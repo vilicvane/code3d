@@ -10,7 +10,19 @@
 
 ## Expected behavior
 
+- When the current source target produces a collection of runtime occurrences,
+  clicking any rendered focus occurrence makes it the active instance.
 - Selecting a different runtime occurrence refines which instance the tool
   edits; it must not replace the caret-selected operation-input context.
 - During the edit, the viewport should remain in the same `cut(...)` context,
   including its peer inputs and operation-specific visualization.
+
+## Resolution
+
+Viewport selection within a source view now changes only the selected runtime
+occurrence. It does not navigate Monaco or replace the caret-selected source
+target. Normal parameter write-back also carries the occurrence key across
+recompilation, preserving both the operation context and selected instance.
+The existing focus-only picking path provides direct switching for collections;
+switching to a dimmed peer is the distinct source-target navigation described by
+R-007.

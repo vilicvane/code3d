@@ -4,7 +4,6 @@ import type {SourceDecorationProvider} from '../viewport-decoration';
 type BooleanInputTarget = SourceTarget & {
   operation: Readonly<{
     kind: 'cut' | 'union';
-    ids: readonly string[];
     role: 'receiver' | 'tool' | 'operand';
   }>;
 };
@@ -44,35 +43,34 @@ const unionSectionAppearance = {
 const decorations: SourceDecorationProvider['decorations'] = ({
   module,
   target,
+  evaluation,
 }) => {
-  if (!isBooleanInputTarget(target)) {
+  if (!isBooleanInputTarget(target) || !evaluation.operationId) {
     return [];
   }
 
   const sourceOperation = target.operation;
   const operationKind = sourceOperation.kind;
   const inputRole = sourceOperation.role;
-  const focusedNodeIds = new Set(target.nodeIds);
-  return sourceOperation.ids.flatMap(operationId => {
-    const operation = module.operations.get(operationId)!;
-    const output = module.objects.get(operation.outputNodeId)!;
+  const focusedNodeIds = new Set(evaluation.nodeIds);
+  const operation = module.operations.get(evaluation.operationId)!;
+  const output = module.objects.get(operation.outputNodeId)!;
 
-    return operation.regions
-      .filter(
-        region =>
-          (operationKind === 'union' || region.kind === 'intersection') &&
-          (inputRole === 'receiver' || focusedNodeIds.has(region.inputNodeId)),
-      )
-      .map((region, index) => ({
-        id: `${operation.id}:${region.kind}:${region.inputNodeId}:${index}`,
-        mesh: region.mesh,
-        transform: output.transform,
-        appearance:
-          operationKind === 'union' && region.kind === 'section'
-            ? unionSectionAppearance
-            : booleanAppearances[operationKind],
-      }));
-  });
+  return operation.regions
+    .filter(
+      region =>
+        (operationKind === 'union' || region.kind === 'intersection') &&
+        (inputRole === 'receiver' || focusedNodeIds.has(region.inputNodeId)),
+    )
+    .map((region, index) => ({
+      id: `${operation.id}:${region.kind}:${region.inputNodeId}:${index}`,
+      mesh: region.mesh,
+      transform: output.transform,
+      appearance:
+        operationKind === 'union' && region.kind === 'section'
+          ? unionSectionAppearance
+          : booleanAppearances[operationKind],
+    }));
 };
 
 export const booleanOperationSourceDecoration = {

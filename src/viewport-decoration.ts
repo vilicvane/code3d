@@ -1,4 +1,8 @@
-import type {ModelModule, SourceTarget} from './model/compiler';
+import type {
+  ModelModule,
+  SourceTarget,
+  SourceTargetEvaluation,
+} from './model/compiler';
 import type {RenderMesh, Transform} from './model/runtime';
 
 export type ViewportDecorationAppearance = Readonly<{
@@ -22,6 +26,7 @@ export type ViewportDecoration = Readonly<{
 export type SourceDecorationContext = Readonly<{
   module: ModelModule;
   target: SourceTarget;
+  evaluation: SourceTargetEvaluation;
 }>;
 
 export type SourceDecorationProvider = Readonly<{

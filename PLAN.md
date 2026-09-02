@@ -56,16 +56,24 @@ it does not silently reorder the active milestones. Closed requests move to
   JavaScript/TypeScript construction patterns users can write.
 - The editor caret resolves the exact source occurrence being inspected. A
   value site renders that value alone; an operation-input site may also render
-  its peer inputs as non-interactive context. Mouse hover over source code does
-  not change the viewport.
+  its peer inputs as dimmed context that can switch input focus. Mouse hover
+  over source code does not change the viewport.
+- When a source view contains multiple focus occurrences, clicking one switches
+  the selected runtime instance without moving the caret or replacing its
+  source context. Clicking a dimmed operation peer instead navigates to that
+  input's source target and makes it the new focus; decorations are never
+  selection candidates. Normal recompilation preserves an occurrence selection
+  when it still exists.
 - Operation-specific emphasis is supplied through generic viewport decoration
   providers. Boolean input scopes can mark exact B-Rep intersection volumes and
   union contact sections without teaching the viewport those semantics.
 - A provider chooses whether its decoration remains visible during a tool
   preview. Boolean regions hide while geometry moves, then return on cancel or
   from newly evaluated topology after commit.
-- Repeated executions of the same source occurrence are presented together,
-  including values produced by loops or collection operations.
+- A source call renders one evaluation result at a time. Repeated executions
+  remain distinct evaluation groups; a collection value renders all objects
+  returned by that single evaluation rather than flattening execution and
+  collection scopes together.
 - Export status must not change the geometry or position semantics of an object.
 
 ## Milestones
@@ -89,15 +97,17 @@ Status: complete. Rootless selection and optional exports were implemented in
 - Add a compact Model Outline above the editor. Click only navigates to bindings
   and expressions; hover temporarily previews the corresponding runtime values
   and restores the caret-selected view on leave.
-- Group repeated executions by source site and expand them into occurrences.
+- Index repeated executions by source site while preserving each evaluation's
+  result boundary; collections remain values within an evaluation.
 - Hide anonymous intermediates by default and expose them through an expanded
   lineage view.
 - Match catalog entries across recompiles using source-aware identities rather
   than transient runtime node IDs alone.
 - Project explicit runtime operations and typed operand roles onto exact source
   occurrences without inferring them from B-Rep topology.
-- When the caret is on an operation input, render non-interactive, dimmed peer
-  context; a declaration or value expression remains isolated.
+- When the caret is on an operation input, render dimmed peer context that can
+  be clicked to switch input focus; a declaration or value expression remains
+  isolated.
 
 Status: the runtime index and Model Outline are implemented. Metadata includes
 module/local bindings, anonymous source expressions, export aliases,
@@ -111,7 +121,16 @@ exact removed volume; `union` inputs show overlap volumes or contact sections.
 Those regions stay hidden during transient movement and are recomputed by the
 kernel after commit. Source-aware identities survive normal recompiles and
 parameter write-back; matching across large control-flow or structural rewrites
-remains open.
+remains open. [R-005](requests/closed/R-005-preserve-operation-context-when-switching-runtime-occurrences.md)
+is complete: viewport occurrence selection and ordinary write-back preserve the
+caret-selected operation context.
+[R-007](requests/closed/R-007-switch-operation-focus-from-dimmed-peers.md) is
+also complete: dimmed operation inputs link back to their exact source targets
+and can become the new focus directly from the viewport.
+[R-008](requests/closed/R-008-render-immutable-chain-values-by-evaluation.md)
+is complete: source targets preserve evaluation boundaries, so chained calls
+show the value produced at that step while collection bindings show the
+collection returned by their own evaluation.
 
 ### 2a. Unified dock panels — complete
 
@@ -142,7 +161,8 @@ compatibility APIs.
 
 ### 4. Relation-aware GUI tools — translation slice complete
 
-- Show the translation gizmo only when the selected model carries a constraint.
+- Show the translation gizmo only when the selected model carries a constraint
+  and the caret-selected operation input supplies relative-position context.
 - Edit traced `offset()` parameters at their upstream source target.
 - When an `on()` relation has no offset yet, insert one on the constraint
   expression; later drags edit that call's parameters instead of stacking calls.
@@ -154,6 +174,10 @@ compatibility APIs.
 - Keep the caret-selected context stable across gizmo and Inspector commits;
   present the applied edit plan in a temporary code popover instead of moving
   the editor selection.
+
+Status: [R-006](requests/closed/R-006-show-spatial-tools-only-in-a-relative-position-context.md)
+is complete. Value declarations and operation outputs do not expose the
+translation gizmo or offset controls; eligible composition inputs do.
 
 ### 5. Object combination tools
 

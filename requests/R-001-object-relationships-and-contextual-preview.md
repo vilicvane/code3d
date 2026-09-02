@@ -82,9 +82,11 @@ were superseded by exact source-occurrence interactions:
 - The editor caret at a traced value or declaration renders only the value
   produced there.
 - The editor caret at a traced operation input renders that value normally and
-  its peer inputs as neutral, non-interactive dimmed context.
-- Repeated executions of one operation-input source site are aggregated into
-  the same preview target.
+  its peer inputs as neutral dimmed context. Clicking a peer switches focus to
+  its exact operation-input source target.
+- Repeated executions of one source site remain under the same source target
+  but retain separate evaluation results. A collection returned by one
+  evaluation remains grouped as one value.
 - A selected `cut` tool renders its complete shape normally and overlays the
   exact volume removed from the receiver with a distinct emphasis.
 - A selected `union` input distinguishes exact overlap volume; when operands

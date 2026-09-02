@@ -15,15 +15,19 @@ import {
   type SourceRef,
 } from './runtime';
 
+export type SourceTargetEvaluation = Readonly<{
+  nodeIds: readonly string[];
+  operationId?: string;
+}>;
+
 export type SourceTarget = Readonly<{
   id: string;
   kind: 'value' | 'operation-input' | 'operation-output';
   sourceRef: SourceRef;
-  nodeIds: readonly string[];
-  contextNodeIds: readonly string[];
+  evaluations: readonly SourceTargetEvaluation[];
+  contextTargetIds: readonly string[];
   operation?: Readonly<{
     kind: ModelOperationKind;
-    ids: readonly string[];
     role?: ModelOperationInputRole;
   }>;
 }>;
@@ -128,7 +132,7 @@ type SourceValueTrace = {
   id: string;
   kind: 'value' | 'operation-output';
   sourceRef: SourceRef;
-  objects: Set<ModelObject>;
+  evaluations: ModelObject[][];
 };
 
 type SourceInputTrace = Readonly<{
@@ -369,11 +373,11 @@ function recordSourceValue(
     id,
     kind,
     sourceRef,
-    objects: new Set<ModelObject>(),
+    evaluations: [],
   };
+  sourceTrace.evaluations.push(objects);
   objects.forEach(object => {
     tracedObjects.add(object);
-    sourceTrace.objects.add(object);
     latestTracedObject = object;
   });
   sourceValueTraces.set(key, sourceTrace);
@@ -603,24 +607,31 @@ function buildSourceTargets(
   operations: ReadonlyMap<string, ModelOperationSnapshot>,
 ): SourceTarget[] {
   const valueTargets = [...sourceValueTraces.values()].map(trace => {
-    const nodeIds = [...trace.objects].map(object => object.nodeId);
-    const outputOperations = [...operations.values()].filter(
-      operation =>
-        operation.siteId === trace.id &&
-        nodeIds.includes(operation.outputNodeId),
-    );
+    const evaluations = trace.evaluations.map(objects => {
+      const nodeIds = objects.map(object => object.nodeId);
+      const operationId = [...operations.values()].find(
+        operation =>
+          operation.siteId === trace.id &&
+          nodeIds.includes(operation.outputNodeId),
+      )?.id;
+      return {nodeIds, operationId};
+    });
+    const outputOperation = evaluations
+      .map(evaluation =>
+        evaluation.operationId
+          ? operations.get(evaluation.operationId)
+          : undefined,
+      )
+      .find(operation => operation !== undefined);
     return {
       id: `source:${trace.kind}:${trace.id}`,
       kind: trace.kind,
       sourceRef: trace.sourceRef,
-      nodeIds,
-      contextNodeIds: [],
+      evaluations,
+      contextTargetIds: [],
       operation:
-        trace.kind === 'operation-output' && outputOperations.length > 0
-          ? {
-              kind: outputOperations[0].kind,
-              ids: outputOperations.map(operation => operation.id),
-            }
+        trace.kind === 'operation-output' && outputOperation
+          ? {kind: outputOperation.kind}
           : undefined,
     } satisfies SourceTarget;
   });
@@ -643,34 +654,39 @@ function buildSourceTargets(
       id: `source:operation-input:${trace.siteId}:${trace.role}:${trace.index}`,
       kind: 'operation-input' as const,
       sourceRef: trace.sourceRef,
-      nodeIds: new Set<string>(),
-      contextNodeIds: new Set<string>(),
+      evaluations: [],
       operationKind: operation.kind,
-      operationIds: new Set<string>(),
       role: trace.role,
     };
-    const focusNodeIds = new Set(trace.objects.map(object => object.nodeId));
-    focusNodeIds.forEach(nodeId => target.nodeIds.add(nodeId));
-    operation.inputs
-      .filter(input => !focusNodeIds.has(input.nodeId))
-      .forEach(input => target.contextNodeIds.add(input.nodeId));
-    target.operationIds.add(operation.id);
+    target.evaluations.push({
+      operationId: operation.id,
+      objects: trace.objects,
+    });
     inputTargets.set(key, target);
   }
 
+  const operationInputTargets = [...inputTargets.values()];
+
   return [
     ...valueTargets,
-    ...[...inputTargets.values()].map(
+    ...operationInputTargets.map(
       target =>
         ({
           id: target.id,
           kind: target.kind,
           sourceRef: target.sourceRef,
-          nodeIds: [...target.nodeIds],
-          contextNodeIds: [...target.contextNodeIds],
+          evaluations: target.evaluations.map(evaluation => ({
+            nodeIds: evaluation.objects.map(object => object.nodeId),
+            operationId: evaluation.operationId,
+          })),
+          contextTargetIds: operationInputTargets
+            .filter(
+              candidate =>
+                candidate !== target && sharesOperation(candidate, target),
+            )
+            .map(candidate => candidate.id),
           operation: {
             kind: target.operationKind,
-            ids: [...target.operationIds],
             role: target.role,
           },
         }) satisfies SourceTarget,
@@ -682,12 +698,24 @@ type MutableSourceInputTarget = {
   id: string;
   kind: 'operation-input';
   sourceRef: SourceRef;
-  nodeIds: Set<string>;
-  contextNodeIds: Set<string>;
+  evaluations: Array<
+    Readonly<{operationId: string; objects: readonly ModelObject[]}>
+  >;
   operationKind: ModelOperationKind;
-  operationIds: Set<string>;
   role: ModelOperationInputRole;
 };
+
+function sharesOperation(
+  left: MutableSourceInputTarget,
+  right: MutableSourceInputTarget,
+) {
+  const rightIds = new Set(
+    right.evaluations.map(evaluation => evaluation.operationId),
+  );
+  return left.evaluations.some(evaluation =>
+    rightIds.has(evaluation.operationId),
+  );
+}
 
 function createTraceTransformer(): ts.TransformerFactory<ts.SourceFile> {
   return context => {

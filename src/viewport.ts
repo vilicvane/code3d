@@ -1,7 +1,12 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
-import type {ModelModule, SourceTarget} from './model/compiler';
 import type {
+  ModelModule,
+  SourceTarget,
+  SourceTargetEvaluation,
+} from './model/compiler';
+import type {
+  ModelOperationInputRole,
   ModelSnapshotObject,
   ParameterUsage,
   RenderMesh,
@@ -28,8 +33,13 @@ export type Occurrence = Readonly<{
   view: 'model' | 'outline' | 'source';
 }>;
 
-type SelectedViewTarget =
-  Readonly<{kind: 'model'}> | Readonly<{kind: 'source'; targetId: string}>;
+type SourceViewTarget = Readonly<{
+  kind: 'source';
+  targetId: string;
+  evaluationIndex: number;
+}>;
+
+type SelectedViewTarget = Readonly<{kind: 'model'}> | SourceViewTarget;
 
 type RenderedViewTarget =
   SelectedViewTarget | Readonly<{kind: 'outline'; nodeIds: readonly string[]}>;
@@ -42,14 +52,24 @@ type OutlinePreviewRestore = Readonly<{
   cameraFar: number;
 }>;
 
+type SelectionGesture = {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  moved: boolean;
+  blocked: boolean;
+};
+
 export type ModelViewportOptions = Readonly<{
   onSelect: (occurrence: Occurrence) => void;
+  onNavigateSource: (sourceRef: SourceRef) => void;
   onPositionTool: (event: PositionGizmoEvent) => void;
   sourceDecorationProviders?: readonly SourceDecorationProvider[];
 }>;
 
 const sourceDecorationOwner = (providerId: string): string =>
   `source-context:${providerId}`;
+const selectionDragThreshold = 4;
 
 export class ModelViewport {
   private readonly scene = new THREE.Scene();
@@ -65,6 +85,7 @@ export class ModelViewport {
   private readonly decorationLayers = new Map<string, THREE.Group>();
   private readonly positionGizmo: PositionGizmo;
   private readonly onSelect: ModelViewportOptions['onSelect'];
+  private readonly onNavigateSource: ModelViewportOptions['onNavigateSource'];
   private readonly sourceDecorationProviders: readonly SourceDecorationProvider[];
   private readonly impactHelpers: THREE.BoxHelper[] = [];
   private selectionHelper: THREE.BoxHelper | null = null;
@@ -76,16 +97,19 @@ export class ModelViewport {
   private selectedViewTarget: SelectedViewTarget = {kind: 'model'};
   private renderedViewTarget: RenderedViewTarget = {kind: 'model'};
   private outlinePreviewRestore?: OutlinePreviewRestore;
+  private selectionGesture?: SelectionGesture;
 
   constructor(
     private readonly container: HTMLElement,
     {
       onSelect,
+      onNavigateSource,
       onPositionTool,
       sourceDecorationProviders = [],
     }: ModelViewportOptions,
   ) {
     this.onSelect = onSelect;
+    this.onNavigateSource = onNavigateSource;
     this.sourceDecorationProviders = sourceDecorationProviders;
     this.renderer = new THREE.WebGLRenderer({
       antialias: true,
@@ -135,9 +159,18 @@ export class ModelViewport {
       onPositionTool,
     );
 
-    this.renderer.domElement.addEventListener('pointerdown', event => {
-      this.pick(event);
-    });
+    this.renderer.domElement.addEventListener('pointerdown', event =>
+      this.beginSelectionGesture(event),
+    );
+    this.renderer.domElement.addEventListener('pointermove', event =>
+      this.updateSelectionGesture(event),
+    );
+    this.renderer.domElement.addEventListener('pointerup', event =>
+      this.endSelectionGesture(event),
+    );
+    this.renderer.domElement.addEventListener('pointercancel', event =>
+      this.cancelSelectionGesture(event),
+    );
 
     new ResizeObserver(() => this.resize()).observe(this.container);
     this.resize();
@@ -155,19 +188,45 @@ export class ModelViewport {
     this.renderModelView(selectedKey, fitCamera);
   }
 
-  selectBySourceOffset(offset: number): boolean {
+  selectBySourceOffset(
+    offset: number,
+    preferredOccurrenceKey?: string,
+  ): boolean {
     const match = this.sourceTargetAt(offset);
     if (!match) {
       return false;
     }
 
-    this.selectedViewTarget = {kind: 'source', targetId: match.id};
+    const preferredEvaluationIndex =
+      this.renderedViewTarget.kind === 'source' &&
+      this.renderedViewTarget.targetId === match.id
+        ? this.renderedViewTarget.evaluationIndex
+        : sourceEvaluationIndex(preferredOccurrenceKey);
+    const evaluationIndex = match.evaluations[preferredEvaluationIndex]
+      ? preferredEvaluationIndex
+      : 0;
+    this.selectedViewTarget = {
+      kind: 'source',
+      targetId: match.id,
+      evaluationIndex,
+    };
     this.outlinePreviewRestore = undefined;
     if (
       this.renderedViewTarget.kind !== 'source' ||
-      this.renderedViewTarget.targetId !== match.id
+      this.renderedViewTarget.targetId !== match.id ||
+      this.renderedViewTarget.evaluationIndex !== evaluationIndex
     ) {
-      this.renderSourceTarget(match, true);
+      this.renderSourceTarget(
+        match,
+        evaluationIndex,
+        true,
+        preferredOccurrenceKey,
+      );
+    } else if (
+      preferredOccurrenceKey &&
+      this.occurrences.has(preferredOccurrenceKey)
+    ) {
+      this.selectKey(preferredOccurrenceKey, false);
     }
     return true;
   }
@@ -205,7 +264,12 @@ export class ModelViewport {
         candidate => candidate.id === target.targetId,
       );
       if (sourceTarget) {
-        this.renderSourceTarget(sourceTarget, false, restore.selectedKey);
+        this.renderSourceTarget(
+          sourceTarget,
+          target.evaluationIndex,
+          false,
+          restore.selectedKey,
+        );
       } else {
         this.selectedViewTarget = {kind: 'model'};
         this.renderModelView('root', false);
@@ -221,6 +285,10 @@ export class ModelViewport {
 
   getSelected(): Occurrence | undefined {
     return this.occurrences.get(this.selectedKey);
+  }
+
+  hasRelativePositionContext(): boolean {
+    return isRelativePositionContext(this.renderedSourceScope()?.target);
   }
 
   setExplode(value: number): void {
@@ -303,14 +371,10 @@ export class ModelViewport {
   }
 
   restoreSourceDecorations(): void {
-    if (!this.module || this.renderedViewTarget.kind !== 'source') {
-      return;
+    const scope = this.renderedSourceScope();
+    if (this.module && scope) {
+      this.renderSourceDecorations(this.module, scope.target, scope.evaluation);
     }
-    const targetId = this.renderedViewTarget.targetId;
-    const target = this.module.sourceTargets.find(
-      candidate => candidate.id === targetId,
-    )!;
-    this.renderSourceDecorations(this.module, target);
   }
 
   cancelPositionTool(): boolean {
@@ -369,23 +433,42 @@ export class ModelViewport {
 
   private renderSourceTarget(
     target: SourceTarget,
+    evaluationIndex: number,
     fitCamera = true,
     selectedKey?: string,
   ): void {
-    const focusNodes = this.resolveNodes(target.nodeIds);
+    const evaluation = target.evaluations[evaluationIndex];
+    if (!evaluation) {
+      return;
+    }
+    const focusNodes = this.resolveNodes(evaluation.nodeIds);
     const contextNodes = this.resolveContextNodes(
-      target.contextNodeIds,
-      target.nodeIds,
+      target.contextTargetIds,
+      evaluation.operationId,
+      evaluation.nodeIds,
     );
-    this.renderedViewTarget = {kind: 'source', targetId: target.id};
+    this.renderedViewTarget = {
+      kind: 'source',
+      targetId: target.id,
+      evaluationIndex,
+    };
     this.resetRenderedView();
-    contextNodes.forEach((node, index) => {
-      this.root.add(this.buildContextObject(node, `context/${index}`));
+    contextNodes.forEach(({node, targetId}, index) => {
+      this.root.add(
+        this.buildContextObject(node, `context/${index}`, targetId),
+      );
     });
     focusNodes.forEach((node, index) => {
-      this.root.add(this.buildObject(node, `source/${index}`, 1, 'source'));
+      this.root.add(
+        this.buildObject(
+          node,
+          `source/${evaluationIndex}/${index}`,
+          1,
+          'source',
+        ),
+      );
     });
-    this.renderSourceDecorations(this.module!, target);
+    this.renderSourceDecorations(this.module!, target, evaluation);
     this.applyPreviewTransforms();
     const nextKey =
       selectedKey && this.occurrences.has(selectedKey)
@@ -450,14 +533,17 @@ export class ModelViewport {
   private buildContextObject(
     node: ModelSnapshotObject,
     key: string,
+    targetId: string,
   ): THREE.Object3D {
     const object = createThreeObject(node);
     object.name = `${node.name} (context)`;
     object.userData.context = true;
+    object.userData.sourceTargetId = targetId;
+    object.userData.sourceNodeId = node.nodeId;
     applyNodeTransform(object, node);
     dimObject(object);
     node.children.forEach((child, index) => {
-      object.add(this.buildContextObject(child, `${key}/${index}`));
+      object.add(this.buildContextObject(child, `${key}/${index}`, targetId));
     });
     return object;
   }
@@ -478,11 +564,33 @@ export class ModelViewport {
   }
 
   private resolveContextNodes(
-    nodeIds: readonly string[],
+    targetIds: readonly string[],
+    operationId: string | undefined,
     focusNodeIds: readonly string[],
-  ): ModelSnapshotObject[] {
+  ): Array<Readonly<{node: ModelSnapshotObject; targetId: string}>> {
     const focus = new Set(focusNodeIds);
-    return this.resolveNodes(nodeIds).filter(node => !focus.has(node.nodeId));
+    const seen = new Set<string>();
+    return targetIds.flatMap(targetId => {
+      const target = this.module?.sourceTargets.find(
+        candidate => candidate.id === targetId,
+      );
+      if (!target) {
+        return [];
+      }
+      const evaluation = target.evaluations.find(
+        candidate => candidate.operationId === operationId,
+      );
+      if (!evaluation) {
+        return [];
+      }
+      return this.resolveNodes(evaluation.nodeIds).flatMap(node => {
+        if (focus.has(node.nodeId) || seen.has(node.nodeId)) {
+          return [];
+        }
+        seen.add(node.nodeId);
+        return [{node, targetId}];
+      });
+    });
   }
 
   private captureOutlinePreviewRestore(): void {
@@ -545,7 +653,11 @@ export class ModelViewport {
 
   private updatePositionGizmo(): void {
     const occurrence = this.getSelected();
-    if (!occurrence || occurrence.depth === 0) {
+    if (
+      !occurrence ||
+      occurrence.depth === 0 ||
+      !this.hasRelativePositionContext()
+    ) {
       this.positionGizmo.detach();
       return;
     }
@@ -553,6 +665,23 @@ export class ModelViewport {
       occurrence.object,
       positionBindings(occurrence, [...this.occurrences.values()]),
     );
+  }
+
+  private renderedSourceScope():
+    | Readonly<{
+        target: SourceTarget;
+        evaluation: SourceTargetEvaluation;
+      }>
+    | undefined {
+    if (!this.module || this.renderedViewTarget.kind !== 'source') {
+      return undefined;
+    }
+    const renderedTarget = this.renderedViewTarget;
+    const target = this.module.sourceTargets.find(
+      candidate => candidate.id === renderedTarget.targetId,
+    );
+    const evaluation = target?.evaluations[renderedTarget.evaluationIndex];
+    return target && evaluation ? {target, evaluation} : undefined;
   }
 
   private applyPreviewTransforms(): void {
@@ -614,28 +743,108 @@ export class ModelViewport {
   private renderSourceDecorations(
     module: ModelModule,
     target: SourceTarget,
+    evaluation: SourceTargetEvaluation,
   ): void {
     for (const provider of this.sourceDecorationProviders) {
-      const decorations = provider.decorations({module, target});
+      const decorations = provider.decorations({module, target, evaluation});
       this.setDecorations(sourceDecorationOwner(provider.id), decorations);
     }
   }
 
-  private pick(event: PointerEvent): void {
-    if (this.positionGizmo.isPointerActive()) {
+  private beginSelectionGesture(event: PointerEvent): void {
+    if (!event.isPrimary || event.button !== 0) {
+      this.selectionGesture = undefined;
       return;
     }
+    this.selectionGesture = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      moved: false,
+      blocked: this.positionGizmo.isPointerActive(),
+    };
+  }
+
+  private updateSelectionGesture(event: PointerEvent): void {
+    const gesture = this.selectionGesture;
+    if (!gesture || gesture.pointerId !== event.pointerId || gesture.moved) {
+      return;
+    }
+    const deltaX = event.clientX - gesture.startX;
+    const deltaY = event.clientY - gesture.startY;
+    gesture.moved =
+      deltaX * deltaX + deltaY * deltaY >
+      selectionDragThreshold * selectionDragThreshold;
+  }
+
+  private endSelectionGesture(event: PointerEvent): void {
+    const gesture = this.selectionGesture;
+    this.selectionGesture = undefined;
+    if (
+      !gesture ||
+      gesture.pointerId !== event.pointerId ||
+      gesture.moved ||
+      gesture.blocked
+    ) {
+      return;
+    }
+    this.pick(event);
+  }
+
+  private cancelSelectionGesture(event: PointerEvent): void {
+    if (this.selectionGesture?.pointerId === event.pointerId) {
+      this.selectionGesture = undefined;
+    }
+  }
+
+  private pick(event: PointerEvent): void {
     const rect = this.renderer.domElement.getBoundingClientRect();
     this.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     this.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
     this.raycaster.setFromCamera(this.pointer, this.camera);
 
     const hits = this.raycaster.intersectObjects(this.root.children, true);
-    const key = hits
-      .map(({object}) => selectionKeyFromAncestors(object))
-      .find(selectionKey => selectionKey !== undefined);
-    if (key) {
-      this.selectKey(key, true);
+    const target = hits
+      .map(({object}) => pickTargetFromAncestors(object))
+      .find(candidate => candidate !== undefined);
+    if (!target) {
+      return;
+    }
+    if (target.kind === 'occurrence') {
+      this.selectKey(target.key, true);
+    } else {
+      this.selectSourceTarget(target.targetId, target.nodeId);
+    }
+  }
+
+  private selectSourceTarget(targetId: string, nodeId: string): void {
+    const target = this.module?.sourceTargets.find(
+      candidate => candidate.id === targetId,
+    );
+    if (!target) {
+      return;
+    }
+    const evaluationIndex = target.evaluations.findIndex(evaluation =>
+      this.resolveNodes(evaluation.nodeIds).some(node =>
+        containsNode(node, nodeId),
+      ),
+    );
+    if (evaluationIndex < 0) {
+      return;
+    }
+    this.selectedViewTarget = {kind: 'source', targetId, evaluationIndex};
+    this.outlinePreviewRestore = undefined;
+    this.renderSourceTarget(target, evaluationIndex, false);
+    const occurrence = [...this.occurrences.values()].find(
+      candidate => candidate.node.nodeId === nodeId,
+    );
+    if (occurrence) {
+      this.selectKey(occurrence.key, false);
+    }
+    this.onNavigateSource(target.sourceRef);
+    const selected = this.getSelected();
+    if (selected) {
+      this.onSelect(selected);
     }
   }
 
@@ -842,6 +1051,20 @@ function sourceTargetPriority(target: SourceTarget): number {
   if (target.kind === 'operation-input') return 0;
   if (target.kind === 'operation-output') return 1;
   return 2;
+}
+
+function isRelativePositionContext(target: SourceTarget | undefined): boolean {
+  const role = target?.operation?.role;
+  return target?.kind === 'operation-input' && isCompositionRole(role);
+}
+
+function isCompositionRole(role: ModelOperationInputRole | undefined): boolean {
+  return (
+    role === 'receiver' ||
+    role === 'operand' ||
+    role === 'tool' ||
+    role === 'child'
+  );
 }
 
 function positionOnlyTargets(
@@ -1057,13 +1280,43 @@ function applyTransform(object: THREE.Object3D, transform: Transform): void {
   object.scale.set(...transform.scale);
 }
 
-function selectionKeyFromAncestors(object: THREE.Object3D): string | undefined {
+type ViewportPickTarget =
+  | Readonly<{kind: 'occurrence'; key: string}>
+  | Readonly<{kind: 'source-target'; targetId: string; nodeId: string}>;
+
+function pickTargetFromAncestors(
+  object: THREE.Object3D,
+): ViewportPickTarget | undefined {
   let current: THREE.Object3D | null = object;
   while (current) {
     if (typeof current.userData.selectionKey === 'string') {
-      return current.userData.selectionKey;
+      return {kind: 'occurrence', key: current.userData.selectionKey};
+    }
+    if (
+      typeof current.userData.sourceTargetId === 'string' &&
+      typeof current.userData.sourceNodeId === 'string'
+    ) {
+      return {
+        kind: 'source-target',
+        targetId: current.userData.sourceTargetId,
+        nodeId: current.userData.sourceNodeId,
+      };
     }
     current = current.parent;
   }
   return undefined;
+}
+
+function sourceEvaluationIndex(occurrenceKey: string | undefined): number {
+  if (!occurrenceKey?.startsWith('source/')) {
+    return 0;
+  }
+  return Number(occurrenceKey.split('/')[1]);
+}
+
+function containsNode(node: ModelSnapshotObject, nodeId: string): boolean {
+  return (
+    node.nodeId === nodeId ||
+    node.children.some(child => containsNode(child, nodeId))
+  );
 }

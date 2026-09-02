@@ -152,7 +152,10 @@ const expandedCatalogIds = new Set<string>();
 
 const viewport = new ModelViewport(viewportHost, {
   onSelect: occurrence => {
-    selectOccurrence(occurrence, true);
+    selectOccurrence(occurrence, occurrence.view === 'model');
+  },
+  onNavigateSource: sourceRef => {
+    codeEditor.revealSource(sourceRef);
   },
   onPositionTool: handlePositionTool,
   sourceDecorationProviders: [booleanOperationSourceDecoration],
@@ -231,7 +234,7 @@ async function runModel(): Promise<void> {
     renderObjectCatalog(currentModule);
     const cursorOffset = codeEditor.cursorOffset();
     if (cursorOffset !== undefined) {
-      viewport.selectBySourceOffset(cursorOffset);
+      viewport.selectBySourceOffset(cursorOffset, selectedKey);
     }
     const selected = viewport.getSelected();
     if (selected) {
@@ -507,7 +510,10 @@ function renderLocalInspector(occurrence: Occurrence): void {
   kind.textContent = occurrence.node.kind.toUpperCase();
   inspector.append(kind);
 
-  const parameters = uniqueParameters(occurrence.node.parameters);
+  const hasRelativePositionContext = viewport.hasRelativePositionContext();
+  const parameters = uniqueParameters(occurrence.node.parameters).filter(
+    parameter => parameter.operation !== 'offset' || hasRelativePositionContext,
+  );
   if (parameters.length > 0) {
     const sectionLabel = document.createElement('div');
     sectionLabel.className = 'parameter-section-label';

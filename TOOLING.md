@@ -25,6 +25,10 @@ selection + gesture
 - 工具不直接依赖 Monaco、OpenCascade 或 Three.js。
 - 所有提交都带源码版本和 expected text，必须原子应用。
 - 无法唯一解析的意图必须提供候选方案，不能静默猜测。
+- Caret 选择源码 occurrence 及其 operation role。点击当前 focus 集合中的
+  occurrence 只细化 runtime instance，不改变源码 context；点击 dim 的
+  operation peer 则导航到该输入的 source target，并将它切换为 focus。
+  decoration 不参与拾取。
 
 ## 核心层次
 
@@ -85,6 +89,9 @@ Inspector 参数控件产生 `parameter.set` intent。viewport 平移 gizmo 在�
 
 平移 gizmo 目前遵守以下解析规则：
 
+- 当前源码 occurrence 必须是提供相对位置语义的 operation input；变量声明和
+  operation output 即使对应对象带有 relation，也不显示 gizmo 或 Inspector 的
+  offset 控件。
 - 优先修改选中对象关系约束中能够唯一追溯的位置参数。
 - 参数归属到具体 API 调用；连续变换只编辑当前最外层调用，不重复追加操作。
 - 同一参数表达式同时包含上游变量和字面量时，优先修改上游变量。
@@ -94,8 +101,9 @@ Inspector 参数控件产生 `parameter.set` intent。viewport 平移 gizmo 在�
 - preview 会更新所有使用该参数的 occurrence，并标出选中对象以外的受影响对象。
 - 松手才写入源文件；`Esc` 清除 preview，不产生源码修改。
 
-对象没有位置关系或关系接收者无法稳定定位时隐藏 gizmo。后续 choice UI 可以进一步提供
-“调整当前关系”或“修改内部组件关系”等不同 scope 的 edit plan。
+源码 context 不提供相对位置语义、对象没有位置关系或关系接收者无法稳定定位时隐藏
+gizmo。后续 choice UI 可以进一步提供“调整当前关系”或“修改内部组件关系”等不同
+scope 的 edit plan。
 
 ## 表达式构造
 

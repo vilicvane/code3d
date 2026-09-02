@@ -314,7 +314,7 @@ export class ModelObject implements Anchor {
     this.localBounds =
       init.localBounds ?? (init.shape ? shapeBounds(init.shape) : undefined);
     this.name = init.name ?? (init.kind === 'solid' ? 'Solid' : 'Group');
-    this.color = init.color ?? '#d6ff45';
+    this.color = init.color ?? '#c9cec5';
     this.children = init.children ?? [];
     this.constraints = [...(init.constraints ?? [])];
     this.sourceRefs = [...(init.sourceRefs ?? [])];
