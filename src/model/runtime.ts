@@ -29,6 +29,7 @@ import {
 export type {Quaternion, Vec3} from './spatial';
 
 export type SourceRef = Readonly<{
+  file: string;
   start: number;
   end: number;
 }>;
@@ -263,7 +264,11 @@ export class Constraint {
   /** Runtime instrumentation hook. Not part of the authoring API. */
   attachSource(sourceRef: SourceRef): void {
     const previous = this.sourceRefs.at(-1);
-    if (previous?.start !== sourceRef.start || previous.end !== sourceRef.end) {
+    if (
+      previous?.file !== sourceRef.file ||
+      previous.start !== sourceRef.start ||
+      previous.end !== sourceRef.end
+    ) {
       this.sourceRefs.push(sourceRef);
     }
   }
@@ -421,7 +426,11 @@ export class ModelObject implements Anchor {
   /** Runtime instrumentation hook. Not part of the authoring API. */
   attachSource(sourceRef: SourceRef): void {
     const previous = this.sourceRefs.at(-1);
-    if (previous?.start !== sourceRef.start || previous.end !== sourceRef.end) {
+    if (
+      previous?.file !== sourceRef.file ||
+      previous.start !== sourceRef.start ||
+      previous.end !== sourceRef.end
+    ) {
       this.sourceRefs.push(sourceRef);
     }
   }
@@ -1006,8 +1015,10 @@ function hasParameter(
     candidate =>
       candidate.operation === parameter.operation &&
       candidate.argument === parameter.argument &&
+      candidate.operationRef.file === parameter.operationRef.file &&
       candidate.operationRef.start === parameter.operationRef.start &&
       candidate.operationRef.end === parameter.operationRef.end &&
+      candidate.expressionRef.file === parameter.expressionRef.file &&
       candidate.expressionRef.start === parameter.expressionRef.start &&
       candidate.expressionRef.end === parameter.expressionRef.end &&
       candidate.target.id === parameter.target.id,

@@ -1,8 +1,15 @@
 import './style.css';
-import {CodeEditor} from './editor';
+import {CodeEditor, type ProjectEditorChange} from './editor';
 import {ModelCompilerClient} from './model/compiler-client';
 import type {ModelModule, ObjectCatalogEntry} from './model/compiler';
-import {sampleSource} from './model/sample';
+import {
+  defaultProject,
+  projectWithLegacySource,
+} from './project/default-project';
+import {
+  openBrowserProjectFileSystem,
+  type ProjectFileSystem,
+} from './project/filesystem';
 import type {
   ModelSnapshotObject,
   ParameterTarget,
@@ -25,8 +32,15 @@ import {ModelViewport, type Occurrence} from './viewport';
 import {DockPanelCoordinator} from './ui/dock-panels';
 import {SourceEditPopover} from './ui/source-edit-popover';
 
-const storageKey = 'code3d.prototype.source';
-const savedSource = localStorage.getItem(storageKey) ?? sampleSource;
+const legacyStorageKey = 'code3d.prototype.source';
+const projectFileSystem = await openBrowserProjectFileSystem();
+let initialProject = await projectFileSystem.load();
+if (!initialProject) {
+  initialProject = await projectFileSystem.replace(
+    projectWithLegacySource(localStorage.getItem(legacyStorageKey)),
+  );
+  localStorage.removeItem(legacyStorageKey);
+}
 const app = document.querySelector<HTMLDivElement>('#app');
 
 if (!app) {
@@ -47,10 +61,6 @@ app.innerHTML = `
       </div>
       <div class="topbar-actions">
         <button class="quiet-button" id="reset-button" type="button">重置示例</button>
-        <button class="run-button" id="run-button" type="button">
-          <span>运行</span>
-          <kbd>⌘ ↵</kbd>
-        </button>
       </div>
     </header>
 
@@ -59,7 +69,7 @@ app.innerHTML = `
         <header class="pane-header">
           <div class="pane-title">
             <span class="language-badge">TS</span>
-            <span>model.ts</span>
+            <span id="active-file-name">model.ts</span>
           </div>
           <div class="editor-header-actions">
             <span class="pane-meta">入口模组 · ⇧ Alt F 格式化</span>
@@ -78,7 +88,25 @@ app.innerHTML = `
             </aside>
           </div>
         </header>
-        <div class="editor-host" id="editor-host"></div>
+        <div class="editor-workspace">
+          <aside class="project-explorer" aria-label="项目文件">
+            <header>
+              <span>PROJECT</span>
+              <div class="project-actions">
+                <button id="new-file-button" type="button" title="新建文件">＋</button>
+              </div>
+            </header>
+            <nav class="project-tree" id="project-tree"></nav>
+          </aside>
+          <div class="project-context-menu" id="project-context-menu" hidden>
+            <button id="context-rename-file" type="button">重命名</button>
+            <button id="context-delete-file" type="button">删除</button>
+          </div>
+          <section class="editor-document">
+            <nav class="editor-tabs" id="editor-tabs" aria-label="打开的文件"></nav>
+            <div class="editor-host" id="editor-host"></div>
+          </section>
+        </div>
         <div class="error-bar" id="error-bar" hidden></div>
       </section>
 
@@ -123,8 +151,18 @@ const objectCatalogList = requiredElement('object-catalog-list');
 const objectCatalogCount = requiredElement('object-catalog-count');
 const inspector = requiredElement('inspector');
 const toolStatus = requiredElement('tool-status');
-const runButton = requiredElement<HTMLButtonElement>('run-button');
+const projectTree = requiredElement('project-tree');
+const editorTabs = requiredElement('editor-tabs');
+const activeFileName = requiredElement('active-file-name');
 const resetButton = requiredElement<HTMLButtonElement>('reset-button');
+const newFileButton = requiredElement<HTMLButtonElement>('new-file-button');
+const projectContextMenu = requiredElement('project-context-menu');
+const contextRenameFile = requiredElement<HTMLButtonElement>(
+  'context-rename-file',
+);
+const contextDeleteFile = requiredElement<HTMLButtonElement>(
+  'context-delete-file',
+);
 
 const dockPanels = new DockPanelCoordinator();
 dockPanels.register({
@@ -140,14 +178,20 @@ dockPanels.register({
   shortcut: {code: 'Digit2', label: 'Alt 2', altKey: true},
 });
 
-const codeEditor = new CodeEditor(editorHost, savedSource);
+const codeEditor = new CodeEditor(
+  editorHost,
+  initialProject.entryPath,
+  initialProject,
+);
 const compiler = new ModelCompilerClient();
+let persistenceQueue = Promise.resolve();
 let currentModule: ModelModule | null = null;
 let compileTimer: number | undefined;
 let outlinePreviewTimer: number | undefined;
 let explodeValue = 0;
 let runRevision = 0;
 let positionToolSession: ToolSession | undefined;
+let contextFilePath: string | undefined;
 const expandedCatalogIds = new Set<string>();
 
 const viewport = new ModelViewport(viewportHost, {
@@ -170,32 +214,53 @@ const toolEngine = new ToolEngine({
   clearPreview: (preview, reason) => clearToolPreview(preview, reason),
 });
 
-codeEditor.onChange(() => {
-  localStorage.setItem(storageKey, codeEditor.getValue());
+codeEditor.onChange(change => {
+  persistProjectChange(projectFileSystem, change);
+  renderProjectNavigation();
   setRunState('pending', '等待更新');
   window.clearTimeout(compileTimer);
   compileTimer = window.setTimeout(runModel, 420);
 });
 
-codeEditor.onCursorOffset(offset => {
-  viewport.selectBySourceOffset(offset);
+codeEditor.onCursorOffset(({file, offset}) => {
+  viewport.selectBySourceOffset(file, offset);
   const occurrence = viewport.getSelected();
   if (occurrence) {
     selectOccurrence(occurrence, false);
   }
 });
+codeEditor.onActiveFile(() => renderProjectNavigation());
 
-runButton.addEventListener('click', runModel);
+newFileButton.addEventListener('click', () => {
+  const path = window.prompt('新文件路径', '/lib/model.ts')?.trim();
+  if (!path) return;
+  try {
+    codeEditor.createFile(path, "import {box} from 'code3d';\n\n");
+  } catch (error) {
+    showProjectIssue(error);
+  }
+});
+contextRenameFile.addEventListener('click', () => renameContextFile());
+contextDeleteFile.addEventListener('click', () => deleteContextFile());
+window.addEventListener('pointerdown', event => {
+  if (!projectContextMenu.contains(event.target as Node)) {
+    hideProjectContextMenu();
+  }
+});
+
 resetButton.addEventListener('click', () => {
   if (!window.confirm('将编辑器恢复为 prototype 示例？')) {
     return;
   }
-  codeEditor.setValue(sampleSource);
-  localStorage.removeItem(storageKey);
-  runModel();
+  void resetProject();
 });
 
 window.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && !projectContextMenu.hidden) {
+    hideProjectContextMenu();
+    event.preventDefault();
+    return;
+  }
   if (dockPanels.handleKeyDown(event)) {
     event.preventDefault();
     return;
@@ -204,13 +269,132 @@ window.addEventListener('keydown', event => {
     event.preventDefault();
     return;
   }
-  if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-    event.preventDefault();
-    runModel();
-  }
 });
 
+renderProjectNavigation();
 runModel();
+
+function persistProjectChange(
+  fileSystem: ProjectFileSystem,
+  change: ProjectEditorChange,
+): void {
+  persistenceQueue = persistenceQueue
+    .then(async () => {
+      if (change.kind === 'content' || change.kind === 'create') {
+        await fileSystem.writeFile(change.path, change.source);
+      } else if (change.kind === 'rename') {
+        await fileSystem.rename(change.from, change.to);
+      } else {
+        await fileSystem.remove(change.path);
+      }
+    })
+    .catch(error => showProjectIssue(error));
+}
+
+async function resetProject(): Promise<void> {
+  try {
+    await persistenceQueue;
+    initialProject = await projectFileSystem.replace(defaultProject);
+    codeEditor.reset(initialProject);
+    renderProjectNavigation();
+    runModel();
+  } catch (error) {
+    showProjectIssue(error);
+  }
+}
+
+function renderProjectNavigation(): void {
+  const active = codeEditor.currentFile();
+  activeFileName.textContent = active.slice(active.lastIndexOf('/') + 1);
+  projectTree.replaceChildren(
+    ...codeEditor.filePaths().map(path => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'project-file';
+      button.classList.toggle('active', path === active);
+      button.title = path;
+      button.textContent = path.slice(1);
+      button.addEventListener('click', () => codeEditor.switchFile(path, true));
+      button.addEventListener('contextmenu', event => {
+        event.preventDefault();
+        showProjectContextMenu(path, event.clientX, event.clientY);
+      });
+      return button;
+    }),
+  );
+  editorTabs.replaceChildren(
+    ...codeEditor.openedFiles().map(path => {
+      const tab = document.createElement('span');
+      tab.className = 'editor-tab';
+      tab.classList.toggle('active', path === active);
+      const open = document.createElement('button');
+      open.type = 'button';
+      open.textContent = path.slice(path.lastIndexOf('/') + 1);
+      open.title = path;
+      open.addEventListener('click', () => codeEditor.switchFile(path, true));
+      const close = document.createElement('button');
+      close.type = 'button';
+      close.className = 'editor-tab-close';
+      close.textContent = '×';
+      close.setAttribute('aria-label', `关闭 ${path}`);
+      close.addEventListener('click', event => {
+        event.stopPropagation();
+        codeEditor.closeFile(path);
+        renderProjectNavigation();
+      });
+      tab.append(open, close);
+      return tab;
+    }),
+  );
+}
+
+function showProjectContextMenu(path: string, x: number, y: number): void {
+  contextFilePath = path;
+  const entry = path === codeEditor.project().entryPath;
+  contextRenameFile.disabled = entry;
+  contextDeleteFile.disabled = entry;
+  projectContextMenu.style.left = `${x}px`;
+  projectContextMenu.style.top = `${y}px`;
+  projectContextMenu.hidden = false;
+}
+
+function hideProjectContextMenu(): void {
+  projectContextMenu.hidden = true;
+  contextFilePath = undefined;
+}
+
+function renameContextFile(): void {
+  const current = contextFilePath;
+  hideProjectContextMenu();
+  if (!current) return;
+  const path = window.prompt('重命名文件', current)?.trim();
+  if (!path || path === current) return;
+  try {
+    codeEditor.renameFile(current, path);
+  } catch (error) {
+    showProjectIssue(error);
+  }
+}
+
+function deleteContextFile(): void {
+  const current = contextFilePath;
+  hideProjectContextMenu();
+  if (!current || !window.confirm(`删除 ${current}？导入路径不会自动改写。`)) {
+    return;
+  }
+  try {
+    codeEditor.deleteFile(current);
+  } catch (error) {
+    showProjectIssue(error);
+  }
+}
+
+function showProjectIssue(error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  setRunState('error', '项目写入失败');
+  errorBar.textContent = message;
+  errorBar.hidden = false;
+}
 
 async function runModel(): Promise<void> {
   window.clearTimeout(compileTimer);
@@ -223,7 +407,7 @@ async function runModel(): Promise<void> {
   try {
     const selectedKey = viewport.getSelected()?.key ?? 'root';
     const firstRun = currentModule === null;
-    const nextModule = await compiler.compile(codeEditor.getValue());
+    const nextModule = await compiler.compile(codeEditor.project());
     if (revision !== runRevision) {
       return;
     }
@@ -232,9 +416,9 @@ async function runModel(): Promise<void> {
     explodeValue = 0;
     renderScopes(currentModule);
     renderObjectCatalog(currentModule);
-    const cursorOffset = codeEditor.cursorOffset();
-    if (cursorOffset !== undefined) {
-      viewport.selectBySourceOffset(cursorOffset, selectedKey);
+    const cursor = codeEditor.cursorSource();
+    if (cursor) {
+      viewport.selectBySourceOffset(cursor.file, cursor.offset, selectedKey);
     }
     const selected = viewport.getSelected();
     if (selected) {
@@ -246,9 +430,12 @@ async function runModel(): Promise<void> {
     if (revision !== runRevision) {
       return;
     }
+    const located = error as Error & {file?: string};
     const message = error instanceof Error ? error.message : String(error);
     setRunState('error', '运行失败');
-    errorBar.textContent = message;
+    errorBar.textContent = located.file
+      ? `${located.file}: ${message}`
+      : message;
     errorBar.hidden = false;
   }
 }
@@ -434,7 +621,11 @@ function containsSourceRef(
   container: SourceRef,
   candidate: SourceRef,
 ): boolean {
-  return container.start <= candidate.start && candidate.end <= container.end;
+  return (
+    container.file === candidate.file &&
+    container.start <= candidate.start &&
+    candidate.end <= container.end
+  );
 }
 
 function scopeButton(
@@ -724,7 +915,7 @@ function positionBindingId(binding: PositionGizmoBinding): string {
     return binding.target.id;
   }
   const {start, end} = binding.receiver.sourceRef;
-  return `expression:${start}:${end}`;
+  return `expression:${binding.receiver.sourceRef.file}:${start}:${end}`;
 }
 
 function showPositionToolStatus(

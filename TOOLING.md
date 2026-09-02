@@ -23,7 +23,8 @@ selection + gesture
 - 源文件是模型持久化状态的唯一来源。
 - preview 可以临时改变视图，但不能成为隐藏的模型状态。
 - 工具不直接依赖 Monaco、OpenCascade 或 Three.js。
-- 所有提交都带源码版本和 expected text，必须原子应用。
+- 每个 source ref 都包含项目文件路径和文件内 offset；offset 不能脱离文件解释。
+- 所有提交都带项目 revision 和 expected text，跨文件 edit plan 也必须原子应用。
 - 无法唯一解析的意图必须提供候选方案，不能静默猜测。
 - Caret 选择源码 occurrence 及其 operation role。点击当前 focus 集合中的
   occurrence 只细化 runtime instance，不改变源码 context；点击 dim 的
@@ -61,7 +62,7 @@ selection + gesture
 
 ### Source transaction
 
-提交时再次检查源码版本和所有 expected text，然后作为一个编辑事务进入 Monaco undo stack。失败时不应用部分结果。
+提交时再次检查项目 revision 和所有文件中的 expected text，然后按文件作为一个逻辑事务进入各自 Monaco undo stack。失败时不应用部分结果。
 事务保留用户原有 caret 和由它决定的渲染 scope；工具不会为了展示写入位置而移动 selection。提交成功后，UI 使用 edit plan 的 summary 和 edits，在 GUI 一侧的独立 popover 中展示 trim、语法高亮后的局部源码，并只标记实际替换范围。
 
 ## Tool session

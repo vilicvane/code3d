@@ -98,4 +98,3 @@
 - [ ] Add the editable preset/spec library and socket-head screw geometry.
 - [ ] Add clearance/counterbore hole tools and representative composition.
 - [ ] Verify dimensions, tracing, editability, performance, and browser output.
-

@@ -1,12 +1,18 @@
 import CompilerWorker from './compiler.worker?worker';
 import type {ModelModule} from './compiler';
+import type {ModelProject} from '../project/project';
 
 type CompileResponse =
   | Readonly<{id: number; ok: true; module: ModelModule}>
   | Readonly<{
       id: number;
       ok: false;
-      error: Readonly<{message: string; start?: number; length?: number}>;
+      error: Readonly<{
+        message: string;
+        file?: string;
+        start?: number;
+        length?: number;
+      }>;
     }>;
 
 type PendingCompile = {
@@ -26,7 +32,7 @@ export class ModelCompilerClient {
     this.worker = this.createWorker();
   }
 
-  compile(source: string): Promise<ModelModule> {
+  compile(project: ModelProject): Promise<ModelModule> {
     if (this.pending) {
       this.pending.reject(new Error('Compilation superseded.'));
       window.clearTimeout(this.pending.timeout);
@@ -52,7 +58,7 @@ export class ModelCompilerClient {
       }, timeoutMilliseconds);
 
       this.pending = {id, resolve, reject, timeout};
-      this.worker.postMessage({id, source});
+      this.worker.postMessage({id, project});
     });
   }
 
@@ -77,7 +83,9 @@ export class ModelCompilerClient {
         ) as Error & {
           start?: number;
           length?: number;
+          file?: string;
         };
+        error.file = data.error.file;
         error.start = data.error.start;
         error.length = data.error.length;
         pending.reject(error);

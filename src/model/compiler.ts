@@ -1,5 +1,10 @@
 import ts from '@typescript/typescript6';
 import {
+  normalizeProjectPath,
+  resolveProjectImport,
+  type ModelProject,
+} from '../project/project';
+import {
   authoringApi,
   disposeModelObjects,
   isConstraint,
@@ -68,12 +73,14 @@ export type ModelModule = Readonly<{
 }>;
 
 export class CompileFailure extends Error {
+  readonly file?: string;
   readonly start?: number;
   readonly length?: number;
 
-  constructor(message: string, start?: number, length?: number) {
+  constructor(message: string, file?: string, start?: number, length?: number) {
     super(message);
     this.name = 'CompileFailure';
+    this.file = file;
     this.start = start;
     this.length = length;
   }
@@ -90,7 +97,7 @@ type RuntimeParameterTarget = Readonly<{
 
 type StaticParameterTarget = {
   binding?: string;
-  sourceRef: Readonly<{start: number; end: number}>;
+  sourceRef: SourceRef;
   value: number;
   label: string;
   description?: string;
@@ -223,6 +230,7 @@ let latestTracedObject: ModelObject | undefined;
 let evaluationOrder = 0;
 const traceRuntime = Object.freeze({
   trace<T>(
+    file: string,
     start: number,
     end: number,
     id: string,
@@ -242,28 +250,38 @@ const traceRuntime = Object.freeze({
       parameterFrames.pop();
     }
     if (isConstraint(result)) {
-      result.attachSource({start, end});
+      result.attachSource(sourceRef(file, start, end));
       result.attachParameters(parameters);
     } else if (isModelObject(result)) {
       const order = ++evaluationOrder;
-      result.attachSource({start, end});
+      result.attachSource(sourceRef(file, start, end));
       result.attachParameters(parameters);
-      result.attachOperationTrace(id, execution, order, {start, end});
-      recordSourceValue(id, 'operation-output', {start, end}, result);
+      result.attachOperationTrace(
+        id,
+        execution,
+        order,
+        sourceRef(file, start, end),
+      );
+      recordSourceValue(
+        id,
+        'operation-output',
+        sourceRef(file, start, end),
+        result,
+      );
       recordCatalogValue(
         {
           id,
           label,
           category: 'expression',
           scope: 'local',
-          sourceRef: {start, end},
+          sourceRef: sourceRef(file, start, end),
         },
         result,
         order,
       );
       return result;
     } else {
-      recordSourceValue(id, 'value', {start, end}, result);
+      recordSourceValue(id, 'value', sourceRef(file, start, end), result);
     }
     const order = ++evaluationOrder;
     recordCatalogValue(
@@ -272,7 +290,7 @@ const traceRuntime = Object.freeze({
         label,
         category: 'expression',
         scope: 'local',
-        sourceRef: {start, end},
+        sourceRef: sourceRef(file, start, end),
       },
       result,
       order,
@@ -281,6 +299,7 @@ const traceRuntime = Object.freeze({
   },
 
   bind<T>(
+    file: string,
     start: number,
     end: number,
     id: string,
@@ -290,10 +309,10 @@ const traceRuntime = Object.freeze({
     run: () => T,
   ): T {
     const result = run();
-    recordSourceValue(id, 'value', {start, end}, result);
+    recordSourceValue(id, 'value', sourceRef(file, start, end), result);
     const order = ++evaluationOrder;
     recordCatalogValue(
-      {id, label, category, scope, sourceRef: {start, end}},
+      {id, label, category, scope, sourceRef: sourceRef(file, start, end)},
       result,
       order,
     );
@@ -301,6 +320,7 @@ const traceRuntime = Object.freeze({
   },
 
   input<T>(
+    file: string,
     start: number,
     end: number,
     siteId: string,
@@ -318,7 +338,7 @@ const traceRuntime = Object.freeze({
       sourceInputTraces.push({
         siteId,
         execution: frame.execution,
-        sourceRef: {start, end},
+        sourceRef: sourceRef(file, start, end),
         role,
         index,
         objects,
@@ -328,6 +348,7 @@ const traceRuntime = Object.freeze({
   },
 
   parameter(
+    file: string,
     operation: string,
     argument: string,
     value: number,
@@ -347,8 +368,8 @@ const traceRuntime = Object.freeze({
           operation,
           argument,
           value,
-          operationRef: {start: operationStart, end: operationEnd},
-          expressionRef: {start: expressionStart, end: expressionEnd},
+          operationRef: sourceRef(file, operationStart, operationEnd),
+          expressionRef: sourceRef(file, expressionStart, expressionEnd),
           target,
           sensitivity,
         });
@@ -368,7 +389,7 @@ function recordSourceValue(
   if (objects.length === 0) {
     return;
   }
-  const key = `${kind}:${id}:${sourceRef.start}:${sourceRef.end}`;
+  const key = `${kind}:${id}:${sourceRef.file}:${sourceRef.start}:${sourceRef.end}`;
   const sourceTrace = sourceValueTraces.get(key) ?? {
     id,
     kind,
@@ -431,7 +452,18 @@ function modelObjectsIn(
   return [];
 }
 
-export function compileModel(source: string): ModelModule {
+export function compileProject(project: ModelProject): ModelModule {
+  const files = new Map(
+    project.files.map(file => [normalizeProjectPath(file.path), file.source]),
+  );
+  const entryPath = resolveModuleFile(
+    normalizeProjectPath(project.entryPath),
+    files,
+  );
+  if (!entryPath) {
+    throw new CompileFailure(`找不到项目入口：${project.entryPath}`);
+  }
+
   tracedObjects.clear();
   sourceValueTraces.clear();
   sourceInputTraces.length = 0;
@@ -441,61 +473,71 @@ export function compileModel(source: string): ModelModule {
   traceExecutions.clear();
   latestTracedObject = undefined;
   evaluationOrder = 0;
-  const result = ts.transpileModule(source, {
-    fileName: 'model.ts',
-    compilerOptions: {
-      target: ts.ScriptTarget.ES2022,
-      module: ts.ModuleKind.CommonJS,
-      esModuleInterop: true,
-      strict: true,
-      isolatedModules: true,
-    },
-    reportDiagnostics: true,
-    transformers: {
-      before: [createTraceTransformer()],
-    },
-  });
-
-  const errors = (result.diagnostics ?? []).filter(
-    diagnostic => diagnostic.category === ts.DiagnosticCategory.Error,
-  );
-  if (errors.length > 0) {
-    throw diagnosticFailure(errors[0]);
-  }
-
-  const module: CommonJsModule = {exports: {}};
-  const requireModule = (specifier: string): unknown => {
-    if (specifier === 'code3d') {
-      return authoringApi;
-    }
-    throw new Error(`prototype 暂不支持导入模块：${specifier}`);
-  };
-
-  const execute = new Function(
-    'require',
-    'module',
-    'exports',
-    '__code3d',
-    `"use strict";\n${result.outputText}\n//# sourceURL=code3d-model.js`,
-  );
-
   try {
-    execute(requireModule, module, module.exports, traceRuntime);
+    const modules = new Map<string, CommonJsModule>();
+    const executeModule = (path: string): CommonJsModule => {
+      const normalized = normalizeProjectPath(path);
+      const cached = modules.get(normalized);
+      if (cached) {
+        return cached;
+      }
+      const source = files.get(normalized);
+      if (source === undefined) {
+        throw new CompileFailure(`找不到项目文件：${normalized}`, normalized);
+      }
+      const module: CommonJsModule = {exports: {}};
+      modules.set(normalized, module);
+      const result = transpileSource(normalized, source);
+      const execute = new Function(
+        'require',
+        'module',
+        'exports',
+        '__code3d',
+        `"use strict";\n${result}\n//# sourceURL=code3d:${normalized}`,
+      );
+      const requireModule = (specifier: string): unknown => {
+        if (specifier === 'code3d') {
+          return authoringApi;
+        }
+        if (!specifier.startsWith('.')) {
+          throw new CompileFailure(
+            `不支持的模块导入：${specifier}`,
+            normalized,
+          );
+        }
+        const candidate = resolveProjectImport(normalized, specifier);
+        const resolved = resolveModuleFile(candidate, files);
+        if (!resolved) {
+          throw new CompileFailure(
+            `无法从 ${normalized} 解析模块 ${specifier}`,
+            normalized,
+          );
+        }
+        return executeModule(resolved).exports;
+      };
+      execute(requireModule, module, module.exports, traceRuntime);
+      return module;
+    };
+
+    executeModule(entryPath);
 
     const modelExports = new Map<string, ModelObject>();
     const exportNamesByObject = new Map<ModelObject, Set<string>>();
-    for (const [name, value] of Object.entries(module.exports)) {
-      if (isModelObject(value)) {
-        modelExports.set(name, value);
-      }
-      for (const object of modelObjectsIn(value)) {
-        tracedObjects.add(object);
-        const names = exportNamesByObject.get(object) ?? new Set<string>();
-        names.add(name);
-        exportNamesByObject.set(object, names);
+    for (const [modulePath, module] of modules) {
+      for (const [name, value] of Object.entries(module.exports)) {
+        const exportLabel =
+          modulePath === entryPath ? name : `${modulePath}:${name}`;
+        if (modulePath === entryPath && isModelObject(value)) {
+          modelExports.set(name, value);
+        }
+        for (const object of modelObjectsIn(value)) {
+          tracedObjects.add(object);
+          const names = exportNamesByObject.get(object) ?? new Set<string>();
+          names.add(exportLabel);
+          exportNamesByObject.set(object, names);
+        }
       }
     }
-
     const fallbackObject =
       modelExports.get('default') ??
       [...modelExports.values()].at(-1) ??
@@ -588,6 +630,54 @@ export function compileModel(source: string): ModelModule {
   }
 }
 
+function transpileSource(path: string, source: string): string {
+  const result = ts.transpileModule(source, {
+    fileName: path,
+    compilerOptions: {
+      target: ts.ScriptTarget.ES2022,
+      module: ts.ModuleKind.CommonJS,
+      esModuleInterop: true,
+      strict: true,
+      isolatedModules: true,
+    },
+    reportDiagnostics: true,
+    transformers: {before: [createTraceTransformer()]},
+  });
+  const error = (result.diagnostics ?? []).find(
+    diagnostic => diagnostic.category === ts.DiagnosticCategory.Error,
+  );
+  if (error) {
+    throw diagnosticFailure(error, path);
+  }
+  return result.outputText;
+}
+
+function resolveModuleFile(
+  candidate: string,
+  files: ReadonlyMap<string, string>,
+): string | undefined {
+  const normalized = normalizeProjectPath(candidate);
+  const extension = /\.[^/]+$/.test(normalized);
+  const sourceExtensions = [
+    '.ts',
+    '.tsx',
+    '.mts',
+    '.cts',
+    '.js',
+    '.jsx',
+    '.mjs',
+    '.cjs',
+  ];
+  const candidates = extension
+    ? [normalized]
+    : [
+        normalized,
+        ...sourceExtensions.map(suffix => normalized + suffix),
+        ...sourceExtensions.map(suffix => `${normalized}/index${suffix}`),
+      ];
+  return candidates.find(path => files.has(path));
+}
+
 function collectObjectGraph(roots: Iterable<ModelObject>): ModelObject[] {
   const found = new Set<ModelObject>();
   const visit = (object: ModelObject): void => {
@@ -647,6 +737,7 @@ function buildSourceTargets(
       trace.siteId,
       trace.role,
       trace.index,
+      trace.sourceRef.file,
       trace.sourceRef.start,
       trace.sourceRef.end,
     ].join(':');
@@ -736,7 +827,7 @@ function createTraceTransformer(): ts.TransformerFactory<ts.SourceFile> {
           const label = node.name.getText(sourceFile);
           const id =
             scope === 'module' && ts.isIdentifier(node.name)
-              ? `binding:${node.name.text}`
+              ? `${sourceFile.fileName}:binding:${node.name.text}`
               : `${stableSourceId('binding', node, sourceFile)}:${label}`;
           return factory.updateVariableDeclaration(
             visited,
@@ -747,6 +838,7 @@ function createTraceTransformer(): ts.TransformerFactory<ts.SourceFile> {
               visited.initializer,
               node.name.getStart(sourceFile),
               node.initializer.getEnd(),
+              sourceFile.fileName,
               id,
               label,
               'binding',
@@ -769,7 +861,8 @@ function createTraceTransformer(): ts.TransformerFactory<ts.SourceFile> {
               visited.expression,
               node.expression.getStart(sourceFile),
               node.expression.getEnd(),
-              'export:default',
+              sourceFile.fileName,
+              `${sourceFile.fileName}:export:default`,
               'default',
               'export',
               'module',
@@ -811,6 +904,7 @@ function createTraceTransformer(): ts.TransformerFactory<ts.SourceFile> {
             call,
             node.getStart(sourceFile),
             node.getEnd(),
+            sourceFile.fileName,
             siteId,
             callLabel(node),
             factory,
@@ -829,6 +923,7 @@ function traceExpression(
   expression: ts.Expression,
   start: number,
   end: number,
+  file: string,
   id: string,
   label: string,
   factory: ts.NodeFactory,
@@ -840,6 +935,7 @@ function traceExpression(
     ),
     undefined,
     [
+      factory.createStringLiteral(file),
       factory.createNumericLiteral(start),
       factory.createNumericLiteral(end),
       factory.createStringLiteral(id),
@@ -860,6 +956,7 @@ function bindExpression(
   expression: ts.Expression,
   start: number,
   end: number,
+  file: string,
   id: string,
   label: string,
   category: ObjectCatalogEntry['category'],
@@ -873,6 +970,7 @@ function bindExpression(
     ),
     undefined,
     [
+      factory.createStringLiteral(file),
       factory.createNumericLiteral(start),
       factory.createNumericLiteral(end),
       factory.createStringLiteral(id),
@@ -912,7 +1010,7 @@ function stableSourceId(
     path.unshift(`${current.kind}-${siblings.indexOf(current)}`);
     current = current.parent;
   }
-  return `${category}:${statementIdentity(statement, sourceFile)}:${path.join('/') || 'root'}`;
+  return `${sourceFile.fileName}:${category}:${statementIdentity(statement, sourceFile)}:${path.join('/') || 'root'}`;
 }
 
 function topLevelStatement(node: ts.Node): ts.Node {
@@ -1083,6 +1181,7 @@ function operationInputExpression(
     ),
     undefined,
     [
+      factory.createStringLiteral(sourceFile.fileName),
       factory.createNumericLiteral(original.getStart(sourceFile)),
       factory.createNumericLiteral(original.getEnd()),
       factory.createStringLiteral(siteId),
@@ -1141,6 +1240,7 @@ function instrumentCallParameters(
       ),
       undefined,
       [
+        factory.createStringLiteral(sourceFile.fileName),
         factory.createStringLiteral(signature.operation),
         factory.createStringLiteral(argumentDefinition.name),
         argument,
@@ -1182,6 +1282,7 @@ function collectStaticParameterTargets(
       targets.set(name, {
         binding: name,
         sourceRef: {
+          file: sourceFile.fileName,
           start: declaration.initializer.getStart(sourceFile),
           end: declaration.initializer.getEnd(),
         },
@@ -1207,7 +1308,7 @@ function collectExpressionTargets(
 ): readonly StaticParameterTarget[] {
   const targets = new Map<string, StaticParameterTarget>();
   const add = (target: StaticParameterTarget): void => {
-    const id = `${target.sourceRef.start}:${target.sourceRef.end}`;
+    const id = `${target.sourceRef.file}:${target.sourceRef.start}:${target.sourceRef.end}`;
     targets.set(id, {
       ...target,
       kind: target.kind ?? argument.kind,
@@ -1227,6 +1328,7 @@ function collectExpressionTargets(
     if (numeric !== undefined && isStandaloneNumericExpression(node)) {
       add({
         sourceRef: {
+          file: sourceFile.fileName,
           start: node.getStart(sourceFile),
           end: node.getEnd(),
         },
@@ -1409,7 +1511,7 @@ function createRuntimeTarget(
     property(
       'id',
       factory.createStringLiteral(
-        `${target.sourceRef.start}:${target.sourceRef.end}`,
+        `${target.sourceRef.file}:${target.sourceRef.start}:${target.sourceRef.end}`,
       ),
       factory,
     ),
@@ -1418,6 +1520,11 @@ function createRuntimeTarget(
     property(
       'sourceRef',
       factory.createObjectLiteralExpression([
+        property(
+          'file',
+          factory.createStringLiteral(target.sourceRef.file),
+          factory,
+        ),
         property(
           'start',
           factory.createNumericLiteral(target.sourceRef.start),
@@ -1748,9 +1855,17 @@ function isParameterKind(value: string): value is ParameterKind {
   return ['length', 'angle', 'ratio', 'count', 'scalar'].includes(value);
 }
 
-function diagnosticFailure(diagnostic: ts.Diagnostic): CompileFailure {
+function sourceRef(file: string, start: number, end: number): SourceRef {
+  return {file: normalizeProjectPath(file), start, end};
+}
+
+function diagnosticFailure(
+  diagnostic: ts.Diagnostic,
+  file?: string,
+): CompileFailure {
   return new CompileFailure(
     ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'),
+    file,
     diagnostic.start,
     diagnostic.length,
   );

@@ -189,10 +189,11 @@ export class ModelViewport {
   }
 
   selectBySourceOffset(
+    file: string,
     offset: number,
     preferredOccurrenceKey?: string,
   ): boolean {
-    const match = this.sourceTargetAt(offset);
+    const match = this.sourceTargetAt(file, offset);
     if (!match) {
       return false;
     }
@@ -518,10 +519,16 @@ export class ModelViewport {
     this.fit();
   }
 
-  private sourceTargetAt(offset: number): SourceTarget | undefined {
+  private sourceTargetAt(
+    file: string,
+    offset: number,
+  ): SourceTarget | undefined {
     return this.module?.sourceTargets
       .filter(
-        ({sourceRef}) => sourceRef.start <= offset && offset <= sourceRef.end,
+        ({sourceRef}) =>
+          sourceRef.file === file &&
+          sourceRef.start <= offset &&
+          offset <= sourceRef.end,
       )
       .sort(
         (left, right) =>
@@ -1019,8 +1026,8 @@ function preferUpstreamTargets(
 ): ParameterUsage[] {
   const groups = new Map<string, ParameterUsage[]>();
   for (const parameter of parameters) {
-    const {start, end} = parameter.expressionRef;
-    const key = `${parameter.operation}:${parameter.argument}:${start}:${end}`;
+    const {file, start, end} = parameter.expressionRef;
+    const key = `${parameter.operation}:${parameter.argument}:${file}:${start}:${end}`;
     const group = groups.get(key) ?? [];
     group.push(parameter);
     groups.set(key, group);
@@ -1036,11 +1043,19 @@ function preferUpstreamTargets(
 }
 
 function containsSource(container: SourceRef, candidate: SourceRef): boolean {
-  return container.start <= candidate.start && candidate.end <= container.end;
+  return (
+    container.file === candidate.file &&
+    container.start <= candidate.start &&
+    candidate.end <= container.end
+  );
 }
 
 function sameSource(left: SourceRef, right: SourceRef): boolean {
-  return left.start === right.start && left.end === right.end;
+  return (
+    left.file === right.file &&
+    left.start === right.start &&
+    left.end === right.end
+  );
 }
 
 function sourceSpan(sourceRef: SourceRef): number {

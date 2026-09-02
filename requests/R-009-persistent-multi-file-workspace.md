@@ -74,9 +74,19 @@
 
 ## Implementation checkpoints
 
-- [ ] Persistent project filesystem and default-project bootstrap.
-- [ ] Multi-model editor, file tree, tabs, and file operations.
-- [ ] Multi-module compiler and TypeScript module resolution.
-- [ ] File-qualified tracing, diagnostics, navigation, and tool transactions.
-- [ ] Persistence, browser, and regression verification.
+- [x] Persistent project filesystem and default-project bootstrap.
+- [x] Multi-model editor, file tree, tabs, and file operations. The project
+      header keeps only New; rename and delete live in each file's context menu.
+- [x] Multi-module compiler and TypeScript module resolution.
+- [x] File-qualified tracing, diagnostics, navigation, and tool transactions.
+- [x] Persistence, browser, and regression verification.
 
+## Verification
+
+- `npm run build` passes with the ZenFS browser backend included.
+- Host Chrome verified nested file creation, relative imports, an imported
+  `ModelObject`, cross-file Outline navigation, independent Monaco documents,
+  context-menu rename/delete (including deleting the active document), and
+  persistence after a full reload.
+- The imported-library browser fixture was removed and the persistent project
+  restored to the default example after verification.

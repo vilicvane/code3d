@@ -1,6 +1,7 @@
 import * as monaco from 'monaco-editor/editor';
 
 export type SourceEditExcerpt = Readonly<{
+  file: string;
   lineNumber: number;
   source: string;
   changedStart: number;
@@ -75,12 +76,13 @@ function sourceEditBlock(
 ): HTMLElement {
   const block = document.createElement('section');
   block.className = 'source-edit-block';
-  if (editCount > 1) {
-    const label = document.createElement('span');
-    label.className = 'source-edit-block-label';
-    label.textContent = `EDIT ${String(index + 1).padStart(2, '0')}`;
-    block.append(label);
-  }
+  const label = document.createElement('span');
+  label.className = 'source-edit-block-label';
+  label.textContent =
+    editCount > 1
+      ? `${excerpt.file} · EDIT ${String(index + 1).padStart(2, '0')}`
+      : excerpt.file;
+  block.append(label);
 
   const source = document.createElement('div');
   source.className = 'source-edit-code';

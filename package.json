@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "@typescript/typescript6": "^6.0.2",
+    "@zenfs/core": "^2.7.0",
+    "@zenfs/dom": "^1.2.12",
     "monaco-editor": "^0.56.0",
     "replicad": "^1.0.1",
     "replicad-opencascadejs": "^1.0.0",
