@@ -20,6 +20,7 @@ export class ModelViewport {
   private readonly root = new THREE.Group();
   private readonly occurrences = new Map<string, Occurrence>();
   private readonly previewOffsets = new Map<string, Vec3>();
+  private readonly parameterPreviews = new Map<string, number>();
   private selectionHelper: THREE.BoxHelper | null = null;
   private selectedKey = "root";
   private explode = 0;
@@ -77,18 +78,25 @@ export class ModelViewport {
     this.animate();
   }
 
-  renderModule(module: ModelModule): void {
+  renderModule(
+    module: ModelModule,
+    selectedKey = "root",
+    fitCamera = true,
+  ): void {
     this.module = module;
     this.disposeRoot();
     this.occurrences.clear();
     this.previewOffsets.clear();
+    this.parameterPreviews.clear();
     this.root.clear();
 
     const rootObject = this.buildObject(module.root, "root", 0);
     this.root.add(rootObject);
     this.applyPreviewTransforms();
-    this.selectKey("root", false);
-    this.fit();
+    this.selectKey(this.occurrences.has(selectedKey) ? selectedKey : "root", false);
+    if (fitCamera) {
+      this.fit();
+    }
   }
 
   selectBySourceOffset(offset: number): void {
@@ -145,6 +153,16 @@ export class ModelViewport {
 
   resetPreviewOffset(key: string): void {
     this.previewOffsets.delete(key);
+    this.applyPreviewTransforms();
+  }
+
+  setParameterPreview(targetId: string, value: number): void {
+    this.parameterPreviews.set(targetId, value);
+    this.applyPreviewTransforms();
+  }
+
+  clearParameterPreview(targetId: string): void {
+    this.parameterPreviews.delete(targetId);
     this.applyPreviewTransforms();
   }
 
@@ -226,7 +244,25 @@ export class ModelViewport {
   private applyPreviewTransforms(): void {
     for (const occurrence of this.occurrences.values()) {
       applyNodeTransform(occurrence.object, occurrence.node);
-      const offset = this.previewOffsets.get(occurrence.key) ?? [0, 0, 0];
+      const offset = [...(this.previewOffsets.get(occurrence.key) ?? [0, 0, 0])] as [
+        number,
+        number,
+        number,
+      ];
+      for (const parameter of occurrence.node.parameters) {
+        const previewValue = this.parameterPreviews.get(parameter.target.id);
+        if (
+          previewValue === undefined ||
+          (parameter.operation !== "at" && parameter.operation !== "move")
+        ) {
+          continue;
+        }
+        const axis = axisIndex(parameter.argument);
+        if (axis !== undefined) {
+          offset[axis] +=
+            (previewValue - parameter.target.value) * parameter.sensitivity;
+        }
+      }
       occurrence.object.position.x += offset[0];
       occurrence.object.position.y += offset[1];
       occurrence.object.position.z += offset[2];
@@ -284,6 +320,13 @@ export class ModelViewport {
       }
     });
   }
+}
+
+function axisIndex(argument: string): 0 | 1 | 2 | undefined {
+  if (argument === "x") return 0;
+  if (argument === "y") return 1;
+  if (argument === "z") return 2;
+  return undefined;
 }
 
 function createThreeObject(node: ModelSnapshotObject): THREE.Object3D {

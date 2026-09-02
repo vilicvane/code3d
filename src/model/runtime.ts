@@ -12,6 +12,35 @@ export type SourceRef = Readonly<{
   end: number;
 }>;
 
+export type ParameterKind =
+  | "length"
+  | "angle"
+  | "ratio"
+  | "count"
+  | "scalar";
+
+export type ParameterTarget = Readonly<{
+  id: string;
+  label: string;
+  description?: string;
+  kind?: ParameterKind;
+  unit?: string;
+  min?: number;
+  max?: number;
+  step?: number;
+  value: number;
+  sourceRef: SourceRef;
+}>;
+
+export type ParameterUsage = Readonly<{
+  operation: string;
+  argument: string;
+  value: number;
+  expressionRef: SourceRef;
+  target: ParameterTarget;
+  sensitivity: number;
+}>;
+
 export type Transform = Readonly<{
   position: Vec3;
   rotation: Vec3;
@@ -43,6 +72,7 @@ export type ModelSnapshotObject = Readonly<{
   children: readonly ModelSnapshotObject[];
   transform: Transform;
   sourceRefs: readonly SourceRef[];
+  parameters: readonly ParameterUsage[];
   mesh?: RenderMesh;
 }>;
 
@@ -56,6 +86,7 @@ type ModelObjectInit = Readonly<{
   rotation?: Vec3;
   scale?: Vec3;
   sourceRefs?: readonly SourceRef[];
+  parameters?: readonly ParameterUsage[];
   nodeId?: string;
 }>;
 
@@ -75,6 +106,7 @@ export class ModelObject {
   readonly color: string;
   readonly children: readonly ModelObject[];
   readonly sourceRefs: SourceRef[];
+  readonly parameters: ParameterUsage[];
   readonly position: Vec3;
   readonly rotation: Vec3;
   readonly scale: Vec3;
@@ -94,6 +126,7 @@ export class ModelObject {
     this.rotation = init.rotation ?? origin;
     this.scale = init.scale ?? unitScale;
     this.sourceRefs = [...(init.sourceRefs ?? [])];
+    this.parameters = [...(init.parameters ?? [])];
   }
 
   named(name: string): ModelObject {
@@ -220,6 +253,23 @@ export class ModelObject {
     this.sourceRefs.push(sourceRef);
   }
 
+  /** Runtime instrumentation hook. Not part of the authoring API. */
+  attachParameters(parameters: readonly ParameterUsage[]): void {
+    for (const parameter of parameters) {
+      const duplicate = this.parameters.some(
+        (candidate) =>
+          candidate.operation === parameter.operation &&
+          candidate.argument === parameter.argument &&
+          candidate.expressionRef.start === parameter.expressionRef.start &&
+          candidate.expressionRef.end === parameter.expressionRef.end &&
+          candidate.target.id === parameter.target.id,
+      );
+      if (!duplicate) {
+        this.parameters.push(parameter);
+      }
+    }
+  }
+
   toSnapshot(): ModelSnapshotObject {
     if (this.kind === "group") {
       return {
@@ -230,6 +280,7 @@ export class ModelObject {
         children: this.children.map((child) => child.toSnapshot()),
         transform: identityTransform,
         sourceRefs: [...this.sourceRefs],
+        parameters: [...this.parameters],
       };
     }
 
@@ -244,6 +295,7 @@ export class ModelObject {
       children: [],
       transform: identityTransform,
       sourceRefs: [...this.sourceRefs],
+      parameters: [...this.parameters],
       mesh: {
         vertices: new Float32Array(surface.vertices),
         normals: new Float32Array(surface.normals),
@@ -275,7 +327,8 @@ export class ModelObject {
       shape,
       name: this.name,
       color: this.color,
-      sourceRefs: this.sourceRefs,
+      sourceRefs: [...this.sourceRefs, ...other.sourceRefs],
+      parameters: [...this.parameters, ...other.parameters],
     });
   }
 
@@ -323,6 +376,7 @@ export class ModelObject {
       rotation: this.rotation,
       scale: this.scale,
       sourceRefs: this.sourceRefs,
+      parameters: this.parameters,
       ...overrides,
     });
   }

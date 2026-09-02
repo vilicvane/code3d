@@ -109,6 +109,36 @@ export class CodeEditor {
     this.model.setValue(source);
   }
 
+  replaceNumber(
+    sourceRef: SourceRef,
+    expectedValue: number,
+    nextValue: number,
+  ): boolean {
+    const start = this.model.getPositionAt(sourceRef.start);
+    const end = this.model.getPositionAt(sourceRef.end);
+    const range = new monaco.Range(
+      start.lineNumber,
+      start.column,
+      end.lineNumber,
+      end.column,
+    );
+    const currentText = this.model.getValueInRange(range);
+    if (parseSourceNumber(currentText) !== expectedValue) {
+      return false;
+    }
+
+    this.editor.pushUndoStop();
+    this.editor.executeEdits("code3d.parameter", [
+      {
+        range,
+        text: formatSourceNumber(nextValue),
+        forceMoveMarkers: true,
+      },
+    ]);
+    this.editor.pushUndoStop();
+    return true;
+  }
+
   onChange(listener: () => void): monaco.IDisposable {
     return this.model.onDidChangeContent(listener);
   }
@@ -158,4 +188,21 @@ export class CodeEditor {
   clearSourceHighlight(): void {
     this.sourceDecoration.clear();
   }
+}
+
+function parseSourceNumber(source: string): number | undefined {
+  const normalized = source.replace(/[()_\s]/g, "");
+  if (!/^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(normalized)) {
+    return undefined;
+  }
+  const value = Number(normalized);
+  return Number.isFinite(value) ? value : undefined;
+}
+
+function formatSourceNumber(value: number): string {
+  if (!Number.isFinite(value)) {
+    throw new Error("参数必须是有限数值。");
+  }
+  const normalized = Object.is(value, -0) ? 0 : value;
+  return String(Number(normalized.toPrecision(12)));
 }

@@ -3,7 +3,12 @@ import { CodeEditor } from "./editor";
 import { ModelCompilerClient } from "./model/compiler-client";
 import type { ModelModule } from "./model/compiler";
 import { sampleSource } from "./model/sample";
-import type { ModelSnapshotObject, SourceRef, Vec3 } from "./model/runtime";
+import type {
+  ModelSnapshotObject,
+  ParameterTarget,
+  ParameterUsage,
+  SourceRef,
+} from "./model/runtime";
 import { ModelViewport, type Occurrence } from "./viewport";
 
 const storageKey = "code3d.prototype.source";
@@ -134,11 +139,14 @@ async function runModel(): Promise<void> {
   errorBar.hidden = true;
 
   try {
-    currentModule = await compiler.compile(codeEditor.getValue());
+    const selectedKey = viewport.getSelected()?.key ?? "root";
+    const firstRun = currentModule === null;
+    const nextModule = await compiler.compile(codeEditor.getValue());
     if (revision !== runRevision) {
       return;
     }
-    viewport.renderModule(currentModule);
+    currentModule = nextModule;
+    viewport.renderModule(currentModule, selectedKey, firstRun);
     explodeValue = 0;
     renderScopes(currentModule);
     const root = viewport.getSelected();
@@ -240,37 +248,152 @@ function renderLocalInspector(occurrence: Occurrence): void {
   kind.textContent = occurrence.node.kind.toUpperCase();
   inspector.append(kind);
 
-  const current = viewport.getPreviewOffset(occurrence.key);
-  const axisLabels = ["X", "Y", "Z"] as const;
-  axisLabels.forEach((axis, index) => {
-    inspector.append(
-      rangeControl(axis, current[index], -30, 30, 1, (value) => {
-        const next = [...viewport.getPreviewOffset(occurrence.key)] as [
-          number,
-          number,
-          number,
-        ];
-        next[index] = value;
-        viewport.setPreviewOffset(occurrence.key, next);
-      }),
-    );
-  });
+  const parameters = uniqueParameters(occurrence.node.parameters);
+  if (parameters.length > 0) {
+    const sectionLabel = document.createElement("div");
+    sectionLabel.className = "parameter-section-label";
+    sectionLabel.textContent = "SOURCE PARAMETERS";
+    inspector.append(sectionLabel);
+    parameters.forEach((parameter) => {
+      const impact = currentModule?.parameterImpacts.get(parameter.target.id) ?? 1;
+      inspector.append(parameterControl(parameter, impact));
+    });
+  } else {
+    const empty = document.createElement("p");
+    empty.className = "inspector-copy";
+    empty.textContent = "这个对象暂时没有可安全写回的数值参数。";
+    inspector.append(empty);
+  }
 
   const actions = document.createElement("div");
   actions.className = "inspector-actions";
-  actions.append(
-    actionButton("聚焦", () => viewport.focusSelection()),
-    actionButton("清除偏移", () => {
-      viewport.resetPreviewOffset(occurrence.key);
-      renderInspector(occurrence);
-    }),
-  );
+  actions.append(actionButton("聚焦", () => viewport.focusSelection()));
   inspector.append(actions);
 
   const note = document.createElement("p");
   note.className = "inspector-note";
-  note.textContent = "局部调整是临时 preview override；它不会尝试重写任意 TS 表达式。";
+  note.textContent =
+    "拖动时使用临时预览；确认后修改源文件并重新执行。unit 只影响界面提示。";
   inspector.append(note);
+}
+
+function parameterControl(parameter: ParameterUsage, impact: number): HTMLElement {
+  const { target } = parameter;
+  const bounds = parameterBounds(parameter);
+  const wrapper = document.createElement("section");
+  wrapper.className = "parameter-control";
+
+  const row = document.createElement("div");
+  row.className = "parameter-control-row";
+  const name = document.createElement("span");
+  name.className = "parameter-name";
+  name.textContent = target.label;
+
+  const valueGroup = document.createElement("span");
+  valueGroup.className = "parameter-value";
+  const numberInput = document.createElement("input");
+  numberInput.className = "parameter-number";
+  numberInput.type = "number";
+  numberInput.min = String(bounds.min);
+  numberInput.max = String(bounds.max);
+  numberInput.step = String(bounds.step);
+  numberInput.value = String(target.value);
+  numberInput.setAttribute("aria-label", target.label);
+  valueGroup.append(numberInput);
+  if (target.unit) {
+    const unit = document.createElement("span");
+    unit.textContent = target.unit;
+    valueGroup.append(unit);
+  }
+  row.append(name, valueGroup);
+
+  const range = document.createElement("input");
+  range.type = "range";
+  range.min = String(bounds.min);
+  range.max = String(bounds.max);
+  range.step = String(bounds.step);
+  range.value = String(target.value);
+
+  const details = document.createElement("p");
+  details.className = "parameter-details";
+  const context = `${parameter.operation}.${parameter.argument}`;
+  details.textContent = target.description
+    ? `${target.description} · ${context}`
+    : context;
+  if (impact > 1) {
+    const impactLabel = document.createElement("span");
+    impactLabel.className = "parameter-impact";
+    impactLabel.textContent = `影响 ${impact} 个对象`;
+    details.append(" · ", impactLabel);
+  }
+
+  const preview = (value: number): void => {
+    if (!Number.isFinite(value)) return;
+    range.value = String(value);
+    numberInput.value = String(value);
+    viewport.setParameterPreview(target.id, value);
+  };
+  const commit = (value: number): void => {
+    if (!Number.isFinite(value)) return;
+    if (value === target.value) {
+      viewport.clearParameterPreview(target.id);
+      return;
+    }
+    codeEditor.revealSource(target.sourceRef);
+    if (!codeEditor.replaceNumber(target.sourceRef, target.value, value)) {
+      viewport.clearParameterPreview(target.id);
+      setRunState("pending", "源码已变化");
+      errorBar.textContent = "参数对应的源码已经变化，请等待模型更新后重试。";
+      errorBar.hidden = false;
+    }
+  };
+
+  range.addEventListener("input", () => preview(Number(range.value)));
+  range.addEventListener("change", () => commit(Number(range.value)));
+  numberInput.addEventListener("input", () => preview(Number(numberInput.value)));
+  numberInput.addEventListener("change", () => commit(Number(numberInput.value)));
+  numberInput.addEventListener("focus", () => codeEditor.revealSource(target.sourceRef));
+
+  wrapper.append(row, range, details);
+  return wrapper;
+}
+
+function uniqueParameters(parameters: readonly ParameterUsage[]): ParameterUsage[] {
+  const unique = new Map<string, ParameterUsage>();
+  for (const parameter of parameters) {
+    if (!unique.has(parameter.target.id)) {
+      unique.set(parameter.target.id, parameter);
+    }
+  }
+  return [...unique.values()];
+}
+
+function parameterBounds(parameter: ParameterUsage): Readonly<{
+  min: number;
+  max: number;
+  step: number;
+}> {
+  const { target } = parameter;
+  const span = Math.max(Math.abs(target.value), 10);
+  const positive = [
+    "box",
+    "cylinder",
+    "sphere",
+    "fillet",
+    "chamfer",
+    "scaled",
+  ].includes(parameter.operation);
+  return {
+    min: target.min ?? (positive ? Math.max(span / 100, 0.01) : target.value - span),
+    max: target.max ?? target.value + span,
+    step: target.step ?? inferredStep(target),
+  };
+}
+
+function inferredStep(target: ParameterTarget): number {
+  if (target.kind === "count") return 1;
+  if (target.kind === "angle") return 1;
+  return Math.abs(target.value) < 10 ? 0.1 : 0.5;
 }
 
 function rangeControl(

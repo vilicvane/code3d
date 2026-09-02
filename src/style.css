@@ -329,8 +329,10 @@ kbd {
   right: 14px;
   bottom: 14px;
   z-index: 3;
-  width: 218px;
+  width: 252px;
+  max-height: calc(100% - 28px);
   padding: 14px;
+  overflow: auto;
   border: 1px solid #353831;
   border-radius: 5px;
   background: #11120fed;
@@ -375,6 +377,75 @@ kbd {
   display: grid;
   gap: 6px;
   margin: 9px 0;
+}
+
+.parameter-section-label {
+  margin: 2px 0 8px;
+  color: #777c70;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 8px;
+  letter-spacing: 0.1em;
+}
+
+.parameter-control {
+  padding: 9px 0 8px;
+  border-top: 1px solid #292c26;
+}
+
+.parameter-control-row,
+.parameter-value {
+  display: flex;
+  align-items: center;
+}
+
+.parameter-control-row {
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+
+.parameter-name {
+  overflow: hidden;
+  color: #afb3aa;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.parameter-value {
+  flex: 0 0 auto;
+  gap: 4px;
+  color: var(--acid);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 8px;
+}
+
+.parameter-number {
+  width: 56px;
+  padding: 3px 4px;
+  color: var(--acid);
+  border: 1px solid #34372f;
+  border-radius: 3px;
+  background: #181a16;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9px;
+  text-align: right;
+  outline: 0;
+}
+
+.parameter-number:focus {
+  border-color: #82952f;
+}
+
+.parameter-details {
+  margin: 5px 0 0;
+  color: #676c62;
+  font-size: 8px;
+  line-height: 1.45;
+}
+
+.parameter-impact {
+  color: #a3ad7a;
 }
 
 .range-control > span {

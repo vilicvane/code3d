@@ -11,8 +11,28 @@
 - primitive、变换、布尔运算、圆角和倒角由 OCCT B-Rep 计算。
 - Worker 将 B-Rep 三角化为 surface、法线和拓扑边线供 Three.js 渲染。
 - 点击模型定位源码，移动光标反向选择模型对象。
-- 整体 scope 提供分解视图，局部 scope 提供临时位置调整。
+- 局部 Inspector 将 API 参数追溯到上游变量或源码字面量。
+- 参数拖动先做临时预览，确认后通过 Monaco 编辑直接写回源码。
+- JSDoc 可以提供参数标签、描述、kind、unit、范围和步长。
 - 渲染器只消费模型对象，不依赖对象的构建过程。
+
+示例中的共享参数：
+
+```ts
+/**
+ * @code3d.label 支柱间距
+ * @code3d.kind length
+ * @code3d.unit mm
+ * @code3d.min 18
+ * @code3d.max 36
+ * @code3d.step 0.5
+ */
+const postOffset = 27;
+
+cylinder(4.5, 25).at(x * postOffset, 18.5, 13);
+```
+
+`unit` 只影响 UI 提示，不进行运行时换算。
 
 ## 运行
 
@@ -31,7 +51,8 @@ npm run build
 
 - 只支持一个入口模组；运行时仅能导入 `code3d`。
 - code3d API 目前只开放 box、cylinder、sphere 和基础实体运算。
-- GUI 调整是临时 preview override，不写回任意 TypeScript 表达式。
+- 当前可写回顶层数值变量、直接字面量及由它们组成的简单四则表达式。
+- 任意函数调用、闭包、解构和非线性表达式还不会被自动反向编辑。
 - 源码映射目前到模型对象；face/edge ID 已传出，但尚未映射回局部源码 scope。
 - Worker 防止用户代码锁死 UI，但不是安全沙箱。
 - 当前精简 OCCT WASM 约 23 MB，gzip 约 7.3 MB。
@@ -39,6 +60,7 @@ npm run build
 ## 下一步
 
 - 将 face/edge group ID 接入拾取，验证局部拓扑 scope。
+- 扩展参数追踪到更多词法 scope，并处理存在多个上游候选的编辑选择。
 - 验证实体布尔失败、取消执行和连续重算的内存行为。
 - 增加 STEP/STL 导出。
 

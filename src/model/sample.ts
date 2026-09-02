@@ -9,6 +9,17 @@ export const sampleSource = `import {
 const accent = "#d8ff3e";
 const dark = "#222621";
 
+/**
+ * @code3d.label 支柱间距
+ * @code3d.description 控制左右支柱到模型中心的距离
+ * @code3d.kind length
+ * @code3d.unit mm
+ * @code3d.min 18
+ * @code3d.max 36
+ * @code3d.step 0.5
+ */
+const postOffset = 27;
+
 const plate = box(76, 6, 50).at(0, 3, 0);
 const mountingHoles = [-1, 1].flatMap((x) =>
   [-1, 1].map((z) => cylinder(3.4, 10).at(x * 29, 3, z * 17)),
@@ -32,7 +43,7 @@ const posts = [-1, 1].map((x) =>
   cylinder(4.5, 25)
     .named(\`Post \${x}\`)
     .paint(accent)
-    .at(x * 27, 18.5, 13),
+    .at(x * postOffset, 18.5, 13),
 );
 
 const marker = group(
