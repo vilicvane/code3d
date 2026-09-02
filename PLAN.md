@@ -3,8 +3,9 @@
 This file is the durable working memory for decisions and multi-step work. Keep
 stable product goals in `DESIGN.md` and source-editing/tool contracts in
 `TOOLING.md`; update this file whenever the active design or milestone changes.
-Unscheduled product feedback is captured separately in `REQUESTS.md` so it does
-not silently reorder the active milestones.
+Unscheduled product feedback lives in one file per request under `requests/` so
+it does not silently reorder the active milestones. Closed requests move to
+`requests/closed/`.
 
 ## Confirmed direction
 
@@ -122,7 +123,8 @@ remains open.
 - Keep a peek open across focus and pointer-driven controls without persisting
   panel state into model source or browser storage.
 
-Status: R-002 is implemented as reusable dock panel infrastructure.
+Status: [R-002](requests/closed/R-002-unified-collapsible-gui-panels.md) is
+implemented as reusable dock panel infrastructure.
 
 ### 3. Anchor constraint graph — first slice complete
 
