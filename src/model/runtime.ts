@@ -67,6 +67,39 @@ export type ConstraintSnapshot = Readonly<{
   parameters: readonly ParameterUsage[];
 }>;
 
+export type ModelOperationKind =
+  | 'box'
+  | 'cylinder'
+  | 'sphere'
+  | 'named'
+  | 'paint'
+  | 'scaled'
+  | 'fillet'
+  | 'chamfer'
+  | 'relate'
+  | 'group'
+  | 'union'
+  | 'cut'
+  | 'intersect';
+
+export type ModelOperationInputRole =
+  'source' | 'receiver' | 'operand' | 'tool' | 'child' | 'reference';
+
+export type ModelOperationSnapshot = Readonly<{
+  id: string;
+  siteId?: string;
+  execution?: number;
+  kind: ModelOperationKind;
+  order?: number;
+  outputNodeId: string;
+  inputs: readonly Readonly<{
+    nodeId: string;
+    role: ModelOperationInputRole;
+    index: number;
+  }>[];
+  sourceRef?: SourceRef;
+}>;
+
 export type RenderMesh = Readonly<{
   vertices: Float32Array;
   normals: Float32Array;
@@ -94,6 +127,7 @@ export type ModelSnapshotObject = Readonly<{
   constraints: readonly ConstraintSnapshot[];
   sourceRefs: readonly SourceRef[];
   parameters: readonly ParameterUsage[];
+  operation: ModelOperationSnapshot;
   mesh?: RenderMesh;
 }>;
 
@@ -112,6 +146,22 @@ type StoredConstraint = Readonly<{
   parameters: readonly ParameterUsage[];
 }>;
 
+type StoredOperationInput = Readonly<{
+  model: ModelObject;
+  role: ModelOperationInputRole;
+  index: number;
+}>;
+
+type StoredOperation = {
+  runtimeId: string;
+  kind: ModelOperationKind;
+  inputs: StoredOperationInput[];
+  siteId?: string;
+  execution?: number;
+  order?: number;
+  sourceRef?: SourceRef;
+};
+
 type ModelObjectInit = Readonly<{
   kind: 'solid' | 'group';
   shape?: Shape3D;
@@ -121,6 +171,7 @@ type ModelObjectInit = Readonly<{
   constraints?: readonly StoredConstraint[];
   sourceRefs?: readonly SourceRef[];
   parameters?: readonly ParameterUsage[];
+  operation: StoredOperation;
   nodeId?: string;
 }>;
 
@@ -132,6 +183,7 @@ type SolveContext = {
 const unitScale: Vec3 = [1, 1, 1];
 let nextNodeId = 1;
 let nextConstraintId = 1;
+let nextOperationId = 1;
 const combineModels = Symbol('combineModels');
 
 export interface Anchor {
@@ -215,6 +267,7 @@ export class ModelObject implements Anchor {
   readonly parameters: ParameterUsage[];
   private readonly shape?: Shape3D;
   private constraints: StoredConstraint[];
+  private readonly operation: StoredOperation;
 
   constructor(init: ModelObjectInit) {
     if (init.kind === 'solid' && !init.shape) {
@@ -229,6 +282,7 @@ export class ModelObject implements Anchor {
     this.constraints = [...(init.constraints ?? [])];
     this.sourceRefs = [...(init.sourceRefs ?? [])];
     this.parameters = [...(init.parameters ?? [])];
+    this.operation = init.operation;
   }
 
   get center(): Anchor {
@@ -257,38 +311,60 @@ export class ModelObject implements Anchor {
   relate(
     build: (self: ModelObject) => Constraint | readonly Constraint[],
   ): ModelObject {
-    const related = this.copy();
+    const operation = storedOperation('relate', [
+      {model: this, role: 'source', index: 0},
+    ]);
+    const related = this.copy({}, operation);
     const built = build(related);
     const constraints = Array.isArray(built) ? built : [built];
-    related.constraints.push(
-      ...constraints.map(constraint => constraint.storeFor(related)),
+    const stored = constraints.map(constraint => constraint.storeFor(related));
+    related.constraints.push(...stored);
+    operation.inputs.push(
+      ...stored.map((constraint, index) => ({
+        model: constraint.target.model,
+        role: 'reference' as const,
+        index,
+      })),
     );
     return related;
   }
 
   named(name: string): ModelObject {
-    return this.copy({name});
+    return this.copy(
+      {name},
+      storedOperation('named', [{model: this, role: 'source', index: 0}]),
+    );
   }
 
   paint(color: string): ModelObject {
-    return this.copy({color});
+    return this.copy(
+      {color},
+      storedOperation('paint', [{model: this, role: 'source', index: 0}]),
+    );
   }
 
   scaled(factor: number): ModelObject {
     assertPositive('scale', factor);
-    return this.copy({
-      shape: this.requireShape().clone().scale(factor, toPoint(origin)),
-    });
+    return this.copy(
+      {shape: this.requireShape().clone().scale(factor, toPoint(origin))},
+      storedOperation('scaled', [{model: this, role: 'source', index: 0}]),
+    );
   }
 
   fillet(radius: number): ModelObject {
     assertPositive('radius', radius);
-    return this.copy({shape: this.requireShape().fillet(radius)});
+    return this.copy(
+      {shape: this.requireShape().fillet(radius)},
+      storedOperation('fillet', [{model: this, role: 'source', index: 0}]),
+    );
   }
 
   chamfer(distance: number): ModelObject {
     assertPositive('distance', distance);
-    return this.copy({shape: this.requireShape().chamfer(distance)});
+    return this.copy(
+      {shape: this.requireShape().chamfer(distance)},
+      storedOperation('chamfer', [{model: this, role: 'source', index: 0}]),
+    );
   }
 
   withChildren(children: readonly ModelObject[]): ModelObject {
@@ -296,7 +372,13 @@ export class ModelObject implements Anchor {
       throw new Error('只有 group 可以包含子对象。');
     }
     assertChildren(children);
-    return this.copy({children});
+    return this.copy(
+      {children},
+      storedOperation(
+        'group',
+        children.map((model, index) => ({model, role: 'child', index})),
+      ),
+    );
   }
 
   /** Runtime instrumentation hook. Not part of the authoring API. */
@@ -310,6 +392,28 @@ export class ModelObject implements Anchor {
   /** Runtime instrumentation hook. Not part of the authoring API. */
   attachParameters(parameters: readonly ParameterUsage[]): void {
     appendUniqueParameters(this.parameters, parameters);
+  }
+
+  /** Runtime instrumentation hook. Not part of the authoring API. */
+  attachOperationTrace(
+    siteId: string,
+    execution: number,
+    order: number,
+    sourceRef: SourceRef,
+  ): void {
+    if (this.operation.siteId) {
+      return;
+    }
+    Object.assign(this.operation, {siteId, execution, order, sourceRef});
+  }
+
+  /** Runtime graph hook. Not part of the authoring API. */
+  relatedObjects(): readonly ModelObject[] {
+    return [
+      ...this.children,
+      ...this.operation.inputs.map(input => input.model),
+      ...this.constraints.map(constraint => constraint.target.model),
+    ];
   }
 
   toSnapshot(
@@ -333,6 +437,7 @@ export class ModelObject implements Anchor {
       constraints,
       sourceRefs: [...this.sourceRefs],
       parameters,
+      operation: this.operationSnapshot(),
     } as const;
 
     if (this.kind === 'group') {
@@ -404,6 +509,15 @@ export class ModelObject implements Anchor {
         parameters: uniqueParameters(
           [this, ...others].flatMap(model => model.allParameters()),
         ),
+        operation: storedOperation(operation === 'fuse' ? 'union' : operation, [
+          {model: this, role: 'receiver', index: 0},
+          ...others.map((model, index) => ({
+            model,
+            role:
+              operation === 'cut' ? ('tool' as const) : ('operand' as const),
+            index: index + 1,
+          })),
+        ]),
       });
       transferred = true;
       return combined;
@@ -514,7 +628,32 @@ export class ModelObject implements Anchor {
     return this.shape;
   }
 
-  private copy(overrides: Partial<ModelObjectInit> = {}): ModelObject {
+  private operationSnapshot(): ModelOperationSnapshot {
+    const {runtimeId, siteId, execution, kind, order, sourceRef, inputs} =
+      this.operation;
+    return {
+      id:
+        siteId !== undefined && execution !== undefined
+          ? `${siteId}:execution:${execution}`
+          : runtimeId,
+      siteId,
+      execution,
+      kind,
+      order,
+      outputNodeId: this.nodeId,
+      inputs: inputs.map(({model, role, index}) => ({
+        nodeId: model.nodeId,
+        role,
+        index,
+      })),
+      sourceRef,
+    };
+  }
+
+  private copy(
+    overrides: Partial<ModelObjectInit>,
+    operation: StoredOperation,
+  ): ModelObject {
     return new ModelObject({
       kind: this.kind,
       shape: this.shape,
@@ -524,6 +663,7 @@ export class ModelObject implements Anchor {
       constraints: this.constraints,
       sourceRefs: this.sourceRefs,
       parameters: this.parameters,
+      operation,
       ...overrides,
     });
   }
@@ -540,6 +680,7 @@ export function box(width: number, height: number, depth: number): ModelObject {
       [-width / 2, -height / 2, -depth / 2],
       [width / 2, height / 2, depth / 2],
     ),
+    operation: storedOperation('box'),
   });
 }
 
@@ -550,6 +691,7 @@ export function cylinder(radius: number, height: number): ModelObject {
     kind: 'solid',
     name: 'Cylinder',
     shape: makeCylinder(radius, height, [0, -height / 2, 0], [0, 1, 0]),
+    operation: storedOperation('cylinder'),
   });
 }
 
@@ -559,6 +701,7 @@ export function sphere(radius: number): ModelObject {
     kind: 'solid',
     name: 'Sphere',
     shape: makeSphere(radius),
+    operation: storedOperation('sphere'),
   });
 }
 
@@ -567,7 +710,15 @@ export function group(
   name = 'Group',
 ): ModelObject {
   assertChildren(children);
-  return new ModelObject({kind: 'group', name, children});
+  return new ModelObject({
+    kind: 'group',
+    name,
+    children,
+    operation: storedOperation(
+      'group',
+      children.map((model, index) => ({model, role: 'child', index})),
+    ),
+  });
 }
 
 export function union(
@@ -616,6 +767,17 @@ export const authoringApi = Object.freeze({
   cut,
   intersect,
 });
+
+function storedOperation(
+  kind: ModelOperationKind,
+  inputs: readonly StoredOperationInput[] = [],
+): StoredOperation {
+  return {
+    runtimeId: `operation-${nextOperationId++}`,
+    kind,
+    inputs: [...inputs],
+  };
+}
 
 function anchorReference(anchor: Anchor): AnchorReference {
   if (anchor instanceof ModelObject) {

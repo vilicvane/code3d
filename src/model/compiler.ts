@@ -4,6 +4,9 @@ import {
   disposeModelObjects,
   isConstraint,
   isModelObject,
+  type ModelOperationInputRole,
+  type ModelOperationKind,
+  type ModelOperationSnapshot,
   type ModelSnapshotObject,
   type ModelObject,
   type ParameterKind,
@@ -12,9 +15,17 @@ import {
   type SourceRef,
 } from './runtime';
 
-export type SourcePreview = Readonly<{
+export type SourceTarget = Readonly<{
+  id: string;
+  kind: 'value' | 'operation-input' | 'operation-output';
   sourceRef: SourceRef;
-  objects: readonly ModelSnapshotObject[];
+  nodeIds: readonly string[];
+  contextNodeIds: readonly string[];
+  operation?: Readonly<{
+    kind: ModelOperationKind;
+    ids: readonly string[];
+    role?: ModelOperationInputRole;
+  }>;
 }>;
 
 export type ObjectCatalogOccurrence = Readonly<{
@@ -45,10 +56,11 @@ export type ObjectCatalogEntry = Readonly<{
 export type ModelModule = Readonly<{
   fallback: ModelSnapshotObject;
   objects: ReadonlyMap<string, ModelSnapshotObject>;
+  operations: ReadonlyMap<string, ModelOperationSnapshot>;
   exports: ReadonlyMap<string, string>;
   catalog: readonly ObjectCatalogEntry[];
   parameterImpacts: ReadonlyMap<string, number>;
-  sourcePreviews: readonly SourcePreview[];
+  sourceTargets: readonly SourceTarget[];
 }>;
 
 export class CompileFailure extends Error {
@@ -111,6 +123,27 @@ type CatalogTrace = {
     }>
   >;
 };
+
+type SourceValueTrace = {
+  id: string;
+  kind: 'value' | 'operation-output';
+  sourceRef: SourceRef;
+  objects: Set<ModelObject>;
+};
+
+type SourceInputTrace = Readonly<{
+  siteId: string;
+  execution: number;
+  sourceRef: SourceRef;
+  role: ModelOperationInputRole;
+  index: number;
+  objects: readonly ModelObject[];
+}>;
+
+type TraceFrame = Readonly<{
+  siteId: string;
+  execution: number;
+}>;
 
 const signatures = new Map<string, ParameterSignature>([
   [
@@ -176,12 +209,13 @@ const signatures = new Map<string, ParameterSignature>([
 ]);
 
 const tracedObjects = new Set<ModelObject>();
-const sourceTraces = new Map<
-  string,
-  {sourceRef: SourceRef; objects: Set<ModelObject>}
->();
+const sourceValueTraces = new Map<string, SourceValueTrace>();
+const sourceInputTraces: SourceInputTrace[] = [];
 const catalogTraces = new Map<string, CatalogTrace>();
 const parameterFrames: ParameterUsage[][] = [];
+const traceFrames: TraceFrame[] = [];
+const traceExecutions = new Map<string, number>();
+let latestTracedObject: ModelObject | undefined;
 let evaluationOrder = 0;
 const traceRuntime = Object.freeze({
   trace<T>(
@@ -191,25 +225,41 @@ const traceRuntime = Object.freeze({
     label: string,
     run: () => T,
   ): T {
+    const execution = traceExecutions.get(id) ?? 0;
+    traceExecutions.set(id, execution + 1);
     const parameters: ParameterUsage[] = [];
     parameterFrames.push(parameters);
+    traceFrames.push({siteId: id, execution});
     let result: T;
     try {
       result = run();
     } finally {
+      traceFrames.pop();
       parameterFrames.pop();
     }
     if (isConstraint(result)) {
       result.attachSource({start, end});
       result.attachParameters(parameters);
     } else if (isModelObject(result)) {
+      const order = ++evaluationOrder;
       result.attachSource({start, end});
       result.attachParameters(parameters);
-      recordSourceObject(start, end, result);
-    } else {
-      modelObjectsIn(result).forEach(object =>
-        recordSourceObject(start, end, object),
+      result.attachOperationTrace(id, execution, order, {start, end});
+      recordSourceValue(id, 'operation-output', {start, end}, result);
+      recordCatalogValue(
+        {
+          id,
+          label,
+          category: 'expression',
+          scope: 'local',
+          sourceRef: {start, end},
+        },
+        result,
+        order,
       );
+      return result;
+    } else {
+      recordSourceValue(id, 'value', {start, end}, result);
     }
     const order = ++evaluationOrder;
     recordCatalogValue(
@@ -236,9 +286,7 @@ const traceRuntime = Object.freeze({
     run: () => T,
   ): T {
     const result = run();
-    modelObjectsIn(result).forEach(object =>
-      recordSourceObject(start, end, object),
-    );
+    recordSourceValue(id, 'value', {start, end}, result);
     const order = ++evaluationOrder;
     recordCatalogValue(
       {id, label, category, scope, sourceRef: {start, end}},
@@ -246,6 +294,33 @@ const traceRuntime = Object.freeze({
       order,
     );
     return result;
+  },
+
+  input<T>(
+    start: number,
+    end: number,
+    siteId: string,
+    role: ModelOperationInputRole,
+    index: number,
+    value: T,
+  ): T {
+    const frame = traceFrames.at(-1);
+    if (frame?.siteId !== siteId) {
+      return value;
+    }
+    const objects = modelObjectsIn(value);
+    if (objects.length > 0) {
+      objects.forEach(object => tracedObjects.add(object));
+      sourceInputTraces.push({
+        siteId,
+        execution: frame.execution,
+        sourceRef: {start, end},
+        role,
+        index,
+        objects,
+      });
+    }
+    return value;
   },
 
   parameter(
@@ -279,19 +354,29 @@ const traceRuntime = Object.freeze({
   },
 });
 
-function recordSourceObject(
-  start: number,
-  end: number,
-  object: ModelObject,
+function recordSourceValue(
+  id: string,
+  kind: SourceValueTrace['kind'],
+  sourceRef: SourceRef,
+  value: unknown,
 ): void {
-  tracedObjects.add(object);
-  const key = `${start}:${end}`;
-  const sourceTrace = sourceTraces.get(key) ?? {
-    sourceRef: {start, end},
+  const objects = modelObjectsIn(value);
+  if (objects.length === 0) {
+    return;
+  }
+  const key = `${kind}:${id}:${sourceRef.start}:${sourceRef.end}`;
+  const sourceTrace = sourceValueTraces.get(key) ?? {
+    id,
+    kind,
+    sourceRef,
     objects: new Set<ModelObject>(),
   };
-  sourceTrace.objects.add(object);
-  sourceTraces.set(key, sourceTrace);
+  objects.forEach(object => {
+    tracedObjects.add(object);
+    sourceTrace.objects.add(object);
+    latestTracedObject = object;
+  });
+  sourceValueTraces.set(key, sourceTrace);
 }
 
 function recordCatalogValue(
@@ -344,9 +429,13 @@ function modelObjectsIn(
 
 export function compileModel(source: string): ModelModule {
   tracedObjects.clear();
-  sourceTraces.clear();
+  sourceValueTraces.clear();
+  sourceInputTraces.length = 0;
   catalogTraces.clear();
   parameterFrames.length = 0;
+  traceFrames.length = 0;
+  traceExecutions.clear();
+  latestTracedObject = undefined;
   evaluationOrder = 0;
   const result = ts.transpileModule(source, {
     fileName: 'model.ts',
@@ -406,7 +495,7 @@ export function compileModel(source: string): ModelModule {
     const fallbackObject =
       modelExports.get('default') ??
       [...modelExports.values()].at(-1) ??
-      latestSourceObject();
+      latestTracedObject;
     if (!fallbackObject) {
       throw new Error('当前代码没有产生可渲染的 ModelObject。');
     }
@@ -419,12 +508,21 @@ export function compileModel(source: string): ModelModule {
       return snapshot;
     };
     const fallbackSnapshot = snapshotOf(fallbackObject);
+    const graphObjects = collectObjectGraph(tracedObjects);
+    graphObjects.forEach(object => tracedObjects.add(object));
     const objectSnapshots = new Map(
-      [...tracedObjects].map(object => [object.nodeId, snapshotOf(object)]),
+      graphObjects.map(object => [object.nodeId, snapshotOf(object)]),
+    );
+    const operations = new Map(
+      [...objectSnapshots.values()].map(object => [
+        object.operation.id,
+        object.operation,
+      ]),
     );
     return {
       fallback: fallbackSnapshot,
       objects: objectSnapshots,
+      operations,
       exports: new Map(
         [...modelExports].map(([name, modelObject]) => [
           name,
@@ -470,27 +568,126 @@ export function compileModel(source: string): ModelModule {
           };
         }),
       parameterImpacts: countParameterImpacts(fallbackSnapshot),
-      sourcePreviews: [...sourceTraces.values()].map(
-        ({sourceRef, objects}) => ({
-          sourceRef,
-          objects: [...objects].map(snapshotOf),
-        }),
-      ),
+      sourceTargets: buildSourceTargets(operations),
     };
   } finally {
     disposeModelObjects(tracedObjects);
     tracedObjects.clear();
-    sourceTraces.clear();
+    sourceValueTraces.clear();
+    sourceInputTraces.length = 0;
     catalogTraces.clear();
     parameterFrames.length = 0;
+    traceFrames.length = 0;
+    traceExecutions.clear();
+    latestTracedObject = undefined;
     evaluationOrder = 0;
   }
 }
 
-function latestSourceObject(): ModelObject | undefined {
-  const latestTrace = [...sourceTraces.values()].at(-1);
-  return latestTrace ? [...latestTrace.objects].at(-1) : undefined;
+function collectObjectGraph(roots: Iterable<ModelObject>): ModelObject[] {
+  const found = new Set<ModelObject>();
+  const visit = (object: ModelObject): void => {
+    if (found.has(object)) {
+      return;
+    }
+    found.add(object);
+    object.relatedObjects().forEach(visit);
+  };
+  for (const root of roots) {
+    visit(root);
+  }
+  return [...found];
 }
+
+function buildSourceTargets(
+  operations: ReadonlyMap<string, ModelOperationSnapshot>,
+): SourceTarget[] {
+  const valueTargets = [...sourceValueTraces.values()].map(trace => {
+    const nodeIds = [...trace.objects].map(object => object.nodeId);
+    const outputOperations = [...operations.values()].filter(
+      operation =>
+        operation.siteId === trace.id &&
+        nodeIds.includes(operation.outputNodeId),
+    );
+    return {
+      id: `source:${trace.kind}:${trace.id}`,
+      kind: trace.kind,
+      sourceRef: trace.sourceRef,
+      nodeIds,
+      contextNodeIds: [],
+      operation:
+        trace.kind === 'operation-output' && outputOperations.length > 0
+          ? {
+              kind: outputOperations[0].kind,
+              ids: outputOperations.map(operation => operation.id),
+            }
+          : undefined,
+    } satisfies SourceTarget;
+  });
+
+  const inputTargets = new Map<string, MutableSourceInputTarget>();
+  for (const trace of sourceInputTraces) {
+    const operationId = `${trace.siteId}:execution:${trace.execution}`;
+    const operation = operations.get(operationId);
+    if (!operation) {
+      continue;
+    }
+    const key = [
+      trace.siteId,
+      trace.role,
+      trace.index,
+      trace.sourceRef.start,
+      trace.sourceRef.end,
+    ].join(':');
+    const target = inputTargets.get(key) ?? {
+      id: `source:operation-input:${trace.siteId}:${trace.role}:${trace.index}`,
+      kind: 'operation-input' as const,
+      sourceRef: trace.sourceRef,
+      nodeIds: new Set<string>(),
+      contextNodeIds: new Set<string>(),
+      operationKind: operation.kind,
+      operationIds: new Set<string>(),
+      role: trace.role,
+    };
+    const focusNodeIds = new Set(trace.objects.map(object => object.nodeId));
+    focusNodeIds.forEach(nodeId => target.nodeIds.add(nodeId));
+    operation.inputs
+      .filter(input => !focusNodeIds.has(input.nodeId))
+      .forEach(input => target.contextNodeIds.add(input.nodeId));
+    target.operationIds.add(operation.id);
+    inputTargets.set(key, target);
+  }
+
+  return [
+    ...valueTargets,
+    ...[...inputTargets.values()].map(
+      target =>
+        ({
+          id: target.id,
+          kind: target.kind,
+          sourceRef: target.sourceRef,
+          nodeIds: [...target.nodeIds],
+          contextNodeIds: [...target.contextNodeIds],
+          operation: {
+            kind: target.operationKind,
+            ids: [...target.operationIds],
+            role: target.role,
+          },
+        }) satisfies SourceTarget,
+    ),
+  ];
+}
+
+type MutableSourceInputTarget = {
+  id: string;
+  kind: 'operation-input';
+  sourceRef: SourceRef;
+  nodeIds: Set<string>;
+  contextNodeIds: Set<string>;
+  operationKind: ModelOperationKind;
+  operationIds: Set<string>;
+  role: ModelOperationInputRole;
+};
 
 function createTraceTransformer(): ts.TransformerFactory<ts.SourceFile> {
   return context => {
@@ -558,23 +755,35 @@ function createTraceTransformer(): ts.TransformerFactory<ts.SourceFile> {
           ts.isCallExpression(visited) &&
           isTraceableCall(node, sourceFile)
         ) {
-          const signature = getParameterSignature(node);
-          const call = signature
+          const siteId = stableSourceId('expression', node, sourceFile);
+          const parameterSignature = getParameterSignature(node);
+          const parameterizedCall = parameterSignature
             ? instrumentCallParameters(
                 node,
                 visited,
-                signature,
+                parameterSignature,
                 bindings,
                 sourceFile,
                 factory,
               )
             : visited;
+          const inputPlan = operationInputPlan(node);
+          const call = inputPlan
+            ? instrumentOperationInputs(
+                node,
+                parameterizedCall,
+                inputPlan,
+                siteId,
+                sourceFile,
+                factory,
+              )
+            : parameterizedCall;
 
           return traceExpression(
             call,
             node.getStart(sourceFile),
             node.getEnd(),
-            stableSourceId('expression', node, sourceFile),
+            siteId,
             callLabel(node),
             factory,
           );
@@ -723,6 +932,137 @@ function callLabel(node: ts.CallExpression): string {
     return node.expression.argumentExpression.text;
   }
   return 'call';
+}
+
+type OperationInputPlan = Readonly<{
+  receiver?: ModelOperationInputRole;
+  arguments?: readonly (ModelOperationInputRole | undefined)[];
+  rest?: ModelOperationInputRole;
+}>;
+
+function operationInputPlan(
+  node: ts.CallExpression,
+): OperationInputPlan | undefined {
+  if (ts.isIdentifier(node.expression)) {
+    if (node.expression.text === 'union') {
+      return {arguments: ['receiver'], rest: 'operand'};
+    }
+    if (node.expression.text === 'cut') {
+      return {arguments: ['receiver'], rest: 'tool'};
+    }
+    if (node.expression.text === 'intersect') {
+      return {arguments: ['receiver'], rest: 'operand'};
+    }
+    if (node.expression.text === 'group') {
+      return {arguments: ['child']};
+    }
+    return undefined;
+  }
+  if (!ts.isPropertyAccessExpression(node.expression)) {
+    return undefined;
+  }
+  const method = node.expression.name.text;
+  if (
+    method === 'named' ||
+    method === 'paint' ||
+    method === 'scaled' ||
+    method === 'fillet' ||
+    method === 'chamfer' ||
+    method === 'relate'
+  ) {
+    return {receiver: 'source'};
+  }
+  return undefined;
+}
+
+function instrumentOperationInputs(
+  original: ts.CallExpression,
+  visited: ts.CallExpression,
+  plan: OperationInputPlan,
+  siteId: string,
+  sourceFile: ts.SourceFile,
+  factory: ts.NodeFactory,
+): ts.CallExpression {
+  let expression = visited.expression;
+  if (
+    plan.receiver &&
+    ts.isPropertyAccessExpression(original.expression) &&
+    ts.isPropertyAccessExpression(visited.expression)
+  ) {
+    const originalReceiver = original.expression.expression;
+    expression = factory.updatePropertyAccessExpression(
+      visited.expression,
+      operationInputExpression(
+        visited.expression.expression,
+        originalReceiver,
+        siteId,
+        plan.receiver,
+        0,
+        sourceFile,
+        factory,
+      ),
+      visited.expression.name,
+    );
+  }
+
+  const args = visited.arguments.map((argument, index) => {
+    const role = plan.arguments?.[index] ?? plan.rest;
+    const originalArgument = original.arguments[index];
+    if (!role || !originalArgument) {
+      return argument;
+    }
+    const originalValue = ts.isSpreadElement(originalArgument)
+      ? originalArgument.expression
+      : originalArgument;
+    const visitedValue = ts.isSpreadElement(argument)
+      ? argument.expression
+      : argument;
+    const traced = operationInputExpression(
+      visitedValue,
+      originalValue,
+      siteId,
+      role,
+      index,
+      sourceFile,
+      factory,
+    );
+    return ts.isSpreadElement(argument)
+      ? factory.updateSpreadElement(argument, traced)
+      : traced;
+  });
+
+  return factory.updateCallExpression(
+    visited,
+    expression,
+    visited.typeArguments,
+    args,
+  );
+}
+
+function operationInputExpression(
+  expression: ts.Expression,
+  original: ts.Expression,
+  siteId: string,
+  role: ModelOperationInputRole,
+  index: number,
+  sourceFile: ts.SourceFile,
+  factory: ts.NodeFactory,
+): ts.CallExpression {
+  return factory.createCallExpression(
+    factory.createPropertyAccessExpression(
+      factory.createIdentifier('__code3d'),
+      'input',
+    ),
+    undefined,
+    [
+      factory.createNumericLiteral(original.getStart(sourceFile)),
+      factory.createNumericLiteral(original.getEnd()),
+      factory.createStringLiteral(siteId),
+      factory.createStringLiteral(role),
+      factory.createNumericLiteral(index),
+      expression,
+    ],
+  );
 }
 
 function instrumentCallParameters(

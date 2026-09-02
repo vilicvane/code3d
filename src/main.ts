@@ -1,11 +1,7 @@
 import './style.css';
 import {CodeEditor} from './editor';
 import {ModelCompilerClient} from './model/compiler-client';
-import type {
-  ModelModule,
-  ObjectCatalogEntry,
-  ObjectCatalogOccurrence,
-} from './model/compiler';
+import type {ModelModule, ObjectCatalogEntry} from './model/compiler';
 import {sampleSource} from './model/sample';
 import type {
   ModelSnapshotObject,
@@ -25,16 +21,11 @@ import {
   type ToolSession,
 } from './tools/tool-system';
 import {ModelViewport, type Occurrence} from './viewport';
+import {DockPanelCoordinator} from './ui/dock-panels';
 
 const storageKey = 'code3d.prototype.source';
 const savedSource = localStorage.getItem(storageKey) ?? sampleSource;
 const app = document.querySelector<HTMLDivElement>('#app');
-
-type CatalogTarget = Readonly<{
-  id: string;
-  nodeIds: readonly string[];
-  sourceRef: SourceRef;
-}>;
 
 if (!app) {
   throw new Error('Missing #app element.');
@@ -68,7 +59,22 @@ app.innerHTML = `
             <span class="language-badge">TS</span>
             <span>model.ts</span>
           </div>
-          <span class="pane-meta">入口模组 · ⇧ Alt F 格式化</span>
+          <div class="editor-header-actions">
+            <span class="pane-meta">入口模组 · ⇧ Alt F 格式化</span>
+            <aside class="dock-panel object-catalog" id="object-catalog" aria-label="模型对象大纲">
+              <button class="dock-panel-handle" id="object-catalog-handle" type="button">
+                <span>MODEL OUTLINE</span>
+                <span class="dock-panel-handle-meta">
+                  <span id="object-catalog-count">0</span>
+                  <kbd data-dock-shortcut></kbd>
+                </span>
+              </button>
+              <div class="dock-panel-body object-catalog-body" id="object-catalog-body" hidden>
+                <div class="object-catalog-list" id="object-catalog-list"></div>
+                <p class="object-catalog-hint">悬停预览 · 点击跳转源码</p>
+              </div>
+            </aside>
+          </div>
         </header>
         <div class="editor-host" id="editor-host"></div>
         <div class="error-bar" id="error-bar" hidden></div>
@@ -85,15 +91,13 @@ app.innerHTML = `
         <div class="viewport-host" id="viewport-host">
           <div class="viewport-hint">拖动旋转 · 滚轮缩放 · 点击对象 · 拖动 gizmo</div>
           <div class="tool-status" id="tool-status" hidden></div>
-          <aside class="object-catalog" aria-label="运行时对象">
-            <header class="object-catalog-header">
-              <span>OBJECTS</span>
-              <span id="object-catalog-count">0</span>
-            </header>
-            <div class="object-catalog-list" id="object-catalog-list"></div>
-            <p class="object-catalog-hint">悬停预览 · 点击定位并固定</p>
+          <aside class="dock-panel inspector-panel" id="inspector-panel" aria-label="对象属性">
+            <button class="dock-panel-handle" id="inspector-handle" type="button">
+              <span>PROPERTIES</span>
+              <kbd data-dock-shortcut></kbd>
+            </button>
+            <div class="dock-panel-body inspector" id="inspector" hidden></div>
           </aside>
-          <aside class="inspector" id="inspector"></aside>
         </div>
       </section>
     </main>
@@ -120,17 +124,29 @@ const toolStatus = requiredElement('tool-status');
 const runButton = requiredElement<HTMLButtonElement>('run-button');
 const resetButton = requiredElement<HTMLButtonElement>('reset-button');
 
+const dockPanels = new DockPanelCoordinator();
+dockPanels.register({
+  root: requiredElement('object-catalog'),
+  handle: requiredElement<HTMLButtonElement>('object-catalog-handle'),
+  body: requiredElement('object-catalog-body'),
+  shortcut: {code: 'Digit1', label: 'Alt 1', altKey: true},
+});
+dockPanels.register({
+  root: requiredElement('inspector-panel'),
+  handle: requiredElement<HTMLButtonElement>('inspector-handle'),
+  body: inspector,
+  shortcut: {code: 'Digit2', label: 'Alt 2', altKey: true},
+});
+
 const codeEditor = new CodeEditor(editorHost, savedSource);
 const compiler = new ModelCompilerClient();
 let currentModule: ModelModule | null = null;
 let compileTimer: number | undefined;
+let outlinePreviewTimer: number | undefined;
 let explodeValue = 0;
 let runRevision = 0;
 let positionToolSession: ToolSession | undefined;
-let pinnedCatalogId: string | undefined;
-let catalogHoverTimer: number | undefined;
 const expandedCatalogIds = new Set<string>();
-const catalogTargets = new Map<string, CatalogTarget>();
 
 const viewport = new ModelViewport(
   viewportHost,
@@ -156,9 +172,7 @@ codeEditor.onChange(() => {
 });
 
 codeEditor.onCursorOffset(offset => {
-  if (viewport.selectBySourceOffset(offset)) {
-    pinnedCatalogId = undefined;
-  }
+  viewport.selectBySourceOffset(offset);
   const occurrence = viewport.getSelected();
   if (occurrence) {
     selectOccurrence(occurrence, false);
@@ -176,6 +190,10 @@ resetButton.addEventListener('click', () => {
 });
 
 window.addEventListener('keydown', event => {
+  if (dockPanels.handleKeyDown(event)) {
+    event.preventDefault();
+    return;
+  }
   if (event.key === 'Escape' && viewport.cancelPositionTool()) {
     event.preventDefault();
     return;
@@ -190,6 +208,8 @@ runModel();
 
 async function runModel(): Promise<void> {
   window.clearTimeout(compileTimer);
+  window.clearTimeout(outlinePreviewTimer);
+  viewport.restoreOutlinePreview();
   const revision = ++runRevision;
   setRunState('running', '正在编译');
   errorBar.hidden = true;
@@ -206,14 +226,9 @@ async function runModel(): Promise<void> {
     explodeValue = 0;
     renderScopes(currentModule);
     renderObjectCatalog(currentModule);
-    const restoredCatalogTarget = restorePinnedCatalogTarget();
-    if (!restoredCatalogTarget) {
-      const cursorOffset = codeEditor.cursorOffset();
-      if (cursorOffset !== undefined) {
-        if (viewport.selectBySourceOffset(cursorOffset)) {
-          pinnedCatalogId = undefined;
-        }
-      }
+    const cursorOffset = codeEditor.cursorOffset();
+    if (cursorOffset !== undefined) {
+      viewport.selectBySourceOffset(cursorOffset);
     }
     const selected = viewport.getSelected();
     if (selected) {
@@ -236,17 +251,14 @@ function renderScopes(module: ModelModule): void {
   scopeList.replaceChildren();
   scopeList.append(
     scopeButton('整体预览', module.fallback.nodeId, () => {
-      pinnedCatalogId = undefined;
       viewport.selectRoot();
-      updateCatalogSelection(viewport.getSelected());
     }),
   );
 }
 
 function renderObjectCatalog(module: ModelModule): void {
-  window.clearTimeout(catalogHoverTimer);
+  window.clearTimeout(outlinePreviewTimer);
   objectCatalogList.replaceChildren();
-  catalogTargets.clear();
   const entries = module.catalog.filter(
     entry => entry.visibility === 'primary' && entry.nodeIds.length > 0,
   );
@@ -276,11 +288,6 @@ function renderObjectCatalog(module: ModelModule): void {
       }),
     );
   });
-
-  if (pinnedCatalogId && !catalogTargets.has(pinnedCatalogId)) {
-    pinnedCatalogId = undefined;
-  }
-  updateCatalogSelection(viewport.getSelected());
 }
 
 function objectCatalogGroup(
@@ -300,9 +307,8 @@ function objectCatalogGroup(
   const details = document.createElement('div');
   details.className = 'object-catalog-details';
 
-  const showInstances = entry.occurrences.length > 1;
   const lineage = options.lineage ?? [];
-  const expandable = showInstances || lineage.length > 0;
+  const expandable = lineage.length > 0;
   const expanded = expandable && expandedCatalogIds.has(entry.id);
   const toggle = document.createElement('button');
   toggle.type = 'button';
@@ -319,15 +325,7 @@ function objectCatalogGroup(
     module,
     options.variant,
   );
-  bindCatalogTarget(button, catalogEntryTarget(entry));
   row.append(toggle, button);
-
-  entry.occurrences.forEach((occurrence, index) => {
-    registerCatalogTarget(catalogOccurrenceTarget(occurrence));
-    if (showInstances) {
-      details.append(objectCatalogOccurrenceButton(occurrence, index));
-    }
-  });
 
   if (lineage.length > 0) {
     const label = document.createElement('div');
@@ -368,8 +366,8 @@ function objectCatalogEntryButton(
 ): HTMLButtonElement {
   const button = document.createElement('button');
   button.type = 'button';
-  button.className = `object-catalog-entry catalog-target ${variant}`;
-  button.title = `${entry.label}：点击定位源码并固定预览`;
+  button.className = `object-catalog-entry ${variant}`;
+  button.title = `${entry.label}：悬停预览，点击跳转源码`;
 
   const order = document.createElement('span');
   order.className = 'object-catalog-order';
@@ -388,30 +386,21 @@ function objectCatalogEntryButton(
   count.textContent =
     entry.occurrences.length > 1 ? `×${entry.occurrences.length}` : '';
   button.append(order, copy, count);
-  return button;
-}
-
-function objectCatalogOccurrenceButton(
-  occurrence: ObjectCatalogOccurrence,
-  index: number,
-): HTMLButtonElement {
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = 'object-catalog-occurrence catalog-target';
-  button.title = `${occurrence.label}：点击定位这个运行时实例`;
-
-  const marker = document.createElement('span');
-  marker.className = 'object-catalog-occurrence-marker';
-  marker.textContent = `#${String(index + 1).padStart(2, '0')}`;
-  const copy = document.createElement('span');
-  copy.className = 'object-catalog-copy';
-  const label = document.createElement('strong');
-  label.textContent = occurrence.label;
-  const meta = document.createElement('small');
-  meta.textContent = `RUN ${occurrence.execution + 1} · OUTPUT ${occurrence.output + 1}`;
-  copy.append(label, meta);
-  button.append(marker, copy);
-  bindCatalogTarget(button, catalogOccurrenceTarget(occurrence));
+  button.addEventListener('pointerenter', () => {
+    window.clearTimeout(outlinePreviewTimer);
+    outlinePreviewTimer = window.setTimeout(() => {
+      viewport.previewOutline(entry.nodeIds);
+    }, 90);
+  });
+  button.addEventListener('pointerleave', () => {
+    window.clearTimeout(outlinePreviewTimer);
+    outlinePreviewTimer = window.setTimeout(() => {
+      viewport.restoreOutlinePreview();
+    }, 50);
+  });
+  button.addEventListener('click', () => {
+    codeEditor.revealSource(entry.sourceRef, true);
+  });
   return button;
 }
 
@@ -433,101 +422,6 @@ function catalogEntryMeta(
     parts.push(`EXPORT ${entry.exportNames.join(', ')}`);
   }
   return parts.join(' · ');
-}
-
-function catalogEntryTarget(entry: ObjectCatalogEntry): CatalogTarget {
-  return {
-    id: entry.id,
-    nodeIds: entry.nodeIds,
-    sourceRef: entry.sourceRef,
-  };
-}
-
-function catalogOccurrenceTarget(
-  occurrence: ObjectCatalogOccurrence,
-): CatalogTarget {
-  return {
-    id: occurrence.id,
-    nodeIds: [occurrence.nodeId],
-    sourceRef: occurrence.sourceRef,
-  };
-}
-
-function registerCatalogTarget(target: CatalogTarget): void {
-  catalogTargets.set(target.id, target);
-}
-
-function bindCatalogTarget(
-  element: HTMLButtonElement,
-  target: CatalogTarget,
-): void {
-  registerCatalogTarget(target);
-  element.dataset.catalogTargetId = target.id;
-  element.addEventListener('pointerenter', () => {
-    window.clearTimeout(catalogHoverTimer);
-    if (target.id === pinnedCatalogId) {
-      return;
-    }
-    catalogHoverTimer = window.setTimeout(() => {
-      if (viewport.previewNodes(target.nodeIds)) {
-        syncViewportSelection();
-      }
-    }, 100);
-  });
-  element.addEventListener('pointerleave', () => {
-    window.clearTimeout(catalogHoverTimer);
-    if (target.id === pinnedCatalogId) {
-      return;
-    }
-    viewport.restoreView();
-    syncViewportSelection();
-  });
-  element.addEventListener('click', () => pinCatalogTarget(target));
-}
-
-function pinCatalogTarget(target: CatalogTarget): void {
-  window.clearTimeout(catalogHoverTimer);
-  pinnedCatalogId = target.id;
-  if (viewport.selectNodes(target.nodeIds)) {
-    codeEditor.revealSource(target.sourceRef);
-    syncViewportSelection();
-  }
-}
-
-function restorePinnedCatalogTarget(): boolean {
-  if (!pinnedCatalogId) {
-    return false;
-  }
-  const target = catalogTargets.get(pinnedCatalogId);
-  if (!target || !viewport.selectNodes(target.nodeIds)) {
-    pinnedCatalogId = undefined;
-    return false;
-  }
-  codeEditor.revealSource(target.sourceRef);
-  syncViewportSelection();
-  return true;
-}
-
-function syncViewportSelection(): void {
-  const occurrence = viewport.getSelected();
-  if (occurrence) {
-    selectOccurrence(occurrence, false);
-  }
-}
-
-function updateCatalogSelection(occurrence?: Occurrence): void {
-  const entries =
-    objectCatalogList.querySelectorAll<HTMLElement>('.catalog-target');
-  entries.forEach(element => {
-    const targetId = element.dataset.catalogTargetId;
-    const target = targetId ? catalogTargets.get(targetId) : undefined;
-    element.classList.toggle(
-      'active',
-      target?.id === pinnedCatalogId ||
-        (!!occurrence && target?.nodeIds.includes(occurrence.node.nodeId)),
-    );
-    element.classList.toggle('pinned', target?.id === pinnedCatalogId);
-  });
 }
 
 function containsSourceRef(
@@ -554,7 +448,6 @@ function scopeButton(
 function selectOccurrence(occurrence: Occurrence, revealSource: boolean): void {
   renderInspector(occurrence);
   updateActiveScope(occurrence);
-  updateCatalogSelection(occurrence);
 
   if (revealSource) {
     const sourceRef = primarySource(occurrence.node);
@@ -721,11 +614,7 @@ function parameterControl(
       toolSession.cancel();
       return;
     }
-    codeEditor.revealSource(target.sourceRef);
-    const result = toolSession.commit(parameterIntent(target, value));
-    if (result.status !== 'committed') {
-      showToolIssue(result.reason);
-    }
+    commitToolSession(toolSession, parameterIntent(target, value));
   };
 
   range?.addEventListener('input', () => preview(Number(range.value)));
@@ -735,9 +624,6 @@ function parameterControl(
   );
   numberInput.addEventListener('change', () =>
     commit(Number(numberInput.value)),
-  );
-  numberInput.addEventListener('focus', () =>
-    codeEditor.revealSource(target.sourceRef),
   );
 
   wrapper.append(row);
@@ -794,11 +680,7 @@ function handlePositionTool(event: PositionGizmoEvent): void {
   if (Math.abs(event.value - event.binding.value) < 1e-9) {
     session.cancel();
   } else {
-    codeEditor.revealSource(positionBindingSource(event.binding));
-    const result = session.commit(positionIntent(event.binding, event.value));
-    if (result.status !== 'committed') {
-      showToolIssue(result.reason);
-    }
+    commitToolSession(session, positionIntent(event.binding, event.value));
   }
   positionToolSession = undefined;
   hidePositionToolStatus();
@@ -834,12 +716,6 @@ function positionBindingId(binding: PositionGizmoBinding): string {
   }
   const {start, end} = binding.receiver.sourceRef;
   return `expression:${start}:${end}`;
-}
-
-function positionBindingSource(binding: PositionGizmoBinding): SourceRef {
-  return binding.kind === 'parameter'
-    ? binding.target.sourceRef
-    : binding.receiver.sourceRef;
 }
 
 function showPositionToolStatus(
@@ -895,6 +771,16 @@ function clearToolPreview(preview: ToolPreview): void {
   } else if (preview.kind === 'occurrence-translation') {
     viewport.clearOccurrenceTranslationPreview(preview.occurrenceKeys);
   }
+}
+
+function commitToolSession(session: ToolSession, intent: ToolIntent): boolean {
+  const result = session.commit(intent);
+  if (result.status !== 'committed') {
+    showToolIssue(result.reason);
+    return false;
+  }
+  codeEditor.showSourceEdits(result.plan.summary, result.plan.edits);
+  return true;
 }
 
 function showToolIssue(message: string): void {

@@ -35,9 +35,10 @@ not silently reorder the active milestones.
 - Object replacement/deletion is not a core modeling primitive. JavaScript
   bindings, reachability, derivation, and runtime occurrences describe what
   exists.
-- The future object list is a source/runtime index, not a scene tree. A lineage
-  or execution timeline is an optional view over runtime derivation, not the
-  persisted source of truth.
+- Model Outline lives with the editor. Clicking navigates source while hovering
+  provides a transient object preview; it is not a scene tree or persistent
+  viewport controller. A lineage or execution timeline is an optional view over
+  runtime derivation, not the persisted source of truth.
 - Monaco multi-selection and automatic boolean code generation are deferred
   until single-object discovery, rendering, and position relations are solid.
 
@@ -46,11 +47,17 @@ not silently reorder the active milestones.
 - Public model values do not expose OpenCascade or Three.js details.
 - GUI tools resolve an explicit source-edit scope and use the common tool intent
   and transaction mechanism.
+- Tool commits preserve the editor caret and its rendering scope. The committed
+  source fragment is shown in a non-focusing code popover.
 - Units remain UI metadata; no implicit runtime conversion occurs.
 - Runtime trace data may explain and locate values, but must not constrain which
   JavaScript/TypeScript construction patterns users can write.
-- Source selection previews the exact runtime value at that source site,
-  including all instances produced by loops or collection operations.
+- The editor caret resolves the exact source occurrence being inspected. A
+  value site renders that value alone; an operation-input site may also render
+  its peer inputs as non-interactive context. Mouse hover over source code does
+  not change the viewport.
+- Repeated executions of the same source occurrence are presented together,
+  including values produced by loops or collection operations.
 - Export status must not change the geometry or position semantics of an object.
 
 ## Milestones
@@ -67,26 +74,45 @@ not silently reorder the active milestones.
 Status: complete. Rootless selection and optional exports were implemented in
 `809fcc7`; the remaining `model()` API entry has now been removed.
 
-### 2. Runtime object catalog — in progress
+### 2. Runtime object outline and source context — in progress
 
 - Record top-level bindings, source sites, export names, collections, runtime
   instance counts, and evaluation order.
-- Add an object panel with locate, hover-preview, pin, and render actions.
+- Add a compact Model Outline above the editor. Click only navigates to bindings
+  and expressions; hover temporarily previews the corresponding runtime values
+  and restores the caret-selected view on leave.
 - Group repeated executions by source site and expand them into occurrences.
 - Hide anonymous intermediates by default and expose them through an expanded
   lineage view.
 - Match catalog entries across recompiles using source-aware identities rather
   than transient runtime node IDs alone.
+- Project explicit runtime operations and typed operand roles onto exact source
+  occurrences without inferring them from B-Rep topology.
+- When the caret is on an operation input, render non-interactive, dimmed peer
+  context; a declaration or value expression remains isolated.
 
-Status: the first two slices are implemented in `809fcc7` and `a233aad`.
-Runtime metadata includes module/local bindings, anonymous source expressions,
-export aliases, collections, per-execution outputs, and evaluation order. The
-object panel shows module bindings by default and supports hover preview,
-click-to-pin, source location, per-instance expansion, and local lineage
-expansion. Binding and expression identities use module anchors plus AST paths;
-expanded and pinned runtime occurrences survive normal recompiles and parameter
-write-back. Thumbnails and matching across large control-flow or structural
-rewrites remain open.
+Status: the runtime index and Model Outline are implemented. Metadata includes
+module/local bindings, anonymous source expressions, export aliases,
+collections, per-execution outputs, evaluation order, and typed operation
+inputs. The outline shows module bindings with optional local lineage, source
+navigation on click, and temporary object preview on hover. The exact
+operation-input occurrence under the caret drives the separate non-selectable
+viewport context layer, so the same value can render differently at its
+declaration and at a Boolean use site. Source-aware identities survive normal
+recompiles and parameter write-back; matching across large control-flow or
+structural rewrites remains open.
+
+### 2a. Unified dock panels — complete
+
+- Keep panels collapsed by default and separate panel state from panel content.
+- Share collapsed, transient peek, and pinned behavior across object and
+  property panels.
+- Centralize `Alt+1` / `Alt+2`, allow multiple pinned panels, and let `Escape`
+  dismiss only the current transient peek.
+- Keep a peek open across focus and pointer-driven controls without persisting
+  panel state into model source or browser storage.
+
+Status: R-002 is implemented as reusable dock panel infrastructure.
 
 ### 3. Anchor constraint graph — first slice complete
 
@@ -113,6 +139,9 @@ compatibility APIs.
   vocabulary is selected.
 - Preview the relation source as a ghost when useful.
 - Add copy and pattern tools on top of the same relation intents.
+- Keep the caret-selected context stable across gizmo and Inspector commits;
+  present the applied edit plan in a temporary code popover instead of moving
+  the editor selection.
 
 ### 5. Object combination tools
 
@@ -136,8 +165,8 @@ compatibility APIs.
 - Whether uniform scaling is geometry derivation, occurrence placement, or two
   explicitly named operations.
 - How much runtime lineage to retain and mesh eagerly for large models.
-- The visual form of the object catalog: list, thumbnails, local lineage, and
-  optional execution-time projection.
+- Whether Model Outline eventually needs thumbnails or an optional
+  execution-time projection without taking on viewport-control semantics.
 - Rules for lifting inline expressions or values from different lexical scopes
   when automatic combination tools are eventually introduced.
 

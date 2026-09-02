@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
-import type {ModelModule, SourcePreview} from './model/compiler';
+import type {ModelModule, SourceTarget} from './model/compiler';
 import type {
   ModelSnapshotObject,
   ParameterUsage,
@@ -19,16 +19,16 @@ export type Occurrence = Readonly<{
   node: ModelSnapshotObject;
   object: THREE.Object3D;
   depth: number;
-  view: 'model' | 'object' | 'source';
+  view: 'model' | 'outline' | 'source';
 }>;
 
-type ViewTarget =
-  | Readonly<{kind: 'model'}>
-  | Readonly<{kind: 'objects'; nodeIds: readonly string[]}>
-  | Readonly<{kind: 'source'; sourceRef: SourceRef}>;
+type SelectedViewTarget =
+  Readonly<{kind: 'model'}> | Readonly<{kind: 'source'; targetId: string}>;
 
-type PreviewRestore = Readonly<{
-  target: ViewTarget;
+type RenderedViewTarget =
+  SelectedViewTarget | Readonly<{kind: 'outline'; nodeIds: readonly string[]}>;
+
+type OutlinePreviewRestore = Readonly<{
   selectedKey: string;
   cameraPosition: THREE.Vector3;
   controlsTarget: THREE.Vector3;
@@ -53,11 +53,11 @@ export class ModelViewport {
   private highlightedTargetId?: string;
   private highlightedOccurrenceKeys = new Set<string>();
   private selectedKey = 'root';
-  private sourcePreviewRef?: SourceRef;
   private explode = 0;
   private module: ModelModule | null = null;
-  private viewTarget: ViewTarget = {kind: 'model'};
-  private previewRestore?: PreviewRestore;
+  private selectedViewTarget: SelectedViewTarget = {kind: 'model'};
+  private renderedViewTarget: RenderedViewTarget = {kind: 'model'};
+  private outlinePreviewRestore?: OutlinePreviewRestore;
 
   constructor(
     private readonly container: HTMLElement,
@@ -127,130 +127,73 @@ export class ModelViewport {
     fitCamera = true,
   ): void {
     this.module = module;
-    this.viewTarget = {kind: 'model'};
-    this.previewRestore = undefined;
+    this.selectedViewTarget = {kind: 'model'};
+    this.outlinePreviewRestore = undefined;
     this.renderModelView(selectedKey, fitCamera);
   }
 
   selectBySourceOffset(offset: number): boolean {
-    if (!this.module) {
-      return false;
-    }
-    const match = [...this.module.sourcePreviews]
-      .filter(
-        ({sourceRef}) => sourceRef.start <= offset && offset <= sourceRef.end,
-      )
-      .sort(
-        (left, right) =>
-          sourceSpan(left.sourceRef) - sourceSpan(right.sourceRef),
-      )[0];
-
+    const match = this.sourceTargetAt(offset);
     if (!match) {
       return false;
     }
 
+    this.selectedViewTarget = {kind: 'source', targetId: match.id};
+    this.outlinePreviewRestore = undefined;
     if (
-      !this.sourcePreviewRef ||
-      !sameSource(match.sourceRef, this.sourcePreviewRef)
+      this.renderedViewTarget.kind !== 'source' ||
+      this.renderedViewTarget.targetId !== match.id
     ) {
-      this.viewTarget = {kind: 'source', sourceRef: match.sourceRef};
-      this.previewRestore = undefined;
-      this.renderSourcePreview(match);
+      this.renderSourceTarget(match, true);
     }
     return true;
   }
 
-  selectNode(nodeId: string): void {
-    const occurrence = [...this.occurrences.values()].find(
-      candidate =>
-        candidate.view !== 'source' && candidate.node.nodeId === nodeId,
-    );
-    if (occurrence) {
-      this.selectKey(occurrence.key, true);
-      return;
-    }
-    const node = this.module?.objects.get(nodeId);
-    if (node) {
-      this.selectNodes([nodeId]);
-    }
-  }
-
   selectRoot(): void {
-    this.viewTarget = {kind: 'model'};
-    this.previewRestore = undefined;
+    this.selectedViewTarget = {kind: 'model'};
+    this.outlinePreviewRestore = undefined;
     if (!this.occurrences.has('root') && this.module) {
       this.renderModelView('root', true);
     }
     this.selectKey('root', true);
   }
 
-  selectNodes(nodeIds: readonly string[]): boolean {
+  previewOutline(nodeIds: readonly string[]): boolean {
     const nodes = this.resolveNodes(nodeIds);
     if (nodes.length === 0) {
       return false;
     }
-    this.viewTarget = {
-      kind: 'objects',
-      nodeIds: nodes.map(node => node.nodeId),
-    };
-    this.previewRestore = undefined;
-    this.renderObjects(nodes, true, true);
+    this.captureOutlinePreviewRestore();
+    this.renderOutlinePreview(nodes);
     return true;
   }
 
-  previewNodes(nodeIds: readonly string[]): boolean {
-    const nodes = this.resolveNodes(nodeIds);
-    if (nodes.length === 0) {
-      return false;
-    }
-    this.previewRestore ??= {
-      target: this.viewTarget,
-      selectedKey: this.selectedKey,
-      cameraPosition: this.camera.position.clone(),
-      controlsTarget: this.controls.target.clone(),
-      cameraNear: this.camera.near,
-      cameraFar: this.camera.far,
-    };
-    this.renderObjects(nodes, true, false);
-    return true;
-  }
-
-  restoreView(): void {
-    if (!this.module) {
+  restoreOutlinePreview(): void {
+    const restore = this.outlinePreviewRestore;
+    if (!this.module || !restore) {
       return;
     }
-    const restore = this.previewRestore;
-    const target = restore?.target ?? this.viewTarget;
-    const selectedKey = restore?.selectedKey;
-    this.previewRestore = undefined;
+    this.outlinePreviewRestore = undefined;
+    const target = this.selectedViewTarget;
     if (target.kind === 'model') {
-      this.renderModelView(selectedKey ?? 'root', !restore);
-    } else if (target.kind === 'objects') {
-      this.renderObjects(
-        this.resolveNodes(target.nodeIds),
-        !restore,
-        false,
-        selectedKey,
-      );
+      this.renderModelView(restore.selectedKey, false);
     } else {
-      const preview = this.module.sourcePreviews.find(({sourceRef}) =>
-        sameSource(sourceRef, target.sourceRef),
+      const sourceTarget = this.module.sourceTargets.find(
+        candidate => candidate.id === target.targetId,
       );
-      if (preview) {
-        this.renderSourcePreview(preview, !restore, selectedKey);
+      if (sourceTarget) {
+        this.renderSourceTarget(sourceTarget, false, restore.selectedKey);
       } else {
-        this.viewTarget = {kind: 'model'};
-        this.renderModelView('root', !restore);
+        this.selectedViewTarget = {kind: 'model'};
+        this.renderModelView('root', false);
       }
     }
-    if (restore) {
-      this.camera.position.copy(restore.cameraPosition);
-      this.controls.target.copy(restore.controlsTarget);
-      this.camera.near = restore.cameraNear;
-      this.camera.far = restore.cameraFar;
-      this.camera.updateProjectionMatrix();
-      this.controls.update();
-    }
+    this.camera.position.copy(restore.cameraPosition);
+    this.controls.target.copy(restore.controlsTarget);
+    this.camera.near = restore.cameraNear;
+    this.camera.far = restore.cameraFar;
+    this.camera.updateProjectionMatrix();
+    this.controls.update();
   }
 
   getSelected(): Occurrence | undefined {
@@ -355,14 +298,22 @@ export class ModelViewport {
     return object;
   }
 
-  private renderSourcePreview(
-    preview: SourcePreview,
+  private renderSourceTarget(
+    target: SourceTarget,
     fitCamera = true,
     selectedKey?: string,
   ): void {
-    this.sourcePreviewRef = preview.sourceRef;
+    const focusNodes = this.resolveNodes(target.nodeIds);
+    const contextNodes = this.resolveContextNodes(
+      target.contextNodeIds,
+      target.nodeIds,
+    );
+    this.renderedViewTarget = {kind: 'source', targetId: target.id};
     this.resetRenderedView();
-    preview.objects.forEach((node, index) => {
+    contextNodes.forEach((node, index) => {
+      this.root.add(this.buildContextObject(node, `context/${index}`));
+    });
+    focusNodes.forEach((node, index) => {
       this.root.add(this.buildObject(node, `source/${index}`, 1, 'source'));
     });
     this.applyPreviewTransforms();
@@ -382,7 +333,7 @@ export class ModelViewport {
     if (!this.module) {
       return;
     }
-    this.sourcePreviewRef = undefined;
+    this.renderedViewTarget = {kind: 'model'};
     this.resetRenderedView();
     const rootObject = this.buildObject(
       this.module.fallback,
@@ -401,28 +352,44 @@ export class ModelViewport {
     }
   }
 
-  private renderObjects(
-    nodes: readonly ModelSnapshotObject[],
-    fitCamera: boolean,
-    notify: boolean,
-    selectedKey?: string,
-  ): void {
-    this.sourcePreviewRef = undefined;
+  private renderOutlinePreview(nodes: readonly ModelSnapshotObject[]): void {
+    this.renderedViewTarget = {
+      kind: 'outline',
+      nodeIds: nodes.map(node => node.nodeId),
+    };
     this.resetRenderedView();
     nodes.forEach((node, index) => {
-      this.root.add(this.buildObject(node, `object/${index}`, 1, 'object'));
+      this.root.add(this.buildObject(node, `outline/${index}`, 1, 'outline'));
     });
     this.applyPreviewTransforms();
-    const nextKey =
-      selectedKey && this.occurrences.has(selectedKey)
-        ? selectedKey
-        : this.occurrences.keys().next().value;
-    if (nextKey) {
-      this.selectKey(nextKey, notify);
-    }
-    if (fitCamera) {
-      this.fit();
-    }
+    this.fit();
+  }
+
+  private sourceTargetAt(offset: number): SourceTarget | undefined {
+    return this.module?.sourceTargets
+      .filter(
+        ({sourceRef}) => sourceRef.start <= offset && offset <= sourceRef.end,
+      )
+      .sort(
+        (left, right) =>
+          sourceSpan(left.sourceRef) - sourceSpan(right.sourceRef) ||
+          sourceTargetPriority(left) - sourceTargetPriority(right),
+      )[0];
+  }
+
+  private buildContextObject(
+    node: ModelSnapshotObject,
+    key: string,
+  ): THREE.Object3D {
+    const object = createThreeObject(node);
+    object.name = `${node.name} (context)`;
+    object.userData.context = true;
+    applyNodeTransform(object, node);
+    dimObject(object);
+    node.children.forEach((child, index) => {
+      object.add(this.buildContextObject(child, `${key}/${index}`));
+    });
+    return object;
   }
 
   private resolveNodes(nodeIds: readonly string[]): ModelSnapshotObject[] {
@@ -438,6 +405,24 @@ export class ModelViewport {
       seen.add(node.nodeId);
       return [node];
     });
+  }
+
+  private resolveContextNodes(
+    nodeIds: readonly string[],
+    focusNodeIds: readonly string[],
+  ): ModelSnapshotObject[] {
+    const focus = new Set(focusNodeIds);
+    return this.resolveNodes(nodeIds).filter(node => !focus.has(node.nodeId));
+  }
+
+  private captureOutlinePreviewRestore(): void {
+    this.outlinePreviewRestore ??= {
+      selectedKey: this.selectedKey,
+      cameraPosition: this.camera.position.clone(),
+      controlsTarget: this.controls.target.clone(),
+      cameraNear: this.camera.near,
+      cameraFar: this.camera.far,
+    };
   }
 
   private resetRenderedView(): void {
@@ -535,7 +520,7 @@ export class ModelViewport {
       occurrence.object.position.z += offset[2];
 
       if (
-        !this.sourcePreviewRef &&
+        this.renderedViewTarget.kind === 'model' &&
         occurrence.depth === 1 &&
         this.explode > 0
       ) {
@@ -777,6 +762,12 @@ function sourceSpan(sourceRef: SourceRef): number {
   return sourceRef.end - sourceRef.start;
 }
 
+function sourceTargetPriority(target: SourceTarget): number {
+  if (target.kind === 'operation-input') return 0;
+  if (target.kind === 'operation-output') return 1;
+  return 2;
+}
+
 function positionOnlyTargets(
   parameters: readonly ParameterUsage[],
 ): Set<string> {
@@ -874,6 +865,37 @@ function createThreeObject(node: ModelSnapshotObject): THREE.Object3D {
   }
 
   return container;
+}
+
+function dimObject(object: THREE.Object3D): void {
+  object.traverse(child => {
+    if (child instanceof THREE.Mesh) {
+      const materials = Array.isArray(child.material)
+        ? child.material
+        : [child.material];
+      materials.forEach(material => {
+        if (material instanceof THREE.MeshStandardMaterial) {
+          material.color.set('#788078');
+          material.transparent = true;
+          material.opacity = 0.18;
+          material.depthWrite = false;
+        }
+      });
+      child.renderOrder = -2;
+    } else if (child instanceof THREE.LineSegments) {
+      const materials = Array.isArray(child.material)
+        ? child.material
+        : [child.material];
+      materials.forEach(material => {
+        if (material instanceof THREE.LineBasicMaterial) {
+          material.color.set('#a1aa9d');
+          material.opacity = 0.28;
+          material.depthWrite = false;
+        }
+      });
+      child.renderOrder = -1;
+    }
+  });
 }
 
 function applyNodeTransform(
