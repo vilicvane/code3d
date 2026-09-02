@@ -3,6 +3,8 @@
 This file is the durable working memory for decisions and multi-step work. Keep
 stable product goals in `DESIGN.md` and source-editing/tool contracts in
 `TOOLING.md`; update this file whenever the active design or milestone changes.
+Unscheduled product feedback is captured separately in `REQUESTS.md` so it does
+not silently reorder the active milestones.
 
 ## Confirmed direction
 
@@ -71,13 +73,15 @@ browser-verified default example contains neither `model()` nor an export.
 - Match catalog entries across recompiles using source-aware identities rather
   than transient runtime node IDs alone.
 
-Status: the first slice is implemented locally. Runtime metadata now includes
+Status: the first two slices are implemented locally. Runtime metadata includes
 module/local bindings, anonymous source expressions, export aliases,
-collections, execution counts, and evaluation order. The object panel shows
-module bindings by default and supports hover preview, click-to-pin, and source
-location. Module binding IDs survive recompiles by name. Lineage expansion,
-per-instance rows, thumbnails, and stronger identities for local expressions
-remain open.
+collections, per-execution outputs, and evaluation order. The object panel
+shows module bindings by default and supports hover preview, click-to-pin,
+source location, per-instance expansion, and local lineage expansion. Binding
+and expression identities use module anchors plus AST paths; expanded and
+pinned runtime occurrences survive normal recompiles and parameter write-back.
+Thumbnails and matching across large control-flow or structural rewrites remain
+open.
 
 ### 3. Position-relation graph
 

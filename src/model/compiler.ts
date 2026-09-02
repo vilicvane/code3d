@@ -16,6 +16,16 @@ export type SourcePreview = Readonly<{
   objects: readonly ModelSnapshotObject[];
 }>;
 
+export type ObjectCatalogOccurrence = Readonly<{
+  id: string;
+  nodeId: string;
+  label: string;
+  sourceRef: SourceRef;
+  execution: number;
+  output: number;
+  order: number;
+}>;
+
 export type ObjectCatalogEntry = Readonly<{
   id: string;
   label: string;
@@ -24,6 +34,7 @@ export type ObjectCatalogEntry = Readonly<{
   visibility: 'primary' | 'lineage';
   sourceRef: SourceRef;
   nodeIds: readonly string[];
+  occurrences: readonly ObjectCatalogOccurrence[];
   executions: number;
   firstOrder: number;
   lastOrder: number;
@@ -92,9 +103,12 @@ type CatalogTrace = {
   scope: ObjectCatalogEntry['scope'];
   sourceRef: SourceRef;
   objects: Set<ModelObject>;
-  executions: number;
-  firstOrder: number;
-  lastOrder: number;
+  runs: Array<
+    Readonly<{
+      order: number;
+      objects: readonly ModelObject[];
+    }>
+  >;
 };
 
 const signatures = new Map<string, ParameterSignature>([
@@ -191,8 +205,13 @@ const catalogTraces = new Map<string, CatalogTrace>();
 const parameterFrames: ParameterUsage[][] = [];
 let evaluationOrder = 0;
 const traceRuntime = Object.freeze({
-  trace<T>(start: number, end: number, run: () => T): T {
-    const order = ++evaluationOrder;
+  trace<T>(
+    start: number,
+    end: number,
+    id: string,
+    label: string,
+    run: () => T,
+  ): T {
     const parameters: ParameterUsage[] = [];
     parameterFrames.push(parameters);
     let result: T;
@@ -210,10 +229,11 @@ const traceRuntime = Object.freeze({
         recordSourceObject(start, end, object),
       );
     }
+    const order = ++evaluationOrder;
     recordCatalogValue(
       {
-        id: `expression:${start}:${end}`,
-        label: 'expression',
+        id,
+        label,
         category: 'expression',
         scope: 'local',
         sourceRef: {start, end},
@@ -233,11 +253,11 @@ const traceRuntime = Object.freeze({
     scope: ObjectCatalogEntry['scope'],
     run: () => T,
   ): T {
-    const order = ++evaluationOrder;
     const result = run();
     modelObjectsIn(result).forEach(object =>
       recordSourceObject(start, end, object),
     );
+    const order = ++evaluationOrder;
     recordCatalogValue(
       {id, label, category, scope, sourceRef: {start, end}},
       result,
@@ -306,13 +326,10 @@ function recordCatalogValue(
   const trace = catalogTraces.get(metadata.id) ?? {
     ...metadata,
     objects: new Set<ModelObject>(),
-    executions: 0,
-    firstOrder: order,
-    lastOrder: order,
+    runs: [],
   };
   objects.forEach(object => trace.objects.add(object));
-  trace.executions += 1;
-  trace.lastOrder = order;
+  trace.runs.push({order, objects});
   catalogTraces.set(metadata.id, trace);
 }
 
@@ -433,29 +450,43 @@ export function compileModel(source: string): ModelModule {
         ]),
       ),
       catalog: [...catalogTraces.values()]
-        .sort((left, right) => left.firstOrder - right.firstOrder)
-        .map(trace => ({
-          id: trace.id,
-          label: trace.label,
-          category: trace.category,
-          scope: trace.scope,
-          visibility:
-            trace.category === 'expression' || trace.scope === 'local'
-              ? 'lineage'
-              : 'primary',
-          sourceRef: trace.sourceRef,
-          nodeIds: [...trace.objects].map(object => object.nodeId),
-          executions: trace.executions,
-          firstOrder: trace.firstOrder,
-          lastOrder: trace.lastOrder,
-          exportNames: [
-            ...new Set(
-              [...trace.objects].flatMap(object => [
-                ...(exportNamesByObject.get(object) ?? []),
-              ]),
-            ),
-          ],
-        })),
+        .sort((left, right) => left.runs[0].order - right.runs[0].order)
+        .map(trace => {
+          const occurrences = trace.runs.flatMap((run, execution) =>
+            run.objects.map((object, output) => ({
+              id: `${trace.id}:execution:${execution}:output:${output}`,
+              nodeId: object.nodeId,
+              label: object.name,
+              sourceRef: object.sourceRefs.at(-1) ?? trace.sourceRef,
+              execution,
+              output,
+              order: run.order,
+            })),
+          );
+          return {
+            id: trace.id,
+            label: trace.label,
+            category: trace.category,
+            scope: trace.scope,
+            visibility:
+              trace.category === 'expression' || trace.scope === 'local'
+                ? 'lineage'
+                : 'primary',
+            sourceRef: trace.sourceRef,
+            nodeIds: [...trace.objects].map(object => object.nodeId),
+            occurrences,
+            executions: trace.runs.length,
+            firstOrder: trace.runs[0].order,
+            lastOrder: trace.runs.at(-1)?.order ?? trace.runs[0].order,
+            exportNames: [
+              ...new Set(
+                [...trace.objects].flatMap(object => [
+                  ...(exportNamesByObject.get(object) ?? []),
+                ]),
+              ),
+            ],
+          };
+        }),
       parameterImpacts: countParameterImpacts(fallbackSnapshot),
       sourcePreviews: [...sourceTraces.values()].map(
         ({sourceRef, objects}) => ({
@@ -499,7 +530,7 @@ function createTraceTransformer(): ts.TransformerFactory<ts.SourceFile> {
           const id =
             scope === 'module' && ts.isIdentifier(node.name)
               ? `binding:${node.name.text}`
-              : `binding:${node.name.getStart(sourceFile)}:${label}`;
+              : `${stableSourceId('binding', node, sourceFile)}:${label}`;
           return factory.updateVariableDeclaration(
             visited,
             visited.name,
@@ -561,6 +592,8 @@ function createTraceTransformer(): ts.TransformerFactory<ts.SourceFile> {
             call,
             node.getStart(sourceFile),
             node.getEnd(),
+            stableSourceId('expression', node, sourceFile),
+            callLabel(node),
             factory,
           );
         }
@@ -577,6 +610,8 @@ function traceExpression(
   expression: ts.Expression,
   start: number,
   end: number,
+  id: string,
+  label: string,
   factory: ts.NodeFactory,
 ): ts.CallExpression {
   return factory.createCallExpression(
@@ -588,6 +623,8 @@ function traceExpression(
     [
       factory.createNumericLiteral(start),
       factory.createNumericLiteral(end),
+      factory.createStringLiteral(id),
+      factory.createStringLiteral(label),
       factory.createArrowFunction(
         undefined,
         undefined,
@@ -638,6 +675,72 @@ function bindExpression(
 function isModuleVariableDeclaration(node: ts.VariableDeclaration): boolean {
   const statement = node.parent.parent;
   return ts.isVariableStatement(statement) && ts.isSourceFile(statement.parent);
+}
+
+function stableSourceId(
+  category: ObjectCatalogEntry['category'],
+  node: ts.Node,
+  sourceFile: ts.SourceFile,
+): string {
+  const statement = topLevelStatement(node);
+  const path: string[] = [];
+  let current = node;
+  while (current !== statement && current.parent) {
+    const siblings: ts.Node[] = [];
+    ts.forEachChild(current.parent, child => {
+      siblings.push(child);
+    });
+    path.unshift(`${current.kind}-${siblings.indexOf(current)}`);
+    current = current.parent;
+  }
+  return `${category}:${statementIdentity(statement, sourceFile)}:${path.join('/') || 'root'}`;
+}
+
+function topLevelStatement(node: ts.Node): ts.Node {
+  let current = node;
+  while (current.parent && !ts.isSourceFile(current.parent)) {
+    current = current.parent;
+  }
+  return current;
+}
+
+function statementIdentity(
+  statement: ts.Node,
+  sourceFile: ts.SourceFile,
+): string {
+  if (ts.isVariableStatement(statement)) {
+    const names = statement.declarationList.declarations.map(declaration =>
+      declaration.name.getText(sourceFile).replace(/\s+/g, ''),
+    );
+    return `binding:${names.join(',')}`;
+  }
+  if (ts.isFunctionDeclaration(statement) && statement.name) {
+    return `function:${statement.name.text}`;
+  }
+  if (ts.isClassDeclaration(statement) && statement.name) {
+    return `class:${statement.name.text}`;
+  }
+  if (ts.isExportAssignment(statement) && !statement.isExportEquals) {
+    return 'export:default';
+  }
+  const index = sourceFile.statements.indexOf(statement as ts.Statement);
+  return `statement:${statement.kind}:${Math.max(index, 0)}`;
+}
+
+function callLabel(node: ts.CallExpression): string {
+  if (ts.isIdentifier(node.expression)) {
+    return node.expression.text;
+  }
+  if (ts.isPropertyAccessExpression(node.expression)) {
+    return node.expression.name.text;
+  }
+  if (
+    ts.isElementAccessExpression(node.expression) &&
+    ts.isStringLiteralLike(node.expression.argumentExpression)
+  ) {
+    return node.expression.argumentExpression.text;
+  }
+  return 'call';
 }
 
 function instrumentCallParameters(

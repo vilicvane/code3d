@@ -393,6 +393,54 @@ kbd {
   overflow: auto;
 }
 
+.object-catalog-group {
+  min-width: 0;
+}
+
+.object-catalog-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: stretch;
+}
+
+.object-catalog-toggle {
+  width: 16px;
+  padding: 0;
+  color: #686d63;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px;
+  transform: rotate(0deg);
+  transition:
+    color 120ms ease,
+    transform 120ms ease;
+}
+
+.object-catalog-toggle:hover {
+  color: var(--acid);
+}
+
+.object-catalog-toggle:disabled {
+  cursor: default;
+  opacity: 0;
+}
+
+.object-catalog-group.expanded > .object-catalog-row > .object-catalog-toggle {
+  transform: rotate(90deg);
+}
+
+.object-catalog-details[hidden] {
+  display: none;
+}
+
+.object-catalog-details {
+  margin: 1px 0 3px 8px;
+  padding-left: 8px;
+  border-left: 1px solid #30332d;
+}
+
 .object-catalog-entry {
   position: relative;
   display: grid;
@@ -410,12 +458,15 @@ kbd {
 }
 
 .object-catalog-entry:hover,
-.object-catalog-entry.active {
+.object-catalog-entry.active,
+.object-catalog-occurrence:hover,
+.object-catalog-occurrence.active {
   color: #e1e3dc;
   background: #20221d;
 }
 
-.object-catalog-entry.pinned::before {
+.object-catalog-entry.pinned::before,
+.object-catalog-occurrence.pinned::before {
   position: absolute;
   top: 6px;
   bottom: 6px;
@@ -428,7 +479,8 @@ kbd {
 
 .object-catalog-order,
 .object-catalog-instances,
-.object-catalog-copy small {
+.object-catalog-copy small,
+.object-catalog-occurrence-marker {
   font-family: 'IBM Plex Mono', monospace;
 }
 
@@ -466,6 +518,65 @@ kbd {
   padding-top: 1px;
   color: var(--acid);
   font-size: 8px;
+}
+
+.object-catalog-section-label {
+  padding: 7px 6px 4px 21px;
+  color: #585d54;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 7px;
+  letter-spacing: 0.11em;
+}
+
+.object-catalog-group.lineage .object-catalog-row {
+  grid-template-columns: 13px minmax(0, 1fr);
+}
+
+.object-catalog-group.lineage .object-catalog-toggle {
+  width: 13px;
+  font-size: 11px;
+}
+
+.object-catalog-entry.lineage {
+  padding-top: 5px;
+  padding-bottom: 5px;
+  color: #7f8579;
+}
+
+.object-catalog-entry.lineage .object-catalog-order {
+  color: #4f544c;
+  font-size: 7px;
+}
+
+.object-catalog-entry.lineage .object-catalog-copy strong {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+}
+
+.object-catalog-occurrence {
+  position: relative;
+  display: grid;
+  grid-template-columns: 27px minmax(0, 1fr);
+  gap: 5px;
+  align-items: center;
+  width: calc(100% - 2px);
+  margin-left: 2px;
+  padding: 6px;
+  color: #858b80;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.object-catalog-occurrence-marker {
+  color: #60665d;
+  font-size: 7px;
+}
+
+.object-catalog-occurrence .object-catalog-copy strong {
+  font-size: 9px;
 }
 
 .object-catalog-hint,

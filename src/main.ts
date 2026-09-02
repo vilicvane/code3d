@@ -1,7 +1,11 @@
 import './style.css';
 import {CodeEditor} from './editor';
 import {ModelCompilerClient} from './model/compiler-client';
-import type {ModelModule, ObjectCatalogEntry} from './model/compiler';
+import type {
+  ModelModule,
+  ObjectCatalogEntry,
+  ObjectCatalogOccurrence,
+} from './model/compiler';
 import {sampleSource} from './model/sample';
 import type {
   ModelSnapshotObject,
@@ -25,6 +29,12 @@ import {ModelViewport, type Occurrence} from './viewport';
 const storageKey = 'code3d.prototype.source';
 const savedSource = localStorage.getItem(storageKey) ?? sampleSource;
 const app = document.querySelector<HTMLDivElement>('#app');
+
+type CatalogTarget = Readonly<{
+  id: string;
+  nodeIds: readonly string[];
+  sourceRef: SourceRef;
+}>;
 
 if (!app) {
   throw new Error('Missing #app element.');
@@ -119,6 +129,8 @@ let runRevision = 0;
 let positionToolSession: ToolSession | undefined;
 let pinnedCatalogId: string | undefined;
 let catalogHoverTimer: number | undefined;
+const expandedCatalogIds = new Set<string>();
+const catalogTargets = new Map<string, CatalogTarget>();
 
 const viewport = new ModelViewport(
   viewportHost,
@@ -194,10 +206,13 @@ async function runModel(): Promise<void> {
     explodeValue = 0;
     renderScopes(currentModule);
     renderObjectCatalog(currentModule);
-    const cursorOffset = codeEditor.cursorOffset();
-    if (cursorOffset !== undefined) {
-      if (viewport.selectBySourceOffset(cursorOffset)) {
-        pinnedCatalogId = undefined;
+    const restoredCatalogTarget = restorePinnedCatalogTarget();
+    if (!restoredCatalogTarget) {
+      const cursorOffset = codeEditor.cursorOffset();
+      if (cursorOffset !== undefined) {
+        if (viewport.selectBySourceOffset(cursorOffset)) {
+          pinnedCatalogId = undefined;
+        }
       }
     }
     const selected = viewport.getSelected();
@@ -231,8 +246,12 @@ function renderScopes(module: ModelModule): void {
 function renderObjectCatalog(module: ModelModule): void {
   window.clearTimeout(catalogHoverTimer);
   objectCatalogList.replaceChildren();
+  catalogTargets.clear();
   const entries = module.catalog.filter(
     entry => entry.visibility === 'primary' && entry.nodeIds.length > 0,
+  );
+  const lineage = module.catalog.filter(
+    entry => entry.visibility === 'lineage' && entry.nodeIds.length > 0,
   );
   objectCatalogCount.textContent = String(entries.length);
 
@@ -245,56 +264,116 @@ function renderObjectCatalog(module: ModelModule): void {
   }
 
   entries.forEach((entry, index) => {
-    const item = objectCatalogEntry(entry, index, module);
-    item.addEventListener('pointerenter', () => {
-      window.clearTimeout(catalogHoverTimer);
-      if (entry.id === pinnedCatalogId) {
-        return;
-      }
-      catalogHoverTimer = window.setTimeout(() => {
-        if (viewport.previewNodes(entry.nodeIds)) {
-          syncViewportSelection();
-        }
-      }, 100);
-    });
-    item.addEventListener('pointerleave', () => {
-      window.clearTimeout(catalogHoverTimer);
-      if (entry.id === pinnedCatalogId) {
-        return;
-      }
-      viewport.restoreView();
-      syncViewportSelection();
-    });
-    item.addEventListener('click', () => {
-      window.clearTimeout(catalogHoverTimer);
-      pinnedCatalogId = entry.id;
-      if (viewport.selectNodes(entry.nodeIds)) {
-        codeEditor.revealSource(entry.sourceRef);
-        syncViewportSelection();
-      }
-    });
-    objectCatalogList.append(item);
+    const localLineage = lineage
+      .filter(candidate =>
+        containsSourceRef(entry.sourceRef, candidate.sourceRef),
+      )
+      .sort((left, right) => left.firstOrder - right.firstOrder);
+    objectCatalogList.append(
+      objectCatalogGroup(entry, String(index + 1).padStart(2, '0'), module, {
+        variant: 'primary',
+        lineage: localLineage,
+      }),
+    );
   });
 
-  if (pinnedCatalogId && !entries.some(entry => entry.id === pinnedCatalogId)) {
+  if (pinnedCatalogId && !catalogTargets.has(pinnedCatalogId)) {
     pinnedCatalogId = undefined;
   }
+  updateCatalogSelection(viewport.getSelected());
 }
 
-function objectCatalogEntry(
+function objectCatalogGroup(
   entry: ObjectCatalogEntry,
-  index: number,
+  orderLabel: string,
   module: ModelModule,
+  options: Readonly<{
+    variant: 'primary' | 'lineage';
+    lineage?: readonly ObjectCatalogEntry[];
+  }>,
+): HTMLElement {
+  const group = document.createElement('section');
+  group.className = `object-catalog-group ${options.variant}`;
+
+  const row = document.createElement('div');
+  row.className = 'object-catalog-row';
+  const details = document.createElement('div');
+  details.className = 'object-catalog-details';
+
+  const showInstances = entry.occurrences.length > 1;
+  const lineage = options.lineage ?? [];
+  const expandable = showInstances || lineage.length > 0;
+  const expanded = expandable && expandedCatalogIds.has(entry.id);
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'object-catalog-toggle';
+  toggle.textContent = expandable ? '›' : '';
+  toggle.disabled = !expandable;
+  toggle.tabIndex = expandable ? 0 : -1;
+  toggle.setAttribute('aria-label', `${entry.label} 详情`);
+  toggle.setAttribute('aria-expanded', String(expanded));
+
+  const button = objectCatalogEntryButton(
+    entry,
+    orderLabel,
+    module,
+    options.variant,
+  );
+  bindCatalogTarget(button, catalogEntryTarget(entry));
+  row.append(toggle, button);
+
+  entry.occurrences.forEach((occurrence, index) => {
+    registerCatalogTarget(catalogOccurrenceTarget(occurrence));
+    if (showInstances) {
+      details.append(objectCatalogOccurrenceButton(occurrence, index));
+    }
+  });
+
+  if (lineage.length > 0) {
+    const label = document.createElement('div');
+    label.className = 'object-catalog-section-label';
+    label.textContent = 'LINEAGE';
+    details.append(label);
+    lineage.forEach(candidate => {
+      details.append(
+        objectCatalogGroup(candidate, `@${candidate.firstOrder}`, module, {
+          variant: 'lineage',
+        }),
+      );
+    });
+  }
+
+  details.hidden = !expanded;
+  group.classList.toggle('expanded', expanded);
+  toggle.addEventListener('click', () => {
+    const nextExpanded = !expandedCatalogIds.has(entry.id);
+    if (nextExpanded) {
+      expandedCatalogIds.add(entry.id);
+    } else {
+      expandedCatalogIds.delete(entry.id);
+    }
+    group.classList.toggle('expanded', nextExpanded);
+    details.hidden = !nextExpanded;
+    toggle.setAttribute('aria-expanded', String(nextExpanded));
+  });
+  group.append(row, details);
+  return group;
+}
+
+function objectCatalogEntryButton(
+  entry: ObjectCatalogEntry,
+  orderLabel: string,
+  module: ModelModule,
+  variant: 'primary' | 'lineage',
 ): HTMLButtonElement {
   const button = document.createElement('button');
   button.type = 'button';
-  button.className = 'object-catalog-entry';
-  button.dataset.catalogId = entry.id;
+  button.className = `object-catalog-entry catalog-target ${variant}`;
   button.title = `${entry.label}：点击定位源码并固定预览`;
 
   const order = document.createElement('span');
   order.className = 'object-catalog-order';
-  order.textContent = String(index + 1).padStart(2, '0');
+  order.textContent = orderLabel;
 
   const copy = document.createElement('span');
   copy.className = 'object-catalog-copy';
@@ -307,8 +386,32 @@ function objectCatalogEntry(
   const count = document.createElement('span');
   count.className = 'object-catalog-instances';
   count.textContent =
-    entry.nodeIds.length > 1 ? `×${entry.nodeIds.length}` : '';
+    entry.occurrences.length > 1 ? `×${entry.occurrences.length}` : '';
   button.append(order, copy, count);
+  return button;
+}
+
+function objectCatalogOccurrenceButton(
+  occurrence: ObjectCatalogOccurrence,
+  index: number,
+): HTMLButtonElement {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'object-catalog-occurrence catalog-target';
+  button.title = `${occurrence.label}：点击定位这个运行时实例`;
+
+  const marker = document.createElement('span');
+  marker.className = 'object-catalog-occurrence-marker';
+  marker.textContent = `#${String(index + 1).padStart(2, '0')}`;
+  const copy = document.createElement('span');
+  copy.className = 'object-catalog-copy';
+  const label = document.createElement('strong');
+  label.textContent = occurrence.label;
+  const meta = document.createElement('small');
+  meta.textContent = `RUN ${occurrence.execution + 1} · OUTPUT ${occurrence.output + 1}`;
+  copy.append(label, meta);
+  button.append(marker, copy);
+  bindCatalogTarget(button, catalogOccurrenceTarget(occurrence));
   return button;
 }
 
@@ -332,6 +435,79 @@ function catalogEntryMeta(
   return parts.join(' · ');
 }
 
+function catalogEntryTarget(entry: ObjectCatalogEntry): CatalogTarget {
+  return {
+    id: entry.id,
+    nodeIds: entry.nodeIds,
+    sourceRef: entry.sourceRef,
+  };
+}
+
+function catalogOccurrenceTarget(
+  occurrence: ObjectCatalogOccurrence,
+): CatalogTarget {
+  return {
+    id: occurrence.id,
+    nodeIds: [occurrence.nodeId],
+    sourceRef: occurrence.sourceRef,
+  };
+}
+
+function registerCatalogTarget(target: CatalogTarget): void {
+  catalogTargets.set(target.id, target);
+}
+
+function bindCatalogTarget(
+  element: HTMLButtonElement,
+  target: CatalogTarget,
+): void {
+  registerCatalogTarget(target);
+  element.dataset.catalogTargetId = target.id;
+  element.addEventListener('pointerenter', () => {
+    window.clearTimeout(catalogHoverTimer);
+    if (target.id === pinnedCatalogId) {
+      return;
+    }
+    catalogHoverTimer = window.setTimeout(() => {
+      if (viewport.previewNodes(target.nodeIds)) {
+        syncViewportSelection();
+      }
+    }, 100);
+  });
+  element.addEventListener('pointerleave', () => {
+    window.clearTimeout(catalogHoverTimer);
+    if (target.id === pinnedCatalogId) {
+      return;
+    }
+    viewport.restoreView();
+    syncViewportSelection();
+  });
+  element.addEventListener('click', () => pinCatalogTarget(target));
+}
+
+function pinCatalogTarget(target: CatalogTarget): void {
+  window.clearTimeout(catalogHoverTimer);
+  pinnedCatalogId = target.id;
+  if (viewport.selectNodes(target.nodeIds)) {
+    codeEditor.revealSource(target.sourceRef);
+    syncViewportSelection();
+  }
+}
+
+function restorePinnedCatalogTarget(): boolean {
+  if (!pinnedCatalogId) {
+    return false;
+  }
+  const target = catalogTargets.get(pinnedCatalogId);
+  if (!target || !viewport.selectNodes(target.nodeIds)) {
+    pinnedCatalogId = undefined;
+    return false;
+  }
+  codeEditor.revealSource(target.sourceRef);
+  syncViewportSelection();
+  return true;
+}
+
 function syncViewportSelection(): void {
   const occurrence = viewport.getSelected();
   if (occurrence) {
@@ -340,20 +516,25 @@ function syncViewportSelection(): void {
 }
 
 function updateCatalogSelection(occurrence?: Occurrence): void {
-  const entries = objectCatalogList.querySelectorAll<HTMLButtonElement>(
-    '.object-catalog-entry',
-  );
-  entries.forEach(button => {
-    const entry = currentModule?.catalog.find(
-      candidate => candidate.id === button.dataset.catalogId,
-    );
-    button.classList.toggle(
+  const entries =
+    objectCatalogList.querySelectorAll<HTMLElement>('.catalog-target');
+  entries.forEach(element => {
+    const targetId = element.dataset.catalogTargetId;
+    const target = targetId ? catalogTargets.get(targetId) : undefined;
+    element.classList.toggle(
       'active',
-      entry?.id === pinnedCatalogId ||
-        (!!occurrence && entry?.nodeIds.includes(occurrence.node.nodeId)),
+      target?.id === pinnedCatalogId ||
+        (!!occurrence && target?.nodeIds.includes(occurrence.node.nodeId)),
     );
-    button.classList.toggle('pinned', entry?.id === pinnedCatalogId);
+    element.classList.toggle('pinned', target?.id === pinnedCatalogId);
   });
+}
+
+function containsSourceRef(
+  container: SourceRef,
+  candidate: SourceRef,
+): boolean {
+  return container.start <= candidate.start && candidate.end <= container.end;
 }
 
 function scopeButton(
