@@ -16,9 +16,25 @@ export type SourcePreview = Readonly<{
   objects: readonly ModelSnapshotObject[];
 }>;
 
+export type ObjectCatalogEntry = Readonly<{
+  id: string;
+  label: string;
+  category: 'binding' | 'export' | 'expression';
+  scope: 'module' | 'local';
+  visibility: 'primary' | 'lineage';
+  sourceRef: SourceRef;
+  nodeIds: readonly string[];
+  executions: number;
+  firstOrder: number;
+  lastOrder: number;
+  exportNames: readonly string[];
+}>;
+
 export type ModelModule = Readonly<{
-  root: ModelSnapshotObject;
+  fallback: ModelSnapshotObject;
+  objects: ReadonlyMap<string, ModelSnapshotObject>;
   exports: ReadonlyMap<string, string>;
+  catalog: readonly ObjectCatalogEntry[];
   parameterImpacts: ReadonlyMap<string, number>;
   sourcePreviews: readonly SourcePreview[];
 }>;
@@ -68,6 +84,18 @@ type ParameterSignature = Readonly<{
   operation: string;
   arguments: readonly ParameterArgument[];
 }>;
+
+type CatalogTrace = {
+  id: string;
+  label: string;
+  category: ObjectCatalogEntry['category'];
+  scope: ObjectCatalogEntry['scope'];
+  sourceRef: SourceRef;
+  objects: Set<ModelObject>;
+  executions: number;
+  firstOrder: number;
+  lastOrder: number;
+};
 
 const signatures = new Map<string, ParameterSignature>([
   [
@@ -159,9 +187,12 @@ const sourceTraces = new Map<
   string,
   {sourceRef: SourceRef; objects: Set<ModelObject>}
 >();
+const catalogTraces = new Map<string, CatalogTrace>();
 const parameterFrames: ParameterUsage[][] = [];
+let evaluationOrder = 0;
 const traceRuntime = Object.freeze({
   trace<T>(start: number, end: number, run: () => T): T {
+    const order = ++evaluationOrder;
     const parameters: ParameterUsage[] = [];
     parameterFrames.push(parameters);
     let result: T;
@@ -179,13 +210,38 @@ const traceRuntime = Object.freeze({
         recordSourceObject(start, end, object),
       );
     }
+    recordCatalogValue(
+      {
+        id: `expression:${start}:${end}`,
+        label: 'expression',
+        category: 'expression',
+        scope: 'local',
+        sourceRef: {start, end},
+      },
+      result,
+      order,
+    );
     return result;
   },
 
-  bind<T>(start: number, end: number, run: () => T): T {
+  bind<T>(
+    start: number,
+    end: number,
+    id: string,
+    label: string,
+    category: ObjectCatalogEntry['category'],
+    scope: ObjectCatalogEntry['scope'],
+    run: () => T,
+  ): T {
+    const order = ++evaluationOrder;
     const result = run();
     modelObjectsIn(result).forEach(object =>
       recordSourceObject(start, end, object),
+    );
+    recordCatalogValue(
+      {id, label, category, scope, sourceRef: {start, end}},
+      result,
+      order,
     );
     return result;
   },
@@ -236,6 +292,30 @@ function recordSourceObject(
   sourceTraces.set(key, sourceTrace);
 }
 
+function recordCatalogValue(
+  metadata: Readonly<
+    Pick<CatalogTrace, 'id' | 'label' | 'category' | 'scope' | 'sourceRef'>
+  >,
+  value: unknown,
+  order: number,
+): void {
+  const objects = modelObjectsIn(value);
+  if (objects.length === 0) {
+    return;
+  }
+  const trace = catalogTraces.get(metadata.id) ?? {
+    ...metadata,
+    objects: new Set<ModelObject>(),
+    executions: 0,
+    firstOrder: order,
+    lastOrder: order,
+  };
+  objects.forEach(object => trace.objects.add(object));
+  trace.executions += 1;
+  trace.lastOrder = order;
+  catalogTraces.set(metadata.id, trace);
+}
+
 function modelObjectsIn(
   value: unknown,
   seen = new Set<unknown>(),
@@ -243,17 +323,32 @@ function modelObjectsIn(
   if (isModelObject(value)) {
     return [value];
   }
-  if (!Array.isArray(value) || seen.has(value)) {
+  if (typeof value !== 'object' || value === null || seen.has(value)) {
     return [];
   }
   seen.add(value);
-  return value.flatMap(item => modelObjectsIn(item, seen));
+  if (Array.isArray(value)) {
+    return value.flatMap(item => modelObjectsIn(item, seen));
+  }
+  if (value instanceof Map) {
+    return [...value.values()].flatMap(item => modelObjectsIn(item, seen));
+  }
+  if (value instanceof Set) {
+    return [...value].flatMap(item => modelObjectsIn(item, seen));
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype === Object.prototype || prototype === null) {
+    return Object.values(value).flatMap(item => modelObjectsIn(item, seen));
+  }
+  return [];
 }
 
 export function compileModel(source: string): ModelModule {
   tracedObjects.clear();
   sourceTraces.clear();
+  catalogTraces.clear();
   parameterFrames.length = 0;
+  evaluationOrder = 0;
   const result = ts.transpileModule(source, {
     fileName: 'model.ts',
     compilerOptions: {
@@ -295,16 +390,26 @@ export function compileModel(source: string): ModelModule {
   try {
     execute(requireModule, module, module.exports, traceRuntime);
 
-    const root = module.exports.default;
-    if (!isModelObject(root)) {
-      throw new Error('模型模块必须 default export 一个 ModelObject。');
-    }
-
     const modelExports = new Map<string, ModelObject>();
+    const exportNamesByObject = new Map<ModelObject, Set<string>>();
     for (const [name, value] of Object.entries(module.exports)) {
       if (isModelObject(value)) {
         modelExports.set(name, value);
       }
+      for (const object of modelObjectsIn(value)) {
+        tracedObjects.add(object);
+        const names = exportNamesByObject.get(object) ?? new Set<string>();
+        names.add(name);
+        exportNamesByObject.set(object, names);
+      }
+    }
+
+    const fallbackObject =
+      modelExports.get('default') ??
+      [...modelExports.values()].at(-1) ??
+      latestSourceObject();
+    if (!fallbackObject) {
+      throw new Error('当前代码没有产生可渲染的 ModelObject。');
     }
 
     const meshCache = new Map();
@@ -314,16 +419,44 @@ export function compileModel(source: string): ModelModule {
       snapshots.set(object, snapshot);
       return snapshot;
     };
-    const rootSnapshot = snapshotOf(root);
+    const fallbackSnapshot = snapshotOf(fallbackObject);
+    const objectSnapshots = new Map(
+      [...tracedObjects].map(object => [object.nodeId, snapshotOf(object)]),
+    );
     return {
-      root: rootSnapshot,
+      fallback: fallbackSnapshot,
+      objects: objectSnapshots,
       exports: new Map(
         [...modelExports].map(([name, modelObject]) => [
           name,
           modelObject.nodeId,
         ]),
       ),
-      parameterImpacts: countParameterImpacts(rootSnapshot),
+      catalog: [...catalogTraces.values()]
+        .sort((left, right) => left.firstOrder - right.firstOrder)
+        .map(trace => ({
+          id: trace.id,
+          label: trace.label,
+          category: trace.category,
+          scope: trace.scope,
+          visibility:
+            trace.category === 'expression' || trace.scope === 'local'
+              ? 'lineage'
+              : 'primary',
+          sourceRef: trace.sourceRef,
+          nodeIds: [...trace.objects].map(object => object.nodeId),
+          executions: trace.executions,
+          firstOrder: trace.firstOrder,
+          lastOrder: trace.lastOrder,
+          exportNames: [
+            ...new Set(
+              [...trace.objects].flatMap(object => [
+                ...(exportNamesByObject.get(object) ?? []),
+              ]),
+            ),
+          ],
+        })),
+      parameterImpacts: countParameterImpacts(fallbackSnapshot),
       sourcePreviews: [...sourceTraces.values()].map(
         ({sourceRef, objects}) => ({
           sourceRef,
@@ -335,8 +468,15 @@ export function compileModel(source: string): ModelModule {
     disposeModelObjects(tracedObjects);
     tracedObjects.clear();
     sourceTraces.clear();
+    catalogTraces.clear();
     parameterFrames.length = 0;
+    evaluationOrder = 0;
   }
+}
+
+function latestSourceObject(): ModelObject | undefined {
+  const latestTrace = [...sourceTraces.values()].at(-1);
+  return latestTrace ? [...latestTrace.objects].at(-1) : undefined;
 }
 
 function createTraceTransformer(): ts.TransformerFactory<ts.SourceFile> {
@@ -354,17 +494,26 @@ function createTraceTransformer(): ts.TransformerFactory<ts.SourceFile> {
           visited.initializer &&
           isTraceableExpression(node.initializer, sourceFile)
         ) {
+          const scope = isModuleVariableDeclaration(node) ? 'module' : 'local';
+          const label = node.name.getText(sourceFile);
+          const id =
+            scope === 'module' && ts.isIdentifier(node.name)
+              ? `binding:${node.name.text}`
+              : `binding:${node.name.getStart(sourceFile)}:${label}`;
           return factory.updateVariableDeclaration(
             visited,
             visited.name,
             visited.exclamationToken,
             visited.type,
-            traceExpression(
+            bindExpression(
               visited.initializer,
               node.name.getStart(sourceFile),
               node.initializer.getEnd(),
+              id,
+              label,
+              'binding',
+              scope,
               factory,
-              'bind',
             ),
           );
         }
@@ -378,12 +527,15 @@ function createTraceTransformer(): ts.TransformerFactory<ts.SourceFile> {
           return factory.updateExportAssignment(
             visited,
             visited.modifiers,
-            traceExpression(
+            bindExpression(
               visited.expression,
               node.expression.getStart(sourceFile),
               node.expression.getEnd(),
+              'export:default',
+              'default',
+              'export',
+              'module',
               factory,
-              'bind',
             ),
           );
         }
@@ -426,12 +578,11 @@ function traceExpression(
   start: number,
   end: number,
   factory: ts.NodeFactory,
-  method: 'trace' | 'bind' = 'trace',
 ): ts.CallExpression {
   return factory.createCallExpression(
     factory.createPropertyAccessExpression(
       factory.createIdentifier('__code3d'),
-      method,
+      'trace',
     ),
     undefined,
     [
@@ -447,6 +598,46 @@ function traceExpression(
       ),
     ],
   );
+}
+
+function bindExpression(
+  expression: ts.Expression,
+  start: number,
+  end: number,
+  id: string,
+  label: string,
+  category: ObjectCatalogEntry['category'],
+  scope: ObjectCatalogEntry['scope'],
+  factory: ts.NodeFactory,
+): ts.CallExpression {
+  return factory.createCallExpression(
+    factory.createPropertyAccessExpression(
+      factory.createIdentifier('__code3d'),
+      'bind',
+    ),
+    undefined,
+    [
+      factory.createNumericLiteral(start),
+      factory.createNumericLiteral(end),
+      factory.createStringLiteral(id),
+      factory.createStringLiteral(label),
+      factory.createStringLiteral(category),
+      factory.createStringLiteral(scope),
+      factory.createArrowFunction(
+        undefined,
+        undefined,
+        [],
+        undefined,
+        factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
+        expression,
+      ),
+    ],
+  );
+}
+
+function isModuleVariableDeclaration(node: ts.VariableDeclaration): boolean {
+  const statement = node.parent.parent;
+  return ts.isVariableStatement(statement) && ts.isSourceFile(statement.parent);
 }
 
 function instrumentCallParameters(

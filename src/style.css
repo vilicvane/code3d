@@ -353,6 +353,138 @@ kbd {
   display: none;
 }
 
+.object-catalog {
+  position: absolute;
+  top: 34px;
+  left: 14px;
+  z-index: 3;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  width: 206px;
+  max-height: calc(100% - 50px);
+  overflow: hidden;
+  border: 1px solid #353831;
+  border-radius: 5px;
+  background: #11120fed;
+  box-shadow: 0 18px 50px #0007;
+  backdrop-filter: blur(12px);
+}
+
+.object-catalog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 10px 8px;
+  color: #777c70;
+  border-bottom: 1px solid #292c26;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 8px;
+  letter-spacing: 0.11em;
+}
+
+.object-catalog-header span:last-child {
+  color: #a4aa9d;
+  letter-spacing: 0;
+}
+
+.object-catalog-list {
+  min-height: 0;
+  padding: 4px;
+  overflow: auto;
+}
+
+.object-catalog-entry {
+  position: relative;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  gap: 5px;
+  align-items: center;
+  width: 100%;
+  padding: 7px 6px;
+  color: #999e93;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.object-catalog-entry:hover,
+.object-catalog-entry.active {
+  color: #e1e3dc;
+  background: #20221d;
+}
+
+.object-catalog-entry.pinned::before {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: 0;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--acid);
+  content: '';
+}
+
+.object-catalog-order,
+.object-catalog-instances,
+.object-catalog-copy small {
+  font-family: 'IBM Plex Mono', monospace;
+}
+
+.object-catalog-order {
+  color: #5e6359;
+  font-size: 8px;
+}
+
+.object-catalog-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.object-catalog-copy strong,
+.object-catalog-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.object-catalog-copy strong {
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.object-catalog-copy small {
+  color: #666b61;
+  font-size: 7px;
+  letter-spacing: 0.05em;
+}
+
+.object-catalog-instances {
+  align-self: start;
+  padding-top: 1px;
+  color: var(--acid);
+  font-size: 8px;
+}
+
+.object-catalog-hint,
+.object-catalog-empty {
+  margin: 0;
+  color: #5f645a;
+  font-size: 8px;
+}
+
+.object-catalog-hint {
+  padding: 8px 10px;
+  border-top: 1px solid #292c26;
+}
+
+.object-catalog-empty {
+  padding: 14px 8px;
+  text-align: center;
+}
+
 .inspector {
   position: absolute;
   right: 14px;
@@ -588,5 +720,9 @@ input[type='range']::-webkit-slider-thumb {
 
   .inspector {
     width: 190px;
+  }
+
+  .object-catalog {
+    width: 178px;
   }
 }

@@ -2,18 +2,22 @@
 
 第一个 prototype 验证“TypeScript 模型对象 + scoped GUI 交互”的最小闭环。
 
-通用 GUI 工具与源码编辑协议见 [TOOLING.md](./TOOLING.md)。
+当前设计与实施顺序见 [PLAN.md](./PLAN.md)，通用 GUI 工具与源码编辑协议见
+[TOOLING.md](./TOOLING.md)。
 
 ## 已验证
 
 - 使用普通 TypeScript 自由构建和组合对象。
-- `default export` 作为渲染入口，命名导出作为可选 scope。
+- 源码产生任意模型对象即可预览；export 只是可选发布边界和 fallback。
+- `model()` 不是入口要求，源码选择决定主要渲染对象。
 - Monaco 提供 `code3d` API 的类型和补全。
 - 用户代码与 OpenCascade 在可终止 Worker 中编译和执行。
 - primitive、变换、布尔运算、圆角和倒角由 OCCT B-Rep 计算。
 - Worker 将 B-Rep 三角化为 surface、法线和拓扑边线供 Three.js 渲染。
 - 点击模型定位源码；移动光标会独立渲染对应的运行时模型节点。
 - 同一源码表达式产生多个对象时，源码节点预览会同时显示这些对象。
+- 运行时对象目录按模块绑定组织对象；数组和循环结果会聚合显示实例数。
+- 目录支持悬停临时预览、点击固定渲染并定位回对应源码。
 - 局部 Inspector 将 API 参数追溯到上游变量或源码字面量。
 - 参数拖动先做临时预览，确认后通过 Monaco 编辑直接写回源码。
 - Monaco 使用 Prettier 格式化模型源码；GUI 写回后自动格式化，也可使用 `Shift+Alt+F`。
@@ -65,6 +69,8 @@ npm run lint-prettier
 ## 当前边界
 
 - 只支持一个入口模组；运行时仅能导入 `code3d`。
+- 对象目录暂只展示模块级绑定；匿名中间值已记录，但尚无 lineage 展开视图。
+- 目录的模块绑定 ID 可跨重算保持，局部表达式仍使用源码区间定位。
 - code3d API 目前只开放 box、cylinder、sphere 和基础实体运算。
 - 当前可写回顶层数值变量、直接字面量及由它们组成的简单四则表达式。
 - 任意函数调用、闭包、解构和非线性表达式还不会被自动反向编辑。
@@ -74,6 +80,8 @@ npm run lint-prettier
 
 ## 下一步
 
+- 增加对象目录的局部 lineage、实例展开和缩略图视图。
+- 将实体变换拆为几何与不可变位置关系图。
 - 将 face/edge group ID 接入拾取，验证局部拓扑 scope。
 - 扩展参数追踪到更多词法 scope，并处理存在多个上游候选的编辑选择。
 - 验证实体布尔失败、取消执行和连续重算的内存行为。

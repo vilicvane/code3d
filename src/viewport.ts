@@ -19,7 +19,21 @@ export type Occurrence = Readonly<{
   node: ModelSnapshotObject;
   object: THREE.Object3D;
   depth: number;
-  view: 'model' | 'source';
+  view: 'model' | 'object' | 'source';
+}>;
+
+type ViewTarget =
+  | Readonly<{kind: 'model'}>
+  | Readonly<{kind: 'objects'; nodeIds: readonly string[]}>
+  | Readonly<{kind: 'source'; sourceRef: SourceRef}>;
+
+type PreviewRestore = Readonly<{
+  target: ViewTarget;
+  selectedKey: string;
+  cameraPosition: THREE.Vector3;
+  controlsTarget: THREE.Vector3;
+  cameraNear: number;
+  cameraFar: number;
 }>;
 
 export class ModelViewport {
@@ -42,6 +56,8 @@ export class ModelViewport {
   private sourcePreviewRef?: SourceRef;
   private explode = 0;
   private module: ModelModule | null = null;
+  private viewTarget: ViewTarget = {kind: 'model'};
+  private previewRestore?: PreviewRestore;
 
   constructor(
     private readonly container: HTMLElement,
@@ -111,19 +127,9 @@ export class ModelViewport {
     fitCamera = true,
   ): void {
     this.module = module;
-    this.sourcePreviewRef = undefined;
-    this.resetRenderedView();
-
-    const rootObject = this.buildObject(module.root, 'root', 0, 'model');
-    this.root.add(rootObject);
-    this.applyPreviewTransforms();
-    this.selectKey(
-      this.occurrences.has(selectedKey) ? selectedKey : 'root',
-      false,
-    );
-    if (fitCamera) {
-      this.fit();
-    }
+    this.viewTarget = {kind: 'model'};
+    this.previewRestore = undefined;
+    this.renderModelView(selectedKey, fitCamera);
   }
 
   selectBySourceOffset(offset: number): boolean {
@@ -140,10 +146,6 @@ export class ModelViewport {
       )[0];
 
     if (!match) {
-      if (this.sourcePreviewRef) {
-        this.renderModule(this.module, 'root', true);
-        return true;
-      }
       return false;
     }
 
@@ -151,28 +153,104 @@ export class ModelViewport {
       !this.sourcePreviewRef ||
       !sameSource(match.sourceRef, this.sourcePreviewRef)
     ) {
+      this.viewTarget = {kind: 'source', sourceRef: match.sourceRef};
+      this.previewRestore = undefined;
       this.renderSourcePreview(match);
     }
     return true;
   }
 
   selectNode(nodeId: string): void {
-    if (this.sourcePreviewRef && this.module) {
-      this.renderModule(this.module, 'root', true);
-    }
     const occurrence = [...this.occurrences.values()].find(
-      candidate => candidate.node.nodeId === nodeId,
+      candidate =>
+        candidate.view !== 'source' && candidate.node.nodeId === nodeId,
     );
     if (occurrence) {
       this.selectKey(occurrence.key, true);
+      return;
+    }
+    const node = this.module?.objects.get(nodeId);
+    if (node) {
+      this.selectNodes([nodeId]);
     }
   }
 
   selectRoot(): void {
-    if (this.sourcePreviewRef && this.module) {
-      this.renderModule(this.module, 'root', true);
+    this.viewTarget = {kind: 'model'};
+    this.previewRestore = undefined;
+    if (!this.occurrences.has('root') && this.module) {
+      this.renderModelView('root', true);
     }
     this.selectKey('root', true);
+  }
+
+  selectNodes(nodeIds: readonly string[]): boolean {
+    const nodes = this.resolveNodes(nodeIds);
+    if (nodes.length === 0) {
+      return false;
+    }
+    this.viewTarget = {
+      kind: 'objects',
+      nodeIds: nodes.map(node => node.nodeId),
+    };
+    this.previewRestore = undefined;
+    this.renderObjects(nodes, true, true);
+    return true;
+  }
+
+  previewNodes(nodeIds: readonly string[]): boolean {
+    const nodes = this.resolveNodes(nodeIds);
+    if (nodes.length === 0) {
+      return false;
+    }
+    this.previewRestore ??= {
+      target: this.viewTarget,
+      selectedKey: this.selectedKey,
+      cameraPosition: this.camera.position.clone(),
+      controlsTarget: this.controls.target.clone(),
+      cameraNear: this.camera.near,
+      cameraFar: this.camera.far,
+    };
+    this.renderObjects(nodes, true, false);
+    return true;
+  }
+
+  restoreView(): void {
+    if (!this.module) {
+      return;
+    }
+    const restore = this.previewRestore;
+    const target = restore?.target ?? this.viewTarget;
+    const selectedKey = restore?.selectedKey;
+    this.previewRestore = undefined;
+    if (target.kind === 'model') {
+      this.renderModelView(selectedKey ?? 'root', !restore);
+    } else if (target.kind === 'objects') {
+      this.renderObjects(
+        this.resolveNodes(target.nodeIds),
+        !restore,
+        false,
+        selectedKey,
+      );
+    } else {
+      const preview = this.module.sourcePreviews.find(({sourceRef}) =>
+        sameSource(sourceRef, target.sourceRef),
+      );
+      if (preview) {
+        this.renderSourcePreview(preview, !restore, selectedKey);
+      } else {
+        this.viewTarget = {kind: 'model'};
+        this.renderModelView('root', !restore);
+      }
+    }
+    if (restore) {
+      this.camera.position.copy(restore.cameraPosition);
+      this.controls.target.copy(restore.controlsTarget);
+      this.camera.near = restore.cameraNear;
+      this.camera.far = restore.cameraFar;
+      this.camera.updateProjectionMatrix();
+      this.controls.update();
+    }
   }
 
   getSelected(): Occurrence | undefined {
@@ -277,18 +355,89 @@ export class ModelViewport {
     return object;
   }
 
-  private renderSourcePreview(preview: SourcePreview): void {
+  private renderSourcePreview(
+    preview: SourcePreview,
+    fitCamera = true,
+    selectedKey?: string,
+  ): void {
     this.sourcePreviewRef = preview.sourceRef;
     this.resetRenderedView();
     preview.objects.forEach((node, index) => {
       this.root.add(this.buildObject(node, `source/${index}`, 1, 'source'));
     });
     this.applyPreviewTransforms();
-    const first = this.occurrences.keys().next().value;
-    if (first) {
-      this.selectKey(first, false);
+    const nextKey =
+      selectedKey && this.occurrences.has(selectedKey)
+        ? selectedKey
+        : this.occurrences.keys().next().value;
+    if (nextKey) {
+      this.selectKey(nextKey, false);
     }
-    this.fit();
+    if (fitCamera) {
+      this.fit();
+    }
+  }
+
+  private renderModelView(selectedKey: string, fitCamera: boolean): void {
+    if (!this.module) {
+      return;
+    }
+    this.sourcePreviewRef = undefined;
+    this.resetRenderedView();
+    const rootObject = this.buildObject(
+      this.module.fallback,
+      'root',
+      this.module.fallback.kind === 'group' ? 0 : 1,
+      'model',
+    );
+    this.root.add(rootObject);
+    this.applyPreviewTransforms();
+    this.selectKey(
+      this.occurrences.has(selectedKey) ? selectedKey : 'root',
+      false,
+    );
+    if (fitCamera) {
+      this.fit();
+    }
+  }
+
+  private renderObjects(
+    nodes: readonly ModelSnapshotObject[],
+    fitCamera: boolean,
+    notify: boolean,
+    selectedKey?: string,
+  ): void {
+    this.sourcePreviewRef = undefined;
+    this.resetRenderedView();
+    nodes.forEach((node, index) => {
+      this.root.add(this.buildObject(node, `object/${index}`, 1, 'object'));
+    });
+    this.applyPreviewTransforms();
+    const nextKey =
+      selectedKey && this.occurrences.has(selectedKey)
+        ? selectedKey
+        : this.occurrences.keys().next().value;
+    if (nextKey) {
+      this.selectKey(nextKey, notify);
+    }
+    if (fitCamera) {
+      this.fit();
+    }
+  }
+
+  private resolveNodes(nodeIds: readonly string[]): ModelSnapshotObject[] {
+    if (!this.module) {
+      return [];
+    }
+    const seen = new Set<string>();
+    return nodeIds.flatMap(nodeId => {
+      const node = this.module?.objects.get(nodeId);
+      if (!node || seen.has(node.nodeId)) {
+        return [];
+      }
+      seen.add(node.nodeId);
+      return [node];
+    });
   }
 
   private resetRenderedView(): void {

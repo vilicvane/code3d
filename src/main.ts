@@ -1,7 +1,7 @@
 import './style.css';
 import {CodeEditor} from './editor';
 import {ModelCompilerClient} from './model/compiler-client';
-import type {ModelModule} from './model/compiler';
+import type {ModelModule, ObjectCatalogEntry} from './model/compiler';
 import {sampleSource} from './model/sample';
 import type {
   ModelSnapshotObject,
@@ -75,6 +75,14 @@ app.innerHTML = `
         <div class="viewport-host" id="viewport-host">
           <div class="viewport-hint">拖动旋转 · 滚轮缩放 · 点击对象 · 拖动 gizmo</div>
           <div class="tool-status" id="tool-status" hidden></div>
+          <aside class="object-catalog" aria-label="运行时对象">
+            <header class="object-catalog-header">
+              <span>OBJECTS</span>
+              <span id="object-catalog-count">0</span>
+            </header>
+            <div class="object-catalog-list" id="object-catalog-list"></div>
+            <p class="object-catalog-hint">悬停预览 · 点击定位并固定</p>
+          </aside>
           <aside class="inspector" id="inspector"></aside>
         </div>
       </section>
@@ -95,6 +103,8 @@ const runState = requiredElement('run-state');
 const runStateLabel = requiredElement('run-state-label');
 const errorBar = requiredElement('error-bar');
 const scopeList = requiredElement('scope-list');
+const objectCatalogList = requiredElement('object-catalog-list');
+const objectCatalogCount = requiredElement('object-catalog-count');
 const inspector = requiredElement('inspector');
 const toolStatus = requiredElement('tool-status');
 const runButton = requiredElement<HTMLButtonElement>('run-button');
@@ -107,6 +117,8 @@ let compileTimer: number | undefined;
 let explodeValue = 0;
 let runRevision = 0;
 let positionToolSession: ToolSession | undefined;
+let pinnedCatalogId: string | undefined;
+let catalogHoverTimer: number | undefined;
 
 const viewport = new ModelViewport(
   viewportHost,
@@ -132,7 +144,9 @@ codeEditor.onChange(() => {
 });
 
 codeEditor.onCursorOffset(offset => {
-  viewport.selectBySourceOffset(offset);
+  if (viewport.selectBySourceOffset(offset)) {
+    pinnedCatalogId = undefined;
+  }
   const occurrence = viewport.getSelected();
   if (occurrence) {
     selectOccurrence(occurrence, false);
@@ -179,15 +193,18 @@ async function runModel(): Promise<void> {
     viewport.renderModule(currentModule, selectedKey, firstRun);
     explodeValue = 0;
     renderScopes(currentModule);
+    renderObjectCatalog(currentModule);
     const cursorOffset = codeEditor.cursorOffset();
     if (cursorOffset !== undefined) {
-      viewport.selectBySourceOffset(cursorOffset);
+      if (viewport.selectBySourceOffset(cursorOffset)) {
+        pinnedCatalogId = undefined;
+      }
     }
     const selected = viewport.getSelected();
     if (selected) {
       selectOccurrence(selected, false);
     }
-    const objectCount = countObjects(currentModule.root);
+    const objectCount = countObjects(currentModule.fallback);
     setRunState('ready', `${objectCount} 个对象`);
   } catch (error) {
     if (revision !== runRevision) {
@@ -203,17 +220,140 @@ async function runModel(): Promise<void> {
 function renderScopes(module: ModelModule): void {
   scopeList.replaceChildren();
   scopeList.append(
-    scopeButton('整体', module.root.nodeId, () => viewport.selectRoot()),
+    scopeButton('整体预览', module.fallback.nodeId, () => {
+      pinnedCatalogId = undefined;
+      viewport.selectRoot();
+      updateCatalogSelection(viewport.getSelected());
+    }),
   );
+}
 
-  for (const [name, nodeId] of module.exports) {
-    if (name === 'default' || nodeId === module.root.nodeId) {
-      continue;
-    }
-    scopeList.append(
-      scopeButton(name, nodeId, () => viewport.selectNode(nodeId)),
-    );
+function renderObjectCatalog(module: ModelModule): void {
+  window.clearTimeout(catalogHoverTimer);
+  objectCatalogList.replaceChildren();
+  const entries = module.catalog.filter(
+    entry => entry.visibility === 'primary' && entry.nodeIds.length > 0,
+  );
+  objectCatalogCount.textContent = String(entries.length);
+
+  if (entries.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'object-catalog-empty';
+    empty.textContent = '暂无命名对象';
+    objectCatalogList.append(empty);
+    return;
   }
+
+  entries.forEach((entry, index) => {
+    const item = objectCatalogEntry(entry, index, module);
+    item.addEventListener('pointerenter', () => {
+      window.clearTimeout(catalogHoverTimer);
+      if (entry.id === pinnedCatalogId) {
+        return;
+      }
+      catalogHoverTimer = window.setTimeout(() => {
+        if (viewport.previewNodes(entry.nodeIds)) {
+          syncViewportSelection();
+        }
+      }, 100);
+    });
+    item.addEventListener('pointerleave', () => {
+      window.clearTimeout(catalogHoverTimer);
+      if (entry.id === pinnedCatalogId) {
+        return;
+      }
+      viewport.restoreView();
+      syncViewportSelection();
+    });
+    item.addEventListener('click', () => {
+      window.clearTimeout(catalogHoverTimer);
+      pinnedCatalogId = entry.id;
+      if (viewport.selectNodes(entry.nodeIds)) {
+        codeEditor.revealSource(entry.sourceRef);
+        syncViewportSelection();
+      }
+    });
+    objectCatalogList.append(item);
+  });
+
+  if (pinnedCatalogId && !entries.some(entry => entry.id === pinnedCatalogId)) {
+    pinnedCatalogId = undefined;
+  }
+}
+
+function objectCatalogEntry(
+  entry: ObjectCatalogEntry,
+  index: number,
+  module: ModelModule,
+): HTMLButtonElement {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'object-catalog-entry';
+  button.dataset.catalogId = entry.id;
+  button.title = `${entry.label}：点击定位源码并固定预览`;
+
+  const order = document.createElement('span');
+  order.className = 'object-catalog-order';
+  order.textContent = String(index + 1).padStart(2, '0');
+
+  const copy = document.createElement('span');
+  copy.className = 'object-catalog-copy';
+  const label = document.createElement('strong');
+  label.textContent = entry.label;
+  const meta = document.createElement('small');
+  meta.textContent = catalogEntryMeta(entry, module);
+  copy.append(label, meta);
+
+  const count = document.createElement('span');
+  count.className = 'object-catalog-instances';
+  count.textContent =
+    entry.nodeIds.length > 1 ? `×${entry.nodeIds.length}` : '';
+  button.append(order, copy, count);
+  return button;
+}
+
+function catalogEntryMeta(
+  entry: ObjectCatalogEntry,
+  module: ModelModule,
+): string {
+  const kinds = new Set(
+    entry.nodeIds.flatMap(nodeId => {
+      const node = module.objects.get(nodeId);
+      return node ? [node.kind] : [];
+    }),
+  );
+  const parts = [kinds.size === 1 ? [...kinds][0].toUpperCase() : 'COLLECTION'];
+  if (entry.executions > 1) {
+    parts.push(`${entry.executions} RUNS`);
+  }
+  if (entry.exportNames.length > 0) {
+    parts.push(`EXPORT ${entry.exportNames.join(', ')}`);
+  }
+  return parts.join(' · ');
+}
+
+function syncViewportSelection(): void {
+  const occurrence = viewport.getSelected();
+  if (occurrence) {
+    selectOccurrence(occurrence, false);
+  }
+}
+
+function updateCatalogSelection(occurrence?: Occurrence): void {
+  const entries = objectCatalogList.querySelectorAll<HTMLButtonElement>(
+    '.object-catalog-entry',
+  );
+  entries.forEach(button => {
+    const entry = currentModule?.catalog.find(
+      candidate => candidate.id === button.dataset.catalogId,
+    );
+    button.classList.toggle(
+      'active',
+      entry?.id === pinnedCatalogId ||
+        (!!occurrence && entry?.nodeIds.includes(occurrence.node.nodeId)),
+    );
+    button.classList.toggle('pinned', entry?.id === pinnedCatalogId);
+  });
 }
 
 function scopeButton(
@@ -233,6 +373,7 @@ function scopeButton(
 function selectOccurrence(occurrence: Occurrence, revealSource: boolean): void {
   renderInspector(occurrence);
   updateActiveScope(occurrence);
+  updateCatalogSelection(occurrence);
 
   if (revealSource) {
     const sourceRef = primarySource(occurrence.node);
@@ -637,11 +778,7 @@ function updateActiveScope(occurrence: Occurrence): void {
   const buttons =
     scopeList.querySelectorAll<HTMLButtonElement>('.scope-button');
   buttons.forEach(button => {
-    button.classList.toggle(
-      'active',
-      occurrence.view === 'model' &&
-        button.dataset.nodeId === occurrence.node.nodeId,
-    );
+    button.classList.toggle('active', occurrence.view === 'model');
   });
 }
 
