@@ -57,6 +57,12 @@ not silently reorder the active milestones.
   value site renders that value alone; an operation-input site may also render
   its peer inputs as non-interactive context. Mouse hover over source code does
   not change the viewport.
+- Operation-specific emphasis is supplied through generic viewport decoration
+  providers. Boolean input scopes can mark exact B-Rep intersection volumes and
+  union contact sections without teaching the viewport those semantics.
+- A provider chooses whether its decoration remains visible during a tool
+  preview. Boolean regions hide while geometry moves, then return on cancel or
+  from newly evaluated topology after commit.
 - Repeated executions of the same source occurrence are presented together,
   including values produced by loops or collection operations.
 - Export status must not change the geometry or position semantics of an object.
@@ -99,9 +105,12 @@ inputs. The outline shows module bindings with optional local lineage, source
 navigation on click, and temporary object preview on hover. The exact
 operation-input occurrence under the caret drives the separate non-selectable
 viewport context layer, so the same value can render differently at its
-declaration and at a Boolean use site. Source-aware identities survive normal
-recompiles and parameter write-back; matching across large control-flow or
-structural rewrites remains open.
+declaration and at a Boolean use site. `cut` tool inputs additionally show their
+exact removed volume; `union` inputs show overlap volumes or contact sections.
+Those regions stay hidden during transient movement and are recomputed by the
+kernel after commit. Source-aware identities survive normal recompiles and
+parameter write-back; matching across large control-flow or structural rewrites
+remains open.
 
 ### 2a. Unified dock panels — complete
 

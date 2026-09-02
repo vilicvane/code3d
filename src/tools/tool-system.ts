@@ -4,6 +4,7 @@ import type {
   SourceRef,
   Vec3,
 } from '../model/runtime';
+import type {ViewportDecoration} from '../viewport-decoration';
 import {rotateVector} from '../model/spatial';
 
 export type ExpressionDraft =
@@ -82,6 +83,11 @@ export type ToolPreview =
       kind: 'occurrence-translation';
       occurrenceKeys: readonly string[];
       delta: Vec3;
+    }>
+  | Readonly<{
+      kind: 'viewport-decorations';
+      owner: string;
+      decorations: readonly ViewportDecoration[];
     }>;
 
 export type ToolEditPlan = Readonly<{
@@ -114,7 +120,7 @@ export interface ToolHost {
     edits: readonly SourceTextEdit[],
   ): boolean;
   applyPreview(preview: ToolPreview): void;
-  clearPreview(preview: ToolPreview): void;
+  clearPreview(preview: ToolPreview, reason: 'replace' | 'end'): void;
 }
 
 type ResolveContext = Readonly<{
@@ -196,11 +202,11 @@ export class ToolSession {
       intent,
     );
     if (resolution.status !== 'ready') {
-      this.clearActivePreview();
+      this.clearActivePreview('end');
       return resolution;
     }
     if (this.activePreview) {
-      this.engine.host.clearPreview(this.activePreview);
+      this.engine.host.clearPreview(this.activePreview, 'replace');
     }
     this.activePreview = resolution.plan.preview;
     this.lastIntent = intent;
@@ -218,7 +224,7 @@ export class ToolSession {
       intent,
     );
     if (resolution.status !== 'ready') {
-      this.clearActivePreview();
+      this.clearActivePreview('end');
       this.closed = true;
       return resolution;
     }
@@ -228,7 +234,7 @@ export class ToolSession {
         resolution.plan.edits,
       )
     ) {
-      this.clearActivePreview();
+      this.clearActivePreview('end');
       this.closed = true;
       return {
         status: 'conflict',
@@ -240,13 +246,13 @@ export class ToolSession {
   }
 
   cancel(): void {
-    this.clearActivePreview();
+    this.clearActivePreview('end');
     this.closed = true;
   }
 
-  private clearActivePreview(): void {
+  private clearActivePreview(reason: 'replace' | 'end'): void {
     if (this.activePreview) {
-      this.engine.host.clearPreview(this.activePreview);
+      this.engine.host.clearPreview(this.activePreview, reason);
       this.activePreview = undefined;
     }
   }

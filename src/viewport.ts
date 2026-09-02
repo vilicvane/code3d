@@ -4,7 +4,9 @@ import type {ModelModule, SourceTarget} from './model/compiler';
 import type {
   ModelSnapshotObject,
   ParameterUsage,
+  RenderMesh,
   SourceRef,
+  Transform,
   Vec3,
 } from './model/runtime';
 import {
@@ -13,6 +15,10 @@ import {
   type PositionGizmoBinding,
   type PositionGizmoEvent,
 } from './tools/position-gizmo';
+import type {
+  SourceDecorationProvider,
+  ViewportDecoration,
+} from './viewport-decoration';
 
 export type Occurrence = Readonly<{
   key: string;
@@ -36,6 +42,15 @@ type OutlinePreviewRestore = Readonly<{
   cameraFar: number;
 }>;
 
+export type ModelViewportOptions = Readonly<{
+  onSelect: (occurrence: Occurrence) => void;
+  onPositionTool: (event: PositionGizmoEvent) => void;
+  sourceDecorationProviders?: readonly SourceDecorationProvider[];
+}>;
+
+const sourceDecorationOwner = (providerId: string): string =>
+  `source-context:${providerId}`;
+
 export class ModelViewport {
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.PerspectiveCamera(42, 1, 0.1, 2000);
@@ -47,7 +62,10 @@ export class ModelViewport {
   private readonly occurrences = new Map<string, Occurrence>();
   private readonly parameterPreviews = new Map<string, number>();
   private readonly occurrenceTranslationPreviews = new Map<string, Vec3>();
+  private readonly decorationLayers = new Map<string, THREE.Group>();
   private readonly positionGizmo: PositionGizmo;
+  private readonly onSelect: ModelViewportOptions['onSelect'];
+  private readonly sourceDecorationProviders: readonly SourceDecorationProvider[];
   private readonly impactHelpers: THREE.BoxHelper[] = [];
   private selectionHelper: THREE.BoxHelper | null = null;
   private highlightedTargetId?: string;
@@ -61,9 +79,14 @@ export class ModelViewport {
 
   constructor(
     private readonly container: HTMLElement,
-    private readonly onSelect: (occurrence: Occurrence) => void,
-    onPositionTool: (event: PositionGizmoEvent) => void,
+    {
+      onSelect,
+      onPositionTool,
+      sourceDecorationProviders = [],
+    }: ModelViewportOptions,
   ) {
+    this.onSelect = onSelect;
+    this.sourceDecorationProviders = sourceDecorationProviders;
     this.renderer = new THREE.WebGLRenderer({
       antialias: true,
       alpha: false,
@@ -244,6 +267,52 @@ export class ModelViewport {
     this.applyPreviewTransforms();
   }
 
+  setDecorations(
+    owner: string,
+    decorations: readonly ViewportDecoration[],
+  ): void {
+    this.clearDecorations(owner);
+    if (decorations.length === 0) {
+      return;
+    }
+    const layer = new THREE.Group();
+    layer.name = `decorations:${owner}`;
+    decorations.forEach(decoration =>
+      layer.add(createDecorationObject(decoration)),
+    );
+    this.decorationLayers.set(owner, layer);
+    this.root.add(layer);
+  }
+
+  clearDecorations(owner: string): void {
+    const layer = this.decorationLayers.get(owner);
+    if (!layer) {
+      return;
+    }
+    this.root.remove(layer);
+    disposeObject(layer);
+    this.decorationLayers.delete(owner);
+  }
+
+  hideSourceDecorationsDuringPreview(): void {
+    this.sourceDecorationProviders
+      .filter(provider => provider.previewBehavior === 'hide')
+      .forEach(provider =>
+        this.clearDecorations(sourceDecorationOwner(provider.id)),
+      );
+  }
+
+  restoreSourceDecorations(): void {
+    if (!this.module || this.renderedViewTarget.kind !== 'source') {
+      return;
+    }
+    const targetId = this.renderedViewTarget.targetId;
+    const target = this.module.sourceTargets.find(
+      candidate => candidate.id === targetId,
+    )!;
+    this.renderSourceDecorations(this.module, target);
+  }
+
   cancelPositionTool(): boolean {
     return this.positionGizmo.cancel();
   }
@@ -316,6 +385,7 @@ export class ModelViewport {
     focusNodes.forEach((node, index) => {
       this.root.add(this.buildObject(node, `source/${index}`, 1, 'source'));
     });
+    this.renderSourceDecorations(this.module!, target);
     this.applyPreviewTransforms();
     const nextKey =
       selectedKey && this.occurrences.has(selectedKey)
@@ -435,6 +505,7 @@ export class ModelViewport {
     this.occurrenceTranslationPreviews.clear();
     this.highlightedTargetId = undefined;
     this.highlightedOccurrenceKeys.clear();
+    this.decorationLayers.clear();
     this.root.clear();
   }
 
@@ -487,34 +558,7 @@ export class ModelViewport {
   private applyPreviewTransforms(): void {
     for (const occurrence of this.occurrences.values()) {
       applyNodeTransform(occurrence.object, occurrence.node);
-      const offset: [number, number, number] = [
-        ...(this.occurrenceTranslationPreviews.get(occurrence.key) ?? [
-          0, 0, 0,
-        ]),
-      ];
-      for (const constraint of occurrence.node.constraints) {
-        const localOffset: [number, number, number] = [0, 0, 0];
-        for (const parameter of constraint.parameters) {
-          const previewValue = this.parameterPreviews.get(parameter.target.id);
-          if (previewValue === undefined || parameter.operation !== 'offset') {
-            continue;
-          }
-          const axis = axisIndex(parameter.argument);
-          if (axis !== undefined) {
-            localOffset[axis] +=
-              (previewValue - parameter.target.value) * parameter.sensitivity;
-          }
-        }
-        const frame = new THREE.Quaternion(
-          ...constraint.offsetFrame.quaternion,
-        );
-        const worldOffset = new THREE.Vector3(...localOffset).applyQuaternion(
-          frame,
-        );
-        offset[0] += worldOffset.x;
-        offset[1] += worldOffset.y;
-        offset[2] += worldOffset.z;
-      }
+      const offset = this.previewTranslationFor(occurrence);
       occurrence.object.position.x += offset[0];
       occurrence.object.position.y += offset[1];
       occurrence.object.position.z += offset[2];
@@ -532,6 +576,49 @@ export class ModelViewport {
     this.selectionHelper?.update();
     this.impactHelpers.forEach(helper => helper.update());
     this.positionGizmo.updateAnchor();
+  }
+
+  private previewTranslationFor(occurrence: Occurrence): Vec3 {
+    const occurrenceOffset = this.occurrenceTranslationPreviews.get(
+      occurrence.key,
+    );
+    const offset: [number, number, number] = [
+      occurrenceOffset?.[0] ?? 0,
+      occurrenceOffset?.[1] ?? 0,
+      occurrenceOffset?.[2] ?? 0,
+    ];
+    for (const constraint of occurrence.node.constraints) {
+      const localOffset: [number, number, number] = [0, 0, 0];
+      for (const parameter of constraint.parameters) {
+        const previewValue = this.parameterPreviews.get(parameter.target.id);
+        if (previewValue === undefined || parameter.operation !== 'offset') {
+          continue;
+        }
+        const axis = axisIndex(parameter.argument);
+        if (axis !== undefined) {
+          localOffset[axis] +=
+            (previewValue - parameter.target.value) * parameter.sensitivity;
+        }
+      }
+      const frame = new THREE.Quaternion(...constraint.offsetFrame.quaternion);
+      const worldOffset = new THREE.Vector3(...localOffset).applyQuaternion(
+        frame,
+      );
+      offset[0] += worldOffset.x;
+      offset[1] += worldOffset.y;
+      offset[2] += worldOffset.z;
+    }
+    return offset;
+  }
+
+  private renderSourceDecorations(
+    module: ModelModule,
+    target: SourceTarget,
+  ): void {
+    for (const provider of this.sourceDecorationProviders) {
+      const decorations = provider.decorations({module, target});
+      this.setDecorations(sourceDecorationOwner(provider.id), decorations);
+    }
   }
 
   private pick(event: PointerEvent): void {
@@ -609,18 +696,7 @@ export class ModelViewport {
   }
 
   private disposeRoot(): void {
-    this.root.traverse(object => {
-      if (
-        object instanceof THREE.Mesh ||
-        object instanceof THREE.LineSegments
-      ) {
-        object.geometry.dispose();
-        const materials = Array.isArray(object.material)
-          ? object.material
-          : [object.material];
-        materials.forEach(material => material.dispose());
-      }
-    });
+    disposeObject(this.root);
   }
 }
 
@@ -823,23 +899,6 @@ function createThreeObject(node: ModelSnapshotObject): THREE.Object3D {
   }
 
   const container = new THREE.Group();
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute(
-    'position',
-    new THREE.BufferAttribute(node.mesh.vertices, 3),
-  );
-  if (node.mesh.normals.length === node.mesh.vertices.length) {
-    geometry.setAttribute(
-      'normal',
-      new THREE.BufferAttribute(node.mesh.normals, 3),
-    );
-  } else {
-    geometry.computeVertexNormals();
-  }
-  geometry.setIndex(new THREE.BufferAttribute(node.mesh.triangles, 1));
-  geometry.computeBoundingBox();
-  geometry.computeBoundingSphere();
-
   const material = new THREE.MeshStandardMaterial({
     color: node.color,
     roughness: 0.52,
@@ -848,14 +907,10 @@ function createThreeObject(node: ModelSnapshotObject): THREE.Object3D {
     polygonOffsetFactor: 1,
     polygonOffsetUnits: 1,
   });
-  container.add(new THREE.Mesh(geometry, material));
+  container.add(new THREE.Mesh(createSurfaceGeometry(node.mesh), material));
 
-  if (node.mesh.edges.length > 0) {
-    const edgeGeometry = new THREE.BufferGeometry();
-    edgeGeometry.setAttribute(
-      'position',
-      new THREE.BufferAttribute(node.mesh.edges, 3),
-    );
+  const edgeGeometry = createEdgeGeometry(node.mesh);
+  if (edgeGeometry) {
     const edgeMaterial = new THREE.LineBasicMaterial({
       color: '#080a07',
       transparent: true,
@@ -865,6 +920,97 @@ function createThreeObject(node: ModelSnapshotObject): THREE.Object3D {
   }
 
   return container;
+}
+
+function createDecorationObject(
+  decoration: ViewportDecoration,
+): THREE.Object3D {
+  const {appearance} = decoration;
+  const container = new THREE.Group();
+  container.name = decoration.id;
+  container.userData.decoration = decoration;
+  applyTransform(container, decoration.transform);
+
+  const depthBias = appearance.depthBias ?? 0;
+  const surfaceMaterial = new THREE.MeshStandardMaterial({
+    color: appearance.color,
+    emissive: appearance.emissive,
+    emissiveIntensity: appearance.emissiveIntensity ?? 0,
+    roughness: 0.38,
+    metalness: 0.06,
+    transparent: (appearance.opacity ?? 1) < 1,
+    opacity: appearance.opacity ?? 1,
+    depthTest: appearance.depthTest ?? true,
+    depthWrite: false,
+    polygonOffset: depthBias !== 0,
+    polygonOffsetFactor: -depthBias,
+    polygonOffsetUnits: -depthBias,
+  });
+  const surface = new THREE.Mesh(
+    createSurfaceGeometry(decoration.mesh),
+    surfaceMaterial,
+  );
+  surface.renderOrder = 4;
+  container.add(surface);
+
+  const edgeGeometry = createEdgeGeometry(decoration.mesh);
+  if (edgeGeometry && appearance.edgeColor) {
+    const edges = new THREE.LineSegments(
+      edgeGeometry,
+      new THREE.LineBasicMaterial({
+        color: appearance.edgeColor,
+        transparent: (appearance.edgeOpacity ?? 1) < 1,
+        opacity: appearance.edgeOpacity ?? 1,
+        depthTest: appearance.depthTest ?? true,
+        depthWrite: false,
+      }),
+    );
+    edges.renderOrder = 5;
+    container.add(edges);
+  } else {
+    edgeGeometry?.dispose();
+  }
+  return container;
+}
+
+function createSurfaceGeometry(mesh: RenderMesh): THREE.BufferGeometry {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute(
+    'position',
+    new THREE.BufferAttribute(mesh.vertices, 3),
+  );
+  if (mesh.normals.length === mesh.vertices.length) {
+    geometry.setAttribute('normal', new THREE.BufferAttribute(mesh.normals, 3));
+  } else {
+    geometry.computeVertexNormals();
+  }
+  geometry.setIndex(new THREE.BufferAttribute(mesh.triangles, 1));
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+function createEdgeGeometry(
+  mesh: RenderMesh,
+): THREE.BufferGeometry | undefined {
+  if (mesh.edges.length === 0) {
+    return undefined;
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(mesh.edges, 3));
+  return geometry;
+}
+
+function disposeObject(object: THREE.Object3D): void {
+  object.traverse(child => {
+    if (child instanceof THREE.Mesh || child instanceof THREE.LineSegments) {
+      child.geometry.dispose();
+      const materials = Array.isArray(child.material)
+        ? child.material
+        : [child.material];
+      materials.forEach(material => material.dispose());
+    }
+  });
 }
 
 function dimObject(object: THREE.Object3D): void {
@@ -902,9 +1048,13 @@ function applyNodeTransform(
   object: THREE.Object3D,
   node: ModelSnapshotObject,
 ): void {
-  object.position.set(...node.transform.position);
-  object.quaternion.set(...node.transform.quaternion);
-  object.scale.set(...node.transform.scale);
+  applyTransform(object, node.transform);
+}
+
+function applyTransform(object: THREE.Object3D, transform: Transform): void {
+  object.position.set(...transform.position);
+  object.quaternion.set(...transform.quaternion);
+  object.scale.set(...transform.scale);
 }
 
 function selectionKeyFromAncestors(object: THREE.Object3D): string | undefined {

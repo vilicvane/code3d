@@ -91,6 +91,12 @@ were superseded by exact source-occurrence interactions:
   its peer inputs as neutral, non-interactive dimmed context.
 - Repeated executions of one operation-input source site are aggregated into
   the same preview target.
+- A selected `cut` tool renders its complete shape normally and overlays the
+  exact volume removed from the receiver with a distinct emphasis.
+- A selected `union` input distinguishes exact overlap volume; when operands
+  only touch, it marks the exact B-Rep contact section instead.
+- Boolean operation decorations hide during transient movement. Cancel restores
+  the compiled decoration; commit waits for the next compile's exact topology.
 - Model Outline aggregates bindings and local expressions; repeated runtime
   instances do not become redundant navigation rows. Clicking is navigation
   only, while hovering temporarily renders the entry's runtime values without
@@ -274,3 +280,43 @@ Status: captured, not scheduled
   secondary locations.
 - Whether hover details are sufficient or clicking should also select and
   preview the related models and constraints.
+
+## R-005 Preserve operation context when switching runtime occurrences
+
+Status: bug captured, not scheduled
+
+### Bug
+
+- Place the editor caret on `mountingHoles` as an input of `cut(...)`.
+- In the viewport, switch from the selected hole to another one of the four
+  runtime occurrences, then move it with the gizmo.
+- The rendered source context incorrectly jumps outside `cut(...)`, leaving
+  only the four cylinders visible.
+
+### Expected behavior
+
+- Selecting a different runtime occurrence refines which instance the tool
+  edits; it must not replace the caret-selected operation-input context.
+- During the edit, the viewport should remain in the same `cut(...)` context,
+  including its peer inputs and operation-specific visualization.
+
+## R-006 Show spatial tools only in a relative-position context
+
+Status: feature captured, not scheduled
+
+### Request
+
+- Tools that edit relative position should appear only when the current source
+  occurrence supplies a meaningful relative-position context.
+- Selecting the declaration `const posts = ...` should not show a position
+  gizmo: at that point there is no composition context for interpreting the
+  position as relative to another object.
+- Selecting the `posts` input inside `union(...)` should show the relevant
+  spatial tools because that operation-input occurrence provides the required
+  context.
+
+### Design implication
+
+- Tool availability belongs to the selected source occurrence and its role in
+  an operation, not merely to the runtime object's ability to carry a spatial
+  relation.

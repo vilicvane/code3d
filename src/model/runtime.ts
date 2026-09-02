@@ -1,4 +1,14 @@
-import {makeBox, makeCylinder, makeSphere, type Shape3D} from 'replicad';
+import {
+  assembleWire,
+  cast,
+  getOC,
+  makeBox,
+  makeCylinder,
+  makeFace,
+  makeSphere,
+  type AnyShape,
+  type Shape3D,
+} from 'replicad';
 import {
   addVectors,
   composeTransforms,
@@ -85,6 +95,12 @@ export type ModelOperationKind =
 export type ModelOperationInputRole =
   'source' | 'receiver' | 'operand' | 'tool' | 'child' | 'reference';
 
+export type ModelOperationRegionSnapshot = Readonly<{
+  kind: 'intersection' | 'section';
+  inputNodeId: string;
+  mesh: RenderMesh;
+}>;
+
 export type ModelOperationSnapshot = Readonly<{
   id: string;
   siteId?: string;
@@ -97,6 +113,7 @@ export type ModelOperationSnapshot = Readonly<{
     role: ModelOperationInputRole;
     index: number;
   }>[];
+  regions: readonly ModelOperationRegionSnapshot[];
   sourceRef?: SourceRef;
 }>;
 
@@ -152,19 +169,34 @@ type StoredOperationInput = Readonly<{
   index: number;
 }>;
 
+type StoredOperationRegion = Readonly<{
+  kind: 'intersection' | 'section';
+  input: ModelObject;
+  shape: AnyShape;
+}>;
+
 type StoredOperation = {
   runtimeId: string;
   kind: ModelOperationKind;
   inputs: StoredOperationInput[];
+  regions: StoredOperationRegion[];
   siteId?: string;
   execution?: number;
   order?: number;
   sourceRef?: SourceRef;
 };
 
+type BooleanOperation = 'cut' | 'fuse' | 'intersect';
+
+type BooleanEvaluation = Readonly<{
+  result: Shape3D;
+  regions: readonly StoredOperationRegion[];
+}>;
+
 type ModelObjectInit = Readonly<{
   kind: 'solid' | 'group';
   shape?: Shape3D;
+  localBounds?: LocalBounds;
   name?: string;
   color?: string;
   children?: readonly ModelObject[];
@@ -174,6 +206,8 @@ type ModelObjectInit = Readonly<{
   operation: StoredOperation;
   nodeId?: string;
 }>;
+
+type LocalBounds = readonly [minimum: Vec3, maximum: Vec3];
 
 type SolveContext = {
   poses: Map<ModelObject, RigidTransform>;
@@ -266,6 +300,7 @@ export class ModelObject implements Anchor {
   readonly sourceRefs: SourceRef[];
   readonly parameters: ParameterUsage[];
   private readonly shape?: Shape3D;
+  private readonly localBounds?: LocalBounds;
   private constraints: StoredConstraint[];
   private readonly operation: StoredOperation;
 
@@ -276,6 +311,8 @@ export class ModelObject implements Anchor {
     this.nodeId = init.nodeId ?? `node-${nextNodeId++}`;
     this.kind = init.kind;
     this.shape = init.shape;
+    this.localBounds =
+      init.localBounds ?? (init.shape ? shapeBounds(init.shape) : undefined);
     this.name = init.name ?? (init.kind === 'solid' ? 'Solid' : 'Group');
     this.color = init.color ?? '#d6ff45';
     this.children = init.children ?? [];
@@ -417,7 +454,7 @@ export class ModelObject implements Anchor {
   }
 
   toSnapshot(
-    meshCache: Map<Shape3D, RenderMesh> = new Map(),
+    meshCache: Map<AnyShape, RenderMesh> = new Map(),
     solveContext: SolveContext = createSolveContext(),
   ): ModelSnapshotObject {
     const pose = this.solvePose(solveContext);
@@ -437,7 +474,7 @@ export class ModelObject implements Anchor {
       constraints,
       sourceRefs: [...this.sourceRefs],
       parameters,
-      operation: this.operationSnapshot(),
+      operation: this.operationSnapshot(meshCache),
     } as const;
 
     if (this.kind === 'group') {
@@ -449,40 +486,77 @@ export class ModelObject implements Anchor {
       };
     }
 
-    const shape = this.requireShape();
-    let mesh = meshCache.get(shape);
-    if (!mesh) {
-      const surface = shape.mesh({tolerance: 0.2, angularTolerance: 0.25});
-      const wire = shape.meshEdges({tolerance: 0.2, angularTolerance: 0.25});
-      mesh = {
-        vertices: new Float32Array(surface.vertices),
-        normals: new Float32Array(surface.normals),
-        triangles: new Uint32Array(surface.triangles),
-        edges: new Float32Array(wire.lines),
-        faceGroups: surface.faceGroups,
-        edgeGroups: wire.edgeGroups,
-      };
-      meshCache.set(shape, mesh);
-    }
-    return {...common, children: [], mesh};
+    return {
+      ...common,
+      children: [],
+      mesh: renderMesh(this.requireShape(), meshCache),
+    };
   }
 
-  disposeShape(disposed: Set<Shape3D>): void {
-    if (this.shape && !disposed.has(this.shape)) {
-      disposed.add(this.shape);
-      this.shape.delete();
+  disposeShape(disposed: Set<AnyShape>): void {
+    const shapes = [
+      ...(this.shape ? [this.shape] : []),
+      ...this.operation.regions.map(region => region.shape),
+    ];
+    for (const shape of shapes) {
+      if (!disposed.has(shape)) {
+        disposed.add(shape);
+        shape.delete();
+      }
     }
     this.children.forEach(child => child.disposeShape(disposed));
   }
 
   [combineModels](
-    operation: 'cut' | 'fuse' | 'intersect',
+    operation: BooleanOperation,
     others: readonly ModelObject[],
   ): ModelObject {
+    const evaluation = this.evaluateBoolean(operation, others);
+    let transferred = false;
+    try {
+      const combined = new ModelObject({
+        kind: 'solid',
+        shape: evaluation.result,
+        name: this.name,
+        color: this.color,
+        constraints: this.constraints,
+        sourceRefs: [this, ...others].flatMap(model => model.sourceRefs),
+        parameters: uniqueParameters(
+          [this, ...others].flatMap(model => model.allParameters()),
+        ),
+        operation: storedOperation(
+          operation === 'fuse' ? 'union' : operation,
+          [
+            {model: this, role: 'receiver', index: 0},
+            ...others.map((model, index) => ({
+              model,
+              role:
+                operation === 'cut' ? ('tool' as const) : ('operand' as const),
+              index: index + 1,
+            })),
+          ],
+          evaluation.regions,
+        ),
+      });
+      transferred = true;
+      return combined;
+    } finally {
+      if (!transferred) {
+        evaluation.result.delete();
+        evaluation.regions.forEach(region => region.shape.delete());
+      }
+    }
+  }
+
+  private evaluateBoolean(
+    operation: BooleanOperation,
+    others: readonly ModelObject[],
+  ): BooleanEvaluation {
     const solveContext = createSolveContext();
     const targetPose = this.solvePose(solveContext);
     let result: Shape3D = this.requireShape().clone();
-    let transferred = false;
+    const regions: StoredOperationRegion[] = [];
+    let evaluated = false;
     try {
       for (const other of others) {
         const operand = shapeInFrame(
@@ -492,38 +566,32 @@ export class ModelObject implements Anchor {
         );
         const previous = result;
         try {
+          if (operation === 'cut' || operation === 'fuse') {
+            regions.push({
+              kind: 'intersection',
+              input: other,
+              shape: previous.intersect(operand),
+            });
+          }
+          if (operation === 'fuse') {
+            regions.push({
+              kind: 'section',
+              input: other,
+              shape: unionSectionShape(previous, operand),
+            });
+          }
           result = previous[operation](operand);
         } finally {
           operand.delete();
         }
         previous.delete();
       }
-
-      const combined = new ModelObject({
-        kind: 'solid',
-        shape: result,
-        name: this.name,
-        color: this.color,
-        constraints: this.constraints,
-        sourceRefs: [this, ...others].flatMap(model => model.sourceRefs),
-        parameters: uniqueParameters(
-          [this, ...others].flatMap(model => model.allParameters()),
-        ),
-        operation: storedOperation(operation === 'fuse' ? 'union' : operation, [
-          {model: this, role: 'receiver', index: 0},
-          ...others.map((model, index) => ({
-            model,
-            role:
-              operation === 'cut' ? ('tool' as const) : ('operand' as const),
-            index: index + 1,
-          })),
-        ]),
-      });
-      transferred = true;
-      return combined;
+      evaluated = true;
+      return {result, regions};
     } finally {
-      if (!transferred) {
+      if (!evaluated) {
         result.delete();
+        regions.forEach(region => region.shape.delete());
       }
     }
   }
@@ -601,9 +669,8 @@ export class ModelObject implements Anchor {
     if (kind === 'origin') {
       return identityRigidTransform;
     }
-    const boundingBox = this.requireShape().boundingBox;
-    const [[minX, minY, minZ], [maxX, maxY, maxZ]] = boundingBox.bounds;
-    boundingBox.delete();
+    this.requireShape();
+    const [[minX, minY, minZ], [maxX, maxY, maxZ]] = this.localBounds!;
     const center: Vec3 = [
       (minX + maxX) / 2,
       (minY + maxY) / 2,
@@ -628,14 +695,13 @@ export class ModelObject implements Anchor {
     return this.shape;
   }
 
-  private operationSnapshot(): ModelOperationSnapshot {
-    const {runtimeId, siteId, execution, kind, order, sourceRef, inputs} =
+  private operationSnapshot(
+    meshCache: Map<AnyShape, RenderMesh>,
+  ): ModelOperationSnapshot {
+    const {siteId, execution, kind, order, sourceRef, inputs, regions} =
       this.operation;
     return {
-      id:
-        siteId !== undefined && execution !== undefined
-          ? `${siteId}:execution:${execution}`
-          : runtimeId,
+      id: storedOperationId(this.operation),
       siteId,
       execution,
       kind,
@@ -645,6 +711,11 @@ export class ModelObject implements Anchor {
         nodeId: model.nodeId,
         role,
         index,
+      })),
+      regions: regions.map(region => ({
+        kind: region.kind,
+        inputNodeId: region.input.nodeId,
+        mesh: renderMesh(region.shape, meshCache),
       })),
       sourceRef,
     };
@@ -657,6 +728,7 @@ export class ModelObject implements Anchor {
     return new ModelObject({
       kind: this.kind,
       shape: this.shape,
+      localBounds: overrides.shape ? undefined : this.localBounds,
       name: this.name,
       color: this.color,
       children: this.children,
@@ -751,7 +823,7 @@ export function isConstraint(value: unknown): value is Constraint {
 }
 
 export function disposeModelObjects(objects: Iterable<ModelObject>): void {
-  const disposed = new Set<Shape3D>();
+  const disposed = new Set<AnyShape>();
   for (const object of objects) {
     object.disposeShape(disposed);
   }
@@ -771,12 +843,82 @@ export const authoringApi = Object.freeze({
 function storedOperation(
   kind: ModelOperationKind,
   inputs: readonly StoredOperationInput[] = [],
+  regions: readonly StoredOperationRegion[] = [],
 ): StoredOperation {
   return {
     runtimeId: `operation-${nextOperationId++}`,
     kind,
     inputs: [...inputs],
+    regions: [...regions],
   };
+}
+
+function storedOperationId(operation: StoredOperation): string {
+  return operation.siteId !== undefined && operation.execution !== undefined
+    ? `${operation.siteId}:execution:${operation.execution}`
+    : operation.runtimeId;
+}
+
+function renderMesh(
+  shape: AnyShape,
+  cache: Map<AnyShape, RenderMesh>,
+): RenderMesh {
+  const cached = cache.get(shape);
+  if (cached) {
+    return cached;
+  }
+  const surface = shape.mesh({tolerance: 0.2, angularTolerance: 0.25});
+  const wire = shape.meshEdges({tolerance: 0.2, angularTolerance: 0.25});
+  const mesh = {
+    vertices: new Float32Array(surface.vertices),
+    normals: new Float32Array(surface.normals),
+    triangles: new Uint32Array(surface.triangles),
+    edges: new Float32Array(wire.lines),
+    faceGroups: surface.faceGroups,
+    edgeGroups: wire.edgeGroups,
+  };
+  cache.set(shape, mesh);
+  return mesh;
+}
+
+function shapeBounds(shape: Shape3D): LocalBounds {
+  const boundingBox = shape.boundingBox;
+  const [minimum, maximum] = boundingBox.bounds;
+  boundingBox.delete();
+  return [
+    [minimum[0], minimum[1], minimum[2]],
+    [maximum[0], maximum[1], maximum[2]],
+  ];
+}
+
+function unionSectionShape(left: Shape3D, right: Shape3D): AnyShape {
+  const section = new (getOC().BRepAlgoAPI_Section)(
+    left.wrapped,
+    right.wrapped,
+    false,
+  );
+  try {
+    section.Build();
+    const sectionShape = cast(section.Shape());
+    const edges = sectionShape.edges;
+    if (edges.length === 0) {
+      return sectionShape;
+    }
+    let wire: ReturnType<typeof assembleWire> | undefined;
+    try {
+      wire = assembleWire(edges);
+      const face = makeFace(wire);
+      sectionShape.delete();
+      return face;
+    } catch {
+      return sectionShape;
+    } finally {
+      edges.forEach(edge => edge.delete());
+      wire?.delete();
+    }
+  } finally {
+    section.delete();
+  }
 }
 
 function anchorReference(anchor: Anchor): AnchorReference {

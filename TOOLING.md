@@ -69,6 +69,16 @@ selection + gesture
 
 模型重新编译后，tool session 即结束；后续工具必须基于新的 provenance 开始。
 
+## Viewport decoration
+
+临时 3D 辅助显示使用通用的 `ViewportDecoration`，由 mesh、transform 和 renderer-neutral appearance 组成。viewport 按 owner 设置或清除 decoration layer，不理解具体工具或建模操作的语义。
+
+与源码 scope 相关的辅助显示实现为 `SourceDecorationProvider`。provider 读取 runtime operation metadata 并返回 decoration；工具开发者可以注册新的 provider，无需修改 viewport 的选择或渲染主路径。交互中的工具则返回 `viewport-decorations` preview，由 host 按 owner 应用和清理对应 layer，工具本身仍不直接调用 viewport。
+
+需要精确派生几何时由 kernel/runtime 产生 operation region，provider 只决定何时、以何种 appearance 展示。当前 Boolean provider 用同一机制强调 `cut` 的切除体积，以及 `union` 的重叠体积或仅接触时的 B-Rep section；它不是 viewport 中的 Boolean 特例。
+
+Provider 可通过 `previewBehavior` 声明工具预览期间的显示策略。当前 Boolean provider 使用 `hide`：参数或关系工具开始移动后隐藏旧 region，pointer move 不触发模型或 region 重算；取消时恢复已编译 region，提交后等待正常源码编译产生新的精确 region。这个策略只影响对应 provider 的 layer，不影响实体、gizmo 或其他工具 decoration。
+
 ## 当前接入的工具
 
 Inspector 参数控件产生 `parameter.set` intent。viewport 平移 gizmo 在能够唯一追溯参数时同样产生 `parameter.set`，否则针对已有关系产生 `relation.offset`；两者共享 preview、冲突检查、源码事务和 undo 语义。

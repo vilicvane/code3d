@@ -9,6 +9,7 @@ import type {
   ParameterUsage,
   SourceRef,
 } from './model/runtime';
+import {booleanOperationSourceDecoration} from './model/operation-decorations';
 import type {
   PositionGizmoBinding,
   PositionGizmoEvent,
@@ -149,13 +150,13 @@ let runRevision = 0;
 let positionToolSession: ToolSession | undefined;
 const expandedCatalogIds = new Set<string>();
 
-const viewport = new ModelViewport(
-  viewportHost,
-  occurrence => {
+const viewport = new ModelViewport(viewportHost, {
+  onSelect: occurrence => {
     selectOccurrence(occurrence, true);
   },
-  handlePositionTool,
-);
+  onPositionTool: handlePositionTool,
+  sourceDecorationProviders: [booleanOperationSourceDecoration],
+});
 const sourceEditPopover = new SourceEditPopover(viewportHost);
 const toolEngine = new ToolEngine({
   sourceVersion: () => codeEditor.sourceVersion(),
@@ -163,7 +164,7 @@ const toolEngine = new ToolEngine({
   applySourceEdits: (baseVersion, edits) =>
     codeEditor.applySourceEdits(baseVersion, edits),
   applyPreview: preview => applyToolPreview(preview),
-  clearPreview: preview => clearToolPreview(preview),
+  clearPreview: (preview, reason) => clearToolPreview(preview, reason),
 });
 
 codeEditor.onChange(() => {
@@ -759,19 +760,31 @@ function formatDisplayNumber(value: number): string {
 function applyToolPreview(preview: ToolPreview): void {
   if (preview.kind === 'parameter') {
     viewport.setParameterPreview(preview.targetId, preview.value);
+    viewport.hideSourceDecorationsDuringPreview();
   } else if (preview.kind === 'occurrence-translation') {
     viewport.setOccurrenceTranslationPreview(
       preview.occurrenceKeys,
       preview.delta,
     );
+    viewport.hideSourceDecorationsDuringPreview();
+  } else if (preview.kind === 'viewport-decorations') {
+    viewport.setDecorations(preview.owner, preview.decorations);
   }
 }
 
-function clearToolPreview(preview: ToolPreview): void {
+function clearToolPreview(
+  preview: ToolPreview,
+  reason: 'replace' | 'end',
+): void {
   if (preview.kind === 'parameter') {
     viewport.clearParameterPreview(preview.targetId);
   } else if (preview.kind === 'occurrence-translation') {
     viewport.clearOccurrenceTranslationPreview(preview.occurrenceKeys);
+  } else if (preview.kind === 'viewport-decorations') {
+    viewport.clearDecorations(preview.owner);
+  }
+  if (reason === 'end') {
+    viewport.restoreSourceDecorations();
   }
 }
 
