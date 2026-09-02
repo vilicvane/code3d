@@ -78,6 +78,19 @@ it does not silently reorder the active milestones. Closed requests move to
 
 ## Milestones
 
+### Active: persistent project and reusable metric fasteners
+
+- [R-009](requests/R-009-persistent-multi-file-workspace.md) replaces the
+  single-document prototype with a browser-persistent, path-addressed project,
+  then carries file identity through Monaco, compilation, runtime tracing, and
+  GUI source edits.
+- [R-010](requests/R-010-metric-fastener-library.md) uses that project boundary
+  to ship an editable TypeScript fastener library, while adding the general
+  helical/profile modeling capabilities needed for accurate screws and Boolean
+  hole tools.
+- Implement and commit these in that order so the library proves the multi-file
+  system instead of becoming another built-in sample string.
+
 ### 1. Rootless authoring and optional exports — complete
 
 - Remove the requirement that `default export` is a `ModelObject`.
