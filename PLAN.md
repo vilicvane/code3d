@@ -78,18 +78,24 @@ it does not silently reorder the active milestones. Closed requests move to
 
 ## Milestones
 
-### Active: persistent project and reusable metric fasteners
+### Persistent project and reusable metric fasteners — complete
 
-- [R-009](requests/R-009-persistent-multi-file-workspace.md) replaces the
+- [R-009](requests/closed/R-009-persistent-multi-file-workspace.md) replaces the
   single-document prototype with a browser-persistent, path-addressed project,
   then carries file identity through Monaco, compilation, runtime tracing, and
   GUI source edits.
-- [R-010](requests/R-010-metric-fastener-library.md) uses that project boundary
+- [R-010](requests/closed/R-010-metric-fastener-library.md) uses that project boundary
   to ship an editable TypeScript fastener library, while adding the general
   helical/profile modeling capabilities needed for accurate screws and Boolean
   hole tools.
-- Implement and commit these in that order so the library proves the multi-file
-  system instead of becoming another built-in sample string.
+- [R-011](requests/closed/R-011-unify-interface-language.md) additionally makes
+  English the single interface language across the resulting project and
+  modeling workflows.
+
+Status: complete. The browser-persistent ZenFS project, first-class module
+graph, file-qualified source/tool pipeline, editable metric fastener library,
+general helical-thread foundation, one-time library migration, and English UI
+have passed build and host-browser verification.
 
 ### 1. Rootless authoring and optional exports — complete
 
@@ -144,6 +150,11 @@ and can become the new focus directly from the viewport.
 is complete: source targets preserve evaluation boundaries, so chained calls
 show the value produced at that step while collection bindings show the
 collection returned by their own evaluation.
+[R-012](requests/R-012-render-downstream-context-while-editing-relations.md)
+will extend relation-source views with the concrete downstream composition
+context that consumes each constrained value. [R-013](requests/R-013-drill-from-composition-preview-to-object-source.md)
+adds explicit double-click drill-down from an active composition operand to its
+best defining source.
 
 ### 2a. Unified dock panels — complete
 

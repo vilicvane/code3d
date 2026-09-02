@@ -24,13 +24,13 @@ export function normalizeProjectPath(path: string): string {
     }
     if (segment === '..') {
       if (segments.length === 0) {
-        throw new Error(`项目路径不能超出根目录：${path}`);
+        throw new Error(`Project path cannot escape the project root: ${path}`);
       }
       segments.pop();
       continue;
     }
     if (segment.includes('\0')) {
-      throw new Error('项目路径不能包含空字符。');
+      throw new Error('Project paths cannot contain null characters.');
     }
     segments.push(segment);
   }
@@ -48,7 +48,7 @@ export function resolveProjectImport(
   specifier: string,
 ): string {
   if (!specifier.startsWith('.')) {
-    throw new Error(`不是项目相对导入：${specifier}`);
+    throw new Error(`Not a relative project import: ${specifier}`);
   }
   return normalizeProjectPath(`${projectDirectory(importer)}/${specifier}`);
 }

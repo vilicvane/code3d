@@ -162,9 +162,9 @@ const signatures = new Map<string, ParameterSignature>([
     {
       operation: 'box',
       arguments: [
-        {name: 'width', label: '宽度', kind: 'length'},
-        {name: 'height', label: '高度', kind: 'length'},
-        {name: 'depth', label: '深度', kind: 'length'},
+        {name: 'width', label: 'Width', kind: 'length'},
+        {name: 'height', label: 'Height', kind: 'length'},
+        {name: 'depth', label: 'Depth', kind: 'length'},
       ],
     },
   ],
@@ -173,8 +173,8 @@ const signatures = new Map<string, ParameterSignature>([
     {
       operation: 'cylinder',
       arguments: [
-        {name: 'radius', label: '半径', kind: 'length'},
-        {name: 'height', label: '高度', kind: 'length'},
+        {name: 'radius', label: 'Radius', kind: 'length'},
+        {name: 'height', label: 'Height', kind: 'length'},
       ],
     },
   ],
@@ -182,7 +182,30 @@ const signatures = new Map<string, ParameterSignature>([
     'sphere',
     {
       operation: 'sphere',
-      arguments: [{name: 'radius', label: '半径', kind: 'length'}],
+      arguments: [{name: 'radius', label: 'Radius', kind: 'length'}],
+    },
+  ],
+  [
+    'frustum',
+    {
+      operation: 'frustum',
+      arguments: [
+        {name: 'bottomRadius', label: 'Bottom radius', kind: 'length'},
+        {name: 'topRadius', label: 'Top radius', kind: 'length'},
+        {name: 'height', label: 'Height', kind: 'length'},
+      ],
+    },
+  ],
+  [
+    'regularPrism',
+    {
+      operation: 'regularPrism',
+      arguments: [
+        {name: 'radius', label: 'Radius', kind: 'length'},
+        {name: 'height', label: 'Height', kind: 'length'},
+        {name: 'sides', label: 'Sides', kind: 'count'},
+        {name: 'rotation', label: 'Rotation', kind: 'angle', unit: 'deg'},
+      ],
     },
   ],
   [
@@ -200,21 +223,23 @@ const signatures = new Map<string, ParameterSignature>([
     'scaled',
     {
       operation: 'scaled',
-      arguments: [{name: 'factor', label: '缩放', kind: 'ratio'}],
+      arguments: [{name: 'factor', label: 'Scale', kind: 'ratio'}],
     },
   ],
   [
     'fillet',
     {
       operation: 'fillet',
-      arguments: [{name: 'radius', label: '圆角半径', kind: 'length'}],
+      arguments: [{name: 'radius', label: 'Fillet radius', kind: 'length'}],
     },
   ],
   [
     'chamfer',
     {
       operation: 'chamfer',
-      arguments: [{name: 'distance', label: '倒角距离', kind: 'length'}],
+      arguments: [
+        {name: 'distance', label: 'Chamfer distance', kind: 'length'},
+      ],
     },
   ],
 ]);
@@ -461,7 +486,7 @@ export function compileProject(project: ModelProject): ModelModule {
     files,
   );
   if (!entryPath) {
-    throw new CompileFailure(`找不到项目入口：${project.entryPath}`);
+    throw new CompileFailure(`Project entry not found: ${project.entryPath}`);
   }
 
   tracedObjects.clear();
@@ -483,7 +508,10 @@ export function compileProject(project: ModelProject): ModelModule {
       }
       const source = files.get(normalized);
       if (source === undefined) {
-        throw new CompileFailure(`找不到项目文件：${normalized}`, normalized);
+        throw new CompileFailure(
+          `Project file not found: ${normalized}`,
+          normalized,
+        );
       }
       const module: CommonJsModule = {exports: {}};
       modules.set(normalized, module);
@@ -501,7 +529,7 @@ export function compileProject(project: ModelProject): ModelModule {
         }
         if (!specifier.startsWith('.')) {
           throw new CompileFailure(
-            `不支持的模块导入：${specifier}`,
+            `Unsupported module import: ${specifier}`,
             normalized,
           );
         }
@@ -509,7 +537,7 @@ export function compileProject(project: ModelProject): ModelModule {
         const resolved = resolveModuleFile(candidate, files);
         if (!resolved) {
           throw new CompileFailure(
-            `无法从 ${normalized} 解析模块 ${specifier}`,
+            `Could not resolve ${specifier} from ${normalized}`,
             normalized,
           );
         }
@@ -543,7 +571,9 @@ export function compileProject(project: ModelProject): ModelModule {
       [...modelExports.values()].at(-1) ??
       latestTracedObject;
     if (!fallbackObject) {
-      throw new Error('当前代码没有产生可渲染的 ModelObject。');
+      throw new Error(
+        'The current program did not produce a renderable ModelObject.',
+      );
     }
 
     const meshCache = new Map();

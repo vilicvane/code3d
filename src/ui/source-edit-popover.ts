@@ -27,7 +27,7 @@ export class SourceEditPopover {
     const close = document.createElement('button');
     close.type = 'button';
     close.className = 'source-edit-popover-close';
-    close.setAttribute('aria-label', '关闭源码改动');
+    close.setAttribute('aria-label', 'Close source update');
     close.textContent = '×';
     close.addEventListener('click', () => this.dismiss());
     header.append(eyebrow, close);

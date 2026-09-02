@@ -92,9 +92,26 @@
 
 ## Implementation checkpoints
 
-- [ ] Confirm and test kernel helix/sweep behavior and choose the smallest
+- [x] Confirm and test kernel helix/sweep behavior and choose the smallest
       general public modeling API.
-- [ ] Implement/refactor the required modeling foundation and diagnostics.
-- [ ] Add the editable preset/spec library and socket-head screw geometry.
-- [ ] Add clearance/counterbore hole tools and representative composition.
-- [ ] Verify dimensions, tracing, editability, performance, and browser output.
+- [x] Implement/refactor the required modeling foundation and diagnostics.
+- [x] Add the editable preset/spec library and socket-head screw geometry.
+- [x] Add clearance/counterbore hole tools and representative composition.
+- [x] Verify dimensions, tracing, editability, performance, and browser output.
+
+## Verification
+
+- `npm run build` passes with `frustum`, `regularPrism`, and `helicalThread` in
+  the public runtime and Monaco declarations.
+- Host Chrome compiled and rendered the imported default M6 × 18 screw with a
+  real helical solid, recessed hex socket, matching ISO 273 normal-clearance
+  counterbore tool, and a plate cut by that tool.
+- A separate browser fixture compiled a custom M8 × 1 specification at 50 mm,
+  exercising the standard partial-thread rule, plain shank, custom clearance
+  diameter, and custom counterbore dimensions.
+- A zero-pitch custom specification produced a local English modeling error;
+  resetting immediately compiled again, confirming that the worker and kernel
+  remained healthy.
+- Source selection inside `/lib/fasteners/metric.ts` previewed the cylinder
+  created at that library source site rather than falling back to the entry
+  module.

@@ -6,6 +6,8 @@ import {
   makeCylinder,
   makeFace,
   makeSphere,
+  sketchCircle,
+  sketchPolysides,
   type AnyShape,
   type Shape3D,
 } from 'replicad';
@@ -25,6 +27,7 @@ import {
   type RigidTransform,
   type Vec3,
 } from './spatial';
+import {makeHelicalThreadShape} from './thread';
 
 export type {Quaternion, Vec3} from './spatial';
 
@@ -82,6 +85,9 @@ export type ModelOperationKind =
   | 'box'
   | 'cylinder'
   | 'sphere'
+  | 'frustum'
+  | 'regularPrism'
+  | 'helicalThread'
   | 'named'
   | 'paint'
   | 'scaled'
@@ -205,6 +211,7 @@ type ModelObjectInit = Readonly<{
   sourceRefs?: readonly SourceRef[];
   parameters?: readonly ParameterUsage[];
   operation: StoredOperation;
+  meshTolerance?: number;
   nodeId?: string;
 }>;
 
@@ -281,7 +288,7 @@ export class Constraint {
   storeFor(model: ModelObject): StoredConstraint {
     if (this.source.model !== model) {
       throw new Error(
-        'relate() 返回的 constraint 必须以回调中的模型副本为源。',
+        'The constraint returned by relate() must originate from the model copy passed to its callback.',
       );
     }
     return {
@@ -306,18 +313,22 @@ export class ModelObject implements Anchor {
   readonly parameters: ParameterUsage[];
   private readonly shape?: Shape3D;
   private readonly localBounds?: LocalBounds;
+  private readonly meshTolerance: number;
   private constraints: StoredConstraint[];
   private readonly operation: StoredOperation;
 
   constructor(init: ModelObjectInit) {
     if (init.kind === 'solid' && !init.shape) {
-      throw new Error('solid 模型对象必须包含 OpenCascade shape。');
+      throw new Error(
+        'A solid model object must contain an OpenCascade shape.',
+      );
     }
     this.nodeId = init.nodeId ?? `node-${nextNodeId++}`;
     this.kind = init.kind;
     this.shape = init.shape;
     this.localBounds =
       init.localBounds ?? (init.shape ? shapeBounds(init.shape) : undefined);
+    this.meshTolerance = init.meshTolerance ?? 0.2;
     this.name = init.name ?? (init.kind === 'solid' ? 'Solid' : 'Group');
     this.color = init.color ?? '#c9cec5';
     this.children = init.children ?? [];
@@ -411,7 +422,7 @@ export class ModelObject implements Anchor {
 
   withChildren(children: readonly ModelObject[]): ModelObject {
     if (this.kind !== 'group') {
-      throw new Error('只有 group 可以包含子对象。');
+      throw new Error('Only a group can contain child objects.');
     }
     assertChildren(children);
     return this.copy(
@@ -498,7 +509,7 @@ export class ModelObject implements Anchor {
     return {
       ...common,
       children: [],
-      mesh: renderMesh(this.requireShape(), meshCache),
+      mesh: renderMesh(this.requireShape(), meshCache, this.meshTolerance),
     };
   }
 
@@ -532,6 +543,10 @@ export class ModelObject implements Anchor {
         sourceRefs: [this, ...others].flatMap(model => model.sourceRefs),
         parameters: uniqueParameters(
           [this, ...others].flatMap(model => model.allParameters()),
+        ),
+        meshTolerance: Math.min(
+          this.meshTolerance,
+          ...others.map(model => model.meshTolerance),
         ),
         operation: storedOperation(
           operation === 'fuse' ? 'union' : operation,
@@ -618,7 +633,7 @@ export class ModelObject implements Anchor {
       return cached;
     }
     if (context.visiting.has(this)) {
-      throw new Error(`模型 ${this.name} 的关系形成了循环。`);
+      throw new Error(`The relations for ${this.name} form a cycle.`);
     }
 
     context.visiting.add(this);
@@ -626,7 +641,9 @@ export class ModelObject implements Anchor {
     for (const constraint of this.constraints) {
       const candidate = this.solveConstraint(constraint, context);
       if (pose && !transformsAreEquivalent(pose, candidate)) {
-        throw new Error(`模型 ${this.name} 的 constraints 没有一致的唯一解。`);
+        throw new Error(
+          `The constraints for ${this.name} do not have one consistent solution.`,
+        );
       }
       pose = candidate;
     }
@@ -699,7 +716,9 @@ export class ModelObject implements Anchor {
 
   private requireShape(): Shape3D {
     if (!this.shape) {
-      throw new Error('该操作需要 solid，不能直接作用于 group。');
+      throw new Error(
+        'This operation requires a solid and cannot act on a group.',
+      );
     }
     return this.shape;
   }
@@ -724,7 +743,7 @@ export class ModelObject implements Anchor {
       regions: regions.map(region => ({
         kind: region.kind,
         inputNodeId: region.input.nodeId,
-        mesh: renderMesh(region.shape, meshCache),
+        mesh: renderMesh(region.shape, meshCache, this.meshTolerance),
       })),
       sourceRef,
     };
@@ -744,6 +763,7 @@ export class ModelObject implements Anchor {
       constraints: this.constraints,
       sourceRefs: this.sourceRefs,
       parameters: this.parameters,
+      meshTolerance: this.meshTolerance,
       operation,
       ...overrides,
     });
@@ -783,6 +803,114 @@ export function sphere(radius: number): ModelObject {
     name: 'Sphere',
     shape: makeSphere(radius),
     operation: storedOperation('sphere'),
+  });
+}
+
+export function frustum(
+  bottomRadius: number,
+  topRadius: number,
+  height: number,
+): ModelObject {
+  assertPositive('bottomRadius', bottomRadius);
+  assertPositive('topRadius', topRadius);
+  assertPositive('height', height);
+  const bottom = sketchCircle(bottomRadius, {
+    plane: 'XZ',
+    origin: [0, -height / 2, 0],
+  });
+  const top = sketchCircle(topRadius, {
+    plane: 'XZ',
+    origin: [0, height / 2, 0],
+  });
+  return new ModelObject({
+    kind: 'solid',
+    name: 'Frustum',
+    shape: bottom.loftWith(top, {ruled: true}),
+    operation: storedOperation('frustum'),
+  });
+}
+
+export function regularPrism(
+  radius: number,
+  height: number,
+  sides: number,
+  rotation = 0,
+): ModelObject {
+  assertPositive('radius', radius);
+  assertPositive('height', height);
+  if (!Number.isInteger(sides) || sides < 3) {
+    throw new Error('sides must be an integer greater than or equal to 3.');
+  }
+  if (!Number.isFinite(rotation)) {
+    throw new Error('rotation must be a finite number.');
+  }
+  const sketch = sketchPolysides(radius, sides, 0, {
+    plane: 'XZ',
+    origin: [0, -height / 2, 0],
+  });
+  let shape = sketch.extrude(height, {extrusionDirection: [0, 1, 0]});
+  if (rotation !== 0) {
+    shape = shape.rotate(rotation, [0, 0, 0], [0, 1, 0]);
+  }
+  return new ModelObject({
+    kind: 'solid',
+    name: `${sides}-sided prism`,
+    shape,
+    operation: storedOperation('regularPrism'),
+  });
+}
+
+export type HelicalThreadOptions = Readonly<{
+  pitch: number;
+  height: number;
+  majorDiameter: number;
+  minorDiameter: number;
+  rootWidth: number;
+  crestWidth: number;
+  leftHanded?: boolean;
+}>;
+
+export function helicalThread(options: HelicalThreadOptions): ModelObject {
+  const {
+    pitch,
+    height,
+    majorDiameter,
+    minorDiameter,
+    rootWidth,
+    crestWidth,
+    leftHanded = false,
+  } = options;
+  assertPositive('pitch', pitch);
+  assertPositive('height', height);
+  assertPositive('majorDiameter', majorDiameter);
+  assertPositive('minorDiameter', minorDiameter);
+  assertPositive('rootWidth', rootWidth);
+  assertPositive('crestWidth', crestWidth);
+  if (height < pitch) {
+    throw new Error('height must be at least one thread pitch.');
+  }
+  if (minorDiameter >= majorDiameter) {
+    throw new Error('minorDiameter must be smaller than majorDiameter.');
+  }
+  if (crestWidth >= rootWidth || rootWidth > pitch) {
+    throw new Error(
+      'The thread profile requires crestWidth < rootWidth <= pitch.',
+    );
+  }
+  return new ModelObject({
+    kind: 'solid',
+    name: 'Helical thread',
+    shape: makeHelicalThreadShape({
+      pitch,
+      height,
+      majorRadius: majorDiameter / 2,
+      minorRadius: minorDiameter / 2,
+      rootWidth,
+      crestWidth,
+      leftHanded,
+    }),
+    meshTolerance: Math.min(0.12, pitch / 8),
+    operation: storedOperation('helicalThread'),
   });
 }
 
@@ -843,6 +971,9 @@ export const authoringApi = Object.freeze({
   box,
   cylinder,
   sphere,
+  frustum,
+  regularPrism,
+  helicalThread,
   group,
   union,
   cut,
@@ -871,13 +1002,14 @@ function storedOperationId(operation: StoredOperation): string {
 function renderMesh(
   shape: AnyShape,
   cache: Map<AnyShape, RenderMesh>,
+  tolerance: number,
 ): RenderMesh {
   const cached = cache.get(shape);
   if (cached) {
     return cached;
   }
-  const surface = shape.mesh({tolerance: 0.2, angularTolerance: 0.25});
-  const wire = shape.meshEdges({tolerance: 0.2, angularTolerance: 0.25});
+  const surface = shape.mesh({tolerance, angularTolerance: 0.2});
+  const wire = shape.meshEdges({tolerance, angularTolerance: 0.2});
   const mesh = {
     vertices: new Float32Array(surface.vertices),
     normals: new Float32Array(surface.normals),
@@ -967,20 +1099,20 @@ function shapeInFrame(
 function assertChildren(children: readonly ModelObject[]): void {
   for (const child of children) {
     if (!isModelObject(child)) {
-      throw new Error('group 的 children 必须全部是 ModelObject。');
+      throw new Error('Every group child must be a ModelObject.');
     }
   }
 }
 
 function assertPositive(label: string, value: number): void {
   if (!Number.isFinite(value) || value <= 0) {
-    throw new Error(`${label} 必须是大于 0 的有限数值。`);
+    throw new Error(`${label} must be a positive finite number.`);
   }
 }
 
 function assertFiniteVector(label: string, value: Vec3): void {
   if (value.some(component => !Number.isFinite(component))) {
-    throw new Error(`${label} 必须使用有限数值。`);
+    throw new Error(`${label} must be a finite number.`);
   }
 }
 
@@ -1060,6 +1192,18 @@ declare module "code3d" {
   export function box(width: number, height: number, depth: number): ModelObject;
   export function cylinder(radius: number, height: number): ModelObject;
   export function sphere(radius: number): ModelObject;
+  export function frustum(bottomRadius: number, topRadius: number, height: number): ModelObject;
+  export function regularPrism(radius: number, height: number, sides: number, rotation?: number): ModelObject;
+  export type HelicalThreadOptions = Readonly<{
+    pitch: number;
+    height: number;
+    majorDiameter: number;
+    minorDiameter: number;
+    rootWidth: number;
+    crestWidth: number;
+    leftHanded?: boolean;
+  }>;
+  export function helicalThread(options: HelicalThreadOptions): ModelObject;
   export function group(children: readonly ModelObject[], name?: string): ModelObject;
   export function union(first: ModelObject, ...others: readonly ModelObject[]): ModelObject;
   export function cut(stock: ModelObject, ...tools: readonly ModelObject[]): ModelObject;

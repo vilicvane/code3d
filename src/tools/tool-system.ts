@@ -159,14 +159,15 @@ export class ToolEngine {
     if (this.host.sourceVersion() !== baseVersion) {
       return {
         status: 'conflict',
-        reason: '工具启动后源码已经变化，请基于最新模型重新操作。',
+        reason:
+          'The source changed after the tool started. Retry with the latest model.',
       };
     }
     const resolver = this.resolvers.get(intent.kind);
     if (!resolver) {
       return {
         status: 'unsupported',
-        reason: `没有可处理 ${intent.kind} 的解析器。`,
+        reason: `No resolver is registered for ${intent.kind}.`,
       };
     }
     return resolver.resolve(intent, {
@@ -194,7 +195,7 @@ export class ToolSession {
 
   preview(intent: ToolIntent): ToolResolution {
     if (this.closed) {
-      return {status: 'conflict', reason: '工具会话已经结束。'};
+      return {status: 'conflict', reason: 'The tool session has ended.'};
     }
     const resolution = this.engine.resolve(
       this.toolId,
@@ -216,7 +217,10 @@ export class ToolSession {
 
   commit(intent = this.lastIntent): ToolCommitResult {
     if (this.closed || !intent) {
-      return {status: 'conflict', reason: '工具会话没有可提交的编辑。'};
+      return {
+        status: 'conflict',
+        reason: 'The tool session has no edit to commit.',
+      };
     }
     const resolution = this.engine.resolve(
       this.toolId,
@@ -238,7 +242,8 @@ export class ToolSession {
       this.closed = true;
       return {
         status: 'conflict',
-        reason: '源码编辑未能原子应用，请基于最新模型重试。',
+        reason:
+          'The source edit could not be applied atomically. Retry with the latest model.',
       };
     }
     this.closed = true;
@@ -265,17 +270,21 @@ class SetParameterResolver implements ToolIntentResolver {
     if (intent.kind !== this.kind) {
       return {
         status: 'unsupported',
-        reason: '参数解析器收到错误的编辑意图。',
+        reason: 'The parameter resolver received the wrong edit intent.',
       };
     }
     if (!Number.isFinite(intent.value)) {
-      return {status: 'unsupported', reason: '参数必须是有限数值。'};
+      return {
+        status: 'unsupported',
+        reason: 'A parameter must be a finite number.',
+      };
     }
     const currentText = context.readSource(intent.target.sourceRef);
     if (parseSourceNumber(currentText) !== intent.target.value) {
       return {
         status: 'conflict',
-        reason: '参数对应的源码已经变化，请等待模型更新后重试。',
+        reason:
+          'The parameter source changed. Wait for the model update and retry.',
       };
     }
     const edits: readonly SourceTextEdit[] = [
@@ -290,7 +299,7 @@ class SetParameterResolver implements ToolIntentResolver {
       plan: {
         toolId: context.toolId,
         baseVersion: context.baseVersion,
-        summary: `将 ${intent.target.label} 设为 ${intent.value}`,
+        summary: `Set ${intent.target.label} to ${intent.value}`,
         intent,
         edits,
         preview: {
@@ -310,7 +319,7 @@ class ReplaceExpressionResolver implements ToolIntentResolver {
     if (intent.kind !== this.kind) {
       return {
         status: 'unsupported',
-        reason: '表达式解析器收到错误的编辑意图。',
+        reason: 'The expression resolver received the wrong edit intent.',
       };
     }
     try {
@@ -318,7 +327,7 @@ class ReplaceExpressionResolver implements ToolIntentResolver {
         intent,
         intent.target,
         renderExpression(intent.expression),
-        '替换模型表达式',
+        'Replace model expression',
         context,
       );
     } catch (error) {
@@ -337,11 +346,14 @@ class InsertOperationResolver implements ToolIntentResolver {
     if (intent.kind !== this.kind) {
       return {
         status: 'unsupported',
-        reason: '操作解析器收到错误的编辑意图。',
+        reason: 'The operation resolver received the wrong edit intent.',
       };
     }
     if (!isIdentifier(intent.operation)) {
-      return {status: 'unsupported', reason: '操作名称不是合法的标识符。'};
+      return {
+        status: 'unsupported',
+        reason: 'The operation name is not a valid identifier.',
+      };
     }
     try {
       const receiver = context.readSource(intent.receiver.sourceRef);
@@ -350,7 +362,7 @@ class InsertOperationResolver implements ToolIntentResolver {
         intent,
         intent.receiver,
         `(${receiver}).${intent.operation}(${argumentsText})`,
-        `添加 .${intent.operation}() 操作`,
+        `Add .${intent.operation}() operation`,
         context,
       );
     } catch (error) {
@@ -369,7 +381,7 @@ class OffsetRelationResolver implements ToolIntentResolver {
     if (intent.kind !== this.kind) {
       return {
         status: 'unsupported',
-        reason: '关系偏移解析器收到错误的编辑意图。',
+        reason: 'The relation-offset resolver received the wrong edit intent.',
       };
     }
     if (
@@ -378,7 +390,7 @@ class OffsetRelationResolver implements ToolIntentResolver {
     ) {
       return {
         status: 'unsupported',
-        reason: '关系偏移必须包含有效对象和有限数值。',
+        reason: 'A relation offset requires an object and finite values.',
       };
     }
     const receiver = context.readSource(intent.receiver.sourceRef);
@@ -387,7 +399,7 @@ class OffsetRelationResolver implements ToolIntentResolver {
       intent,
       intent.receiver,
       `(${receiver}).offset(${delta})`,
-      '添加关系偏移',
+      'Add relation offset',
       context,
     );
     if (resolution.status !== 'ready') {
@@ -419,7 +431,7 @@ function expressionPlan(
     anchor.expectedText !== undefined &&
     anchor.expectedText !== currentText
   ) {
-    return {status: 'conflict', reason: '表达式对应的源码已经变化。'};
+    return {status: 'conflict', reason: 'The expression source changed.'};
   }
   const edits: readonly SourceTextEdit[] = [
     {
@@ -451,7 +463,7 @@ function renderExpression(expression: ExpressionDraft): string {
       return String(expression.value);
     case 'identifier':
       if (!isIdentifier(expression.name)) {
-        throw new Error(`非法标识符：${expression.name}`);
+        throw new Error(`Invalid identifier: ${expression.name}`);
       }
       return expression.name;
     case 'array':
@@ -462,7 +474,7 @@ function renderExpression(expression: ExpressionDraft): string {
       return `${renderExpression(expression.callee)}(${expression.arguments.map(renderExpression).join(', ')})`;
     case 'member':
       if (!isIdentifier(expression.property)) {
-        throw new Error(`非法属性名：${expression.property}`);
+        throw new Error(`Invalid property name: ${expression.property}`);
       }
       return `${renderExpression(expression.object)}.${expression.property}`;
   }
@@ -479,7 +491,7 @@ function parseSourceNumber(source: string): number | undefined {
 
 function formatSourceNumber(value: number): string {
   if (!Number.isFinite(value)) {
-    throw new Error('表达式数值必须是有限数值。');
+    throw new Error('An expression value must be a finite number.');
   }
   const normalized = Object.is(value, -0) ? 0 : value;
   return String(Number(normalized.toPrecision(12)));

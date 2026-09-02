@@ -41,7 +41,7 @@ export class ModelCompilerClient {
 
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
-      const timeoutMilliseconds = this.kernelInitialized ? 3000 : 20_000;
+      const timeoutMilliseconds = this.kernelInitialized ? 15_000 : 30_000;
       const timeout = window.setTimeout(() => {
         if (this.pending?.id !== id) {
           return;
@@ -51,8 +51,8 @@ export class ModelCompilerClient {
         reject(
           new Error(
             this.kernelInitialized
-              ? '模型执行超过 3 秒，已终止本次运行。'
-              : 'OpenCascade 初始化或首次建模超过 20 秒，已终止本次运行。',
+              ? 'Model execution exceeded 15 seconds and was terminated.'
+              : 'OpenCascade initialization or the first model run exceeded 30 seconds and was terminated.',
           ),
         );
       }, timeoutMilliseconds);
@@ -98,7 +98,7 @@ export class ModelCompilerClient {
       }
       window.clearTimeout(pending.timeout);
       this.pending = null;
-      pending.reject(new Error(message || '模型 Worker 运行失败。'));
+      pending.reject(new Error(message || 'The model worker failed.'));
       this.restartWorker();
     };
     return worker;

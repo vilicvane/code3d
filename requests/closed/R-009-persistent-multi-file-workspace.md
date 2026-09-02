@@ -15,6 +15,9 @@
 
 - A project has an explicit entry file and a set of path-addressed source
   files. `/model.ts` is the initial entry, not a privileged compiler concept.
+- Every executed source module is an equal authoring surface: caret-driven
+  preview, Model Outline navigation, Properties, gizmos, and source write-back
+  must work in library files as well as in the entry file.
 - The editor exposes files and open documents, maintains one Monaco model per
   source file, and resolves imports using project paths.
 - Browser reload restores file contents and project structure.
@@ -70,6 +73,9 @@
   appropriate.
 - Inspector/gizmo edits against an imported value update the correct file and
   preserve the active caret-selected viewport context.
+- Selecting a construct inside an imported library file previews the runtime
+  value produced at that source site; a GUI edit there writes back to that
+  library file rather than `/model.ts`.
 - Build, automated tests, and a browser reload/import/edit verification pass.
 
 ## Implementation checkpoints
@@ -88,5 +94,12 @@
   `ModelObject`, cross-file Outline navigation, independent Monaco documents,
   context-menu rename/delete (including deleting the active document), and
   persistence after a full reload.
+- A browser fixture selected and previewed a primitive from
+  `/parts/library-part.ts`, then changed its width through Properties. The
+  atomic edit and source popover both targeted that library file while
+  `/model.ts` remained only its importer.
+- Default-library installation is a versioned, one-time project migration.
+  Host Chrome verified that deleting the migrated library remains deleted
+  after reload; resetting the example explicitly restores it.
 - The imported-library browser fixture was removed and the persistent project
   restored to the default example after verification.

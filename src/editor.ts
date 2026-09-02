@@ -220,7 +220,7 @@ export class CodeEditor {
   createFile(path: string, source = ''): void {
     const normalized = normalizeProjectPath(path);
     if (normalized === '/' || this.documents.has(normalized)) {
-      throw new Error(`文件已经存在：${normalized}`);
+      throw new Error(`File already exists: ${normalized}`);
     }
     this.addDocument(normalized, source);
     this.revision += 1;
@@ -232,10 +232,10 @@ export class CodeEditor {
     const sourcePath = normalizeProjectPath(from);
     const targetPath = normalizeProjectPath(to);
     if (sourcePath === this.entryPath) {
-      throw new Error('入口文件暂时不能重命名。');
+      throw new Error('The entry file cannot be renamed yet.');
     }
     if (this.documents.has(targetPath)) {
-      throw new Error(`文件已经存在：${targetPath}`);
+      throw new Error(`File already exists: ${targetPath}`);
     }
     const source = this.requireDocument(sourcePath).model.getValue();
     const wasActive = sourcePath === this.activePath;
@@ -254,7 +254,7 @@ export class CodeEditor {
   deleteFile(path: string): void {
     const normalized = normalizeProjectPath(path);
     if (normalized === this.entryPath) {
-      throw new Error('入口文件不能删除。');
+      throw new Error('The entry file cannot be deleted.');
     }
     const wasActive = normalized === this.activePath;
     const openIndex = this.openPaths.indexOf(normalized);
@@ -431,7 +431,7 @@ export class CodeEditor {
   private requireDocument(path: string): ProjectDocument {
     const normalized = normalizeProjectPath(path);
     const document = this.documents.get(normalized);
-    if (!document) throw new Error(`项目中不存在文件：${normalized}`);
+    if (!document) throw new Error(`Project file not found: ${normalized}`);
     return document;
   }
 

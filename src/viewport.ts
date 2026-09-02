@@ -1133,7 +1133,7 @@ function createThreeObject(node: ModelSnapshotObject): THREE.Object3D {
   }
 
   if (!node.mesh) {
-    throw new Error(`OpenCascade solid ${node.name} 没有可渲染网格。`);
+    throw new Error(`OpenCascade solid ${node.name} has no renderable mesh.`);
   }
 
   const container = new THREE.Group();

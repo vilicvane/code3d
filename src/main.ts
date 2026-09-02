@@ -3,8 +3,10 @@ import {CodeEditor, type ProjectEditorChange} from './editor';
 import {ModelCompilerClient} from './model/compiler-client';
 import type {ModelModule, ObjectCatalogEntry} from './model/compiler';
 import {
+  currentProjectMigrationVersion,
   defaultProject,
   projectWithLegacySource,
+  withDefaultLibraries,
 } from './project/default-project';
 import {
   openBrowserProjectFileSystem,
@@ -38,8 +40,15 @@ let initialProject = await projectFileSystem.load();
 if (!initialProject) {
   initialProject = await projectFileSystem.replace(
     projectWithLegacySource(localStorage.getItem(legacyStorageKey)),
+    currentProjectMigrationVersion,
   );
   localStorage.removeItem(legacyStorageKey);
+} else {
+  initialProject =
+    (await projectFileSystem.migrate(
+      currentProjectMigrationVersion,
+      withDefaultLibraries,
+    )) ?? initialProject;
 }
 const app = document.querySelector<HTMLDivElement>('#app');
 
@@ -57,10 +66,10 @@ app.innerHTML = `
       </div>
       <div class="run-state" id="run-state" data-state="idle">
         <span class="run-state-dot"></span>
-        <span id="run-state-label">等待编译</span>
+        <span id="run-state-label">Waiting to compile</span>
       </div>
       <div class="topbar-actions">
-        <button class="quiet-button" id="reset-button" type="button">重置示例</button>
+        <button class="quiet-button" id="reset-button" type="button">Reset example</button>
       </div>
     </header>
 
@@ -72,8 +81,8 @@ app.innerHTML = `
             <span id="active-file-name">model.ts</span>
           </div>
           <div class="editor-header-actions">
-            <span class="pane-meta">入口模组 · ⇧ Alt F 格式化</span>
-            <aside class="dock-panel object-catalog" id="object-catalog" aria-label="模型对象大纲">
+            <span class="pane-meta">TypeScript module · ⇧ Alt F Format</span>
+            <aside class="dock-panel object-catalog" id="object-catalog" aria-label="Model outline">
               <button class="dock-panel-handle" id="object-catalog-handle" type="button">
                 <span>MODEL OUTLINE</span>
                 <span class="dock-panel-handle-meta">
@@ -83,27 +92,27 @@ app.innerHTML = `
               </button>
               <div class="dock-panel-body object-catalog-body" id="object-catalog-body" hidden>
                 <div class="object-catalog-list" id="object-catalog-list"></div>
-                <p class="object-catalog-hint">悬停预览 · 点击跳转源码</p>
+                <p class="object-catalog-hint">Hover to preview · Click to open source</p>
               </div>
             </aside>
           </div>
         </header>
         <div class="editor-workspace">
-          <aside class="project-explorer" aria-label="项目文件">
+          <aside class="project-explorer" aria-label="Project files">
             <header>
               <span>PROJECT</span>
               <div class="project-actions">
-                <button id="new-file-button" type="button" title="新建文件">＋</button>
+                <button id="new-file-button" type="button" title="New file">＋</button>
               </div>
             </header>
             <nav class="project-tree" id="project-tree"></nav>
           </aside>
           <div class="project-context-menu" id="project-context-menu" hidden>
-            <button id="context-rename-file" type="button">重命名</button>
-            <button id="context-delete-file" type="button">删除</button>
+            <button id="context-rename-file" type="button">Rename</button>
+            <button id="context-delete-file" type="button">Delete</button>
           </div>
           <section class="editor-document">
-            <nav class="editor-tabs" id="editor-tabs" aria-label="打开的文件"></nav>
+            <nav class="editor-tabs" id="editor-tabs" aria-label="Open files"></nav>
             <div class="editor-host" id="editor-host"></div>
           </section>
         </div>
@@ -114,14 +123,14 @@ app.innerHTML = `
         <header class="pane-header scope-header">
           <div class="pane-title">
             <span class="preview-icon" aria-hidden="true"></span>
-            <span>模型</span>
+            <span>Model</span>
           </div>
-          <nav class="scope-list" id="scope-list" aria-label="模型 scope"></nav>
+          <nav class="scope-list" id="scope-list" aria-label="Model scope"></nav>
         </header>
         <div class="viewport-host" id="viewport-host">
-          <div class="viewport-hint">拖动旋转 · 滚轮缩放 · 点击对象 · 拖动 gizmo</div>
+          <div class="viewport-hint">Drag to orbit · Scroll to zoom · Click an object · Drag a gizmo</div>
           <div class="tool-status" id="tool-status" hidden></div>
-          <aside class="dock-panel inspector-panel" id="inspector-panel" aria-label="对象属性">
+          <aside class="dock-panel inspector-panel" id="inspector-panel" aria-label="Object properties">
             <button class="dock-panel-handle" id="inspector-handle" type="button">
               <span>PROPERTIES</span>
               <kbd data-dock-shortcut></kbd>
@@ -217,7 +226,7 @@ const toolEngine = new ToolEngine({
 codeEditor.onChange(change => {
   persistProjectChange(projectFileSystem, change);
   renderProjectNavigation();
-  setRunState('pending', '等待更新');
+  setRunState('pending', 'Waiting for update');
   window.clearTimeout(compileTimer);
   compileTimer = window.setTimeout(runModel, 420);
 });
@@ -232,7 +241,7 @@ codeEditor.onCursorOffset(({file, offset}) => {
 codeEditor.onActiveFile(() => renderProjectNavigation());
 
 newFileButton.addEventListener('click', () => {
-  const path = window.prompt('新文件路径', '/lib/model.ts')?.trim();
+  const path = window.prompt('New file path', '/lib/model.ts')?.trim();
   if (!path) return;
   try {
     codeEditor.createFile(path, "import {box} from 'code3d';\n\n");
@@ -249,7 +258,7 @@ window.addEventListener('pointerdown', event => {
 });
 
 resetButton.addEventListener('click', () => {
-  if (!window.confirm('将编辑器恢复为 prototype 示例？')) {
+  if (!window.confirm('Restore the prototype example?')) {
     return;
   }
   void resetProject();
@@ -294,7 +303,10 @@ function persistProjectChange(
 async function resetProject(): Promise<void> {
   try {
     await persistenceQueue;
-    initialProject = await projectFileSystem.replace(defaultProject);
+    initialProject = await projectFileSystem.replace(
+      defaultProject,
+      currentProjectMigrationVersion,
+    );
     codeEditor.reset(initialProject);
     renderProjectNavigation();
     runModel();
@@ -336,7 +348,7 @@ function renderProjectNavigation(): void {
       close.type = 'button';
       close.className = 'editor-tab-close';
       close.textContent = '×';
-      close.setAttribute('aria-label', `关闭 ${path}`);
+      close.setAttribute('aria-label', `Close ${path}`);
       close.addEventListener('click', event => {
         event.stopPropagation();
         codeEditor.closeFile(path);
@@ -367,7 +379,7 @@ function renameContextFile(): void {
   const current = contextFilePath;
   hideProjectContextMenu();
   if (!current) return;
-  const path = window.prompt('重命名文件', current)?.trim();
+  const path = window.prompt('Rename file', current)?.trim();
   if (!path || path === current) return;
   try {
     codeEditor.renameFile(current, path);
@@ -379,7 +391,10 @@ function renameContextFile(): void {
 function deleteContextFile(): void {
   const current = contextFilePath;
   hideProjectContextMenu();
-  if (!current || !window.confirm(`删除 ${current}？导入路径不会自动改写。`)) {
+  if (
+    !current ||
+    !window.confirm(`Delete ${current}? Import paths will not be rewritten.`)
+  ) {
     return;
   }
   try {
@@ -391,7 +406,7 @@ function deleteContextFile(): void {
 
 function showProjectIssue(error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
-  setRunState('error', '项目写入失败');
+  setRunState('error', 'Project write failed');
   errorBar.textContent = message;
   errorBar.hidden = false;
 }
@@ -401,7 +416,7 @@ async function runModel(): Promise<void> {
   window.clearTimeout(outlinePreviewTimer);
   viewport.restoreOutlinePreview();
   const revision = ++runRevision;
-  setRunState('running', '正在编译');
+  setRunState('running', 'Compiling');
   errorBar.hidden = true;
 
   try {
@@ -425,14 +440,14 @@ async function runModel(): Promise<void> {
       selectOccurrence(selected, false);
     }
     const objectCount = countObjects(currentModule.fallback);
-    setRunState('ready', `${objectCount} 个对象`);
+    setRunState('ready', formatObjectCount(objectCount));
   } catch (error) {
     if (revision !== runRevision) {
       return;
     }
     const located = error as Error & {file?: string};
     const message = error instanceof Error ? error.message : String(error);
-    setRunState('error', '运行失败');
+    setRunState('error', 'Run failed');
     errorBar.textContent = located.file
       ? `${located.file}: ${message}`
       : message;
@@ -443,7 +458,7 @@ async function runModel(): Promise<void> {
 function renderScopes(module: ModelModule): void {
   scopeList.replaceChildren();
   scopeList.append(
-    scopeButton('整体预览', module.fallback.nodeId, () => {
+    scopeButton('Overview', module.fallback.nodeId, () => {
       viewport.selectRoot();
     }),
   );
@@ -463,7 +478,7 @@ function renderObjectCatalog(module: ModelModule): void {
   if (entries.length === 0) {
     const empty = document.createElement('p');
     empty.className = 'object-catalog-empty';
-    empty.textContent = '暂无命名对象';
+    empty.textContent = 'No named objects';
     objectCatalogList.append(empty);
     return;
   }
@@ -509,7 +524,7 @@ function objectCatalogGroup(
   toggle.textContent = expandable ? '›' : '';
   toggle.disabled = !expandable;
   toggle.tabIndex = expandable ? 0 : -1;
-  toggle.setAttribute('aria-label', `${entry.label} 详情`);
+  toggle.setAttribute('aria-label', `${entry.label} details`);
   toggle.setAttribute('aria-expanded', String(expanded));
 
   const button = objectCatalogEntryButton(
@@ -560,7 +575,7 @@ function objectCatalogEntryButton(
   const button = document.createElement('button');
   button.type = 'button';
   button.className = `object-catalog-entry ${variant}`;
-  button.title = `${entry.label}：悬停预览，点击跳转源码`;
+  button.title = `${entry.label}: hover to preview, click to open source`;
 
   const order = document.createElement('span');
   order.className = 'object-catalog-order';
@@ -684,14 +699,22 @@ function renderInspector(occurrence: Occurrence): void {
 function renderModelInspector(): void {
   const copy = document.createElement('p');
   copy.className = 'inspector-copy';
-  copy.textContent = '整体 scope 只改变当前观察方式，不修改模型代码。';
+  copy.textContent =
+    'Model scope changes only the current view; it does not modify source.';
 
-  const control = rangeControl('分解视图', explodeValue, -0, 32, 1, value => {
-    explodeValue = value;
-    viewport.setExplode(value);
-  });
+  const control = rangeControl(
+    'Exploded view',
+    explodeValue,
+    -0,
+    32,
+    1,
+    value => {
+      explodeValue = value;
+      viewport.setExplode(value);
+    },
+  );
 
-  const fitButton = actionButton('适应模型', () => viewport.fit());
+  const fitButton = actionButton('Fit model', () => viewport.fit());
   inspector.append(copy, control, fitButton);
 }
 
@@ -718,19 +741,20 @@ function renderLocalInspector(occurrence: Occurrence): void {
   } else {
     const empty = document.createElement('p');
     empty.className = 'inspector-copy';
-    empty.textContent = '这个对象暂时没有可安全写回的数值参数。';
+    empty.textContent =
+      'This object has no numeric parameters that can be safely written back.';
     inspector.append(empty);
   }
 
   const actions = document.createElement('div');
   actions.className = 'inspector-actions';
-  actions.append(actionButton('聚焦', () => viewport.focusSelection()));
+  actions.append(actionButton('Focus', () => viewport.focusSelection()));
   inspector.append(actions);
 
   const note = document.createElement('p');
   note.className = 'inspector-note';
   note.textContent =
-    '拖动时使用临时预览；确认后修改源文件并重新执行。unit 只影响界面提示。';
+    'Dragging uses a temporary preview. Committing updates the source and reruns it. Units are UI hints only.';
   inspector.append(note);
 }
 
@@ -795,7 +819,7 @@ function parameterControl(
   if (impact > 1) {
     const impactLabel = document.createElement('span');
     impactLabel.className = 'parameter-impact';
-    impactLabel.textContent = `影响 ${impact} 个对象`;
+    impactLabel.textContent = `Affects ${formatObjectCount(impact)}`;
     details.append(' · ', impactLabel);
   }
 
@@ -817,14 +841,23 @@ function parameterControl(
     commitToolSession(toolSession, parameterIntent(target, value));
   };
 
-  range?.addEventListener('input', () => preview(Number(range.value)));
-  range?.addEventListener('change', () => commit(Number(range.value)));
-  numberInput.addEventListener('input', () =>
-    preview(Number(numberInput.value)),
-  );
-  numberInput.addEventListener('change', () =>
-    commit(Number(numberInput.value)),
-  );
+  let settled = false;
+  range?.addEventListener('input', () => {
+    if (!settled) preview(Number(range.value));
+  });
+  range?.addEventListener('change', () => {
+    if (settled) return;
+    settled = true;
+    commit(Number(range.value));
+  });
+  numberInput.addEventListener('input', () => {
+    if (!settled) preview(Number(numberInput.value));
+  });
+  numberInput.addEventListener('change', () => {
+    if (settled) return;
+    settled = true;
+    commit(Number(numberInput.value));
+  });
 
   wrapper.append(row);
   if (range) wrapper.append(range);
@@ -859,7 +892,7 @@ function handlePositionTool(event: PositionGizmoEvent): void {
 
   const session = positionToolSession;
   if (!session) {
-    showToolIssue('位置工具会话已经失效，请重新拖动。');
+    showToolIssue('The position tool session expired. Start the drag again.');
     return;
   }
   if (event.binding.kind === 'parameter') {
@@ -927,8 +960,8 @@ function showPositionToolStatus(
       ? (currentModule?.parameterImpacts.get(binding.target.id) ?? 1)
       : binding.occurrenceKeys.length;
   const unit = binding.unit ? ` ${binding.unit}` : '';
-  const effect = impact > 1 ? ` · 影响 ${impact} 个对象` : '';
-  toolStatus.textContent = `${binding.axis.toUpperCase()} · ${binding.label} ${formatDisplayNumber(value)}${unit}${effect} · Esc 取消`;
+  const effect = impact > 1 ? ` · Affects ${formatObjectCount(impact)}` : '';
+  toolStatus.textContent = `${binding.axis.toUpperCase()} · ${binding.label} ${formatDisplayNumber(value)}${unit}${effect} · Esc to cancel`;
   toolStatus.hidden = false;
 }
 
@@ -999,7 +1032,7 @@ function commitToolSession(session: ToolSession, intent: ToolIntent): boolean {
 }
 
 function showToolIssue(message: string): void {
-  setRunState('pending', '工具需要更新');
+  setRunState('pending', 'Tool needs an update');
   errorBar.textContent = message;
   errorBar.hidden = false;
 }
@@ -1079,6 +1112,10 @@ function primarySource(node: ModelSnapshotObject): SourceRef | undefined {
 
 function countObjects(root: ModelSnapshotObject): number {
   return 1 + root.children.reduce((sum, child) => sum + countObjects(child), 0);
+}
+
+function formatObjectCount(count: number): string {
+  return `${count} ${count === 1 ? 'object' : 'objects'}`;
 }
 
 function requiredElement<T extends HTMLElement = HTMLElement>(id: string): T {
