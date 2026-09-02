@@ -138,6 +138,11 @@ export class CodeEditor {
     return this.model.getVersionId();
   }
 
+  cursorOffset(): number | undefined {
+    const position = this.editor.getPosition();
+    return position ? this.model.getOffsetAt(position) : undefined;
+  }
+
   readSource(sourceRef: SourceRef): string {
     const start = this.model.getPositionAt(sourceRef.start);
     const end = this.model.getPositionAt(sourceRef.end);

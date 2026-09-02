@@ -12,7 +12,8 @@
 - 用户代码与 OpenCascade 在可终止 Worker 中编译和执行。
 - primitive、变换、布尔运算、圆角和倒角由 OCCT B-Rep 计算。
 - Worker 将 B-Rep 三角化为 surface、法线和拓扑边线供 Three.js 渲染。
-- 点击模型定位源码，移动光标反向选择模型对象。
+- 点击模型定位源码；移动光标会独立渲染对应的运行时模型节点。
+- 同一源码表达式产生多个对象时，源码节点预览会同时显示这些对象。
 - 局部 Inspector 将 API 参数追溯到上游变量或源码字面量。
 - 参数拖动先做临时预览，确认后通过 Monaco 编辑直接写回源码。
 - Monaco 使用 Prettier 格式化模型源码；GUI 写回后自动格式化，也可使用 `Shift+Alt+F`。

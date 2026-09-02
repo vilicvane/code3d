@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
-import type {ModelModule} from './model/compiler';
+import type {ModelModule, SourcePreview} from './model/compiler';
 import type {
   ModelSnapshotObject,
   ParameterUsage,
@@ -19,6 +19,7 @@ export type Occurrence = Readonly<{
   node: ModelSnapshotObject;
   object: THREE.Object3D;
   depth: number;
+  view: 'model' | 'source';
 }>;
 
 export class ModelViewport {
@@ -38,6 +39,7 @@ export class ModelViewport {
   private highlightedTargetId?: string;
   private highlightedOccurrenceKeys = new Set<string>();
   private selectedKey = 'root';
+  private sourcePreviewRef?: SourceRef;
   private explode = 0;
   private module: ModelModule | null = null;
 
@@ -109,17 +111,10 @@ export class ModelViewport {
     fitCamera = true,
   ): void {
     this.module = module;
-    this.positionGizmo.detach();
-    this.clearImpactHelpers();
-    this.disposeRoot();
-    this.occurrences.clear();
-    this.parameterPreviews.clear();
-    this.occurrenceTranslationPreviews.clear();
-    this.highlightedTargetId = undefined;
-    this.highlightedOccurrenceKeys.clear();
-    this.root.clear();
+    this.sourcePreviewRef = undefined;
+    this.resetRenderedView();
 
-    const rootObject = this.buildObject(module.root, 'root', 0);
+    const rootObject = this.buildObject(module.root, 'root', 0, 'model');
     this.root.add(rootObject);
     this.applyPreviewTransforms();
     this.selectKey(
@@ -131,32 +126,40 @@ export class ModelViewport {
     }
   }
 
-  selectBySourceOffset(offset: number): void {
-    const candidates = [...this.occurrences.values()]
-      .flatMap(occurrence =>
-        occurrence.node.sourceRefs
-          .filter(
-            sourceRef => sourceRef.start <= offset && offset <= sourceRef.end,
-          )
-          .map(sourceRef => ({
-            occurrence,
-            span: sourceRef.end - sourceRef.start,
-          })),
+  selectBySourceOffset(offset: number): boolean {
+    if (!this.module) {
+      return false;
+    }
+    const match = [...this.module.sourcePreviews]
+      .filter(
+        ({sourceRef}) => sourceRef.start <= offset && offset <= sourceRef.end,
       )
       .sort(
-        (a, b) => a.span - b.span || b.occurrence.depth - a.occurrence.depth,
-      );
+        (left, right) =>
+          sourceSpan(left.sourceRef) - sourceSpan(right.sourceRef),
+      )[0];
 
-    const current = candidates.find(
-      ({occurrence}) => occurrence.key === this.selectedKey,
-    );
-    const match = current ?? candidates[0];
-    if (match) {
-      this.selectKey(match.occurrence.key, false);
+    if (!match) {
+      if (this.sourcePreviewRef) {
+        this.renderModule(this.module, 'root', true);
+        return true;
+      }
+      return false;
     }
+
+    if (
+      !this.sourcePreviewRef ||
+      !sameSource(match.sourceRef, this.sourcePreviewRef)
+    ) {
+      this.renderSourcePreview(match);
+    }
+    return true;
   }
 
   selectNode(nodeId: string): void {
+    if (this.sourcePreviewRef && this.module) {
+      this.renderModule(this.module, 'root', true);
+    }
     const occurrence = [...this.occurrences.values()].find(
       candidate => candidate.node.nodeId === nodeId,
     );
@@ -166,6 +169,9 @@ export class ModelViewport {
   }
 
   selectRoot(): void {
+    if (this.sourcePreviewRef && this.module) {
+      this.renderModule(this.module, 'root', true);
+    }
     this.selectKey('root', true);
   }
 
@@ -254,20 +260,48 @@ export class ModelViewport {
     node: ModelSnapshotObject,
     key: string,
     depth: number,
+    view: Occurrence['view'],
   ): THREE.Object3D {
     const object = createThreeObject(node);
     object.name = node.name;
     object.userData.selectionKey = key;
     applyNodeTransform(object, node);
 
-    const occurrence = {key, node, object, depth};
+    const occurrence = {key, node, object, depth, view};
     this.occurrences.set(key, occurrence);
 
     node.children.forEach((child, index) => {
-      object.add(this.buildObject(child, `${key}/${index}`, depth + 1));
+      object.add(this.buildObject(child, `${key}/${index}`, depth + 1, view));
     });
 
     return object;
+  }
+
+  private renderSourcePreview(preview: SourcePreview): void {
+    this.sourcePreviewRef = preview.sourceRef;
+    this.resetRenderedView();
+    preview.objects.forEach((node, index) => {
+      this.root.add(this.buildObject(node, `source/${index}`, 1, 'source'));
+    });
+    this.applyPreviewTransforms();
+    const first = this.occurrences.keys().next().value;
+    if (first) {
+      this.selectKey(first, false);
+    }
+    this.fit();
+  }
+
+  private resetRenderedView(): void {
+    this.positionGizmo.detach();
+    this.clearImpactHelpers();
+    this.disposeRoot();
+    this.occurrences.clear();
+    this.rebuildSelectionHelper();
+    this.parameterPreviews.clear();
+    this.occurrenceTranslationPreviews.clear();
+    this.highlightedTargetId = undefined;
+    this.highlightedOccurrenceKeys.clear();
+    this.root.clear();
   }
 
   private selectKey(key: string, notify: boolean): void {
@@ -342,7 +376,11 @@ export class ModelViewport {
       occurrence.object.position.y += offset[1];
       occurrence.object.position.z += offset[2];
 
-      if (occurrence.depth === 1 && this.explode > 0) {
+      if (
+        !this.sourcePreviewRef &&
+        occurrence.depth === 1 &&
+        this.explode > 0
+      ) {
         const factor = 1 + this.explode / 55;
         occurrence.object.position.multiplyScalar(factor);
       }
@@ -569,6 +607,10 @@ function containsSource(container: SourceRef, candidate: SourceRef): boolean {
 
 function sameSource(left: SourceRef, right: SourceRef): boolean {
   return left.start === right.start && left.end === right.end;
+}
+
+function sourceSpan(sourceRef: SourceRef): number {
+  return sourceRef.end - sourceRef.start;
 }
 
 function positionOnlyTargets(

@@ -263,14 +263,16 @@ export class ModelObject {
     }
   }
 
-  toSnapshot(): ModelSnapshotObject {
+  toSnapshot(
+    meshCache: Map<Shape3D, RenderMesh> = new Map(),
+  ): ModelSnapshotObject {
     if (this.kind === 'group') {
       return {
         nodeId: this.nodeId,
         kind: this.kind,
         name: this.name,
         color: this.color,
-        children: this.children.map(child => child.toSnapshot()),
+        children: this.children.map(child => child.toSnapshot(meshCache)),
         transform: identityTransform,
         sourceRefs: [...this.sourceRefs],
         parameters: [...this.parameters],
@@ -278,8 +280,20 @@ export class ModelObject {
     }
 
     const shape = this.requireShape();
-    const surface = shape.mesh({tolerance: 0.2, angularTolerance: 0.25});
-    const wire = shape.meshEdges({tolerance: 0.2, angularTolerance: 0.25});
+    let mesh = meshCache.get(shape);
+    if (!mesh) {
+      const surface = shape.mesh({tolerance: 0.2, angularTolerance: 0.25});
+      const wire = shape.meshEdges({tolerance: 0.2, angularTolerance: 0.25});
+      mesh = {
+        vertices: new Float32Array(surface.vertices),
+        normals: new Float32Array(surface.normals),
+        triangles: new Uint32Array(surface.triangles),
+        edges: new Float32Array(wire.lines),
+        faceGroups: surface.faceGroups,
+        edgeGroups: wire.edgeGroups,
+      };
+      meshCache.set(shape, mesh);
+    }
     return {
       nodeId: this.nodeId,
       kind: this.kind,
@@ -289,14 +303,7 @@ export class ModelObject {
       transform: identityTransform,
       sourceRefs: [...this.sourceRefs],
       parameters: [...this.parameters],
-      mesh: {
-        vertices: new Float32Array(surface.vertices),
-        normals: new Float32Array(surface.normals),
-        triangles: new Uint32Array(surface.triangles),
-        edges: new Float32Array(wire.lines),
-        faceGroups: surface.faceGroups,
-        edgeGroups: wire.edgeGroups,
-      },
+      mesh,
     };
   }
 

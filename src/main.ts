@@ -179,9 +179,13 @@ async function runModel(): Promise<void> {
     viewport.renderModule(currentModule, selectedKey, firstRun);
     explodeValue = 0;
     renderScopes(currentModule);
-    const root = viewport.getSelected();
-    if (root) {
-      selectOccurrence(root, false);
+    const cursorOffset = codeEditor.cursorOffset();
+    if (cursorOffset !== undefined) {
+      viewport.selectBySourceOffset(cursorOffset);
+    }
+    const selected = viewport.getSelected();
+    if (selected) {
+      selectOccurrence(selected, false);
     }
     const objectCount = countObjects(currentModule.root);
     setRunState('ready', `${objectCount} 个对象`);
@@ -228,7 +232,7 @@ function scopeButton(
 
 function selectOccurrence(occurrence: Occurrence, revealSource: boolean): void {
   renderInspector(occurrence);
-  updateActiveScope(occurrence.node);
+  updateActiveScope(occurrence);
 
   if (revealSource) {
     const sourceRef = primarySource(occurrence.node);
@@ -247,13 +251,18 @@ function renderInspector(occurrence: Occurrence): void {
   heading.className = 'inspector-heading';
   const eyebrow = document.createElement('span');
   eyebrow.className = 'inspector-eyebrow';
-  eyebrow.textContent = occurrence.depth === 0 ? 'MODEL SCOPE' : 'LOCAL SCOPE';
+  eyebrow.textContent =
+    occurrence.view === 'source'
+      ? 'SOURCE NODE'
+      : occurrence.depth === 0
+        ? 'MODEL SCOPE'
+        : 'LOCAL SCOPE';
   const title = document.createElement('strong');
   title.textContent = occurrence.node.name;
   heading.append(eyebrow, title);
   inspector.append(heading);
 
-  if (occurrence.depth === 0) {
+  if (occurrence.view === 'model' && occurrence.depth === 0) {
     renderModelInspector();
   } else {
     renderLocalInspector(occurrence);
@@ -624,11 +633,15 @@ function actionButton(label: string, action: () => void): HTMLButtonElement {
   return button;
 }
 
-function updateActiveScope(node: ModelSnapshotObject): void {
+function updateActiveScope(occurrence: Occurrence): void {
   const buttons =
     scopeList.querySelectorAll<HTMLButtonElement>('.scope-button');
   buttons.forEach(button => {
-    button.classList.toggle('active', button.dataset.nodeId === node.nodeId);
+    button.classList.toggle(
+      'active',
+      occurrence.view === 'model' &&
+        button.dataset.nodeId === occurrence.node.nodeId,
+    );
   });
 }
 

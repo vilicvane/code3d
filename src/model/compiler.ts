@@ -8,12 +8,19 @@ import {
   type ParameterKind,
   type ParameterTarget,
   type ParameterUsage,
+  type SourceRef,
 } from './runtime';
+
+export type SourcePreview = Readonly<{
+  sourceRef: SourceRef;
+  objects: readonly ModelSnapshotObject[];
+}>;
 
 export type ModelModule = Readonly<{
   root: ModelSnapshotObject;
   exports: ReadonlyMap<string, string>;
   parameterImpacts: ReadonlyMap<string, number>;
+  sourcePreviews: readonly SourcePreview[];
 }>;
 
 export class CompileFailure extends Error {
@@ -148,6 +155,10 @@ const signatures = new Map<string, ParameterSignature>([
 ]);
 
 const tracedObjects = new Set<ModelObject>();
+const sourceTraces = new Map<
+  string,
+  {sourceRef: SourceRef; objects: Set<ModelObject>}
+>();
 const parameterFrames: ParameterUsage[][] = [];
 const traceRuntime = Object.freeze({
   trace<T>(start: number, end: number, run: () => T): T {
@@ -162,8 +173,20 @@ const traceRuntime = Object.freeze({
     if (isModelObject(result)) {
       result.attachSource({start, end});
       result.attachParameters(parameters);
-      tracedObjects.add(result);
+      recordSourceObject(start, end, result);
+    } else {
+      modelObjectsIn(result).forEach(object =>
+        recordSourceObject(start, end, object),
+      );
     }
+    return result;
+  },
+
+  bind<T>(start: number, end: number, run: () => T): T {
+    const result = run();
+    modelObjectsIn(result).forEach(object =>
+      recordSourceObject(start, end, object),
+    );
     return result;
   },
 
@@ -198,8 +221,38 @@ const traceRuntime = Object.freeze({
   },
 });
 
+function recordSourceObject(
+  start: number,
+  end: number,
+  object: ModelObject,
+): void {
+  tracedObjects.add(object);
+  const key = `${start}:${end}`;
+  const sourceTrace = sourceTraces.get(key) ?? {
+    sourceRef: {start, end},
+    objects: new Set<ModelObject>(),
+  };
+  sourceTrace.objects.add(object);
+  sourceTraces.set(key, sourceTrace);
+}
+
+function modelObjectsIn(
+  value: unknown,
+  seen = new Set<unknown>(),
+): ModelObject[] {
+  if (isModelObject(value)) {
+    return [value];
+  }
+  if (!Array.isArray(value) || seen.has(value)) {
+    return [];
+  }
+  seen.add(value);
+  return value.flatMap(item => modelObjectsIn(item, seen));
+}
+
 export function compileModel(source: string): ModelModule {
   tracedObjects.clear();
+  sourceTraces.clear();
   parameterFrames.length = 0;
   const result = ts.transpileModule(source, {
     fileName: 'model.ts',
@@ -254,7 +307,14 @@ export function compileModel(source: string): ModelModule {
       }
     }
 
-    const rootSnapshot = root.toSnapshot();
+    const meshCache = new Map();
+    const snapshots = new Map<ModelObject, ModelSnapshotObject>();
+    const snapshotOf = (object: ModelObject): ModelSnapshotObject => {
+      const snapshot = snapshots.get(object) ?? object.toSnapshot(meshCache);
+      snapshots.set(object, snapshot);
+      return snapshot;
+    };
+    const rootSnapshot = snapshotOf(root);
     return {
       root: rootSnapshot,
       exports: new Map(
@@ -264,10 +324,17 @@ export function compileModel(source: string): ModelModule {
         ]),
       ),
       parameterImpacts: countParameterImpacts(rootSnapshot),
+      sourcePreviews: [...sourceTraces.values()].map(
+        ({sourceRef, objects}) => ({
+          sourceRef,
+          objects: [...objects].map(snapshotOf),
+        }),
+      ),
     };
   } finally {
     disposeModelObjects(tracedObjects);
     tracedObjects.clear();
+    sourceTraces.clear();
     parameterFrames.length = 0;
   }
 }
@@ -281,49 +348,105 @@ function createTraceTransformer(): ts.TransformerFactory<ts.SourceFile> {
       const visit: ts.Visitor = node => {
         const visited = ts.visitEachChild(node, visit, context);
         if (
-          !ts.isCallExpression(node) ||
-          !ts.isCallExpression(visited) ||
-          !isTraceableCall(node, sourceFile)
+          ts.isVariableDeclaration(node) &&
+          ts.isVariableDeclaration(visited) &&
+          node.initializer &&
+          visited.initializer &&
+          isTraceableExpression(node.initializer, sourceFile)
         ) {
-          return visited;
+          return factory.updateVariableDeclaration(
+            visited,
+            visited.name,
+            visited.exclamationToken,
+            visited.type,
+            traceExpression(
+              visited.initializer,
+              node.name.getStart(sourceFile),
+              node.initializer.getEnd(),
+              factory,
+              'bind',
+            ),
+          );
         }
 
-        const signature = getParameterSignature(node);
-        const call = signature
-          ? instrumentCallParameters(
-              node,
-              visited,
-              signature,
-              bindings,
-              sourceFile,
+        if (
+          ts.isExportAssignment(node) &&
+          ts.isExportAssignment(visited) &&
+          !node.isExportEquals &&
+          isTraceableExpression(node.expression, sourceFile)
+        ) {
+          return factory.updateExportAssignment(
+            visited,
+            visited.modifiers,
+            traceExpression(
+              visited.expression,
+              node.expression.getStart(sourceFile),
+              node.expression.getEnd(),
               factory,
-            )
-          : visited;
-
-        return factory.createCallExpression(
-          factory.createPropertyAccessExpression(
-            factory.createIdentifier('__code3d'),
-            'trace',
-          ),
-          undefined,
-          [
-            factory.createNumericLiteral(node.getStart(sourceFile)),
-            factory.createNumericLiteral(node.getEnd()),
-            factory.createArrowFunction(
-              undefined,
-              undefined,
-              [],
-              undefined,
-              factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
-              call,
+              'bind',
             ),
-          ],
-        );
+          );
+        }
+
+        if (
+          ts.isCallExpression(node) &&
+          ts.isCallExpression(visited) &&
+          isTraceableCall(node, sourceFile)
+        ) {
+          const signature = getParameterSignature(node);
+          const call = signature
+            ? instrumentCallParameters(
+                node,
+                visited,
+                signature,
+                bindings,
+                sourceFile,
+                factory,
+              )
+            : visited;
+
+          return traceExpression(
+            call,
+            node.getStart(sourceFile),
+            node.getEnd(),
+            factory,
+          );
+        }
+
+        return visited;
       };
 
       return ts.visitNode(sourceFile, visit) as ts.SourceFile;
     };
   };
+}
+
+function traceExpression(
+  expression: ts.Expression,
+  start: number,
+  end: number,
+  factory: ts.NodeFactory,
+  method: 'trace' | 'bind' = 'trace',
+): ts.CallExpression {
+  return factory.createCallExpression(
+    factory.createPropertyAccessExpression(
+      factory.createIdentifier('__code3d'),
+      method,
+    ),
+    undefined,
+    [
+      factory.createNumericLiteral(start),
+      factory.createNumericLiteral(end),
+      factory.createArrowFunction(
+        undefined,
+        undefined,
+        [],
+        undefined,
+        factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
+        expression,
+      ),
+    ],
+  );
 }
 
 function instrumentCallParameters(
@@ -920,19 +1043,28 @@ function bindingNameContains(name: ts.BindingName, binding: string): boolean {
 }
 
 function isTraceableCall(node: ts.Node, sourceFile: ts.SourceFile): boolean {
-  if (!ts.isCallExpression(node)) {
-    return false;
-  }
-  if (node.expression.kind === ts.SyntaxKind.SuperKeyword) {
-    return false;
-  }
+  return (
+    ts.isCallExpression(node) &&
+    node.expression.kind !== ts.SyntaxKind.SuperKeyword &&
+    isTraceableExpression(node, sourceFile)
+  );
+}
 
+function isTraceableExpression(
+  node: ts.Expression,
+  sourceFile: ts.SourceFile,
+): boolean {
+  if (
+    ts.isAwaitExpression(node) ||
+    node.kind === ts.SyntaxKind.YieldExpression
+  ) {
+    return false;
+  }
   let traceable = true;
   const inspect = (child: ts.Node): void => {
     if (
-      child !== node &&
-      (ts.isAwaitExpression(child) ||
-        child.kind === ts.SyntaxKind.YieldExpression)
+      ts.isAwaitExpression(child) ||
+      child.kind === ts.SyntaxKind.YieldExpression
     ) {
       traceable = false;
       return;
