@@ -9,6 +9,17 @@ import type {
   ParameterUsage,
   SourceRef,
 } from "./model/runtime";
+import type {
+  PositionGizmoBinding,
+  PositionGizmoEvent,
+} from "./tools/position-gizmo";
+import { parameterBounds } from "./tools/parameter-policy";
+import {
+  ToolEngine,
+  type ToolIntent,
+  type ToolPreview,
+  type ToolSession,
+} from "./tools/tool-system";
 import { ModelViewport, type Occurrence } from "./viewport";
 
 const storageKey = "code3d.prototype.source";
@@ -62,7 +73,8 @@ app.innerHTML = `
           <nav class="scope-list" id="scope-list" aria-label="模型 scope"></nav>
         </header>
         <div class="viewport-host" id="viewport-host">
-          <div class="viewport-hint">拖动旋转 · 滚轮缩放 · 点击对象</div>
+          <div class="viewport-hint">拖动旋转 · 滚轮缩放 · 点击对象 · 拖动 gizmo</div>
+          <div class="tool-status" id="tool-status" hidden></div>
           <aside class="inspector" id="inspector"></aside>
         </div>
       </section>
@@ -84,6 +96,7 @@ const runStateLabel = requiredElement("run-state-label");
 const errorBar = requiredElement("error-bar");
 const scopeList = requiredElement("scope-list");
 const inspector = requiredElement("inspector");
+const toolStatus = requiredElement("tool-status");
 const runButton = requiredElement<HTMLButtonElement>("run-button");
 const resetButton = requiredElement<HTMLButtonElement>("reset-button");
 
@@ -93,9 +106,22 @@ let currentModule: ModelModule | null = null;
 let compileTimer: number | undefined;
 let explodeValue = 0;
 let runRevision = 0;
+let positionToolSession: ToolSession | undefined;
 
-const viewport = new ModelViewport(viewportHost, (occurrence) => {
-  selectOccurrence(occurrence, true);
+const viewport = new ModelViewport(
+  viewportHost,
+  (occurrence) => {
+    selectOccurrence(occurrence, true);
+  },
+  handlePositionTool,
+);
+const toolEngine = new ToolEngine({
+  sourceVersion: () => codeEditor.sourceVersion(),
+  readSource: (sourceRef) => codeEditor.readSource(sourceRef),
+  applySourceEdits: (baseVersion, edits) =>
+    codeEditor.applySourceEdits(baseVersion, edits),
+  applyPreview: (preview) => applyToolPreview(preview),
+  clearPreview: (preview) => clearToolPreview(preview),
 });
 
 codeEditor.onChange(() => {
@@ -124,6 +150,10 @@ resetButton.addEventListener("click", () => {
 });
 
 window.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && viewport.cancelPositionTool()) {
+    event.preventDefault();
+    return;
+  }
   if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
     event.preventDefault();
     runModel();
@@ -280,8 +310,10 @@ function renderLocalInspector(occurrence: Occurrence): void {
 function parameterControl(parameter: ParameterUsage, impact: number): HTMLElement {
   const { target } = parameter;
   const bounds = parameterBounds(parameter);
+  const toolSession = toolEngine.begin(`inspector.parameter:${target.id}`);
   const wrapper = document.createElement("section");
   wrapper.className = "parameter-control";
+  wrapper.dataset.targetId = target.id;
 
   const row = document.createElement("div");
   row.className = "parameter-control-row";
@@ -331,20 +363,21 @@ function parameterControl(parameter: ParameterUsage, impact: number): HTMLElemen
     if (!Number.isFinite(value)) return;
     range.value = String(value);
     numberInput.value = String(value);
-    viewport.setParameterPreview(target.id, value);
+    const resolution = toolSession.preview(parameterIntent(target, value));
+    if (resolution.status !== "ready") {
+      showToolIssue(resolution.reason);
+    }
   };
   const commit = (value: number): void => {
     if (!Number.isFinite(value)) return;
     if (value === target.value) {
-      viewport.clearParameterPreview(target.id);
+      toolSession.cancel();
       return;
     }
     codeEditor.revealSource(target.sourceRef);
-    if (!codeEditor.replaceNumber(target.sourceRef, target.value, value)) {
-      viewport.clearParameterPreview(target.id);
-      setRunState("pending", "源码已变化");
-      errorBar.textContent = "参数对应的源码已经变化，请等待模型更新后重试。";
-      errorBar.hidden = false;
+    const result = toolSession.commit(parameterIntent(target, value));
+    if (result.status !== "committed") {
+      showToolIssue(result.reason);
     }
   };
 
@@ -358,6 +391,156 @@ function parameterControl(parameter: ParameterUsage, impact: number): HTMLElemen
   return wrapper;
 }
 
+function parameterIntent(target: ParameterTarget, value: number): ToolIntent {
+  return { kind: "parameter.set", target, value };
+}
+
+function handlePositionTool(event: PositionGizmoEvent): void {
+  if (event.kind === "begin") {
+    positionToolSession?.cancel();
+    positionToolSession = toolEngine.begin(
+      `viewport.translate:${event.binding.axis}:${positionBindingId(event.binding)}`,
+    );
+    errorBar.hidden = true;
+    showPositionToolStatus(event.binding, event.binding.value);
+    return;
+  }
+
+  if (event.kind === "cancel") {
+    positionToolSession?.cancel();
+    positionToolSession = undefined;
+    if (event.binding.kind === "parameter") {
+      updateParameterControl(event.binding.target.id, event.binding.value);
+    }
+    hidePositionToolStatus();
+    return;
+  }
+
+  const session = positionToolSession;
+  if (!session) {
+    showToolIssue("位置工具会话已经失效，请重新拖动。");
+    return;
+  }
+  if (event.binding.kind === "parameter") {
+    updateParameterControl(event.binding.target.id, event.value);
+  }
+  showPositionToolStatus(event.binding, event.value);
+
+  if (event.kind === "preview") {
+    const resolution = session.preview(positionIntent(event.binding, event.value));
+    if (resolution.status !== "ready") {
+      showToolIssue(resolution.reason);
+    }
+    return;
+  }
+
+  if (Math.abs(event.value - event.binding.value) < 1e-9) {
+    session.cancel();
+  } else {
+    codeEditor.revealSource(positionBindingSource(event.binding));
+    const result = session.commit(positionIntent(event.binding, event.value));
+    if (result.status !== "committed") {
+      showToolIssue(result.reason);
+    }
+  }
+  positionToolSession = undefined;
+  hidePositionToolStatus();
+}
+
+function positionIntent(
+  binding: PositionGizmoBinding,
+  value: number,
+): ToolIntent {
+  if (binding.kind === "parameter") {
+    return parameterIntent(binding.target, value);
+  }
+  const delta: [number, number, number] = [0, 0, 0];
+  delta[positionAxisIndex(binding.axis)] = value;
+  return {
+    kind: "object.translate",
+    receiver: binding.receiver,
+    occurrenceKeys: binding.occurrenceKeys,
+    delta,
+  };
+}
+
+function positionAxisIndex(axis: PositionGizmoBinding["axis"]): 0 | 1 | 2 {
+  if (axis === "x") return 0;
+  if (axis === "y") return 1;
+  return 2;
+}
+
+function positionBindingId(binding: PositionGizmoBinding): string {
+  if (binding.kind === "parameter") {
+    return binding.target.id;
+  }
+  const { start, end } = binding.receiver.sourceRef;
+  return `expression:${start}:${end}`;
+}
+
+function positionBindingSource(binding: PositionGizmoBinding): SourceRef {
+  return binding.kind === "parameter"
+    ? binding.target.sourceRef
+    : binding.receiver.sourceRef;
+}
+
+function showPositionToolStatus(
+  binding: PositionGizmoBinding,
+  value: number,
+): void {
+  const impact =
+    binding.kind === "parameter"
+      ? (currentModule?.parameterImpacts.get(binding.target.id) ?? 1)
+      : binding.occurrenceKeys.length;
+  const unit = binding.unit ? ` ${binding.unit}` : "";
+  const effect = impact > 1 ? ` · 影响 ${impact} 个对象` : "";
+  toolStatus.textContent = `${binding.axis.toUpperCase()} · ${binding.label} ${formatDisplayNumber(value)}${unit}${effect} · Esc 取消`;
+  toolStatus.hidden = false;
+}
+
+function hidePositionToolStatus(): void {
+  toolStatus.hidden = true;
+}
+
+function updateParameterControl(targetId: string, value: number): void {
+  const control = [...inspector.querySelectorAll<HTMLElement>(".parameter-control")]
+    .find((candidate) => candidate.dataset.targetId === targetId);
+  if (!control) return;
+  const numberInput = control.querySelector<HTMLInputElement>(".parameter-number");
+  const rangeInput = control.querySelector<HTMLInputElement>('input[type="range"]');
+  if (numberInput) numberInput.value = String(value);
+  if (rangeInput) rangeInput.value = String(value);
+}
+
+function formatDisplayNumber(value: number): string {
+  return String(Number(value.toFixed(3)));
+}
+
+function applyToolPreview(preview: ToolPreview): void {
+  if (preview.kind === "parameter") {
+    viewport.setParameterPreview(preview.targetId, preview.value);
+  } else if (preview.kind === "occurrence-translation") {
+    viewport.setOccurrenceTranslationPreview(
+      preview.occurrenceKeys,
+      preview.delta,
+    );
+  }
+}
+
+function clearToolPreview(preview: ToolPreview): void {
+  if (preview.kind === "parameter") {
+    viewport.clearParameterPreview(preview.targetId);
+  } else if (preview.kind === "occurrence-translation") {
+    viewport.clearOccurrenceTranslationPreview(preview.occurrenceKeys);
+  }
+}
+
+function showToolIssue(message: string): void {
+  setRunState("pending", "工具需要更新");
+  errorBar.textContent = message;
+  errorBar.hidden = false;
+}
+
 function uniqueParameters(parameters: readonly ParameterUsage[]): ParameterUsage[] {
   const unique = new Map<string, ParameterUsage>();
   for (const parameter of parameters) {
@@ -366,34 +549,6 @@ function uniqueParameters(parameters: readonly ParameterUsage[]): ParameterUsage
     }
   }
   return [...unique.values()];
-}
-
-function parameterBounds(parameter: ParameterUsage): Readonly<{
-  min: number;
-  max: number;
-  step: number;
-}> {
-  const { target } = parameter;
-  const span = Math.max(Math.abs(target.value), 10);
-  const positive = [
-    "box",
-    "cylinder",
-    "sphere",
-    "fillet",
-    "chamfer",
-    "scaled",
-  ].includes(parameter.operation);
-  return {
-    min: target.min ?? (positive ? Math.max(span / 100, 0.01) : target.value - span),
-    max: target.max ?? target.value + span,
-    step: target.step ?? inferredStep(target),
-  };
-}
-
-function inferredStep(target: ParameterTarget): number {
-  if (target.kind === "count") return 1;
-  if (target.kind === "angle") return 1;
-  return Math.abs(target.value) < 10 ? 0.1 : 0.5;
 }
 
 function rangeControl(

@@ -5,6 +5,7 @@ import * as typeScriptLanguage from "monaco-editor/languages/features/typescript
 import EditorWorker from "monaco-editor/editor/editor.worker?worker";
 import TypeScriptWorker from "monaco-editor/language/typescript/ts.worker?worker";
 import { authoringTypes, type SourceRef } from "./model/runtime";
+import type { SourceTextEdit } from "./tools/tool-system";
 
 type MonacoEnvironment = typeof self & {
   MonacoEnvironment: {
@@ -109,11 +110,11 @@ export class CodeEditor {
     this.model.setValue(source);
   }
 
-  replaceNumber(
-    sourceRef: SourceRef,
-    expectedValue: number,
-    nextValue: number,
-  ): boolean {
+  sourceVersion(): number {
+    return this.model.getVersionId();
+  }
+
+  readSource(sourceRef: SourceRef): string {
     const start = this.model.getPositionAt(sourceRef.start);
     const end = this.model.getPositionAt(sourceRef.end);
     const range = new monaco.Range(
@@ -122,19 +123,56 @@ export class CodeEditor {
       end.lineNumber,
       end.column,
     );
-    const currentText = this.model.getValueInRange(range);
-    if (parseSourceNumber(currentText) !== expectedValue) {
+    return this.model.getValueInRange(range);
+  }
+
+  applySourceEdits(
+    baseVersion: number,
+    edits: readonly SourceTextEdit[],
+  ): boolean {
+    if (this.model.getVersionId() !== baseVersion || edits.length === 0) {
+      return false;
+    }
+    const ordered = [...edits].sort(
+      (left, right) => left.sourceRef.start - right.sourceRef.start,
+    );
+    if (
+      ordered.some(
+        (edit, index) =>
+          index > 0 && ordered[index - 1].sourceRef.end > edit.sourceRef.start,
+      )
+    ) {
+      return false;
+    }
+
+    const operations = ordered.map((edit) => {
+      const start = this.model.getPositionAt(edit.sourceRef.start);
+      const end = this.model.getPositionAt(edit.sourceRef.end);
+      const range = new monaco.Range(
+        start.lineNumber,
+        start.column,
+        end.lineNumber,
+        end.column,
+      );
+      return { edit, range };
+    });
+    if (
+      operations.some(
+        ({ edit, range }) => this.model.getValueInRange(range) !== edit.expectedText,
+      )
+    ) {
       return false;
     }
 
     this.editor.pushUndoStop();
-    this.editor.executeEdits("code3d.parameter", [
-      {
+    this.editor.executeEdits(
+      "code3d.tool",
+      operations.map(({ edit, range }) => ({
         range,
-        text: formatSourceNumber(nextValue),
+        text: edit.text,
         forceMoveMarkers: true,
-      },
-    ]);
+      })),
+    );
     this.editor.pushUndoStop();
     return true;
   }
@@ -188,21 +226,4 @@ export class CodeEditor {
   clearSourceHighlight(): void {
     this.sourceDecoration.clear();
   }
-}
-
-function parseSourceNumber(source: string): number | undefined {
-  const normalized = source.replace(/[()_\s]/g, "");
-  if (!/^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(normalized)) {
-    return undefined;
-  }
-  const value = Number(normalized);
-  return Number.isFinite(value) ? value : undefined;
-}
-
-function formatSourceNumber(value: number): string {
-  if (!Number.isFinite(value)) {
-    throw new Error("参数必须是有限数值。");
-  }
-  const normalized = Object.is(value, -0) ? 0 : value;
-  return String(Number(normalized.toPrecision(12)));
 }

@@ -1,7 +1,18 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import type { ModelModule } from "./model/compiler";
-import type { ModelSnapshotObject, Vec3 } from "./model/runtime";
+import type {
+  ModelSnapshotObject,
+  ParameterUsage,
+  SourceRef,
+  Vec3,
+} from "./model/runtime";
+import {
+  PositionGizmo,
+  type PositionAxis,
+  type PositionGizmoBinding,
+  type PositionGizmoEvent,
+} from "./tools/position-gizmo";
 
 export type Occurrence = Readonly<{
   key: string;
@@ -19,9 +30,13 @@ export class ModelViewport {
   private readonly pointer = new THREE.Vector2();
   private readonly root = new THREE.Group();
   private readonly occurrences = new Map<string, Occurrence>();
-  private readonly previewOffsets = new Map<string, Vec3>();
   private readonly parameterPreviews = new Map<string, number>();
+  private readonly occurrenceTranslationPreviews = new Map<string, Vec3>();
+  private readonly positionGizmo: PositionGizmo;
+  private readonly impactHelpers: THREE.BoxHelper[] = [];
   private selectionHelper: THREE.BoxHelper | null = null;
+  private highlightedTargetId?: string;
+  private highlightedOccurrenceKeys = new Set<string>();
   private selectedKey = "root";
   private explode = 0;
   private module: ModelModule | null = null;
@@ -29,6 +44,7 @@ export class ModelViewport {
   constructor(
     private readonly container: HTMLElement,
     private readonly onSelect: (occurrence: Occurrence) => void,
+    onPositionTool: (event: PositionGizmoEvent) => void,
   ) {
     this.renderer = new THREE.WebGLRenderer({
       antialias: true,
@@ -68,6 +84,15 @@ export class ModelViewport {
     this.controls.target.set(0, 20, 0);
     this.controls.minDistance = 20;
     this.controls.maxDistance = 650;
+    this.positionGizmo = new PositionGizmo(
+      this.scene,
+      this.camera,
+      this.renderer.domElement,
+      (enabled) => {
+        this.controls.enabled = enabled;
+      },
+      onPositionTool,
+    );
 
     this.renderer.domElement.addEventListener("pointerdown", (event) => {
       this.pick(event);
@@ -84,10 +109,14 @@ export class ModelViewport {
     fitCamera = true,
   ): void {
     this.module = module;
+    this.positionGizmo.detach();
+    this.clearImpactHelpers();
     this.disposeRoot();
     this.occurrences.clear();
-    this.previewOffsets.clear();
     this.parameterPreviews.clear();
+    this.occurrenceTranslationPreviews.clear();
+    this.highlightedTargetId = undefined;
+    this.highlightedOccurrenceKeys.clear();
     this.root.clear();
 
     const rootObject = this.buildObject(module.root, "root", 0);
@@ -142,28 +171,47 @@ export class ModelViewport {
     this.applyPreviewTransforms();
   }
 
-  setPreviewOffset(key: string, offset: Vec3): void {
-    this.previewOffsets.set(key, offset);
-    this.applyPreviewTransforms();
-  }
-
-  getPreviewOffset(key: string): Vec3 {
-    return this.previewOffsets.get(key) ?? [0, 0, 0];
-  }
-
-  resetPreviewOffset(key: string): void {
-    this.previewOffsets.delete(key);
-    this.applyPreviewTransforms();
-  }
-
   setParameterPreview(targetId: string, value: number): void {
     this.parameterPreviews.set(targetId, value);
+    if (this.highlightedTargetId !== targetId) {
+      this.highlightedTargetId = targetId;
+      this.rebuildImpactHelpers();
+    }
     this.applyPreviewTransforms();
   }
 
   clearParameterPreview(targetId: string): void {
     this.parameterPreviews.delete(targetId);
+    if (this.highlightedTargetId === targetId) {
+      this.highlightedTargetId = this.parameterPreviews.keys().next().value;
+      this.rebuildImpactHelpers();
+    }
     this.applyPreviewTransforms();
+  }
+
+  setOccurrenceTranslationPreview(
+    occurrenceKeys: readonly string[],
+    delta: Vec3,
+  ): void {
+    occurrenceKeys.forEach((key) =>
+      this.occurrenceTranslationPreviews.set(key, delta),
+    );
+    this.highlightedOccurrenceKeys = new Set(occurrenceKeys);
+    this.rebuildImpactHelpers();
+    this.applyPreviewTransforms();
+  }
+
+  clearOccurrenceTranslationPreview(occurrenceKeys: readonly string[]): void {
+    occurrenceKeys.forEach((key) =>
+      this.occurrenceTranslationPreviews.delete(key),
+    );
+    this.highlightedOccurrenceKeys.clear();
+    this.rebuildImpactHelpers();
+    this.applyPreviewTransforms();
+  }
+
+  cancelPositionTool(): boolean {
+    return this.positionGizmo.cancel();
   }
 
   fit(target: THREE.Object3D = this.root): void {
@@ -215,13 +263,15 @@ export class ModelViewport {
       return;
     }
     this.selectedKey = key;
-    this.updateSelectionHelper();
+    this.rebuildSelectionHelper();
+    this.rebuildImpactHelpers();
+    this.updatePositionGizmo();
     if (notify) {
       this.onSelect(occurrence);
     }
   }
 
-  private updateSelectionHelper(): void {
+  private rebuildSelectionHelper(): void {
     if (this.selectionHelper) {
       this.scene.remove(this.selectionHelper);
       this.selectionHelper.geometry.dispose();
@@ -241,13 +291,26 @@ export class ModelViewport {
     this.scene.add(this.selectionHelper);
   }
 
+  private updatePositionGizmo(): void {
+    const occurrence = this.getSelected();
+    if (!occurrence || occurrence.depth === 0) {
+      this.positionGizmo.detach();
+      return;
+    }
+    this.positionGizmo.attach(
+      occurrence.object,
+      positionBindings(
+        occurrence,
+        [...this.occurrences.values()],
+      ),
+    );
+  }
+
   private applyPreviewTransforms(): void {
     for (const occurrence of this.occurrences.values()) {
       applyNodeTransform(occurrence.object, occurrence.node);
-      const offset = [...(this.previewOffsets.get(occurrence.key) ?? [0, 0, 0])] as [
-        number,
-        number,
-        number,
+      const offset: [number, number, number] = [
+        ...(this.occurrenceTranslationPreviews.get(occurrence.key) ?? [0, 0, 0]),
       ];
       for (const parameter of occurrence.node.parameters) {
         const previewValue = this.parameterPreviews.get(parameter.target.id);
@@ -273,10 +336,15 @@ export class ModelViewport {
       }
     }
     this.root.updateMatrixWorld(true);
-    this.updateSelectionHelper();
+    this.selectionHelper?.update();
+    this.impactHelpers.forEach((helper) => helper.update());
+    this.positionGizmo.updateAnchor();
   }
 
   private pick(event: PointerEvent): void {
+    if (this.positionGizmo.isPointerActive()) {
+      return;
+    }
     const rect = this.renderer.domElement.getBoundingClientRect();
     this.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     this.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
@@ -306,8 +374,43 @@ export class ModelViewport {
     requestAnimationFrame(this.animate);
     this.controls.update();
     this.selectionHelper?.update();
+    this.impactHelpers.forEach((helper) => helper.update());
     this.renderer.render(this.scene, this.camera);
   };
+
+  private rebuildImpactHelpers(): void {
+    this.clearImpactHelpers();
+    if (!this.highlightedTargetId && this.highlightedOccurrenceKeys.size === 0) {
+      return;
+    }
+    for (const occurrence of this.occurrences.values()) {
+      if (
+        occurrence.key === this.selectedKey ||
+        (!this.highlightedOccurrenceKeys.has(occurrence.key) &&
+          !occurrence.node.parameters.some(
+            (parameter) => parameter.target.id === this.highlightedTargetId,
+          ))
+      ) {
+        continue;
+      }
+      const helper = new THREE.BoxHelper(occurrence.object, "#8ea2ff");
+      helper.material.depthTest = false;
+      helper.material.transparent = true;
+      helper.material.opacity = 0.72;
+      helper.renderOrder = 19;
+      this.impactHelpers.push(helper);
+      this.scene.add(helper);
+    }
+  }
+
+  private clearImpactHelpers(): void {
+    for (const helper of this.impactHelpers) {
+      this.scene.remove(helper);
+      helper.geometry.dispose();
+      helper.material.dispose();
+    }
+    this.impactHelpers.length = 0;
+  }
 
   private disposeRoot(): void {
     this.root.traverse((object) => {
@@ -320,6 +423,149 @@ export class ModelViewport {
       }
     });
   }
+}
+
+function positionBindings(
+  occurrence: Occurrence,
+  occurrences: readonly Occurrence[],
+): PositionGizmoBinding[] {
+  const receiver = occurrence.node.sourceRefs.at(-1);
+  const parameters = receiver
+    ? occurrence.node.parameters.filter(({ expressionRef }) =>
+        containsSource(receiver, expressionRef),
+      )
+    : [];
+  const modelParameters = occurrences.flatMap(({ node }) => node.parameters);
+  const safeTargets = positionOnlyTargets(modelParameters);
+  const byTarget = new Map<
+    string,
+    {
+      target: ParameterUsage["target"];
+      sensitivities: Map<PositionAxis, number>;
+    }
+  >();
+  for (const parameter of parameters) {
+    if (!safeTargets.has(parameter.target.id)) {
+      continue;
+    }
+    if (parameter.operation !== "at" && parameter.operation !== "move") {
+      continue;
+    }
+    const axis = positionAxis(parameter.argument);
+    if (!axis || !Number.isFinite(parameter.sensitivity)) {
+      continue;
+    }
+    const aggregate = byTarget.get(parameter.target.id) ?? {
+      target: parameter.target,
+      sensitivities: new Map<PositionAxis, number>(),
+    };
+    aggregate.sensitivities.set(
+      axis,
+      (aggregate.sensitivities.get(axis) ?? 0) + parameter.sensitivity,
+    );
+    byTarget.set(parameter.target.id, aggregate);
+  }
+
+  const candidates = new Map<PositionAxis, PositionGizmoBinding[]>();
+  for (const { target, sensitivities } of byTarget.values()) {
+    const effective = [...sensitivities].filter(
+      ([, sensitivity]) => Math.abs(sensitivity) > 1e-9,
+    );
+    if (effective.length !== 1) {
+      continue;
+    }
+    const [axis, sensitivity] = effective[0];
+    const binding: PositionGizmoBinding = {
+      kind: "parameter",
+      axis,
+      target,
+      label: target.label,
+      value: target.value,
+      sensitivity,
+      parameterKind: target.kind,
+      unit: target.unit,
+      min: target.min,
+      max: target.max,
+      step: target.step,
+    };
+    const axisCandidates = candidates.get(axis) ?? [];
+    axisCandidates.push(binding);
+    candidates.set(axis, axisCandidates);
+  }
+
+  return (["x", "y", "z"] as const).flatMap((axis) => {
+    const axisCandidates = candidates.get(axis) ?? [];
+    if (axisCandidates.length === 1) {
+      return axisCandidates;
+    }
+    if (!receiver) {
+      return [];
+    }
+    const occurrenceKeys = occurrences
+      .filter(({ node }) =>
+        node.sourceRefs.some((sourceRef) => sameSource(sourceRef, receiver)),
+      )
+      .map(({ key }) => key);
+    return [
+      {
+        kind: "expression",
+        axis,
+        label: `Δ${axis.toUpperCase()}`,
+        value: 0,
+        sensitivity: 1,
+        parameterKind: "length",
+        step: 0.5,
+        receiver: { sourceRef: receiver },
+        occurrenceKeys,
+      },
+    ];
+  });
+}
+
+function containsSource(container: SourceRef, candidate: SourceRef): boolean {
+  return container.start <= candidate.start && candidate.end <= container.end;
+}
+
+function sameSource(left: SourceRef, right: SourceRef): boolean {
+  return left.start === right.start && left.end === right.end;
+}
+
+function positionOnlyTargets(parameters: readonly ParameterUsage[]): Set<string> {
+  const usages = new Map<string, ParameterUsage[]>();
+  for (const parameter of parameters) {
+    const targetUsages = usages.get(parameter.target.id) ?? [];
+    targetUsages.push(parameter);
+    usages.set(parameter.target.id, targetUsages);
+  }
+
+  const safe = new Set<string>();
+  for (const [targetId, targetUsages] of usages) {
+    const axes = new Set(
+      targetUsages.map((usage) =>
+        usage.operation === "at" || usage.operation === "move"
+          ? positionAxis(usage.argument)
+          : undefined,
+      ),
+    );
+    if (
+      axes.size === 1 &&
+      !axes.has(undefined) &&
+      targetUsages.every(
+        ({ sensitivity }) =>
+          Number.isFinite(sensitivity) && Math.abs(sensitivity) > 1e-9,
+      )
+    ) {
+      safe.add(targetId);
+    }
+  }
+  return safe;
+}
+
+function positionAxis(argument: string): PositionAxis | undefined {
+  if (argument === "x") return "x";
+  if (argument === "y") return "y";
+  if (argument === "z") return "z";
+  return undefined;
 }
 
 function axisIndex(argument: string): 0 | 1 | 2 | undefined {
