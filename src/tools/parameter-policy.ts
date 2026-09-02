@@ -1,44 +1,49 @@
-import type { ParameterTarget, ParameterUsage } from "../model/runtime";
+import type {ParameterTarget} from '../model/runtime';
 
 export type NumericValuePolicy = Readonly<{
   value: number;
-  kind?: ParameterTarget["kind"];
+  kind?: ParameterTarget['kind'];
   min?: number;
   max?: number;
   step?: number;
 }>;
 
-export type ParameterBounds = Readonly<{
+export type ParameterRange = Readonly<{
   min: number;
   max: number;
   step: number;
 }>;
 
-export function parameterBounds(parameter: ParameterUsage): ParameterBounds {
-  const { target } = parameter;
-  const span = Math.max(Math.abs(target.value), 10);
-  const positive = [
-    "box",
-    "cylinder",
-    "sphere",
-    "fillet",
-    "chamfer",
-    "scaled",
-  ].includes(parameter.operation);
+export function parameterRange(
+  target: ParameterTarget,
+): ParameterRange | undefined {
+  if (
+    target.min === undefined ||
+    target.max === undefined ||
+    !Number.isFinite(target.min) ||
+    !Number.isFinite(target.max) ||
+    target.min >= target.max
+  ) {
+    return undefined;
+  }
+
   return {
-    min:
-      target.min ??
-      (positive ? Math.max(span / 100, 0.01) : target.value - span),
-    max: target.max ?? target.value + span,
-    step: target.step ?? inferredParameterStep(target),
+    min: target.min,
+    max: target.max,
+    step:
+      target.step !== undefined &&
+      Number.isFinite(target.step) &&
+      target.step > 0
+        ? target.step
+        : inferredParameterStep(target),
   };
 }
 
 export function inferredParameterStep(
-  target: Pick<ParameterTarget, "kind" | "value">,
+  target: Pick<ParameterTarget, 'kind' | 'value'>,
 ): number {
-  if (target.kind === "count") return 1;
-  if (target.kind === "angle") return 1;
+  if (target.kind === 'count') return 1;
+  if (target.kind === 'angle') return 1;
   return Math.abs(target.value) < 10 ? 0.1 : 0.5;
 }
 

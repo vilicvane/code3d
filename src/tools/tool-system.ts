@@ -1,27 +1,27 @@
-import type { ParameterTarget, SourceRef, Vec3 } from "../model/runtime";
+import type {ParameterTarget, SourceRef, Vec3} from '../model/runtime';
 
 export type ExpressionDraft =
-  | Readonly<{ kind: "number"; value: number }>
-  | Readonly<{ kind: "string"; value: string }>
-  | Readonly<{ kind: "boolean"; value: boolean }>
-  | Readonly<{ kind: "identifier"; name: string }>
+  | Readonly<{kind: 'number'; value: number}>
+  | Readonly<{kind: 'string'; value: string}>
+  | Readonly<{kind: 'boolean'; value: boolean}>
+  | Readonly<{kind: 'identifier'; name: string}>
   | Readonly<{
-      kind: "array";
+      kind: 'array';
       elements: readonly ExpressionDraft[];
     }>
   | Readonly<{
-      kind: "binary";
-      operator: "+" | "-" | "*" | "/";
+      kind: 'binary';
+      operator: '+' | '-' | '*' | '/';
       left: ExpressionDraft;
       right: ExpressionDraft;
     }>
   | Readonly<{
-      kind: "call";
+      kind: 'call';
       callee: ExpressionDraft;
       arguments: readonly ExpressionDraft[];
     }>
   | Readonly<{
-      kind: "member";
+      kind: 'member';
       object: ExpressionDraft;
       property: string;
     }>;
@@ -33,23 +33,23 @@ export type SourceAnchor = Readonly<{
 
 export type ToolIntent =
   | Readonly<{
-      kind: "parameter.set";
+      kind: 'parameter.set';
       target: ParameterTarget;
       value: number;
     }>
   | Readonly<{
-      kind: "expression.replace";
+      kind: 'expression.replace';
       target: SourceAnchor;
       expression: ExpressionDraft;
     }>
   | Readonly<{
-      kind: "operation.insert";
+      kind: 'operation.insert';
       receiver: SourceAnchor;
       operation: string;
       arguments: readonly ExpressionDraft[];
     }>
   | Readonly<{
-      kind: "object.translate";
+      kind: 'object.translate';
       receiver: SourceAnchor;
       occurrenceKeys: readonly string[];
       delta: Vec3;
@@ -63,16 +63,16 @@ export type SourceTextEdit = Readonly<{
 
 export type ToolPreview =
   | Readonly<{
-      kind: "parameter";
+      kind: 'parameter';
       targetId: string;
       value: number;
     }>
   | Readonly<{
-      kind: "source-edits";
+      kind: 'source-edits';
       edits: readonly SourceTextEdit[];
     }>
   | Readonly<{
-      kind: "occurrence-translation";
+      kind: 'occurrence-translation';
       occurrenceKeys: readonly string[];
       delta: Vec3;
     }>;
@@ -87,17 +87,17 @@ export type ToolEditPlan = Readonly<{
 }>;
 
 export type ToolResolution =
-  | Readonly<{ status: "ready"; plan: ToolEditPlan }>
+  | Readonly<{status: 'ready'; plan: ToolEditPlan}>
   | Readonly<{
-      status: "choice";
+      status: 'choice';
       reason: string;
       plans: readonly ToolEditPlan[];
     }>
-  | Readonly<{ status: "conflict" | "unsupported"; reason: string }>;
+  | Readonly<{status: 'conflict' | 'unsupported'; reason: string}>;
 
 export type ToolCommitResult =
-  | Readonly<{ status: "committed"; plan: ToolEditPlan }>
-  | Exclude<ToolResolution, Readonly<{ status: "ready"; plan: ToolEditPlan }>>;
+  | Readonly<{status: 'committed'; plan: ToolEditPlan}>
+  | Exclude<ToolResolution, Readonly<{status: 'ready'; plan: ToolEditPlan}>>;
 
 export interface ToolHost {
   sourceVersion(): number;
@@ -117,12 +117,15 @@ type ResolveContext = Readonly<{
 }>;
 
 interface ToolIntentResolver {
-  readonly kind: ToolIntent["kind"];
+  readonly kind: ToolIntent['kind'];
   resolve(intent: ToolIntent, context: ResolveContext): ToolResolution;
 }
 
 export class ToolEngine {
-  private readonly resolvers = new Map<ToolIntent["kind"], ToolIntentResolver>();
+  private readonly resolvers = new Map<
+    ToolIntent['kind'],
+    ToolIntentResolver
+  >();
 
   constructor(readonly host: ToolHost) {
     this.register(new SetParameterResolver());
@@ -135,21 +138,28 @@ export class ToolEngine {
     return new ToolSession(this, toolId, this.host.sourceVersion());
   }
 
-  resolve(toolId: string, baseVersion: number, intent: ToolIntent): ToolResolution {
+  resolve(
+    toolId: string,
+    baseVersion: number,
+    intent: ToolIntent,
+  ): ToolResolution {
     if (this.host.sourceVersion() !== baseVersion) {
       return {
-        status: "conflict",
-        reason: "工具启动后源码已经变化，请基于最新模型重新操作。",
+        status: 'conflict',
+        reason: '工具启动后源码已经变化，请基于最新模型重新操作。',
       };
     }
     const resolver = this.resolvers.get(intent.kind);
     if (!resolver) {
-      return { status: "unsupported", reason: `没有可处理 ${intent.kind} 的解析器。` };
+      return {
+        status: 'unsupported',
+        reason: `没有可处理 ${intent.kind} 的解析器。`,
+      };
     }
     return resolver.resolve(intent, {
       toolId,
       baseVersion,
-      readSource: (sourceRef) => this.host.readSource(sourceRef),
+      readSource: sourceRef => this.host.readSource(sourceRef),
     });
   }
 
@@ -171,10 +181,14 @@ export class ToolSession {
 
   preview(intent: ToolIntent): ToolResolution {
     if (this.closed) {
-      return { status: "conflict", reason: "工具会话已经结束。" };
+      return {status: 'conflict', reason: '工具会话已经结束。'};
     }
-    const resolution = this.engine.resolve(this.toolId, this.baseVersion, intent);
-    if (resolution.status !== "ready") {
+    const resolution = this.engine.resolve(
+      this.toolId,
+      this.baseVersion,
+      intent,
+    );
+    if (resolution.status !== 'ready') {
       this.clearActivePreview();
       return resolution;
     }
@@ -189,10 +203,14 @@ export class ToolSession {
 
   commit(intent = this.lastIntent): ToolCommitResult {
     if (this.closed || !intent) {
-      return { status: "conflict", reason: "工具会话没有可提交的编辑。" };
+      return {status: 'conflict', reason: '工具会话没有可提交的编辑。'};
     }
-    const resolution = this.engine.resolve(this.toolId, this.baseVersion, intent);
-    if (resolution.status !== "ready") {
+    const resolution = this.engine.resolve(
+      this.toolId,
+      this.baseVersion,
+      intent,
+    );
+    if (resolution.status !== 'ready') {
       this.clearActivePreview();
       this.closed = true;
       return resolution;
@@ -206,12 +224,12 @@ export class ToolSession {
       this.clearActivePreview();
       this.closed = true;
       return {
-        status: "conflict",
-        reason: "源码编辑未能原子应用，请基于最新模型重试。",
+        status: 'conflict',
+        reason: '源码编辑未能原子应用，请基于最新模型重试。',
       };
     }
     this.closed = true;
-    return { status: "committed", plan: resolution.plan };
+    return {status: 'committed', plan: resolution.plan};
   }
 
   cancel(): void {
@@ -228,20 +246,23 @@ export class ToolSession {
 }
 
 class SetParameterResolver implements ToolIntentResolver {
-  readonly kind = "parameter.set" as const;
+  readonly kind = 'parameter.set' as const;
 
   resolve(intent: ToolIntent, context: ResolveContext): ToolResolution {
     if (intent.kind !== this.kind) {
-      return { status: "unsupported", reason: "参数解析器收到错误的编辑意图。" };
+      return {
+        status: 'unsupported',
+        reason: '参数解析器收到错误的编辑意图。',
+      };
     }
     if (!Number.isFinite(intent.value)) {
-      return { status: "unsupported", reason: "参数必须是有限数值。" };
+      return {status: 'unsupported', reason: '参数必须是有限数值。'};
     }
     const currentText = context.readSource(intent.target.sourceRef);
     if (parseSourceNumber(currentText) !== intent.target.value) {
       return {
-        status: "conflict",
-        reason: "参数对应的源码已经变化，请等待模型更新后重试。",
+        status: 'conflict',
+        reason: '参数对应的源码已经变化，请等待模型更新后重试。',
       };
     }
     const edits: readonly SourceTextEdit[] = [
@@ -252,7 +273,7 @@ class SetParameterResolver implements ToolIntentResolver {
       },
     ];
     return {
-      status: "ready",
+      status: 'ready',
       plan: {
         toolId: context.toolId,
         baseVersion: context.baseVersion,
@@ -260,7 +281,7 @@ class SetParameterResolver implements ToolIntentResolver {
         intent,
         edits,
         preview: {
-          kind: "parameter",
+          kind: 'parameter',
           targetId: intent.target.id,
           value: intent.value,
         },
@@ -270,23 +291,26 @@ class SetParameterResolver implements ToolIntentResolver {
 }
 
 class ReplaceExpressionResolver implements ToolIntentResolver {
-  readonly kind = "expression.replace" as const;
+  readonly kind = 'expression.replace' as const;
 
   resolve(intent: ToolIntent, context: ResolveContext): ToolResolution {
     if (intent.kind !== this.kind) {
-      return { status: "unsupported", reason: "表达式解析器收到错误的编辑意图。" };
+      return {
+        status: 'unsupported',
+        reason: '表达式解析器收到错误的编辑意图。',
+      };
     }
     try {
       return expressionPlan(
         intent,
         intent.target,
         renderExpression(intent.expression),
-        "替换模型表达式",
+        '替换模型表达式',
         context,
       );
     } catch (error) {
       return {
-        status: "unsupported",
+        status: 'unsupported',
         reason: error instanceof Error ? error.message : String(error),
       };
     }
@@ -294,18 +318,21 @@ class ReplaceExpressionResolver implements ToolIntentResolver {
 }
 
 class InsertOperationResolver implements ToolIntentResolver {
-  readonly kind = "operation.insert" as const;
+  readonly kind = 'operation.insert' as const;
 
   resolve(intent: ToolIntent, context: ResolveContext): ToolResolution {
     if (intent.kind !== this.kind) {
-      return { status: "unsupported", reason: "操作解析器收到错误的编辑意图。" };
+      return {
+        status: 'unsupported',
+        reason: '操作解析器收到错误的编辑意图。',
+      };
     }
     if (!isIdentifier(intent.operation)) {
-      return { status: "unsupported", reason: "操作名称不是合法的标识符。" };
+      return {status: 'unsupported', reason: '操作名称不是合法的标识符。'};
     }
     try {
       const receiver = context.readSource(intent.receiver.sourceRef);
-      const argumentsText = intent.arguments.map(renderExpression).join(", ");
+      const argumentsText = intent.arguments.map(renderExpression).join(', ');
       return expressionPlan(
         intent,
         intent.receiver,
@@ -315,7 +342,7 @@ class InsertOperationResolver implements ToolIntentResolver {
       );
     } catch (error) {
       return {
-        status: "unsupported",
+        status: 'unsupported',
         reason: error instanceof Error ? error.message : String(error),
       };
     }
@@ -323,36 +350,42 @@ class InsertOperationResolver implements ToolIntentResolver {
 }
 
 class TranslateObjectResolver implements ToolIntentResolver {
-  readonly kind = "object.translate" as const;
+  readonly kind = 'object.translate' as const;
 
   resolve(intent: ToolIntent, context: ResolveContext): ToolResolution {
     if (intent.kind !== this.kind) {
-      return { status: "unsupported", reason: "平移解析器收到错误的编辑意图。" };
+      return {
+        status: 'unsupported',
+        reason: '平移解析器收到错误的编辑意图。',
+      };
     }
     if (
       intent.occurrenceKeys.length === 0 ||
-      intent.delta.some((value) => !Number.isFinite(value))
+      intent.delta.some(value => !Number.isFinite(value))
     ) {
-      return { status: "unsupported", reason: "平移必须包含有效对象和有限数值。" };
+      return {
+        status: 'unsupported',
+        reason: '平移必须包含有效对象和有限数值。',
+      };
     }
     const receiver = context.readSource(intent.receiver.sourceRef);
-    const delta = intent.delta.map(formatSourceNumber).join(", ");
+    const delta = intent.delta.map(formatSourceNumber).join(', ');
     const resolution = expressionPlan(
       intent,
       intent.receiver,
       `(${receiver}).move(${delta})`,
-      "平移模型对象",
+      '平移模型对象',
       context,
     );
-    if (resolution.status !== "ready") {
+    if (resolution.status !== 'ready') {
       return resolution;
     }
     return {
-      status: "ready",
+      status: 'ready',
       plan: {
         ...resolution.plan,
         preview: {
-          kind: "occurrence-translation",
+          kind: 'occurrence-translation',
           occurrenceKeys: intent.occurrenceKeys,
           delta: intent.delta,
         },
@@ -369,8 +402,11 @@ function expressionPlan(
   context: ResolveContext,
 ): ToolResolution {
   const currentText = context.readSource(anchor.sourceRef);
-  if (anchor.expectedText !== undefined && anchor.expectedText !== currentText) {
-    return { status: "conflict", reason: "表达式对应的源码已经变化。" };
+  if (
+    anchor.expectedText !== undefined &&
+    anchor.expectedText !== currentText
+  ) {
+    return {status: 'conflict', reason: '表达式对应的源码已经变化。'};
   }
   const edits: readonly SourceTextEdit[] = [
     {
@@ -380,38 +416,38 @@ function expressionPlan(
     },
   ];
   return {
-    status: "ready",
+    status: 'ready',
     plan: {
       toolId: context.toolId,
       baseVersion: context.baseVersion,
       summary,
       intent,
       edits,
-      preview: { kind: "source-edits", edits },
+      preview: {kind: 'source-edits', edits},
     },
   };
 }
 
 function renderExpression(expression: ExpressionDraft): string {
   switch (expression.kind) {
-    case "number":
+    case 'number':
       return formatSourceNumber(expression.value);
-    case "string":
+    case 'string':
       return JSON.stringify(expression.value);
-    case "boolean":
+    case 'boolean':
       return String(expression.value);
-    case "identifier":
+    case 'identifier':
       if (!isIdentifier(expression.name)) {
         throw new Error(`非法标识符：${expression.name}`);
       }
       return expression.name;
-    case "array":
-      return `[${expression.elements.map(renderExpression).join(", ")}]`;
-    case "binary":
+    case 'array':
+      return `[${expression.elements.map(renderExpression).join(', ')}]`;
+    case 'binary':
       return `(${renderExpression(expression.left)} ${expression.operator} ${renderExpression(expression.right)})`;
-    case "call":
-      return `${renderExpression(expression.callee)}(${expression.arguments.map(renderExpression).join(", ")})`;
-    case "member":
+    case 'call':
+      return `${renderExpression(expression.callee)}(${expression.arguments.map(renderExpression).join(', ')})`;
+    case 'member':
       if (!isIdentifier(expression.property)) {
         throw new Error(`非法属性名：${expression.property}`);
       }
@@ -420,7 +456,7 @@ function renderExpression(expression: ExpressionDraft): string {
 }
 
 function parseSourceNumber(source: string): number | undefined {
-  const normalized = source.replace(/[()_\s]/g, "");
+  const normalized = source.replace(/[()_\s]/g, '');
   if (!/^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(normalized)) {
     return undefined;
   }
@@ -430,7 +466,7 @@ function parseSourceNumber(source: string): number | undefined {
 
 function formatSourceNumber(value: number): string {
   if (!Number.isFinite(value)) {
-    throw new Error("表达式数值必须是有限数值。");
+    throw new Error('表达式数值必须是有限数值。');
   }
   const normalized = Object.is(value, -0) ? 0 : value;
   return String(Number(normalized.toPrecision(12)));

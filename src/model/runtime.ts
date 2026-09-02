@@ -1,9 +1,4 @@
-import {
-  makeBox,
-  makeCylinder,
-  makeSphere,
-  type Shape3D,
-} from "replicad";
+import {makeBox, makeCylinder, makeSphere, type Shape3D} from 'replicad';
 
 export type Vec3 = readonly [x: number, y: number, z: number];
 
@@ -12,12 +7,7 @@ export type SourceRef = Readonly<{
   end: number;
 }>;
 
-export type ParameterKind =
-  | "length"
-  | "angle"
-  | "ratio"
-  | "count"
-  | "scalar";
+export type ParameterKind = 'length' | 'angle' | 'ratio' | 'count' | 'scalar';
 
 export type ParameterTarget = Readonly<{
   id: string;
@@ -36,6 +26,7 @@ export type ParameterUsage = Readonly<{
   operation: string;
   argument: string;
   value: number;
+  operationRef: SourceRef;
   expressionRef: SourceRef;
   target: ParameterTarget;
   sensitivity: number;
@@ -66,7 +57,7 @@ export type RenderMesh = Readonly<{
 
 export type ModelSnapshotObject = Readonly<{
   nodeId: string;
-  kind: "solid" | "group";
+  kind: 'solid' | 'group';
   name: string;
   color: string;
   children: readonly ModelSnapshotObject[];
@@ -77,7 +68,7 @@ export type ModelSnapshotObject = Readonly<{
 }>;
 
 type ModelObjectInit = Readonly<{
-  kind: "solid" | "group";
+  kind: 'solid' | 'group';
   shape?: Shape3D;
   name?: string;
   color?: string;
@@ -101,7 +92,7 @@ let nextNodeId = 1;
 
 export class ModelObject {
   readonly nodeId: string;
-  readonly kind: "solid" | "group";
+  readonly kind: 'solid' | 'group';
   readonly name: string;
   readonly color: string;
   readonly children: readonly ModelObject[];
@@ -113,14 +104,14 @@ export class ModelObject {
   private readonly shape?: Shape3D;
 
   constructor(init: ModelObjectInit) {
-    if (init.kind === "solid" && !init.shape) {
-      throw new Error("solid 模型对象必须包含 OpenCascade shape。");
+    if (init.kind === 'solid' && !init.shape) {
+      throw new Error('solid 模型对象必须包含 OpenCascade shape。');
     }
     this.nodeId = init.nodeId ?? `node-${nextNodeId++}`;
     this.kind = init.kind;
     this.shape = init.shape;
-    this.name = init.name ?? (init.kind === "solid" ? "Solid" : "Group");
-    this.color = init.color ?? "#d6ff45";
+    this.name = init.name ?? (init.kind === 'solid' ? 'Solid' : 'Group');
+    this.color = init.color ?? '#d6ff45';
     this.children = init.children ?? [];
     this.position = init.position ?? origin;
     this.rotation = init.rotation ?? origin;
@@ -130,11 +121,11 @@ export class ModelObject {
   }
 
   named(name: string): ModelObject {
-    return this.copy({ name });
+    return this.copy({name});
   }
 
   paint(color: string): ModelObject {
-    return this.copy({ color });
+    return this.copy({color});
   }
 
   at(x: number, y: number, z: number): ModelObject {
@@ -151,9 +142,9 @@ export class ModelObject {
       this.position[1] + y,
       this.position[2] + z,
     ];
-    if (this.kind === "group") {
+    if (this.kind === 'group') {
       return this.copy({
-        children: this.children.map((child) => child.move(x, y, z)),
+        children: this.children.map(child => child.move(x, y, z)),
         position: nextPosition,
       });
     }
@@ -169,9 +160,9 @@ export class ModelObject {
       this.rotation[1] + y,
       this.rotation[2] + z,
     ];
-    if (this.kind === "group") {
+    if (this.kind === 'group') {
       return this.copy({
-        children: this.children.map((child) =>
+        children: this.children.map(child =>
           child.rotateAround(this.position, x, y, z),
         ),
         rotation: nextRotation,
@@ -184,15 +175,15 @@ export class ModelObject {
   }
 
   scaled(factor: number): ModelObject {
-    assertPositive("scale", factor);
+    assertPositive('scale', factor);
     const nextScale: Vec3 = [
       this.scale[0] * factor,
       this.scale[1] * factor,
       this.scale[2] * factor,
     ];
-    if (this.kind === "group") {
+    if (this.kind === 'group') {
       return this.copy({
-        children: this.children.map((child) =>
+        children: this.children.map(child =>
           child.scaleAround(this.position, factor),
         ),
         scale: nextScale,
@@ -205,19 +196,19 @@ export class ModelObject {
   }
 
   cut(tool: ModelObject): ModelObject {
-    return this.booleanResult("cut", tool);
+    return this.booleanResult('cut', tool);
   }
 
   fuse(other: ModelObject): ModelObject {
-    return this.booleanResult("fuse", other);
+    return this.booleanResult('fuse', other);
   }
 
   intersect(other: ModelObject): ModelObject {
-    return this.booleanResult("intersect", other);
+    return this.booleanResult('intersect', other);
   }
 
   fillet(radius: number): ModelObject {
-    assertPositive("radius", radius);
+    assertPositive('radius', radius);
     return this.copy({
       shape: this.requireShape().fillet(radius),
       position: origin,
@@ -227,7 +218,7 @@ export class ModelObject {
   }
 
   chamfer(distance: number): ModelObject {
-    assertPositive("distance", distance);
+    assertPositive('distance', distance);
     return this.copy({
       shape: this.requireShape().chamfer(distance),
       position: origin,
@@ -237,11 +228,11 @@ export class ModelObject {
   }
 
   withChildren(children: readonly ModelObject[]): ModelObject {
-    if (this.kind !== "group") {
-      throw new Error("只有 group 或 model 可以包含子对象。");
+    if (this.kind !== 'group') {
+      throw new Error('只有 group 或 model 可以包含子对象。');
     }
     assertChildren(children);
-    return this.copy({ children });
+    return this.copy({children});
   }
 
   /** Runtime instrumentation hook. Not part of the authoring API. */
@@ -257,9 +248,11 @@ export class ModelObject {
   attachParameters(parameters: readonly ParameterUsage[]): void {
     for (const parameter of parameters) {
       const duplicate = this.parameters.some(
-        (candidate) =>
+        candidate =>
           candidate.operation === parameter.operation &&
           candidate.argument === parameter.argument &&
+          candidate.operationRef.start === parameter.operationRef.start &&
+          candidate.operationRef.end === parameter.operationRef.end &&
           candidate.expressionRef.start === parameter.expressionRef.start &&
           candidate.expressionRef.end === parameter.expressionRef.end &&
           candidate.target.id === parameter.target.id,
@@ -271,13 +264,13 @@ export class ModelObject {
   }
 
   toSnapshot(): ModelSnapshotObject {
-    if (this.kind === "group") {
+    if (this.kind === 'group') {
       return {
         nodeId: this.nodeId,
         kind: this.kind,
         name: this.name,
         color: this.color,
-        children: this.children.map((child) => child.toSnapshot()),
+        children: this.children.map(child => child.toSnapshot()),
         transform: identityTransform,
         sourceRefs: [...this.sourceRefs],
         parameters: [...this.parameters],
@@ -285,8 +278,8 @@ export class ModelObject {
     }
 
     const shape = this.requireShape();
-    const surface = shape.mesh({ tolerance: 0.2, angularTolerance: 0.25 });
-    const wire = shape.meshEdges({ tolerance: 0.2, angularTolerance: 0.25 });
+    const surface = shape.mesh({tolerance: 0.2, angularTolerance: 0.25});
+    const wire = shape.meshEdges({tolerance: 0.2, angularTolerance: 0.25});
     return {
       nodeId: this.nodeId,
       kind: this.kind,
@@ -312,18 +305,18 @@ export class ModelObject {
       disposed.add(this.shape);
       this.shape.delete();
     }
-    this.children.forEach((child) => child.disposeShape(disposed));
+    this.children.forEach(child => child.disposeShape(disposed));
   }
 
   private booleanResult(
-    operation: "cut" | "fuse" | "intersect",
+    operation: 'cut' | 'fuse' | 'intersect',
     other: ModelObject,
   ): ModelObject {
     const left = this.requireShape();
     const right = other.requireShape();
     const shape = left[operation](right);
     return new ModelObject({
-      kind: "solid",
+      kind: 'solid',
       shape,
       name: this.name,
       color: this.color,
@@ -332,10 +325,17 @@ export class ModelObject {
     });
   }
 
-  private rotateAround(center: Vec3, x: number, y: number, z: number): ModelObject {
-    if (this.kind === "group") {
+  private rotateAround(
+    center: Vec3,
+    x: number,
+    y: number,
+    z: number,
+  ): ModelObject {
+    if (this.kind === 'group') {
       return this.copy({
-        children: this.children.map((child) => child.rotateAround(center, x, y, z)),
+        children: this.children.map(child =>
+          child.rotateAround(center, x, y, z),
+        ),
         position: rotatePoint(this.position, center, x, y, z),
       });
     }
@@ -346,9 +346,9 @@ export class ModelObject {
   }
 
   private scaleAround(center: Vec3, factor: number): ModelObject {
-    if (this.kind === "group") {
+    if (this.kind === 'group') {
       return this.copy({
-        children: this.children.map((child) => child.scaleAround(center, factor)),
+        children: this.children.map(child => child.scaleAround(center, factor)),
         position: scalePoint(this.position, center, factor),
       });
     }
@@ -360,7 +360,7 @@ export class ModelObject {
 
   private requireShape(): Shape3D {
     if (!this.shape) {
-      throw new Error("该操作需要 solid，不能直接作用于 group。");
+      throw new Error('该操作需要 solid，不能直接作用于 group。');
     }
     return this.shape;
   }
@@ -383,12 +383,12 @@ export class ModelObject {
 }
 
 export function box(width: number, height: number, depth: number): ModelObject {
-  assertPositive("width", width);
-  assertPositive("height", height);
-  assertPositive("depth", depth);
+  assertPositive('width', width);
+  assertPositive('height', height);
+  assertPositive('depth', depth);
   return new ModelObject({
-    kind: "solid",
-    name: "Box",
+    kind: 'solid',
+    name: 'Box',
     shape: makeBox(
       [-width / 2, -height / 2, -depth / 2],
       [width / 2, height / 2, depth / 2],
@@ -397,31 +397,31 @@ export function box(width: number, height: number, depth: number): ModelObject {
 }
 
 export function cylinder(radius: number, height: number): ModelObject {
-  assertPositive("radius", radius);
-  assertPositive("height", height);
+  assertPositive('radius', radius);
+  assertPositive('height', height);
   return new ModelObject({
-    kind: "solid",
-    name: "Cylinder",
+    kind: 'solid',
+    name: 'Cylinder',
     shape: makeCylinder(radius, height, [0, -height / 2, 0], [0, 1, 0]),
   });
 }
 
 export function sphere(radius: number): ModelObject {
-  assertPositive("radius", radius);
+  assertPositive('radius', radius);
   return new ModelObject({
-    kind: "solid",
-    name: "Sphere",
+    kind: 'solid',
+    name: 'Sphere',
     shape: makeSphere(radius),
   });
 }
 
 export function group(
   children: readonly ModelObject[],
-  name = "Group",
+  name = 'Group',
 ): ModelObject {
   assertChildren(children);
   return new ModelObject({
-    kind: "group",
+    kind: 'group',
     name,
     children,
   });
@@ -458,7 +458,7 @@ export const authoringApi = Object.freeze({
 function assertChildren(children: readonly ModelObject[]): void {
   for (const child of children) {
     if (!isModelObject(child)) {
-      throw new Error("group 的 children 必须全部是 ModelObject。");
+      throw new Error('group 的 children 必须全部是 ModelObject。');
     }
   }
 }
@@ -487,24 +487,30 @@ function toPoint(vector: Vec3): [number, number, number] {
   return [vector[0], vector[1], vector[2]];
 }
 
-function rotatePoint(point: Vec3, center: Vec3, x: number, y: number, z: number): Vec3 {
+function rotatePoint(
+  point: Vec3,
+  center: Vec3,
+  x: number,
+  y: number,
+  z: number,
+): Vec3 {
   let [px, py, pz] = [
     point[0] - center[0],
     point[1] - center[1],
     point[2] - center[2],
   ];
   for (const [angle, axis] of [
-    [x, "x"],
-    [y, "y"],
-    [z, "z"],
+    [x, 'x'],
+    [y, 'y'],
+    [z, 'z'],
   ] as const) {
     if (!angle) continue;
     const radians = (angle * Math.PI) / 180;
     const cos = Math.cos(radians);
     const sin = Math.sin(radians);
-    if (axis === "x") [py, pz] = [py * cos - pz * sin, py * sin + pz * cos];
-    if (axis === "y") [px, pz] = [px * cos + pz * sin, -px * sin + pz * cos];
-    if (axis === "z") [px, py] = [px * cos - py * sin, px * sin + py * cos];
+    if (axis === 'x') [py, pz] = [py * cos - pz * sin, py * sin + pz * cos];
+    if (axis === 'y') [px, pz] = [px * cos + pz * sin, -px * sin + pz * cos];
+    if (axis === 'z') [px, py] = [px * cos - py * sin, px * sin + py * cos];
   }
   return [px + center[0], py + center[1], pz + center[2]];
 }

@@ -1,4 +1,4 @@
-import ts from "@typescript/typescript6";
+import ts from '@typescript/typescript6';
 import {
   authoringApi,
   disposeModelObjects,
@@ -8,7 +8,7 @@ import {
   type ParameterKind,
   type ParameterTarget,
   type ParameterUsage,
-} from "./runtime";
+} from './runtime';
 
 export type ModelModule = Readonly<{
   root: ModelSnapshotObject;
@@ -22,7 +22,7 @@ export class CompileFailure extends Error {
 
   constructor(message: string, start?: number, length?: number) {
     super(message);
-    this.name = "CompileFailure";
+    this.name = 'CompileFailure';
     this.start = start;
     this.length = length;
   }
@@ -39,7 +39,7 @@ type RuntimeParameterTarget = Readonly<{
 
 type StaticParameterTarget = {
   binding?: string;
-  sourceRef: Readonly<{ start: number; end: number }>;
+  sourceRef: Readonly<{start: number; end: number}>;
   value: number;
   label: string;
   description?: string;
@@ -64,85 +64,85 @@ type ParameterSignature = Readonly<{
 
 const signatures = new Map<string, ParameterSignature>([
   [
-    "box",
+    'box',
     {
-      operation: "box",
+      operation: 'box',
       arguments: [
-        { name: "width", label: "宽度", kind: "length" },
-        { name: "height", label: "高度", kind: "length" },
-        { name: "depth", label: "深度", kind: "length" },
+        {name: 'width', label: '宽度', kind: 'length'},
+        {name: 'height', label: '高度', kind: 'length'},
+        {name: 'depth', label: '深度', kind: 'length'},
       ],
     },
   ],
   [
-    "cylinder",
+    'cylinder',
     {
-      operation: "cylinder",
+      operation: 'cylinder',
       arguments: [
-        { name: "radius", label: "半径", kind: "length" },
-        { name: "height", label: "高度", kind: "length" },
+        {name: 'radius', label: '半径', kind: 'length'},
+        {name: 'height', label: '高度', kind: 'length'},
       ],
     },
   ],
   [
-    "sphere",
+    'sphere',
     {
-      operation: "sphere",
-      arguments: [{ name: "radius", label: "半径", kind: "length" }],
+      operation: 'sphere',
+      arguments: [{name: 'radius', label: '半径', kind: 'length'}],
     },
   ],
   [
-    "at",
+    'at',
     {
-      operation: "at",
+      operation: 'at',
       arguments: [
-        { name: "x", label: "X", kind: "length" },
-        { name: "y", label: "Y", kind: "length" },
-        { name: "z", label: "Z", kind: "length" },
+        {name: 'x', label: 'X', kind: 'length'},
+        {name: 'y', label: 'Y', kind: 'length'},
+        {name: 'z', label: 'Z', kind: 'length'},
       ],
     },
   ],
   [
-    "move",
+    'move',
     {
-      operation: "move",
+      operation: 'move',
       arguments: [
-        { name: "x", label: "ΔX", kind: "length" },
-        { name: "y", label: "ΔY", kind: "length" },
-        { name: "z", label: "ΔZ", kind: "length" },
+        {name: 'x', label: 'ΔX', kind: 'length'},
+        {name: 'y', label: 'ΔY', kind: 'length'},
+        {name: 'z', label: 'ΔZ', kind: 'length'},
       ],
     },
   ],
   [
-    "rotate",
+    'rotate',
     {
-      operation: "rotate",
+      operation: 'rotate',
       arguments: [
-        { name: "x", label: "X 旋转", kind: "angle", unit: "deg" },
-        { name: "y", label: "Y 旋转", kind: "angle", unit: "deg" },
-        { name: "z", label: "Z 旋转", kind: "angle", unit: "deg" },
+        {name: 'x', label: 'X 旋转', kind: 'angle', unit: 'deg'},
+        {name: 'y', label: 'Y 旋转', kind: 'angle', unit: 'deg'},
+        {name: 'z', label: 'Z 旋转', kind: 'angle', unit: 'deg'},
       ],
     },
   ],
   [
-    "scaled",
+    'scaled',
     {
-      operation: "scaled",
-      arguments: [{ name: "factor", label: "缩放", kind: "ratio" }],
+      operation: 'scaled',
+      arguments: [{name: 'factor', label: '缩放', kind: 'ratio'}],
     },
   ],
   [
-    "fillet",
+    'fillet',
     {
-      operation: "fillet",
-      arguments: [{ name: "radius", label: "圆角半径", kind: "length" }],
+      operation: 'fillet',
+      arguments: [{name: 'radius', label: '圆角半径', kind: 'length'}],
     },
   ],
   [
-    "chamfer",
+    'chamfer',
     {
-      operation: "chamfer",
-      arguments: [{ name: "distance", label: "倒角距离", kind: "length" }],
+      operation: 'chamfer',
+      arguments: [{name: 'distance', label: '倒角距离', kind: 'length'}],
     },
   ],
 ]);
@@ -160,7 +160,7 @@ const traceRuntime = Object.freeze({
       parameterFrames.pop();
     }
     if (isModelObject(result)) {
-      result.attachSource({ start, end });
+      result.attachSource({start, end});
       result.attachParameters(parameters);
       tracedObjects.add(result);
     }
@@ -171,6 +171,8 @@ const traceRuntime = Object.freeze({
     operation: string,
     argument: string,
     value: number,
+    operationStart: number,
+    operationEnd: number,
     expressionStart: number,
     expressionEnd: number,
     targets: readonly RuntimeParameterTarget[],
@@ -179,13 +181,14 @@ const traceRuntime = Object.freeze({
     if (!frame || !Number.isFinite(value)) {
       return value;
     }
-    for (const { target, sensitivity } of targets) {
+    for (const {target, sensitivity} of targets) {
       if (Number.isFinite(sensitivity) && sensitivity !== 0) {
         frame.push({
           operation,
           argument,
           value,
-          expressionRef: { start: expressionStart, end: expressionEnd },
+          operationRef: {start: operationStart, end: operationEnd},
+          expressionRef: {start: expressionStart, end: expressionEnd},
           target,
           sensitivity,
         });
@@ -199,7 +202,7 @@ export function compileModel(source: string): ModelModule {
   tracedObjects.clear();
   parameterFrames.length = 0;
   const result = ts.transpileModule(source, {
-    fileName: "model.ts",
+    fileName: 'model.ts',
     compilerOptions: {
       target: ts.ScriptTarget.ES2022,
       module: ts.ModuleKind.CommonJS,
@@ -214,25 +217,25 @@ export function compileModel(source: string): ModelModule {
   });
 
   const errors = (result.diagnostics ?? []).filter(
-    (diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error,
+    diagnostic => diagnostic.category === ts.DiagnosticCategory.Error,
   );
   if (errors.length > 0) {
     throw diagnosticFailure(errors[0]);
   }
 
-  const module: CommonJsModule = { exports: {} };
+  const module: CommonJsModule = {exports: {}};
   const requireModule = (specifier: string): unknown => {
-    if (specifier === "code3d") {
+    if (specifier === 'code3d') {
       return authoringApi;
     }
     throw new Error(`prototype 暂不支持导入模块：${specifier}`);
   };
 
   const execute = new Function(
-    "require",
-    "module",
-    "exports",
-    "__code3d",
+    'require',
+    'module',
+    'exports',
+    '__code3d',
     `"use strict";\n${result.outputText}\n//# sourceURL=code3d-model.js`,
   );
 
@@ -241,7 +244,7 @@ export function compileModel(source: string): ModelModule {
 
     const root = module.exports.default;
     if (!isModelObject(root)) {
-      throw new Error("模型模块必须 default export 一个 ModelObject。");
+      throw new Error('模型模块必须 default export 一个 ModelObject。');
     }
 
     const modelExports = new Map<string, ModelObject>();
@@ -255,7 +258,10 @@ export function compileModel(source: string): ModelModule {
     return {
       root: rootSnapshot,
       exports: new Map(
-        [...modelExports].map(([name, modelObject]) => [name, modelObject.nodeId]),
+        [...modelExports].map(([name, modelObject]) => [
+          name,
+          modelObject.nodeId,
+        ]),
       ),
       parameterImpacts: countParameterImpacts(rootSnapshot),
     };
@@ -267,12 +273,12 @@ export function compileModel(source: string): ModelModule {
 }
 
 function createTraceTransformer(): ts.TransformerFactory<ts.SourceFile> {
-  return (context) => {
-    const { factory } = context;
+  return context => {
+    const {factory} = context;
 
-    return (sourceFile) => {
+    return sourceFile => {
       const bindings = collectStaticParameterTargets(sourceFile);
-      const visit: ts.Visitor = (node) => {
+      const visit: ts.Visitor = node => {
         const visited = ts.visitEachChild(node, visit, context);
         if (
           !ts.isCallExpression(node) ||
@@ -296,8 +302,8 @@ function createTraceTransformer(): ts.TransformerFactory<ts.SourceFile> {
 
         return factory.createCallExpression(
           factory.createPropertyAccessExpression(
-            factory.createIdentifier("__code3d"),
-            "trace",
+            factory.createIdentifier('__code3d'),
+            'trace',
           ),
           undefined,
           [
@@ -341,7 +347,7 @@ function instrumentCallParameters(
       bindings,
       sourceFile,
     )
-      .map((target) => {
+      .map(target => {
         const derivative = derivativeOf(
           originalArgument,
           target,
@@ -353,7 +359,9 @@ function instrumentCallParameters(
         }
         return createRuntimeTarget(target, derivative, factory);
       })
-      .filter((target): target is ts.ObjectLiteralExpression => target !== undefined);
+      .filter(
+        (target): target is ts.ObjectLiteralExpression => target !== undefined,
+      );
 
     if (targets.length === 0) {
       return argument;
@@ -361,14 +369,16 @@ function instrumentCallParameters(
 
     return factory.createCallExpression(
       factory.createPropertyAccessExpression(
-        factory.createIdentifier("__code3d"),
-        "parameter",
+        factory.createIdentifier('__code3d'),
+        'parameter',
       ),
       undefined,
       [
         factory.createStringLiteral(signature.operation),
         factory.createStringLiteral(argumentDefinition.name),
         argument,
+        factory.createNumericLiteral(original.getStart(sourceFile)),
+        factory.createNumericLiteral(original.getEnd()),
         factory.createNumericLiteral(originalArgument.getStart(sourceFile)),
         factory.createNumericLiteral(originalArgument.getEnd()),
         factory.createArrayLiteralExpression(targets),
@@ -481,11 +491,19 @@ function derivativeOf(
   if (ts.isParenthesizedExpression(expression)) {
     return derivativeOf(expression.expression, target, sourceFile, factory);
   }
-  if (ts.isAsExpression(expression) || ts.isTypeAssertionExpression(expression)) {
+  if (
+    ts.isAsExpression(expression) ||
+    ts.isTypeAssertionExpression(expression)
+  ) {
     return derivativeOf(expression.expression, target, sourceFile, factory);
   }
   if (ts.isPrefixUnaryExpression(expression)) {
-    const operand = derivativeOf(expression.operand, target, sourceFile, factory);
+    const operand = derivativeOf(
+      expression.operand,
+      target,
+      sourceFile,
+      factory,
+    );
     if (!operand) {
       return undefined;
     }
@@ -493,7 +511,10 @@ function derivativeOf(
       return operand;
     }
     if (expression.operator === ts.SyntaxKind.MinusToken) {
-      return factory.createPrefixUnaryExpression(ts.SyntaxKind.MinusToken, operand);
+      return factory.createPrefixUnaryExpression(
+        ts.SyntaxKind.MinusToken,
+        operand,
+      );
     }
     return undefined;
   }
@@ -501,8 +522,18 @@ function derivativeOf(
     return undefined;
   }
 
-  const leftDerivative = derivativeOf(expression.left, target, sourceFile, factory);
-  const rightDerivative = derivativeOf(expression.right, target, sourceFile, factory);
+  const leftDerivative = derivativeOf(
+    expression.left,
+    target,
+    sourceFile,
+    factory,
+  );
+  const rightDerivative = derivativeOf(
+    expression.right,
+    target,
+    sourceFile,
+    factory,
+  );
   if (!leftDerivative || !rightDerivative) {
     return undefined;
   }
@@ -554,7 +585,11 @@ function derivativeOf(
         ),
         ts.SyntaxKind.SlashToken,
         factory.createParenthesizedExpression(
-          factory.createBinaryExpression(right, ts.SyntaxKind.AsteriskToken, right),
+          factory.createBinaryExpression(
+            right,
+            ts.SyntaxKind.AsteriskToken,
+            right,
+          ),
         ),
       );
     default:
@@ -571,7 +606,7 @@ function containsTarget(
     return true;
   }
   let contains = false;
-  ts.forEachChild(node, (child) => {
+  ts.forEachChild(node, child => {
     if (!contains && containsTarget(child, target, sourceFile)) {
       contains = true;
     }
@@ -605,31 +640,50 @@ function createRuntimeTarget(
 ): ts.ObjectLiteralExpression {
   const targetProperties: ts.ObjectLiteralElementLike[] = [
     property(
-      "id",
-      factory.createStringLiteral(`${target.sourceRef.start}:${target.sourceRef.end}`),
+      'id',
+      factory.createStringLiteral(
+        `${target.sourceRef.start}:${target.sourceRef.end}`,
+      ),
       factory,
     ),
-    property("label", factory.createStringLiteral(target.label), factory),
-    property("value", createNumberExpression(target.value, factory), factory),
+    property('label', factory.createStringLiteral(target.label), factory),
+    property('value', createNumberExpression(target.value, factory), factory),
     property(
-      "sourceRef",
+      'sourceRef',
       factory.createObjectLiteralExpression([
-        property("start", factory.createNumericLiteral(target.sourceRef.start), factory),
-        property("end", factory.createNumericLiteral(target.sourceRef.end), factory),
+        property(
+          'start',
+          factory.createNumericLiteral(target.sourceRef.start),
+          factory,
+        ),
+        property(
+          'end',
+          factory.createNumericLiteral(target.sourceRef.end),
+          factory,
+        ),
       ]),
       factory,
     ),
   ];
-  addOptionalString(targetProperties, "description", target.description, factory);
-  addOptionalString(targetProperties, "kind", target.kind, factory);
-  addOptionalString(targetProperties, "unit", target.unit, factory);
-  addOptionalNumber(targetProperties, "min", target.min, factory);
-  addOptionalNumber(targetProperties, "max", target.max, factory);
-  addOptionalNumber(targetProperties, "step", target.step, factory);
+  addOptionalString(
+    targetProperties,
+    'description',
+    target.description,
+    factory,
+  );
+  addOptionalString(targetProperties, 'kind', target.kind, factory);
+  addOptionalString(targetProperties, 'unit', target.unit, factory);
+  addOptionalNumber(targetProperties, 'min', target.min, factory);
+  addOptionalNumber(targetProperties, 'max', target.max, factory);
+  addOptionalNumber(targetProperties, 'step', target.step, factory);
 
   return factory.createObjectLiteralExpression([
-    property("target", factory.createObjectLiteralExpression(targetProperties), factory),
-    property("sensitivity", sensitivity, factory),
+    property(
+      'target',
+      factory.createObjectLiteralExpression(targetProperties),
+      factory,
+    ),
+    property('sensitivity', sensitivity, factory),
   ]);
 }
 
@@ -648,7 +702,9 @@ function addOptionalString(
   factory: ts.NodeFactory,
 ): void {
   if (value !== undefined) {
-    properties.push(property(name, factory.createStringLiteral(value), factory));
+    properties.push(
+      property(name, factory.createStringLiteral(value), factory),
+    );
   }
 }
 
@@ -659,7 +715,9 @@ function addOptionalNumber(
   factory: ts.NodeFactory,
 ): void {
   if (value !== undefined) {
-    properties.push(property(name, createNumberExpression(value, factory), factory));
+    properties.push(
+      property(name, createNumberExpression(value, factory), factory),
+    );
   }
 }
 
@@ -676,7 +734,9 @@ function createNumberExpression(
   return factory.createNumericLiteral(Object.is(value, -0) ? 0 : value);
 }
 
-function getParameterSignature(node: ts.CallExpression): ParameterSignature | undefined {
+function getParameterSignature(
+  node: ts.CallExpression,
+): ParameterSignature | undefined {
   const expression = node.expression;
   if (ts.isIdentifier(expression)) {
     return signatures.get(expression.text);
@@ -694,18 +754,19 @@ function parseCode3dMetadata(
   const comments =
     ts.getLeadingCommentRanges(sourceFile.text, statement.getFullStart()) ?? [];
   const text = comments
-    .map(({ pos, end }) => sourceFile.text.slice(pos, end))
-    .join("\n");
+    .map(({pos, end}) => sourceFile.text.slice(pos, end))
+    .join('\n');
   const metadata: Partial<StaticParameterTarget> = {};
-  const pattern = /@code3d\.(label|description|kind|unit|min|max|step)\s+([^\r\n*]+)/g;
+  const pattern =
+    /@code3d\.(label|description|kind|unit|min|max|step)\s+([^\r\n*]+)/g;
   for (const match of text.matchAll(pattern)) {
     const key = match[1];
     const value = match[2].trim();
-    if (key === "label" || key === "description" || key === "unit") {
+    if (key === 'label' || key === 'description' || key === 'unit') {
       metadata[key] = value;
-    } else if (key === "kind" && isParameterKind(value)) {
+    } else if (key === 'kind' && isParameterKind(value)) {
       metadata.kind = value;
-    } else if (key === "min" || key === "max" || key === "step") {
+    } else if (key === 'min' || key === 'max' || key === 'step') {
       const numeric = Number(value);
       if (Number.isFinite(numeric)) {
         metadata[key] = numeric;
@@ -776,14 +837,13 @@ function isValueIdentifier(identifier: ts.Identifier): boolean {
     return false;
   }
   if (
-    (ts.isPropertyAssignment(parent) || ts.isShorthandPropertyAssignment(parent)) &&
+    (ts.isPropertyAssignment(parent) ||
+      ts.isShorthandPropertyAssignment(parent)) &&
     parent.name === identifier
   ) {
     return ts.isShorthandPropertyAssignment(parent);
   }
-  return !(
-    ts.isVariableDeclaration(parent) && parent.name === identifier
-  );
+  return !(ts.isVariableDeclaration(parent) && parent.name === identifier);
 }
 
 function isShadowedBinding(
@@ -795,7 +855,9 @@ function isShadowedBinding(
   while (current && current !== sourceFile) {
     if (
       ts.isFunctionLike(current) &&
-      current.parameters.some((parameter) => bindingNameContains(parameter.name, binding))
+      current.parameters.some(parameter =>
+        bindingNameContains(parameter.name, binding),
+      )
     ) {
       return true;
     }
@@ -808,7 +870,9 @@ function isShadowedBinding(
     }
     if (
       ts.isBlock(current) &&
-      current.statements.some((statement) => statementDeclares(statement, binding))
+      current.statements.some(statement =>
+        statementDeclares(statement, binding),
+      )
     ) {
       return true;
     }
@@ -818,7 +882,7 @@ function isShadowedBinding(
         ts.isForOfStatement(current)) &&
       current.initializer &&
       ts.isVariableDeclarationList(current.initializer) &&
-      current.initializer.declarations.some((declaration) =>
+      current.initializer.declarations.some(declaration =>
         bindingNameContains(declaration.name, binding),
       )
     ) {
@@ -831,7 +895,7 @@ function isShadowedBinding(
 
 function statementDeclares(statement: ts.Statement, binding: string): boolean {
   if (ts.isVariableStatement(statement)) {
-    return statement.declarationList.declarations.some((declaration) =>
+    return statement.declarationList.declarations.some(declaration =>
       bindingNameContains(declaration.name, binding),
     );
   }
@@ -849,7 +913,7 @@ function bindingNameContains(name: ts.BindingName, binding: string): boolean {
     return name.text === binding;
   }
   return name.elements.some(
-    (element) =>
+    element =>
       !ts.isOmittedExpression(element) &&
       bindingNameContains(element.name, binding),
   );
@@ -867,7 +931,8 @@ function isTraceableCall(node: ts.Node, sourceFile: ts.SourceFile): boolean {
   const inspect = (child: ts.Node): void => {
     if (
       child !== node &&
-      (ts.isAwaitExpression(child) || child.kind === ts.SyntaxKind.YieldExpression)
+      (ts.isAwaitExpression(child) ||
+        child.kind === ts.SyntaxKind.YieldExpression)
     ) {
       traceable = false;
       return;
@@ -879,10 +944,14 @@ function isTraceableCall(node: ts.Node, sourceFile: ts.SourceFile): boolean {
   return traceable && node.getStart(sourceFile) >= 0;
 }
 
-function countParameterImpacts(root: ModelSnapshotObject): ReadonlyMap<string, number> {
+function countParameterImpacts(
+  root: ModelSnapshotObject,
+): ReadonlyMap<string, number> {
   const impacts = new Map<string, number>();
   const visit = (node: ModelSnapshotObject): void => {
-    const targets = new Set(node.parameters.map((parameter) => parameter.target.id));
+    const targets = new Set(
+      node.parameters.map(parameter => parameter.target.id),
+    );
     for (const target of targets) {
       impacts.set(target, (impacts.get(target) ?? 0) + 1);
     }
@@ -894,18 +963,18 @@ function countParameterImpacts(root: ModelSnapshotObject): ReadonlyMap<string, n
 
 function humanizeIdentifier(identifier: string): string {
   return identifier
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .replace(/[_-]+/g, " ")
-    .replace(/^./, (character) => character.toUpperCase());
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .replace(/^./, character => character.toUpperCase());
 }
 
 function isParameterKind(value: string): value is ParameterKind {
-  return ["length", "angle", "ratio", "count", "scalar"].includes(value);
+  return ['length', 'angle', 'ratio', 'count', 'scalar'].includes(value);
 }
 
 function diagnosticFailure(diagnostic: ts.Diagnostic): CompileFailure {
   return new CompileFailure(
-    ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"),
+    ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'),
     diagnostic.start,
     diagnostic.length,
   );

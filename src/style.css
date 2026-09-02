@@ -1,9 +1,15 @@
-@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap");
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap');
 
 :root {
   color: #e8e9e1;
   background: #0d0e0c;
-  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family:
+    Inter,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   --acid: #d8ff3e;
@@ -73,7 +79,9 @@ button {
   height: 11px;
   border: 2px solid var(--acid);
   transform: rotate(45deg);
-  box-shadow: 5px -5px 0 -2px #0f100e, 5px -5px 0 0 #778c27;
+  box-shadow:
+    5px -5px 0 -2px #0f100e,
+    5px -5px 0 0 #778c27;
 }
 
 .prototype-tag,
@@ -81,7 +89,7 @@ button {
 .footer,
 .inspector-eyebrow,
 .object-kind {
-  font-family: "IBM Plex Mono", monospace;
+  font-family: 'IBM Plex Mono', monospace;
   text-transform: uppercase;
   letter-spacing: 0.11em;
 }
@@ -109,18 +117,18 @@ button {
   background: #65695f;
 }
 
-.run-state[data-state="running"] .run-state-dot,
-.run-state[data-state="pending"] .run-state-dot {
+.run-state[data-state='running'] .run-state-dot,
+.run-state[data-state='pending'] .run-state-dot {
   background: #e6bd55;
   box-shadow: 0 0 8px #e6bd5577;
 }
 
-.run-state[data-state="ready"] .run-state-dot {
+.run-state[data-state='ready'] .run-state-dot {
   background: var(--acid);
   box-shadow: 0 0 8px #d8ff3e77;
 }
 
-.run-state[data-state="error"] .run-state-dot {
+.run-state[data-state='error'] .run-state-dot {
   background: #ff624a;
   box-shadow: 0 0 8px #ff624a66;
 }
@@ -170,7 +178,7 @@ kbd {
   color: #38400d;
   border: 1px solid #99b520;
   border-radius: 2px;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: 'IBM Plex Mono', monospace;
   font-size: 9px;
 }
 
@@ -212,7 +220,7 @@ kbd {
 
 .language-badge {
   color: #9da8ff;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: 'IBM Plex Mono', monospace;
   font-size: 9px;
   font-weight: 500;
 }
@@ -254,7 +262,7 @@ kbd {
   border: 1px solid #743e36;
   border-radius: 4px;
   background: #2b1b18ee;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: 'IBM Plex Mono', monospace;
   font-size: 10px;
   line-height: 1.5;
 }
@@ -286,7 +294,7 @@ kbd {
   color: #777c71;
   border-radius: 3px;
   background: transparent;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: 'IBM Plex Mono', monospace;
   font-size: 9px;
 }
 
@@ -320,7 +328,7 @@ kbd {
   z-index: 2;
   color: #6f746a;
   pointer-events: none;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: 'IBM Plex Mono', monospace;
   font-size: 9px;
 }
 
@@ -337,7 +345,7 @@ kbd {
   background: #15180fd9;
   box-shadow: 0 8px 24px #0005;
   pointer-events: none;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: 'IBM Plex Mono', monospace;
   font-size: 9px;
 }
 
@@ -403,7 +411,7 @@ kbd {
 .parameter-section-label {
   margin: 2px 0 8px;
   color: #777c70;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: 'IBM Plex Mono', monospace;
   font-size: 8px;
   letter-spacing: 0.1em;
 }
@@ -437,7 +445,7 @@ kbd {
   flex: 0 0 auto;
   gap: 4px;
   color: var(--acid);
-  font-family: "IBM Plex Mono", monospace;
+  font-family: 'IBM Plex Mono', monospace;
   font-size: 8px;
 }
 
@@ -448,7 +456,7 @@ kbd {
   border: 1px solid #34372f;
   border-radius: 3px;
   background: #181a16;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: 'IBM Plex Mono', monospace;
   font-size: 9px;
   text-align: right;
   outline: 0;
@@ -473,7 +481,7 @@ kbd {
   display: flex;
   justify-content: space-between;
   color: #a4a89f;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: 'IBM Plex Mono', monospace;
   font-size: 9px;
 }
 
@@ -481,7 +489,7 @@ kbd {
   color: var(--acid);
 }
 
-input[type="range"] {
+input[type='range'] {
   width: 100%;
   height: 2px;
   margin: 4px 0;
@@ -490,7 +498,7 @@ input[type="range"] {
   outline: 0;
 }
 
-input[type="range"]::-webkit-slider-thumb {
+input[type='range']::-webkit-slider-thumb {
   width: 10px;
   height: 10px;
   appearance: none;

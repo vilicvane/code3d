@@ -1,18 +1,18 @@
-import * as THREE from "three";
-import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import type { ModelModule } from "./model/compiler";
+import * as THREE from 'three';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import type {ModelModule} from './model/compiler';
 import type {
   ModelSnapshotObject,
   ParameterUsage,
   SourceRef,
   Vec3,
-} from "./model/runtime";
+} from './model/runtime';
 import {
   PositionGizmo,
   type PositionAxis,
   type PositionGizmoBinding,
   type PositionGizmoEvent,
-} from "./tools/position-gizmo";
+} from './tools/position-gizmo';
 
 export type Occurrence = Readonly<{
   key: string;
@@ -37,7 +37,7 @@ export class ModelViewport {
   private selectionHelper: THREE.BoxHelper | null = null;
   private highlightedTargetId?: string;
   private highlightedOccurrenceKeys = new Set<string>();
-  private selectedKey = "root";
+  private selectedKey = 'root';
   private explode = 0;
   private module: ModelModule | null = null;
 
@@ -49,31 +49,31 @@ export class ModelViewport {
     this.renderer = new THREE.WebGLRenderer({
       antialias: true,
       alpha: false,
-      powerPreference: "high-performance",
+      powerPreference: 'high-performance',
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
-    this.renderer.domElement.className = "viewport-canvas";
+    this.renderer.domElement.className = 'viewport-canvas';
     this.container.append(this.renderer.domElement);
 
-    this.scene.background = new THREE.Color("#171815");
-    this.scene.fog = new THREE.Fog("#171815", 180, 430);
+    this.scene.background = new THREE.Color('#171815');
+    this.scene.fog = new THREE.Fog('#171815', 180, 430);
     this.scene.add(this.root);
 
-    const hemi = new THREE.HemisphereLight("#f6f4df", "#333b40", 1.8);
+    const hemi = new THREE.HemisphereLight('#f6f4df', '#333b40', 1.8);
     this.scene.add(hemi);
 
-    const key = new THREE.DirectionalLight("#fff8df", 3.2);
+    const key = new THREE.DirectionalLight('#fff8df', 3.2);
     key.position.set(70, 110, 80);
     this.scene.add(key);
 
-    const rim = new THREE.DirectionalLight("#90a0ff", 1.6);
+    const rim = new THREE.DirectionalLight('#90a0ff', 1.6);
     rim.position.set(-80, 55, -65);
     this.scene.add(rim);
 
-    const grid = new THREE.GridHelper(360, 36, "#4b5046", "#282b26");
+    const grid = new THREE.GridHelper(360, 36, '#4b5046', '#282b26');
     grid.position.y = -0.08;
     this.scene.add(grid);
 
@@ -88,13 +88,13 @@ export class ModelViewport {
       this.scene,
       this.camera,
       this.renderer.domElement,
-      (enabled) => {
+      enabled => {
         this.controls.enabled = enabled;
       },
       onPositionTool,
     );
 
-    this.renderer.domElement.addEventListener("pointerdown", (event) => {
+    this.renderer.domElement.addEventListener('pointerdown', event => {
       this.pick(event);
     });
 
@@ -105,7 +105,7 @@ export class ModelViewport {
 
   renderModule(
     module: ModelModule,
-    selectedKey = "root",
+    selectedKey = 'root',
     fitCamera = true,
   ): void {
     this.module = module;
@@ -119,10 +119,13 @@ export class ModelViewport {
     this.highlightedOccurrenceKeys.clear();
     this.root.clear();
 
-    const rootObject = this.buildObject(module.root, "root", 0);
+    const rootObject = this.buildObject(module.root, 'root', 0);
     this.root.add(rootObject);
     this.applyPreviewTransforms();
-    this.selectKey(this.occurrences.has(selectedKey) ? selectedKey : "root", false);
+    this.selectKey(
+      this.occurrences.has(selectedKey) ? selectedKey : 'root',
+      false,
+    );
     if (fitCamera) {
       this.fit();
     }
@@ -130,18 +133,22 @@ export class ModelViewport {
 
   selectBySourceOffset(offset: number): void {
     const candidates = [...this.occurrences.values()]
-      .flatMap((occurrence) =>
+      .flatMap(occurrence =>
         occurrence.node.sourceRefs
-          .filter((sourceRef) => sourceRef.start <= offset && offset <= sourceRef.end)
-          .map((sourceRef) => ({
+          .filter(
+            sourceRef => sourceRef.start <= offset && offset <= sourceRef.end,
+          )
+          .map(sourceRef => ({
             occurrence,
             span: sourceRef.end - sourceRef.start,
           })),
       )
-      .sort((a, b) => a.span - b.span || b.occurrence.depth - a.occurrence.depth);
+      .sort(
+        (a, b) => a.span - b.span || b.occurrence.depth - a.occurrence.depth,
+      );
 
     const current = candidates.find(
-      ({ occurrence }) => occurrence.key === this.selectedKey,
+      ({occurrence}) => occurrence.key === this.selectedKey,
     );
     const match = current ?? candidates[0];
     if (match) {
@@ -151,7 +158,7 @@ export class ModelViewport {
 
   selectNode(nodeId: string): void {
     const occurrence = [...this.occurrences.values()].find(
-      (candidate) => candidate.node.nodeId === nodeId,
+      candidate => candidate.node.nodeId === nodeId,
     );
     if (occurrence) {
       this.selectKey(occurrence.key, true);
@@ -159,7 +166,7 @@ export class ModelViewport {
   }
 
   selectRoot(): void {
-    this.selectKey("root", true);
+    this.selectKey('root', true);
   }
 
   getSelected(): Occurrence | undefined {
@@ -193,7 +200,7 @@ export class ModelViewport {
     occurrenceKeys: readonly string[],
     delta: Vec3,
   ): void {
-    occurrenceKeys.forEach((key) =>
+    occurrenceKeys.forEach(key =>
       this.occurrenceTranslationPreviews.set(key, delta),
     );
     this.highlightedOccurrenceKeys = new Set(occurrenceKeys);
@@ -202,7 +209,7 @@ export class ModelViewport {
   }
 
   clearOccurrenceTranslationPreview(occurrenceKeys: readonly string[]): void {
-    occurrenceKeys.forEach((key) =>
+    occurrenceKeys.forEach(key =>
       this.occurrenceTranslationPreviews.delete(key),
     );
     this.highlightedOccurrenceKeys.clear();
@@ -227,7 +234,9 @@ export class ModelViewport {
       .normalize();
     const distance = Math.max(sphere.radius * 2.8, 24);
     this.controls.target.copy(sphere.center);
-    this.camera.position.copy(sphere.center).addScaledVector(direction, distance);
+    this.camera.position
+      .copy(sphere.center)
+      .addScaledVector(direction, distance);
     this.camera.near = Math.max(distance / 1000, 0.05);
     this.camera.far = Math.max(distance * 20, 1000);
     this.camera.updateProjectionMatrix();
@@ -241,13 +250,17 @@ export class ModelViewport {
     }
   }
 
-  private buildObject(node: ModelSnapshotObject, key: string, depth: number): THREE.Object3D {
+  private buildObject(
+    node: ModelSnapshotObject,
+    key: string,
+    depth: number,
+  ): THREE.Object3D {
     const object = createThreeObject(node);
     object.name = node.name;
     object.userData.selectionKey = key;
     applyNodeTransform(object, node);
 
-    const occurrence = { key, node, object, depth };
+    const occurrence = {key, node, object, depth};
     this.occurrences.set(key, occurrence);
 
     node.children.forEach((child, index) => {
@@ -283,7 +296,7 @@ export class ModelViewport {
     if (!occurrence) {
       return;
     }
-    this.selectionHelper = new THREE.BoxHelper(occurrence.object, "#d8ff3e");
+    this.selectionHelper = new THREE.BoxHelper(occurrence.object, '#d8ff3e');
     this.selectionHelper.material.depthTest = false;
     this.selectionHelper.material.transparent = true;
     this.selectionHelper.material.opacity = 0.85;
@@ -299,10 +312,7 @@ export class ModelViewport {
     }
     this.positionGizmo.attach(
       occurrence.object,
-      positionBindings(
-        occurrence,
-        [...this.occurrences.values()],
-      ),
+      positionBindings(occurrence, [...this.occurrences.values()]),
     );
   }
 
@@ -310,13 +320,15 @@ export class ModelViewport {
     for (const occurrence of this.occurrences.values()) {
       applyNodeTransform(occurrence.object, occurrence.node);
       const offset: [number, number, number] = [
-        ...(this.occurrenceTranslationPreviews.get(occurrence.key) ?? [0, 0, 0]),
+        ...(this.occurrenceTranslationPreviews.get(occurrence.key) ?? [
+          0, 0, 0,
+        ]),
       ];
       for (const parameter of occurrence.node.parameters) {
         const previewValue = this.parameterPreviews.get(parameter.target.id);
         if (
           previewValue === undefined ||
-          (parameter.operation !== "at" && parameter.operation !== "move")
+          (parameter.operation !== 'at' && parameter.operation !== 'move')
         ) {
           continue;
         }
@@ -337,7 +349,7 @@ export class ModelViewport {
     }
     this.root.updateMatrixWorld(true);
     this.selectionHelper?.update();
-    this.impactHelpers.forEach((helper) => helper.update());
+    this.impactHelpers.forEach(helper => helper.update());
     this.positionGizmo.updateAnchor();
   }
 
@@ -352,8 +364,8 @@ export class ModelViewport {
 
     const hits = this.raycaster.intersectObjects(this.root.children, true);
     const key = hits
-      .map(({ object }) => selectionKeyFromAncestors(object))
-      .find((selectionKey) => selectionKey !== undefined);
+      .map(({object}) => selectionKeyFromAncestors(object))
+      .find(selectionKey => selectionKey !== undefined);
     if (key) {
       this.selectKey(key, true);
     }
@@ -374,13 +386,16 @@ export class ModelViewport {
     requestAnimationFrame(this.animate);
     this.controls.update();
     this.selectionHelper?.update();
-    this.impactHelpers.forEach((helper) => helper.update());
+    this.impactHelpers.forEach(helper => helper.update());
     this.renderer.render(this.scene, this.camera);
   };
 
   private rebuildImpactHelpers(): void {
     this.clearImpactHelpers();
-    if (!this.highlightedTargetId && this.highlightedOccurrenceKeys.size === 0) {
+    if (
+      !this.highlightedTargetId &&
+      this.highlightedOccurrenceKeys.size === 0
+    ) {
       return;
     }
     for (const occurrence of this.occurrences.values()) {
@@ -388,12 +403,12 @@ export class ModelViewport {
         occurrence.key === this.selectedKey ||
         (!this.highlightedOccurrenceKeys.has(occurrence.key) &&
           !occurrence.node.parameters.some(
-            (parameter) => parameter.target.id === this.highlightedTargetId,
+            parameter => parameter.target.id === this.highlightedTargetId,
           ))
       ) {
         continue;
       }
-      const helper = new THREE.BoxHelper(occurrence.object, "#8ea2ff");
+      const helper = new THREE.BoxHelper(occurrence.object, '#8ea2ff');
       helper.material.depthTest = false;
       helper.material.transparent = true;
       helper.material.opacity = 0.72;
@@ -413,13 +428,16 @@ export class ModelViewport {
   }
 
   private disposeRoot(): void {
-    this.root.traverse((object) => {
-      if (object instanceof THREE.Mesh || object instanceof THREE.LineSegments) {
+    this.root.traverse(object => {
+      if (
+        object instanceof THREE.Mesh ||
+        object instanceof THREE.LineSegments
+      ) {
         object.geometry.dispose();
         const materials = Array.isArray(object.material)
           ? object.material
           : [object.material];
-        materials.forEach((material) => material.dispose());
+        materials.forEach(material => material.dispose());
       }
     });
   }
@@ -431,16 +449,18 @@ function positionBindings(
 ): PositionGizmoBinding[] {
   const receiver = occurrence.node.sourceRefs.at(-1);
   const parameters = receiver
-    ? occurrence.node.parameters.filter(({ expressionRef }) =>
-        containsSource(receiver, expressionRef),
+    ? preferUpstreamTargets(
+        occurrence.node.parameters.filter(({operationRef}) =>
+          sameSource(receiver, operationRef),
+        ),
       )
     : [];
-  const modelParameters = occurrences.flatMap(({ node }) => node.parameters);
+  const modelParameters = occurrences.flatMap(({node}) => node.parameters);
   const safeTargets = positionOnlyTargets(modelParameters);
   const byTarget = new Map<
     string,
     {
-      target: ParameterUsage["target"];
+      target: ParameterUsage['target'];
       sensitivities: Map<PositionAxis, number>;
     }
   >();
@@ -448,7 +468,7 @@ function positionBindings(
     if (!safeTargets.has(parameter.target.id)) {
       continue;
     }
-    if (parameter.operation !== "at" && parameter.operation !== "move") {
+    if (parameter.operation !== 'at' && parameter.operation !== 'move') {
       continue;
     }
     const axis = positionAxis(parameter.argument);
@@ -467,7 +487,7 @@ function positionBindings(
   }
 
   const candidates = new Map<PositionAxis, PositionGizmoBinding[]>();
-  for (const { target, sensitivities } of byTarget.values()) {
+  for (const {target, sensitivities} of byTarget.values()) {
     const effective = [...sensitivities].filter(
       ([, sensitivity]) => Math.abs(sensitivity) > 1e-9,
     );
@@ -476,7 +496,7 @@ function positionBindings(
     }
     const [axis, sensitivity] = effective[0];
     const binding: PositionGizmoBinding = {
-      kind: "parameter",
+      kind: 'parameter',
       axis,
       target,
       label: target.label,
@@ -493,7 +513,7 @@ function positionBindings(
     candidates.set(axis, axisCandidates);
   }
 
-  return (["x", "y", "z"] as const).flatMap((axis) => {
+  return (['x', 'y', 'z'] as const).flatMap(axis => {
     const axisCandidates = candidates.get(axis) ?? [];
     if (axisCandidates.length === 1) {
       return axisCandidates;
@@ -502,23 +522,44 @@ function positionBindings(
       return [];
     }
     const occurrenceKeys = occurrences
-      .filter(({ node }) =>
-        node.sourceRefs.some((sourceRef) => sameSource(sourceRef, receiver)),
+      .filter(({node}) =>
+        node.sourceRefs.some(sourceRef => sameSource(sourceRef, receiver)),
       )
-      .map(({ key }) => key);
+      .map(({key}) => key);
     return [
       {
-        kind: "expression",
+        kind: 'expression',
         axis,
         label: `Δ${axis.toUpperCase()}`,
         value: 0,
         sensitivity: 1,
-        parameterKind: "length",
+        parameterKind: 'length',
         step: 0.5,
-        receiver: { sourceRef: receiver },
+        receiver: {sourceRef: receiver},
         occurrenceKeys,
       },
     ];
+  });
+}
+
+function preferUpstreamTargets(
+  parameters: readonly ParameterUsage[],
+): ParameterUsage[] {
+  const groups = new Map<string, ParameterUsage[]>();
+  for (const parameter of parameters) {
+    const {start, end} = parameter.expressionRef;
+    const key = `${parameter.operation}:${parameter.argument}:${start}:${end}`;
+    const group = groups.get(key) ?? [];
+    group.push(parameter);
+    groups.set(key, group);
+  }
+
+  return [...groups.values()].flatMap(group => {
+    const upstream = group.filter(
+      ({expressionRef, target}) =>
+        !containsSource(expressionRef, target.sourceRef),
+    );
+    return upstream.length > 0 ? upstream : group;
   });
 }
 
@@ -530,7 +571,9 @@ function sameSource(left: SourceRef, right: SourceRef): boolean {
   return left.start === right.start && left.end === right.end;
 }
 
-function positionOnlyTargets(parameters: readonly ParameterUsage[]): Set<string> {
+function positionOnlyTargets(
+  parameters: readonly ParameterUsage[],
+): Set<string> {
   const usages = new Map<string, ParameterUsage[]>();
   for (const parameter of parameters) {
     const targetUsages = usages.get(parameter.target.id) ?? [];
@@ -541,8 +584,8 @@ function positionOnlyTargets(parameters: readonly ParameterUsage[]): Set<string>
   const safe = new Set<string>();
   for (const [targetId, targetUsages] of usages) {
     const axes = new Set(
-      targetUsages.map((usage) =>
-        usage.operation === "at" || usage.operation === "move"
+      targetUsages.map(usage =>
+        usage.operation === 'at' || usage.operation === 'move'
           ? positionAxis(usage.argument)
           : undefined,
       ),
@@ -551,7 +594,7 @@ function positionOnlyTargets(parameters: readonly ParameterUsage[]): Set<string>
       axes.size === 1 &&
       !axes.has(undefined) &&
       targetUsages.every(
-        ({ sensitivity }) =>
+        ({sensitivity}) =>
           Number.isFinite(sensitivity) && Math.abs(sensitivity) > 1e-9,
       )
     ) {
@@ -562,21 +605,21 @@ function positionOnlyTargets(parameters: readonly ParameterUsage[]): Set<string>
 }
 
 function positionAxis(argument: string): PositionAxis | undefined {
-  if (argument === "x") return "x";
-  if (argument === "y") return "y";
-  if (argument === "z") return "z";
+  if (argument === 'x') return 'x';
+  if (argument === 'y') return 'y';
+  if (argument === 'z') return 'z';
   return undefined;
 }
 
 function axisIndex(argument: string): 0 | 1 | 2 | undefined {
-  if (argument === "x") return 0;
-  if (argument === "y") return 1;
-  if (argument === "z") return 2;
+  if (argument === 'x') return 0;
+  if (argument === 'y') return 1;
+  if (argument === 'z') return 2;
   return undefined;
 }
 
 function createThreeObject(node: ModelSnapshotObject): THREE.Object3D {
-  if (node.kind === "group") {
+  if (node.kind === 'group') {
     return new THREE.Group();
   }
 
@@ -587,12 +630,12 @@ function createThreeObject(node: ModelSnapshotObject): THREE.Object3D {
   const container = new THREE.Group();
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute(
-    "position",
+    'position',
     new THREE.BufferAttribute(node.mesh.vertices, 3),
   );
   if (node.mesh.normals.length === node.mesh.vertices.length) {
     geometry.setAttribute(
-      "normal",
+      'normal',
       new THREE.BufferAttribute(node.mesh.normals, 3),
     );
   } else {
@@ -615,11 +658,11 @@ function createThreeObject(node: ModelSnapshotObject): THREE.Object3D {
   if (node.mesh.edges.length > 0) {
     const edgeGeometry = new THREE.BufferGeometry();
     edgeGeometry.setAttribute(
-      "position",
+      'position',
       new THREE.BufferAttribute(node.mesh.edges, 3),
     );
     const edgeMaterial = new THREE.LineBasicMaterial({
-      color: "#080a07",
+      color: '#080a07',
       transparent: true,
       opacity: 0.72,
     });
@@ -629,7 +672,10 @@ function createThreeObject(node: ModelSnapshotObject): THREE.Object3D {
   return container;
 }
 
-function applyNodeTransform(object: THREE.Object3D, node: ModelSnapshotObject): void {
+function applyNodeTransform(
+  object: THREE.Object3D,
+  node: ModelSnapshotObject,
+): void {
   object.position.set(...node.transform.position);
   object.rotation.set(
     THREE.MathUtils.degToRad(node.transform.rotation[0]),
@@ -642,7 +688,7 @@ function applyNodeTransform(object: THREE.Object3D, node: ModelSnapshotObject): 
 function selectionKeyFromAncestors(object: THREE.Object3D): string | undefined {
   let current: THREE.Object3D | null = object;
   while (current) {
-    if (typeof current.userData.selectionKey === "string") {
+    if (typeof current.userData.selectionKey === 'string') {
       return current.userData.selectionKey;
     }
     current = current.parent;

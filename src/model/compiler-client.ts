@@ -1,12 +1,12 @@
-import CompilerWorker from "./compiler.worker?worker";
-import type { ModelModule } from "./compiler";
+import CompilerWorker from './compiler.worker?worker';
+import type {ModelModule} from './compiler';
 
 type CompileResponse =
-  | Readonly<{ id: number; ok: true; module: ModelModule }>
+  | Readonly<{id: number; ok: true; module: ModelModule}>
   | Readonly<{
       id: number;
       ok: false;
-      error: Readonly<{ message: string; start?: number; length?: number }>;
+      error: Readonly<{message: string; start?: number; length?: number}>;
     }>;
 
 type PendingCompile = {
@@ -28,7 +28,7 @@ export class ModelCompilerClient {
 
   compile(source: string): Promise<ModelModule> {
     if (this.pending) {
-      this.pending.reject(new Error("Compilation superseded."));
+      this.pending.reject(new Error('Compilation superseded.'));
       window.clearTimeout(this.pending.timeout);
       this.restartWorker();
     }
@@ -45,20 +45,20 @@ export class ModelCompilerClient {
         reject(
           new Error(
             this.kernelInitialized
-              ? "模型执行超过 3 秒，已终止本次运行。"
-              : "OpenCascade 初始化或首次建模超过 20 秒，已终止本次运行。",
+              ? '模型执行超过 3 秒，已终止本次运行。'
+              : 'OpenCascade 初始化或首次建模超过 20 秒，已终止本次运行。',
           ),
         );
       }, timeoutMilliseconds);
 
-      this.pending = { id, resolve, reject, timeout };
-      this.worker.postMessage({ id, source });
+      this.pending = {id, resolve, reject, timeout};
+      this.worker.postMessage({id, source});
     });
   }
 
   private createWorker(): Worker {
     const worker = new CompilerWorker();
-    worker.onmessage = ({ data }: MessageEvent<CompileResponse>) => {
+    worker.onmessage = ({data}: MessageEvent<CompileResponse>) => {
       const pending = this.pending;
       if (!pending || pending.id !== data.id) {
         return;
@@ -71,7 +71,7 @@ export class ModelCompilerClient {
         pending.resolve(data.module);
       } else {
         const error = new Error(
-          "stack" in data.error && typeof data.error.stack === "string"
+          'stack' in data.error && typeof data.error.stack === 'string'
             ? data.error.stack
             : data.error.message,
         ) as Error & {
@@ -83,14 +83,14 @@ export class ModelCompilerClient {
         pending.reject(error);
       }
     };
-    worker.onerror = ({ message }) => {
+    worker.onerror = ({message}) => {
       const pending = this.pending;
       if (!pending) {
         return;
       }
       window.clearTimeout(pending.timeout);
       this.pending = null;
-      pending.reject(new Error(message || "模型 Worker 运行失败。"));
+      pending.reject(new Error(message || '模型 Worker 运行失败。'));
       this.restartWorker();
     };
     return worker;

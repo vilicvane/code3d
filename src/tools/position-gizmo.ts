@@ -1,10 +1,10 @@
-import * as THREE from "three";
-import { TransformControls } from "three/addons/controls/TransformControls.js";
-import type { ParameterKind, ParameterTarget } from "../model/runtime";
-import { snapNumericValue } from "./parameter-policy";
-import type { SourceAnchor } from "./tool-system";
+import * as THREE from 'three';
+import {TransformControls} from 'three/addons/controls/TransformControls.js';
+import type {ParameterKind, ParameterTarget} from '../model/runtime';
+import {snapNumericValue} from './parameter-policy';
+import type {SourceAnchor} from './tool-system';
 
-export type PositionAxis = "x" | "y" | "z";
+export type PositionAxis = 'x' | 'y' | 'z';
 
 type PositionGizmoBindingBase = Readonly<{
   axis: PositionAxis;
@@ -21,24 +21,24 @@ type PositionGizmoBindingBase = Readonly<{
 export type PositionGizmoBinding =
   | (PositionGizmoBindingBase &
       Readonly<{
-        kind: "parameter";
+        kind: 'parameter';
         target: ParameterTarget;
       }>)
   | (PositionGizmoBindingBase &
       Readonly<{
-        kind: "expression";
+        kind: 'expression';
         receiver: SourceAnchor;
         occurrenceKeys: readonly string[];
       }>);
 
 export type PositionGizmoEvent =
-  | Readonly<{ kind: "begin"; binding: PositionGizmoBinding }>
+  | Readonly<{kind: 'begin'; binding: PositionGizmoBinding}>
   | Readonly<{
-      kind: "preview" | "commit";
+      kind: 'preview' | 'commit';
       binding: PositionGizmoBinding;
       value: number;
     }>
-  | Readonly<{ kind: "cancel"; binding: PositionGizmoBinding }>;
+  | Readonly<{kind: 'cancel'; binding: PositionGizmoBinding}>;
 
 type ActiveDrag = {
   binding: PositionGizmoBinding;
@@ -47,7 +47,7 @@ type ActiveDrag = {
 };
 
 // @types/three 0.185.4 spells the runtime `minX` property as `minx`.
-type BoundedTransformControls = TransformControls & { minX: number };
+type BoundedTransformControls = TransformControls & {minX: number};
 
 export class PositionGizmo {
   private readonly controls: BoundedTransformControls;
@@ -69,10 +69,10 @@ export class PositionGizmo {
       camera,
       domElement,
     ) as BoundedTransformControls;
-    this.controls.setMode("translate");
-    this.controls.setSpace("world");
+    this.controls.setMode('translate');
+    this.controls.setSpace('world');
     this.controls.setSize(0.72);
-    this.controls.setColors("#ff665c", "#70d98d", "#6c8cff", "#d8ff3e");
+    this.controls.setColors('#ff665c', '#70d98d', '#6c8cff', '#d8ff3e');
     this.controls.showXY = false;
     this.controls.showYZ = false;
     this.controls.showXZ = false;
@@ -80,9 +80,9 @@ export class PositionGizmo {
     removeUnsupportedHandles(helper);
     scene.add(helper);
 
-    this.controls.addEventListener("mouseDown", () => this.beginDrag());
-    this.controls.addEventListener("objectChange", () => this.updateDrag());
-    this.controls.addEventListener("mouseUp", () => this.finishDrag());
+    this.controls.addEventListener('mouseDown', () => this.beginDrag());
+    this.controls.addEventListener('objectChange', () => this.updateDrag());
+    this.controls.addEventListener('mouseUp', () => this.finishDrag());
   }
 
   attach(
@@ -94,10 +94,10 @@ export class PositionGizmo {
       return;
     }
     this.attachedObject = object;
-    bindings.forEach((binding) => this.bindings.set(binding.axis, binding));
-    this.controls.showX = this.bindings.has("x");
-    this.controls.showY = this.bindings.has("y");
-    this.controls.showZ = this.bindings.has("z");
+    bindings.forEach(binding => this.bindings.set(binding.axis, binding));
+    this.controls.showX = this.bindings.has('x');
+    this.controls.showY = this.bindings.has('y');
+    this.controls.showZ = this.bindings.has('z');
     this.updateAnchor();
     this.updateLimits();
     this.controls.attach(this.proxy);
@@ -139,7 +139,7 @@ export class PositionGizmo {
     this.cancelling = false;
     this.active = undefined;
     this.setNavigationEnabled(true);
-    this.onEvent({ kind: "cancel", binding: active.binding });
+    this.onEvent({kind: 'cancel', binding: active.binding});
     return true;
   }
 
@@ -155,15 +155,16 @@ export class PositionGizmo {
       value: binding.value,
     };
     this.setNavigationEnabled(false);
-    this.onEvent({ kind: "begin", binding });
+    this.onEvent({kind: 'begin', binding});
   }
 
   private updateDrag(): void {
     if (!this.active || this.cancelling) {
       return;
     }
-    const { binding, startPosition } = this.active;
-    const delta = this.proxy.position[binding.axis] - startPosition[binding.axis];
+    const {binding, startPosition} = this.active;
+    const delta =
+      this.proxy.position[binding.axis] - startPosition[binding.axis];
     const rawValue = binding.value + delta / binding.sensitivity;
     const value = snapNumericValue(
       {
@@ -179,7 +180,7 @@ export class PositionGizmo {
       startPosition[binding.axis] +
       (value - binding.value) * binding.sensitivity;
     this.active.value = value;
-    this.onEvent({ kind: "preview", binding, value });
+    this.onEvent({kind: 'preview', binding, value});
   }
 
   private finishDrag(): void {
@@ -190,7 +191,7 @@ export class PositionGizmo {
     }
     this.active = undefined;
     this.onEvent({
-      kind: "commit",
+      kind: 'commit',
       binding: active.binding,
       value: active.value,
     });
@@ -205,7 +206,7 @@ export class PositionGizmo {
     this.controls.maxZ = Number.POSITIVE_INFINITY;
 
     for (const binding of this.bindings.values()) {
-      const { sensitivity, axis } = binding;
+      const {sensitivity, axis} = binding;
       const anchor = this.proxy.position[axis];
       const first =
         anchor +
@@ -217,10 +218,10 @@ export class PositionGizmo {
           sensitivity;
       const min = Math.min(first, second);
       const max = Math.max(first, second);
-      if (axis === "x") {
+      if (axis === 'x') {
         this.controls.minX = min;
         this.controls.maxX = max;
-      } else if (axis === "y") {
+      } else if (axis === 'y') {
         this.controls.minY = min;
         this.controls.maxY = max;
       } else {
@@ -231,20 +232,22 @@ export class PositionGizmo {
   }
 }
 
-function controlAxis(axis: TransformControls["axis"]): PositionAxis | undefined {
-  if (axis === "X") return "x";
-  if (axis === "Y") return "y";
-  if (axis === "Z") return "z";
+function controlAxis(
+  axis: TransformControls['axis'],
+): PositionAxis | undefined {
+  if (axis === 'X') return 'x';
+  if (axis === 'Y') return 'y';
+  if (axis === 'Z') return 'z';
   return undefined;
 }
 
 function removeUnsupportedHandles(helper: THREE.Object3D): void {
-  const unsupported = new Set(["XYZ", "XY", "YZ", "XZ", "E", "XYZE"]);
+  const unsupported = new Set(['XYZ', 'XY', 'YZ', 'XZ', 'E', 'XYZE']);
   const handles: THREE.Object3D[] = [];
-  helper.traverse((object) => {
+  helper.traverse(object => {
     if (unsupported.has(object.name)) {
       handles.push(object);
     }
   });
-  handles.forEach((handle) => handle.removeFromParent());
+  handles.forEach(handle => handle.removeFromParent());
 }
