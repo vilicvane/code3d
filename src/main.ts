@@ -22,6 +22,7 @@ import {
 } from './tools/tool-system';
 import {ModelViewport, type Occurrence} from './viewport';
 import {DockPanelCoordinator} from './ui/dock-panels';
+import {SourceEditPopover} from './ui/source-edit-popover';
 
 const storageKey = 'code3d.prototype.source';
 const savedSource = localStorage.getItem(storageKey) ?? sampleSource;
@@ -155,6 +156,7 @@ const viewport = new ModelViewport(
   },
   handlePositionTool,
 );
+const sourceEditPopover = new SourceEditPopover(viewportHost);
 const toolEngine = new ToolEngine({
   sourceVersion: () => codeEditor.sourceVersion(),
   readSource: sourceRef => codeEditor.readSource(sourceRef),
@@ -779,7 +781,10 @@ function commitToolSession(session: ToolSession, intent: ToolIntent): boolean {
     showToolIssue(result.reason);
     return false;
   }
-  codeEditor.showSourceEdits(result.plan.summary, result.plan.edits);
+  sourceEditPopover.show(
+    result.plan.summary,
+    codeEditor.sourceEditExcerpts(result.plan.edits),
+  );
   return true;
 }
 

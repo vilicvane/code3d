@@ -7,6 +7,7 @@ import TypeScriptWorker from 'monaco-editor/language/typescript/ts.worker?worker
 import type {CursorOptions, Options} from 'prettier';
 import {authoringTypes, type SourceRef} from './model/runtime';
 import type {SourceTextEdit} from './tools/tool-system';
+import type {SourceEditExcerpt} from './ui/source-edit-popover';
 
 type MonacoEnvironment = typeof self & {
   MonacoEnvironment: {
@@ -95,7 +96,6 @@ export class CodeEditor {
   readonly editor: monaco.editor.IStandaloneCodeEditor;
   private readonly model: monaco.editor.ITextModel;
   private readonly sourceDecoration: monaco.editor.IEditorDecorationsCollection;
-  private readonly sourceEditPopover: SourceEditPopover;
   private suppressCursorEvent = false;
 
   constructor(container: HTMLElement, source: string) {
@@ -125,7 +125,6 @@ export class CodeEditor {
       tabSize: 2,
     });
     this.sourceDecoration = this.editor.createDecorationsCollection();
-    this.sourceEditPopover = new SourceEditPopover(this.editor);
   }
 
   getValue(): string {
@@ -242,8 +241,8 @@ export class CodeEditor {
     return true;
   }
 
-  showSourceEdits(summary: string, edits: readonly SourceTextEdit[]): void {
-    this.sourceEditPopover.show(summary, edits);
+  sourceEditExcerpts(edits: readonly SourceTextEdit[]): SourceEditExcerpt[] {
+    return sourceEditExcerpts(this.model.getValue(), edits);
   }
 
   onChange(listener: () => void): monaco.IDisposable {
@@ -306,130 +305,35 @@ export class CodeEditor {
   }
 }
 
-class SourceEditPopover implements monaco.editor.IOverlayWidget {
-  readonly allowEditorOverflow = false;
-  private readonly root = document.createElement('section');
-  private readonly summary = document.createElement('p');
-  private readonly edits = document.createElement('div');
-  private position: monaco.editor.IOverlayWidgetPositionCoordinates = {
-    top: 12,
-    left: 12,
-  };
-  private dismissTimer?: number;
-
-  constructor(private readonly editor: monaco.editor.IStandaloneCodeEditor) {
-    this.root.className = 'source-edit-popover';
-    this.root.hidden = true;
-    this.root.setAttribute('aria-live', 'polite');
-    this.root.setAttribute('aria-atomic', 'true');
-
-    const header = document.createElement('header');
-    const eyebrow = document.createElement('span');
-    eyebrow.className = 'source-edit-popover-eyebrow';
-    eyebrow.textContent = 'SOURCE UPDATED';
-    const close = document.createElement('button');
-    close.type = 'button';
-    close.className = 'source-edit-popover-close';
-    close.setAttribute('aria-label', '关闭源码改动');
-    close.textContent = '×';
-    close.addEventListener('click', () => this.dismiss());
-    header.append(eyebrow, close);
-
-    this.summary.className = 'source-edit-popover-summary';
-    this.edits.className = 'source-edit-popover-edits';
-    this.root.append(header, this.summary, this.edits);
-    this.root.addEventListener('pointerenter', () => this.cancelDismiss());
-    this.root.addEventListener('pointerleave', () =>
-      this.scheduleDismiss(2400),
-    );
-    this.editor.addOverlayWidget(this);
-    this.editor.onDidLayoutChange(() => this.layout());
-  }
-
-  getId(): string {
-    return 'code3d.source-edit-popover';
-  }
-
-  getDomNode(): HTMLElement {
-    return this.root;
-  }
-
-  getPosition(): monaco.editor.IOverlayWidgetPosition {
-    return {preference: this.position};
-  }
-
-  show(summary: string, edits: readonly SourceTextEdit[]): void {
-    this.summary.textContent = summary;
-    this.edits.replaceChildren(
-      ...edits.map((edit, index) => sourceEditBlock(edit, index, edits.length)),
-    );
-    this.root.hidden = false;
-    requestAnimationFrame(() => this.layout());
-    this.scheduleDismiss(7000);
-  }
-
-  private layout(): void {
-    if (this.root.hidden) {
-      return;
-    }
-    const {width, height} = this.editor.getLayoutInfo();
-    this.position = {
-      top: Math.max(12, height - this.root.offsetHeight - 12),
-      left: Math.max(12, width - this.root.offsetWidth - 12),
-    };
-    this.editor.layoutOverlayWidget(this);
-  }
-
-  private dismiss(): void {
-    this.cancelDismiss();
-    this.root.hidden = true;
-  }
-
-  private scheduleDismiss(delay: number): void {
-    this.cancelDismiss();
-    this.dismissTimer = window.setTimeout(() => this.dismiss(), delay);
-  }
-
-  private cancelDismiss(): void {
-    window.clearTimeout(this.dismissTimer);
-    this.dismissTimer = undefined;
-  }
-}
-
-function sourceEditBlock(
-  edit: SourceTextEdit,
-  index: number,
-  editCount: number,
-): HTMLElement {
-  const block = document.createElement('section');
-  block.className = 'source-edit-block';
-  if (editCount > 1) {
-    const label = document.createElement('span');
-    label.className = 'source-edit-block-label';
-    label.textContent = `EDIT ${String(index + 1).padStart(2, '0')}`;
-    block.append(label);
-  }
-  block.append(
-    sourceEditLine('−', edit.expectedText, 'removed'),
-    sourceEditLine('+', edit.text, 'added'),
-  );
-  return block;
-}
-
-function sourceEditLine(
-  marker: string,
+function sourceEditExcerpts(
   source: string,
-  kind: 'removed' | 'added',
-): HTMLElement {
-  const line = document.createElement('div');
-  line.className = `source-edit-line ${kind}`;
-  const prefix = document.createElement('span');
-  prefix.className = 'source-edit-marker';
-  prefix.textContent = marker;
-  const code = document.createElement('code');
-  code.textContent = source;
-  line.append(prefix, code);
-  return line;
+  edits: readonly SourceTextEdit[],
+): SourceEditExcerpt[] {
+  let offsetDelta = 0;
+  return [...edits]
+    .sort((left, right) => left.sourceRef.start - right.sourceRef.start)
+    .map(edit => {
+      const start = edit.sourceRef.start + offsetDelta;
+      const end = start + edit.text.length;
+      offsetDelta +=
+        edit.text.length - (edit.sourceRef.end - edit.sourceRef.start);
+
+      const lineStart = source.lastIndexOf('\n', start - 1) + 1;
+      const followingLineBreak = source.indexOf('\n', end);
+      const lineEnd =
+        followingLineBreak === -1 ? source.length : followingLineBreak;
+      const lineNumber = source.slice(0, lineStart).split('\n').length;
+      const rawSource = source.slice(lineStart, lineEnd);
+      const contentStart = rawSource.length - rawSource.trimStart().length;
+      const contentEnd = rawSource.trimEnd().length;
+
+      return {
+        lineNumber,
+        source: rawSource.slice(contentStart, contentEnd),
+        changedStart: start - lineStart - contentStart,
+        changedEnd: end - lineStart - contentStart,
+      };
+    });
 }
 
 async function formatTypeScript(source: string): Promise<string> {

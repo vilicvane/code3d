@@ -257,9 +257,13 @@ kbd {
 }
 
 .source-edit-popover {
-  z-index: 30;
-  width: clamp(260px, 38vw, 420px);
-  max-height: min(340px, calc(100vh - 150px));
+  position: absolute;
+  bottom: 14px;
+  left: 14px;
+  z-index: 6;
+  width: fit-content;
+  max-width: min(560px, calc(100% - 28px));
+  max-height: calc(100% - 28px);
   overflow: hidden;
   color: #dfe2d8;
   border: 1px solid #4e5830;
@@ -267,6 +271,13 @@ kbd {
   background: #151710f5;
   box-shadow: 0 18px 50px #0009;
   backdrop-filter: blur(14px);
+}
+
+.viewport-host:has(
+    .inspector-panel:is([data-panel-state='peek'], [data-panel-state='pinned'])
+  )
+  .source-edit-popover {
+  max-width: min(560px, calc(100% - var(--expanded-inspector-width) - 42px));
 }
 
 .source-edit-popover[hidden] {
@@ -338,40 +349,63 @@ kbd {
   font-size: 7px;
 }
 
-.source-edit-line {
+.source-edit-code {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
+  grid-template-columns: 30px minmax(0, 1fr);
   min-width: 0;
-  padding: 5px 7px 5px 0;
+  overflow: hidden;
+  color: #dfe2d8;
+  border: 1px solid #303527;
   border-radius: 3px;
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 10px;
-  line-height: 1.5;
+  background: #10120d;
+  font-family: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
+  font-size: 13px;
+  font-feature-settings: 'liga', 'calt';
+  line-height: 22px;
 }
 
-.source-edit-line + .source-edit-line {
-  margin-top: 3px;
-}
-
-.source-edit-line.removed {
-  color: #bba29b;
-  background: #3a211d73;
-}
-
-.source-edit-line.added {
-  color: #dff59b;
-  background: #29331691;
-}
-
-.source-edit-marker {
-  text-align: center;
+.source-edit-line-number {
+  padding: 6px 7px 6px 0;
+  color: #555b4e;
+  border-right: 1px solid #282c22;
+  text-align: right;
   user-select: none;
 }
 
-.source-edit-line code {
+.source-edit-code code {
   min-width: 0;
+  padding: 6px 8px;
   overflow-wrap: anywhere;
+  font: inherit;
+  font-feature-settings: inherit;
   white-space: pre-wrap;
+}
+
+.source-edit-change {
+  padding: 1px 0;
+  border-bottom: 1px solid #d8ff3ecc;
+  background: #d8ff3e1c;
+  box-decoration-break: clone;
+}
+
+.source-token-comment {
+  color: #6f756b;
+}
+
+.source-token-keyword {
+  color: #d8ff3e;
+}
+
+.source-token-string {
+  color: #e8bd76;
+}
+
+.source-token-number {
+  color: #8ed5d1;
+}
+
+.source-token-type {
+  color: #aebcff;
 }
 
 .error-bar {
@@ -435,6 +469,7 @@ kbd {
 
 .viewport-host {
   position: relative;
+  --expanded-inspector-width: 252px;
   overflow: hidden;
   background: #171815;
 }
@@ -986,6 +1021,10 @@ input[type='range']::-webkit-slider-thumb {
   .workspace {
     grid-template-columns: 1fr;
     grid-template-rows: 48% 52%;
+  }
+
+  .viewport-host {
+    --expanded-inspector-width: 190px;
   }
 
   .editor-pane {

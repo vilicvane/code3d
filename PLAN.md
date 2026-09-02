@@ -47,8 +47,9 @@ not silently reorder the active milestones.
 - Public model values do not expose OpenCascade or Three.js details.
 - GUI tools resolve an explicit source-edit scope and use the common tool intent
   and transaction mechanism.
-- Tool commits preserve the editor caret and its rendering scope. The committed
-  source fragment is shown in a non-focusing code popover.
+- Tool commits preserve the editor caret and its rendering scope. A non-focusing
+  GUI popover shows a trimmed, syntax-highlighted source excerpt with the
+  changed range marked.
 - Units remain UI metadata; no implicit runtime conversion occurs.
 - Runtime trace data may explain and locate values, but must not constrain which
   JavaScript/TypeScript construction patterns users can write.

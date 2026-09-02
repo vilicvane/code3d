@@ -58,7 +58,7 @@ selection + gesture
 ### Source transaction
 
 提交时再次检查源码版本和所有 expected text，然后作为一个编辑事务进入 Monaco undo stack。失败时不应用部分结果。
-事务保留用户原有 caret 和由它决定的渲染 scope；工具不会为了展示写入位置而移动 selection。提交成功后，UI 使用 edit plan 的 summary 和 edits 在独立代码 popover 中展示实际替换内容。
+事务保留用户原有 caret 和由它决定的渲染 scope；工具不会为了展示写入位置而移动 selection。提交成功后，UI 使用 edit plan 的 summary 和 edits，在 GUI 一侧的独立 popover 中展示 trim、语法高亮后的局部源码，并只标记实际替换范围。
 
 ## Tool session
 
