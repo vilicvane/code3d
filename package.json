@@ -1,0 +1,26 @@
+{
+  "name": "code3d",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@typescript/typescript6": "^6.0.2",
+    "monaco-editor": "^0.56.0",
+    "replicad": "^1.0.1",
+    "replicad-opencascadejs": "^1.0.0",
+    "three": "^0.185.1"
+  },
+  "devDependencies": {
+    "@types/three": "^0.185.4",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.2"
+  },
+  "overrides": {
+    "dompurify": "3.4.14"
+  }
+}
