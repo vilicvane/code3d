@@ -2,6 +2,7 @@ import ts from '@typescript/typescript6';
 import {
   authoringApi,
   disposeModelObjects,
+  isConstraint,
   isModelObject,
   type ModelSnapshotObject,
   type ModelObject,
@@ -141,35 +142,13 @@ const signatures = new Map<string, ParameterSignature>([
     },
   ],
   [
-    'at',
+    'offset',
     {
-      operation: 'at',
-      arguments: [
-        {name: 'x', label: 'X', kind: 'length'},
-        {name: 'y', label: 'Y', kind: 'length'},
-        {name: 'z', label: 'Z', kind: 'length'},
-      ],
-    },
-  ],
-  [
-    'move',
-    {
-      operation: 'move',
+      operation: 'offset',
       arguments: [
         {name: 'x', label: 'ΔX', kind: 'length'},
         {name: 'y', label: 'ΔY', kind: 'length'},
         {name: 'z', label: 'ΔZ', kind: 'length'},
-      ],
-    },
-  ],
-  [
-    'rotate',
-    {
-      operation: 'rotate',
-      arguments: [
-        {name: 'x', label: 'X 旋转', kind: 'angle', unit: 'deg'},
-        {name: 'y', label: 'Y 旋转', kind: 'angle', unit: 'deg'},
-        {name: 'z', label: 'Z 旋转', kind: 'angle', unit: 'deg'},
       ],
     },
   ],
@@ -220,7 +199,10 @@ const traceRuntime = Object.freeze({
     } finally {
       parameterFrames.pop();
     }
-    if (isModelObject(result)) {
+    if (isConstraint(result)) {
+      result.attachSource({start, end});
+      result.attachParameters(parameters);
+    } else if (isModelObject(result)) {
       result.attachSource({start, end});
       result.attachParameters(parameters);
       recordSourceObject(start, end, result);

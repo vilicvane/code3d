@@ -1,4 +1,10 @@
-import type {ParameterTarget, SourceRef, Vec3} from '../model/runtime';
+import type {
+  ParameterTarget,
+  Quaternion,
+  SourceRef,
+  Vec3,
+} from '../model/runtime';
+import {rotateVector} from '../model/spatial';
 
 export type ExpressionDraft =
   | Readonly<{kind: 'number'; value: number}>
@@ -49,10 +55,11 @@ export type ToolIntent =
       arguments: readonly ExpressionDraft[];
     }>
   | Readonly<{
-      kind: 'object.translate';
+      kind: 'relation.offset';
       receiver: SourceAnchor;
       occurrenceKeys: readonly string[];
       delta: Vec3;
+      frameQuaternion: Quaternion;
     }>;
 
 export type SourceTextEdit = Readonly<{
@@ -131,7 +138,7 @@ export class ToolEngine {
     this.register(new SetParameterResolver());
     this.register(new ReplaceExpressionResolver());
     this.register(new InsertOperationResolver());
-    this.register(new TranslateObjectResolver());
+    this.register(new OffsetRelationResolver());
   }
 
   begin(toolId: string): ToolSession {
@@ -349,14 +356,14 @@ class InsertOperationResolver implements ToolIntentResolver {
   }
 }
 
-class TranslateObjectResolver implements ToolIntentResolver {
-  readonly kind = 'object.translate' as const;
+class OffsetRelationResolver implements ToolIntentResolver {
+  readonly kind = 'relation.offset' as const;
 
   resolve(intent: ToolIntent, context: ResolveContext): ToolResolution {
     if (intent.kind !== this.kind) {
       return {
         status: 'unsupported',
-        reason: '平移解析器收到错误的编辑意图。',
+        reason: '关系偏移解析器收到错误的编辑意图。',
       };
     }
     if (
@@ -365,7 +372,7 @@ class TranslateObjectResolver implements ToolIntentResolver {
     ) {
       return {
         status: 'unsupported',
-        reason: '平移必须包含有效对象和有限数值。',
+        reason: '关系偏移必须包含有效对象和有限数值。',
       };
     }
     const receiver = context.readSource(intent.receiver.sourceRef);
@@ -373,8 +380,8 @@ class TranslateObjectResolver implements ToolIntentResolver {
     const resolution = expressionPlan(
       intent,
       intent.receiver,
-      `(${receiver}).move(${delta})`,
-      '平移模型对象',
+      `(${receiver}).offset(${delta})`,
+      '添加关系偏移',
       context,
     );
     if (resolution.status !== 'ready') {
@@ -387,7 +394,7 @@ class TranslateObjectResolver implements ToolIntentResolver {
         preview: {
           kind: 'occurrence-translation',
           occurrenceKeys: intent.occurrenceKeys,
-          delta: intent.delta,
+          delta: rotateVector(intent.delta, intent.frameQuaternion),
         },
       },
     };

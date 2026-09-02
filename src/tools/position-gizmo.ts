@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {TransformControls} from 'three/addons/controls/TransformControls.js';
-import type {ParameterKind, ParameterTarget} from '../model/runtime';
+import type {ParameterKind, ParameterTarget, Transform} from '../model/runtime';
 import {snapNumericValue} from './parameter-policy';
 import type {SourceAnchor} from './tool-system';
 
@@ -16,6 +16,7 @@ type PositionGizmoBindingBase = Readonly<{
   min?: number;
   max?: number;
   step?: number;
+  frame: Transform;
 }>;
 
 export type PositionGizmoBinding =
@@ -46,11 +47,8 @@ type ActiveDrag = {
   value: number;
 };
 
-// @types/three 0.185.4 spells the runtime `minX` property as `minx`.
-type BoundedTransformControls = TransformControls & {minX: number};
-
 export class PositionGizmo {
-  private readonly controls: BoundedTransformControls;
+  private readonly controls: TransformControls;
   private readonly proxy = new THREE.Object3D();
   private readonly bindings = new Map<PositionAxis, PositionGizmoBinding>();
   private attachedObject?: THREE.Object3D;
@@ -65,12 +63,9 @@ export class PositionGizmo {
     private readonly onEvent: (event: PositionGizmoEvent) => void,
   ) {
     scene.add(this.proxy);
-    this.controls = new TransformControls(
-      camera,
-      domElement,
-    ) as BoundedTransformControls;
+    this.controls = new TransformControls(camera, domElement);
     this.controls.setMode('translate');
-    this.controls.setSpace('world');
+    this.controls.setSpace('local');
     this.controls.setSize(0.72);
     this.controls.setColors('#ff665c', '#70d98d', '#6c8cff', '#d8ff3e');
     this.controls.showXY = false;
@@ -95,11 +90,12 @@ export class PositionGizmo {
     }
     this.attachedObject = object;
     bindings.forEach(binding => this.bindings.set(binding.axis, binding));
+    const [qx, qy, qz, qw] = bindings[0].frame.quaternion;
+    this.proxy.quaternion.set(qx, qy, qz, qw);
     this.controls.showX = this.bindings.has('x');
     this.controls.showY = this.bindings.has('y');
     this.controls.showZ = this.bindings.has('z');
     this.updateAnchor();
-    this.updateLimits();
     this.controls.attach(this.proxy);
   }
 
@@ -163,8 +159,10 @@ export class PositionGizmo {
       return;
     }
     const {binding, startPosition} = this.active;
-    const delta =
-      this.proxy.position[binding.axis] - startPosition[binding.axis];
+    const direction = axisVector(binding.axis).applyQuaternion(
+      this.proxy.quaternion,
+    );
+    const delta = this.proxy.position.clone().sub(startPosition).dot(direction);
     const rawValue = binding.value + delta / binding.sensitivity;
     const value = snapNumericValue(
       {
@@ -176,9 +174,12 @@ export class PositionGizmo {
       },
       rawValue,
     );
-    this.proxy.position[binding.axis] =
-      startPosition[binding.axis] +
-      (value - binding.value) * binding.sensitivity;
+    this.proxy.position
+      .copy(startPosition)
+      .addScaledVector(
+        direction,
+        (value - binding.value) * binding.sensitivity,
+      );
     this.active.value = value;
     this.onEvent({kind: 'preview', binding, value});
   }
@@ -196,40 +197,12 @@ export class PositionGizmo {
       value: active.value,
     });
   }
+}
 
-  private updateLimits(): void {
-    this.controls.minX = Number.NEGATIVE_INFINITY;
-    this.controls.maxX = Number.POSITIVE_INFINITY;
-    this.controls.minY = Number.NEGATIVE_INFINITY;
-    this.controls.maxY = Number.POSITIVE_INFINITY;
-    this.controls.minZ = Number.NEGATIVE_INFINITY;
-    this.controls.maxZ = Number.POSITIVE_INFINITY;
-
-    for (const binding of this.bindings.values()) {
-      const {sensitivity, axis} = binding;
-      const anchor = this.proxy.position[axis];
-      const first =
-        anchor +
-        ((binding.min ?? Number.NEGATIVE_INFINITY) - binding.value) *
-          sensitivity;
-      const second =
-        anchor +
-        ((binding.max ?? Number.POSITIVE_INFINITY) - binding.value) *
-          sensitivity;
-      const min = Math.min(first, second);
-      const max = Math.max(first, second);
-      if (axis === 'x') {
-        this.controls.minX = min;
-        this.controls.maxX = max;
-      } else if (axis === 'y') {
-        this.controls.minY = min;
-        this.controls.maxY = max;
-      } else {
-        this.controls.minZ = min;
-        this.controls.maxZ = max;
-      }
-    }
-  }
+function axisVector(axis: PositionAxis): THREE.Vector3 {
+  if (axis === 'x') return new THREE.Vector3(1, 0, 0);
+  if (axis === 'y') return new THREE.Vector3(0, 1, 0);
+  return new THREE.Vector3(0, 0, 1);
 }
 
 function controlAxis(

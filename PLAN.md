@@ -15,15 +15,20 @@ not silently reorder the active milestones.
   a publishing boundary and only a preview fallback, not a render prerequisite.
 - `model()` is not a required entry wrapper. Any runtime model object can be
   selected and rendered.
-- An entity consists conceptually of reusable geometry plus an immutable
-  position relation.
-- A position-relation root has no absolute coordinates. `move`, `rotate`, and
-  later spatial operations derive a new relation from an existing relation.
-- Chained calls are the human-facing syntax for relation derivation; they do not
-  imply mutation or a persistent CAD feature history.
-- Creating an entity can start a fresh position relation or inherit another
-  entity's relation. Copying defaults to inheriting the source relation, while a
-  fresh relation remains an explicit option.
+- `Model` and `Anchor` are both core abstractions. A model is also usable as its
+  intrinsic origin anchor; named anchors such as `top`, `bottom`, and `axis`
+  describe local frames on that model.
+- `model.relate(self => constraint)` creates a new semantic-immutable model
+  value that shares geometry and carries the returned constraints. The callback
+  parameter is that new value.
+- Anchor methods return immutable constraint expressions. `on()` relates two
+  complete local frames and `offset(x, y, z)` adjusts the relation in the target
+  anchor's frame.
+- Standalone `union`, `cut`, and `intersect` functions are geometry-evaluation
+  boundaries. They collect and solve operand relations without introducing an
+  author-facing composition object.
+- Chained calls are the human-facing syntax for constraint derivation; they do
+  not imply mutation or a persistent CAD feature history.
 - A composite is broad: any connected set of occurrences and spatial relations
   is a composite, including copy, pattern, boolean operands, groups, and named
   assemblies. A composite can itself be reused as geometry in a larger model.
@@ -50,17 +55,17 @@ not silently reorder the active milestones.
 
 ## Milestones
 
-### 1. Rootless authoring and optional exports — implemented
+### 1. Rootless authoring and optional exports — complete
 
 - Remove the requirement that `default export` is a `ModelObject`.
 - Compile successfully when the module produces any traceable model object.
 - Use source selection as the primary render target.
 - Use a model export as a fallback; without one, use the latest produced object.
-- Keep `model()` available for compatibility, but remove it from the default
-  example and documentation as a requirement.
+- Remove `model()` from the authoring API and examples; selectable objects and
+  optional exports cover its former role.
 
-Status: implemented locally on 2026-09-02 and awaiting a phase commit. The
-browser-verified default example contains neither `model()` nor an export.
+Status: complete. Rootless selection and optional exports were implemented in
+`809fcc7`; the remaining `model()` API entry has now been removed.
 
 ### 2. Runtime object catalog — in progress
 
@@ -73,38 +78,46 @@ browser-verified default example contains neither `model()` nor an export.
 - Match catalog entries across recompiles using source-aware identities rather
   than transient runtime node IDs alone.
 
-Status: the first two slices are implemented locally. Runtime metadata includes
-module/local bindings, anonymous source expressions, export aliases,
-collections, per-execution outputs, and evaluation order. The object panel
-shows module bindings by default and supports hover preview, click-to-pin,
-source location, per-instance expansion, and local lineage expansion. Binding
-and expression identities use module anchors plus AST paths; expanded and
-pinned runtime occurrences survive normal recompiles and parameter write-back.
-Thumbnails and matching across large control-flow or structural rewrites remain
-open.
+Status: the first two slices are implemented in `809fcc7` and `a233aad`.
+Runtime metadata includes module/local bindings, anonymous source expressions,
+export aliases, collections, per-execution outputs, and evaluation order. The
+object panel shows module bindings by default and supports hover preview,
+click-to-pin, source location, per-instance expansion, and local lineage
+expansion. Binding and expression identities use module anchors plus AST paths;
+expanded and pinned runtime occurrences survive normal recompiles and parameter
+write-back. Thumbnails and matching across large control-flow or structural
+rewrites remain open.
 
-### 3. Position-relation graph
+### 3. Anchor constraint graph — first slice complete
 
-- Separate B-Rep geometry from position relations in the runtime.
-- Make `move` and `rotate` derive immutable relation nodes instead of modifying
-  OpenCascade shapes.
-- Define fresh versus inherited relation behavior for creation and copy.
-- Resolve related occurrences into a common frame only when rendering or
-  combining them.
-- Preserve relation provenance so gizmos can update the correct chain call.
+- Keep B-Rep geometry local and store constraints on immutable model copies.
+- Support model-origin, center, top, bottom, and axis anchors.
+- Solve directly determined rigid-frame `on()` relations and validate multiple
+  constraints for consistency.
+- Resolve related models only when rendering or evaluating standalone Boolean
+  operations.
+- Preserve constraint source and parameter provenance for GUI tools.
 
-### 4. Relation-aware GUI tools
+Status: implemented for directly solvable frame relations. The old public
+`at`, `move`, and `rotate` placement paths were removed rather than retained as
+compatibility APIs.
 
-- Show translation/rotation gizmos only for occurrence or relation scope.
-- Let a gizmo create a relation call when none exists, then edit that same call
-  on later drags.
+### 4. Relation-aware GUI tools — translation slice complete
+
+- Show the translation gizmo only when the selected model carries a constraint.
+- Edit traced `offset()` parameters at their upstream source target.
+- When an `on()` relation has no offset yet, insert one on the constraint
+  expression; later drags edit that call's parameters instead of stacking calls.
+- Orient gizmo axes and previews in the target Anchor frame.
+- Add rotation relations and previews once their author-facing constraint
+  vocabulary is selected.
 - Preview the relation source as a ghost when useful.
 - Add copy and pattern tools on top of the same relation intents.
 
 ### 5. Object combination tools
 
-- Begin with handwritten `union`, `cut`, and composition code plus GUI position
-  adjustment.
+- Handwritten standalone `union`, `cut`, and `intersect` functions are now the
+  only Boolean API; the old instance methods were removed.
 - Later allow an explicit tool mode to resolve multiple semantic selections.
 - Treat the main selection as the primary boolean operand and result frame.
 - Initially generate a new binding in a safe common lexical scope; do not guess
@@ -112,10 +125,14 @@ open.
 
 ## Open questions
 
-- Final public names for relation inheritance and fresh-copy behavior
-  (`relativeTo`, `copy({position: 'new'})`, or alternatives).
-- How disconnected relation roots acquire an identity relation inside a new
-  composite.
+- The constraint vocabulary beyond exact-frame `on()` and `offset()`, including
+  partially constrained point, axis, plane, distance, and angle relations.
+- Topology-backed face, edge, and vertex anchors beyond the first canonical
+  bounding-frame anchors.
+- How to diagnose under-constrained systems once partial constraints exist; the
+  first solver intentionally accepts only relations that directly determine a
+  rigid transform.
+- How Boolean results expose operand anchors and provenance for later relations.
 - Whether uniform scaling is geometry derivation, occurrence placement, or two
   explicitly named operations.
 - How much runtime lineage to retain and mesh eagerly for large models.

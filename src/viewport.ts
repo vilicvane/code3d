@@ -507,19 +507,28 @@ export class ModelViewport {
           0, 0, 0,
         ]),
       ];
-      for (const parameter of occurrence.node.parameters) {
-        const previewValue = this.parameterPreviews.get(parameter.target.id);
-        if (
-          previewValue === undefined ||
-          (parameter.operation !== 'at' && parameter.operation !== 'move')
-        ) {
-          continue;
+      for (const constraint of occurrence.node.constraints) {
+        const localOffset: [number, number, number] = [0, 0, 0];
+        for (const parameter of constraint.parameters) {
+          const previewValue = this.parameterPreviews.get(parameter.target.id);
+          if (previewValue === undefined || parameter.operation !== 'offset') {
+            continue;
+          }
+          const axis = axisIndex(parameter.argument);
+          if (axis !== undefined) {
+            localOffset[axis] +=
+              (previewValue - parameter.target.value) * parameter.sensitivity;
+          }
         }
-        const axis = axisIndex(parameter.argument);
-        if (axis !== undefined) {
-          offset[axis] +=
-            (previewValue - parameter.target.value) * parameter.sensitivity;
-        }
+        const frame = new THREE.Quaternion(
+          ...constraint.offsetFrame.quaternion,
+        );
+        const worldOffset = new THREE.Vector3(...localOffset).applyQuaternion(
+          frame,
+        );
+        offset[0] += worldOffset.x;
+        offset[1] += worldOffset.y;
+        offset[2] += worldOffset.z;
       }
       occurrence.object.position.x += offset[0];
       occurrence.object.position.y += offset[1];
@@ -634,14 +643,14 @@ function positionBindings(
   occurrence: Occurrence,
   occurrences: readonly Occurrence[],
 ): PositionGizmoBinding[] {
-  const receiver = occurrence.node.sourceRefs.at(-1);
-  const parameters = receiver
-    ? preferUpstreamTargets(
-        occurrence.node.parameters.filter(({operationRef}) =>
-          sameSource(receiver, operationRef),
-        ),
-      )
-    : [];
+  const constraint = occurrence.node.constraints.at(-1);
+  if (!constraint) {
+    return [];
+  }
+  const receiver = constraint.sourceRefs.at(-1);
+  const parameters = preferUpstreamTargets(
+    constraint.parameters.filter(({operation}) => operation === 'offset'),
+  );
   const modelParameters = occurrences.flatMap(({node}) => node.parameters);
   const safeTargets = positionOnlyTargets(modelParameters);
   const byTarget = new Map<
@@ -655,7 +664,7 @@ function positionBindings(
     if (!safeTargets.has(parameter.target.id)) {
       continue;
     }
-    if (parameter.operation !== 'at' && parameter.operation !== 'move') {
+    if (parameter.operation !== 'offset') {
       continue;
     }
     const axis = positionAxis(parameter.argument);
@@ -694,6 +703,7 @@ function positionBindings(
       min: target.min,
       max: target.max,
       step: target.step,
+      frame: constraint.offsetFrame,
     };
     const axisCandidates = candidates.get(axis) ?? [];
     axisCandidates.push(binding);
@@ -710,7 +720,11 @@ function positionBindings(
     }
     const occurrenceKeys = occurrences
       .filter(({node}) =>
-        node.sourceRefs.some(sourceRef => sameSource(sourceRef, receiver)),
+        node.constraints.some(candidate =>
+          candidate.sourceRefs.some(sourceRef =>
+            sameSource(sourceRef, receiver),
+          ),
+        ),
       )
       .map(({key}) => key);
     return [
@@ -722,6 +736,7 @@ function positionBindings(
         sensitivity: 1,
         parameterKind: 'length',
         step: 0.5,
+        frame: constraint.offsetFrame,
         receiver: {sourceRef: receiver},
         occurrenceKeys,
       },
@@ -776,9 +791,7 @@ function positionOnlyTargets(
   for (const [targetId, targetUsages] of usages) {
     const axes = new Set(
       targetUsages.map(usage =>
-        usage.operation === 'at' || usage.operation === 'move'
-          ? positionAxis(usage.argument)
-          : undefined,
+        usage.operation === 'offset' ? positionAxis(usage.argument) : undefined,
       ),
     );
     if (
@@ -868,11 +881,7 @@ function applyNodeTransform(
   node: ModelSnapshotObject,
 ): void {
   object.position.set(...node.transform.position);
-  object.rotation.set(
-    THREE.MathUtils.degToRad(node.transform.rotation[0]),
-    THREE.MathUtils.degToRad(node.transform.rotation[1]),
-    THREE.MathUtils.degToRad(node.transform.rotation[2]),
-  );
+  object.quaternion.set(...node.transform.quaternion);
   object.scale.set(...node.transform.scale);
 }
 

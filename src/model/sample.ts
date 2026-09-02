@@ -1,4 +1,4 @@
-export const sampleSource = `import {box, cylinder, group, sphere} from 'code3d';
+export const sampleSource = `import {box, cylinder, cut, union} from 'code3d';
 
 const accent = '#d8ff3e';
 const dark = '#222621';
@@ -14,39 +14,26 @@ const dark = '#222621';
  */
 const postOffset = 27;
 
-const plate = box(76, 6, 50).at(0, 3, 0);
-const mountingHoles = [-1, 1].flatMap(x =>
-  [-1, 1].map(z => cylinder(3.4, 10).at(x * 29, 3, z * 17)),
-);
-
-const base = mountingHoles
-  .reduce((body, hole) => body.cut(hole), plate)
-  .named('Base')
-  .paint(dark);
-
-const frameBlank = box(68, 34, 8).at(0, 23, -19);
-const frameWindow = box(46, 19, 12).at(0, 23, -19);
-
-const bridge = frameBlank
-  .cut(frameWindow)
-  .named('Bridge frame')
-  .paint('#f0f1e8')
-  .fillet(1.4);
-
-const posts = [-1, 1].map(x =>
-  cylinder(4.5, 25)
-    .named(\`Post \${x}\`)
+const plate = box(76, 6, 50).named('Plate').paint(dark);
+const postBlank = cylinder(4.5, 25);
+const posts = [-1, 1].map(side =>
+  postBlank
+    .named(\`Post \${side}\`)
     .paint(accent)
-    .at(x * postOffset, 18.5, 13),
+    .relate(post =>
+      post.bottom.on(plate.top).offset(side * postOffset, 0, 13),
+    ),
 );
 
-const marker = group(
-  [
-    sphere(5).paint('#ff6b45').at(-8, 43, -19),
-    sphere(5).paint('#7c8cff').at(8, 43, -19),
-  ],
-  'Markers',
+const body = union(plate, ...posts);
+const holeBlank = cylinder(3.4, 10);
+const mountingHoles = [-1, 1].flatMap(x =>
+  [-1, 1].map(z =>
+    holeBlank.relate(hole =>
+      hole.axis.on(plate.axis).offset(x * 29, 0, z * 17),
+    ),
+  ),
 );
 
-const deskRig = group([base, ...posts, bridge, marker], 'Desk rig');
+const base = cut(body, ...mountingHoles).named('Base').paint(dark);
 `;

@@ -814,10 +814,11 @@ function positionIntent(
   const delta: [number, number, number] = [0, 0, 0];
   delta[positionAxisIndex(binding.axis)] = value;
   return {
-    kind: 'object.translate',
+    kind: 'relation.offset',
     receiver: binding.receiver,
     occurrenceKeys: binding.occurrenceKeys,
     delta,
+    frameQuaternion: binding.frame.quaternion,
   };
 }
 

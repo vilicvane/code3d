@@ -1,6 +1,22 @@
 import {makeBox, makeCylinder, makeSphere, type Shape3D} from 'replicad';
+import {
+  addVectors,
+  composeTransforms,
+  halfTurnAroundX,
+  identityRigidTransform,
+  invertTransform,
+  origin,
+  quaternionAxisAngle,
+  relativeTransform,
+  rotation,
+  transformsAreEquivalent,
+  translation,
+  type Quaternion,
+  type RigidTransform,
+  type Vec3,
+} from './spatial';
 
-export type Vec3 = readonly [x: number, y: number, z: number];
+export type {Quaternion, Vec3} from './spatial';
 
 export type SourceRef = Readonly<{
   start: number;
@@ -34,8 +50,21 @@ export type ParameterUsage = Readonly<{
 
 export type Transform = Readonly<{
   position: Vec3;
-  rotation: Vec3;
+  quaternion: Quaternion;
   scale: Vec3;
+}>;
+
+export type AnchorKind = 'origin' | 'center' | 'top' | 'bottom' | 'axis';
+
+export type ConstraintSnapshot = Readonly<{
+  id: string;
+  kind: 'on';
+  source: Readonly<{nodeId: string; anchor: AnchorKind}>;
+  target: Readonly<{nodeId: string; anchor: AnchorKind}>;
+  offset: Vec3;
+  offsetFrame: Transform;
+  sourceRefs: readonly SourceRef[];
+  parameters: readonly ParameterUsage[];
 }>;
 
 export type RenderMesh = Readonly<{
@@ -62,9 +91,25 @@ export type ModelSnapshotObject = Readonly<{
   color: string;
   children: readonly ModelSnapshotObject[];
   transform: Transform;
+  constraints: readonly ConstraintSnapshot[];
   sourceRefs: readonly SourceRef[];
   parameters: readonly ParameterUsage[];
   mesh?: RenderMesh;
+}>;
+
+type AnchorReference = Readonly<{
+  model: ModelObject;
+  kind: AnchorKind;
+}>;
+
+type StoredConstraint = Readonly<{
+  id: string;
+  kind: 'on';
+  source: AnchorKind;
+  target: AnchorReference;
+  offset: Vec3;
+  sourceRefs: readonly SourceRef[];
+  parameters: readonly ParameterUsage[];
 }>;
 
 type ModelObjectInit = Readonly<{
@@ -73,24 +118,94 @@ type ModelObjectInit = Readonly<{
   name?: string;
   color?: string;
   children?: readonly ModelObject[];
-  position?: Vec3;
-  rotation?: Vec3;
-  scale?: Vec3;
+  constraints?: readonly StoredConstraint[];
   sourceRefs?: readonly SourceRef[];
   parameters?: readonly ParameterUsage[];
   nodeId?: string;
 }>;
 
-const origin: Vec3 = [0, 0, 0];
-const unitScale: Vec3 = [1, 1, 1];
-const identityTransform: Transform = {
-  position: origin,
-  rotation: origin,
-  scale: unitScale,
+type SolveContext = {
+  poses: Map<ModelObject, RigidTransform>;
+  visiting: Set<ModelObject>;
 };
-let nextNodeId = 1;
 
-export class ModelObject {
+const unitScale: Vec3 = [1, 1, 1];
+let nextNodeId = 1;
+let nextConstraintId = 1;
+const combineModels = Symbol('combineModels');
+
+export interface Anchor {
+  on(target: Anchor): Constraint;
+}
+
+class ModelAnchor implements Anchor {
+  constructor(readonly reference: AnchorReference) {}
+
+  on(target: Anchor): Constraint {
+    return new Constraint(this.reference, anchorReference(target));
+  }
+}
+
+export class Constraint {
+  private readonly sourceRefs: SourceRef[];
+  private readonly parameters: ParameterUsage[];
+
+  constructor(
+    private readonly source: AnchorReference,
+    private readonly target: AnchorReference,
+    private readonly displacement: Vec3 = origin,
+    private readonly constraintId = `constraint-${nextConstraintId++}`,
+    sourceRefs: readonly SourceRef[] = [],
+    parameters: readonly ParameterUsage[] = [],
+  ) {
+    this.sourceRefs = [...sourceRefs];
+    this.parameters = [...parameters];
+  }
+
+  offset(x: number, y: number, z: number): Constraint {
+    assertFiniteVector('offset', [x, y, z]);
+    return new Constraint(
+      this.source,
+      this.target,
+      addVectors(this.displacement, [x, y, z]),
+      this.constraintId,
+      this.sourceRefs,
+      this.parameters,
+    );
+  }
+
+  /** Runtime instrumentation hook. Not part of the authoring API. */
+  attachSource(sourceRef: SourceRef): void {
+    const previous = this.sourceRefs.at(-1);
+    if (previous?.start !== sourceRef.start || previous.end !== sourceRef.end) {
+      this.sourceRefs.push(sourceRef);
+    }
+  }
+
+  /** Runtime instrumentation hook. Not part of the authoring API. */
+  attachParameters(parameters: readonly ParameterUsage[]): void {
+    appendUniqueParameters(this.parameters, parameters);
+  }
+
+  storeFor(model: ModelObject): StoredConstraint {
+    if (this.source.model !== model) {
+      throw new Error(
+        'relate() 返回的 constraint 必须以回调中的模型副本为源。',
+      );
+    }
+    return {
+      id: this.constraintId,
+      kind: 'on',
+      source: this.source.kind,
+      target: this.target,
+      offset: this.displacement,
+      sourceRefs: [...this.sourceRefs],
+      parameters: [...this.parameters],
+    };
+  }
+}
+
+export class ModelObject implements Anchor {
   readonly nodeId: string;
   readonly kind: 'solid' | 'group';
   readonly name: string;
@@ -98,10 +213,8 @@ export class ModelObject {
   readonly children: readonly ModelObject[];
   readonly sourceRefs: SourceRef[];
   readonly parameters: ParameterUsage[];
-  readonly position: Vec3;
-  readonly rotation: Vec3;
-  readonly scale: Vec3;
   private readonly shape?: Shape3D;
+  private constraints: StoredConstraint[];
 
   constructor(init: ModelObjectInit) {
     if (init.kind === 'solid' && !init.shape) {
@@ -113,11 +226,44 @@ export class ModelObject {
     this.name = init.name ?? (init.kind === 'solid' ? 'Solid' : 'Group');
     this.color = init.color ?? '#d6ff45';
     this.children = init.children ?? [];
-    this.position = init.position ?? origin;
-    this.rotation = init.rotation ?? origin;
-    this.scale = init.scale ?? unitScale;
+    this.constraints = [...(init.constraints ?? [])];
     this.sourceRefs = [...(init.sourceRefs ?? [])];
     this.parameters = [...(init.parameters ?? [])];
+  }
+
+  get center(): Anchor {
+    return new ModelAnchor({model: this, kind: 'center'});
+  }
+
+  get top(): Anchor {
+    return new ModelAnchor({model: this, kind: 'top'});
+  }
+
+  get bottom(): Anchor {
+    return new ModelAnchor({model: this, kind: 'bottom'});
+  }
+
+  get axis(): Anchor {
+    return new ModelAnchor({model: this, kind: 'axis'});
+  }
+
+  on(target: Anchor): Constraint {
+    return new Constraint(
+      {model: this, kind: 'origin'},
+      anchorReference(target),
+    );
+  }
+
+  relate(
+    build: (self: ModelObject) => Constraint | readonly Constraint[],
+  ): ModelObject {
+    const related = this.copy();
+    const built = build(related);
+    const constraints = Array.isArray(built) ? built : [built];
+    related.constraints.push(
+      ...constraints.map(constraint => constraint.storeFor(related)),
+    );
+    return related;
   }
 
   named(name: string): ModelObject {
@@ -128,108 +274,26 @@ export class ModelObject {
     return this.copy({color});
   }
 
-  at(x: number, y: number, z: number): ModelObject {
-    return this.move(
-      x - this.position[0],
-      y - this.position[1],
-      z - this.position[2],
-    );
-  }
-
-  move(x: number, y: number, z: number): ModelObject {
-    const nextPosition: Vec3 = [
-      this.position[0] + x,
-      this.position[1] + y,
-      this.position[2] + z,
-    ];
-    if (this.kind === 'group') {
-      return this.copy({
-        children: this.children.map(child => child.move(x, y, z)),
-        position: nextPosition,
-      });
-    }
-    return this.copy({
-      shape: this.requireShape().clone().translate(x, y, z),
-      position: nextPosition,
-    });
-  }
-
-  rotate(x: number, y: number, z: number): ModelObject {
-    const nextRotation: Vec3 = [
-      this.rotation[0] + x,
-      this.rotation[1] + y,
-      this.rotation[2] + z,
-    ];
-    if (this.kind === 'group') {
-      return this.copy({
-        children: this.children.map(child =>
-          child.rotateAround(this.position, x, y, z),
-        ),
-        rotation: nextRotation,
-      });
-    }
-    return this.copy({
-      shape: rotateShape(this.requireShape(), this.position, x, y, z),
-      rotation: nextRotation,
-    });
-  }
-
   scaled(factor: number): ModelObject {
     assertPositive('scale', factor);
-    const nextScale: Vec3 = [
-      this.scale[0] * factor,
-      this.scale[1] * factor,
-      this.scale[2] * factor,
-    ];
-    if (this.kind === 'group') {
-      return this.copy({
-        children: this.children.map(child =>
-          child.scaleAround(this.position, factor),
-        ),
-        scale: nextScale,
-      });
-    }
     return this.copy({
-      shape: this.requireShape().clone().scale(factor, toPoint(this.position)),
-      scale: nextScale,
+      shape: this.requireShape().clone().scale(factor, toPoint(origin)),
     });
-  }
-
-  cut(tool: ModelObject): ModelObject {
-    return this.booleanResult('cut', tool);
-  }
-
-  fuse(other: ModelObject): ModelObject {
-    return this.booleanResult('fuse', other);
-  }
-
-  intersect(other: ModelObject): ModelObject {
-    return this.booleanResult('intersect', other);
   }
 
   fillet(radius: number): ModelObject {
     assertPositive('radius', radius);
-    return this.copy({
-      shape: this.requireShape().fillet(radius),
-      position: origin,
-      rotation: origin,
-      scale: unitScale,
-    });
+    return this.copy({shape: this.requireShape().fillet(radius)});
   }
 
   chamfer(distance: number): ModelObject {
     assertPositive('distance', distance);
-    return this.copy({
-      shape: this.requireShape().chamfer(distance),
-      position: origin,
-      rotation: origin,
-      scale: unitScale,
-    });
+    return this.copy({shape: this.requireShape().chamfer(distance)});
   }
 
   withChildren(children: readonly ModelObject[]): ModelObject {
     if (this.kind !== 'group') {
-      throw new Error('只有 group 或 model 可以包含子对象。');
+      throw new Error('只有 group 可以包含子对象。');
     }
     assertChildren(children);
     return this.copy({children});
@@ -238,44 +302,45 @@ export class ModelObject {
   /** Runtime instrumentation hook. Not part of the authoring API. */
   attachSource(sourceRef: SourceRef): void {
     const previous = this.sourceRefs.at(-1);
-    if (previous?.start === sourceRef.start && previous.end === sourceRef.end) {
-      return;
+    if (previous?.start !== sourceRef.start || previous.end !== sourceRef.end) {
+      this.sourceRefs.push(sourceRef);
     }
-    this.sourceRefs.push(sourceRef);
   }
 
   /** Runtime instrumentation hook. Not part of the authoring API. */
   attachParameters(parameters: readonly ParameterUsage[]): void {
-    for (const parameter of parameters) {
-      const duplicate = this.parameters.some(
-        candidate =>
-          candidate.operation === parameter.operation &&
-          candidate.argument === parameter.argument &&
-          candidate.operationRef.start === parameter.operationRef.start &&
-          candidate.operationRef.end === parameter.operationRef.end &&
-          candidate.expressionRef.start === parameter.expressionRef.start &&
-          candidate.expressionRef.end === parameter.expressionRef.end &&
-          candidate.target.id === parameter.target.id,
-      );
-      if (!duplicate) {
-        this.parameters.push(parameter);
-      }
-    }
+    appendUniqueParameters(this.parameters, parameters);
   }
 
   toSnapshot(
     meshCache: Map<Shape3D, RenderMesh> = new Map(),
+    solveContext: SolveContext = createSolveContext(),
   ): ModelSnapshotObject {
+    const pose = this.solvePose(solveContext);
+    const constraints = this.constraints.map(constraint =>
+      this.constraintSnapshot(constraint, solveContext),
+    );
+    const parameters = uniqueParameters([
+      ...this.parameters,
+      ...this.constraints.flatMap(constraint => constraint.parameters),
+    ]);
+    const common = {
+      nodeId: this.nodeId,
+      kind: this.kind,
+      name: this.name,
+      color: this.color,
+      transform: toTransform(pose),
+      constraints,
+      sourceRefs: [...this.sourceRefs],
+      parameters,
+    } as const;
+
     if (this.kind === 'group') {
       return {
-        nodeId: this.nodeId,
-        kind: this.kind,
-        name: this.name,
-        color: this.color,
-        children: this.children.map(child => child.toSnapshot(meshCache)),
-        transform: identityTransform,
-        sourceRefs: [...this.sourceRefs],
-        parameters: [...this.parameters],
+        ...common,
+        children: this.children.map(child =>
+          child.toSnapshot(meshCache, solveContext),
+        ),
       };
     }
 
@@ -294,17 +359,7 @@ export class ModelObject {
       };
       meshCache.set(shape, mesh);
     }
-    return {
-      nodeId: this.nodeId,
-      kind: this.kind,
-      name: this.name,
-      color: this.color,
-      children: [],
-      transform: identityTransform,
-      sourceRefs: [...this.sourceRefs],
-      parameters: [...this.parameters],
-      mesh,
-    };
+    return {...common, children: [], mesh};
   }
 
   disposeShape(disposed: Set<Shape3D>): void {
@@ -315,54 +370,141 @@ export class ModelObject {
     this.children.forEach(child => child.disposeShape(disposed));
   }
 
-  private booleanResult(
+  [combineModels](
     operation: 'cut' | 'fuse' | 'intersect',
-    other: ModelObject,
+    others: readonly ModelObject[],
   ): ModelObject {
-    const left = this.requireShape();
-    const right = other.requireShape();
-    const shape = left[operation](right);
-    return new ModelObject({
-      kind: 'solid',
-      shape,
-      name: this.name,
-      color: this.color,
-      sourceRefs: [...this.sourceRefs, ...other.sourceRefs],
-      parameters: [...this.parameters, ...other.parameters],
-    });
-  }
+    const solveContext = createSolveContext();
+    const targetPose = this.solvePose(solveContext);
+    let result: Shape3D = this.requireShape().clone();
+    let transferred = false;
+    try {
+      for (const other of others) {
+        const operand = shapeInFrame(
+          other.requireShape(),
+          other.solvePose(solveContext),
+          targetPose,
+        );
+        const previous = result;
+        try {
+          result = previous[operation](operand);
+        } finally {
+          operand.delete();
+        }
+        previous.delete();
+      }
 
-  private rotateAround(
-    center: Vec3,
-    x: number,
-    y: number,
-    z: number,
-  ): ModelObject {
-    if (this.kind === 'group') {
-      return this.copy({
-        children: this.children.map(child =>
-          child.rotateAround(center, x, y, z),
+      const combined = new ModelObject({
+        kind: 'solid',
+        shape: result,
+        name: this.name,
+        color: this.color,
+        constraints: this.constraints,
+        sourceRefs: [this, ...others].flatMap(model => model.sourceRefs),
+        parameters: uniqueParameters(
+          [this, ...others].flatMap(model => model.allParameters()),
         ),
-        position: rotatePoint(this.position, center, x, y, z),
       });
+      transferred = true;
+      return combined;
+    } finally {
+      if (!transferred) {
+        result.delete();
+      }
     }
-    return this.copy({
-      shape: rotateShape(this.requireShape(), center, x, y, z),
-      position: rotatePoint(this.position, center, x, y, z),
-    });
   }
 
-  private scaleAround(center: Vec3, factor: number): ModelObject {
-    if (this.kind === 'group') {
-      return this.copy({
-        children: this.children.map(child => child.scaleAround(center, factor)),
-        position: scalePoint(this.position, center, factor),
-      });
+  private allParameters(): ParameterUsage[] {
+    return uniqueParameters([
+      ...this.parameters,
+      ...this.constraints.flatMap(constraint => constraint.parameters),
+    ]);
+  }
+
+  private solvePose(context: SolveContext): RigidTransform {
+    const cached = context.poses.get(this);
+    if (cached) {
+      return cached;
     }
-    return this.copy({
-      shape: this.requireShape().clone().scale(factor, toPoint(center)),
-      position: scalePoint(this.position, center, factor),
-    });
+    if (context.visiting.has(this)) {
+      throw new Error(`模型 ${this.name} 的关系形成了循环。`);
+    }
+
+    context.visiting.add(this);
+    let pose: RigidTransform | undefined;
+    for (const constraint of this.constraints) {
+      const candidate = this.solveConstraint(constraint, context);
+      if (pose && !transformsAreEquivalent(pose, candidate)) {
+        throw new Error(`模型 ${this.name} 的 constraints 没有一致的唯一解。`);
+      }
+      pose = candidate;
+    }
+    pose ??= identityRigidTransform;
+    context.visiting.delete(this);
+    context.poses.set(this, pose);
+    return pose;
+  }
+
+  private solveConstraint(
+    constraint: StoredConstraint,
+    context: SolveContext,
+  ): RigidTransform {
+    const targetPose = constraint.target.model.solvePose(context);
+    return composeAll(
+      targetPose,
+      constraint.target.model.anchorTransform(constraint.target.kind),
+      translation(constraint.offset),
+      rotation(halfTurnAroundX),
+      invertTransform(this.anchorTransform(constraint.source)),
+    );
+  }
+
+  private constraintSnapshot(
+    constraint: StoredConstraint,
+    context: SolveContext,
+  ): ConstraintSnapshot {
+    const targetPose = constraint.target.model.solvePose(context);
+    const offsetFrame = composeTransforms(
+      targetPose,
+      constraint.target.model.anchorTransform(constraint.target.kind),
+    );
+    return {
+      id: constraint.id,
+      kind: constraint.kind,
+      source: {nodeId: this.nodeId, anchor: constraint.source},
+      target: {
+        nodeId: constraint.target.model.nodeId,
+        anchor: constraint.target.kind,
+      },
+      offset: constraint.offset,
+      offsetFrame: toTransform(offsetFrame),
+      sourceRefs: [...constraint.sourceRefs],
+      parameters: [...constraint.parameters],
+    };
+  }
+
+  private anchorTransform(kind: AnchorKind): RigidTransform {
+    if (kind === 'origin') {
+      return identityRigidTransform;
+    }
+    const boundingBox = this.requireShape().boundingBox;
+    const [[minX, minY, minZ], [maxX, maxY, maxZ]] = boundingBox.bounds;
+    boundingBox.delete();
+    const center: Vec3 = [
+      (minX + maxX) / 2,
+      (minY + maxY) / 2,
+      (minZ + maxZ) / 2,
+    ];
+    if (kind === 'center' || kind === 'axis') {
+      return translation(center);
+    }
+    if (kind === 'top') {
+      return translation([center[0], maxY, center[2]]);
+    }
+    return composeTransforms(
+      translation([center[0], minY, center[2]]),
+      rotation(halfTurnAroundX),
+    );
   }
 
   private requireShape(): Shape3D {
@@ -372,16 +514,14 @@ export class ModelObject {
     return this.shape;
   }
 
-  private copy(overrides: Partial<ModelObjectInit>): ModelObject {
+  private copy(overrides: Partial<ModelObjectInit> = {}): ModelObject {
     return new ModelObject({
       kind: this.kind,
       shape: this.shape,
       name: this.name,
       color: this.color,
       children: this.children,
-      position: this.position,
-      rotation: this.rotation,
-      scale: this.scale,
+      constraints: this.constraints,
       sourceRefs: this.sourceRefs,
       parameters: this.parameters,
       ...overrides,
@@ -427,23 +567,36 @@ export function group(
   name = 'Group',
 ): ModelObject {
   assertChildren(children);
-  return new ModelObject({
-    kind: 'group',
-    name,
-    children,
-  });
+  return new ModelObject({kind: 'group', name, children});
 }
 
-export function model(
-  name: string,
-  children: ModelObject | readonly ModelObject[],
+export function union(
+  first: ModelObject,
+  ...others: readonly ModelObject[]
 ): ModelObject {
-  const normalizedChildren = Array.isArray(children) ? children : [children];
-  return group(normalizedChildren, name);
+  return first[combineModels]('fuse', others);
+}
+
+export function cut(
+  stock: ModelObject,
+  ...tools: readonly ModelObject[]
+): ModelObject {
+  return stock[combineModels]('cut', tools);
+}
+
+export function intersect(
+  first: ModelObject,
+  ...others: readonly ModelObject[]
+): ModelObject {
+  return first[combineModels]('intersect', others);
 }
 
 export function isModelObject(value: unknown): value is ModelObject {
   return value instanceof ModelObject;
+}
+
+export function isConstraint(value: unknown): value is Constraint {
+  return value instanceof Constraint;
 }
 
 export function disposeModelObjects(objects: Iterable<ModelObject>): void {
@@ -459,8 +612,44 @@ export const authoringApi = Object.freeze({
   cylinder,
   sphere,
   group,
-  model,
+  union,
+  cut,
+  intersect,
 });
+
+function anchorReference(anchor: Anchor): AnchorReference {
+  if (anchor instanceof ModelObject) {
+    return {model: anchor, kind: 'origin'};
+  }
+  return (anchor as ModelAnchor).reference;
+}
+
+function createSolveContext(): SolveContext {
+  return {poses: new Map(), visiting: new Set()};
+}
+
+function composeAll(...transforms: readonly RigidTransform[]): RigidTransform {
+  return transforms.reduce(composeTransforms, identityRigidTransform);
+}
+
+function toTransform(transform: RigidTransform): Transform {
+  return {...transform, scale: unitScale};
+}
+
+function shapeInFrame(
+  source: Shape3D,
+  sourceFrame: RigidTransform,
+  targetFrame: RigidTransform,
+): Shape3D {
+  const transform = relativeTransform(sourceFrame, targetFrame);
+  let shape = source.clone();
+  const {axis, angleDegrees} = quaternionAxisAngle(transform.quaternion);
+  if (Math.abs(angleDegrees) > 1e-9) {
+    shape = shape.rotate(angleDegrees, toPoint(origin), toPoint(axis));
+  }
+  shape = shape.translate(toPoint(transform.position));
+  return shape;
+}
 
 function assertChildren(children: readonly ModelObject[]): void {
   for (const child of children) {
@@ -476,77 +665,78 @@ function assertPositive(label: string, value: number): void {
   }
 }
 
-function rotateShape(
-  source: Shape3D,
-  center: Vec3,
-  x: number,
-  y: number,
-  z: number,
-): Shape3D {
-  let shape = source.clone();
-  if (x) shape = shape.rotate(x, toPoint(center), [1, 0, 0]);
-  if (y) shape = shape.rotate(y, toPoint(center), [0, 1, 0]);
-  if (z) shape = shape.rotate(z, toPoint(center), [0, 0, 1]);
-  return shape;
+function assertFiniteVector(label: string, value: Vec3): void {
+  if (value.some(component => !Number.isFinite(component))) {
+    throw new Error(`${label} 必须使用有限数值。`);
+  }
 }
 
 function toPoint(vector: Vec3): [number, number, number] {
   return [vector[0], vector[1], vector[2]];
 }
 
-function rotatePoint(
-  point: Vec3,
-  center: Vec3,
-  x: number,
-  y: number,
-  z: number,
-): Vec3 {
-  let [px, py, pz] = [
-    point[0] - center[0],
-    point[1] - center[1],
-    point[2] - center[2],
-  ];
-  for (const [angle, axis] of [
-    [x, 'x'],
-    [y, 'y'],
-    [z, 'z'],
-  ] as const) {
-    if (!angle) continue;
-    const radians = (angle * Math.PI) / 180;
-    const cos = Math.cos(radians);
-    const sin = Math.sin(radians);
-    if (axis === 'x') [py, pz] = [py * cos - pz * sin, py * sin + pz * cos];
-    if (axis === 'y') [px, pz] = [px * cos + pz * sin, -px * sin + pz * cos];
-    if (axis === 'z') [px, py] = [px * cos - py * sin, px * sin + py * cos];
+function appendUniqueParameters(
+  destination: ParameterUsage[],
+  parameters: readonly ParameterUsage[],
+): void {
+  for (const parameter of parameters) {
+    if (!hasParameter(destination, parameter)) {
+      destination.push(parameter);
+    }
   }
-  return [px + center[0], py + center[1], pz + center[2]];
 }
 
-function scalePoint(point: Vec3, center: Vec3, factor: number): Vec3 {
-  return [
-    center[0] + (point[0] - center[0]) * factor,
-    center[1] + (point[1] - center[1]) * factor,
-    center[2] + (point[2] - center[2]) * factor,
-  ];
+function uniqueParameters(
+  parameters: readonly ParameterUsage[],
+): ParameterUsage[] {
+  const unique: ParameterUsage[] = [];
+  appendUniqueParameters(unique, parameters);
+  return unique;
+}
+
+function hasParameter(
+  parameters: readonly ParameterUsage[],
+  parameter: ParameterUsage,
+): boolean {
+  return parameters.some(
+    candidate =>
+      candidate.operation === parameter.operation &&
+      candidate.argument === parameter.argument &&
+      candidate.operationRef.start === parameter.operationRef.start &&
+      candidate.operationRef.end === parameter.operationRef.end &&
+      candidate.expressionRef.start === parameter.expressionRef.start &&
+      candidate.expressionRef.end === parameter.expressionRef.end &&
+      candidate.target.id === parameter.target.id,
+  );
 }
 
 export const authoringTypes = `
 declare module "code3d" {
   export type Vec3 = readonly [x: number, y: number, z: number];
 
-  export class ModelObject {
+  export interface Anchor {
+    on(target: Anchor): Constraint;
+  }
+
+  export class Constraint {
+    private constructor();
+    offset(x: number, y: number, z: number): Constraint;
+  }
+
+  export class ModelObject implements Anchor {
+    private constructor();
     readonly nodeId: string;
     readonly name: string;
     readonly kind: "solid" | "group";
+    readonly center: Anchor;
+    readonly top: Anchor;
+    readonly bottom: Anchor;
+    readonly axis: Anchor;
+    on(target: Anchor): Constraint;
+    relate(build: (self: ModelObject) => Constraint | readonly Constraint[]): ModelObject;
     named(name: string): ModelObject;
     paint(color: string): ModelObject;
-    at(x: number, y: number, z: number): ModelObject;
-    move(x: number, y: number, z: number): ModelObject;
-    rotate(x: number, y: number, z: number): ModelObject;
     scaled(factor: number): ModelObject;
-    cut(tool: ModelObject): ModelObject;
-    fuse(other: ModelObject): ModelObject;
-    intersect(other: ModelObject): ModelObject;
     fillet(radius: number): ModelObject;
     chamfer(distance: number): ModelObject;
     withChildren(children: readonly ModelObject[]): ModelObject;
@@ -556,6 +746,8 @@ declare module "code3d" {
   export function cylinder(radius: number, height: number): ModelObject;
   export function sphere(radius: number): ModelObject;
   export function group(children: readonly ModelObject[], name?: string): ModelObject;
-  export function model(name: string, children: ModelObject | readonly ModelObject[]): ModelObject;
+  export function union(first: ModelObject, ...others: readonly ModelObject[]): ModelObject;
+  export function cut(stock: ModelObject, ...tools: readonly ModelObject[]): ModelObject;
+  export function intersect(first: ModelObject, ...others: readonly ModelObject[]): ModelObject;
 }
 `;
