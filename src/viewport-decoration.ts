@@ -25,15 +25,25 @@ export type ViewportMeshDecoration = Readonly<{
   appearance: ViewportDecorationAppearance;
 }>;
 
-export type ViewportAnchorDecoration = Readonly<{
+type ViewportAnchorDecorationBase = Readonly<{
   kind: 'anchor';
   id: string;
   nodeId: string;
-  elementKind: ElementKind;
   transform: Transform;
-  size: number;
+  markerSize: number;
   appearance: ViewportDecorationAppearance;
 }>;
+
+export type ViewportAnchorDecoration =
+  | (ViewportAnchorDecorationBase &
+      Readonly<{
+        elementKind: 'line';
+        span: Readonly<{negative: number; positive: number}>;
+      }>)
+  | (ViewportAnchorDecorationBase &
+      Readonly<{
+        elementKind: Exclude<ElementKind, 'line'>;
+      }>);
 
 export type ViewportSurfaceDecoration = Readonly<{
   kind: 'surface';

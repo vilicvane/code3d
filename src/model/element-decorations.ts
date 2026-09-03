@@ -8,6 +8,7 @@ import type {
 } from './runtime';
 import type {
   SourceDecorationProvider,
+  ViewportAnchorDecoration,
   ViewportDecoration,
 } from '../viewport-decoration';
 
@@ -16,6 +17,14 @@ const elementAppearance = {
   opacity: 0.92,
   emissive: '#8daa16',
   emissiveIntensity: 0.8,
+  depthTest: false,
+} as const;
+
+const axisAppearance = {
+  color: '#ffad4d',
+  opacity: 0.98,
+  emissive: '#a94300',
+  emissiveIntensity: 1,
   depthTest: false,
 } as const;
 
@@ -50,10 +59,32 @@ export function namedElementDecorations(
   node: ModelSnapshotObject,
   element: ElementSnapshot,
 ): readonly ViewportDecoration[] {
+  const markerSize = elementDisplaySize(node);
   const surface =
     element.kind === 'face' && node.mesh
       ? faceSurfaceAt(node.mesh, element.transform)
       : undefined;
+  const anchorBase = {
+    kind: 'anchor' as const,
+    id: `${node.nodeId}:${element.name}`,
+    nodeId: node.nodeId,
+    transform: element.transform,
+    markerSize,
+  };
+  const anchor: ViewportAnchorDecoration =
+    element.kind === 'line'
+      ? {
+          ...anchorBase,
+          elementKind: element.kind,
+          span: axisDisplaySpan(node, element.transform, markerSize),
+          appearance: axisAppearance,
+        }
+      : {
+          ...anchorBase,
+          elementKind: element.kind,
+          appearance:
+            element.kind === 'face' ? faceAppearance : elementAppearance,
+        };
   return [
     ...(surface
       ? [
@@ -66,15 +97,7 @@ export function namedElementDecorations(
           },
         ]
       : []),
-    {
-      kind: 'anchor',
-      id: `${node.nodeId}:${element.name}`,
-      nodeId: node.nodeId,
-      elementKind: element.kind,
-      transform: element.transform,
-      size: elementDisplaySize(node),
-      appearance: element.kind === 'face' ? faceAppearance : elementAppearance,
-    },
+    anchor,
   ];
 }
 
@@ -198,6 +221,37 @@ function elementDisplaySize(node: ModelSnapshotObject): number {
     max[2] - min[2],
   );
   return Math.min(8, Math.max(0.8, diagonal * 0.14));
+}
+
+function axisDisplaySpan(
+  node: ModelSnapshotObject,
+  transform: Transform,
+  markerSize: number,
+): Readonly<{negative: number; positive: number}> {
+  const mesh = node.mesh;
+  if (!mesh || mesh.vertices.length < 3) {
+    return {negative: markerSize, positive: markerSize};
+  }
+  const direction = rotateVector([0, 1, 0], transform.quaternion);
+  let minimum = Number.POSITIVE_INFINITY;
+  let maximum = Number.NEGATIVE_INFINITY;
+  for (let index = 0; index < mesh.vertices.length; index += 3) {
+    const projection = dot(
+      [
+        mesh.vertices[index] - transform.position[0],
+        mesh.vertices[index + 1] - transform.position[1],
+        mesh.vertices[index + 2] - transform.position[2],
+      ],
+      direction,
+    );
+    minimum = Math.min(minimum, projection);
+    maximum = Math.max(maximum, projection);
+  }
+  const overhang = markerSize * 1.5;
+  return {
+    negative: Math.max(0, -minimum) + overhang,
+    positive: Math.max(0, maximum) + overhang,
+  };
 }
 
 function meshBounds(mesh: RenderMesh): Readonly<{min: Vec3; max: Vec3}> {

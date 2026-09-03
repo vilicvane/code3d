@@ -70,6 +70,11 @@ type SelectionClick = Readonly<{
   time: number;
 }>;
 
+type DecorationInstance = Readonly<{
+  object: THREE.Object3D;
+  occurrenceKey?: string;
+}>;
+
 export type ModelViewportOptions = Readonly<{
   onSelect: (occurrence: Occurrence) => void;
   onDrillDown: (node: ModelSnapshotObject) => void;
@@ -92,6 +97,7 @@ export class ModelViewport {
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointer = new THREE.Vector2();
   private readonly root = new THREE.Group();
+  private readonly decorationRoot = new THREE.Group();
   private readonly occurrences = new Map<string, Occurrence>();
   private readonly parameterPreviews = new Map<string, number>();
   private readonly committedParameterPreviews = new Map<string, number>();
@@ -100,7 +106,7 @@ export class ModelViewport {
     string,
     Vec3
   >();
-  private readonly decorationLayers = new Map<string, THREE.Object3D[]>();
+  private readonly decorationLayers = new Map<string, DecorationInstance[]>();
   private readonly positionGizmo: PositionGizmo;
   private readonly onSelect: ModelViewportOptions['onSelect'];
   private readonly onDrillDown: ModelViewportOptions['onDrillDown'];
@@ -148,7 +154,7 @@ export class ModelViewport {
 
     this.scene.background = new THREE.Color('#171815');
     this.scene.fog = new THREE.Fog('#171815', 180, 430);
-    this.scene.add(this.root);
+    this.scene.add(this.root, this.decorationRoot);
 
     const hemi = new THREE.HemisphereLight('#f6f4df', '#333b40', 1.8);
     this.scene.add(hemi);
@@ -551,11 +557,12 @@ export class ModelViewport {
       return;
     }
     const occurrenceKeys = scope ? new Set(scope.occurrenceKeys) : undefined;
-    const objects = decorations.flatMap(decoration => {
+    this.root.updateMatrixWorld(true);
+    const instances = decorations.flatMap<DecorationInstance>(decoration => {
       if (decoration.kind === 'mesh') {
         const object = createMeshDecorationObject(decoration);
-        this.root.add(object);
-        return [object];
+        this.decorationRoot.add(object);
+        return [{object}];
       }
       return [...this.occurrences.values()]
         .filter(
@@ -564,23 +571,28 @@ export class ModelViewport {
             (!occurrenceKeys || occurrenceKeys.has(occurrence.key)),
         )
         .map(occurrence => {
-          const object =
+          const decorationObject =
             decoration.kind === 'surface'
               ? createSurfaceDecorationObject(decoration)
               : createAnchorDecorationObject(decoration);
-          occurrence.object.add(object);
-          return object;
+          const object = new THREE.Group();
+          object.matrixAutoUpdate = false;
+          object.add(decorationObject);
+          this.decorationRoot.add(object);
+          const instance = {object, occurrenceKey: occurrence.key};
+          this.updateDecorationTransform(instance);
+          return instance;
         });
     });
-    if (objects.length > 0) this.decorationLayers.set(owner, objects);
+    if (instances.length > 0) this.decorationLayers.set(owner, instances);
   }
 
   clearDecorations(owner: string): void {
-    const objects = this.decorationLayers.get(owner);
-    if (!objects) {
+    const instances = this.decorationLayers.get(owner);
+    if (!instances) {
       return;
     }
-    objects.forEach(object => {
+    instances.forEach(({object}) => {
       object.removeFromParent();
       disposeObject(object);
     });
@@ -867,6 +879,7 @@ export class ModelViewport {
   private resetRenderedView(): void {
     this.positionGizmo.detach();
     this.clearImpactHelpers();
+    this.clearAllDecorations();
     this.disposeRoot();
     this.occurrences.clear();
     this.rebuildSelectionHelper();
@@ -877,8 +890,8 @@ export class ModelViewport {
     this.highlightedTargetId = undefined;
     this.highlightedOccurrenceKeys.clear();
     this.selectionClick = undefined;
-    this.decorationLayers.clear();
     this.root.clear();
+    this.decorationRoot.clear();
   }
 
   private selectKey(key: string, notify: boolean): void {
@@ -975,6 +988,7 @@ export class ModelViewport {
       }
     }
     this.root.updateMatrixWorld(true);
+    this.updateDecorationTransforms();
     this.selectionHelper?.update();
     this.impactHelpers.forEach(helper => helper.update());
     this.positionGizmo.updateAnchor();
@@ -1255,6 +1269,26 @@ export class ModelViewport {
       helper.material.dispose();
     }
     this.impactHelpers.length = 0;
+  }
+
+  private updateDecorationTransforms(): void {
+    for (const instances of this.decorationLayers.values()) {
+      instances.forEach(instance => this.updateDecorationTransform(instance));
+    }
+  }
+
+  private updateDecorationTransform(instance: DecorationInstance): void {
+    if (!instance.occurrenceKey) return;
+    const occurrence = this.occurrences.get(instance.occurrenceKey);
+    if (!occurrence) return;
+    instance.object.matrix.copy(occurrence.object.matrixWorld);
+    instance.object.matrixWorldNeedsUpdate = true;
+  }
+
+  private clearAllDecorations(): void {
+    for (const owner of [...this.decorationLayers.keys()]) {
+      this.clearDecorations(owner);
+    }
   }
 
   private disposeRoot(): void {
@@ -1599,7 +1633,7 @@ function createDecoratedMesh(
 function createAnchorDecorationObject(
   decoration: Extract<ViewportDecoration, {kind: 'anchor'}>,
 ): THREE.Object3D {
-  const {appearance, size} = decoration;
+  const {appearance, markerSize} = decoration;
   const color = new THREE.Color(appearance.color);
   const container = new THREE.Group();
   container.name = decoration.id;
@@ -1609,29 +1643,22 @@ function createAnchorDecorationObject(
   if (decoration.elementKind === 'point') {
     container.add(
       new THREE.Mesh(
-        new THREE.SphereGeometry(size * 0.14, 20, 14),
+        new THREE.SphereGeometry(markerSize * 0.14, 20, 14),
         anchorSurfaceMaterial(appearance),
       ),
-      anchorCross(size * 0.38, appearance),
+      anchorCross(markerSize * 0.38, appearance),
     );
   } else if (decoration.elementKind === 'line') {
-    container.add(anchorLine([0, -size, 0], [0, size, 0], appearance));
+    container.add(anchorAxis(decoration.span, markerSize, color));
   } else if (decoration.elementKind === 'face') {
     container.add(
-      new THREE.ArrowHelper(
-        new THREE.Vector3(0, 1, 0),
-        new THREE.Vector3(),
-        size,
-        color.getHex(),
-        size * 0.28,
-        size * 0.16,
-      ),
+      anchorArrow(new THREE.Vector3(0, 1, 0), markerSize, markerSize, color),
     );
   } else {
     container.add(
-      anchorLine([0, 0, 0], [size, 0, 0], appearance),
-      anchorLine([0, 0, 0], [0, size, 0], appearance),
-      anchorLine([0, 0, 0], [0, 0, size], appearance),
+      anchorLine([0, 0, 0], [markerSize, 0, 0], appearance),
+      anchorLine([0, 0, 0], [0, markerSize, 0], appearance),
+      anchorLine([0, 0, 0], [0, 0, markerSize], appearance),
     );
   }
   container.traverse(object => {
@@ -1647,6 +1674,35 @@ function createAnchorDecorationObject(
     });
   });
   return container;
+}
+
+function anchorAxis(
+  span: Readonly<{negative: number; positive: number}>,
+  markerSize: number,
+  color: THREE.Color,
+): THREE.Object3D {
+  const axis = new THREE.Group();
+  axis.add(
+    anchorArrow(new THREE.Vector3(0, 1, 0), span.positive, markerSize, color),
+    anchorArrow(new THREE.Vector3(0, -1, 0), span.negative, markerSize, color),
+  );
+  return axis;
+}
+
+function anchorArrow(
+  direction: THREE.Vector3,
+  length: number,
+  size: number,
+  color: THREE.Color,
+): THREE.ArrowHelper {
+  return new THREE.ArrowHelper(
+    direction,
+    new THREE.Vector3(),
+    length,
+    color.getHex(),
+    size * 0.28,
+    size * 0.16,
+  );
 }
 
 function anchorCross(

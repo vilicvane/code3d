@@ -1336,12 +1336,28 @@ kbd {
 }
 
 .element-kind-glyph[data-kind='line']::before {
-  top: 5px;
+  top: 2px;
   left: 0;
   width: 11px;
-  height: 1px;
+  height: 7px;
   background: currentColor;
+  clip-path: polygon(
+    0 50%,
+    24% 0,
+    24% 35%,
+    76% 35%,
+    76% 0,
+    100% 50%,
+    76% 100%,
+    76% 65%,
+    24% 65%,
+    24% 100%
+  );
   transform: rotate(-35deg);
+}
+
+.element-kind-glyph[data-kind='line'] {
+  color: #ffad4d;
 }
 
 .element-kind-glyph[data-kind='face']::before {
