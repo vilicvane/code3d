@@ -223,6 +223,7 @@ export class ModelViewport {
   private readonly parameterPreviews = new Map<string, number>();
   private readonly committedParameterPreviews = new Map<string, number>();
   private readonly occurrenceTranslationPreviews = new Map<string, Vec3>();
+  private hasFramedView = false;
   private readonly committedOccurrenceTranslationPreviews = new Map<
     string,
     Vec3
@@ -802,6 +803,16 @@ export class ModelViewport {
   }
 
   fit(target: THREE.Object3D = this.root): void {
+    this.frame(target, true);
+    this.hasFramedView = true;
+  }
+
+  private frameChangedView(target: THREE.Object3D = this.root): void {
+    this.frame(target, !this.hasFramedView);
+    this.hasFramedView = true;
+  }
+
+  private frame(target: THREE.Object3D, allowZoomIn: boolean): void {
     const box = new THREE.Box3().setFromObject(target);
     if (box.isEmpty()) {
       return;
@@ -812,7 +823,13 @@ export class ModelViewport {
       .clone()
       .sub(this.controls.target)
       .normalize();
-    const distance = Math.max(sphere.radius * 2.8, 24);
+    const fittedDistance = Math.max(sphere.radius * 2.8, 24);
+    const currentDistance = this.camera.position.distanceTo(
+      this.controls.target,
+    );
+    const distance = allowZoomIn
+      ? fittedDistance
+      : Math.max(fittedDistance, currentDistance);
     this.controls.target.copy(sphere.center);
     this.camera.position
       .copy(sphere.center)
@@ -937,7 +954,7 @@ export class ModelViewport {
       this.selectKey(nextKey, false);
     }
     if (fitCamera) {
-      this.fit();
+      this.frameChangedView();
     }
   }
 
@@ -965,7 +982,7 @@ export class ModelViewport {
       false,
     );
     if (fitCamera) {
-      this.fit();
+      this.frameChangedView();
     }
   }
 
