@@ -2,6 +2,18 @@ import * as monaco from 'monaco-editor/editor';
 
 type SuggestionItem = Readonly<{
   completion: monaco.languages.CompletionItem;
+  position: monaco.IPosition;
+  editStart: monaco.IPosition;
+  editInsertEnd: monaco.IPosition;
+  editReplaceEnd: monaco.IPosition;
+}>;
+
+export type FocusedSuggestion = Readonly<{
+  completion: monaco.languages.CompletionItem;
+  requestedPosition: monaco.IPosition;
+  editStart: monaco.IPosition;
+  editInsertEnd: monaco.IPosition;
+  editReplaceEnd: monaco.IPosition;
 }>;
 
 type SuggestionWidget = Readonly<{
@@ -25,13 +37,19 @@ type SuggestionController = Readonly<{
  */
 export function observeSuggestionFocus(
   editor: monaco.editor.IStandaloneCodeEditor,
-  listener: (item: monaco.languages.CompletionItem | undefined) => void,
+  listener: (item: FocusedSuggestion | undefined) => void,
 ): monaco.IDisposable {
   const controller = editor.getContribution(
     'editor.contrib.suggestController',
   ) as unknown as SuggestionController;
   const focus = controller.widget.value.onDidFocus(({item}) =>
-    listener(item.completion),
+    listener({
+      completion: item.completion,
+      requestedPosition: item.position,
+      editStart: item.editStart,
+      editInsertEnd: item.editInsertEnd,
+      editReplaceEnd: item.editReplaceEnd,
+    }),
   );
   const cancel = controller.model.onDidCancel(({retrigger}) => {
     if (!retrigger) listener(undefined);

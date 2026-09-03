@@ -73,7 +73,9 @@ it does not silently reorder the active milestones. Closed requests move to
 - The editor caret resolves the exact source occurrence being inspected. A
   value site renders that value alone; an operation-input site may also render
   its peer inputs as dimmed context that can switch input focus. Mouse hover
-  over source code does not change the viewport.
+  over source code does not change the viewport. In a layered source scene,
+  focus solids are slightly translucent while context remains strongly dimmed,
+  so overlaps stay legible; a single focus solid remains opaque.
 - A constraint source site renders both relation participants and takes dimmed
   context from the concrete downstream composition that consumes the
   constrained value. The constrained value remains the relation-edit scope for
@@ -81,9 +83,13 @@ it does not silently reorder the active milestones. Closed requests move to
 - A caret on a named-element property keeps its surrounding relation visible,
   promotes the owning model, and highlights the typed point, line, face, or
   frame. Face elements highlight matching B-Rep face groups and their real
-  boundaries rather than drawing a proxy plane. Monaco's native TypeScript
-  completion list drives the same transient preview for its focused member
-  without duplicating TypeScript completions.
+  boundaries rather than drawing a proxy plane. A focused item in Monaco's
+  native completion list is applied to an in-memory project snapshot and that
+  completed snapshot drives a transient compiled viewport; named elements use
+  the current module for immediate feedback while the speculative compile is
+  pending. A prominent viewport-local rendering status covers that pending
+  interval. The actual source, caret, history, diagnostics, and tools remain
+  bound to the incomplete editor revision.
 - Constraint arrays retain one source/tool scope per member. Selecting a member
   uses only its frame and parameters; the array container does not synthesize a
   combined gizmo from potentially different constraints.
@@ -197,7 +203,11 @@ multiple consumers as separate scopes, and enables relation tools directly.
 Named-element property occurrences now refine that scope: the owning model and
 typed anchor are highlighted while all relation participants remain visible.
 Focused items in Monaco's native TypeScript member completion reuse the same
-viewport preview and restore the caret-selected scene when completion closes.
+viewport preview immediately, then replace it with a model compiled from the
+hypothetically accepted completion. The incomplete source and caret remain
+unchanged, and the caret-selected scene returns when completion closes.
+[R-017](requests/closed/R-017-completion-derived-model-preview.md) records this
+completion-derived rendering contract.
 [R-004](requests/closed/R-004-source-local-modeling-diagnostics.md) is complete:
 structured model diagnostics retain their exact source span across the worker
 boundary, and Monaco renders located evaluation failures inline while the

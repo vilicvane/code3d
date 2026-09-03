@@ -5,7 +5,10 @@ import * as typeScriptLanguage from 'monaco-editor/languages/features/typescript
 import EditorWorker from 'monaco-editor/editor/editor.worker?worker';
 import TypeScriptWorker from 'monaco-editor/language/typescript/ts.worker?worker';
 import type {CursorOptions, Options} from 'prettier';
-import {observeSuggestionFocus} from './monaco/suggestion-focus';
+import {
+  observeSuggestionFocus,
+  type FocusedSuggestion,
+} from './monaco/suggestion-focus';
 import {code3dAnnotations, type Code3dAnnotation} from './model/annotations';
 import type {DesignArgumentContext} from './model/compiler';
 import type {ModelDiagnostic} from './model/diagnostic';
@@ -29,9 +32,14 @@ export type ProjectEditorChange =
 export type ActiveFileChangeReason = 'switch' | 'rename' | 'delete' | 'reset';
 
 export type CompletionFocus = Readonly<{
-  receiverRef: SourceRef;
+  receiverRef?: SourceRef;
   definitionRef?: SourceRef;
   memberName: string;
+  preview?: Readonly<{
+    project: ModelProject;
+    cursor: Readonly<{file: string; offset: number}>;
+    sourceVersion: number;
+  }>;
 }>;
 
 type ProjectDocument = {
@@ -520,7 +528,7 @@ export class CodeEditor {
   }
 
   private async resolveCompletionFocus(
-    item: monaco.languages.CompletionItem,
+    suggestion: FocusedSuggestion,
     version: number,
   ): Promise<void> {
     const model = this.editor.getModel();
@@ -533,10 +541,21 @@ export class CodeEditor {
         this.emitCompletionFocus(undefined);
       return;
     }
+    const memberName = completionLabel(suggestion.completion.label);
+    const preview = completionProject(
+      this.project(),
+      document.path,
+      model,
+      position,
+      suggestion,
+      this.editor.getOption(monaco.editor.EditorOption.suggest).insertMode,
+      this.revision,
+    );
     const receiverRef = completionReceiver(model, position, document.path);
     if (!receiverRef) {
-      if (version === this.completionFocusVersion)
-        this.emitCompletionFocus(undefined);
+      if (version === this.completionFocusVersion) {
+        this.emitCompletionFocus({memberName, preview});
+      }
       return;
     }
     const workerFactory = await (model.getLanguageId() === 'javascript'
@@ -563,7 +582,8 @@ export class CodeEditor {
       definitionRef: definitions
         ?.map(definitionSourceRef)
         .find(reference => reference !== undefined),
-      memberName: completionLabel(item.label),
+      memberName,
+      preview,
     });
   }
 
@@ -965,6 +985,85 @@ function sourceEditExcerpts(
         sourceRef: {file, start, end},
       };
     });
+}
+
+function completionProject(
+  project: ModelProject,
+  file: string,
+  model: monaco.editor.ITextModel,
+  position: monaco.IPosition,
+  suggestion: FocusedSuggestion,
+  insertMode: 'insert' | 'replace',
+  sourceVersion: number,
+): CompletionFocus['preview'] {
+  const {completion} = suggestion;
+  if (
+    (completion.insertTextRules ?? 0) &
+    monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
+  ) {
+    return undefined;
+  }
+  const editEnd =
+    insertMode === 'replace'
+      ? suggestion.editReplaceEnd
+      : suggestion.editInsertEnd;
+  const columnDelta = position.column - suggestion.requestedPosition.column;
+  if (
+    position.lineNumber !== suggestion.requestedPosition.lineNumber ||
+    columnDelta < 0
+  ) {
+    return undefined;
+  }
+  const primaryRange = new monaco.Range(
+    suggestion.editStart.lineNumber,
+    suggestion.editStart.column,
+    editEnd.lineNumber,
+    editEnd.column + columnDelta,
+  );
+  const edits = [
+    {
+      start: model.getOffsetAt(primaryRange.getStartPosition()),
+      end: model.getOffsetAt(primaryRange.getEndPosition()),
+      text: completion.insertText,
+      primary: true,
+    },
+    ...(completion.additionalTextEdits ?? []).map(edit => ({
+      start: model.getOffsetAt(
+        monaco.Range.lift(edit.range).getStartPosition(),
+      ),
+      end: model.getOffsetAt(monaco.Range.lift(edit.range).getEndPosition()),
+      text: edit.text,
+      primary: false,
+    })),
+  ].sort((left, right) => left.start - right.start || left.end - right.end);
+  if (
+    edits.some((edit, index) => index > 0 && edits[index - 1].end > edit.start)
+  ) {
+    return undefined;
+  }
+
+  const source = model.getValue();
+  let completedSource = '';
+  let consumed = 0;
+  let projectedCursor = 0;
+  for (const edit of edits) {
+    completedSource += source.slice(consumed, edit.start) + edit.text;
+    consumed = edit.end;
+    if (edit.primary) projectedCursor = completedSource.length;
+  }
+  completedSource += source.slice(consumed);
+  return {
+    project: {
+      ...project,
+      files: project.files.map(projectFile =>
+        projectFile.path === file
+          ? {...projectFile, source: completedSource}
+          : projectFile,
+      ),
+    },
+    cursor: {file, offset: projectedCursor},
+    sourceVersion,
+  };
 }
 
 function completionReceiver(

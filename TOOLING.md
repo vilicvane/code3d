@@ -75,6 +75,22 @@ selection + gesture
 模型重新编译后，tool session 即结束；后续工具必须基于新的 provenance 开始。
 源码事务提交后，GUI 将 preview 提升为当前 revision 的 optimistic 状态。编译期间仍可继续交互；新的交互立即丢弃正在运行或等待中的旧 revision 编译，新的源码事务产生后只编译最新 revision。对应模型完成后，以原 selection 和 scope 替换 optimistic 状态。
 
+## Completion-derived preview
+
+Monaco 原生 completion list 中当前聚焦的普通文本候选会生成一个非持久化 project
+snapshot：只在 snapshot 中应用 Monaco 已计算的主 edit 和 additional edits，并把补全
+后的虚拟 caret 位置用于选择编译结果。这个 snapshot 使用正常 compiler/runtime 路径，
+所以 viewport 展示的是“接受该补全后”的模型语义，而不是仅替换标签的视觉猜测。
+
+真实 Monaco model、caret、undo history、文件系统和 source revision 始终不变。补全候选
+切换时丢弃旧 speculative compile；候选关闭后恢复真实 module，并重新编译实际源码。
+speculative module 只属于 viewport transient preview，不替换工具使用的已接受 module，
+也不允许 viewport picking 或 source write-back。具名 element 候选在 speculative compile
+完成前先复用已接受 module 显示即时高亮。
+
+speculative compile 等待期间，viewport 中央显示显著但不阻挡交互的 rendering 状态；
+候选结果就绪、失败、关闭或被新候选取代时立即移除。
+
 ## Model diagnostics
 
 模型编译和执行错误以结构化 diagnostic 穿过 worker 边界，保留 kind、summary、

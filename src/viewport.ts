@@ -47,6 +47,7 @@ type RenderedViewTarget =
   | Readonly<{kind: 'completion'}>;
 
 type TransientPreviewRestore = Readonly<{
+  module: ModelModule;
   selectedKey: string;
   cameraPosition: THREE.Vector3;
   controlsTarget: THREE.Vector3;
@@ -369,12 +370,41 @@ export class ModelViewport {
     return true;
   }
 
+  previewCompletedProject(
+    module: ModelModule,
+    file: string,
+    offset: number,
+    preferredContextId?: string,
+  ): boolean {
+    this.captureTransientPreviewRestore();
+    if (!this.transientPreviewRestore) return false;
+    this.module = module;
+    const target = this.sourceTargetAt(file, offset);
+    if (target) {
+      const matchingContext = preferredContextId
+        ? target.evaluations.findIndex(
+            evaluation => evaluation.contextId === preferredContextId,
+          )
+        : -1;
+      const evaluation =
+        target.evaluations[matchingContext] ?? target.evaluations[0];
+      if (evaluation) {
+        this.renderSourceScene(target, evaluation, {kind: 'completion'}, true);
+        return true;
+      }
+    }
+    if (!module.fallback) return false;
+    this.renderModelView('root', true, {kind: 'completion'});
+    return true;
+  }
+
   restoreTransientPreview(): void {
     const restore = this.transientPreviewRestore;
-    if (!this.module || !restore) {
+    if (!restore) {
       return;
     }
     this.transientPreviewRestore = undefined;
+    this.module = restore.module;
     const target = this.selectedViewTarget;
     if (target.kind === 'model') {
       this.renderModelView(restore.selectedKey, false);
@@ -650,6 +680,7 @@ export class ModelViewport {
         evaluation.nodeIds,
       ),
     ]);
+    const layeredScene = focusNodes.length + contextNodes.length > 1;
     this.selectionEmphasized =
       focusedNodeId !== undefined || target.kind !== 'constraint';
     this.renderedViewTarget = renderedViewTarget;
@@ -660,7 +691,9 @@ export class ModelViewport {
       );
     });
     focusNodes.forEach((node, index) => {
-      this.root.add(this.buildObject(node, `source/${index}`, 1, 'source'));
+      const object = this.buildObject(node, `source/${index}`, 1, 'source');
+      if (layeredScene) makeFocusObjectTranslucent(object);
+      this.root.add(object);
     });
     this.renderSourceDecorations(this.module!, target, evaluation);
     this.applyPreviewTransforms();
@@ -676,12 +709,16 @@ export class ModelViewport {
     }
   }
 
-  private renderModelView(selectedKey: string, fitCamera: boolean): void {
+  private renderModelView(
+    selectedKey: string,
+    fitCamera: boolean,
+    renderedViewTarget: RenderedViewTarget = {kind: 'model'},
+  ): void {
     if (!this.module?.fallback) {
       return;
     }
     this.selectionEmphasized = true;
-    this.renderedViewTarget = {kind: 'model'};
+    this.renderedViewTarget = renderedViewTarget;
     this.resetRenderedView();
     const rootObject = this.buildObject(
       this.module.fallback,
@@ -796,7 +833,9 @@ export class ModelViewport {
   }
 
   private captureTransientPreviewRestore(): void {
+    if (!this.module) return;
     this.transientPreviewRestore ??= {
+      module: this.module,
       selectedKey: this.selectedKey,
       cameraPosition: this.camera.position.clone(),
       controlsTarget: this.controls.target.clone(),
@@ -1011,6 +1050,7 @@ export class ModelViewport {
   }
 
   private pick(event: PointerEvent): void {
+    if (this.renderedViewTarget.kind === 'completion') return;
     const rect = this.renderer.domElement.getBoundingClientRect();
     this.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     this.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
@@ -1633,6 +1673,23 @@ function dimObject(object: THREE.Object3D): void {
         }
       });
       child.renderOrder = -1;
+    }
+  });
+}
+
+function makeFocusObjectTranslucent(object: THREE.Object3D): void {
+  object.traverse(child => {
+    if (child instanceof THREE.Mesh) {
+      const materials = Array.isArray(child.material)
+        ? child.material
+        : [child.material];
+      materials.forEach(material => {
+        if (material instanceof THREE.MeshStandardMaterial) {
+          material.transparent = true;
+          material.opacity = 0.82;
+          material.depthWrite = false;
+        }
+      });
     }
   });
 }

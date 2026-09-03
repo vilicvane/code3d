@@ -127,6 +127,10 @@ app.innerHTML = `
         <div class="viewport-host" id="viewport-host">
           <div class="viewport-hint">Drag to orbit · Scroll to zoom · Click an object · Drag a gizmo</div>
           <div class="tool-status" id="tool-status" hidden></div>
+          <div class="viewport-render-status" id="viewport-render-status" role="status" aria-live="polite" hidden>
+            <span class="viewport-render-status-spinner" aria-hidden="true"></span>
+            <span id="viewport-render-status-label"></span>
+          </div>
           <div class="viewport-dock-panels">
             <aside class="dock-panel design-arguments-panel" id="design-arguments-panel" aria-label="Design arguments">
               <button class="dock-panel-handle" id="design-arguments-handle" type="button">
@@ -178,6 +182,10 @@ const designArgumentsCount = requiredElement('design-arguments-count');
 const designArgumentsFunction = requiredElement('design-arguments-function');
 const designArgumentsOptions = requiredElement('design-arguments-options');
 const toolStatus = requiredElement('tool-status');
+const viewportRenderStatus = requiredElement('viewport-render-status');
+const viewportRenderStatusLabel = requiredElement(
+  'viewport-render-status-label',
+);
 const projectTree = requiredElement('project-tree');
 const editorTabs = requiredElement('editor-tabs');
 const activeFileName = requiredElement('active-file-name');
@@ -221,6 +229,7 @@ const compiler = new ModelCompilerClient();
 let persistenceQueue = Promise.resolve();
 let currentModule: ModelModule | null = null;
 let compileTimer: number | undefined;
+let completionPreviewTimer: number | undefined;
 let outlinePreviewTimer: number | undefined;
 let explodeValue = 0;
 let runRevision = 0;
@@ -230,6 +239,7 @@ let contextFilePath: string | undefined;
 let preferredEvaluationContextId: string | undefined;
 let selectedDesignContextId: string | undefined;
 let compilingDesignContextId: string | undefined;
+let activeCompletionFocus: CompletionFocus | undefined;
 let applyingFileRoute = false;
 const expandedCatalogIds = new Set<string>();
 const optimisticParameterValues = new Map<string, number>();
@@ -271,14 +281,15 @@ const toolEngine = new ToolEngine({
 codeEditor.onChange(change => {
   persistProjectChange(projectFileSystem, change);
   renderProjectNavigation();
+  activeCompletionFocus = undefined;
+  window.clearTimeout(completionPreviewTimer);
+  completionPreviewTimer = undefined;
+  viewport.restoreTransientPreview();
+  hideViewportRenderStatus();
   setRunState('pending', 'Waiting for update');
   runRevision += 1;
   compiler.cancel();
-  window.clearTimeout(compileTimer);
-  compileTimer = window.setTimeout(() => {
-    compileTimer = undefined;
-    void runModel();
-  }, 420);
+  scheduleModelRun(420);
 });
 
 codeEditor.onCursorOffset(({file, offset}) => {
@@ -307,22 +318,7 @@ codeEditor.onCursorOffset(({file, offset}) => {
     renderContextControls(currentModule);
   }
 });
-codeEditor.onCompletionFocus(focus => {
-  if (!focus || !currentModule) {
-    viewport.restoreTransientPreview();
-    return;
-  }
-  const match = completionPreviewTarget(currentModule, focus);
-  if (!match) {
-    viewport.restoreTransientPreview();
-    return;
-  }
-  viewport.previewCompletion(
-    match.target,
-    match.evaluationIndex,
-    focus.memberName,
-  );
-});
+codeEditor.onCompletionFocus(handleCompletionFocus);
 codeEditor.onActiveFile((path, reason) => {
   renderProjectNavigation();
   if (!applyingFileRoute) updateFileRoute(path, reason);
@@ -549,6 +545,7 @@ async function runModel(
   compileTimer = undefined;
   window.clearTimeout(outlinePreviewTimer);
   viewport.restoreTransientPreview();
+  hideViewportRenderStatus();
   const revision = ++runRevision;
   const sourceVersion = codeEditor.sourceVersion();
   compilingDesignContextId = designContextId;
@@ -651,6 +648,105 @@ async function runModel(
       errorBar.hidden = false;
     }
   }
+}
+
+function handleCompletionFocus(focus: CompletionFocus | undefined): void {
+  const previous = activeCompletionFocus;
+  activeCompletionFocus = focus;
+  window.clearTimeout(completionPreviewTimer);
+  completionPreviewTimer = undefined;
+  viewport.restoreTransientPreview();
+  hideViewportRenderStatus();
+
+  if (!focus) {
+    if (previous?.preview) resumeModelAfterCompletion();
+    return;
+  }
+
+  if (currentModule) {
+    const match = completionPreviewTarget(currentModule, focus);
+    if (match) {
+      viewport.previewCompletion(
+        match.target,
+        match.evaluationIndex,
+        focus.memberName,
+      );
+    }
+  }
+
+  if (!focus.preview) {
+    if (previous?.preview) resumeModelAfterCompletion();
+    return;
+  }
+
+  runRevision += 1;
+  compiler.cancel();
+  window.clearTimeout(compileTimer);
+  compileTimer = undefined;
+  setRunState('pending', `Completing ${focus.memberName}`);
+  showViewportRenderStatus(`Rendering ${focus.memberName}`);
+  const revision = runRevision;
+  completionPreviewTimer = window.setTimeout(() => {
+    completionPreviewTimer = undefined;
+    void runCompletionPreview(focus, revision);
+  }, 160);
+}
+
+async function runCompletionPreview(
+  focus: CompletionFocus,
+  revision: number,
+): Promise<void> {
+  const preview = focus.preview;
+  if (
+    !preview ||
+    activeCompletionFocus !== focus ||
+    preview.sourceVersion !== codeEditor.sourceVersion()
+  ) {
+    return;
+  }
+  setRunState('running', `Previewing ${focus.memberName}`);
+  try {
+    const module = await compiler.compile(
+      preview.project,
+      selectedDesignContextId,
+    );
+    if (
+      revision !== runRevision ||
+      activeCompletionFocus !== focus ||
+      preview.sourceVersion !== codeEditor.sourceVersion()
+    ) {
+      return;
+    }
+    viewport.previewCompletedProject(
+      module,
+      preview.cursor.file,
+      preview.cursor.offset,
+      preferredEvaluationContextId,
+    );
+    hideViewportRenderStatus();
+    setRunState('ready', `Preview · ${focus.memberName}`);
+  } catch {
+    if (revision === runRevision && activeCompletionFocus === focus) {
+      hideViewportRenderStatus();
+      setRunState('pending', `Preview unavailable · ${focus.memberName}`);
+    }
+  }
+}
+
+function resumeModelAfterCompletion(): void {
+  runRevision += 1;
+  compiler.cancel();
+  hideViewportRenderStatus();
+  setRunState('pending', 'Waiting for update');
+  scheduleModelRun(180);
+}
+
+function scheduleModelRun(delay: number): void {
+  window.clearTimeout(compileTimer);
+  compileTimer = window.setTimeout(() => {
+    compileTimer = undefined;
+    if (!activeCompletionFocus?.preview) void runModel();
+  }, delay);
 }
 
 function renderContextControls(module: ModelModule): void {
@@ -1569,7 +1665,8 @@ function completionPreviewTarget(
     }>
   | undefined {
   const receiverTarget = module.sourceTargets.find(target => {
-    if (target.kind !== 'element' || !target.receiverRef) return false;
+    if (!focus.receiverRef || target.kind !== 'element' || !target.receiverRef)
+      return false;
     const current = codeEditor.resolveSourceRef(target.receiverRef);
     return current ? sameSourceRef(current, focus.receiverRef) : false;
   });
@@ -1676,6 +1773,15 @@ function setRunState(
 ): void {
   runState.dataset.state = state;
   runStateLabel.textContent = label;
+}
+
+function showViewportRenderStatus(label: string): void {
+  viewportRenderStatusLabel.textContent = label;
+  viewportRenderStatus.hidden = false;
+}
+
+function hideViewportRenderStatus(): void {
+  viewportRenderStatus.hidden = true;
 }
 
 function primarySource(node: ModelSnapshotObject): SourceRef | undefined {

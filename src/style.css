@@ -707,6 +707,50 @@ kbd {
   display: none;
 }
 
+.viewport-render-status {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 38px;
+  padding: 9px 13px;
+  color: #edf3d5;
+  border: 1px solid #778a32;
+  border-radius: 5px;
+  background: #12150deb;
+  box-shadow:
+    0 18px 50px #0009,
+    0 0 28px #d8ff3e18;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  backdrop-filter: blur(12px);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+
+.viewport-render-status[hidden] {
+  display: none;
+}
+
+.viewport-render-status-spinner {
+  width: 13px;
+  height: 13px;
+  border: 2px solid #66722f;
+  border-top-color: var(--acid);
+  border-radius: 50%;
+  animation: viewport-render-spin 700ms linear infinite;
+}
+
+@keyframes viewport-render-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .dock-panel {
   position: absolute;
   z-index: 3;
@@ -1177,7 +1221,8 @@ kbd {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .design-argument-spinner {
+  .design-argument-spinner,
+  .viewport-render-status-spinner {
     animation: none;
   }
 }
