@@ -110,6 +110,99 @@ type EdgeSelectionState = {
   hoveredEdgeId?: EdgeId;
 };
 
+const boxCornerPairs = [
+  [0, 1],
+  [0, 2],
+  [0, 4],
+  [1, 3],
+  [1, 5],
+  [2, 3],
+  [2, 6],
+  [3, 7],
+  [4, 5],
+  [4, 6],
+  [5, 7],
+  [6, 7],
+] as const;
+const boxCornerFraction = 0.18;
+
+class CornerBoxHelper extends THREE.LineSegments<
+  THREE.BufferGeometry,
+  THREE.LineBasicMaterial
+> {
+  private readonly bounds = new THREE.Box3();
+  private readonly positionAttribute: THREE.BufferAttribute;
+
+  constructor(
+    private readonly target: THREE.Object3D,
+    color: THREE.ColorRepresentation,
+    opacity: number,
+    renderOrder: number,
+  ) {
+    const geometry = new THREE.BufferGeometry();
+    const positionAttribute = new THREE.BufferAttribute(
+      new Float32Array(boxCornerPairs.length * 4 * 3),
+      3,
+    );
+    geometry.setAttribute('position', positionAttribute);
+    super(
+      geometry,
+      new THREE.LineBasicMaterial({
+        color,
+        transparent: true,
+        opacity,
+        depthTest: true,
+        depthWrite: false,
+        toneMapped: false,
+      }),
+    );
+    this.positionAttribute = positionAttribute;
+    this.renderOrder = renderOrder;
+    this.frustumCulled = false;
+    this.matrixAutoUpdate = false;
+    this.update();
+  }
+
+  update(): void {
+    this.bounds.setFromObject(this.target);
+    this.visible = !this.bounds.isEmpty();
+    if (!this.visible) return;
+
+    const {min, max} = this.bounds;
+    const positions = this.positionAttribute.array as Float32Array;
+    let offset = 0;
+    for (const [start, end] of boxCornerPairs) {
+      const startX = start & 1 ? max.x : min.x;
+      const startY = start & 2 ? max.y : min.y;
+      const startZ = start & 4 ? max.z : min.z;
+      const endX = end & 1 ? max.x : min.x;
+      const endY = end & 2 ? max.y : min.y;
+      const endZ = end & 4 ? max.z : min.z;
+      const insetX = (endX - startX) * boxCornerFraction;
+      const insetY = (endY - startY) * boxCornerFraction;
+      const insetZ = (endZ - startZ) * boxCornerFraction;
+      positions[offset++] = startX;
+      positions[offset++] = startY;
+      positions[offset++] = startZ;
+      positions[offset++] = startX + insetX;
+      positions[offset++] = startY + insetY;
+      positions[offset++] = startZ + insetZ;
+      positions[offset++] = endX;
+      positions[offset++] = endY;
+      positions[offset++] = endZ;
+      positions[offset++] = endX - insetX;
+      positions[offset++] = endY - insetY;
+      positions[offset++] = endZ - insetZ;
+    }
+    this.positionAttribute.needsUpdate = true;
+  }
+
+  dispose(): void {
+    this.geometry.dispose();
+    this.material.dispose();
+  }
+}
+
 const sourceDecorationOwner = (providerId: string): string =>
   `source-context:${providerId}`;
 const selectionDragThreshold = 4;
@@ -140,8 +233,8 @@ export class ModelViewport {
   private readonly onNavigateSource: ModelViewportOptions['onNavigateSource'];
   private readonly onEdgeSelection: ModelViewportOptions['onEdgeSelection'];
   private readonly sourceDecorationProviders: readonly SourceDecorationProvider[];
-  private readonly impactHelpers: THREE.BoxHelper[] = [];
-  private selectionHelper: THREE.BoxHelper | null = null;
+  private readonly impactHelpers: CornerBoxHelper[] = [];
+  private selectionHelper: CornerBoxHelper | null = null;
   private edgeSelection?: EdgeSelectionState;
   private edgeSelectionOverlay?: THREE.Group;
   private edgeSelectionResultPreview?: THREE.Object3D;
@@ -1012,8 +1105,7 @@ export class ModelViewport {
   private rebuildSelectionHelper(): void {
     if (this.selectionHelper) {
       this.scene.remove(this.selectionHelper);
-      this.selectionHelper.geometry.dispose();
-      this.selectionHelper.material.dispose();
+      this.selectionHelper.dispose();
       this.selectionHelper = null;
     }
 
@@ -1021,11 +1113,12 @@ export class ModelViewport {
     if (!occurrence || !this.selectionEmphasized || this.edgeSelection) {
       return;
     }
-    this.selectionHelper = new THREE.BoxHelper(occurrence.object, '#d8ff3e');
-    this.selectionHelper.material.depthTest = false;
-    this.selectionHelper.material.transparent = true;
-    this.selectionHelper.material.opacity = 0.85;
-    this.selectionHelper.renderOrder = 20;
+    this.selectionHelper = new CornerBoxHelper(
+      occurrence.object,
+      '#d8ff3e',
+      0.85,
+      20,
+    );
     this.scene.add(this.selectionHelper);
   }
 
@@ -1459,11 +1552,12 @@ export class ModelViewport {
       ) {
         continue;
       }
-      const helper = new THREE.BoxHelper(occurrence.object, '#8ea2ff');
-      helper.material.depthTest = false;
-      helper.material.transparent = true;
-      helper.material.opacity = 0.72;
-      helper.renderOrder = 19;
+      const helper = new CornerBoxHelper(
+        occurrence.object,
+        '#8ea2ff',
+        0.72,
+        19,
+      );
       this.impactHelpers.push(helper);
       this.scene.add(helper);
     }
@@ -1472,8 +1566,7 @@ export class ModelViewport {
   private clearImpactHelpers(): void {
     for (const helper of this.impactHelpers) {
       this.scene.remove(helper);
-      helper.geometry.dispose();
-      helper.material.dispose();
+      helper.dispose();
     }
     this.impactHelpers.length = 0;
   }
