@@ -63,8 +63,16 @@ type SelectionGesture = {
   blocked: boolean;
 };
 
+type SelectionClick = Readonly<{
+  node: ModelSnapshotObject;
+  x: number;
+  y: number;
+  time: number;
+}>;
+
 export type ModelViewportOptions = Readonly<{
   onSelect: (occurrence: Occurrence) => void;
+  onDrillDown: (node: ModelSnapshotObject) => void;
   onNavigateSource: (sourceRef: SourceRef) => void;
   onPositionTool: (event: PositionGizmoEvent) => void;
   sourceDecorationProviders?: readonly SourceDecorationProvider[];
@@ -73,6 +81,8 @@ export type ModelViewportOptions = Readonly<{
 const sourceDecorationOwner = (providerId: string): string =>
   `source-context:${providerId}`;
 const selectionDragThreshold = 4;
+const doubleClickDistance = 6;
+const doubleClickInterval = 450;
 
 export class ModelViewport {
   private readonly scene = new THREE.Scene();
@@ -93,6 +103,7 @@ export class ModelViewport {
   private readonly decorationLayers = new Map<string, THREE.Object3D[]>();
   private readonly positionGizmo: PositionGizmo;
   private readonly onSelect: ModelViewportOptions['onSelect'];
+  private readonly onDrillDown: ModelViewportOptions['onDrillDown'];
   private readonly onNavigateSource: ModelViewportOptions['onNavigateSource'];
   private readonly sourceDecorationProviders: readonly SourceDecorationProvider[];
   private readonly impactHelpers: THREE.BoxHelper[] = [];
@@ -107,17 +118,20 @@ export class ModelViewport {
   private renderedViewTarget: RenderedViewTarget = {kind: 'model'};
   private transientPreviewRestore?: TransientPreviewRestore;
   private selectionGesture?: SelectionGesture;
+  private selectionClick?: SelectionClick;
 
   constructor(
     private readonly container: HTMLElement,
     {
       onSelect,
+      onDrillDown,
       onNavigateSource,
       onPositionTool,
       sourceDecorationProviders = [],
     }: ModelViewportOptions,
   ) {
     this.onSelect = onSelect;
+    this.onDrillDown = onDrillDown;
     this.onNavigateSource = onNavigateSource;
     this.sourceDecorationProviders = sourceDecorationProviders;
     this.renderer = new THREE.WebGLRenderer({
@@ -856,6 +870,7 @@ export class ModelViewport {
     this.committedOccurrenceTranslationPreviews.clear();
     this.highlightedTargetId = undefined;
     this.highlightedOccurrenceKeys.clear();
+    this.selectionClick = undefined;
     this.decorationLayers.clear();
     this.root.clear();
   }
@@ -1006,6 +1021,7 @@ export class ModelViewport {
   private beginSelectionGesture(event: PointerEvent): void {
     if (!event.isPrimary || event.button !== 0) {
       this.selectionGesture = undefined;
+      this.selectionClick = undefined;
       return;
     }
     this.selectionGesture = {
@@ -1038,36 +1054,114 @@ export class ModelViewport {
       gesture.moved ||
       gesture.blocked
     ) {
+      this.selectionClick = undefined;
       return;
     }
-    this.pick(event);
+    const targets = this.pickTargets(event);
+    const target = targets[0];
+    if (!target) {
+      this.selectionClick = undefined;
+      return;
+    }
+
+    const previousDrillTarget = this.selectionClick;
+    const repeatedDrillTarget = previousDrillTarget
+      ? targets.find(
+          candidate =>
+            this.pickTargetNodeId(candidate) ===
+            previousDrillTarget.node.nodeId,
+        )
+      : undefined;
+    if (
+      previousDrillTarget &&
+      repeatedDrillTarget &&
+      this.hasCompositionSourceContext() &&
+      this.isDoubleClick(previousDrillTarget.node.nodeId, event)
+    ) {
+      this.selectionClick = undefined;
+      this.onDrillDown(previousDrillTarget.node);
+      return;
+    }
+
+    const selected = this.getSelected();
+    const selectedTarget = selected
+      ? targets.find(
+          candidate =>
+            this.pickTargetNodeId(candidate) === selected.node.nodeId,
+        )
+      : undefined;
+    const nextSelectionClick =
+      selected && selectedTarget && this.hasCompositionSourceContext()
+        ? {
+            node: selected.node,
+            x: event.clientX,
+            y: event.clientY,
+            time: event.timeStamp,
+          }
+        : undefined;
+    this.applyPickTarget(target);
+    this.selectionClick = nextSelectionClick;
+  }
+
+  private pickTargetNodeId(target: ViewportPickTarget): string | undefined {
+    return target.kind === 'occurrence'
+      ? this.occurrences.get(target.key)?.node.nodeId
+      : target.nodeId;
   }
 
   private cancelSelectionGesture(event: PointerEvent): void {
     if (this.selectionGesture?.pointerId === event.pointerId) {
       this.selectionGesture = undefined;
+      this.selectionClick = undefined;
     }
   }
 
-  private pick(event: PointerEvent): void {
-    if (this.renderedViewTarget.kind === 'completion') return;
+  private pickTargets(event: PointerEvent): readonly ViewportPickTarget[] {
+    if (this.renderedViewTarget.kind === 'completion') return [];
     const rect = this.renderer.domElement.getBoundingClientRect();
     this.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     this.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
     this.raycaster.setFromCamera(this.pointer, this.camera);
 
     const hits = this.raycaster.intersectObjects(this.root.children, true);
-    const target = hits
-      .map(({object}) => pickTargetFromAncestors(object))
-      .find(candidate => candidate !== undefined);
-    if (!target) {
-      return;
+    const targets: ViewportPickTarget[] = [];
+    const seen = new Set<string>();
+    for (const {object} of hits) {
+      const target = pickTargetFromAncestors(object);
+      if (!target) continue;
+      const identity = viewportPickTargetIdentity(target);
+      if (seen.has(identity)) continue;
+      seen.add(identity);
+      targets.push(target);
     }
+    return targets;
+  }
+
+  private applyPickTarget(target: ViewportPickTarget): void {
     if (target.kind === 'occurrence') {
       this.selectKey(target.key, true);
     } else {
       this.selectSourceTarget(target.targetId, target.nodeId);
     }
+  }
+
+  private hasCompositionSourceContext(): boolean {
+    const scope = this.renderedSourceScope();
+    return Boolean(
+      scope?.evaluation.operationId && scope.target.contextTargetIds.length > 0,
+    );
+  }
+
+  private isDoubleClick(nodeId: string, event: PointerEvent): boolean {
+    const previous = this.selectionClick;
+    if (!previous || previous.node.nodeId !== nodeId) return false;
+    const deltaX = event.clientX - previous.x;
+    const deltaY = event.clientY - previous.y;
+    return (
+      event.timeStamp - previous.time <= doubleClickInterval &&
+      deltaX * deltaX + deltaY * deltaY <=
+        doubleClickDistance * doubleClickDistance
+    );
   }
 
   private selectSourceTarget(targetId: string, nodeId: string): void {
@@ -1710,6 +1804,12 @@ function applyTransform(object: THREE.Object3D, transform: Transform): void {
 type ViewportPickTarget =
   | Readonly<{kind: 'occurrence'; key: string}>
   | Readonly<{kind: 'source-target'; targetId: string; nodeId: string}>;
+
+function viewportPickTargetIdentity(target: ViewportPickTarget): string {
+  return target.kind === 'occurrence'
+    ? `occurrence:${target.key}`
+    : `source-target:${target.targetId}:${target.nodeId}`;
+}
 
 function pickTargetFromAncestors(
   object: THREE.Object3D,

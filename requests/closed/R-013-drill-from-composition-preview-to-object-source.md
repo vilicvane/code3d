@@ -32,3 +32,25 @@
   different project file.
 - Single click, dimmed-peer switching, dragging, and gizmo interaction remain
   unchanged.
+
+## Implementation
+
+- Pointer hit testing retains every semantic target along a ray so an active
+  solid remains a valid drill target when a translucent context surface is in
+  front of it.
+- The double-click candidate is the stable runtime node rather than a rendered
+  occurrence key. It therefore survives the context rerender caused by the
+  first click.
+- Source resolution prefers the earliest exact binding for that immutable
+  value, then the narrowest exact value or operation-output source, and finally
+  the runtime value's own primary source reference. All references remain
+  file-qualified for cross-file navigation.
+- Pointer movement, gizmo capture, cancellation, non-primary buttons, misses,
+  and source rerenders outside the click sequence clear the pending gesture.
+
+## Verification
+
+- `npm run build`
+- Host Chrome: `cut(stock, [bore])` keeps its operation context on a single
+  click, opens and isolates the `bore` declaration on double-click, and does
+  not navigate after repeated camera drags.

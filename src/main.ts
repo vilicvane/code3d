@@ -146,7 +146,7 @@ app.innerHTML = `
           <nav class="scope-list" id="scope-list" aria-label="Model scope"></nav>
         </header>
         <div class="viewport-host" id="viewport-host">
-          <div class="viewport-hint">Drag to orbit · Scroll to zoom · Click an object · Drag a gizmo</div>
+          <div class="viewport-hint">Drag to orbit · Scroll to zoom · Click to select · Double-click active to open source</div>
           <div class="tool-status" id="tool-status" hidden></div>
           <div class="viewport-progress" id="viewport-progress" role="status" aria-live="polite" hidden>
             <span class="viewport-progress-spinner" aria-hidden="true"></span>
@@ -289,6 +289,7 @@ const viewport = new ModelViewport(viewportHost, {
     }
     selectOccurrence(occurrence, occurrence.view === 'model');
   },
+  onDrillDown: node => drillToObjectSource(node),
   onNavigateSource: sourceRef => {
     codeEditor.revealSource(sourceRef);
   },
@@ -1238,6 +1239,53 @@ function selectOccurrence(occurrence: Occurrence, revealSource: boolean): void {
       codeEditor.clearSourceHighlight();
     }
   }
+}
+
+function drillToObjectSource(node: ModelSnapshotObject): void {
+  if (!currentModule) return;
+  const compiledSource = preferredObjectSource(currentModule, node);
+  if (!compiledSource) return;
+  const sourceRef =
+    codeEditor.resolveSourceRef(compiledSource) ?? compiledSource;
+  const evaluationContextId = viewport.sourceEvaluation()?.evaluation.contextId;
+  codeEditor.revealSource(sourceRef, true);
+  const matched = viewport.selectBySourceOffset(
+    sourceRef.file,
+    sourceRef.start,
+    undefined,
+    evaluationContextId,
+  );
+  preferredEvaluationContextId = matched ? evaluationContextId : undefined;
+  const selected = matched ? viewport.getSelected() : undefined;
+  if (selected) selectOccurrence(selected, false);
+}
+
+function preferredObjectSource(
+  module: ModelModule,
+  node: ModelSnapshotObject,
+): SourceRef | undefined {
+  const binding = module.catalog
+    .filter(
+      entry =>
+        entry.category === 'binding' && entry.nodeIds.includes(node.nodeId),
+    )
+    .sort((left, right) => left.firstOrder - right.firstOrder)[0];
+  if (binding) return binding.sourceRef;
+
+  return (
+    module.sourceTargets
+      .filter(
+        target =>
+          (target.kind === 'value' || target.kind === 'operation-output') &&
+          target.evaluations.some(evaluation =>
+            evaluation.nodeIds.includes(node.nodeId),
+          ),
+      )
+      .sort(
+        (left, right) =>
+          sourceRefSpan(left.sourceRef) - sourceRefSpan(right.sourceRef),
+      )[0]?.sourceRef ?? primarySource(node)
+  );
 }
 
 function renderInspector(occurrence: Occurrence): void {

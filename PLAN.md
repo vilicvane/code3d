@@ -235,9 +235,11 @@ completion-derived rendering contract.
 structured model diagnostics retain their exact source span across the worker
 boundary, and Monaco renders located evaluation failures inline while the
 global error bar is reserved for failures without a reliable source location.
-[R-013](requests/R-013-drill-from-composition-preview-to-object-source.md) adds
-explicit double-click drill-down from an active composition operand to its best
-defining source.
+[R-013](requests/closed/R-013-drill-from-composition-preview-to-object-source.md)
+is complete: an explicit double-click drills from the active composition
+operand to its best exact binding or defining expression, including
+file-qualified targets, while single-click focus switching and drag gestures
+retain their existing meanings.
 [R-016](requests/R-016-viewport-elements-panel.md) retains a complementary,
 on-demand viewport inventory for named-element discovery without turning it
 into a second model editor.
