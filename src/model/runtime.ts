@@ -28,8 +28,19 @@ import {
   type Vec3,
 } from './spatial';
 import {makeHelicalThreadShape} from './thread';
+import {
+  booleanWithTopology,
+  chamferEdges,
+  filletEdges,
+  initialEdgeTopology,
+  preserveEdgeTopology,
+  stableEdgeGroups,
+  type EdgeId,
+  type EdgeTopology,
+} from './topology';
 
 export type {Quaternion, Vec3} from './spatial';
+export type {EdgeId} from './topology';
 
 export type SourceRef = Readonly<{
   file: string;
@@ -128,6 +139,12 @@ export type ModelOperationRegionSnapshot = Readonly<{
   mesh: RenderMesh;
 }>;
 
+export type ModelOperationSelectionSnapshot = Readonly<{
+  kind: 'edge';
+  inputNodeId: string;
+  ids: readonly EdgeId[];
+}>;
+
 export type ModelOperationSnapshot = Readonly<{
   id: string;
   siteId?: string;
@@ -141,6 +158,7 @@ export type ModelOperationSnapshot = Readonly<{
     index: number;
   }>[];
   regions: readonly ModelOperationRegionSnapshot[];
+  selections: readonly ModelOperationSelectionSnapshot[];
   sourceRef?: SourceRef;
 }>;
 
@@ -216,11 +234,18 @@ type StoredOperationRegion = Readonly<{
   shape: AnyShape;
 }>;
 
+type StoredOperationSelection = Readonly<{
+  kind: 'edge';
+  input: ModelObject;
+  ids: readonly EdgeId[];
+}>;
+
 type StoredOperation = {
   runtimeId: string;
   kind: ModelOperationKind;
   inputs: StoredOperationInput[];
   regions: StoredOperationRegion[];
+  selections: StoredOperationSelection[];
   siteId?: string;
   execution?: number;
   order?: number;
@@ -231,12 +256,14 @@ type BooleanOperation = 'cut' | 'fuse' | 'intersect';
 
 type BooleanEvaluation = Readonly<{
   result: Shape3D;
+  edgeTopology: EdgeTopology;
   regions: readonly StoredOperationRegion[];
 }>;
 
 type ModelObjectInit = Readonly<{
   kind: 'solid' | 'group';
   shape?: Shape3D;
+  edgeTopology?: EdgeTopology;
   localBounds?: LocalBounds;
   name?: string;
   color?: string;
@@ -434,6 +461,7 @@ export class ModelObject<
   readonly sourceRefs: SourceRef[];
   readonly parameters: ParameterUsage[];
   private readonly shape?: Shape3D;
+  private readonly edgeTopology?: EdgeTopology;
   private readonly localBounds?: LocalBounds;
   private readonly meshTolerance: number;
   private readonly elements: StoredElements;
@@ -449,6 +477,9 @@ export class ModelObject<
     this.nodeId = init.nodeId ?? `node-${nextNodeId++}`;
     this.kind = init.kind;
     this.shape = init.shape;
+    this.edgeTopology = init.shape
+      ? (init.edgeTopology ?? initialEdgeTopology(init.shape))
+      : undefined;
     this.localBounds =
       init.localBounds ?? (init.shape ? shapeBounds(init.shape) : undefined);
     this.meshTolerance = init.meshTolerance ?? 0.2;
@@ -564,28 +595,55 @@ export class ModelObject<
 
   scaled(factor: number): Model<Elements> {
     assertPositive('scale', factor);
-    return this.copy(
-      {
-        shape: this.requireShape().clone().scale(factor, toPoint(origin)),
-        elements: scaleElements(this.elements, factor),
-      },
+    const shape = this.requireShape().clone().scale(factor, toPoint(origin));
+    let edgeTopology: EdgeTopology;
+    try {
+      edgeTopology = preserveEdgeTopology(shape, this.requireEdgeTopology());
+    } catch (error) {
+      shape.delete();
+      throw error;
+    }
+    return this.copyWithShape(
+      shape,
+      edgeTopology,
+      {elements: scaleElements(this.elements, factor)},
       storedOperation('scaled', [{model: this, role: 'source', index: 0}]),
     );
   }
 
-  fillet(radius: number): Model<Elements> {
+  fillet(radius: number, edgeIds?: readonly EdgeId[]): Model<Elements> {
     assertPositive('radius', radius);
-    return this.copy(
-      {shape: this.requireShape().fillet(radius)},
-      storedOperation('fillet', [{model: this, role: 'source', index: 0}]),
+    const result = filletEdges(
+      this.requireShape(),
+      this.requireEdgeTopology(),
+      radius,
+      edgeIds,
+    );
+    return this.copyWithShape(
+      result.shape,
+      result.topology,
+      {},
+      storedOperation('fillet', [{model: this, role: 'source', index: 0}], {
+        selections: [{kind: 'edge', input: this, ids: result.selectedEdgeIds}],
+      }),
     );
   }
 
-  chamfer(distance: number): Model<Elements> {
+  chamfer(distance: number, edgeIds?: readonly EdgeId[]): Model<Elements> {
     assertPositive('distance', distance);
-    return this.copy(
-      {shape: this.requireShape().chamfer(distance)},
-      storedOperation('chamfer', [{model: this, role: 'source', index: 0}]),
+    const result = chamferEdges(
+      this.requireShape(),
+      this.requireEdgeTopology(),
+      distance,
+      edgeIds,
+    );
+    return this.copyWithShape(
+      result.shape,
+      result.topology,
+      {},
+      storedOperation('chamfer', [{model: this, role: 'source', index: 0}], {
+        selections: [{kind: 'edge', input: this, ids: result.selectedEdgeIds}],
+      }),
     );
   }
 
@@ -683,7 +741,12 @@ export class ModelObject<
     return {
       ...common,
       children: [],
-      mesh: renderMesh(this.requireShape(), meshCache, this.meshTolerance),
+      mesh: renderMesh(
+        this.requireShape(),
+        meshCache,
+        this.meshTolerance,
+        this.requireEdgeTopology(),
+      ),
     };
   }
 
@@ -711,6 +774,7 @@ export class ModelObject<
       const combined = new ModelObject<CanonicalElements>({
         kind: 'solid',
         shape: evaluation.result,
+        edgeTopology: evaluation.edgeTopology,
         name: this.name,
         color: this.color,
         constraints: this.constraints,
@@ -733,7 +797,7 @@ export class ModelObject<
               index: index + 1,
             })),
           ],
-          evaluation.regions,
+          {regions: evaluation.regions},
         ),
       });
       transferred = true;
@@ -753,6 +817,13 @@ export class ModelObject<
     const solveContext = createSolveContext();
     const targetPose = this.solvePose(solveContext);
     let result: Shape3D = this.requireShape().clone();
+    let edgeTopology: EdgeTopology;
+    try {
+      edgeTopology = preserveEdgeTopology(result, this.requireEdgeTopology());
+    } catch (error) {
+      result.delete();
+      throw error;
+    }
     const regions: StoredOperationRegion[] = [];
     let evaluated = false;
     try {
@@ -778,14 +849,21 @@ export class ModelObject<
               shape: unionSectionShape(previous, operand),
             });
           }
-          result = previous[operation](operand);
+          const evaluation = booleanWithTopology(
+            previous,
+            operand,
+            operation,
+            edgeTopology,
+          );
+          result = evaluation.shape;
+          edgeTopology = evaluation.topology;
         } finally {
           operand.delete();
         }
         previous.delete();
       }
       evaluated = true;
-      return {result, regions};
+      return {result, edgeTopology, regions};
     } finally {
       if (!evaluated) {
         result.delete();
@@ -872,11 +950,28 @@ export class ModelObject<
     return this.shape;
   }
 
+  private requireEdgeTopology(): EdgeTopology {
+    if (!this.edgeTopology) {
+      throw new Error(
+        'This operation requires solid edge topology and cannot act on a group.',
+      );
+    }
+    return this.edgeTopology;
+  }
+
   private operationSnapshot(
     meshCache: Map<AnyShape, RenderMesh>,
   ): ModelOperationSnapshot {
-    const {siteId, execution, kind, order, sourceRef, inputs, regions} =
-      this.operation;
+    const {
+      siteId,
+      execution,
+      kind,
+      order,
+      sourceRef,
+      inputs,
+      regions,
+      selections,
+    } = this.operation;
     return {
       id: storedOperationId(this.operation),
       siteId,
@@ -894,8 +989,27 @@ export class ModelObject<
         inputNodeId: region.input.nodeId,
         mesh: renderMesh(region.shape, meshCache, this.meshTolerance),
       })),
+      selections: selections.map(selection => ({
+        kind: selection.kind,
+        inputNodeId: selection.input.nodeId,
+        ids: [...selection.ids],
+      })),
       sourceRef,
     };
+  }
+
+  private copyWithShape(
+    shape: Shape3D,
+    edgeTopology: EdgeTopology,
+    overrides: Partial<ModelObjectInit>,
+    operation: StoredOperation,
+  ): Model<Elements> {
+    try {
+      return this.copy({...overrides, shape, edgeTopology}, operation);
+    } catch (error) {
+      shape.delete();
+      throw error;
+    }
   }
 
   private copy(
@@ -905,6 +1019,10 @@ export class ModelObject<
     return new ModelObject<Elements>({
       kind: this.kind,
       shape: this.shape,
+      edgeTopology:
+        overrides.shape === undefined
+          ? this.edgeTopology
+          : overrides.edgeTopology,
       localBounds: overrides.shape ? undefined : this.localBounds,
       name: this.name,
       color: this.color,
@@ -1150,13 +1268,17 @@ export const authoringApi = Object.freeze({
 function storedOperation(
   kind: ModelOperationKind,
   inputs: readonly StoredOperationInput[] = [],
-  regions: readonly StoredOperationRegion[] = [],
+  options: Readonly<{
+    regions?: readonly StoredOperationRegion[];
+    selections?: readonly StoredOperationSelection[];
+  }> = {},
 ): StoredOperation {
   return {
     runtimeId: `operation-${nextOperationId++}`,
     kind,
     inputs: [...inputs],
-    regions: [...regions],
+    regions: [...(options.regions ?? [])],
+    selections: [...(options.selections ?? [])],
   };
 }
 
@@ -1170,6 +1292,7 @@ function renderMesh(
   shape: AnyShape,
   cache: Map<AnyShape, RenderMesh>,
   tolerance: number,
+  edgeTopology?: EdgeTopology,
 ): RenderMesh {
   const cached = cache.get(shape);
   if (cached) {
@@ -1183,7 +1306,9 @@ function renderMesh(
     triangles: new Uint32Array(surface.triangles),
     edges: new Float32Array(wire.lines),
     faceGroups: surface.faceGroups,
-    edgeGroups: wire.edgeGroups,
+    edgeGroups: edgeTopology
+      ? stableEdgeGroups(shape.asShape3D(), edgeTopology, wire.edgeGroups)
+      : wire.edgeGroups,
   };
   cache.set(shape, mesh);
   return mesh;
@@ -1431,6 +1556,7 @@ function hasParameter(
 export const authoringTypes = `
 declare module "code3d" {
   export type Vec3 = readonly [x: number, y: number, z: number];
+  export type EdgeId = number;
   export type ElementKind = "point" | "line" | "face" | "frame";
 
   export interface Anchor<Kind extends ElementKind = ElementKind> {
@@ -1483,8 +1609,8 @@ declare module "code3d" {
     named(name: string): Model<Elements>;
     paint(color: string): Model<Elements>;
     scaled(factor: number): Model<Elements>;
-    fillet(radius: number): Model<Elements>;
-    chamfer(distance: number): Model<Elements>;
+    fillet(radius: number, edgeIds?: readonly EdgeId[]): Model<Elements>;
+    chamfer(distance: number, edgeIds?: readonly EdgeId[]): Model<Elements>;
     withChildren(children: readonly ModelObject[]): Model<Elements>;
   }
 

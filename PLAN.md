@@ -43,6 +43,11 @@ it does not silently reorder the active milestones. Closed requests move to
   the ordered cutting tools in an array.
 - Chained calls are the human-facing syntax for constraint derivation; they do
   not imply mutation or a persistent CAD feature history.
+- Solid edges have model-local numeric IDs. Primitive traversal assigns the
+  initial IDs; a derived value preserves strict one-to-one edge history,
+  allocates newly created or ambiguous edges above the inherited high-water
+  mark, and never reuses retired IDs. Deterministic source replay is the
+  persistence mechanism rather than a separate topology ledger.
 - A composite is broad: any connected set of occurrences and spatial relations
   is a composite, including copy, pattern, boolean operands, groups, and named
   assemblies. A composite can itself be reused as geometry in a larger model.
@@ -59,6 +64,10 @@ it does not silently reorder the active milestones. Closed requests move to
 ## Invariants
 
 - Public model values do not expose OpenCascade or Three.js details.
+- Public topology IDs are deterministic model semantics, not OpenCascade hash
+  codes or current edge-array positions. Boolean results inherit only from the
+  ordered primary operand; every other contributed edge is new in that ID
+  namespace.
 - GUI tools resolve an explicit source-edit scope and use the common tool intent
   and transaction mechanism.
 - Source undo and redo remain Monaco history operations. Standard shortcuts
@@ -297,6 +306,21 @@ is complete. Value declarations and operation outputs do not expose the
 translation gizmo or offset controls; eligible composition inputs and explicit
 constraint source sites do.
 
+### 4a. Topology-scoped modeling tools — in progress
+
+- Assign stable numeric edge IDs at primitive boundaries and carry them across
+  scale, fillet, chamfer, and Boolean derivations.
+- Let `fillet(radius, edgeIds)` and `chamfer(distance, edgeIds)` modify an
+  explicit edge set while retaining the one-argument all-edge form.
+- Project stable IDs into render meshes and operation trace selections without
+  exposing kernel hashes.
+- Add an explicit viewport edge-selection mode that writes the chosen IDs back
+  to source through the common tool transaction path.
+
+Status: the runtime topology namespace, edge-scoped author API, derivation
+transfer rules, render-mesh IDs, and operation trace selections are
+implemented. Viewport selection and source write-back are the remaining slice.
+
 ### 5. Object combination tools
 
 - Handwritten standalone `union`, `cut`, and `intersect` functions are now the
@@ -311,8 +335,9 @@ constraint source sites do.
 - Whether any solid-modeling use case justifies partially constrained point,
   line, plane, distance, or angle relations. General partial constraint solving
   is expected for sketching, but is not assumed to be necessary for solids.
-- How topology picking and B-Rep provenance should create stable named point,
-  line, and face elements while retaining their author-visible semantic names.
+- How explicit numeric topology selections should be promoted into reusable
+  named point, line, and face anchors while retaining author-visible semantic
+  names.
 - How Boolean results expose operand anchors and provenance for later relations.
 - Whether uniform scaling is geometry derivation, occurrence placement, or two
   explicitly named operations.
