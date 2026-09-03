@@ -175,13 +175,6 @@ app.innerHTML = `
         </div>
       </section>
     </main>
-
-    <footer class="footer">
-      <span>JS/TS OBJECT MODEL</span>
-      <span class="footer-separator"></span>
-      <span>MONACO + OPENCASCADE</span>
-      <span class="footer-note">B-Rep → Three.js mesh</span>
-    </footer>
   </div>
 `;
 
