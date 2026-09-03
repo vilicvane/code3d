@@ -1499,6 +1499,7 @@ type OperationInputPlan = Readonly<{
     argumentIndex: number;
     first: ModelOperationInputRole;
     rest: ModelOperationInputRole;
+    indexOffset?: number;
   }>;
 }>;
 
@@ -1513,7 +1514,13 @@ function operationInputPlan(
     }
     if (node.expression.text === 'cut') {
       return {
-        collection: {argumentIndex: 0, first: 'receiver', rest: 'tool'},
+        arguments: ['receiver'],
+        collection: {
+          argumentIndex: 1,
+          first: 'tool',
+          rest: 'tool',
+          indexOffset: 1,
+        },
       };
     }
     if (node.expression.text === 'intersect') {
@@ -1636,7 +1643,7 @@ function instrumentOperationCollection(
       original,
       siteId,
       'collection',
-      0,
+      plan.indexOffset ?? 0,
       sourceFile,
       factory,
     );
@@ -1668,7 +1675,7 @@ function instrumentOperationCollection(
       originalValue,
       siteId,
       role,
-      index,
+      index + (plan.indexOffset ?? 0),
       sourceFile,
       factory,
     );

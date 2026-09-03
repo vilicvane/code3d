@@ -89,7 +89,7 @@ returns a model:
 model.relate(constraints) -> Model
 anchor.on(anchor)         -> Constraint
 union(models)             -> Model
-cut(models)               -> Model
+cut(stock, tools)         -> Model
 ```
 
 `relate` does not solve or assign an absolute transform. Constraints are stored
@@ -106,7 +106,7 @@ const mountedBoss = boss.relate(boss => boss.bottom.on(plate.top));
 const body = union([plate, mountedBoss]);
 
 const hole = drill.relate(hole => hole.axis.alignedWith(mountedBoss.axis));
-const result = cut([body, hole]);
+const result = cut(body, [hole]);
 ```
 
 Composition is an internal runtime solve context in this candidate, not a

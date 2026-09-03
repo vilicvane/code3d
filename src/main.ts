@@ -10,19 +10,12 @@ import type {
   ModelModule,
   ObjectCatalogEntry,
 } from './model/compiler';
-import {
-  defaultProject,
-  projectWithLegacySource,
-} from './project/default-project';
+import {defaultProject} from './project/default-project';
 import {
   openBrowserProjectFileSystem,
   type ProjectFileSystem,
 } from './project/filesystem';
 import {filePathFromRoute, fileRoute} from './project/file-route';
-import {
-  currentProjectMigrationVersion,
-  migrateProject,
-} from './project/migrations';
 import type {ModelProject} from './project/project';
 import type {
   ModelSnapshotObject,
@@ -46,23 +39,10 @@ import {ModelViewport, type Occurrence} from './viewport';
 import {DockPanelCoordinator} from './ui/dock-panels';
 import {SourceEditPopover} from './ui/source-edit-popover';
 
-const legacyStorageKey = 'code3d.prototype.source';
 const projectFileSystem = await openBrowserProjectFileSystem();
 let initialProject = await projectFileSystem.load();
 if (!initialProject) {
-  const legacySource = localStorage.getItem(legacyStorageKey);
-  const legacyProject = projectWithLegacySource(legacySource);
-  initialProject = await projectFileSystem.replace(
-    legacySource === null ? legacyProject : await migrateProject(legacyProject),
-    currentProjectMigrationVersion,
-  );
-  localStorage.removeItem(legacyStorageKey);
-} else {
-  initialProject =
-    (await projectFileSystem.migrate(
-      currentProjectMigrationVersion,
-      migrateProject,
-    )) ?? initialProject;
+  initialProject = await projectFileSystem.replace(defaultProject);
 }
 const app = document.querySelector<HTMLDivElement>('#app');
 
@@ -394,10 +374,7 @@ async function resetProject(): Promise<void> {
     await persistenceQueue;
     preferredEvaluationContextId = undefined;
     selectedDesignContextId = undefined;
-    initialProject = await projectFileSystem.replace(
-      defaultProject,
-      currentProjectMigrationVersion,
-    );
+    initialProject = await projectFileSystem.replace(defaultProject);
     codeEditor.reset(initialProject);
     runModel();
   } catch (error) {

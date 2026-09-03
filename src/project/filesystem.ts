@@ -14,19 +14,11 @@ const storeName = 'code3d-project-v1';
 type ProjectManifest = Readonly<{
   version: 1;
   entryPath: string;
-  migrationVersion: number;
 }>;
 
 export interface ProjectFileSystem {
   load(): Promise<ModelProject | undefined>;
-  migrate(
-    targetVersion: number,
-    migration: (project: ModelProject) => ModelProject | Promise<ModelProject>,
-  ): Promise<ModelProject | undefined>;
-  replace(
-    project: ModelProject,
-    migrationVersion?: number,
-  ): Promise<ModelProject>;
+  replace(project: ModelProject): Promise<ModelProject>;
   writeFile(path: string, source: string): Promise<void>;
   createDirectory(path: string): Promise<void>;
   rename(from: string, to: string): Promise<void>;
@@ -57,22 +49,7 @@ class ZenProjectFileSystem implements ProjectFileSystem {
     };
   }
 
-  async migrate(
-    targetVersion: number,
-    migration: (project: ModelProject) => ModelProject | Promise<ModelProject>,
-  ): Promise<ModelProject | undefined> {
-    const manifest = await readManifest();
-    const project = await this.load();
-    if (!manifest || !project || manifest.migrationVersion >= targetVersion) {
-      return project;
-    }
-    return this.replace(await migration(project), targetVersion);
-  }
-
-  async replace(
-    project: ModelProject,
-    migrationVersion = 0,
-  ): Promise<ModelProject> {
+  async replace(project: ModelProject): Promise<ModelProject> {
     if (await exists(projectRoot)) {
       await fs.promises.rm(projectRoot, {recursive: true, force: true});
     }
@@ -83,7 +60,6 @@ class ZenProjectFileSystem implements ProjectFileSystem {
     const manifest: ProjectManifest = {
       version: 1,
       entryPath: normalizeProjectPath(project.entryPath),
-      migrationVersion,
     };
     await fs.promises.writeFile(manifestPath, JSON.stringify(manifest), 'utf8');
     return (await this.load())!;
@@ -130,10 +106,6 @@ async function readManifest(): Promise<ProjectManifest | undefined> {
     ? {
         version: 1,
         entryPath: value.entryPath,
-        migrationVersion:
-          typeof value.migrationVersion === 'number'
-            ? value.migrationVersion
-            : 0,
       }
     : undefined;
 }

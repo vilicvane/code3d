@@ -12,28 +12,3 @@ export const defaultProject: ModelProject = Object.freeze({
     },
   ]),
 });
-
-export function projectWithLegacySource(source: string | null): ModelProject {
-  if (source === null) {
-    return defaultProject;
-  }
-  return {
-    entryPath: defaultProject.entryPath,
-    files: [
-      {path: defaultProject.entryPath, source},
-      ...defaultProject.files.filter(
-        file => file.path !== defaultProject.entryPath,
-      ),
-    ],
-  };
-}
-
-export function withDefaultLibraries(project: ModelProject): ModelProject {
-  const paths = new Set(project.files.map(file => file.path));
-  const missing = defaultProject.files.filter(
-    file => file.path !== defaultProject.entryPath && !paths.has(file.path),
-  );
-  return missing.length === 0
-    ? project
-    : {...project, files: [...project.files, ...missing]};
-}

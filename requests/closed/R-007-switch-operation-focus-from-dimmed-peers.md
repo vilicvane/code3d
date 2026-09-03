@@ -2,7 +2,7 @@
 
 ## Request
 
-When an operation such as `cut([a, b])` renders one input as focus and the other
+When an operation such as `cut(a, [b])` renders one input as focus and the other
 as dimmed context, clicking the dimmed input should switch the operation focus
 to that input.
 

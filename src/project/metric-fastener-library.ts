@@ -165,7 +165,7 @@ export function socketCapScrew(
       .on(headBlank.top)
       .offset(0, -spec.hexSocketDepth / 2 + 0.1, 0),
   );
-  const head = cut([headBlank, socketTool]).named(
+  const head = cut(headBlank, [socketTool]).named(
     spec.designation + ' socket head',
   );
 

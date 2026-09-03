@@ -941,8 +941,21 @@ export function union(operands: readonly ModelObject[]): ModelObject {
   return first[combineModels]('fuse', others);
 }
 
-export function cut(operands: readonly ModelObject[]): ModelObject {
-  const {first: stock, others: tools} = booleanOperands('cut', operands);
+export function cut(
+  stock: ModelObject,
+  tools: readonly ModelObject[],
+): ModelObject {
+  if (!isModelObject(stock)) {
+    throw new Error('The cut stock must be a ModelObject.');
+  }
+  if (tools.length === 0) {
+    throw new Error('cut requires at least one tool.');
+  }
+  for (const tool of tools) {
+    if (!isModelObject(tool)) {
+      throw new Error('Every cut tool must be a ModelObject.');
+    }
+  }
   return stock[combineModels]('cut', tools);
 }
 
@@ -1105,7 +1118,7 @@ function assertChildren(children: readonly ModelObject[]): void {
 }
 
 function booleanOperands(
-  operation: 'union' | 'cut' | 'intersect',
+  operation: 'union' | 'intersect',
   operands: readonly ModelObject[],
 ): Readonly<{first: ModelObject; others: readonly ModelObject[]}> {
   if (operands.length < 2) {
@@ -1221,7 +1234,7 @@ declare module "code3d" {
   export function helicalThread(options: HelicalThreadOptions): ModelObject;
   export function group(children: readonly ModelObject[], name?: string): ModelObject;
   export function union(operands: readonly ModelObject[]): ModelObject;
-  export function cut(operands: readonly ModelObject[]): ModelObject;
+  export function cut(stock: ModelObject, tools: readonly ModelObject[]): ModelObject;
   export function intersect(operands: readonly ModelObject[]): ModelObject;
 }
 `;

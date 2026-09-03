@@ -98,8 +98,9 @@
   `/parts/library-part.ts`, then changed its width through Properties. The
   atomic edit and source popover both targeted that library file while
   `/model.ts` remained only its importer.
-- Default-library installation is a versioned, one-time project migration.
-  Host Chrome verified that deleting the migrated library remains deleted
+- Default libraries are seeded only when a project is created or reset; opening
+  an existing project never mutates its source tree.
+  Host Chrome verified that deleting the seeded library remains deleted
   after reload; resetting the example explicitly restores it.
 - The imported-library browser fixture was removed and the persistent project
   restored to the default example after verification.

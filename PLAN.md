@@ -28,9 +28,9 @@ it does not silently reorder the active milestones. Closed requests move to
 - Standalone `union`, `cut`, and `intersect` functions are geometry-evaluation
   boundaries. They collect and solve operand relations without introducing an
   author-facing composition object.
-- Multi-model operations receive their ordered model collection as an array in
-  the first argument, leaving later arguments available for operation metadata
-  or options.
+- Symmetric multi-model operations receive their ordered model collection as an
+  array. `cut(stock, tools)` instead names its unique stock separately and keeps
+  the ordered cutting tools in an array.
 - Chained calls are the human-facing syntax for constraint derivation; they do
   not imply mutation or a persistent CAD feature history.
 - A composite is broad: any connected set of occurrences and spatial relations
@@ -97,7 +97,7 @@ it does not silently reorder the active milestones. Closed requests move to
 
 Status: complete. The browser-persistent ZenFS project, first-class module
 graph, file-qualified source/tool pipeline, editable metric fastener library,
-general helical-thread foundation, one-time library migration, and English UI
+general helical-thread foundation, default-project library seeding, and English UI
 have passed build and host-browser verification. [R-014](requests/closed/R-014-cross-file-editor-navigation.md)
 connects Monaco's built-in definition navigation to the same project document
 boundary for Ctrl/Cmd+Click and F12 across files.

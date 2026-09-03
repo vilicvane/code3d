@@ -10,7 +10,7 @@ const hole = socketCapHole('M6', {
   fit: 'normal',
   counterbore: true,
 }).relate(tool => tool.center.on(plate.axis).offset(0, -2, 0));
-const preparedPlate = cut([plate, hole])
+const preparedPlate = cut(plate, [hole])
   .named('Counterbored plate')
   .paint(dark);
 
