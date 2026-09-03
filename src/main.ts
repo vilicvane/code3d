@@ -33,10 +33,12 @@ import type {
   EdgeId,
   ModelSnapshotObject,
   ParameterTarget,
-  ParameterUsage,
   SourceRef,
 } from './model/runtime';
-import {booleanOperationSourceDecoration} from './model/operation-decorations';
+import {
+  booleanOperationSourceDecoration,
+  edgeModificationSourceDecoration,
+} from './model/operation-decorations';
 import {
   elementSourceDecoration,
   namedElementDecorations,
@@ -45,7 +47,6 @@ import type {
   PositionGizmoBinding,
   PositionGizmoEvent,
 } from './tools/position-gizmo';
-import {parameterRange} from './tools/parameter-policy';
 import {
   ToolEngine,
   type ToolIntent,
@@ -157,6 +158,17 @@ app.innerHTML = `
         <div class="viewport-host" id="viewport-host">
           <div class="viewport-hint">Drag to orbit · Scroll to zoom · Click to select · Double-click active to open source</div>
           <div class="tool-status" id="tool-status" hidden></div>
+          <div class="edge-selection-toolbar" id="edge-selection-toolbar" hidden>
+            <div class="edge-selection-copy">
+              <strong id="edge-selection-title"></strong>
+              <span id="edge-selection-summary"></span>
+            </div>
+            <div class="edge-selection-actions">
+              <button id="edge-selection-clear" type="button">Clear</button>
+              <button id="edge-selection-cancel" type="button">Cancel</button>
+              <button class="primary" id="edge-selection-apply" type="button">Apply</button>
+            </div>
+          </div>
           <div class="viewport-progress" id="viewport-progress" role="status" aria-live="polite" hidden>
             <span class="viewport-progress-spinner" aria-hidden="true"></span>
             <span id="viewport-progress-label"></span>
@@ -188,13 +200,6 @@ app.innerHTML = `
               </button>
               <div class="dock-panel-body elements" id="elements" hidden></div>
             </aside>
-            <aside class="dock-panel inspector-panel" id="inspector-panel" aria-label="Object properties">
-              <button class="dock-panel-handle" id="inspector-handle" type="button">
-                <span>PROPERTIES</span>
-                <kbd data-dock-shortcut></kbd>
-              </button>
-              <div class="dock-panel-body inspector" id="inspector" hidden></div>
-            </aside>
           </div>
         </div>
       </section>
@@ -215,13 +220,24 @@ const errorBar = requiredElement('error-bar');
 const scopeList = requiredElement('scope-list');
 const objectCatalogList = requiredElement('object-catalog-list');
 const objectCatalogCount = requiredElement('object-catalog-count');
-const inspector = requiredElement('inspector');
 const designArgumentsCount = requiredElement('design-arguments-count');
 const designArgumentsFunction = requiredElement('design-arguments-function');
 const designArgumentsOptions = requiredElement('design-arguments-options');
 const elements = requiredElement('elements');
 const elementsCount = requiredElement('elements-count');
 const toolStatus = requiredElement('tool-status');
+const edgeSelectionToolbar = requiredElement('edge-selection-toolbar');
+const edgeSelectionTitle = requiredElement('edge-selection-title');
+const edgeSelectionSummary = requiredElement('edge-selection-summary');
+const edgeSelectionClear = requiredElement<HTMLButtonElement>(
+  'edge-selection-clear',
+);
+const edgeSelectionCancel = requiredElement<HTMLButtonElement>(
+  'edge-selection-cancel',
+);
+const edgeSelectionApply = requiredElement<HTMLButtonElement>(
+  'edge-selection-apply',
+);
 const viewportProgress = requiredElement('viewport-progress');
 const viewportProgressLabel = requiredElement('viewport-progress-label');
 const projectTree = requiredElement('project-tree');
@@ -257,22 +273,16 @@ dockPanels.register({
   shortcut: {code: 'Digit1', label: 'Alt 1', altKey: true},
 });
 dockPanels.register({
-  root: requiredElement('inspector-panel'),
-  handle: requiredElement<HTMLButtonElement>('inspector-handle'),
-  body: inspector,
-  shortcut: {code: 'Digit2', label: 'Alt 2', altKey: true},
-});
-dockPanels.register({
   root: requiredElement('design-arguments-panel'),
   handle: requiredElement<HTMLButtonElement>('design-arguments-handle'),
   body: requiredElement('design-arguments'),
-  shortcut: {code: 'Digit3', label: 'Alt 3', altKey: true},
+  shortcut: {code: 'Digit2', label: 'Alt 2', altKey: true},
 });
 dockPanels.register({
   root: requiredElement('elements-panel'),
   handle: requiredElement<HTMLButtonElement>('elements-handle'),
   body: elements,
-  shortcut: {code: 'Digit4', label: 'Alt 4', altKey: true},
+  shortcut: {code: 'Digit3', label: 'Alt 3', altKey: true},
 });
 
 const codeEditor = new CodeEditor(
@@ -292,11 +302,10 @@ let currentModule: ModelModule | null = null;
 let compileTimer: number | undefined;
 let completionPreviewTimer: number | undefined;
 let outlinePreviewTimer: number | undefined;
-let explodeValue = 0;
 let runRevision = 0;
 let positionToolSession: ToolSession | undefined;
 let positionToolInterruptedCompile = false;
-let edgeOperationTool: EdgeOperationTool | undefined;
+let edgeSelectionTool: EdgeSelectionTool | undefined;
 let contextFilePath: string | undefined;
 let preferredEvaluationContextId: string | undefined;
 let selectedDesignContextId: string | undefined;
@@ -304,17 +313,14 @@ let compilingDesignContextId: string | undefined;
 let activeCompletionFocus: CompletionFocus | undefined;
 let applyingFileRoute = false;
 const expandedCatalogIds = new Set<string>();
-const optimisticParameterValues = new Map<string, number>();
-
-type EdgeOperation = 'fillet' | 'chamfer';
-
-type EdgeOperationTool = {
-  operation: EdgeOperation;
-  occurrence: Occurrence;
-  receiver: SourceRef;
+type EdgeSelectionTool = {
+  targetId: string;
+  evaluationIndex: number;
+  operation: 'fillet' | 'chamfer';
+  sourceRef: SourceRef;
+  occurrenceKey: string;
   availableEdgeIds: readonly EdgeId[];
   selectedEdgeIds: readonly EdgeId[];
-  amount: number;
   session: ToolSession;
   interruptedCompile: boolean;
 };
@@ -338,6 +344,7 @@ const viewport = new ModelViewport(viewportHost, {
   onEdgeSelection: handleEdgeSelection,
   sourceDecorationProviders: [
     booleanOperationSourceDecoration,
+    edgeModificationSourceDecoration,
     elementSourceDecoration,
   ],
 });
@@ -369,7 +376,7 @@ const toolEngine = new ToolEngine({
 });
 
 codeEditor.onChange(change => {
-  cancelEdgeOperationTool();
+  cancelEdgeSelectionTool();
   persistProjectChange(projectFileSystem, change);
   sourceEditPopover.dismiss();
   if (change.kind !== 'content') renderProjectNavigation();
@@ -377,7 +384,6 @@ codeEditor.onChange(change => {
 });
 
 codeEditor.onCursorOffset(({file, offset}) => {
-  cancelEdgeOperationTool();
   const matched = viewport.selectBySourceOffset(
     file,
     offset,
@@ -402,6 +408,7 @@ codeEditor.onCursorOffset(({file, offset}) => {
   } else if (currentModule) {
     renderContextControls(currentModule);
   }
+  syncEdgeSelectionTool();
 });
 codeEditor.onCompletionFocus(handleCompletionFocus);
 codeEditor.onActiveFile((path, reason) => {
@@ -449,6 +456,9 @@ browserStorageButton.addEventListener('click', () => {
 });
 contextRenameFile.addEventListener('click', () => renameContextFile());
 contextDeleteFile.addEventListener('click', () => deleteContextFile());
+edgeSelectionClear.addEventListener('click', clearSelectedEdges);
+edgeSelectionCancel.addEventListener('click', () => cancelEdgeSelectionTool());
+edgeSelectionApply.addEventListener('click', commitEdgeSelectionTool);
 window.addEventListener('pointerdown', event => {
   if (!projectContextMenu.contains(event.target as Node)) {
     hideProjectContextMenu();
@@ -478,7 +488,12 @@ window.addEventListener('keydown', event => {
     event.preventDefault();
     return;
   }
-  if (event.key === 'Escape' && cancelEdgeOperationTool()) {
+  if (event.key === 'Escape' && cancelEdgeSelectionTool()) {
+    event.preventDefault();
+    return;
+  }
+  if (event.key === 'Enter' && edgeSelectionTool && !codeEditor.ownsFocus()) {
+    commitEdgeSelectionTool();
     event.preventDefault();
     return;
   }
@@ -767,7 +782,6 @@ async function runModel(
     }
     currentModule = nextModule;
     codeEditor.setModelDiagnostic();
-    optimisticParameterValues.clear();
     codeEditor.setDesignArguments(nextModule.designArguments);
     codeEditor.trackSourceRefs(toolSourceRefs(nextModule));
     selectedDesignContextId = nextModule.activeDesignContextId;
@@ -779,7 +793,6 @@ async function runModel(
       preferredEvaluationContextId = undefined;
     }
     viewport.renderModule(currentModule, selectedKey, firstRun);
-    explodeValue = 0;
     renderObjectCatalog(currentModule);
     const cursor = codeEditor.cursorSource();
     if (cursor) {
@@ -810,9 +823,10 @@ async function runModel(
     if (selected) {
       selectOccurrence(selected, false);
     } else {
-      renderInspectorEmpty();
+      renderElementsPanel();
       renderContextControls(currentModule);
     }
+    syncEdgeSelectionTool();
     hideViewportProgress();
   } catch (error) {
     if (revision !== runRevision) {
@@ -1097,15 +1111,6 @@ function inspectedFunctionId(module: ModelModule): string | undefined {
     : undefined;
 }
 
-function renderInspectorEmpty(): void {
-  inspector.replaceChildren();
-  const empty = document.createElement('p');
-  empty.className = 'inspector-copy';
-  empty.textContent = 'Select a model expression to inspect it.';
-  inspector.append(empty);
-  renderElementsPanel();
-}
-
 function renderObjectCatalog(module: ModelModule): void {
   window.clearTimeout(outlinePreviewTimer);
   objectCatalogList.replaceChildren();
@@ -1300,7 +1305,6 @@ function scopeButton(
 }
 
 function selectOccurrence(occurrence: Occurrence, revealSource: boolean): void {
-  renderInspector(occurrence);
   renderElementsPanel(occurrence);
   if (currentModule) renderContextControls(currentModule);
 
@@ -1375,31 +1379,6 @@ function preferredObjectSource(
   );
 }
 
-function renderInspector(occurrence: Occurrence): void {
-  inspector.replaceChildren();
-
-  const heading = document.createElement('div');
-  heading.className = 'inspector-heading';
-  const eyebrow = document.createElement('span');
-  eyebrow.className = 'inspector-eyebrow';
-  eyebrow.textContent =
-    occurrence.view === 'source'
-      ? 'SOURCE NODE'
-      : occurrence.depth === 0
-        ? 'MODEL SCOPE'
-        : 'LOCAL SCOPE';
-  const title = document.createElement('strong');
-  title.textContent = occurrence.node.name;
-  heading.append(eyebrow, title);
-  inspector.append(heading);
-
-  if (occurrence.view === 'model' && occurrence.depth === 0) {
-    renderModelInspector();
-  } else {
-    renderLocalInspector(occurrence);
-  }
-}
-
 function renderDesignArguments(module: ModelModule): void {
   const functionId = inspectedFunctionId(module);
   const contexts = module.designArguments.filter(
@@ -1461,156 +1440,49 @@ function designArgumentCall(context: DesignArgumentContext): string {
 
 function renderCurrentPanels(): void {
   const occurrence = viewport.getSelected();
-  if (occurrence) {
-    selectOccurrence(occurrence, false);
-  } else {
-    renderInspectorEmpty();
-  }
+  renderElementsPanel(occurrence);
   if (!occurrence && currentModule) renderContextControls(currentModule);
 }
 
-function renderModelInspector(): void {
-  const copy = document.createElement('p');
-  copy.className = 'inspector-copy';
-  copy.textContent =
-    'Model scope changes only the current view; it does not modify source.';
-
-  const control = rangeControl(
-    'Exploded view',
-    explodeValue,
-    -0,
-    32,
-    1,
-    value => {
-      explodeValue = value;
-      viewport.setExplode(value);
-    },
-  );
-
-  const fitButton = actionButton('Fit model', () => viewport.fit());
-  inspector.append(copy, control, fitButton);
-}
-
-function renderLocalInspector(occurrence: Occurrence): void {
-  const kind = document.createElement('div');
-  kind.className = 'object-kind';
-  kind.textContent = occurrence.node.kind.toUpperCase();
-  inspector.append(kind);
-
-  if (edgeOperationTool?.occurrence.key === occurrence.key) {
-    renderEdgeOperationInspector(edgeOperationTool);
+function syncEdgeSelectionTool(): void {
+  const scope = viewport.sourceEvaluation();
+  const occurrence = viewport.getSelected();
+  const operation = scope?.target.operation?.kind;
+  const selection = scope?.evaluation.selection;
+  const eligible =
+    scope?.target.kind === 'operation-selection' &&
+    selection?.kind === 'edge' &&
+    selection.ids.length === 0 &&
+    (operation === 'fillet' || operation === 'chamfer') &&
+    occurrence?.node.kind === 'solid';
+  if (!eligible || !scope || !occurrence) {
+    cancelEdgeSelectionTool();
     return;
   }
-
-  const hasRelativePositionContext = viewport.hasRelativePositionContext();
-  const sourceConstraintParameters = viewport.sourceConstraintParameters();
-  const parameters = uniqueParameters(
-    sourceConstraintParameters
-      ? parametersForConstraint(occurrence.node, sourceConstraintParameters)
-      : occurrence.node.parameters.filter(
-          parameter =>
-            parameter.operation !== 'offset' || hasRelativePositionContext,
-        ),
+  if (
+    edgeSelectionTool?.targetId === scope.target.id &&
+    edgeSelectionTool.evaluationIndex === scope.evaluationIndex &&
+    edgeSelectionTool.occurrenceKey === occurrence.key
+  ) {
+    return;
+  }
+  startEdgeSelection(
+    scope.target.id,
+    scope.evaluationIndex,
+    operation,
+    scope.target.sourceRef,
+    occurrence,
   );
-  if (parameters.length > 0) {
-    const sectionLabel = document.createElement('div');
-    sectionLabel.className = 'parameter-section-label';
-    sectionLabel.textContent = 'SOURCE PARAMETERS';
-    inspector.append(sectionLabel);
-    parameters.forEach(parameter => {
-      const impact =
-        currentModule?.parameterImpacts.get(parameter.target.id) ?? 1;
-      inspector.append(parameterControl(parameter, impact));
-    });
-  } else {
-    const empty = document.createElement('p');
-    empty.className = 'inspector-copy';
-    empty.textContent =
-      'This object has no numeric parameters that can be safely written back.';
-    inspector.append(empty);
-  }
-
-  const actions = document.createElement('div');
-  actions.className = 'inspector-actions';
-  actions.append(actionButton('Focus', () => viewport.focusSelection()));
-  if (occurrence.node.kind === 'solid' && edgeOperationReceiver(occurrence)) {
-    actions.append(
-      actionButton('Fillet', () => startEdgeOperation('fillet', occurrence)),
-      actionButton('Chamfer', () => startEdgeOperation('chamfer', occurrence)),
-    );
-  }
-  inspector.append(actions);
-
-  const note = document.createElement('p');
-  note.className = 'inspector-note';
-  note.textContent =
-    'Dragging uses a temporary preview. Committing updates the source and reruns it. Units are UI hints only.';
-  inspector.append(note);
 }
 
-function renderEdgeOperationInspector(tool: EdgeOperationTool): void {
-  const label = edgeOperationLabel(tool.operation);
-  const instructions = document.createElement('p');
-  instructions.className = 'inspector-copy';
-  instructions.textContent =
-    'Click model edges to toggle their stable IDs. Selected edges are written to source as one numeric array.';
-
-  const amountControl = document.createElement('label');
-  amountControl.className = 'edge-operation-amount';
-  const amountName = document.createElement('span');
-  amountName.textContent = tool.operation === 'fillet' ? 'Radius' : 'Distance';
-  const amountInput = document.createElement('input');
-  amountInput.className = 'parameter-number edge-operation-number';
-  amountInput.type = 'number';
-  amountInput.min = '0';
-  amountInput.step = 'any';
-  amountInput.value = String(tool.amount);
-  amountInput.setAttribute('aria-label', `${label} amount`);
-  amountInput.addEventListener('input', () => {
-    if (edgeOperationTool !== tool) return;
-    tool.amount = Number(amountInput.value);
-    updateEdgeOperationControls(tool);
-    previewEdgeOperation(tool);
-  });
-  amountInput.addEventListener('keydown', event => {
-    if (event.key === 'Enter') commitEdgeOperationTool();
-  });
-  amountControl.append(amountName, amountInput);
-
-  const selection = document.createElement('div');
-  selection.className = 'edge-operation-selection';
-  const selectionLabel = document.createElement('span');
-  selectionLabel.textContent = 'EDGES';
-  const selectionValue = document.createElement('strong');
-  selectionValue.className = 'edge-operation-selection-value';
-  selection.append(selectionLabel, selectionValue);
-
-  const actions = document.createElement('div');
-  actions.className = 'inspector-actions';
-  const cancel = actionButton('Cancel', () => cancelEdgeOperationTool());
-  const apply = actionButton(`Apply ${label}`, commitEdgeOperationTool);
-  apply.classList.add('primary');
-  apply.classList.add('edge-operation-apply');
-  actions.append(cancel, apply);
-
-  const note = document.createElement('p');
-  note.className = 'inspector-note';
-  note.textContent = `${tool.availableEdgeIds.length} selectable edges · Esc cancels without changing source.`;
-
-  inspector.append(instructions, amountControl, selection, actions, note);
-  updateEdgeOperationControls(tool);
-}
-
-function startEdgeOperation(
-  operation: EdgeOperation,
+function startEdgeSelection(
+  targetId: string,
+  evaluationIndex: number,
+  operation: 'fillet' | 'chamfer',
+  sourceRef: SourceRef,
   occurrence: Occurrence,
 ): void {
-  cancelEdgeOperationTool();
-  const receiver = edgeOperationReceiver(occurrence);
-  if (!receiver) {
-    showToolIssue('This solid does not map to one editable source expression.');
-    return;
-  }
+  cancelEdgeSelectionTool();
   viewport.cancelPositionTool();
   const interruptedCompile = interruptCompileForTool();
   let availableEdgeIds: readonly EdgeId[];
@@ -1621,142 +1493,96 @@ function startEdgeOperation(
     showToolIssue(error instanceof Error ? error.message : String(error));
     return;
   }
-  edgeOperationTool = {
+  edgeSelectionTool = {
+    targetId,
+    evaluationIndex,
     operation,
-    occurrence,
-    receiver,
+    sourceRef,
+    occurrenceKey: occurrence.key,
     availableEdgeIds,
     selectedEdgeIds: [],
-    amount: 1,
     session: toolEngine.begin(
-      `viewport.${operation}:${receiver.file}:${receiver.start}:${receiver.end}`,
+      `viewport.edge-selection:${sourceRef.file}:${sourceRef.start}:${sourceRef.end}`,
     ),
     interruptedCompile,
   };
   sourceEditPopover.dismiss();
   errorBar.hidden = true;
-  renderInspector(occurrence);
-  showEdgeOperationStatus(edgeOperationTool);
+  updateEdgeSelectionToolbar(edgeSelectionTool);
+}
+
+function clearSelectedEdges(): void {
+  const tool = edgeSelectionTool;
+  if (!tool || tool.selectedEdgeIds.length === 0) return;
+  tool.selectedEdgeIds = [];
+  viewport.clearSelectedEdges();
+  updateEdgeSelectionToolbar(tool);
+}
+
+function updateEdgeSelectionToolbar(
+  tool: EdgeSelectionTool,
+  hoveredEdgeId?: EdgeId,
+): void {
+  edgeSelectionTitle.textContent = `${edgeOperationLabel(tool.operation)} edges`;
+  const hovered =
+    hoveredEdgeId === undefined ? '' : ` · Hover E${hoveredEdgeId}`;
+  edgeSelectionSummary.textContent = `${formatEdgeIds(tool.selectedEdgeIds)} selected${hovered} · ${tool.availableEdgeIds.length} edges · Click selected edges again to remove them`;
+  edgeSelectionClear.disabled = tool.selectedEdgeIds.length === 0;
+  edgeSelectionApply.disabled = tool.selectedEdgeIds.length === 0;
+  edgeSelectionToolbar.hidden = false;
 }
 
 function handleEdgeSelection(event: EdgeSelectionEvent): void {
   if (event.kind === 'cancel') {
-    cancelEdgeOperationTool(false, false);
+    cancelEdgeSelectionTool(false);
     return;
   }
-  const tool = edgeOperationTool;
+  const tool = edgeSelectionTool;
   if (!tool) return;
   tool.selectedEdgeIds = event.selectedEdgeIds;
-  if (event.kind === 'change') {
-    updateEdgeOperationControls(tool);
-    previewEdgeOperation(tool);
-  }
-  showEdgeOperationStatus(tool, event.edgeId);
+  updateEdgeSelectionToolbar(tool, event.edgeId);
 }
 
-function previewEdgeOperation(tool: EdgeOperationTool): void {
-  if (!validEdgeOperation(tool)) return;
-  const resolution = tool.session.preview(edgeOperationIntent(tool));
-  if (resolution.status !== 'ready') showToolIssue(resolution.reason);
-}
-
-function commitEdgeOperationTool(): void {
-  const tool = edgeOperationTool;
+function commitEdgeSelectionTool(): void {
+  const tool = edgeSelectionTool;
   if (!tool) return;
-  if (!validEdgeOperation(tool)) {
-    showToolIssue(
-      tool.selectedEdgeIds.length === 0
-        ? 'Select at least one edge.'
-        : `${edgeOperationLabel(tool.operation)} size must be a positive number.`,
-    );
+  if (tool.selectedEdgeIds.length === 0) {
+    showToolIssue('Select at least one edge.');
     return;
   }
-  const intent = edgeOperationIntent(tool);
-  edgeOperationTool = undefined;
+  const intent = edgeSelectionIntent(tool);
+  edgeSelectionTool = undefined;
   viewport.endEdgeSelection();
-  toolStatus.hidden = true;
+  edgeSelectionToolbar.hidden = true;
   errorBar.hidden = true;
   const committed = commitToolSession(tool.session, intent);
   if (!committed) resumeCompileAfterTool(tool.interruptedCompile);
   renderCurrentPanels();
 }
 
-function cancelEdgeOperationTool(
-  updateViewport = true,
-  renderPanels = true,
-): boolean {
-  const tool = edgeOperationTool;
+function cancelEdgeSelectionTool(updateViewport = true): boolean {
+  const tool = edgeSelectionTool;
   if (!tool) return false;
-  edgeOperationTool = undefined;
+  edgeSelectionTool = undefined;
   tool.session.cancel();
   if (updateViewport) viewport.endEdgeSelection();
-  toolStatus.hidden = true;
+  edgeSelectionToolbar.hidden = true;
   resumeCompileAfterTool(tool.interruptedCompile);
-  if (renderPanels) renderCurrentPanels();
   return true;
 }
 
-function edgeOperationIntent(tool: EdgeOperationTool): ToolIntent {
+function edgeSelectionIntent(tool: EdgeSelectionTool): ToolIntent {
   return {
-    kind: 'operation.insert',
-    receiver: {sourceRef: tool.receiver},
-    operation: tool.operation,
-    arguments: [
-      {kind: 'number', value: tool.amount},
-      {
-        kind: 'array',
-        elements: tool.selectedEdgeIds.map(value => ({kind: 'number', value})),
-      },
-    ],
+    kind: 'expression.replace',
+    target: {sourceRef: tool.sourceRef},
+    expression: {
+      kind: 'array',
+      elements: tool.selectedEdgeIds.map(value => ({kind: 'number', value})),
+    },
   };
 }
 
-function edgeOperationReceiver(occurrence: Occurrence): SourceRef | undefined {
-  const scope = viewport.sourceEvaluation();
-  if (
-    scope &&
-    scope.target.kind !== 'constraint' &&
-    scope.target.kind !== 'element' &&
-    scope.evaluation.nodeIds.length === 1 &&
-    scope.evaluation.nodeIds[0] === occurrence.node.nodeId
-  ) {
-    return scope.target.sourceRef;
-  }
-  return occurrence.node.operation.sourceRef ?? primarySource(occurrence.node);
-}
-
-function validEdgeOperation(tool: EdgeOperationTool): boolean {
-  return (
-    Number.isFinite(tool.amount) &&
-    tool.amount > 0 &&
-    tool.selectedEdgeIds.length > 0
-  );
-}
-
-function updateEdgeOperationControls(tool: EdgeOperationTool): void {
-  const selected = inspector.querySelector<HTMLElement>(
-    '.edge-operation-selection-value',
-  );
-  if (selected) {
-    selected.textContent = formatEdgeIds(tool.selectedEdgeIds);
-  }
-  const apply = inspector.querySelector<HTMLButtonElement>(
-    '.edge-operation-apply',
-  );
-  if (apply) apply.disabled = !validEdgeOperation(tool);
-}
-
-function showEdgeOperationStatus(
-  tool: EdgeOperationTool,
-  hoveredEdgeId?: EdgeId,
-): void {
-  const hovered =
-    hoveredEdgeId === undefined ? '' : ` · Hover E${hoveredEdgeId}`;
-  toolStatus.textContent = `${edgeOperationLabel(tool.operation)}${hovered} · Selected ${formatEdgeIds(tool.selectedEdgeIds)} · Click edges to toggle · Esc to cancel`;
-  toolStatus.hidden = false;
-}
-
-function edgeOperationLabel(operation: EdgeOperation): string {
+function edgeOperationLabel(operation: EdgeSelectionTool['operation']): string {
   return operation === 'fillet' ? 'Fillet' : 'Chamfer';
 }
 
@@ -1766,38 +1592,6 @@ function formatEdgeIds(edgeIds: readonly EdgeId[]): string {
   return edgeIds.length > visible.length
     ? `${visible.join(', ')} +${edgeIds.length - visible.length}`
     : visible.join(', ');
-}
-
-function parametersForConstraint(
-  node: ModelSnapshotObject,
-  selected: readonly ParameterUsage[],
-): ParameterUsage[] {
-  const constraintParameters = new Set(
-    node.constraints.flatMap(constraint =>
-      constraint.parameters.map(parameterUsageKey),
-    ),
-  );
-  const selectedParameters = new Set(selected.map(parameterUsageKey));
-  return node.parameters.filter(parameter => {
-    const key = parameterUsageKey(parameter);
-    return !constraintParameters.has(key) || selectedParameters.has(key);
-  });
-}
-
-function parameterUsageKey(parameter: ParameterUsage): string {
-  const operation = parameter.operationRef;
-  const expression = parameter.expressionRef;
-  return [
-    parameter.operation,
-    parameter.argument,
-    operation.file,
-    operation.start,
-    operation.end,
-    expression.file,
-    expression.start,
-    expression.end,
-    parameter.target.id,
-  ].join(':');
 }
 
 function interruptCompileForTool(): boolean {
@@ -1816,136 +1610,8 @@ function resumeCompileAfterTool(interrupted: boolean): void {
   if (interrupted) void runModel();
 }
 
-function parameterControl(
-  parameter: ParameterUsage,
-  impact: number,
-): HTMLElement {
-  const {target} = parameter;
-  const rangeBounds = parameterRange(target);
-  let toolSession: ToolSession | undefined;
-  let interruptedCompile = false;
-  const beginToolSession = (): ToolSession => {
-    if (!toolSession) {
-      interruptedCompile = interruptCompileForTool();
-      toolSession = toolEngine.begin(`inspector.parameter:${target.id}`);
-    }
-    return toolSession;
-  };
-  const wrapper = document.createElement('section');
-  wrapper.className = 'parameter-control';
-  wrapper.dataset.targetId = target.id;
-
-  const row = document.createElement('div');
-  row.className = 'parameter-control-row';
-  const name = document.createElement('span');
-  name.className = 'parameter-name';
-  name.textContent = target.label;
-
-  const valueGroup = document.createElement('span');
-  valueGroup.className = 'parameter-value';
-  const numberInput = document.createElement('input');
-  numberInput.className = 'parameter-number';
-  numberInput.type = 'number';
-  if (target.min !== undefined && Number.isFinite(target.min)) {
-    numberInput.min = String(target.min);
-  }
-  if (target.max !== undefined && Number.isFinite(target.max)) {
-    numberInput.max = String(target.max);
-  }
-  numberInput.step =
-    target.step !== undefined && Number.isFinite(target.step) && target.step > 0
-      ? String(target.step)
-      : 'any';
-  numberInput.value = String(currentParameterValue(target));
-  numberInput.setAttribute('aria-label', target.label);
-  valueGroup.append(numberInput);
-  if (target.unit) {
-    const unit = document.createElement('span');
-    unit.textContent = target.unit;
-    valueGroup.append(unit);
-  }
-  row.append(name, valueGroup);
-
-  const range = rangeBounds
-    ? Object.assign(document.createElement('input'), {
-        type: 'range',
-        min: String(rangeBounds.min),
-        max: String(rangeBounds.max),
-        step: String(rangeBounds.step),
-        value: String(currentParameterValue(target)),
-      })
-    : undefined;
-
-  const details = document.createElement('p');
-  details.className = 'parameter-details';
-  const context = `${parameter.operation}.${parameter.argument}`;
-  details.textContent = target.description
-    ? `${target.description} · ${context}`
-    : context;
-  if (impact > 1) {
-    const impactLabel = document.createElement('span');
-    impactLabel.className = 'parameter-impact';
-    impactLabel.textContent = `Affects ${formatObjectCount(impact)}`;
-    details.append(' · ', impactLabel);
-  }
-
-  const preview = (value: number): void => {
-    if (!Number.isFinite(value)) return;
-    if (range) range.value = String(value);
-    numberInput.value = String(value);
-    const resolution = beginToolSession().preview(
-      parameterIntent(target, value),
-    );
-    if (resolution.status !== 'ready') {
-      showToolIssue(resolution.reason);
-    }
-  };
-  const commit = (value: number): void => {
-    if (!Number.isFinite(value)) return;
-    const session = beginToolSession();
-    if (value === currentParameterValue(target)) {
-      session.cancel();
-      resumeCompileAfterTool(interruptedCompile);
-      toolSession = undefined;
-      interruptedCompile = false;
-      return;
-    }
-    const committed = commitToolSession(
-      session,
-      parameterIntent(target, value),
-    );
-    if (!committed) {
-      resumeCompileAfterTool(interruptedCompile);
-    }
-    toolSession = undefined;
-    interruptedCompile = false;
-  };
-
-  range?.addEventListener('input', () => {
-    preview(Number(range.value));
-  });
-  range?.addEventListener('change', () => {
-    commit(Number(range.value));
-  });
-  numberInput.addEventListener('input', () => {
-    preview(Number(numberInput.value));
-  });
-  numberInput.addEventListener('change', () => {
-    commit(Number(numberInput.value));
-  });
-
-  wrapper.append(row);
-  if (range) wrapper.append(range);
-  wrapper.append(details);
-  return wrapper;
-}
-
 function parameterIntent(target: ParameterTarget, value: number): ToolIntent {
   return {kind: 'parameter.set', target, value};
-}
-
-function currentParameterValue(target: ParameterTarget): number {
-  return optimisticParameterValues.get(target.id) ?? target.value;
 }
 
 function handlePositionTool(event: PositionGizmoEvent): void {
@@ -1965,9 +1631,6 @@ function handlePositionTool(event: PositionGizmoEvent): void {
     positionToolSession = undefined;
     resumeCompileAfterTool(positionToolInterruptedCompile);
     positionToolInterruptedCompile = false;
-    if (event.binding.kind === 'parameter') {
-      updateParameterControl(event.binding.target.id, event.binding.value);
-    }
     hidePositionToolStatus();
     return;
   }
@@ -1976,9 +1639,6 @@ function handlePositionTool(event: PositionGizmoEvent): void {
   if (!session) {
     showToolIssue('The position tool session expired. Start the drag again.');
     return;
-  }
-  if (event.binding.kind === 'parameter') {
-    updateParameterControl(event.binding.target.id, event.value);
   }
   showPositionToolStatus(event.binding, event.value);
 
@@ -2057,20 +1717,6 @@ function hidePositionToolStatus(): void {
   toolStatus.hidden = true;
 }
 
-function updateParameterControl(targetId: string, value: number): void {
-  const control = [
-    ...inspector.querySelectorAll<HTMLElement>('.parameter-control'),
-  ].find(candidate => candidate.dataset.targetId === targetId);
-  if (!control) return;
-  const numberInput =
-    control.querySelector<HTMLInputElement>('.parameter-number');
-  const rangeInput = control.querySelector<HTMLInputElement>(
-    'input[type="range"]',
-  );
-  if (numberInput) numberInput.value = String(value);
-  if (rangeInput) rangeInput.value = String(value);
-}
-
 function formatDisplayNumber(value: number): string {
   return String(Number(value.toFixed(3)));
 }
@@ -2092,7 +1738,6 @@ function applyToolPreview(preview: ToolPreview): void {
 
 function commitToolPreview(preview: ToolPreview): void {
   if (preview.kind === 'parameter') {
-    optimisticParameterValues.set(preview.targetId, preview.value);
     viewport.commitParameterPreview(preview.targetId, preview.value);
   } else if (preview.kind === 'occurrence-translation') {
     viewport.commitOccurrenceTranslationPreview(preview.occurrenceKeys);
@@ -2213,59 +1858,6 @@ function showToolIssue(message: string): void {
   hideViewportProgress();
   errorBar.textContent = message;
   errorBar.hidden = false;
-}
-
-function uniqueParameters(
-  parameters: readonly ParameterUsage[],
-): ParameterUsage[] {
-  const unique = new Map<string, ParameterUsage>();
-  for (const parameter of parameters) {
-    if (!unique.has(parameter.target.id)) {
-      unique.set(parameter.target.id, parameter);
-    }
-  }
-  return [...unique.values()];
-}
-
-function rangeControl(
-  label: string,
-  value: number,
-  min: number,
-  max: number,
-  step: number,
-  onInput: (value: number) => void,
-): HTMLElement {
-  const wrapper = document.createElement('label');
-  wrapper.className = 'range-control';
-  const row = document.createElement('span');
-  const name = document.createElement('span');
-  name.textContent = label;
-  const output = document.createElement('output');
-  output.textContent = String(value);
-  row.append(name, output);
-
-  const input = document.createElement('input');
-  input.type = 'range';
-  input.min = String(min);
-  input.max = String(max);
-  input.step = String(step);
-  input.value = String(value);
-  input.addEventListener('input', () => {
-    const next = Number(input.value);
-    output.textContent = String(next);
-    onInput(next);
-  });
-  wrapper.append(row, input);
-  return wrapper;
-}
-
-function actionButton(label: string, action: () => void): HTMLButtonElement {
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = 'inspector-button';
-  button.textContent = label;
-  button.addEventListener('click', action);
-  return button;
 }
 
 function sourceHistoryAction(

@@ -49,12 +49,6 @@ export type ToolIntent =
       expression: ExpressionDraft;
     }>
   | Readonly<{
-      kind: 'operation.insert';
-      receiver: SourceAnchor;
-      operation: string;
-      arguments: readonly ExpressionDraft[];
-    }>
-  | Readonly<{
       kind: 'relation.offset';
       receiver: SourceAnchor;
       occurrenceKeys: readonly string[];
@@ -145,7 +139,6 @@ export class ToolEngine {
   constructor(readonly host: ToolHost) {
     this.register(new SetParameterResolver());
     this.register(new ReplaceExpressionResolver());
-    this.register(new InsertOperationResolver());
     this.register(new OffsetRelationResolver());
   }
 
@@ -323,41 +316,6 @@ class ReplaceExpressionResolver implements ToolIntentResolver {
         intent.target,
         renderExpression(intent.expression),
         'Replace model expression',
-        context,
-      );
-    } catch (error) {
-      return {
-        status: 'unsupported',
-        reason: error instanceof Error ? error.message : String(error),
-      };
-    }
-  }
-}
-
-class InsertOperationResolver implements ToolIntentResolver {
-  readonly kind = 'operation.insert' as const;
-
-  resolve(intent: ToolIntent, context: ResolveContext): ToolResolution {
-    if (intent.kind !== this.kind) {
-      return {
-        status: 'unsupported',
-        reason: 'The operation resolver received the wrong edit intent.',
-      };
-    }
-    if (!isIdentifier(intent.operation)) {
-      return {
-        status: 'unsupported',
-        reason: 'The operation name is not a valid identifier.',
-      };
-    }
-    try {
-      const receiver = context.readSource(intent.receiver.sourceRef);
-      const argumentsText = intent.arguments.map(renderExpression).join(', ');
-      return expressionPlan(
-        intent,
-        intent.receiver,
-        `(${receiver}).${intent.operation}(${argumentsText})`,
-        `Add .${intent.operation}() operation`,
         context,
       );
     } catch (error) {

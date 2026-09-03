@@ -142,7 +142,6 @@ export class ModelViewport {
   private highlightedOccurrenceKeys = new Set<string>();
   private selectionEmphasized = true;
   private selectedKey = 'root';
-  private explode = 0;
   private module: ModelModule | null = null;
   private selectedViewTarget: SelectedViewTarget = {kind: 'model'};
   private renderedViewTarget: RenderedViewTarget = {kind: 'model'};
@@ -513,24 +512,15 @@ export class ModelViewport {
     this.updatePositionGizmo();
   }
 
+  clearSelectedEdges(): void {
+    if (!this.edgeSelection) return;
+    this.edgeSelection.selectedEdgeIds.clear();
+    this.edgeSelection.hoveredEdgeId = undefined;
+    this.rebuildEdgeSelectionOverlay();
+  }
+
   hasRelativePositionContext(): boolean {
     return isRelativePositionContext(this.renderedSourceScope()?.target);
-  }
-
-  sourceConstraintParameters(): readonly ParameterUsage[] | undefined {
-    const scope = this.renderedSourceScope();
-    const occurrence = this.getSelected();
-    if (scope?.target.kind !== 'constraint' || !occurrence) {
-      return undefined;
-    }
-    return occurrence.node.constraints.find(
-      constraint => constraint.id === scope.evaluation.constraintId,
-    )?.parameters;
-  }
-
-  setExplode(value: number): void {
-    this.explode = value;
-    this.applyPreviewTransforms();
   }
 
   setParameterPreview(targetId: string, value: number): void {
@@ -616,8 +606,11 @@ export class ModelViewport {
     const occurrenceKeys = scope ? new Set(scope.occurrenceKeys) : undefined;
     this.root.updateMatrixWorld(true);
     const instances = decorations.flatMap<DecorationInstance>(decoration => {
-      if (decoration.kind === 'mesh') {
-        const object = createMeshDecorationObject(decoration);
+      if (decoration.kind === 'mesh' || decoration.kind === 'edges') {
+        const object =
+          decoration.kind === 'mesh'
+            ? createMeshDecorationObject(decoration)
+            : createEdgeDecorationObject(decoration);
         this.decorationRoot.add(object);
         return [{object}];
       }
@@ -695,13 +688,6 @@ export class ModelViewport {
     this.camera.far = Math.max(distance * 20, 1000);
     this.camera.updateProjectionMatrix();
     this.controls.update();
-  }
-
-  focusSelection(): void {
-    const occurrence = this.getSelected();
-    if (occurrence) {
-      this.fit(occurrence.object);
-    }
   }
 
   private buildObject(
@@ -1039,15 +1025,6 @@ export class ModelViewport {
       occurrence.object.position.x += offset[0];
       occurrence.object.position.y += offset[1];
       occurrence.object.position.z += offset[2];
-
-      if (
-        this.renderedViewTarget.kind === 'model' &&
-        occurrence.depth === 1 &&
-        this.explode > 0
-      ) {
-        const factor = 1 + this.explode / 55;
-        occurrence.object.position.multiplyScalar(factor);
-      }
     }
     this.root.updateMatrixWorld(true);
     this.updateDecorationTransforms();
@@ -1637,6 +1614,7 @@ function sourceSpan(sourceRef: SourceRef): number {
 }
 
 function sourceTargetPriority(target: SourceTarget): number {
+  if (target.kind === 'operation-selection') return -2;
   if (target.kind === 'element') return -1;
   if (target.kind === 'constraint') return 0;
   if (target.kind === 'operation-input') return 1;
@@ -1748,6 +1726,34 @@ function createMeshDecorationObject(
     decoration.appearance,
   );
   container.userData.decoration = decoration;
+  applyTransform(container, decoration.transform);
+  return container;
+}
+
+function createEdgeDecorationObject(
+  decoration: Extract<ViewportDecoration, {kind: 'edges'}>,
+): THREE.Object3D {
+  const container = new THREE.Group();
+  container.name = decoration.id;
+  container.userData.decoration = decoration;
+  const geometry = decoration.edgeIds
+    ? createEdgeSelectionGeometry(decoration.mesh, new Set(decoration.edgeIds))
+    : createEdgeGeometry(decoration.mesh);
+  if (geometry) {
+    const {appearance} = decoration;
+    const edges = new THREE.LineSegments(
+      geometry,
+      new THREE.LineBasicMaterial({
+        color: appearance.color,
+        transparent: (appearance.opacity ?? 1) < 1,
+        opacity: appearance.opacity ?? 1,
+        depthTest: appearance.depthTest ?? true,
+        depthWrite: false,
+      }),
+    );
+    edges.renderOrder = 6;
+    container.add(edges);
+  }
   applyTransform(container, decoration.transform);
   return container;
 }

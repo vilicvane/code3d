@@ -3,7 +3,7 @@ import type {
   SourceTarget,
   SourceTargetEvaluation,
 } from './model/compiler';
-import type {ElementKind, RenderMesh, Transform} from './model/runtime';
+import type {EdgeId, ElementKind, RenderMesh, Transform} from './model/runtime';
 
 export type ViewportDecorationAppearance = Readonly<{
   color: string;
@@ -21,6 +21,15 @@ export type ViewportMeshDecoration = Readonly<{
   kind: 'mesh';
   id: string;
   mesh: RenderMesh;
+  transform: Transform;
+  appearance: ViewportDecorationAppearance;
+}>;
+
+export type ViewportEdgeDecoration = Readonly<{
+  kind: 'edges';
+  id: string;
+  mesh: RenderMesh;
+  edgeIds?: readonly EdgeId[];
   transform: Transform;
   appearance: ViewportDecorationAppearance;
 }>;
@@ -54,7 +63,10 @@ export type ViewportSurfaceDecoration = Readonly<{
 }>;
 
 export type ViewportDecoration =
-  ViewportMeshDecoration | ViewportSurfaceDecoration | ViewportAnchorDecoration;
+  | ViewportMeshDecoration
+  | ViewportEdgeDecoration
+  | ViewportSurfaceDecoration
+  | ViewportAnchorDecoration;
 
 export type SourceDecorationContext = Readonly<{
   module: ModelModule;

@@ -147,8 +147,22 @@ function modifyEdges(
   amount: number,
   requestedIds?: readonly EdgeId[],
 ): EdgeModificationResult {
-  const edges = shape.edges;
   const selectedEdgeIds = selectEdgeIds(source, requestedIds);
+  if (selectedEdgeIds.length === 0) {
+    const result = shape.clone();
+    try {
+      return {
+        shape: result,
+        topology: preserveEdgeTopology(result, source),
+        selectedEdgeIds,
+      };
+    } catch (error) {
+      result.delete();
+      throw error;
+    }
+  }
+
+  const edges = shape.edges;
   const selected = new Set(selectedEdgeIds);
   const oc = getOC();
   const builder =
@@ -194,9 +208,6 @@ function selectEdgeIds(
 ): readonly EdgeId[] {
   if (requestedIds === undefined) {
     return [...topology.edgeIds];
-  }
-  if (requestedIds.length === 0) {
-    throw new Error('At least one edge ID is required.');
   }
   const requested = new Set<EdgeId>();
   for (const edgeId of requestedIds) {

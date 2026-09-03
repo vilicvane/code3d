@@ -11,6 +11,7 @@ import {
   isModelObject,
   modelElementReference,
   type Constraint,
+  type EdgeId,
   type ElementKind,
   type ModelOperationInputRole,
   type ModelOperationKind,
@@ -42,12 +43,21 @@ export type SourceTargetEvaluation = Readonly<{
     name: string;
     kind: ElementKind;
   }>;
+  selection?: Readonly<{
+    kind: 'edge';
+    ids: readonly EdgeId[];
+  }>;
 }>;
 
 export type SourceTarget = Readonly<{
   id: string;
   kind:
-    'value' | 'constraint' | 'element' | 'operation-input' | 'operation-output';
+    | 'value'
+    | 'constraint'
+    | 'element'
+    | 'operation-input'
+    | 'operation-output'
+    | 'operation-selection';
   sourceRef: SourceRef;
   receiverRef?: SourceRef;
   functionId?: string;
@@ -219,6 +229,12 @@ type SourceElementTrace = {
   >;
 };
 
+type EdgeSelectionSite = Readonly<{
+  siteId: string;
+  operation: 'fillet' | 'chamfer';
+  sourceRef: SourceRef;
+}>;
+
 type TraceFrame = Readonly<{
   siteId: string;
   execution: number;
@@ -318,6 +334,7 @@ const sourceValueTraces = new Map<string, SourceValueTrace>();
 const sourceInputTraces: SourceInputTrace[] = [];
 const sourceConstraintTraces = new Map<string, SourceConstraintTrace>();
 const sourceElementTraces = new Map<string, SourceElementTrace>();
+const edgeSelectionSites = new Map<string, EdgeSelectionSite>();
 const catalogTraces = new Map<string, CatalogTrace>();
 const parameterFrames: ParameterUsage[][] = [];
 const traceFrames: TraceFrame[] = [];
@@ -892,6 +909,7 @@ export function compileProject(
   sourceInputTraces.length = 0;
   sourceConstraintTraces.clear();
   sourceElementTraces.clear();
+  edgeSelectionSites.clear();
   catalogTraces.clear();
   parameterFrames.length = 0;
   traceFrames.length = 0;
@@ -1095,6 +1113,7 @@ export function compileProject(
     sourceInputTraces.length = 0;
     sourceConstraintTraces.clear();
     sourceElementTraces.clear();
+    edgeSelectionSites.clear();
     catalogTraces.clear();
     parameterFrames.length = 0;
     traceFrames.length = 0;
@@ -1283,6 +1302,48 @@ function buildSourceTargets(
   }
 
   const operationInputTargets = [...inputTargets.values()];
+  const operationSelectionTargets = [...edgeSelectionSites.values()].flatMap(
+    site => {
+      const evaluations = sourceInputTraces.flatMap<SourceTargetEvaluation>(
+        trace => {
+          if (trace.siteId !== site.siteId || trace.role !== 'source') {
+            return [];
+          }
+          const operation = operations.get(
+            `${trace.siteId}:execution:${trace.execution}`,
+          );
+          const selection = operation?.selections.find(
+            candidate =>
+              candidate.kind === 'edge' &&
+              candidate.inputNodeId === trace.objects[0]?.nodeId,
+          );
+          return operation && selection
+            ? [
+                {
+                  nodeIds: [selection.inputNodeId],
+                  operationId: operation.id,
+                  contextId: trace.contextId,
+                  selection: {kind: 'edge', ids: selection.ids},
+                },
+              ]
+            : [];
+        },
+      );
+      return evaluations.length > 0
+        ? [
+            {
+              id: `source:operation-selection:${site.siteId}:edge`,
+              kind: 'operation-selection' as const,
+              sourceRef: site.sourceRef,
+              functionId: designFunctionAt(site.sourceRef, designArguments),
+              evaluations,
+              contextTargetIds: [],
+              operation: {kind: site.operation, role: 'source' as const},
+            } satisfies SourceTarget,
+          ]
+        : [];
+    },
+  );
   const constraintTargets = [...sourceConstraintTraces.values()].map(trace => {
     const evaluations = trace.evaluations.flatMap<SourceTargetEvaluation>(
       evaluation => {
@@ -1393,6 +1454,7 @@ function buildSourceTargets(
   return [
     ...elementTargets,
     ...constraintTargets,
+    ...operationSelectionTargets,
     ...valueTargets,
     ...operationInputTargets.map(
       target =>
@@ -1562,6 +1624,10 @@ function createTraceTransformer(
           isTraceableCall(node, sourceFile)
         ) {
           const siteId = stableSourceId('expression', node, sourceFile);
+          const edgeSelection = edgeSelectionSite(node, siteId, sourceFile);
+          if (edgeSelection) {
+            edgeSelectionSites.set(siteId, edgeSelection);
+          }
           const parameterSignature = getParameterSignature(node);
           const parameterizedCall = parameterSignature
             ? instrumentCallParameters(
@@ -1610,6 +1676,44 @@ function createTraceTransformer(
       return ts.visitNode(sourceFile, visit) as ts.SourceFile;
     };
   };
+}
+
+function edgeSelectionSite(
+  node: ts.CallExpression,
+  siteId: string,
+  sourceFile: ts.SourceFile,
+): EdgeSelectionSite | undefined {
+  if (!ts.isPropertyAccessExpression(node.expression)) return undefined;
+  const operation = node.expression.name.text;
+  if (operation !== 'fillet' && operation !== 'chamfer') return undefined;
+  const argument = node.arguments[1];
+  if (!argument) return undefined;
+  const expression = unwrapParenthesizedExpression(argument);
+  if (
+    !ts.isArrayLiteralExpression(expression) ||
+    expression.elements.length > 0
+  ) {
+    return undefined;
+  }
+  return {
+    siteId,
+    operation,
+    sourceRef: sourceRef(
+      sourceFile.fileName,
+      argument.getStart(sourceFile),
+      argument.getEnd(),
+    ),
+  };
+}
+
+function unwrapParenthesizedExpression(
+  expression: ts.Expression,
+): ts.Expression {
+  let current = expression;
+  while (ts.isParenthesizedExpression(current)) {
+    current = current.expression;
+  }
+  return current;
 }
 
 function traceElementExpression(
