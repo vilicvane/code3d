@@ -5,6 +5,7 @@ import * as typeScriptLanguage from 'monaco-editor/languages/features/typescript
 import EditorWorker from 'monaco-editor/editor/editor.worker?worker';
 import TypeScriptWorker from 'monaco-editor/language/typescript/ts.worker?worker';
 import type {CursorOptions, Options} from 'prettier';
+import {code3dAnnotations} from './model/annotations';
 import {authoringTypes, type SourceRef} from './model/runtime';
 import {normalizeProjectPath, type ModelProject} from './project/project';
 import type {SourceTextEdit} from './tools/tool-system';
@@ -115,9 +116,16 @@ monaco.editor.defineTheme('code3d-dark', {
   },
 });
 
+const typeScriptTokenizationReady = monaco.editor.colorize(
+  "['code3d', 1]",
+  'typescript',
+  {},
+);
+
 export class CodeEditor {
   readonly editor: monaco.editor.IStandaloneCodeEditor;
   private readonly documents = new Map<string, ProjectDocument>();
+  private readonly annotationDecorations = new Map<string, string[]>();
   private readonly openPaths: string[] = [];
   private readonly changeListeners = new Set<
     (change: ProjectEditorChange) => void
@@ -172,6 +180,11 @@ export class CodeEditor {
       openCodeEditor: (source, resource, selectionOrPosition) =>
         source === this.editor &&
         this.openProjectResource(resource, selectionOrPosition),
+    });
+    void typeScriptTokenizationReady.then(() => {
+      for (const document of this.documents.values()) {
+        this.refreshAnnotationDecorations(document.path, document.model);
+      }
     });
   }
 
@@ -317,6 +330,12 @@ export class CodeEditor {
     return model.getValueInRange(sourceRange(model, sourceRef));
   }
 
+  sourceLine(sourceRef: SourceRef): number {
+    return this.requireDocument(sourceRef.file).model.getPositionAt(
+      sourceRef.start,
+    ).lineNumber;
+  }
+
   applySourceEdits(
     baseVersion: number,
     edits: readonly SourceTextEdit[],
@@ -413,10 +432,12 @@ export class CodeEditor {
       languageForPath(normalized),
       monaco.Uri.parse(`file:///workspace${normalized}`),
     );
+    this.refreshAnnotationDecorations(normalized, model);
     const document: ProjectDocument = {
       path: normalized,
       model,
       subscription: model.onDidChangeContent(() => {
+        this.refreshAnnotationDecorations(normalized, model);
         this.revision += 1;
         this.emitChange({
           kind: 'content',
@@ -432,7 +453,21 @@ export class CodeEditor {
     const document = this.requireDocument(path);
     document.subscription.dispose();
     document.model.dispose();
+    this.annotationDecorations.delete(path);
     this.documents.delete(path);
+  }
+
+  private refreshAnnotationDecorations(
+    path: string,
+    model: monaco.editor.ITextModel,
+  ): void {
+    this.annotationDecorations.set(
+      path,
+      model.deltaDecorations(
+        this.annotationDecorations.get(path) ?? [],
+        annotationDecorations(path, model),
+      ),
+    );
   }
 
   private activeModel(): monaco.editor.ITextModel {
@@ -602,6 +637,69 @@ function sourceEditExcerpts(
         changedEnd: end - lineStart - contentStart,
       };
     });
+}
+
+function annotationDecorations(
+  path: string,
+  model: monaco.editor.ITextModel,
+): monaco.editor.IModelDeltaDecoration[] {
+  const decorations: monaco.editor.IModelDeltaDecoration[] = [];
+  for (const annotation of code3dAnnotations(model.getValue())) {
+    decorations.push({
+      range: sourceRange(model, {
+        file: path,
+        start: annotation.start,
+        end: annotation.end,
+      }),
+      options: annotationDecorationOptions('code3d-annotation'),
+    });
+    if (annotation.name !== 'arguments' || annotation.value.length === 0) {
+      continue;
+    }
+
+    const tokens = monaco.editor.tokenize(annotation.value, 'typescript')[0];
+    if (!tokens || tokens.length === 0) {
+      decorations.push({
+        range: sourceRange(model, {
+          file: path,
+          start: annotation.valueStart,
+          end: annotation.valueEnd,
+        }),
+        options: annotationDecorationOptions('code3d-annotation-value'),
+      });
+      continue;
+    }
+    tokens.forEach((token, index) => {
+      const nextOffset = tokens[index + 1]?.offset ?? annotation.value.length;
+      decorations.push({
+        range: sourceRange(model, {
+          file: path,
+          start: annotation.valueStart + token.offset,
+          end: annotation.valueStart + nextOffset,
+        }),
+        options: annotationDecorationOptions(
+          `code3d-annotation-value code3d-annotation-value-${annotationTokenKind(token.type)}`,
+        ),
+      });
+    });
+  }
+  return decorations;
+}
+
+function annotationDecorationOptions(
+  inlineClassName: string,
+): monaco.editor.IModelDecorationOptions {
+  return {
+    inlineClassName,
+    inlineClassNameAffectsLetterSpacing: false,
+  };
+}
+
+function annotationTokenKind(tokenType: string): string {
+  if (tokenType.includes('string')) return 'string';
+  if (tokenType.includes('number')) return 'number';
+  if (tokenType.includes('keyword')) return 'keyword';
+  return 'plain';
 }
 
 function languageForPath(path: string): string {

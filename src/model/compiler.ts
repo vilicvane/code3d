@@ -19,22 +19,42 @@ import {
   type ParameterUsage,
   type SourceRef,
 } from './runtime';
+import {code3dAnnotations} from './annotations';
 
 export type SourceTargetEvaluation = Readonly<{
   nodeIds: readonly string[];
   operationId?: string;
+  contextId: string;
 }>;
 
 export type SourceTarget = Readonly<{
   id: string;
   kind: 'value' | 'operation-input' | 'operation-output';
   sourceRef: SourceRef;
+  functionId?: string;
   evaluations: readonly SourceTargetEvaluation[];
   contextTargetIds: readonly string[];
   operation?: Readonly<{
     kind: ModelOperationKind;
     role?: ModelOperationInputRole;
   }>;
+}>;
+
+export type EvaluationContext = Readonly<{
+  id: string;
+  kind: 'call' | 'design';
+  label: string;
+  sourceRef: SourceRef;
+}>;
+
+export type DesignArgumentContext = Readonly<{
+  id: string;
+  functionId: string;
+  functionName: string;
+  label: string;
+  functionRef: SourceRef;
+  annotationRef: SourceRef;
+  argumentsRef: SourceRef;
 }>;
 
 export type ObjectCatalogOccurrence = Readonly<{
@@ -63,13 +83,16 @@ export type ObjectCatalogEntry = Readonly<{
 }>;
 
 export type ModelModule = Readonly<{
-  fallback: ModelSnapshotObject;
+  fallback?: ModelSnapshotObject;
   objects: ReadonlyMap<string, ModelSnapshotObject>;
   operations: ReadonlyMap<string, ModelOperationSnapshot>;
   exports: ReadonlyMap<string, string>;
   catalog: readonly ObjectCatalogEntry[];
   parameterImpacts: ReadonlyMap<string, number>;
   sourceTargets: readonly SourceTarget[];
+  evaluationContexts: readonly EvaluationContext[];
+  designArguments: readonly DesignArgumentContext[];
+  activeDesignContextId?: string;
 }>;
 
 export class CompileFailure extends Error {
@@ -108,6 +131,12 @@ type StaticParameterTarget = {
   step?: number;
 };
 
+type ParsedDesignArgumentContext = DesignArgumentContext &
+  Readonly<{
+    binding: string;
+    argumentsSource: string;
+  }>;
+
 type ParameterArgument = Readonly<{
   name: string;
   label: string;
@@ -139,7 +168,9 @@ type SourceValueTrace = {
   id: string;
   kind: 'value' | 'operation-output';
   sourceRef: SourceRef;
-  evaluations: ModelObject[][];
+  evaluations: Array<
+    Readonly<{objects: readonly ModelObject[]; contextId: string}>
+  >;
 };
 
 type SourceInputTrace = Readonly<{
@@ -149,11 +180,13 @@ type SourceInputTrace = Readonly<{
   role: ModelOperationInputRole;
   index: number;
   objects: readonly ModelObject[];
+  contextId: string;
 }>;
 
 type TraceFrame = Readonly<{
   siteId: string;
   execution: number;
+  contextId: string;
 }>;
 
 const signatures = new Map<string, ParameterSignature>([
@@ -251,6 +284,9 @@ const catalogTraces = new Map<string, CatalogTrace>();
 const parameterFrames: ParameterUsage[][] = [];
 const traceFrames: TraceFrame[] = [];
 const traceExecutions = new Map<string, number>();
+const evaluationContexts = new Map<string, EvaluationContext>();
+const designContextFrames: EvaluationContext[] = [];
+const designRootObjects = new Set<ModelObject>();
 let latestTracedObject: ModelObject | undefined;
 let evaluationOrder = 0;
 const traceRuntime = Object.freeze({
@@ -264,9 +300,13 @@ const traceRuntime = Object.freeze({
   ): T {
     const execution = traceExecutions.get(id) ?? 0;
     traceExecutions.set(id, execution + 1);
+    const location = sourceRef(file, start, end);
+    const context =
+      currentEvaluationContext() ??
+      callEvaluationContext(id, execution, label, location);
     const parameters: ParameterUsage[] = [];
     parameterFrames.push(parameters);
-    traceFrames.push({siteId: id, execution});
+    traceFrames.push({siteId: id, execution, contextId: context.id});
     let result: T;
     try {
       result = run();
@@ -275,51 +315,45 @@ const traceRuntime = Object.freeze({
       parameterFrames.pop();
     }
     if (isConstraint(result)) {
-      result.attachSource(sourceRef(file, start, end));
+      result.attachSource(location);
       result.attachParameters(parameters);
     } else if (isModelObject(result)) {
       const order = ++evaluationOrder;
-      result.attachSource(sourceRef(file, start, end));
+      result.attachSource(location);
       result.attachParameters(parameters);
-      result.attachOperationTrace(
-        id,
-        execution,
-        order,
-        sourceRef(file, start, end),
-      );
-      recordSourceValue(
-        id,
-        'operation-output',
-        sourceRef(file, start, end),
-        result,
-      );
+      result.attachOperationTrace(id, execution, order, location);
+      recordSourceValue(id, 'operation-output', location, result, context.id);
+      if (context.kind === 'call') {
+        recordCatalogValue(
+          {
+            id,
+            label,
+            category: 'expression',
+            scope: 'local',
+            sourceRef: location,
+          },
+          result,
+          order,
+        );
+      }
+      return result;
+    } else {
+      recordSourceValue(id, 'value', location, result, context.id);
+    }
+    const order = ++evaluationOrder;
+    if (context.kind === 'call') {
       recordCatalogValue(
         {
           id,
           label,
           category: 'expression',
           scope: 'local',
-          sourceRef: sourceRef(file, start, end),
+          sourceRef: location,
         },
         result,
         order,
       );
-      return result;
-    } else {
-      recordSourceValue(id, 'value', sourceRef(file, start, end), result);
     }
-    const order = ++evaluationOrder;
-    recordCatalogValue(
-      {
-        id,
-        label,
-        category: 'expression',
-        scope: 'local',
-        sourceRef: sourceRef(file, start, end),
-      },
-      result,
-      order,
-    );
     return result;
   },
 
@@ -333,13 +367,67 @@ const traceRuntime = Object.freeze({
     scope: ObjectCatalogEntry['scope'],
     run: () => T,
   ): T {
+    const location = sourceRef(file, start, end);
+    const context =
+      currentEvaluationContext() ??
+      callEvaluationContext(
+        id,
+        nextTraceExecution(`binding:${id}`),
+        label,
+        location,
+      );
     const result = run();
-    recordSourceValue(id, 'value', sourceRef(file, start, end), result);
+    recordSourceValue(id, 'value', location, result, context.id);
     const order = ++evaluationOrder;
-    recordCatalogValue(
-      {id, label, category, scope, sourceRef: sourceRef(file, start, end)},
+    if (context.kind === 'call') {
+      recordCatalogValue(
+        {id, label, category, scope, sourceRef: location},
+        result,
+        order,
+      );
+    }
+    return result;
+  },
+
+  design<T>(
+    file: string,
+    functionStart: number,
+    functionEnd: number,
+    annotationStart: number,
+    annotationEnd: number,
+    id: string,
+    functionId: string,
+    label: string,
+    run: () => T,
+  ): T {
+    const context: EvaluationContext = {
+      id,
+      kind: 'design',
+      label,
+      sourceRef: sourceRef(file, annotationStart, annotationEnd),
+    };
+    evaluationContexts.set(id, context);
+    designContextFrames.push(context);
+    let result: T;
+    try {
+      result = run();
+    } catch (error) {
+      throw new CompileFailure(
+        error instanceof Error ? error.message : String(error),
+        file,
+        annotationStart,
+        annotationEnd - annotationStart,
+      );
+    } finally {
+      designContextFrames.pop();
+    }
+    modelObjectsIn(result).forEach(object => designRootObjects.add(object));
+    recordSourceValue(
+      `${functionId}:result`,
+      'value',
+      sourceRef(file, functionStart, functionEnd),
       result,
-      order,
+      id,
     );
     return result;
   },
@@ -367,6 +455,7 @@ const traceRuntime = Object.freeze({
         role,
         index,
         objects,
+        contextId: frame.contextId,
       });
     }
     return value;
@@ -404,11 +493,37 @@ const traceRuntime = Object.freeze({
   },
 });
 
+function currentEvaluationContext(): EvaluationContext | undefined {
+  const design = designContextFrames.at(-1);
+  if (design) return design;
+  const contextId = traceFrames[0]?.contextId;
+  return contextId ? evaluationContexts.get(contextId) : undefined;
+}
+
+function callEvaluationContext(
+  siteId: string,
+  execution: number,
+  label: string,
+  sourceRef: SourceRef,
+): EvaluationContext {
+  const id = `${siteId}:context:${execution}`;
+  const context = {id, kind: 'call', label, sourceRef} as const;
+  evaluationContexts.set(id, context);
+  return context;
+}
+
+function nextTraceExecution(id: string): number {
+  const execution = traceExecutions.get(id) ?? 0;
+  traceExecutions.set(id, execution + 1);
+  return execution;
+}
+
 function recordSourceValue(
   id: string,
   kind: SourceValueTrace['kind'],
   sourceRef: SourceRef,
   value: unknown,
+  contextId: string,
 ): void {
   const objects = modelObjectsIn(value);
   if (objects.length === 0) {
@@ -421,10 +536,12 @@ function recordSourceValue(
     sourceRef,
     evaluations: [],
   };
-  sourceTrace.evaluations.push(objects);
+  sourceTrace.evaluations.push({objects, contextId});
   objects.forEach(object => {
     tracedObjects.add(object);
-    latestTracedObject = object;
+    if (evaluationContexts.get(contextId)?.kind === 'call') {
+      latestTracedObject = object;
+    }
   });
   sourceValueTraces.set(key, sourceTrace);
 }
@@ -477,9 +594,216 @@ function modelObjectsIn(
   return [];
 }
 
-export function compileProject(project: ModelProject): ModelModule {
+function parseDesignArgumentContexts(
+  path: string,
+  source: string,
+): ParsedDesignArgumentContext[] {
+  const normalizedPath = normalizeProjectPath(path);
+  const sourceFile = ts.createSourceFile(
+    normalizedPath,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  const contexts: ParsedDesignArgumentContext[] = [];
+  const consumedAnnotations = new Set<number>();
+
+  for (const statement of sourceFile.statements) {
+    const designFunction = designFunctionFromStatement(statement);
+    if (!designFunction) continue;
+    const annotations = code3dAnnotations(
+      source,
+      statement.getFullStart(),
+      statement.getStart(sourceFile),
+    ).filter(annotation => annotation.name === 'arguments');
+    const functionId = `${normalizedPath}:function:${designFunction.name}`;
+    annotations.forEach((annotation, index) => {
+      consumedAnnotations.add(annotation.start);
+      const argumentsRef = sourceRef(
+        normalizedPath,
+        annotation.valueStart,
+        annotation.valueEnd,
+      );
+      const argumentsExpression = parseDesignArgumentsExpression(
+        annotation.value,
+        argumentsRef,
+      );
+      validateDesignArgumentCount(
+        argumentsExpression,
+        designFunction.parameters,
+        argumentsRef,
+      );
+      contexts.push({
+        id: `${functionId}:arguments:${index}`,
+        functionId,
+        functionName: designFunction.name,
+        label: designArgumentsLabel(annotation.value),
+        functionRef: sourceRef(
+          normalizedPath,
+          statement.getFullStart(),
+          designFunction.node.getEnd(),
+        ),
+        annotationRef: sourceRef(
+          normalizedPath,
+          annotation.start,
+          annotation.valueEnd,
+        ),
+        argumentsRef,
+        binding: designFunction.name,
+        argumentsSource: annotation.value,
+      });
+    });
+  }
+
+  const misplaced = code3dAnnotations(source).find(
+    annotation =>
+      annotation.name === 'arguments' &&
+      !consumedAnnotations.has(annotation.start),
+  );
+  if (misplaced) {
+    throw new CompileFailure(
+      '@code3d.arguments must annotate a named module-level function.',
+      normalizedPath,
+      misplaced.start,
+      misplaced.end - misplaced.start,
+    );
+  }
+  return contexts;
+}
+
+type DesignFunctionDeclaration = Readonly<{
+  name: string;
+  node: ts.Node;
+  parameters: readonly ts.ParameterDeclaration[];
+}>;
+
+function designFunctionFromStatement(
+  statement: ts.Statement,
+): DesignFunctionDeclaration | undefined {
+  if (ts.isFunctionDeclaration(statement) && statement.name && statement.body) {
+    return {
+      name: statement.name.text,
+      node: statement,
+      parameters: statement.parameters,
+    };
+  }
+  if (!ts.isVariableStatement(statement)) return undefined;
+  const declarations = statement.declarationList.declarations;
+  if (declarations.length !== 1) return undefined;
+  const [declaration] = declarations;
+  if (
+    !ts.isIdentifier(declaration.name) ||
+    !declaration.initializer ||
+    (!ts.isArrowFunction(declaration.initializer) &&
+      !ts.isFunctionExpression(declaration.initializer))
+  ) {
+    return undefined;
+  }
+  return {
+    name: declaration.name.text,
+    node: statement,
+    parameters: declaration.initializer.parameters,
+  };
+}
+
+function parseDesignArgumentsExpression(
+  source: string,
+  sourceRef: SourceRef,
+): ts.ArrayLiteralExpression {
+  const prefix = 'const __code3dArguments = (';
+  const parsed = ts.createSourceFile(
+    sourceRef.file,
+    `${prefix}${source});`,
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  const parseDiagnostics = (
+    parsed as ts.SourceFile & {parseDiagnostics: readonly ts.Diagnostic[]}
+  ).parseDiagnostics;
+  const error = parseDiagnostics.find(
+    diagnostic => diagnostic.category === ts.DiagnosticCategory.Error,
+  );
+  if (error) {
+    const relativeStart = Math.max(
+      0,
+      (error.start ?? prefix.length) - prefix.length,
+    );
+    throw new CompileFailure(
+      ts.flattenDiagnosticMessageText(error.messageText, '\n'),
+      sourceRef.file,
+      sourceRef.start + relativeStart,
+      error.length,
+    );
+  }
+  const statement = parsed.statements[0];
+  const declaration =
+    statement && ts.isVariableStatement(statement)
+      ? statement.declarationList.declarations[0]
+      : undefined;
+  const expression = declaration?.initializer;
+  const argumentsExpression =
+    expression && ts.isParenthesizedExpression(expression)
+      ? expression.expression
+      : expression;
+  if (
+    !argumentsExpression ||
+    !ts.isArrayLiteralExpression(argumentsExpression)
+  ) {
+    throw new CompileFailure(
+      '@code3d.arguments requires an array expression.',
+      sourceRef.file,
+      sourceRef.start,
+      Math.max(1, sourceRef.end - sourceRef.start),
+    );
+  }
+  return argumentsExpression;
+}
+
+function validateDesignArgumentCount(
+  argumentsExpression: ts.ArrayLiteralExpression,
+  parameters: readonly ts.ParameterDeclaration[],
+  sourceRef: SourceRef,
+): void {
+  if (
+    argumentsExpression.elements.some(ts.isSpreadElement) ||
+    parameters.some(parameter => parameter.dotDotDotToken)
+  ) {
+    return;
+  }
+  const required = parameters.filter(
+    parameter => !parameter.questionToken && !parameter.initializer,
+  ).length;
+  const count = argumentsExpression.elements.length;
+  if (required <= count && count <= parameters.length) return;
+  const expected =
+    required === parameters.length
+      ? String(required)
+      : `${required}–${parameters.length}`;
+  throw new CompileFailure(
+    `@code3d.arguments provides ${count} arguments; ${expected} expected.`,
+    sourceRef.file,
+    sourceRef.start,
+    Math.max(1, sourceRef.end - sourceRef.start),
+  );
+}
+
+function designArgumentsLabel(source: string): string {
+  const trimmed = source.trim();
+  return trimmed.slice(1, -1).trim() || 'no arguments';
+}
+
+export function compileProject(
+  project: ModelProject,
+  requestedDesignContextId?: string,
+): ModelModule {
   const files = new Map(
     project.files.map(file => [normalizeProjectPath(file.path), file.source]),
+  );
+  const designArguments = [...files].flatMap(([path, source]) =>
+    parseDesignArgumentContexts(path, source),
+  );
+  const activeDesignContext = designArguments.find(
+    context => context.id === requestedDesignContextId,
   );
   const entryPath = resolveModuleFile(
     normalizeProjectPath(project.entryPath),
@@ -496,6 +820,9 @@ export function compileProject(project: ModelProject): ModelModule {
   parameterFrames.length = 0;
   traceFrames.length = 0;
   traceExecutions.clear();
+  evaluationContexts.clear();
+  designContextFrames.length = 0;
+  designRootObjects.clear();
   latestTracedObject = undefined;
   evaluationOrder = 0;
   try {
@@ -515,7 +842,13 @@ export function compileProject(project: ModelProject): ModelModule {
       }
       const module: CommonJsModule = {exports: {}};
       modules.set(normalized, module);
-      const result = transpileSource(normalized, source);
+      const result = transpileSource(
+        normalized,
+        source,
+        activeDesignContext?.functionRef.file === normalized
+          ? activeDesignContext
+          : undefined,
+      );
       const execute = new Function(
         'require',
         'module',
@@ -548,6 +881,12 @@ export function compileProject(project: ModelProject): ModelModule {
     };
 
     executeModule(entryPath);
+    if (
+      activeDesignContext &&
+      !modules.has(activeDesignContext.functionRef.file)
+    ) {
+      executeModule(activeDesignContext.functionRef.file);
+    }
 
     const modelExports = new Map<string, ModelObject>();
     const exportNamesByObject = new Map<ModelObject, Set<string>>();
@@ -570,7 +909,7 @@ export function compileProject(project: ModelProject): ModelModule {
       modelExports.get('default') ??
       [...modelExports.values()].at(-1) ??
       latestTracedObject;
-    if (!fallbackObject) {
+    if (!fallbackObject && designArguments.length === 0) {
       throw new Error(
         'The current program did not produce a renderable ModelObject.',
       );
@@ -583,7 +922,9 @@ export function compileProject(project: ModelProject): ModelModule {
       snapshots.set(object, snapshot);
       return snapshot;
     };
-    const fallbackSnapshot = snapshotOf(fallbackObject);
+    const fallbackSnapshot = fallbackObject
+      ? snapshotOf(fallbackObject)
+      : undefined;
     const graphObjects = collectObjectGraph(tracedObjects);
     graphObjects.forEach(object => tracedObjects.add(object));
     const objectSnapshots = new Map(
@@ -643,8 +984,18 @@ export function compileProject(project: ModelProject): ModelModule {
             ],
           };
         }),
-      parameterImpacts: countParameterImpacts(fallbackSnapshot),
-      sourceTargets: buildSourceTargets(operations),
+      parameterImpacts: countParameterImpacts(
+        fallbackSnapshot
+          ? [fallbackSnapshot]
+          : [...designRootObjects].map(snapshotOf),
+      ),
+      sourceTargets: buildSourceTargets(operations, designArguments),
+      evaluationContexts: [...evaluationContexts.values()],
+      designArguments: designArguments.map(
+        ({binding: _binding, argumentsSource: _argumentsSource, ...context}) =>
+          context,
+      ),
+      activeDesignContextId: activeDesignContext?.id,
     };
   } finally {
     disposeModelObjects(tracedObjects);
@@ -655,13 +1006,23 @@ export function compileProject(project: ModelProject): ModelModule {
     parameterFrames.length = 0;
     traceFrames.length = 0;
     traceExecutions.clear();
+    evaluationContexts.clear();
+    designContextFrames.length = 0;
+    designRootObjects.clear();
     latestTracedObject = undefined;
     evaluationOrder = 0;
   }
 }
 
-function transpileSource(path: string, source: string): string {
-  const result = ts.transpileModule(source, {
+function transpileSource(
+  path: string,
+  source: string,
+  designContext?: ParsedDesignArgumentContext,
+): string {
+  const executableSource = designContext
+    ? `${source}\n${designEvaluationSource(designContext)}\n`
+    : source;
+  const result = ts.transpileModule(executableSource, {
     fileName: path,
     compilerOptions: {
       target: ts.ScriptTarget.ES2022,
@@ -671,7 +1032,7 @@ function transpileSource(path: string, source: string): string {
       isolatedModules: true,
     },
     reportDiagnostics: true,
-    transformers: {before: [createTraceTransformer()]},
+    transformers: {before: [createTraceTransformer(source.length)]},
   });
   const error = (result.diagnostics ?? []).find(
     diagnostic => diagnostic.category === ts.DiagnosticCategory.Error,
@@ -680,6 +1041,10 @@ function transpileSource(path: string, source: string): string {
     throw diagnosticFailure(error, path);
   }
   return result.outputText;
+}
+
+function designEvaluationSource(context: ParsedDesignArgumentContext): string {
+  return `__code3d.design(${JSON.stringify(context.functionRef.file)}, ${context.functionRef.start}, ${context.functionRef.end}, ${context.annotationRef.start}, ${context.annotationRef.end}, ${JSON.stringify(context.id)}, ${JSON.stringify(context.functionId)}, ${JSON.stringify(context.label)}, () => ${context.binding}(...(${context.argumentsSource})));`;
 }
 
 function resolveModuleFile(
@@ -725,16 +1090,17 @@ function collectObjectGraph(roots: Iterable<ModelObject>): ModelObject[] {
 
 function buildSourceTargets(
   operations: ReadonlyMap<string, ModelOperationSnapshot>,
+  designArguments: readonly ParsedDesignArgumentContext[],
 ): SourceTarget[] {
   const valueTargets = [...sourceValueTraces.values()].map(trace => {
-    const evaluations = trace.evaluations.map(objects => {
+    const evaluations = trace.evaluations.map(({objects, contextId}) => {
       const nodeIds = objects.map(object => object.nodeId);
       const operationId = [...operations.values()].find(
         operation =>
           operation.siteId === trace.id &&
           nodeIds.includes(operation.outputNodeId),
       )?.id;
-      return {nodeIds, operationId};
+      return {nodeIds, operationId, contextId};
     });
     const outputOperation = evaluations
       .map(evaluation =>
@@ -747,6 +1113,7 @@ function buildSourceTargets(
       id: `source:${trace.kind}:${trace.id}`,
       kind: trace.kind,
       sourceRef: trace.sourceRef,
+      functionId: designFunctionAt(trace.sourceRef, designArguments),
       evaluations,
       contextTargetIds: [],
       operation:
@@ -782,6 +1149,7 @@ function buildSourceTargets(
     target.evaluations.push({
       operationId: operation.id,
       objects: trace.objects,
+      contextId: trace.contextId,
     });
     inputTargets.set(key, target);
   }
@@ -796,9 +1164,11 @@ function buildSourceTargets(
           id: target.id,
           kind: target.kind,
           sourceRef: target.sourceRef,
+          functionId: designFunctionAt(target.sourceRef, designArguments),
           evaluations: target.evaluations.map(evaluation => ({
             nodeIds: evaluation.objects.map(object => object.nodeId),
             operationId: evaluation.operationId,
+            contextId: evaluation.contextId,
           })),
           contextTargetIds: operationInputTargets
             .filter(
@@ -820,11 +1190,34 @@ type MutableSourceInputTarget = {
   kind: 'operation-input';
   sourceRef: SourceRef;
   evaluations: Array<
-    Readonly<{operationId: string; objects: readonly ModelObject[]}>
+    Readonly<{
+      operationId: string;
+      objects: readonly ModelObject[];
+      contextId: string;
+    }>
   >;
   operationKind: ModelOperationKind;
   role: ModelOperationInputRole;
 };
+
+function designFunctionAt(
+  sourceRef: SourceRef,
+  designArguments: readonly ParsedDesignArgumentContext[],
+): string | undefined {
+  return designArguments
+    .filter(
+      candidate =>
+        candidate.functionRef.file === sourceRef.file &&
+        candidate.functionRef.start <= sourceRef.start &&
+        sourceRef.end <= candidate.functionRef.end,
+    )
+    .sort(
+      (left, right) =>
+        left.functionRef.end -
+        left.functionRef.start -
+        (right.functionRef.end - right.functionRef.start),
+    )[0]?.functionId;
+}
 
 function sharesOperation(
   left: MutableSourceInputTarget,
@@ -838,13 +1231,21 @@ function sharesOperation(
   );
 }
 
-function createTraceTransformer(): ts.TransformerFactory<ts.SourceFile> {
+function createTraceTransformer(
+  authorSourceLength: number,
+): ts.TransformerFactory<ts.SourceFile> {
   return context => {
     const {factory} = context;
 
     return sourceFile => {
       const bindings = collectStaticParameterTargets(sourceFile);
       const visit: ts.Visitor = node => {
+        if (
+          !ts.isSourceFile(node) &&
+          node.getStart(sourceFile) >= authorSourceLength
+        ) {
+          return node;
+        }
         const visited = ts.visitEachChild(node, visit, context);
         if (
           ts.isVariableDeclaration(node) &&
@@ -1655,17 +2056,13 @@ function parseCode3dMetadata(
   statement: ts.VariableStatement,
   sourceFile: ts.SourceFile,
 ): Partial<StaticParameterTarget> {
-  const comments =
-    ts.getLeadingCommentRanges(sourceFile.text, statement.getFullStart()) ?? [];
-  const text = comments
-    .map(({pos, end}) => sourceFile.text.slice(pos, end))
-    .join('\n');
   const metadata: Partial<StaticParameterTarget> = {};
-  const pattern =
-    /@code3d\.(label|description|kind|unit|min|max|step)\s+([^\r\n*]+)/g;
-  for (const match of text.matchAll(pattern)) {
-    const key = match[1];
-    const value = match[2].trim();
+  const annotations = code3dAnnotations(
+    sourceFile.text,
+    statement.getFullStart(),
+    statement.getStart(sourceFile),
+  );
+  for (const {name: key, value} of annotations) {
     if (key === 'label' || key === 'description' || key === 'unit') {
       metadata[key] = value;
     } else if (key === 'kind' && isParameterKind(value)) {
@@ -1858,7 +2255,7 @@ function isTraceableExpression(
 }
 
 function countParameterImpacts(
-  root: ModelSnapshotObject,
+  roots: readonly ModelSnapshotObject[],
 ): ReadonlyMap<string, number> {
   const impacts = new Map<string, number>();
   const visit = (node: ModelSnapshotObject): void => {
@@ -1870,7 +2267,7 @@ function countParameterImpacts(
     }
     node.children.forEach(visit);
   };
-  visit(root);
+  roots.forEach(visit);
   return impacts;
 }
 

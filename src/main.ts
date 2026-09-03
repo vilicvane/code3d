@@ -201,10 +201,19 @@ let explodeValue = 0;
 let runRevision = 0;
 let positionToolSession: ToolSession | undefined;
 let contextFilePath: string | undefined;
+let preferredEvaluationContextId: string | undefined;
+let selectedDesignContextId: string | undefined;
 const expandedCatalogIds = new Set<string>();
 
 const viewport = new ModelViewport(viewportHost, {
   onSelect: occurrence => {
+    if (occurrence.view === 'model') {
+      preferredEvaluationContextId = undefined;
+      selectedDesignContextId = undefined;
+    } else {
+      preferredEvaluationContextId =
+        viewport.sourceEvaluation()?.evaluation.contextId;
+    }
     selectOccurrence(occurrence, occurrence.view === 'model');
   },
   onNavigateSource: sourceRef => {
@@ -232,10 +241,29 @@ codeEditor.onChange(change => {
 });
 
 codeEditor.onCursorOffset(({file, offset}) => {
-  viewport.selectBySourceOffset(file, offset);
+  const matched = viewport.selectBySourceOffset(
+    file,
+    offset,
+    undefined,
+    preferredEvaluationContextId,
+  );
+  if (!matched && currentModule) {
+    const designContext = designContextAt(currentModule, file, offset);
+    if (
+      designContext &&
+      currentModule.activeDesignContextId !== designContext.id
+    ) {
+      activateDesignContext(designContext.id);
+      return;
+    }
+  }
+  preferredEvaluationContextId =
+    viewport.sourceEvaluation()?.evaluation.contextId;
   const occurrence = viewport.getSelected();
   if (occurrence) {
     selectOccurrence(occurrence, false);
+  } else if (currentModule) {
+    renderScopes(currentModule);
   }
 });
 codeEditor.onActiveFile(() => renderProjectNavigation());
@@ -303,6 +331,8 @@ function persistProjectChange(
 async function resetProject(): Promise<void> {
   try {
     await persistenceQueue;
+    preferredEvaluationContextId = undefined;
+    selectedDesignContextId = undefined;
     initialProject = await projectFileSystem.replace(
       defaultProject,
       currentProjectMigrationVersion,
@@ -411,7 +441,9 @@ function showProjectIssue(error: unknown): void {
   errorBar.hidden = false;
 }
 
-async function runModel(): Promise<void> {
+async function runModel(
+  designContextId = selectedDesignContextId,
+): Promise<void> {
   window.clearTimeout(compileTimer);
   window.clearTimeout(outlinePreviewTimer);
   viewport.restoreOutlinePreview();
@@ -422,25 +454,65 @@ async function runModel(): Promise<void> {
   try {
     const selectedKey = viewport.getSelected()?.key ?? 'root';
     const firstRun = currentModule === null;
-    const nextModule = await compiler.compile(codeEditor.project());
+    const nextModule = await compiler.compile(
+      codeEditor.project(),
+      designContextId,
+    );
     if (revision !== runRevision) {
       return;
     }
     currentModule = nextModule;
+    selectedDesignContextId = nextModule.activeDesignContextId;
+    if (
+      preferredEvaluationContextId === designContextId &&
+      !nextModule.activeDesignContextId
+    ) {
+      preferredEvaluationContextId = undefined;
+    }
     viewport.renderModule(currentModule, selectedKey, firstRun);
     explodeValue = 0;
-    renderScopes(currentModule);
     renderObjectCatalog(currentModule);
     const cursor = codeEditor.cursorSource();
     if (cursor) {
-      viewport.selectBySourceOffset(cursor.file, cursor.offset, selectedKey);
+      const matched = viewport.selectBySourceOffset(
+        cursor.file,
+        cursor.offset,
+        selectedKey,
+        preferredEvaluationContextId,
+      );
+      if (!matched) {
+        const designContext = designContextAt(
+          currentModule,
+          cursor.file,
+          cursor.offset,
+        );
+        if (
+          designContext &&
+          currentModule.activeDesignContextId !== designContext.id
+        ) {
+          activateDesignContext(designContext.id);
+          return;
+        }
+      }
     }
+    preferredEvaluationContextId =
+      viewport.sourceEvaluation()?.evaluation.contextId;
     const selected = viewport.getSelected();
     if (selected) {
       selectOccurrence(selected, false);
+    } else {
+      renderInspectorEmpty();
+      renderScopes(currentModule);
     }
-    const objectCount = countObjects(currentModule.fallback);
-    setRunState('ready', formatObjectCount(objectCount));
+    const objectCount = currentModule.fallback
+      ? countObjects(currentModule.fallback)
+      : currentModule.objects.size;
+    setRunState(
+      'ready',
+      objectCount > 0
+        ? formatObjectCount(objectCount)
+        : `${currentModule.designArguments.length} design contexts`,
+    );
   } catch (error) {
     if (revision !== runRevision) {
       return;
@@ -457,11 +529,117 @@ async function runModel(): Promise<void> {
 
 function renderScopes(module: ModelModule): void {
   scopeList.replaceChildren();
-  scopeList.append(
-    scopeButton('Overview', module.fallback.nodeId, () => {
-      viewport.selectRoot();
-    }),
+  if (module.fallback) {
+    scopeList.append(
+      scopeButton(
+        'Overview',
+        () => {
+          preferredEvaluationContextId = undefined;
+          selectedDesignContextId = undefined;
+          viewport.selectRoot();
+          const selected = viewport.getSelected();
+          if (selected) selectOccurrence(selected, false);
+        },
+        viewport.sourceEvaluation() === undefined,
+      ),
+    );
+  }
+
+  const sourceEvaluation = viewport.sourceEvaluation();
+  const cursor = codeEditor.cursorSource();
+  const cursorDesignContext = cursor
+    ? designContextAt(module, cursor.file, cursor.offset)
+    : undefined;
+  const functionId =
+    sourceEvaluation?.target.functionId ?? cursorDesignContext?.functionId;
+  if (!functionId) return;
+
+  const contexts = new Map(
+    module.evaluationContexts.map(context => [context.id, context]),
   );
+  const callContextIds = sourceEvaluation
+    ? [
+        ...new Set(
+          sourceEvaluation.target.evaluations
+            .map(evaluation => evaluation.contextId)
+            .filter(contextId => contexts.get(contextId)?.kind === 'call'),
+        ),
+      ]
+    : [];
+  callContextIds.forEach((contextId, index) => {
+    const context = contexts.get(contextId)!;
+    const fileName = context.sourceRef.file.slice(
+      context.sourceRef.file.lastIndexOf('/') + 1,
+    );
+    const location = `${fileName}:${codeEditor.sourceLine(context.sourceRef)}`;
+    scopeList.append(
+      scopeButton(
+        callContextIds.length === 1
+          ? `Call · ${location}`
+          : `Call ${index + 1} · ${location}`,
+        () => selectCompiledEvaluationContext(contextId, false),
+        sourceEvaluation?.evaluation.contextId === contextId,
+      ),
+    );
+  });
+
+  module.designArguments
+    .filter(context => context.functionId === functionId)
+    .forEach(context => {
+      scopeList.append(
+        scopeButton(
+          `Arguments · ${context.label}`,
+          () => {
+            if (!selectCompiledEvaluationContext(context.id, true)) {
+              activateDesignContext(context.id);
+            }
+          },
+          sourceEvaluation?.evaluation.contextId === context.id,
+        ),
+      );
+    });
+}
+
+function selectCompiledEvaluationContext(
+  contextId: string,
+  design: boolean,
+): boolean {
+  if (!viewport.selectEvaluationContext(contextId)) return false;
+  preferredEvaluationContextId = contextId;
+  selectedDesignContextId = design ? contextId : undefined;
+  const occurrence = viewport.getSelected();
+  if (occurrence) selectOccurrence(occurrence, false);
+  return true;
+}
+
+function activateDesignContext(contextId: string): void {
+  preferredEvaluationContextId = contextId;
+  selectedDesignContextId = contextId;
+  void runModel(contextId);
+}
+
+function designContextAt(module: ModelModule, file: string, offset: number) {
+  return module.designArguments
+    .filter(
+      context =>
+        context.functionRef.file === file &&
+        context.functionRef.start <= offset &&
+        offset <= context.functionRef.end,
+    )
+    .sort(
+      (left, right) =>
+        left.functionRef.end -
+        left.functionRef.start -
+        (right.functionRef.end - right.functionRef.start),
+    )[0];
+}
+
+function renderInspectorEmpty(): void {
+  inspector.replaceChildren();
+  const empty = document.createElement('p');
+  empty.className = 'inspector-copy';
+  empty.textContent = 'Select a model expression to inspect it.';
+  inspector.append(empty);
 }
 
 function renderObjectCatalog(module: ModelModule): void {
@@ -645,13 +823,13 @@ function containsSourceRef(
 
 function scopeButton(
   label: string,
-  nodeId: string,
   action: () => void,
+  active = false,
 ): HTMLButtonElement {
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'scope-button';
-  button.dataset.nodeId = nodeId;
+  button.classList.toggle('active', active);
   button.textContent = label;
   button.addEventListener('click', action);
   return button;
@@ -659,7 +837,7 @@ function scopeButton(
 
 function selectOccurrence(occurrence: Occurrence, revealSource: boolean): void {
   renderInspector(occurrence);
-  updateActiveScope(occurrence);
+  if (currentModule) renderScopes(currentModule);
 
   if (revealSource) {
     const sourceRef = primarySource(occurrence.node);
@@ -1088,14 +1266,6 @@ function actionButton(label: string, action: () => void): HTMLButtonElement {
   button.textContent = label;
   button.addEventListener('click', action);
   return button;
-}
-
-function updateActiveScope(occurrence: Occurrence): void {
-  const buttons =
-    scopeList.querySelectorAll<HTMLButtonElement>('.scope-button');
-  buttons.forEach(button => {
-    button.classList.toggle('active', occurrence.view === 'model');
-  });
 }
 
 function setRunState(

@@ -32,7 +32,10 @@ export class ModelCompilerClient {
     this.worker = this.createWorker();
   }
 
-  compile(project: ModelProject): Promise<ModelModule> {
+  compile(
+    project: ModelProject,
+    designContextId?: string,
+  ): Promise<ModelModule> {
     if (this.pending) {
       this.pending.reject(new Error('Compilation superseded.'));
       window.clearTimeout(this.pending.timeout);
@@ -58,7 +61,7 @@ export class ModelCompilerClient {
       }, timeoutMilliseconds);
 
       this.pending = {id, resolve, reject, timeout};
-      this.worker.postMessage({id, project});
+      this.worker.postMessage({id, project, designContextId});
     });
   }
 

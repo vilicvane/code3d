@@ -129,6 +129,8 @@ Status: complete. Rootless selection and optional exports were implemented in
 - When the caret is on an operation input, render dimmed peer context that can
   be clicked to switch input focus; a declaration or value expression remains
   isolated.
+- Treat ordinary calls and JSDoc design arguments as explicit evaluation
+  contexts for source inside model-producing functions.
 
 Status: the runtime index and Model Outline are implemented. Metadata includes
 module/local bindings, anonymous source expressions, export aliases,
@@ -152,6 +154,11 @@ and can become the new focus directly from the viewport.
 is complete: source targets preserve evaluation boundaries, so chained calls
 show the value produced at that step while collection bindings show the
 collection returned by their own evaluation.
+[R-015](requests/closed/R-015-function-design-arguments.md) is complete:
+repeated `@code3d.arguments [...]` annotations provide source-only design
+contexts for called or uncalled functions, while the GUI switches those
+contexts alongside ordinary runtime calls and Monaco highlights recognized
+code3d annotations.
 [R-012](requests/R-012-render-downstream-context-while-editing-relations.md)
 will extend relation-source views with the concrete downstream composition
 context that consumes each constrained value. [R-013](requests/R-013-drill-from-composition-preview-to-object-source.md)

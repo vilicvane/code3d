@@ -185,24 +185,37 @@ export class ModelViewport {
     this.module = module;
     this.selectedViewTarget = {kind: 'model'};
     this.outlinePreviewRestore = undefined;
-    this.renderModelView(selectedKey, fitCamera);
+    if (module.fallback) {
+      this.renderModelView(selectedKey, fitCamera);
+    } else {
+      this.renderedViewTarget = {kind: 'model'};
+      this.resetRenderedView();
+    }
   }
 
   selectBySourceOffset(
     file: string,
     offset: number,
     preferredOccurrenceKey?: string,
+    preferredContextId?: string,
   ): boolean {
     const match = this.sourceTargetAt(file, offset);
     if (!match) {
       return false;
     }
 
+    const matchingContextIndex = preferredContextId
+      ? match.evaluations.findIndex(
+          evaluation => evaluation.contextId === preferredContextId,
+        )
+      : -1;
     const preferredEvaluationIndex =
-      this.renderedViewTarget.kind === 'source' &&
-      this.renderedViewTarget.targetId === match.id
-        ? this.renderedViewTarget.evaluationIndex
-        : sourceEvaluationIndex(preferredOccurrenceKey);
+      matchingContextIndex >= 0
+        ? matchingContextIndex
+        : this.renderedViewTarget.kind === 'source' &&
+            this.renderedViewTarget.targetId === match.id
+          ? this.renderedViewTarget.evaluationIndex
+          : sourceEvaluationIndex(preferredOccurrenceKey);
     const evaluationIndex = match.evaluations[preferredEvaluationIndex]
       ? preferredEvaluationIndex
       : 0;
@@ -232,10 +245,48 @@ export class ModelViewport {
     return true;
   }
 
+  selectEvaluationContext(contextId: string): boolean {
+    const scope = this.renderedSourceScope();
+    if (!scope) return false;
+    const evaluationIndex = scope.target.evaluations.findIndex(
+      evaluation => evaluation.contextId === contextId,
+    );
+    if (evaluationIndex < 0) return false;
+    this.selectedViewTarget = {
+      kind: 'source',
+      targetId: scope.target.id,
+      evaluationIndex,
+    };
+    this.outlinePreviewRestore = undefined;
+    this.renderSourceTarget(scope.target, evaluationIndex, false);
+    return true;
+  }
+
+  sourceEvaluation():
+    | Readonly<{
+        target: SourceTarget;
+        evaluation: SourceTargetEvaluation;
+        evaluationIndex: number;
+      }>
+    | undefined {
+    const scope = this.renderedSourceScope();
+    return scope && this.renderedViewTarget.kind === 'source'
+      ? {
+          ...scope,
+          evaluationIndex: this.renderedViewTarget.evaluationIndex,
+        }
+      : undefined;
+  }
+
   selectRoot(): void {
     this.selectedViewTarget = {kind: 'model'};
     this.outlinePreviewRestore = undefined;
-    if (!this.occurrences.has('root') && this.module) {
+    if (!this.module?.fallback) {
+      this.renderedViewTarget = {kind: 'model'};
+      this.resetRenderedView();
+      return;
+    }
+    if (!this.occurrences.has('root')) {
       this.renderModelView('root', true);
     }
     this.selectKey('root', true);
@@ -484,7 +535,7 @@ export class ModelViewport {
   }
 
   private renderModelView(selectedKey: string, fitCamera: boolean): void {
-    if (!this.module) {
+    if (!this.module?.fallback) {
       return;
     }
     this.renderedViewTarget = {kind: 'model'};

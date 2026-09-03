@@ -128,6 +128,10 @@ export type SocketCapHoleOptions = Readonly<{
       }>;
 }>;
 
+/**
+ * @code3d.arguments ['M6', 18]
+ * @code3d.arguments ['M8', 30]
+ */
 export function socketCapScrew(
   input: SocketCapScrewInput,
   length: number,
@@ -202,6 +206,9 @@ export function socketCapScrew(
   );
 }
 
+/**
+ * @code3d.arguments ['M6', {depth: 10, fit: 'normal', counterbore: true}]
+ */
 export function socketCapHole(
   input: SocketCapScrewInput,
   options: SocketCapHoleOptions,

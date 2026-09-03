@@ -423,6 +423,28 @@ kbd {
   border-bottom: 1px solid #d8ff3e88;
 }
 
+.monaco-editor .code3d-annotation {
+  color: #aebcff !important;
+  font-weight: 600;
+}
+
+.monaco-editor .code3d-annotation-value {
+  color: #e7e8df !important;
+  font-weight: 400;
+}
+
+.monaco-editor .code3d-annotation-value-string {
+  color: #e8bd76 !important;
+}
+
+.monaco-editor .code3d-annotation-value-number {
+  color: #8ed5d1 !important;
+}
+
+.monaco-editor .code3d-annotation-value-keyword {
+  color: #d8ff3e !important;
+}
+
 .source-edit-popover {
   position: absolute;
   bottom: 14px;
