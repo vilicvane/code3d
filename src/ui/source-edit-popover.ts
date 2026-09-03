@@ -1,4 +1,5 @@
 import * as monaco from 'monaco-editor/editor';
+import type {SourceRef} from '../model/runtime';
 
 export type SourceEditExcerpt = Readonly<{
   file: string;
@@ -6,6 +7,7 @@ export type SourceEditExcerpt = Readonly<{
   source: string;
   changedStart: number;
   changedEnd: number;
+  sourceRef: SourceRef;
 }>;
 
 export class SourceEditPopover {
@@ -14,7 +16,10 @@ export class SourceEditPopover {
   private readonly edits = document.createElement('div');
   private dismissTimer?: number;
 
-  constructor(container: HTMLElement) {
+  constructor(
+    container: HTMLElement,
+    private readonly navigateSource: (sourceRef: SourceRef) => void,
+  ) {
     this.root.className = 'source-edit-popover';
     this.root.hidden = true;
     this.root.setAttribute('aria-live', 'polite');
@@ -46,7 +51,7 @@ export class SourceEditPopover {
     this.summary.textContent = summary;
     this.edits.replaceChildren(
       ...excerpts.map((excerpt, index) =>
-        sourceEditBlock(excerpt, index, excerpts.length),
+        sourceEditBlock(excerpt, index, excerpts.length, this.navigateSource),
       ),
     );
     this.root.hidden = false;
@@ -73,6 +78,7 @@ function sourceEditBlock(
   excerpt: SourceEditExcerpt,
   index: number,
   editCount: number,
+  navigateSource: (sourceRef: SourceRef) => void,
 ): HTMLElement {
   const block = document.createElement('section');
   block.className = 'source-edit-block';
@@ -84,8 +90,15 @@ function sourceEditBlock(
       : excerpt.file;
   block.append(label);
 
-  const source = document.createElement('div');
+  const source = document.createElement('button');
+  source.type = 'button';
   source.className = 'source-edit-code';
+  source.title = `Open ${excerpt.file}:${excerpt.lineNumber}`;
+  source.setAttribute(
+    'aria-label',
+    `Open changed source at ${excerpt.file}, line ${excerpt.lineNumber}`,
+  );
+  source.addEventListener('click', () => navigateSource(excerpt.sourceRef));
   const lineNumber = document.createElement('span');
   lineNumber.className = 'source-edit-line-number';
   lineNumber.textContent = String(excerpt.lineNumber);

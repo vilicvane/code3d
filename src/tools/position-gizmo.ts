@@ -123,6 +123,14 @@ export class PositionGizmo {
     return this.controls.axis !== null || this.active !== undefined;
   }
 
+  commitParameterValue(targetId: string, value: number): void {
+    for (const [axis, binding] of this.bindings) {
+      if (binding.kind === 'parameter' && binding.target.id === targetId) {
+        this.bindings.set(axis, {...binding, value});
+      }
+    }
+  }
+
   cancel(): boolean {
     const active = this.active;
     if (!active) {

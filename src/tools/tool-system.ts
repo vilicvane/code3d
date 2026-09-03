@@ -35,7 +35,6 @@ export type ExpressionDraft =
 
 export type SourceAnchor = Readonly<{
   sourceRef: SourceRef;
-  expectedText?: string;
 }>;
 
 export type ToolIntent =
@@ -114,18 +113,21 @@ export type ToolCommitResult =
 
 export interface ToolHost {
   sourceVersion(): number;
+  resolveSourceRef(sourceRef: SourceRef): SourceRef | undefined;
   readSource(sourceRef: SourceRef): string;
   applySourceEdits(
     baseVersion: number,
     edits: readonly SourceTextEdit[],
   ): boolean;
   applyPreview(preview: ToolPreview): void;
+  commitPreview(preview: ToolPreview): void;
   clearPreview(preview: ToolPreview, reason: 'replace' | 'end'): void;
 }
 
 type ResolveContext = Readonly<{
   toolId: string;
   baseVersion: number;
+  resolveSourceRef(sourceRef: SourceRef): SourceRef | undefined;
   readSource(sourceRef: SourceRef): string;
 }>;
 
@@ -148,21 +150,10 @@ export class ToolEngine {
   }
 
   begin(toolId: string): ToolSession {
-    return new ToolSession(this, toolId, this.host.sourceVersion());
+    return new ToolSession(this, toolId);
   }
 
-  resolve(
-    toolId: string,
-    baseVersion: number,
-    intent: ToolIntent,
-  ): ToolResolution {
-    if (this.host.sourceVersion() !== baseVersion) {
-      return {
-        status: 'conflict',
-        reason:
-          'The source changed after the tool started. Retry with the latest model.',
-      };
-    }
+  resolve(toolId: string, intent: ToolIntent): ToolResolution {
     const resolver = this.resolvers.get(intent.kind);
     if (!resolver) {
       return {
@@ -172,7 +163,8 @@ export class ToolEngine {
     }
     return resolver.resolve(intent, {
       toolId,
-      baseVersion,
+      baseVersion: this.host.sourceVersion(),
+      resolveSourceRef: sourceRef => this.host.resolveSourceRef(sourceRef),
       readSource: sourceRef => this.host.readSource(sourceRef),
     });
   }
@@ -190,18 +182,13 @@ export class ToolSession {
   constructor(
     private readonly engine: ToolEngine,
     readonly toolId: string,
-    readonly baseVersion: number,
   ) {}
 
   preview(intent: ToolIntent): ToolResolution {
     if (this.closed) {
       return {status: 'conflict', reason: 'The tool session has ended.'};
     }
-    const resolution = this.engine.resolve(
-      this.toolId,
-      this.baseVersion,
-      intent,
-    );
+    const resolution = this.engine.resolve(this.toolId, intent);
     if (resolution.status !== 'ready') {
       this.clearActivePreview('end');
       return resolution;
@@ -222,11 +209,7 @@ export class ToolSession {
         reason: 'The tool session has no edit to commit.',
       };
     }
-    const resolution = this.engine.resolve(
-      this.toolId,
-      this.baseVersion,
-      intent,
-    );
+    const resolution = this.engine.resolve(this.toolId, intent);
     if (resolution.status !== 'ready') {
       this.clearActivePreview('end');
       this.closed = true;
@@ -246,6 +229,12 @@ export class ToolSession {
           'The source edit could not be applied atomically. Retry with the latest model.',
       };
     }
+    if (this.activePreview) {
+      this.engine.host.clearPreview(this.activePreview, 'replace');
+    }
+    this.engine.host.applyPreview(resolution.plan.preview);
+    this.engine.host.commitPreview(resolution.plan.preview);
+    this.activePreview = undefined;
     this.closed = true;
     return {status: 'committed', plan: resolution.plan};
   }
@@ -279,17 +268,23 @@ class SetParameterResolver implements ToolIntentResolver {
         reason: 'A parameter must be a finite number.',
       };
     }
-    const currentText = context.readSource(intent.target.sourceRef);
-    if (parseSourceNumber(currentText) !== intent.target.value) {
+    const sourceRef = context.resolveSourceRef(intent.target.sourceRef);
+    if (!sourceRef) {
       return {
         status: 'conflict',
-        reason:
-          'The parameter source changed. Wait for the model update and retry.',
+        reason: 'The parameter no longer maps to the current source.',
+      };
+    }
+    const currentText = context.readSource(sourceRef);
+    if (parseSourceNumber(currentText) === undefined) {
+      return {
+        status: 'conflict',
+        reason: 'The parameter is no longer a numeric source expression.',
       };
     }
     const edits: readonly SourceTextEdit[] = [
       {
-        sourceRef: intent.target.sourceRef,
+        sourceRef,
         expectedText: currentText,
         text: formatSourceNumber(intent.value),
       },
@@ -426,16 +421,17 @@ function expressionPlan(
   summary: string,
   context: ResolveContext,
 ): ToolResolution {
-  const currentText = context.readSource(anchor.sourceRef);
-  if (
-    anchor.expectedText !== undefined &&
-    anchor.expectedText !== currentText
-  ) {
-    return {status: 'conflict', reason: 'The expression source changed.'};
+  const sourceRef = context.resolveSourceRef(anchor.sourceRef);
+  if (!sourceRef) {
+    return {
+      status: 'conflict',
+      reason: 'The expression no longer maps to the current source.',
+    };
   }
+  const currentText = context.readSource(sourceRef);
   const edits: readonly SourceTextEdit[] = [
     {
-      sourceRef: anchor.sourceRef,
+      sourceRef,
       expectedText: currentText,
       text: replacement,
     },

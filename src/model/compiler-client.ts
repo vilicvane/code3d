@@ -36,11 +36,7 @@ export class ModelCompilerClient {
     project: ModelProject,
     designContextId?: string,
   ): Promise<ModelModule> {
-    if (this.pending) {
-      this.pending.reject(new Error('Compilation superseded.'));
-      window.clearTimeout(this.pending.timeout);
-      this.restartWorker();
-    }
+    this.cancel();
 
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
@@ -63,6 +59,20 @@ export class ModelCompilerClient {
       this.pending = {id, resolve, reject, timeout};
       this.worker.postMessage({id, project, designContextId});
     });
+  }
+
+  isCompiling(): boolean {
+    return this.pending !== null;
+  }
+
+  cancel(): boolean {
+    const pending = this.pending;
+    if (!pending) return false;
+    this.pending = null;
+    window.clearTimeout(pending.timeout);
+    pending.reject(new Error('Compilation superseded.'));
+    this.restartWorker();
+    return true;
   }
 
   private createWorker(): Worker {

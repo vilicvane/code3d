@@ -81,7 +81,12 @@ export class ModelViewport {
   private readonly root = new THREE.Group();
   private readonly occurrences = new Map<string, Occurrence>();
   private readonly parameterPreviews = new Map<string, number>();
+  private readonly committedParameterPreviews = new Map<string, number>();
   private readonly occurrenceTranslationPreviews = new Map<string, Vec3>();
+  private readonly committedOccurrenceTranslationPreviews = new Map<
+    string,
+    Vec3
+  >();
   private readonly decorationLayers = new Map<string, THREE.Group>();
   private readonly positionGizmo: PositionGizmo;
   private readonly onSelect: ModelViewportOptions['onSelect'];
@@ -383,7 +388,12 @@ export class ModelViewport {
   }
 
   clearParameterPreview(targetId: string): void {
-    this.parameterPreviews.delete(targetId);
+    const committed = this.committedParameterPreviews.get(targetId);
+    if (committed === undefined) {
+      this.parameterPreviews.delete(targetId);
+    } else {
+      this.parameterPreviews.set(targetId, committed);
+    }
     if (this.highlightedTargetId === targetId) {
       this.highlightedTargetId = this.parameterPreviews.keys().next().value;
       this.rebuildImpactHelpers();
@@ -391,25 +401,52 @@ export class ModelViewport {
     this.applyPreviewTransforms();
   }
 
+  commitParameterPreview(targetId: string, value: number): void {
+    this.committedParameterPreviews.set(targetId, value);
+    this.parameterPreviews.set(targetId, value);
+    this.positionGizmo.commitParameterValue(targetId, value);
+  }
+
   setOccurrenceTranslationPreview(
     occurrenceKeys: readonly string[],
     delta: Vec3,
   ): void {
-    occurrenceKeys.forEach(key =>
-      this.occurrenceTranslationPreviews.set(key, delta),
-    );
+    occurrenceKeys.forEach(key => {
+      const committed = this.committedOccurrenceTranslationPreviews.get(key);
+      this.occurrenceTranslationPreviews.set(key, [
+        (committed?.[0] ?? 0) + delta[0],
+        (committed?.[1] ?? 0) + delta[1],
+        (committed?.[2] ?? 0) + delta[2],
+      ]);
+    });
     this.highlightedOccurrenceKeys = new Set(occurrenceKeys);
     this.rebuildImpactHelpers();
     this.applyPreviewTransforms();
   }
 
   clearOccurrenceTranslationPreview(occurrenceKeys: readonly string[]): void {
-    occurrenceKeys.forEach(key =>
-      this.occurrenceTranslationPreviews.delete(key),
+    occurrenceKeys.forEach(key => {
+      const committed = this.committedOccurrenceTranslationPreviews.get(key);
+      if (committed) {
+        this.occurrenceTranslationPreviews.set(key, committed);
+      } else {
+        this.occurrenceTranslationPreviews.delete(key);
+      }
+    });
+    this.highlightedOccurrenceKeys = new Set(
+      this.committedOccurrenceTranslationPreviews.keys(),
     );
-    this.highlightedOccurrenceKeys.clear();
     this.rebuildImpactHelpers();
     this.applyPreviewTransforms();
+  }
+
+  commitOccurrenceTranslationPreview(occurrenceKeys: readonly string[]): void {
+    occurrenceKeys.forEach(key => {
+      const translation = this.occurrenceTranslationPreviews.get(key);
+      if (translation) {
+        this.committedOccurrenceTranslationPreviews.set(key, translation);
+      }
+    });
   }
 
   setDecorations(
@@ -693,7 +730,9 @@ export class ModelViewport {
     this.occurrences.clear();
     this.rebuildSelectionHelper();
     this.parameterPreviews.clear();
+    this.committedParameterPreviews.clear();
     this.occurrenceTranslationPreviews.clear();
+    this.committedOccurrenceTranslationPreviews.clear();
     this.highlightedTargetId = undefined;
     this.highlightedOccurrenceKeys.clear();
     this.decorationLayers.clear();

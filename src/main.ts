@@ -222,12 +222,14 @@ let outlinePreviewTimer: number | undefined;
 let explodeValue = 0;
 let runRevision = 0;
 let positionToolSession: ToolSession | undefined;
+let positionToolInterruptedCompile = false;
 let contextFilePath: string | undefined;
 let preferredEvaluationContextId: string | undefined;
 let selectedDesignContextId: string | undefined;
 let compilingDesignContextId: string | undefined;
 let applyingFileRoute = false;
 const expandedCatalogIds = new Set<string>();
+const optimisticParameterValues = new Map<string, number>();
 
 const viewport = new ModelViewport(viewportHost, {
   onSelect: occurrence => {
@@ -246,13 +248,17 @@ const viewport = new ModelViewport(viewportHost, {
   onPositionTool: handlePositionTool,
   sourceDecorationProviders: [booleanOperationSourceDecoration],
 });
-const sourceEditPopover = new SourceEditPopover(viewportHost);
+const sourceEditPopover = new SourceEditPopover(viewportHost, sourceRef =>
+  codeEditor.revealSource(sourceRef, true),
+);
 const toolEngine = new ToolEngine({
   sourceVersion: () => codeEditor.sourceVersion(),
+  resolveSourceRef: sourceRef => codeEditor.resolveSourceRef(sourceRef),
   readSource: sourceRef => codeEditor.readSource(sourceRef),
   applySourceEdits: (baseVersion, edits) =>
     codeEditor.applySourceEdits(baseVersion, edits),
   applyPreview: preview => applyToolPreview(preview),
+  commitPreview: preview => commitToolPreview(preview),
   clearPreview: (preview, reason) => clearToolPreview(preview, reason),
 });
 
@@ -260,8 +266,13 @@ codeEditor.onChange(change => {
   persistProjectChange(projectFileSystem, change);
   renderProjectNavigation();
   setRunState('pending', 'Waiting for update');
+  runRevision += 1;
+  compiler.cancel();
   window.clearTimeout(compileTimer);
-  compileTimer = window.setTimeout(runModel, 420);
+  compileTimer = window.setTimeout(() => {
+    compileTimer = undefined;
+    void runModel();
+  }, 420);
 });
 
 codeEditor.onCursorOffset(({file, offset}) => {
@@ -513,9 +524,11 @@ async function runModel(
   designContextId = selectedDesignContextId,
 ): Promise<void> {
   window.clearTimeout(compileTimer);
+  compileTimer = undefined;
   window.clearTimeout(outlinePreviewTimer);
   viewport.restoreOutlinePreview();
   const revision = ++runRevision;
+  const sourceVersion = codeEditor.sourceVersion();
   compilingDesignContextId = designContextId;
   if (designContextId) {
     renderCurrentPanels();
@@ -531,11 +544,16 @@ async function runModel(
       codeEditor.project(),
       designContextId,
     );
-    if (revision !== runRevision) {
+    if (
+      revision !== runRevision ||
+      sourceVersion !== codeEditor.sourceVersion()
+    ) {
       return;
     }
     currentModule = nextModule;
+    optimisticParameterValues.clear();
     codeEditor.setDesignArguments(nextModule.designArguments);
+    codeEditor.trackSourceRefs(toolSourceRefs(nextModule));
     selectedDesignContextId = nextModule.activeDesignContextId;
     compilingDesignContextId = undefined;
     if (
@@ -1155,13 +1173,36 @@ function parameterUsageKey(parameter: ParameterUsage): string {
   ].join(':');
 }
 
+function interruptCompileForTool(): boolean {
+  const scheduled = compileTimer !== undefined;
+  const compiling = compiler.isCompiling();
+  if (!scheduled && !compiling) return false;
+  runRevision += 1;
+  window.clearTimeout(compileTimer);
+  compileTimer = undefined;
+  compiler.cancel();
+  return true;
+}
+
+function resumeCompileAfterTool(interrupted: boolean): void {
+  if (interrupted) void runModel();
+}
+
 function parameterControl(
   parameter: ParameterUsage,
   impact: number,
 ): HTMLElement {
   const {target} = parameter;
   const rangeBounds = parameterRange(target);
-  const toolSession = toolEngine.begin(`inspector.parameter:${target.id}`);
+  let toolSession: ToolSession | undefined;
+  let interruptedCompile = false;
+  const beginToolSession = (): ToolSession => {
+    if (!toolSession) {
+      interruptedCompile = interruptCompileForTool();
+      toolSession = toolEngine.begin(`inspector.parameter:${target.id}`);
+    }
+    return toolSession;
+  };
   const wrapper = document.createElement('section');
   wrapper.className = 'parameter-control';
   wrapper.dataset.targetId = target.id;
@@ -1187,7 +1228,7 @@ function parameterControl(
     target.step !== undefined && Number.isFinite(target.step) && target.step > 0
       ? String(target.step)
       : 'any';
-  numberInput.value = String(target.value);
+  numberInput.value = String(currentParameterValue(target));
   numberInput.setAttribute('aria-label', target.label);
   valueGroup.append(numberInput);
   if (target.unit) {
@@ -1203,7 +1244,7 @@ function parameterControl(
         min: String(rangeBounds.min),
         max: String(rangeBounds.max),
         step: String(rangeBounds.step),
-        value: String(target.value),
+        value: String(currentParameterValue(target)),
       })
     : undefined;
 
@@ -1224,35 +1265,44 @@ function parameterControl(
     if (!Number.isFinite(value)) return;
     if (range) range.value = String(value);
     numberInput.value = String(value);
-    const resolution = toolSession.preview(parameterIntent(target, value));
+    const resolution = beginToolSession().preview(
+      parameterIntent(target, value),
+    );
     if (resolution.status !== 'ready') {
       showToolIssue(resolution.reason);
     }
   };
   const commit = (value: number): void => {
     if (!Number.isFinite(value)) return;
-    if (value === target.value) {
-      toolSession.cancel();
+    const session = beginToolSession();
+    if (value === currentParameterValue(target)) {
+      session.cancel();
+      resumeCompileAfterTool(interruptedCompile);
+      toolSession = undefined;
+      interruptedCompile = false;
       return;
     }
-    commitToolSession(toolSession, parameterIntent(target, value));
+    const committed = commitToolSession(
+      session,
+      parameterIntent(target, value),
+    );
+    if (!committed) {
+      resumeCompileAfterTool(interruptedCompile);
+    }
+    toolSession = undefined;
+    interruptedCompile = false;
   };
 
-  let settled = false;
   range?.addEventListener('input', () => {
-    if (!settled) preview(Number(range.value));
+    preview(Number(range.value));
   });
   range?.addEventListener('change', () => {
-    if (settled) return;
-    settled = true;
     commit(Number(range.value));
   });
   numberInput.addEventListener('input', () => {
-    if (!settled) preview(Number(numberInput.value));
+    preview(Number(numberInput.value));
   });
   numberInput.addEventListener('change', () => {
-    if (settled) return;
-    settled = true;
     commit(Number(numberInput.value));
   });
 
@@ -1266,9 +1316,14 @@ function parameterIntent(target: ParameterTarget, value: number): ToolIntent {
   return {kind: 'parameter.set', target, value};
 }
 
+function currentParameterValue(target: ParameterTarget): number {
+  return optimisticParameterValues.get(target.id) ?? target.value;
+}
+
 function handlePositionTool(event: PositionGizmoEvent): void {
   if (event.kind === 'begin') {
     positionToolSession?.cancel();
+    positionToolInterruptedCompile = interruptCompileForTool();
     positionToolSession = toolEngine.begin(
       `viewport.translate:${event.binding.axis}:${positionBindingId(event.binding)}`,
     );
@@ -1280,6 +1335,8 @@ function handlePositionTool(event: PositionGizmoEvent): void {
   if (event.kind === 'cancel') {
     positionToolSession?.cancel();
     positionToolSession = undefined;
+    resumeCompileAfterTool(positionToolInterruptedCompile);
+    positionToolInterruptedCompile = false;
     if (event.binding.kind === 'parameter') {
       updateParameterControl(event.binding.target.id, event.binding.value);
     }
@@ -1309,10 +1366,16 @@ function handlePositionTool(event: PositionGizmoEvent): void {
 
   if (Math.abs(event.value - event.binding.value) < 1e-9) {
     session.cancel();
+    resumeCompileAfterTool(positionToolInterruptedCompile);
   } else {
-    commitToolSession(session, positionIntent(event.binding, event.value));
+    const committed = commitToolSession(
+      session,
+      positionIntent(event.binding, event.value),
+    );
+    if (!committed) resumeCompileAfterTool(positionToolInterruptedCompile);
   }
   positionToolSession = undefined;
+  positionToolInterruptedCompile = false;
   hidePositionToolStatus();
 }
 
@@ -1399,6 +1462,15 @@ function applyToolPreview(preview: ToolPreview): void {
   }
 }
 
+function commitToolPreview(preview: ToolPreview): void {
+  if (preview.kind === 'parameter') {
+    optimisticParameterValues.set(preview.targetId, preview.value);
+    viewport.commitParameterPreview(preview.targetId, preview.value);
+  } else if (preview.kind === 'occurrence-translation') {
+    viewport.commitOccurrenceTranslationPreview(preview.occurrenceKeys);
+  }
+}
+
 function clearToolPreview(
   preview: ToolPreview,
   reason: 'replace' | 'end',
@@ -1426,6 +1498,31 @@ function commitToolSession(session: ToolSession, intent: ToolIntent): boolean {
     codeEditor.sourceEditExcerpts(result.plan.edits),
   );
   return true;
+}
+
+function toolSourceRefs(module: ModelModule): SourceRef[] {
+  const refs = [
+    ...module.sourceTargets.map(target => target.sourceRef),
+    ...[...module.operations.values()].flatMap(operation =>
+      operation.sourceRef ? [operation.sourceRef] : [],
+    ),
+    ...[...module.objects.values()].flatMap(node => [
+      ...node.sourceRefs,
+      ...node.parameters.map(parameter => parameter.target.sourceRef),
+      ...node.constraints.flatMap(constraint => [
+        ...constraint.sourceRefs,
+        ...constraint.parameters.map(parameter => parameter.target.sourceRef),
+      ]),
+    ]),
+  ];
+  return [
+    ...new Map(
+      refs.map(sourceRef => [
+        `${sourceRef.file}:${sourceRef.start}:${sourceRef.end}`,
+        sourceRef,
+      ]),
+    ).values(),
+  ];
 }
 
 function showToolIssue(message: string): void {

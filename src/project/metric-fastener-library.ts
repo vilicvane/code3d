@@ -164,7 +164,8 @@ type CounterboredSocketCapHoleElements = SocketCapHoleElements &
 
 export type SocketCapScrew = Model<SocketCapScrewElements>;
 export type SocketCapHole = Model<SocketCapHoleElements>;
-export type CounterboredSocketCapHole = Model<CounterboredSocketCapHoleElements>;
+export type CounterboredSocketCapHole =
+  Model<CounterboredSocketCapHoleElements>;
 
 /**
  * @code3d.arguments ['M6', 18]
@@ -177,7 +178,9 @@ export function socketCapScrew(
   const spec = resolveSocketCapScrewSpec(input);
   validateSpec(spec);
   if (!Number.isFinite(length) || length <= spec.pitch + spec.underHeadRadius) {
-    throw new Error('Screw length must leave room for at least one full thread pitch.');
+    throw new Error(
+      'Screw length must leave room for at least one full thread pitch.',
+    );
   }
 
   const headChamfer = Math.min(spec.pitch / 2, spec.headHeight * 0.12);
@@ -199,9 +202,7 @@ export function socketCapScrew(
     6,
     30,
   ).relate(tool =>
-    tool.center
-      .on(headBlank.top)
-      .offset(0, -spec.hexSocketDepth / 2 + 0.1, 0),
+    tool.center.on(headBlank.top).offset(0, -spec.hexSocketDepth / 2 + 0.1, 0),
   );
   const head = cut(headBlank, [socketTool]).named(
     spec.designation + ' socket head',
@@ -213,7 +214,10 @@ export function socketCapScrew(
     spec.underHeadRadius,
   ).relate(part => part.top.on(head.bottom));
   const bodyLength = length - spec.underHeadRadius;
-  const threadLength = Math.min(bodyLength, referenceThreadLength(spec, length));
+  const threadLength = Math.min(
+    bodyLength,
+    referenceThreadLength(spec, length),
+  );
   const plainLength = bodyLength - threadLength;
   const overlap = Math.min(0.08, spec.pitch / 10);
   const parts: ModelObject[] = [head, transition];
@@ -275,7 +279,9 @@ export function socketCapHole(
   const fit = options.fit ?? 'normal';
   const diameter = options.diameter ?? spec.clearance[fit];
   if (!Number.isFinite(diameter) || diameter <= spec.nominalDiameter) {
-    throw new Error('Clearance-hole diameter must exceed the nominal screw diameter.');
+    throw new Error(
+      'Clearance-hole diameter must exceed the nominal screw diameter.',
+    );
   }
   const shaft = cylinder(diameter / 2, options.depth);
   if (!options.counterbore) {
@@ -288,13 +294,11 @@ export function socketCapHole(
       .named(spec.designation + ' ' + fit + ' clearance hole');
   }
 
-  const counterbore =
-    options.counterbore === true ? {} : options.counterbore;
+  const counterbore = options.counterbore === true ? {} : options.counterbore;
   const axialClearance = counterbore.axialClearance ?? 0.5;
   const counterboreDepth =
     counterbore.depth ?? spec.headHeight + axialClearance;
-  const counterboreDiameter =
-    counterbore.diameter ?? spec.counterboreDiameter;
+  const counterboreDiameter = counterbore.diameter ?? spec.counterboreDiameter;
   if (
     !Number.isFinite(counterboreDepth) ||
     counterboreDepth <= 0 ||
@@ -358,7 +362,9 @@ function validateSpec(spec: SocketCapScrewSpec): void {
     spec.counterboreDiameter,
   ];
   if (values.some(value => !Number.isFinite(value) || value <= 0)) {
-    throw new Error('Fastener specifications must contain positive finite dimensions.');
+    throw new Error(
+      'Fastener specifications must contain positive finite dimensions.',
+    );
   }
   if (spec.headDiameter <= spec.nominalDiameter) {
     throw new Error('Head diameter must exceed the nominal thread diameter.');

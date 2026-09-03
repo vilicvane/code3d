@@ -141,6 +141,7 @@ export class CodeEditor {
     string,
     monaco.editor.ITextModel
   >();
+  private readonly trackedSourceRefs = new Map<string, SourceRef>();
   private designArguments: readonly DesignArgumentContext[] = [];
   private readonly annotationDecorations = new Map<string, string[]>();
   private readonly openPaths: string[] = [];
@@ -330,6 +331,7 @@ export class CodeEditor {
 
   reset(project: ModelProject): void {
     this.sourceDecoration.clear();
+    this.trackedSourceRefs.clear();
     [...this.documents.keys()].forEach(path => this.removeDocument(path));
     this.openPaths.length = 0;
     this.entryPath = normalizeProjectPath(project.entryPath);
@@ -362,6 +364,17 @@ export class CodeEditor {
 
   setDesignArguments(contexts: readonly DesignArgumentContext[]): void {
     this.designArguments = contexts;
+  }
+
+  trackSourceRefs(sourceRefs: readonly SourceRef[]): void {
+    this.trackedSourceRefs.clear();
+    sourceRefs.forEach(sourceRef =>
+      this.trackedSourceRefs.set(sourceRefKey(sourceRef), sourceRef),
+    );
+  }
+
+  resolveSourceRef(sourceRef: SourceRef): SourceRef | undefined {
+    return this.trackedSourceRefs.get(sourceRefKey(sourceRef));
   }
 
   sourceLine(sourceRef: SourceRef): number {
@@ -555,7 +568,8 @@ export class CodeEditor {
     const document: ProjectDocument = {
       path: normalized,
       model,
-      subscription: model.onDidChangeContent(() => {
+      subscription: model.onDidChangeContent(event => {
+        this.rebaseTrackedSourceRefs(normalized, event.changes);
         this.refreshAnnotationDecorations(normalized, model);
         this.revision += 1;
         this.emitChange({
@@ -570,12 +584,30 @@ export class CodeEditor {
 
   private removeDocument(path: string): void {
     const document = this.requireDocument(path);
+    for (const [key, sourceRef] of this.trackedSourceRefs) {
+      if (sourceRef.file === path) this.trackedSourceRefs.delete(key);
+    }
     this.designArgumentModels.get(path)?.dispose();
     this.designArgumentModels.delete(path);
     document.subscription.dispose();
     document.model.dispose();
     this.annotationDecorations.delete(path);
     this.documents.delete(path);
+  }
+
+  private rebaseTrackedSourceRefs(
+    path: string,
+    changes: readonly monaco.editor.IModelContentChange[],
+  ): void {
+    for (const [key, sourceRef] of this.trackedSourceRefs) {
+      if (sourceRef.file !== path) continue;
+      const rebased = rebaseSourceRef(sourceRef, changes);
+      if (rebased) {
+        this.trackedSourceRefs.set(key, rebased);
+      } else {
+        this.trackedSourceRefs.delete(key);
+      }
+    }
   }
 
   private refreshAnnotationDecorations(
@@ -706,6 +738,50 @@ function sourceRange(
   );
 }
 
+function sourceRefKey(sourceRef: SourceRef): string {
+  return `${sourceRef.file}:${sourceRef.start}:${sourceRef.end}`;
+}
+
+function rebaseSourceRef(
+  sourceRef: SourceRef,
+  changes: readonly monaco.editor.IModelContentChange[],
+): SourceRef | undefined {
+  let shift = 0;
+  let internalDelta = 0;
+  for (const change of [...changes].sort(
+    (left, right) => left.rangeOffset - right.rangeOffset,
+  )) {
+    const changeStart = change.rangeOffset;
+    const changeEnd = changeStart + change.rangeLength;
+    const delta = change.text.length - change.rangeLength;
+    if (change.rangeLength === 0 && changeStart === sourceRef.start) {
+      internalDelta += delta;
+    } else if (changeEnd <= sourceRef.start) {
+      shift += delta;
+    } else if (changeStart >= sourceRef.end) {
+      if (change.rangeLength === 0 && changeStart === sourceRef.end) {
+        internalDelta += delta;
+      }
+    } else if (changeStart === sourceRef.start && changeEnd === sourceRef.end) {
+      const start = sourceRef.start + shift;
+      return {
+        file: sourceRef.file,
+        start,
+        end: start + change.text.length,
+      };
+    } else if (sourceRef.start <= changeStart && changeEnd <= sourceRef.end) {
+      internalDelta += delta;
+    } else {
+      return undefined;
+    }
+  }
+  return {
+    file: sourceRef.file,
+    start: sourceRef.start + shift,
+    end: sourceRef.end + shift + internalDelta,
+  };
+}
+
 function validEdits(
   model: monaco.editor.ITextModel,
   edits: readonly SourceTextEdit[],
@@ -762,6 +838,7 @@ function sourceEditExcerpts(
         source: rawSource.slice(contentStart, contentEnd),
         changedStart: start - lineStart - contentStart,
         changedEnd: end - lineStart - contentStart,
+        sourceRef: {file, start, end},
       };
     });
 }

@@ -23,7 +23,7 @@ selection + gesture
 - 源文件是模型持久化状态的唯一来源。
 - preview 可以临时改变视图，但不能成为隐藏的模型状态。
 - 工具不直接依赖 Monaco、OpenCascade 或 Three.js。
-- 每个 source ref 都包含项目文件路径和文件内 offset；offset 不能脱离文件解释。
+- 每个 source ref 都包含项目文件路径和文件内 offset；offset 不能脱离文件解释。模型完成编译后，editor 在下一版模型到达前持续追踪工具所用 source ref 的最新范围。
 - 所有提交都带项目 revision 和 expected text，跨文件 edit plan 也必须原子应用。
 - 无法唯一解析的意图必须提供候选方案，不能静默猜测。
 - Caret 选择源码 occurrence 及其 operation role。点击当前 focus 集合中的
@@ -63,16 +63,17 @@ selection + gesture
 ### Source transaction
 
 提交时再次检查项目 revision 和所有文件中的 expected text，然后按文件作为一个逻辑事务进入各自 Monaco undo stack。失败时不应用部分结果。
-事务保留用户原有 caret 和由它决定的渲染 scope；工具不会为了展示写入位置而移动 selection。提交成功后，UI 使用 edit plan 的 summary 和 edits，在 GUI 一侧的独立 popover 中展示 trim、语法高亮后的局部源码，并只标记实际替换范围。
+事务保留用户原有 caret 和由它决定的渲染 scope；工具不会为了展示写入位置而移动 selection。提交成功后，UI 使用 edit plan 的 summary 和 edits，在 GUI 一侧的独立 popover 中展示 trim、语法高亮后的局部源码，并只标记实际替换范围；只有用户点击源码块时，编辑器才定位并聚焦对应修改。
 
 ## Tool session
 
-1. `begin` 固定源码 revision。
+1. `begin` 固定工具和交互 scope；source anchor 由 editor 跨 revision 追踪。
 2. `preview` 可以被连续调用，只产生临时视图。
-3. `commit` 重新解析 intent 并原子写入源码。
+3. `commit` 针对最新 source anchor 和 editor revision 重新解析 intent，再原子写入源码。
 4. `cancel` 清除 preview，不产生源码修改。
 
 模型重新编译后，tool session 即结束；后续工具必须基于新的 provenance 开始。
+源码事务提交后，GUI 将 preview 提升为当前 revision 的 optimistic 状态。编译期间仍可继续交互；新的交互立即丢弃正在运行或等待中的旧 revision 编译，新的源码事务产生后只编译最新 revision。对应模型完成后，以原 selection 和 scope 替换 optimistic 状态。
 
 ## Viewport decoration
 
