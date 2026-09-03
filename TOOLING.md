@@ -77,11 +77,21 @@ selection + gesture
 
 ## Viewport decoration
 
-临时 3D 辅助显示使用通用的 `ViewportDecoration`，由 mesh、transform 和 renderer-neutral appearance 组成。viewport 按 owner 设置或清除 decoration layer，不理解具体工具或建模操作的语义。
+临时 3D 辅助显示使用通用的 `ViewportDecoration`。它是 renderer-neutral 的
+discriminated union：`mesh` decoration 携带派生网格和 transform，`surface`
+decoration 把网格子集附着到指定模型 occurrence，`anchor` decoration 携带模型
+node、point/line/face/frame 类型和局部 frame。viewport 只把这些数据渲染为辅助
+几何，并按 owner 设置或清除 decoration layer，不理解具体工具、建模操作或元素名称
+的语义。
 
 与源码 scope 相关的辅助显示实现为 `SourceDecorationProvider`。provider 读取 runtime operation metadata 并返回 decoration；工具开发者可以注册新的 provider，无需修改 viewport 的选择或渲染主路径。交互中的工具则返回 `viewport-decorations` preview，由 host 按 owner 应用和清理对应 layer，工具本身仍不直接调用 viewport。
 
-需要精确派生几何时由 kernel/runtime 产生 operation region，provider 只决定何时、以何种 appearance 展示。当前 Boolean provider 用同一机制强调 `cut` 的切除体积，以及 `union` 的重叠体积或仅接触时的 B-Rep section；它不是 viewport 中的 Boolean 特例。
+需要精确派生几何时由 kernel/runtime 产生 operation region，provider 只决定何时、
+以何种 appearance 展示。当前 Boolean provider 用 `mesh` decoration 强调 `cut`
+的切除体积，以及 `union` 的重叠体积或仅接触时的 B-Rep section；named-element
+provider 用 `anchor` 标出元素 frame，并为 face 元素按其平面和法向选择真实 B-Rep
+face group，再用 `surface` 显示实体面及其边界。二者都不是 viewport 中的专用语义
+分支。
 
 Provider 可通过 `previewBehavior` 声明工具预览期间的显示策略。当前 Boolean provider 使用 `hide`：参数或关系工具开始移动后隐藏旧 region，pointer move 不触发模型或 region 重算；取消时恢复已编译 region，提交后等待正常源码编译产生新的精确 region。这个策略只影响对应 provider 的 layer，不影响实体、gizmo 或其他工具 decoration。
 

@@ -5,6 +5,7 @@ import * as typeScriptLanguage from 'monaco-editor/languages/features/typescript
 import EditorWorker from 'monaco-editor/editor/editor.worker?worker';
 import TypeScriptWorker from 'monaco-editor/language/typescript/ts.worker?worker';
 import type {CursorOptions, Options} from 'prettier';
+import {observeSuggestionFocus} from './monaco/suggestion-focus';
 import {code3dAnnotations, type Code3dAnnotation} from './model/annotations';
 import type {DesignArgumentContext} from './model/compiler';
 import {authoringTypes, type SourceRef} from './model/runtime';
@@ -25,6 +26,12 @@ export type ProjectEditorChange =
   | Readonly<{kind: 'delete'; path: string}>;
 
 export type ActiveFileChangeReason = 'switch' | 'rename' | 'delete' | 'reset';
+
+export type CompletionFocus = Readonly<{
+  receiverRef: SourceRef;
+  definitionRef?: SourceRef;
+  memberName: string;
+}>;
 
 type ProjectDocument = {
   path: string;
@@ -56,6 +63,11 @@ const modelPrettierOptions = {
   bracketSameLine: false,
   arrowParens: 'avoid',
 } satisfies Options;
+
+const projectLanguageSelector = [
+  {language: 'typescript', scheme: 'file', pattern: '**/workspace/**'},
+  {language: 'javascript', scheme: 'file', pattern: '**/workspace/**'},
+] satisfies monaco.languages.LanguageSelector;
 
 (self as MonacoEnvironment).MonacoEnvironment = {
   getWorker(_moduleId, label) {
@@ -154,6 +166,10 @@ export class CodeEditor {
   private readonly activeFileListeners = new Set<
     (path: string, reason: ActiveFileChangeReason) => void
   >();
+  private readonly completionFocusListeners = new Set<
+    (focus: CompletionFocus | undefined) => void
+  >();
+  private completionFocusVersion = 0;
   private readonly sourceDecoration: monaco.editor.IEditorDecorationsCollection;
   private entryPath: string;
   private activePath: string;
@@ -202,14 +218,19 @@ export class CodeEditor {
         source === this.editor &&
         this.openProjectResource(resource, selectionOrPosition),
     });
-    monaco.languages.registerCompletionItemProvider(
-      ['typescript', 'javascript'],
-      {
-        triggerCharacters: ["'", '"'],
-        provideCompletionItems: (model, position, _context, token) =>
-          this.designArgumentCompletions(model, position, token),
-      },
-    );
+    monaco.languages.registerCompletionItemProvider(projectLanguageSelector, {
+      triggerCharacters: ["'", '"'],
+      provideCompletionItems: (model, position, _context, token) =>
+        this.designArgumentCompletions(model, position, token),
+    });
+    observeSuggestionFocus(this.editor, item => {
+      const version = ++this.completionFocusVersion;
+      if (item) {
+        void this.resolveCompletionFocus(item, version);
+      } else {
+        this.emitCompletionFocus(undefined);
+      }
+    });
     void typeScriptTokenizationReady.then(() => {
       for (const document of this.documents.values()) {
         this.refreshAnnotationDecorations(document.path, document.model);
@@ -447,6 +468,13 @@ export class CodeEditor {
     return () => this.activeFileListeners.delete(listener);
   }
 
+  onCompletionFocus(
+    listener: (focus: CompletionFocus | undefined) => void,
+  ): () => void {
+    this.completionFocusListeners.add(listener);
+    return () => this.completionFocusListeners.delete(listener);
+  }
+
   revealSource(sourceRef: SourceRef, takeFocus = false): void {
     this.switchFile(sourceRef.file);
     const range = sourceRange(this.activeModel(), sourceRef);
@@ -472,6 +500,54 @@ export class CodeEditor {
 
   clearSourceHighlight(): void {
     this.sourceDecoration.clear();
+  }
+
+  private async resolveCompletionFocus(
+    item: monaco.languages.CompletionItem,
+    version: number,
+  ): Promise<void> {
+    const model = this.editor.getModel();
+    const position = this.editor.getPosition();
+    const document = [...this.documents.values()].find(
+      candidate => candidate.model === model,
+    );
+    if (!model || !position || !document) {
+      if (version === this.completionFocusVersion)
+        this.emitCompletionFocus(undefined);
+      return;
+    }
+    const receiverRef = completionReceiver(model, position, document.path);
+    if (!receiverRef) {
+      if (version === this.completionFocusVersion)
+        this.emitCompletionFocus(undefined);
+      return;
+    }
+    const workerFactory = await (model.getLanguageId() === 'javascript'
+      ? typeScriptLanguage.getJavaScriptWorker()
+      : typeScriptLanguage.getTypeScriptWorker());
+    const worker = await workerFactory(model.uri);
+    const definitions = (await worker.getDefinitionAtPosition(
+      model.uri.toString(),
+      Math.max(receiverRef.start, receiverRef.end - 1),
+    )) as
+      | readonly Readonly<{
+          fileName: string;
+          textSpan: Readonly<{start: number; length: number}>;
+        }>[]
+      | undefined;
+    if (
+      version !== this.completionFocusVersion ||
+      this.editor.getModel() !== model
+    ) {
+      return;
+    }
+    this.emitCompletionFocus({
+      receiverRef,
+      definitionRef: definitions
+        ?.map(definitionSourceRef)
+        .find(reference => reference !== undefined),
+      memberName: completionLabel(item.label),
+    });
   }
 
   private async designArgumentCompletions(
@@ -636,6 +712,10 @@ export class CodeEditor {
 
   private emitChange(change: ProjectEditorChange): void {
     this.changeListeners.forEach(listener => listener(change));
+  }
+
+  private emitCompletionFocus(focus: CompletionFocus | undefined): void {
+    this.completionFocusListeners.forEach(listener => listener(focus));
   }
 
   private emitActiveFile(reason: ActiveFileChangeReason): void {
@@ -841,6 +921,49 @@ function sourceEditExcerpts(
         sourceRef: {file, start, end},
       };
     });
+}
+
+function completionReceiver(
+  model: monaco.editor.ITextModel,
+  position: monaco.Position,
+  file: string,
+): SourceRef | undefined {
+  const source = model.getValue();
+  const word = model.getWordUntilPosition(position);
+  const wordStart = model.getOffsetAt({
+    lineNumber: position.lineNumber,
+    column: word.startColumn,
+  });
+  if (source[wordStart - 1] !== '.') return undefined;
+  let end = wordStart - 1;
+  while (end > 0 && /\s/.test(source[end - 1])) end -= 1;
+  let start = end;
+  while (start > 0 && /[\w$]/.test(source[start - 1])) start -= 1;
+  return start < end ? {file, start, end} : undefined;
+}
+
+function definitionSourceRef(
+  definition: Readonly<{
+    fileName: string;
+    textSpan: Readonly<{start: number; length: number}>;
+  }>,
+): SourceRef | undefined {
+  const uri = monaco.Uri.parse(definition.fileName);
+  const workspacePrefix = '/workspace';
+  if (uri.scheme !== 'file' || !uri.path.startsWith(`${workspacePrefix}/`)) {
+    return undefined;
+  }
+  return {
+    file: normalizeProjectPath(uri.path.slice(workspacePrefix.length)),
+    start: definition.textSpan.start,
+    end: definition.textSpan.start + definition.textSpan.length,
+  };
+}
+
+function completionLabel(
+  label: monaco.languages.CompletionItem['label'],
+): string {
+  return typeof label === 'string' ? label : label.label;
 }
 
 type DesignArgumentVirtualCall = Readonly<{

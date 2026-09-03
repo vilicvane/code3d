@@ -187,6 +187,12 @@ type StoredAnchor = StoredElement & Readonly<{name: string}>;
 
 type AnchorReference = StoredAnchor & Readonly<{model: ModelObject}>;
 
+export type ModelElementReference = Readonly<{
+  model: ModelObject;
+  name: string;
+  kind: ElementKind;
+}>;
+
 type StoredConstraint = Readonly<{
   id: string;
   kind: 'on';
@@ -312,6 +318,17 @@ class ModelAnchor<
   on(target: Anchor): Constraint {
     return new Constraint(this.reference, anchorReference(target));
   }
+}
+
+export function modelElementReference(
+  value: unknown,
+): ModelElementReference | undefined {
+  if (!(value instanceof ModelAnchor)) return undefined;
+  return {
+    model: value.reference.model,
+    name: value.reference.name,
+    kind: value.reference.kind,
+  };
 }
 
 export class Constraint {

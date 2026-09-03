@@ -9,6 +9,10 @@ it does not silently reorder the active milestones. Closed requests move to
 
 ## Confirmed direction
 
+- Model editing is code-first. GUI editing is an important but restrained
+  supplement for spatial work that is awkward in code; information display may
+  use the GUI much more broadly because it does not create a second editable
+  source of truth.
 - Source code is the only persistent model state. GUI changes write back to it.
 - Author code remains ordinary JavaScript/TypeScript and may freely construct,
   reuse, copy, collect, and derive model values.
@@ -70,9 +74,16 @@ it does not silently reorder the active milestones. Closed requests move to
   value site renders that value alone; an operation-input site may also render
   its peer inputs as dimmed context that can switch input focus. Mouse hover
   over source code does not change the viewport.
-- A constraint source site renders its constrained value as focus and takes
-  dimmed context from the concrete downstream composition that consumes that
-  value. It is also an explicit relation-edit scope for spatial tools.
+- A constraint source site renders both relation participants and takes dimmed
+  context from the concrete downstream composition that consumes the
+  constrained value. The constrained value remains the relation-edit scope for
+  spatial tools; the relation target does not replace downstream context.
+- A caret on a named-element property keeps its surrounding relation visible,
+  promotes the owning model, and highlights the typed point, line, face, or
+  frame. Face elements highlight matching B-Rep face groups and their real
+  boundaries rather than drawing a proxy plane. Monaco's native TypeScript
+  completion list drives the same transient preview for its focused member
+  without duplicating TypeScript completions.
 - Constraint arrays retain one source/tool scope per member. Selecting a member
   uses only its frame and parameters; the array container does not synthesize a
   combined gizmo from potentially different constraints.
@@ -149,6 +160,8 @@ Status: complete. Rootless selection and optional exports were implemented in
   isolated.
 - Treat ordinary calls and JSDoc design arguments as explicit evaluation
   contexts for source inside model-producing functions.
+- Later add an on-demand Elements panel in the viewport as a supplementary way
+  to inspect the named elements available on the current model.
 
 Status: the runtime index and Model Outline are implemented. Metadata includes
 module/local bindings, anonymous source expressions, export aliases,
@@ -181,9 +194,16 @@ code3d annotations.
 is complete: selecting an `on()` or `offset()` constraint renders the
 constrained value with peers from its concrete downstream composition, exposes
 multiple consumers as separate scopes, and enables relation tools directly.
+Named-element property occurrences now refine that scope: the owning model and
+typed anchor are highlighted while all relation participants remain visible.
+Focused items in Monaco's native TypeScript member completion reuse the same
+viewport preview and restore the caret-selected scene when completion closes.
 [R-013](requests/R-013-drill-from-composition-preview-to-object-source.md) adds
 explicit double-click drill-down from an active composition operand to its best
 defining source.
+[R-016](requests/R-016-viewport-elements-panel.md) retains a complementary,
+on-demand viewport inventory for named-element discovery without turning it
+into a second model editor.
 
 ### 2a. Unified dock panels — complete
 

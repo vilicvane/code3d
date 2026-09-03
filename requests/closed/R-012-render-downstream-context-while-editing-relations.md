@@ -30,8 +30,8 @@
   value as focus with the objects from its actual later composition dimmed.
 - An object reused by two different combinations shows only the peers from the
   selected/evaluated downstream occurrence.
-- A constraint target that is not a peer in the selected downstream operation
-  is not added merely because it appears in the relation expression.
+- The relation target remains visible as a relation participant, but does not
+  replace or stand in for peers from the selected downstream operation.
 - Existing declaration, immutable-chain, and operation-input source scopes
   retain their current rendering semantics.
 
@@ -41,8 +41,9 @@
   retain the constrained object, exact constraint identity, and evaluation
   context.
 - Each target resolves its concrete downstream composition inputs by runtime
-  object identity. Those peers provide dimmed context; the relation target is
-  never inserted merely because it occurs in the constraint.
+  object identity. Those peers provide dimmed context independently of the
+  relation target, which remains visible so the constraint itself can be read
+  spatially.
 - Separate downstream consumers remain separate target evaluations and appear
   as `Use` scopes when more than one exists. The selected use survives source
   edits and recompilation.

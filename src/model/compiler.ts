@@ -9,7 +9,9 @@ import {
   disposeModelObjects,
   isConstraint,
   isModelObject,
+  modelElementReference,
   type Constraint,
+  type ElementKind,
   type ModelOperationInputRole,
   type ModelOperationKind,
   type ModelOperationSnapshot,
@@ -27,13 +29,21 @@ export type SourceTargetEvaluation = Readonly<{
   nodeIds: readonly string[];
   operationId?: string;
   constraintId?: string;
+  constraintSourceNodeId?: string;
   contextId: string;
+  element?: Readonly<{
+    nodeId: string;
+    name: string;
+    kind: ElementKind;
+  }>;
 }>;
 
 export type SourceTarget = Readonly<{
   id: string;
-  kind: 'value' | 'constraint' | 'operation-input' | 'operation-output';
+  kind:
+    'value' | 'constraint' | 'element' | 'operation-input' | 'operation-output';
   sourceRef: SourceRef;
+  receiverRef?: SourceRef;
   functionId?: string;
   evaluations: readonly SourceTargetEvaluation[];
   contextTargetIds: readonly string[];
@@ -203,6 +213,20 @@ type SourceConstraintTrace = {
   >;
 };
 
+type SourceElementTrace = {
+  id: string;
+  sourceRef: SourceRef;
+  receiverRef: SourceRef;
+  evaluations: Array<
+    Readonly<{
+      model: ModelObject;
+      name: string;
+      kind: ElementKind;
+      contextId: string;
+    }>
+  >;
+};
+
 type TraceFrame = Readonly<{
   siteId: string;
   execution: number;
@@ -301,6 +325,7 @@ const tracedObjects = new Set<ModelObject>();
 const sourceValueTraces = new Map<string, SourceValueTrace>();
 const sourceInputTraces: SourceInputTrace[] = [];
 const sourceConstraintTraces = new Map<string, SourceConstraintTrace>();
+const sourceElementTraces = new Map<string, SourceElementTrace>();
 const catalogTraces = new Map<string, CatalogTrace>();
 const parameterFrames: ParameterUsage[][] = [];
 const traceFrames: TraceFrame[] = [];
@@ -484,6 +509,40 @@ const traceRuntime = Object.freeze({
         contextId: frame.contextId,
       });
     }
+    return value;
+  },
+
+  element<T>(
+    file: string,
+    start: number,
+    end: number,
+    receiverStart: number,
+    receiverEnd: number,
+    id: string,
+    value: T,
+  ): T {
+    const reference = modelElementReference(value);
+    if (!reference) return value;
+    const location = sourceRef(file, start, end);
+    const receiver = sourceRef(file, receiverStart, receiverEnd);
+    const context =
+      currentEvaluationContext() ??
+      callEvaluationContext(
+        id,
+        nextTraceExecution(`element:${id}`),
+        reference.name,
+        location,
+      );
+    const key = `${id}:${location.file}:${location.start}:${location.end}`;
+    const trace = sourceElementTraces.get(key) ?? {
+      id,
+      sourceRef: location,
+      receiverRef: receiver,
+      evaluations: [],
+    };
+    trace.evaluations.push({...reference, contextId: context.id});
+    sourceElementTraces.set(key, trace);
+    tracedObjects.add(reference.model);
     return value;
   },
 
@@ -833,6 +892,8 @@ export function compileProject(
   tracedObjects.clear();
   sourceValueTraces.clear();
   sourceInputTraces.length = 0;
+  sourceConstraintTraces.clear();
+  sourceElementTraces.clear();
   catalogTraces.clear();
   parameterFrames.length = 0;
   traceFrames.length = 0;
@@ -1020,6 +1081,7 @@ export function compileProject(
     sourceValueTraces.clear();
     sourceInputTraces.length = 0;
     sourceConstraintTraces.clear();
+    sourceElementTraces.clear();
     catalogTraces.clear();
     parameterFrames.length = 0;
     traceFrames.length = 0;
@@ -1185,15 +1247,17 @@ function buildSourceTargets(
         );
         return consumers.length > 0
           ? consumers.map(consumer => ({
-              nodeIds: [evaluation.source.nodeId],
+              nodeIds: uniqueNodeIds(evaluation.source, evaluation.target),
               operationId: consumer.operationId,
               constraintId: evaluation.constraintId,
+              constraintSourceNodeId: evaluation.source.nodeId,
               contextId: evaluation.contextId,
             }))
           : [
               {
-                nodeIds: [evaluation.source.nodeId],
+                nodeIds: uniqueNodeIds(evaluation.source, evaluation.target),
                 constraintId: evaluation.constraintId,
+                constraintSourceNodeId: evaluation.source.nodeId,
                 contextId: evaluation.contextId,
               },
             ];
@@ -1220,7 +1284,66 @@ function buildSourceTargets(
     } satisfies SourceTarget;
   });
 
+  const elementTargets = [...sourceElementTraces.values()].map(trace => {
+    const containingConstraints = constraintTargets.filter(
+      target =>
+        target.sourceRef.file === trace.sourceRef.file &&
+        target.sourceRef.start <= trace.sourceRef.start &&
+        trace.sourceRef.end <= target.sourceRef.end,
+    );
+    const narrowestConstraintSpan = Math.min(
+      ...containingConstraints.map(target => sourceSpan(target.sourceRef)),
+    );
+    const relatedConstraints = containingConstraints.filter(
+      target => sourceSpan(target.sourceRef) === narrowestConstraintSpan,
+    );
+    const evaluations = trace.evaluations.flatMap<SourceTargetEvaluation>(
+      element => {
+        const related = relatedConstraints.flatMap(target =>
+          target.evaluations
+            .filter(
+              evaluation =>
+                evaluation.contextId === element.contextId &&
+                evaluation.nodeIds.includes(element.model.nodeId),
+            )
+            .map(evaluation => ({target, evaluation})),
+        );
+        const elementSnapshot = {
+          nodeId: element.model.nodeId,
+          name: element.name,
+          kind: element.kind,
+        } as const;
+        return related.length > 0
+          ? related.map(({evaluation}) => ({
+              ...evaluation,
+              element: elementSnapshot,
+            }))
+          : [
+              {
+                nodeIds: [element.model.nodeId],
+                contextId: element.contextId,
+                element: elementSnapshot,
+              },
+            ];
+      },
+    );
+    return {
+      id: `source:element:${trace.id}`,
+      kind: 'element',
+      sourceRef: trace.sourceRef,
+      receiverRef: trace.receiverRef,
+      functionId: designFunctionAt(trace.sourceRef, designArguments),
+      evaluations,
+      contextTargetIds: [
+        ...new Set(
+          relatedConstraints.flatMap(target => target.contextTargetIds),
+        ),
+      ],
+    } satisfies SourceTarget;
+  });
+
   return [
+    ...elementTargets,
     ...constraintTargets,
     ...valueTargets,
     ...operationInputTargets.map(
@@ -1248,6 +1371,14 @@ function buildSourceTargets(
         }) satisfies SourceTarget,
     ),
   ];
+}
+
+function uniqueNodeIds(...models: readonly ModelObject[]): string[] {
+  return [...new Set(models.map(model => model.nodeId))];
+}
+
+function sourceSpan(sourceRef: SourceRef): number {
+  return sourceRef.end - sourceRef.start;
 }
 
 type MutableSourceInputTarget = {
@@ -1417,12 +1548,75 @@ function createTraceTransformer(
           );
         }
 
+        if (
+          ts.isPropertyAccessExpression(node) &&
+          ts.isPropertyAccessExpression(visited) &&
+          isReadablePropertyAccess(node)
+        ) {
+          return traceElementExpression(node, visited, sourceFile, factory);
+        }
+
         return visited;
       };
 
       return ts.visitNode(sourceFile, visit) as ts.SourceFile;
     };
   };
+}
+
+function traceElementExpression(
+  original: ts.PropertyAccessExpression,
+  visited: ts.PropertyAccessExpression,
+  sourceFile: ts.SourceFile,
+  factory: ts.NodeFactory,
+): ts.CallExpression {
+  const id = stableSourceId('element', original.name, sourceFile);
+  return factory.createCallExpression(
+    factory.createPropertyAccessExpression(
+      factory.createIdentifier('__code3d'),
+      'element',
+    ),
+    undefined,
+    [
+      factory.createStringLiteral(sourceFile.fileName),
+      factory.createNumericLiteral(original.name.getStart(sourceFile)),
+      factory.createNumericLiteral(original.name.getEnd()),
+      factory.createNumericLiteral(original.expression.getStart(sourceFile)),
+      factory.createNumericLiteral(original.expression.getEnd()),
+      factory.createStringLiteral(id),
+      visited,
+    ],
+  );
+}
+
+function isReadablePropertyAccess(node: ts.PropertyAccessExpression): boolean {
+  const {parent} = node;
+  if (
+    (ts.isCallExpression(parent) || ts.isNewExpression(parent)) &&
+    parent.expression === node
+  ) {
+    return false;
+  }
+  if (ts.isTaggedTemplateExpression(parent) && parent.tag === node) {
+    return false;
+  }
+  if (
+    ts.isBinaryExpression(parent) &&
+    parent.left === node &&
+    parent.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+    parent.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+  ) {
+    return false;
+  }
+  if (
+    (ts.isPrefixUnaryExpression(parent) ||
+      ts.isPostfixUnaryExpression(parent)) &&
+    (parent.operator === ts.SyntaxKind.PlusPlusToken ||
+      parent.operator === ts.SyntaxKind.MinusMinusToken)
+  ) {
+    return false;
+  }
+  return !(ts.isDeleteExpression(parent) && parent.expression === node);
 }
 
 function traceExpression(
@@ -1501,7 +1695,7 @@ function isModuleVariableDeclaration(node: ts.VariableDeclaration): boolean {
 }
 
 function stableSourceId(
-  category: ObjectCatalogEntry['category'],
+  category: string,
   node: ts.Node,
   sourceFile: ts.SourceFile,
 ): string {

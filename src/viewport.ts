@@ -42,9 +42,11 @@ type SourceViewTarget = Readonly<{
 type SelectedViewTarget = Readonly<{kind: 'model'}> | SourceViewTarget;
 
 type RenderedViewTarget =
-  SelectedViewTarget | Readonly<{kind: 'outline'; nodeIds: readonly string[]}>;
+  | SelectedViewTarget
+  | Readonly<{kind: 'outline'; nodeIds: readonly string[]}>
+  | Readonly<{kind: 'completion'}>;
 
-type OutlinePreviewRestore = Readonly<{
+type TransientPreviewRestore = Readonly<{
   selectedKey: string;
   cameraPosition: THREE.Vector3;
   controlsTarget: THREE.Vector3;
@@ -87,7 +89,7 @@ export class ModelViewport {
     string,
     Vec3
   >();
-  private readonly decorationLayers = new Map<string, THREE.Group>();
+  private readonly decorationLayers = new Map<string, THREE.Object3D[]>();
   private readonly positionGizmo: PositionGizmo;
   private readonly onSelect: ModelViewportOptions['onSelect'];
   private readonly onNavigateSource: ModelViewportOptions['onNavigateSource'];
@@ -96,12 +98,13 @@ export class ModelViewport {
   private selectionHelper: THREE.BoxHelper | null = null;
   private highlightedTargetId?: string;
   private highlightedOccurrenceKeys = new Set<string>();
+  private selectionEmphasized = true;
   private selectedKey = 'root';
   private explode = 0;
   private module: ModelModule | null = null;
   private selectedViewTarget: SelectedViewTarget = {kind: 'model'};
   private renderedViewTarget: RenderedViewTarget = {kind: 'model'};
-  private outlinePreviewRestore?: OutlinePreviewRestore;
+  private transientPreviewRestore?: TransientPreviewRestore;
   private selectionGesture?: SelectionGesture;
 
   constructor(
@@ -189,7 +192,7 @@ export class ModelViewport {
   ): void {
     this.module = module;
     this.selectedViewTarget = {kind: 'model'};
-    this.outlinePreviewRestore = undefined;
+    this.transientPreviewRestore = undefined;
     if (module.fallback) {
       this.renderModelView(selectedKey, fitCamera);
     } else {
@@ -230,7 +233,7 @@ export class ModelViewport {
       targetId: match.id,
       evaluationIndex,
     };
-    this.outlinePreviewRestore = undefined;
+    this.transientPreviewRestore = undefined;
     if (
       this.renderedViewTarget.kind !== 'source' ||
       this.renderedViewTarget.targetId !== match.id ||
@@ -263,7 +266,7 @@ export class ModelViewport {
       targetId: scope.target.id,
       evaluationIndex,
     };
-    this.outlinePreviewRestore = undefined;
+    this.transientPreviewRestore = undefined;
     this.renderSourceTarget(scope.target, evaluationIndex, false);
     return true;
   }
@@ -276,7 +279,7 @@ export class ModelViewport {
       targetId: scope.target.id,
       evaluationIndex,
     };
-    this.outlinePreviewRestore = undefined;
+    this.transientPreviewRestore = undefined;
     this.renderSourceTarget(scope.target, evaluationIndex, false);
     return true;
   }
@@ -299,7 +302,7 @@ export class ModelViewport {
 
   selectRoot(): void {
     this.selectedViewTarget = {kind: 'model'};
-    this.outlinePreviewRestore = undefined;
+    this.transientPreviewRestore = undefined;
     if (!this.module?.fallback) {
       this.renderedViewTarget = {kind: 'model'};
       this.resetRenderedView();
@@ -316,17 +319,62 @@ export class ModelViewport {
     if (nodes.length === 0) {
       return false;
     }
-    this.captureOutlinePreviewRestore();
+    this.captureTransientPreviewRestore();
     this.renderOutlinePreview(nodes);
     return true;
   }
 
-  restoreOutlinePreview(): void {
-    const restore = this.outlinePreviewRestore;
+  previewCompletion(
+    target: SourceTarget,
+    evaluationIndex: number,
+    memberName: string,
+  ): boolean {
+    const evaluation = target.evaluations[evaluationIndex];
+    if (!this.module || !evaluation) return false;
+    const receiverNodeId =
+      evaluation.element?.nodeId ??
+      evaluation.nodeIds.find(nodeId => this.module?.objects.has(nodeId));
+    const receiver = receiverNodeId
+      ? this.module.objects.get(receiverNodeId)
+      : undefined;
+    if (!receiver) return false;
+    const element = receiver.elements.find(
+      candidate => candidate.name === memberName,
+    );
+    const previewEvaluation: SourceTargetEvaluation = {
+      ...evaluation,
+      element: element
+        ? {
+            nodeId: receiver.nodeId,
+            name: element.name,
+            kind: element.kind,
+          }
+        : undefined,
+    };
+    const previewTarget: SourceTarget = {
+      ...target,
+      id: `completion:${target.id}`,
+      kind: element ? 'element' : target.kind,
+      evaluations: [previewEvaluation],
+    };
+    this.captureTransientPreviewRestore();
+    this.renderSourceScene(
+      previewTarget,
+      previewEvaluation,
+      {kind: 'completion'},
+      true,
+      undefined,
+      receiver.nodeId,
+    );
+    return true;
+  }
+
+  restoreTransientPreview(): void {
+    const restore = this.transientPreviewRestore;
     if (!this.module || !restore) {
       return;
     }
-    this.outlinePreviewRestore = undefined;
+    this.transientPreviewRestore = undefined;
     const target = this.selectedViewTarget;
     if (target.kind === 'model') {
       this.renderModelView(restore.selectedKey, false);
@@ -457,22 +505,35 @@ export class ModelViewport {
     if (decorations.length === 0) {
       return;
     }
-    const layer = new THREE.Group();
-    layer.name = `decorations:${owner}`;
-    decorations.forEach(decoration =>
-      layer.add(createDecorationObject(decoration)),
-    );
-    this.decorationLayers.set(owner, layer);
-    this.root.add(layer);
+    const objects = decorations.flatMap(decoration => {
+      if (decoration.kind === 'mesh') {
+        const object = createMeshDecorationObject(decoration);
+        this.root.add(object);
+        return [object];
+      }
+      return [...this.occurrences.values()]
+        .filter(occurrence => occurrence.node.nodeId === decoration.nodeId)
+        .map(occurrence => {
+          const object =
+            decoration.kind === 'surface'
+              ? createSurfaceDecorationObject(decoration)
+              : createAnchorDecorationObject(decoration);
+          occurrence.object.add(object);
+          return object;
+        });
+    });
+    if (objects.length > 0) this.decorationLayers.set(owner, objects);
   }
 
   clearDecorations(owner: string): void {
-    const layer = this.decorationLayers.get(owner);
-    if (!layer) {
+    const objects = this.decorationLayers.get(owner);
+    if (!objects) {
       return;
     }
-    this.root.remove(layer);
-    disposeObject(layer);
+    objects.forEach(object => {
+      object.removeFromParent();
+      disposeObject(object);
+    });
     this.decorationLayers.delete(owner);
   }
 
@@ -555,17 +616,43 @@ export class ModelViewport {
     if (!evaluation) {
       return;
     }
-    const focusNodes = this.resolveNodes(evaluation.nodeIds);
-    const contextNodes = this.resolveContextNodes(
-      target.contextTargetIds,
-      evaluation.operationId,
-      evaluation.nodeIds,
+    this.renderSourceScene(
+      target,
+      evaluation,
+      {kind: 'source', targetId: target.id, evaluationIndex},
+      fitCamera,
+      selectedKey,
     );
-    this.renderedViewTarget = {
-      kind: 'source',
-      targetId: target.id,
-      evaluationIndex,
-    };
+  }
+
+  private renderSourceScene(
+    target: SourceTarget,
+    evaluation: SourceTargetEvaluation,
+    renderedViewTarget: RenderedViewTarget,
+    fitCamera: boolean,
+    selectedKey?: string,
+    focusedNodeId = evaluation.element?.nodeId,
+  ): void {
+    const relatedNodes = this.resolveNodes(evaluation.nodeIds);
+    const focusNodes = focusedNodeId
+      ? relatedNodes.filter(node => node.nodeId === focusedNodeId)
+      : relatedNodes;
+    const relationContextNodes = focusedNodeId
+      ? relatedNodes
+          .filter(node => node.nodeId !== focusedNodeId)
+          .map(node => ({node, targetId: target.id}))
+      : [];
+    const contextNodes = uniqueContextNodes([
+      ...relationContextNodes,
+      ...this.resolveContextNodes(
+        target.contextTargetIds,
+        evaluation.operationId,
+        evaluation.nodeIds,
+      ),
+    ]);
+    this.selectionEmphasized =
+      focusedNodeId !== undefined || target.kind !== 'constraint';
+    this.renderedViewTarget = renderedViewTarget;
     this.resetRenderedView();
     contextNodes.forEach(({node, targetId}, index) => {
       this.root.add(
@@ -573,14 +660,7 @@ export class ModelViewport {
       );
     });
     focusNodes.forEach((node, index) => {
-      this.root.add(
-        this.buildObject(
-          node,
-          `source/${evaluationIndex}/${index}`,
-          1,
-          'source',
-        ),
-      );
+      this.root.add(this.buildObject(node, `source/${index}`, 1, 'source'));
     });
     this.renderSourceDecorations(this.module!, target, evaluation);
     this.applyPreviewTransforms();
@@ -600,6 +680,7 @@ export class ModelViewport {
     if (!this.module?.fallback) {
       return;
     }
+    this.selectionEmphasized = true;
     this.renderedViewTarget = {kind: 'model'};
     this.resetRenderedView();
     const rootObject = this.buildObject(
@@ -620,6 +701,7 @@ export class ModelViewport {
   }
 
   private renderOutlinePreview(nodes: readonly ModelSnapshotObject[]): void {
+    this.selectionEmphasized = true;
     this.renderedViewTarget = {
       kind: 'outline',
       nodeIds: nodes.map(node => node.nodeId),
@@ -713,8 +795,8 @@ export class ModelViewport {
     });
   }
 
-  private captureOutlinePreviewRestore(): void {
-    this.outlinePreviewRestore ??= {
+  private captureTransientPreviewRestore(): void {
+    this.transientPreviewRestore ??= {
       selectedKey: this.selectedKey,
       cameraPosition: this.camera.position.clone(),
       controlsTarget: this.controls.target.clone(),
@@ -762,7 +844,7 @@ export class ModelViewport {
     }
 
     const occurrence = this.getSelected();
-    if (!occurrence) {
+    if (!occurrence || !this.selectionEmphasized) {
       return;
     }
     this.selectionHelper = new THREE.BoxHelper(occurrence.object, '#d8ff3e');
@@ -964,7 +1046,7 @@ export class ModelViewport {
       return;
     }
     this.selectedViewTarget = {kind: 'source', targetId, evaluationIndex};
-    this.outlinePreviewRestore = undefined;
+    this.transientPreviewRestore = undefined;
     this.renderSourceTarget(target, evaluationIndex, false);
     const occurrence = [...this.occurrences.values()].find(
       candidate => candidate.node.nodeId === nodeId,
@@ -1193,6 +1275,7 @@ function sourceSpan(sourceRef: SourceRef): number {
 }
 
 function sourceTargetPriority(target: SourceTarget): number {
+  if (target.kind === 'element') return -1;
   if (target.kind === 'constraint') return 0;
   if (target.kind === 'operation-input') return 1;
   if (target.kind === 'operation-output') return 2;
@@ -1292,22 +1375,42 @@ function createThreeObject(node: ModelSnapshotObject): THREE.Object3D {
   return container;
 }
 
-function createDecorationObject(
-  decoration: ViewportDecoration,
+function createMeshDecorationObject(
+  decoration: Extract<ViewportDecoration, {kind: 'mesh'}>,
 ): THREE.Object3D {
-  const {appearance} = decoration;
-  const container = new THREE.Group();
-  container.name = decoration.id;
+  const container = createDecoratedMesh(
+    decoration.id,
+    decoration.mesh,
+    decoration.appearance,
+  );
   container.userData.decoration = decoration;
   applyTransform(container, decoration.transform);
+  return container;
+}
+
+function createSurfaceDecorationObject(
+  decoration: Extract<ViewportDecoration, {kind: 'surface'}>,
+): THREE.Object3D {
+  const container = createDecoratedMesh(
+    decoration.id,
+    decoration.mesh,
+    decoration.appearance,
+  );
+  container.userData.decoration = decoration;
+  return container;
+}
+
+function createDecoratedMesh(
+  id: string,
+  mesh: RenderMesh,
+  appearance: ViewportDecoration['appearance'],
+): THREE.Object3D {
+  const container = new THREE.Group();
+  container.name = id;
 
   const depthBias = appearance.depthBias ?? 0;
-  const surfaceMaterial = new THREE.MeshStandardMaterial({
+  const materialOptions = {
     color: appearance.color,
-    emissive: appearance.emissive,
-    emissiveIntensity: appearance.emissiveIntensity ?? 0,
-    roughness: 0.38,
-    metalness: 0.06,
     transparent: (appearance.opacity ?? 1) < 1,
     opacity: appearance.opacity ?? 1,
     depthTest: appearance.depthTest ?? true,
@@ -1315,15 +1418,25 @@ function createDecorationObject(
     polygonOffset: depthBias !== 0,
     polygonOffsetFactor: -depthBias,
     polygonOffsetUnits: -depthBias,
-  });
-  const surface = new THREE.Mesh(
-    createSurfaceGeometry(decoration.mesh),
-    surfaceMaterial,
-  );
+  } as const;
+  const surfaceMaterial =
+    appearance.shading === 'unlit'
+      ? new THREE.MeshBasicMaterial({
+          ...materialOptions,
+          side: THREE.DoubleSide,
+        })
+      : new THREE.MeshStandardMaterial({
+          ...materialOptions,
+          emissive: appearance.emissive,
+          emissiveIntensity: appearance.emissiveIntensity ?? 0,
+          roughness: 0.38,
+          metalness: 0.06,
+        });
+  const surface = new THREE.Mesh(createSurfaceGeometry(mesh), surfaceMaterial);
   surface.renderOrder = 4;
   container.add(surface);
 
-  const edgeGeometry = createEdgeGeometry(decoration.mesh);
+  const edgeGeometry = createEdgeGeometry(mesh);
   if (edgeGeometry && appearance.edgeColor) {
     const edges = new THREE.LineSegments(
       edgeGeometry,
@@ -1341,6 +1454,116 @@ function createDecorationObject(
     edgeGeometry?.dispose();
   }
   return container;
+}
+
+function createAnchorDecorationObject(
+  decoration: Extract<ViewportDecoration, {kind: 'anchor'}>,
+): THREE.Object3D {
+  const {appearance, size} = decoration;
+  const color = new THREE.Color(appearance.color);
+  const container = new THREE.Group();
+  container.name = decoration.id;
+  container.userData.decoration = decoration;
+  applyTransform(container, decoration.transform);
+
+  if (decoration.elementKind === 'point') {
+    container.add(
+      new THREE.Mesh(
+        new THREE.SphereGeometry(size * 0.14, 20, 14),
+        anchorSurfaceMaterial(appearance),
+      ),
+      anchorCross(size * 0.38, appearance),
+    );
+  } else if (decoration.elementKind === 'line') {
+    container.add(anchorLine([0, -size, 0], [0, size, 0], appearance));
+  } else if (decoration.elementKind === 'face') {
+    container.add(
+      new THREE.ArrowHelper(
+        new THREE.Vector3(0, 1, 0),
+        new THREE.Vector3(),
+        size,
+        color.getHex(),
+        size * 0.28,
+        size * 0.16,
+      ),
+    );
+  } else {
+    container.add(
+      anchorLine([0, 0, 0], [size, 0, 0], appearance),
+      anchorLine([0, 0, 0], [0, size, 0], appearance),
+      anchorLine([0, 0, 0], [0, 0, size], appearance),
+    );
+  }
+  container.traverse(object => {
+    object.renderOrder = 24;
+    const material = 'material' in object ? object.material : undefined;
+    const materials = Array.isArray(material) ? material : [material];
+    materials.forEach(candidate => {
+      if (candidate instanceof THREE.Material) {
+        candidate.depthTest = appearance.depthTest ?? false;
+        candidate.depthWrite = false;
+        candidate.transparent = true;
+      }
+    });
+  });
+  return container;
+}
+
+function anchorCross(
+  radius: number,
+  appearance: ViewportDecoration['appearance'],
+): THREE.LineSegments {
+  const points = [
+    new THREE.Vector3(-radius, 0, 0),
+    new THREE.Vector3(radius, 0, 0),
+    new THREE.Vector3(0, -radius, 0),
+    new THREE.Vector3(0, radius, 0),
+    new THREE.Vector3(0, 0, -radius),
+    new THREE.Vector3(0, 0, radius),
+  ];
+  return new THREE.LineSegments(
+    new THREE.BufferGeometry().setFromPoints(points),
+    anchorLineMaterial(appearance),
+  );
+}
+
+function anchorLine(
+  from: readonly [number, number, number],
+  to: readonly [number, number, number],
+  appearance: ViewportDecoration['appearance'],
+): THREE.Line {
+  return new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(...from),
+      new THREE.Vector3(...to),
+    ]),
+    anchorLineMaterial(appearance),
+  );
+}
+
+function anchorSurfaceMaterial(
+  appearance: ViewportDecoration['appearance'],
+): THREE.MeshBasicMaterial {
+  return new THREE.MeshBasicMaterial({
+    color: appearance.color,
+    transparent: true,
+    opacity: appearance.opacity ?? 1,
+    depthTest: appearance.depthTest ?? false,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+}
+
+function anchorLineMaterial(
+  appearance: ViewportDecoration['appearance'],
+): THREE.LineBasicMaterial {
+  return new THREE.LineBasicMaterial({
+    color: appearance.color,
+    transparent: true,
+    opacity: appearance.opacity ?? 1,
+    depthTest: appearance.depthTest ?? false,
+    depthWrite: false,
+  });
 }
 
 function createSurfaceGeometry(mesh: RenderMesh): THREE.BufferGeometry {
@@ -1373,7 +1596,7 @@ function createEdgeGeometry(
 
 function disposeObject(object: THREE.Object3D): void {
   object.traverse(child => {
-    if (child instanceof THREE.Mesh || child instanceof THREE.LineSegments) {
+    if (child instanceof THREE.Mesh || child instanceof THREE.Line) {
       child.geometry.dispose();
       const materials = Array.isArray(child.material)
         ? child.material
@@ -1468,4 +1691,18 @@ function containsNode(node: ModelSnapshotObject, nodeId: string): boolean {
     node.nodeId === nodeId ||
     node.children.some(child => containsNode(child, nodeId))
   );
+}
+
+function uniqueContextNodes(
+  entries: readonly Readonly<{
+    node: ModelSnapshotObject;
+    targetId: string;
+  }>[],
+): Array<Readonly<{node: ModelSnapshotObject; targetId: string}>> {
+  const seen = new Set<string>();
+  return entries.filter(({node}) => {
+    if (seen.has(node.nodeId)) return false;
+    seen.add(node.nodeId);
+    return true;
+  });
 }

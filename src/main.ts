@@ -2,6 +2,7 @@ import './style.css';
 import {
   CodeEditor,
   type ActiveFileChangeReason,
+  type CompletionFocus,
   type ProjectEditorChange,
 } from './editor';
 import {ModelCompilerClient} from './model/compiler-client';
@@ -24,6 +25,7 @@ import type {
   SourceRef,
 } from './model/runtime';
 import {booleanOperationSourceDecoration} from './model/operation-decorations';
+import {elementSourceDecoration} from './model/element-decorations';
 import type {
   PositionGizmoBinding,
   PositionGizmoEvent,
@@ -246,7 +248,10 @@ const viewport = new ModelViewport(viewportHost, {
     codeEditor.revealSource(sourceRef);
   },
   onPositionTool: handlePositionTool,
-  sourceDecorationProviders: [booleanOperationSourceDecoration],
+  sourceDecorationProviders: [
+    booleanOperationSourceDecoration,
+    elementSourceDecoration,
+  ],
 });
 const sourceEditPopover = new SourceEditPopover(viewportHost, sourceRef =>
   codeEditor.revealSource(sourceRef, true),
@@ -300,6 +305,22 @@ codeEditor.onCursorOffset(({file, offset}) => {
   } else if (currentModule) {
     renderContextControls(currentModule);
   }
+});
+codeEditor.onCompletionFocus(focus => {
+  if (!focus || !currentModule) {
+    viewport.restoreTransientPreview();
+    return;
+  }
+  const match = completionPreviewTarget(currentModule, focus);
+  if (!match) {
+    viewport.restoreTransientPreview();
+    return;
+  }
+  viewport.previewCompletion(
+    match.target,
+    match.evaluationIndex,
+    focus.memberName,
+  );
 });
 codeEditor.onActiveFile((path, reason) => {
   renderProjectNavigation();
@@ -526,7 +547,7 @@ async function runModel(
   window.clearTimeout(compileTimer);
   compileTimer = undefined;
   window.clearTimeout(outlinePreviewTimer);
-  viewport.restoreOutlinePreview();
+  viewport.restoreTransientPreview();
   const revision = ++runRevision;
   const sourceVersion = codeEditor.sourceVersion();
   compilingDesignContextId = designContextId;
@@ -911,7 +932,7 @@ function objectCatalogEntryButton(
   button.addEventListener('pointerleave', () => {
     window.clearTimeout(outlinePreviewTimer);
     outlinePreviewTimer = window.setTimeout(() => {
-      viewport.restoreOutlinePreview();
+      viewport.restoreTransientPreview();
     }, 50);
   });
   button.addEventListener('click', () => {
@@ -1502,7 +1523,10 @@ function commitToolSession(session: ToolSession, intent: ToolIntent): boolean {
 
 function toolSourceRefs(module: ModelModule): SourceRef[] {
   const refs = [
-    ...module.sourceTargets.map(target => target.sourceRef),
+    ...module.sourceTargets.flatMap(target => [
+      target.sourceRef,
+      ...(target.receiverRef ? [target.receiverRef] : []),
+    ]),
     ...[...module.operations.values()].flatMap(operation =>
       operation.sourceRef ? [operation.sourceRef] : [],
     ),
@@ -1523,6 +1547,58 @@ function toolSourceRefs(module: ModelModule): SourceRef[] {
       ]),
     ).values(),
   ];
+}
+
+function completionPreviewTarget(
+  module: ModelModule,
+  focus: CompletionFocus,
+):
+  | Readonly<{
+      target: ModelModule['sourceTargets'][number];
+      evaluationIndex: number;
+    }>
+  | undefined {
+  const receiverTarget = module.sourceTargets.find(target => {
+    if (target.kind !== 'element' || !target.receiverRef) return false;
+    const current = codeEditor.resolveSourceRef(target.receiverRef);
+    return current ? sameSourceRef(current, focus.receiverRef) : false;
+  });
+  const definitionTarget = focus.definitionRef
+    ? module.sourceTargets
+        .filter(target => {
+          const current = codeEditor.resolveSourceRef(target.sourceRef);
+          return current
+            ? containsSourceRef(current, focus.definitionRef!)
+            : false;
+        })
+        .sort(
+          (left, right) =>
+            sourceRefSpan(left.sourceRef) - sourceRefSpan(right.sourceRef),
+        )[0]
+    : undefined;
+  const target = receiverTarget ?? definitionTarget;
+  if (!target) return undefined;
+  const matchingContext = preferredEvaluationContextId
+    ? target.evaluations.findIndex(
+        evaluation => evaluation.contextId === preferredEvaluationContextId,
+      )
+    : -1;
+  return {
+    target,
+    evaluationIndex: matchingContext >= 0 ? matchingContext : 0,
+  };
+}
+
+function sameSourceRef(left: SourceRef, right: SourceRef): boolean {
+  return (
+    left.file === right.file &&
+    left.start === right.start &&
+    left.end === right.end
+  );
+}
+
+function sourceRefSpan(sourceRef: SourceRef): number {
+  return sourceRef.end - sourceRef.start;
 }
 
 function showToolIssue(message: string): void {
