@@ -5,7 +5,8 @@ import * as typeScriptLanguage from 'monaco-editor/languages/features/typescript
 import EditorWorker from 'monaco-editor/editor/editor.worker?worker';
 import TypeScriptWorker from 'monaco-editor/language/typescript/ts.worker?worker';
 import type {CursorOptions, Options} from 'prettier';
-import {code3dAnnotations} from './model/annotations';
+import {code3dAnnotations, type Code3dAnnotation} from './model/annotations';
+import type {DesignArgumentContext} from './model/compiler';
 import {authoringTypes, type SourceRef} from './model/runtime';
 import {normalizeProjectPath, type ModelProject} from './project/project';
 import type {SourceTextEdit} from './tools/tool-system';
@@ -31,6 +32,15 @@ type ProjectDocument = {
   viewState?: monaco.editor.ICodeEditorViewState | null;
   subscription: monaco.IDisposable;
 };
+
+type TypeScriptCompletionEntry = Readonly<{
+  name: string;
+  kind: string;
+  kindModifiers?: string;
+  sortText: string;
+  insertText?: string;
+  replacementSpan?: Readonly<{start: number; length: number}>;
+}>;
 
 const modelPrettierOptions = {
   parser: 'typescript',
@@ -127,6 +137,11 @@ const typeScriptTokenizationReady = monaco.editor.colorize(
 export class CodeEditor {
   readonly editor: monaco.editor.IStandaloneCodeEditor;
   private readonly documents = new Map<string, ProjectDocument>();
+  private readonly designArgumentModels = new Map<
+    string,
+    monaco.editor.ITextModel
+  >();
+  private designArguments: readonly DesignArgumentContext[] = [];
   private readonly annotationDecorations = new Map<string, string[]>();
   private readonly openPaths: string[] = [];
   private readonly changeListeners = new Set<
@@ -173,7 +188,7 @@ export class CodeEditor {
       bracketPairColorization: {enabled: true},
       guides: {bracketPairs: true, indentation: true},
       suggest: {preview: true, showWords: false},
-      quickSuggestions: {other: true, comments: false, strings: false},
+      quickSuggestions: {other: true, comments: true, strings: false},
       tabSize: 2,
     });
     this.sourceDecoration = this.editor.createDecorationsCollection();
@@ -186,6 +201,14 @@ export class CodeEditor {
         source === this.editor &&
         this.openProjectResource(resource, selectionOrPosition),
     });
+    monaco.languages.registerCompletionItemProvider(
+      ['typescript', 'javascript'],
+      {
+        triggerCharacters: ["'", '"'],
+        provideCompletionItems: (model, position, _context, token) =>
+          this.designArgumentCompletions(model, position, token),
+      },
+    );
     void typeScriptTokenizationReady.then(() => {
       for (const document of this.documents.values()) {
         this.refreshAnnotationDecorations(document.path, document.model);
@@ -337,6 +360,10 @@ export class CodeEditor {
     return model.getValueInRange(sourceRange(model, sourceRef));
   }
 
+  setDesignArguments(contexts: readonly DesignArgumentContext[]): void {
+    this.designArguments = contexts;
+  }
+
   sourceLine(sourceRef: SourceRef): number {
     return this.requireDocument(sourceRef.file).model.getPositionAt(
       sourceRef.start,
@@ -434,6 +461,89 @@ export class CodeEditor {
     this.sourceDecoration.clear();
   }
 
+  private async designArgumentCompletions(
+    model: monaco.editor.ITextModel,
+    position: monaco.Position,
+    token: monaco.CancellationToken,
+  ): Promise<monaco.languages.CompletionList | undefined> {
+    const document = [...this.documents.values()].find(
+      candidate => candidate.model === model,
+    );
+    if (!document) return undefined;
+    const source = model.getValue();
+    const offset = model.getOffsetAt(position);
+    const annotation = code3dAnnotations(source).find(
+      candidate =>
+        candidate.name === 'arguments' &&
+        candidate.valueStart < offset &&
+        offset <= candidate.valueEnd,
+    );
+    if (!annotation) return undefined;
+    const context = this.designArguments.find(
+      candidate =>
+        candidate.annotationRef.file === document.path &&
+        candidate.annotationRef.start === annotation.start,
+    );
+    const site = context ? {annotation, context} : undefined;
+    if (!site) return undefined;
+    const virtualCall = designArgumentVirtualCall(source, site, offset);
+    if (!virtualCall) return undefined;
+
+    const virtualModel = this.designArgumentModel(
+      document.path,
+      model.getLanguageId(),
+      virtualCall.source,
+    );
+    const workerFactory = await (model.getLanguageId() === 'javascript'
+      ? typeScriptLanguage.getJavaScriptWorker()
+      : typeScriptLanguage.getTypeScriptWorker());
+    if (token.isCancellationRequested) return undefined;
+    const worker = await workerFactory(virtualModel.uri);
+    const completions = (await worker.getCompletionsAtPosition(
+      virtualModel.uri.toString(),
+      virtualCall.offset,
+    )) as {entries?: TypeScriptCompletionEntry[]} | undefined;
+    if (!completions?.entries || token.isCancellationRequested) {
+      return undefined;
+    }
+    return {
+      suggestions: completions.entries.map(entry => ({
+        label: entry.name,
+        kind: completionItemKind(entry.kind),
+        detail: entry.kind,
+        insertText: entry.insertText ?? entry.name,
+        sortText: entry.sortText,
+        tags: entry.kindModifiers?.includes('deprecated')
+          ? [monaco.languages.CompletionItemTag.Deprecated]
+          : undefined,
+        range: completionRange(
+          model,
+          position,
+          site,
+          virtualCall.argumentsStart,
+          virtualCall.argumentsEnd,
+          entry.replacementSpan,
+        ),
+      })),
+    };
+  }
+
+  private designArgumentModel(
+    path: string,
+    language: string,
+    source: string,
+  ): monaco.editor.ITextModel {
+    const existing = this.designArgumentModels.get(path);
+    if (existing) {
+      if (existing.getValue() !== source) existing.setValue(source);
+      return existing;
+    }
+    const uri = designArgumentModelUri(this.requireDocument(path).model.uri);
+    const model = monaco.editor.createModel(source, language, uri);
+    this.designArgumentModels.set(path, model);
+    return model;
+  }
+
   private addDocument(path: string, source: string): void {
     const normalized = normalizeProjectPath(path);
     const model = monaco.editor.createModel(
@@ -460,6 +570,8 @@ export class CodeEditor {
 
   private removeDocument(path: string): void {
     const document = this.requireDocument(path);
+    this.designArgumentModels.get(path)?.dispose();
+    this.designArgumentModels.delete(path);
     document.subscription.dispose();
     document.model.dispose();
     this.annotationDecorations.delete(path);
@@ -652,6 +764,108 @@ function sourceEditExcerpts(
         changedEnd: end - lineStart - contentStart,
       };
     });
+}
+
+type DesignArgumentVirtualCall = Readonly<{
+  source: string;
+  offset: number;
+  argumentsStart: number;
+  argumentsEnd: number;
+}>;
+
+type DesignArgumentCompletionSite = Readonly<{
+  annotation: Code3dAnnotation;
+  context: DesignArgumentContext;
+}>;
+
+function designArgumentVirtualCall(
+  source: string,
+  site: DesignArgumentCompletionSite,
+  cursorOffset: number,
+): DesignArgumentVirtualCall | undefined {
+  const {annotation, context} = site;
+  if (!annotation.value.startsWith('[')) return undefined;
+  const valueEnd = annotation.value.endsWith(']')
+    ? annotation.value.length - 1
+    : annotation.value.length;
+  const cursorInValue = cursorOffset - annotation.valueStart;
+  if (cursorInValue < 1 || cursorInValue > valueEnd) return undefined;
+  const argumentsSource = annotation.value.slice(1, valueEnd);
+  const helperName = `__code3dArguments${annotation.start}`;
+  const callPrefix = `\nfunction ${helperName}${context.signature.typeParametersSource}(${context.signature.parametersSource}) {}\n${helperName}(`;
+  const argumentsStart = source.length + callPrefix.length;
+  return {
+    source: `${source}${callPrefix}${argumentsSource});\n`,
+    offset: argumentsStart + cursorInValue - 1,
+    argumentsStart,
+    argumentsEnd: argumentsStart + argumentsSource.length,
+  };
+}
+
+function designArgumentModelUri(original: monaco.Uri): monaco.Uri {
+  const slash = original.path.lastIndexOf('/');
+  return original.with({
+    path: `${original.path.slice(0, slash + 1)}.__code3d-intellisense-${original.path.slice(slash + 1)}`,
+  });
+}
+
+function completionRange(
+  model: monaco.editor.ITextModel,
+  position: monaco.Position,
+  site: DesignArgumentCompletionSite,
+  argumentsStart: number,
+  argumentsEnd: number,
+  replacementSpan?: Readonly<{start: number; length: number}>,
+): monaco.IRange {
+  if (
+    replacementSpan &&
+    argumentsStart <= replacementSpan.start &&
+    replacementSpan.start + replacementSpan.length <= argumentsEnd
+  ) {
+    const start =
+      site.annotation.valueStart + 1 + replacementSpan.start - argumentsStart;
+    const end = start + replacementSpan.length;
+    return monaco.Range.fromPositions(
+      model.getPositionAt(start),
+      model.getPositionAt(end),
+    );
+  }
+  const word = model.getWordUntilPosition(position);
+  return new monaco.Range(
+    position.lineNumber,
+    word.startColumn,
+    position.lineNumber,
+    word.endColumn,
+  );
+}
+
+function completionItemKind(kind: string): monaco.languages.CompletionItemKind {
+  switch (kind) {
+    case 'keyword':
+    case 'primitive type':
+      return monaco.languages.CompletionItemKind.Keyword;
+    case 'const':
+    case 'let':
+    case 'var':
+    case 'local var':
+      return monaco.languages.CompletionItemKind.Variable;
+    case 'method':
+    case 'function':
+    case 'construct':
+    case 'call':
+    case 'index':
+      return monaco.languages.CompletionItemKind.Function;
+    case 'class':
+      return monaco.languages.CompletionItemKind.Class;
+    case 'interface':
+      return monaco.languages.CompletionItemKind.Interface;
+    case 'module':
+      return monaco.languages.CompletionItemKind.Module;
+    case 'enum':
+      return monaco.languages.CompletionItemKind.Enum;
+    default:
+      return monaco.languages.CompletionItemKind.Property;
+  }
 }
 
 function annotationDecorations(

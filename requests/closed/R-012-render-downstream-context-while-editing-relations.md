@@ -34,3 +34,22 @@
   is not added merely because it appears in the relation expression.
 - Existing declaration, immutable-chain, and operation-input source scopes
   retain their current rendering semantics.
+
+## Resolution
+
+- Constraint-returning source expressions are first-class source targets that
+  retain the constrained object, exact constraint identity, and evaluation
+  context.
+- Each target resolves its concrete downstream composition inputs by runtime
+  object identity. Those peers provide dimmed context; the relation target is
+  never inserted merely because it occurs in the constraint.
+- Separate downstream consumers remain separate target evaluations and appear
+  as `Use` scopes when more than one exists. The selected use survives source
+  edits and recompilation.
+- Constraint targets enable the existing Inspector offset controls and position
+  gizmo, including expression insertion when the selected constraint has no
+  `offset()` yet. Boolean region emphasis continues through the generic source
+  decoration provider.
+- Arrays returned from `relate` keep each constraint as an independent source
+  and tool scope. Inspector parameters are restricted to the selected member;
+  the array expression itself does not invent a shared frame or combined gizmo.

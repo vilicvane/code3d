@@ -68,13 +68,26 @@ export type Transform = Readonly<{
   scale: Vec3;
 }>;
 
-export type AnchorKind = 'origin' | 'center' | 'top' | 'bottom' | 'axis';
+export type ElementKind = 'point' | 'line' | 'face' | 'frame';
+
+export type ElementSnapshot = Readonly<{
+  name: string;
+  kind: ElementKind;
+  transform: Transform;
+}>;
+
+export type ConstraintAnchorSnapshot = Readonly<{
+  nodeId: string;
+  name: string;
+  kind: ElementKind;
+}>;
 
 export type ConstraintSnapshot = Readonly<{
   id: string;
   kind: 'on';
-  source: Readonly<{nodeId: string; anchor: AnchorKind}>;
-  target: Readonly<{nodeId: string; anchor: AnchorKind}>;
+  source: ConstraintAnchorSnapshot;
+  target: ConstraintAnchorSnapshot;
+  flipped: boolean;
   offset: Vec3;
   offsetFrame: Transform;
   sourceRefs: readonly SourceRef[];
@@ -94,6 +107,7 @@ export type ModelOperationKind =
   | 'fillet'
   | 'chamfer'
   | 'relate'
+  | 'expose'
   | 'group'
   | 'union'
   | 'cut'
@@ -155,22 +169,30 @@ export type ModelSnapshotObject = Readonly<{
   children: readonly ModelSnapshotObject[];
   transform: Transform;
   constraints: readonly ConstraintSnapshot[];
+  elements: readonly ElementSnapshot[];
   sourceRefs: readonly SourceRef[];
   parameters: readonly ParameterUsage[];
   operation: ModelOperationSnapshot;
   mesh?: RenderMesh;
 }>;
 
-type AnchorReference = Readonly<{
-  model: ModelObject;
-  kind: AnchorKind;
+type StoredElement = Readonly<{
+  kind: ElementKind;
+  transform: RigidTransform;
 }>;
+
+type StoredElements = Readonly<Record<string, StoredElement>>;
+
+type StoredAnchor = StoredElement & Readonly<{name: string}>;
+
+type AnchorReference = StoredAnchor & Readonly<{model: ModelObject}>;
 
 type StoredConstraint = Readonly<{
   id: string;
   kind: 'on';
-  source: AnchorKind;
+  source: StoredAnchor;
   target: AnchorReference;
+  flipped: boolean;
   offset: Vec3;
   sourceRefs: readonly SourceRef[];
   parameters: readonly ParameterUsage[];
@@ -214,6 +236,7 @@ type ModelObjectInit = Readonly<{
   color?: string;
   children?: readonly ModelObject[];
   constraints?: readonly StoredConstraint[];
+  elements?: StoredElements;
   sourceRefs?: readonly SourceRef[];
   parameters?: readonly ParameterUsage[];
   operation: StoredOperation;
@@ -234,12 +257,57 @@ let nextConstraintId = 1;
 let nextOperationId = 1;
 const combineModels = Symbol('combineModels');
 
-export interface Anchor {
+export interface Anchor<Kind extends ElementKind = ElementKind> {
+  readonly elementKind: Kind;
   on(target: Anchor): Constraint;
 }
 
-class ModelAnchor implements Anchor {
-  constructor(readonly reference: AnchorReference) {}
+export interface PointAnchor extends Anchor<'point'> {}
+
+export interface LineAnchor extends Anchor<'line'> {}
+
+export interface FaceAnchor extends Anchor<'face'> {}
+
+type ElementSources = Readonly<Record<string, Anchor>>;
+type NamedElements = Readonly<Record<string, Anchor>>;
+
+type AnchorFor<Kind extends ElementKind> = Kind extends 'point'
+  ? PointAnchor
+  : Kind extends 'line'
+    ? LineAnchor
+    : Kind extends 'face'
+      ? FaceAnchor
+      : Anchor<'frame'>;
+
+type ExposedElements<Sources extends ElementSources> = Readonly<{
+  [Name in keyof Sources]: Sources[Name] extends Anchor<infer Kind>
+    ? AnchorFor<Kind>
+    : never;
+}>;
+
+type MergedElements<
+  Existing extends NamedElements,
+  Added extends NamedElements,
+> = Omit<Existing, keyof Added> & Added;
+
+export type Model<Elements extends NamedElements = {}> = ModelObject<Elements> &
+  Elements;
+
+export type CanonicalElements = Readonly<{
+  center: PointAnchor;
+  top: FaceAnchor;
+  bottom: FaceAnchor;
+  axis: LineAnchor;
+}>;
+
+class ModelAnchor<
+  Kind extends ElementKind = ElementKind,
+> implements Anchor<Kind> {
+  readonly elementKind: Kind;
+
+  constructor(readonly reference: AnchorReference) {
+    this.elementKind = this.reference.kind as Kind;
+  }
 
   on(target: Anchor): Constraint {
     return new Constraint(this.reference, anchorReference(target));
@@ -254,6 +322,7 @@ export class Constraint {
     private readonly source: AnchorReference,
     private readonly target: AnchorReference,
     private readonly displacement: Vec3 = origin,
+    private readonly isFlipped = false,
     private readonly constraintId = `constraint-${nextConstraintId++}`,
     sourceRefs: readonly SourceRef[] = [],
     parameters: readonly ParameterUsage[] = [],
@@ -268,6 +337,19 @@ export class Constraint {
       this.source,
       this.target,
       addVectors(this.displacement, [x, y, z]),
+      this.isFlipped,
+      this.constraintId,
+      this.sourceRefs,
+      this.parameters,
+    );
+  }
+
+  flip(): Constraint {
+    return new Constraint(
+      this.source,
+      this.target,
+      this.displacement,
+      !this.isFlipped,
       this.constraintId,
       this.sourceRefs,
       this.parameters,
@@ -291,6 +373,19 @@ export class Constraint {
     appendUniqueParameters(this.parameters, parameters);
   }
 
+  /** Runtime instrumentation hook. Not part of the authoring API. */
+  traceReference(): Readonly<{
+    constraintId: string;
+    source: ModelObject;
+    target: ModelObject;
+  }> {
+    return {
+      constraintId: this.constraintId,
+      source: this.source.model,
+      target: this.target.model,
+    };
+  }
+
   storeFor(model: ModelObject): StoredConstraint {
     if (this.source.model !== model) {
       throw new Error(
@@ -300,8 +395,9 @@ export class Constraint {
     return {
       id: this.constraintId,
       kind: 'on',
-      source: this.source.kind,
+      source: storedAnchor(this.source),
       target: this.target,
+      flipped: this.isFlipped,
       offset: this.displacement,
       sourceRefs: [...this.sourceRefs],
       parameters: [...this.parameters],
@@ -309,7 +405,10 @@ export class Constraint {
   }
 }
 
-export class ModelObject implements Anchor {
+export class ModelObject<
+  Elements extends NamedElements = {},
+> implements Anchor<'frame'> {
+  readonly elementKind = 'frame' as const;
   readonly nodeId: string;
   readonly kind: 'solid' | 'group';
   readonly name: string;
@@ -320,6 +419,7 @@ export class ModelObject implements Anchor {
   private readonly shape?: Shape3D;
   private readonly localBounds?: LocalBounds;
   private readonly meshTolerance: number;
+  private readonly elements: StoredElements;
   private constraints: StoredConstraint[];
   private readonly operation: StoredOperation;
 
@@ -342,34 +442,36 @@ export class ModelObject implements Anchor {
     this.sourceRefs = [...(init.sourceRefs ?? [])];
     this.parameters = [...(init.parameters ?? [])];
     this.operation = init.operation;
-  }
-
-  get center(): Anchor {
-    return new ModelAnchor({model: this, kind: 'center'});
-  }
-
-  get top(): Anchor {
-    return new ModelAnchor({model: this, kind: 'top'});
-  }
-
-  get bottom(): Anchor {
-    return new ModelAnchor({model: this, kind: 'bottom'});
-  }
-
-  get axis(): Anchor {
-    return new ModelAnchor({model: this, kind: 'axis'});
+    this.elements =
+      init.elements ??
+      (this.localBounds ? canonicalElements(this.localBounds) : {});
+    for (const [name, element] of Object.entries(this.elements)) {
+      if (name in this) {
+        throw new Error(
+          `The element name ${name} conflicts with the model API.`,
+        );
+      }
+      Object.defineProperty(this, name, {
+        value: modelAnchor(this, name, element),
+      });
+    }
   }
 
   on(target: Anchor): Constraint {
     return new Constraint(
-      {model: this, kind: 'origin'},
+      {
+        model: this,
+        name: 'origin',
+        kind: 'frame',
+        transform: identityRigidTransform,
+      },
       anchorReference(target),
     );
   }
 
   relate(
-    build: (self: ModelObject) => Constraint | readonly Constraint[],
-  ): ModelObject {
+    build: (self: Model<Elements>) => Constraint | readonly Constraint[],
+  ): Model<Elements> {
     const operation = storedOperation('relate', [
       {model: this, role: 'source', index: 0},
     ]);
@@ -388,29 +490,73 @@ export class ModelObject implements Anchor {
     return related;
   }
 
-  named(name: string): ModelObject {
+  expose<const Sources extends ElementSources>(
+    sources: Sources,
+  ): Model<MergedElements<Elements, ExposedElements<Sources>>> {
+    const context = createSolveContext();
+    const ownPose = this.solvePose(context);
+    const references: ModelObject[] = [];
+    const exposed = Object.fromEntries(
+      Object.entries(sources).map(([name, source]) => {
+        const reference = anchorReference(source);
+        references.push(reference.model);
+        return [
+          name,
+          {
+            kind: reference.kind,
+            transform: relativeTransform(
+              composeTransforms(
+                reference.model.solvePose(context),
+                reference.transform,
+              ),
+              ownPose,
+            ),
+          },
+        ];
+      }),
+    );
+    const operation = storedOperation('expose', [
+      {model: this, role: 'source', index: 0},
+      ...uniqueModels(references)
+        .filter(model => model !== this)
+        .map((model, index) => ({
+          model,
+          role: 'reference' as const,
+          index,
+        })),
+    ]);
+    return this.copy(
+      {elements: {...this.elements, ...exposed}},
+      operation,
+    ) as Model<MergedElements<Elements, ExposedElements<Sources>>>;
+  }
+
+  named(name: string): Model<Elements> {
     return this.copy(
       {name},
       storedOperation('named', [{model: this, role: 'source', index: 0}]),
     );
   }
 
-  paint(color: string): ModelObject {
+  paint(color: string): Model<Elements> {
     return this.copy(
       {color},
       storedOperation('paint', [{model: this, role: 'source', index: 0}]),
     );
   }
 
-  scaled(factor: number): ModelObject {
+  scaled(factor: number): Model<Elements> {
     assertPositive('scale', factor);
     return this.copy(
-      {shape: this.requireShape().clone().scale(factor, toPoint(origin))},
+      {
+        shape: this.requireShape().clone().scale(factor, toPoint(origin)),
+        elements: scaleElements(this.elements, factor),
+      },
       storedOperation('scaled', [{model: this, role: 'source', index: 0}]),
     );
   }
 
-  fillet(radius: number): ModelObject {
+  fillet(radius: number): Model<Elements> {
     assertPositive('radius', radius);
     return this.copy(
       {shape: this.requireShape().fillet(radius)},
@@ -418,7 +564,7 @@ export class ModelObject implements Anchor {
     );
   }
 
-  chamfer(distance: number): ModelObject {
+  chamfer(distance: number): Model<Elements> {
     assertPositive('distance', distance);
     return this.copy(
       {shape: this.requireShape().chamfer(distance)},
@@ -426,7 +572,7 @@ export class ModelObject implements Anchor {
     );
   }
 
-  withChildren(children: readonly ModelObject[]): ModelObject {
+  withChildren(children: readonly ModelObject[]): Model<Elements> {
     if (this.kind !== 'group') {
       throw new Error('Only a group can contain child objects.');
     }
@@ -498,6 +644,11 @@ export class ModelObject implements Anchor {
       color: this.color,
       transform: toTransform(pose),
       constraints,
+      elements: Object.entries(this.elements).map(([name, element]) => ({
+        name,
+        kind: element.kind,
+        transform: toTransform(element.transform),
+      })),
       sourceRefs: [...this.sourceRefs],
       parameters,
       operation: this.operationSnapshot(meshCache),
@@ -536,11 +687,11 @@ export class ModelObject implements Anchor {
   [combineModels](
     operation: BooleanOperation,
     others: readonly ModelObject[],
-  ): ModelObject {
+  ): Model<CanonicalElements> {
     const evaluation = this.evaluateBoolean(operation, others);
     let transferred = false;
     try {
-      const combined = new ModelObject({
+      const combined = new ModelObject<CanonicalElements>({
         kind: 'solid',
         shape: evaluation.result,
         name: this.name,
@@ -569,7 +720,7 @@ export class ModelObject implements Anchor {
         ),
       });
       transferred = true;
-      return combined;
+      return combined as Model<CanonicalElements>;
     } finally {
       if (!transferred) {
         evaluation.result.delete();
@@ -666,10 +817,10 @@ export class ModelObject implements Anchor {
     const targetPose = constraint.target.model.solvePose(context);
     return composeAll(
       targetPose,
-      constraint.target.model.anchorTransform(constraint.target.kind),
+      constraint.target.transform,
       translation(constraint.offset),
-      rotation(halfTurnAroundX),
-      invertTransform(this.anchorTransform(constraint.source)),
+      constraint.flipped ? identityRigidTransform : rotation(halfTurnAroundX),
+      invertTransform(constraint.source.transform),
     );
   }
 
@@ -680,44 +831,19 @@ export class ModelObject implements Anchor {
     const targetPose = constraint.target.model.solvePose(context);
     const offsetFrame = composeTransforms(
       targetPose,
-      constraint.target.model.anchorTransform(constraint.target.kind),
+      constraint.target.transform,
     );
     return {
       id: constraint.id,
       kind: constraint.kind,
-      source: {nodeId: this.nodeId, anchor: constraint.source},
-      target: {
-        nodeId: constraint.target.model.nodeId,
-        anchor: constraint.target.kind,
-      },
+      source: anchorSnapshot(this, constraint.source),
+      target: anchorSnapshot(constraint.target),
+      flipped: constraint.flipped,
       offset: constraint.offset,
       offsetFrame: toTransform(offsetFrame),
       sourceRefs: [...constraint.sourceRefs],
       parameters: [...constraint.parameters],
     };
-  }
-
-  private anchorTransform(kind: AnchorKind): RigidTransform {
-    if (kind === 'origin') {
-      return identityRigidTransform;
-    }
-    this.requireShape();
-    const [[minX, minY, minZ], [maxX, maxY, maxZ]] = this.localBounds!;
-    const center: Vec3 = [
-      (minX + maxX) / 2,
-      (minY + maxY) / 2,
-      (minZ + maxZ) / 2,
-    ];
-    if (kind === 'center' || kind === 'axis') {
-      return translation(center);
-    }
-    if (kind === 'top') {
-      return translation([center[0], maxY, center[2]]);
-    }
-    return composeTransforms(
-      translation([center[0], minY, center[2]]),
-      rotation(halfTurnAroundX),
-    );
   }
 
   private requireShape(): Shape3D {
@@ -758,8 +884,8 @@ export class ModelObject implements Anchor {
   private copy(
     overrides: Partial<ModelObjectInit>,
     operation: StoredOperation,
-  ): ModelObject {
-    return new ModelObject({
+  ): Model<Elements> {
+    return new ModelObject<Elements>({
       kind: this.kind,
       shape: this.shape,
       localBounds: overrides.shape ? undefined : this.localBounds,
@@ -767,20 +893,25 @@ export class ModelObject implements Anchor {
       color: this.color,
       children: this.children,
       constraints: this.constraints,
+      elements: this.elements,
       sourceRefs: this.sourceRefs,
       parameters: this.parameters,
       meshTolerance: this.meshTolerance,
       operation,
       ...overrides,
-    });
+    }) as Model<Elements>;
   }
 }
 
-export function box(width: number, height: number, depth: number): ModelObject {
+export function box(
+  width: number,
+  height: number,
+  depth: number,
+): Model<CanonicalElements> {
   assertPositive('width', width);
   assertPositive('height', height);
   assertPositive('depth', depth);
-  return new ModelObject({
+  return new ModelObject<CanonicalElements>({
     kind: 'solid',
     name: 'Box',
     shape: makeBox(
@@ -788,35 +919,38 @@ export function box(width: number, height: number, depth: number): ModelObject {
       [width / 2, height / 2, depth / 2],
     ),
     operation: storedOperation('box'),
-  });
+  }) as Model<CanonicalElements>;
 }
 
-export function cylinder(radius: number, height: number): ModelObject {
+export function cylinder(
+  radius: number,
+  height: number,
+): Model<CanonicalElements> {
   assertPositive('radius', radius);
   assertPositive('height', height);
-  return new ModelObject({
+  return new ModelObject<CanonicalElements>({
     kind: 'solid',
     name: 'Cylinder',
     shape: makeCylinder(radius, height, [0, -height / 2, 0], [0, 1, 0]),
     operation: storedOperation('cylinder'),
-  });
+  }) as Model<CanonicalElements>;
 }
 
-export function sphere(radius: number): ModelObject {
+export function sphere(radius: number): Model<CanonicalElements> {
   assertPositive('radius', radius);
-  return new ModelObject({
+  return new ModelObject<CanonicalElements>({
     kind: 'solid',
     name: 'Sphere',
     shape: makeSphere(radius),
     operation: storedOperation('sphere'),
-  });
+  }) as Model<CanonicalElements>;
 }
 
 export function frustum(
   bottomRadius: number,
   topRadius: number,
   height: number,
-): ModelObject {
+): Model<CanonicalElements> {
   assertPositive('bottomRadius', bottomRadius);
   assertPositive('topRadius', topRadius);
   assertPositive('height', height);
@@ -828,12 +962,12 @@ export function frustum(
     plane: 'XZ',
     origin: [0, height / 2, 0],
   });
-  return new ModelObject({
+  return new ModelObject<CanonicalElements>({
     kind: 'solid',
     name: 'Frustum',
     shape: bottom.loftWith(top, {ruled: true}),
     operation: storedOperation('frustum'),
-  });
+  }) as Model<CanonicalElements>;
 }
 
 export function regularPrism(
@@ -841,7 +975,7 @@ export function regularPrism(
   height: number,
   sides: number,
   rotation = 0,
-): ModelObject {
+): Model<CanonicalElements> {
   assertPositive('radius', radius);
   assertPositive('height', height);
   if (!Number.isInteger(sides) || sides < 3) {
@@ -858,12 +992,12 @@ export function regularPrism(
   if (rotation !== 0) {
     shape = shape.rotate(rotation, [0, 0, 0], [0, 1, 0]);
   }
-  return new ModelObject({
+  return new ModelObject<CanonicalElements>({
     kind: 'solid',
     name: `${sides}-sided prism`,
     shape,
     operation: storedOperation('regularPrism'),
-  });
+  }) as Model<CanonicalElements>;
 }
 
 export type HelicalThreadOptions = Readonly<{
@@ -876,7 +1010,9 @@ export type HelicalThreadOptions = Readonly<{
   leftHanded?: boolean;
 }>;
 
-export function helicalThread(options: HelicalThreadOptions): ModelObject {
+export function helicalThread(
+  options: HelicalThreadOptions,
+): Model<CanonicalElements> {
   const {
     pitch,
     height,
@@ -903,7 +1039,7 @@ export function helicalThread(options: HelicalThreadOptions): ModelObject {
       'The thread profile requires crestWidth < rootWidth <= pitch.',
     );
   }
-  return new ModelObject({
+  return new ModelObject<CanonicalElements>({
     kind: 'solid',
     name: 'Helical thread',
     shape: makeHelicalThreadShape({
@@ -917,13 +1053,10 @@ export function helicalThread(options: HelicalThreadOptions): ModelObject {
     }),
     meshTolerance: Math.min(0.12, pitch / 8),
     operation: storedOperation('helicalThread'),
-  });
+  }) as Model<CanonicalElements>;
 }
 
-export function group(
-  children: readonly ModelObject[],
-  name = 'Group',
-): ModelObject {
+export function group(children: readonly ModelObject[], name = 'Group'): Model {
   assertChildren(children);
   return new ModelObject({
     kind: 'group',
@@ -936,7 +1069,9 @@ export function group(
   });
 }
 
-export function union(operands: readonly ModelObject[]): ModelObject {
+export function union(
+  operands: readonly ModelObject[],
+): Model<CanonicalElements> {
   const {first, others} = booleanOperands('union', operands);
   return first[combineModels]('fuse', others);
 }
@@ -944,7 +1079,7 @@ export function union(operands: readonly ModelObject[]): ModelObject {
 export function cut(
   stock: ModelObject,
   tools: readonly ModelObject[],
-): ModelObject {
+): Model<CanonicalElements> {
   if (!isModelObject(stock)) {
     throw new Error('The cut stock must be a ModelObject.');
   }
@@ -959,7 +1094,9 @@ export function cut(
   return stock[combineModels]('cut', tools);
 }
 
-export function intersect(operands: readonly ModelObject[]): ModelObject {
+export function intersect(
+  operands: readonly ModelObject[],
+): Model<CanonicalElements> {
   const {first, others} = booleanOperands('intersect', operands);
   return first[combineModels]('intersect', others);
 }
@@ -1045,6 +1182,60 @@ function shapeBounds(shape: Shape3D): LocalBounds {
   ];
 }
 
+function canonicalElements(bounds: LocalBounds): StoredElements {
+  const [[minX, minY, minZ], [maxX, maxY, maxZ]] = bounds;
+  const center: Vec3 = [
+    (minX + maxX) / 2,
+    (minY + maxY) / 2,
+    (minZ + maxZ) / 2,
+  ];
+  return {
+    center: {kind: 'point', transform: translation(center)},
+    top: {
+      kind: 'face',
+      transform: translation([center[0], maxY, center[2]]),
+    },
+    bottom: {
+      kind: 'face',
+      transform: composeTransforms(
+        translation([center[0], minY, center[2]]),
+        rotation(halfTurnAroundX),
+      ),
+    },
+    axis: {kind: 'line', transform: translation(center)},
+  };
+}
+
+function modelAnchor<Kind extends ElementKind>(
+  model: ModelObject,
+  name: string,
+  element: StoredElement & Readonly<{kind: Kind}>,
+): Anchor<Kind> {
+  return new ModelAnchor<Kind>({model, name, ...element});
+}
+
+function scaleElements(
+  elements: StoredElements,
+  factor: number,
+): StoredElements {
+  return Object.fromEntries(
+    Object.entries(elements).map(([name, element]) => [
+      name,
+      {
+        ...element,
+        transform: {
+          ...element.transform,
+          position: [
+            element.transform.position[0] * factor,
+            element.transform.position[1] * factor,
+            element.transform.position[2] * factor,
+          ],
+        },
+      },
+    ]),
+  );
+}
+
 function unionSectionShape(left: Shape3D, right: Shape3D): AnyShape {
   const section = new (getOC().BRepAlgoAPI_Section)(
     left.wrapped,
@@ -1077,9 +1268,44 @@ function unionSectionShape(left: Shape3D, right: Shape3D): AnyShape {
 
 function anchorReference(anchor: Anchor): AnchorReference {
   if (anchor instanceof ModelObject) {
-    return {model: anchor, kind: 'origin'};
+    return {
+      model: anchor,
+      name: 'origin',
+      kind: 'frame',
+      transform: identityRigidTransform,
+    };
   }
   return (anchor as ModelAnchor).reference;
+}
+
+function storedAnchor(reference: AnchorReference): StoredAnchor {
+  return {
+    name: reference.name,
+    kind: reference.kind,
+    transform: reference.transform,
+  };
+}
+
+function anchorSnapshot(reference: AnchorReference): ConstraintAnchorSnapshot;
+function anchorSnapshot(
+  model: ModelObject,
+  anchor: StoredAnchor,
+): ConstraintAnchorSnapshot;
+function anchorSnapshot(
+  modelOrReference: ModelObject | AnchorReference,
+  stored?: StoredAnchor,
+): ConstraintAnchorSnapshot {
+  const model = stored ? (modelOrReference as ModelObject) : undefined;
+  const reference = stored ?? (modelOrReference as AnchorReference);
+  return {
+    nodeId: (model ?? (modelOrReference as AnchorReference).model).nodeId,
+    name: reference.name,
+    kind: reference.kind,
+  };
+}
+
+function uniqueModels(models: readonly ModelObject[]): ModelObject[] {
+  return [...new Set(models)];
 }
 
 function createSolveContext(): SolveContext {
@@ -1188,40 +1414,68 @@ function hasParameter(
 export const authoringTypes = `
 declare module "code3d" {
   export type Vec3 = readonly [x: number, y: number, z: number];
+  export type ElementKind = "point" | "line" | "face" | "frame";
 
-  export interface Anchor {
+  export interface Anchor<Kind extends ElementKind = ElementKind> {
+    readonly elementKind: Kind;
     on(target: Anchor): Constraint;
   }
+
+  export interface PointAnchor extends Anchor<"point"> {}
+  export interface LineAnchor extends Anchor<"line"> {}
+  export interface FaceAnchor extends Anchor<"face"> {}
+
+  type ElementSources = Readonly<Record<string, Anchor>>;
+  type NamedElements = Readonly<Record<string, Anchor>>;
+  type AnchorFor<Kind extends ElementKind> =
+    Kind extends "point" ? PointAnchor :
+    Kind extends "line" ? LineAnchor :
+    Kind extends "face" ? FaceAnchor :
+    Anchor<"frame">;
+  type ExposedElements<Sources extends ElementSources> = Readonly<{
+    [Name in keyof Sources]: Sources[Name] extends Anchor<infer Kind>
+      ? AnchorFor<Kind>
+      : never;
+  }>;
+  type MergedElements<Existing extends NamedElements, Added extends NamedElements> =
+    Omit<Existing, keyof Added> & Added;
+
+  export type Model<Elements extends NamedElements = {}> = ModelObject<Elements> & Elements;
+  export type CanonicalElements = Readonly<{
+    center: PointAnchor;
+    top: FaceAnchor;
+    bottom: FaceAnchor;
+    axis: LineAnchor;
+  }>;
 
   export class Constraint {
     private constructor();
     offset(x: number, y: number, z: number): Constraint;
+    flip(): Constraint;
   }
 
-  export class ModelObject implements Anchor {
+  export class ModelObject<Elements extends NamedElements = {}> implements Anchor<"frame"> {
     private constructor();
+    readonly elementKind: "frame";
     readonly nodeId: string;
     readonly name: string;
     readonly kind: "solid" | "group";
-    readonly center: Anchor;
-    readonly top: Anchor;
-    readonly bottom: Anchor;
-    readonly axis: Anchor;
     on(target: Anchor): Constraint;
-    relate(build: (self: ModelObject) => Constraint | readonly Constraint[]): ModelObject;
-    named(name: string): ModelObject;
-    paint(color: string): ModelObject;
-    scaled(factor: number): ModelObject;
-    fillet(radius: number): ModelObject;
-    chamfer(distance: number): ModelObject;
-    withChildren(children: readonly ModelObject[]): ModelObject;
+    relate(build: (self: Model<Elements>) => Constraint | readonly Constraint[]): Model<Elements>;
+    expose<const Sources extends ElementSources>(sources: Sources): Model<MergedElements<Elements, ExposedElements<Sources>>>;
+    named(name: string): Model<Elements>;
+    paint(color: string): Model<Elements>;
+    scaled(factor: number): Model<Elements>;
+    fillet(radius: number): Model<Elements>;
+    chamfer(distance: number): Model<Elements>;
+    withChildren(children: readonly ModelObject[]): Model<Elements>;
   }
 
-  export function box(width: number, height: number, depth: number): ModelObject;
-  export function cylinder(radius: number, height: number): ModelObject;
-  export function sphere(radius: number): ModelObject;
-  export function frustum(bottomRadius: number, topRadius: number, height: number): ModelObject;
-  export function regularPrism(radius: number, height: number, sides: number, rotation?: number): ModelObject;
+  export function box(width: number, height: number, depth: number): Model<CanonicalElements>;
+  export function cylinder(radius: number, height: number): Model<CanonicalElements>;
+  export function sphere(radius: number): Model<CanonicalElements>;
+  export function frustum(bottomRadius: number, topRadius: number, height: number): Model<CanonicalElements>;
+  export function regularPrism(radius: number, height: number, sides: number, rotation?: number): Model<CanonicalElements>;
   export type HelicalThreadOptions = Readonly<{
     pitch: number;
     height: number;
@@ -1231,10 +1485,10 @@ declare module "code3d" {
     crestWidth: number;
     leftHanded?: boolean;
   }>;
-  export function helicalThread(options: HelicalThreadOptions): ModelObject;
-  export function group(children: readonly ModelObject[], name?: string): ModelObject;
-  export function union(operands: readonly ModelObject[]): ModelObject;
-  export function cut(stock: ModelObject, tools: readonly ModelObject[]): ModelObject;
-  export function intersect(operands: readonly ModelObject[]): ModelObject;
+  export function helicalThread(options: HelicalThreadOptions): Model<CanonicalElements>;
+  export function group(children: readonly ModelObject[], name?: string): Model;
+  export function union(operands: readonly ModelObject[]): Model<CanonicalElements>;
+  export function cut(stock: ModelObject, tools: readonly ModelObject[]): Model<CanonicalElements>;
+  export function intersect(operands: readonly ModelObject[]): Model<CanonicalElements>;
 }
 `;

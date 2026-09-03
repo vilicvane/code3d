@@ -19,7 +19,8 @@
 
 ## Resolution
 
-The position gizmo and Inspector offset controls now require a composition
-operation-input context. Value declarations and operation outputs therefore
-remain free of relative-position tools, while Boolean and group inputs can
-expose them when the selected occurrence supports the edit.
+The position gizmo and Inspector offset controls now require either a
+composition operation-input context or the source site of a concrete
+constraint. Value declarations and operation outputs therefore remain free of
+relative-position tools, while Boolean/group inputs and `on()`/`offset()` sites
+can expose them when the selected occurrence supports the edit.

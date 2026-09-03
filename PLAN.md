@@ -16,15 +16,21 @@ it does not silently reorder the active milestones. Closed requests move to
   a publishing boundary and only a preview fallback, not a render prerequisite.
 - `model()` is not a required entry wrapper. Any runtime model object can be
   selected and rendered.
-- `Model` and `Anchor` are both core abstractions. A model is also usable as its
-  intrinsic origin anchor; named anchors such as `top`, `bottom`, and `axis`
-  describe local frames on that model.
-- `model.relate(self => constraint)` creates a new semantic-immutable model
-  value that shares geometry and carries the returned constraints. The callback
-  parameter is that new value.
+- `Model` and typed point, line, face, and frame Anchors are core abstractions. A
+  model is itself usable as its intrinsic frame Anchor. Solid primitives expose
+  `center`, `top`, `bottom`, and `axis` through the same named-element mechanism
+  available to user models rather than through a separate fixed-anchor path.
+- `model.expose({...})` creates a semantic-immutable model with a type-inferred
+  named-element interface. An element imported from an internal model is
+  rebound into the exposed model's local frame, so reusable APIs do not leak
+  their construction objects.
+- `model.relate(self => constraint | constraints)` creates a new
+  semantic-immutable model value that shares geometry and carries the returned
+  constraint or constraint array. The callback parameter is that new value.
 - Anchor methods return immutable constraint expressions. `on()` relates two
-  complete local frames and `offset(x, y, z)` adjusts the relation in the target
-  anchor's frame.
+  complete local frames with opposing orientation, `flip()` selects the other
+  orientation, and `offset(x, y, z)` adjusts the relation in the target Anchor's
+  frame.
 - Standalone `union`, `cut`, and `intersect` functions are geometry-evaluation
   boundaries. They collect and solve operand relations without introducing an
   author-facing composition object.
@@ -57,10 +63,19 @@ it does not silently reorder the active milestones. Closed requests move to
 - Units remain UI metadata; no implicit runtime conversion occurs.
 - Runtime trace data may explain and locate values, but must not constrain which
   JavaScript/TypeScript construction patterns users can write.
+- Named point, line, and face elements retain complete local frames. Solid
+  relations remain directly solvable frame relations; code3d does not infer a
+  partial solid-constraint system merely from an element's geometric kind.
 - The editor caret resolves the exact source occurrence being inspected. A
   value site renders that value alone; an operation-input site may also render
   its peer inputs as dimmed context that can switch input focus. Mouse hover
   over source code does not change the viewport.
+- A constraint source site renders its constrained value as focus and takes
+  dimmed context from the concrete downstream composition that consumes that
+  value. It is also an explicit relation-edit scope for spatial tools.
+- Constraint arrays retain one source/tool scope per member. Selecting a member
+  uses only its frame and parameters; the array container does not synthesize a
+  combined gizmo from potentially different constraints.
 - When a source view contains multiple focus occurrences, clicking one switches
   the selected runtime instance without moving the caret or replacing its
   source context. Clicking a dimmed operation peer instead navigates to that
@@ -162,11 +177,13 @@ repeated `@code3d.arguments [...]` annotations provide source-only design
 contexts for called or uncalled functions, while the GUI switches those
 contexts alongside ordinary runtime calls and Monaco highlights recognized
 code3d annotations.
-[R-012](requests/R-012-render-downstream-context-while-editing-relations.md)
-will extend relation-source views with the concrete downstream composition
-context that consumes each constrained value. [R-013](requests/R-013-drill-from-composition-preview-to-object-source.md)
-adds explicit double-click drill-down from an active composition operand to its
-best defining source.
+[R-012](requests/closed/R-012-render-downstream-context-while-editing-relations.md)
+is complete: selecting an `on()` or `offset()` constraint renders the
+constrained value with peers from its concrete downstream composition, exposes
+multiple consumers as separate scopes, and enables relation tools directly.
+[R-013](requests/R-013-drill-from-composition-preview-to-object-source.md) adds
+explicit double-click drill-down from an active composition operand to its best
+defining source.
 
 ### 2a. Unified dock panels — complete
 
@@ -184,9 +201,13 @@ implemented as reusable dock panel infrastructure.
 ### 3. Anchor constraint graph — first slice complete
 
 - Keep B-Rep geometry local and store constraints on immutable model copies.
-- Support model-origin, center, top, bottom, and axis anchors.
+- Support a model's intrinsic frame and type-safe named point, line, and face
+  elements. Primitives provide canonical center, top, bottom, and axis elements;
+  reusable models can expose and rename internal elements in their own frame.
 - Solve directly determined rigid-frame `on()` relations and validate multiple
   constraints for consistency.
+- Let `flip()` choose between opposed and aligned frame orientation without
+  encoding front/back as a special-case placement rule.
 - Resolve related models only when rendering or evaluating standalone Boolean
   operations.
 - Preserve constraint source and parameter provenance for GUI tools.
@@ -213,7 +234,8 @@ compatibility APIs.
 
 Status: [R-006](requests/closed/R-006-show-spatial-tools-only-in-a-relative-position-context.md)
 is complete. Value declarations and operation outputs do not expose the
-translation gizmo or offset controls; eligible composition inputs do.
+translation gizmo or offset controls; eligible composition inputs and explicit
+constraint source sites do.
 
 ### 5. Object combination tools
 
@@ -226,13 +248,11 @@ translation gizmo or offset controls; eligible composition inputs do.
 
 ## Open questions
 
-- The constraint vocabulary beyond exact-frame `on()` and `offset()`, including
-  partially constrained point, axis, plane, distance, and angle relations.
-- Topology-backed face, edge, and vertex anchors beyond the first canonical
-  bounding-frame anchors.
-- How to diagnose under-constrained systems once partial constraints exist; the
-  first solver intentionally accepts only relations that directly determine a
-  rigid transform.
+- Whether any solid-modeling use case justifies partially constrained point,
+  line, plane, distance, or angle relations. General partial constraint solving
+  is expected for sketching, but is not assumed to be necessary for solids.
+- How topology picking and B-Rep provenance should create stable named point,
+  line, and face elements while retaining their author-visible semantic names.
 - How Boolean results expose operand anchors and provenance for later relations.
 - Whether uniform scaling is geometry derivation, occurrence placement, or two
   explicitly named operations.

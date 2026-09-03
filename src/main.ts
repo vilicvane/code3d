@@ -535,6 +535,7 @@ async function runModel(
       return;
     }
     currentModule = nextModule;
+    codeEditor.setDesignArguments(nextModule.designArguments);
     selectedDesignContextId = nextModule.activeDesignContextId;
     compilingDesignContextId = undefined;
     if (
@@ -628,6 +629,30 @@ function renderScopes(module: ModelModule): void {
   }
 
   const sourceEvaluation = viewport.sourceEvaluation();
+  if (sourceEvaluation?.target.kind === 'constraint') {
+    const uses = sourceEvaluation.target.evaluations.flatMap(
+      (evaluation, evaluationIndex) => {
+        const operation = evaluation.operationId
+          ? module.operations.get(evaluation.operationId)
+          : undefined;
+        return operation ? [{evaluationIndex, operation}] : [];
+      },
+    );
+    if (uses.length > 1) {
+      uses.forEach(({evaluationIndex, operation}, index) => {
+        const location = operation.sourceRef
+          ? ` · ${sourceLocation(operation.sourceRef)}`
+          : '';
+        scopeList.append(
+          scopeButton(
+            `Use ${index + 1} · ${operation.kind.toUpperCase()}${location}`,
+            () => selectSourceEvaluation(evaluationIndex),
+            sourceEvaluation.evaluationIndex === evaluationIndex,
+          ),
+        );
+      });
+    }
+  }
   const functionId = inspectedFunctionId(module);
   if (!functionId) return;
 
@@ -645,10 +670,7 @@ function renderScopes(module: ModelModule): void {
     : [];
   callContextIds.forEach((contextId, index) => {
     const context = contexts.get(contextId)!;
-    const fileName = context.sourceRef.file.slice(
-      context.sourceRef.file.lastIndexOf('/') + 1,
-    );
-    const location = `${fileName}:${codeEditor.sourceLine(context.sourceRef)}`;
+    const location = sourceLocation(context.sourceRef);
     scopeList.append(
       scopeButton(
         callContextIds.length === 1
@@ -659,6 +681,19 @@ function renderScopes(module: ModelModule): void {
       ),
     );
   });
+}
+
+function selectSourceEvaluation(evaluationIndex: number): void {
+  if (!viewport.selectSourceEvaluation(evaluationIndex)) return;
+  const evaluation = viewport.sourceEvaluation()?.evaluation;
+  preferredEvaluationContextId = evaluation?.contextId;
+  const occurrence = viewport.getSelected();
+  if (occurrence) selectOccurrence(occurrence, false);
+}
+
+function sourceLocation(sourceRef: SourceRef): string {
+  const fileName = sourceRef.file.slice(sourceRef.file.lastIndexOf('/') + 1);
+  return `${fileName}:${codeEditor.sourceLine(sourceRef)}`;
 }
 
 function selectCompiledEvaluationContext(
@@ -1049,8 +1084,14 @@ function renderLocalInspector(occurrence: Occurrence): void {
   inspector.append(kind);
 
   const hasRelativePositionContext = viewport.hasRelativePositionContext();
-  const parameters = uniqueParameters(occurrence.node.parameters).filter(
-    parameter => parameter.operation !== 'offset' || hasRelativePositionContext,
+  const sourceConstraintParameters = viewport.sourceConstraintParameters();
+  const parameters = uniqueParameters(
+    sourceConstraintParameters
+      ? parametersForConstraint(occurrence.node, sourceConstraintParameters)
+      : occurrence.node.parameters.filter(
+          parameter =>
+            parameter.operation !== 'offset' || hasRelativePositionContext,
+        ),
   );
   if (parameters.length > 0) {
     const sectionLabel = document.createElement('div');
@@ -1080,6 +1121,38 @@ function renderLocalInspector(occurrence: Occurrence): void {
   note.textContent =
     'Dragging uses a temporary preview. Committing updates the source and reruns it. Units are UI hints only.';
   inspector.append(note);
+}
+
+function parametersForConstraint(
+  node: ModelSnapshotObject,
+  selected: readonly ParameterUsage[],
+): ParameterUsage[] {
+  const constraintParameters = new Set(
+    node.constraints.flatMap(constraint =>
+      constraint.parameters.map(parameterUsageKey),
+    ),
+  );
+  const selectedParameters = new Set(selected.map(parameterUsageKey));
+  return node.parameters.filter(parameter => {
+    const key = parameterUsageKey(parameter);
+    return !constraintParameters.has(key) || selectedParameters.has(key);
+  });
+}
+
+function parameterUsageKey(parameter: ParameterUsage): string {
+  const operation = parameter.operationRef;
+  const expression = parameter.expressionRef;
+  return [
+    parameter.operation,
+    parameter.argument,
+    operation.file,
+    operation.start,
+    operation.end,
+    expression.file,
+    expression.start,
+    expression.end,
+    parameter.target.id,
+  ].join(':');
 }
 
 function parameterControl(

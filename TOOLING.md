@@ -90,9 +90,9 @@ Inspector 参数控件产生 `parameter.set` intent。viewport 平移 gizmo 在�
 
 平移 gizmo 目前遵守以下解析规则：
 
-- 当前源码 occurrence 必须是提供相对位置语义的 operation input；变量声明和
-  operation output 即使对应对象带有 relation，也不显示 gizmo 或 Inspector 的
-  offset 控件。
+- 当前源码 occurrence 必须是提供相对位置语义的 operation input，或具体的
+  constraint source site；变量声明和 operation output 即使对应对象带有 relation，
+  也不显示 gizmo 或 Inspector 的 offset 控件。
 - 优先修改选中对象关系约束中能够唯一追溯的位置参数。
 - 参数归属到具体 API 调用；连续变换只编辑当前最外层调用，不重复追加操作。
 - 同一参数表达式同时包含上游变量和字面量时，优先修改上游变量。

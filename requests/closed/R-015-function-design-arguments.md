@@ -15,6 +15,11 @@
 
 - Each annotation value is a TypeScript array expression representing one
   positional argument list and is evaluated in the function's module scope.
+- On an overloaded function, an annotation belongs to the overload signature
+  it immediately precedes. All overload contexts remain grouped under the same
+  function in the GUI.
+- Monaco maps the annotation value to a virtual call of that signature so
+  completions come from the project's TypeScript types.
 - Design evaluation is a view concern. It must not change exports, fallback
   model selection, normal Model Outline contents, or persistent state outside
   source.
@@ -36,4 +41,6 @@
 - [x] Confirm valid annotations are highlighted and unknown annotations are
       left as ordinary comments.
 - [x] Confirm invalid argument annotations report their source location.
+- [x] Complete object fields and string literals inside an overloaded
+      function's argument annotation.
 - [x] Run the full build and host-browser verification.

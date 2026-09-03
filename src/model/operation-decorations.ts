@@ -1,12 +1,16 @@
-import type {SourceTarget} from './compiler';
+import type {
+  ModelModule,
+  SourceTarget,
+  SourceTargetEvaluation,
+} from './compiler';
 import type {SourceDecorationProvider} from '../viewport-decoration';
 
-type BooleanInputTarget = SourceTarget & {
+type BooleanInputContext = Readonly<{
   operation: Readonly<{
     kind: 'cut' | 'union';
     role: 'receiver' | 'tool' | 'operand' | 'collection';
   }>;
-};
+}>;
 
 const booleanAppearances = {
   cut: {
@@ -45,11 +49,12 @@ const decorations: SourceDecorationProvider['decorations'] = ({
   target,
   evaluation,
 }) => {
-  if (!isBooleanInputTarget(target) || !evaluation.operationId) {
+  const input = booleanInputContext(module, target, evaluation);
+  if (!input || !evaluation.operationId) {
     return [];
   }
 
-  const sourceOperation = target.operation;
+  const sourceOperation = input.operation;
   const operationKind = sourceOperation.kind;
   const inputRole = sourceOperation.role;
   const focusedNodeIds = new Set(evaluation.nodeIds);
@@ -81,16 +86,26 @@ export const booleanOperationSourceDecoration = {
   decorations,
 } satisfies SourceDecorationProvider;
 
-function isBooleanInputTarget(
+function booleanInputContext(
+  module: ModelModule,
   target: SourceTarget,
-): target is BooleanInputTarget {
-  const operationKind = target.operation?.kind;
-  const inputRole = target.operation?.role;
-  return (
-    (operationKind === 'cut' || operationKind === 'union') &&
+  evaluation: SourceTargetEvaluation,
+): BooleanInputContext | undefined {
+  const runtimeOperation = evaluation.operationId
+    ? module.operations.get(evaluation.operationId)
+    : undefined;
+  const operationKind = runtimeOperation?.kind ?? target.operation?.kind;
+  const inputRole =
+    target.kind === 'constraint'
+      ? runtimeOperation?.inputs.find(input =>
+          evaluation.nodeIds.includes(input.nodeId),
+        )?.role
+      : target.operation?.role;
+  return (operationKind === 'cut' || operationKind === 'union') &&
     (inputRole === 'receiver' ||
       inputRole === 'tool' ||
       inputRole === 'operand' ||
       inputRole === 'collection')
-  );
+    ? {operation: {kind: operationKind, role: inputRole}}
+    : undefined;
 }

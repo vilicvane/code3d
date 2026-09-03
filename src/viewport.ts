@@ -204,18 +204,19 @@ export class ModelViewport {
       return false;
     }
 
+    const preferredSourceIndex = sourceEvaluationIndex(preferredOccurrenceKey);
     const matchingContextIndex = preferredContextId
       ? match.evaluations.findIndex(
           evaluation => evaluation.contextId === preferredContextId,
         )
       : -1;
     const preferredEvaluationIndex =
-      matchingContextIndex >= 0
-        ? matchingContextIndex
-        : this.renderedViewTarget.kind === 'source' &&
-            this.renderedViewTarget.targetId === match.id
-          ? this.renderedViewTarget.evaluationIndex
-          : sourceEvaluationIndex(preferredOccurrenceKey);
+      this.renderedViewTarget.kind === 'source' &&
+      this.renderedViewTarget.targetId === match.id
+        ? this.renderedViewTarget.evaluationIndex
+        : preferredSourceIndex !== undefined
+          ? preferredSourceIndex
+          : matchingContextIndex;
     const evaluationIndex = match.evaluations[preferredEvaluationIndex]
       ? preferredEvaluationIndex
       : 0;
@@ -252,6 +253,19 @@ export class ModelViewport {
       evaluation => evaluation.contextId === contextId,
     );
     if (evaluationIndex < 0) return false;
+    this.selectedViewTarget = {
+      kind: 'source',
+      targetId: scope.target.id,
+      evaluationIndex,
+    };
+    this.outlinePreviewRestore = undefined;
+    this.renderSourceTarget(scope.target, evaluationIndex, false);
+    return true;
+  }
+
+  selectSourceEvaluation(evaluationIndex: number): boolean {
+    const scope = this.renderedSourceScope();
+    if (!scope?.target.evaluations[evaluationIndex]) return false;
     this.selectedViewTarget = {
       kind: 'source',
       targetId: scope.target.id,
@@ -341,6 +355,17 @@ export class ModelViewport {
 
   hasRelativePositionContext(): boolean {
     return isRelativePositionContext(this.renderedSourceScope()?.target);
+  }
+
+  sourceConstraintParameters(): readonly ParameterUsage[] | undefined {
+    const scope = this.renderedSourceScope();
+    const occurrence = this.getSelected();
+    if (scope?.target.kind !== 'constraint' || !occurrence) {
+      return undefined;
+    }
+    return occurrence.node.constraints.find(
+      constraint => constraint.id === scope.evaluation.constraintId,
+    )?.parameters;
   }
 
   setExplode(value: number): void {
@@ -719,9 +744,18 @@ export class ModelViewport {
       this.positionGizmo.detach();
       return;
     }
+    const scope = this.renderedSourceScope();
+    const constraintId =
+      scope?.target.kind === 'constraint'
+        ? scope.evaluation.constraintId!
+        : null;
     this.positionGizmo.attach(
       occurrence.object,
-      positionBindings(occurrence, [...this.occurrences.values()]),
+      positionBindings(
+        occurrence,
+        [...this.occurrences.values()],
+        constraintId,
+      ),
     );
   }
 
@@ -970,8 +1004,14 @@ export class ModelViewport {
 function positionBindings(
   occurrence: Occurrence,
   occurrences: readonly Occurrence[],
+  constraintId: string | null,
 ): PositionGizmoBinding[] {
-  const constraint = occurrence.node.constraints.at(-1);
+  const constraint =
+    constraintId === null
+      ? occurrence.node.constraints.at(-1)
+      : occurrence.node.constraints.find(
+          candidate => candidate.id === constraintId,
+        );
   if (!constraint) {
     return [];
   }
@@ -1114,12 +1154,14 @@ function sourceSpan(sourceRef: SourceRef): number {
 }
 
 function sourceTargetPriority(target: SourceTarget): number {
-  if (target.kind === 'operation-input') return 0;
-  if (target.kind === 'operation-output') return 1;
-  return 2;
+  if (target.kind === 'constraint') return 0;
+  if (target.kind === 'operation-input') return 1;
+  if (target.kind === 'operation-output') return 2;
+  return 3;
 }
 
 function isRelativePositionContext(target: SourceTarget | undefined): boolean {
+  if (target?.kind === 'constraint') return true;
   const role = target?.operation?.role;
   return target?.kind === 'operation-input' && isCompositionRole(role);
 }
@@ -1373,9 +1415,11 @@ function pickTargetFromAncestors(
   return undefined;
 }
 
-function sourceEvaluationIndex(occurrenceKey: string | undefined): number {
+function sourceEvaluationIndex(
+  occurrenceKey: string | undefined,
+): number | undefined {
   if (!occurrenceKey?.startsWith('source/')) {
-    return 0;
+    return undefined;
   }
   return Number(occurrenceKey.split('/')[1]);
 }

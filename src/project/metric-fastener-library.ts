@@ -5,6 +5,10 @@ export const metricFastenerLibrarySource = `import {
   helicalThread,
   regularPrism,
   union,
+  type CanonicalElements,
+  type FaceAnchor,
+  type LineAnchor,
+  type Model,
   type ModelObject,
 } from 'code3d';
 
@@ -115,18 +119,52 @@ export const socketCapScrewSpecs = {
 export type SocketCapScrewPreset = keyof typeof socketCapScrewSpecs;
 export type SocketCapScrewInput = SocketCapScrewPreset | SocketCapScrewSpec;
 
+export type SocketCapCounterboreOptions = Readonly<{
+  diameter?: number;
+  depth?: number;
+  axialClearance?: number;
+}>;
+
 export type SocketCapHoleOptions = Readonly<{
   depth: number;
   fit?: ClearanceFit;
   diameter?: number;
-  counterbore?:
-    | boolean
-    | Readonly<{
-        diameter?: number;
-        depth?: number;
-        axialClearance?: number;
-      }>;
+  counterbore?: boolean | SocketCapCounterboreOptions;
 }>;
+
+export type CounterboredSocketCapHoleOptions = Omit<
+  SocketCapHoleOptions,
+  'counterbore'
+> &
+  Readonly<{
+    counterbore: true | SocketCapCounterboreOptions;
+  }>;
+
+type SocketCapScrewElements = CanonicalElements &
+  Readonly<{
+    headTop: FaceAnchor;
+    headBottom: FaceAnchor;
+    shankTop: FaceAnchor;
+    shankBottom: FaceAnchor;
+    shankAxis: LineAnchor;
+  }>;
+
+type SocketCapHoleElements = CanonicalElements &
+  Readonly<{
+    shaftTop: FaceAnchor;
+    shaftBottom: FaceAnchor;
+    shaftAxis: LineAnchor;
+  }>;
+
+type CounterboredSocketCapHoleElements = SocketCapHoleElements &
+  Readonly<{
+    counterboreTop: FaceAnchor;
+    counterboreBottom: FaceAnchor;
+  }>;
+
+export type SocketCapScrew = Model<SocketCapScrewElements>;
+export type SocketCapHole = Model<SocketCapHoleElements>;
+export type CounterboredSocketCapHole = Model<CounterboredSocketCapHoleElements>;
 
 /**
  * @code3d.arguments ['M6', 18]
@@ -135,7 +173,7 @@ export type SocketCapHoleOptions = Readonly<{
 export function socketCapScrew(
   input: SocketCapScrewInput,
   length: number,
-): ModelObject {
+): SocketCapScrew {
   const spec = resolveSocketCapScrewSpec(input);
   validateSpec(spec);
   if (!Number.isFinite(length) || length <= spec.pitch + spec.underHeadRadius) {
@@ -203,9 +241,15 @@ export function socketCapScrew(
   }).relate(part => part.top.on(previous.bottom).offset(0, -overlap, 0));
   parts.push(thread);
 
-  return union(parts).named(
-    spec.designation + ' × ' + length + ' socket cap screw',
-  );
+  return union(parts)
+    .expose({
+      headTop: head.top,
+      headBottom: head.bottom,
+      shankTop: transition.top,
+      shankBottom: thread.bottom,
+      shankAxis: thread.axis,
+    })
+    .named(spec.designation + ' × ' + length + ' socket cap screw');
 }
 
 /**
@@ -213,8 +257,16 @@ export function socketCapScrew(
  */
 export function socketCapHole(
   input: SocketCapScrewInput,
+  options: CounterboredSocketCapHoleOptions,
+): CounterboredSocketCapHole;
+export function socketCapHole(
+  input: SocketCapScrewInput,
   options: SocketCapHoleOptions,
-): ModelObject {
+): SocketCapHole;
+export function socketCapHole(
+  input: SocketCapScrewInput,
+  options: SocketCapHoleOptions,
+): SocketCapHole | CounterboredSocketCapHole {
   const spec = resolveSocketCapScrewSpec(input);
   validateSpec(spec);
   if (!Number.isFinite(options.depth) || options.depth <= 0) {
@@ -227,7 +279,13 @@ export function socketCapHole(
   }
   const shaft = cylinder(diameter / 2, options.depth);
   if (!options.counterbore) {
-    return shaft.named(spec.designation + ' ' + fit + ' clearance hole');
+    return shaft
+      .expose({
+        shaftTop: shaft.top,
+        shaftBottom: shaft.bottom,
+        shaftAxis: shaft.axis,
+      })
+      .named(spec.designation + ' ' + fit + ' clearance hole');
   }
 
   const counterbore =
@@ -256,11 +314,18 @@ export function socketCapHole(
   ).relate(tool =>
     tool.center
       .on(shaft.top)
+      .flip()
       .offset(0, -counterboreDepth / 2 + 0.1, 0),
   );
-  return union([shaft, recess]).named(
-    spec.designation + ' ' + fit + ' counterbored hole',
-  );
+  return union([shaft, recess])
+    .expose({
+      shaftTop: shaft.top,
+      shaftBottom: shaft.bottom,
+      shaftAxis: shaft.axis,
+      counterboreTop: recess.top,
+      counterboreBottom: recess.bottom,
+    })
+    .named(spec.designation + ' ' + fit + ' counterbored hole');
 }
 
 export function resolveSocketCapScrewSpec(

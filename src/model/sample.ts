@@ -9,14 +9,16 @@ const hole = socketCapHole('M6', {
   depth: 10,
   fit: 'normal',
   counterbore: true,
-}).relate(tool => tool.center.on(plate.axis).offset(0, -2, 0));
+}).relate(tool => tool.shaftBottom.on(plate.bottom).flip());
 const preparedPlate = cut(plate, [hole])
   .named('Counterbored plate')
   .paint(dark);
 
 const screw = socketCapScrew('M6', 18)
   .paint(accent)
-  .relate(part => part.bottom.on(preparedPlate.top).offset(25, 0, 0));
+  .relate(part =>
+    part.headBottom.on(hole.counterboreBottom).flip().offset(0, -1, 0),
+  );
 
 const fastenerDemo = group([preparedPlate, screw], 'M6 fastener demo');
 `;

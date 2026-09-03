@@ -9,6 +9,7 @@ import {
   disposeModelObjects,
   isConstraint,
   isModelObject,
+  type Constraint,
   type ModelOperationInputRole,
   type ModelOperationKind,
   type ModelOperationSnapshot,
@@ -20,16 +21,18 @@ import {
   type SourceRef,
 } from './runtime';
 import {code3dAnnotations} from './annotations';
+import {designArgumentAnnotationSites} from './design-functions';
 
 export type SourceTargetEvaluation = Readonly<{
   nodeIds: readonly string[];
   operationId?: string;
+  constraintId?: string;
   contextId: string;
 }>;
 
 export type SourceTarget = Readonly<{
   id: string;
-  kind: 'value' | 'operation-input' | 'operation-output';
+  kind: 'value' | 'constraint' | 'operation-input' | 'operation-output';
   sourceRef: SourceRef;
   functionId?: string;
   evaluations: readonly SourceTargetEvaluation[];
@@ -55,6 +58,10 @@ export type DesignArgumentContext = Readonly<{
   functionRef: SourceRef;
   annotationRef: SourceRef;
   argumentsRef: SourceRef;
+  signature: Readonly<{
+    typeParametersSource: string;
+    parametersSource: string;
+  }>;
 }>;
 
 export type ObjectCatalogOccurrence = Readonly<{
@@ -183,6 +190,19 @@ type SourceInputTrace = Readonly<{
   contextId: string;
 }>;
 
+type SourceConstraintTrace = {
+  id: string;
+  sourceRef: SourceRef;
+  evaluations: Array<
+    Readonly<{
+      constraintId: string;
+      source: ModelObject;
+      target: ModelObject;
+      contextId: string;
+    }>
+  >;
+};
+
 type TraceFrame = Readonly<{
   siteId: string;
   execution: number;
@@ -280,6 +300,7 @@ const signatures = new Map<string, ParameterSignature>([
 const tracedObjects = new Set<ModelObject>();
 const sourceValueTraces = new Map<string, SourceValueTrace>();
 const sourceInputTraces: SourceInputTrace[] = [];
+const sourceConstraintTraces = new Map<string, SourceConstraintTrace>();
 const catalogTraces = new Map<string, CatalogTrace>();
 const parameterFrames: ParameterUsage[][] = [];
 const traceFrames: TraceFrame[] = [];
@@ -317,6 +338,7 @@ const traceRuntime = Object.freeze({
     if (isConstraint(result)) {
       result.attachSource(location);
       result.attachParameters(parameters);
+      recordSourceConstraint(id, location, result, context.id);
     } else if (isModelObject(result)) {
       const order = ++evaluationOrder;
       result.attachSource(location);
@@ -377,7 +399,11 @@ const traceRuntime = Object.freeze({
         location,
       );
     const result = run();
-    recordSourceValue(id, 'value', location, result, context.id);
+    if (isConstraint(result)) {
+      recordSourceConstraint(id, location, result, context.id);
+    } else {
+      recordSourceValue(id, 'value', location, result, context.id);
+    }
     const order = ++evaluationOrder;
     if (context.kind === 'call') {
       recordCatalogValue(
@@ -546,6 +572,25 @@ function recordSourceValue(
   sourceValueTraces.set(key, sourceTrace);
 }
 
+function recordSourceConstraint(
+  id: string,
+  location: SourceRef,
+  constraint: Constraint,
+  contextId: string,
+): void {
+  const reference = constraint.traceReference();
+  const key = `${id}:${location.file}:${location.start}:${location.end}`;
+  const trace = sourceConstraintTraces.get(key) ?? {
+    id,
+    sourceRef: location,
+    evaluations: [],
+  };
+  trace.evaluations.push({...reference, contextId});
+  sourceConstraintTraces.set(key, trace);
+  tracedObjects.add(reference.source);
+  tracedObjects.add(reference.target);
+}
+
 function recordCatalogValue(
   metadata: Readonly<
     Pick<CatalogTrace, 'id' | 'label' | 'category' | 'scope' | 'sourceRef'>
@@ -608,50 +653,57 @@ function parseDesignArgumentContexts(
   const contexts: ParsedDesignArgumentContext[] = [];
   const consumedAnnotations = new Set<number>();
 
-  for (const statement of sourceFile.statements) {
-    const designFunction = designFunctionFromStatement(statement);
-    if (!designFunction) continue;
-    const annotations = code3dAnnotations(
-      source,
-      statement.getFullStart(),
-      statement.getStart(sourceFile),
-    ).filter(annotation => annotation.name === 'arguments');
+  for (const {
+    annotation,
+    designFunction,
+    signature,
+    index,
+  } of designArgumentAnnotationSites(source, sourceFile)) {
     const functionId = `${normalizedPath}:function:${designFunction.name}`;
-    annotations.forEach((annotation, index) => {
-      consumedAnnotations.add(annotation.start);
-      const argumentsRef = sourceRef(
+    consumedAnnotations.add(annotation.start);
+    const argumentsRef = sourceRef(
+      normalizedPath,
+      annotation.valueStart,
+      annotation.valueEnd,
+    );
+    const argumentsExpression = parseDesignArgumentsExpression(
+      annotation.value,
+      argumentsRef,
+    );
+    validateDesignArgumentCount(
+      argumentsExpression,
+      signature.parameters,
+      argumentsRef,
+    );
+    contexts.push({
+      id: `${functionId}:arguments:${index}`,
+      functionId,
+      functionName: designFunction.name,
+      label: designArgumentsLabel(annotation.value),
+      functionRef: sourceRef(
         normalizedPath,
-        annotation.valueStart,
+        designFunction.signatures[0].statement.getFullStart(),
+        designFunction.node.getEnd(),
+      ),
+      annotationRef: sourceRef(
+        normalizedPath,
+        annotation.start,
         annotation.valueEnd,
-      );
-      const argumentsExpression = parseDesignArgumentsExpression(
-        annotation.value,
-        argumentsRef,
-      );
-      validateDesignArgumentCount(
-        argumentsExpression,
-        designFunction.parameters,
-        argumentsRef,
-      );
-      contexts.push({
-        id: `${functionId}:arguments:${index}`,
-        functionId,
-        functionName: designFunction.name,
-        label: designArgumentsLabel(annotation.value),
-        functionRef: sourceRef(
-          normalizedPath,
-          statement.getFullStart(),
-          designFunction.node.getEnd(),
-        ),
-        annotationRef: sourceRef(
-          normalizedPath,
-          annotation.start,
-          annotation.valueEnd,
-        ),
-        argumentsRef,
-        binding: designFunction.name,
-        argumentsSource: annotation.value,
-      });
+      ),
+      argumentsRef,
+      signature: {
+        typeParametersSource:
+          signature.typeParameters.length === 0
+            ? ''
+            : `<${signature.typeParameters
+                .map(parameter => parameter.getText(sourceFile))
+                .join(', ')}>`,
+        parametersSource: signature.parameters
+          .map(parameter => parameter.getText(sourceFile))
+          .join(', '),
+      },
+      binding: designFunction.name,
+      argumentsSource: annotation.value,
     });
   }
 
@@ -669,41 +721,6 @@ function parseDesignArgumentContexts(
     );
   }
   return contexts;
-}
-
-type DesignFunctionDeclaration = Readonly<{
-  name: string;
-  node: ts.Node;
-  parameters: readonly ts.ParameterDeclaration[];
-}>;
-
-function designFunctionFromStatement(
-  statement: ts.Statement,
-): DesignFunctionDeclaration | undefined {
-  if (ts.isFunctionDeclaration(statement) && statement.name && statement.body) {
-    return {
-      name: statement.name.text,
-      node: statement,
-      parameters: statement.parameters,
-    };
-  }
-  if (!ts.isVariableStatement(statement)) return undefined;
-  const declarations = statement.declarationList.declarations;
-  if (declarations.length !== 1) return undefined;
-  const [declaration] = declarations;
-  if (
-    !ts.isIdentifier(declaration.name) ||
-    !declaration.initializer ||
-    (!ts.isArrowFunction(declaration.initializer) &&
-      !ts.isFunctionExpression(declaration.initializer))
-  ) {
-    return undefined;
-  }
-  return {
-    name: declaration.name.text,
-    node: statement,
-    parameters: declaration.initializer.parameters,
-  };
 }
 
 function parseDesignArgumentsExpression(
@@ -1002,6 +1019,7 @@ export function compileProject(
     tracedObjects.clear();
     sourceValueTraces.clear();
     sourceInputTraces.length = 0;
+    sourceConstraintTraces.clear();
     catalogTraces.clear();
     parameterFrames.length = 0;
     traceFrames.length = 0;
@@ -1155,8 +1173,55 @@ function buildSourceTargets(
   }
 
   const operationInputTargets = [...inputTargets.values()];
+  const constraintTargets = [...sourceConstraintTraces.values()].map(trace => {
+    const evaluations = trace.evaluations.flatMap<SourceTargetEvaluation>(
+      evaluation => {
+        const consumers = operationInputTargets.flatMap(target =>
+          isCompositionInputRole(target.role)
+            ? target.evaluations.filter(candidate =>
+                candidate.objects.includes(evaluation.source),
+              )
+            : [],
+        );
+        return consumers.length > 0
+          ? consumers.map(consumer => ({
+              nodeIds: [evaluation.source.nodeId],
+              operationId: consumer.operationId,
+              constraintId: evaluation.constraintId,
+              contextId: evaluation.contextId,
+            }))
+          : [
+              {
+                nodeIds: [evaluation.source.nodeId],
+                constraintId: evaluation.constraintId,
+                contextId: evaluation.contextId,
+              },
+            ];
+      },
+    );
+    const consumerOperationIds = new Set(
+      evaluations.flatMap(evaluation =>
+        evaluation.operationId ? [evaluation.operationId] : [],
+      ),
+    );
+    return {
+      id: `source:constraint:${trace.id}`,
+      kind: 'constraint',
+      sourceRef: trace.sourceRef,
+      functionId: designFunctionAt(trace.sourceRef, designArguments),
+      evaluations,
+      contextTargetIds: operationInputTargets
+        .filter(target =>
+          target.evaluations.some(evaluation =>
+            consumerOperationIds.has(evaluation.operationId),
+          ),
+        )
+        .map(target => target.id),
+    } satisfies SourceTarget;
+  });
 
   return [
+    ...constraintTargets,
     ...valueTargets,
     ...operationInputTargets.map(
       target =>
@@ -1228,6 +1293,16 @@ function sharesOperation(
   );
   return left.evaluations.some(evaluation =>
     rightIds.has(evaluation.operationId),
+  );
+}
+
+function isCompositionInputRole(role: ModelOperationInputRole): boolean {
+  return (
+    role === 'receiver' ||
+    role === 'operand' ||
+    role === 'tool' ||
+    role === 'child' ||
+    role === 'collection'
   );
 }
 
@@ -1545,6 +1620,7 @@ function operationInputPlan(
     method === 'scaled' ||
     method === 'fillet' ||
     method === 'chamfer' ||
+    method === 'expose' ||
     method === 'relate'
   ) {
     return {receiver: 'source'};
