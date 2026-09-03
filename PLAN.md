@@ -1,10 +1,11 @@
 # code3d working plan
 
 This file is the durable working memory for decisions and multi-step work. Keep
-stable product goals in `DESIGN.md` and source-editing/tool contracts in
-`TOOLING.md`; update this file whenever the active design or milestone changes.
-Unscheduled product feedback lives in one file per request under `requests/` so
-it does not silently reorder the active milestones. Closed requests move to
+stable product goals in `DESIGN.md`, source-editing/tool contracts in
+`TOOLING.md`, and detailed not-yet-active refactors under `plans/`; update this
+file whenever the active design or milestone changes. Unscheduled product
+feedback lives in one file per request under `requests/` so it does not
+silently reorder the active milestones. Closed requests move to
 `requests/closed/`.
 
 ## Confirmed direction
@@ -16,6 +17,10 @@ it does not silently reorder the active milestones. Closed requests move to
 - Source code is the only persistent model state. GUI changes write back to it.
 - Author code remains ordinary JavaScript/TypeScript and may freely construct,
   reuse, copy, collect, and derive model values.
+- A real code3d project is an ordinary Node/TypeScript package that owns its
+  `package.json`, lockfile, and installed dependencies, including
+  `@code3d/core`. The same source should run in a supported Node runtime without
+  a code3d-only module syntax or hidden host dependency.
 - Rendering is driven primarily by source or GUI object selection. Exporting is
   a publishing boundary and only a preview fallback, not a render prerequisite.
 - `model()` is not a required entry wrapper. Any runtime model object can be
@@ -132,6 +137,10 @@ it does not silently reorder the active milestones. Closed requests move to
 - A project has no privileged persistent entry file. The active editor file is
   the root module for the current compile, so every source file can be opened
   and previewed directly.
+- Studio diagnostics and completion resolve the project's installed package
+  declarations, while model evaluation resolves and executes the installed
+  package implementation. These are separate consumers of one project module
+  graph and must not be conflated into a hand-authored declaration shim.
 
 ## Milestones
 
@@ -323,6 +332,28 @@ derivation transfer rules, render-mesh IDs, operation trace selections,
 array-driven viewport picking, before/after comparison, reversible
 selection, and source write-back are implemented. The Properties panel and
 GUI operation-insertion path were removed pending a broader interaction design.
+
+### 4b. Core package and Node-native projects — active
+
+- Extract the author runtime into a real ESM `@code3d/core` package with emitted
+  JavaScript, declarations, explicit exports, and an explicit tooling boundary.
+- Make every real project resolve its own `node_modules`; remove the injected
+  `code3d` module, duplicated declaration string, and host-runtime fallback.
+- Keep TypeScript language-service resolution separate from model building and
+  evaluation while making both honor the same project package graph.
+- Make the authoring convention valid for direct execution by a supported Node
+  runtime and for ordinary TypeScript emit.
+- Preserve one project-local core/kernel runtime during repeated Studio
+  evaluations without coupling the host to its concrete runtime classes.
+
+Status: the repository is now a workspace with `@code3d/app`, `@code3d/core`,
+and the standard-model demo package `@code3d/screws`. Core emits a shared
+public type surface plus Node and tooling entries; package resolution from an
+opened project's own `node_modules` remains the active next boundary. The
+detailed working plan is
+[plans/core-package-and-node-projects.md](plans/core-package-and-node-projects.md).
+It records confirmed constraints separately from technical choices that should
+remain adjustable as implementation evidence arrives.
 
 ### 5. Object combination tools
 

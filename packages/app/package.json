@@ -1,0 +1,27 @@
+{
+  "name": "@code3d/app",
+  "version": "0.0.1-alpha.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@code3d/core": "*",
+    "@code3d/screws": "*",
+    "@headless-tree/core": "^1.7.0",
+    "@typescript/typescript6": "^6.0.2",
+    "@zenfs/core": "^2.7.0",
+    "@zenfs/dom": "^1.2.12",
+    "monaco-editor": "^0.56.0",
+    "prettier": "^3.9.6",
+    "replicad-opencascadejs": "^1.0.0",
+    "three": "^0.185.1"
+  },
+  "devDependencies": {
+    "@types/three": "^0.185.4",
+    "vite": "^8.2.2"
+  }
+}

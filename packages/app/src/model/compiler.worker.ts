@@ -1,0 +1,40 @@
+/// <reference lib="webworker" />
+
+import {compileProject} from './compiler';
+import {diagnosticFromError} from './diagnostic';
+import type {ModelProject} from '../project/project';
+import initOpenCascade from 'replicad-opencascadejs';
+import openCascadeWasmUrl from 'replicad-opencascadejs/wasm?url';
+import {installOpenCascade} from '@code3d/core/tooling';
+
+type CompileRequest = Readonly<{
+  id: number;
+  project: ModelProject;
+  rootPath: string;
+  designContextId?: string;
+}>;
+
+const workerScope = self as DedicatedWorkerGlobalScope;
+const kernelReady = initOpenCascade({
+  locateFile: () => openCascadeWasmUrl,
+}).then(openCascade => {
+  installOpenCascade(openCascade);
+});
+
+workerScope.onmessage = async ({data}: MessageEvent<CompileRequest>) => {
+  try {
+    await kernelReady;
+    const module = compileProject(
+      data.project,
+      data.rootPath,
+      data.designContextId,
+    );
+    workerScope.postMessage({id: data.id, ok: true, module});
+  } catch (error) {
+    workerScope.postMessage({
+      id: data.id,
+      ok: false,
+      diagnostic: diagnosticFromError(error),
+    });
+  }
+};

@@ -1,0 +1,10 @@
+{
+  "extends": "../../../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": ".",
+    "outDir": "../../bld/library",
+    "tsBuildInfoFile": "../../.cache/library.tsbuildinfo"
+  },
+  "references": [{"path": "../../../core/src/library"}]
+}
