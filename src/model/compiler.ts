@@ -124,6 +124,7 @@ export type ModelModule = Readonly<{
   fallback?: ModelSnapshotObject;
   objects: ReadonlyMap<string, ModelSnapshotObject>;
   operations: ReadonlyMap<string, ModelOperationSnapshot>;
+  toolNodeIds: ReadonlySet<string>;
   exports: ReadonlyMap<string, string>;
   catalog: readonly ObjectCatalogEntry[];
   parameterImpacts: ReadonlyMap<string, number>;
@@ -1054,6 +1055,7 @@ export function compileProject(
       fallback: fallbackSnapshot,
       objects: objectSnapshots,
       operations,
+      toolNodeIds: operationRoleLineageNodeIds(operations, 'tool'),
       exports: new Map(
         [...modelExports].map(([name, modelObject]) => [
           name,
@@ -1527,6 +1529,31 @@ function sourceLineageContains(
       ?.inputs.find(input => input.role === 'source')?.nodeId;
   }
   return false;
+}
+
+function operationRoleLineageNodeIds(
+  operations: ReadonlyMap<string, ModelOperationSnapshot>,
+  role: ModelOperationInputRole,
+): ReadonlySet<string> {
+  const operationsByOutputNodeId = new Map(
+    [...operations.values()].map(operation => [
+      operation.outputNodeId,
+      operation,
+    ]),
+  );
+  const nodeIds = new Set<string>();
+  for (const operation of operations.values()) {
+    for (const input of operation.inputs.filter(input => input.role === role)) {
+      let nodeId: string | undefined = input.nodeId;
+      while (nodeId) {
+        nodeIds.add(nodeId);
+        nodeId = operationsByOutputNodeId
+          .get(nodeId)
+          ?.inputs.find(candidate => candidate.role === 'source')?.nodeId;
+      }
+    }
+  }
+  return nodeIds;
 }
 
 function uniqueNodeIds(...models: readonly ModelObject[]): string[] {

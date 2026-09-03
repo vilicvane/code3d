@@ -908,7 +908,11 @@ export class ModelViewport {
       );
     });
     focusNodes.forEach((node, index) => {
-      const operationRole = sourceOperationRole(evaluation, node.nodeId);
+      const operationRole = sourceOperationRole(
+        this.module!,
+        evaluation,
+        node.nodeId,
+      );
       const object = this.buildObject(
         node,
         `source/${index}`,
@@ -1765,9 +1769,11 @@ function isCompositionRole(role: ModelOperationInputRole | undefined): boolean {
 }
 
 function sourceOperationRole(
+  module: ModelModule,
   evaluation: SourceTargetEvaluation,
   nodeId: string,
 ): ModelOperationInputRole | undefined {
+  if (module.toolNodeIds.has(nodeId)) return 'tool';
   const input = evaluation.operationInput;
   if (!input) return undefined;
   const sourceNodeIds = evaluation.constraintSourceNodeId
