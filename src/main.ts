@@ -12,9 +12,19 @@ import type {
   ObjectCatalogEntry,
 } from './model/compiler';
 import {ModelDiagnosticError} from './model/diagnostic';
+import {bundledExamples} from './project/bundled-examples';
 import {defaultProject} from './project/default-project';
 import {
+  pickProjectDirectory,
+  projectDirectoryPermission,
+  requestProjectDirectoryPermission,
+  storedProjectDirectory,
+  storeProjectDirectory,
+  supportsProjectDirectories,
+} from './project/directory-access';
+import {
   openBrowserProjectFileSystem,
+  openDirectoryProjectFileSystem,
   type ProjectFileSystem,
 } from './project/filesystem';
 import {filePathFromRoute, fileRoute} from './project/file-route';
@@ -42,11 +52,20 @@ import {ModelViewport, type Occurrence} from './viewport';
 import {DockPanelCoordinator} from './ui/dock-panels';
 import {SourceEditPopover} from './ui/source-edit-popover';
 
-const projectFileSystem = await openBrowserProjectFileSystem();
-let initialProject = await projectFileSystem.load();
-if (!initialProject) {
-  initialProject = await projectFileSystem.replace(defaultProject);
-}
+const directoryWorkspaceId = new URL(window.location.href).searchParams.get(
+  'workspace',
+);
+const storedDirectoryHandle = directoryWorkspaceId
+  ? await storedProjectDirectory(directoryWorkspaceId)
+  : undefined;
+const directoryConnected =
+  storedDirectoryHandle !== undefined &&
+  (await projectDirectoryPermission(storedDirectoryHandle)) === 'granted';
+const projectFileSystem = directoryConnected
+  ? await openDirectoryProjectFileSystem(storedDirectoryHandle)
+  : await openBrowserProjectFileSystem();
+await projectFileSystem.initialize(defaultProject);
+const initialProject = await projectFileSystem.syncDirectory(bundledExamples);
 const app = document.querySelector<HTMLDivElement>('#app');
 
 if (!app) {
@@ -62,7 +81,12 @@ app.innerHTML = `
         <span class="prototype-tag">prototype 01</span>
       </div>
       <div class="topbar-actions">
-        <button class="quiet-button" id="reset-button" type="button">Reset example</button>
+        <span class="project-location" id="project-location"></span>
+        <button class="quiet-button" id="open-folder-button" type="button">Open folder</button>
+        <button class="quiet-button" id="reconnect-folder-button" type="button" hidden>Reconnect folder</button>
+        <button class="quiet-button" id="reload-folder-button" type="button" hidden>Reload folder</button>
+        <button class="quiet-button" id="browser-storage-button" type="button" hidden>Use browser storage</button>
+        <button class="quiet-button" id="reset-button" type="button">Reset examples</button>
       </div>
     </header>
 
@@ -181,6 +205,18 @@ const viewportProgressLabel = requiredElement('viewport-progress-label');
 const projectTree = requiredElement('project-tree');
 const editorTabs = requiredElement('editor-tabs');
 const activeFileName = requiredElement('active-file-name');
+const projectLocation = requiredElement('project-location');
+const openFolderButton =
+  requiredElement<HTMLButtonElement>('open-folder-button');
+const reconnectFolderButton = requiredElement<HTMLButtonElement>(
+  'reconnect-folder-button',
+);
+const reloadFolderButton = requiredElement<HTMLButtonElement>(
+  'reload-folder-button',
+);
+const browserStorageButton = requiredElement<HTMLButtonElement>(
+  'browser-storage-button',
+);
 const resetButton = requiredElement<HTMLButtonElement>('reset-button');
 const newFileButton = requiredElement<HTMLButtonElement>('new-file-button');
 const projectContextMenu = requiredElement('project-context-menu');
@@ -339,6 +375,18 @@ newFileButton.addEventListener('click', () => {
     showProjectIssue(error);
   }
 });
+openFolderButton.addEventListener('click', () => {
+  void openProjectDirectory();
+});
+reconnectFolderButton.addEventListener('click', () => {
+  void reconnectProjectDirectory();
+});
+reloadFolderButton.addEventListener('click', () => {
+  void reloadProjectDirectory();
+});
+browserStorageButton.addEventListener('click', () => {
+  void useBrowserStorage();
+});
 contextRenameFile.addEventListener('click', () => renameContextFile());
 contextDeleteFile.addEventListener('click', () => deleteContextFile());
 window.addEventListener('pointerdown', event => {
@@ -348,10 +396,14 @@ window.addEventListener('pointerdown', event => {
 });
 
 resetButton.addEventListener('click', () => {
-  if (!window.confirm('Restore the prototype example?')) {
+  if (
+    !window.confirm(
+      'Reset bundled examples? Files under /examples will be replaced. Other project files will not change.',
+    )
+  ) {
     return;
   }
-  void resetProject();
+  void resetExamples();
 });
 
 window.addEventListener('keydown', event => {
@@ -376,8 +428,107 @@ window.addEventListener('keydown', event => {
   }
 });
 
+renderProjectLocation();
 renderProjectNavigation();
 runModel();
+
+function renderProjectLocation(): void {
+  if (directoryConnected) {
+    projectLocation.textContent = `Local · ${storedDirectoryHandle.name}`;
+    projectLocation.dataset.kind = 'local';
+    projectLocation.title = `Files are stored directly in ${storedDirectoryHandle.name}`;
+    openFolderButton.textContent = 'Change folder';
+    reconnectFolderButton.hidden = true;
+    reloadFolderButton.hidden = false;
+    browserStorageButton.hidden = false;
+    return;
+  }
+
+  projectLocation.textContent = 'Browser storage';
+  projectLocation.dataset.kind = 'browser';
+  projectLocation.title = 'Files are stored in this browser';
+  openFolderButton.textContent = 'Open folder';
+  openFolderButton.disabled = !supportsProjectDirectories();
+  reconnectFolderButton.hidden = storedDirectoryHandle === undefined;
+  reconnectFolderButton.textContent = storedDirectoryHandle
+    ? `Reconnect ${storedDirectoryHandle.name}`
+    : 'Reconnect folder';
+  reloadFolderButton.hidden = true;
+  browserStorageButton.hidden = true;
+}
+
+async function openProjectDirectory(): Promise<void> {
+  setProjectLocationBusy(true);
+  try {
+    await persistenceQueue;
+    const handle = await pickProjectDirectory();
+    if (!handle) return;
+    const target = await openDirectoryProjectFileSystem(handle);
+    await target.initialize(codeEditor.project());
+    await target.syncDirectory(bundledExamples);
+    const workspaceId = crypto.randomUUID();
+    await storeProjectDirectory(workspaceId, handle);
+    openDirectoryWorkspace(workspaceId);
+  } catch (error) {
+    showProjectIssue(error);
+  } finally {
+    setProjectLocationBusy(false);
+  }
+}
+
+async function reconnectProjectDirectory(): Promise<void> {
+  if (!storedDirectoryHandle) return;
+  setProjectLocationBusy(true);
+  try {
+    if (
+      (await requestProjectDirectoryPermission(storedDirectoryHandle)) !==
+      'granted'
+    ) {
+      throw new Error('Write access to the project folder was not granted.');
+    }
+    window.location.reload();
+  } catch (error) {
+    showProjectIssue(error);
+  } finally {
+    setProjectLocationBusy(false);
+  }
+}
+
+async function reloadProjectDirectory(): Promise<void> {
+  setProjectLocationBusy(true);
+  await persistenceQueue;
+  window.location.reload();
+}
+
+async function useBrowserStorage(): Promise<void> {
+  setProjectLocationBusy(true);
+  try {
+    await persistenceQueue;
+    openBrowserWorkspace();
+  } catch (error) {
+    showProjectIssue(error);
+    setProjectLocationBusy(false);
+  }
+}
+
+function openDirectoryWorkspace(workspaceId: string): void {
+  const url = new URL(window.location.href);
+  url.searchParams.set('workspace', workspaceId);
+  window.location.replace(url);
+}
+
+function openBrowserWorkspace(): void {
+  const url = new URL(window.location.href);
+  url.searchParams.delete('workspace');
+  window.location.replace(url);
+}
+
+function setProjectLocationBusy(busy: boolean): void {
+  openFolderButton.disabled = busy || !supportsProjectDirectories();
+  reconnectFolderButton.disabled = busy;
+  reloadFolderButton.disabled = busy;
+  browserStorageButton.disabled = busy;
+}
 
 function persistProjectChange(
   fileSystem: ProjectFileSystem,
@@ -396,14 +547,12 @@ function persistProjectChange(
     .catch(error => showProjectIssue(error));
 }
 
-async function resetProject(): Promise<void> {
+async function resetExamples(): Promise<void> {
   try {
     await persistenceQueue;
-    preferredEvaluationContextId = undefined;
-    selectedDesignContextId = undefined;
-    initialProject = await projectFileSystem.replace(defaultProject);
-    codeEditor.reset(initialProject);
-    runModel();
+    const project = await projectFileSystem.resetDirectory(bundledExamples);
+    codeEditor.replaceDirectory(project, bundledExamples.directory);
+    void runModel();
   } catch (error) {
     showProjectIssue(error);
   }

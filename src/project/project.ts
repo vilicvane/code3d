@@ -8,6 +8,12 @@ export type ModelProject = Readonly<{
   files: readonly ProjectSourceFile[];
 }>;
 
+export type ProjectDirectoryTemplate = Readonly<{
+  directory: string;
+  revision: string;
+  files: readonly ProjectSourceFile[];
+}>;
+
 export function projectFile(
   project: ModelProject,
   path: string,
@@ -41,6 +47,15 @@ export function projectDirectory(path: string): string {
   const normalized = normalizeProjectPath(path);
   const separator = normalized.lastIndexOf('/');
   return separator <= 0 ? '/' : normalized.slice(0, separator);
+}
+
+export function projectPathIsWithin(path: string, directory: string): boolean {
+  const normalizedPath = normalizeProjectPath(path);
+  const normalizedDirectory = normalizeProjectPath(directory);
+  return (
+    normalizedPath === normalizedDirectory ||
+    normalizedPath.startsWith(`${normalizedDirectory}/`)
+  );
 }
 
 export function resolveProjectImport(

@@ -116,6 +116,14 @@ it does not silently reorder the active milestones. Closed requests move to
   returned by that single evaluation rather than flattening execution and
   collection scopes together.
 - Export status must not change the geometry or position semantics of an object.
+- The persistent project is user-owned except for the explicit `/examples`
+  template boundary. A bundled-example version change and the explicit
+  `Reset examples` action may replace that directory; `/model.ts`, `/lib`, and
+  every other project path remain untouched.
+- A project may use browser persistence or directly map a user-selected local
+  directory through the same ZenFS-backed filesystem contract. Directory
+  selection belongs to a URL-scoped workspace instance, never to the whole
+  browser origin, so separate code3d pages may open different projects.
 
 ## Milestones
 
@@ -139,6 +147,12 @@ general helical-thread foundation, default-project library seeding, and English 
 have passed build and host-browser verification. [R-014](requests/closed/R-014-cross-file-editor-navigation.md)
 connects Monaco's built-in definition navigation to the same project document
 boundary for Ctrl/Cmd+Click and F12 across files.
+[R-020](requests/closed/R-020-managed-examples-directory.md) separates the
+resettable bundled showcase from the persistent user workspace: all examples
+live under `/examples`, while reset no longer replaces the project.
+[R-021](requests/closed/R-021-local-folder-projects.md) adds direct local-folder
+projects while retaining the default browser workspace and isolating directory
+selection per page URL.
 
 ### 1. Rootless authoring and optional exports — complete
 

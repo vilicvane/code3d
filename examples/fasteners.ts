@@ -1,5 +1,5 @@
-export const sampleSource = `import {box, cut, group} from 'code3d';
-import {socketCapHole, socketCapScrew} from './lib/fasteners/metric';
+import {box, cut, group} from 'code3d';
+import {socketCapHole, socketCapScrew} from '../lib/fasteners/metric';
 
 const accent = '#d8ff3e';
 const dark = '#222621';
@@ -20,5 +20,7 @@ const screw = socketCapScrew('M6', 18)
     part.headBottom.on(hole.counterboreBottom).flip().offset(0, -1, 0),
   );
 
-const fastenerDemo = group([preparedPlate, screw], 'M6 fastener demo');
-`;
+export const fastenerExample = group(
+  [preparedPlate, screw],
+  'M6 fastener assembly',
+);

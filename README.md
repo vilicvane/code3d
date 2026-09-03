@@ -8,7 +8,10 @@
 ## 已验证
 
 - 使用普通 TypeScript 自由构建和组合对象。
-- 浏览器内项目由 ZenFS 持久化，可创建多个 TypeScript 模组并使用普通相对导入。
+- 项目通过 ZenFS 使用浏览器持久化存储，或直接读写用户选择的本地文件夹；两种模式
+  都可创建多个 TypeScript 模组并使用普通相对导入。
+- `/model.ts` 和用户创建的文件始终属于工作区；内置功能示例集中在可单独重置的
+  `/examples` 目录，`Reset examples` 不会改动其他文件。
 - 源码产生任意模型对象即可预览；export 只是可选发布边界和 fallback。
 - `model()` 不是入口要求，源码选择决定主要渲染对象。
 - Monaco 提供 `code3d` API 的类型、补全、格式化和跨文件定义跳转。
@@ -90,6 +93,28 @@ npm run format
 npm run lint-prettier
 ```
 
+## 工作区与示例
+
+新工作区的 `/model.ts` 默认导出 `/examples` 中的示例，之后它就是普通的用户文件。
+可以直接把实际模型放在 `/model.ts`，也可以在任意自建目录中维护并从入口导入。
+
+内置示例覆盖 primitive 与派生操作、Boolean 运算、关系与具名元素、函数设计时参数，
+以及公制紧固件。示例版本变化时会将 `/examples` 自动同步为新的内置版本；顶部的
+`Reset examples` 可随时手动恢复它。两种操作都不会改动 `/model.ts`、`/lib` 或其他
+用户目录，因此长期维护的模型不应放在 `/examples` 中。
+
+默认 URL 打开浏览器工作区。`Open folder` 会让当前页面直接连接用户选择的真实目录：
+空目录会接收当前工作区，已有 TypeScript 文件的目录会被原样采用，并用 `model.ts`
+或第一个源码文件作为入口。code3d 只另外写入 `.code3d/project.json`，并同步其托管的
+`examples` 目录。
+
+每个本地目录连接都有自己的 `?workspace=...` URL，因此一个标签页切换目录不会改变
+其他 code3d 页面。目录 handle 会被保存，权限失效时可用 `Reconnect folder` 重新授权；
+`Use browser storage` 只让当前页面回到默认浏览器工作区。
+
+应用内编辑会直接写入磁盘。浏览器目前没有稳定的目录监听 API；在外部编辑器中修改
+文件后，使用 `Reload folder` 重新读取磁盘内容。
+
 ## 当前边界
 
 - 项目支持一个入口模组和任意本地 TypeScript 模组；第三方包导入尚未开放。
@@ -100,6 +125,8 @@ npm run lint-prettier
 - canonical model anchor 已可用于关系约束；任意 face、edge 和 vertex anchor 尚未开放。
 - Worker 防止用户代码锁死 UI，但不是安全沙箱。
 - 当前精简 OCCT WASM 约 23 MB，gzip 约 7.3 MB。
+- 本地目录模式依赖支持 File System Access API 的浏览器和安全上下文；不支持时仍可
+  使用默认浏览器工作区。
 
 ## 下一步
 

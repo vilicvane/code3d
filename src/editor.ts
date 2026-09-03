@@ -13,7 +13,11 @@ import {code3dAnnotations, type Code3dAnnotation} from './model/annotations';
 import type {DesignArgumentContext} from './model/compiler';
 import type {ModelDiagnostic} from './model/diagnostic';
 import {authoringTypes, type SourceRef} from './model/runtime';
-import {normalizeProjectPath, type ModelProject} from './project/project';
+import {
+  normalizeProjectPath,
+  projectPathIsWithin,
+  type ModelProject,
+} from './project/project';
 import type {SourceTextEdit} from './tools/tool-system';
 import type {SourceEditExcerpt} from './ui/source-edit-popover';
 
@@ -360,16 +364,40 @@ export class CodeEditor {
     this.emitChange({kind: 'delete', path: normalized});
   }
 
-  reset(project: ModelProject): void {
+  replaceDirectory(project: ModelProject, directory: string): void {
+    const normalizedDirectory = normalizeProjectPath(directory);
+    const replacementFiles = project.files.filter(file =>
+      projectPathIsWithin(file.path, normalizedDirectory),
+    );
+    const replacementPaths = new Set(replacementFiles.map(file => file.path));
+    const activeDocumentReplaced = projectPathIsWithin(
+      this.activePath,
+      normalizedDirectory,
+    );
+
     this.sourceDecoration.clear();
     this.trackedSourceRefs.clear();
-    [...this.documents.keys()].forEach(path => this.removeDocument(path));
-    this.openPaths.length = 0;
+    [...this.documents.keys()]
+      .filter(path => projectPathIsWithin(path, normalizedDirectory))
+      .forEach(path => this.removeDocument(path));
+    replacementFiles.forEach(file => this.addDocument(file.path, file.source));
+
+    const retainedOpenPaths = this.openPaths.filter(
+      path =>
+        !projectPathIsWithin(path, normalizedDirectory) ||
+        replacementPaths.has(path),
+    );
+    this.openPaths.splice(0, this.openPaths.length, ...retainedOpenPaths);
     this.entryPath = normalizeProjectPath(project.entryPath);
-    this.activePath = this.entryPath;
-    project.files.forEach(file => this.addDocument(file.path, file.source));
-    this.openPaths.push(this.entryPath);
-    this.editor.setModel(this.requireDocument(this.entryPath).model);
+    if (activeDocumentReplaced) {
+      if (!replacementPaths.has(this.activePath)) {
+        this.activePath = replacementFiles[0]?.path ?? this.entryPath;
+      }
+      if (!this.openPaths.includes(this.activePath)) {
+        this.openPaths.push(this.activePath);
+      }
+      this.editor.setModel(this.requireDocument(this.activePath).model);
+    }
     this.revision += 1;
     this.emitActiveFile('reset');
   }

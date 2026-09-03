@@ -108,6 +108,31 @@ button {
   gap: 8px;
 }
 
+.project-location {
+  max-width: 180px;
+  overflow: hidden;
+  color: #72786d;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-location::before {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--acid);
+  content: '';
+  vertical-align: 1px;
+}
+
+.project-location[data-kind='browser']::before {
+  background: #666b62;
+}
+
 .quiet-button,
 .scope-button,
 .inspector-button {
@@ -124,6 +149,11 @@ button {
 
 .quiet-button:hover {
   color: #dcddd6;
+}
+
+.quiet-button:disabled {
+  color: #4f534b;
+  cursor: default;
 }
 
 kbd {

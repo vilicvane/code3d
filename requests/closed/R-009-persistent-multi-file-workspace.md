@@ -34,6 +34,9 @@
   with the IndexedDB backend from `@zenfs/dom`; keep backend choice out of the
   editor and compiler so a File System Access API, OPFS, desktop, or host-backed
   implementation can replace it later.
+- R-021 completes the next backend: ZenFS `WebAccess` maps a selected directory
+  directly while the editor, compiler, tracing, and tool layers keep the same
+  project snapshot contract.
 - Keep an in-memory immutable project snapshot for compilation and UI state.
   Persistence is an asynchronous boundary around that snapshot, not something
   compiler evaluation reaches into directly.
@@ -98,9 +101,14 @@
   `/parts/library-part.ts`, then changed its width through Properties. The
   atomic edit and source popover both targeted that library file while
   `/model.ts` remained only its importer.
-- Default libraries are seeded only when a project is created or reset; opening
-  an existing project never mutates its source tree.
-  Host Chrome verified that deleting the seeded library remains deleted
-  after reload; resetting the example explicitly restores it.
+- Default libraries are seeded only when a project is created. Opening an
+  existing project never replaces user-owned source. The separately managed
+  `/examples` template is replaced when its bundled revision changes.
+- `Reset examples` replaces `/examples` alone. It never restores or removes
+  `/model.ts`, `/lib`, or any other user-owned path; R-020 records that refined
+  reset boundary.
 - The imported-library browser fixture was removed and the persistent project
   restored to the default example after verification.
+- Host Chrome additionally verified direct handle-backed reads and writes,
+  initialization of empty and existing source directories, and independent
+  folder workspaces in multiple browser pages; see R-021.
