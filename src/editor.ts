@@ -23,6 +23,8 @@ export type ProjectEditorChange =
   | Readonly<{kind: 'rename'; from: string; to: string}>
   | Readonly<{kind: 'delete'; path: string}>;
 
+export type ActiveFileChangeReason = 'switch' | 'rename' | 'delete' | 'reset';
+
 type ProjectDocument = {
   path: string;
   model: monaco.editor.ITextModel;
@@ -133,19 +135,22 @@ export class CodeEditor {
   private readonly cursorListeners = new Set<
     (source: Readonly<{file: string; offset: number}>) => void
   >();
-  private readonly activeFileListeners = new Set<(path: string) => void>();
+  private readonly activeFileListeners = new Set<
+    (path: string, reason: ActiveFileChangeReason) => void
+  >();
   private readonly sourceDecoration: monaco.editor.IEditorDecorationsCollection;
+  private entryPath: string;
   private activePath: string;
   private revision = 1;
   private suppressCursorEvent = false;
 
   constructor(
     private readonly container: HTMLElement,
-    private entryPath: string,
     project: ModelProject,
+    initialPath = project.entryPath,
   ) {
-    this.entryPath = normalizeProjectPath(entryPath);
-    this.activePath = this.entryPath;
+    this.entryPath = normalizeProjectPath(project.entryPath);
+    this.activePath = normalizeProjectPath(initialPath);
     for (const file of project.files) {
       this.addDocument(file.path, file.source);
     }
@@ -228,7 +233,7 @@ export class CodeEditor {
       if (next.viewState) this.editor.restoreViewState(next.viewState);
       if (takeFocus) this.editor.focus();
     });
-    this.activeFileListeners.forEach(listener => listener(normalized));
+    this.emitActiveFile('switch');
   }
 
   closeFile(path: string): void {
@@ -273,6 +278,7 @@ export class CodeEditor {
     }
     this.revision += 1;
     this.emitChange({kind: 'rename', from: sourcePath, to: targetPath});
+    if (wasActive) this.emitActiveFile('rename');
   }
 
   deleteFile(path: string): void {
@@ -291,7 +297,7 @@ export class CodeEditor {
         this.sourceDecoration.clear();
         this.editor.setModel(this.requireDocument(nextPath).model);
       });
-      this.activeFileListeners.forEach(listener => listener(nextPath));
+      this.emitActiveFile('delete');
     }
     this.removeDocument(normalized);
     if (openIndex >= 0) this.openPaths.splice(openIndex, 1);
@@ -309,6 +315,7 @@ export class CodeEditor {
     this.openPaths.push(this.entryPath);
     this.editor.setModel(this.requireDocument(this.entryPath).model);
     this.revision += 1;
+    this.emitActiveFile('reset');
   }
 
   sourceVersion(): number {
@@ -393,7 +400,9 @@ export class CodeEditor {
     return () => this.cursorListeners.delete(listener);
   }
 
-  onActiveFile(listener: (path: string) => void): () => void {
+  onActiveFile(
+    listener: (path: string, reason: ActiveFileChangeReason) => void,
+  ): () => void {
     this.activeFileListeners.add(listener);
     return () => this.activeFileListeners.delete(listener);
   }
@@ -483,6 +492,12 @@ export class CodeEditor {
 
   private emitChange(change: ProjectEditorChange): void {
     this.changeListeners.forEach(listener => listener(change));
+  }
+
+  private emitActiveFile(reason: ActiveFileChangeReason): void {
+    this.activeFileListeners.forEach(listener =>
+      listener(this.activePath, reason),
+    );
   }
 
   private openProjectResource(

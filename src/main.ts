@@ -1,5 +1,9 @@
 import './style.css';
-import {CodeEditor, type ProjectEditorChange} from './editor';
+import {
+  CodeEditor,
+  type ActiveFileChangeReason,
+  type ProjectEditorChange,
+} from './editor';
 import {ModelCompilerClient} from './model/compiler-client';
 import type {ModelModule, ObjectCatalogEntry} from './model/compiler';
 import {
@@ -10,10 +14,12 @@ import {
   openBrowserProjectFileSystem,
   type ProjectFileSystem,
 } from './project/filesystem';
+import {filePathFromRoute, fileRoute} from './project/file-route';
 import {
   currentProjectMigrationVersion,
   migrateProject,
 } from './project/migrations';
+import type {ModelProject} from './project/project';
 import type {
   ModelSnapshotObject,
   ParameterTarget,
@@ -193,9 +199,10 @@ dockPanels.register({
 
 const codeEditor = new CodeEditor(
   editorHost,
-  initialProject.entryPath,
   initialProject,
+  initialFilePath(initialProject, window.location.hash),
 );
+replaceFileRoute(codeEditor.currentFile());
 const compiler = new ModelCompilerClient();
 let persistenceQueue = Promise.resolve();
 let currentModule: ModelModule | null = null;
@@ -207,6 +214,7 @@ let positionToolSession: ToolSession | undefined;
 let contextFilePath: string | undefined;
 let preferredEvaluationContextId: string | undefined;
 let selectedDesignContextId: string | undefined;
+let applyingFileRoute = false;
 const expandedCatalogIds = new Set<string>();
 
 const viewport = new ModelViewport(viewportHost, {
@@ -270,7 +278,24 @@ codeEditor.onCursorOffset(({file, offset}) => {
     renderScopes(currentModule);
   }
 });
-codeEditor.onActiveFile(() => renderProjectNavigation());
+codeEditor.onActiveFile((path, reason) => {
+  renderProjectNavigation();
+  if (!applyingFileRoute) updateFileRoute(path, reason);
+});
+
+window.addEventListener('popstate', () => {
+  const path = filePathFromRoute(window.location.hash);
+  if (!path || !codeEditor.filePaths().includes(path)) {
+    replaceFileRoute(codeEditor.currentFile());
+    return;
+  }
+  applyingFileRoute = true;
+  try {
+    codeEditor.switchFile(path);
+  } finally {
+    applyingFileRoute = false;
+  }
+});
 
 newFileButton.addEventListener('click', () => {
   const path = window.prompt('New file path', '/lib/model.ts')?.trim();
@@ -342,11 +367,41 @@ async function resetProject(): Promise<void> {
       currentProjectMigrationVersion,
     );
     codeEditor.reset(initialProject);
-    renderProjectNavigation();
     runModel();
   } catch (error) {
     showProjectIssue(error);
   }
+}
+
+function initialFilePath(project: ModelProject, hash: string): string {
+  const routed = filePathFromRoute(hash);
+  return routed && project.files.some(file => file.path === routed)
+    ? routed
+    : project.entryPath;
+}
+
+function updateFileRoute(path: string, reason: ActiveFileChangeReason): void {
+  if (reason === 'switch') {
+    pushFileRoute(path);
+  } else {
+    replaceFileRoute(path);
+  }
+}
+
+function pushFileRoute(path: string): void {
+  const route = fileRoute(path);
+  if (window.location.hash === route) return;
+  const url = new URL(window.location.href);
+  url.hash = route.slice(1);
+  window.history.pushState(null, '', url);
+}
+
+function replaceFileRoute(path: string): void {
+  const route = fileRoute(path);
+  if (window.location.hash === route) return;
+  const url = new URL(window.location.href);
+  url.hash = route.slice(1);
+  window.history.replaceState(null, '', url);
 }
 
 function renderProjectNavigation(): void {
