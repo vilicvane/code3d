@@ -240,9 +240,10 @@ is complete: an explicit double-click drills from the active composition
 operand to its best exact binding or defining expression, including
 file-qualified targets, while single-click focus switching and drag gestures
 retain their existing meanings.
-[R-016](requests/R-016-viewport-elements-panel.md) retains a complementary,
-on-demand viewport inventory for named-element discovery without turning it
-into a second model editor.
+[R-016](requests/closed/R-016-viewport-elements-panel.md) is complete: the
+on-demand Elements dock follows the selected occurrence, marks the element
+under the source caret, and transiently previews exact point, line, face, and
+frame decorations without editing source or retaining a parallel selection.
 
 ### 2a. Unified dock panels — complete
 

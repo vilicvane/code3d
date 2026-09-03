@@ -7,9 +7,11 @@ function locatingPin(radius: number, height: number) {
   const blank = cylinder(radius, height);
   return blank
     .expose({
+      datum: blank.center,
       mountingFace: blank.bottom,
       tipFace: blank.top,
       centerline: blank.axis,
+      referenceFrame: blank,
     })
     .named('Locating pin');
 }

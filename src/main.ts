@@ -36,7 +36,10 @@ import type {
   SourceRef,
 } from './model/runtime';
 import {booleanOperationSourceDecoration} from './model/operation-decorations';
-import {elementSourceDecoration} from './model/element-decorations';
+import {
+  elementSourceDecoration,
+  namedElementDecorations,
+} from './model/element-decorations';
 import type {
   PositionGizmoBinding,
   PositionGizmoEvent,
@@ -50,6 +53,7 @@ import {
 } from './tools/tool-system';
 import {ModelViewport, type Occurrence} from './viewport';
 import {DockPanelCoordinator} from './ui/dock-panels';
+import {ElementsPanel} from './ui/elements-panel';
 import {ProjectTree} from './ui/project-tree';
 import {SourceEditPopover} from './ui/source-edit-popover';
 
@@ -169,6 +173,16 @@ app.innerHTML = `
                 <div class="design-arguments-options" id="design-arguments-options"></div>
               </div>
             </aside>
+            <aside class="dock-panel elements-panel" id="elements-panel" aria-label="Model elements">
+              <button class="dock-panel-handle" id="elements-handle" type="button">
+                <span>ELEMENTS</span>
+                <span class="dock-panel-handle-meta">
+                  <span id="elements-count">0</span>
+                  <kbd data-dock-shortcut></kbd>
+                </span>
+              </button>
+              <div class="dock-panel-body elements" id="elements" hidden></div>
+            </aside>
             <aside class="dock-panel inspector-panel" id="inspector-panel" aria-label="Object properties">
               <button class="dock-panel-handle" id="inspector-handle" type="button">
                 <span>PROPERTIES</span>
@@ -200,6 +214,8 @@ const inspector = requiredElement('inspector');
 const designArgumentsCount = requiredElement('design-arguments-count');
 const designArgumentsFunction = requiredElement('design-arguments-function');
 const designArgumentsOptions = requiredElement('design-arguments-options');
+const elements = requiredElement('elements');
+const elementsCount = requiredElement('elements-count');
 const toolStatus = requiredElement('tool-status');
 const viewportProgress = requiredElement('viewport-progress');
 const viewportProgressLabel = requiredElement('viewport-progress-label');
@@ -246,6 +262,12 @@ dockPanels.register({
   handle: requiredElement<HTMLButtonElement>('design-arguments-handle'),
   body: requiredElement('design-arguments'),
   shortcut: {code: 'Digit3', label: 'Alt 3', altKey: true},
+});
+dockPanels.register({
+  root: requiredElement('elements-panel'),
+  handle: requiredElement<HTMLButtonElement>('elements-handle'),
+  body: elements,
+  shortcut: {code: 'Digit4', label: 'Alt 4', altKey: true},
 });
 
 const codeEditor = new CodeEditor(
@@ -298,6 +320,19 @@ const viewport = new ModelViewport(viewportHost, {
     booleanOperationSourceDecoration,
     elementSourceDecoration,
   ],
+});
+const elementsDecorationOwner = 'elements-panel';
+const elementsPanel = new ElementsPanel(elements, elementsCount, {
+  onPreview: element => {
+    viewport.clearDecorations(elementsDecorationOwner);
+    const occurrence = viewport.getSelected();
+    if (!element || !occurrence) return;
+    viewport.setDecorations(
+      elementsDecorationOwner,
+      namedElementDecorations(occurrence.node, element),
+      {occurrenceKeys: [occurrence.key]},
+    );
+  },
 });
 const sourceEditPopover = new SourceEditPopover(viewportHost, sourceRef =>
   codeEditor.revealSource(sourceRef, true),
@@ -783,6 +818,7 @@ function handleCompletionFocus(focus: CompletionFocus | undefined): void {
   window.clearTimeout(completionPreviewTimer);
   completionPreviewTimer = undefined;
   viewport.restoreTransientPreview();
+  renderElementsPanel(viewport.getSelected());
 
   if (!focus) {
     if (previous?.preview) resumeModelAfterCompletion();
@@ -792,11 +828,15 @@ function handleCompletionFocus(focus: CompletionFocus | undefined): void {
   if (currentModule) {
     const match = completionPreviewTarget(currentModule, focus);
     if (match) {
-      viewport.previewCompletion(
-        match.target,
-        match.evaluationIndex,
-        focus.memberName,
-      );
+      if (
+        viewport.previewCompletion(
+          match.target,
+          match.evaluationIndex,
+          focus.memberName,
+        )
+      ) {
+        renderElementsPanel(viewport.getSelected());
+      }
     }
   }
 
@@ -842,12 +882,16 @@ async function runCompletionPreview(
     ) {
       return;
     }
-    viewport.previewCompletedProject(
-      module,
-      preview.cursor.file,
-      preview.cursor.offset,
-      preferredEvaluationContextId,
-    );
+    if (
+      viewport.previewCompletedProject(
+        module,
+        preview.cursor.file,
+        preview.cursor.offset,
+        preferredEvaluationContextId,
+      )
+    ) {
+      renderElementsPanel(viewport.getSelected());
+    }
     hideViewportProgress();
   } catch {
     if (revision === runRevision && activeCompletionFocus === focus) {
@@ -876,6 +920,7 @@ function requestModelUpdate(delay: number): void {
   window.clearTimeout(completionPreviewTimer);
   completionPreviewTimer = undefined;
   viewport.restoreTransientPreview();
+  renderElementsPanel(viewport.getSelected());
   showViewportProgress('Updating model');
   runRevision += 1;
   compiler.cancel();
@@ -1032,6 +1077,7 @@ function renderInspectorEmpty(): void {
   empty.className = 'inspector-copy';
   empty.textContent = 'Select a model expression to inspect it.';
   inspector.append(empty);
+  renderElementsPanel();
 }
 
 function renderObjectCatalog(module: ModelModule): void {
@@ -1229,6 +1275,7 @@ function scopeButton(
 
 function selectOccurrence(occurrence: Occurrence, revealSource: boolean): void {
   renderInspector(occurrence);
+  renderElementsPanel(occurrence);
   if (currentModule) renderContextControls(currentModule);
 
   if (revealSource) {
@@ -1239,6 +1286,20 @@ function selectOccurrence(occurrence: Occurrence, revealSource: boolean): void {
       codeEditor.clearSourceHighlight();
     }
   }
+}
+
+function renderElementsPanel(occurrence?: Occurrence): void {
+  if (!occurrence) {
+    elementsPanel.render();
+    return;
+  }
+  const sourceElement = viewport.sourceEvaluation()?.evaluation.element;
+  elementsPanel.render(
+    occurrence.node,
+    sourceElement?.nodeId === occurrence.node.nodeId
+      ? sourceElement.name
+      : undefined,
+  );
 }
 
 function drillToObjectSource(node: ModelSnapshotObject): void {
@@ -1375,11 +1436,11 @@ function designArgumentCall(context: DesignArgumentContext): string {
 function renderCurrentPanels(): void {
   const occurrence = viewport.getSelected();
   if (occurrence) {
-    renderInspector(occurrence);
+    selectOccurrence(occurrence, false);
   } else {
     renderInspectorEmpty();
   }
-  if (currentModule) renderContextControls(currentModule);
+  if (!occurrence && currentModule) renderContextControls(currentModule);
 }
 
 function renderModelInspector(): void {

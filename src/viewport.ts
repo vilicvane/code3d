@@ -544,11 +544,13 @@ export class ModelViewport {
   setDecorations(
     owner: string,
     decorations: readonly ViewportDecoration[],
+    scope?: Readonly<{occurrenceKeys: readonly string[]}>,
   ): void {
     this.clearDecorations(owner);
     if (decorations.length === 0) {
       return;
     }
+    const occurrenceKeys = scope ? new Set(scope.occurrenceKeys) : undefined;
     const objects = decorations.flatMap(decoration => {
       if (decoration.kind === 'mesh') {
         const object = createMeshDecorationObject(decoration);
@@ -556,7 +558,11 @@ export class ModelViewport {
         return [object];
       }
       return [...this.occurrences.values()]
-        .filter(occurrence => occurrence.node.nodeId === decoration.nodeId)
+        .filter(
+          occurrence =>
+            occurrence.node.nodeId === decoration.nodeId &&
+            (!occurrenceKeys || occurrenceKeys.has(occurrence.key)),
+        )
         .map(occurrence => {
           const object =
             decoration.kind === 'surface'

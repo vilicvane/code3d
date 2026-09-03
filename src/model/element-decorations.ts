@@ -1,6 +1,15 @@
 import {rotateVector} from './spatial';
-import type {ModelSnapshotObject, RenderMesh, Transform, Vec3} from './runtime';
-import type {SourceDecorationProvider} from '../viewport-decoration';
+import type {
+  ElementSnapshot,
+  ModelSnapshotObject,
+  RenderMesh,
+  Transform,
+  Vec3,
+} from './runtime';
+import type {
+  SourceDecorationProvider,
+  ViewportDecoration,
+} from '../viewport-decoration';
 
 const elementAppearance = {
   color: '#d8ff3e',
@@ -33,35 +42,41 @@ export const elementSourceDecoration = {
         candidate.name === reference.name && candidate.kind === reference.kind,
     );
     if (!node || !element) return [];
-    const surface =
-      reference.kind === 'face' && node.mesh
-        ? faceSurfaceAt(node.mesh, element.transform)
-        : undefined;
-    return [
-      ...(surface
-        ? [
-            {
-              kind: 'surface' as const,
-              id: `${reference.nodeId}:${reference.name}:surface`,
-              nodeId: reference.nodeId,
-              mesh: surface,
-              appearance: faceAppearance,
-            },
-          ]
-        : []),
-      {
-        kind: 'anchor' as const,
-        id: `${reference.nodeId}:${reference.name}`,
-        nodeId: reference.nodeId,
-        elementKind: reference.kind,
-        transform: element.transform,
-        size: elementDisplaySize(node),
-        appearance:
-          reference.kind === 'face' ? faceAppearance : elementAppearance,
-      },
-    ];
+    return namedElementDecorations(node, element);
   },
 } satisfies SourceDecorationProvider;
+
+export function namedElementDecorations(
+  node: ModelSnapshotObject,
+  element: ElementSnapshot,
+): readonly ViewportDecoration[] {
+  const surface =
+    element.kind === 'face' && node.mesh
+      ? faceSurfaceAt(node.mesh, element.transform)
+      : undefined;
+  return [
+    ...(surface
+      ? [
+          {
+            kind: 'surface' as const,
+            id: `${node.nodeId}:${element.name}:surface`,
+            nodeId: node.nodeId,
+            mesh: surface,
+            appearance: faceAppearance,
+          },
+        ]
+      : []),
+    {
+      kind: 'anchor',
+      id: `${node.nodeId}:${element.name}`,
+      nodeId: node.nodeId,
+      elementKind: element.kind,
+      transform: element.transform,
+      size: elementDisplaySize(node),
+      appearance: element.kind === 'face' ? faceAppearance : elementAppearance,
+    },
+  ];
+}
 
 function faceSurfaceAt(
   mesh: RenderMesh,

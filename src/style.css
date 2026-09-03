@@ -740,6 +740,7 @@ kbd {
   position: relative;
   --expanded-inspector-width: 252px;
   --expanded-arguments-width: 310px;
+  --expanded-elements-width: 248px;
   overflow: hidden;
   background: #171815;
 }
@@ -1140,6 +1141,11 @@ kbd {
   width: var(--expanded-arguments-width);
 }
 
+.elements-panel[data-panel-state='peek'],
+.elements-panel[data-panel-state='pinned'] {
+  width: var(--expanded-elements-width);
+}
+
 .inspector {
   max-height: calc(100vh - 180px);
   padding: 14px;
@@ -1219,6 +1225,153 @@ kbd {
   margin: 8px 2px 2px;
   color: #696e64;
   font-size: 9px;
+  line-height: 1.45;
+}
+
+.elements {
+  max-height: calc(100vh - 180px);
+  padding: 10px;
+  overflow: auto;
+}
+
+.elements-heading {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 9px;
+}
+
+.elements-heading > span {
+  color: #777c70;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 7px;
+  letter-spacing: 0.1em;
+}
+
+.elements-heading strong {
+  overflow: hidden;
+  color: #c7cbc0;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.elements-list {
+  display: grid;
+  gap: 2px;
+  padding-top: 4px;
+  border-top: 1px solid #292c26;
+}
+
+.element-row {
+  display: grid;
+  grid-template-columns: 13px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 7px;
+  color: #979c91;
+  border-radius: 3px;
+  outline: none;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+}
+
+.element-row:hover,
+.element-row:focus-visible {
+  color: #e5eadb;
+  background: #24271f;
+}
+
+.element-row:focus-visible {
+  box-shadow: inset 0 0 0 1px #687229;
+}
+
+.element-row.source-active {
+  box-shadow: inset 2px 0 0 var(--acid);
+}
+
+.element-row.source-active:focus-visible {
+  box-shadow:
+    inset 2px 0 0 var(--acid),
+    inset 0 0 0 1px #687229;
+}
+
+.element-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.element-kind-label {
+  color: #666c61;
+  font-size: 7px;
+  letter-spacing: 0.06em;
+}
+
+.element-kind-glyph {
+  position: relative;
+  display: block;
+  width: 11px;
+  height: 11px;
+  color: #a9c632;
+}
+
+.element-kind-glyph::before,
+.element-kind-glyph::after {
+  position: absolute;
+  display: block;
+  content: '';
+}
+
+.element-kind-glyph[data-kind='point']::before {
+  top: 3px;
+  left: 3px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 5px #d8ff3e66;
+}
+
+.element-kind-glyph[data-kind='line']::before {
+  top: 5px;
+  left: 0;
+  width: 11px;
+  height: 1px;
+  background: currentColor;
+  transform: rotate(-35deg);
+}
+
+.element-kind-glyph[data-kind='face']::before {
+  inset: 1px;
+  border: 1px solid #7de3ff;
+  background: #63dcff30;
+  transform: skewY(-18deg);
+}
+
+.element-kind-glyph[data-kind='frame']::before {
+  top: 5px;
+  left: 0;
+  width: 11px;
+  height: 1px;
+  background: currentColor;
+}
+
+.element-kind-glyph[data-kind='frame']::after {
+  top: 0;
+  left: 5px;
+  width: 1px;
+  height: 11px;
+  background: currentColor;
+}
+
+.elements-hint,
+.elements-empty {
+  margin: 8px 2px 2px;
+  color: #696e64;
+  font-size: 8px;
   line-height: 1.45;
 }
 
@@ -1484,6 +1637,7 @@ input[type='range']::-webkit-slider-thumb {
   .viewport-host {
     --expanded-inspector-width: 190px;
     --expanded-arguments-width: 190px;
+    --expanded-elements-width: 190px;
   }
 
   .editor-pane {
@@ -1494,7 +1648,9 @@ input[type='range']::-webkit-slider-thumb {
   .inspector-panel[data-panel-state='peek'],
   .inspector-panel[data-panel-state='pinned'],
   .design-arguments-panel[data-panel-state='peek'],
-  .design-arguments-panel[data-panel-state='pinned'] {
+  .design-arguments-panel[data-panel-state='pinned'],
+  .elements-panel[data-panel-state='peek'],
+  .elements-panel[data-panel-state='pinned'] {
     width: 190px;
   }
 
