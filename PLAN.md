@@ -318,10 +318,11 @@ constraint source sites do.
   explicit viewport selection entry. Initialize from its current IDs and write
   changes back only to that existing array through the common tool transaction
   path. Do not offer GUI insertion of modeling calls.
-- While selecting, render the operation input and highlight hovered/selected
-  original edges with high-contrast screen-space lines. For an applied edge
-  modification, render the result as the primary solid with a weak input
-  outline and emphasized modified input edges.
+- While selecting, render the applied operation result as the primary solid and
+  retain every original input edge at its pre-operation position as a
+  hoverable/toggleable guide. Recompile the temporary result as the selected
+  set changes without writing source. Outside selection, keep the weaker
+  before/after comparison for an applied edge modification.
 - Make deselection reversible at both levels: toggle individual edges, clear
   the set, or cancel the whole session without changing source.
 - Keep the contextual selection panel vertically ordered and stable under

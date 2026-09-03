@@ -103,6 +103,9 @@ export type EdgeSelectionEvent =
 
 type EdgeSelectionState = {
   occurrenceKey: string;
+  mesh: RenderMesh;
+  guide: THREE.Group;
+  pickObject: THREE.LineSegments;
   selectedEdgeIds: Set<EdgeId>;
   hoveredEdgeId?: EdgeId;
 };
@@ -141,6 +144,7 @@ export class ModelViewport {
   private selectionHelper: THREE.BoxHelper | null = null;
   private edgeSelection?: EdgeSelectionState;
   private edgeSelectionOverlay?: THREE.Group;
+  private edgeSelectionResultPreview?: THREE.Object3D;
   private highlightedTargetId?: string;
   private highlightedOccurrenceKeys = new Set<string>();
   private selectionEmphasized = true;
@@ -489,19 +493,30 @@ export class ModelViewport {
 
   beginEdgeSelection(
     occurrenceKey: string,
+    inputNodeId: string,
     initialEdgeIds: readonly EdgeId[] = [],
   ): readonly EdgeId[] {
     const occurrence = this.occurrences.get(occurrenceKey);
-    if (occurrence?.node.kind !== 'solid' || !occurrence.node.mesh) {
-      throw new Error('Edge selection requires a rendered solid.');
+    const input = this.module?.objects.get(inputNodeId);
+    if (
+      occurrence?.node.kind !== 'solid' ||
+      input?.kind !== 'solid' ||
+      !input.mesh
+    ) {
+      throw new Error('Edge selection requires an operation input solid.');
     }
-    const edgeIds = uniqueEdgeIds(occurrence.node.mesh);
+    const edgeIds = uniqueEdgeIds(input.mesh);
     if (edgeIds.length === 0) {
-      throw new Error('The selected solid has no selectable edges.');
+      throw new Error('The operation input has no selectable edges.');
     }
     this.clearEdgeSelection();
+    const {guide, pickObject} = createEdgeSelectionGuide(input, input.mesh);
+    this.decorationRoot.add(guide);
     this.edgeSelection = {
       occurrenceKey,
+      mesh: input.mesh,
+      guide,
+      pickObject,
       selectedEdgeIds: new Set(initialEdgeIds),
     };
     this.raycaster.params.Line.threshold = 1.5;
@@ -510,6 +525,36 @@ export class ModelViewport {
     this.updatePositionGizmo();
     this.rebuildEdgeSelectionOverlay();
     return edgeIds;
+  }
+
+  setEdgeSelectionResultPreview(node: ModelSnapshotObject): void {
+    const selection = this.edgeSelection;
+    const occurrence = selection
+      ? this.occurrences.get(selection.occurrenceKey)
+      : undefined;
+    if (!selection || !occurrence || node.kind !== 'solid' || !node.mesh) {
+      throw new Error('Edge selection preview requires a rendered solid.');
+    }
+    this.clearEdgeSelectionResultPreview();
+    occurrence.object.visible = false;
+    const preview = createThreeObject(node);
+    preview.name = `${node.name} (edge selection preview)`;
+    applyNodeTransform(preview, node);
+    this.root.add(preview);
+    this.edgeSelectionResultPreview = preview;
+  }
+
+  clearEdgeSelectionResultPreview(): void {
+    if (this.edgeSelectionResultPreview) {
+      this.edgeSelectionResultPreview.removeFromParent();
+      disposeObject(this.edgeSelectionResultPreview);
+      this.edgeSelectionResultPreview = undefined;
+    }
+    const selection = this.edgeSelection;
+    const occurrence = selection
+      ? this.occurrences.get(selection.occurrenceKey)
+      : undefined;
+    if (occurrence) occurrence.object.visible = true;
   }
 
   endEdgeSelection(): void {
@@ -1219,15 +1264,11 @@ export class ModelViewport {
   private rebuildEdgeSelectionOverlay(): void {
     this.clearEdgeSelectionOverlay();
     const selection = this.edgeSelection;
-    const occurrence = selection
-      ? this.occurrences.get(selection.occurrenceKey)
-      : undefined;
-    const mesh = occurrence?.node.mesh;
-    if (!selection || !occurrence || !mesh) return;
+    if (!selection) return;
 
     const overlay = new THREE.Group();
     const selectedPositions = edgeSelectionPositions(
-      mesh,
+      selection.mesh,
       selection.selectedEdgeIds,
     );
     if (selectedPositions) {
@@ -1244,7 +1285,7 @@ export class ModelViewport {
     }
     if (selection.hoveredEdgeId !== undefined) {
       const hoverPositions = edgeSelectionPositions(
-        mesh,
+        selection.mesh,
         new Set([selection.hoveredEdgeId]),
       );
       if (hoverPositions) {
@@ -1260,12 +1301,17 @@ export class ModelViewport {
         );
       }
     }
-    occurrence.object.add(overlay);
+    selection.guide.add(overlay);
     this.edgeSelectionOverlay = overlay;
   }
 
   private clearEdgeSelection(): void {
+    this.clearEdgeSelectionResultPreview();
     this.clearEdgeSelectionOverlay();
+    if (this.edgeSelection) {
+      this.edgeSelection.guide.removeFromParent();
+      disposeObject(this.edgeSelection.guide);
+    }
     this.edgeSelection = undefined;
     this.raycaster.params.Line.threshold = 1;
     this.renderer.domElement.classList.remove('edge-selection-active');
@@ -1280,23 +1326,10 @@ export class ModelViewport {
 
   private pickEdge(event: PointerEvent): EdgeId | undefined {
     const selection = this.edgeSelection;
-    const occurrence = selection
-      ? this.occurrences.get(selection.occurrenceKey)
-      : undefined;
-    if (!selection || !occurrence) return undefined;
+    if (!selection) return undefined;
     this.prepareRaycaster(event);
-    const hits = this.raycaster.intersectObject(occurrence.object, true);
-    const surfaceDistance = hits.find(
-      hit => hit.object instanceof THREE.Mesh,
-    )?.distance;
+    const hits = this.raycaster.intersectObject(selection.pickObject);
     for (const hit of hits) {
-      if (
-        surfaceDistance !== undefined &&
-        hit.distance >
-          surfaceDistance + this.raycaster.params.Line.threshold * 1.5
-      ) {
-        continue;
-      }
       const edgeId = edgeIdFromIntersection(hit);
       if (edgeId !== undefined) return edgeId;
     }
@@ -1721,6 +1754,31 @@ function createThreeObject(node: ModelSnapshotObject): THREE.Object3D {
   }
 
   return container;
+}
+
+function createEdgeSelectionGuide(
+  node: ModelSnapshotObject,
+  mesh: RenderMesh,
+): Readonly<{guide: THREE.Group; pickObject: THREE.LineSegments}> {
+  const guide = new THREE.Group();
+  guide.name = `${node.name} (selectable input edges)`;
+  applyNodeTransform(guide, node);
+  const geometry = createEdgeGeometry(mesh);
+  if (!geometry) {
+    throw new Error('The operation input has no renderable edges.');
+  }
+  const material = new THREE.LineBasicMaterial({
+    color: '#aeb7a8',
+    transparent: true,
+    opacity: 0.58,
+    depthTest: false,
+    depthWrite: false,
+  });
+  const pickObject = new THREE.LineSegments(geometry, material);
+  pickObject.userData.edgeGroups = mesh.edgeGroups;
+  pickObject.renderOrder = 27;
+  guide.add(pickObject);
+  return {guide, pickObject};
 }
 
 function createMeshDecorationObject(

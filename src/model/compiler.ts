@@ -45,6 +45,7 @@ export type SourceTargetEvaluation = Readonly<{
   }>;
   selection?: Readonly<{
     kind: 'edge';
+    inputNodeId: string;
     ids: readonly EdgeId[];
   }>;
 }>;
@@ -1320,10 +1321,14 @@ function buildSourceTargets(
           return operation && selection
             ? [
                 {
-                  nodeIds: [selection.inputNodeId],
+                  nodeIds: [operation.outputNodeId],
                   operationId: operation.id,
                   contextId: trace.contextId,
-                  selection: {kind: 'edge', ids: selection.ids},
+                  selection: {
+                    kind: 'edge',
+                    inputNodeId: selection.inputNodeId,
+                    ids: selection.ids,
+                  },
                 },
               ]
             : [];

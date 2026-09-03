@@ -322,6 +322,7 @@ const expandedCatalogIds = new Set<string>();
 type EdgeSelectionTool = {
   targetId: string;
   evaluationIndex: number;
+  contextId: string;
   operation: 'fillet' | 'chamfer';
   sourceRef: SourceRef;
   occurrenceKey: string;
@@ -330,6 +331,9 @@ type EdgeSelectionTool = {
   selectedEdgeIds: readonly EdgeId[];
   session: ToolSession;
   interruptedCompile: boolean;
+  previewRevision: number;
+  previewTimer?: number;
+  previewCompiling: boolean;
 };
 
 const viewport = new ModelViewport(viewportHost, {
@@ -1482,6 +1486,8 @@ function syncEdgeSelectionTool(): void {
     scope.evaluationIndex,
     operation,
     scope.target.sourceRef,
+    scope.evaluation.contextId,
+    selection.inputNodeId,
     selection.ids,
     occurrence,
   );
@@ -1492,6 +1498,8 @@ function startEdgeSelection(
   evaluationIndex: number,
   operation: 'fillet' | 'chamfer',
   sourceRef: SourceRef,
+  contextId: string,
+  inputNodeId: string,
   initialEdgeIds: readonly EdgeId[],
   occurrence: Occurrence,
 ): void {
@@ -1502,6 +1510,7 @@ function startEdgeSelection(
   try {
     availableEdgeIds = viewport.beginEdgeSelection(
       occurrence.key,
+      inputNodeId,
       initialEdgeIds,
     );
   } catch (error) {
@@ -1512,6 +1521,7 @@ function startEdgeSelection(
   edgeSelectionTool = {
     targetId,
     evaluationIndex,
+    contextId,
     operation,
     sourceRef,
     occurrenceKey: occurrence.key,
@@ -1522,6 +1532,8 @@ function startEdgeSelection(
       `viewport.edge-selection:${sourceRef.file}:${sourceRef.start}:${sourceRef.end}`,
     ),
     interruptedCompile,
+    previewRevision: 0,
+    previewCompiling: false,
   };
   sourceEditPopover.dismiss();
   errorBar.hidden = true;
@@ -1534,6 +1546,7 @@ function clearSelectedEdges(): void {
   tool.selectedEdgeIds = [];
   viewport.clearSelectedEdges();
   updateEdgeSelectionToolbar(tool);
+  scheduleEdgeSelectionResultPreview(tool);
 }
 
 function updateEdgeSelectionToolbar(tool: EdgeSelectionTool): void {
@@ -1558,6 +1571,7 @@ function handleEdgeSelection(event: EdgeSelectionEvent): void {
   if (event.kind === 'hover') return;
   tool.selectedEdgeIds = event.selectedEdgeIds;
   updateEdgeSelectionToolbar(tool);
+  scheduleEdgeSelectionResultPreview(tool);
 }
 
 function commitEdgeSelectionTool(): void {
@@ -1565,6 +1579,7 @@ function commitEdgeSelectionTool(): void {
   if (!tool) return;
   if (sameEdgeIds(tool.selectedEdgeIds, tool.initialEdgeIds)) return;
   const intent = edgeSelectionIntent(tool);
+  stopEdgeSelectionResultPreview(tool);
   edgeSelectionTool = undefined;
   viewport.endEdgeSelection();
   edgeSelectionToolbar.hidden = true;
@@ -1577,12 +1592,107 @@ function commitEdgeSelectionTool(): void {
 function cancelEdgeSelectionTool(updateViewport = true): boolean {
   const tool = edgeSelectionTool;
   if (!tool) return false;
+  stopEdgeSelectionResultPreview(tool);
   edgeSelectionTool = undefined;
   tool.session.cancel();
   if (updateViewport) viewport.endEdgeSelection();
   edgeSelectionToolbar.hidden = true;
   resumeCompileAfterTool(tool.interruptedCompile);
   return true;
+}
+
+function scheduleEdgeSelectionResultPreview(tool: EdgeSelectionTool): void {
+  tool.previewRevision += 1;
+  window.clearTimeout(tool.previewTimer);
+  tool.previewTimer = undefined;
+  if (tool.previewCompiling) {
+    compiler.cancel();
+    tool.previewCompiling = false;
+  }
+  errorBar.hidden = true;
+  if (sameEdgeIds(tool.selectedEdgeIds, tool.initialEdgeIds)) {
+    viewport.clearEdgeSelectionResultPreview();
+    hideViewportProgress();
+    return;
+  }
+
+  const resolution = toolEngine.resolve(
+    tool.session.toolId,
+    edgeSelectionIntent(tool),
+  );
+  if (resolution.status !== 'ready') {
+    showToolIssue(resolution.reason);
+    return;
+  }
+  const project = codeEditor.projectWithSourceEdits(resolution.plan.edits);
+  if (!project) {
+    showToolIssue('The edge selection no longer maps to the current source.');
+    return;
+  }
+  const revision = tool.previewRevision;
+  tool.previewTimer = window.setTimeout(() => {
+    tool.previewTimer = undefined;
+    void runEdgeSelectionResultPreview(tool, project, revision);
+  }, 140);
+}
+
+async function runEdgeSelectionResultPreview(
+  tool: EdgeSelectionTool,
+  project: ModelProject,
+  revision: number,
+): Promise<void> {
+  if (edgeSelectionTool !== tool || tool.previewRevision !== revision) return;
+  tool.previewCompiling = true;
+  showViewportProgress(`Previewing ${edgeOperationLabel(tool.operation)}`);
+  try {
+    const module = await compiler.compile(
+      project,
+      codeEditor.currentFile(),
+      selectedDesignContextId,
+    );
+    if (edgeSelectionTool !== tool || tool.previewRevision !== revision) return;
+    const target = module.sourceTargets.find(
+      candidate => candidate.id === tool.targetId,
+    );
+    const evaluation =
+      target?.evaluations.find(
+        candidate => candidate.contextId === tool.contextId,
+      ) ?? target?.evaluations[tool.evaluationIndex];
+    const result = evaluation?.nodeIds
+      .map(nodeId => module.objects.get(nodeId))
+      .find(node => node?.kind === 'solid' && node.mesh);
+    if (!result) {
+      throw new Error('The edge operation preview produced no solid result.');
+    }
+    viewport.setEdgeSelectionResultPreview(result);
+    errorBar.hidden = true;
+  } catch (error) {
+    if (edgeSelectionTool !== tool || tool.previewRevision !== revision) return;
+    const diagnostic =
+      error instanceof ModelDiagnosticError ? error.diagnostic : undefined;
+    showToolIssue(
+      diagnostic
+        ? [diagnostic.summary, diagnostic.details].filter(Boolean).join('\n')
+        : error instanceof Error
+          ? error.message
+          : String(error),
+    );
+  } finally {
+    if (edgeSelectionTool === tool && tool.previewRevision === revision) {
+      tool.previewCompiling = false;
+      hideViewportProgress();
+    }
+  }
+}
+
+function stopEdgeSelectionResultPreview(tool: EdgeSelectionTool): void {
+  tool.previewRevision += 1;
+  window.clearTimeout(tool.previewTimer);
+  tool.previewTimer = undefined;
+  if (tool.previewCompiling) compiler.cancel();
+  tool.previewCompiling = false;
+  viewport.clearEdgeSelectionResultPreview();
+  hideViewportProgress();
 }
 
 function edgeSelectionIntent(tool: EdgeSelectionTool): ToolIntent {

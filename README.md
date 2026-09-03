@@ -20,7 +20,7 @@
 - primitive、约束定位、布尔运算、圆角、倒角、棱柱、圆台和螺纹由 OCCT B-Rep 计算。
 - Worker 将 B-Rep 三角化为 surface、法线和拓扑边线供 Three.js 渲染。
 - 实体边使用模型内稳定的数字 ID；派生操作保留可一一追踪的旧 ID，新边递增分配且不复用已消失的 ID。
-- 用户手写 `fillet(radius, edgeIds)` 或 `chamfer(distance, edgeIds)` 后，光标进入直接数字数组即开启 viewport 选边；已有 ID 会预先选中，确认后只把新集合写回该数组。
+- 用户手写 `fillet(radius, edgeIds)` 或 `chamfer(distance, edgeIds)` 后，光标进入直接数字数组即开启 viewport 选边；viewport 以当前边集合的操作结果为主体，同时在原位置保留可 hover、可 toggle 的输入边。已有 ID 会预先选中，切换时临时重编译结果，确认后才把新集合写回该数组。
 - 已生效的 fillet/chamfer 源码上下文以结果实体为主，并叠加弱化的操作前轮廓和被修改的原边，便于比较前后拓扑。
 - 点击模型定位源码；移动光标会独立渲染对应的运行时模型节点。
 - 同一源码表达式产生多个对象时，源码节点预览会同时显示这些对象。
