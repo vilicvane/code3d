@@ -35,6 +35,7 @@ export type Occurrence = Readonly<{
   object: THREE.Object3D;
   depth: number;
   view: 'model' | 'source';
+  operationRole?: ModelOperationInputRole;
 }>;
 
 type SourceViewTarget = Readonly<{
@@ -124,6 +125,7 @@ const boxCornerPairs = [
 const boxCornerFraction = 0.18;
 const symbolLineWidth = 1;
 const interactiveLineWidth = 2;
+const toolSurfaceOpacity = 0.22;
 
 class CornerBoxHelper extends THREE.LineSegments<
   THREE.BufferGeometry,
@@ -732,7 +734,10 @@ export class ModelViewport {
         .map(occurrence => {
           const decorationObject =
             decoration.kind === 'surface'
-              ? createSurfaceDecorationObject(decoration)
+              ? createSurfaceDecorationObject(
+                  decoration,
+                  decoration.operationRole ?? occurrence.operationRole,
+                )
               : createAnchorDecorationObject(decoration);
           const object = new THREE.Group();
           object.matrixAutoUpdate = false;
@@ -823,17 +828,26 @@ export class ModelViewport {
     key: string,
     depth: number,
     view: Occurrence['view'],
+    operationRole?: ModelOperationInputRole,
   ): THREE.Object3D {
     const object = createThreeObject(node);
     object.name = node.name;
     object.userData.selectionKey = key;
     applyNodeTransform(object, node);
 
-    const occurrence = {key, node, object, depth, view};
+    const occurrence = {key, node, object, depth, view, operationRole};
     this.occurrences.set(key, occurrence);
 
     node.children.forEach((child, index) => {
-      object.add(this.buildObject(child, `${key}/${index}`, depth + 1, view));
+      object.add(
+        this.buildObject(
+          child,
+          `${key}/${index}`,
+          depth + 1,
+          view,
+          operationRole,
+        ),
+      );
     });
 
     return object;
@@ -894,8 +908,19 @@ export class ModelViewport {
       );
     });
     focusNodes.forEach((node, index) => {
-      const object = this.buildObject(node, `source/${index}`, 1, 'source');
-      if (layeredScene) makeFocusObjectTranslucent(object);
+      const operationRole = sourceOperationRole(evaluation, node.nodeId);
+      const object = this.buildObject(
+        node,
+        `source/${index}`,
+        1,
+        'source',
+        operationRole,
+      );
+      if (operationRole === 'tool') {
+        makeToolObjectTranslucent(object);
+      } else if (layeredScene) {
+        makeFocusObjectTranslucent(object);
+      }
       this.root.add(object);
     });
     this.renderSourceDecorations(this.module!, target, evaluation);
@@ -1739,6 +1764,18 @@ function isCompositionRole(role: ModelOperationInputRole | undefined): boolean {
   );
 }
 
+function sourceOperationRole(
+  evaluation: SourceTargetEvaluation,
+  nodeId: string,
+): ModelOperationInputRole | undefined {
+  const input = evaluation.operationInput;
+  if (!input) return undefined;
+  const sourceNodeIds = evaluation.constraintSourceNodeId
+    ? [evaluation.constraintSourceNodeId]
+    : evaluation.nodeIds;
+  return sourceNodeIds.includes(nodeId) ? input.role : undefined;
+}
+
 function positionOnlyTargets(
   parameters: readonly ParameterUsage[],
 ): Set<string> {
@@ -1856,6 +1893,7 @@ function createMeshDecorationObject(
     decoration.id,
     decoration.mesh,
     decoration.appearance,
+    decoration.operationRole,
   );
   container.userData.decoration = decoration;
   applyTransform(container, decoration.transform);
@@ -1890,11 +1928,13 @@ function createEdgeDecorationObject(
 
 function createSurfaceDecorationObject(
   decoration: Extract<ViewportDecoration, {kind: 'surface'}>,
+  operationRole?: ModelOperationInputRole,
 ): THREE.Object3D {
   const container = createDecoratedMesh(
     decoration.id,
     decoration.mesh,
     decoration.appearance,
+    operationRole,
   );
   container.userData.decoration = decoration;
   return container;
@@ -1904,15 +1944,20 @@ function createDecoratedMesh(
   id: string,
   mesh: RenderMesh,
   appearance: ViewportDecoration['appearance'],
+  operationRole?: ModelOperationInputRole,
 ): THREE.Object3D {
   const container = new THREE.Group();
   container.name = id;
 
   const depthBias = appearance.depthBias ?? 0;
+  const opacity =
+    operationRole === 'tool'
+      ? Math.min(appearance.opacity ?? 1, toolSurfaceOpacity)
+      : (appearance.opacity ?? 1);
   const materialOptions = {
     color: appearance.color,
-    transparent: (appearance.opacity ?? 1) < 1,
-    opacity: appearance.opacity ?? 1,
+    transparent: opacity < 1,
+    opacity,
     depthTest: appearance.depthTest ?? true,
     depthWrite: false,
     polygonOffset: depthBias !== 0,
@@ -2282,7 +2327,18 @@ function dimObject(object: THREE.Object3D): void {
   });
 }
 
+function makeToolObjectTranslucent(object: THREE.Object3D): void {
+  makeObjectSurfacesTranslucent(object, toolSurfaceOpacity);
+}
+
 function makeFocusObjectTranslucent(object: THREE.Object3D): void {
+  makeObjectSurfacesTranslucent(object, 0.82);
+}
+
+function makeObjectSurfacesTranslucent(
+  object: THREE.Object3D,
+  opacity: number,
+): void {
   object.traverse(child => {
     if (child instanceof THREE.Mesh) {
       const materials = Array.isArray(child.material)
@@ -2291,7 +2347,7 @@ function makeFocusObjectTranslucent(object: THREE.Object3D): void {
       materials.forEach(material => {
         if (material instanceof THREE.MeshStandardMaterial) {
           material.transparent = true;
-          material.opacity = 0.82;
+          material.opacity = opacity;
           material.depthWrite = false;
         }
       });

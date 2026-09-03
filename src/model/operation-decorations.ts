@@ -73,9 +73,7 @@ const decorations: SourceDecorationProvider['decorations'] = ({
   const operationKind = sourceOperation.kind;
   const inputRole = sourceOperation.role;
   const focusedNodeIds = new Set(
-    evaluation.constraintSourceNodeId
-      ? [evaluation.constraintSourceNodeId]
-      : evaluation.nodeIds,
+    evaluation.operationInput?.nodeIds ?? evaluation.nodeIds,
   );
   const operation = module.operations.get(evaluation.operationId)!;
   const output = module.objects.get(operation.outputNodeId)!;
@@ -91,6 +89,7 @@ const decorations: SourceDecorationProvider['decorations'] = ({
     .map((region, index) => ({
       kind: 'mesh' as const,
       id: `${operation.id}:${region.kind}:${region.inputNodeId}:${index}`,
+      operationRole: inputRole,
       mesh: region.mesh,
       transform: output.transform,
       appearance:
@@ -158,11 +157,7 @@ function booleanInputContext(
     ? module.operations.get(evaluation.operationId)
     : undefined;
   const operationKind = runtimeOperation?.kind ?? target.operation?.kind;
-  const inputRole = evaluation.constraintSourceNodeId
-    ? runtimeOperation?.inputs.find(
-        input => input.nodeId === evaluation.constraintSourceNodeId,
-      )?.role
-    : target.operation?.role;
+  const inputRole = evaluation.operationInput?.role ?? target.operation?.role;
   return (operationKind === 'cut' || operationKind === 'union') &&
     (inputRole === 'receiver' ||
       inputRole === 'tool' ||

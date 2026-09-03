@@ -35,6 +35,10 @@ import {
 export type SourceTargetEvaluation = Readonly<{
   nodeIds: readonly string[];
   operationId?: string;
+  operationInput?: Readonly<{
+    role: ModelOperationInputRole;
+    nodeIds: readonly string[];
+  }>;
   constraintId?: string;
   constraintSourceNodeId?: string;
   contextId: string;
@@ -1240,6 +1244,12 @@ function buildSourceTargets(
   operations: ReadonlyMap<string, ModelOperationSnapshot>,
   designArguments: readonly ParsedDesignArgumentContext[],
 ): SourceTarget[] {
+  const operationsByOutputNodeId = new Map(
+    [...operations.values()].map(operation => [
+      operation.outputNodeId,
+      operation,
+    ]),
+  );
   const valueTargets = [...sourceValueTraces.values()].map(trace => {
     const evaluations = trace.evaluations.map(({objects, contextId}) => {
       const nodeIds = objects.map(object => object.nodeId);
@@ -1354,15 +1364,27 @@ function buildSourceTargets(
       evaluation => {
         const consumers = operationInputTargets.flatMap(target =>
           isCompositionInputRole(target.role)
-            ? target.evaluations.filter(candidate =>
-                candidate.objects.includes(evaluation.source),
-              )
+            ? target.evaluations
+                .filter(candidate =>
+                  candidate.objects.some(object =>
+                    sourceLineageContains(
+                      operationsByOutputNodeId,
+                      object.nodeId,
+                      evaluation.source.nodeId,
+                    ),
+                  ),
+                )
+                .map(input => ({input, role: target.role}))
             : [],
         );
         return consumers.length > 0
           ? consumers.map(consumer => ({
               nodeIds: uniqueNodeIds(evaluation.source, evaluation.target),
-              operationId: consumer.operationId,
+              operationId: consumer.input.operationId,
+              operationInput: {
+                role: consumer.role,
+                nodeIds: consumer.input.objects.map(object => object.nodeId),
+              },
               constraintId: evaluation.constraintId,
               constraintSourceNodeId: evaluation.source.nodeId,
               contextId: evaluation.contextId,
@@ -1471,6 +1493,10 @@ function buildSourceTargets(
           evaluations: target.evaluations.map(evaluation => ({
             nodeIds: evaluation.objects.map(object => object.nodeId),
             operationId: evaluation.operationId,
+            operationInput: {
+              role: target.role,
+              nodeIds: evaluation.objects.map(object => object.nodeId),
+            },
             contextId: evaluation.contextId,
           })),
           contextTargetIds: operationInputTargets
@@ -1486,6 +1512,21 @@ function buildSourceTargets(
         }) satisfies SourceTarget,
     ),
   ];
+}
+
+function sourceLineageContains(
+  operationsByOutputNodeId: ReadonlyMap<string, ModelOperationSnapshot>,
+  nodeId: string,
+  sourceNodeId: string,
+): boolean {
+  let currentNodeId: string | undefined = nodeId;
+  while (currentNodeId) {
+    if (currentNodeId === sourceNodeId) return true;
+    currentNodeId = operationsByOutputNodeId
+      .get(currentNodeId)
+      ?.inputs.find(input => input.role === 'source')?.nodeId;
+  }
+  return false;
 }
 
 function uniqueNodeIds(...models: readonly ModelObject[]): string[] {

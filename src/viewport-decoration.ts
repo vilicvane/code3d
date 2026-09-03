@@ -3,7 +3,13 @@ import type {
   SourceTarget,
   SourceTargetEvaluation,
 } from './model/compiler';
-import type {EdgeId, ElementKind, RenderMesh, Transform} from './model/runtime';
+import type {
+  EdgeId,
+  ElementKind,
+  ModelOperationInputRole,
+  RenderMesh,
+  Transform,
+} from './model/runtime';
 
 export type ViewportDecorationAppearance = Readonly<{
   color: string;
@@ -18,31 +24,36 @@ export type ViewportDecorationAppearance = Readonly<{
   shading?: 'lit' | 'unlit';
 }>;
 
-export type ViewportMeshDecoration = Readonly<{
-  kind: 'mesh';
+type ViewportDecorationBase = Readonly<{
   id: string;
-  mesh: RenderMesh;
-  transform: Transform;
-  appearance: ViewportDecorationAppearance;
+  operationRole?: ModelOperationInputRole;
 }>;
 
-export type ViewportEdgeDecoration = Readonly<{
-  kind: 'edges';
-  id: string;
-  mesh: RenderMesh;
-  edgeIds?: readonly EdgeId[];
-  transform: Transform;
-  appearance: ViewportDecorationAppearance;
-}>;
+export type ViewportMeshDecoration = ViewportDecorationBase &
+  Readonly<{
+    kind: 'mesh';
+    mesh: RenderMesh;
+    transform: Transform;
+    appearance: ViewportDecorationAppearance;
+  }>;
 
-type ViewportAnchorDecorationBase = Readonly<{
-  kind: 'anchor';
-  id: string;
-  nodeId: string;
-  transform: Transform;
-  markerSize: number;
-  appearance: ViewportDecorationAppearance;
-}>;
+export type ViewportEdgeDecoration = ViewportDecorationBase &
+  Readonly<{
+    kind: 'edges';
+    mesh: RenderMesh;
+    edgeIds?: readonly EdgeId[];
+    transform: Transform;
+    appearance: ViewportDecorationAppearance;
+  }>;
+
+type ViewportAnchorDecorationBase = ViewportDecorationBase &
+  Readonly<{
+    kind: 'anchor';
+    nodeId: string;
+    transform: Transform;
+    markerSize: number;
+    appearance: ViewportDecorationAppearance;
+  }>;
 
 export type ViewportAnchorDecoration =
   | (ViewportAnchorDecorationBase &
@@ -55,13 +66,13 @@ export type ViewportAnchorDecoration =
         elementKind: Exclude<ElementKind, 'line'>;
       }>);
 
-export type ViewportSurfaceDecoration = Readonly<{
-  kind: 'surface';
-  id: string;
-  nodeId: string;
-  mesh: RenderMesh;
-  appearance: ViewportDecorationAppearance;
-}>;
+export type ViewportSurfaceDecoration = ViewportDecorationBase &
+  Readonly<{
+    kind: 'surface';
+    nodeId: string;
+    mesh: RenderMesh;
+    appearance: ViewportDecorationAppearance;
+  }>;
 
 export type ViewportDecoration =
   | ViewportMeshDecoration
