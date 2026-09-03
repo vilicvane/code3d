@@ -5,7 +5,11 @@ import {
   type ProjectEditorChange,
 } from './editor';
 import {ModelCompilerClient} from './model/compiler-client';
-import type {ModelModule, ObjectCatalogEntry} from './model/compiler';
+import type {
+  DesignArgumentContext,
+  ModelModule,
+  ObjectCatalogEntry,
+} from './model/compiler';
 import {
   defaultProject,
   projectWithLegacySource,
@@ -140,13 +144,31 @@ app.innerHTML = `
         <div class="viewport-host" id="viewport-host">
           <div class="viewport-hint">Drag to orbit · Scroll to zoom · Click an object · Drag a gizmo</div>
           <div class="tool-status" id="tool-status" hidden></div>
-          <aside class="dock-panel inspector-panel" id="inspector-panel" aria-label="Object properties">
-            <button class="dock-panel-handle" id="inspector-handle" type="button">
-              <span>PROPERTIES</span>
-              <kbd data-dock-shortcut></kbd>
-            </button>
-            <div class="dock-panel-body inspector" id="inspector" hidden></div>
-          </aside>
+          <div class="viewport-dock-panels">
+            <aside class="dock-panel design-arguments-panel" id="design-arguments-panel" aria-label="Design arguments">
+              <button class="dock-panel-handle" id="design-arguments-handle" type="button">
+                <span>ARGUMENTS</span>
+                <span class="dock-panel-handle-meta">
+                  <span id="design-arguments-count">0</span>
+                  <kbd data-dock-shortcut></kbd>
+                </span>
+              </button>
+              <div class="dock-panel-body design-arguments" id="design-arguments" hidden>
+                <div class="design-arguments-heading">
+                  <span>FUNCTION</span>
+                  <strong id="design-arguments-function">No function context</strong>
+                </div>
+                <div class="design-arguments-options" id="design-arguments-options"></div>
+              </div>
+            </aside>
+            <aside class="dock-panel inspector-panel" id="inspector-panel" aria-label="Object properties">
+              <button class="dock-panel-handle" id="inspector-handle" type="button">
+                <span>PROPERTIES</span>
+                <kbd data-dock-shortcut></kbd>
+              </button>
+              <div class="dock-panel-body inspector" id="inspector" hidden></div>
+            </aside>
+          </div>
         </div>
       </section>
     </main>
@@ -169,6 +191,9 @@ const scopeList = requiredElement('scope-list');
 const objectCatalogList = requiredElement('object-catalog-list');
 const objectCatalogCount = requiredElement('object-catalog-count');
 const inspector = requiredElement('inspector');
+const designArgumentsCount = requiredElement('design-arguments-count');
+const designArgumentsFunction = requiredElement('design-arguments-function');
+const designArgumentsOptions = requiredElement('design-arguments-options');
 const toolStatus = requiredElement('tool-status');
 const projectTree = requiredElement('project-tree');
 const editorTabs = requiredElement('editor-tabs');
@@ -196,6 +221,12 @@ dockPanels.register({
   body: inspector,
   shortcut: {code: 'Digit2', label: 'Alt 2', altKey: true},
 });
+dockPanels.register({
+  root: requiredElement('design-arguments-panel'),
+  handle: requiredElement<HTMLButtonElement>('design-arguments-handle'),
+  body: requiredElement('design-arguments'),
+  shortcut: {code: 'Digit3', label: 'Alt 3', altKey: true},
+});
 
 const codeEditor = new CodeEditor(
   editorHost,
@@ -214,6 +245,7 @@ let positionToolSession: ToolSession | undefined;
 let contextFilePath: string | undefined;
 let preferredEvaluationContextId: string | undefined;
 let selectedDesignContextId: string | undefined;
+let compilingDesignContextId: string | undefined;
 let applyingFileRoute = false;
 const expandedCatalogIds = new Set<string>();
 
@@ -275,7 +307,7 @@ codeEditor.onCursorOffset(({file, offset}) => {
   if (occurrence) {
     selectOccurrence(occurrence, false);
   } else if (currentModule) {
-    renderScopes(currentModule);
+    renderContextControls(currentModule);
   }
 });
 codeEditor.onActiveFile((path, reason) => {
@@ -507,7 +539,12 @@ async function runModel(
   window.clearTimeout(outlinePreviewTimer);
   viewport.restoreOutlinePreview();
   const revision = ++runRevision;
-  setRunState('running', 'Compiling');
+  compilingDesignContextId = designContextId;
+  if (designContextId) {
+    renderCurrentPanels();
+  } else {
+    setRunState('running', 'Compiling');
+  }
   errorBar.hidden = true;
 
   try {
@@ -522,6 +559,7 @@ async function runModel(
     }
     currentModule = nextModule;
     selectedDesignContextId = nextModule.activeDesignContextId;
+    compilingDesignContextId = undefined;
     if (
       preferredEvaluationContextId === designContextId &&
       !nextModule.activeDesignContextId
@@ -561,7 +599,7 @@ async function runModel(
       selectOccurrence(selected, false);
     } else {
       renderInspectorEmpty();
-      renderScopes(currentModule);
+      renderContextControls(currentModule);
     }
     const objectCount = currentModule.fallback
       ? countObjects(currentModule.fallback)
@@ -578,12 +616,19 @@ async function runModel(
     }
     const located = error as Error & {file?: string};
     const message = error instanceof Error ? error.message : String(error);
+    compilingDesignContextId = undefined;
+    renderCurrentPanels();
     setRunState('error', 'Run failed');
     errorBar.textContent = located.file
       ? `${located.file}: ${message}`
       : message;
     errorBar.hidden = false;
   }
+}
+
+function renderContextControls(module: ModelModule): void {
+  renderScopes(module);
+  renderDesignArguments(module);
 }
 
 function renderScopes(module: ModelModule): void {
@@ -593,6 +638,7 @@ function renderScopes(module: ModelModule): void {
       scopeButton(
         'Overview',
         () => {
+          cancelPendingDesignCompile();
           preferredEvaluationContextId = undefined;
           selectedDesignContextId = undefined;
           viewport.selectRoot();
@@ -605,12 +651,7 @@ function renderScopes(module: ModelModule): void {
   }
 
   const sourceEvaluation = viewport.sourceEvaluation();
-  const cursor = codeEditor.cursorSource();
-  const cursorDesignContext = cursor
-    ? designContextAt(module, cursor.file, cursor.offset)
-    : undefined;
-  const functionId =
-    sourceEvaluation?.target.functionId ?? cursorDesignContext?.functionId;
+  const functionId = inspectedFunctionId(module);
   if (!functionId) return;
 
   const contexts = new Map(
@@ -641,22 +682,6 @@ function renderScopes(module: ModelModule): void {
       ),
     );
   });
-
-  module.designArguments
-    .filter(context => context.functionId === functionId)
-    .forEach(context => {
-      scopeList.append(
-        scopeButton(
-          `Arguments · ${context.label}`,
-          () => {
-            if (!selectCompiledEvaluationContext(context.id, true)) {
-              activateDesignContext(context.id);
-            }
-          },
-          sourceEvaluation?.evaluation.contextId === context.id,
-        ),
-      );
-    });
 }
 
 function selectCompiledEvaluationContext(
@@ -664,6 +689,7 @@ function selectCompiledEvaluationContext(
   design: boolean,
 ): boolean {
   if (!viewport.selectEvaluationContext(contextId)) return false;
+  cancelPendingDesignCompile();
   preferredEvaluationContextId = contextId;
   selectedDesignContextId = design ? contextId : undefined;
   const occurrence = viewport.getSelected();
@@ -675,6 +701,12 @@ function activateDesignContext(contextId: string): void {
   preferredEvaluationContextId = contextId;
   selectedDesignContextId = contextId;
   void runModel(contextId);
+}
+
+function cancelPendingDesignCompile(): void {
+  if (!compilingDesignContextId) return;
+  compilingDesignContextId = undefined;
+  runRevision += 1;
 }
 
 function designContextAt(module: ModelModule, file: string, offset: number) {
@@ -691,6 +723,15 @@ function designContextAt(module: ModelModule, file: string, offset: number) {
         left.functionRef.start -
         (right.functionRef.end - right.functionRef.start),
     )[0];
+}
+
+function inspectedFunctionId(module: ModelModule): string | undefined {
+  const sourceFunctionId = viewport.sourceEvaluation()?.target.functionId;
+  if (sourceFunctionId) return sourceFunctionId;
+  const cursor = codeEditor.cursorSource();
+  return cursor
+    ? designContextAt(module, cursor.file, cursor.offset)?.functionId
+    : undefined;
 }
 
 function renderInspectorEmpty(): void {
@@ -896,7 +937,7 @@ function scopeButton(
 
 function selectOccurrence(occurrence: Occurrence, revealSource: boolean): void {
   renderInspector(occurrence);
-  if (currentModule) renderScopes(currentModule);
+  if (currentModule) renderContextControls(currentModule);
 
   if (revealSource) {
     const sourceRef = primarySource(occurrence.node);
@@ -931,6 +972,75 @@ function renderInspector(occurrence: Occurrence): void {
   } else {
     renderLocalInspector(occurrence);
   }
+}
+
+function renderDesignArguments(module: ModelModule): void {
+  const functionId = inspectedFunctionId(module);
+  const contexts = module.designArguments.filter(
+    context => context.functionId === functionId,
+  );
+  designArgumentsCount.textContent = String(contexts.length);
+  designArgumentsFunction.textContent =
+    contexts[0]?.functionName ?? 'No function context';
+  designArgumentsOptions.replaceChildren();
+  if (contexts.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'design-arguments-empty';
+    empty.textContent = 'Select a function with @code3d.arguments.';
+    designArgumentsOptions.append(empty);
+    return;
+  }
+
+  const activeContextId =
+    viewport.sourceEvaluation()?.evaluation.contextId ??
+    selectedDesignContextId;
+  contexts.forEach(context => {
+    const active = context.id === activeContextId;
+    const compiling = context.id === compilingDesignContextId;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'design-argument-option';
+    button.classList.toggle('active', active);
+    button.classList.toggle('compiling', compiling);
+    button.setAttribute('aria-pressed', String(active));
+    button.title = designArgumentCall(context);
+    if (compiling) button.setAttribute('aria-busy', 'true');
+
+    const label = document.createElement('span');
+    label.textContent = designArgumentCall(context);
+    const state = document.createElement('span');
+    state.className = 'design-argument-state';
+    if (compiling) {
+      const spinner = document.createElement('span');
+      spinner.className = 'design-argument-spinner';
+      spinner.setAttribute('aria-hidden', 'true');
+      state.append(spinner, 'COMPILING');
+    } else {
+      state.textContent = active ? 'ACTIVE' : 'VIEW';
+    }
+    button.append(label, state);
+    button.addEventListener('click', () => {
+      if (compilingDesignContextId === context.id) return;
+      if (!selectCompiledEvaluationContext(context.id, true)) {
+        activateDesignContext(context.id);
+      }
+    });
+    designArgumentsOptions.append(button);
+  });
+}
+
+function designArgumentCall(context: DesignArgumentContext): string {
+  return `${context.functionName}(${context.label})`;
+}
+
+function renderCurrentPanels(): void {
+  const occurrence = viewport.getSelected();
+  if (occurrence) {
+    renderInspector(occurrence);
+  } else {
+    renderInspectorEmpty();
+  }
+  if (currentModule) renderContextControls(currentModule);
 }
 
 function renderModelInspector(): void {

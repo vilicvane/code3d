@@ -20,6 +20,8 @@
   source.
 - Context selection follows the caret across traced expressions in the same
   function whenever the selected context evaluates that expression.
+- Design contexts are selected from their own dock panel beside Properties. A
+  context that requires evaluation shows its compile progress on that item.
 - Annotation names are shared by the compiler and editor so recognized tags
   and highlighting cannot diverge.
 - Invalid annotation values produce a source-located diagnostic instead of

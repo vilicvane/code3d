@@ -173,8 +173,8 @@ best defining source.
 - Keep panels collapsed by default and separate panel state from panel content.
 - Share collapsed, transient peek, and pinned behavior across object and
   property panels.
-- Centralize `Alt+1` / `Alt+2`, allow multiple pinned panels, and let `Escape`
-  dismiss only the current transient peek.
+- Centralize `Alt+1` / `Alt+2` / `Alt+3`, allow multiple pinned panels, and let
+  `Escape` dismiss only the current transient peek.
 - Keep a peek open across focus and pointer-driven controls without persisting
   panel state into model source or browser storage.
 
