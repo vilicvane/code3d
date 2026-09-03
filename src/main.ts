@@ -158,17 +158,21 @@ app.innerHTML = `
         <div class="viewport-host" id="viewport-host">
           <div class="viewport-hint">Drag to orbit · Scroll to zoom · Click to select · Double-click active to open source</div>
           <div class="tool-status" id="tool-status" hidden></div>
-          <div class="edge-selection-toolbar" id="edge-selection-toolbar" hidden>
-            <div class="edge-selection-copy">
+          <section class="edge-selection-toolbar" id="edge-selection-toolbar" aria-label="Edge selection" hidden>
+            <header class="edge-selection-header">
               <strong id="edge-selection-title"></strong>
-              <span id="edge-selection-summary"></span>
+              <span id="edge-selection-available"></span>
+            </header>
+            <div class="edge-selection-field">
+              <span>SELECTED EDGES</span>
+              <output id="edge-selection-summary"></output>
             </div>
             <div class="edge-selection-actions">
               <button id="edge-selection-clear" type="button">Clear</button>
               <button id="edge-selection-cancel" type="button">Cancel</button>
               <button class="primary" id="edge-selection-apply" type="button">Apply</button>
             </div>
-          </div>
+          </section>
           <div class="viewport-progress" id="viewport-progress" role="status" aria-live="polite" hidden>
             <span class="viewport-progress-spinner" aria-hidden="true"></span>
             <span id="viewport-progress-label"></span>
@@ -228,6 +232,7 @@ const elementsCount = requiredElement('elements-count');
 const toolStatus = requiredElement('tool-status');
 const edgeSelectionToolbar = requiredElement('edge-selection-toolbar');
 const edgeSelectionTitle = requiredElement('edge-selection-title');
+const edgeSelectionAvailable = requiredElement('edge-selection-available');
 const edgeSelectionSummary = requiredElement('edge-selection-summary');
 const edgeSelectionClear = requiredElement<HTMLButtonElement>(
   'edge-selection-clear',
@@ -320,6 +325,7 @@ type EdgeSelectionTool = {
   sourceRef: SourceRef;
   occurrenceKey: string;
   availableEdgeIds: readonly EdgeId[];
+  initialEdgeIds: readonly EdgeId[];
   selectedEdgeIds: readonly EdgeId[];
   session: ToolSession;
   interruptedCompile: boolean;
@@ -1452,7 +1458,6 @@ function syncEdgeSelectionTool(): void {
   const eligible =
     scope?.target.kind === 'operation-selection' &&
     selection?.kind === 'edge' &&
-    selection.ids.length === 0 &&
     (operation === 'fillet' || operation === 'chamfer') &&
     occurrence?.node.kind === 'solid';
   if (!eligible || !scope || !occurrence) {
@@ -1471,6 +1476,7 @@ function syncEdgeSelectionTool(): void {
     scope.evaluationIndex,
     operation,
     scope.target.sourceRef,
+    selection.ids,
     occurrence,
   );
 }
@@ -1480,6 +1486,7 @@ function startEdgeSelection(
   evaluationIndex: number,
   operation: 'fillet' | 'chamfer',
   sourceRef: SourceRef,
+  initialEdgeIds: readonly EdgeId[],
   occurrence: Occurrence,
 ): void {
   cancelEdgeSelectionTool();
@@ -1487,7 +1494,10 @@ function startEdgeSelection(
   const interruptedCompile = interruptCompileForTool();
   let availableEdgeIds: readonly EdgeId[];
   try {
-    availableEdgeIds = viewport.beginEdgeSelection(occurrence.key);
+    availableEdgeIds = viewport.beginEdgeSelection(
+      occurrence.key,
+      initialEdgeIds,
+    );
   } catch (error) {
     resumeCompileAfterTool(interruptedCompile);
     showToolIssue(error instanceof Error ? error.message : String(error));
@@ -1500,7 +1510,8 @@ function startEdgeSelection(
     sourceRef,
     occurrenceKey: occurrence.key,
     availableEdgeIds,
-    selectedEdgeIds: [],
+    initialEdgeIds: sortedEdgeIds(initialEdgeIds),
+    selectedEdgeIds: sortedEdgeIds(initialEdgeIds),
     session: toolEngine.begin(
       `viewport.edge-selection:${sourceRef.file}:${sourceRef.start}:${sourceRef.end}`,
     ),
@@ -1519,16 +1530,15 @@ function clearSelectedEdges(): void {
   updateEdgeSelectionToolbar(tool);
 }
 
-function updateEdgeSelectionToolbar(
-  tool: EdgeSelectionTool,
-  hoveredEdgeId?: EdgeId,
-): void {
-  edgeSelectionTitle.textContent = `${edgeOperationLabel(tool.operation)} edges`;
-  const hovered =
-    hoveredEdgeId === undefined ? '' : ` · Hover E${hoveredEdgeId}`;
-  edgeSelectionSummary.textContent = `${formatEdgeIds(tool.selectedEdgeIds)} selected${hovered} · ${tool.availableEdgeIds.length} edges · Click selected edges again to remove them`;
+function updateEdgeSelectionToolbar(tool: EdgeSelectionTool): void {
+  edgeSelectionTitle.textContent = edgeOperationLabel(tool.operation);
+  edgeSelectionAvailable.textContent = `${tool.availableEdgeIds.length} AVAILABLE`;
+  edgeSelectionSummary.textContent = formatEdgeIds(tool.selectedEdgeIds);
   edgeSelectionClear.disabled = tool.selectedEdgeIds.length === 0;
-  edgeSelectionApply.disabled = tool.selectedEdgeIds.length === 0;
+  edgeSelectionApply.disabled = sameEdgeIds(
+    tool.selectedEdgeIds,
+    tool.initialEdgeIds,
+  );
   edgeSelectionToolbar.hidden = false;
 }
 
@@ -1539,17 +1549,15 @@ function handleEdgeSelection(event: EdgeSelectionEvent): void {
   }
   const tool = edgeSelectionTool;
   if (!tool) return;
+  if (event.kind === 'hover') return;
   tool.selectedEdgeIds = event.selectedEdgeIds;
-  updateEdgeSelectionToolbar(tool, event.edgeId);
+  updateEdgeSelectionToolbar(tool);
 }
 
 function commitEdgeSelectionTool(): void {
   const tool = edgeSelectionTool;
   if (!tool) return;
-  if (tool.selectedEdgeIds.length === 0) {
-    showToolIssue('Select at least one edge.');
-    return;
-  }
+  if (sameEdgeIds(tool.selectedEdgeIds, tool.initialEdgeIds)) return;
   const intent = edgeSelectionIntent(tool);
   edgeSelectionTool = undefined;
   viewport.endEdgeSelection();
@@ -1592,6 +1600,20 @@ function formatEdgeIds(edgeIds: readonly EdgeId[]): string {
   return edgeIds.length > visible.length
     ? `${visible.join(', ')} +${edgeIds.length - visible.length}`
     : visible.join(', ');
+}
+
+function sortedEdgeIds(edgeIds: readonly EdgeId[]): EdgeId[] {
+  return [...edgeIds].sort((left, right) => left - right);
+}
+
+function sameEdgeIds(
+  left: readonly EdgeId[],
+  right: readonly EdgeId[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((edgeId, index) => edgeId === right[index])
+  );
 }
 
 function interruptCompileForTool(): boolean {

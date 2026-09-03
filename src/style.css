@@ -788,11 +788,11 @@ kbd {
   top: 34px;
   left: 14px;
   z-index: 5;
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  max-width: calc(100% - 42px);
-  padding: 9px 10px 9px 12px;
+  display: grid;
+  gap: 12px;
+  width: 248px;
+  max-width: calc(100% - 28px);
+  padding: 12px;
   color: #dfe5ca;
   border: 1px solid #66752c;
   border-radius: 5px;
@@ -805,30 +805,53 @@ kbd {
   display: none;
 }
 
-.edge-selection-copy {
+.edge-selection-header {
   display: grid;
   min-width: 0;
-  gap: 2px;
+  gap: 4px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid #34382c;
   font-family: 'IBM Plex Mono', monospace;
 }
 
-.edge-selection-copy strong {
+.edge-selection-header strong {
   color: var(--acid);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
 }
 
-.edge-selection-copy span {
-  overflow: hidden;
-  color: #aeb4a6;
+.edge-selection-header span,
+.edge-selection-field > span {
+  color: #777d71;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 8px;
+  letter-spacing: 0.1em;
+}
+
+.edge-selection-field {
+  display: grid;
+  gap: 7px;
+}
+
+.edge-selection-field output {
+  display: block;
+  min-height: 32px;
+  max-height: 72px;
+  padding: 8px;
+  overflow: auto;
+  color: #edf3d5;
+  border: 1px solid #34382e;
+  border-radius: 3px;
+  background: #11130f;
+  font-family: 'IBM Plex Mono', monospace;
   font-size: 9px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .edge-selection-actions {
-  display: flex;
-  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
   gap: 5px;
 }
 
@@ -1566,10 +1589,7 @@ kbd {
 
   .edge-selection-toolbar {
     right: 14px;
+    width: auto;
     max-width: none;
-  }
-
-  .edge-selection-copy span {
-    white-space: normal;
   }
 }

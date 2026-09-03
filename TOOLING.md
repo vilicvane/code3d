@@ -132,9 +132,10 @@ Provider 可通过 `previewBehavior` 声明工具预览期间的显示策略。�
 ## 当前接入的工具
 
 viewport 平移 gizmo 在能够唯一追溯参数时产生 `parameter.set`，否则针对已有关系产生
-`relation.offset`。源码中的 `fillet(radius, [])` 和 `chamfer(distance, [])` 则把空数组
-投影为显式 edge-selection source target，选边完成后用 `expression.replace` 只替换该
-数组。工具共享冲突检查、源码事务和 undo 语义。
+`relation.offset`。源码中的 `fillet(radius, edgeIds)` 和
+`chamfer(distance, edgeIds)` 则把直接数字数组投影为显式 edge-selection source
+target，以当前 ID 初始化选择，完成后用 `expression.replace` 只替换该数组。工具共享
+冲突检查、源码事务和 undo 语义。
 
 平移 gizmo 目前遵守以下解析规则：
 
@@ -160,16 +161,17 @@ scope 的 edit plan。
 
 ```text
 expression.replace(
-  target = source ref of [],
+  target = source ref of [2, 5],
   expression = array([number(3), number(7)])
 )
 ```
 
-edge 工具只在 caret 落入 fillet/chamfer 的直接空数组字面量时解释 viewport 点击。
-这时主实体是操作输入，边以模型内稳定数字 ID 显示为 `E3`、`E7`，写回源码时仍是
-普通数字数组 `[3, 7]`；其他时候 viewport 点击继续执行对象/occurrence 选择。再次点击
-已选边会取消该边，工具条可清空集合或放弃整次交互，`Esc` 不修改源码。选中集合按 ID
-排序，空集合不可提交。
+edge 工具只在 caret 落入 fillet/chamfer 的直接纯数字数组字面量时解释 viewport 点击。
+这时主实体是操作输入，数组中的 ID 预先高亮，边以模型内稳定数字 ID 显示为 `E3`、
+`E7`，写回源码时仍是普通数字数组 `[3, 7]`；其他时候 viewport 点击继续执行
+对象/occurrence 选择。再次点击已选边会取消该边，工具条可清空集合或放弃整次交互，
+`Esc` 不修改源码。选中集合按 ID 排序；只有集合发生变化时才可提交，包括把已有集合
+清空为 `[]`。
 
 Resolver 再生成带 source anchor 的编辑计划。当前 prototype 已具备基础表达式替换；
 新增 fillet/chamfer 调用仍由用户手写，不提供 GUI 插入入口。基于临时重编译的结构

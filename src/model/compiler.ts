@@ -1691,7 +1691,7 @@ function edgeSelectionSite(
   const expression = unwrapParenthesizedExpression(argument);
   if (
     !ts.isArrayLiteralExpression(expression) ||
-    expression.elements.length > 0
+    expression.elements.some(element => !ts.isNumericLiteral(element))
   ) {
     return undefined;
   }

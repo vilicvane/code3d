@@ -1,5 +1,8 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {LineMaterial} from 'three/addons/lines/LineMaterial.js';
+import {LineSegments2} from 'three/addons/lines/LineSegments2.js';
+import {LineSegmentsGeometry} from 'three/addons/lines/LineSegmentsGeometry.js';
 import type {
   ModelModule,
   SourceTarget,
@@ -484,7 +487,10 @@ export class ModelViewport {
     return this.occurrences.get(this.selectedKey);
   }
 
-  beginEdgeSelection(occurrenceKey: string): readonly EdgeId[] {
+  beginEdgeSelection(
+    occurrenceKey: string,
+    initialEdgeIds: readonly EdgeId[] = [],
+  ): readonly EdgeId[] {
     const occurrence = this.occurrences.get(occurrenceKey);
     if (occurrence?.node.kind !== 'solid' || !occurrence.node.mesh) {
       throw new Error('Edge selection requires a rendered solid.');
@@ -496,7 +502,7 @@ export class ModelViewport {
     this.clearEdgeSelection();
     this.edgeSelection = {
       occurrenceKey,
-      selectedEdgeIds: new Set(),
+      selectedEdgeIds: new Set(initialEdgeIds),
     };
     this.raycaster.params.Line.threshold = 1.5;
     this.renderer.domElement.classList.add('edge-selection-active');
@@ -1220,38 +1226,42 @@ export class ModelViewport {
     if (!selection || !occurrence || !mesh) return;
 
     const overlay = new THREE.Group();
-    const selectedGeometry = createEdgeSelectionGeometry(
+    const selectedPositions = edgeSelectionPositions(
       mesh,
       selection.selectedEdgeIds,
     );
-    if (selectedGeometry) {
-      const selected = new THREE.LineSegments(
-        selectedGeometry,
-        new THREE.LineBasicMaterial({
+    if (selectedPositions) {
+      addWideEdgeHighlight(
+        overlay,
+        selectedPositions,
+        {
           color: '#d8ff3e',
+          width: 4,
+          haloColor: '#11130f',
+          haloWidth: 8,
           depthTest: false,
-          depthWrite: false,
-        }),
+        },
+        30,
       );
-      selected.renderOrder = 30;
-      overlay.add(selected);
     }
     if (selection.hoveredEdgeId !== undefined) {
-      const hoverGeometry = createEdgeSelectionGeometry(
+      const hoverPositions = edgeSelectionPositions(
         mesh,
         new Set([selection.hoveredEdgeId]),
       );
-      if (hoverGeometry) {
-        const hovered = new THREE.LineSegments(
-          hoverGeometry,
-          new THREE.LineBasicMaterial({
-            color: '#ffffff',
+      if (hoverPositions) {
+        addWideEdgeHighlight(
+          overlay,
+          hoverPositions,
+          {
+            color: '#ffad66',
+            width: 4,
+            haloColor: '#11130f',
+            haloWidth: 8,
             depthTest: false,
-            depthWrite: false,
-          }),
+          },
+          32,
         );
-        hovered.renderOrder = 31;
-        overlay.add(hovered);
       }
     }
     occurrence.object.add(overlay);
@@ -1736,23 +1746,24 @@ function createEdgeDecorationObject(
   const container = new THREE.Group();
   container.name = decoration.id;
   container.userData.decoration = decoration;
-  const geometry = decoration.edgeIds
-    ? createEdgeSelectionGeometry(decoration.mesh, new Set(decoration.edgeIds))
-    : createEdgeGeometry(decoration.mesh);
-  if (geometry) {
+  const positions = decoration.edgeIds
+    ? edgeSelectionPositions(decoration.mesh, new Set(decoration.edgeIds))
+    : decoration.mesh.edges;
+  if (positions && positions.length > 0) {
     const {appearance} = decoration;
-    const edges = new THREE.LineSegments(
-      geometry,
-      new THREE.LineBasicMaterial({
+    addWideEdgeHighlight(
+      container,
+      positions,
+      {
         color: appearance.color,
-        transparent: (appearance.opacity ?? 1) < 1,
-        opacity: appearance.opacity ?? 1,
-        depthTest: appearance.depthTest ?? true,
-        depthWrite: false,
-      }),
+        width: appearance.lineWidth ?? 1,
+        opacity: appearance.opacity,
+        depthTest: appearance.depthTest,
+        haloColor: appearance.lineHaloColor,
+        haloWidth: appearance.lineHaloWidth,
+      },
+      6,
     );
-    edges.renderOrder = 6;
-    container.add(edges);
   }
   applyTransform(container, decoration.transform);
   return container;
@@ -1986,10 +1997,79 @@ function createEdgeGeometry(
   return geometry;
 }
 
-function createEdgeSelectionGeometry(
+type EdgeHighlightAppearance = Readonly<{
+  color: string;
+  width: number;
+  opacity?: number;
+  depthTest?: boolean;
+  haloColor?: string;
+  haloWidth?: number;
+}>;
+
+function addWideEdgeHighlight(
+  container: THREE.Object3D,
+  positions: Float32Array,
+  appearance: EdgeHighlightAppearance,
+  renderOrder: number,
+): void {
+  if (
+    appearance.haloColor &&
+    appearance.haloWidth !== undefined &&
+    appearance.haloWidth > appearance.width
+  ) {
+    container.add(
+      createWideEdgeLines(
+        positions,
+        appearance.haloColor,
+        appearance.haloWidth,
+        appearance.opacity,
+        appearance.depthTest,
+        renderOrder,
+      ),
+    );
+  }
+  container.add(
+    createWideEdgeLines(
+      positions,
+      appearance.color,
+      appearance.width,
+      appearance.opacity,
+      appearance.depthTest,
+      renderOrder + 1,
+    ),
+  );
+}
+
+function createWideEdgeLines(
+  positions: Float32Array,
+  color: string,
+  width: number,
+  opacity = 1,
+  depthTest = true,
+  renderOrder = 0,
+): LineSegments2 {
+  const geometry = new LineSegmentsGeometry();
+  geometry.setPositions(positions);
+  const material = new LineMaterial({
+    color,
+    transparent: opacity < 1,
+    opacity,
+    depthTest,
+    depthWrite: false,
+    worldUnits: false,
+  });
+  Object.assign(material, {linewidth: width});
+  material.toneMapped = false;
+  const lines = new LineSegments2(geometry, material);
+  lines.raycast = () => undefined;
+  lines.renderOrder = renderOrder;
+  return lines;
+}
+
+function edgeSelectionPositions(
   mesh: RenderMesh,
   edgeIds: ReadonlySet<EdgeId>,
-): THREE.BufferGeometry | undefined {
+): Float32Array | undefined {
   const groups = mesh.edgeGroups.filter(group => edgeIds.has(group.edgeId));
   const coordinateCount = groups.reduce(
     (count, group) => count + group.count * 3,
@@ -2006,9 +2086,7 @@ function createEdgeSelectionGeometry(
     positions.set(coordinates, offset);
     offset += coordinates.length;
   });
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  return geometry;
+  return positions;
 }
 
 function uniqueEdgeIds(mesh: RenderMesh): EdgeId[] {

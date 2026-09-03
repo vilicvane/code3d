@@ -314,18 +314,22 @@ constraint source sites do.
   explicit edge set while retaining the one-argument all-edge form.
 - Project stable IDs into render meshes and operation trace selections without
   exposing kernel hashes.
-- Treat a direct empty edge-array argument as the explicit viewport selection
-  entry, and write chosen IDs back only to that existing array through the
-  common tool transaction path. Do not offer GUI insertion of modeling calls.
+- Treat a direct numeric edge-array argument, including an empty one, as the
+  explicit viewport selection entry. Initialize from its current IDs and write
+  changes back only to that existing array through the common tool transaction
+  path. Do not offer GUI insertion of modeling calls.
 - While selecting, render the operation input and highlight hovered/selected
-  original edges. For an applied edge modification, render the result as the
-  primary solid with a weak input outline and emphasized modified input edges.
+  original edges with high-contrast screen-space lines. For an applied edge
+  modification, render the result as the primary solid with a weak input
+  outline and emphasized modified input edges.
 - Make deselection reversible at both levels: toggle individual edges, clear
   the set, or cancel the whole session without changing source.
+- Keep the contextual selection panel vertically ordered and stable under
+  pointer hover; hover feedback belongs on the model rather than in moving text.
 
 Status: complete. The runtime topology namespace, edge-scoped author API,
 derivation transfer rules, render-mesh IDs, operation trace selections,
-empty-array-driven viewport picking, before/after comparison, reversible
+array-driven viewport picking, before/after comparison, reversible
 selection, and source write-back are implemented. The Properties panel and
 GUI operation-insertion path were removed pending a broader interaction design.
 

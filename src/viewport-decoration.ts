@@ -12,6 +12,9 @@ export type ViewportDecorationAppearance = Readonly<{
   emissiveIntensity?: number;
   edgeColor?: string;
   edgeOpacity?: number;
+  lineWidth?: number;
+  lineHaloColor?: string;
+  lineHaloWidth?: number;
   depthBias?: number;
   depthTest?: boolean;
   shading?: 'lit' | 'unlit';
