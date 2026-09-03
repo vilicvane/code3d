@@ -253,9 +253,10 @@ export class CodeEditor {
       tabSize: 2,
     });
     this.sourceDecoration = this.editor.createDecorationsCollection();
-    this.editor.onDidChangeCursorPosition(({position}) => {
+    this.editor.onDidChangeCursorSelection(({selection}) => {
       if (this.suppressCursorEvent) return;
-      this.emitCursorPosition(position);
+      this.sourceDecoration.clear();
+      this.emitCursorPosition(selection.getPosition());
     });
     monaco.editor.registerEditorOpener({
       openCodeEditor: (source, resource, selectionOrPosition) =>
