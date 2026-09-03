@@ -65,6 +65,11 @@ selection + gesture
 提交时再次检查项目 revision 和所有文件中的 expected text，然后按文件作为一个逻辑事务进入各自 Monaco undo stack。失败时不应用部分结果。
 事务保留用户原有 caret 和由它决定的渲染 scope；工具不会为了展示写入位置而移动 selection。提交成功后，UI 使用 edit plan 的 summary 和 edits，在 GUI 一侧的独立 popover 中展示 trim、语法高亮后的局部源码，并只标记实际替换范围；只有用户点击源码块时，编辑器才定位并聚焦对应修改。
 
+GUI 不维护第二套历史。编辑器界面没有焦点时，`Ctrl/Cmd+Z`、
+`Ctrl/Cmd+Shift+Z` 和 `Ctrl/Cmd+Y` 直接作用于当前活动文件的 Monaco undo
+stack，且不夺走 viewport 或面板焦点；Monaco 及其内部输入有焦点时仍由编辑器原生处理。
+任何后续源码变化都会关闭已经过期的 source-update popover。
+
 ## Tool session
 
 1. `begin` 固定工具和交互 scope；source anchor 由 editor 跨 revision 追踪。

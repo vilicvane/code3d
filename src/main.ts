@@ -280,6 +280,7 @@ const toolEngine = new ToolEngine({
 
 codeEditor.onChange(change => {
   persistProjectChange(projectFileSystem, change);
+  sourceEditPopover.dismiss();
   renderProjectNavigation();
   activeCompletionFocus = undefined;
   window.clearTimeout(completionPreviewTimer);
@@ -365,6 +366,12 @@ resetButton.addEventListener('click', () => {
 window.addEventListener('keydown', event => {
   if (event.key === 'Escape' && !projectContextMenu.hidden) {
     hideProjectContextMenu();
+    event.preventDefault();
+    return;
+  }
+  const historyAction = sourceHistoryAction(event);
+  if (historyAction && !codeEditor.ownsFocus()) {
+    codeEditor.runHistoryAction(historyAction);
     event.preventDefault();
     return;
   }
@@ -1773,6 +1780,15 @@ function setRunState(
 ): void {
   runState.dataset.state = state;
   runStateLabel.textContent = label;
+}
+
+function sourceHistoryAction(
+  event: KeyboardEvent,
+): 'undo' | 'redo' | undefined {
+  if (event.altKey || (!event.ctrlKey && !event.metaKey)) return undefined;
+  if (event.code === 'KeyZ') return event.shiftKey ? 'redo' : 'undo';
+  if (event.code === 'KeyY' && !event.shiftKey) return 'redo';
+  return undefined;
 }
 
 function showViewportRenderStatus(label: string): void {

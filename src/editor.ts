@@ -378,6 +378,19 @@ export class CodeEditor {
     return this.revision;
   }
 
+  ownsFocus(): boolean {
+    return this.container.contains(document.activeElement);
+  }
+
+  runHistoryAction(action: 'undo' | 'redo'): void {
+    const model = this.activeModel();
+    if (action === 'undo') {
+      if (model.canUndo()) void model.undo();
+    } else if (model.canRedo()) {
+      void model.redo();
+    }
+  }
+
   cursorSource(): Readonly<{file: string; offset: number}> | undefined {
     const position = this.editor.getPosition();
     return position

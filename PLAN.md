@@ -61,6 +61,9 @@ it does not silently reorder the active milestones. Closed requests move to
 - Public model values do not expose OpenCascade or Three.js details.
 - GUI tools resolve an explicit source-edit scope and use the common tool intent
   and transaction mechanism.
+- Source undo and redo remain Monaco history operations. Standard shortcuts
+  invoke that same active-file history while GUI controls own focus, without
+  moving focus back into the editor or maintaining a parallel GUI stack.
 - Tool commits preserve the editor caret and its rendering scope. A non-focusing
   GUI popover shows a trimmed, syntax-highlighted source excerpt with the
   changed range marked.

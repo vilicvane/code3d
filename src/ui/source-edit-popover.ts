@@ -58,7 +58,7 @@ export class SourceEditPopover {
     this.scheduleDismiss(7000);
   }
 
-  private dismiss(): void {
+  dismiss(): void {
     this.cancelDismiss();
     this.root.hidden = true;
   }
