@@ -191,6 +191,9 @@ export class ModelViewport {
     const hemi = new THREE.HemisphereLight('#f6f4df', '#333b40', 1.8);
     this.scene.add(hemi);
 
+    const ambient = new THREE.AmbientLight('#eef0e8', 2.4);
+    this.scene.add(ambient);
+
     const key = new THREE.DirectionalLight('#fff8df', 3.2);
     key.position.set(70, 110, 80);
     this.scene.add(key);
