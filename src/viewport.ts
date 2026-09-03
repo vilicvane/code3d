@@ -6,6 +6,7 @@ import type {
   SourceTargetEvaluation,
 } from './model/compiler';
 import type {
+  EdgeId,
   ModelOperationInputRole,
   ModelSnapshotObject,
   ParameterUsage,
@@ -80,8 +81,28 @@ export type ModelViewportOptions = Readonly<{
   onDrillDown: (node: ModelSnapshotObject) => void;
   onNavigateSource: (sourceRef: SourceRef) => void;
   onPositionTool: (event: PositionGizmoEvent) => void;
+  onEdgeSelection: (event: EdgeSelectionEvent) => void;
   sourceDecorationProviders?: readonly SourceDecorationProvider[];
 }>;
+
+export type EdgeSelectionEvent =
+  | Readonly<{
+      kind: 'hover';
+      edgeId?: EdgeId;
+      selectedEdgeIds: readonly EdgeId[];
+    }>
+  | Readonly<{
+      kind: 'change';
+      edgeId: EdgeId;
+      selectedEdgeIds: readonly EdgeId[];
+    }>
+  | Readonly<{kind: 'cancel'}>;
+
+type EdgeSelectionState = {
+  occurrenceKey: string;
+  selectedEdgeIds: Set<EdgeId>;
+  hoveredEdgeId?: EdgeId;
+};
 
 const sourceDecorationOwner = (providerId: string): string =>
   `source-context:${providerId}`;
@@ -111,9 +132,12 @@ export class ModelViewport {
   private readonly onSelect: ModelViewportOptions['onSelect'];
   private readonly onDrillDown: ModelViewportOptions['onDrillDown'];
   private readonly onNavigateSource: ModelViewportOptions['onNavigateSource'];
+  private readonly onEdgeSelection: ModelViewportOptions['onEdgeSelection'];
   private readonly sourceDecorationProviders: readonly SourceDecorationProvider[];
   private readonly impactHelpers: THREE.BoxHelper[] = [];
   private selectionHelper: THREE.BoxHelper | null = null;
+  private edgeSelection?: EdgeSelectionState;
+  private edgeSelectionOverlay?: THREE.Group;
   private highlightedTargetId?: string;
   private highlightedOccurrenceKeys = new Set<string>();
   private selectionEmphasized = true;
@@ -133,12 +157,14 @@ export class ModelViewport {
       onDrillDown,
       onNavigateSource,
       onPositionTool,
+      onEdgeSelection,
       sourceDecorationProviders = [],
     }: ModelViewportOptions,
   ) {
     this.onSelect = onSelect;
     this.onDrillDown = onDrillDown;
     this.onNavigateSource = onNavigateSource;
+    this.onEdgeSelection = onEdgeSelection;
     this.sourceDecorationProviders = sourceDecorationProviders;
     this.renderer = new THREE.WebGLRenderer({
       antialias: true,
@@ -199,6 +225,9 @@ export class ModelViewport {
     );
     this.renderer.domElement.addEventListener('pointercancel', event =>
       this.cancelSelectionGesture(event),
+    );
+    this.renderer.domElement.addEventListener('pointerleave', () =>
+      this.updateEdgeHover(undefined),
     );
 
     new ResizeObserver(() => this.resize()).observe(this.container);
@@ -454,6 +483,34 @@ export class ModelViewport {
 
   getSelected(): Occurrence | undefined {
     return this.occurrences.get(this.selectedKey);
+  }
+
+  beginEdgeSelection(occurrenceKey: string): readonly EdgeId[] {
+    const occurrence = this.occurrences.get(occurrenceKey);
+    if (occurrence?.node.kind !== 'solid' || !occurrence.node.mesh) {
+      throw new Error('Edge selection requires a rendered solid.');
+    }
+    const edgeIds = uniqueEdgeIds(occurrence.node.mesh);
+    if (edgeIds.length === 0) {
+      throw new Error('The selected solid has no selectable edges.');
+    }
+    this.clearEdgeSelection();
+    this.edgeSelection = {
+      occurrenceKey,
+      selectedEdgeIds: new Set(),
+    };
+    this.raycaster.params.Line.threshold = 1.5;
+    this.renderer.domElement.classList.add('edge-selection-active');
+    this.rebuildSelectionHelper();
+    this.updatePositionGizmo();
+    this.rebuildEdgeSelectionOverlay();
+    return edgeIds;
+  }
+
+  endEdgeSelection(): void {
+    this.clearEdgeSelection();
+    this.rebuildSelectionHelper();
+    this.updatePositionGizmo();
   }
 
   hasRelativePositionContext(): boolean {
@@ -877,6 +934,10 @@ export class ModelViewport {
   }
 
   private resetRenderedView(): void {
+    if (this.edgeSelection) {
+      this.clearEdgeSelection();
+      this.onEdgeSelection({kind: 'cancel'});
+    }
     this.positionGizmo.detach();
     this.clearImpactHelpers();
     this.clearAllDecorations();
@@ -917,7 +978,7 @@ export class ModelViewport {
     }
 
     const occurrence = this.getSelected();
-    if (!occurrence || !this.selectionEmphasized) {
+    if (!occurrence || !this.selectionEmphasized || this.edgeSelection) {
       return;
     }
     this.selectionHelper = new THREE.BoxHelper(occurrence.object, '#d8ff3e');
@@ -931,6 +992,7 @@ export class ModelViewport {
   private updatePositionGizmo(): void {
     const occurrence = this.getSelected();
     if (
+      this.edgeSelection ||
       !occurrence ||
       occurrence.depth === 0 ||
       !this.hasRelativePositionContext()
@@ -1054,6 +1116,7 @@ export class ModelViewport {
   }
 
   private updateSelectionGesture(event: PointerEvent): void {
+    this.updateEdgeHover(this.pickEdge(event));
     const gesture = this.selectionGesture;
     if (!gesture || gesture.pointerId !== event.pointerId || gesture.moved) {
       return;
@@ -1074,6 +1137,12 @@ export class ModelViewport {
       gesture.moved ||
       gesture.blocked
     ) {
+      this.selectionClick = undefined;
+      return;
+    }
+    if (this.edgeSelection) {
+      const edgeId = this.pickEdge(event);
+      if (edgeId !== undefined) this.toggleEdgeSelection(edgeId);
       this.selectionClick = undefined;
       return;
     }
@@ -1136,12 +1205,131 @@ export class ModelViewport {
     }
   }
 
-  private pickTargets(event: PointerEvent): readonly ViewportPickTarget[] {
-    if (this.renderedViewTarget.kind === 'completion') return [];
+  private toggleEdgeSelection(edgeId: EdgeId): void {
+    const selection = this.edgeSelection;
+    if (!selection) return;
+    if (selection.selectedEdgeIds.has(edgeId)) {
+      selection.selectedEdgeIds.delete(edgeId);
+    } else {
+      selection.selectedEdgeIds.add(edgeId);
+    }
+    this.rebuildEdgeSelectionOverlay();
+    this.onEdgeSelection({
+      kind: 'change',
+      edgeId,
+      selectedEdgeIds: selectedEdgeIds(selection),
+    });
+  }
+
+  private updateEdgeHover(edgeId: EdgeId | undefined): void {
+    const selection = this.edgeSelection;
+    if (!selection || selection.hoveredEdgeId === edgeId) return;
+    selection.hoveredEdgeId = edgeId;
+    this.rebuildEdgeSelectionOverlay();
+    this.onEdgeSelection({
+      kind: 'hover',
+      edgeId,
+      selectedEdgeIds: selectedEdgeIds(selection),
+    });
+  }
+
+  private rebuildEdgeSelectionOverlay(): void {
+    this.clearEdgeSelectionOverlay();
+    const selection = this.edgeSelection;
+    const occurrence = selection
+      ? this.occurrences.get(selection.occurrenceKey)
+      : undefined;
+    const mesh = occurrence?.node.mesh;
+    if (!selection || !occurrence || !mesh) return;
+
+    const overlay = new THREE.Group();
+    const selectedGeometry = createEdgeSelectionGeometry(
+      mesh,
+      selection.selectedEdgeIds,
+    );
+    if (selectedGeometry) {
+      const selected = new THREE.LineSegments(
+        selectedGeometry,
+        new THREE.LineBasicMaterial({
+          color: '#d8ff3e',
+          depthTest: false,
+          depthWrite: false,
+        }),
+      );
+      selected.renderOrder = 30;
+      overlay.add(selected);
+    }
+    if (selection.hoveredEdgeId !== undefined) {
+      const hoverGeometry = createEdgeSelectionGeometry(
+        mesh,
+        new Set([selection.hoveredEdgeId]),
+      );
+      if (hoverGeometry) {
+        const hovered = new THREE.LineSegments(
+          hoverGeometry,
+          new THREE.LineBasicMaterial({
+            color: '#ffffff',
+            depthTest: false,
+            depthWrite: false,
+          }),
+        );
+        hovered.renderOrder = 31;
+        overlay.add(hovered);
+      }
+    }
+    occurrence.object.add(overlay);
+    this.edgeSelectionOverlay = overlay;
+  }
+
+  private clearEdgeSelection(): void {
+    this.clearEdgeSelectionOverlay();
+    this.edgeSelection = undefined;
+    this.raycaster.params.Line.threshold = 1;
+    this.renderer.domElement.classList.remove('edge-selection-active');
+  }
+
+  private clearEdgeSelectionOverlay(): void {
+    if (!this.edgeSelectionOverlay) return;
+    this.edgeSelectionOverlay.removeFromParent();
+    disposeObject(this.edgeSelectionOverlay);
+    this.edgeSelectionOverlay = undefined;
+  }
+
+  private pickEdge(event: PointerEvent): EdgeId | undefined {
+    const selection = this.edgeSelection;
+    const occurrence = selection
+      ? this.occurrences.get(selection.occurrenceKey)
+      : undefined;
+    if (!selection || !occurrence) return undefined;
+    this.prepareRaycaster(event);
+    const hits = this.raycaster.intersectObject(occurrence.object, true);
+    const surfaceDistance = hits.find(
+      hit => hit.object instanceof THREE.Mesh,
+    )?.distance;
+    for (const hit of hits) {
+      if (
+        surfaceDistance !== undefined &&
+        hit.distance >
+          surfaceDistance + this.raycaster.params.Line.threshold * 1.5
+      ) {
+        continue;
+      }
+      const edgeId = edgeIdFromIntersection(hit);
+      if (edgeId !== undefined) return edgeId;
+    }
+    return undefined;
+  }
+
+  private prepareRaycaster(event: PointerEvent): void {
     const rect = this.renderer.domElement.getBoundingClientRect();
     this.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     this.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
     this.raycaster.setFromCamera(this.pointer, this.camera);
+  }
+
+  private pickTargets(event: PointerEvent): readonly ViewportPickTarget[] {
+    if (this.renderedViewTarget.kind === 'completion') return [];
+    this.prepareRaycaster(event);
 
     const hits = this.raycaster.intersectObjects(this.root.children, true);
     const targets: ViewportPickTarget[] = [];
@@ -1543,7 +1731,9 @@ function createThreeObject(node: ModelSnapshotObject): THREE.Object3D {
       transparent: true,
       opacity: 0.72,
     });
-    container.add(new THREE.LineSegments(edgeGeometry, edgeMaterial));
+    const edges = new THREE.LineSegments(edgeGeometry, edgeMaterial);
+    edges.userData.edgeGroups = node.mesh.edgeGroups;
+    container.add(edges);
   }
 
   return container;
@@ -1788,6 +1978,53 @@ function createEdgeGeometry(
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(mesh.edges, 3));
   return geometry;
+}
+
+function createEdgeSelectionGeometry(
+  mesh: RenderMesh,
+  edgeIds: ReadonlySet<EdgeId>,
+): THREE.BufferGeometry | undefined {
+  const groups = mesh.edgeGroups.filter(group => edgeIds.has(group.edgeId));
+  const coordinateCount = groups.reduce(
+    (count, group) => count + group.count * 3,
+    0,
+  );
+  if (coordinateCount === 0) return undefined;
+  const positions = new Float32Array(coordinateCount);
+  let offset = 0;
+  groups.forEach(group => {
+    const coordinates = mesh.edges.subarray(
+      group.start * 3,
+      (group.start + group.count) * 3,
+    );
+    positions.set(coordinates, offset);
+    offset += coordinates.length;
+  });
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  return geometry;
+}
+
+function uniqueEdgeIds(mesh: RenderMesh): EdgeId[] {
+  return [...new Set(mesh.edgeGroups.map(group => group.edgeId))].sort(
+    (left, right) => left - right,
+  );
+}
+
+function selectedEdgeIds(selection: EdgeSelectionState): EdgeId[] {
+  return [...selection.selectedEdgeIds].sort((left, right) => left - right);
+}
+
+function edgeIdFromIntersection(hit: THREE.Intersection): EdgeId | undefined {
+  if (!(hit.object instanceof THREE.LineSegments) || hit.index === undefined) {
+    return undefined;
+  }
+  const groups = hit.object.userData.edgeGroups as
+    RenderMesh['edgeGroups'] | undefined;
+  return groups?.find(
+    group =>
+      group.start <= hit.index! && hit.index! < group.start + group.count,
+  )?.edgeId;
 }
 
 function disposeObject(object: THREE.Object3D): void {

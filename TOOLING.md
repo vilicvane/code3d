@@ -159,9 +159,13 @@ scope 的 edit plan。
 operation.insert(
   receiver = selected expression,
   operation = "fillet",
-  arguments = [number(2.5)]
+  arguments = [number(2.5), array([number(3), number(7)])]
 )
 ```
+
+edge 工具只在显式选择模式中解释 viewport 点击。边以模型内稳定数字 ID 显示为
+`E3`、`E7`，写回源码时仍是普通数字数组 `[3, 7]`；普通 viewport 点击继续执行
+对象/occurrence 选择。选中集合按 ID 排序，空集合不可提交。
 
 Resolver 再生成带 source anchor 的编辑计划。当前 prototype 已具备基础表达式生成和操作插入解析器；基于临时重编译的结构 preview、格式保持和多方案 UI 尚未实现。
 

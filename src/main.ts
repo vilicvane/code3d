@@ -30,6 +30,7 @@ import {
 import {filePathFromRoute, fileRoute} from './project/file-route';
 import type {ModelProject} from './project/project';
 import type {
+  EdgeId,
   ModelSnapshotObject,
   ParameterTarget,
   ParameterUsage,
@@ -51,7 +52,11 @@ import {
   type ToolPreview,
   type ToolSession,
 } from './tools/tool-system';
-import {ModelViewport, type Occurrence} from './viewport';
+import {
+  ModelViewport,
+  type EdgeSelectionEvent,
+  type Occurrence,
+} from './viewport';
 import {DockPanelCoordinator} from './ui/dock-panels';
 import {ElementsPanel} from './ui/elements-panel';
 import {ProjectTree} from './ui/project-tree';
@@ -291,6 +296,7 @@ let explodeValue = 0;
 let runRevision = 0;
 let positionToolSession: ToolSession | undefined;
 let positionToolInterruptedCompile = false;
+let edgeOperationTool: EdgeOperationTool | undefined;
 let contextFilePath: string | undefined;
 let preferredEvaluationContextId: string | undefined;
 let selectedDesignContextId: string | undefined;
@@ -299,6 +305,19 @@ let activeCompletionFocus: CompletionFocus | undefined;
 let applyingFileRoute = false;
 const expandedCatalogIds = new Set<string>();
 const optimisticParameterValues = new Map<string, number>();
+
+type EdgeOperation = 'fillet' | 'chamfer';
+
+type EdgeOperationTool = {
+  operation: EdgeOperation;
+  occurrence: Occurrence;
+  receiver: SourceRef;
+  availableEdgeIds: readonly EdgeId[];
+  selectedEdgeIds: readonly EdgeId[];
+  amount: number;
+  session: ToolSession;
+  interruptedCompile: boolean;
+};
 
 const viewport = new ModelViewport(viewportHost, {
   onSelect: occurrence => {
@@ -316,6 +335,7 @@ const viewport = new ModelViewport(viewportHost, {
     codeEditor.revealSource(sourceRef);
   },
   onPositionTool: handlePositionTool,
+  onEdgeSelection: handleEdgeSelection,
   sourceDecorationProviders: [
     booleanOperationSourceDecoration,
     elementSourceDecoration,
@@ -349,6 +369,7 @@ const toolEngine = new ToolEngine({
 });
 
 codeEditor.onChange(change => {
+  cancelEdgeOperationTool();
   persistProjectChange(projectFileSystem, change);
   sourceEditPopover.dismiss();
   if (change.kind !== 'content') renderProjectNavigation();
@@ -356,6 +377,7 @@ codeEditor.onChange(change => {
 });
 
 codeEditor.onCursorOffset(({file, offset}) => {
+  cancelEdgeOperationTool();
   const matched = viewport.selectBySourceOffset(
     file,
     offset,
@@ -453,6 +475,10 @@ window.addEventListener('keydown', event => {
   const historyAction = sourceHistoryAction(event);
   if (historyAction && !codeEditor.ownsFocus()) {
     codeEditor.runHistoryAction(historyAction);
+    event.preventDefault();
+    return;
+  }
+  if (event.key === 'Escape' && cancelEdgeOperationTool()) {
     event.preventDefault();
     return;
   }
@@ -1471,6 +1497,11 @@ function renderLocalInspector(occurrence: Occurrence): void {
   kind.textContent = occurrence.node.kind.toUpperCase();
   inspector.append(kind);
 
+  if (edgeOperationTool?.occurrence.key === occurrence.key) {
+    renderEdgeOperationInspector(edgeOperationTool);
+    return;
+  }
+
   const hasRelativePositionContext = viewport.hasRelativePositionContext();
   const sourceConstraintParameters = viewport.sourceConstraintParameters();
   const parameters = uniqueParameters(
@@ -1502,6 +1533,12 @@ function renderLocalInspector(occurrence: Occurrence): void {
   const actions = document.createElement('div');
   actions.className = 'inspector-actions';
   actions.append(actionButton('Focus', () => viewport.focusSelection()));
+  if (occurrence.node.kind === 'solid' && edgeOperationReceiver(occurrence)) {
+    actions.append(
+      actionButton('Fillet', () => startEdgeOperation('fillet', occurrence)),
+      actionButton('Chamfer', () => startEdgeOperation('chamfer', occurrence)),
+    );
+  }
   inspector.append(actions);
 
   const note = document.createElement('p');
@@ -1509,6 +1546,226 @@ function renderLocalInspector(occurrence: Occurrence): void {
   note.textContent =
     'Dragging uses a temporary preview. Committing updates the source and reruns it. Units are UI hints only.';
   inspector.append(note);
+}
+
+function renderEdgeOperationInspector(tool: EdgeOperationTool): void {
+  const label = edgeOperationLabel(tool.operation);
+  const instructions = document.createElement('p');
+  instructions.className = 'inspector-copy';
+  instructions.textContent =
+    'Click model edges to toggle their stable IDs. Selected edges are written to source as one numeric array.';
+
+  const amountControl = document.createElement('label');
+  amountControl.className = 'edge-operation-amount';
+  const amountName = document.createElement('span');
+  amountName.textContent = tool.operation === 'fillet' ? 'Radius' : 'Distance';
+  const amountInput = document.createElement('input');
+  amountInput.className = 'parameter-number edge-operation-number';
+  amountInput.type = 'number';
+  amountInput.min = '0';
+  amountInput.step = 'any';
+  amountInput.value = String(tool.amount);
+  amountInput.setAttribute('aria-label', `${label} amount`);
+  amountInput.addEventListener('input', () => {
+    if (edgeOperationTool !== tool) return;
+    tool.amount = Number(amountInput.value);
+    updateEdgeOperationControls(tool);
+    previewEdgeOperation(tool);
+  });
+  amountInput.addEventListener('keydown', event => {
+    if (event.key === 'Enter') commitEdgeOperationTool();
+  });
+  amountControl.append(amountName, amountInput);
+
+  const selection = document.createElement('div');
+  selection.className = 'edge-operation-selection';
+  const selectionLabel = document.createElement('span');
+  selectionLabel.textContent = 'EDGES';
+  const selectionValue = document.createElement('strong');
+  selectionValue.className = 'edge-operation-selection-value';
+  selection.append(selectionLabel, selectionValue);
+
+  const actions = document.createElement('div');
+  actions.className = 'inspector-actions';
+  const cancel = actionButton('Cancel', () => cancelEdgeOperationTool());
+  const apply = actionButton(`Apply ${label}`, commitEdgeOperationTool);
+  apply.classList.add('primary');
+  apply.classList.add('edge-operation-apply');
+  actions.append(cancel, apply);
+
+  const note = document.createElement('p');
+  note.className = 'inspector-note';
+  note.textContent = `${tool.availableEdgeIds.length} selectable edges · Esc cancels without changing source.`;
+
+  inspector.append(instructions, amountControl, selection, actions, note);
+  updateEdgeOperationControls(tool);
+}
+
+function startEdgeOperation(
+  operation: EdgeOperation,
+  occurrence: Occurrence,
+): void {
+  cancelEdgeOperationTool();
+  const receiver = edgeOperationReceiver(occurrence);
+  if (!receiver) {
+    showToolIssue('This solid does not map to one editable source expression.');
+    return;
+  }
+  viewport.cancelPositionTool();
+  const interruptedCompile = interruptCompileForTool();
+  let availableEdgeIds: readonly EdgeId[];
+  try {
+    availableEdgeIds = viewport.beginEdgeSelection(occurrence.key);
+  } catch (error) {
+    resumeCompileAfterTool(interruptedCompile);
+    showToolIssue(error instanceof Error ? error.message : String(error));
+    return;
+  }
+  edgeOperationTool = {
+    operation,
+    occurrence,
+    receiver,
+    availableEdgeIds,
+    selectedEdgeIds: [],
+    amount: 1,
+    session: toolEngine.begin(
+      `viewport.${operation}:${receiver.file}:${receiver.start}:${receiver.end}`,
+    ),
+    interruptedCompile,
+  };
+  sourceEditPopover.dismiss();
+  errorBar.hidden = true;
+  renderInspector(occurrence);
+  showEdgeOperationStatus(edgeOperationTool);
+}
+
+function handleEdgeSelection(event: EdgeSelectionEvent): void {
+  if (event.kind === 'cancel') {
+    cancelEdgeOperationTool(false, false);
+    return;
+  }
+  const tool = edgeOperationTool;
+  if (!tool) return;
+  tool.selectedEdgeIds = event.selectedEdgeIds;
+  if (event.kind === 'change') {
+    updateEdgeOperationControls(tool);
+    previewEdgeOperation(tool);
+  }
+  showEdgeOperationStatus(tool, event.edgeId);
+}
+
+function previewEdgeOperation(tool: EdgeOperationTool): void {
+  if (!validEdgeOperation(tool)) return;
+  const resolution = tool.session.preview(edgeOperationIntent(tool));
+  if (resolution.status !== 'ready') showToolIssue(resolution.reason);
+}
+
+function commitEdgeOperationTool(): void {
+  const tool = edgeOperationTool;
+  if (!tool) return;
+  if (!validEdgeOperation(tool)) {
+    showToolIssue(
+      tool.selectedEdgeIds.length === 0
+        ? 'Select at least one edge.'
+        : `${edgeOperationLabel(tool.operation)} size must be a positive number.`,
+    );
+    return;
+  }
+  const intent = edgeOperationIntent(tool);
+  edgeOperationTool = undefined;
+  viewport.endEdgeSelection();
+  toolStatus.hidden = true;
+  errorBar.hidden = true;
+  const committed = commitToolSession(tool.session, intent);
+  if (!committed) resumeCompileAfterTool(tool.interruptedCompile);
+  renderCurrentPanels();
+}
+
+function cancelEdgeOperationTool(
+  updateViewport = true,
+  renderPanels = true,
+): boolean {
+  const tool = edgeOperationTool;
+  if (!tool) return false;
+  edgeOperationTool = undefined;
+  tool.session.cancel();
+  if (updateViewport) viewport.endEdgeSelection();
+  toolStatus.hidden = true;
+  resumeCompileAfterTool(tool.interruptedCompile);
+  if (renderPanels) renderCurrentPanels();
+  return true;
+}
+
+function edgeOperationIntent(tool: EdgeOperationTool): ToolIntent {
+  return {
+    kind: 'operation.insert',
+    receiver: {sourceRef: tool.receiver},
+    operation: tool.operation,
+    arguments: [
+      {kind: 'number', value: tool.amount},
+      {
+        kind: 'array',
+        elements: tool.selectedEdgeIds.map(value => ({kind: 'number', value})),
+      },
+    ],
+  };
+}
+
+function edgeOperationReceiver(occurrence: Occurrence): SourceRef | undefined {
+  const scope = viewport.sourceEvaluation();
+  if (
+    scope &&
+    scope.target.kind !== 'constraint' &&
+    scope.target.kind !== 'element' &&
+    scope.evaluation.nodeIds.length === 1 &&
+    scope.evaluation.nodeIds[0] === occurrence.node.nodeId
+  ) {
+    return scope.target.sourceRef;
+  }
+  return occurrence.node.operation.sourceRef ?? primarySource(occurrence.node);
+}
+
+function validEdgeOperation(tool: EdgeOperationTool): boolean {
+  return (
+    Number.isFinite(tool.amount) &&
+    tool.amount > 0 &&
+    tool.selectedEdgeIds.length > 0
+  );
+}
+
+function updateEdgeOperationControls(tool: EdgeOperationTool): void {
+  const selected = inspector.querySelector<HTMLElement>(
+    '.edge-operation-selection-value',
+  );
+  if (selected) {
+    selected.textContent = formatEdgeIds(tool.selectedEdgeIds);
+  }
+  const apply = inspector.querySelector<HTMLButtonElement>(
+    '.edge-operation-apply',
+  );
+  if (apply) apply.disabled = !validEdgeOperation(tool);
+}
+
+function showEdgeOperationStatus(
+  tool: EdgeOperationTool,
+  hoveredEdgeId?: EdgeId,
+): void {
+  const hovered =
+    hoveredEdgeId === undefined ? '' : ` · Hover E${hoveredEdgeId}`;
+  toolStatus.textContent = `${edgeOperationLabel(tool.operation)}${hovered} · Selected ${formatEdgeIds(tool.selectedEdgeIds)} · Click edges to toggle · Esc to cancel`;
+  toolStatus.hidden = false;
+}
+
+function edgeOperationLabel(operation: EdgeOperation): string {
+  return operation === 'fillet' ? 'Fillet' : 'Chamfer';
+}
+
+function formatEdgeIds(edgeIds: readonly EdgeId[]): string {
+  if (edgeIds.length === 0) return 'None';
+  const visible = edgeIds.slice(0, 8).map(edgeId => `E${edgeId}`);
+  return edgeIds.length > visible.length
+    ? `${visible.join(', ')} +${edgeIds.length - visible.length}`
+    : visible.join(', ');
 }
 
 function parametersForConstraint(

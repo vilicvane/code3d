@@ -317,9 +317,9 @@ constraint source sites do.
 - Add an explicit viewport edge-selection mode that writes the chosen IDs back
   to source through the common tool transaction path.
 
-Status: the runtime topology namespace, edge-scoped author API, derivation
-transfer rules, render-mesh IDs, and operation trace selections are
-implemented. Viewport selection and source write-back are the remaining slice.
+Status: complete. The runtime topology namespace, edge-scoped author API,
+derivation transfer rules, render-mesh IDs, operation trace selections,
+explicit viewport edge picking, and source write-back are implemented.
 
 ### 5. Object combination tools
 
