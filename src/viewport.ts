@@ -122,6 +122,8 @@ const boxCornerPairs = [
   [6, 7],
 ] as const;
 const boxCornerFraction = 0.18;
+const symbolLineWidth = 1;
+const interactiveLineWidth = 2;
 
 class CornerBoxHelper extends THREE.LineSegments<
   THREE.BufferGeometry,
@@ -756,12 +758,31 @@ export class ModelViewport {
     this.decorationLayers.delete(owner);
   }
 
+  setSourceDecorationVisible(providerId: string, visible: boolean): void {
+    const owner = sourceDecorationOwner(providerId);
+    if (!visible) {
+      this.clearDecorations(owner);
+      return;
+    }
+    const scope = this.renderedSourceScope();
+    if (!this.module || !scope) return;
+    const provider = this.sourceDecorationProviders.find(
+      candidate => candidate.id === providerId,
+    )!;
+    this.setDecorations(
+      owner,
+      provider.decorations({
+        module: this.module,
+        target: scope.target,
+        evaluation: scope.evaluation,
+      }),
+    );
+  }
+
   hideSourceDecorationsDuringPreview(): void {
     this.sourceDecorationProviders
       .filter(provider => provider.previewBehavior === 'hide')
-      .forEach(provider =>
-        this.clearDecorations(sourceDecorationOwner(provider.id)),
-      );
+      .forEach(provider => this.setSourceDecorationVisible(provider.id, false));
   }
 
   restoreSourceDecorations(): void {
@@ -1318,7 +1339,7 @@ export class ModelViewport {
         createScreenSpaceEdgeLines(
           selectedPositions,
           '#d8ff3e',
-          1,
+          interactiveLineWidth,
           1,
           false,
           31,
@@ -1335,7 +1356,7 @@ export class ModelViewport {
           createScreenSpaceEdgeLines(
             hoverPositions,
             '#ffad66',
-            1,
+            interactiveLineWidth,
             1,
             false,
             33,
@@ -1809,17 +1830,22 @@ function createEdgeSelectionGuide(
   if (!geometry) {
     throw new Error('The operation input has no renderable edges.');
   }
-  const material = new THREE.LineBasicMaterial({
-    color: '#aeb7a8',
-    transparent: true,
-    opacity: 0.58,
-    depthTest: false,
-    depthWrite: false,
-  });
-  const pickObject = new THREE.LineSegments(geometry, material);
+  const pickObject = new THREE.LineSegments(
+    geometry,
+    new THREE.LineBasicMaterial({visible: false}),
+  );
   pickObject.userData.edgeGroups = mesh.edgeGroups;
-  pickObject.renderOrder = 27;
-  guide.add(pickObject);
+  guide.add(
+    createScreenSpaceEdgeLines(
+      mesh.edges,
+      '#aeb7a8',
+      interactiveLineWidth,
+      0.58,
+      false,
+      27,
+    ),
+    pickObject,
+  );
   return {guide, pickObject};
 }
 
@@ -1851,7 +1877,7 @@ function createEdgeDecorationObject(
       createScreenSpaceEdgeLines(
         positions,
         appearance.color,
-        appearance.lineWidth ?? 1,
+        appearance.lineWidth ?? symbolLineWidth,
         appearance.opacity,
         appearance.depthTest,
         7,
@@ -1942,16 +1968,15 @@ function createAnchorDecorationObject(
 
   if (decoration.elementKind === 'point') {
     container.add(
-      new THREE.Mesh(
-        new THREE.SphereGeometry(markerSize * 0.14, 20, 14),
-        anchorSurfaceMaterial(appearance),
-      ),
+      anchorDot(markerSize * 0.14, appearance),
       anchorCross(markerSize * 0.38, appearance),
     );
   } else if (decoration.elementKind === 'line') {
-    container.add(anchorAxis(decoration.span, markerSize, color));
+    container.add(anchorAxis(decoration.span, markerSize, appearance));
   } else if (decoration.elementKind === 'face') {
     container.add(
+      anchorRing(markerSize * 0.14, appearance),
+      anchorOriginPoint(appearance),
       anchorArrow(new THREE.Vector3(0, 1, 0), markerSize, markerSize, color),
     );
   } else {
@@ -1969,7 +1994,8 @@ function createAnchorDecorationObject(
       if (candidate instanceof THREE.Material) {
         candidate.depthTest = appearance.depthTest ?? false;
         candidate.depthWrite = false;
-        candidate.transparent = true;
+        candidate.transparent = candidate.opacity < 1;
+        candidate.toneMapped = false;
       }
     });
   });
@@ -1979,12 +2005,14 @@ function createAnchorDecorationObject(
 function anchorAxis(
   span: Readonly<{negative: number; positive: number}>,
   markerSize: number,
-  color: THREE.Color,
+  appearance: ViewportDecoration['appearance'],
 ): THREE.Object3D {
+  const color = new THREE.Color(appearance.color);
   const axis = new THREE.Group();
   axis.add(
     anchorArrow(new THREE.Vector3(0, 1, 0), span.positive, markerSize, color),
     anchorArrow(new THREE.Vector3(0, -1, 0), span.negative, markerSize, color),
+    anchorRing(markerSize * 0.14, appearance),
   );
   return axis;
 }
@@ -2023,6 +2051,52 @@ function anchorCross(
   );
 }
 
+function anchorDot(
+  radius: number,
+  appearance: ViewportDecoration['appearance'],
+): THREE.Mesh {
+  return new THREE.Mesh(
+    new THREE.SphereGeometry(radius, 20, 14),
+    anchorSurfaceMaterial(appearance),
+  );
+}
+
+function anchorRing(
+  radius: number,
+  appearance: ViewportDecoration['appearance'],
+): THREE.LineLoop {
+  const points = Array.from({length: 32}, (_, index) => {
+    const angle = (index / 32) * Math.PI * 2;
+    return new THREE.Vector3(
+      Math.cos(angle) * radius,
+      0,
+      Math.sin(angle) * radius,
+    );
+  });
+  return new THREE.LineLoop(
+    new THREE.BufferGeometry().setFromPoints(points),
+    anchorLineMaterial(appearance, 1),
+  );
+}
+
+function anchorOriginPoint(
+  appearance: ViewportDecoration['appearance'],
+): THREE.Points {
+  return new THREE.Points(
+    new THREE.BufferGeometry().setFromPoints([new THREE.Vector3()]),
+    new THREE.PointsMaterial({
+      color: appearance.color,
+      size: 3,
+      sizeAttenuation: false,
+      transparent: false,
+      opacity: 1,
+      depthTest: appearance.depthTest ?? false,
+      depthWrite: false,
+      toneMapped: false,
+    }),
+  );
+}
+
 function anchorLine(
   from: readonly [number, number, number],
   to: readonly [number, number, number],
@@ -2040,25 +2114,29 @@ function anchorLine(
 function anchorSurfaceMaterial(
   appearance: ViewportDecoration['appearance'],
 ): THREE.MeshBasicMaterial {
+  const opacity = appearance.opacity ?? 1;
   return new THREE.MeshBasicMaterial({
     color: appearance.color,
-    transparent: true,
-    opacity: appearance.opacity ?? 1,
+    transparent: opacity < 1,
+    opacity,
     depthTest: appearance.depthTest ?? false,
     depthWrite: false,
     side: THREE.DoubleSide,
+    toneMapped: false,
   });
 }
 
 function anchorLineMaterial(
   appearance: ViewportDecoration['appearance'],
+  opacity = appearance.opacity ?? 1,
 ): THREE.LineBasicMaterial {
   return new THREE.LineBasicMaterial({
     color: appearance.color,
-    transparent: true,
-    opacity: appearance.opacity ?? 1,
+    transparent: opacity < 1,
+    opacity,
     depthTest: appearance.depthTest ?? false,
     depthWrite: false,
+    toneMapped: false,
   });
 }
 

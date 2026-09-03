@@ -312,7 +312,18 @@ const elementsPanel = new ElementsPanel(elements, elementsCount, {
   onPreview: element => {
     viewport.clearDecorations(elementsDecorationOwner);
     const occurrence = viewport.getSelected();
-    if (!element || !occurrence) return;
+    const sourceElement = viewport.sourceEvaluation()?.evaluation.element;
+    const previewsSourceElement =
+      element !== undefined &&
+      occurrence !== undefined &&
+      sourceElement?.nodeId === occurrence.node.nodeId &&
+      sourceElement.name === element.name &&
+      sourceElement.kind === element.kind;
+    viewport.setSourceDecorationVisible(
+      elementSourceDecoration.id,
+      element === undefined || previewsSourceElement,
+    );
+    if (!element || !occurrence || previewsSourceElement) return;
     viewport.setDecorations(
       elementsDecorationOwner,
       namedElementDecorations(occurrence.node, element),

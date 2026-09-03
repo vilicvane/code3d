@@ -5,6 +5,9 @@ export type ElementsPanelOptions = Readonly<{
 }>;
 
 export class ElementsPanel {
+  private hoveredElement?: ElementSnapshot;
+  private focusedElement?: ElementSnapshot;
+
   constructor(
     private readonly body: HTMLElement,
     private readonly count: HTMLElement,
@@ -12,6 +15,8 @@ export class ElementsPanel {
   ) {}
 
   render(node?: ModelSnapshotObject, sourceElementName?: string): void {
+    this.hoveredElement = undefined;
+    this.focusedElement = undefined;
     this.options.onPreview(undefined);
     this.body.replaceChildren();
     this.count.textContent = String(node?.elements.length ?? 0);
@@ -75,15 +80,27 @@ export class ElementsPanel {
     kind.textContent = element.kind.toUpperCase();
     row.append(glyph, name, kind);
 
-    row.addEventListener('pointerenter', () => this.options.onPreview(element));
-    row.addEventListener('pointerleave', () => {
-      if (document.activeElement !== row) this.options.onPreview(undefined);
+    row.addEventListener('pointerenter', () => {
+      this.hoveredElement = element;
+      this.updatePreview();
     });
-    row.addEventListener('focus', () => this.options.onPreview(element));
+    row.addEventListener('pointerleave', () => {
+      if (this.hoveredElement === element) this.hoveredElement = undefined;
+      this.updatePreview();
+    });
+    row.addEventListener('focus', () => {
+      this.focusedElement = element;
+      this.updatePreview();
+    });
     row.addEventListener('blur', () => {
-      if (!row.matches(':hover')) this.options.onPreview(undefined);
+      if (this.focusedElement === element) this.focusedElement = undefined;
+      this.updatePreview();
     });
     return row;
+  }
+
+  private updatePreview(): void {
+    this.options.onPreview(this.hoveredElement ?? this.focusedElement);
   }
 }
 
