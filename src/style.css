@@ -184,6 +184,11 @@ kbd {
   background: var(--panel);
 }
 
+.editor-pane > .pane-header {
+  position: relative;
+  z-index: 1;
+}
+
 .pane-header {
   display: flex;
   align-items: center;
@@ -231,6 +236,8 @@ kbd {
 }
 
 .editor-workspace {
+  position: relative;
+  z-index: 0;
   display: grid;
   grid-template-columns: 148px minmax(0, 1fr);
   min-width: 0;
