@@ -11,6 +11,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@headless-tree/core": "^1.7.0",
     "@typescript/typescript6": "^6.0.2",
     "@zenfs/core": "^2.7.0",
     "@zenfs/dom": "^1.2.12",

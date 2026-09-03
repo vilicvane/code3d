@@ -50,6 +50,7 @@ import {
 } from './tools/tool-system';
 import {ModelViewport, type Occurrence} from './viewport';
 import {DockPanelCoordinator} from './ui/dock-panels';
+import {ProjectTree} from './ui/project-tree';
 import {SourceEditPopover} from './ui/source-edit-popover';
 
 const directoryWorkspaceId = new URL(window.location.href).searchParams.get(
@@ -252,6 +253,11 @@ const codeEditor = new CodeEditor(
   initialProject,
   initialFilePath(initialProject, window.location.hash),
 );
+const projectDirectory = new ProjectTree(projectTree, {
+  onOpenFile: path => codeEditor.switchFile(path, true),
+  onFileContextMenu: (path, event) =>
+    showProjectContextMenu(path, event.clientX, event.clientY),
+});
 replaceFileRoute(codeEditor.currentFile());
 const compiler = new ModelCompilerClient();
 let persistenceQueue = Promise.resolve();
@@ -592,22 +598,7 @@ function replaceFileRoute(path: string): void {
 function renderProjectNavigation(): void {
   const active = codeEditor.currentFile();
   activeFileName.textContent = active.slice(active.lastIndexOf('/') + 1);
-  projectTree.replaceChildren(
-    ...codeEditor.filePaths().map(path => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'project-file';
-      button.classList.toggle('active', path === active);
-      button.title = path;
-      button.textContent = path.slice(1);
-      button.addEventListener('click', () => codeEditor.switchFile(path, true));
-      button.addEventListener('contextmenu', event => {
-        event.preventDefault();
-        showProjectContextMenu(path, event.clientX, event.clientY);
-      });
-      return button;
-    }),
-  );
+  projectDirectory.update(codeEditor.filePaths(), active);
   editorTabs.replaceChildren(
     ...codeEditor.openedFiles().map(path => {
       const tab = document.createElement('span');

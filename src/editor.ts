@@ -218,6 +218,7 @@ export class CodeEditor {
       renderLineHighlight: 'line',
       bracketPairColorization: {enabled: true},
       guides: {bracketPairs: true, indentation: true},
+      fixedOverflowWidgets: true,
       suggest: {preview: true, showWords: false},
       quickSuggestions: {other: true, comments: true, strings: false},
       tabSize: 2,
