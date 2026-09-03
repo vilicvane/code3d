@@ -51,7 +51,7 @@ button {
 
 .topbar {
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: 1fr auto;
   align-items: center;
   padding: 0 14px 0 18px;
   border-bottom: 1px solid var(--line);
@@ -60,7 +60,6 @@ button {
 
 .brand,
 .topbar-actions,
-.run-state,
 .pane-title,
 .scope-list,
 .inspector-actions {
@@ -102,35 +101,6 @@ button {
   border-radius: 3px;
   font-size: 9px;
   font-weight: 500;
-}
-
-.run-state {
-  gap: 8px;
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.run-state-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #65695f;
-}
-
-.run-state[data-state='running'] .run-state-dot,
-.run-state[data-state='pending'] .run-state-dot {
-  background: #e6bd55;
-  box-shadow: 0 0 8px #e6bd5577;
-}
-
-.run-state[data-state='ready'] .run-state-dot {
-  background: var(--acid);
-  box-shadow: 0 0 8px #d8ff3e77;
-}
-
-.run-state[data-state='error'] .run-state-dot {
-  background: #ff624a;
-  box-shadow: 0 0 8px #ff624a66;
 }
 
 .topbar-actions {
@@ -707,15 +677,16 @@ kbd {
   display: none;
 }
 
-.viewport-render-status {
+.viewport-progress {
   position: absolute;
-  top: 50%;
-  left: 50%;
+  top: 14px;
+  right: 14px;
   z-index: 6;
   display: flex;
   align-items: center;
   gap: 10px;
   min-height: 38px;
+  max-width: calc(100% - 28px);
   padding: 9px 13px;
   color: #edf3d5;
   border: 1px solid #778a32;
@@ -724,7 +695,6 @@ kbd {
   box-shadow:
     0 18px 50px #0009,
     0 0 28px #d8ff3e18;
-  transform: translate(-50%, -50%);
   pointer-events: none;
   backdrop-filter: blur(12px);
   font-family: 'IBM Plex Mono', monospace;
@@ -732,20 +702,20 @@ kbd {
   letter-spacing: 0.02em;
 }
 
-.viewport-render-status[hidden] {
+.viewport-progress[hidden] {
   display: none;
 }
 
-.viewport-render-status-spinner {
+.viewport-progress-spinner {
   width: 13px;
   height: 13px;
   border: 2px solid #66722f;
   border-top-color: var(--acid);
   border-radius: 50%;
-  animation: viewport-render-spin 700ms linear infinite;
+  animation: viewport-progress-spin 700ms linear infinite;
 }
 
-@keyframes viewport-render-spin {
+@keyframes viewport-progress-spin {
   to {
     transform: rotate(360deg);
   }
@@ -1222,7 +1192,7 @@ kbd {
 
 @media (prefers-reduced-motion: reduce) {
   .design-argument-spinner,
-  .viewport-render-status-spinner {
+  .viewport-progress-spinner {
     animation: none;
   }
 }
@@ -1396,7 +1366,6 @@ input[type='range']::-webkit-slider-thumb {
     grid-template-columns: 1fr auto;
   }
 
-  .run-state,
   .footer {
     display: none;
   }

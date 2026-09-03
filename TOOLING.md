@@ -93,7 +93,7 @@ speculative module 只属于 viewport transient preview，不替换工具使用�
 也不允许 viewport picking 或 source write-back。具名 element 候选在 speculative compile
 完成前先复用已接受 module 显示即时高亮。
 
-speculative compile 等待期间，viewport 中央显示显著但不阻挡交互的 rendering 状态；
+speculative compile 等待期间，viewport 边缘显示显著但不阻挡交互的 progress 状态；
 候选结果就绪、失败、关闭或被新候选取代时立即移除。
 
 ## Model diagnostics

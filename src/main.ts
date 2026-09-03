@@ -61,10 +61,6 @@ app.innerHTML = `
         <span>code3d</span>
         <span class="prototype-tag">prototype 01</span>
       </div>
-      <div class="run-state" id="run-state" data-state="idle">
-        <span class="run-state-dot"></span>
-        <span id="run-state-label">Waiting to compile</span>
-      </div>
       <div class="topbar-actions">
         <button class="quiet-button" id="reset-button" type="button">Reset example</button>
       </div>
@@ -127,9 +123,9 @@ app.innerHTML = `
         <div class="viewport-host" id="viewport-host">
           <div class="viewport-hint">Drag to orbit · Scroll to zoom · Click an object · Drag a gizmo</div>
           <div class="tool-status" id="tool-status" hidden></div>
-          <div class="viewport-render-status" id="viewport-render-status" role="status" aria-live="polite" hidden>
-            <span class="viewport-render-status-spinner" aria-hidden="true"></span>
-            <span id="viewport-render-status-label"></span>
+          <div class="viewport-progress" id="viewport-progress" role="status" aria-live="polite" hidden>
+            <span class="viewport-progress-spinner" aria-hidden="true"></span>
+            <span id="viewport-progress-label"></span>
           </div>
           <div class="viewport-dock-panels">
             <aside class="dock-panel design-arguments-panel" id="design-arguments-panel" aria-label="Design arguments">
@@ -171,8 +167,6 @@ app.innerHTML = `
 
 const editorHost = requiredElement('editor-host');
 const viewportHost = requiredElement('viewport-host');
-const runState = requiredElement('run-state');
-const runStateLabel = requiredElement('run-state-label');
 const errorBar = requiredElement('error-bar');
 const scopeList = requiredElement('scope-list');
 const objectCatalogList = requiredElement('object-catalog-list');
@@ -182,10 +176,8 @@ const designArgumentsCount = requiredElement('design-arguments-count');
 const designArgumentsFunction = requiredElement('design-arguments-function');
 const designArgumentsOptions = requiredElement('design-arguments-options');
 const toolStatus = requiredElement('tool-status');
-const viewportRenderStatus = requiredElement('viewport-render-status');
-const viewportRenderStatusLabel = requiredElement(
-  'viewport-render-status-label',
-);
+const viewportProgress = requiredElement('viewport-progress');
+const viewportProgressLabel = requiredElement('viewport-progress-label');
 const projectTree = requiredElement('project-tree');
 const editorTabs = requiredElement('editor-tabs');
 const activeFileName = requiredElement('active-file-name');
@@ -286,8 +278,7 @@ codeEditor.onChange(change => {
   window.clearTimeout(completionPreviewTimer);
   completionPreviewTimer = undefined;
   viewport.restoreTransientPreview();
-  hideViewportRenderStatus();
-  setRunState('pending', 'Waiting for update');
+  showViewportProgress('Updating model');
   runRevision += 1;
   compiler.cancel();
   scheduleModelRun(420);
@@ -540,7 +531,7 @@ function deleteContextFile(): void {
 
 function showProjectIssue(error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
-  setRunState('error', 'Project write failed');
+  hideViewportProgress();
   errorBar.textContent = message;
   errorBar.hidden = false;
 }
@@ -552,14 +543,12 @@ async function runModel(
   compileTimer = undefined;
   window.clearTimeout(outlinePreviewTimer);
   viewport.restoreTransientPreview();
-  hideViewportRenderStatus();
   const revision = ++runRevision;
   const sourceVersion = codeEditor.sourceVersion();
   compilingDesignContextId = designContextId;
+  showViewportProgress('Compiling model');
   if (designContextId) {
     renderCurrentPanels();
-  } else {
-    setRunState('running', 'Compiling');
   }
   errorBar.hidden = true;
 
@@ -624,22 +613,14 @@ async function runModel(
       renderInspectorEmpty();
       renderContextControls(currentModule);
     }
-    const objectCount = currentModule.fallback
-      ? countObjects(currentModule.fallback)
-      : currentModule.objects.size;
-    setRunState(
-      'ready',
-      objectCount > 0
-        ? formatObjectCount(objectCount)
-        : `${currentModule.designArguments.length} design contexts`,
-    );
+    hideViewportProgress();
   } catch (error) {
     if (revision !== runRevision) {
       return;
     }
     compilingDesignContextId = undefined;
     renderCurrentPanels();
-    setRunState('error', 'Run failed');
+    hideViewportProgress();
     const diagnostic =
       error instanceof ModelDiagnosticError ? error.diagnostic : undefined;
     if (diagnostic?.sourceRef) {
@@ -663,7 +644,6 @@ function handleCompletionFocus(focus: CompletionFocus | undefined): void {
   window.clearTimeout(completionPreviewTimer);
   completionPreviewTimer = undefined;
   viewport.restoreTransientPreview();
-  hideViewportRenderStatus();
 
   if (!focus) {
     if (previous?.preview) resumeModelAfterCompletion();
@@ -690,8 +670,7 @@ function handleCompletionFocus(focus: CompletionFocus | undefined): void {
   compiler.cancel();
   window.clearTimeout(compileTimer);
   compileTimer = undefined;
-  setRunState('pending', `Completing ${focus.memberName}`);
-  showViewportRenderStatus(`Rendering ${focus.memberName}`);
+  showViewportProgress(`Rendering preview · ${focus.memberName}`);
   const revision = runRevision;
   completionPreviewTimer = window.setTimeout(() => {
     completionPreviewTimer = undefined;
@@ -711,7 +690,6 @@ async function runCompletionPreview(
   ) {
     return;
   }
-  setRunState('running', `Previewing ${focus.memberName}`);
   try {
     const module = await compiler.compile(
       preview.project,
@@ -730,12 +708,10 @@ async function runCompletionPreview(
       preview.cursor.offset,
       preferredEvaluationContextId,
     );
-    hideViewportRenderStatus();
-    setRunState('ready', `Preview · ${focus.memberName}`);
+    hideViewportProgress();
   } catch {
     if (revision === runRevision && activeCompletionFocus === focus) {
-      hideViewportRenderStatus();
-      setRunState('pending', `Preview unavailable · ${focus.memberName}`);
+      hideViewportProgress();
     }
   }
 }
@@ -743,8 +719,7 @@ async function runCompletionPreview(
 function resumeModelAfterCompletion(): void {
   runRevision += 1;
   compiler.cancel();
-  hideViewportRenderStatus();
-  setRunState('pending', 'Waiting for update');
+  showViewportProgress('Updating model');
   scheduleModelRun(180);
 }
 
@@ -871,6 +846,8 @@ function cancelPendingDesignCompile(): void {
   if (!compilingDesignContextId) return;
   compilingDesignContextId = undefined;
   runRevision += 1;
+  compiler.cancel();
+  hideViewportProgress();
 }
 
 function designContextAt(module: ModelModule, file: string, offset: number) {
@@ -1315,6 +1292,7 @@ function interruptCompileForTool(): boolean {
   window.clearTimeout(compileTimer);
   compileTimer = undefined;
   compiler.cancel();
+  hideViewportProgress();
   return true;
 }
 
@@ -1716,7 +1694,7 @@ function sourceRefSpan(sourceRef: SourceRef): number {
 }
 
 function showToolIssue(message: string): void {
-  setRunState('pending', 'Tool needs an update');
+  hideViewportProgress();
   errorBar.textContent = message;
   errorBar.hidden = false;
 }
@@ -1774,14 +1752,6 @@ function actionButton(label: string, action: () => void): HTMLButtonElement {
   return button;
 }
 
-function setRunState(
-  state: 'idle' | 'pending' | 'running' | 'ready' | 'error',
-  label: string,
-): void {
-  runState.dataset.state = state;
-  runStateLabel.textContent = label;
-}
-
 function sourceHistoryAction(
   event: KeyboardEvent,
 ): 'undo' | 'redo' | undefined {
@@ -1791,21 +1761,17 @@ function sourceHistoryAction(
   return undefined;
 }
 
-function showViewportRenderStatus(label: string): void {
-  viewportRenderStatusLabel.textContent = label;
-  viewportRenderStatus.hidden = false;
+function showViewportProgress(label: string): void {
+  viewportProgressLabel.textContent = label;
+  viewportProgress.hidden = false;
 }
 
-function hideViewportRenderStatus(): void {
-  viewportRenderStatus.hidden = true;
+function hideViewportProgress(): void {
+  viewportProgress.hidden = true;
 }
 
 function primarySource(node: ModelSnapshotObject): SourceRef | undefined {
   return node.sourceRefs.at(-1);
-}
-
-function countObjects(root: ModelSnapshotObject): number {
-  return 1 + root.children.reduce((sum, child) => sum + countObjects(child), 0);
 }
 
 function formatObjectCount(count: number): string {

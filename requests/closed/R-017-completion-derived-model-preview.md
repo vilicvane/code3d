@@ -18,8 +18,9 @@
   the projected post-completion cursor selects its viewport source context.
 - Named-element focus still provides an immediate preview from the last
   accepted module while speculative compilation is pending.
-- The viewport shows a prominent rendering indicator while that speculative
-  compilation is pending, then removes it as soon as the preview resolves.
+- The viewport shows a prominent, non-blocking rendering indicator while that
+  speculative compilation is pending, then removes it as soon as the preview
+  resolves.
 - Completion previews are debounced and superseded when the source or focused
   item changes. Closing completion restores the accepted module and resumes
   compilation from the real source revision.

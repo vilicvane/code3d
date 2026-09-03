@@ -64,6 +64,9 @@ it does not silently reorder the active milestones. Closed requests move to
 - Source undo and redo remain Monaco history operations. Standard shortcuts
   invoke that same active-file history while GUI controls own focus, without
   moving focus back into the editor or maintaining a parallel GUI stack.
+- Pending and active model compilation use one prominent, non-blocking progress
+  indicator at the viewport edge. The application header has no parallel run
+  state, and ready states do not leave persistent status chrome.
 - Tool commits preserve the editor caret and its rendering scope. A non-focusing
   GUI popover shows a trimmed, syntax-highlighted source excerpt with the
   changed range marked.
@@ -90,7 +93,7 @@ it does not silently reorder the active milestones. Closed requests move to
   native completion list is applied to an in-memory project snapshot and that
   completed snapshot drives a transient compiled viewport; named elements use
   the current module for immediate feedback while the speculative compile is
-  pending. A prominent viewport-local rendering status covers that pending
+  pending. The shared viewport progress indicator covers that pending
   interval. The actual source, caret, history, diagnostics, and tools remain
   bound to the incomplete editor revision.
 - Constraint arrays retain one source/tool scope per member. Selecting a member
