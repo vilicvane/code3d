@@ -1231,17 +1231,15 @@ export class ModelViewport {
       selection.selectedEdgeIds,
     );
     if (selectedPositions) {
-      addWideEdgeHighlight(
-        overlay,
-        selectedPositions,
-        {
-          color: '#d8ff3e',
-          width: 4,
-          haloColor: '#11130f',
-          haloWidth: 8,
-          depthTest: false,
-        },
-        30,
+      overlay.add(
+        createScreenSpaceEdgeLines(
+          selectedPositions,
+          '#d8ff3e',
+          1,
+          1,
+          false,
+          31,
+        ),
       );
     }
     if (selection.hoveredEdgeId !== undefined) {
@@ -1250,17 +1248,15 @@ export class ModelViewport {
         new Set([selection.hoveredEdgeId]),
       );
       if (hoverPositions) {
-        addWideEdgeHighlight(
-          overlay,
-          hoverPositions,
-          {
-            color: '#ffad66',
-            width: 4,
-            haloColor: '#11130f',
-            haloWidth: 8,
-            depthTest: false,
-          },
-          32,
+        overlay.add(
+          createScreenSpaceEdgeLines(
+            hoverPositions,
+            '#ffad66',
+            1,
+            1,
+            false,
+            33,
+          ),
         );
       }
     }
@@ -1751,18 +1747,15 @@ function createEdgeDecorationObject(
     : decoration.mesh.edges;
   if (positions && positions.length > 0) {
     const {appearance} = decoration;
-    addWideEdgeHighlight(
-      container,
-      positions,
-      {
-        color: appearance.color,
-        width: appearance.lineWidth ?? 1,
-        opacity: appearance.opacity,
-        depthTest: appearance.depthTest,
-        haloColor: appearance.lineHaloColor,
-        haloWidth: appearance.lineHaloWidth,
-      },
-      6,
+    container.add(
+      createScreenSpaceEdgeLines(
+        positions,
+        appearance.color,
+        appearance.lineWidth ?? 1,
+        appearance.opacity,
+        appearance.depthTest,
+        7,
+      ),
     );
   }
   applyTransform(container, decoration.transform);
@@ -1997,50 +1990,7 @@ function createEdgeGeometry(
   return geometry;
 }
 
-type EdgeHighlightAppearance = Readonly<{
-  color: string;
-  width: number;
-  opacity?: number;
-  depthTest?: boolean;
-  haloColor?: string;
-  haloWidth?: number;
-}>;
-
-function addWideEdgeHighlight(
-  container: THREE.Object3D,
-  positions: Float32Array,
-  appearance: EdgeHighlightAppearance,
-  renderOrder: number,
-): void {
-  if (
-    appearance.haloColor &&
-    appearance.haloWidth !== undefined &&
-    appearance.haloWidth > appearance.width
-  ) {
-    container.add(
-      createWideEdgeLines(
-        positions,
-        appearance.haloColor,
-        appearance.haloWidth,
-        appearance.opacity,
-        appearance.depthTest,
-        renderOrder,
-      ),
-    );
-  }
-  container.add(
-    createWideEdgeLines(
-      positions,
-      appearance.color,
-      appearance.width,
-      appearance.opacity,
-      appearance.depthTest,
-      renderOrder + 1,
-    ),
-  );
-}
-
-function createWideEdgeLines(
+function createScreenSpaceEdgeLines(
   positions: Float32Array,
   color: string,
   width: number,
@@ -2052,7 +2002,7 @@ function createWideEdgeLines(
   geometry.setPositions(positions);
   const material = new LineMaterial({
     color,
-    transparent: opacity < 1,
+    transparent: true,
     opacity,
     depthTest,
     depthWrite: false,

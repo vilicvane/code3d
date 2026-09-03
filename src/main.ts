@@ -304,6 +304,7 @@ replaceFileRoute(codeEditor.currentFile());
 const compiler = new ModelCompilerClient();
 let persistenceQueue = Promise.resolve();
 let currentModule: ModelModule | null = null;
+let currentModuleSourceVersion: number | undefined;
 let compileTimer: number | undefined;
 let completionPreviewTimer: number | undefined;
 let outlinePreviewTimer: number | undefined;
@@ -787,6 +788,7 @@ async function runModel(
       return;
     }
     currentModule = nextModule;
+    currentModuleSourceVersion = sourceVersion;
     codeEditor.setModelDiagnostic();
     codeEditor.setDesignArguments(nextModule.designArguments);
     codeEditor.trackSourceRefs(toolSourceRefs(nextModule));
@@ -1451,6 +1453,10 @@ function renderCurrentPanels(): void {
 }
 
 function syncEdgeSelectionTool(): void {
+  if (currentModuleSourceVersion !== codeEditor.sourceVersion()) {
+    cancelEdgeSelectionTool();
+    return;
+  }
   const scope = viewport.sourceEvaluation();
   const occurrence = viewport.getSelected();
   const operation = scope?.target.operation?.kind;
@@ -1783,8 +1789,11 @@ function clearToolPreview(
 }
 
 function commitToolSession(session: ToolSession, intent: ToolIntent): boolean {
+  const compiledSourceVersion = currentModuleSourceVersion;
+  currentModuleSourceVersion = undefined;
   const result = session.commit(intent);
   if (result.status !== 'committed') {
+    currentModuleSourceVersion = compiledSourceVersion;
     showToolIssue(result.reason);
     return false;
   }
