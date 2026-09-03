@@ -95,7 +95,9 @@ it does not silently reorder the active milestones. Closed requests move to
 Status: complete. The browser-persistent ZenFS project, first-class module
 graph, file-qualified source/tool pipeline, editable metric fastener library,
 general helical-thread foundation, one-time library migration, and English UI
-have passed build and host-browser verification.
+have passed build and host-browser verification. [R-014](requests/closed/R-014-cross-file-editor-navigation.md)
+connects Monaco's built-in definition navigation to the same project document
+boundary for Ctrl/Cmd+Click and F12 across files.
 
 ### 1. Rootless authoring and optional exports — complete
 

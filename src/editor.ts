@@ -53,14 +53,23 @@ const modelPrettierOptions = {
   },
 };
 
-typeScriptLanguage.typescriptDefaults.setCompilerOptions({
+const languageCompilerOptions = {
   target: typeScriptLanguage.ScriptTarget.ESNext,
   module: typeScriptLanguage.ModuleKind.ESNext,
   moduleResolution: typeScriptLanguage.ModuleResolutionKind.NodeJs,
   allowNonTsExtensions: true,
   strict: true,
   noEmit: true,
+};
+typeScriptLanguage.typescriptDefaults.setCompilerOptions(
+  languageCompilerOptions,
+);
+typeScriptLanguage.javascriptDefaults.setCompilerOptions({
+  ...languageCompilerOptions,
+  allowJs: true,
 });
+typeScriptLanguage.typescriptDefaults.setEagerModelSync(true);
+typeScriptLanguage.javascriptDefaults.setEagerModelSync(true);
 typeScriptLanguage.typescriptDefaults.setDiagnosticsOptions({
   noSemanticValidation: false,
   noSyntaxValidation: false,
@@ -157,10 +166,12 @@ export class CodeEditor {
     this.sourceDecoration = this.editor.createDecorationsCollection();
     this.editor.onDidChangeCursorPosition(({position}) => {
       if (this.suppressCursorEvent) return;
-      const offset = this.activeModel().getOffsetAt(position);
-      this.cursorListeners.forEach(listener =>
-        listener({file: this.activePath, offset}),
-      );
+      this.emitCursorPosition(position);
+    });
+    monaco.editor.registerEditorOpener({
+      openCodeEditor: (source, resource, selectionOrPosition) =>
+        source === this.editor &&
+        this.openProjectResource(resource, selectionOrPosition),
     });
   }
 
@@ -437,6 +448,42 @@ export class CodeEditor {
 
   private emitChange(change: ProjectEditorChange): void {
     this.changeListeners.forEach(listener => listener(change));
+  }
+
+  private openProjectResource(
+    resource: monaco.Uri,
+    selectionOrPosition?: monaco.IRange | monaco.IPosition,
+  ): boolean {
+    const target = [...this.documents.values()].find(
+      document => document.model.uri.toString() === resource.toString(),
+    );
+    if (!target) return false;
+
+    this.switchFile(target.path);
+    this.sourceDecoration.clear();
+    this.withSuppressedCursorEvents(() => {
+      if (monaco.Range.isIRange(selectionOrPosition)) {
+        const range = monaco.Range.lift(selectionOrPosition);
+        this.editor.setSelection(range);
+        this.editor.revealRangeInCenterIfOutsideViewport(range);
+      } else if (selectionOrPosition) {
+        this.editor.setPosition(selectionOrPosition);
+        this.editor.revealPositionInCenterIfOutsideViewport(
+          selectionOrPosition,
+        );
+      }
+      this.editor.focus();
+    });
+    const position = this.editor.getPosition();
+    if (position) this.emitCursorPosition(position);
+    return true;
+  }
+
+  private emitCursorPosition(position: monaco.IPosition): void {
+    const offset = this.activeModel().getOffsetAt(position);
+    this.cursorListeners.forEach(listener =>
+      listener({file: this.activePath, offset}),
+    );
   }
 
   private async formatFile(path: string): Promise<boolean> {
