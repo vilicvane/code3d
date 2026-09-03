@@ -1495,6 +1495,11 @@ type OperationInputPlan = Readonly<{
   receiver?: ModelOperationInputRole;
   arguments?: readonly (ModelOperationInputRole | undefined)[];
   rest?: ModelOperationInputRole;
+  collection?: Readonly<{
+    argumentIndex: number;
+    first: ModelOperationInputRole;
+    rest: ModelOperationInputRole;
+  }>;
 }>;
 
 function operationInputPlan(
@@ -1502,16 +1507,24 @@ function operationInputPlan(
 ): OperationInputPlan | undefined {
   if (ts.isIdentifier(node.expression)) {
     if (node.expression.text === 'union') {
-      return {arguments: ['receiver'], rest: 'operand'};
+      return {
+        collection: {argumentIndex: 0, first: 'receiver', rest: 'operand'},
+      };
     }
     if (node.expression.text === 'cut') {
-      return {arguments: ['receiver'], rest: 'tool'};
+      return {
+        collection: {argumentIndex: 0, first: 'receiver', rest: 'tool'},
+      };
     }
     if (node.expression.text === 'intersect') {
-      return {arguments: ['receiver'], rest: 'operand'};
+      return {
+        collection: {argumentIndex: 0, first: 'receiver', rest: 'operand'},
+      };
     }
     if (node.expression.text === 'group') {
-      return {arguments: ['child']};
+      return {
+        collection: {argumentIndex: 0, first: 'child', rest: 'child'},
+      };
     }
     return undefined;
   }
@@ -1563,6 +1576,16 @@ function instrumentOperationInputs(
   }
 
   const args = visited.arguments.map((argument, index) => {
+    if (plan.collection?.argumentIndex === index && original.arguments[index]) {
+      return instrumentOperationCollection(
+        original.arguments[index],
+        argument,
+        plan.collection,
+        siteId,
+        sourceFile,
+        factory,
+      );
+    }
     const role = plan.arguments?.[index] ?? plan.rest;
     const originalArgument = original.arguments[index];
     if (!role || !originalArgument) {
@@ -1594,6 +1617,66 @@ function instrumentOperationInputs(
     visited.typeArguments,
     args,
   );
+}
+
+function instrumentOperationCollection(
+  original: ts.Expression,
+  visited: ts.Expression,
+  plan: NonNullable<OperationInputPlan['collection']>,
+  siteId: string,
+  sourceFile: ts.SourceFile,
+  factory: ts.NodeFactory,
+): ts.Expression {
+  if (
+    !ts.isArrayLiteralExpression(original) ||
+    !ts.isArrayLiteralExpression(visited)
+  ) {
+    return operationInputExpression(
+      visited,
+      original,
+      siteId,
+      'collection',
+      0,
+      sourceFile,
+      factory,
+    );
+  }
+
+  const elements = visited.elements.map((element, index) => {
+    const originalElement = original.elements[index];
+    if (
+      !originalElement ||
+      ts.isOmittedExpression(originalElement) ||
+      ts.isOmittedExpression(element)
+    ) {
+      return element;
+    }
+    const originalValue = ts.isSpreadElement(originalElement)
+      ? originalElement.expression
+      : originalElement;
+    const visitedValue = ts.isSpreadElement(element)
+      ? element.expression
+      : element;
+    const role =
+      index === 0 && ts.isSpreadElement(originalElement)
+        ? 'collection'
+        : index === 0
+          ? plan.first
+          : plan.rest;
+    const traced = operationInputExpression(
+      visitedValue,
+      originalValue,
+      siteId,
+      role,
+      index,
+      sourceFile,
+      factory,
+    );
+    return ts.isSpreadElement(element)
+      ? factory.updateSpreadElement(element, traced)
+      : traced;
+  });
+  return factory.updateArrayLiteralExpression(visited, elements);
 }
 
 function operationInputExpression(

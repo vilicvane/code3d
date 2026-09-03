@@ -21,7 +21,7 @@ export interface ProjectFileSystem {
   load(): Promise<ModelProject | undefined>;
   migrate(
     targetVersion: number,
-    migration: (project: ModelProject) => ModelProject,
+    migration: (project: ModelProject) => ModelProject | Promise<ModelProject>,
   ): Promise<ModelProject | undefined>;
   replace(
     project: ModelProject,
@@ -59,14 +59,14 @@ class ZenProjectFileSystem implements ProjectFileSystem {
 
   async migrate(
     targetVersion: number,
-    migration: (project: ModelProject) => ModelProject,
+    migration: (project: ModelProject) => ModelProject | Promise<ModelProject>,
   ): Promise<ModelProject | undefined> {
     const manifest = await readManifest();
     const project = await this.load();
     if (!manifest || !project || manifest.migrationVersion >= targetVersion) {
       return project;
     }
-    return this.replace(migration(project), targetVersion);
+    return this.replace(await migration(project), targetVersion);
   }
 
   async replace(

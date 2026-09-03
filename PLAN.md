@@ -28,6 +28,9 @@ it does not silently reorder the active milestones. Closed requests move to
 - Standalone `union`, `cut`, and `intersect` functions are geometry-evaluation
   boundaries. They collect and solve operand relations without introducing an
   author-facing composition object.
+- Multi-model operations receive their ordered model collection as an array in
+  the first argument, leaving later arguments available for operation metadata
+  or options.
 - Chained calls are the human-facing syntax for constraint derivation; they do
   not imply mutation or a persistent CAD feature history.
 - A composite is broad: any connected set of occurrences and spatial relations

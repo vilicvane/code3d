@@ -4,7 +4,7 @@ import type {SourceDecorationProvider} from '../viewport-decoration';
 type BooleanInputTarget = SourceTarget & {
   operation: Readonly<{
     kind: 'cut' | 'union';
-    role: 'receiver' | 'tool' | 'operand';
+    role: 'receiver' | 'tool' | 'operand' | 'collection';
   }>;
 };
 
@@ -60,7 +60,9 @@ const decorations: SourceDecorationProvider['decorations'] = ({
     .filter(
       region =>
         (operationKind === 'union' || region.kind === 'intersection') &&
-        (inputRole === 'receiver' || focusedNodeIds.has(region.inputNodeId)),
+        (inputRole === 'receiver' ||
+          inputRole === 'collection' ||
+          focusedNodeIds.has(region.inputNodeId)),
     )
     .map((region, index) => ({
       id: `${operation.id}:${region.kind}:${region.inputNodeId}:${index}`,
@@ -88,6 +90,7 @@ function isBooleanInputTarget(
     (operationKind === 'cut' || operationKind === 'union') &&
     (inputRole === 'receiver' ||
       inputRole === 'tool' ||
-      inputRole === 'operand')
+      inputRole === 'operand' ||
+      inputRole === 'collection')
   );
 }

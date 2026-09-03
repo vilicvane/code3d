@@ -100,7 +100,13 @@ export type ModelOperationKind =
   | 'intersect';
 
 export type ModelOperationInputRole =
-  'source' | 'receiver' | 'operand' | 'tool' | 'child' | 'reference';
+  | 'source'
+  | 'receiver'
+  | 'operand'
+  | 'tool'
+  | 'child'
+  | 'collection'
+  | 'reference';
 
 export type ModelOperationRegionSnapshot = Readonly<{
   kind: 'intersection' | 'section';
@@ -930,24 +936,18 @@ export function group(
   });
 }
 
-export function union(
-  first: ModelObject,
-  ...others: readonly ModelObject[]
-): ModelObject {
+export function union(operands: readonly ModelObject[]): ModelObject {
+  const {first, others} = booleanOperands('union', operands);
   return first[combineModels]('fuse', others);
 }
 
-export function cut(
-  stock: ModelObject,
-  ...tools: readonly ModelObject[]
-): ModelObject {
+export function cut(operands: readonly ModelObject[]): ModelObject {
+  const {first: stock, others: tools} = booleanOperands('cut', operands);
   return stock[combineModels]('cut', tools);
 }
 
-export function intersect(
-  first: ModelObject,
-  ...others: readonly ModelObject[]
-): ModelObject {
+export function intersect(operands: readonly ModelObject[]): ModelObject {
+  const {first, others} = booleanOperands('intersect', operands);
   return first[combineModels]('intersect', others);
 }
 
@@ -1104,6 +1104,21 @@ function assertChildren(children: readonly ModelObject[]): void {
   }
 }
 
+function booleanOperands(
+  operation: 'union' | 'cut' | 'intersect',
+  operands: readonly ModelObject[],
+): Readonly<{first: ModelObject; others: readonly ModelObject[]}> {
+  if (operands.length < 2) {
+    throw new Error(`${operation} requires at least two model operands.`);
+  }
+  for (const operand of operands) {
+    if (!isModelObject(operand)) {
+      throw new Error(`Every ${operation} operand must be a ModelObject.`);
+    }
+  }
+  return {first: operands[0], others: operands.slice(1)};
+}
+
 function assertPositive(label: string, value: number): void {
   if (!Number.isFinite(value) || value <= 0) {
     throw new Error(`${label} must be a positive finite number.`);
@@ -1205,8 +1220,8 @@ declare module "code3d" {
   }>;
   export function helicalThread(options: HelicalThreadOptions): ModelObject;
   export function group(children: readonly ModelObject[], name?: string): ModelObject;
-  export function union(first: ModelObject, ...others: readonly ModelObject[]): ModelObject;
-  export function cut(stock: ModelObject, ...tools: readonly ModelObject[]): ModelObject;
-  export function intersect(first: ModelObject, ...others: readonly ModelObject[]): ModelObject;
+  export function union(operands: readonly ModelObject[]): ModelObject;
+  export function cut(operands: readonly ModelObject[]): ModelObject;
+  export function intersect(operands: readonly ModelObject[]): ModelObject;
 }
 `;

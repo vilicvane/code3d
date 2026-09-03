@@ -152,7 +152,7 @@ export function socketCapScrew(
     spec.headDiameter / 2 - headChamfer,
     headChamfer,
   ).relate(top => top.bottom.on(headBarrel.top));
-  const headBlank = union(headBarrel, headTop);
+  const headBlank = union([headBarrel, headTop]);
 
   const socketToolHeight = spec.hexSocketDepth + 0.2;
   const socketTool = regularPrism(
@@ -165,7 +165,9 @@ export function socketCapScrew(
       .on(headBlank.top)
       .offset(0, -spec.hexSocketDepth / 2 + 0.1, 0),
   );
-  const head = cut(headBlank, socketTool).named(spec.designation + ' socket head');
+  const head = cut([headBlank, socketTool]).named(
+    spec.designation + ' socket head',
+  );
 
   const transition = frustum(
     spec.nominalDiameter / 2,
@@ -201,7 +203,7 @@ export function socketCapScrew(
   }).relate(part => part.top.on(previous.bottom).offset(0, -overlap, 0));
   parts.push(thread);
 
-  return union(parts[0], ...parts.slice(1)).named(
+  return union(parts).named(
     spec.designation + ' × ' + length + ' socket cap screw',
   );
 }
@@ -256,7 +258,7 @@ export function socketCapHole(
       .on(shaft.top)
       .offset(0, -counterboreDepth / 2 + 0.1, 0),
   );
-  return union(shaft, recess).named(
+  return union([shaft, recess]).named(
     spec.designation + ' ' + fit + ' counterbored hole',
   );
 }

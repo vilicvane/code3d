@@ -3,15 +3,17 @@ import {CodeEditor, type ProjectEditorChange} from './editor';
 import {ModelCompilerClient} from './model/compiler-client';
 import type {ModelModule, ObjectCatalogEntry} from './model/compiler';
 import {
-  currentProjectMigrationVersion,
   defaultProject,
   projectWithLegacySource,
-  withDefaultLibraries,
 } from './project/default-project';
 import {
   openBrowserProjectFileSystem,
   type ProjectFileSystem,
 } from './project/filesystem';
+import {
+  currentProjectMigrationVersion,
+  migrateProject,
+} from './project/migrations';
 import type {
   ModelSnapshotObject,
   ParameterTarget,
@@ -38,8 +40,10 @@ const legacyStorageKey = 'code3d.prototype.source';
 const projectFileSystem = await openBrowserProjectFileSystem();
 let initialProject = await projectFileSystem.load();
 if (!initialProject) {
+  const legacySource = localStorage.getItem(legacyStorageKey);
+  const legacyProject = projectWithLegacySource(legacySource);
   initialProject = await projectFileSystem.replace(
-    projectWithLegacySource(localStorage.getItem(legacyStorageKey)),
+    legacySource === null ? legacyProject : await migrateProject(legacyProject),
     currentProjectMigrationVersion,
   );
   localStorage.removeItem(legacyStorageKey);
@@ -47,7 +51,7 @@ if (!initialProject) {
   initialProject =
     (await projectFileSystem.migrate(
       currentProjectMigrationVersion,
-      withDefaultLibraries,
+      migrateProject,
     )) ?? initialProject;
 }
 const app = document.querySelector<HTMLDivElement>('#app');

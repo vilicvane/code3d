@@ -26,7 +26,7 @@
 
 ## Acceptance criteria
 
-- Double-clicking the active operand in a `cut(a, b)` preview opens its source
+- Double-clicking the active operand in a `cut([a, b])` preview opens its source
   declaration/expression and renders that value without `cut` peer context.
 - The same behaviour works for collection occurrences and for sources in a
   different project file.

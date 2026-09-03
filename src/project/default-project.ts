@@ -2,8 +2,6 @@ import {sampleSource} from '../model/sample';
 import {metricFastenerLibrarySource} from './metric-fastener-library';
 import type {ModelProject} from './project';
 
-export const currentProjectMigrationVersion = 1;
-
 export const defaultProject: ModelProject = Object.freeze({
   entryPath: '/model.ts',
   files: Object.freeze([

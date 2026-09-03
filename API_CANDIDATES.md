@@ -78,7 +78,7 @@ const rightBoss = boss.relate(right =>
   right.bottom.on(plate.top).offset(24, 0, 0),
 );
 
-const base = union(plate, leftBoss, rightBoss);
+const base = union([plate, leftBoss, rightBoss]);
 ```
 
 The callback parameter denotes the newly created copy, not the source model.
@@ -88,8 +88,8 @@ returns a model:
 ```text
 model.relate(constraints) -> Model
 anchor.on(anchor)         -> Constraint
-union(...models)          -> Model
-cut(...models)            -> Model
+union(models)             -> Model
+cut(models)               -> Model
 ```
 
 `relate` does not solve or assign an absolute transform. Constraints are stored
@@ -103,10 +103,10 @@ can remain useful across multiple operations:
 
 ```ts
 const mountedBoss = boss.relate(boss => boss.bottom.on(plate.top));
-const body = union(plate, mountedBoss);
+const body = union([plate, mountedBoss]);
 
 const hole = drill.relate(hole => hole.axis.alignedWith(mountedBoss.axis));
-const result = cut(body, hole);
+const result = cut([body, hole]);
 ```
 
 Composition is an internal runtime solve context in this candidate, not a
