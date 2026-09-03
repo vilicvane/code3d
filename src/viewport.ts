@@ -34,7 +34,7 @@ export type Occurrence = Readonly<{
   node: ModelSnapshotObject;
   object: THREE.Object3D;
   depth: number;
-  view: 'model' | 'outline' | 'source';
+  view: 'model' | 'source';
 }>;
 
 type SourceViewTarget = Readonly<{
@@ -45,10 +45,7 @@ type SourceViewTarget = Readonly<{
 
 type SelectedViewTarget = Readonly<{kind: 'model'}> | SourceViewTarget;
 
-type RenderedViewTarget =
-  | SelectedViewTarget
-  | Readonly<{kind: 'outline'; nodeIds: readonly string[]}>
-  | Readonly<{kind: 'completion'}>;
+type RenderedViewTarget = SelectedViewTarget | Readonly<{kind: 'completion'}>;
 
 type TransientPreviewRestore = Readonly<{
   module: ModelModule;
@@ -423,19 +420,6 @@ export class ModelViewport {
     return true;
   }
 
-  selectSourceEvaluation(evaluationIndex: number): boolean {
-    const scope = this.renderedSourceScope();
-    if (!scope?.target.evaluations[evaluationIndex]) return false;
-    this.selectedViewTarget = {
-      kind: 'source',
-      targetId: scope.target.id,
-      evaluationIndex,
-    };
-    this.transientPreviewRestore = undefined;
-    this.renderSourceTarget(scope.target, evaluationIndex, false);
-    return true;
-  }
-
   sourceEvaluation():
     | Readonly<{
         target: SourceTarget;
@@ -450,30 +434,6 @@ export class ModelViewport {
           evaluationIndex: this.renderedViewTarget.evaluationIndex,
         }
       : undefined;
-  }
-
-  selectRoot(): void {
-    this.selectedViewTarget = {kind: 'model'};
-    this.transientPreviewRestore = undefined;
-    if (!this.module?.fallback) {
-      this.renderedViewTarget = {kind: 'model'};
-      this.resetRenderedView();
-      return;
-    }
-    if (!this.occurrences.has('root')) {
-      this.renderModelView('root', true);
-    }
-    this.selectKey('root', true);
-  }
-
-  previewOutline(nodeIds: readonly string[]): boolean {
-    const nodes = this.resolveNodes(nodeIds);
-    if (nodes.length === 0) {
-      return false;
-    }
-    this.captureTransientPreviewRestore();
-    this.renderOutlinePreview(nodes);
-    return true;
   }
 
   previewCompletion(
@@ -957,20 +917,6 @@ export class ModelViewport {
     if (fitCamera) {
       this.fit();
     }
-  }
-
-  private renderOutlinePreview(nodes: readonly ModelSnapshotObject[]): void {
-    this.selectionEmphasized = true;
-    this.renderedViewTarget = {
-      kind: 'outline',
-      nodeIds: nodes.map(node => node.nodeId),
-    };
-    this.resetRenderedView();
-    nodes.forEach((node, index) => {
-      this.root.add(this.buildObject(node, `outline/${index}`, 1, 'outline'));
-    });
-    this.applyPreviewTransforms();
-    this.fit();
   }
 
   private sourceTargetAt(

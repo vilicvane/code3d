@@ -59,9 +59,7 @@ button {
 }
 
 .brand,
-.topbar-actions,
-.pane-title,
-.scope-list {
+.topbar-actions {
   display: flex;
   align-items: center;
 }
@@ -83,7 +81,6 @@ button {
 }
 
 .prototype-tag,
-.pane-meta,
 .footer {
   font-family: 'IBM Plex Mono', monospace;
   text-transform: uppercase;
@@ -130,8 +127,7 @@ button {
   background: #666b62;
 }
 
-.quiet-button,
-.scope-button {
+.quiet-button {
   border: 0;
   cursor: pointer;
 }
@@ -169,7 +165,7 @@ kbd {
 
 .pane {
   display: grid;
-  grid-template-rows: 40px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
 }
@@ -179,47 +175,6 @@ kbd {
   z-index: 1;
   border-right: 1px solid var(--line);
   background: var(--panel);
-}
-
-.editor-pane > .pane-header {
-  position: relative;
-  z-index: 1;
-}
-
-.pane-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-width: 0;
-  padding: 0 12px;
-  border-bottom: 1px solid var(--line);
-  background: #131411;
-}
-
-.pane-title {
-  gap: 8px;
-  min-width: 0;
-  font-size: 11px;
-  font-weight: 500;
-}
-
-.language-badge {
-  color: #9da8ff;
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 9px;
-  font-weight: 500;
-}
-
-.pane-meta {
-  color: #686c63;
-  font-size: 8px;
-}
-
-.editor-header-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
 }
 
 .editor-host,
@@ -691,47 +646,6 @@ kbd {
   line-height: 1.5;
 }
 
-.scope-header {
-  gap: 12px;
-  justify-content: flex-start;
-  overflow: hidden;
-}
-
-.preview-icon {
-  width: 11px;
-  height: 11px;
-  border: 1px solid #9ea399;
-  border-radius: 50%;
-  box-shadow: inset 3px 0 0 #9ea399;
-}
-
-.scope-list {
-  gap: 4px;
-  min-width: 0;
-  overflow: auto hidden;
-  scrollbar-width: none;
-}
-
-.scope-button {
-  flex: 0 0 auto;
-  padding: 5px 8px;
-  color: #777c71;
-  border-radius: 3px;
-  background: transparent;
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 9px;
-}
-
-.scope-button:hover {
-  color: #c8cbc2;
-  background: #22241f;
-}
-
-.scope-button.active {
-  color: #11120f;
-  background: var(--acid);
-}
-
 .viewport-host {
   position: relative;
   --expanded-arguments-width: 310px;
@@ -1001,206 +915,6 @@ kbd {
 .dock-panel[data-panel-state='peek'] > .dock-panel-handle,
 .dock-panel[data-panel-state='pinned'] > .dock-panel-handle {
   border-bottom: 1px solid #292c26;
-}
-
-.object-catalog {
-  position: relative;
-  top: auto;
-  left: auto;
-  overflow: visible;
-  background: #11120f;
-  box-shadow: none;
-  backdrop-filter: none;
-}
-
-.object-catalog[data-panel-state='peek'] > .dock-panel-handle,
-.object-catalog[data-panel-state='pinned'] > .dock-panel-handle {
-  border-bottom: 0;
-}
-
-.object-catalog-body {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: -1px;
-  z-index: 6;
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
-  width: 236px;
-  min-height: 0;
-  max-height: min(520px, calc(100vh - 150px));
-  overflow: hidden;
-  border: 1px solid #353831;
-  border-radius: 5px;
-  background: #11120ff7;
-  box-shadow: 0 18px 50px #0008;
-  backdrop-filter: blur(12px);
-}
-
-.object-catalog-list {
-  min-height: 0;
-  padding: 4px;
-  overflow: auto;
-}
-
-.object-catalog-group {
-  min-width: 0;
-}
-
-.object-catalog-row {
-  display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
-  align-items: stretch;
-}
-
-.object-catalog-toggle {
-  width: 16px;
-  padding: 0;
-  color: #686d63;
-  border: 0;
-  background: transparent;
-  cursor: pointer;
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 13px;
-  transform: rotate(0deg);
-  transition:
-    color 120ms ease,
-    transform 120ms ease;
-}
-
-.object-catalog-toggle:hover {
-  color: var(--acid);
-}
-
-.object-catalog-toggle:disabled {
-  cursor: default;
-  opacity: 0;
-}
-
-.object-catalog-group.expanded > .object-catalog-row > .object-catalog-toggle {
-  transform: rotate(90deg);
-}
-
-.object-catalog-details[hidden] {
-  display: none;
-}
-
-.object-catalog-details {
-  margin: 1px 0 3px 8px;
-  padding-left: 8px;
-  border-left: 1px solid #30332d;
-}
-
-.object-catalog-entry {
-  position: relative;
-  display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) auto;
-  gap: 5px;
-  align-items: center;
-  width: 100%;
-  padding: 7px 6px;
-  color: #999e93;
-  border: 0;
-  border-radius: 3px;
-  background: transparent;
-  cursor: pointer;
-  text-align: left;
-}
-
-.object-catalog-entry:hover {
-  color: #e1e3dc;
-  background: #20221d;
-}
-
-.object-catalog-order,
-.object-catalog-instances,
-.object-catalog-copy small {
-  font-family: 'IBM Plex Mono', monospace;
-}
-
-.object-catalog-order {
-  color: #5e6359;
-  font-size: 8px;
-}
-
-.object-catalog-copy {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-}
-
-.object-catalog-copy strong,
-.object-catalog-copy small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.object-catalog-copy strong {
-  font-size: 10px;
-  font-weight: 500;
-}
-
-.object-catalog-copy small {
-  color: #666b61;
-  font-size: 7px;
-  letter-spacing: 0.05em;
-}
-
-.object-catalog-instances {
-  align-self: start;
-  padding-top: 1px;
-  color: var(--acid);
-  font-size: 8px;
-}
-
-.object-catalog-section-label {
-  padding: 7px 6px 4px 21px;
-  color: #585d54;
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 7px;
-  letter-spacing: 0.11em;
-}
-
-.object-catalog-group.lineage .object-catalog-row {
-  grid-template-columns: 13px minmax(0, 1fr);
-}
-
-.object-catalog-group.lineage .object-catalog-toggle {
-  width: 13px;
-  font-size: 11px;
-}
-
-.object-catalog-entry.lineage {
-  padding-top: 5px;
-  padding-bottom: 5px;
-  color: #7f8579;
-}
-
-.object-catalog-entry.lineage .object-catalog-order {
-  color: #4f544c;
-  font-size: 7px;
-}
-
-.object-catalog-entry.lineage .object-catalog-copy strong {
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 9px;
-}
-
-.object-catalog-hint,
-.object-catalog-empty {
-  margin: 0;
-  color: #5f645a;
-  font-size: 8px;
-}
-
-.object-catalog-hint {
-  padding: 8px 10px;
-  border-top: 1px solid #292c26;
-}
-
-.object-catalog-empty {
-  padding: 14px 8px;
-  text-align: center;
 }
 
 .viewport-dock-panels {
@@ -1581,10 +1295,6 @@ kbd {
   .elements-panel[data-panel-state='peek'],
   .elements-panel[data-panel-state='pinned'] {
     width: 190px;
-  }
-
-  .pane-meta {
-    display: none;
   }
 
   .edge-selection-toolbar {

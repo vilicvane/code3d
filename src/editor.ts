@@ -468,12 +468,6 @@ export class CodeEditor {
     return this.trackedSourceRefs.get(sourceRefKey(sourceRef));
   }
 
-  sourceLine(sourceRef: SourceRef): number {
-    return this.requireDocument(sourceRef.file).model.getPositionAt(
-      sourceRef.start,
-    ).lineNumber;
-  }
-
   applySourceEdits(
     baseVersion: number,
     edits: readonly SourceTextEdit[],

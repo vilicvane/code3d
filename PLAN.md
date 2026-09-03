@@ -54,10 +54,6 @@ it does not silently reorder the active milestones. Closed requests move to
 - Object replacement/deletion is not a core modeling primitive. JavaScript
   bindings, reachability, derivation, and runtime occurrences describe what
   exists.
-- Model Outline lives with the editor. Clicking navigates source while hovering
-  provides a transient object preview; it is not a scene tree or persistent
-  viewport controller. A lineage or execution timeline is an optional view over
-  runtime derivation, not the persisted source of truth.
 - Monaco multi-selection and automatic boolean code generation are deferred
   until single-object discovery, rendering, and position relations are solid.
 
@@ -178,17 +174,12 @@ selection per page URL.
 Status: complete. Rootless selection and optional exports were implemented in
 `809fcc7`; the remaining `model()` API entry has now been removed.
 
-### 2. Runtime object outline and source context — in progress
+### 2. Runtime source context — in progress
 
 - Record top-level bindings, source sites, export names, collections, runtime
   instance counts, and evaluation order.
-- Add a compact Model Outline above the editor. Click only navigates to bindings
-  and expressions; hover temporarily previews the corresponding runtime values
-  and restores the caret-selected view on leave.
 - Index repeated executions by source site while preserving each evaluation's
   result boundary; collections remain values within an evaluation.
-- Hide anonymous intermediates by default and expose them through an expanded
-  lineage view.
 - Match catalog entries across recompiles using source-aware identities rather
   than transient runtime node IDs alone.
 - Project explicit runtime operations and typed operand roles onto exact source
@@ -201,15 +192,14 @@ Status: complete. Rootless selection and optional exports were implemented in
 - Later add an on-demand Elements panel in the viewport as a supplementary way
   to inspect the named elements available on the current model.
 
-Status: the runtime index and Model Outline are implemented. Metadata includes
-module/local bindings, anonymous source expressions, export aliases,
+Status: the runtime index and source-context rendering are implemented. Metadata
+includes module/local bindings, anonymous source expressions, export aliases,
 collections, per-execution outputs, evaluation order, and typed operation
-inputs. The outline shows module bindings with optional local lineage, source
-navigation on click, and temporary object preview on hover. The exact
-operation-input occurrence under the caret drives the separate non-selectable
-viewport context layer, so the same value can render differently at its
-declaration and at a Boolean use site. `cut` tool inputs additionally show their
-exact removed volume; `union` inputs show overlap volumes or contact sections.
+inputs. The exact operation-input occurrence under the caret drives the
+separate non-selectable viewport context layer, so the same value can render
+differently at its declaration and at a Boolean use site. `cut` tool inputs
+additionally show their exact removed volume; `union` inputs show overlap
+volumes or contact sections.
 Those regions stay hidden during transient movement and are recomputed by the
 kernel after commit. Source-aware identities survive normal recompiles and
 parameter write-back; matching across large control-flow or structural rewrites
@@ -257,9 +247,9 @@ frame decorations without editing source or retaining a parallel selection.
 ### 2a. Unified dock panels — complete
 
 - Keep panels collapsed by default and separate panel state from panel content.
-- Share collapsed, transient peek, and pinned behavior across object and
-  property panels.
-- Centralize `Alt+1` / `Alt+2` / `Alt+3`, allow multiple pinned panels, and let
+- Share collapsed, transient peek, and pinned behavior across the arguments and
+  elements panels.
+- Centralize `Alt+1` / `Alt+2`, allow multiple pinned panels, and let
   `Escape` dismiss only the current transient peek.
 - Keep a peek open across focus and pointer-driven controls without persisting
   panel state into model source or browser storage.
@@ -355,8 +345,6 @@ GUI operation-insertion path were removed pending a broader interaction design.
 - Whether uniform scaling is geometry derivation, occurrence placement, or two
   explicitly named operations.
 - How much runtime lineage to retain and mesh eagerly for large models.
-- Whether Model Outline eventually needs thumbnails or an optional
-  execution-time projection without taking on viewport-control semantics.
 - Rules for lifting inline expressions or values from different lexical scopes
   when automatic combination tools are eventually introduced.
 

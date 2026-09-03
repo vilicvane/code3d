@@ -6,11 +6,7 @@ import {
   type ProjectEditorChange,
 } from './editor';
 import {ModelCompilerClient} from './model/compiler-client';
-import type {
-  DesignArgumentContext,
-  ModelModule,
-  ObjectCatalogEntry,
-} from './model/compiler';
+import type {DesignArgumentContext, ModelModule} from './model/compiler';
 import {ModelDiagnosticError} from './model/diagnostic';
 import {bundledExamples} from './project/bundled-examples';
 import {defaultProject} from './project/default-project';
@@ -103,28 +99,6 @@ app.innerHTML = `
 
     <main class="workspace">
       <section class="pane editor-pane">
-        <header class="pane-header">
-          <div class="pane-title">
-            <span class="language-badge">TS</span>
-            <span id="active-file-name">model.ts</span>
-          </div>
-          <div class="editor-header-actions">
-            <span class="pane-meta">TypeScript module · ⇧ Alt F Format</span>
-            <aside class="dock-panel object-catalog" id="object-catalog" aria-label="Model outline">
-              <button class="dock-panel-handle" id="object-catalog-handle" type="button">
-                <span>MODEL OUTLINE</span>
-                <span class="dock-panel-handle-meta">
-                  <span id="object-catalog-count">0</span>
-                  <kbd data-dock-shortcut></kbd>
-                </span>
-              </button>
-              <div class="dock-panel-body object-catalog-body" id="object-catalog-body" hidden>
-                <div class="object-catalog-list" id="object-catalog-list"></div>
-                <p class="object-catalog-hint">Hover to preview · Click to open source</p>
-              </div>
-            </aside>
-          </div>
-        </header>
         <div class="editor-workspace">
           <aside class="project-explorer" aria-label="Project files">
             <header>
@@ -148,13 +122,6 @@ app.innerHTML = `
       </section>
 
       <section class="pane preview-pane">
-        <header class="pane-header scope-header">
-          <div class="pane-title">
-            <span class="preview-icon" aria-hidden="true"></span>
-            <span>Model</span>
-          </div>
-          <nav class="scope-list" id="scope-list" aria-label="Model scope"></nav>
-        </header>
         <div class="viewport-host" id="viewport-host">
           <div class="viewport-hint">Drag to orbit · Scroll to zoom · Click to select · Double-click active to open source</div>
           <div class="tool-status" id="tool-status" hidden></div>
@@ -221,9 +188,6 @@ app.innerHTML = `
 const editorHost = requiredElement('editor-host');
 const viewportHost = requiredElement('viewport-host');
 const errorBar = requiredElement('error-bar');
-const scopeList = requiredElement('scope-list');
-const objectCatalogList = requiredElement('object-catalog-list');
-const objectCatalogCount = requiredElement('object-catalog-count');
 const designArgumentsCount = requiredElement('design-arguments-count');
 const designArgumentsFunction = requiredElement('design-arguments-function');
 const designArgumentsOptions = requiredElement('design-arguments-options');
@@ -247,7 +211,6 @@ const viewportProgress = requiredElement('viewport-progress');
 const viewportProgressLabel = requiredElement('viewport-progress-label');
 const projectTree = requiredElement('project-tree');
 const editorTabs = requiredElement('editor-tabs');
-const activeFileName = requiredElement('active-file-name');
 const projectLocation = requiredElement('project-location');
 const openFolderButton =
   requiredElement<HTMLButtonElement>('open-folder-button');
@@ -272,22 +235,16 @@ const contextDeleteFile = requiredElement<HTMLButtonElement>(
 
 const dockPanels = new DockPanelCoordinator();
 dockPanels.register({
-  root: requiredElement('object-catalog'),
-  handle: requiredElement<HTMLButtonElement>('object-catalog-handle'),
-  body: requiredElement('object-catalog-body'),
-  shortcut: {code: 'Digit1', label: 'Alt 1', altKey: true},
-});
-dockPanels.register({
   root: requiredElement('design-arguments-panel'),
   handle: requiredElement<HTMLButtonElement>('design-arguments-handle'),
   body: requiredElement('design-arguments'),
-  shortcut: {code: 'Digit2', label: 'Alt 2', altKey: true},
+  shortcut: {code: 'Digit1', label: 'Alt 1', altKey: true},
 });
 dockPanels.register({
   root: requiredElement('elements-panel'),
   handle: requiredElement<HTMLButtonElement>('elements-handle'),
   body: elements,
-  shortcut: {code: 'Digit3', label: 'Alt 3', altKey: true},
+  shortcut: {code: 'Digit2', label: 'Alt 2', altKey: true},
 });
 
 const codeEditor = new CodeEditor(
@@ -307,7 +264,6 @@ let currentModule: ModelModule | null = null;
 let currentModuleSourceVersion: number | undefined;
 let compileTimer: number | undefined;
 let completionPreviewTimer: number | undefined;
-let outlinePreviewTimer: number | undefined;
 let runRevision = 0;
 let positionToolSession: ToolSession | undefined;
 let positionToolInterruptedCompile = false;
@@ -318,7 +274,6 @@ let selectedDesignContextId: string | undefined;
 let compilingDesignContextId: string | undefined;
 let activeCompletionFocus: CompletionFocus | undefined;
 let applyingFileRoute = false;
-const expandedCatalogIds = new Set<string>();
 type EdgeSelectionTool = {
   targetId: string;
   evaluationIndex: number;
@@ -417,7 +372,7 @@ codeEditor.onCursorOffset(({file, offset}) => {
   if (occurrence) {
     selectOccurrence(occurrence, false);
   } else if (currentModule) {
-    renderContextControls(currentModule);
+    renderDesignArguments(currentModule);
   }
   syncEdgeSelectionTool();
 });
@@ -684,7 +639,6 @@ function replaceFileRoute(path: string): void {
 
 function renderProjectNavigation(): void {
   const active = codeEditor.currentFile();
-  activeFileName.textContent = active.slice(active.lastIndexOf('/') + 1);
   projectDirectory.update(codeEditor.filePaths(), active);
   editorTabs.replaceChildren(
     ...codeEditor.openedFiles().map(path => {
@@ -766,7 +720,6 @@ async function runModel(
 ): Promise<void> {
   window.clearTimeout(compileTimer);
   compileTimer = undefined;
-  window.clearTimeout(outlinePreviewTimer);
   viewport.restoreTransientPreview();
   const revision = ++runRevision;
   const sourceVersion = codeEditor.sourceVersion();
@@ -805,7 +758,6 @@ async function runModel(
       preferredEvaluationContextId = undefined;
     }
     viewport.renderModule(currentModule, selectedKey, firstRun);
-    renderObjectCatalog(currentModule);
     const cursor = codeEditor.cursorSource();
     if (cursor) {
       const matched = viewport.selectBySourceOffset(
@@ -836,7 +788,7 @@ async function runModel(
       selectOccurrence(selected, false);
     } else {
       renderElementsPanel();
-      renderContextControls(currentModule);
+      renderDesignArguments(currentModule);
     }
     syncEdgeSelectionTool();
     hideViewportProgress();
@@ -979,98 +931,6 @@ function requestModelUpdate(delay: number): void {
   scheduleModelRun(delay);
 }
 
-function renderContextControls(module: ModelModule): void {
-  renderScopes(module);
-  renderDesignArguments(module);
-}
-
-function renderScopes(module: ModelModule): void {
-  scopeList.replaceChildren();
-  if (module.fallback) {
-    scopeList.append(
-      scopeButton(
-        'Overview',
-        () => {
-          cancelPendingDesignCompile();
-          preferredEvaluationContextId = undefined;
-          selectedDesignContextId = undefined;
-          viewport.selectRoot();
-          const selected = viewport.getSelected();
-          if (selected) selectOccurrence(selected, false);
-        },
-        viewport.sourceEvaluation() === undefined,
-      ),
-    );
-  }
-
-  const sourceEvaluation = viewport.sourceEvaluation();
-  if (sourceEvaluation?.target.kind === 'constraint') {
-    const uses = sourceEvaluation.target.evaluations.flatMap(
-      (evaluation, evaluationIndex) => {
-        const operation = evaluation.operationId
-          ? module.operations.get(evaluation.operationId)
-          : undefined;
-        return operation ? [{evaluationIndex, operation}] : [];
-      },
-    );
-    if (uses.length > 1) {
-      uses.forEach(({evaluationIndex, operation}, index) => {
-        const location = operation.sourceRef
-          ? ` · ${sourceLocation(operation.sourceRef)}`
-          : '';
-        scopeList.append(
-          scopeButton(
-            `Use ${index + 1} · ${operation.kind.toUpperCase()}${location}`,
-            () => selectSourceEvaluation(evaluationIndex),
-            sourceEvaluation.evaluationIndex === evaluationIndex,
-          ),
-        );
-      });
-    }
-  }
-  const functionId = inspectedFunctionId(module);
-  if (!functionId) return;
-
-  const contexts = new Map(
-    module.evaluationContexts.map(context => [context.id, context]),
-  );
-  const callContextIds = sourceEvaluation
-    ? [
-        ...new Set(
-          sourceEvaluation.target.evaluations
-            .map(evaluation => evaluation.contextId)
-            .filter(contextId => contexts.get(contextId)?.kind === 'call'),
-        ),
-      ]
-    : [];
-  callContextIds.forEach((contextId, index) => {
-    const context = contexts.get(contextId)!;
-    const location = sourceLocation(context.sourceRef);
-    scopeList.append(
-      scopeButton(
-        callContextIds.length === 1
-          ? `Call · ${location}`
-          : `Call ${index + 1} · ${location}`,
-        () => selectCompiledEvaluationContext(contextId, false),
-        sourceEvaluation?.evaluation.contextId === contextId,
-      ),
-    );
-  });
-}
-
-function selectSourceEvaluation(evaluationIndex: number): void {
-  if (!viewport.selectSourceEvaluation(evaluationIndex)) return;
-  const evaluation = viewport.sourceEvaluation()?.evaluation;
-  preferredEvaluationContextId = evaluation?.contextId;
-  const occurrence = viewport.getSelected();
-  if (occurrence) selectOccurrence(occurrence, false);
-}
-
-function sourceLocation(sourceRef: SourceRef): string {
-  const fileName = sourceRef.file.slice(sourceRef.file.lastIndexOf('/') + 1);
-  return `${fileName}:${codeEditor.sourceLine(sourceRef)}`;
-}
-
 function selectCompiledEvaluationContext(
   contextId: string,
   design: boolean,
@@ -1123,174 +983,6 @@ function inspectedFunctionId(module: ModelModule): string | undefined {
     : undefined;
 }
 
-function renderObjectCatalog(module: ModelModule): void {
-  window.clearTimeout(outlinePreviewTimer);
-  objectCatalogList.replaceChildren();
-  const entries = module.catalog.filter(
-    entry => entry.visibility === 'primary' && entry.nodeIds.length > 0,
-  );
-  const lineage = module.catalog.filter(
-    entry => entry.visibility === 'lineage' && entry.nodeIds.length > 0,
-  );
-  objectCatalogCount.textContent = String(entries.length);
-
-  if (entries.length === 0) {
-    const empty = document.createElement('p');
-    empty.className = 'object-catalog-empty';
-    empty.textContent = 'No named objects';
-    objectCatalogList.append(empty);
-    return;
-  }
-
-  entries.forEach((entry, index) => {
-    const localLineage = lineage
-      .filter(candidate =>
-        containsSourceRef(entry.sourceRef, candidate.sourceRef),
-      )
-      .sort((left, right) => left.firstOrder - right.firstOrder);
-    objectCatalogList.append(
-      objectCatalogGroup(entry, String(index + 1).padStart(2, '0'), module, {
-        variant: 'primary',
-        lineage: localLineage,
-      }),
-    );
-  });
-}
-
-function objectCatalogGroup(
-  entry: ObjectCatalogEntry,
-  orderLabel: string,
-  module: ModelModule,
-  options: Readonly<{
-    variant: 'primary' | 'lineage';
-    lineage?: readonly ObjectCatalogEntry[];
-  }>,
-): HTMLElement {
-  const group = document.createElement('section');
-  group.className = `object-catalog-group ${options.variant}`;
-
-  const row = document.createElement('div');
-  row.className = 'object-catalog-row';
-  const details = document.createElement('div');
-  details.className = 'object-catalog-details';
-
-  const lineage = options.lineage ?? [];
-  const expandable = lineage.length > 0;
-  const expanded = expandable && expandedCatalogIds.has(entry.id);
-  const toggle = document.createElement('button');
-  toggle.type = 'button';
-  toggle.className = 'object-catalog-toggle';
-  toggle.textContent = expandable ? '›' : '';
-  toggle.disabled = !expandable;
-  toggle.tabIndex = expandable ? 0 : -1;
-  toggle.setAttribute('aria-label', `${entry.label} details`);
-  toggle.setAttribute('aria-expanded', String(expanded));
-
-  const button = objectCatalogEntryButton(
-    entry,
-    orderLabel,
-    module,
-    options.variant,
-  );
-  row.append(toggle, button);
-
-  if (lineage.length > 0) {
-    const label = document.createElement('div');
-    label.className = 'object-catalog-section-label';
-    label.textContent = 'LINEAGE';
-    details.append(label);
-    lineage.forEach(candidate => {
-      details.append(
-        objectCatalogGroup(candidate, `@${candidate.firstOrder}`, module, {
-          variant: 'lineage',
-        }),
-      );
-    });
-  }
-
-  details.hidden = !expanded;
-  group.classList.toggle('expanded', expanded);
-  toggle.addEventListener('click', () => {
-    const nextExpanded = !expandedCatalogIds.has(entry.id);
-    if (nextExpanded) {
-      expandedCatalogIds.add(entry.id);
-    } else {
-      expandedCatalogIds.delete(entry.id);
-    }
-    group.classList.toggle('expanded', nextExpanded);
-    details.hidden = !nextExpanded;
-    toggle.setAttribute('aria-expanded', String(nextExpanded));
-  });
-  group.append(row, details);
-  return group;
-}
-
-function objectCatalogEntryButton(
-  entry: ObjectCatalogEntry,
-  orderLabel: string,
-  module: ModelModule,
-  variant: 'primary' | 'lineage',
-): HTMLButtonElement {
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = `object-catalog-entry ${variant}`;
-  button.title = `${entry.label}: hover to preview, click to open source`;
-
-  const order = document.createElement('span');
-  order.className = 'object-catalog-order';
-  order.textContent = orderLabel;
-
-  const copy = document.createElement('span');
-  copy.className = 'object-catalog-copy';
-  const label = document.createElement('strong');
-  label.textContent = entry.label;
-  const meta = document.createElement('small');
-  meta.textContent = catalogEntryMeta(entry, module);
-  copy.append(label, meta);
-
-  const count = document.createElement('span');
-  count.className = 'object-catalog-instances';
-  count.textContent =
-    entry.occurrences.length > 1 ? `×${entry.occurrences.length}` : '';
-  button.append(order, copy, count);
-  button.addEventListener('pointerenter', () => {
-    window.clearTimeout(outlinePreviewTimer);
-    outlinePreviewTimer = window.setTimeout(() => {
-      viewport.previewOutline(entry.nodeIds);
-    }, 90);
-  });
-  button.addEventListener('pointerleave', () => {
-    window.clearTimeout(outlinePreviewTimer);
-    outlinePreviewTimer = window.setTimeout(() => {
-      viewport.restoreTransientPreview();
-    }, 50);
-  });
-  button.addEventListener('click', () => {
-    codeEditor.revealSource(entry.sourceRef, true);
-  });
-  return button;
-}
-
-function catalogEntryMeta(
-  entry: ObjectCatalogEntry,
-  module: ModelModule,
-): string {
-  const kinds = new Set(
-    entry.nodeIds.flatMap(nodeId => {
-      const node = module.objects.get(nodeId);
-      return node ? [node.kind] : [];
-    }),
-  );
-  const parts = [kinds.size === 1 ? [...kinds][0].toUpperCase() : 'COLLECTION'];
-  if (entry.executions > 1) {
-    parts.push(`${entry.executions} RUNS`);
-  }
-  if (entry.exportNames.length > 0) {
-    parts.push(`EXPORT ${entry.exportNames.join(', ')}`);
-  }
-  return parts.join(' · ');
-}
-
 function containsSourceRef(
   container: SourceRef,
   candidate: SourceRef,
@@ -1302,23 +994,9 @@ function containsSourceRef(
   );
 }
 
-function scopeButton(
-  label: string,
-  action: () => void,
-  active = false,
-): HTMLButtonElement {
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = 'scope-button';
-  button.classList.toggle('active', active);
-  button.textContent = label;
-  button.addEventListener('click', action);
-  return button;
-}
-
 function selectOccurrence(occurrence: Occurrence, revealSource: boolean): void {
   renderElementsPanel(occurrence);
-  if (currentModule) renderContextControls(currentModule);
+  if (currentModule) renderDesignArguments(currentModule);
 
   if (revealSource) {
     const sourceRef = primarySource(occurrence.node);
@@ -1453,7 +1131,7 @@ function designArgumentCall(context: DesignArgumentContext): string {
 function renderCurrentPanels(): void {
   const occurrence = viewport.getSelected();
   renderElementsPanel(occurrence);
-  if (!occurrence && currentModule) renderContextControls(currentModule);
+  if (!occurrence && currentModule) renderDesignArguments(currentModule);
 }
 
 function syncEdgeSelectionTool(): void {
