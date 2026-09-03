@@ -8,6 +8,7 @@ import type {CursorOptions, Options} from 'prettier';
 import {observeSuggestionFocus} from './monaco/suggestion-focus';
 import {code3dAnnotations, type Code3dAnnotation} from './model/annotations';
 import type {DesignArgumentContext} from './model/compiler';
+import type {ModelDiagnostic} from './model/diagnostic';
 import {authoringTypes, type SourceRef} from './model/runtime';
 import {normalizeProjectPath, type ModelProject} from './project/project';
 import type {SourceTextEdit} from './tools/tool-system';
@@ -68,6 +69,7 @@ const projectLanguageSelector = [
   {language: 'typescript', scheme: 'file', pattern: '**/workspace/**'},
   {language: 'javascript', scheme: 'file', pattern: '**/workspace/**'},
 ] satisfies monaco.languages.LanguageSelector;
+const modelDiagnosticOwner = 'code3d-model';
 
 (self as MonacoEnvironment).MonacoEnvironment = {
   getWorker(_moduleId, label) {
@@ -502,6 +504,21 @@ export class CodeEditor {
     this.sourceDecoration.clear();
   }
 
+  setModelDiagnostic(diagnostic?: ModelDiagnostic): void {
+    for (const document of this.documents.values()) {
+      const sourceRef = diagnostic?.sourceRef;
+      const marker =
+        diagnostic && sourceRef?.file === document.path
+          ? modelDiagnosticMarker(document.model, diagnostic, sourceRef)
+          : undefined;
+      monaco.editor.setModelMarkers(
+        document.model,
+        modelDiagnosticOwner,
+        marker ? [marker] : [],
+      );
+    }
+  }
+
   private async resolveCompletionFocus(
     item: monaco.languages.CompletionItem,
     version: number,
@@ -816,6 +833,33 @@ function sourceRange(
     end.lineNumber,
     end.column,
   );
+}
+
+function modelDiagnosticMarker(
+  model: monaco.editor.ITextModel,
+  diagnostic: ModelDiagnostic,
+  sourceRef: SourceRef,
+): monaco.editor.IMarkerData {
+  const sourceLength = model.getValueLength();
+  const startOffset = Math.min(sourceLength, Math.max(0, sourceRef.start));
+  const endOffset = Math.min(
+    sourceLength,
+    Math.max(startOffset, sourceRef.end),
+  );
+  const start = model.getPositionAt(startOffset);
+  const end = model.getPositionAt(endOffset);
+  return {
+    severity: monaco.MarkerSeverity.Error,
+    source: 'code3d',
+    code: diagnostic.kind,
+    message: diagnostic.details
+      ? `${diagnostic.summary}\n\n${diagnostic.details}`
+      : diagnostic.summary,
+    startLineNumber: start.lineNumber,
+    startColumn: start.column,
+    endLineNumber: end.lineNumber,
+    endColumn: end.column,
+  };
 }
 
 function sourceRefKey(sourceRef: SourceRef): string {

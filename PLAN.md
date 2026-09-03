@@ -198,6 +198,10 @@ Named-element property occurrences now refine that scope: the owning model and
 typed anchor are highlighted while all relation participants remain visible.
 Focused items in Monaco's native TypeScript member completion reuse the same
 viewport preview and restore the caret-selected scene when completion closes.
+[R-004](requests/closed/R-004-source-local-modeling-diagnostics.md) is complete:
+structured model diagnostics retain their exact source span across the worker
+boundary, and Monaco renders located evaluation failures inline while the
+global error bar is reserved for failures without a reliable source location.
 [R-013](requests/R-013-drill-from-composition-preview-to-object-source.md) adds
 explicit double-click drill-down from an active composition operand to its best
 defining source.

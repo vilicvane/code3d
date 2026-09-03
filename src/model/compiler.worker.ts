@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 
 import {compileProject} from './compiler';
+import {diagnosticFromError} from './diagnostic';
 import type {ModelProject} from '../project/project';
 import initOpenCascade from 'replicad-opencascadejs';
 import openCascadeWasmUrl from 'replicad-opencascadejs/wasm?url';
@@ -10,14 +11,6 @@ type CompileRequest = Readonly<{
   id: number;
   project: ModelProject;
   designContextId?: string;
-}>;
-
-type SerializedError = Readonly<{
-  message: string;
-  stack?: string;
-  file?: string;
-  start?: number;
-  length?: number;
 }>;
 
 const workerScope = self as DedicatedWorkerGlobalScope;
@@ -36,25 +29,7 @@ workerScope.onmessage = async ({data}: MessageEvent<CompileRequest>) => {
     workerScope.postMessage({
       id: data.id,
       ok: false,
-      error: serializeError(error),
+      diagnostic: diagnosticFromError(error),
     });
   }
 };
-
-function serializeError(error: unknown): SerializedError {
-  if (error instanceof Error) {
-    const located = error as Error & {
-      file?: string;
-      start?: number;
-      length?: number;
-    };
-    return {
-      message: error.message,
-      stack: error.stack,
-      file: located.file,
-      start: located.start,
-      length: located.length,
-    };
-  }
-  return {message: String(error)};
-}

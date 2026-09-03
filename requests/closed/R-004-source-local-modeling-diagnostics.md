@@ -1,0 +1,37 @@
+# R-004 Source-local modeling diagnostics
+
+## Request
+
+- Show code and modeling errors through Monaco's inline diagnostics whenever a
+  reliable source location exists, rather than merely placing feedback near the
+  editor or in a global error bar.
+- Attribute concrete evaluation failures such as invalid parameters,
+  inconsistent constraints, and Boolean/kernel failures to the source
+  expression that requested the evaluation.
+- Keep the marker compact and use Monaco's native hover UI for details.
+- Reserve the global error bar for failures that cannot be attributed to code.
+
+## Confirmed behavior
+
+- Compiler diagnostics carry a kind, summary, optional details, and an optional
+  file-qualified source span across the worker boundary.
+- A normal thrown error acquires the location of the innermost traced source
+  evaluation that contains it. An already-located diagnostic keeps its more
+  precise location through outer calls and design-time evaluation contexts.
+- Runtime model calls, traced binding initializers, imported module specifiers,
+  and model snapshot generation all supply source locations where available.
+- Located diagnostics become `code3d` Monaco error markers. They remain visible
+  while the replacement revision compiles and clear when that revision
+  succeeds; they do not open a second error overlay or move editor focus.
+- A compile produces one primary diagnostic. Related constraint locations are
+  not marked speculatively; they can be added later only when the solver emits
+  structured contributing diagnostics.
+
+## Verification
+
+- `npm run build` passes.
+- Host Chrome evaluated `box(-1, 20, 10)`: the full call expression received
+  one Monaco error marker, its native hover displayed the evaluation message,
+  and the global error bar remained hidden.
+- Restoring valid source returned the model to ready state and cleared the
+  marker without changing the restored project contents.

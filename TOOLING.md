@@ -75,6 +75,19 @@ selection + gesture
 模型重新编译后，tool session 即结束；后续工具必须基于新的 provenance 开始。
 源码事务提交后，GUI 将 preview 提升为当前 revision 的 optimistic 状态。编译期间仍可继续交互；新的交互立即丢弃正在运行或等待中的旧 revision 编译，新的源码事务产生后只编译最新 revision。对应模型完成后，以原 selection 和 scope 替换 optimistic 状态。
 
+## Model diagnostics
+
+模型编译和执行错误以结构化 diagnostic 穿过 worker 边界，保留 kind、summary、
+details 和可选的 `SourceRef`。最内层的源码求值边界负责为普通 runtime/kernel error
+补充位置；已有精确位置的错误经过外层调用时不会被覆盖。参数校验、关系求解、Boolean
+求值及 snapshot 生成因此都归属到请求该次求值的源码表达式，而不是从错误文本或编译后
+stack 反推位置。
+
+带 `SourceRef` 的 diagnostic 由 Monaco marker 直接标在源代码上，hover 使用编辑器原生
+诊断界面展示详细信息；成功编译后清除。编辑期间保留上一版 marker，直到新的编译结果被
+接受，避免异步编译造成错误状态闪烁。只有项目、worker、超时等无法可靠归属源码的错误
+才使用全局 error bar。
+
 ## Viewport decoration
 
 临时 3D 辅助显示使用通用的 `ViewportDecoration`。它是 renderer-neutral 的

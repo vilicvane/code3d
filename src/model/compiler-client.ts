@@ -1,5 +1,6 @@
 import CompilerWorker from './compiler.worker?worker';
 import type {ModelModule} from './compiler';
+import {ModelDiagnosticError, type ModelDiagnostic} from './diagnostic';
 import type {ModelProject} from '../project/project';
 
 type CompileResponse =
@@ -7,12 +8,7 @@ type CompileResponse =
   | Readonly<{
       id: number;
       ok: false;
-      error: Readonly<{
-        message: string;
-        file?: string;
-        start?: number;
-        length?: number;
-      }>;
+      diagnostic: ModelDiagnostic;
     }>;
 
 type PendingCompile = {
@@ -89,19 +85,7 @@ export class ModelCompilerClient {
         this.kernelInitialized = true;
         pending.resolve(data.module);
       } else {
-        const error = new Error(
-          'stack' in data.error && typeof data.error.stack === 'string'
-            ? data.error.stack
-            : data.error.message,
-        ) as Error & {
-          start?: number;
-          length?: number;
-          file?: string;
-        };
-        error.file = data.error.file;
-        error.start = data.error.start;
-        error.length = data.error.length;
-        pending.reject(error);
+        pending.reject(new ModelDiagnosticError(data.diagnostic));
       }
     };
     worker.onerror = ({message}) => {

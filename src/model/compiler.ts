@@ -24,6 +24,12 @@ import {
 } from './runtime';
 import {code3dAnnotations} from './annotations';
 import {designArgumentAnnotationSites} from './design-functions';
+import {
+  createModelDiagnostic,
+  locateModelError,
+  ModelDiagnosticError,
+  type ModelDiagnosticKind,
+} from './diagnostic';
 
 export type SourceTargetEvaluation = Readonly<{
   nodeIds: readonly string[];
@@ -111,20 +117,6 @@ export type ModelModule = Readonly<{
   designArguments: readonly DesignArgumentContext[];
   activeDesignContextId?: string;
 }>;
-
-export class CompileFailure extends Error {
-  readonly file?: string;
-  readonly start?: number;
-  readonly length?: number;
-
-  constructor(message: string, file?: string, start?: number, length?: number) {
-    super(message);
-    this.name = 'CompileFailure';
-    this.file = file;
-    this.start = start;
-    this.length = length;
-  }
-}
 
 type CommonJsModule = {
   exports: Record<string, unknown>;
@@ -356,6 +348,8 @@ const traceRuntime = Object.freeze({
     let result: T;
     try {
       result = run();
+    } catch (error) {
+      throw locateModelError(error, location);
     } finally {
       traceFrames.pop();
       parameterFrames.pop();
@@ -423,7 +417,12 @@ const traceRuntime = Object.freeze({
         label,
         location,
       );
-    const result = run();
+    let result: T;
+    try {
+      result = run();
+    } catch (error) {
+      throw locateModelError(error, location);
+    }
     if (isConstraint(result)) {
       recordSourceConstraint(id, location, result, context.id);
     } else {
@@ -463,11 +462,9 @@ const traceRuntime = Object.freeze({
     try {
       result = run();
     } catch (error) {
-      throw new CompileFailure(
-        error instanceof Error ? error.message : String(error),
-        file,
-        annotationStart,
-        annotationEnd - annotationStart,
+      throw locateModelError(
+        error,
+        sourceRef(file, annotationStart, annotationEnd),
       );
     } finally {
       designContextFrames.pop();
@@ -772,11 +769,10 @@ function parseDesignArgumentContexts(
       !consumedAnnotations.has(annotation.start),
   );
   if (misplaced) {
-    throw new CompileFailure(
+    throw modelFailure(
+      'syntax',
       '@code3d.arguments must annotate a named module-level function.',
-      normalizedPath,
-      misplaced.start,
-      misplaced.end - misplaced.start,
+      sourceRef(normalizedPath, misplaced.start, misplaced.end),
     );
   }
   return contexts;
@@ -804,11 +800,14 @@ function parseDesignArgumentsExpression(
       0,
       (error.start ?? prefix.length) - prefix.length,
     );
-    throw new CompileFailure(
+    throw modelFailure(
+      'syntax',
       ts.flattenDiagnosticMessageText(error.messageText, '\n'),
-      sourceRef.file,
-      sourceRef.start + relativeStart,
-      error.length,
+      {
+        file: sourceRef.file,
+        start: sourceRef.start + relativeStart,
+        end: sourceRef.start + relativeStart + (error.length ?? 1),
+      },
     );
   }
   const statement = parsed.statements[0];
@@ -825,11 +824,10 @@ function parseDesignArgumentsExpression(
     !argumentsExpression ||
     !ts.isArrayLiteralExpression(argumentsExpression)
   ) {
-    throw new CompileFailure(
+    throw modelFailure(
+      'syntax',
       '@code3d.arguments requires an array expression.',
-      sourceRef.file,
-      sourceRef.start,
-      Math.max(1, sourceRef.end - sourceRef.start),
+      sourceRef,
     );
   }
   return argumentsExpression;
@@ -855,11 +853,10 @@ function validateDesignArgumentCount(
     required === parameters.length
       ? String(required)
       : `${required}–${parameters.length}`;
-  throw new CompileFailure(
+  throw modelFailure(
+    'evaluation',
     `@code3d.arguments provides ${count} arguments; ${expected} expected.`,
-    sourceRef.file,
-    sourceRef.start,
-    Math.max(1, sourceRef.end - sourceRef.start),
+    sourceRef,
   );
 }
 
@@ -886,7 +883,10 @@ export function compileProject(
     files,
   );
   if (!entryPath) {
-    throw new CompileFailure(`Project entry not found: ${project.entryPath}`);
+    throw modelFailure(
+      'project',
+      `Project entry not found: ${project.entryPath}`,
+    );
   }
 
   tracedObjects.clear();
@@ -913,10 +913,7 @@ export function compileProject(
       }
       const source = files.get(normalized);
       if (source === undefined) {
-        throw new CompileFailure(
-          `Project file not found: ${normalized}`,
-          normalized,
-        );
+        throw modelFailure('project', `Project file not found: ${normalized}`);
       }
       const module: CommonJsModule = {exports: {}};
       modules.set(normalized, module);
@@ -934,22 +931,31 @@ export function compileProject(
         '__code3d',
         `"use strict";\n${result}\n//# sourceURL=code3d:${normalized}`,
       );
+      const sourceFile = ts.createSourceFile(
+        normalized,
+        source,
+        ts.ScriptTarget.Latest,
+        true,
+      );
       const requireModule = (specifier: string): unknown => {
+        const importRef = moduleSpecifierSourceRef(sourceFile, specifier);
         if (specifier === 'code3d') {
           return authoringApi;
         }
         if (!specifier.startsWith('.')) {
-          throw new CompileFailure(
+          throw modelFailure(
+            'module',
             `Unsupported module import: ${specifier}`,
-            normalized,
+            importRef,
           );
         }
         const candidate = resolveProjectImport(normalized, specifier);
         const resolved = resolveModuleFile(candidate, files);
         if (!resolved) {
-          throw new CompileFailure(
+          throw modelFailure(
+            'module',
             `Could not resolve ${specifier} from ${normalized}`,
-            normalized,
+            importRef,
           );
         }
         return executeModule(resolved).exports;
@@ -996,7 +1002,16 @@ export function compileProject(
     const meshCache = new Map();
     const snapshots = new Map<ModelObject, ModelSnapshotObject>();
     const snapshotOf = (object: ModelObject): ModelSnapshotObject => {
-      const snapshot = snapshots.get(object) ?? object.toSnapshot(meshCache);
+      const existing = snapshots.get(object);
+      if (existing) return existing;
+      let snapshot: ModelSnapshotObject;
+      try {
+        snapshot = object.toSnapshot(meshCache);
+      } catch (error) {
+        const location = object.sourceRefs.at(-1);
+        if (!location) throw error;
+        throw locateModelError(error, location);
+      }
       snapshots.set(object, snapshot);
       return snapshot;
     };
@@ -1151,6 +1166,41 @@ function resolveModuleFile(
         ...sourceExtensions.map(suffix => `${normalized}/index${suffix}`),
       ];
   return candidates.find(path => files.has(path));
+}
+
+function moduleSpecifierSourceRef(
+  sourceFile: ts.SourceFile,
+  specifier: string,
+): SourceRef | undefined {
+  let match: ts.StringLiteralLike | undefined;
+  const visit = (node: ts.Node): void => {
+    if (match) return;
+    if (
+      (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
+      node.moduleSpecifier &&
+      ts.isStringLiteralLike(node.moduleSpecifier) &&
+      node.moduleSpecifier.text === specifier
+    ) {
+      match = node.moduleSpecifier;
+      return;
+    }
+    if (
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === 'require' &&
+      node.arguments.length === 1 &&
+      ts.isStringLiteralLike(node.arguments[0]) &&
+      node.arguments[0].text === specifier
+    ) {
+      match = node.arguments[0];
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  ts.forEachChild(sourceFile, visit);
+  return match
+    ? sourceRef(sourceFile.fileName, match.getStart(sourceFile), match.getEnd())
+    : undefined;
 }
 
 function collectObjectGraph(roots: Iterable<ModelObject>): ModelObject[] {
@@ -2649,11 +2699,26 @@ function sourceRef(file: string, start: number, end: number): SourceRef {
 function diagnosticFailure(
   diagnostic: ts.Diagnostic,
   file?: string,
-): CompileFailure {
-  return new CompileFailure(
+): ModelDiagnosticError {
+  return modelFailure(
+    'syntax',
     ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'),
-    file,
-    diagnostic.start,
-    diagnostic.length,
+    file && diagnostic.start !== undefined
+      ? sourceRef(
+          file,
+          diagnostic.start,
+          diagnostic.start + (diagnostic.length ?? 1),
+        )
+      : undefined,
+  );
+}
+
+function modelFailure(
+  kind: ModelDiagnosticKind,
+  message: string,
+  sourceRef?: SourceRef,
+): ModelDiagnosticError {
+  return new ModelDiagnosticError(
+    createModelDiagnostic(kind, message, sourceRef),
   );
 }

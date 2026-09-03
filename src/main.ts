@@ -11,6 +11,7 @@ import type {
   ModelModule,
   ObjectCatalogEntry,
 } from './model/compiler';
+import {ModelDiagnosticError} from './model/diagnostic';
 import {defaultProject} from './project/default-project';
 import {
   openBrowserProjectFileSystem,
@@ -572,6 +573,7 @@ async function runModel(
       return;
     }
     currentModule = nextModule;
+    codeEditor.setModelDiagnostic();
     optimisticParameterValues.clear();
     codeEditor.setDesignArguments(nextModule.designArguments);
     codeEditor.trackSourceRefs(toolSourceRefs(nextModule));
@@ -631,15 +633,23 @@ async function runModel(
     if (revision !== runRevision) {
       return;
     }
-    const located = error as Error & {file?: string};
-    const message = error instanceof Error ? error.message : String(error);
     compilingDesignContextId = undefined;
     renderCurrentPanels();
     setRunState('error', 'Run failed');
-    errorBar.textContent = located.file
-      ? `${located.file}: ${message}`
-      : message;
-    errorBar.hidden = false;
+    const diagnostic =
+      error instanceof ModelDiagnosticError ? error.diagnostic : undefined;
+    if (diagnostic?.sourceRef) {
+      codeEditor.setModelDiagnostic(diagnostic);
+      errorBar.hidden = true;
+    } else {
+      codeEditor.setModelDiagnostic();
+      errorBar.textContent = diagnostic
+        ? [diagnostic.summary, diagnostic.details].filter(Boolean).join('\n')
+        : error instanceof Error
+          ? error.message
+          : String(error);
+      errorBar.hidden = false;
+    }
   }
 }
 
