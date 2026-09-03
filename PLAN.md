@@ -297,7 +297,7 @@ compatibility APIs.
   vocabulary is selected.
 - Preview the relation source as a ghost when useful.
 - Add copy and pattern tools on top of the same relation intents.
-- Keep the caret-selected context stable across gizmo and Inspector commits;
+- Keep the caret-selected context stable across gizmo and contextual tool commits;
   present the applied edit plan in a temporary code popover instead of moving
   the editor selection.
 
@@ -314,12 +314,20 @@ constraint source sites do.
   explicit edge set while retaining the one-argument all-edge form.
 - Project stable IDs into render meshes and operation trace selections without
   exposing kernel hashes.
-- Add an explicit viewport edge-selection mode that writes the chosen IDs back
-  to source through the common tool transaction path.
+- Treat a direct empty edge-array argument as the explicit viewport selection
+  entry, and write chosen IDs back only to that existing array through the
+  common tool transaction path. Do not offer GUI insertion of modeling calls.
+- While selecting, render the operation input and highlight hovered/selected
+  original edges. For an applied edge modification, render the result as the
+  primary solid with a weak input outline and emphasized modified input edges.
+- Make deselection reversible at both levels: toggle individual edges, clear
+  the set, or cancel the whole session without changing source.
 
 Status: complete. The runtime topology namespace, edge-scoped author API,
 derivation transfer rules, render-mesh IDs, operation trace selections,
-explicit viewport edge picking, and source write-back are implemented.
+empty-array-driven viewport picking, before/after comparison, reversible
+selection, and source write-back are implemented. The Properties panel and
+GUI operation-insertion path were removed pending a broader interaction design.
 
 ### 5. Object combination tools
 

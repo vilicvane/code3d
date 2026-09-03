@@ -35,7 +35,7 @@ selection + gesture
 
 ### Tool
 
-处理 pointer、keyboard、gizmo 或 Inspector 输入，并产生 `ToolIntent`。同一个意图可以来自不同 UI。
+处理 pointer、keyboard 或 gizmo 输入，并产生 `ToolIntent`。同一个意图可以来自不同 UI。
 
 ### Intent
 
@@ -43,7 +43,6 @@ selection + gesture
 
 - `parameter.set`：修改已有上游参数。
 - `expression.replace`：用结构化 Expression Draft 替换表达式。
-- `operation.insert`：在已有模型表达式上追加操作。
 - `relation.offset`：调整选中对象的位置关系；必要时在约束表达式上构造 `.offset()`。
 
 ### Resolver
@@ -112,11 +111,11 @@ stack 反推位置。
 ## Viewport decoration
 
 临时 3D 辅助显示使用通用的 `ViewportDecoration`。它是 renderer-neutral 的
-discriminated union：`mesh` decoration 携带派生网格和 transform，`surface`
-decoration 把网格子集附着到指定模型 occurrence，`anchor` decoration 携带模型
-node、point/line/face/frame 类型和局部 frame。viewport 只把这些数据渲染为辅助
-几何，并按 owner 设置或清除 decoration layer，不理解具体工具、建模操作或元素名称
-的语义。
+discriminated union：`mesh` decoration 携带派生网格和 transform，`edges` 可显示
+完整或按稳定 ID 过滤的边线，`surface` decoration 把网格子集附着到指定模型
+occurrence，`anchor` decoration 携带模型 node、point/line/face/frame 类型和局部
+frame。viewport 只把这些数据渲染为辅助几何，并按 owner 设置或清除 decoration
+layer，不理解具体工具、建模操作或元素名称的语义。
 
 与源码 scope 相关的辅助显示实现为 `SourceDecorationProvider`。provider 读取 runtime operation metadata 并返回 decoration；工具开发者可以注册新的 provider，无需修改 viewport 的选择或渲染主路径。交互中的工具则返回 `viewport-decorations` preview，由 host 按 owner 应用和清理对应 layer，工具本身仍不直接调用 viewport。
 
@@ -124,26 +123,30 @@ node、point/line/face/frame 类型和局部 frame。viewport 只把这些数据
 以何种 appearance 展示。当前 Boolean provider 用 `mesh` decoration 强调 `cut`
 的切除体积，以及 `union` 的重叠体积或仅接触时的 B-Rep section；named-element
 provider 用 `anchor` 标出元素 frame，并为 face 元素按其平面和法向选择真实 B-Rep
-face group，再用 `surface` 显示实体面及其边界。二者都不是 viewport 中的专用语义
-分支。
+face group，再用 `surface` 显示实体面及其边界。fillet/chamfer provider 在结果源码
+上下文中用弱化 `mesh` 保留操作前形状，并用 `edges` 强调被修改的原边。这些都不是
+viewport 中的专用操作语义分支。
 
 Provider 可通过 `previewBehavior` 声明工具预览期间的显示策略。当前 Boolean provider 使用 `hide`：参数或关系工具开始移动后隐藏旧 region，pointer move 不触发模型或 region 重算；取消时恢复已编译 region，提交后等待正常源码编译产生新的精确 region。这个策略只影响对应 provider 的 layer，不影响实体、gizmo 或其他工具 decoration。
 
 ## 当前接入的工具
 
-Inspector 参数控件产生 `parameter.set` intent。viewport 平移 gizmo 在能够唯一追溯参数时同样产生 `parameter.set`，否则针对已有关系产生 `relation.offset`；两者共享 preview、冲突检查、源码事务和 undo 语义。
+viewport 平移 gizmo 在能够唯一追溯参数时产生 `parameter.set`，否则针对已有关系产生
+`relation.offset`。源码中的 `fillet(radius, [])` 和 `chamfer(distance, [])` 则把空数组
+投影为显式 edge-selection source target，选边完成后用 `expression.replace` 只替换该
+数组。工具共享冲突检查、源码事务和 undo 语义。
 
 平移 gizmo 目前遵守以下解析规则：
 
 - 当前源码 occurrence 必须是提供相对位置语义的 operation input，或具体的
   constraint source site；变量声明和 operation output 即使对应对象带有 relation，
-  也不显示 gizmo 或 Inspector 的 offset 控件。
+  也不显示 gizmo。
 - 优先修改选中对象关系约束中能够唯一追溯的位置参数。
 - 参数归属到具体 API 调用；连续变换只编辑当前最外层调用，不重复追加操作。
 - 同一参数表达式同时包含上游变量和字面量时，优先修改上游变量。
 - 参数在整个模型中的用途必须都是同一位置轴，避免 preview 遗漏尺寸等副作用。
 - 没有唯一安全参数、但关系接收者可稳定定位时，在约束表达式上构造 `.offset(dx, dy, dz)`，不猜测内部组件应如何移动。
-- 拖动值遵守参数的 `min`、`max` 和 `step`；没有 `step` 时使用与 Inspector 相同的推断值。
+- 拖动值遵守参数的 `min`、`max` 和 `step`；没有 `step` 时使用按参数 kind 推断的步长。
 - preview 会更新所有使用该参数的 occurrence，并标出选中对象以外的受影响对象。
 - 松手才写入源文件；`Esc` 清除 preview，不产生源码修改。
 
@@ -153,21 +156,24 @@ scope 的 edit plan。
 
 ## 表达式构造
 
-工具使用 `ExpressionDraft` 描述 number、string、identifier、array、binary、call 和 member，而不是直接提交任意字符串。例如 fillet 工具可以产生：
+工具使用 `ExpressionDraft` 描述 number、string、identifier、array、binary、call 和 member，而不是直接提交任意字符串。例如边选择工具产生：
 
 ```text
-operation.insert(
-  receiver = selected expression,
-  operation = "fillet",
-  arguments = [number(2.5), array([number(3), number(7)])]
+expression.replace(
+  target = source ref of [],
+  expression = array([number(3), number(7)])
 )
 ```
 
-edge 工具只在显式选择模式中解释 viewport 点击。边以模型内稳定数字 ID 显示为
-`E3`、`E7`，写回源码时仍是普通数字数组 `[3, 7]`；普通 viewport 点击继续执行
-对象/occurrence 选择。选中集合按 ID 排序，空集合不可提交。
+edge 工具只在 caret 落入 fillet/chamfer 的直接空数组字面量时解释 viewport 点击。
+这时主实体是操作输入，边以模型内稳定数字 ID 显示为 `E3`、`E7`，写回源码时仍是
+普通数字数组 `[3, 7]`；其他时候 viewport 点击继续执行对象/occurrence 选择。再次点击
+已选边会取消该边，工具条可清空集合或放弃整次交互，`Esc` 不修改源码。选中集合按 ID
+排序，空集合不可提交。
 
-Resolver 再生成带 source anchor 的编辑计划。当前 prototype 已具备基础表达式生成和操作插入解析器；基于临时重编译的结构 preview、格式保持和多方案 UI 尚未实现。
+Resolver 再生成带 source anchor 的编辑计划。当前 prototype 已具备基础表达式替换；
+新增 fillet/chamfer 调用仍由用户手写，不提供 GUI 插入入口。基于临时重编译的结构
+preview、格式保持和多方案 UI 尚未实现。
 
 ## Scope 与歧义
 
