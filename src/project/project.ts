@@ -4,7 +4,6 @@ export type ProjectSourceFile = Readonly<{
 }>;
 
 export type ModelProject = Readonly<{
-  entryPath: string;
   files: readonly ProjectSourceFile[];
 }>;
 

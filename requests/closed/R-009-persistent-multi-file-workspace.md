@@ -13,11 +13,11 @@
 
 ## Confirmed product behavior
 
-- A project has an explicit entry file and a set of path-addressed source
-  files. `/model.ts` is the initial entry, not a privileged compiler concept.
+- A project is a set of path-addressed source files with no privileged
+  persistent entry. The active editor file is the root of the current run.
 - Every executed source module is an equal authoring surface: caret-driven
   preview, Model Outline navigation, Properties, gizmos, and source write-back
-  must work in library files as well as in the entry file.
+  must work in every project file.
 - The editor exposes files and open documents, maintains one Monaco model per
   source file, and resolves imports using project paths.
 - Browser reload restores file contents and project structure.
@@ -40,7 +40,7 @@
 - Keep an in-memory immutable project snapshot for compilation and UI state.
   Persistence is an asynchronous boundary around that snapshot, not something
   compiler evaluation reaches into directly.
-- Compile an explicit module graph rooted at the entry file. Support relative
+- Compile an explicit module graph rooted at the active file. Support relative
   TypeScript/JavaScript imports, extension resolution, index modules, module
   caching, cycles with CommonJS semantics, and the virtual `code3d` runtime
   module.
@@ -64,8 +64,8 @@
 
 ## Acceptance criteria
 
-- A fresh browser project contains an entry model plus the reusable library
-  files required by R-010 and compiles through imports.
+- A fresh browser project contains an initial model plus the reusable library
+  files required by R-010, and every file can become the execution root.
 - Creating, editing, renaming, and deleting project files/folders is reflected
   in the project tree and persists across reload. Destructive UI operations
   must be explicit and must not silently retarget imports.

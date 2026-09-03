@@ -185,7 +185,6 @@ export class CodeEditor {
   >();
   private completionFocusVersion = 0;
   private readonly sourceDecoration: monaco.editor.IEditorDecorationsCollection;
-  private entryPath: string;
   private activePath: string;
   private revision = 1;
   private suppressCursorEvent = false;
@@ -193,9 +192,8 @@ export class CodeEditor {
   constructor(
     private readonly container: HTMLElement,
     project: ModelProject,
-    initialPath = project.entryPath,
+    initialPath: string,
   ) {
-    this.entryPath = normalizeProjectPath(project.entryPath);
     this.activePath = normalizeProjectPath(initialPath);
     for (const file of project.files) {
       this.addDocument(file.path, file.source);
@@ -255,7 +253,6 @@ export class CodeEditor {
 
   project(): ModelProject {
     return {
-      entryPath: this.entryPath,
       files: [...this.documents.values()]
         .map(({path, model}) => ({path, source: model.getValue()}))
         .sort((left, right) => left.path.localeCompare(right.path)),
@@ -320,9 +317,6 @@ export class CodeEditor {
   renameFile(from: string, to: string): void {
     const sourcePath = normalizeProjectPath(from);
     const targetPath = normalizeProjectPath(to);
-    if (sourcePath === this.entryPath) {
-      throw new Error('The entry file cannot be renamed yet.');
-    }
     if (this.documents.has(targetPath)) {
       throw new Error(`File already exists: ${targetPath}`);
     }
@@ -343,26 +337,26 @@ export class CodeEditor {
 
   deleteFile(path: string): void {
     const normalized = normalizeProjectPath(path);
-    if (normalized === this.entryPath) {
-      throw new Error('The entry file cannot be deleted.');
+    if (this.documents.size === 1) {
+      throw new Error('A project needs at least one source file.');
     }
     const wasActive = normalized === this.activePath;
     const openIndex = this.openPaths.indexOf(normalized);
     if (wasActive) {
       const nextPath =
         this.openPaths.find(candidate => candidate !== normalized) ??
-        this.entryPath;
+        [...this.documents.keys()].find(candidate => candidate !== normalized)!;
       this.activePath = nextPath;
       this.withSuppressedCursorEvents(() => {
         this.sourceDecoration.clear();
         this.editor.setModel(this.requireDocument(nextPath).model);
       });
-      this.emitActiveFile('delete');
     }
     this.removeDocument(normalized);
     if (openIndex >= 0) this.openPaths.splice(openIndex, 1);
     this.revision += 1;
     this.emitChange({kind: 'delete', path: normalized});
+    if (wasActive) this.emitActiveFile('delete');
   }
 
   replaceDirectory(project: ModelProject, directory: string): void {
@@ -389,10 +383,10 @@ export class CodeEditor {
         replacementPaths.has(path),
     );
     this.openPaths.splice(0, this.openPaths.length, ...retainedOpenPaths);
-    this.entryPath = normalizeProjectPath(project.entryPath);
     if (activeDocumentReplaced) {
       if (!replacementPaths.has(this.activePath)) {
-        this.activePath = replacementFiles[0]?.path ?? this.entryPath;
+        this.activePath =
+          replacementFiles[0]?.path ?? [...this.documents.keys()][0]!;
       }
       if (!this.openPaths.includes(this.activePath)) {
         this.openPaths.push(this.activePath);

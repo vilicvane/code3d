@@ -10,7 +10,7 @@
 
 ## Product behavior
 
-- `/model.ts` is an ordinary user-owned entry module. A fresh project initially
+- `/model.ts` is an ordinary user-owned source module. A fresh project initially
   re-exports bundled examples, but later application updates do not rewrite it.
 - `/examples` is the only managed template boundary. Its files demonstrate
   primitives and derived geometry, Boolean operations, relations and typed

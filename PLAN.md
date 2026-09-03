@@ -124,6 +124,9 @@ it does not silently reorder the active milestones. Closed requests move to
   directory through the same ZenFS-backed filesystem contract. Directory
   selection belongs to a URL-scoped workspace instance, never to the whole
   browser origin, so separate code3d pages may open different projects.
+- A project has no privileged persistent entry file. The active editor file is
+  the root module for the current compile, so every source file can be opened
+  and previewed directly.
 
 ## Milestones
 

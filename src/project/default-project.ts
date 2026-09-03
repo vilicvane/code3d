@@ -6,7 +6,6 @@ export {fastenerExample as default} from './examples/fasteners';
 `;
 
 export const defaultProject = {
-  entryPath: '/model.ts',
   files: [
     {path: '/model.ts', source: workspaceSource},
     {

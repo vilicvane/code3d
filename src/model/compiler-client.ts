@@ -30,6 +30,7 @@ export class ModelCompilerClient {
 
   compile(
     project: ModelProject,
+    rootPath: string,
     designContextId?: string,
   ): Promise<ModelModule> {
     this.cancel();
@@ -53,7 +54,7 @@ export class ModelCompilerClient {
       }, timeoutMilliseconds);
 
       this.pending = {id, resolve, reject, timeout};
-      this.worker.postMessage({id, project, designContextId});
+      this.worker.postMessage({id, project, rootPath, designContextId});
     });
   }
 

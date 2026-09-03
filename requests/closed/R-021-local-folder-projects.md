@@ -15,11 +15,11 @@
   the current page to a URL-scoped local workspace.
 - An empty selected directory receives the current project snapshot. A directory
   that already contains TypeScript or JavaScript files is adopted without
-  overwriting them; `/model.ts` is preferred as its entry, otherwise the first
-  source path is used.
+  overwriting them; the routed file, `/model.ts`, or the first source path is
+  opened initially, and the active file drives each run.
 - Local source edits, creation, rename, deletion, GUI write-back, and example
   reset operate directly on the selected directory. `.code3d/project.json`
-  stores the entry and managed-example revision.
+  stores the managed-example revision.
 - Bundled examples remain visible alongside user files and retain their managed
   reset/update behavior in both storage modes.
 - The directory handle is stored under the workspace ID carried in the page

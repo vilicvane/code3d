@@ -22,8 +22,7 @@ const directoryManifestPath = '/.code3d/project.json';
 const ignoredDirectoryNames = new Set(['.code3d', '.git', 'node_modules']);
 
 type ProjectManifest = Readonly<{
-  version: 1;
-  entryPath: string;
+  version: 2;
   managedDirectories: Readonly<Record<string, string>>;
 }>;
 
@@ -89,21 +88,12 @@ class ZenProjectFileSystem implements ProjectFileSystem {
       for (const file of seed.files) {
         await this.writeFile(file.path, file.source);
       }
-      await this.writeManifest({
-        ...(manifest ?? newManifest(seed.entryPath)),
-        entryPath: normalizeProjectPath(seed.entryPath),
-      });
+      await this.writeManifest(manifest ?? newManifest());
       return this.load();
     }
 
-    const sourcePaths = sourceFiles.map(file => file.path);
-    if (manifest && sourcePaths.includes(manifest.entryPath)) {
-      return projectFrom(manifest, sourceFiles);
-    }
-    await this.writeManifest({
-      ...(manifest ?? newManifest(inferEntryPath(sourcePaths))),
-      entryPath: inferEntryPath(sourcePaths),
-    });
+    if (manifest) return projectFrom(sourceFiles);
+    await this.writeManifest(newManifest());
     return this.load();
   }
 
@@ -175,10 +165,8 @@ class ZenProjectFileSystem implements ProjectFileSystem {
   }
 
   private async load(): Promise<ModelProject> {
-    return projectFrom(
-      await this.requireManifest(),
-      await this.readSourceTree(this.projectRoot),
-    );
+    await this.requireManifest();
+    return projectFrom(await this.readSourceTree(this.projectRoot));
   }
 
   private async requireManifest(): Promise<ProjectManifest> {
@@ -192,12 +180,11 @@ class ZenProjectFileSystem implements ProjectFileSystem {
     const value = JSON.parse(
       await this.files.readFile(this.manifestPath, 'utf8'),
     ) as Partial<ProjectManifest>;
-    if (value.version !== 1 || typeof value.entryPath !== 'string') {
+    if (value.version !== 2) {
       return undefined;
     }
     return {
-      version: 1,
-      entryPath: value.entryPath,
+      version: 2,
       managedDirectories: Object.fromEntries(
         Object.entries(value.managedDirectories ?? {}).filter(
           (entry): entry is [string, string] => typeof entry[1] === 'string',
@@ -260,28 +247,15 @@ class ZenProjectFileSystem implements ProjectFileSystem {
   }
 }
 
-function projectFrom(
-  manifest: ProjectManifest,
-  files: readonly ProjectSourceFile[],
-): ModelProject {
-  return {
-    entryPath: normalizeProjectPath(manifest.entryPath),
-    files,
-  };
+function projectFrom(files: readonly ProjectSourceFile[]): ModelProject {
+  return {files};
 }
 
-function newManifest(entryPath: string): ProjectManifest {
+function newManifest(): ProjectManifest {
   return {
-    version: 1,
-    entryPath: normalizeProjectPath(entryPath),
+    version: 2,
     managedDirectories: {},
   };
-}
-
-function inferEntryPath(paths: readonly string[]): string {
-  if (paths.includes('/model.ts')) return '/model.ts';
-  if (paths.includes('/index.ts')) return '/index.ts';
-  return paths.find(path => !path.endsWith('.d.ts')) ?? paths[0];
 }
 
 function joinPath(directory: string, name: string): string {

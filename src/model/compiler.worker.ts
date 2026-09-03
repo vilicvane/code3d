@@ -10,6 +10,7 @@ import {setOC} from 'replicad';
 type CompileRequest = Readonly<{
   id: number;
   project: ModelProject;
+  rootPath: string;
   designContextId?: string;
 }>;
 
@@ -23,7 +24,11 @@ const kernelReady = initOpenCascade({
 workerScope.onmessage = async ({data}: MessageEvent<CompileRequest>) => {
   try {
     await kernelReady;
-    const module = compileProject(data.project, data.designContextId);
+    const module = compileProject(
+      data.project,
+      data.rootPath,
+      data.designContextId,
+    );
     workerScope.postMessage({id: data.id, ok: true, module});
   } catch (error) {
     workerScope.postMessage({

@@ -315,15 +315,8 @@ const toolEngine = new ToolEngine({
 codeEditor.onChange(change => {
   persistProjectChange(projectFileSystem, change);
   sourceEditPopover.dismiss();
-  renderProjectNavigation();
-  activeCompletionFocus = undefined;
-  window.clearTimeout(completionPreviewTimer);
-  completionPreviewTimer = undefined;
-  viewport.restoreTransientPreview();
-  showViewportProgress('Updating model');
-  runRevision += 1;
-  compiler.cancel();
-  scheduleModelRun(420);
+  if (change.kind !== 'content') renderProjectNavigation();
+  requestModelUpdate(420);
 });
 
 codeEditor.onCursorOffset(({file, offset}) => {
@@ -356,6 +349,9 @@ codeEditor.onCompletionFocus(handleCompletionFocus);
 codeEditor.onActiveFile((path, reason) => {
   renderProjectNavigation();
   if (!applyingFileRoute) updateFileRoute(path, reason);
+  preferredEvaluationContextId = undefined;
+  selectedDesignContextId = undefined;
+  requestModelUpdate(0);
 });
 
 window.addEventListener('popstate', () => {
@@ -558,7 +554,6 @@ async function resetExamples(): Promise<void> {
     await persistenceQueue;
     const project = await projectFileSystem.resetDirectory(bundledExamples);
     codeEditor.replaceDirectory(project, bundledExamples.directory);
-    void runModel();
   } catch (error) {
     showProjectIssue(error);
   }
@@ -566,9 +561,13 @@ async function resetExamples(): Promise<void> {
 
 function initialFilePath(project: ModelProject, hash: string): string {
   const routed = filePathFromRoute(hash);
-  return routed && project.files.some(file => file.path === routed)
-    ? routed
-    : project.entryPath;
+  if (routed && project.files.some(file => file.path === routed)) return routed;
+  const paths = project.files.map(file => file.path);
+  return (
+    ['/model.ts', '/index.ts'].find(path => paths.includes(path)) ??
+    paths.find(path => !path.endsWith('.d.ts')) ??
+    paths[0]!
+  );
 }
 
 function updateFileRoute(path: string, reason: ActiveFileChangeReason): void {
@@ -627,9 +626,7 @@ function renderProjectNavigation(): void {
 
 function showProjectContextMenu(path: string, x: number, y: number): void {
   contextFilePath = path;
-  const entry = path === codeEditor.project().entryPath;
-  contextRenameFile.disabled = entry;
-  contextDeleteFile.disabled = entry;
+  contextDeleteFile.disabled = codeEditor.filePaths().length === 1;
   projectContextMenu.style.left = `${x}px`;
   projectContextMenu.style.top = `${y}px`;
   projectContextMenu.hidden = false;
@@ -697,6 +694,7 @@ async function runModel(
     const firstRun = currentModule === null;
     const nextModule = await compiler.compile(
       codeEditor.project(),
+      codeEditor.currentFile(),
       designContextId,
     );
     if (
@@ -833,6 +831,7 @@ async function runCompletionPreview(
   try {
     const module = await compiler.compile(
       preview.project,
+      preview.cursor.file,
       selectedDesignContextId,
     );
     if (
@@ -869,6 +868,17 @@ function scheduleModelRun(delay: number): void {
     compileTimer = undefined;
     if (!activeCompletionFocus?.preview) void runModel();
   }, delay);
+}
+
+function requestModelUpdate(delay: number): void {
+  activeCompletionFocus = undefined;
+  window.clearTimeout(completionPreviewTimer);
+  completionPreviewTimer = undefined;
+  viewport.restoreTransientPreview();
+  showViewportProgress('Updating model');
+  runRevision += 1;
+  compiler.cancel();
+  scheduleModelRun(delay);
 }
 
 function renderContextControls(module: ModelModule): void {

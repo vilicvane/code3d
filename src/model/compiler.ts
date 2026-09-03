@@ -867,6 +867,7 @@ function designArgumentsLabel(source: string): string {
 
 export function compileProject(
   project: ModelProject,
+  rootModulePath: string,
   requestedDesignContextId?: string,
 ): ModelModule {
   const files = new Map(
@@ -878,15 +879,12 @@ export function compileProject(
   const activeDesignContext = designArguments.find(
     context => context.id === requestedDesignContextId,
   );
-  const entryPath = resolveModuleFile(
-    normalizeProjectPath(project.entryPath),
+  const rootPath = resolveModuleFile(
+    normalizeProjectPath(rootModulePath),
     files,
   );
-  if (!entryPath) {
-    throw modelFailure(
-      'project',
-      `Project entry not found: ${project.entryPath}`,
-    );
+  if (!rootPath) {
+    throw modelFailure('project', `Project file not found: ${rootModulePath}`);
   }
 
   tracedObjects.clear();
@@ -964,7 +962,7 @@ export function compileProject(
       return module;
     };
 
-    executeModule(entryPath);
+    executeModule(rootPath);
     if (
       activeDesignContext &&
       !modules.has(activeDesignContext.functionRef.file)
@@ -977,8 +975,8 @@ export function compileProject(
     for (const [modulePath, module] of modules) {
       for (const [name, value] of Object.entries(module.exports)) {
         const exportLabel =
-          modulePath === entryPath ? name : `${modulePath}:${name}`;
-        if (modulePath === entryPath && isModelObject(value)) {
+          modulePath === rootPath ? name : `${modulePath}:${name}`;
+        if (modulePath === rootPath && isModelObject(value)) {
           modelExports.set(name, value);
         }
         for (const object of modelObjectsIn(value)) {
