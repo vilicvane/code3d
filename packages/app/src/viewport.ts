@@ -550,11 +550,13 @@ export class ModelViewport {
     const occurrence = this.occurrences.get(occurrenceKey);
     const input = this.module?.objects.get(inputNodeId);
     if (
-      occurrence?.node.kind !== 'solid' ||
-      input?.kind !== 'solid' ||
+      !occurrence ||
+      !input ||
+      occurrence.node.kind === 'group' ||
+      input.kind === 'group' ||
       !input.mesh
     ) {
-      throw new Error('Topology selection requires a solid model.');
+      throw new Error('Topology selection requires a geometric model.');
     }
     const availableIds = topologyIds(input.mesh, kind);
     if (availableIds.length === 0) {
@@ -1723,7 +1725,9 @@ function isCompositionRole(role: ModelOperationInputRole | undefined): boolean {
     role === 'receiver' ||
     role === 'operand' ||
     role === 'tool' ||
-    role === 'child'
+    role === 'child' ||
+    role === 'section' ||
+    role === 'spine'
   );
 }
 

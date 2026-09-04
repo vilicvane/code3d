@@ -152,7 +152,7 @@ compiler 为每个实际进入的 call site execution 统一记录完成或失�
 
 参数 schema 是按能力扩展的 tagged union。数值 `kind` 提供标量控件；`vertex`、`edge`
 和 `surface` 提供 topology selector，其单选或多选能力从声明参数是否为数组推导，而不是
-再写一份交互配置。`Solid.vertex(id)`、`Solid.edge(id)` 和 `Solid.surface(id)` 使用单选
+再写一份交互配置。几何模型的 `.vertex(id)`、`.edge(id)` 和 `.surface(id)` 使用单选
 provider：compiler 在调用进入时记录 receiver 和已求值参数，所以参数缺失或引用已退休
 拓扑而失败时仍可显示 receiver 并修复；viewport pick 产生通用 `argument.set` intent，
 立即写回同一个源码事务。

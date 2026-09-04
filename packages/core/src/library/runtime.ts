@@ -2,18 +2,31 @@ import {
   assembleWire,
   cast,
   getOC,
+  loft as makeLoft,
   makeBox,
+  makeBSplineApproximation,
+  makeBezierCurve,
   makeCylinder,
   makeFace,
+  makeLine,
   makeSphere,
+  makeThreePointArc,
+  makeVertex,
   sketchCircle,
+  sketchEllipse,
   sketchPolysides,
+  sketchRectangle,
   type AnyShape,
+  type Edge as ReplicadEdge,
+  type Face as ReplicadFace,
   type Shape3D,
+  type Wire as ReplicadWire,
 } from 'replicad';
+import type {TopoDS_Shape} from 'replicad-opencascadejs';
 import {
   addVectors,
   composeTransforms,
+  frameFromYAxis,
   halfTurnAroundX,
   identityRigidTransform,
   invertTransform,
@@ -38,8 +51,8 @@ import {
   booleanWithTopology,
   chamferEdges,
   filletEdges,
-  initialSolidTopology,
-  preserveSolidTopology,
+  initialShapeTopology,
+  preserveShapeTopology,
   resolveEdge,
   resolveEdgeSelection,
   resolveSurface,
@@ -47,8 +60,11 @@ import {
   stableEdgeGroups,
   stableSurfaceGroups,
   stableVertexData,
+  topologyEdgeDirection,
+  topologySurfaceDirection,
+  topologyVertexPoint,
   type EdgeId,
-  type SolidTopology,
+  type ShapeTopology,
   type SurfaceId,
   type TopologyKind,
   type VertexId,
@@ -126,6 +142,16 @@ export type ModelOperationKind =
   | 'sphere'
   | 'frustum'
   | 'regularPrism'
+  | 'circle'
+  | 'ellipse'
+  | 'rectangle'
+  | 'regularPolygon'
+  | 'point'
+  | 'line'
+  | 'arc'
+  | 'bezier'
+  | 'spline'
+  | 'loft'
   | 'helicalThread'
   | 'paint'
   | 'scaled'
@@ -145,7 +171,13 @@ export type ModelOperationInputRole =
   | 'tool'
   | 'child'
   | 'collection'
-  | 'reference';
+  | 'reference'
+  | 'section'
+  | 'spine';
+
+export type ModelGeometryKind = 'solid' | 'face' | 'edge' | 'vertex';
+
+export type ModelKind = ModelGeometryKind | 'group';
 
 export type ModelOperationRegionSnapshot = Readonly<{
   kind: 'intersection' | 'section';
@@ -199,7 +231,7 @@ export type RenderMesh = Readonly<{
 
 export type ModelSnapshotObject = Readonly<{
   nodeId: string;
-  kind: 'solid' | 'group';
+  kind: ModelKind;
   name: string;
   color?: string;
   children: readonly ModelSnapshotObject[];
@@ -283,9 +315,10 @@ type BooleanEvaluation = Readonly<{
   regions: readonly StoredOperationRegion[];
 }>;
 
-type ModelObjectInit = Readonly<{
-  kind: 'solid' | 'group';
-  geometry?: SolidGeometry;
+type ModelObjectInit<Kind extends ModelKind = ModelKind> = Readonly<{
+  kind: Kind;
+  geometry?: ModelGeometry;
+  intrinsic?: StoredElement;
   name?: string;
   color?: string;
   children?: readonly ModelObject[];
@@ -300,13 +333,17 @@ type ModelObjectInit = Readonly<{
 
 type LocalBounds = readonly [minimum: Vec3, maximum: Vec3];
 
-type SolidGeometryValue = Readonly<{
-  shape: Shape3D;
-  topology: SolidTopology;
+type ModelGeometryValue = Readonly<{
+  shape: AnyShape;
+  topology: ShapeTopology;
   localBounds: LocalBounds;
 }>;
 
-type SolidGeometry = KernelArtifact<SolidGeometryValue>;
+type ModelGeometry = KernelArtifact<ModelGeometryValue>;
+
+type SolidGeometry = KernelArtifact<
+  ModelGeometryValue & Readonly<{shape: Shape3D}>
+>;
 
 type SolveContext = {
   poses: Map<ModelObject, RigidTransform>;
@@ -318,6 +355,23 @@ let nextNodeId = 1;
 let nextConstraintId = 1;
 let nextOperationId = 1;
 const combineModels = Symbol('combineModels');
+const loftModels = Symbol('loftModels');
+
+const modelElementKinds = {
+  solid: 'frame',
+  face: 'face',
+  edge: 'line',
+  vertex: 'point',
+  group: 'frame',
+} as const satisfies Record<ModelKind, ElementKind>;
+
+const defaultModelNames = {
+  solid: 'Solid',
+  face: 'Face',
+  edge: 'Edge',
+  vertex: 'Vertex',
+  group: 'Group',
+} as const satisfies Record<ModelKind, string>;
 
 export interface Anchor<Kind extends ElementKind = ElementKind> {
   readonly elementKind: Kind;
@@ -330,17 +384,17 @@ export interface LineAnchor extends Anchor<'line'> {}
 
 export interface FaceAnchor extends Anchor<'face'> {}
 
-export interface Vertex {
+export interface Vertex extends PointAnchor {
   readonly kind: 'vertex';
   readonly id: VertexId;
 }
 
-export interface Edge {
+export interface Edge extends LineAnchor {
   readonly kind: 'edge';
   readonly id: EdgeId;
 }
 
-export interface Surface {
+export interface Surface extends FaceAnchor {
   readonly kind: 'surface';
   readonly id: SurfaceId;
 }
@@ -367,14 +421,59 @@ type MergedElements<
   Added extends NamedElements,
 > = Omit<Existing, keyof Added> & Added;
 
-export type Model<Elements extends NamedElements = {}> = ModelObject<Elements> &
-  Elements;
+type ModelElementKind<Kind extends ModelKind> = Kind extends 'face'
+  ? 'face'
+  : Kind extends 'edge'
+    ? 'line'
+    : Kind extends 'vertex'
+      ? 'point'
+      : 'frame';
+
+type TopologyElementKind<Kind extends TopologyKind> = Kind extends 'surface'
+  ? 'face'
+  : Kind extends 'edge'
+    ? 'line'
+    : 'point';
+
+export type Model<
+  Elements extends NamedElements = {},
+  Kind extends ModelKind = 'solid',
+> = ModelObject<Elements, Kind> & Elements;
+
+export type SolidModel<Elements extends NamedElements = CanonicalElements> =
+  Model<Elements, 'solid'>;
+
+export type FaceModel<Elements extends NamedElements = PlanarElements> = Model<
+  Elements,
+  'face'
+>;
+
+export type EdgeModel<Elements extends NamedElements = CurveElements> = Model<
+  Elements,
+  'edge'
+>;
+
+export type VertexModel<Elements extends NamedElements = {}> = Model<
+  Elements,
+  'vertex'
+>;
 
 export type CanonicalElements = Readonly<{
   center: PointAnchor;
   top: FaceAnchor;
   bottom: FaceAnchor;
   axis: LineAnchor;
+}>;
+
+export type PlanarElements = Readonly<{
+  center: PointAnchor;
+  plane: FaceAnchor;
+}>;
+
+export type CurveElements = Readonly<{
+  start: PointAnchor;
+  midpoint: PointAnchor;
+  end: PointAnchor;
 }>;
 
 class ModelAnchor<
@@ -397,13 +496,35 @@ type TopologyIdByKind = Readonly<{
   surface: SurfaceId;
 }>;
 
-class ModelTopologyElement<Kind extends TopologyKind> {
+class ModelTopologyElement<Kind extends TopologyKind> implements Anchor<
+  TopologyElementKind<Kind>
+> {
+  readonly elementKind: TopologyElementKind<Kind>;
+
   constructor(
     readonly model: ModelObject,
     readonly kind: Kind,
     readonly id: TopologyIdByKind[Kind],
-  ) {}
+    readonly transform: RigidTransform,
+  ) {
+    this.elementKind = topologyElementKinds[
+      kind
+    ] as unknown as TopologyElementKind<Kind>;
+  }
+
+  on(target: Anchor): Constraint {
+    return new Constraint(
+      topologyAnchorReference(this),
+      anchorReference(target),
+    );
+  }
 }
+
+const topologyElementKinds = {
+  vertex: 'point',
+  edge: 'line',
+  surface: 'face',
+} as const satisfies Record<TopologyKind, ElementKind>;
 
 export function modelElementReference(
   value: unknown,
@@ -521,32 +642,41 @@ export class Constraint {
 
 export class ModelObject<
   Elements extends NamedElements = {},
-> implements Anchor<'frame'> {
-  readonly elementKind = 'frame' as const;
+  Kind extends ModelKind = ModelKind,
+> implements Anchor<ModelElementKind<Kind>> {
+  readonly elementKind: ModelElementKind<Kind>;
   readonly nodeId: string;
-  readonly kind: 'solid' | 'group';
+  readonly kind: Kind;
   readonly name: string;
   readonly color?: string;
   readonly children: readonly ModelObject[];
   readonly sourceRefs: SourceRef[];
   readonly parameters: ParameterUsage[];
-  private readonly geometry?: SolidGeometry;
+  private readonly geometry?: ModelGeometry;
   private readonly meshTolerance: number;
+  private readonly intrinsic: StoredElement;
   private readonly elements: StoredElements;
   private constraints: StoredConstraint[];
   private readonly operation: StoredOperation;
 
-  constructor(init: ModelObjectInit) {
-    if (init.kind === 'solid' && !init.geometry) {
+  constructor(init: ModelObjectInit<Kind>) {
+    if (init.kind !== 'group' && !init.geometry) {
       throw new Error(
-        'A solid model object must contain an OpenCascade shape.',
+        'A geometric model object must contain an OpenCascade shape.',
       );
     }
     this.nodeId = init.nodeId ?? `node-${nextNodeId++}`;
     this.kind = init.kind;
+    this.elementKind = modelElementKinds[
+      init.kind
+    ] as unknown as ModelElementKind<Kind>;
     this.geometry = init.geometry;
+    this.intrinsic = init.intrinsic ?? {
+      kind: this.elementKind,
+      transform: identityRigidTransform,
+    };
     this.meshTolerance = init.meshTolerance ?? 0.2;
-    this.name = init.name ?? (init.kind === 'solid' ? 'Solid' : 'Group');
+    this.name = init.name ?? defaultModelNames[init.kind];
     this.color = init.color;
     this.children = init.children ?? [];
     this.constraints = [...(init.constraints ?? [])];
@@ -555,7 +685,9 @@ export class ModelObject<
     this.operation = init.operation;
     this.elements =
       init.elements ??
-      (this.geometry ? canonicalElements(this.geometry.value.localBounds) : {});
+      (this.kind === 'solid' && this.geometry
+        ? canonicalElements(this.geometry.value.localBounds)
+        : {});
     for (const [name, element] of Object.entries(this.elements)) {
       if (name in this) {
         throw new Error(
@@ -570,19 +702,19 @@ export class ModelObject<
 
   on(target: Anchor): Constraint {
     return new Constraint(
-      {
-        model: this,
-        name: 'origin',
-        kind: 'frame',
-        transform: identityRigidTransform,
-      },
+      this.relationAnchorReference(),
       anchorReference(target),
     );
   }
 
+  /** Runtime relation hook. Not part of the authoring API. */
+  relationAnchorReference(): AnchorReference {
+    return {model: this, name: 'origin', ...this.intrinsic};
+  }
+
   relate(
-    build: (self: Model<Elements>) => Constraint | readonly Constraint[],
-  ): Model<Elements> {
+    build: (self: Model<Elements, Kind>) => Constraint | readonly Constraint[],
+  ): Model<Elements, Kind> {
     const operation = storedOperation('relate', [
       {model: this, role: 'source', index: 0},
     ]);
@@ -603,7 +735,7 @@ export class ModelObject<
 
   expose<const Sources extends ElementSources>(
     sources: Sources,
-  ): Model<MergedElements<Elements, ExposedElements<Sources>>> {
+  ): Model<MergedElements<Elements, ExposedElements<Sources>>, Kind> {
     const context = createSolveContext();
     const ownPose = this.solvePose(context);
     const references: ModelObject[] = [];
@@ -639,36 +771,60 @@ export class ModelObject<
     return this.copy(
       {elements: {...this.elements, ...exposed}},
       operation,
-    ) as Model<MergedElements<Elements, ExposedElements<Sources>>>;
+    ) as Model<MergedElements<Elements, ExposedElements<Sources>>, Kind>;
   }
 
   /** @code3d.param id {kind: 'vertex', label: 'Vertex'} */
   vertex(id: VertexId): Vertex {
-    const topology = this.requireGeometry().value.topology.vertices;
+    const geometry = this.requireGeometry().value;
+    const topology = geometry.topology.vertices;
+    const resolved = resolveVertex(topology, id);
+    const {position} = topologyVertexPoint(geometry.shape, topology, resolved);
     return new ModelTopologyElement(
       this,
       'vertex',
-      resolveVertex(topology, id),
+      resolved,
+      translation(position),
     );
   }
 
   /** @code3d.param id {kind: 'surface', label: 'Surface'} */
   surface(id: SurfaceId): Surface {
-    const topology = this.requireGeometry().value.topology.surfaces;
+    const geometry = this.requireGeometry().value;
+    const topology = geometry.topology.surfaces;
+    const resolved = resolveSurface(topology, id);
+    const {position, direction} = topologySurfaceDirection(
+      geometry.shape,
+      topology,
+      resolved,
+    );
     return new ModelTopologyElement(
       this,
       'surface',
-      resolveSurface(topology, id),
+      resolved,
+      frameFromYAxis(position, direction),
     );
   }
 
   /** @code3d.param id {kind: 'edge', label: 'Edge'} */
   edge(id: EdgeId): Edge {
-    const topology = this.requireGeometry().value.topology.edges;
-    return new ModelTopologyElement(this, 'edge', resolveEdge(topology, id));
+    const geometry = this.requireGeometry().value;
+    const topology = geometry.topology.edges;
+    const resolved = resolveEdge(topology, id);
+    const {position, direction} = topologyEdgeDirection(
+      geometry.shape,
+      topology,
+      resolved,
+    );
+    return new ModelTopologyElement(
+      this,
+      'edge',
+      resolved,
+      frameFromYAxis(position, direction),
+    );
   }
 
-  paint(color: string): Model<Elements> {
+  paint(color: string): Model<Elements, Kind> {
     return this.copy(
       {color},
       storedOperation('paint', [{model: this, role: 'source', index: 0}]),
@@ -676,15 +832,15 @@ export class ModelObject<
   }
 
   /** @code3d.param factor {kind: 'ratio', label: 'Scale'} */
-  scaled(factor: number): Model<Elements> {
+  scaled(factor: number): Model<Elements, Kind> {
     assertPositive('scale', factor);
     const source = this.requireGeometry();
-    const geometry = evaluateSolidGeometry('scaled', [factor], [source], () => {
+    const geometry = evaluateModelGeometry('scaled', [factor], [source], () => {
       const shape = source.value.shape.clone().scale(factor, toPoint(origin));
       try {
         return {
           shape,
-          topology: preserveSolidTopology(shape, source.value.topology),
+          topology: preserveShapeTopology(shape, source.value.topology),
         };
       } catch (error) {
         shape.delete();
@@ -693,7 +849,10 @@ export class ModelObject<
     });
     return this.copyWithGeometry(
       geometry,
-      {elements: scaleElements(this.elements, factor)},
+      {
+        intrinsic: scaleElement(this.intrinsic, factor),
+        elements: scaleElements(this.elements, factor),
+      },
       storedOperation('scaled', [{model: this, role: 'source', index: 0}]),
     );
   }
@@ -702,9 +861,13 @@ export class ModelObject<
    * @code3d.param radius {kind: 'length', label: 'Fillet radius', constraints: {exclusiveMin: 0}}
    * @code3d.param edgeIds {kind: 'edge', actions: [{label: 'Use all', action: 'remove-argument'}]}
    */
-  fillet(radius: number, edgeIds?: readonly EdgeId[]): Model<Elements> {
+  fillet(
+    this: ModelObject<Elements, 'solid'>,
+    radius: number,
+    edgeIds?: readonly EdgeId[],
+  ): SolidModel<Elements> {
     assertPositive('radius', radius);
-    const source = this.requireGeometry();
+    const source = this.requireSolidGeometry();
     const selectedEdgeIds = resolveEdgeSelection(
       source.value.topology.edges,
       edgeIds,
@@ -736,9 +899,13 @@ export class ModelObject<
    * @code3d.param distance {kind: 'length', label: 'Chamfer distance', constraints: {exclusiveMin: 0}}
    * @code3d.param edgeIds {kind: 'edge', actions: [{label: 'Use all', action: 'remove-argument'}]}
    */
-  chamfer(distance: number, edgeIds?: readonly EdgeId[]): Model<Elements> {
+  chamfer(
+    this: ModelObject<Elements, 'solid'>,
+    distance: number,
+    edgeIds?: readonly EdgeId[],
+  ): SolidModel<Elements> {
     assertPositive('distance', distance);
-    const source = this.requireGeometry();
+    const source = this.requireSolidGeometry();
     const selectedEdgeIds = resolveEdgeSelection(
       source.value.topology.edges,
       edgeIds,
@@ -766,7 +933,10 @@ export class ModelObject<
     );
   }
 
-  withChildren(children: readonly ModelObject[]): Model<Elements> {
+  withChildren(
+    this: ModelObject<Elements, 'group'>,
+    children: readonly ModelObject[],
+  ): Model<Elements, 'group'> {
     if (this.kind !== 'group') {
       throw new Error('Only a group can contain child objects.');
     }
@@ -885,14 +1055,85 @@ export class ModelObject<
     this.children.forEach(child => child.disposeShape(disposed));
   }
 
+  [loftModels](
+    this: ModelObject<Elements, 'face'>,
+    others: readonly ModelObject<{}, 'face'>[],
+    spine: ModelObject<{}, 'edge'> | undefined,
+    ruled: boolean,
+  ): SolidModel {
+    const sections: readonly ModelObject<{}, 'face'>[] = [this, ...others];
+    const solveContext = createSolveContext();
+    const resultPose = this.solvePose(solveContext);
+    const sectionInputs = sections.map(section => ({
+      model: section,
+      geometry: section.requireGeometry(),
+      transform: relativeTransform(section.solvePose(solveContext), resultPose),
+    }));
+    const spineInput = spine
+      ? {
+          model: spine,
+          geometry: spine.requireGeometry(),
+          transform: relativeTransform(
+            spine.solvePose(solveContext),
+            resultPose,
+          ),
+        }
+      : undefined;
+    const geometry = evaluateSolidGeometry(
+      spine ? 'spine-loft' : 'loft',
+      [
+        ruled,
+        sectionInputs.map(input => [
+          input.transform.position,
+          input.transform.quaternion,
+        ]),
+        spineInput
+          ? [spineInput.transform.position, spineInput.transform.quaternion]
+          : null,
+      ],
+      [
+        ...sectionInputs.map(input => input.geometry),
+        ...(spineInput ? [spineInput.geometry] : []),
+      ],
+      () => ({
+        shape: buildLoftShape(sectionInputs, spineInput, ruled),
+      }),
+    );
+    const inputs = [...sections, ...(spine ? [spine] : [])];
+    return new ModelObject<CanonicalElements, 'solid'>({
+      kind: 'solid',
+      name: 'Loft',
+      geometry,
+      color: this.color,
+      constraints: this.constraints,
+      sourceRefs: inputs.flatMap(input => input.sourceRefs),
+      parameters: uniqueParameters(
+        inputs.flatMap(input => input.allParameters()),
+      ),
+      meshTolerance: Math.min(...inputs.map(input => input.meshTolerance)),
+      operation: storedOperation('loft', [
+        {model: this, role: 'receiver', index: 0},
+        ...others.map((model, index) => ({
+          model,
+          role: 'section' as const,
+          index: index + 1,
+        })),
+        ...(spine
+          ? [{model: spine, role: 'spine' as const, index: sections.length}]
+          : []),
+      ]),
+    }) as SolidModel;
+  }
+
   [combineModels](
+    this: ModelObject<Elements, 'solid'>,
     operation: BooleanOperation,
-    others: readonly ModelObject[],
-  ): Model<CanonicalElements> {
+    others: readonly ModelObject<{}, 'solid'>[],
+  ): SolidModel {
     const evaluation = this.evaluateBoolean(operation, others);
     let transferred = false;
     try {
-      const combined = new ModelObject<CanonicalElements>({
+      const combined = new ModelObject<CanonicalElements, 'solid'>({
         kind: 'solid',
         geometry: evaluation.geometry,
         name: this.name,
@@ -921,7 +1162,7 @@ export class ModelObject<
         ),
       });
       transferred = true;
-      return combined as Model<CanonicalElements>;
+      return combined as SolidModel;
     } finally {
       if (!transferred) {
         evaluation.geometry.value.shape.delete();
@@ -931,18 +1172,19 @@ export class ModelObject<
   }
 
   private evaluateBoolean(
+    this: ModelObject<Elements, 'solid'>,
     operation: BooleanOperation,
-    others: readonly ModelObject[],
+    others: readonly ModelObject<{}, 'solid'>[],
   ): BooleanEvaluation {
     const solveContext = createSolveContext();
     const targetPose = this.solvePose(solveContext);
-    let geometry = this.requireGeometry();
+    let geometry = this.requireSolidGeometry();
     let temporaryGeometry: SolidGeometry | undefined;
     const regions: StoredOperationRegion[] = [];
     let evaluated = false;
     try {
       for (const other of others) {
-        const otherGeometry = other.requireGeometry();
+        const otherGeometry = other.requireSolidGeometry();
         const transform = relativeTransform(
           other.solvePose(solveContext),
           targetPose,
@@ -1078,13 +1320,20 @@ export class ModelObject<
     };
   }
 
-  private requireGeometry(): SolidGeometry {
+  private requireGeometry(): ModelGeometry {
     if (!this.geometry) {
       throw new Error(
-        'This operation requires a solid and cannot act on a group.',
+        'This operation requires geometry and cannot act on a group.',
       );
     }
     return this.geometry;
+  }
+
+  private requireSolidGeometry(): SolidGeometry {
+    if (this.kind !== 'solid') {
+      throw new Error('This operation requires a solid model.');
+    }
+    return this.requireGeometry() as SolidGeometry;
   }
 
   private operationSnapshot(
@@ -1132,10 +1381,10 @@ export class ModelObject<
   }
 
   private copyWithGeometry(
-    geometry: SolidGeometry,
-    overrides: Partial<ModelObjectInit>,
+    geometry: ModelGeometry,
+    overrides: Partial<ModelObjectInit<Kind>>,
     operation: StoredOperation,
-  ): Model<Elements> {
+  ): Model<Elements, Kind> {
     try {
       return this.copy({...overrides, geometry}, operation);
     } catch (error) {
@@ -1145,12 +1394,13 @@ export class ModelObject<
   }
 
   private copy(
-    overrides: Partial<ModelObjectInit>,
+    overrides: Partial<ModelObjectInit<Kind>>,
     operation: StoredOperation,
-  ): Model<Elements> {
-    return new ModelObject<Elements>({
+  ): Model<Elements, Kind> {
+    return new ModelObject<Elements, Kind>({
       kind: this.kind,
       geometry: this.geometry,
+      intrinsic: this.intrinsic,
       name: this.name,
       color: this.color,
       children: this.children,
@@ -1161,8 +1411,161 @@ export class ModelObject<
       meshTolerance: this.meshTolerance,
       operation,
       ...overrides,
-    }) as Model<Elements>;
+    }) as Model<Elements, Kind>;
   }
+}
+
+/** @code3d.param radius {kind: 'length', constraints: {exclusiveMin: 0}} */
+export function circle(radius: number): FaceModel {
+  assertPositive('radius', radius);
+  return planarFaceModel('circle', 'Circle', [radius], () =>
+    sketchCircle(radius, {plane: 'XZ'}),
+  );
+}
+
+/**
+ * @code3d.param xRadius {kind: 'length', label: 'X radius', constraints: {exclusiveMin: 0}}
+ * @code3d.param zRadius {kind: 'length', label: 'Z radius', constraints: {exclusiveMin: 0}}
+ */
+export function ellipse(xRadius: number, zRadius: number): FaceModel {
+  assertPositive('xRadius', xRadius);
+  assertPositive('zRadius', zRadius);
+  return planarFaceModel('ellipse', 'Ellipse', [xRadius, zRadius], () =>
+    sketchEllipse(xRadius, zRadius, {plane: 'XZ'}),
+  );
+}
+
+/**
+ * @code3d.param width {kind: 'length', constraints: {exclusiveMin: 0}}
+ * @code3d.param height {kind: 'length', constraints: {exclusiveMin: 0}}
+ */
+export function rectangle(width: number, height: number): FaceModel {
+  assertPositive('width', width);
+  assertPositive('height', height);
+  return planarFaceModel('rectangle', 'Rectangle', [width, height], () =>
+    sketchRectangle(width, height, {plane: 'XZ'}),
+  );
+}
+
+/**
+ * @code3d.param radius {kind: 'length', constraints: {exclusiveMin: 0}}
+ * @code3d.param sides {kind: 'count', constraints: {min: 3}}
+ * @code3d.param rotation {kind: 'angle'}
+ */
+export function regularPolygon(
+  radius: number,
+  sides: number,
+  rotation = 0,
+): FaceModel {
+  assertPositive('radius', radius);
+  if (!Number.isInteger(sides) || sides < 3) {
+    throw new Error('sides must be an integer greater than or equal to 3.');
+  }
+  if (!Number.isFinite(rotation)) {
+    throw new Error('rotation must be a finite number.');
+  }
+  return planarFaceModel(
+    'regularPolygon',
+    `${sides}-sided polygon`,
+    [radius, sides, rotation],
+    () => sketchPolysides(radius, sides, 0, {plane: 'XZ'}),
+    face =>
+      rotation === 0 ? face : face.rotate(rotation, toPoint(origin), [0, 1, 0]),
+  );
+}
+
+/**
+ * @code3d.param x {kind: 'length'}
+ * @code3d.param y {kind: 'length'}
+ * @code3d.param z {kind: 'length'}
+ */
+export function point(x?: number, y?: number, z?: number): VertexModel;
+export function point(position: Vec3): VertexModel;
+export function point(
+  xOrPosition: number | Vec3 = 0,
+  y = 0,
+  z = 0,
+): VertexModel {
+  const position: Vec3 =
+    typeof xOrPosition === 'number' ? [xOrPosition, y, z] : xOrPosition;
+  assertFiniteVector('point', position);
+  const geometry = evaluateModelGeometry('point', [position], [], () => ({
+    shape: makeVertex(toPoint(position)),
+  }));
+  return new ModelObject<{}, 'vertex'>({
+    kind: 'vertex',
+    name: 'Point',
+    geometry,
+    intrinsic: {kind: 'point', transform: translation(position)},
+    operation: storedOperation('point'),
+  }) as VertexModel;
+}
+
+/**
+ * @code3d.param x {kind: 'length', label: 'End X'}
+ * @code3d.param y {kind: 'length', label: 'End Y'}
+ * @code3d.param z {kind: 'length', label: 'End Z'}
+ */
+export function line(x: number, y: number, z: number): EdgeModel;
+export function line(start: Vec3, end: Vec3): EdgeModel;
+export function line(
+  xOrStart: number | Vec3,
+  yOrEnd: number | Vec3,
+  z?: number,
+): EdgeModel {
+  const [start, end]: readonly [Vec3, Vec3] =
+    typeof xOrStart === 'number'
+      ? [origin, [xOrStart, yOrEnd as number, z ?? 0]]
+      : [xOrStart, yOrEnd as Vec3];
+  assertCurvePoints('line', [start, end], 2);
+  return curveModel('line', 'Line', [start, end], () =>
+    makeLine(toPoint(start), toPoint(end)),
+  );
+}
+
+export function arc(start: Vec3, middle: Vec3, end: Vec3): EdgeModel {
+  assertCurvePoints('arc', [start, middle, end], 3);
+  return curveModel('arc', 'Arc', [start, middle, end], () =>
+    makeThreePointArc(toPoint(start), toPoint(middle), toPoint(end)),
+  );
+}
+
+export function bezier(points: readonly Vec3[]): EdgeModel {
+  assertCurvePoints('bezier', points, 2);
+  return curveModel('bezier', 'Bezier curve', points, () =>
+    makeBezierCurve(points.map(toPoint)),
+  );
+}
+
+export function spline(points: readonly Vec3[]): EdgeModel {
+  assertCurvePoints('spline', points, 2);
+  return curveModel('spline', 'Spline', points, () =>
+    makeBSplineApproximation(points.map(toPoint)),
+  );
+}
+
+export type LoftOptions = Readonly<{
+  spine?: EdgeModel;
+  ruled?: boolean;
+}>;
+
+export function loft(
+  sections: readonly FaceModel[],
+  {spine, ruled = false}: LoftOptions = {},
+): SolidModel {
+  if (sections.length < 2) {
+    throw new Error('loft requires at least two planar sections.');
+  }
+  sections.forEach(section => {
+    if (!isModelObject(section) || section.kind !== 'face') {
+      throw new Error('Every loft section must be a planar face model.');
+    }
+  });
+  if (spine && (!isModelObject(spine) || spine.kind !== 'edge')) {
+    throw new Error('A loft spine must be a curve model.');
+  }
+  const [first, ...others] = sections;
+  return first[loftModels](others, spine, ruled);
 }
 
 /**
@@ -1170,15 +1573,11 @@ export class ModelObject<
  * @code3d.param height {kind: 'length', constraints: {exclusiveMin: 0}}
  * @code3d.param depth {kind: 'length', constraints: {exclusiveMin: 0}}
  */
-export function box(
-  width: number,
-  height: number,
-  depth: number,
-): Model<CanonicalElements> {
+export function box(width: number, height: number, depth: number): SolidModel {
   assertPositive('width', width);
   assertPositive('height', height);
   assertPositive('depth', depth);
-  return new ModelObject<CanonicalElements>({
+  return new ModelObject<CanonicalElements, 'solid'>({
     kind: 'solid',
     name: 'Box',
     geometry: evaluateSolidGeometry('box', [width, height, depth], [], () => ({
@@ -1195,13 +1594,10 @@ export function box(
  * @code3d.param radius {kind: 'length', constraints: {exclusiveMin: 0}}
  * @code3d.param height {kind: 'length', constraints: {exclusiveMin: 0}}
  */
-export function cylinder(
-  radius: number,
-  height: number,
-): Model<CanonicalElements> {
+export function cylinder(radius: number, height: number): SolidModel {
   assertPositive('radius', radius);
   assertPositive('height', height);
-  return new ModelObject<CanonicalElements>({
+  return new ModelObject<CanonicalElements, 'solid'>({
     kind: 'solid',
     name: 'Cylinder',
     geometry: evaluateSolidGeometry('cylinder', [radius, height], [], () => ({
@@ -1212,9 +1608,9 @@ export function cylinder(
 }
 
 /** @code3d.param radius {kind: 'length', constraints: {exclusiveMin: 0}} */
-export function sphere(radius: number): Model<CanonicalElements> {
+export function sphere(radius: number): SolidModel {
   assertPositive('radius', radius);
-  return new ModelObject<CanonicalElements>({
+  return new ModelObject<CanonicalElements, 'solid'>({
     kind: 'solid',
     name: 'Sphere',
     geometry: evaluateSolidGeometry('sphere', [radius], [], () => ({
@@ -1233,11 +1629,11 @@ export function frustum(
   bottomRadius: number,
   topRadius: number,
   height: number,
-): Model<CanonicalElements> {
+): SolidModel {
   assertPositive('bottomRadius', bottomRadius);
   assertPositive('topRadius', topRadius);
   assertPositive('height', height);
-  return new ModelObject<CanonicalElements>({
+  return new ModelObject<CanonicalElements, 'solid'>({
     kind: 'solid',
     name: 'Frustum',
     geometry: evaluateSolidGeometry(
@@ -1271,7 +1667,7 @@ export function regularPrism(
   height: number,
   sides: number,
   rotation = 0,
-): Model<CanonicalElements> {
+): SolidModel {
   assertPositive('radius', radius);
   assertPositive('height', height);
   if (!Number.isInteger(sides) || sides < 3) {
@@ -1280,7 +1676,7 @@ export function regularPrism(
   if (!Number.isFinite(rotation)) {
     throw new Error('rotation must be a finite number.');
   }
-  return new ModelObject<CanonicalElements>({
+  return new ModelObject<CanonicalElements, 'solid'>({
     kind: 'solid',
     name: `${sides}-sided prism`,
     geometry: evaluateSolidGeometry(
@@ -1315,9 +1711,7 @@ export type HelicalThreadOptions = Readonly<{
   leftHanded?: boolean;
 }>;
 
-export function helicalThread(
-  options: HelicalThreadOptions,
-): Model<CanonicalElements> {
+export function helicalThread(options: HelicalThreadOptions): SolidModel {
   const {
     pitch,
     height,
@@ -1344,7 +1738,7 @@ export function helicalThread(
       'The thread profile requires crestWidth < rootWidth <= pitch.',
     );
   }
-  return new ModelObject<CanonicalElements>({
+  return new ModelObject<CanonicalElements, 'solid'>({
     kind: 'solid',
     name: 'Helical thread',
     geometry: evaluateSolidGeometry(
@@ -1376,9 +1770,12 @@ export function helicalThread(
   }) as Model<CanonicalElements>;
 }
 
-export function group(children: readonly ModelObject[], name = 'Group'): Model {
+export function group(
+  children: readonly ModelObject[],
+  name = 'Group',
+): Model<{}, 'group'> {
   assertChildren(children);
-  return new ModelObject({
+  return new ModelObject<{}, 'group'>({
     kind: 'group',
     name,
     children,
@@ -1390,33 +1787,33 @@ export function group(children: readonly ModelObject[], name = 'Group'): Model {
 }
 
 export function union(
-  operands: readonly ModelObject[],
-): Model<CanonicalElements> {
+  operands: readonly ModelObject<{}, 'solid'>[],
+): SolidModel {
   const {first, others} = booleanOperands('union', operands);
   return first[combineModels]('fuse', others);
 }
 
 export function cut(
-  stock: ModelObject,
-  tools: readonly ModelObject[],
-): Model<CanonicalElements> {
-  if (!isModelObject(stock)) {
-    throw new Error('The cut stock must be a ModelObject.');
+  stock: ModelObject<{}, 'solid'>,
+  tools: readonly ModelObject<{}, 'solid'>[],
+): SolidModel {
+  if (!isModelObject(stock) || stock.kind !== 'solid') {
+    throw new Error('The cut stock must be a solid model.');
   }
   if (tools.length === 0) {
     throw new Error('cut requires at least one tool.');
   }
   for (const tool of tools) {
-    if (!isModelObject(tool)) {
-      throw new Error('Every cut tool must be a ModelObject.');
+    if (!isModelObject(tool) || tool.kind !== 'solid') {
+      throw new Error('Every cut tool must be a solid model.');
     }
   }
   return stock[combineModels]('cut', tools);
 }
 
 export function intersect(
-  operands: readonly ModelObject[],
-): Model<CanonicalElements> {
+  operands: readonly ModelObject<{}, 'solid'>[],
+): SolidModel {
   const {first, others} = booleanOperands('intersect', operands);
   return first[combineModels]('intersect', others);
 }
@@ -1438,6 +1835,16 @@ export function disposeModelObjects(objects: Iterable<ModelObject>): void {
 
 export const authoringApi = Object.freeze({
   ModelObject,
+  circle,
+  ellipse,
+  rectangle,
+  regularPolygon,
+  point,
+  line,
+  arc,
+  bezier,
+  spline,
+  loft,
   box,
   cylinder,
   sphere,
@@ -1479,7 +1886,7 @@ const shapeLifecycle: KernelValueLifecycle<AnyShape> = {
   release: shape => shape.delete(),
 };
 
-const solidGeometryLifecycle: KernelValueLifecycle<SolidGeometryValue> = {
+const modelGeometryLifecycle: KernelValueLifecycle<ModelGeometryValue> = {
   retain: geometry => ({...geometry, shape: geometry.shape.clone()}),
   instantiate: geometry => ({...geometry, shape: geometry.shape.clone()}),
   release: geometry => geometry.shape.delete(),
@@ -1506,26 +1913,26 @@ function evaluateKernelShape<Shape extends AnyShape>(
   );
 }
 
-function evaluateSolidGeometry(
+function evaluateModelGeometry(
   operation: string,
   arguments_: readonly KernelKeyPart[],
   inputs: readonly KernelArtifact<unknown>[],
   compute: () => Readonly<{
-    shape: Shape3D;
-    topology?: SolidTopology;
+    shape: AnyShape;
+    topology?: ShapeTopology;
   }>,
-): SolidGeometry {
+): ModelGeometry {
   return evaluateKernelOperation(
     operation,
     arguments_,
     inputs,
-    solidGeometryLifecycle,
+    modelGeometryLifecycle,
     () => {
       const result = compute();
       try {
         return {
           shape: result.shape,
-          topology: result.topology ?? initialSolidTopology(result.shape),
+          topology: result.topology ?? initialShapeTopology(result.shape),
           localBounds: shapeBounds(result.shape),
         };
       } catch (error) {
@@ -1536,12 +1943,29 @@ function evaluateSolidGeometry(
   );
 }
 
+function evaluateSolidGeometry(
+  operation: string,
+  arguments_: readonly KernelKeyPart[],
+  inputs: readonly KernelArtifact<unknown>[],
+  compute: () => Readonly<{
+    shape: Shape3D;
+    topology?: ShapeTopology;
+  }>,
+): SolidGeometry {
+  return evaluateModelGeometry(
+    operation,
+    arguments_,
+    inputs,
+    compute,
+  ) as SolidGeometry;
+}
+
 function renderMesh(
   artifact: KernelArtifact<unknown>,
   shape: AnyShape,
   cache: Map<AnyShape, RenderMesh>,
   tolerance: number,
-  topology?: SolidTopology,
+  topology?: ShapeTopology,
 ): RenderMesh {
   const cached = cache.get(shape);
   if (cached) {
@@ -1556,7 +1980,7 @@ function renderMesh(
       const surface = shape.mesh({tolerance, angularTolerance: 0.2});
       const wire = shape.meshEdges({tolerance, angularTolerance: 0.2});
       const vertexData = topology
-        ? stableVertexData(shape.asShape3D(), topology.vertices)
+        ? stableVertexData(shape, topology.vertices)
         : {positions: new Float32Array(), ids: []};
       return {
         vertices: new Float32Array(surface.vertices),
@@ -1566,18 +1990,14 @@ function renderMesh(
         topologyVertices: vertexData.positions,
         vertexIds: vertexData.ids,
         surfaceGroups: topology
-          ? stableSurfaceGroups(
-              shape.asShape3D(),
-              topology.surfaces,
-              surface.faceGroups,
-            )
+          ? stableSurfaceGroups(shape, topology.surfaces, surface.faceGroups)
           : surface.faceGroups.map((group, index) => ({
               start: group.start,
               count: group.count,
               surfaceId: index + 1,
             })),
         edgeGroups: topology
-          ? stableEdgeGroups(shape.asShape3D(), topology.edges, wire.edgeGroups)
+          ? stableEdgeGroups(shape, topology.edges, wire.edgeGroups)
           : wire.edgeGroups,
       };
     },
@@ -1586,7 +2006,168 @@ function renderMesh(
   return mesh;
 }
 
-function shapeBounds(shape: Shape3D): LocalBounds {
+type PlanarSketch = Readonly<{
+  face(): ReplicadFace;
+  delete(): void;
+}>;
+
+function planarFaceModel(
+  operation: Extract<
+    ModelOperationKind,
+    'circle' | 'ellipse' | 'rectangle' | 'regularPolygon'
+  >,
+  name: string,
+  arguments_: readonly KernelKeyPart[],
+  buildSketch: () => PlanarSketch,
+  transform?: (face: ReplicadFace) => ReplicadFace,
+): FaceModel {
+  const geometry = evaluateModelGeometry(operation, arguments_, [], () => {
+    const sketch = buildSketch();
+    try {
+      const face = sketch.face();
+      return {shape: transform?.(face) ?? face};
+    } finally {
+      sketch.delete();
+    }
+  });
+  const plane: StoredElement = {
+    kind: 'face',
+    transform: identityRigidTransform,
+  };
+  return new ModelObject<PlanarElements, 'face'>({
+    kind: 'face',
+    name,
+    geometry,
+    intrinsic: plane,
+    elements: {
+      center: {kind: 'point', transform: identityRigidTransform},
+      plane,
+    },
+    operation: storedOperation(operation),
+  }) as FaceModel;
+}
+
+function curveModel(
+  operation: Extract<ModelOperationKind, 'line' | 'arc' | 'bezier' | 'spline'>,
+  name: string,
+  arguments_: readonly KernelKeyPart[],
+  build: () => ReplicadEdge,
+): EdgeModel {
+  const geometry = evaluateModelGeometry(operation, arguments_, [], () => ({
+    shape: build(),
+  }));
+  const elements = curveElements(geometry.value.shape as ReplicadEdge);
+  return new ModelObject<CurveElements, 'edge'>({
+    kind: 'edge',
+    name,
+    geometry,
+    intrinsic: {...elements.start, kind: 'line'},
+    elements,
+    operation: storedOperation(operation),
+  }) as EdgeModel;
+}
+
+function curveElements(curve: ReplicadEdge): Readonly<{
+  start: StoredElement;
+  midpoint: StoredElement;
+  end: StoredElement;
+}> {
+  return {
+    start: curveAnchor(curve, 0),
+    midpoint: curveAnchor(curve, 0.5),
+    end: curveAnchor(curve, 1),
+  };
+}
+
+function curveAnchor(curve: ReplicadEdge, position: number): StoredElement {
+  const point = curve.pointAt(position);
+  const tangent = curve.tangentAt(position);
+  try {
+    return {
+      kind: 'point',
+      transform: frameFromYAxis(point.toTuple(), tangent.toTuple()),
+    };
+  } finally {
+    point.delete();
+    tangent.delete();
+  }
+}
+
+type PositionedModelGeometry = Readonly<{
+  geometry: ModelGeometry;
+  transform: RigidTransform;
+}>;
+
+function buildLoftShape(
+  sections: readonly PositionedModelGeometry[],
+  spine: PositionedModelGeometry | undefined,
+  ruled: boolean,
+): Shape3D {
+  const wires = sections.map(section => {
+    const face = shapeWithTransform(
+      section.geometry.value.shape as ReplicadFace,
+      section.transform,
+    );
+    return face.outerWire();
+  });
+  let spineWire: ReplicadWire | undefined;
+  try {
+    if (!spine) return makeLoft(wires, {ruled});
+    const edge = shapeWithTransform(
+      spine.geometry.value.shape as ReplicadEdge,
+      spine.transform,
+    );
+    try {
+      spineWire = assembleWire([edge]);
+    } finally {
+      edge.delete();
+    }
+    return makeSpineLoft(wires, spineWire);
+  } finally {
+    wires.forEach(wire => wire.delete());
+    spineWire?.delete();
+  }
+}
+
+function makeSpineLoft(
+  sections: readonly ReplicadWire[],
+  spine: ReplicadWire,
+): Shape3D {
+  const builder = new (getOC().BRepOffsetAPI_MakePipeShell)(spine.wrapped);
+  try {
+    builder.SetMode(false);
+    sections.forEach(section => builder.Add(section.wrapped, false, false));
+    if (!builder.IsReady()) {
+      throw new Error(
+        'The loft sections could not be associated with the spine.',
+      );
+    }
+    builder.Build();
+    if (!builder.IsDone() || !builder.MakeSolid()) {
+      throw new Error('Could not construct a solid loft along the spine.');
+    }
+    return castOwnedShape3D(builder.Shape());
+  } finally {
+    builder.delete();
+  }
+}
+
+function castOwnedShape3D(shape: TopoDS_Shape): Shape3D {
+  let result: ReturnType<typeof cast>;
+  try {
+    result = cast(shape);
+  } finally {
+    shape.delete();
+  }
+  try {
+    return result.asShape3D();
+  } catch (error) {
+    result.delete();
+    throw error;
+  }
+}
+
+function shapeBounds(shape: AnyShape): LocalBounds {
   const boundingBox = shape.boundingBox;
   const [minimum, maximum] = boundingBox.bounds;
   boundingBox.delete();
@@ -1635,19 +2216,23 @@ function scaleElements(
   return Object.fromEntries(
     Object.entries(elements).map(([name, element]) => [
       name,
-      {
-        ...element,
-        transform: {
-          ...element.transform,
-          position: [
-            element.transform.position[0] * factor,
-            element.transform.position[1] * factor,
-            element.transform.position[2] * factor,
-          ],
-        },
-      },
+      scaleElement(element, factor),
     ]),
   );
+}
+
+function scaleElement(element: StoredElement, factor: number): StoredElement {
+  return {
+    ...element,
+    transform: {
+      ...element.transform,
+      position: [
+        element.transform.position[0] * factor,
+        element.transform.position[1] * factor,
+        element.transform.position[2] * factor,
+      ],
+    },
+  };
 }
 
 function unionSectionShape(left: Shape3D, right: Shape3D): AnyShape {
@@ -1682,14 +2267,28 @@ function unionSectionShape(left: Shape3D, right: Shape3D): AnyShape {
 
 function anchorReference(anchor: Anchor): AnchorReference {
   if (anchor instanceof ModelObject) {
-    return {
-      model: anchor,
-      name: 'origin',
-      kind: 'frame',
-      transform: identityRigidTransform,
-    };
+    return anchor.relationAnchorReference();
+  }
+  if (anchor instanceof ModelTopologyElement) {
+    return topologyAnchorReference(anchor);
   }
   return (anchor as ModelAnchor).reference;
+}
+
+function topologyAnchorReference(
+  element: ModelTopologyElement<TopologyKind>,
+): AnchorReference {
+  const prefixes = {
+    vertex: 'V',
+    edge: 'E',
+    surface: 'S',
+  } as const satisfies Record<TopologyKind, string>;
+  return {
+    model: element.model,
+    name: `${prefixes[element.kind]}${element.id}`,
+    kind: element.elementKind,
+    transform: element.transform,
+  };
 }
 
 function storedAnchor(reference: AnchorReference): StoredAnchor {
@@ -1734,17 +2333,17 @@ function toTransform(transform: RigidTransform): Transform {
   return {...transform, scale: unitScale};
 }
 
-function shapeWithTransform(
-  source: Shape3D,
+function shapeWithTransform<Shape extends AnyShape>(
+  source: Shape,
   transform: RigidTransform,
-): Shape3D {
+): Shape {
   let shape = source.clone();
   const {axis, angleDegrees} = quaternionAxisAngle(transform.quaternion);
   if (Math.abs(angleDegrees) > 1e-9) {
     shape = shape.rotate(angleDegrees, toPoint(origin), toPoint(axis));
   }
   shape = shape.translate(toPoint(transform.position));
-  return shape;
+  return shape as unknown as Shape;
 }
 
 function assertChildren(children: readonly ModelObject[]): void {
@@ -1757,14 +2356,17 @@ function assertChildren(children: readonly ModelObject[]): void {
 
 function booleanOperands(
   operation: 'union' | 'intersect',
-  operands: readonly ModelObject[],
-): Readonly<{first: ModelObject; others: readonly ModelObject[]}> {
+  operands: readonly ModelObject<{}, 'solid'>[],
+): Readonly<{
+  first: ModelObject<{}, 'solid'>;
+  others: readonly ModelObject<{}, 'solid'>[];
+}> {
   if (operands.length < 2) {
     throw new Error(`${operation} requires at least two model operands.`);
   }
   for (const operand of operands) {
-    if (!isModelObject(operand)) {
-      throw new Error(`Every ${operation} operand must be a ModelObject.`);
+    if (!isModelObject(operand) || operand.kind !== 'solid') {
+      throw new Error(`Every ${operation} operand must be a solid model.`);
     }
   }
   return {first: operands[0], others: operands.slice(1)};
@@ -1779,6 +2381,27 @@ function assertPositive(label: string, value: number): void {
 function assertFiniteVector(label: string, value: Vec3): void {
   if (value.some(component => !Number.isFinite(component))) {
     throw new Error(`${label} must be a finite number.`);
+  }
+}
+
+function assertCurvePoints(
+  label: string,
+  points: readonly Vec3[],
+  minimum: number,
+): void {
+  if (points.length < minimum) {
+    throw new Error(`${label} requires at least ${minimum} points.`);
+  }
+  points.forEach((point, index) =>
+    assertFiniteVector(`${label} point ${index + 1}`, point),
+  );
+  const [first, ...rest] = points;
+  if (
+    rest.every(point =>
+      point.every((component, index) => component === first[index]),
+    )
+  ) {
+    throw new Error(`${label} requires at least two distinct points.`);
   }
 }
 

@@ -23,6 +23,20 @@ export function rotation(quaternion: Quaternion): RigidTransform {
   return {position: origin, quaternion};
 }
 
+export function frameFromYAxis(
+  position: Vec3,
+  direction: Vec3,
+): RigidTransform {
+  const y = normalizeVector(direction);
+  const preferredX: Vec3 = Math.abs(y[0]) < 0.9 ? [1, 0, 0] : [0, 0, 1];
+  const x = normalizeVector(rejectVector(preferredX, y));
+  const z = crossVectors(x, y);
+  return {
+    position,
+    quaternion: quaternionFromBasis(x, y, z),
+  };
+}
+
 export function composeTransforms(
   outer: RigidTransform,
   inner: RigidTransform,
@@ -137,6 +151,82 @@ function normalizeQuaternion(quaternion: Quaternion): Quaternion {
     quaternion[2] / length,
     quaternion[3] / length,
   ];
+}
+
+function normalizeVector(vector: Vec3): Vec3 {
+  const length = Math.hypot(...vector);
+  if (length < 1e-12) {
+    throw new Error('A relation frame direction cannot be zero.');
+  }
+  return [vector[0] / length, vector[1] / length, vector[2] / length];
+}
+
+function rejectVector(vector: Vec3, normal: Vec3): Vec3 {
+  const projection = dotVectors(vector, normal);
+  return [
+    vector[0] - projection * normal[0],
+    vector[1] - projection * normal[1],
+    vector[2] - projection * normal[2],
+  ];
+}
+
+function dotVectors(left: Vec3, right: Vec3): number {
+  return left[0] * right[0] + left[1] * right[1] + left[2] * right[2];
+}
+
+function crossVectors(left: Vec3, right: Vec3): Vec3 {
+  return [
+    left[1] * right[2] - left[2] * right[1],
+    left[2] * right[0] - left[0] * right[2],
+    left[0] * right[1] - left[1] * right[0],
+  ];
+}
+
+function quaternionFromBasis(x: Vec3, y: Vec3, z: Vec3): Quaternion {
+  const m00 = x[0];
+  const m01 = y[0];
+  const m02 = z[0];
+  const m10 = x[1];
+  const m11 = y[1];
+  const m12 = z[1];
+  const m20 = x[2];
+  const m21 = y[2];
+  const m22 = z[2];
+  const trace = m00 + m11 + m22;
+  if (trace > 0) {
+    const scale = Math.sqrt(trace + 1) * 2;
+    return normalizeQuaternion([
+      (m21 - m12) / scale,
+      (m02 - m20) / scale,
+      (m10 - m01) / scale,
+      scale / 4,
+    ]);
+  }
+  if (m00 > m11 && m00 > m22) {
+    const scale = Math.sqrt(1 + m00 - m11 - m22) * 2;
+    return normalizeQuaternion([
+      scale / 4,
+      (m01 + m10) / scale,
+      (m02 + m20) / scale,
+      (m21 - m12) / scale,
+    ]);
+  }
+  if (m11 > m22) {
+    const scale = Math.sqrt(1 + m11 - m00 - m22) * 2;
+    return normalizeQuaternion([
+      (m01 + m10) / scale,
+      scale / 4,
+      (m12 + m21) / scale,
+      (m02 - m20) / scale,
+    ]);
+  }
+  const scale = Math.sqrt(1 + m22 - m00 - m11) * 2;
+  return normalizeQuaternion([
+    (m02 + m20) / scale,
+    (m12 + m21) / scale,
+    scale / 4,
+    (m10 - m01) / scale,
+  ]);
 }
 
 function clamp(value: number, min: number, max: number): number {

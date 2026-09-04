@@ -17,9 +17,13 @@
 - `model()` 不是入口要求，源码选择决定主要渲染对象。
 - Monaco 提供 `code3d` API 的类型、补全、格式化和跨文件定义跳转。
 - 用户代码与 OpenCascade 在可终止 Worker 中编译和执行。
-- primitive、约束定位、布尔运算、圆角、倒角、棱柱、圆台和螺纹由 OCCT B-Rep 计算。
+- primitive、平面图形、空间曲线、loft、约束定位、布尔运算、圆角、倒角、棱柱、圆台和螺纹由 OCCT B-Rep 计算。
 - Worker 将 B-Rep 三角化为 surface、法线和拓扑边线供 Three.js 渲染。
-- 实体边使用模型内稳定的数字 ID；派生操作保留可一一追踪的旧 ID，新边递增分配且不复用已消失的 ID。
+- 几何模型的 vertex、edge 和 surface 使用模型内稳定的数字 ID；派生操作保留可一一追踪的旧 ID，新元素递增分配且不复用已消失的 ID。
+- circle、ellipse、rectangle、regularPolygon 平面图形和 line、arc、bezier、spline
+  曲线都是可独立渲染、选择和 `relate()` 的一等模型值；平面图形局部位于 XZ 面，法向为 +Y。
+- `loft(sections)` 构造普通多截面放样，`loft(sections, {spine})` 使用曲线作为真实 sweep spine；section 和 spine 都保留为源码运行时上下文。
+- `.surface(id)`、`.edge(id)` 和 `.vertex(id)` 分别提供带中心/法向、中点/切向和位置的完整关系锚点，并共享 viewport 拓扑选择交互。
 - 用户手写 `fillet(radius)`、`fillet(radius, edgeIds)` 或对应的 `chamfer`
   调用后，光标进入整个参数区域即可开启 viewport 选边；viewport 以已应用的操作结果
   为主体，同时在原位置保留可 hover、可 toggle 的输入边。边和参数修改会立即写回源码并
@@ -85,6 +89,22 @@ const finished = rounded.chamfer(0.5, [13]);
 这些数字是随模型派生传递的拓扑 ID，而不是当前边数组的下标或 OCCT hash。
 相同源码、参数和内核版本会确定性地产生相同 ID；被删除边的 ID 不会在后续步骤中复用。
 
+沿曲线放样两个方向不同的平面图形：
+
+```ts
+const spine = bezier([
+  [0, 0, 0],
+  [12, 7, 0],
+  [10, 20, 9],
+  [4, 28, 14],
+]);
+const start = circle(4).relate(profile => profile.plane.on(spine.start).flip());
+const end = rectangle(7, 4).relate(profile =>
+  profile.plane.on(spine.end).flip(),
+);
+const result = loft([start, end], {spine});
+```
+
 函数的设计时参数使用普通 TypeScript 表达式，并在函数所在模组的作用域中求值：
 
 ```ts
@@ -146,7 +166,7 @@ npm run lint-prettier
 - 实例身份依赖源码结构路径和运行序号；大幅改变控制流时仍可能需要重新匹配。
 - 当前可写回顶层数值变量、直接字面量及由它们组成的简单四则表达式。
 - 任意函数调用、闭包、解构和非线性表达式还不会被自动反向编辑。
-- canonical model anchor 已可用于关系约束；任意 face、edge 和 vertex anchor 尚未开放。
+- 数值和单个 topology ID 已能通过 panel 写回；曲线控制点数组仍只通过代码编辑。
 - Worker 防止用户代码锁死 UI，但不是安全沙箱。
 - 当前精简 OCCT WASM 约 23 MB，gzip 约 7.3 MB。
 - 本地目录模式依赖支持 File System Access API 的浏览器和安全上下文；不支持时仍可
@@ -155,7 +175,6 @@ npm run lint-prettier
 ## 下一步
 
 - 增强结构性源码编辑后的实例匹配，并探索对象 lineage / 时间线视图。
-- 将任意 face、edge 和 vertex 接入 anchor 选择与源码表达。
 - 扩展参数追踪到更多词法 scope，并处理存在多个上游候选的编辑选择。
 - 验证实体布尔失败、取消执行和连续重算的内存行为。
 - 增加 STEP/STL 导出。

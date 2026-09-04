@@ -9,7 +9,6 @@ import {
   type FaceAnchor,
   type LineAnchor,
   type Model,
-  type ModelObject,
 } from '@code3d/core';
 
 export type ClearanceFit = 'close' | 'normal' | 'loose';
@@ -217,7 +216,7 @@ export function screw(input: ScrewInput, length: number): Screw {
   const threadedLength = Math.min(bodyLength, threadLength(spec, length));
   const plainLength = bodyLength - threadedLength;
   const overlap = Math.min(0.08, spec.pitch / 10);
-  const parts: ModelObject[] = [head, transition];
+  const parts = [head, transition];
   let previous = transition;
 
   if (plainLength > overlap) {
