@@ -990,10 +990,35 @@ export class ModelViewport {
         placement,
         operationRole,
       );
-      if (operationRole === 'tool') {
+      const references =
+        evaluation.topologyReferences?.filter(
+          reference => reference.nodeId === node.nodeId,
+        ) ?? [];
+      if (references.length > 0 || target.kind === 'topology-selection') {
+        dimObject(object);
+      } else if (operationRole === 'tool') {
         makeToolObjectTranslucent(object);
       } else if (layeredScene) {
         makeFocusObjectTranslucent(object);
+      }
+      for (const kind of ['vertex', 'edge', 'surface'] as const) {
+        const ids = new Set(
+          references
+            .filter(reference => reference.kind === kind)
+            .map(reference => reference.id),
+        );
+        if (ids.size === 0 || !node.mesh) continue;
+        const highlight = createTopologyHighlight(
+          node.mesh,
+          kind,
+          ids,
+          '#d8ff3e',
+          24,
+        );
+        if (highlight) {
+          highlight.raycast = () => undefined;
+          object.add(highlight);
+        }
       }
       this.root.add(object);
     });
@@ -2566,6 +2591,7 @@ function dimObject(object: THREE.Object3D): void {
       materials.forEach(material => {
         if (material instanceof THREE.LineBasicMaterial) {
           material.color.set('#a1aa9d');
+          material.transparent = true;
           material.opacity = 0.28;
           material.depthWrite = false;
         }
