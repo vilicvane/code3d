@@ -147,7 +147,7 @@ function modifyEdges(
   amount: number,
   requestedIds?: readonly EdgeId[],
 ): EdgeModificationResult {
-  const selectedEdgeIds = selectEdgeIds(source, requestedIds);
+  const selectedEdgeIds = resolveEdgeSelection(source, requestedIds);
   if (selectedEdgeIds.length === 0) {
     const result = shape.clone();
     try {
@@ -202,7 +202,7 @@ function modifyEdges(
   }
 }
 
-function selectEdgeIds(
+export function resolveEdgeSelection(
   topology: EdgeTopology,
   requestedIds: readonly EdgeId[] | undefined,
 ): readonly EdgeId[] {

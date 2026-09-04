@@ -382,6 +382,26 @@ detailed working plan is
 It records confirmed constraints separately from technical choices that should
 remain adjustable as implementation evidence arrives.
 
+### 4c. Content-addressed kernel operation reuse — complete
+
+- Cache complete OpenCascade-backed operation results by operation identity,
+  scalar arguments, and input artifact identities.
+- Re-run JavaScript and source tracing for every compile while reusing only
+  opaque geometry artifacts and kernel query results.
+- Make linear-prefix reuse fall out of the same content-addressed mechanism
+  that also handles branches and shared inputs.
+- Keep cached kernel ownership separate from disposable per-evaluation model
+  values, bound retained resources, and invalidate them with the kernel
+  instance.
+
+Status: [R-024](requests/closed/R-024-cache-opencascade-operation-results.md)
+is implemented as a bounded, content-addressed kernel-operation LRU covering
+solid construction and modification, Boolean prefixes and context regions,
+relative transforms, topology sidecars, bounds, and render meshes. JavaScript
+and provenance are still evaluated afresh. Cache encoding, capacity, and a
+possible lifetime beyond one compiler worker remain adjustable implementation
+choices rather than product semantics.
+
 ### 5. Object combination tools
 
 - Handwritten standalone `union`, `cut`, and `intersect` functions are now the

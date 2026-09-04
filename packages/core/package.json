@@ -7,6 +7,9 @@
   "license": "MIT",
   "author": "vilicvane",
   "type": "module",
+  "scripts": {
+    "test": "tsc --build src/library/tsconfig.json src/node/tsconfig.json src/tooling/tsconfig.json && node --test test/*.test.mjs"
+  },
   "exports": {
     ".": {
       "types": "./bld/library/index.d.ts",

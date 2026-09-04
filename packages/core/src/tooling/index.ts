@@ -1,5 +1,6 @@
 import {setOC} from 'replicad';
 import type {OpenCascadeInstance} from 'replicad-opencascadejs';
+import {clearKernelOperationCache} from '../library/kernel-cache.js';
 
 export {
   Constraint,
@@ -44,5 +45,6 @@ export type {EdgeId} from '../library/topology.js';
 export const toolingProtocolVersion = 1;
 
 export function installOpenCascade(openCascade: OpenCascadeInstance): void {
+  clearKernelOperationCache();
   setOC(openCascade);
 }
