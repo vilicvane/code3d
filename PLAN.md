@@ -322,10 +322,12 @@ constraint source sites do.
 - While selecting, render the applied operation result as the primary solid and
   retain every original input edge at its pre-operation position as a
   hoverable/toggleable guide. Commit each edge-set or confirmed size change to
-  source immediately and render the normal compiled model; do not present an
-  uncommitted operation result as if it had already taken effect. Outside
-  selection, keep the weaker before/after comparison for an applied edge
-  modification.
+  source immediately while keeping the guide, hover, and selection panel
+  interactive during background compilation. Newer edits invalidate older
+  compile results, and the latest normal compiled model replaces the rendered
+  result when ready; do not present an uncommitted operation result as if it
+  had already taken effect. Outside selection, keep the weaker before/after
+  comparison for an applied edge modification.
 - Make deselection reversible at both levels: toggle individual edges or clear
   the set. Leaving the call's source focus or pressing `Escape` only dismisses
   the transient panel; already committed edits remain in source. The panel has

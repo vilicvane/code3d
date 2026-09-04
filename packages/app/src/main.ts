@@ -277,7 +277,6 @@ let runRevision = 0;
 let positionToolSession: ToolSession | undefined;
 let positionToolInterruptedCompile = false;
 let edgeSelectionTool: EdgeSelectionTool | undefined;
-let immediateSourceUpdate = false;
 let contextFilePath: string | undefined;
 let preferredEvaluationContextId: string | undefined;
 let selectedDesignContextId: string | undefined;
@@ -358,11 +357,12 @@ const toolEngine = new ToolEngine({
 });
 
 codeEditor.onChange(change => {
-  dismissEdgeSelectionTool();
+  const toolChange = change.kind === 'content' && change.origin === 'tool';
+  if (!toolChange) dismissEdgeSelectionTool();
   persistProjectChange(projectFileSystem, change);
   sourceEditPopover.dismiss();
   if (change.kind !== 'content') renderProjectNavigation();
-  requestModelUpdate(immediateSourceUpdate ? 0 : 420);
+  requestModelUpdate(toolChange ? 0 : 420);
 });
 
 codeEditor.onCursorOffset(({file, offset}) => {
@@ -1311,18 +1311,12 @@ function commitEdgeOperationChange(
 ): void {
   if (edgeSelectionTool !== tool) return;
   errorBar.hidden = true;
-  let committed = false;
-  try {
-    immediateSourceUpdate = true;
-    committed = commitToolSession(
-      toolEngine.begin(
-        `viewport.edge-operation:${tool.targetId}:${tool.evaluationIndex}`,
-      ),
-      intent,
-    );
-  } finally {
-    immediateSourceUpdate = false;
-  }
+  const committed = commitToolSession(
+    toolEngine.begin(
+      `viewport.edge-operation:${tool.targetId}:${tool.evaluationIndex}`,
+    ),
+    intent,
+  );
   if (!committed) dismissEdgeSelectionTool();
 }
 

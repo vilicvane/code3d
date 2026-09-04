@@ -34,7 +34,12 @@ type MonacoEnvironment = typeof self & {
 };
 
 export type ProjectEditorChange =
-  | Readonly<{kind: 'content'; path: string; source: string}>
+  | Readonly<{
+      kind: 'content';
+      path: string;
+      source: string;
+      origin: 'user' | 'tool';
+    }>
   | Readonly<{kind: 'create'; path: string; source: string}>
   | Readonly<{kind: 'rename'; from: string; to: string}>
   | Readonly<{kind: 'delete'; path: string}>;
@@ -215,6 +220,7 @@ export class CodeEditor {
     (focus: CompletionFocus | undefined) => void
   >();
   private completionFocusVersion = 0;
+  private contentChangeOrigin: 'user' | 'tool' = 'user';
   private readonly sourceDecoration: monaco.editor.IEditorDecorationsCollection;
   private activePath: string;
   private revision = 1;
@@ -486,24 +492,30 @@ export class CodeEditor {
       const model = this.documents.get(path)?.model;
       if (!model || !validEdits(model, fileEdits)) return false;
     }
-    for (const [path, fileEdits] of grouped) {
-      const model = this.requireDocument(path).model;
-      model.pushStackElement();
-      model.pushEditOperations(
-        [],
-        [...fileEdits]
-          .sort((left, right) => right.sourceRef.start - left.sourceRef.start)
-          .map(edit => ({
-            range: sourceRange(model, edit.sourceRef),
-            text: edit.text,
-            forceMoveMarkers: true,
-          })),
-        () => null,
-      );
-      model.pushStackElement();
-    }
+    this.withSuppressedCursorEvents(() =>
+      this.withContentChangeOrigin('tool', () => {
+        for (const [path, fileEdits] of grouped) {
+          const model = this.requireDocument(path).model;
+          model.pushStackElement();
+          model.pushEditOperations(
+            [],
+            [...fileEdits]
+              .sort(
+                (left, right) => right.sourceRef.start - left.sourceRef.start,
+              )
+              .map(edit => ({
+                range: sourceRange(model, edit.sourceRef),
+                text: edit.text,
+                forceMoveMarkers: true,
+              })),
+            () => null,
+          );
+          model.pushStackElement();
+        }
+      }),
+    );
     void Promise.all(
-      [...grouped.keys()].map(path => this.formatFile(path)),
+      [...grouped.keys()].map(path => this.formatFile(path, 'tool')),
     ).catch(error =>
       console.error('Prettier failed after a Code3D source edit.', error),
     );
@@ -751,6 +763,7 @@ export class CodeEditor {
           kind: 'content',
           path: normalized,
           source: model.getValue(),
+          origin: this.contentChangeOrigin,
         });
       }),
     };
@@ -859,7 +872,10 @@ export class CodeEditor {
     );
   }
 
-  private async formatFile(path: string): Promise<boolean> {
+  private async formatFile(
+    path: string,
+    origin: 'user' | 'tool' = 'user',
+  ): Promise<boolean> {
     const document = this.requireDocument(path);
     const {model} = document;
     const source = model.getValue();
@@ -871,24 +887,39 @@ export class CodeEditor {
     if (model.getVersionId() !== version || result.formatted === source) {
       return model.getVersionId() === version;
     }
-    this.withSuppressedCursorEvents(() => {
-      model.pushStackElement();
-      model.pushEditOperations(
-        [],
-        [
-          {
-            range: model.getFullModelRange(),
-            text: result.formatted,
-            forceMoveMarkers: true,
-          },
-        ],
-        () => null,
-      );
-      if (active)
-        this.editor.setPosition(model.getPositionAt(result.cursorOffset));
-      model.pushStackElement();
-    });
+    this.withContentChangeOrigin(origin, () =>
+      this.withSuppressedCursorEvents(() => {
+        model.pushStackElement();
+        model.pushEditOperations(
+          [],
+          [
+            {
+              range: model.getFullModelRange(),
+              text: result.formatted,
+              forceMoveMarkers: true,
+            },
+          ],
+          () => null,
+        );
+        if (active)
+          this.editor.setPosition(model.getPositionAt(result.cursorOffset));
+        model.pushStackElement();
+      }),
+    );
     return true;
+  }
+
+  private withContentChangeOrigin<T>(
+    origin: 'user' | 'tool',
+    action: () => T,
+  ): T {
+    const previous = this.contentChangeOrigin;
+    this.contentChangeOrigin = origin;
+    try {
+      return action();
+    } finally {
+      this.contentChangeOrigin = previous;
+    }
   }
 
   private withSuppressedCursorEvents(action: () => void): void {
