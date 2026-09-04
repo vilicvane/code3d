@@ -6,7 +6,11 @@ import {
   type ProjectEditorChange,
 } from './editor';
 import {ModelCompilerClient} from './model/compiler-client';
-import type {DesignArgumentContext, ModelModule} from './model/compiler';
+import type {
+  DesignArgumentContext,
+  EdgeArgumentTarget,
+  ModelModule,
+} from './model/compiler';
 import {ModelDiagnosticError} from './model/diagnostic';
 import {bundledExamples} from './project/bundled-examples';
 import {defaultProject} from './project/default-project';
@@ -29,6 +33,7 @@ import type {
   EdgeId,
   ModelSnapshotObject,
   ParameterTarget,
+  ParameterUsage,
   SourceRef,
 } from '@code3d/core/tooling';
 import {
@@ -130,13 +135,19 @@ app.innerHTML = `
               <strong id="edge-selection-title"></strong>
               <span id="edge-selection-available"></span>
             </header>
+            <label class="edge-selection-field" id="edge-selection-parameter-field">
+              <span id="edge-selection-parameter-label"></span>
+              <div class="edge-selection-parameter-control">
+                <input id="edge-selection-parameter" type="number" inputmode="decimal">
+                <span id="edge-selection-parameter-unit"></span>
+              </div>
+            </label>
             <div class="edge-selection-field">
               <span>SELECTED EDGES</span>
               <output id="edge-selection-summary"></output>
             </div>
             <div class="edge-selection-actions">
               <button id="edge-selection-clear" type="button">Clear</button>
-              <button id="edge-selection-cancel" type="button">Cancel</button>
               <button class="primary" id="edge-selection-apply" type="button">Apply</button>
             </div>
           </section>
@@ -191,11 +202,20 @@ const edgeSelectionToolbar = requiredElement('edge-selection-toolbar');
 const edgeSelectionTitle = requiredElement('edge-selection-title');
 const edgeSelectionAvailable = requiredElement('edge-selection-available');
 const edgeSelectionSummary = requiredElement('edge-selection-summary');
+const edgeSelectionParameterField = requiredElement(
+  'edge-selection-parameter-field',
+);
+const edgeSelectionParameterLabel = requiredElement(
+  'edge-selection-parameter-label',
+);
+const edgeSelectionParameter = requiredElement<HTMLInputElement>(
+  'edge-selection-parameter',
+);
+const edgeSelectionParameterUnit = requiredElement(
+  'edge-selection-parameter-unit',
+);
 const edgeSelectionClear = requiredElement<HTMLButtonElement>(
   'edge-selection-clear',
-);
-const edgeSelectionCancel = requiredElement<HTMLButtonElement>(
-  'edge-selection-cancel',
 );
 const edgeSelectionApply = requiredElement<HTMLButtonElement>(
   'edge-selection-apply',
@@ -272,7 +292,9 @@ type EdgeSelectionTool = {
   evaluationIndex: number;
   contextId: string;
   operation: 'fillet' | 'chamfer';
-  sourceRef: SourceRef;
+  edgeArgument: EdgeArgumentTarget;
+  parameter?: ParameterUsage;
+  parameterValue?: number;
   occurrenceKey: string;
   availableEdgeIds: readonly EdgeId[];
   initialEdgeIds: readonly EdgeId[];
@@ -378,7 +400,7 @@ codeEditor.onCursorOffset(({file, offset}) => {
   } else if (currentModule) {
     renderDesignArguments(currentModule);
   }
-  syncEdgeSelectionTool();
+  syncEdgeSelectionTool(matched);
 });
 codeEditor.onCompletionFocus(handleCompletionFocus);
 codeEditor.onActiveFile((path, reason) => {
@@ -426,8 +448,8 @@ browserStorageButton.addEventListener('click', () => {
 });
 contextRenameFile.addEventListener('click', () => renameContextFile());
 contextDeleteFile.addEventListener('click', () => deleteContextFile());
+edgeSelectionParameter.addEventListener('input', updateEdgeOperationParameter);
 edgeSelectionClear.addEventListener('click', clearSelectedEdges);
-edgeSelectionCancel.addEventListener('click', () => cancelEdgeSelectionTool());
 edgeSelectionApply.addEventListener('click', commitEdgeSelectionTool);
 window.addEventListener('pointerdown', event => {
   if (!projectContextMenu.contains(event.target as Node)) {
@@ -1138,21 +1160,26 @@ function renderCurrentPanels(): void {
   if (!occurrence && currentModule) renderDesignArguments(currentModule);
 }
 
-function syncEdgeSelectionTool(): void {
-  if (currentModuleSourceVersion !== codeEditor.sourceVersion()) {
+function syncEdgeSelectionTool(sourceTargetFocused = true): void {
+  if (
+    !sourceTargetFocused ||
+    currentModuleSourceVersion !== codeEditor.sourceVersion()
+  ) {
     cancelEdgeSelectionTool();
     return;
   }
   const scope = viewport.sourceEvaluation();
   const occurrence = viewport.getSelected();
   const operation = scope?.target.operation?.kind;
+  const edgeArgument = scope?.target.operation?.edgeArgument;
   const selection = scope?.evaluation.selection;
   const eligible =
     scope?.target.kind === 'operation-selection' &&
     selection?.kind === 'edge' &&
+    edgeArgument !== undefined &&
     (operation === 'fillet' || operation === 'chamfer') &&
     occurrence?.node.kind === 'solid';
-  if (!eligible || !scope || !occurrence) {
+  if (!eligible || !scope || !occurrence || !edgeArgument) {
     cancelEdgeSelectionTool();
     return;
   }
@@ -1168,9 +1195,11 @@ function syncEdgeSelectionTool(): void {
     scope.evaluationIndex,
     operation,
     scope.target.sourceRef,
+    edgeArgument,
     scope.evaluation.contextId,
     selection.inputNodeId,
     selection.ids,
+    selection.parameter,
     occurrence,
   );
 }
@@ -1180,9 +1209,11 @@ function startEdgeSelection(
   evaluationIndex: number,
   operation: 'fillet' | 'chamfer',
   sourceRef: SourceRef,
+  edgeArgument: EdgeArgumentTarget,
   contextId: string,
   inputNodeId: string,
   initialEdgeIds: readonly EdgeId[],
+  parameter: ParameterUsage | undefined,
   occurrence: Occurrence,
 ): void {
   cancelEdgeSelectionTool();
@@ -1205,7 +1236,9 @@ function startEdgeSelection(
     evaluationIndex,
     contextId,
     operation,
-    sourceRef,
+    edgeArgument,
+    parameter,
+    parameterValue: parameter?.value,
     occurrenceKey: occurrence.key,
     availableEdgeIds,
     initialEdgeIds: sortedEdgeIds(initialEdgeIds),
@@ -1231,15 +1264,49 @@ function clearSelectedEdges(): void {
   scheduleEdgeSelectionResultPreview(tool);
 }
 
+function updateEdgeOperationParameter(): void {
+  const tool = edgeSelectionTool;
+  if (!tool?.parameter) return;
+  const value = edgeSelectionParameter.valueAsNumber;
+  tool.parameterValue = Number.isFinite(value) && value > 0 ? value : undefined;
+  edgeSelectionParameter.setAttribute(
+    'aria-invalid',
+    String(tool.parameterValue === undefined),
+  );
+  edgeSelectionApply.disabled = !canApplyEdgeSelection(tool);
+  if (tool.parameterValue === undefined) {
+    stopEdgeSelectionResultPreview(tool);
+    return;
+  }
+  scheduleEdgeSelectionResultPreview(tool);
+}
+
 function updateEdgeSelectionToolbar(tool: EdgeSelectionTool): void {
   edgeSelectionTitle.textContent = edgeOperationLabel(tool.operation);
   edgeSelectionAvailable.textContent = `${tool.availableEdgeIds.length} AVAILABLE`;
+  edgeSelectionParameterField.hidden = !tool.parameter;
+  if (tool.parameter) {
+    edgeSelectionParameterLabel.textContent =
+      tool.parameter.argument.toUpperCase();
+    edgeSelectionParameterUnit.textContent = tool.parameter.target.unit ?? '';
+    edgeSelectionParameterUnit.hidden = !tool.parameter.target.unit;
+    edgeSelectionParameter.step = String(
+      Math.abs(tool.parameter.sensitivity) *
+        (tool.parameter.target.step ?? 0.1),
+    );
+    if (document.activeElement !== edgeSelectionParameter) {
+      edgeSelectionParameter.value = formatDisplayNumber(
+        tool.parameterValue ?? tool.parameter.value,
+      );
+    }
+    edgeSelectionParameter.setAttribute(
+      'aria-invalid',
+      String(tool.parameterValue === undefined),
+    );
+  }
   edgeSelectionSummary.textContent = formatEdgeIds(tool.selectedEdgeIds);
   edgeSelectionClear.disabled = tool.selectedEdgeIds.length === 0;
-  edgeSelectionApply.disabled = sameEdgeIds(
-    tool.selectedEdgeIds,
-    tool.initialEdgeIds,
-  );
+  edgeSelectionApply.disabled = !canApplyEdgeSelection(tool);
   edgeSelectionToolbar.hidden = false;
 }
 
@@ -1259,7 +1326,7 @@ function handleEdgeSelection(event: EdgeSelectionEvent): void {
 function commitEdgeSelectionTool(): void {
   const tool = edgeSelectionTool;
   if (!tool) return;
-  if (sameEdgeIds(tool.selectedEdgeIds, tool.initialEdgeIds)) return;
+  if (!canApplyEdgeSelection(tool)) return;
   const intent = edgeSelectionIntent(tool);
   stopEdgeSelectionResultPreview(tool);
   edgeSelectionTool = undefined;
@@ -1292,7 +1359,12 @@ function scheduleEdgeSelectionResultPreview(tool: EdgeSelectionTool): void {
     tool.previewCompiling = false;
   }
   errorBar.hidden = true;
-  if (sameEdgeIds(tool.selectedEdgeIds, tool.initialEdgeIds)) {
+  if (tool.parameter && tool.parameterValue === undefined) {
+    viewport.clearEdgeSelectionResultPreview();
+    hideViewportProgress();
+    return;
+  }
+  if (!edgeSelectionChanged(tool)) {
     viewport.clearEdgeSelectionResultPreview();
     hideViewportProgress();
     return;
@@ -1378,14 +1450,53 @@ function stopEdgeSelectionResultPreview(tool: EdgeSelectionTool): void {
 }
 
 function edgeSelectionIntent(tool: EdgeSelectionTool): ToolIntent {
+  const parameter = edgeOperationParameterEdit(tool);
+  const edges = sameEdgeIds(tool.selectedEdgeIds, tool.initialEdgeIds)
+    ? undefined
+    : {
+        argument: tool.edgeArgument,
+        ids: tool.selectedEdgeIds,
+      };
   return {
-    kind: 'expression.replace',
-    target: {sourceRef: tool.sourceRef},
-    expression: {
-      kind: 'array',
-      elements: tool.selectedEdgeIds.map(value => ({kind: 'number', value})),
-    },
+    kind: 'edge-operation.set',
+    operation: tool.operation,
+    parameter,
+    edges,
   };
+}
+
+function edgeOperationParameterEdit(
+  tool: EdgeSelectionTool,
+): Readonly<{target: ParameterTarget; value: number}> | undefined {
+  const parameter = tool.parameter;
+  const value = tool.parameterValue;
+  if (
+    !parameter ||
+    value === undefined ||
+    Math.abs(value - parameter.value) < 1e-9
+  ) {
+    return undefined;
+  }
+  return {
+    target: parameter.target,
+    value:
+      parameter.target.value +
+      (value - parameter.value) / parameter.sensitivity,
+  };
+}
+
+function edgeSelectionChanged(tool: EdgeSelectionTool): boolean {
+  return (
+    !sameEdgeIds(tool.selectedEdgeIds, tool.initialEdgeIds) ||
+    edgeOperationParameterEdit(tool) !== undefined
+  );
+}
+
+function canApplyEdgeSelection(tool: EdgeSelectionTool): boolean {
+  return (
+    (!tool.parameter || tool.parameterValue !== undefined) &&
+    edgeSelectionChanged(tool)
+  );
 }
 
 function edgeOperationLabel(operation: EdgeSelectionTool['operation']): string {
@@ -1601,6 +1712,9 @@ function toolSourceRefs(module: ModelModule): SourceRef[] {
     ...module.sourceTargets.flatMap(target => [
       target.sourceRef,
       ...(target.receiverRef ? [target.receiverRef] : []),
+      ...(target.operation?.edgeArgument
+        ? [target.operation.edgeArgument.sourceRef]
+        : []),
     ]),
     ...[...module.operations.values()].flatMap(operation =>
       operation.sourceRef ? [operation.sourceRef] : [],

@@ -1,5 +1,6 @@
 import {
   rotateVector,
+  type EdgeId,
   type ParameterTarget,
   type Quaternion,
   type SourceRef,
@@ -47,6 +48,18 @@ export type ToolIntent =
       kind: 'expression.replace';
       target: SourceAnchor;
       expression: ExpressionDraft;
+    }>
+  | Readonly<{
+      kind: 'edge-operation.set';
+      operation: 'fillet' | 'chamfer';
+      parameter?: Readonly<{target: ParameterTarget; value: number}>;
+      edges?: Readonly<{
+        argument: Readonly<
+          | {kind: 'replace'; sourceRef: SourceRef}
+          | {kind: 'append'; sourceRef: SourceRef; needsComma: boolean}
+        >;
+        ids: readonly EdgeId[];
+      }>;
     }>
   | Readonly<{
       kind: 'relation.offset';
@@ -139,6 +152,7 @@ export class ToolEngine {
   constructor(readonly host: ToolHost) {
     this.register(new SetParameterResolver());
     this.register(new ReplaceExpressionResolver());
+    this.register(new SetEdgeOperationResolver());
     this.register(new OffsetRelationResolver());
   }
 
@@ -324,6 +338,88 @@ class ReplaceExpressionResolver implements ToolIntentResolver {
         reason: error instanceof Error ? error.message : String(error),
       };
     }
+  }
+}
+
+class SetEdgeOperationResolver implements ToolIntentResolver {
+  readonly kind = 'edge-operation.set' as const;
+  private readonly parameterResolver = new SetParameterResolver();
+
+  resolve(intent: ToolIntent, context: ResolveContext): ToolResolution {
+    if (intent.kind !== this.kind) {
+      return {
+        status: 'unsupported',
+        reason: 'The edge-operation resolver received the wrong edit intent.',
+      };
+    }
+    const edits: SourceTextEdit[] = [];
+    if (intent.parameter) {
+      const resolution = this.parameterResolver.resolve(
+        {kind: 'parameter.set', ...intent.parameter},
+        context,
+      );
+      if (resolution.status !== 'ready') return resolution;
+      edits.push(...resolution.plan.edits);
+    }
+    if (intent.edges) {
+      const sourceRef = context.resolveSourceRef(
+        intent.edges.argument.sourceRef,
+      );
+      if (!sourceRef) {
+        return {
+          status: 'conflict',
+          reason: 'The edge argument no longer maps to the current source.',
+        };
+      }
+      const expectedText = context.readSource(sourceRef);
+      const edgeArray = renderExpression({
+        kind: 'array',
+        elements: intent.edges.ids.map(value => ({kind: 'number', value})),
+      });
+      edits.push({
+        sourceRef,
+        expectedText,
+        text:
+          intent.edges.argument.kind === 'replace'
+            ? edgeArray
+            : `${intent.edges.argument.needsComma ? ',' : ''} ${edgeArray}`,
+      });
+    }
+    if (edits.length === 0) {
+      return {
+        status: 'conflict',
+        reason: 'The edge operation has no changes to apply.',
+      };
+    }
+    const ordered = [...edits].sort(
+      (left, right) =>
+        left.sourceRef.file.localeCompare(right.sourceRef.file) ||
+        left.sourceRef.start - right.sourceRef.start,
+    );
+    if (
+      ordered.some(
+        (edit, index) =>
+          index > 0 &&
+          ordered[index - 1].sourceRef.file === edit.sourceRef.file &&
+          ordered[index - 1].sourceRef.end > edit.sourceRef.start,
+      )
+    ) {
+      return {
+        status: 'conflict',
+        reason: 'The edge-operation edits overlap in source.',
+      };
+    }
+    return {
+      status: 'ready',
+      plan: {
+        toolId: context.toolId,
+        baseVersion: context.baseVersion,
+        summary: `Update ${intent.operation}`,
+        intent,
+        edits,
+        preview: {kind: 'source-edits', edits},
+      },
+    };
   }
 }
 

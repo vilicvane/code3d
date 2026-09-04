@@ -751,6 +751,48 @@ kbd {
   gap: 7px;
 }
 
+.edge-selection-field[hidden] {
+  display: none;
+}
+
+.edge-selection-parameter-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  border: 1px solid #34382e;
+  border-radius: 3px;
+  background: #11130f;
+}
+
+.edge-selection-parameter-control input {
+  min-width: 0;
+  padding: 8px 0;
+  color: #edf3d5;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font:
+    10px/1.5 'IBM Plex Mono',
+    monospace;
+}
+
+.edge-selection-parameter-control:focus-within {
+  border-color: var(--acid);
+}
+
+.edge-selection-parameter-control:has(input[aria-invalid='true']) {
+  border-color: #e8664d;
+}
+
+.edge-selection-parameter-control span {
+  color: #777d71;
+  font:
+    8px/1 'IBM Plex Mono',
+    monospace;
+}
+
 .edge-selection-field output {
   display: block;
   min-height: 32px;
@@ -769,7 +811,7 @@ kbd {
 
 .edge-selection-actions {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 5px;
 }
 

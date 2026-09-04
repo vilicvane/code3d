@@ -57,8 +57,14 @@ export type SourceTargetEvaluation = Readonly<{
     kind: 'edge';
     inputNodeId: string;
     ids: readonly EdgeId[];
+    parameter?: ParameterUsage;
   }>;
 }>;
+
+export type EdgeArgumentTarget = Readonly<
+  | {kind: 'replace'; sourceRef: SourceRef}
+  | {kind: 'append'; sourceRef: SourceRef; needsComma: boolean}
+>;
 
 export type SourceTarget = Readonly<{
   id: string;
@@ -77,6 +83,7 @@ export type SourceTarget = Readonly<{
   operation?: Readonly<{
     kind: ModelOperationKind;
     role?: ModelOperationInputRole;
+    edgeArgument?: EdgeArgumentTarget;
   }>;
 }>;
 
@@ -245,6 +252,7 @@ type EdgeSelectionSite = Readonly<{
   siteId: string;
   operation: 'fillet' | 'chamfer';
   sourceRef: SourceRef;
+  edgeArgument: EdgeArgumentTarget;
 }>;
 
 type TraceFrame = Readonly<{
@@ -1110,7 +1118,11 @@ export function compileProject(
           ? [fallbackSnapshot]
           : [...designRootObjects].map(snapshotOf),
       ),
-      sourceTargets: buildSourceTargets(operations, designArguments),
+      sourceTargets: buildSourceTargets(
+        operations,
+        objectSnapshots,
+        designArguments,
+      ),
       evaluationContexts: [...evaluationContexts.values()],
       designArguments: designArguments.map(
         ({binding: _binding, argumentsSource: _argumentsSource, ...context}) =>
@@ -1249,6 +1261,7 @@ function collectObjectGraph(roots: Iterable<ModelObject>): ModelObject[] {
 
 function buildSourceTargets(
   operations: ReadonlyMap<string, ModelOperationSnapshot>,
+  objects: ReadonlyMap<string, ModelSnapshotObject>,
   designArguments: readonly ParsedDesignArgumentContext[],
 ): SourceTarget[] {
   const operationsByOutputNodeId = new Map(
@@ -1335,6 +1348,13 @@ function buildSourceTargets(
               candidate.kind === 'edge' &&
               candidate.inputNodeId === trace.objects[0]?.nodeId,
           );
+          const parameter = operation
+            ? editableEdgeOperationParameter(
+                objects.get(operation.outputNodeId),
+                operation,
+                site.operation,
+              )
+            : undefined;
           return operation && selection
             ? [
                 {
@@ -1345,6 +1365,7 @@ function buildSourceTargets(
                     kind: 'edge',
                     inputNodeId: selection.inputNodeId,
                     ids: selection.ids,
+                    parameter,
                   },
                 },
               ]
@@ -1360,7 +1381,11 @@ function buildSourceTargets(
               functionId: designFunctionAt(site.sourceRef, designArguments),
               evaluations,
               contextTargetIds: [],
-              operation: {kind: site.operation, role: 'source' as const},
+              operation: {
+                kind: site.operation,
+                role: 'source' as const,
+                edgeArgument: site.edgeArgument,
+              },
             } satisfies SourceTarget,
           ]
         : [];
@@ -1519,6 +1544,48 @@ function buildSourceTargets(
         }) satisfies SourceTarget,
     ),
   ];
+}
+
+function editableEdgeOperationParameter(
+  output: ModelSnapshotObject | undefined,
+  operation: ModelOperationSnapshot,
+  operationKind: 'fillet' | 'chamfer',
+): ParameterUsage | undefined {
+  const operationRef = operation.sourceRef;
+  if (!output || !operationRef) return undefined;
+  const argument = operationKind === 'fillet' ? 'radius' : 'distance';
+  const matches = output.parameters.filter(
+    parameter =>
+      parameter.operation === operationKind &&
+      parameter.argument === argument &&
+      sameSourceRef(parameter.operationRef, operationRef) &&
+      Math.abs(parameter.sensitivity) > 1e-9,
+  );
+  const upstream = matches.filter(
+    parameter =>
+      !containsSourceRef(parameter.expressionRef, parameter.target.sourceRef),
+  );
+  const candidates = upstream.length > 0 ? upstream : matches;
+  return candidates.length === 1 ? candidates[0] : undefined;
+}
+
+function containsSourceRef(
+  container: SourceRef,
+  candidate: SourceRef,
+): boolean {
+  return (
+    container.file === candidate.file &&
+    container.start <= candidate.start &&
+    candidate.end <= container.end
+  );
+}
+
+function sameSourceRef(left: SourceRef, right: SourceRef): boolean {
+  return (
+    left.file === right.file &&
+    left.start === right.start &&
+    left.end === right.end
+  );
 }
 
 function sourceLineageContains(
@@ -1764,34 +1831,33 @@ function edgeSelectionSite(
   if (!ts.isPropertyAccessExpression(node.expression)) return undefined;
   const operation = node.expression.name.text;
   if (operation !== 'fillet' && operation !== 'chamfer') return undefined;
-  const argument = node.arguments[1];
-  if (!argument) return undefined;
-  const expression = unwrapParenthesizedExpression(argument);
-  if (
-    !ts.isArrayLiteralExpression(expression) ||
-    expression.elements.some(element => !ts.isNumericLiteral(element))
-  ) {
-    return undefined;
-  }
+  const firstArgument = node.arguments[0];
+  if (!firstArgument) return undefined;
+  const edgeArgument = node.arguments[1];
+  const closeParen = node.getEnd() - 1;
   return {
     siteId,
     operation,
     sourceRef: sourceRef(
       sourceFile.fileName,
-      argument.getStart(sourceFile),
-      argument.getEnd(),
+      node.expression.getEnd(),
+      node.getEnd(),
     ),
+    edgeArgument: edgeArgument
+      ? {
+          kind: 'replace',
+          sourceRef: sourceRef(
+            sourceFile.fileName,
+            edgeArgument.getStart(sourceFile),
+            edgeArgument.getEnd(),
+          ),
+        }
+      : {
+          kind: 'append',
+          sourceRef: sourceRef(sourceFile.fileName, closeParen, closeParen),
+          needsComma: !node.arguments.hasTrailingComma,
+        },
   };
-}
-
-function unwrapParenthesizedExpression(
-  expression: ts.Expression,
-): ts.Expression {
-  let current = expression;
-  while (ts.isParenthesizedExpression(current)) {
-    current = current.expression;
-  }
-  return current;
 }
 
 function traceElementExpression(

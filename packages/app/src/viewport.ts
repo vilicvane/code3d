@@ -997,11 +997,15 @@ export class ModelViewport {
           sourceRef.start <= offset &&
           offset <= sourceRef.end,
       )
-      .sort(
-        (left, right) =>
+      .sort((left, right) => {
+        const leftIsTool = left.kind === 'operation-selection';
+        const rightIsTool = right.kind === 'operation-selection';
+        if (leftIsTool !== rightIsTool) return leftIsTool ? -1 : 1;
+        return (
           sourceSpan(left.sourceRef) - sourceSpan(right.sourceRef) ||
-          sourceTargetPriority(left) - sourceTargetPriority(right),
-      )[0];
+          sourceTargetPriority(left) - sourceTargetPriority(right)
+        );
+      })[0];
   }
 
   private buildContextObject(

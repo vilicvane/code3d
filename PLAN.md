@@ -313,17 +313,21 @@ constraint source sites do.
   explicit edge set while retaining the one-argument all-edge form.
 - Project stable IDs into render meshes and operation trace selections without
   exposing kernel hashes.
-- Treat a direct numeric edge-array argument, including an empty one, as the
-  explicit viewport selection entry. Initialize from its current IDs and write
-  changes back only to that existing array through the common tool transaction
-  path. Do not offer GUI insertion of modeling calls.
+- Treat the full argument area of `fillet()` and `chamfer()` as the viewport
+  tool entry. Include the first size parameter in the tool panel and keep edge
+  selection available whether or not the optional edge-array argument already
+  exists. Preserve a one-argument call until its selected edge set changes,
+  then append the explicit array through the common tool transaction path; do
+  not offer GUI insertion of modeling calls.
 - While selecting, render the applied operation result as the primary solid and
   retain every original input edge at its pre-operation position as a
   hoverable/toggleable guide. Recompile the temporary result as the selected
   set changes without writing source. Outside selection, keep the weaker
   before/after comparison for an applied edge modification.
-- Make deselection reversible at both levels: toggle individual edges, clear
-  the set, or cancel the whole session without changing source.
+- Make deselection reversible at both levels: toggle individual edges or clear
+  the set. Leaving the call's source focus or pressing `Escape` cancels the
+  whole session without changing source; the transient panel has no redundant
+  Cancel action.
 - Keep the contextual selection panel vertically ordered and stable under
   pointer hover; hover feedback belongs on the model rather than in moving text.
 
