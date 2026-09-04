@@ -24,11 +24,11 @@
 - [ ] 等旋转/变换 API 定型时，再决定是否从 root 公开 `Quaternion`。
 - [ ] 单独最小化 `@code3d/core/tooling`。
 
-## 待修复：Model 能力分层
+## 已修复：Model 能力分层
 
-状态：已确认设计方向，可交给独立 session 实现。
+状态：已按确认的设计实现并验证。
 
-当前 `Model<Elements, Kind>` 是 `ModelObject<Elements, Kind> & Elements`，而
+修复前 `Model<Elements, Kind>` 是 `ModelObject<Elements, Kind> & Elements`，而
 拓扑选择、缩放和 solid modifier 全部声明在共同的 `ModelObject` class 上。因此
 `group([]).vertex(1)`、`group([]).scaled(2)`、`group([]).fillet(1)` 等无效调用仍可能
 通过 TypeScript；运行时才因 group 没有 geometry 而失败。隐藏作者可见的 `kind` 后，
@@ -57,13 +57,23 @@
 
 验收：
 
-- 正向类型测试覆盖每层允许的方法。
-- 负向 `@ts-expect-error` 至少覆盖 group 的 `vertex/scaled/fillet`、VertexModel 的
-  `edge/surface`、EdgeModel 的 `surface`、FaceModel 的 `fillet/chamfer`。
-- 检查生成的 root `.d.ts`，确认上述能力边界清晰且不出现 `ModelObject`。
-- core tests、全 packages build、app build 均通过。
+- [x] 正向类型测试覆盖每层允许的方法。
+- [x] 负向 `@ts-expect-error` 至少覆盖 group 的 `vertex/scaled/fillet`、VertexModel 的
+      `edge/surface`、EdgeModel 的 `surface`、FaceModel 的 `fillet/chamfer`。
+- [x] 检查生成的 root `.d.ts`，确认上述能力边界清晰且不出现 `ModelObject`。
+- [x] core tests、全 packages build、app build 均通过。
+
+实现补充：
+
+- 公共能力由独立 capability interfaces 组合，`ModelObject` 仅保留为 runtime/tooling
+  实现；`Model` 是只含共同能力的作者类型。
+- `relate`、`expose`、`paint`、`scaled` 和 solid modifiers 会同时保留具体能力层与
+  具名元素类型。
+- topology、scale、fillet/chamfer 的 `@code3d.param` 注释放在公共能力签名上，Studio
+  继续能从作者实际解析到的 method signature 生成 panel。
+- `paint` 暂时仍属于共同能力，因此 group 上的现有行为不变，等待独立审阅。
 
 ## 当前状态
 
-- core root 第一版白名单已在 `core-api-whitelist-side-0905` worktree 实现并验证。
-- 尚未提交或集成。
+- core root 第一版白名单已集成。
+- Model 能力分层已实现并通过 core、packages、app 的类型与构建验证。

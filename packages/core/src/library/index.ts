@@ -30,6 +30,7 @@ export type {
   EdgeModel,
   FaceAnchor,
   FaceModel,
+  GroupModel,
   HelicalThreadOptions,
   LineAnchor,
   LoftOptions,

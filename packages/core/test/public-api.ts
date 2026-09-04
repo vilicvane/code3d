@@ -28,6 +28,7 @@ import {
   type EdgeModel,
   type FaceAnchor,
   type FaceModel,
+  type GroupModel,
   type HelicalThreadOptions,
   type LineAnchor,
   type LoftOptions,
@@ -73,6 +74,12 @@ const solidModel: SolidModel<CanonicalElements> = solid;
 const faceModel: FaceModel<PlanarElements> = circle(4);
 const edgeModel: EdgeModel<CurveElements> = line([0, 0, 0], vector);
 const vertexModel: VertexModel = point(vector);
+const groupModel: GroupModel = group([
+  solid,
+  faceModel,
+  edgeModel,
+  vertexModel,
+]);
 const pointAnchor: PointAnchor = solid.center;
 const lineAnchor: LineAnchor = solid.axis;
 const faceAnchor: FaceAnchor = solid.top;
@@ -90,6 +97,42 @@ solid.paint('#fff').scaled(2).fillet(1).chamfer(0.5);
 solid.vertices();
 solid.edges();
 solid.surfaces();
+solid
+  .expose({mount: solid.bottom})
+  .relate(self => self.mount.on(solid.top))
+  .fillet(1, [edgeId]);
+faceModel
+  .scaled(2)
+  .relate(self => self.plane.on(solid.top))
+  .expose({mount: solid.bottom})
+  .surface(1);
+faceModel.vertex(1);
+faceModel.edge(1);
+faceModel.surfaces();
+edgeModel
+  .scaled(2)
+  .relate(self => self.start.on(solid.center))
+  .expose({mount: solid.axis})
+  .edge(1);
+edgeModel.vertex(1);
+edgeModel.edges();
+vertexModel
+  .scaled(2)
+  .relate(self => self.on(solid.center))
+  .expose({mount: solid.center})
+  .vertex(1);
+vertexModel.vertices();
+groupModel
+  .paint('#fff')
+  .relate(self => self.on(solid.center))
+  .expose({mount: solid.top})
+  .relate(self => self.mount.on(solid.bottom));
+union([solid, exposed]);
+cut(solid, [exposed]);
+intersect([solid, exposed]);
+loft([faceModel, faceModel.relate(self => self.plane.on(solid.bottom))], {
+  spine: edgeModel,
+});
 constraint.flip();
 
 void [
@@ -102,6 +145,7 @@ void [
   faceModel,
   frustum,
   group,
+  groupModel,
   helicalThread,
   intersect,
   line,
@@ -171,3 +215,22 @@ constraint.attachParameters([]);
 constraint.traceReference();
 // @ts-expect-error Constraint storage is a runtime implementation detail.
 constraint.storeFor(solid);
+
+// @ts-expect-error Groups do not expose geometric topology.
+groupModel.vertex(1);
+// @ts-expect-error Groups do not have geometric scaling.
+groupModel.scaled(2);
+// @ts-expect-error Groups do not support solid modifiers.
+groupModel.fillet(1);
+// @ts-expect-error Vertex models expose only vertex topology.
+vertexModel.edge(1);
+// @ts-expect-error Vertex models do not expose surface topology.
+vertexModel.surface(1);
+// @ts-expect-error Edge models do not expose surface topology.
+edgeModel.surface(1);
+// @ts-expect-error Face models do not support solid fillets.
+faceModel.fillet(1);
+// @ts-expect-error Face models do not support solid chamfers.
+faceModel.chamfer(1);
+// @ts-expect-error The general Model type contains only common capabilities.
+model.scaled(2);

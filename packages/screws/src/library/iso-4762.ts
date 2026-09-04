@@ -8,7 +8,7 @@ import {
   type CanonicalElements,
   type FaceAnchor,
   type LineAnchor,
-  type Model,
+  type SolidModel,
 } from '@code3d/core';
 
 export type ClearanceFit = 'close' | 'normal' | 'loose';
@@ -166,9 +166,9 @@ type CounterboredSocketCapHoleElements = SocketCapHoleElements &
     counterboreBottom: FaceAnchor;
   }>;
 
-export type Screw = Model<SocketCapScrewElements>;
-export type ClearanceHole = Model<SocketCapHoleElements>;
-export type CounterboredHole = Model<CounterboredSocketCapHoleElements>;
+export type Screw = SolidModel<SocketCapScrewElements>;
+export type ClearanceHole = SolidModel<SocketCapHoleElements>;
+export type CounterboredHole = SolidModel<CounterboredSocketCapHoleElements>;
 
 /**
  * @code3d.arguments ['M6', 18]

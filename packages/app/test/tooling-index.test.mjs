@@ -152,8 +152,72 @@ test('preserves parameter metadata at the resolved definition', () => {
   );
 });
 
+test('resolves tool schemas from layered model capabilities', () => {
+  const source = [
+    'import {box, circle} from "@code3d/core";',
+    'const solid = box(10, 20, 30);',
+    'const face = circle(4);',
+    'solid.fillet(2, [1]);',
+    'solid.edge(1);',
+    'solid.scaled(2);',
+    'face.surface(1);',
+  ].join('\n');
+  const calls = resolveProjectTooling({
+    files: [{path: 'model.ts', source}],
+  }).toolCalls.get('/model.ts');
+
+  assert.deepEqual(
+    toolSchemaAt(calls, source, 'solid.fillet(2, [1])')?.parameters,
+    [
+      {
+        index: 0,
+        name: 'radius',
+        optional: false,
+        label: 'Fillet radius',
+        actions: [],
+        kind: 'length',
+        constraints: {exclusiveMin: 0},
+      },
+      {
+        index: 1,
+        name: 'edgeIds',
+        optional: true,
+        label: 'Edge Ids',
+        actions: [{label: 'Use all', action: 'remove-argument'}],
+        kind: 'edge',
+        multiple: true,
+      },
+    ],
+  );
+  assert.deepEqual(toolSchemaAt(calls, source, 'solid.edge(1)')?.parameters, [
+    {
+      index: 0,
+      name: 'id',
+      optional: false,
+      label: 'Edge',
+      actions: [],
+      kind: 'edge',
+      multiple: false,
+    },
+  ]);
+  assert.equal(
+    toolSchemaAt(calls, source, 'solid.scaled(2)')?.parameters[0]?.kind,
+    'ratio',
+  );
+  assert.equal(
+    toolSchemaAt(calls, source, 'face.surface(1)')?.parameters[0]?.kind,
+    'surface',
+  );
+});
+
 function indexDefinitions(files) {
   return resolveProjectTooling({files}).parameterDefinitions.get('/model.ts');
+}
+
+function toolSchemaAt(calls, source, call) {
+  const start = source.indexOf(call);
+  assert.notEqual(start, -1, `missing call fixture: ${call}`);
+  return calls?.get(sourceNodeKey(start, start + call.length));
 }
 
 function targetAt(definitions, source, reference, context = reference) {
