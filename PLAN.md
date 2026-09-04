@@ -23,6 +23,11 @@ silently reorder the active milestones. Closed requests move to
   a code3d-only module syntax or hidden host dependency.
 - Rendering is driven primarily by source or GUI object selection. Exporting is
   a publishing boundary and only a preview fallback, not a render prerequisite.
+- Base viewport appearance follows geometry kind: face models keep a filled
+  surface visible from either side, while edge models render their authored
+  color (or the neutral unpainted model color) as the curve itself. Solid
+  surface and boundary treatment remains independent from profile and curve
+  visibility.
 - `model()` is not a required entry wrapper. Any runtime model object can be
   selected and rendered.
 - `Model` and typed point, line, face, and frame Anchors are core abstractions. A

@@ -7,6 +7,8 @@ import type {
 
 const unpaintedSurfaceColor = '#dde0dc';
 const unpaintedSurfaceOpacity = 0.68;
+const boundaryColor = '#080a07';
+const boundaryOpacity = 0.72;
 
 export class ModelRenderer {
   readonly scene = new THREE.Scene();
@@ -160,6 +162,22 @@ export function createRenderedModelNode(
     container.add(new THREE.Points(pointGeometry, pointMaterial));
     return container;
   }
+  const edgeGeometry = createEdgeGeometry(node.mesh);
+  if (node.kind === 'edge') {
+    if (edgeGeometry) {
+      const curve = new THREE.LineSegments(
+        edgeGeometry,
+        new THREE.LineBasicMaterial({
+          color: node.color ?? unpaintedSurfaceColor,
+          toneMapped: false,
+        }),
+      );
+      curve.userData.edgeGroups = node.mesh.edgeGroups;
+      container.add(curve);
+    }
+    return container;
+  }
+
   const isUnpainted = node.color === undefined;
   const material = new THREE.MeshStandardMaterial({
     color: node.color ?? unpaintedSurfaceColor,
@@ -171,15 +189,15 @@ export function createRenderedModelNode(
     polygonOffset: true,
     polygonOffsetFactor: 1,
     polygonOffsetUnits: 1,
+    side: node.kind === 'face' ? THREE.DoubleSide : THREE.FrontSide,
   });
   container.add(new THREE.Mesh(createSurfaceGeometry(node.mesh), material));
 
-  const edgeGeometry = createEdgeGeometry(node.mesh);
   if (edgeGeometry) {
     const edgeMaterial = new THREE.LineBasicMaterial({
-      color: '#080a07',
+      color: boundaryColor,
       transparent: true,
-      opacity: 0.72,
+      opacity: boundaryOpacity,
     });
     const edges = new THREE.LineSegments(edgeGeometry, edgeMaterial);
     edges.userData.edgeGroups = node.mesh.edgeGroups;
