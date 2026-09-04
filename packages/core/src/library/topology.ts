@@ -269,78 +269,67 @@ export function resolveEdgeSelection(
   return selected;
 }
 
-export function resolveEdge(topology: EdgeTopology, edgeId: EdgeId): EdgeId {
-  return resolveTopologyId('edge', topology, edgeId);
-}
-
-export function resolveSurface(
-  topology: SurfaceTopology,
-  surfaceId: SurfaceId,
-): SurfaceId {
-  return resolveTopologyId('surface', topology, surfaceId);
-}
-
-export function resolveVertex(
-  topology: VertexTopology,
-  vertexId: VertexId,
-): VertexId {
-  return resolveTopologyId('vertex', topology, vertexId);
-}
-
-export function topologyVertexPoint(
+export function topologyVertexPoints(
   shape: AnyShape,
   topology: VertexTopology,
-  vertexId: VertexId,
-): TopologyPointData {
+  vertexIds: readonly VertexId[],
+): readonly TopologyPointData[] {
   const vertices = shapeVertices(shape);
   try {
-    const index = resolveTopologyIndex('vertex', topology, vertexId);
     assertTopologyLength('vertex', vertices, topology);
-    return {position: vertices[index].asTuple()};
+    return vertexIds.map(vertexId => ({
+      position:
+        vertices[resolveTopologyIndex('vertex', topology, vertexId)].asTuple(),
+    }));
   } finally {
     deleteShapes(vertices);
   }
 }
 
-export function topologyEdgeDirection(
+export function topologyEdgeDirections(
   shape: AnyShape,
   topology: EdgeTopology,
-  edgeId: EdgeId,
-): TopologyDirectionData {
+  edgeIds: readonly EdgeId[],
+): readonly TopologyDirectionData[] {
   const edges = shape.edges;
   try {
-    const index = resolveTopologyIndex('edge', topology, edgeId);
     assertTopologyLength('edge', edges, topology);
-    const point = edges[index].pointAt(0.5);
-    const tangent = edges[index].tangentAt(0.5);
-    try {
-      return {position: point.toTuple(), direction: tangent.toTuple()};
-    } finally {
-      point.delete();
-      tangent.delete();
-    }
+    return edgeIds.map(edgeId => {
+      const edge = edges[resolveTopologyIndex('edge', topology, edgeId)];
+      const point = edge.pointAt(0.5);
+      const tangent = edge.tangentAt(0.5);
+      try {
+        return {position: point.toTuple(), direction: tangent.toTuple()};
+      } finally {
+        point.delete();
+        tangent.delete();
+      }
+    });
   } finally {
     deleteShapes(edges);
   }
 }
 
-export function topologySurfaceDirection(
+export function topologySurfaceDirections(
   shape: AnyShape,
   topology: SurfaceTopology,
-  surfaceId: SurfaceId,
-): TopologyDirectionData {
+  surfaceIds: readonly SurfaceId[],
+): readonly TopologyDirectionData[] {
   const surfaces = shape.faces;
   try {
-    const index = resolveTopologyIndex('surface', topology, surfaceId);
     assertTopologyLength('surface', surfaces, topology);
-    const center = surfaces[index].center;
-    const normal = surfaces[index].normalAt(center);
-    try {
-      return {position: center.toTuple(), direction: normal.toTuple()};
-    } finally {
-      center.delete();
-      normal.delete();
-    }
+    return surfaceIds.map(surfaceId => {
+      const surface =
+        surfaces[resolveTopologyIndex('surface', topology, surfaceId)];
+      const center = surface.center;
+      const normal = surface.normalAt(center);
+      try {
+        return {position: center.toTuple(), direction: normal.toTuple()};
+      } finally {
+        center.delete();
+        normal.delete();
+      }
+    });
   } finally {
     deleteShapes(surfaces);
   }

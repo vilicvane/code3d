@@ -23,7 +23,7 @@
 - circle、ellipse、rectangle、regularPolygon 平面图形和 line、arc、bezier、spline
   曲线都是可独立渲染、选择和 `relate()` 的一等模型值；平面图形局部位于 XZ 面，法向为 +Y。
 - `loft(sections)` 构造普通多截面放样，`loft(sections, {spine})` 使用曲线作为真实 sweep spine；section 和 spine 都保留为源码运行时上下文。
-- `.surface(id)`、`.edge(id)` 和 `.vertex(id)` 分别提供带中心/法向、中点/切向和位置的完整关系锚点，并共享 viewport 拓扑选择交互。
+- `.surface(id)`、`.edge(id)` 和 `.vertex(id)` 分别提供带中心/法向、中点/切向和位置的完整关系锚点；对应的 `.surfaces(ids)`、`.edges(ids)` 和 `.vertices(ids)` 返回引用数组，并共享 viewport 单选或多选交互。
 - 用户手写 `fillet(radius)`、`fillet(radius, edgeIds)` 或对应的 `chamfer`
   调用后，光标进入整个参数区域即可开启 viewport 选边；viewport 以已应用的操作结果
   为主体，同时在原位置保留可 hover、可 toggle 的输入边。边和参数修改会立即写回源码并
