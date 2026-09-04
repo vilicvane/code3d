@@ -1,0 +1,117 @@
+---
+import {getEntry} from 'astro:content';
+import {Image} from 'astro:assets';
+import {firstModelContexts} from '../../../app/render-samples/catalog';
+import {modelImage} from '../lib/images';
+import {highlightedSource} from '../lib/code';
+import {appUrl} from '../lib/site';
+const example = (await getEntry('examples', 'first-model'))!;
+const contexts = await Promise.all(
+  firstModelContexts.map(async context => ({
+    ...context,
+    html: await highlightedSource(example.data.source, context.focus),
+  })),
+);
+---
+
+<source-demo class="source-demo">
+  <div class="demo-toolbar">
+    <span><i></i> first-model.ts</span><a
+      href={appUrl(example.data.file)}
+      target="_blank"
+      rel="noopener">Open this model <span aria-hidden="true">↗</span></a
+    >
+  </div>
+  <div
+    role="tablist"
+    aria-label="Inspect a source expression"
+    class="demo-tabs"
+  >
+    {
+      contexts.map((context, index) => (
+        <button
+          type="button"
+          role="tab"
+          id={`tab-${context.id}`}
+          aria-selected={index === 2 ? 'true' : 'false'}
+          aria-controls={`context-${context.id}`}
+          tabindex={index === 2 ? 0 : -1}
+        >
+          {String(index + 1).padStart(2, '0')} <span>{context.label}</span>
+        </button>
+      ))
+    }
+  </div>
+  {
+    contexts.map((context, index) => (
+      <div
+        role="tabpanel"
+        id={`context-${context.id}`}
+        aria-labelledby={`tab-${context.id}`}
+        hidden={index !== 2}
+        tabindex="0"
+      >
+        <div class="demo-split">
+          <div class="demo-source" set:html={context.html} />
+          <div class="demo-model">
+            <span class="viewport-label">
+              {context.id === 'model' ? 'model' : context.id} <span>↗</span>
+            </span>
+            <Image
+              src={modelImage(
+                context.id === 'model'
+                  ? 'first-model'
+                  : `first-model-${context.id}`,
+              )}
+              alt={context.description}
+              widths={[640, 960, 1440]}
+              sizes="(max-width: 52rem) 100vw, 50vw"
+              loading={index === 2 ? 'eager' : 'lazy'}
+            />
+            <span class="viewport-axis" aria-hidden="true">
+              <b>Y</b>↑ &nbsp; Z ↙ &nbsp; ↗ X
+            </span>
+          </div>
+        </div>
+        <p class="demo-caption">{context.description}</p>
+      </div>
+    ))
+  }
+</source-demo>
+<script>
+  class SourceDemo extends HTMLElement {
+    connectedCallback() {
+      const tabs = [
+        ...this.querySelectorAll<HTMLButtonElement>('[role="tab"]'),
+      ];
+      const panels = [
+        ...this.querySelectorAll<HTMLElement>('[role="tabpanel"]'),
+      ];
+      const select = (tab: HTMLButtonElement, focus = false) => {
+        tabs.forEach(candidate => {
+          candidate.setAttribute('aria-selected', String(candidate === tab));
+          candidate.tabIndex = candidate === tab ? 0 : -1;
+        });
+        panels.forEach(panel => {
+          panel.hidden = panel.id !== tab.getAttribute('aria-controls');
+        });
+        if (focus) tab.focus();
+      };
+      tabs.forEach((tab, index) => {
+        tab.addEventListener('click', () => select(tab));
+        tab.addEventListener('keydown', event => {
+          let next: number;
+          if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+          else if (event.key === 'ArrowLeft')
+            next = (index + tabs.length - 1) % tabs.length;
+          else if (event.key === 'Home') next = 0;
+          else if (event.key === 'End') next = tabs.length - 1;
+          else return;
+          event.preventDefault();
+          select(tabs[next]!, true);
+        });
+      });
+    }
+  }
+  customElements.define('source-demo', SourceDemo);
+</script>

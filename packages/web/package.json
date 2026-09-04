@@ -6,19 +6,26 @@
   "author": "vilicvane",
   "type": "module",
   "scripts": {
-    "dev": "vite --config vite.config.ts",
-    "build": "tsc --noEmit -p src/www/tsconfig.json && vite build --config vite.config.ts",
-    "preview": "vite preview --config vite.config.ts"
+    "dev": "astro dev",
+    "build": "astro sync && node scripts/check.mjs && astro build && node scripts/check-site.mjs",
+    "preview": "astro preview",
+    "render-images": "node scripts/render-images.mjs"
   },
   "dependencies": {
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "@astrojs/starlight": "^0.42.0",
+    "astro": "^7.3.1"
   },
   "devDependencies": {
-    "@types/react": "^19.2.14",
-    "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^6.1.1",
+    "@astrojs/check": "^0.9.10",
+    "@astrojs/sitemap": "^3.7.4",
+    "@fontsource-variable/inter": "^5.2.8",
+    "@fontsource-variable/jetbrains-mono": "^5.2.8",
+    "@types/node": "^24.10.1",
+    "parse5": "^8.0.0",
+    "prettier-plugin-astro": "^0.14.1",
+    "sharp": "^0.35.4",
     "shiki": "^4.4.3",
-    "vite": "^8.2.2"
+    "sirv": "^3.0.2",
+    "typescript": "^6.0.2"
   }
 }

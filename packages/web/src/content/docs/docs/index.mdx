@@ -1,0 +1,48 @@
+---
+title: Start building with Code3D
+description: Learn solid modeling with TypeScript and direct geometric interaction.
+---
+
+import {LinkCard, CardGrid} from '@astrojs/starlight/components';
+import {sitePath, appUrl} from '../../../lib/site';
+
+Code3D connects TypeScript source with the geometry it produces. Write a model,
+move through its expressions to inspect individual objects, and use visual
+tools to make supported selections and parameter changes directly in source.
+
+<CardGrid>
+  <LinkCard
+    title="Make your first model"
+    description="Build a base and a post, inspect both, and adjust their relation."
+    href={sitePath('docs/getting-started/first-model/')}
+  />
+  <LinkCard
+    title="Explore the examples"
+    description="Read complete models and open their actual source in the App."
+    href={sitePath('examples/')}
+  />
+</CardGrid>
+
+## Start in the App
+
+<a href={appUrl('first-model.ts')} target="_blank" rel="noopener">
+  Open the first model in Code3D
+</a>
+. You can edit immediately using browser storage. There is no account to create.
+
+You will benefit from knowing JavaScript variables, functions, arrays, and
+imports. Code3D uses ordinary TypeScript; you do not need to learn a separate
+modeling language.
+
+## Find what you need
+
+- **Getting started:** follow a complete modeling task and learn the App.
+- **Guides:** position parts, select topology, and make reusable models.
+- **Concepts:** understand model values, source contexts, and GUI writeback.
+- **Reference:** look up modeling operations and current product boundaries.
+
+## Prototype 01
+
+Code3D is an early working prototype. APIs and project behavior are evolving.
+Read the [current limitations](./reference/limitations/) before depending on it
+for an existing workflow.

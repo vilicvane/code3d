@@ -1,0 +1,32 @@
+---
+title: Metric fasteners
+description: Use ISO 4762 socket cap screws and matching hole geometry.
+---
+
+import ModelExample from '../../../../components/ModelExample.astro';
+
+Import the fastener namespace from `@code3d/screws`:
+
+```ts
+import {ISO4762} from '@code3d/screws';
+```
+
+## Screw and clearance tool
+
+`ISO4762.screw(size, length)` creates a socket cap screw.
+`ISO4762.clearanceHole(size, length)` creates the matching clearance and
+counterbore tool. Current examples cover metric sizes M3 through M12.
+
+The hole is a model used as a tool for `cut(stock, [hole])`. It is also a
+useful placement reference: its named elements describe the fastening geometry.
+
+<ModelExample id="fastener" />
+
+## Place through named elements
+
+The hole's `shaftBottom` positions it against the plate.
+The screw's `headBottom` relates to the hole's `counterboreBottom`.
+The offset in this example lifts the screw away from its seated position to
+make the connection visible.
+
+Use completion to inspect the full typed interface and supported size values.

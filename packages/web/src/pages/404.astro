@@ -1,0 +1,15 @@
+---
+import Site from '../layouts/Site.astro';
+import {sitePath} from '../lib/site';
+---
+
+<Site title="Page not found">
+  <section class="page-lead shell">
+    <p class="eyebrow">404</p>
+    <h1>That page has moved<br />out of view.</h1>
+    <p>
+      Return to <a href={sitePath('')}>the homepage</a> or
+      <a href={sitePath('docs/')}>explore the documentation</a>.
+    </p>
+  </section>
+</Site>
