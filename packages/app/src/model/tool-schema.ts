@@ -10,6 +10,15 @@ import {
   injectedPackages,
 } from '../monaco/injected-packages';
 import {normalizeProjectPath, type ModelProject} from '../project/project';
+import {
+  indexParameterDefinitions,
+  sourceNodeKey,
+  type ParameterDefinitionMap,
+  type SourceParameterTarget,
+} from './parameter-definitions';
+
+export {sourceNodeKey};
+export type {ParameterDefinitionMap, SourceParameterTarget};
 
 export type ToolParameterKind = ParameterKind | TopologyKind;
 
@@ -75,6 +84,11 @@ export type ToolArgumentSource = Readonly<{
 
 export type ToolCallSchemaMap = ReadonlyMap<string, ToolSignatureSchema>;
 
+export type ProjectToolingIndex = Readonly<{
+  toolCalls: ReadonlyMap<string, ToolCallSchemaMap>;
+  parameterDefinitions: ReadonlyMap<string, ParameterDefinitionMap>;
+}>;
+
 const toolParameterKinds = new Set<ToolParameterKind>([
   'length',
   'angle',
@@ -96,9 +110,9 @@ function isTopologyKind(kind: unknown): kind is TopologyKind {
   return kind === 'vertex' || kind === 'edge' || kind === 'surface';
 }
 
-export function resolveProjectToolCalls(
+export function resolveProjectTooling(
   project: ModelProject,
-): ReadonlyMap<string, ToolCallSchemaMap> {
+): ProjectToolingIndex {
   const sources = new Map<string, string>();
   project.files.forEach(file =>
     sources.set(normalizeProjectPath(file.path), file.source),
@@ -160,7 +174,9 @@ export function resolveProjectToolCalls(
     ts.SignatureDeclaration,
     ToolSignatureSchema | undefined
   >();
-  const result = new Map<string, ToolCallSchemaMap>();
+  const toolCalls = new Map<string, ToolCallSchemaMap>();
+  const parameterDefinitions = new Map<string, ParameterDefinitionMap>();
+  const parameterTargets = new Map<ts.Symbol, SourceParameterTarget | null>();
 
   for (const file of project.files) {
     const path = normalizeProjectPath(file.path);
@@ -170,6 +186,7 @@ export function resolveProjectToolCalls(
     // if semantic diagnostics are requested after getResolvedSignature().
     const semanticDiagnostics = program.getSemanticDiagnostics(sourceFile);
     const calls = new Map<string, ToolSignatureSchema>();
+    const definitions = new Map<string, SourceParameterTarget>();
     const visit = (node: ts.Node): void => {
       if (ts.isCallExpression(node)) {
         const candidates: ts.Signature[] = [];
@@ -197,14 +214,23 @@ export function resolveProjectToolCalls(
             toolCallKey(node.getStart(sourceFile), node.getEnd()),
             schema,
           );
+          indexParameterDefinitions(
+            node,
+            schema,
+            checker,
+            parameterTargets,
+            definitions,
+            sourceFile,
+          );
         }
       }
       ts.forEachChild(node, visit);
     };
     ts.forEachChild(sourceFile, visit);
-    result.set(path, calls);
+    toolCalls.set(path, calls);
+    parameterDefinitions.set(path, definitions);
   }
-  return result;
+  return {toolCalls, parameterDefinitions};
 }
 
 const callSignatureDiagnosticCodes = new Set([
@@ -254,7 +280,7 @@ function signatureToolSchema(
 }
 
 export function toolCallKey(start: number, end: number): string {
-  return `${start}:${end}`;
+  return sourceNodeKey(start, end);
 }
 
 function toolSignatureSchema(

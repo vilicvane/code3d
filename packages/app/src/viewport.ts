@@ -38,6 +38,7 @@ import type {
   SourceDecorationProvider,
   ViewportDecoration,
 } from './viewport-decoration';
+import {preferUpstreamParameterUsages} from './model/parameter-provenance';
 import {ViewportCoordinateReference} from './ui/viewport-coordinate-reference';
 
 export type Occurrence = Readonly<{
@@ -1602,7 +1603,7 @@ function positionBindings(
     return [];
   }
   const receiver = constraint.sourceRefs.at(-1);
-  const parameters = preferUpstreamTargets(
+  const parameters = preferUpstreamParameterUsages(
     constraint.parameters.filter(({operation}) => operation === 'offset'),
   );
   const modelParameters = occurrences.flatMap(({node}) => node.parameters);
@@ -1695,27 +1696,6 @@ function positionBindings(
         occurrenceKeys,
       },
     ];
-  });
-}
-
-function preferUpstreamTargets(
-  parameters: readonly ParameterUsage[],
-): ParameterUsage[] {
-  const groups = new Map<string, ParameterUsage[]>();
-  for (const parameter of parameters) {
-    const {file, start, end} = parameter.expressionRef;
-    const key = `${parameter.operation}:${parameter.argument}:${file}:${start}:${end}`;
-    const group = groups.get(key) ?? [];
-    group.push(parameter);
-    groups.set(key, group);
-  }
-
-  return [...groups.values()].flatMap(group => {
-    const upstream = group.filter(
-      ({expressionRef, target}) =>
-        !containsSource(expressionRef, target.sourceRef),
-    );
-    return upstream.length > 0 ? upstream : group;
   });
 }
 

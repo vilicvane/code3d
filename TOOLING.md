@@ -148,7 +148,9 @@ compiler 为每个实际进入的 call site execution 统一记录完成或失�
 恢复候选，否则按声明顺序选择第一个带注释的候选。候选恢复只接受落在当前 callee 或其
 直接参数上的调用签名 diagnostic，不能因外层调用把当前表达式标成错误参数而误判。缺失
 参数在面板中显示为空，当前调用末尾能够合法追加的下一个参数可以直接填写并写回源码，
-后续参数随调用补全依次解锁。
+后续参数随调用补全依次解锁。已有数值参数表达式无法解析出可编辑 target 时，compiler
+仍会捕获它的运行时求值结果，并把格式化后的数值作为空 input 的 placeholder；它与尚未
+填写的参数保持区分。
 
 参数 schema 是按能力扩展的 tagged union。数值 `kind` 提供标量控件；`vertex`、`edge`
 和 `surface` 提供 topology selector，其单选或多选能力从声明参数是否为数组推导，而不是
@@ -158,6 +160,13 @@ compiler 在调用进入时记录 receiver 和已求值参数，所以参数缺�
 仍可显示 receiver 并修复；viewport pick 产生通用 `argument.set` intent，立即写回同一个
 源码事务。复数引用允许空数组，并在省略参数时返回全部当前稳定拓扑引用；fillet/chamfer
 的省略参数全选语义仍由专用 provider 处理。
+
+数值参数的源码 provenance 与工具签名共用一个 TypeScript semantic program。调用参数中的
+标识符、具体对象属性、字面量类型的计算属性和对象解构会沿唯一 symbol definition 继续
+追溯，也可以穿过 import 和 re-export，直到静态数值 initializer。任一步存在多个定义、
+缺少可追溯 initializer，或 receiver 的运行时对象不唯一时，该链路不产生可编辑 target。
+这套索引只覆盖带工具注释的数值参数表达式；panel 与 viewport 对同一表达式都优先采用
+表达式之外的上游 target，避免把比例因子等内联字面量误当成主要参数。
 
 平移 gizmo 目前遵守以下解析规则：
 

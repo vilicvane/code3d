@@ -2,6 +2,7 @@ export type ContextualToolParameterView = Readonly<{
   name: string;
   label: string;
   value?: number;
+  placeholder?: string;
   unit?: string;
   step: number;
   min?: number;
@@ -181,6 +182,7 @@ export class ContextualToolPanel {
     setOptionalNumberAttribute(control.input, 'min', parameter.min);
     setOptionalNumberAttribute(control.input, 'max', parameter.max);
     control.input.disabled = parameter.disabled ?? false;
+    control.input.placeholder = parameter.placeholder ?? '';
     control.input.setAttribute(
       'aria-invalid',
       String(parameter.invalid ?? false),

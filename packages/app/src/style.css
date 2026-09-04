@@ -1010,6 +1010,11 @@ kbd {
   background: var(--acid);
 }
 
+.contextual-tool-parameter-control input::placeholder {
+  color: #777d71;
+  opacity: 1;
+}
+
 .contextual-tool-parameter-control:focus-within {
   border-color: var(--acid);
 }

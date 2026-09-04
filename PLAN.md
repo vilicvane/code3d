@@ -462,6 +462,11 @@ choices rather than product semantics.
   picking plus input/result comparison. A provider consumes runtime facts and
   emits ordinary tool intents; annotations do not restate implementation
   behavior.
+- Resolve editable scalar sources through the same TypeScript program used for
+  tool signatures. Follow only unique definitions through aliases, concrete
+  object properties, destructuring, imports, and re-exports until reaching a
+  static numeric initializer; reject runtime-ambiguous receivers instead of
+  selecting a structurally compatible property declaration.
 - Migrate primitive constructors, `Constraint.offset()`, scale, fillet, and
   chamfer to the annotation path, deleting the compiler's name-based parameter
   table and the fillet/chamfer-specific panel contract rather than retaining
@@ -477,10 +482,13 @@ Status: declaration parsing, overload-aware signature resolution, runtime call
 context, scalar write-back, parameter actions, and the generic contextual panel
 are implemented. Primitive constructors, `offset()`, `scaled()`, `fillet()`,
 `chamfer()`, topology references, and the scalar signatures of the screw tools
-use the annotation path. Single edge/surface picking and multiple-edge picking
-are viewport providers layered into the same panel and undo session;
-object-valued parameters and further selectable parameter kinds will be
-migrated only after their concrete controls establish the next schema boundary.
+use the annotation path. Scalar provenance follows unique TypeScript definition
+chains across property access and project files, while contextual panels and
+viewport providers share the same upstream-target preference. Single
+edge/surface picking and multiple-edge picking are viewport providers layered
+into the same panel and undo session; object-valued parameters and further
+selectable parameter kinds will be migrated only after their concrete controls
+establish the next schema boundary.
 
 ### 4e. First-class profiles, curves, and loft — complete
 

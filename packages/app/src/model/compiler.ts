@@ -30,8 +30,11 @@ import {code3dAnnotations} from './annotations';
 import {designArgumentAnnotationSites} from './design-functions';
 import {
   isToolSelectionParameter,
-  resolveProjectToolCalls,
+  resolveProjectTooling,
+  sourceNodeKey,
   toolCallKey,
+  type ParameterDefinitionMap,
+  type SourceParameterTarget,
   type ToolCallSchemaMap,
   type ToolArgumentSource,
   type ToolSelectionParameterSchema,
@@ -55,6 +58,7 @@ export type SourceTargetEvaluation = Readonly<{
   runtime: RuntimeReach;
   nodeIds: readonly string[];
   parameters?: readonly ParameterUsage[];
+  toolArguments?: Readonly<Record<number, number>>;
   operationId?: string;
   operationInput?: Readonly<{
     role: ModelOperationInputRole;
@@ -192,19 +196,6 @@ type RuntimeParameterTarget = Readonly<{
   target: ParameterTarget;
   sensitivity: number;
 }>;
-
-type StaticParameterTarget = {
-  binding?: string;
-  sourceRef: SourceRef;
-  value: number;
-  label: string;
-  description?: string;
-  kind?: ParameterKind;
-  unit?: string;
-  min?: number;
-  max?: number;
-  step?: number;
-};
 
 type ParsedDesignArgumentContext = DesignArgumentContext &
   Readonly<{
@@ -972,7 +963,7 @@ export function compileProject(
   const designArguments = [...files].flatMap(([path, source]) =>
     parseDesignArgumentContexts(path, source),
   );
-  const toolCalls = resolveProjectToolCalls(project);
+  const tooling = resolveProjectTooling(project);
   const activeDesignContext = designArguments.find(
     context => context.id === requestedDesignContextId,
   );
@@ -1018,7 +1009,8 @@ export function compileProject(
       const result = transpileSource(
         normalized,
         source,
-        toolCalls.get(normalized),
+        tooling.toolCalls.get(normalized),
+        tooling.parameterDefinitions.get(normalized),
         activeDesignContext?.functionRef.file === normalized
           ? activeDesignContext
           : undefined,
@@ -1228,6 +1220,7 @@ function transpileSource(
   path: string,
   source: string,
   toolCalls: ToolCallSchemaMap | undefined,
+  parameterDefinitions: ParameterDefinitionMap | undefined,
   designContext?: ParsedDesignArgumentContext,
 ): string {
   const executableSource = designContext
@@ -1244,7 +1237,13 @@ function transpileSource(
     },
     reportDiagnostics: true,
     transformers: {
-      before: [createTraceTransformer(source.length, toolCalls)],
+      before: [
+        createTraceTransformer(
+          source.length,
+          toolCalls,
+          parameterDefinitions ?? new Map(),
+        ),
+      ],
     },
   });
   const error = (result.diagnostics ?? []).find(
@@ -1775,10 +1774,32 @@ function buildSourceTargets(
   });
   return [...fallbackToolTargets, ...targets].map(target => ({
     ...target,
-    evaluations: [...target.evaluations].sort(
-      (left, right) => right.runtime.order - left.runtime.order,
-    ),
+    evaluations: target.evaluations
+      .map(evaluation => {
+        const execution = target.tool
+          ? sourceExecutionFor(
+              target.tool.callId,
+              evaluation.contextId,
+              evaluation.runtime,
+            )
+          : undefined;
+        const toolArguments = execution
+          ? numericToolArguments(execution.arguments)
+          : undefined;
+        return toolArguments ? {...evaluation, toolArguments} : evaluation;
+      })
+      .sort((left, right) => right.runtime.order - left.runtime.order),
   }));
+}
+
+function numericToolArguments(
+  arguments_: ReadonlyMap<number, unknown>,
+): Readonly<Record<number, number>> | undefined {
+  const values: Record<number, number> = {};
+  arguments_.forEach((value, index) => {
+    if (typeof value === 'number') values[index] = value;
+  });
+  return Object.keys(values).length > 0 ? values : undefined;
 }
 
 function toolExecutionIsRepresented(
@@ -2006,12 +2027,12 @@ function isCompositionInputRole(role: ModelOperationInputRole): boolean {
 function createTraceTransformer(
   authorSourceLength: number,
   toolCalls: ToolCallSchemaMap | undefined,
+  parameterDefinitions: ParameterDefinitionMap,
 ): ts.TransformerFactory<ts.SourceFile> {
   return context => {
     const {factory} = context;
 
     return sourceFile => {
-      const bindings = collectStaticParameterTargets(sourceFile);
       const visit: ts.Visitor = node => {
         if (
           !ts.isSourceFile(node) &&
@@ -2102,7 +2123,7 @@ function createTraceTransformer(
                 node,
                 visited,
                 parameterSignature,
-                bindings,
+                parameterDefinitions,
                 sourceFile,
                 factory,
               )
@@ -2800,7 +2821,7 @@ function instrumentCallParameters(
   original: ts.CallExpression,
   visited: ts.CallExpression,
   signature: ParameterSignature,
-  bindings: ReadonlyMap<string, StaticParameterTarget>,
+  parameterDefinitions: ParameterDefinitionMap,
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
 ): ts.CallExpression {
@@ -2814,13 +2835,14 @@ function instrumentCallParameters(
     const targets = collectExpressionTargets(
       originalArgument,
       argumentDefinition,
-      bindings,
+      parameterDefinitions,
       sourceFile,
     )
       .map(target => {
         const derivative = derivativeOf(
           originalArgument,
           target,
+          parameterDefinitions,
           sourceFile,
           factory,
         );
@@ -2865,53 +2887,14 @@ function instrumentCallParameters(
   );
 }
 
-function collectStaticParameterTargets(
-  sourceFile: ts.SourceFile,
-): ReadonlyMap<string, StaticParameterTarget> {
-  const targets = new Map<string, StaticParameterTarget>();
-  for (const statement of sourceFile.statements) {
-    if (!ts.isVariableStatement(statement)) {
-      continue;
-    }
-    const metadata = parseCode3dMetadata(statement, sourceFile);
-    for (const declaration of statement.declarationList.declarations) {
-      if (!ts.isIdentifier(declaration.name) || !declaration.initializer) {
-        continue;
-      }
-      const value = numericExpressionValue(declaration.initializer);
-      if (value === undefined) {
-        continue;
-      }
-      const name = declaration.name.text;
-      targets.set(name, {
-        binding: name,
-        sourceRef: {
-          file: sourceFile.fileName,
-          start: declaration.initializer.getStart(sourceFile),
-          end: declaration.initializer.getEnd(),
-        },
-        value,
-        label: metadata.label ?? humanizeIdentifier(name),
-        description: metadata.description,
-        kind: metadata.kind,
-        unit: metadata.unit,
-        min: metadata.min,
-        max: metadata.max,
-        step: metadata.step,
-      });
-    }
-  }
-  return targets;
-}
-
 function collectExpressionTargets(
   expression: ts.Expression,
   argument: ParameterArgument,
-  bindings: ReadonlyMap<string, StaticParameterTarget>,
+  parameterDefinitions: ParameterDefinitionMap,
   sourceFile: ts.SourceFile,
-): readonly StaticParameterTarget[] {
-  const targets = new Map<string, StaticParameterTarget>();
-  const add = (target: StaticParameterTarget): void => {
+): readonly SourceParameterTarget[] {
+  const targets = new Map<string, SourceParameterTarget>();
+  const add = (target: SourceParameterTarget): void => {
     const id = `${target.sourceRef.file}:${target.sourceRef.start}:${target.sourceRef.end}`;
     targets.set(id, {
       ...target,
@@ -2921,11 +2904,11 @@ function collectExpressionTargets(
   };
 
   const visit = (node: ts.Node): void => {
-    if (ts.isIdentifier(node) && isValueIdentifier(node)) {
-      const binding = bindings.get(node.text);
-      if (binding && !isShadowedBinding(node, node.text, sourceFile)) {
-        add(binding);
-      }
+    const definition = parameterDefinitions.get(
+      sourceNodeKey(node.getStart(sourceFile), node.getEnd()),
+    );
+    if (definition) {
+      add(definition);
       return;
     }
     const numeric = numericExpressionValue(node);
@@ -2951,29 +2934,45 @@ function collectExpressionTargets(
 
 function derivativeOf(
   expression: ts.Expression,
-  target: StaticParameterTarget,
+  target: SourceParameterTarget,
+  parameterDefinitions: ParameterDefinitionMap,
   sourceFile: ts.SourceFile,
   factory: ts.NodeFactory,
 ): ts.Expression | undefined {
-  if (matchesTarget(expression, target, sourceFile)) {
+  if (matchesTarget(expression, target, parameterDefinitions, sourceFile)) {
     return factory.createNumericLiteral(1);
   }
-  if (!containsTarget(expression, target, sourceFile)) {
+  if (!containsTarget(expression, target, parameterDefinitions, sourceFile)) {
     return factory.createNumericLiteral(0);
   }
   if (ts.isParenthesizedExpression(expression)) {
-    return derivativeOf(expression.expression, target, sourceFile, factory);
+    return derivativeOf(
+      expression.expression,
+      target,
+      parameterDefinitions,
+      sourceFile,
+      factory,
+    );
   }
   if (
     ts.isAsExpression(expression) ||
-    ts.isTypeAssertionExpression(expression)
+    ts.isTypeAssertionExpression(expression) ||
+    ts.isSatisfiesExpression(expression) ||
+    ts.isNonNullExpression(expression)
   ) {
-    return derivativeOf(expression.expression, target, sourceFile, factory);
+    return derivativeOf(
+      expression.expression,
+      target,
+      parameterDefinitions,
+      sourceFile,
+      factory,
+    );
   }
   if (ts.isPrefixUnaryExpression(expression)) {
     const operand = derivativeOf(
       expression.operand,
       target,
+      parameterDefinitions,
       sourceFile,
       factory,
     );
@@ -2984,10 +2983,7 @@ function derivativeOf(
       return operand;
     }
     if (expression.operator === ts.SyntaxKind.MinusToken) {
-      return factory.createPrefixUnaryExpression(
-        ts.SyntaxKind.MinusToken,
-        operand,
-      );
+      return negateNumericExpression(operand, factory);
     }
     return undefined;
   }
@@ -2998,12 +2994,14 @@ function derivativeOf(
   const leftDerivative = derivativeOf(
     expression.left,
     target,
+    parameterDefinitions,
     sourceFile,
     factory,
   );
   const rightDerivative = derivativeOf(
     expression.right,
     target,
+    parameterDefinitions,
     sourceFile,
     factory,
   );
@@ -3014,73 +3012,129 @@ function derivativeOf(
   const right = expression.right;
   switch (expression.operatorToken.kind) {
     case ts.SyntaxKind.PlusToken:
-      return factory.createBinaryExpression(
+      return combineNumericExpressions(
         leftDerivative,
-        ts.SyntaxKind.PlusToken,
         rightDerivative,
+        'add',
+        factory,
       );
     case ts.SyntaxKind.MinusToken:
-      return factory.createBinaryExpression(
+      return combineNumericExpressions(
         leftDerivative,
-        ts.SyntaxKind.MinusToken,
         rightDerivative,
+        'subtract',
+        factory,
       );
     case ts.SyntaxKind.AsteriskToken:
-      return factory.createBinaryExpression(
-        factory.createBinaryExpression(
-          leftDerivative,
-          ts.SyntaxKind.AsteriskToken,
-          right,
-        ),
-        ts.SyntaxKind.PlusToken,
-        factory.createBinaryExpression(
-          left,
-          ts.SyntaxKind.AsteriskToken,
-          rightDerivative,
-        ),
+      return combineNumericExpressions(
+        combineNumericExpressions(leftDerivative, right, 'multiply', factory),
+        combineNumericExpressions(left, rightDerivative, 'multiply', factory),
+        'add',
+        factory,
       );
     case ts.SyntaxKind.SlashToken:
-      return factory.createBinaryExpression(
-        factory.createParenthesizedExpression(
-          factory.createBinaryExpression(
-            factory.createBinaryExpression(
-              leftDerivative,
-              ts.SyntaxKind.AsteriskToken,
-              right,
-            ),
-            ts.SyntaxKind.MinusToken,
-            factory.createBinaryExpression(
-              left,
-              ts.SyntaxKind.AsteriskToken,
-              rightDerivative,
-            ),
-          ),
+      return combineNumericExpressions(
+        combineNumericExpressions(
+          combineNumericExpressions(leftDerivative, right, 'multiply', factory),
+          combineNumericExpressions(left, rightDerivative, 'multiply', factory),
+          'subtract',
+          factory,
         ),
-        ts.SyntaxKind.SlashToken,
-        factory.createParenthesizedExpression(
-          factory.createBinaryExpression(
-            right,
-            ts.SyntaxKind.AsteriskToken,
-            right,
-          ),
-        ),
+        combineNumericExpressions(right, right, 'multiply', factory),
+        'divide',
+        factory,
       );
     default:
       return undefined;
   }
 }
 
+type NumericExpressionOperation = 'add' | 'subtract' | 'multiply' | 'divide';
+
+function combineNumericExpressions(
+  left: ts.Expression,
+  right: ts.Expression,
+  operation: NumericExpressionOperation,
+  factory: ts.NodeFactory,
+): ts.Expression {
+  const leftValue = generatedNumericValue(left);
+  const rightValue = generatedNumericValue(right);
+  if (leftValue !== undefined && rightValue !== undefined) {
+    const value =
+      operation === 'add'
+        ? leftValue + rightValue
+        : operation === 'subtract'
+          ? leftValue - rightValue
+          : operation === 'multiply'
+            ? leftValue * rightValue
+            : leftValue / rightValue;
+    if (Number.isFinite(value)) return createNumberExpression(value, factory);
+  }
+  if (operation === 'add') {
+    if (leftValue === 0) return right;
+    if (rightValue === 0) return left;
+  } else if (operation === 'subtract') {
+    if (rightValue === 0) return left;
+    if (leftValue === 0) return negateNumericExpression(right, factory);
+  } else if (operation === 'multiply') {
+    if (leftValue === 0 || rightValue === 0) {
+      return factory.createNumericLiteral(0);
+    }
+    if (leftValue === 1) return right;
+    if (rightValue === 1) return left;
+  } else if (leftValue === 0) {
+    return factory.createNumericLiteral(0);
+  } else if (rightValue === 1) {
+    return left;
+  }
+  const token =
+    operation === 'add'
+      ? ts.SyntaxKind.PlusToken
+      : operation === 'subtract'
+        ? ts.SyntaxKind.MinusToken
+        : operation === 'multiply'
+          ? ts.SyntaxKind.AsteriskToken
+          : ts.SyntaxKind.SlashToken;
+  return factory.createBinaryExpression(left, token, right);
+}
+
+function negateNumericExpression(
+  expression: ts.Expression,
+  factory: ts.NodeFactory,
+): ts.Expression {
+  const value = generatedNumericValue(expression);
+  return value === undefined
+    ? factory.createPrefixUnaryExpression(ts.SyntaxKind.MinusToken, expression)
+    : createNumberExpression(-value, factory);
+}
+
+function generatedNumericValue(expression: ts.Expression): number | undefined {
+  if (ts.isNumericLiteral(expression)) return Number(expression.text);
+  if (
+    ts.isPrefixUnaryExpression(expression) &&
+    expression.operator === ts.SyntaxKind.MinusToken &&
+    ts.isNumericLiteral(expression.operand)
+  ) {
+    return -Number(expression.operand.text);
+  }
+  return undefined;
+}
+
 function containsTarget(
   node: ts.Node,
-  target: StaticParameterTarget,
+  target: SourceParameterTarget,
+  parameterDefinitions: ParameterDefinitionMap,
   sourceFile: ts.SourceFile,
 ): boolean {
-  if (matchesTarget(node, target, sourceFile)) {
+  if (matchesTarget(node, target, parameterDefinitions, sourceFile)) {
     return true;
   }
   let contains = false;
   ts.forEachChild(node, child => {
-    if (!contains && containsTarget(child, target, sourceFile)) {
+    if (
+      !contains &&
+      containsTarget(child, target, parameterDefinitions, sourceFile)
+    ) {
       contains = true;
     }
   });
@@ -3089,25 +3143,23 @@ function containsTarget(
 
 function matchesTarget(
   node: ts.Node,
-  target: StaticParameterTarget,
+  target: SourceParameterTarget,
+  parameterDefinitions: ParameterDefinitionMap,
   sourceFile: ts.SourceFile,
 ): boolean {
-  if (target.binding && ts.isIdentifier(node)) {
-    return (
-      node.text === target.binding &&
-      isValueIdentifier(node) &&
-      !isShadowedBinding(node, target.binding, sourceFile)
-    );
-  }
+  const definition = parameterDefinitions.get(
+    sourceNodeKey(node.getStart(sourceFile), node.getEnd()),
+  );
+  if (definition) return sameSourceRef(definition.sourceRef, target.sourceRef);
   return (
-    !target.binding &&
     node.getStart(sourceFile) === target.sourceRef.start &&
-    node.getEnd() === target.sourceRef.end
+    node.getEnd() === target.sourceRef.end &&
+    normalizeProjectPath(sourceFile.fileName) === target.sourceRef.file
   );
 }
 
 function createRuntimeTarget(
-  target: StaticParameterTarget,
+  target: SourceParameterTarget,
   sensitivity: ts.Expression,
   factory: ts.NodeFactory,
 ): ts.ObjectLiteralExpression {
@@ -3300,31 +3352,6 @@ function parameterSignatureFor(
   return {operation: schema.name, arguments: arguments_};
 }
 
-function parseCode3dMetadata(
-  statement: ts.VariableStatement,
-  sourceFile: ts.SourceFile,
-): Partial<StaticParameterTarget> {
-  const metadata: Partial<StaticParameterTarget> = {};
-  const annotations = code3dAnnotations(
-    sourceFile.text,
-    statement.getFullStart(),
-    statement.getStart(sourceFile),
-  );
-  for (const {name: key, value} of annotations) {
-    if (key === 'label' || key === 'description' || key === 'unit') {
-      metadata[key] = value;
-    } else if (key === 'kind' && isParameterKind(value)) {
-      metadata.kind = value;
-    } else if (key === 'min' || key === 'max' || key === 'step') {
-      const numeric = Number(value);
-      if (Number.isFinite(numeric)) {
-        metadata[key] = numeric;
-      }
-    }
-  }
-  return metadata;
-}
-
 function numericExpressionValue(node: ts.Node): number | undefined {
   if (ts.isNumericLiteral(node)) {
     const value = Number(node.text);
@@ -3380,94 +3407,6 @@ function isSafeSensitivityExpression(expression: ts.Expression): boolean {
   return false;
 }
 
-function isValueIdentifier(identifier: ts.Identifier): boolean {
-  const parent = identifier.parent;
-  if (ts.isPropertyAccessExpression(parent) && parent.name === identifier) {
-    return false;
-  }
-  if (
-    (ts.isPropertyAssignment(parent) ||
-      ts.isShorthandPropertyAssignment(parent)) &&
-    parent.name === identifier
-  ) {
-    return ts.isShorthandPropertyAssignment(parent);
-  }
-  return !(ts.isVariableDeclaration(parent) && parent.name === identifier);
-}
-
-function isShadowedBinding(
-  identifier: ts.Identifier,
-  binding: string,
-  sourceFile: ts.SourceFile,
-): boolean {
-  let current: ts.Node | undefined = identifier.parent;
-  while (current && current !== sourceFile) {
-    if (
-      ts.isFunctionLike(current) &&
-      current.parameters.some(parameter =>
-        bindingNameContains(parameter.name, binding),
-      )
-    ) {
-      return true;
-    }
-    if (
-      ts.isCatchClause(current) &&
-      current.variableDeclaration &&
-      bindingNameContains(current.variableDeclaration.name, binding)
-    ) {
-      return true;
-    }
-    if (
-      ts.isBlock(current) &&
-      current.statements.some(statement =>
-        statementDeclares(statement, binding),
-      )
-    ) {
-      return true;
-    }
-    if (
-      (ts.isForStatement(current) ||
-        ts.isForInStatement(current) ||
-        ts.isForOfStatement(current)) &&
-      current.initializer &&
-      ts.isVariableDeclarationList(current.initializer) &&
-      current.initializer.declarations.some(declaration =>
-        bindingNameContains(declaration.name, binding),
-      )
-    ) {
-      return true;
-    }
-    current = current.parent;
-  }
-  return false;
-}
-
-function statementDeclares(statement: ts.Statement, binding: string): boolean {
-  if (ts.isVariableStatement(statement)) {
-    return statement.declarationList.declarations.some(declaration =>
-      bindingNameContains(declaration.name, binding),
-    );
-  }
-  if (
-    (ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) &&
-    statement.name?.text === binding
-  ) {
-    return true;
-  }
-  return false;
-}
-
-function bindingNameContains(name: ts.BindingName, binding: string): boolean {
-  if (ts.isIdentifier(name)) {
-    return name.text === binding;
-  }
-  return name.elements.some(
-    element =>
-      !ts.isOmittedExpression(element) &&
-      bindingNameContains(element.name, binding),
-  );
-}
-
 function isTraceableCall(node: ts.Node, sourceFile: ts.SourceFile): boolean {
   return (
     ts.isCallExpression(node) &&
@@ -3519,19 +3458,16 @@ function countParameterImpacts(
   return impacts;
 }
 
-function humanizeIdentifier(identifier: string): string {
-  return identifier
-    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-    .replace(/[_-]+/g, ' ')
-    .replace(/^./, character => character.toUpperCase());
-}
-
-function isParameterKind(value: string): value is ParameterKind {
-  return ['length', 'angle', 'ratio', 'count', 'scalar'].includes(value);
-}
-
 function sourceRef(file: string, start: number, end: number): SourceRef {
   return {file: normalizeProjectPath(file), start, end};
+}
+
+function sameSourceRef(left: SourceRef, right: SourceRef): boolean {
+  return (
+    left.file === right.file &&
+    left.start === right.start &&
+    left.end === right.end
+  );
 }
 
 function diagnosticFailure(
