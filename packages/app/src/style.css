@@ -675,19 +675,12 @@ kbd {
 
 .viewport-coordinate-reference {
   position: absolute;
-  bottom: 14px;
-  left: 14px;
+  top: 10px;
+  right: 14px;
   z-index: 2;
-  display: grid;
-  justify-items: center;
   width: 88px;
-  color: #858b7f;
   pointer-events: none;
   user-select: none;
-  font:
-    500 7px/1 'IBM Plex Mono',
-    monospace;
-  letter-spacing: 0.12em;
 }
 
 .viewport-coordinate-reference svg {
@@ -736,97 +729,85 @@ kbd {
   dominant-baseline: central;
 }
 
-.viewport-hint {
-  position: absolute;
-  top: 12px;
-  left: 14px;
-  z-index: 2;
-  color: #6f746a;
-  pointer-events: none;
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 9px;
-}
-
-.viewport-export-button {
-  position: absolute;
-  z-index: 5;
-  top: 10px;
-  right: 14px;
-  min-height: 26px;
-  padding: 0 10px;
-  color: #a4aa9d;
-  border: 1px solid #393d34;
-  border-radius: 3px;
-  background: #141611d9;
-  cursor: pointer;
-  backdrop-filter: blur(10px);
-  font:
-    500 9px/1 'IBM Plex Mono',
-    monospace;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.viewport-export-button:hover,
-.viewport-export-button[aria-expanded='true'] {
-  color: #11120f;
-  border-color: var(--acid);
-  background: var(--acid);
-}
-
-.viewport-export-panel {
-  position: absolute;
-  z-index: 7;
-  top: 44px;
-  right: 14px;
-  display: grid;
-  width: 268px;
-  gap: 12px;
-  padding: 12px;
+.viewport-context-menu {
+  position: fixed;
+  inset: auto;
+  min-width: 170px;
+  margin: 0;
+  padding: 4px;
   color: #dfe5ca;
-  border: 1px solid #4a5138;
-  border-radius: 5px;
+  border: 1px solid #393d34;
+  border-radius: 4px;
   background: #15180ff2;
-  box-shadow: 0 16px 42px #0009;
+  box-shadow: 0 8px 24px #0008;
   backdrop-filter: blur(12px);
 }
 
-.viewport-export-panel[hidden] {
-  display: none;
+.viewport-context-menu button {
+  width: 100%;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  cursor: pointer;
+  font:
+    500 10px/1.4 'IBM Plex Mono',
+    monospace;
+  text-align: left;
 }
 
-.viewport-export-panel > header {
+.viewport-context-menu button:hover,
+.viewport-context-menu button:focus-visible {
+  color: #11120f;
+  background: var(--acid);
+  outline: none;
+}
+
+.viewport-export-dialog {
+  width: 340px;
+  max-width: calc(100vw - 32px);
+  padding: 20px;
+  color: #dfe5ca;
+  border: 1px solid #4a5138;
+  border-radius: 5px;
+  background: #15180f;
+  box-shadow: 0 16px 42px #0009;
+}
+
+.viewport-export-dialog::backdrop {
+  background: #0008;
+}
+
+.viewport-export-dialog form {
+  display: grid;
+  gap: 20px;
+}
+
+.viewport-export-dialog h2 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.viewport-export-dialog p {
+  margin: 0;
+  color: #858b7f;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.viewport-export-dialog footer {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 22px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid #34382c;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
-.viewport-export-panel > header > span,
 .viewport-export-dimensions label > span {
   color: #858d77;
   font:
     500 8px/1 'IBM Plex Mono',
     monospace;
   letter-spacing: 0.1em;
-}
-
-.viewport-export-close {
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  color: #858b7f;
-  border: 0;
-  border-radius: 3px;
-  background: transparent;
-  cursor: pointer;
-}
-
-.viewport-export-close:hover {
-  color: var(--acid);
-  background: #272a22;
 }
 
 .viewport-export-dimensions {
@@ -868,8 +849,10 @@ kbd {
   border-color: var(--acid);
 }
 
-.viewport-export-submit {
+.viewport-export-submit,
+.viewport-export-cancel {
   min-height: 30px;
+  padding: 0 12px;
   color: #11120f;
   border: 1px solid var(--acid);
   border-radius: 3px;
@@ -882,11 +865,23 @@ kbd {
   text-transform: uppercase;
 }
 
+.viewport-export-cancel {
+  color: #a4aa9d;
+  border-color: #393d34;
+  background: transparent;
+}
+
+.viewport-export-cancel:hover:not(:disabled) {
+  color: #dfe5ca;
+  background: #272a22;
+}
+
 .viewport-export-submit:hover:not(:disabled) {
   background: #e3ff73;
 }
 
-.viewport-export-submit:disabled {
+.viewport-export-submit:disabled,
+.viewport-export-cancel:disabled {
   color: #676d5f;
   border-color: #34382e;
   background: #1b1d18;
@@ -906,7 +901,7 @@ kbd {
 
 .tool-status {
   position: absolute;
-  top: 34px;
+  top: 60px;
   left: 14px;
   z-index: 4;
   max-width: calc(100% - 300px);
@@ -927,7 +922,7 @@ kbd {
 
 .contextual-tool-panel {
   position: absolute;
-  top: 34px;
+  top: 60px;
   left: 14px;
   z-index: 5;
   display: grid;
@@ -1134,24 +1129,21 @@ kbd {
   white-space: pre-wrap;
 }
 
-.viewport-progress {
+.viewport-status {
   position: absolute;
-  top: 48px;
-  right: 14px;
+  top: 10px;
+  left: 14px;
   z-index: 6;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   min-height: 38px;
-  max-width: calc(100% - 28px);
-  padding: 9px 13px;
-  color: #edf3d5;
-  border: 1px solid #778a32;
+  max-width: calc(100% - 124px);
+  padding: 9px 13px 9px 11px;
+  color: #a3aa96;
+  border: 1px solid #353831;
   border-radius: 5px;
-  background: #12150deb;
-  box-shadow:
-    0 18px 50px #0009,
-    0 0 28px #d8ff3e18;
+  background: #11120feb;
   pointer-events: none;
   backdrop-filter: blur(12px);
   font-family: 'IBM Plex Mono', monospace;
@@ -1159,20 +1151,62 @@ kbd {
   letter-spacing: 0.02em;
 }
 
-.viewport-progress[hidden] {
-  display: none;
+.viewport-status[data-state='busy'] {
+  color: #edf3d5;
+  border-color: #778a32;
+  background: #12150deb;
+  box-shadow:
+    0 18px 50px #0009,
+    0 0 28px #d8ff3e18;
 }
 
-.viewport-progress-spinner {
-  width: 13px;
-  height: 13px;
+.viewport-status[data-state='error'] {
+  color: #d99b8f;
+  border-color: #654138;
+}
+
+.viewport-status-indicator {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+}
+
+.viewport-status-indicator svg {
+  display: none;
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.viewport-status[data-state='ready'] .viewport-status-ready,
+.viewport-status[data-state='error'] .viewport-status-error {
+  display: block;
+}
+
+.viewport-status[data-state='busy'] .viewport-status-indicator::before {
+  content: '';
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
   border: 2px solid #66722f;
   border-top-color: var(--acid);
   border-radius: 50%;
-  animation: viewport-progress-spin 700ms linear infinite;
+  animation: viewport-status-spin 700ms linear infinite;
 }
 
-@keyframes viewport-progress-spin {
+#viewport-status-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes viewport-status-spin {
   to {
     transform: rotate(360deg);
   }
@@ -1576,7 +1610,7 @@ kbd {
 
 @media (prefers-reduced-motion: reduce) {
   .design-argument-spinner,
-  .viewport-progress-spinner {
+  .viewport-status[data-state='busy'] .viewport-status-indicator::before {
     animation: none;
   }
 }

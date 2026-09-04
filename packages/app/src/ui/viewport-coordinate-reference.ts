@@ -26,7 +26,6 @@ const axisLength = 27;
 
 export class ViewportCoordinateReference {
   private readonly root = document.createElement('div');
-  private readonly caption = document.createElement('span');
   private readonly axisEnds: readonly AxisEndView[];
   private readonly cameraQuaternion = new THREE.Quaternion();
   private readonly frameQuaternion = new THREE.Quaternion();
@@ -109,7 +108,7 @@ export class ViewportCoordinateReference {
       }),
     );
 
-    this.root.append(svg, this.caption);
+    this.root.append(svg);
     container.append(this.root);
     this.updateLabel();
   }
@@ -179,13 +178,11 @@ export class ViewportCoordinateReference {
 
   private updateLabel(): void {
     if (!this.target) {
-      this.caption.textContent = 'WORLD XYZ';
       this.root.setAttribute('aria-label', 'World X, Y, Z coordinate axes');
       this.root.title = 'World coordinate frame';
       return;
     }
     const targetName = this.target.name || 'selected model';
-    this.caption.textContent = 'LOCAL XYZ';
     this.root.setAttribute(
       'aria-label',
       `Local X, Y, Z coordinate axes for ${targetName}`,

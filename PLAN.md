@@ -92,9 +92,10 @@ silently reorder the active milestones. Closed requests move to
 - Source undo and redo remain Monaco history operations. Standard shortcuts
   invoke that same active-file history while GUI controls own focus, without
   moving focus back into the editor or maintaining a parallel GUI stack.
-- Pending and active model compilation use one prominent, non-blocking progress
-  indicator at the viewport edge. The application header has no parallel run
-  state, and ready states do not leave persistent status chrome.
+- Model compilation uses one persistent, non-blocking status indicator at the
+  viewport's upper-left edge. Pending and active work are prominent; the idle
+  state shows a subdued `Ready` or `Model error`. The application header has no
+  parallel run state.
 - Tool commits preserve the editor caret and its rendering scope. A non-focusing
   GUI popover shows a trimmed, syntax-highlighted source excerpt with the
   changed range marked.

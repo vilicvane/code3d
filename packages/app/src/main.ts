@@ -65,7 +65,8 @@ import {
 } from './viewport';
 import {DockPanelCoordinator} from './ui/dock-panels';
 import {ElementsPanel} from './ui/elements-panel';
-import {ImageExportPanel} from './ui/image-export';
+import {ImageExportDialog} from './ui/image-export';
+import {ViewportContextMenu} from './ui/viewport-context-menu';
 import {ProjectTree} from './ui/project-tree';
 import {SourceEditPopover} from './ui/source-edit-popover';
 import {
@@ -145,14 +146,22 @@ app.innerHTML = `
 
       <section class="pane preview-pane">
         <div class="viewport-host" id="viewport-host">
-          <div class="viewport-hint">Drag to orbit · Scroll to zoom · Click to select · Double-click active to open source</div>
           <div class="tool-status" id="tool-status" hidden></div>
           <div class="viewport-feedback-stack" id="viewport-feedback-stack">
             <div class="viewport-diagnostic-stack" id="viewport-diagnostic-stack" role="status" aria-live="polite" aria-atomic="true" hidden></div>
           </div>
-          <div class="viewport-progress" id="viewport-progress" role="status" aria-live="polite" hidden>
-            <span class="viewport-progress-spinner" aria-hidden="true"></span>
-            <span id="viewport-progress-label"></span>
+          <div class="viewport-status" id="viewport-status" data-state="busy" role="status" aria-live="polite" aria-busy="true">
+            <span class="viewport-status-indicator" aria-hidden="true">
+              <svg class="viewport-status-ready" viewBox="0 0 16 16">
+                <circle cx="8" cy="8" r="6" />
+                <path d="m5 8 2 2 4-4" />
+              </svg>
+              <svg class="viewport-status-error" viewBox="0 0 16 16">
+                <circle cx="8" cy="8" r="6" />
+                <path d="m6 6 4 4m0-4-4 4" />
+              </svg>
+            </span>
+            <span id="viewport-status-label">Compiling model</span>
           </div>
           <div class="viewport-dock-panels">
             <aside class="dock-panel design-arguments-panel" id="design-arguments-panel" aria-label="Design arguments">
@@ -199,8 +208,8 @@ const elementsCount = requiredElement('elements-count');
 const toolStatus = requiredElement('tool-status');
 const viewportFeedbackStack = requiredElement('viewport-feedback-stack');
 const viewportDiagnosticStack = requiredElement('viewport-diagnostic-stack');
-const viewportProgress = requiredElement('viewport-progress');
-const viewportProgressLabel = requiredElement('viewport-progress-label');
+const viewportStatus = requiredElement('viewport-status');
+const viewportStatusLabel = requiredElement('viewport-status-label');
 const projectTree = requiredElement('project-tree');
 const editorTabs = requiredElement('editor-tabs');
 const projectLocation = requiredElement('project-location');
@@ -254,6 +263,7 @@ const compiler = new ModelCompilerClient();
 let persistenceQueue = Promise.resolve();
 let currentModule: ModelModule | null = null;
 let currentModuleSourceVersion: number | undefined;
+let modelStatus: 'ready' | 'error' = 'ready';
 let compileTimer: number | undefined;
 let completionPreviewTimer: number | undefined;
 let runRevision = 0;
@@ -355,10 +365,14 @@ const viewport = new ModelViewport(viewportHost, {
     elementSourceDecoration,
   ],
 });
-new ImageExportPanel(viewportHost, {
+const imageExportDialog = new ImageExportDialog(viewportHost, {
   capture: (width, height) => viewport.captureImage(width, height),
   fileName: () => codeEditor.currentFile().split('/').at(-1) ?? 'code3d-model',
 });
+new ViewportContextMenu(
+  viewportHost.querySelector<HTMLCanvasElement>('.viewport-canvas')!,
+  () => imageExportDialog.open(),
+);
 const elementsDecorationOwner = 'elements-panel';
 const elementsPanel = new ElementsPanel(elements, elementsCount, {
   onPreview: element => {
@@ -779,7 +793,6 @@ function deleteContextFile(): void {
 
 function showProjectIssue(error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
-  hideViewportProgress();
   renderViewportDiagnostic();
   errorBar.textContent = message;
   errorBar.hidden = false;
@@ -794,7 +807,7 @@ async function runModel(
   const revision = ++runRevision;
   const sourceVersion = codeEditor.sourceVersion();
   compilingDesignContextId = designContextId;
-  showViewportProgress('Compiling model');
+  setViewportStatus('busy', 'Compiling model');
   if (designContextId) {
     renderCurrentPanels();
   }
@@ -816,6 +829,7 @@ async function runModel(
     }
     currentModule = nextModule;
     currentModuleSourceVersion = sourceVersion;
+    modelStatus = nextModule.diagnostic ? 'error' : 'ready';
     if (
       !(await presentModelDiagnostic(
         nextModule.diagnostic,
@@ -869,14 +883,15 @@ async function runModel(
       renderDesignArguments(currentModule);
     }
     syncContextualTool();
-    hideViewportProgress();
+    restoreModelStatus();
   } catch (error) {
     if (revision !== runRevision) {
       return;
     }
     compilingDesignContextId = undefined;
     renderCurrentPanels();
-    hideViewportProgress();
+    modelStatus = 'error';
+    restoreModelStatus();
     const diagnostic =
       error instanceof ModelDiagnosticError ? error.diagnostic : undefined;
     if (diagnostic) {
@@ -977,7 +992,7 @@ function handleCompletionFocus(focus: CompletionFocus | undefined): void {
   compiler.cancel();
   window.clearTimeout(compileTimer);
   compileTimer = undefined;
-  showViewportProgress(`Rendering preview · ${focus.memberName}`);
+  setViewportStatus('busy', `Rendering preview · ${focus.memberName}`);
   const revision = runRevision;
   completionPreviewTimer = window.setTimeout(() => {
     completionPreviewTimer = undefined;
@@ -1011,7 +1026,7 @@ async function runCompletionPreview(
       return;
     }
     if (module.diagnostic) {
-      hideViewportProgress();
+      restoreModelStatus();
       return;
     }
     if (
@@ -1024,10 +1039,10 @@ async function runCompletionPreview(
     ) {
       renderElementsPanel(viewport.getSelected());
     }
-    hideViewportProgress();
+    restoreModelStatus();
   } catch {
     if (revision === runRevision && activeCompletionFocus === focus) {
-      hideViewportProgress();
+      restoreModelStatus();
     }
   }
 }
@@ -1035,7 +1050,7 @@ async function runCompletionPreview(
 function resumeModelAfterCompletion(): void {
   runRevision += 1;
   compiler.cancel();
-  showViewportProgress('Updating model');
+  setViewportStatus('busy', 'Updating model');
   scheduleModelRun(180);
 }
 
@@ -1053,7 +1068,7 @@ function requestModelUpdate(delay: number): void {
   completionPreviewTimer = undefined;
   viewport.restoreTransientPreview();
   renderElementsPanel(viewport.getSelected());
-  showViewportProgress('Updating model');
+  setViewportStatus('busy', 'Updating model');
   runRevision += 1;
   compiler.cancel();
   scheduleModelRun(delay);
@@ -1083,7 +1098,7 @@ function cancelPendingDesignCompile(): void {
   compilingDesignContextId = undefined;
   runRevision += 1;
   compiler.cancel();
-  hideViewportProgress();
+  restoreModelStatus();
 }
 
 function designContextAt(module: ModelModule, file: string, offset: number) {
@@ -2185,7 +2200,7 @@ function interruptCompileForTool(): boolean {
   window.clearTimeout(compileTimer);
   compileTimer = undefined;
   compiler.cancel();
-  hideViewportProgress();
+  restoreModelStatus();
   return true;
 }
 
@@ -2464,7 +2479,6 @@ function sourceRefSpan(sourceRef: SourceRef): number {
 }
 
 function showToolIssue(message: string): void {
-  hideViewportProgress();
   errorBar.textContent = message;
   errorBar.hidden = false;
 }
@@ -2478,13 +2492,20 @@ function sourceHistoryAction(
   return undefined;
 }
 
-function showViewportProgress(label: string): void {
-  viewportProgressLabel.textContent = label;
-  viewportProgress.hidden = false;
+function setViewportStatus(
+  state: 'busy' | 'ready' | 'error',
+  label: string,
+): void {
+  viewportStatus.dataset.state = state;
+  viewportStatusLabel.textContent = label;
+  viewportStatus.setAttribute('aria-busy', String(state === 'busy'));
 }
 
-function hideViewportProgress(): void {
-  viewportProgress.hidden = true;
+function restoreModelStatus(): void {
+  setViewportStatus(
+    modelStatus,
+    modelStatus === 'ready' ? 'Ready' : 'Model error',
+  );
 }
 
 function primarySource(node: ModelSnapshotObject): SourceRef | undefined {
