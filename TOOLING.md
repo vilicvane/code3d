@@ -153,10 +153,11 @@ compiler 为每个实际进入的 call site execution 统一记录完成或失�
 参数 schema 是按能力扩展的 tagged union。数值 `kind` 提供标量控件；`vertex`、`edge`
 和 `surface` 提供 topology selector，其单选或多选能力从声明参数是否为数组推导，而不是
 再写一份交互配置。几何模型的 `.vertex(id)`、`.edge(id)` 和 `.surface(id)` 使用单选，
-`.vertices(ids)`、`.edges(ids)` 和 `.surfaces(ids)` 使用多选；两者共享同一个 provider。
+`.vertices(ids?)`、`.edges(ids?)` 和 `.surfaces(ids?)` 使用多选；两者共享同一个 provider。
 compiler 在调用进入时记录 receiver 和已求值参数，所以参数缺失或引用已退休拓扑而失败时
 仍可显示 receiver 并修复；viewport pick 产生通用 `argument.set` intent，立即写回同一个
-源码事务。复数引用允许空数组；fillet/chamfer 的省略参数全选语义仍由专用 provider 处理。
+源码事务。复数引用允许空数组，并在省略参数时返回全部当前稳定拓扑引用；fillet/chamfer
+的省略参数全选语义仍由专用 provider 处理。
 
 平移 gizmo 目前遵守以下解析规则：
 

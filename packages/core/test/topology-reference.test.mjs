@@ -39,6 +39,15 @@ test('resolves stable vertex, edge, and surface references', () => {
     assert.ok(vertexIds(roundedSnapshot).some(id => id > 8));
     assert.deepEqual(surfaceIds(baseSnapshot), [1, 2, 3, 4, 5, 6]);
     assert.ok(surfaceIds(roundedSnapshot).some(id => id > 6));
+    assert.deepEqual(
+      referenceIds(rounded.vertices()),
+      vertexIds(roundedSnapshot),
+    );
+    assert.deepEqual(referenceIds(rounded.edges()), edgeIds(roundedSnapshot));
+    assert.deepEqual(
+      referenceIds(rounded.surfaces()),
+      surfaceIds(roundedSnapshot),
+    );
   } finally {
     disposeModelObjects([base, scaled, rounded]);
   }
@@ -60,6 +69,12 @@ test('resolves plural topology references in authored order', () => {
       {model, kind: 'surface', id: 6},
       {model, kind: 'surface', id: 1},
     ]);
+    assert.deepEqual(referenceIds(model.vertices()), [1, 2, 3, 4, 5, 6, 7, 8]);
+    assert.deepEqual(
+      referenceIds(model.edges()),
+      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+    );
+    assert.deepEqual(referenceIds(model.surfaces()), [1, 2, 3, 4, 5, 6]);
     assert.deepEqual(model.vertices([]), []);
     assert.deepEqual(model.edges([]), []);
     assert.deepEqual(model.surfaces([]), []);
@@ -74,13 +89,21 @@ test('resolves plural topology references in authored order', () => {
 function topologyIds(snapshot) {
   return {
     vertices: vertexIds(snapshot),
-    edges: [...new Set(snapshot.mesh.edgeGroups.map(group => group.edgeId))],
+    edges: edgeIds(snapshot),
     surfaces: surfaceIds(snapshot),
   };
 }
 
+function referenceIds(references) {
+  return references.map(reference => modelTopologyReference(reference)?.id);
+}
+
 function vertexIds(snapshot) {
   return [...snapshot.mesh.vertexIds];
+}
+
+function edgeIds(snapshot) {
+  return [...new Set(snapshot.mesh.edgeGroups.map(group => group.edgeId))];
 }
 
 function surfaceIds(snapshot) {
