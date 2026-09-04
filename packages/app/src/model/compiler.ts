@@ -263,18 +263,20 @@ type EdgeSelectionSite = Readonly<{
 }>;
 
 type TraceFrame = Readonly<{
-  siteId: string;
-  execution: number;
-  contextId: string;
+  trace: SourceExecutionTrace;
 }>;
 
-type FailedOperationTrace = Readonly<{
+type SourceExecutionTrace = {
   siteId: string;
   execution: number;
   contextId: string;
   sourceRef: SourceRef;
+  outcome: 'entered' | 'completed' | 'failed';
+  order: number;
   parameters: readonly ParameterUsage[];
-}>;
+  arguments: Map<number, unknown>;
+  inputs: SourceInputTrace[];
+};
 
 const signatures = new Map<string, ParameterSignature>([
   [
@@ -366,21 +368,20 @@ const signatures = new Map<string, ParameterSignature>([
 
 const tracedObjects = new Set<ModelObject>();
 const sourceValueTraces = new Map<string, SourceValueTrace>();
-const sourceInputTraces: SourceInputTrace[] = [];
 const sourceConstraintTraces = new Map<string, SourceConstraintTrace>();
 const sourceElementTraces = new Map<string, SourceElementTrace>();
 const edgeSelectionSites = new Map<string, EdgeSelectionSite>();
-const edgeSelectionAttempts = new Map<string, readonly EdgeId[]>();
-const failedOperationTraces = new Map<string, FailedOperationTrace>();
+const sourceExecutionTraces = new Map<string, SourceExecutionTrace>();
 const catalogTraces = new Map<string, CatalogTrace>();
 const parameterFrames: ParameterUsage[][] = [];
 const traceFrames: TraceFrame[] = [];
-const traceExecutions = new Map<string, number>();
+const traceExecutionCounts = new Map<string, number>();
 const evaluationContexts = new Map<string, EvaluationContext>();
 const designContextFrames: EvaluationContext[] = [];
 const designRootObjects = new Set<ModelObject>();
 let latestTracedObject: ModelObject | undefined;
 let evaluationOrder = 0;
+let sourceExecutionOrder = 0;
 const traceRuntime = Object.freeze({
   trace<T>(
     file: string,
@@ -392,31 +393,39 @@ const traceRuntime = Object.freeze({
     label: string,
     run: () => T,
   ): T {
-    const execution = traceExecutions.get(id) ?? 0;
-    traceExecutions.set(id, execution + 1);
+    const execution = nextTraceExecution(id);
     const location = sourceRef(file, start, end);
     const context =
       currentEvaluationContext() ??
       callEvaluationContext(id, execution, label, location);
     const parameters: ParameterUsage[] = [];
+    const executionTrace: SourceExecutionTrace = {
+      siteId: id,
+      execution,
+      contextId: context.id,
+      sourceRef: location,
+      outcome: 'entered',
+      order: nextSourceExecutionOrder(),
+      parameters,
+      arguments: new Map(),
+      inputs: [],
+    };
+    sourceExecutionTraces.set(traceExecutionKey(id, execution), executionTrace);
     parameterFrames.push(parameters);
-    traceFrames.push({siteId: id, execution, contextId: context.id});
+    traceFrames.push({trace: executionTrace});
     let result: T;
     try {
       result = run();
     } catch (error) {
-      failedOperationTraces.set(traceExecutionKey(id, execution), {
-        siteId: id,
-        execution,
-        contextId: context.id,
-        sourceRef: location,
-        parameters: [...parameters],
-      });
+      executionTrace.outcome = 'failed';
+      executionTrace.order = nextSourceExecutionOrder();
       throw locateModelError(error, sourceRef(file, failureStart, failureEnd));
     } finally {
       traceFrames.pop();
       parameterFrames.pop();
     }
+    executionTrace.outcome = 'completed';
+    executionTrace.order = nextSourceExecutionOrder();
     if (isConstraint(result)) {
       result.attachSource(location);
       result.attachParameters(parameters);
@@ -552,40 +561,31 @@ const traceRuntime = Object.freeze({
     index: number,
     value: T,
   ): T {
-    const frame = traceFrames.at(-1);
-    if (frame?.siteId !== siteId) {
+    const executionTrace = traceFrames.at(-1)?.trace;
+    if (executionTrace?.siteId !== siteId) {
       return value;
     }
     const objects = modelObjectsIn(value);
     if (objects.length > 0) {
       objects.forEach(object => tracedObjects.add(object));
-      sourceInputTraces.push({
+      executionTrace.inputs.push({
         siteId,
-        execution: frame.execution,
+        execution: executionTrace.execution,
         sourceRef: sourceRef(file, start, end),
         role,
         index,
         objects,
-        contextId: frame.contextId,
+        contextId: executionTrace.contextId,
       });
     }
     return value;
   },
 
-  edgeSelection<T>(siteId: string, value: T): T {
-    const frame = traceFrames.at(-1);
-    if (frame?.siteId !== siteId) return value;
-    const edgeIds = Array.isArray(value)
-      ? value.filter(
-          (candidate): candidate is EdgeId =>
-            typeof candidate === 'number' &&
-            Number.isSafeInteger(candidate) &&
-            candidate >= 1,
-        )
-      : [];
-    edgeSelectionAttempts.set(traceExecutionKey(siteId, frame.execution), [
-      ...new Set(edgeIds),
-    ]);
+  argument<T>(siteId: string, index: number, value: T): T {
+    const executionTrace = traceFrames.at(-1)?.trace;
+    if (executionTrace?.siteId === siteId) {
+      executionTrace.arguments.set(index, value);
+    }
     return value;
   },
 
@@ -658,7 +658,7 @@ const traceRuntime = Object.freeze({
 function currentEvaluationContext(): EvaluationContext | undefined {
   const design = designContextFrames.at(-1);
   if (design) return design;
-  const contextId = traceFrames[0]?.contextId;
+  const contextId = traceFrames[0]?.trace.contextId;
   return contextId ? evaluationContexts.get(contextId) : undefined;
 }
 
@@ -675,9 +675,14 @@ function callEvaluationContext(
 }
 
 function nextTraceExecution(id: string): number {
-  const execution = traceExecutions.get(id) ?? 0;
-  traceExecutions.set(id, execution + 1);
+  const execution = traceExecutionCounts.get(id) ?? 0;
+  traceExecutionCounts.set(id, execution + 1);
   return execution;
+}
+
+function nextSourceExecutionOrder(): number {
+  sourceExecutionOrder += 1;
+  return sourceExecutionOrder;
 }
 
 function traceExecutionKey(siteId: string, execution: number): string {
@@ -973,21 +978,20 @@ export function compileProject(
 
   tracedObjects.clear();
   sourceValueTraces.clear();
-  sourceInputTraces.length = 0;
   sourceConstraintTraces.clear();
   sourceElementTraces.clear();
   edgeSelectionSites.clear();
-  edgeSelectionAttempts.clear();
-  failedOperationTraces.clear();
+  sourceExecutionTraces.clear();
   catalogTraces.clear();
   parameterFrames.length = 0;
   traceFrames.length = 0;
-  traceExecutions.clear();
+  traceExecutionCounts.clear();
   evaluationContexts.clear();
   designContextFrames.length = 0;
   designRootObjects.clear();
   latestTracedObject = undefined;
   evaluationOrder = 0;
+  sourceExecutionOrder = 0;
   try {
     const modules = new Map<string, CommonJsModule>();
     const executeModule = (path: string): CommonJsModule => {
@@ -1192,21 +1196,20 @@ export function compileProject(
     disposeModelObjects(tracedObjects);
     tracedObjects.clear();
     sourceValueTraces.clear();
-    sourceInputTraces.length = 0;
     sourceConstraintTraces.clear();
     sourceElementTraces.clear();
     edgeSelectionSites.clear();
-    edgeSelectionAttempts.clear();
-    failedOperationTraces.clear();
+    sourceExecutionTraces.clear();
     catalogTraces.clear();
     parameterFrames.length = 0;
     traceFrames.length = 0;
-    traceExecutions.clear();
+    traceExecutionCounts.clear();
     evaluationContexts.clear();
     designContextFrames.length = 0;
     designRootObjects.clear();
     latestTracedObject = undefined;
     evaluationOrder = 0;
+    sourceExecutionOrder = 0;
   }
 }
 
@@ -1330,6 +1333,9 @@ function buildSourceTargets(
       operation,
     ]),
   );
+  const sourceInputTraces = [...sourceExecutionTraces.values()].flatMap(
+    execution => execution.inputs,
+  );
   const valueTargets = [...sourceValueTraces.values()].map(trace => {
     const evaluations = trace.evaluations.map(({objects, contextId}) => {
       const nodeIds = objects.map(object => object.nodeId);
@@ -1395,70 +1401,71 @@ function buildSourceTargets(
   const operationInputTargets = [...inputTargets.values()];
   const operationSelectionTargets = [...edgeSelectionSites.values()].flatMap(
     site => {
-      const evaluations = sourceInputTraces.flatMap<SourceTargetEvaluation>(
-        trace => {
-          if (trace.siteId !== site.siteId || trace.role !== 'source') {
-            return [];
-          }
-          const operation = operations.get(
-            traceExecutionKey(trace.siteId, trace.execution),
-          );
-          const failedOperation = failedOperationTraces.get(
-            traceExecutionKey(trace.siteId, trace.execution),
-          );
-          const selection = operation?.selections.find(
-            candidate =>
-              candidate.kind === 'edge' &&
-              candidate.inputNodeId === trace.objects[0]?.nodeId,
-          );
-          const parameter = operation
-            ? editableEdgeOperationParameter(
-                objects.get(operation.outputNodeId),
-                operation,
-                site.operation,
-              )
-            : undefined;
-          if (operation && selection) {
-            return [
-              {
-                nodeIds: [operation.outputNodeId],
-                operationId: operation.id,
-                contextId: trace.contextId,
-                selection: {
-                  kind: 'edge',
-                  inputNodeId: selection.inputNodeId,
-                  ids: selection.ids,
-                  parameter,
-                },
-              },
-            ];
-          }
-          const input = trace.objects[0];
-          const inputSnapshot = input ? objects.get(input.nodeId) : undefined;
-          if (!failedOperation || inputSnapshot?.kind !== 'solid') return [];
+      const evaluations = [
+        ...sourceExecutionTraces.values(),
+      ].flatMap<SourceTargetEvaluation>(execution => {
+        if (execution.siteId !== site.siteId) {
+          return [];
+        }
+        const trace = execution.inputs.find(
+          input => input.role === 'source' && input.index === 0,
+        );
+        if (!trace) return [];
+        const operation = operations.get(
+          traceExecutionKey(execution.siteId, execution.execution),
+        );
+        const selection = operation?.selections.find(
+          candidate =>
+            candidate.kind === 'edge' &&
+            candidate.inputNodeId === trace.objects[0]?.nodeId,
+        );
+        const parameter = operation
+          ? editableEdgeOperationParameter(
+              objects.get(operation.outputNodeId),
+              operation,
+              site.operation,
+            )
+          : undefined;
+        if (operation && selection) {
           return [
             {
-              nodeIds: [input.nodeId],
-              contextId: failedOperation.contextId,
+              nodeIds: [operation.outputNodeId],
+              operationId: operation.id,
+              contextId: trace.contextId,
               selection: {
                 kind: 'edge',
-                inputNodeId: input.nodeId,
-                ids: validAttemptedEdgeIds(
-                  inputSnapshot,
-                  edgeSelectionAttempts.get(
-                    traceExecutionKey(trace.siteId, trace.execution),
-                  ),
-                ),
-                parameter: editableEdgeOperationParameterFromParameters(
-                  failedOperation.parameters,
-                  failedOperation.sourceRef,
-                  site.operation,
-                ),
+                inputNodeId: selection.inputNodeId,
+                ids: selection.ids,
+                parameter,
               },
             },
           ];
-        },
-      );
+        }
+        const input = trace.objects[0];
+        const inputSnapshot = input ? objects.get(input.nodeId) : undefined;
+        if (execution.outcome !== 'failed' || inputSnapshot?.kind !== 'solid') {
+          return [];
+        }
+        return [
+          {
+            nodeIds: [input.nodeId],
+            contextId: execution.contextId,
+            selection: {
+              kind: 'edge',
+              inputNodeId: input.nodeId,
+              ids: validAttemptedEdgeIds(
+                inputSnapshot,
+                attemptedEdgeIds(execution.arguments.get(1)),
+              ),
+              parameter: editableEdgeOperationParameterFromParameters(
+                execution.parameters,
+                execution.sourceRef,
+                site.operation,
+              ),
+            },
+          },
+        ];
+      });
       return evaluations.length > 0
         ? [
             {
@@ -1666,6 +1673,20 @@ function editableEdgeOperationParameterFromParameters(
   );
   const candidates = upstream.length > 0 ? upstream : matches;
   return candidates.length === 1 ? candidates[0] : undefined;
+}
+
+function attemptedEdgeIds(value: unknown): EdgeId[] {
+  if (!Array.isArray(value)) return [];
+  return [
+    ...new Set(
+      value.filter(
+        (candidate): candidate is EdgeId =>
+          typeof candidate === 'number' &&
+          Number.isSafeInteger(candidate) &&
+          candidate >= 1,
+      ),
+    ),
+  ];
 }
 
 function validAttemptedEdgeIds(
@@ -1894,24 +1915,18 @@ function createTraceTransformer(
                 factory,
               )
             : visited;
-          const edgeSelectionCall = edgeSelection
-            ? instrumentEdgeSelectionArgument(
-                parameterizedCall,
-                siteId,
-                factory,
-              )
-            : parameterizedCall;
           const inputPlan = operationInputPlan(node);
-          const call = inputPlan
+          const callWithInputs = inputPlan
             ? instrumentOperationInputs(
                 node,
-                edgeSelectionCall,
+                parameterizedCall,
                 inputPlan,
                 siteId,
                 sourceFile,
                 factory,
               )
-            : edgeSelectionCall;
+            : parameterizedCall;
+          const call = instrumentCallArguments(callWithInputs, siteId, factory);
 
           return traceExpression(
             call,
@@ -1984,27 +1999,34 @@ function edgeSelectionSite(
   };
 }
 
-function instrumentEdgeSelectionArgument(
+function instrumentCallArguments(
   call: ts.CallExpression,
   siteId: string,
   factory: ts.NodeFactory,
 ): ts.CallExpression {
-  const edgeArgument = call.arguments[1];
-  if (!edgeArgument || ts.isSpreadElement(edgeArgument)) return call;
-  const argumentsWithSelection = [...call.arguments];
-  argumentsWithSelection[1] = factory.createCallExpression(
-    factory.createPropertyAccessExpression(
-      factory.createIdentifier('__code3d'),
-      'edgeSelection',
-    ),
-    undefined,
-    [factory.createStringLiteral(siteId), edgeArgument],
-  );
+  const argumentsWithTracing = call.arguments.map((argument, index) => {
+    const value = ts.isSpreadElement(argument) ? argument.expression : argument;
+    const traced = factory.createCallExpression(
+      factory.createPropertyAccessExpression(
+        factory.createIdentifier('__code3d'),
+        'argument',
+      ),
+      undefined,
+      [
+        factory.createStringLiteral(siteId),
+        factory.createNumericLiteral(index),
+        value,
+      ],
+    );
+    return ts.isSpreadElement(argument)
+      ? factory.updateSpreadElement(argument, traced)
+      : traced;
+  });
   return factory.updateCallExpression(
     call,
     call.expression,
     call.typeArguments,
-    argumentsWithSelection,
+    argumentsWithTracing,
   );
 }
 
