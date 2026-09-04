@@ -62,6 +62,7 @@ import {
 } from './viewport';
 import {DockPanelCoordinator} from './ui/dock-panels';
 import {ElementsPanel} from './ui/elements-panel';
+import {ImageExportPanel} from './ui/image-export';
 import {ProjectTree} from './ui/project-tree';
 import {SourceEditPopover} from './ui/source-edit-popover';
 
@@ -332,6 +333,10 @@ const viewport = new ModelViewport(viewportHost, {
     edgeModificationSourceDecoration,
     elementSourceDecoration,
   ],
+});
+new ImageExportPanel(viewportHost, {
+  capture: (width, height) => viewport.captureImage(width, height),
+  fileName: () => codeEditor.currentFile().split('/').at(-1) ?? 'code3d-model',
 });
 const elementsDecorationOwner = 'elements-panel';
 const elementsPanel = new ElementsPanel(elements, elementsCount, {

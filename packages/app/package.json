@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "render-image": "node scripts/render-image.mjs"
   },
   "dependencies": {
     "@code3d/core": "*",
@@ -22,6 +23,7 @@
   },
   "devDependencies": {
     "@types/three": "^0.185.4",
+    "playwright-core": "^1.58.2",
     "vite": "^8.2.2"
   }
 }

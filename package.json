@@ -8,18 +8,21 @@
     "3": "npm install && npm dedupe && npm install",
     "clean": "rimraf dist --glob packages/*/{.cache,bld,dist}",
     "build:packages": "tsc --build",
-    "build": "npm run lint-prettier && npm run clean && npm run build:packages && npm run build --workspace @code3d/app",
+    "build": "npm run lint-prettier && npm run clean && npm run build:packages && npm run build --workspace @code3d/app && npm run build --workspace @code3d/web",
+    "render:web-image": "npm run render-image --workspace @code3d/app -- --model fasteners --output ../web/src/www/public/product-fastener.png --width 1200 --height 900",
     "dev": "npm run build:packages && npm run dev --workspace @code3d/app",
     "lint-prettier": "prettier --check .",
     "format": "prettier --write .",
     "app": "npm run --workspace @code3d/app",
     "core": "npm run --workspace @code3d/core",
-    "screws": "npm run --workspace @code3d/screws"
+    "screws": "npm run --workspace @code3d/screws",
+    "web": "npm run --workspace @code3d/web"
   },
   "workspaces": [
     "packages/app",
     "packages/core",
-    "packages/screws"
+    "packages/screws",
+    "packages/web"
   ],
   "devDependencies": {
     "@types/node": "^24.10.1",

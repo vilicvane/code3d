@@ -1,0 +1,24 @@
+{
+  "name": "@code3d/web",
+  "version": "0.0.1-alpha.0",
+  "private": true,
+  "license": "MIT",
+  "author": "vilicvane",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --config vite.config.ts",
+    "build": "tsc --noEmit -p src/www/tsconfig.json && vite build --config vite.config.ts",
+    "preview": "vite preview --config vite.config.ts"
+  },
+  "dependencies": {
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.1.1",
+    "shiki": "^4.4.3",
+    "vite": "^8.2.2"
+  }
+}

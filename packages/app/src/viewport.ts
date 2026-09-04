@@ -15,9 +15,17 @@ import type {
   ParameterUsage,
   RenderMesh,
   SourceRef,
-  Transform,
   Vec3,
 } from '@code3d/core/tooling';
+import {
+  ModelRenderer,
+  applyNodeTransform,
+  applyTransform,
+  createEdgeGeometry,
+  createRenderedModelNode,
+  createSurfaceGeometry,
+  disposeObject,
+} from './rendering/model-renderer';
 import {
   PositionGizmo,
   type PositionAxis,
@@ -211,8 +219,9 @@ const doubleClickDistance = 6;
 const doubleClickInterval = 450;
 
 export class ModelViewport {
-  private readonly scene = new THREE.Scene();
-  private readonly camera = new THREE.PerspectiveCamera(42, 1, 0.1, 2000);
+  private readonly rendering: ModelRenderer;
+  private readonly scene: THREE.Scene;
+  private readonly camera: THREE.PerspectiveCamera;
   private readonly renderer: THREE.WebGLRenderer;
   private readonly controls: OrbitControls;
   private readonly raycaster = new THREE.Raycaster();
@@ -266,41 +275,11 @@ export class ModelViewport {
     this.onNavigateSource = onNavigateSource;
     this.onEdgeSelection = onEdgeSelection;
     this.sourceDecorationProviders = sourceDecorationProviders;
-    this.renderer = new THREE.WebGLRenderer({
-      antialias: true,
-      alpha: false,
-      powerPreference: 'high-performance',
-    });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
-    this.renderer.domElement.className = 'viewport-canvas';
-    this.container.append(this.renderer.domElement);
-
-    this.scene.background = new THREE.Color('#171815');
-    this.scene.fog = new THREE.Fog('#171815', 180, 430);
+    this.rendering = new ModelRenderer(this.container);
+    this.scene = this.rendering.scene;
+    this.camera = this.rendering.camera;
+    this.renderer = this.rendering.renderer;
     this.scene.add(this.root, this.decorationRoot);
-
-    const hemi = new THREE.HemisphereLight('#f6f4df', '#333b40', 1.8);
-    this.scene.add(hemi);
-
-    const ambient = new THREE.AmbientLight('#eef0e8', 2.4);
-    this.scene.add(ambient);
-
-    const key = new THREE.DirectionalLight('#fff8df', 3.2);
-    key.position.set(70, 110, 80);
-    this.scene.add(key);
-
-    const rim = new THREE.DirectionalLight('#90a0ff', 1.6);
-    rim.position.set(-80, 55, -65);
-    this.scene.add(rim);
-
-    const grid = new THREE.GridHelper(360, 36, '#4b5046', '#282b26');
-    grid.position.y = -0.08;
-    this.scene.add(grid);
-
-    this.camera.position.set(105, 82, 120);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.075;
@@ -783,36 +762,19 @@ export class ModelViewport {
     this.hasFramedView = true;
   }
 
+  captureImage(width: number, height: number): Promise<Blob> {
+    this.selectionHelper?.update();
+    this.impactHelpers.forEach(helper => helper.update());
+    return this.rendering.captureImage(width, height);
+  }
+
   private frameChangedView(target: THREE.Object3D = this.root): void {
     this.frame(target, !this.hasFramedView);
     this.hasFramedView = true;
   }
 
   private frame(target: THREE.Object3D, allowZoomIn: boolean): void {
-    const box = new THREE.Box3().setFromObject(target);
-    if (box.isEmpty()) {
-      return;
-    }
-
-    const sphere = box.getBoundingSphere(new THREE.Sphere());
-    const direction = this.camera.position
-      .clone()
-      .sub(this.controls.target)
-      .normalize();
-    const fittedDistance = Math.max(sphere.radius * 2.8, 24);
-    const currentDistance = this.camera.position.distanceTo(
-      this.controls.target,
-    );
-    const distance = allowZoomIn
-      ? fittedDistance
-      : Math.max(fittedDistance, currentDistance);
-    this.controls.target.copy(sphere.center);
-    this.camera.position
-      .copy(sphere.center)
-      .addScaledVector(direction, distance);
-    this.camera.near = Math.max(distance / 1000, 0.05);
-    this.camera.far = Math.max(distance * 20, 1000);
-    this.camera.updateProjectionMatrix();
+    this.rendering.frame(target, allowZoomIn, this.controls.target);
     this.controls.update();
   }
 
@@ -823,7 +785,7 @@ export class ModelViewport {
     view: Occurrence['view'],
     operationRole?: ModelOperationInputRole,
   ): THREE.Object3D {
-    const object = createThreeObject(node);
+    const object = createRenderedModelNode(node);
     object.name = node.name;
     object.userData.selectionKey = key;
     applyNodeTransform(object, node);
@@ -989,7 +951,7 @@ export class ModelViewport {
     key: string,
     targetId: string,
   ): THREE.Object3D {
-    const object = createThreeObject(node);
+    const object = createRenderedModelNode(node);
     object.name = `${node.name} (context)`;
     object.userData.context = true;
     object.userData.sourceTargetId = targetId;
@@ -1508,22 +1470,16 @@ export class ModelViewport {
   }
 
   private resize(): void {
-    const width = this.container.clientWidth;
-    const height = this.container.clientHeight;
-    if (width === 0 || height === 0) {
-      return;
-    }
-    this.renderer.setSize(width, height, false);
-    this.camera.aspect = width / height;
-    this.camera.updateProjectionMatrix();
+    this.rendering.resize();
   }
 
   private animate = (): void => {
     requestAnimationFrame(this.animate);
     this.controls.update();
-    this.selectionHelper?.update();
-    this.impactHelpers.forEach(helper => helper.update());
-    this.renderer.render(this.scene, this.camera);
+    this.rendering.renderFrame(() => {
+      this.selectionHelper?.update();
+      this.impactHelpers.forEach(helper => helper.update());
+    });
   };
 
   private rebuildImpactHelpers(): void {
@@ -1821,41 +1777,6 @@ function axisIndex(argument: string): 0 | 1 | 2 | undefined {
   if (argument === 'y') return 1;
   if (argument === 'z') return 2;
   return undefined;
-}
-
-function createThreeObject(node: ModelSnapshotObject): THREE.Object3D {
-  if (node.kind === 'group') {
-    return new THREE.Group();
-  }
-
-  if (!node.mesh) {
-    throw new Error(`OpenCascade solid ${node.name} has no renderable mesh.`);
-  }
-
-  const container = new THREE.Group();
-  const material = new THREE.MeshStandardMaterial({
-    color: node.color,
-    roughness: 0.52,
-    metalness: 0.12,
-    polygonOffset: true,
-    polygonOffsetFactor: 1,
-    polygonOffsetUnits: 1,
-  });
-  container.add(new THREE.Mesh(createSurfaceGeometry(node.mesh), material));
-
-  const edgeGeometry = createEdgeGeometry(node.mesh);
-  if (edgeGeometry) {
-    const edgeMaterial = new THREE.LineBasicMaterial({
-      color: '#080a07',
-      transparent: true,
-      opacity: 0.72,
-    });
-    const edges = new THREE.LineSegments(edgeGeometry, edgeMaterial);
-    edges.userData.edgeGroups = node.mesh.edgeGroups;
-    container.add(edges);
-  }
-
-  return container;
 }
 
 function createEdgeSelectionGuide(
@@ -2187,34 +2108,6 @@ function anchorLineMaterial(
   });
 }
 
-function createSurfaceGeometry(mesh: RenderMesh): THREE.BufferGeometry {
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute(
-    'position',
-    new THREE.BufferAttribute(mesh.vertices, 3),
-  );
-  if (mesh.normals.length === mesh.vertices.length) {
-    geometry.setAttribute('normal', new THREE.BufferAttribute(mesh.normals, 3));
-  } else {
-    geometry.computeVertexNormals();
-  }
-  geometry.setIndex(new THREE.BufferAttribute(mesh.triangles, 1));
-  geometry.computeBoundingBox();
-  geometry.computeBoundingSphere();
-  return geometry;
-}
-
-function createEdgeGeometry(
-  mesh: RenderMesh,
-): THREE.BufferGeometry | undefined {
-  if (mesh.edges.length === 0) {
-    return undefined;
-  }
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(mesh.edges, 3));
-  return geometry;
-}
-
 function createScreenSpaceEdgeLines(
   positions: Float32Array,
   color: string,
@@ -2286,18 +2179,6 @@ function edgeIdFromIntersection(hit: THREE.Intersection): EdgeId | undefined {
   )?.edgeId;
 }
 
-function disposeObject(object: THREE.Object3D): void {
-  object.traverse(child => {
-    if (child instanceof THREE.Mesh || child instanceof THREE.Line) {
-      child.geometry.dispose();
-      const materials = Array.isArray(child.material)
-        ? child.material
-        : [child.material];
-      materials.forEach(material => material.dispose());
-    }
-  });
-}
-
 function dimObject(object: THREE.Object3D): void {
   object.traverse(child => {
     if (child instanceof THREE.Mesh) {
@@ -2355,19 +2236,6 @@ function makeObjectSurfacesTranslucent(
       });
     }
   });
-}
-
-function applyNodeTransform(
-  object: THREE.Object3D,
-  node: ModelSnapshotObject,
-): void {
-  applyTransform(object, node.transform);
-}
-
-function applyTransform(object: THREE.Object3D, transform: Transform): void {
-  object.position.set(...transform.position);
-  object.quaternion.set(...transform.quaternion);
-  object.scale.set(...transform.scale);
 }
 
 type ViewportPickTarget =

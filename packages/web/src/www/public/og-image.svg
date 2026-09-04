@@ -1,0 +1,140 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  width="1200"
+  height="630"
+  viewBox="0 0 1200 630"
+>
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0v40" fill="none" stroke="#22251e" />
+    </pattern>
+    <linearGradient id="solid" x1="0" x2="1" y1="0" y2="1">
+      <stop stop-color="#e6e8df" />
+      <stop offset="1" stop-color="#6e7369" />
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="#0b0c09" />
+  <rect width="1200" height="630" fill="url(#grid)" opacity=".7" />
+  <path
+    d="M64 54 86 76 64 98 42 76 64 54Z"
+    fill="none"
+    stroke="#d8ff3e"
+    stroke-width="5"
+  />
+  <path
+    d="m64 65 11 11-11 11-11-11 11-11Z"
+    fill="none"
+    stroke="#d8ff3e"
+    stroke-width="4"
+  />
+  <text
+    x="102"
+    y="88"
+    fill="#f2f3ed"
+    font-family="Arial, sans-serif"
+    font-size="40"
+    font-weight="700"
+  >
+    Code3D
+  </text>
+  <text
+    x="60"
+    y="230"
+    fill="#f2f3ed"
+    font-family="Arial, sans-serif"
+    font-size="66"
+    font-weight="700"
+    letter-spacing="-2"
+  >
+    The model is code.
+  </text>
+  <text
+    x="60"
+    y="305"
+    fill="#a9ada3"
+    font-family="Arial, sans-serif"
+    font-size="66"
+    font-weight="700"
+    letter-spacing="-2"
+  >
+    The view is an
+  </text>
+  <text
+    x="60"
+    y="376"
+    fill="#a9ada3"
+    font-family="Arial, sans-serif"
+    font-size="66"
+    font-weight="700"
+    letter-spacing="-2"
+  >
+    instrument.
+  </text>
+  <text
+    x="64"
+    y="445"
+    fill="#d8ff3e"
+    font-family="monospace"
+    font-size="19"
+    letter-spacing="3"
+  >
+    CODE-FIRST SOLID MODELING IN TYPESCRIPT
+  </text>
+  <g transform="translate(895 284)">
+    <path
+      d="m-176-8 176-102L176-8 0 94Z"
+      fill="url(#solid)"
+      stroke="#eef1e7"
+      stroke-width="2"
+    />
+    <path
+      d="M-176-8 0 94v68l-176-102Z"
+      fill="#3e433b"
+      stroke="#8e9489"
+      stroke-width="2"
+    />
+    <path
+      d="M0 94 176-8v68L0 162Z"
+      fill="#585d54"
+      stroke="#8e9489"
+      stroke-width="2"
+    />
+    <ellipse
+      cy="-8"
+      rx="48"
+      ry="28"
+      fill="#22251f"
+      stroke="#d8ff3e"
+      stroke-width="4"
+    />
+    <ellipse
+      cy="-8"
+      rx="22"
+      ry="13"
+      fill="#0b0c09"
+      stroke="#a4a99d"
+      stroke-width="2"
+    />
+    <path d="M0-166V-37" stroke="#d8ff3e" stroke-width="3" />
+    <path d="m-9-151 9-15 9 15" fill="none" stroke="#d8ff3e" stroke-width="3" />
+  </g>
+  <rect
+    x="60"
+    y="526"
+    width="196"
+    height="42"
+    rx="4"
+    fill="none"
+    stroke="#44493f"
+  />
+  <text
+    x="80"
+    y="553"
+    fill="#d8ff3e"
+    font-family="monospace"
+    font-size="14"
+    letter-spacing="2"
+  >
+    PROTOTYPE 01
+  </text>
+</svg>
