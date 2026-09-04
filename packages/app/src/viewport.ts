@@ -141,56 +141,94 @@ const boxCornerPairs = [
   [6, 7],
 ] as const;
 const boxCornerFraction = 0.18;
+const boxCornerMaxScreenLengthPixels = 32;
 const symbolLineWidth = 1;
 const interactiveLineWidth = 2;
 const topologyGuidePointSize = 6;
 const interactivePointSize = 10;
 const toolSurfaceOpacity = 0.22;
+const impactSurfaceOpacity = 0.08;
 
-class CornerBoxHelper extends THREE.LineSegments<
-  THREE.BufferGeometry,
-  THREE.LineBasicMaterial
-> {
+type ObjectHighlightAppearance =
+  | Readonly<{
+      kind: 'bounds';
+      color: string;
+      opacity: number;
+      lineWidth: number;
+      renderOrder: number;
+    }>
+  | Readonly<{
+      kind: 'geometry';
+      color: string;
+      opacity: number;
+      lineWidth: number;
+      pointSize: number;
+      surfaceOpacity: number;
+      renderOrder: number;
+    }>;
+
+class ObjectHighlight extends THREE.Group {
   private readonly bounds = new THREE.Box3();
-  private readonly positionAttribute: THREE.BufferAttribute;
+  private readonly boundsPositions = new Float32Array(
+    boxCornerPairs.length * 4 * 3,
+  );
+  private readonly boundsHighlight?: Readonly<{
+    lines: LineSegments2;
+    positionBuffer: THREE.InterleavedBuffer;
+  }>;
+  private readonly projectedStart = new THREE.Vector3();
+  private readonly projectedEnd = new THREE.Vector3();
 
   constructor(
     private readonly target: THREE.Object3D,
-    color: THREE.ColorRepresentation,
-    opacity: number,
-    renderOrder: number,
+    node: ModelSnapshotObject,
+    private readonly camera: THREE.Camera,
+    private readonly viewport: HTMLElement,
+    appearance: ObjectHighlightAppearance,
   ) {
-    const geometry = new THREE.BufferGeometry();
-    const positionAttribute = new THREE.BufferAttribute(
-      new Float32Array(boxCornerPairs.length * 4 * 3),
-      3,
-    );
-    geometry.setAttribute('position', positionAttribute);
-    super(
-      geometry,
-      new THREE.LineBasicMaterial({
-        color,
-        transparent: true,
-        opacity,
-        depthTest: true,
-        depthWrite: false,
-        toneMapped: false,
-      }),
-    );
-    this.positionAttribute = positionAttribute;
-    this.renderOrder = renderOrder;
+    super();
+    const geometryHighlight =
+      appearance.kind === 'geometry'
+        ? createObjectGeometryHighlight(node, appearance)
+        : undefined;
+    if (geometryHighlight) {
+      this.add(geometryHighlight);
+    } else {
+      const lines = createScreenSpaceEdgeLines(
+        this.boundsPositions,
+        appearance.color,
+        appearance.lineWidth,
+        appearance.opacity,
+        false,
+        appearance.renderOrder,
+      );
+      lines.frustumCulled = false;
+      const positionBuffer = (
+        lines.geometry.getAttribute(
+          'instanceStart',
+        ) as THREE.InterleavedBufferAttribute
+      ).data;
+      this.boundsHighlight = {lines, positionBuffer};
+      this.add(lines);
+    }
     this.frustumCulled = false;
     this.matrixAutoUpdate = false;
     this.update();
   }
 
   update(): void {
+    if (!this.boundsHighlight) {
+      this.target.updateWorldMatrix(true, false);
+      this.matrix.copy(this.target.matrixWorld);
+      this.matrixWorldNeedsUpdate = true;
+      return;
+    }
+
     this.bounds.setFromObject(this.target);
     this.visible = !this.bounds.isEmpty();
     if (!this.visible) return;
 
     const {min, max} = this.bounds;
-    const positions = this.positionAttribute.array as Float32Array;
     let offset = 0;
     for (const [start, end] of boxCornerPairs) {
       const startX = start & 1 ? max.x : min.x;
@@ -199,28 +237,60 @@ class CornerBoxHelper extends THREE.LineSegments<
       const endX = end & 1 ? max.x : min.x;
       const endY = end & 2 ? max.y : min.y;
       const endZ = end & 4 ? max.z : min.z;
-      const insetX = (endX - startX) * boxCornerFraction;
-      const insetY = (endY - startY) * boxCornerFraction;
-      const insetZ = (endZ - startZ) * boxCornerFraction;
-      positions[offset++] = startX;
-      positions[offset++] = startY;
-      positions[offset++] = startZ;
-      positions[offset++] = startX + insetX;
-      positions[offset++] = startY + insetY;
-      positions[offset++] = startZ + insetZ;
-      positions[offset++] = endX;
-      positions[offset++] = endY;
-      positions[offset++] = endZ;
-      positions[offset++] = endX - insetX;
-      positions[offset++] = endY - insetY;
-      positions[offset++] = endZ - insetZ;
+      const fraction = this.cornerFraction(
+        startX,
+        startY,
+        startZ,
+        endX,
+        endY,
+        endZ,
+      );
+      const insetX = (endX - startX) * fraction;
+      const insetY = (endY - startY) * fraction;
+      const insetZ = (endZ - startZ) * fraction;
+      this.boundsPositions[offset++] = startX;
+      this.boundsPositions[offset++] = startY;
+      this.boundsPositions[offset++] = startZ;
+      this.boundsPositions[offset++] = startX + insetX;
+      this.boundsPositions[offset++] = startY + insetY;
+      this.boundsPositions[offset++] = startZ + insetZ;
+      this.boundsPositions[offset++] = endX;
+      this.boundsPositions[offset++] = endY;
+      this.boundsPositions[offset++] = endZ;
+      this.boundsPositions[offset++] = endX - insetX;
+      this.boundsPositions[offset++] = endY - insetY;
+      this.boundsPositions[offset++] = endZ - insetZ;
     }
-    this.positionAttribute.needsUpdate = true;
+    this.boundsHighlight.positionBuffer.needsUpdate = true;
+  }
+
+  private cornerFraction(
+    startX: number,
+    startY: number,
+    startZ: number,
+    endX: number,
+    endY: number,
+    endZ: number,
+  ): number {
+    this.projectedStart.set(startX, startY, startZ).project(this.camera);
+    this.projectedEnd.set(endX, endY, endZ).project(this.camera);
+    const screenX =
+      ((this.projectedEnd.x - this.projectedStart.x) *
+        this.viewport.clientWidth) /
+      2;
+    const screenY =
+      ((this.projectedEnd.y - this.projectedStart.y) *
+        this.viewport.clientHeight) /
+      2;
+    const screenLength = Math.hypot(screenX, screenY);
+    return Math.min(
+      boxCornerFraction,
+      boxCornerMaxScreenLengthPixels / screenLength,
+    );
   }
 
   dispose(): void {
-    this.geometry.dispose();
-    this.material.dispose();
+    disposeObject(this);
   }
 }
 
@@ -242,6 +312,7 @@ export class ModelViewport {
   private readonly root = new THREE.Group();
   private readonly decorationRoot = new THREE.Group();
   private readonly occurrences = new Map<string, Occurrence>();
+  private readonly contextOccurrences = new Map<string, Occurrence>();
   private readonly parameterPreviews = new Map<string, number>();
   private readonly committedParameterPreviews = new Map<string, number>();
   private readonly occurrenceTranslationPreviews = new Map<string, Vec3>();
@@ -257,8 +328,8 @@ export class ModelViewport {
   private readonly onNavigateSource: ModelViewportOptions['onNavigateSource'];
   private readonly onTopologySelection: ModelViewportOptions['onTopologySelection'];
   private readonly sourceDecorationProviders: readonly SourceDecorationProvider[];
-  private readonly impactHelpers: CornerBoxHelper[] = [];
-  private selectionHelper: CornerBoxHelper | null = null;
+  private readonly impactHighlights: ObjectHighlight[] = [];
+  private selectionHighlight: ObjectHighlight | null = null;
   private topologySelection?: TopologySelectionState;
   private topologySelectionOverlay?: THREE.Group;
   private highlightedTargetId?: string;
@@ -595,7 +666,7 @@ export class ModelViewport {
     this.raycaster.params.Line.threshold = kind === 'edge' ? 1.5 : 1;
     this.raycaster.params.Points.threshold = kind === 'vertex' ? 2 : 1;
     this.renderer.domElement.classList.add('topology-selection-active');
-    this.rebuildSelectionHelper();
+    this.rebuildSelectionHighlight();
     this.updatePositionGizmo();
     this.rebuildTopologySelectionOverlay();
     return availableIds;
@@ -603,7 +674,7 @@ export class ModelViewport {
 
   endTopologySelection(): void {
     this.clearTopologySelection();
-    this.rebuildSelectionHelper();
+    this.rebuildSelectionHighlight();
     this.updatePositionGizmo();
   }
 
@@ -622,7 +693,7 @@ export class ModelViewport {
     this.parameterPreviews.set(targetId, value);
     if (this.highlightedTargetId !== targetId) {
       this.highlightedTargetId = targetId;
-      this.rebuildImpactHelpers();
+      this.rebuildImpactHighlights();
     }
     this.applyPreviewTransforms();
   }
@@ -636,7 +707,7 @@ export class ModelViewport {
     }
     if (this.highlightedTargetId === targetId) {
       this.highlightedTargetId = this.parameterPreviews.keys().next().value;
-      this.rebuildImpactHelpers();
+      this.rebuildImpactHighlights();
     }
     this.applyPreviewTransforms();
   }
@@ -660,7 +731,7 @@ export class ModelViewport {
       ]);
     });
     this.highlightedOccurrenceKeys = new Set(occurrenceKeys);
-    this.rebuildImpactHelpers();
+    this.rebuildImpactHighlights();
     this.applyPreviewTransforms();
   }
 
@@ -676,7 +747,7 @@ export class ModelViewport {
     this.highlightedOccurrenceKeys = new Set(
       this.committedOccurrenceTranslationPreviews.keys(),
     );
-    this.rebuildImpactHelpers();
+    this.rebuildImpactHighlights();
     this.applyPreviewTransforms();
   }
 
@@ -791,8 +862,8 @@ export class ModelViewport {
   }
 
   captureImage(width: number, height: number): Promise<Blob> {
-    this.selectionHelper?.update();
-    this.impactHelpers.forEach(helper => helper.update());
+    this.selectionHighlight?.update();
+    this.impactHighlights.forEach(highlight => highlight.update());
     return this.rendering.captureImage(width, height);
   }
 
@@ -1005,6 +1076,14 @@ export class ModelViewport {
     object.userData.sourceNodeId = node.nodeId;
     applyNodeTransform(object, node, placement);
     dimObject(object);
+    this.contextOccurrences.set(key, {
+      key,
+      node,
+      object,
+      depth: 1,
+      view: 'source',
+      placement,
+    });
     node.children.forEach((child, index) => {
       object.add(
         this.buildContextObject(child, `${key}/${index}`, targetId, placement),
@@ -1077,11 +1156,12 @@ export class ModelViewport {
     }
     this.positionGizmo.detach();
     this.coordinateReference?.setTarget(undefined);
-    this.clearImpactHelpers();
+    this.clearImpactHighlights();
     this.clearAllDecorations();
     this.disposeRoot();
     this.occurrences.clear();
-    this.rebuildSelectionHelper();
+    this.contextOccurrences.clear();
+    this.rebuildSelectionHighlight();
     this.parameterPreviews.clear();
     this.committedParameterPreviews.clear();
     this.occurrenceTranslationPreviews.clear();
@@ -1100,32 +1180,44 @@ export class ModelViewport {
     }
     this.selectedKey = key;
     this.coordinateReference?.setTarget(occurrence.object);
-    this.rebuildSelectionHelper();
-    this.rebuildImpactHelpers();
+    this.rebuildSelectionHighlight();
+    this.rebuildImpactHighlights();
     this.updatePositionGizmo();
     if (notify) {
       this.onSelect(occurrence);
     }
   }
 
-  private rebuildSelectionHelper(): void {
-    if (this.selectionHelper) {
-      this.scene.remove(this.selectionHelper);
-      this.selectionHelper.dispose();
-      this.selectionHelper = null;
+  private rebuildSelectionHighlight(): void {
+    if (this.selectionHighlight) {
+      this.scene.remove(this.selectionHighlight);
+      this.selectionHighlight.dispose();
+      this.selectionHighlight = null;
     }
 
     const occurrence = this.getSelected();
-    if (!occurrence || !this.selectionEmphasized || this.topologySelection) {
+    if (
+      !occurrence ||
+      occurrence.node.mesh ||
+      !this.selectionEmphasized ||
+      this.topologySelection
+    ) {
       return;
     }
-    this.selectionHelper = new CornerBoxHelper(
+    this.selectionHighlight = new ObjectHighlight(
       occurrence.object,
-      '#d8ff3e',
-      0.85,
-      20,
+      occurrence.node,
+      this.camera,
+      this.renderer.domElement,
+      {
+        kind: 'bounds',
+        color: '#d8ff3e',
+        opacity: 0.85,
+        lineWidth: symbolLineWidth,
+        renderOrder: 20,
+      },
     );
-    this.scene.add(this.selectionHelper);
+    this.scene.add(this.selectionHighlight);
   }
 
   private updatePositionGizmo(): void {
@@ -1146,11 +1238,7 @@ export class ModelViewport {
         : null;
     this.positionGizmo.attach(
       occurrence.object,
-      positionBindings(
-        occurrence,
-        [...this.occurrences.values()],
-        constraintId,
-      ),
+      positionBindings(occurrence, this.renderedOccurrences(), constraintId),
     );
   }
 
@@ -1172,7 +1260,7 @@ export class ModelViewport {
   }
 
   private applyPreviewTransforms(): void {
-    for (const occurrence of this.occurrences.values()) {
+    for (const occurrence of this.renderedOccurrences()) {
       applyNodeTransform(
         occurrence.object,
         occurrence.node,
@@ -1185,9 +1273,13 @@ export class ModelViewport {
     }
     this.root.updateMatrixWorld(true);
     this.updateDecorationTransforms();
-    this.selectionHelper?.update();
-    this.impactHelpers.forEach(helper => helper.update());
+    this.selectionHighlight?.update();
+    this.impactHighlights.forEach(highlight => highlight.update());
     this.positionGizmo.updateAnchor();
+  }
+
+  private renderedOccurrences(): Occurrence[] {
+    return [...this.occurrences.values(), ...this.contextOccurrences.values()];
   }
 
   private previewTranslationFor(occurrence: Occurrence): Vec3 {
@@ -1521,20 +1613,20 @@ export class ModelViewport {
     this.controls.update();
     this.coordinateReference?.update();
     this.rendering.renderFrame(() => {
-      this.selectionHelper?.update();
-      this.impactHelpers.forEach(helper => helper.update());
+      this.selectionHighlight?.update();
+      this.impactHighlights.forEach(highlight => highlight.update());
     });
   };
 
-  private rebuildImpactHelpers(): void {
-    this.clearImpactHelpers();
+  private rebuildImpactHighlights(): void {
+    this.clearImpactHighlights();
     if (
       !this.highlightedTargetId &&
       this.highlightedOccurrenceKeys.size === 0
     ) {
       return;
     }
-    for (const occurrence of this.occurrences.values()) {
+    for (const occurrence of this.renderedOccurrences()) {
       if (
         occurrence.key === this.selectedKey ||
         (!this.highlightedOccurrenceKeys.has(occurrence.key) &&
@@ -1544,23 +1636,32 @@ export class ModelViewport {
       ) {
         continue;
       }
-      const helper = new CornerBoxHelper(
+      const highlight = new ObjectHighlight(
         occurrence.object,
-        '#8ea2ff',
-        0.72,
-        19,
+        occurrence.node,
+        this.camera,
+        this.renderer.domElement,
+        {
+          kind: 'geometry',
+          color: '#8ea2ff',
+          opacity: 0.72,
+          lineWidth: symbolLineWidth,
+          pointSize: topologyGuidePointSize,
+          surfaceOpacity: impactSurfaceOpacity,
+          renderOrder: 19,
+        },
       );
-      this.impactHelpers.push(helper);
-      this.scene.add(helper);
+      this.impactHighlights.push(highlight);
+      this.scene.add(highlight);
     }
   }
 
-  private clearImpactHelpers(): void {
-    for (const helper of this.impactHelpers) {
-      this.scene.remove(helper);
-      helper.dispose();
+  private clearImpactHighlights(): void {
+    for (const highlight of this.impactHighlights) {
+      this.scene.remove(highlight);
+      highlight.dispose();
     }
-    this.impactHelpers.length = 0;
+    this.impactHighlights.length = 0;
   }
 
   private updateDecorationTransforms(): void {
@@ -2226,6 +2327,66 @@ function createScreenSpacePoints(
   );
   points.renderOrder = renderOrder;
   return points;
+}
+
+function createObjectGeometryHighlight(
+  node: ModelSnapshotObject,
+  appearance: Extract<ObjectHighlightAppearance, {kind: 'geometry'}>,
+): THREE.Object3D | undefined {
+  const {mesh} = node;
+  if (!mesh) return undefined;
+
+  const highlight = new THREE.Group();
+  if (node.kind === 'vertex') {
+    if (mesh.topologyVertices.length > 0) {
+      highlight.add(
+        createScreenSpacePoints(
+          mesh.topologyVertices,
+          appearance.color,
+          appearance.pointSize,
+          appearance.opacity,
+          false,
+          appearance.renderOrder,
+        ),
+      );
+    }
+  } else {
+    if (
+      (node.kind === 'solid' || node.kind === 'face') &&
+      mesh.triangles.length > 0
+    ) {
+      const surface = new THREE.Mesh(
+        createSurfaceGeometry(mesh),
+        new THREE.MeshBasicMaterial({
+          color: appearance.color,
+          transparent: true,
+          opacity: appearance.surfaceOpacity,
+          depthTest: true,
+          depthWrite: false,
+          polygonOffset: true,
+          polygonOffsetFactor: -2,
+          polygonOffsetUnits: -2,
+          side: THREE.DoubleSide,
+          toneMapped: false,
+        }),
+      );
+      surface.renderOrder = appearance.renderOrder;
+      highlight.add(surface);
+    }
+    if (mesh.edges.length > 0) {
+      highlight.add(
+        createScreenSpaceEdgeLines(
+          mesh.edges,
+          appearance.color,
+          appearance.lineWidth,
+          appearance.opacity,
+          node.kind === 'solid' || node.kind === 'face',
+          appearance.renderOrder + 1,
+        ),
+      );
+    }
+  }
+  return highlight.children.length > 0 ? highlight : undefined;
 }
 
 function vertexSelectionPositions(

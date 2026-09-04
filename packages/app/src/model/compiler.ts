@@ -62,6 +62,7 @@ const workspacePackages = new Map<string, unknown>([
 
 export type SourceTargetEvaluation = Readonly<{
   runtime: RuntimeReach;
+  toolExecutionOrder?: number;
   nodeIds: readonly string[];
   parameters?: readonly ParameterUsage[];
   toolArguments?: Readonly<Record<number, number>>;
@@ -1634,6 +1635,7 @@ function buildSourceTargets(
         return consumers.length > 0
           ? consumers.map(consumer => ({
               runtime: consumer.input.runtime,
+              toolExecutionOrder: evaluation.runtime.order,
               parameters: execution?.parameters,
               nodeIds: uniqueNodeIds(evaluation.source, evaluation.target),
               operationId: consumer.input.operationId,
@@ -1648,6 +1650,7 @@ function buildSourceTargets(
           : [
               {
                 runtime: evaluation.runtime,
+                toolExecutionOrder: evaluation.runtime.order,
                 parameters: execution?.parameters,
                 nodeIds: uniqueNodeIds(evaluation.source, evaluation.target),
                 constraintId: evaluation.constraintId,
@@ -1774,7 +1777,9 @@ function buildSourceTargets(
         }) satisfies SourceTarget,
     ),
   ];
-  const fallbackToolTargets = [...toolCallSites.values()].flatMap(site => {
+  const fallbackToolTargets: SourceTarget[] = [
+    ...toolCallSites.values(),
+  ].flatMap(site => {
     const evaluations = [...sourceExecutionTraces.values()]
       .filter(
         execution =>
@@ -1806,11 +1811,10 @@ function buildSourceTargets(
     evaluations: target.evaluations
       .map(evaluation => {
         const execution = target.tool
-          ? sourceExecutionFor(
-              target.tool.callId,
-              evaluation.contextId,
-              evaluation.runtime,
-            )
+          ? sourceExecutionFor(target.tool.callId, evaluation.contextId, {
+              ...evaluation.runtime,
+              order: evaluation.toolExecutionOrder ?? evaluation.runtime.order,
+            })
           : undefined;
         const toolArguments = execution
           ? numericToolArguments(execution.arguments)
@@ -1845,7 +1849,8 @@ function toolExecutionIsRepresented(
       target.evaluations.some(
         evaluation =>
           evaluation.contextId === execution.contextId &&
-          evaluation.runtime.order === execution.order,
+          (evaluation.toolExecutionOrder ?? evaluation.runtime.order) ===
+            execution.order,
       ),
   );
 }
