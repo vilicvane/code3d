@@ -1018,7 +1018,7 @@ kbd {
   flex-direction: column-reverse;
   align-items: flex-start;
   gap: 8px;
-  width: min(390px, calc(100% - 28px));
+  width: calc(100% - 28px);
   max-height: calc(100% - 28px);
   pointer-events: none;
 }
@@ -1030,7 +1030,7 @@ kbd {
 .viewport-diagnostic-stack {
   display: grid;
   gap: 8px;
-  width: 100%;
+  width: min(390px, 100%);
   max-height: 180px;
   overflow: auto;
 }
