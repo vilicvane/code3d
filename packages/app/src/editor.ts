@@ -210,6 +210,7 @@ export class CodeEditor {
   private readonly sourceEditUndoGroups = new Map<string, string>();
   private readonly sourceDecoration: monaco.editor.IEditorDecorationsCollection;
   private activePath: string;
+  private pointerActivatingEditor = false;
   private revision = 1;
   private suppressCursorEvent = false;
 
@@ -260,8 +261,34 @@ export class CodeEditor {
       this.sourceDecoration.clear();
       this.emitCursorPosition(selection.getPosition());
     });
-    this.editor.onDidFocusEditorText(() => this.emitEditorActivation());
-    this.editor.onMouseDown(() => this.emitEditorActivation());
+    // Pointer focus arrives before Monaco finishes placing the caret. Wait for
+    // the complete gesture before formatting so it uses the clicked position.
+    this.container.addEventListener(
+      'pointerdown',
+      () => {
+        this.pointerActivatingEditor = true;
+      },
+      {capture: true},
+    );
+    window.addEventListener(
+      'pointerup',
+      () => {
+        if (!this.pointerActivatingEditor) return;
+        this.pointerActivatingEditor = false;
+        window.setTimeout(() => this.emitEditorActivation(), 0);
+      },
+      {capture: true},
+    );
+    window.addEventListener(
+      'pointercancel',
+      () => {
+        this.pointerActivatingEditor = false;
+      },
+      {capture: true},
+    );
+    this.editor.onDidFocusEditorText(() => {
+      if (!this.pointerActivatingEditor) this.emitEditorActivation();
+    });
     monaco.editor.registerEditorOpener({
       openCodeEditor: (source, resource, selectionOrPosition) =>
         source === this.editor &&
