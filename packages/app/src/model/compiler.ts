@@ -386,6 +386,8 @@ const traceRuntime = Object.freeze({
     file: string,
     start: number,
     end: number,
+    failureStart: number,
+    failureEnd: number,
     id: string,
     label: string,
     run: () => T,
@@ -410,7 +412,7 @@ const traceRuntime = Object.freeze({
         sourceRef: location,
         parameters: [...parameters],
       });
-      throw locateModelError(error, location);
+      throw locateModelError(error, sourceRef(file, failureStart, failureEnd));
     } finally {
       traceFrames.pop();
       parameterFrames.pop();
@@ -1915,6 +1917,8 @@ function createTraceTransformer(
             call,
             node.getStart(sourceFile),
             node.getEnd(),
+            callFailureStart(node, sourceFile),
+            node.getEnd(),
             sourceFile.fileName,
             siteId,
             callLabel(node),
@@ -1955,7 +1959,7 @@ function edgeSelectionSite(
     operation,
     sourceRef: sourceRef(
       sourceFile.fileName,
-      node.expression.getEnd(),
+      node.expression.name.getStart(sourceFile),
       node.getEnd(),
     ),
     edgeArgument: edgeArgument
@@ -2063,6 +2067,8 @@ function traceExpression(
   expression: ts.Expression,
   start: number,
   end: number,
+  failureStart: number,
+  failureEnd: number,
   file: string,
   id: string,
   label: string,
@@ -2078,6 +2084,8 @@ function traceExpression(
       factory.createStringLiteral(file),
       factory.createNumericLiteral(start),
       factory.createNumericLiteral(end),
+      factory.createNumericLiteral(failureStart),
+      factory.createNumericLiteral(failureEnd),
       factory.createStringLiteral(id),
       factory.createStringLiteral(label),
       factory.createArrowFunction(
@@ -2090,6 +2098,15 @@ function traceExpression(
       ),
     ],
   );
+}
+
+function callFailureStart(
+  call: ts.CallExpression,
+  sourceFile: ts.SourceFile,
+): number {
+  return ts.isPropertyAccessExpression(call.expression)
+    ? call.expression.name.getStart(sourceFile)
+    : call.getStart(sourceFile);
 }
 
 function bindExpression(

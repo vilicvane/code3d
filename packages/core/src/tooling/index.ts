@@ -41,6 +41,7 @@ export {
 } from '../library/spatial.js';
 export type {Quaternion, RigidTransform, Vec3} from '../library/spatial.js';
 export type {EdgeId} from '../library/topology.js';
+export {describeOpenCascadeException} from '../library/open-cascade-error.js';
 
 export const toolingProtocolVersion = 1;
 

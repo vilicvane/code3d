@@ -1,4 +1,7 @@
-import type {SourceRef} from '@code3d/core/tooling';
+import {
+  describeOpenCascadeException,
+  type SourceRef,
+} from '@code3d/core/tooling';
 
 export type ModelDiagnosticKind =
   'syntax' | 'module' | 'evaluation' | 'project';
@@ -39,7 +42,8 @@ export function diagnosticFromError(
   if (error instanceof ModelDiagnosticError) return error.diagnostic;
   return createModelDiagnostic(
     kind,
-    error instanceof Error ? error.message : String(error),
+    describeOpenCascadeException(error) ??
+      (error instanceof Error ? error.message : String(error)),
   );
 }
 

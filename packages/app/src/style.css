@@ -1002,6 +1002,21 @@ kbd {
   cursor: not-allowed;
 }
 
+.edge-selection-error {
+  padding: 8px;
+  color: #ffb09f;
+  border-left: 2px solid #e8664d;
+  background: #2a1714;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.edge-selection-error[hidden] {
+  display: none;
+}
+
 .viewport-progress {
   position: absolute;
   top: 48px;

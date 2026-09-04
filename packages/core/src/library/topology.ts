@@ -36,6 +36,11 @@ type RawEdgeGroup = Readonly<{
   edgeId: number;
 }>;
 
+type LocalEdgeOperation = Readonly<{
+  NbContours(): number;
+  NbEdges(index: number): number;
+}>;
+
 export function initialEdgeTopology(shape: Shape3D): EdgeTopology {
   const edges = shape.edges;
   try {
@@ -181,6 +186,9 @@ function modifyEdges(
       }
     });
     builder.Build();
+    if (!builder.IsDone()) {
+      throw edgeModificationError(kind, amount, selectedEdgeIds, builder);
+    }
     result = castShape3D(builder.Shape());
     const nextTopology = transferEdgeTopologyFromEdges(
       edges,
@@ -200,6 +208,51 @@ function modifyEdges(
     builder.delete();
     deleteEdges(edges);
   }
+}
+
+function edgeModificationError(
+  kind: 'fillet' | 'chamfer',
+  amount: number,
+  selectedEdgeIds: readonly EdgeId[],
+  builder: LocalEdgeOperation,
+): Error {
+  const parameter = kind === 'fillet' ? 'radius' : 'distance';
+  const selection = formattedEdgeSelection(selectedEdgeIds);
+  const contourDetail = propagatedContourDetail(builder, selectedEdgeIds);
+
+  return new Error(
+    `Could not construct ${kind} with ${parameter} ${amount} on ${selection}.\n` +
+      `${contourDetail} The edge/${parameter} combination may create degenerate, self-intersecting, or otherwise unsupported geometry. Try a slightly different ${parameter} or edge selection.`.trim(),
+  );
+}
+
+function propagatedContourDetail(
+  builder: LocalEdgeOperation,
+  selectedEdgeIds: readonly EdgeId[],
+): string {
+  try {
+    const contourCount = builder.NbContours();
+    let contourEdgeCount = 0;
+    for (let index = 1; index <= contourCount; index += 1) {
+      contourEdgeCount += builder.NbEdges(index);
+    }
+    return contourEdgeCount > selectedEdgeIds.length
+      ? ` OpenCascade expanded the selection to ${counted(contourCount, 'tangent contour')} containing ${counted(contourEdgeCount, 'edge')}.`
+      : '';
+  } catch {
+    return '';
+  }
+}
+
+function formattedEdgeSelection(edgeIds: readonly EdgeId[]): string {
+  const visible = edgeIds.slice(0, 8).map(edgeId => `E${edgeId}`);
+  return edgeIds.length <= visible.length
+    ? visible.join(', ')
+    : `${visible.join(', ')}, and ${edgeIds.length - visible.length} more`;
+}
+
+function counted(count: number, singular: string): string {
+  return `${count} ${singular}${count === 1 ? '' : 's'}`;
 }
 
 export function resolveEdgeSelection(

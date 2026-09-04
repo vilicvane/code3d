@@ -151,6 +151,7 @@ app.innerHTML = `
             <div class="edge-selection-actions">
               <button id="edge-selection-all" type="button">Use all edges</button>
             </div>
+            <div class="edge-selection-error" id="edge-selection-error" role="status" aria-live="polite" hidden></div>
           </section>
           <div class="viewport-progress" id="viewport-progress" role="status" aria-live="polite" hidden>
             <span class="viewport-progress-spinner" aria-hidden="true"></span>
@@ -217,6 +218,7 @@ const edgeSelectionParameterUnit = requiredElement(
 );
 const edgeSelectionAll =
   requiredElement<HTMLButtonElement>('edge-selection-all');
+const edgeSelectionError = requiredElement('edge-selection-error');
 const viewportProgress = requiredElement('viewport-progress');
 const viewportProgressLabel = requiredElement('viewport-progress-label');
 const projectTree = requiredElement('project-tree');
@@ -1242,6 +1244,7 @@ function syncEdgeSelectionTool(sourceTargetFocused = true): void {
     edgeSelectionTool.evaluationIndex === scope.evaluationIndex &&
     edgeSelectionTool.occurrenceKey === occurrence.key
   ) {
+    updateEdgeSelectionDiagnostic(edgeSelectionTool);
     return;
   }
   startEdgeSelection(
@@ -1385,7 +1388,23 @@ function updateEdgeSelectionToolbar(
     ? formatEdgeIds(tool.selectedEdgeIds)
     : 'All edges';
   edgeSelectionAll.disabled = !tool.hasExplicitEdgeSelection;
+  updateEdgeSelectionDiagnostic(tool);
   edgeSelectionToolbar.hidden = false;
+}
+
+function updateEdgeSelectionDiagnostic(tool: EdgeSelectionTool): void {
+  const diagnostic = currentModule?.diagnostic;
+  const target = currentModule?.sourceTargets.find(
+    candidate => candidate.id === tool.targetId,
+  );
+  const relevant =
+    diagnostic?.sourceRef &&
+    target &&
+    sourceRefsOverlap(diagnostic.sourceRef, target.sourceRef);
+  edgeSelectionError.textContent = relevant
+    ? [diagnostic.summary, diagnostic.details].filter(Boolean).join('\n')
+    : '';
+  edgeSelectionError.hidden = !relevant;
 }
 
 function handleEdgeSelection(event: EdgeSelectionEvent): void {
@@ -1791,6 +1810,11 @@ function toolSourceRefs(module: ModelModule): SourceRef[] {
     ...module.sourceTargets.flatMap(target => [
       target.sourceRef,
       ...(target.receiverRef ? [target.receiverRef] : []),
+      ...target.evaluations.flatMap(evaluation =>
+        evaluation.selection?.parameter
+          ? [evaluation.selection.parameter.target.sourceRef]
+          : [],
+      ),
       ...(target.operation?.edgeArgument
         ? [
             target.operation.edgeArgument.sourceRef,
@@ -1868,6 +1892,12 @@ function sameSourceRef(left: SourceRef, right: SourceRef): boolean {
     left.file === right.file &&
     left.start === right.start &&
     left.end === right.end
+  );
+}
+
+function sourceRefsOverlap(left: SourceRef, right: SourceRef): boolean {
+  return (
+    left.file === right.file && left.start < right.end && right.start < left.end
   );
 }
 

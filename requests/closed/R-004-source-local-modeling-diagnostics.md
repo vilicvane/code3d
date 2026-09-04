@@ -20,9 +20,22 @@
   precise location through outer calls and design-time evaluation contexts.
 - Runtime model calls, traced binding initializers, imported module specifiers,
   and model snapshot generation all supply source locations where available.
+- Chained model calls retain their full expression span for model-value tracing
+  while failures use the narrower concrete invocation span, such as
+  `chamfer(2, [10])`, for the editor marker.
+- Fillet and chamfer builders report an unfinished OpenCascade operation with
+  its size, stable edge IDs, and any implicit tangent-contour expansion. Other
+  native OpenCascade WebAssembly exceptions are decoded at the tooling boundary
+  instead of degrading to `[object WebAssembly.Exception]`.
 - Located diagnostics become `code3d` Monaco error markers. They remain visible
   while the replacement revision compiles and clear when that revision
   succeeds; they do not open a second error overlay or move editor focus.
+- When the matching fillet or chamfer selection tool is open, its current
+  diagnostic is also shown in the tool footer and clears with a successful
+  replacement compile.
+- Parameter source references from failed fillet and chamfer evaluations remain
+  tracked even though those operations have no output object, so the open tool
+  can repair the failing size directly.
 - A compile produces one primary diagnostic. Related constraint locations are
   not marked speculatively; they can be added later only when the solver emits
   structured contributing diagnostics.
@@ -33,5 +46,12 @@
 - Host Chrome evaluated `box(-1, 20, 10)`: the full call expression received
   one Monaco error marker, its native hover displayed the evaluation message,
   and the global error bar remained hidden.
+- Core integration tests reproduce a chamfer rejected after both cold and
+  cache-hit fillet prefixes and verify raw OpenCascade exception decoding.
+- Host Chrome's compiler worker evaluated the same chamfer and returned the
+  readable summary and details with the exact `chamfer(...)` invocation span.
+- In an isolated Host Chrome Studio project, selecting the marked call opened
+  the Chamfer tool with the same diagnostic; changing distance from `2` to `1`
+  rewrote the source, rebuilt successfully, and cleared both marker and footer.
 - Restoring valid source returned the model to ready state and cleared the
   marker without changing the restored project contents.
