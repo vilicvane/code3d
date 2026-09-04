@@ -1452,14 +1452,14 @@ export function ellipse(xRadius: number, zRadius: number): FaceModel {
 }
 
 /**
- * @code3d.param width {kind: 'length', constraints: {exclusiveMin: 0}}
- * @code3d.param height {kind: 'length', constraints: {exclusiveMin: 0}}
+ * @code3d.param x {kind: 'length', constraints: {exclusiveMin: 0}}
+ * @code3d.param z {kind: 'length', constraints: {exclusiveMin: 0}}
  */
-export function rectangle(width: number, height: number): FaceModel {
-  assertPositive('width', width);
-  assertPositive('height', height);
-  return planarFaceModel('rectangle', 'Rectangle', [width, height], () =>
-    sketchRectangle(width, height, {plane: 'XZ'}),
+export function rectangle(x: number, z: number): FaceModel {
+  assertPositive('x', x);
+  assertPositive('z', z);
+  return planarFaceModel('rectangle', 'Rectangle', [x, z], () =>
+    sketchRectangle(x, z, {plane: 'XZ'}),
   );
 }
 
@@ -1585,22 +1585,19 @@ export function loft(
 }
 
 /**
- * @code3d.param width {kind: 'length', constraints: {exclusiveMin: 0}}
- * @code3d.param height {kind: 'length', constraints: {exclusiveMin: 0}}
- * @code3d.param depth {kind: 'length', constraints: {exclusiveMin: 0}}
+ * @code3d.param x {kind: 'length', constraints: {exclusiveMin: 0}}
+ * @code3d.param y {kind: 'length', constraints: {exclusiveMin: 0}}
+ * @code3d.param z {kind: 'length', constraints: {exclusiveMin: 0}}
  */
-export function box(width: number, height: number, depth: number): SolidModel {
-  assertPositive('width', width);
-  assertPositive('height', height);
-  assertPositive('depth', depth);
+export function box(x: number, y: number, z: number): SolidModel {
+  assertPositive('x', x);
+  assertPositive('y', y);
+  assertPositive('z', z);
   return new ModelObject<CanonicalElements, 'solid'>({
     kind: 'solid',
     name: 'Box',
-    geometry: evaluateSolidGeometry('box', [width, height, depth], [], () => ({
-      shape: makeBox(
-        [-width / 2, -height / 2, -depth / 2],
-        [width / 2, height / 2, depth / 2],
-      ),
+    geometry: evaluateSolidGeometry('box', [x, y, z], [], () => ({
+      shape: makeBox([-x / 2, -y / 2, -z / 2], [x / 2, y / 2, z / 2]),
     })),
     operation: storedOperation('box'),
   }) as Model<CanonicalElements>;
@@ -1608,16 +1605,16 @@ export function box(width: number, height: number, depth: number): SolidModel {
 
 /**
  * @code3d.param radius {kind: 'length', constraints: {exclusiveMin: 0}}
- * @code3d.param height {kind: 'length', constraints: {exclusiveMin: 0}}
+ * @code3d.param y {kind: 'length', constraints: {exclusiveMin: 0}}
  */
-export function cylinder(radius: number, height: number): SolidModel {
+export function cylinder(radius: number, y: number): SolidModel {
   assertPositive('radius', radius);
-  assertPositive('height', height);
+  assertPositive('y', y);
   return new ModelObject<CanonicalElements, 'solid'>({
     kind: 'solid',
     name: 'Cylinder',
-    geometry: evaluateSolidGeometry('cylinder', [radius, height], [], () => ({
-      shape: makeCylinder(radius, height, [0, -height / 2, 0], [0, 1, 0]),
+    geometry: evaluateSolidGeometry('cylinder', [radius, y], [], () => ({
+      shape: makeCylinder(radius, y, [0, -y / 2, 0], [0, 1, 0]),
     })),
     operation: storedOperation('cylinder'),
   }) as Model<CanonicalElements>;
@@ -1639,31 +1636,31 @@ export function sphere(radius: number): SolidModel {
 /**
  * @code3d.param bottomRadius {kind: 'length', label: 'Bottom radius', constraints: {exclusiveMin: 0}}
  * @code3d.param topRadius {kind: 'length', label: 'Top radius', constraints: {exclusiveMin: 0}}
- * @code3d.param height {kind: 'length', constraints: {exclusiveMin: 0}}
+ * @code3d.param y {kind: 'length', constraints: {exclusiveMin: 0}}
  */
 export function frustum(
   bottomRadius: number,
   topRadius: number,
-  height: number,
+  y: number,
 ): SolidModel {
   assertPositive('bottomRadius', bottomRadius);
   assertPositive('topRadius', topRadius);
-  assertPositive('height', height);
+  assertPositive('y', y);
   return new ModelObject<CanonicalElements, 'solid'>({
     kind: 'solid',
     name: 'Frustum',
     geometry: evaluateSolidGeometry(
       'frustum',
-      [bottomRadius, topRadius, height],
+      [bottomRadius, topRadius, y],
       [],
       () => {
         const bottom = sketchCircle(bottomRadius, {
           plane: 'XZ',
-          origin: [0, -height / 2, 0],
+          origin: [0, -y / 2, 0],
         });
         const top = sketchCircle(topRadius, {
           plane: 'XZ',
-          origin: [0, height / 2, 0],
+          origin: [0, y / 2, 0],
         });
         return {shape: bottom.loftWith(top, {ruled: true})};
       },
@@ -1674,18 +1671,18 @@ export function frustum(
 
 /**
  * @code3d.param radius {kind: 'length', constraints: {exclusiveMin: 0}}
- * @code3d.param height {kind: 'length', constraints: {exclusiveMin: 0}}
+ * @code3d.param y {kind: 'length', constraints: {exclusiveMin: 0}}
  * @code3d.param sides {kind: 'count', constraints: {min: 3}}
  * @code3d.param rotation {kind: 'angle'}
  */
 export function regularPrism(
   radius: number,
-  height: number,
+  y: number,
   sides: number,
   rotation = 0,
 ): SolidModel {
   assertPositive('radius', radius);
-  assertPositive('height', height);
+  assertPositive('y', y);
   if (!Number.isInteger(sides) || sides < 3) {
     throw new Error('sides must be an integer greater than or equal to 3.');
   }
@@ -1697,14 +1694,14 @@ export function regularPrism(
     name: `${sides}-sided prism`,
     geometry: evaluateSolidGeometry(
       'regular-prism',
-      [radius, height, sides, rotation],
+      [radius, y, sides, rotation],
       [],
       () => {
         const sketch = sketchPolysides(radius, sides, 0, {
           plane: 'XZ',
-          origin: [0, -height / 2, 0],
+          origin: [0, -y / 2, 0],
         });
-        let shape = sketch.extrude(height, {
+        let shape = sketch.extrude(y, {
           extrusionDirection: [0, 1, 0],
         });
         if (rotation !== 0) {
@@ -1719,7 +1716,7 @@ export function regularPrism(
 
 export type HelicalThreadOptions = Readonly<{
   pitch: number;
-  height: number;
+  y: number;
   majorDiameter: number;
   minorDiameter: number;
   rootWidth: number;
@@ -1730,7 +1727,7 @@ export type HelicalThreadOptions = Readonly<{
 export function helicalThread(options: HelicalThreadOptions): SolidModel {
   const {
     pitch,
-    height,
+    y,
     majorDiameter,
     minorDiameter,
     rootWidth,
@@ -1738,13 +1735,13 @@ export function helicalThread(options: HelicalThreadOptions): SolidModel {
     leftHanded = false,
   } = options;
   assertPositive('pitch', pitch);
-  assertPositive('height', height);
+  assertPositive('y', y);
   assertPositive('majorDiameter', majorDiameter);
   assertPositive('minorDiameter', minorDiameter);
   assertPositive('rootWidth', rootWidth);
   assertPositive('crestWidth', crestWidth);
-  if (height < pitch) {
-    throw new Error('height must be at least one thread pitch.');
+  if (y < pitch) {
+    throw new Error('y must be at least one thread pitch.');
   }
   if (minorDiameter >= majorDiameter) {
     throw new Error('minorDiameter must be smaller than majorDiameter.');
@@ -1761,7 +1758,7 @@ export function helicalThread(options: HelicalThreadOptions): SolidModel {
       'helical-thread',
       [
         pitch,
-        height,
+        y,
         majorDiameter,
         minorDiameter,
         rootWidth,
@@ -1772,7 +1769,7 @@ export function helicalThread(options: HelicalThreadOptions): SolidModel {
       () => ({
         shape: makeHelicalThreadShape({
           pitch,
-          height,
+          y,
           majorRadius: majorDiameter / 2,
           minorRadius: minorDiameter / 2,
           rootWidth,

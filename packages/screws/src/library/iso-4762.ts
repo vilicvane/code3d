@@ -196,10 +196,10 @@ export function screw(input: ScrewInput, length: number): Screw {
   ).relate(top => top.bottom.on(headBarrel.top));
   const headBlank = union([headBarrel, headTop]);
 
-  const socketToolHeight = spec.hexSocketDepth + 0.2;
+  const socketToolY = spec.hexSocketDepth + 0.2;
   const socketTool = regularPrism(
     spec.hexSocketWidth / Math.sqrt(3),
-    socketToolHeight,
+    socketToolY,
     6,
     30,
   ).relate(tool =>
@@ -233,7 +233,7 @@ export function screw(input: ScrewInput, length: number): Screw {
     spec.nominalDiameter - 2 * ((5 / 8) * fundamentalHeight);
   const thread = helicalThread({
     pitch: spec.pitch,
-    height: threadedLength + overlap,
+    y: threadedLength + overlap,
     majorDiameter: spec.nominalDiameter,
     minorDiameter,
     rootWidth: (3 / 4) * spec.pitch,

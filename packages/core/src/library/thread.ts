@@ -13,7 +13,7 @@ import {
 
 export type HelicalThreadShapeOptions = Readonly<{
   pitch: number;
-  height: number;
+  y: number;
   majorRadius: number;
   minorRadius: number;
   rootWidth: number;
@@ -30,7 +30,7 @@ const loopSteps = Array.from({length: 21}, (_, index) => index / 20);
  */
 export function makeHelicalThreadShape({
   pitch,
-  height,
+  y,
   majorRadius,
   minorRadius,
   rootWidth,
@@ -39,14 +39,12 @@ export function makeHelicalThreadShape({
 }: HelicalThreadShapeOptions): Shape3D {
   const toothHeight = majorRadius - minorRadius;
   const profile = threadProfile(rootWidth, crestWidth, toothHeight);
-  const teeth = fadedThread(pitch, minorRadius, height, profile, leftHanded);
-  const core = makeCylinder(minorRadius + 0.05, height);
+  const teeth = fadedThread(pitch, minorRadius, y, profile, leftHanded);
+  const core = makeCylinder(minorRadius + 0.05, y);
   const threaded = core.fuse(teeth);
   core.delete();
   teeth.delete();
-  return threaded
-    .rotate(-90, [0, 0, 0], [1, 0, 0])
-    .translate([0, -height / 2, 0]);
+  return threaded.rotate(-90, [0, 0, 0], [1, 0, 0]).translate([0, -y / 2, 0]);
 }
 
 function threadProfile(
@@ -68,12 +66,12 @@ function threadProfile(
 function fadedThread(
   pitch: number,
   radius: number,
-  height: number,
+  length: number,
   profile: Drawing,
   leftHanded: boolean,
 ): Shape3D {
   const bottomEnd = fadedEnd(pitch, radius, profile, true, leftHanded);
-  const totalLoops = height / pitch - 0.5;
+  const totalLoops = length / pitch - 0.5;
   const fullLoops = Math.floor(totalLoops);
   const leftover = totalLoops - fullLoops;
   const singleLoop = basicThreadLoop(
@@ -118,13 +116,13 @@ function basicThreadLoop(
   pitch: number,
   radius: number,
   profile: Drawing,
-  height: number,
+  loopFraction: number,
   includeEnd: 'none' | 'first' | 'last' | 'both',
   leftHanded: boolean,
 ) {
   const helix = makeHelix(
     pitch,
-    pitch * clamp(height, 0, 1),
+    pitch * clamp(loopFraction, 0, 1),
     radius,
     [0, 0, 0],
     [0, 0, 1],
@@ -164,10 +162,10 @@ function fadedEnd(
   bottom: boolean,
   leftHanded: boolean,
 ) {
-  const height = pitch / 4;
+  const length = pitch / 4;
   const helix = makeHelix(
     pitch,
-    height,
+    length,
     radius,
     [0, 0, 0],
     [0, 0, bottom ? -1 : 1],
