@@ -72,7 +72,7 @@ async function renderModel(): Promise<void> {
     onDrillDown: () => undefined,
     onNavigateSource: () => undefined,
     onPositionTool: () => undefined,
-    onEdgeSelection: () => undefined,
+    onTopologySelection: () => undefined,
     sourceDecorationProviders: [
       booleanOperationSourceDecoration,
       edgeModificationSourceDecoration,

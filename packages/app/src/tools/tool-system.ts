@@ -56,6 +56,12 @@ export type ToolIntent =
       target: Extract<ToolArgumentEditTarget, Readonly<{kind: 'present'}>>;
     }>
   | Readonly<{
+      kind: 'argument.set';
+      parameter: string;
+      target: ToolArgumentEditTarget;
+      expression: ExpressionDraft;
+    }>
+  | Readonly<{
       kind: 'edge-operation.set';
       operation: 'fillet' | 'chamfer';
       parameter?: Readonly<{target: ParameterTarget; value: number}>;
@@ -174,6 +180,7 @@ export class ToolEngine {
     this.register(new SetParameterResolver());
     this.register(new ReplaceExpressionResolver());
     this.register(new RemoveArgumentResolver());
+    this.register(new SetArgumentResolver());
     this.register(new SetEdgeOperationResolver());
     this.register(new OffsetRelationResolver());
   }
@@ -400,6 +407,52 @@ class RemoveArgumentResolver implements ToolIntentResolver {
         toolId: context.toolId,
         baseVersion: context.baseVersion,
         summary: `Remove ${intent.parameter}`,
+        intent,
+        edits,
+        preview: {kind: 'source-edits', edits},
+      },
+    };
+  }
+}
+
+class SetArgumentResolver implements ToolIntentResolver {
+  readonly kind = 'argument.set' as const;
+
+  resolve(intent: ToolIntent, context: ResolveContext): ToolResolution {
+    if (intent.kind !== this.kind) {
+      return {
+        status: 'unsupported',
+        reason: 'The argument resolver received the wrong edit intent.',
+      };
+    }
+    const sourceRef = context.resolveSourceRef(intent.target.sourceRef);
+    if (!sourceRef) {
+      return {
+        status: 'conflict',
+        reason: 'The argument no longer maps to the current source.',
+      };
+    }
+    let expression: string;
+    try {
+      expression = renderExpression(intent.expression);
+    } catch (error) {
+      return {
+        status: 'unsupported',
+        reason: error instanceof Error ? error.message : String(error),
+      };
+    }
+    const expectedText = context.readSource(sourceRef);
+    const text =
+      intent.target.kind === 'omitted' && intent.target.needsComma
+        ? `, ${expression}`
+        : expression;
+    const edits: readonly SourceTextEdit[] = [{sourceRef, expectedText, text}];
+    return {
+      status: 'ready',
+      plan: {
+        toolId: context.toolId,
+        baseVersion: context.baseVersion,
+        summary: `Set ${intent.parameter}`,
         intent,
         edits,
         preview: {kind: 'source-edits', edits},

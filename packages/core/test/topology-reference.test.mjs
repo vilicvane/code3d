@@ -28,10 +28,7 @@ test('resolves stable edge and surface references', () => {
     const baseSnapshot = base.toSnapshot();
     const scaledSnapshot = scaled.toSnapshot();
     const roundedSnapshot = rounded.toSnapshot();
-    assert.deepEqual(
-      topologyIds(scaledSnapshot),
-      topologyIds(baseSnapshot),
-    );
+    assert.deepEqual(topologyIds(scaledSnapshot), topologyIds(baseSnapshot));
     assert.deepEqual(surfaceIds(baseSnapshot), [1, 2, 3, 4, 5, 6]);
     assert.ok(surfaceIds(roundedSnapshot).some(id => id > 6));
   } finally {

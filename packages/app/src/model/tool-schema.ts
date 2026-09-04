@@ -8,7 +8,9 @@ import {
 } from '../monaco/injected-packages';
 import {normalizeProjectPath, type ModelProject} from '../project/project';
 
-export type ToolParameterKind = ParameterKind | 'edge';
+export type ToolSelectionKind = 'edge' | 'surface';
+
+export type ToolParameterKind = ParameterKind | ToolSelectionKind;
 
 export type ToolParameterAction = Readonly<{
   action: 'remove-argument';
@@ -22,15 +24,28 @@ export type ToolParameterConstraints = Readonly<{
   exclusiveMax?: number;
 }>;
 
-export type ToolParameterSchema = Readonly<{
+type ToolParameterSchemaBase = Readonly<{
   index: number;
   name: string;
   optional: boolean;
-  kind: ToolParameterKind;
   label: string;
-  constraints?: ToolParameterConstraints;
   actions: readonly ToolParameterAction[];
 }>;
+
+export type ToolValueParameterSchema = ToolParameterSchemaBase &
+  Readonly<{
+    kind: ParameterKind;
+    constraints?: ToolParameterConstraints;
+  }>;
+
+export type ToolSelectionParameterSchema = ToolParameterSchemaBase &
+  Readonly<{
+    kind: ToolSelectionKind;
+    multiple: boolean;
+  }>;
+
+export type ToolParameterSchema =
+  ToolValueParameterSchema | ToolSelectionParameterSchema;
 
 export type ToolSignatureSchema = Readonly<{
   id: string;
@@ -64,8 +79,16 @@ const toolParameterKinds = new Set<ToolParameterKind>([
   'angle',
   'ratio',
   'count',
+  'scalar',
   'edge',
+  'surface',
 ]);
+
+export function isToolSelectionParameter(
+  parameter: ToolParameterSchema,
+): parameter is ToolSelectionParameterSchema {
+  return parameter.kind === 'edge' || parameter.kind === 'surface';
+}
 
 export function resolveProjectToolCalls(
   project: ModelProject,
@@ -137,24 +160,37 @@ export function resolveProjectToolCalls(
     const path = normalizeProjectPath(file.path);
     const sourceFile = program.getSourceFile(path);
     if (!sourceFile) continue;
+    // TypeScript 6 can cache a recovery signature and omit its overload error
+    // if semantic diagnostics are requested after getResolvedSignature().
+    const semanticDiagnostics = program.getSemanticDiagnostics(sourceFile);
     const calls = new Map<string, ToolSignatureSchema>();
     const visit = (node: ts.Node): void => {
       if (ts.isCallExpression(node)) {
-        const declaration = checker
-          .getResolvedSignature(node)
-          ?.getDeclaration();
-        if (declaration) {
-          let schema = declarationSchemas.get(declaration);
-          if (!declarationSchemas.has(declaration)) {
-            schema = toolSignatureSchema(declaration);
-            declarationSchemas.set(declaration, schema);
+        const candidates: ts.Signature[] = [];
+        const resolved = checker.getResolvedSignature(node, candidates);
+        const resolvedSchema = signatureToolSchema(
+          resolved,
+          declarationSchemas,
+        );
+        let schema = resolvedSchema;
+        if (!schema) {
+          const recoverySchema = candidates
+            .map(candidate =>
+              signatureToolSchema(candidate, declarationSchemas),
+            )
+            .find(candidate => candidate !== undefined);
+          if (
+            recoverySchema &&
+            hasCallSignatureError(node, semanticDiagnostics)
+          ) {
+            schema = recoverySchema;
           }
-          if (schema) {
-            calls.set(
-              toolCallKey(node.getStart(sourceFile), node.getEnd()),
-              schema,
-            );
-          }
+        }
+        if (schema) {
+          calls.set(
+            toolCallKey(node.getStart(sourceFile), node.getEnd()),
+            schema,
+          );
         }
       }
       ts.forEachChild(node, visit);
@@ -163,6 +199,52 @@ export function resolveProjectToolCalls(
     result.set(path, calls);
   }
   return result;
+}
+
+const callSignatureDiagnosticCodes = new Set([
+  2345, // Argument of type ... is not assignable ...
+  2554, // Expected ... arguments, but got ...
+  2555, // Expected at least ... arguments, but got ...
+  2556, // A spread argument must have a tuple type or target a rest parameter.
+  2575, // No overload expects ... arguments.
+  2769, // No overload matches this call.
+]);
+
+function hasCallSignatureError(
+  call: ts.CallExpression,
+  diagnostics: readonly ts.Diagnostic[],
+): boolean {
+  return diagnostics.some(
+    diagnostic =>
+      callSignatureDiagnosticCodes.has(diagnostic.code) &&
+      diagnostic.start !== undefined &&
+      diagnosticBelongsToCall(diagnostic, call),
+  );
+}
+
+function diagnosticBelongsToCall(
+  diagnostic: ts.Diagnostic,
+  call: ts.CallExpression,
+): boolean {
+  const start = diagnostic.start;
+  if (start === undefined) return false;
+  const end = start + Math.max(diagnostic.length ?? 0, 1);
+  const sourceFile = call.getSourceFile();
+  return [call.expression, ...call.arguments].some(node => {
+    return node.getStart(sourceFile) <= start && end <= node.getEnd();
+  });
+}
+
+function signatureToolSchema(
+  signature: ts.Signature | undefined,
+  schemas: Map<ts.SignatureDeclaration, ToolSignatureSchema | undefined>,
+): ToolSignatureSchema | undefined {
+  const declaration = signature?.getDeclaration();
+  if (!declaration) return undefined;
+  if (!schemas.has(declaration)) {
+    schemas.set(declaration, toolSignatureSchema(declaration));
+  }
+  return schemas.get(declaration);
 }
 
 export function toolCallKey(start: number, end: number): string {
@@ -217,26 +299,43 @@ function toolSignatureSchema(
         `@code3d.param ${parameterName} label must be a string.`,
       );
     }
-    return {
+    const constraints = parseConstraints(
+      config.constraints,
+      declaration,
+      parameterName,
+    );
+    const common = {
       index,
       name: parameterName,
       optional: Boolean(parameter.questionToken || parameter.initializer),
-      kind: kind as ToolParameterKind,
       label:
         typeof config.label === 'string'
           ? config.label
           : humanizeIdentifier(parameterName),
-      constraints: parseConstraints(
-        config.constraints,
-        declaration,
-        parameterName,
-      ),
       actions: parseParameterActions(
         config.actions,
         declaration,
         parameterName,
       ),
-    } satisfies ToolParameterSchema;
+    } as const;
+    if (kind === 'edge' || kind === 'surface') {
+      if (constraints) {
+        throw toolSchemaError(
+          declaration,
+          `@code3d.param ${parameterName} selection does not accept numeric constraints.`,
+        );
+      }
+      return {
+        ...common,
+        kind,
+        multiple: parameterAcceptsArray(parameter),
+      } satisfies ToolSelectionParameterSchema;
+    }
+    return {
+      ...common,
+      kind: kind as ParameterKind,
+      constraints,
+    } satisfies ToolValueParameterSchema;
   });
   const duplicate = parameters.find(
     (parameter, index) =>
@@ -264,6 +363,23 @@ function code3dTag(tag: ts.JSDocTag, name: string): string[] {
   return comment.startsWith(prefix) && /\s/.test(comment[prefix.length] ?? '')
     ? [comment.slice(prefix.length).trim()]
     : [];
+}
+
+function parameterAcceptsArray(parameter: ts.ParameterDeclaration): boolean {
+  const inspect = (type: ts.TypeNode | undefined): boolean => {
+    if (!type) return false;
+    if (ts.isArrayTypeNode(type)) return true;
+    if (ts.isParenthesizedTypeNode(type) || ts.isTypeOperatorNode(type)) {
+      return inspect(type.type);
+    }
+    if (ts.isUnionTypeNode(type)) return type.types.some(inspect);
+    return (
+      ts.isTypeReferenceNode(type) &&
+      ts.isIdentifier(type.typeName) &&
+      (type.typeName.text === 'Array' || type.typeName.text === 'ReadonlyArray')
+    );
+  };
+  return inspect(parameter.type);
 }
 
 function jsDocComment(comment: ts.JSDocTag['comment']): string {

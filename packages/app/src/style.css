@@ -669,7 +669,7 @@ kbd {
   outline: none;
 }
 
-.viewport-canvas.edge-selection-active {
+.viewport-canvas.topology-selection-active {
   cursor: crosshair;
 }
 

@@ -8,6 +8,7 @@ import type {
   SourceTarget,
   SourceTargetEvaluation,
 } from './model/compiler';
+import type {ToolSelectionKind} from './model/tool-schema';
 import type {
   EdgeId,
   ModelOperationInputRole,
@@ -90,30 +91,34 @@ export type ModelViewportOptions = Readonly<{
   onDrillDown: (node: ModelSnapshotObject) => void;
   onNavigateSource: (sourceRef: SourceRef) => void;
   onPositionTool: (event: PositionGizmoEvent) => void;
-  onEdgeSelection: (event: EdgeSelectionEvent) => void;
+  onTopologySelection: (event: TopologySelectionEvent) => void;
   sourceDecorationProviders?: readonly SourceDecorationProvider[];
 }>;
 
-export type EdgeSelectionEvent =
+export type TopologySelectionEvent =
   | Readonly<{
       kind: 'hover';
-      edgeId?: EdgeId;
-      selectedEdgeIds: readonly EdgeId[];
+      topology: ToolSelectionKind;
+      id?: number;
+      selectedIds: readonly number[];
     }>
   | Readonly<{
       kind: 'change';
-      edgeId: EdgeId;
-      selectedEdgeIds: readonly EdgeId[];
+      topology: ToolSelectionKind;
+      id: number;
+      selectedIds: readonly number[];
     }>
   | Readonly<{kind: 'cancel'}>;
 
-type EdgeSelectionState = {
+type TopologySelectionState = {
+  kind: ToolSelectionKind;
+  multiple: boolean;
   occurrenceKey: string;
   mesh: RenderMesh;
   guide: THREE.Group;
-  pickObject: THREE.LineSegments;
-  selectedEdgeIds: Set<EdgeId>;
-  hoveredEdgeId?: EdgeId;
+  pickObject: THREE.Object3D;
+  selectedIds: Set<number>;
+  hoveredId?: number;
 };
 
 const boxCornerPairs = [
@@ -242,12 +247,12 @@ export class ModelViewport {
   private readonly onSelect: ModelViewportOptions['onSelect'];
   private readonly onDrillDown: ModelViewportOptions['onDrillDown'];
   private readonly onNavigateSource: ModelViewportOptions['onNavigateSource'];
-  private readonly onEdgeSelection: ModelViewportOptions['onEdgeSelection'];
+  private readonly onTopologySelection: ModelViewportOptions['onTopologySelection'];
   private readonly sourceDecorationProviders: readonly SourceDecorationProvider[];
   private readonly impactHelpers: CornerBoxHelper[] = [];
   private selectionHelper: CornerBoxHelper | null = null;
-  private edgeSelection?: EdgeSelectionState;
-  private edgeSelectionOverlay?: THREE.Group;
+  private topologySelection?: TopologySelectionState;
+  private topologySelectionOverlay?: THREE.Group;
   private highlightedTargetId?: string;
   private highlightedOccurrenceKeys = new Set<string>();
   private selectionEmphasized = true;
@@ -266,14 +271,14 @@ export class ModelViewport {
       onDrillDown,
       onNavigateSource,
       onPositionTool,
-      onEdgeSelection,
+      onTopologySelection,
       sourceDecorationProviders = [],
     }: ModelViewportOptions,
   ) {
     this.onSelect = onSelect;
     this.onDrillDown = onDrillDown;
     this.onNavigateSource = onNavigateSource;
-    this.onEdgeSelection = onEdgeSelection;
+    this.onTopologySelection = onTopologySelection;
     this.sourceDecorationProviders = sourceDecorationProviders;
     this.rendering = new ModelRenderer(this.container);
     this.scene = this.rendering.scene;
@@ -309,7 +314,7 @@ export class ModelViewport {
       this.cancelSelectionGesture(event),
     );
     this.renderer.domElement.addEventListener('pointerleave', () =>
-      this.updateEdgeHover(undefined),
+      this.updateTopologyHover(undefined),
     );
 
     new ResizeObserver(() => this.resize()).observe(this.container);
@@ -533,11 +538,13 @@ export class ModelViewport {
     return this.occurrences.get(this.selectedKey);
   }
 
-  beginEdgeSelection(
+  beginTopologySelection(
     occurrenceKey: string,
     inputNodeId: string,
-    initialEdgeIds: readonly EdgeId[] = [],
-  ): readonly EdgeId[] {
+    kind: ToolSelectionKind,
+    multiple: boolean,
+    initialIds: readonly number[] = [],
+  ): readonly number[] {
     const occurrence = this.occurrences.get(occurrenceKey);
     const input = this.module?.objects.get(inputNodeId);
     if (
@@ -545,41 +552,47 @@ export class ModelViewport {
       input?.kind !== 'solid' ||
       !input.mesh
     ) {
-      throw new Error('Edge selection requires an operation input solid.');
+      throw new Error('Topology selection requires a solid model.');
     }
-    const edgeIds = uniqueEdgeIds(input.mesh);
-    if (edgeIds.length === 0) {
-      throw new Error('The operation input has no selectable edges.');
+    const availableIds = topologyIds(input.mesh, kind);
+    if (availableIds.length === 0) {
+      throw new Error(`The model has no selectable ${kind}s.`);
     }
-    this.clearEdgeSelection();
-    const {guide, pickObject} = createEdgeSelectionGuide(input, input.mesh);
+    this.clearTopologySelection();
+    const {guide, pickObject} = createTopologySelectionGuide(
+      input,
+      input.mesh,
+      kind,
+    );
     this.decorationRoot.add(guide);
-    this.edgeSelection = {
+    this.topologySelection = {
+      kind,
+      multiple,
       occurrenceKey,
       mesh: input.mesh,
       guide,
       pickObject,
-      selectedEdgeIds: new Set(initialEdgeIds),
+      selectedIds: new Set(initialIds),
     };
-    this.raycaster.params.Line.threshold = 1.5;
-    this.renderer.domElement.classList.add('edge-selection-active');
+    this.raycaster.params.Line.threshold = kind === 'edge' ? 1.5 : 1;
+    this.renderer.domElement.classList.add('topology-selection-active');
     this.rebuildSelectionHelper();
     this.updatePositionGizmo();
-    this.rebuildEdgeSelectionOverlay();
-    return edgeIds;
+    this.rebuildTopologySelectionOverlay();
+    return availableIds;
   }
 
-  endEdgeSelection(): void {
-    this.clearEdgeSelection();
+  endTopologySelection(): void {
+    this.clearTopologySelection();
     this.rebuildSelectionHelper();
     this.updatePositionGizmo();
   }
 
-  setSelectedEdges(edgeIds: readonly EdgeId[]): void {
-    if (!this.edgeSelection) return;
-    this.edgeSelection.selectedEdgeIds = new Set(edgeIds);
-    this.edgeSelection.hoveredEdgeId = undefined;
-    this.rebuildEdgeSelectionOverlay();
+  setSelectedTopologyIds(ids: readonly number[]): void {
+    if (!this.topologySelection) return;
+    this.topologySelection.selectedIds = new Set(ids);
+    this.topologySelection.hoveredId = undefined;
+    this.rebuildTopologySelectionOverlay();
   }
 
   hasRelativePositionContext(): boolean {
@@ -1019,9 +1032,9 @@ export class ModelViewport {
   }
 
   private resetRenderedView(): void {
-    if (this.edgeSelection) {
-      this.clearEdgeSelection();
-      this.onEdgeSelection({kind: 'cancel'});
+    if (this.topologySelection) {
+      this.clearTopologySelection();
+      this.onTopologySelection({kind: 'cancel'});
     }
     this.positionGizmo.detach();
     this.clearImpactHelpers();
@@ -1062,7 +1075,7 @@ export class ModelViewport {
     }
 
     const occurrence = this.getSelected();
-    if (!occurrence || !this.selectionEmphasized || this.edgeSelection) {
+    if (!occurrence || !this.selectionEmphasized || this.topologySelection) {
       return;
     }
     this.selectionHelper = new CornerBoxHelper(
@@ -1077,7 +1090,7 @@ export class ModelViewport {
   private updatePositionGizmo(): void {
     const occurrence = this.getSelected();
     if (
-      this.edgeSelection ||
+      this.topologySelection ||
       !occurrence ||
       occurrence.depth === 0 ||
       !this.hasRelativePositionContext()
@@ -1192,7 +1205,7 @@ export class ModelViewport {
   }
 
   private updateSelectionGesture(event: PointerEvent): void {
-    this.updateEdgeHover(this.pickEdge(event));
+    this.updateTopologyHover(this.pickTopology(event));
     const gesture = this.selectionGesture;
     if (!gesture || gesture.pointerId !== event.pointerId || gesture.moved) {
       return;
@@ -1216,9 +1229,9 @@ export class ModelViewport {
       this.selectionClick = undefined;
       return;
     }
-    if (this.edgeSelection) {
-      const edgeId = this.pickEdge(event);
-      if (edgeId !== undefined) this.toggleEdgeSelection(edgeId);
+    if (this.topologySelection) {
+      const id = this.pickTopology(event);
+      if (id !== undefined) this.selectTopology(id);
       this.selectionClick = undefined;
       return;
     }
@@ -1281,104 +1294,91 @@ export class ModelViewport {
     }
   }
 
-  private toggleEdgeSelection(edgeId: EdgeId): void {
-    const selection = this.edgeSelection;
+  private selectTopology(id: number): void {
+    const selection = this.topologySelection;
     if (!selection) return;
-    if (selection.selectedEdgeIds.has(edgeId)) {
-      selection.selectedEdgeIds.delete(edgeId);
+    if (selection.multiple && selection.selectedIds.has(id)) {
+      selection.selectedIds.delete(id);
     } else {
-      selection.selectedEdgeIds.add(edgeId);
+      if (!selection.multiple) selection.selectedIds.clear();
+      selection.selectedIds.add(id);
     }
-    this.rebuildEdgeSelectionOverlay();
-    this.onEdgeSelection({
+    this.rebuildTopologySelectionOverlay();
+    this.onTopologySelection({
       kind: 'change',
-      edgeId,
-      selectedEdgeIds: selectedEdgeIds(selection),
+      topology: selection.kind,
+      id,
+      selectedIds: selectedTopologyIds(selection),
     });
   }
 
-  private updateEdgeHover(edgeId: EdgeId | undefined): void {
-    const selection = this.edgeSelection;
-    if (!selection || selection.hoveredEdgeId === edgeId) return;
-    selection.hoveredEdgeId = edgeId;
-    this.rebuildEdgeSelectionOverlay();
-    this.onEdgeSelection({
+  private updateTopologyHover(id: number | undefined): void {
+    const selection = this.topologySelection;
+    if (!selection || selection.hoveredId === id) return;
+    selection.hoveredId = id;
+    this.rebuildTopologySelectionOverlay();
+    this.onTopologySelection({
       kind: 'hover',
-      edgeId,
-      selectedEdgeIds: selectedEdgeIds(selection),
+      topology: selection.kind,
+      id,
+      selectedIds: selectedTopologyIds(selection),
     });
   }
 
-  private rebuildEdgeSelectionOverlay(): void {
-    this.clearEdgeSelectionOverlay();
-    const selection = this.edgeSelection;
+  private rebuildTopologySelectionOverlay(): void {
+    this.clearTopologySelectionOverlay();
+    const selection = this.topologySelection;
     if (!selection) return;
 
     const overlay = new THREE.Group();
-    const selectedPositions = edgeSelectionPositions(
+    const selected = createTopologyHighlight(
       selection.mesh,
-      selection.selectedEdgeIds,
+      selection.kind,
+      selection.selectedIds,
+      '#d8ff3e',
+      31,
     );
-    if (selectedPositions) {
-      overlay.add(
-        createScreenSpaceEdgeLines(
-          selectedPositions,
-          '#d8ff3e',
-          interactiveLineWidth,
-          1,
-          false,
-          31,
-        ),
-      );
-    }
-    if (selection.hoveredEdgeId !== undefined) {
-      const hoverPositions = edgeSelectionPositions(
+    if (selected) overlay.add(selected);
+    if (selection.hoveredId !== undefined) {
+      const hovered = createTopologyHighlight(
         selection.mesh,
-        new Set([selection.hoveredEdgeId]),
+        selection.kind,
+        new Set([selection.hoveredId]),
+        '#ffad66',
+        33,
       );
-      if (hoverPositions) {
-        overlay.add(
-          createScreenSpaceEdgeLines(
-            hoverPositions,
-            '#ffad66',
-            interactiveLineWidth,
-            1,
-            false,
-            33,
-          ),
-        );
-      }
+      if (hovered) overlay.add(hovered);
     }
     selection.guide.add(overlay);
-    this.edgeSelectionOverlay = overlay;
+    this.topologySelectionOverlay = overlay;
   }
 
-  private clearEdgeSelection(): void {
-    this.clearEdgeSelectionOverlay();
-    if (this.edgeSelection) {
-      this.edgeSelection.guide.removeFromParent();
-      disposeObject(this.edgeSelection.guide);
+  private clearTopologySelection(): void {
+    this.clearTopologySelectionOverlay();
+    if (this.topologySelection) {
+      this.topologySelection.guide.removeFromParent();
+      disposeObject(this.topologySelection.guide);
     }
-    this.edgeSelection = undefined;
+    this.topologySelection = undefined;
     this.raycaster.params.Line.threshold = 1;
-    this.renderer.domElement.classList.remove('edge-selection-active');
+    this.renderer.domElement.classList.remove('topology-selection-active');
   }
 
-  private clearEdgeSelectionOverlay(): void {
-    if (!this.edgeSelectionOverlay) return;
-    this.edgeSelectionOverlay.removeFromParent();
-    disposeObject(this.edgeSelectionOverlay);
-    this.edgeSelectionOverlay = undefined;
+  private clearTopologySelectionOverlay(): void {
+    if (!this.topologySelectionOverlay) return;
+    this.topologySelectionOverlay.removeFromParent();
+    disposeObject(this.topologySelectionOverlay);
+    this.topologySelectionOverlay = undefined;
   }
 
-  private pickEdge(event: PointerEvent): EdgeId | undefined {
-    const selection = this.edgeSelection;
+  private pickTopology(event: PointerEvent): number | undefined {
+    const selection = this.topologySelection;
     if (!selection) return undefined;
     this.prepareRaycaster(event);
     const hits = this.raycaster.intersectObject(selection.pickObject);
     for (const hit of hits) {
-      const edgeId = edgeIdFromIntersection(hit);
-      if (edgeId !== undefined) return edgeId;
+      const id = topologyIdFromIntersection(hit, selection.kind);
+      if (id !== undefined) return id;
     }
     return undefined;
   }
@@ -1698,7 +1698,9 @@ function latestRuntimeOrder(target: SourceTarget): number {
 }
 
 function sourceTargetPriority(target: SourceTarget): number {
+  if (target.kind === 'topology-selection') return -3;
   if (target.kind === 'operation-selection') return -2;
+  if (target.kind === 'tool') return -1;
   if (target.kind === 'element') return -1;
   if (target.kind === 'constraint') return 0;
   if (target.kind === 'operation-input') return 1;
@@ -1780,17 +1782,26 @@ function axisIndex(argument: string): 0 | 1 | 2 | undefined {
   return undefined;
 }
 
-function createEdgeSelectionGuide(
+function createTopologySelectionGuide(
   node: ModelSnapshotObject,
   mesh: RenderMesh,
-): Readonly<{guide: THREE.Group; pickObject: THREE.LineSegments}> {
+  kind: ToolSelectionKind,
+): Readonly<{guide: THREE.Group; pickObject: THREE.Object3D}> {
   const guide = new THREE.Group();
-  guide.name = `${node.name} (selectable input edges)`;
+  guide.name = `${node.name} (selectable ${kind}s)`;
   applyNodeTransform(guide, node);
-  const geometry = createEdgeGeometry(mesh);
-  if (!geometry) {
-    throw new Error('The operation input has no renderable edges.');
+  if (kind === 'surface') {
+    const pickObject = new THREE.Mesh(
+      createSurfaceGeometry(mesh),
+      new THREE.MeshBasicMaterial({visible: false, side: THREE.DoubleSide}),
+    );
+    pickObject.userData.surfaceGroups = mesh.surfaceGroups;
+    guide.add(pickObject);
+    return {guide, pickObject};
   }
+
+  const geometry = createEdgeGeometry(mesh);
+  if (!geometry) throw new Error('The model has no renderable edges.');
   const pickObject = new THREE.LineSegments(
     geometry,
     new THREE.LineBasicMaterial({visible: false}),
@@ -2158,17 +2169,85 @@ function edgeSelectionPositions(
   return positions;
 }
 
-function uniqueEdgeIds(mesh: RenderMesh): EdgeId[] {
-  return [...new Set(mesh.edgeGroups.map(group => group.edgeId))].sort(
-    (left, right) => left - right,
+function createTopologyHighlight(
+  mesh: RenderMesh,
+  kind: ToolSelectionKind,
+  ids: ReadonlySet<number>,
+  color: string,
+  renderOrder: number,
+): THREE.Object3D | undefined {
+  if (kind === 'edge') {
+    const positions = edgeSelectionPositions(mesh, ids);
+    return positions
+      ? createScreenSpaceEdgeLines(
+          positions,
+          color,
+          interactiveLineWidth,
+          1,
+          false,
+          renderOrder,
+        )
+      : undefined;
+  }
+  const groups = mesh.surfaceGroups.filter(group => ids.has(group.surfaceId));
+  if (groups.length === 0) return undefined;
+  const triangles = new Uint32Array(
+    groups.flatMap(group => [
+      ...mesh.triangles.slice(group.start, group.start + group.count),
+    ]),
   );
+  const surface = new THREE.Mesh(
+    createSurfaceGeometry({
+      vertices: mesh.vertices,
+      normals: mesh.normals,
+      triangles,
+      edges: new Float32Array(),
+      surfaceGroups: [],
+      edgeGroups: [],
+    }),
+    new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.52,
+      depthTest: false,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      toneMapped: false,
+    }),
+  );
+  surface.renderOrder = renderOrder;
+  return surface;
 }
 
-function selectedEdgeIds(selection: EdgeSelectionState): EdgeId[] {
-  return [...selection.selectedEdgeIds].sort((left, right) => left - right);
+function topologyIds(mesh: RenderMesh, kind: ToolSelectionKind): number[] {
+  const ids =
+    kind === 'edge'
+      ? mesh.edgeGroups.map(group => group.edgeId)
+      : mesh.surfaceGroups.map(group => group.surfaceId);
+  return [...new Set(ids)].sort((left, right) => left - right);
 }
 
-function edgeIdFromIntersection(hit: THREE.Intersection): EdgeId | undefined {
+function selectedTopologyIds(selection: TopologySelectionState): number[] {
+  return [...selection.selectedIds].sort((left, right) => left - right);
+}
+
+function topologyIdFromIntersection(
+  hit: THREE.Intersection,
+  kind: ToolSelectionKind,
+): number | undefined {
+  if (kind === 'surface') {
+    if (!(hit.object instanceof THREE.Mesh) || hit.faceIndex == null) {
+      return undefined;
+    }
+    const groups = hit.object.userData.surfaceGroups as
+      RenderMesh['surfaceGroups'] | undefined;
+    const triangleStart = hit.faceIndex * 3;
+    return groups?.find(
+      group =>
+        group.start <= triangleStart &&
+        triangleStart < group.start + group.count,
+    )?.surfaceId;
+  }
   if (!(hit.object instanceof THREE.LineSegments) || hit.index === undefined) {
     return undefined;
   }

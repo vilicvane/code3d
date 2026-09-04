@@ -1,7 +1,7 @@
 export type ContextualToolParameterView = Readonly<{
   name: string;
   label: string;
-  value: number;
+  value?: number;
   unit?: string;
   step: number;
   min?: number;
@@ -186,7 +186,10 @@ export class ContextualToolPanel {
       String(parameter.invalid ?? false),
     );
     if (forceValue || document.activeElement !== control.input) {
-      control.input.value = formatDisplayNumber(parameter.value);
+      control.input.value =
+        parameter.value === undefined
+          ? ''
+          : formatDisplayNumber(parameter.value);
     }
     control.unit.textContent = parameter.unit ?? '';
     control.unit.hidden = !parameter.unit;

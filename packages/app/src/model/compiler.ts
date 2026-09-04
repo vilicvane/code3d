@@ -10,6 +10,7 @@ import {
   isConstraint,
   isModelObject,
   modelElementReference,
+  modelTopologyReference,
   type Constraint,
   type EdgeId,
   type ElementKind,
@@ -27,10 +28,13 @@ import * as screwApi from '@code3d/screws';
 import {code3dAnnotations} from './annotations';
 import {designArgumentAnnotationSites} from './design-functions';
 import {
+  isToolSelectionParameter,
   resolveProjectToolCalls,
   toolCallKey,
   type ToolCallSchemaMap,
   type ToolArgumentSource,
+  type ToolSelectionParameterSchema,
+  type ToolSelectionKind,
   type ToolSignatureSchema,
 } from './tool-schema';
 import {
@@ -64,11 +68,17 @@ export type SourceTargetEvaluation = Readonly<{
     name: string;
     kind: ElementKind;
   }>;
-  selection?: Readonly<{
-    kind: 'edge';
-    inputNodeId: string;
-    ids: readonly EdgeId[];
-  }>;
+  selection?:
+    | Readonly<{
+        kind: 'edges';
+        inputNodeId: string;
+        ids: readonly EdgeId[];
+      }>
+    | Readonly<{
+        kind: ToolSelectionKind;
+        inputNodeId: string;
+        id?: number;
+      }>;
 }>;
 
 export type RuntimeReach = Readonly<{
@@ -91,6 +101,8 @@ export type SourceTarget = Readonly<{
     | 'value'
     | 'constraint'
     | 'element'
+    | 'tool'
+    | 'topology-selection'
     | 'operation-input'
     | 'operation-output'
     | 'operation-selection';
@@ -100,6 +112,7 @@ export type SourceTarget = Readonly<{
   evaluations: readonly SourceTargetEvaluation[];
   contextTargetIds: readonly string[];
   tool?: Readonly<{
+    callId: string;
     signature: ToolSignatureSchema;
     arguments: readonly ToolArgumentSource[];
   }>;
@@ -306,6 +319,7 @@ type SourceExecutionTrace = {
   order: number;
   parameters: readonly ParameterUsage[];
   arguments: Map<number, unknown>;
+  receiver?: unknown;
   inputs: SourceInputTrace[];
   failure?: ModelDiagnostic;
 };
@@ -550,6 +564,17 @@ const traceRuntime = Object.freeze({
     return value;
   },
 
+  receiver<T>(siteId: string, value: T): T {
+    const executionTrace = traceFrames.at(-1)?.trace;
+    if (executionTrace?.siteId === siteId) {
+      executionTrace.receiver = value;
+      const reference = modelTopologyReference(value);
+      const model = isModelObject(value) ? value : reference?.model;
+      if (model) tracedObjects.add(model);
+    }
+    return value;
+  },
+
   element<T>(
     file: string,
     start: number,
@@ -744,6 +769,8 @@ function modelObjectsIn(
   if (isModelObject(value)) {
     return [value];
   }
+  const topology = modelTopologyReference(value);
+  if (topology) return [topology.model];
   if (typeof value !== 'object' || value === null || seen.has(value)) {
     return [];
   }
@@ -1069,10 +1096,7 @@ export function compileProject(
       modelExports.get('default') ??
       [...modelExports.values()].at(-1) ??
       latestTracedObject;
-    if (!fallbackObject && diagnostic) {
-      throw new ModelDiagnosticError(diagnostic);
-    }
-    if (!fallbackObject && designArguments.length === 0) {
+    if (!fallbackObject && !diagnostic && designArguments.length === 0) {
       throw new Error(
         'The current program did not produce a renderable ModelObject.',
       );
@@ -1319,9 +1343,10 @@ function relateDiagnosticToFallback(
   if (diagnostic.kind !== 'evaluation') return diagnostic;
   const failureInputs = [...sourceExecutionTraces.values()]
     .filter(execution => execution.failure === diagnostic)
-    .flatMap(execution =>
-      execution.inputs.flatMap(input => input.objects),
-    );
+    .flatMap(execution => [
+      ...execution.inputs.flatMap(input => input.objects),
+      ...modelObjectsIn(execution.receiver),
+    ]);
   if (failureInputs.length === 0) return diagnostic;
   const fallbackNodeIds = new Set(
     collectObjectGraph([fallback]).map(object => object.nodeId),
@@ -1456,7 +1481,7 @@ function buildSourceTargets(
               operationId: operation.id,
               contextId: trace.contextId,
               selection: {
-                kind: 'edge',
+                kind: 'edges',
                 inputNodeId: selection.inputNodeId,
                 ids: selection.ids,
               },
@@ -1475,7 +1500,7 @@ function buildSourceTargets(
             parameters: execution.parameters,
             contextId: execution.contextId,
             selection: {
-              kind: 'edge',
+              kind: 'edges',
               inputNodeId: input.nodeId,
               ids: validAttemptedEdgeIds(
                 inputSnapshot,
@@ -1505,6 +1530,46 @@ function buildSourceTargets(
         : [];
     },
   );
+  const topologySelectionTargets = [...toolCallSites.values()].flatMap(site => {
+    const parameter = site.signature.parameters.find(
+      (candidate): candidate is ToolSelectionParameterSchema =>
+        isToolSelectionParameter(candidate) && !candidate.multiple,
+    );
+    if (!parameter) return [];
+    const evaluations = [...sourceExecutionTraces.values()].flatMap(
+      execution => {
+        if (execution.siteId !== site.siteId) return [];
+        const receiver = execution.receiver;
+        if (!isModelObject(receiver)) return [];
+        return [
+          {
+            runtime: sourceExecutionRuntime(execution),
+            nodeIds: [receiver.nodeId],
+            parameters: execution.parameters,
+            contextId: execution.contextId,
+            selection: {
+              kind: parameter.kind,
+              inputNodeId: receiver.nodeId,
+              id: attemptedTopologyId(execution.arguments.get(parameter.index)),
+            },
+          } satisfies SourceTargetEvaluation,
+        ];
+      },
+    );
+    return evaluations.length > 0
+      ? [
+          {
+            id: `source:topology-selection:${site.siteId}:${parameter.kind}`,
+            kind: 'topology-selection' as const,
+            sourceRef: site.sourceRef,
+            functionId: designFunctionAt(site.sourceRef, designArguments),
+            evaluations,
+            contextTargetIds: [],
+            tool: sourceTool(site),
+          } satisfies SourceTarget,
+        ]
+      : [];
+  });
   const constraintTargets = [...sourceConstraintTraces.values()].map(trace => {
     const toolSite = toolCallSites.get(trace.id);
     const evaluations = trace.evaluations.flatMap<SourceTargetEvaluation>(
@@ -1640,6 +1705,7 @@ function buildSourceTargets(
     ...elementTargets,
     ...constraintTargets,
     ...operationSelectionTargets,
+    ...topologySelectionTargets,
     ...valueTargets,
     ...operationInputTargets.map(
       target =>
@@ -1671,7 +1737,34 @@ function buildSourceTargets(
         }) satisfies SourceTarget,
     ),
   ];
-  return targets.map(target => ({
+  const fallbackToolTargets = [...toolCallSites.values()].flatMap(site => {
+    const evaluations = [...sourceExecutionTraces.values()]
+      .filter(
+        execution =>
+          execution.siteId === site.siteId &&
+          !toolExecutionIsRepresented(site, execution, targets),
+      )
+      .map(execution => ({
+        runtime: sourceExecutionRuntime(execution),
+        nodeIds: toolExecutionNodeIds(execution, objects),
+        parameters: execution.parameters,
+        contextId: execution.contextId,
+      }));
+    return evaluations.length > 0
+      ? [
+          {
+            id: `source:tool:${site.siteId}`,
+            kind: 'tool' as const,
+            sourceRef: site.sourceRef,
+            functionId: designFunctionAt(site.sourceRef, designArguments),
+            evaluations,
+            contextTargetIds: [],
+            tool: sourceTool(site),
+          } satisfies SourceTarget,
+        ]
+      : [];
+  });
+  return [...fallbackToolTargets, ...targets].map(target => ({
     ...target,
     evaluations: [...target.evaluations].sort(
       (left, right) => right.runtime.order - left.runtime.order,
@@ -1679,9 +1772,50 @@ function buildSourceTargets(
   }));
 }
 
+function toolExecutionIsRepresented(
+  site: ToolCallSite,
+  execution: SourceExecutionTrace,
+  targets: readonly SourceTarget[],
+): boolean {
+  return targets.some(
+    target =>
+      target.tool !== undefined &&
+      target.sourceRef.file === site.sourceRef.file &&
+      target.sourceRef.start === site.sourceRef.start &&
+      target.sourceRef.end === site.sourceRef.end &&
+      target.evaluations.some(
+        evaluation =>
+          evaluation.contextId === execution.contextId &&
+          evaluation.runtime.order === execution.order,
+      ),
+  );
+}
+
+function toolExecutionNodeIds(
+  execution: SourceExecutionTrace,
+  objects: ReadonlyMap<string, ModelSnapshotObject>,
+): string[] {
+  const models = [
+    ...execution.inputs.flatMap(input => input.objects),
+    ...modelObjectsIn(execution.receiver),
+    ...[...execution.arguments.values()].flatMap(value =>
+      modelObjectsIn(value),
+    ),
+  ];
+  return [
+    ...new Set(
+      models.map(model => model.nodeId).filter(nodeId => objects.has(nodeId)),
+    ),
+  ];
+}
+
 function sourceTool(site: ToolCallSite | undefined): SourceTarget['tool'] {
   return site
-    ? {signature: site.signature, arguments: site.arguments}
+    ? {
+        callId: site.siteId,
+        signature: site.signature,
+        arguments: site.arguments,
+      }
     : undefined;
 }
 
@@ -1710,6 +1844,12 @@ function attemptedEdgeIds(value: unknown): EdgeId[] {
       ),
     ),
   ];
+}
+
+function attemptedTopologyId(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1
+    ? value
+    : undefined;
 }
 
 function validAttemptedEdgeIds(
@@ -1943,7 +2083,16 @@ function createTraceTransformer(
                 factory,
               )
             : parameterizedCall;
-          const call = instrumentCallArguments(callWithInputs, siteId, factory);
+          const callWithReceiver = toolSignature?.parameters.some(
+            isToolSelectionParameter,
+          )
+            ? instrumentToolReceiver(callWithInputs, siteId, factory)
+            : callWithInputs;
+          const call = instrumentCallArguments(
+            callWithReceiver,
+            siteId,
+            factory,
+          );
 
           return traceExpression(
             call,
@@ -2044,6 +2193,37 @@ function instrumentCallArguments(
     call.expression,
     call.typeArguments,
     argumentsWithTracing,
+  );
+}
+
+function instrumentToolReceiver(
+  call: ts.CallExpression,
+  siteId: string,
+  factory: ts.NodeFactory,
+): ts.CallExpression {
+  if (!ts.isPropertyAccessExpression(call.expression)) return call;
+  const property = call.expression;
+  const receiver = factory.createCallExpression(
+    factory.createPropertyAccessExpression(
+      factory.createIdentifier('__code3d'),
+      'receiver',
+    ),
+    undefined,
+    [factory.createStringLiteral(siteId), property.expression],
+  );
+  const expression = ts.isPropertyAccessChain(property)
+    ? factory.updatePropertyAccessChain(
+        property,
+        receiver,
+        property.questionDotToken,
+        property.name,
+      )
+    : factory.updatePropertyAccessExpression(property, receiver, property.name);
+  return factory.updateCallExpression(
+    call,
+    expression,
+    call.typeArguments,
+    call.arguments,
   );
 }
 
@@ -2963,7 +3143,7 @@ function parameterSignatureFor(
     (
       parameter,
     ): parameter is typeof parameter & Readonly<{kind: ParameterKind}> =>
-      parameter.kind !== 'edge',
+      !isToolSelectionParameter(parameter),
   );
   if (numericParameters.length === 0) return undefined;
   const lastIndex = Math.max(

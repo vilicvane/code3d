@@ -51,11 +51,14 @@ silently reorder the active milestones. Closed requests move to
 - Model values have no chainable `named()` operation. Source bindings identify
   authored values; intrinsic primitive and group names remain only as runtime
   display and diagnostic fallbacks.
-- Solid edges have model-local numeric IDs. Primitive traversal assigns the
-  initial IDs; a derived value preserves strict one-to-one edge history,
-  allocates newly created or ambiguous edges above the inherited high-water
-  mark, and never reuses retired IDs. Deterministic source replay is the
-  persistence mechanism rather than a separate topology ledger.
+- Solid edges and surfaces have independent model-local numeric ID namespaces.
+  Primitive traversal assigns the initial IDs; a derived value preserves
+  strict one-to-one topology history, allocates newly created or ambiguous
+  elements above the inherited high-water mark, and never reuses retired IDs.
+  Deterministic source replay is the persistence mechanism rather than a
+  separate topology ledger. `solid.edge(id)` and `solid.surface(id)` return
+  topology references without inventing the complete frame semantics of named
+  line or face anchors.
 - A composite is broad: any connected set of occurrences and spatial relations
   is a composite, including copy, pattern, boolean operands, groups, and
   assemblies. A composite can itself be reused as geometry in a larger model.
@@ -361,12 +364,18 @@ constraint source sites do.
   panel has neither Apply nor Cancel actions.
 - Keep the contextual selection panel vertically ordered and stable under
   pointer hover; hover feedback belongs on the model rather than in moving text.
+- Let scalar `edge` and `surface` parameters select exactly one topology ID in
+  the viewport. Entering `solid.edge(id)` or `solid.surface(id)` shows the
+  receiver solid, highlights the current topology element, and writes each new
+  pick directly to the argument; a missing or retired ID remains repairable
+  from the failed call's reached receiver.
 
-Status: complete. The runtime topology namespace, edge-scoped author API,
-derivation transfer rules, render-mesh IDs, operation trace selections,
-array-driven viewport picking, before/after comparison, reversible
-selection, and source write-back are implemented. The Properties panel and
-GUI operation-insertion path were removed pending a broader interaction design.
+Status: complete. The runtime topology namespaces, edge-scoped modification
+API, scalar edge/surface reference API, derivation transfer rules, render-mesh
+IDs, operation trace selections, single- and array-selection viewport picking,
+before/after comparison, reversible selection, and source write-back are
+implemented. The Properties panel and GUI operation-insertion path were
+removed pending a broader interaction design.
 
 ### 4b. Core package and Node-native projects — active
 
@@ -424,7 +433,12 @@ choices rather than product semantics.
 - Prefer an optional trailing parameter when omission is the only alternative
   call form, as for `fillet(radius, edgeIds?)` and
   `chamfer(distance, edgeIds?)`. Retain independently annotated overloads when
-  signatures genuinely require different tool configuration.
+  signatures genuinely require different tool configuration. When an
+  incomplete call matches no overload, retain the resolved recovery candidate
+  when it is annotated; otherwise choose the first annotated candidate in
+  declaration order. Publish the reached tool call even if it fails before
+  producing a model value, show missing parameters as empty controls, and let
+  the next syntactically insertable parameter be filled from the panel.
 - Allow parameter-level and tool-level actions to evolve as separate tagged
   unions. Implement only actions required by an actual tool; edge selection's
   initial action is `{label: 'Use all', action: 'remove-argument'}` on the
@@ -450,11 +464,11 @@ boundary instead of preserving an awkward planned abstraction.
 Status: declaration parsing, overload-aware signature resolution, runtime call
 context, scalar write-back, parameter actions, and the generic contextual panel
 are implemented. Primitive constructors, `offset()`, `scaled()`, `fillet()`,
-`chamfer()`, and the scalar signatures of the screw tools use the annotation
-path. Edge picking remains a viewport provider layered into the same panel and
-undo session; object-valued parameters and further selectable parameter kinds
-will be migrated only after their concrete controls establish the next schema
-boundary.
+`chamfer()`, topology references, and the scalar signatures of the screw tools
+use the annotation path. Single edge/surface picking and multiple-edge picking
+are viewport providers layered into the same panel and undo session;
+object-valued parameters and further selectable parameter kinds will be
+migrated only after their concrete controls establish the next schema boundary.
 
 ### 5. Object combination tools
 
@@ -470,9 +484,9 @@ boundary.
 - Whether any solid-modeling use case justifies partially constrained point,
   line, plane, distance, or angle relations. General partial constraint solving
   is expected for sketching, but is not assumed to be necessary for solids.
-- How explicit numeric topology selections should be promoted into reusable
-  named point, line, and face anchors while retaining author-visible semantic
-  names.
+- Which explicit topology references, if any, should be promotable into reusable
+  named point, line, or face anchors, and how the author supplies the additional
+  frame semantics and stable semantic name that a raw edge or surface ID lacks.
 - How Boolean results expose operand anchors and provenance for later relations.
 - Whether uniform scaling is geometry derivation, occurrence placement, or two
   explicitly named operations.

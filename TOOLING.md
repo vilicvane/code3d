@@ -143,6 +143,19 @@ compiler 为每个实际进入的 call site execution 统一记录完成或失�
 失败生命周期。fillet/chamfer 因而可在操作失败时使用已求值的 receiver、实际边数组和
 尺寸参数继续工作；不可用于 receiver 的失效 ID 不进入 GUI 选择，下一次写回即可清除。
 
+带工具注释的调用即使在产生模型值之前失败，也会发布独立的 tool source target。有效调用
+严格采用 TypeScript 实际匹配的重载；没有重载可匹配时，优先保留 TypeScript 的带注释
+恢复候选，否则按声明顺序选择第一个带注释的候选。候选恢复只接受落在当前 callee 或其
+直接参数上的调用签名 diagnostic，不能因外层调用把当前表达式标成错误参数而误判。缺失
+参数在面板中显示为空，当前调用末尾能够合法追加的下一个参数可以直接填写并写回源码，
+后续参数随调用补全依次解锁。
+
+参数 schema 是按能力扩展的 tagged union。数值 `kind` 提供标量控件；`edge` 和
+`surface` 提供 topology selector，其单选或多选能力从声明参数是否为数组推导，而不是
+再写一份交互配置。`Solid.edge(id)` 和 `Solid.surface(id)` 使用单选 provider：compiler
+在调用进入时记录 receiver 和已求值参数，所以参数缺失或引用已退休拓扑而失败时仍可显示
+receiver 并修复；viewport pick 产生通用 `argument.set` intent，立即写回同一个源码事务。
+
 平移 gizmo 目前遵守以下解析规则：
 
 - 当前源码 occurrence 必须是提供相对位置语义的 operation input，或具体的

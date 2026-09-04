@@ -57,8 +57,8 @@ import {
 } from './tools/tool-system';
 import {
   ModelViewport,
-  type EdgeSelectionEvent,
   type Occurrence,
+  type TopologySelectionEvent,
 } from './viewport';
 import {DockPanelCoordinator} from './ui/dock-panels';
 import {ElementsPanel} from './ui/elements-panel';
@@ -72,9 +72,11 @@ import {
 } from './ui/contextual-tool-panel';
 import type {
   ToolArgumentSource,
-  ToolParameterSchema,
+  ToolSelectionParameterSchema,
   ToolSignatureSchema,
+  ToolValueParameterSchema,
 } from './model/tool-schema';
+import {isToolSelectionParameter} from './model/tool-schema';
 
 const directoryWorkspaceId = new URL(window.location.href).searchParams.get(
   'workspace',
@@ -255,6 +257,7 @@ let runRevision = 0;
 let positionToolSession: ToolSession | undefined;
 let positionToolInterruptedCompile = false;
 let edgeSelectionTool: EdgeSelectionTool | undefined;
+let topologyReferenceSelectionTool: TopologyReferenceSelectionTool | undefined;
 let edgeEditSession: EdgeEditSession | undefined;
 let edgeEditSessionCounter = 0;
 let contextualTool: ContextualToolState | undefined;
@@ -289,12 +292,25 @@ type EdgeEditSession = {
   historyState: 'applied' | 'undone';
 };
 type ContextualToolParameterState = {
-  schema: ToolParameterSchema;
+  schema: ToolValueParameterSchema;
   usage?: ParameterUsage;
+  argument?: ToolArgumentSource['target'];
   value?: number;
   editable: boolean;
 };
+type TopologyReferenceSelectionTool = {
+  targetId: string;
+  evaluationIndex: number;
+  sourceFile: string;
+  parameter: ToolSelectionParameterSchema;
+  argument: ToolArgumentSource['target'];
+  occurrenceKey: string;
+  availableIds: readonly number[];
+  selectedId?: number;
+};
 type ContextualToolState = {
+  callId: string;
+  contextId: string;
   targetId: string;
   evaluationIndex: number;
   sourceFile: string;
@@ -328,7 +344,7 @@ const viewport = new ModelViewport(viewportHost, {
     codeEditor.revealSource(sourceRef);
   },
   onPositionTool: handlePositionTool,
-  onEdgeSelection: handleEdgeSelection,
+  onTopologySelection: handleTopologySelection,
   sourceDecorationProviders: [
     booleanOperationSourceDecoration,
     edgeModificationSourceDecoration,
@@ -1252,8 +1268,10 @@ function syncContextualTool(sourceTargetFocused = true): void {
   const continuesPrevious =
     previous !== undefined &&
     scope !== undefined &&
-    previous.targetId === scope.target.id &&
-    previous.evaluationIndex === scope.evaluationIndex;
+    scope.target.tool !== undefined &&
+    previous.callId === scope.target.tool.callId &&
+    previous.contextId === scope.evaluation.contextId &&
+    previous.signature.id === scope.target.tool.signature.id;
   if (currentModuleSourceVersion !== codeEditor.sourceVersion()) {
     if (previous && !continuesPrevious) finishContextualTool();
     return;
@@ -1267,6 +1285,7 @@ function syncContextualTool(sourceTargetFocused = true): void {
   if (previous && !continuesPrevious) finishContextualTool();
   const parameters = contextualToolParameters(
     sourceTool.signature,
+    sourceTool.arguments,
     scope.target.sourceRef,
     scope.evaluation.parameters ?? [],
   );
@@ -1288,6 +1307,8 @@ function syncContextualTool(sourceTargetFocused = true): void {
     });
   }
   contextualTool = {
+    callId: sourceTool.callId,
+    contextId: scope.evaluation.contextId,
     targetId: scope.target.id,
     evaluationIndex: scope.evaluationIndex,
     sourceFile: scope.target.sourceRef.file,
@@ -1298,7 +1319,7 @@ function syncContextualTool(sourceTargetFocused = true): void {
     parameters,
     undoGroup: continuesPrevious
       ? previous.undoGroup
-      : `contextual-tool:${scope.target.id}:${++contextualToolCounter}`,
+      : `contextual-tool:${sourceTool.callId}:${scope.evaluation.contextId}:${++contextualToolCounter}`,
     baselineValues,
     appliedValues,
     removedArguments,
@@ -1306,7 +1327,7 @@ function syncContextualTool(sourceTargetFocused = true): void {
     historyState: continuesPrevious ? previous.historyState : 'applied',
   };
   applyContextualHistoryValues(contextualTool);
-  syncEdgeSelectionProvider(scope, occurrence);
+  syncSelectionProvider(scope, occurrence);
   renderContextualToolPanel();
 }
 
@@ -1314,13 +1335,20 @@ const contextualParameterCommitDelayMilliseconds = 240;
 
 function contextualToolParameters(
   signature: ToolSignatureSchema,
+  arguments_: readonly ToolArgumentSource[],
   operationRef: SourceRef,
   usages: readonly ParameterUsage[],
 ): Map<string, ContextualToolParameterState> {
   return new Map(
     signature.parameters
-      .filter(parameter => parameter.kind !== 'edge')
+      .filter(
+        (parameter): parameter is ToolValueParameterSchema =>
+          !isToolSelectionParameter(parameter),
+      )
       .map(parameter => {
+        const argument = arguments_.find(
+          candidate => candidate.index === parameter.index,
+        )?.target;
         const matches = usages.filter(
           usage =>
             usage.operation === signature.name &&
@@ -1330,12 +1358,15 @@ function contextualToolParameters(
             containsSourceRef(usage.operationRef, operationRef) &&
             Math.abs(usage.sensitivity) > 1e-9,
         );
-        const editable = matches.length === 1;
+        const editable =
+          matches.length === 1 ||
+          (matches.length === 0 && argument !== undefined);
         return [
           parameter.name,
           {
             schema: parameter,
             usage: editable ? matches[0] : undefined,
+            argument: matches.length === 0 ? argument : undefined,
             value: matches[0]?.value,
             editable,
           },
@@ -1381,8 +1412,7 @@ function applyContextualHistoryValues(tool: ContextualToolState): void {
   const values =
     tool.historyState === 'applied' ? tool.appliedValues : tool.baselineValues;
   tool.parameters.forEach((parameter, name) => {
-    const value = values.get(name);
-    if (value !== undefined) parameter.value = value;
+    parameter.value = values.get(name);
   });
 }
 
@@ -1419,24 +1449,38 @@ function commitContextualToolParameter(
   parameter.value = value;
   const invalid = !validContextualParameter(parameter);
   contextualToolPanel.setInvalid(name, invalid);
-  if (invalid || !parameter.editable || !parameter.usage) return;
+  if (invalid || !parameter.editable) return;
   const appliedValue = tool.appliedValues.get(name);
   if (appliedValue !== undefined && Math.abs(value! - appliedValue) < 1e-9) {
     return;
   }
   const usage = parameter.usage;
-  const sourceValue =
-    usage.target.value + (value! - usage.value) / usage.sensitivity;
-  if (!Number.isFinite(sourceValue)) return;
+  const argument = parameter.argument;
+  let intent: ToolIntent;
+  if (usage) {
+    const sourceValue =
+      usage.target.value + (value! - usage.value) / usage.sensitivity;
+    if (!Number.isFinite(sourceValue)) return;
+    intent = parameterIntent(usage.target, sourceValue);
+  } else if (argument) {
+    intent = {
+      kind: 'argument.set',
+      parameter: parameter.schema.name,
+      target: argument,
+      expression: {kind: 'number', value: value!},
+    };
+  } else {
+    return;
+  }
   const committed = commitToolSession(
     toolEngine.begin(
-      `contextual-tool.parameter:${tool.targetId}:${tool.evaluationIndex}:${name}`,
+      `contextual-tool.parameter:${tool.callId}:${tool.contextId}:${name}`,
     ),
-    parameterIntent(usage.target, sourceValue),
+    intent,
     {undoGroup: tool.undoGroup},
   );
   if (!committed) {
-    parameter.value = appliedValue ?? usage.value;
+    parameter.value = appliedValue ?? usage?.value;
     renderContextualToolPanel();
     return;
   }
@@ -1496,7 +1540,7 @@ function runContextualToolAction(id: string): void {
   if (!action || action.action !== 'remove-argument' || !target) return;
   const committed = commitToolSession(
     toolEngine.begin(
-      `contextual-tool.action:${tool.targetId}:${tool.evaluationIndex}:${parameterName}`,
+      `contextual-tool.action:${tool.callId}:${tool.contextId}:${parameterName}`,
     ),
     {kind: 'argument.remove', parameter: parameterName, target},
     {undoGroup: tool.undoGroup},
@@ -1518,7 +1562,7 @@ function runContextualToolAction(id: string): void {
     edge.session.appliedHasExplicitEdgeSelection = false;
     edge.session.hasEdits = true;
     edge.session.historyState = 'applied';
-    viewport.setSelectedEdges([]);
+    viewport.setSelectedTopologyIds([]);
   }
   renderContextualToolPanel();
 }
@@ -1533,26 +1577,24 @@ function renderContextualToolPanel(forceParameterValues = false): void {
     edgeSelectionTool?.targetId === tool.targetId
       ? edgeSelectionTool
       : undefined;
+  const topology =
+    topologyReferenceSelectionTool?.targetId === tool.targetId
+      ? topologyReferenceSelectionTool
+      : undefined;
   const parameters: ContextualToolParameterView[] = [
     ...tool.parameters.values(),
-  ]
-    .filter(
-      (
-        parameter,
-      ): parameter is ContextualToolParameterState & {value: number} =>
-        parameter.value !== undefined,
-    )
-    .map(parameter => ({
-      name: parameter.schema.name,
-      label: parameter.schema.label,
-      value: parameter.value,
-      unit: parameter.usage?.target.unit,
-      step: contextualParameterStep(parameter),
-      min: parameter.schema.constraints?.min,
-      max: parameter.schema.constraints?.max,
-      invalid: !validContextualParameter(parameter),
-      disabled: !parameter.editable,
-    }));
+  ].map(parameter => ({
+    name: parameter.schema.name,
+    label: parameter.schema.label,
+    value: parameter.value,
+    unit: parameter.usage?.target.unit,
+    step: contextualParameterStep(parameter),
+    min: parameter.schema.constraints?.min,
+    max: parameter.schema.constraints?.max,
+    invalid:
+      parameter.value !== undefined && !validContextualParameter(parameter),
+    disabled: !parameter.editable,
+  }));
   const actions = tool.signature.parameters.flatMap(parameter =>
     parameter.actions.map(action => ({
       id: `${parameter.name}:${action.action}`,
@@ -1565,25 +1607,37 @@ function renderContextualToolPanel(forceParameterValues = false): void {
     })),
   );
   const view: ContextualToolPanelView = {
-    id: `${tool.targetId}:${tool.evaluationIndex}`,
+    id: `${tool.callId}:${tool.contextId}:${tool.signature.id}`,
     title: humanizeToolName(tool.signature.name),
-    meta: edge ? `${edge.availableEdgeIds.length} AVAILABLE` : undefined,
+    meta: edge
+      ? `${edge.availableEdgeIds.length} AVAILABLE`
+      : topology
+        ? `${topology.availableIds.length} AVAILABLE`
+        : undefined,
     parameters,
-    selection: edge
+    selection: topology
       ? {
-          label: 'SELECTED EDGES',
-          summary: edge.hasExplicitEdgeSelection
-            ? formatEdgeIds(edge.selectedEdgeIds)
-            : 'All edges',
+          label: `SELECTED ${topology.parameter.kind.toUpperCase()}`,
+          summary:
+            topology.selectedId === undefined
+              ? 'None'
+              : formatTopologyId(topology.parameter.kind, topology.selectedId),
         }
-      : undefined,
+      : edge
+        ? {
+            label: 'SELECTED EDGES',
+            summary: edge.hasExplicitEdgeSelection
+              ? formatEdgeIds(edge.selectedEdgeIds)
+              : 'All edges',
+          }
+        : undefined,
     actions,
   };
   contextualToolPanel.show(view, forceParameterValues);
 }
 
 function contextualParameterStep(
-  parameter: ContextualToolParameterState & {value: number},
+  parameter: ContextualToolParameterState,
 ): number {
   const runtimeStep = parameter.usage?.target.step;
   if (runtimeStep !== undefined && parameter.usage) {
@@ -1593,7 +1647,7 @@ function contextualParameterStep(
     return 1;
   }
   if (parameter.schema.kind === 'length') {
-    return Math.abs(parameter.value) < 10 ? 0.1 : 0.5;
+    return Math.abs(parameter.value ?? 0) < 10 ? 0.1 : 0.5;
   }
   return 0.1;
 }
@@ -1608,6 +1662,87 @@ function humanizeToolName(value: string): string {
     : `${words[0].toUpperCase()}${words.slice(1)}`;
 }
 
+function syncSelectionProvider(
+  scope: NonNullable<ReturnType<ModelViewport['sourceEvaluation']>>,
+  occurrence: Occurrence | undefined,
+): void {
+  if (scope.target.kind === 'topology-selection') {
+    finishEdgeSelectionTool();
+    syncTopologyReferenceSelectionProvider(scope, occurrence);
+  } else {
+    finishTopologyReferenceSelectionTool();
+    syncEdgeSelectionProvider(scope, occurrence);
+  }
+}
+
+function syncTopologyReferenceSelectionProvider(
+  scope: NonNullable<ReturnType<ModelViewport['sourceEvaluation']>>,
+  occurrence: Occurrence | undefined,
+): void {
+  const selection = scope.evaluation.selection;
+  const parameter = scope.target.tool?.signature.parameters.find(
+    (candidate): candidate is ToolSelectionParameterSchema =>
+      isToolSelectionParameter(candidate) &&
+      !candidate.multiple &&
+      candidate.kind === selection?.kind,
+  );
+  const argument = parameter
+    ? scope.target.tool?.arguments.find(
+        candidate => candidate.index === parameter.index,
+      )?.target
+    : undefined;
+  if (
+    !selection ||
+    selection.kind === 'edges' ||
+    !parameter ||
+    !argument ||
+    !occurrence ||
+    occurrence.node.kind !== 'solid'
+  ) {
+    finishTopologyReferenceSelectionTool();
+    return;
+  }
+  const current = topologyReferenceSelectionTool;
+  if (
+    current?.targetId === scope.target.id &&
+    current.evaluationIndex === scope.evaluationIndex &&
+    current.occurrenceKey === occurrence.key
+  ) {
+    current.argument = argument;
+    current.selectedId = selection.id;
+    viewport.setSelectedTopologyIds(
+      selection.id === undefined ? [] : [selection.id],
+    );
+    return;
+  }
+  dismissTopologyReferenceSelectionTool();
+  viewport.cancelPositionTool();
+  let availableIds: readonly number[];
+  try {
+    availableIds = viewport.beginTopologySelection(
+      occurrence.key,
+      selection.inputNodeId,
+      selection.kind,
+      false,
+      selection.id === undefined ? [] : [selection.id],
+    );
+  } catch (error) {
+    showToolIssue(error instanceof Error ? error.message : String(error));
+    return;
+  }
+  topologyReferenceSelectionTool = {
+    targetId: scope.target.id,
+    evaluationIndex: scope.evaluationIndex,
+    sourceFile: scope.target.sourceRef.file,
+    parameter,
+    argument,
+    occurrenceKey: occurrence.key,
+    availableIds,
+    selectedId: selection.id,
+  };
+  errorBar.hidden = true;
+}
+
 function syncEdgeSelectionProvider(
   scope: NonNullable<ReturnType<ModelViewport['sourceEvaluation']>>,
   occurrence: Occurrence | undefined,
@@ -1617,7 +1752,7 @@ function syncEdgeSelectionProvider(
   const selection = scope?.evaluation.selection;
   const eligible =
     scope?.target.kind === 'operation-selection' &&
-    selection?.kind === 'edge' &&
+    selection?.kind === 'edges' &&
     edgeArgument !== undefined &&
     (operation === 'fillet' || operation === 'chamfer') &&
     occurrence?.node.kind === 'solid';
@@ -1683,9 +1818,11 @@ function startEdgeSelection(
   viewport.cancelPositionTool();
   let availableEdgeIds: readonly EdgeId[];
   try {
-    availableEdgeIds = viewport.beginEdgeSelection(
+    availableEdgeIds = viewport.beginTopologySelection(
       occurrence.key,
       inputNodeId,
+      'edge',
+      true,
       selectedEdgeIds,
     );
   } catch (error) {
@@ -1707,7 +1844,61 @@ function startEdgeSelection(
   renderContextualToolPanel();
 }
 
-function handleEdgeSelection(event: EdgeSelectionEvent): void {
+function handleTopologySelection(event: TopologySelectionEvent): void {
+  if (event.kind === 'cancel') {
+    if (topologyReferenceSelectionTool) {
+      dismissTopologyReferenceSelectionTool(false);
+    } else {
+      dismissEdgeSelectionTool(false);
+    }
+    renderContextualToolPanel();
+    return;
+  }
+  if (topologyReferenceSelectionTool) {
+    handleTopologyReferenceSelection(event);
+  } else {
+    handleEdgeOperationSelection(event);
+  }
+}
+
+function handleTopologyReferenceSelection(
+  event: Exclude<TopologySelectionEvent, Readonly<{kind: 'cancel'}>>,
+): void {
+  const tool = topologyReferenceSelectionTool;
+  if (
+    !tool ||
+    event.kind === 'hover' ||
+    event.topology !== tool.parameter.kind
+  ) {
+    return;
+  }
+  tool.selectedId = event.id;
+  renderContextualToolPanel();
+  const contextual = contextualTool;
+  const committed = commitToolSession(
+    toolEngine.begin(
+      `viewport.topology-reference:${tool.targetId}:${tool.evaluationIndex}`,
+    ),
+    {
+      kind: 'argument.set',
+      parameter: tool.parameter.name,
+      target: tool.argument,
+      expression: {kind: 'number', value: event.id},
+    },
+    {undoGroup: contextual?.undoGroup},
+  );
+  if (!committed) {
+    finishTopologyReferenceSelectionTool();
+    renderContextualToolPanel();
+    return;
+  }
+  if (contextual?.targetId === tool.targetId) {
+    contextual.hasEdits = true;
+    contextual.historyState = 'applied';
+  }
+}
+
+function handleEdgeOperationSelection(event: TopologySelectionEvent): void {
   if (event.kind === 'cancel') {
     dismissEdgeSelectionTool(false);
     renderContextualToolPanel();
@@ -1716,12 +1907,13 @@ function handleEdgeSelection(event: EdgeSelectionEvent): void {
   const tool = edgeSelectionTool;
   if (!tool) return;
   if (event.kind === 'hover') return;
-  const selectedEdgeIds = sortedEdgeIds(event.selectedEdgeIds);
+  if (event.topology !== 'edge') return;
+  const selectedEdgeIds = sortedEdgeIds(event.selectedIds);
   if (selectedEdgeIds.length === 0) {
     const hadExplicitSelection = tool.hasExplicitEdgeSelection;
     tool.selectedEdgeIds = [];
     tool.hasExplicitEdgeSelection = false;
-    viewport.setSelectedEdges(tool.selectedEdgeIds);
+    viewport.setSelectedTopologyIds(tool.selectedEdgeIds);
     renderContextualToolPanel();
     if (!hadExplicitSelection) return;
   } else {
@@ -1768,8 +1960,19 @@ function commitEdgeOperationChange(
 function dismissEdgeSelectionTool(updateViewport = true): boolean {
   if (!edgeSelectionTool) return false;
   edgeSelectionTool = undefined;
-  if (updateViewport) viewport.endEdgeSelection();
+  if (updateViewport) viewport.endTopologySelection();
   return true;
+}
+
+function dismissTopologyReferenceSelectionTool(updateViewport = true): boolean {
+  if (!topologyReferenceSelectionTool) return false;
+  topologyReferenceSelectionTool = undefined;
+  if (updateViewport) viewport.endTopologySelection();
+  return true;
+}
+
+function finishTopologyReferenceSelectionTool(): boolean {
+  return dismissTopologyReferenceSelectionTool();
 }
 
 function finishEdgeSelectionTool(): boolean {
@@ -1782,11 +1985,12 @@ function finishEdgeSelectionTool(): boolean {
 
 function finishContextualTool(): boolean {
   cancelContextualParameterCommits();
+  const finishedTopology = finishTopologyReferenceSelectionTool();
   const finishedEdge = finishEdgeSelectionTool();
   const tool = contextualTool;
   contextualTool = undefined;
   const hidden = contextualToolPanel.hide();
-  if (!tool) return finishedEdge || hidden;
+  if (!tool) return finishedTopology || finishedEdge || hidden;
   if (!tool.hasEdits || tool.historyState === 'undone') {
     codeEditor.discardPendingToolFormat(tool.sourceFile, tool.undoGroup);
     codeEditor.endSourceEditGroup(tool.undoGroup);
@@ -1814,11 +2018,12 @@ function abandonEdgeSelectionTool(): boolean {
 
 function abandonContextualTool(): boolean {
   cancelContextualParameterCommits();
+  const abandonedTopology = finishTopologyReferenceSelectionTool();
   const abandonedEdge = abandonEdgeSelectionTool();
   const tool = contextualTool;
   contextualTool = undefined;
   const hidden = contextualToolPanel.hide();
-  if (!tool) return abandonedEdge || hidden;
+  if (!tool) return abandonedTopology || abandonedEdge || hidden;
   codeEditor.discardPendingToolFormat(tool.sourceFile, tool.undoGroup);
   codeEditor.endSourceEditGroup(tool.undoGroup);
   return true;
@@ -1878,7 +2083,7 @@ function applyEdgeEditSessionToTool(session: EdgeEditSession): void {
   if (!tool || tool.session !== session) return;
   tool.selectedEdgeIds = edgeSessionEdgeIds(session);
   tool.hasExplicitEdgeSelection = edgeSessionHasExplicitEdgeSelection(session);
-  viewport.setSelectedEdges(tool.selectedEdgeIds);
+  viewport.setSelectedTopologyIds(tool.selectedEdgeIds);
   renderContextualToolPanel();
 }
 
@@ -1916,6 +2121,10 @@ function formatEdgeIds(edgeIds: readonly EdgeId[]): string {
   return edgeIds.length > visible.length
     ? `${visible.join(', ')} +${edgeIds.length - visible.length}`
     : visible.join(', ');
+}
+
+function formatTopologyId(kind: 'edge' | 'surface', id: number): string {
+  return `${kind === 'edge' ? 'E' : 'S'}${id}`;
 }
 
 function sortedEdgeIds(edgeIds: readonly EdgeId[]): EdgeId[] {
