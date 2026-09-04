@@ -1,4 +1,4 @@
-export type ImageExportPanelOptions = Readonly<{
+export type ImageExportDialogOptions = Readonly<{
   capture: (width: number, height: number) => Promise<Blob>;
   fileName: () => string;
 }>;
@@ -7,37 +7,28 @@ const defaultLongEdge = 1920;
 const minimumEdge = 64;
 const maximumEdge = 8192;
 
-export class ImageExportPanel {
-  private readonly button = document.createElement('button');
-  private readonly panel = document.createElement('form');
+export class ImageExportDialog {
+  private readonly dialog = document.createElement('dialog');
+  private readonly form = document.createElement('form');
   private readonly widthInput = resolutionInput('Width');
   private readonly heightInput = resolutionInput('Height');
   private readonly submit = document.createElement('button');
+  private readonly cancel = document.createElement('button');
   private readonly status = document.createElement('div');
 
   constructor(
     private readonly host: HTMLElement,
-    private readonly options: ImageExportPanelOptions,
+    private readonly options: ImageExportDialogOptions,
   ) {
-    this.button.type = 'button';
-    this.button.className = 'viewport-export-button';
-    this.button.textContent = 'Export';
-    this.button.title = 'Export the current viewport as a PNG image';
-    this.button.setAttribute('aria-expanded', 'false');
-
-    this.panel.className = 'viewport-export-panel';
-    this.panel.hidden = true;
-    this.panel.setAttribute('aria-label', 'Export viewport image');
+    this.dialog.className = 'viewport-export-dialog';
+    this.dialog.setAttribute('aria-label', 'Export image');
 
     const heading = document.createElement('header');
-    const eyebrow = document.createElement('span');
-    eyebrow.textContent = 'PNG IMAGE';
-    const close = document.createElement('button');
-    close.type = 'button';
-    close.className = 'viewport-export-close';
-    close.textContent = '×';
-    close.title = 'Close';
-    heading.append(eyebrow, close);
+    const title = document.createElement('h2');
+    title.textContent = 'Export image';
+    const description = document.createElement('p');
+    description.textContent = 'PNG image of the current viewport.';
+    heading.append(title, description);
 
     const dimensions = document.createElement('div');
     dimensions.className = 'viewport-export-dimensions';
@@ -52,45 +43,34 @@ export class ImageExportPanel {
     this.submit.type = 'submit';
     this.submit.className = 'viewport-export-submit';
     this.submit.textContent = 'Export PNG';
-    this.panel.append(heading, dimensions, this.status, this.submit);
-    this.host.append(this.button, this.panel);
+    this.cancel.type = 'button';
+    this.cancel.className = 'viewport-export-cancel';
+    this.cancel.textContent = 'Cancel';
+    const actions = document.createElement('footer');
+    actions.append(this.cancel, this.submit);
+    this.form.append(heading, dimensions, this.status, actions);
+    this.dialog.append(this.form);
+    this.host.append(this.dialog);
 
-    this.setDefaultResolution();
-    this.button.addEventListener('click', () => this.toggle());
-    close.addEventListener('click', () => this.close());
-    this.panel.addEventListener('submit', event => {
+    this.cancel.addEventListener('click', () => this.dialog.close());
+    this.form.addEventListener('submit', event => {
       event.preventDefault();
       void this.export();
     });
-    document.addEventListener('pointerdown', event => {
-      if (
-        !this.panel.hidden &&
-        event.target instanceof Node &&
-        !this.panel.contains(event.target) &&
-        !this.button.contains(event.target)
-      ) {
-        this.close();
-      }
+    this.dialog.addEventListener('cancel', event => {
+      if (this.submit.disabled) event.preventDefault();
+    });
+    this.dialog.addEventListener('keydown', event => {
+      event.stopPropagation();
     });
   }
 
-  private toggle(): void {
-    if (this.panel.hidden) this.open();
-    else this.close();
-  }
-
-  private open(): void {
-    this.panel.hidden = false;
-    this.button.setAttribute('aria-expanded', 'true');
+  open(): void {
+    if (!this.widthInput.input.value) this.setDefaultResolution();
     this.status.hidden = true;
+    this.dialog.showModal();
     this.widthInput.input.focus();
     this.widthInput.input.select();
-  }
-
-  private close(): void {
-    this.panel.hidden = true;
-    this.button.setAttribute('aria-expanded', 'false');
-    this.button.focus();
   }
 
   private setDefaultResolution(): void {
@@ -106,23 +86,31 @@ export class ImageExportPanel {
   }
 
   private async export(): Promise<void> {
-    if (!this.panel.reportValidity()) return;
+    if (this.submit.disabled || !this.form.reportValidity()) return;
     const width = this.widthInput.input.valueAsNumber;
     const height = this.heightInput.input.valueAsNumber;
 
     this.submit.disabled = true;
+    this.cancel.disabled = true;
+    this.widthInput.input.disabled = true;
+    this.heightInput.input.disabled = true;
+    this.form.setAttribute('aria-busy', 'true');
     this.submit.textContent = 'Rendering…';
     this.status.hidden = true;
     try {
       const image = await this.options.capture(width, height);
       download(image, normalizedPngName(this.options.fileName()));
-      this.close();
+      this.dialog.close();
     } catch (error) {
       this.status.textContent =
         error instanceof Error ? error.message : String(error);
       this.status.hidden = false;
     } finally {
       this.submit.disabled = false;
+      this.cancel.disabled = false;
+      this.widthInput.input.disabled = false;
+      this.heightInput.input.disabled = false;
+      this.form.removeAttribute('aria-busy');
       this.submit.textContent = 'Export PNG';
     }
   }
@@ -134,7 +122,7 @@ function resolutionInput(name: string): Readonly<{
 }> {
   const label = document.createElement('label');
   const caption = document.createElement('span');
-  caption.textContent = name.toUpperCase();
+  caption.textContent = `${name.toUpperCase()} (PX)`;
   const input = document.createElement('input');
   input.type = 'number';
   input.inputMode = 'numeric';
