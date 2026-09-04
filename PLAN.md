@@ -246,6 +246,9 @@ completion-derived rendering contract.
 structured model diagnostics retain their exact source span across the worker
 boundary, and Monaco renders located evaluation failures inline while the
 global error bar is reserved for failures without a reliable source location.
+When later evaluation fails after earlier model expressions succeeded, the
+compiler publishes that successful prefix as a partial module together with the
+diagnostic, so earlier source targets and their contextual tools remain usable.
 [R-013](requests/closed/R-013-drill-from-composition-preview-to-object-source.md)
 is complete: an explicit double-click drills from the active composition
 operand to its best exact binding or defining expression, including
@@ -339,7 +342,10 @@ constraint source sites do.
 - Make explicit edge filtering reversible: toggle individual edges or use all
   edges by deleting the second argument. An empty explicit array is never a
   persistent model state; toggling down to zero returns to the one-argument
-  all-edge form. Leaving the call's source focus or pressing `Escape` only
+  all-edge form. Treat that implicit all-edge mode as distinct from an explicit
+  array containing every edge: it starts with no guide edges selected, so the
+  first click creates a one-edge filter rather than subtracting from all edges.
+  Leaving the call's source focus or pressing `Escape` only
   dismisses the transient panel; already committed edits remain in source. The
   panel has neither Apply nor Cancel actions.
 - Keep the contextual selection panel vertically ordered and stable under

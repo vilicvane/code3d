@@ -28,8 +28,10 @@ import {code3dAnnotations} from './annotations';
 import {designArgumentAnnotationSites} from './design-functions';
 import {
   createModelDiagnostic,
+  diagnosticFromError,
   locateModelError,
   ModelDiagnosticError,
+  type ModelDiagnostic,
   type ModelDiagnosticKind,
 } from './diagnostic';
 
@@ -138,6 +140,7 @@ export type ObjectCatalogEntry = Readonly<{
 }>;
 
 export type ModelModule = Readonly<{
+  diagnostic?: ModelDiagnostic;
   fallback?: ModelSnapshotObject;
   objects: ReadonlyMap<string, ModelSnapshotObject>;
   operations: ReadonlyMap<string, ModelOperationSnapshot>;
@@ -1003,12 +1006,17 @@ export function compileProject(
       return module;
     };
 
-    executeModule(rootPath);
-    if (
-      activeDesignContext &&
-      !modules.has(activeDesignContext.functionRef.file)
-    ) {
-      executeModule(activeDesignContext.functionRef.file);
+    let diagnostic: ModelDiagnostic | undefined;
+    try {
+      executeModule(rootPath);
+      if (
+        activeDesignContext &&
+        !modules.has(activeDesignContext.functionRef.file)
+      ) {
+        executeModule(activeDesignContext.functionRef.file);
+      }
+    } catch (error) {
+      diagnostic = diagnosticFromError(error);
     }
 
     const modelExports = new Map<string, ModelObject>();
@@ -1032,6 +1040,9 @@ export function compileProject(
       modelExports.get('default') ??
       [...modelExports.values()].at(-1) ??
       latestTracedObject;
+    if (!fallbackObject && diagnostic) {
+      throw new ModelDiagnosticError(diagnostic);
+    }
     if (!fallbackObject && designArguments.length === 0) {
       throw new Error(
         'The current program did not produce a renderable ModelObject.',
@@ -1069,6 +1080,7 @@ export function compileProject(
       ]),
     );
     return {
+      diagnostic,
       fallback: fallbackSnapshot,
       objects: objectSnapshots,
       operations,

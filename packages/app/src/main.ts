@@ -11,7 +11,7 @@ import type {
   EdgeArgumentTarget,
   ModelModule,
 } from './model/compiler';
-import {ModelDiagnosticError} from './model/diagnostic';
+import {ModelDiagnosticError, type ModelDiagnostic} from './model/diagnostic';
 import {bundledExamples} from './project/bundled-examples';
 import {defaultProject} from './project/default-project';
 import {
@@ -790,7 +790,7 @@ async function runModel(
     }
     currentModule = nextModule;
     currentModuleSourceVersion = sourceVersion;
-    codeEditor.setModelDiagnostic();
+    presentModelDiagnostic(nextModule.diagnostic);
     codeEditor.setDesignArguments(nextModule.designArguments);
     codeEditor.trackSourceRefs(toolSourceRefs(nextModule));
     selectedDesignContextId = nextModule.activeDesignContextId;
@@ -845,19 +845,27 @@ async function runModel(
     hideViewportProgress();
     const diagnostic =
       error instanceof ModelDiagnosticError ? error.diagnostic : undefined;
-    if (diagnostic?.sourceRef) {
-      codeEditor.setModelDiagnostic(diagnostic);
-      errorBar.hidden = true;
+    if (diagnostic) {
+      presentModelDiagnostic(diagnostic);
     } else {
       codeEditor.setModelDiagnostic();
-      errorBar.textContent = diagnostic
-        ? [diagnostic.summary, diagnostic.details].filter(Boolean).join('\n')
-        : error instanceof Error
-          ? error.message
-          : String(error);
+      errorBar.textContent =
+        error instanceof Error ? error.message : String(error);
       errorBar.hidden = false;
     }
   }
+}
+
+function presentModelDiagnostic(diagnostic?: ModelDiagnostic): void {
+  codeEditor.setModelDiagnostic(diagnostic);
+  if (!diagnostic || diagnostic.sourceRef) {
+    errorBar.hidden = true;
+    return;
+  }
+  errorBar.textContent = [diagnostic.summary, diagnostic.details]
+    .filter(Boolean)
+    .join('\n');
+  errorBar.hidden = false;
 }
 
 function handleCompletionFocus(focus: CompletionFocus | undefined): void {
@@ -928,6 +936,10 @@ async function runCompletionPreview(
       activeCompletionFocus !== focus ||
       preview.sourceVersion !== codeEditor.sourceVersion()
     ) {
+      return;
+    }
+    if (module.diagnostic) {
+      hideViewportProgress();
       return;
     }
     if (
@@ -1236,17 +1248,21 @@ function startEdgeSelection(
   if (edgeEditSession && edgeEditSession.targetId !== targetId) {
     finishEdgeEditSession(edgeEditSession);
   }
+  const hasExplicitEdgeSelection = edgeArgument.kind === 'replace';
+  const sourceSelectedEdgeIds = hasExplicitEdgeSelection
+    ? sortedEdgeIds(initialEdgeIds)
+    : [];
   const session =
     edgeEditSession ??
     (edgeEditSession = {
       targetId,
       sourceFile,
       undoGroup: `edge-operation:${targetId}:${++edgeEditSessionCounter}`,
-      baselineEdgeIds: sortedEdgeIds(initialEdgeIds),
-      baselineHasExplicitEdgeSelection: edgeArgument.kind === 'replace',
+      baselineEdgeIds: sourceSelectedEdgeIds,
+      baselineHasExplicitEdgeSelection: hasExplicitEdgeSelection,
       baselineParameterValue: parameter?.value,
-      appliedEdgeIds: sortedEdgeIds(initialEdgeIds),
-      appliedHasExplicitEdgeSelection: edgeArgument.kind === 'replace',
+      appliedEdgeIds: sourceSelectedEdgeIds,
+      appliedHasExplicitEdgeSelection: hasExplicitEdgeSelection,
       appliedParameterValue: parameter?.value,
       hasEdits: false,
       historyState: 'applied',
@@ -1285,7 +1301,7 @@ function startEdgeSelection(
 function useAllEdges(): void {
   const tool = edgeSelectionTool;
   if (!tool?.hasExplicitEdgeSelection) return;
-  tool.selectedEdgeIds = tool.availableEdgeIds;
+  tool.selectedEdgeIds = [];
   tool.hasExplicitEdgeSelection = false;
   viewport.setSelectedEdges(tool.selectedEdgeIds);
   updateEdgeSelectionToolbar(tool);
@@ -1360,7 +1376,7 @@ function handleEdgeSelection(event: EdgeSelectionEvent): void {
   const selectedEdgeIds = sortedEdgeIds(event.selectedEdgeIds);
   if (selectedEdgeIds.length === 0) {
     const hadExplicitSelection = tool.hasExplicitEdgeSelection;
-    tool.selectedEdgeIds = tool.availableEdgeIds;
+    tool.selectedEdgeIds = [];
     tool.hasExplicitEdgeSelection = false;
     viewport.setSelectedEdges(tool.selectedEdgeIds);
     updateEdgeSelectionToolbar(tool);

@@ -9,6 +9,7 @@ import {
 } from '../render-samples/fastener.config';
 import fastenerSource from '../render-samples/fastener.ts?raw';
 import {compileProject} from './model/compiler';
+import {ModelDiagnosticError} from './model/diagnostic';
 import {elementSourceDecoration} from './model/element-decorations';
 import {
   booleanOperationSourceDecoration,
@@ -63,6 +64,9 @@ async function renderModel(): Promise<void> {
 
   const project = renderProjects[requestedModel()];
   const module = compileProject(project, project.rootPath);
+  if (module.diagnostic) {
+    throw new ModelDiagnosticError(module.diagnostic);
+  }
   const viewport = new ModelViewport(root, {
     onSelect: () => undefined,
     onDrillDown: () => undefined,
