@@ -205,9 +205,7 @@ export function screw(input: ScrewInput, length: number): Screw {
   ).relate(tool =>
     tool.center.on(headBlank.top).offset(0, -spec.hexSocketDepth / 2 + 0.1, 0),
   );
-  const head = cut(headBlank, [socketTool]).named(
-    spec.designation + ' socket head',
-  );
+  const head = cut(headBlank, [socketTool]);
 
   const transition = frustum(
     spec.nominalDiameter / 2,
@@ -243,15 +241,13 @@ export function screw(input: ScrewInput, length: number): Screw {
   }).relate(part => part.top.on(previous.bottom).offset(0, -overlap, 0));
   parts.push(thread);
 
-  return union(parts)
-    .expose({
-      headTop: head.top,
-      headBottom: head.bottom,
-      shankTop: transition.top,
-      shankBottom: thread.bottom,
-      shankAxis: thread.axis,
-    })
-    .named(spec.designation + ' × ' + length + ' socket cap screw');
+  return union(parts).expose({
+    headTop: head.top,
+    headBottom: head.bottom,
+    shankTop: transition.top,
+    shankBottom: thread.bottom,
+    shankAxis: thread.axis,
+  });
 }
 
 /**
@@ -297,13 +293,11 @@ export function clearanceHole(
   const shaft = cylinder(diameter / 2, options.depth);
   const counterboreOption = options.counterbore ?? true;
   if (counterboreOption === false) {
-    return shaft
-      .expose({
-        shaftTop: shaft.top,
-        shaftBottom: shaft.bottom,
-        shaftAxis: shaft.axis,
-      })
-      .named(spec.designation + ' ' + fit + ' clearance hole');
+    return shaft.expose({
+      shaftTop: shaft.top,
+      shaftBottom: shaft.bottom,
+      shaftAxis: shaft.axis,
+    });
   }
 
   const counterbore = counterboreOption === true ? {} : counterboreOption;
@@ -333,15 +327,13 @@ export function clearanceHole(
       .flip()
       .offset(0, -counterboreDepth / 2 + 0.1, 0),
   );
-  return union([shaft, recess])
-    .expose({
-      shaftTop: shaft.top,
-      shaftBottom: shaft.bottom,
-      shaftAxis: shaft.axis,
-      counterboreTop: recess.top,
-      counterboreBottom: recess.bottom,
-    })
-    .named(spec.designation + ' ' + fit + ' counterbored hole');
+  return union([shaft, recess]).expose({
+    shaftTop: shaft.top,
+    shaftBottom: shaft.bottom,
+    shaftAxis: shaft.axis,
+    counterboreTop: recess.top,
+    counterboreBottom: recess.bottom,
+  });
 }
 
 export function resolveSpecification(input: ScrewInput): Specification {

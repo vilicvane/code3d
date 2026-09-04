@@ -9,10 +9,7 @@ export function makeKnob(
   height: number,
   sides: number,
 ): ModelObject {
-  return regularPrism(radius, height, sides, 30)
-    .fillet(0.6)
-    .named(`${sides}-sided knob`)
-    .paint('#d8ff3e');
+  return regularPrism(radius, height, sides, 30).fillet(0.6).paint('#d8ff3e');
 }
 
 export const designArgumentsExample = makeKnob(10, 5, 6);

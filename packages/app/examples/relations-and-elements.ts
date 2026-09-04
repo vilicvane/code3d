@@ -5,18 +5,16 @@ const neutral = '#343934';
 
 function locatingPin(radius: number, height: number) {
   const blank = cylinder(radius, height);
-  return blank
-    .expose({
-      datum: blank.center,
-      mountingFace: blank.bottom,
-      tipFace: blank.top,
-      centerline: blank.axis,
-      referenceFrame: blank,
-    })
-    .named('Locating pin');
+  return blank.expose({
+    datum: blank.center,
+    mountingFace: blank.bottom,
+    tipFace: blank.top,
+    centerline: blank.axis,
+    referenceFrame: blank,
+  });
 }
 
-const bracket = box(26, 5, 18).chamfer(1).named('Bracket').paint(neutral);
+const bracket = box(26, 5, 18).chamfer(1).paint(neutral);
 const pin = locatingPin(3, 12)
   .paint(accent)
   .relate(part => part.mountingFace.on(bracket.top));

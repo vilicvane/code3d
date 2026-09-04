@@ -2105,7 +2105,6 @@ function operationInputPlan(
   }
   const method = node.expression.name.text;
   if (
-    method === 'named' ||
     method === 'paint' ||
     method === 'scaled' ||
     method === 'fillet' ||

@@ -18,3 +18,7 @@ so the scope remains exact through Boolean previews and peer switching.
 
 The default primitive color is now neutral rather than nearly identical to the
 UI accent, making the `named` to `paint` transition visually explicit.
+
+The chainable `named()` operation referenced by this historical request was
+later removed from the authoring API. The evaluation-boundary behavior remains
+applicable to the other semantic-immutable model operations.

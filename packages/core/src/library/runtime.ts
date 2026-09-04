@@ -112,7 +112,6 @@ export type ModelOperationKind =
   | 'frustum'
   | 'regularPrism'
   | 'helicalThread'
-  | 'named'
   | 'paint'
   | 'scaled'
   | 'fillet'
@@ -577,13 +576,6 @@ export class ModelObject<
       {elements: {...this.elements, ...exposed}},
       operation,
     ) as Model<MergedElements<Elements, ExposedElements<Sources>>>;
-  }
-
-  named(name: string): Model<Elements> {
-    return this.copy(
-      {name},
-      storedOperation('named', [{model: this, role: 'source', index: 0}]),
-    );
   }
 
   paint(color: string): Model<Elements> {

@@ -48,13 +48,16 @@ silently reorder the active milestones. Closed requests move to
   the ordered cutting tools in an array.
 - Chained calls are the human-facing syntax for constraint derivation; they do
   not imply mutation or a persistent CAD feature history.
+- Model values have no chainable `named()` operation. Source bindings identify
+  authored values; intrinsic primitive and group names remain only as runtime
+  display and diagnostic fallbacks.
 - Solid edges have model-local numeric IDs. Primitive traversal assigns the
   initial IDs; a derived value preserves strict one-to-one edge history,
   allocates newly created or ambiguous edges above the inherited high-water
   mark, and never reuses retired IDs. Deterministic source replay is the
   persistence mechanism rather than a separate topology ledger.
 - A composite is broad: any connected set of occurrences and spatial relations
-  is a composite, including copy, pattern, boolean operands, groups, and named
+  is a composite, including copy, pattern, boolean operands, groups, and
   assemblies. A composite can itself be reused as geometry in a larger model.
 - Object replacement/deletion is not a core modeling primitive. JavaScript
   bindings, reachability, derivation, and runtime occurrences describe what

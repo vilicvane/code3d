@@ -22,30 +22,23 @@ const neutral = '#353a33';
  */
 const baseWidth = 36;
 
-const base = box(baseWidth, 4, 24)
-  .fillet(1)
-  .named('Filleted box')
-  .paint(neutral);
+const base = box(baseWidth, 4, 24).fillet(1).paint(neutral);
 
 const column = cylinder(4, 14)
   .relate(part => part.bottom.on(base.top).offset(-10, 0, 0))
-  .named('Cylinder')
   .paint(accent);
 
 const taperedColumn = frustum(5, 3, 12)
   .relate(part => part.bottom.on(base.top).offset(10, 0, 0))
-  .named('Frustum')
   .paint(secondary);
 
 const prism = regularPrism(4.5, 6, 6, 30)
   .relate(part => part.bottom.on(taperedColumn.top))
-  .named('Regular prism')
   .paint(accent);
 
 const scaledSphere = sphere(5)
   .scaled(0.8)
   .relate(part => part.center.on(base.top).offset(0, 4, 0))
-  .named('Scaled sphere')
   .paint(secondary);
 
 export const primitivesExample = group(
