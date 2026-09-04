@@ -425,11 +425,11 @@ codeEditor.onCursorOffset(({file, offset}) => {
   syncContextualTool(matched);
 });
 codeEditor.onCompletionFocus(handleCompletionFocus);
-codeEditor.onEditorActivation(() => {
+codeEditor.onEditorActivation(cursor => {
   if (!codeEditor.hasPendingToolEdits()) return;
   finishContextualTool();
   void codeEditor
-    .formatPendingToolEdits()
+    .formatPendingToolEdits(cursor)
     .catch(error =>
       console.error('Prettier failed after a Code3D source edit.', error),
     );

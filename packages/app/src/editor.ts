@@ -61,6 +61,8 @@ export type CompletionFocus = Readonly<{
   }>;
 }>;
 
+export type EditorCursor = Readonly<{file: string; offset: number}>;
+
 type ProjectDocument = {
   path: string;
   model: monaco.editor.ITextModel;
@@ -73,6 +75,7 @@ type ContentChangeOrigin = 'user' | 'tool' | 'undo' | 'redo';
 type FormatOptions = Readonly<{
   origin?: 'user' | 'tool';
   undoGroup?: string;
+  cursor?: EditorCursor & Readonly<{selectionVersion: number}>;
 }>;
 
 const modelPrettierOptions = {
@@ -137,7 +140,7 @@ registerProjectTypeScriptCompletions(
 monaco.languages.registerDocumentFormattingEditProvider('typescript', {
   async provideDocumentFormattingEdits(model) {
     const source = model.getValue();
-    const text = await formatTypeScript(source);
+    const text = await formatTypeScript(source, prettierEndOfLine(model));
     return text === source ? [] : [{range: model.getFullModelRange(), text}];
   },
 });
@@ -194,13 +197,13 @@ export class CodeEditor {
   private readonly changeListeners = new Set<
     (change: ProjectEditorChange) => void
   >();
-  private readonly cursorListeners = new Set<
-    (source: Readonly<{file: string; offset: number}>) => void
-  >();
+  private readonly cursorListeners = new Set<(source: EditorCursor) => void>();
   private readonly activeFileListeners = new Set<
     (path: string, reason: ActiveFileChangeReason) => void
   >();
-  private readonly editorActivationListeners = new Set<() => void>();
+  private readonly editorActivationListeners = new Set<
+    (cursor: EditorCursor | undefined) => void
+  >();
   private readonly completionFocusListeners = new Set<
     (focus: CompletionFocus | undefined) => void
   >();
@@ -210,6 +213,7 @@ export class CodeEditor {
   private readonly sourceEditUndoGroups = new Map<string, string>();
   private readonly sourceDecoration: monaco.editor.IEditorDecorationsCollection;
   private activePath: string;
+  private cursorSelectionVersion = 0;
   private pointerActivatingEditor = false;
   private revision = 1;
   private suppressCursorEvent = false;
@@ -248,6 +252,7 @@ export class CodeEditor {
     });
     this.sourceDecoration = this.editor.createDecorationsCollection();
     this.editor.onDidChangeCursorSelection(({selection, reason}) => {
+      this.cursorSelectionVersion += 1;
       // History and marker recovery move Monaco's cursor without the user
       // leaving the source target currently being edited by a viewport tool.
       if (
@@ -261,8 +266,9 @@ export class CodeEditor {
       this.sourceDecoration.clear();
       this.emitCursorPosition(selection.getPosition());
     });
-    // Pointer focus arrives before Monaco finishes placing the caret. Wait for
-    // the complete gesture before formatting so it uses the clicked position.
+    // Focus arrives before Monaco finishes placing a pointer caret. Use the
+    // position reported by Monaco when the gesture completes as the formatting
+    // anchor instead of relying on browser event scheduling.
     this.container.addEventListener(
       'pointerdown',
       () => {
@@ -270,15 +276,16 @@ export class CodeEditor {
       },
       {capture: true},
     );
-    window.addEventListener(
-      'pointerup',
-      () => {
-        if (!this.pointerActivatingEditor) return;
-        this.pointerActivatingEditor = false;
-        window.setTimeout(() => this.emitEditorActivation(), 0);
-      },
-      {capture: true},
-    );
+    this.editor.onMouseUp(({target}) => {
+      if (!this.pointerActivatingEditor) return;
+      this.pointerActivatingEditor = false;
+      this.emitEditorActivation(target.position ?? undefined);
+    });
+    window.addEventListener('pointerup', () => {
+      if (!this.pointerActivatingEditor) return;
+      this.pointerActivatingEditor = false;
+      this.emitEditorActivation();
+    });
     window.addEventListener(
       'pointercancel',
       () => {
@@ -477,7 +484,7 @@ export class CodeEditor {
     }
   }
 
-  cursorSource(): Readonly<{file: string; offset: number}> | undefined {
+  cursorSource(): EditorCursor | undefined {
     const position = this.editor.getPosition();
     return position
       ? {
@@ -544,13 +551,20 @@ export class CodeEditor {
     return true;
   }
 
-  async formatPendingToolEdits(): Promise<void> {
+  async formatPendingToolEdits(cursor?: EditorCursor): Promise<void> {
     const pending = [...this.pendingToolFormats];
     this.pendingToolFormats.clear();
     await Promise.all(
       pending.map(async ([path, undoGroup]) => {
         try {
-          await this.formatFile(path, {origin: 'tool', undoGroup});
+          await this.formatFile(path, {
+            origin: 'tool',
+            undoGroup,
+            cursor:
+              cursor?.file === path
+                ? {...cursor, selectionVersion: this.cursorSelectionVersion}
+                : undefined,
+          });
         } finally {
           if (undoGroup) this.endSourceEditGroup(undoGroup);
         }
@@ -608,7 +622,9 @@ export class CodeEditor {
     return () => this.activeFileListeners.delete(listener);
   }
 
-  onEditorActivation(listener: () => void): () => void {
+  onEditorActivation(
+    listener: (cursor: EditorCursor | undefined) => void,
+  ): () => void {
     this.editorActivationListeners.add(listener);
     return () => this.editorActivationListeners.delete(listener);
   }
@@ -933,8 +949,14 @@ export class CodeEditor {
     );
   }
 
-  private emitEditorActivation(): void {
-    this.editorActivationListeners.forEach(listener => listener());
+  private emitEditorActivation(position = this.editor.getPosition()): void {
+    const cursor = position
+      ? {
+          file: this.activePath,
+          offset: this.activeModel().getOffsetAt(position),
+        }
+      : undefined;
+    this.editorActivationListeners.forEach(listener => listener(cursor));
   }
 
   private openProjectResource(
@@ -981,18 +1003,32 @@ export class CodeEditor {
     const {model} = document;
     const source = model.getValue();
     const version = model.getVersionId();
-    let cursorOffset = this.activeCursorOffset(model);
-    let result = await formatTypeScriptWithCursor(source, cursorOffset ?? 0);
+    const endOfLine = prettierEndOfLine(model);
+    let cursorSelectionVersion =
+      options.cursor?.selectionVersion ?? this.cursorSelectionVersion;
+    let cursorOffset = options.cursor?.offset ?? this.activeCursorOffset(model);
+    let result = await formatTypeScriptWithCursor(
+      source,
+      cursorOffset ?? 0,
+      endOfLine,
+    );
     while (model.getVersionId() === version) {
       if (result.formatted === source) return true;
       const currentCursorOffset = this.activeCursorOffset(model);
       if (
         currentCursorOffset !== undefined &&
-        currentCursorOffset !== cursorOffset
+        this.cursorSelectionVersion !== cursorSelectionVersion
       ) {
-        cursorOffset = currentCursorOffset;
-        result = await formatTypeScriptWithCursor(source, cursorOffset);
-        continue;
+        cursorSelectionVersion = this.cursorSelectionVersion;
+        if (currentCursorOffset !== cursorOffset) {
+          cursorOffset = currentCursorOffset;
+          result = await formatTypeScriptWithCursor(
+            source,
+            cursorOffset,
+            endOfLine,
+          );
+          continue;
+        }
       }
       this.withContentChangeOrigin(options.origin ?? 'user', () =>
         this.withSuppressedCursorEvents(() => {
@@ -1007,10 +1043,7 @@ export class CodeEditor {
             ],
             options.undoGroup,
           );
-          if (
-            currentCursorOffset !== undefined &&
-            this.editor.getModel() === model
-          ) {
+          if (cursorOffset !== undefined && this.editor.getModel() === model) {
             this.editor.setPosition(model.getPositionAt(result.cursorOffset));
           }
         }),
@@ -1485,20 +1518,33 @@ function languageForPath(path: string): string {
   return /\.[cm]?jsx?$/.test(path) ? 'javascript' : 'typescript';
 }
 
-async function formatTypeScript(source: string): Promise<string> {
+function prettierEndOfLine(model: monaco.editor.ITextModel): 'lf' | 'crlf' {
+  return model.getEOL() === '\r\n' ? 'crlf' : 'lf';
+}
+
+async function formatTypeScript(
+  source: string,
+  endOfLine: 'lf' | 'crlf',
+): Promise<string> {
   const {prettier, plugins} = await loadPrettier();
-  return prettier.format(source, {...modelPrettierOptions, plugins});
+  return prettier.format(source, {
+    ...modelPrettierOptions,
+    plugins,
+    endOfLine,
+  });
 }
 
 async function formatTypeScriptWithCursor(
   source: string,
   cursorOffset: number,
+  endOfLine: 'lf' | 'crlf',
 ) {
   const {prettier, plugins} = await loadPrettier();
   const options: CursorOptions = {
     ...modelPrettierOptions,
     plugins,
     cursorOffset,
+    endOfLine,
   };
   return prettier.formatWithCursor(source, options);
 }
