@@ -1,0 +1,92 @@
+---
+name: worktree-development
+description: 'code3d 的隔离开发与串行集成流程。USE FOR: 在 code3d 中进行任何会保留的开发工作，或创建、恢复、合并临时 Git worktree，启动独立开发服务器，协调多个并行 agent 时。DO NOT USE FOR: 只读检查、解释或无需修改仓库的任务。'
+---
+
+# Worktree development
+
+每个开发需求在自己的 linked worktree 中完成。主 worktree 只用于领取合并队列、合并已提交的分支和执行最终测试；不得在其中实现功能或修复测试。
+
+本技能目录记为 `SKILL_DIR`，协调命令为：
+
+```bash
+python3 "$SKILL_DIR/scripts/coordination.py" [--repo <worktree>] <command>
+```
+
+命令会从任意 linked worktree 定位主 worktree，并原子更新主 worktree 内被 gitignore 的 `.agents/worktree-state.json`。直接运行 `coordination.py --help` 或子命令的 `--help` 查看参数。
+
+## 开始开发
+
+1. 检查 `git status --short --branch`、`git worktree list --porcelain` 和协调状态。不得移动、覆盖或带入其他人的未提交改动。
+2. 用任务短名和稳定的 agent 标识创建唯一分支与 sibling worktree。Herdr pane ID 可作为 agent 标识；用时间或随机后缀避免分支、目录重名。基线默认取主分支当前已提交的 `HEAD`，不能隐式复制主 worktree 的未提交内容。
+3. 如果当前已经是只属于本需求的 linked worktree，复用它；否则运行 `git worktree add -b <branch> <sibling-path> <base-ref>`。从此以后，所有读取、编辑、格式化、测试和提交都明确以该 worktree 为工作目录。不要在主 worktree 暂存功能文件。
+4. 在开发 worktree 中注册：
+
+   ```bash
+   python3 "$SKILL_DIR/scripts/coordination.py" register \
+     --task '<简明需求>' --role development
+   ```
+
+   默认 agent ID 是 `$HERDR_PANE_ID`；不在 Herdr 中时必须显式传 `--agent`。注册会记录 worktree、分支、提交以及 Herdr workspace/tab/pane ID。
+
+5. 在每轮实质工作开始和结束时运行 `heartbeat`，并用 `--note` 写当前动作。长任务至少每五分钟更新一次。不要用常驻心跳进程。
+
+主 worktree 有未提交内容时只能等待其现有 owner 或用户处理，不能为了创建开发 worktree 清理、stash 或提交这些内容。
+
+## 独立开发服务器
+
+每个开发 worktree 使用独立依赖目录、Vite cache 和端口。缺少依赖时在该 worktree 内运行 `timeout 300s npm install`，再运行 `timeout 300s npm run build:packages`；不要链接另一 worktree 的 `node_modules`。
+
+先原子预留端口：
+
+```bash
+PORT="$(python3 "$SKILL_DIR/scripts/coordination.py" reserve-port)"
+```
+
+在 Herdr 中先确认 `HERDR_ENV=1`，再用 `herdr pane current --current` 取得当前 IDs。为服务器创建 cwd 指向开发 worktree 的 pane，保留用户焦点，并强制使用预留端口：
+
+```bash
+herdr pane split --current --direction right --cwd "$WORKTREE" --no-focus
+herdr pane run <pane-id> "npm run dev --workspace @code3d/app -- --host 127.0.0.1 --port $PORT --strictPort"
+herdr pane wait-output <pane-id> --match "Local:" --timeout 120000
+```
+
+从 JSON 响应读取 pane ID，不能猜测。窄 pane 改为向下 split。确认 Vite 已监听后运行 `server-started --port "$PORT" --pane-id <pane-id> --command '<command>'`；失败或停止后运行 `server-stopped`。如果不在 Herdr 中，不伪造 Herdr ID；可启动受控后台进程并记录 PID。
+
+查看关联会话使用：
+
+```bash
+herdr pane current --current
+herdr agent list
+herdr workspace get "$HERDR_WORKSPACE_ID"
+python3 "$SKILL_DIR/scripts/coordination.py" status
+```
+
+Herdr 的 workspace/tab/pane ID 是相关终端会话的稳定句柄；协调文件中的 `herdr` 字段把它们与任务、分支和服务器关联起来。
+
+## 提交并排队
+
+开发完成后，在开发 worktree 中运行与风险相称的测试，确认 diff 只含本需求，提交任务改动，再把不可变的当前提交入队：
+
+```bash
+python3 "$SKILL_DIR/scripts/coordination.py" enqueue --summary '<改动与验证摘要>'
+```
+
+未提交、detached HEAD 或主 worktree 中的内容不能入队。入队记录固定 `HEAD`；分支之后若有新提交，必须用 `retry` 取代旧队列项并重新排到队尾。等待期间保持开发 worktree，不要自行合并主分支。
+
+## 串行集成
+
+集成 agent 必须位于主 worktree。注册 `--role integration` 后运行 `claim`；只有 FIFO 队首且当前没有 owner 时才能领取。`claim` 还会拒绝 dirty 的主 worktree。
+
+领取后：
+
+1. 核对队列记录的分支仍指向记录的 commit；只合并记录的 commit，不默默带入后续提交。
+2. 运行 `phase --phase merging`，再用 `git merge --no-ff --no-commit <commit>` 准备合并。冲突处理属于集成工作，但需要重新设计或修复功能时应回到开发 worktree。
+3. 运行 `phase --phase testing`，在主 worktree 执行最终测试。通过后完成 merge commit，确认主 worktree clean，再运行 `complete`。
+4. 若不能安全完成，优先在仍存在 `MERGE_HEAD` 时运行 `git merge --abort`。主 worktree恢复 clean 后运行 `block --reason '<原因>'`，把需求退回开发方且释放队列；开发方修复并提交后运行 `retry`，它会排到队尾。
+
+`claimed`、`merging` 或 `testing` owner 即使心跳陈旧也不能被自动抢占，因为主 worktree 可能处于未完成的合并状态。先通过协调文件和 Herdr ID 联系 owner；没有 owner 可恢复时，请用户决定如何处理。
+
+## 收尾
+
+成功集成后停止服务器，运行 `finish` 把开发 agent 标记为完成。只有确认分支已集成、worktree clean 且没有进程使用它后，才执行 `git worktree remove <path>`；删除分支也必须属于用户明确要求。协调记录保留已完成队列项，作为本地会话与集成历史。
