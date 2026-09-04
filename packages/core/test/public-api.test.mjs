@@ -38,3 +38,12 @@ test('exposes only the root and tooling package entries', async () => {
   );
   assert.deepEqual(Object.keys(packageJson.exports).sort(), ['.', './tooling']);
 });
+
+test('keeps the concrete model class out of the root declaration', async () => {
+  const declaration = await readFile(
+    new URL('../bld/library/index.d.ts', import.meta.url),
+    'utf8',
+  );
+  assert.doesNotMatch(declaration, /\bModelObject\b/);
+  assert.match(declaration, /\bGroupModel\b/);
+});

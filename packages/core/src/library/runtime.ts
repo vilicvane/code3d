@@ -457,28 +457,124 @@ type TopologyElementKind<Kind extends TopologyKind> = Kind extends 'surface'
     ? 'line'
     : 'point';
 
-export type Model<
-  Elements extends NamedElements = {},
-  Kind extends ModelKind = 'solid',
-> = ModelObject<Elements, Kind> & Elements;
+type ModelFamily = ModelKind | 'model';
+
+type ModelFamilyElementKind<Family extends ModelFamily> =
+  Family extends ModelKind ? ModelElementKind<Family> : ElementKind;
+
+type ModelForFamily<
+  Elements extends NamedElements,
+  Family extends ModelFamily,
+> = Family extends 'solid'
+  ? SolidModel<Elements>
+  : Family extends 'face'
+    ? FaceModel<Elements>
+    : Family extends 'edge'
+      ? EdgeModel<Elements>
+      : Family extends 'vertex'
+        ? VertexModel<Elements>
+        : Family extends 'group'
+          ? GroupModel<Elements>
+          : Model<Elements>;
+
+interface ModelCapabilities<
+  Elements extends NamedElements,
+  Family extends ModelFamily,
+> extends Anchor<ModelFamilyElementKind<Family>> {
+  relate(
+    build: (
+      self: ModelForFamily<Elements, Family>,
+    ) => Constraint | readonly Constraint[],
+  ): ModelForFamily<Elements, Family>;
+  expose<const Sources extends ElementSources>(
+    sources: Sources,
+  ): ModelForFamily<MergedElements<Elements, ExposedElements<Sources>>, Family>;
+  paint(color: string): ModelForFamily<Elements, Family>;
+}
+
+interface GeometryCapabilities<
+  Elements extends NamedElements,
+  Family extends ModelGeometryKind,
+> {
+  /** @code3d.param factor {kind: 'ratio', label: 'Scale'} */
+  scaled(factor: number): ModelForFamily<Elements, Family>;
+}
+
+interface VertexTopologyCapabilities {
+  /** @code3d.param id {kind: 'vertex', label: 'Vertex'} */
+  vertex(id: VertexId): Vertex;
+  /** @code3d.param ids {kind: 'vertex', label: 'Vertices'} */
+  vertices(ids?: readonly VertexId[]): readonly Vertex[];
+}
+
+interface EdgeTopologyCapabilities extends VertexTopologyCapabilities {
+  /** @code3d.param id {kind: 'edge', label: 'Edge'} */
+  edge(id: EdgeId): Edge;
+  /** @code3d.param ids {kind: 'edge', label: 'Edges'} */
+  edges(ids?: readonly EdgeId[]): readonly Edge[];
+}
+
+interface SurfaceTopologyCapabilities extends EdgeTopologyCapabilities {
+  /** @code3d.param id {kind: 'surface', label: 'Surface'} */
+  surface(id: SurfaceId): Surface;
+  /** @code3d.param ids {kind: 'surface', label: 'Surfaces'} */
+  surfaces(ids?: readonly SurfaceId[]): readonly Surface[];
+}
+
+interface SolidModificationCapabilities<Elements extends NamedElements> {
+  /**
+   * @code3d.param radius {kind: 'length', label: 'Fillet radius', constraints: {exclusiveMin: 0}}
+   * @code3d.param edgeIds {kind: 'edge', actions: [{label: 'Use all', action: 'remove-argument'}]}
+   */
+  fillet(radius: number, edgeIds?: readonly EdgeId[]): SolidModel<Elements>;
+  /**
+   * @code3d.param distance {kind: 'length', label: 'Chamfer distance', constraints: {exclusiveMin: 0}}
+   * @code3d.param edgeIds {kind: 'edge', actions: [{label: 'Use all', action: 'remove-argument'}]}
+   */
+  chamfer(distance: number, edgeIds?: readonly EdgeId[]): SolidModel<Elements>;
+}
+
+export type Model<Elements extends NamedElements = {}> = ModelCapabilities<
+  Elements,
+  'model'
+> &
+  Elements;
+
+export type GroupModel<Elements extends NamedElements = {}> = ModelCapabilities<
+  Elements,
+  'group'
+> &
+  Elements;
+
+export type VertexModel<Elements extends NamedElements = {}> =
+  ModelCapabilities<Elements, 'vertex'> &
+    GeometryCapabilities<Elements, 'vertex'> &
+    VertexTopologyCapabilities &
+    Elements;
+
+export type EdgeModel<Elements extends NamedElements = CurveElements> =
+  ModelCapabilities<Elements, 'edge'> &
+    GeometryCapabilities<Elements, 'edge'> &
+    EdgeTopologyCapabilities &
+    Elements;
+
+export type FaceModel<Elements extends NamedElements = PlanarElements> =
+  ModelCapabilities<Elements, 'face'> &
+    GeometryCapabilities<Elements, 'face'> &
+    SurfaceTopologyCapabilities &
+    Elements;
 
 export type SolidModel<Elements extends NamedElements = CanonicalElements> =
-  Model<Elements, 'solid'>;
+  ModelCapabilities<Elements, 'solid'> &
+    GeometryCapabilities<Elements, 'solid'> &
+    SurfaceTopologyCapabilities &
+    SolidModificationCapabilities<Elements> &
+    Elements;
 
-export type FaceModel<Elements extends NamedElements = PlanarElements> = Model<
-  Elements,
-  'face'
->;
-
-export type EdgeModel<Elements extends NamedElements = CurveElements> = Model<
-  Elements,
-  'edge'
->;
-
-export type VertexModel<Elements extends NamedElements = {}> = Model<
-  Elements,
-  'vertex'
->;
+type RuntimeModel<
+  Elements extends NamedElements,
+  Kind extends ModelKind,
+> = ModelObject<Elements, Kind> & Elements;
 
 export type CanonicalElements = Readonly<{
   center: PointAnchor;
@@ -756,8 +852,10 @@ export class ModelObject<
   }
 
   relate(
-    build: (self: Model<Elements, Kind>) => Constraint | readonly Constraint[],
-  ): Model<Elements, Kind> {
+    build: (
+      self: RuntimeModel<Elements, Kind>,
+    ) => Constraint | readonly Constraint[],
+  ): RuntimeModel<Elements, Kind> {
     const operation = storedOperation('relate', [
       {model: this, role: 'source', index: 0},
     ]);
@@ -778,7 +876,7 @@ export class ModelObject<
 
   expose<const Sources extends ElementSources>(
     sources: Sources,
-  ): Model<MergedElements<Elements, ExposedElements<Sources>>, Kind> {
+  ): RuntimeModel<MergedElements<Elements, ExposedElements<Sources>>, Kind> {
     const context = createSolveContext();
     const ownPose = this.solvePose(context);
     const references: ModelObject[] = [];
@@ -814,15 +912,13 @@ export class ModelObject<
     return this.copy(
       {elements: {...this.elements, ...exposed}},
       operation,
-    ) as Model<MergedElements<Elements, ExposedElements<Sources>>, Kind>;
+    ) as RuntimeModel<MergedElements<Elements, ExposedElements<Sources>>, Kind>;
   }
 
-  /** @code3d.param id {kind: 'vertex', label: 'Vertex'} */
   vertex(id: VertexId): Vertex {
     return this.vertices([id])[0];
   }
 
-  /** @code3d.param ids {kind: 'vertex', label: 'Vertices'} */
   vertices(ids?: readonly VertexId[]): readonly Vertex[] {
     const geometry = this.requireGeometry().value;
     const topology = geometry.topology.vertices;
@@ -839,12 +935,10 @@ export class ModelObject<
     );
   }
 
-  /** @code3d.param id {kind: 'surface', label: 'Surface'} */
   surface(id: SurfaceId): Surface {
     return this.surfaces([id])[0];
   }
 
-  /** @code3d.param ids {kind: 'surface', label: 'Surfaces'} */
   surfaces(ids?: readonly SurfaceId[]): readonly Surface[] {
     const geometry = this.requireGeometry().value;
     const topology = geometry.topology.surfaces;
@@ -868,12 +962,10 @@ export class ModelObject<
     );
   }
 
-  /** @code3d.param id {kind: 'edge', label: 'Edge'} */
   edge(id: EdgeId): Edge {
     return this.edges([id])[0];
   }
 
-  /** @code3d.param ids {kind: 'edge', label: 'Edges'} */
   edges(ids?: readonly EdgeId[]): readonly Edge[] {
     const geometry = this.requireGeometry().value;
     const topology = geometry.topology.edges;
@@ -897,15 +989,14 @@ export class ModelObject<
     );
   }
 
-  paint(color: string): Model<Elements, Kind> {
+  paint(color: string): RuntimeModel<Elements, Kind> {
     return this.copy(
       {color},
       storedOperation('paint', [{model: this, role: 'source', index: 0}]),
     );
   }
 
-  /** @code3d.param factor {kind: 'ratio', label: 'Scale'} */
-  scaled(factor: number): Model<Elements, Kind> {
+  scaled(factor: number): RuntimeModel<Elements, Kind> {
     assertPositive('scale', factor);
     const source = this.requireGeometry();
     const geometry = evaluateModelGeometry('scaled', [factor], [source], () => {
@@ -930,10 +1021,6 @@ export class ModelObject<
     );
   }
 
-  /**
-   * @code3d.param radius {kind: 'length', label: 'Fillet radius', constraints: {exclusiveMin: 0}}
-   * @code3d.param edgeIds {kind: 'edge', actions: [{label: 'Use all', action: 'remove-argument'}]}
-   */
   fillet(
     this: ModelObject<Elements, 'solid'>,
     radius: number,
@@ -965,13 +1052,9 @@ export class ModelObject<
       storedOperation('fillet', [{model: this, role: 'source', index: 0}], {
         selections: [{kind: 'edge', input: this, ids: selectedEdgeIds}],
       }),
-    );
+    ) as unknown as SolidModel<Elements>;
   }
 
-  /**
-   * @code3d.param distance {kind: 'length', label: 'Chamfer distance', constraints: {exclusiveMin: 0}}
-   * @code3d.param edgeIds {kind: 'edge', actions: [{label: 'Use all', action: 'remove-argument'}]}
-   */
   chamfer(
     this: ModelObject<Elements, 'solid'>,
     distance: number,
@@ -1003,14 +1086,14 @@ export class ModelObject<
       storedOperation('chamfer', [{model: this, role: 'source', index: 0}], {
         selections: [{kind: 'edge', input: this, ids: selectedEdgeIds}],
       }),
-    );
+    ) as unknown as SolidModel<Elements>;
   }
 
   /** @internal */
   withChildren(
     this: ModelObject<Elements, 'group'>,
     children: readonly ModelObject[],
-  ): Model<Elements, 'group'> {
+  ): RuntimeModel<Elements, 'group'> {
     if (this.kind !== 'group') {
       throw new Error('Only a group can contain child objects.');
     }
@@ -1217,7 +1300,7 @@ export class ModelObject<
           ? [{model: spine, role: 'spine' as const, index: sections.length}]
           : []),
       ]),
-    }) as SolidModel;
+    }) as unknown as SolidModel;
   }
 
   /** @internal */
@@ -1258,7 +1341,7 @@ export class ModelObject<
         ),
       });
       transferred = true;
-      return combined as SolidModel;
+      return combined as unknown as SolidModel;
     } finally {
       if (!transferred) {
         evaluation.geometry.value.shape.delete();
@@ -1481,7 +1564,7 @@ export class ModelObject<
     geometry: ModelGeometry,
     overrides: Partial<ModelObjectInit<Kind>>,
     operation: StoredOperation,
-  ): Model<Elements, Kind> {
+  ): RuntimeModel<Elements, Kind> {
     try {
       return this.copy({...overrides, geometry}, operation);
     } catch (error) {
@@ -1493,7 +1576,7 @@ export class ModelObject<
   private copy(
     overrides: Partial<ModelObjectInit<Kind>>,
     operation: StoredOperation,
-  ): Model<Elements, Kind> {
+  ): RuntimeModel<Elements, Kind> {
     return ModelObject.create<Elements, Kind>({
       kind: this.kind,
       geometry: this.geometry,
@@ -1508,7 +1591,7 @@ export class ModelObject<
       meshTolerance: this.meshTolerance,
       operation,
       ...overrides,
-    }) as Model<Elements, Kind>;
+    }) as RuntimeModel<Elements, Kind>;
   }
 }
 
@@ -1642,27 +1725,29 @@ export function spline(points: readonly Vec3[]): EdgeModel {
 }
 
 export type LoftOptions = Readonly<{
-  spine?: EdgeModel;
+  spine?: EdgeModel<{}>;
   ruled?: boolean;
 }>;
 
 export function loft(
-  sections: readonly FaceModel[],
+  sections: readonly FaceModel<{}>[],
   {spine, ruled = false}: LoftOptions = {},
 ): SolidModel {
   if (sections.length < 2) {
     throw new Error('loft requires at least two planar sections.');
   }
-  sections.forEach(section => {
-    if (!isModelObject(section) || section.kind !== 'face') {
-      throw new Error('Every loft section must be a planar face model.');
-    }
-  });
-  if (spine && (!isModelObject(spine) || spine.kind !== 'edge')) {
-    throw new Error('A loft spine must be a curve model.');
-  }
-  const [first, ...others] = sections;
-  return first[loftModels](others, spine, ruled);
+  const runtimeSections = sections.map(section =>
+    requireModelKind(
+      section,
+      'face',
+      'Every loft section must be a planar face model.',
+    ),
+  );
+  const runtimeSpine = spine
+    ? requireModelKind(spine, 'edge', 'A loft spine must be a curve model.')
+    : undefined;
+  const [first, ...others] = runtimeSections;
+  return first[loftModels](others, runtimeSpine, ruled);
 }
 
 /**
@@ -1681,7 +1766,7 @@ export function box(x: number, y: number, z: number): SolidModel {
       shape: makeBox([-x / 2, -y / 2, -z / 2], [x / 2, y / 2, z / 2]),
     })),
     operation: storedOperation('box'),
-  }) as Model<CanonicalElements>;
+  }) as unknown as SolidModel;
 }
 
 /**
@@ -1698,7 +1783,7 @@ export function cylinder(radius: number, y: number): SolidModel {
       shape: makeCylinder(radius, y, [0, -y / 2, 0], [0, 1, 0]),
     })),
     operation: storedOperation('cylinder'),
-  }) as Model<CanonicalElements>;
+  }) as unknown as SolidModel;
 }
 
 /** @code3d.param radius {kind: 'length', constraints: {exclusiveMin: 0}} */
@@ -1711,7 +1796,7 @@ export function sphere(radius: number): SolidModel {
       shape: makeSphere(radius),
     })),
     operation: storedOperation('sphere'),
-  }) as Model<CanonicalElements>;
+  }) as unknown as SolidModel;
 }
 
 /**
@@ -1747,7 +1832,7 @@ export function frustum(
       },
     ),
     operation: storedOperation('frustum'),
-  }) as Model<CanonicalElements>;
+  }) as unknown as SolidModel;
 }
 
 /**
@@ -1792,7 +1877,7 @@ export function regularPrism(
       },
     ),
     operation: storedOperation('regularPrism'),
-  }) as Model<CanonicalElements>;
+  }) as unknown as SolidModel;
 }
 
 export type HelicalThreadOptions = Readonly<{
@@ -1861,53 +1946,52 @@ export function helicalThread(options: HelicalThreadOptions): SolidModel {
     ),
     meshTolerance: Math.min(0.12, pitch / 8),
     operation: storedOperation('helicalThread'),
-  }) as Model<CanonicalElements>;
+  }) as unknown as SolidModel;
 }
 
-export function group(
-  children: readonly ModelObject[],
-  name = 'Group',
-): Model<{}, 'group'> {
-  assertChildren(children);
+export function group(children: readonly Model[], name = 'Group'): GroupModel {
+  const runtimeChildren = children.map(child =>
+    requireModelObject(child, 'Every group child must be a model.'),
+  );
   return ModelObject.create<{}, 'group'>({
     kind: 'group',
     name,
-    children,
+    children: runtimeChildren,
     operation: storedOperation(
       'group',
-      children.map((model, index) => ({model, role: 'child', index})),
+      runtimeChildren.map((model, index) => ({
+        model,
+        role: 'child',
+        index,
+      })),
     ),
-  });
+  }) as unknown as GroupModel;
 }
 
-export function union(
-  operands: readonly ModelObject<{}, 'solid'>[],
-): SolidModel {
+export function union(operands: readonly SolidModel<{}>[]): SolidModel {
   const {first, others} = booleanOperands('union', operands);
   return first[combineModels]('fuse', others);
 }
 
 export function cut(
-  stock: ModelObject<{}, 'solid'>,
-  tools: readonly ModelObject<{}, 'solid'>[],
+  stock: SolidModel<{}>,
+  tools: readonly SolidModel<{}>[],
 ): SolidModel {
-  if (!isModelObject(stock) || stock.kind !== 'solid') {
-    throw new Error('The cut stock must be a solid model.');
-  }
+  const runtimeStock = requireModelKind(
+    stock,
+    'solid',
+    'The cut stock must be a solid model.',
+  );
   if (tools.length === 0) {
     throw new Error('cut requires at least one tool.');
   }
-  for (const tool of tools) {
-    if (!isModelObject(tool) || tool.kind !== 'solid') {
-      throw new Error('Every cut tool must be a solid model.');
-    }
-  }
-  return stock[combineModels]('cut', tools);
+  const runtimeTools = tools.map(tool =>
+    requireModelKind(tool, 'solid', 'Every cut tool must be a solid model.'),
+  );
+  return runtimeStock[combineModels]('cut', runtimeTools);
 }
 
-export function intersect(
-  operands: readonly ModelObject<{}, 'solid'>[],
-): SolidModel {
+export function intersect(operands: readonly SolidModel<{}>[]): SolidModel {
   const {first, others} = booleanOperands('intersect', operands);
   return first[combineModels]('intersect', others);
 }
@@ -2189,7 +2273,7 @@ function planarFaceModel(
       plane,
     },
     operation: storedOperation(operation),
-  }) as FaceModel;
+  }) as unknown as FaceModel;
 }
 
 function curveModel(
@@ -2209,7 +2293,7 @@ function curveModel(
     intrinsic: {...elements.start, kind: 'line'},
     elements,
     operation: storedOperation(operation),
-  }) as EdgeModel;
+  }) as unknown as EdgeModel;
 }
 
 function curveElements(curve: ReplicadEdge): Readonly<{
@@ -2499,9 +2583,28 @@ function assertChildren(children: readonly ModelObject[]): void {
   }
 }
 
+function requireModelObject(value: unknown, message: string): ModelObject {
+  if (!isModelObject(value)) {
+    throw new Error(message);
+  }
+  return value;
+}
+
+function requireModelKind<Kind extends ModelKind>(
+  value: unknown,
+  kind: Kind,
+  message: string,
+): ModelObject<{}, Kind> {
+  const object = requireModelObject(value, message);
+  if (object.kind !== kind) {
+    throw new Error(message);
+  }
+  return object as ModelObject<{}, Kind>;
+}
+
 function booleanOperands(
   operation: 'union' | 'intersect',
-  operands: readonly ModelObject<{}, 'solid'>[],
+  operands: readonly SolidModel<{}>[],
 ): Readonly<{
   first: ModelObject<{}, 'solid'>;
   others: readonly ModelObject<{}, 'solid'>[];
@@ -2509,12 +2612,14 @@ function booleanOperands(
   if (operands.length < 2) {
     throw new Error(`${operation} requires at least two model operands.`);
   }
-  for (const operand of operands) {
-    if (!isModelObject(operand) || operand.kind !== 'solid') {
-      throw new Error(`Every ${operation} operand must be a solid model.`);
-    }
-  }
-  return {first: operands[0], others: operands.slice(1)};
+  const runtimeOperands = operands.map(operand =>
+    requireModelKind(
+      operand,
+      'solid',
+      `Every ${operation} operand must be a solid model.`,
+    ),
+  );
+  return {first: runtimeOperands[0], others: runtimeOperands.slice(1)};
 }
 
 function assertPositive(label: string, value: number): void {
