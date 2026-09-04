@@ -862,7 +862,7 @@ kbd {
   display: none;
 }
 
-.edge-selection-toolbar {
+.contextual-tool-panel {
   position: absolute;
   top: 34px;
   left: 14px;
@@ -880,11 +880,11 @@ kbd {
   backdrop-filter: blur(12px);
 }
 
-.edge-selection-toolbar[hidden] {
+.contextual-tool-panel[hidden] {
   display: none;
 }
 
-.edge-selection-header {
+.contextual-tool-header {
   display: grid;
   min-width: 0;
   gap: 4px;
@@ -893,30 +893,35 @@ kbd {
   font-family: 'IBM Plex Mono', monospace;
 }
 
-.edge-selection-header strong {
+.contextual-tool-header strong {
   color: var(--acid);
   font-size: 11px;
   font-weight: 600;
 }
 
-.edge-selection-header span,
-.edge-selection-field > span {
+.contextual-tool-header span,
+.contextual-tool-field > span {
   color: #777d71;
   font-family: 'IBM Plex Mono', monospace;
   font-size: 8px;
   letter-spacing: 0.1em;
 }
 
-.edge-selection-field {
+.contextual-tool-field {
   display: grid;
   gap: 7px;
 }
 
-.edge-selection-field[hidden] {
+.contextual-tool-field[hidden] {
   display: none;
 }
 
-.edge-selection-parameter-control {
+.contextual-tool-parameters {
+  display: grid;
+  gap: 12px;
+}
+
+.contextual-tool-parameter-control {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -928,7 +933,7 @@ kbd {
   color-scheme: dark;
 }
 
-.edge-selection-parameter-control input {
+.contextual-tool-parameter-control input {
   min-width: 0;
   padding: 8px 0;
   color: #edf3d5;
@@ -940,27 +945,27 @@ kbd {
     monospace;
 }
 
-.edge-selection-parameter-control input::selection {
+.contextual-tool-parameter-control input::selection {
   color: #11120f;
   background: var(--acid);
 }
 
-.edge-selection-parameter-control:focus-within {
+.contextual-tool-parameter-control:focus-within {
   border-color: var(--acid);
 }
 
-.edge-selection-parameter-control:has(input[aria-invalid='true']) {
+.contextual-tool-parameter-control:has(input[aria-invalid='true']) {
   border-color: #e8664d;
 }
 
-.edge-selection-parameter-control span {
+.contextual-tool-parameter-control span {
   color: #777d71;
   font:
     8px/1 'IBM Plex Mono',
     monospace;
 }
 
-.edge-selection-field output {
+.contextual-tool-field output {
   display: block;
   min-height: 32px;
   max-height: 72px;
@@ -976,11 +981,11 @@ kbd {
   overflow-wrap: anywhere;
 }
 
-.edge-selection-actions {
+.contextual-tool-actions {
   display: block;
 }
 
-.edge-selection-actions button {
+.contextual-tool-actions button {
   width: 100%;
   padding: 6px 9px;
   color: #c8cbc2;
@@ -991,13 +996,13 @@ kbd {
   font-size: 9px;
 }
 
-.edge-selection-actions button:hover:not(:disabled) {
+.contextual-tool-actions button:hover:not(:disabled) {
   color: #11120f;
   border-color: var(--acid);
   background: var(--acid);
 }
 
-.edge-selection-actions button:disabled {
+.contextual-tool-actions button:disabled {
   color: #5d6258;
   border-color: #2d302a;
   background: #171915;
@@ -1539,7 +1544,7 @@ kbd {
     width: 190px;
   }
 
-  .edge-selection-toolbar {
+  .contextual-tool-panel {
     right: 14px;
     width: auto;
     max-width: none;

@@ -932,8 +932,8 @@ export class ModelViewport {
           offset <= sourceRef.end,
       )
       .sort((left, right) => {
-        const leftIsTool = left.kind === 'operation-selection';
-        const rightIsTool = right.kind === 'operation-selection';
+        const leftIsTool = left.tool !== undefined;
+        const rightIsTool = right.tool !== undefined;
         if (leftIsTool !== rightIsTool) return leftIsTool ? -1 : 1;
         return (
           sourceSpan(left.sourceRef) - sourceSpan(right.sourceRef) ||

@@ -447,6 +447,13 @@ then commit the generic panel and migrate viewport providers one operation
 family at a time. Adjust the schema when concrete operations expose a better
 boundary instead of preserving an awkward planned abstraction.
 
+Status: declaration parsing, overload-aware signature resolution, runtime call
+context, scalar write-back, parameter actions, and the generic contextual panel
+are implemented. Primitive constructors, `offset()`, `scaled()`, `fillet()`,
+and `chamfer()` use the annotation path. Edge picking remains a viewport
+provider layered into the same panel and undo session; further selectable
+parameter kinds will be migrated provider by provider.
+
 ### 5. Object combination tools
 
 - Handwritten standalone `union`, `cut`, and `intersect` functions are now the

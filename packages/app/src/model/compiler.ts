@@ -68,7 +68,6 @@ export type SourceTargetEvaluation = Readonly<{
     kind: 'edge';
     inputNodeId: string;
     ids: readonly EdgeId[];
-    parameter?: ParameterUsage;
   }>;
 }>;
 
@@ -1413,13 +1412,6 @@ function buildSourceTargets(
             candidate.kind === 'edge' &&
             candidate.inputNodeId === trace.objects[0]?.nodeId,
         );
-        const parameter = operation
-          ? editableEdgeOperationParameter(
-              objects.get(operation.outputNodeId),
-              operation,
-              site.operation,
-            )
-          : undefined;
         if (operation && selection) {
           return [
             {
@@ -1432,7 +1424,6 @@ function buildSourceTargets(
                 kind: 'edge',
                 inputNodeId: selection.inputNodeId,
                 ids: selection.ids,
-                parameter,
               },
             },
           ];
@@ -1454,11 +1445,6 @@ function buildSourceTargets(
               ids: validAttemptedEdgeIds(
                 inputSnapshot,
                 attemptedEdgeIds(execution.arguments.get(1)),
-              ),
-              parameter: editableEdgeOperationParameterFromParameters(
-                execution.parameters,
-                execution.sourceRef,
-                site.operation,
               ),
             },
           },
@@ -1677,41 +1663,6 @@ function sourceExecutionFor(
   );
 }
 
-function editableEdgeOperationParameter(
-  output: ModelSnapshotObject | undefined,
-  operation: ModelOperationSnapshot,
-  operationKind: 'fillet' | 'chamfer',
-): ParameterUsage | undefined {
-  const operationRef = operation.sourceRef;
-  if (!output || !operationRef) return undefined;
-  return editableEdgeOperationParameterFromParameters(
-    output.parameters,
-    operationRef,
-    operationKind,
-  );
-}
-
-function editableEdgeOperationParameterFromParameters(
-  parameters: readonly ParameterUsage[],
-  operationRef: SourceRef,
-  operationKind: 'fillet' | 'chamfer',
-): ParameterUsage | undefined {
-  const argument = operationKind === 'fillet' ? 'radius' : 'distance';
-  const matches = parameters.filter(
-    parameter =>
-      parameter.operation === operationKind &&
-      parameter.argument === argument &&
-      sameSourceRef(parameter.operationRef, operationRef) &&
-      Math.abs(parameter.sensitivity) > 1e-9,
-  );
-  const upstream = matches.filter(
-    parameter =>
-      !containsSourceRef(parameter.expressionRef, parameter.target.sourceRef),
-  );
-  const candidates = upstream.length > 0 ? upstream : matches;
-  return candidates.length === 1 ? candidates[0] : undefined;
-}
-
 function attemptedEdgeIds(value: unknown): EdgeId[] {
   if (!Array.isArray(value)) return [];
   return [
@@ -1735,25 +1686,6 @@ function validAttemptedEdgeIds(
     input.mesh.edgeGroups.map(edgeGroup => edgeGroup.edgeId),
   );
   return attempted.filter(edgeId => available.has(edgeId));
-}
-
-function containsSourceRef(
-  container: SourceRef,
-  candidate: SourceRef,
-): boolean {
-  return (
-    container.file === candidate.file &&
-    container.start <= candidate.start &&
-    candidate.end <= container.end
-  );
-}
-
-function sameSourceRef(left: SourceRef, right: SourceRef): boolean {
-  return (
-    left.file === right.file &&
-    left.start === right.start &&
-    left.end === right.end
-  );
 }
 
 function sourceLineageContains(
