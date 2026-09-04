@@ -60,8 +60,9 @@ silently reorder the active milestones. Closed requests move to
   separate topology ledger. `model.vertex(id)`, `model.edge(id)`, and
   `model.surface(id)` return complete point, line, and face anchors: vertices
   use the owning model orientation, edges use their midpoint and tangent, and
-  surfaces use their center and normal. Their `vertices(ids)`, `edges(ids)`,
-  and `surfaces(ids)` counterparts return ordered arrays of the same anchors.
+  surfaces use their center and normal. Their `vertices(ids?)`, `edges(ids?)`,
+  and `surfaces(ids?)` counterparts return ordered arrays of the same anchors,
+  defaulting to every current stable topology ID when the argument is omitted.
 - A composite is broad: any connected set of occurrences and spatial relations
   is a composite, including copy, pattern, boolean operands, groups, and
   assemblies. A composite can itself be reused as geometry in a larger model.
@@ -373,9 +374,9 @@ constraint source sites do.
   element, and writes each new pick directly to the argument; a missing or
   retired ID remains repairable from the failed call's reached receiver.
 - Let array-valued topology parameters use the same provider in multiple mode.
-  `.vertices(ids)`, `.edges(ids)`, and `.surfaces(ids)` preserve an explicit
-  empty array as an empty reference collection; unlike fillet/chamfer, omission
-  does not mean “all”.
+  `.vertices(ids?)`, `.edges(ids?)`, and `.surfaces(ids?)` preserve an explicit
+  empty array as an empty reference collection and return all current stable
+  topology references when the argument is omitted.
 
 Status: complete. The runtime topology namespaces, edge-scoped modification
 API, singular and plural vertex/edge/surface reference APIs, derivation

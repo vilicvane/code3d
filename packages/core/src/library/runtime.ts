@@ -777,11 +777,12 @@ export class ModelObject<
   }
 
   /** @code3d.param ids {kind: 'vertex', label: 'Vertices'} */
-  vertices(ids: readonly VertexId[]): readonly Vertex[] {
+  vertices(ids?: readonly VertexId[]): readonly Vertex[] {
     const geometry = this.requireGeometry().value;
     const topology = geometry.topology.vertices;
-    const points = topologyVertexPoints(geometry.shape, topology, ids);
-    return ids.map(
+    const selectedIds = ids ?? topology.ids;
+    const points = topologyVertexPoints(geometry.shape, topology, selectedIds);
+    return selectedIds.map(
       (id, index) =>
         new ModelTopologyElement(
           this,
@@ -798,11 +799,16 @@ export class ModelObject<
   }
 
   /** @code3d.param ids {kind: 'surface', label: 'Surfaces'} */
-  surfaces(ids: readonly SurfaceId[]): readonly Surface[] {
+  surfaces(ids?: readonly SurfaceId[]): readonly Surface[] {
     const geometry = this.requireGeometry().value;
     const topology = geometry.topology.surfaces;
-    const directions = topologySurfaceDirections(geometry.shape, topology, ids);
-    return ids.map(
+    const selectedIds = ids ?? topology.ids;
+    const directions = topologySurfaceDirections(
+      geometry.shape,
+      topology,
+      selectedIds,
+    );
+    return selectedIds.map(
       (id, index) =>
         new ModelTopologyElement(
           this,
@@ -822,11 +828,16 @@ export class ModelObject<
   }
 
   /** @code3d.param ids {kind: 'edge', label: 'Edges'} */
-  edges(ids: readonly EdgeId[]): readonly Edge[] {
+  edges(ids?: readonly EdgeId[]): readonly Edge[] {
     const geometry = this.requireGeometry().value;
     const topology = geometry.topology.edges;
-    const directions = topologyEdgeDirections(geometry.shape, topology, ids);
-    return ids.map(
+    const selectedIds = ids ?? topology.ids;
+    const directions = topologyEdgeDirections(
+      geometry.shape,
+      topology,
+      selectedIds,
+    );
+    return selectedIds.map(
       (id, index) =>
         new ModelTopologyElement(
           this,
