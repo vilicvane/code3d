@@ -65,7 +65,7 @@ button {
 }
 
 .brand {
-  gap: 10px;
+  gap: 14px;
   font-weight: 600;
   letter-spacing: -0.02em;
 }
@@ -84,10 +84,6 @@ button {
   font-family: 'IBM Plex Mono', monospace;
   text-transform: uppercase;
   letter-spacing: 0.11em;
-}
-
-.prototype-tag {
-  margin-left: 4px;
   padding: 3px 6px;
   color: #8e9486;
   border: 1px solid #33362f;

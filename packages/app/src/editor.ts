@@ -529,7 +529,7 @@ export class CodeEditor {
     void Promise.all(
       [...grouped.keys()].map(path => this.formatFile(path)),
     ).catch(error =>
-      console.error('Prettier failed after a code3d source edit.', error),
+      console.error('Prettier failed after a Code3D source edit.', error),
     );
     return true;
   }

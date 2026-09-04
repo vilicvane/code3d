@@ -89,7 +89,7 @@ app.innerHTML = `
     <header class="topbar">
       <div class="brand">
         <span class="brand-mark" aria-hidden="true"></span>
-        <span>code3d</span>
+        <span>Code3D</span>
         <span class="prototype-tag">prototype 01</span>
       </div>
       <div class="topbar-actions">

@@ -171,7 +171,7 @@ class ZenProjectFileSystem implements ProjectFileSystem {
 
   private async requireManifest(): Promise<ProjectManifest> {
     const manifest = await this.readManifest();
-    if (!manifest) throw new Error('The code3d project is not initialized.');
+    if (!manifest) throw new Error('The Code3D project is not initialized.');
     return manifest;
   }
 
