@@ -30,6 +30,7 @@ import {
   resolveProjectToolCalls,
   toolCallKey,
   type ToolCallSchemaMap,
+  type ToolArgumentSource,
   type ToolSignatureSchema,
 } from './tool-schema';
 import {
@@ -49,6 +50,7 @@ const workspacePackages = new Map<string, unknown>([
 export type SourceTargetEvaluation = Readonly<{
   runtime: RuntimeReach;
   nodeIds: readonly string[];
+  parameters?: readonly ParameterUsage[];
   operationId?: string;
   operationInput?: Readonly<{
     role: ModelOperationInputRole;
@@ -98,6 +100,10 @@ export type SourceTarget = Readonly<{
   functionId?: string;
   evaluations: readonly SourceTargetEvaluation[];
   contextTargetIds: readonly string[];
+  tool?: Readonly<{
+    signature: ToolSignatureSchema;
+    arguments: readonly ToolArgumentSource[];
+  }>;
   operation?: Readonly<{
     kind: ModelOperationKind;
     role?: ModelOperationInputRole;
@@ -281,6 +287,13 @@ type EdgeSelectionSite = Readonly<{
   edgeArgument: EdgeArgumentTarget;
 }>;
 
+type ToolCallSite = Readonly<{
+  siteId: string;
+  sourceRef: SourceRef;
+  signature: ToolSignatureSchema;
+  arguments: readonly ToolArgumentSource[];
+}>;
+
 type TraceFrame = Readonly<{
   trace: SourceExecutionTrace;
 }>;
@@ -302,6 +315,7 @@ const sourceValueTraces = new Map<string, SourceValueTrace>();
 const sourceConstraintTraces = new Map<string, SourceConstraintTrace>();
 const sourceElementTraces = new Map<string, SourceElementTrace>();
 const edgeSelectionSites = new Map<string, EdgeSelectionSite>();
+const toolCallSites = new Map<string, ToolCallSite>();
 const sourceExecutionTraces = new Map<string, SourceExecutionTrace>();
 const catalogTraces = new Map<string, CatalogTrace>();
 const parameterFrames: ParameterUsage[][] = [];
@@ -943,6 +957,7 @@ export function compileProject(
   sourceConstraintTraces.clear();
   sourceElementTraces.clear();
   edgeSelectionSites.clear();
+  toolCallSites.clear();
   sourceExecutionTraces.clear();
   catalogTraces.clear();
   parameterFrames.length = 0;
@@ -1162,6 +1177,7 @@ export function compileProject(
     sourceConstraintTraces.clear();
     sourceElementTraces.clear();
     edgeSelectionSites.clear();
+    toolCallSites.clear();
     sourceExecutionTraces.clear();
     catalogTraces.clear();
     parameterFrames.length = 0;
@@ -1303,6 +1319,7 @@ function buildSourceTargets(
     execution => execution.inputs,
   );
   const valueTargets = [...sourceValueTraces.values()].map(trace => {
+    const toolSite = toolCallSites.get(trace.id);
     const evaluations = trace.evaluations.map(
       ({objects, contextId, runtime}) => {
         const nodeIds = objects.map(object => object.nodeId);
@@ -1311,7 +1328,14 @@ function buildSourceTargets(
             operation.siteId === trace.id &&
             nodeIds.includes(operation.outputNodeId),
         )?.id;
-        return {runtime, nodeIds, operationId, contextId};
+        return {
+          runtime,
+          nodeIds,
+          operationId,
+          contextId,
+          parameters: sourceExecutionFor(trace.id, contextId, runtime)
+            ?.parameters,
+        };
       },
     );
     const outputOperation = evaluations
@@ -1324,10 +1348,11 @@ function buildSourceTargets(
     return {
       id: `source:${trace.kind}:${trace.id}`,
       kind: trace.kind,
-      sourceRef: trace.sourceRef,
+      sourceRef: toolSite?.sourceRef ?? trace.sourceRef,
       functionId: designFunctionAt(trace.sourceRef, designArguments),
       evaluations,
       contextTargetIds: [],
+      tool: sourceTool(toolSite),
       operation:
         trace.kind === 'operation-output' && outputOperation
           ? {kind: outputOperation.kind}
@@ -1400,6 +1425,7 @@ function buildSourceTargets(
             {
               runtime: sourceExecutionRuntime(execution),
               nodeIds: [operation.outputNodeId],
+              parameters: execution.parameters,
               operationId: operation.id,
               contextId: trace.contextId,
               selection: {
@@ -1420,6 +1446,7 @@ function buildSourceTargets(
           {
             runtime: sourceExecutionRuntime(execution),
             nodeIds: [input.nodeId],
+            parameters: execution.parameters,
             contextId: execution.contextId,
             selection: {
               kind: 'edge',
@@ -1446,6 +1473,7 @@ function buildSourceTargets(
               functionId: designFunctionAt(site.sourceRef, designArguments),
               evaluations,
               contextTargetIds: [],
+              tool: sourceTool(toolCallSites.get(site.siteId)),
               operation: {
                 kind: site.operation,
                 role: 'source' as const,
@@ -1457,8 +1485,14 @@ function buildSourceTargets(
     },
   );
   const constraintTargets = [...sourceConstraintTraces.values()].map(trace => {
+    const toolSite = toolCallSites.get(trace.id);
     const evaluations = trace.evaluations.flatMap<SourceTargetEvaluation>(
       evaluation => {
+        const execution = sourceExecutionFor(
+          trace.id,
+          evaluation.contextId,
+          evaluation.runtime,
+        );
         const consumers = operationInputTargets.flatMap(target =>
           isCompositionInputRole(target.role)
             ? target.evaluations
@@ -1477,6 +1511,7 @@ function buildSourceTargets(
         return consumers.length > 0
           ? consumers.map(consumer => ({
               runtime: consumer.input.runtime,
+              parameters: execution?.parameters,
               nodeIds: uniqueNodeIds(evaluation.source, evaluation.target),
               operationId: consumer.input.operationId,
               operationInput: {
@@ -1490,6 +1525,7 @@ function buildSourceTargets(
           : [
               {
                 runtime: evaluation.runtime,
+                parameters: execution?.parameters,
                 nodeIds: uniqueNodeIds(evaluation.source, evaluation.target),
                 constraintId: evaluation.constraintId,
                 constraintSourceNodeId: evaluation.source.nodeId,
@@ -1506,9 +1542,10 @@ function buildSourceTargets(
     return {
       id: `source:constraint:${trace.id}`,
       kind: 'constraint',
-      sourceRef: trace.sourceRef,
+      sourceRef: toolSite?.sourceRef ?? trace.sourceRef,
       functionId: designFunctionAt(trace.sourceRef, designArguments),
       evaluations,
+      tool: sourceTool(toolSite),
       contextTargetIds: operationInputTargets
         .filter(target =>
           target.evaluations.some(evaluation =>
@@ -1619,6 +1656,25 @@ function buildSourceTargets(
       (left, right) => right.runtime.order - left.runtime.order,
     ),
   }));
+}
+
+function sourceTool(site: ToolCallSite | undefined): SourceTarget['tool'] {
+  return site
+    ? {signature: site.signature, arguments: site.arguments}
+    : undefined;
+}
+
+function sourceExecutionFor(
+  siteId: string,
+  contextId: string,
+  runtime: RuntimeReach,
+): SourceExecutionTrace | undefined {
+  return [...sourceExecutionTraces.values()].find(
+    execution =>
+      execution.siteId === siteId &&
+      execution.contextId === contextId &&
+      execution.order === runtime.order,
+  );
 }
 
 function editableEdgeOperationParameter(
@@ -1883,11 +1939,22 @@ function createTraceTransformer(
           isTraceableCall(node, sourceFile)
         ) {
           const siteId = stableSourceId('expression', node, sourceFile);
+          const toolSignature = toolCalls?.get(
+            toolCallKey(node.getStart(sourceFile), node.getEnd()),
+          );
+          if (toolSignature) {
+            toolCallSites.set(
+              siteId,
+              toolCallSite(node, siteId, toolSignature, sourceFile),
+            );
+          }
           const edgeSelection = edgeSelectionSite(node, siteId, sourceFile);
           if (edgeSelection) {
             edgeSelectionSites.set(siteId, edgeSelection);
           }
-          const parameterSignature = getParameterSignature(node, toolCalls);
+          const parameterSignature = toolSignature
+            ? parameterSignatureFor(toolSignature)
+            : undefined;
           const parameterizedCall = parameterSignature
             ? instrumentCallParameters(
                 node,
@@ -2860,15 +2927,69 @@ function createNumberExpression(
   return factory.createNumericLiteral(Object.is(value, -0) ? 0 : value);
 }
 
-function getParameterSignature(
+function toolCallSite(
   node: ts.CallExpression,
-  toolCalls: ToolCallSchemaMap | undefined,
-): ParameterSignature | undefined {
-  const schema = toolCalls?.get(toolCallKey(node.getStart(), node.getEnd()));
-  return schema ? parameterSignature(schema) : undefined;
+  siteId: string,
+  signature: ToolSignatureSchema,
+  sourceFile: ts.SourceFile,
+): ToolCallSite {
+  const sourceStart = ts.isPropertyAccessExpression(node.expression)
+    ? node.expression.name.getStart(sourceFile)
+    : node.expression.getStart(sourceFile);
+  return {
+    siteId,
+    sourceRef: sourceRef(sourceFile.fileName, sourceStart, node.getEnd()),
+    signature,
+    arguments: signature.parameters.flatMap(parameter => {
+      const target = toolArgumentSource(node, parameter.index, sourceFile);
+      return target
+        ? [{name: parameter.name, index: parameter.index, target}]
+        : [];
+    }),
+  };
 }
 
-function parameterSignature(
+function toolArgumentSource(
+  call: ts.CallExpression,
+  index: number,
+  sourceFile: ts.SourceFile,
+): ToolArgumentSource['target'] | undefined {
+  const argument = call.arguments[index];
+  if (argument) {
+    const previous = call.arguments[index - 1];
+    const next = call.arguments[index + 1];
+    const removalStart = previous
+      ? previous.getEnd()
+      : argument.getStart(sourceFile);
+    const removalEnd = previous
+      ? argument.getEnd()
+      : next
+        ? next.getStart(sourceFile)
+        : argument.getEnd();
+    return {
+      kind: 'present',
+      sourceRef: sourceRef(
+        sourceFile.fileName,
+        argument.getStart(sourceFile),
+        argument.getEnd(),
+      ),
+      removalSourceRef: sourceRef(
+        sourceFile.fileName,
+        removalStart,
+        removalEnd,
+      ),
+    };
+  }
+  if (index !== call.arguments.length) return undefined;
+  const closeParen = call.getEnd() - 1;
+  return {
+    kind: 'omitted',
+    sourceRef: sourceRef(sourceFile.fileName, closeParen, closeParen),
+    needsComma: call.arguments.length > 0 && !call.arguments.hasTrailingComma,
+  };
+}
+
+function parameterSignatureFor(
   schema: ToolSignatureSchema,
 ): ParameterSignature | undefined {
   const numericParameters = schema.parameters.filter(

@@ -1861,6 +1861,12 @@ function toolSourceRefs(module: ModelModule): SourceRef[] {
     ...module.sourceTargets.flatMap(target => [
       target.sourceRef,
       ...(target.receiverRef ? [target.receiverRef] : []),
+      ...(target.tool?.arguments.flatMap(argument => [
+        argument.target.sourceRef,
+        ...(argument.target.kind === 'present'
+          ? [argument.target.removalSourceRef]
+          : []),
+      ]) ?? []),
       ...target.evaluations.flatMap(evaluation =>
         evaluation.selection?.parameter
           ? [evaluation.selection.parameter.target.sourceRef]

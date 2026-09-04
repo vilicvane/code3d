@@ -1,6 +1,7 @@
 import ts from '@typescript/typescript6';
 import es5Library from '@typescript/old/lib/lib.es5.d.ts?raw';
 import type {ParameterKind} from '@code3d/core/tooling';
+import type {SourceRef} from '@code3d/core/tooling';
 import {
   injectedPackageFiles,
   injectedPackages,
@@ -35,6 +36,25 @@ export type ToolSignatureSchema = Readonly<{
   id: string;
   name: string;
   parameters: readonly ToolParameterSchema[];
+}>;
+
+export type ToolArgumentEditTarget = Readonly<
+  | {
+      kind: 'present';
+      sourceRef: SourceRef;
+      removalSourceRef: SourceRef;
+    }
+  | {
+      kind: 'omitted';
+      sourceRef: SourceRef;
+      needsComma: boolean;
+    }
+>;
+
+export type ToolArgumentSource = Readonly<{
+  name: string;
+  index: number;
+  target: ToolArgumentEditTarget;
 }>;
 
 export type ToolCallSchemaMap = ReadonlyMap<string, ToolSignatureSchema>;
