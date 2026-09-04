@@ -41,6 +41,7 @@ const workspacePackages = new Map<string, unknown>([
 ]);
 
 export type SourceTargetEvaluation = Readonly<{
+  runtime: RuntimeReach;
   nodeIds: readonly string[];
   operationId?: string;
   operationInput?: Readonly<{
@@ -61,6 +62,11 @@ export type SourceTargetEvaluation = Readonly<{
     ids: readonly EdgeId[];
     parameter?: ParameterUsage;
   }>;
+}>;
+
+export type RuntimeReach = Readonly<{
+  order: number;
+  outcome: 'completed' | 'failed';
 }>;
 
 export type EdgeArgumentTarget = Readonly<
@@ -214,7 +220,11 @@ type SourceValueTrace = {
   kind: 'value' | 'operation-output';
   sourceRef: SourceRef;
   evaluations: Array<
-    Readonly<{objects: readonly ModelObject[]; contextId: string}>
+    Readonly<{
+      objects: readonly ModelObject[];
+      contextId: string;
+      runtime: RuntimeReach;
+    }>
   >;
 };
 
@@ -226,6 +236,7 @@ type SourceInputTrace = Readonly<{
   index: number;
   objects: readonly ModelObject[];
   contextId: string;
+  runtime: RuntimeReach;
 }>;
 
 type SourceConstraintTrace = {
@@ -237,6 +248,7 @@ type SourceConstraintTrace = {
       source: ModelObject;
       target: ModelObject;
       contextId: string;
+      runtime: RuntimeReach;
     }>
   >;
 };
@@ -251,6 +263,7 @@ type SourceElementTrace = {
       name: string;
       kind: ElementKind;
       contextId: string;
+      runtime: RuntimeReach;
     }>
   >;
 };
@@ -381,7 +394,7 @@ const designContextFrames: EvaluationContext[] = [];
 const designRootObjects = new Set<ModelObject>();
 let latestTracedObject: ModelObject | undefined;
 let evaluationOrder = 0;
-let sourceExecutionOrder = 0;
+let sourceReachOrder = 0;
 const traceRuntime = Object.freeze({
   trace<T>(
     file: string,
@@ -405,7 +418,7 @@ const traceRuntime = Object.freeze({
       contextId: context.id,
       sourceRef: location,
       outcome: 'entered',
-      order: nextSourceExecutionOrder(),
+      order: nextSourceReachOrder(),
       parameters,
       arguments: new Map(),
       inputs: [],
@@ -418,24 +431,32 @@ const traceRuntime = Object.freeze({
       result = run();
     } catch (error) {
       executionTrace.outcome = 'failed';
-      executionTrace.order = nextSourceExecutionOrder();
+      executionTrace.order = nextSourceReachOrder();
       throw locateModelError(error, sourceRef(file, failureStart, failureEnd));
     } finally {
       traceFrames.pop();
       parameterFrames.pop();
     }
     executionTrace.outcome = 'completed';
-    executionTrace.order = nextSourceExecutionOrder();
+    executionTrace.order = nextSourceReachOrder();
+    const runtime = sourceExecutionRuntime(executionTrace);
     if (isConstraint(result)) {
       result.attachSource(location);
       result.attachParameters(parameters);
-      recordSourceConstraint(id, location, result, context.id);
+      recordSourceConstraint(id, location, result, context.id, runtime);
     } else if (isModelObject(result)) {
       const order = ++evaluationOrder;
       result.attachSource(location);
       result.attachParameters(parameters);
       result.attachOperationTrace(id, execution, order, location);
-      recordSourceValue(id, 'operation-output', location, result, context.id);
+      recordSourceValue(
+        id,
+        'operation-output',
+        location,
+        result,
+        context.id,
+        runtime,
+      );
       if (context.kind === 'call') {
         recordCatalogValue(
           {
@@ -451,7 +472,7 @@ const traceRuntime = Object.freeze({
       }
       return result;
     } else {
-      recordSourceValue(id, 'value', location, result, context.id);
+      recordSourceValue(id, 'value', location, result, context.id, runtime);
     }
     const order = ++evaluationOrder;
     if (context.kind === 'call') {
@@ -495,10 +516,11 @@ const traceRuntime = Object.freeze({
     } catch (error) {
       throw locateModelError(error, location);
     }
+    const runtime = completedRuntimeReach();
     if (isConstraint(result)) {
-      recordSourceConstraint(id, location, result, context.id);
+      recordSourceConstraint(id, location, result, context.id, runtime);
     } else {
-      recordSourceValue(id, 'value', location, result, context.id);
+      recordSourceValue(id, 'value', location, result, context.id, runtime);
     }
     const order = ++evaluationOrder;
     if (context.kind === 'call') {
@@ -548,6 +570,7 @@ const traceRuntime = Object.freeze({
       sourceRef(file, functionStart, functionEnd),
       result,
       id,
+      completedRuntimeReach(),
     );
     return result;
   },
@@ -576,6 +599,7 @@ const traceRuntime = Object.freeze({
         index,
         objects,
         contextId: executionTrace.contextId,
+        runtime: completedRuntimeReach(),
       });
     }
     return value;
@@ -617,7 +641,11 @@ const traceRuntime = Object.freeze({
       receiverRef: receiver,
       evaluations: [],
     };
-    trace.evaluations.push({...reference, contextId: context.id});
+    trace.evaluations.push({
+      ...reference,
+      contextId: context.id,
+      runtime: completedRuntimeReach(),
+    });
     sourceElementTraces.set(key, trace);
     tracedObjects.add(reference.model);
     return value;
@@ -680,9 +708,22 @@ function nextTraceExecution(id: string): number {
   return execution;
 }
 
-function nextSourceExecutionOrder(): number {
-  sourceExecutionOrder += 1;
-  return sourceExecutionOrder;
+function nextSourceReachOrder(): number {
+  sourceReachOrder += 1;
+  return sourceReachOrder;
+}
+
+function completedRuntimeReach(): RuntimeReach {
+  return {order: nextSourceReachOrder(), outcome: 'completed'};
+}
+
+function sourceExecutionRuntime(trace: SourceExecutionTrace): RuntimeReach {
+  if (trace.outcome === 'entered') {
+    throw new Error(
+      'A running source execution cannot produce a source target.',
+    );
+  }
+  return {order: trace.order, outcome: trace.outcome};
 }
 
 function traceExecutionKey(siteId: string, execution: number): string {
@@ -695,6 +736,7 @@ function recordSourceValue(
   sourceRef: SourceRef,
   value: unknown,
   contextId: string,
+  runtime: RuntimeReach,
 ): void {
   const objects = modelObjectsIn(value);
   if (objects.length === 0) {
@@ -707,7 +749,7 @@ function recordSourceValue(
     sourceRef,
     evaluations: [],
   };
-  sourceTrace.evaluations.push({objects, contextId});
+  sourceTrace.evaluations.push({objects, contextId, runtime});
   objects.forEach(object => {
     tracedObjects.add(object);
     if (evaluationContexts.get(contextId)?.kind === 'call') {
@@ -722,6 +764,7 @@ function recordSourceConstraint(
   location: SourceRef,
   constraint: Constraint,
   contextId: string,
+  runtime: RuntimeReach,
 ): void {
   const reference = constraint.traceReference();
   const key = `${id}:${location.file}:${location.start}:${location.end}`;
@@ -730,7 +773,7 @@ function recordSourceConstraint(
     sourceRef: location,
     evaluations: [],
   };
-  trace.evaluations.push({...reference, contextId});
+  trace.evaluations.push({...reference, contextId, runtime});
   sourceConstraintTraces.set(key, trace);
   tracedObjects.add(reference.source);
   tracedObjects.add(reference.target);
@@ -991,7 +1034,7 @@ export function compileProject(
   designRootObjects.clear();
   latestTracedObject = undefined;
   evaluationOrder = 0;
-  sourceExecutionOrder = 0;
+  sourceReachOrder = 0;
   try {
     const modules = new Map<string, CommonJsModule>();
     const executeModule = (path: string): CommonJsModule => {
@@ -1209,7 +1252,7 @@ export function compileProject(
     designRootObjects.clear();
     latestTracedObject = undefined;
     evaluationOrder = 0;
-    sourceExecutionOrder = 0;
+    sourceReachOrder = 0;
   }
 }
 
@@ -1337,15 +1380,17 @@ function buildSourceTargets(
     execution => execution.inputs,
   );
   const valueTargets = [...sourceValueTraces.values()].map(trace => {
-    const evaluations = trace.evaluations.map(({objects, contextId}) => {
-      const nodeIds = objects.map(object => object.nodeId);
-      const operationId = [...operations.values()].find(
-        operation =>
-          operation.siteId === trace.id &&
-          nodeIds.includes(operation.outputNodeId),
-      )?.id;
-      return {nodeIds, operationId, contextId};
-    });
+    const evaluations = trace.evaluations.map(
+      ({objects, contextId, runtime}) => {
+        const nodeIds = objects.map(object => object.nodeId);
+        const operationId = [...operations.values()].find(
+          operation =>
+            operation.siteId === trace.id &&
+            nodeIds.includes(operation.outputNodeId),
+        )?.id;
+        return {runtime, nodeIds, operationId, contextId};
+      },
+    );
     const outputOperation = evaluations
       .map(evaluation =>
         evaluation.operationId
@@ -1394,6 +1439,7 @@ function buildSourceTargets(
       operationId: operation.id,
       objects: trace.objects,
       contextId: trace.contextId,
+      runtime: trace.runtime,
     });
     inputTargets.set(key, target);
   }
@@ -1429,6 +1475,7 @@ function buildSourceTargets(
         if (operation && selection) {
           return [
             {
+              runtime: sourceExecutionRuntime(execution),
               nodeIds: [operation.outputNodeId],
               operationId: operation.id,
               contextId: trace.contextId,
@@ -1448,6 +1495,7 @@ function buildSourceTargets(
         }
         return [
           {
+            runtime: sourceExecutionRuntime(execution),
             nodeIds: [input.nodeId],
             contextId: execution.contextId,
             selection: {
@@ -1505,6 +1553,7 @@ function buildSourceTargets(
         );
         return consumers.length > 0
           ? consumers.map(consumer => ({
+              runtime: consumer.input.runtime,
               nodeIds: uniqueNodeIds(evaluation.source, evaluation.target),
               operationId: consumer.input.operationId,
               operationInput: {
@@ -1517,6 +1566,7 @@ function buildSourceTargets(
             }))
           : [
               {
+                runtime: evaluation.runtime,
                 nodeIds: uniqueNodeIds(evaluation.source, evaluation.target),
                 constraintId: evaluation.constraintId,
                 constraintSourceNodeId: evaluation.source.nodeId,
@@ -1582,6 +1632,7 @@ function buildSourceTargets(
             }))
           : [
               {
+                runtime: element.runtime,
                 nodeIds: [element.model.nodeId],
                 contextId: element.contextId,
                 element: elementSnapshot,
@@ -1604,7 +1655,7 @@ function buildSourceTargets(
     } satisfies SourceTarget;
   });
 
-  return [
+  const targets: SourceTarget[] = [
     ...elementTargets,
     ...constraintTargets,
     ...operationSelectionTargets,
@@ -1617,6 +1668,7 @@ function buildSourceTargets(
           sourceRef: target.sourceRef,
           functionId: designFunctionAt(target.sourceRef, designArguments),
           evaluations: target.evaluations.map(evaluation => ({
+            runtime: evaluation.runtime,
             nodeIds: evaluation.objects.map(object => object.nodeId),
             operationId: evaluation.operationId,
             operationInput: {
@@ -1638,6 +1690,12 @@ function buildSourceTargets(
         }) satisfies SourceTarget,
     ),
   ];
+  return targets.map(target => ({
+    ...target,
+    evaluations: [...target.evaluations].sort(
+      (left, right) => right.runtime.order - left.runtime.order,
+    ),
+  }));
 }
 
 function editableEdgeOperationParameter(
@@ -1776,6 +1834,7 @@ type MutableSourceInputTarget = {
       operationId: string;
       objects: readonly ModelObject[];
       contextId: string;
+      runtime: RuntimeReach;
     }>
   >;
   operationKind: ModelOperationKind;

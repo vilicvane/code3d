@@ -249,9 +249,13 @@ global error bar is reserved for failures without a reliable source location.
 When later evaluation fails after earlier model expressions succeeded, the
 compiler publishes that successful prefix as a partial module together with the
 diagnostic, so earlier source targets and their contextual tools remain usable.
-If the failing expression itself is a fillet or chamfer, its successfully
-evaluated input, attempted edge IDs, and editable size parameter form a failed
-operation target, allowing the same contextual tool to repair that call.
+Every traceable call records one ordered runtime execution containing its
+completion or failure outcome, evaluated operation inputs, actual arguments,
+and parameter provenance. Source targets keep that reach order and choose the
+most recently reached execution within the preferred runtime context. A tool
+therefore projects whichever context its call reached before failure instead of
+implementing a separate failure lifecycle; fillet and chamfer use the common
+record to repair their attempted edge selection and size parameter.
 [R-013](requests/closed/R-013-drill-from-composition-preview-to-object-source.md)
 is complete: an explicit double-click drills from the active composition
 operand to its best exact binding or defining expression, including

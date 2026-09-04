@@ -344,19 +344,22 @@ export class ModelViewport {
       return false;
     }
 
-    const preferredSourceIndex = sourceEvaluationIndex(preferredOccurrenceKey);
     const matchingContextIndex = preferredContextId
       ? match.evaluations.findIndex(
           evaluation => evaluation.contextId === preferredContextId,
         )
       : -1;
-    const preferredEvaluationIndex =
+    const retainedEvaluationIndex =
       this.renderedViewTarget.kind === 'source' &&
       this.renderedViewTarget.targetId === match.id
         ? this.renderedViewTarget.evaluationIndex
-        : preferredSourceIndex !== undefined
-          ? preferredSourceIndex
-          : matchingContextIndex;
+        : -1;
+    const preferredEvaluationIndex =
+      matchingContextIndex >= 0
+        ? matchingContextIndex
+        : retainedEvaluationIndex >= 0
+          ? retainedEvaluationIndex
+          : 0;
     const evaluationIndex = match.evaluations[preferredEvaluationIndex]
       ? preferredEvaluationIndex
       : 0;
@@ -934,7 +937,8 @@ export class ModelViewport {
         if (leftIsTool !== rightIsTool) return leftIsTool ? -1 : 1;
         return (
           sourceSpan(left.sourceRef) - sourceSpan(right.sourceRef) ||
-          sourceTargetPriority(left) - sourceTargetPriority(right)
+          sourceTargetPriority(left) - sourceTargetPriority(right) ||
+          latestRuntimeOrder(right) - latestRuntimeOrder(left)
         );
       })[0];
   }
@@ -1689,6 +1693,10 @@ function sourceSpan(sourceRef: SourceRef): number {
   return sourceRef.end - sourceRef.start;
 }
 
+function latestRuntimeOrder(target: SourceTarget): number {
+  return target.evaluations[0]?.runtime.order ?? -1;
+}
+
 function sourceTargetPriority(target: SourceTarget): number {
   if (target.kind === 'operation-selection') return -2;
   if (target.kind === 'element') return -1;
@@ -2262,15 +2270,6 @@ function pickTargetFromAncestors(
     current = current.parent;
   }
   return undefined;
-}
-
-function sourceEvaluationIndex(
-  occurrenceKey: string | undefined,
-): number | undefined {
-  if (!occurrenceKey?.startsWith('source/')) {
-    return undefined;
-  }
-  return Number(occurrenceKey.split('/')[1]);
 }
 
 function containsNode(node: ModelSnapshotObject, nodeId: string): boolean {
