@@ -311,6 +311,7 @@ type TopologyReferenceSelectionTool = {
   occurrenceKey: string;
   availableIds: readonly number[];
   selectedIds: readonly number[];
+  hasExplicitSelection: boolean;
 };
 type ContextualToolState = {
   callId: string;
@@ -1558,6 +1559,15 @@ function runContextualToolAction(id: string): void {
   tool.removedArguments.add(parameterName);
   tool.hasEdits = true;
   tool.historyState = 'applied';
+  const topology = topologyReferenceSelectionTool;
+  if (
+    topology?.targetId === tool.targetId &&
+    topology.parameter.name === parameterName
+  ) {
+    topology.selectedIds = [];
+    topology.hasExplicitSelection = false;
+    viewport.setSelectedTopologyIds(topology.selectedIds);
+  }
   const edge = edgeSelectionTool;
   if (edge && parameter?.kind === 'edge') {
     edge.selectedEdgeIds = [];
@@ -1618,7 +1628,9 @@ function renderContextualToolPanel(forceParameterValues = false): void {
         !tool.presentArguments.has(parameter.name) ||
         (tool.historyState === 'applied' &&
           tool.removedArguments.has(parameter.name)) ||
-        (parameter.kind === 'edge' && !edge?.hasExplicitEdgeSelection),
+        (edge !== undefined &&
+          parameter.kind === 'edge' &&
+          !edge.hasExplicitEdgeSelection),
     })),
   );
   const view: ContextualToolPanelView = {
@@ -1633,10 +1645,9 @@ function renderContextualToolPanel(forceParameterValues = false): void {
     selection: topology
       ? {
           label: `SELECTED ${topologySelectionLabel(topology.parameter)}`,
-          summary: formatTopologyIds(
-            topology.parameter.kind,
-            topology.selectedIds,
-          ),
+          summary: topology.hasExplicitSelection
+            ? formatTopologyIds(topology.parameter.kind, topology.selectedIds)
+            : `All ${topologySelectionLabel(topology.parameter).toLowerCase()}`,
         }
       : edge
         ? {
@@ -1716,14 +1727,18 @@ function syncTopologyReferenceSelectionProvider(
     return;
   }
   const current = topologyReferenceSelectionTool;
+  const hasExplicitSelection =
+    !parameter.multiple || argument.kind === 'present';
+  const selectedIds = hasExplicitSelection ? selection.ids : [];
   if (
     current?.targetId === scope.target.id &&
     current.evaluationIndex === scope.evaluationIndex &&
     current.occurrenceKey === occurrence.key
   ) {
     current.argument = argument;
-    current.selectedIds = selection.ids;
-    viewport.setSelectedTopologyIds(selection.ids);
+    current.selectedIds = selectedIds;
+    current.hasExplicitSelection = hasExplicitSelection;
+    viewport.setSelectedTopologyIds(selectedIds);
     return;
   }
   dismissTopologyReferenceSelectionTool();
@@ -1735,7 +1750,7 @@ function syncTopologyReferenceSelectionProvider(
       selection.inputNodeId,
       selection.kind,
       parameter.multiple,
-      selection.ids,
+      selectedIds,
     );
   } catch (error) {
     showToolIssue(error instanceof Error ? error.message : String(error));
@@ -1749,7 +1764,8 @@ function syncTopologyReferenceSelectionProvider(
     argument,
     occurrenceKey: occurrence.key,
     availableIds,
-    selectedIds: selection.ids,
+    selectedIds,
+    hasExplicitSelection,
   };
   errorBar.hidden = true;
 }
@@ -1886,6 +1902,7 @@ function handleTopologyReferenceSelection(
   tool.selectedIds = tool.parameter.multiple
     ? sortedTopologyIds(event.selectedIds)
     : [event.id];
+  tool.hasExplicitSelection = true;
   renderContextualToolPanel();
   const contextual = contextualTool;
   const committed = commitToolSession(

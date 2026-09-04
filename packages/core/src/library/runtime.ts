@@ -503,21 +503,21 @@ interface GeometryCapabilities<
 interface VertexTopologyCapabilities {
   /** @code3d.param id {kind: 'vertex', label: 'Vertex'} */
   vertex(id: VertexId): Vertex;
-  /** @code3d.param ids {kind: 'vertex', label: 'Vertices'} */
+  /** @code3d.param ids {kind: 'vertex', label: 'Vertices', actions: [{label: 'Use all', action: 'remove-argument'}]} */
   vertices(ids?: readonly VertexId[]): readonly Vertex[];
 }
 
 interface EdgeTopologyCapabilities extends VertexTopologyCapabilities {
   /** @code3d.param id {kind: 'edge', label: 'Edge'} */
   edge(id: EdgeId): Edge;
-  /** @code3d.param ids {kind: 'edge', label: 'Edges'} */
+  /** @code3d.param ids {kind: 'edge', label: 'Edges', actions: [{label: 'Use all', action: 'remove-argument'}]} */
   edges(ids?: readonly EdgeId[]): readonly Edge[];
 }
 
 interface SurfaceTopologyCapabilities extends EdgeTopologyCapabilities {
   /** @code3d.param id {kind: 'surface', label: 'Surface'} */
   surface(id: SurfaceId): Surface;
-  /** @code3d.param ids {kind: 'surface', label: 'Surfaces'} */
+  /** @code3d.param ids {kind: 'surface', label: 'Surfaces', actions: [{label: 'Use all', action: 'remove-argument'}]} */
   surfaces(ids?: readonly SurfaceId[]): readonly Surface[];
 }
 
