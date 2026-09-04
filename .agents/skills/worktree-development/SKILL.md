@@ -43,15 +43,17 @@ python3 "$SKILL_DIR/scripts/coordination.py" [--repo <worktree>] <command>
 PORT="$(python3 "$SKILL_DIR/scripts/coordination.py" reserve-port)"
 ```
 
-在 Herdr 中先确认 `HERDR_ENV=1`，再用 `herdr pane current --current` 取得当前 IDs。为服务器创建 cwd 指向开发 worktree 的 pane，保留用户焦点，并强制使用预留端口：
+在 Herdr 中先确认 `HERDR_ENV=1`，再用 `herdr pane current --current` 取得当前 IDs。为服务器在当前 pane 下方创建一个约占 15% 高度、cwd 指向开发 worktree 的 pane，保留用户焦点，并强制使用预留端口：
 
 ```bash
-herdr pane split --current --direction right --cwd "$WORKTREE" --no-focus
+herdr pane split --current --direction down --ratio 0.85 --cwd "$WORKTREE" --no-focus
 herdr pane run <pane-id> "npm run dev --workspace @code3d/app -- --host 127.0.0.1 --port $PORT --strictPort"
 herdr pane wait-output <pane-id> --match "Local:" --timeout 120000
 ```
 
-从 JSON 响应读取 pane ID，不能猜测。窄 pane 改为向下 split。确认 Vite 已监听后运行 `server-started --port "$PORT" --pane-id <pane-id> --command '<command>'`；失败或停止后运行 `server-stopped`。如果不在 Herdr 中，不伪造 Herdr ID；可启动受控后台进程并记录 PID。
+`--ratio 0.85` 为原 pane 保留约 85% 高度，新的下方 pane 使用余下空间。从 JSON 响应读取 pane ID，不能猜测。确认 Vite 已监听后运行 `server-started --port "$PORT" --pane-id <pane-id> --command '<command>'`。启动失败或服务器自行停止后运行 `server-stopped`。
+
+实现完成、测试通过、提交、排队和等待用户验收都不是主动停止开发服务器或关闭其 pane 的理由。除非用户明确要求停止，否则必须保留开发服务器及其 pane，直到改动已按要求成功合并进主 worktree；合并前不得发送中断、关闭 pane 或调用 `server-stopped`。如果不在 Herdr 中，不伪造 Herdr ID；可启动受控后台进程并记录 PID，同样遵循这项生命周期约束。
 
 查看关联会话使用：
 
@@ -72,7 +74,7 @@ Herdr 的 workspace/tab/pane ID 是相关终端会话的稳定句柄；协调文
 python3 "$SKILL_DIR/scripts/coordination.py" enqueue --summary '<改动与验证摘要>'
 ```
 
-未提交、detached HEAD 或主 worktree 中的内容不能入队。入队记录固定 `HEAD`；分支之后若有新提交，必须用 `retry` 取代旧队列项并重新排到队尾。等待期间保持开发 worktree，不要自行合并主分支。
+未提交、detached HEAD 或主 worktree 中的内容不能入队。入队记录固定 `HEAD`；分支之后若有新提交，必须用 `retry` 取代旧队列项并重新排到队尾。等待期间保持开发 worktree、已启动的开发服务器及其 pane，不要自行合并主分支。
 
 ## 串行集成
 
@@ -89,4 +91,4 @@ python3 "$SKILL_DIR/scripts/coordination.py" enqueue --summary '<改动与验证
 
 ## 收尾
 
-成功集成后停止服务器，运行 `finish` 把开发 agent 标记为完成。只有确认分支已集成、worktree clean 且没有进程使用它后，才执行 `git worktree remove <path>`；删除分支也必须属于用户明确要求。协调记录保留已完成队列项，作为本地会话与集成历史。
+改动按要求成功集成进主 worktree 后，可以停止开发服务器并运行 `server-stopped`，再运行 `finish` 把开发 agent 标记为完成。只有确认分支已集成、worktree clean 且没有进程使用它后，才执行 `git worktree remove <path>`；删除分支也必须属于用户明确要求。协调记录保留已完成队列项，作为本地会话与集成历史。
