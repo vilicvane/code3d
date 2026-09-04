@@ -428,6 +428,15 @@ codeEditor.onCursorOffset(({file, offset}) => {
   syncEdgeSelectionTool(matched);
 });
 codeEditor.onCompletionFocus(handleCompletionFocus);
+codeEditor.onEditorActivation(() => {
+  if (!codeEditor.hasPendingToolEdits()) return;
+  finishEdgeSelectionTool();
+  void codeEditor
+    .formatPendingToolEdits()
+    .catch(error =>
+      console.error('Prettier failed after a Code3D source edit.', error),
+    );
+});
 codeEditor.onActiveFile((path, reason) => {
   finishEdgeSelectionTool();
   renderProjectNavigation();
@@ -1496,7 +1505,7 @@ function commitEdgeOperationChange(
       `viewport.edge-operation:${tool.targetId}:${tool.evaluationIndex}`,
     ),
     intent,
-    {formatSource: false, undoGroup: tool.session.undoGroup},
+    {undoGroup: tool.session.undoGroup},
   );
   if (committed) {
     if (intent.kind === 'edge-operation.set') {
@@ -1536,24 +1545,9 @@ function finishEdgeSelectionTool(): boolean {
 function finishEdgeEditSession(session: EdgeEditSession): void {
   if (edgeEditSession === session) edgeEditSession = undefined;
   if (!session.hasEdits || session.historyState === 'undone') {
+    codeEditor.discardPendingToolFormat(session.sourceFile, session.undoGroup);
     codeEditor.endSourceEditGroup(session.undoGroup);
-    return;
   }
-  queueMicrotask(() => {
-    if (edgeEditSession?.sourceFile === session.sourceFile) {
-      codeEditor.endSourceEditGroup(session.undoGroup);
-      return;
-    }
-    void codeEditor
-      .format(session.sourceFile, {
-        origin: 'tool',
-        undoGroup: session.undoGroup,
-      })
-      .catch(error =>
-        console.error('Prettier failed after an edge tool edit.', error),
-      )
-      .finally(() => codeEditor.endSourceEditGroup(session.undoGroup));
-  });
 }
 
 function abandonEdgeSelectionTool(): boolean {
@@ -1561,6 +1555,7 @@ function abandonEdgeSelectionTool(): boolean {
   const session = edgeEditSession;
   if (!session) return dismissed;
   edgeEditSession = undefined;
+  codeEditor.discardPendingToolFormat(session.sourceFile, session.undoGroup);
   codeEditor.endSourceEditGroup(session.undoGroup);
   return true;
 }

@@ -129,7 +129,6 @@ export type ToolCommitResult =
   | Exclude<ToolResolution, Readonly<{status: 'ready'; plan: ToolEditPlan}>>;
 
 export type ToolCommitOptions = Readonly<{
-  formatSource?: boolean;
   undoGroup?: string;
 }>;
 

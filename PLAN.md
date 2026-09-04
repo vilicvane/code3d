@@ -340,8 +340,10 @@ constraint source sites do.
   keeping the guide, hover, and selection panel interactive during background
   compilation. Newer edits invalidate older compile results, and the latest
   normal compiled model replaces the rendered result when ready. Defer source
-  formatting until selection ends so it cannot invalidate active source
-  anchors; do not present an uncommitted operation result as if it had already
+  formatting after every GUI tool source update until the user returns focus
+  to the editor, then end any active edge-selection session and format the
+  affected files once while preserving the cursor's relation to the formatted
+  code. Do not present an uncommitted operation result as if it had already
   taken effect. Outside selection, keep the weaker before/after comparison for
   an applied edge modification.
 - Treat one continuous edge-editing session as one source-history entry.

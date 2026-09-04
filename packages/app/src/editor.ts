@@ -28,7 +28,7 @@ import {
   projectPathIsWithin,
   type ModelProject,
 } from './project/project';
-import type {SourceTextEdit} from './tools/tool-system';
+import type {SourceTextEdit, ToolCommitOptions} from './tools/tool-system';
 import type {SourceEditExcerpt} from './ui/source-edit-popover';
 
 type MonacoEnvironment = typeof self & {
@@ -69,11 +69,6 @@ type ProjectDocument = {
 };
 
 type ContentChangeOrigin = 'user' | 'tool' | 'undo' | 'redo';
-
-type SourceEditOptions = Readonly<{
-  formatSource?: boolean;
-  undoGroup?: string;
-}>;
 
 type FormatOptions = Readonly<{
   origin?: 'user' | 'tool';
@@ -205,9 +200,11 @@ export class CodeEditor {
   private readonly activeFileListeners = new Set<
     (path: string, reason: ActiveFileChangeReason) => void
   >();
+  private readonly editorActivationListeners = new Set<() => void>();
   private readonly completionFocusListeners = new Set<
     (focus: CompletionFocus | undefined) => void
   >();
+  private readonly pendingToolFormats = new Map<string, string | undefined>();
   private completionFocusVersion = 0;
   private contentChangeOrigin: 'user' | 'tool' = 'user';
   private readonly sourceEditUndoGroups = new Map<string, string>();
@@ -263,6 +260,8 @@ export class CodeEditor {
       this.sourceDecoration.clear();
       this.emitCursorPosition(selection.getPosition());
     });
+    this.editor.onDidFocusEditorText(() => this.emitEditorActivation());
+    this.editor.onMouseDown(() => this.emitEditorActivation());
     monaco.editor.registerEditorOpener({
       openCodeEditor: (source, resource, selectionOrPosition) =>
         source === this.editor &&
@@ -484,7 +483,7 @@ export class CodeEditor {
   applySourceEdits(
     baseVersion: number,
     edits: readonly SourceTextEdit[],
-    options: SourceEditOptions = {},
+    options: ToolCommitOptions = {},
   ): boolean {
     if (this.revision !== baseVersion || edits.length === 0) return false;
     const grouped = groupEditsByFile(edits);
@@ -512,23 +511,35 @@ export class CodeEditor {
         }
       }),
     );
-    if (options.formatSource !== false) {
-      void Promise.all(
-        [...grouped.keys()].map(path =>
-          this.formatFile(path, {origin: 'tool'}),
-        ),
-      ).catch(error =>
-        console.error('Prettier failed after a Code3D source edit.', error),
-      );
+    for (const path of grouped.keys()) {
+      this.pendingToolFormats.set(path, options.undoGroup);
     }
     return true;
   }
 
-  async format(
-    path = this.activePath,
-    options: FormatOptions = {},
-  ): Promise<boolean> {
-    return this.formatFile(path, options);
+  async formatPendingToolEdits(): Promise<void> {
+    const pending = [...this.pendingToolFormats];
+    this.pendingToolFormats.clear();
+    await Promise.all(
+      pending.map(async ([path, undoGroup]) => {
+        try {
+          await this.formatFile(path, {origin: 'tool', undoGroup});
+        } finally {
+          if (undoGroup) this.endSourceEditGroup(undoGroup);
+        }
+      }),
+    );
+  }
+
+  hasPendingToolEdits(): boolean {
+    return this.pendingToolFormats.size > 0;
+  }
+
+  discardPendingToolFormat(path: string, undoGroup: string): void {
+    const normalized = normalizeProjectPath(path);
+    if (this.pendingToolFormats.get(normalized) === undoGroup) {
+      this.pendingToolFormats.delete(normalized);
+    }
   }
 
   resumeSourceEditGroup(path: string, undoGroup: string): void {
@@ -568,6 +579,11 @@ export class CodeEditor {
   ): () => void {
     this.activeFileListeners.add(listener);
     return () => this.activeFileListeners.delete(listener);
+  }
+
+  onEditorActivation(listener: () => void): () => void {
+    this.editorActivationListeners.add(listener);
+    return () => this.editorActivationListeners.delete(listener);
   }
 
   onCompletionFocus(
@@ -824,6 +840,8 @@ export class CodeEditor {
 
   private removeDocument(path: string): void {
     const document = this.requireDocument(path);
+    this.pendingToolFormats.delete(path);
+    this.sourceEditUndoGroups.delete(path);
     for (const [key, sourceRef] of this.trackedSourceRefs) {
       if (sourceRef.file === path) this.trackedSourceRefs.delete(key);
     }
@@ -888,6 +906,10 @@ export class CodeEditor {
     );
   }
 
+  private emitEditorActivation(): void {
+    this.editorActivationListeners.forEach(listener => listener());
+  }
+
   private openProjectResource(
     resource: monaco.Uri,
     selectionOrPosition?: monaco.IRange | monaco.IPosition,
@@ -932,31 +954,51 @@ export class CodeEditor {
     const {model} = document;
     const source = model.getValue();
     const version = model.getVersionId();
-    const active = path === this.activePath;
-    const position = active ? this.editor.getPosition() : null;
-    const cursorOffset = position ? model.getOffsetAt(position) : 0;
-    const result = await formatTypeScriptWithCursor(source, cursorOffset);
-    if (model.getVersionId() !== version || result.formatted === source) {
-      return model.getVersionId() === version;
+    let cursorOffset = this.activeCursorOffset(model);
+    let result = await formatTypeScriptWithCursor(source, cursorOffset ?? 0);
+    while (model.getVersionId() === version) {
+      if (result.formatted === source) return true;
+      const currentCursorOffset = this.activeCursorOffset(model);
+      if (
+        currentCursorOffset !== undefined &&
+        currentCursorOffset !== cursorOffset
+      ) {
+        cursorOffset = currentCursorOffset;
+        result = await formatTypeScriptWithCursor(source, cursorOffset);
+        continue;
+      }
+      this.withContentChangeOrigin(options.origin ?? 'user', () =>
+        this.withSuppressedCursorEvents(() => {
+          this.pushSourceEdits(
+            path,
+            [
+              {
+                range: model.getFullModelRange(),
+                text: result.formatted,
+                forceMoveMarkers: true,
+              },
+            ],
+            options.undoGroup,
+          );
+          if (
+            currentCursorOffset !== undefined &&
+            this.editor.getModel() === model
+          ) {
+            this.editor.setPosition(model.getPositionAt(result.cursorOffset));
+          }
+        }),
+      );
+      return true;
     }
-    this.withContentChangeOrigin(options.origin ?? 'user', () =>
-      this.withSuppressedCursorEvents(() => {
-        this.pushSourceEdits(
-          path,
-          [
-            {
-              range: model.getFullModelRange(),
-              text: result.formatted,
-              forceMoveMarkers: true,
-            },
-          ],
-          options.undoGroup,
-        );
-        if (active)
-          this.editor.setPosition(model.getPositionAt(result.cursorOffset));
-      }),
-    );
-    return true;
+    return false;
+  }
+
+  private activeCursorOffset(
+    model: monaco.editor.ITextModel,
+  ): number | undefined {
+    if (this.editor.getModel() !== model) return undefined;
+    const position = this.editor.getPosition();
+    return position ? model.getOffsetAt(position) : undefined;
   }
 
   private withContentChangeOrigin<T>(
