@@ -387,7 +387,7 @@ codeEditor.onChange(change => {
     historyChange && handleEdgeEditingHistory(change);
   if (!toolChange && !editingHistoryChange) abandonEdgeSelectionTool();
   persistProjectChange(projectFileSystem, change);
-  sourceEditPopover.dismiss();
+  if (!toolChange) sourceEditPopover.dismiss();
   if (change.kind !== 'content') renderProjectNavigation();
   requestModelUpdate(toolChange || historyChange ? 0 : 420);
 });
@@ -1317,7 +1317,6 @@ function startEdgeSelection(
     selectedEdgeIds,
     hasExplicitEdgeSelection: edgeSessionHasExplicitEdgeSelection(session),
   };
-  sourceEditPopover.dismiss();
   errorBar.hidden = true;
   updateEdgeSelectionToolbar(edgeSelectionTool);
 }
