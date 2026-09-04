@@ -111,6 +111,7 @@ const modelDiagnosticOwner = 'code3d-model';
 
 const languageCompilerOptions = {
   target: typeScriptLanguage.ScriptTarget.ESNext,
+  lib: ['lib.esnext.d.ts'],
   module: 199 as typeScriptLanguage.ModuleKind,
   moduleResolution: 99 as typeScriptLanguage.ModuleResolutionKind,
   allowNonTsExtensions: true,
