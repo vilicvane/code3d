@@ -427,7 +427,6 @@ codeEditor.onCursorOffset(({file, offset}) => {
 codeEditor.onCompletionFocus(handleCompletionFocus);
 codeEditor.onEditorActivation(cursor => {
   if (!codeEditor.hasPendingToolEdits()) return;
-  finishContextualTool();
   void codeEditor
     .formatPendingToolEdits(cursor)
     .catch(error =>
@@ -1246,25 +1245,29 @@ function syncContextualTool(sourceTargetFocused = true): void {
     finishContextualTool();
     return;
   }
+  const scope = viewport.sourceEvaluation();
+  const previous = contextualTool;
+  const continuesPrevious =
+    previous !== undefined &&
+    scope !== undefined &&
+    previous.targetId === scope.target.id &&
+    previous.evaluationIndex === scope.evaluationIndex;
   if (currentModuleSourceVersion !== codeEditor.sourceVersion()) {
+    if (previous && !continuesPrevious) finishContextualTool();
     return;
   }
-  const scope = viewport.sourceEvaluation();
   const occurrence = viewport.getSelected();
   const sourceTool = scope?.target.tool;
   if (!scope || !sourceTool) {
     finishContextualTool();
     return;
   }
-  const previous = contextualTool;
+  if (previous && !continuesPrevious) finishContextualTool();
   const parameters = contextualToolParameters(
     sourceTool.signature,
     scope.target.sourceRef,
     scope.evaluation.parameters ?? [],
   );
-  const continuesPrevious =
-    previous?.targetId === scope.target.id &&
-    previous.evaluationIndex === scope.evaluationIndex;
   const baselineValues = continuesPrevious
     ? previous.baselineValues
     : parameterValues(parameters);

@@ -216,7 +216,7 @@ export class CodeEditor {
   private cursorSelectionVersion = 0;
   private pointerActivatingEditor = false;
   private revision = 1;
-  private suppressCursorEvent = false;
+  private suppressCursorEventDepth = 0;
 
   constructor(
     private readonly container: HTMLElement,
@@ -256,7 +256,7 @@ export class CodeEditor {
       // History and marker recovery move Monaco's cursor without the user
       // leaving the source target currently being edited by a viewport tool.
       if (
-        this.suppressCursorEvent ||
+        this.suppressCursorEventDepth > 0 ||
         reason === monaco.editor.CursorChangeReason.RecoverFromMarkers ||
         reason === monaco.editor.CursorChangeReason.Undo ||
         reason === monaco.editor.CursorChangeReason.Redo
@@ -1099,13 +1099,11 @@ export class CodeEditor {
   }
 
   private withSuppressedCursorEvents(action: () => void): void {
-    this.suppressCursorEvent = true;
+    this.suppressCursorEventDepth += 1;
     try {
       action();
     } finally {
-      queueMicrotask(() => {
-        this.suppressCursorEvent = false;
-      });
+      this.suppressCursorEventDepth -= 1;
     }
   }
 }
