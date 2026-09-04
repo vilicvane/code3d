@@ -10,8 +10,10 @@ import type {
   DesignArgumentContext,
   EdgeArgumentTarget,
   ModelModule,
+  SourceTargetEvaluation,
 } from './model/compiler';
 import {ModelDiagnosticError, type ModelDiagnostic} from './model/diagnostic';
+import {preferUpstreamParameterUsages} from './model/parameter-provenance';
 import {bundledExamples} from './project/bundled-examples';
 import {defaultProject} from './project/default-project';
 import {
@@ -297,6 +299,7 @@ type ContextualToolParameterState = {
   usage?: ParameterUsage;
   argument?: ToolArgumentSource['target'];
   value?: number;
+  expressionValue?: number;
   editable: boolean;
 };
 type TopologyReferenceSelectionTool = {
@@ -1289,6 +1292,7 @@ function syncContextualTool(sourceTargetFocused = true): void {
     sourceTool.arguments,
     scope.target.sourceRef,
     scope.evaluation.parameters ?? [],
+    scope.evaluation.toolArguments,
   );
   const baselineValues = continuesPrevious
     ? previous.baselineValues
@@ -1339,6 +1343,7 @@ function contextualToolParameters(
   arguments_: readonly ToolArgumentSource[],
   operationRef: SourceRef,
   usages: readonly ParameterUsage[],
+  toolArguments: SourceTargetEvaluation['toolArguments'],
 ): Map<string, ContextualToolParameterState> {
   return new Map(
     signature.parameters
@@ -1350,14 +1355,16 @@ function contextualToolParameters(
         const argument = arguments_.find(
           candidate => candidate.index === parameter.index,
         )?.target;
-        const matches = usages.filter(
-          usage =>
-            usage.operation === signature.name &&
-            usage.argument === parameter.name &&
-            usage.operationRef.file === operationRef.file &&
-            usage.operationRef.end === operationRef.end &&
-            containsSourceRef(usage.operationRef, operationRef) &&
-            Math.abs(usage.sensitivity) > 1e-9,
+        const matches = preferUpstreamParameterUsages(
+          usages.filter(
+            usage =>
+              usage.operation === signature.name &&
+              usage.argument === parameter.name &&
+              usage.operationRef.file === operationRef.file &&
+              usage.operationRef.end === operationRef.end &&
+              containsSourceRef(usage.operationRef, operationRef) &&
+              Math.abs(usage.sensitivity) > 1e-9,
+          ),
         );
         const editable =
           matches.length === 1 ||
@@ -1369,6 +1376,7 @@ function contextualToolParameters(
             usage: editable ? matches[0] : undefined,
             argument: matches.length === 0 ? argument : undefined,
             value: matches[0]?.value,
+            expressionValue: toolArguments?.[parameter.index],
             editable,
           },
         ];
@@ -1588,6 +1596,12 @@ function renderContextualToolPanel(forceParameterValues = false): void {
     name: parameter.schema.name,
     label: parameter.schema.label,
     value: parameter.value,
+    placeholder:
+      parameter.value === undefined && parameter.argument?.kind === 'present'
+        ? parameter.expressionValue === undefined
+          ? undefined
+          : formatDisplayNumber(parameter.expressionValue)
+        : undefined,
     unit: parameter.usage?.target.unit,
     step: contextualParameterStep(parameter),
     min: parameter.schema.constraints?.min,
