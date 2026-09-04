@@ -33,9 +33,20 @@ const completionFormatSettings = {
 
 class ProjectTypeScriptWorker extends TypeScriptWorker {
   override getScriptFileNames(): string[] {
+    const extraLibFileNames = new Map(
+      Object.keys(this.getExtraLibs()).map(fileName => [
+        uriFileIdentity(fileName),
+        fileName,
+      ]),
+    );
     return super
       .getScriptFileNames()
-      .filter(fileName => !fileName.endsWith('/package.json'));
+      .filter(
+        fileName =>
+          !fileName.endsWith('/package.json') &&
+          (extraLibFileNames.get(uriFileIdentity(fileName)) ?? fileName) ===
+            fileName,
+      );
   }
 
   async getProjectCompletions(
@@ -66,6 +77,11 @@ class ProjectTypeScriptWorker extends TypeScriptWorker {
       data,
     );
   }
+}
+
+/** Monaco models serialize scoped-package paths while extra libs keep them raw. */
+function uriFileIdentity(fileName: string): string {
+  return decodeURIComponent(fileName);
 }
 
 self.onmessage = () => {
