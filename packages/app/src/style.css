@@ -667,10 +667,7 @@ kbd {
   width: 100%;
   height: 100%;
   outline: none;
-}
-
-.viewport-canvas.topology-selection-active {
-  cursor: crosshair;
+  cursor: default;
 }
 
 .viewport-coordinate-reference {

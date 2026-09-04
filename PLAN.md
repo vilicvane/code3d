@@ -114,6 +114,21 @@ silently reorder the active milestones. Closed requests move to
   collections. Their preview emphasizes the returned vertices, edges, or
   surfaces with the owning geometry dimmed as spatial context; topology
   accessor calls use the same dimmed context while editing the selected IDs.
+- Topology preview and selection use fixed screen-space sizes: vertices are
+  5px and edges are 2px in every state. Available references are dim gray,
+  previewed/selected references yellow-green, hovered unselected references
+  cyan, and hovered selected references orange. Hover changes color only;
+  face fill opacity stays constant and selected and hovered fills do not stack.
+  Hover is recomputed at the retained pointer position after selection changes
+  and recompilation. Vertex and edge picking uses a six-CSS-pixel radius and
+  chooses the closest projected element, independently of zoom and model scale;
+  surfaces use ray/triangle intersection.
+- Topology multi-selection tools expose the same Use all action as fillet and
+  chamfer: remove the ID argument to select all through the normal source-edit
+  transaction and undo history. The omitted-argument state displays All
+  vertices/edges/surfaces and has no explicit selection highlights; clicking an
+  element starts a singleton explicit selection. This editing state is distinct
+  from value previews, which display the actual returned topology.
 - A constraint source site renders both relation participants and takes dimmed
   context from the concrete downstream composition that consumes the
   constrained value. The constrained value remains the relation-edit scope for

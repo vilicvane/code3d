@@ -40,6 +40,7 @@ import type {
 } from './viewport-decoration';
 import {preferUpstreamParameterUsages} from './model/parameter-provenance';
 import {ViewportCoordinateReference} from './ui/viewport-coordinate-reference';
+import {pickScreenTopology} from './rendering/topology-picking';
 
 export type Occurrence = Readonly<{
   key: string;
@@ -121,7 +122,7 @@ type TopologySelectionState = {
   occurrenceKey: string;
   mesh: RenderMesh;
   guide: THREE.Group;
-  pickObject: THREE.Object3D;
+  pickObject?: THREE.Mesh;
   selectedIds: Set<number>;
   hoveredId?: number;
 };
@@ -144,10 +145,7 @@ const boxCornerFraction = 0.18;
 const boxCornerMaxScreenLengthPixels = 32;
 const symbolLineWidth = 1;
 const interactiveLineWidth = 2;
-const topologyGuidePointSize = 3;
 const topologyPointSize = 5;
-const topologyHoverPointSize = 7;
-const interactivePointSize = 10;
 const toolSurfaceOpacity = 0.22;
 const impactSurfaceOpacity = 0.08;
 
@@ -303,6 +301,7 @@ const doubleClickDistance = 6;
 const doubleClickInterval = 450;
 
 export class ModelViewport {
+  private topologyPointer?: Readonly<{clientX: number; clientY: number}>;
   private readonly rendering: ModelRenderer;
   private readonly scene: THREE.Scene;
   private readonly camera: THREE.PerspectiveCamera;
@@ -373,6 +372,7 @@ export class ModelViewport {
     this.controls.target.set(0, 20, 0);
     this.controls.minDistance = 20;
     this.controls.maxDistance = 650;
+    this.controls.addEventListener('change', () => this.refreshTopologyHover());
     if (showCoordinateReference) {
       this.coordinateReference = new ViewportCoordinateReference(
         this.container,
@@ -401,9 +401,10 @@ export class ModelViewport {
     this.renderer.domElement.addEventListener('pointercancel', event =>
       this.cancelSelectionGesture(event),
     );
-    this.renderer.domElement.addEventListener('pointerleave', () =>
-      this.updateTopologyHover(undefined),
-    );
+    this.renderer.domElement.addEventListener('pointerleave', () => {
+      this.topologyPointer = undefined;
+      this.updateTopologyHover(undefined);
+    });
 
     new ResizeObserver(() => this.resize()).observe(this.container);
     this.resize();
@@ -665,12 +666,10 @@ export class ModelViewport {
       pickObject,
       selectedIds: new Set(initialIds),
     };
-    this.raycaster.params.Line.threshold = kind === 'edge' ? 1.5 : 1;
-    this.raycaster.params.Points.threshold = kind === 'vertex' ? 2 : 1;
-    this.renderer.domElement.classList.add('topology-selection-active');
     this.rebuildSelectionHighlight();
     this.updatePositionGizmo();
     this.rebuildTopologySelectionOverlay();
+    this.refreshTopologyHover();
     return availableIds;
   }
 
@@ -683,8 +682,8 @@ export class ModelViewport {
   setSelectedTopologyIds(ids: readonly number[]): void {
     if (!this.topologySelection) return;
     this.topologySelection.selectedIds = new Set(ids);
-    this.topologySelection.hoveredId = undefined;
     this.rebuildTopologySelectionOverlay();
+    this.refreshTopologyHover();
   }
 
   hasRelativePositionContext(): boolean {
@@ -1369,6 +1368,7 @@ export class ModelViewport {
   }
 
   private updateSelectionGesture(event: PointerEvent): void {
+    this.topologyPointer = {clientX: event.clientX, clientY: event.clientY};
     this.updateTopologyHover(this.pickTopology(event));
     const gesture = this.selectionGesture;
     if (!gesture || gesture.pointerId !== event.pointerId || gesture.moved) {
@@ -1489,6 +1489,14 @@ export class ModelViewport {
     });
   }
 
+  private refreshTopologyHover(): void {
+    this.updateTopologyHover(
+      this.topologyPointer
+        ? this.pickTopology(this.topologyPointer)
+        : undefined,
+    );
+  }
+
   private rebuildTopologySelectionOverlay(): void {
     this.clearTopologySelectionOverlay();
     const selection = this.topologySelection;
@@ -1498,7 +1506,9 @@ export class ModelViewport {
     const selected = createTopologyHighlight(
       selection.mesh,
       selection.kind,
-      selection.selectedIds,
+      new Set(
+        [...selection.selectedIds].filter(id => id !== selection.hoveredId),
+      ),
       '#d8ff3e',
       31,
     );
@@ -1508,9 +1518,8 @@ export class ModelViewport {
         selection.mesh,
         selection.kind,
         new Set([selection.hoveredId]),
-        '#ffad66',
+        selection.selectedIds.has(selection.hoveredId) ? '#ffad66' : '#63dcff',
         33,
-        topologyHoverPointSize,
       );
       if (hovered) overlay.add(hovered);
     }
@@ -1525,9 +1534,6 @@ export class ModelViewport {
       disposeObject(this.topologySelection.guide);
     }
     this.topologySelection = undefined;
-    this.raycaster.params.Line.threshold = 1;
-    this.raycaster.params.Points.threshold = 1;
-    this.renderer.domElement.classList.remove('topology-selection-active');
   }
 
   private clearTopologySelectionOverlay(): void {
@@ -1537,19 +1543,41 @@ export class ModelViewport {
     this.topologySelectionOverlay = undefined;
   }
 
-  private pickTopology(event: PointerEvent): number | undefined {
+  private pickTopology(
+    event: Readonly<{clientX: number; clientY: number}>,
+  ): number | undefined {
     const selection = this.topologySelection;
     if (!selection) return undefined;
+    selection.guide.updateWorldMatrix(true, false);
+    if (selection.kind !== 'surface') {
+      const rect = this.renderer.domElement.getBoundingClientRect();
+      const localToClip = new THREE.Matrix4()
+        .multiplyMatrices(
+          this.camera.projectionMatrix,
+          this.camera.matrixWorldInverse,
+        )
+        .multiply(selection.guide.matrixWorld);
+      return pickScreenTopology(
+        selection.mesh,
+        selection.kind,
+        localToClip,
+        {x: event.clientX - rect.left, y: event.clientY - rect.top},
+        rect,
+      );
+    }
     this.prepareRaycaster(event);
-    const hits = this.raycaster.intersectObject(selection.pickObject);
+    selection.pickObject!.updateWorldMatrix(true, false);
+    const hits = this.raycaster.intersectObject(selection.pickObject!);
     for (const hit of hits) {
-      const id = topologyIdFromIntersection(hit, selection.kind);
+      const id = surfaceIdFromIntersection(hit);
       if (id !== undefined) return id;
     }
     return undefined;
   }
 
-  private prepareRaycaster(event: PointerEvent): void {
+  private prepareRaycaster(
+    event: Readonly<{clientX: number; clientY: number}>,
+  ): void {
     const rect = this.renderer.domElement.getBoundingClientRect();
     this.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
     this.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
@@ -1634,6 +1662,7 @@ export class ModelViewport {
 
   private resize(): void {
     this.rendering.resize();
+    this.refreshTopologyHover();
   }
 
   private animate = (): void => {
@@ -1674,7 +1703,7 @@ export class ModelViewport {
           color: '#8ea2ff',
           opacity: 0.72,
           lineWidth: symbolLineWidth,
-          pointSize: topologyGuidePointSize,
+          pointSize: topologyPointSize,
           surfaceOpacity: impactSurfaceOpacity,
           renderOrder: 19,
         },
@@ -1944,7 +1973,7 @@ function createTopologySelectionGuide(
   mesh: RenderMesh,
   kind: TopologyKind,
   placement: ModelPlacement,
-): Readonly<{guide: THREE.Group; pickObject: THREE.Object3D}> {
+): Readonly<{guide: THREE.Group; pickObject?: THREE.Mesh}> {
   const guide = new THREE.Group();
   guide.name = `${node.name} (selectable ${kind}s)`;
   applyNodeTransform(guide, node, placement);
@@ -1952,27 +1981,17 @@ function createTopologySelectionGuide(
     if (mesh.topologyVertices.length === 0) {
       throw new Error('The model has no renderable vertices.');
     }
-    const pickObject = createScreenSpacePoints(
-      mesh.topologyVertices,
-      '#ffffff',
-      interactivePointSize,
-      0,
-      false,
-      0,
-    );
-    pickObject.userData.vertexIds = mesh.vertexIds;
     guide.add(
       createScreenSpacePoints(
         mesh.topologyVertices,
         '#aeb7a8',
-        topologyGuidePointSize,
+        topologyPointSize,
         0.72,
         false,
         27,
       ),
-      pickObject,
     );
-    return {guide, pickObject};
+    return {guide};
   }
   if (kind === 'surface') {
     const pickObject = new THREE.Mesh(
@@ -1984,13 +2003,6 @@ function createTopologySelectionGuide(
     return {guide, pickObject};
   }
 
-  const geometry = createEdgeGeometry(mesh);
-  if (!geometry) throw new Error('The model has no renderable edges.');
-  const pickObject = new THREE.LineSegments(
-    geometry,
-    new THREE.LineBasicMaterial({visible: false}),
-  );
-  pickObject.userData.edgeGroups = mesh.edgeGroups;
   guide.add(
     createScreenSpaceEdgeLines(
       mesh.edges,
@@ -2000,9 +2012,8 @@ function createTopologySelectionGuide(
       false,
       27,
     ),
-    pickObject,
   );
-  return {guide, pickObject};
+  return {guide};
 }
 
 function createMeshDecorationObject(
@@ -2346,7 +2357,8 @@ function createScreenSpacePoints(
       color,
       size,
       sizeAttenuation: false,
-      transparent: opacity < 1,
+      // Keep opaque highlights after translucent guides in the same render queue.
+      transparent: true,
       opacity,
       depthTest,
       depthWrite: false,
@@ -2463,7 +2475,6 @@ function createTopologyHighlight(
   ids: ReadonlySet<number>,
   color: string,
   renderOrder: number,
-  pointSize = topologyPointSize,
 ): THREE.Object3D | undefined {
   if (kind === 'vertex') {
     const positions = vertexSelectionPositions(mesh, ids);
@@ -2471,7 +2482,7 @@ function createTopologyHighlight(
       ? createScreenSpacePoints(
           positions,
           color,
-          pointSize,
+          topologyPointSize,
           1,
           false,
           renderOrder,
@@ -2537,40 +2548,17 @@ function selectedTopologyIds(selection: TopologySelectionState): number[] {
   return [...selection.selectedIds].sort((left, right) => left - right);
 }
 
-function topologyIdFromIntersection(
+function surfaceIdFromIntersection(
   hit: THREE.Intersection,
-  kind: TopologyKind,
 ): number | undefined {
-  if (kind === 'vertex') {
-    if (!(hit.object instanceof THREE.Points) || hit.index === undefined) {
-      return undefined;
-    }
-    const ids = hit.object.userData.vertexIds as
-      RenderMesh['vertexIds'] | undefined;
-    return ids?.[hit.index];
-  }
-  if (kind === 'surface') {
-    if (!(hit.object instanceof THREE.Mesh) || hit.faceIndex == null) {
-      return undefined;
-    }
-    const groups = hit.object.userData.surfaceGroups as
-      RenderMesh['surfaceGroups'] | undefined;
-    const triangleStart = hit.faceIndex * 3;
-    return groups?.find(
-      group =>
-        group.start <= triangleStart &&
-        triangleStart < group.start + group.count,
-    )?.surfaceId;
-  }
-  if (!(hit.object instanceof THREE.LineSegments) || hit.index === undefined) {
-    return undefined;
-  }
-  const groups = hit.object.userData.edgeGroups as
-    RenderMesh['edgeGroups'] | undefined;
+  if (hit.faceIndex == null) return undefined;
+  const groups = hit.object.userData.surfaceGroups as
+    RenderMesh['surfaceGroups'] | undefined;
+  const triangleStart = hit.faceIndex * 3;
   return groups?.find(
     group =>
-      group.start <= hit.index! && hit.index! < group.start + group.count,
-  )?.edgeId;
+      group.start <= triangleStart && triangleStart < group.start + group.count,
+  )?.surfaceId;
 }
 
 function dimObject(object: THREE.Object3D): void {
