@@ -5,6 +5,7 @@ export const code3dAnnotationNames = [
   'label',
   'max',
   'min',
+  'param',
   'step',
   'unit',
 ] as const;

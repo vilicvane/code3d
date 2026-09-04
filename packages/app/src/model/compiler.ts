@@ -27,6 +27,12 @@ import * as screwApi from '@code3d/screws';
 import {code3dAnnotations} from './annotations';
 import {designArgumentAnnotationSites} from './design-functions';
 import {
+  resolveProjectToolCalls,
+  toolCallKey,
+  type ToolCallSchemaMap,
+  type ToolSignatureSchema,
+} from './tool-schema';
+import {
   createModelDiagnostic,
   diagnosticFromError,
   locateModelError,
@@ -197,7 +203,7 @@ type ParameterArgument = Readonly<{
 
 type ParameterSignature = Readonly<{
   operation: string;
-  arguments: readonly ParameterArgument[];
+  arguments: readonly (ParameterArgument | undefined)[];
 }>;
 
 type CatalogTrace = {
@@ -290,94 +296,6 @@ type SourceExecutionTrace = {
   arguments: Map<number, unknown>;
   inputs: SourceInputTrace[];
 };
-
-const signatures = new Map<string, ParameterSignature>([
-  [
-    'box',
-    {
-      operation: 'box',
-      arguments: [
-        {name: 'width', label: 'Width', kind: 'length'},
-        {name: 'height', label: 'Height', kind: 'length'},
-        {name: 'depth', label: 'Depth', kind: 'length'},
-      ],
-    },
-  ],
-  [
-    'cylinder',
-    {
-      operation: 'cylinder',
-      arguments: [
-        {name: 'radius', label: 'Radius', kind: 'length'},
-        {name: 'height', label: 'Height', kind: 'length'},
-      ],
-    },
-  ],
-  [
-    'sphere',
-    {
-      operation: 'sphere',
-      arguments: [{name: 'radius', label: 'Radius', kind: 'length'}],
-    },
-  ],
-  [
-    'frustum',
-    {
-      operation: 'frustum',
-      arguments: [
-        {name: 'bottomRadius', label: 'Bottom radius', kind: 'length'},
-        {name: 'topRadius', label: 'Top radius', kind: 'length'},
-        {name: 'height', label: 'Height', kind: 'length'},
-      ],
-    },
-  ],
-  [
-    'regularPrism',
-    {
-      operation: 'regularPrism',
-      arguments: [
-        {name: 'radius', label: 'Radius', kind: 'length'},
-        {name: 'height', label: 'Height', kind: 'length'},
-        {name: 'sides', label: 'Sides', kind: 'count'},
-        {name: 'rotation', label: 'Rotation', kind: 'angle', unit: 'deg'},
-      ],
-    },
-  ],
-  [
-    'offset',
-    {
-      operation: 'offset',
-      arguments: [
-        {name: 'x', label: 'ΔX', kind: 'length'},
-        {name: 'y', label: 'ΔY', kind: 'length'},
-        {name: 'z', label: 'ΔZ', kind: 'length'},
-      ],
-    },
-  ],
-  [
-    'scaled',
-    {
-      operation: 'scaled',
-      arguments: [{name: 'factor', label: 'Scale', kind: 'ratio'}],
-    },
-  ],
-  [
-    'fillet',
-    {
-      operation: 'fillet',
-      arguments: [{name: 'radius', label: 'Fillet radius', kind: 'length'}],
-    },
-  ],
-  [
-    'chamfer',
-    {
-      operation: 'chamfer',
-      arguments: [
-        {name: 'distance', label: 'Chamfer distance', kind: 'length'},
-      ],
-    },
-  ],
-]);
 
 const tracedObjects = new Set<ModelObject>();
 const sourceValueTraces = new Map<string, SourceValueTrace>();
@@ -1008,6 +926,7 @@ export function compileProject(
   const designArguments = [...files].flatMap(([path, source]) =>
     parseDesignArgumentContexts(path, source),
   );
+  const toolCalls = resolveProjectToolCalls(project);
   const activeDesignContext = designArguments.find(
     context => context.id === requestedDesignContextId,
   );
@@ -1052,6 +971,7 @@ export function compileProject(
       const result = transpileSource(
         normalized,
         source,
+        toolCalls.get(normalized),
         activeDesignContext?.functionRef.file === normalized
           ? activeDesignContext
           : undefined,
@@ -1259,6 +1179,7 @@ export function compileProject(
 function transpileSource(
   path: string,
   source: string,
+  toolCalls: ToolCallSchemaMap | undefined,
   designContext?: ParsedDesignArgumentContext,
 ): string {
   const executableSource = designContext
@@ -1274,7 +1195,9 @@ function transpileSource(
       isolatedModules: true,
     },
     reportDiagnostics: true,
-    transformers: {before: [createTraceTransformer(source.length)]},
+    transformers: {
+      before: [createTraceTransformer(source.length, toolCalls)],
+    },
   });
   const error = (result.diagnostics ?? []).find(
     diagnostic => diagnostic.category === ts.DiagnosticCategory.Error,
@@ -1884,6 +1807,7 @@ function isCompositionInputRole(role: ModelOperationInputRole): boolean {
 
 function createTraceTransformer(
   authorSourceLength: number,
+  toolCalls: ToolCallSchemaMap | undefined,
 ): ts.TransformerFactory<ts.SourceFile> {
   return context => {
     const {factory} = context;
@@ -1963,7 +1887,7 @@ function createTraceTransformer(
           if (edgeSelection) {
             edgeSelectionSites.set(siteId, edgeSelection);
           }
-          const parameterSignature = getParameterSignature(node);
+          const parameterSignature = getParameterSignature(node, toolCalls);
           const parameterizedCall = parameterSignature
             ? instrumentCallParameters(
                 node,
@@ -2938,15 +2862,36 @@ function createNumberExpression(
 
 function getParameterSignature(
   node: ts.CallExpression,
+  toolCalls: ToolCallSchemaMap | undefined,
 ): ParameterSignature | undefined {
-  const expression = node.expression;
-  if (ts.isIdentifier(expression)) {
-    return signatures.get(expression.text);
-  }
-  if (ts.isPropertyAccessExpression(expression)) {
-    return signatures.get(expression.name.text);
-  }
-  return undefined;
+  const schema = toolCalls?.get(toolCallKey(node.getStart(), node.getEnd()));
+  return schema ? parameterSignature(schema) : undefined;
+}
+
+function parameterSignature(
+  schema: ToolSignatureSchema,
+): ParameterSignature | undefined {
+  const numericParameters = schema.parameters.filter(
+    (
+      parameter,
+    ): parameter is typeof parameter & Readonly<{kind: ParameterKind}> =>
+      parameter.kind !== 'edge',
+  );
+  if (numericParameters.length === 0) return undefined;
+  const lastIndex = Math.max(
+    ...numericParameters.map(parameter => parameter.index),
+  );
+  const arguments_: Array<ParameterArgument | undefined> = Array.from({
+    length: lastIndex + 1,
+  });
+  numericParameters.forEach(parameter => {
+    arguments_[parameter.index] = {
+      name: parameter.name,
+      label: parameter.label,
+      kind: parameter.kind,
+    };
+  });
+  return {operation: schema.name, arguments: arguments_};
 }
 
 function parseCode3dMetadata(

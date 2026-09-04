@@ -410,6 +410,43 @@ and provenance are still evaluated afresh. Cache encoding, capacity, and a
 possible lifetime beyond one compiler worker remain adjustable implementation
 choices rather than product semantics.
 
+### 4d. Annotation-driven contextual tools — active
+
+- Let an authoring API opt individual parameters into contextual panels with
+  per-signature JSDoc such as `@code3d.param width {kind: 'length'}`. Parse the
+  annotation value as a statically inspectable JavaScript object literal and
+  resolve the declaration through its TypeScript symbol and signature rather
+  than the spelling used at the call site.
+- Use one semantic `kind` discriminator for value and selectable parameters.
+  Keep runtime defaults, effective selections, environment-dependent steps,
+  display ranges, units, and other presentation policy out of the declaration
+  metadata; resolve them from the reached tool context and current environment.
+- Prefer an optional trailing parameter when omission is the only alternative
+  call form, as for `fillet(radius, edgeIds?)` and
+  `chamfer(distance, edgeIds?)`. Retain independently annotated overloads when
+  signatures genuinely require different tool configuration.
+- Allow parameter-level and tool-level actions to evolve as separate tagged
+  unions. Implement only actions required by an actual tool; edge selection's
+  initial action is `{label: 'Use all', action: 'remove-argument'}` on the
+  optional edge parameter.
+- Build a generic parameter panel from the resolved signature and the most
+  recently reached runtime execution. Keep specialized viewport behavior in
+  reusable providers: scalar parameters need no viewport interaction, offset
+  contributes its relative-frame gizmo, and edge parameters contribute edge
+  picking plus input/result comparison. A provider consumes runtime facts and
+  emits ordinary tool intents; annotations do not restate implementation
+  behavior.
+- Migrate primitive constructors, `Constraint.offset()`, scale, fillet, and
+  chamfer to the annotation path, deleting the compiler's name-based parameter
+  table and the fillet/chamfer-specific panel contract rather than retaining
+  parallel metadata or UI paths.
+
+Implementation order: first establish and commit declaration parsing,
+signature resolution, runtime tool context, and generic source-edit actions;
+then commit the generic panel and migrate viewport providers one operation
+family at a time. Adjust the schema when concrete operations expose a better
+boundary instead of preserving an awkward planned abstraction.
+
 ### 5. Object combination tools
 
 - Handwritten standalone `union`, `cut`, and `intersect` functions are now the

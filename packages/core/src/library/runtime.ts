@@ -386,6 +386,11 @@ export class Constraint {
     this.parameters = [...parameters];
   }
 
+  /**
+   * @code3d.param x {kind: 'length', label: 'ΔX'}
+   * @code3d.param y {kind: 'length', label: 'ΔY'}
+   * @code3d.param z {kind: 'length', label: 'ΔZ'}
+   */
   offset(x: number, y: number, z: number): Constraint {
     assertFiniteVector('offset', [x, y, z]);
     return new Constraint(
@@ -590,6 +595,7 @@ export class ModelObject<
     );
   }
 
+  /** @code3d.param factor {kind: 'ratio', label: 'Scale'} */
   scaled(factor: number): Model<Elements> {
     assertPositive('scale', factor);
     const source = this.requireGeometry();
@@ -612,8 +618,10 @@ export class ModelObject<
     );
   }
 
-  fillet(radius: number): Model<Elements>;
-  fillet(radius: number, edgeIds: readonly EdgeId[]): Model<Elements>;
+  /**
+   * @code3d.param radius {kind: 'length', label: 'Fillet radius', constraints: {exclusiveMin: 0}}
+   * @code3d.param edgeIds {kind: 'edge', actions: [{label: 'Use all', action: 'remove-argument'}]}
+   */
   fillet(radius: number, edgeIds?: readonly EdgeId[]): Model<Elements> {
     assertPositive('radius', radius);
     const source = this.requireGeometry();
@@ -644,8 +652,10 @@ export class ModelObject<
     );
   }
 
-  chamfer(distance: number): Model<Elements>;
-  chamfer(distance: number, edgeIds: readonly EdgeId[]): Model<Elements>;
+  /**
+   * @code3d.param distance {kind: 'length', label: 'Chamfer distance', constraints: {exclusiveMin: 0}}
+   * @code3d.param edgeIds {kind: 'edge', actions: [{label: 'Use all', action: 'remove-argument'}]}
+   */
   chamfer(distance: number, edgeIds?: readonly EdgeId[]): Model<Elements> {
     assertPositive('distance', distance);
     const source = this.requireGeometry();
@@ -1078,6 +1088,11 @@ export class ModelObject<
   }
 }
 
+/**
+ * @code3d.param width {kind: 'length', constraints: {exclusiveMin: 0}}
+ * @code3d.param height {kind: 'length', constraints: {exclusiveMin: 0}}
+ * @code3d.param depth {kind: 'length', constraints: {exclusiveMin: 0}}
+ */
 export function box(
   width: number,
   height: number,
@@ -1099,6 +1114,10 @@ export function box(
   }) as Model<CanonicalElements>;
 }
 
+/**
+ * @code3d.param radius {kind: 'length', constraints: {exclusiveMin: 0}}
+ * @code3d.param height {kind: 'length', constraints: {exclusiveMin: 0}}
+ */
 export function cylinder(
   radius: number,
   height: number,
@@ -1115,6 +1134,7 @@ export function cylinder(
   }) as Model<CanonicalElements>;
 }
 
+/** @code3d.param radius {kind: 'length', constraints: {exclusiveMin: 0}} */
 export function sphere(radius: number): Model<CanonicalElements> {
   assertPositive('radius', radius);
   return new ModelObject<CanonicalElements>({
@@ -1127,6 +1147,11 @@ export function sphere(radius: number): Model<CanonicalElements> {
   }) as Model<CanonicalElements>;
 }
 
+/**
+ * @code3d.param bottomRadius {kind: 'length', label: 'Bottom radius', constraints: {exclusiveMin: 0}}
+ * @code3d.param topRadius {kind: 'length', label: 'Top radius', constraints: {exclusiveMin: 0}}
+ * @code3d.param height {kind: 'length', constraints: {exclusiveMin: 0}}
+ */
 export function frustum(
   bottomRadius: number,
   topRadius: number,
@@ -1158,6 +1183,12 @@ export function frustum(
   }) as Model<CanonicalElements>;
 }
 
+/**
+ * @code3d.param radius {kind: 'length', constraints: {exclusiveMin: 0}}
+ * @code3d.param height {kind: 'length', constraints: {exclusiveMin: 0}}
+ * @code3d.param sides {kind: 'count', constraints: {min: 3}}
+ * @code3d.param rotation {kind: 'angle'}
+ */
 export function regularPrism(
   radius: number,
   height: number,
