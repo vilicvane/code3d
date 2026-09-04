@@ -232,6 +232,9 @@ export type ModelSnapshotObject = Readonly<{
   name: string;
   color?: string;
   children: readonly ModelSnapshotObject[];
+  /** Placement used when this snapshot participates in a composition. */
+  compositionTransform: Transform;
+  /** Placement in this snapshot tree; a root value keeps its intrinsic frame. */
   transform: Transform;
   constraints: readonly ConstraintSnapshot[];
   elements: readonly ElementSnapshot[];
@@ -1018,11 +1021,26 @@ export class ModelObject<
 
   toSnapshot(
     meshCache: Map<AnyShape, RenderMesh> = new Map(),
-    solveContext: SolveContext = createSolveContext(),
+  ): ModelSnapshotObject {
+    const solveContext = createSolveContext();
+    return this.snapshotNode(meshCache, solveContext);
+  }
+
+  private snapshotNode(
+    meshCache: Map<AnyShape, RenderMesh>,
+    solveContext: SolveContext,
+    parentPose?: RigidTransform,
   ): ModelSnapshotObject {
     const pose = this.solvePose(solveContext);
+    const compositionPose = parentPose
+      ? relativeTransform(pose, parentPose)
+      : pose;
     const constraints = this.constraints.map(constraint =>
-      this.constraintSnapshot(constraint, solveContext),
+      this.constraintSnapshot(
+        constraint,
+        solveContext,
+        parentPose ?? identityRigidTransform,
+      ),
     );
     const parameters = uniqueParameters([
       ...this.parameters,
@@ -1033,7 +1051,10 @@ export class ModelObject<
       kind: this.kind,
       name: this.name,
       color: this.color,
-      transform: toTransform(pose),
+      compositionTransform: toTransform(compositionPose),
+      transform: toTransform(
+        parentPose ? compositionPose : identityRigidTransform,
+      ),
       constraints,
       elements: Object.entries(this.elements).map(([name, element]) => ({
         name,
@@ -1049,7 +1070,7 @@ export class ModelObject<
       return {
         ...common,
         children: this.children.map(child =>
-          child.toSnapshot(meshCache, solveContext),
+          child.snapshotNode(meshCache, solveContext, pose),
         ),
       };
     }
@@ -1328,6 +1349,7 @@ export class ModelObject<
   private constraintSnapshot(
     constraint: StoredConstraint,
     context: SolveContext,
+    basis: RigidTransform,
   ): ConstraintSnapshot {
     const targetPose = constraint.target.model.solvePose(context);
     const offsetFrame = composeTransforms(
@@ -1341,7 +1363,7 @@ export class ModelObject<
       target: anchorSnapshot(constraint.target),
       flipped: constraint.flipped,
       offset: constraint.offset,
-      offsetFrame: toTransform(offsetFrame),
+      offsetFrame: toTransform(relativeTransform(offsetFrame, basis)),
       sourceRefs: [...constraint.sourceRefs],
       parameters: [...constraint.parameters],
     };

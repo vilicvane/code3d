@@ -36,6 +36,9 @@ silently reorder the active milestones. Closed requests move to
 - `model.relate(self => constraint | constraints)` creates a new
   semantic-immutable model value that shares geometry and carries the returned
   constraint or constraint array. The callback parameter is that new value.
+  Rendering this value on its own preserves its intrinsic local placement;
+  relation placement is resolved only when the value participates in a
+  composition.
 - Anchor methods return immutable constraint expressions. `on()` relates two
   complete local frames with opposing orientation, `flip()` selects the other
   orientation, and `offset(x, y, z)` adjusts the relation in the target Anchor's
@@ -296,8 +299,9 @@ implemented as reusable dock panel infrastructure.
   constraints for consistency.
 - Let `flip()` choose between opposed and aligned frame orientation without
   encoding front/back as a special-case placement rule.
-- Resolve related models only when rendering or evaluating standalone Boolean
-  operations.
+- Preserve a related value's intrinsic local placement when it is rendered on
+  its own. Resolve relation placement when rendering a composition or evaluating
+  a compositional geometry operation such as a Boolean or loft.
 - Preserve constraint source and parameter provenance for GUI tools.
 
 Status: implemented for directly solvable frame relations. The old public

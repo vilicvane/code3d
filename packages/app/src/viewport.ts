@@ -26,6 +26,7 @@ import {
   createRenderedModelNode,
   createSurfaceGeometry,
   disposeObject,
+  type ModelPlacement,
 } from './rendering/model-renderer';
 import {
   PositionGizmo,
@@ -45,6 +46,7 @@ export type Occurrence = Readonly<{
   object: THREE.Object3D;
   depth: number;
   view: 'model' | 'source';
+  placement: ModelPlacement;
   operationRole?: ModelOperationInputRole;
 }>;
 
@@ -577,6 +579,7 @@ export class ModelViewport {
       input,
       input.mesh,
       kind,
+      occurrence.placement,
     );
     this.decorationRoot.add(guide);
     this.topologySelection = {
@@ -807,14 +810,23 @@ export class ModelViewport {
     key: string,
     depth: number,
     view: Occurrence['view'],
+    placement: ModelPlacement,
     operationRole?: ModelOperationInputRole,
   ): THREE.Object3D {
     const object = createRenderedModelNode(node);
     object.name = node.name;
     object.userData.selectionKey = key;
-    applyNodeTransform(object, node);
+    applyNodeTransform(object, node, placement);
 
-    const occurrence = {key, node, object, depth, view, operationRole};
+    const occurrence = {
+      key,
+      node,
+      object,
+      depth,
+      view,
+      placement,
+      operationRole,
+    };
     this.occurrences.set(key, occurrence);
 
     node.children.forEach((child, index) => {
@@ -824,6 +836,7 @@ export class ModelViewport {
           `${key}/${index}`,
           depth + 1,
           view,
+          placement,
           operationRole,
         ),
       );
@@ -860,6 +873,11 @@ export class ModelViewport {
     focusedNodeId = evaluation.element?.nodeId,
   ): void {
     const relatedNodes = this.resolveNodes(evaluation.nodeIds);
+    const placement: ModelPlacement = isCompositionRole(
+      evaluation.operationInput?.role,
+    )
+      ? 'composition'
+      : 'standalone';
     const focusNodes = focusedNodeId
       ? relatedNodes.filter(node => node.nodeId === focusedNodeId)
       : relatedNodes;
@@ -883,7 +901,7 @@ export class ModelViewport {
     this.resetRenderedView();
     contextNodes.forEach(({node, targetId}, index) => {
       this.root.add(
-        this.buildContextObject(node, `context/${index}`, targetId),
+        this.buildContextObject(node, `context/${index}`, targetId, placement),
       );
     });
     focusNodes.forEach((node, index) => {
@@ -897,6 +915,7 @@ export class ModelViewport {
         `source/${index}`,
         1,
         'source',
+        placement,
         operationRole,
       );
       if (operationRole === 'tool') {
@@ -936,6 +955,7 @@ export class ModelViewport {
       'root',
       this.module.fallback.kind === 'group' ? 0 : 1,
       'model',
+      'standalone',
     );
     this.root.add(rootObject);
     this.applyPreviewTransforms();
@@ -975,16 +995,19 @@ export class ModelViewport {
     node: ModelSnapshotObject,
     key: string,
     targetId: string,
+    placement: ModelPlacement,
   ): THREE.Object3D {
     const object = createRenderedModelNode(node);
     object.name = `${node.name} (context)`;
     object.userData.context = true;
     object.userData.sourceTargetId = targetId;
     object.userData.sourceNodeId = node.nodeId;
-    applyNodeTransform(object, node);
+    applyNodeTransform(object, node, placement);
     dimObject(object);
     node.children.forEach((child, index) => {
-      object.add(this.buildContextObject(child, `${key}/${index}`, targetId));
+      object.add(
+        this.buildContextObject(child, `${key}/${index}`, targetId, placement),
+      );
     });
     return object;
   }
@@ -1149,7 +1172,11 @@ export class ModelViewport {
 
   private applyPreviewTransforms(): void {
     for (const occurrence of this.occurrences.values()) {
-      applyNodeTransform(occurrence.object, occurrence.node);
+      applyNodeTransform(
+        occurrence.object,
+        occurrence.node,
+        occurrence.placement,
+      );
       const offset = this.previewTranslationFor(occurrence);
       occurrence.object.position.x += offset[0];
       occurrence.object.position.y += offset[1];
@@ -1807,10 +1834,11 @@ function createTopologySelectionGuide(
   node: ModelSnapshotObject,
   mesh: RenderMesh,
   kind: TopologyKind,
+  placement: ModelPlacement,
 ): Readonly<{guide: THREE.Group; pickObject: THREE.Object3D}> {
   const guide = new THREE.Group();
   guide.name = `${node.name} (selectable ${kind}s)`;
-  applyNodeTransform(guide, node);
+  applyNodeTransform(guide, node, placement);
   if (kind === 'vertex') {
     if (mesh.topologyVertices.length === 0) {
       throw new Error('The model has no renderable vertices.');

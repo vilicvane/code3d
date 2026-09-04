@@ -5,6 +5,7 @@ import type {
   ParameterTarget,
   Transform,
 } from '@code3d/core/tooling';
+import {spatialAxisColors} from '../spatial-axis-colors';
 import {snapNumericValue} from './parameter-policy';
 import type {SourceAnchor} from './tool-system';
 
@@ -71,7 +72,12 @@ export class PositionGizmo {
     this.controls.setMode('translate');
     this.controls.setSpace('local');
     this.controls.setSize(0.72);
-    this.controls.setColors('#ff665c', '#70d98d', '#6c8cff', '#d8ff3e');
+    this.controls.setColors(
+      spatialAxisColors.x,
+      spatialAxisColors.y,
+      spatialAxisColors.z,
+      '#d8ff3e',
+    );
     this.controls.showXY = false;
     this.controls.showYZ = false;
     this.controls.showXZ = false;

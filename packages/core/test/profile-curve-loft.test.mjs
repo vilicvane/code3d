@@ -3,6 +3,7 @@ import {test} from 'node:test';
 import {
   bezier,
   circle,
+  group,
   line,
   loft,
   point,
@@ -72,7 +73,9 @@ test('uses face, edge, and vertex topology as relation anchors', () => {
       constraints.map(constraint => constraint.target.name),
       ['S1', 'E1', 'V1'],
     );
-    assert.deepEqual(vertexRelated.toSnapshot().transform.position, [2, 3, 4]);
+    const relatedSnapshot = vertexRelated.toSnapshot();
+    assert.deepEqual(relatedSnapshot.transform.position, [0, 0, 0]);
+    assert.deepEqual(relatedSnapshot.compositionTransform.position, [2, 3, 4]);
   } finally {
     disposeModelObjects([
       face,
@@ -82,6 +85,26 @@ test('uses face, edge, and vertex topology as relation anchors', () => {
       edgeRelated,
       vertexRelated,
     ]);
+  }
+});
+
+test('resolves relation placement only inside a composition', () => {
+  const target = point([2, 3, 4]);
+  const related = point().relate(self => self.on(target.vertex(1)).flip());
+  const assembly = group([target, related]);
+
+  try {
+    const standalone = related.toSnapshot();
+    const assemblySnapshot = assembly.toSnapshot();
+    assert.deepEqual(standalone.transform.position, [0, 0, 0]);
+    assert.deepEqual(standalone.compositionTransform.position, [2, 3, 4]);
+    assert.deepEqual(assemblySnapshot.transform.position, [0, 0, 0]);
+    assert.deepEqual(
+      assemblySnapshot.children[1].transform.position,
+      [2, 3, 4],
+    );
+  } finally {
+    disposeModelObjects([target, related, assembly]);
   }
 });
 
@@ -104,9 +127,11 @@ test('lofts nonparallel planar profiles along a curved spine', () => {
     const startSnapshot = start.toSnapshot();
     const endSnapshot = end.toSnapshot();
     const resultSnapshot = result.toSnapshot();
+    assert.deepEqual(startSnapshot.transform.quaternion, [0, 0, 0, 1]);
+    assert.deepEqual(endSnapshot.transform.quaternion, [0, 0, 0, 1]);
     assert.notDeepEqual(
-      startSnapshot.transform.quaternion,
-      endSnapshot.transform.quaternion,
+      startSnapshot.compositionTransform.quaternion,
+      endSnapshot.compositionTransform.quaternion,
     );
     assert.equal(resultSnapshot.kind, 'solid');
     assert.equal(resultSnapshot.operation.kind, 'loft');

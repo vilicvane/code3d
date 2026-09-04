@@ -712,24 +712,13 @@ kbd {
   color: #dfe5ca;
 }
 
-.viewport-coordinate-axis[data-axis='x'] {
-  color: #ef746f;
-}
-
-.viewport-coordinate-axis[data-axis='y'] {
-  color: #b9d85a;
-}
-
-.viewport-coordinate-axis[data-axis='z'] {
-  color: #7f9df2;
-}
-
 .viewport-coordinate-axis line {
   stroke: currentColor;
   stroke-width: 2;
 }
 
-.viewport-coordinate-axis circle {
+.viewport-coordinate-axis circle,
+.viewport-coordinate-axis polygon {
   fill: currentColor;
   stroke: #11130f;
   stroke-width: 1;
