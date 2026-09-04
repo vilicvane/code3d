@@ -110,6 +110,10 @@ silently reorder the active milestones. Closed requests move to
   over source code does not change the viewport. In a layered source scene,
   focus solids are slightly translucent while context remains strongly dimmed,
   so overlaps stay legible; a single focus solid remains opaque.
+- Topology reference values retain their selected IDs through bindings and
+  collections. Their preview emphasizes the returned vertices, edges, or
+  surfaces with the owning geometry dimmed as spatial context; topology
+  accessor calls use the same dimmed context while editing the selected IDs.
 - A constraint source site renders both relation participants and takes dimmed
   context from the concrete downstream composition that consumes the
   constrained value. The constrained value remains the relation-edit scope for

@@ -21,6 +21,53 @@ after(async () => {
   await server?.close();
 });
 
+test('retains topology values at bindings, aliases, and collection results', () => {
+  const source = [
+    'import {box, rectangle} from "@code3d/core";',
+    'const plate = box(50, 4, 30);',
+    'let screwPoints = rectangle(40, 20).relate(plane => plane.on(plate.top)).vertices();',
+    'const alias = screwPoints;',
+    'const subset = [screwPoints[0], screwPoints[2]];',
+    'const repeated = [plate, plate];',
+  ].join('\n');
+  const module = compileProject(
+    {files: [{path: 'model.ts', source}]},
+    'model.ts',
+  );
+  assert.equal(module.diagnostic, undefined);
+  const binding = name =>
+    module.sourceTargets.find(
+      target =>
+        target.kind === 'value' &&
+        source.slice(target.sourceRef.start).startsWith(name + ' ='),
+    ).evaluations[0];
+  const points = binding('screwPoints');
+  assert.equal(points.nodeIds.length, 1);
+  assert.equal(points.topologyReferences.length, 4);
+  const call = module.sourceTargets.find(
+    target => target.kind === 'topology-selection',
+  );
+  assert.deepEqual(
+    call.evaluations[0].selection.ids,
+    points.topologyReferences.map(reference => reference.id),
+  );
+  assert.ok(
+    points.topologyReferences.every(
+      reference =>
+        reference.kind === 'vertex' && reference.nodeId === points.nodeIds[0],
+    ),
+  );
+  assert.deepEqual(
+    binding('alias').topologyReferences,
+    points.topologyReferences,
+  );
+  assert.deepEqual(binding('subset').topologyReferences, [
+    points.topologyReferences[0],
+    points.topologyReferences[2],
+  ]);
+  assert.equal(binding('repeated').nodeIds.length, 2);
+});
+
 test('represents an offset call with its constraint target', () => {
   const source = sharedOffsetSource();
   const module = compileProject(

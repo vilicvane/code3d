@@ -60,7 +60,14 @@ const workspacePackages = new Map<string, unknown>([
   ['@code3d/screws', screwApi],
 ]);
 
+type TopologyValueReference = Readonly<{
+  nodeId: string;
+  kind: TopologyKind;
+  id: number;
+}>;
+
 export type SourceTargetEvaluation = Readonly<{
+  topologyReferences?: readonly TopologyValueReference[];
   runtime: RuntimeReach;
   toolExecutionOrder?: number;
   nodeIds: readonly string[];
@@ -244,6 +251,7 @@ type SourceValueTrace = {
   evaluations: Array<
     Readonly<{
       objects: readonly ModelObject[];
+      topologyReferences: readonly TopologyValueReference[];
       contextId: string;
       runtime: RuntimeReach;
     }>
@@ -701,7 +709,8 @@ function recordSourceValue(
   contextId: string,
   runtime: RuntimeReach,
 ): void {
-  const objects = modelObjectsIn(value);
+  const topologyReferences: TopologyValueReference[] = [];
+  const objects = modelObjectsIn(value, new Set(), topologyReferences);
   if (objects.length === 0) {
     return;
   }
@@ -712,7 +721,12 @@ function recordSourceValue(
     sourceRef,
     evaluations: [],
   };
-  sourceTrace.evaluations.push({objects, contextId, runtime});
+  sourceTrace.evaluations.push({
+    objects,
+    topologyReferences,
+    contextId,
+    runtime,
+  });
   objects.forEach(object => {
     tracedObjects.add(object);
     if (evaluationContexts.get(contextId)?.kind === 'call') {
@@ -766,28 +780,48 @@ function recordCatalogValue(
 function modelObjectsIn(
   value: unknown,
   seen = new Set<unknown>(),
+  topologyReferences?: TopologyValueReference[],
 ): ModelObject[] {
   if (isModelObject(value)) {
     return [value];
   }
   const topology = modelTopologyReference(value);
-  if (topology) return [topology.model];
+  if (topology) {
+    const nodeId = modelObjectNodeId(topology.model);
+    const ownerRecorded = topologyReferences?.some(
+      reference => reference.nodeId === nodeId,
+    );
+    topologyReferences?.push({
+      nodeId,
+      kind: topology.kind,
+      id: topology.id,
+    });
+    return ownerRecorded ? [] : [topology.model];
+  }
   if (typeof value !== 'object' || value === null || seen.has(value)) {
     return [];
   }
   seen.add(value);
   if (Array.isArray(value)) {
-    return value.flatMap(item => modelObjectsIn(item, seen));
+    return value.flatMap(item =>
+      modelObjectsIn(item, seen, topologyReferences),
+    );
   }
   if (value instanceof Map) {
-    return [...value.values()].flatMap(item => modelObjectsIn(item, seen));
+    return [...value.values()].flatMap(item =>
+      modelObjectsIn(item, seen, topologyReferences),
+    );
   }
   if (value instanceof Set) {
-    return [...value].flatMap(item => modelObjectsIn(item, seen));
+    return [...value].flatMap(item =>
+      modelObjectsIn(item, seen, topologyReferences),
+    );
   }
   const prototype = Object.getPrototypeOf(value);
   if (prototype === Object.prototype || prototype === null) {
-    return Object.values(value).flatMap(item => modelObjectsIn(item, seen));
+    return Object.values(value).flatMap(item =>
+      modelObjectsIn(item, seen, topologyReferences),
+    );
   }
   return [];
 }
@@ -1405,7 +1439,7 @@ function buildSourceTargets(
   const valueTargets = [...sourceValueTraces.values()].map(trace => {
     const toolSite = toolCallSites.get(trace.id);
     const evaluations = trace.evaluations.map(
-      ({objects, contextId, runtime}) => {
+      ({objects, topologyReferences, contextId, runtime}) => {
         const nodeIds = objects.map(modelObjectNodeId);
         const operationId = [...operations.values()].find(
           operation =>
@@ -1415,6 +1449,7 @@ function buildSourceTargets(
         return {
           runtime,
           nodeIds,
+          topologyReferences,
           operationId,
           contextId,
           parameters: sourceExecutionFor(trace.id, contextId, runtime)
@@ -1575,6 +1610,11 @@ function buildSourceTargets(
           execution.arguments.get(parameter.index),
           parameter.multiple,
         );
+        const returnedReferences = valueTargets
+          .find(target => target.tool?.callId === site.siteId)
+          ?.evaluations.find(
+            evaluation => evaluation.runtime.order === execution.order,
+          )?.topologyReferences;
         return [
           {
             runtime: sourceExecutionRuntime(execution),
@@ -1584,11 +1624,15 @@ function buildSourceTargets(
             selection: {
               kind: parameter.kind,
               inputNodeId: modelObjectNodeId(receiver),
-              ids: validAttemptedTopologyIds(
-                objects.get(modelObjectNodeId(receiver)),
-                parameter.kind,
-                attemptedIds,
-              ),
+              ids: returnedReferences
+                ? returnedReferences
+                    .filter(reference => reference.kind === parameter.kind)
+                    .map(reference => reference.id)
+                : validAttemptedTopologyIds(
+                    objects.get(modelObjectNodeId(receiver)),
+                    parameter.kind,
+                    attemptedIds,
+                  ),
             },
           } satisfies SourceTargetEvaluation,
         ];
