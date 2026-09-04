@@ -1,5 +1,8 @@
 import type * as typeScript from '@typescript/typescript6';
+import type {TypeScriptSelectionRange} from 'monaco-editor/language/typescript/ts.worker';
 import type * as typeScriptLanguage from 'monaco-editor/languages/features/typescript/register';
+
+export type {TypeScriptSelectionRange};
 
 export type TypeScriptCompletionEntry = typeScript.CompletionEntry;
 export type TypeScriptCompletionInfo = typeScript.CompletionInfo;
@@ -21,4 +24,9 @@ export interface ProjectTypeScriptWorker
     source: string | undefined,
     data: TypeScriptCompletionEntryData | undefined,
   ): Promise<TypeScriptCompletionEntryDetails | undefined>;
+
+  getProjectSelectionRanges(
+    fileName: string,
+    positions: readonly number[],
+  ): Promise<readonly TypeScriptSelectionRange[]>;
 }

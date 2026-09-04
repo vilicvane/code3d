@@ -1,10 +1,10 @@
 import * as monaco from 'monaco-editor/editor';
 import * as typeScriptLanguage from 'monaco-editor/languages/features/typescript/register';
 import type {
-  ProjectTypeScriptWorker,
   TypeScriptCompletionEntry,
   TypeScriptCompletionEntryDetails,
 } from './typescript-protocol';
+import {projectTypeScriptWorker} from './typescript-worker-client';
 
 type ProjectCompletionItem = monaco.languages.CompletionItem &
   Readonly<{
@@ -29,7 +29,7 @@ export function registerProjectTypeScriptCompletions(
     async provideCompletionItems(model, position, _context, token) {
       const uri = model.uri;
       const offset = model.getOffsetAt(position);
-      const worker = await projectWorker(model.getLanguageId(), uri);
+      const worker = await projectTypeScriptWorker(model.getLanguageId(), uri);
       if (token.isCancellationRequested || model.isDisposed()) return undefined;
       const info = await worker.getProjectCompletions(uri.toString(), offset);
       if (token.isCancellationRequested || model.isDisposed()) return undefined;
@@ -89,7 +89,7 @@ export function registerProjectTypeScriptCompletions(
       ) {
         return item;
       }
-      const worker = await projectWorker(
+      const worker = await projectTypeScriptWorker(
         completion.uri.path.endsWith('.js') ||
           completion.uri.path.endsWith('.jsx')
           ? 'javascript'
@@ -158,16 +158,6 @@ function disableBuiltInCompletions(
     ...defaults.modeConfiguration,
     completionItems: false,
   });
-}
-
-async function projectWorker(
-  language: string,
-  uri: monaco.Uri,
-): Promise<ProjectTypeScriptWorker> {
-  const factory = await (language === 'javascript'
-    ? typeScriptLanguage.getJavaScriptWorker()
-    : typeScriptLanguage.getTypeScriptWorker());
-  return (await factory(uri)) as ProjectTypeScriptWorker;
 }
 
 function completionRange(
