@@ -5,6 +5,7 @@ import * as typeScriptLanguage from 'monaco-editor/languages/features/typescript
 import EditorWorker from 'monaco-editor/editor/editor.worker?worker';
 import TypeScriptWorker from 'monaco-editor/language/typescript/ts.worker?worker';
 import type {CursorOptions, Options} from 'prettier';
+import {code3dCodeColors, code3dCodeFocusColors} from './code-theme';
 import {
   observeSuggestionFocus,
   type FocusedSuggestion,
@@ -178,21 +179,21 @@ monaco.editor.defineTheme('code3d-dark', {
   base: 'vs-dark',
   inherit: true,
   rules: [
-    {token: 'comment', foreground: '6f756b'},
-    {token: 'keyword', foreground: 'd8ff3e'},
-    {token: 'string', foreground: 'e8bd76'},
-    {token: 'number', foreground: '8ed5d1'},
-    {token: 'type.identifier', foreground: 'aebcff'},
+    {token: 'comment', foreground: tokenColor(code3dCodeColors.comment)},
+    {token: 'keyword', foreground: tokenColor(code3dCodeColors.keyword)},
+    {token: 'string', foreground: tokenColor(code3dCodeColors.string)},
+    {token: 'number', foreground: tokenColor(code3dCodeColors.number)},
+    {token: 'type.identifier', foreground: tokenColor(code3dCodeColors.type)},
   ],
   colors: {
-    'editor.background': '#11110f',
-    'editor.foreground': '#e7e8df',
+    'editor.background': code3dCodeColors.background,
+    'editor.foreground': code3dCodeColors.foreground,
     'editorLineNumber.foreground': '#4e514a',
     'editorLineNumber.activeForeground': '#b9beaf',
-    'editorCursor.foreground': '#d8ff3e',
+    'editorCursor.foreground': code3dCodeFocusColors.cursor,
     'editor.selectionBackground': '#53651566',
     'editor.inactiveSelectionBackground': '#53651533',
-    'editor.lineHighlightBackground': '#1a1b17',
+    'editor.lineHighlightBackground': code3dCodeFocusColors.currentLine,
     'editorIndentGuide.background1': '#272923',
     'editorIndentGuide.activeBackground1': '#555a4e',
     'editorWidget.background': '#1a1b17',
@@ -201,6 +202,10 @@ monaco.editor.defineTheme('code3d-dark', {
     'editorSuggestWidget.selectedBackground': '#303527',
   },
 });
+
+function tokenColor(color: `#${string}`): string {
+  return color.slice(1);
+}
 
 const typeScriptTokenizationReady = monaco.editor.colorize(
   "['code3d', 1]",

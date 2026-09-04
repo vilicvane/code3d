@@ -4,8 +4,20 @@ import {readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 import react from '@vitejs/plugin-react';
-import {codeToHtml} from 'shiki';
+import {
+  codeToHtml,
+  type ShikiTransformer,
+  type ThemeRegistrationRaw,
+} from 'shiki';
 import {defineConfig, type Plugin} from 'vite';
+import {
+  code3dCodeColors,
+  code3dCodeFocusColors,
+} from '../app/src/code-theme.ts';
+import {
+  fastenerRenderSample,
+  sourceTokenOffset,
+} from '../app/render-samples/fastener.config.ts';
 import {App} from './src/www/app.tsx';
 import {
   packageSource,
@@ -17,8 +29,56 @@ const wwwDirectory = path.join(packageDirectory, 'src/www');
 const rootMarker = '<div id="root"></div>';
 const assemblySourcePath = path.join(
   packageDirectory,
-  '../app/examples/fasteners.ts',
+  '../app/render-samples/fastener.ts',
 );
+const code3dShikiTheme = {
+  name: 'code3d-dark',
+  type: 'dark',
+  fg: code3dCodeColors.foreground,
+  bg: code3dCodeColors.background,
+  colors: {
+    'editor.background': code3dCodeColors.background,
+    'editor.foreground': code3dCodeColors.foreground,
+  },
+  settings: [
+    {
+      settings: {
+        background: code3dCodeColors.background,
+        foreground: code3dCodeColors.foreground,
+      },
+    },
+    {
+      scope: 'comment',
+      settings: {foreground: code3dCodeColors.comment},
+    },
+    {
+      scope: [
+        'keyword',
+        'storage',
+        'constant.language',
+        'support.type.primitive',
+      ],
+      settings: {foreground: code3dCodeColors.keyword},
+    },
+    {
+      scope: 'string',
+      settings: {foreground: code3dCodeColors.string},
+    },
+    {
+      scope: 'constant.numeric',
+      settings: {foreground: code3dCodeColors.number},
+    },
+    {
+      scope: [
+        'entity.name.type',
+        'entity.name.class',
+        'entity.name.interface',
+        'support.type',
+      ],
+      settings: {foreground: code3dCodeColors.type},
+    },
+  ],
+} satisfies ThemeRegistrationRaw;
 
 function normalizedSiteUrl(value: string | undefined): string | undefined {
   if (!value) return undefined;
@@ -100,13 +160,70 @@ function staticSite(siteUrl: string | undefined): Plugin {
 
 async function highlightedCodeSamples(): Promise<HighlightedCodeSamples> {
   const assemblySource = await readFile(assemblySourcePath, 'utf8');
+  const focus = fastenerRenderSample.focus;
+  const focusOffset = sourceTokenOffset(assemblySource, focus.target);
   const [assemblyHtml, packageHtml] = await Promise.all([
-    codeToHtml(assemblySource, {lang: 'typescript', theme: 'vesper'}),
-    codeToHtml(packageSource, {lang: 'typescript', theme: 'vesper'}),
+    codeToHtml(assemblySource, {
+      lang: 'typescript',
+      theme: code3dShikiTheme,
+      decorations: [
+        ...focus.related.map(target => ({
+          start: sourceTokenOffset(assemblySource, target),
+          end: sourceTokenOffset(assemblySource, target) + target.token.length,
+          properties: {class: 'source-symbol-related'},
+          alwaysWrap: true,
+        })),
+        ...focus.brackets.map(target => ({
+          start: sourceTokenOffset(assemblySource, target),
+          end: sourceTokenOffset(assemblySource, target) + target.token.length,
+          properties: {class: 'source-bracket-match'},
+          alwaysWrap: true,
+        })),
+        {
+          start: focusOffset,
+          end: focusOffset + focus.target.token.length,
+          properties: {class: 'source-cursor source-symbol-current'},
+          alwaysWrap: true,
+        },
+      ],
+      transformers: [sourceFocusTransformer(assemblySource, focusOffset)],
+    }),
+    codeToHtml(packageSource, {
+      lang: 'typescript',
+      theme: code3dShikiTheme,
+    }),
   ]);
   return {
     assembly: {source: assemblySource, html: assemblyHtml},
     package: {source: packageSource, html: packageHtml},
+  };
+}
+
+function sourceFocusTransformer(
+  source: string,
+  focusOffset: number,
+): ShikiTransformer {
+  const focusedLine = source.slice(0, focusOffset).split('\n').length;
+  const focusStyles = [
+    `--source-cursor:${code3dCodeFocusColors.cursor}`,
+    `--source-current-line:${code3dCodeFocusColors.currentLine}`,
+    `--source-related-symbol:${code3dCodeFocusColors.relatedSymbol}`,
+    `--source-current-symbol:${code3dCodeFocusColors.currentSymbol}`,
+    `--source-bracket-match:${code3dCodeFocusColors.bracketMatch}`,
+  ].join(';');
+
+  return {
+    name: 'code3d-source-focus',
+    pre(hast) {
+      const style =
+        typeof hast.properties.style === 'string' ? hast.properties.style : '';
+      hast.properties.style = `${style};${focusStyles}`;
+    },
+    line(hast, line) {
+      if (line === focusedLine) {
+        this.addClassToHast(hast, 'source-current-line');
+      }
+    },
   };
 }
 

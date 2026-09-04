@@ -1,8 +1,7 @@
 import type {ReactNode} from 'react';
-import {
-  fallbackCodeSamples,
-  type HighlightedCodeSample,
-  type HighlightedCodeSamples,
+import type {
+  HighlightedCodeSample,
+  HighlightedCodeSamples,
 } from './code-samples.js';
 
 const githubUrl = 'https://github.com/vilicvane/code3d';
@@ -129,10 +128,10 @@ function ModelViewport(): ReactNode {
     <figure className="model-render">
       <img
         alt="A counterbored plate and ISO 4762 socket cap screw rendered by Code3D"
-        height="900"
+        height="1800"
         loading="lazy"
         src="product-fastener.png"
-        width="1200"
+        width="2400"
       />
     </figure>
   );
@@ -368,8 +367,8 @@ function PackageSection({sample}: {sample: HighlightedCodeSample}): ReactNode {
       </div>
       <div className="package-code-card">
         <div className="package-card-top">
-          <span>@code3d/screws</span>
-          <span>ISO 4762</span>
+          <span>fixtures/locating-pin.ts</span>
+          <span>TYPED ELEMENTS</span>
         </div>
         <HighlightedCode
           className="package-highlight"
@@ -472,11 +471,7 @@ function Footer(): ReactNode {
   );
 }
 
-export function App({
-  samples = fallbackCodeSamples,
-}: {
-  samples?: HighlightedCodeSamples;
-} = {}): ReactNode {
+export function App({samples}: {samples: HighlightedCodeSamples}): ReactNode {
   return (
     <>
       <a className="skip-link" href="#main-content">
@@ -493,7 +488,10 @@ export function App({
                 <span>CODE-FIRST SOLID MODELING</span>
               </div>
               <h1>
-                <span className="hero-headline">The model is code.</span>
+                <span className="hero-headline">
+                  <span>The model</span>
+                  <span>is code.</span>
+                </span>
                 <span className="hero-view-headline">
                   <span>The view is an</span>
                   <span>instrument.</span>

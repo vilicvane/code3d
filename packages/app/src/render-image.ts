@@ -1,7 +1,13 @@
 import initOpenCascade from 'replicad-opencascadejs';
 import openCascadeWasmUrl from 'replicad-opencascadejs/wasm?url';
 import {installOpenCascade} from '@code3d/core/tooling';
-import fastenerSource from '../examples/fasteners.ts?raw';
+import {
+  fastenerRenderSample,
+  sourceTokenOffset,
+  type SourceToken,
+  uniqueSourceOffset,
+} from '../render-samples/fastener.config';
+import fastenerSource from '../render-samples/fastener.ts?raw';
 import {compileProject} from './model/compiler';
 import {elementSourceDecoration} from './model/element-decorations';
 import {
@@ -14,10 +20,14 @@ import './render-image.css';
 
 const renderProjects = {
   fasteners: {
-    rootPath: '/examples/fasteners.ts',
-    files: [{path: '/examples/fasteners.ts', source: fastenerSource}],
+    rootPath: '/fastener.ts',
+    files: [{path: '/fastener.ts', source: fastenerSource}],
+    focus: fastenerRenderSample.focus.target,
   },
-} satisfies Record<string, ModelProject & Readonly<{rootPath: string}>>;
+} satisfies Record<
+  string,
+  ModelProject & Readonly<{rootPath: string; focus: SourceToken}>
+>;
 
 type ModelName = keyof typeof renderProjects;
 
@@ -29,31 +39,15 @@ function requestedModel(): ModelName {
   return name as ModelName;
 }
 
-function requestedSourceOffset(source: string): number | undefined {
+function requestedSourceOffset(
+  source: string,
+  defaultFocus: SourceToken,
+): number | undefined {
   const parameters = new URLSearchParams(location.search);
-  const lineValue = parameters.get('line');
-  if (lineValue === null) return undefined;
-
-  const line = Number(lineValue);
-  const column = Number(parameters.get('column') ?? '1');
-  const lines = source.split('\n');
-  if (
-    !Number.isInteger(line) ||
-    !Number.isInteger(column) ||
-    line < 1 ||
-    line > lines.length ||
-    column < 1 ||
-    column > lines[line - 1].length + 1
-  ) {
-    throw new Error(`Invalid source position: ${line}:${column}`);
-  }
-  return (
-    lines
-      .slice(0, line - 1)
-      .reduce((offset, value) => offset + value.length + 1, 0) +
-    column -
-    1
-  );
+  const focus = parameters.get('focus');
+  return focus
+    ? uniqueSourceOffset(source, focus)
+    : sourceTokenOffset(source, defaultFocus);
 }
 
 async function renderModel(): Promise<void> {
@@ -85,7 +79,7 @@ async function renderModel(): Promise<void> {
   const source = project.files.find(
     file => file.path === project.rootPath,
   )!.source;
-  const sourceOffset = requestedSourceOffset(source);
+  const sourceOffset = requestedSourceOffset(source, project.focus);
   if (sourceOffset !== undefined) {
     if (!viewport.selectBySourceOffset(project.rootPath, sourceOffset)) {
       throw new Error(
@@ -100,7 +94,28 @@ async function renderModel(): Promise<void> {
   await new Promise<void>(resolve =>
     requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
   );
+  const {width, height} = root.getBoundingClientRect();
+  const image = await viewport.captureImage(
+    Math.round(width),
+    Math.round(height),
+  );
+  window.code3dRenderedImage = await blobDataUrl(image);
   document.documentElement.dataset.renderState = 'ready';
+}
+
+function blobDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener('load', () => resolve(String(reader.result)));
+    reader.addEventListener('error', () => reject(reader.error));
+    reader.readAsDataURL(blob);
+  });
+}
+
+declare global {
+  interface Window {
+    code3dRenderedImage?: string;
+  }
 }
 
 renderModel().catch(error => {

@@ -178,6 +178,7 @@
     height: 92px;
     grid-template-columns: 1fr auto 1fr;
     align-items: center;
+    padding-inline: clamp(14px, 1.5vw, 24px);
     border-bottom: 1px solid rgba(122, 128, 115, 0.24);
     transform: translateX(-50%);
   }
@@ -370,12 +371,13 @@
   }
 
   .hero-headline,
+  .hero-headline > span,
   .hero-view-headline,
   .hero-view-headline > span {
     display: block;
   }
 
-  .hero-headline,
+  .hero-headline > span,
   .hero-view-headline > span {
     white-space: nowrap;
   }
@@ -649,7 +651,7 @@
   .highlighted-code {
     min-width: 0;
     overflow: auto;
-    background: #10120f;
+    background: #11110f;
   }
 
   .highlighted-code pre,
@@ -659,17 +661,57 @@
     margin: 0;
     padding: 36px 34px;
     overflow: visible;
-    background: transparent !important;
-    font: 500 0.72rem/1.58 var(--mono);
+    font: 500 0.93rem/1.58 var(--mono);
   }
 
   .highlighted-code code {
-    display: block;
+    display: flex;
+    flex-direction: column;
   }
 
   .highlighted-code .line {
     display: block;
     min-height: 1.58em;
+  }
+
+  .highlighted-code .source-current-line {
+    background: var(--source-current-line);
+    box-shadow:
+      -34px 0 var(--source-current-line),
+      34px 0 var(--source-current-line);
+  }
+
+  .source-symbol-related {
+    background: var(--source-related-symbol);
+  }
+
+  .source-symbol-current {
+    background: var(--source-current-symbol);
+  }
+
+  .source-bracket-match {
+    background: color-mix(
+      in srgb,
+      var(--source-bracket-match) 16%,
+      transparent
+    );
+    box-shadow: inset 0 0 0 1px var(--source-bracket-match);
+  }
+
+  .source-cursor {
+    position: relative;
+  }
+
+  .source-cursor::before {
+    position: absolute;
+    top: -0.15em;
+    bottom: -0.15em;
+    left: -1px;
+    z-index: 1;
+    width: 2px;
+    content: '';
+    background: var(--source-cursor);
+    box-shadow: 0 0 5px rgba(216, 255, 62, 0.48);
   }
 
   .demo-code {
@@ -1392,6 +1434,11 @@
 
     .demo-code {
       min-height: 525px;
+    }
+
+    .demo-code pre,
+    .demo-code .shiki {
+      font-size: 0.77rem;
     }
 
     .model-render img {

@@ -1,4 +1,4 @@
-import {mkdir} from 'node:fs/promises';
+import {mkdir, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {chromium} from 'playwright-core';
@@ -20,8 +20,7 @@ const output = path.resolve(
 );
 const width = Number(option('width', '1200'));
 const height = Number(option('height', '900'));
-const line = option('line');
-const column = option('column');
+const focus = option('focus');
 
 if (!Number.isInteger(width) || width <= 0) {
   throw new Error(`Invalid image width: ${width}`);
@@ -52,14 +51,16 @@ await page.setViewportSize({width, height});
 try {
   const url = new URL('render.html', baseUrl);
   url.searchParams.set('model', model);
-  if (line) url.searchParams.set('line', line);
-  if (column) url.searchParams.set('column', column);
+  if (focus) url.searchParams.set('focus', focus);
   await page.goto(url.href, {waitUntil: 'networkidle'});
   await page.locator('html[data-render-state="ready"]').waitFor({
     state: 'attached',
     timeout: 60_000,
   });
-  await page.locator('#render-root').screenshot({path: output});
+  const image = await page.evaluate(() => window.code3dRenderedImage);
+  if (!image) throw new Error('The render page did not produce an image.');
+  const encoded = image.slice(image.indexOf(',') + 1);
+  await writeFile(output, Buffer.from(encoded, 'base64'));
   console.log(path.relative(process.cwd(), output));
 } finally {
   await page.close();

@@ -8,31 +8,15 @@ export type HighlightedCodeSamples = Readonly<{
   package: HighlightedCodeSample;
 }>;
 
-export const fallbackAssemblySource = `import {box, cut, group} from '@code3d/core';
-import {ISO4762} from '@code3d/screws';
+export const packageSource = `import {cylinder} from '@code3d/core';
 
-const plate = box(38, 6, 26);
-const hole = ISO4762.clearanceHole('M6', {
-  depth: 10,
-  fit: 'normal',
-  counterbore: true,
-}).relate(tool => tool.shaftBottom.on(plate.bottom).flip());
+export function locatingPin(radius: number, height: number) {
+  const body = cylinder(radius, height);
 
-export const assembly = group([
-  cut(plate, [hole]),
-  ISO4762.screw('M6', 18),
-]);`;
-
-export const packageSource = `import {ISO4762} from '@code3d/screws';
-
-export const mountingHole = (depth: number) =>
-  ISO4762.clearanceHole('M6', {
-    depth,
-    fit: 'normal',
-    counterbore: true,
-  });`;
-
-export const fallbackCodeSamples: HighlightedCodeSamples = {
-  assembly: {source: fallbackAssemblySource, html: ''},
-  package: {source: packageSource, html: ''},
-};
+  return body
+    .expose({
+      mountingFace: body.bottom,
+      tipFace: body.top,
+      centerline: body.axis,
+    });
+}`;

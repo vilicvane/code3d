@@ -11,9 +11,12 @@ if (!(root instanceof HTMLElement)) {
 }
 
 const samplesElement = document.querySelector('#code3d-code-samples');
-const samples = samplesElement?.textContent
-  ? (JSON.parse(samplesElement.textContent) as HighlightedCodeSamples)
-  : undefined;
+if (!samplesElement?.textContent) {
+  throw new Error('The Code3D website code samples are missing.');
+}
+const samples = JSON.parse(
+  samplesElement.textContent,
+) as HighlightedCodeSamples;
 
 const application = (
   <StrictMode>

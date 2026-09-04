@@ -9,7 +9,7 @@
     "clean": "rimraf dist --glob packages/*/{.cache,bld,dist}",
     "build:packages": "tsc --build",
     "build": "npm run lint-prettier && npm run clean && npm run build:packages && npm run build --workspace @code3d/app && npm run build --workspace @code3d/web",
-    "render:web-image": "npm run render-image --workspace @code3d/app -- --model fasteners --output ../web/src/www/public/product-fastener.png --width 1200 --height 900",
+    "render:web-image": "npm run render-image --workspace @code3d/app -- --model fasteners --output ../web/src/www/public/product-fastener.png --width 2400 --height 1800",
     "dev": "npm run build:packages && npm run dev --workspace @code3d/app",
     "lint-prettier": "prettier --check .",
     "format": "prettier --write .",
