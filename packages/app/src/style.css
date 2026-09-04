@@ -673,6 +673,77 @@ kbd {
   cursor: crosshair;
 }
 
+.viewport-coordinate-reference {
+  position: absolute;
+  bottom: 14px;
+  left: 14px;
+  z-index: 2;
+  display: grid;
+  justify-items: center;
+  width: 88px;
+  color: #858b7f;
+  pointer-events: none;
+  user-select: none;
+  font:
+    500 7px/1 'IBM Plex Mono',
+    monospace;
+  letter-spacing: 0.12em;
+}
+
+.viewport-coordinate-reference svg {
+  display: block;
+  width: 88px;
+  height: 88px;
+  overflow: visible;
+  filter: drop-shadow(0 4px 12px #0008);
+}
+
+.viewport-coordinate-backplate {
+  fill: #11130fa8;
+  stroke: #373b33;
+  stroke-width: 1;
+}
+
+.viewport-coordinate-origin {
+  fill: #c5cbb8;
+}
+
+.viewport-coordinate-axis {
+  color: #dfe5ca;
+}
+
+.viewport-coordinate-axis[data-axis='x'] {
+  color: #ef746f;
+}
+
+.viewport-coordinate-axis[data-axis='y'] {
+  color: #b9d85a;
+}
+
+.viewport-coordinate-axis[data-axis='z'] {
+  color: #7f9df2;
+}
+
+.viewport-coordinate-axis line {
+  stroke: currentColor;
+  stroke-width: 2;
+}
+
+.viewport-coordinate-axis circle {
+  fill: currentColor;
+  stroke: #11130f;
+  stroke-width: 1;
+}
+
+.viewport-coordinate-axis text {
+  fill: #10120e;
+  font:
+    700 8px/1 'IBM Plex Mono',
+    monospace;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+
 .viewport-hint {
   position: absolute;
   top: 12px;
