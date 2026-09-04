@@ -128,6 +128,12 @@ silently reorder the active milestones. Closed requests move to
   input's source target and makes it the new focus; decorations are never
   selection candidates. Normal recompilation preserves an occurrence selection
   when it still exists.
+- Viewport occurrence selection leaves the focused geometry's materials
+  unchanged; source context dimming carries the primary focus contrast. A
+  passive one-pixel screen-space corner bound marks only groups and other
+  scopes without their own renderable geometry. Parameter and position previews
+  use one-pixel geometry-aware emphasis in a secondary color for other affected
+  occurrences.
 - Operation-specific emphasis is supplied through generic viewport decoration
   providers. Boolean input scopes can mark exact B-Rep intersection volumes and
   union contact sections without teaching the viewport those semantics.
