@@ -135,7 +135,10 @@ viewport 平移 gizmo 在能够唯一追溯参数时产生 `parameter.set`，否
 `relation.offset`。源码中的 `fillet(radius)`、`fillet(radius, edgeIds)` 和对应的
 `chamfer` 调用把整个参数区域投影为 edge-selection source target。`edge-operation.set`
 可以写入非空的显式 ID 数组，也可以删除第二参数以恢复单参数的全部边语义；每次修改
-立即进入共享源码事务，同一轮工具交互合并为一个 Monaco undo 历史项。
+立即进入共享源码事务，同一轮工具交互合并为一个 Monaco undo 历史项。操作求值失败
+时，compiler 用已求值的 receiver、实际传入的边数组和已追踪的尺寸参数构造同类
+source target；不可用于 receiver 的失效 ID 不进入 GUI 选择，因此下一次写回即可
+清除它们。
 
 平移 gizmo 目前遵守以下解析规则：
 

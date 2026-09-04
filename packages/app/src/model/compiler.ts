@@ -268,6 +268,14 @@ type TraceFrame = Readonly<{
   contextId: string;
 }>;
 
+type FailedOperationTrace = Readonly<{
+  siteId: string;
+  execution: number;
+  contextId: string;
+  sourceRef: SourceRef;
+  parameters: readonly ParameterUsage[];
+}>;
+
 const signatures = new Map<string, ParameterSignature>([
   [
     'box',
@@ -362,6 +370,8 @@ const sourceInputTraces: SourceInputTrace[] = [];
 const sourceConstraintTraces = new Map<string, SourceConstraintTrace>();
 const sourceElementTraces = new Map<string, SourceElementTrace>();
 const edgeSelectionSites = new Map<string, EdgeSelectionSite>();
+const edgeSelectionAttempts = new Map<string, readonly EdgeId[]>();
+const failedOperationTraces = new Map<string, FailedOperationTrace>();
 const catalogTraces = new Map<string, CatalogTrace>();
 const parameterFrames: ParameterUsage[][] = [];
 const traceFrames: TraceFrame[] = [];
@@ -393,6 +403,13 @@ const traceRuntime = Object.freeze({
     try {
       result = run();
     } catch (error) {
+      failedOperationTraces.set(traceExecutionKey(id, execution), {
+        siteId: id,
+        execution,
+        contextId: context.id,
+        sourceRef: location,
+        parameters: [...parameters],
+      });
       throw locateModelError(error, location);
     } finally {
       traceFrames.pop();
@@ -553,6 +570,23 @@ const traceRuntime = Object.freeze({
     return value;
   },
 
+  edgeSelection<T>(siteId: string, value: T): T {
+    const frame = traceFrames.at(-1);
+    if (frame?.siteId !== siteId) return value;
+    const edgeIds = Array.isArray(value)
+      ? value.filter(
+          (candidate): candidate is EdgeId =>
+            typeof candidate === 'number' &&
+            Number.isSafeInteger(candidate) &&
+            candidate >= 1,
+        )
+      : [];
+    edgeSelectionAttempts.set(traceExecutionKey(siteId, frame.execution), [
+      ...new Set(edgeIds),
+    ]);
+    return value;
+  },
+
   element<T>(
     file: string,
     start: number,
@@ -642,6 +676,10 @@ function nextTraceExecution(id: string): number {
   const execution = traceExecutions.get(id) ?? 0;
   traceExecutions.set(id, execution + 1);
   return execution;
+}
+
+function traceExecutionKey(siteId: string, execution: number): string {
+  return `${siteId}:execution:${execution}`;
 }
 
 function recordSourceValue(
@@ -937,6 +975,8 @@ export function compileProject(
   sourceConstraintTraces.clear();
   sourceElementTraces.clear();
   edgeSelectionSites.clear();
+  edgeSelectionAttempts.clear();
+  failedOperationTraces.clear();
   catalogTraces.clear();
   parameterFrames.length = 0;
   traceFrames.length = 0;
@@ -1154,6 +1194,8 @@ export function compileProject(
     sourceConstraintTraces.clear();
     sourceElementTraces.clear();
     edgeSelectionSites.clear();
+    edgeSelectionAttempts.clear();
+    failedOperationTraces.clear();
     catalogTraces.clear();
     parameterFrames.length = 0;
     traceFrames.length = 0;
@@ -1357,7 +1399,10 @@ function buildSourceTargets(
             return [];
           }
           const operation = operations.get(
-            `${trace.siteId}:execution:${trace.execution}`,
+            traceExecutionKey(trace.siteId, trace.execution),
+          );
+          const failedOperation = failedOperationTraces.get(
+            traceExecutionKey(trace.siteId, trace.execution),
           );
           const selection = operation?.selections.find(
             candidate =>
@@ -1371,21 +1416,45 @@ function buildSourceTargets(
                 site.operation,
               )
             : undefined;
-          return operation && selection
-            ? [
-                {
-                  nodeIds: [operation.outputNodeId],
-                  operationId: operation.id,
-                  contextId: trace.contextId,
-                  selection: {
-                    kind: 'edge',
-                    inputNodeId: selection.inputNodeId,
-                    ids: selection.ids,
-                    parameter,
-                  },
+          if (operation && selection) {
+            return [
+              {
+                nodeIds: [operation.outputNodeId],
+                operationId: operation.id,
+                contextId: trace.contextId,
+                selection: {
+                  kind: 'edge',
+                  inputNodeId: selection.inputNodeId,
+                  ids: selection.ids,
+                  parameter,
                 },
-              ]
-            : [];
+              },
+            ];
+          }
+          const input = trace.objects[0];
+          const inputSnapshot = input ? objects.get(input.nodeId) : undefined;
+          if (!failedOperation || inputSnapshot?.kind !== 'solid') return [];
+          return [
+            {
+              nodeIds: [input.nodeId],
+              contextId: failedOperation.contextId,
+              selection: {
+                kind: 'edge',
+                inputNodeId: input.nodeId,
+                ids: validAttemptedEdgeIds(
+                  inputSnapshot,
+                  edgeSelectionAttempts.get(
+                    traceExecutionKey(trace.siteId, trace.execution),
+                  ),
+                ),
+                parameter: editableEdgeOperationParameterFromParameters(
+                  failedOperation.parameters,
+                  failedOperation.sourceRef,
+                  site.operation,
+                ),
+              },
+            },
+          ];
         },
       );
       return evaluations.length > 0
@@ -1569,8 +1638,20 @@ function editableEdgeOperationParameter(
 ): ParameterUsage | undefined {
   const operationRef = operation.sourceRef;
   if (!output || !operationRef) return undefined;
+  return editableEdgeOperationParameterFromParameters(
+    output.parameters,
+    operationRef,
+    operationKind,
+  );
+}
+
+function editableEdgeOperationParameterFromParameters(
+  parameters: readonly ParameterUsage[],
+  operationRef: SourceRef,
+  operationKind: 'fillet' | 'chamfer',
+): ParameterUsage | undefined {
   const argument = operationKind === 'fillet' ? 'radius' : 'distance';
-  const matches = output.parameters.filter(
+  const matches = parameters.filter(
     parameter =>
       parameter.operation === operationKind &&
       parameter.argument === argument &&
@@ -1583,6 +1664,17 @@ function editableEdgeOperationParameter(
   );
   const candidates = upstream.length > 0 ? upstream : matches;
   return candidates.length === 1 ? candidates[0] : undefined;
+}
+
+function validAttemptedEdgeIds(
+  input: ModelSnapshotObject,
+  attempted: readonly EdgeId[] | undefined,
+): EdgeId[] {
+  if (input.kind !== 'solid' || !input.mesh || !attempted) return [];
+  const available = new Set(
+    input.mesh.edgeGroups.map(edgeGroup => edgeGroup.edgeId),
+  );
+  return attempted.filter(edgeId => available.has(edgeId));
 }
 
 function containsSourceRef(
@@ -1800,17 +1892,24 @@ function createTraceTransformer(
                 factory,
               )
             : visited;
+          const edgeSelectionCall = edgeSelection
+            ? instrumentEdgeSelectionArgument(
+                parameterizedCall,
+                siteId,
+                factory,
+              )
+            : parameterizedCall;
           const inputPlan = operationInputPlan(node);
           const call = inputPlan
             ? instrumentOperationInputs(
                 node,
-                parameterizedCall,
+                edgeSelectionCall,
                 inputPlan,
                 siteId,
                 sourceFile,
                 factory,
               )
-            : parameterizedCall;
+            : edgeSelectionCall;
 
           return traceExpression(
             call,
@@ -1879,6 +1978,30 @@ function edgeSelectionSite(
           needsComma: !node.arguments.hasTrailingComma,
         },
   };
+}
+
+function instrumentEdgeSelectionArgument(
+  call: ts.CallExpression,
+  siteId: string,
+  factory: ts.NodeFactory,
+): ts.CallExpression {
+  const edgeArgument = call.arguments[1];
+  if (!edgeArgument || ts.isSpreadElement(edgeArgument)) return call;
+  const argumentsWithSelection = [...call.arguments];
+  argumentsWithSelection[1] = factory.createCallExpression(
+    factory.createPropertyAccessExpression(
+      factory.createIdentifier('__code3d'),
+      'edgeSelection',
+    ),
+    undefined,
+    [factory.createStringLiteral(siteId), edgeArgument],
+  );
+  return factory.updateCallExpression(
+    call,
+    call.expression,
+    call.typeArguments,
+    argumentsWithSelection,
+  );
 }
 
 function traceElementExpression(
