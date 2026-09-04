@@ -16,12 +16,14 @@ export {
 export type {
   Anchor,
   CanonicalElements,
+  Edge,
   ElementKind,
   FaceAnchor,
   HelicalThreadOptions,
   LineAnchor,
   Model,
   PointAnchor,
+  Surface,
 } from './runtime.js';
 export type {Quaternion, Vec3} from './spatial.js';
-export type {EdgeId} from './topology.js';
+export type {EdgeId, SurfaceId} from './topology.js';

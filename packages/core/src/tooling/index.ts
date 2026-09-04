@@ -10,6 +10,7 @@ export {
   isConstraint,
   isModelObject,
   modelElementReference,
+  modelTopologyReference,
 } from '../library/runtime.js';
 export type {
   ConstraintAnchorSnapshot,
@@ -23,6 +24,7 @@ export type {
   ModelOperationSelectionSnapshot,
   ModelOperationSnapshot,
   ModelSnapshotObject,
+  ModelTopologyReference,
   ParameterKind,
   ParameterTarget,
   ParameterUsage,
@@ -40,7 +42,7 @@ export {
   transformsAreEquivalent,
 } from '../library/spatial.js';
 export type {Quaternion, RigidTransform, Vec3} from '../library/spatial.js';
-export type {EdgeId} from '../library/topology.js';
+export type {EdgeId, SurfaceId} from '../library/topology.js';
 export {describeOpenCascadeException} from '../library/open-cascade-error.js';
 
 export const toolingProtocolVersion = 1;

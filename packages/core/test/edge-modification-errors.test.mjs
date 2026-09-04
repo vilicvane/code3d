@@ -37,9 +37,9 @@ test('decodes a raw OpenCascade WebAssembly exception', () => {
   const base = box(40, 10, 40);
   const rounded = base.fillet(2, filletEdges);
   const shape = rounded.geometry.value.shape;
-  const topology = rounded.geometry.value.edgeTopology;
+  const topology = rounded.geometry.value.topology.edges;
   const edges = shape.edges;
-  const edge = edges[topology.edgeIds.indexOf(10)];
+  const edge = edges[topology.ids.indexOf(10)];
   const builder = new (getOC().BRepFilletAPI_MakeChamfer)(shape.wrapped);
 
   try {

@@ -38,16 +38,20 @@ import {
   booleanWithTopology,
   chamferEdges,
   filletEdges,
-  initialEdgeTopology,
-  preserveEdgeTopology,
+  initialSolidTopology,
+  preserveSolidTopology,
+  resolveEdge,
   resolveEdgeSelection,
+  resolveSurface,
   stableEdgeGroups,
+  stableSurfaceGroups,
   type EdgeId,
-  type EdgeTopology,
+  type SolidTopology,
+  type SurfaceId,
 } from './topology.js';
 
 export type {Quaternion, Vec3} from './spatial.js';
-export type {EdgeId} from './topology.js';
+export type {EdgeId, SurfaceId} from './topology.js';
 
 export type SourceRef = Readonly<{
   file: string;
@@ -173,10 +177,10 @@ export type RenderMesh = Readonly<{
   normals: Float32Array;
   triangles: Uint32Array;
   edges: Float32Array;
-  faceGroups: readonly Readonly<{
+  surfaceGroups: readonly Readonly<{
     start: number;
     count: number;
-    faceId: number;
+    surfaceId: SurfaceId;
   }>[];
   edgeGroups: readonly Readonly<{
     start: number;
@@ -215,6 +219,12 @@ export type ModelElementReference = Readonly<{
   model: ModelObject;
   name: string;
   kind: ElementKind;
+}>;
+
+export type ModelTopologyReference = Readonly<{
+  model: ModelObject;
+  kind: 'edge' | 'surface';
+  id: EdgeId | SurfaceId;
 }>;
 
 type StoredConstraint = Readonly<{
@@ -284,7 +294,7 @@ type LocalBounds = readonly [minimum: Vec3, maximum: Vec3];
 
 type SolidGeometryValue = Readonly<{
   shape: Shape3D;
-  edgeTopology: EdgeTopology;
+  topology: SolidTopology;
   localBounds: LocalBounds;
 }>;
 
@@ -311,6 +321,16 @@ export interface PointAnchor extends Anchor<'point'> {}
 export interface LineAnchor extends Anchor<'line'> {}
 
 export interface FaceAnchor extends Anchor<'face'> {}
+
+export interface Edge {
+  readonly kind: 'edge';
+  readonly id: EdgeId;
+}
+
+export interface Surface {
+  readonly kind: 'surface';
+  readonly id: SurfaceId;
+}
 
 type ElementSources = Readonly<Record<string, Anchor>>;
 type NamedElements = Readonly<Record<string, Anchor>>;
@@ -358,6 +378,14 @@ class ModelAnchor<
   }
 }
 
+class ModelTopologyElement<Kind extends 'edge' | 'surface'> {
+  constructor(
+    readonly model: ModelObject,
+    readonly kind: Kind,
+    readonly id: Kind extends 'edge' ? EdgeId : SurfaceId,
+  ) {}
+}
+
 export function modelElementReference(
   value: unknown,
 ): ModelElementReference | undefined {
@@ -367,6 +395,13 @@ export function modelElementReference(
     name: value.reference.name,
     kind: value.reference.kind,
   };
+}
+
+export function modelTopologyReference(
+  value: unknown,
+): ModelTopologyReference | undefined {
+  if (!(value instanceof ModelTopologyElement)) return undefined;
+  return {model: value.model, kind: value.kind, id: value.id};
 }
 
 export class Constraint {
@@ -588,6 +623,22 @@ export class ModelObject<
     ) as Model<MergedElements<Elements, ExposedElements<Sources>>>;
   }
 
+  /** @code3d.param id {kind: 'surface', label: 'Surface'} */
+  surface(id: SurfaceId): Surface {
+    const topology = this.requireGeometry().value.topology.surfaces;
+    return new ModelTopologyElement(
+      this,
+      'surface',
+      resolveSurface(topology, id),
+    );
+  }
+
+  /** @code3d.param id {kind: 'edge', label: 'Edge'} */
+  edge(id: EdgeId): Edge {
+    const topology = this.requireGeometry().value.topology.edges;
+    return new ModelTopologyElement(this, 'edge', resolveEdge(topology, id));
+  }
+
   paint(color: string): Model<Elements> {
     return this.copy(
       {color},
@@ -604,7 +655,7 @@ export class ModelObject<
       try {
         return {
           shape,
-          edgeTopology: preserveEdgeTopology(shape, source.value.edgeTopology),
+          topology: preserveSolidTopology(shape, source.value.topology),
         };
       } catch (error) {
         shape.delete();
@@ -626,7 +677,7 @@ export class ModelObject<
     assertPositive('radius', radius);
     const source = this.requireGeometry();
     const selectedEdgeIds = resolveEdgeSelection(
-      source.value.edgeTopology,
+      source.value.topology.edges,
       edgeIds,
     );
     const geometry = evaluateSolidGeometry(
@@ -636,11 +687,11 @@ export class ModelObject<
       () => {
         const result = filletEdges(
           source.value.shape,
-          source.value.edgeTopology,
+          source.value.topology,
           radius,
           selectedEdgeIds,
         );
-        return {shape: result.shape, edgeTopology: result.topology};
+        return {shape: result.shape, topology: result.topology};
       },
     );
     return this.copyWithGeometry(
@@ -660,7 +711,7 @@ export class ModelObject<
     assertPositive('distance', distance);
     const source = this.requireGeometry();
     const selectedEdgeIds = resolveEdgeSelection(
-      source.value.edgeTopology,
+      source.value.topology.edges,
       edgeIds,
     );
     const geometry = evaluateSolidGeometry(
@@ -670,11 +721,11 @@ export class ModelObject<
       () => {
         const result = chamferEdges(
           source.value.shape,
-          source.value.edgeTopology,
+          source.value.topology,
           distance,
           selectedEdgeIds,
         );
-        return {shape: result.shape, edgeTopology: result.topology};
+        return {shape: result.shape, topology: result.topology};
       },
     );
     return this.copyWithGeometry(
@@ -786,7 +837,7 @@ export class ModelObject<
         geometry.value.shape,
         meshCache,
         this.meshTolerance,
-        geometry.value.edgeTopology,
+        geometry.value.topology,
       ),
     };
   }
@@ -907,12 +958,9 @@ export class ModelObject<
                 geometry.value.shape,
                 operand.value,
                 operation,
-                geometry.value.edgeTopology,
+                geometry.value.topology,
               );
-              return {
-                shape: result.shape,
-                edgeTopology: result.topology,
-              };
+              return {shape: result.shape, topology: result.topology};
             },
           );
           temporaryGeometry?.value.shape.delete();
@@ -1435,7 +1483,7 @@ function evaluateSolidGeometry(
   inputs: readonly KernelArtifact<unknown>[],
   compute: () => Readonly<{
     shape: Shape3D;
-    edgeTopology?: EdgeTopology;
+    topology?: SolidTopology;
   }>,
 ): SolidGeometry {
   return evaluateKernelOperation(
@@ -1448,8 +1496,7 @@ function evaluateSolidGeometry(
       try {
         return {
           shape: result.shape,
-          edgeTopology:
-            result.edgeTopology ?? initialEdgeTopology(result.shape),
+          topology: result.topology ?? initialSolidTopology(result.shape),
           localBounds: shapeBounds(result.shape),
         };
       } catch (error) {
@@ -1465,7 +1512,7 @@ function renderMesh(
   shape: AnyShape,
   cache: Map<AnyShape, RenderMesh>,
   tolerance: number,
-  edgeTopology?: EdgeTopology,
+  topology?: SolidTopology,
 ): RenderMesh {
   const cached = cache.get(shape);
   if (cached) {
@@ -1473,7 +1520,7 @@ function renderMesh(
   }
   const mesh = evaluateKernelOperation(
     'render-mesh',
-    [tolerance, 0.2, edgeTopology !== undefined],
+    [tolerance, 0.2, topology !== undefined],
     [artifact],
     renderMeshLifecycle,
     () => {
@@ -1484,9 +1531,19 @@ function renderMesh(
         normals: new Float32Array(surface.normals),
         triangles: new Uint32Array(surface.triangles),
         edges: new Float32Array(wire.lines),
-        faceGroups: surface.faceGroups,
-        edgeGroups: edgeTopology
-          ? stableEdgeGroups(shape.asShape3D(), edgeTopology, wire.edgeGroups)
+        surfaceGroups: topology
+          ? stableSurfaceGroups(
+              shape.asShape3D(),
+              topology.surfaces,
+              surface.faceGroups,
+            )
+          : surface.faceGroups.map((group, index) => ({
+              start: group.start,
+              count: group.count,
+              surfaceId: index + 1,
+            })),
+        edgeGroups: topology
+          ? stableEdgeGroups(shape.asShape3D(), topology.edges, wire.edgeGroups)
           : wire.edgeGroups,
       };
     },

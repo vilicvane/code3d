@@ -1,21 +1,36 @@
-import {cast, getOC, type Edge, type Shape3D} from 'replicad';
+import {
+  cast,
+  getOC,
+  type Edge as ReplicadEdge,
+  type Face as ReplicadFace,
+  type Shape3D,
+} from 'replicad';
 import type {
   NCollection_List_TopoDS_Shape,
   TopoDS_Shape,
 } from 'replicad-opencascadejs';
 
 export type EdgeId = number;
+export type SurfaceId = number;
 
-export type EdgeTopology = Readonly<{
-  /** Stable IDs aligned with Shape3D.edges traversal order. */
-  edgeIds: readonly EdgeId[];
+type StableTopology<Id extends number> = Readonly<{
+  /** Stable IDs aligned with the corresponding Shape3D traversal order. */
+  ids: readonly Id[];
   /** High-water mark. Retired IDs below this value are never reused. */
-  nextEdgeId: EdgeId;
+  nextId: Id;
+}>;
+
+export type EdgeTopology = StableTopology<EdgeId>;
+export type SurfaceTopology = StableTopology<SurfaceId>;
+
+export type SolidTopology = Readonly<{
+  edges: EdgeTopology;
+  surfaces: SurfaceTopology;
 }>;
 
 export type EdgeModificationResult = Readonly<{
   shape: Shape3D;
-  topology: EdgeTopology;
+  topology: SolidTopology;
   selectedEdgeIds: readonly EdgeId[];
 }>;
 
@@ -23,11 +38,17 @@ export type BooleanTopologyOperation = 'cut' | 'fuse' | 'intersect';
 
 export type BooleanTopologyResult = Readonly<{
   shape: Shape3D;
-  topology: EdgeTopology;
+  topology: SolidTopology;
 }>;
 
 type ShapeHistory = Readonly<{
   Modified(shape: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+}>;
+
+type TopologyShape = Readonly<{
+  wrapped: TopoDS_Shape;
+  hashCode: number;
+  delete(): void;
 }>;
 
 type RawEdgeGroup = Readonly<{
@@ -36,39 +57,59 @@ type RawEdgeGroup = Readonly<{
   edgeId: number;
 }>;
 
+type RawSurfaceGroup = Readonly<{
+  start: number;
+  count: number;
+  faceId: number;
+}>;
+
+type StableSurfaceGroup = Readonly<{
+  start: number;
+  count: number;
+  surfaceId: SurfaceId;
+}>;
+
 type LocalEdgeOperation = Readonly<{
   NbContours(): number;
   NbEdges(index: number): number;
 }>;
 
-export function initialEdgeTopology(shape: Shape3D): EdgeTopology {
+export function initialSolidTopology(shape: Shape3D): SolidTopology {
   const edges = shape.edges;
+  const surfaces = shape.faces;
   try {
-    return topology(
-      edges.map((_, index) => index + 1),
-      edges.length + 1,
+    return solidTopology(
+      initialTopology(edges) as EdgeTopology,
+      initialTopology(surfaces) as SurfaceTopology,
     );
   } finally {
-    deleteEdges(edges);
+    deleteShapes(edges);
+    deleteShapes(surfaces);
   }
 }
 
-export function preserveEdgeTopology(
+export function preserveSolidTopology(
   shape: Shape3D,
-  source: EdgeTopology,
-): EdgeTopology {
+  source: SolidTopology,
+): SolidTopology {
   const edges = shape.edges;
+  const surfaces = shape.faces;
   try {
-    assertTopologyLength(edges, source);
-    return topology(source.edgeIds, source.nextEdgeId);
+    assertTopologyLength('edge', edges, source.edges);
+    assertTopologyLength('surface', surfaces, source.surfaces);
+    return solidTopology(
+      stableTopology(source.edges.ids, source.edges.nextId),
+      stableTopology(source.surfaces.ids, source.surfaces.nextId),
+    );
   } finally {
-    deleteEdges(edges);
+    deleteShapes(edges);
+    deleteShapes(surfaces);
   }
 }
 
 export function filletEdges(
   shape: Shape3D,
-  source: EdgeTopology,
+  source: SolidTopology,
   radius: number,
   edgeIds?: readonly EdgeId[],
 ): EdgeModificationResult {
@@ -77,7 +118,7 @@ export function filletEdges(
 
 export function chamferEdges(
   shape: Shape3D,
-  source: EdgeTopology,
+  source: SolidTopology,
   distance: number,
   edgeIds?: readonly EdgeId[],
 ): EdgeModificationResult {
@@ -88,7 +129,7 @@ export function booleanWithTopology(
   left: Shape3D,
   right: Shape3D,
   operation: BooleanTopologyOperation,
-  source: EdgeTopology,
+  source: SolidTopology,
 ): BooleanTopologyResult {
   const oc = getOC();
   const builder =
@@ -102,8 +143,10 @@ export function booleanWithTopology(
     builder.Build();
     builder.SimplifyResult(true, true, 0.001);
     result = castShape3D(builder.Shape());
-    const nextTopology = transferEdgeTopology(left, source, result, builder);
-    return {shape: result, topology: nextTopology};
+    return {
+      shape: result,
+      topology: transferSolidTopology(left, source, result, builder),
+    };
   } catch (error) {
     result?.delete();
     throw error;
@@ -114,51 +157,100 @@ export function booleanWithTopology(
 
 export function stableEdgeGroups(
   shape: Shape3D,
-  edgeTopology: EdgeTopology,
+  topology: EdgeTopology,
   groups: readonly RawEdgeGroup[],
 ): readonly RawEdgeGroup[] {
   const edges = shape.edges;
   try {
-    assertTopologyLength(edges, edgeTopology);
-    const idsByKernelHash = new Map<number, EdgeId>();
-    edges.forEach((edge, index) => {
-      const stableId = edgeTopology.edgeIds[index];
-      const previous = idsByKernelHash.get(edge.hashCode);
-      if (previous !== undefined && previous !== stableId) {
-        throw new Error(
-          `OpenCascade produced colliding edge hashes for E${previous} and E${stableId}.`,
-        );
-      }
-      idsByKernelHash.set(edge.hashCode, stableId);
-    });
-    return groups.map(group => {
-      const stableId = idsByKernelHash.get(group.edgeId);
-      if (stableId === undefined) {
-        throw new Error(
-          `The mesh referenced an edge that is absent from the model topology (${group.edgeId}).`,
-        );
-      }
-      return {...group, edgeId: stableId};
-    });
+    const ids = stableGroupIds(
+      'edge',
+      'E',
+      edges,
+      topology,
+      groups.map(group => group.edgeId),
+    );
+    return groups.map((group, index) => ({...group, edgeId: ids[index]}));
   } finally {
-    deleteEdges(edges);
+    deleteShapes(edges);
   }
+}
+
+export function stableSurfaceGroups(
+  shape: Shape3D,
+  topology: SurfaceTopology,
+  groups: readonly RawSurfaceGroup[],
+): readonly StableSurfaceGroup[] {
+  const surfaces = shape.faces;
+  try {
+    const ids = stableGroupIds(
+      'surface',
+      'S',
+      surfaces,
+      topology,
+      groups.map(group => group.faceId),
+    );
+    return groups.map((group, index) => ({
+      start: group.start,
+      count: group.count,
+      surfaceId: ids[index],
+    }));
+  } finally {
+    deleteShapes(surfaces);
+  }
+}
+
+export function resolveEdgeSelection(
+  topology: EdgeTopology,
+  requestedIds: readonly EdgeId[] | undefined,
+): readonly EdgeId[] {
+  if (requestedIds === undefined) {
+    return [...topology.ids];
+  }
+  if (requestedIds.length === 0) {
+    throw new Error(
+      'An edge selection cannot be empty; omit the second argument to select all edges.',
+    );
+  }
+  const requested = new Set<EdgeId>();
+  for (const edgeId of requestedIds) {
+    assertTopologyId('edge', 'E', edgeId);
+    requested.add(edgeId);
+  }
+  const selected = topology.ids.filter(edgeId => requested.has(edgeId));
+  const missing = [...requested].filter(edgeId => !selected.includes(edgeId));
+  if (missing.length > 0) {
+    throw new Error(
+      `Unknown or retired edge ${missing.map(edgeId => `E${edgeId}`).join(', ')}.`,
+    );
+  }
+  return selected;
+}
+
+export function resolveEdge(topology: EdgeTopology, edgeId: EdgeId): EdgeId {
+  return resolveTopologyId('edge', 'E', topology, edgeId);
+}
+
+export function resolveSurface(
+  topology: SurfaceTopology,
+  surfaceId: SurfaceId,
+): SurfaceId {
+  return resolveTopologyId('surface', 'S', topology, surfaceId);
 }
 
 function modifyEdges(
   kind: 'fillet' | 'chamfer',
   shape: Shape3D,
-  source: EdgeTopology,
+  source: SolidTopology,
   amount: number,
   requestedIds?: readonly EdgeId[],
 ): EdgeModificationResult {
-  const selectedEdgeIds = resolveEdgeSelection(source, requestedIds);
+  const selectedEdgeIds = resolveEdgeSelection(source.edges, requestedIds);
   if (selectedEdgeIds.length === 0) {
     const result = shape.clone();
     try {
       return {
         shape: result,
-        topology: preserveEdgeTopology(result, source),
+        topology: preserveSolidTopology(result, source),
         selectedEdgeIds,
       };
     } catch (error) {
@@ -179,9 +271,9 @@ function modifyEdges(
       : new oc.BRepFilletAPI_MakeChamfer(shape.wrapped);
   let result: Shape3D | undefined;
   try {
-    assertTopologyLength(edges, source);
+    assertTopologyLength('edge', edges, source.edges);
     edges.forEach((edge, index) => {
-      if (selected.has(source.edgeIds[index])) {
+      if (selected.has(source.edges.ids[index])) {
         builder.Add(amount, edge.wrapped);
       }
     });
@@ -190,15 +282,9 @@ function modifyEdges(
       throw edgeModificationError(kind, amount, selectedEdgeIds, builder);
     }
     result = castShape3D(builder.Shape());
-    const nextTopology = transferEdgeTopologyFromEdges(
-      edges,
-      source,
-      result,
-      builder,
-    );
     return {
       shape: result,
-      topology: nextTopology,
+      topology: transferSolidTopology(shape, source, result, builder),
       selectedEdgeIds,
     };
   } catch (error) {
@@ -206,7 +292,7 @@ function modifyEdges(
     throw error;
   } finally {
     builder.delete();
-    deleteEdges(edges);
+    deleteShapes(edges);
   }
 }
 
@@ -255,108 +341,111 @@ function counted(count: number, singular: string): string {
   return `${count} ${singular}${count === 1 ? '' : 's'}`;
 }
 
-export function resolveEdgeSelection(
-  topology: EdgeTopology,
-  requestedIds: readonly EdgeId[] | undefined,
-): readonly EdgeId[] {
-  if (requestedIds === undefined) {
-    return [...topology.edgeIds];
+function resolveTopologyId<Id extends number>(
+  kind: 'edge' | 'surface',
+  prefix: 'E' | 'S',
+  topology: StableTopology<Id>,
+  id: Id,
+): Id {
+  assertTopologyId(kind, prefix, id);
+  if (!topology.ids.includes(id)) {
+    throw new Error(`Unknown or retired ${kind} ${prefix}${id}.`);
   }
-  if (requestedIds.length === 0) {
-    throw new Error(
-      'An edge selection cannot be empty; omit the second argument to select all edges.',
-    );
-  }
-  const requested = new Set<EdgeId>();
-  for (const edgeId of requestedIds) {
-    if (!Number.isSafeInteger(edgeId) || edgeId < 1) {
-      throw new Error(
-        `Edge IDs must be positive integers; received ${edgeId}.`,
-      );
-    }
-    requested.add(edgeId);
-  }
-  const selected = topology.edgeIds.filter(edgeId => requested.has(edgeId));
-  const missing = [...requested].filter(edgeId => !selected.includes(edgeId));
-  if (missing.length > 0) {
-    throw new Error(
-      `Unknown or retired edge ${missing.map(edgeId => `E${edgeId}`).join(', ')}.`,
-    );
-  }
-  return selected;
+  return id;
 }
 
-function transferEdgeTopology(
+function assertTopologyId(
+  kind: 'edge' | 'surface',
+  prefix: 'E' | 'S',
+  id: number,
+): void {
+  if (!Number.isSafeInteger(id) || id < 1) {
+    throw new Error(
+      `${kind[0].toUpperCase()}${kind.slice(1)} IDs must be positive integers; received ${id}. Expected ${prefix}<positive integer>.`,
+    );
+  }
+}
+
+function transferSolidTopology(
   input: Shape3D,
-  source: EdgeTopology,
+  source: SolidTopology,
   output: Shape3D,
   history: ShapeHistory,
-): EdgeTopology {
+): SolidTopology {
   const inputEdges = input.edges;
-  try {
-    return transferEdgeTopologyFromEdges(inputEdges, source, output, history);
-  } finally {
-    deleteEdges(inputEdges);
-  }
-}
-
-function transferEdgeTopologyFromEdges(
-  inputEdges: readonly Edge[],
-  source: EdgeTopology,
-  output: Shape3D,
-  history: ShapeHistory,
-): EdgeTopology {
-  assertTopologyLength(inputEdges, source);
   const outputEdges = output.edges;
+  const inputSurfaces = input.faces;
+  const outputSurfaces = output.faces;
   try {
-    const candidates = inputEdges.map(edge => {
-      const unchanged = matchingOutputEdges(edge.wrapped, outputEdges);
-      return unchanged.length > 0
-        ? unchanged
-        : modifiedOutputEdges(edge.wrapped, outputEdges, history);
-    });
-    const inputCountsByOutput = new Array<number>(outputEdges.length).fill(0);
-    for (const indices of candidates) {
-      for (const index of indices) {
-        inputCountsByOutput[index] += 1;
-      }
-    }
-
-    const transferred = new Map<number, EdgeId>();
-    candidates.forEach((indices, inputIndex) => {
-      if (indices.length !== 1) return;
-      const [outputIndex] = indices;
-      if (inputCountsByOutput[outputIndex] === 1) {
-        transferred.set(outputIndex, source.edgeIds[inputIndex]);
-      }
-    });
-
-    let nextEdgeId = source.nextEdgeId;
-    const edgeIds = outputEdges.map((_, outputIndex) => {
-      const inherited = transferred.get(outputIndex);
-      if (inherited !== undefined) return inherited;
-      return nextEdgeId++;
-    });
-    return topology(edgeIds, nextEdgeId);
+    return solidTopology(
+      transferTopology('edge', inputEdges, source.edges, outputEdges, history),
+      transferTopology(
+        'surface',
+        inputSurfaces,
+        source.surfaces,
+        outputSurfaces,
+        history,
+      ),
+    );
   } finally {
-    deleteEdges(outputEdges);
+    deleteShapes(inputEdges);
+    deleteShapes(outputEdges);
+    deleteShapes(inputSurfaces);
+    deleteShapes(outputSurfaces);
   }
 }
 
-function matchingOutputEdges(
+function transferTopology<Id extends number>(
+  kind: 'edge' | 'surface',
+  input: readonly TopologyShape[],
+  source: StableTopology<Id>,
+  output: readonly TopologyShape[],
+  history: ShapeHistory,
+): StableTopology<Id> {
+  assertTopologyLength(kind, input, source);
+  const candidates = input.map(shape => {
+    const unchanged = matchingOutputShapes(shape.wrapped, output);
+    return unchanged.length > 0
+      ? unchanged
+      : modifiedOutputShapes(shape.wrapped, output, history);
+  });
+  const inputCountsByOutput = new Array<number>(output.length).fill(0);
+  for (const indices of candidates) {
+    for (const index of indices) inputCountsByOutput[index] += 1;
+  }
+
+  const transferred = new Map<number, Id>();
+  candidates.forEach((indices, inputIndex) => {
+    if (indices.length !== 1) return;
+    const [outputIndex] = indices;
+    if (inputCountsByOutput[outputIndex] === 1) {
+      transferred.set(outputIndex, source.ids[inputIndex]);
+    }
+  });
+
+  let nextId = source.nextId;
+  const ids = output.map((_, outputIndex) => {
+    const inherited = transferred.get(outputIndex);
+    if (inherited !== undefined) return inherited;
+    return nextId++ as Id;
+  });
+  return stableTopology(ids, nextId);
+}
+
+function matchingOutputShapes(
   input: TopoDS_Shape,
-  outputEdges: readonly Edge[],
+  output: readonly TopologyShape[],
 ): number[] {
   const matches: number[] = [];
-  outputEdges.forEach((edge, index) => {
-    if (edge.wrapped.IsSame(input)) matches.push(index);
+  output.forEach((shape, index) => {
+    if (shape.wrapped.IsSame(input)) matches.push(index);
   });
   return matches;
 }
 
-function modifiedOutputEdges(
+function modifiedOutputShapes(
   input: TopoDS_Shape,
-  outputEdges: readonly Edge[],
+  output: readonly TopologyShape[],
   history: ShapeHistory,
 ): number[] {
   const modified = history.Modified(input);
@@ -366,8 +455,8 @@ function modifiedOutputEdges(
       const candidate = modified.First();
       modified.RemoveFirst();
       try {
-        outputEdges.forEach((edge, index) => {
-          if (edge.wrapped.IsSame(candidate)) matches.add(index);
+        output.forEach((shape, index) => {
+          if (shape.wrapped.IsSame(candidate)) matches.add(index);
         });
       } finally {
         candidate.delete();
@@ -377,6 +466,71 @@ function modifiedOutputEdges(
     modified.delete();
   }
   return [...matches];
+}
+
+function stableGroupIds<Id extends number>(
+  kind: 'edge' | 'surface',
+  prefix: 'E' | 'S',
+  shapes: readonly TopologyShape[],
+  topology: StableTopology<Id>,
+  kernelIds: readonly number[],
+): Id[] {
+  assertTopologyLength(kind, shapes, topology);
+  const idsByKernelHash = new Map<number, Id>();
+  shapes.forEach((shape, index) => {
+    const stableId = topology.ids[index];
+    const previous = idsByKernelHash.get(shape.hashCode);
+    if (previous !== undefined && previous !== stableId) {
+      throw new Error(
+        `OpenCascade produced colliding ${kind} hashes for ${prefix}${previous} and ${prefix}${stableId}.`,
+      );
+    }
+    idsByKernelHash.set(shape.hashCode, stableId);
+  });
+  return kernelIds.map(kernelId => {
+    const stableId = idsByKernelHash.get(kernelId);
+    if (stableId === undefined) {
+      throw new Error(
+        `The mesh referenced a ${kind} that is absent from the model topology (${kernelId}).`,
+      );
+    }
+    return stableId;
+  });
+}
+
+function initialTopology(
+  shapes: readonly (ReplicadEdge | ReplicadFace)[],
+): StableTopology<number> {
+  return stableTopology(
+    shapes.map((_, index) => index + 1),
+    shapes.length + 1,
+  );
+}
+
+function stableTopology<Id extends number>(
+  ids: readonly Id[],
+  nextId: Id,
+): StableTopology<Id> {
+  return Object.freeze({ids: Object.freeze([...ids]), nextId});
+}
+
+function solidTopology(
+  edges: EdgeTopology,
+  surfaces: SurfaceTopology,
+): SolidTopology {
+  return Object.freeze({edges, surfaces});
+}
+
+function assertTopologyLength<Id extends number>(
+  kind: 'edge' | 'surface',
+  shapes: readonly TopologyShape[],
+  topology: StableTopology<Id>,
+): void {
+  if (shapes.length !== topology.ids.length) {
+    throw new Error(
+      `${kind[0].toUpperCase()}${kind.slice(1)} topology mismatch: the shape has ${shapes.length} ${kind}s but ${topology.ids.length} IDs.`,
+    );
+  }
 }
 
 function castShape3D(shape: TopoDS_Shape): Shape3D {
@@ -394,27 +548,6 @@ function castShape3D(shape: TopoDS_Shape): Shape3D {
   }
 }
 
-function assertTopologyLength(
-  edges: readonly Edge[],
-  topology: EdgeTopology,
-): void {
-  if (edges.length !== topology.edgeIds.length) {
-    throw new Error(
-      `Edge topology mismatch: the shape has ${edges.length} edges but ${topology.edgeIds.length} IDs.`,
-    );
-  }
-}
-
-function topology(
-  edgeIds: readonly EdgeId[],
-  nextEdgeId: EdgeId,
-): EdgeTopology {
-  return Object.freeze({
-    edgeIds: Object.freeze([...edgeIds]),
-    nextEdgeId,
-  });
-}
-
-function deleteEdges(edges: readonly Edge[]): void {
-  edges.forEach(edge => edge.delete());
+function deleteShapes(shapes: readonly TopologyShape[]): void {
+  shapes.forEach(shape => shape.delete());
 }

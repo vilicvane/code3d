@@ -107,8 +107,8 @@ function faceSurfaceAt(
 ): RenderMesh | undefined {
   const normal = rotateVector([0, 1, 0], transform.quaternion);
   const tolerance = Math.max(1e-4, meshDiagonal(mesh) * 1e-5);
-  const groups = mesh.faceGroups.filter(group =>
-    faceGroupMatches(mesh, group, transform.position, normal, tolerance),
+  const groups = mesh.surfaceGroups.filter(group =>
+    surfaceGroupMatches(mesh, group, transform.position, normal, tolerance),
   );
   if (groups.length === 0) return undefined;
 
@@ -117,11 +117,11 @@ function faceSurfaceAt(
   ]);
   const triangles = new Uint32Array(indices);
   let groupStart = 0;
-  const faceGroups = groups.map(group => {
+  const surfaceGroups = groups.map(group => {
     const snapshot = {
       start: groupStart,
       count: group.count,
-      faceId: group.faceId,
+      surfaceId: group.surfaceId,
     };
     groupStart += group.count;
     return snapshot;
@@ -131,14 +131,14 @@ function faceSurfaceAt(
     normals: mesh.normals,
     triangles,
     edges: boundaryEdges(mesh.vertices, triangles),
-    faceGroups,
+    surfaceGroups,
     edgeGroups: [],
   };
 }
 
-function faceGroupMatches(
+function surfaceGroupMatches(
   mesh: RenderMesh,
-  group: RenderMesh['faceGroups'][number],
+  group: RenderMesh['surfaceGroups'][number],
   planeOrigin: Vec3,
   planeNormal: Vec3,
   tolerance: number,
