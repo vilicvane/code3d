@@ -1,17 +1,73 @@
 import {
-  Plane,
-  draw,
-  makeCylinder,
-  makeHelix,
-  makeSolid,
-  weldShellsAndFaces,
+  definePrimitive,
+  replicad,
   type Drawing,
   type Face,
   type Shape3D,
   type Sketch,
-} from 'replicad';
+} from '@code3d/core/replicad';
 
-export type HelicalThreadShapeOptions = Readonly<{
+const {Plane, draw, makeCylinder, makeHelix, makeSolid, weldShellsAndFaces} =
+  replicad;
+
+type HelicalThreadOptions = Readonly<{
+  pitch: number;
+  y: number;
+  majorDiameter: number;
+  minorDiameter: number;
+  rootWidth: number;
+  crestWidth: number;
+  leftHanded?: boolean;
+}>;
+
+const loopSteps = Array.from({length: 21}, (_, index) => index / 20);
+
+export const helicalThread = definePrimitive(
+  (options: HelicalThreadOptions) => {
+    validateHelicalThread(options);
+    const {
+      majorDiameter,
+      minorDiameter,
+      leftHanded = false,
+      ...dimensions
+    } = options;
+    return makeHelicalThreadShape({
+      ...dimensions,
+      majorRadius: majorDiameter / 2,
+      minorRadius: minorDiameter / 2,
+      leftHanded,
+    });
+  },
+);
+
+function validateHelicalThread({
+  pitch,
+  y,
+  majorDiameter,
+  minorDiameter,
+  rootWidth,
+  crestWidth,
+}: HelicalThreadOptions): void {
+  assertPositive('pitch', pitch);
+  assertPositive('y', y);
+  assertPositive('majorDiameter', majorDiameter);
+  assertPositive('minorDiameter', minorDiameter);
+  assertPositive('rootWidth', rootWidth);
+  assertPositive('crestWidth', crestWidth);
+  if (y < pitch) {
+    throw new Error('y must be at least one thread pitch.');
+  }
+  if (minorDiameter >= majorDiameter) {
+    throw new Error('minorDiameter must be smaller than majorDiameter.');
+  }
+  if (crestWidth >= rootWidth || rootWidth > pitch) {
+    throw new Error(
+      'The thread profile requires crestWidth < rootWidth <= pitch.',
+    );
+  }
+}
+
+type HelicalThreadShapeOptions = Readonly<{
   pitch: number;
   y: number;
   majorRadius: number;
@@ -21,14 +77,12 @@ export type HelicalThreadShapeOptions = Readonly<{
   leftHanded: boolean;
 }>;
 
-const loopSteps = Array.from({length: 21}, (_, index) => index / 20);
-
 /**
  * Builds a closed external thread around its minor-diameter core. The lofted
  * end treatment follows the MIT-licensed replicad-threads construction by
  * Steve Genoud, adapted here to code3d's Y-axis and geometry ownership model.
  */
-export function makeHelicalThreadShape({
+function makeHelicalThreadShape({
   pitch,
   y,
   majorRadius,
@@ -189,6 +243,12 @@ function fadedEnd(
   shell.delete();
   endFace.delete();
   return bottom ? closed.rotate(180, [0, 0, 0], [0, 0, 1]) : closed;
+}
+
+function assertPositive(name: string, value: number): void {
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error(`${name} must be a positive finite number.`);
+  }
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {

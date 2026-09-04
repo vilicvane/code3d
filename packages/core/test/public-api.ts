@@ -3,12 +3,12 @@ import {
   bezier,
   box,
   circle,
+  coil,
   cut,
   cylinder,
   ellipse,
   frustum,
   group,
-  helicalThread,
   intersect,
   line,
   loft,
@@ -18,6 +18,7 @@ import {
   regularPrism,
   spline,
   sphere,
+  tube,
   union,
   type Anchor,
   type CanonicalElements,
@@ -29,7 +30,6 @@ import {
   type FaceAnchor,
   type FaceModel,
   type GroupModel,
-  type HelicalThreadOptions,
   type LineAnchor,
   type LoftOptions,
   type Model,
@@ -43,6 +43,11 @@ import {
   type VertexId,
   type VertexModel,
 } from '../bld/library/index.js';
+import {
+  definePrimitive,
+  replicad,
+  type Shape3D,
+} from '../bld/library/replicad.js';
 
 // @ts-expect-error The concrete runtime class is not part of the authoring API.
 import type {ModelObject} from '../bld/library/index.js';
@@ -56,6 +61,10 @@ import type {ModelKind} from '../bld/library/index.js';
 import type {TopologyKind} from '../bld/library/index.js';
 // @ts-expect-error Quaternions are a tooling transform detail for now.
 import type {Quaternion} from '../bld/library/index.js';
+// @ts-expect-error Replicad builders are available only through the explicit subpath.
+import {definePrimitive as rootDefinePrimitive} from '../bld/library/index.js';
+// @ts-expect-error Replicad values are available only through the explicit subpath.
+import type {Shape3D as RootShape3D} from '../bld/library/index.js';
 
 const solid = box(10, 5, 8);
 const related = solid.relate(self => self.center.on(solid.top).flip());
@@ -71,6 +80,16 @@ const surfaceId: SurfaceId = surface.id;
 const vector: Vec3 = [1, 2, 3];
 const model: Model = solid;
 const solidModel: SolidModel<CanonicalElements> = solid;
+const tubeModel: SolidModel<CanonicalElements> = tube(6, 4, 12);
+const coilModel: SolidModel<CanonicalElements> = coil(5, 0.75, 4, 2.5);
+// @ts-expect-error Coil dimensions are required numeric parameters.
+coil(5, 0.75, 4, '2.5');
+// @ts-expect-error No implicit default turn count.
+coil(5, 0.75, 4);
+// @ts-expect-error Tube dimensions are required, with no option bag or overload.
+tube(6, {wall: 2}, 12);
+// @ts-expect-error Tube dimensions are required.
+tube(6, 4);
 const faceModel: FaceModel<PlanarElements> = circle(4);
 const edgeModel: EdgeModel<CurveElements> = line([0, 0, 0], vector);
 const vertexModel: VertexModel = point(vector);
@@ -84,14 +103,23 @@ const pointAnchor: PointAnchor = solid.center;
 const lineAnchor: LineAnchor = solid.axis;
 const faceAnchor: FaceAnchor = solid.top;
 const loftOptions: LoftOptions = {spine: edgeModel, ruled: true};
-const threadOptions: HelicalThreadOptions = {
-  pitch: 1,
-  y: 10,
-  majorDiameter: 6,
-  minorDiameter: 5,
-  rootWidth: 0.75,
-  crestWidth: 0.125,
-};
+const customPrimitive = definePrimitive((radius: number, height = 4) =>
+  replicad.makeCylinder(radius, height),
+);
+const customSolid: SolidModel = customPrimitive(2);
+const primitiveShape: Shape3D = replicad.makeCylinder(1, 1);
+// @ts-expect-error The builder's argument types are preserved.
+customPrimitive('2');
+// @ts-expect-error Defaulted parameters retain their inferred type.
+customPrimitive(2, '4');
+// @ts-expect-error The builder's required arguments are preserved.
+customPrimitive();
+// @ts-expect-error Builders must return a Replicad solid synchronously.
+definePrimitive(async () => replicad.makeCylinder(1, 1));
+// @ts-expect-error Kernel access remains owned by code3d.
+replicad.getOC();
+// @ts-expect-error Kernel replacement remains owned by code3d.
+replicad.setOC(undefined);
 
 solid.paint('#fff').scaled(2).fillet(1).chamfer(0.5);
 solid.vertices();
@@ -141,12 +169,13 @@ void [
   circle,
   cut,
   cylinder,
+  customSolid,
+  definePrimitive,
   ellipse,
   faceModel,
   frustum,
   group,
   groupModel,
-  helicalThread,
   intersect,
   line,
   loft,
@@ -160,7 +189,8 @@ void [
   solidModel,
   sphere,
   spline,
-  threadOptions,
+  tubeModel,
+  coilModel,
   union,
   vertexModel,
   lineAnchor,
@@ -169,6 +199,7 @@ void [
   edgeId,
   surfaceId,
   anchor,
+  rootDefinePrimitive,
 ];
 
 // @ts-expect-error Runtime identity is available only through tooling.

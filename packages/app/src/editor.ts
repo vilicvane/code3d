@@ -116,6 +116,7 @@ const languageCompilerOptions = {
   allowNonTsExtensions: true,
   allowImportingTsExtensions: true,
   strict: true,
+  skipLibCheck: true,
   noEmit: true,
 };
 typeScriptLanguage.typescriptDefaults.setCompilerOptions(

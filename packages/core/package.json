@@ -17,6 +17,12 @@
       "browser": "./bld/library/index.js",
       "default": "./bld/library/index.js"
     },
+    "./replicad": {
+      "types": "./bld/library/replicad.d.ts",
+      "node": "./bld/node/replicad.js",
+      "browser": "./bld/library/replicad.js",
+      "default": "./bld/library/replicad.js"
+    },
     "./tooling": {
       "types": "./bld/tooling/index.d.ts",
       "default": "./bld/tooling/index.js"

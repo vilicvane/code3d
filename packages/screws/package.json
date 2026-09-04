@@ -7,6 +7,9 @@
   "license": "MIT",
   "author": "vilicvane",
   "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
   "exports": {
     ".": {
       "types": "./bld/library/index.d.ts",

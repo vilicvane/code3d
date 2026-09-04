@@ -1,13 +1,17 @@
 import {
   assembleWire,
+  basicFaceExtrusion,
   cast,
+  genericSweep,
   getOC,
   loft as makeLoft,
   makeBox,
   makeBSplineApproximation,
   makeBezierCurve,
+  makeCircle,
   makeCylinder,
   makeFace,
+  makeHelix,
   makeLine,
   makeSphere,
   makeThreePointArc,
@@ -16,6 +20,7 @@ import {
   sketchEllipse,
   sketchPolysides,
   sketchRectangle,
+  Vector,
   type AnyShape,
   type Edge as ReplicadEdge,
   type Face as ReplicadFace,
@@ -41,12 +46,12 @@ import {
   type Vec3,
 } from './spatial.js';
 import {
+  createKernelArtifact,
   evaluateKernelOperation,
   type KernelArtifact,
   type KernelKeyPart,
   type KernelValueLifecycle,
 } from './kernel-cache.js';
-import {makeHelicalThreadShape} from './thread.js';
 import {
   booleanWithTopology,
   chamferEdges,
@@ -136,6 +141,8 @@ export type ConstraintSnapshot = Readonly<{
 export type ModelOperationKind =
   | 'box'
   | 'cylinder'
+  | 'tube'
+  | 'coil'
   | 'sphere'
   | 'frustum'
   | 'regularPrism'
@@ -149,7 +156,7 @@ export type ModelOperationKind =
   | 'bezier'
   | 'spline'
   | 'loft'
-  | 'helicalThread'
+  | 'primitive'
   | 'paint'
   | 'scaled'
   | 'fillet'
@@ -1786,6 +1793,159 @@ export function cylinder(radius: number, y: number): SolidModel {
   }) as unknown as SolidModel;
 }
 
+/**
+ * A concentric, constant-section tube, open at both ends and centered on Y.
+ * @code3d.param outerRadius {kind: 'length', label: 'Outer radius', constraints: {exclusiveMin: 0}}
+ * @code3d.param innerRadius {kind: 'length', label: 'Inner radius', constraints: {exclusiveMin: 0}}
+ * @code3d.param y {kind: 'length', constraints: {exclusiveMin: 0}}
+ */
+export function tube(
+  outerRadius: number,
+  innerRadius: number,
+  y: number,
+): SolidModel {
+  assertPositive('outerRadius', outerRadius);
+  assertPositive('innerRadius', innerRadius);
+  assertPositive('y', y);
+  if (innerRadius >= outerRadius) {
+    throw new Error('innerRadius must be smaller than outerRadius.');
+  }
+  return ModelObject.create<CanonicalElements, 'solid'>({
+    kind: 'solid',
+    name: 'Tube',
+    geometry: evaluateSolidGeometry(
+      'tube',
+      [outerRadius, innerRadius, y],
+      [],
+      () => {
+        const outer = sketchCircle(outerRadius, {
+          plane: 'XZ',
+          origin: [0, -y / 2, 0],
+        });
+        const inner = sketchCircle(innerRadius, {
+          plane: 'XZ',
+          origin: [0, -y / 2, 0],
+        });
+        // Hole wires run opposite to the outer boundary.
+        inner.wire.wrapped.Reverse();
+        const section = makeFace(outer.wire, [inner.wire]);
+        const direction = new Vector([0, y, 0]);
+        try {
+          return {shape: basicFaceExtrusion(section, direction)};
+        } finally {
+          direction.delete();
+          section.delete();
+          inner.delete();
+          outer.delete();
+        }
+      },
+    ),
+    operation: storedOperation('tube'),
+  }) as unknown as SolidModel;
+}
+
+/**
+ * A right-handed, constant-pitch coil with a circular wire section and plain ends.
+ * coilRadius measures to the wire centerline; pitch is the Y advance per turn.
+ * The centerline spans -pitch * turns / 2 to +pitch * turns / 2 on the Y axis.
+ * Fractional turns are supported. No spring-specific end treatments are applied.
+ * @code3d.param coilRadius {kind: 'length', label: 'Coil radius', constraints: {exclusiveMin: 0}}
+ * @code3d.param wireRadius {kind: 'length', label: 'Wire radius', constraints: {exclusiveMin: 0}}
+ * @code3d.param pitch {kind: 'length', constraints: {exclusiveMin: 0}}
+ * @code3d.param turns {kind: 'scalar', constraints: {exclusiveMin: 0}}
+ */
+export function coil(
+  coilRadius: number,
+  wireRadius: number,
+  pitch: number,
+  turns: number,
+): SolidModel {
+  assertPositive('coilRadius', coilRadius);
+  assertPositive('wireRadius', wireRadius);
+  assertPositive('pitch', pitch);
+  assertPositive('turns', turns);
+  if (wireRadius >= coilRadius) {
+    throw new Error('wireRadius must be smaller than coilRadius.');
+  }
+  if (pitch <= 2 * wireRadius) {
+    throw new Error('pitch must be greater than the wire diameter.');
+  }
+  assertCoilClearance(coilRadius, wireRadius, pitch, turns);
+  const y = pitch * turns;
+  assertPositive('pitch * turns', y);
+  const geometry = evaluateSolidGeometry(
+    'coil',
+    [coilRadius, wireRadius, pitch, turns],
+    [],
+    () => {
+      const spine = makeHelix(pitch, y, coilRadius, [0, -y / 2, 0], [0, 1, 0]);
+      const start = spine.pointAt(0);
+      const tangent = spine.tangentAt(0);
+      const circle = makeCircle(wireRadius, start, tangent);
+      const section = assembleWire([circle]);
+      try {
+        return {shape: genericSweep(section, spine, {frenet: true})};
+      } finally {
+        section.delete();
+        circle.delete();
+        tangent.delete();
+        start.delete();
+        spine.delete();
+      }
+    },
+  );
+  // A fractional turn has asymmetric X/Z bounds, but its axis is still Y.
+  // The circular end sections extend beyond the centerline's Y interval.
+  const circumference = 2 * Math.PI * coilRadius;
+  const halfHeight =
+    y / 2 + wireRadius * (circumference / Math.hypot(circumference, pitch));
+  return ModelObject.create<CanonicalElements, 'solid'>({
+    kind: 'solid',
+    name: 'Coil',
+    geometry,
+    elements: canonicalElements([
+      [0, -halfHeight, 0],
+      [0, halfHeight, 0],
+    ]),
+    operation: storedOperation('coil'),
+  }) as unknown as SolidModel;
+}
+
+function assertCoilClearance(
+  radius: number,
+  wireRadius: number,
+  pitch: number,
+  turns: number,
+): void {
+  // Neighboring turns approach obliquely: pitch alone overestimates clearance.
+  // For angular separation t, squared centerline distance is
+  // 2 R² (1 - cos(t)) + (pitch * t / 2π)². Its only possible minimum
+  // between half a turn and a full turn lies after the derivative's minimum.
+  // Beyond a full turn, the Y separation already exceeds the wire diameter.
+  if (turns <= 0.5) return;
+  const fullTurn = 2 * Math.PI;
+  const slopeSquared = (pitch / (fullTurn * radius)) ** 2;
+  if (slopeSquared >= 1) return;
+  let lower = fullTurn - Math.acos(-slopeSquared);
+  if (Math.sin(lower) + slopeSquared * lower >= 0) return;
+  let upper = fullTurn;
+  for (let iteration = 0; iteration < 48; iteration += 1) {
+    const middle = (lower + upper) / 2;
+    if (Math.sin(middle) + slopeSquared * middle < 0) lower = middle;
+    else upper = middle;
+  }
+  const separation = Math.min(fullTurn * turns, (lower + upper) / 2);
+  const distance = Math.hypot(
+    2 * radius * Math.sin(separation / 2),
+    (pitch * separation) / fullTurn,
+  );
+  if (distance <= 2 * wireRadius) {
+    throw new Error(
+      'Coil turns must not touch or overlap; increase pitch or decrease wireRadius.',
+    );
+  }
+}
+
 /** @code3d.param radius {kind: 'length', constraints: {exclusiveMin: 0}} */
 export function sphere(radius: number): SolidModel {
   assertPositive('radius', radius);
@@ -1880,73 +2040,82 @@ export function regularPrism(
   }) as unknown as SolidModel;
 }
 
-export type HelicalThreadOptions = Readonly<{
-  pitch: number;
-  y: number;
-  majorDiameter: number;
-  minorDiameter: number;
-  rootWidth: number;
-  crestWidth: number;
-  leftHanded?: boolean;
-}>;
-
-export function helicalThread(options: HelicalThreadOptions): SolidModel {
-  const {
-    pitch,
-    y,
-    majorDiameter,
-    minorDiameter,
-    rootWidth,
-    crestWidth,
-    leftHanded = false,
-  } = options;
-  assertPositive('pitch', pitch);
-  assertPositive('y', y);
-  assertPositive('majorDiameter', majorDiameter);
-  assertPositive('minorDiameter', minorDiameter);
-  assertPositive('rootWidth', rootWidth);
-  assertPositive('crestWidth', crestWidth);
-  if (y < pitch) {
-    throw new Error('y must be at least one thread pitch.');
-  }
-  if (minorDiameter >= majorDiameter) {
-    throw new Error('minorDiameter must be smaller than majorDiameter.');
-  }
-  if (crestWidth >= rootWidth || rootWidth > pitch) {
-    throw new Error(
-      'The thread profile requires crestWidth < rootWidth <= pitch.',
-    );
+/** @internal */
+export function modelFromReplicadSolid(shape: Shape3D): SolidModel {
+  let solid: Shape3D;
+  try {
+    solid = normalizeReplicadSolid(shape);
+  } catch (error) {
+    shape.delete();
+    throw error;
   }
   return ModelObject.create<CanonicalElements, 'solid'>({
     kind: 'solid',
-    name: 'Helical thread',
-    geometry: evaluateSolidGeometry(
-      'helical-thread',
-      [
-        pitch,
-        y,
-        majorDiameter,
-        minorDiameter,
-        rootWidth,
-        crestWidth,
-        leftHanded,
-      ],
-      [],
-      () => ({
-        shape: makeHelicalThreadShape({
-          pitch,
-          y,
-          majorRadius: majorDiameter / 2,
-          minorRadius: minorDiameter / 2,
-          rootWidth,
-          crestWidth,
-          leftHanded,
-        }),
-      }),
-    ),
-    meshTolerance: Math.min(0.12, pitch / 8),
-    operation: storedOperation('helicalThread'),
+    name: 'Custom primitive',
+    geometry: createKernelArtifact(createModelGeometryValue(solid)),
+    operation: storedOperation('primitive'),
   }) as unknown as SolidModel;
+}
+
+function normalizeReplicadSolid(shape: Shape3D): Shape3D {
+  const oc = getOC();
+  const type = shape.wrapped.ShapeType();
+  if (type === oc.TopAbs_ShapeEnum.TopAbs_SOLID) return shape;
+  if (
+    type !== oc.TopAbs_ShapeEnum.TopAbs_COMPSOLID &&
+    type !== oc.TopAbs_ShapeEnum.TopAbs_COMPOUND
+  ) {
+    throw new Error(
+      'A primitive builder must return exactly one OpenCascade solid.',
+    );
+  }
+
+  const containmentLayers = [
+    [oc.TopAbs_ShapeEnum.TopAbs_SHELL, oc.TopAbs_ShapeEnum.TopAbs_SOLID],
+    [oc.TopAbs_ShapeEnum.TopAbs_FACE, oc.TopAbs_ShapeEnum.TopAbs_SHELL],
+    [oc.TopAbs_ShapeEnum.TopAbs_WIRE, oc.TopAbs_ShapeEnum.TopAbs_FACE],
+    [oc.TopAbs_ShapeEnum.TopAbs_EDGE, oc.TopAbs_ShapeEnum.TopAbs_WIRE],
+    [oc.TopAbs_ShapeEnum.TopAbs_VERTEX, oc.TopAbs_ShapeEnum.TopAbs_EDGE],
+  ] as const;
+  for (const [find, avoid] of containmentLayers) {
+    const outsideSolid = new oc.TopExp_Explorer(shape.wrapped, find, avoid);
+    try {
+      if (outsideSolid.More()) {
+        throw new Error(
+          'A primitive builder must return exactly one OpenCascade solid.',
+        );
+      }
+    } finally {
+      outsideSolid.delete();
+    }
+  }
+
+  const solids = new oc.TopExp_Explorer(
+    shape.wrapped,
+    oc.TopAbs_ShapeEnum.TopAbs_SOLID,
+  );
+  let solid: Shape3D | undefined;
+  try {
+    if (!solids.More()) {
+      throw new Error(
+        'A primitive builder must return exactly one OpenCascade solid.',
+      );
+    }
+    solid = castOwnedShape3D(solids.Current());
+    solids.Next();
+    if (solids.More()) {
+      solid.delete();
+      solid = undefined;
+      throw new Error(
+        'A primitive builder must return exactly one OpenCascade solid.',
+      );
+    }
+  } finally {
+    solids.delete();
+  }
+
+  shape.delete();
+  return solid;
 }
 
 export function group(children: readonly Model[], name = 'Group'): GroupModel {
@@ -2076,10 +2245,11 @@ export const authoringApi = Object.freeze({
   loft,
   box,
   cylinder,
+  tube,
+  coil,
   sphere,
   frustum,
   regularPrism,
-  helicalThread,
   group,
   union,
   cut,
@@ -2158,18 +2328,25 @@ function evaluateModelGeometry(
     modelGeometryLifecycle,
     () => {
       const result = compute();
-      try {
-        return {
-          shape: result.shape,
-          topology: result.topology ?? initialShapeTopology(result.shape),
-          localBounds: shapeBounds(result.shape),
-        };
-      } catch (error) {
-        result.shape.delete();
-        throw error;
-      }
+      return createModelGeometryValue(result.shape, result.topology);
     },
   );
+}
+
+function createModelGeometryValue(
+  shape: AnyShape,
+  topology?: ShapeTopology,
+): ModelGeometryValue {
+  try {
+    return {
+      shape,
+      topology: topology ?? initialShapeTopology(shape),
+      localBounds: shapeBounds(shape),
+    };
+  } catch (error) {
+    shape.delete();
+    throw error;
+  }
 }
 
 function evaluateSolidGeometry(

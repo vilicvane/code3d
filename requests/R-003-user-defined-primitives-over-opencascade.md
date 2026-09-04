@@ -4,63 +4,65 @@
 
 - Give users a supported path to build their own primitives from OpenCascade
   capabilities instead of waiting for code3d to wrap every modeling operation.
-- This escape hatch is especially important while code3d's built-in primitive
-  library is still incomplete.
-- A custom primitive should behave like a built-in one: it must support normal
-  composition, booleans, rendering, source tracing, parameters, and the object
-  catalog.
+- A custom primitive should support normal composition, booleans, rendering,
+  source tracing, parameters, and the object catalog.
 
-## Architecture direction
+## Confirmed interface
 
-- Put OpenCascade behind an explicit kernel/interoperability boundary. Do not
-  expose a raw OpenCascade shape as the public `ModelObject` representation.
-- Let a user-defined builder produce an opaque, code3d-owned geometry value,
-  then adopt that value into a normal `ModelObject` with a fresh position
-  relation.
-- Keep geometry ownership and OpenCascade lifetime management inside code3d;
-  raw handles must not escape a builder scope or be deleted by both user code
-  and the runtime.
-- Consider two layers: a stable, typed kernel facade for common topology and
-  construction operations, plus a clearly marked low-level OpenCascade escape
-  hatch for capabilities the facade does not yet cover.
-- The API should work as ordinary JavaScript/TypeScript functions so custom
-  primitives remain reusable modules rather than a separate plugin-only model.
-
-Illustrative shape only; names are deliberately undecided:
+`definePrimitive(build)` is available from `@code3d/core/replicad`, together
+with the Replicad API bound to core's kernel. It takes one synchronous builder
+and infers the public constructor's parameters from that function:
 
 ```ts
-const gear = definePrimitive(
-  'gear',
-  ({kernel}, teeth: number, radius: number) =>
-    kernel.build(scope => {
-      // Use the typed facade, or deliberately enter low-level OC here.
-      return scope.adopt(/* kernel result */);
-    }),
+import {definePrimitive, replicad} from '@code3d/core/replicad';
+
+/**
+ * @code3d.param radius {kind: 'length'}
+ * @code3d.param y {kind: 'length'}
+ */
+export const column = definePrimitive((radius: number, y: number) =>
+  replicad.makeCylinder(radius, y, [0, -y / 2, 0], [0, 1, 0]),
 );
 
-const driveGear = gear(24, 18);
+export const example = column(6, 12);
 ```
 
-## Required contracts
+The root model API remains independent of Replicad shapes. The factory has no
+definition options, opaque return token, or author-visible build scope.
 
-- Define exactly which returned topology types can become model geometry and
-  how invalid, null, or non-solid results are reported.
-- Ensure custom primitives run only after the OpenCascade kernel is ready and
-  in the same worker/runtime boundary as built-in primitives.
-- Preserve source and parameter provenance at the custom primitive call site;
-  internal implementation details may optionally expose deeper diagnostics.
-- Make meshing tolerance, serialization, caching, and geometry disposal follow
-  the same policies as built-in primitives.
-- Keep the interoperability layer versioned so upgrading OpenCascade does not
-  silently break every user module.
+## Implemented contracts
 
-## Open decisions
+- The returned shape transfers to code3d and becomes a `SolidModel`.
+  Intermediate resources remain the builder's responsibility under Replicad's
+  ownership rules. Authors must not reuse or delete the transferred shape.
+- The first implementation accepts exactly one solid. Single-solid aggregates
+  from Replicad booleans are normalized; shells, multiple solids, and stray
+  lower-dimensional topology are rejected. Rejected returned shapes are released.
+- Builders run synchronously on every invocation, preserving validation and
+  captured-state behavior. They are not memoized by arguments. Produced models
+  have fresh artifact identities and retain ordinary downstream operation and
+  mesh caching.
+- Custom models use standard mesh tolerance and normal canonical anchors.
+- Node imports initialize the shared kernel before author code executes;
+  Studio waits for its worker kernel before evaluating models.
+- `@code3d.param` annotations on the public callable variable are associated
+  with the resolved call signature, including import aliases, re-exports, and
+  emitted declarations. No wrapper or new annotation options are required.
+- `@code3d.arguments` recognition is not expanded for primitive factories.
+  An ordinary exported invocation supplies a standalone preview.
+- `helicalThread` is a private consumer in `@code3d/screws`.
+  `examples/fasteners.ts` consumes that implementation through the public screw
+  generator. Tube and coil examples use the corresponding core primitives;
+  they do not duplicate built-in geometry behind `definePrimitive`.
+- `examples/custom-primitives.ts` is a separate runnable author example: a
+  twisted knob with a D-shaped shaft bore, direct parameter annotations, a
+  default twist angle, intermediate resource cleanup, and composed instances.
+  A private package implementation does not replace this teaching example.
 
-- Whether the first version exposes replicad's `Shape3D`, a code3d-owned
-  `KernelShape`, or both through separate stable and unsafe APIs.
-- Whether low-level builders may be asynchronous or must stay synchronous
-  inside the compiler worker.
-- How custom primitives publish editor types and documentation without
-  requiring a full plugin system.
-- Whether builder internals appear in the runtime lineage or collapse into one
-  semantic primitive operation by default.
+## Remaining decisions
+
+- Versioning of the interoperability layer as Replicad/OpenCascade evolve.
+- Whether separately installed Replicad versions can be connected safely.
+- Whether future use cases justify additional topology dimensions or a distinct
+  low-level OpenCascade entry; the current solid builder does not predeclare
+  those APIs.

@@ -2,7 +2,6 @@ import {
   cylinder,
   cut,
   frustum,
-  helicalThread,
   regularPrism,
   union,
   type CanonicalElements,
@@ -10,6 +9,7 @@ import {
   type LineAnchor,
   type SolidModel,
 } from '@code3d/core';
+import {helicalThread} from './thread.js';
 
 export type ClearanceFit = 'close' | 'normal' | 'loose';
 

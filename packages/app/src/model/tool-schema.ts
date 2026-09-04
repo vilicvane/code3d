@@ -171,8 +171,8 @@ export function resolveProjectTooling(
   });
   const checker = program.getTypeChecker();
   const declarationSchemas = new Map<
-    ts.SignatureDeclaration,
-    ToolSignatureSchema | undefined
+    ts.Signature,
+    Map<ts.Node, ToolSignatureSchema | undefined>
   >();
   const toolCalls = new Map<string, ToolCallSchemaMap>();
   const parameterDefinitions = new Map<string, ParameterDefinitionMap>();
@@ -193,13 +193,20 @@ export function resolveProjectTooling(
         const resolved = checker.getResolvedSignature(node, candidates);
         const resolvedSchema = signatureToolSchema(
           resolved,
+          node.expression,
+          checker,
           declarationSchemas,
         );
         let schema = resolvedSchema;
         if (!schema) {
           const recoverySchema = candidates
             .map(candidate =>
-              signatureToolSchema(candidate, declarationSchemas),
+              signatureToolSchema(
+                candidate,
+                node.expression,
+                checker,
+                declarationSchemas,
+              ),
             )
             .find(candidate => candidate !== undefined);
           if (
@@ -267,16 +274,128 @@ function diagnosticBelongsToCall(
   });
 }
 
+type SignatureParameter = Readonly<{
+  name: string;
+  optional: boolean;
+  multiple: boolean;
+}>;
+
 function signatureToolSchema(
   signature: ts.Signature | undefined,
-  schemas: Map<ts.SignatureDeclaration, ToolSignatureSchema | undefined>,
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+  schemas: Map<ts.Signature, Map<ts.Node, ToolSignatureSchema | undefined>>,
 ): ToolSignatureSchema | undefined {
-  const declaration = signature?.getDeclaration();
+  if (!signature) return undefined;
+  const declaration = annotationDeclaration(signature, expression, checker);
   if (!declaration) return undefined;
-  if (!schemas.has(declaration)) {
-    schemas.set(declaration, toolSignatureSchema(declaration));
+  let declarations = schemas.get(signature);
+  if (!declarations) {
+    declarations = new Map();
+    schemas.set(signature, declarations);
   }
-  return schemas.get(declaration);
+  if (!declarations.has(declaration)) {
+    declarations.set(
+      declaration,
+      toolSignatureSchema(
+        declaration,
+        signatureParameters(signature, checker, declaration),
+      ),
+    );
+  }
+  return declarations.get(declaration);
+}
+
+function parameterAnnotations(node: ts.Node): string[] {
+  return ts.getJSDocTags(node).flatMap(tag => code3dTag(tag, 'param'));
+}
+
+function annotationDeclaration(
+  signature: ts.Signature,
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+): ts.Node | undefined {
+  const declaration = signature.getDeclaration();
+  // Overload-specific annotations remain attached to the resolved signature.
+  if (declaration?.name) {
+    return parameterAnnotations(declaration).length ? declaration : undefined;
+  }
+  let symbol = checker.getSymbolAtLocation(expression);
+  const visited = new Set<ts.Symbol>();
+  while (symbol && !visited.has(symbol)) {
+    visited.add(symbol);
+    if (symbol.flags & ts.SymbolFlags.Alias) {
+      symbol = checker.getAliasedSymbol(symbol);
+      continue;
+    }
+    const annotated = symbol.declarations?.find(
+      node => parameterAnnotations(node).length > 0,
+    );
+    if (annotated) return annotated;
+    const variable = symbol.valueDeclaration;
+    if (
+      !variable ||
+      !ts.isVariableDeclaration(variable) ||
+      !variable.initializer
+    )
+      break;
+    // Follow ordinary aliases, but do not borrow annotations from a factory's
+    // implementation or assume that a wrapper preserves its input signature.
+    symbol = checker.getSymbolAtLocation(variable.initializer);
+  }
+  return declaration && parameterAnnotations(declaration).length
+    ? declaration
+    : undefined;
+}
+
+function signatureParameters(
+  signature: ts.Signature,
+  checker: ts.TypeChecker,
+  location: ts.Node,
+): readonly SignatureParameter[] {
+  const acceptsArray = (type: ts.Type): boolean =>
+    type.isUnion()
+      ? type.types.some(acceptsArray)
+      : checker.isArrayType(type) || checker.isTupleType(type);
+
+  return signature.getParameters().flatMap(parameter => {
+    const declaration = parameter.valueDeclaration;
+    const type = checker.getTypeOfSymbolAtLocation(parameter, location);
+    if (
+      declaration &&
+      ts.isParameter(declaration) &&
+      declaration.dotDotDotToken &&
+      checker.isTupleType(type)
+    ) {
+      const reference = type as ts.TypeReference;
+      const tuple = reference.target as ts.TupleType;
+      return checker.getTypeArguments(reference).map((element, index) => {
+        const label = tuple.labeledElementDeclarations?.[index];
+        return {
+          name:
+            label && ts.isIdentifier(label.name)
+              ? label.name.text
+              : `arg${index}`,
+          optional: Boolean(
+            tuple.elementFlags[index] & ts.ElementFlags.Optional,
+          ),
+          multiple: acceptsArray(element),
+        };
+      });
+    }
+    return [
+      {
+        name: parameter.getName(),
+        optional: Boolean(
+          parameter.flags & ts.SymbolFlags.Optional ||
+          (declaration &&
+            ts.isParameter(declaration) &&
+            (declaration.questionToken || declaration.initializer)),
+        ),
+        multiple: acceptsArray(type),
+      },
+    ];
+  });
 }
 
 export function toolCallKey(start: number, end: number): string {
@@ -284,14 +403,13 @@ export function toolCallKey(start: number, end: number): string {
 }
 
 function toolSignatureSchema(
-  declaration: ts.SignatureDeclaration,
+  declaration: ts.Node,
+  signatureParameters: readonly SignatureParameter[],
 ): ToolSignatureSchema | undefined {
-  const parameterAnnotations = ts
-    .getJSDocTags(declaration)
-    .flatMap(tag => code3dTag(tag, 'param'));
-  if (parameterAnnotations.length === 0) return undefined;
+  const annotations = parameterAnnotations(declaration);
+  if (annotations.length === 0) return undefined;
   const name = declarationName(declaration);
-  const parameters = parameterAnnotations.map(annotation => {
+  const parameters = annotations.map(annotation => {
     const match = /^([A-Za-z_$][\w$]*)\s+([\s\S]+)$/.exec(annotation);
     if (!match) {
       throw toolSchemaError(
@@ -300,10 +418,8 @@ function toolSignatureSchema(
       );
     }
     const [, parameterName, expression] = match;
-    const index = declaration.parameters.findIndex(
-      parameter =>
-        ts.isIdentifier(parameter.name) &&
-        parameter.name.text === parameterName,
+    const index = signatureParameters.findIndex(
+      parameter => parameter.name === parameterName,
     );
     if (index < 0) {
       throw toolSchemaError(
@@ -311,7 +427,7 @@ function toolSignatureSchema(
         `@code3d.param names an unknown parameter: ${parameterName}.`,
       );
     }
-    const parameter = declaration.parameters[index];
+    const parameter = signatureParameters[index];
     const config = parseObjectLiteral(expression, declaration);
     const allowedFields = new Set(['kind', 'label', 'constraints', 'actions']);
     rejectUnknownFields(config, allowedFields, declaration, parameterName);
@@ -339,7 +455,7 @@ function toolSignatureSchema(
     const common = {
       index,
       name: parameterName,
-      optional: Boolean(parameter.questionToken || parameter.initializer),
+      optional: parameter.optional,
       label:
         typeof config.label === 'string'
           ? config.label
@@ -360,7 +476,7 @@ function toolSignatureSchema(
       return {
         ...common,
         kind,
-        multiple: parameterAcceptsArray(parameter),
+        multiple: parameter.multiple,
       } satisfies ToolSelectionParameterSchema;
     }
     return {
@@ -397,23 +513,6 @@ function code3dTag(tag: ts.JSDocTag, name: string): string[] {
     : [];
 }
 
-function parameterAcceptsArray(parameter: ts.ParameterDeclaration): boolean {
-  const inspect = (type: ts.TypeNode | undefined): boolean => {
-    if (!type) return false;
-    if (ts.isArrayTypeNode(type)) return true;
-    if (ts.isParenthesizedTypeNode(type) || ts.isTypeOperatorNode(type)) {
-      return inspect(type.type);
-    }
-    if (ts.isUnionTypeNode(type)) return type.types.some(inspect);
-    return (
-      ts.isTypeReferenceNode(type) &&
-      ts.isIdentifier(type.typeName) &&
-      (type.typeName.text === 'Array' || type.typeName.text === 'ReadonlyArray')
-    );
-  };
-  return inspect(parameter.type);
-}
-
 function jsDocComment(comment: ts.JSDocTag['comment']): string {
   if (typeof comment === 'string') return comment;
   return comment?.map(part => part.text).join('') ?? '';
@@ -421,7 +520,7 @@ function jsDocComment(comment: ts.JSDocTag['comment']): string {
 
 function parseObjectLiteral(
   expression: string,
-  declaration: ts.SignatureDeclaration,
+  declaration: ts.Node,
 ): Readonly<Record<string, unknown>> {
   const prefix = 'const __code3dToolConfig = (';
   const sourceFile = ts.createSourceFile(
@@ -461,7 +560,7 @@ function parseObjectLiteral(
 
 function staticObjectValue(
   object: ts.ObjectLiteralExpression,
-  declaration: ts.SignatureDeclaration,
+  declaration: ts.Node,
 ): Readonly<Record<string, unknown>> {
   const result: Record<string, unknown> = {};
   for (const property of object.properties) {
@@ -489,10 +588,7 @@ function staticObjectValue(
   return result;
 }
 
-function staticValue(
-  expression: ts.Expression,
-  declaration: ts.SignatureDeclaration,
-): unknown {
+function staticValue(expression: ts.Expression, declaration: ts.Node): unknown {
   if (ts.isStringLiteralLike(expression)) return expression.text;
   if (ts.isNumericLiteral(expression)) return Number(expression.text);
   if (expression.kind === ts.SyntaxKind.TrueKeyword) return true;
@@ -537,7 +633,7 @@ function propertyName(name: ts.PropertyName): string | undefined {
 
 function parseConstraints(
   value: unknown,
-  declaration: ts.SignatureDeclaration,
+  declaration: ts.Node,
   parameterName: string,
 ): ToolParameterConstraints | undefined {
   if (value === undefined) return undefined;
@@ -564,7 +660,7 @@ function parseConstraints(
 
 function parseParameterActions(
   value: unknown,
-  declaration: ts.SignatureDeclaration,
+  declaration: ts.Node,
   parameterName: string,
 ): readonly ToolParameterAction[] {
   if (value === undefined) return [];
@@ -609,7 +705,7 @@ function parseParameterActions(
 function rejectUnknownFields(
   object: Readonly<Record<string, unknown>>,
   allowed: ReadonlySet<string>,
-  declaration: ts.SignatureDeclaration,
+  declaration: ts.Node,
   parameterName: string,
 ): void {
   const unknown = Object.keys(object).find(name => !allowed.has(name));
@@ -627,21 +723,18 @@ function isStaticObject(
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function declarationName(declaration: ts.SignatureDeclaration): string {
-  const name = declaration.name;
+function declarationName(declaration: ts.Node): string {
+  const name = (declaration as ts.NamedDeclaration).name;
   if (name && (ts.isIdentifier(name) || ts.isStringLiteralLike(name))) {
     return name.text;
   }
   throw toolSchemaError(
     declaration,
-    '@code3d.param requires a named function or method signature.',
+    '@code3d.param requires a named callable declaration.',
   );
 }
 
-function toolSchemaError(
-  declaration: ts.SignatureDeclaration,
-  message: string,
-): Error {
+function toolSchemaError(declaration: ts.Node, message: string): Error {
   const sourceFile = declaration.getSourceFile();
   const position = sourceFile.getLineAndCharacterOfPosition(
     declaration.getStart(sourceFile),
@@ -660,12 +753,7 @@ function resolveModule(
     candidate => candidate.specifier === specifier,
   );
   if (packageEntry) {
-    const entry = packageEntry.files.find(file =>
-      file.filePath.endsWith('/bld/library/index.d.ts'),
-    );
-    return entry
-      ? resolvedModule(virtualFilePath(entry.filePath), true)
-      : undefined;
+    return resolvedModule(virtualFilePath(packageEntry.entryFilePath), true);
   }
   if (!specifier.startsWith('.')) return undefined;
   const directory = containingFile.slice(0, containingFile.lastIndexOf('/'));

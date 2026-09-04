@@ -131,6 +131,14 @@ Provider 可通过 `previewBehavior` 声明工具预览期间的显示策略。�
 
 ## 当前接入的工具
 
+`@code3d.param` 可直接放在公开的 callable 变量上，例如
+`export const sleeve = definePrimitive((radius: number, y = 4) => ...)`。
+tooling 从公开声明读取注释，并从 TypeScript 实际调用签名解析参数名称、顺序、
+可选性和数组类型，包括泛型工厂返回的具名参数 tuple。普通别名、import/re-export
+和已发布的 `.d.ts` 使用同一规则，不要求函数 wrapper 或专用 metadata 选项。
+具名函数与方法的重载仍优先使用匹配签名上的注释。primitive factory 不额外提供
+`@code3d.arguments` 入口；独立预览使用普通示例调用。
+
 viewport 平移 gizmo 在能够唯一追溯参数时产生 `parameter.set`，否则针对已有关系产生
 `relation.offset`。源码中的 `fillet(radius)`、`fillet(radius, edgeIds)` 和对应的
 `chamfer` 调用把整个参数区域投影为 edge-selection source target。`edge-operation.set`

@@ -31,6 +31,7 @@ import {
   type SourceRef,
   type TopologyKind,
 } from '@code3d/core/tooling';
+import * as coreReplicadApi from '@code3d/core/replicad';
 import * as screwApi from '@code3d/screws';
 import {code3dAnnotations} from './annotations';
 import {designArgumentAnnotationSites} from './design-functions';
@@ -57,6 +58,7 @@ import {
 
 const workspacePackages = new Map<string, unknown>([
   ['@code3d/core', authoringApi],
+  ['@code3d/core/replicad', coreReplicadApi],
   ['@code3d/screws', screwApi],
 ]);
 
