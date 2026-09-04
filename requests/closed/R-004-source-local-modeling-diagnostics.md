@@ -30,9 +30,12 @@
 - Located diagnostics become `code3d` Monaco error markers. They remain visible
   while the replacement revision compiles and clear when that revision
   succeeds; they do not open a second error overlay or move editor focus.
-- Located model diagnostics also appear in the viewport's bottom-left feedback
-  stack, independently of whether a matching tool is open. Source-edit notices
-  share that stack without overlapping it, and a successful replacement
+- A failed evaluation appears in the viewport's bottom-left feedback stack only
+  when its recorded model inputs intersect the object graph of the fallback
+  model rendered by that compilation. This relation is independent of whether
+  the failed operation exposes a tool. Syntax, module, and unrelated evaluation
+  diagnostics remain editor-only. Source-edit notices share the viewport stack
+  without overlapping model-related diagnostics, and a successful replacement
   compile clears the diagnostic.
 - Parameter source references from failed fillet and chamfer evaluations remain
   tracked even though those operations have no output object, so the open tool
@@ -44,6 +47,10 @@
 ## Verification
 
 - `npm run build` passes.
+- Host Chrome kept both `const broken = ;` and an invalid standalone `box()`
+  evaluation out of the viewport feedback stack while retaining their Monaco
+  diagnostics. A failed `chamfer()` consuming the rendered fallback model still
+  appeared in the viewport.
 - Host Chrome evaluated `box(-1, 20, 10)`: the full call expression received
   one Monaco error marker, its native hover displayed the evaluation message,
   and the global error bar remained hidden.

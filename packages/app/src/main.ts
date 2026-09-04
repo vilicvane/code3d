@@ -877,7 +877,9 @@ async function presentModelDiagnostic(
   sourceVersion: number,
 ): Promise<boolean> {
   codeEditor.setModelDiagnostic(diagnostic);
-  renderViewportDiagnostic(diagnostic?.sourceRef ? diagnostic : undefined);
+  renderViewportDiagnostic(
+    diagnostic?.relatedModelNodeIds?.length ? diagnostic : undefined,
+  );
   if (!diagnostic || diagnostic.sourceRef) {
     errorBar.hidden = true;
     return true;

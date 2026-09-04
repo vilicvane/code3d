@@ -11,6 +11,8 @@ export type ModelDiagnostic = Readonly<{
   summary: string;
   details?: string;
   sourceRef?: SourceRef;
+  /** Nodes shared by the failed evaluation inputs and rendered fallback graph. */
+  relatedModelNodeIds?: readonly string[];
 }>;
 
 export class ModelDiagnosticError extends Error {

@@ -307,6 +307,7 @@ type SourceExecutionTrace = {
   parameters: readonly ParameterUsage[];
   arguments: Map<number, unknown>;
   inputs: SourceInputTrace[];
+  failure?: ModelDiagnostic;
 };
 
 const tracedObjects = new Set<ModelObject>();
@@ -363,7 +364,12 @@ const traceRuntime = Object.freeze({
     } catch (error) {
       executionTrace.outcome = 'failed';
       executionTrace.order = nextSourceReachOrder();
-      throw locateModelError(error, sourceRef(file, failureStart, failureEnd));
+      const failure = locateModelError(
+        error,
+        sourceRef(file, failureStart, failureEnd),
+      );
+      executionTrace.failure = failure.diagnostic;
+      throw failure;
     } finally {
       traceFrames.pop();
       parameterFrames.pop();
@@ -1071,6 +1077,9 @@ export function compileProject(
         'The current program did not produce a renderable ModelObject.',
       );
     }
+    if (diagnostic && fallbackObject) {
+      diagnostic = relateDiagnosticToFallback(diagnostic, fallbackObject);
+    }
 
     const meshCache = new Map();
     const snapshots = new Map<ModelObject, ModelSnapshotObject>();
@@ -1301,6 +1310,32 @@ function collectObjectGraph(roots: Iterable<ModelObject>): ModelObject[] {
     visit(root);
   }
   return [...found];
+}
+
+function relateDiagnosticToFallback(
+  diagnostic: ModelDiagnostic,
+  fallback: ModelObject,
+): ModelDiagnostic {
+  if (diagnostic.kind !== 'evaluation') return diagnostic;
+  const failureInputs = [...sourceExecutionTraces.values()]
+    .filter(execution => execution.failure === diagnostic)
+    .flatMap(execution =>
+      execution.inputs.flatMap(input => input.objects),
+    );
+  if (failureInputs.length === 0) return diagnostic;
+  const fallbackNodeIds = new Set(
+    collectObjectGraph([fallback]).map(object => object.nodeId),
+  );
+  const relatedModelNodeIds = [
+    ...new Set(
+      collectObjectGraph(failureInputs)
+        .map(object => object.nodeId)
+        .filter(nodeId => fallbackNodeIds.has(nodeId)),
+    ),
+  ];
+  return relatedModelNodeIds.length > 0
+    ? {...diagnostic, relatedModelNodeIds}
+    : diagnostic;
 }
 
 function buildSourceTargets(
