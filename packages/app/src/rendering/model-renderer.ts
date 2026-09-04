@@ -5,6 +5,9 @@ import type {
   Transform,
 } from '@code3d/core/tooling';
 
+const unpaintedSurfaceColor = '#dde0dc';
+const unpaintedSurfaceOpacity = 0.68;
+
 export class ModelRenderer {
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(42, 1, 0.1, 2000);
@@ -141,8 +144,12 @@ export function createRenderedModelNode(
   }
 
   const container = new THREE.Group();
+  const isUnpainted = node.color === undefined;
   const material = new THREE.MeshStandardMaterial({
-    color: node.color,
+    color: node.color ?? unpaintedSurfaceColor,
+    transparent: isUnpainted,
+    opacity: isUnpainted ? unpaintedSurfaceOpacity : 1,
+    depthWrite: !isUnpainted,
     roughness: 0.52,
     metalness: 0.12,
     polygonOffset: true,

@@ -189,7 +189,7 @@ export type ModelSnapshotObject = Readonly<{
   nodeId: string;
   kind: 'solid' | 'group';
   name: string;
-  color: string;
+  color?: string;
   children: readonly ModelSnapshotObject[];
   transform: Transform;
   constraints: readonly ConstraintSnapshot[];
@@ -472,7 +472,7 @@ export class ModelObject<
   readonly nodeId: string;
   readonly kind: 'solid' | 'group';
   readonly name: string;
-  readonly color: string;
+  readonly color?: string;
   readonly children: readonly ModelObject[];
   readonly sourceRefs: SourceRef[];
   readonly parameters: ParameterUsage[];
@@ -493,7 +493,7 @@ export class ModelObject<
     this.geometry = init.geometry;
     this.meshTolerance = init.meshTolerance ?? 0.2;
     this.name = init.name ?? (init.kind === 'solid' ? 'Solid' : 'Group');
-    this.color = init.color ?? '#c9cec5';
+    this.color = init.color;
     this.children = init.children ?? [];
     this.constraints = [...(init.constraints ?? [])];
     this.sourceRefs = [...(init.sourceRefs ?? [])];

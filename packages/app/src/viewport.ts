@@ -2231,7 +2231,7 @@ function makeObjectSurfacesTranslucent(
       materials.forEach(material => {
         if (material instanceof THREE.MeshStandardMaterial) {
           material.transparent = true;
-          material.opacity = opacity;
+          material.opacity = Math.min(material.opacity, opacity);
           material.depthWrite = false;
         }
       });
