@@ -73,6 +73,7 @@ async function renderModel(): Promise<void> {
     onNavigateSource: () => undefined,
     onPositionTool: () => undefined,
     onTopologySelection: () => undefined,
+    showCoordinateReference: false,
     sourceDecorationProviders: [
       booleanOperationSourceDecoration,
       edgeModificationSourceDecoration,

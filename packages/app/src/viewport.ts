@@ -37,6 +37,7 @@ import type {
   SourceDecorationProvider,
   ViewportDecoration,
 } from './viewport-decoration';
+import {ViewportCoordinateReference} from './ui/viewport-coordinate-reference';
 
 export type Occurrence = Readonly<{
   key: string;
@@ -93,6 +94,7 @@ export type ModelViewportOptions = Readonly<{
   onPositionTool: (event: PositionGizmoEvent) => void;
   onTopologySelection: (event: TopologySelectionEvent) => void;
   sourceDecorationProviders?: readonly SourceDecorationProvider[];
+  showCoordinateReference?: boolean;
 }>;
 
 export type TopologySelectionEvent =
@@ -231,6 +233,7 @@ export class ModelViewport {
   private readonly camera: THREE.PerspectiveCamera;
   private readonly renderer: THREE.WebGLRenderer;
   private readonly controls: OrbitControls;
+  private readonly coordinateReference?: ViewportCoordinateReference;
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointer = new THREE.Vector2();
   private readonly root = new THREE.Group();
@@ -275,6 +278,7 @@ export class ModelViewport {
       onPositionTool,
       onTopologySelection,
       sourceDecorationProviders = [],
+      showCoordinateReference = true,
     }: ModelViewportOptions,
   ) {
     this.onSelect = onSelect;
@@ -293,6 +297,12 @@ export class ModelViewport {
     this.controls.target.set(0, 20, 0);
     this.controls.minDistance = 20;
     this.controls.maxDistance = 650;
+    if (showCoordinateReference) {
+      this.coordinateReference = new ViewportCoordinateReference(
+        this.container,
+        this.camera,
+      );
+    }
     this.positionGizmo = new PositionGizmo(
       this.scene,
       this.camera,
@@ -1042,6 +1052,7 @@ export class ModelViewport {
       this.onTopologySelection({kind: 'cancel'});
     }
     this.positionGizmo.detach();
+    this.coordinateReference?.setTarget(undefined);
     this.clearImpactHelpers();
     this.clearAllDecorations();
     this.disposeRoot();
@@ -1064,6 +1075,7 @@ export class ModelViewport {
       return;
     }
     this.selectedKey = key;
+    this.coordinateReference?.setTarget(occurrence.object);
     this.rebuildSelectionHelper();
     this.rebuildImpactHelpers();
     this.updatePositionGizmo();
@@ -1479,6 +1491,7 @@ export class ModelViewport {
   private animate = (): void => {
     requestAnimationFrame(this.animate);
     this.controls.update();
+    this.coordinateReference?.update();
     this.rendering.renderFrame(() => {
       this.selectionHelper?.update();
       this.impactHelpers.forEach(helper => helper.update());
