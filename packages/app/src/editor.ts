@@ -19,6 +19,7 @@ import {
   typeScriptCompletionItemKind,
 } from './monaco/typescript-completions';
 import type {TypeScriptCompletionEntry} from './monaco/typescript-protocol';
+import {registerProjectTypeScriptSelectionRanges} from './monaco/typescript-selection-ranges';
 import {code3dAnnotations, type Code3dAnnotation} from './model/annotations';
 import type {DesignArgumentContext} from './model/compiler';
 import type {ModelDiagnostic} from './model/diagnostic';
@@ -136,6 +137,7 @@ registerProjectTypeScriptCompletions(
   projectLanguageSelector,
   injectedPackageSpecifiers,
 );
+registerProjectTypeScriptSelectionRanges(projectLanguageSelector);
 
 monaco.languages.registerDocumentFormattingEditProvider('typescript', {
   async provideDocumentFormattingEdits(model) {

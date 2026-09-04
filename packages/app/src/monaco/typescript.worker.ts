@@ -2,6 +2,7 @@ import type * as typeScript from '@typescript/typescript6';
 import {
   initialize,
   TypeScriptWorker,
+  type TypeScriptSelectionRange,
 } from 'monaco-editor/language/typescript/ts.worker';
 
 const completionPreferences = {
@@ -75,6 +76,16 @@ class ProjectTypeScriptWorker extends TypeScriptWorker {
       source,
       completionPreferences,
       data,
+    );
+  }
+
+  async getProjectSelectionRanges(
+    fileName: string,
+    positions: readonly number[],
+  ): Promise<readonly TypeScriptSelectionRange[]> {
+    const languageService = this.getLanguageService();
+    return positions.map(position =>
+      languageService.getSmartSelectionRange(fileName, position),
     );
   }
 }
