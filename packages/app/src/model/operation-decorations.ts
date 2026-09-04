@@ -91,7 +91,7 @@ const decorations: SourceDecorationProvider['decorations'] = ({
       id: `${operation.id}:${region.kind}:${region.inputNodeId}:${index}`,
       operationRole: inputRole,
       mesh: region.mesh,
-      transform: output.transform,
+      transform: output.compositionTransform,
       appearance:
         operationKind === 'union' && region.kind === 'section'
           ? unionSectionAppearance

@@ -10,3 +10,5 @@ curve models (`line`, `arc`, `bezier`, `spline`), point models, and
 through-section or spine-guided `loft`. Every geometric model is immutable,
 renderable, and relation-aware; stable `.surface(id)`, `.edge(id)`, and
 `.vertex(id)` references can be used as complete relation anchors.
+`relate()` records placement for composition with other values; inspecting or
+rendering the resulting value by itself keeps its intrinsic local frame.

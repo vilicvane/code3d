@@ -135,6 +135,8 @@ export function createRenderedModel(node: ModelSnapshotObject): THREE.Object3D {
   return object;
 }
 
+export type ModelPlacement = 'standalone' | 'composition';
+
 export function createRenderedModelNode(
   node: ModelSnapshotObject,
 ): THREE.Object3D {
@@ -233,8 +235,12 @@ export function disposeObject(object: THREE.Object3D): void {
 export function applyNodeTransform(
   object: THREE.Object3D,
   node: ModelSnapshotObject,
+  placement: ModelPlacement = 'standalone',
 ): void {
-  applyTransform(object, node.transform);
+  applyTransform(
+    object,
+    placement === 'composition' ? node.compositionTransform : node.transform,
+  );
 }
 
 export function applyTransform(
