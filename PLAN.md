@@ -325,9 +325,14 @@ constraint source sites do.
   source immediately while keeping the guide, hover, and selection panel
   interactive during background compilation. Newer edits invalidate older
   compile results, and the latest normal compiled model replaces the rendered
-  result when ready; do not present an uncommitted operation result as if it
-  had already taken effect. Outside selection, keep the weaker before/after
-  comparison for an applied edge modification.
+  result when ready. Defer source formatting until selection ends so it cannot
+  invalidate active source anchors; do not present an uncommitted operation
+  result as if it had already taken effect. Outside selection, keep the weaker
+  before/after comparison for an applied edge modification.
+- Treat one continuous edge-editing session as one source-history entry.
+  Undo and redo during that session update the source, guide, and controls
+  together without closing the tool; after the session ends, history remains
+  immediate but does not reopen transient edge-selection UI.
 - Make deselection reversible at both levels: toggle individual edges or clear
   the set. Leaving the call's source focus or pressing `Escape` only dismisses
   the transient panel; already committed edits remain in source. The panel has

@@ -600,6 +600,13 @@ export class ModelViewport {
     this.rebuildEdgeSelectionOverlay();
   }
 
+  setSelectedEdges(edgeIds: readonly EdgeId[]): void {
+    if (!this.edgeSelection) return;
+    this.edgeSelection.selectedEdgeIds = new Set(edgeIds);
+    this.edgeSelection.hoveredEdgeId = undefined;
+    this.rebuildEdgeSelectionOverlay();
+  }
+
   hasRelativePositionContext(): boolean {
     return isRelativePositionContext(this.renderedSourceScope()?.target);
   }

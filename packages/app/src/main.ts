@@ -50,6 +50,7 @@ import type {
 } from './tools/position-gizmo';
 import {
   ToolEngine,
+  type ToolCommitOptions,
   type ToolIntent,
   type ToolPreview,
   type ToolSession,
@@ -277,6 +278,8 @@ let runRevision = 0;
 let positionToolSession: ToolSession | undefined;
 let positionToolInterruptedCompile = false;
 let edgeSelectionTool: EdgeSelectionTool | undefined;
+let edgeEditSession: EdgeEditSession | undefined;
+let edgeEditSessionCounter = 0;
 let contextFilePath: string | undefined;
 let preferredEvaluationContextId: string | undefined;
 let selectedDesignContextId: string | undefined;
@@ -286,6 +289,7 @@ let applyingFileRoute = false;
 type EdgeSelectionTool = {
   targetId: string;
   evaluationIndex: number;
+  session: EdgeEditSession;
   operation: 'fillet' | 'chamfer';
   edgeArgument: EdgeArgumentTarget;
   parameter?: ParameterUsage;
@@ -293,6 +297,17 @@ type EdgeSelectionTool = {
   occurrenceKey: string;
   availableEdgeIds: readonly EdgeId[];
   selectedEdgeIds: readonly EdgeId[];
+};
+type EdgeEditSession = {
+  targetId: string;
+  sourceFile: string;
+  undoGroup: string;
+  baselineEdgeIds: readonly EdgeId[];
+  baselineParameterValue?: number;
+  appliedEdgeIds: readonly EdgeId[];
+  appliedParameterValue?: number;
+  hasEdits: boolean;
+  historyState: 'applied' | 'undone';
 };
 
 const viewport = new ModelViewport(viewportHost, {
@@ -349,8 +364,8 @@ const toolEngine = new ToolEngine({
   sourceVersion: () => codeEditor.sourceVersion(),
   resolveSourceRef: sourceRef => codeEditor.resolveSourceRef(sourceRef),
   readSource: sourceRef => codeEditor.readSource(sourceRef),
-  applySourceEdits: (baseVersion, edits) =>
-    codeEditor.applySourceEdits(baseVersion, edits),
+  applySourceEdits: (baseVersion, edits, options) =>
+    codeEditor.applySourceEdits(baseVersion, edits, options),
   applyPreview: preview => applyToolPreview(preview),
   commitPreview: preview => commitToolPreview(preview),
   clearPreview: (preview, reason) => clearToolPreview(preview, reason),
@@ -358,11 +373,16 @@ const toolEngine = new ToolEngine({
 
 codeEditor.onChange(change => {
   const toolChange = change.kind === 'content' && change.origin === 'tool';
-  if (!toolChange) dismissEdgeSelectionTool();
+  const historyChange =
+    change.kind === 'content' &&
+    (change.origin === 'undo' || change.origin === 'redo');
+  const editingHistoryChange =
+    historyChange && handleEdgeEditingHistory(change);
+  if (!toolChange && !editingHistoryChange) abandonEdgeSelectionTool();
   persistProjectChange(projectFileSystem, change);
   sourceEditPopover.dismiss();
   if (change.kind !== 'content') renderProjectNavigation();
-  requestModelUpdate(toolChange ? 0 : 420);
+  requestModelUpdate(toolChange || historyChange ? 0 : 420);
 });
 
 codeEditor.onCursorOffset(({file, offset}) => {
@@ -394,6 +414,7 @@ codeEditor.onCursorOffset(({file, offset}) => {
 });
 codeEditor.onCompletionFocus(handleCompletionFocus);
 codeEditor.onActiveFile((path, reason) => {
+  finishEdgeSelectionTool();
   renderProjectNavigation();
   if (!applyingFileRoute) updateFileRoute(path, reason);
   preferredEvaluationContextId = undefined;
@@ -475,7 +496,7 @@ window.addEventListener('keydown', event => {
     event.preventDefault();
     return;
   }
-  if (event.key === 'Escape' && dismissEdgeSelectionTool()) {
+  if (event.key === 'Escape' && finishEdgeSelectionTool()) {
     event.preventDefault();
     return;
   }
@@ -1151,11 +1172,11 @@ function renderCurrentPanels(): void {
 }
 
 function syncEdgeSelectionTool(sourceTargetFocused = true): void {
-  if (
-    !sourceTargetFocused ||
-    currentModuleSourceVersion !== codeEditor.sourceVersion()
-  ) {
-    dismissEdgeSelectionTool();
+  if (!sourceTargetFocused) {
+    finishEdgeSelectionTool();
+    return;
+  }
+  if (currentModuleSourceVersion !== codeEditor.sourceVersion()) {
     return;
   }
   const scope = viewport.sourceEvaluation();
@@ -1170,7 +1191,7 @@ function syncEdgeSelectionTool(sourceTargetFocused = true): void {
     (operation === 'fillet' || operation === 'chamfer') &&
     occurrence?.node.kind === 'solid';
   if (!eligible || !scope || !occurrence || !edgeArgument) {
-    dismissEdgeSelectionTool();
+    finishEdgeSelectionTool();
     return;
   }
   if (
@@ -1183,6 +1204,7 @@ function syncEdgeSelectionTool(sourceTargetFocused = true): void {
   startEdgeSelection(
     scope.target.id,
     scope.evaluationIndex,
+    scope.target.sourceRef.file,
     operation,
     edgeArgument,
     selection.inputNodeId,
@@ -1195,6 +1217,7 @@ function syncEdgeSelectionTool(sourceTargetFocused = true): void {
 function startEdgeSelection(
   targetId: string,
   evaluationIndex: number,
+  sourceFile: string,
   operation: 'fillet' | 'chamfer',
   edgeArgument: EdgeArgumentTarget,
   inputNodeId: string,
@@ -1203,13 +1226,30 @@ function startEdgeSelection(
   occurrence: Occurrence,
 ): void {
   dismissEdgeSelectionTool();
+  if (edgeEditSession && edgeEditSession.targetId !== targetId) {
+    finishEdgeEditSession(edgeEditSession);
+  }
+  const session =
+    edgeEditSession ??
+    (edgeEditSession = {
+      targetId,
+      sourceFile,
+      undoGroup: `edge-operation:${targetId}:${++edgeEditSessionCounter}`,
+      baselineEdgeIds: sortedEdgeIds(initialEdgeIds),
+      baselineParameterValue: parameter?.value,
+      appliedEdgeIds: sortedEdgeIds(initialEdgeIds),
+      appliedParameterValue: parameter?.value,
+      hasEdits: false,
+      historyState: 'applied',
+    });
+  const selectedEdgeIds = edgeSessionEdgeIds(session);
   viewport.cancelPositionTool();
   let availableEdgeIds: readonly EdgeId[];
   try {
     availableEdgeIds = viewport.beginEdgeSelection(
       occurrence.key,
       inputNodeId,
-      initialEdgeIds,
+      selectedEdgeIds,
     );
   } catch (error) {
     showToolIssue(error instanceof Error ? error.message : String(error));
@@ -1218,13 +1258,14 @@ function startEdgeSelection(
   edgeSelectionTool = {
     targetId,
     evaluationIndex,
+    session,
     operation,
     edgeArgument,
     parameter,
-    parameterValue: parameter?.value,
+    parameterValue: edgeSessionParameterValue(session),
     occurrenceKey: occurrence.key,
     availableEdgeIds,
-    selectedEdgeIds: sortedEdgeIds(initialEdgeIds),
+    selectedEdgeIds,
   };
   sourceEditPopover.dismiss();
   errorBar.hidden = true;
@@ -1264,7 +1305,10 @@ function commitEdgeOperationParameter(): void {
   });
 }
 
-function updateEdgeSelectionToolbar(tool: EdgeSelectionTool): void {
+function updateEdgeSelectionToolbar(
+  tool: EdgeSelectionTool,
+  forceParameter = false,
+): void {
   edgeSelectionTitle.textContent = edgeOperationLabel(tool.operation);
   edgeSelectionAvailable.textContent = `${tool.availableEdgeIds.length} AVAILABLE`;
   edgeSelectionParameterField.hidden = !tool.parameter;
@@ -1277,7 +1321,7 @@ function updateEdgeSelectionToolbar(tool: EdgeSelectionTool): void {
       Math.abs(tool.parameter.sensitivity) *
         (tool.parameter.target.step ?? 0.1),
     );
-    if (document.activeElement !== edgeSelectionParameter) {
+    if (forceParameter || document.activeElement !== edgeSelectionParameter) {
       edgeSelectionParameter.value = formatDisplayNumber(
         tool.parameterValue ?? tool.parameter.value,
       );
@@ -1316,8 +1360,22 @@ function commitEdgeOperationChange(
       `viewport.edge-operation:${tool.targetId}:${tool.evaluationIndex}`,
     ),
     intent,
+    {formatSource: false, undoGroup: tool.session.undoGroup},
   );
-  if (!committed) dismissEdgeSelectionTool();
+  if (committed) {
+    if (intent.kind === 'edge-operation.set') {
+      if (intent.edges) {
+        tool.session.appliedEdgeIds = [...tool.selectedEdgeIds];
+      }
+      if (intent.parameter) {
+        tool.session.appliedParameterValue = tool.parameterValue;
+      }
+    }
+    tool.session.hasEdits = true;
+    tool.session.historyState = 'applied';
+  } else {
+    finishEdgeSelectionTool();
+  }
 }
 
 function dismissEdgeSelectionTool(updateViewport = true): boolean {
@@ -1326,6 +1384,96 @@ function dismissEdgeSelectionTool(updateViewport = true): boolean {
   if (updateViewport) viewport.endEdgeSelection();
   edgeSelectionToolbar.hidden = true;
   return true;
+}
+
+function finishEdgeSelectionTool(): boolean {
+  const dismissed = dismissEdgeSelectionTool();
+  const session = edgeEditSession;
+  if (!session) return dismissed;
+  finishEdgeEditSession(session);
+  return true;
+}
+
+function finishEdgeEditSession(session: EdgeEditSession): void {
+  if (edgeEditSession === session) edgeEditSession = undefined;
+  if (!session.hasEdits || session.historyState === 'undone') {
+    codeEditor.endSourceEditGroup(session.undoGroup);
+    return;
+  }
+  queueMicrotask(() => {
+    if (edgeEditSession?.sourceFile === session.sourceFile) {
+      codeEditor.endSourceEditGroup(session.undoGroup);
+      return;
+    }
+    void codeEditor
+      .format(session.sourceFile, {
+        origin: 'tool',
+        undoGroup: session.undoGroup,
+      })
+      .catch(error =>
+        console.error('Prettier failed after an edge tool edit.', error),
+      )
+      .finally(() => codeEditor.endSourceEditGroup(session.undoGroup));
+  });
+}
+
+function abandonEdgeSelectionTool(): boolean {
+  const dismissed = dismissEdgeSelectionTool();
+  const session = edgeEditSession;
+  if (!session) return dismissed;
+  edgeEditSession = undefined;
+  codeEditor.endSourceEditGroup(session.undoGroup);
+  return true;
+}
+
+function handleEdgeEditingHistory(
+  change: Extract<ProjectEditorChange, Readonly<{kind: 'content'}>>,
+): boolean {
+  const session = edgeEditSession;
+  if (!session || change.path !== session.sourceFile) return false;
+  if (
+    change.origin === 'undo' &&
+    session.hasEdits &&
+    session.historyState === 'applied'
+  ) {
+    session.historyState = 'undone';
+    applyEdgeEditSessionToTool(session);
+    return true;
+  }
+  if (
+    change.origin === 'redo' &&
+    session.hasEdits &&
+    session.historyState === 'undone'
+  ) {
+    session.historyState = 'applied';
+    codeEditor.resumeSourceEditGroup(session.sourceFile, session.undoGroup);
+    applyEdgeEditSessionToTool(session);
+    return true;
+  }
+  return false;
+}
+
+function applyEdgeEditSessionToTool(session: EdgeEditSession): void {
+  const tool = edgeSelectionTool;
+  if (!tool || tool.session !== session) return;
+  tool.selectedEdgeIds = edgeSessionEdgeIds(session);
+  tool.parameterValue = edgeSessionParameterValue(session);
+  viewport.setSelectedEdges(tool.selectedEdgeIds);
+  updateEdgeSelectionToolbar(tool, true);
+}
+
+function edgeSessionEdgeIds(session: EdgeEditSession): readonly EdgeId[] {
+  return session.historyState === 'applied'
+    ? session.appliedEdgeIds
+    : session.baselineEdgeIds;
+}
+
+function edgeSessionParameterValue(
+  session: EdgeEditSession,
+): number | undefined {
+  return session.historyState === 'applied'
+    ? session.appliedParameterValue
+    : session.baselineParameterValue;
 }
 
 function edgeSelectionIntent(tool: EdgeSelectionTool): ToolIntent {
@@ -1541,10 +1689,14 @@ function clearToolPreview(
   }
 }
 
-function commitToolSession(session: ToolSession, intent: ToolIntent): boolean {
+function commitToolSession(
+  session: ToolSession,
+  intent: ToolIntent,
+  options: ToolCommitOptions = {},
+): boolean {
   const compiledSourceVersion = currentModuleSourceVersion;
   currentModuleSourceVersion = undefined;
-  const result = session.commit(intent);
+  const result = session.commit(intent, options);
   if (result.status !== 'committed') {
     currentModuleSourceVersion = compiledSourceVersion;
     showToolIssue(result.reason);

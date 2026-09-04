@@ -118,6 +118,11 @@ export type ToolCommitResult =
   | Readonly<{status: 'committed'; plan: ToolEditPlan}>
   | Exclude<ToolResolution, Readonly<{status: 'ready'; plan: ToolEditPlan}>>;
 
+export type ToolCommitOptions = Readonly<{
+  formatSource?: boolean;
+  undoGroup?: string;
+}>;
+
 export interface ToolHost {
   sourceVersion(): number;
   resolveSourceRef(sourceRef: SourceRef): SourceRef | undefined;
@@ -125,6 +130,7 @@ export interface ToolHost {
   applySourceEdits(
     baseVersion: number,
     edits: readonly SourceTextEdit[],
+    options: ToolCommitOptions,
   ): boolean;
   applyPreview(preview: ToolPreview): void;
   commitPreview(preview: ToolPreview): void;
@@ -209,7 +215,10 @@ export class ToolSession {
     return resolution;
   }
 
-  commit(intent = this.lastIntent): ToolCommitResult {
+  commit(
+    intent = this.lastIntent,
+    options: ToolCommitOptions = {},
+  ): ToolCommitResult {
     if (this.closed || !intent) {
       return {
         status: 'conflict',
@@ -226,6 +235,7 @@ export class ToolSession {
       !this.engine.host.applySourceEdits(
         resolution.plan.baseVersion,
         resolution.plan.edits,
+        options,
       )
     ) {
       this.clearActivePreview('end');

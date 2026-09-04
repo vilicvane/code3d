@@ -38,7 +38,7 @@ export type ProjectEditorChange =
       kind: 'content';
       path: string;
       source: string;
-      origin: 'user' | 'tool';
+      origin: ContentChangeOrigin;
     }>
   | Readonly<{kind: 'create'; path: string; source: string}>
   | Readonly<{kind: 'rename'; from: string; to: string}>
@@ -63,6 +63,18 @@ type ProjectDocument = {
   viewState?: monaco.editor.ICodeEditorViewState | null;
   subscription: monaco.IDisposable;
 };
+
+type ContentChangeOrigin = 'user' | 'tool' | 'undo' | 'redo';
+
+type SourceEditOptions = Readonly<{
+  formatSource?: boolean;
+  undoGroup?: string;
+}>;
+
+type FormatOptions = Readonly<{
+  origin?: 'user' | 'tool';
+  undoGroup?: string;
+}>;
 
 type TypeScriptCompletionEntry = Readonly<{
   name: string;
@@ -221,6 +233,7 @@ export class CodeEditor {
   >();
   private completionFocusVersion = 0;
   private contentChangeOrigin: 'user' | 'tool' = 'user';
+  private readonly sourceEditUndoGroups = new Map<string, string>();
   private readonly sourceDecoration: monaco.editor.IEditorDecorationsCollection;
   private activePath: string;
   private revision = 1;
@@ -259,8 +272,17 @@ export class CodeEditor {
       tabSize: 2,
     });
     this.sourceDecoration = this.editor.createDecorationsCollection();
-    this.editor.onDidChangeCursorSelection(({selection}) => {
-      if (this.suppressCursorEvent) return;
+    this.editor.onDidChangeCursorSelection(({selection, reason}) => {
+      // History and marker recovery move Monaco's cursor without the user
+      // leaving the source target currently being edited by a viewport tool.
+      if (
+        this.suppressCursorEvent ||
+        reason === monaco.editor.CursorChangeReason.RecoverFromMarkers ||
+        reason === monaco.editor.CursorChangeReason.Undo ||
+        reason === monaco.editor.CursorChangeReason.Redo
+      ) {
+        return;
+      }
       this.sourceDecoration.clear();
       this.emitCursorPosition(selection.getPosition());
     });
@@ -485,6 +507,7 @@ export class CodeEditor {
   applySourceEdits(
     baseVersion: number,
     edits: readonly SourceTextEdit[],
+    options: SourceEditOptions = {},
   ): boolean {
     if (this.revision !== baseVersion || edits.length === 0) return false;
     const grouped = groupEditsByFile(edits);
@@ -496,9 +519,8 @@ export class CodeEditor {
       this.withContentChangeOrigin('tool', () => {
         for (const [path, fileEdits] of grouped) {
           const model = this.requireDocument(path).model;
-          model.pushStackElement();
-          model.pushEditOperations(
-            [],
+          this.pushSourceEdits(
+            path,
             [...fileEdits]
               .sort(
                 (left, right) => right.sourceRef.start - left.sourceRef.start,
@@ -508,22 +530,41 @@ export class CodeEditor {
                 text: edit.text,
                 forceMoveMarkers: true,
               })),
-            () => null,
+            options.undoGroup,
           );
-          model.pushStackElement();
         }
       }),
     );
-    void Promise.all(
-      [...grouped.keys()].map(path => this.formatFile(path, 'tool')),
-    ).catch(error =>
-      console.error('Prettier failed after a Code3D source edit.', error),
-    );
+    if (options.formatSource !== false) {
+      void Promise.all(
+        [...grouped.keys()].map(path =>
+          this.formatFile(path, {origin: 'tool'}),
+        ),
+      ).catch(error =>
+        console.error('Prettier failed after a Code3D source edit.', error),
+      );
+    }
     return true;
   }
 
-  async format(): Promise<boolean> {
-    return this.formatFile(this.activePath);
+  async format(
+    path = this.activePath,
+    options: FormatOptions = {},
+  ): Promise<boolean> {
+    return this.formatFile(path, options);
+  }
+
+  resumeSourceEditGroup(path: string, undoGroup: string): void {
+    const normalized = normalizeProjectPath(path);
+    if (this.documents.has(normalized)) {
+      this.sourceEditUndoGroups.set(normalized, undoGroup);
+    }
+  }
+
+  endSourceEditGroup(undoGroup: string): void {
+    for (const [path, activeGroup] of this.sourceEditUndoGroups) {
+      if (activeGroup === undoGroup) this.sourceEditUndoGroups.delete(path);
+    }
   }
 
   sourceEditExcerpts(edits: readonly SourceTextEdit[]): SourceEditExcerpt[] {
@@ -756,6 +797,12 @@ export class CodeEditor {
       path: normalized,
       model,
       subscription: model.onDidChangeContent(event => {
+        const origin: ContentChangeOrigin = event.isUndoing
+          ? 'undo'
+          : event.isRedoing
+            ? 'redo'
+            : this.contentChangeOrigin;
+        if (origin !== 'tool') this.sourceEditUndoGroups.delete(normalized);
         this.rebaseTrackedSourceRefs(normalized, event.changes);
         this.refreshAnnotationDecorations(normalized, model);
         this.revision += 1;
@@ -763,7 +810,7 @@ export class CodeEditor {
           kind: 'content',
           path: normalized,
           source: model.getValue(),
-          origin: this.contentChangeOrigin,
+          origin,
         });
       }),
     };
@@ -874,7 +921,7 @@ export class CodeEditor {
 
   private async formatFile(
     path: string,
-    origin: 'user' | 'tool' = 'user',
+    options: FormatOptions = {},
   ): Promise<boolean> {
     const document = this.requireDocument(path);
     const {model} = document;
@@ -887,11 +934,10 @@ export class CodeEditor {
     if (model.getVersionId() !== version || result.formatted === source) {
       return model.getVersionId() === version;
     }
-    this.withContentChangeOrigin(origin, () =>
+    this.withContentChangeOrigin(options.origin ?? 'user', () =>
       this.withSuppressedCursorEvents(() => {
-        model.pushStackElement();
-        model.pushEditOperations(
-          [],
+        this.pushSourceEdits(
+          path,
           [
             {
               range: model.getFullModelRange(),
@@ -899,11 +945,10 @@ export class CodeEditor {
               forceMoveMarkers: true,
             },
           ],
-          () => null,
+          options.undoGroup,
         );
         if (active)
           this.editor.setPosition(model.getPositionAt(result.cursorOffset));
-        model.pushStackElement();
       }),
     );
     return true;
@@ -919,6 +964,30 @@ export class CodeEditor {
       return action();
     } finally {
       this.contentChangeOrigin = previous;
+    }
+  }
+
+  private pushSourceEdits(
+    path: string,
+    edits: readonly monaco.editor.IIdentifiedSingleEditOperation[],
+    undoGroup?: string,
+  ): void {
+    const model = this.requireDocument(path).model;
+    if (
+      undoGroup &&
+      this.sourceEditUndoGroups.get(path) === undoGroup &&
+      model.canUndo()
+    ) {
+      model.popStackElement();
+    } else {
+      model.pushStackElement();
+    }
+    model.pushEditOperations([], [...edits], () => null);
+    model.pushStackElement();
+    if (undoGroup) {
+      this.sourceEditUndoGroups.set(path, undoGroup);
+    } else {
+      this.sourceEditUndoGroups.delete(path);
     }
   }
 
