@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {test} from 'node:test';
 import * as authoring from '../bld/library/index.js';
+import * as replicadInterop from '../bld/library/replicad.js';
 import {authoringApi} from '../bld/tooling/index.js';
 
 const authoringValues = [
@@ -9,12 +10,12 @@ const authoringValues = [
   'bezier',
   'box',
   'circle',
+  'coil',
   'cut',
   'cylinder',
   'ellipse',
   'frustum',
   'group',
-  'helicalThread',
   'intersect',
   'line',
   'loft',
@@ -24,6 +25,7 @@ const authoringValues = [
   'regularPrism',
   'sphere',
   'spline',
+  'tube',
   'union',
 ].sort();
 
@@ -32,11 +34,25 @@ test('exports exactly the authoring value whitelist', () => {
   assert.deepEqual(Object.keys(authoringApi).sort(), authoringValues);
 });
 
-test('exposes only the root and tooling package entries', async () => {
+test('keeps Replicad behind its explicit author interop entry', () => {
+  assert.deepEqual(Object.keys(replicadInterop).sort(), [
+    'definePrimitive',
+    'replicad',
+  ]);
+  assert.equal('getOC' in replicadInterop.replicad, false);
+  assert.equal('setOC' in replicadInterop.replicad, false);
+  assert.equal(Object.isFrozen(replicadInterop.replicad), true);
+});
+
+test('exposes only the root, Replicad, and tooling package entries', async () => {
   const packageJson = JSON.parse(
     await readFile(new URL('../package.json', import.meta.url), 'utf8'),
   );
-  assert.deepEqual(Object.keys(packageJson.exports).sort(), ['.', './tooling']);
+  assert.deepEqual(Object.keys(packageJson.exports).sort(), [
+    '.',
+    './replicad',
+    './tooling',
+  ]);
 });
 
 test('keeps the concrete model class out of the root declaration', async () => {

@@ -1,4 +1,5 @@
 import booleanOperationsSource from '../../examples/boolean-operations.ts?raw';
+import customPrimitivesSource from '../../examples/custom-primitives.ts?raw';
 import designArgumentsSource from '../../examples/design-arguments.ts?raw';
 import fastenersSource from '../../examples/fasteners.ts?raw';
 import examplesIndexSource from '../../examples/index.ts?raw';
@@ -15,6 +16,7 @@ const websiteSources = import.meta.glob<string>('../../examples/website/*.ts', {
 const files = [
   {path: '/examples/index.ts', source: examplesIndexSource},
   {path: '/examples/primitives.ts', source: primitivesSource},
+  {path: '/examples/custom-primitives.ts', source: customPrimitivesSource},
   {
     path: '/examples/boolean-operations.ts',
     source: booleanOperationsSource,

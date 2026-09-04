@@ -4,7 +4,8 @@
 
 ## 已确认
 
-- 公开包采用显式最小白名单；不确定的 API 默认不公开。
+- 公开包采用显式白名单；不确定的 API 默认不公开。core 可以提供常用、定义
+  清楚的便捷几何原语，不因可组合实现或 UI 入口数量的顾虑刻意排除。
 - 坐标系保持 Y-up。primitive 尺寸参数按轴命名为 `x`、`y`、`z`；
   需要消歧义时使用 `sizeX` 等名称。
 - `@code3d/core` root 只面向作者建模；Studio 能力放在
@@ -12,12 +13,37 @@
 - core root 不导出 `ModelObject` 类值或类型；`Constraint` 仅作 type-only
   export。runtime identity、trace、snapshot、资源释放和 kind discriminators
   已从 root 收起。
-- package entries 仅保留 `.` 与 `./tooling`。
+- package entries 为 `.`、`./tooling` 与 `./replicad`。
+- `definePrimitive(build)` 位于 `@code3d/core/replicad`，同步 builder 直接
+  返回 Replicad shape，由 core 接管并转成 `SolidModel`；中间资源由 builder
+  管理。没有定义选项、显式 adopt 或隐式 scope。
+- `helicalThread` 从 core root 收起，作为 screws 私有原语消费上述入口。
+- core 提供 `tube(outerRadius, innerRadius, y)`：同轴、等截面、两端贯通，
+  沿 Y 轴且居中，与 `cylinder` 一致。尺寸均为有限正数，内半径小于外半径。
+  不提供壁厚重载、锥管或路径管选项；实心圆柱使用 `cylinder`。
+- core 提供 `coil(coilRadius, wireRadius, pitch, turns)`：圆截面、固定螺距、
+  右手螺旋、沿 Y 轴，圈数允许正小数。半径量到线材中心线，中心线高度区间
+  关于原点对称；端部截面会超出该区间。部分圈的 axis 仍在 Y 轴上。
+  不将弹簧端部处理、力学参数或标准规格带入 core。
+- `primitives.ts` 直接消费 `tube` / `coil`，只放一个 coil；不保留单独的
+  `coils.ts` 或示例内同质的 `helicalSpring` 定义。
+  同时必须保留独立、可运行的 `custom-primitives.ts`：用带 D 形轴孔的扭纹
+  旋钮展示 `definePrimitive`、Replicad 和直接参数注释。screws 的私有
+  `helicalThread` 不能代替面向用户的自定义示例；也不为保留示例人为缩小 core。
+- 调研依据：[FreeCAD BasicShapes](https://github.com/FreeCAD/FreeCAD/blob/main/src/Mod/Part/BasicShapes/Shapes.py)
+  与 [Rhino Tube](https://docs.mcneel.com/rhino/8/help/en-us/commands/tube.htm)
+  均直接提供基础直圆管；[Fusion](https://help.autodesk.com/cloudhelp/ENU/Fusion-Model/files/SLD-CREATE-SOLID-PRIMITIVE.htm)
+  把 Coil 列为实体原语。可由其他原语组合不构成排除依据。
+- `@code3d.param` 直接标注公开函数变量，支持调用点 panel 和包声明文件；
+  不为 primitive factory 扩展 `@code3d.arguments`。
+- 公共 API 的职责或签名发生设计调整时，先明确说明改动、需求依据和代价。
 
 ## 待讨论
 
-- [ ] `helicalThread` 是否属于通用 core primitive；目前因
-      `@code3d/screws` 的真实依赖暂时保留。
+- [ ] Replicad 互操作层长期稳定性与用户自行安装的 Replicad 如何接入。
+- [ ] `definePrimitive` 可选参数的默认值展示：省略 `twistKnob` 的 `twist` 时，
+      builder 正常使用 `60`，panel 识别可选字段但显示空项；是否以及如何呈现默认值
+      待讨论，不先为此增加 factory 选项。
 - [ ] `kind`、`name`、`color`、`children` 是否应成为作者可读属性。
 - [ ] `withChildren()` 是否需要成为正式的 immutable group API。
 - [ ] 是否需要公开 `ElementKind`、`ModelKind`、`TopologyKind` 等判别类型。
@@ -77,3 +103,12 @@
 
 - core root 第一版白名单已集成。
 - Model 能力分层已实现并通过 core、packages、app 的类型与构建验证。
+- `definePrimitive(build)` 已按确认的单函数签名实现，螺纹和 examples 已迁移。
+  builder 每次调用执行，返回模型采用独立几何身份及统一网格精度；后续几何
+  运算和渲染仍走缓存。变量注释已接入 tool panel，包含发布声明与别名调用。
+- `tube` / `coil` 已加入 core 白名单和 `examples/primitives.ts`；coil 仅保留
+  一个实例，已移除独立的螺旋弹簧示例入口。
+- `examples/custom-primitives.ts` 独立展示 `twistKnob` 的定义、默认参数和普通
+  调用预览，不依赖 `@code3d.arguments` 或外层包装。
+- 管状实体回归同时修复曲面锚点：不再将可能离开曲面的面积质心投影求法线；
+  位置保留质心，法线取曲面 UV 参数域中点。原有圆柱、球体一并覆盖。

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
 import {fileURLToPath} from 'node:url';
 import {createServer} from 'vite';
+import ts from '@typescript/typescript6';
 
 const appRoot = fileURLToPath(new URL('..', import.meta.url));
 let server;
@@ -13,7 +14,7 @@ before(async () => {
     root: appRoot,
     appType: 'custom',
     logLevel: 'error',
-    server: {middlewareMode: true},
+    server: {middlewareMode: true, hmr: false},
   });
   ({resolveProjectTooling, sourceNodeKey} = await server.ssrLoadModule(
     '/src/model/tool-schema.ts',
@@ -152,6 +153,20 @@ test('preserves parameter metadata at the resolved definition', () => {
   );
 });
 
+test('keeps coil turn counts fractional in the tool panel', () => {
+  const source = 'import {coil} from "@code3d/core"; coil(5, 0.75, 4, 0.25);';
+  const calls = resolveProjectTooling({
+    files: [{path: 'model.ts', source}],
+  }).toolCalls.get('/model.ts');
+  const schema = toolSchemaAt(calls, source, 'coil(5, 0.75, 4, 0.25)');
+  assert.deepEqual(
+    schema.parameters.map(parameter => parameter.name),
+    ['coilRadius', 'wireRadius', 'pitch', 'turns'],
+  );
+  assert.equal(schema.parameters[3].kind, 'scalar');
+  assert.deepEqual(schema.parameters[3].constraints, {exclusiveMin: 0});
+});
+
 test('resolves tool schemas from layered model capabilities', () => {
   const source = [
     'import {box, circle} from "@code3d/core";',
@@ -209,6 +224,160 @@ test('resolves tool schemas from layered model capabilities', () => {
     'surface',
   );
 });
+
+const primitiveSource = [
+  'import {definePrimitive, replicad} from "@code3d/core/replicad";',
+  '/**',
+  ' * @code3d.param radius {kind: "length", label: "Outer radius"}',
+  ' * @code3d.param y {kind: "length", constraints: {exclusiveMin: 0}}',
+  ' */',
+  'export const sleeve = definePrimitive((radius: number, y = 4) =>',
+  '  replicad.makeCylinder(radius, y),',
+  ');',
+].join('\n');
+
+test('keeps an unannotated resolved overload separate from its annotated peers', () => {
+  const source = [
+    'import {ISO4762} from "@code3d/screws";',
+    'ISO4762.clearanceHole("M6", 10);',
+    'ISO4762.clearanceHole("M6", {depth: 10});',
+  ].join('\n');
+  const calls = resolveProjectTooling({
+    files: [{path: 'model.ts', source}],
+  }).toolCalls.get('/model.ts');
+  assert.equal(
+    toolSchemaAt(calls, source, 'ISO4762.clearanceHole("M6", 10)')
+      ?.parameters[0].name,
+    'depth',
+  );
+  assert.equal(
+    toolSchemaAt(calls, source, 'ISO4762.clearanceHole("M6", {depth: 10})'),
+    undefined,
+  );
+});
+
+for (const declarationOnly of [false, true]) {
+  test(`reads primitive annotations through imports and aliases from ${declarationOnly ? 'emitted declarations' : 'source'}`, () => {
+    const source = [
+      'import {sleeve as imported} from "./bridge";',
+      'import * as library from "./library.js";',
+      'const renamed = imported;',
+      'const radius = 6;',
+      'renamed(radius);',
+      'library.sleeve(8, 12);',
+    ].join('\n');
+    const index = resolveProjectTooling({
+      files: [
+        {
+          path: declarationOnly ? 'library.d.ts' : 'library.ts',
+          source: declarationOnly
+            ? emitPrimitiveDeclaration(primitiveSource)
+            : primitiveSource,
+        },
+        {path: 'bridge.ts', source: 'export {sleeve} from "./library.js";'},
+        {path: 'model.ts', source},
+      ],
+    });
+    const calls = index.toolCalls.get('/model.ts');
+    const schema = toolSchemaAt(calls, source, 'renamed(radius)');
+    assert.equal(schema?.name, 'sleeve');
+    assert.deepEqual(
+      schema?.parameters.map(({name, index, optional, label}) => ({
+        name,
+        index,
+        optional,
+        label,
+      })),
+      [
+        {name: 'radius', index: 0, optional: false, label: 'Outer radius'},
+        {name: 'y', index: 1, optional: true, label: 'Y'},
+      ],
+    );
+    assert.deepEqual(
+      toolSchemaAt(calls, source, 'library.sleeve(8, 12)')?.parameters,
+      schema.parameters,
+    );
+    assertTarget(
+      index.parameterDefinitions.get('/model.ts'),
+      source,
+      'radius',
+      source,
+      '6',
+      'renamed(radius)',
+    );
+  });
+}
+
+test('does not share annotations between callable variables with the same type', () => {
+  const source = [
+    'import {definePrimitive, replicad} from "@code3d/core/replicad";',
+    'const builder = (radius: number) => replicad.makeCylinder(radius, 4);',
+    '/** @code3d.param radius {kind: "length", label: "First radius"} */',
+    'const first = definePrimitive(builder);',
+    '/** @code3d.param radius {kind: "length", label: "Second radius"} */',
+    'const second = definePrimitive(builder);',
+    'first(2);',
+    'second(3);',
+  ].join('\n');
+  const calls = resolveProjectTooling({
+    files: [{path: 'model.ts', source}],
+  }).toolCalls.get('/model.ts');
+  assert.equal(
+    toolSchemaAt(calls, source, 'first(2)')?.parameters[0].label,
+    'First radius',
+  );
+  assert.equal(
+    toolSchemaAt(calls, source, 'second(3)')?.parameters[0].label,
+    'Second radius',
+  );
+});
+
+test('reports annotations naming a parameter missing from the returned signature', () => {
+  const source =
+    primitiveSource.replace('@code3d.param radius', '@code3d.param missing') +
+    '\nsleeve(2);';
+  assert.throws(
+    () => resolveProjectTooling({files: [{path: 'model.ts', source}]}),
+    /unknown parameter: missing/,
+  );
+});
+
+function emitPrimitiveDeclaration(source) {
+  const fileName = fileURLToPath(
+    new URL('./primitive-fixture.ts', import.meta.url),
+  );
+  const options = {
+    target: ts.ScriptTarget.ES2022,
+    module: ts.ModuleKind.NodeNext,
+    moduleResolution: ts.ModuleResolutionKind.NodeNext,
+    strict: true,
+    skipLibCheck: true,
+    declaration: true,
+    emitDeclarationOnly: true,
+    types: [],
+  };
+  const host = ts.createCompilerHost(options);
+  const getSourceFile = host.getSourceFile.bind(host);
+  host.getSourceFile = (path, ...args) =>
+    path === fileName
+      ? ts.createSourceFile(path, source, options.target, true)
+      : getSourceFile(path, ...args);
+  const program = ts.createProgram([fileName], options, host);
+  assert.deepEqual(
+    ts
+      .getPreEmitDiagnostics(program)
+      .map(diagnostic =>
+        ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'),
+      ),
+    [],
+  );
+  let declaration;
+  program.emit(undefined, (path, text) => {
+    if (path.endsWith('primitive-fixture.d.ts')) declaration = text;
+  });
+  assert.ok(declaration?.includes('@code3d.param radius'));
+  return declaration;
+}
 
 function indexDefinitions(files) {
   return resolveProjectTooling({files}).parameterDefinitions.get('/model.ts');

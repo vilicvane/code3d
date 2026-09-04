@@ -1,10 +1,12 @@
 import {
   box,
+  coil,
   cylinder,
   frustum,
   group,
   regularPrism,
   sphere,
+  tube,
 } from '@code3d/core';
 
 const accent = '#d8ff3e';
@@ -22,7 +24,7 @@ const neutral = '#353a33';
  */
 const baseWidth = 36;
 
-const base = box(baseWidth, 4, 24).fillet(1).paint(neutral);
+const base = box(baseWidth, 4, 34).fillet(1).paint(neutral);
 
 const column = cylinder(4, 14)
   .relate(part => part.bottom.on(base.top).offset(-10, 0, 0))
@@ -36,12 +38,20 @@ const prism = regularPrism(4.5, 6, 6, 30)
   .relate(part => part.bottom.on(taperedColumn.top))
   .paint(accent);
 
+const collar = tube(5.5, 4.5, 4)
+  .relate(part => part.bottom.on(base.top).offset(-10, 0, 0))
+  .paint(secondary);
+
 const scaledSphere = sphere(5)
   .scaled(0.8)
   .relate(part => part.center.on(base.top).offset(0, 4, 0))
   .paint(secondary);
 
+const winding = coil(5, 0.75, 4, 2.5)
+  .relate(part => part.bottom.on(base.top).offset(0, 0, 10))
+  .paint(accent);
+
 export const primitivesExample = group(
-  [base, column, taperedColumn, prism, scaledSphere],
+  [base, column, collar, taperedColumn, prism, scaledSphere, winding],
   'Primitive operations',
 );

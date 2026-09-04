@@ -5,6 +5,7 @@ import {createServer} from 'vite';
 
 const appRoot = fileURLToPath(new URL('..', import.meta.url));
 let compileProject;
+let bundledExamples;
 let server;
 
 before(async () => {
@@ -15,6 +16,9 @@ before(async () => {
     server: {middlewareMode: true, hmr: false},
   });
   ({compileProject} = await server.ssrLoadModule('/src/model/compiler.ts'));
+  ({bundledExamples} = await server.ssrLoadModule(
+    '/src/project/bundled-examples.ts',
+  ));
 });
 
 after(async () => {
@@ -129,6 +133,130 @@ test('retains shared-parameter peers in a group input context', () => {
         ?.parameters.some(parameter => parameter.target.id === spacingTargetId),
     ),
   );
+});
+
+test('evaluates a user-defined Replicad primitive', () => {
+  const source = [
+    'import {definePrimitive, replicad} from "@code3d/core/replicad";',
+    '/** @code3d.param radius {kind: "length"} */',
+    'const cylinder = definePrimitive((radius: number) =>',
+    '  replicad.makeCylinder(radius, 4),',
+    ');',
+    'export const model = cylinder(2);',
+  ].join('\n');
+  const module = compileProject(
+    {files: [{path: 'model.ts', source}]},
+    'model.ts',
+  );
+
+  assert.equal(module.diagnostic, undefined);
+  const modelId = module.exports.get('model');
+  assert.ok(modelId);
+  assert.equal(module.objects.get(modelId)?.operation.kind, 'primitive');
+  assert.ok(
+    exactTargets(module, source, 'cylinder(2)').some(
+      target => target.kind === 'operation-output',
+    ),
+  );
+  const output = exactTargets(module, source, 'cylinder(2)').find(
+    target => target.kind === 'operation-output',
+  );
+  assert.equal(output.evaluations[0].parameters[0]?.argument, 'radius');
+});
+
+test('compiles the standalone custom primitive example with direct annotations and a default argument', () => {
+  const rootPath = '/examples/custom-primitives.ts';
+  const module = compileProject({files: bundledExamples.files}, rootPath);
+  assert.equal(module.diagnostic, undefined);
+  assert.ok(module.exports.has('customPrimitivesExample'));
+  const source = bundledExamples.files.find(
+    file => file.path === rootPath,
+  ).source;
+
+  for (const [call, arguments_] of [
+    ['twistKnob(10, 3, 14)', ['radius', 'shaftRadius', 'y']],
+    ['twistKnob(10, 3, 8, 30)', ['radius', 'shaftRadius', 'y', 'twist']],
+  ]) {
+    const start = source.indexOf(call);
+    assert.notEqual(start, -1);
+    const target = module.sourceTargets.find(
+      target =>
+        target.kind === 'operation-output' &&
+        target.sourceRef.file === rootPath &&
+        target.sourceRef.start === start,
+    );
+    assert.ok(target);
+    const evaluation = target.evaluations[0];
+    assert.deepEqual(
+      evaluation.parameters.map(parameter => parameter.argument),
+      arguments_,
+    );
+    assert.deepEqual(
+      evaluation.parameters.map(parameter => parameter.target.kind),
+      arguments_.map(argument => (argument === 'twist' ? 'angle' : 'length')),
+    );
+    assert.equal(
+      evaluation.parameters.find(parameter => parameter.argument === 'twist')
+        ?.value,
+      arguments_.includes('twist') ? 30 : undefined,
+    );
+    const model = module.objects.get(evaluation.nodeIds[0]);
+    assert.equal(model.operation.kind, 'primitive');
+    assert.ok(model.mesh.triangles.length > 0);
+  }
+});
+
+test('compiles one coil in the bundled primitives showcase without a separate coil example', () => {
+  const rootPath = '/examples/primitives.ts';
+  const module = compileProject({files: bundledExamples.files}, rootPath);
+  assert.equal(module.diagnostic, undefined);
+  assert.ok(module.exports.has('primitivesExample'));
+  assert.ok(
+    !bundledExamples.files.some(file => file.path === '/examples/coils.ts'),
+  );
+  const source = bundledExamples.files.find(
+    file => file.path === rootPath,
+  ).source;
+  assert.equal([...source.matchAll(/\bcoil\(/g)].length, 1);
+  const start = source.indexOf('coil(5, 0.75, 4, 2.5)');
+  assert.notEqual(start, -1);
+  const target = module.sourceTargets.find(
+    target =>
+      target.kind === 'operation-output' &&
+      target.sourceRef.file === rootPath &&
+      target.sourceRef.start === start,
+  );
+  assert.deepEqual(
+    target?.evaluations[0].parameters.map(parameter => parameter.argument),
+    ['coilRadius', 'wireRadius', 'pitch', 'turns'],
+  );
+  const model = module.objects.get(target.evaluations[0].nodeIds[0]);
+  assert.equal(model.operation.kind, 'coil');
+  assert.ok(model.mesh.triangles.length > 0);
+});
+
+test('compiles the core tube example with its own operation and editable dimensions', () => {
+  const rootPath = '/examples/primitives.ts';
+  const module = compileProject({files: bundledExamples.files}, rootPath);
+  assert.equal(module.diagnostic, undefined);
+  const source = bundledExamples.files.find(
+    file => file.path === rootPath,
+  ).source;
+  const start = source.indexOf('tube(5.5, 4.5, 4)');
+  assert.notEqual(start, -1);
+  const target = module.sourceTargets.find(
+    target =>
+      target.kind === 'operation-output' &&
+      target.sourceRef.file === rootPath &&
+      target.sourceRef.start === start,
+  );
+  assert.deepEqual(
+    target?.evaluations[0].parameters.map(parameter => parameter.argument),
+    ['outerRadius', 'innerRadius', 'y'],
+  );
+  const model = module.objects.get(target.evaluations[0].nodeIds[0]);
+  assert.equal(model.operation.kind, 'tube');
+  assert.ok(model.mesh.triangles.length > 0);
 });
 
 function sharedOffsetSource() {

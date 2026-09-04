@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {box} from '../bld/node/index.js';
+import {box, cylinder, sphere} from '../bld/node/index.js';
 import {
   createModelSnapshotter,
   disposeModelObjects,
@@ -85,6 +85,33 @@ test('resolves plural topology references in authored order', () => {
     assert.throws(() => model.surfaces([7]), /Unknown or retired surface S7/);
   } finally {
     disposeModelObjects([model]);
+  }
+});
+
+test('resolves curved face anchors even when their centroids are off-surface', () => {
+  const models = [cylinder(6, 12), sphere(6)];
+  try {
+    for (const model of models) {
+      const surfaces = model.surfaces();
+      const expectedIds = model.geometry.value.topology.surfaces.ids;
+      assert.deepEqual(referenceIds(surfaces), expectedIds);
+      const exposed = model.expose(
+        Object.fromEntries(
+          surfaces.map(surface => [`surface${surface.id}`, surface]),
+        ),
+      );
+      const snapshot = createModelSnapshotter()(exposed);
+      for (const id of expectedIds) {
+        const element = snapshot.elements.find(
+          element => element.name === `surface${id}`,
+        );
+        assert.ok(element);
+        assert.ok(element.transform.position.every(Number.isFinite));
+        assert.ok(element.transform.quaternion.every(Number.isFinite));
+      }
+    }
+  } finally {
+    disposeModelObjects(models);
   }
 });
 

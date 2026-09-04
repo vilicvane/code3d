@@ -68,7 +68,8 @@ silently reorder the active milestones. Closed requests move to
   separate topology ledger. `model.vertex(id)`, `model.edge(id)`, and
   `model.surface(id)` return complete point, line, and face anchors: vertices
   use the owning model orientation, edges use their midpoint and tangent, and
-  surfaces use their center and normal. Their `vertices(ids?)`, `edges(ids?)`,
+  surfaces use their area centroid and a normal sampled at the surface's UV-domain
+  midpoint (the centroid need not lie on a curved surface). Their `vertices(ids?)`, `edges(ids?)`,
   and `surfaces(ids?)` counterparts return ordered arrays of the same anchors,
   defaulting to every current stable topology ID when the argument is omitted.
 - A composite is broad: any connected set of occurrences and spatial relations
@@ -83,6 +84,22 @@ silently reorder the active milestones. Closed requests move to
 ## Invariants
 
 - Public model values do not expose OpenCascade or Three.js details.
+- `@code3d/core/replicad` exposes `definePrimitive(build)`: a synchronous
+  builder returns a Replicad solid whose ownership transfers to a normal
+  `SolidModel`. Intermediate resources remain the builder's responsibility.
+  The factory takes no definition options and is not exported from core root.
+- Core provides `tube(outerRadius, innerRadius, y)` as a centered Y-axis,
+  constant-section straight tube with a through bore. It has no wall-thickness,
+  taper, or path options. Custom primitive examples demonstrate extensions
+  beyond built-in geometry, rather than reimplementing cylinders or tubes.
+- Core also provides `coil(coilRadius, wireRadius, pitch, turns)`: a right-handed
+  circular-section coil about Y with plain ends and fractional turns. Its
+  centerline Y interval is centered at the origin and its named axis remains
+  on Y even for partial turns. Spring specifications remain outside core.
+- Common, well-defined geometric conveniences may belong in core even when
+  composed from lower-level operations. A code API has lower discovery and
+  presentation costs than a GUI toolbar; minimizing entry count alone is not
+  the scope criterion. Example selection must follow this boundary, not define it.
 - Public topology IDs are deterministic model semantics, not OpenCascade hash
   codes or current edge-array positions. Boolean results inherit only from the
   ordered primary operand; every other contributed edge is new in that ID
@@ -470,6 +487,11 @@ relative transforms, topology sidecars, bounds, and render meshes. JavaScript
 and provenance are still evaluated afresh. Cache encoding, capacity, and a
 possible lifetime beyond one compiler worker remain adjustable implementation
 choices rather than product semantics.
+
+User-defined Replicad builders execute on every invocation because their
+closures may depend on state beyond their arguments. Each returned geometry
+receives a fresh artifact identity; operations and render queries on that model
+still use the common cache. Custom primitives use the standard mesh tolerance.
 
 ### 4d. Annotation-driven contextual tools — active
 

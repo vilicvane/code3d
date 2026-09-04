@@ -322,12 +322,18 @@ export function topologySurfaceDirections(
       const surface =
         surfaces[resolveTopologyIndex('surface', topology, surfaceId)];
       const center = surface.center;
-      const normal = surface.normalAt(center);
       try {
-        return {position: center.toTuple(), direction: normal.toTuple()};
+        // A curved face's centroid need not lie on its surface, and projecting
+        // it can be ambiguous (for example, a cylinder's center lies on its axis).
+        // Sample the normal at the UV-domain midpoint without a projection.
+        const normal = surface.normalAt();
+        try {
+          return {position: center.toTuple(), direction: normal.toTuple()};
+        } finally {
+          normal.delete();
+        }
       } finally {
         center.delete();
-        normal.delete();
       }
     });
   } finally {
