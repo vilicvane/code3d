@@ -6,6 +6,12 @@ import primitivesSource from '../../examples/primitives.ts?raw';
 import relationsAndElementsSource from '../../examples/relations-and-elements.ts?raw';
 import type {ProjectDirectoryTemplate, ProjectSourceFile} from './project';
 
+const websiteSources = import.meta.glob<string>('../../examples/website/*.ts', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+});
+
 const files = [
   {path: '/examples/index.ts', source: examplesIndexSource},
   {path: '/examples/primitives.ts', source: primitivesSource},
@@ -19,6 +25,10 @@ const files = [
   },
   {path: '/examples/design-arguments.ts', source: designArgumentsSource},
   {path: '/examples/fasteners.ts', source: fastenersSource},
+  ...Object.entries(websiteSources).map(([path, source]) => ({
+    path: '/examples/website/' + path.split('/').at(-1)!,
+    source,
+  })),
 ] satisfies readonly ProjectSourceFile[];
 
 export const bundledExamples = {

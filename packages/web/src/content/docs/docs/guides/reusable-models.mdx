@@ -1,0 +1,35 @@
+---
+title: Building reusable models
+description: Give a TypeScript model function a meaningful, typed interface.
+---
+
+import ModelExample from '../../../../components/ModelExample.astro';
+
+A reusable model is an ordinary function. Pass dimensions in, return a model
+value, and use `expose()` to name the elements that other parts should attach to.
+
+<ModelExample id="locating-pin" />
+
+## Name the interface
+
+The function exposes `mountingFace`, `tipFace`, and `centerline`.
+Callers receive these as typed elements: they can place the pin on the plate,
+or attach a cap to its tip, without knowing how the pin was constructed.
+
+The exposed references are rebound into the returned model's frame. They
+describe its public interface rather than leaking the placement of an internal
+construction object.
+
+## Keep composition separate
+
+The function defines the part's geometry and useful attachment points.
+Its caller supplies the relation to another part. This keeps the same pin
+useful in different assemblies.
+
+## Publish the function
+
+Move the function into its own TypeScript file and add `export`. Another file
+can then import it by its normal relative path. The runtime does not require
+a special model declaration wrapper.
+
+Use the editor's completion list to explore the names on the returned model.

@@ -1,0 +1,50 @@
+---
+import '@fontsource-variable/inter';
+import '@fontsource-variable/jetbrains-mono';
+import '../styles/site.css';
+import Header from '../components/Header.astro';
+import Footer from '../components/Footer.astro';
+import {sitePath, tagline} from '../lib/site';
+interface Props {
+  title?: string;
+  description?: string;
+}
+const {title, description = tagline} = Astro.props;
+const pageTitle = title
+  ? `${title} — Code3D`
+  : 'Code3D — Code and geometry, connected';
+const canonical = Astro.site
+  ? new URL(Astro.url.pathname, Astro.site).href
+  : undefined;
+const socialImage = new URL(sitePath('og-image.png'), Astro.site ?? Astro.url)
+  .href;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{pageTitle}</title>
+    <meta name="description" content={description} />
+    <meta name="theme-color" content="#11130f" />
+    <link rel="icon" type="image/svg+xml" href={sitePath('favicon.svg')} />
+    {canonical && <link rel="canonical" href={canonical} />}
+    {Astro.site && <link rel="sitemap" href={sitePath('sitemap-index.xml')} />}
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Code3D" />
+    <meta property="og:title" content={pageTitle} />
+    <meta property="og:description" content={description} />
+    {canonical && <meta property="og:url" content={canonical} />}
+    <meta property="og:image" content={socialImage} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <Header />
+    <main id="main"><slot /></main>
+    <Footer />
+  </body>
+</html>

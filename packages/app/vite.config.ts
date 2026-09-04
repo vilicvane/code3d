@@ -5,6 +5,7 @@ import {defineConfig} from 'vite';
 const packageDirectory = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
+  base: './',
   build: {
     rolldownOptions: {
       input: {

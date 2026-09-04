@@ -1,0 +1,57 @@
+---
+import {getEntry} from 'astro:content';
+import {Image} from 'astro:assets';
+import {modelImage} from '../lib/images';
+import {appUrl} from '../lib/site';
+import SourceCode from './SourceCode.astro';
+interface Props {
+  id: string;
+}
+const {id} = Astro.props;
+const example = await getEntry('examples', id);
+if (!example) throw new Error(`Unknown example: ${id}`);
+const {data} = example;
+---
+
+<figure class="model-example">
+  <Image
+    src={modelImage(id)}
+    alt={data.description}
+    widths={[640, 960, 1440]}
+    sizes="(max-width: 50rem) 100vw, 50rem"
+  />
+  <figcaption>
+    {data.description}
+    <a href={appUrl(data.file)} target="_blank" rel="noopener"
+      >Open in Code3D ↗</a
+    >
+  </figcaption>
+  <SourceCode source={data.source} file={data.file} />
+</figure>
+<style>
+  figure {
+    margin: 2rem 0;
+  }
+  img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border: 1px solid var(--sl-color-hairline, #30342a);
+    border-radius: 12px;
+    background: #171815;
+  }
+  figcaption {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    font-size: 0.875rem;
+    line-height: 1.65;
+    margin: 16px 0;
+  }
+  a {
+    white-space: nowrap;
+    color: var(--sl-color-text-accent, #d8ff3e);
+  }
+</style>

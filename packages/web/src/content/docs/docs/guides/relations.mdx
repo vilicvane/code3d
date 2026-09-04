@@ -1,0 +1,45 @@
+---
+title: Positioning with relations
+description: Compose parts by connecting named faces and frames.
+---
+
+import ModelExample from '../../../../components/ModelExample.astro';
+
+A relation describes how one part sits against another. It is attached to a
+model value and resolved when the parts are composed.
+
+<ModelExample id="first-model" />
+
+## Connect two faces
+
+In the example, `part.bottom.on(base.top)` connects two complete frames.
+By default, `on()` gives them opposing orientations, as if two mating faces
+were touching. Use `.flip()` when they should share the other orientation.
+
+`offset(x, y, z)` applies an offset in the **target anchor's frame**, not
+necessarily the global coordinate system. This lets placement follow the part
+it is attached to.
+
+## Inspect the right scope
+
+The related post on its own still displays in its local frame. Select the
+`group` to see the post positioned against the base, or place the cursor in
+the relation to inspect both participants.
+
+The callback parameter in `relate(part => ...)` is the new related model
+value. Operations preserve the observable meaning of existing model values.
+
+## Group or fuse
+
+Use `group([base, post])` for separate parts. Use `union([base, post])`
+when you want a single fused solid. Boolean operations also resolve operand
+relations before evaluating geometry.
+
+## Make visual adjustments
+
+Enter an `offset` call in the source to use the position tool. Supported
+parameter changes write back to the defining source values. If a parameter
+is shared, other affected objects can preview the change as well.
+
+See [code and geometry](../../concepts/code-and-geometry/) for the distinction
+between a model value and its runtime context.

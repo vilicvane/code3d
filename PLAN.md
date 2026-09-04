@@ -172,6 +172,15 @@ silently reorder the active milestones. Closed requests move to
 
 ## Milestones
 
+### Website and user documentation — complete
+
+- Rebuild the product website with Astro and Starlight, with a custom homepage,
+  searchable user documentation, and executable examples shared with App.
+- Keep the website static and App independently built; deliver them in one
+  artifact with App under `/app/`.
+- The detailed scope, flexible execution plan, and acceptance criteria are in
+  [the website plan](plans/website-and-docs.md).
+
 ### Persistent project and reusable metric fasteners — complete
 
 - [R-009](requests/closed/R-009-persistent-multi-file-workspace.md) replaces the

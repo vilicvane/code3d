@@ -34,8 +34,8 @@ jobs:
       - name: Install render browser
         run: npx playwright-core install --with-deps chromium
 
-      - name: Generate website model image
-        run: npm run render:web-image
+      - name: Generate website model images
+        run: npm run render:web-images
 
       - name: Build website
         run: npm run build --workspace @code3d/web

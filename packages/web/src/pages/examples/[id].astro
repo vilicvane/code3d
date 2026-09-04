@@ -1,0 +1,38 @@
+---
+import {getCollection, type CollectionEntry} from 'astro:content';
+import Site from '../../layouts/Site.astro';
+import ModelExample from '../../components/ModelExample.astro';
+import {sitePath, appUrl} from '../../lib/site';
+export async function getStaticPaths() {
+  return (await getCollection('examples')).map(example => ({
+    params: {id: example.id},
+    props: {example},
+  }));
+}
+interface Props {
+  example: CollectionEntry<'examples'>;
+}
+const {example} = Astro.props;
+---
+
+<Site title={example.data.title} description={example.data.description}>
+  <article class="example-detail shell" data-pagefind-body>
+    <a class="text-link" href={sitePath('examples/')}>← All examples</a>
+    <p class="eyebrow">{example.data.category}</p>
+    <h1>{example.data.title}</h1>
+    <p class="lead">{example.data.description}</p>
+    <div class="tags">{example.data.tags.map(tag => <span>{tag}</span>)}</div>
+    <ModelExample id={example.id} />
+    <div class="detail-next">
+      <h2>Make it yours.</h2><p>
+        Open the example, move the cursor through its source, and try changing a
+        dimension.
+      </p><a
+        class="button"
+        href={appUrl(example.data.file)}
+        target="_blank"
+        rel="noopener">Open in Code3D ↗</a
+      >
+    </div>
+  </article>
+</Site>

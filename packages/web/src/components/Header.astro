@@ -1,0 +1,20 @@
+---
+import Brand from './Brand.astro';
+import {githubUrl, sitePath, appUrl} from '../lib/site';
+const section = Astro.url.pathname.includes('/examples') ? 'examples' : '';
+---
+
+<header class="site-header shell">
+  <Brand />
+  <nav aria-label="Main navigation">
+    <a href={sitePath('docs/')} data-astro-prefetch>Docs</a>
+    <a
+      href={sitePath('examples/')}
+      aria-current={section === 'examples' ? 'page' : undefined}>Examples</a
+    >
+    <a href={githubUrl}>GitHub <span aria-hidden="true">↗</span></a>
+  </nav>
+  <a class="button button-small" href={appUrl()} target="_blank" rel="noopener"
+    >Open App <span aria-hidden="true">↗</span></a
+  >
+</header>

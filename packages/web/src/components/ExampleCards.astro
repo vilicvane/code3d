@@ -1,0 +1,39 @@
+---
+import {getCollection} from 'astro:content';
+import {Image} from 'astro:assets';
+import {modelImage} from '../lib/images';
+import {sitePath} from '../lib/site';
+import {renderSamples} from '../../../app/render-samples/catalog';
+const examples = await getCollection('examples');
+examples.sort(
+  (a, b) =>
+    renderSamples.findIndex(s => s.id === a.id) -
+    renderSamples.findIndex(s => s.id === b.id),
+);
+---
+
+<div class="example-grid">
+  {
+    examples.map(example => (
+      <a class="example-card" href={sitePath(`examples/${example.id}/`)}>
+        <div class="example-image">
+          <Image
+            src={modelImage(example.id)}
+            alt={example.data.description}
+            widths={[480, 800]}
+            sizes="(max-width: 48rem) 100vw, 33vw"
+          />
+        </div>
+        <div class="example-copy">
+          <>
+            <p class="eyebrow">{example.data.category}</p>
+            <h3>
+              {example.data.title} <span aria-hidden="true">↗</span>
+            </h3>
+            <p>{example.data.description}</p>
+          </>
+        </div>
+      </a>
+    ))
+  }
+</div>

@@ -1,0 +1,92 @@
+---
+import {highlightedSource} from '../lib/code';
+import type {SourceToken} from '../../../app/render-samples/source-focus';
+interface Props {
+  source: string;
+  file: string;
+  focus?: SourceToken;
+}
+const {source, file, focus} = Astro.props;
+const html = await highlightedSource(source, focus);
+---
+
+<source-code class="source-code">
+  <div class="code-heading">
+    <span>{file}</span><button
+      type="button"
+      class="copy-code"
+      aria-label={`Copy ${file}`}>Copy</button
+    >
+  </div>
+  <div class="code-body" set:html={html} />
+  <span class="copy-status" role="status" aria-live="polite"></span>
+</source-code>
+<script>
+  class SourceCode extends HTMLElement {
+    connectedCallback() {
+      this.querySelector('button')?.addEventListener('click', async () => {
+        const code = this.querySelector('code')!.textContent ?? '';
+        const status = this.querySelector<HTMLElement>('.copy-status')!;
+        try {
+          await navigator.clipboard.writeText(code);
+          status.textContent = 'Copied';
+        } catch {
+          status.textContent = 'Select the code to copy it.';
+        }
+      });
+    }
+  }
+  customElements.define('source-code', SourceCode);
+</script>
+<style is:global>
+  source-code {
+    position: relative;
+    display: block;
+    min-width: 0;
+    background: #11110f;
+    color: #e7e8df;
+    border: 1px solid #30342a;
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .code-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 13px 20px;
+    border-bottom: 1px solid #30342a;
+    font: 12px var(--c3-mono, 'JetBrains Mono Variable', monospace);
+    color: #a9afa1;
+  }
+  .copy-code {
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: 0;
+    cursor: pointer;
+    padding: 4px 8px;
+  }
+  .copy-code:hover {
+    color: #d8ff3e;
+  }
+  .code-body pre {
+    margin: 0;
+    padding: 24px;
+    overflow: auto;
+    font: 13px/1.9 var(--c3-mono, 'JetBrains Mono Variable', monospace);
+    tab-size: 2;
+  }
+  .code-body code {
+    font: inherit;
+  }
+  .source-focus {
+    border-radius: 2px;
+  }
+  .copy-status {
+    position: absolute;
+    right: 15px;
+    bottom: 7px;
+    font-size: 11px;
+    color: #c4cdba;
+  }
+</style>

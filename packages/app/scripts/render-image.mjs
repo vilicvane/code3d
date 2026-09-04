@@ -13,7 +13,7 @@ function option(name, fallback) {
   return index < 0 ? fallback : process.argv[index + 1];
 }
 
-const model = option('model', 'fasteners');
+const model = option('model', 'first-model');
 const output = path.resolve(
   packageDirectory,
   option('output', `rendered/${model}.png`),

@@ -1,0 +1,10 @@
+---
+import DefaultHead from '@astrojs/starlight/components/Head.astro';
+import {sitePath} from '../lib/site';
+---
+
+<DefaultHead><slot /></DefaultHead>
+<meta
+  property="og:image"
+  content={new URL(sitePath('og-image.png'), Astro.site ?? Astro.url).href}
+/>

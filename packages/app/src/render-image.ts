@@ -2,12 +2,11 @@ import initOpenCascade from 'replicad-opencascadejs';
 import openCascadeWasmUrl from 'replicad-opencascadejs/wasm?url';
 import {installOpenCascade} from '@code3d/core/tooling';
 import {
-  fastenerRenderSample,
   sourceTokenOffset,
   type SourceToken,
   uniqueSourceOffset,
-} from '../render-samples/fastener.config';
-import fastenerSource from '../render-samples/fastener.ts?raw';
+} from '../render-samples/source-focus';
+import {renderSamples} from '../render-samples/catalog';
 import {compileProject} from './model/compiler';
 import {ModelDiagnosticError} from './model/diagnostic';
 import {elementSourceDecoration} from './model/element-decorations';
@@ -19,21 +18,35 @@ import type {ModelProject} from './project/project';
 import {ModelViewport} from './viewport';
 import './render-image.css';
 
-const renderProjects = {
-  fasteners: {
-    rootPath: '/fastener.ts',
-    files: [{path: '/fastener.ts', source: fastenerSource}],
-    focus: fastenerRenderSample.focus.target,
-  },
-} satisfies Record<
+const sources = import.meta.glob<string>('../examples/website/*.ts', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+});
+const renderProjects: Record<
   string,
   ModelProject & Readonly<{rootPath: string; focus: SourceToken}>
->;
+> = Object.fromEntries(
+  renderSamples.map(sample => [
+    sample.id,
+    {
+      rootPath: '/' + sample.file,
+      files: [
+        {
+          path: '/' + sample.file,
+          source: sources['../examples/website/' + sample.file]!,
+        },
+      ],
+      focus: sample.focus,
+    },
+  ]),
+);
 
 type ModelName = keyof typeof renderProjects;
 
 function requestedModel(): ModelName {
-  const name = new URLSearchParams(location.search).get('model') ?? 'fasteners';
+  const name =
+    new URLSearchParams(location.search).get('model') ?? 'first-model';
   if (!(name in renderProjects)) {
     throw new Error(`Unknown render model: ${name}`);
   }

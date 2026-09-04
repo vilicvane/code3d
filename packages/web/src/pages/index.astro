@@ -1,0 +1,143 @@
+---
+import Site from '../layouts/Site.astro';
+import SourceDemo from '../components/SourceDemo.astro';
+import ExampleCards from '../components/ExampleCards.astro';
+import {sitePath, appUrl} from '../lib/site';
+---
+
+<Site>
+  <section class="hero shell">
+    <div class="hero-topline">
+      <span class="eyebrow">A solid modeler for people who code</span><a
+        href={sitePath('docs/reference/limitations/')}
+        class="status-pill"><i></i> Prototype 01</a
+      >
+    </div>
+    <h1>
+      The power of code.<br /><span>The feel of direct manipulation.</span>
+    </h1>
+    <div class="hero-bottom">
+      <p>
+        Build precise 3D models with TypeScript. Reach into the geometry to
+        inspect, select, and adjust. Every edit comes back as readable code.
+      </p>
+      <div class="hero-actions">
+        <a
+          class="button"
+          href={appUrl('first-model.ts')}
+          target="_blank"
+          rel="noopener">Start building <span aria-hidden="true">↗</span></a
+        ><a
+          class="text-link"
+          href={sitePath('docs/getting-started/first-model/')}
+          >Make your first model <span aria-hidden="true">→</span></a
+        >
+      </div>
+    </div>
+    <SourceDemo />
+    <div class="hero-footnote">
+      <span>ONE MODEL. ONE SOURCE OF TRUTH.</span><p>
+        Click a source context above. See exactly the object it produces.
+      </p>
+    </div>
+  </section>
+  <section class="connection shell">
+    <div class="section-heading">
+      <p class="eyebrow">Code and geometry, connected</p><h2>
+        Keep your train<br />of thought.
+      </h2><p>
+        Some ideas are easier to write.<br />Some are easier to point at. Code3D
+        brings them together.
+      </p>
+    </div>
+    <div class="workflow">
+      <article>
+        <span class="step-number">01 / WRITE</span><h3>
+          Think in TypeScript.
+        </h3><p>
+          Use variables, functions, loops, and modules to make a model as
+          precise and reusable as the code that defines it.
+        </p><code>const base = box(36, 4, 24);</code>
+      </article>
+      <article>
+        <span class="step-number">02 / INSPECT</span><h3>
+          Follow any expression.
+        </h3><p>
+          Move through the source to see an individual part, an intermediate
+          result, or the assembled model.
+        </p><div class="inline-context" aria-hidden="true">
+          group([<mark>base</mark>, post]) <span>→ geometry</span>
+        </div>
+      </article>
+      <article>
+        <span class="step-number">03 / ADJUST</span><h3>
+          Let the geometry help.
+        </h3><p>
+          Pick edges and adjust supported parameters in the viewport. Your
+          changes return to the same TypeScript source.
+        </p><a class="text-link" href={sitePath('docs/guides/topology/')}
+          >See how selection works →</a
+        >
+      </article>
+    </div>
+  </section>
+  <section class="examples-section shell">
+    <div class="section-top">
+      <div>
+        <p class="eyebrow">Built with Code3D</p><h2>
+          Small models.<br />Real possibilities.
+        </h2>
+      </div><a class="text-link" href={sitePath('examples/')}
+        >Explore the examples →</a
+      >
+    </div>
+    <ExampleCards />
+  </section>
+  <section class="foundations shell">
+    <div>
+      <p class="eyebrow">A familiar foundation</p><h2>
+        Precise geometry.<br />Ordinary source files.
+      </h2>
+    </div>
+    <div class="foundation-grid">
+      <article>
+        <h3>OpenCascade solids</h3><p>
+          Build with B-Rep geometry, boolean operations, fillets, and chamfers.
+        </p>
+      </article><article>
+        <h3>Typed model interfaces</h3><p>
+          Expose meaningful points, edges, faces, and frames for the next model
+          to use.
+        </p>
+      </article><article>
+        <h3>Your project, in source</h3><p>
+          Keep durable changes in TypeScript, ready to read, diff, and reuse.
+        </p>
+      </article><article>
+        <h3>Open from the start</h3><p>
+          An MIT-licensed prototype, developed in the open. APIs are still
+          evolving.
+        </p>
+      </article>
+    </div>
+  </section>
+  <section class="closing shell">
+    <p class="eyebrow">Start with something simple</p><h2>
+      A few lines.<br />Something you can reach into.
+    </h2>
+    <div class="hero-actions">
+      <a
+        class="button"
+        href={appUrl('first-model.ts')}
+        target="_blank"
+        rel="noopener">Open Code3D <span aria-hidden="true">↗</span></a
+      ><a class="text-link" href={sitePath('docs/')}>Read the docs →</a>
+    </div>
+    <p class="closing-note">
+      Prototype 01 · APIs and project behavior are evolving.<br /><a
+        href={sitePath('docs/reference/limitations/')}
+        >Explore the current capabilities and limitations.</a
+      >
+    </p>
+  </section>
+</Site>
