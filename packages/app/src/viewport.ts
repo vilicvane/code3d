@@ -144,7 +144,9 @@ const boxCornerFraction = 0.18;
 const boxCornerMaxScreenLengthPixels = 32;
 const symbolLineWidth = 1;
 const interactiveLineWidth = 2;
-const topologyGuidePointSize = 6;
+const topologyGuidePointSize = 3;
+const topologyPointSize = 5;
+const topologyHoverPointSize = 7;
 const interactivePointSize = 10;
 const toolSurfaceOpacity = 0.22;
 const impactSurfaceOpacity = 0.08;
@@ -1508,6 +1510,7 @@ export class ModelViewport {
         new Set([selection.hoveredId]),
         '#ffad66',
         33,
+        topologyHoverPointSize,
       );
       if (hovered) overlay.add(hovered);
     }
@@ -2460,6 +2463,7 @@ function createTopologyHighlight(
   ids: ReadonlySet<number>,
   color: string,
   renderOrder: number,
+  pointSize = topologyPointSize,
 ): THREE.Object3D | undefined {
   if (kind === 'vertex') {
     const positions = vertexSelectionPositions(mesh, ids);
@@ -2467,7 +2471,7 @@ function createTopologyHighlight(
       ? createScreenSpacePoints(
           positions,
           color,
-          interactivePointSize,
+          pointSize,
           1,
           false,
           renderOrder,
