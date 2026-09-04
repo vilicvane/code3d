@@ -151,8 +151,10 @@ app.innerHTML = `
             <div class="edge-selection-actions">
               <button id="edge-selection-all" type="button">Use all edges</button>
             </div>
-            <div class="edge-selection-error" id="edge-selection-error" role="status" aria-live="polite" hidden></div>
           </section>
+          <div class="viewport-feedback-stack" id="viewport-feedback-stack">
+            <div class="viewport-diagnostic-stack" id="viewport-diagnostic-stack" role="status" aria-live="polite" aria-atomic="true" hidden></div>
+          </div>
           <div class="viewport-progress" id="viewport-progress" role="status" aria-live="polite" hidden>
             <span class="viewport-progress-spinner" aria-hidden="true"></span>
             <span id="viewport-progress-label"></span>
@@ -218,7 +220,8 @@ const edgeSelectionParameterUnit = requiredElement(
 );
 const edgeSelectionAll =
   requiredElement<HTMLButtonElement>('edge-selection-all');
-const edgeSelectionError = requiredElement('edge-selection-error');
+const viewportFeedbackStack = requiredElement('viewport-feedback-stack');
+const viewportDiagnosticStack = requiredElement('viewport-diagnostic-stack');
 const viewportProgress = requiredElement('viewport-progress');
 const viewportProgressLabel = requiredElement('viewport-progress-label');
 const projectTree = requiredElement('project-tree');
@@ -282,6 +285,8 @@ let positionToolInterruptedCompile = false;
 let edgeSelectionTool: EdgeSelectionTool | undefined;
 let edgeEditSession: EdgeEditSession | undefined;
 let edgeEditSessionCounter = 0;
+let edgeSelectionParameterCommitTimer: number | undefined;
+let selectEdgeSelectionParameterOnPointerUp = false;
 let contextFilePath: string | undefined;
 let preferredEvaluationContextId: string | undefined;
 let selectedDesignContextId: string | undefined;
@@ -366,8 +371,9 @@ const elementsPanel = new ElementsPanel(elements, elementsCount, {
     );
   },
 });
-const sourceEditPopover = new SourceEditPopover(viewportHost, sourceRef =>
-  codeEditor.revealSource(sourceRef, true),
+const sourceEditPopover = new SourceEditPopover(
+  viewportFeedbackStack,
+  sourceRef => codeEditor.revealSource(sourceRef, true),
 );
 const toolEngine = new ToolEngine({
   sourceVersion: () => codeEditor.sourceVersion(),
@@ -468,12 +474,31 @@ browserStorageButton.addEventListener('click', () => {
 });
 contextRenameFile.addEventListener('click', () => renameContextFile());
 contextDeleteFile.addEventListener('click', () => deleteContextFile());
-edgeSelectionParameter.addEventListener('input', updateEdgeOperationParameter);
+edgeSelectionParameter.addEventListener(
+  'input',
+  scheduleEdgeOperationParameterCommit,
+);
 edgeSelectionParameter.addEventListener('change', commitEdgeOperationParameter);
 edgeSelectionParameter.addEventListener('keydown', event => {
   if (event.key !== 'Enter') return;
   commitEdgeOperationParameter();
   event.preventDefault();
+});
+edgeSelectionParameter.addEventListener('pointerdown', () => {
+  selectEdgeSelectionParameterOnPointerUp =
+    document.activeElement !== edgeSelectionParameter;
+});
+edgeSelectionParameter.addEventListener('pointerup', event => {
+  if (!selectEdgeSelectionParameterOnPointerUp) return;
+  selectEdgeSelectionParameterOnPointerUp = false;
+  event.preventDefault();
+  edgeSelectionParameter.select();
+});
+edgeSelectionParameter.addEventListener('focus', () => {
+  edgeSelectionParameter.select();
+});
+edgeSelectionParameter.addEventListener('blur', () => {
+  selectEdgeSelectionParameterOnPointerUp = false;
 });
 edgeSelectionAll.addEventListener('click', useAllEdges);
 window.addEventListener('pointerdown', event => {
@@ -757,6 +782,7 @@ function deleteContextFile(): void {
 function showProjectIssue(error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
   hideViewportProgress();
+  renderViewportDiagnostic();
   errorBar.textContent = message;
   errorBar.hidden = false;
 }
@@ -859,6 +885,7 @@ async function runModel(
       await presentModelDiagnostic(diagnostic, revision, sourceVersion);
     } else {
       codeEditor.setModelDiagnostic();
+      renderViewportDiagnostic();
       errorBar.textContent =
         error instanceof Error ? error.message : String(error);
       errorBar.hidden = false;
@@ -872,6 +899,7 @@ async function presentModelDiagnostic(
   sourceVersion: number,
 ): Promise<boolean> {
   codeEditor.setModelDiagnostic(diagnostic);
+  renderViewportDiagnostic(diagnostic?.sourceRef ? diagnostic : undefined);
   if (!diagnostic || diagnostic.sourceRef) {
     errorBar.hidden = true;
     return true;
@@ -892,6 +920,24 @@ async function presentModelDiagnostic(
     .join('\n');
   errorBar.hidden = false;
   return true;
+}
+
+function renderViewportDiagnostic(diagnostic?: ModelDiagnostic): void {
+  viewportDiagnosticStack.replaceChildren();
+  viewportDiagnosticStack.hidden = !diagnostic;
+  if (!diagnostic) return;
+
+  const item = document.createElement('section');
+  item.className = 'viewport-diagnostic';
+  const summary = document.createElement('strong');
+  summary.textContent = diagnostic.summary;
+  item.append(summary);
+  if (diagnostic.details) {
+    const details = document.createElement('p');
+    details.textContent = diagnostic.details;
+    item.append(details);
+  }
+  viewportDiagnosticStack.append(item);
 }
 
 function handleCompletionFocus(focus: CompletionFocus | undefined): void {
@@ -1244,7 +1290,12 @@ function syncEdgeSelectionTool(sourceTargetFocused = true): void {
     edgeSelectionTool.evaluationIndex === scope.evaluationIndex &&
     edgeSelectionTool.occurrenceKey === occurrence.key
   ) {
-    updateEdgeSelectionDiagnostic(edgeSelectionTool);
+    edgeSelectionTool.edgeArgument = edgeArgument;
+    edgeSelectionTool.parameter = selection.parameter;
+    edgeSelectionTool.parameterValue = edgeSessionParameterValue(
+      edgeSelectionTool.session,
+    );
+    updateEdgeSelectionToolbar(edgeSelectionTool);
     return;
   }
   startEdgeSelection(
@@ -1345,7 +1396,26 @@ function updateEdgeOperationParameter(): void {
   );
 }
 
+const edgeSelectionParameterCommitDelayMilliseconds = 240;
+
+function scheduleEdgeOperationParameterCommit(): void {
+  updateEdgeOperationParameter();
+  cancelEdgeOperationParameterCommit();
+  const tool = edgeSelectionTool;
+  if (!tool || !edgeOperationParameterEdit(tool)) return;
+  edgeSelectionParameterCommitTimer = window.setTimeout(() => {
+    edgeSelectionParameterCommitTimer = undefined;
+    commitEdgeOperationParameter();
+  }, edgeSelectionParameterCommitDelayMilliseconds);
+}
+
+function cancelEdgeOperationParameterCommit(): void {
+  window.clearTimeout(edgeSelectionParameterCommitTimer);
+  edgeSelectionParameterCommitTimer = undefined;
+}
+
 function commitEdgeOperationParameter(): void {
+  cancelEdgeOperationParameterCommit();
   updateEdgeOperationParameter();
   const tool = edgeSelectionTool;
   if (!tool) return;
@@ -1388,23 +1458,7 @@ function updateEdgeSelectionToolbar(
     ? formatEdgeIds(tool.selectedEdgeIds)
     : 'All edges';
   edgeSelectionAll.disabled = !tool.hasExplicitEdgeSelection;
-  updateEdgeSelectionDiagnostic(tool);
   edgeSelectionToolbar.hidden = false;
-}
-
-function updateEdgeSelectionDiagnostic(tool: EdgeSelectionTool): void {
-  const diagnostic = currentModule?.diagnostic;
-  const target = currentModule?.sourceTargets.find(
-    candidate => candidate.id === tool.targetId,
-  );
-  const relevant =
-    diagnostic?.sourceRef &&
-    target &&
-    sourceRefsOverlap(diagnostic.sourceRef, target.sourceRef);
-  edgeSelectionError.textContent = relevant
-    ? [diagnostic.summary, diagnostic.details].filter(Boolean).join('\n')
-    : '';
-  edgeSelectionError.hidden = !relevant;
 }
 
 function handleEdgeSelection(event: EdgeSelectionEvent): void {
@@ -1463,6 +1517,7 @@ function commitEdgeOperationChange(
 }
 
 function dismissEdgeSelectionTool(updateViewport = true): boolean {
+  cancelEdgeOperationParameterCommit();
   if (!edgeSelectionTool) return false;
   edgeSelectionTool = undefined;
   if (updateViewport) viewport.endEdgeSelection();
@@ -1588,10 +1643,11 @@ function edgeOperationParameterEdit(
 ): Readonly<{target: ParameterTarget; value: number}> | undefined {
   const parameter = tool.parameter;
   const value = tool.parameterValue;
+  const appliedValue = edgeSessionParameterValue(tool.session);
   if (
     !parameter ||
     value === undefined ||
-    Math.abs(value - parameter.value) < 1e-9
+    (appliedValue !== undefined && Math.abs(value - appliedValue) < 1e-9)
   ) {
     return undefined;
   }
@@ -1892,12 +1948,6 @@ function sameSourceRef(left: SourceRef, right: SourceRef): boolean {
     left.file === right.file &&
     left.start === right.start &&
     left.end === right.end
-  );
-}
-
-function sourceRefsOverlap(left: SourceRef, right: SourceRef): boolean {
-  return (
-    left.file === right.file && left.start < right.end && right.start < left.end
   );
 }
 

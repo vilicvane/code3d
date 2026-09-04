@@ -331,17 +331,19 @@ constraint source sites do.
   selection available whether or not the optional edge-array argument already
   exists. Preserve a one-argument call until its selected edge set changes,
   then append the explicit array through the common tool transaction path; do
-  not offer GUI insertion of modeling calls.
+  not offer GUI insertion of modeling calls. Select the size value when its
+  input first receives focus and use the theme accent for the text selection.
 - While selecting, render the applied operation result as the primary solid and
   retain every original input edge at its pre-operation position as a
-  hoverable/toggleable guide. Commit each edge-set or confirmed size change to
-  source immediately while keeping the guide, hover, and selection panel
-  interactive during background compilation. Newer edits invalidate older
-  compile results, and the latest normal compiled model replaces the rendered
-  result when ready. Defer source formatting until selection ends so it cannot
-  invalidate active source anchors; do not present an uncommitted operation
-  result as if it had already taken effect. Outside selection, keep the weaker
-  before/after comparison for an applied edge modification.
+  hoverable/toggleable guide. Commit each edge-set change immediately and each
+  valid size input after a short debounce, flushing it on Enter or blur, while
+  keeping the guide, hover, and selection panel interactive during background
+  compilation. Newer edits invalidate older compile results, and the latest
+  normal compiled model replaces the rendered result when ready. Defer source
+  formatting until selection ends so it cannot invalidate active source
+  anchors; do not present an uncommitted operation result as if it had already
+  taken effect. Outside selection, keep the weaker before/after comparison for
+  an applied edge modification.
 - Treat one continuous edge-editing session as one source-history entry.
   Undo and redo during that session update the source, guide, and controls
   together without closing the tool; after the session ends, history remains

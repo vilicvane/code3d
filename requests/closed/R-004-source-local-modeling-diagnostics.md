@@ -30,9 +30,10 @@
 - Located diagnostics become `code3d` Monaco error markers. They remain visible
   while the replacement revision compiles and clear when that revision
   succeeds; they do not open a second error overlay or move editor focus.
-- When the matching fillet or chamfer selection tool is open, its current
-  diagnostic is also shown in the tool footer and clears with a successful
-  replacement compile.
+- Located model diagnostics also appear in the viewport's bottom-left feedback
+  stack, independently of whether a matching tool is open. Source-edit notices
+  share that stack without overlapping it, and a successful replacement
+  compile clears the diagnostic.
 - Parameter source references from failed fillet and chamfer evaluations remain
   tracked even though those operations have no output object, so the open tool
   can repair the failing size directly.
@@ -51,7 +52,13 @@
 - Host Chrome's compiler worker evaluated the same chamfer and returned the
   readable summary and details with the exact `chamfer(...)` invocation span.
 - In an isolated Host Chrome Studio project, selecting the marked call opened
-  the Chamfer tool with the same diagnostic; changing distance from `2` to `1`
-  rewrote the source, rebuilt successfully, and cleared both marker and footer.
+  the Chamfer tool. Changing distance from `2` to `1` without blurring kept the
+  input focused, rewrote the source after the input debounce, rebuilt
+  successfully, and cleared both the marker and bottom-left diagnostic. The
+  focused input selected its whole value and used the theme accent selection
+  color.
+- Changing the distance back to the failing value kept the source-edit notice
+  and model diagnostic visible together, with the notice stacked 8 px above
+  the diagnostic and the diagnostic anchored 14 px from the viewport edges.
 - Restoring valid source returned the model to ready state and cleared the
   marker without changing the restored project contents.
