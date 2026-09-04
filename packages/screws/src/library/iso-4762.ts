@@ -132,12 +132,17 @@ export type ClearanceHoleOptions = Readonly<{
   counterbore?: boolean | CounterboreOptions;
 }>;
 
+export type PlainClearanceHoleOptions = ClearanceHoleOptions &
+  Readonly<{
+    counterbore: false;
+  }>;
+
 export type CounterboredHoleOptions = Omit<
   ClearanceHoleOptions,
   'counterbore'
 > &
   Readonly<{
-    counterbore: true | CounterboreOptions;
+    counterbore?: true | CounterboreOptions;
   }>;
 
 type SocketCapScrewElements = CanonicalElements &
@@ -250,8 +255,17 @@ export function screw(input: ScrewInput, length: number): Screw {
 }
 
 /**
- * @code3d.arguments ['M6', {depth: 10, fit: 'normal', counterbore: true}]
+ * @code3d.arguments ['M6', 10]
+ * @code3d.arguments ['M6', {depth: 10, counterbore: false}]
  */
+export function clearanceHole(
+  input: ScrewInput,
+  depth: number,
+): CounterboredHole;
+export function clearanceHole(
+  input: ScrewInput,
+  options: PlainClearanceHoleOptions,
+): ClearanceHole;
 export function clearanceHole(
   input: ScrewInput,
   options: CounterboredHoleOptions,
@@ -259,11 +273,15 @@ export function clearanceHole(
 export function clearanceHole(
   input: ScrewInput,
   options: ClearanceHoleOptions,
-): ClearanceHole;
+): ClearanceHole | CounterboredHole;
 export function clearanceHole(
   input: ScrewInput,
-  options: ClearanceHoleOptions,
+  optionsOrDepth: ClearanceHoleOptions | number,
 ): ClearanceHole | CounterboredHole {
+  const options: ClearanceHoleOptions =
+    typeof optionsOrDepth === 'number'
+      ? {depth: optionsOrDepth}
+      : optionsOrDepth;
   const spec = resolveSpecification(input);
   validateSpec(spec);
   if (!Number.isFinite(options.depth) || options.depth <= 0) {
@@ -277,7 +295,8 @@ export function clearanceHole(
     );
   }
   const shaft = cylinder(diameter / 2, options.depth);
-  if (!options.counterbore) {
+  const counterboreOption = options.counterbore ?? true;
+  if (counterboreOption === false) {
     return shaft
       .expose({
         shaftTop: shaft.top,
@@ -287,7 +306,7 @@ export function clearanceHole(
       .named(spec.designation + ' ' + fit + ' clearance hole');
   }
 
-  const counterbore = options.counterbore === true ? {} : options.counterbore;
+  const counterbore = counterboreOption === true ? {} : counterboreOption;
   const axialClearance = counterbore.axialClearance ?? 0.5;
   const counterboreDepth =
     counterbore.depth ?? spec.headHeight + axialClearance;
