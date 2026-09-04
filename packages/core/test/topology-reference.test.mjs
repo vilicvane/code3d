@@ -44,6 +44,33 @@ test('resolves stable vertex, edge, and surface references', () => {
   }
 });
 
+test('resolves plural topology references in authored order', () => {
+  const model = box(20, 10, 15);
+
+  try {
+    assert.deepEqual(model.vertices([3, 1]).map(modelTopologyReference), [
+      {model, kind: 'vertex', id: 3},
+      {model, kind: 'vertex', id: 1},
+    ]);
+    assert.deepEqual(model.edges([4, 2]).map(modelTopologyReference), [
+      {model, kind: 'edge', id: 4},
+      {model, kind: 'edge', id: 2},
+    ]);
+    assert.deepEqual(model.surfaces([6, 1]).map(modelTopologyReference), [
+      {model, kind: 'surface', id: 6},
+      {model, kind: 'surface', id: 1},
+    ]);
+    assert.deepEqual(model.vertices([]), []);
+    assert.deepEqual(model.edges([]), []);
+    assert.deepEqual(model.surfaces([]), []);
+    assert.throws(() => model.vertices([9]), /Unknown or retired vertex V9/);
+    assert.throws(() => model.edges([13]), /Unknown or retired edge E13/);
+    assert.throws(() => model.surfaces([7]), /Unknown or retired surface S7/);
+  } finally {
+    disposeModelObjects([model]);
+  }
+});
+
 function topologyIds(snapshot) {
   return {
     vertices: vertexIds(snapshot),

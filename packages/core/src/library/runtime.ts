@@ -53,16 +53,13 @@ import {
   filletEdges,
   initialShapeTopology,
   preserveShapeTopology,
-  resolveEdge,
   resolveEdgeSelection,
-  resolveSurface,
-  resolveVertex,
   stableEdgeGroups,
   stableSurfaceGroups,
   stableVertexData,
-  topologyEdgeDirection,
-  topologySurfaceDirection,
-  topologyVertexPoint,
+  topologyEdgeDirections,
+  topologySurfaceDirections,
+  topologyVertexPoints,
   type EdgeId,
   type ShapeTopology,
   type SurfaceId,
@@ -776,51 +773,70 @@ export class ModelObject<
 
   /** @code3d.param id {kind: 'vertex', label: 'Vertex'} */
   vertex(id: VertexId): Vertex {
+    return this.vertices([id])[0];
+  }
+
+  /** @code3d.param ids {kind: 'vertex', label: 'Vertices'} */
+  vertices(ids: readonly VertexId[]): readonly Vertex[] {
     const geometry = this.requireGeometry().value;
     const topology = geometry.topology.vertices;
-    const resolved = resolveVertex(topology, id);
-    const {position} = topologyVertexPoint(geometry.shape, topology, resolved);
-    return new ModelTopologyElement(
-      this,
-      'vertex',
-      resolved,
-      translation(position),
+    const points = topologyVertexPoints(geometry.shape, topology, ids);
+    return ids.map(
+      (id, index) =>
+        new ModelTopologyElement(
+          this,
+          'vertex',
+          id,
+          translation(points[index].position),
+        ),
     );
   }
 
   /** @code3d.param id {kind: 'surface', label: 'Surface'} */
   surface(id: SurfaceId): Surface {
+    return this.surfaces([id])[0];
+  }
+
+  /** @code3d.param ids {kind: 'surface', label: 'Surfaces'} */
+  surfaces(ids: readonly SurfaceId[]): readonly Surface[] {
     const geometry = this.requireGeometry().value;
     const topology = geometry.topology.surfaces;
-    const resolved = resolveSurface(topology, id);
-    const {position, direction} = topologySurfaceDirection(
-      geometry.shape,
-      topology,
-      resolved,
-    );
-    return new ModelTopologyElement(
-      this,
-      'surface',
-      resolved,
-      frameFromYAxis(position, direction),
+    const directions = topologySurfaceDirections(geometry.shape, topology, ids);
+    return ids.map(
+      (id, index) =>
+        new ModelTopologyElement(
+          this,
+          'surface',
+          id,
+          frameFromYAxis(
+            directions[index].position,
+            directions[index].direction,
+          ),
+        ),
     );
   }
 
   /** @code3d.param id {kind: 'edge', label: 'Edge'} */
   edge(id: EdgeId): Edge {
+    return this.edges([id])[0];
+  }
+
+  /** @code3d.param ids {kind: 'edge', label: 'Edges'} */
+  edges(ids: readonly EdgeId[]): readonly Edge[] {
     const geometry = this.requireGeometry().value;
     const topology = geometry.topology.edges;
-    const resolved = resolveEdge(topology, id);
-    const {position, direction} = topologyEdgeDirection(
-      geometry.shape,
-      topology,
-      resolved,
-    );
-    return new ModelTopologyElement(
-      this,
-      'edge',
-      resolved,
-      frameFromYAxis(position, direction),
+    const directions = topologyEdgeDirections(geometry.shape, topology, ids);
+    return ids.map(
+      (id, index) =>
+        new ModelTopologyElement(
+          this,
+          'edge',
+          id,
+          frameFromYAxis(
+            directions[index].position,
+            directions[index].direction,
+          ),
+        ),
     );
   }
 

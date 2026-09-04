@@ -77,7 +77,7 @@ export type SourceTargetEvaluation = Readonly<{
     | Readonly<{
         kind: TopologyKind;
         inputNodeId: string;
-        id?: number;
+        ids: readonly number[];
       }>;
 }>;
 
@@ -1531,9 +1531,10 @@ function buildSourceTargets(
     },
   );
   const topologySelectionTargets = [...toolCallSites.values()].flatMap(site => {
+    if (edgeSelectionSites.has(site.siteId)) return [];
     const parameter = site.signature.parameters.find(
       (candidate): candidate is ToolSelectionParameterSchema =>
-        isToolSelectionParameter(candidate) && !candidate.multiple,
+        isToolSelectionParameter(candidate),
     );
     if (!parameter) return [];
     const evaluations = [...sourceExecutionTraces.values()].flatMap(
@@ -1541,6 +1542,10 @@ function buildSourceTargets(
         if (execution.siteId !== site.siteId) return [];
         const receiver = execution.receiver;
         if (!isModelObject(receiver)) return [];
+        const attemptedIds = attemptedTopologyIds(
+          execution.arguments.get(parameter.index),
+          parameter.multiple,
+        );
         return [
           {
             runtime: sourceExecutionRuntime(execution),
@@ -1550,7 +1555,11 @@ function buildSourceTargets(
             selection: {
               kind: parameter.kind,
               inputNodeId: receiver.nodeId,
-              id: attemptedTopologyId(execution.arguments.get(parameter.index)),
+              ids: validAttemptedTopologyIds(
+                objects.get(receiver.nodeId),
+                parameter.kind,
+                attemptedIds,
+              ),
             },
           } satisfies SourceTargetEvaluation,
         ];
@@ -1846,10 +1855,34 @@ function attemptedEdgeIds(value: unknown): EdgeId[] {
   ];
 }
 
-function attemptedTopologyId(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1
-    ? value
-    : undefined;
+function attemptedTopologyIds(value: unknown, multiple: boolean): number[] {
+  const values = multiple ? (Array.isArray(value) ? value : []) : [value];
+  return [
+    ...new Set(
+      values.filter(
+        (candidate): candidate is number =>
+          typeof candidate === 'number' &&
+          Number.isSafeInteger(candidate) &&
+          candidate >= 1,
+      ),
+    ),
+  ];
+}
+
+function validAttemptedTopologyIds(
+  input: ModelSnapshotObject | undefined,
+  kind: TopologyKind,
+  attempted: readonly number[],
+): number[] {
+  if (!input?.mesh) return [];
+  const available = new Set(
+    kind === 'vertex'
+      ? input.mesh.vertexIds
+      : kind === 'edge'
+        ? input.mesh.edgeGroups.map(group => group.edgeId)
+        : input.mesh.surfaceGroups.map(group => group.surfaceId),
+  );
+  return attempted.filter(id => available.has(id));
 }
 
 function validAttemptedEdgeIds(

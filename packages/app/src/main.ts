@@ -307,7 +307,7 @@ type TopologyReferenceSelectionTool = {
   argument: ToolArgumentSource['target'];
   occurrenceKey: string;
   availableIds: readonly number[];
-  selectedId?: number;
+  selectedIds: readonly number[];
 };
 type ContextualToolState = {
   callId: string;
@@ -1618,11 +1618,11 @@ function renderContextualToolPanel(forceParameterValues = false): void {
     parameters,
     selection: topology
       ? {
-          label: `SELECTED ${topology.parameter.kind.toUpperCase()}`,
-          summary:
-            topology.selectedId === undefined
-              ? 'None'
-              : formatTopologyId(topology.parameter.kind, topology.selectedId),
+          label: `SELECTED ${topologySelectionLabel(topology.parameter)}`,
+          summary: formatTopologyIds(
+            topology.parameter.kind,
+            topology.selectedIds,
+          ),
         }
       : edge
         ? {
@@ -1683,9 +1683,7 @@ function syncTopologyReferenceSelectionProvider(
   const selection = scope.evaluation.selection;
   const parameter = scope.target.tool?.signature.parameters.find(
     (candidate): candidate is ToolSelectionParameterSchema =>
-      isToolSelectionParameter(candidate) &&
-      !candidate.multiple &&
-      candidate.kind === selection?.kind,
+      isToolSelectionParameter(candidate) && candidate.kind === selection?.kind,
   );
   const argument = parameter
     ? scope.target.tool?.arguments.find(
@@ -1710,10 +1708,8 @@ function syncTopologyReferenceSelectionProvider(
     current.occurrenceKey === occurrence.key
   ) {
     current.argument = argument;
-    current.selectedId = selection.id;
-    viewport.setSelectedTopologyIds(
-      selection.id === undefined ? [] : [selection.id],
-    );
+    current.selectedIds = selection.ids;
+    viewport.setSelectedTopologyIds(selection.ids);
     return;
   }
   dismissTopologyReferenceSelectionTool();
@@ -1724,8 +1720,8 @@ function syncTopologyReferenceSelectionProvider(
       occurrence.key,
       selection.inputNodeId,
       selection.kind,
-      false,
-      selection.id === undefined ? [] : [selection.id],
+      parameter.multiple,
+      selection.ids,
     );
   } catch (error) {
     showToolIssue(error instanceof Error ? error.message : String(error));
@@ -1739,7 +1735,7 @@ function syncTopologyReferenceSelectionProvider(
     argument,
     occurrenceKey: occurrence.key,
     availableIds,
-    selectedId: selection.id,
+    selectedIds: selection.ids,
   };
   errorBar.hidden = true;
 }
@@ -1873,7 +1869,9 @@ function handleTopologyReferenceSelection(
   ) {
     return;
   }
-  tool.selectedId = event.id;
+  tool.selectedIds = tool.parameter.multiple
+    ? sortedTopologyIds(event.selectedIds)
+    : [event.id];
   renderContextualToolPanel();
   const contextual = contextualTool;
   const committed = commitToolSession(
@@ -1884,7 +1882,12 @@ function handleTopologyReferenceSelection(
       kind: 'argument.set',
       parameter: tool.parameter.name,
       target: tool.argument,
-      expression: {kind: 'number', value: event.id},
+      expression: tool.parameter.multiple
+        ? {
+            kind: 'array',
+            elements: tool.selectedIds.map(value => ({kind: 'number', value})),
+          }
+        : {kind: 'number', value: event.id},
     },
     {undoGroup: contextual?.undoGroup},
   );
@@ -2131,6 +2134,29 @@ function formatTopologyId(kind: TopologyKind, id: number): string {
     surface: 'S',
   } as const satisfies Record<TopologyKind, string>;
   return `${prefixes[kind]}${id}`;
+}
+
+function formatTopologyIds(kind: TopologyKind, ids: readonly number[]): string {
+  if (ids.length === 0) return 'None';
+  const visible = ids.slice(0, 8).map(id => formatTopologyId(kind, id));
+  return ids.length > visible.length
+    ? `${visible.join(', ')} +${ids.length - visible.length}`
+    : visible.join(', ');
+}
+
+function topologySelectionLabel(
+  parameter: ToolSelectionParameterSchema,
+): string {
+  if (!parameter.multiple) return parameter.kind.toUpperCase();
+  return {
+    vertex: 'VERTICES',
+    edge: 'EDGES',
+    surface: 'SURFACES',
+  }[parameter.kind];
+}
+
+function sortedTopologyIds(ids: readonly number[]): number[] {
+  return [...ids].sort((left, right) => left - right);
 }
 
 function sortedEdgeIds(edgeIds: readonly EdgeId[]): EdgeId[] {
