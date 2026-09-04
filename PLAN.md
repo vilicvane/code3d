@@ -450,9 +450,11 @@ boundary instead of preserving an awkward planned abstraction.
 Status: declaration parsing, overload-aware signature resolution, runtime call
 context, scalar write-back, parameter actions, and the generic contextual panel
 are implemented. Primitive constructors, `offset()`, `scaled()`, `fillet()`,
-and `chamfer()` use the annotation path. Edge picking remains a viewport
-provider layered into the same panel and undo session; further selectable
-parameter kinds will be migrated provider by provider.
+`chamfer()`, and the scalar signatures of the screw tools use the annotation
+path. Edge picking remains a viewport provider layered into the same panel and
+undo session; object-valued parameters and further selectable parameter kinds
+will be migrated only after their concrete controls establish the next schema
+boundary.
 
 ### 5. Object combination tools
 

@@ -174,6 +174,7 @@ export type CounterboredHole = Model<CounterboredSocketCapHoleElements>;
 /**
  * @code3d.arguments ['M6', 18]
  * @code3d.arguments ['M8', 30]
+ * @code3d.param length {kind: 'length'}
  */
 export function screw(input: ScrewInput, length: number): Screw {
   const spec = resolveSpecification(input);
@@ -253,6 +254,7 @@ export function screw(input: ScrewInput, length: number): Screw {
 /**
  * @code3d.arguments ['M6', 10]
  * @code3d.arguments ['M6', {depth: 10, counterbore: false}]
+ * @code3d.param depth {kind: 'length', constraints: {exclusiveMin: 0}}
  */
 export function clearanceHole(
   input: ScrewInput,
