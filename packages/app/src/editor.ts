@@ -3,23 +3,26 @@ import 'monaco-editor/features/register.all';
 import 'monaco-editor/languages/definitions/typescript/register';
 import * as typeScriptLanguage from 'monaco-editor/languages/features/typescript/register';
 import EditorWorker from 'monaco-editor/editor/editor.worker?worker';
-import TypeScriptWorker from 'monaco-editor/language/typescript/ts.worker?worker';
+import ProjectTypeScriptWorker from './monaco/typescript.worker?worker';
 import type {CursorOptions, Options} from 'prettier';
 import {code3dCodeColors, code3dCodeFocusColors} from './code-theme';
+import {
+  injectedPackageFiles,
+  injectedPackageSpecifiers,
+} from './monaco/injected-packages';
 import {
   observeSuggestionFocus,
   type FocusedSuggestion,
 } from './monaco/suggestion-focus';
+import {
+  registerProjectTypeScriptCompletions,
+  typeScriptCompletionItemKind,
+} from './monaco/typescript-completions';
+import type {TypeScriptCompletionEntry} from './monaco/typescript-protocol';
 import {code3dAnnotations, type Code3dAnnotation} from './model/annotations';
 import type {DesignArgumentContext} from './model/compiler';
 import type {ModelDiagnostic} from './model/diagnostic';
 import type {SourceRef} from '@code3d/core/tooling';
-import coreIndexTypes from '../../core/bld/library/index.d.ts?raw';
-import coreRuntimeTypes from '../../core/bld/library/runtime.d.ts?raw';
-import coreSpatialTypes from '../../core/bld/library/spatial.d.ts?raw';
-import coreTopologyTypes from '../../core/bld/library/topology.d.ts?raw';
-import screwsTypes from '../../screws/bld/library/index.d.ts?raw';
-import iso4762Types from '../../screws/bld/library/iso-4762.d.ts?raw';
 import {
   normalizeProjectPath,
   projectPathIsWithin,
@@ -77,15 +80,6 @@ type FormatOptions = Readonly<{
   undoGroup?: string;
 }>;
 
-type TypeScriptCompletionEntry = Readonly<{
-  name: string;
-  kind: string;
-  kindModifiers?: string;
-  sortText: string;
-  insertText?: string;
-  replacementSpan?: Readonly<{start: number; length: number}>;
-}>;
-
 const modelPrettierOptions = {
   parser: 'typescript',
   printWidth: 80,
@@ -110,7 +104,7 @@ const modelDiagnosticOwner = 'code3d-model';
 (self as MonacoEnvironment).MonacoEnvironment = {
   getWorker(_moduleId, label) {
     if (label === 'typescript' || label === 'javascript') {
-      return new TypeScriptWorker();
+      return new ProjectTypeScriptWorker();
     }
     return new EditorWorker();
   },
@@ -138,34 +132,12 @@ typeScriptLanguage.typescriptDefaults.setDiagnosticsOptions({
   noSemanticValidation: false,
   noSyntaxValidation: false,
 });
-const packageDeclarations = [
-  {
-    filePath: 'file:///node_modules/@code3d/core/index.d.ts',
-    content: coreIndexTypes,
-  },
-  {
-    filePath: 'file:///node_modules/@code3d/core/runtime.d.ts',
-    content: coreRuntimeTypes,
-  },
-  {
-    filePath: 'file:///node_modules/@code3d/core/spatial.d.ts',
-    content: coreSpatialTypes,
-  },
-  {
-    filePath: 'file:///node_modules/@code3d/core/topology.d.ts',
-    content: coreTopologyTypes,
-  },
-  {
-    filePath: 'file:///node_modules/@code3d/screws/index.d.ts',
-    content: screwsTypes,
-  },
-  {
-    filePath: 'file:///node_modules/@code3d/screws/iso-4762.d.ts',
-    content: iso4762Types,
-  },
-];
-typeScriptLanguage.typescriptDefaults.setExtraLibs(packageDeclarations);
-typeScriptLanguage.javascriptDefaults.setExtraLibs(packageDeclarations);
+typeScriptLanguage.typescriptDefaults.setExtraLibs(injectedPackageFiles);
+typeScriptLanguage.javascriptDefaults.setExtraLibs(injectedPackageFiles);
+registerProjectTypeScriptCompletions(
+  projectLanguageSelector,
+  injectedPackageSpecifiers,
+);
 
 monaco.languages.registerDocumentFormattingEditProvider('typescript', {
   async provideDocumentFormattingEdits(model) {
@@ -647,6 +619,34 @@ export class CodeEditor {
     }
   }
 
+  async hasLanguageError(): Promise<boolean> {
+    const model = this.editor.getModel();
+    if (!model) return false;
+    const version = model.getVersionId();
+    try {
+      const factory = await (model.getLanguageId() === 'javascript'
+        ? typeScriptLanguage.getJavaScriptWorker()
+        : typeScriptLanguage.getTypeScriptWorker());
+      const worker = await factory(model.uri);
+      const diagnostics = await Promise.all([
+        worker.getSyntacticDiagnostics(model.uri.toString()),
+        worker.getSemanticDiagnostics(model.uri.toString()),
+      ]);
+      if (
+        model.isDisposed() ||
+        this.editor.getModel() !== model ||
+        model.getVersionId() !== version
+      ) {
+        return false;
+      }
+      return diagnostics.some(group =>
+        group.some(diagnostic => diagnostic.category === 1),
+      );
+    } catch {
+      return false;
+    }
+  }
+
   private async resolveCompletionFocus(
     suggestion: FocusedSuggestion,
     version: number,
@@ -755,7 +755,7 @@ export class CodeEditor {
     return {
       suggestions: completions.entries.map(entry => ({
         label: entry.name,
-        kind: completionItemKind(entry.kind),
+        kind: typeScriptCompletionItemKind(entry.kind),
         detail: entry.kind,
         insertText: entry.insertText ?? entry.name,
         sortText: entry.sortText,
@@ -1347,35 +1347,6 @@ function completionRange(
     position.lineNumber,
     word.endColumn,
   );
-}
-
-function completionItemKind(kind: string): monaco.languages.CompletionItemKind {
-  switch (kind) {
-    case 'keyword':
-    case 'primitive type':
-      return monaco.languages.CompletionItemKind.Keyword;
-    case 'const':
-    case 'let':
-    case 'var':
-    case 'local var':
-      return monaco.languages.CompletionItemKind.Variable;
-    case 'method':
-    case 'function':
-    case 'construct':
-    case 'call':
-    case 'index':
-      return monaco.languages.CompletionItemKind.Function;
-    case 'class':
-      return monaco.languages.CompletionItemKind.Class;
-    case 'interface':
-      return monaco.languages.CompletionItemKind.Interface;
-    case 'module':
-      return monaco.languages.CompletionItemKind.Module;
-    case 'enum':
-      return monaco.languages.CompletionItemKind.Enum;
-    default:
-      return monaco.languages.CompletionItemKind.Property;
-  }
 }
 
 function annotationDecorations(

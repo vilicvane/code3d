@@ -790,7 +790,15 @@ async function runModel(
     }
     currentModule = nextModule;
     currentModuleSourceVersion = sourceVersion;
-    presentModelDiagnostic(nextModule.diagnostic);
+    if (
+      !(await presentModelDiagnostic(
+        nextModule.diagnostic,
+        revision,
+        sourceVersion,
+      ))
+    ) {
+      return;
+    }
     codeEditor.setDesignArguments(nextModule.designArguments);
     codeEditor.trackSourceRefs(toolSourceRefs(nextModule));
     selectedDesignContextId = nextModule.activeDesignContextId;
@@ -846,7 +854,7 @@ async function runModel(
     const diagnostic =
       error instanceof ModelDiagnosticError ? error.diagnostic : undefined;
     if (diagnostic) {
-      presentModelDiagnostic(diagnostic);
+      await presentModelDiagnostic(diagnostic, revision, sourceVersion);
     } else {
       codeEditor.setModelDiagnostic();
       errorBar.textContent =
@@ -856,16 +864,32 @@ async function runModel(
   }
 }
 
-function presentModelDiagnostic(diagnostic?: ModelDiagnostic): void {
+async function presentModelDiagnostic(
+  diagnostic: ModelDiagnostic | undefined,
+  revision: number,
+  sourceVersion: number,
+): Promise<boolean> {
   codeEditor.setModelDiagnostic(diagnostic);
   if (!diagnostic || diagnostic.sourceRef) {
     errorBar.hidden = true;
-    return;
+    return true;
+  }
+  const hasLanguageError = await codeEditor.hasLanguageError();
+  if (
+    revision !== runRevision ||
+    sourceVersion !== codeEditor.sourceVersion()
+  ) {
+    return false;
+  }
+  if (hasLanguageError) {
+    errorBar.hidden = true;
+    return true;
   }
   errorBar.textContent = [diagnostic.summary, diagnostic.details]
     .filter(Boolean)
     .join('\n');
   errorBar.hidden = false;
+  return true;
 }
 
 function handleCompletionFocus(focus: CompletionFocus | undefined): void {
