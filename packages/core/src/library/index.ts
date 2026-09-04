@@ -24,6 +24,7 @@ export type {
   Model,
   PointAnchor,
   Surface,
+  Vertex,
 } from './runtime.js';
 export type {Quaternion, Vec3} from './spatial.js';
-export type {EdgeId, SurfaceId} from './topology.js';
+export type {EdgeId, SurfaceId, TopologyKind, VertexId} from './topology.js';

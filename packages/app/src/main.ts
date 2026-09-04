@@ -35,6 +35,7 @@ import type {
   ParameterTarget,
   ParameterUsage,
   SourceRef,
+  TopologyKind,
 } from '@code3d/core/tooling';
 import {
   booleanOperationSourceDecoration,
@@ -2123,8 +2124,13 @@ function formatEdgeIds(edgeIds: readonly EdgeId[]): string {
     : visible.join(', ');
 }
 
-function formatTopologyId(kind: 'edge' | 'surface', id: number): string {
-  return `${kind === 'edge' ? 'E' : 'S'}${id}`;
+function formatTopologyId(kind: TopologyKind, id: number): string {
+  const prefixes = {
+    vertex: 'V',
+    edge: 'E',
+    surface: 'S',
+  } as const satisfies Record<TopologyKind, string>;
+  return `${prefixes[kind]}${id}`;
 }
 
 function sortedEdgeIds(edgeIds: readonly EdgeId[]): EdgeId[] {

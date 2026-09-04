@@ -8,7 +8,6 @@ import type {
   SourceTarget,
   SourceTargetEvaluation,
 } from './model/compiler';
-import type {ToolSelectionKind} from './model/tool-schema';
 import type {
   EdgeId,
   ModelOperationInputRole,
@@ -16,6 +15,7 @@ import type {
   ParameterUsage,
   RenderMesh,
   SourceRef,
+  TopologyKind,
   Vec3,
 } from '@code3d/core/tooling';
 import {
@@ -98,20 +98,20 @@ export type ModelViewportOptions = Readonly<{
 export type TopologySelectionEvent =
   | Readonly<{
       kind: 'hover';
-      topology: ToolSelectionKind;
+      topology: TopologyKind;
       id?: number;
       selectedIds: readonly number[];
     }>
   | Readonly<{
       kind: 'change';
-      topology: ToolSelectionKind;
+      topology: TopologyKind;
       id: number;
       selectedIds: readonly number[];
     }>
   | Readonly<{kind: 'cancel'}>;
 
 type TopologySelectionState = {
-  kind: ToolSelectionKind;
+  kind: TopologyKind;
   multiple: boolean;
   occurrenceKey: string;
   mesh: RenderMesh;
@@ -138,6 +138,8 @@ const boxCornerPairs = [
 const boxCornerFraction = 0.18;
 const symbolLineWidth = 1;
 const interactiveLineWidth = 2;
+const topologyGuidePointSize = 6;
+const interactivePointSize = 10;
 const toolSurfaceOpacity = 0.22;
 
 class CornerBoxHelper extends THREE.LineSegments<
@@ -541,7 +543,7 @@ export class ModelViewport {
   beginTopologySelection(
     occurrenceKey: string,
     inputNodeId: string,
-    kind: ToolSelectionKind,
+    kind: TopologyKind,
     multiple: boolean,
     initialIds: readonly number[] = [],
   ): readonly number[] {
@@ -575,6 +577,7 @@ export class ModelViewport {
       selectedIds: new Set(initialIds),
     };
     this.raycaster.params.Line.threshold = kind === 'edge' ? 1.5 : 1;
+    this.raycaster.params.Points.threshold = kind === 'vertex' ? 2 : 1;
     this.renderer.domElement.classList.add('topology-selection-active');
     this.rebuildSelectionHelper();
     this.updatePositionGizmo();
@@ -1361,6 +1364,7 @@ export class ModelViewport {
     }
     this.topologySelection = undefined;
     this.raycaster.params.Line.threshold = 1;
+    this.raycaster.params.Points.threshold = 1;
     this.renderer.domElement.classList.remove('topology-selection-active');
   }
 
@@ -1785,11 +1789,37 @@ function axisIndex(argument: string): 0 | 1 | 2 | undefined {
 function createTopologySelectionGuide(
   node: ModelSnapshotObject,
   mesh: RenderMesh,
-  kind: ToolSelectionKind,
+  kind: TopologyKind,
 ): Readonly<{guide: THREE.Group; pickObject: THREE.Object3D}> {
   const guide = new THREE.Group();
   guide.name = `${node.name} (selectable ${kind}s)`;
   applyNodeTransform(guide, node);
+  if (kind === 'vertex') {
+    if (mesh.topologyVertices.length === 0) {
+      throw new Error('The model has no renderable vertices.');
+    }
+    const pickObject = createScreenSpacePoints(
+      mesh.topologyVertices,
+      '#ffffff',
+      interactivePointSize,
+      0,
+      false,
+      0,
+    );
+    pickObject.userData.vertexIds = mesh.vertexIds;
+    guide.add(
+      createScreenSpacePoints(
+        mesh.topologyVertices,
+        '#aeb7a8',
+        topologyGuidePointSize,
+        0.72,
+        false,
+        27,
+      ),
+      pickObject,
+    );
+    return {guide, pickObject};
+  }
   if (kind === 'surface') {
     const pickObject = new THREE.Mesh(
       createSurfaceGeometry(mesh),
@@ -2146,6 +2176,50 @@ function createScreenSpaceEdgeLines(
   return lines;
 }
 
+function createScreenSpacePoints(
+  positions: Float32Array,
+  color: string,
+  size: number,
+  opacity = 1,
+  depthTest = true,
+  renderOrder = 0,
+): THREE.Points {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  const points = new THREE.Points(
+    geometry,
+    new THREE.PointsMaterial({
+      color,
+      size,
+      sizeAttenuation: false,
+      transparent: opacity < 1,
+      opacity,
+      depthTest,
+      depthWrite: false,
+      toneMapped: false,
+    }),
+  );
+  points.renderOrder = renderOrder;
+  return points;
+}
+
+function vertexSelectionPositions(
+  mesh: RenderMesh,
+  vertexIds: ReadonlySet<number>,
+): Float32Array | undefined {
+  const positions: number[] = [];
+  mesh.vertexIds.forEach((vertexId, index) => {
+    if (!vertexIds.has(vertexId)) return;
+    const offset = index * 3;
+    positions.push(
+      mesh.topologyVertices[offset],
+      mesh.topologyVertices[offset + 1],
+      mesh.topologyVertices[offset + 2],
+    );
+  });
+  return positions.length > 0 ? new Float32Array(positions) : undefined;
+}
+
 function edgeSelectionPositions(
   mesh: RenderMesh,
   edgeIds: ReadonlySet<EdgeId>,
@@ -2171,11 +2245,24 @@ function edgeSelectionPositions(
 
 function createTopologyHighlight(
   mesh: RenderMesh,
-  kind: ToolSelectionKind,
+  kind: TopologyKind,
   ids: ReadonlySet<number>,
   color: string,
   renderOrder: number,
 ): THREE.Object3D | undefined {
+  if (kind === 'vertex') {
+    const positions = vertexSelectionPositions(mesh, ids);
+    return positions
+      ? createScreenSpacePoints(
+          positions,
+          color,
+          interactivePointSize,
+          1,
+          false,
+          renderOrder,
+        )
+      : undefined;
+  }
   if (kind === 'edge') {
     const positions = edgeSelectionPositions(mesh, ids);
     return positions
@@ -2202,6 +2289,8 @@ function createTopologyHighlight(
       normals: mesh.normals,
       triangles,
       edges: new Float32Array(),
+      topologyVertices: new Float32Array(),
+      vertexIds: [],
       surfaceGroups: [],
       edgeGroups: [],
     }),
@@ -2219,11 +2308,13 @@ function createTopologyHighlight(
   return surface;
 }
 
-function topologyIds(mesh: RenderMesh, kind: ToolSelectionKind): number[] {
+function topologyIds(mesh: RenderMesh, kind: TopologyKind): number[] {
   const ids =
-    kind === 'edge'
-      ? mesh.edgeGroups.map(group => group.edgeId)
-      : mesh.surfaceGroups.map(group => group.surfaceId);
+    kind === 'vertex'
+      ? mesh.vertexIds
+      : kind === 'edge'
+        ? mesh.edgeGroups.map(group => group.edgeId)
+        : mesh.surfaceGroups.map(group => group.surfaceId);
   return [...new Set(ids)].sort((left, right) => left - right);
 }
 
@@ -2233,8 +2324,16 @@ function selectedTopologyIds(selection: TopologySelectionState): number[] {
 
 function topologyIdFromIntersection(
   hit: THREE.Intersection,
-  kind: ToolSelectionKind,
+  kind: TopologyKind,
 ): number | undefined {
+  if (kind === 'vertex') {
+    if (!(hit.object instanceof THREE.Points) || hit.index === undefined) {
+      return undefined;
+    }
+    const ids = hit.object.userData.vertexIds as
+      RenderMesh['vertexIds'] | undefined;
+    return ids?.[hit.index];
+  }
   if (kind === 'surface') {
     if (!(hit.object instanceof THREE.Mesh) || hit.faceIndex == null) {
       return undefined;
