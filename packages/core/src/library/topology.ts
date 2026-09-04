@@ -2,6 +2,7 @@ import {
   cast,
   getOC,
   iterTopo,
+  type AnyShape,
   type Edge as ReplicadEdge,
   type Face as ReplicadFace,
   type Shape3D,
@@ -19,7 +20,7 @@ export type SurfaceId = number;
 export type TopologyKind = 'vertex' | 'edge' | 'surface';
 
 type StableTopology<Id extends number> = Readonly<{
-  /** Stable IDs aligned with the corresponding Shape3D traversal order. */
+  /** Stable IDs aligned with the corresponding shape traversal order. */
   ids: readonly Id[];
   /** High-water mark. Retired IDs below this value are never reused. */
   nextId: Id;
@@ -29,7 +30,7 @@ export type VertexTopology = StableTopology<VertexId>;
 export type EdgeTopology = StableTopology<EdgeId>;
 export type SurfaceTopology = StableTopology<SurfaceId>;
 
-export type SolidTopology = Readonly<{
+export type ShapeTopology = Readonly<{
   vertices: VertexTopology;
   edges: EdgeTopology;
   surfaces: SurfaceTopology;
@@ -42,7 +43,7 @@ export type VertexRenderData = Readonly<{
 
 export type EdgeModificationResult = Readonly<{
   shape: Shape3D;
-  topology: SolidTopology;
+  topology: ShapeTopology;
   selectedEdgeIds: readonly EdgeId[];
 }>;
 
@@ -50,8 +51,17 @@ export type BooleanTopologyOperation = 'cut' | 'fuse' | 'intersect';
 
 export type BooleanTopologyResult = Readonly<{
   shape: Shape3D;
-  topology: SolidTopology;
+  topology: ShapeTopology;
 }>;
+
+export type TopologyPointData = Readonly<{
+  position: readonly [x: number, y: number, z: number];
+}>;
+
+export type TopologyDirectionData = TopologyPointData &
+  Readonly<{
+    direction: readonly [x: number, y: number, z: number];
+  }>;
 
 type ShapeHistory = Readonly<{
   Modified(shape: TopoDS_Shape): NCollection_List_TopoDS_Shape;
@@ -86,12 +96,12 @@ type LocalEdgeOperation = Readonly<{
   NbEdges(index: number): number;
 }>;
 
-export function initialSolidTopology(shape: Shape3D): SolidTopology {
+export function initialShapeTopology(shape: AnyShape): ShapeTopology {
   const vertices = shapeVertices(shape);
   const edges = shape.edges;
   const surfaces = shape.faces;
   try {
-    return solidTopology(
+    return shapeTopology(
       initialTopology(vertices) as VertexTopology,
       initialTopology(edges) as EdgeTopology,
       initialTopology(surfaces) as SurfaceTopology,
@@ -103,10 +113,10 @@ export function initialSolidTopology(shape: Shape3D): SolidTopology {
   }
 }
 
-export function preserveSolidTopology(
-  shape: Shape3D,
-  source: SolidTopology,
-): SolidTopology {
+export function preserveShapeTopology(
+  shape: AnyShape,
+  source: ShapeTopology,
+): ShapeTopology {
   const vertices = shapeVertices(shape);
   const edges = shape.edges;
   const surfaces = shape.faces;
@@ -114,7 +124,7 @@ export function preserveSolidTopology(
     assertTopologyLength('vertex', vertices, source.vertices);
     assertTopologyLength('edge', edges, source.edges);
     assertTopologyLength('surface', surfaces, source.surfaces);
-    return solidTopology(
+    return shapeTopology(
       stableTopology(source.vertices.ids, source.vertices.nextId),
       stableTopology(source.edges.ids, source.edges.nextId),
       stableTopology(source.surfaces.ids, source.surfaces.nextId),
@@ -128,7 +138,7 @@ export function preserveSolidTopology(
 
 export function filletEdges(
   shape: Shape3D,
-  source: SolidTopology,
+  source: ShapeTopology,
   radius: number,
   edgeIds?: readonly EdgeId[],
 ): EdgeModificationResult {
@@ -137,7 +147,7 @@ export function filletEdges(
 
 export function chamferEdges(
   shape: Shape3D,
-  source: SolidTopology,
+  source: ShapeTopology,
   distance: number,
   edgeIds?: readonly EdgeId[],
 ): EdgeModificationResult {
@@ -148,7 +158,7 @@ export function booleanWithTopology(
   left: Shape3D,
   right: Shape3D,
   operation: BooleanTopologyOperation,
-  source: SolidTopology,
+  source: ShapeTopology,
 ): BooleanTopologyResult {
   const oc = getOC();
   const builder =
@@ -164,7 +174,7 @@ export function booleanWithTopology(
     result = castShape3D(builder.Shape());
     return {
       shape: result,
-      topology: transferSolidTopology(left, source, result, builder),
+      topology: transferShapeTopology(left, source, result, builder),
     };
   } catch (error) {
     result?.delete();
@@ -175,7 +185,7 @@ export function booleanWithTopology(
 }
 
 export function stableEdgeGroups(
-  shape: Shape3D,
+  shape: AnyShape,
   topology: EdgeTopology,
   groups: readonly RawEdgeGroup[],
 ): readonly RawEdgeGroup[] {
@@ -194,7 +204,7 @@ export function stableEdgeGroups(
 }
 
 export function stableSurfaceGroups(
-  shape: Shape3D,
+  shape: AnyShape,
   topology: SurfaceTopology,
   groups: readonly RawSurfaceGroup[],
 ): readonly StableSurfaceGroup[] {
@@ -217,7 +227,7 @@ export function stableSurfaceGroups(
 }
 
 export function stableVertexData(
-  shape: Shape3D,
+  shape: AnyShape,
   topology: VertexTopology,
 ): VertexRenderData {
   const vertices = shapeVertices(shape);
@@ -277,10 +287,69 @@ export function resolveVertex(
   return resolveTopologyId('vertex', topology, vertexId);
 }
 
+export function topologyVertexPoint(
+  shape: AnyShape,
+  topology: VertexTopology,
+  vertexId: VertexId,
+): TopologyPointData {
+  const vertices = shapeVertices(shape);
+  try {
+    const index = resolveTopologyIndex('vertex', topology, vertexId);
+    assertTopologyLength('vertex', vertices, topology);
+    return {position: vertices[index].asTuple()};
+  } finally {
+    deleteShapes(vertices);
+  }
+}
+
+export function topologyEdgeDirection(
+  shape: AnyShape,
+  topology: EdgeTopology,
+  edgeId: EdgeId,
+): TopologyDirectionData {
+  const edges = shape.edges;
+  try {
+    const index = resolveTopologyIndex('edge', topology, edgeId);
+    assertTopologyLength('edge', edges, topology);
+    const point = edges[index].pointAt(0.5);
+    const tangent = edges[index].tangentAt(0.5);
+    try {
+      return {position: point.toTuple(), direction: tangent.toTuple()};
+    } finally {
+      point.delete();
+      tangent.delete();
+    }
+  } finally {
+    deleteShapes(edges);
+  }
+}
+
+export function topologySurfaceDirection(
+  shape: AnyShape,
+  topology: SurfaceTopology,
+  surfaceId: SurfaceId,
+): TopologyDirectionData {
+  const surfaces = shape.faces;
+  try {
+    const index = resolveTopologyIndex('surface', topology, surfaceId);
+    assertTopologyLength('surface', surfaces, topology);
+    const center = surfaces[index].center;
+    const normal = surfaces[index].normalAt(center);
+    try {
+      return {position: center.toTuple(), direction: normal.toTuple()};
+    } finally {
+      center.delete();
+      normal.delete();
+    }
+  } finally {
+    deleteShapes(surfaces);
+  }
+}
+
 function modifyEdges(
   kind: 'fillet' | 'chamfer',
   shape: Shape3D,
-  source: SolidTopology,
+  source: ShapeTopology,
   amount: number,
   requestedIds?: readonly EdgeId[],
 ): EdgeModificationResult {
@@ -290,7 +359,7 @@ function modifyEdges(
     try {
       return {
         shape: result,
-        topology: preserveSolidTopology(result, source),
+        topology: preserveShapeTopology(result, source),
         selectedEdgeIds,
       };
     } catch (error) {
@@ -324,7 +393,7 @@ function modifyEdges(
     result = castShape3D(builder.Shape());
     return {
       shape: result,
-      topology: transferSolidTopology(shape, source, result, builder),
+      topology: transferShapeTopology(shape, source, result, builder),
       selectedEdgeIds,
     };
   } catch (error) {
@@ -395,6 +464,15 @@ function resolveTopologyId<Id extends number>(
   return id;
 }
 
+function resolveTopologyIndex<Id extends number>(
+  kind: TopologyKind,
+  topology: StableTopology<Id>,
+  id: Id,
+): number {
+  resolveTopologyId(kind, topology, id);
+  return topology.ids.indexOf(id);
+}
+
 function assertTopologyId(kind: TopologyKind, id: number): void {
   if (!Number.isSafeInteger(id) || id < 1) {
     const prefix = topologyMetadata[kind].prefix;
@@ -404,12 +482,12 @@ function assertTopologyId(kind: TopologyKind, id: number): void {
   }
 }
 
-function transferSolidTopology(
+function transferShapeTopology(
   input: Shape3D,
-  source: SolidTopology,
+  source: ShapeTopology,
   output: Shape3D,
   history: ShapeHistory,
-): SolidTopology {
+): ShapeTopology {
   const inputVertices = shapeVertices(input);
   const outputVertices = shapeVertices(output);
   const inputEdges = input.edges;
@@ -417,7 +495,7 @@ function transferSolidTopology(
   const inputSurfaces = input.faces;
   const outputSurfaces = output.faces;
   try {
-    return solidTopology(
+    return shapeTopology(
       transferTopology(
         'vertex',
         inputVertices,
@@ -563,11 +641,11 @@ function stableTopology<Id extends number>(
   return Object.freeze({ids: Object.freeze([...ids]), nextId});
 }
 
-function solidTopology(
+function shapeTopology(
   vertices: VertexTopology,
   edges: EdgeTopology,
   surfaces: SurfaceTopology,
-): SolidTopology {
+): ShapeTopology {
   return Object.freeze({vertices, edges, surfaces});
 }
 
@@ -592,7 +670,7 @@ const topologyMetadata = {
   Readonly<{prefix: string; plural: string}>
 >;
 
-function shapeVertices(shape: Shape3D): ReplicadVertex[] {
+function shapeVertices(shape: AnyShape): ReplicadVertex[] {
   return Array.from(iterTopo(shape.wrapped, 'vertex'), vertex =>
     cast(vertex),
   ) as ReplicadVertex[];

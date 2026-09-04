@@ -18,6 +18,8 @@ export type {
   ElementKind,
   ElementSnapshot,
   ModelElementReference,
+  ModelGeometryKind,
+  ModelKind,
   ModelOperationInputRole,
   ModelOperationKind,
   ModelOperationRegionSnapshot,

@@ -1698,7 +1698,7 @@ function syncTopologyReferenceSelectionProvider(
     !parameter ||
     !argument ||
     !occurrence ||
-    occurrence.node.kind !== 'solid'
+    occurrence.node.kind === 'group'
   ) {
     finishTopologyReferenceSelectionTool();
     return;

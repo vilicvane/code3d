@@ -144,6 +144,20 @@ export function createRenderedModelNode(
   }
 
   const container = new THREE.Group();
+  if (node.kind === 'vertex') {
+    const pointGeometry = new THREE.BufferGeometry();
+    pointGeometry.setAttribute(
+      'position',
+      new THREE.BufferAttribute(node.mesh.topologyVertices, 3),
+    );
+    const pointMaterial = new THREE.PointsMaterial({
+      color: node.color ?? unpaintedSurfaceColor,
+      size: 5,
+      sizeAttenuation: false,
+    });
+    container.add(new THREE.Points(pointGeometry, pointMaterial));
+    return container;
+  }
   const isUnpainted = node.color === undefined;
   const material = new THREE.MeshStandardMaterial({
     color: node.color ?? unpaintedSurfaceColor,

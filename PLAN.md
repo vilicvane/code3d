@@ -51,15 +51,16 @@ silently reorder the active milestones. Closed requests move to
 - Model values have no chainable `named()` operation. Source bindings identify
   authored values; intrinsic primitive and group names remain only as runtime
   display and diagnostic fallbacks.
-- Solid vertices, edges, and surfaces have independent model-local numeric ID
+- Geometric model vertices, edges, and surfaces have independent model-local numeric ID
   namespaces.
   Primitive traversal assigns the initial IDs; a derived value preserves
   strict one-to-one topology history, allocates newly created or ambiguous
   elements above the inherited high-water mark, and never reuses retired IDs.
   Deterministic source replay is the persistence mechanism rather than a
-  separate topology ledger. `solid.vertex(id)`, `solid.edge(id)`, and
-  `solid.surface(id)` return topology references without inventing the complete
-  frame semantics of named point, line, or face anchors.
+  separate topology ledger. `model.vertex(id)`, `model.edge(id)`, and
+  `model.surface(id)` return complete point, line, and face anchors: vertices
+  use the owning model orientation, edges use their midpoint and tangent, and
+  surfaces use their center and normal.
 - A composite is broad: any connected set of occurrences and spatial relations
   is a composite, including copy, pattern, boolean operands, groups, and
   assemblies. A composite can itself be reused as geometry in a larger model.
@@ -471,6 +472,34 @@ are viewport providers layered into the same panel and undo session;
 object-valued parameters and further selectable parameter kinds will be
 migrated only after their concrete controls establish the next schema boundary.
 
+### 4e. First-class profiles, curves, and loft — complete
+
+- Generalize geometric model values beyond solids: planar faces, curve edges,
+  and vertices remain ordinary immutable, traceable, renderable model objects
+  and therefore use the same `relate()` mechanism as solids.
+- Keep local profile constructors in the XZ plane with +Y as their normal,
+  matching the existing primitive axis convention. Start with circles,
+  ellipses, rectangles, and regular polygons; start 3D curves with line, arc,
+  Bezier, and interpolated spline constructors.
+- Make `.surface(id)`, `.edge(id)`, and `.vertex(id)` usable as face, line, and
+  point anchors. Faces use their center and normal, edges use their midpoint
+  and tangent, and vertices use their point with the owning model orientation;
+  all remain complete deterministic frames rather than introducing a partial
+  constraint solver.
+- Let `loft(sections, {spine})` transform every related input into the first
+  section's frame. Without a spine it builds a through-sections loft; with a
+  spine it uses a multi-section pipe shell so the curve affects the generated
+  geometry rather than serving only as a placement guide.
+- Validate the complete path with two non-parallel related planar profiles at
+  the endpoints of a curved spine, including Node execution, Studio rendering,
+  source context, and topology selection on the result and inputs.
+
+Status: complete. Node tests cover renderable face/edge/vertex models, all three
+topology anchor kinds, ordinary through-section loft, and a curved-spine loft
+between nonparallel circle and rectangle profiles. Host-Chrome validation also
+confirmed Studio rendering, section/spine source context, and Surface, Edge,
+and Vertex viewport selectors on the new model kinds and loft result.
+
 ### 5. Object combination tools
 
 - Handwritten standalone `union`, `cut`, and `intersect` functions are now the
@@ -485,10 +514,8 @@ migrated only after their concrete controls establish the next schema boundary.
 - Whether any solid-modeling use case justifies partially constrained point,
   line, plane, distance, or angle relations. General partial constraint solving
   is expected for sketching, but is not assumed to be necessary for solids.
-- Which explicit topology references, if any, should be promotable into reusable
-  named point, line, or face anchors, and how the author supplies the additional
-  frame semantics and stable semantic name that a raw vertex, edge, or surface
-  ID lacks.
+- Whether topology anchors should be promotable into reusable semantic names,
+  and how those names should behave when the underlying topology is retired.
 - How Boolean results expose operand anchors and provenance for later relations.
 - Whether uniform scaling is geometry derivation, occurrence placement, or two
   explicitly named operations.

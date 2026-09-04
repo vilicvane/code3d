@@ -1964,7 +1964,9 @@ function isCompositionInputRole(role: ModelOperationInputRole): boolean {
     role === 'operand' ||
     role === 'tool' ||
     role === 'child' ||
-    role === 'collection'
+    role === 'collection' ||
+    role === 'section' ||
+    role === 'spine'
   );
 }
 
@@ -2446,12 +2448,27 @@ type OperationInputPlan = Readonly<{
     rest: ModelOperationInputRole;
     indexOffset?: number;
   }>;
+  object?: Readonly<{
+    argumentIndex: number;
+    properties: Readonly<Record<string, ModelOperationInputRole>>;
+    fallback: ModelOperationInputRole;
+  }>;
 }>;
 
 function operationInputPlan(
   node: ts.CallExpression,
 ): OperationInputPlan | undefined {
   if (ts.isIdentifier(node.expression)) {
+    if (node.expression.text === 'loft') {
+      return {
+        collection: {argumentIndex: 0, first: 'receiver', rest: 'section'},
+        object: {
+          argumentIndex: 1,
+          properties: {spine: 'spine'},
+          fallback: 'spine',
+        },
+      };
+    }
     if (node.expression.text === 'union') {
       return {
         collection: {argumentIndex: 0, first: 'receiver', rest: 'operand'},
@@ -2538,6 +2555,16 @@ function instrumentOperationInputs(
         factory,
       );
     }
+    if (plan.object?.argumentIndex === index && original.arguments[index]) {
+      return instrumentOperationObject(
+        original.arguments[index],
+        argument,
+        plan.object,
+        siteId,
+        sourceFile,
+        factory,
+      );
+    }
     const role = plan.arguments?.[index] ?? plan.rest;
     const originalArgument = original.arguments[index];
     if (!role || !originalArgument) {
@@ -2569,6 +2596,84 @@ function instrumentOperationInputs(
     visited.typeArguments,
     args,
   );
+}
+
+function instrumentOperationObject(
+  original: ts.Expression,
+  visited: ts.Expression,
+  plan: NonNullable<OperationInputPlan['object']>,
+  siteId: string,
+  sourceFile: ts.SourceFile,
+  factory: ts.NodeFactory,
+): ts.Expression {
+  if (
+    !ts.isObjectLiteralExpression(original) ||
+    !ts.isObjectLiteralExpression(visited)
+  ) {
+    return operationInputExpression(
+      visited,
+      original,
+      siteId,
+      plan.fallback,
+      plan.argumentIndex,
+      sourceFile,
+      factory,
+    );
+  }
+
+  const properties = visited.properties.map((property, index) => {
+    const originalProperty = original.properties[index];
+    if (!originalProperty) return property;
+    const name = operationObjectPropertyName(originalProperty.name);
+    const role = name ? plan.properties[name] : undefined;
+    if (!role) return property;
+
+    if (
+      ts.isPropertyAssignment(originalProperty) &&
+      ts.isPropertyAssignment(property)
+    ) {
+      return factory.updatePropertyAssignment(
+        property,
+        property.name,
+        operationInputExpression(
+          property.initializer,
+          originalProperty.initializer,
+          siteId,
+          role,
+          plan.argumentIndex,
+          sourceFile,
+          factory,
+        ),
+      );
+    }
+    if (
+      ts.isShorthandPropertyAssignment(originalProperty) &&
+      ts.isShorthandPropertyAssignment(property)
+    ) {
+      return factory.createPropertyAssignment(
+        property.name,
+        operationInputExpression(
+          factory.createIdentifier(property.name.text),
+          originalProperty.name,
+          siteId,
+          role,
+          plan.argumentIndex,
+          sourceFile,
+          factory,
+        ),
+      );
+    }
+    return property;
+  });
+  return factory.updateObjectLiteralExpression(visited, properties);
+}
+
+function operationObjectPropertyName(
+  name: ts.PropertyName | undefined,
+): string | undefined {
+  if (!name) return undefined;
+  if (ts.isIdentifier(name) || ts.isStringLiteralLike(name)) return name.text;
+  return undefined;
 }
 
 function instrumentOperationCollection(
