@@ -2114,6 +2114,11 @@ function toolSourceRefs(module: ModelModule): SourceRef[] {
           ? [argument.target.removalSourceRef]
           : []),
       ]) ?? []),
+      ...target.evaluations.flatMap(
+        evaluation =>
+          evaluation.parameters?.map(parameter => parameter.target.sourceRef) ??
+          [],
+      ),
       ...(target.operation?.edgeArgument
         ? [
             target.operation.edgeArgument.sourceRef,
