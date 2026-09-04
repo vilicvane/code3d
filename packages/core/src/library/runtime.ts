@@ -267,6 +267,26 @@ export type ModelTopologyReference = Readonly<{
   id: VertexId | EdgeId | SurfaceId;
 }>;
 
+export type ConstraintTraceReference = Readonly<{
+  constraintId: string;
+  source: ModelObject;
+  target: ModelObject;
+}>;
+
+export type ModelOperationInstrumentation = Readonly<{
+  siteId: string;
+  execution: number;
+  order: number;
+  sourceRef: SourceRef;
+  parameters: readonly ParameterUsage[];
+}>;
+
+export type ModelObjectRuntimeInfo = Readonly<{
+  nodeId: string;
+  name: string;
+  sourceRefs: readonly SourceRef[];
+}>;
+
 type StoredConstraint = Readonly<{
   id: string;
   kind: 'on';
@@ -373,8 +393,10 @@ const defaultModelNames = {
   group: 'Group',
 } as const satisfies Record<ModelKind, string>;
 
+const anchorKind = Symbol('anchorKind');
+
 export interface Anchor<Kind extends ElementKind = ElementKind> {
-  readonly elementKind: Kind;
+  readonly [anchorKind]: Kind;
   on(target: Anchor): Constraint;
 }
 
@@ -479,6 +501,7 @@ export type CurveElements = Readonly<{
 class ModelAnchor<
   Kind extends ElementKind = ElementKind,
 > implements Anchor<Kind> {
+  declare readonly [anchorKind]: Kind;
   readonly elementKind: Kind;
 
   constructor(readonly reference: AnchorReference) {
@@ -486,7 +509,7 @@ class ModelAnchor<
   }
 
   on(target: Anchor): Constraint {
-    return new Constraint(this.reference, anchorReference(target));
+    return Constraint.create(this.reference, anchorReference(target));
   }
 }
 
@@ -499,6 +522,7 @@ type TopologyIdByKind = Readonly<{
 class ModelTopologyElement<Kind extends TopologyKind> implements Anchor<
   TopologyElementKind<Kind>
 > {
+  declare readonly [anchorKind]: TopologyElementKind<Kind>;
   readonly elementKind: TopologyElementKind<Kind>;
 
   constructor(
@@ -513,7 +537,7 @@ class ModelTopologyElement<Kind extends TopologyKind> implements Anchor<
   }
 
   on(target: Anchor): Constraint {
-    return new Constraint(
+    return Constraint.create(
       topologyAnchorReference(this),
       anchorReference(target),
     );
@@ -548,7 +572,7 @@ export class Constraint {
   private readonly sourceRefs: SourceRef[];
   private readonly parameters: ParameterUsage[];
 
-  constructor(
+  private constructor(
     private readonly source: AnchorReference,
     private readonly target: AnchorReference,
     private readonly displacement: Vec3 = origin,
@@ -559,6 +583,11 @@ export class Constraint {
   ) {
     this.sourceRefs = [...sourceRefs];
     this.parameters = [...parameters];
+  }
+
+  /** @internal */
+  static create(source: AnchorReference, target: AnchorReference): Constraint {
+    return new Constraint(source, target);
   }
 
   /**
@@ -591,7 +620,7 @@ export class Constraint {
     );
   }
 
-  /** Runtime instrumentation hook. Not part of the authoring API. */
+  /** @internal */
   attachSource(sourceRef: SourceRef): void {
     const previous = this.sourceRefs.at(-1);
     if (
@@ -603,17 +632,13 @@ export class Constraint {
     }
   }
 
-  /** Runtime instrumentation hook. Not part of the authoring API. */
+  /** @internal */
   attachParameters(parameters: readonly ParameterUsage[]): void {
     appendUniqueParameters(this.parameters, parameters);
   }
 
-  /** Runtime instrumentation hook. Not part of the authoring API. */
-  traceReference(): Readonly<{
-    constraintId: string;
-    source: ModelObject;
-    target: ModelObject;
-  }> {
+  /** @internal */
+  traceReference(): ConstraintTraceReference {
     return {
       constraintId: this.constraintId,
       source: this.source.model,
@@ -621,6 +646,7 @@ export class Constraint {
     };
   }
 
+  /** @internal */
   storeFor(model: ModelObject): StoredConstraint {
     if (this.source.model !== model) {
       throw new Error(
@@ -644,13 +670,22 @@ export class ModelObject<
   Elements extends NamedElements = {},
   Kind extends ModelKind = ModelKind,
 > implements Anchor<ModelElementKind<Kind>> {
+  declare readonly [anchorKind]: ModelElementKind<Kind>;
+  /** @internal */
   readonly elementKind: ModelElementKind<Kind>;
+  /** @internal */
   readonly nodeId: string;
+  /** @internal */
   readonly kind: Kind;
+  /** @internal */
   readonly name: string;
+  /** @internal */
   readonly color?: string;
+  /** @internal */
   readonly children: readonly ModelObject[];
+  /** @internal */
   readonly sourceRefs: SourceRef[];
+  /** @internal */
   readonly parameters: ParameterUsage[];
   private readonly geometry?: ModelGeometry;
   private readonly meshTolerance: number;
@@ -659,7 +694,7 @@ export class ModelObject<
   private constraints: StoredConstraint[];
   private readonly operation: StoredOperation;
 
-  constructor(init: ModelObjectInit<Kind>) {
+  private constructor(init: ModelObjectInit<Kind>) {
     if (init.kind !== 'group' && !init.geometry) {
       throw new Error(
         'A geometric model object must contain an OpenCascade shape.',
@@ -700,14 +735,22 @@ export class ModelObject<
     }
   }
 
+  /** @internal */
+  static create<
+    Elements extends NamedElements = {},
+    Kind extends ModelKind = ModelKind,
+  >(init: ModelObjectInit<Kind>): ModelObject<Elements, Kind> {
+    return new ModelObject<Elements, Kind>(init);
+  }
+
   on(target: Anchor): Constraint {
-    return new Constraint(
+    return Constraint.create(
       this.relationAnchorReference(),
       anchorReference(target),
     );
   }
 
-  /** Runtime relation hook. Not part of the authoring API. */
+  /** @internal */
   relationAnchorReference(): AnchorReference {
     return {model: this, name: 'origin', ...this.intrinsic};
   }
@@ -963,6 +1006,7 @@ export class ModelObject<
     );
   }
 
+  /** @internal */
   withChildren(
     this: ModelObject<Elements, 'group'>,
     children: readonly ModelObject[],
@@ -980,7 +1024,7 @@ export class ModelObject<
     );
   }
 
-  /** Runtime instrumentation hook. Not part of the authoring API. */
+  /** @internal */
   attachSource(sourceRef: SourceRef): void {
     const previous = this.sourceRefs.at(-1);
     if (
@@ -992,12 +1036,12 @@ export class ModelObject<
     }
   }
 
-  /** Runtime instrumentation hook. Not part of the authoring API. */
+  /** @internal */
   attachParameters(parameters: readonly ParameterUsage[]): void {
     appendUniqueParameters(this.parameters, parameters);
   }
 
-  /** Runtime instrumentation hook. Not part of the authoring API. */
+  /** @internal */
   attachOperationTrace(
     siteId: string,
     execution: number,
@@ -1010,7 +1054,7 @@ export class ModelObject<
     Object.assign(this.operation, {siteId, execution, order, sourceRef});
   }
 
-  /** Runtime graph hook. Not part of the authoring API. */
+  /** @internal */
   relatedObjects(): readonly ModelObject[] {
     return [
       ...this.children,
@@ -1019,6 +1063,7 @@ export class ModelObject<
     ];
   }
 
+  /** @internal */
   toSnapshot(
     meshCache: Map<AnyShape, RenderMesh> = new Map(),
   ): ModelSnapshotObject {
@@ -1089,6 +1134,7 @@ export class ModelObject<
     };
   }
 
+  /** @internal */
   disposeShape(disposed: Set<AnyShape>): void {
     const shapes = [
       ...(this.geometry ? [this.geometry.value.shape] : []),
@@ -1103,6 +1149,7 @@ export class ModelObject<
     this.children.forEach(child => child.disposeShape(disposed));
   }
 
+  /** @internal */
   [loftModels](
     this: ModelObject<Elements, 'face'>,
     others: readonly ModelObject<{}, 'face'>[],
@@ -1148,7 +1195,7 @@ export class ModelObject<
       }),
     );
     const inputs = [...sections, ...(spine ? [spine] : [])];
-    return new ModelObject<CanonicalElements, 'solid'>({
+    return ModelObject.create<CanonicalElements, 'solid'>({
       kind: 'solid',
       name: 'Loft',
       geometry,
@@ -1173,6 +1220,7 @@ export class ModelObject<
     }) as SolidModel;
   }
 
+  /** @internal */
   [combineModels](
     this: ModelObject<Elements, 'solid'>,
     operation: BooleanOperation,
@@ -1181,7 +1229,7 @@ export class ModelObject<
     const evaluation = this.evaluateBoolean(operation, others);
     let transferred = false;
     try {
-      const combined = new ModelObject<CanonicalElements, 'solid'>({
+      const combined = ModelObject.create<CanonicalElements, 'solid'>({
         kind: 'solid',
         geometry: evaluation.geometry,
         name: this.name,
@@ -1446,7 +1494,7 @@ export class ModelObject<
     overrides: Partial<ModelObjectInit<Kind>>,
     operation: StoredOperation,
   ): Model<Elements, Kind> {
-    return new ModelObject<Elements, Kind>({
+    return ModelObject.create<Elements, Kind>({
       kind: this.kind,
       geometry: this.geometry,
       intrinsic: this.intrinsic,
@@ -1541,7 +1589,7 @@ export function point(
   const geometry = evaluateModelGeometry('point', [position], [], () => ({
     shape: makeVertex(toPoint(position)),
   }));
-  return new ModelObject<{}, 'vertex'>({
+  return ModelObject.create<{}, 'vertex'>({
     kind: 'vertex',
     name: 'Point',
     geometry,
@@ -1626,7 +1674,7 @@ export function box(x: number, y: number, z: number): SolidModel {
   assertPositive('x', x);
   assertPositive('y', y);
   assertPositive('z', z);
-  return new ModelObject<CanonicalElements, 'solid'>({
+  return ModelObject.create<CanonicalElements, 'solid'>({
     kind: 'solid',
     name: 'Box',
     geometry: evaluateSolidGeometry('box', [x, y, z], [], () => ({
@@ -1643,7 +1691,7 @@ export function box(x: number, y: number, z: number): SolidModel {
 export function cylinder(radius: number, y: number): SolidModel {
   assertPositive('radius', radius);
   assertPositive('y', y);
-  return new ModelObject<CanonicalElements, 'solid'>({
+  return ModelObject.create<CanonicalElements, 'solid'>({
     kind: 'solid',
     name: 'Cylinder',
     geometry: evaluateSolidGeometry('cylinder', [radius, y], [], () => ({
@@ -1656,7 +1704,7 @@ export function cylinder(radius: number, y: number): SolidModel {
 /** @code3d.param radius {kind: 'length', constraints: {exclusiveMin: 0}} */
 export function sphere(radius: number): SolidModel {
   assertPositive('radius', radius);
-  return new ModelObject<CanonicalElements, 'solid'>({
+  return ModelObject.create<CanonicalElements, 'solid'>({
     kind: 'solid',
     name: 'Sphere',
     geometry: evaluateSolidGeometry('sphere', [radius], [], () => ({
@@ -1679,7 +1727,7 @@ export function frustum(
   assertPositive('bottomRadius', bottomRadius);
   assertPositive('topRadius', topRadius);
   assertPositive('y', y);
-  return new ModelObject<CanonicalElements, 'solid'>({
+  return ModelObject.create<CanonicalElements, 'solid'>({
     kind: 'solid',
     name: 'Frustum',
     geometry: evaluateSolidGeometry(
@@ -1722,7 +1770,7 @@ export function regularPrism(
   if (!Number.isFinite(rotation)) {
     throw new Error('rotation must be a finite number.');
   }
-  return new ModelObject<CanonicalElements, 'solid'>({
+  return ModelObject.create<CanonicalElements, 'solid'>({
     kind: 'solid',
     name: `${sides}-sided prism`,
     geometry: evaluateSolidGeometry(
@@ -1784,7 +1832,7 @@ export function helicalThread(options: HelicalThreadOptions): SolidModel {
       'The thread profile requires crestWidth < rootWidth <= pitch.',
     );
   }
-  return new ModelObject<CanonicalElements, 'solid'>({
+  return ModelObject.create<CanonicalElements, 'solid'>({
     kind: 'solid',
     name: 'Helical thread',
     geometry: evaluateSolidGeometry(
@@ -1821,7 +1869,7 @@ export function group(
   name = 'Group',
 ): Model<{}, 'group'> {
   assertChildren(children);
-  return new ModelObject<{}, 'group'>({
+  return ModelObject.create<{}, 'group'>({
     kind: 'group',
     name,
     children,
@@ -1872,6 +1920,58 @@ export function isConstraint(value: unknown): value is Constraint {
   return value instanceof Constraint;
 }
 
+export function instrumentConstraint(
+  constraint: Constraint,
+  sourceRef: SourceRef,
+  parameters: readonly ParameterUsage[],
+): void {
+  constraint.attachSource(sourceRef);
+  constraint.attachParameters(parameters);
+}
+
+export function instrumentModelOperation(
+  object: ModelObject,
+  instrumentation: ModelOperationInstrumentation,
+): void {
+  object.attachSource(instrumentation.sourceRef);
+  object.attachParameters(instrumentation.parameters);
+  object.attachOperationTrace(
+    instrumentation.siteId,
+    instrumentation.execution,
+    instrumentation.order,
+    instrumentation.sourceRef,
+  );
+}
+
+export function constraintTraceReference(
+  constraint: Constraint,
+): ConstraintTraceReference {
+  return constraint.traceReference();
+}
+
+export function modelObjectRuntimeInfo(
+  object: ModelObject,
+): ModelObjectRuntimeInfo {
+  return {
+    nodeId: object.nodeId,
+    name: object.name,
+    sourceRefs: object.sourceRefs,
+  };
+}
+
+export function relatedModelObjects(
+  object: ModelObject,
+): readonly ModelObject[] {
+  return object.relatedObjects();
+}
+
+export function createModelSnapshotter(): (
+  object: ModelObject,
+) => ModelSnapshotObject {
+  const meshCache = new Map<AnyShape, RenderMesh>();
+  return object => object.toSnapshot(meshCache);
+}
+
 export function disposeModelObjects(objects: Iterable<ModelObject>): void {
   const disposed = new Set<AnyShape>();
   for (const object of objects) {
@@ -1880,7 +1980,6 @@ export function disposeModelObjects(objects: Iterable<ModelObject>): void {
 }
 
 export const authoringApi = Object.freeze({
-  ModelObject,
   circle,
   ellipse,
   rectangle,
@@ -2080,7 +2179,7 @@ function planarFaceModel(
     kind: 'face',
     transform: identityRigidTransform,
   };
-  return new ModelObject<PlanarElements, 'face'>({
+  return ModelObject.create<PlanarElements, 'face'>({
     kind: 'face',
     name,
     geometry,
@@ -2103,7 +2202,7 @@ function curveModel(
     shape: build(),
   }));
   const elements = curveElements(geometry.value.shape as ReplicadEdge);
-  return new ModelObject<CurveElements, 'edge'>({
+  return ModelObject.create<CurveElements, 'edge'>({
     kind: 'edge',
     name,
     geometry,
