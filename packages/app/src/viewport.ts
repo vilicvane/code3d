@@ -572,13 +572,6 @@ export class ModelViewport {
     this.updatePositionGizmo();
   }
 
-  clearSelectedEdges(): void {
-    if (!this.edgeSelection) return;
-    this.edgeSelection.selectedEdgeIds.clear();
-    this.edgeSelection.hoveredEdgeId = undefined;
-    this.rebuildEdgeSelectionOverlay();
-  }
-
   setSelectedEdges(edgeIds: readonly EdgeId[]): void {
     if (!this.edgeSelection) return;
     this.edgeSelection.selectedEdgeIds = new Set(edgeIds);

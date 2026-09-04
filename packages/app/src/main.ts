@@ -149,7 +149,7 @@ app.innerHTML = `
               <output id="edge-selection-summary"></output>
             </div>
             <div class="edge-selection-actions">
-              <button id="edge-selection-clear" type="button">Clear</button>
+              <button id="edge-selection-all" type="button">Use all edges</button>
             </div>
           </section>
           <div class="viewport-progress" id="viewport-progress" role="status" aria-live="polite" hidden>
@@ -215,9 +215,8 @@ const edgeSelectionParameter = requiredElement<HTMLInputElement>(
 const edgeSelectionParameterUnit = requiredElement(
   'edge-selection-parameter-unit',
 );
-const edgeSelectionClear = requiredElement<HTMLButtonElement>(
-  'edge-selection-clear',
-);
+const edgeSelectionAll =
+  requiredElement<HTMLButtonElement>('edge-selection-all');
 const viewportProgress = requiredElement('viewport-progress');
 const viewportProgressLabel = requiredElement('viewport-progress-label');
 const projectTree = requiredElement('project-tree');
@@ -298,14 +297,17 @@ type EdgeSelectionTool = {
   occurrenceKey: string;
   availableEdgeIds: readonly EdgeId[];
   selectedEdgeIds: readonly EdgeId[];
+  hasExplicitEdgeSelection: boolean;
 };
 type EdgeEditSession = {
   targetId: string;
   sourceFile: string;
   undoGroup: string;
   baselineEdgeIds: readonly EdgeId[];
+  baselineHasExplicitEdgeSelection: boolean;
   baselineParameterValue?: number;
   appliedEdgeIds: readonly EdgeId[];
+  appliedHasExplicitEdgeSelection: boolean;
   appliedParameterValue?: number;
   hasEdits: boolean;
   historyState: 'applied' | 'undone';
@@ -471,7 +473,7 @@ edgeSelectionParameter.addEventListener('keydown', event => {
   commitEdgeOperationParameter();
   event.preventDefault();
 });
-edgeSelectionClear.addEventListener('click', clearSelectedEdges);
+edgeSelectionAll.addEventListener('click', useAllEdges);
 window.addEventListener('pointerdown', event => {
   if (!projectContextMenu.contains(event.target as Node)) {
     hideProjectContextMenu();
@@ -1241,8 +1243,10 @@ function startEdgeSelection(
       sourceFile,
       undoGroup: `edge-operation:${targetId}:${++edgeEditSessionCounter}`,
       baselineEdgeIds: sortedEdgeIds(initialEdgeIds),
+      baselineHasExplicitEdgeSelection: edgeArgument.kind === 'replace',
       baselineParameterValue: parameter?.value,
       appliedEdgeIds: sortedEdgeIds(initialEdgeIds),
+      appliedHasExplicitEdgeSelection: edgeArgument.kind === 'replace',
       appliedParameterValue: parameter?.value,
       hasEdits: false,
       historyState: 'applied',
@@ -1271,17 +1275,19 @@ function startEdgeSelection(
     occurrenceKey: occurrence.key,
     availableEdgeIds,
     selectedEdgeIds,
+    hasExplicitEdgeSelection: edgeSessionHasExplicitEdgeSelection(session),
   };
   sourceEditPopover.dismiss();
   errorBar.hidden = true;
   updateEdgeSelectionToolbar(edgeSelectionTool);
 }
 
-function clearSelectedEdges(): void {
+function useAllEdges(): void {
   const tool = edgeSelectionTool;
-  if (!tool || tool.selectedEdgeIds.length === 0) return;
-  tool.selectedEdgeIds = [];
-  viewport.clearSelectedEdges();
+  if (!tool?.hasExplicitEdgeSelection) return;
+  tool.selectedEdgeIds = tool.availableEdgeIds;
+  tool.hasExplicitEdgeSelection = false;
+  viewport.setSelectedEdges(tool.selectedEdgeIds);
   updateEdgeSelectionToolbar(tool);
   commitEdgeOperationChange(tool, edgeSelectionIntent(tool));
 }
@@ -1336,8 +1342,10 @@ function updateEdgeSelectionToolbar(
       String(tool.parameterValue === undefined),
     );
   }
-  edgeSelectionSummary.textContent = formatEdgeIds(tool.selectedEdgeIds);
-  edgeSelectionClear.disabled = tool.selectedEdgeIds.length === 0;
+  edgeSelectionSummary.textContent = tool.hasExplicitEdgeSelection
+    ? formatEdgeIds(tool.selectedEdgeIds)
+    : 'All edges';
+  edgeSelectionAll.disabled = !tool.hasExplicitEdgeSelection;
   edgeSelectionToolbar.hidden = false;
 }
 
@@ -1349,8 +1357,19 @@ function handleEdgeSelection(event: EdgeSelectionEvent): void {
   const tool = edgeSelectionTool;
   if (!tool) return;
   if (event.kind === 'hover') return;
-  tool.selectedEdgeIds = sortedEdgeIds(event.selectedEdgeIds);
-  updateEdgeSelectionToolbar(tool);
+  const selectedEdgeIds = sortedEdgeIds(event.selectedEdgeIds);
+  if (selectedEdgeIds.length === 0) {
+    const hadExplicitSelection = tool.hasExplicitEdgeSelection;
+    tool.selectedEdgeIds = tool.availableEdgeIds;
+    tool.hasExplicitEdgeSelection = false;
+    viewport.setSelectedEdges(tool.selectedEdgeIds);
+    updateEdgeSelectionToolbar(tool);
+    if (!hadExplicitSelection) return;
+  } else {
+    tool.selectedEdgeIds = selectedEdgeIds;
+    tool.hasExplicitEdgeSelection = true;
+    updateEdgeSelectionToolbar(tool);
+  }
   commitEdgeOperationChange(tool, edgeSelectionIntent(tool));
 }
 
@@ -1371,6 +1390,8 @@ function commitEdgeOperationChange(
     if (intent.kind === 'edge-operation.set') {
       if (intent.edges) {
         tool.session.appliedEdgeIds = [...tool.selectedEdgeIds];
+        tool.session.appliedHasExplicitEdgeSelection =
+          tool.hasExplicitEdgeSelection;
       }
       if (intent.parameter) {
         tool.session.appliedParameterValue = tool.parameterValue;
@@ -1462,6 +1483,7 @@ function applyEdgeEditSessionToTool(session: EdgeEditSession): void {
   const tool = edgeSelectionTool;
   if (!tool || tool.session !== session) return;
   tool.selectedEdgeIds = edgeSessionEdgeIds(session);
+  tool.hasExplicitEdgeSelection = edgeSessionHasExplicitEdgeSelection(session);
   tool.parameterValue = edgeSessionParameterValue(session);
   viewport.setSelectedEdges(tool.selectedEdgeIds);
   updateEdgeSelectionToolbar(tool, true);
@@ -1481,14 +1503,25 @@ function edgeSessionParameterValue(
     : session.baselineParameterValue;
 }
 
+function edgeSessionHasExplicitEdgeSelection(
+  session: EdgeEditSession,
+): boolean {
+  return session.historyState === 'applied'
+    ? session.appliedHasExplicitEdgeSelection
+    : session.baselineHasExplicitEdgeSelection;
+}
+
 function edgeSelectionIntent(tool: EdgeSelectionTool): ToolIntent {
   return {
     kind: 'edge-operation.set',
     operation: tool.operation,
-    edges: {
-      argument: tool.edgeArgument,
-      ids: tool.selectedEdgeIds,
-    },
+    edges: tool.hasExplicitEdgeSelection
+      ? {
+          kind: 'explicit',
+          argument: tool.edgeArgument,
+          ids: tool.selectedEdgeIds,
+        }
+      : {kind: 'all', argument: tool.edgeArgument},
   };
 }
 
@@ -1720,7 +1753,12 @@ function toolSourceRefs(module: ModelModule): SourceRef[] {
       target.sourceRef,
       ...(target.receiverRef ? [target.receiverRef] : []),
       ...(target.operation?.edgeArgument
-        ? [target.operation.edgeArgument.sourceRef]
+        ? [
+            target.operation.edgeArgument.sourceRef,
+            ...(target.operation.edgeArgument.kind === 'replace'
+              ? [target.operation.edgeArgument.removalSourceRef]
+              : []),
+          ]
         : []),
     ]),
     ...[...module.operations.values()].flatMap(operation =>

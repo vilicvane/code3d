@@ -336,10 +336,12 @@ constraint source sites do.
   Undo and redo during that session update the source, guide, and controls
   together without closing the tool; after the session ends, history remains
   immediate but does not reopen transient edge-selection UI.
-- Make deselection reversible at both levels: toggle individual edges or clear
-  the set. Leaving the call's source focus or pressing `Escape` only dismisses
-  the transient panel; already committed edits remain in source. The panel has
-  neither Apply nor Cancel actions.
+- Make explicit edge filtering reversible: toggle individual edges or use all
+  edges by deleting the second argument. An empty explicit array is never a
+  persistent model state; toggling down to zero returns to the one-argument
+  all-edge form. Leaving the call's source focus or pressing `Escape` only
+  dismisses the transient panel; already committed edits remain in source. The
+  panel has neither Apply nor Cancel actions.
 - Keep the contextual selection panel vertically ordered and stable under
   pointer hover; hover feedback belongs on the model rather than in moving text.
 

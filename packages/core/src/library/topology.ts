@@ -209,6 +209,11 @@ function selectEdgeIds(
   if (requestedIds === undefined) {
     return [...topology.edgeIds];
   }
+  if (requestedIds.length === 0) {
+    throw new Error(
+      'An edge selection cannot be empty; omit the second argument to select all edges.',
+    );
+  }
   const requested = new Set<EdgeId>();
   for (const edgeId of requestedIds) {
     if (!Number.isSafeInteger(edgeId) || edgeId < 1) {

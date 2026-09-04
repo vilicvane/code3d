@@ -603,6 +603,8 @@ export class ModelObject<
     );
   }
 
+  fillet(radius: number): Model<Elements>;
+  fillet(radius: number, edgeIds: readonly EdgeId[]): Model<Elements>;
   fillet(radius: number, edgeIds?: readonly EdgeId[]): Model<Elements> {
     assertPositive('radius', radius);
     const result = filletEdges(
@@ -621,6 +623,8 @@ export class ModelObject<
     );
   }
 
+  chamfer(distance: number): Model<Elements>;
+  chamfer(distance: number, edgeIds: readonly EdgeId[]): Model<Elements>;
   chamfer(distance: number, edgeIds?: readonly EdgeId[]): Model<Elements> {
     assertPositive('distance', distance);
     const result = chamferEdges(

@@ -53,13 +53,14 @@ export type ToolIntent =
       kind: 'edge-operation.set';
       operation: 'fillet' | 'chamfer';
       parameter?: Readonly<{target: ParameterTarget; value: number}>;
-      edges?: Readonly<{
-        argument: Readonly<
-          | {kind: 'replace'; sourceRef: SourceRef}
-          | {kind: 'append'; sourceRef: SourceRef; needsComma: boolean}
-        >;
-        ids: readonly EdgeId[];
-      }>;
+      edges?: Readonly<
+        | {
+            kind: 'explicit';
+            argument: EdgeArgumentTarget;
+            ids: readonly EdgeId[];
+          }
+        | {kind: 'all'; argument: EdgeArgumentTarget}
+      >;
     }>
   | Readonly<{
       kind: 'relation.offset';
@@ -74,6 +75,15 @@ export type SourceTextEdit = Readonly<{
   expectedText: string;
   text: string;
 }>;
+
+type EdgeArgumentTarget = Readonly<
+  | {
+      kind: 'replace';
+      sourceRef: SourceRef;
+      removalSourceRef: SourceRef;
+    }
+  | {kind: 'append'; sourceRef: SourceRef; needsComma: boolean}
+>;
 
 export type ToolPreview =
   | Readonly<{
@@ -372,9 +382,28 @@ class SetEdgeOperationResolver implements ToolIntentResolver {
       edits.push(...resolution.plan.edits);
     }
     if (intent.edges) {
-      const sourceRef = context.resolveSourceRef(
-        intent.edges.argument.sourceRef,
-      );
+      const argument = intent.edges.argument;
+      const edgeArray =
+        intent.edges.kind === 'explicit'
+          ? renderExpression({
+              kind: 'array',
+              elements: intent.edges.ids.map(value => ({
+                kind: 'number',
+                value,
+              })),
+            })
+          : undefined;
+      const replaceExistingArgument =
+        intent.edges.kind === 'explicit' && argument.kind === 'replace'
+          ? context.resolveSourceRef(argument.sourceRef)
+          : undefined;
+      const sourceRef = replaceExistingArgument
+        ? replaceExistingArgument
+        : context.resolveSourceRef(
+            argument.kind === 'replace'
+              ? argument.removalSourceRef
+              : argument.sourceRef,
+          );
       if (!sourceRef) {
         return {
           status: 'conflict',
@@ -382,17 +411,13 @@ class SetEdgeOperationResolver implements ToolIntentResolver {
         };
       }
       const expectedText = context.readSource(sourceRef);
-      const edgeArray = renderExpression({
-        kind: 'array',
-        elements: intent.edges.ids.map(value => ({kind: 'number', value})),
-      });
       edits.push({
         sourceRef,
         expectedText,
         text:
-          intent.edges.argument.kind === 'replace'
-            ? edgeArray
-            : `${intent.edges.argument.needsComma ? ',' : ''} ${edgeArray}`,
+          edgeArray === undefined || replaceExistingArgument
+            ? (edgeArray ?? '')
+            : `${argument.kind === 'append' && !argument.needsComma ? '' : ','} ${edgeArray}`,
       });
     }
     if (edits.length === 0) {

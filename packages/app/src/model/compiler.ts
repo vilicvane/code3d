@@ -62,7 +62,11 @@ export type SourceTargetEvaluation = Readonly<{
 }>;
 
 export type EdgeArgumentTarget = Readonly<
-  | {kind: 'replace'; sourceRef: SourceRef}
+  | {
+      kind: 'replace';
+      sourceRef: SourceRef;
+      removalSourceRef: SourceRef;
+    }
   | {kind: 'append'; sourceRef: SourceRef; needsComma: boolean}
 >;
 
@@ -1850,6 +1854,11 @@ function edgeSelectionSite(
             sourceFile.fileName,
             edgeArgument.getStart(sourceFile),
             edgeArgument.getEnd(),
+          ),
+          removalSourceRef: sourceRef(
+            sourceFile.fileName,
+            firstArgument.getEnd(),
+            closeParen,
           ),
         }
       : {

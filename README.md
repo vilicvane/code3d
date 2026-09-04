@@ -20,7 +20,10 @@
 - primitive、约束定位、布尔运算、圆角、倒角、棱柱、圆台和螺纹由 OCCT B-Rep 计算。
 - Worker 将 B-Rep 三角化为 surface、法线和拓扑边线供 Three.js 渲染。
 - 实体边使用模型内稳定的数字 ID；派生操作保留可一一追踪的旧 ID，新边递增分配且不复用已消失的 ID。
-- 用户手写 `fillet(radius, edgeIds)` 或 `chamfer(distance, edgeIds)` 后，光标进入直接数字数组即开启 viewport 选边；viewport 以当前边集合的操作结果为主体，同时在原位置保留可 hover、可 toggle 的输入边。已有 ID 会预先选中，切换时临时重编译结果，确认后才把新集合写回该数组。
+- 用户手写 `fillet(radius)`、`fillet(radius, edgeIds)` 或对应的 `chamfer`
+  调用后，光标进入整个参数区域即可开启 viewport 选边；viewport 以已应用的操作结果
+  为主体，同时在原位置保留可 hover、可 toggle 的输入边。边和参数修改会立即写回源码并
+  在后台重编译，单参数形式表示全部边。
 - 已生效的 fillet/chamfer 源码上下文以结果实体为主，并叠加弱化的操作前轮廓和被修改的原边，便于比较前后拓扑。
 - 点击模型定位源码；移动光标会独立渲染对应的运行时模型节点。
 - 同一源码表达式产生多个对象时，源码节点预览会同时显示这些对象。
@@ -57,22 +60,18 @@ const post = cylinder(4.5, 25).relate(part =>
 
 `unit` 只影响 UI 提示，不进行运行时换算。
 
-圆角和倒角可以接收边 ID 数组；省略数组时仍作用于全部边：
+圆角和倒角都有明确的单参数重载；第二参数是可选的非空边 ID 过滤：
 
 ```ts
+const allRounded = box(38, 6, 26).fillet(2);
 const rounded = box(38, 6, 26).fillet(2, [1, 5, 9]);
 const finished = rounded.chamfer(0.5, [13]);
 ```
 
-直接写下空数组可以先保留未修改的输入形状，再在 viewport 中选择边；已有数组也可重新进入并修改：
-
-```ts
-const rounded = box(38, 6, 26).fillet(2, []);
-const edited = box(38, 6, 26).fillet(2, [1, 5, 9]);
-```
-
-再次点击已选边可取消单边，`Clear` 清空当前集合，`Esc`/`Cancel` 放弃整次交互；
-只有选择发生变化后，`Enter`/`Apply` 才会替换源码数组。当前交互入口要求第二个参数是直接写在调用中的纯数字数组字面量。
+已有数组会在 viewport 中预先选中并可继续 toggle；`Use all edges` 删除第二参数并
+回到单参数形式。显式选择不能是空数组：逐个取消到空集合时也会自动回到全部边，
+不会把 `[]` 留在源码中。同一轮连续交互合并成一个 Monaco undo 历史项，移开源码
+焦点或按 `Esc` 只关闭临时工具界面，不撤销已经写入的修改。
 
 这些数字是随模型派生传递的拓扑 ID，而不是当前边数组的下标或 OCCT hash。
 相同源码、参数和内核版本会确定性地产生相同 ID；被删除边的 ID 不会在后续步骤中复用。

@@ -132,10 +132,10 @@ Provider 可通过 `previewBehavior` 声明工具预览期间的显示策略。�
 ## 当前接入的工具
 
 viewport 平移 gizmo 在能够唯一追溯参数时产生 `parameter.set`，否则针对已有关系产生
-`relation.offset`。源码中的 `fillet(radius, edgeIds)` 和
-`chamfer(distance, edgeIds)` 则把直接数字数组投影为显式 edge-selection source
-target，以当前 ID 初始化选择，完成后用 `expression.replace` 只替换该数组。工具共享
-冲突检查、源码事务和 undo 语义。
+`relation.offset`。源码中的 `fillet(radius)`、`fillet(radius, edgeIds)` 和对应的
+`chamfer` 调用把整个参数区域投影为 edge-selection source target。`edge-operation.set`
+可以写入非空的显式 ID 数组，也可以删除第二参数以恢复单参数的全部边语义；每次修改
+立即进入共享源码事务，同一轮工具交互合并为一个 Monaco undo 历史项。
 
 平移 gizmo 目前遵守以下解析规则：
 
