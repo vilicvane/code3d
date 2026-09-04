@@ -717,11 +717,14 @@ kbd {
   stroke-width: 2;
 }
 
-.viewport-coordinate-axis circle,
-.viewport-coordinate-axis polygon {
+.viewport-coordinate-axis circle {
   fill: currentColor;
   stroke: #11130f;
   stroke-width: 1;
+}
+
+.viewport-coordinate-axis[data-direction='negative'] circle {
+  stroke: none;
 }
 
 .viewport-coordinate-axis text {

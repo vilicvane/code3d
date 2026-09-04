@@ -1,14 +1,24 @@
 import * as THREE from 'three';
 import {spatialAxisColors} from '../spatial-axis-colors';
 
-type AxisEndView = Readonly<{
-  kind: 'positive' | 'negative';
+type AxisEndViewBase = Readonly<{
   direction: THREE.Vector3;
   group: SVGGElement;
-  line: SVGLineElement;
-  marker: SVGCircleElement | SVGPolygonElement;
-  label?: SVGTextElement;
 }>;
+
+type AxisEndView =
+  | (AxisEndViewBase &
+      Readonly<{
+        kind: 'positive';
+        line: SVGLineElement;
+        marker: SVGCircleElement;
+        label: SVGTextElement;
+      }>)
+  | (AxisEndViewBase &
+      Readonly<{
+        kind: 'negative';
+        marker: SVGCircleElement;
+      }>);
 
 const svgNamespace = 'http://www.w3.org/2000/svg';
 const center = 44;
@@ -66,11 +76,10 @@ export class ViewportCoordinateReference {
         group.dataset.direction = kind;
         group.style.color = spatialAxisColors[name];
 
-        const line = document.createElementNS(svgNamespace, 'line');
-        line.setAttribute('x1', String(center));
-        line.setAttribute('y1', String(center));
-
         if (kind === 'positive') {
+          const line = document.createElementNS(svgNamespace, 'line');
+          line.setAttribute('x1', String(center));
+          line.setAttribute('y1', String(center));
           const marker = document.createElementNS(svgNamespace, 'circle');
           marker.setAttribute('r', '7');
           const label = document.createElementNS(svgNamespace, 'text');
@@ -87,14 +96,14 @@ export class ViewportCoordinateReference {
           };
         }
 
-        const marker = document.createElementNS(svgNamespace, 'polygon');
-        group.append(line, marker);
+        const marker = document.createElementNS(svgNamespace, 'circle');
+        marker.setAttribute('r', '5.5');
+        group.append(marker);
         svg.append(group);
         return {
           kind,
           direction: direction.clone().multiplyScalar(-1),
           group,
-          line,
           marker,
         };
       }),
@@ -138,38 +147,26 @@ export class ViewportCoordinateReference {
           .applyQuaternion(this.cameraQuaternion);
         const x = center + this.viewDirection.x * axisLength;
         const y = center - this.viewDirection.y * axisLength;
-        axisEnd.line.setAttribute('x2', x.toFixed(2));
-        axisEnd.line.setAttribute('y2', y.toFixed(2));
         const screenLength = Math.hypot(
           this.viewDirection.x,
           this.viewDirection.y,
         );
         axisEnd.group.style.visibility = screenLength < 0.12 ? 'hidden' : '';
         if (axisEnd.kind === 'positive') {
+          axisEnd.line.setAttribute('x2', x.toFixed(2));
+          axisEnd.line.setAttribute('y2', y.toFixed(2));
           axisEnd.marker.setAttribute('cx', x.toFixed(2));
           axisEnd.marker.setAttribute('cy', y.toFixed(2));
-          axisEnd.label!.setAttribute('x', x.toFixed(2));
-          axisEnd.label!.setAttribute('y', y.toFixed(2));
+          axisEnd.label.setAttribute('x', x.toFixed(2));
+          axisEnd.label.setAttribute('y', y.toFixed(2));
         } else {
-          const inverseScreenLength =
-            screenLength > 1e-6 ? 1 / screenLength : 0;
-          const directionX = this.viewDirection.x * inverseScreenLength;
-          const directionY = -this.viewDirection.y * inverseScreenLength;
-          const baseX = x - directionX * 7;
-          const baseY = y - directionY * 7;
-          const perpendicularX = -directionY * 4;
-          const perpendicularY = directionX * 4;
-          axisEnd.marker.setAttribute(
-            'points',
-            [
-              `${x.toFixed(2)},${y.toFixed(2)}`,
-              `${(baseX + perpendicularX).toFixed(2)},${(baseY + perpendicularY).toFixed(2)}`,
-              `${(baseX - perpendicularX).toFixed(2)},${(baseY - perpendicularY).toFixed(2)}`,
-            ].join(' '),
-          );
+          axisEnd.marker.setAttribute('cx', x.toFixed(2));
+          axisEnd.marker.setAttribute('cy', y.toFixed(2));
         }
         axisEnd.group.style.opacity = String(
-          0.58 + (this.viewDirection.z + 1) * 0.21,
+          axisEnd.kind === 'positive'
+            ? 0.58 + (this.viewDirection.z + 1) * 0.21
+            : 0.42 + (this.viewDirection.z + 1) * 0.1,
         );
         return {axisEnd, depth: this.viewDirection.z};
       })
