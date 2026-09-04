@@ -2,11 +2,13 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {box} from '../bld/node/index.js';
 import {
+  createModelSnapshotter,
   disposeModelObjects,
   modelTopologyReference,
 } from '../bld/tooling/index.js';
 
 test('resolves stable vertex, edge, and surface references', () => {
+  const snapshotModel = createModelSnapshotter();
   const base = box(20, 10, 15);
   const scaled = base.scaled(2);
   const rounded = base.fillet(1, [1]);
@@ -31,9 +33,9 @@ test('resolves stable vertex, edge, and surface references', () => {
     assert.throws(() => base.edge(13), /Unknown or retired edge E13/);
     assert.throws(() => base.surface(7), /Unknown or retired surface S7/);
 
-    const baseSnapshot = base.toSnapshot();
-    const scaledSnapshot = scaled.toSnapshot();
-    const roundedSnapshot = rounded.toSnapshot();
+    const baseSnapshot = snapshotModel(base);
+    const scaledSnapshot = snapshotModel(scaled);
+    const roundedSnapshot = snapshotModel(rounded);
     assert.deepEqual(topologyIds(scaledSnapshot), topologyIds(baseSnapshot));
     assert.deepEqual(vertexIds(baseSnapshot), [1, 2, 3, 4, 5, 6, 7, 8]);
     assert.ok(vertexIds(roundedSnapshot).some(id => id > 8));

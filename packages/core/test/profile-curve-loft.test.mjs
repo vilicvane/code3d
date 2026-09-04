@@ -10,9 +10,13 @@ import {
   rectangle,
   regularPolygon,
 } from '../bld/node/index.js';
-import {disposeModelObjects} from '../bld/tooling/index.js';
+import {
+  createModelSnapshotter,
+  disposeModelObjects,
+} from '../bld/tooling/index.js';
 
 test('constructs renderable planar profiles, curves, and points', () => {
+  const snapshotModel = createModelSnapshotter();
   const models = [
     circle(4),
     rectangle(8, 5),
@@ -28,7 +32,7 @@ test('constructs renderable planar profiles, curves, and points', () => {
       polygonSnapshot,
       lineSnapshot,
       pointSnapshot,
-    ] = models.map(model => model.toSnapshot());
+    ] = models.map(snapshotModel);
     assert.equal(circleSnapshot.kind, 'face');
     assert.ok(circleSnapshot.mesh.triangles.length > 0);
     assert.equal(rectangleSnapshot.kind, 'face');
@@ -46,6 +50,7 @@ test('constructs renderable planar profiles, curves, and points', () => {
 });
 
 test('uses face, edge, and vertex topology as relation anchors', () => {
+  const snapshotModel = createModelSnapshotter();
   const face = circle(5);
   const edge = line([0, 0, 0], [6, 2, 0]);
   const vertex = point([2, 3, 4]);
@@ -59,7 +64,7 @@ test('uses face, edge, and vertex topology as relation anchors', () => {
 
   try {
     const constraints = [faceRelated, edgeRelated, vertexRelated].map(
-      model => model.toSnapshot().constraints[0],
+      model => snapshotModel(model).constraints[0],
     );
     assert.deepEqual(
       constraints.map(constraint => constraint.target.kind),
@@ -73,7 +78,7 @@ test('uses face, edge, and vertex topology as relation anchors', () => {
       constraints.map(constraint => constraint.target.name),
       ['S1', 'E1', 'V1'],
     );
-    const relatedSnapshot = vertexRelated.toSnapshot();
+    const relatedSnapshot = snapshotModel(vertexRelated);
     assert.deepEqual(relatedSnapshot.transform.position, [0, 0, 0]);
     assert.deepEqual(relatedSnapshot.compositionTransform.position, [2, 3, 4]);
   } finally {
@@ -89,13 +94,14 @@ test('uses face, edge, and vertex topology as relation anchors', () => {
 });
 
 test('resolves relation placement only inside a composition', () => {
+  const snapshotModel = createModelSnapshotter();
   const target = point([2, 3, 4]);
   const related = point().relate(self => self.on(target.vertex(1)).flip());
   const assembly = group([target, related]);
 
   try {
-    const standalone = related.toSnapshot();
-    const assemblySnapshot = assembly.toSnapshot();
+    const standalone = snapshotModel(related);
+    const assemblySnapshot = snapshotModel(assembly);
     assert.deepEqual(standalone.transform.position, [0, 0, 0]);
     assert.deepEqual(standalone.compositionTransform.position, [2, 3, 4]);
     assert.deepEqual(assemblySnapshot.transform.position, [0, 0, 0]);
@@ -109,6 +115,7 @@ test('resolves relation placement only inside a composition', () => {
 });
 
 test('lofts nonparallel planar profiles along a curved spine', () => {
+  const snapshotModel = createModelSnapshotter();
   const spine = bezier([
     [0, 0, 0],
     [12, 7, 0],
@@ -124,9 +131,9 @@ test('lofts nonparallel planar profiles along a curved spine', () => {
   const result = loft([start, end], {spine});
 
   try {
-    const startSnapshot = start.toSnapshot();
-    const endSnapshot = end.toSnapshot();
-    const resultSnapshot = result.toSnapshot();
+    const startSnapshot = snapshotModel(start);
+    const endSnapshot = snapshotModel(end);
+    const resultSnapshot = snapshotModel(result);
     assert.deepEqual(startSnapshot.transform.quaternion, [0, 0, 0, 1]);
     assert.deepEqual(endSnapshot.transform.quaternion, [0, 0, 0, 1]);
     assert.notDeepEqual(
@@ -147,6 +154,7 @@ test('lofts nonparallel planar profiles along a curved spine', () => {
 });
 
 test('lofts planar sections without a spine', () => {
+  const snapshotModel = createModelSnapshotter();
   const base = circle(4);
   const location = point([0, 12, 0]);
   const top = rectangle(5, 3).relate(profile =>
@@ -155,7 +163,7 @@ test('lofts planar sections without a spine', () => {
   const result = loft([base, top]);
 
   try {
-    assert.ok(result.toSnapshot().mesh.triangles.length > 0);
+    assert.ok(snapshotModel(result).mesh.triangles.length > 0);
   } finally {
     disposeModelObjects([base, location, top, result]);
   }

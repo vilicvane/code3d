@@ -6,11 +6,17 @@ import {
 } from '../project/project';
 import {
   authoringApi,
+  constraintTraceReference,
+  createModelSnapshotter,
   disposeModelObjects,
+  instrumentConstraint,
+  instrumentModelOperation,
   isConstraint,
   isModelObject,
   modelElementReference,
+  modelObjectRuntimeInfo,
   modelTopologyReference,
+  relatedModelObjects,
   type Constraint,
   type EdgeId,
   type ElementKind,
@@ -383,14 +389,17 @@ const traceRuntime = Object.freeze({
     executionTrace.order = nextSourceReachOrder();
     const runtime = sourceExecutionRuntime(executionTrace);
     if (isConstraint(result)) {
-      result.attachSource(location);
-      result.attachParameters(parameters);
+      instrumentConstraint(result, location, parameters);
       recordSourceConstraint(id, location, result, context.id, runtime);
     } else if (isModelObject(result)) {
       const order = ++evaluationOrder;
-      result.attachSource(location);
-      result.attachParameters(parameters);
-      result.attachOperationTrace(id, execution, order, location);
+      instrumentModelOperation(result, {
+        siteId: id,
+        execution,
+        order,
+        sourceRef: location,
+        parameters,
+      });
       recordSourceValue(
         id,
         'operation-output',
@@ -719,7 +728,7 @@ function recordSourceConstraint(
   contextId: string,
   runtime: RuntimeReach,
 ): void {
-  const reference = constraint.traceReference();
+  const reference = constraintTraceReference(constraint);
   const key = `${id}:${location.file}:${location.start}:${location.end}`;
   const trace = sourceConstraintTraces.get(key) ?? {
     id,
@@ -1097,16 +1106,16 @@ export function compileProject(
       diagnostic = relateDiagnosticToFallback(diagnostic, fallbackObject);
     }
 
-    const meshCache = new Map();
+    const snapshotModel = createModelSnapshotter();
     const snapshots = new Map<ModelObject, ModelSnapshotObject>();
     const snapshotOf = (object: ModelObject): ModelSnapshotObject => {
       const existing = snapshots.get(object);
       if (existing) return existing;
       let snapshot: ModelSnapshotObject;
       try {
-        snapshot = object.toSnapshot(meshCache);
+        snapshot = snapshotModel(object);
       } catch (error) {
-        const location = object.sourceRefs.at(-1);
+        const location = modelObjectSourceRefs(object).at(-1);
         if (!location) throw error;
         throw locateModelError(error, location);
       }
@@ -1119,7 +1128,10 @@ export function compileProject(
     const graphObjects = collectObjectGraph(tracedObjects);
     graphObjects.forEach(object => tracedObjects.add(object));
     const objectSnapshots = new Map(
-      graphObjects.map(object => [object.nodeId, snapshotOf(object)]),
+      graphObjects.map(object => [
+        modelObjectNodeId(object),
+        snapshotOf(object),
+      ]),
     );
     const operations = new Map(
       [...objectSnapshots.values()].map(object => [
@@ -1136,7 +1148,7 @@ export function compileProject(
       exports: new Map(
         [...modelExports].map(([name, modelObject]) => [
           name,
-          modelObject.nodeId,
+          modelObjectNodeId(modelObject),
         ]),
       ),
       catalog: [...catalogTraces.values()]
@@ -1145,9 +1157,10 @@ export function compileProject(
           const occurrences = trace.runs.flatMap((run, execution) =>
             run.objects.map((object, output) => ({
               id: `${trace.id}:execution:${execution}:output:${output}`,
-              nodeId: object.nodeId,
-              label: object.name,
-              sourceRef: object.sourceRefs.at(-1) ?? trace.sourceRef,
+              nodeId: modelObjectNodeId(object),
+              label: modelObjectName(object),
+              sourceRef:
+                modelObjectSourceRefs(object).at(-1) ?? trace.sourceRef,
               execution,
               output,
               order: run.order,
@@ -1163,7 +1176,7 @@ export function compileProject(
                 ? 'lineage'
                 : 'primary',
             sourceRef: trace.sourceRef,
-            nodeIds: [...trace.objects].map(object => object.nodeId),
+            nodeIds: [...trace.objects].map(modelObjectNodeId),
             occurrences,
             executions: trace.runs.length,
             firstOrder: trace.runs[0].order,
@@ -1327,12 +1340,24 @@ function collectObjectGraph(roots: Iterable<ModelObject>): ModelObject[] {
       return;
     }
     found.add(object);
-    object.relatedObjects().forEach(visit);
+    relatedModelObjects(object).forEach(visit);
   };
   for (const root of roots) {
     visit(root);
   }
   return [...found];
+}
+
+function modelObjectNodeId(object: ModelObject): string {
+  return modelObjectRuntimeInfo(object).nodeId;
+}
+
+function modelObjectName(object: ModelObject): string {
+  return modelObjectRuntimeInfo(object).name;
+}
+
+function modelObjectSourceRefs(object: ModelObject): readonly SourceRef[] {
+  return modelObjectRuntimeInfo(object).sourceRefs;
 }
 
 function relateDiagnosticToFallback(
@@ -1348,12 +1373,12 @@ function relateDiagnosticToFallback(
     ]);
   if (failureInputs.length === 0) return diagnostic;
   const fallbackNodeIds = new Set(
-    collectObjectGraph([fallback]).map(object => object.nodeId),
+    collectObjectGraph([fallback]).map(modelObjectNodeId),
   );
   const relatedModelNodeIds = [
     ...new Set(
       collectObjectGraph(failureInputs)
-        .map(object => object.nodeId)
+        .map(modelObjectNodeId)
         .filter(nodeId => fallbackNodeIds.has(nodeId)),
     ),
   ];
@@ -1380,7 +1405,7 @@ function buildSourceTargets(
     const toolSite = toolCallSites.get(trace.id);
     const evaluations = trace.evaluations.map(
       ({objects, contextId, runtime}) => {
-        const nodeIds = objects.map(object => object.nodeId);
+        const nodeIds = objects.map(modelObjectNodeId);
         const operationId = [...operations.values()].find(
           operation =>
             operation.siteId === trace.id &&
@@ -1466,10 +1491,12 @@ function buildSourceTargets(
         const operation = operations.get(
           traceExecutionKey(execution.siteId, execution.execution),
         );
+        const sourceObject = trace.objects[0];
         const selection = operation?.selections.find(
           candidate =>
             candidate.kind === 'edge' &&
-            candidate.inputNodeId === trace.objects[0]?.nodeId,
+            candidate.inputNodeId ===
+              (sourceObject ? modelObjectNodeId(sourceObject) : undefined),
         );
         if (operation && selection) {
           return [
@@ -1488,19 +1515,21 @@ function buildSourceTargets(
           ];
         }
         const input = trace.objects[0];
-        const inputSnapshot = input ? objects.get(input.nodeId) : undefined;
+        const inputSnapshot = input
+          ? objects.get(modelObjectNodeId(input))
+          : undefined;
         if (execution.outcome !== 'failed' || inputSnapshot?.kind !== 'solid') {
           return [];
         }
         return [
           {
             runtime: sourceExecutionRuntime(execution),
-            nodeIds: [input.nodeId],
+            nodeIds: [modelObjectNodeId(input)],
             parameters: execution.parameters,
             contextId: execution.contextId,
             selection: {
               kind: 'edges',
-              inputNodeId: input.nodeId,
+              inputNodeId: modelObjectNodeId(input),
               ids: validAttemptedEdgeIds(
                 inputSnapshot,
                 attemptedEdgeIds(execution.arguments.get(1)),
@@ -1548,14 +1577,14 @@ function buildSourceTargets(
         return [
           {
             runtime: sourceExecutionRuntime(execution),
-            nodeIds: [receiver.nodeId],
+            nodeIds: [modelObjectNodeId(receiver)],
             parameters: execution.parameters,
             contextId: execution.contextId,
             selection: {
               kind: parameter.kind,
-              inputNodeId: receiver.nodeId,
+              inputNodeId: modelObjectNodeId(receiver),
               ids: validAttemptedTopologyIds(
-                objects.get(receiver.nodeId),
+                objects.get(modelObjectNodeId(receiver)),
                 parameter.kind,
                 attemptedIds,
               ),
@@ -1594,8 +1623,8 @@ function buildSourceTargets(
                   candidate.objects.some(object =>
                     sourceLineageContains(
                       operationsByOutputNodeId,
-                      object.nodeId,
-                      evaluation.source.nodeId,
+                      modelObjectNodeId(object),
+                      modelObjectNodeId(evaluation.source),
                     ),
                   ),
                 )
@@ -1610,10 +1639,10 @@ function buildSourceTargets(
               operationId: consumer.input.operationId,
               operationInput: {
                 role: consumer.role,
-                nodeIds: consumer.input.objects.map(object => object.nodeId),
+                nodeIds: consumer.input.objects.map(modelObjectNodeId),
               },
               constraintId: evaluation.constraintId,
-              constraintSourceNodeId: evaluation.source.nodeId,
+              constraintSourceNodeId: modelObjectNodeId(evaluation.source),
               contextId: evaluation.contextId,
             }))
           : [
@@ -1622,7 +1651,7 @@ function buildSourceTargets(
                 parameters: execution?.parameters,
                 nodeIds: uniqueNodeIds(evaluation.source, evaluation.target),
                 constraintId: evaluation.constraintId,
-                constraintSourceNodeId: evaluation.source.nodeId,
+                constraintSourceNodeId: modelObjectNodeId(evaluation.source),
                 contextId: evaluation.contextId,
               },
             ];
@@ -1670,12 +1699,12 @@ function buildSourceTargets(
             .filter(
               evaluation =>
                 evaluation.contextId === element.contextId &&
-                evaluation.nodeIds.includes(element.model.nodeId),
+                evaluation.nodeIds.includes(modelObjectNodeId(element.model)),
             )
             .map(evaluation => ({target, evaluation})),
         );
         const elementSnapshot = {
-          nodeId: element.model.nodeId,
+          nodeId: modelObjectNodeId(element.model),
           name: element.name,
           kind: element.kind,
         } as const;
@@ -1687,7 +1716,7 @@ function buildSourceTargets(
           : [
               {
                 runtime: element.runtime,
-                nodeIds: [element.model.nodeId],
+                nodeIds: [modelObjectNodeId(element.model)],
                 contextId: element.contextId,
                 element: elementSnapshot,
               },
@@ -1724,11 +1753,11 @@ function buildSourceTargets(
           functionId: designFunctionAt(target.sourceRef, designArguments),
           evaluations: target.evaluations.map(evaluation => ({
             runtime: evaluation.runtime,
-            nodeIds: evaluation.objects.map(object => object.nodeId),
+            nodeIds: evaluation.objects.map(modelObjectNodeId),
             operationId: evaluation.operationId,
             operationInput: {
               role: target.role,
-              nodeIds: evaluation.objects.map(object => object.nodeId),
+              nodeIds: evaluation.objects.map(modelObjectNodeId),
             },
             contextId: evaluation.contextId,
           })),
@@ -1834,7 +1863,7 @@ function toolExecutionNodeIds(
   ];
   return [
     ...new Set(
-      models.map(model => model.nodeId).filter(nodeId => objects.has(nodeId)),
+      models.map(modelObjectNodeId).filter(nodeId => objects.has(nodeId)),
     ),
   ];
 }
@@ -1958,7 +1987,7 @@ function operationRoleLineageNodeIds(
 }
 
 function uniqueNodeIds(...models: readonly ModelObject[]): string[] {
-  return [...new Set(models.map(model => model.nodeId))];
+  return [...new Set(models.map(modelObjectNodeId))];
 }
 
 function sourceSpan(sourceRef: SourceRef): number {

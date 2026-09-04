@@ -1,6 +1,4 @@
 export {
-  Constraint,
-  ModelObject,
   arc,
   bezier,
   box,
@@ -26,18 +24,16 @@ export {
 export type {
   Anchor,
   CanonicalElements,
+  Constraint,
   CurveElements,
   Edge,
   EdgeModel,
-  ElementKind,
   FaceAnchor,
   FaceModel,
   HelicalThreadOptions,
   LineAnchor,
   LoftOptions,
   Model,
-  ModelGeometryKind,
-  ModelKind,
   PlanarElements,
   PointAnchor,
   SolidModel,
@@ -45,5 +41,5 @@ export type {
   Vertex,
   VertexModel,
 } from './runtime.js';
-export type {Quaternion, Vec3} from './spatial.js';
-export type {EdgeId, SurfaceId, TopologyKind, VertexId} from './topology.js';
+export type {Vec3} from './spatial.js';
+export type {EdgeId, SurfaceId, VertexId} from './topology.js';
