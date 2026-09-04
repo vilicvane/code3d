@@ -23,6 +23,7 @@ import {
   type ParameterTarget,
   type ParameterUsage,
   type SourceRef,
+  type TopologyKind,
 } from '@code3d/core/tooling';
 import * as screwApi from '@code3d/screws';
 import {code3dAnnotations} from './annotations';
@@ -34,7 +35,6 @@ import {
   type ToolCallSchemaMap,
   type ToolArgumentSource,
   type ToolSelectionParameterSchema,
-  type ToolSelectionKind,
   type ToolSignatureSchema,
 } from './tool-schema';
 import {
@@ -75,7 +75,7 @@ export type SourceTargetEvaluation = Readonly<{
         ids: readonly EdgeId[];
       }>
     | Readonly<{
-        kind: ToolSelectionKind;
+        kind: TopologyKind;
         inputNodeId: string;
         id?: number;
       }>;

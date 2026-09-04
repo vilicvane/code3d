@@ -43,15 +43,19 @@ import {
   resolveEdge,
   resolveEdgeSelection,
   resolveSurface,
+  resolveVertex,
   stableEdgeGroups,
   stableSurfaceGroups,
+  stableVertexData,
   type EdgeId,
   type SolidTopology,
   type SurfaceId,
+  type TopologyKind,
+  type VertexId,
 } from './topology.js';
 
 export type {Quaternion, Vec3} from './spatial.js';
-export type {EdgeId, SurfaceId} from './topology.js';
+export type {EdgeId, SurfaceId, TopologyKind, VertexId} from './topology.js';
 
 export type SourceRef = Readonly<{
   file: string;
@@ -173,10 +177,14 @@ export type ModelOperationSnapshot = Readonly<{
 }>;
 
 export type RenderMesh = Readonly<{
+  /** Tessellation vertices used by the triangle mesh. */
   vertices: Float32Array;
   normals: Float32Array;
   triangles: Uint32Array;
   edges: Float32Array;
+  /** OpenCascade topology vertices, aligned with vertexIds. */
+  topologyVertices: Float32Array;
+  vertexIds: readonly VertexId[];
   surfaceGroups: readonly Readonly<{
     start: number;
     count: number;
@@ -223,8 +231,8 @@ export type ModelElementReference = Readonly<{
 
 export type ModelTopologyReference = Readonly<{
   model: ModelObject;
-  kind: 'edge' | 'surface';
-  id: EdgeId | SurfaceId;
+  kind: TopologyKind;
+  id: VertexId | EdgeId | SurfaceId;
 }>;
 
 type StoredConstraint = Readonly<{
@@ -322,6 +330,11 @@ export interface LineAnchor extends Anchor<'line'> {}
 
 export interface FaceAnchor extends Anchor<'face'> {}
 
+export interface Vertex {
+  readonly kind: 'vertex';
+  readonly id: VertexId;
+}
+
 export interface Edge {
   readonly kind: 'edge';
   readonly id: EdgeId;
@@ -378,11 +391,17 @@ class ModelAnchor<
   }
 }
 
-class ModelTopologyElement<Kind extends 'edge' | 'surface'> {
+type TopologyIdByKind = Readonly<{
+  vertex: VertexId;
+  edge: EdgeId;
+  surface: SurfaceId;
+}>;
+
+class ModelTopologyElement<Kind extends TopologyKind> {
   constructor(
     readonly model: ModelObject,
     readonly kind: Kind,
-    readonly id: Kind extends 'edge' ? EdgeId : SurfaceId,
+    readonly id: TopologyIdByKind[Kind],
   ) {}
 }
 
@@ -621,6 +640,16 @@ export class ModelObject<
       {elements: {...this.elements, ...exposed}},
       operation,
     ) as Model<MergedElements<Elements, ExposedElements<Sources>>>;
+  }
+
+  /** @code3d.param id {kind: 'vertex', label: 'Vertex'} */
+  vertex(id: VertexId): Vertex {
+    const topology = this.requireGeometry().value.topology.vertices;
+    return new ModelTopologyElement(
+      this,
+      'vertex',
+      resolveVertex(topology, id),
+    );
   }
 
   /** @code3d.param id {kind: 'surface', label: 'Surface'} */
@@ -1526,11 +1555,16 @@ function renderMesh(
     () => {
       const surface = shape.mesh({tolerance, angularTolerance: 0.2});
       const wire = shape.meshEdges({tolerance, angularTolerance: 0.2});
+      const vertexData = topology
+        ? stableVertexData(shape.asShape3D(), topology.vertices)
+        : {positions: new Float32Array(), ids: []};
       return {
         vertices: new Float32Array(surface.vertices),
         normals: new Float32Array(surface.normals),
         triangles: new Uint32Array(surface.triangles),
         edges: new Float32Array(wire.lines),
+        topologyVertices: vertexData.positions,
+        vertexIds: vertexData.ids,
         surfaceGroups: topology
           ? stableSurfaceGroups(
               shape.asShape3D(),

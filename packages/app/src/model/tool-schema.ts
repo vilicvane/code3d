@@ -1,16 +1,17 @@
 import ts from '@typescript/typescript6';
 import es5Library from '@typescript/old/lib/lib.es5.d.ts?raw';
-import type {ParameterKind} from '@code3d/core/tooling';
-import type {SourceRef} from '@code3d/core/tooling';
+import type {
+  ParameterKind,
+  SourceRef,
+  TopologyKind,
+} from '@code3d/core/tooling';
 import {
   injectedPackageFiles,
   injectedPackages,
 } from '../monaco/injected-packages';
 import {normalizeProjectPath, type ModelProject} from '../project/project';
 
-export type ToolSelectionKind = 'edge' | 'surface';
-
-export type ToolParameterKind = ParameterKind | ToolSelectionKind;
+export type ToolParameterKind = ParameterKind | TopologyKind;
 
 export type ToolParameterAction = Readonly<{
   action: 'remove-argument';
@@ -40,7 +41,7 @@ export type ToolValueParameterSchema = ToolParameterSchemaBase &
 
 export type ToolSelectionParameterSchema = ToolParameterSchemaBase &
   Readonly<{
-    kind: ToolSelectionKind;
+    kind: TopologyKind;
     multiple: boolean;
   }>;
 
@@ -80,6 +81,7 @@ const toolParameterKinds = new Set<ToolParameterKind>([
   'ratio',
   'count',
   'scalar',
+  'vertex',
   'edge',
   'surface',
 ]);
@@ -87,7 +89,11 @@ const toolParameterKinds = new Set<ToolParameterKind>([
 export function isToolSelectionParameter(
   parameter: ToolParameterSchema,
 ): parameter is ToolSelectionParameterSchema {
-  return parameter.kind === 'edge' || parameter.kind === 'surface';
+  return isTopologyKind(parameter.kind);
+}
+
+function isTopologyKind(kind: unknown): kind is TopologyKind {
+  return kind === 'vertex' || kind === 'edge' || kind === 'surface';
 }
 
 export function resolveProjectToolCalls(
@@ -318,7 +324,7 @@ function toolSignatureSchema(
         parameterName,
       ),
     } as const;
-    if (kind === 'edge' || kind === 'surface') {
+    if (isTopologyKind(kind)) {
       if (constraints) {
         throw toolSchemaError(
           declaration,

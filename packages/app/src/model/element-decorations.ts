@@ -131,6 +131,8 @@ function faceSurfaceAt(
     normals: mesh.normals,
     triangles,
     edges: boundaryEdges(mesh.vertices, triangles),
+    topologyVertices: new Float32Array(),
+    vertexIds: [],
     surfaceGroups,
     edgeGroups: [],
   };

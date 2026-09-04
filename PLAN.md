@@ -51,14 +51,15 @@ silently reorder the active milestones. Closed requests move to
 - Model values have no chainable `named()` operation. Source bindings identify
   authored values; intrinsic primitive and group names remain only as runtime
   display and diagnostic fallbacks.
-- Solid edges and surfaces have independent model-local numeric ID namespaces.
+- Solid vertices, edges, and surfaces have independent model-local numeric ID
+  namespaces.
   Primitive traversal assigns the initial IDs; a derived value preserves
   strict one-to-one topology history, allocates newly created or ambiguous
   elements above the inherited high-water mark, and never reuses retired IDs.
   Deterministic source replay is the persistence mechanism rather than a
-  separate topology ledger. `solid.edge(id)` and `solid.surface(id)` return
-  topology references without inventing the complete frame semantics of named
-  line or face anchors.
+  separate topology ledger. `solid.vertex(id)`, `solid.edge(id)`, and
+  `solid.surface(id)` return topology references without inventing the complete
+  frame semantics of named point, line, or face anchors.
 - A composite is broad: any connected set of occurrences and spatial relations
   is a composite, including copy, pattern, boolean operands, groups, and
   assemblies. A composite can itself be reused as geometry in a larger model.
@@ -364,14 +365,14 @@ constraint source sites do.
   panel has neither Apply nor Cancel actions.
 - Keep the contextual selection panel vertically ordered and stable under
   pointer hover; hover feedback belongs on the model rather than in moving text.
-- Let scalar `edge` and `surface` parameters select exactly one topology ID in
-  the viewport. Entering `solid.edge(id)` or `solid.surface(id)` shows the
-  receiver solid, highlights the current topology element, and writes each new
-  pick directly to the argument; a missing or retired ID remains repairable
-  from the failed call's reached receiver.
+- Let scalar `vertex`, `edge`, and `surface` parameters select exactly one
+  topology ID in the viewport. Entering `solid.vertex(id)`, `solid.edge(id)`, or
+  `solid.surface(id)` shows the receiver solid, highlights the current topology
+  element, and writes each new pick directly to the argument; a missing or
+  retired ID remains repairable from the failed call's reached receiver.
 
 Status: complete. The runtime topology namespaces, edge-scoped modification
-API, scalar edge/surface reference API, derivation transfer rules, render-mesh
+API, scalar vertex/edge/surface reference API, derivation transfer rules, render-mesh
 IDs, operation trace selections, single- and array-selection viewport picking,
 before/after comparison, reversible selection, and source write-back are
 implemented. The Properties panel and GUI operation-insertion path were
@@ -486,7 +487,8 @@ migrated only after their concrete controls establish the next schema boundary.
   is expected for sketching, but is not assumed to be necessary for solids.
 - Which explicit topology references, if any, should be promotable into reusable
   named point, line, or face anchors, and how the author supplies the additional
-  frame semantics and stable semantic name that a raw edge or surface ID lacks.
+  frame semantics and stable semantic name that a raw vertex, edge, or surface
+  ID lacks.
 - How Boolean results expose operand anchors and provenance for later relations.
 - Whether uniform scaling is geometry derivation, occurrence placement, or two
   explicitly named operations.

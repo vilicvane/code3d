@@ -202,7 +202,11 @@ export function createEdgeGeometry(
 
 export function disposeObject(object: THREE.Object3D): void {
   object.traverse(child => {
-    if (child instanceof THREE.Mesh || child instanceof THREE.Line) {
+    if (
+      child instanceof THREE.Mesh ||
+      child instanceof THREE.Line ||
+      child instanceof THREE.Points
+    ) {
       child.geometry.dispose();
       const materials = Array.isArray(child.material)
         ? child.material
