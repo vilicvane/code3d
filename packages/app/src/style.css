@@ -760,6 +760,7 @@ kbd {
   border: 1px solid #34382e;
   border-radius: 3px;
   background: #11130f;
+  color-scheme: dark;
 }
 
 .edge-selection-parameter-control input {
@@ -772,6 +773,19 @@ kbd {
   font:
     10px/1.5 'IBM Plex Mono',
     monospace;
+}
+
+.edge-selection-parameter-control input::-webkit-inner-spin-button {
+  width: 12px;
+  height: 18px;
+  margin: 0;
+  opacity: 0.42;
+  cursor: ns-resize;
+}
+
+.edge-selection-parameter-control input:hover::-webkit-inner-spin-button,
+.edge-selection-parameter-control input:focus::-webkit-inner-spin-button {
+  opacity: 0.82;
 }
 
 .edge-selection-parameter-control:focus-within {
@@ -806,12 +820,11 @@ kbd {
 }
 
 .edge-selection-actions {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 5px;
+  display: block;
 }
 
 .edge-selection-actions button {
+  width: 100%;
   padding: 6px 9px;
   color: #c8cbc2;
   border: 1px solid #3a3d36;
@@ -821,8 +834,7 @@ kbd {
   font-size: 9px;
 }
 
-.edge-selection-actions button:hover:not(:disabled),
-.edge-selection-actions button.primary:not(:disabled) {
+.edge-selection-actions button:hover:not(:disabled) {
   color: #11120f;
   border-color: var(--acid);
   background: var(--acid);

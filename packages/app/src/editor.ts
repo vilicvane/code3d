@@ -291,30 +291,6 @@ export class CodeEditor {
     };
   }
 
-  projectWithSourceEdits(
-    edits: readonly SourceTextEdit[],
-  ): ModelProject | undefined {
-    const grouped = groupEditsByFile(edits);
-    for (const [path, fileEdits] of grouped) {
-      const model = this.documents.get(path)?.model;
-      if (!model || !validEdits(model, fileEdits)) return undefined;
-    }
-    return {
-      files: [...this.documents.values()]
-        .map(({path, model}) => {
-          let source = model.getValue();
-          const fileEdits = grouped.get(path) ?? [];
-          for (const edit of [...fileEdits].sort(
-            (left, right) => right.sourceRef.start - left.sourceRef.start,
-          )) {
-            source = `${source.slice(0, edit.sourceRef.start)}${edit.text}${source.slice(edit.sourceRef.end)}`;
-          }
-          return {path, source};
-        })
-        .sort((left, right) => left.path.localeCompare(right.path)),
-    };
-  }
-
   currentFile(): string {
     return this.activePath;
   }

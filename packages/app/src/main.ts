@@ -148,7 +148,6 @@ app.innerHTML = `
             </div>
             <div class="edge-selection-actions">
               <button id="edge-selection-clear" type="button">Clear</button>
-              <button class="primary" id="edge-selection-apply" type="button">Apply</button>
             </div>
           </section>
           <div class="viewport-progress" id="viewport-progress" role="status" aria-live="polite" hidden>
@@ -217,9 +216,6 @@ const edgeSelectionParameterUnit = requiredElement(
 const edgeSelectionClear = requiredElement<HTMLButtonElement>(
   'edge-selection-clear',
 );
-const edgeSelectionApply = requiredElement<HTMLButtonElement>(
-  'edge-selection-apply',
-);
 const viewportProgress = requiredElement('viewport-progress');
 const viewportProgressLabel = requiredElement('viewport-progress-label');
 const projectTree = requiredElement('project-tree');
@@ -281,6 +277,7 @@ let runRevision = 0;
 let positionToolSession: ToolSession | undefined;
 let positionToolInterruptedCompile = false;
 let edgeSelectionTool: EdgeSelectionTool | undefined;
+let immediateSourceUpdate = false;
 let contextFilePath: string | undefined;
 let preferredEvaluationContextId: string | undefined;
 let selectedDesignContextId: string | undefined;
@@ -290,20 +287,13 @@ let applyingFileRoute = false;
 type EdgeSelectionTool = {
   targetId: string;
   evaluationIndex: number;
-  contextId: string;
   operation: 'fillet' | 'chamfer';
   edgeArgument: EdgeArgumentTarget;
   parameter?: ParameterUsage;
   parameterValue?: number;
   occurrenceKey: string;
   availableEdgeIds: readonly EdgeId[];
-  initialEdgeIds: readonly EdgeId[];
   selectedEdgeIds: readonly EdgeId[];
-  session: ToolSession;
-  interruptedCompile: boolean;
-  previewRevision: number;
-  previewTimer?: number;
-  previewCompiling: boolean;
 };
 
 const viewport = new ModelViewport(viewportHost, {
@@ -368,11 +358,11 @@ const toolEngine = new ToolEngine({
 });
 
 codeEditor.onChange(change => {
-  cancelEdgeSelectionTool();
+  dismissEdgeSelectionTool();
   persistProjectChange(projectFileSystem, change);
   sourceEditPopover.dismiss();
   if (change.kind !== 'content') renderProjectNavigation();
-  requestModelUpdate(420);
+  requestModelUpdate(immediateSourceUpdate ? 0 : 420);
 });
 
 codeEditor.onCursorOffset(({file, offset}) => {
@@ -449,8 +439,13 @@ browserStorageButton.addEventListener('click', () => {
 contextRenameFile.addEventListener('click', () => renameContextFile());
 contextDeleteFile.addEventListener('click', () => deleteContextFile());
 edgeSelectionParameter.addEventListener('input', updateEdgeOperationParameter);
+edgeSelectionParameter.addEventListener('change', commitEdgeOperationParameter);
+edgeSelectionParameter.addEventListener('keydown', event => {
+  if (event.key !== 'Enter') return;
+  commitEdgeOperationParameter();
+  event.preventDefault();
+});
 edgeSelectionClear.addEventListener('click', clearSelectedEdges);
-edgeSelectionApply.addEventListener('click', commitEdgeSelectionTool);
 window.addEventListener('pointerdown', event => {
   if (!projectContextMenu.contains(event.target as Node)) {
     hideProjectContextMenu();
@@ -480,12 +475,7 @@ window.addEventListener('keydown', event => {
     event.preventDefault();
     return;
   }
-  if (event.key === 'Escape' && cancelEdgeSelectionTool()) {
-    event.preventDefault();
-    return;
-  }
-  if (event.key === 'Enter' && edgeSelectionTool && !codeEditor.ownsFocus()) {
-    commitEdgeSelectionTool();
+  if (event.key === 'Escape' && dismissEdgeSelectionTool()) {
     event.preventDefault();
     return;
   }
@@ -1165,7 +1155,7 @@ function syncEdgeSelectionTool(sourceTargetFocused = true): void {
     !sourceTargetFocused ||
     currentModuleSourceVersion !== codeEditor.sourceVersion()
   ) {
-    cancelEdgeSelectionTool();
+    dismissEdgeSelectionTool();
     return;
   }
   const scope = viewport.sourceEvaluation();
@@ -1180,7 +1170,7 @@ function syncEdgeSelectionTool(sourceTargetFocused = true): void {
     (operation === 'fillet' || operation === 'chamfer') &&
     occurrence?.node.kind === 'solid';
   if (!eligible || !scope || !occurrence || !edgeArgument) {
-    cancelEdgeSelectionTool();
+    dismissEdgeSelectionTool();
     return;
   }
   if (
@@ -1194,9 +1184,7 @@ function syncEdgeSelectionTool(sourceTargetFocused = true): void {
     scope.target.id,
     scope.evaluationIndex,
     operation,
-    scope.target.sourceRef,
     edgeArgument,
-    scope.evaluation.contextId,
     selection.inputNodeId,
     selection.ids,
     selection.parameter,
@@ -1208,17 +1196,14 @@ function startEdgeSelection(
   targetId: string,
   evaluationIndex: number,
   operation: 'fillet' | 'chamfer',
-  sourceRef: SourceRef,
   edgeArgument: EdgeArgumentTarget,
-  contextId: string,
   inputNodeId: string,
   initialEdgeIds: readonly EdgeId[],
   parameter: ParameterUsage | undefined,
   occurrence: Occurrence,
 ): void {
-  cancelEdgeSelectionTool();
+  dismissEdgeSelectionTool();
   viewport.cancelPositionTool();
-  const interruptedCompile = interruptCompileForTool();
   let availableEdgeIds: readonly EdgeId[];
   try {
     availableEdgeIds = viewport.beginEdgeSelection(
@@ -1227,28 +1212,19 @@ function startEdgeSelection(
       initialEdgeIds,
     );
   } catch (error) {
-    resumeCompileAfterTool(interruptedCompile);
     showToolIssue(error instanceof Error ? error.message : String(error));
     return;
   }
   edgeSelectionTool = {
     targetId,
     evaluationIndex,
-    contextId,
     operation,
     edgeArgument,
     parameter,
     parameterValue: parameter?.value,
     occurrenceKey: occurrence.key,
     availableEdgeIds,
-    initialEdgeIds: sortedEdgeIds(initialEdgeIds),
     selectedEdgeIds: sortedEdgeIds(initialEdgeIds),
-    session: toolEngine.begin(
-      `viewport.edge-selection:${sourceRef.file}:${sourceRef.start}:${sourceRef.end}`,
-    ),
-    interruptedCompile,
-    previewRevision: 0,
-    previewCompiling: false,
   };
   sourceEditPopover.dismiss();
   errorBar.hidden = true;
@@ -1261,7 +1237,7 @@ function clearSelectedEdges(): void {
   tool.selectedEdgeIds = [];
   viewport.clearSelectedEdges();
   updateEdgeSelectionToolbar(tool);
-  scheduleEdgeSelectionResultPreview(tool);
+  commitEdgeOperationChange(tool, edgeSelectionIntent(tool));
 }
 
 function updateEdgeOperationParameter(): void {
@@ -1273,12 +1249,19 @@ function updateEdgeOperationParameter(): void {
     'aria-invalid',
     String(tool.parameterValue === undefined),
   );
-  edgeSelectionApply.disabled = !canApplyEdgeSelection(tool);
-  if (tool.parameterValue === undefined) {
-    stopEdgeSelectionResultPreview(tool);
-    return;
-  }
-  scheduleEdgeSelectionResultPreview(tool);
+}
+
+function commitEdgeOperationParameter(): void {
+  updateEdgeOperationParameter();
+  const tool = edgeSelectionTool;
+  if (!tool) return;
+  const parameter = edgeOperationParameterEdit(tool);
+  if (!parameter) return;
+  commitEdgeOperationChange(tool, {
+    kind: 'edge-operation.set',
+    operation: tool.operation,
+    parameter,
+  });
 }
 
 function updateEdgeSelectionToolbar(tool: EdgeSelectionTool): void {
@@ -1306,162 +1289,59 @@ function updateEdgeSelectionToolbar(tool: EdgeSelectionTool): void {
   }
   edgeSelectionSummary.textContent = formatEdgeIds(tool.selectedEdgeIds);
   edgeSelectionClear.disabled = tool.selectedEdgeIds.length === 0;
-  edgeSelectionApply.disabled = !canApplyEdgeSelection(tool);
   edgeSelectionToolbar.hidden = false;
 }
 
 function handleEdgeSelection(event: EdgeSelectionEvent): void {
   if (event.kind === 'cancel') {
-    cancelEdgeSelectionTool(false);
+    dismissEdgeSelectionTool(false);
     return;
   }
   const tool = edgeSelectionTool;
   if (!tool) return;
   if (event.kind === 'hover') return;
-  tool.selectedEdgeIds = event.selectedEdgeIds;
+  tool.selectedEdgeIds = sortedEdgeIds(event.selectedEdgeIds);
   updateEdgeSelectionToolbar(tool);
-  scheduleEdgeSelectionResultPreview(tool);
+  commitEdgeOperationChange(tool, edgeSelectionIntent(tool));
 }
 
-function commitEdgeSelectionTool(): void {
-  const tool = edgeSelectionTool;
-  if (!tool) return;
-  if (!canApplyEdgeSelection(tool)) return;
-  const intent = edgeSelectionIntent(tool);
-  stopEdgeSelectionResultPreview(tool);
-  edgeSelectionTool = undefined;
-  viewport.endEdgeSelection();
-  edgeSelectionToolbar.hidden = true;
+function commitEdgeOperationChange(
+  tool: EdgeSelectionTool,
+  intent: ToolIntent,
+): void {
+  if (edgeSelectionTool !== tool) return;
   errorBar.hidden = true;
-  const committed = commitToolSession(tool.session, intent);
-  if (!committed) resumeCompileAfterTool(tool.interruptedCompile);
-  renderCurrentPanels();
+  let committed = false;
+  try {
+    immediateSourceUpdate = true;
+    committed = commitToolSession(
+      toolEngine.begin(
+        `viewport.edge-operation:${tool.targetId}:${tool.evaluationIndex}`,
+      ),
+      intent,
+    );
+  } finally {
+    immediateSourceUpdate = false;
+  }
+  if (!committed) dismissEdgeSelectionTool();
 }
 
-function cancelEdgeSelectionTool(updateViewport = true): boolean {
-  const tool = edgeSelectionTool;
-  if (!tool) return false;
-  stopEdgeSelectionResultPreview(tool);
+function dismissEdgeSelectionTool(updateViewport = true): boolean {
+  if (!edgeSelectionTool) return false;
   edgeSelectionTool = undefined;
-  tool.session.cancel();
   if (updateViewport) viewport.endEdgeSelection();
   edgeSelectionToolbar.hidden = true;
-  resumeCompileAfterTool(tool.interruptedCompile);
   return true;
 }
 
-function scheduleEdgeSelectionResultPreview(tool: EdgeSelectionTool): void {
-  tool.previewRevision += 1;
-  window.clearTimeout(tool.previewTimer);
-  tool.previewTimer = undefined;
-  if (tool.previewCompiling) {
-    compiler.cancel();
-    tool.previewCompiling = false;
-  }
-  errorBar.hidden = true;
-  if (tool.parameter && tool.parameterValue === undefined) {
-    viewport.clearEdgeSelectionResultPreview();
-    hideViewportProgress();
-    return;
-  }
-  if (!edgeSelectionChanged(tool)) {
-    viewport.clearEdgeSelectionResultPreview();
-    hideViewportProgress();
-    return;
-  }
-
-  const resolution = toolEngine.resolve(
-    tool.session.toolId,
-    edgeSelectionIntent(tool),
-  );
-  if (resolution.status !== 'ready') {
-    showToolIssue(resolution.reason);
-    return;
-  }
-  const project = codeEditor.projectWithSourceEdits(resolution.plan.edits);
-  if (!project) {
-    showToolIssue('The edge selection no longer maps to the current source.');
-    return;
-  }
-  const revision = tool.previewRevision;
-  tool.previewTimer = window.setTimeout(() => {
-    tool.previewTimer = undefined;
-    void runEdgeSelectionResultPreview(tool, project, revision);
-  }, 140);
-}
-
-async function runEdgeSelectionResultPreview(
-  tool: EdgeSelectionTool,
-  project: ModelProject,
-  revision: number,
-): Promise<void> {
-  if (edgeSelectionTool !== tool || tool.previewRevision !== revision) return;
-  tool.previewCompiling = true;
-  showViewportProgress(`Previewing ${edgeOperationLabel(tool.operation)}`);
-  try {
-    const module = await compiler.compile(
-      project,
-      codeEditor.currentFile(),
-      selectedDesignContextId,
-    );
-    if (edgeSelectionTool !== tool || tool.previewRevision !== revision) return;
-    const target = module.sourceTargets.find(
-      candidate => candidate.id === tool.targetId,
-    );
-    const evaluation =
-      target?.evaluations.find(
-        candidate => candidate.contextId === tool.contextId,
-      ) ?? target?.evaluations[tool.evaluationIndex];
-    const result = evaluation?.nodeIds
-      .map(nodeId => module.objects.get(nodeId))
-      .find(node => node?.kind === 'solid' && node.mesh);
-    if (!result) {
-      throw new Error('The edge operation preview produced no solid result.');
-    }
-    viewport.setEdgeSelectionResultPreview(result);
-    errorBar.hidden = true;
-  } catch (error) {
-    if (edgeSelectionTool !== tool || tool.previewRevision !== revision) return;
-    const diagnostic =
-      error instanceof ModelDiagnosticError ? error.diagnostic : undefined;
-    showToolIssue(
-      diagnostic
-        ? [diagnostic.summary, diagnostic.details].filter(Boolean).join('\n')
-        : error instanceof Error
-          ? error.message
-          : String(error),
-    );
-  } finally {
-    if (edgeSelectionTool === tool && tool.previewRevision === revision) {
-      tool.previewCompiling = false;
-      hideViewportProgress();
-    }
-  }
-}
-
-function stopEdgeSelectionResultPreview(tool: EdgeSelectionTool): void {
-  tool.previewRevision += 1;
-  window.clearTimeout(tool.previewTimer);
-  tool.previewTimer = undefined;
-  if (tool.previewCompiling) compiler.cancel();
-  tool.previewCompiling = false;
-  viewport.clearEdgeSelectionResultPreview();
-  hideViewportProgress();
-}
-
 function edgeSelectionIntent(tool: EdgeSelectionTool): ToolIntent {
-  const parameter = edgeOperationParameterEdit(tool);
-  const edges = sameEdgeIds(tool.selectedEdgeIds, tool.initialEdgeIds)
-    ? undefined
-    : {
-        argument: tool.edgeArgument,
-        ids: tool.selectedEdgeIds,
-      };
   return {
     kind: 'edge-operation.set',
     operation: tool.operation,
-    parameter,
-    edges,
+    edges: {
+      argument: tool.edgeArgument,
+      ids: tool.selectedEdgeIds,
+    },
   };
 }
 
@@ -1485,20 +1365,6 @@ function edgeOperationParameterEdit(
   };
 }
 
-function edgeSelectionChanged(tool: EdgeSelectionTool): boolean {
-  return (
-    !sameEdgeIds(tool.selectedEdgeIds, tool.initialEdgeIds) ||
-    edgeOperationParameterEdit(tool) !== undefined
-  );
-}
-
-function canApplyEdgeSelection(tool: EdgeSelectionTool): boolean {
-  return (
-    (!tool.parameter || tool.parameterValue !== undefined) &&
-    edgeSelectionChanged(tool)
-  );
-}
-
 function edgeOperationLabel(operation: EdgeSelectionTool['operation']): string {
   return operation === 'fillet' ? 'Fillet' : 'Chamfer';
 }
@@ -1513,16 +1379,6 @@ function formatEdgeIds(edgeIds: readonly EdgeId[]): string {
 
 function sortedEdgeIds(edgeIds: readonly EdgeId[]): EdgeId[] {
   return [...edgeIds].sort((left, right) => left - right);
-}
-
-function sameEdgeIds(
-  left: readonly EdgeId[],
-  right: readonly EdgeId[],
-): boolean {
-  return (
-    left.length === right.length &&
-    left.every((edgeId, index) => edgeId === right[index])
-  );
 }
 
 function interruptCompileForTool(): boolean {

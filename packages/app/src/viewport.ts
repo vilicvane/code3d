@@ -239,7 +239,6 @@ export class ModelViewport {
   private selectionHelper: CornerBoxHelper | null = null;
   private edgeSelection?: EdgeSelectionState;
   private edgeSelectionOverlay?: THREE.Group;
-  private edgeSelectionResultPreview?: THREE.Object3D;
   private highlightedTargetId?: string;
   private highlightedOccurrenceKeys = new Set<string>();
   private selectionEmphasized = true;
@@ -586,36 +585,6 @@ export class ModelViewport {
     this.updatePositionGizmo();
     this.rebuildEdgeSelectionOverlay();
     return edgeIds;
-  }
-
-  setEdgeSelectionResultPreview(node: ModelSnapshotObject): void {
-    const selection = this.edgeSelection;
-    const occurrence = selection
-      ? this.occurrences.get(selection.occurrenceKey)
-      : undefined;
-    if (!selection || !occurrence || node.kind !== 'solid' || !node.mesh) {
-      throw new Error('Edge selection preview requires a rendered solid.');
-    }
-    this.clearEdgeSelectionResultPreview();
-    occurrence.object.visible = false;
-    const preview = createThreeObject(node);
-    preview.name = `${node.name} (edge selection preview)`;
-    applyNodeTransform(preview, node);
-    this.root.add(preview);
-    this.edgeSelectionResultPreview = preview;
-  }
-
-  clearEdgeSelectionResultPreview(): void {
-    if (this.edgeSelectionResultPreview) {
-      this.edgeSelectionResultPreview.removeFromParent();
-      disposeObject(this.edgeSelectionResultPreview);
-      this.edgeSelectionResultPreview = undefined;
-    }
-    const selection = this.edgeSelection;
-    const occurrence = selection
-      ? this.occurrences.get(selection.occurrenceKey)
-      : undefined;
-    if (occurrence) occurrence.object.visible = true;
   }
 
   endEdgeSelection(): void {
@@ -1419,7 +1388,6 @@ export class ModelViewport {
   }
 
   private clearEdgeSelection(): void {
-    this.clearEdgeSelectionResultPreview();
     this.clearEdgeSelectionOverlay();
     if (this.edgeSelection) {
       this.edgeSelection.guide.removeFromParent();

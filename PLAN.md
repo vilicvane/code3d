@@ -321,13 +321,15 @@ constraint source sites do.
   not offer GUI insertion of modeling calls.
 - While selecting, render the applied operation result as the primary solid and
   retain every original input edge at its pre-operation position as a
-  hoverable/toggleable guide. Recompile the temporary result as the selected
-  set changes without writing source. Outside selection, keep the weaker
-  before/after comparison for an applied edge modification.
+  hoverable/toggleable guide. Commit each edge-set or confirmed size change to
+  source immediately and render the normal compiled model; do not present an
+  uncommitted operation result as if it had already taken effect. Outside
+  selection, keep the weaker before/after comparison for an applied edge
+  modification.
 - Make deselection reversible at both levels: toggle individual edges or clear
-  the set. Leaving the call's source focus or pressing `Escape` cancels the
-  whole session without changing source; the transient panel has no redundant
-  Cancel action.
+  the set. Leaving the call's source focus or pressing `Escape` only dismisses
+  the transient panel; already committed edits remain in source. The panel has
+  neither Apply nor Cancel actions.
 - Keep the contextual selection panel vertically ordered and stable under
   pointer hover; hover feedback belongs on the model rather than in moving text.
 
