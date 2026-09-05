@@ -244,7 +244,122 @@ test('retains topology values at bindings, aliases, and collection results', asy
   assert.equal(binding('repeated').nodeIds.length, 2);
 });
 
+test('parameter previews observe bound values without changing function execution', async () => {
+  const source = `import {box} from '@code3d/core';
+    function strict(part) {
+      'use strict';
+      if (this !== undefined || arguments.length !== 1) throw new Error('function semantics changed');
+      return part;
+    }
+    let reads = 0;
+    const object = {get part() { reads++; return box(10, 10, 10); }};
+    function unpack({part}, [peer], ...remaining) {
+      if (remaining.length !== 1) throw new Error('rest arguments changed');
+      return [strict(part), peer, ...remaining];
+    }
+    const models = unpack(object, [box(20, 20, 20)], box(30, 30, 30));
+    if (reads !== 1) throw new Error('destructuring getter observed twice');
+    const identity = (part = box(40, 40, 40)) => part;
+    models.map(identity);
+    identity();`;
+  const module = await compileProject(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  assert.equal(module.diagnostic, undefined);
+  for (const [binding, context, count, collection] of [
+    ['part', 'function strict(', 1, false],
+    ['part', 'function unpack(', 1, false],
+    ['peer', 'function unpack(', 1, false],
+    ['remaining', 'function unpack(', 1, true],
+    ['part', 'const identity = (', 4, false],
+  ]) {
+    const start = source.indexOf(binding, source.indexOf(context));
+    const target = ModelViewport.prototype.sourceTargetAt.call(
+      {module},
+      '/model.ts',
+      start + 1,
+    );
+    assert.equal(target.kind, 'value');
+    assert.equal(target.sourceRef.start, start);
+    assert.equal(target.sourceRef.end, start + binding.length);
+    assert.equal(target.evaluations.length, count);
+    assert.equal(
+      new Set(target.evaluations.flatMap(evaluation => evaluation.nodeIds))
+        .size,
+      count,
+    );
+    for (const evaluation of target.evaluations) {
+      assert.equal(evaluation.isCollection, collection);
+      assert.equal(evaluation.constraintId, undefined);
+      assert.equal(evaluation.nodeIds.length, 1);
+    }
+  }
+});
+
+for (const compose of [true, false]) {
+  test(`relate model values retain their relation context ${compose ? 'with' : 'without'} a loft consumer`, async () => {
+    const source = `import {box, circle, loft, rectangle} from '@code3d/core';
+      const model = (() => {
+        const ref = box(100, 100, 100);
+        const start = circle(20).relate(circle => circle.on(ref.surface(4)));
+        const end = rectangle(40, 40).relate(circle => circle.on(ref.surface(6)));
+        ${compose ? 'return loft([start, end]);' : ''}
+      })();`;
+    const module = await compileProject(
+      {files: [{path: '/model.ts', source}]},
+      '/model.ts',
+    );
+    assert.equal(module.diagnostic, undefined);
+    for (const id of [4, 6]) {
+      const callback = `circle => circle.on(ref.surface(${id}))`;
+      const callbackStart = source.indexOf(callback);
+      const relation = module.sourceTargets.find(
+        target =>
+          target.kind === 'constraint' &&
+          source.slice(target.sourceRef.start, target.sourceRef.end) ===
+            `circle.on(ref.surface(${id}))`,
+      ).evaluations[0];
+      for (const offset of [
+        callbackStart + 3,
+        callbackStart + 'circle => cir'.length,
+      ]) {
+        const target = ModelViewport.prototype.sourceTargetAt.call(
+          {module},
+          '/model.ts',
+          offset,
+        );
+        assert.equal(target.kind, 'value');
+        assert.equal(target.evaluations.length, 1);
+        const evaluation = target.evaluations[0];
+        assert.deepEqual(evaluation.nodeIds, relation.nodeIds);
+        assert.deepEqual(evaluation.focusNodeIds, [
+          relation.constraintSourceNodeId,
+        ]);
+        assert.equal(evaluation.constraintId, relation.constraintId);
+        assert.equal(sourceTargetPlacement(evaluation), 'composition');
+        assert.deepEqual(
+          target.contextTargetIds,
+          module.sourceTargets.find(
+            candidate =>
+              candidate.kind === 'constraint' &&
+              candidate.evaluations[0] === relation,
+          ).contextTargetIds,
+        );
+      }
+      const focused = module.objects.get(relation.constraintSourceNodeId);
+      assert.ok(
+        focused.compositionTransform.position.some(
+          value => Math.abs(value) > 49,
+        ),
+      );
+      assert.deepEqual(focused.transform.position, [0, 0, 0]);
+    }
+  });
+}
+
 for (const [kind, sourceAnchor, targetAnchor] of [
+  ['model', 'self', 'base'],
   ['edge', 'self.edge(id)', 'base.edge(1)'],
   ['surface', 'self.surface(id)', 'base.surface(1)'],
   ['vertex', 'self.vertex(id)', 'base.vertex(1)'],
@@ -282,11 +397,17 @@ for (const [kind, sourceAnchor, targetAnchor] of [
       const target = ModelViewport.prototype.sourceTargetAt.call(
         {module},
         '/model.ts',
-        source.indexOf(anchor) + anchor.length - 1,
+        source.indexOf(anchor, source.indexOf(`${sourceAnchor}.on(`)) +
+          anchor.length -
+          1,
       );
       assert.equal(
         target.kind,
-        kind === 'named' ? 'element' : 'topology-selection',
+        kind === 'model'
+          ? 'value'
+          : kind === 'named'
+            ? 'element'
+            : 'topology-selection',
       );
       assert.equal(target.evaluations.length, 4);
       assert.equal(new Set(target.evaluations.map(e => e.contextId)).size, 1);
@@ -312,7 +433,7 @@ for (const [kind, sourceAnchor, targetAnchor] of [
             );
         assert.deepEqual(evaluation.focusNodeIds, [owner]);
         assert.equal(sourceTargetPlacement(evaluation), 'composition');
-        if (kind !== 'named') {
+        if (kind !== 'named' && kind !== 'model') {
           assert.equal(evaluation.selection.kind, kind);
           assert.equal(evaluation.selection.inputNodeId, owner);
           assert.deepEqual(evaluation.selection.ids, [
@@ -837,6 +958,117 @@ test('compiles the standalone custom primitive example with direct annotations a
     assert.equal(model.operation.kind, 'primitive');
     assert.ok(model.mesh.triangles.length > 0);
   }
+});
+
+test('the documented origin example exposes each spatial operation and its assembly', async () => {
+  const rootPath = '/examples/origin-and-rotation.ts';
+  const file = bundledExamples.files.find(file => file.path === rootPath);
+  assert.ok(file);
+  const module = await compileProject({files: [file]}, rootPath);
+  assert.equal(module.diagnostic, undefined);
+  for (const [text, kind, parameters] of [
+    ['blank.originVertex(3)', 'originVertex', ['id']],
+    ['pivoted.originOffset(0, 2, 0)', 'originOffset', ['dx', 'dy', 'dz']],
+    ['offset.rotate(15, 35, 0)', 'rotate', ['x', 'y', 'z']],
+    ['rotated.originCenter()', 'originCenter', undefined],
+    ['rotated.origin(0, 0, 0)', 'origin', ['x', 'y', 'z']],
+  ]) {
+    // The receiver is a separate input scope; the tool starts at the method name.
+    const targets = exactTargets(
+      module,
+      file.source,
+      text.slice(text.indexOf('.') + 1),
+      text,
+    );
+    assert.ok(
+      targets.some(target =>
+        target.evaluations.some(evaluation => {
+          const operation = module.operations.get(evaluation.operationId);
+          return operation?.kind === kind && operation.spatial;
+        }),
+      ),
+      `The guide needs an inspectable spatial context for ${text}`,
+    );
+    if (parameters) {
+      const target = targets.find(target => target.tool);
+      assert.deepEqual(
+        target?.tool.signature.parameters.map(parameter => parameter.name),
+        parameters,
+      );
+    }
+  }
+  const assembly = exactTargets(
+    module,
+    file.source,
+    'group([rotated, companion])',
+  );
+  assert.ok(
+    assembly.some(target =>
+      target.evaluations.some(evaluation => evaluation.nodeIds.length > 0),
+    ),
+  );
+});
+
+test('the shared combined-constraints guide retains both inspectable relations', async () => {
+  const rootPath = '/examples/combined-constraints.ts';
+  const file = bundledExamples.files.find(file => file.path === rootPath);
+  assert.ok(file);
+  const module = await compileProject({files: [file]}, rootPath);
+  assert.equal(module.diagnostic, undefined);
+  assert.ok(module.exports.has('default'));
+  const relations = ['self.edge(3)', 'self.top'].map(text => {
+    const target = ModelViewport.prototype.sourceTargetAt.call(
+      {module},
+      rootPath,
+      file.source.indexOf(text) + text.length - 1,
+    );
+    const evaluation = target.evaluations[0];
+    assert.ok(evaluation.constraintId);
+    assert.equal(sourceTargetPlacement(evaluation), 'composition');
+    assert.equal(evaluation.nodeIds.length, 2);
+    return evaluation.constraintId;
+  });
+  assert.notEqual(relations[0], relations[1]);
+});
+
+test('the App guide distinguishes a method receiver, its result and an ordinary function input', async () => {
+  const document = await readFile(
+    new URL(
+      '../../web/src/content/docs/docs/getting-started/app.md',
+      import.meta.url,
+    ),
+    'utf8',
+  );
+  const source = [...document.matchAll(/\`\`\`ts\n([\s\S]*?)\`\`\`/g)]
+    .map(match => match[1])
+    .find(source => source.includes('centered(rounded)'));
+  assert.ok(source);
+  const rootPath = '/model.ts';
+  const module = await compileProject(
+    {files: [{path: rootPath, source}]},
+    rootPath,
+  );
+  assert.equal(module.diagnostic, undefined);
+  const at = (text, context = text) => {
+    const start = source.indexOf(text, source.indexOf(context));
+    return ModelViewport.prototype.sourceTargetAt.call(
+      {module},
+      rootPath,
+      start + text.length - 1,
+    );
+  };
+  const receiver = at('blank', 'blank.fillet(1)');
+  const result = at('fillet(1)');
+  const argument = at('rounded', 'centered(rounded)');
+  assert.notDeepEqual(
+    receiver.evaluations[0].nodeIds,
+    result.evaluations[0].nodeIds,
+  );
+  assert.deepEqual(
+    argument.evaluations[0].nodeIds,
+    result.evaluations[0].nodeIds,
+  );
+  assert.equal(at('centered(rounded)').tool, undefined);
 });
 
 for (const sample of renderSamples) {

@@ -7,7 +7,7 @@ description: 'code3d 的隔离开发与串行集成流程。USE FOR: 在 code3d 
 
 每个开发需求在自己的 linked worktree 中完成。获得用户合并授权后，由同一个任务会话按 FIFO 临时取得主区锁，自己合并并执行最终测试。主 worktree 不设常驻 owner 或专门整合 session，也不得用于实现功能或修复测试。
 
-GitHub Issues 跟踪需求，下面的本地协调文件只负责 agent 活动、开发服务器和串行集成。开始需求、更新 issue 或交付时，读取 [GitHub Issues 协作约定](references/github-issues.md)。不设需求模板；简短需求可以只有一句话。
+GitHub Issues 跟踪需求和当前已确定的方案，下面的本地协调文件只负责 agent 活动、开发服务器和串行集成。开始需求、方案确定或调整、更新 issue 或交付时，读取 [GitHub Issues 协作约定](references/github-issues.md)，同步维护 issue 正文中的方案摘要。不设需求模板；简短需求可以只有一句话。
 
 协调脚本统一使用主 worktree 的已集成版本，不使用任务分支中的旧副本，避免旧工作流覆盖新状态。主区路径记为 `PRIMARY`，任务 worktree 记为 `WORKTREE`：
 

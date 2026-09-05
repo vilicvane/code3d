@@ -61,13 +61,36 @@ ordinary choice about reuse by another module.
 
 Controls follow a unique chain of TypeScript definitions to an editable
 numeric source value, including supported variables, object properties, and
-destructuring. A computed value is not automatically reversible. If there is
-no editable source target, a numeric input can show the evaluated value as
-placeholder text; change the expression in source instead.
+destructuring. The appearance of the input tells you how an edit will work:
+
+| Input                                     | Meaning                                                               | What typing a number does                                        |
+| ----------------------------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| An editable value                         | A literal or unique editable source was found                         | Updates that source, preserving a supported expression around it |
+| An empty input with a numeric placeholder | The argument was evaluated, but has no unique editable upstream value | Replaces the entire argument expression at this call             |
+| An empty input without a placeholder      | The argument is missing or has no evaluated value                     | Adds or replaces the argument if the input is enabled            |
+
+For example, with `const spacing = 8`, changing X from `16` to `20` in
+`box(spacing * 2, 8, 4)` updates `spacing` to `10`, leaving `spacing * 2`
+intact. An inline coefficient is not treated as an upstream parameter:
+`box(i * 8, 8, 4)` can instead show the evaluated X as a placeholder.
+Typing `20` replaces `i * 8` with `20`, not the coefficient with another number.
+
+Placeholder values are shown to at most three decimal places. Focusing an
+input does not replace the expression; entering a value does, including when
+it matches the placeholder. In a loop or function, the edit changes that
+shared call site, not just the inspected runtime instance. Use Undo to restore
+the original expression.
+
+This differs from [dragging a position tool](../relations/#make-visual-adjustments),
+which can preserve an expression by adding a numeric increment.
 
 An incomplete call can still show a panel. Missing arguments remain blank,
 and the next argument that can legally be appended becomes editable. The
 panel does not invent values for the remaining parameters.
+
+Use `Tab` to commit a value and move to the next input as it becomes available.
+`Esc` cancels an active viewport drag, not the panel; leave the call in the
+editor to close it.
 
 Use runtime validation in the function for geometric requirements; input
 constraints do not replace it.

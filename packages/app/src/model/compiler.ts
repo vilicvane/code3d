@@ -57,7 +57,7 @@ export type SourceTargetEvaluation = Readonly<{
   runtime: RuntimeReach;
   toolExecutionOrder?: number;
   nodeIds: readonly string[];
-  /** Anchor owners to emphasize while their relation peers remain visible. */
+  /** Models to emphasize while their relation peers remain visible. */
   focusNodeIds?: readonly string[];
   parameters?: readonly ParameterUsage[];
   toolArguments?: Readonly<Record<number, number>>;
@@ -234,6 +234,8 @@ type SourceValueTrace = {
   id: string;
   kind: 'value' | 'operation-output';
   sourceRef: SourceRef;
+  /** A parameter can inspect relations constructed in its function body. */
+  scopeRef?: SourceRef;
   evaluations: Array<
     Readonly<{
       objects: readonly ModelObject[];
@@ -516,6 +518,35 @@ export function createModelCompiler(
       return result;
     },
 
+    parameterValue(
+      file: string,
+      start: number,
+      end: number,
+      scopeStart: number,
+      scopeEnd: number,
+      id: string,
+      value: unknown,
+    ): void {
+      const location = sourceRef(file, start, end);
+      const context =
+        currentEvaluationContext() ??
+        callEvaluationContext(
+          id,
+          nextTraceExecution(id),
+          'parameter',
+          location,
+        );
+      recordSourceValue(
+        id,
+        'value',
+        location,
+        value,
+        context.id,
+        completedRuntimeReach(),
+        sourceRef(file, scopeStart, scopeEnd),
+      );
+    },
+
     design<T>(
       file: string,
       functionStart: number,
@@ -745,6 +776,7 @@ export function createModelCompiler(
     value: unknown,
     contextId: string,
     runtime: RuntimeReach,
+    scopeRef?: SourceRef,
   ): void {
     const topologyReferences: TopologyValueReference[] = [];
     const objects = modelObjectsIn(value, new Set(), topologyReferences);
@@ -757,6 +789,7 @@ export function createModelCompiler(
       id,
       kind,
       sourceRef,
+      scopeRef,
       evaluations: [],
     };
     sourceTrace.evaluations.push({
@@ -1423,6 +1456,13 @@ export function createModelCompiler(
     const sourceInputTraces = [...sourceExecutionTraces.values()].flatMap(
       execution => execution.inputs,
     );
+    const parameterScopes = new Map<string, SourceRef>(
+      [...sourceValueTraces.values()].flatMap(trace =>
+        trace.scopeRef
+          ? [[`source:${trace.kind}:${trace.id}`, trace.scopeRef] as const]
+          : [],
+      ),
+    );
     const valueTargets = [...sourceValueTraces.values()].map(trace => {
       const toolSite = toolCallSites.get(trace.id);
       const evaluations = trace.evaluations.map(
@@ -1771,46 +1811,54 @@ export function createModelCompiler(
     );
 
     function withConstraintContext(target: SourceTarget): SourceTarget {
-      if (!target.evaluations.some(evaluation => evaluation.focusNodeIds)) {
-        return target;
-      }
+      if (target.kind === 'constraint') return target;
+      const scopeRef = parameterScopes.get(target.id);
       const containing = constraintTargets.filter(
         constraint =>
           constraint.sourceRef.file === target.sourceRef.file &&
-          constraint.sourceRef.start <= target.sourceRef.start &&
-          target.sourceRef.end <= constraint.sourceRef.end,
-      );
-      const narrowestSpan = Math.min(
-        ...containing.map(constraint => sourceSpan(constraint.sourceRef)),
-      );
-      const related = containing.filter(
-        constraint => sourceSpan(constraint.sourceRef) === narrowestSpan,
+          (scopeRef
+            ? scopeRef.start <= constraint.sourceRef.start &&
+              constraint.sourceRef.end <= scopeRef.end
+            : constraint.sourceRef.start <= target.sourceRef.start &&
+              target.sourceRef.end <= constraint.sourceRef.end),
       );
       const contextTargetIds = new Set(target.contextTargetIds);
       const evaluations = target.evaluations.flatMap(evaluation => {
-        const matches = related.flatMap(constraint =>
+        const focusNodeIds = evaluation.focusNodeIds ?? evaluation.nodeIds;
+        if (focusNodeIds.length === 0) return [evaluation];
+        const matches = containing.flatMap(constraint =>
           constraint.evaluations
             .filter(
               candidate =>
                 candidate.contextId === evaluation.contextId &&
                 (candidate.toolExecutionOrder ?? candidate.runtime.order) >=
                   evaluation.runtime.order &&
-                evaluation.focusNodeIds?.every(nodeId =>
+                focusNodeIds.every(nodeId =>
                   candidate.nodeIds.includes(nodeId),
                 ),
             )
             .map(candidate => ({constraint, candidate})),
         );
+        const narrowestSpan = scopeRef
+          ? Infinity
+          : Math.min(
+              ...matches.map(({constraint}) =>
+                sourceSpan(constraint.sourceRef),
+              ),
+            );
+        const nearest = matches.filter(
+          ({constraint}) => sourceSpan(constraint.sourceRef) <= narrowestSpan,
+        );
         // Several calls can share one runtime context and reference model.
-        // The first enclosing constraint to finish owns this anchor occurrence.
+        // The first matching constraint to finish owns this value occurrence.
         const enclosingOrder = Math.min(
-          ...matches.map(
+          ...nearest.map(
             ({candidate}) =>
               candidate.toolExecutionOrder ?? candidate.runtime.order,
           ),
         );
-        return matches.length > 0
-          ? matches
+        return nearest.length > 0
+          ? nearest
               .filter(
                 ({candidate}) =>
                   (candidate.toolExecutionOrder ?? candidate.runtime.order) ===
@@ -1822,6 +1870,7 @@ export function createModelCompiler(
                 );
                 return {
                   ...evaluation,
+                  focusNodeIds,
                   runtime: candidate.runtime,
                   toolExecutionOrder:
                     evaluation.toolExecutionOrder ?? evaluation.runtime.order,
@@ -2177,6 +2226,45 @@ export function createModelCompiler(
           }
           const visited = ts.visitEachChild(node, visit, context);
           if (
+            ts.isFunctionLike(node) &&
+            ts.isFunctionLike(visited) &&
+            'body' in node &&
+            node.body &&
+            'body' in visited &&
+            visited.body
+          ) {
+            const parameters = parameterValueStatements(
+              node.parameters,
+              node.body,
+              sourceFile,
+              factory,
+            );
+            if (parameters.length > 0) {
+              const body = visited.body;
+              const statements = ts.isBlock(body)
+                ? [...body.statements]
+                : [factory.createReturnStatement(body)];
+              // Directive prologues must remain at the beginning of the function.
+              let insertion = 0;
+              while (insertion < statements.length) {
+                const statement = statements[insertion];
+                if (
+                  !ts.isExpressionStatement(statement) ||
+                  !ts.isStringLiteral(statement.expression)
+                )
+                  break;
+                insertion++;
+              }
+              statements.splice(insertion, 0, ...parameters);
+              const tracedBody = factory.createBlock(statements, true);
+              return ts.visitEachChild(
+                visited,
+                child => (child === body ? tracedBody : child),
+                context,
+              );
+            }
+          }
+          if (
             ts.isVariableDeclaration(node) &&
             ts.isVariableDeclaration(visited) &&
             node.initializer &&
@@ -2308,6 +2396,48 @@ export function createModelCompiler(
         return ts.visitNode(sourceFile, visit) as ts.SourceFile;
       };
     };
+  }
+
+  function parameterValueStatements(
+    parameters: readonly ts.ParameterDeclaration[],
+    body: ts.ConciseBody,
+    sourceFile: ts.SourceFile,
+    factory: ts.NodeFactory,
+  ): ts.Statement[] {
+    const statements: ts.Statement[] = [];
+    const capture = (name: ts.BindingName): void => {
+      if (!ts.isIdentifier(name)) {
+        name.elements.forEach(element => {
+          if (ts.isBindingElement(element)) capture(element.name);
+        });
+        return;
+      }
+      if (name.text === 'this') return;
+      statements.push(
+        factory.createExpressionStatement(
+          factory.createCallExpression(
+            factory.createPropertyAccessExpression(
+              factory.createIdentifier('__code3d'),
+              'parameterValue',
+            ),
+            undefined,
+            [
+              factory.createStringLiteral(sourceFile.fileName),
+              factory.createNumericLiteral(name.getStart(sourceFile)),
+              factory.createNumericLiteral(name.getEnd()),
+              factory.createNumericLiteral(body.getStart(sourceFile)),
+              factory.createNumericLiteral(body.getEnd()),
+              factory.createStringLiteral(
+                stableSourceId('parameter', name, sourceFile),
+              ),
+              factory.createIdentifier(name.text),
+            ],
+          ),
+        ),
+      );
+    };
+    parameters.forEach(parameter => capture(parameter.name));
+    return statements;
   }
 
   function edgeSelectionSite(

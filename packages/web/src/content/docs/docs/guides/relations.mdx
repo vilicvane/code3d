@@ -4,6 +4,10 @@ description: Compose parts by combining relations between points, lines, planes,
 ---
 
 import ModelExample from '../../../../components/ModelExample.astro';
+import SourceCode from '../../../../components/SourceCode.astro';
+import ArrowIcon from '../../../../components/ArrowIcon.astro';
+import {appUrl} from '../../../../lib/site';
+import source from '../../../../../../app/examples/combined-constraints.ts?raw';
 
 A relation describes how one part sits against another. It is attached to a
 model value and resolved when the parts are composed.
@@ -25,17 +29,14 @@ placement follow the part it is attached to. Repeated offsets add together.
 
 Return an array from `relate()` to solve several relations together:
 
-```ts
-import {box, group} from '@code3d/core';
+<SourceCode source={source} file="combined-constraints.ts" />
 
-const first = box(10, 10, 10);
-const second = box(20, 20, 20).relate(self => [
-  self.edge(3).on(first.edge(1)),
-  self.top.on(first.bottom),
-]);
-
-export default group([first, second]);
-```
+<p>
+  <a href={appUrl('combined-constraints.ts')} target="_blank" rel="noopener">
+    {'Open this example in the App '}
+    <ArrowIcon />
+  </a>
+</p>
 
 The edge relation makes the reference lines collinear, while the face relation
 places the second box below the first. Together they place the second box at
@@ -71,8 +72,28 @@ relations before evaluating geometry.
 ## Make visual adjustments
 
 Enter an `offset` call in the source to use the position tool. Supported
-parameter changes write back to the defining source values. If a parameter
-is shared, other affected objects can preview the change as well.
+parameter changes write back to the defining source values. A unique upstream
+parameter takes priority when the tool can safely preview its uses. If it is
+shared, other affected objects preview the change as well.
+
+Without a safe upstream parameter, dragging preserves the offset expression
+and adjusts it by an increment. For example, an X movement of `2` changes
+`.offset((i - 2) * 8, 0, 0)` to `.offset((i - 2) * 8 + 2, 0, 0)`.
+Another movement of `3` combines that increment into `+ 5`. Returning by `5`
+removes it. The tool does not change the inner `8` or keep nesting offset calls.
+
+Only the outermost offset is edited. When no offset is present, or its arguments
+cannot be edited axis by axis, the tool appends one offset and reuses it on later
+drags. A shared expression changes all of its runtime occurrences; it is not
+an override for only the clicked part.
+
+Release to commit the preview, or press `Esc` while dragging to cancel without
+closing the panel. Use Undo after an edit has been committed. Numeric panel
+input has a different meaning when an expression appears as a placeholder:
+it [replaces the whole argument](../model-tools/#what-a-panel-can-edit).
+
+To rotate the geometry itself or choose its pivot, see
+[origins and rotation](../origins-and-rotation/).
 
 See [code and geometry](../../concepts/code-and-geometry/) for the distinction
 between a model value and its runtime context.

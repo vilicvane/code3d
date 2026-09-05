@@ -196,10 +196,26 @@ export class CodeEditor {
       ...languageCompilerOptions,
       ...language.compilerOptions,
     } as typeScriptLanguage.CompilerOptions;
-    typeScriptLanguage.typescriptDefaults.setCompilerOptions(options);
-    typeScriptLanguage.javascriptDefaults.setCompilerOptions(options);
-    typeScriptLanguage.typescriptDefaults.setExtraLibs(extraLibs);
-    typeScriptLanguage.javascriptDefaults.setExtraLibs(extraLibs);
+    for (const defaults of [
+      typeScriptLanguage.typescriptDefaults,
+      typeScriptLanguage.javascriptDefaults,
+    ]) {
+      // Monaco restarts the worker on every options update, even when equal.
+      // Compilation and completion previews routinely publish the same setup.
+      if (
+        JSON.stringify(defaults.getCompilerOptions()) !==
+        JSON.stringify(options)
+      ) {
+        defaults.setCompilerOptions(options);
+      }
+      const installed = defaults.getExtraLibs();
+      if (
+        Object.keys(installed).length !== extraLibs.length ||
+        extraLibs.some(lib => installed[lib.filePath]?.content !== lib.content)
+      ) {
+        defaults.setExtraLibs(extraLibs);
+      }
+    }
   }
 
   readonly editor: monaco.editor.IStandaloneCodeEditor;

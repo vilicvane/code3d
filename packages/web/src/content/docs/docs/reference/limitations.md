@@ -12,6 +12,10 @@ Code3D is Prototype 01. APIs and project behavior are still evolving.
   chamfers, and threaded geometry.
 - Source-context inspection, topology selection, supported parameter editing,
   and relative-position tools.
+- Editable model origins and geometric rotation, with vertex picking,
+  translation arrows, and rotation rings.
+- Combined geometric relations between points, lines, planes, and complete
+  frames, solved together when composing parts.
 - Browser-persistent projects and direct local-folder editing in supported
   browsers.
 - Typed named elements and reusable metric fasteners.
@@ -21,12 +25,20 @@ Code3D is Prototype 01. APIs and project behavior are still evolving.
 
 ## What to account for
 
-**GUI writeback has limits.** The App can edit supported values that lead
-uniquely to source. It does not automatically invert arbitrary functions or
-expressions. Code remains available for every model change.
+**GUI writeback changes source, not isolated instances.** The App can update a
+unique upstream value, replace a numeric argument expression from a panel, or
+adjust a spatial expression with a drag. It does not automatically invert
+arbitrary functions. An edit to a shared call or variable can affect several
+objects. See [parameter editing](../../guides/model-tools/#what-a-panel-can-edit).
 
 **Geometric operations can fail.** A fillet or chamfer must fit the input
 geometry. Later operations must select topology from their own input model.
+
+**Constraint solving is local and nonlinear.** Several relations can jointly
+determine a part's placement. Remaining freedom is resolved using centering and
+orientation preferences; an explicit offset adds a position condition.
+A failed solve does not prove that no valid pose exists. See
+[positioning with relations](../../guides/relations/#combine-conditions).
 
 **Installed packages must support browsers.** The App resolves packages from
 the project's `node_modules`, but does not provide Node's built-in APIs or
@@ -60,3 +72,6 @@ this license merely because you use Code3D.
 Third-party components retain their own licenses.
 The OpenCascade WASM dependency includes LGPL-licensed OCCT; redistributions
 need to preserve its applicable license and source-availability information.
+Rigid-body relations use OndselSolver through `@code3d/solver`, distributed
+under LGPL-2.1-or-later. Code3D's interim license does not replace these
+third-party licenses.

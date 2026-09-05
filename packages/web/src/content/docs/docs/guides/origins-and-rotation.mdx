@@ -1,0 +1,88 @@
+---
+title: Choosing an origin and rotating a part
+description: Set a pivot, rotate geometry, and adjust both directly in the viewport.
+---
+
+import SourceCode from '../../../../components/SourceCode.astro';
+import ArrowIcon from '../../../../components/ArrowIcon.astro';
+import {appUrl} from '../../../../lib/site';
+import source from '../../../../../../app/examples/origin-and-rotation.ts?raw';
+
+An origin gives a part a pivot for rotation and an anchor for placement.
+Changing it does not move the geometry. `rotate` changes the geometry about
+that pivot; a [relation](../relations/) places the resulting part in a composition.
+
+<SourceCode source={source} file="origin-and-rotation.ts" />
+
+<p>
+  <a href={appUrl('origin-and-rotation.ts')} target="_blank" rel="noopener">
+    {'Open this example in the App '}
+    <ArrowIcon />
+  </a>
+</p>
+
+## Choose a pivot
+
+Place the cursor in `blank.originVertex(3)`. Pick a vertex in the viewport to
+use it as the origin. The ID belongs to the operation's input model, just like
+other [topology selections](../topology/).
+
+For an exact coordinate, use `.origin(x, y, z)`. For the body's center, use
+`.originCenter()`. Each of these replaces the previous origin and any
+accumulated origin offset. They return new model values; `blank` is unchanged.
+
+## Fine-tune the origin
+
+Move to `pivoted.originOffset(0, 2, 0)` and drag an axis arrow. The origin
+marker moves while the geometry stays in place. The offsets use local
+geometry coordinates and accumulate across calls.
+
+You can also drag the origin marker's arrows while inspecting `originVertex`
+or `originCenter`. The App adds or updates an `originOffset(...)` call so the
+chosen vertex or center remains the starting point.
+
+## Rotate the part
+
+Move to `offset.rotate(15, 35, 0)` and drag a rotation ring, or enter an angle
+in the panel. Angles are in degrees, applied around fixed local X, then Y,
+then Z axes. Each ring follows the effective axis of its angle parameter;
+the rings need not line up with the world axes when other angles are nonzero.
+
+Repeated `rotate` calls compose in source order. Named anchors such as `top`
+rotate with the shape, and topology IDs are preserved. Changing the origin
+afterward does not undo an earlier rotation.
+
+## Recenter without undoing the rotation
+
+Inspect `rotated.originCenter()`. The `center` anchor follows the body's
+transforms; it is not recalculated from the rotated shape's axis-aligned
+bounding box. The next `originOffset(0, 2, 0)` moves the pivot beyond that center.
+
+Compare this with `rotated.origin(0, 0, 0)`: it sets the origin to coordinate
+zero, rather than the body's center. Both keep the already-rotated geometry.
+
+## Compose with other parts
+
+Inspect `group([rotated, companion])` to see the companion placed against the
+rotated part's `top` anchor. Inspecting the companion by itself uses its local
+frame, without its assembly placement.
+
+Setting an origin changes the model's own relation anchor, but leaves named
+anchors where they are. A relation already authored keeps the anchors it
+captured; a relation authored afterward uses the updated ones.
+
+## Finish or cancel a drag
+
+Dragging previews the change. Release to write it to source, or press `Esc`
+before releasing to cancel. Cancellation keeps the panel and editor position;
+move the cursor out of the call to leave its tool. Use Undo for an edit already
+written to source.
+
+When possible, a drag changes a unique safe upstream parameter. Otherwise it
+adjusts the current expression by a numeric increment. Entering a number in a
+panel can instead replace that expression: see
+[what a panel can edit](../model-tools/#what-a-panel-can-edit).
+
+These operations are available on solids, faces, curves, and points, not
+groups. See the [API reference](../../reference/core/#origins-and-rotation)
+for the complete method list.
