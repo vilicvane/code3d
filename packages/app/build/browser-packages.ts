@@ -44,6 +44,12 @@ export function browserPackages(repository: string): Plugin {
     async function add(name: string, from: string, parent = '') {
       const disk = await locate(name, from);
       if (packages.has(disk)) return;
+      // Watch before reading metadata or bytes: collection awaits npm and can
+      // overlap a clean/build. Directory watches also see new published files.
+      if (development && !watched.has(disk)) {
+        watched.add(disk);
+        watcher.add(disk);
+      }
       const destination = destinations.has('/node_modules/' + name)
         ? parent + '/node_modules/' + name
         : '/node_modules/' + name;
@@ -105,19 +111,30 @@ export function browserPackages(repository: string): Plugin {
     },
     async load(id) {
       if (id !== '\0' + moduleId) return;
-      const collection = (artifacts ??= collect());
-      const {files} = await collection.catch(error => {
-        // A clean rebuild can remove a file while npm is enumerating it.
-        // Let the next request retry instead of retaining a rejected manifest.
-        if (artifacts === collection) artifacts = undefined;
-        throw error;
-      });
+      let files: Artifact[];
+      for (;;) {
+        const collection = (artifacts ??= collect());
+        let collected: {files: Artifact[]};
+        try {
+          collected = await collection;
+        } catch (error) {
+          // A clean rebuild can remove a file while npm is enumerating it.
+          // Retry an invalidated snapshot; do not cache other read failures.
+          if (artifacts !== collection) continue;
+          artifacts = undefined;
+          throw error;
+        }
+        // An update during collection invalidates the whole snapshot. Never
+        // publish a stale manifest after the update's reload already happened.
+        if (artifacts === collection) {
+          files = collected.files;
+          break;
+        }
+      }
       const records = files.map(file => {
         // These are package bytes, not Studio imports. Vite's addWatchFile
         // also adds module-graph edges on reload, including Node-only entries.
-        if (development) watcher.add(file.disk);
-        else this.addWatchFile(file.disk);
-        watched.add(file.disk);
+        if (!development) this.addWatchFile(file.disk);
         const key = file.version + path.extname(file.path);
         const url = development
           ? JSON.stringify(assetPrefix + key)
@@ -141,7 +158,10 @@ export function browserPackages(repository: string): Plugin {
     },
     hotUpdate({file}) {
       if (this.environment.config.consumer !== 'client') return;
-      if (!watched.has(file)) return;
+      if (
+        ![...watched].some(directory => file.startsWith(directory + path.sep))
+      )
+        return;
       artifacts = undefined;
       const module = this.environment.moduleGraph.getModuleById(
         '\0' + moduleId,
