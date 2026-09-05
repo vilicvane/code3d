@@ -17,7 +17,7 @@ before(async () => {
   ));
   ({ToolEngine} = await server.ssrLoadModule('/src/tools/tool-system.ts'));
   ({offsetExpression} = await server.ssrLoadModule(
-    '/src/tools/spatial-edit.ts',
+    '/src/tools/source-expression.ts',
   ));
 });
 after(async () => {
@@ -190,7 +190,7 @@ test('shared size and angle parameters keep the size expression while editing th
     .commit(spatialIntent(binding, 18));
   assert.equal(result.status, 'committed');
   assert.match(host.source(), /const size = 8/);
-  assert.match(host.source(), /rotate\(\(size\) \+ 10, 35, 10\)/);
+  assert.match(host.source(), /rotate\(size \+ 10, 35, 10\)/);
 });
 
 test('originOffset drag accumulates on the selected offset and cancel preserves source', async () => {
@@ -209,8 +209,24 @@ test('originOffset drag accumulates on the selected offset and cancel preserves 
 
 test('numeric adjustment folds repeated deltas while preserving expressions', () => {
   assert.equal(offsetExpression('2', 3), '5');
-  assert.equal(offsetExpression('Math.sin(t)', 3), '(Math.sin(t)) + 3');
-  assert.equal(offsetExpression('(Math.sin(t)) + 3', 4), '(Math.sin(t)) + 7');
+  assert.equal(offsetExpression('Math.sin(t)', 3), 'Math.sin(t) + 3');
+  assert.equal(offsetExpression('Math.sin(t) + 3', 4), 'Math.sin(t) + 7');
   assert.equal(offsetExpression('size - 5', 5), 'size');
-  assert.equal(offsetExpression('size * 2', -3), '(size * 2) - 3');
+  assert.equal(offsetExpression('size * 2', -3), 'size * 2 - 3');
+});
+
+test('origin offset editing reuses the outer call and retains authored comments', async () => {
+  const {offsetCallSource} = await server.ssrLoadModule(
+    '/src/tools/source-expression.ts',
+  );
+  const source = 'originCenter().originOffset(/* x */ (size + 2), 0, 0)';
+  const changed = offsetCallSource(source, 'originOffset', [2, 0, 0]);
+  assert.equal(
+    changed,
+    'originCenter().originOffset(/* x */ (size + 4), 0, 0)',
+  );
+  assert.equal(
+    offsetCallSource(changed, 'originOffset', [-4, 0, 0]),
+    'originCenter().originOffset(/* x */ (size), 0, 0)',
+  );
 });

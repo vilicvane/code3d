@@ -13,6 +13,7 @@ import {
   type SpatialSourceChange,
   type SpatialPreview,
 } from './spatial-edit';
+import {formatSourceNumber, offsetCallSource} from './source-expression';
 
 export type ExpressionDraft =
   | Readonly<{kind: 'number'; value: number}>
@@ -590,13 +591,11 @@ class OffsetRelationResolver implements ToolIntentResolver {
         reason: 'A relation offset requires an object and finite values.',
       };
     }
-    const receiver = context.readSource(intent.receiver.sourceRef);
-    const delta = intent.delta.map(formatSourceNumber).join(', ');
     const resolution = expressionPlan(
       intent,
       intent.receiver,
-      `(${receiver}).offset(${delta})`,
-      'Add relation offset',
+      receiver => offsetCallSource(receiver, 'offset', intent.delta),
+      'Adjust relation offset',
       context,
     );
     if (resolution.status !== 'ready') {
@@ -619,7 +618,7 @@ class OffsetRelationResolver implements ToolIntentResolver {
 function expressionPlan(
   intent: ToolIntent,
   anchor: SourceAnchor,
-  replacement: string,
+  replacement: string | ((source: string) => string),
   summary: string,
   context: ResolveContext,
 ): ToolResolution {
@@ -635,7 +634,10 @@ function expressionPlan(
     {
       sourceRef,
       expectedText: currentText,
-      text: replacement,
+      text:
+        typeof replacement === 'string'
+          ? replacement
+          : replacement(currentText),
     },
   ];
   return {
@@ -685,14 +687,6 @@ function parseSourceNumber(source: string): number | undefined {
   }
   const value = Number(normalized);
   return Number.isFinite(value) ? value : undefined;
-}
-
-function formatSourceNumber(value: number): string {
-  if (!Number.isFinite(value)) {
-    throw new Error('An expression value must be a finite number.');
-  }
-  const normalized = Object.is(value, -0) ? 0 : value;
-  return String(Number(normalized.toPrecision(12)));
 }
 
 function isIdentifier(value: string): boolean {

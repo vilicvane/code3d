@@ -1,4 +1,8 @@
-import ts from '@typescript/typescript6';
+import {
+  offsetExpression,
+  offsetCallSource,
+  formatSourceNumber,
+} from './source-expression';
 import type {
   ModelSpatialOperation,
   ParameterTarget,
@@ -48,10 +52,10 @@ export class SpatialTransformResolver implements ToolIntentResolver {
     const expectedText = context.readSource(sourceRef);
     const text =
       change.kind === 'parameter'
-        ? numberSource(change.value)
+        ? formatSourceNumber(change.value)
         : change.kind === 'argument'
           ? offsetExpression(expectedText, change.delta)
-          : offsetOriginCall(expectedText, change.delta);
+          : offsetCallSource(expectedText, 'originOffset', change.delta);
     return {
       status: 'ready',
       plan: {
@@ -65,86 +69,4 @@ export class SpatialTransformResolver implements ToolIntentResolver {
       },
     };
   }
-}
-
-/** Keep authored expressions, folding only their trailing numeric adjustment. */
-export function offsetExpression(source: string, delta: number): string {
-  if (Math.abs(delta) < 1e-9) return source;
-  const {file, expression} = parseExpression(source);
-  const value = numericValue(expression);
-  if (value !== undefined) return numberSource(value + delta);
-  if (
-    ts.isBinaryExpression(expression) &&
-    (expression.operatorToken.kind === ts.SyntaxKind.PlusToken ||
-      expression.operatorToken.kind === ts.SyntaxKind.MinusToken)
-  ) {
-    const right = numericValue(expression.right);
-    if (right !== undefined) {
-      const increment =
-        (expression.operatorToken.kind === ts.SyntaxKind.MinusToken
-          ? -right
-          : right) + delta;
-      return adjusted(expression.left.getText(file), increment);
-    }
-  }
-  return adjusted(source, delta);
-}
-
-function offsetOriginCall(source: string, delta: Vec3): string {
-  const {file, expression} = parseExpression(source);
-  if (
-    ts.isCallExpression(expression) &&
-    ts.isPropertyAccessExpression(expression.expression) &&
-    expression.expression.name.text === 'originOffset' &&
-    expression.arguments.length === 3
-  ) {
-    const args = expression.arguments.map((argument, index) =>
-      offsetExpression(argument.getText(file), delta[index]),
-    );
-    return `${expression.expression.getText(file)}(${args.join(', ')})`;
-  }
-  return `${source}.originOffset(${delta.map(numberSource).join(', ')})`;
-}
-
-function adjusted(source: string, delta: number): string {
-  if (Math.abs(delta) < 1e-9) return source;
-  const {file, expression} = parseExpression(source);
-  return `(${expression.getText(file)}) ${delta < 0 ? '-' : '+'} ${numberSource(Math.abs(delta))}`;
-}
-
-function parseExpression(source: string) {
-  const file = ts.createSourceFile(
-    'expression.ts',
-    `(${source})`,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TS,
-  );
-  const statement = file.statements[0];
-  if (!ts.isExpressionStatement(statement))
-    throw new Error('Expected a spatial argument expression.');
-  let expression = statement.expression;
-  while (ts.isParenthesizedExpression(expression))
-    expression = expression.expression;
-  return {file, expression};
-}
-
-function numericValue(expression: ts.Expression): number | undefined {
-  if (ts.isParenthesizedExpression(expression))
-    return numericValue(expression.expression);
-  if (ts.isNumericLiteral(expression)) return Number(expression.text);
-  if (ts.isPrefixUnaryExpression(expression)) {
-    const value = numericValue(expression.operand);
-    if (value !== undefined && expression.operator === ts.SyntaxKind.MinusToken)
-      return -value;
-    if (value !== undefined && expression.operator === ts.SyntaxKind.PlusToken)
-      return value;
-  }
-  return undefined;
-}
-
-function numberSource(value: number): string {
-  if (!Number.isFinite(value))
-    throw new Error('Spatial values must be finite.');
-  return String(Number(value.toFixed(6)));
 }

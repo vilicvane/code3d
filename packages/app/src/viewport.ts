@@ -39,7 +39,7 @@ import type {
   SourceDecorationProvider,
   ViewportDecoration,
 } from './viewport-decoration';
-import {preferUpstreamParameterUsages} from './model/parameter-provenance';
+import {editableParameterUsages} from './model/parameter-provenance';
 import {spatialBindings} from './tools/model-spatial-tool';
 import type {SpatialObjectPreview} from './tools/spatial-edit';
 import {ViewportCoordinateReference} from './ui/viewport-coordinate-reference';
@@ -1022,11 +1022,7 @@ export class ModelViewport {
     focusedNodeId = evaluation.element?.nodeId,
   ): void {
     const relatedNodes = this.resolveNodes(evaluation.nodeIds);
-    const placement: ModelPlacement = isCompositionRole(
-      evaluation.operationInput?.role,
-    )
-      ? 'composition'
-      : 'standalone';
+    const placement = sourceTargetPlacement(evaluation);
     const focusNodes = focusedNodeId
       ? relatedNodes.filter(node => node.nodeId === focusedNodeId)
       : relatedNodes;
@@ -1858,7 +1854,7 @@ export class ModelViewport {
   }
 }
 
-function positionBindings(
+export function positionBindings(
   occurrence: Occurrence,
   occurrences: readonly Occurrence[],
   constraintId: string | null,
@@ -1873,8 +1869,13 @@ function positionBindings(
     return [];
   }
   const receiver = constraint.sourceRefs.at(-1);
-  const parameters = preferUpstreamParameterUsages(
-    constraint.parameters.filter(({operation}) => operation === 'offset'),
+  const parameters = editableParameterUsages(
+    constraint.parameters.filter(
+      ({operation, operationRef}) =>
+        operation === 'offset' &&
+        receiver &&
+        sameSource(operationRef, receiver),
+    ),
   );
   const modelParameters = occurrences.flatMap(({node}) => node.parameters);
   const safeTargets = positionOnlyTargets(modelParameters);
@@ -1887,9 +1888,6 @@ function positionBindings(
   >();
   for (const parameter of parameters) {
     if (!safeTargets.has(parameter.target.id)) {
-      continue;
-    }
-    if (parameter.operation !== 'offset') {
       continue;
     }
     const axis = positionAxis(parameter.argument);
@@ -2002,6 +2000,15 @@ function sourceTargetPriority(target: SourceTarget): number {
   if (target.kind === 'operation-input') return 1;
   if (target.kind === 'operation-output') return 2;
   return 3;
+}
+
+export function sourceTargetPlacement(
+  evaluation: SourceTargetEvaluation,
+): ModelPlacement {
+  return evaluation.isCollection ||
+    isCompositionRole(evaluation.operationInput?.role)
+    ? 'composition'
+    : 'standalone';
 }
 
 function isRelativePositionContext(target: SourceTarget | undefined): boolean {

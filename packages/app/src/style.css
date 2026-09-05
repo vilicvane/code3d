@@ -940,27 +940,6 @@ kbd {
   display: none;
 }
 
-.tool-status {
-  position: absolute;
-  top: 60px;
-  left: 14px;
-  z-index: 4;
-  max-width: calc(100% - 300px);
-  padding: 6px 8px;
-  color: #dfe5ca;
-  border: 1px solid #66752c;
-  border-radius: 3px;
-  background: #15180fd9;
-  box-shadow: 0 8px 24px #0005;
-  pointer-events: none;
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 9px;
-}
-
-.tool-status[hidden] {
-  display: none;
-}
-
 .contextual-tool-panel {
   position: absolute;
   top: 60px;

@@ -19,7 +19,7 @@ import type {
   SourceTarget,
   SourceTargetEvaluation,
 } from '../model/compiler';
-import {preferUpstreamParameterUsages} from '../model/parameter-provenance';
+import {editableParameterUsages} from '../model/parameter-provenance';
 import type {TransformGizmoBinding, TransformAxis} from './transform-gizmo';
 import type {ToolIntent} from './tool-system';
 import type {SpatialObjectPreview} from './spatial-edit';
@@ -71,7 +71,7 @@ export function spatialBindings(
   const kind = operation.kind;
   const offsetOrigin = kind === 'originVertex' || kind === 'originCenter';
   const mode = kind === 'rotate' ? 'rotate' : 'translate';
-  const usages = preferUpstreamParameterUsages(evaluation.parameters ?? []);
+  const usages = editableParameterUsages(evaluation.parameters ?? []);
   const matching = occurrences.filter(
     candidate =>
       candidate.node.operation.siteId === operation.siteId &&

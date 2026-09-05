@@ -149,7 +149,10 @@ implementation context and historical outcomes, not a competing work queue.
   relations remain directly solvable frame relations; code3d does not infer a
   partial solid-constraint system merely from an element's geometric kind.
 - The editor caret resolves the exact source occurrence being inspected. A
-  value site renders that value alone; an operation-input site may also render
+  value site renders that value alone. A collection result places its members
+  together using their resolved relations, including singleton collections;
+  selecting one member as a value still renders it in its intrinsic frame.
+  An operation-input site may also render
   its peer inputs as dimmed context that can switch input focus. Mouse hover
   over source code does not change the viewport. In a layered source scene,
   focus solids are slightly translucent while context remains strongly dimmed,
@@ -409,6 +412,9 @@ compatibility APIs.
 - Keep the caret-selected context stable across gizmo and contextual tool commits;
   present the applied edit plan in a temporary code popover instead of moving
   the editor selection.
+- Let `Escape` cancel the active drag before handling menus or transient docks.
+  Cancellation restores the pre-drag preview without writing source and leaves
+  the code-selected tool panel open; mouse release commits only uncancelled drags.
 
 Status: [R-006](requests/closed/R-006-show-spatial-tools-only-in-a-relative-position-context.md)
 is complete. Value declarations and operation outputs do not expose the
@@ -453,9 +459,9 @@ constraint source sites do.
   all-edge form. Treat that implicit all-edge mode as distinct from an explicit
   array containing every edge: it starts with no guide edges selected, so the
   first click creates a one-edge filter rather than subtracting from all edges.
-  Leaving the call's source focus or pressing `Escape` only
-  dismisses the transient panel; already committed edits remain in source. The
-  panel has neither Apply nor Cancel actions.
+  The tool panel follows the selected source location: leaving the call dismisses
+  it, while `Escape` does not close the panel or end its editing session. Already
+  committed edits remain in source. The panel has neither Apply nor Cancel actions.
 - Keep the contextual selection panel vertically ordered and stable under
   pointer hover; hover feedback belongs on the model rather than in moving text.
 - Let scalar `vertex`, `edge`, and `surface` parameters select exactly one

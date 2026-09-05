@@ -1,6 +1,7 @@
 import type {ParameterUsage} from '@code3d/core/tooling';
 
-export function preferUpstreamParameterUsages(
+/** Prefer upstream definitions; never treat an inline coefficient as the argument. */
+export function editableParameterUsages(
   parameters: readonly ParameterUsage[],
 ): ParameterUsage[] {
   const groups = new Map<string, ParameterUsage[]>();
@@ -19,6 +20,13 @@ export function preferUpstreamParameterUsages(
         target.sourceRef.start < expressionRef.start ||
         expressionRef.end < target.sourceRef.end,
     );
-    return upstream.length > 0 ? upstream : group;
+    return upstream.length > 0
+      ? upstream
+      : group.filter(
+          ({expressionRef, target}) =>
+            expressionRef.file === target.sourceRef.file &&
+            expressionRef.start === target.sourceRef.start &&
+            expressionRef.end === target.sourceRef.end,
+        );
   });
 }

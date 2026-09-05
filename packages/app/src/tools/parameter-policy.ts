@@ -6,6 +6,10 @@ export type NumericValuePolicy = Readonly<{
   step?: number;
 }>;
 
+export function formatDisplayNumber(value: number): string {
+  return String(Number(value.toFixed(3)));
+}
+
 export function snapNumericValue(
   policy: NumericValuePolicy,
   value: number,

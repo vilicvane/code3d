@@ -1,3 +1,5 @@
+import {formatDisplayNumber} from '../tools/parameter-policy';
+
 export type ContextualToolParameterView = Readonly<{
   name: string;
   label: string;
@@ -30,7 +32,8 @@ export type ContextualToolPanelView = Readonly<{
 
 type ContextualToolPanelOptions = Readonly<{
   onParameterInput(name: string, value: number | undefined): void;
-  onParameterCommit(name: string, value: number | undefined): void;
+  /** Whether the commit is awaiting refreshed parameter availability. */
+  onParameterCommit(name: string, value: number | undefined): boolean;
   onAction(id: string): void;
 }>;
 
@@ -51,6 +54,11 @@ export class ContextualToolPanel {
   private readonly actions: HTMLElement;
   private readonly controls = new Map<string, ParameterControl>();
   private activeViewId?: string;
+  private pendingNavigation?: Readonly<{
+    from: HTMLInputElement;
+    to: HTMLInputElement;
+    cancellation: AbortController;
+  }>;
 
   constructor(
     container: HTMLElement,
@@ -95,7 +103,10 @@ export class ContextualToolPanel {
     this.title.textContent = view.title;
     this.meta.textContent = view.meta ?? '';
     this.meta.hidden = !view.meta;
-    if (structureChanged) this.rebuildParameterControls(view.parameters);
+    if (structureChanged) {
+      this.cancelPendingNavigation();
+      this.rebuildParameterControls(view.parameters);
+    }
     view.parameters.forEach(parameter =>
       this.updateParameterControl(parameter, forceParameterValues),
     );
@@ -106,13 +117,13 @@ export class ContextualToolPanel {
     }
     this.renderActions(view.actions);
     this.root.hidden = false;
+    this.completePendingNavigation();
   }
 
-  hide(): boolean {
-    if (this.root.hidden) return false;
+  hide(): void {
+    this.cancelPendingNavigation();
     this.root.hidden = true;
     this.activeViewId = undefined;
-    return true;
   }
 
   setInvalid(name: string, invalid: boolean): void {
@@ -142,13 +153,19 @@ export class ContextualToolPanel {
       this.controls.set(parameter.name, {field, label, input});
 
       let selectOnPointerUp = false;
-      input.addEventListener('input', () =>
-        this.options.onParameterInput(parameter.name, finiteInputValue(input)),
-      );
+      input.addEventListener('input', () => {
+        this.cancelPendingNavigation();
+        this.options.onParameterInput(parameter.name, finiteInputValue(input));
+      });
       input.addEventListener('change', () =>
         this.options.onParameterCommit(parameter.name, finiteInputValue(input)),
       );
       input.addEventListener('keydown', event => {
+        if (event.key === 'Tab' && !event.shiftKey) {
+          this.advanceAfterCommit(event, parameter.name, input);
+          return;
+        }
+        this.cancelPendingNavigation();
         if (event.key !== 'Enter') return;
         this.options.onParameterCommit(parameter.name, finiteInputValue(input));
         event.preventDefault();
@@ -167,6 +184,52 @@ export class ContextualToolPanel {
         selectOnPointerUp = false;
       });
     });
+  }
+
+  private advanceAfterCommit(
+    event: KeyboardEvent,
+    name: string,
+    input: HTMLInputElement,
+  ): void {
+    const inputs = [...this.controls.values()].map(control => control.input);
+    const next = inputs[inputs.indexOf(input) + 1];
+    // Enabled controls and the panel boundaries keep native Tab behavior.
+    if (!next?.disabled) return;
+    if (this.pendingNavigation) {
+      if (event.repeat) event.preventDefault();
+      else this.cancelPendingNavigation();
+      return;
+    }
+    if (!this.options.onParameterCommit(name, finiteInputValue(input))) return;
+    event.preventDefault();
+    const cancellation = new AbortController();
+    this.pendingNavigation = {from: input, to: next, cancellation};
+    const cancel = () => this.cancelPendingNavigation();
+    const options = {signal: cancellation.signal};
+    input.addEventListener('blur', cancel, options);
+    window.addEventListener('blur', cancel, options);
+    document.addEventListener('pointerdown', cancel, {
+      ...options,
+      capture: true,
+    });
+  }
+
+  private completePendingNavigation(): void {
+    const pending = this.pendingNavigation;
+    if (!pending) return;
+    this.cancelPendingNavigation();
+    if (
+      !pending.to.disabled &&
+      document.activeElement === pending.from &&
+      document.hasFocus()
+    ) {
+      pending.to.focus();
+    }
+  }
+
+  private cancelPendingNavigation(): void {
+    this.pendingNavigation?.cancellation.abort();
+    this.pendingNavigation = undefined;
   }
 
   private updateParameterControl(
@@ -233,8 +296,4 @@ function sameNames(
     current.length === parameters.length &&
     current.every((name, index) => name === parameters[index].name)
   );
-}
-
-function formatDisplayNumber(value: number): string {
-  return String(Number(value.toFixed(3)));
 }

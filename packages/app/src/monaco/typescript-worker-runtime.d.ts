@@ -1,3 +1,8 @@
+declare module 'monaco-editor/base/common/uri' {
+  // The worker-safe implementation of the Uri exported by editor.api.
+  export const URI: typeof import('monaco-editor/editor').Uri;
+}
+
 declare module 'monaco-editor/language/typescript/ts.worker' {
   import type * as typeScript from '@typescript/typescript6';
   import type * as typeScriptLanguage from 'monaco-editor/languages/features/typescript/register';
