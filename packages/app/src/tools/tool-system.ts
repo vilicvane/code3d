@@ -8,6 +8,11 @@ import {
 } from '@code3d/core/tooling';
 import type {ViewportDecoration} from '../viewport-decoration';
 import type {ToolArgumentEditTarget} from '../model/tool-schema';
+import {
+  SpatialTransformResolver,
+  type SpatialSourceChange,
+  type SpatialPreview,
+} from './spatial-edit';
 
 export type ExpressionDraft =
   | Readonly<{kind: 'number'; value: number}>
@@ -40,6 +45,12 @@ export type SourceAnchor = Readonly<{
 }>;
 
 export type ToolIntent =
+  | Readonly<{
+      kind: 'model.spatial';
+      operation: string;
+      change: SpatialSourceChange;
+      preview: SpatialPreview;
+    }>
   | Readonly<{
       kind: 'parameter.set';
       target: ParameterTarget;
@@ -98,6 +109,7 @@ type EdgeArgumentTarget = Readonly<
 >;
 
 export type ToolPreview =
+  | SpatialPreview
   | Readonly<{
       kind: 'parameter';
       targetId: string;
@@ -158,14 +170,14 @@ export interface ToolHost {
   clearPreview(preview: ToolPreview, reason: 'replace' | 'end'): void;
 }
 
-type ResolveContext = Readonly<{
+export type ResolveContext = Readonly<{
   toolId: string;
   baseVersion: number;
   resolveSourceRef(sourceRef: SourceRef): SourceRef | undefined;
   readSource(sourceRef: SourceRef): string;
 }>;
 
-interface ToolIntentResolver {
+export interface ToolIntentResolver {
   readonly kind: ToolIntent['kind'];
   resolve(intent: ToolIntent, context: ResolveContext): ToolResolution;
 }
@@ -183,6 +195,7 @@ export class ToolEngine {
     this.register(new SetArgumentResolver());
     this.register(new SetEdgeOperationResolver());
     this.register(new OffsetRelationResolver());
+    this.register(new SpatialTransformResolver());
   }
 
   begin(toolId: string): ToolSession {

@@ -23,6 +23,26 @@ export function rotation(quaternion: Quaternion): RigidTransform {
   return {position: origin, quaternion};
 }
 
+/** Degrees, applied about fixed X, then Y, then Z axes. */
+export function xyzRotation(angles: Vec3): Quaternion {
+  const [x, y, z] = angles.map(angle => (angle * Math.PI) / 360);
+  const rx: Quaternion = [Math.sin(x), 0, 0, Math.cos(x)];
+  const ry: Quaternion = [0, Math.sin(y), 0, Math.cos(y)];
+  const rz: Quaternion = [0, 0, Math.sin(z), Math.cos(z)];
+  return multiplyQuaternions(rz, multiplyQuaternions(ry, rx));
+}
+
+export function rotationAround(position: Vec3, angles: Vec3): RigidTransform {
+  const quaternion = xyzRotation(angles);
+  return {
+    position: addVectors(
+      position,
+      negateVector(rotateVector(position, quaternion)),
+    ),
+    quaternion,
+  };
+}
+
 export function frameFromYAxis(
   position: Vec3,
   direction: Vec3,

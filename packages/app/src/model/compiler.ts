@@ -358,14 +358,15 @@ export function createModelCompiler(
       file: string,
       start: number,
       end: number,
-      failureStart: number,
-      failureEnd: number,
+      callStart: number,
+      callEnd: number,
       id: string,
       label: string,
       run: () => T,
     ): T {
       const execution = nextTraceExecution(id);
       const location = sourceRef(file, start, end);
+      const callLocation = sourceRef(file, callStart, callEnd);
       const context =
         currentEvaluationContext() ??
         callEvaluationContext(id, execution, label, location);
@@ -393,10 +394,7 @@ export function createModelCompiler(
       } catch (error) {
         executionTrace.outcome = 'failed';
         executionTrace.order = nextSourceReachOrder();
-        const failure = locateModelError(
-          error,
-          sourceRef(file, failureStart, failureEnd),
-        );
+        const failure = locateModelError(error, callLocation);
         executionTrace.failure = failure.diagnostic;
         throw failure;
       } finally {
@@ -421,7 +419,7 @@ export function createModelCompiler(
         recordSourceValue(
           id,
           'operation-output',
-          location,
+          callLocation,
           result,
           context.id,
           runtime,
@@ -1554,6 +1552,9 @@ export function createModelCompiler(
             if (execution.siteId !== site.siteId) return [];
             const receiver = execution.receiver;
             if (!isModelObject(receiver)) return [];
+            const operation = operations.get(
+              traceExecutionKey(execution.siteId, execution.execution),
+            );
             const attemptedIds = attemptedTopologyIds(
               execution.arguments.get(parameter.index),
               parameter.multiple,
@@ -1566,13 +1567,16 @@ export function createModelCompiler(
             return [
               {
                 runtime: sourceExecutionRuntime(execution),
-                nodeIds: [modelObjectNodeId(receiver)],
+                nodeIds: [
+                  operation?.outputNodeId ?? modelObjectNodeId(receiver),
+                ],
+                operationId: operation?.id,
                 parameters: execution.parameters,
                 contextId: execution.contextId,
                 selection: {
                   kind: parameter.kind,
                   inputNodeId: modelObjectNodeId(receiver),
-                  ids: returnedReferences
+                  ids: returnedReferences?.length
                     ? returnedReferences
                         .filter(reference => reference.kind === parameter.kind)
                         .map(reference => reference.id)
@@ -2193,7 +2197,7 @@ export function createModelCompiler(
               call,
               node.getStart(sourceFile),
               node.getEnd(),
-              callFailureStart(node, sourceFile),
+              callSourceStart(node, sourceFile),
               node.getEnd(),
               sourceFile.fileName,
               siteId,
@@ -2390,8 +2394,8 @@ export function createModelCompiler(
     expression: ts.Expression,
     start: number,
     end: number,
-    failureStart: number,
-    failureEnd: number,
+    callStart: number,
+    callEnd: number,
     file: string,
     id: string,
     label: string,
@@ -2407,8 +2411,8 @@ export function createModelCompiler(
         factory.createStringLiteral(file),
         factory.createNumericLiteral(start),
         factory.createNumericLiteral(end),
-        factory.createNumericLiteral(failureStart),
-        factory.createNumericLiteral(failureEnd),
+        factory.createNumericLiteral(callStart),
+        factory.createNumericLiteral(callEnd),
         factory.createStringLiteral(id),
         factory.createStringLiteral(label),
         factory.createArrowFunction(
@@ -2423,7 +2427,7 @@ export function createModelCompiler(
     );
   }
 
-  function callFailureStart(
+  function callSourceStart(
     call: ts.CallExpression,
     sourceFile: ts.SourceFile,
   ): number {
@@ -2608,6 +2612,11 @@ export function createModelCompiler(
     if (
       method === 'paint' ||
       method === 'scaled' ||
+      method === 'origin' ||
+      method === 'originOffset' ||
+      method === 'originVertex' ||
+      method === 'originCenter' ||
+      method === 'rotate' ||
       method === 'fillet' ||
       method === 'chamfer' ||
       method === 'expose' ||
@@ -3301,9 +3310,7 @@ export function createModelCompiler(
     signature: ToolSignatureSchema,
     sourceFile: ts.SourceFile,
   ): ToolCallSite {
-    const sourceStart = ts.isPropertyAccessExpression(node.expression)
-      ? node.expression.name.getStart(sourceFile)
-      : node.expression.getStart(sourceFile);
+    const sourceStart = callSourceStart(node, sourceFile);
     return {
       siteId,
       sourceRef: sourceRef(sourceFile.fileName, sourceStart, node.getEnd()),

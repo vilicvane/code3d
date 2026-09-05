@@ -35,6 +35,7 @@
 - Monaco 使用 Prettier 格式化模型源码；GUI 写回后自动格式化，也可使用 `Shift+Alt+F`。
 - 选中对象后可用平移 gizmo 直接调整能唯一追溯的位置参数。
 - 相对位置由语义不可变的 `relate()` copy 携带，并在组合或渲染边界求解。
+- 几何模型支持 `origin`、`originOffset`、`originVertex`、`originCenter` 与 `rotate`；原点设置不移动几何，旋转按局部固定 X/Y/Z 轴顺序使用角度制。`originCenter()` 取主体包围盒中心随模型变换后的 `.center` 锚点。原点坐标和偏移提供平移手柄，顶点原点复用拾取，中心及顶点原点拖动会生成偏移，旋转提供与角度参数对应的环形手柄。
 - 平移工具编辑现有 `offset(x, y, z)`；缺少 offset 时在约束表达式上创建它。
 - 共享参数的其他受影响对象会同步预览并高亮；`Esc` 可取消交互。
 - 可调用 API 的 `@code3d.param` 提供工具参数的 kind、标签和静态约束；变量本身不读取 annotation 元数据。

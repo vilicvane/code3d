@@ -15,6 +15,11 @@ import type {
 } from './model/compiler';
 import {ModelDiagnosticError, type ModelDiagnostic} from './model/diagnostic';
 import {preferUpstreamParameterUsages} from './model/parameter-provenance';
+import {
+  originDecoration,
+  originSourceDecoration,
+} from './model/origin-decorations';
+import {spatialIntent} from './tools/model-spatial-tool';
 import {bundledExamples} from './project/bundled-examples';
 import {defaultProject} from './project/default-project';
 import {
@@ -49,9 +54,9 @@ import {
   namedElementDecorations,
 } from './model/element-decorations';
 import type {
-  PositionGizmoBinding,
-  PositionGizmoEvent,
-} from './tools/position-gizmo';
+  TransformGizmoBinding,
+  TransformGizmoEvent,
+} from './tools/transform-gizmo';
 import {
   ToolEngine,
   type ToolCommitOptions,
@@ -368,6 +373,7 @@ const viewport = new ModelViewport(viewportHost, {
     booleanOperationSourceDecoration,
     edgeModificationSourceDecoration,
     elementSourceDecoration,
+    originSourceDecoration,
   ],
 });
 const imageExportDialog = new ImageExportDialog(viewportHost, {
@@ -570,15 +576,15 @@ window.addEventListener('keydown', event => {
     event.preventDefault();
     return;
   }
+  if (event.key === 'Escape' && viewport.cancelPositionTool()) {
+    event.preventDefault();
+    return;
+  }
   if (event.key === 'Escape' && finishContextualTool()) {
     event.preventDefault();
     return;
   }
   if (dockPanels.handleKeyDown(event)) {
-    event.preventDefault();
-    return;
-  }
-  if (event.key === 'Escape' && viewport.cancelPositionTool()) {
     event.preventDefault();
     return;
   }
@@ -2251,12 +2257,12 @@ function parameterIntent(target: ParameterTarget, value: number): ToolIntent {
   return {kind: 'parameter.set', target, value};
 }
 
-function handlePositionTool(event: PositionGizmoEvent): void {
+function handlePositionTool(event: TransformGizmoEvent): void {
   if (event.kind === 'begin') {
     positionToolSession?.cancel();
     positionToolInterruptedCompile = interruptCompileForTool();
     positionToolSession = toolEngine.begin(
-      `viewport.translate:${event.binding.axis}:${positionBindingId(event.binding)}`,
+      `viewport.${event.binding.mode}:${event.binding.axis}:${positionBindingId(event.binding)}`,
     );
     errorBar.hidden = true;
     showPositionToolStatus(event.binding, event.binding.value);
@@ -2305,9 +2311,10 @@ function handlePositionTool(event: PositionGizmoEvent): void {
 }
 
 function positionIntent(
-  binding: PositionGizmoBinding,
+  binding: TransformGizmoBinding,
   value: number,
 ): ToolIntent {
+  if (binding.kind === 'spatial') return spatialIntent(binding, value);
   if (binding.kind === 'parameter') {
     return parameterIntent(binding.target, value);
   }
@@ -2322,13 +2329,18 @@ function positionIntent(
   };
 }
 
-function positionAxisIndex(axis: PositionGizmoBinding['axis']): 0 | 1 | 2 {
+function positionAxisIndex(axis: TransformGizmoBinding['axis']): 0 | 1 | 2 {
   if (axis === 'x') return 0;
   if (axis === 'y') return 1;
   return 2;
 }
 
-function positionBindingId(binding: PositionGizmoBinding): string {
+function positionBindingId(binding: TransformGizmoBinding): string {
+  if (binding.kind === 'spatial') {
+    const source = binding.spatial.source;
+    if (source.kind === 'parameter') return source.target.id;
+    return `spatial:${source.sourceRef.file}:${source.sourceRef.start}:${source.sourceRef.end}`;
+  }
   if (binding.kind === 'parameter') {
     return binding.target.id;
   }
@@ -2337,13 +2349,15 @@ function positionBindingId(binding: PositionGizmoBinding): string {
 }
 
 function showPositionToolStatus(
-  binding: PositionGizmoBinding,
+  binding: TransformGizmoBinding,
   value: number,
 ): void {
   const impact =
     binding.kind === 'parameter'
       ? (currentModule?.parameterImpacts.get(binding.target.id) ?? 1)
-      : binding.occurrenceKeys.length;
+      : binding.kind === 'spatial'
+        ? binding.spatial.objects.length
+        : binding.occurrenceKeys.length;
   const effect = impact > 1 ? ` · Affects ${formatObjectCount(impact)}` : '';
   toolStatus.textContent = `${binding.axis.toUpperCase()} · ${binding.label} ${formatDisplayNumber(value)}${effect} · Esc to cancel`;
   toolStatus.hidden = false;
@@ -2358,7 +2372,16 @@ function formatDisplayNumber(value: number): string {
 }
 
 function applyToolPreview(preview: ToolPreview): void {
-  if (preview.kind === 'parameter') {
+  if (preview.kind === 'model-spatial') {
+    viewport.hideSourceDecorationsDuringPreview();
+    viewport.setSpatialPreview(preview.objects);
+    viewport.setDecorations(
+      'spatial-preview',
+      preview.objects.map(object =>
+        originDecoration(object.nodeId, object.spatial.origin),
+      ),
+    );
+  } else if (preview.kind === 'parameter') {
     viewport.setParameterPreview(preview.targetId, preview.value);
     viewport.hideSourceDecorationsDuringPreview();
   } else if (preview.kind === 'occurrence-translation') {
@@ -2373,7 +2396,9 @@ function applyToolPreview(preview: ToolPreview): void {
 }
 
 function commitToolPreview(preview: ToolPreview): void {
-  if (preview.kind === 'parameter') {
+  if (preview.kind === 'model-spatial') {
+    viewport.commitSpatialPreview(preview.objects, preview.parameter);
+  } else if (preview.kind === 'parameter') {
     viewport.commitParameterPreview(preview.targetId, preview.value);
   } else if (preview.kind === 'occurrence-translation') {
     viewport.commitOccurrenceTranslationPreview(preview.occurrenceKeys);
@@ -2384,7 +2409,10 @@ function clearToolPreview(
   preview: ToolPreview,
   reason: 'replace' | 'end',
 ): void {
-  if (preview.kind === 'parameter') {
+  if (preview.kind === 'model-spatial') {
+    viewport.clearSpatialPreview(preview.objects);
+    viewport.clearDecorations('spatial-preview');
+  } else if (preview.kind === 'parameter') {
     viewport.clearParameterPreview(preview.targetId);
   } else if (preview.kind === 'occurrence-translation') {
     viewport.clearOccurrenceTranslationPreview(preview.occurrenceKeys);
