@@ -23,7 +23,9 @@ dimensions and twist angle available in call-site panels.
 
 Open the example and place the cursor in either `twistKnob(...)` call to
 adjust its inputs. The short knob supplies a twist of 30°; the tall one uses
-the builder's default of 60°.
+the builder's default of 60°. The twist annotation also declares `default: 60`,
+so the tall knob's panel shows that value as a placeholder. Typing a number
+adds an explicit twist argument; simply opening the panel leaves it omitted.
 
 ## Return a model, own the intermediate geometry
 

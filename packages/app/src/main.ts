@@ -80,6 +80,7 @@ import {
 } from './ui/contextual-tool-panel';
 import type {
   ToolArgumentSource,
+  ToolArgumentEditTarget,
   ToolSelectionParameterSchema,
   ToolSignatureSchema,
 } from './model/tool-schema';
@@ -319,7 +320,7 @@ type TopologyReferenceSelectionTool = {
   evaluationIndex: number;
   sourceFile: string;
   parameter: ToolSelectionParameterSchema;
-  argument: ToolArgumentSource['target'];
+  argument: ToolArgumentEditTarget;
   occurrenceKey: string;
   availableIds: readonly number[];
   selectedIds: readonly number[];
@@ -334,7 +335,7 @@ type ContextualToolState = {
   signature: ToolSignatureSchema;
   presentArguments: Map<
     string,
-    Extract<ToolArgumentSource['target'], Readonly<{kind: 'present'}>>
+    Extract<ToolArgumentEditTarget, Readonly<{kind: 'present'}>>
   >;
   parameters: Map<string, ContextualToolParameterState>;
   undoGroup: string;
@@ -1349,7 +1350,7 @@ function syncContextualTool(sourceTargetFocused = true): void {
     : new Set<string>();
   if (!continuesPrevious || previous.historyState === 'applied') {
     sourceTool.arguments.forEach(argument => {
-      if (argument.target.kind === 'present') {
+      if (argument.target?.kind === 'present') {
         removedArguments.delete(argument.name);
       }
     });
@@ -1396,7 +1397,7 @@ function presentArguments(
 ): ContextualToolState['presentArguments'] {
   return new Map(
     arguments_.flatMap(argument =>
-      argument.target.kind === 'present'
+      argument.target?.kind === 'present'
         ? [[argument.name, argument.target]]
         : [],
     ),
@@ -2301,12 +2302,14 @@ function toolSourceRefs(module: ModelModule): SourceRef[] {
     ...module.sourceTargets.flatMap(target => [
       target.sourceRef,
       ...(target.receiverRef ? [target.receiverRef] : []),
-      ...(target.tool?.arguments.flatMap(argument => [
-        argument.target.sourceRef,
-        ...(argument.target.kind === 'present'
-          ? [argument.target.removalSourceRef]
-          : []),
-      ]) ?? []),
+      ...(target.tool?.arguments.flatMap(({target}) =>
+        target
+          ? [
+              target.sourceRef,
+              ...(target.kind === 'present' ? [target.removalSourceRef] : []),
+            ]
+          : [],
+      ) ?? []),
       ...target.evaluations.flatMap(
         evaluation =>
           evaluation.parameters?.map(parameter => parameter.target.sourceRef) ??

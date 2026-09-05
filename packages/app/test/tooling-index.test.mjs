@@ -213,7 +213,7 @@ const primitiveSource = [
   'import {definePrimitive, replicad} from "@code3d/core/replicad";',
   '/**',
   ' * @code3d.param radius {kind: "length", label: "Outer radius"}',
-  ' * @code3d.param y {kind: "length", constraints: {exclusiveMin: 0}}',
+  ' * @code3d.param y {kind: "length", default: 4, constraints: {exclusiveMin: 0}}',
   ' */',
   'export const sleeve = definePrimitive((radius: number, y = 4) =>',
   '  replicad.makeCylinder(radius, y),',
@@ -244,7 +244,7 @@ for (const declarationOnly of [false, true]) {
   test(`reads primitive annotations through imports and aliases from ${declarationOnly ? 'emitted declarations' : 'source'}`, () => {
     const source = [
       'import {sleeve as imported} from "./bridge.ts";',
-      'import * as library from "./library.js";',
+      `import * as library from "${declarationOnly ? 'knobs' : './library.js'}";`,
       'const renamed = imported;',
       'const radius = 6;',
       'renamed(radius);',
@@ -253,18 +253,37 @@ for (const declarationOnly of [false, true]) {
     const index = resolveProjectTooling({
       files: [
         {
-          path: declarationOnly ? 'library.d.ts' : 'library.ts',
+          path: declarationOnly
+            ? 'node_modules/knobs/index.d.ts'
+            : 'library.ts',
           source: declarationOnly
             ? emitPrimitiveDeclaration(primitiveSource)
             : primitiveSource,
         },
-        {path: 'bridge.ts', source: 'export {sleeve} from "./library.js";'},
+        {
+          path: 'bridge.ts',
+          source: `export {sleeve} from "${declarationOnly ? 'knobs' : './library.js'}";`,
+        },
+        ...(declarationOnly
+          ? [
+              {
+                path: 'node_modules/knobs/package.json',
+                source: JSON.stringify({
+                  name: 'knobs',
+                  type: 'module',
+                  types: './index.d.ts',
+                }),
+              },
+            ]
+          : []),
         {path: 'model.ts', source},
       ],
     });
     const calls = index.toolCalls.get('/model.ts');
     const schema = toolSchemaAt(calls, source, 'renamed(radius)');
     assert.equal(schema?.name, 'sleeve');
+    assert.equal(schema.parameters[0].default, undefined);
+    assert.equal(schema.parameters[1].default, 4);
     assert.deepEqual(
       schema?.parameters.map(({name, index, optional, label}) => ({
         name,
@@ -360,6 +379,8 @@ function emitPrimitiveDeclaration(source) {
     if (path.endsWith('primitive-fixture.d.ts')) declaration = text;
   });
   assert.ok(declaration?.includes('@code3d.param radius'));
+  assert.ok(declaration.includes('default: 4'));
+  assert.ok(!declaration.includes('y = 4'));
   return declaration;
 }
 

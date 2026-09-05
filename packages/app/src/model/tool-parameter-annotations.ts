@@ -1,11 +1,12 @@
 import ts from '@typescript/typescript6';
 import type {TopologyKind} from '@code3d/core/tooling';
 import {code3dAnnotations, type Code3dAnnotation} from './annotations';
-import type {
-  ToolParameterAction,
-  ToolParameterConfig,
-  ToolParameterConstraints,
-  ToolParameterKind,
+import {
+  validToolParameterValue,
+  type ToolParameterAction,
+  type ToolParameterConfig,
+  type ToolParameterConstraints,
+  type ToolParameterKind,
 } from './tool-parameter-config';
 
 export type ParameterAnnotationSite = Readonly<{
@@ -50,6 +51,7 @@ export function isToolSelectionKind(kind: unknown): kind is TopologyKind {
 export type SignatureParameter = Readonly<{
   name: string;
   optional: boolean;
+  numeric: boolean;
   multiple: boolean;
 }>;
 
@@ -58,6 +60,11 @@ export function signatureParameters(
   checker: ts.TypeChecker,
   location: ts.Node,
 ): readonly SignatureParameter[] {
+  const isNumeric = (type: ts.Type): boolean =>
+    checker.isTypeAssignableTo(
+      checker.getNonNullableType(type),
+      checker.getNumberType(),
+    );
   const acceptsArray = (type: ts.Type): boolean =>
     type.isUnion()
       ? type.types.some(acceptsArray)
@@ -84,6 +91,7 @@ export function signatureParameters(
           optional: Boolean(
             tuple.elementFlags[index] & ts.ElementFlags.Optional,
           ),
+          numeric: isNumeric(element),
           multiple: acceptsArray(element),
         };
       });
@@ -97,6 +105,7 @@ export function signatureParameters(
             ts.isParameter(declaration) &&
             (declaration.questionToken || declaration.initializer)),
         ),
+        numeric: isNumeric(type),
         multiple: acceptsArray(type),
       },
     ];
@@ -230,15 +239,12 @@ function validateParameterAnnotation(
   const value = parseObjectLiteral(expression, annotation);
   rejectUnknownFields(
     value,
-    new Set(['kind', 'label', 'constraints', 'actions']),
+    new Set(['kind', 'label', 'constraints', 'actions', 'default']),
     annotation,
     name,
   );
-  const kind = value.kind;
-  if (
-    typeof kind !== 'string' ||
-    !toolParameterKinds.has(kind as ToolParameterKind)
-  ) {
+  const kind = value.kind as ToolParameterKind;
+  if (typeof kind !== 'string' || !toolParameterKinds.has(kind)) {
     throw annotationError(
       annotation,
       `@code3d.param ${name} has an unsupported kind.`,
@@ -258,15 +264,45 @@ function validateParameterAnnotation(
       `@code3d.param ${name} selection does not accept numeric constraints.`,
     );
   }
-  const config = {
-    kind: kind as ToolParameterKind,
+  const parameter = parameters[index];
+  if (value.default !== undefined) {
+    if (
+      isToolSelectionKind(kind) ||
+      !parameter.optional ||
+      !parameter.numeric
+    ) {
+      throw annotationError(
+        annotation,
+        `@code3d.param ${name} default requires an optional numeric parameter.`,
+      );
+    }
+    if (
+      typeof value.default !== 'number' ||
+      !validToolParameterValue({kind, constraints}, value.default)
+    ) {
+      throw annotationError(
+        annotation,
+        `@code3d.param ${name} default must be a finite ${kind === 'count' ? 'integer' : 'number'} satisfying its constraints.`,
+      );
+    }
+  }
+  const common = {
     ...(value.label === undefined ? {} : {label: value.label as string}),
-    ...(constraints ? {constraints} : {}),
     actions,
-  } as ToolParameterConfig;
+  };
+  const config: ToolParameterConfig = isToolSelectionKind(kind)
+    ? {...common, kind}
+    : {
+        ...common,
+        kind,
+        ...(constraints ? {constraints} : {}),
+        ...(value.default === undefined
+          ? {}
+          : {default: value.default as number}),
+      };
   return {
     annotation,
-    parameter: parameters[index],
+    parameter,
     index,
     name,
     config,

@@ -3366,15 +3366,25 @@ export function createModelCompiler(
     sourceFile: ts.SourceFile,
   ): ToolCallSite {
     const sourceStart = callSourceStart(node, sourceFile);
+    const spreadIndex = node.arguments.findIndex(ts.isSpreadElement);
     return {
       siteId,
       sourceRef: sourceRef(sourceFile.fileName, sourceStart, node.getEnd()),
       signature,
-      arguments: signature.parameters.flatMap(parameter => {
-        const target = toolArgumentSource(node, parameter.index, sourceFile);
-        return target
-          ? [{name: parameter.name, index: parameter.index, target}]
-          : [];
+      arguments: signature.parameters.map(parameter => {
+        const unknown = spreadIndex >= 0 && parameter.index >= spreadIndex;
+        return {
+          name: parameter.name,
+          index: parameter.index,
+          presence: unknown
+            ? 'unknown'
+            : parameter.index < node.arguments.length
+              ? 'present'
+              : 'omitted',
+          target: unknown
+            ? undefined
+            : toolArgumentSource(node, parameter.index, sourceFile),
+        };
       }),
     };
   }

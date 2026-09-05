@@ -139,6 +139,19 @@ tooling 从公开声明读取注释，并从 TypeScript 实际调用签名解析
 具名函数与方法的重载仍优先使用匹配签名上的注释。primitive factory 不额外提供
 `@code3d.arguments` 入口；独立预览使用普通示例调用。
 
+可选数值参数的 `@code3d.param` 可用 `default: 60` 描述省略实参时的面板
+placeholder；源码与已发布 `.d.ts` 使用同一静态解析路径。默认值接受有限数值
+字面量，count 必须为整数，且满足参数 constraints；静态校验与面板编辑共用数值
+规则。函数参数初始化器只决定实际运行行为，不读取其默认值，也不把 annotation
+注入非交互运行时；作者负责保持描述与实现一致。
+
+默认 placeholder 仅用于源码确实省略的实参。已有实参（包括显式 undefined、
+求值为 undefined 的表达式和求值失败）维持原展示。所有连续省略参数均可展示
+各自默认值，但仅下一位置可以补写。参数是否省略与能否写回分别记录；展开实参
+及后续位置无法静态映射时标记为 unknown，不展示默认值或提供位置编辑。聚焦、离开和未输入时提交不修改源码；主动
+输入同一数值也会写成显式实参。清空仍属无效输入，Undo 或源码删除实参可恢复
+省略状态，不新增恢复默认按钮。实现背景见 [#29](https://github.com/vilicvane/code3d/issues/29)。
+
 viewport 平移 gizmo 在能够唯一追溯参数时产生 `parameter.set`，否则针对已有关系产生
 `relation.offset`。源码中的 `fillet(radius)`、`fillet(radius, edgeIds)` 和对应的
 `chamfer` 调用把整个参数区域投影为 edge-selection source target。`edge-operation.set`
