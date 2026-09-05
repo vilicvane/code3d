@@ -2,7 +2,7 @@
 
 This file is the durable working memory for decisions and multi-step work. Keep
 stable product goals in `DESIGN.md`, source-editing/tool contracts in
-`TOOLING.md`, and detailed not-yet-active refactors under `plans/`; update this
+`TOOLING.md`, and detailed implementation records under `plans/`; update this
 file whenever the confirmed design changes. [GitHub Issues](https://github.com/vilicvane/code3d/issues)
 is the single source for requirements, discussion, acceptance, and current work
 status. A one-sentence issue is welcome; there are no required templates or
@@ -57,12 +57,15 @@ implementation context and historical outcomes, not a competing work queue.
   `package.json`, lockfile, and installed dependencies, including
   `@code3d/core`. The same source should run in a supported Node runtime without
   a code3d-only module syntax or hidden host dependency.
-- Studio provides built-in core/screws when the root package metadata does not
+- App provides built-in core/screws when the root package metadata does not
   declare `@code3d/core`. Declaring core in dependencies, devDependencies,
   peerDependencies or optionalDependencies transfers the entire runtime to the
   project's packages; missing installations are errors. Built-in packages use
   real published artifacts, one shared core instance and an isolated internal
   dependency closure. Other npm packages still resolve from the project.
+- App and core evolve together during prototyping. `@code3d/core/tooling`
+  remains their internal integration boundary without a separate compatibility
+  version or stability guarantee. See [#30](https://github.com/vilicvane/code3d/issues/30).
 - Rendering is driven primarily by source or GUI object selection. Exporting is
   a publishing boundary and only a preview fallback, not a render prerequisite.
 - Viewport file export supports STEP, STL and 3MF alongside PNG image export.
@@ -82,10 +85,23 @@ implementation context and historical outcomes, not a competing work queue.
   model is itself usable as its intrinsic frame Anchor. Solid primitives expose
   `center`, `top`, `bottom`, and `axis` through the same named-element mechanism
   available to user models rather than through a separate fixed-anchor path.
+- Types referenced by the public authoring API are exported with their named
+  dependencies, including generic constraints and result mappings. Model types
+  belong to core's root entry and Replicad builder types to `./replicad`;
+  exposing a type does not add runtime properties or operations. See
+  [#34](https://github.com/vilicvane/code3d/issues/34).
 - `model.expose({...})` creates a semantic-immutable model with a type-inferred
   named-element interface. An element imported from an internal model is
   rebound into the exposed model's local frame, so reusable APIs do not leak
   their construction objects.
+- Geometric models passed to `expose()` become `Solid`, `Surface`, `Edge`, or
+  `Vertex` references, retaining named members. Existing topology references
+  keep their source identity and acquire the containing model's placement;
+  pure anchors retain their reference-geometry meaning. Chained topology and
+  calculated-point queries carry that placement and constrain the containing
+  model. IDs remain in the immutable source geometry's namespace. References
+  provide query and relation capabilities without model operations. See
+  [#27](https://github.com/vilicvane/code3d/issues/27).
 - `model.relate(self => constraint | constraints)` creates a new
   semantic-immutable model value that shares geometry and carries the returned
   constraint or constraint array. The callback parameter is that new value.
@@ -121,6 +137,10 @@ implementation context and historical outcomes, not a competing work queue.
   midpoint (the centroid need not lie on a curved surface). Their `vertices(ids?)`, `edges(ids?)`,
   and `surfaces(ids?)` counterparts return ordered arrays of the same anchors,
   defaulting to every current stable topology ID when the argument is omitted.
+- Subtopology queries validate membership and retain source IDs. Geometric
+  references expose a local bounding-box center carried through transforms;
+  edge start/midpoint/end anchors sample parameters 0/0.5/1. A shared edge keeps
+  its identity across faces, and a closed edge retains its actual vertex count.
 - A composite is broad: any connected set of occurrences and spatial relations
   is a composite, including copy, pattern, boolean operands, groups, and
   assemblies. A composite can itself be reused as geometry in a larger model.
@@ -140,6 +160,10 @@ implementation context and historical outcomes, not a competing work queue.
   local bounding box and carried through transforms. `originCenter()` uses
   that anchor; origin edits never move `center`. Center and vertex origin
   drags append or edit `originOffset()` through the same source transaction.
+- `scaled(factor)` derives geometric models about local coordinate zero. Geometry,
+  named anchors, `center`, and the origin position scale together while topology
+  IDs are preserved. The factor is positive and finite; groups do not provide
+  geometric scaling. Export unit conversion is a separate output setting.
 
 ## Invariants
 
@@ -275,7 +299,7 @@ implementation context and historical outcomes, not a competing work queue.
 - A project has no privileged persistent entry file. The active editor file is
   the root module for the current compile, so every source file can be opened
   and previewed directly.
-- Studio diagnostics, completion and model evaluation use one selected package
+- App diagnostics, completion and model evaluation use one selected package
   filesystem: project-owned packages when core is declared, otherwise the
   built-in core/screws plus ordinary project dependencies. Declarations and
   implementations remain separate consumers of real package artifacts, not a
@@ -331,7 +355,7 @@ selection per page URL.
 Status: complete. Rootless selection and optional exports were implemented in
 `809fcc7`; the remaining `model()` API entry has now been removed.
 
-### 2. Runtime source context — in progress
+### 2. Runtime source context
 
 Remaining scope and live status: [#2](https://github.com/vilicvane/code3d/issues/2).
 
@@ -385,10 +409,19 @@ Named-element properties and edge, surface, and vertex anchors refine that
 scope through the same context resolver. The owning model and selected anchor
 are highlighted while all relation participants remain visible; each accessor
 keeps its own editing arguments across runtime calls and downstream consumers.
+[#22](https://github.com/vilicvane/code3d/issues/22) completed automatic receiver
+and input tracking, including function parameter bindings. Within `relate`,
+model values, callback parameters, and named or topology anchors share the
+relation context; participants also appear in their solved placement before a
+downstream composition is written. Broader relationship browsing remains the
+separate discussion in #2.
 Focused items in Monaco's native TypeScript member completion reuse the same
 viewport preview immediately, then replace it with a model compiled from the
 hypothetically accepted completion. The incomplete source and caret remain
 unchanged, and the caret-selected scene returns when completion closes.
+Unchanged compiler options and declarations preserve Monaco's TypeScript worker
+and in-flight completion requests; actual language changes still synchronize.
+See [#26](https://github.com/vilicvane/code3d/issues/26).
 [R-017](requests/closed/R-017-completion-derived-model-preview.md) records this
 completion-derived rendering contract.
 [R-004](requests/closed/R-004-source-local-modeling-diagnostics.md) is complete:
@@ -428,7 +461,7 @@ frame decorations without editing source or retaining a parallel selection.
 Status: [R-002](requests/closed/R-002-unified-collapsible-gui-panels.md) is
 implemented as reusable dock panel infrastructure.
 
-### 3. Anchor constraint graph — geometric solver
+### 3. Anchor constraint graph — geometric solver complete
 
 - Keep B-Rep geometry local and store constraints on immutable model copies.
 - Support a model's intrinsic frame and type-safe named point, line, and face
@@ -473,7 +506,7 @@ is complete. Value declarations and operation outputs do not expose the
 translation gizmo or offset controls; eligible composition inputs and explicit
 constraint source sites do.
 
-### 4a. Topology-scoped modeling tools — in progress
+### 4a. Topology-scoped modeling tools — complete
 
 - Assign stable numeric edge IDs at primitive boundaries and carry them across
   scale, fillet, chamfer, and Boolean derivations.
@@ -533,9 +566,10 @@ and multiple-selection viewport picking, before/after comparison, reversible
 selection, and source write-back are implemented. The Properties panel and GUI
 operation-insertion path were removed pending a broader interaction design.
 
-### 4b. Core package and Node-native projects — active
+### 4b. Core package and Node-native projects — complete
 
-Remaining scope and live status: [#6](https://github.com/vilicvane/code3d/issues/6).
+Implementation and acceptance: [#6](https://github.com/vilicvane/code3d/issues/6)
+and [#12](https://github.com/vilicvane/code3d/issues/12).
 
 - Extract the author runtime into a real ESM `@code3d/core` package with emitted
   JavaScript, declarations, explicit exports, and an explicit tooling boundary.
@@ -546,14 +580,14 @@ Remaining scope and live status: [#6](https://github.com/vilicvane/code3d/issues
   evaluation while making both honor the same project package graph.
 - Make the authoring convention valid for direct execution by a supported Node
   runtime and for ordinary TypeScript emit.
-- Preserve one project-local core/kernel runtime during repeated Studio
+- Preserve one project-local core/kernel runtime during repeated App
   evaluations without coupling the host to its concrete runtime classes.
 
-Status: the repository is now a workspace with `@code3d/app`, `@code3d/core`,
-and the standard-model demo package `@code3d/screws`. Core emits a shared
-public type surface plus Node and tooling entries; package resolution from an
-opened project's own `node_modules` remains the active next boundary. The
-detailed working plan is
+The repository uses `@code3d/app`, `@code3d/core`, `@code3d/solver`,
+`@code3d/opencascade`, and `@code3d/screws`. Core emits a shared public type surface plus Node and tooling
+entries. App reads the selected project's package implementations and
+metadata lazily, evaluates native ESM in a persistent project Worker, and
+loads the same packages' declarations into Monaco. The detailed design is
 [plans/core-package-and-node-projects.md](plans/core-package-and-node-projects.md).
 It records confirmed constraints separately from technical choices that should
 remain adjustable as implementation evidence arrives.
@@ -587,7 +621,7 @@ package privately caches deterministic thread B-Rep data in a bounded LRU, readi
 an independently owned shape in the current kernel for each invocation. This
 avoids caching disposable model objects or retaining native handles across kernels.
 
-### 4d. Annotation-driven contextual tools — active
+### 4d. Annotation-driven contextual tools
 
 Further parameter/provider design: [#7](https://github.com/vilicvane/code3d/issues/7).
 The implemented contract below remains the baseline; the issue is a discussion,
@@ -609,9 +643,15 @@ not approval to predeclare additional parameter kinds.
   the fragment, then join annotation and ordinary source parents without
   exposing generated helper code.
 - Use one semantic `kind` discriminator for value and selectable parameters.
-  Keep runtime defaults, effective selections, environment-dependent steps,
-  display ranges, units, and other presentation policy out of the declaration
-  metadata; resolve them from the reached tool context and current environment.
+  Function implementations own runtime defaults. Optional numeric parameters
+  display defaults for omitted arguments through explicit `@code3d.param`
+  `default` metadata, shared by source and emitted declarations
+  (see [#29](https://github.com/vilicvane/code3d/issues/29)).
+  Do not extract implementation initializers or inject annotation defaults into
+  non-interactive execution. Authors keep the display metadata consistent with
+  the implementation. Resolve effective selections, environment-dependent steps,
+  display ranges, units, and other presentation policy from the reached tool
+  context and current environment.
 - Recognize only callable `@code3d.param` and design `@code3d.arguments`
   annotations. Numeric variables carry no annotation metadata: resolve their
   editable source without inheriting labels, units, kinds, bounds, or steps
@@ -684,13 +724,13 @@ establish the next schema boundary.
   spine it uses a multi-section pipe shell so the curve affects the generated
   geometry rather than serving only as a placement guide.
 - Validate the complete path with two non-parallel related planar profiles at
-  the endpoints of a curved spine, including Node execution, Studio rendering,
+  the endpoints of a curved spine, including Node execution, App rendering,
   source context, and topology selection on the result and inputs.
 
 Status: complete. Node tests cover renderable face/edge/vertex models, all three
 topology anchor kinds, ordinary through-section loft, and a curved-spine loft
 between nonparallel circle and rectangle profiles. Host-Chrome validation also
-confirmed Studio rendering, section/spine source context, and Surface, Edge,
+confirmed App rendering, section/spine source context, and Surface, Edge,
 and Vertex viewport selectors on the new model kinds and loft result.
 
 ### 5. Object combination tools
@@ -706,14 +746,25 @@ Design discussion and live scope: [#8](https://github.com/vilicvane/code3d/issue
 
 ## Open questions
 
-Unresolved constraint, topology naming, Boolean provenance, scaling, and runtime
-retention questions are tracked in [#9](https://github.com/vilicvane/code3d/issues/9).
-The geometric solver implementation belongs to
-[#21](https://github.com/vilicvane/code3d/issues/21). The earlier
-[experiment](plans/constraint-solver-wasm-evaluation.md) records the evidence
-leading to the shared OndselSolver WASM backend.
-Source lifting for combination tools belongs to [#8](https://github.com/vilicvane/code3d/issues/8).
-Public API and interoperability review belongs to [#5](https://github.com/vilicvane/code3d/issues/5).
+Further author-facing Boolean provenance and large-model lineage/mesh retention
+questions are tracked in [#9](https://github.com/vilicvane/code3d/issues/9).
+Geometric constraints (#21), named topology references and retired-ID semantics
+(#27), and geometric scaling (#33) already have implemented, documented behavior.
+The bounded kernel cache and the runtime/resource ownership boundaries are also
+implemented; #9 discusses additional needs at larger scales.
+
+The [solver experiment](plans/constraint-solver-wasm-evaluation.md) records the
+evidence preceding the integrated OndselSolver backend. The completed public API
+and interoperability audit is recorded in
+[plans/public-api-audit.md](plans/public-api-audit.md) and
+[#5](https://github.com/vilicvane/code3d/issues/5).
+
+Relationship browsing belongs to [#2](https://github.com/vilicvane/code3d/issues/2),
+object-parameter controls to [#7](https://github.com/vilicvane/code3d/issues/7), and
+source lifting for combination tools to [#8](https://github.com/vilicvane/code3d/issues/8).
+Sketch editing has its own implementation and acceptance in
+[#23](https://github.com/vilicvane/code3d/issues/23); its development-branch features
+are not part of the integrated capability descriptions above.
 Confirmed outcomes return to the design documents; discussion status stays in
 Issues.
 

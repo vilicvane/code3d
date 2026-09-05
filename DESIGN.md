@@ -4,9 +4,9 @@
 
 - 使用完整的 JavaScript/TypeScript 自由构建和组合模型。
 - code3d 模型项目是普通的 Node/TypeScript 项目，自行管理 `package.json`、
-  lockfile 和 `node_modules`。Studio 在项目未声明 `@code3d/core` 时提供完整内置
+  lockfile 和 `node_modules`。App 在项目未声明 `@code3d/core` 时提供完整内置
   core/screws，支持零安装开始建模；声明 core 后全部由项目自己的依赖接管。
-- 同一份项目源码遵循标准 Node ESM/TypeScript 规则，既可由 Studio 加载，也可
+- 同一份项目源码遵循标准 Node ESM/TypeScript 规则，既可由 App 加载，也可
   在受支持的 Node 环境中直接执行。
 - 关注模型对象本身，而不是它的构建过程。
 - 模型可以导出、导入、复用、实例化和渲染。
@@ -25,6 +25,7 @@
 - 模型参数可以追溯到可编辑的上游源码。
 - 模型对象采用语义不可变的 value semantics；建模操作产生新值，不改变已有值的可观察模型语义。
 - 模型可以公开类型安全的具名点、线、面参考元素，供复用方直接选择、约束和可视化。
+- 几何模型经 `expose` 成为相应的拓扑引用，已有拓扑引用保留身份；纯参考几何保留 Anchor 语义。拓扑引用支持按维度继续查询，其几何来源与装配归属分别记录，约束作用于外层模型。见 [#27](https://github.com/vilicvane/code3d/issues/27)。
 - 派生模型使用简洁的数字拓扑 ID 指定局部元素；确定性重算会保留一一对应的旧 ID，新元素只从高水位递增分配，已消失的 ID 不再复用。
 
 ## Non-goals

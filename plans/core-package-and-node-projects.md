@@ -1,13 +1,15 @@
 # `@code3d/core` package and Node-native project refactor
 
-## Status and planning posture
+## Implementation and acceptance
 
-Live scope, discussion, and status: [GitHub #6](https://github.com/vilicvane/code3d/issues/6).
-The following is the implementation baseline at the 2026-09-05 migration,
-not a separate status tracker. The fillet/chamfer edge-selection work is integrated and the
-workspace/package-boundary portion of phase 1 is implemented. Project-local
-package resolution, building, evaluation, and language-service loading were
-the remaining work at that point.
+The project package boundary, lazy dependency resolution, native ESM evaluation,
+and Monaco declaration loading are implemented and accepted in
+[#6](https://github.com/vilicvane/code3d/issues/6) and
+[#12](https://github.com/vilicvane/code3d/issues/12). The final integration is
+[`162497e`](https://github.com/vilicvane/code3d/commit/162497e3887dc5cd5b7936307353d68b4ba5d73f).
+Acceptance covers ordinary Windows npm projects, direct Node execution, actual
+directory handles, repeated Worker compilation, and native resource release.
+The supported layouts and measured lifetime limits are recorded below.
 
 This document is durable working memory, not a frozen implementation spec. It
 separates confirmed product constraints from working technical choices. During
@@ -28,10 +30,10 @@ the product.
 - A real code3d project is an ordinary Node/TypeScript project.
 - The project owns its `package.json`, lockfile, and `node_modules`.
 - The project may install `@code3d/core` itself and may choose its compatible
-  version. Until the root package metadata declares core, Studio supplies
+  version. Until the root package metadata declares core, App supplies
   built-in core/screws for zero-install authoring. Declaring core transfers the
-  entire runtime to the project; Studio never replaces a missing declared package.
-- The same author source must be usable by Studio and directly executable in a
+  entire runtime to the project; App never replaces a missing declared package.
+- The same author source must be usable by App and directly executable in a
   supported Node runtime.
 - Author modules use standard ESM imports and exports. code3d does not introduce
   a private module syntax.
@@ -39,7 +41,7 @@ the product.
   `node_modules`.
 - Source files remain the only persistent model state. Packaging must not add a
   parallel model document or build-history format.
-- Every source file remains eligible as the current Studio preview root.
+- Every source file remains eligible as the current App preview root.
 - TypeScript language services and model execution are separate responsibilities:
   declarations drive editor intelligence; JavaScript implementations drive
   runtime evaluation.
@@ -120,15 +122,16 @@ two conceptual surfaces:
 
 - `@code3d/core`: the author-facing modeling values, functions, anchors, and
   constraints.
-- `@code3d/core/tooling`: the explicit, versioned boundary used by Studio to
+- `@code3d/core/tooling`: the explicit internal boundary used by the App to
   initialize an evaluation, attach trace metadata, finalize snapshots, and
   release resources.
 
 The exact export names may change during extraction if the runtime dependency
-graph shows a cleaner boundary. The important boundary is that Studio must not
+graph shows a cleaner boundary. The important boundary is that App must not
 classify values using its own copy of core classes. Project code and tooling
-must operate on the same installed core instance, and Studio receives a
-serializable result through a checked tooling-protocol version.
+must operate on the same installed core instance, and the App receives a
+serializable result through tooling. App and core evolve together during
+prototyping; this internal integration surface does not promise API stability.
 
 Reusable model packages should normally declare `@code3d/core` as a peer
 dependency, with a development dependency for their own build and tests. This
@@ -169,9 +172,9 @@ that completes OpenCascade initialization during module evaluation. Validate
 top-level-await behavior, process shutdown, resource ownership, and the
 OpenCascade loader in an isolated package spike before committing to that API.
 
-Studio uses the browser/tooling entry from the project's installed package and
+App uses the browser/tooling entry from the project's installed package and
 keeps the corresponding kernel alive across source evaluations. The installed
-core version, not Studio's build-time dependency, owns the compatible geometry
+core version, not App's build-time dependency, owns the compatible geometry
 runtime and kernel asset.
 
 ## Architectural boundaries
@@ -197,7 +200,7 @@ mounting and indexing the entire folder through the current WebAccess backend.
 Module resolution must read only the files reached by the active graph.
 
 Browser examples and loose local models use the same read-only built-in package
-view. Studio distributes the actual npm-published files and fetches reached
+view. App distributes the actual npm-published files and fetches reached
 bytes lazily; it no longer preinstalls the full distribution or creates dependency
 metadata in the project. Existing user-owned package files remain untouched.
 
@@ -211,13 +214,13 @@ filesystem and implements package `exports`, `imports`, conditions, hierarchical
 Use separate resolution intents over the same service:
 
 - author/editor types: NodeNext-compatible type and declaration resolution;
-- Studio runtime: browser/import/default package conditions and executable
+- App runtime: browser/import/default package conditions and executable
   JavaScript;
 - Node smoke tests: Node's own resolver is the authority.
 
 This distinction is intentional. A package may expose different Node and
 browser implementations, but their advertised public type contract must agree.
-Studio build diagnostics catch dependencies that have no browser-compatible
+App build diagnostics catch dependencies that have no browser-compatible
 implementation even if their declarations are valid.
 
 Select the effective package filesystem before resolving any imports:
@@ -286,8 +289,7 @@ viewport or the currently initialized geometry kernel.
 
 The working execution model is:
 
-1. Resolve the project's installed `@code3d/core` and validate its tooling
-   protocol.
+1. Resolve the project's installed `@code3d/core` and its tooling entry.
 2. Create a project-local runtime capsule and initialize its OpenCascade kernel
    once.
 3. Build the selected source root and its reachable graph using ESM authoring
@@ -295,15 +297,28 @@ The working execution model is:
 4. Execute a fresh instance of the user module graph for each accepted revision
    while reusing only the platform runtime capsule.
 5. Let the installed tooling entry inspect its own model values and return a
-   serializable model/trace snapshot to Studio.
+   serializable model/trace snapshot to App.
 6. Drop evaluation-owned object references after the snapshot boundary while
    keeping dependency-owned model values and the kernel ready for reuse.
    Do not forcibly dispose models that an installed package may cache privately.
    Unreachable Replicad wrappers release native resources through finalizers.
 
-Tooling protocol 4 initializes OpenCascade and `@code3d/solver` from the same
-selected package graph, including each module's own WASM asset. Node's core
-entry performs both installations; Studio installs both through the selected
+Tooling initializes OpenCascade and `@code3d/solver` from the same
+selected package graph, including each module's own WASM asset.
+The core package selects `@code3d/opencascade`, whose checked-in runtime is
+rebuilt from a pinned toolchain and binding configuration. Its generator patch
+restores native destruction for classes that provide both ordinary and placement
+delete. Upstream 1.0.0 and 1.1.0 incorrectly emit empty destructors for these
+classes; invalidating JavaScript handles alone did not free their native geometry.
+Topology traversal also releases every owned explorer result, including duplicate
+occurrences, and consumes raw handles when creating independent Replicad wrappers.
+The core Replicad interface also consumes the native B-Rep reader result before
+returning an independent shape, so repeated screw-cache reads release their
+geometry. Box construction owns and releases its temporary native point.
+See [the kernel package](../packages/opencascade/README.md) for the source pins
+and reproducible build command.
+
+Node's core entry performs both installations; App installs both through the selected
 tooling entry before evaluating author code.
 
 Call `beginModelEvaluation(): void` before each serial source
@@ -312,7 +327,7 @@ in per-evaluation weak maps, separate from model geometry and stored relations.
 Reusing a dependency's model must not reuse the previous revision's source
 offsets. Completed snapshots remain independent of the next evaluation.
 
-Studio must not use `instanceof` against a host-installed core to inspect values
+App must not use `instanceof` against a host-installed core to inspect values
 from the project-installed core. Package or lockfile changes invalidate the
 runtime capsule and rebuild it from the changed installed artifacts.
 
@@ -347,12 +362,59 @@ Distinct compiled code remains until the Worker ends (project close, execution
 cancellation, or timeout). Ordinary completed source edits retain that Worker
 and its expensive kernel caches. The 360-edit isolated natural-GC experiment
 released obsolete model wrappers and kept geometry caches hot; full project
-worker measurements and the real Windows directory check remain tracked in #12.
+Worker acceptance now also covers a real Windows npm directory through the native
+picker and a `DirectoryFileReader`. The full Worker reads only reached package
+files, without enumerating `node_modules`.
 
-## Implementation sequence
+Dependency graph preparation is serialized only until its unevaluated static
+modules are reserved. Execution runs outside that lock; each completed module
+publishes its namespace and wakes imports waiting for that module. This preserves
+shared dependency identity under concurrent imports, including when a parent
+uses top-level await to import a second graph that shares an already initialized
+child. Failed graphs release waiters and retain their evaluation error for the
+runtime lifetime. Unrelated imports remain usable.
 
-The sequence may be refined after the preflight experiments, but the completed
-milestone must leave one coherent path.
+The supported local-project baseline is ordinary npm installations in Windows
+Chromium and Node 24 (verified with win32 Node 24.13.1). Browser execution requires
+browser-compatible packages; Node built-ins and native addons are diagnosed,
+without automatic polyfills. Symbolic-link layouts used by pnpm or workspace
+links have no support claim in this baseline. Dynamic imports must have a string
+literal specifier; computed specifiers receive a source diagnostic. Relative
+resource URLs use `new URL(literal, import.meta.url)`.
+
+Build diagnostics retain the original file and UTF-16 source range, including
+imports preceded by multibyte UTF-8 text. Resolver errors use the importing source
+location rather than plugin implementation stacks. Runtime package preparation
+errors identify an author import when one exists.
+
+Full-Worker acceptance on Windows Chrome 152 uses a multi-file plate fillet
+plus ISO4762 screw project installed with npm. Measurements distinguish the
+kernel's `wasmMemory.buffer.byteLength` from JavaScript heap and CDP backing
+storage: backing storage alone did not reveal the native geometry leak. The
+corrected kernel passes 10,000 owned-shape release cycles and 1,200 distinct
+fillet/mesh operations with its linear memory remaining at 100 MiB. The same
+owned-shape regression fails against the upstream 1.0.0 kernel.
+
+With the final package graph, 360 distinct edits plus five identical repeats in
+one Worker kept WASM linear memory at 208,732,160 bytes (about 199 MiB). All 366
+observed plate WeakRefs were empty after GC. The cold compilation took 5.52 s;
+subsequent edits had a 458 ms median and 588 ms p95. Only 46 distinct package
+files were read. The bounded operation cache reached 256 entries.
+
+Compiled ESM code grew from 924,325 to 3,918,531 bytes, about 8.3 KB per distinct
+variant; the five identical recompilations added no code. JS used heap after GC
+grew from 46.0 MB to 56.4 MB.
+
+Distinct compiled ESM code remains until the Worker ends; source variants are
+content-deduplicated. These measurements do not claim zero JS growth for
+unlimited distinct edits. Closing the project or terminating its Worker releases
+the complete native-module cache. Full acceptance details are tracked in #12.
+
+## Implementation sequence (historical)
+
+The phases below preserve the migration plan and its verification criteria.
+They are not pending work; the retained implementation and support boundaries
+above and below describe the completed system.
 
 ### Phase 0: integrate the current topology work and run isolated spikes
 
@@ -375,15 +437,14 @@ Delete the spike after its conclusions are reflected in the retained design.
 
 ### Phase 1: establish the package boundary
 
-- Convert the repository to a private workspace root with Studio and core
+- Convert the repository to a private workspace root with App and core
   packages at their best final locations.
 - Move the true author runtime and its tests into `@code3d/core`.
 - Generate JavaScript and declarations from one source instead of maintaining a
   parallel declaration string.
 - Define explicit public and tooling exports and package the compatible kernel
   asset.
-- Replace Studio runtime-class knowledge with serializable tooling protocol
-  types and protocol-version checks.
+- Replace App runtime-class knowledge with serializable tooling protocol types.
 
 ### Phase 2: establish project filesystem and resolution
 
@@ -432,13 +493,12 @@ At minimum, verify:
 
 - `node src/model.ts` executes a multi-file project using its installed core;
 - ordinary TypeScript emit produces runnable JavaScript and valid declarations;
-- the same source root produces equivalent geometry in Studio;
+- the same source root produces equivalent geometry in App;
 - every project source file can still be selected as a preview entry;
 - imports from ESM and CommonJS browser-compatible dependencies build;
 - a reusable model package shares the project's peer core instance;
-- missing core, incompatible tooling protocol, blocked package export, missing
-  file extension, and Node-only browser dependency errors are located and
-  understandable;
+- missing core, blocked package export, missing file extension, and Node-only
+  browser dependency errors are located and understandable;
 - Monaco uses the installed package version for completion and navigation;
 - changing a dependency or lockfile invalidates the right caches and runtime;
 - opening a real project does not enumerate all of `node_modules`;
@@ -450,28 +510,26 @@ At minimum, verify:
 - production build, typecheck, focused unit tests, and host-browser interaction
   checks all pass.
 
-## Decision checkpoints
+## Confirmed support boundaries
 
-No decision is currently required before the existing topology milestone
-finishes. During the refactor, ask the user if evidence makes any of these
-choices materially ambiguous:
-
-1. The minimum supported Node release and whether native type stripping is a
-   hard project requirement or `node --import=tsx` is acceptable.
-2. Whether direct Node import must initialize OpenCascade invisibly, or a
-   visible asynchronous runtime boundary is acceptable in author code.
-3. Which package managers and local/workspace symlink layouts belong in the
-   first supported contract.
-4. Whether Studio must support arbitrary Node-oriented dependencies through
-   polyfills, or should reject everything without a browser-compatible path.
-5. Whether code3d-aware reusable dependencies expose only their public results
-   to Studio tracing or also publish inspectable internal source metadata.
-6. Resolved through #12's isolated experiments: native ESM with internal fresh
-   source execution scopes and persistent dependency scopes replaces
-   Babel/SystemJS. Complete the lifecycle and real-directory acceptance checks
-   before delivery.
-7. Resolved: the Studio package is `@code3d/app` at `packages/app`, alongside
-   `packages/core` and reusable modeling packages such as `packages/screws`.
+- Node 24 is the documented runtime; the native Windows acceptance used
+  Node 24.13.1 for direct TypeScript, TypeScript emit, and emitted JavaScript.
+  Authors do not need `tsx` or an initialization function.
+- The Node core entry initializes both OpenCascade and the constraint solver
+  before author module execution. App initializes the selected browser
+  package through its tooling entry.
+- Ordinary npm installations are the verified local layout. No support claim
+  is made for pnpm/workspace symlinks or paths outside the selected directory.
+- Browser dependencies must provide a browser-compatible implementation.
+  Node built-ins and native addons are rejected without polyfills.
+- Reusable packages are uninstrumented dependencies. Their public model values
+  participate in App snapshots; their private implementation source is not
+  transformed into author traces.
+- Native ESM with internal source execution scopes and persistent dependency
+  scopes replaces Babel/SystemJS. The lifetime and measurements above describe
+  the retained implementation.
+- The repository packages are `@code3d/app`, `@code3d/core`, `@code3d/solver`,
+  `@code3d/opencascade`, and `@code3d/screws`.
 
 ## Primary references
 

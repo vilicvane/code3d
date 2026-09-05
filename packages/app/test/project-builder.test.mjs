@@ -71,7 +71,7 @@ test('builds and executes a reached ESM/CommonJS/JSON dependency graph', async (
 
 test('conditional bare Node builtins remain conditional instead of resolving as npm dependencies', async () => {
   const source =
-    'export async function browser() { if (globalThis.useNode) { return await import("module"); } return 42; }';
+    'export async function browser(useNode = false) { if (useNode) { return await import("module"); } return 42; }';
   const reader = {
     async readFile(path) {
       if (path === '/model.ts') return new TextEncoder().encode(source);
@@ -84,7 +84,6 @@ test('conditional bare Node builtins remain conditional instead of resolving as 
   const bundle = await new ProjectBuilder(reader, esbuild).build(
     'export * from "/model.ts"',
   );
-  assert.match(bundle.source, /import\("node:module"\)/);
   const evaluator = new ModuleEvaluator(importTestModule);
   try {
     const result = await evaluator.evaluate(
@@ -92,6 +91,10 @@ test('conditional bare Node builtins remain conditional instead of resolving as 
       bundle.source,
     );
     assert.equal(await result.browser(), 42);
+    await assert.rejects(
+      result.browser(true),
+      /Node built-in node:module.*browser/,
+    );
   } finally {
     evaluator.dispose();
   }

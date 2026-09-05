@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {box, group, line, point} from '../bld/node/index.js';
+import {box, group, line, point} from '@code3d/core';
 import {
   composeTransforms,
   createModelSnapshotter,
   disposeModelObjects,
   rotateVector,
-} from '../bld/tooling/index.js';
+} from '@code3d/core/tooling';
 
 const snapshot = createModelSnapshotter();
 const identity = [0, 0, 0, 1];

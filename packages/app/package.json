@@ -28,7 +28,6 @@
     "monaco-editor": "^0.56.0",
     "prettier": "^3.9.6",
     "replicad": "^1.0.1",
-    "replicad-opencascadejs": "^1.0.0",
     "three": "^0.185.1"
   },
   "devDependencies": {

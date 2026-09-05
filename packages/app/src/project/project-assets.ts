@@ -1,6 +1,7 @@
 import ts from '@typescript/typescript6';
 import type {ProjectFileReader} from './file-reader';
 import {normalizeProjectPath, projectDirectory} from './project';
+import {locateModelError} from '../model/diagnostic';
 
 /** Owns URLs for statically referenced project assets for one runtime lifetime. */
 export class ProjectAssets {
@@ -69,7 +70,15 @@ export class ProjectAssets {
       source =
         source.slice(0, site.start) +
         'new URL(' +
-        JSON.stringify(await this.url(site.path)) +
+        JSON.stringify(
+          await this.url(site.path).catch(error => {
+            throw locateModelError(
+              error,
+              {file: path, start: site.start, end: site.end},
+              'module',
+            );
+          }),
+        ) +
         ')' +
         source.slice(site.end);
     }

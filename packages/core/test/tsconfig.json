@@ -3,5 +3,5 @@
   "compilerOptions": {
     "noEmit": true
   },
-  "files": ["public-api.ts"]
+  "files": ["public-api.ts", "public-types.ts"]
 }

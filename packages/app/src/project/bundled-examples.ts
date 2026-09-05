@@ -2,6 +2,7 @@ import booleanOperationsSource from '../../examples/boolean-operations.ts?raw';
 import combinedConstraintsSource from '../../examples/combined-constraints.ts?raw';
 import customPrimitivesSource from '../../examples/custom-primitives.ts?raw';
 import designArgumentsSource from '../../examples/design-arguments.ts?raw';
+import exposedTopologySource from '../../examples/exposed-topology.ts?raw';
 import fastenersSource from '../../examples/fasteners.ts?raw';
 import examplesIndexSource from '../../examples/index.ts?raw';
 import primitivesSource from '../../examples/primitives.ts?raw';
@@ -21,6 +22,7 @@ const files = [
   {path: '/examples/primitives.ts', source: primitivesSource},
   {path: '/examples/sketches.ts', source: sketchesSource},
   {path: '/examples/origin-and-rotation.ts', source: originAndRotationSource},
+  {path: '/examples/exposed-topology.ts', source: exposedTopologySource},
   {path: '/examples/custom-primitives.ts', source: customPrimitivesSource},
   {
     path: '/examples/combined-constraints.ts',

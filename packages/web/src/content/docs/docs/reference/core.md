@@ -6,6 +6,12 @@ description: A curated map of the public core modeling operations.
 Import these functions from `@code3d/core`. The editor's TypeScript signatures
 provide exact overloads and inferred model interfaces.
 
+Types used by the authoring API are also exported, including generic constraints,
+named-element result types, and capability interfaces. Use `import type` from
+`@code3d/core` for types such as `ElementKind`, `ModelKind`, `TopologyKind`,
+`NamedElements`, and `ExposedElements`. Replicad builder types such as `Shape3D`
+are available from `@code3d/core/replicad` alongside `definePrimitive`.
+
 ## Solid primitives
 
 | Function                                     | Meaning                           |
@@ -66,10 +72,28 @@ shows which operations are supported by the value you hold.
 
 - `.fillet(radius, edgeIds?)`: round selected edges, or all edges.
 - `.chamfer(distance, edgeIds?)`: bevel selected edges, or all edges.
-- `.paint(color)`: assign a model color.
+- `.scaled(factor)`: uniformly scale a geometric model about local coordinate zero.
+- `.paint(color)`: return a recolored model; a group recursively overrides
+  every descendant's color, including already-painted parts and nested groups.
 - `.relate(self => constraint)` or `.relate(self => [first, second])`: attach
   one or more relations for placement in a composition.
 - `.expose({name: element})`: publish a typed named-element interface.
+
+The outermost painted group determines the color of its complete subtree.
+Painting again replaces that override. Original models and shared parts used
+elsewhere retain their colors; previews and exports use the same result.
+
+## Scaling
+
+Solids, faces, curves, and points support `.scaled(factor)`. The factor must be
+positive and finite. For example, `box(20, 8, 12).scaled(0.5)` returns a new box
+with dimensions 10, 4, and 6, leaving the original model unchanged.
+
+Scaling uses local coordinate zero even after an origin edit. Geometry, named
+anchors, the `center` anchor, and the model's origin position scale together;
+topology IDs are preserved. Groups do not provide `.scaled()`; scale their
+geometric parts before composing them. To change only an exported file's unit
+conversion, use the [export scale](../../guides/exporting/#scale-and-orientation).
 
 ## Origins and rotation
 
@@ -122,6 +146,11 @@ children as rigid bodies.
 
 - `.vertex(id)`, `.edge(id)`, `.surface(id)`: one point, line, or face anchor.
 - `.vertices(ids?)`, `.edges(ids?)`, `.surfaces(ids?)`: arrays of anchors.
+
+These topology references expose readonly `kind` (`vertex`, `edge`, or
+`surface`) and `id` properties. Use `model.edges().map(edge => edge.id)` to
+collect edge IDs for an operation on that model. Plain named anchors such as
+`model.top` do not have these topology properties.
 
 IDs are model-local. See [topology selection](../../guides/topology/) for
 selection behavior and derived-model identity.

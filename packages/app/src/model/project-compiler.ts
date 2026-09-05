@@ -1,4 +1,5 @@
 import type * as esbuild from 'esbuild-wasm';
+import ts from '@typescript/typescript6';
 import type {ModelGeometrySnapshot, SketchSnapshot} from '@code3d/core/tooling';
 import {ProjectFileCache} from '../project/file-cache';
 import type {ProjectFileReader} from '../project/file-reader';
@@ -19,6 +20,7 @@ import {
 } from './sketch-drag';
 import {ModuleEvaluator} from './module-evaluator';
 import type {CompilationProgress} from './compilation-progress';
+import {ModelDiagnosticError, diagnosticFromError} from './diagnostic';
 import {
   exportModel,
   type ModelExportInstance,
@@ -94,7 +96,41 @@ export class ProjectCompiler {
         builder,
         this.evaluator,
         onProgress,
-      );
+      ).catch(error => {
+        const diagnostic = diagnosticFromError(error, 'module');
+        if (diagnostic.sourceRef) throw error;
+        for (const file of project.files) {
+          const parsed = ts.createSourceFile(
+            file.path,
+            file.source,
+            ts.ScriptTarget.Latest,
+            true,
+          );
+          for (const statement of parsed.statements) {
+            if (
+              !ts.isImportDeclaration(statement) &&
+              !ts.isExportDeclaration(statement)
+            )
+              continue;
+            const specifier = statement.moduleSpecifier;
+            if (
+              !specifier ||
+              !ts.isStringLiteralLike(specifier) ||
+              !/^@code3d\/(?:core|screws)(?:\/|$)/.test(specifier.text)
+            )
+              continue;
+            throw new ModelDiagnosticError({
+              ...diagnostic,
+              sourceRef: {
+                file: file.path,
+                start: specifier.getStart(parsed),
+                end: specifier.getEnd(),
+              },
+            });
+          }
+        }
+        throw new ModelDiagnosticError(diagnostic);
+      });
       this.compiler = createModelCompiler(this.runtime.tooling, this.evaluator);
     }
     onProgress?.('compiling-model');

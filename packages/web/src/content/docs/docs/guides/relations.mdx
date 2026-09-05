@@ -61,7 +61,11 @@ the relation to inspect both participants. Selecting a named anchor or an
 composition peers visible while highlighting the selected anchor.
 
 The callback parameter in `relate(part => ...)` is the new related model
-value. Operations preserve the observable meaning of existing model values.
+value. Place the cursor on its declaration or a use of `part` inside the
+callback to inspect the same relationship. Even before you write a consuming
+`group` or `loft`, the relation context shows the participants in their solved
+positions. Selecting the related model's standalone binding shows it in its local
+frame. Operations preserve the observable meaning of existing model values.
 
 ## Group or fuse
 

@@ -17,9 +17,9 @@
   `/examples` 目录，`Reset examples` 不会改动其他文件。
 - 源码产生任意模型对象即可预览；export 只是可选发布边界和 fallback。
 - `model()` 不是入口要求，源码选择决定主要渲染对象。
-- Monaco 提供 `code3d` API 的类型、补全、格式化和跨文件定义跳转。
+- Monaco 提供 `@code3d/core` 等建模包的类型、补全、格式化和跨文件定义跳转。
 - 用户代码与 OpenCascade 在可终止 Worker 中编译和执行。
-- primitive、平面图形、空间曲线、loft、约束定位、布尔运算、圆角、倒角、棱柱、圆台和螺纹由 OCCT B-Rep 计算。
+- primitive、平面图形、空间曲线、loft、布尔运算、圆角、倒角、棱柱、圆台和螺纹由 OCCT B-Rep 计算；几何关系的位姿由 OndselSolver 求解。
 - Worker 将 B-Rep 三角化为 surface、法线和拓扑边线供 Three.js 渲染。
 - 几何模型的 vertex、edge 和 surface 使用模型内稳定的数字 ID；派生操作保留可一一追踪的旧 ID，新元素递增分配且不复用已消失的 ID。
 - circle、ellipse、rectangle、regularPolygon 平面图形和 line、arc、bezier、spline
@@ -36,6 +36,8 @@
 - 模型接收者与参数按实际求值自动追踪；普通函数、导入别名、namespace 调用，以及
   数组和选项对象中的模型输入都可保留独立源码上下文。调用失败仍保留已求值的输入。
   可预览不意味着自动拥有参数面板或空间手柄，后两者仍由工具注释和操作语义决定。
+- `relate` 回调参数、模型值、具名锚点和拓扑引用共用关系上下文预览；尚未编写下游
+  `group` 或 `loft` 时，也能查看关系参与者的组合位置。
 - 数组、Set 和 Map 中的模型按组合位置预览，即使集合只有一个成员也保留该语义；
   单独模型仍使用自身局部坐标，集合不会隐式变成 group 或额外位置工具 scope。
 - 平移 gizmo 将位置参数追溯到上游变量或源码字面量，拖动时先做临时预览，确认后通过 Monaco 编辑直接写回源码。
@@ -48,11 +50,12 @@
 - 平移工具优先修改唯一安全的上游位置参数，否则在最外层 offset 的参数表达式上
   加减并合并增量，保留原表达式；缺少可逐轴编辑的 offset 时追加一次并在后续拖动中复用。
 - 共享参数的其他受影响对象会同步预览并高亮；`Esc` 取消尚未松手的拖动，保留源码面板。
-- 可调用 API 的 `@code3d.param` 提供工具参数的 kind、标签和静态约束；变量本身不读取 annotation 元数据。
+- 可调用 API 的 `@code3d.param` 提供工具参数的 kind、标签、静态约束和省略可选数值参数时显示的默认值；变量本身不读取 annotation 元数据。
 - 模型函数可用重复的 `@code3d.arguments [...]` 声明设计时调用参数；GUI 可在真实调用与这些候选上下文之间切换，注解内的值也会按对应函数签名提供 TypeScript 补全。
 - Monaco 会高亮已识别的 `@code3d.*` JSDoc 标签，非法参数候选会得到源码定位诊断。
 - 渲染器只消费模型对象，不依赖对象的构建过程。
-- 内置可编辑模组提供 M3–M12 内六角圆柱头螺钉、配合间隙孔和沉孔工具对象。
+- `@code3d/screws` 包提供 M3–M12 内六角圆柱头螺钉、配合间隙孔和沉孔工具对象；
+  App 根据项目是否声明 core 使用内置包或项目安装版本，可编辑的调用示例位于 `/examples`。
 - core 提供 Y 轴直管 `tube` 和支持小数圈数的 `coil`；自定义实体通过
   `@code3d/core/replicad` 的 `definePrimitive` 接入，螺纹 builder 属于 screws 包内部。
 - viewport 右键提供 STEP、STL、3MF 模型导出与 PNG 图像导出。模型导出当前前景上下文，
@@ -182,7 +185,11 @@ npm run lint-prettier
   解构、import/re-export 及支持的简单算术映射。
 - 没有唯一上游目标的函数调用或非线性表达式不会被自动反向求解。面板以运行时值作为
   空 input 的 placeholder；输入数字会替换整个调用参数表达式，同值输入也会替换。
-  空缺参数没有 placeholder，按顺序填入后可用 Tab 进入下一项。
+- 省略的可选数值参数可通过 `@code3d.param` 的 `default` 显示 placeholder；
+  实际运行默认值由函数实现决定，作者负责保持两者一致。没有注释默认值时保持空白，
+  显式 `undefined` 不使用该 placeholder。只有下一可追加参数可以写入，按顺序填入后
+  可用 Tab 进入下一项；聚焦或提交未改动的 placeholder 不会补写实参。
+  完整规则见 [工具参数默认值](TOOLING.md#当前接入的工具)。
 - 源码编辑影响共享调用或变量的全部求值实例，不是只针对当前点中的 occurrence 创建覆盖值。
 - 数值和单个 topology ID 已能通过 panel 写回；曲线控制点数组仍只通过代码编辑。
 - 约束求解是局部非线性求解，失败不构成全局无解证明。线和面约束使用参考直线及

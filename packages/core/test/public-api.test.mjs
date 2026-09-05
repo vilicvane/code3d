@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {test} from 'node:test';
-import * as authoring from '../bld/library/index.js';
-import * as replicadInterop from '../bld/library/replicad.js';
-import {authoringApi} from '../bld/tooling/index.js';
+import * as authoring from '@code3d/core';
+import * as replicadInterop from '@code3d/core/replicad';
+import {authoringApi} from '@code3d/core/tooling';
+import * as browserAuthoring from '../bld/library/index.js';
+import * as browserReplicadInterop from '../bld/library/replicad.js';
 
 const authoringValues = [
   'arc',
@@ -43,6 +45,23 @@ test('keeps Replicad behind its explicit author interop entry', () => {
   assert.equal('getOC' in replicadInterop.replicad, false);
   assert.equal('setOC' in replicadInterop.replicad, false);
   assert.equal(Object.isFrozen(replicadInterop.replicad), true);
+});
+
+test('Node initialization preserves the browser authoring and interop exports', () => {
+  assert.deepEqual(authoring, browserAuthoring);
+  assert.deepEqual(replicadInterop, browserReplicadInterop);
+});
+
+test('rejects package imports that bypass the public entries', async () => {
+  for (const specifier of [
+    '@code3d/core/bld/library/index.js',
+    '@code3d/core/bld/library/runtime.js',
+    '@code3d/core/bld/tooling/index.js',
+  ]) {
+    await assert.rejects(import(specifier), {
+      code: 'ERR_PACKAGE_PATH_NOT_EXPORTED',
+    });
+  }
 });
 
 test('exposes only the root, Replicad, and tooling package entries', async () => {

@@ -1,20 +1,45 @@
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
 import * as THREE from 'three';
+import {box, group} from '@code3d/core';
+import {
+  createModelSnapshotter,
+  disposeModelObjects,
+} from '@code3d/core/tooling';
 import {createAppTestServer} from './vite-test-server.mjs';
 
-let createRenderedModelNode;
+let createRenderedModelNode, createRenderedModel, disposeObject;
 let server;
 
 before(async () => {
   server = await createAppTestServer();
-  ({createRenderedModelNode} = await server.ssrLoadModule(
-    '/src/rendering/model-renderer.ts',
-  ));
+  ({createRenderedModelNode, createRenderedModel, disposeObject} =
+    await server.ssrLoadModule('/src/rendering/model-renderer.ts'));
 });
 
 after(async () => {
   await server?.close();
+});
+
+test('renders a group override on nested painted and unpainted parts', () => {
+  const first = box(2, 4, 6).paint('#ff0000');
+  const second = box(1, 2, 3);
+  const assembly = group([first, group([second])]).paint('#345678');
+  const rendered = createRenderedModel(createModelSnapshotter()(assembly));
+  try {
+    const meshes = [];
+    rendered.traverse(object => {
+      if (object instanceof THREE.Mesh) meshes.push(object);
+    });
+    assert.equal(meshes.length, 2);
+    for (const mesh of meshes) {
+      assert.equal(mesh.material.color.getHexString(), '345678');
+      assert.equal(mesh.material.transparent, false);
+    }
+  } finally {
+    disposeObject(rendered);
+    disposeModelObjects([first, second, assembly]);
+  }
 });
 
 test('renders face models from both sides without changing solid culling', () => {

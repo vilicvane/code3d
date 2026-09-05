@@ -19,6 +19,11 @@ vertices provide `.vertex(id)`, edges add `.edge(id)`, and faces and solids
 add `.surface(id)`; only solids provide `fillet` and `chamfer`. Groups retain
 the common relation, expose, and paint capabilities without pretending to
 contain geometry. Stable topology references can be used as geometric relation anchors.
+`Vertex`, `Edge`, and `Surface` references expose readonly `kind` and `id`
+properties. For example, `model.edges().map(edge => edge.id)` collects edge IDs
+for a later operation on that model. Their `kind` values are `vertex`, `edge`,
+and `surface`; IDs belong to that model and topology kind. Plain named anchors
+such as `model.top` do not expose these topology properties.
 `relate()` records placement for composition with other values; inspecting or
 rendering the resulting value by itself keeps its intrinsic local frame.
 
@@ -103,6 +108,46 @@ rewritten. Circles/arcs, trimming and conversion to faces/solids remain outside
 this point/line slice. See the [sketch example](../app/examples/sketches.ts) and
 [third-party solver sources](THIRD_PARTY.md).
 
+## Type imports
+
+Types used by public signatures, generic constraints, and return values are
+exported alongside the authoring API, including their named type dependencies.
+This includes `ElementKind`, `ModelKind`, `ModelGeometryKind`, `TopologyKind`,
+the named-element and expose result types, and the model capability interfaces.
+
+```ts
+import type {
+  Anchor,
+  ElementKind,
+  NamedElements,
+  SolidModel,
+} from '@code3d/core';
+
+type Mount<Kind extends ElementKind> = Anchor<Kind>;
+type Part<Elements extends NamedElements> = SolidModel<Elements>;
+```
+
+Code3d model types come from `@code3d/core`; Replicad builder types such as
+`Shape3D` come from `@code3d/core/replicad`. Type exports do not add runtime
+properties or operations. `Quaternion` belongs to the tooling transform API;
+author rotations use `rotate(x, y, z)` in degrees.
+
+## Colors
+
+`paint(color)` returns a new model value. On a group, it recursively overrides
+every descendant's color, including already-painted parts and nested groups.
+The outermost painted group wins within that composition; shared parts retain
+their own colors when used elsewhere. Painting the same value again uses the
+latest color. Previews and exports use the same effective colors.
+
+```ts
+import {box, group} from '@code3d/core';
+
+const redPart = box(10, 10, 10).paint('#ff0000');
+const assembly = group([redPart, group([box(4, 4, 4)])]).paint('#345678');
+// Both parts in assembly use #345678; redPart still renders red on its own.
+```
+
 ## Geometric relations
 
 `relate(self => constraint | constraints)` solves the returned relations
@@ -147,6 +192,48 @@ children are solved in its local space, so relating the group moves the
 assembled children as one rigid body. `expose()` rebinds member anchors into
 that local space. The backend is [`@code3d/solver`](../solver/README.md);
 an unsatisfied local solve is reported without claiming proof of infeasibility.
+
+## Exposed geometry and topology
+
+`expose()` preserves geometry as a reference in the returned model's frame.
+A solid, face, edge, or vertex model becomes a `Solid`, `Surface`, `Edge`, or
+`Vertex` reference. Existing topology references retain their identity; pure
+point, line, plane, and frame anchors retain their reference-geometry meaning.
+Named members remain available, including on an exposed group frame.
+An exposed face, edge, or vertex uses the same relation frame as its topology
+accessor, independent of a custom model origin. A whole solid retains its model
+frame for complete-frame relations.
+
+```ts
+const plate = box(32, 4, 24);
+const assembly = group([plate]).expose({body: plate, mount: plate.surface(1)});
+const boundary = assembly.mount.edges();
+const corners = boundary[0].vertices();
+const center = assembly.mount.center;
+```
+
+References support geometric queries and `on()`. They do not have model
+operations such as `rotate`, `scaled`, `fillet`, or `relate`. A relation authored
+through `self.mount.center` acts on `self`, including when `self` is an assembly.
+Every chained result carries that assembly context while its geometry and IDs
+continue to refer to the original immutable source. Exposing an upstream value
+captures that source; later modeling operations do not reinterpret its IDs in
+a different geometry. To expose result topology, select it from that result.
+
+Subtopology access follows dimension: a surface can query its edges and
+vertices, and an edge its vertices. Singular queries validate membership;
+plural queries retain authored order and allow `[]`. IDs always use the source
+geometry's namespace, so a shared edge has the same ID through either face.
+An edge's vertices are its actual topological vertices; a closed edge can have
+one vertex. A source used in multiple occurrences must be exposed through the
+intended child's reference, such as `left.body`, to select its placement.
+
+Every geometric reference has a local bounding-box `center` point, carried
+through rotation and scaling. `Edge.start`, `.midpoint`, and `.end` sample curve
+parameters 0, 0.5, and 1; the midpoint need not be the bounding-box center or the
+half-length point. These calculated points are anchors, not topology vertices.
+The reference frame used by `edge.on()` or `surface.on()` retains its tangent
+or normal semantics independently of `.center`.
 
 ## Origins and rotation
 
@@ -267,10 +354,12 @@ is not expanded to recognize primitive factory definitions.
 ## Tooling evaluation lifetime
 
 The App uses the selected runtime's `@code3d/core/tooling` entry, from the project
-when core is declared or from the built-in package otherwise. Protocol 5
-adds sketch definitions and layer snapshots to the origin and spatial-operation
-snapshots, and requires installing both
-OpenCascade and the constraint solver from that same package dependency graph.
+when core is declared or from the built-in package otherwise. This internal
+integration surface evolves with the App during prototyping and does not promise
+API stability. It includes topology source identities, assembly transforms, and
+calculated-anchor frames alongside origin, spatial-operation, and sketch layer
+snapshots. It requires installing OpenCascade and the assembly and sketch
+constraint solvers from that same package dependency graph.
 Call `beginModelEvaluation(): void` before each serial source
 evaluation to reset source locations, parameter provenance, and operation
 traces. Geometry, model identity, relations, and kernel caches are unaffected.
@@ -282,3 +371,16 @@ it encounters. Unreachable Replicad wrappers release their native resources
 through their finalizers; explicit disposal is appropriate only when the caller
 owns the complete model lifetime. This boundary is tooling-only: ordinary
 model authors do not initialize an evaluation session.
+
+Rendering snapshots contain serializable meshes and model metadata, without
+native shapes. File export uses a separate `ModelGeometrySnapshot` retained
+by the compiler Worker. Core clones each distinct source shape once; the
+compiler releases these copies before the next compilation, when replacing
+the runtime, or when it is disposed. The snapshot's shapes are borrowed by
+consumers: each export clones them before transformations or consuming kernel
+operations and releases its temporary geometry on both success and failure.
+Repeated exports therefore preserve the retained geometry and author models.
+
+Core owns snapshot creation; the App owns export placement and file generation,
+using Replicad from the same runtime. This division already serves the current
+consumers and changes only when a concrete use case calls for it.

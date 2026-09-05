@@ -7,7 +7,7 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 
-test('watches published package bytes without linking them into the Studio module graph', async () => {
+test('watches published package bytes without linking them into the App module graph', async () => {
   const server = await createAppTestServer();
   try {
     const client = server.environments.client;

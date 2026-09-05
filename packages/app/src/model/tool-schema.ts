@@ -46,6 +46,7 @@ export type ToolValueParameterSchema = ToolParameterSchemaBase &
   Readonly<{
     kind: ParameterKind;
     constraints?: ToolParameterConstraints;
+    default?: number;
   }>;
 
 export type ToolSelectionParameterSchema = ToolParameterSchemaBase &
@@ -79,7 +80,9 @@ export type ToolArgumentEditTarget = Readonly<
 export type ToolArgumentSource = Readonly<{
   name: string;
   index: number;
-  target: ToolArgumentEditTarget;
+  /** Positions at or after a spread cannot be mapped to individual arguments. */
+  presence: 'present' | 'omitted' | 'unknown';
+  target?: ToolArgumentEditTarget;
 }>;
 
 export type ToolCallSchemaMap = ReadonlyMap<string, ToolSignatureSchema>;
@@ -347,6 +350,7 @@ function toolSignatureSchema(
           ...common,
           kind: config.kind,
           constraints: 'constraints' in config ? config.constraints : undefined,
+          ...('default' in config ? {default: config.default} : {}),
         } satisfies ToolValueParameterSchema);
   });
   const sourceFile = declaration.getSourceFile();

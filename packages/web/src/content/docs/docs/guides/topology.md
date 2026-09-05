@@ -58,6 +58,26 @@ Singular forms select one ID; plural forms let you toggle multiple IDs and
 can explicitly use `[]` for no elements. That is different from fillet and
 chamfer's all-edge behavior.
 
+Continue querying a selected face or edge:
+
+```ts
+const face = base.surface(1);
+const boundary = face.edges();
+const corners = boundary[0].vertices();
+const center = face.center;
+```
+
+Queries use the original model's IDs and stay within the selected element.
+`face.edge(id)` reports an error if that edge is outside the face. The viewport
+picker offers only the eligible edges or vertices, including when the geometry
+is exposed from an assembly.
+
+`center` is the selected geometry's local bounding-box center, carried through
+transforms. Edges also provide `start`, `midpoint`, and `end` point anchors at
+curve parameters 0, 0.5, and 1. A curve midpoint can differ from its center or
+half-length point. Calculated points do not acquire vertex IDs; `.vertices()`
+returns the actual topology, including a single vertex on a closed edge.
+
 To choose a vertex as a rotation pivot, use `.originVertex(id)`. See
 [origins and rotation](../origins-and-rotation/).
 

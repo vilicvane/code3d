@@ -27,14 +27,18 @@ Each `@code3d.param` names a parameter in the function's signature:
 
 - `kind: 'length'` describes a dimension.
 - `kind: 'angle'` describes an angle.
-- `kind: 'count'` describes a count.
+- `kind: 'ratio'` describes a dimensionless factor, such as a scale multiplier.
+- `kind: 'count'` describes an integer count.
+- `kind: 'scalar'` describes a general numeric value without a more specific kind.
 - `label` can give the input a readable name.
-- `constraints` can supply `min`, `max`, and `step`.
+- `constraints` can supply `min`, `max`, `exclusiveMin`, and `exclusiveMax`.
+- `default` describes the value to display when an optional numeric argument
+  is omitted.
 
 For example:
 
 ```ts
-/** @code3d.param radius {kind: 'length', label: 'Radius', constraints: {min: 1, step: 0.5}} */
+/** @code3d.param radius {kind: 'length', label: 'Radius', constraints: {min: 1}} */
 ```
 
 Place the cursor in `makeKnob(10, 5, 6)` to open its parameter panel. Change an
@@ -45,6 +49,31 @@ The editor highlights recognized tags, completes configuration fields, and
 reports invalid annotations. Put annotations on the callable declaration,
 not on a variable that happens to hold a dimension. For overloaded functions,
 annotate the overload signatures that should offer tools.
+
+## Describe an omitted argument's default
+
+```ts
+/** @code3d.param twist {kind: 'angle', default: 60} */
+function makeKnob(twist = 60) {
+  // Build the model using twist.
+}
+```
+
+For `makeKnob()`, the panel shows `60` as a numeric placeholder. The annotation
+describes this display value; the function implementation decides what an
+omitted argument actually does. Keep the two consistent. The App reads the
+same annotation from source and published `.d.ts` declarations, without
+extracting initializer values or applying annotations during ordinary execution.
+
+`default` accepts a finite numeric literal, including zero and negative values,
+on an optional numeric parameter. A `count` default must be an integer, and
+every default must satisfy its parameter's constraints. Expressions such as
+`Math.PI` and variable references are not accepted in this static metadata.
+
+An explicit argument keeps its usual display and editing behavior, including
+`undefined` or an expression that produces no numeric result; it never falls
+back to the annotation default. A parameter without `default` remains blank
+when omitted.
 
 ## Preview a function with example arguments
 
@@ -63,11 +92,11 @@ Controls follow a unique chain of TypeScript definitions to an editable
 numeric source value, including supported variables, object properties, and
 destructuring. The appearance of the input tells you how an edit will work:
 
-| Input                                     | Meaning                                                               | What typing a number does                                        |
-| ----------------------------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| An editable value                         | A literal or unique editable source was found                         | Updates that source, preserving a supported expression around it |
-| An empty input with a numeric placeholder | The argument was evaluated, but has no unique editable upstream value | Replaces the entire argument expression at this call             |
-| An empty input without a placeholder      | The argument is missing or has no evaluated value                     | Adds or replaces the argument if the input is enabled            |
+| Input                                     | Meaning                                                                                                        | What typing a number does                                          |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| An editable value                         | A literal or unique editable source was found                                                                  | Updates that source, preserving a supported expression around it   |
+| An empty input with a numeric placeholder | An evaluated expression has no unique editable upstream value, or an omitted argument has an annotated default | Replaces the expression or appends an explicit argument if enabled |
+| An empty input without a placeholder      | The argument is missing or has no evaluated value                                                              | Adds or replaces the argument if the input is enabled              |
 
 For example, with `const spacing = 8`, changing X from `16` to `20` in
 `box(spacing * 2, 8, 4)` updates `spacing` to `10`, leaving `spacing * 2`
@@ -84,9 +113,20 @@ the original expression.
 This differs from [dragging a position tool](../relations/#make-visual-adjustments),
 which can preserve an expression by adding a numeric increment.
 
-An incomplete call can still show a panel. Missing arguments remain blank,
-and the next argument that can legally be appended becomes editable. The
-panel does not invent values for the remaining parameters.
+An incomplete call can still show a panel. Omitted optional parameters show
+their annotated defaults; other missing arguments remain blank. Only the next
+argument that can be appended is editable, even when later parameters have
+default placeholders. Editing never fills intermediate positions with
+`undefined`.
+
+At and after a spread argument such as `makeKnob(...args)`, the panel cannot
+map individual parameter positions to source arguments. Those controls remain
+disabled without default placeholders.
+
+Focusing, leaving, or submitting an untouched default placeholder leaves the
+call unchanged. Typing its value explicitly adds that argument, even if the
+number matches the placeholder. Clearing an input is invalid and leaves the
+source unchanged. Use Undo or edit the source to restore an omitted argument.
 
 Use `Tab` to commit a value and move to the next input as it becomes available.
 `Esc` cancels an active viewport drag, not the panel; leave the call in the
@@ -98,8 +138,8 @@ constraints do not replace it.
 ## Custom primitives use the same annotations
 
 For a `definePrimitive` result, put `@code3d.param` directly above the
-`const` declaration. Its argument names, types, and defaults come from the
-builder signature. Use ordinary calls to preview such a primitive;
+`const` declaration. Its argument names, types, and optionality come from the
+builder signature; panel defaults come from `@code3d.param`. Use ordinary calls to preview such a primitive;
 `@code3d.arguments` does not create previews of primitive factory definitions.
 
 See [custom primitives](../custom-primitives/) for the complete twisted-knob

@@ -20,6 +20,37 @@ The exposed references are rebound into the returned model's frame. They
 describe its public interface rather than leaking the placement of an internal
 construction object.
 
+## Expose geometry for further queries
+
+Exposing a geometric model gives callers a topology reference to it:
+
+```ts
+import {box, group} from '@code3d/core';
+
+const plate = box(32, 4, 24);
+const assembly = group([plate]).expose({
+  body: plate,
+  mountingFace: plate.surface(1),
+});
+
+const boundary = assembly.mountingFace.edges();
+const center = assembly.mountingFace.center;
+```
+
+`body` is a `Solid` reference; `mountingFace` remains a `Surface`. Face, edge,
+and point models similarly become `Surface`, `Edge`, and `Vertex` references.
+The references support queries and attachment relations, and retain named
+members such as `assembly.body.top`. Model operations such as `fillet` or
+`rotate` belong to the model values used to construct the assembly.
+
+Chained queries preserve the assembly placement and the source geometry's IDs.
+A relation through `self.mountingFace.center` places the entire `self` model.
+If two child instances share a source, expose the intended child's reference
+(`left.body` or `right.body`) to identify the placement.
+
+Pure reference planes, axes, and calculated points remain anchors. They do
+not gain a topological boundary merely by being given a name.
+
 ## Keep composition separate
 
 The function defines the part's geometry and useful attachment points.

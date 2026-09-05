@@ -36,7 +36,9 @@ browser. The renderer closes its own pages and leaves that browser running.
   side-by-side mark used in headers and the social image; `favicon.svg` brings
   the diamonds closer together for small sizes. Both builds publish these assets.
 - License text: the root `LICENSE`, served unchanged at `/license.txt` and
-  included in the App build. Workspace packages copy it during `npm pack`.
+  included in the App build. Packages using Code3D's interim license copy it
+  during `npm pack`. `@code3d/solver` ships its own `LICENSE.LGPL-2.1` under
+  LGPL-2.1-or-later; see the [solver README](../solver/README.md).
 
 Example code is bundled into App's managed examples, loaded by Astro's
 content collection, and executed by the image renderer. Keep snippets and

@@ -6,7 +6,7 @@ import {
   disposeModelObjects,
 } from '@code3d/core/tooling';
 
-import * as screws from '../bld/library/index.js';
+import * as screws from '@code3d/screws';
 import {replicad} from '@code3d/core/replicad';
 import {
   clearKernelOperationCache,
@@ -15,9 +15,12 @@ import {
 
 const {ISO4762} = screws;
 
-test('keeps the thread primitive private to the screws package', () => {
+test('keeps the thread primitive private to the screws package', async () => {
   assert.deepEqual(Object.keys(screws), ['ISO4762']);
   assert.equal('helicalThread' in screws, false);
+  await assert.rejects(import('@code3d/screws/bld/library/thread.js'), {
+    code: 'ERR_PACKAGE_PATH_NOT_EXPORTED',
+  });
 });
 
 test('ISO 4762 screws build through the package-local thread primitive', () => {
