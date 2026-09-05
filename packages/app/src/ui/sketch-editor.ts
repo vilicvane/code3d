@@ -3,7 +3,26 @@ import type {
   SketchPosition,
   SketchSnapshot,
 } from '@code3d/core/tooling';
-import type {SketchChange, SketchDraftEntry} from '../tools/sketch-source';
+import {
+  Maximize,
+  Magnet,
+  Minus,
+  MousePointer2,
+  Trash2,
+  type IconNode,
+} from 'lucide';
+import type {SketchChange} from '../tools/sketch-source';
+import {SketchLineDrawing} from '../tools/sketch-drawing';
+import {
+  endpointPosition,
+  sameSketchPoint as same,
+  sketchDistance as distance,
+  sketchGridStep,
+  snapSketchPointer,
+  type SketchPoint as Point,
+} from '../tools/sketch-snap';
+import {DrawingInputs} from './drawing-inputs';
+import {createIcon} from './icon';
 
 export type SketchEditorView = Readonly<{
   id: string;
@@ -13,9 +32,6 @@ export type SketchEditorView = Readonly<{
   readOnlyReason?: string;
 }>;
 
-type Point = SketchPointAddress & {position: SketchPosition};
-type Endpoint = {point: Point} | {position: SketchPosition};
-type Mode = 'Select' | 'Point' | 'Line';
 type Gesture =
   | {
       kind: 'move';
@@ -31,17 +47,31 @@ export class SketchEditor {
   private readonly svg = svgElement('svg');
   private readonly status = document.createElement('output');
   private readonly buttons = new Map<string, HTMLButtonElement>();
-  private draft?: SVGLineElement;
+  private readonly overlay = svgElement('g');
+  private readonly draftLine = svgElement('line');
+  private readonly draftMarker = svgElement('circle');
+  private readonly snapLabel = svgElement('text');
+  private readonly snapText = document.createTextNode('');
+  private readonly drawingInputs = new DrawingInputs(
+    () => this.drawDraft(),
+    () => this.place(),
+    () => this.escape(),
+  );
+  private readonly abort = new AbortController();
   private readonly resize: ResizeObserver;
   private view?: SketchEditorView;
-  private mode: Mode = 'Select';
+  private drawing?: SketchLineDrawing;
+  private snapping = true;
+  private bypassSnap = false;
   private center: SketchPosition = [0, 0];
   private scale = 6;
   private selection?: SketchPointAddress;
   private gesture?: Gesture;
-  private lineStart?: Endpoint;
-  private pointer?: SketchPosition;
   private space = false;
+
+  private get mode() {
+    return this.drawing ? 'Line' : 'Select';
+  }
 
   constructor(
     container: HTMLElement,
@@ -54,15 +84,25 @@ export class SketchEditor {
     const title = document.createElement('strong');
     title.textContent = 'Sketch';
     toolbar.append(title);
-    for (const mode of ['Select', 'Point', 'Line'] as const)
-      this.button(toolbar, mode, () => {
+    for (const [mode, icon] of [
+      ['Select', MousePointer2],
+      ['Line', Minus],
+    ] as const)
+      this.button(toolbar, mode, icon, () => {
         this.cancel();
-        this.mode = mode;
+        this.drawing = mode === 'Select' ? undefined : new SketchLineDrawing();
         this.svg.focus();
         this.draw();
       });
-    this.button(toolbar, 'Delete', () => this.deleteSelection());
-    this.button(toolbar, 'Fit', () => this.fit());
+    this.button(toolbar, 'Delete', Trash2, () => this.deleteSelection());
+    this.button(toolbar, 'Fit', Maximize, () => this.fit());
+    this.button(toolbar, 'Snap', Magnet, () => {
+      this.snapping = !this.snapping;
+      this.svg.focus();
+      this.draw();
+    });
+    this.buttons.get('Snap')!.title =
+      'Snap to points, origin, grid and directions · Hold Alt to bypass';
     this.svg.classList.add('sketch-canvas');
     this.svg.setAttribute('tabindex', '0');
     this.svg.setAttribute('aria-label', 'Sketch drawing');
@@ -94,31 +134,43 @@ export class SketchEditor {
     this.root.addEventListener('contextmenu', event => {
       event.preventDefault();
       event.stopPropagation();
-      this.cancel();
+      this.escape();
     });
     this.root.addEventListener('pointerdown', event => event.stopPropagation());
-    this.svg.addEventListener('keydown', event => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        this.cancel();
-      }
-      if (event.key === 'Delete' || event.key === 'Backspace') {
-        event.preventDefault();
-        this.deleteSelection();
-      }
-      if (event.code === 'Space') {
-        event.preventDefault();
-        this.space = true;
-      }
-    });
-    this.svg.addEventListener('keyup', event => {
+    this.root.addEventListener('keydown', event => this.keyDown(event));
+    this.root.addEventListener('keyup', event => {
       if (event.code === 'Space') this.space = false;
+      if (event.key === 'Alt') {
+        this.bypassSnap = false;
+        this.drawDraft();
+      }
     });
-    this.svg.addEventListener('blur', () => {
+    this.root.addEventListener('focusout', event => {
+      if (
+        event.relatedTarget instanceof Node &&
+        this.root.contains(event.relatedTarget)
+      )
+        return;
       this.space = false;
+      this.bypassSnap = false;
       this.cancel();
     });
-    this.root.append(toolbar, this.svg, this.status);
+    window.addEventListener(
+      'blur',
+      () => {
+        this.space = false;
+        this.bypassSnap = false;
+        this.cancel();
+      },
+      {signal: this.abort.signal},
+    );
+    const stage = document.createElement('div');
+    stage.className = 'sketch-stage';
+    stage.append(this.svg, this.drawingInputs.root);
+    this.overlay.classList.add('drawing-overlay');
+    this.snapLabel.append(this.snapText);
+    this.overlay.append(this.draftLine, this.draftMarker, this.snapLabel);
+    this.root.append(toolbar, stage, this.status);
     container.append(this.root);
     this.resize = new ResizeObserver(() => this.draw());
     this.resize.observe(this.svg);
@@ -129,9 +181,16 @@ export class SketchEditor {
     if (changed) {
       this.cancel();
       this.selection = undefined;
-      this.mode = 'Select';
+      this.drawing = undefined;
     }
     this.view = view;
+    if (view.readOnlyReason) this.drawing = undefined;
+    const start = this.drawing?.start;
+    if (start && 'point' in start) {
+      const point = this.points().find(point => same(point, start.point));
+      if (point) this.drawing!.start = {point};
+      else this.drawing!.reset();
+    }
     this.root.hidden = false;
     if (changed) this.fit();
     else this.draw();
@@ -143,23 +202,122 @@ export class SketchEditor {
     this.root.hidden = true;
   }
   dispose(): void {
+    this.abort.abort();
     this.resize.disconnect();
     this.root.remove();
   }
   cancel(): void {
+    if (this.drawingInputs.root.contains(document.activeElement))
+      this.svg.focus();
     this.gesture = undefined;
-    this.lineStart = undefined;
+    this.drawing?.reset();
     this.draw();
+  }
+
+  private escape(): void {
+    const hasDraft = this.gesture || this.drawing?.hasDraft;
+    this.svg.focus();
+    if (!hasDraft) this.drawing = undefined;
+    this.cancel();
+  }
+
+  private keyDown(event: KeyboardEvent): void {
+    if (event.isComposing || event.ctrlKey || event.metaKey) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      this.escape();
+      return;
+    }
+    if (event.key === 'Alt') {
+      this.bypassSnap = true;
+      this.drawDraft();
+    }
+    const canvas = event.target === this.svg;
+    const input =
+      event.target instanceof HTMLInputElement &&
+      this.drawingInputs.root.contains(event.target);
+    if (this.drawing && (canvas || input)) {
+      const axis = event.key.toLowerCase();
+      if (
+        this.drawing.start &&
+        !event.altKey &&
+        (axis === 'x' || axis === 'y')
+      ) {
+        event.preventDefault();
+        if (!event.repeat) {
+          this.drawing.toggleAxis(axis);
+          this.drawingInputs.clearError();
+          this.drawDraft();
+        }
+      } else if (event.key === 'Tab') {
+        event.preventDefault();
+        this.drawingInputs.focusField(event.shiftKey);
+      } else if (event.key === 'Enter') {
+        event.preventDefault();
+        this.place();
+      } else if (canvas && !event.altKey && /^[\d.+-]$/.test(event.key)) {
+        // Move focus before the native character insertion. Do not synthesize
+        // input or assign the first character: it must participate in undo/IME.
+        this.drawingInputs.focusField();
+      }
+    }
+    if (
+      canvas &&
+      !this.drawing &&
+      (event.key === 'Delete' || event.key === 'Backspace')
+    ) {
+      event.preventDefault();
+      this.deleteSelection();
+    }
+    if (canvas && event.code === 'Space') {
+      event.preventDefault();
+      this.space = true;
+    }
+  }
+
+  private snapContext() {
+    return {
+      points: this.points().reverse(),
+      scale: this.scale,
+      gridStep: sketchGridStep(this.scale),
+      enabled: this.snapping && !this.bypassSnap,
+    };
+  }
+
+  private place(): void {
+    const drawing = this.drawing;
+    if (!drawing || !this.view || this.view.readOnlyReason) return;
+    this.svg.focus();
+    const {endpoint} = drawing.resolve(this.snapContext());
+    if (
+      'point' in endpoint &&
+      endpoint.point.layer !== this.view.id &&
+      !this.view.referenceable.has(endpoint.point.layer)
+    ) {
+      this.drawingInputs.report(
+        'This upstream point has no accessible named sketch',
+      );
+      return;
+    }
+    const error = drawing.place(
+      endpoint,
+      this.view.id,
+      this.nextId(),
+      this.commit,
+    );
+    this.draw();
+    if (error) this.drawingInputs.report(error);
   }
 
   private button(
     toolbar: HTMLElement,
     label: string,
+    icon: IconNode,
     action: () => void,
   ): void {
     const button = document.createElement('button');
     button.type = 'button';
-    button.textContent = label;
+    button.append(createIcon(icon), label);
     button.addEventListener('click', action);
     this.buttons.set(label, button);
     toolbar.append(button);
@@ -214,25 +372,12 @@ export class SketchEditor {
       )[0];
   }
 
-  private endpoint(position: SketchPosition): Endpoint | undefined {
-    const point = this.pick(position);
-    if (!point) return {position: rounded(position)};
-    if (
-      point.layer !== this.view!.id &&
-      !this.view!.referenceable.has(point.layer)
-    ) {
-      this.status.textContent =
-        'This upstream point has no accessible named sketch.';
-      return undefined;
-    }
-    return {point};
-  }
-
   private pointerDown(event: PointerEvent): void {
     if (!this.view || (event.button !== 0 && event.button !== 1)) return;
     event.preventDefault();
     this.svg.focus();
     const position = this.coordinates(event);
+    this.bypassSnap = event.altKey;
     if (event.button === 1 || this.space) {
       this.gesture = {
         kind: 'pan',
@@ -244,39 +389,9 @@ export class SketchEditor {
     }
     if (this.mode !== 'Select' && this.view.readOnlyReason) return;
     const point = this.pick(position);
-    if (this.mode === 'Point') {
-      if (!point)
-        this.commit({
-          kind: 'append',
-          entries: [['point', this.nextId(), rounded(position)]],
-        });
-    } else if (this.mode === 'Line') {
-      const endpoint = this.endpoint(position);
-      if (!endpoint) return;
-      if (!this.lineStart) {
-        this.lineStart = endpoint;
-        this.pointer = position;
-      } else {
-        if (
-          'point' in this.lineStart &&
-          'point' in endpoint &&
-          same(this.lineStart.point, endpoint.point)
-        )
-          return;
-        const entries: SketchDraftEntry[] = [];
-        let id = this.nextId();
-        const address = (end: Endpoint): SketchPointAddress => {
-          if ('point' in end) return end.point;
-          const pointId = id++;
-          entries.push(['point', pointId, end.position]);
-          return {layer: this.view!.id, id: pointId};
-        };
-        const start = address(this.lineStart),
-          end = address(endpoint);
-        entries.push(['line', id, [start, end]]);
-        this.lineStart = undefined;
-        this.commit({kind: 'append', entries});
-      }
+    if (this.drawing) {
+      this.drawing.pointer = position;
+      this.place();
     } else {
       this.selection = point;
       if (!point) {
@@ -314,6 +429,7 @@ export class SketchEditor {
   }
 
   private pointerMove(event: PointerEvent): void {
+    this.bypassSnap = event.altKey;
     if (this.gesture?.kind === 'pan') {
       this.center = [
         this.gesture.center[0] -
@@ -322,19 +438,28 @@ export class SketchEditor {
           (event.clientY - this.gesture.start[1]) / this.scale,
       ];
     } else {
-      this.pointer = this.coordinates(event);
-      if (this.gesture?.kind === 'move')
-        this.gesture.position = rounded([
-          this.gesture.point.position[0] +
-            this.pointer[0] -
-            this.gesture.start[0],
-          this.gesture.point.position[1] +
-            this.pointer[1] -
-            this.gesture.start[1],
-        ]);
+      const pointer = this.coordinates(event);
+      if (this.drawing) this.drawing.pointer = pointer;
+      const gesture = this.gesture;
+      if (gesture?.kind === 'move')
+        gesture.position = endpointPosition(
+          snapSketchPointer(
+            [
+              gesture.point.position[0] + pointer[0] - gesture.start[0],
+              gesture.point.position[1] + pointer[1] - gesture.start[1],
+            ],
+            {kind: 'cartesian'},
+            {
+              ...this.snapContext(),
+              points: this.points().filter(
+                point => !same(point, gesture.point),
+              ),
+            },
+          ).endpoint,
+        );
     }
     if (this.gesture) this.draw();
-    else if (this.lineStart) this.drawDraft();
+    else this.drawDraft();
   }
 
   private pointerUp(event: PointerEvent): void {
@@ -413,23 +538,27 @@ export class SketchEditor {
   private draw(): void {
     if (!this.view || this.root.hidden) return;
     this.svg.replaceChildren();
-    this.draft = undefined;
     const width = this.svg.clientWidth,
       height = this.svg.clientHeight;
-    const step = 10 ** Math.ceil(Math.log10(35 / this.scale));
+    const step = sketchGridStep(this.scale);
     const [originX, originY] = this.screen([0, 0]);
+    const spacing = step * this.scale;
     for (
-      let x = originX % (step * this.scale);
-      x < width;
-      x += step * this.scale
-    )
-      this.line([x, 0], [x, height], 'grid');
+      let i = Math.ceil(-originX / spacing);
+      originX + i * spacing < width;
+      i++
+    ) {
+      const x = originX + i * spacing;
+      this.line([x, 0], [x, height], i % 5 === 0 ? 'grid major' : 'grid');
+    }
     for (
-      let y = originY % (step * this.scale);
-      y < height;
-      y += step * this.scale
-    )
-      this.line([0, y], [width, y], 'grid');
+      let i = Math.ceil(-originY / spacing);
+      originY + i * spacing < height;
+      i++
+    ) {
+      const y = originY + i * spacing;
+      this.line([0, y], [width, y], i % 5 === 0 ? 'grid major' : 'grid');
+    }
     this.line([originX, 0], [originX, height], 'axis');
     this.line([0, originY], [width, originY], 'axis');
     const points = this.points();
@@ -460,14 +589,17 @@ export class SketchEditor {
       circle.append(title);
       this.svg.append(circle);
     }
+    this.svg.append(this.overlay);
     this.drawDraft();
     for (const [name, button] of this.buttons) {
-      if (name === 'Select' || name === 'Point' || name === 'Line')
+      if (name === 'Select' || name === 'Line')
         button.setAttribute('aria-pressed', String(name === this.mode));
+      if (name === 'Snap')
+        button.setAttribute('aria-pressed', String(this.snapping));
       button.disabled =
         name === 'Delete'
           ? !!this.view.readOnlyReason || this.selection?.layer !== this.view.id
-          : (name === 'Point' || name === 'Line') && !!this.view.readOnlyReason;
+          : name === 'Line' && !!this.view.readOnlyReason;
     }
     const selected = this.selection;
     this.status.textContent =
@@ -479,26 +611,67 @@ export class SketchEditor {
             !this.view.movable.has(selected.id)
           ? 'Expression-driven point · edit coordinates in code'
           : this.mode === 'Line'
-            ? this.lineStart
-              ? 'Choose the end point · Esc to cancel'
-              : 'Choose the start point'
-            : this.mode === 'Point'
-              ? 'Click to add a point'
-              : 'Drag points · Delete removes connected local lines · Wheel to zoom · Space-drag to pan');
+            ? this.drawing?.start
+              ? 'Next point · Enter length/angle or click · X/Y locks direction · Esc ends the chain'
+              : 'Start point · Enter X/Y or click'
+            : 'Drag points · Delete removes connected local lines · Wheel to zoom · Space-drag to pan');
   }
 
   private entityClass(layer: string, id: number): string {
     return `entity ${layer === this.view!.id ? 'local' : 'upstream'}${same(this.selection, {layer, id}) ? ' selected' : ''}`;
   }
   private drawDraft(): void {
-    if (!this.lineStart || !this.pointer) return;
-    const start =
-      'point' in this.lineStart
-        ? this.lineStart.point.position
-        : this.lineStart.position;
-    const end = this.pick(this.pointer)?.position ?? this.pointer;
-    this.draft?.remove();
-    this.draft = this.line(this.screen(start), this.screen(end), 'draft');
+    if (!this.drawing || !this.view || this.root.hidden) {
+      this.overlay.style.display = 'none';
+      this.draftLine.classList.remove('draft');
+      this.snapLabel.classList.remove('snap-label');
+      this.drawingInputs.hide();
+      return;
+    }
+    const {endpoint, hint} = this.drawing.resolve(this.snapContext());
+    const position = endpointPosition(endpoint);
+    const lock = this.drawing.axis
+      ? `${this.drawing.axis.toUpperCase()} locked`
+      : undefined;
+    this.drawingInputs.show(
+      this.drawing.start ? (lock ?? 'Next point') : 'Start point',
+      this.drawing.dimensions,
+      this.drawing.measurements(position),
+    );
+    this.overlay.style.display = position.every(Number.isFinite) ? '' : 'none';
+    this.draftLine.style.display = this.drawing.start ? '' : 'none';
+    this.draftLine.classList.toggle('draft', !!this.drawing.start);
+    const [x, y] = this.screen(position);
+    if (this.drawing.start) {
+      const [startX, startY] = this.screen(
+        endpointPosition(this.drawing.start),
+      );
+      this.draftLine.setAttribute('x1', String(startX));
+      this.draftLine.setAttribute('y1', String(startY));
+      this.draftLine.setAttribute('x2', String(x));
+      this.draftLine.setAttribute('y2', String(y));
+    }
+    this.draftMarker.setAttribute('cx', String(x));
+    this.draftMarker.setAttribute('cy', String(y));
+    this.draftMarker.setAttribute('r', hint ? '7' : '4');
+    this.draftMarker.setAttribute(
+      'class',
+      hint ? 'snap-marker' : 'draft-marker',
+    );
+    this.snapLabel.style.display = hint || lock ? '' : 'none';
+    this.snapLabel.classList.toggle('snap-label', !!hint || !!lock);
+    if (hint || lock) {
+      this.snapLabel.setAttribute('x', String(x + 12));
+      this.snapLabel.setAttribute('y', String(y - 12));
+      const snap =
+        'point' in endpoint
+          ? `Point ${endpoint.point.id}${endpoint.point.layer !== this.view.id ? ' · upstream' : ''}`
+          : hint;
+      const text = [lock, snap].filter(Boolean).join(' · ');
+      // Updating the existing text node preserves native input undo grouping;
+      // replacing a connected text node during input ends Chrome's typing group.
+      if (this.snapText.data !== text) this.snapText.data = text;
+    }
   }
   private tag(
     element: SVGElement,
@@ -530,18 +703,6 @@ function svgElement<K extends keyof SVGElementTagNameMap>(
   name: K,
 ): SVGElementTagNameMap[K] {
   return document.createElementNS('http://www.w3.org/2000/svg', name);
-}
-function same(
-  a: SketchPointAddress | undefined,
-  b: SketchPointAddress,
-): boolean {
-  return a?.layer === b.layer && a.id === b.id;
-}
-function distance(a: SketchPosition, b: SketchPosition): number {
-  return Math.hypot(a[0] - b[0], a[1] - b[1]);
-}
-function rounded(position: SketchPosition): SketchPosition {
-  return [Number(position[0].toFixed(3)), Number(position[1].toFixed(3))];
 }
 function segmentDistance(
   p: SketchPosition,

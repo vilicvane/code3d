@@ -41,6 +41,11 @@ button {
   color: inherit;
 }
 
+.ui-icon {
+  flex: none;
+  vertical-align: middle;
+}
+
 input[type='number'] {
   caret-color: var(--acid);
   appearance: textfield;
@@ -981,8 +986,12 @@ kbd {
 #viewport-host:has(.sketch-editor:not([hidden])) .viewport-canvas {
   visibility: hidden;
 }
+#viewport-host:has(.sketch-editor:not([hidden])) .source-edit-popover {
+  display: none;
+}
 .sketch-editor header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   padding: 10px;
@@ -994,12 +1003,20 @@ kbd {
   margin-right: auto;
 }
 .sketch-editor button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
   padding: 5px 8px;
   font-size: 11px;
   border: 1px solid var(--line);
   border-radius: 3px;
   background: var(--soft);
   cursor: pointer;
+}
+.sketch-editor button:focus-visible {
+  outline: 1px solid var(--acid);
+  outline-offset: 2px;
 }
 .sketch-editor button[aria-pressed='true'] {
   color: var(--acid);
@@ -1021,11 +1038,94 @@ kbd {
   touch-action: none;
   outline: none;
 }
+.sketch-stage {
+  position: relative;
+  min-height: 0;
+}
+.drawing-overlay {
+  pointer-events: none;
+}
+.snap-marker,
+.draft-marker {
+  stroke: var(--acid);
+  fill: none;
+  stroke-width: 1.5;
+}
+.snap-label {
+  fill: var(--acid);
+  font:
+    11px Inter,
+    sans-serif;
+  paint-order: stroke;
+  stroke: var(--panel);
+  stroke-width: 3px;
+}
+.drawing-inputs {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 24px);
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--panel);
+  box-shadow: 0 3px 16px #0005;
+  font-size: 11px;
+}
+.drawing-inputs[hidden] {
+  display: none;
+}
+.drawing-input-title {
+  color: var(--muted);
+}
+.drawing-input-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.drawing-input-fields label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.drawing-input-fields input {
+  width: 82px;
+  padding: 5px;
+  color: inherit;
+  background: var(--soft);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  outline: none;
+}
+.drawing-input-fields input:focus,
+.drawing-input-fields input[data-entered='true'] {
+  border-color: #66752c;
+}
+.drawing-input-fields input:focus {
+  outline: 1px solid var(--acid);
+}
+.drawing-input-fields input[aria-invalid='true'] {
+  border-color: #ed897b;
+}
+.drawing-input-error {
+  color: #ed897b;
+  flex-basis: 100%;
+}
+.drawing-input-error:empty {
+  display: none;
+}
 .sketch-canvas:focus-visible {
   box-shadow: inset 0 0 0 1px #66752c;
 }
 .sketch-canvas .grid {
   stroke: #ffffff07;
+}
+.sketch-canvas .grid.major {
+  stroke: #ffffff10;
 }
 .sketch-canvas .axis {
   stroke: #ffffff20;

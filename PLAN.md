@@ -24,9 +24,17 @@ implementation context and historical outcomes, not a competing work queue.
   distinguish ownership. IDs are independent per layer; new editor entries use
   local max + 1, without persistent `nextId` or renumbering surviving entries.
   Selecting a sketch opens a 2D point/line editor. Literal coordinates can be
-  dragged; expression-driven coordinates stay source-edited. The first editor
-  does not infer regions, generate B-Reps, solve constraints, or trim crossings.
-  See [#23](https://github.com/vilicvane/code3d/issues/23).
+  dragged; expression-driven coordinates stay source-edited. Continuous lines
+  create/reuse endpoints without a standalone point creation tool, with numeric
+  start X/Y or segment length/angle input, temporary X/Y direction locks,
+  dense adaptive snapping, cancellation
+  and one atomic source transaction per segment. Entered numbers define creation geometry,
+  not persistent constraints. The editor does not yet infer regions, generate
+  B-Reps, solve sketch constraints, or trim crossings.
+  The next scope is common sketch tools and in-canvas numeric input, with
+  Lucide for tool icons. See the requested [research and priority proposal](plans/sketch-editor.md)
+  and [#23](https://github.com/vilicvane/code3d/issues/23); new curve and constraint
+  tuple formats in that proposal are not yet confirmed.
 - Author code remains ordinary JavaScript/TypeScript and may freely construct,
   reuse, copy, collect, and derive model values.
 - A real code3d project is an ordinary Node/TypeScript package that owns its

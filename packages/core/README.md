@@ -46,8 +46,22 @@ independent positive-integer ID space shared by points and lines. Definitions
 may be empty, open, or contain crossing lines; crossings do not automatically
 split entities. Missing point references are errors.
 
-In Studio, select a sketch expression or variable to open its 2D editor. Add
-points or lines, drag literal-coordinate points, and delete local entities.
+In Studio, select a sketch expression or variable to open its 2D editor. Draw
+continuous lines, drag literal-coordinate points, and delete local entities.
+Endpoints are created or reused by Line; there is no standalone Point tool.
+Type X/Y for the start, then length/angle for each segment. Tab switches fields
+and Enter accepts the next endpoint. Each segment is one undo step and reuses
+its endpoint for the next segment. Escape ends the chain without removing
+completed segments; press it again to exit the tool. Blank fields follow the
+pointer. Snap uses points, the origin, a dense adaptive grid and horizontal/vertical
+directions; hold Alt to bypass it.
+After choosing the start point, press X for a horizontal axis lock or Y for
+vertical; press the same key again to unlock. This also works in numeric fields.
+The pointer chooses either direction along the locked axis; Length still applies.
+Entering Angle replaces the axis lock and locking an axis clears Angle.
+Snap/Alt do not override the lock; finishing or canceling a segment clears it.
+Entered numbers take priority and specify creation geometry, not persistent
+constraints. Numeric fields keep their own text undo; canvas undo edits source.
 Deleting a point also deletes connected local lines. Upstream geometry stays
 locked but can supply endpoints for new lines. Coordinates using expressions
 remain editable in code, not by dragging. The editor preserves existing IDs and
