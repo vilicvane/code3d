@@ -13,13 +13,13 @@ import subprocess
 import sys
 import tempfile
 import uuid
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
-
-VERSION = 1
+VERSION = 2
 STATE_RELATIVE_PATH = Path(".agents/worktree-state.json")
 ACTIVE_QUEUE_STATES = {"waiting", "claimed", "merging", "testing"}
 
@@ -29,8 +29,8 @@ class CoordinationError(RuntimeError):
 
 
 def now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace(
-        "+00:00", "Z"
+    return (
+        datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     )
 
 
@@ -43,31 +43,13 @@ def run_git(repo: Path, *args: str) -> str:
     result = subprocess.run(
         ["git", "-C", str(repo), *args],
         check=False,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         text=True,
     )
     if result.returncode != 0:
         message = result.stderr.strip() or result.stdout.strip()
         raise CoordinationError(f"git {' '.join(args)} failed: {message}")
     return result.stdout.strip()
-
-
-def commit_is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
-    result = subprocess.run(
-        ["git", "-C", str(repo), "merge-base", "--is-ancestor", ancestor, descendant],
-        check=False,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    if result.returncode == 0:
-        return True
-    if result.returncode == 1:
-        return False
-    raise CoordinationError(
-        f"git merge-base --is-ancestor failed: {result.stderr.strip()}"
-    )
 
 
 class Repository:
@@ -121,15 +103,18 @@ def empty_state() -> dict[str, Any]:
     }
 
 
-def read_state_file(path: Path) -> dict[str, Any]:
+def read_state_file(path: Path, version: int) -> dict[str, Any]:
     if not path.exists():
         return empty_state()
     try:
         state = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         raise CoordinationError(f"cannot read {path}: {error}") from error
-    if not isinstance(state, dict) or state.get("version") != VERSION:
-        raise CoordinationError(f"unsupported coordination state in {path}")
+    if not isinstance(state, dict) or state.get("version") != version:
+        raise CoordinationError(
+            f"unsupported coordination state in {path}; expected version {version}. "
+            "Use the current primary-worktree script; version 1 requires migrate."
+        )
     if not isinstance(state.get("agents"), dict) or not isinstance(
         state.get("queue"), list
     ):
@@ -156,11 +141,13 @@ def write_state_file(path: Path, state: dict[str, Any]) -> None:
 
 
 @contextmanager
-def locked_state(repo: Repository, *, write: bool) -> Iterator[dict[str, Any]]:
+def locked_state(
+    repo: Repository, *, write: bool, version: int = VERSION
+) -> Iterator[dict[str, Any]]:
     repo.lock_path.parent.mkdir(parents=True, exist_ok=True)
     with repo.lock_path.open("a+", encoding="utf-8") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX if write else fcntl.LOCK_SH)
-        state = read_state_file(repo.state_path)
+        state = read_state_file(repo.state_path, version)
         yield state
         if write:
             write_state_file(repo.state_path, state)
@@ -190,26 +177,70 @@ def herdr_context() -> dict[str, str]:
 
 def require_agent(state: dict[str, Any], identity: str) -> dict[str, Any]:
     try:
-        return state["agents"][identity]
+        agent = state["agents"][identity]
     except KeyError as error:
         raise CoordinationError(
             f"agent {identity!r} is not registered; run register first"
         ) from error
+    session = agent.get("session_id")
+    pane = agent.get("herdr", {}).get("pane_id")
+    if (session and session != os.environ.get("CODEX_THREAD_ID")) or (
+        not session and pane and pane != os.environ.get("HERDR_PANE_ID")
+    ):
+        raise CoordinationError(f"agent {identity!r} belongs to another session")
+    if agent.get("status") == "done":
+        raise CoordinationError(f"agent {identity!r} is finished; register a new task")
+    return agent
 
 
-def require_role_location(repo: Repository, role: str) -> None:
-    if role == "development" and repo.is_primary:
-        raise CoordinationError("development agents must use a linked worktree")
-    if role == "integration" and not repo.is_primary:
-        raise CoordinationError("integration agents must use the primary worktree")
+def require_primary(repo: Repository) -> None:
+    if not repo.is_primary:
+        raise CoordinationError("integration operations must use the primary worktree")
 
 
-def update_agent_location(agent: dict[str, Any], repo: Repository) -> None:
+def require_linked(repo: Repository) -> None:
+    if repo.is_primary:
+        raise CoordinationError(
+            "task registration and queueing must use a linked worktree"
+        )
+
+
+def require_task(
+    state: dict[str, Any], identity: str, repo: Repository
+) -> dict[str, Any]:
+    require_linked(repo)
+    agent = require_agent(state, identity)
+    if agent["worktree"] != str(repo.current_root):
+        raise CoordinationError(
+            f"agent {identity!r} must use its task worktree {agent['worktree']}"
+        )
+    return agent
+
+
+def require_clean_primary(repo: Repository) -> None:
+    primary = Repository(repo.primary_root)
+    if not primary.is_clean():
+        raise CoordinationError("primary worktree must be clean")
+    for operation in (
+        "MERGE_HEAD",
+        "CHERRY_PICK_HEAD",
+        "REVERT_HEAD",
+        "rebase-merge",
+        "rebase-apply",
+        "sequencer",
+    ):
+        if (repo.common_git_dir / operation).exists():
+            raise CoordinationError(
+                f"primary worktree has unfinished Git operation: {operation}"
+            )
+
+
+def update_agent_activity(agent: dict[str, Any]) -> None:
+    task_root = Path(agent["worktree"])
     agent.update(
         {
-            "worktree": str(repo.current_root),
-            "branch": repo.branch(),
-            "head": repo.head(),
+            "branch": run_git(task_root, "branch", "--show-current"),
+            "head": run_git(task_root, "rev-parse", "HEAD"),
             "active_at": now(),
         }
     )
@@ -236,7 +267,7 @@ def active_item_for_agent(
 
 def command_register(args: argparse.Namespace, repo: Repository) -> None:
     identity = agent_id(args)
-    require_role_location(repo, args.role)
+    require_linked(repo)
     branch = repo.branch()
     if not branch:
         raise CoordinationError("registered worktrees must be on a branch")
@@ -251,30 +282,26 @@ def command_register(args: argparse.Namespace, repo: Repository) -> None:
                     f"worktree is already assigned to agent {other_identity!r}"
                 )
         existing = state["agents"].get(identity, {})
-        if existing and existing.get("status") != "done" and (
-            existing.get("role") != args.role
-            or existing.get("worktree") != str(repo.current_root)
-        ):
-            raise CoordinationError(
-                f"agent {identity!r} is already active as {existing.get('role')} "
-                f"in {existing.get('worktree')}"
-            )
+        if existing.get("status") == "done":
+            existing = {}
+        if existing:
+            require_task(state, identity, repo)
         registered_at = existing.get("registered_at", now())
-        issue_urls = (
-            existing.get("issue_urls", []) if existing.get("status") != "done" else []
-        )
+        issue_urls = existing.get("issue_urls", [])
         if args.issue is not None:
             issue_urls = list(dict.fromkeys(args.issue))
         agent = {
             **existing,
             "id": identity,
             "task": args.task,
-            "role": args.role,
-            "status": "working" if args.role == "development" else "available",
+            "worktree": str(repo.current_root),
+            "status": existing.get("status", "working"),
             "registered_at": registered_at,
             "issue_urls": issue_urls,
         }
-        update_agent_location(agent, repo)
+        if session := os.environ.get("CODEX_THREAD_ID"):
+            agent["session_id"] = session
+        update_agent_activity(agent)
         if args.note:
             agent["note"] = args.note
         state["agents"][identity] = agent
@@ -287,14 +314,39 @@ def command_init(args: argparse.Namespace, repo: Repository) -> None:
     print(repo.state_path)
 
 
+def command_migrate(args: argparse.Namespace, repo: Repository) -> None:
+    """Explicit, one-time upgrade; old scripts must stop writing the new state."""
+    require_primary(repo)
+    with locked_state(repo, write=True, version=1) as state:
+        if state.get("integration") is not None:
+            raise CoordinationError(
+                "finish or safely block the active integration before migration"
+            )
+        require_clean_primary(repo)
+        for agent in state["agents"].values():
+            if agent.pop("role", None) == "integration":
+                agent["status"] = "done"
+                agent["note"] = (
+                    "retired fixed integration registration during version 2 migration"
+                )
+        state["version"] = VERSION
+    print(repo.state_path)
+
+
 def command_heartbeat(args: argparse.Namespace, repo: Repository) -> None:
     identity = agent_id(args)
     with locked_state(repo, write=True) as state:
-        agent = require_agent(state, identity)
-        require_role_location(repo, agent["role"])
-        update_agent_location(agent, repo)
+        agent = require_task(state, identity, repo)
+        update_agent_activity(agent)
+        integration = state.get("integration")
+        if integration and integration["agent"] == identity:
+            integration["active_at"] = now()
         if args.status:
-            agent["status"] = args.status
+            agent["status"] = (
+                "integrating"
+                if integration and integration["agent"] == identity
+                else args.status
+            )
         if args.note is not None:
             agent["note"] = args.note
     print(identity)
@@ -313,10 +365,7 @@ def port_is_free(port: int) -> bool:
 def command_reserve_port(args: argparse.Namespace, repo: Repository) -> None:
     identity = agent_id(args)
     with locked_state(repo, write=True) as state:
-        agent = require_agent(state, identity)
-        require_role_location(repo, "development")
-        if agent.get("role") != "development":
-            raise CoordinationError("only development agents reserve dev-server ports")
+        agent = require_task(state, identity, repo)
         reserved = {
             other["server"]["port"]
             for other in state["agents"].values()
@@ -340,15 +389,14 @@ def command_reserve_port(args: argparse.Namespace, repo: Repository) -> None:
             "port": port,
             "reserved_at": now(),
         }
-        update_agent_location(agent, repo)
+        update_agent_activity(agent)
     print(port)
 
 
 def command_server_started(args: argparse.Namespace, repo: Repository) -> None:
     identity = agent_id(args)
     with locked_state(repo, write=True) as state:
-        agent = require_agent(state, identity)
-        require_role_location(repo, "development")
+        agent = require_task(state, identity, repo)
         server = agent.get("server")
         if not isinstance(server, dict) or server.get("port") != args.port:
             raise CoordinationError(
@@ -366,31 +414,29 @@ def command_server_started(args: argparse.Namespace, repo: Repository) -> None:
             server["pane_id"] = args.pane_id
         if args.pid is not None:
             server["pid"] = args.pid
-        update_agent_location(agent, repo)
+        update_agent_activity(agent)
     print(args.port)
 
 
 def command_server_stopped(args: argparse.Namespace, repo: Repository) -> None:
     identity = agent_id(args)
     with locked_state(repo, write=True) as state:
-        agent = require_agent(state, identity)
+        agent = require_task(state, identity, repo)
         agent.pop("server", None)
-        update_agent_location(agent, repo)
+        update_agent_activity(agent)
     print(identity)
 
 
 def command_enqueue(args: argparse.Namespace, repo: Repository) -> None:
     identity = agent_id(args)
-    require_role_location(repo, "development")
+    require_linked(repo)
     branch = repo.branch()
     if not branch:
         raise CoordinationError("detached HEAD cannot enter the integration queue")
     if not repo.is_clean():
         raise CoordinationError("commit or remove all worktree changes before enqueue")
     with locked_state(repo, write=True) as state:
-        agent = require_agent(state, identity)
-        if agent.get("role") != "development":
-            raise CoordinationError("only development agents can enqueue work")
+        agent = require_task(state, identity, repo)
         existing = active_item_for_agent(state, identity)
         if existing:
             raise CoordinationError(
@@ -413,21 +459,14 @@ def command_enqueue(args: argparse.Namespace, repo: Repository) -> None:
         }
         state["queue"].append(item)
         agent["status"] = "queued"
-        update_agent_location(agent, repo)
+        update_agent_activity(agent)
     print(item["id"])
 
 
 def command_claim(args: argparse.Namespace, repo: Repository) -> None:
     identity = agent_id(args)
-    require_role_location(repo, "integration")
-    if not repo.is_clean():
-        raise CoordinationError(
-            "primary worktree must be clean before claiming the queue"
-        )
     with locked_state(repo, write=True) as state:
-        agent = require_agent(state, identity)
-        if agent.get("role") != "integration":
-            raise CoordinationError("only integration agents can claim the queue")
+        agent = require_task(state, identity, repo)
         if state.get("integration") is not None:
             owner = state["integration"]
             raise CoordinationError(
@@ -444,19 +483,26 @@ def command_claim(args: argparse.Namespace, repo: Repository) -> None:
         )
         if item is None:
             raise CoordinationError("integration queue is empty")
+        if item["agent"] != identity:
+            raise CoordinationError(
+                f"FIFO head {item['id']} belongs to {item['agent']}; "
+                "wait for that task to release the primary worktree"
+            )
+        if not repo.is_clean():
+            raise CoordinationError("task worktree must be clean before claiming")
         branch_head = run_git(
             repo.primary_root, "rev-parse", f"refs/heads/{item['branch']}"
         )
-        if branch_head != item["commit"]:
+        if repo.branch() != item["branch"] or branch_head != item["commit"]:
             raise CoordinationError(
                 f"branch {item['branch']!r} moved from queued commit "
                 f"{item['commit']} to {branch_head}; the developer must run retry"
             )
+        require_clean_primary(repo)
         timestamp = now()
         item.update(
             {
                 "state": "claimed",
-                "integrator": identity,
                 "claimed_at": timestamp,
                 "updated_at": timestamp,
             }
@@ -464,13 +510,15 @@ def command_claim(args: argparse.Namespace, repo: Repository) -> None:
         state["integration"] = {
             "queue_id": item["id"],
             "agent": identity,
+            "worktree": str(repo.primary_root),
+            "base_commit": run_git(repo.primary_root, "rev-parse", "HEAD"),
             "phase": "claimed",
             "claimed_at": timestamp,
             "active_at": timestamp,
         }
         agent["status"] = "integrating"
         agent["note"] = f"claimed {item['id']}: {item['task']}"
-        update_agent_location(agent, repo)
+        update_agent_activity(agent)
         rendered = json.dumps(item, indent=2, sort_keys=True)
     print(rendered)
 
@@ -478,6 +526,7 @@ def command_claim(args: argparse.Namespace, repo: Repository) -> None:
 def owned_integration(
     state: dict[str, Any], identity: str
 ) -> tuple[dict[str, Any], dict[str, Any]]:
+    require_agent(state, identity)
     integration = state.get("integration")
     if not isinstance(integration, dict) or integration.get("agent") != identity:
         raise CoordinationError(f"agent {identity!r} does not own integration")
@@ -486,31 +535,34 @@ def owned_integration(
 
 def command_phase(args: argparse.Namespace, repo: Repository) -> None:
     identity = agent_id(args)
-    require_role_location(repo, "integration")
+    require_primary(repo)
     with locked_state(repo, write=True) as state:
         integration, item = owned_integration(state, identity)
         timestamp = now()
         integration.update({"phase": args.phase, "active_at": timestamp})
         item.update({"state": args.phase, "updated_at": timestamp})
         agent = require_agent(state, identity)
-        update_agent_location(agent, repo)
+        update_agent_activity(agent)
         agent["note"] = args.note or f"{args.phase} {item['id']}"
     print(args.phase)
 
 
 def command_complete(args: argparse.Namespace, repo: Repository) -> None:
     identity = agent_id(args)
-    require_role_location(repo, "integration")
-    if not repo.is_clean():
-        raise CoordinationError(
-            "primary worktree must be clean before completing integration"
-        )
+    require_primary(repo)
     with locked_state(repo, write=True) as state:
-        _, item = owned_integration(state, identity)
+        integration, item = owned_integration(state, identity)
+        require_clean_primary(repo)
+        if integration["phase"] != "testing":
+            raise CoordinationError("complete requires final testing first")
         result_commit = repo.head()
-        if not commit_is_ancestor(repo.current_root, item["commit"], result_commit):
+        parents = run_git(
+            repo.current_root, "show", "-s", "--format=%P", result_commit
+        ).split()
+        if parents != [integration["base_commit"], item["commit"]]:
             raise CoordinationError(
-                f"queued commit {item['commit']} is not integrated into {result_commit}"
+                "complete requires a --no-ff merge commit of the claimed base "
+                f"and queued commit {item['commit']}"
             )
         timestamp = now()
         item.update(
@@ -521,28 +573,24 @@ def command_complete(args: argparse.Namespace, repo: Repository) -> None:
                 "result_commit": result_commit,
             }
         )
-        developer = state["agents"].get(item["agent"])
-        if developer:
-            developer["status"] = "integrated"
-            developer["active_at"] = timestamp
-        integrator = require_agent(state, identity)
-        integrator["status"] = "available"
-        integrator["note"] = f"completed {item['id']}"
-        update_agent_location(integrator, repo)
+        agent = require_agent(state, identity)
+        agent["status"] = "integrated"
+        agent["note"] = f"completed {item['id']}"
+        update_agent_activity(agent)
         state["integration"] = None
     print(item["id"])
 
 
 def command_block(args: argparse.Namespace, repo: Repository) -> None:
     identity = agent_id(args)
-    require_role_location(repo, "integration")
-    if not repo.is_clean():
-        raise CoordinationError(
-            "restore the primary worktree to a clean state before releasing a "
-            "blocked item"
-        )
+    require_primary(repo)
     with locked_state(repo, write=True) as state:
-        _, item = owned_integration(state, identity)
+        integration, item = owned_integration(state, identity)
+        require_clean_primary(repo)
+        if repo.head() != integration["base_commit"]:
+            raise CoordinationError(
+                "restore the claimed base before blocking integration"
+            )
         timestamp = now()
         item.update(
             {
@@ -551,28 +599,23 @@ def command_block(args: argparse.Namespace, repo: Repository) -> None:
                 "updated_at": timestamp,
             }
         )
-        developer = state["agents"].get(item["agent"])
-        if developer:
-            developer["status"] = "blocked"
-            developer["note"] = args.reason
-            developer["active_at"] = timestamp
-        integrator = require_agent(state, identity)
-        integrator["status"] = "available"
-        integrator["note"] = f"blocked {item['id']}: {args.reason}"
-        update_agent_location(integrator, repo)
+        agent = require_agent(state, identity)
+        agent["status"] = "blocked"
+        agent["note"] = f"blocked {item['id']}: {args.reason}"
+        update_agent_activity(agent)
         state["integration"] = None
     print(item["id"])
 
 
 def command_retry(args: argparse.Namespace, repo: Repository) -> None:
     identity = agent_id(args)
-    require_role_location(repo, "development")
+    require_linked(repo)
     if not repo.branch():
         raise CoordinationError("detached HEAD cannot enter the integration queue")
     if not repo.is_clean():
         raise CoordinationError("commit or remove all worktree changes before retry")
     with locked_state(repo, write=True) as state:
-        agent = require_agent(state, identity)
+        agent = require_task(state, identity, repo)
         candidates = [
             item
             for item in state["queue"]
@@ -605,15 +648,14 @@ def command_retry(args: argparse.Namespace, repo: Repository) -> None:
         previous["retried_as"] = item["id"]
         previous["updated_at"] = timestamp
         agent["status"] = "queued"
-        update_agent_location(agent, repo)
+        update_agent_activity(agent)
     print(item["id"])
 
 
 def command_finish(args: argparse.Namespace, repo: Repository) -> None:
     identity = agent_id(args)
     with locked_state(repo, write=True) as state:
-        agent = require_agent(state, identity)
-        require_role_location(repo, agent["role"])
+        agent = require_task(state, identity, repo)
         active = active_item_for_agent(state, identity)
         if active:
             raise CoordinationError(
@@ -625,9 +667,10 @@ def command_finish(args: argparse.Namespace, repo: Repository) -> None:
             raise CoordinationError(
                 f"cannot finish while owning integration item {integration['queue_id']}"
             )
-        update_agent_location(agent, repo)
+        if agent.get("server"):
+            raise CoordinationError("stop and clear the task server before finishing")
+        update_agent_activity(agent)
         agent["status"] = "done"
-        agent.pop("server", None)
         if args.note:
             agent["note"] = args.note
     print(identity)
@@ -664,11 +707,9 @@ def command_status(args: argparse.Namespace, repo: Repository) -> None:
             if value
         )
         server = agent.get("server")
-        server_text = (
-            f", server {server['state']}:{server['port']}" if server else ""
-        )
+        server_text = f", server {server['state']}:{server['port']}" if server else ""
         print(
-            f"  {identity}: {agent['role']}/{agent['status']}, "
+            f"  {identity}: {agent['status']}, "
             f"{agent['branch']} @ {agent['head'][:12]}, active {agent['active_at']}"
             f"{server_text}"
         )
@@ -723,6 +764,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     initialize.set_defaults(handler=command_init)
 
+    migrate = subparsers.add_parser(
+        "migrate", help="upgrade version 1 state after the primary worktree is idle"
+    )
+    migrate.set_defaults(handler=command_migrate)
+
     register = subparsers.add_parser("register", help="register an agent")
     register.add_argument("--agent")
     register.add_argument("--task", required=True)
@@ -731,9 +777,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         type=github_issue_url,
         help="GitHub issue URL; repeat for related issues (omission preserves active links)",
-    )
-    register.add_argument(
-        "--role", choices=("development", "integration"), required=True
     )
     register.add_argument("--note")
     register.set_defaults(handler=command_register)
@@ -776,7 +819,9 @@ def build_parser() -> argparse.ArgumentParser:
     enqueue.add_argument("--summary", required=True)
     enqueue.set_defaults(handler=command_enqueue)
 
-    claim = subparsers.add_parser("claim", help="claim the oldest waiting item")
+    claim = subparsers.add_parser(
+        "claim", help="claim your own FIFO head from the task worktree"
+    )
     claim.add_argument("--agent")
     claim.set_defaults(handler=command_claim)
 
