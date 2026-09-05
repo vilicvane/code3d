@@ -63,8 +63,10 @@ export class ModelRenderer {
     target: THREE.Object3D,
     allowZoomIn: boolean,
     cameraTarget = this.cameraTarget,
+    additional?: Readonly<{bounds: THREE.Box3; paddingPixels: number}>,
   ): void {
     const box = new THREE.Box3().setFromObject(target);
+    if (additional) box.union(additional.bounds);
     if (box.isEmpty()) return;
 
     const sphere = box.getBoundingSphere(new THREE.Sphere());
@@ -72,7 +74,18 @@ export class ModelRenderer {
       .clone()
       .sub(cameraTarget)
       .normalize();
-    const fittedDistance = Math.max(sphere.radius * 2.8, 24);
+    const availableFraction = additional
+      ? Math.max(
+          0.25,
+          1 -
+            (2 * additional.paddingPixels) /
+              Math.min(this.container.clientWidth, this.container.clientHeight),
+        )
+      : 1;
+    const fittedDistance = Math.max(
+      (sphere.radius * 2.8) / availableFraction,
+      24,
+    );
     const currentDistance = this.camera.position.distanceTo(cameraTarget);
     const distance = allowZoomIn
       ? fittedDistance

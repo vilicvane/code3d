@@ -1,80 +1,21 @@
 import ts from '@typescript/typescript6';
 import type {Vec3} from '@code3d/core/tooling';
 
-/** Adjust only the outer offset, preserving author expressions and trivia. */
-export function offsetRelationSource(source: string, delta: Vec3): string {
+/** Adjust only the outer offset call, preserving author expressions and trivia. */
+export function offsetCallSource(
+  source: string,
+  method: 'offset' | 'originOffset',
+  delta: Vec3,
+): string {
   if (delta.every(value => value === 0)) return source;
-  const prefix = 'const relation = ';
-  const parsed = ts.createSourceFile(
-    'relation.ts',
-    `${prefix}${source};`,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TS,
-  );
-  const statement = parsed.statements[0] as ts.VariableStatement;
-  const expression = statement.declarationList.declarations[0].initializer!;
+  const {expression, prefixLength} = parseExpression(source);
   const receiver = unparenthesize(expression);
-  const text = (node: ts.Node) => node.getText(parsed);
-  const replace = (
-    node: ts.Node,
-    replacement: string,
-    within: string,
-    start: number,
-  ) =>
-    within.slice(0, node.getStart(parsed) - start) +
-    replacement +
-    within.slice(node.end - start);
-
-  const adjust = (node: ts.Expression, increment: number): string => {
-    if (increment === 0) return text(node);
-    if (ts.isParenthesizedExpression(node)) {
-      return replace(
-        node.expression,
-        adjust(node.expression, increment),
-        text(node),
-        node.getStart(parsed),
-      );
-    }
-    const number = sourceNumber(node);
-    if (number !== undefined) return formatSourceNumber(number + increment);
-    if (
-      ts.isBinaryExpression(node) &&
-      (node.operatorToken.kind === ts.SyntaxKind.PlusToken ||
-        node.operatorToken.kind === ts.SyntaxKind.MinusToken)
-    ) {
-      const right = sourceNumber(node.right);
-      if (right !== undefined) {
-        const total =
-          (node.operatorToken.kind === ts.SyntaxKind.PlusToken
-            ? right
-            : -right) + increment;
-        const before = parsed.text.slice(
-          node.getStart(parsed),
-          node.operatorToken.getStart(parsed),
-        );
-        const between = parsed.text.slice(
-          node.operatorToken.end,
-          node.right.getStart(parsed),
-        );
-        const retained = before + between;
-        return total === 0
-          ? /[\r\n]/.test(retained)
-            ? retained
-            : retained.trimEnd()
-          : `${before}${total < 0 ? '-' : '+'}${between}${formatSourceNumber(Math.abs(total))}`;
-      }
-    }
-    const operand = isAdditiveOperand(node) ? text(node) : `(${text(node)})`;
-    return `${operand} ${increment < 0 ? '-' : '+'} ${formatSourceNumber(Math.abs(increment))}`;
-  };
-
   // A spread has no stable per-axis argument span. Append one editable offset;
   // later gestures will edit that outer call, never append another one.
   if (
     ts.isCallExpression(receiver) &&
     ts.isPropertyAccessExpression(receiver.expression) &&
-    receiver.expression.name.text === 'offset' &&
+    receiver.expression.name.text === method &&
     receiver.arguments.length === 3 &&
     receiver.arguments.every(argument => !ts.isSpreadElement(argument))
   ) {
@@ -82,18 +23,103 @@ export function offsetRelationSource(source: string, delta: Vec3): string {
     for (let index = 2; index >= 0; index--) {
       if (delta[index] !== 0) {
         const argument = receiver.arguments[index];
-        result = replace(
+        result = replaceNode(
           argument,
-          adjust(argument, delta[index]),
+          adjustExpression(argument, delta[index]),
           result,
-          prefix.length,
+          prefixLength,
         );
       }
     }
     return result;
   }
   const target = isMemberReceiver(expression) ? source : `(${source})`;
-  return `${target}.offset(${delta.map(formatSourceNumber).join(', ')})`;
+  return `${target}.${method}(${delta.map(formatSourceNumber).join(', ')})`;
+}
+
+/** Change a scalar expression without dropping comments or repeating evaluation. */
+export function offsetExpression(source: string, delta: number): string {
+  if (delta === 0) return source;
+  const {expression, prefixLength} = parseExpression(source);
+  return replaceNode(
+    expression,
+    adjustExpression(expression, delta),
+    source,
+    prefixLength,
+  );
+}
+
+function parseExpression(source: string) {
+  const prefix = 'const value = ';
+  const parsed = ts.createSourceFile(
+    'expression.ts',
+    `${prefix}${source};`,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const statement = parsed.statements[0] as ts.VariableStatement;
+  return {
+    expression: statement.declarationList.declarations[0].initializer!,
+    prefixLength: prefix.length,
+  };
+}
+
+function replaceNode(
+  node: ts.Node,
+  replacement: string,
+  source: string,
+  start: number,
+): string {
+  return (
+    source.slice(0, node.getStart() - start) +
+    replacement +
+    source.slice(node.end - start)
+  );
+}
+
+function adjustExpression(node: ts.Expression, increment: number): string {
+  const text = node.getText();
+  if (increment === 0) return text;
+  if (ts.isParenthesizedExpression(node)) {
+    return replaceNode(
+      node.expression,
+      adjustExpression(node.expression, increment),
+      text,
+      node.getStart(),
+    );
+  }
+  const number = sourceNumber(node);
+  if (number !== undefined) return formatSourceNumber(number + increment);
+  if (
+    ts.isBinaryExpression(node) &&
+    (node.operatorToken.kind === ts.SyntaxKind.PlusToken ||
+      node.operatorToken.kind === ts.SyntaxKind.MinusToken)
+  ) {
+    const right = sourceNumber(node.right);
+    if (right !== undefined) {
+      const total =
+        (node.operatorToken.kind === ts.SyntaxKind.PlusToken ? right : -right) +
+        increment;
+      const parsed = node.getSourceFile();
+      const before = parsed.text.slice(
+        node.getStart(),
+        node.operatorToken.getStart(),
+      );
+      const between = parsed.text.slice(
+        node.operatorToken.end,
+        node.right.getStart(),
+      );
+      const retained = before + between;
+      return total === 0
+        ? /[\r\n]/.test(retained)
+          ? retained
+          : retained.trimEnd()
+        : `${before}${total < 0 ? '-' : '+'}${between}${formatSourceNumber(Math.abs(total))}`;
+    }
+  }
+  const operand = isAdditiveOperand(node) ? text : `(${text})`;
+  return `${operand} ${increment < 0 ? '-' : '+'} ${formatSourceNumber(Math.abs(increment))}`;
 }
 
 function unparenthesize(node: ts.Expression): ts.Expression {

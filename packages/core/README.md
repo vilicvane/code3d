@@ -67,6 +67,50 @@ assembled children as one rigid body. `expose()` rebinds member anchors into
 that local space. The backend is [`@code3d/solver`](../solver/README.md);
 an unsatisfied local solve is reported without claiming proof of infeasibility.
 
+## Origins and rotation
+
+Geometric models (solids, faces, curves, and points) support immutable origin
+editing and rotation:
+
+```ts
+const part = box(24, 6, 14)
+  .originVertex(3)
+  .originOffset(0, 2, 0)
+  .rotate(15, 35, 0);
+```
+
+- `origin(x, y, z)` sets the origin to local geometry coordinates.
+- `originVertex(id)` sets it to the selected vertex of the input model.
+- `originCenter()` sets it to the model's `center` anchor.
+- `originOffset(dx, dy, dz)` adds a local-coordinate offset to the current origin.
+- `rotate(x, y, z)` rotates geometry about that origin in degrees, applying
+  fixed local X, then Y, then Z rotations. Repeated calls compose in source order.
+
+All three setters replace previous origin settings and accumulated offsets. Setting
+an origin leaves geometry in place, preserves the anchor's orientation, and
+changes the model's own relation anchor. Existing named anchors remain where
+they were. The default origin is the model's intrinsic anchor: zero for solids
+and profiles, the point itself for points, and the start for curves.
+Rotation carries named anchors along with the shape and preserves topology IDs.
+`center` starts at the body's local bounding-box center and follows its
+translation, rotation, and scaling. It is not recomputed from the rotated
+shape's axis-aligned bounds. All geometric models expose this point anchor;
+changing the origin leaves it in place. `model.originCenter().originOffset(1, 0, 0)`
+sets the origin one local X unit beyond that center.
+Changing the origin afterward does not undo geometry already rotated. Existing
+relations retain the source anchor captured when they were authored; relations
+created afterward use the updated anchors. `scaled()` retains its existing
+geometric scaling about coordinate zero, including the origin position.
+Groups expose composition capabilities rather than these geometric operations.
+
+In Studio, origin coordinates and offsets have translation arrows; `originVertex`
+uses vertex picking and an origin marker. Dragging an `originCenter()` or
+`originVertex()` marker adds or edits an `originOffset()` call. Rotation rings edit the corresponding
+angle about its effective axis, including when other angles are nonzero. Dragging
+previews the change; release writes source and Escape cancels. The
+[origin and rotation example](../app/examples/origin-and-rotation.ts) demonstrates
+these scopes.
+
 ## Tubes
 
 `tube(outerRadius, innerRadius, y)` creates a concentric, constant-section
@@ -142,9 +186,9 @@ is not expanded to recognize primitive factory definitions.
 ## Tooling evaluation lifetime
 
 Studio uses the selected runtime's `@code3d/core/tooling` entry, from the project
-when core is declared or from the built-in package otherwise. Protocol 3
-requires installing both OpenCascade and the constraint solver from that same
-package dependency graph. Call `beginModelEvaluation(): void` before each serial source
+when core is declared or from the built-in package otherwise. Protocol 4
+includes origin and spatial-operation snapshots and requires installing both
+OpenCascade and the constraint solver from that same package dependency graph. Call `beginModelEvaluation(): void` before each serial source
 evaluation to reset source locations, parameter provenance, and operation
 traces. Geometry, model identity, relations, and kernel caches are unaffected.
 Already-created snapshots keep their previous evaluation's metadata.

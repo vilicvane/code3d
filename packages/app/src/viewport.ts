@@ -18,6 +18,7 @@ import type {
   TopologyKind,
   Vec3,
 } from '@code3d/core/tooling';
+import {composeTransforms} from '@code3d/core/tooling';
 import {
   ModelRenderer,
   applyNodeTransform,
@@ -29,16 +30,18 @@ import {
   type ModelPlacement,
 } from './rendering/model-renderer';
 import {
-  PositionGizmo,
-  type PositionAxis,
-  type PositionGizmoBinding,
-  type PositionGizmoEvent,
-} from './tools/position-gizmo';
+  TransformGizmo,
+  type TransformAxis,
+  type TransformGizmoBinding,
+  type TransformGizmoEvent,
+} from './tools/transform-gizmo';
 import type {
   SourceDecorationProvider,
   ViewportDecoration,
 } from './viewport-decoration';
 import {editableParameterUsages} from './model/parameter-provenance';
+import {spatialBindings} from './tools/model-spatial-tool';
+import type {SpatialObjectPreview} from './tools/spatial-edit';
 import {ViewportCoordinateReference} from './ui/viewport-coordinate-reference';
 import {pickScreenTopology} from './rendering/topology-picking';
 import {
@@ -99,7 +102,7 @@ export type ModelViewportOptions = Readonly<{
   onSelect: (occurrence: Occurrence) => void;
   onDrillDown: (node: ModelSnapshotObject) => void;
   onNavigateSource: (sourceRef: SourceRef) => void;
-  onPositionTool: (event: PositionGizmoEvent) => void;
+  onPositionTool: (event: TransformGizmoEvent) => void;
   onTopologySelection: (event: TopologySelectionEvent) => void;
   sourceDecorationProviders?: readonly SourceDecorationProvider[];
   showCoordinateReference?: boolean;
@@ -327,7 +330,13 @@ export class ModelViewport {
     Vec3
   >();
   private readonly decorationLayers = new Map<string, DecorationInstance[]>();
-  private readonly positionGizmo: PositionGizmo;
+  private readonly transformGizmo: TransformGizmo;
+  private readonly spatialPreviews = new Map<string, SpatialObjectPreview>();
+  private readonly committedSpatialPreviews = new Map<
+    string,
+    SpatialObjectPreview
+  >();
+  private readonly spatialParameterValues = new Map<string, number>();
   private readonly onSelect: ModelViewportOptions['onSelect'];
   private readonly onDrillDown: ModelViewportOptions['onDrillDown'];
   private readonly onNavigateSource: ModelViewportOptions['onNavigateSource'];
@@ -383,7 +392,7 @@ export class ModelViewport {
         this.camera,
       );
     }
-    this.positionGizmo = new PositionGizmo(
+    this.transformGizmo = new TransformGizmo(
       this.scene,
       this.camera,
       this.renderer.domElement,
@@ -691,7 +700,7 @@ export class ModelViewport {
       selectedIds: new Set(initialIds),
     };
     this.rebuildSelectionHighlight();
-    this.updatePositionGizmo();
+    this.updateTransformGizmo();
     this.rebuildTopologySelectionOverlay();
     this.refreshTopologyHover();
     return availableIds;
@@ -700,7 +709,7 @@ export class ModelViewport {
   endTopologySelection(): void {
     this.clearTopologySelection();
     this.rebuildSelectionHighlight();
-    this.updatePositionGizmo();
+    this.updateTransformGizmo();
   }
 
   setSelectedTopologyIds(ids: readonly number[]): void {
@@ -740,7 +749,7 @@ export class ModelViewport {
   commitParameterPreview(targetId: string, value: number): void {
     this.committedParameterPreviews.set(targetId, value);
     this.parameterPreviews.set(targetId, value);
-    this.positionGizmo.commitParameterValue(targetId, value);
+    this.transformGizmo.commitParameterValue(targetId, value);
   }
 
   setOccurrenceTranslationPreview(
@@ -783,6 +792,44 @@ export class ModelViewport {
         this.committedOccurrenceTranslationPreviews.set(key, translation);
       }
     });
+  }
+
+  setSpatialPreview(objects: readonly SpatialObjectPreview[]): void {
+    for (const preview of objects) {
+      const previous = this.committedSpatialPreviews.get(preview.key);
+      this.spatialPreviews.set(preview.key, {
+        ...preview,
+        transform: previous
+          ? composeTransforms(preview.transform, previous.transform)
+          : preview.transform,
+      });
+    }
+    this.highlightedOccurrenceKeys = new Set(objects.map(object => object.key));
+    this.rebuildImpactHighlights();
+    this.applyPreviewTransforms();
+  }
+
+  clearSpatialPreview(objects: readonly SpatialObjectPreview[]): void {
+    for (const {key} of objects) {
+      const committed = this.committedSpatialPreviews.get(key);
+      if (committed) this.spatialPreviews.set(key, committed);
+      else this.spatialPreviews.delete(key);
+    }
+    this.highlightedOccurrenceKeys.clear();
+    this.rebuildImpactHighlights();
+    this.applyPreviewTransforms();
+  }
+
+  commitSpatialPreview(
+    objects: readonly SpatialObjectPreview[],
+    parameter?: Readonly<{id: string; value: number}>,
+  ): void {
+    this.setSpatialPreview(objects);
+    for (const {key} of objects)
+      this.committedSpatialPreviews.set(key, this.spatialPreviews.get(key)!);
+    if (parameter)
+      this.spatialParameterValues.set(parameter.id, parameter.value);
+    this.updateTransformGizmo();
   }
 
   setDecorations(
@@ -878,7 +925,7 @@ export class ModelViewport {
   }
 
   cancelPositionTool(): boolean {
-    return this.positionGizmo.cancel();
+    return this.transformGizmo.cancel();
   }
 
   fit(target: THREE.Object3D = this.root): void {
@@ -898,7 +945,12 @@ export class ModelViewport {
   }
 
   private frame(target: THREE.Object3D, allowZoomIn: boolean): void {
-    this.rendering.frame(target, allowZoomIn, this.controls.target);
+    this.rendering.frame(
+      target,
+      allowZoomIn,
+      this.controls.target,
+      this.transformGizmo.framing(),
+    );
     this.controls.update();
   }
 
@@ -1015,7 +1067,10 @@ export class ModelViewport {
         evaluation.topologyReferences?.filter(
           reference => reference.nodeId === node.nodeId,
         ) ?? [];
-      if (references.length > 0 || target.kind === 'topology-selection') {
+      if (
+        references.length > 0 ||
+        (target.kind === 'topology-selection' && !evaluation.operationId)
+      ) {
         dimObject(object);
       } else if (operationRole === 'tool') {
         makeToolObjectTranslucent(object);
@@ -1200,7 +1255,7 @@ export class ModelViewport {
       this.clearTopologySelection();
       this.onTopologySelection({kind: 'cancel'});
     }
-    this.positionGizmo.detach();
+    this.transformGizmo.detach();
     this.coordinateReference?.setTarget(undefined);
     this.clearImpactHighlights();
     this.clearAllDecorations();
@@ -1212,6 +1267,9 @@ export class ModelViewport {
     this.committedParameterPreviews.clear();
     this.occurrenceTranslationPreviews.clear();
     this.committedOccurrenceTranslationPreviews.clear();
+    this.spatialPreviews.clear();
+    this.committedSpatialPreviews.clear();
+    this.spatialParameterValues.clear();
     this.highlightedTargetId = undefined;
     this.highlightedOccurrenceKeys.clear();
     this.selectionClick = undefined;
@@ -1228,7 +1286,7 @@ export class ModelViewport {
     this.coordinateReference?.setTarget(occurrence.object);
     this.rebuildSelectionHighlight();
     this.rebuildImpactHighlights();
-    this.updatePositionGizmo();
+    this.updateTransformGizmo();
     if (notify) {
       this.onSelect(occurrence);
     }
@@ -1266,23 +1324,37 @@ export class ModelViewport {
     this.scene.add(this.selectionHighlight);
   }
 
-  private updatePositionGizmo(): void {
+  private updateTransformGizmo(): void {
     const occurrence = this.getSelected();
+    const scope = this.renderedSourceScope();
+    if (occurrence && scope && this.module) {
+      const bindings = spatialBindings(
+        this.module,
+        scope,
+        occurrence,
+        this.renderedOccurrences(),
+        this.committedSpatialPreviews,
+        this.spatialParameterValues,
+      );
+      if (bindings.length > 0) {
+        this.transformGizmo.attach(occurrence.object, bindings);
+        return;
+      }
+    }
     if (
       this.topologySelection ||
       !occurrence ||
       occurrence.depth === 0 ||
       !this.hasRelativePositionContext()
     ) {
-      this.positionGizmo.detach();
+      this.transformGizmo.detach();
       return;
     }
-    const scope = this.renderedSourceScope();
     const constraintId =
       scope?.target.kind === 'constraint'
         ? scope.evaluation.constraintId!
         : null;
-    this.positionGizmo.attach(
+    this.transformGizmo.attach(
       occurrence.object,
       positionBindings(occurrence, this.renderedOccurrences(), constraintId),
     );
@@ -1316,12 +1388,28 @@ export class ModelViewport {
       occurrence.object.position.x += offset[0];
       occurrence.object.position.y += offset[1];
       occurrence.object.position.z += offset[2];
+      const spatial = this.spatialPreviews.get(occurrence.key);
+      if (spatial) {
+        const matrix = new THREE.Matrix4().compose(
+          new THREE.Vector3(...spatial.transform.position),
+          new THREE.Quaternion(...spatial.transform.quaternion),
+          new THREE.Vector3(1, 1, 1),
+        );
+        occurrence.object.updateMatrix();
+        occurrence.object.matrix
+          .multiply(matrix)
+          .decompose(
+            occurrence.object.position,
+            occurrence.object.quaternion,
+            occurrence.object.scale,
+          );
+      }
     }
     this.root.updateMatrixWorld(true);
     this.updateDecorationTransforms();
     this.selectionHighlight?.update();
     this.impactHighlights.forEach(highlight => highlight.update());
-    this.positionGizmo.updateAnchor();
+    this.transformGizmo.updateAnchor();
   }
 
   private renderedOccurrences(): Occurrence[] {
@@ -1383,7 +1471,7 @@ export class ModelViewport {
       startX: event.clientX,
       startY: event.clientY,
       moved: false,
-      blocked: this.positionGizmo.isPointerActive(),
+      blocked: this.transformGizmo.isPointerActive(),
     };
   }
 
@@ -1770,7 +1858,7 @@ export function positionBindings(
   occurrence: Occurrence,
   occurrences: readonly Occurrence[],
   constraintId: string | null,
-): PositionGizmoBinding[] {
+): TransformGizmoBinding[] {
   const constraint =
     constraintId === null
       ? occurrence.node.constraints.at(-1)
@@ -1795,7 +1883,7 @@ export function positionBindings(
     string,
     {
       target: ParameterUsage['target'];
-      sensitivities: Map<PositionAxis, number>;
+      sensitivities: Map<TransformAxis, number>;
     }
   >();
   for (const parameter of parameters) {
@@ -1808,7 +1896,7 @@ export function positionBindings(
     }
     const aggregate = byTarget.get(parameter.target.id) ?? {
       target: parameter.target,
-      sensitivities: new Map<PositionAxis, number>(),
+      sensitivities: new Map<TransformAxis, number>(),
     };
     aggregate.sensitivities.set(
       axis,
@@ -1817,7 +1905,7 @@ export function positionBindings(
     byTarget.set(parameter.target.id, aggregate);
   }
 
-  const candidates = new Map<PositionAxis, PositionGizmoBinding[]>();
+  const candidates = new Map<TransformAxis, TransformGizmoBinding[]>();
   for (const {target, sensitivities} of byTarget.values()) {
     const effective = [...sensitivities].filter(
       ([, sensitivity]) => Math.abs(sensitivity) > 1e-9,
@@ -1826,8 +1914,10 @@ export function positionBindings(
       continue;
     }
     const [axis, sensitivity] = effective[0];
-    const binding: PositionGizmoBinding = {
+    const binding: TransformGizmoBinding = {
       kind: 'parameter',
+      mode: 'translate',
+      anchor: 'bounds',
       axis,
       target,
       label: target.label,
@@ -1861,6 +1951,8 @@ export function positionBindings(
     return [
       {
         kind: 'expression',
+        mode: 'translate',
+        anchor: 'bounds',
         axis,
         label: `Δ${axis.toUpperCase()}`,
         value: 0,
@@ -1981,7 +2073,7 @@ function positionOnlyTargets(
   return safe;
 }
 
-function positionAxis(argument: string): PositionAxis | undefined {
+function positionAxis(argument: string): TransformAxis | undefined {
   if (argument === 'x') return 'x';
   if (argument === 'y') return 'y';
   if (argument === 'z') return 'z';

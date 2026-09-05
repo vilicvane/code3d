@@ -38,6 +38,7 @@ export type {
   ModelObject,
   ModelObjectRuntimeInfo,
   ModelSnapshotObject,
+  ModelSpatialOperation,
   ModelTopologyReference,
   ParameterKind,
   ParameterTarget,
@@ -53,6 +54,8 @@ export {
   quaternionAxisAngle,
   relativeTransform,
   rotateVector,
+  rotationAround,
+  xyzRotation,
   transformsAreEquivalent,
 } from '../library/spatial.js';
 export type {Quaternion, RigidTransform, Vec3} from '../library/spatial.js';
@@ -66,7 +69,7 @@ export {describeOpenCascadeException} from '../library/open-cascade-error.js';
 
 export {installConstraintSolver} from '../library/constraint-solver.js';
 
-export const toolingProtocolVersion = 3;
+export const toolingProtocolVersion = 4;
 
 export function installOpenCascade(openCascade: OpenCascadeInstance): void {
   clearKernelOperationCache();

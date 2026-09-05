@@ -355,6 +355,62 @@ test('retains shared-parameter peers in a group input context', async () => {
   );
 });
 
+for (const call of [
+  'origin(9, 8, 7)',
+  'originOffset(0, 2, 0)',
+  'originVertex(3)',
+  'originCenter()',
+  'rotate(0, 0, 90)',
+]) {
+  test(`retains the model before ${call} at its receiver source range`, async () => {
+    const source = [
+      'import {box} from "@code3d/core";',
+      'const pivoted = box(8, 6, 4).origin(1, 2, 3);',
+      `const direct = pivoted.${call};`,
+      `const chained = pivoted.originOffset(0, 5, 0).${call};`,
+    ].join('\n');
+    const module = await compileProject(
+      {files: [{path: '/model.ts', source}]},
+      '/model.ts',
+    );
+    assert.equal(module.diagnostic, undefined);
+    for (const [binding, receiver, origin] of [
+      ['direct', 'pivoted', [1, 2, 3]],
+      ['chained', 'pivoted.originOffset(0, 5, 0)', [1, 7, 3]],
+    ]) {
+      const context = `const ${binding} = ${receiver}.${call}`;
+      const input = exactTargets(module, source, receiver, context).find(
+        target => target.kind === 'operation-input',
+      );
+      assert.ok(input, `missing receiver target for ${context}`);
+      const output = module.sourceTargets.find(target => {
+        const evaluation = target.evaluations[0];
+        return (
+          evaluation.operationId === input.evaluations[0].operationId &&
+          target.kind ===
+            (call.startsWith('originVertex')
+              ? 'topology-selection'
+              : 'operation-output')
+        );
+      });
+      assert.ok(output);
+      // The caret immediately before the dot belongs to the receiver.
+      assert.equal(source[input.sourceRef.end], '.');
+      assert.equal(output.sourceRef.start, input.sourceRef.end + 1);
+      const evaluation = input.evaluations[0];
+      const operation = module.operations.get(evaluation.operationId);
+      assert.equal(evaluation.operationId, output.evaluations[0].operationId);
+      assert.equal(operation.kind, call.slice(0, call.indexOf('(')));
+      assert.deepEqual(evaluation.nodeIds, [operation.inputs[0].nodeId]);
+      assert.notEqual(evaluation.nodeIds[0], operation.outputNodeId);
+      assert.deepEqual(
+        module.objects.get(evaluation.nodeIds[0]).origin,
+        origin,
+      );
+    }
+  });
+}
+
 test('evaluates a user-defined Replicad primitive', async () => {
   const source = [
     'import {definePrimitive, replicad} from "@code3d/core/replicad";',

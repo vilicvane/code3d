@@ -7,9 +7,11 @@ let offsetRelationSource;
 let ToolEngine;
 before(async () => {
   server = await createAppTestServer();
-  ({offsetRelationSource} = await server.ssrLoadModule(
+  const {offsetCallSource} = await server.ssrLoadModule(
     '/src/tools/source-expression.ts',
-  ));
+  );
+  offsetRelationSource = (source, delta) =>
+    offsetCallSource(source, 'offset', delta);
   ({ToolEngine} = await server.ssrLoadModule('/src/tools/tool-system.ts'));
 });
 after(async () => {

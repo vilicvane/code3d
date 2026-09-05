@@ -121,7 +121,16 @@ replicad.getOC();
 // @ts-expect-error Kernel replacement remains owned by code3d.
 replicad.setOC(undefined);
 
-solid.paint('#fff').scaled(2).fillet(1).chamfer(0.5);
+solid
+  .paint('#fff')
+  .origin(1, 2, 3)
+  .originOffset(0, 1, 0)
+  .originVertex(1)
+  .originCenter()
+  .rotate(15, 30, 45)
+  .scaled(2)
+  .fillet(1)
+  .chamfer(0.5);
 solid.vertices();
 solid.edges();
 solid.surfaces();
@@ -130,6 +139,10 @@ solid
   .relate(self => self.mount.on(solid.top))
   .fillet(1, [edgeId]);
 faceModel
+  .originCenter()
+  .originVertex(1)
+  .originOffset(0, 2, 0)
+  .rotate(90, 0, 0)
   .scaled(2)
   .relate(self => self.plane.on(solid.top))
   .expose({mount: solid.bottom})
@@ -138,6 +151,9 @@ faceModel.vertex(1);
 faceModel.edge(1);
 faceModel.surfaces();
 edgeModel
+  .originCenter()
+  .origin(0, 0, 0)
+  .rotate(0, 0, 90)
   .scaled(2)
   .relate(self => self.start.on(solid.center))
   .expose({mount: solid.axis})
@@ -145,6 +161,9 @@ edgeModel
 edgeModel.vertex(1);
 edgeModel.edges();
 vertexModel
+  .originCenter()
+  .origin(0, 0, 0)
+  .rotate(0, 90, 0)
   .scaled(2)
   .relate(self => self.on(solid.center))
   .expose({mount: solid.center})
@@ -265,3 +284,15 @@ faceModel.fillet(1);
 faceModel.chamfer(1);
 // @ts-expect-error The general Model type contains only common capabilities.
 model.scaled(2);
+
+// @ts-expect-error Groups do not contain geometry to rotate.
+groupModel.rotate(0, 90, 0);
+// @ts-expect-error Groups do not expose geometric origin editing.
+groupModel.origin(0, 0, 0);
+// @ts-expect-error Groups do not have a geometric center.
+groupModel.originCenter();
+// @ts-expect-error Center setters do not take coordinates.
+solid.originCenter(1, 2, 3);
+const curveCenter: PointAnchor = edgeModel.center;
+const pointCenter: PointAnchor = vertexModel.center;
+void [curveCenter, pointCenter];

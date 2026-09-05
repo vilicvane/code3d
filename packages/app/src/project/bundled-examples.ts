@@ -5,6 +5,7 @@ import designArgumentsSource from '../../examples/design-arguments.ts?raw';
 import fastenersSource from '../../examples/fasteners.ts?raw';
 import examplesIndexSource from '../../examples/index.ts?raw';
 import primitivesSource from '../../examples/primitives.ts?raw';
+import originAndRotationSource from '../../examples/origin-and-rotation.ts?raw';
 import relationsAndElementsSource from '../../examples/relations-and-elements.ts?raw';
 import type {ProjectDirectoryTemplate, ProjectSourceFile} from './project';
 
@@ -17,6 +18,7 @@ const websiteSources = import.meta.glob<string>('../../examples/website/*.ts', {
 const files = [
   {path: '/examples/index.ts', source: examplesIndexSource},
   {path: '/examples/primitives.ts', source: primitivesSource},
+  {path: '/examples/origin-and-rotation.ts', source: originAndRotationSource},
   {path: '/examples/custom-primitives.ts', source: customPrimitivesSource},
   {
     path: '/examples/combined-constraints.ts',
