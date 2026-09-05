@@ -67,6 +67,7 @@ import {
 import {DockPanelCoordinator} from './ui/dock-panels';
 import {ElementsPanel} from './ui/elements-panel';
 import {ImageExportDialog} from './ui/image-export';
+import {ModelExportDialog} from './ui/model-export';
 import {ViewportContextMenu} from './ui/viewport-context-menu';
 import {ProjectTree} from './ui/project-tree';
 import {SourceEditPopover} from './ui/source-edit-popover';
@@ -371,11 +372,34 @@ const viewport = new ModelViewport(viewportHost, {
 });
 const imageExportDialog = new ImageExportDialog(viewportHost, {
   capture: (width, height) => viewport.captureImage(width, height),
-  fileName: () => codeEditor.currentFile().split('/').at(-1) ?? 'code3d-model',
+  fileName: () => viewport.exportName(),
+});
+const modelExportDialog = new ModelExportDialog(viewportHost, () => {
+  const scene = viewport.exportScene();
+  const sourceVersion = codeEditor.sourceVersion();
+  return {
+    fileName: viewport.exportName(),
+    export: async options => {
+      if (
+        !scene ||
+        currentModule !== scene.module ||
+        sourceVersion !== codeEditor.sourceVersion() ||
+        currentModuleSourceVersion !== sourceVersion
+      ) {
+        throw new Error(
+          'The model has changed or is only a preview. Run the model and reopen export.',
+        );
+      }
+      return compiler.export(scene.module, scene.instances, options);
+    },
+  };
 });
 new ViewportContextMenu(
   viewportHost.querySelector<HTMLCanvasElement>('.viewport-canvas')!,
-  () => imageExportDialog.open(),
+  [
+    {label: 'Export image…', run: () => imageExportDialog.open()},
+    {label: 'Export model…', run: () => modelExportDialog.open()},
+  ],
 );
 const elementsDecorationOwner = 'elements-panel';
 const elementsPanel = new ElementsPanel(elements, elementsCount, {

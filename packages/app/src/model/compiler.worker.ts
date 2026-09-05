@@ -50,6 +50,7 @@ const compiler = new ProjectCompiler(
 let queued: CompileRequest | undefined;
 let currentId: number | undefined;
 let running = false;
+let compileId: number | undefined;
 
 async function drain(): Promise<void> {
   if (running) return;
@@ -72,8 +73,10 @@ async function drain(): Promise<void> {
             send({kind: 'evaluating', id: request.id});
           },
         );
-        if (currentId === request.id)
+        if (currentId === request.id) {
+          compileId = request.id;
           send({kind: 'result', id: request.id, ok: true, module});
+        }
       } catch (error) {
         if (currentId === request.id)
           send({
@@ -109,7 +112,24 @@ workerScope.onmessage = ({data}: MessageEvent<CompilerRequest>) => {
   } else if (data.kind === 'cancel') {
     if (queued?.id === data.id) queued = undefined;
     if (currentId === data.id) currentId = undefined;
+  } else if (data.kind === 'export') {
+    try {
+      if (running || queued || compileId !== data.compileId)
+        throw new Error(
+          'The model has changed. Reopen export after compilation finishes.',
+        );
+      const blob = compiler.export(data.instances, data.options);
+      send({kind: 'export', id: data.id, ok: true, blob});
+    } catch (error) {
+      send({
+        kind: 'result',
+        id: data.id,
+        ok: false,
+        diagnostic: diagnosticFromError(error),
+      });
+    }
   } else {
+    compileId = undefined;
     queued = data;
     void drain();
   }

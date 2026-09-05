@@ -311,6 +311,12 @@ Studio must not use `instanceof` against a host-installed core to inspect values
 from the project-installed core. Package or lockfile changes invalidate the
 runtime capsule and rebuild it from the changed installed artifacts.
 
+Model exports use the selected runtime's geometry snapshot and Replicad functions
+as well; no host-initialized kernel participates in STEP/STL/3MF export. The latest
+snapshot survives repeated exports and is released on recompilation, runtime
+invalidation, or project disposal. Worker export requests identify the completed
+compile revision so an older preview cannot export a newer model accidentally.
+
 The execution layer now uses native ESM following the isolated experiments in
 [#12](https://github.com/vilicvane/code3d/issues/12). esbuild handles TypeScript,
 CommonJS interop, linking, and source-module cycles. Closed bundles export an

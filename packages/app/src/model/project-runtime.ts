@@ -1,4 +1,5 @@
 import type * as CoreTooling from '@code3d/core/tooling';
+import type * as Replicad from 'replicad';
 import type {ProjectFileReader} from '../project/file-reader';
 import {ProjectBuilder, type ProjectBundle} from '../project/project-builder';
 import {ModuleEvaluator, type ModuleExports} from './module-evaluator';
@@ -12,6 +13,7 @@ export class ProjectRuntime {
   private readonly pending = new Map<string, Promise<ModuleExports>>();
   private constructor(
     readonly tooling: typeof CoreTooling,
+    readonly replicad: typeof Replicad,
     readonly modules: Map<string, ModuleExports>,
     readonly formats: Map<string, 'esm' | 'cjs'>,
     private readonly evaluator: ModuleEvaluator,
@@ -32,9 +34,10 @@ export class ProjectRuntime {
     const toolingPath = await resolve('@code3d/core/tooling');
     const corePath = await resolve('@code3d/core');
     const interopPath = await resolve('@code3d/core/replicad');
+    const replicadPath = await resolve('replicad', toolingPath);
     const loaderPath = await resolve('replicad-opencascadejs', toolingPath);
     const wasmPath = await resolve('replicad-opencascadejs/wasm', toolingPath);
-    const entry = [toolingPath, corePath, interopPath, loaderPath]
+    const entry = [toolingPath, corePath, interopPath, loaderPath, replicadPath]
       .map(
         (path, index) =>
           `export * as entry${index} from ${JSON.stringify(path)};`,
@@ -76,6 +79,7 @@ export class ProjectRuntime {
       });
       return new ProjectRuntime(
         runtime.tooling,
+        runtime.modules.get(replicadPath),
         runtime.modules,
         new Map(discovery.formats),
         evaluator,

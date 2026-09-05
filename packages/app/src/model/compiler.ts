@@ -1016,6 +1016,7 @@ export function createModelCompiler(
     sourceGraph: ProjectBundle,
     requestedDesignContextId?: string,
     onEvaluate?: () => void,
+    captureGeometry?: (objects: readonly ModelObject[]) => void,
   ): Promise<ModelModule> {
     const files = new Map(
       project.files.map(file => [normalizeProjectPath(file.path), file.source]),
@@ -1179,6 +1180,7 @@ export function createModelCompiler(
           object.operation,
         ]),
       );
+      captureGeometry?.(graphObjects);
       return {
         diagnostic,
         fallback: fallbackSnapshot,

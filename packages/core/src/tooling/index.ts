@@ -16,6 +16,7 @@ export {
   modelObjectRuntimeInfo,
   modelTopologyReference,
   relatedModelObjects,
+  retainModelGeometry,
 } from '../library/runtime.js';
 export type {
   Constraint,
@@ -26,6 +27,7 @@ export type {
   ElementSnapshot,
   ModelElementReference,
   ModelGeometryKind,
+  ModelGeometrySnapshot,
   ModelKind,
   ModelOperationInputRole,
   ModelOperationInstrumentation,

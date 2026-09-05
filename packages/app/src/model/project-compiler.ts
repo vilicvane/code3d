@@ -1,4 +1,5 @@
 import type * as esbuild from 'esbuild-wasm';
+import type {ModelGeometrySnapshot} from '@code3d/core/tooling';
 import {ProjectFileCache} from '../project/file-cache';
 import type {ProjectFileReader} from '../project/file-reader';
 import {ProjectPackages} from '../project/project-packages';
@@ -12,6 +13,11 @@ import {normalizeProjectPath, type ModelProject} from '../project/project';
 import {createModelCompiler, type ModelModule} from './compiler';
 import {ProjectRuntime} from './project-runtime';
 import {ModuleEvaluator} from './module-evaluator';
+import {
+  exportModel,
+  type ModelExportInstance,
+  type ModelExportOptions,
+} from './model-export';
 
 export class ProjectCompiler {
   private readonly files: ProjectFileCache;
@@ -20,6 +26,7 @@ export class ProjectCompiler {
   private readonly evaluator: ModuleEvaluator;
   private runtime?: ProjectRuntime;
   private compiler?: ReturnType<typeof createModelCompiler>;
+  private geometry?: ModelGeometrySnapshot;
 
   constructor(
     files: ProjectFileReader,
@@ -43,6 +50,7 @@ export class ProjectCompiler {
     onLanguage?: (language: ProjectLanguage) => void,
     onEvaluate?: () => void,
   ): Promise<ModelModule> {
+    this.disposeGeometry();
     const changed = await this.files.refresh();
     const packageSelectionChanged = await this.packages.update(project);
     if (
@@ -104,6 +112,25 @@ export class ProjectCompiler {
       discovery,
       designContextId,
       onEvaluate,
+      objects => {
+        this.geometry = this.runtime!.tooling.retainModelGeometry(objects);
+      },
+    );
+  }
+
+  export(
+    instances: readonly ModelExportInstance[],
+    options: ModelExportOptions,
+  ): Blob {
+    if (!this.geometry || !this.runtime)
+      throw new Error(
+        'The model has changed. Reopen export after compilation finishes.',
+      );
+    return exportModel(
+      this.geometry,
+      instances,
+      options,
+      this.runtime.replicad,
     );
   }
 
@@ -117,9 +144,15 @@ export class ProjectCompiler {
   }
 
   private disposeRuntime(): void {
+    this.disposeGeometry();
     this.assets.dispose();
     this.runtime?.dispose();
     this.compiler = undefined;
     this.runtime = undefined;
+  }
+
+  private disposeGeometry(): void {
+    this.geometry?.dispose();
+    this.geometry = undefined;
   }
 }

@@ -3,6 +3,7 @@ import type {ProjectFileInfo} from '../project/file-reader';
 import type {ProjectLanguage} from '../project/project-language';
 import type {ModelModule} from './compiler';
 import type {ModelDiagnostic} from './diagnostic';
+import type {ModelExportInstance, ModelExportOptions} from './model-export';
 
 export type CompileRequest = Readonly<{
   kind: 'compile';
@@ -22,6 +23,13 @@ export type FileRequest = Readonly<{
 
 export type CompilerRequest =
   | CompileRequest
+  | Readonly<{
+      kind: 'export';
+      id: number;
+      compileId: number;
+      instances: readonly ModelExportInstance[];
+      options: ModelExportOptions;
+    }>
   | Readonly<{kind: 'cancel'; id: number}>
   | Readonly<{
       kind: 'file-result';
@@ -35,6 +43,7 @@ export type CompilerResponse =
   | Readonly<{kind: 'language'; id: number; language: ProjectLanguage}>
   | Readonly<{kind: 'evaluating'; id: number}>
   | Readonly<{kind: 'result'; id: number; ok: true; module: ModelModule}>
+  | Readonly<{kind: 'export'; id: number; ok: true; blob: Blob}>
   | Readonly<{
       kind: 'result';
       id: number;
