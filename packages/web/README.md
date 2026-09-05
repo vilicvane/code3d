@@ -60,3 +60,38 @@ build and preview. Without it, local builds omit origin-specific metadata.
 Astro's checker uses the website's TypeScript 6 compiler for its whole process.
 This isolates the JavaScript compiler API required by Volar from the repository's
 native TypeScript 7 compiler.
+
+## Cloudflare deployment
+
+The website, docs, and App are one Workers Static Assets deployment, configured
+by the root `wrangler.jsonc`. No server-side Worker or Astro adapter is needed.
+The production site URL is `https://www.code3d.org/`.
+
+For a local deployment, use Node.js 24 and run from the repository root:
+
+```bash
+npm ci
+export CODE3D_SITE_URL=https://www.code3d.org/
+npm run build
+npm run deploy
+```
+
+This uses the checked-in model images. To regenerate them, run
+`npm run render:web-images` after building App, then rebuild the website.
+
+GitHub Actions regenerates model images and builds the complete artifact before
+deploying. Automatic deployment from `main` is enabled by setting the repository
+variable `CLOUDFLARE_ACCOUNT_ID` and secret `CLOUDFLARE_API_TOKEN` (an account-scoped
+Workers deployment token). Without the account variable, CI only builds and
+uploads the artifact. Local Wrangler OAuth credentials are never copied to CI.
+
+`www.code3d.org` is declared as a Worker Custom Domain in `wrangler.jsonc`.
+Cloudflare manages its DNS record and certificate; do not add a competing CNAME.
+The `workers.dev` address also remains available for deployment verification.
+Keep normal static routing and 404 handling: App's file navigation uses URL
+hashes, not a site-wide SPA fallback.
+
+Finish building before starting `npx wrangler dev` to preview the production
+artifact. Rebuilding Astro while this preview runs can leave Wrangler's local
+asset index pointing at the intermediate empty output directory; reload its
+configuration after the build if necessary. For source changes, use Astro dev.

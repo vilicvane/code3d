@@ -1,0 +1,14 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "code3d-www",
+  "compatibility_date": "2026-09-05",
+  "workers_dev": true,
+  "preview_urls": false,
+  "routes": [{"pattern": "www.code3d.org", "custom_domain": true}],
+  // Build the complete website and App before previewing or deploying.
+  "assets": {
+    "directory": "./packages/web/dist/www",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page",
+  },
+}

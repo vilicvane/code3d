@@ -10,6 +10,7 @@
     "build:packages": "tsc --build",
     "build": "npm run lint-prettier && npm run clean && npm run build:packages && npm run build --workspace @code3d/app && npm run build --workspace @code3d/web",
     "render:web-images": "npm run render-images --workspace @code3d/web",
+    "deploy": "node packages/web/scripts/check-site.mjs && wrangler deploy",
     "dev": "npm run build:packages && npm run dev --workspace @code3d/app",
     "lint-prettier": "prettier --check .",
     "format": "prettier --write .",
@@ -28,7 +29,8 @@
     "@types/node": "^24.10.1",
     "prettier": "^3.9.6",
     "rimraf": "^6.1.2",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "wrangler": "^4.129.0"
   },
   "overrides": {
     "dompurify": "3.4.14"

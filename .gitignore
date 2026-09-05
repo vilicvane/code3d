@@ -1,6 +1,9 @@
 node_modules/
 .cache/
 .astro/
+.wrangler/
+.dev.vars*
+.env*
 bld/
 dist/
 .agents/worktree-state.json
