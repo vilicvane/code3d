@@ -19,6 +19,8 @@ for await (const file of glob('**/*.html', {cwd: directory})) {
   const document = parse(await readFile(path.join(directory, file), 'utf8'));
   const ids = new Set();
   const references = [];
+  const fontPreloads = [];
+  const fontFaces = [];
   walk(document, node => {
     const attributes = Object.fromEntries(
       (node.attrs || []).map(a => [a.name, a.value]),
@@ -41,9 +43,28 @@ for await (const file of glob('**/*.html', {cwd: directory})) {
       node.tagName === 'link' &&
       attributes.rel
         ?.split(/\s+/)
-        .some(rel => ['stylesheet', 'icon', 'sitemap'].includes(rel))
+        .some(rel => ['stylesheet', 'icon', 'sitemap', 'preload'].includes(rel))
     )
       references.push(attributes.href);
+    if (
+      node.tagName === 'link' &&
+      attributes.rel === 'preload' &&
+      attributes.as === 'font'
+    ) {
+      fontPreloads.push(attributes.href);
+      if (attributes.type !== 'font/woff2' || !('crossorigin' in attributes)) {
+        issues.push(`${file}: font preload must use WOFF2 and anonymous CORS`);
+      }
+    }
+    if (node.tagName === 'style' && node.parentNode?.tagName === 'head') {
+      const css = node.childNodes.map(child => child.value || '').join('');
+      for (const [face] of css.matchAll(/@font-face\s*\{[^}]+\}/g)) {
+        fontFaces.push(face);
+        for (const [, url] of face.matchAll(/url\(["']?([^"')]+)["']?\)/g)) {
+          references.push(url);
+        }
+      }
+    }
     if (attributes.src) references.push(attributes.src);
     if (node.tagName === 'meta' && attributes.property === 'og:image')
       references.push(attributes.content);
@@ -54,6 +75,16 @@ for await (const file of glob('**/*.html', {cwd: directory})) {
           .map(item => item.trim().split(/\s+/)[0]),
       );
   });
+  if (
+    fontPreloads.length !== 2 ||
+    !fontFaces.length ||
+    fontPreloads.some(url => !fontFaces.some(face => face.includes(url))) ||
+    fontFaces.some(face => !/font-display:\s*optional\b/.test(face))
+  ) {
+    issues.push(
+      `${file}: fonts must be declared in the head, preloaded, and optional`,
+    );
+  }
   const route = '/' + file.replace(/index\.html$/, '');
   pages.set(route, {ids, references, file});
 }
@@ -95,6 +126,19 @@ for (const [route, page] of pages) {
 }
 await stat(path.join(directory, 'pagefind/pagefind.js'));
 await stat(path.join(directory, 'app/index.html'));
+for (const asset of ['mark.svg', 'favicon.svg']) {
+  const source = await readFile(
+    new URL(`../../../assets/brand/${asset}`, import.meta.url),
+    'utf8',
+  );
+  for (const file of [asset, `app/${asset}`]) {
+    assert.equal(
+      await readFile(path.join(directory, file), 'utf8'),
+      source,
+      `${file} must match the shared brand asset`,
+    );
+  }
+}
 const license = await readFile(
   new URL('../../../LICENSE', import.meta.url),
   'utf8',

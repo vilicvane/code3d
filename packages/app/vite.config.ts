@@ -7,6 +7,7 @@ const packageDirectory = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   base: './',
+  publicDir: '../../assets/brand',
   plugins: [
     {
       name: 'code3d-license',

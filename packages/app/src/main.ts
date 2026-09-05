@@ -1,4 +1,5 @@
 import './style.css';
+import brandMark from '../../../assets/brand/mark.svg?raw';
 import {
   CodeEditor,
   type ActiveFileChangeReason,
@@ -106,7 +107,7 @@ app.innerHTML = `
   <div class="shell">
     <header class="topbar">
       <div class="brand">
-        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-mark" aria-hidden="true">${brandMark}</span>
         <span>Code3D</span>
         <span class="prototype-tag">prototype 01</span>
       </div>

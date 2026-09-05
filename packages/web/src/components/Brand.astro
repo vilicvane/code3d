@@ -1,12 +1,10 @@
 ---
 import {sitePath} from '../lib/site';
+import mark from '../../../../assets/brand/mark.svg?raw';
 ---
 
 <a class="c3-brand" href={sitePath('')} aria-label="Code3D home">
-  <svg aria-hidden="true" viewBox="0 0 32 32"
-    ><path d="M16 2 30 16 16 30 2 16Z"></path><path d="m16 9 7 7-7 7-7-7Z"
-    ></path></svg
-  >
+  <span class="c3-brand-mark" aria-hidden="true" set:html={mark} />
   <span>Code3D</span>
 </a>
 <style>
@@ -21,11 +19,13 @@ import {sitePath} from '../lib/site';
     letter-spacing: -0.04em;
     white-space: nowrap;
   }
-  svg {
-    width: 26px;
-    height: 26px;
-    fill: none;
-    stroke: var(--c3-accent, #d8ff3e);
-    stroke-width: 2.2;
+  .c3-brand-mark {
+    display: flex;
+    width: 28px;
+    height: 21px;
+  }
+  .c3-brand-mark :global(svg) {
+    width: 100%;
+    height: 100%;
   }
 </style>
