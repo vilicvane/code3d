@@ -12,8 +12,13 @@
 - `@code3d/core` root 只面向作者建模；App 能力放在
   `@code3d/core/tooling`。
 - core root 不导出 `ModelObject` 类值或类型；`Constraint` 仅作 type-only
-  export。runtime identity、trace、snapshot、资源释放和 kind discriminators
-  已从 root 收起。
+  export。runtime identity、trace、snapshot 和资源释放不属于作者入口。
+- 公开导出的内容涉及的类型一并导出，包括泛型约束、返回类型和递归命名依赖。
+  `ElementKind`、`ModelKind`、`ModelGeometryKind`、拓扑引用的 `TopologyKind`、
+  named-element/expose 辅助类型及模型能力接口从 core root 作 type-only 导出。
+  code3d 模型类型由 root 提供，Replicad builder 类型由 `./replicad` 提供；
+  类型导出不增加运行时属性或建模操作。`Quaternion` 只出现在 tooling 变换签名中，
+  继续由 `./tooling` 导出。见 [#34](https://github.com/vilicvane/code3d/issues/34)。
 - package entries 为 `.`、`./tooling` 与 `./replicad`。
 - `definePrimitive(build)` 位于 `@code3d/core/replicad`，同步 builder 直接
   返回 Replicad shape，由 core 接管并转成 `SolidModel`；中间资源由 builder
@@ -45,7 +50,7 @@
 
 ## 待讨论
 
-未决定的互操作、作者可读属性、group API、判别类型、Quaternion
+未决定的互操作、作者可读属性、group API
 和 tooling 边界已迁入 [#5](https://github.com/vilicvane/code3d/issues/5)。讨论结果确认
 后再更新本文中的设计；迁移本身不代表批准公开这些 API。
 

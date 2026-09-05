@@ -52,6 +52,11 @@ implementation context and historical outcomes, not a competing work queue.
   model is itself usable as its intrinsic frame Anchor. Solid primitives expose
   `center`, `top`, `bottom`, and `axis` through the same named-element mechanism
   available to user models rather than through a separate fixed-anchor path.
+- Types referenced by the public authoring API are exported with their named
+  dependencies, including generic constraints and result mappings. Model types
+  belong to core's root entry and Replicad builder types to `./replicad`;
+  exposing a type does not add runtime properties or operations. See
+  [#34](https://github.com/vilicvane/code3d/issues/34).
 - `model.expose({...})` creates a semantic-immutable model with a type-inferred
   named-element interface. An element imported from an internal model is
   rebound into the exposed model's local frame, so reusable APIs do not leak

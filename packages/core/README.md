@@ -22,6 +22,30 @@ contain geometry. Stable topology references can be used as geometric relation a
 `relate()` records placement for composition with other values; inspecting or
 rendering the resulting value by itself keeps its intrinsic local frame.
 
+## Type imports
+
+Types used by public signatures, generic constraints, and return values are
+exported alongside the authoring API, including their named type dependencies.
+This includes `ElementKind`, `ModelKind`, `ModelGeometryKind`, `TopologyKind`,
+the named-element and expose result types, and the model capability interfaces.
+
+```ts
+import type {
+  Anchor,
+  ElementKind,
+  NamedElements,
+  SolidModel,
+} from '@code3d/core';
+
+type Mount<Kind extends ElementKind> = Anchor<Kind>;
+type Part<Elements extends NamedElements> = SolidModel<Elements>;
+```
+
+Code3d model types come from `@code3d/core`; Replicad builder types such as
+`Shape3D` come from `@code3d/core/replicad`. Type exports do not add runtime
+properties or operations. `Quaternion` belongs to the tooling transform API;
+author rotations use `rotate(x, y, z)` in degrees.
+
 ## Colors
 
 `paint(color)` returns a new model value. On a group, it recursively overrides

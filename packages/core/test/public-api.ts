@@ -51,14 +51,6 @@ import {
 
 // @ts-expect-error The concrete runtime class is not part of the authoring API.
 import type {ModelObject} from '../bld/library/index.js';
-// @ts-expect-error Runtime element discriminators belong to tooling.
-import type {ElementKind} from '../bld/library/index.js';
-// @ts-expect-error Runtime geometry discriminators belong to tooling.
-import type {ModelGeometryKind} from '../bld/library/index.js';
-// @ts-expect-error Runtime model discriminators belong to tooling.
-import type {ModelKind} from '../bld/library/index.js';
-// @ts-expect-error Runtime topology discriminators belong to tooling.
-import type {TopologyKind} from '../bld/library/index.js';
 // @ts-expect-error Quaternions are a tooling transform detail for now.
 import type {Quaternion} from '../bld/library/index.js';
 // @ts-expect-error Replicad builders are available only through the explicit subpath.
