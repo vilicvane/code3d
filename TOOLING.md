@@ -151,3 +151,138 @@ placeholder；源码与已发布 `.d.ts` 使用同一静态解析路径。默认
 及后续位置无法静态映射时标记为 unknown，不展示默认值或提供位置编辑。聚焦、离开和未输入时提交不修改源码；主动
 输入同一数值也会写成显式实参。清空仍属无效输入，Undo 或源码删除实参可恢复
 省略状态，不新增恢复默认按钮。实现背景见 [#29](https://github.com/vilicvane/code3d/issues/29)。
+
+viewport 平移 gizmo 在能够唯一追溯参数时产生 `parameter.set`，否则针对已有关系产生
+`relation.offset`。源码中的 `fillet(radius)`、`fillet(radius, edgeIds)` 和对应的
+`chamfer` 调用把整个参数区域投影为 edge-selection source target。`edge-operation.set`
+可以写入非空的显式 ID 数组，也可以删除第二参数以恢复单参数的全部边语义；每次修改
+立即进入共享源码事务，同一轮工具交互合并为一个 Monaco undo 历史项。
+
+上下文工具面板的展示由选中的源码位置决定，不由 `Esc` 关闭；离开对应调用才结束
+该面板的交互。`Esc` 优先取消尚未松手的 viewport 拖动，保留面板与代码位置；
+未拖动时不结束面板的参数编辑或拓扑选择，也不撤销已经提交的源码修改。
+
+compiler 为每个实际进入的 call site execution 统一记录完成或失败状态、单调触达顺序、
+已求值的 operation inputs、实际参数和参数 provenance。source target 的同一 context 内
+默认采用最近触达的一次 execution；工具只投影自己需要的已捕获上下文，不维护单独的
+失败生命周期。fillet/chamfer 因而可在操作失败时使用已求值的 receiver、实际边数组和
+尺寸参数继续工作；不可用于 receiver 的失效 ID 不进入 GUI 选择，下一次写回即可清除。
+
+receiver 与参数中的模型值按实际求值自动记录，不按建模 API 名称登记。数组和选项对象
+字面量保留成员各自的源码范围；变量和展开表达式也可携带模型集合。输入角色由运行时
+operation 的输入记录关联，因此导入别名、namespace 调用和计算属性方法共用同一路径。
+没有对应 operation 或调用失败时，已取得的输入仍可作为模型值预览；同一源码位置的多次
+执行保留各自的输入，采用最近触达的值。追踪不主动读取 getter。空间手柄仍由 operation
+metadata 和参数 provenance 定义轴、pivot 与编辑语义。
+
+带工具注释的调用即使在产生模型值之前失败，也会发布独立的 tool source target。有效调用
+严格采用 TypeScript 实际匹配的重载；没有重载可匹配时，优先保留 TypeScript 的带注释
+恢复候选，否则按声明顺序选择第一个带注释的候选。候选恢复只接受落在当前 callee 或其
+直接参数上的调用签名 diagnostic，不能因外层调用把当前表达式标成错误参数而误判。缺失
+参数在面板中显示为空，当前调用末尾能够合法追加的下一个参数可以直接填写并写回源码，
+后续参数随调用补全依次解锁。已有数值参数无法唯一解析出整个字面量或上游 target 时，
+不论追踪到了零个、一个内联系数还是多个候选，均把运行时求值结果作为空 input 的
+placeholder；填写数字会替换整个参数表达式，填写与 placeholder 相同的值也会替换。
+它与尚未填写的参数保持区分。唯一可编辑的上游参数仍显示有效值并反向修改其来源。
+面板参数的绑定、显示和输入 intent 集中在同一个模块；它与 gizmo 共用源码 provenance
+候选规则，禁止各自根据候选数量引入不同的表达式分类。
+
+参数 schema 是按能力扩展的 tagged union。数值 `kind` 提供标量控件；`vertex`、`edge`
+和 `surface` 提供 topology selector，其单选或多选能力从声明参数是否为数组推导，而不是
+再写一份交互配置。几何模型的 `.vertex(id)`、`.edge(id)` 和 `.surface(id)` 使用单选，
+`.vertices(ids?)`、`.edges(ids?)` 和 `.surfaces(ids?)` 使用多选；两者共享同一个 provider。
+compiler 在调用进入时记录 receiver 和已求值参数，所以参数缺失或引用已退休拓扑而失败时
+仍可显示 receiver 并修复；viewport pick 产生通用 `argument.set` intent，立即写回同一个
+源码事务。复数引用允许空数组，并在省略参数时返回全部当前稳定拓扑引用；fillet/chamfer
+的省略参数全选语义仍由专用 provider 处理。
+
+数值参数的源码 provenance 与工具签名共用一个 TypeScript semantic program。调用参数中的
+标识符、具体对象属性、字面量类型的计算属性和对象解构会沿唯一 symbol definition 继续
+追溯，也可以穿过 import 和 re-export，直到静态数值 initializer。任一步存在多个定义、
+缺少可追溯 initializer，或 receiver 的运行时对象不唯一时，该链路不产生可编辑 target。
+这套索引只覆盖带工具注释的数值参数表达式；panel 与 viewport 对同一表达式都优先采用
+表达式之外的上游 target，避免把比例因子等内联字面量误当成主要参数。
+
+平移 gizmo 目前遵守以下解析规则：
+
+- 当前源码 occurrence 必须是提供相对位置语义的 operation input，或具体的
+  constraint source site；变量声明和 operation output 即使对应对象带有 relation，
+  也不显示 gizmo。
+- 优先修改选中对象关系约束中能够唯一追溯的位置参数。
+- 参数归属到具体 API 调用；连续变换只编辑当前最外层调用，不重复追加操作。
+- 同一参数表达式同时包含上游变量和字面量时，优先修改上游变量。
+- 没有可用上游参数时，只有整个参数是数值字面量才直接改值；表达式内部的字面量（例如 `i * 8` 中的 `8`）不作为拖动目标。
+- 参数在整个模型中的用途必须都是同一位置轴，避免 preview 遗漏尺寸等副作用。
+- 没有唯一安全参数时，优先在最外层 `.offset()` 的对应参数表达式上加减增量，保留原表达式与运算优先级；连续拖动合并末尾数值增量，归零时移除增量。
+- 只有最外层不是可逐轴编辑的 `.offset()`（例如尚未添加 offset 或参数为 spread）时才追加一次字面量 `.offset(dx, dy, dz)`；后续拖动复用它，不反复嵌套，也不猜测内部组件应如何移动。
+- 拖动值遵守参数的 `min`、`max` 和 `step`；没有 `step` 时使用按参数 kind 推断的步长。
+- preview 会更新所有使用该参数的 occurrence，并标出选中对象以外的受影响对象。
+- 松手才写入源文件；`Esc` 优先清除当前拖动 preview，恢复拖动前的位置，不产生源码修改，之后松手也不提交。取消拖动不关闭上下文工具面板。
+
+源码 context 不提供相对位置语义、对象没有位置关系或关系接收者无法稳定定位时隐藏
+gizmo。后续 choice UI 可以进一步提供“调整当前关系”或“修改内部组件关系”等不同
+scope 的 edit plan。
+
+## 模型原点与旋转
+
+`origin`、`originOffset`、`originVertex`、`originCenter` 和 `rotate` 在 operation snapshot 中记录
+局部几何坐标下的原点和本次操作向量。模型 snapshot 同时提供当前原点，tooling
+统一这些数据与参数 provenance，并从同一依赖图安装 OpenCascade 和约束求解器；
+viewport 不从包围盒推断模型旋转中心。
+
+拓扑引用同时报告约束所属模型、几何来源、源拓扑身份和几何到所属模型的变换。
+值预览用来源网格和该变换高亮原拓扑；子拓扑选择在同一坐标关系下只提供所属面/边内的 ID。
+计算锚点直接报告坐标系，预览无需从名字反查模型的固定具名元素。`expose` 的命名成员及嵌套成员
+保留拓扑元数据，补全预览遵循同样的装配坐标语义。见 [#27](https://github.com/vilicvane/code3d/issues/27)。
+
+`originCenter()` 取主体建立时的局部包围盒中心随模型变换后的位置，与 `.center`
+使用同一锚点。无参数操作通过 operation metadata 接入原点标记和手柄，不需要虚构参数。
+
+`originVertex` 复用 topology selection provider：拾取来自操作输入，显示操作输出及
+其原点。原点坐标和偏移显示平移箭头，`rotate` 显示角度参数对应的旋转环；固定
+X/Y/Z 顺序意味着 X 环包含后续 Y/Z 的方向，Y 环包含后续 Z 的方向。
+
+`model.spatial` intent 通过通用源码事务修改唯一安全的参数，或保留当前参数表达式
+并折叠末尾数值增量。拖动顶点或中心原点时生成或复用 `originOffset`。preview 保存临时
+刚体变换和原点标记；旋转预览使用新旧完整旋转的差，松手写源码，Esc 清除预览。
+原点偏移不会临时移动实体。已有 relation offset 工具与这些操作共用轴手柄和会话机制。
+
+## 表达式构造
+
+工具使用 `ExpressionDraft` 描述 number、string、identifier、array、binary、call 和 member，而不是直接提交任意字符串。例如边选择工具产生：
+
+```text
+expression.replace(
+  target = source ref of [2, 5],
+  expression = array([number(3), number(7)])
+)
+```
+
+edge 工具在 caret 落入 fillet/chamfer 的整个参数区域时解释 viewport 点击。
+主实体是当前边集合已经应用后的操作结果，操作输入的全部原边同时保留在原位置作为
+独立的可选择图层；数组中的 ID 预先高亮，边以模型内稳定数字 ID 显示为 `E3`、`E7`。
+每次 toggle 都立即通过共享源码事务写回普通数字数组（例如 `[3, 7]`），并后台重编译；
+选中集合按 ID 排序，只有集合发生变化时才提交。取消最后一个显式选择会删除第二参数，
+恢复单参数的全部边语义，不保存空数组。离开调用时结束选择；`Esc` 不关闭面板或撤销修改。
+
+Resolver 再生成带 source anchor 的编辑计划。当前 prototype 已具备基础表达式替换；
+新增 fillet/chamfer 调用仍由用户手写，不提供 GUI 插入入口。多方案 UI 尚未实现。
+
+## Scope 与歧义
+
+工具必须把以下信息作为解析上下文，而不是自行决定：
+
+- 当前选中的是模型、occurrence、组件、face、edge 还是 operation。
+- 一个参数会影响哪些 occurrence。
+- 修改已有共享参数，还是为当前 occurrence 构造新表达式。
+- 当前 topology 是否还能稳定映射到产生它的源码。
+
+例如拖动由 `x * postOffset` 定位的单个支柱时，resolver 可以提供：
+
+- 修改 `postOffset`，影响两个支柱。
+- 为当前 occurrence 构造局部表达式。
+
+第一种可以直接 preview；第二种属于结构编辑，应在提交前展示将要生成的源码。
+
+对于没有自身位置关系的布尔结果，工具不会猜测应修改哪个输入实体，也不会为结果发明绝对位置；
+只有用户选定具体关系 scope 后才生成对应的 edit plan。

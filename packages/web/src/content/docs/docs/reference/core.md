@@ -6,6 +6,12 @@ description: A curated map of the public core modeling operations.
 Import these functions from `@code3d/core`. The editor's TypeScript signatures
 provide exact overloads and inferred model interfaces.
 
+Types used by the authoring API are also exported, including generic constraints,
+named-element result types, and capability interfaces. Use `import type` from
+`@code3d/core` for types such as `ElementKind`, `ModelKind`, `TopologyKind`,
+`NamedElements`, and `ExposedElements`. Replicad builder types such as `Shape3D`
+are available from `@code3d/core/replicad` alongside `definePrimitive`.
+
 ## Solid primitives
 
 | Function                                     | Meaning                           |

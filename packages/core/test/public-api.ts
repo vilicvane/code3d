@@ -47,14 +47,6 @@ import {definePrimitive, replicad, type Shape3D} from '@code3d/core/replicad';
 
 // @ts-expect-error The concrete runtime class is not part of the authoring API.
 import type {ModelObject} from '@code3d/core';
-// @ts-expect-error Runtime element discriminators belong to tooling.
-import type {ElementKind} from '@code3d/core';
-// @ts-expect-error Runtime geometry discriminators belong to tooling.
-import type {ModelGeometryKind} from '@code3d/core';
-// @ts-expect-error Runtime model discriminators belong to tooling.
-import type {ModelKind} from '@code3d/core';
-// @ts-expect-error Runtime topology discriminators belong to tooling.
-import type {TopologyKind} from '@code3d/core';
 // @ts-expect-error Quaternions are a tooling transform detail for now.
 import type {Quaternion} from '@code3d/core';
 // @ts-expect-error Replicad builders are available only through the explicit subpath.

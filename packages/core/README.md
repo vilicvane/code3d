@@ -27,6 +27,30 @@ such as `model.top` do not expose these topology properties.
 `relate()` records placement for composition with other values; inspecting or
 rendering the resulting value by itself keeps its intrinsic local frame.
 
+## Type imports
+
+Types used by public signatures, generic constraints, and return values are
+exported alongside the authoring API, including their named type dependencies.
+This includes `ElementKind`, `ModelKind`, `ModelGeometryKind`, `TopologyKind`,
+the named-element and expose result types, and the model capability interfaces.
+
+```ts
+import type {
+  Anchor,
+  ElementKind,
+  NamedElements,
+  SolidModel,
+} from '@code3d/core';
+
+type Mount<Kind extends ElementKind> = Anchor<Kind>;
+type Part<Elements extends NamedElements> = SolidModel<Elements>;
+```
+
+Code3d model types come from `@code3d/core`; Replicad builder types such as
+`Shape3D` come from `@code3d/core/replicad`. Type exports do not add runtime
+properties or operations. `Quaternion` belongs to the tooling transform API;
+author rotations use `rotate(x, y, z)` in degrees.
+
 ## Colors
 
 `paint(color)` returns a new model value. On a group, it recursively overrides
@@ -255,3 +279,27 @@ API stability. It includes topology source identities, assembly transforms, and
 calculated-anchor frames alongside origin and spatial-operation snapshots. It
 requires installing both OpenCascade and the constraint solver from that same
 package dependency graph.
+Call `beginModelEvaluation(): void` before each serial source
+evaluation to reset source locations, parameter provenance, and operation
+traces. Geometry, model identity, relations, and kernel caches are unaffected.
+Already-created snapshots keep their previous evaluation's metadata.
+
+Packages may retain model values privately. The App therefore drops its own
+references after creating snapshots instead of forcibly disposing every model
+it encounters. Unreachable Replicad wrappers release their native resources
+through their finalizers; explicit disposal is appropriate only when the caller
+owns the complete model lifetime. This boundary is tooling-only: ordinary
+model authors do not initialize an evaluation session.
+
+Rendering snapshots contain serializable meshes and model metadata, without
+native shapes. File export uses a separate `ModelGeometrySnapshot` retained
+by the compiler Worker. Core clones each distinct source shape once; the
+compiler releases these copies before the next compilation, when replacing
+the runtime, or when it is disposed. The snapshot's shapes are borrowed by
+consumers: each export clones them before transformations or consuming kernel
+operations and releases its temporary geometry on both success and failure.
+Repeated exports therefore preserve the retained geometry and author models.
+
+Core owns snapshot creation; the App owns export placement and file generation,
+using Replicad from the same runtime. This division already serves the current
+consumers and changes only when a concrete use case calls for it.
