@@ -93,11 +93,12 @@ screws 也已有具体用途的公开属性：`ISO4762.specifications` 及其规
 `LoftOptions`、螺丝选项和 solver 的问题/解属于输入输出数据结构，不属于待开放的
 模型实例元数据。Replicad 互操作对象按其既定入口提供已有能力。
 
-另已只读核对尚未合并的 [#27](https://github.com/vilicvane/code3d/issues/27) worktree：
+接管时另已只读核对当时尚未合并的 [#27](https://github.com/vilicvane/code3d/issues/27) worktree：
 该实现为拓扑引用增加 `center`，为 `Edge` 增加 `start/midpoint/end`，新增带
 `kind: 'solid'` 的 `Solid` 引用，并让 expose 保留几何及命名成员。它仍没有将
 模型实例的 `kind/name/color/children` 加入作者类型。这些改动已有链式拓扑查询和
-装配用例，不能重新归为没有用例的候选属性；其集成状态由 #27 跟踪。
+装配用例，不能重新归为没有用例的候选属性。该项现已合并到 main；以上属性表保留
+接管基线的复核结果，后续几何引用与类型导出分别以 #27、#34 的实现为准。
 
 ## 已确认
 
@@ -115,7 +116,10 @@ screws 也已有具体用途的公开属性：`ISO4762.specifications` 及其规
   export。模型实例的 runtime identity、trace、snapshot、资源释放及 `kind`
   元数据已从作者类型收起；拓扑引用的 `kind/id` 仍正式公开。
 - 公开 API 涉及的类型一并导出，包括泛型约束、返回类型及递归命名依赖；模型类型
-  由 root 提供，Replicad builder 类型由 `./replicad` 提供。`Quaternion` 当前只涉及
+  由 root 提供，Replicad builder 类型由 `./replicad` 提供。screws 返回类型涉及的
+  `SocketCapScrewElements`、`SocketCapHoleElements` 和
+  `CounterboredSocketCapHoleElements` 也从 `ISO4762` namespace 导出。
+  `Quaternion` 当前只涉及
   tooling 变换签名，已由 tooling 导出。类型导出规则及补齐实现由
   [#34](https://github.com/vilicvane/code3d/issues/34) 跟踪，不再作为待决定事项。
 - 未使用的 `withChildren` 已确认删除，不预留或公开子项替换接口；实施由

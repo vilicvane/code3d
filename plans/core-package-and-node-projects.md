@@ -301,9 +301,22 @@ The working execution model is:
    Do not forcibly dispose models that an installed package may cache privately.
    Unreachable Replicad wrappers release native resources through finalizers.
 
-Tooling initializes OpenCascade and `@code3d/solver` from the same selected
-package graph, including each module's own WASM asset. Node's core
-entry performs both installations; App installs both through the selected
+Tooling initializes OpenCascade and `@code3d/solver` from the same
+selected package graph, including each module's own WASM asset.
+The core package selects `@code3d/opencascade`, whose checked-in runtime is
+rebuilt from a pinned toolchain and binding configuration. Its generator patch
+restores native destruction for classes that provide both ordinary and placement
+delete. Upstream 1.0.0 and 1.1.0 incorrectly emit empty destructors for these
+classes; invalidating JavaScript handles alone did not free their native geometry.
+Topology traversal also releases every owned explorer result, including duplicate
+occurrences, and consumes raw handles when creating independent Replicad wrappers.
+The core Replicad interface also consumes the native B-Rep reader result before
+returning an independent shape, so repeated screw-cache reads release their
+geometry. Box construction owns and releases its temporary native point.
+See [the kernel package](../packages/opencascade/README.md) for the source pins
+and reproducible build command.
+
+Node's core entry performs both installations; App installs both through the selected
 tooling entry before evaluating author code.
 
 Call `beginModelEvaluation(): void` before each serial source
@@ -347,7 +360,53 @@ Distinct compiled code remains until the Worker ends (project close, execution
 cancellation, or timeout). Ordinary completed source edits retain that Worker
 and its expensive kernel caches. The 360-edit isolated natural-GC experiment
 released obsolete model wrappers and kept geometry caches hot; full project
-worker measurements and the real Windows directory check remain tracked in #12.
+Worker acceptance now also covers a real Windows npm directory through the native
+picker and a `DirectoryFileReader`. The full Worker reads only reached package
+files, without enumerating `node_modules`.
+
+Dependency graph preparation is serialized only until its unevaluated static
+modules are reserved. Execution runs outside that lock; each completed module
+publishes its namespace and wakes imports waiting for that module. This preserves
+shared dependency identity under concurrent imports, including when a parent
+uses top-level await to import a second graph that shares an already initialized
+child. Failed graphs release waiters and retain their evaluation error for the
+runtime lifetime. Unrelated imports remain usable.
+
+The supported local-project baseline is ordinary npm installations in Windows
+Chromium and Node 24 (verified with win32 Node 24.13.1). Browser execution requires
+browser-compatible packages; Node built-ins and native addons are diagnosed,
+without automatic polyfills. Symbolic-link layouts used by pnpm or workspace
+links have no support claim in this baseline. Dynamic imports must have a string
+literal specifier; computed specifiers receive a source diagnostic. Relative
+resource URLs use `new URL(literal, import.meta.url)`.
+
+Build diagnostics retain the original file and UTF-16 source range, including
+imports preceded by multibyte UTF-8 text. Resolver errors use the importing source
+location rather than plugin implementation stacks. Runtime package preparation
+errors identify an author import when one exists.
+
+Full-Worker acceptance on Windows Chrome 152 uses a multi-file plate fillet
+plus ISO4762 screw project installed with npm. Measurements distinguish the
+kernel's `wasmMemory.buffer.byteLength` from JavaScript heap and CDP backing
+storage: backing storage alone did not reveal the native geometry leak. The
+corrected kernel passes 10,000 owned-shape release cycles and 1,200 distinct
+fillet/mesh operations with its linear memory remaining at 100 MiB. The same
+owned-shape regression fails against the upstream 1.0.0 kernel.
+
+With the final package graph, 360 distinct edits plus five identical repeats in
+one Worker kept WASM linear memory at 208,732,160 bytes (about 199 MiB). All 366
+observed plate WeakRefs were empty after GC. The cold compilation took 5.52 s;
+subsequent edits had a 458 ms median and 588 ms p95. Only 46 distinct package
+files were read. The bounded operation cache reached 256 entries.
+
+Compiled ESM code grew from 924,325 to 3,918,531 bytes, about 8.3 KB per distinct
+variant; the five identical recompilations added no code. JS used heap after GC
+grew from 46.0 MB to 56.4 MB.
+
+Distinct compiled ESM code remains until the Worker ends; source variants are
+content-deduplicated. These measurements do not claim zero JS growth for
+unlimited distinct edits. Closing the project or terminating its Worker releases
+the complete native-module cache. Full acceptance details are tracked in #12.
 
 ## Implementation sequence
 
@@ -448,28 +507,26 @@ At minimum, verify:
 - production build, typecheck, focused unit tests, and host-browser interaction
   checks all pass.
 
-## Decision checkpoints
+## Confirmed support boundaries
 
-No decision is currently required before the existing topology milestone
-finishes. During the refactor, ask the user if evidence makes any of these
-choices materially ambiguous:
-
-1. The minimum supported Node release and whether native type stripping is a
-   hard project requirement or `node --import=tsx` is acceptable.
-2. Whether direct Node import must initialize OpenCascade invisibly, or a
-   visible asynchronous runtime boundary is acceptable in author code.
-3. Which package managers and local/workspace symlink layouts belong in the
-   first supported contract.
-4. Whether App must support arbitrary Node-oriented dependencies through
-   polyfills, or should reject everything without a browser-compatible path.
-5. Whether code3d-aware reusable dependencies expose only their public results
-   to App tracing or also publish inspectable internal source metadata.
-6. Resolved through #12's isolated experiments: native ESM with internal fresh
-   source execution scopes and persistent dependency scopes replaces
-   Babel/SystemJS. Complete the lifecycle and real-directory acceptance checks
-   before delivery.
-7. Resolved: the App package is `@code3d/app` at `packages/app`, alongside
-   `packages/core` and reusable modeling packages such as `packages/screws`.
+- Node 24 is the documented runtime; the native Windows acceptance used
+  Node 24.13.1 for direct TypeScript, TypeScript emit, and emitted JavaScript.
+  Authors do not need `tsx` or an initialization function.
+- The Node core entry initializes both OpenCascade and the constraint solver
+  before author module execution. App initializes the selected browser
+  package through its tooling entry.
+- Ordinary npm installations are the verified local layout. No support claim
+  is made for pnpm/workspace symlinks or paths outside the selected directory.
+- Browser dependencies must provide a browser-compatible implementation.
+  Node built-ins and native addons are rejected without polyfills.
+- Reusable packages are uninstrumented dependencies. Their public model values
+  participate in App snapshots; their private implementation source is not
+  transformed into author traces.
+- Native ESM with internal source execution scopes and persistent dependency
+  scopes replaces Babel/SystemJS. The lifetime and measurements above describe
+  the retained implementation.
+- The repository packages are `@code3d/app`, `@code3d/core`, `@code3d/solver`,
+  `@code3d/opencascade`, and `@code3d/screws`.
 
 ## Primary references
 

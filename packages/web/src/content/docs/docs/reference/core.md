@@ -72,6 +72,7 @@ shows which operations are supported by the value you hold.
 
 - `.fillet(radius, edgeIds?)`: round selected edges, or all edges.
 - `.chamfer(distance, edgeIds?)`: bevel selected edges, or all edges.
+- `.scaled(factor)`: uniformly scale a geometric model about local coordinate zero.
 - `.paint(color)`: return a recolored model; a group recursively overrides
   every descendant's color, including already-painted parts and nested groups.
 - `.relate(self => constraint)` or `.relate(self => [first, second])`: attach
@@ -81,6 +82,18 @@ shows which operations are supported by the value you hold.
 The outermost painted group determines the color of its complete subtree.
 Painting again replaces that override. Original models and shared parts used
 elsewhere retain their colors; previews and exports use the same result.
+
+## Scaling
+
+Solids, faces, curves, and points support `.scaled(factor)`. The factor must be
+positive and finite. For example, `box(20, 8, 12).scaled(0.5)` returns a new box
+with dimensions 10, 4, and 6, leaving the original model unchanged.
+
+Scaling uses local coordinate zero even after an origin edit. Geometry, named
+anchors, the `center` anchor, and the model's origin position scale together;
+topology IDs are preserved. Groups do not provide `.scaled()`; scale their
+geometric parts before composing them. To change only an exported file's unit
+conversion, use the [export scale](../../guides/exporting/#scale-and-orientation).
 
 ## Origins and rotation
 

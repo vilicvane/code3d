@@ -1,11 +1,9 @@
 import {
   assembleWire,
   basicFaceExtrusion,
-  cast,
   genericSweep,
   getOC,
   loft as makeLoft,
-  makeBox,
   makeBSplineApproximation,
   makeBezierCurve,
   makeCircle,
@@ -27,7 +25,12 @@ import {
   type Shape3D,
   type Wire as ReplicadWire,
 } from 'replicad';
-import type {TopoDS_Shape} from 'replicad-opencascadejs';
+import {
+  castOwnedShape,
+  castOwnedShape3D,
+  centeredBoxShape,
+  shapeSubshapes,
+} from './kernel-shapes.js';
 import {
   addVectors,
   composeTransforms,
@@ -2166,7 +2169,7 @@ export function box(x: number, y: number, z: number): SolidModel {
     kind: 'solid',
     name: 'Box',
     geometry: evaluateSolidGeometry('box', [x, y, z], [], () => ({
-      shape: makeBox([-x / 2, -y / 2, -z / 2], [x / 2, y / 2, z / 2]),
+      shape: centeredBoxShape(x, y, z),
     })),
     elements: solidBoundsElements([
       [0, -y / 2, 0],
@@ -3056,21 +3059,6 @@ function makeSpineLoft(
   }
 }
 
-function castOwnedShape3D(shape: TopoDS_Shape): Shape3D {
-  let result: ReturnType<typeof cast>;
-  try {
-    result = cast(shape);
-  } finally {
-    shape.delete();
-  }
-  try {
-    return result.asShape3D();
-  } catch (error) {
-    result.delete();
-    throw error;
-  }
-}
-
 function shapeBounds(shape: AnyShape): LocalBounds {
   const boundingBox = shape.boundingBox;
   const [minimum, maximum] = boundingBox.bounds;
@@ -3311,8 +3299,8 @@ function unionSectionShape(left: Shape3D, right: Shape3D): AnyShape {
   );
   try {
     section.Build();
-    const sectionShape = cast(section.Shape());
-    const edges = sectionShape.edges;
+    const sectionShape = castOwnedShape(section.Shape());
+    const edges = shapeSubshapes(sectionShape, 'edge');
     if (edges.length === 0) {
       return sectionShape;
     }

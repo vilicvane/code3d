@@ -1,8 +1,9 @@
 import type * as esbuild from 'esbuild-wasm';
 import ts from '@typescript/typescript6';
-import {ProjectPackageResolver} from './package-resolver';
+import {ProjectPackageResolver, nodeBuiltinError} from './package-resolver';
 import {decodeProjectFile, type ProjectFileReader} from './file-reader';
 import type {ProjectAssets} from './project-assets';
+import {ModelDiagnosticError} from '../model/diagnostic';
 
 export type SourceTransform = (path: string, source: string) => string;
 export type ModuleFormats = ReadonlyMap<string, 'esm' | 'cjs'>;
@@ -55,146 +56,201 @@ export class ProjectBuilder {
       runtimePaths.set(namespace + ':' + generated, path);
       return {path: generated, namespace, pluginData: path};
     };
-    const result = await this.engine.build({
-      stdin: {
-        contents: entrySource,
-        sourcefile: '/.__code3d-entry.js',
-        resolveDir: '/',
-      },
-      bundle: true,
-      format: 'esm',
-      platform: 'browser',
-      target: 'es2022',
-      absWorkingDir: '/',
-      write: false,
-      metafile: true,
-      logLevel: 'silent',
-      plugins: [
-        {
-          name: 'code3d-project-files',
-          setup: build => {
-            build.onResolve({filter: /.*/}, async args => {
-              if (
-                args.namespace === 'runtime' &&
-                args.path === 'code3d:cached-namespace'
-              )
-                return runtimeModule(args.pluginData, 'runtime-value');
-              // Conditional dynamic imports in universal packages stay conditional.
-              // Executing a Node-only branch is rejected by the evaluator.
-              if (args.path.startsWith('node:'))
-                return {path: args.path, external: true};
-              const path = await this.resolver.resolve(
-                args.path,
-                args.importer || '/.__code3d-entry.js',
-                args.kind === 'require-call' ? 'require' : 'import',
-              );
-              if (path === false) return {path: args.path, namespace: 'empty'};
-              if (runtimeFiles.has(path))
-                return runtimeModule(
-                  path,
-                  runtimeFiles.get(path) === 'esm'
-                    ? 'runtime'
-                    : 'runtime-value',
-                );
-              return {path, namespace: 'project'};
-            });
-            build.onLoad({filter: /.*/, namespace: 'empty'}, () => ({
-              contents: '',
-              loader: 'js',
-            }));
-            build.onLoad({filter: /.*/, namespace: 'runtime'}, async args => {
-              const path: string = args.pluginData;
-              const bytes = await this.files.readFile(path);
-              if (!bytes) throw new Error(`Project file not found: ${path}`);
-              // The ESM facade keeps .mjs/.mts consumers out of CommonJS
-              // default-import interop. Re-exports retain the cached getters;
-              // assigning namespace.default to an exported const would not.
-              return {
-                contents:
-                  'export * from "code3d:cached-namespace";' +
-                  (hasDefaultExport(path, decodeProjectFile(bytes))
-                    ? '\nexport {default} from "code3d:cached-namespace";'
-                    : ''),
+    const result = await this.engine
+      .build({
+        stdin: {
+          contents: entrySource,
+          sourcefile: '/.__code3d-entry.js',
+          resolveDir: '/',
+        },
+        bundle: true,
+        format: 'esm',
+        platform: 'browser',
+        target: 'es2022',
+        absWorkingDir: '/',
+        write: false,
+        metafile: true,
+        logLevel: 'silent',
+        plugins: [
+          {
+            name: 'code3d-project-files',
+            setup: build => {
+              build.onResolve({filter: /.*/}, async args => {
+                try {
+                  if (
+                    args.namespace === 'runtime' &&
+                    args.path === 'code3d:cached-namespace'
+                  )
+                    return runtimeModule(args.pluginData, 'runtime-value');
+                  const path = await this.resolver.resolve(
+                    args.path,
+                    args.importer || '/.__code3d-entry.js',
+                    args.kind === 'require-call' ? 'require' : 'import',
+                  );
+                  if (path === false)
+                    return {path: args.path, namespace: 'empty'};
+                  if (path.endsWith('.node'))
+                    throw new Error(
+                      `Native Node addon ${args.path} is not available in the browser. Use a package with a browser implementation.`,
+                    );
+                  if (runtimeFiles.has(path))
+                    return runtimeModule(
+                      path,
+                      runtimeFiles.get(path) === 'esm'
+                        ? 'runtime'
+                        : 'runtime-value',
+                    );
+                  return {path, namespace: 'project'};
+                } catch (error) {
+                  return {
+                    errors: [
+                      {
+                        text:
+                          error instanceof Error
+                            ? error.message
+                            : String(error),
+                        detail: error,
+                      },
+                    ],
+                  };
+                }
+              });
+              build.onLoad({filter: /.*/, namespace: 'empty'}, () => ({
+                contents: '',
                 loader: 'js',
-                pluginData: path,
-              };
-            });
-            build.onLoad({filter: /.*/, namespace: 'runtime-value'}, args => ({
-              // CommonJS is used only as an internal getter-bearing value
-              // carrier (or for an actual CommonJS dependency).
-              contents:
-                runtimeFiles.get(args.pluginData) === 'cjs'
-                  ? `module.exports = __code3dModules.get(${JSON.stringify(args.pluginData)}).default;`
-                  : `const namespace = __code3dModules.get(${JSON.stringify(args.pluginData)});
+              }));
+              build.onLoad({filter: /.*/, namespace: 'runtime'}, async args => {
+                const path: string = args.pluginData;
+                const bytes = await this.files.readFile(path);
+                if (!bytes) throw new Error(`Project file not found: ${path}`);
+                // The ESM facade keeps .mjs/.mts consumers out of CommonJS
+                // default-import interop. Re-exports retain the cached getters;
+                // assigning namespace.default to an exported const would not.
+                return {
+                  contents:
+                    'export * from "code3d:cached-namespace";' +
+                    (hasDefaultExport(path, decodeProjectFile(bytes))
+                      ? '\nexport {default} from "code3d:cached-namespace";'
+                      : ''),
+                  loader: 'js',
+                  pluginData: path,
+                };
+              });
+              build.onLoad(
+                {filter: /.*/, namespace: 'runtime-value'},
+                args => ({
+                  // CommonJS is used only as an internal getter-bearing value
+                  // carrier (or for an actual CommonJS dependency).
+                  contents:
+                    runtimeFiles.get(args.pluginData) === 'cjs'
+                      ? `module.exports = __code3dModules.get(${JSON.stringify(args.pluginData)}).default;`
+                      : `const namespace = __code3dModules.get(${JSON.stringify(args.pluginData)});
                 Object.defineProperty(exports, '__esModule', {value: true});
                 for (const key of Object.keys(namespace)) {
                   Object.defineProperty(exports, key, {enumerable: true, get: () => namespace[key]});
                 }`,
-              loader: 'js',
-            }));
-            build.onLoad({filter: /.*/, namespace: 'project'}, async args => {
-              const bytes = await this.files.readFile(args.path);
-              if (!bytes)
-                throw new Error(`Project file not found: ${args.path}`);
-              if (args.path.endsWith('.wasm'))
-                return {contents: bytes, loader: 'binary'};
-              let source = decodeProjectFile(bytes);
-              if (
-                transform &&
-                !args.path.includes('/node_modules/') &&
-                !args.path.endsWith('.json')
-              ) {
-                source = transform(args.path, source);
-              }
-              if (this.assets && !args.path.endsWith('.json'))
-                source = await this.assets.rewrite(args.path, source);
-              if (!args.path.endsWith('.json'))
-                source = await this.rewriteDynamicImports(
-                  args.path,
-                  source,
-                  lazyPackages,
-                );
-              const captureFormat = captureModules?.get(args.path);
-              if (captureFormat) {
-                if (args.path.endsWith('.json'))
-                  source =
-                    'module.exports = JSON.parse(' +
-                    JSON.stringify(source) +
-                    ');';
-                if (captureFormat === 'cjs') {
-                  source = `let __code3dFailed = false;
+                  loader: 'js',
+                }),
+              );
+              build.onLoad({filter: /.*/, namespace: 'project'}, async args => {
+                const bytes = await this.files.readFile(args.path);
+                if (!bytes)
+                  throw new Error(`Project file not found: ${args.path}`);
+                if (args.path.endsWith('.wasm'))
+                  return {contents: bytes, loader: 'binary'};
+                let source = decodeProjectFile(bytes);
+                if (
+                  transform &&
+                  !args.path.includes('/node_modules/') &&
+                  !args.path.endsWith('.json')
+                ) {
+                  source = transform(args.path, source);
+                }
+                if (this.assets && !args.path.endsWith('.json'))
+                  source = await this.assets.rewrite(args.path, source);
+                if (!args.path.endsWith('.json'))
+                  source = await this.rewriteDynamicImports(
+                    args.path,
+                    source,
+                    lazyPackages,
+                  );
+                const captureFormat = captureModules?.get(args.path);
+                if (captureFormat) {
+                  if (args.path.endsWith('.json'))
+                    source =
+                      'module.exports = JSON.parse(' +
+                      JSON.stringify(source) +
+                      ');';
+                  if (captureFormat === 'cjs') {
+                    source = `let __code3dFailed = false;
                     try { ${source} }
                     catch (__code3dError) { __code3dFailed = true; throw __code3dError; }
                     finally {
                       if (!__code3dFailed) __code3dRecordModule(${JSON.stringify(args.path)},
                         {get default() {return module.exports;}}, 'cjs');
                     }`;
-                  if (args.path.includes('/node_modules/'))
-                    source = `if (__code3dModules.has(${JSON.stringify(args.path)})) {
+                    if (args.path.includes('/node_modules/'))
+                      source = `if (__code3dModules.has(${JSON.stringify(args.path)})) {
                       module.exports = __code3dModules.get(${JSON.stringify(args.path)}).default;
                     } else { ${source} }`;
-                } else {
-                  source += `\nimport * as __code3dCurrentModule from ${JSON.stringify(args.path)};
+                  } else {
+                    source += `\nimport * as __code3dCurrentModule from ${JSON.stringify(args.path)};
                     __code3dRecordModule(${JSON.stringify(args.path)}, __code3dCurrentModule, 'esm');`;
+                  }
                 }
-              }
-              const extension = args.path.split('.').at(-1)!;
-              const loader: esbuild.Loader =
-                extension === 'json' && !captureFormat
-                  ? 'json'
-                  : extension === 'tsx'
-                    ? 'tsx'
-                    : extension === 'jsx'
-                      ? 'jsx'
-                      : ['ts', 'mts', 'cts'].includes(extension)
-                        ? 'ts'
-                        : 'js';
-              return {contents: source, loader, resolveDir: '/'};
-            });
+                const extension = args.path.split('.').at(-1)!;
+                const loader: esbuild.Loader =
+                  extension === 'json' && !captureFormat
+                    ? 'json'
+                    : extension === 'tsx'
+                      ? 'tsx'
+                      : extension === 'jsx'
+                        ? 'jsx'
+                        : ['ts', 'mts', 'cts'].includes(extension)
+                          ? 'ts'
+                          : 'js';
+                return {contents: source, loader, resolveDir: '/'};
+              });
+            },
           },
-        },
-      ],
-    });
+        ],
+      })
+      .catch(async (error: esbuild.BuildFailure) => {
+        if (!error.errors?.length) throw error;
+        const message = error.errors[0];
+        if (message.detail instanceof ModelDiagnosticError)
+          throw message.detail;
+        const location = message.location;
+        const file = location?.file.replace(/^project:/, '');
+        const bytes = file?.startsWith('/')
+          ? await this.files.readFile(file)
+          : undefined;
+        let sourceRef;
+        if (bytes && location && file) {
+          const source = decodeProjectFile(bytes);
+          const lines = source.split('\n');
+          const line = lines[location.line - 1] ?? '';
+          // esbuild columns are UTF-8 bytes; editor offsets are UTF-16 units.
+          const utf8 = new TextEncoder().encode(line);
+          const prefix = new TextDecoder().decode(
+            utf8.slice(0, location.column),
+          );
+          const span = new TextDecoder().decode(
+            utf8.slice(location.column, location.column + location.length),
+          );
+          const start =
+            lines
+              .slice(0, location.line - 1)
+              .reduce((n, text) => n + text.length + 1, 0) + prefix.length;
+          sourceRef = {file, start, end: start + Math.max(1, span.length)};
+        }
+        throw new ModelDiagnosticError({
+          kind: message.pluginName ? 'module' : 'syntax',
+          summary: message.text,
+          details: error.message,
+          ...(sourceRef ? {sourceRef} : {}),
+        });
+      });
     return {
       source: result.outputFiles![0].text,
       files: Object.keys(result.metafile!.inputs)
@@ -242,18 +298,52 @@ export class ProjectBuilder {
     const visit = (node: ts.Node): void => {
       if (
         ts.isCallExpression(node) &&
-        node.expression.kind === ts.SyntaxKind.ImportKeyword &&
-        node.arguments.length === 1 &&
-        ts.isStringLiteralLike(node.arguments[0]) &&
-        !node.arguments[0].text.startsWith('node:')
-      )
+        node.expression.kind === ts.SyntaxKind.ImportKeyword
+      ) {
+        if (
+          !node.arguments.length ||
+          !ts.isStringLiteralLike(node.arguments[0])
+        )
+          throw new ModelDiagnosticError({
+            kind: 'module',
+            summary:
+              'Dynamic imports require a string literal so Studio can build the project module graph.',
+            sourceRef: {
+              file: path,
+              start: node.getStart(parsed),
+              end: node.getEnd(),
+            },
+          });
         imports.push(node);
+      }
       ts.forEachChild(node, visit);
     };
     visit(parsed);
     for (const node of imports.reverse()) {
       const specifier = (node.arguments[0] as ts.StringLiteralLike).text;
-      const resolved = await this.resolver.resolve(specifier, path);
+      if (specifier.startsWith('node:')) {
+        source =
+          source.slice(0, node.getStart(parsed)) +
+          'Promise.reject(new Error(' +
+          JSON.stringify(nodeBuiltinError(specifier).message) +
+          '))' +
+          source.slice(node.getEnd());
+        continue;
+      }
+      let resolved;
+      try {
+        resolved = await this.resolver.resolve(specifier, path);
+      } catch (error) {
+        throw new ModelDiagnosticError({
+          kind: 'module',
+          summary: error instanceof Error ? error.message : String(error),
+          sourceRef: {
+            file: path,
+            start: node.getStart(parsed),
+            end: node.getEnd(),
+          },
+        });
+      }
       if (resolved && resolved.includes('/node_modules/')) {
         source =
           source.slice(0, node.getStart(parsed)) +

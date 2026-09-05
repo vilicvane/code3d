@@ -31,6 +31,10 @@ const spec = ISO4762.resolveSpecification('M6');
 const nominalThreadLength = ISO4762.threadLength(spec, 30); // 24 mm
 ```
 
+The `ISO4762` namespace also exports the types used by these APIs, including
+`Specification`, `ScrewInput`, `SocketCapScrewElements`,
+`SocketCapHoleElements`, and `CounterboredSocketCapHoleElements`.
+
 The package currently implements ISO 4762 socket-head cap screws. Its source
 is organized by standard so additional screw families can be added without
 mixing their dimensional tables or model-specific elements.

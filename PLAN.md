@@ -520,9 +520,9 @@ and multiple-selection viewport picking, before/after comparison, reversible
 selection, and source write-back are implemented. The Properties panel and GUI
 operation-insertion path were removed pending a broader interaction design.
 
-### 4b. Core package and Node-native projects — active
+### 4b. Core package and Node-native projects
 
-Remaining scope and live status: [#6](https://github.com/vilicvane/code3d/issues/6).
+Discussion and acceptance: [#6](https://github.com/vilicvane/code3d/issues/6).
 
 - Extract the author runtime into a real ESM `@code3d/core` package with emitted
   JavaScript, declarations, explicit exports, and an explicit tooling boundary.
@@ -536,11 +536,11 @@ Remaining scope and live status: [#6](https://github.com/vilicvane/code3d/issues
 - Preserve one project-local core/kernel runtime during repeated App
   evaluations without coupling the host to its concrete runtime classes.
 
-Status: the repository is now a workspace with `@code3d/app`, `@code3d/core`,
-and the standard-model demo package `@code3d/screws`. Core emits a shared
-public type surface plus Node and tooling entries; package resolution from an
-opened project's own `node_modules` remains the active next boundary. The
-detailed working plan is
+The repository uses `@code3d/app`, `@code3d/core`, `@code3d/solver`,
+`@code3d/opencascade`, and `@code3d/screws`. Core emits a shared public type surface plus Node and tooling
+entries. App reads the selected project's package implementations and
+metadata lazily, evaluates native ESM in a persistent project Worker, and
+loads the same packages' declarations into Monaco. The detailed design is
 [plans/core-package-and-node-projects.md](plans/core-package-and-node-projects.md).
 It records confirmed constraints separately from technical choices that should
 remain adjustable as implementation evidence arrives.
@@ -596,10 +596,10 @@ not approval to predeclare additional parameter kinds.
   the fragment, then join annotation and ordinary source parents without
   exposing generated helper code.
 - Use one semantic `kind` discriminator for value and selectable parameters.
-  Function implementations own runtime defaults. The confirmed extension for
-  displaying an omitted parameter's default is explicit `@code3d.param`
-  metadata, shared by source and emitted declarations; this display capability
-  has since shipped in main (see [#29](https://github.com/vilicvane/code3d/issues/29)).
+  Function implementations own runtime defaults. Optional numeric parameters
+  display defaults for omitted arguments through explicit `@code3d.param`
+  `default` metadata, shared by source and emitted declarations
+  (see [#29](https://github.com/vilicvane/code3d/issues/29)).
   Do not extract implementation initializers or inject annotation defaults into
   non-interactive execution. Authors keep the display metadata consistent with
   the implementation. Resolve effective selections, environment-dependent steps,
