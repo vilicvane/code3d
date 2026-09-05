@@ -507,6 +507,55 @@ class CoordinationTests(unittest.TestCase):
         self.assertEqual(self.state(), before)
         self.merge(self.claim(env=pane_env), env=pane_env)
 
+    def test_reserve_port_skips_primary_port_in_custom_ranges(self):
+        self.register()
+        port = int(
+            self.coordinate(
+                self.dev,
+                "reserve-port",
+                "--agent",
+                "developer",
+                "--start",
+                "3133",
+                "--end",
+                "3143",
+            ).strip()
+        )
+        self.assertGreater(port, 3133)
+        self.assertLessEqual(port, 3143)
+        self.assertEqual(self.state()["agents"]["developer"]["server"]["port"], port)
+        before = self.state()
+        self.coordinate(
+            self.dev,
+            "reserve-port",
+            "--agent",
+            "developer",
+            "--start",
+            "3133",
+            "--end",
+            "3133",
+            expected=2,
+        )
+        self.assertEqual(self.state(), before)
+
+    def test_server_started_rejects_primary_port_from_an_older_reservation(self):
+        self.register()
+        state = self.state()
+        state["agents"]["developer"]["server"] = {"state": "reserved", "port": 3133}
+        self.write_state(state)
+        self.coordinate(
+            self.dev,
+            "server-started",
+            "--agent",
+            "developer",
+            "--port",
+            "3133",
+            "--command",
+            "vite --port 3133",
+            expected=2,
+        )
+        self.assertEqual(self.state(), state)
+
     def test_integration_preserves_server_and_task_context_and_heartbeat_updates_lock(
         self,
     ):

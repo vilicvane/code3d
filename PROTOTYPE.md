@@ -128,6 +128,11 @@ npm install
 npm run dev
 ```
 
+App 默认使用 `http://localhost:3133`（`0xc3d`），该端口专供主 worktree。
+开发 worktree 按 [worktree 开发流程](.agents/skills/worktree-development/SKILL.md#独立开发服务器)
+预留其他端口，再显式传入，例如 `npm run dev -- --port 5174`。
+端口占用时直接失败，不自动递增。
+
 生产构建：
 
 ```bash

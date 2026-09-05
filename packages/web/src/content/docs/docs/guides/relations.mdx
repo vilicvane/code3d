@@ -1,6 +1,6 @@
 ---
 title: Positioning with relations
-description: Compose parts by connecting named faces and frames.
+description: Compose parts by combining relations between points, lines, planes, and frames.
 ---
 
 import ModelExample from '../../../../components/ModelExample.astro';
@@ -12,19 +12,52 @@ model value and resolved when the parts are composed.
 
 ## Connect two faces
 
-In the example, `part.bottom.on(base.top)` connects two complete frames.
-By default, `on()` gives them opposing orientations, as if two mating faces
-were touching. Use `.flip()` when they should share the other orientation.
+In the example, `part.bottom.on(base.top)` makes the two planes coincide with
+opposing normals. Their centers align by default, but centering is a preference:
+other relations can slide the faces along their shared plane. Use `.flip()`
+when their normals should point in the same direction.
 
-`offset(x, y, z)` applies an offset in the **target anchor's frame**, not
-necessarily the global coordinate system. This lets placement follow the part
-it is attached to.
+An explicit `offset(x, y, z)` fixes the source anchor's position in the
+**target anchor's frame**, including when all three values are zero. This lets
+placement follow the part it is attached to. Repeated offsets add together.
+
+## Combine conditions
+
+Return an array from `relate()` to solve several relations together:
+
+```ts
+import {box, group} from '@code3d/core';
+
+const first = box(10, 10, 10);
+const second = box(20, 20, 20).relate(self => [
+  self.edge(3).on(first.edge(1)),
+  self.top.on(first.bottom),
+]);
+
+export default group([first, second]);
+```
+
+The edge relation makes the reference lines collinear, while the face relation
+places the second box below the first. Together they place the second box at
+`[5, -15, 0]`; neither relation forces both anchor centers to match.
+
+Points coincide with points or lie on reference lines and planes. Lines can
+coincide or lie in a plane; two planes coincide with opposing normals. A
+relation involving a complete frame fixes the complete pose. Edge and surface
+anchors describe reference lines and planes, so their finite boundaries need
+not match. Curved topology uses a sampled tangent or normal frame.
+
+The solver chooses a nearby valid pose using centering and orientation
+preferences. Conflicting relations report a failure; because solving is local
+and nonlinear, a failure is not proof that every possible pose is invalid.
 
 ## Inspect the right scope
 
 The related post on its own still displays in its local frame. Select the
 `group` to see the post positioned against the base, or place the cursor in
-the relation to inspect both participants.
+the relation to inspect both participants. Selecting a named anchor or an
+`edge`, `surface`, or `vertex` call keeps the other participant and downstream
+composition peers visible while highlighting the selected anchor.
 
 The callback parameter in `relate(part => ...)` is the new related model
 value. Operations preserve the observable meaning of existing model values.

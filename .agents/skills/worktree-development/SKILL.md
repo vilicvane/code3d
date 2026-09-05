@@ -41,6 +41,12 @@ python3 "$COORDINATOR" --repo <worktree> <command>
 
 ## 独立开发服务器
 
+App 默认开发端口为 `3133`（`0xc3d`），专供主 worktree 使用。主区运行
+`npm run dev` 即使用该端口；端口占用时直接失败，不自动递增。开发 worktree
+必须通过下述协调步骤预留其他端口并显式传入 `--port`。App 会拒绝 linked
+worktree 使用 `3133`；协调脚本即使收到包含 `3133` 的自定义范围也会跳过它，
+并拒绝把它登记为任务服务器端口。
+
 每个开发 worktree 使用独立依赖目录、Vite cache 和端口。缺少依赖时在该 worktree 内运行 `timeout 300s npm install`，再运行 `timeout 300s npm run build:packages`；不要链接另一 worktree 的 `node_modules`。
 
 先原子预留端口：

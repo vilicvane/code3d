@@ -59,10 +59,11 @@ implementation context and historical outcomes, not a competing work queue.
   Rendering this value on its own preserves its intrinsic local placement;
   relation placement is resolved only when the value participates in a
   composition.
-- Anchor methods return immutable constraint expressions. `on()` relates two
-  complete local frames with opposing orientation, `flip()` selects the other
-  orientation, and `offset(x, y, z)` adjusts the relation in the target Anchor's
-  frame.
+- Anchor methods return immutable constraint expressions. `on()` constrains
+  points, lines, planes, or complete frames according to the anchor kinds.
+  Centering and default orientation are secondary preferences. Face `flip()`
+  selects aligned normals; explicit `offset(x, y, z)` pins the anchor position
+  in the target frame, including an explicit zero offset.
 - Standalone `union`, `cut`, and `intersect` functions are geometry-evaluation
   boundaries. They collect and solve operand relations without introducing an
   author-facing composition object.
@@ -145,9 +146,10 @@ implementation context and historical outcomes, not a competing work queue.
 - Units remain UI metadata; no implicit runtime conversion occurs.
 - Runtime trace data may explain and locate values, but must not constrain which
   JavaScript/TypeScript construction patterns users can write.
-- Named point, line, and face elements retain complete local frames. Solid
-  relations remain directly solvable frame relations; code3d does not infer a
-  partial solid-constraint system merely from an element's geometric kind.
+- Named point, line, and face elements retain complete local reference frames
+  while their kinds determine geometric degrees of freedom. A composition's
+  relations are solved jointly by the OndselSolver WASM backend. Groups retain
+  their children's local assembly and move as rigid bodies in outer groups.
 - The editor caret resolves the exact source occurrence being inspected. A
   value site renders that value alone. A collection result places its members
   together using their resolved relations, including singleton collections;
@@ -180,10 +182,14 @@ implementation context and historical outcomes, not a competing work queue.
   context from the concrete downstream composition that consumes the
   constrained value. The constrained value remains the relation-edit scope for
   spatial tools; the relation target does not replace downstream context.
-- A caret on a named-element property keeps its surrounding relation visible,
-  promotes the owning model, and highlights the typed point, line, face, or
-  frame. Face elements highlight matching B-Rep face groups and their real
-  boundaries rather than drawing a proxy plane. A focused item in Monaco's
+- Named-element properties and topology anchors share one relation-preview
+  context: the owning model is the focus, with the other participant and the
+  concrete downstream composition visible as dimmed peers. Matching uses the
+  enclosing constraint's source range and execution, including repeated calls
+  sharing a reference model. Topology accessors retain their own selection IDs,
+  arguments, and tool execution. Named point, line, face, and frame elements
+  retain typed decorations; faces highlight matching B-Rep face groups and
+  their real boundaries rather than drawing a proxy plane. A focused item in Monaco's
   native completion list is applied to an in-memory project snapshot and that
   completed snapshot drives a transient compiled viewport; named elements use
   the current module for immediate feedback while the speculative compile is
@@ -333,8 +339,10 @@ code3d annotations.
 is complete: selecting an `on()` or `offset()` constraint renders the
 constrained value with peers from its concrete downstream composition, exposes
 multiple consumers as separate scopes, and enables relation tools directly.
-Named-element property occurrences now refine that scope: the owning model and
-typed anchor are highlighted while all relation participants remain visible.
+Named-element properties and edge, surface, and vertex anchors refine that
+scope through the same context resolver. The owning model and selected anchor
+are highlighted while all relation participants remain visible; each accessor
+keeps its own editing arguments across runtime calls and downstream consumers.
 Focused items in Monaco's native TypeScript member completion reuse the same
 viewport preview immediately, then replace it with a model compiled from the
 hypothetically accepted completion. The incomplete source and caret remain
@@ -378,24 +386,26 @@ frame decorations without editing source or retaining a parallel selection.
 Status: [R-002](requests/closed/R-002-unified-collapsible-gui-panels.md) is
 implemented as reusable dock panel infrastructure.
 
-### 3. Anchor constraint graph — first slice complete
+### 3. Anchor constraint graph — geometric solver
 
 - Keep B-Rep geometry local and store constraints on immutable model copies.
 - Support a model's intrinsic frame and type-safe named point, line, and face
   elements. Primitives provide canonical center, top, bottom, and axis elements;
   reusable models can expose and rename internal elements in their own frame.
-- Solve directly determined rigid-frame `on()` relations and validate multiple
-  constraints for consistency.
-- Let `flip()` choose between opposed and aligned frame orientation without
-  encoding front/back as a special-case placement rule.
+- Solve simultaneous geometric `on()` relations using the shared Node/Worker
+  WASM module, with geometric feasibility preceding secondary placement
+  preferences. Validate every original equation after redundancy handling.
+- Check directed face and complete-frame orientation branches. Line anchors
+  are geometrically unoriented, with `flip()` changing the preferred direction.
 - Preserve a related value's intrinsic local placement when it is rendered on
   its own. Resolve relation placement when rendering a composition or evaluating
   a compositional geometry operation such as a Boolean or loft.
 - Preserve constraint source and parameter provenance for GUI tools.
 
-Status: implemented for directly solvable frame relations. The old public
-`at`, `move`, and `rotate` placement paths were removed rather than retained as
-compatibility APIs.
+The independently determined full-pose comparison path has been removed.
+Primitive canonical anchors use their exact dimensions instead of padded
+OpenCascade bounds. Build and solver details are in
+[`@code3d/solver`](packages/solver/README.md).
 
 ### 4. Relation-aware GUI tools — translation slice complete
 
@@ -624,9 +634,9 @@ establish the next schema boundary.
   Bezier, and interpolated spline constructors.
 - Make `.surface(id)`, `.edge(id)`, and `.vertex(id)` usable as face, line, and
   point anchors. Faces use their center and normal, edges use their midpoint
-  and tangent, and vertices use their point with the owning model orientation;
-  all remain complete deterministic frames rather than introducing a partial
-  constraint solver.
+  and tangent, and vertices use their point with the owning model orientation.
+  The solver constrains the resulting reference lines and planes, including
+  those of curved topology; it does not match complete curves or surfaces.
 - Let `loft(sections, {spine})` transform every related input into the first
   section's frame. Without a spine it builds a through-sections loft; with a
   spine it uses a multi-section pipe shell so the curve affects the generated
@@ -656,6 +666,10 @@ Design discussion and live scope: [#8](https://github.com/vilicvane/code3d/issue
 
 Unresolved constraint, topology naming, Boolean provenance, scaling, and runtime
 retention questions are tracked in [#9](https://github.com/vilicvane/code3d/issues/9).
+The geometric solver implementation belongs to
+[#21](https://github.com/vilicvane/code3d/issues/21). The earlier
+[experiment](plans/constraint-solver-wasm-evaluation.md) records the evidence
+leading to the shared OndselSolver WASM backend.
 Source lifting for combination tools belongs to [#8](https://github.com/vilicvane/code3d/issues/8).
 Public API and interoperability review belongs to [#5](https://github.com/vilicvane/code3d/issues/5).
 Confirmed outcomes return to the design documents; discussion status stays in
