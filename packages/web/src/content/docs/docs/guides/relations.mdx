@@ -4,6 +4,10 @@ description: Compose parts by combining relations between points, lines, planes,
 ---
 
 import ModelExample from '../../../../components/ModelExample.astro';
+import SourceCode from '../../../../components/SourceCode.astro';
+import ArrowIcon from '../../../../components/ArrowIcon.astro';
+import {appUrl} from '../../../../lib/site';
+import source from '../../../../../../app/examples/combined-constraints.ts?raw';
 
 A relation describes how one part sits against another. It is attached to a
 model value and resolved when the parts are composed.
@@ -25,17 +29,14 @@ placement follow the part it is attached to. Repeated offsets add together.
 
 Return an array from `relate()` to solve several relations together:
 
-```ts
-import {box, group} from '@code3d/core';
+<SourceCode source={source} file="combined-constraints.ts" />
 
-const first = box(10, 10, 10);
-const second = box(20, 20, 20).relate(self => [
-  self.edge(3).on(first.edge(1)),
-  self.top.on(first.bottom),
-]);
-
-export default group([first, second]);
-```
+<p>
+  <a href={appUrl('combined-constraints.ts')} target="_blank" rel="noopener">
+    {'Open this example in the App '}
+    <ArrowIcon />
+  </a>
+</p>
 
 The edge relation makes the reference lines collinear, while the face relation
 places the second box below the first. Together they place the second box at

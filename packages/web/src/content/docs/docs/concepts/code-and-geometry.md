@@ -25,6 +25,12 @@ One source expression can execute multiple times, such as inside a loop or
 function. The App tracks those runtime results and lets source and viewport
 selection identify the relevant instance.
 
+Inputs and outputs are separate contexts. In `part.rotate(0, 30, 0)`, the
+`part` occurrence refers to the input model, while the method call refers to
+the rotated result. Model-valued arguments are tracked through ordinary
+function calls too; this inspection does not require tool annotations.
+See [inspecting inputs and results](../../getting-started/app/#inspect-inputs-and-results).
+
 A collection of models uses the members' resolved composition positions,
 including arrays, sets, and map values. Even a one-element collection keeps
 that placement; inspecting the member by itself uses its local frame. This

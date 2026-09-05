@@ -67,7 +67,8 @@ shows which operations are supported by the value you hold.
 - `.fillet(radius, edgeIds?)`: round selected edges, or all edges.
 - `.chamfer(distance, edgeIds?)`: bevel selected edges, or all edges.
 - `.paint(color)`: assign a model color.
-- `.relate(self => constraint)`: return a value with relative placement.
+- `.relate(self => constraint)` or `.relate(self => [first, second])`: attach
+  one or more relations for placement in a composition.
 - `.expose({name: element})`: publish a typed named-element interface.
 
 ## Origins and rotation

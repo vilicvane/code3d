@@ -17,6 +17,34 @@ the models it produces.
 The viewport may show surrounding parts dimmed when they help explain a
 relation or operation. The active geometry remains the main context.
 
+### Inspect inputs and results
+
+```ts
+import {box} from '@code3d/core';
+
+const blank = box(24, 6, 14);
+const rounded = blank.fillet(1);
+
+function centered(model: typeof blank) {
+  return model.originCenter();
+}
+const result = centered(rounded);
+```
+
+In `blank.fillet(1)`, place the cursor on `blank` to inspect the input before
+rounding, then on `fillet(1)` to inspect the operation's result. In
+`centered(rounded)`, the `rounded` argument is also an inspectable input,
+even though `centered` is an ordinary function without tool annotations.
+
+The App follows evaluated model values, not a list of function names. Imported
+aliases, namespace calls, and models in arrays or options objects can retain
+their input contexts too. A failed call can still expose inputs that were
+evaluated before it failed.
+
+Inspection does not automatically add a parameter panel or a drag handle.
+Panels use [parameter annotations](../../guides/model-tools/), while spatial
+handles require an operation with supported positioning or rotation semantics.
+
 ## Use a contextual tool
 
 Tools depend on the call or value under the editor cursor. A primitive can

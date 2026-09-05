@@ -214,7 +214,8 @@ scope 的 edit plan。
 
 `origin`、`originOffset`、`originVertex`、`originCenter` 和 `rotate` 在 operation snapshot 中记录
 局部几何坐标下的原点和本次操作向量。模型 snapshot 同时提供当前原点，tooling
-protocol 3 统一这些数据与参数 provenance；viewport 不从包围盒推断模型旋转中心。
+protocol 4 统一这些数据与参数 provenance，并从同一依赖图安装 OpenCascade 和约束求解器；
+viewport 不从包围盒推断模型旋转中心。
 
 `originCenter()` 取主体建立时的局部包围盒中心随模型变换后的位置，与 `.center`
 使用同一锚点。无参数操作通过 operation metadata 接入原点标记和手柄，不需要虚构参数。
