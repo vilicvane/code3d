@@ -13,6 +13,7 @@ import {normalizeProjectPath, type ModelProject} from '../project/project';
 import {createModelCompiler, type ModelModule} from './compiler';
 import {ProjectRuntime} from './project-runtime';
 import {ModuleEvaluator} from './module-evaluator';
+import type {CompilationProgress} from './compilation-progress';
 import {
   exportModel,
   type ModelExportInstance,
@@ -48,8 +49,9 @@ export class ProjectCompiler {
     rootPath: string,
     designContextId?: string,
     onLanguage?: (language: ProjectLanguage) => void,
-    onEvaluate?: () => void,
+    onProgress?: CompilationProgress,
   ): Promise<ModelModule> {
+    onProgress?.('loading-project');
     this.disposeGeometry();
     const changed = await this.files.refresh();
     const packageSelectionChanged = await this.packages.update(project);
@@ -86,9 +88,11 @@ export class ProjectCompiler {
         reader,
         builder,
         this.evaluator,
+        onProgress,
       );
       this.compiler = createModelCompiler(this.runtime.tooling, this.evaluator);
     }
+    onProgress?.('compiling-model');
     const root = normalizeProjectPath(rootPath);
     const contextFile = this.compiler!.designContextFile(
       project,
@@ -111,7 +115,7 @@ export class ProjectCompiler {
       language,
       discovery,
       designContextId,
-      onEvaluate,
+      () => onProgress?.('evaluating-model'),
       objects => {
         this.geometry = this.runtime!.tooling.retainModelGeometry(objects);
       },

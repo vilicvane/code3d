@@ -7,6 +7,7 @@ import {
   type ProjectEditorChange,
 } from './editor';
 import {ModelCompilerClient} from './model/compiler-client';
+import {compilationPhaseLabels} from './model/compilation-progress';
 import type {
   DesignArgumentContext,
   EdgeArgumentTarget,
@@ -169,7 +170,7 @@ app.innerHTML = `
                 <path d="m6 6 4 4m0-4-4 4" />
               </svg>
             </span>
-            <span id="viewport-status-label">Compiling model</span>
+            <span id="viewport-status-label">Loading editor</span>
           </div>
           <div class="viewport-dock-panels">
             <aside class="dock-panel design-arguments-panel" id="design-arguments-panel" aria-label="Design arguments">
@@ -828,7 +829,7 @@ async function runModel(
   const revision = ++runRevision;
   const sourceVersion = codeEditor.sourceVersion();
   compilingDesignContextId = designContextId;
-  setViewportStatus('busy', 'Compiling model');
+  setViewportStatus('busy', 'Preparing model');
   if (designContextId) {
     renderCurrentPanels();
   }
@@ -841,6 +842,7 @@ async function runModel(
       codeEditor.project(),
       codeEditor.currentFile(),
       designContextId,
+      phase => setViewportStatus('busy', compilationPhaseLabels[phase]),
     );
     if (
       revision !== runRevision ||
@@ -1038,6 +1040,11 @@ async function runCompletionPreview(
       preview.project,
       preview.cursor.file,
       selectedDesignContextId,
+      phase =>
+        setViewportStatus(
+          'busy',
+          `${compilationPhaseLabels[phase]} · ${focus.memberName}`,
+        ),
     );
     if (
       revision !== runRevision ||
