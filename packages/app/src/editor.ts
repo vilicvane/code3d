@@ -1467,34 +1467,34 @@ function annotationDecorations(
       }),
       options: annotationDecorationOptions('code3d-annotation'),
     });
-    if (annotation.name !== 'arguments' || annotation.value.length === 0) {
+    if (
+      (annotation.name !== 'arguments' && annotation.name !== 'param') ||
+      annotation.value.length === 0
+    ) {
       continue;
     }
 
-    const tokens = monaco.editor.tokenize(annotation.value, 'typescript')[0];
-    if (!tokens || tokens.length === 0) {
-      decorations.push({
-        range: sourceRange(model, {
-          file: path,
-          start: annotation.valueStart,
-          end: annotation.valueEnd,
-        }),
-        options: annotationDecorationOptions('code3d-annotation-value'),
+    const tokenLines = monaco.editor.tokenize(annotation.value, 'typescript');
+    let lineStart = annotation.valueStart;
+    annotation.value.split('\n').forEach((line, lineIndex) => {
+      const tokens = tokenLines[lineIndex] ?? [];
+      tokens.forEach((token, index) => {
+        const nextOffset = tokens[index + 1]?.offset ?? line.length;
+        const text = line.slice(token.offset, nextOffset);
+        if (!text.trim()) return;
+        decorations.push({
+          range: sourceRange(model, {
+            file: path,
+            start:
+              lineStart + token.offset + text.length - text.trimStart().length,
+            end: lineStart + token.offset + text.trimEnd().length,
+          }),
+          options: annotationDecorationOptions(
+            `code3d-annotation-value code3d-annotation-value-${annotationTokenKind(token.type)}`,
+          ),
+        });
       });
-      continue;
-    }
-    tokens.forEach((token, index) => {
-      const nextOffset = tokens[index + 1]?.offset ?? annotation.value.length;
-      decorations.push({
-        range: sourceRange(model, {
-          file: path,
-          start: annotation.valueStart + token.offset,
-          end: annotation.valueStart + nextOffset,
-        }),
-        options: annotationDecorationOptions(
-          `code3d-annotation-value code3d-annotation-value-${annotationTokenKind(token.type)}`,
-        ),
-      });
+      lineStart += line.length + 1;
     });
   }
   return decorations;

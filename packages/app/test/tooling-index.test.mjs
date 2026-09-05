@@ -1,21 +1,15 @@
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
 import {fileURLToPath} from 'node:url';
-import {createServer} from 'vite';
 import ts from '@typescript/typescript6';
+import {createAppTestServer} from './vite-test-server.mjs';
 
-const appRoot = fileURLToPath(new URL('..', import.meta.url));
 let server;
 let resolveProjectTooling;
 let sourceNodeKey;
 
 before(async () => {
-  server = await createServer({
-    root: appRoot,
-    appType: 'custom',
-    logLevel: 'error',
-    server: {middlewareMode: true, hmr: false},
-  });
+  server = await createAppTestServer();
   ({resolveProjectTooling, sourceNodeKey} = await server.ssrLoadModule(
     '/src/model/tool-schema.ts',
   ));

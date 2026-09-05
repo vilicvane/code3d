@@ -500,6 +500,11 @@ still use the common cache. Custom primitives use the standard mesh tolerance.
   annotation value as a statically inspectable JavaScript object literal and
   resolve the declaration through its TypeScript symbol and signature rather
   than the spelling used at the call site.
+- Give `@code3d.param` the same embedded-value highlighting as design
+  arguments, including multiline configuration. Complete parameter names from
+  the callable signature and configuration from its actual TypeScript types.
+  Share static validation with compilation and report errors inline even
+  before the callable is used.
 - Use one semantic `kind` discriminator for value and selectable parameters.
   Keep runtime defaults, effective selections, environment-dependent steps,
   display ranges, units, and other presentation policy out of the declaration

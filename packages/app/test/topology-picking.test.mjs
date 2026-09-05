@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
-import {fileURLToPath} from 'node:url';
 import {Matrix4, PerspectiveCamera} from 'three';
-import {createServer} from 'vite';
+import {createAppTestServer} from './vite-test-server.mjs';
 
 let server;
 let pickScreenTopology;
@@ -10,12 +9,7 @@ const viewport = {width: 1000, height: 800};
 const camera = new PerspectiveCamera(60, 1.25, 0.1, 1000);
 
 before(async () => {
-  server = await createServer({
-    root: fileURLToPath(new URL('..', import.meta.url)),
-    appType: 'custom',
-    logLevel: 'error',
-    server: {middlewareMode: true, hmr: false},
-  });
+  server = await createAppTestServer();
   ({pickScreenTopology} = await server.ssrLoadModule(
     '/src/rendering/topology-picking.ts',
   ));

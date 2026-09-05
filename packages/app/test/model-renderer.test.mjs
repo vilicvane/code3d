@@ -1,20 +1,13 @@
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
-import {fileURLToPath} from 'node:url';
 import * as THREE from 'three';
-import {createServer} from 'vite';
+import {createAppTestServer} from './vite-test-server.mjs';
 
-const appRoot = fileURLToPath(new URL('..', import.meta.url));
 let createRenderedModelNode;
 let server;
 
 before(async () => {
-  server = await createServer({
-    root: appRoot,
-    appType: 'custom',
-    logLevel: 'error',
-    server: {middlewareMode: true, hmr: false},
-  });
+  server = await createAppTestServer();
   ({createRenderedModelNode} = await server.ssrLoadModule(
     '/src/rendering/model-renderer.ts',
   ));
