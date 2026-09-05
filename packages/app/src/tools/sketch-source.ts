@@ -2,6 +2,7 @@ import ts from '@typescript/typescript6';
 import type {
   SketchPointAddress,
   SketchPosition,
+  SketchConstraint,
   SourceRef,
 } from '@code3d/core/tooling';
 import {formatSourceNumber} from './source-expression';
@@ -21,9 +22,20 @@ export type SketchDraftEntry =
     ];
 
 export type SketchChange =
-  | Readonly<{kind: 'append'; entries: readonly SketchDraftEntry[]}>
-  | Readonly<{kind: 'move'; id: number; position: SketchPosition}>
-  | Readonly<{kind: 'delete'; ids: readonly number[]}>;
+  | Readonly<{
+      kind: 'append';
+      entries: readonly SketchDraftEntry[];
+      constraints?: readonly SketchConstraint<SketchPointAddress>[];
+    }>
+  | Readonly<{
+      kind: 'move';
+      positions: readonly Readonly<{id: number; position: SketchPosition}>[];
+    }>
+  | Readonly<{
+      kind: 'delete';
+      ids: readonly number[];
+      constraints?: readonly number[];
+    }>;
 
 export type SketchEditIntent = Readonly<{
   kind: 'sketch.edit';
@@ -40,26 +52,32 @@ type Entry = {
   node: ts.ArrayLiteralExpression;
   data: ts.ArrayLiteralExpression;
 };
-const prefix = 'const entries = ';
+const prefix = 'sketch(';
 
 /** Analyze only the authored tuple structure; never evaluate coordinate code. */
 export function analyzeSketchSource(source: string): {
   entries: ReadonlyMap<number, Entry>;
   movable: ReadonlySet<number>;
   array?: ts.ArrayLiteralExpression;
+  options?: ts.ObjectLiteralExpression;
+  constraints?: ts.ArrayLiteralExpression;
   reason?: string;
 } {
   const file = ts.createSourceFile(
     'sketch.ts',
-    `${prefix}${source}`,
+    `${prefix}${source})`,
     ts.ScriptTarget.Latest,
     true,
   );
   const statement = file.statements[0];
-  const array =
-    statement && ts.isVariableStatement(statement)
-      ? statement.declarationList.declarations[0]?.initializer
+  const call =
+    statement &&
+    ts.isExpressionStatement(statement) &&
+    ts.isCallExpression(statement.expression)
+      ? statement.expression
       : undefined;
+  const array = call?.arguments[0];
+  const options = call?.arguments[1];
   const entries = new Map<number, Entry>();
   const movable = new Set<number>();
   const unsupported = () => ({
@@ -68,6 +86,36 @@ export function analyzeSketchSource(source: string): {
     reason: 'Visual editing requires explicit [kind, ID, data] tuples.',
   });
   if (!array || !ts.isArrayLiteralExpression(array)) return unsupported();
+  let constraints: ts.ArrayLiteralExpression | undefined;
+  if (options) {
+    if (!ts.isObjectLiteralExpression(options))
+      return {
+        ...unsupported(),
+        reason: 'Visual editing requires inline sketch options.',
+      };
+    for (const property of options.properties) {
+      if (
+        !ts.isPropertyAssignment(property) ||
+        (!ts.isIdentifier(property.name) && !ts.isStringLiteral(property.name))
+      )
+        return {
+          ...unsupported(),
+          reason: 'Visual editing requires explicit sketch options.',
+        };
+      if (property.name.text === 'constraints') {
+        if (
+          constraints ||
+          !ts.isArrayLiteralExpression(property.initializer) ||
+          !property.initializer.elements.every(ts.isArrayLiteralExpression)
+        )
+          return {
+            ...unsupported(),
+            reason: 'Visual editing requires an explicit constraints array.',
+          };
+        constraints = property.initializer;
+      }
+    }
+  }
   for (const node of array.elements) {
     if (!ts.isArrayLiteralExpression(node) || node.elements.length !== 3)
       return unsupported();
@@ -90,7 +138,13 @@ export function analyzeSketchSource(source: string): {
     )
       movable.add(id);
   }
-  return {entries, movable, array};
+  return {
+    entries,
+    movable,
+    array,
+    options: options as ts.ObjectLiteralExpression | undefined,
+    constraints,
+  };
 }
 
 function numeric(node: ts.Expression): number | undefined {
@@ -133,26 +187,20 @@ export class SketchEditResolver implements ToolIntentResolver {
       });
     const {change} = intent;
     if (change.kind === 'move') {
-      const entry = parsed.entries.get(change.id);
-      if (!entry || !parsed.movable.has(change.id))
-        return {
-          status: 'unsupported',
-          reason: 'Expression-driven points must be edited in code.',
-        };
-      entry.data.elements.forEach((node, i) =>
-        replace(node, formatSourceNumber(change.position[i])),
-      );
-    } else if (change.kind === 'delete') {
-      for (const id of change.ids) {
+      for (const {id, position} of change.positions) {
         const entry = parsed.entries.get(id);
-        if (!entry)
+        if (!entry || !parsed.movable.has(id))
           return {
-            status: 'conflict',
-            reason: `Sketch entity ${id} no longer exists.`,
+            status: 'unsupported',
+            reason: 'Expression-driven points must be edited in code.',
           };
-        const end = entry.node.end - prefix.length;
-        // A remaining preceding comma is a valid trailing comma. Trivia attached
-        // to surviving entries is not regenerated or discarded.
+        entry.data.elements.forEach((node, i) =>
+          replace(node, formatSourceNumber(position[i])),
+        );
+      }
+    } else if (change.kind === 'delete') {
+      const remove = (node: ts.Node) => {
+        const end = node.end - prefix.length;
         const scanner = ts.createScanner(
           ts.ScriptTarget.Latest,
           true,
@@ -161,10 +209,28 @@ export class SketchEditResolver implements ToolIntentResolver {
         );
         const comma = scanner.scan() === ts.SyntaxKind.CommaToken;
         changes.push({
-          start: entry.node.pos - prefix.length,
+          start: node.pos - prefix.length,
           end: end + (comma ? scanner.getTextPos() : 0),
           text: '',
         });
+      };
+      for (const id of change.ids) {
+        const entry = parsed.entries.get(id);
+        if (!entry)
+          return {
+            status: 'conflict',
+            reason: `Sketch entity ${id} no longer exists.`,
+          };
+        remove(entry.node);
+      }
+      for (const index of change.constraints ?? []) {
+        const node = parsed.constraints?.elements[index];
+        if (!node)
+          return {
+            status: 'conflict',
+            reason: 'The sketch constraints changed.',
+          };
+        remove(node);
       }
     } else {
       const ids = new Set(parsed.entries.keys());
@@ -178,6 +244,7 @@ export class SketchEditResolver implements ToolIntentResolver {
         return `${name}.point(${ref.id})`;
       };
       let text: string;
+      let constraints: string;
       try {
         text = change.entries
           .map(([kind, id, data]) => {
@@ -189,6 +256,32 @@ export class SketchEditResolver implements ToolIntentResolver {
             return `  ['${kind}', ${id}, [${content.join(', ')}]],`;
           })
           .join('\n');
+        constraints = (change.constraints ?? [])
+          .map(([kind, data]) => {
+            let content: string;
+            switch (kind) {
+              case 'fixed':
+                content = point(data);
+                break;
+              case 'horizontal':
+              case 'vertical':
+                content = String(data);
+                break;
+              case 'coincident':
+                content = `[${data.map(point).join(', ')}]`;
+                break;
+              case 'x':
+              case 'y':
+                content = `[${point(data[0])}, ${formatSourceNumber(data[1])}]`;
+                break;
+              case 'length':
+              case 'angle':
+                content = `[${data.map(formatSourceNumber).join(', ')}]`;
+                break;
+            }
+            return `['${kind}', ${content}]`;
+          })
+          .join(',\n  ');
       } catch (error) {
         return {status: 'conflict', reason: (error as Error).message};
       }
@@ -202,6 +295,38 @@ export class SketchEditResolver implements ToolIntentResolver {
       const start = end - closingIndent.length;
       const separator = source[start - 1] === '\n' ? '' : '\n';
       changes.push({start, end, text: `${separator}${text}\n${closingIndent}`});
+      if (change.constraints?.length) {
+        if (parsed.constraints) {
+          const array = parsed.constraints;
+          if (array.elements.length && !array.elements.hasTrailingComma) {
+            const end = array.elements.at(-1)!.end - prefix.length;
+            changes.push({start: end, end, text: ','});
+          }
+          const end = array.end - prefix.length - 1;
+          changes.push({start: end, end, text: `\n  ${constraints},\n`});
+        } else if (parsed.options) {
+          const options = parsed.options;
+          if (
+            options.properties.length &&
+            !options.properties.hasTrailingComma
+          ) {
+            const end = options.properties.at(-1)!.end - prefix.length;
+            changes.push({start: end, end, text: ','});
+          }
+          const end = options.end - prefix.length - 1;
+          changes.push({
+            start: end,
+            end,
+            text: `\nconstraints: [${constraints}],\n`,
+          });
+        } else {
+          changes.push({
+            start: source.length,
+            end: source.length,
+            text: `, {constraints: [\n  ${constraints},\n]}`,
+          });
+        }
+      }
     }
     let text = source;
     for (const edit of changes.reverse().sort((a, b) => b.start - a.start))

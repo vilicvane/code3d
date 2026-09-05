@@ -7,11 +7,13 @@ import type {ProjectLanguage} from '../project/project-language';
 import {browserPackageFiles} from '../project/browser-packages';
 import type {ModelExportInstance, ModelExportOptions} from './model-export';
 import type {CompilationProgress} from './compilation-progress';
+import type {SketchSnapshot} from '@code3d/core/tooling';
 import type {
   CompilerRequest,
   CompilerResponse,
   FileRequest,
 } from './compiler-protocol';
+import type {SketchDrag, SketchDragPreview} from './sketch-drag';
 
 type PendingRequest = {
   id: number;
@@ -25,6 +27,7 @@ type PendingRequest = {
       resolve(module: ModelModule): void;
     }
   | {kind: 'export'; resolve(blob: Blob): void}
+  | {kind: 'sketch'; resolve(preview: SketchDragPreview): void}
 );
 
 export class ModelCompilerClient {
@@ -106,14 +109,39 @@ export class ModelCompilerClient {
       new Error(
         pending.kind === 'compile'
           ? 'Compilation superseded.'
-          : 'Export cancelled because the model changed.',
+          : pending.kind === 'sketch'
+            ? 'Sketch preview superseded.'
+            : 'Export cancelled because the model changed.',
       ),
     );
     // An executing model may contain a synchronous infinite loop. Preparation
     // can finish asynchronously without throwing away the installed kernel.
-    if (pending.kind === 'export' || pending.evaluating) this.restartWorker();
+    if (
+      pending.kind === 'export' ||
+      (pending.kind === 'compile' && pending.evaluating)
+    )
+      this.restartWorker();
     else this.send({kind: 'cancel', id: pending.id});
     return true;
+  }
+
+  previewSketchDrag(
+    layers: readonly SketchSnapshot[],
+    drag: SketchDrag,
+  ): Promise<SketchDragPreview> {
+    if (this.pending || !this.exportable)
+      return Promise.reject(new Error('Waiting for the updated sketch.'));
+    const id = this.nextId++;
+    return new Promise((resolve, reject) => {
+      this.pending = {
+        kind: 'sketch',
+        id,
+        resolve,
+        reject,
+        timeout: this.deadline(id, 15_000),
+      };
+      this.send({kind: 'sketch', id, layers, drag});
+    });
   }
 
   dispose(): void {
@@ -136,9 +164,11 @@ export class ModelCompilerClient {
         new Error(
           pending.kind === 'export'
             ? 'Export exceeded 30 seconds and was terminated. Run the model again before retrying.'
-            : pending.evaluating
-              ? 'Model execution exceeded 15 seconds and was terminated.'
-              : 'Project preparation exceeded 120 seconds and was terminated.',
+            : pending.kind === 'sketch'
+              ? 'Sketch solving exceeded 15 seconds and was terminated.'
+              : pending.evaluating
+                ? 'Model execution exceeded 15 seconds and was terminated.'
+                : 'Project preparation exceeded 120 seconds and was terminated.',
         ),
       );
     }, milliseconds);
@@ -199,6 +229,8 @@ export class ModelCompilerClient {
         pending.resolve(data.module);
       } else if (pending.kind === 'export' && data.kind === 'export') {
         pending.resolve(data.blob);
+      } else if (pending.kind === 'sketch' && data.kind === 'sketch') {
+        pending.resolve(data.preview);
       }
     };
     worker.onerror = ({message}) => {

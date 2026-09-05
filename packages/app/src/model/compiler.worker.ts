@@ -112,6 +112,23 @@ workerScope.onmessage = ({data}: MessageEvent<CompilerRequest>) => {
   } else if (data.kind === 'cancel') {
     if (queued?.id === data.id) queued = undefined;
     if (currentId === data.id) currentId = undefined;
+  } else if (data.kind === 'sketch') {
+    try {
+      if (running || queued) throw new Error('Waiting for the updated sketch.');
+      send({
+        kind: 'sketch',
+        id: data.id,
+        ok: true,
+        preview: compiler.previewSketchDrag(data.layers, data.drag),
+      });
+    } catch (error) {
+      send({
+        kind: 'result',
+        id: data.id,
+        ok: false,
+        diagnostic: diagnosticFromError(error),
+      });
+    }
   } else if (data.kind === 'export') {
     try {
       if (running || queued || compileId !== data.compileId)

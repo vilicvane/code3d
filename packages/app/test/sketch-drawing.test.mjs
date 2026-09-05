@@ -306,6 +306,12 @@ test('the two-click line draft commits new endpoints and line as one transaction
   assert.deepEqual(edits, [
     {
       kind: 'append',
+      constraints: [
+        ['x', [{layer: 'local', id: 10}, 1.5]],
+        ['y', [{layer: 'local', id: 10}, -2]],
+        ['length', [12, 12]],
+        ['angle', [12, 90]],
+      ],
       entries: [
         ['point', 10, [1.5, -2]],
         ['point', 11, [1.5, 10]],
@@ -334,6 +340,7 @@ test('the two-click line draft commits new endpoints and line as one transaction
   );
   assert.deepEqual(edits[1], {
     kind: 'append',
+    constraints: [],
     entries: [
       ['point', 13, [20, 10]],
       [
@@ -407,4 +414,31 @@ test('zero-length and non-finite geometry cannot enter a source transaction', ()
     line.dimensions.definitions.map(field => field.id),
     ['x', 'y'],
   );
+});
+
+test('only the final explicit axis or angle becomes a constraint and cancellation leaves none', () => {
+  for (const axes of [['x'], ['x', 'y'], ['x', 'x'], ['y', 'x', 'x']]) {
+    const draft = new SketchLineDrawing();
+    const edits = [];
+    draft.place({position: [0, 0]}, 'local', 1, () => true);
+    draft.dimensions.set('length', '10');
+    draft.dimensions.set('angle', '45');
+    for (const axis of axes) draft.toggleAxis(axis);
+    draft.pointer = [10, 10];
+    const finalAxis = draft.axis;
+    draft.place(draft.resolve(context).endpoint, 'local', 1, change => {
+      edits.push(change);
+      return true;
+    });
+    assert.deepEqual(edits[0].constraints, [
+      ['length', [3, 10]],
+      ...(finalAxis
+        ? [[finalAxis === 'x' ? 'horizontal' : 'vertical', 3]]
+        : []),
+    ]);
+    assert.equal(draft.axis, undefined);
+    draft.toggleAxis('y');
+    draft.reset();
+    assert.equal(edits.length, 1);
+  }
 });

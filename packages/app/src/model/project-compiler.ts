@@ -1,5 +1,5 @@
 import type * as esbuild from 'esbuild-wasm';
-import type {ModelGeometrySnapshot} from '@code3d/core/tooling';
+import type {ModelGeometrySnapshot, SketchSnapshot} from '@code3d/core/tooling';
 import {ProjectFileCache} from '../project/file-cache';
 import type {ProjectFileReader} from '../project/file-reader';
 import {ProjectPackages} from '../project/project-packages';
@@ -12,6 +12,11 @@ import {
 import {normalizeProjectPath, type ModelProject} from '../project/project';
 import {createModelCompiler, type ModelModule} from './compiler';
 import {ProjectRuntime} from './project-runtime';
+import {
+  previewSketchDrag,
+  type SketchDrag,
+  type SketchDragPreview,
+} from './sketch-drag';
 import {ModuleEvaluator} from './module-evaluator';
 import type {CompilationProgress} from './compilation-progress';
 import {
@@ -136,6 +141,14 @@ export class ProjectCompiler {
       options,
       this.runtime.replicad,
     );
+  }
+
+  previewSketchDrag(
+    layers: readonly SketchSnapshot[],
+    drag: SketchDrag,
+  ): SketchDragPreview {
+    if (!this.runtime) throw new Error('The sketch runtime is not ready.');
+    return previewSketchDrag(this.runtime.tooling, layers, drag);
   }
 
   dispose(): void {

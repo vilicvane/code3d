@@ -63,6 +63,9 @@ export class ProjectAssets {
     };
     visit(parsed);
     for (const site of sites.sort((left, right) => right.start - left.start)) {
+      // A URL to a directory establishes a base; it is not a file asset.
+      // Keep it for the module evaluator's import.meta.url handling.
+      if ((await this.files.stat(site.path))?.kind === 'directory') continue;
       source =
         source.slice(0, site.start) +
         'new URL(' +

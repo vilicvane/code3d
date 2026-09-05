@@ -445,6 +445,7 @@ const toolEngine = new ToolEngine({
   clearPreview: (preview, reason) => clearToolPreview(preview, reason),
 });
 const sketchEditor = new SketchEditorController(viewportHost, {
+  solve: (layers, drag) => compiler.previewSketchDrag(layers, drag),
   readSource: ref => {
     const current = codeEditor.resolveSourceRef(ref);
     return current && codeEditor.readSource(current);

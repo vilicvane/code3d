@@ -1,11 +1,13 @@
 import ts from '@typescript/typescript6';
 import type * as CoreTooling from '@code3d/core/tooling';
 import type {Sketch, SketchSnapshot, SourceRef} from '@code3d/core/tooling';
+import type {SketchPointData} from './sketch-drag';
 
 export type CompiledSketch = SketchSnapshot &
   Readonly<{
     definitionRef?: SourceRef;
     references: Readonly<Record<string, string>>;
+    data: readonly SketchPointData[];
   }>;
 
 type SketchTrace = {
@@ -69,6 +71,38 @@ export class SketchTraceRegistry {
     return this.values.size;
   }
 
+  constraintErrorSource(
+    error: unknown,
+    location: SourceRef,
+  ): SourceRef | undefined {
+    if (!(error instanceof this.runtime.SketchConstraintError)) return;
+    const options = this.calls.get(sourceKey(location))?.arguments[1];
+    if (!options || !ts.isObjectLiteralExpression(options)) return;
+    const property = options.properties.find(
+      p =>
+        ts.isPropertyAssignment(p) &&
+        (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name)) &&
+        p.name.text === 'constraints',
+    );
+    if (
+      !property ||
+      !ts.isPropertyAssignment(property) ||
+      !ts.isArrayLiteralExpression(property.initializer)
+    )
+      return;
+    const array = property.initializer;
+    const nodes = error.constraints.flatMap(i =>
+      array.elements[i] ? [array.elements[i]] : [],
+    );
+    return nodes.length
+      ? {
+          ...nodeRef(nodes[0]),
+          start: Math.min(...nodes.map(n => n.getStart())),
+          end: Math.max(...nodes.map(n => n.end)),
+        }
+      : nodeRef(property.initializer);
+  }
+
   identity(value: Sketch): string {
     let trace = this.values.get(value);
     if (!trace) {
@@ -94,6 +128,7 @@ export class SketchTraceRegistry {
     id: string,
     location: SourceRef,
     argument: unknown,
+    options: unknown,
     receiver: unknown,
   ): void {
     if (!this.runtime.isSketch(value) || this.values.has(value)) return;
@@ -102,11 +137,14 @@ export class SketchTraceRegistry {
     const editable =
       call &&
       definition.input === argument &&
+      definition.inputOptions === options &&
       call.arguments[0] &&
       ts.isArrayLiteralExpression(call.arguments[0]);
     const trace: SketchTrace = {
       id: `sketch:${id}`,
-      definitionRef: editable ? nodeRef(call.arguments[0]) : undefined,
+      definitionRef: editable
+        ? {...nodeRef(call.arguments[0]), end: call.arguments.at(-1)!.end}
+        : undefined,
       references: {},
     };
     this.values.set(value, trace);
@@ -178,6 +216,11 @@ export class SketchTraceRegistry {
           ),
           definitionRef: trace.definitionRef,
           references: trace.references,
+          data: this.runtime
+            .sketchDefinition(value)
+            .entries.flatMap(([kind, id, data]) =>
+              kind === 'point' ? [{id, position: data}] : [],
+            ),
         },
       ]),
     );

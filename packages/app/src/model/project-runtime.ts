@@ -42,6 +42,14 @@ export class ProjectRuntime {
     const wasmPath = await resolve('replicad-opencascadejs/wasm', toolingPath);
     const solverLoaderPath = await resolve('@code3d/solver', toolingPath);
     const solverWasmPath = await resolve('@code3d/solver/wasm', toolingPath);
+    const sketchLoaderPath = await resolve(
+      '@salusoft89/planegcs/dist/planegcs_dist/planegcs.js',
+      toolingPath,
+    );
+    const sketchWasmPath = await resolve(
+      '@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm',
+      toolingPath,
+    );
     const entry = [
       toolingPath,
       corePath,
@@ -49,6 +57,7 @@ export class ProjectRuntime {
       loaderPath,
       replicadPath,
       solverLoaderPath,
+      sketchLoaderPath,
     ]
       .map(
         (path, index) =>
@@ -85,20 +94,33 @@ export class ProjectRuntime {
         print() {},
         printErr() {},
       }));
+      const initializeSketchSolver = modules.get(${JSON.stringify(sketchLoaderPath)}).default;
+      tooling.installSketchSolver(await initializeSketchSolver({
+        wasmBinary: __code3dSketchBytes,
+        locateFile: () => ${JSON.stringify(sketchWasmPath)},
+        print() {},
+        printErr() {},
+      }));
     `;
-    const [bundle, wasm, solverWasm] = await Promise.all([
+    const [bundle, wasm, solverWasm, sketchWasm] = await Promise.all([
       builder.build(runtimeSource),
       files.readFile(wasmPath),
       files.readFile(solverWasmPath),
+      files.readFile(sketchWasmPath),
     ]);
     if (!wasm)
       throw new Error(`Installed kernel asset is missing: ${wasmPath}`);
     if (!solverWasm)
       throw new Error(`Installed solver asset is missing: ${solverWasmPath}`);
+    if (!sketchWasm)
+      throw new Error(
+        `Installed sketch solver asset is missing: ${sketchWasmPath}`,
+      );
     onProgress?.('initializing-runtime');
     const runtime = await evaluator.evaluate(runtimeUrl, bundle.source, {
       __code3dKernelBytes: wasm,
       __code3dSolverBytes: solverWasm,
+      __code3dSketchBytes: sketchWasm,
     });
     return new ProjectRuntime(
       runtime.tooling,

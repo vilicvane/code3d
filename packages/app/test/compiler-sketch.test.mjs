@@ -128,3 +128,112 @@ get().child.method();
 if (calls !== 1) throw new Error('Repeated receiver evaluation');
 const value = sketch([]);`);
 });
+
+test('constraint options share the editable source range and use the installed sketch solver', async () => {
+  const args =
+    "[['point', 1, [0,0]], ['point', 2, [38,2]], ['line', 3, [1,2]]], {constraints: [['fixed', 1], ['horizontal', 3], ['length', [3, width]]]}";
+  const source = `import {sketch} from '@code3d/core'; const width = 40; const value = sketch(${args});`;
+  const module = await compiler.compile(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  assert.equal(module.diagnostic, undefined);
+  const value = [...module.sketches.values()][0];
+  assert.equal(
+    source.slice(value.definitionRef.start, value.definitionRef.end),
+    args,
+  );
+  assert.deepEqual(value.entities[1].position, [40, 0]);
+  assert.equal(value.degreesOfFreedom, 0);
+  const dragged = compiler.previewSketchDrag([value], {
+    id: 2,
+    position: [80, 30],
+    movable: [1, 2],
+    data: value.data,
+  });
+  assert.deepEqual(dragged.snapshot.entities[1].position, [40, 0]);
+});
+
+test('constraint conflicts highlight their source tuples, without persistent constraint IDs', async () => {
+  const source = `import {sketch} from '@code3d/core'; const value = sketch([['point', 1, [0,0]], ['point', 2, [40,0]], ['line', 3, [1,2]]], {constraints: [['length', [3, 40]], ['length', [3, 50]]]});`;
+  const module = await compiler.compile(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  assert.equal(module.diagnostic.kind, 'evaluation');
+  assert.match(module.diagnostic.summary, /sketch constraints/);
+  const ref = module.diagnostic.sourceRef;
+  assert.equal(
+    source.slice(ref.start, ref.end),
+    "['length', [3, 40]], ['length', [3, 50]]",
+  );
+});
+
+test('temporary drag anchors survive full rotations and exact rounded source replay', async () => {
+  const source = data =>
+    `const value = sketch(${JSON.stringify([
+      ...data.map(p => ['point', p.id, p.position]),
+      ['line', 3, [1, 2]],
+    ])}, {constraints: [['length', [3, 40]]]});`;
+  const initialData = [
+    {id: 1, position: [2, 2]},
+    {id: 2, position: [22, 19]},
+  ];
+  const initial = [
+    ...(await compile(source(initialData))).sketches.values(),
+  ][0];
+  const point = (snapshot, id) =>
+    snapshot.entities.find(e => e.kind === 'point' && e.id === id).position;
+  const close = (a, b) =>
+    a.forEach((v, i) => assert.ok(Math.abs(v - b[i]) < 1e-6, `${a} != ${b}`));
+  for (const id of [1, 2]) {
+    const anchor = id === 1 ? 2 : 1;
+    const center = point(initial, anchor),
+      start = point(initial, id);
+    const angle = Math.atan2(start[1] - center[1], start[0] - center[0]);
+    let preview = {snapshot: initial, data: initial.data};
+    const unchanged = compiler.previewSketchDrag([initial], {
+      id,
+      position: start,
+      movable: [1, 2],
+      data: initial.data,
+    });
+    assert.deepEqual(
+      unchanged.data,
+      initial.data,
+      'a click must not normalize author seeds',
+    );
+    for (let step = 1; step <= 144; step++) {
+      const theta = angle + (step * Math.PI) / 72;
+      const position = [
+        center[0] + 40 * Math.cos(theta),
+        center[1] + 40 * Math.sin(theta),
+      ];
+      preview = compiler.previewSketchDrag([preview.snapshot], {
+        id,
+        position,
+        movable: [1, 2],
+        data: preview.data,
+      });
+      close(point(preview.snapshot, anchor), center);
+      close(point(preview.snapshot, id), position);
+      if ([71, 73, 144].includes(step)) {
+        const replay = [
+          ...(await compile(source(preview.data))).sketches.values(),
+        ][0];
+        for (const pointId of [1, 2])
+          close(point(preview.snapshot, pointId), point(replay, pointId));
+      }
+    }
+  }
+});
+
+test('a library wrapper cannot expose an editable array while hiding its constraint options', async () => {
+  const module = await compile(`
+// Simulate a library wrapper whose body is not source-instrumented.
+const wrapped = Function('sketch', 'return entries => sketch(entries, {constraints: [["fixed", 1]]})')(sketch);
+const value = wrapped([['point', 1, [0,0]]]);`);
+  const value = [...module.sketches.values()][0];
+  assert.equal(value.definitionRef, undefined);
+  assert.equal(value.constraints.length, 1);
+});

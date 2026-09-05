@@ -73,6 +73,27 @@ const sketchValue = sketch([
   ['point', 2, [10, 0]],
   ['line', 3, [1, 2]],
 ]);
+sketch(
+  [
+    ['point', 1, [0, 0]],
+    ['point', 2, [40, 0]],
+    ['line', 3, [1, 2]],
+  ],
+  {
+    constraints: [
+      ['fixed', 1],
+      ['horizontal', 3],
+      ['length', [3, 40]],
+      ['angle', [3, 0]],
+      ['x', [1, 0]],
+      ['coincident', [1, 2]],
+    ],
+  },
+);
+// @ts-expect-error Constraints do not carry persistent IDs.
+sketch([], {constraints: [['horizontal', 10, 3]]});
+// @ts-expect-error Single-target constraints take a scalar reference, not an array.
+sketch([], {constraints: [['fixed', [1]]]});
 sketchValue.derive([
   ['point', 1, [0, 5]],
   ['line', 2, [sketchValue.point(2), 1]],

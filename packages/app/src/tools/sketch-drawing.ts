@@ -1,4 +1,8 @@
-import type {SketchPosition} from '@code3d/core/tooling';
+import type {
+  SketchPosition,
+  SketchConstraint,
+  SketchPointAddress,
+} from '@code3d/core/tooling';
 import {DrawingDimensions} from './drawing-dimensions';
 import type {SketchChange, SketchDraftEntry} from './sketch-source';
 import {
@@ -22,6 +26,7 @@ export class SketchLineDrawing {
   dimensions = coordinates();
   pointer: SketchPosition = [0, 0];
   axis?: SketchAxis;
+  private startCoordinates: {axis: 'x' | 'y'; value: number}[] = [];
 
   get hasDraft(): boolean {
     return !!this.start || this.dimensions.edited;
@@ -65,6 +70,7 @@ export class SketchLineDrawing {
   reset(): void {
     this.start = undefined;
     this.axis = undefined;
+    this.startCoordinates = [];
     this.dimensions = coordinates();
   }
 
@@ -102,6 +108,10 @@ export class SketchLineDrawing {
       return 'The resulting coordinates must be finite';
     if (!this.start) {
       this.start = endpoint;
+      this.startCoordinates = (['x', 'y'] as const).flatMap(axis => {
+        const value = this.dimensions.value(axis);
+        return value === undefined ? [] : [{axis, value}];
+      });
       this.dimensions = this.segmentDimensions();
       return undefined;
     }
@@ -123,13 +133,22 @@ export class SketchLineDrawing {
     const start = address(this.start),
       end = address(endpoint);
     entries.push(['line', nextId, [start, end]]);
-    if (!commit({kind: 'append', entries}))
+    const constraints: SketchConstraint<SketchPointAddress>[] =
+      this.startCoordinates.map(({axis, value}) => [axis, [start, value]]);
+    const length = this.dimensions.value('length');
+    const angle = this.dimensions.value('angle');
+    if (length !== undefined) constraints.push(['length', [nextId, length]]);
+    if (this.axis)
+      constraints.push([this.axis === 'x' ? 'horizontal' : 'vertical', nextId]);
+    else if (angle !== undefined) constraints.push(['angle', [nextId, angle]]);
+    if (!commit({kind: 'append', entries, constraints}))
       return 'The sketch changed; the drawing was not applied';
     // Reuse the committed endpoint's identity, including a newly allocated ID.
     // Advance only after the transaction succeeds; each segment is one undo step.
     this.pointer = endpointPosition(endpoint);
     this.start = {point: {...end, position: this.pointer}};
     this.axis = undefined;
+    this.startCoordinates = [];
     this.dimensions = this.segmentDimensions();
     return undefined;
   }

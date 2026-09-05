@@ -29,11 +29,20 @@ Sketches are immutable 2D definitions, separate from geometric models and B-Reps
 ```ts
 import {sketch} from '@code3d/core';
 
-const sketch1 = sketch([
-  ['point', 1, [0, 0]],
-  ['point', 2, [30, 0]],
-  ['line', 3, [1, 2]],
-]);
+const sketch1 = sketch(
+  [
+    ['point', 1, [0, 0]],
+    ['point', 2, [30, 0]],
+    ['line', 3, [1, 2]],
+  ],
+  {
+    constraints: [
+      ['fixed', 1],
+      ['horizontal', 3],
+      ['length', [3, 30]],
+    ],
+  },
+);
 const sketch2 = sketch1.derive([
   ['point', 1, [10, 20]],
   ['line', 2, [sketch1.point(2), 1]],
@@ -45,6 +54,18 @@ Each tuple is `[kind, ID, data]`. Numeric line endpoints name local points;
 independent positive-integer ID space shared by points and lines. Definitions
 may be empty, open, or contain crossing lines; crossings do not automatically
 split entities. Missing point references are errors.
+
+Geometry tuples hold current data; `constraints` specify what must remain true.
+Constraints have no persistent IDs. Point coordinates have the same runtime
+meaning whether computed from an expression or written as literals. They may
+move during solving unless constrained. `fixed` locks one point at its supplied
+coordinates; `horizontal` / `vertical` target one local line. `length` / `angle`
+take `[lineId, value]` (angles in degrees); `x` / `y` take `[pointRef, value]`, and
+`coincident` takes `[pointRef, pointRef]`. A point reference may name locked upstream
+geometry. Lines must have nonzero length; length constraints must be positive.
+PlaneGCS solves each layer without modifying upstream values. The snapshot
+reports degrees of freedom and redundant constraint indices. Conflicts are
+located at their source tuples when inline source is available.
 
 In Studio, select a sketch expression or variable to open its 2D editor. Draw
 continuous lines, drag literal-coordinate points, and delete local entities.
@@ -60,15 +81,27 @@ vertical; press the same key again to unlock. This also works in numeric fields.
 The pointer chooses either direction along the locked axis; Length still applies.
 Entering Angle replaces the axis lock and locking an axis clears Angle.
 Snap/Alt do not override the lock; finishing or canceling a segment clears it.
-Entered numbers take priority and specify creation geometry, not persistent
-constraints. Numeric fields keep their own text undo; canvas undo edits source.
-Deleting a point also deletes connected local lines. Upstream geometry stays
+Entered coordinates, length and angle, and the final active X/Y lock generate
+explicit constraints in the same source transaction as the new segment. Turning
+the lock off before committing creates no direction constraint; resetting the
+next segment does not remove existing constraints. Ordinary automatic snapping
+does not create constraints. Numeric fields keep native text undo/redo, whose
+grouping belongs to the browser; canvas undo edits source.
+Dragging previews a soft solver target and writes every changed editable point
+in one transaction. Hard constraints remain satisfied. With no locked point,
+a gesture temporarily anchors the first non-dragged point; this does not add a
+source constraint or reduce the reported model DOF. Unconstrained movement needs
+no native kernel. Expression source is preserved, but replaying unchanged
+expression seeds can still displace the gesture anchor; stability for that case
+remains unresolved in [#23](https://github.com/vilicvane/code3d/issues/23).
+Deleting a point also deletes connected local lines and affected constraints. Upstream geometry stays
 locked but can supply endpoints for new lines. Coordinates using expressions
 remain editable in code, not by dragging. The editor preserves existing IDs and
 allocates new IDs from the current local maximum, without `nextId` metadata.
 Deleted IDs may therefore be reused; downstream references are not automatically
-rewritten. Constraint solving, trimming and conversion to faces/solids are not
-part of this initial point/line API. See the [sketch example](../app/examples/sketches.ts).
+rewritten. Circles/arcs, trimming and conversion to faces/solids remain outside
+this point/line slice. See the [sketch example](../app/examples/sketches.ts) and
+[third-party solver sources](THIRD_PARTY.md).
 
 ## Geometric relations
 

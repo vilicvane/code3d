@@ -12,6 +12,7 @@ import {
   type IconNode,
 } from 'lucide';
 import type {SketchChange} from '../tools/sketch-source';
+import type {SketchDragPreview, SketchPointData} from '../model/sketch-drag';
 import {SketchLineDrawing} from '../tools/sketch-drawing';
 import {
   endpointPosition,
@@ -27,6 +28,7 @@ import {createIcon} from './icon';
 export type SketchEditorView = Readonly<{
   id: string;
   layers: readonly SketchSnapshot[];
+  data: readonly SketchPointData[];
   movable: ReadonlySet<number>;
   referenceable: ReadonlySet<string>;
   readOnlyReason?: string;
@@ -38,6 +40,11 @@ type Gesture =
       point: Point;
       start: SketchPosition;
       position: SketchPosition;
+      preview?: SketchDragPreview;
+      pending?: Promise<void>;
+      released: boolean;
+      version: number;
+      error?: string;
     }
   | {kind: 'pan'; start: SketchPosition; center: SketchPosition};
 
@@ -46,6 +53,12 @@ export class SketchEditor {
   readonly root = document.createElement('section');
   private readonly svg = svgElement('svg');
   private readonly status = document.createElement('output');
+  private readonly statusText = document.createTextNode('');
+  private readonly grid = svgElement('g');
+  private readonly lines = svgElement('g');
+  private readonly vertices = svgElement('g');
+  private readonly shapes = new Map<string, SVGElement>();
+  private readonly usedShapes = new Set<string>();
   private readonly buttons = new Map<string, HTMLButtonElement>();
   private readonly overlay = svgElement('g');
   private readonly draftLine = svgElement('line');
@@ -75,7 +88,15 @@ export class SketchEditor {
 
   constructor(
     container: HTMLElement,
-    private readonly commit: (change: SketchChange) => boolean,
+    private readonly commit: (
+      change: SketchChange,
+      preview?: SketchSnapshot,
+    ) => boolean,
+    private readonly solve: (
+      id: number,
+      position: SketchPosition,
+      previous?: SketchDragPreview,
+    ) => Promise<SketchDragPreview>,
   ) {
     this.root.className = 'sketch-editor';
     this.root.setAttribute('aria-label', 'Sketch editor');
@@ -108,10 +129,14 @@ export class SketchEditor {
     this.svg.setAttribute('aria-label', 'Sketch drawing');
     this.svg.addEventListener('pointerdown', event => this.pointerDown(event));
     this.svg.addEventListener('pointermove', event => this.pointerMove(event));
-    this.svg.addEventListener('pointerup', event => this.pointerUp(event));
+    this.svg.addEventListener('pointerup', event => void this.pointerUp(event));
     this.svg.addEventListener('pointercancel', () => this.cancel());
     this.svg.addEventListener('lostpointercapture', () => {
-      if (this.gesture) this.cancel();
+      if (
+        this.gesture &&
+        (this.gesture.kind !== 'move' || !this.gesture.released)
+      )
+        this.cancel();
     });
     this.svg.addEventListener(
       'wheel',
@@ -170,6 +195,8 @@ export class SketchEditor {
     this.overlay.classList.add('drawing-overlay');
     this.snapLabel.append(this.snapText);
     this.overlay.append(this.draftLine, this.draftMarker, this.snapLabel);
+    this.svg.append(this.grid, this.lines, this.vertices, this.overlay);
+    this.status.append(this.statusText);
     this.root.append(toolbar, stage, this.status);
     container.append(this.root);
     this.resize = new ResizeObserver(() => this.draw());
@@ -333,9 +360,12 @@ export class SketchEditor {
                   layer: layer.id,
                   id: entity.id,
                   position:
-                    this.gesture?.kind === 'move' &&
-                    same(this.gesture.point, {layer: layer.id, id: entity.id})
-                      ? this.gesture.position
+                    this.gesture?.kind === 'move' && layer.id === this.view!.id
+                      ? ((
+                          this.gesture.preview?.snapshot.entities.find(
+                            e => e.kind === 'point' && e.id === entity.id,
+                          ) as {position: SketchPosition} | undefined
+                        )?.position ?? entity.position)
                       : entity.position,
                 },
               ]
@@ -421,6 +451,8 @@ export class SketchEditor {
           point,
           start: position,
           position: point.position,
+          released: false,
+          version: 0,
         };
         this.svg.setPointerCapture(event.pointerId);
       }
@@ -441,7 +473,7 @@ export class SketchEditor {
       const pointer = this.coordinates(event);
       if (this.drawing) this.drawing.pointer = pointer;
       const gesture = this.gesture;
-      if (gesture?.kind === 'move')
+      if (gesture?.kind === 'move' && !gesture.released) {
         gesture.position = endpointPosition(
           snapSketchPointer(
             [
@@ -457,25 +489,65 @@ export class SketchEditor {
             },
           ).endpoint,
         );
+        gesture.version++;
+        this.previewMove(gesture);
+      }
     }
     if (this.gesture) this.draw();
     else this.drawDraft();
   }
 
-  private pointerUp(event: PointerEvent): void {
+  private previewMove(gesture: Extract<Gesture, {kind: 'move'}>): void {
+    if (gesture.pending) return;
+    gesture.pending = (async () => {
+      while (this.gesture === gesture) {
+        const version = gesture.version;
+        try {
+          const preview = await this.solve(
+            gesture.point.id,
+            gesture.position,
+            gesture.preview,
+          );
+          if (this.gesture !== gesture) return;
+          gesture.preview = preview;
+          gesture.error = undefined;
+        } catch (error) {
+          if (this.gesture !== gesture) return;
+          gesture.error = (error as Error).message;
+        }
+        this.draw();
+        if (version === gesture.version) return;
+      }
+    })().finally(() => {
+      gesture.pending = undefined;
+      this.draw();
+    });
+  }
+
+  private async pointerUp(event: PointerEvent): Promise<void> {
     const gesture = this.gesture;
-    this.gesture = undefined;
+    if (gesture?.kind === 'move') gesture.released = true;
+    else this.gesture = undefined;
     if (this.svg.hasPointerCapture(event.pointerId))
       this.svg.releasePointerCapture(event.pointerId);
-    if (
-      gesture?.kind === 'move' &&
-      distance(gesture.position, gesture.point.position) > 0
-    )
-      this.commit({
-        kind: 'move',
-        id: gesture.point.id,
-        position: gesture.position,
-      });
+    if (gesture?.kind === 'move') {
+      await gesture.pending;
+      if (this.gesture !== gesture) return;
+      this.gesture = undefined;
+      if (gesture.preview && !gesture.error) {
+        const positions = gesture.preview.data.flatMap(e => {
+          if (!this.view!.movable.has(e.id)) return [];
+          const previous = this.view!.data.find(p => p.id === e.id)!;
+          return e.position.some(
+            (value, axis) => value !== previous.position[axis],
+          )
+            ? [{id: e.id, position: e.position}]
+            : [];
+        });
+        if (positions.length)
+          this.commit({kind: 'move', positions}, gesture.preview.snapshot);
+      }
+    }
     this.draw();
   }
 
@@ -537,7 +609,11 @@ export class SketchEditor {
 
   private draw(): void {
     if (!this.view || this.root.hidden) return;
-    this.svg.replaceChildren();
+    this.root.setAttribute(
+      'aria-busy',
+      String(this.gesture?.kind === 'move' && !!this.gesture.pending),
+    );
+    this.usedShapes.clear();
     const width = this.svg.clientWidth,
       height = this.svg.clientHeight;
     const step = sketchGridStep(this.scale);
@@ -549,7 +625,13 @@ export class SketchEditor {
       i++
     ) {
       const x = originX + i * spacing;
-      this.line([x, 0], [x, height], i % 5 === 0 ? 'grid major' : 'grid');
+      this.line(
+        [x, 0],
+        [x, height],
+        i % 5 === 0 ? 'grid major' : 'grid',
+        `grid:x:${i}`,
+        this.grid,
+      );
     }
     for (
       let i = Math.ceil(-originY / spacing);
@@ -557,10 +639,16 @@ export class SketchEditor {
       i++
     ) {
       const y = originY + i * spacing;
-      this.line([0, y], [width, y], i % 5 === 0 ? 'grid major' : 'grid');
+      this.line(
+        [0, y],
+        [width, y],
+        i % 5 === 0 ? 'grid major' : 'grid',
+        `grid:y:${i}`,
+        this.grid,
+      );
     }
-    this.line([originX, 0], [originX, height], 'axis');
-    this.line([0, originY], [width, originY], 'axis');
+    this.line([originX, 0], [originX, height], 'axis', 'axis:x', this.grid);
+    this.line([0, originY], [width, originY], 'axis', 'axis:y', this.grid);
     const points = this.points();
     for (const layer of this.view.layers) {
       for (const entity of layer.entities) {
@@ -572,24 +660,39 @@ export class SketchEditor {
           positions[0],
           positions[1],
           this.entityClass(layer.id, entity.id),
+          JSON.stringify([layer.id, 'line', entity.id]),
+          this.lines,
         );
         this.tag(element, layer.id, entity.id, 'line');
       }
     }
     for (const point of points) {
-      const circle = svgElement('circle');
+      const circle = this.shape(
+        JSON.stringify([point.layer, 'point', point.id]),
+        'circle',
+        this.vertices,
+      );
       const [x, y] = this.screen(point.position);
       circle.setAttribute('cx', String(x));
       circle.setAttribute('cy', String(y));
       circle.setAttribute('r', '4');
       circle.setAttribute('class', this.entityClass(point.layer, point.id));
       this.tag(circle, point.layer, point.id, 'point');
-      const title = svgElement('title');
-      title.textContent = `Point ${point.id} (${point.position.join(', ')})${point.layer !== this.view.id ? ' · upstream (locked)' : !this.view.movable.has(point.id) ? ' · expression-driven (edit in code)' : ''}`;
-      circle.append(title);
-      this.svg.append(circle);
+      let title = circle.querySelector<SVGTitleElement>('title');
+      if (!title) {
+        title = svgElement('title');
+        title.append(document.createTextNode(''));
+        circle.append(title);
+      }
+      const text = `Point ${point.id} (${point.position.join(', ')})${point.layer !== this.view.id ? ' · upstream (locked)' : !this.view.movable.has(point.id) ? ' · expression-driven (edit in code)' : ''}`;
+      if (title.firstChild!.textContent !== text)
+        (title.firstChild as Text).data = text;
     }
-    this.svg.append(this.overlay);
+    for (const [key, shape] of this.shapes)
+      if (!this.usedShapes.has(key)) {
+        shape.remove();
+        this.shapes.delete(key);
+      }
     this.drawDraft();
     for (const [name, button] of this.buttons) {
       if (name === 'Select' || name === 'Line')
@@ -602,7 +705,8 @@ export class SketchEditor {
           : name === 'Line' && !!this.view.readOnlyReason;
     }
     const selected = this.selection;
-    this.status.textContent =
+    const status =
+      (this.gesture?.kind === 'move' ? this.gesture.error : undefined) ??
       this.view.readOnlyReason ??
       (selected?.layer && selected.layer !== this.view.id
         ? 'Upstream geometry · locked'
@@ -614,7 +718,8 @@ export class SketchEditor {
             ? this.drawing?.start
               ? 'Next point · Enter length/angle or click · X/Y locks direction · Esc ends the chain'
               : 'Start point · Enter X/Y or click'
-            : 'Drag points · Delete removes connected local lines · Wheel to zoom · Space-drag to pan');
+            : `${this.view.layers.at(-1)!.degreesOfFreedom} DOF · ${this.view.layers.at(-1)!.constraints.length} constraints · Drag points · Delete removes connected local lines`);
+    if (this.statusText.data !== status) this.statusText.data = status;
   }
 
   private entityClass(layer: string, id: number): string {
@@ -687,15 +792,31 @@ export class SketchEditor {
     a: SketchPosition,
     b: SketchPosition,
     className: string,
+    key: string,
+    parent: SVGElement,
   ): SVGLineElement {
-    const line = svgElement('line');
+    const line = this.shape(key, 'line', parent);
     line.setAttribute('x1', String(a[0]));
     line.setAttribute('y1', String(a[1]));
     line.setAttribute('x2', String(b[0]));
     line.setAttribute('y2', String(b[1]));
     line.setAttribute('class', className);
-    this.svg.append(line);
     return line;
+  }
+
+  private shape<K extends keyof SVGElementTagNameMap>(
+    key: string,
+    kind: K,
+    parent: SVGElement,
+  ): SVGElementTagNameMap[K] {
+    this.usedShapes.add(key);
+    let shape = this.shapes.get(key);
+    if (!shape) {
+      shape = svgElement(kind);
+      this.shapes.set(key, shape);
+      parent.append(shape);
+    }
+    return shape as SVGElementTagNameMap[K];
   }
 }
 

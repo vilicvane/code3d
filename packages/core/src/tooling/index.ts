@@ -2,10 +2,21 @@ import {setOC} from 'replicad';
 import type {OpenCascadeInstance} from 'replicad-opencascadejs';
 import {clearKernelOperationCache} from '../library/kernel-cache.js';
 
-export {isSketch, sketchDefinition, snapshotSketch} from '../library/sketch.js';
+export {
+  isSketch,
+  sketchDefinition,
+  snapshotSketch,
+  solveSketchSnapshot,
+} from '../library/sketch.js';
+export {
+  installSketchSolver,
+  SketchConstraintError,
+} from '../library/sketch-solver.js';
 export type {
   Sketch,
   SketchEntry,
+  SketchConstraint,
+  SketchOptions,
   SketchPosition,
   SketchPointAddress,
   SketchPointSnapshot,

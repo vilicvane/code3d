@@ -14,7 +14,7 @@ after(async () => browser?.close());
 
 for (const installed of [false, true]) {
   test(
-    `solves in the Studio Worker with ${installed ? 'project' : 'built-in'} packages`,
+    `solves assemblies and sketches in the Worker with ${installed ? 'project' : 'built-in'} packages`,
     {timeout: 120_000},
     async t => {
       const context = await browser.newContext();
@@ -95,6 +95,28 @@ for (const installed of [false, true]) {
             conflict = error.message;
           }
           const restored = await compile(source);
+          const sketchModule =
+            await compile(`import {sketch} from '@code3d/core';
+            const value = sketch([['point', 1, [0,0]], ['point', 2, [38,2]], ['line', 3, [1,2]]],
+              {constraints: [['horizontal', 3], ['length', [3, 40]]]});`);
+          const sketch = [...sketchModule.sketches.values()][0];
+          const gesture = {
+            id: 2,
+            position: [60, 20],
+            movable: [1, 2],
+            data: sketch.data,
+          };
+          const moved = await client.previewSketchDrag([sketch], gesture);
+          const pending = client.previewSketchDrag([sketch], gesture).then(
+            () => 'unexpected completion',
+            error => error.message,
+          );
+          client.cancel();
+          const cancelled = await pending;
+          const next = await client.previewSketchDrag([sketch], {
+            ...gesture,
+            position: [70, 30],
+          });
           return {
             firstDiagnostic: first.diagnostic,
             first: root(first)?.children[1].transform.position,
@@ -105,6 +127,11 @@ for (const installed of [false, true]) {
               root(shifted)?.children[1].constraints[1].sourceRefs.at(-1)?.file,
             conflict,
             restored: root(restored)?.children[1].transform.position,
+            sketchDiagnostic: sketchModule.diagnostic,
+            originalSketch: sketch,
+            moved,
+            cancelled,
+            next,
           };
         } finally {
           client.dispose();
@@ -135,6 +162,25 @@ for (const installed of [false, true]) {
       assert.deepEqual(result.offset, [5, 0, 7]);
       assert.equal(result.constraintSource, '/main.ts');
       assert.match(result.conflict, /Could not satisfy/);
+      assert.equal(result.sketchDiagnostic, undefined);
+      assert.match(result.cancelled, /superseded/);
+      const originalPoints = result.originalSketch.entities.filter(
+        e => e.kind === 'point',
+      );
+      for (const snapshot of [result.moved.snapshot, result.next.snapshot]) {
+        const [a, b] = snapshot.entities
+          .filter(e => e.kind === 'point')
+          .map(e => e.position);
+        for (const [index, p] of [a, b].entries())
+          p.forEach((v, axis) =>
+            assert.ok(
+              Math.abs(v - originalPoints[index].position[axis]) < 1e-6,
+            ),
+          );
+        assert.ok(Math.abs(b[0] - a[0] - 40) < 1e-6);
+        assert.ok(Math.abs(b[1] - a[1]) < 1e-6);
+        assert.equal(snapshot.degreesOfFreedom, 2);
+      }
     },
   );
 }

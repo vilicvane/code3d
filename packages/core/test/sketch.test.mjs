@@ -5,6 +5,7 @@ import {
   isSketch,
   sketchDefinition,
   snapshotSketch,
+  solveSketchSnapshot,
 } from '../bld/tooling/index.js';
 
 test('sketches exist without a kernel, a closed region, or any entities', () => {
@@ -17,6 +18,9 @@ test('sketches exist without a kernel, a closed region, or any entities', () => 
       id: 'empty',
       base: undefined,
       entities: [],
+      constraints: [],
+      degreesOfFreedom: 0,
+      redundant: [],
     },
   );
 });
@@ -39,6 +43,22 @@ test('IDs are explicit, unordered and permit forward references', () => {
     {kind: 'point', id: 2, position: [10, 0]},
     {kind: 'point', id: 1, position: [0, 0]},
   ]);
+});
+
+test('unconstrained dragging needs no native kernel and preserves other points', () => {
+  const initial = snapshotSketch(
+    sketch([
+      ['point', 1, [0, 0]],
+      ['point', 2, [10, 0]],
+      ['line', 3, [1, 2]],
+    ]),
+    () => 'local',
+  );
+  const moved = solveSketchSnapshot([initial], {id: 1, position: [4, 5]});
+  assert.deepEqual(moved.entities[0].position, [4, 5]);
+  assert.deepEqual(moved.entities[1].position, [10, 0]);
+  assert.equal(moved.degreesOfFreedom, 4);
+  assert.deepEqual(initial.entities[0].position, [0, 0]);
 });
 
 test('the value captures its definition without retaining mutable coordinate arrays', () => {
@@ -71,6 +91,9 @@ test('derived layers independently reuse IDs while preserving upstream addresses
   assert.deepEqual(snapshotSketch(derived, identity), {
     id: 'derived',
     base: 'base',
+    constraints: [],
+    degreesOfFreedom: 2,
+    redundant: [],
     entities: [
       {kind: 'point', id: 1, position: [10, 10]},
       {

@@ -4,6 +4,15 @@ import {ProjectPackageResolver} from './package-resolver';
 import {decodeProjectFile, type ProjectFileReader} from './file-reader';
 import type {ProjectAssets} from './project-assets';
 
+// Build-time Node supplies its real builtin catalog, including subpaths.
+const nodeBuiltins = new Set(__CODE3D_NODE_BUILTINS__);
+const nodeBuiltin = (specifier: string) =>
+  specifier.startsWith('node:')
+    ? specifier
+    : nodeBuiltins.has(specifier)
+      ? `node:${specifier}`
+      : undefined;
+
 export type SourceTransform = (path: string, source: string) => string;
 export type ModuleFormats = ReadonlyMap<string, 'esm' | 'cjs'>;
 export type ProjectBundle = Readonly<{
@@ -81,8 +90,8 @@ export class ProjectBuilder {
                 return runtimeModule(args.pluginData, 'runtime-value');
               // Conditional dynamic imports in universal packages stay conditional.
               // Executing a Node-only branch is rejected by the evaluator.
-              if (args.path.startsWith('node:'))
-                return {path: args.path, external: true};
+              const builtin = nodeBuiltin(args.path);
+              if (builtin) return {path: builtin, external: true};
               const path = await this.resolver.resolve(
                 args.path,
                 args.importer || '/.__code3d-entry.js',
@@ -245,7 +254,7 @@ export class ProjectBuilder {
         node.expression.kind === ts.SyntaxKind.ImportKeyword &&
         node.arguments.length === 1 &&
         ts.isStringLiteralLike(node.arguments[0]) &&
-        !node.arguments[0].text.startsWith('node:')
+        !nodeBuiltin(node.arguments[0].text)
       )
         imports.push(node);
       ts.forEachChild(node, visit);

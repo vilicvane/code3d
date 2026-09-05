@@ -55,12 +55,12 @@ test('moving a numeric point preserves expressions, comments and tuple identitie
   const host = setup(source);
   assert.deepEqual([...analyzeSketchSource(source).movable], [1]);
   assert.equal(
-    host.edit({kind: 'move', id: 1, position: [4, 5]}).status,
+    host.edit({kind: 'move', positions: [{id: 1, position: [4, 5]}]}).status,
     'committed',
   );
   assert.equal(host.source(), source.replace('-2', '4').replace('+3', '5'));
   assert.equal(
-    host.edit({kind: 'move', id: 8, position: [4, 5]}).status,
+    host.edit({kind: 'move', positions: [{id: 8, position: [4, 5]}]}).status,
     'unsupported',
   );
   assert.equal(host.undo.length, 1);
@@ -137,7 +137,8 @@ test('successive appends do not accumulate blank lines between generated tuples'
 test('stale gestures, dynamic tuples and inaccessible upstreams never rewrite source', () => {
   const host = setup("[['point', 1, [0,0]]]");
   assert.equal(
-    host.edit({kind: 'move', id: 1, position: [2, 3]}, '[]').status,
+    host.edit({kind: 'move', positions: [{id: 1, position: [2, 3]}]}, '[]')
+      .status,
     'conflict',
   );
   assert.equal(
@@ -157,6 +158,23 @@ test('stale gestures, dynamic tuples and inaccessible upstreams never rewrite so
     'conflict',
   );
   assert.equal(host.undo.length, 0);
+  assert.equal(
+    host.edit({
+      kind: 'append',
+      entries: [['point', 2, [2, 3]]],
+      constraints: [
+        [
+          'coincident',
+          [
+            {layer: 'unknown', id: 1},
+            {layer: 'local', id: 2},
+          ],
+        ],
+      ],
+    }).status,
+    'conflict',
+  );
+  assert.equal(host.undo.length, 0);
   for (const source of [
     '[...entries]',
     "[['point', id, [0,0]]]",
@@ -169,5 +187,104 @@ test('stale gestures, dynamic tuples and inaccessible upstreams never rewrite so
       'unsupported',
     );
     assert.equal(dynamic.source(), source);
+  }
+});
+
+test('geometry and constraints append in one source edit without replacing existing options or expressions', () => {
+  for (const source of [
+    "[['point', 1, [0,0]]]",
+    "[['point', 1, [0,0]]], {}",
+    "[['point', 1, [0,0]]], {constraints: [/* keep */ ['x', [1, width]] /* end */]}",
+  ]) {
+    const host = setup(source);
+    assert.equal(
+      host.edit({
+        kind: 'append',
+        entries: [
+          ['point', 2, [40, 0]],
+          [
+            'line',
+            3,
+            [
+              {layer: 'local', id: 1},
+              {layer: 'local', id: 2},
+            ],
+          ],
+        ],
+        constraints: [
+          ['length', [3, 40]],
+          ['horizontal', 3],
+        ],
+      }).status,
+      'committed',
+    );
+    const [entries, options] = Function(
+      'width',
+      `return [${host.source()}]`,
+    )(0);
+    assert.equal(entries.length, 3);
+    assert.deepEqual(options.constraints.slice(-2), [
+      ['length', [3, 40]],
+      ['horizontal', 3],
+    ]);
+    assert.equal(host.undo.length, 1);
+    assert.ok(analyzeSketchSource(host.source()).constraints);
+    if (source.includes('width'))
+      assert.match(host.source(), /\/\* keep \*\/ \['x', \[1, width\]\]/);
+  }
+});
+
+test('solved multi-point movement is atomic and does not rewrite dimension expressions', () => {
+  const source =
+    "[['point', 1, [0,0]], ['point', 2, [40,0]], ['line', 3, [1,2]]], {constraints: [['length', [3, width]], ['horizontal', 3]]}";
+  const host = setup(source);
+  assert.equal(
+    host.edit({
+      kind: 'move',
+      positions: [
+        {id: 1, position: [10, 5]},
+        {id: 2, position: [50, 5]},
+      ],
+    }).status,
+    'committed',
+  );
+  assert.match(host.source(), /\[10,5\]/);
+  assert.match(host.source(), /\[50,5\]/);
+  assert.match(host.source(), /\['length', \[3, width\]\]/);
+  assert.equal(host.undo.length, 1);
+});
+
+test('entity deletion removes its constraints in the same undo transaction while keeping others', () => {
+  const host = setup(
+    "[['point', 1, [0,0]], ['point', 2, [40,0]], ['line', 3, [1,2]]], {constraints: [['fixed', 1], ['horizontal', 3], /* width */ ['length', [3, width]]]}",
+  );
+  assert.equal(
+    host.edit({kind: 'delete', ids: [3], constraints: [1, 2]}).status,
+    'committed',
+  );
+  const [entries, options] = Function(`return [${host.source()}]`)();
+  assert.equal(entries.length, 2);
+  assert.deepEqual(options.constraints, [['fixed', 1]]);
+  assert.equal(host.undo.length, 1);
+});
+
+test('computed options and constraints never get silently replaced by generated constraints', () => {
+  for (const options of [
+    'settings',
+    '{...settings}',
+    '{constraints: rules}',
+    '{constraints: [...rules]}',
+  ]) {
+    const source = `[], ${options}`;
+    const host = setup(source);
+    assert.equal(
+      host.edit({
+        kind: 'append',
+        entries: [['point', 1, [0, 0]]],
+        constraints: [['fixed', {layer: 'local', id: 1}]],
+      }).status,
+      'unsupported',
+    );
+    assert.equal(host.source(), source);
   }
 });

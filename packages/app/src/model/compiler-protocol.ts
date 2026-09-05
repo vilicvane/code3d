@@ -5,6 +5,8 @@ import type {ModelModule} from './compiler';
 import type {ModelDiagnostic} from './diagnostic';
 import type {ModelExportInstance, ModelExportOptions} from './model-export';
 import type {CompilationPhase} from './compilation-progress';
+import type {SketchSnapshot} from '@code3d/core/tooling';
+import type {SketchDrag, SketchDragPreview} from './sketch-drag';
 
 export type CompileRequest = Readonly<{
   kind: 'compile';
@@ -24,6 +26,12 @@ export type FileRequest = Readonly<{
 
 export type CompilerRequest =
   | CompileRequest
+  | Readonly<{
+      kind: 'sketch';
+      id: number;
+      layers: readonly SketchSnapshot[];
+      drag: SketchDrag;
+    }>
   | Readonly<{
       kind: 'export';
       id: number;
@@ -45,6 +53,7 @@ export type CompilerResponse =
   | Readonly<{kind: 'progress'; id: number; phase: CompilationPhase}>
   | Readonly<{kind: 'result'; id: number; ok: true; module: ModelModule}>
   | Readonly<{kind: 'export'; id: number; ok: true; blob: Blob}>
+  | Readonly<{kind: 'sketch'; id: number; ok: true; preview: SketchDragPreview}>
   | Readonly<{
       kind: 'result';
       id: number;

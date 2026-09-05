@@ -404,7 +404,10 @@ export function createModelCompiler(
       } catch (error) {
         executionTrace.outcome = 'failed';
         executionTrace.order = nextSourceReachOrder();
-        const failure = locateModelError(error, callLocation);
+        const failure = locateModelError(
+          error,
+          sketches.constraintErrorSource(error, location) ?? callLocation,
+        );
         executionTrace.failure = failure.diagnostic;
         throw failure;
       } finally {
@@ -419,6 +422,7 @@ export function createModelCompiler(
         `${id}:execution:${execution}`,
         location,
         executionTrace.arguments.get(0),
+        executionTrace.arguments.get(1),
         executionTrace.receiver,
       );
       if (isConstraint(result)) {

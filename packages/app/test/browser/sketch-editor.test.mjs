@@ -167,6 +167,16 @@ test('a line between empty positions commits its points atomically and Escape ca
   assert.equal(await page.locator('.sketch-canvas circle.local').count(), 2);
   assert.match(await text(page), /'line',\s*3,\s*\[1,\s*2\]/);
   await page.getByRole('button', {name: 'Select', exact: true}).click();
+  const created = await text(page);
+  const anchor = await screenPoint(point(page, 2));
+  await drag(page, point(page, 1), 35, -25);
+  await settleDrag(page);
+  assert.notEqual(
+    await text(page),
+    created,
+    'new point data is available before recompilation',
+  );
+  assert.deepEqual(await screenPoint(point(page, 2)), anchor);
   const before = await text(page);
   const p = await point(page, 1).boundingBox();
   await page.mouse.move(p.x + p.width / 2, p.y + p.height / 2);
@@ -350,11 +360,16 @@ test('numeric fields retain native undo including the first character, independe
   const before = await text(page);
   await page.keyboard.type('40');
   assert.equal(await field(page, 'Length').inputValue(), '40');
-  await page.keyboard.press('Control+z');
-  assert.equal(await field(page, 'Length').inputValue(), '');
-  assert.equal(await text(page), before);
-  assert.equal(await point(page, 1).count(), 1);
-  await page.keyboard.press('Control+Shift+z');
+  // Native Chrome may split typing when Monaco asynchronously tokenizes the
+  // just-edited source. Every native group must remain in the field's history.
+  let groups = 0;
+  while (await field(page, 'Length').inputValue()) {
+    assert.ok(groups++ < 2);
+    await page.keyboard.press('Control+z');
+    assert.equal(await text(page), before);
+    assert.equal(await point(page, 1).count(), 1);
+  }
+  for (let i = 0; i < groups; i++) await page.keyboard.press('Control+Shift+z');
   assert.equal(await field(page, 'Length').inputValue(), '40');
   assert.equal(await text(page), before);
   await page.keyboard.press('Escape');
@@ -420,7 +435,9 @@ test('X/Y switch and cancel bidirectional axis locks independently of snap and k
   assert.equal(await drawingTitle(page), 'Next point');
   assert.equal(await page.locator('.sketch-canvas line.local').count(), 1);
   const completed = await text(page);
-  assert.doesNotMatch(completed, /constraint|locked|axis/);
+  assert.match(completed, /constraints/);
+  assert.match(completed, /\['horizontal',\s*3\]/);
+  assert.doesNotMatch(completed, /vertical|locked|axis/);
   await page.keyboard.press('y');
   await page.keyboard.press('Escape');
   assert.equal(await drawingTitle(page), 'Start point');
@@ -480,4 +497,108 @@ test('axis shortcuts share direction with Angle while preserving Length focus, t
   );
   await page.evaluate(() => window.dispatchEvent(new Event('blur')));
   assert.equal(await drawingTitle(page), 'Start point');
+});
+
+const constrainedLine = `import {sketch} from '@code3d/core';
+const value = sketch([
+  ['point', 1, [0, 0]],
+  ['point', 2, [40, 0]],
+  ['line', 3, [1, 2]],
+], {constraints: [['horizontal', 3], ['length', [3, 40]]]});`;
+const screenPoint = locator =>
+  locator.evaluate(e => [
+    Number(e.getAttribute('cx')),
+    Number(e.getAttribute('cy')),
+  ]);
+const settleDrag = page =>
+  page
+    .getByRole('region', {name: 'Sketch editor'})
+    .filter({has: page.locator('svg')})
+    .evaluate(async root => {
+      if (root.getAttribute('aria-busy') !== 'true') return;
+      await new Promise(resolve => {
+        const observer = new MutationObserver(() => {
+          if (root.getAttribute('aria-busy') !== 'true') {
+            observer.disconnect();
+            resolve();
+          }
+        });
+        observer.observe(root, {
+          attributes: true,
+          attributeFilter: ['aria-busy'],
+        });
+      });
+    });
+
+test('constrained drag anchors the opposite endpoint, keeps length and survives recompilation with one undo', async t => {
+  const page = await open(
+    t,
+    constrainedLine.replace("['horizontal', 3], ", ''),
+  );
+  const source = await text(page);
+  const a = await screenPoint(point(page, 1)),
+    b = await screenPoint(point(page, 2));
+  await page.evaluate(
+    () =>
+      (globalThis.originalSketchPoint = document.querySelector(
+        '.sketch-canvas circle.local[data-id="1"]',
+      )),
+  );
+  await drag(page, point(page, 2), -40, -50);
+  await settleDrag(page);
+  await page.getByText('Ready', {exact: true}).waitFor();
+  const movedA = await screenPoint(point(page, 1)),
+    movedB = await screenPoint(point(page, 2));
+  assert.deepEqual(movedA, a);
+  assert.ok(
+    Math.abs(
+      Math.hypot(movedB[0] - movedA[0], movedB[1] - movedA[1]) -
+        Math.hypot(b[0] - a[0], b[1] - a[1]),
+    ) < 1e-5,
+  );
+  assert.ok(Math.abs(movedB[1] - b[1]) > 20);
+  assert.notEqual(await text(page), source);
+  assert.match(await text(page), /'length',\s*\[3,\s*40\]/);
+  assert.equal(
+    await page.evaluate(
+      () =>
+        globalThis.originalSketchPoint ===
+        document.querySelector('.sketch-canvas circle.local[data-id="1"]'),
+    ),
+    true,
+  );
+  await page.keyboard.press('Control+z');
+  await page.getByText('Ready', {exact: true}).waitFor();
+  await point(page, 2).waitFor();
+  assert.match(await text(page), /'point',\s*2,\s*\[40,\s*0\]/);
+  assert.doesNotMatch(await text(page), /'horizontal'|'fixed'/);
+});
+
+test('fully constrained points resist dragging without writing a source transaction', async t => {
+  const page = await open(
+    t,
+    constrainedLine.replace('constraints: [', "constraints: [['fixed', 1], "),
+  );
+  const before = await text(page);
+  const p = await screenPoint(point(page, 2));
+  await drag(page, point(page, 2), -60, -70);
+  await settleDrag(page);
+  assert.deepEqual(await screenPoint(point(page, 2)), p);
+  assert.equal(await text(page), before);
+});
+
+test('deleting a constrained line removes only its constraints and undo restores them together', async t => {
+  const page = await open(t, constrainedLine);
+  const a = await point(page, 1).boundingBox(),
+    b = await point(page, 2).boundingBox();
+  await page.mouse.click((a.x + b.x + a.width) / 2, a.y + a.height / 2);
+  await page.keyboard.press('Delete');
+  assert.equal(await page.locator('.sketch-canvas line.local').count(), 0);
+  assert.doesNotMatch(await text(page), /'horizontal'|'length'/);
+  assert.equal(await page.locator('.sketch-canvas circle.local').count(), 2);
+  await page.getByText('Ready', {exact: true}).waitFor();
+  await page.keyboard.press('Control+z');
+  await page.locator('.sketch-canvas line.local').waitFor({state: 'attached'});
+  assert.match(await text(page), /'horizontal',\s*3/);
+  assert.match(await text(page), /'length',\s*\[3,\s*40\]/);
 });

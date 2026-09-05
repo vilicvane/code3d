@@ -26,15 +26,31 @@ implementation context and historical outcomes, not a competing work queue.
   Selecting a sketch opens a 2D point/line editor. Literal coordinates can be
   dragged; expression-driven coordinates stay source-edited. Continuous lines
   create/reuse endpoints without a standalone point creation tool, with numeric
-  start X/Y or segment length/angle input, temporary X/Y direction locks,
-  dense adaptive snapping, cancellation
-  and one atomic source transaction per segment. Entered numbers define creation geometry,
-  not persistent constraints. The editor does not yet infer regions, generate
-  B-Reps, solve sketch constraints, or trim crossings.
-  The next scope is common sketch tools and in-canvas numeric input, with
-  Lucide for tool icons. See the requested [research and priority proposal](plans/sketch-editor.md)
-  and [#23](https://github.com/vilicvane/code3d/issues/23); new curve and constraint
-  tuple formats in that proposal are not yet confirmed.
+  start X/Y or segment length/angle input, X/Y direction locks, dense adaptive
+  snapping, cancellation and one atomic source transaction per segment.
+  `sketch(entries, {constraints})` separates current geometry from hard
+  conditions, without persistent constraint IDs. Fixed point, coincident,
+  horizontal/vertical, length, angle and point X/Y constraints use PlaneGCS;
+  assemblies retain OndselSolver. Explicit drawing dimensions and the final
+  active X/Y lock become constraints when geometry is committed; toggling off
+  emits no direction constraint. Ordinary automatic snapping stays temporary.
+  Dragging uses a soft Worker solve and writes all changed editable coordinates
+  together, preserving hard constraints, upstream values and expression source.
+  Without a locked point, a gesture temporarily anchors the first non-dragged
+  point; this does not persist a fixed constraint or reduce the reported model
+  DOF. Unconstrained movement is kernel-independent. Successive frames use the
+  preceding solution, and previews forward-solve the rounded source data that
+  will be committed. Preserved expression seeds can still move that temporary
+  anchor during replay; the full stability requirement is not yet accepted.
+  Deletion removes affected local constraints atomically. Snapshots expose DOF
+  and redundant indices; conflicting inline constraints are source-located.
+  Numeric fields retain native browser text history; SVG nodes retain entity
+  identities across redraws. PlaneGCS 1.2.0 is a pinned, unmodified dependency;
+  native systems and vectors are released after every solve.
+  Circles/arcs, trimming, regions and B-Rep generation remain later slices.
+  See [research and priorities](plans/sketch-editor.md) and
+  [#23](https://github.com/vilicvane/code3d/issues/23); curve and trimming formats
+  remain unconfirmed.
 - Author code remains ordinary JavaScript/TypeScript and may freely construct,
   reuse, copy, collect, and derive model values.
 - A real code3d project is an ordinary Node/TypeScript package that owns its
