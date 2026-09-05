@@ -2,7 +2,7 @@
 
 The synchronous rigid-body constraint backend used by `@code3d/core`, compiled
 from [OndselSolver](https://github.com/FreeCAD/OndselSolver) to WebAssembly.
-Node and Studio Workers load the same JavaScript and WASM artifacts. Model
+Node and App Workers load the same JavaScript and WASM artifacts. Model
 authors initialize neither module themselves.
 
 The package is LGPL-2.1-or-later. It includes the code3d binding source and the

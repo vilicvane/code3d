@@ -839,6 +839,117 @@ test('compiles the standalone custom primitive example with direct annotations a
   }
 });
 
+test('the documented origin example exposes each spatial operation and its assembly', async () => {
+  const rootPath = '/examples/origin-and-rotation.ts';
+  const file = bundledExamples.files.find(file => file.path === rootPath);
+  assert.ok(file);
+  const module = await compileProject({files: [file]}, rootPath);
+  assert.equal(module.diagnostic, undefined);
+  for (const [text, kind, parameters] of [
+    ['blank.originVertex(3)', 'originVertex', ['id']],
+    ['pivoted.originOffset(0, 2, 0)', 'originOffset', ['dx', 'dy', 'dz']],
+    ['offset.rotate(15, 35, 0)', 'rotate', ['x', 'y', 'z']],
+    ['rotated.originCenter()', 'originCenter', undefined],
+    ['rotated.origin(0, 0, 0)', 'origin', ['x', 'y', 'z']],
+  ]) {
+    // The receiver is a separate input scope; the tool starts at the method name.
+    const targets = exactTargets(
+      module,
+      file.source,
+      text.slice(text.indexOf('.') + 1),
+      text,
+    );
+    assert.ok(
+      targets.some(target =>
+        target.evaluations.some(evaluation => {
+          const operation = module.operations.get(evaluation.operationId);
+          return operation?.kind === kind && operation.spatial;
+        }),
+      ),
+      `The guide needs an inspectable spatial context for ${text}`,
+    );
+    if (parameters) {
+      const target = targets.find(target => target.tool);
+      assert.deepEqual(
+        target?.tool.signature.parameters.map(parameter => parameter.name),
+        parameters,
+      );
+    }
+  }
+  const assembly = exactTargets(
+    module,
+    file.source,
+    'group([rotated, companion])',
+  );
+  assert.ok(
+    assembly.some(target =>
+      target.evaluations.some(evaluation => evaluation.nodeIds.length > 0),
+    ),
+  );
+});
+
+test('the shared combined-constraints guide retains both inspectable relations', async () => {
+  const rootPath = '/examples/combined-constraints.ts';
+  const file = bundledExamples.files.find(file => file.path === rootPath);
+  assert.ok(file);
+  const module = await compileProject({files: [file]}, rootPath);
+  assert.equal(module.diagnostic, undefined);
+  assert.ok(module.exports.has('default'));
+  const relations = ['self.edge(3)', 'self.top'].map(text => {
+    const target = ModelViewport.prototype.sourceTargetAt.call(
+      {module},
+      rootPath,
+      file.source.indexOf(text) + text.length - 1,
+    );
+    const evaluation = target.evaluations[0];
+    assert.ok(evaluation.constraintId);
+    assert.equal(sourceTargetPlacement(evaluation), 'composition');
+    assert.equal(evaluation.nodeIds.length, 2);
+    return evaluation.constraintId;
+  });
+  assert.notEqual(relations[0], relations[1]);
+});
+
+test('the App guide distinguishes a method receiver, its result and an ordinary function input', async () => {
+  const document = await readFile(
+    new URL(
+      '../../web/src/content/docs/docs/getting-started/app.md',
+      import.meta.url,
+    ),
+    'utf8',
+  );
+  const source = [...document.matchAll(/\`\`\`ts\n([\s\S]*?)\`\`\`/g)]
+    .map(match => match[1])
+    .find(source => source.includes('centered(rounded)'));
+  assert.ok(source);
+  const rootPath = '/model.ts';
+  const module = await compileProject(
+    {files: [{path: rootPath, source}]},
+    rootPath,
+  );
+  assert.equal(module.diagnostic, undefined);
+  const at = (text, context = text) => {
+    const start = source.indexOf(text, source.indexOf(context));
+    return ModelViewport.prototype.sourceTargetAt.call(
+      {module},
+      rootPath,
+      start + text.length - 1,
+    );
+  };
+  const receiver = at('blank', 'blank.fillet(1)');
+  const result = at('fillet(1)');
+  const argument = at('rounded', 'centered(rounded)');
+  assert.notDeepEqual(
+    receiver.evaluations[0].nodeIds,
+    result.evaluations[0].nodeIds,
+  );
+  assert.deepEqual(
+    argument.evaluations[0].nodeIds,
+    result.evaluations[0].nodeIds,
+  );
+  assert.equal(at('centered(rounded)').tool, undefined);
+});
+
 for (const sample of renderSamples) {
   test(`compiles the shared gallery source and focus for ${sample.id}`, async () => {
     const rootPath = '/examples/' + sample.file;

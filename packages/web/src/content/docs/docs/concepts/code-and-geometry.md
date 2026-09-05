@@ -25,6 +25,19 @@ One source expression can execute multiple times, such as inside a loop or
 function. The App tracks those runtime results and lets source and viewport
 selection identify the relevant instance.
 
+Inputs and outputs are separate contexts. In `part.rotate(0, 30, 0)`, the
+`part` occurrence refers to the input model, while the method call refers to
+the rotated result. Model-valued arguments are tracked through ordinary
+function calls too; this inspection does not require tool annotations.
+See [inspecting inputs and results](../../getting-started/app/#inspect-inputs-and-results).
+
+A collection of models uses the members' resolved composition positions,
+including arrays, sets, and map values. Even a one-element collection keeps
+that placement; inspecting the member by itself uses its local frame. This
+lets you inspect a `map(...)` result without its related parts collapsing onto
+the same local origin. A collection is not a new group model or an implicit
+group-level position tool.
+
 Selecting an intermediate expression is a way to inspect the model, not an
 instruction to rewrite the program's entry point. Exporting a value is an
 optional publishing boundary.
@@ -38,8 +51,15 @@ object properties.
 
 Being able to evaluate an expression does not mean the App can invert it.
 A function call might produce a number, but there may be no unique way to
-change its inputs to obtain a requested result. In such cases, edit the
-expression in code.
+change its inputs to obtain a requested result. A numeric panel can show that
+result as a placeholder and replace the whole argument when you type a value.
+A position or rotation drag can instead retain the expression and add an
+increment. Neither operation solves for the expression's inputs.
+
+These are source edits. If a loop or function uses the same call more than
+once, changing its expression can affect every occurrence. Shared upstream
+parameters can affect other call sites too. See
+[parameter editing](../../guides/model-tools/#what-a-panel-can-edit) for examples.
 
 ## Geometry and topology
 

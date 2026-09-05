@@ -1,6 +1,6 @@
 ---
-title: Selecting edges and faces
-description: Apply fillets and chamfers and understand model-local topology IDs.
+title: Selecting vertices, edges, and faces
+description: Pick topology for fillets, chamfers, origins, and relation anchors.
 ---
 
 Start with a box:
@@ -30,6 +30,10 @@ edits return to the source as you type.
 **Use all edges** removes the second argument. Deselecting every explicit edge
 also returns to all-edge mode; an empty array is not an explicit no-op.
 
+Selections write back immediately. Pressing `Esc` does not discard them or
+close the tool; move the editor cursor away from the call to leave it, and
+use Undo to revert an edit.
+
 ## IDs belong to a model
 
 Edge, face, and vertex IDs have separate namespaces within each model. An ID
@@ -48,6 +52,14 @@ it still selects the same edges.
 `model.surface(id)`, `model.edge(id)`, and `model.vertex(id)` return
 face, line, and point anchors. Use their plural forms to obtain a collection;
 omitting the ID array returns all elements of that kind.
+
+Place the cursor in one of these calls to pick its topology in the viewport.
+Singular forms select one ID; plural forms let you toggle multiple IDs and
+can explicitly use `[]` for no elements. That is different from fillet and
+chamfer's all-edge behavior.
+
+To choose a vertex as a rotation pivot, use `.originVertex(id)`. See
+[origins and rotation](../origins-and-rotation/).
 
 A named element exposed by a reusable part usually communicates intent better
 than a caller maintaining its internal topology IDs. See
