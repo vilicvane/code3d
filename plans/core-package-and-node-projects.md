@@ -301,7 +301,12 @@ The working execution model is:
    Do not forcibly dispose models that an installed package may cache privately.
    Unreachable Replicad wrappers release native resources through finalizers.
 
-Tooling protocol 2 uses `beginModelEvaluation(): void` before each serial source
+Tooling protocol 3 initializes OpenCascade and `@code3d/solver` from the same
+selected package graph, including each module's own WASM asset. Node's core
+entry performs both installations; Studio installs both through the selected
+tooling entry before evaluating author code.
+
+Call `beginModelEvaluation(): void` before each serial source
 evaluation. Source locations, parameter provenance, and operation traces live
 in per-evaluation weak maps, separate from model geometry and stored relations.
 Reusing a dependency's model must not reuse the previous revision's source

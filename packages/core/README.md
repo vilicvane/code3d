@@ -18,9 +18,54 @@ renderable, and relation-aware. Topology capabilities follow dimension:
 vertices provide `.vertex(id)`, edges add `.edge(id)`, and faces and solids
 add `.surface(id)`; only solids provide `fillet` and `chamfer`. Groups retain
 the common relation, expose, and paint capabilities without pretending to
-contain geometry. Stable topology references can be used as complete relation anchors.
+contain geometry. Stable topology references can be used as geometric relation anchors.
 `relate()` records placement for composition with other values; inspecting or
 rendering the resulting value by itself keeps its intrinsic local frame.
+
+## Geometric relations
+
+`relate(self => constraint | constraints)` solves the returned relations
+together. `on()` constrains geometry according to the anchors:
+
+| Anchors                           | Hard condition                                       |
+| --------------------------------- | ---------------------------------------------------- |
+| Point / point                     | Coincident points                                    |
+| Point / line or face              | Point lies on the reference line or plane            |
+| Line / line                       | Collinear reference lines                            |
+| Line / face                       | Reference line lies in the plane                     |
+| Face / face                       | Coincident planes with opposing normals              |
+| Either anchor is a complete frame | Coincident complete frames with opposing orientation |
+
+Centers and default orientation select among geometrically valid poses;
+they do not add hard conditions. Face `.flip()` selects aligned normals.
+Line directions are geometrically unoriented; `.flip()` reverses the preferred
+direction. Point anchors do not impose orientation. An explicit
+`.offset(x, y, z)` pins the source anchor position to that point in the target
+anchor's frame, including `.offset(0, 0, 0)`. Repeated offsets add together.
+
+```ts
+import {box, group} from '@code3d/core';
+
+const first = box(10, 10, 10);
+const second = box(20, 20, 20).relate(self => [
+  self.edge(3).on(first.edge(1)),
+  self.top.on(first.bottom),
+]);
+export default group([first, second]);
+```
+
+Here the second box is placed at `[5, -15, 0]`. A line anchor represents its
+infinite reference line, and a face anchor represents its reference plane;
+this does not require finite edges or face boundaries to match. Curved
+topology retains the sampled tangent/normal reference frame rather than
+constraining complete curves or surfaces to coincide.
+
+Related objects are solved together at composition, Boolean, and loft
+boundaries. Models without relations provide fixed references. Each group's
+children are solved in its local space, so relating the group moves the
+assembled children as one rigid body. `expose()` rebinds member anchors into
+that local space. The backend is [`@code3d/solver`](../solver/README.md);
+an unsatisfied local solve is reported without claiming proof of infeasibility.
 
 ## Tubes
 
@@ -97,8 +142,9 @@ is not expanded to recognize primitive factory definitions.
 ## Tooling evaluation lifetime
 
 Studio uses the selected runtime's `@code3d/core/tooling` entry, from the project
-when core is declared or from the built-in package otherwise. Protocol 2
-adds `beginModelEvaluation(): void`: call it before each serial source
+when core is declared or from the built-in package otherwise. Protocol 3
+requires installing both OpenCascade and the constraint solver from that same
+package dependency graph. Call `beginModelEvaluation(): void` before each serial source
 evaluation to reset source locations, parameter provenance, and operation
 traces. Geometry, model identity, relations, and kernel caches are unaffected.
 Already-created snapshots keep their previous evaluation's metadata.

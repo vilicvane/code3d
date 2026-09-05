@@ -64,7 +64,9 @@ export type {
 } from '../library/topology.js';
 export {describeOpenCascadeException} from '../library/open-cascade-error.js';
 
-export const toolingProtocolVersion = 2;
+export {installConstraintSolver} from '../library/constraint-solver.js';
+
+export const toolingProtocolVersion = 3;
 
 export function installOpenCascade(openCascade: OpenCascadeInstance): void {
   clearKernelOperationCache();
