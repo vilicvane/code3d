@@ -1691,6 +1691,9 @@ export function createModelCompiler(
               execution.arguments.get(parameter.index),
               parameter.multiple,
             );
+            const operationSelection = operation?.selections.find(
+              selection => selection.kind === parameter.kind,
+            );
             const returnedReferences = valueTargets
               .find(target => target.tool?.callId === site.siteId)
               ?.evaluations.find(
@@ -1709,14 +1712,16 @@ export function createModelCompiler(
                 selection: {
                   kind: parameter.kind,
                   inputNodeId: modelObjectNodeId(owner),
-                  ids: returnedReferences?.length
-                    ? returnedReferences.flatMap(reference =>
-                        reference.kind !== 'solid' &&
-                        reference.kind === parameter.kind
-                          ? [reference.id]
-                          : [],
-                      )
-                    : attemptedIds.filter(id => availableIds.includes(id)),
+                  ids: operationSelection
+                    ? operationSelection.ids
+                    : returnedReferences?.length
+                      ? returnedReferences.flatMap(reference =>
+                          reference.kind !== 'solid' &&
+                          reference.kind === parameter.kind
+                            ? [reference.id]
+                            : [],
+                        )
+                      : attemptedIds.filter(id => availableIds.includes(id)),
                   scope: reference
                     ? {
                         geometryNodeId: modelObjectNodeId(reference.geometry),

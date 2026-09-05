@@ -72,6 +72,10 @@ shows which operations are supported by the value you hold.
 
 - `.fillet(radius, edgeIds?)`: round selected edges, or all edges.
 - `.chamfer(distance, edgeIds?)`: bevel selected edges, or all edges.
+- `.shell(thickness, removedSurfaceIds?)`: hollow one connected solid. Positive
+  thickness offsets inward; negative thickness offsets outward. Selected surfaces
+  become openings; omission or `[]` creates an enclosed cavity. See
+  [shelling](../../guides/topology/#hollow-a-solid).
 - `.scaled(factor)`: uniformly scale a geometric model about local coordinate zero.
 - `.paint(color)`: return a recolored model; a group recursively overrides
   every descendant's color, including already-painted parts and nested groups.

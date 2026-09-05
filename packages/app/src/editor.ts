@@ -28,6 +28,7 @@ import {
   type ModelProject,
 } from './project/project';
 import type {SourceTextEdit, ToolCommitOptions} from './tools/tool-system';
+import {rebaseSourceRef} from './tools/source-ref';
 import type {SourceEditExcerpt} from './ui/source-edit-popover';
 
 type MonacoEnvironment = typeof self & {
@@ -899,7 +900,7 @@ export class CodeEditor {
             ? 'redo'
             : this.contentChangeOrigin;
         if (origin !== 'tool') this.sourceEditUndoGroups.delete(normalized);
-        this.rebaseTrackedSourceRefs(normalized, event.changes);
+        this.rebaseTrackedSourceRefs(normalized, event.changes, origin);
         this.refreshAnnotationDecorations(normalized, model);
         this.revision += 1;
         this.emitChange({
@@ -931,10 +932,11 @@ export class CodeEditor {
   private rebaseTrackedSourceRefs(
     path: string,
     changes: readonly monaco.editor.IModelContentChange[],
+    origin: ContentChangeOrigin,
   ): void {
     for (const [key, sourceRef] of this.trackedSourceRefs) {
       if (sourceRef.file !== path) continue;
-      const rebased = rebaseSourceRef(sourceRef, changes);
+      const rebased = rebaseSourceRef(sourceRef, changes, origin === 'user');
       if (rebased) {
         this.trackedSourceRefs.set(key, rebased);
       } else {
@@ -1183,46 +1185,6 @@ function modelDiagnosticMarker(
 
 function sourceRefKey(sourceRef: SourceRef): string {
   return `${sourceRef.file}:${sourceRef.start}:${sourceRef.end}`;
-}
-
-function rebaseSourceRef(
-  sourceRef: SourceRef,
-  changes: readonly monaco.editor.IModelContentChange[],
-): SourceRef | undefined {
-  let shift = 0;
-  let internalDelta = 0;
-  for (const change of [...changes].sort(
-    (left, right) => left.rangeOffset - right.rangeOffset,
-  )) {
-    const changeStart = change.rangeOffset;
-    const changeEnd = changeStart + change.rangeLength;
-    const delta = change.text.length - change.rangeLength;
-    if (change.rangeLength === 0 && changeStart === sourceRef.start) {
-      internalDelta += delta;
-    } else if (changeEnd <= sourceRef.start) {
-      shift += delta;
-    } else if (changeStart >= sourceRef.end) {
-      if (change.rangeLength === 0 && changeStart === sourceRef.end) {
-        internalDelta += delta;
-      }
-    } else if (changeStart === sourceRef.start && changeEnd === sourceRef.end) {
-      const start = sourceRef.start + shift;
-      return {
-        file: sourceRef.file,
-        start,
-        end: start + change.text.length,
-      };
-    } else if (sourceRef.start <= changeStart && changeEnd <= sourceRef.end) {
-      internalDelta += delta;
-    } else {
-      return undefined;
-    }
-  }
-  return {
-    file: sourceRef.file,
-    start: sourceRef.start + shift,
-    end: sourceRef.end + shift + internalDelta,
-  };
 }
 
 function validEdits(

@@ -9,7 +9,7 @@ Code3D is Prototype 01. APIs and project behavior are still evolving.
 
 - TypeScript model functions and relative imports across project files.
 - B-Rep primitives, curves, profiles, lofts, boolean operations, fillets,
-  chamfers, and threaded geometry.
+  chamfers, uniform-wall shells, and threaded geometry.
 - Source-context inspection, topology selection, supported parameter editing,
   and relative-position tools.
 - Editable model origins and geometric rotation, with vertex picking,
@@ -31,8 +31,15 @@ adjust a spatial expression with a drag. It does not automatically invert
 arbitrary functions. An edit to a shared call or variable can affect several
 objects. See [parameter editing](../../guides/model-tools/#what-a-panel-can-edit).
 
-**Geometric operations can fail.** A fillet or chamfer must fit the input
-geometry. Later operations must select topology from their own input model.
+**Geometric operations can fail.** A fillet, chamfer, or shell must fit the input
+geometry. Shelling requires one connected solid and cannot remove every face.
+Offsets through tight curvature, narrow features, or complex intersections can
+fail even when the thickness looks reasonable. On some lofts between different
+profile shapes, adding openings fails even though a closed cavity succeeds.
+Closed cavities use a complete offset and subtraction; openings require
+additional boundary construction. Smaller thicknesses may still fail.
+Results without offset walls are rejected instead of returning the unchanged
+solid. Later operations must select topology from their own input model.
 
 **Constraint solving is local and nonlinear.** Several relations can jointly
 determine a part's placement. Remaining freedom is resolved using centering and

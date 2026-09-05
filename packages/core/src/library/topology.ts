@@ -321,16 +321,22 @@ export function resolveEdgeSelection(
       'An edge selection cannot be empty; omit the second argument to select all edges.',
     );
   }
-  const requested = new Set<EdgeId>();
-  for (const edgeId of requestedIds) {
-    assertTopologyId('edge', edgeId);
-    requested.add(edgeId);
-  }
-  const selected = topology.ids.filter(edgeId => requested.has(edgeId));
-  const missing = [...requested].filter(edgeId => !selected.includes(edgeId));
+  return resolveTopologySelection('edge', topology, requestedIds);
+}
+
+/** Resolve an explicit selection in source order, including an empty selection. */
+export function resolveTopologySelection(
+  kind: TopologyKind,
+  topology: StableTopology<number>,
+  requestedIds: readonly number[],
+): readonly number[] {
+  const requested = new Set(requestedIds);
+  for (const id of requested) assertTopologyId(kind, id);
+  const selected = topology.ids.filter(id => requested.has(id));
+  const missing = [...requested].filter(id => !selected.includes(id));
   if (missing.length > 0) {
     throw new Error(
-      `Unknown or retired edge ${missing.map(edgeId => `E${edgeId}`).join(', ')}.`,
+      `Unknown or retired ${kind} ${missing.map(id => `${topologyMetadata[kind].prefix}${id}`).join(', ')}.`,
     );
   }
   return selected;
@@ -544,7 +550,7 @@ function assertTopologyId(kind: TopologyKind, id: number): void {
   }
 }
 
-function transferShapeTopology(
+export function transferShapeTopology(
   input: Shape3D,
   source: ShapeTopology,
   output: Shape3D,
