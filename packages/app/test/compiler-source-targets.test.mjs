@@ -548,6 +548,226 @@ for (const call of [
   });
 }
 
+test('captures computed methods and model-valued inputs without operation metadata', async () => {
+  const source = [
+    'import {box} from "@code3d/core";',
+    'const pivoted = box(8, 6, 4).origin(1, 2, 3);',
+    'const method = "originOffset";',
+    'const changed = pivoted[method](0, 5, 0);',
+    'function inspect(model) { return model.originCenter(); }',
+    'const inspected = inspect(changed);',
+    'const vertex = changed.vertex(1);',
+  ].join('\n');
+  const module = await compileProject(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  assert.equal(module.diagnostic, undefined);
+  for (const [text, context, expected] of [
+    ['pivoted', 'changed = pivoted', [1, 2, 3]],
+    ['changed', 'inspect(changed)', [1, 7, 3]],
+    ['changed', 'vertex = changed', [1, 7, 3]],
+  ]) {
+    const start = source.indexOf(text, source.indexOf(context));
+    const target = ModelViewport.prototype.sourceTargetAt.call(
+      {module},
+      '/model.ts',
+      start + text.length,
+    );
+    assert.equal(target.sourceRef.start, start);
+    assert.equal(target.sourceRef.end, start + text.length);
+    assert.deepEqual(
+      module.objects.get(target.evaluations[0].nodeIds[0]).origin,
+      expected,
+    );
+  }
+});
+
+test('derives composition roles for imported aliases, namespace calls, and nested inputs', async () => {
+  const source = [
+    'import * as core from "@code3d/core";',
+    'import {loft as skin, group as assemble} from "@code3d/core";',
+    'const spine = core.bezier([[0, 0, 0], [12, 7, 0], [10, 20, 9], [4, 28, 14]]);',
+    'const start = core.circle(4).relate(p => p.plane.on(spine.start).flip());',
+    'const end = core.rectangle(7, 4).relate(p => p.plane.on(spine.end).flip());',
+    'const body = skin([...[start], end], {spine});',
+    'const sections = [start, end];',
+    'const options = {spine};',
+    'const second = core.loft(sections, options);',
+    'export default assemble([body, second]);',
+  ].join('\n');
+  const module = await compileProject(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  assert.equal(module.diagnostic, undefined);
+  for (const [text, context, role] of [
+    ['start', 'skin([...[start]', 'receiver'],
+    ['end', 'skin([...[start], end', 'section'],
+    ['spine', 'skin([...[start], end], {spine}', 'spine'],
+    ['sections', 'core.loft(sections', 'collection'],
+    ['options', 'core.loft(sections, options', 'spine'],
+    ['body', 'assemble([body', 'child'],
+  ]) {
+    const target = exactTargets(module, source, text, context).find(
+      target => target.kind === 'operation-input',
+    );
+    assert.ok(target, `${context}: missing ${text}`);
+    assert.equal(target.operation.role, role);
+    const evaluation = target.evaluations[0];
+    const operation = module.operations.get(evaluation.operationId);
+    assert.ok(
+      evaluation.nodeIds.every(id =>
+        operation.inputs.some(input => input.nodeId === id),
+      ),
+    );
+    // Container tracing must not create duplicate sibling previews.
+    const peers = target.contextTargetIds.flatMap(
+      id =>
+        module.sourceTargets.find(candidate => candidate.id === id)
+          .evaluations[0].nodeIds,
+    );
+    assert.equal(peers.length, new Set(peers).size);
+  }
+});
+
+test('keeps repeated and failed receiver evaluations separate', async () => {
+  const source = [
+    'import {box} from "@code3d/core";',
+    'const pivoted = box(8, 6, 4).origin(1, 2, 3);',
+    'const results = [2, 5].map(y => pivoted.originOffset(0, y, 0));',
+    'const changed = results[1];',
+    'export const failed = changed.originVertex(9999);',
+  ].join('\n');
+  const module = await compileProject(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  assert.ok(module.diagnostic);
+  const repeated = exactTargets(module, source, 'pivoted', 'y => pivoted').find(
+    target => target.kind === 'operation-input',
+  );
+  assert.equal(repeated.evaluations.length, 2);
+  assert.equal(
+    new Set(repeated.evaluations.map(evaluation => evaluation.operationId))
+      .size,
+    2,
+  );
+  assert.deepEqual(
+    [...repeated.evaluations]
+      .sort((a, b) => a.runtime.order - b.runtime.order)
+      .map(
+        evaluation =>
+          module.objects.get(
+            module.operations.get(evaluation.operationId).outputNodeId,
+          ).origin,
+      ),
+    [
+      [1, 4, 3],
+      [1, 7, 3],
+    ],
+  );
+  const beforeFailure = exactTargets(
+    module,
+    source,
+    'changed',
+    'failed = changed',
+  ).find(target => target.kind === 'value');
+  assert.ok(beforeFailure);
+  assert.deepEqual(
+    module.objects.get(beforeFailure.evaluations[0].nodeIds[0]).origin,
+    [1, 7, 3],
+  );
+  const failure = exactTargets(module, source, 'originVertex(9999)').find(
+    target => target.kind === 'topology-selection',
+  );
+  assert.equal(failure.evaluations[0].runtime.outcome, 'failed');
+  assert.deepEqual(failure.evaluations[0].selection.ids, []);
+});
+
+test('input observation preserves getters, this, argument order, and optional calls', async () => {
+  const source = [
+    'import {box, group} from "@code3d/core";',
+    'const base = box(8, 6, 4);',
+    'let reads = 0;',
+    'const container = { get model() { reads++; return base; }, call(model) { if (this !== container) throw Error("this"); return model.originCenter(); } };',
+    'const first = container.call(container.model);',
+    'if (reads !== 1) throw Error(`reads: ${reads}`);',
+    'const missing = undefined;',
+    'missing?.originOffset(reads++, 0, 0);',
+    'base.originOffset?.(0, 1, 0);',
+    'if (reads !== 1) throw Error("optional arguments");',
+    'export default group([first]);',
+  ].join('\n');
+  const module = await compileProject(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  assert.equal(module.diagnostic, undefined);
+});
+
+test('a failed repetition retains its own receiver instead of the previous successful input', async () => {
+  const source = [
+    'import {box} from "@code3d/core";',
+    'const base = box(8, 6, 4);',
+    'for (const id of [1, 9999]) {',
+    '  const current = base.origin(0, id, 0);',
+    '  current.originVertex(id);',
+    '}',
+  ].join('\n');
+  const module = await compileProject(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  assert.ok(module.diagnostic);
+  const target = ModelViewport.prototype.sourceTargetAt.call(
+    {module},
+    '/model.ts',
+    source.indexOf('current.origin') + 'current'.length,
+  );
+  assert.equal(target.evaluations.length, 2);
+  assert.deepEqual(
+    target.evaluations.map(
+      evaluation => module.objects.get(evaluation.nodeIds[0]).origin,
+    ),
+    [
+      [0, 9999, 0],
+      [0, 1, 0],
+    ],
+  );
+  assert.equal(target.evaluations[0].operationId, undefined);
+  assert.ok(target.evaluations[1].operationId);
+});
+
+test('input target identities survive preceding text edits', async () => {
+  const body = [
+    'import {box, group as assemble} from "@code3d/core";',
+    'const base = box(8, 6, 4);',
+    'const moved = base.originOffset(0, 2, 0);',
+    'export default assemble([base, moved]);',
+  ].join('\n');
+  const targets = [];
+  for (const source of [body, '// preceding edit\n' + body]) {
+    const module = await compileProject(
+      {files: [{path: '/model.ts', source}]},
+      '/model.ts',
+    );
+    assert.equal(module.diagnostic, undefined);
+    targets.push(
+      module.sourceTargets.filter(target => target.kind === 'operation-input'),
+    );
+  }
+  assert.deepEqual(
+    targets[0].map(target => target.id),
+    targets[1].map(target => target.id),
+  );
+  assert.ok(
+    targets[1].every(
+      (target, i) => target.sourceRef.start > targets[0][i].sourceRef.start,
+    ),
+  );
+});
+
 test('evaluates a user-defined Replicad primitive', async () => {
   const source = [
     'import {definePrimitive, replicad} from "@code3d/core/replicad";',

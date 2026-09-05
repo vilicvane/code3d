@@ -243,11 +243,11 @@ type SourceValueTrace = {
 };
 
 type SourceInputTrace = Readonly<{
+  id: string;
   siteId: string;
   execution: number;
   sourceRef: SourceRef;
-  role: ModelOperationInputRole;
-  index: number;
+  isCollection: boolean;
   objects: readonly ModelObject[];
   contextId: string;
   runtime: RuntimeReach;
@@ -549,23 +549,31 @@ export function createModelCompiler(
       start: number,
       end: number,
       siteId: string,
-      role: ModelOperationInputRole,
-      index: number,
+      id: string,
       value: T,
     ): T {
       const executionTrace = traceFrames.at(-1)?.trace;
       if (executionTrace?.siteId !== siteId) {
         return value;
       }
-      const objects = modelObjectsIn(value);
+      const objects = modelObjectsIn(value).filter(
+        object =>
+          !executionTrace.inputs.some(
+            input =>
+              input.sourceRef.file === normalizeProjectPath(file) &&
+              start <= input.sourceRef.start &&
+              input.sourceRef.end <= end &&
+              input.objects.includes(object),
+          ),
+      );
       if (objects.length > 0) {
         objects.forEach(object => tracedObjects.add(object));
         executionTrace.inputs.push({
+          id,
           siteId,
           execution: executionTrace.execution,
           sourceRef: sourceRef(file, start, end),
-          role,
-          index,
+          isCollection: !isModelObject(value) && !modelTopologyReference(value),
           objects,
           contextId: executionTrace.contextId,
           runtime: completedRuntimeReach(),
@@ -582,7 +590,14 @@ export function createModelCompiler(
       return value;
     },
 
-    receiver<T>(siteId: string, value: T): T {
+    receiver<T>(
+      file: string,
+      start: number,
+      end: number,
+      siteId: string,
+      id: string,
+      value: T,
+    ): T {
       const executionTrace = traceFrames.at(-1)?.trace;
       if (executionTrace?.siteId === siteId) {
         executionTrace.receiver = value;
@@ -590,7 +605,7 @@ export function createModelCompiler(
         const model = isModelObject(value) ? value : reference?.model;
         if (model) tracedObjects.add(model);
       }
-      return value;
+      return traceRuntime.input(file, start, end, siteId, id, value);
     },
 
     element<T>(
@@ -812,25 +827,28 @@ export function createModelCompiler(
       return [];
     }
     seen.add(value);
-    if (Array.isArray(value)) {
-      return value.flatMap(item =>
-        modelObjectsIn(item, seen, topologyReferences),
-      );
-    }
     if (value instanceof Map) {
-      return [...value.values()].flatMap(item =>
+      return [...Map.prototype.values.call(value)].flatMap(item =>
         modelObjectsIn(item, seen, topologyReferences),
       );
     }
     if (value instanceof Set) {
-      return [...value].flatMap(item =>
+      return [...Set.prototype.values.call(value)].flatMap(item =>
         modelObjectsIn(item, seen, topologyReferences),
       );
     }
     const prototype = Object.getPrototypeOf(value);
-    if (prototype === Object.prototype || prototype === null) {
-      return Object.values(value).flatMap(item =>
-        modelObjectsIn(item, seen, topologyReferences),
+    if (
+      Array.isArray(value) ||
+      prototype === Object.prototype ||
+      prototype === null
+    ) {
+      // Observing a value must not invoke author-defined accessors.
+      return Object.values(Object.getOwnPropertyDescriptors(value)).flatMap(
+        property =>
+          property.enumerable && 'value' in property
+            ? modelObjectsIn(property.value, seen, topologyReferences)
+            : [],
       );
     }
     return [];
@@ -1421,30 +1439,35 @@ export function createModelCompiler(
 
     const inputTargets = new Map<string, MutableSourceInputTarget>();
     for (const trace of sourceInputTraces) {
-      const operationId = `${trace.siteId}:execution:${trace.execution}`;
+      const operationId = traceExecutionKey(trace.siteId, trace.execution);
       const operation = operations.get(operationId);
-      if (!operation) {
-        continue;
-      }
-      const key = [
-        trace.siteId,
-        trace.role,
-        trace.index,
-        trace.sourceRef.file,
-        trace.sourceRef.start,
-        trace.sourceRef.end,
-      ].join(':');
-      const target = inputTargets.get(key) ?? {
-        id: `source:operation-input:${trace.siteId}:${trace.role}:${trace.index}`,
-        kind: 'operation-input' as const,
+      const nodeIds = trace.objects.map(modelObjectNodeId);
+      const inputs =
+        operation?.inputs.filter(input => nodeIds.includes(input.nodeId)) ?? [];
+      const key = trace.id;
+      const target: MutableSourceInputTarget = inputTargets.get(key) ?? {
+        id: `source:operation-input:${key}`,
         sourceRef: trace.sourceRef,
         evaluations: [],
-        operationKind: operation.kind,
-        role: trace.role,
       };
+      // Roles belong to the runtime operation, independent of the callee's spelling.
+      const roles = new Set(inputs.map(input => input.role));
+      const role =
+        inputs.length === 0
+          ? undefined
+          : roles.size === 1
+            ? inputs[0].role
+            : 'collection';
+      if (operation && role) target.operation = {kind: operation.kind, role};
       target.evaluations.push({
-        operationId: operation.id,
-        objects: trace.objects,
+        operationId: role ? operation?.id : undefined,
+        role,
+        objects: role
+          ? trace.objects.filter(object =>
+              inputs.some(input => input.nodeId === modelObjectNodeId(object)),
+            )
+          : trace.objects,
+        isCollection: role ? undefined : trace.isCollection,
         contextId: trace.contextId,
         runtime: trace.runtime,
       });
@@ -1460,19 +1483,15 @@ export function createModelCompiler(
           if (execution.siteId !== site.siteId) {
             return [];
           }
-          const trace = execution.inputs.find(
-            input => input.role === 'source' && input.index === 0,
-          );
-          if (!trace) return [];
+          const sourceObject = execution.receiver;
+          if (!isModelObject(sourceObject)) return [];
           const operation = operations.get(
             traceExecutionKey(execution.siteId, execution.execution),
           );
-          const sourceObject = trace.objects[0];
           const selection = operation?.selections.find(
             candidate =>
               candidate.kind === 'edge' &&
-              candidate.inputNodeId ===
-                (sourceObject ? modelObjectNodeId(sourceObject) : undefined),
+              candidate.inputNodeId === modelObjectNodeId(sourceObject),
           );
           if (operation && selection) {
             return [
@@ -1481,7 +1500,7 @@ export function createModelCompiler(
                 nodeIds: [operation.outputNodeId],
                 parameters: execution.parameters,
                 operationId: operation.id,
-                contextId: trace.contextId,
+                contextId: execution.contextId,
                 selection: {
                   kind: 'edges',
                   inputNodeId: selection.inputNodeId,
@@ -1490,7 +1509,7 @@ export function createModelCompiler(
               },
             ];
           }
-          const input = trace.objects[0];
+          const input = sourceObject;
           const inputSnapshot = input
             ? objects.get(modelObjectNodeId(input))
             : undefined;
@@ -1617,19 +1636,19 @@ export function createModelCompiler(
               evaluation.runtime,
             );
             const consumers = operationInputTargets.flatMap(target =>
-              isCompositionInputRole(target.role)
-                ? target.evaluations
-                    .filter(candidate =>
-                      candidate.objects.some(object =>
-                        sourceLineageContains(
-                          operationsByOutputNodeId,
-                          modelObjectNodeId(object),
-                          modelObjectNodeId(evaluation.source),
-                        ),
-                      ),
-                    )
-                    .map(input => ({input, role: target.role}))
-                : [],
+              target.evaluations.flatMap(input =>
+                input.role &&
+                isCompositionInputRole(input.role) &&
+                input.objects.some(object =>
+                  sourceLineageContains(
+                    operationsByOutputNodeId,
+                    modelObjectNodeId(object),
+                    modelObjectNodeId(evaluation.source),
+                  ),
+                )
+                  ? [{input, role: input.role}]
+                  : [],
+              ),
             );
             return consumers.length > 0
               ? consumers.map(consumer => ({
@@ -1678,8 +1697,10 @@ export function createModelCompiler(
           tool: sourceTool(toolSite),
           contextTargetIds: operationInputTargets
             .filter(target =>
-              target.evaluations.some(evaluation =>
-                consumerOperationIds.has(evaluation.operationId),
+              target.evaluations.some(
+                evaluation =>
+                  evaluation.operationId !== undefined &&
+                  consumerOperationIds.has(evaluation.operationId),
               ),
             )
             .map(target => target.id),
@@ -1787,17 +1808,20 @@ export function createModelCompiler(
         target =>
           ({
             id: target.id,
-            kind: target.kind,
+            kind: target.operation ? 'operation-input' : 'value',
             sourceRef: target.sourceRef,
             functionId: designFunctionAt(target.sourceRef, designArguments),
             evaluations: target.evaluations.map(evaluation => ({
               runtime: evaluation.runtime,
               nodeIds: evaluation.objects.map(modelObjectNodeId),
               operationId: evaluation.operationId,
-              operationInput: {
-                role: target.role,
-                nodeIds: evaluation.objects.map(modelObjectNodeId),
-              },
+              operationInput: evaluation.role
+                ? {
+                    role: evaluation.role,
+                    nodeIds: evaluation.objects.map(modelObjectNodeId),
+                  }
+                : undefined,
+              isCollection: evaluation.isCollection,
               contextId: evaluation.contextId,
             })),
             contextTargetIds: operationInputTargets
@@ -1806,10 +1830,7 @@ export function createModelCompiler(
                   candidate !== target && sharesOperation(candidate, target),
               )
               .map(candidate => candidate.id),
-            operation: {
-              kind: target.operationKind,
-              role: target.role,
-            },
+            operation: target.operation,
           }) satisfies SourceTarget,
       ),
     ].map(withConstraintContext);
@@ -2040,18 +2061,18 @@ export function createModelCompiler(
 
   type MutableSourceInputTarget = {
     id: string;
-    kind: 'operation-input';
     sourceRef: SourceRef;
     evaluations: Array<
       Readonly<{
-        operationId: string;
+        operationId?: string;
+        role?: ModelOperationInputRole;
+        isCollection?: boolean;
         objects: readonly ModelObject[];
         contextId: string;
         runtime: RuntimeReach;
       }>
     >;
-    operationKind: ModelOperationKind;
-    role: ModelOperationInputRole;
+    operation?: SourceTarget['operation'];
   };
 
   function designFunctionAt(
@@ -2080,8 +2101,10 @@ export function createModelCompiler(
     const rightIds = new Set(
       right.evaluations.map(evaluation => evaluation.operationId),
     );
-    return left.evaluations.some(evaluation =>
-      rightIds.has(evaluation.operationId),
+    return left.evaluations.some(
+      evaluation =>
+        evaluation.operationId !== undefined &&
+        rightIds.has(evaluation.operationId),
     );
   }
 
@@ -2203,24 +2226,15 @@ export function createModelCompiler(
                   factory,
                 )
               : visited;
-            const inputPlan = operationInputPlan(node);
-            const callWithInputs = inputPlan
-              ? instrumentOperationInputs(
-                  node,
-                  parameterizedCall,
-                  inputPlan,
-                  siteId,
-                  sourceFile,
-                  factory,
-                )
-              : parameterizedCall;
-            const callWithReceiver = toolSignature?.parameters.some(
-              isToolSelectionParameter,
-            )
-              ? instrumentToolReceiver(callWithInputs, siteId, factory)
-              : callWithInputs;
+            const callWithInputs = instrumentCallInputs(
+              node,
+              parameterizedCall,
+              siteId,
+              sourceFile,
+              factory,
+            );
             const call = instrumentCallArguments(
-              callWithReceiver,
+              callWithInputs,
               siteId,
               factory,
             );
@@ -2322,47 +2336,7 @@ export function createModelCompiler(
         ? factory.updateSpreadElement(argument, traced)
         : traced;
     });
-    return factory.updateCallExpression(
-      call,
-      call.expression,
-      call.typeArguments,
-      argumentsWithTracing,
-    );
-  }
-
-  function instrumentToolReceiver(
-    call: ts.CallExpression,
-    siteId: string,
-    factory: ts.NodeFactory,
-  ): ts.CallExpression {
-    if (!ts.isPropertyAccessExpression(call.expression)) return call;
-    const property = call.expression;
-    const receiver = factory.createCallExpression(
-      factory.createPropertyAccessExpression(
-        factory.createIdentifier('__code3d'),
-        'receiver',
-      ),
-      undefined,
-      [factory.createStringLiteral(siteId), property.expression],
-    );
-    const expression = ts.isPropertyAccessChain(property)
-      ? factory.updatePropertyAccessChain(
-          property,
-          receiver,
-          property.questionDotToken,
-          property.name,
-        )
-      : factory.updatePropertyAccessExpression(
-          property,
-          receiver,
-          property.name,
-        );
-    return factory.updateCallExpression(
-      call,
-      expression,
-      call.typeArguments,
-      call.arguments,
-    );
+    return updateCall(call, call.expression, argumentsWithTracing, factory);
   }
 
   function traceElementExpression(
@@ -2465,7 +2439,9 @@ export function createModelCompiler(
   ): number {
     return ts.isPropertyAccessExpression(call.expression)
       ? call.expression.name.getStart(sourceFile)
-      : call.getStart(sourceFile);
+      : ts.isElementAccessExpression(call.expression)
+        ? call.expression.argumentExpression.getStart(sourceFile)
+        : call.getStart(sourceFile);
   }
 
   function bindExpression(
@@ -2578,325 +2554,152 @@ export function createModelCompiler(
     return 'call';
   }
 
-  type OperationInputPlan = Readonly<{
-    receiver?: ModelOperationInputRole;
-    arguments?: readonly (ModelOperationInputRole | undefined)[];
-    rest?: ModelOperationInputRole;
-    collection?: Readonly<{
-      argumentIndex: number;
-      first: ModelOperationInputRole;
-      rest: ModelOperationInputRole;
-      indexOffset?: number;
-    }>;
-    object?: Readonly<{
-      argumentIndex: number;
-      properties: Readonly<Record<string, ModelOperationInputRole>>;
-      fallback: ModelOperationInputRole;
-    }>;
-  }>;
-
-  function operationInputPlan(
-    node: ts.CallExpression,
-  ): OperationInputPlan | undefined {
-    if (ts.isIdentifier(node.expression)) {
-      if (node.expression.text === 'loft') {
-        return {
-          collection: {argumentIndex: 0, first: 'receiver', rest: 'section'},
-          object: {
-            argumentIndex: 1,
-            properties: {spine: 'spine'},
-            fallback: 'spine',
-          },
-        };
-      }
-      if (node.expression.text === 'union') {
-        return {
-          collection: {argumentIndex: 0, first: 'receiver', rest: 'operand'},
-        };
-      }
-      if (node.expression.text === 'cut') {
-        return {
-          arguments: ['receiver'],
-          collection: {
-            argumentIndex: 1,
-            first: 'tool',
-            rest: 'tool',
-            indexOffset: 1,
-          },
-        };
-      }
-      if (node.expression.text === 'intersect') {
-        return {
-          collection: {argumentIndex: 0, first: 'receiver', rest: 'operand'},
-        };
-      }
-      if (node.expression.text === 'group') {
-        return {
-          collection: {argumentIndex: 0, first: 'child', rest: 'child'},
-        };
-      }
-      return undefined;
-    }
-    if (!ts.isPropertyAccessExpression(node.expression)) {
-      return undefined;
-    }
-    const method = node.expression.name.text;
-    if (
-      method === 'paint' ||
-      method === 'scaled' ||
-      method === 'origin' ||
-      method === 'originOffset' ||
-      method === 'originVertex' ||
-      method === 'originCenter' ||
-      method === 'rotate' ||
-      method === 'fillet' ||
-      method === 'chamfer' ||
-      method === 'expose' ||
-      method === 'relate'
-    ) {
-      return {receiver: 'source'};
-    }
-    return undefined;
-  }
-
-  function instrumentOperationInputs(
+  function instrumentCallInputs(
     original: ts.CallExpression,
     visited: ts.CallExpression,
-    plan: OperationInputPlan,
     siteId: string,
     sourceFile: ts.SourceFile,
     factory: ts.NodeFactory,
   ): ts.CallExpression {
     let expression = visited.expression;
+    const originalAccess = original.expression;
     if (
-      plan.receiver &&
-      ts.isPropertyAccessExpression(original.expression) &&
-      ts.isPropertyAccessExpression(visited.expression)
+      (ts.isPropertyAccessExpression(originalAccess) ||
+        ts.isElementAccessExpression(originalAccess)) &&
+      (ts.isPropertyAccessExpression(expression) ||
+        ts.isElementAccessExpression(expression)) &&
+      originalAccess.expression.kind !== ts.SyntaxKind.SuperKeyword
     ) {
-      const originalReceiver = original.expression.expression;
-      expression = factory.updatePropertyAccessExpression(
-        visited.expression,
-        operationInputExpression(
-          visited.expression.expression,
-          originalReceiver,
-          siteId,
-          plan.receiver,
-          0,
-          sourceFile,
-          factory,
-        ),
-        visited.expression.name,
-      );
-    }
-
-    const args = visited.arguments.map((argument, index) => {
-      if (
-        plan.collection?.argumentIndex === index &&
-        original.arguments[index]
-      ) {
-        return instrumentOperationCollection(
-          original.arguments[index],
-          argument,
-          plan.collection,
-          siteId,
-          sourceFile,
-          factory,
-        );
-      }
-      if (plan.object?.argumentIndex === index && original.arguments[index]) {
-        return instrumentOperationObject(
-          original.arguments[index],
-          argument,
-          plan.object,
-          siteId,
-          sourceFile,
-          factory,
-        );
-      }
-      const role = plan.arguments?.[index] ?? plan.rest;
-      const originalArgument = original.arguments[index];
-      if (!role || !originalArgument) {
-        return argument;
-      }
-      const originalValue = ts.isSpreadElement(originalArgument)
-        ? originalArgument.expression
-        : originalArgument;
-      const visitedValue = ts.isSpreadElement(argument)
-        ? argument.expression
-        : argument;
-      const traced = operationInputExpression(
-        visitedValue,
-        originalValue,
+      const receiver = callInputExpression(
+        expression.expression,
+        originalAccess.expression,
         siteId,
-        role,
-        index,
         sourceFile,
         factory,
+        'receiver',
       );
-      return ts.isSpreadElement(argument)
-        ? factory.updateSpreadElement(argument, traced)
-        : traced;
-    });
-
-    return factory.updateCallExpression(
-      visited,
-      expression,
-      visited.typeArguments,
-      args,
+      expression = ts.isPropertyAccessExpression(expression)
+        ? ts.isPropertyAccessChain(expression)
+          ? factory.updatePropertyAccessChain(
+              expression,
+              receiver,
+              expression.questionDotToken,
+              expression.name,
+            )
+          : factory.updatePropertyAccessExpression(
+              expression,
+              receiver,
+              expression.name,
+            )
+        : ts.isElementAccessChain(expression)
+          ? factory.updateElementAccessChain(
+              expression,
+              receiver,
+              expression.questionDotToken,
+              expression.argumentExpression,
+            )
+          : factory.updateElementAccessExpression(
+              expression,
+              receiver,
+              expression.argumentExpression,
+            );
+    }
+    const args = visited.arguments.map((argument, index) =>
+      instrumentInputValue(
+        original.arguments[index],
+        argument,
+        siteId,
+        sourceFile,
+        factory,
+      ),
     );
+    return updateCall(visited, expression, args, factory);
   }
 
-  function instrumentOperationObject(
+  function instrumentInputValue(
     original: ts.Expression,
     visited: ts.Expression,
-    plan: NonNullable<OperationInputPlan['object']>,
     siteId: string,
     sourceFile: ts.SourceFile,
     factory: ts.NodeFactory,
   ): ts.Expression {
-    if (
-      !ts.isObjectLiteralExpression(original) ||
-      !ts.isObjectLiteralExpression(visited)
-    ) {
-      return operationInputExpression(
+    const instrument = (
+      before: ts.Expression,
+      after: ts.Expression,
+    ): ts.Expression =>
+      instrumentInputValue(before, after, siteId, sourceFile, factory);
+    if (ts.isOmittedExpression(visited)) return visited;
+    if (ts.isSpreadElement(original) && ts.isSpreadElement(visited)) {
+      return factory.updateSpreadElement(
         visited,
-        original,
-        siteId,
-        plan.fallback,
-        plan.argumentIndex,
-        sourceFile,
-        factory,
+        instrument(original.expression, visited.expression),
       );
     }
-
-    const properties = visited.properties.map((property, index) => {
-      const originalProperty = original.properties[index];
-      if (!originalProperty) return property;
-      const name = operationObjectPropertyName(originalProperty.name);
-      const role = name ? plan.properties[name] : undefined;
-      if (!role) return property;
-
-      if (
-        ts.isPropertyAssignment(originalProperty) &&
-        ts.isPropertyAssignment(property)
-      ) {
-        return factory.updatePropertyAssignment(
-          property,
-          property.name,
-          operationInputExpression(
-            property.initializer,
-            originalProperty.initializer,
-            siteId,
-            role,
-            plan.argumentIndex,
-            sourceFile,
-            factory,
-          ),
-        );
-      }
-      if (
-        ts.isShorthandPropertyAssignment(originalProperty) &&
-        ts.isShorthandPropertyAssignment(property)
-      ) {
-        return factory.createPropertyAssignment(
-          property.name,
-          operationInputExpression(
-            factory.createIdentifier(property.name.text),
-            originalProperty.name,
-            siteId,
-            role,
-            plan.argumentIndex,
-            sourceFile,
-            factory,
-          ),
-        );
-      }
-      return property;
-    });
-    return factory.updateObjectLiteralExpression(visited, properties);
-  }
-
-  function operationObjectPropertyName(
-    name: ts.PropertyName | undefined,
-  ): string | undefined {
-    if (!name) return undefined;
-    if (ts.isIdentifier(name) || ts.isStringLiteralLike(name)) return name.text;
-    return undefined;
-  }
-
-  function instrumentOperationCollection(
-    original: ts.Expression,
-    visited: ts.Expression,
-    plan: NonNullable<OperationInputPlan['collection']>,
-    siteId: string,
-    sourceFile: ts.SourceFile,
-    factory: ts.NodeFactory,
-  ): ts.Expression {
     if (
-      !ts.isArrayLiteralExpression(original) ||
-      !ts.isArrayLiteralExpression(visited)
+      ts.isArrayLiteralExpression(original) &&
+      ts.isArrayLiteralExpression(visited)
     ) {
-      return operationInputExpression(
+      visited = factory.updateArrayLiteralExpression(
         visited,
-        original,
-        siteId,
-        'collection',
-        plan.indexOffset ?? 0,
-        sourceFile,
-        factory,
+        visited.elements.map((element, index) =>
+          instrument(original.elements[index], element),
+        ),
+      );
+    } else if (
+      ts.isObjectLiteralExpression(original) &&
+      ts.isObjectLiteralExpression(visited)
+    ) {
+      visited = factory.updateObjectLiteralExpression(
+        visited,
+        visited.properties.map((property, index) => {
+          const before = original.properties[index];
+          if (
+            ts.isPropertyAssignment(before) &&
+            ts.isPropertyAssignment(property)
+          ) {
+            return factory.updatePropertyAssignment(
+              property,
+              property.name,
+              instrument(before.initializer, property.initializer),
+            );
+          }
+          if (
+            ts.isShorthandPropertyAssignment(before) &&
+            ts.isShorthandPropertyAssignment(property)
+          ) {
+            return factory.createPropertyAssignment(
+              property.name,
+              instrument(before.name, property.name),
+            );
+          }
+          if (
+            ts.isSpreadAssignment(before) &&
+            ts.isSpreadAssignment(property)
+          ) {
+            return factory.updateSpreadAssignment(
+              property,
+              instrument(before.expression, property.expression),
+            );
+          }
+          return property;
+        }),
       );
     }
-
-    const elements = visited.elements.map((element, index) => {
-      const originalElement = original.elements[index];
-      if (
-        !originalElement ||
-        ts.isOmittedExpression(originalElement) ||
-        ts.isOmittedExpression(element)
-      ) {
-        return element;
-      }
-      const originalValue = ts.isSpreadElement(originalElement)
-        ? originalElement.expression
-        : originalElement;
-      const visitedValue = ts.isSpreadElement(element)
-        ? element.expression
-        : element;
-      const role =
-        index === 0 && ts.isSpreadElement(originalElement)
-          ? 'collection'
-          : index === 0
-            ? plan.first
-            : plan.rest;
-      const traced = operationInputExpression(
-        visitedValue,
-        originalValue,
-        siteId,
-        role,
-        index + (plan.indexOffset ?? 0),
-        sourceFile,
-        factory,
-      );
-      return ts.isSpreadElement(element)
-        ? factory.updateSpreadElement(element, traced)
-        : traced;
-    });
-    return factory.updateArrayLiteralExpression(visited, elements);
+    return callInputExpression(visited, original, siteId, sourceFile, factory);
   }
 
-  function operationInputExpression(
+  function callInputExpression(
     expression: ts.Expression,
     original: ts.Expression,
     siteId: string,
-    role: ModelOperationInputRole,
-    index: number,
     sourceFile: ts.SourceFile,
     factory: ts.NodeFactory,
+    kind: 'input' | 'receiver' = 'input',
   ): ts.CallExpression {
     return factory.createCallExpression(
       factory.createPropertyAccessExpression(
         factory.createIdentifier('__code3d'),
-        'input',
+        kind,
       ),
       undefined,
       [
@@ -2904,11 +2707,34 @@ export function createModelCompiler(
         factory.createNumericLiteral(original.getStart(sourceFile)),
         factory.createNumericLiteral(original.getEnd()),
         factory.createStringLiteral(siteId),
-        factory.createStringLiteral(role),
-        factory.createNumericLiteral(index),
+        factory.createStringLiteral(
+          stableSourceId('input', original, sourceFile),
+        ),
         expression,
       ],
     );
+  }
+
+  function updateCall(
+    call: ts.CallExpression,
+    expression: ts.Expression,
+    args: readonly ts.Expression[],
+    factory: ts.NodeFactory,
+  ): ts.CallExpression {
+    return ts.isCallChain(call)
+      ? factory.updateCallChain(
+          call,
+          expression,
+          call.questionDotToken,
+          call.typeArguments,
+          args,
+        )
+      : factory.updateCallExpression(
+          call,
+          expression,
+          call.typeArguments,
+          args,
+        );
   }
 
   function instrumentCallParameters(
@@ -2974,11 +2800,11 @@ export function createModelCompiler(
       );
     });
 
-    return factory.updateCallExpression(
+    return updateCall(
       visited,
       visited.expression,
-      visited.typeArguments,
       argumentsWithTracing,
+      factory,
     );
   }
 

@@ -2258,6 +2258,8 @@ function createAnchorDecorationObject(
   const container = new THREE.Group();
   container.name = decoration.id;
   container.userData.decoration = decoration;
+  // A later render group draws above gizmos, whose object order is Infinity.
+  container.renderOrder = decoration.layer === 'foreground' ? 1 : 0;
   applyTransform(container, decoration.transform);
 
   if (decoration.elementKind === 'point') {
@@ -2281,14 +2283,15 @@ function createAnchorDecorationObject(
     );
   }
   container.traverse(object => {
-    object.renderOrder = 24;
     const material = 'material' in object ? object.material : undefined;
     const materials = Array.isArray(material) ? material : [material];
     materials.forEach(candidate => {
       if (candidate instanceof THREE.Material) {
+        object.renderOrder = 24;
         candidate.depthTest = appearance.depthTest ?? false;
         candidate.depthWrite = false;
-        candidate.transparent = candidate.opacity < 1;
+        // Full-opacity anchors must also draw after transparent model surfaces.
+        candidate.transparent = true;
         candidate.toneMapped = false;
       }
     });
