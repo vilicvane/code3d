@@ -6,32 +6,38 @@ import {
   disposeModelObjects,
   retainModelGeometry,
 } from '@code3d/core/tooling';
+import * as replicad from 'replicad';
 import {importSTEP} from 'replicad';
 import {strFromU8, unzipSync} from 'fflate';
 import {Group, Object3D} from 'three';
 import {STLLoader} from 'three/addons/loaders/STLLoader.js';
 import {createAppTestServer} from './vite-test-server.mjs';
+import {createTestProjectCompiler} from './project-test-files.mjs';
 
 let server,
   exportModel,
   collectExportInstances,
   renderedModelName,
   compileProject,
-  applyNodeTransform,
-  retainCompiledGeometry;
+  applyNodeTransform;
 before(async () => {
   server = await createAppTestServer();
-  ({exportModel} = await server.ssrLoadModule('/src/model/model-export.ts'));
+  const exporter = await server.ssrLoadModule('/src/model/model-export.ts');
+  exportModel = (...args) => exporter.exportModel(...args, replicad);
   ({collectExportInstances, renderedModelName} = await server.ssrLoadModule(
     '/src/rendering/model-export-scene.ts',
   ));
   ({applyNodeTransform} = await server.ssrLoadModule(
     '/src/rendering/model-renderer.ts',
   ));
-  ({compileProject} = await server.ssrLoadModule('/src/model/compiler.ts'));
-  ({retainModelGeometry: retainCompiledGeometry} = await server.ssrLoadModule(
-    '@code3d/core/tooling',
-  ));
+  compileProject = async (...args) => {
+    const compiler = await createTestProjectCompiler(server);
+    try {
+      return await compiler.compile(...args);
+    } finally {
+      compiler.dispose();
+    }
+  };
 });
 after(async () => {
   await server?.close();
@@ -112,26 +118,22 @@ function closedMesh(mesh) {
   assert.ok(volume > 0, 'triangles wind outwards');
 }
 
-test('worker geometry survives compiler cleanup and preserves STEP placements, names and colors', async () => {
-  let geometry;
+test('project runtime retains export geometry and preserves STEP placements, names and colors', async () => {
+  const compiler = await createTestProjectCompiler(server);
   const source = `import {box, group} from '@code3d/core';
 const base = box(10, 20, 30).paint('#123456');
 const top = box(2, 4, 6).relate(self => self.bottom.on(base.top));
 export default group([base, top], 'Assembly');`;
-  const module = compileProject(
-    {files: [{path: '/model.ts', source}]},
-    '/model.ts',
-    undefined,
-    objects => {
-      geometry = retainCompiledGeometry(objects);
-    },
-  );
   try {
+    const module = await compiler.compile(
+      {files: [{path: '/model.ts', source}]},
+      '/model.ts',
+    );
     assert.equal(module.diagnostic, undefined);
     const snapshot = module.objects.get(module.exports.get('default'));
     const instances = collectExportInstances(scene(snapshot));
     assert.equal(instances.length, 2);
-    const blob = exportModel(geometry, instances, defaults);
+    const blob = compiler.export(instances, defaults);
     const text = await blob.text();
     assert.match(text, /ISO-10303-21/);
     assert.match(text, /COLOUR_RGB/);
@@ -151,13 +153,86 @@ export default group([base, top], 'Assembly');`;
     }
     // Repeated exports do not consume retained geometry.
     assert.match(
-      await exportModel(geometry, instances, defaults).text(),
+      await compiler.export(instances, defaults).text(),
       /END-ISO-10303-21/,
     );
   } finally {
-    geometry?.dispose();
+    compiler.dispose();
   }
 });
+
+for (const mode of ['builtin', 'installed']) {
+  test(`exports with the ${mode} project kernel across cached npm model edits and releases old geometry`, async () => {
+    const compiler = await createTestProjectCompiler(server);
+    let retained;
+    let runtime;
+    try {
+      for (const count of [2, 3]) {
+        const module = await compiler.compile(
+          {
+            files: [
+              {
+                path: '/package.json',
+                source: JSON.stringify({
+                  dependencies: {
+                    'just-range': '4.2.0',
+                    ...(mode === 'installed' ? {'@code3d/core': '*'} : {}),
+                  },
+                }),
+              },
+              {
+                path: '/model.ts',
+                source: `import range from 'just-range'; import {box, group} from '@code3d/core'; export default group(range(${count}).map(i => box(i + 1, 2, 3)));`,
+              },
+            ],
+          },
+          '/model.ts',
+        );
+        assert.equal(module.diagnostic, undefined);
+        if (retained) assert.equal(retained.shapes.size, 0);
+        retained = compiler.geometry;
+        runtime ??= compiler.runtime;
+        assert.equal(compiler.runtime, runtime);
+        assert.notEqual(runtime.replicad.exportSTEP, replicad.exportSTEP);
+        const instances = collectExportInstances(scene(module.fallback));
+        assert.equal(instances.length, count);
+        assert.throws(
+          () => compiler.export(instances, {...defaults, scale: 0}),
+          /Scale/,
+        );
+        assert.match(
+          await compiler.export(instances, defaults).text(),
+          /ISO-10303-21/,
+        );
+        const stl = await compiler
+          .export(instances, {...defaults, format: 'stl'})
+          .arrayBuffer();
+        assert.equal(
+          stl.byteLength,
+          84 + new DataView(stl).getUint32(80, true) * 50,
+        );
+        const threeMf = read3mf(
+          await compiler
+            .export(instances, {...defaults, format: '3mf'})
+            .arrayBuffer(),
+        );
+        assert.equal(threeMf.meshes.length, count);
+        threeMf.meshes.forEach(closedMesh);
+      }
+      await assert.rejects(
+        compiler.compile(
+          {files: [{path: '/model.ts', source: 'import "missing-package";'}]},
+          '/model.ts',
+        ),
+        /missing-package/,
+      );
+      assert.equal(retained.shapes.size, 0);
+      assert.throws(() => compiler.export([], defaults), /model has changed/);
+    } finally {
+      compiler.dispose();
+    }
+  });
+}
 
 test('STL binary and ASCII encode rendered occurrences with scale and Z-up conversion', async () => {
   const model = box(2, 4, 6);
@@ -326,14 +401,14 @@ test('export file names retain Unicode and version suffixes while replacing form
   assert.equal(exportFileName('invalid/name', 'png'), 'invalid-name.png');
 });
 
-test('names rendered variables, aliases, collections and assemblies without guessing from their children', () => {
+test('names rendered variables, aliases, collections and assemblies without guessing from their children', async () => {
   const source = `import {box, group} from '@code3d/core';
 const plate = box(10, 20, 30);
 const alias = plate;
 const parts = [plate, box(2, 4, 6)];
 const assembly = group(parts);
 export default group([assembly]);`;
-  const module = compileProject(
+  const module = await compileProject(
     {files: [{path: '/model.ts', source}]},
     '/model.ts',
   );
@@ -359,12 +434,12 @@ export default group([assembly]);`;
   assert.equal(renderedModelName(module, []), 'code3d-model');
 });
 
-test('names repeated local results and prefers the outer binding for a rendered function result', () => {
+test('names repeated local results and prefers the outer binding for a rendered function result', async () => {
   const source = `import {box} from '@code3d/core';
 function makePart(size: number) { const part = box(size, 2, 3); return part; }
 const pieces = [makePart(1), makePart(2)];
 const plate = makePart(3);`;
-  const module = compileProject(
+  const module = await compileProject(
     {files: [{path: '/model.ts', source}]},
     '/model.ts',
   );

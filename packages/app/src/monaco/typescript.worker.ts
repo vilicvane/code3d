@@ -17,7 +17,7 @@ const completionPreferences = {
   // paths, which also avoids assuming a synthetic baseUrl in the browser host.
   importModuleSpecifierPreference: 'relative',
   importModuleSpecifierEnding: 'js',
-  includePackageJsonAutoImports: 'off',
+  includePackageJsonAutoImports: 'on',
 } satisfies typeScript.UserPreferences;
 
 const completionFormatSettings = {

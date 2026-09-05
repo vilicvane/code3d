@@ -4,6 +4,7 @@ import {clearKernelOperationCache} from '../library/kernel-cache.js';
 
 export {
   authoringApi,
+  beginModelEvaluation,
   constraintTraceReference,
   createModelSnapshotter,
   disposeModelObjects,
@@ -63,7 +64,7 @@ export type {
 } from '../library/topology.js';
 export {describeOpenCascadeException} from '../library/open-cascade-error.js';
 
-export const toolingProtocolVersion = 1;
+export const toolingProtocolVersion = 2;
 
 export function installOpenCascade(openCascade: OpenCascadeInstance): void {
   clearKernelOperationCache();

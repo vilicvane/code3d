@@ -1,4 +1,5 @@
-import {exportSTEP, makeCompound, type AnyShape} from 'replicad';
+import type * as Replicad from 'replicad';
+import type {AnyShape} from 'replicad';
 import {strToU8, zipSync} from 'fflate';
 import {
   quaternionAxisAngle,
@@ -29,6 +30,10 @@ export function exportModel(
   geometry: ModelGeometrySnapshot,
   instances: readonly ModelExportInstance[],
   options: ModelExportOptions,
+  {
+    exportSTEP,
+    makeCompound,
+  }: Pick<typeof Replicad, 'exportSTEP' | 'makeCompound'>,
 ): Blob {
   if (!instances.length)
     throw new Error('There is no rendered model to export.');

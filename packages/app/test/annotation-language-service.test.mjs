@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
 import ts from '@typescript/typescript6';
 import {createAppTestServer} from './vite-test-server.mjs';
+import {packageTestLanguage} from './project-test-files.mjs';
 
 let server;
 let annotations;
@@ -47,11 +48,9 @@ before(async () => {
   ({EmbeddedCodeProjection} = await server.ssrLoadModule(
     '/src/monaco/embedded-code.ts',
   ));
-  const {injectedPackageFiles} = await server.ssrLoadModule(
-    '/src/monaco/injected-packages.ts',
-  );
+  const language = await packageTestLanguage(server);
   files = new Map(
-    injectedPackageFiles.map(file => [file.filePath, file.content]),
+    language.files.map(file => [`file:///workspace${file.path}`, file.source]),
   );
   const readFile = name => files.get(name) ?? ts.sys.readFile(name);
   const host = {

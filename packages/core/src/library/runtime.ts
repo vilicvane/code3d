@@ -295,8 +295,6 @@ type StoredConstraint = Readonly<{
   target: AnchorReference;
   flipped: boolean;
   offset: Vec3;
-  sourceRefs: readonly SourceRef[];
-  parameters: readonly ParameterUsage[];
 }>;
 
 type StoredOperationInput = Readonly<{
@@ -323,11 +321,34 @@ type StoredOperation = {
   inputs: StoredOperationInput[];
   regions: StoredOperationRegion[];
   selections: StoredOperationSelection[];
-  siteId?: string;
-  execution?: number;
-  order?: number;
-  sourceRef?: SourceRef;
 };
+
+type ValueTrace = {
+  sourceRefs: SourceRef[];
+  parameters: ParameterUsage[];
+};
+
+type OperationTrace = Omit<ModelOperationInstrumentation, 'parameters'>;
+
+// Geometry and relations are persistent model values. Source provenance belongs
+// only to the evaluation that observed them, including models cached by packages.
+let valueTraces = new WeakMap<object, ValueTrace>();
+let operationTraces = new WeakMap<StoredOperation, OperationTrace>();
+
+/** Start a fresh, serial tooling evaluation without invalidating model geometry. */
+export function beginModelEvaluation(): void {
+  valueTraces = new WeakMap();
+  operationTraces = new WeakMap();
+}
+
+function valueTrace(value: object): ValueTrace {
+  let trace = valueTraces.get(value);
+  if (!trace) {
+    trace = {sourceRefs: [], parameters: []};
+    valueTraces.set(value, trace);
+  }
+  return trace;
+}
 
 type BooleanOperation = 'cut' | 'fuse' | 'intersect';
 
@@ -666,8 +687,13 @@ export function modelTopologyReference(
 }
 
 export class Constraint {
-  private readonly sourceRefs: SourceRef[];
-  private readonly parameters: ParameterUsage[];
+  private get sourceRefs(): SourceRef[] {
+    return valueTrace(this).sourceRefs;
+  }
+
+  private get parameters(): ParameterUsage[] {
+    return valueTrace(this).parameters;
+  }
 
   private constructor(
     private readonly source: AnchorReference,
@@ -678,8 +704,10 @@ export class Constraint {
     sourceRefs: readonly SourceRef[] = [],
     parameters: readonly ParameterUsage[] = [],
   ) {
-    this.sourceRefs = [...sourceRefs];
-    this.parameters = [...parameters];
+    valueTraces.set(this, {
+      sourceRefs: [...sourceRefs],
+      parameters: [...parameters],
+    });
   }
 
   /** @internal */
@@ -750,16 +778,19 @@ export class Constraint {
         'The constraint returned by relate() must originate from the model copy passed to its callback.',
       );
     }
-    return {
+    const stored: StoredConstraint = {
       id: this.constraintId,
       kind: 'on',
       source: storedAnchor(this.source),
       target: this.target,
       flipped: this.isFlipped,
       offset: this.displacement,
+    };
+    valueTraces.set(stored, {
       sourceRefs: [...this.sourceRefs],
       parameters: [...this.parameters],
-    };
+    });
+    return stored;
   }
 }
 
@@ -783,9 +814,13 @@ export class ModelObject<
   /** @internal */
   readonly children: readonly ModelObject[];
   /** @internal */
-  readonly sourceRefs: SourceRef[];
+  get sourceRefs(): SourceRef[] {
+    return valueTrace(this).sourceRefs;
+  }
   /** @internal */
-  readonly parameters: ParameterUsage[];
+  get parameters(): ParameterUsage[] {
+    return valueTrace(this).parameters;
+  }
   private readonly geometry?: ModelGeometry;
   private readonly meshTolerance: number;
   private readonly intrinsic: StoredElement;
@@ -819,8 +854,10 @@ export class ModelObject<
     this.color = init.color;
     this.children = init.children ?? [];
     this.constraints = [...(init.constraints ?? [])];
-    this.sourceRefs = [...(init.sourceRefs ?? [])];
-    this.parameters = [...(init.parameters ?? [])];
+    valueTraces.set(this, {
+      sourceRefs: [...(init.sourceRefs ?? [])],
+      parameters: [...(init.parameters ?? [])],
+    });
     this.operation = init.operation;
     this.elements =
       init.elements ??
@@ -1139,10 +1176,10 @@ export class ModelObject<
     order: number,
     sourceRef: SourceRef,
   ): void {
-    if (this.operation.siteId) {
+    if (operationTraces.has(this.operation)) {
       return;
     }
-    Object.assign(this.operation, {siteId, execution, order, sourceRef});
+    operationTraces.set(this.operation, {siteId, execution, order, sourceRef});
   }
 
   /** @internal */
@@ -1180,7 +1217,9 @@ export class ModelObject<
     );
     const parameters = uniqueParameters([
       ...this.parameters,
-      ...this.constraints.flatMap(constraint => constraint.parameters),
+      ...this.constraints.flatMap(
+        constraint => valueTrace(constraint).parameters,
+      ),
     ]);
     const common = {
       nodeId: this.nodeId,
@@ -1441,7 +1480,9 @@ export class ModelObject<
   private allParameters(): ParameterUsage[] {
     return uniqueParameters([
       ...this.parameters,
-      ...this.constraints.flatMap(constraint => constraint.parameters),
+      ...this.constraints.flatMap(
+        constraint => valueTrace(constraint).parameters,
+      ),
     ]);
   }
 
@@ -1503,8 +1544,8 @@ export class ModelObject<
       flipped: constraint.flipped,
       offset: constraint.offset,
       offsetFrame: toTransform(relativeTransform(offsetFrame, basis)),
-      sourceRefs: [...constraint.sourceRefs],
-      parameters: [...constraint.parameters],
+      sourceRefs: [...valueTrace(constraint).sourceRefs],
+      parameters: [...valueTrace(constraint).parameters],
     };
   }
 
@@ -1527,16 +1568,9 @@ export class ModelObject<
   private operationSnapshot(
     meshCache: Map<AnyShape, RenderMesh>,
   ): ModelOperationSnapshot {
-    const {
-      siteId,
-      execution,
-      kind,
-      order,
-      sourceRef,
-      inputs,
-      regions,
-      selections,
-    } = this.operation;
+    const {kind, inputs, regions, selections} = this.operation;
+    const {siteId, execution, order, sourceRef} =
+      operationTraces.get(this.operation) ?? {};
     return {
       id: storedOperationId(this.operation),
       siteId,
@@ -2329,8 +2363,9 @@ function storedOperation(
 }
 
 function storedOperationId(operation: StoredOperation): string {
-  return operation.siteId !== undefined && operation.execution !== undefined
-    ? `${operation.siteId}:execution:${operation.execution}`
+  const trace = operationTraces.get(operation);
+  return trace
+    ? `${trace.siteId}:execution:${trace.execution}`
     : operation.runtimeId;
 }
 

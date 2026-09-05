@@ -19,7 +19,7 @@ type ModuleSpecifierSite = Readonly<{
 
 export function registerProjectTypeScriptCompletions(
   selector: monaco.languages.LanguageSelector,
-  packageSpecifiers: readonly string[],
+  packageSpecifiers: () => readonly string[],
 ): monaco.IDisposable {
   disableBuiltInCompletions(typeScriptLanguage.typescriptDefaults);
   disableBuiltInCompletions(typeScriptLanguage.javascriptDefaults);
@@ -61,12 +61,12 @@ export function registerProjectTypeScriptCompletions(
         const existing = new Set(
           suggestions.map(suggestion => completionItemLabel(suggestion.label)),
         );
-        for (const specifier of packageSpecifiers) {
+        for (const specifier of packageSpecifiers()) {
           if (existing.has(specifier)) continue;
           suggestions.push({
             label: specifier,
             kind: monaco.languages.CompletionItemKind.Module,
-            detail: 'injected package',
+            detail: 'project dependency',
             insertText: specifier,
             filterText: specifier,
             sortText: `0-${specifier}`,

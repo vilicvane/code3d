@@ -1,13 +1,11 @@
-import initOpenCascade from 'replicad-opencascadejs';
-import openCascadeWasmUrl from 'replicad-opencascadejs/wasm?url';
-import {installOpenCascade} from '@code3d/core/tooling';
+import {openBrowserProjectFileSystem} from './project/filesystem';
+import {ModelCompilerClient} from './model/compiler-client';
 import {
   sourceTokenOffset,
   type SourceToken,
   uniqueSourceOffset,
 } from '../render-samples/source-focus';
 import {renderSamples} from '../render-samples/catalog';
-import {compileProject} from './model/compiler';
 import {ModelDiagnosticError} from './model/diagnostic';
 import {elementSourceDecoration} from './model/element-decorations';
 import {
@@ -70,13 +68,13 @@ async function renderModel(): Promise<void> {
     throw new Error('The render root is missing.');
   }
 
-  const openCascade = await initOpenCascade({
-    locateFile: () => openCascadeWasmUrl,
-  });
-  installOpenCascade(openCascade);
-
   const project = renderProjects[requestedModel()];
-  const module = compileProject(project, project.rootPath);
+  const compiler = new ModelCompilerClient(
+    await openBrowserProjectFileSystem(),
+  );
+  const module = await compiler
+    .compile(project, project.rootPath)
+    .finally(() => compiler.dispose());
   if (module.diagnostic) {
     throw new ModelDiagnosticError(module.diagnostic);
   }

@@ -6,10 +6,7 @@ import EditorWorker from 'monaco-editor/editor/editor.worker?worker';
 import ProjectTypeScriptWorker from './monaco/typescript.worker?worker';
 import type {CursorOptions, Options} from 'prettier';
 import {code3dCodeColors, code3dCodeFocusColors} from './code-theme';
-import {
-  injectedPackageFiles,
-  injectedPackageSpecifiers,
-} from './monaco/injected-packages';
+import type {ProjectLanguage} from './project/project-language';
 import {
   observeSuggestionFocus,
   type FocusedSuggestion,
@@ -134,11 +131,10 @@ typeScriptLanguage.typescriptDefaults.setDiagnosticsOptions({
   noSemanticValidation: false,
   noSyntaxValidation: false,
 });
-typeScriptLanguage.typescriptDefaults.setExtraLibs(injectedPackageFiles);
-typeScriptLanguage.javascriptDefaults.setExtraLibs(injectedPackageFiles);
+let projectPackageSpecifiers: readonly string[] = [];
 registerProjectTypeScriptCompletions(
   projectLanguageSelector,
-  injectedPackageSpecifiers,
+  () => projectPackageSpecifiers,
 );
 registerProjectTypeScriptSelectionRanges(projectLanguageSelector);
 
@@ -189,6 +185,23 @@ const typeScriptTokenizationReady = monaco.editor.colorize(
 );
 
 export class CodeEditor {
+  setProjectLanguage(language: ProjectLanguage): void {
+    projectPackageSpecifiers = language.packageSpecifiers;
+    const extraLibs = language.files.map(file => ({
+      filePath: monaco.Uri.file('/workspace' + file.path).toString(true),
+      content: file.source,
+    }));
+    // Monaco forwards these options to the project's TypeScript worker.
+    const options = {
+      ...languageCompilerOptions,
+      ...language.compilerOptions,
+    } as typeScriptLanguage.CompilerOptions;
+    typeScriptLanguage.typescriptDefaults.setCompilerOptions(options);
+    typeScriptLanguage.javascriptDefaults.setCompilerOptions(options);
+    typeScriptLanguage.typescriptDefaults.setExtraLibs(extraLibs);
+    typeScriptLanguage.javascriptDefaults.setExtraLibs(extraLibs);
+  }
+
   readonly editor: monaco.editor.IStandaloneCodeEditor;
   private readonly documents = new Map<string, ProjectDocument>();
   private readonly designArgumentModels = new Map<

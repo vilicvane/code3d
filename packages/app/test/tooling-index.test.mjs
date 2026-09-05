@@ -3,6 +3,7 @@ import {after, before, test} from 'node:test';
 import {fileURLToPath} from 'node:url';
 import ts from '@typescript/typescript6';
 import {createAppTestServer} from './vite-test-server.mjs';
+import {packageTestLanguage} from './project-test-files.mjs';
 
 let server;
 let resolveProjectTooling;
@@ -10,9 +11,11 @@ let sourceNodeKey;
 
 before(async () => {
   server = await createAppTestServer();
-  ({resolveProjectTooling, sourceNodeKey} = await server.ssrLoadModule(
-    '/src/model/tool-schema.ts',
-  ));
+  const tooling = await server.ssrLoadModule('/src/model/tool-schema.ts');
+  const language = await packageTestLanguage(server);
+  sourceNodeKey = tooling.sourceNodeKey;
+  resolveProjectTooling = project =>
+    tooling.resolveProjectTooling(project, language);
 });
 
 after(async () => {
@@ -25,10 +28,10 @@ test('follows unique property, alias, destructuring, and re-export definitions',
     'export interface Dimensions {width: number; nested: {depth: number}}',
     'export const dimensions: Dimensions = {width: base, nested: {depth: 20}};',
   ].join('\n');
-  const bridge = 'export {dimensions} from "./settings";';
+  const bridge = 'export {dimensions} from "./settings.ts";';
   const model = [
     'import {box} from "@code3d/core";',
-    'import {dimensions} from "./bridge";',
+    'import {dimensions} from "./bridge.ts";',
     'const alias = dimensions.width;',
     'const {nested: {depth}} = dimensions;',
     'const key = "width" as const;',
@@ -240,7 +243,7 @@ test('keeps an unannotated resolved overload separate from its annotated peers',
 for (const declarationOnly of [false, true]) {
   test(`reads primitive annotations through imports and aliases from ${declarationOnly ? 'emitted declarations' : 'source'}`, () => {
     const source = [
-      'import {sleeve as imported} from "./bridge";',
+      'import {sleeve as imported} from "./bridge.ts";',
       'import * as library from "./library.js";',
       'const renamed = imported;',
       'const radius = 6;',

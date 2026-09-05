@@ -24,6 +24,12 @@ implementation context and historical outcomes, not a competing work queue.
   `package.json`, lockfile, and installed dependencies, including
   `@code3d/core`. The same source should run in a supported Node runtime without
   a code3d-only module syntax or hidden host dependency.
+- Studio provides built-in core/screws when the root package metadata does not
+  declare `@code3d/core`. Declaring core in dependencies, devDependencies,
+  peerDependencies or optionalDependencies transfers the entire runtime to the
+  project's packages; missing installations are errors. Built-in packages use
+  real published artifacts, one shared core instance and an isolated internal
+  dependency closure. Other npm packages still resolve from the project.
 - Rendering is driven primarily by source or GUI object selection. Exporting is
   a publishing boundary and only a preview fallback, not a render prerequisite.
 - Viewport file export supports STEP, STL and 3MF alongside PNG image export.
@@ -207,10 +213,11 @@ implementation context and historical outcomes, not a competing work queue.
 - A project has no privileged persistent entry file. The active editor file is
   the root module for the current compile, so every source file can be opened
   and previewed directly.
-- Studio diagnostics and completion resolve the project's installed package
-  declarations, while model evaluation resolves and executes the installed
-  package implementation. These are separate consumers of one project module
-  graph and must not be conflated into a hand-authored declaration shim.
+- Studio diagnostics, completion and model evaluation use one selected package
+  filesystem: project-owned packages when core is declared, otherwise the
+  built-in core/screws plus ordinary project dependencies. Declarations and
+  implementations remain separate consumers of real package artifacts, not a
+  hand-authored declaration shim. Changing this selection invalidates the runtime.
 
 ## Milestones
 
@@ -463,8 +470,9 @@ Remaining scope and live status: [#6](https://github.com/vilicvane/code3d/issues
 
 - Extract the author runtime into a real ESM `@code3d/core` package with emitted
   JavaScript, declarations, explicit exports, and an explicit tooling boundary.
-- Make every real project resolve its own `node_modules`; remove the injected
-  `code3d` module, duplicated declaration string, and host-runtime fallback.
+- Resolve project-owned `node_modules` with a zero-install built-in runtime
+  until the project declares core. Remove the injected `code3d` module and
+  duplicated declaration string; never fall back after a declared dependency fails.
 - Keep TypeScript language-service resolution separate from model building and
   evaluation while making both honor the same project package graph.
 - Make the authoring convention valid for direct execution by a supported Node

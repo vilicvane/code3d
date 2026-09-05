@@ -5,10 +5,7 @@ import type {
   SourceRef,
   TopologyKind,
 } from '@code3d/core/tooling';
-import {
-  injectedPackageFiles,
-  injectedPackages,
-} from '../monaco/injected-packages';
+import type {ProjectLanguage} from '../project/project-language';
 import {normalizeProjectPath, type ModelProject} from '../project/project';
 import {
   indexParameterDefinitions,
@@ -100,16 +97,15 @@ export function isToolSelectionParameter(
 
 export function resolveProjectTooling(
   project: ModelProject,
+  language: ProjectLanguage,
 ): ProjectToolingIndex {
   const sources = new Map<string, string>();
   project.files.forEach(file =>
     sources.set(normalizeProjectPath(file.path), file.source),
   );
-  injectedPackageFiles.forEach(file => {
-    if (file.filePath.endsWith('.d.ts')) {
-      sources.set(virtualFilePath(file.filePath), file.content);
-    }
-  });
+  language.files.forEach(file =>
+    sources.set(normalizeProjectPath(file.path), file.source),
+  );
   sources.set('/lib.es5.d.ts', es5Library);
 
   const sourceFiles = new Map<string, ts.SourceFile>();
@@ -132,29 +128,21 @@ export function resolveProjectTooling(
       sourceFiles.set(path, sourceFile);
       return sourceFile;
     },
-    getDefaultLibFileName: () => '/lib.d.ts',
+    getDefaultLibFileName: () => '/lib.es5.d.ts',
     writeFile: () => {},
     getCurrentDirectory: () => '/',
     getDirectories: () => [],
     getCanonicalFileName: fileName => virtualFilePath(fileName),
     useCaseSensitiveFileNames: () => true,
     getNewLine: () => '\n',
-    resolveModuleNames: (moduleNames, containingFile) =>
-      moduleNames.map(specifier =>
-        resolveModule(specifier, virtualFilePath(containingFile), sources),
+    directoryExists: path =>
+      [...sources.keys()].some(file =>
+        file.startsWith(path === '/' ? '/' : path + '/'),
       ),
   };
   const program = ts.createProgram({
-    rootNames: [...sources.keys()],
-    options: {
-      target: ts.ScriptTarget.ES2022,
-      module: ts.ModuleKind.NodeNext,
-      moduleResolution: ts.ModuleResolutionKind.NodeNext,
-      allowJs: true,
-      noLib: false,
-      skipLibCheck: true,
-      strict: true,
-    },
+    rootNames: project.files.map(file => normalizeProjectPath(file.path)),
+    options: language.compilerOptions,
     host,
   });
   const checker = program.getTypeChecker();
@@ -387,61 +375,6 @@ function toolSchemaError(declaration: ts.Node, message: string): Error {
   return new Error(
     `${sourceFile.fileName}:${position.line + 1}:${position.character + 1}: ${message}`,
   );
-}
-
-function resolveModule(
-  specifier: string,
-  containingFile: string,
-  sources: ReadonlyMap<string, string>,
-): ts.ResolvedModule | undefined {
-  const packageEntry = injectedPackages.find(
-    candidate => candidate.specifier === specifier,
-  );
-  if (packageEntry) {
-    return resolvedModule(virtualFilePath(packageEntry.entryFilePath), true);
-  }
-  if (!specifier.startsWith('.')) return undefined;
-  const directory = containingFile.slice(0, containingFile.lastIndexOf('/'));
-  const candidate = normalizeProjectPath(`${directory}/${specifier}`);
-  const resolved = moduleCandidates(candidate).find(path => sources.has(path));
-  return resolved ? resolvedModule(resolved, false) : undefined;
-}
-
-function moduleCandidates(path: string): string[] {
-  const scriptExtension = /\.(?:mjs|cjs|js|jsx)$/i.exec(path);
-  if (scriptExtension) {
-    const stem = path.slice(0, -scriptExtension[0].length);
-    return [
-      `${stem}.ts`,
-      `${stem}.tsx`,
-      `${stem}.mts`,
-      `${stem}.cts`,
-      `${stem}.d.ts`,
-      path,
-    ];
-  }
-  if (/\.[^/]+$/.test(path)) return [path];
-  return [
-    path,
-    `${path}.ts`,
-    `${path}.tsx`,
-    `${path}.mts`,
-    `${path}.cts`,
-    `${path}.d.ts`,
-    `${path}/index.ts`,
-    `${path}/index.tsx`,
-    `${path}/index.d.ts`,
-  ];
-}
-
-function resolvedModule(
-  resolvedFileName: string,
-  isExternalLibraryImport: boolean,
-): ts.ResolvedModule {
-  return {
-    resolvedFileName,
-    isExternalLibraryImport,
-  };
 }
 
 function scriptKind(path: string): ts.ScriptKind {
