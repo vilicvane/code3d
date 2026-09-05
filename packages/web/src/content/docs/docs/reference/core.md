@@ -123,6 +123,11 @@ children as rigid bodies.
 - `.vertex(id)`, `.edge(id)`, `.surface(id)`: one point, line, or face anchor.
 - `.vertices(ids?)`, `.edges(ids?)`, `.surfaces(ids?)`: arrays of anchors.
 
+These topology references expose readonly `kind` (`vertex`, `edge`, or
+`surface`) and `id` properties. Use `model.edges().map(edge => edge.id)` to
+collect edge IDs for an operation on that model. Plain named anchors such as
+`model.top` do not have these topology properties.
+
 IDs are model-local. See [topology selection](../../guides/topology/) for
 selection behavior and derived-model identity.
 

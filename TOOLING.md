@@ -139,6 +139,11 @@ tooling 从公开声明读取注释，并从 TypeScript 实际调用签名解析
 具名函数与方法的重载仍优先使用匹配签名上的注释。primitive factory 不额外提供
 `@code3d.arguments` 入口；独立预览使用普通示例调用。
 
+参数默认值展示已由
+[#29](https://github.com/vilicvane/code3d/issues/29) 实现并合并到 main：面板默认值由 `@code3d.param`
+显式描述，随声明供交互工具读取。`twist = 60` 等初始化器属于函数实现，annotation
+不注入非交互运行时，不改变省略实参时的执行语义；作者负责保持描述与实现一致。
+
 viewport 平移 gizmo 在能够唯一追溯参数时产生 `parameter.set`，否则针对已有关系产生
 `relation.offset`。源码中的 `fillet(radius)`、`fillet(radius, edgeIds)` 和对应的
 `chamfer` 调用把整个参数区域投影为 edge-selection source target。`edge-operation.set`

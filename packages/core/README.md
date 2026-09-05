@@ -19,6 +19,11 @@ vertices provide `.vertex(id)`, edges add `.edge(id)`, and faces and solids
 add `.surface(id)`; only solids provide `fillet` and `chamfer`. Groups retain
 the common relation, expose, and paint capabilities without pretending to
 contain geometry. Stable topology references can be used as geometric relation anchors.
+`Vertex`, `Edge`, and `Surface` references expose readonly `kind` and `id`
+properties. For example, `model.edges().map(edge => edge.id)` collects edge IDs
+for a later operation on that model. Their `kind` values are `vertex`, `edge`,
+and `surface`; IDs belong to that model and topology kind. Plain named anchors
+such as `model.top` do not expose these topology properties.
 `relate()` records placement for composition with other values; inspecting or
 rendering the resulting value by itself keeps its intrinsic local frame.
 
@@ -186,9 +191,10 @@ is not expanded to recognize primitive factory definitions.
 ## Tooling evaluation lifetime
 
 The App uses the selected runtime's `@code3d/core/tooling` entry, from the project
-when core is declared or from the built-in package otherwise. Protocol 4
-includes origin and spatial-operation snapshots and requires installing both
-OpenCascade and the constraint solver from that same package dependency graph.
+when core is declared or from the built-in package otherwise. This internal
+integration surface evolves with the App without a separate protocol version.
+It requires installing both OpenCascade and the constraint solver from that
+same package dependency graph.
 Call `beginModelEvaluation(): void` before each serial source
 evaluation to reset source locations, parameter provenance, and operation
 traces. Geometry, model identity, relations, and kernel caches are unaffected.
@@ -200,3 +206,16 @@ it encounters. Unreachable Replicad wrappers release their native resources
 through their finalizers; explicit disposal is appropriate only when the caller
 owns the complete model lifetime. This boundary is tooling-only: ordinary
 model authors do not initialize an evaluation session.
+
+Rendering snapshots contain serializable meshes and model metadata, without
+native shapes. File export uses a separate `ModelGeometrySnapshot` retained
+by the compiler Worker. Core clones each distinct source shape once; the
+compiler releases these copies before the next compilation, when replacing
+the runtime, or when it is disposed. The snapshot's shapes are borrowed by
+consumers: each export clones them before transformations or consuming kernel
+operations and releases its temporary geometry on both success and failure.
+Repeated exports therefore preserve the retained geometry and author models.
+
+Core owns snapshot creation; the App owns export placement and file generation,
+using Replicad from the same runtime. This division already serves the current
+consumers and changes only when a concrete use case calls for it.

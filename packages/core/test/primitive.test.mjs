@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import {definePrimitive, replicad} from '../bld/node/replicad.js';
+import {definePrimitive, replicad} from '@code3d/core/replicad';
 import {
   createModelSnapshotter,
   disposeModelObjects,
-} from '../bld/tooling/index.js';
+} from '@code3d/core/tooling';
 import {
   clearKernelOperationCache,
   kernelOperationCacheStats,

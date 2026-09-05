@@ -576,9 +576,15 @@ not approval to predeclare additional parameter kinds.
   the fragment, then join annotation and ordinary source parents without
   exposing generated helper code.
 - Use one semantic `kind` discriminator for value and selectable parameters.
-  Keep runtime defaults, effective selections, environment-dependent steps,
-  display ranges, units, and other presentation policy out of the declaration
-  metadata; resolve them from the reached tool context and current environment.
+  Function implementations own runtime defaults. The confirmed extension for
+  displaying an omitted parameter's default is explicit `@code3d.param`
+  metadata, shared by source and emitted declarations; this display capability
+  has since shipped in main (see [#29](https://github.com/vilicvane/code3d/issues/29)).
+  Do not extract implementation initializers or inject annotation defaults into
+  non-interactive execution. Authors keep the display metadata consistent with
+  the implementation. Resolve effective selections, environment-dependent steps,
+  display ranges, units, and other presentation policy from the reached tool
+  context and current environment.
 - Recognize only callable `@code3d.param` and design `@code3d.arguments`
   annotations. Numeric variables carry no annotation metadata: resolve their
   editable source without inheriting labels, units, kinds, bounds, or steps
