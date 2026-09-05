@@ -9,7 +9,7 @@ const execute = promisify(execFile);
 const moduleId = 'virtual:code3d-browser-packages';
 const assetPrefix = '/__code3d-packages/';
 
-/** Distribute npm's published file lists, never the Studio's bundled modules. */
+/** Distribute npm's published file lists, never the App's bundled modules. */
 export function browserPackages(repository: string): Plugin {
   type Artifact = {path: string; disk: string; version: string; bytes: Buffer};
   type PackageMetadata = {
@@ -132,7 +132,7 @@ export function browserPackages(repository: string): Plugin {
         }
       }
       const records = files.map(file => {
-        // These are package bytes, not Studio imports. Vite's addWatchFile
+        // These are package bytes, not App imports. Vite's addWatchFile
         // also adds module-graph edges on reload, including Node-only entries.
         if (!development) this.addWatchFile(file.disk);
         const key = file.version + path.extname(file.path);

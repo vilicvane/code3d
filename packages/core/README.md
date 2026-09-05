@@ -228,10 +228,12 @@ is not expanded to recognize primitive factory definitions.
 ## Tooling evaluation lifetime
 
 The App uses the selected runtime's `@code3d/core/tooling` entry, from the project
-when core is declared or from the built-in package otherwise. Protocol 5
-includes topology source identities, assembly transforms, and calculated-anchor
-frames alongside origin and spatial-operation snapshots. It requires installing both
-OpenCascade and the constraint solver from that same package dependency graph.
+when core is declared or from the built-in package otherwise. This internal
+integration surface evolves with the App during prototyping and does not promise
+API stability. It includes topology source identities, assembly transforms, and
+calculated-anchor frames alongside origin and spatial-operation snapshots. It
+requires installing both OpenCascade and the constraint solver from that same
+package dependency graph.
 Call `beginModelEvaluation(): void` before each serial source
 evaluation to reset source locations, parameter provenance, and operation
 traces. Geometry, model identity, relations, and kernel caches are unaffected.

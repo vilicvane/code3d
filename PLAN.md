@@ -24,12 +24,15 @@ implementation context and historical outcomes, not a competing work queue.
   `package.json`, lockfile, and installed dependencies, including
   `@code3d/core`. The same source should run in a supported Node runtime without
   a code3d-only module syntax or hidden host dependency.
-- Studio provides built-in core/screws when the root package metadata does not
+- App provides built-in core/screws when the root package metadata does not
   declare `@code3d/core`. Declaring core in dependencies, devDependencies,
   peerDependencies or optionalDependencies transfers the entire runtime to the
   project's packages; missing installations are errors. Built-in packages use
   real published artifacts, one shared core instance and an isolated internal
   dependency closure. Other npm packages still resolve from the project.
+- App and core evolve together during prototyping. `@code3d/core/tooling`
+  remains their internal integration boundary without a separate compatibility
+  version or stability guarantee. See [#30](https://github.com/vilicvane/code3d/issues/30).
 - Rendering is driven primarily by source or GUI object selection. Exporting is
   a publishing boundary and only a preview fallback, not a render prerequisite.
 - Viewport file export supports STEP, STL and 3MF alongside PNG image export.
@@ -254,7 +257,7 @@ implementation context and historical outcomes, not a competing work queue.
 - A project has no privileged persistent entry file. The active editor file is
   the root module for the current compile, so every source file can be opened
   and previewed directly.
-- Studio diagnostics, completion and model evaluation use one selected package
+- App diagnostics, completion and model evaluation use one selected package
   filesystem: project-owned packages when core is declared, otherwise the
   built-in core/screws plus ordinary project dependencies. Declarations and
   implementations remain separate consumers of real package artifacts, not a
@@ -525,7 +528,7 @@ Remaining scope and live status: [#6](https://github.com/vilicvane/code3d/issues
   evaluation while making both honor the same project package graph.
 - Make the authoring convention valid for direct execution by a supported Node
   runtime and for ordinary TypeScript emit.
-- Preserve one project-local core/kernel runtime during repeated Studio
+- Preserve one project-local core/kernel runtime during repeated App
   evaluations without coupling the host to its concrete runtime classes.
 
 Status: the repository is now a workspace with `@code3d/app`, `@code3d/core`,
@@ -663,13 +666,13 @@ establish the next schema boundary.
   spine it uses a multi-section pipe shell so the curve affects the generated
   geometry rather than serving only as a placement guide.
 - Validate the complete path with two non-parallel related planar profiles at
-  the endpoints of a curved spine, including Node execution, Studio rendering,
+  the endpoints of a curved spine, including Node execution, App rendering,
   source context, and topology selection on the result and inputs.
 
 Status: complete. Node tests cover renderable face/edge/vertex models, all three
 topology anchor kinds, ordinary through-section loft, and a curved-spine loft
 between nonparallel circle and rectangle profiles. Host-Chrome validation also
-confirmed Studio rendering, section/spine source context, and Surface, Edge,
+confirmed App rendering, section/spine source context, and Surface, Edge,
 and Vertex viewport selectors on the new model kinds and loft result.
 
 ### 5. Object combination tools

@@ -70,8 +70,6 @@ export {describeOpenCascadeException} from '../library/open-cascade-error.js';
 
 export {installConstraintSolver} from '../library/constraint-solver.js';
 
-export const toolingProtocolVersion = 5;
-
 export function installOpenCascade(openCascade: OpenCascadeInstance): void {
   clearKernelOperationCache();
   setOC(openCascade);

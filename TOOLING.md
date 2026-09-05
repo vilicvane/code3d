@@ -227,7 +227,7 @@ scope 的 edit plan。
 
 `origin`、`originOffset`、`originVertex`、`originCenter` 和 `rotate` 在 operation snapshot 中记录
 局部几何坐标下的原点和本次操作向量。模型 snapshot 同时提供当前原点，tooling
-protocol 5 统一这些数据与参数 provenance，并从同一依赖图安装 OpenCascade 和约束求解器；
+统一这些数据与参数 provenance，并从同一依赖图安装 OpenCascade 和约束求解器；
 viewport 不从包围盒推断模型旋转中心。
 
 拓扑引用同时报告约束所属模型、几何来源、源拓扑身份和几何到所属模型的变换。
