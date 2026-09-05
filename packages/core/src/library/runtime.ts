@@ -86,12 +86,7 @@ export type ParameterKind = 'length' | 'angle' | 'ratio' | 'count' | 'scalar';
 export type ParameterTarget = Readonly<{
   id: string;
   label: string;
-  description?: string;
-  kind?: ParameterKind;
-  unit?: string;
-  min?: number;
-  max?: number;
-  step?: number;
+  kind: ParameterKind;
   value: number;
   sourceRef: SourceRef;
 }>;

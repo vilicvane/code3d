@@ -1,16 +1,6 @@
 import ts from '@typescript/typescript6';
 
-export const code3dAnnotationNames = [
-  'arguments',
-  'description',
-  'kind',
-  'label',
-  'max',
-  'min',
-  'param',
-  'step',
-  'unit',
-] as const;
+export const code3dAnnotationNames = ['arguments', 'param'] as const;
 
 export type Code3dAnnotationName = (typeof code3dAnnotationNames)[number];
 
@@ -77,12 +67,8 @@ function scanAnnotations(
       const nextTag = /(?:\r?\n)[ \t]*@[A-Za-z]/.exec(body.slice(contentStart));
       const contentEnd = nextTag ? contentStart + nextTag.index : body.length;
       const content = body.slice(contentStart, contentEnd);
-      const rawValue =
-        name === 'param' || name === 'arguments'
-          ? content
-          : content.split(/\r?\n/, 1)[0];
-      const leadingWhitespace = rawValue.length - rawValue.trimStart().length;
-      const value = rawValue.trim();
+      const leadingWhitespace = content.length - content.trimStart().length;
+      const value = content.trim();
       const valueStart = start + tag.length + leadingWhitespace;
       annotations.push({
         name: name as Code3dAnnotationName,

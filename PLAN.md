@@ -514,6 +514,11 @@ still use the common cache. Custom primitives use the standard mesh tolerance.
   Keep runtime defaults, effective selections, environment-dependent steps,
   display ranges, units, and other presentation policy out of the declaration
   metadata; resolve them from the reached tool context and current environment.
+- Recognize only callable `@code3d.param` and design `@code3d.arguments`
+  annotations. Numeric variables carry no annotation metadata: resolve their
+  editable source without inheriting labels, units, kinds, bounds, or steps
+  from comments. Derive parameter semantics from the reached call, and do not
+  display unconverted variable units in panels or viewport drag feedback.
 - Prefer an optional trailing parameter when omission is the only alternative
   call form, as for `fillet(radius, edgeIds?)` and
   `chamfer(distance, edgeIds?)`. Retain independently annotated overloads when

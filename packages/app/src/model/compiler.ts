@@ -223,8 +223,10 @@ type ParameterArgument = Readonly<{
   name: string;
   label: string;
   kind: ParameterKind;
-  unit?: string;
 }>;
+
+type CallParameterTarget = SourceParameterTarget &
+  Readonly<{kind: ParameterKind}>;
 
 type ParameterSignature = Readonly<{
   operation: string;
@@ -2972,14 +2974,13 @@ function collectExpressionTargets(
   argument: ParameterArgument,
   parameterDefinitions: ParameterDefinitionMap,
   sourceFile: ts.SourceFile,
-): readonly SourceParameterTarget[] {
-  const targets = new Map<string, SourceParameterTarget>();
+): readonly CallParameterTarget[] {
+  const targets = new Map<string, CallParameterTarget>();
   const add = (target: SourceParameterTarget): void => {
     const id = `${target.sourceRef.file}:${target.sourceRef.start}:${target.sourceRef.end}`;
     targets.set(id, {
       ...target,
-      kind: target.kind ?? argument.kind,
-      unit: target.unit ?? argument.unit,
+      kind: argument.kind,
     });
   };
 
@@ -3001,8 +3002,6 @@ function collectExpressionTargets(
         },
         value: numeric,
         label: argument.label,
-        kind: argument.kind,
-        unit: argument.unit,
       });
       return;
     }
@@ -3239,7 +3238,7 @@ function matchesTarget(
 }
 
 function createRuntimeTarget(
-  target: SourceParameterTarget,
+  target: CallParameterTarget,
   sensitivity: ts.Expression,
   factory: ts.NodeFactory,
 ): ts.ObjectLiteralExpression {
@@ -3252,6 +3251,7 @@ function createRuntimeTarget(
       factory,
     ),
     property('label', factory.createStringLiteral(target.label), factory),
+    property('kind', factory.createStringLiteral(target.kind), factory),
     property('value', createNumberExpression(target.value, factory), factory),
     property(
       'sourceRef',
@@ -3275,17 +3275,6 @@ function createRuntimeTarget(
       factory,
     ),
   ];
-  addOptionalString(
-    targetProperties,
-    'description',
-    target.description,
-    factory,
-  );
-  addOptionalString(targetProperties, 'kind', target.kind, factory);
-  addOptionalString(targetProperties, 'unit', target.unit, factory);
-  addOptionalNumber(targetProperties, 'min', target.min, factory);
-  addOptionalNumber(targetProperties, 'max', target.max, factory);
-  addOptionalNumber(targetProperties, 'step', target.step, factory);
 
   return factory.createObjectLiteralExpression([
     property(
@@ -3303,32 +3292,6 @@ function property(
   factory: ts.NodeFactory,
 ): ts.PropertyAssignment {
   return factory.createPropertyAssignment(name, initializer);
-}
-
-function addOptionalString(
-  properties: ts.ObjectLiteralElementLike[],
-  name: string,
-  value: string | undefined,
-  factory: ts.NodeFactory,
-): void {
-  if (value !== undefined) {
-    properties.push(
-      property(name, factory.createStringLiteral(value), factory),
-    );
-  }
-}
-
-function addOptionalNumber(
-  properties: ts.ObjectLiteralElementLike[],
-  name: string,
-  value: number | undefined,
-  factory: ts.NodeFactory,
-): void {
-  if (value !== undefined) {
-    properties.push(
-      property(name, createNumberExpression(value, factory), factory),
-    );
-  }
 }
 
 function createNumberExpression(

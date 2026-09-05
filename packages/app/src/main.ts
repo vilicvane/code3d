@@ -1627,7 +1627,6 @@ function renderContextualToolPanel(forceParameterValues = false): void {
           ? undefined
           : formatDisplayNumber(parameter.expressionValue)
         : undefined,
-    unit: parameter.usage?.target.unit,
     step: contextualParameterStep(parameter),
     min: parameter.schema.constraints?.min,
     max: parameter.schema.constraints?.max,
@@ -1680,10 +1679,6 @@ function renderContextualToolPanel(forceParameterValues = false): void {
 function contextualParameterStep(
   parameter: ContextualToolParameterState,
 ): number {
-  const runtimeStep = parameter.usage?.target.step;
-  if (runtimeStep !== undefined && parameter.usage) {
-    return Math.abs(parameter.usage.sensitivity * runtimeStep);
-  }
   if (parameter.schema.kind === 'count' || parameter.schema.kind === 'angle') {
     return 1;
   }
@@ -2322,9 +2317,8 @@ function showPositionToolStatus(
     binding.kind === 'parameter'
       ? (currentModule?.parameterImpacts.get(binding.target.id) ?? 1)
       : binding.occurrenceKeys.length;
-  const unit = binding.unit ? ` ${binding.unit}` : '';
   const effect = impact > 1 ? ` · Affects ${formatObjectCount(impact)}` : '';
-  toolStatus.textContent = `${binding.axis.toUpperCase()} · ${binding.label} ${formatDisplayNumber(value)}${unit}${effect} · Esc to cancel`;
+  toolStatus.textContent = `${binding.axis.toUpperCase()} · ${binding.label} ${formatDisplayNumber(value)}${effect} · Esc to cancel`;
   toolStatus.hidden = false;
 }
 

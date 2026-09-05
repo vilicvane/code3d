@@ -5,6 +5,7 @@ import {createAppTestServer} from './vite-test-server.mjs';
 
 let server;
 let annotations;
+let annotationNames;
 let diagnostics;
 let readParameters;
 let languageService;
@@ -19,9 +20,8 @@ const preferences = {
 
 before(async () => {
   server = await createAppTestServer();
-  ({code3dAnnotations: annotations} = await server.ssrLoadModule(
-    '/src/model/annotations.ts',
-  ));
+  ({code3dAnnotations: annotations, code3dAnnotationNames: annotationNames} =
+    await server.ssrLoadModule('/src/model/annotations.ts'));
   const shared = await server.ssrLoadModule(
     '/src/model/tool-parameter-annotations.ts',
   );
@@ -207,6 +207,34 @@ test('reads real JSDoc only and keeps multiline offsets in the original source',
   );
   assert.equal(result[1].value, '[10]');
   assert.deepEqual(diagnostics(sourceFile(source)), []);
+});
+
+test('recognizes only param and arguments, leaving former variable tags as ordinary comments', () => {
+  assert.deepEqual([...annotationNames], ['arguments', 'param']);
+  const source = [
+    '/**',
+    ' * @code3d.label Custom width',
+    ' * @code3d.description Width metadata',
+    ' * @code3d.kind length',
+    ' * @code3d.unit mm',
+    ' * @code3d.min 10',
+    ' * @code3d.max 100',
+    ' * @code3d.step 1',
+    ' */',
+    'const width = 40;',
+    '/**',
+    " * @code3d.param size {kind: 'length'}",
+    ' * @code3d.arguments [width]',
+    ' */',
+    'function model(size: number) {}',
+  ].join('\n');
+  assert.deepEqual(
+    annotations(source).map(annotation => annotation.name),
+    ['param', 'arguments'],
+  );
+  assert.deepEqual(diagnostics(sourceFile(source)), []);
+  const result = select(source.replace('Custom width', 'Custom wi|dth'));
+  assert.deepEqual(result.selection, result.outer);
 });
 
 test('validates unused functions, methods and overloads independently', () => {

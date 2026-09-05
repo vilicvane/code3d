@@ -17,9 +17,6 @@ type PositionGizmoBindingBase = Readonly<{
   value: number;
   sensitivity: number;
   parameterKind?: ParameterKind;
-  unit?: string;
-  min?: number;
-  max?: number;
   step?: number;
   frame: Transform;
 }>;
@@ -186,8 +183,6 @@ export class PositionGizmo {
       {
         value: binding.value,
         kind: binding.parameterKind,
-        min: binding.min,
-        max: binding.max,
         step: binding.step,
       },
       rawValue,

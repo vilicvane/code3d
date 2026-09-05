@@ -106,7 +106,7 @@ test('does not fall back to a same-named outer binding', () => {
   assert.equal(targetAt(definitions, source, 'width'), undefined);
 });
 
-test('preserves parameter metadata at the resolved definition', () => {
+test('ignores variable annotation metadata while preserving the resolved source', () => {
   const source = [
     'import {box} from "@code3d/core";',
     '/**',
@@ -125,25 +125,12 @@ test('preserves parameter metadata at the resolved definition', () => {
   const definitions = indexDefinitions([{path: 'model.ts', source}]);
 
   const target = targetAt(definitions, source, 'dimensions.width');
-  assert.deepEqual(
-    {
-      label: target?.label,
-      description: target?.description,
-      kind: target?.kind,
-      unit: target?.unit,
-      min: target?.min,
-      max: target?.max,
-      step: target?.step,
-    },
-    {
-      label: 'Cabinet width',
-      description: 'Shared outer width.',
-      kind: 'length',
-      unit: 'mm',
-      min: 20,
-      max: 80,
-      step: 0.5,
-    },
+  assert.deepEqual(Object.keys(target).sort(), ['label', 'sourceRef', 'value']);
+  assert.equal(target.label, 'Width');
+  assert.equal(target.value, 40);
+  assert.equal(
+    source.slice(target.sourceRef.start, target.sourceRef.end),
+    '40',
   );
 });
 

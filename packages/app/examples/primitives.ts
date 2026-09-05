@@ -13,15 +13,7 @@ const accent = '#d8ff3e';
 const secondary = '#8ed5d1';
 const neutral = '#353a33';
 
-/**
- * @code3d.label Base width
- * @code3d.description Width shared by the primitive showcase base.
- * @code3d.kind length
- * @code3d.unit mm
- * @code3d.min 24
- * @code3d.max 48
- * @code3d.step 1
- */
+// Width shared by the primitive showcase base.
 const baseWidth = 36;
 
 const base = box(baseWidth, 4, 34).fillet(1).paint(neutral);

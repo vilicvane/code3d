@@ -3,7 +3,6 @@ export type ContextualToolParameterView = Readonly<{
   label: string;
   value?: number;
   placeholder?: string;
-  unit?: string;
   step: number;
   min?: number;
   max?: number;
@@ -39,7 +38,6 @@ type ParameterControl = Readonly<{
   field: HTMLLabelElement;
   label: HTMLSpanElement;
   input: HTMLInputElement;
-  unit: HTMLSpanElement;
 }>;
 
 export class ContextualToolPanel {
@@ -138,11 +136,10 @@ export class ContextualToolPanel {
       input.type = 'number';
       input.inputMode = 'decimal';
       input.dataset.parameter = parameter.name;
-      const unit = document.createElement('span');
-      control.append(input, unit);
+      control.append(input);
       field.append(label, control);
       this.parameterFields.append(field);
-      this.controls.set(parameter.name, {field, label, input, unit});
+      this.controls.set(parameter.name, {field, label, input});
 
       let selectOnPointerUp = false;
       input.addEventListener('input', () =>
@@ -193,8 +190,6 @@ export class ContextualToolPanel {
           ? ''
           : formatDisplayNumber(parameter.value);
     }
-    control.unit.textContent = parameter.unit ?? '';
-    control.unit.hidden = !parameter.unit;
   }
 
   private renderActions(actions: readonly ContextualToolActionView[]): void {

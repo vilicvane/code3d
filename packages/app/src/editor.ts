@@ -1449,10 +1449,7 @@ function annotationDecorations(
       }),
       options: annotationDecorationOptions('code3d-annotation'),
     });
-    if (
-      (annotation.name !== 'arguments' && annotation.name !== 'param') ||
-      annotation.value.length === 0
-    ) {
+    if (annotation.value.length === 0) {
       continue;
     }
 
