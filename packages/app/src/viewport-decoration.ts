@@ -52,6 +52,7 @@ type ViewportAnchorDecorationBase = ViewportDecorationBase &
     nodeId: string;
     transform: Transform;
     markerSize: number;
+    layer?: 'reference' | 'foreground';
     appearance: ViewportDecorationAppearance;
   }>;
 
