@@ -25,6 +25,9 @@ jobs:
       - name: Check formatting
         run: npm run lint-prettier
 
+      - name: Test worktree coordination
+        run: python3 -B -m unittest discover -s .agents/skills/worktree-development/tests
+
       - name: Build packages
         run: npm run build:packages
 

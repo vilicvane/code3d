@@ -1,6 +1,7 @@
 # 公开 API 审阅待办
 
-用途：只记录当前已确认结论和下一步待讨论项；每讨论完一项就更新本文。
+用途：记录已确认的 API 设计、实现背景及推理。剩余讨论与进度统一跟踪在
+[GitHub #5](https://github.com/vilicvane/code3d/issues/5)；不在本文维护另一份待办清单。
 
 ## 已确认
 
@@ -40,15 +41,9 @@
 
 ## 待讨论
 
-- [ ] Replicad 互操作层长期稳定性与用户自行安装的 Replicad 如何接入。
-- [ ] `definePrimitive` 可选参数的默认值展示：省略 `twistKnob` 的 `twist` 时，
-      builder 正常使用 `60`，panel 识别可选字段但显示空项；是否以及如何呈现默认值
-      待讨论，不先为此增加 factory 选项。
-- [ ] `kind`、`name`、`color`、`children` 是否应成为作者可读属性。
-- [ ] `withChildren()` 是否需要成为正式的 immutable group API。
-- [ ] 是否需要公开 `ElementKind`、`ModelKind`、`TopologyKind` 等判别类型。
-- [ ] 等旋转/变换 API 定型时，再决定是否从 root 公开 `Quaternion`。
-- [ ] 单独最小化 `@code3d/core/tooling`。
+未决定的互操作、默认参数展示、作者可读属性、group API、判别类型、Quaternion
+和 tooling 边界已迁入 [#5](https://github.com/vilicvane/code3d/issues/5)。讨论结果确认
+后再更新本文中的设计；迁移本身不代表批准公开这些 API。
 
 ## 已修复：Model 能力分层
 

@@ -1,5 +1,8 @@
 # R-022 Toggle viewport background for dark models
 
+> Historical snapshot, frozen on 2026-09-05. Live requirement and discussion:
+> [GitHub #3](https://github.com/vilicvane/code3d/issues/3).
+
 ## Request
 
 - Add a compact toggle to the model viewport for switching between dark and
