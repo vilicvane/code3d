@@ -244,7 +244,122 @@ test('retains topology values at bindings, aliases, and collection results', asy
   assert.equal(binding('repeated').nodeIds.length, 2);
 });
 
+test('parameter previews observe bound values without changing function execution', async () => {
+  const source = `import {box} from '@code3d/core';
+    function strict(part) {
+      'use strict';
+      if (this !== undefined || arguments.length !== 1) throw new Error('function semantics changed');
+      return part;
+    }
+    let reads = 0;
+    const object = {get part() { reads++; return box(10, 10, 10); }};
+    function unpack({part}, [peer], ...remaining) {
+      if (remaining.length !== 1) throw new Error('rest arguments changed');
+      return [strict(part), peer, ...remaining];
+    }
+    const models = unpack(object, [box(20, 20, 20)], box(30, 30, 30));
+    if (reads !== 1) throw new Error('destructuring getter observed twice');
+    const identity = (part = box(40, 40, 40)) => part;
+    models.map(identity);
+    identity();`;
+  const module = await compileProject(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  assert.equal(module.diagnostic, undefined);
+  for (const [binding, context, count, collection] of [
+    ['part', 'function strict(', 1, false],
+    ['part', 'function unpack(', 1, false],
+    ['peer', 'function unpack(', 1, false],
+    ['remaining', 'function unpack(', 1, true],
+    ['part', 'const identity = (', 4, false],
+  ]) {
+    const start = source.indexOf(binding, source.indexOf(context));
+    const target = ModelViewport.prototype.sourceTargetAt.call(
+      {module},
+      '/model.ts',
+      start + 1,
+    );
+    assert.equal(target.kind, 'value');
+    assert.equal(target.sourceRef.start, start);
+    assert.equal(target.sourceRef.end, start + binding.length);
+    assert.equal(target.evaluations.length, count);
+    assert.equal(
+      new Set(target.evaluations.flatMap(evaluation => evaluation.nodeIds))
+        .size,
+      count,
+    );
+    for (const evaluation of target.evaluations) {
+      assert.equal(evaluation.isCollection, collection);
+      assert.equal(evaluation.constraintId, undefined);
+      assert.equal(evaluation.nodeIds.length, 1);
+    }
+  }
+});
+
+for (const compose of [true, false]) {
+  test(`relate model values retain their relation context ${compose ? 'with' : 'without'} a loft consumer`, async () => {
+    const source = `import {box, circle, loft, rectangle} from '@code3d/core';
+      const model = (() => {
+        const ref = box(100, 100, 100);
+        const start = circle(20).relate(circle => circle.on(ref.surface(4)));
+        const end = rectangle(40, 40).relate(circle => circle.on(ref.surface(6)));
+        ${compose ? 'return loft([start, end]);' : ''}
+      })();`;
+    const module = await compileProject(
+      {files: [{path: '/model.ts', source}]},
+      '/model.ts',
+    );
+    assert.equal(module.diagnostic, undefined);
+    for (const id of [4, 6]) {
+      const callback = `circle => circle.on(ref.surface(${id}))`;
+      const callbackStart = source.indexOf(callback);
+      const relation = module.sourceTargets.find(
+        target =>
+          target.kind === 'constraint' &&
+          source.slice(target.sourceRef.start, target.sourceRef.end) ===
+            `circle.on(ref.surface(${id}))`,
+      ).evaluations[0];
+      for (const offset of [
+        callbackStart + 3,
+        callbackStart + 'circle => cir'.length,
+      ]) {
+        const target = ModelViewport.prototype.sourceTargetAt.call(
+          {module},
+          '/model.ts',
+          offset,
+        );
+        assert.equal(target.kind, 'value');
+        assert.equal(target.evaluations.length, 1);
+        const evaluation = target.evaluations[0];
+        assert.deepEqual(evaluation.nodeIds, relation.nodeIds);
+        assert.deepEqual(evaluation.focusNodeIds, [
+          relation.constraintSourceNodeId,
+        ]);
+        assert.equal(evaluation.constraintId, relation.constraintId);
+        assert.equal(sourceTargetPlacement(evaluation), 'composition');
+        assert.deepEqual(
+          target.contextTargetIds,
+          module.sourceTargets.find(
+            candidate =>
+              candidate.kind === 'constraint' &&
+              candidate.evaluations[0] === relation,
+          ).contextTargetIds,
+        );
+      }
+      const focused = module.objects.get(relation.constraintSourceNodeId);
+      assert.ok(
+        focused.compositionTransform.position.some(
+          value => Math.abs(value) > 49,
+        ),
+      );
+      assert.deepEqual(focused.transform.position, [0, 0, 0]);
+    }
+  });
+}
+
 for (const [kind, sourceAnchor, targetAnchor] of [
+  ['model', 'self', 'base'],
   ['edge', 'self.edge(id)', 'base.edge(1)'],
   ['surface', 'self.surface(id)', 'base.surface(1)'],
   ['vertex', 'self.vertex(id)', 'base.vertex(1)'],
@@ -282,11 +397,17 @@ for (const [kind, sourceAnchor, targetAnchor] of [
       const target = ModelViewport.prototype.sourceTargetAt.call(
         {module},
         '/model.ts',
-        source.indexOf(anchor) + anchor.length - 1,
+        source.indexOf(anchor, source.indexOf(`${sourceAnchor}.on(`)) +
+          anchor.length -
+          1,
       );
       assert.equal(
         target.kind,
-        kind === 'named' ? 'element' : 'topology-selection',
+        kind === 'model'
+          ? 'value'
+          : kind === 'named'
+            ? 'element'
+            : 'topology-selection',
       );
       assert.equal(target.evaluations.length, 4);
       assert.equal(new Set(target.evaluations.map(e => e.contextId)).size, 1);
@@ -312,7 +433,7 @@ for (const [kind, sourceAnchor, targetAnchor] of [
             );
         assert.deepEqual(evaluation.focusNodeIds, [owner]);
         assert.equal(sourceTargetPlacement(evaluation), 'composition');
-        if (kind !== 'named') {
+        if (kind !== 'named' && kind !== 'model') {
           assert.equal(evaluation.selection.kind, kind);
           assert.equal(evaluation.selection.inputNodeId, owner);
           assert.deepEqual(evaluation.selection.ids, [
