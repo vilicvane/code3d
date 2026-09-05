@@ -248,6 +248,7 @@ export type ModelSnapshotObject = Readonly<{
   nodeId: string;
   kind: ModelKind;
   name: string;
+  /** Effective color, including recursive overrides from enclosing groups. */
   color?: string;
   children: readonly ModelSnapshotObject[];
   /** Placement used when this snapshot participates in a composition. */
@@ -575,6 +576,7 @@ interface ModelCapabilities<
   expose<const Sources extends ElementSources>(
     sources: Sources,
   ): ModelForFamily<MergedElements<Elements, ExposedElements<Sources>>, Family>;
+  /** Return a recolored value; a group overrides the color of every descendant. */
   paint(color: string): ModelForFamily<Elements, Family>;
 }
 
@@ -1568,7 +1570,9 @@ export class ModelObject<
     meshCache: Map<AnyShape, RenderMesh>,
     solveContext: SolveContext,
     inComposition = false,
+    overrideColor?: string,
   ): ModelSnapshotObject {
+    const color = overrideColor ?? this.color;
     const pose = this.solvePose(solveContext);
     const constraints = this.constraints.map(constraint =>
       this.constraintSnapshot(constraint, solveContext),
@@ -1583,7 +1587,7 @@ export class ModelObject<
       nodeId: this.nodeId,
       kind: this.kind,
       name: this.name,
-      color: this.color,
+      color,
       compositionTransform: toTransform(pose),
       transform: toTransform(inComposition ? pose : identityRigidTransform),
       constraints,
@@ -1599,7 +1603,7 @@ export class ModelObject<
       return {
         ...common,
         children: this.children.map(child =>
-          child.snapshotNode(meshCache, childContext, true),
+          child.snapshotNode(meshCache, childContext, true, color),
         ),
       };
     }

@@ -68,7 +68,8 @@
 - `EdgeModel`：在 VertexModel 能力基础上提供 edge 拓扑选择。
 - `FaceModel`：在 EdgeModel 能力基础上提供 surface 拓扑选择。
 - `SolidModel`：具有全部拓扑选择，并额外提供 `fillet`、`chamfer`。
-- `paint` 是否适用于 group 仍是独立审阅项，本修复不要顺带决定。
+- 能力分层重构时保留了 `paint`；其 group 语义后来由
+  [#31](https://github.com/vilicvane/code3d/issues/31) 确认为递归覆盖整棵子树的颜色。
 
 实现约束：
 
@@ -96,7 +97,10 @@
   具名元素类型。
 - topology、scale、fillet/chamfer 的 `@code3d.param` 注释放在公共能力签名上，App
   继续能从作者实际解析到的 method signature 生成 panel。
-- `paint` 暂时仍属于共同能力，因此 group 上的现有行为不变，等待独立审阅。
+- `paint` 属于共同能力。group 的颜色递归覆盖子模型和内层 group 的已有颜色；
+  未着色的 group 保留子项颜色。覆盖色保存在新的 group 值上，生成子树快照时向下
+  传递，因此成员身份、关系和 expose 引用保持不变，原对象及其他装配中的共享对象
+  不受影响。预览与导出使用相同的有效颜色。
 
 ## 当前状态
 

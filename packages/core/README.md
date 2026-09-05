@@ -22,6 +22,22 @@ contain geometry. Stable topology references can be used as geometric relation a
 `relate()` records placement for composition with other values; inspecting or
 rendering the resulting value by itself keeps its intrinsic local frame.
 
+## Colors
+
+`paint(color)` returns a new model value. On a group, it recursively overrides
+every descendant's color, including already-painted parts and nested groups.
+The outermost painted group wins within that composition; shared parts retain
+their own colors when used elsewhere. Painting the same value again uses the
+latest color. Previews and exports use the same effective colors.
+
+```ts
+import {box, group} from '@code3d/core';
+
+const redPart = box(10, 10, 10).paint('#ff0000');
+const assembly = group([redPart, group([box(4, 4, 4)])]).paint('#345678');
+// Both parts in assembly use #345678; redPart still renders red on its own.
+```
+
 ## Geometric relations
 
 `relate(self => constraint | constraints)` solves the returned relations
