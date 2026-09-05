@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
+import {readFile} from 'node:fs/promises';
+import {renderSamples} from '../render-samples/catalog.ts';
+import {sourceTokenOffset} from '../render-samples/source-focus.ts';
 import {createAppTestServer} from './vite-test-server.mjs';
 import {createTestProjectCompiler} from './project-test-files.mjs';
 import * as THREE from 'three';
@@ -614,6 +617,72 @@ test('compiles the standalone custom primitive example with direct annotations a
     assert.equal(model.operation.kind, 'primitive');
     assert.ok(model.mesh.triangles.length > 0);
   }
+});
+
+for (const sample of renderSamples) {
+  test(`compiles the shared gallery source and focus for ${sample.id}`, async () => {
+    const rootPath = '/examples/' + sample.file;
+    const file = bundledExamples.files.find(file => file.path === rootPath);
+    assert.ok(file, `Gallery source must be bundled in App: ${rootPath}`);
+    const module = await compileProject({files: [file]}, rootPath);
+    assert.equal(module.diagnostic, undefined);
+    const offset = sourceTokenOffset(file.source, sample.focus);
+    assert.ok(
+      module.sourceTargets.some(
+        target =>
+          target.sourceRef.file === rootPath &&
+          target.sourceRef.start <= offset &&
+          target.sourceRef.end > offset &&
+          target.evaluations.some(evaluation => evaluation.nodeIds.length > 0),
+      ),
+      'The gallery image must focus a renderable source context',
+    );
+  });
+}
+
+test('the documented function offers parameter tools and design-time arguments', async () => {
+  const rootPath = '/examples/design-arguments.ts';
+  const file = bundledExamples.files.find(file => file.path === rootPath);
+  const module = await compileProject({files: [file]}, rootPath);
+  assert.equal(module.diagnostic, undefined);
+  const call = exactTargets(module, file.source, 'makeKnob(10, 5, 6)').find(
+    target => target.tool,
+  );
+  assert.ok(call);
+  assert.deepEqual(
+    call.tool.signature.parameters.map(parameter => parameter.name),
+    ['radius', 'height', 'sides'],
+  );
+  assert.deepEqual(call.tool.signature.parameters[2].constraints, {min: 3});
+  assert.deepEqual(
+    module.designArguments.map(context => context.label),
+    ['10, 5, 6', '14, 7, 8'],
+  );
+  for (const context of module.designArguments) {
+    const preview = await compileProject({files: [file]}, rootPath, context.id);
+    assert.equal(preview.diagnostic, undefined);
+    assert.equal(preview.activeDesignContextId, context.id);
+  }
+});
+
+test('the npm documentation example compiles with the installed just-range package', async () => {
+  const document = await readFile(
+    new URL(
+      '../../web/src/content/docs/docs/getting-started/files.md',
+      import.meta.url,
+    ),
+    'utf8',
+  );
+  const source = [...document.matchAll(/\`\`\`ts\n([\s\S]*?)\`\`\`/g)]
+    .map(match => match[1])
+    .find(source => source.includes("from 'just-range'"));
+  assert.ok(source);
+  const module = await compileProject(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  assert.equal(module.diagnostic, undefined);
+  assert.ok(module.fallback);
 });
 
 test('compiles one coil in the bundled primitives showcase without a separate coil example', async () => {

@@ -4,8 +4,8 @@ The code3d authoring runtime. Model projects install this package directly and
 may execute the same ESM TypeScript source in code3d or a supported Node.js
 runtime.
 
-Studio also offers zero-install authoring with built-in core and screws. When
-the project's root `package.json` declares `@code3d/core`, Studio uses the
+The App also offers zero-install authoring with built-in core and screws. When
+the project's root `package.json` declares `@code3d/core`, the App uses the
 project's installed packages exclusively, including their declarations; missing
 dependencies are errors rather than a reason to substitute built-in packages.
 Direct Node execution requires installing the project dependencies.
@@ -103,7 +103,7 @@ created afterward use the updated anchors. `scaled()` retains its existing
 geometric scaling about coordinate zero, including the origin position.
 Groups expose composition capabilities rather than these geometric operations.
 
-In Studio, origin coordinates and offsets have translation arrows; `originVertex`
+In the App, origin coordinates and offsets have translation arrows; `originVertex`
 uses vertex picking and an origin marker. Dragging an `originCenter()` or
 `originVertex()` marker adds or edits an `originOffset()` call. Rotation rings edit the corresponding
 angle about its effective axis, including when other angles are nonzero. Dragging
@@ -185,15 +185,16 @@ is not expanded to recognize primitive factory definitions.
 
 ## Tooling evaluation lifetime
 
-Studio uses the selected runtime's `@code3d/core/tooling` entry, from the project
+The App uses the selected runtime's `@code3d/core/tooling` entry, from the project
 when core is declared or from the built-in package otherwise. Protocol 4
 includes origin and spatial-operation snapshots and requires installing both
-OpenCascade and the constraint solver from that same package dependency graph. Call `beginModelEvaluation(): void` before each serial source
+OpenCascade and the constraint solver from that same package dependency graph.
+Call `beginModelEvaluation(): void` before each serial source
 evaluation to reset source locations, parameter provenance, and operation
 traces. Geometry, model identity, relations, and kernel caches are unaffected.
 Already-created snapshots keep their previous evaluation's metadata.
 
-Packages may retain model values privately. Studio therefore drops its own
+Packages may retain model values privately. The App therefore drops its own
 references after creating snapshots instead of forcibly disposing every model
 it encounters. Unreachable Replicad wrappers release their native resources
 through their finalizers; explicit disposal is appropriate only when the caller

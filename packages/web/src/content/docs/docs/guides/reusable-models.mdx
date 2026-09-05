@@ -33,3 +33,15 @@ can then import it by its normal relative path. The runtime does not require
 a special model declaration wrapper.
 
 Use the editor's completion list to explore the names on the returned model.
+
+## Give callers visual controls
+
+Add `@code3d.param` JSDoc annotations to the function to describe its editable
+parameters. The App can then offer a panel at its call sites, while the
+implementation stays an ordinary TypeScript function.
+See [adding tools to model functions](../model-tools/) for a runnable example
+and design-time previews with `@code3d.arguments`.
+
+If the built-in modeling operations are not enough for a part, a
+[custom primitive](../custom-primitives/) can use Replicad and still return
+a model with the same relation, color, and tool capabilities.
