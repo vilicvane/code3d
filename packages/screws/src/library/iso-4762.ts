@@ -144,7 +144,7 @@ export type CounterboredHoleOptions = Omit<
     counterbore?: true | CounterboreOptions;
   }>;
 
-type SocketCapScrewElements = CanonicalElements &
+export type SocketCapScrewElements = CanonicalElements &
   Readonly<{
     headTop: FaceAnchor;
     headBottom: FaceAnchor;
@@ -153,14 +153,14 @@ type SocketCapScrewElements = CanonicalElements &
     shankAxis: LineAnchor;
   }>;
 
-type SocketCapHoleElements = CanonicalElements &
+export type SocketCapHoleElements = CanonicalElements &
   Readonly<{
     shaftTop: FaceAnchor;
     shaftBottom: FaceAnchor;
     shaftAxis: LineAnchor;
   }>;
 
-type CounterboredSocketCapHoleElements = SocketCapHoleElements &
+export type CounterboredSocketCapHoleElements = SocketCapHoleElements &
   Readonly<{
     counterboreTop: FaceAnchor;
     counterboreBottom: FaceAnchor;
