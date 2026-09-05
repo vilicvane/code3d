@@ -1,0 +1,24 @@
+.c3-arrow,
+.c3-link-arrow::after {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  flex-shrink: 0;
+  vertical-align: -0.125em;
+}
+
+.c3-arrow[data-direction='up'] {
+  transform: rotate(-45deg);
+}
+
+.c3-arrow[data-direction='down-left'] {
+  transform: rotate(180deg);
+}
+
+/* Starlight sidebar labels are text-only; reuse the same SVG as a mask. */
+.c3-link-arrow::after {
+  content: '';
+  margin-inline-start: 0.35em;
+  background-color: currentColor;
+  mask: url('../assets/icons/arrow-up-right.svg') center / contain no-repeat;
+}

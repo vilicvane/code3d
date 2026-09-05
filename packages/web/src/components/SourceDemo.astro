@@ -5,6 +5,7 @@ import {firstModelContexts} from '../../../app/render-samples/catalog';
 import {modelImage} from '../lib/images';
 import {highlightedSource} from '../lib/code';
 import {appUrl} from '../lib/site';
+import ArrowIcon from './ArrowIcon.astro';
 const example = (await getEntry('examples', 'first-model'))!;
 const contexts = await Promise.all(
   firstModelContexts.map(async context => ({
@@ -19,7 +20,7 @@ const contexts = await Promise.all(
     <span><i></i> first-model.ts</span><a
       href={appUrl(example.data.file)}
       target="_blank"
-      rel="noopener">Open this model <span aria-hidden="true">↗</span></a
+      rel="noopener">Open this model <ArrowIcon /></a
     >
   </div>
   <div
@@ -55,7 +56,7 @@ const contexts = await Promise.all(
           <div class="demo-source" set:html={context.html} />
           <div class="demo-model">
             <span class="viewport-label">
-              {context.id === 'model' ? 'model' : context.id} <span>↗</span>
+              {context.id === 'model' ? 'model' : context.id} <ArrowIcon />
             </span>
             <Image
               src={modelImage(
@@ -69,7 +70,12 @@ const contexts = await Promise.all(
               loading={index === 2 ? 'eager' : 'lazy'}
             />
             <span class="viewport-axis" aria-hidden="true">
-              <b>Y</b>↑ &nbsp; Z ↙ &nbsp; ↗ X
+              <>
+                <b>Y</b>
+                <ArrowIcon direction="up" />
+              </>{' '}
+              &nbsp; Z <ArrowIcon direction="down-left" /> &nbsp; <ArrowIcon />{' '}
+              X
             </span>
           </div>
         </div>

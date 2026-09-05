@@ -2,6 +2,7 @@
 import Search from '@astrojs/starlight/components/Search.astro';
 import ThemeSelect from '@astrojs/starlight/components/ThemeSelect.astro';
 import Brand from './Brand.astro';
+import ArrowIcon from './ArrowIcon.astro';
 import {sitePath, appUrl} from '../lib/site';
 ---
 
@@ -11,7 +12,7 @@ import {sitePath, appUrl} from '../lib/site';
   <nav aria-label="Website navigation">
     <a href={sitePath('')}>Home</a>
     <a href={sitePath('examples/')}>Examples</a>
-    <a href={appUrl()} target="_blank" rel="noopener">App ↗</a>
+    <a href={appUrl()} target="_blank" rel="noopener">App <ArrowIcon /></a>
   </nav>
   <div class="docs-theme"><ThemeSelect /></div>
 </div>

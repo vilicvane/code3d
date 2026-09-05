@@ -4,6 +4,7 @@ import {Image} from 'astro:assets';
 import {modelImage} from '../lib/images';
 import {appUrl} from '../lib/site';
 import SourceCode from './SourceCode.astro';
+import ArrowIcon from './ArrowIcon.astro';
 interface Props {
   id: string;
 }
@@ -23,7 +24,7 @@ const {data} = example;
   <figcaption>
     {data.description}
     <a href={appUrl(data.file)} target="_blank" rel="noopener"
-      >Open in Code3D ↗</a
+      >Open in Code3D <ArrowIcon /></a
     >
   </figcaption>
   <SourceCode source={data.source} file={data.file} />

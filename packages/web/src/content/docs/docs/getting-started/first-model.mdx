@@ -4,12 +4,16 @@ description: Make a rounded base and a cylindrical post, then inspect and adjust
 ---
 
 import ModelExample from '../../../../components/ModelExample.astro';
+import ArrowIcon from '../../../../components/ArrowIcon.astro';
 import {appUrl} from '../../../../lib/site';
 
-<a href={appUrl('first-model.ts')} target="_blank" rel="noopener">
-  Open this example in Code3D
-</a>
-. The App opens the same source shown below.
+<p>
+  <a href={appUrl('first-model.ts')} target="_blank" rel="noopener">
+    {'Open this example in Code3D '}
+    <ArrowIcon />
+  </a>
+  {'. The App opens the same source shown below.'}
+</p>
 
 <ModelExample id="first-model" />
 
