@@ -16,7 +16,7 @@ import type {ModelProject} from './project/project';
 import {ModelViewport} from './viewport';
 import './render-image.css';
 
-const sources = import.meta.glob<string>('../examples/website/*.ts', {
+const sources = import.meta.glob<string>('../examples/**/*.ts', {
   query: '?raw',
   import: 'default',
   eager: true,
@@ -32,7 +32,7 @@ const renderProjects: Record<
       files: [
         {
           path: '/' + sample.file,
-          source: sources['../examples/website/' + sample.file]!,
+          source: sources['../examples/' + sample.file]!,
         },
       ],
       focus: sample.focus,

@@ -28,6 +28,9 @@ When that chain does not identify an editable value, the panel can display the
 expression but cannot promise to rewrite it. Edit the source directly in that
 case.
 
+Your own functions can offer the same dimension inputs. See
+[adding tools to model functions](../../guides/model-tools/).
+
 ## Understand feedback
 
 Compilation progress appears near the viewport. Source changes from tools
@@ -47,3 +50,10 @@ Escape closes temporary tool context. Changes already committed to source stay
 in place; use Undo to revert them.
 
 See [selecting topology](../../guides/topology/) for a complete tool workflow.
+
+## Export a model or image
+
+Right-click the viewport and choose **Export model…** for STEP, STL, or 3MF,
+or **Export image…** for PNG. Model export follows the foreground source
+context you are inspecting. See [exporting models](../../guides/exporting/)
+for format, scale, and orientation settings.

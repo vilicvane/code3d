@@ -34,18 +34,17 @@ import {
   frameFromYAxis,
   halfTurnAroundX,
   identityRigidTransform,
-  invertTransform,
   origin,
   quaternionAxisAngle,
   relativeTransform,
   rotation,
   rotationAround,
-  transformsAreEquivalent,
   translation,
   type Quaternion,
   type RigidTransform,
   type Vec3,
 } from './spatial.js';
+import {solveBodies} from './constraint-solver.js';
 import {
   evaluateKernelOperation,
   type KernelArtifact,
@@ -310,7 +309,7 @@ type StoredConstraint = Readonly<{
   source: StoredAnchor;
   target: AnchorReference;
   flipped: boolean;
-  offset: Vec3;
+  offset: Vec3 | undefined;
 }>;
 
 type StoredOperationInput = Readonly<{
@@ -406,7 +405,6 @@ type SolidGeometry = KernelArtifact<
 
 type SolveContext = {
   poses: Map<ModelObject, RigidTransform>;
-  visiting: Set<ModelObject>;
 };
 
 const unitScale: Vec3 = [1, 1, 1];
@@ -436,6 +434,7 @@ const anchorKind = Symbol('anchorKind');
 
 export interface Anchor<Kind extends ElementKind = ElementKind> {
   readonly [anchorKind]: Kind;
+  /** Constrain point, line, plane, or complete-frame geometry. Centering is a preference. */
   on(target: Anchor): Constraint;
 }
 
@@ -749,7 +748,7 @@ export class Constraint {
   private constructor(
     private readonly source: AnchorReference,
     private readonly target: AnchorReference,
-    private readonly displacement: Vec3 = origin,
+    private readonly displacement: Vec3 | undefined = undefined,
     private readonly isFlipped = false,
     private readonly constraintId = `constraint-${nextConstraintId++}`,
     sourceRefs: readonly SourceRef[] = [],
@@ -767,6 +766,8 @@ export class Constraint {
   }
 
   /**
+   * Pin the anchor position to this displacement in the target frame.
+   * Calling offset(0, 0, 0) explicitly requires coincident anchor centers.
    * @code3d.param x {kind: 'length', label: 'ΔX'}
    * @code3d.param y {kind: 'length', label: 'ΔY'}
    * @code3d.param z {kind: 'length', label: 'ΔZ'}
@@ -776,7 +777,7 @@ export class Constraint {
     return new Constraint(
       this.source,
       this.target,
-      addVectors(this.displacement, [x, y, z]),
+      addVectors(this.displacement ?? origin, [x, y, z]),
       this.isFlipped,
       this.constraintId,
       this.sourceRefs,
@@ -984,7 +985,13 @@ export class ModelObject<
   expose<const Sources extends ElementSources>(
     sources: Sources,
   ): RuntimeModel<MergedElements<Elements, ExposedElements<Sources>>, Kind> {
-    const context = createSolveContext();
+    const members = this.memberPoses();
+    const context = ModelObject.createSolveContext([
+      this,
+      ...Object.values(sources)
+        .map(source => anchorReference(source).model)
+        .filter(model => !members.has(model)),
+    ]);
     const ownPose = this.solvePose(context);
     const references: ModelObject[] = [];
     const exposed = Object.fromEntries(
@@ -995,12 +1002,10 @@ export class ModelObject<
           name,
           {
             kind: reference.kind,
-            transform: relativeTransform(
-              composeTransforms(
-                reference.model.solvePose(context),
-                reference.transform,
-              ),
-              ownPose,
+            transform: composeTransforms(
+              members.get(reference.model) ??
+                relativeTransform(reference.model.solvePose(context), ownPose),
+              reference.transform,
             ),
           },
         ];
@@ -1356,25 +1361,18 @@ export class ModelObject<
   toSnapshot(
     meshCache: Map<AnyShape, RenderMesh> = new Map(),
   ): ModelSnapshotObject {
-    const solveContext = createSolveContext();
+    const solveContext = ModelObject.createSolveContext([this]);
     return this.snapshotNode(meshCache, solveContext);
   }
 
   private snapshotNode(
     meshCache: Map<AnyShape, RenderMesh>,
     solveContext: SolveContext,
-    parentPose?: RigidTransform,
+    inComposition = false,
   ): ModelSnapshotObject {
     const pose = this.solvePose(solveContext);
-    const compositionPose = parentPose
-      ? relativeTransform(pose, parentPose)
-      : pose;
     const constraints = this.constraints.map(constraint =>
-      this.constraintSnapshot(
-        constraint,
-        solveContext,
-        parentPose ?? identityRigidTransform,
-      ),
+      this.constraintSnapshot(constraint, solveContext),
     );
     const parameters = uniqueParameters([
       ...this.parameters,
@@ -1387,10 +1385,8 @@ export class ModelObject<
       kind: this.kind,
       name: this.name,
       color: this.color,
-      compositionTransform: toTransform(compositionPose),
-      transform: toTransform(
-        parentPose ? compositionPose : identityRigidTransform,
-      ),
+      compositionTransform: toTransform(pose),
+      transform: toTransform(inComposition ? pose : identityRigidTransform),
       constraints,
       origin: this.intrinsic.transform.position,
       elements: Object.entries(this.elements).map(([name, element]) => ({
@@ -1404,10 +1400,11 @@ export class ModelObject<
     } as const;
 
     if (this.kind === 'group') {
+      const childContext = ModelObject.createSolveContext(this.children);
       return {
         ...common,
         children: this.children.map(child =>
-          child.snapshotNode(meshCache, solveContext, pose),
+          child.snapshotNode(meshCache, childContext, true),
         ),
       };
     }
@@ -1449,7 +1446,10 @@ export class ModelObject<
     ruled: boolean,
   ): SolidModel {
     const sections: readonly ModelObject<{}, 'face'>[] = [this, ...others];
-    const solveContext = createSolveContext();
+    const solveContext = ModelObject.createSolveContext([
+      ...sections,
+      ...(spine ? [spine] : []),
+    ]);
     const resultPose = this.solvePose(solveContext);
     const sectionInputs = sections.map(section => ({
       model: section,
@@ -1565,7 +1565,7 @@ export class ModelObject<
     operation: BooleanOperation,
     others: readonly ModelObject<{}, 'solid'>[],
   ): BooleanEvaluation {
-    const solveContext = createSolveContext();
+    const solveContext = ModelObject.createSolveContext([this, ...others]);
     const targetPose = this.solvePose(solveContext);
     let geometry = this.requireSolidGeometry();
     let temporaryGeometry: SolidGeometry | undefined;
@@ -1650,49 +1650,57 @@ export class ModelObject<
   }
 
   private solvePose(context: SolveContext): RigidTransform {
-    const cached = context.poses.get(this);
-    if (cached) {
-      return cached;
-    }
-    if (context.visiting.has(this)) {
-      throw new Error(`The relations for ${this.name} form a cycle.`);
-    }
-
-    context.visiting.add(this);
-    let pose: RigidTransform | undefined;
-    for (const constraint of this.constraints) {
-      const candidate = this.solveConstraint(constraint, context);
-      if (pose && !transformsAreEquivalent(pose, candidate)) {
-        throw new Error(
-          `The constraints for ${this.name} do not have one consistent solution.`,
-        );
-      }
-      pose = candidate;
-    }
-    pose ??= identityRigidTransform;
-    context.visiting.delete(this);
-    context.poses.set(this, pose);
-    return pose;
+    return context.poses.get(this)!;
   }
 
-  private solveConstraint(
-    constraint: StoredConstraint,
-    context: SolveContext,
-  ): RigidTransform {
-    const targetPose = constraint.target.model.solvePose(context);
-    return composeAll(
-      targetPose,
-      constraint.target.transform,
-      translation(constraint.offset),
-      constraint.flipped ? identityRigidTransform : rotation(halfTurnAroundX),
-      invertTransform(constraint.source.transform),
+  private memberPoses(): Map<ModelObject, RigidTransform> {
+    const members = new Map<ModelObject, RigidTransform>([
+      [this, identityRigidTransform],
+    ]);
+    if (this.children.length) {
+      const context = ModelObject.createSolveContext(this.children);
+      for (const child of this.children) {
+        const pose = child.solvePose(context);
+        for (const [member, localPose] of child.memberPoses()) {
+          members.set(member, composeTransforms(pose, localPose));
+        }
+      }
+    }
+    return members;
+  }
+
+  private static createSolveContext(
+    roots: readonly ModelObject[],
+  ): SolveContext {
+    const models: ModelObject[] = [];
+    const indices = new Map<ModelObject, number>();
+    const collect = (model: ModelObject): void => {
+      if (indices.has(model)) return;
+      indices.set(model, models.length);
+      models.push(model);
+      model.constraints.forEach(constraint => collect(constraint.target.model));
+    };
+    roots.forEach(collect);
+    const poses = solveBodies(
+      models.map(model => ({
+        name: model.name,
+        relations: model.constraints.map(constraint => ({
+          ...constraint,
+          target: {
+            ...constraint.target,
+            body: indices.get(constraint.target.model)!,
+          },
+        })),
+      })),
     );
+    return {
+      poses: new Map(models.map((model, index) => [model, poses[index]])),
+    };
   }
 
   private constraintSnapshot(
     constraint: StoredConstraint,
     context: SolveContext,
-    basis: RigidTransform,
   ): ConstraintSnapshot {
     const targetPose = constraint.target.model.solvePose(context);
     const offsetFrame = composeTransforms(
@@ -1705,8 +1713,8 @@ export class ModelObject<
       source: anchorSnapshot(this, constraint.source),
       target: anchorSnapshot(constraint.target),
       flipped: constraint.flipped,
-      offset: constraint.offset,
-      offsetFrame: toTransform(relativeTransform(offsetFrame, basis)),
+      offset: constraint.offset ?? origin,
+      offsetFrame: toTransform(offsetFrame),
       sourceRefs: [...valueTrace(constraint).sourceRefs],
       parameters: [...valueTrace(constraint).parameters],
     };
@@ -1971,6 +1979,10 @@ export function box(x: number, y: number, z: number): SolidModel {
     geometry: evaluateSolidGeometry('box', [x, y, z], [], () => ({
       shape: makeBox([-x / 2, -y / 2, -z / 2], [x / 2, y / 2, z / 2]),
     })),
+    elements: solidBoundsElements([
+      [0, -y / 2, 0],
+      [0, y / 2, 0],
+    ]),
     operation: storedOperation('box'),
   }) as unknown as SolidModel;
 }
@@ -1988,6 +2000,10 @@ export function cylinder(radius: number, y: number): SolidModel {
     geometry: evaluateSolidGeometry('cylinder', [radius, y], [], () => ({
       shape: makeCylinder(radius, y, [0, -y / 2, 0], [0, 1, 0]),
     })),
+    elements: solidBoundsElements([
+      [0, -y / 2, 0],
+      [0, y / 2, 0],
+    ]),
     operation: storedOperation('cylinder'),
   }) as unknown as SolidModel;
 }
@@ -2039,6 +2055,10 @@ export function tube(
         }
       },
     ),
+    elements: solidBoundsElements([
+      [0, -y / 2, 0],
+      [0, y / 2, 0],
+    ]),
     operation: storedOperation('tube'),
   }) as unknown as SolidModel;
 }
@@ -2154,6 +2174,10 @@ export function sphere(radius: number): SolidModel {
     geometry: evaluateSolidGeometry('sphere', [radius], [], () => ({
       shape: makeSphere(radius),
     })),
+    elements: solidBoundsElements([
+      [0, -radius, 0],
+      [0, radius, 0],
+    ]),
     operation: storedOperation('sphere'),
   }) as unknown as SolidModel;
 }
@@ -2190,6 +2214,10 @@ export function frustum(
         return {shape: bottom.loftWith(top, {ruled: true})};
       },
     ),
+    elements: solidBoundsElements([
+      [0, -y / 2, 0],
+      [0, y / 2, 0],
+    ]),
     operation: storedOperation('frustum'),
   }) as unknown as SolidModel;
 }
@@ -2235,6 +2263,10 @@ export function regularPrism(
         return {shape};
       },
     ),
+    elements: solidBoundsElements([
+      [0, -y / 2, 0],
+      [0, y / 2, 0],
+    ]),
     operation: storedOperation('regularPrism'),
   }) as unknown as SolidModel;
 }
@@ -2989,14 +3021,6 @@ function anchorSnapshot(
 
 function uniqueModels(models: readonly ModelObject[]): ModelObject[] {
   return [...new Set(models)];
-}
-
-function createSolveContext(): SolveContext {
-  return {poses: new Map(), visiting: new Set()};
-}
-
-function composeAll(...transforms: readonly RigidTransform[]): RigidTransform {
-  return transforms.reduce(composeTransforms, identityRigidTransform);
 }
 
 function toTransform(transform: RigidTransform): Transform {

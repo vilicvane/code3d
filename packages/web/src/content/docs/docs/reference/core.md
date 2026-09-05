@@ -8,14 +8,25 @@ provide exact overloads and inferred model interfaces.
 
 ## Solid primitives
 
-| Function                                    | Meaning                              |
-| ------------------------------------------- | ------------------------------------ |
-| `box(x, y, z)`                              | Box dimensions along X, Y, and Z     |
-| `cylinder(radius, y)`                       | Cylinder with its axis along Y       |
-| `sphere(radius)`                            | Sphere of the given radius           |
-| `frustum(bottomRadius, topRadius, y)`       | Truncated cone                       |
-| `regularPrism(radius, y, sides, rotation?)` | Regular polygonal prism              |
-| `helicalThread(options)`                    | Helical solid from thread dimensions |
+| Function                                     | Meaning                           |
+| -------------------------------------------- | --------------------------------- |
+| `box(x, y, z)`                               | Box dimensions along X, Y, and Z  |
+| `cylinder(radius, y)`                        | Cylinder with its axis along Y    |
+| `sphere(radius)`                             | Sphere of the given radius        |
+| `frustum(bottomRadius, topRadius, y)`        | Truncated cone                    |
+| `regularPrism(radius, y, sides, rotation?)`  | Regular polygonal prism           |
+| `tube(outerRadius, innerRadius, y)`          | Straight tube with a through bore |
+| `coil(coilRadius, wireRadius, pitch, turns)` | Circular-wire coil along Y        |
+
+Tubes are centered on Y; the inner radius must be smaller than the outer
+radius. For coils, `coilRadius` is measured to the wire centerline and
+`pitch` is the advance per turn. Fractional turns are supported; the wire
+must fit inside the coil radius and neighboring turns must remain separated.
+Use [`@code3d/screws`](../screws/) for standard fasteners and matching hole tools.
+
+To build a solid beyond these primitives, import `definePrimitive` and
+`replicad` from `@code3d/core/replicad`. See
+[custom primitives](../../guides/custom-primitives/) for a complete example.
 
 ## Profiles and curves
 
@@ -99,9 +110,21 @@ three rotation rings follow the axes of the corresponding angle parameters.
 Solid primitives expose `center`, `top`, `bottom`, and `axis`. Profiles,
 curves, and other geometry provide elements suited to their own shape.
 
-Use `selfAnchor.on(targetAnchor)` to relate complete frames.
-`.flip()` changes orientation, and `.offset(x, y, z)` adjusts the relation
-in the target frame.
+Use `selfAnchor.on(targetAnchor)` to constrain geometry. Points coincide,
+lines become collinear, and faces become coplanar with opposing normals.
+Mixed dimensions constrain a point to a line or plane, or a line to a plane.
+Solid and group intrinsic anchors constrain the complete frame.
+
+Return an array from `relate()` to combine conditions. Default centering and
+orientation choose among valid solutions; they do not force every anchor's
+center to coincide. `.flip()` selects aligned face normals or reverses a line's
+preferred direction. An explicit `.offset(x, y, z)` pins the source anchor
+position in the target frame, even when all three values are zero.
+
+Line and face anchors describe infinite reference lines and planes, including
+the sampled reference frames of curved topology. They do not require the
+finite boundaries of two shapes to match. Related groups move their assembled
+children as rigid bodies.
 
 ## Topology
 
@@ -111,5 +134,7 @@ in the target frame.
 IDs are model-local. See [topology selection](../../guides/topology/) for
 selection behavior and derived-model identity.
 
-Numeric values use a consistent coordinate scale. UI unit labels are metadata;
-they do not perform runtime unit conversion.
+Model dimensions use a consistent coordinate scale. When
+[exporting](../../guides/exporting/#scale-and-orientation), choose how many
+millimeters each model unit represents. This scales the output without changing
+the source model.

@@ -4,8 +4,8 @@ The code3d authoring runtime. Model projects install this package directly and
 may execute the same ESM TypeScript source in code3d or a supported Node.js
 runtime.
 
-Studio also offers zero-install authoring with built-in core and screws. When
-the project's root `package.json` declares `@code3d/core`, Studio uses the
+The App also offers zero-install authoring with built-in core and screws. When
+the project's root `package.json` declares `@code3d/core`, the App uses the
 project's installed packages exclusively, including their declarations; missing
 dependencies are errors rather than a reason to substitute built-in packages.
 Direct Node execution requires installing the project dependencies.
@@ -18,7 +18,7 @@ renderable, and relation-aware. Topology capabilities follow dimension:
 vertices provide `.vertex(id)`, edges add `.edge(id)`, and faces and solids
 add `.surface(id)`; only solids provide `fillet` and `chamfer`. Groups retain
 the common relation, expose, and paint capabilities without pretending to
-contain geometry. Stable topology references can be used as complete relation anchors.
+contain geometry. Stable topology references can be used as geometric relation anchors.
 `relate()` records placement for composition with other values; inspecting or
 rendering the resulting value by itself keeps its intrinsic local frame.
 
@@ -56,6 +56,51 @@ Deleted IDs may therefore be reused; downstream references are not automatically
 rewritten. Constraint solving, trimming and conversion to faces/solids are not
 part of this initial point/line API. See the [sketch example](../app/examples/sketches.ts).
 
+## Geometric relations
+
+`relate(self => constraint | constraints)` solves the returned relations
+together. `on()` constrains geometry according to the anchors:
+
+| Anchors                           | Hard condition                                       |
+| --------------------------------- | ---------------------------------------------------- |
+| Point / point                     | Coincident points                                    |
+| Point / line or face              | Point lies on the reference line or plane            |
+| Line / line                       | Collinear reference lines                            |
+| Line / face                       | Reference line lies in the plane                     |
+| Face / face                       | Coincident planes with opposing normals              |
+| Either anchor is a complete frame | Coincident complete frames with opposing orientation |
+
+Centers and default orientation select among geometrically valid poses;
+they do not add hard conditions. Face `.flip()` selects aligned normals.
+Line directions are geometrically unoriented; `.flip()` reverses the preferred
+direction. Point anchors do not impose orientation. An explicit
+`.offset(x, y, z)` pins the source anchor position to that point in the target
+anchor's frame, including `.offset(0, 0, 0)`. Repeated offsets add together.
+
+```ts
+import {box, group} from '@code3d/core';
+
+const first = box(10, 10, 10);
+const second = box(20, 20, 20).relate(self => [
+  self.edge(3).on(first.edge(1)),
+  self.top.on(first.bottom),
+]);
+export default group([first, second]);
+```
+
+Here the second box is placed at `[5, -15, 0]`. A line anchor represents its
+infinite reference line, and a face anchor represents its reference plane;
+this does not require finite edges or face boundaries to match. Curved
+topology retains the sampled tangent/normal reference frame rather than
+constraining complete curves or surfaces to coincide.
+
+Related objects are solved together at composition, Boolean, and loft
+boundaries. Models without relations provide fixed references. Each group's
+children are solved in its local space, so relating the group moves the
+assembled children as one rigid body. `expose()` rebinds member anchors into
+that local space. The backend is [`@code3d/solver`](../solver/README.md);
+an unsatisfied local solve is reported without claiming proof of infeasibility.
+
 ## Origins and rotation
 
 Geometric models (solids, faces, curves, and points) support immutable origin
@@ -92,7 +137,7 @@ created afterward use the updated anchors. `scaled()` retains its existing
 geometric scaling about coordinate zero, including the origin position.
 Groups expose composition capabilities rather than these geometric operations.
 
-In Studio, origin coordinates and offsets have translation arrows; `originVertex`
+In the App, origin coordinates and offsets have translation arrows; `originVertex`
 uses vertex picking and an origin marker. Dragging an `originCenter()` or
 `originVertex()` marker adds or edits an `originOffset()` call. Rotation rings edit the corresponding
 angle about its effective axis, including when other angles are nonzero. Dragging
@@ -174,15 +219,17 @@ is not expanded to recognize primitive factory definitions.
 
 ## Tooling evaluation lifetime
 
-Studio uses the selected runtime's `@code3d/core/tooling` entry, from the project
-when core is declared or from the built-in package otherwise. Protocol 4
+The App uses the selected runtime's `@code3d/core/tooling` entry, from the project
+when core is declared or from the built-in package otherwise. Protocol 5
 adds sketch definitions and layer snapshots to the origin and spatial-operation
-snapshots, alongside `beginModelEvaluation(): void`: call it before each serial source
+snapshots, and requires installing both
+OpenCascade and the constraint solver from that same package dependency graph.
+Call `beginModelEvaluation(): void` before each serial source
 evaluation to reset source locations, parameter provenance, and operation
 traces. Geometry, model identity, relations, and kernel caches are unaffected.
 Already-created snapshots keep their previous evaluation's metadata.
 
-Packages may retain model values privately. Studio therefore drops its own
+Packages may retain model values privately. The App therefore drops its own
 references after creating snapshots instead of forcibly disposing every model
 it encounters. Unreachable Replicad wrappers release their native resources
 through their finalizers; explicit disposal is appropriate only when the caller

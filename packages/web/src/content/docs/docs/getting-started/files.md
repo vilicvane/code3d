@@ -53,6 +53,34 @@ Other browser-compatible npm packages resolve from the project's `node_modules`
 in either case. Running the same source directly in Node requires installing
 the project dependencies; Node does not have the App's built-in package view.
 
+For example, install a browser-compatible utility in your own project directory:
+
+```bash
+npm install just-range
+```
+
+Open that folder in the App (or choose **Reload folder** if it is already open),
+then use the package in a TypeScript file:
+
+```ts
+import range from 'just-range';
+import {box, group} from '@code3d/core';
+
+const base = box(50, 4, 16);
+const posts = range(3).map(index =>
+  box(6, 10, 6).relate(part =>
+    part.bottom.on(base.top).offset((index - 1) * 16, 0, 0),
+  ),
+);
+
+group([base, ...posts]);
+```
+
+The App reads installed package code and declarations for execution and editor
+types. It does not run `npm install` for you. A package working in Node alone
+does not make it browser-compatible; Node built-ins and native addons are not
+available.
+
 ## The examples directory
 
 `/examples` is managed by Code3D. **Reset examples** restores it, and a

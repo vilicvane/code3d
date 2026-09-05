@@ -155,6 +155,13 @@ compiler 为每个实际进入的 call site execution 统一记录完成或失�
 失败生命周期。fillet/chamfer 因而可在操作失败时使用已求值的 receiver、实际边数组和
 尺寸参数继续工作；不可用于 receiver 的失效 ID 不进入 GUI 选择，下一次写回即可清除。
 
+receiver 与参数中的模型值按实际求值自动记录，不按建模 API 名称登记。数组和选项对象
+字面量保留成员各自的源码范围；变量和展开表达式也可携带模型集合。输入角色由运行时
+operation 的输入记录关联，因此导入别名、namespace 调用和计算属性方法共用同一路径。
+没有对应 operation 或调用失败时，已取得的输入仍可作为模型值预览；同一源码位置的多次
+执行保留各自的输入，采用最近触达的值。追踪不主动读取 getter。空间手柄仍由 operation
+metadata 和参数 provenance 定义轴、pivot 与编辑语义。
+
 带工具注释的调用即使在产生模型值之前失败，也会发布独立的 tool source target。有效调用
 严格采用 TypeScript 实际匹配的重载；没有重载可匹配时，优先保留 TypeScript 的带注释
 恢复候选，否则按声明顺序选择第一个带注释的候选。候选恢复只接受落在当前 callee 或其

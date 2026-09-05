@@ -1,15 +1,37 @@
 import {fileURLToPath} from 'node:url';
 import {readFile} from 'node:fs/promises';
+import {statSync} from 'node:fs';
 import path from 'node:path';
 import {defineConfig} from 'vite';
 import {browserPackages} from './build/browser-packages.ts';
 
 const packageDirectory = path.dirname(fileURLToPath(import.meta.url));
+const primaryDevelopmentPort = 0xc3d;
 
 export default defineConfig({
   base: './',
   publicDir: '../../assets/brand',
+  server: {port: primaryDevelopmentPort, strictPort: true},
   plugins: [
+    {
+      name: 'code3d-development-port',
+      configResolved(config) {
+        if (
+          config.command === 'serve' &&
+          !config.isPreview &&
+          !config.server.middlewareMode &&
+          config.server.port === primaryDevelopmentPort &&
+          statSync(path.resolve(packageDirectory, '../../.git'), {
+            throwIfNoEntry: false,
+          })?.isFile()
+        ) {
+          throw new Error(
+            'Port 3133 (0xc3d) is reserved for the primary worktree. ' +
+              'Reserve another port with coordination.py reserve-port, then start Vite with --port <port>.',
+          );
+        }
+      },
+    },
     browserPackages(path.resolve(packageDirectory, '../..')),
     {
       name: 'code3d-license',

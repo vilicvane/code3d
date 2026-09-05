@@ -2,6 +2,9 @@
 
 The expressive power of code, with the immediacy of direct manipulation.
 
+[Open App](https://www.code3d.org/app/) · [Website](https://www.code3d.org/) ·
+[Documentation](https://www.code3d.org/docs/)
+
 Code3D is a solid modeler where TypeScript and the viewport form one continuous
 interface. Use code to define precise, reusable models, and interact directly
 with the geometry whenever space is easier to work with visually.
@@ -18,6 +21,8 @@ TypeScript, so the model never splits into code and hidden UI state.
 - Select topology, position parts, and adjust parameters directly in the
   viewport.
 - Keep every durable change in source, ready to read, diff, test, and reuse.
+- Work in your own project folder with browser-compatible npm packages.
+- Export the model you are inspecting as STEP, STL, or 3MF.
 
 Code3D evaluates precise B-Rep geometry with OpenCascade and exposes typed
 points, edges, faces, and frames for reusable model APIs.
@@ -41,6 +46,8 @@ the same source.
 
 ## Run locally
 
+To develop Code3D locally, use Node.js 24 and npm:
+
 ```bash
 git clone https://github.com/vilicvane/code3d.git
 cd code3d
@@ -48,11 +55,17 @@ npm install
 npm run dev
 ```
 
+The App uses [localhost:3133](http://localhost:3133) (`0xc3d`) by default.
+This port is reserved for the primary worktree. Linked development worktrees
+must [reserve a separate port](.agents/skills/worktree-development/SKILL.md#独立开发服务器)
+and pass it explicitly, for example `npm run dev -- --port 5174`.
+The server fails if its selected port is already in use.
+
 ## Project status
 
 Code3D is currently Prototype 01. APIs and project behavior are still evolving.
-See [PROTOTYPE.md](./PROTOTYPE.md) for the detailed capability snapshot and
-[DESIGN.md](./DESIGN.md) for the product direction.
+See the [current capabilities and limitations](https://www.code3d.org/docs/reference/limitations/)
+before depending on it for an existing workflow.
 
 ## License
 

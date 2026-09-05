@@ -1,4 +1,5 @@
 import booleanOperationsSource from '../../examples/boolean-operations.ts?raw';
+import combinedConstraintsSource from '../../examples/combined-constraints.ts?raw';
 import customPrimitivesSource from '../../examples/custom-primitives.ts?raw';
 import designArgumentsSource from '../../examples/design-arguments.ts?raw';
 import fastenersSource from '../../examples/fasteners.ts?raw';
@@ -21,6 +22,10 @@ const files = [
   {path: '/examples/sketches.ts', source: sketchesSource},
   {path: '/examples/origin-and-rotation.ts', source: originAndRotationSource},
   {path: '/examples/custom-primitives.ts', source: customPrimitivesSource},
+  {
+    path: '/examples/combined-constraints.ts',
+    source: combinedConstraintsSource,
+  },
   {
     path: '/examples/boolean-operations.ts',
     source: booleanOperationsSource,

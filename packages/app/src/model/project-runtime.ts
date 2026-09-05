@@ -37,7 +37,16 @@ export class ProjectRuntime {
     const replicadPath = await resolve('replicad', toolingPath);
     const loaderPath = await resolve('replicad-opencascadejs', toolingPath);
     const wasmPath = await resolve('replicad-opencascadejs/wasm', toolingPath);
-    const entry = [toolingPath, corePath, interopPath, loaderPath, replicadPath]
+    const solverLoaderPath = await resolve('@code3d/solver', toolingPath);
+    const solverWasmPath = await resolve('@code3d/solver/wasm', toolingPath);
+    const entry = [
+      toolingPath,
+      corePath,
+      interopPath,
+      loaderPath,
+      replicadPath,
+      solverLoaderPath,
+    ]
       .map(
         (path, index) =>
           `export * as entry${index} from ${JSON.stringify(path)};`,
@@ -57,7 +66,7 @@ export class ProjectRuntime {
         .map((path, index) => `[${JSON.stringify(path)}, module${index}]`)
         .join(',')}]);
       export const tooling = modules.get(${JSON.stringify(toolingPath)});
-      if (tooling.toolingProtocolVersion !== 4) {
+      if (tooling.toolingProtocolVersion !== 5) {
         throw new Error('This installed @code3d/core tooling protocol is not supported by this Studio.');
       }
       const initialize = modules.get(${JSON.stringify(loaderPath)}).default;
@@ -66,28 +75,35 @@ export class ProjectRuntime {
         locateFile: () => ${JSON.stringify(wasmPath)},
       });
       tooling.installOpenCascade(kernel);
+      const initializeSolver = modules.get(${JSON.stringify(solverLoaderPath)}).default;
+      tooling.installConstraintSolver(await initializeSolver({
+        wasmBinary: __code3dSolverBytes,
+        locateFile: () => ${JSON.stringify(solverWasmPath)},
+        print() {},
+        printErr() {},
+      }));
     `;
-    try {
-      const [bundle, wasm] = await Promise.all([
-        builder.build(runtimeSource),
-        files.readFile(wasmPath),
-      ]);
-      if (!wasm)
-        throw new Error(`Installed kernel asset is missing: ${wasmPath}`);
-      const runtime = await evaluator.evaluate(runtimeUrl, bundle.source, {
-        __code3dKernelBytes: wasm,
-      });
-      return new ProjectRuntime(
-        runtime.tooling,
-        runtime.modules.get(replicadPath),
-        runtime.modules,
-        new Map(discovery.formats),
-        evaluator,
-        builder,
-      );
-    } catch (error) {
-      throw error;
-    }
+    const [bundle, wasm, solverWasm] = await Promise.all([
+      builder.build(runtimeSource),
+      files.readFile(wasmPath),
+      files.readFile(solverWasmPath),
+    ]);
+    if (!wasm)
+      throw new Error(`Installed kernel asset is missing: ${wasmPath}`);
+    if (!solverWasm)
+      throw new Error(`Installed solver asset is missing: ${solverWasmPath}`);
+    const runtime = await evaluator.evaluate(runtimeUrl, bundle.source, {
+      __code3dKernelBytes: wasm,
+      __code3dSolverBytes: solverWasm,
+    });
+    return new ProjectRuntime(
+      runtime.tooling,
+      runtime.modules.get(replicadPath),
+      runtime.modules,
+      new Map(discovery.formats),
+      evaluator,
+      builder,
+    );
   }
 
   dispose(): void {

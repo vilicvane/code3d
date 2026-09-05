@@ -8,10 +8,11 @@
     "3": "npm install && npm dedupe && npm install",
     "clean": "rimraf dist --glob packages/*/{.cache,bld,dist}",
     "build:packages": "tsc --build",
+    "build:solver": "npm run build --workspace @code3d/solver",
     "build": "npm run lint-prettier && npm run clean && npm run build:packages && npm run build --workspace @code3d/app && npm run build --workspace @code3d/web",
     "render:web-images": "npm run render-images --workspace @code3d/web",
     "deploy": "node packages/web/scripts/check-site.mjs && wrangler deploy",
-    "dev": "npm run build:packages && npm run dev --workspace @code3d/app",
+    "dev": "npm run build:packages && npm run dev --workspace @code3d/app --",
     "lint-prettier": "prettier --check .",
     "format": "prettier --write .",
     "app": "npm run --workspace @code3d/app",
@@ -22,6 +23,7 @@
   "workspaces": [
     "packages/app",
     "packages/core",
+    "packages/solver",
     "packages/screws",
     "packages/web"
   ],

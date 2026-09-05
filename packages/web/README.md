@@ -22,7 +22,9 @@ browser. The renderer closes its own pages and leaves that browser running.
 
 - User documentation: `src/content/docs/docs/` (the inner directory is the
   `/docs/` URL prefix).
-- Executable examples: `../app/examples/website/`.
+- Executable examples: `../app/examples/`. The shared catalog stores paths
+  relative to this directory, including both website examples and existing
+  App examples; do not copy a model just to add it to the gallery.
 - Example metadata and source contexts: `../app/render-samples/catalog.ts`.
 - Generated model images: `src/assets/models/`. Regenerate after changing
   examples, source contexts, or the renderer; CI regenerates them on every build.

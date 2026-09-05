@@ -13,17 +13,14 @@ const examples = defineCollection({
       const paths = new Map(
         renderSamples.map(sample => [
           fileURLToPath(
-            new URL(
-              `../../app/examples/website/${sample.file}`,
-              import.meta.url,
-            ),
+            new URL(`../../app/examples/${sample.file}`, import.meta.url),
           ),
           sample,
         ]),
       );
       const loadFile = async (filePath: string) => {
         const sample = paths.get(filePath)!;
-        const relativePath = `../app/examples/website/${sample.file}`;
+        const relativePath = `../app/examples/${sample.file}`;
         const data = await parseData({
           id: sample.id,
           filePath: relativePath,
