@@ -1,3 +1,11 @@
+export {sketch} from './sketch.js';
+export type {
+  Sketch,
+  SketchEntry,
+  SketchPoint,
+  SketchPosition,
+} from './sketch.js';
+
 export {
   arc,
   bezier,

@@ -16,6 +16,7 @@ import {
   rectangle,
   regularPolygon,
   regularPrism,
+  sketch,
   spline,
   sphere,
   tube,
@@ -67,6 +68,21 @@ import {definePrimitive as rootDefinePrimitive} from '../bld/library/index.js';
 import type {Shape3D as RootShape3D} from '../bld/library/index.js';
 
 const solid = box(10, 5, 8);
+const sketchValue = sketch([
+  ['point', 1, [0, 0]],
+  ['point', 2, [10, 0]],
+  ['line', 3, [1, 2]],
+]);
+sketchValue.derive([
+  ['point', 1, [0, 5]],
+  ['line', 2, [sketchValue.point(2), 1]],
+]);
+// @ts-expect-error Point coordinates are a nested two-number tuple.
+sketch([['point', 1, 0, 0]]);
+// @ts-expect-error There is no persistent nextId item.
+sketch([['point', 1, [0, 0]], 2]);
+// @ts-expect-error A line has exactly two point references.
+sketch([['line', 3, [1, 2, 4]]]);
 const related = solid.relate(self => self.center.on(solid.top).flip());
 const exposed = related.expose({mount: related.bottom});
 const constraint: Constraint = exposed.mount.on(solid.center).offset(1, 2, 3);

@@ -72,6 +72,8 @@ import {
   type VertexId,
 } from './topology.js';
 
+import {sketch} from './sketch.js';
+
 export type {Quaternion, Vec3} from './spatial.js';
 export type {EdgeId, SurfaceId, TopologyKind, VertexId} from './topology.js';
 
@@ -2484,6 +2486,7 @@ export function retainModelGeometry(
 }
 
 export const authoringApi = Object.freeze({
+  sketch,
   circle,
   ellipse,
   rectangle,

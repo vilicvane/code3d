@@ -18,6 +18,7 @@ import {
   originSourceDecoration,
 } from './model/origin-decorations';
 import {spatialIntent} from './tools/model-spatial-tool';
+import {SketchEditorController} from './tools/sketch-editor-controller';
 import {bundledExamples} from './project/bundled-examples';
 import {defaultProject} from './project/default-project';
 import {
@@ -442,6 +443,14 @@ const toolEngine = new ToolEngine({
   commitPreview: preview => commitToolPreview(preview),
   clearPreview: (preview, reason) => clearToolPreview(preview, reason),
 });
+const sketchEditor = new SketchEditorController(viewportHost, {
+  readSource: ref => {
+    const current = codeEditor.resolveSourceRef(ref);
+    return current && codeEditor.readSource(current);
+  },
+  commit: intent =>
+    commitToolSession(toolEngine.begin(`sketch:${intent.layer}`), intent),
+});
 
 codeEditor.onChange(change => {
   const toolChange = change.kind === 'content' && change.origin === 'tool';
@@ -451,6 +460,7 @@ codeEditor.onChange(change => {
   const editingHistoryChange =
     historyChange && handleContextualEditingHistory(change);
   if (!toolChange && !editingHistoryChange) abandonContextualTool();
+  if (!toolChange) sketchEditor.invalidate();
   persistProjectChange(projectFileSystem, change);
   if (!toolChange) sourceEditPopover.dismiss();
   if (change.kind !== 'content') renderProjectNavigation();
@@ -495,6 +505,7 @@ codeEditor.onEditorActivation(cursor => {
 });
 codeEditor.onActiveFile((path, reason) => {
   finishContextualTool();
+  sketchEditor.hide();
   renderProjectNavigation();
   if (!applyingFileRoute) updateFileRoute(path, reason);
   preferredEvaluationContextId = undefined;
@@ -1299,6 +1310,16 @@ function renderCurrentPanels(): void {
 }
 
 function syncContextualTool(sourceTargetFocused = true): void {
+  if (!sourceTargetFocused) sketchEditor.hide();
+  else if (
+    currentModule &&
+    currentModuleSourceVersion === codeEditor.sourceVersion()
+  ) {
+    sketchEditor.show(
+      viewport.sourceEvaluation()?.evaluation.sketchIds?.[0],
+      currentModule.sketches,
+    );
+  }
   if (!sourceTargetFocused) {
     finishContextualTool();
     return;
@@ -2289,6 +2310,9 @@ function commitToolSession(
 
 function toolSourceRefs(module: ModelModule): SourceRef[] {
   const refs = [
+    ...[...module.sketches.values()].flatMap(sketch =>
+      sketch.definitionRef ? [sketch.definitionRef] : [],
+    ),
     ...module.sourceTargets.flatMap(target => [
       target.sourceRef,
       ...(target.receiverRef ? [target.receiverRef] : []),

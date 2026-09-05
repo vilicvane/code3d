@@ -22,6 +22,40 @@ contain geometry. Stable topology references can be used as complete relation an
 `relate()` records placement for composition with other values; inspecting or
 rendering the resulting value by itself keeps its intrinsic local frame.
 
+## Editable sketches
+
+Sketches are immutable 2D definitions, separate from geometric models and B-Reps:
+
+```ts
+import {sketch} from '@code3d/core';
+
+const sketch1 = sketch([
+  ['point', 1, [0, 0]],
+  ['point', 2, [30, 0]],
+  ['line', 3, [1, 2]],
+]);
+const sketch2 = sketch1.derive([
+  ['point', 1, [10, 20]],
+  ['line', 2, [sketch1.point(2), 1]],
+]);
+```
+
+Each tuple is `[kind, ID, data]`. Numeric line endpoints name local points;
+`sketch1.point(id)` names a point owned by an upstream layer. Each layer has an
+independent positive-integer ID space shared by points and lines. Definitions
+may be empty, open, or contain crossing lines; crossings do not automatically
+split entities. Missing point references are errors.
+
+In Studio, select a sketch expression or variable to open its 2D editor. Add
+points or lines, drag literal-coordinate points, and delete local entities.
+Deleting a point also deletes connected local lines. Upstream geometry stays
+locked but can supply endpoints for new lines. Coordinates using expressions
+remain editable in code, not by dragging. The editor preserves existing IDs and
+allocates new IDs from the current local maximum, without `nextId` metadata.
+Deleted IDs may therefore be reused; downstream references are not automatically
+rewritten. Constraint solving, trimming and conversion to faces/solids are not
+part of this initial point/line API. See the [sketch example](../app/examples/sketches.ts).
+
 ## Origins and rotation
 
 Geometric models (solids, faces, curves, and points) support immutable origin
@@ -141,8 +175,9 @@ is not expanded to recognize primitive factory definitions.
 ## Tooling evaluation lifetime
 
 Studio uses the selected runtime's `@code3d/core/tooling` entry, from the project
-when core is declared or from the built-in package otherwise. Protocol 3
-includes origin and spatial-operation snapshots as well as `beginModelEvaluation(): void`: call it before each serial source
+when core is declared or from the built-in package otherwise. Protocol 4
+adds sketch definitions and layer snapshots to the origin and spatial-operation
+snapshots, alongside `beginModelEvaluation(): void`: call it before each serial source
 evaluation to reset source locations, parameter provenance, and operation
 traces. Geometry, model identity, relations, and kernel caches are unaffected.
 Already-created snapshots keep their previous evaluation's metadata.

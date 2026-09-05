@@ -57,7 +57,7 @@ export class ProjectRuntime {
         .map((path, index) => `[${JSON.stringify(path)}, module${index}]`)
         .join(',')}]);
       export const tooling = modules.get(${JSON.stringify(toolingPath)});
-      if (tooling.toolingProtocolVersion !== 3) {
+      if (tooling.toolingProtocolVersion !== 4) {
         throw new Error('This installed @code3d/core tooling protocol is not supported by this Studio.');
       }
       const initialize = modules.get(${JSON.stringify(loaderPath)}).default;

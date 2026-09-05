@@ -2,6 +2,17 @@ import {setOC} from 'replicad';
 import type {OpenCascadeInstance} from 'replicad-opencascadejs';
 import {clearKernelOperationCache} from '../library/kernel-cache.js';
 
+export {isSketch, sketchDefinition, snapshotSketch} from '../library/sketch.js';
+export type {
+  Sketch,
+  SketchEntry,
+  SketchPosition,
+  SketchPointAddress,
+  SketchPointSnapshot,
+  SketchLineSnapshot,
+  SketchSnapshot,
+} from '../library/sketch.js';
+
 export {
   authoringApi,
   beginModelEvaluation,
@@ -67,7 +78,7 @@ export type {
 } from '../library/topology.js';
 export {describeOpenCascadeException} from '../library/open-cascade-error.js';
 
-export const toolingProtocolVersion = 3;
+export const toolingProtocolVersion = 4;
 
 export function installOpenCascade(openCascade: OpenCascadeInstance): void {
   clearKernelOperationCache();

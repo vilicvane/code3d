@@ -18,6 +18,15 @@ implementation context and historical outcomes, not a competing work queue.
   use the GUI much more broadly because it does not create a second editable
   source of truth.
 - Source code is the only persistent model state. GUI changes write back to it.
+- Sketches use explicit `[kind, ID, data]` tuples: point data is `[x, y]`,
+  line data is `[startPoint, endPoint]`. `base.derive([...])` retains locked
+  upstream layers; local numeric point IDs and named `base.point(id)` handles
+  distinguish ownership. IDs are independent per layer; new editor entries use
+  local max + 1, without persistent `nextId` or renumbering surviving entries.
+  Selecting a sketch opens a 2D point/line editor. Literal coordinates can be
+  dragged; expression-driven coordinates stay source-edited. The first editor
+  does not infer regions, generate B-Reps, solve constraints, or trim crossings.
+  See [#23](https://github.com/vilicvane/code3d/issues/23).
 - Author code remains ordinary JavaScript/TypeScript and may freely construct,
   reuse, copy, collect, and derive model values.
 - A real code3d project is an ordinary Node/TypeScript package that owns its
