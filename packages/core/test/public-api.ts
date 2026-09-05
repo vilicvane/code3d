@@ -296,3 +296,38 @@ solid.originCenter(1, 2, 3);
 const curveCenter: PointAnchor = edgeModel.center;
 const pointCenter: PointAnchor = vertexModel.center;
 void [curveCenter, pointCenter];
+
+const geometricMembers = group([
+  solid,
+  faceModel,
+  edgeModel,
+  vertexModel,
+]).expose({
+  body: solid,
+  profile: faceModel,
+  path: edgeModel,
+  location: vertexModel,
+  mount: surface,
+  rim: edge,
+});
+const exposedSolid: import('@code3d/core').Solid = geometricMembers.body;
+const exposedSurface: Surface = geometricMembers.profile;
+const exposedEdge: Edge = geometricMembers.path;
+const exposedVertex: Vertex = geometricMembers.location;
+const nested = group([geometricMembers]).expose({component: geometricMembers});
+const rebound = group([nested]).expose({component: nested.component});
+rebound.component.body.surface(1).center;
+geometricMembers.body.surface(1).edge(1).vertex(1).center;
+geometricMembers.mount.edges();
+geometricMembers.rim.midpoint;
+geometricMembers.body.top.on(solid.bottom);
+geometricMembers.relate(self => self.mount.center.on(solid.center));
+// @ts-expect-error Exposed geometry is a topology reference, not a mutable member model.
+geometricMembers.body.fillet(1);
+// @ts-expect-error Topology references do not expose model transforms.
+geometricMembers.path.rotate(0, 90, 0);
+// @ts-expect-error Vertices do not contain edges.
+geometricMembers.location.edge(1);
+// @ts-expect-error An ordinary plane anchor has no topological boundary.
+solid.top.edges();
+void [exposedSolid, exposedSurface, exposedEdge, exposedVertex];

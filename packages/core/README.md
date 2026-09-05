@@ -67,6 +67,48 @@ assembled children as one rigid body. `expose()` rebinds member anchors into
 that local space. The backend is [`@code3d/solver`](../solver/README.md);
 an unsatisfied local solve is reported without claiming proof of infeasibility.
 
+## Exposed geometry and topology
+
+`expose()` preserves geometry as a reference in the returned model's frame.
+A solid, face, edge, or vertex model becomes a `Solid`, `Surface`, `Edge`, or
+`Vertex` reference. Existing topology references retain their identity; pure
+point, line, plane, and frame anchors retain their reference-geometry meaning.
+Named members remain available, including on an exposed group frame.
+An exposed face, edge, or vertex uses the same relation frame as its topology
+accessor, independent of a custom model origin. A whole solid retains its model
+frame for complete-frame relations.
+
+```ts
+const plate = box(32, 4, 24);
+const assembly = group([plate]).expose({body: plate, mount: plate.surface(1)});
+const boundary = assembly.mount.edges();
+const corners = boundary[0].vertices();
+const center = assembly.mount.center;
+```
+
+References support geometric queries and `on()`. They do not have model
+operations such as `rotate`, `scaled`, `fillet`, or `relate`. A relation authored
+through `self.mount.center` acts on `self`, including when `self` is an assembly.
+Every chained result carries that assembly context while its geometry and IDs
+continue to refer to the original immutable source. Exposing an upstream value
+captures that source; later modeling operations do not reinterpret its IDs in
+a different geometry. To expose result topology, select it from that result.
+
+Subtopology access follows dimension: a surface can query its edges and
+vertices, and an edge its vertices. Singular queries validate membership;
+plural queries retain authored order and allow `[]`. IDs always use the source
+geometry's namespace, so a shared edge has the same ID through either face.
+An edge's vertices are its actual topological vertices; a closed edge can have
+one vertex. A source used in multiple occurrences must be exposed through the
+intended child's reference, such as `left.body`, to select its placement.
+
+Every geometric reference has a local bounding-box `center` point, carried
+through rotation and scaling. `Edge.start`, `.midpoint`, and `.end` sample curve
+parameters 0, 0.5, and 1; the midpoint need not be the bounding-box center or the
+half-length point. These calculated points are anchors, not topology vertices.
+The reference frame used by `edge.on()` or `surface.on()` retains its tangent
+or normal semantics independently of `.center`.
+
 ## Origins and rotation
 
 Geometric models (solids, faces, curves, and points) support immutable origin
@@ -186,8 +228,9 @@ is not expanded to recognize primitive factory definitions.
 ## Tooling evaluation lifetime
 
 The App uses the selected runtime's `@code3d/core/tooling` entry, from the project
-when core is declared or from the built-in package otherwise. Protocol 4
-includes origin and spatial-operation snapshots and requires installing both
+when core is declared or from the built-in package otherwise. Protocol 5
+includes topology source identities, assembly transforms, and calculated-anchor
+frames alongside origin and spatial-operation snapshots. It requires installing both
 OpenCascade and the constraint solver from that same package dependency graph.
 Call `beginModelEvaluation(): void` before each serial source
 evaluation to reset source locations, parameter provenance, and operation

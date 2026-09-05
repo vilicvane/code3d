@@ -37,6 +37,7 @@ export type {
   Model,
   PlanarElements,
   PointAnchor,
+  Solid,
   SolidModel,
   Surface,
   Vertex,

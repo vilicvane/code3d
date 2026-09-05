@@ -16,16 +16,22 @@ test('resolves stable vertex, edge, and surface references', () => {
   try {
     assert.deepEqual(modelTopologyReference(base.vertex(1)), {
       model: base,
+      geometry: base,
+      transform: identityTransform,
       kind: 'vertex',
       id: 1,
     });
     assert.deepEqual(modelTopologyReference(base.edge(1)), {
       model: base,
+      geometry: base,
+      transform: identityTransform,
       kind: 'edge',
       id: 1,
     });
     assert.deepEqual(modelTopologyReference(base.surface(1)), {
       model: base,
+      geometry: base,
+      transform: identityTransform,
       kind: 'surface',
       id: 1,
     });
@@ -60,16 +66,52 @@ test('resolves plural topology references in authored order', () => {
 
   try {
     assert.deepEqual(model.vertices([3, 1]).map(modelTopologyReference), [
-      {model, kind: 'vertex', id: 3},
-      {model, kind: 'vertex', id: 1},
+      {
+        model,
+        geometry: model,
+        transform: identityTransform,
+        kind: 'vertex',
+        id: 3,
+      },
+      {
+        model,
+        geometry: model,
+        transform: identityTransform,
+        kind: 'vertex',
+        id: 1,
+      },
     ]);
     assert.deepEqual(model.edges([4, 2]).map(modelTopologyReference), [
-      {model, kind: 'edge', id: 4},
-      {model, kind: 'edge', id: 2},
+      {
+        model,
+        geometry: model,
+        transform: identityTransform,
+        kind: 'edge',
+        id: 4,
+      },
+      {
+        model,
+        geometry: model,
+        transform: identityTransform,
+        kind: 'edge',
+        id: 2,
+      },
     ]);
     assert.deepEqual(model.surfaces([6, 1]).map(modelTopologyReference), [
-      {model, kind: 'surface', id: 6},
-      {model, kind: 'surface', id: 1},
+      {
+        model,
+        geometry: model,
+        transform: identityTransform,
+        kind: 'surface',
+        id: 6,
+      },
+      {
+        model,
+        geometry: model,
+        transform: identityTransform,
+        kind: 'surface',
+        id: 1,
+      },
     ]);
     assert.deepEqual(referenceIds(model.vertices()), [1, 2, 3, 4, 5, 6, 7, 8]);
     assert.deepEqual(
@@ -140,3 +182,9 @@ function surfaceIds(snapshot) {
     ...new Set(snapshot.mesh.surfaceGroups.map(group => group.surfaceId)),
   ];
 }
+
+const identityTransform = {
+  position: [0, 0, 0],
+  quaternion: [0, 0, 0, 1],
+  scale: [1, 1, 1],
+};

@@ -64,10 +64,13 @@ import {
   topologyEdgeDirections,
   topologySurfaceDirections,
   topologyVertexPoints,
+  topologyChildren,
+  withTopologyShape,
   type EdgeId,
   type ShapeTopology,
   type SurfaceId,
   type TopologyKind,
+  type TopologySelection,
   type VertexId,
 } from './topology.js';
 
@@ -112,6 +115,8 @@ export type ElementSnapshot = Readonly<{
   name: string;
   kind: ElementKind;
   transform: Transform;
+  topology?: Readonly<{geometryNodeId: string; transform: Transform}> &
+    TopologySelection;
 }>;
 
 export type ConstraintAnchorSnapshot = Readonly<{
@@ -261,6 +266,15 @@ export type ModelSnapshotObject = Readonly<{
 type StoredElement = Readonly<{
   kind: ElementKind;
   transform: RigidTransform;
+  topology?: StoredTopology;
+  members?: StoredElements;
+}>;
+
+type StoredTopology = Readonly<{
+  source: ModelObject;
+  selection: TopologySelection;
+  transform: RigidTransform;
+  scale: number;
 }>;
 
 type StoredElements = Readonly<Record<string, StoredElement>>;
@@ -273,13 +287,15 @@ export type ModelElementReference = Readonly<{
   model: ModelObject;
   name: string;
   kind: ElementKind;
+  transform: Transform;
 }>;
 
 export type ModelTopologyReference = Readonly<{
   model: ModelObject;
-  kind: TopologyKind;
-  id: VertexId | EdgeId | SurfaceId;
-}>;
+  geometry: ModelObject;
+  transform: Transform;
+}> &
+  TopologySelection;
 
 export type ConstraintTraceReference = Readonly<{
   constraintId: string;
@@ -393,6 +409,12 @@ type ModelGeometryValue = Readonly<{
   shape: AnyShape;
   topology: ShapeTopology;
   localBounds: LocalBounds;
+  referenceBasis?: Readonly<{
+    shape: AnyShape;
+    topology: ShapeTopology;
+    transform: RigidTransform;
+    scale: number;
+  }>;
 }>;
 
 type ModelGeometry = KernelArtifact<ModelGeometryValue>;
@@ -429,6 +451,9 @@ const defaultModelNames = {
 } as const satisfies Record<ModelKind, string>;
 
 const anchorKind = Symbol('anchorKind');
+const anchorReferenceValue = Symbol('anchorReference');
+const modelFamily = Symbol('modelFamily');
+const modelNamedElements = Symbol('modelNamedElements');
 
 export interface Anchor<Kind extends ElementKind = ElementKind> {
   readonly [anchorKind]: Kind;
@@ -442,36 +467,65 @@ export interface LineAnchor extends Anchor<'line'> {}
 
 export interface FaceAnchor extends Anchor<'face'> {}
 
-export interface Vertex extends PointAnchor {
+interface GeometryQueryCapabilities {
+  /** Local bounding-box center, carried through geometry transforms. */
+  readonly center: PointAnchor;
+}
+
+export interface Vertex
+  extends PointAnchor, GeometryQueryCapabilities, VertexTopologyCapabilities {
   readonly kind: 'vertex';
   readonly id: VertexId;
 }
 
-export interface Edge extends LineAnchor {
+export interface Edge
+  extends LineAnchor, GeometryQueryCapabilities, EdgeTopologyCapabilities {
   readonly kind: 'edge';
   readonly id: EdgeId;
+  readonly start: PointAnchor;
+  readonly midpoint: PointAnchor;
+  readonly end: PointAnchor;
 }
 
-export interface Surface extends FaceAnchor {
+export interface Surface
+  extends FaceAnchor, GeometryQueryCapabilities, SurfaceTopologyCapabilities {
   readonly kind: 'surface';
   readonly id: SurfaceId;
+}
+
+export interface Solid
+  extends
+    Anchor<'frame'>,
+    GeometryQueryCapabilities,
+    SurfaceTopologyCapabilities {
+  readonly kind: 'solid';
 }
 
 type ElementSources = Readonly<Record<string, Anchor>>;
 type NamedElements = Readonly<Record<string, Anchor>>;
 
-type AnchorFor<Kind extends ElementKind> = Kind extends 'point'
-  ? PointAnchor
-  : Kind extends 'line'
-    ? LineAnchor
-    : Kind extends 'face'
-      ? FaceAnchor
-      : Anchor<'frame'>;
+type ExposedValue<Value> = Value extends {
+  readonly [modelFamily]: infer Family;
+  readonly [modelNamedElements]: infer Elements;
+}
+  ? (Family extends 'solid'
+      ? Solid
+      : Family extends 'face'
+        ? Surface
+        : Family extends 'edge'
+          ? Edge
+          : Family extends 'vertex'
+            ? Vertex
+            : Family extends 'group'
+              ? Anchor<'frame'>
+              : Anchor) &
+      Elements
+  : Value extends Anchor
+    ? Value
+    : never;
 
 type ExposedElements<Sources extends ElementSources> = Readonly<{
-  [Name in keyof Sources]: Sources[Name] extends Anchor<infer Kind>
-    ? AnchorFor<Kind>
-    : never;
+  [Name in keyof Sources]: ExposedValue<Sources[Name]>;
 }>;
 
 type MergedElements<
@@ -486,12 +540,6 @@ type ModelElementKind<Kind extends ModelKind> = Kind extends 'face'
     : Kind extends 'vertex'
       ? 'point'
       : 'frame';
-
-type TopologyElementKind<Kind extends TopologyKind> = Kind extends 'surface'
-  ? 'face'
-  : Kind extends 'edge'
-    ? 'line'
-    : 'point';
 
 type ModelFamily = ModelKind | 'model';
 
@@ -517,6 +565,8 @@ interface ModelCapabilities<
   Elements extends NamedElements,
   Family extends ModelFamily,
 > extends Anchor<ModelFamilyElementKind<Family>> {
+  readonly [modelFamily]: Family extends ModelKind ? Family : ModelKind;
+  readonly [modelNamedElements]: Elements;
   relate(
     build: (
       self: ModelForFamily<Elements, Family>,
@@ -531,9 +581,7 @@ interface ModelCapabilities<
 interface GeometryCapabilities<
   Elements extends NamedElements,
   Family extends ModelGeometryKind,
-> {
-  /** The body's local bounding-box center, carried along by model transforms. */
-  readonly center: PointAnchor;
+> extends GeometryQueryCapabilities {
   /** Set the origin to this model's center, replacing earlier origin settings. */
   originCenter(): ModelForFamily<Elements, Family>;
   /**
@@ -670,60 +718,153 @@ class ModelAnchor<
   declare readonly [anchorKind]: Kind;
   readonly elementKind: Kind;
 
-  constructor(readonly reference: AnchorReference) {
-    this.elementKind = this.reference.kind as Kind;
-  }
+  readonly [anchorReferenceValue]: AnchorReference;
 
-  on(target: Anchor): Constraint {
-    return Constraint.create(this.reference, anchorReference(target));
-  }
-}
-
-type TopologyIdByKind = Readonly<{
-  vertex: VertexId;
-  edge: EdgeId;
-  surface: SurfaceId;
-}>;
-
-class ModelTopologyElement<Kind extends TopologyKind> implements Anchor<
-  TopologyElementKind<Kind>
-> {
-  declare readonly [anchorKind]: TopologyElementKind<Kind>;
-  readonly elementKind: TopologyElementKind<Kind>;
-
-  constructor(
-    readonly model: ModelObject,
-    readonly kind: Kind,
-    readonly id: TopologyIdByKind[Kind],
-    readonly transform: RigidTransform,
-  ) {
-    this.elementKind = topologyElementKinds[
-      kind
-    ] as unknown as TopologyElementKind<Kind>;
+  constructor(reference: AnchorReference) {
+    this[anchorReferenceValue] = reference;
+    this.elementKind = this[anchorReferenceValue].kind as Kind;
+    for (const [name, member] of Object.entries(reference.members ?? {})) {
+      const pointMember = ['center', 'start', 'midpoint', 'end'].includes(name);
+      if (
+        name in this &&
+        !pointMember &&
+        !(name === 'id' && reference.topology?.selection.kind === 'solid')
+      ) {
+        throw new Error(
+          `The exposed member ${name} conflicts with the topology API.`,
+        );
+      }
+      Object.defineProperty(this, name, {
+        value: modelAnchor(
+          reference.model,
+          `${reference.name}.${name}`,
+          member,
+        ),
+      });
+    }
   }
 
   on(target: Anchor): Constraint {
     return Constraint.create(
-      topologyAnchorReference(this),
+      this[anchorReferenceValue],
       anchorReference(target),
     );
   }
 }
 
+class ModelTopologyElement extends ModelAnchor {
+  get kind(): TopologySelection['kind'] {
+    return this.#topology.selection.kind;
+  }
+  get id(): number | undefined {
+    const selection = this.#topology.selection;
+    return selection.kind === 'solid' ? undefined : selection.id;
+  }
+  get #topology(): StoredTopology {
+    return this[anchorReferenceValue].topology!;
+  }
+
+  get center(): PointAnchor {
+    const geometry = this.#topology.source[modelGeometry]()!;
+    return this.#pointAnchor(
+      'center',
+      topologyCenter(geometry, this.#topology.selection),
+    );
+  }
+
+  get start(): PointAnchor {
+    return this.#curvePoint('start', 0);
+  }
+  get midpoint(): PointAnchor {
+    return this.#curvePoint('midpoint', 0.5);
+  }
+  get end(): PointAnchor {
+    return this.#curvePoint('end', 1);
+  }
+
+  #curvePoint(name: string, parameter: number): PointAnchor {
+    const geometry = this.#topology.source[modelGeometry]()!.value;
+    const basis = geometry.referenceBasis;
+    const element = withTopologyShape(
+      basis?.shape ?? geometry.shape,
+      basis?.topology ?? geometry.topology,
+      this.#topology.selection,
+      shape => curveAnchor(shape as ReplicadEdge, parameter),
+    );
+    return this.#pointAnchor(
+      name,
+      basis ? topologyTransform(basis, element.transform) : element.transform,
+    );
+  }
+
+  #pointAnchor(name: string, transform: RigidTransform): PointAnchor {
+    return modelAnchor(
+      this[anchorReferenceValue].model,
+      `${this[anchorReferenceValue].name}.${name}`,
+      {
+        kind: 'point',
+        transform: topologyTransform(this.#topology, transform),
+      },
+    ) as PointAnchor;
+  }
+
+  vertex(id: VertexId): Vertex {
+    return this.vertices([id])[0];
+  }
+  vertices(ids?: readonly VertexId[]): readonly Vertex[] {
+    return this.#select('vertex', ids) as unknown as readonly Vertex[];
+  }
+  edge(id: EdgeId): Edge {
+    return this.edges([id])[0];
+  }
+  edges(ids?: readonly EdgeId[]): readonly Edge[] {
+    return this.#select('edge', ids) as unknown as readonly Edge[];
+  }
+  surface(id: SurfaceId): Surface {
+    return this.surfaces([id])[0];
+  }
+  surfaces(ids?: readonly SurfaceId[]): readonly Surface[] {
+    return this.#select('surface', ids) as unknown as readonly Surface[];
+  }
+
+  #select(
+    kind: TopologyKind,
+    ids?: readonly number[],
+  ): readonly ModelTopologyElement[] {
+    const geometry = this.#topology.source[modelGeometry]()!.value;
+    const selected = topologyChildren(
+      geometry.shape,
+      geometry.topology,
+      this.#topology.selection,
+      kind,
+      ids,
+    );
+    return topologyReferences(
+      this[anchorReferenceValue].model,
+      `${this[anchorReferenceValue].name}.`,
+      this.#topology,
+      kind,
+      selected,
+    );
+  }
+}
+
 const topologyElementKinds = {
+  solid: 'frame',
   vertex: 'point',
   edge: 'line',
   surface: 'face',
-} as const satisfies Record<TopologyKind, ElementKind>;
+} as const satisfies Record<TopologySelection['kind'], ElementKind>;
 
 export function modelElementReference(
   value: unknown,
 ): ModelElementReference | undefined {
   if (!(value instanceof ModelAnchor)) return undefined;
   return {
-    model: value.reference.model,
-    name: value.reference.name,
-    kind: value.reference.kind,
+    model: value[anchorReferenceValue].model,
+    name: value[anchorReferenceValue].name,
+    kind: value[anchorReferenceValue].kind,
+    transform: toTransform(value[anchorReferenceValue].transform),
   };
 }
 
@@ -731,7 +872,35 @@ export function modelTopologyReference(
   value: unknown,
 ): ModelTopologyReference | undefined {
   if (!(value instanceof ModelTopologyElement)) return undefined;
-  return {model: value.model, kind: value.kind, id: value.id};
+  const topology = value[anchorReferenceValue].topology!;
+  return {
+    model: value[anchorReferenceValue].model,
+    geometry: topology.source,
+    transform: {
+      ...topology.transform,
+      scale: [topology.scale, topology.scale, topology.scale],
+    },
+    ...topology.selection,
+  };
+}
+
+export function modelTopologyIds(
+  value: unknown,
+  kind: TopologyKind,
+): readonly number[] | undefined {
+  const topology =
+    value instanceof ModelTopologyElement
+      ? value[anchorReferenceValue].topology
+      : undefined;
+  const source = isModelObject(value) ? value : topology?.source;
+  const geometry = source?.[modelGeometry]()?.value;
+  if (!geometry) return undefined;
+  return topologyChildren(
+    geometry.shape,
+    geometry.topology,
+    topology?.selection ?? {kind: 'solid'},
+    kind,
+  );
 }
 
 export class Constraint {
@@ -851,6 +1020,8 @@ export class ModelObject<
   Kind extends ModelKind = ModelKind,
 > implements Anchor<ModelElementKind<Kind>> {
   declare readonly [anchorKind]: ModelElementKind<Kind>;
+  declare readonly [modelFamily]: Kind;
+  declare readonly [modelNamedElements]: Elements;
   /** @internal */
   readonly elementKind: ModelElementKind<Kind>;
   /** @internal */
@@ -996,16 +1167,28 @@ export class ModelObject<
       Object.entries(sources).map(([name, source]) => {
         const reference = anchorReference(source);
         references.push(reference.model);
+        const {
+          kind,
+          transform: frame,
+          topology,
+          members: nested,
+        } = source instanceof ModelObject
+          ? source.exposedElement()
+          : (source as ModelAnchor)[anchorReferenceValue];
+        const memberPose = members.get(reference.model);
+        if (memberPose === null)
+          throw new Error(
+            `The exposed element ${name} belongs to multiple occurrences. Expose it through the intended child model's named reference.`,
+          );
+        const transform =
+          memberPose ??
+          relativeTransform(reference.model.solvePose(context), ownPose);
         return [
           name,
-          {
-            kind: reference.kind,
-            transform: composeTransforms(
-              members.get(reference.model) ??
-                relativeTransform(reference.model.solvePose(context), ownPose),
-              reference.transform,
-            ),
-          },
+          transformElement(
+            {kind, transform: frame, topology, members: nested},
+            transform,
+          ),
         ];
       }),
     );
@@ -1022,81 +1205,93 @@ export class ModelObject<
     return this.copy(
       {elements: {...this.elements, ...exposed}},
       operation,
-    ) as RuntimeModel<MergedElements<Elements, ExposedElements<Sources>>, Kind>;
+    ) as unknown as RuntimeModel<
+      MergedElements<Elements, ExposedElements<Sources>>,
+      Kind
+    >;
   }
 
   vertex(id: VertexId): Vertex {
     return this.vertices([id])[0];
   }
-
   vertices(ids?: readonly VertexId[]): readonly Vertex[] {
-    const geometry = this.requireGeometry().value;
-    const topology = geometry.topology.vertices;
-    const selectedIds = ids ?? topology.ids;
-    const points = topologyVertexPoints(geometry.shape, topology, selectedIds);
-    return selectedIds.map(
-      (id, index) =>
-        new ModelTopologyElement(
-          this,
-          'vertex',
-          id,
-          translation(points[index].position),
-        ),
-    );
+    return this.selectTopology('vertex', ids) as unknown as readonly Vertex[];
   }
-
-  surface(id: SurfaceId): Surface {
-    return this.surfaces([id])[0];
-  }
-
-  surfaces(ids?: readonly SurfaceId[]): readonly Surface[] {
-    const geometry = this.requireGeometry().value;
-    const topology = geometry.topology.surfaces;
-    const selectedIds = ids ?? topology.ids;
-    const directions = topologySurfaceDirections(
-      geometry.shape,
-      topology,
-      selectedIds,
-    );
-    return selectedIds.map(
-      (id, index) =>
-        new ModelTopologyElement(
-          this,
-          'surface',
-          id,
-          frameFromYAxis(
-            directions[index].position,
-            directions[index].direction,
-          ),
-        ),
-    );
-  }
-
   edge(id: EdgeId): Edge {
     return this.edges([id])[0];
   }
-
   edges(ids?: readonly EdgeId[]): readonly Edge[] {
+    return this.selectTopology('edge', ids) as unknown as readonly Edge[];
+  }
+  surface(id: SurfaceId): Surface {
+    return this.surfaces([id])[0];
+  }
+  surfaces(ids?: readonly SurfaceId[]): readonly Surface[] {
+    return this.selectTopology('surface', ids) as unknown as readonly Surface[];
+  }
+
+  private selectTopology(
+    kind: TopologyKind,
+    ids?: readonly number[],
+  ): readonly ModelTopologyElement[] {
     const geometry = this.requireGeometry().value;
-    const topology = geometry.topology.edges;
-    const selectedIds = ids ?? topology.ids;
-    const directions = topologyEdgeDirections(
+    const selected = topologyChildren(
       geometry.shape,
-      topology,
-      selectedIds,
+      geometry.topology,
+      {kind: 'solid'},
+      kind,
+      ids,
     );
-    return selectedIds.map(
-      (id, index) =>
-        new ModelTopologyElement(
-          this,
-          'edge',
-          id,
-          frameFromYAxis(
-            directions[index].position,
-            directions[index].direction,
-          ),
-        ),
+    return topologyReferences(
+      this,
+      '',
+      {source: this, transform: identityRigidTransform, scale: 1},
+      kind,
+      selected,
     );
+  }
+
+  /** @internal */
+  exposedElement(): StoredElement {
+    if (this.kind === 'group')
+      return {...this.intrinsic, members: this.elements};
+    const geometry = this.requireGeometry().value;
+    const kind = (
+      this.kind === 'face' ? 'surface' : this.kind
+    ) as TopologySelection['kind'];
+    const selection: TopologySelection =
+      kind === 'solid'
+        ? {kind}
+        : {
+            kind,
+            id: geometry.topology[
+              kind === 'surface'
+                ? 'surfaces'
+                : kind === 'edge'
+                  ? 'edges'
+                  : 'vertices'
+            ].ids[0],
+          };
+    const context = {
+      source: this,
+      transform: identityRigidTransform,
+      scale: 1,
+    };
+    const anchor =
+      selection.kind === 'solid'
+        ? this.intrinsic
+        : topologyReferences(this, '', context, selection.kind, [
+            selection.id,
+          ])[0][anchorReferenceValue];
+    return {
+      kind: anchor.kind,
+      transform: anchor.transform,
+      members: this.elements,
+      topology: {
+        ...context,
+        selection,
+      },
+    };
   }
 
   paint(color: string): RuntimeModel<Elements, Kind> {
@@ -1179,6 +1374,7 @@ export class ModelObject<
           return {
             shape,
             topology: preserveShapeTopology(shape, source.value.topology),
+            referenceBasis: transformedReferenceBasis(source, transform, 1),
           };
         } catch (error) {
           shape.delete();
@@ -1214,6 +1410,11 @@ export class ModelObject<
         return {
           shape,
           topology: preserveShapeTopology(shape, source.value.topology),
+          referenceBasis: transformedReferenceBasis(
+            source,
+            identityRigidTransform,
+            factor,
+          ),
         };
       } catch (error) {
         shape.delete();
@@ -1387,11 +1588,7 @@ export class ModelObject<
       transform: toTransform(inComposition ? pose : identityRigidTransform),
       constraints,
       origin: this.intrinsic.transform.position,
-      elements: Object.entries(this.elements).map(([name, element]) => ({
-        name,
-        kind: element.kind,
-        transform: toTransform(element.transform),
-      })),
+      elements: snapshotElements(this.elements),
       sourceRefs: [...this.sourceRefs],
       parameters,
       operation: this.operationSnapshot(meshCache),
@@ -1425,6 +1622,9 @@ export class ModelObject<
   disposeShape(disposed: Set<AnyShape>): void {
     const shapes = [
       ...(this.geometry ? [this.geometry.value.shape] : []),
+      ...(this.geometry?.value.referenceBasis
+        ? [this.geometry.value.referenceBasis.shape]
+        : []),
       ...this.operation.regions.map(region => region.artifact.value),
     ];
     for (const shape of shapes) {
@@ -1552,7 +1752,7 @@ export class ModelObject<
       return combined as unknown as SolidModel;
     } finally {
       if (!transferred) {
-        evaluation.geometry.value.shape.delete();
+        disposeModelGeometryValue(evaluation.geometry.value);
         evaluation.regions.forEach(region => region.artifact.value.delete());
       }
     }
@@ -1651,8 +1851,8 @@ export class ModelObject<
     return context.poses.get(this)!;
   }
 
-  private memberPoses(): Map<ModelObject, RigidTransform> {
-    const members = new Map<ModelObject, RigidTransform>([
+  private memberPoses(): Map<ModelObject, RigidTransform | null> {
+    const members = new Map<ModelObject, RigidTransform | null>([
       [this, identityRigidTransform],
     ]);
     if (this.children.length) {
@@ -1660,7 +1860,12 @@ export class ModelObject<
       for (const child of this.children) {
         const pose = child.solvePose(context);
         for (const [member, localPose] of child.memberPoses()) {
-          members.set(member, composeTransforms(pose, localPose));
+          members.set(
+            member,
+            members.has(member) || localPose === null
+              ? null
+              : composeTransforms(pose, localPose),
+          );
         }
       }
     }
@@ -1780,7 +1985,7 @@ export class ModelObject<
     try {
       return this.copy({...overrides, geometry}, operation);
     } catch (error) {
-      geometry.value.shape.delete();
+      disposeModelGeometryValue(geometry.value);
       throw error;
     }
   }
@@ -2570,10 +2775,30 @@ const shapeLifecycle: KernelValueLifecycle<AnyShape> = {
 };
 
 const modelGeometryLifecycle: KernelValueLifecycle<ModelGeometryValue> = {
-  retain: geometry => ({...geometry, shape: geometry.shape.clone()}),
-  instantiate: geometry => ({...geometry, shape: geometry.shape.clone()}),
-  release: geometry => geometry.shape.delete(),
+  retain: cloneModelGeometryValue,
+  instantiate: cloneModelGeometryValue,
+  release: disposeModelGeometryValue,
 };
+
+function cloneModelGeometryValue(
+  geometry: ModelGeometryValue,
+): ModelGeometryValue {
+  return {
+    ...geometry,
+    shape: geometry.shape.clone(),
+    referenceBasis: geometry.referenceBasis
+      ? {
+          ...geometry.referenceBasis,
+          shape: geometry.referenceBasis.shape.clone(),
+        }
+      : undefined,
+  };
+}
+
+function disposeModelGeometryValue(geometry: ModelGeometryValue): void {
+  geometry.shape.delete();
+  geometry.referenceBasis?.shape.delete();
+}
 
 const renderMeshLifecycle: KernelValueLifecycle<RenderMesh> = {
   retain: mesh => mesh,
@@ -2603,6 +2828,7 @@ function evaluateModelGeometry(
   compute: () => Readonly<{
     shape: AnyShape;
     topology?: ShapeTopology;
+    referenceBasis?: ModelGeometryValue['referenceBasis'];
   }>,
 ): ModelGeometry {
   return evaluateKernelOperation(
@@ -2612,7 +2838,10 @@ function evaluateModelGeometry(
     modelGeometryLifecycle,
     () => {
       const result = compute();
-      return createModelGeometryValue(result.shape, result.topology);
+      return {
+        ...createModelGeometryValue(result.shape, result.topology),
+        referenceBasis: result.referenceBasis,
+      };
     },
   );
 }
@@ -2895,7 +3124,40 @@ function modelAnchor<Kind extends ElementKind>(
   name: string,
   element: StoredElement & Readonly<{kind: Kind}>,
 ): Anchor<Kind> {
-  return new ModelAnchor<Kind>({model, name, ...element});
+  const reference = {...element, model, name};
+  return (
+    element.topology
+      ? new ModelTopologyElement(reference)
+      : new ModelAnchor<Kind>(reference)
+  ) as Anchor<Kind>;
+}
+
+function snapshotElements(
+  elements: StoredElements,
+  prefix = '',
+): readonly ElementSnapshot[] {
+  return Object.entries(elements).flatMap(([key, element]) => {
+    const name = `${prefix}${key}`;
+    const topology = element.topology;
+    return [
+      {
+        name,
+        kind: element.kind,
+        transform: toTransform(element.transform),
+        topology: topology
+          ? {
+              geometryNodeId: topology.source.nodeId,
+              transform: {
+                ...topology.transform,
+                scale: [topology.scale, topology.scale, topology.scale] as Vec3,
+              },
+              ...topology.selection,
+            }
+          : undefined,
+      },
+      ...snapshotElements(element.members ?? {}, `${name}.`),
+    ];
+  });
 }
 
 function scaleElements(
@@ -2917,12 +3179,36 @@ function transformElement(
   return {
     ...element,
     transform: composeTransforms(transform, element.transform),
+    topology: element.topology
+      ? {
+          ...element.topology,
+          transform: composeTransforms(transform, element.topology.transform),
+        }
+      : undefined,
+    members: element.members
+      ? Object.fromEntries(
+          Object.entries(element.members).map(([name, member]) => [
+            name,
+            transformElement(member, transform),
+          ]),
+        )
+      : undefined,
   };
 }
 
 function scaleElement(element: StoredElement, factor: number): StoredElement {
   return {
     ...element,
+    topology: element.topology
+      ? {
+          ...element.topology,
+          scale: element.topology.scale * factor,
+          transform: scaleFrame(element.topology.transform, factor),
+        }
+      : undefined,
+    members: element.members
+      ? scaleElements(element.members, factor)
+      : undefined,
     transform: {
       ...element.transform,
       position: [
@@ -2932,6 +3218,103 @@ function scaleElement(element: StoredElement, factor: number): StoredElement {
       ],
     },
   };
+}
+
+function scaleFrame(transform: RigidTransform, factor: number): RigidTransform {
+  return {
+    ...transform,
+    position: transform.position.map(
+      value => value * factor,
+    ) as unknown as Vec3,
+  };
+}
+
+function topologyTransform(
+  topology: Pick<StoredTopology, 'transform' | 'scale'>,
+  frame: RigidTransform,
+): RigidTransform {
+  return composeTransforms(
+    topology.transform,
+    scaleFrame(frame, topology.scale),
+  );
+}
+
+function topologyCenter(
+  geometry: ModelGeometry,
+  selection: TopologySelection,
+): RigidTransform {
+  const {referenceBasis, shape, topology} = geometry.value;
+  if (referenceBasis)
+    return withTopologyShape(
+      referenceBasis.shape,
+      referenceBasis.topology,
+      selection,
+      selected =>
+        topologyTransform(
+          referenceBasis,
+          translation(boundsCenter(shapeBounds(selected))),
+        ),
+    );
+  return withTopologyShape(shape, topology, selection, selected =>
+    translation(boundsCenter(shapeBounds(selected))),
+  );
+}
+
+function transformedReferenceBasis(
+  source: ModelGeometry,
+  transform: RigidTransform,
+  scale: number,
+): NonNullable<ModelGeometryValue['referenceBasis']> {
+  const basis = source.value.referenceBasis;
+  return {
+    shape: (basis?.shape ?? source.value.shape).clone(),
+    topology: basis?.topology ?? source.value.topology,
+    transform: composeTransforms(
+      transform,
+      scaleFrame(basis?.transform ?? identityRigidTransform, scale),
+    ),
+    scale: (basis?.scale ?? 1) * scale,
+  };
+}
+
+function topologyName(selection: TopologySelection): string {
+  return selection.kind === 'solid'
+    ? 'solid'
+    : `${{vertex: 'V', edge: 'E', surface: 'S'}[selection.kind]}${selection.id}`;
+}
+
+function topologyReferences(
+  model: ModelObject,
+  prefix: string,
+  context: Omit<StoredTopology, 'selection'>,
+  kind: TopologyKind,
+  ids: readonly number[],
+): readonly ModelTopologyElement[] {
+  const geometry = context.source[modelGeometry]()!.value;
+  const basis = geometry.referenceBasis;
+  const {shape, topology} = basis ?? geometry;
+  const frames =
+    kind === 'vertex'
+      ? topologyVertexPoints(shape, topology.vertices, ids).map(point =>
+          translation(point.position),
+        )
+      : (kind === 'edge'
+          ? topologyEdgeDirections(shape, topology.edges, ids)
+          : topologySurfaceDirections(shape, topology.surfaces, ids)
+        ).map(({position, direction}) => frameFromYAxis(position, direction));
+  return ids.map((id, index) => {
+    const selection = {kind, id};
+    return new ModelTopologyElement({
+      model,
+      name: `${prefix}${topologyName(selection)}`,
+      kind: topologyElementKinds[kind],
+      transform: topologyTransform(
+        context,
+        basis ? topologyTransform(basis, frames[index]) : frames[index],
+      ),
+      topology: {...context, selection},
+    });
+  });
 }
 
 function unionSectionShape(left: Shape3D, right: Shape3D): AnyShape {
@@ -2968,26 +3351,7 @@ function anchorReference(anchor: Anchor): AnchorReference {
   if (anchor instanceof ModelObject) {
     return anchor.relationAnchorReference();
   }
-  if (anchor instanceof ModelTopologyElement) {
-    return topologyAnchorReference(anchor);
-  }
-  return (anchor as ModelAnchor).reference;
-}
-
-function topologyAnchorReference(
-  element: ModelTopologyElement<TopologyKind>,
-): AnchorReference {
-  const prefixes = {
-    vertex: 'V',
-    edge: 'E',
-    surface: 'S',
-  } as const satisfies Record<TopologyKind, string>;
-  return {
-    model: element.model,
-    name: `${prefixes[element.kind]}${element.id}`,
-    kind: element.elementKind,
-    transform: element.transform,
-  };
+  return (anchor as ModelAnchor)[anchorReferenceValue];
 }
 
 function storedAnchor(reference: AnchorReference): StoredAnchor {

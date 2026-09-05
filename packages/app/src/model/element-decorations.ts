@@ -43,15 +43,14 @@ const faceAppearance = {
 export const elementSourceDecoration = {
   id: 'named-element',
   decorations({module, evaluation}) {
-    const reference = evaluation.element;
-    if (!reference) return [];
-    const node = module.objects.get(reference.nodeId);
-    const element = node?.elements.find(
-      candidate =>
-        candidate.name === reference.name && candidate.kind === reference.kind,
-    );
-    if (!node || !element) return [];
-    return namedElementDecorations(node, element);
+    if (evaluation.element && evaluation.topologyReferences?.length) return [];
+    const references = evaluation.element
+      ? [evaluation.element]
+      : (evaluation.anchorReferences ?? []);
+    return references.flatMap(reference => {
+      const node = module.objects.get(reference.nodeId);
+      return node ? namedElementDecorations(node, reference) : [];
+    });
   },
 } satisfies SourceDecorationProvider;
 

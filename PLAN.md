@@ -53,6 +53,14 @@ implementation context and historical outcomes, not a competing work queue.
   named-element interface. An element imported from an internal model is
   rebound into the exposed model's local frame, so reusable APIs do not leak
   their construction objects.
+- Geometric models passed to `expose()` become `Solid`, `Surface`, `Edge`, or
+  `Vertex` references, retaining named members. Existing topology references
+  keep their source identity and acquire the containing model's placement;
+  pure anchors retain their reference-geometry meaning. Chained topology and
+  calculated-point queries carry that placement and constrain the containing
+  model. IDs remain in the immutable source geometry's namespace. References
+  provide query and relation capabilities without model operations. See
+  [#27](https://github.com/vilicvane/code3d/issues/27).
 - `model.relate(self => constraint | constraints)` creates a new
   semantic-immutable model value that shares geometry and carries the returned
   constraint or constraint array. The callback parameter is that new value.
@@ -88,6 +96,10 @@ implementation context and historical outcomes, not a competing work queue.
   midpoint (the centroid need not lie on a curved surface). Their `vertices(ids?)`, `edges(ids?)`,
   and `surfaces(ids?)` counterparts return ordered arrays of the same anchors,
   defaulting to every current stable topology ID when the argument is omitted.
+- Subtopology queries validate membership and retain source IDs. Geometric
+  references expose a local bounding-box center carried through transforms;
+  edge start/midpoint/end anchors sample parameters 0/0.5/1. A shared edge keeps
+  its identity across faces, and a closed edge retains its actual vertex count.
 - A composite is broad: any connected set of occurrences and spatial relations
   is a composite, including copy, pattern, boolean operands, groups, and
   assemblies. A composite can itself be reused as geometry in a larger model.
