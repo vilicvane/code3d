@@ -92,18 +92,9 @@ Every geometric model exposes `center`: the body's local bounding-box center,
 carried along by subsequent transforms. Rotation does not recalculate it from
 the rotated shape's axis-aligned bounds. Changing the origin leaves `center`
 in place. Use `.originCenter().originOffset(1, 0, 0)` to offset from this center.
-Dragging the origin in `originCenter()` appends or edits an `originOffset()` call.
-
-```ts
-const part = box(24, 6, 14)
-  .originVertex(3)
-  .originOffset(0, 2, 0)
-  .rotate(15, 35, 0);
-```
-
-Place the caret in these calls to use vertex picking, origin arrows, or rotation
-rings. Release a drag to write the source; Escape cancels the preview. The
-three rotation rings follow the axes of the corresponding angle parameters.
+Groups do not provide these geometric operations. For a runnable example and
+the vertex picker, origin arrows, and rotation rings, see
+[choosing an origin and rotating a part](../../guides/origins-and-rotation/).
 
 ## Anchors and relations
 

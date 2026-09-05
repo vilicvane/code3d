@@ -485,6 +485,55 @@ test('compiles the standalone custom primitive example with direct annotations a
   }
 });
 
+test('the documented origin example exposes each spatial operation and its assembly', async () => {
+  const rootPath = '/examples/origin-and-rotation.ts';
+  const file = bundledExamples.files.find(file => file.path === rootPath);
+  assert.ok(file);
+  const module = await compileProject({files: [file]}, rootPath);
+  assert.equal(module.diagnostic, undefined);
+  for (const [text, kind, parameters] of [
+    ['blank.originVertex(3)', 'originVertex', ['id']],
+    ['pivoted.originOffset(0, 2, 0)', 'originOffset', ['dx', 'dy', 'dz']],
+    ['offset.rotate(15, 35, 0)', 'rotate', ['x', 'y', 'z']],
+    ['rotated.originCenter()', 'originCenter', undefined],
+    ['rotated.origin(0, 0, 0)', 'origin', ['x', 'y', 'z']],
+  ]) {
+    // The receiver is a separate input scope; the tool starts at the method name.
+    const targets = exactTargets(
+      module,
+      file.source,
+      text.slice(text.indexOf('.') + 1),
+      text,
+    );
+    assert.ok(
+      targets.some(target =>
+        target.evaluations.some(evaluation => {
+          const operation = module.operations.get(evaluation.operationId);
+          return operation?.kind === kind && operation.spatial;
+        }),
+      ),
+      `The guide needs an inspectable spatial context for ${text}`,
+    );
+    if (parameters) {
+      const target = targets.find(target => target.tool);
+      assert.deepEqual(
+        target?.tool.signature.parameters.map(parameter => parameter.name),
+        parameters,
+      );
+    }
+  }
+  const assembly = exactTargets(
+    module,
+    file.source,
+    'group([rotated, companion])',
+  );
+  assert.ok(
+    assembly.some(target =>
+      target.evaluations.some(evaluation => evaluation.nodeIds.length > 0),
+    ),
+  );
+});
+
 for (const sample of renderSamples) {
   test(`compiles the shared gallery source and focus for ${sample.id}`, async () => {
     const rootPath = '/examples/' + sample.file;

@@ -12,6 +12,8 @@ Code3D is Prototype 01. APIs and project behavior are still evolving.
   chamfers, and threaded geometry.
 - Source-context inspection, topology selection, supported parameter editing,
   and relative-position tools.
+- Editable model origins and geometric rotation, with vertex picking,
+  translation arrows, and rotation rings.
 - Browser-persistent projects and direct local-folder editing in supported
   browsers.
 - Typed named elements and reusable metric fasteners.
@@ -21,9 +23,11 @@ Code3D is Prototype 01. APIs and project behavior are still evolving.
 
 ## What to account for
 
-**GUI writeback has limits.** The App can edit supported values that lead
-uniquely to source. It does not automatically invert arbitrary functions or
-expressions. Code remains available for every model change.
+**GUI writeback changes source, not isolated instances.** The App can update a
+unique upstream value, replace a numeric argument expression from a panel, or
+adjust a spatial expression with a drag. It does not automatically invert
+arbitrary functions. An edit to a shared call or variable can affect several
+objects. See [parameter editing](../../guides/model-tools/#what-a-panel-can-edit).
 
 **Geometric operations can fail.** A fillet or chamfer must fit the input
 geometry. Later operations must select topology from their own input model.

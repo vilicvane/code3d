@@ -21,12 +21,20 @@ relation or operation. The active geometry remains the main context.
 
 Tools depend on the call or value under the editor cursor. A primitive can
 offer dimension inputs; a fillet or chamfer can offer edge selection;
-an offset can offer a position tool.
+an offset can offer a position tool. Origin operations offer a pivot marker
+and arrows, while `rotate` offers angle inputs and rotation rings. Try the
+[origin and rotation guide](../../guides/origins-and-rotation/).
 
-Editable parameters are traced through TypeScript definitions to their source.
-When that chain does not identify an editable value, the panel can display the
-expression but cannot promise to rewrite it. Edit the source directly in that
-case.
+When a parameter has a unique editable source, the panel follows TypeScript
+definitions to update it. Otherwise, an evaluated expression appears as
+placeholder text in an empty numeric input. Typing a number replaces that
+call's whole argument expression, even if you enter the displayed value.
+This does not attempt to invert the expression or change its inputs.
+
+Inputs select their contents on focus and apply valid changes after a short
+typing pause. `Enter`, `Tab`, or leaving the input also commits the value.
+You can fill an incomplete call such as `box()` in order with `Tab`; the next
+argument becomes available as each earlier one is added.
 
 Your own functions can offer the same dimension inputs. See
 [adding tools to model functions](../../guides/model-tools/).
@@ -46,8 +54,10 @@ to a failed operation.
 Code and tool changes share the editor's source history. Use the usual Undo
 and Redo shortcuts. `Shift+Alt+F` formats the current source.
 
-Escape closes temporary tool context. Changes already committed to source stay
-in place; use Undo to revert them.
+During a viewport drag, `Esc` cancels the temporary preview without changing
+source. It does not close the contextual tool panel or end topology selection.
+The panel follows the editor cursor and closes when you leave its call.
+Changes already committed to source stay in place; use Undo to revert them.
 
 See [selecting topology](../../guides/topology/) for a complete tool workflow.
 

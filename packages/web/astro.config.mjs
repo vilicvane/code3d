@@ -76,6 +76,7 @@ export default defineConfig({
           label: 'Guides',
           items: [
             {slug: 'docs/guides/relations'},
+            {slug: 'docs/guides/origins-and-rotation'},
             {slug: 'docs/guides/topology'},
             {slug: 'docs/guides/reusable-models'},
             {slug: 'docs/guides/model-tools'},
