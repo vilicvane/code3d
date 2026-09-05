@@ -1502,24 +1502,6 @@ export class ModelObject<
   }
 
   /** @internal */
-  withChildren(
-    this: ModelObject<Elements, 'group'>,
-    children: readonly ModelObject[],
-  ): RuntimeModel<Elements, 'group'> {
-    if (this.kind !== 'group') {
-      throw new Error('Only a group can contain child objects.');
-    }
-    assertChildren(children);
-    return this.copy(
-      {children},
-      storedOperation(
-        'group',
-        children.map((model, index) => ({model, role: 'child', index})),
-      ),
-    );
-  }
-
-  /** @internal */
   attachSource(sourceRef: SourceRef): void {
     const previous = this.sourceRefs.at(-1);
     if (
@@ -3403,14 +3385,6 @@ function shapeWithTransform<Shape extends AnyShape>(
   }
   shape = shape.translate(toPoint(transform.position));
   return shape as unknown as Shape;
-}
-
-function assertChildren(children: readonly ModelObject[]): void {
-  for (const child of children) {
-    if (!isModelObject(child)) {
-      throw new Error('Every group child must be a ModelObject.');
-    }
-  }
 }
 
 function requireModelObject(value: unknown, message: string): ModelObject {

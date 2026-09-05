@@ -239,7 +239,7 @@ solid.sourceRefs;
 solid.parameters;
 // @ts-expect-error Runtime relation references are available only through tooling.
 solid.relationAnchorReference();
-// @ts-expect-error Group child replacement is not an approved author operation.
+// @ts-expect-error Group child replacement is not part of the authoring API.
 group([]).withChildren([]);
 // @ts-expect-error Runtime instrumentation is available only through tooling.
 solid.attachSource({file: 'model.ts', start: 0, end: 1});
