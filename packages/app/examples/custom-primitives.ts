@@ -9,7 +9,7 @@ import {definePrimitive, replicad, type Sketch} from '@code3d/core/replicad';
  * @code3d.param radius {kind: 'length'}
  * @code3d.param shaftRadius {kind: 'length'}
  * @code3d.param y {kind: 'length'}
- * @code3d.param twist {kind: 'angle'}
+ * @code3d.param twist {kind: 'angle', default: 60}
  */
 export const twistKnob = definePrimitive(
   (radius: number, shaftRadius: number, y: number, twist = 60) => {

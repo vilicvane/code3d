@@ -7,6 +7,7 @@ import type {
   ModelModule,
   SourceTarget,
   SourceTargetEvaluation,
+  TopologySelectionScope,
 } from './model/compiler';
 import type {
   EdgeId,
@@ -543,16 +544,25 @@ export class ModelViewport {
       ? this.module.objects.get(receiverNodeId)
       : undefined;
     if (!receiver) return false;
+    const referenceName =
+      evaluation.element?.name ?? evaluation.topologyReferences?.[0]?.name;
     const element = receiver.elements.find(
-      candidate => candidate.name === memberName,
+      candidate =>
+        candidate.name ===
+        (referenceName ? `${referenceName}.${memberName}` : memberName),
     );
     const previewEvaluation: SourceTargetEvaluation = {
       ...evaluation,
+      topologyReferences: element?.topology
+        ? [{nodeId: receiver.nodeId, name: element.name, ...element.topology}]
+        : undefined,
+      anchorReferences: undefined,
       element: element
         ? {
             nodeId: receiver.nodeId,
             name: element.name,
             kind: element.kind,
+            transform: element.transform,
           }
         : undefined,
     };
@@ -666,35 +676,43 @@ export class ModelViewport {
     kind: TopologyKind,
     multiple: boolean,
     initialIds: readonly number[] = [],
+    scope?: TopologySelectionScope,
   ): readonly number[] {
     const occurrence = this.occurrences.get(occurrenceKey);
-    const input = this.module?.objects.get(inputNodeId);
-    if (
-      !occurrence ||
-      !input ||
-      occurrence.node.kind === 'group' ||
-      input.kind === 'group' ||
-      !input.mesh
-    ) {
+    const input = this.module?.objects.get(
+      scope?.geometryNodeId ?? inputNodeId,
+    );
+    if (!occurrence || !input || input.kind === 'group' || !input.mesh) {
       throw new Error('Topology selection requires a geometric model.');
     }
-    const availableIds = topologyIds(input.mesh, kind);
+    const renderedIds = topologyIds(input.mesh, kind);
+    const availableIds = scope
+      ? renderedIds.filter(id => scope.availableIds.includes(id))
+      : renderedIds;
+    const mesh = scope
+      ? restrictTopologyMesh(input.mesh, kind, new Set(availableIds))
+      : input.mesh;
     if (availableIds.length === 0) {
       throw new Error(`The model has no selectable ${kind}s.`);
     }
     this.clearTopologySelection();
     const {guide, pickObject} = createTopologySelectionGuide(
       input,
-      input.mesh,
+      mesh,
       kind,
       occurrence.placement,
     );
+    if (scope) {
+      occurrence.object.updateWorldMatrix(true, false);
+      applyTransform(guide, scope.transform);
+      guide.applyMatrix4(occurrence.object.matrixWorld);
+    }
     this.decorationRoot.add(guide);
     this.topologySelection = {
       kind,
       multiple,
       occurrenceKey,
-      mesh: input.mesh,
+      mesh,
       guide,
       pickObject,
       selectedIds: new Set(initialIds),
@@ -1077,15 +1095,17 @@ export class ModelViewport {
       } else if (layeredScene) {
         makeFocusObjectTranslucent(object);
       }
-      for (const kind of ['vertex', 'edge', 'surface'] as const) {
+      for (const reference of references) {
+        const mesh = this.module!.objects.get(reference.geometryNodeId)?.mesh;
+        if (!mesh) continue;
+        const kind = reference.kind === 'solid' ? 'surface' : reference.kind;
         const ids = new Set(
-          references
-            .filter(reference => reference.kind === kind)
-            .map(reference => reference.id),
+          reference.kind === 'solid'
+            ? topologyIds(mesh, 'surface')
+            : [reference.id],
         );
-        if (ids.size === 0 || !node.mesh) continue;
         const highlight = createTopologyHighlight(
-          node.mesh,
+          mesh,
           kind,
           ids,
           '#d8ff3e',
@@ -1093,6 +1113,7 @@ export class ModelViewport {
         );
         if (highlight) {
           highlight.raycast = () => undefined;
+          applyTransform(highlight, reference.transform);
           object.add(highlight);
         }
       }
@@ -2086,6 +2107,53 @@ function axisIndex(argument: string): 0 | 1 | 2 | undefined {
   if (argument === 'y') return 1;
   if (argument === 'z') return 2;
   return undefined;
+}
+
+export function restrictTopologyMesh(
+  mesh: RenderMesh,
+  kind: TopologyKind,
+  ids: ReadonlySet<number>,
+): RenderMesh {
+  if (kind === 'vertex') {
+    const indices = mesh.vertexIds.flatMap((id, index) =>
+      ids.has(id) ? [index] : [],
+    );
+    return {
+      ...mesh,
+      vertexIds: indices.map(index => mesh.vertexIds[index]),
+      topologyVertices: new Float32Array(
+        indices.flatMap(index => [
+          ...mesh.topologyVertices.slice(index * 3, index * 3 + 3),
+        ]),
+      ),
+    };
+  }
+  if (kind === 'edge') {
+    const groups = mesh.edgeGroups.filter(group => ids.has(group.edgeId));
+    const positions: number[] = [];
+    const edgeGroups = groups.map(group => {
+      const start = positions.length / 3;
+      for (const coordinate of mesh.edges.subarray(
+        group.start * 3,
+        (group.start + group.count) * 3,
+      ))
+        positions.push(coordinate);
+      return {...group, start};
+    });
+    return {...mesh, edges: new Float32Array(positions), edgeGroups};
+  }
+  const groups = mesh.surfaceGroups.filter(group => ids.has(group.surfaceId));
+  const indices: number[] = [];
+  const surfaceGroups = groups.map(group => {
+    const start = indices.length;
+    for (const index of mesh.triangles.subarray(
+      group.start,
+      group.start + group.count,
+    ))
+      indices.push(index);
+    return {...group, start};
+  });
+  return {...mesh, triangles: new Uint32Array(indices), surfaceGroups};
 }
 
 function createTopologySelectionGuide(

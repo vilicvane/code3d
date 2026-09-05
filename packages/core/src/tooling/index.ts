@@ -15,6 +15,7 @@ export {
   modelElementReference,
   modelObjectRuntimeInfo,
   modelTopologyReference,
+  modelTopologyIds,
   relatedModelObjects,
   retainModelGeometry,
 } from '../library/runtime.js';
@@ -68,8 +69,6 @@ export type {
 export {describeOpenCascadeException} from '../library/open-cascade-error.js';
 
 export {installConstraintSolver} from '../library/constraint-solver.js';
-
-export const toolingProtocolVersion = 4;
 
 export function installOpenCascade(openCascade: OpenCascadeInstance): void {
   clearKernelOperationCache();

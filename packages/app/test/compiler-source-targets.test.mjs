@@ -59,6 +59,119 @@ after(async () => {
   await server?.close();
 });
 
+test('exposed topology retains its geometry, placement and child selection scope', async () => {
+  const source = `import {box, group, point} from '@code3d/core';
+const part = box(10, 20, 30);
+const shifted = group([part]).expose({body: part}).relate(self => self.body.center.on(point([40, 50, 60])));
+const assembly = group([shifted]).expose({mount: shifted.body.surface(1), body: shifted.body});
+const outline = assembly.mount.edges();
+const ends = assembly.mount.edge(1).vertices();
+const center = assembly.mount.center;
+const mixed = [center, assembly.mount.edge(1)];
+export default assembly;`;
+  const module = await compileProject(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  assert.equal(module.diagnostic, undefined);
+  const binding = name =>
+    module.sourceTargets.find(
+      target =>
+        target.kind === 'value' &&
+        source.slice(target.sourceRef.start).startsWith(name + ' ='),
+    ).evaluations[0];
+  const outline = binding('outline');
+  assert.equal(outline.topologyReferences.length, 4);
+  assert.equal(outline.nodeIds.length, 1);
+  const ownerId = outline.nodeIds[0];
+  assert.equal(module.objects.get(ownerId).kind, 'group');
+  for (const reference of outline.topologyReferences) {
+    assert.equal(reference.nodeId, ownerId);
+    assert.equal(module.objects.get(reference.geometryNodeId).kind, 'solid');
+    assert.deepEqual(reference.transform.position, [40, 50, 60]);
+  }
+  const selection = module.sourceTargets.find(
+    target =>
+      target.kind === 'topology-selection' &&
+      source.slice(target.sourceRef.start, target.sourceRef.end) === 'edges()',
+  ).evaluations[0].selection;
+  assert.equal(selection.inputNodeId, ownerId);
+  assert.deepEqual(selection.scope.availableIds, [1, 2, 3, 4]);
+  assert.deepEqual(selection.scope.transform.position, [40, 50, 60]);
+  assert.deepEqual(
+    binding('ends').topologyReferences.map(reference => reference.id),
+    [1, 2],
+  );
+  assert.equal(binding('center').anchorReferences.length, 1);
+  assert.deepEqual(
+    binding('center').anchorReferences[0].transform.position,
+    [35, 50, 60],
+  );
+  assert.equal(binding('center').isCollection, false);
+  assert.equal(binding('mixed').topologyReferences.length, 1);
+  assert.equal(binding('mixed').anchorReferences.length, 1);
+});
+
+test('a failed chained selection keeps only the containing face selectable', async () => {
+  const source = `import {box, group} from '@code3d/core';
+const part = box(10, 20, 30);
+const assembly = group([part]).expose({mount: part.surface(1)});
+const invalid = assembly.mount.edge(12);`;
+  const module = await compileProject(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  assert.match(module.diagnostic.summary, /does not belong/);
+  const target = module.sourceTargets.find(
+    target =>
+      target.kind === 'topology-selection' &&
+      source.slice(target.sourceRef.start, target.sourceRef.end) === 'edge(12)',
+  );
+  const selection = target.evaluations[0].selection;
+  assert.deepEqual(selection.ids, []);
+  assert.deepEqual(selection.scope.availableIds, [1, 2, 3, 4]);
+  assert.equal(module.objects.get(selection.inputNodeId).kind, 'group');
+});
+
+test('topology selection guides contain only the requested original IDs', async () => {
+  const {restrictTopologyMesh} = await server.ssrLoadModule('/src/viewport.ts');
+  const module = await compileProject(
+    {
+      files: [
+        {
+          path: '/model.ts',
+          source: `import {box} from '@code3d/core'; export default box(10, 20, 30);`,
+        },
+      ],
+    },
+    '/model.ts',
+  );
+  const mesh = module.fallback.mesh;
+  const vertices = restrictTopologyMesh(mesh, 'vertex', new Set([2, 4]));
+  assert.deepEqual(vertices.vertexIds, [2, 4]);
+  assert.equal(vertices.topologyVertices.length, 6);
+  const edges = restrictTopologyMesh(mesh, 'edge', new Set([2, 4]));
+  assert.deepEqual(
+    edges.edgeGroups.map(group => group.edgeId),
+    [2, 4],
+  );
+  assert.equal(edges.edgeGroups[0].start, 0);
+  assert.equal(
+    edges.edges.length,
+    edges.edgeGroups.reduce((sum, group) => sum + group.count * 3, 0),
+  );
+  const faces = restrictTopologyMesh(mesh, 'surface', new Set([2, 4]));
+  assert.deepEqual(
+    faces.surfaceGroups.map(group => group.surfaceId),
+    [2, 4],
+  );
+  assert.equal(faces.surfaceGroups[0].start, 0);
+  assert.equal(
+    faces.triangles.length,
+    faces.surfaceGroups.reduce((sum, group) => sum + group.count, 0),
+  );
+});
+
 test('a caret on range previews one map result with resolved collection placement', async () => {
   for (const count of [5, 1]) {
     const source = [

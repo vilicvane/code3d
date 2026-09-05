@@ -66,10 +66,15 @@ shows which operations are supported by the value you hold.
 
 - `.fillet(radius, edgeIds?)`: round selected edges, or all edges.
 - `.chamfer(distance, edgeIds?)`: bevel selected edges, or all edges.
-- `.paint(color)`: assign a model color.
+- `.paint(color)`: return a recolored model; a group recursively overrides
+  every descendant's color, including already-painted parts and nested groups.
 - `.relate(self => constraint)` or `.relate(self => [first, second])`: attach
   one or more relations for placement in a composition.
 - `.expose({name: element})`: publish a typed named-element interface.
+
+The outermost painted group determines the color of its complete subtree.
+Painting again replaces that override. Original models and shared parts used
+elsewhere retain their colors; previews and exports use the same result.
 
 ## Origins and rotation
 

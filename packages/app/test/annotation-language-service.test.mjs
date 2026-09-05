@@ -304,6 +304,67 @@ test('reports duplicate parameter tags and annotations on unsupported declaratio
   );
 });
 
+test('accepts static defaults for optional numeric parameters', () => {
+  for (const [config, parameters, expected] of [
+    ["{kind: 'angle', default: 60}", 'width = 75', 60],
+    ["{kind: 'scalar', default: 0}", 'width?: number', 0],
+    ["{kind: 'ratio', default: -0.5}", 'width?: number', -0.5],
+    [
+      "{kind: 'length', default: +4, constraints: {min: 4, max: 4}}",
+      'width?: number',
+      4,
+    ],
+    [
+      "{kind: 'count', default: 3, constraints: {exclusiveMin: 2, exclusiveMax: 4}}",
+      'width = 3',
+      3,
+    ],
+  ]) {
+    const file = sourceFile(declaration(`width ${config}`, parameters));
+    assert.deepEqual(diagnostics(file), [], config);
+    assert.equal(
+      readParameters(file.statements[0])[0].config.default,
+      expected,
+    );
+  }
+});
+
+test('reports invalid defaults through the shared annotation diagnostics and parser', () => {
+  for (const [config, parameters = 'width?: number'] of [
+    ["{kind: 'angle', default: 60}", 'width: number'],
+    ["{kind: 'scalar', default: 1}", 'width?: number[]'],
+    ["{kind: 'scalar', default: 1}", 'width?: string'],
+    ["{kind: 'edge', default: 1}"],
+    ["{kind: 'count', default: 1.5}"],
+    ["{kind: 'scalar', default: 1e999}"],
+    ["{kind: 'scalar', default: '60'}"],
+    ["{kind: 'scalar', default: null}"],
+    ["{kind: 'scalar', default: true}"],
+    ["{kind: 'scalar', default: [1]}"],
+    ["{kind: 'scalar', default: {value: 1}}"],
+    ["{kind: 'angle', default: Math.PI}"],
+    ["{kind: 'angle', default: initial}"],
+    ["{kind: 'angle', default: undefined}"],
+    ["{kind: 'angle', default: 30 + 30}"],
+    ["{kind: 'angle', default: 30, default: 60}"],
+    ["{kind: 'length', default: 0, constraints: {min: 1}}"],
+    ["{kind: 'length', default: 2, constraints: {max: 1}}"],
+    ["{kind: 'length', default: 1, constraints: {exclusiveMin: 1}}"],
+    ["{kind: 'length', default: 1, constraints: {exclusiveMax: 1}}"],
+  ]) {
+    const file = sourceFile(declaration(`width ${config}`, parameters));
+    const [issue] = diagnostics(file);
+    assert.ok(issue, config);
+    assert.ok(issue.start >= file.text.indexOf('width'));
+    assert.ok(issue.start + issue.length <= file.text.indexOf('*/'));
+    assert.throws(
+      () => readParameters(file.statements[0]),
+      error => error.message === issue.messageText,
+      config,
+    );
+  }
+});
+
 test('completes parameter names with replacement ranges, including an empty name', () => {
   for (const fragment of ['|', 'wi|', 'wi|dth']) {
     const result = complete(declaration(fragment));
@@ -322,6 +383,7 @@ test('completes config fields, kind values, numeric constraints and actions from
   assert.deepEqual(names(complete(declaration('width {|}'))), [
     'actions',
     'constraints',
+    'default',
     'kind',
     'label',
   ]);
@@ -353,6 +415,26 @@ test('completes config fields, kind values, numeric constraints and actions from
     !names(complete(declaration("edges {kind: 'edge', |}"))).includes(
       'constraints',
     ),
+  );
+  assert.ok(
+    !names(complete(declaration("edges {kind: 'edge', |}"))).includes(
+      'default',
+    ),
+  );
+  const result = complete(
+    declaration("width {kind: 'length', def|}", 'width = 4'),
+  );
+  assert.ok(names(result).includes('default'));
+  const details = languageService.details(
+    result.file,
+    result.position,
+    'default',
+    {},
+    preferences,
+  );
+  assert.match(
+    details.displayParts.map(part => part.text).join(''),
+    /default\?: number/,
   );
 });
 

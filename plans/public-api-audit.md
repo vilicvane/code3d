@@ -152,11 +152,10 @@ screws 也已有具体用途的公开属性：`ISO4762.specifications` 及其规
   把 Coil 列为实体原语。可由其他原语组合不构成排除依据。
 - `@code3d.param` 直接标注公开函数变量，支持调用点 panel 和包声明文件；
   不为 primitive factory 扩展 `@code3d.arguments`。
-- 参数默认值展示的设计边界已确认：面板需要的默认值信息写在 `@code3d.param`
-  中，使源码和已发布 `.d.ts` 使用同一规则；`twist = 60` 等参数初始化器仍属于
-  函数实现。annotation 只描述交互元数据，不注入非交互运行时，也不改变省略实参
-  时的运行语义；作者负责使静态描述与实现保持一致。默认值字段及面板展示已由
-  [#29](https://github.com/vilicvane/code3d/issues/29) 实现并合并到 main。
+- 可选数值参数的面板默认值由 `@code3d.param` 的 `default` 字段静态描述，
+  源码与已发布 `.d.ts` 共用解析。省略实参时以 placeholder 展示，主动输入才
+  写入显式实参；实际运行默认值由函数实现决定，作者负责保持两者一致。
+  具体规则见 [TOOLING.md](../TOOLING.md)，实现跟踪在 [#29](https://github.com/vilicvane/code3d/issues/29)。
 - 公共 API 的职责或签名发生设计调整时，先明确说明改动、需求依据和代价。
 
 ## 审阅结论
@@ -214,9 +213,13 @@ withChildren、内部资源生命周期和 screws 查询接口不再列为待决
   具名元素类型。
 - topology、scale、fillet/chamfer 的 `@code3d.param` 注释放在公共能力签名上，App
   继续能从作者实际解析到的 method signature 生成 panel。
-- `paint` 属于共同能力。group 保存覆盖色，生成子树快照时递归传递；外层显式
-  覆盖色优先，预览与导出使用同一结果。只创建当前 group 的新值，内部模型、关系和
-  expose 引用保持原身份，其他装配中的共享对象不受影响。
+- `paint` 属于共同能力。group 的颜色递归覆盖子模型和内层 group 的已有颜色；
+  未着色的 group 保留子项颜色。覆盖色保存在新的 group 值上，生成子树快照时向下
+  传递，因此成员身份、关系和 expose 引用保持不变，原对象及其他装配中的共享对象
+  不受影响。预览与导出使用相同的有效颜色。
+- 未使用的内部 `withChildren` 及其专用校验函数已删除。group 的子项由 `group()`
+  构造时指定，不预先公开子项替换 API；未来按实际用例再设计。
+  见 [#32](https://github.com/vilicvane/code3d/issues/32)。
 
 ## 当前状态
 

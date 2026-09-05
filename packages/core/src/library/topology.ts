@@ -19,6 +19,77 @@ export type SurfaceId = number;
 
 export type TopologyKind = 'vertex' | 'edge' | 'surface';
 
+export type TopologySelection =
+  Readonly<{kind: 'solid'}> | Readonly<{kind: TopologyKind; id: number}>;
+
+/** Visit an owned wrapper; callers must not retain it beyond the callback. */
+export function withTopologyShape<T>(
+  shape: AnyShape,
+  topology: ShapeTopology,
+  selection: TopologySelection,
+  visit: (selected: AnyShape) => T,
+): T {
+  if (selection.kind === 'solid') return visit(shape);
+  const shapes = topologyShapes(shape, selection.kind);
+  try {
+    return visit(
+      shapes[
+        resolveTopologyIndex(
+          selection.kind,
+          topology[topologyMetadata[selection.kind].plural],
+          selection.id,
+        )
+      ],
+    );
+  } finally {
+    deleteShapes(shapes);
+  }
+}
+
+/** Child IDs always belong to the original geometry's namespace. */
+export function topologyChildren(
+  shape: AnyShape,
+  topology: ShapeTopology,
+  selection: TopologySelection,
+  kind: TopologyKind,
+  ids?: readonly number[],
+): readonly number[] {
+  const all = topology[topologyMetadata[kind].plural];
+  const available =
+    selection.kind === 'solid'
+      ? all.ids
+      : withTopologyShape(shape, topology, selection, selected => {
+          const children = topologyShapes(selected, kind);
+          const originals = topologyShapes(shape, kind);
+          try {
+            return all.ids.filter((_, index) =>
+              children.some(child => child.isSame(originals[index])),
+            );
+          } finally {
+            deleteShapes(children);
+            deleteShapes(originals);
+          }
+        });
+  if (!ids) return available;
+  return ids.map(id => {
+    resolveTopologyId(kind, all, id);
+    if (!available.includes(id)) {
+      throw new Error(
+        `${topologyMetadata[kind].prefix}${id} does not belong to ${selection.kind}${selection.kind === 'solid' ? '' : ` ${topologyMetadata[selection.kind].prefix}${selection.id}`}.`,
+      );
+    }
+    return id;
+  });
+}
+
+function topologyShapes(shape: AnyShape, kind: TopologyKind): AnyShape[] {
+  return kind === 'vertex'
+    ? shapeVertices(shape)
+    : kind === 'edge'
+      ? shape.edges
+      : shape.faces;
+}
+
 type StableTopology<Id extends number> = Readonly<{
   /** Stable IDs aligned with the corresponding shape traversal order. */
   ids: readonly Id[];

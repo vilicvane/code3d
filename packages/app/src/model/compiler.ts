@@ -14,6 +14,7 @@ import {
   type ParameterUsage,
   type SourceRef,
   type TopologyKind,
+  type Transform,
 } from '@code3d/core/tooling';
 import type * as CoreTooling from '@code3d/core/tooling';
 import type {ProjectLanguage} from '../project/project-language';
@@ -44,14 +45,30 @@ import {
 
 type TopologyValueReference = Readonly<{
   nodeId: string;
-  kind: TopologyKind;
-  id: number;
+  name: string;
+  geometryNodeId: string;
+  transform: Transform;
+}> &
+  ({kind: 'solid'} | {kind: TopologyKind; id: number});
+
+type AnchorValueReference = Readonly<{
+  nodeId: string;
+  name: string;
+  kind: ElementKind;
+  transform: Transform;
+}>;
+
+export type TopologySelectionScope = Readonly<{
+  geometryNodeId: string;
+  transform: Transform;
+  availableIds: readonly number[];
 }>;
 
 export type SourceTargetEvaluation = Readonly<{
   /** A container's members share relation placement, unlike a single value. */
   isCollection?: boolean;
   topologyReferences?: readonly TopologyValueReference[];
+  anchorReferences?: readonly AnchorValueReference[];
   runtime: RuntimeReach;
   toolExecutionOrder?: number;
   nodeIds: readonly string[];
@@ -67,11 +84,7 @@ export type SourceTargetEvaluation = Readonly<{
   constraintId?: string;
   constraintSourceNodeId?: string;
   contextId: string;
-  element?: Readonly<{
-    nodeId: string;
-    name: string;
-    kind: ElementKind;
-  }>;
+  element?: AnchorValueReference;
   selection?:
     | Readonly<{
         kind: 'edges';
@@ -82,6 +95,7 @@ export type SourceTargetEvaluation = Readonly<{
         kind: TopologyKind;
         inputNodeId: string;
         ids: readonly number[];
+        scope?: TopologySelectionScope;
       }>;
 }>;
 
@@ -238,6 +252,7 @@ type SourceValueTrace = {
       objects: readonly ModelObject[];
       isCollection: boolean;
       topologyReferences: readonly TopologyValueReference[];
+      anchorReferences: readonly AnchorValueReference[];
       contextId: string;
       runtime: RuntimeReach;
     }>
@@ -278,6 +293,8 @@ type SourceElementTrace = {
       model: ModelObject;
       name: string;
       kind: ElementKind;
+      transform: Transform;
+      topology?: TopologyValueReference;
       contextId: string;
       runtime: RuntimeReach;
     }>
@@ -331,6 +348,7 @@ export function createModelCompiler(
     modelElementReference,
     modelObjectRuntimeInfo,
     modelTopologyReference,
+    modelTopologyIds,
     relatedModelObjects,
   } = runtime;
   const diagnosticFromError = (error: unknown) =>
@@ -604,7 +622,7 @@ export function createModelCompiler(
           siteId,
           execution: executionTrace.execution,
           sourceRef: sourceRef(file, start, end),
-          isCollection: !isModelObject(value) && !modelTopologyReference(value),
+          isCollection: !isModelObject(value) && !modelElementReference(value),
           objects,
           contextId: executionTrace.contextId,
           runtime: completedRuntimeReach(),
@@ -669,6 +687,7 @@ export function createModelCompiler(
       };
       trace.evaluations.push({
         ...reference,
+        topology: topologyValueReference(value),
         contextId: context.id,
         runtime: completedRuntimeReach(),
       });
@@ -766,7 +785,13 @@ export function createModelCompiler(
     scopeRef?: SourceRef,
   ): void {
     const topologyReferences: TopologyValueReference[] = [];
-    const objects = modelObjectsIn(value, new Set(), topologyReferences);
+    const anchorReferences: AnchorValueReference[] = [];
+    const objects = modelObjectsIn(
+      value,
+      new Set(),
+      topologyReferences,
+      anchorReferences,
+    );
     if (objects.length === 0) {
       return;
     }
@@ -780,8 +805,9 @@ export function createModelCompiler(
     };
     sourceTrace.evaluations.push({
       objects,
-      isCollection: !isModelObject(value) && !modelTopologyReference(value),
+      isCollection: !isModelObject(value) && !modelElementReference(value),
       topologyReferences,
+      anchorReferences,
       contextId,
       runtime,
     });
@@ -835,10 +861,28 @@ export function createModelCompiler(
     catalogTraces.set(metadata.id, trace);
   }
 
+  function topologyValueReference(
+    value: unknown,
+  ): TopologyValueReference | undefined {
+    const reference = modelTopologyReference(value);
+    if (!reference) return undefined;
+    tracedObjects.add(reference.geometry);
+    const common = {
+      nodeId: modelObjectNodeId(reference.model),
+      name: modelElementReference(value)!.name,
+      geometryNodeId: modelObjectNodeId(reference.geometry),
+      transform: reference.transform,
+    };
+    return reference.kind === 'solid'
+      ? {...common, kind: 'solid'}
+      : {...common, kind: reference.kind, id: reference.id};
+  }
+
   function modelObjectsIn(
     value: unknown,
     seen = new Set<unknown>(),
     topologyReferences?: TopologyValueReference[],
+    anchorReferences?: AnchorValueReference[],
   ): ModelObject[] {
     if (isModelObject(value)) {
       return [value];
@@ -846,15 +890,26 @@ export function createModelCompiler(
     const topology = modelTopologyReference(value);
     if (topology) {
       const nodeId = modelObjectNodeId(topology.model);
-      const ownerRecorded = topologyReferences?.some(
-        reference => reference.nodeId === nodeId,
-      );
-      topologyReferences?.push({
-        nodeId,
-        kind: topology.kind,
-        id: topology.id,
-      });
+      const ownerRecorded =
+        topologyReferences?.some(reference => reference.nodeId === nodeId) ||
+        anchorReferences?.some(reference => reference.nodeId === nodeId);
+      topologyReferences?.push(topologyValueReference(value)!);
+      tracedObjects.add(topology.geometry);
       return ownerRecorded ? [] : [topology.model];
+    }
+    const anchor = modelElementReference(value);
+    if (anchor) {
+      const nodeId = modelObjectNodeId(anchor.model);
+      const ownerRecorded =
+        anchorReferences?.some(reference => reference.nodeId === nodeId) ||
+        topologyReferences?.some(reference => reference.nodeId === nodeId);
+      anchorReferences?.push({
+        nodeId,
+        name: anchor.name,
+        kind: anchor.kind,
+        transform: anchor.transform,
+      });
+      return ownerRecorded ? [] : [anchor.model];
     }
     if (typeof value !== 'object' || value === null || seen.has(value)) {
       return [];
@@ -862,12 +917,12 @@ export function createModelCompiler(
     seen.add(value);
     if (value instanceof Map) {
       return [...Map.prototype.values.call(value)].flatMap(item =>
-        modelObjectsIn(item, seen, topologyReferences),
+        modelObjectsIn(item, seen, topologyReferences, anchorReferences),
       );
     }
     if (value instanceof Set) {
       return [...Set.prototype.values.call(value)].flatMap(item =>
-        modelObjectsIn(item, seen, topologyReferences),
+        modelObjectsIn(item, seen, topologyReferences, anchorReferences),
       );
     }
     const prototype = Object.getPrototypeOf(value);
@@ -880,7 +935,12 @@ export function createModelCompiler(
       return Object.values(Object.getOwnPropertyDescriptors(value)).flatMap(
         property =>
           property.enumerable && 'value' in property
-            ? modelObjectsIn(property.value, seen, topologyReferences)
+            ? modelObjectsIn(
+                property.value,
+                seen,
+                topologyReferences,
+                anchorReferences,
+              )
             : [],
       );
     }
@@ -1435,7 +1495,14 @@ export function createModelCompiler(
     const valueTargets = [...sourceValueTraces.values()].map(trace => {
       const toolSite = toolCallSites.get(trace.id);
       const evaluations = trace.evaluations.map(
-        ({objects, isCollection, topologyReferences, contextId, runtime}) => {
+        ({
+          objects,
+          isCollection,
+          topologyReferences,
+          anchorReferences,
+          contextId,
+          runtime,
+        }) => {
           const nodeIds = objects.map(modelObjectNodeId);
           const operationId = [...operations.values()].find(
             operation =>
@@ -1447,7 +1514,11 @@ export function createModelCompiler(
             runtime,
             nodeIds,
             topologyReferences,
-            focusNodeIds: topologyReferences.length > 0 ? nodeIds : undefined,
+            anchorReferences,
+            focusNodeIds:
+              topologyReferences.length + anchorReferences.length > 0
+                ? nodeIds
+                : undefined,
             operationId,
             contextId,
             parameters: sourceExecutionFor(trace.id, contextId, runtime)
@@ -1608,7 +1679,11 @@ export function createModelCompiler(
           execution => {
             if (execution.siteId !== site.siteId) return [];
             const receiver = execution.receiver;
-            if (!isModelObject(receiver)) return [];
+            const reference = modelTopologyReference(receiver);
+            const owner = isModelObject(receiver) ? receiver : reference?.model;
+            if (!owner) return [];
+            const availableIds = modelTopologyIds(receiver, parameter.kind);
+            if (!availableIds) return [];
             const operation = operations.get(
               traceExecutionKey(execution.siteId, execution.execution),
             );
@@ -1624,27 +1699,31 @@ export function createModelCompiler(
             return [
               {
                 runtime: sourceExecutionRuntime(execution),
-                nodeIds: [
-                  operation?.outputNodeId ?? modelObjectNodeId(receiver),
-                ],
+                nodeIds: [operation?.outputNodeId ?? modelObjectNodeId(owner)],
                 operationId: operation?.id,
                 focusNodeIds: operation
                   ? undefined
-                  : [modelObjectNodeId(receiver)],
+                  : [modelObjectNodeId(owner)],
                 parameters: execution.parameters,
                 contextId: execution.contextId,
                 selection: {
                   kind: parameter.kind,
-                  inputNodeId: modelObjectNodeId(receiver),
+                  inputNodeId: modelObjectNodeId(owner),
                   ids: returnedReferences?.length
-                    ? returnedReferences
-                        .filter(reference => reference.kind === parameter.kind)
-                        .map(reference => reference.id)
-                    : validAttemptedTopologyIds(
-                        objects.get(modelObjectNodeId(receiver)),
-                        parameter.kind,
-                        attemptedIds,
-                      ),
+                    ? returnedReferences.flatMap(reference =>
+                        reference.kind !== 'solid' &&
+                        reference.kind === parameter.kind
+                          ? [reference.id]
+                          : [],
+                      )
+                    : attemptedIds.filter(id => availableIds.includes(id)),
+                  scope: reference
+                    ? {
+                        geometryNodeId: modelObjectNodeId(reference.geometry),
+                        transform: reference.transform,
+                        availableIds,
+                      }
+                    : undefined,
                 },
               } satisfies SourceTargetEvaluation,
             ];
@@ -1761,10 +1840,14 @@ export function createModelCompiler(
             nodeIds: [modelObjectNodeId(element.model)],
             focusNodeIds: [modelObjectNodeId(element.model)],
             contextId: element.contextId,
+            topologyReferences: element.topology
+              ? [element.topology]
+              : undefined,
             element: {
               nodeId: modelObjectNodeId(element.model),
               name: element.name,
               kind: element.kind,
+              transform: element.transform,
             },
           })),
           contextTargetIds: [],
@@ -2029,22 +2112,6 @@ export function createModelCompiler(
         ),
       ),
     ];
-  }
-
-  function validAttemptedTopologyIds(
-    input: ModelSnapshotObject | undefined,
-    kind: TopologyKind,
-    attempted: readonly number[],
-  ): number[] {
-    if (!input?.mesh) return [];
-    const available = new Set(
-      kind === 'vertex'
-        ? input.mesh.vertexIds
-        : kind === 'edge'
-          ? input.mesh.edgeGroups.map(group => group.edgeId)
-          : input.mesh.surfaceGroups.map(group => group.surfaceId),
-    );
-    return attempted.filter(id => available.has(id));
   }
 
   function validAttemptedEdgeIds(
@@ -3299,15 +3366,25 @@ export function createModelCompiler(
     sourceFile: ts.SourceFile,
   ): ToolCallSite {
     const sourceStart = callSourceStart(node, sourceFile);
+    const spreadIndex = node.arguments.findIndex(ts.isSpreadElement);
     return {
       siteId,
       sourceRef: sourceRef(sourceFile.fileName, sourceStart, node.getEnd()),
       signature,
-      arguments: signature.parameters.flatMap(parameter => {
-        const target = toolArgumentSource(node, parameter.index, sourceFile);
-        return target
-          ? [{name: parameter.name, index: parameter.index, target}]
-          : [];
+      arguments: signature.parameters.map(parameter => {
+        const unknown = spreadIndex >= 0 && parameter.index >= spreadIndex;
+        return {
+          name: parameter.name,
+          index: parameter.index,
+          presence: unknown
+            ? 'unknown'
+            : parameter.index < node.arguments.length
+              ? 'present'
+              : 'omitted',
+          target: unknown
+            ? undefined
+            : toolArgumentSource(node, parameter.index, sourceFile),
+        };
       }),
     };
   }

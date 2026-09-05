@@ -203,7 +203,7 @@ test('uses installed just-range ESM and types with builtin core across cached mo
   }
 });
 
-test('does not substitute Studio packages when a project declares but has not installed core', async () => {
+test('does not substitute App packages when a project declares but has not installed core', async () => {
   const files = {async readFile() {}, async stat() {}};
   const compiler = new ProjectCompiler(
     files,
