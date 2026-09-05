@@ -1,0 +1,135 @@
+import assert from 'node:assert/strict';
+import {test} from 'node:test';
+import {chromium} from 'playwright-core';
+
+test(
+  'relation anchors render their owner, peer context, and selectable topology together',
+  {timeout: 120_000},
+  async t => {
+    const appUrl = process.env.CODE3D_TEST_URL;
+    assert.ok(appUrl, 'Set CODE3D_TEST_URL to the task development server');
+    const browser = await chromium.connectOverCDP(
+      process.env.CODE3D_CDP_URL ?? 'http://localhost:9222',
+    );
+    t.after(() => browser.close());
+    const context = await browser.newContext();
+    t.after(() => context.close());
+    const page = await context.newPage();
+    const url = new URL('/__relation-anchor-preview-test__', appUrl).href;
+    await page.route(url, route =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: '<main style="width:800px;height:600px"></main>',
+      }),
+    );
+    await page.goto(url);
+    const results = await page.evaluate(async () => {
+      const {ModelCompilerClient} =
+        await import('/src/model/compiler-client.ts');
+      const {browserPackageFiles} =
+        await import('/src/project/browser-packages.ts');
+      const {ModelViewport} = await import('/src/viewport.ts');
+      const {elementSourceDecoration} =
+        await import('/src/model/element-decorations.ts');
+      const client = new ModelCompilerClient(browserPackageFiles);
+      const viewport = new ModelViewport(document.querySelector('main'), {
+        onSelect() {},
+        onDrillDown() {},
+        onNavigateSource() {},
+        onPositionTool() {},
+        onTopologySelection() {},
+        sourceDecorationProviders: [elementSourceDecoration],
+      });
+      const results = [];
+      try {
+        for (const [sourceAnchor, targetAnchor] of [
+          ['self.edge(3)', 'base.edge(1)'],
+          ['self.surface(2)', 'base.surface(1)'],
+          ['self.vertex(2)', 'base.vertex(1)'],
+          ['self.top', 'base.bottom'],
+        ]) {
+          const source = `import {box, group} from '@code3d/core';
+          const base = box(10, 10, 10);
+          const part = box(20, 20, 20).relate(self => ${sourceAnchor}.on(${targetAnchor}));
+          const peer = box(3, 3, 3).relate(self => self.bottom.on(base.top).offset(20, 0, 0));
+          export default group([base, part, peer]);`;
+          const module = await client.compile(
+            {files: [{path: '/main.ts', source}]},
+            '/main.ts',
+          );
+          if (module.diagnostic) throw new Error(module.diagnostic.message);
+          viewport.renderModule(module);
+          for (const anchor of [sourceAnchor, targetAnchor]) {
+            viewport.selectBySourceOffset(
+              '/main.ts',
+              source.indexOf(anchor) + anchor.length - 1,
+            );
+            const {target, evaluation} = viewport.sourceEvaluation();
+            const selected = viewport.getSelected();
+            const rendered = [
+              ...viewport.occurrences.values(),
+              ...viewport.contextOccurrences.values(),
+            ];
+            const selection = evaluation.selection;
+            let availableIds;
+            if (selection) {
+              availableIds = viewport.beginTopologySelection(
+                selected.key,
+                selection.inputNodeId,
+                selection.kind,
+                false,
+                selection.ids,
+              );
+            }
+            results.push({
+              anchor,
+              kind: target.kind,
+              focusCount: viewport.occurrences.size,
+              contextCount: viewport.contextOccurrences.size,
+              ownerSelected:
+                selected.node.nodeId ===
+                (selection?.inputNodeId ?? evaluation.element.nodeId),
+              correctPlacements: rendered.every(
+                ({node, object, placement}) =>
+                  placement === 'composition' &&
+                  object.position
+                    .toArray()
+                    .every(
+                      (value, index) =>
+                        Math.abs(
+                          value - node.compositionTransform.position[index],
+                        ) < 1e-6,
+                    ),
+              ),
+              availableIds,
+              selectedIds: selection
+                ? [...viewport.topologySelection.selectedIds]
+                : undefined,
+              overlayCount: selection
+                ? viewport.topologySelectionOverlay?.children.length
+                : viewport.decorationLayers.get('source-context:named-element')
+                    ?.length,
+              toolArgument: evaluation.toolArguments?.[0],
+            });
+            viewport.endTopologySelection();
+          }
+        }
+        return results;
+      } finally {
+        client.dispose();
+      }
+    });
+    assert.equal(results.length, 8);
+    for (const result of results) {
+      assert.equal(result.focusCount, 1, result.anchor);
+      assert.equal(result.contextCount, 2, result.anchor);
+      assert.equal(result.ownerSelected, true, result.anchor);
+      assert.equal(result.correctPlacements, true, result.anchor);
+      assert.ok(result.overlayCount > 0, result.anchor);
+      if (result.kind === 'topology-selection') {
+        assert.deepEqual(result.selectedIds, [result.toolArgument]);
+        assert.ok(result.availableIds.includes(result.toolArgument));
+      }
+    }
+  },
+);

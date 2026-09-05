@@ -537,7 +537,7 @@ export class ModelViewport {
     const evaluation = target.evaluations[evaluationIndex];
     if (!this.module || !evaluation) return false;
     const receiverNodeId =
-      evaluation.element?.nodeId ??
+      evaluation.focusNodeIds?.[0] ??
       evaluation.nodeIds.find(nodeId => this.module?.objects.has(nodeId));
     const receiver = receiverNodeId
       ? this.module.objects.get(receiverNodeId)
@@ -569,7 +569,7 @@ export class ModelViewport {
       {kind: 'completion'},
       true,
       undefined,
-      receiver.nodeId,
+      [receiver.nodeId],
     );
     return true;
   }
@@ -1019,16 +1019,16 @@ export class ModelViewport {
     renderedViewTarget: RenderedViewTarget,
     fitCamera: boolean,
     selectedKey?: string,
-    focusedNodeId = evaluation.element?.nodeId,
+    focusNodeIds = evaluation.focusNodeIds,
   ): void {
     const relatedNodes = this.resolveNodes(evaluation.nodeIds);
     const placement = sourceTargetPlacement(evaluation);
-    const focusNodes = focusedNodeId
-      ? relatedNodes.filter(node => node.nodeId === focusedNodeId)
+    const focusNodes = focusNodeIds
+      ? relatedNodes.filter(node => focusNodeIds.includes(node.nodeId))
       : relatedNodes;
-    const relationContextNodes = focusedNodeId
+    const relationContextNodes = focusNodeIds
       ? relatedNodes
-          .filter(node => node.nodeId !== focusedNodeId)
+          .filter(node => !focusNodeIds.includes(node.nodeId))
           .map(node => ({node, targetId: target.id}))
       : [];
     const contextNodes = uniqueContextNodes([
@@ -1041,7 +1041,7 @@ export class ModelViewport {
     ]);
     const layeredScene = focusNodes.length + contextNodes.length > 1;
     this.selectionEmphasized =
-      focusedNodeId !== undefined || target.kind !== 'constraint';
+      focusNodeIds !== undefined || target.kind !== 'constraint';
     this.renderedViewTarget = renderedViewTarget;
     this.resetRenderedView();
     contextNodes.forEach(({node, targetId}, index) => {

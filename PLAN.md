@@ -182,10 +182,14 @@ implementation context and historical outcomes, not a competing work queue.
   context from the concrete downstream composition that consumes the
   constrained value. The constrained value remains the relation-edit scope for
   spatial tools; the relation target does not replace downstream context.
-- A caret on a named-element property keeps its surrounding relation visible,
-  promotes the owning model, and highlights the typed point, line, face, or
-  frame. Face elements highlight matching B-Rep face groups and their real
-  boundaries rather than drawing a proxy plane. A focused item in Monaco's
+- Named-element properties and topology anchors share one relation-preview
+  context: the owning model is the focus, with the other participant and the
+  concrete downstream composition visible as dimmed peers. Matching uses the
+  enclosing constraint's source range and execution, including repeated calls
+  sharing a reference model. Topology accessors retain their own selection IDs,
+  arguments, and tool execution. Named point, line, face, and frame elements
+  retain typed decorations; faces highlight matching B-Rep face groups and
+  their real boundaries rather than drawing a proxy plane. A focused item in Monaco's
   native completion list is applied to an in-memory project snapshot and that
   completed snapshot drives a transient compiled viewport; named elements use
   the current module for immediate feedback while the speculative compile is
@@ -335,8 +339,10 @@ code3d annotations.
 is complete: selecting an `on()` or `offset()` constraint renders the
 constrained value with peers from its concrete downstream composition, exposes
 multiple consumers as separate scopes, and enables relation tools directly.
-Named-element property occurrences now refine that scope: the owning model and
-typed anchor are highlighted while all relation participants remain visible.
+Named-element properties and edge, surface, and vertex anchors refine that
+scope through the same context resolver. The owning model and selected anchor
+are highlighted while all relation participants remain visible; each accessor
+keeps its own editing arguments across runtime calls and downstream consumers.
 Focused items in Monaco's native TypeScript member completion reuse the same
 viewport preview immediately, then replace it with a model compiled from the
 hypothetically accepted completion. The incomplete source and caret remain
