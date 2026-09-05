@@ -161,6 +161,37 @@ export default group([base, top], 'Assembly');`;
   }
 });
 
+test('project compilation carries recursive group colors into exported materials', async () => {
+  const compiler = await createTestProjectCompiler(server);
+  const source = `import {box, group} from '@code3d/core';
+const base = box(10, 4, 10).paint('#ff0000');
+const top = box(2, 2, 2).relate(self => self.bottom.on(base.top));
+export default group([base, group([top]).paint('#00ff00')]).paint('#345678');`;
+  try {
+    const module = await compiler.compile(
+      {files: [{path: '/model.ts', source}]},
+      '/model.ts',
+    );
+    assert.equal(module.diagnostic, undefined);
+    const snapshot = module.objects.get(module.exports.get('default'));
+    const instances = collectExportInstances(scene(snapshot));
+    assert.deepEqual(
+      instances.map(instance => instance.color),
+      ['#345678', '#345678'],
+    );
+    const blob = compiler.export(instances, {...defaults, format: '3mf'});
+    const {model, meshes} = read3mf(await blob.arrayBuffer());
+    assert.equal(meshes.length, 2);
+    const colors = [...model.matchAll(/displaycolor="([^"]+)"/g)].map(
+      match => match[1],
+    );
+    assert.ok(colors.length > 0);
+    assert.ok(colors.every(color => color === '#345678'));
+  } finally {
+    compiler.dispose();
+  }
+});
+
 for (const mode of ['builtin', 'installed']) {
   test(`exports with the ${mode} project kernel across cached npm model edits and releases old geometry`, async () => {
     const compiler = await createTestProjectCompiler(server);
