@@ -1,8 +1,10 @@
 import type {SourceTargetEvaluation} from '../model/compiler';
 import type {ParameterUsage, SourceRef} from '@code3d/core/tooling';
 import {editableParameterUsages} from '../model/parameter-provenance';
+import {validToolParameterValue} from '../model/tool-parameter-config';
 import {
   isToolSelectionParameter,
+  type ToolArgumentEditTarget,
   type ToolArgumentSource,
   type ToolSignatureSchema,
   type ToolValueParameterSchema,
@@ -15,9 +17,9 @@ export type ContextualToolParameterState = {
   schema: ToolValueParameterSchema;
   binding?:
     | Readonly<{kind: 'parameter'; usage: ParameterUsage}>
-    | Readonly<{kind: 'argument'; target: ToolArgumentSource['target']}>;
+    | Readonly<{kind: 'argument'; target: ToolArgumentEditTarget}>;
   value?: number;
-  expressionValue?: number;
+  placeholderValue?: number;
 };
 
 export function contextualToolParameters(
@@ -34,9 +36,10 @@ export function contextualToolParameters(
           !isToolSelectionParameter(parameter),
       )
       .map(schema => {
-        const argument = arguments_.find(
+        const source = arguments_.find(
           candidate => candidate.index === schema.index,
-        )?.target;
+        );
+        const argument = source?.target;
         const matches = editableParameterUsages(
           usages.filter(
             usage =>
@@ -48,7 +51,7 @@ export function contextualToolParameters(
               Math.abs(usage.sensitivity) > 1e-9,
           ),
         );
-        const usage = matches.length === 1 ? matches[0] : undefined;
+        const usage = argument && matches.length === 1 ? matches[0] : undefined;
         return [
           schema.name,
           {
@@ -59,10 +62,12 @@ export function contextualToolParameters(
                 ? {kind: 'argument', target: argument}
                 : undefined,
             value: usage?.value,
-            expressionValue:
+            placeholderValue:
               argument?.kind === 'present'
                 ? toolArguments?.[schema.index]
-                : undefined,
+                : source?.presence === 'omitted'
+                  ? schema.default
+                  : undefined,
           },
         ];
       }),
@@ -100,8 +105,8 @@ export function contextualParameterView(
     label: parameter.schema.label,
     value: parameter.value,
     placeholder:
-      parameter.value === undefined && parameter.expressionValue !== undefined
-        ? formatDisplayNumber(parameter.expressionValue)
+      parameter.value === undefined && parameter.placeholderValue !== undefined
+        ? formatDisplayNumber(parameter.placeholderValue)
         : undefined,
     step: contextualParameterStep(parameter),
     min: parameter.schema.constraints?.min,
@@ -116,17 +121,8 @@ export function validContextualParameter(
   parameter: ContextualToolParameterState,
 ): boolean {
   const value = parameter.value;
-  if (value === undefined || !Number.isFinite(value)) return false;
-  if (parameter.schema.kind === 'count' && !Number.isInteger(value))
-    return false;
-  const constraints = parameter.schema.constraints;
-  return !(
-    (constraints?.min !== undefined && value < constraints.min) ||
-    (constraints?.exclusiveMin !== undefined &&
-      value <= constraints.exclusiveMin) ||
-    (constraints?.max !== undefined && value > constraints.max) ||
-    (constraints?.exclusiveMax !== undefined &&
-      value >= constraints.exclusiveMax)
+  return (
+    value !== undefined && validToolParameterValue(parameter.schema, value)
   );
 }
 
@@ -136,7 +132,7 @@ function contextualParameterStep(
   if (parameter.schema.kind === 'count' || parameter.schema.kind === 'angle')
     return 1;
   if (parameter.schema.kind === 'length')
-    return Math.abs(parameter.value ?? parameter.expressionValue ?? 0) < 10
+    return Math.abs(parameter.value ?? parameter.placeholderValue ?? 0) < 10
       ? 0.1
       : 0.5;
   return 0.1;

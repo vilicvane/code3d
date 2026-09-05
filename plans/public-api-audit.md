@@ -37,11 +37,15 @@
   把 Coil 列为实体原语。可由其他原语组合不构成排除依据。
 - `@code3d.param` 直接标注公开函数变量，支持调用点 panel 和包声明文件；
   不为 primitive factory 扩展 `@code3d.arguments`。
+- 可选数值参数的面板默认值由 `@code3d.param` 的 `default` 字段静态描述，
+  源码与已发布 `.d.ts` 共用解析。省略实参时以 placeholder 展示，主动输入才
+  写入显式实参；实际运行默认值由函数实现决定，作者负责保持两者一致。
+  具体规则见 [TOOLING.md](../TOOLING.md)，实现跟踪在 [#29](https://github.com/vilicvane/code3d/issues/29)。
 - 公共 API 的职责或签名发生设计调整时，先明确说明改动、需求依据和代价。
 
 ## 待讨论
 
-未决定的互操作、默认参数展示、作者可读属性、group API、判别类型、Quaternion
+未决定的互操作、作者可读属性、group API、判别类型、Quaternion
 和 tooling 边界已迁入 [#5](https://github.com/vilicvane/code3d/issues/5)。讨论结果确认
 后再更新本文中的设计；迁移本身不代表批准公开这些 API。
 

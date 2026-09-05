@@ -203,3 +203,87 @@ for (const timing of ['before debounce', 'after debounce']) {
     },
   );
 }
+
+test(
+  'default placeholders preserve omission until edited and participate in source undo',
+  {timeout: 60_000},
+  async t => {
+    const page = await createPage(t);
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.goto(appUrl);
+    await page.getByText('Ready', {exact: true}).waitFor({timeout: 30_000});
+    const source = [
+      "import {box} from '@code3d/core';",
+      '/**',
+      " * @code3d.param x {kind: 'length', default: 12}",
+      " * @code3d.param y {kind: 'length', default: 4}",
+      ' */',
+      'function block(x = 12, y = 4) {return box(x, y, 1);}',
+      'block();',
+    ].join('\n');
+    await page.locator('.monaco-editor .view-lines').first().click();
+    await page.keyboard.press('Control+a');
+    await page.keyboard.insertText(source);
+    await page.keyboard.press('ArrowLeft');
+    await page.keyboard.press('ArrowLeft');
+    const x = page.locator('[data-parameter=x]');
+    const y = page.locator('[data-parameter=y]');
+    await x.waitFor();
+    assert.equal(await x.inputValue(), '');
+    assert.equal(await x.getAttribute('placeholder'), '12');
+    assert.equal(await y.getAttribute('placeholder'), '4');
+    assert.equal(await y.isDisabled(), true);
+    await x.focus();
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Tab');
+    assert.match(
+      await page.locator('.monaco-editor .view-lines').innerText(),
+      /block\(\);/,
+    );
+    await x.fill('12');
+    await page.keyboard.press('Tab');
+    await assertFocus(page, 'y');
+    await page.waitForFunction(() =>
+      document
+        .querySelector('.monaco-editor .view-lines')
+        ?.textContent.includes('block(12)'),
+    );
+    assert.equal(await x.inputValue(), '12');
+    await y.fill('5');
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() =>
+      /block\(12,\s*5\)/.test(
+        document.querySelector('.monaco-editor .view-lines')?.textContent ?? '',
+      ),
+    );
+    await y.fill('');
+    await page.keyboard.press('Enter');
+    assert.equal(await y.getAttribute('aria-invalid'), 'true');
+    assert.match(
+      await page.locator('.monaco-editor .view-lines').innerText(),
+      /block\(12,\s*5\)/,
+    );
+    await page.keyboard.press('Control+z');
+    await page.waitForFunction(() =>
+      document
+        .querySelector('.monaco-editor .view-lines')
+        ?.textContent.includes('block()'),
+    );
+    await page.waitForFunction(
+      () =>
+        document.querySelector('[data-parameter=x]')?.value === '' &&
+        document.querySelector('[data-parameter=y]')?.disabled,
+    );
+    assert.equal(await x.getAttribute('placeholder'), '12');
+    assert.equal(await y.getAttribute('placeholder'), '4');
+    assert.equal(await y.isDisabled(), true);
+    await page.keyboard.press('Control+Shift+z');
+    await page.waitForFunction(() =>
+      /block\(12,\s*5\)/.test(
+        document.querySelector('.monaco-editor .view-lines')?.textContent ?? '',
+      ),
+    );
+    assert.deepEqual(errors, []);
+  },
+);
