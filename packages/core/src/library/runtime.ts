@@ -763,6 +763,8 @@ export class Constraint {
   }
 }
 
+const modelGeometry = Symbol('modelGeometry');
+
 export class ModelObject<
   Elements extends NamedElements = {},
   Kind extends ModelKind = ModelKind,
@@ -790,6 +792,11 @@ export class ModelObject<
   private readonly elements: StoredElements;
   private constraints: StoredConstraint[];
   private readonly operation: StoredOperation;
+
+  /** @internal */
+  [modelGeometry](): ModelGeometry | undefined {
+    return this.geometry;
+  }
 
   private constructor(init: ModelObjectInit<Kind>) {
     if (init.kind !== 'group' && !init.geometry) {
@@ -2242,6 +2249,41 @@ export function disposeModelObjects(objects: Iterable<ModelObject>): void {
   const disposed = new Set<AnyShape>();
   for (const object of objects) {
     object.disposeShape(disposed);
+  }
+}
+
+/** Worker-owned native geometry, independent of the author's object lifetime. */
+export type ModelGeometrySnapshot = Readonly<{
+  /** Borrowed shapes; clone before passing them to consuming operations. */
+  shapes: ReadonlyMap<string, AnyShape>;
+  dispose(): void;
+}>;
+
+export function retainModelGeometry(
+  objects: Iterable<ModelObject>,
+): ModelGeometrySnapshot {
+  const retained = new Map<AnyShape, AnyShape>();
+  const shapes = new Map<string, AnyShape>();
+  const dispose = () => {
+    for (const shape of retained.values()) shape.delete();
+    retained.clear();
+    shapes.clear();
+  };
+  try {
+    for (const object of objects) {
+      const original = object[modelGeometry]()?.value.shape;
+      if (!original) continue;
+      let shape = retained.get(original);
+      if (!shape) {
+        shape = original.clone();
+        retained.set(original, shape);
+      }
+      shapes.set(object.nodeId, shape);
+    }
+    return {shapes, dispose};
+  } catch (error) {
+    dispose();
+    throw error;
   }
 }
 

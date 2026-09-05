@@ -41,6 +41,10 @@ import type {
 import {preferUpstreamParameterUsages} from './model/parameter-provenance';
 import {ViewportCoordinateReference} from './ui/viewport-coordinate-reference';
 import {pickScreenTopology} from './rendering/topology-picking';
+import {
+  collectExportInstances,
+  renderedModelName,
+} from './rendering/model-export-scene';
 
 export type Occurrence = Readonly<{
   key: string;
@@ -625,6 +629,26 @@ export class ModelViewport {
 
   getSelected(): Occurrence | undefined {
     return this.occurrences.get(this.selectedKey);
+  }
+
+  exportScene() {
+    if (!this.module || this.transientPreviewRestore) return undefined;
+    return {
+      module: this.module,
+      instances: collectExportInstances(this.occurrences.values()),
+    };
+  }
+
+  exportName(): string {
+    if (!this.module) return 'code3d-model';
+    const roots = [...this.occurrences.values()]
+      .filter(occurrence => occurrence.object.parent === this.root)
+      .map(occurrence => occurrence.node.nodeId);
+    return renderedModelName(
+      this.module,
+      roots,
+      this.sourceEvaluation()?.target.sourceRef,
+    );
   }
 
   beginTopologySelection(
