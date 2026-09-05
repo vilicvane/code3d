@@ -49,6 +49,8 @@ type TopologyValueReference = Readonly<{
 }>;
 
 export type SourceTargetEvaluation = Readonly<{
+  /** A container's members share relation placement, unlike a single value. */
+  isCollection?: boolean;
   topologyReferences?: readonly TopologyValueReference[];
   runtime: RuntimeReach;
   toolExecutionOrder?: number;
@@ -177,7 +179,6 @@ export type ModelModule = Readonly<{
   toolNodeIds: ReadonlySet<string>;
   exports: ReadonlyMap<string, string>;
   catalog: readonly ObjectCatalogEntry[];
-  parameterImpacts: ReadonlyMap<string, number>;
   sourceTargets: readonly SourceTarget[];
   evaluationContexts: readonly EvaluationContext[];
   designArguments: readonly DesignArgumentContext[];
@@ -231,6 +232,7 @@ type SourceValueTrace = {
   evaluations: Array<
     Readonly<{
       objects: readonly ModelObject[];
+      isCollection: boolean;
       topologyReferences: readonly TopologyValueReference[];
       contextId: string;
       runtime: RuntimeReach;
@@ -349,7 +351,6 @@ export function createModelCompiler(
   const traceExecutionCounts = new Map<string, number>();
   const evaluationContexts = new Map<string, EvaluationContext>();
   const designContextFrames: EvaluationContext[] = [];
-  const designRootObjects = new Set<ModelObject>();
   let latestTracedObject: ModelObject | undefined;
   let evaluationOrder = 0;
   let sourceReachOrder = 0;
@@ -532,7 +533,6 @@ export function createModelCompiler(
       } finally {
         designContextFrames.pop();
       }
-      modelObjectsIn(result).forEach(object => designRootObjects.add(object));
       recordSourceValue(
         `${functionId}:result`,
         'value',
@@ -732,6 +732,7 @@ export function createModelCompiler(
     };
     sourceTrace.evaluations.push({
       objects,
+      isCollection: !isModelObject(value) && !modelTopologyReference(value),
       topologyReferences,
       contextId,
       runtime,
@@ -1049,7 +1050,6 @@ export function createModelCompiler(
     traceExecutionCounts.clear();
     evaluationContexts.clear();
     designContextFrames.length = 0;
-    designRootObjects.clear();
     latestTracedObject = undefined;
     evaluationOrder = 0;
     sourceReachOrder = 0;
@@ -1232,11 +1232,6 @@ export function createModelCompiler(
               ],
             };
           }),
-        parameterImpacts: countParameterImpacts(
-          fallbackSnapshot
-            ? [fallbackSnapshot]
-            : [...designRootObjects].map(snapshotOf),
-        ),
         sourceTargets: buildSourceTargets(
           operations,
           objectSnapshots,
@@ -1269,7 +1264,6 @@ export function createModelCompiler(
       traceExecutionCounts.clear();
       evaluationContexts.clear();
       designContextFrames.length = 0;
-      designRootObjects.clear();
       latestTracedObject = undefined;
       evaluationOrder = 0;
       sourceReachOrder = 0;
@@ -1383,7 +1377,7 @@ export function createModelCompiler(
     const valueTargets = [...sourceValueTraces.values()].map(trace => {
       const toolSite = toolCallSites.get(trace.id);
       const evaluations = trace.evaluations.map(
-        ({objects, topologyReferences, contextId, runtime}) => {
+        ({objects, isCollection, topologyReferences, contextId, runtime}) => {
           const nodeIds = objects.map(modelObjectNodeId);
           const operationId = [...operations.values()].find(
             operation =>
@@ -1391,6 +1385,7 @@ export function createModelCompiler(
               nodeIds.includes(operation.outputNodeId),
           )?.id;
           return {
+            isCollection,
             runtime,
             nodeIds,
             topologyReferences,
@@ -3471,23 +3466,6 @@ export function createModelCompiler(
     ts.forEachChild(node, inspect);
 
     return traceable && node.getStart(sourceFile) >= 0;
-  }
-
-  function countParameterImpacts(
-    roots: readonly ModelSnapshotObject[],
-  ): ReadonlyMap<string, number> {
-    const impacts = new Map<string, number>();
-    const visit = (node: ModelSnapshotObject): void => {
-      const targets = new Set(
-        node.parameters.map(parameter => parameter.target.id),
-      );
-      for (const target of targets) {
-        impacts.set(target, (impacts.get(target) ?? 0) + 1);
-      }
-      node.children.forEach(visit);
-    };
-    roots.forEach(visit);
-    return impacts;
   }
 
   function sourceRef(file: string, start: number, end: number): SourceRef {

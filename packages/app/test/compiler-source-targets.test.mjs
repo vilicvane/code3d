@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
 import {createAppTestServer} from './vite-test-server.mjs';
 import {createTestProjectCompiler} from './project-test-files.mjs';
+import * as THREE from 'three';
 
 let compileProject;
 let bundledExamples;
@@ -10,9 +11,18 @@ let compiler;
 let replicad;
 let clearKernelOperationCache;
 let kernelOperationCacheStats;
+let ModelViewport;
+let sourceTargetPlacement;
+let positionBindings;
+let applyNodeTransform;
 
 before(async () => {
   server = await createAppTestServer();
+  ({ModelViewport, sourceTargetPlacement, positionBindings} =
+    await server.ssrLoadModule('/src/viewport.ts'));
+  ({applyNodeTransform} = await server.ssrLoadModule(
+    '/src/rendering/model-renderer.ts',
+  ));
   compiler = await createTestProjectCompiler(server);
   compileProject = compiler.compile.bind(compiler);
   await compileProject(
@@ -44,6 +54,99 @@ before(async () => {
 after(async () => {
   compiler?.dispose();
   await server?.close();
+});
+
+test('a caret on range previews one map result with resolved collection placement', async () => {
+  for (const count of [5, 1]) {
+    const source = [
+      "import range from 'just-range';",
+      "import {box, group} from '@code3d/core';",
+      'const base = box(44, 2, 10);',
+      `const bars = range(${count}).map(i => box(4, 4 + i * 3, 4).relate(part => part.bottom.on(base.top).offset((i - 2) * 8, 0, 0)));`,
+      'const first = bars[0];',
+      'const singleton = [first];',
+      'const set = new Set(bars);',
+      'const map = new Map(bars.map((bar, i) => [i, bar]));',
+      'export default group([base, ...bars]);',
+    ].join('\n');
+    const module = await compileProject(
+      {files: [{path: '/model.ts', source}]},
+      '/model.ts',
+    );
+    assert.equal(module.diagnostic, undefined);
+    const at = text =>
+      ModelViewport.prototype.sourceTargetAt.call(
+        {module},
+        '/model.ts',
+        source.indexOf(text) + text.length,
+      );
+    const target = at('const bars = range');
+    // Caret range|(n) belongs to the surrounding model-valued map call.
+    assert.equal(target.kind, 'value');
+    assert.equal(target.evaluations.length, 1);
+    const evaluation = target.evaluations[0];
+    assert.equal(evaluation.nodeIds.length, count);
+    assert.equal(sourceTargetPlacement(evaluation), 'composition');
+    const positions = evaluation.nodeIds.map(nodeId => {
+      const object = new THREE.Object3D();
+      applyNodeTransform(
+        object,
+        module.objects.get(nodeId),
+        sourceTargetPlacement(evaluation),
+      );
+      return object.position.x;
+    });
+    assert.deepEqual(
+      positions,
+      Array.from({length: count}, (_, i) => (i - 2) * 8),
+    );
+    assert.equal(
+      sourceTargetPlacement(at('const first').evaluations[0]),
+      'standalone',
+    );
+    for (const binding of ['singleton', 'set', 'map']) {
+      assert.equal(
+        sourceTargetPlacement(at(`const ${binding}`).evaluations[0]),
+        'composition',
+      );
+    }
+  }
+});
+
+test('position bindings preserve inline expressions and prioritize safe upstream parameters in the outer call', async () => {
+  const source = [
+    "import {box, group} from '@code3d/core';",
+    'const base = box(44, 2, 10);',
+    'const spacing = 8;',
+    'const bars = [1, 2].flatMap(i => [',
+    '  box(4, 4, 4).relate(p => p.bottom.on(base.top).offset(i * 8, 0, 0)),',
+    '  box(4, 4, 4).relate(p => p.bottom.on(base.top).offset(i * spacing, 0, 0)),',
+    '  box(4, 4, 4).relate(p => p.bottom.on(base.top).offset(i * spacing, 0, 0).offset(2, 0, 0)),',
+    ']);',
+    'export default group([base, ...bars]);',
+  ].join('\n');
+  const module = await compileProject(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  assert.equal(module.diagnostic, undefined);
+  const occurrences = module.fallback.children.map((node, i) => ({
+    key: `root/${i}`,
+    node,
+  }));
+  const bindings = [1, 2, 3].map(index =>
+    positionBindings(occurrences[index], occurrences, null),
+  );
+  assert.equal(bindings[0][0].kind, 'expression');
+  assert.equal(bindings[0][1].kind, 'parameter');
+  assert.deepEqual(bindings[0][0].occurrenceKeys, ['root/1', 'root/4']);
+  assert.equal(bindings[1][0].kind, 'parameter');
+  assert.equal(bindings[1][0].target.sourceRef.start, source.indexOf('8;'));
+  assert.equal(bindings[2][0].kind, 'parameter');
+  assert.equal(
+    bindings[2][0].target.sourceRef.start,
+    source.indexOf('.offset(2') + '.offset('.length,
+  );
 });
 
 test('editing a plate fillet does not rebuild an unchanged screw across compiles', async t => {
@@ -243,7 +346,6 @@ test('retains shared-parameter peers in a group input context', async () => {
   )?.target.id;
 
   assert.ok(spacingTargetId);
-  assert.equal(module.parameterImpacts.get(spacingTargetId), 2);
   assert.ok(
     contextNodeIds.some(nodeId =>
       module.objects
