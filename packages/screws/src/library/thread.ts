@@ -21,6 +21,9 @@ type HelicalThreadOptions = Readonly<{
 }>;
 
 const loopSteps = Array.from({length: 21}, (_, index) => index / 20);
+const threadBreps = new Map<string, string>();
+const maximumCachedBrepCharacters = 8 * 1024 * 1024;
+let cachedBrepCharacters = 0;
 
 export const helicalThread = definePrimitive(
   (options: HelicalThreadOptions) => {
@@ -31,7 +34,7 @@ export const helicalThread = definePrimitive(
       leftHanded = false,
       ...dimensions
     } = options;
-    return makeHelicalThreadShape({
+    return cachedHelicalThreadShape({
       ...dimensions,
       majorRadius: majorDiameter / 2,
       minorRadius: minorDiameter / 2,
@@ -76,6 +79,43 @@ type HelicalThreadShapeOptions = Readonly<{
   crestWidth: number;
   leftHanded: boolean;
 }>;
+
+function cachedHelicalThreadShape(options: HelicalThreadShapeOptions): Shape3D {
+  const key = JSON.stringify([
+    options.pitch,
+    options.y,
+    options.majorRadius,
+    options.minorRadius,
+    options.rootWidth,
+    options.crestWidth,
+    options.leftHanded,
+  ]);
+  let brep = threadBreps.get(key);
+  if (brep === undefined) {
+    const shape = makeHelicalThreadShape(options);
+    try {
+      brep = shape.serialize();
+    } finally {
+      shape.delete();
+    }
+    if (brep.length <= maximumCachedBrepCharacters) {
+      threadBreps.set(key, brep);
+      cachedBrepCharacters += brep.length;
+      while (cachedBrepCharacters > maximumCachedBrepCharacters) {
+        const [oldestKey, oldestBrep] = threadBreps.entries().next().value!;
+        threadBreps.delete(oldestKey);
+        cachedBrepCharacters -= oldestBrep.length;
+      }
+    }
+  } else {
+    threadBreps.delete(key);
+    threadBreps.set(key, brep);
+  }
+  // Cache data, not native handles or disposable models. Each invocation owns
+  // a fresh shape in the current kernel. Reading both misses and hits also
+  // applies the same B-Rep normalization before core identifies the geometry.
+  return replicad.deserializeShape(brep) as Shape3D;
+}
 
 /**
  * Builds a closed external thread around its minor-diameter core. The lofted

@@ -6,7 +6,67 @@ import {
   createModelSnapshotter,
   disposeModelObjects,
 } from '../bld/tooling/index.js';
-import {clearKernelOperationCache} from '../bld/library/kernel-cache.js';
+import {
+  clearKernelOperationCache,
+  kernelOperationCacheStats,
+} from '../bld/library/kernel-cache.js';
+
+test('identical primitive output reuses geometry and meshes without skipping the builder', () => {
+  clearKernelOperationCache();
+  const outputs = [];
+  const cylinder = definePrimitive(() => {
+    const shape = replicad.makeCylinder(2, 4);
+    outputs.push(shape);
+    return shape;
+  });
+  const first = cylinder();
+  const firstId = first.geometry.id;
+  const firstMesh = createModelSnapshotter()(first).mesh;
+  disposeModelObjects([first]);
+  const before = kernelOperationCacheStats();
+  const repeat = cylinder();
+  try {
+    assert.equal(outputs.length, 2);
+    assert.equal(repeat.geometry.id, firstId);
+    assert.deepEqual(createModelSnapshotter()(repeat).mesh, firstMesh);
+    assert.equal(kernelOperationCacheStats().misses, before.misses);
+    assert.ok(kernelOperationCacheStats().hits > before.hits);
+    // Both the disposed first output and the redundant hit output are released.
+    for (const shape of outputs) assert.throws(() => shape.clone(), /deleted/i);
+  } finally {
+    disposeModelObjects([repeat]);
+    clearKernelOperationCache();
+  }
+});
+
+test('clearing output caches does not dispose a live primitive', () => {
+  const cylinder = definePrimitive(() => replicad.makeCylinder(2, 4));
+  const first = cylinder();
+  clearKernelOperationCache();
+  const repeat = cylinder();
+  try {
+    assert.equal(first.geometry.id, repeat.geometry.id);
+    assert.equal(kernelOperationCacheStats().misses, 1);
+    const snapshot = createModelSnapshotter();
+    assert.deepEqual(snapshot(first).mesh, snapshot(repeat).mesh);
+  } finally {
+    disposeModelObjects([first, repeat]);
+    clearKernelOperationCache();
+  }
+});
+
+test('an output that fails serialization is released', () => {
+  let shape;
+  const cylinder = definePrimitive(() => {
+    shape = replicad.makeCylinder(2, 4);
+    shape.serialize = () => {
+      throw new Error('Cannot serialize this output.');
+    };
+    return shape;
+  });
+  assert.throws(() => cylinder(), /Cannot serialize this output/);
+  assert.throws(() => shape.clone(), /deleted/i);
+});
 
 test('a primitive owns its returned solid and supplies normal model capabilities', () => {
   let shape;
@@ -49,6 +109,7 @@ test('repeated arguments still observe closure changes and keep prior models ind
         ...snapshot(model).mesh.vertices.filter((_, index) => index % 3 === 2),
       );
     assert.equal(calls, 2);
+    assert.notEqual(first.geometry.id, second.geometry.id);
     assert.equal(maximumZ(first), 4);
     assert.equal(maximumZ(second), 8);
     assert.equal(maximumZ(firstScaled), 8);

@@ -71,8 +71,9 @@ in author examples.
 The builder's argument types, names, and optional parameters are preserved.
 Write validation inside the builder. It executes on every call, including when
 the same arguments are reused, so changes to captured state remain observable.
-The resulting model participates in normal downstream operation and mesh caches
-and uses the standard mesh tolerance.
+Core caches the actual returned B-Rep, so identical output can reuse downstream
+operations and meshes across evaluations without skipping the builder. Each
+model owns its disposable geometry and uses the standard mesh tolerance.
 
 Returning a shape transfers its ownership to code3d; do not mutate, delete, or
 return it again. Intermediate resources remain the builder's responsibility,

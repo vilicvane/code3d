@@ -104,8 +104,12 @@
 - core root 第一版白名单已集成。
 - Model 能力分层已实现并通过 core、packages、app 的类型与构建验证。
 - `definePrimitive(build)` 已按确认的单函数签名实现，螺纹和 examples 已迁移。
-  builder 每次调用执行，返回模型采用独立几何身份及统一网格精度；后续几何
-  运算和渲染仍走缓存。变量注释已接入 tool panel，包含发布声明与别名调用。
+  builder 每次调用执行，core 按实际返回的 B-Rep 内容复用几何身份及后续缓存，
+  每个模型独立持有可释放的几何，采用统一网格精度。变量注释已接入 tool panel，
+  包含发布声明与别名调用。
+- 已修复 `87d2dd4` 引入的螺丝重复编译缓存回退：screws 私下以有界缓存保存
+  确定性螺纹 B-Rep 数据，每次读入当前内核；不缓存可被编译器释放的模型对象。
+  `definePrimitive(build)` 签名、所有公开导出与 builder 的闭包可观察语义不变。
 - `tube` / `coil` 已加入 core 白名单和 `examples/primitives.ts`；coil 仅保留
   一个实例，已移除独立的螺旋弹簧示例入口。
 - `examples/custom-primitives.ts` 独立展示 `twistKnob` 的定义、默认参数和普通
