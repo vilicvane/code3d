@@ -2006,6 +2006,7 @@ export function sourceTargetPlacement(
   evaluation: SourceTargetEvaluation,
 ): ModelPlacement {
   return evaluation.isCollection ||
+    evaluation.constraintId !== undefined ||
     isCompositionRole(evaluation.operationInput?.role)
     ? 'composition'
     : 'standalone';

@@ -182,6 +182,15 @@ implementation context and historical outcomes, not a competing work queue.
   context from the concrete downstream composition that consumes the
   constrained value. The constrained value remains the relation-edit scope for
   spatial tools; the relation target does not replace downstream context.
+- Model values inside constraint expressions and function parameter bindings
+  share the same relation-context matching as named and topology anchors.
+  Parameters are observed at function-body entry, including destructured,
+  defaulted and rest bindings, without an API or callback-name list. A parameter
+  can inspect the relation constructed with that value in its function body.
+  When no downstream composition exists yet, relation participants still use
+  resolved composition placement, as in a group, instead of overlapping in
+  their standalone frames. Ordinary value sites outside relation construction
+  retain standalone placement. See [#22](https://github.com/vilicvane/code3d/issues/22).
 - Named-element properties and topology anchors share one relation-preview
   context: the owning model is the focus, with the other participant and the
   concrete downstream composition visible as dimmed peers. Matching uses the

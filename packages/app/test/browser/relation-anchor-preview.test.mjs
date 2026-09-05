@@ -83,6 +83,9 @@ test(
             }
             results.push({
               anchor,
+              expectedContextCount: 2,
+              expectedFocusCount: 1,
+              hasOverlay: true,
               kind: target.kind,
               focusCount: viewport.occurrences.size,
               contextCount: viewport.contextOccurrences.size,
@@ -114,18 +117,92 @@ test(
             viewport.endTopologySelection();
           }
         }
+        for (const compose of [true, false]) {
+          const source = `import {box, circle, loft, rectangle} from '@code3d/core';
+            const model = (() => {
+              const ref = box(100, 100, 100);
+              const start = circle(20).relate(circle => circle.on(ref.surface(4)));
+              const end = rectangle(40, 40).relate(circle => circle.on(ref.surface(6)));
+              ${compose ? 'return loft([start, end]);' : ''}
+            })();`;
+          const module = await client.compile(
+            {files: [{path: '/main.ts', source}]},
+            '/main.ts',
+          );
+          if (module.diagnostic) throw new Error(module.diagnostic.message);
+          viewport.renderModule(module);
+          for (const id of [4, 6]) {
+            const callback = `circle => circle.on(ref.surface(${id}))`;
+            const start = source.indexOf(callback);
+            for (const [site, offset] of [
+              ['parameter', 'cir'.length],
+              ['receiver', 'circle => cir'.length],
+              ['constraint', 'circle => circle.o'.length],
+              ['anchor', callback.indexOf('surface') + 3],
+            ]) {
+              viewport.selectBySourceOffset('/main.ts', start + offset);
+              const {target, evaluation} = viewport.sourceEvaluation();
+              const rendered = [
+                ...viewport.occurrences.values(),
+                ...viewport.contextOccurrences.values(),
+              ];
+              results.push({
+                anchor: `${compose ? 'loft' : 'uncomposed'} surface(${id}) ${site}`,
+                focusCount: viewport.occurrences.size,
+                contextCount: viewport.contextOccurrences.size,
+                expectedFocusCount: site === 'constraint' ? 2 : 1,
+                expectedContextCount:
+                  (compose ? 3 : 2) - (site === 'constraint' ? 2 : 1),
+                ownerSelected:
+                  viewport.getSelected().node.nodeId ===
+                  (site === 'anchor'
+                    ? evaluation.selection.inputNodeId
+                    : evaluation.constraintSourceNodeId),
+                correctPlacements: rendered.every(
+                  ({node, object, placement}) =>
+                    placement === 'composition' &&
+                    object.position
+                      .toArray()
+                      .every(
+                        (value, index) =>
+                          Math.abs(
+                            value - node.compositionTransform.position[index],
+                          ) < 1e-6,
+                      ) &&
+                    object.quaternion
+                      .toArray()
+                      .every(
+                        (value, index) =>
+                          Math.abs(
+                            value - node.compositionTransform.quaternion[index],
+                          ) < 1e-6,
+                      ),
+                ),
+                separated: rendered
+                  .filter(({node}) => node.kind === 'face')
+                  .every(({object}) => object.position.length() > 49),
+              });
+            }
+          }
+        }
         return results;
       } finally {
         client.dispose();
       }
     });
-    assert.equal(results.length, 8);
+    assert.equal(results.length, 24);
     for (const result of results) {
-      assert.equal(result.focusCount, 1, result.anchor);
-      assert.equal(result.contextCount, 2, result.anchor);
+      assert.equal(result.focusCount, result.expectedFocusCount, result.anchor);
+      assert.equal(
+        result.contextCount,
+        result.expectedContextCount,
+        result.anchor,
+      );
       assert.equal(result.ownerSelected, true, result.anchor);
       assert.equal(result.correctPlacements, true, result.anchor);
-      assert.ok(result.overlayCount > 0, result.anchor);
+      if (result.hasOverlay) assert.ok(result.overlayCount > 0, result.anchor);
+      if (result.separated !== undefined)
+        assert.equal(result.separated, true, result.anchor);
       if (result.kind === 'topology-selection') {
         assert.deepEqual(result.selectedIds, [result.toolArgument]);
         assert.ok(result.availableIds.includes(result.toolArgument));
