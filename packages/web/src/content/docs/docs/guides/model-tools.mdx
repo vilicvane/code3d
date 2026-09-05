@@ -27,7 +27,9 @@ Each `@code3d.param` names a parameter in the function's signature:
 
 - `kind: 'length'` describes a dimension.
 - `kind: 'angle'` describes an angle.
-- `kind: 'count'` describes a count.
+- `kind: 'ratio'` describes a dimensionless factor, such as a scale multiplier.
+- `kind: 'count'` describes an integer count.
+- `kind: 'scalar'` describes a general numeric value without a more specific kind.
 - `label` can give the input a readable name.
 - `constraints` can supply `min`, `max`, `exclusiveMin`, and `exclusiveMax`.
 - `default` describes the value to display when an optional numeric argument
