@@ -42,6 +42,41 @@ function projectFiles(entries) {
   };
 }
 
+test('shares a dependency across concurrent imports and a nested top-level dynamic import', async () => {
+  const files = projectFiles({
+    '/node_modules/shared/package.json': '{"type":"module","main":"index.js"}',
+    '/node_modules/shared/index.js':
+      'await new Promise(resolve => setTimeout(resolve, 50)); export const identity = {}; export let count = 0; export function increment() { count++; }',
+    '/node_modules/first/package.json': '{"type":"module","main":"index.js"}',
+    '/node_modules/first/index.js':
+      'import {identity} from "shared"; export {identity}; export const nested = await import("second");',
+    '/node_modules/second/package.json': '{"type":"module","main":"index.js"}',
+    '/node_modules/second/index.js':
+      'export {identity, count, increment} from "shared";',
+  });
+  const builder = new ProjectBuilder(files, esbuild);
+  const runtime = await ProjectRuntime.create(files, builder, new Evaluator());
+  try {
+    const [first, second, shared] = await Promise.all([
+      runtime.importModule('/node_modules/first/index.js'),
+      runtime.importModule('/node_modules/second/index.js'),
+      runtime.importModule('/node_modules/shared/index.js'),
+    ]);
+    assert.equal(first.identity, shared.identity);
+    assert.equal(second.identity, shared.identity);
+    assert.equal(first.nested, second);
+    second.increment();
+    assert.equal(shared.count, 1);
+    assert.equal(second.count, 1);
+    assert.equal(
+      await runtime.importModule('/node_modules/shared/index.js'),
+      shared,
+    );
+  } finally {
+    runtime.dispose();
+  }
+});
+
 test('retains callable CommonJS exports and JSON values when a later dependency requires cached modules', async () => {
   const files = projectFiles({
     '/node_modules/clamp/package.json': '{"main":"index.cjs"}',
@@ -228,7 +263,15 @@ test('does not substitute App packages when a project declares but has not insta
         },
         '/model.ts',
       ),
-      /@code3d\/core/,
+      error => {
+        assert.match(error.diagnostic.summary, /@code3d\/core/);
+        assert.deepEqual(error.diagnostic.sourceRef, {
+          file: '/model.ts',
+          start: 18,
+          end: 32,
+        });
+        return true;
+      },
     );
   } finally {
     compiler.dispose();
@@ -460,3 +503,104 @@ for (const throughSource of [false, true]) {
     }
   });
 }
+
+test('releases concurrent waiters on failed dependency evaluation and can load unrelated modules', async () => {
+  const files = projectFiles({
+    '/node_modules/failure/package.json': '{"type":"module","main":"index.js"}',
+    '/node_modules/failure/index.js':
+      'await new Promise(resolve=>setTimeout(resolve,20)); throw new Error("dependency failed");',
+    '/node_modules/consumer/package.json':
+      '{"type":"module","main":"index.js"}',
+    '/node_modules/consumer/index.js':
+      'import "failure"; export const value=1;',
+    '/node_modules/ok/package.json': '{"type":"module","main":"index.js"}',
+    '/node_modules/ok/index.js': 'export const value=42;',
+  });
+  const builder = new ProjectBuilder(files, esbuild);
+  const runtime = await ProjectRuntime.create(files, builder, new Evaluator());
+  try {
+    const failures = await Promise.allSettled([
+      runtime.importModule('/node_modules/failure/index.js'),
+      runtime.importModule('/node_modules/consumer/index.js'),
+      runtime.importModule('/node_modules/failure/index.js'),
+    ]);
+    assert.ok(
+      failures.every(
+        result =>
+          result.status === 'rejected' &&
+          result.reason.message === 'dependency failed',
+      ),
+    );
+    await assert.rejects(
+      runtime.importModule('/node_modules/consumer/index.js'),
+      /dependency failed/,
+    );
+    assert.equal(
+      (await runtime.importModule('/node_modules/ok/index.js')).value,
+      42,
+    );
+  } finally {
+    runtime.dispose();
+  }
+});
+
+test('locates installed tooling initialization failures at the author import', async () => {
+  const files = projectFiles({
+    '/package.json': '{"type":"module","dependencies":{"@code3d/core":"*"}}',
+    '/node_modules/@code3d/core/bld/tooling/index.js':
+      'throw new Error("broken installed core");',
+  });
+  const compiler = new ProjectCompiler(
+    files,
+    packageTestFiles,
+    esbuild,
+    () => new Evaluator(),
+  );
+  const source = 'import {box} from "@code3d/core"; export default box(1,2,3);';
+  try {
+    await assert.rejects(
+      compiler.compile({files: [{path: '/model.ts', source}]}, '/model.ts'),
+      error => {
+        assert.match(error.diagnostic.summary, /broken installed core/);
+        assert.deepEqual(error.diagnostic.sourceRef, {
+          file: '/model.ts',
+          start: 18,
+          end: 32,
+        });
+        return true;
+      },
+    );
+  } finally {
+    compiler.dispose();
+  }
+});
+
+test('locates a missing relative asset in the original author source', async () => {
+  const compiler = new ProjectCompiler(
+    packageTestFiles,
+    packageTestFiles,
+    esbuild,
+    () => new Evaluator(),
+  );
+  const expression = 'new URL("./missing-dimensions.json", import.meta.url)';
+  const source =
+    'import {box} from "@code3d/core"; const asset=' +
+    expression +
+    '; export default box(1,2,3);';
+  try {
+    await assert.rejects(
+      compiler.compile({files: [{path: '/model.ts', source}]}, '/model.ts'),
+      error => {
+        assert.match(error.diagnostic.summary, /Project asset not found/);
+        assert.deepEqual(error.diagnostic.sourceRef, {
+          file: '/model.ts',
+          start: source.indexOf(expression),
+          end: source.indexOf(expression) + expression.length,
+        });
+        return true;
+      },
+    );
+  } finally {
+    compiler.dispose();
+  }
+});

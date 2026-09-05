@@ -1,7 +1,5 @@
 import {
-  cast,
   getOC,
-  iterTopo,
   type AnyShape,
   type Edge as ReplicadEdge,
   type Face as ReplicadFace,
@@ -12,6 +10,8 @@ import type {
   NCollection_List_TopoDS_Shape,
   TopoDS_Shape,
 } from 'replicad-opencascadejs';
+
+import {castOwnedShape3D, shapeSubshapes} from './kernel-shapes.js';
 
 export type VertexId = number;
 export type EdgeId = number;
@@ -83,11 +83,7 @@ export function topologyChildren(
 }
 
 function topologyShapes(shape: AnyShape, kind: TopologyKind): AnyShape[] {
-  return kind === 'vertex'
-    ? shapeVertices(shape)
-    : kind === 'edge'
-      ? shape.edges
-      : shape.faces;
+  return shapeSubshapes(shape, kind === 'surface' ? 'face' : kind);
 }
 
 type StableTopology<Id extends number> = Readonly<{
@@ -169,8 +165,8 @@ type LocalEdgeOperation = Readonly<{
 
 export function initialShapeTopology(shape: AnyShape): ShapeTopology {
   const vertices = shapeVertices(shape);
-  const edges = shape.edges;
-  const surfaces = shape.faces;
+  const edges = shapeSubshapes(shape, 'edge');
+  const surfaces = shapeSubshapes(shape, 'face');
   try {
     return shapeTopology(
       initialTopology(vertices) as VertexTopology,
@@ -189,8 +185,8 @@ export function preserveShapeTopology(
   source: ShapeTopology,
 ): ShapeTopology {
   const vertices = shapeVertices(shape);
-  const edges = shape.edges;
-  const surfaces = shape.faces;
+  const edges = shapeSubshapes(shape, 'edge');
+  const surfaces = shapeSubshapes(shape, 'face');
   try {
     assertTopologyLength('vertex', vertices, source.vertices);
     assertTopologyLength('edge', edges, source.edges);
@@ -242,7 +238,7 @@ export function booleanWithTopology(
   try {
     builder.Build();
     builder.SimplifyResult(true, true, 0.001);
-    result = castShape3D(builder.Shape());
+    result = castOwnedShape3D(builder.Shape());
     return {
       shape: result,
       topology: transferShapeTopology(left, source, result, builder),
@@ -260,7 +256,7 @@ export function stableEdgeGroups(
   topology: EdgeTopology,
   groups: readonly RawEdgeGroup[],
 ): readonly RawEdgeGroup[] {
-  const edges = shape.edges;
+  const edges = shapeSubshapes(shape, 'edge');
   try {
     const ids = stableGroupIds(
       'edge',
@@ -279,7 +275,7 @@ export function stableSurfaceGroups(
   topology: SurfaceTopology,
   groups: readonly RawSurfaceGroup[],
 ): readonly StableSurfaceGroup[] {
-  const surfaces = shape.faces;
+  const surfaces = shapeSubshapes(shape, 'face');
   try {
     const ids = stableGroupIds(
       'surface',
@@ -362,7 +358,7 @@ export function topologyEdgeDirections(
   topology: EdgeTopology,
   edgeIds: readonly EdgeId[],
 ): readonly TopologyDirectionData[] {
-  const edges = shape.edges;
+  const edges = shapeSubshapes(shape, 'edge');
   try {
     assertTopologyLength('edge', edges, topology);
     return edgeIds.map(edgeId => {
@@ -386,7 +382,7 @@ export function topologySurfaceDirections(
   topology: SurfaceTopology,
   surfaceIds: readonly SurfaceId[],
 ): readonly TopologyDirectionData[] {
-  const surfaces = shape.faces;
+  const surfaces = shapeSubshapes(shape, 'face');
   try {
     assertTopologyLength('surface', surfaces, topology);
     return surfaceIds.map(surfaceId => {
@@ -434,7 +430,7 @@ function modifyEdges(
     }
   }
 
-  const edges = shape.edges;
+  const edges = shapeSubshapes(shape, 'edge');
   const selected = new Set(selectedEdgeIds);
   const oc = getOC();
   const builder =
@@ -456,7 +452,7 @@ function modifyEdges(
     if (!builder.IsDone()) {
       throw edgeModificationError(kind, amount, selectedEdgeIds, builder);
     }
-    result = castShape3D(builder.Shape());
+    result = castOwnedShape3D(builder.Shape());
     return {
       shape: result,
       topology: transferShapeTopology(shape, source, result, builder),
@@ -556,10 +552,10 @@ function transferShapeTopology(
 ): ShapeTopology {
   const inputVertices = shapeVertices(input);
   const outputVertices = shapeVertices(output);
-  const inputEdges = input.edges;
-  const outputEdges = output.edges;
-  const inputSurfaces = input.faces;
-  const outputSurfaces = output.faces;
+  const inputEdges = shapeSubshapes(input, 'edge');
+  const outputEdges = shapeSubshapes(output, 'edge');
+  const inputSurfaces = shapeSubshapes(input, 'face');
+  const outputSurfaces = shapeSubshapes(output, 'face');
   try {
     return shapeTopology(
       transferTopology(
@@ -737,24 +733,7 @@ const topologyMetadata = {
 >;
 
 function shapeVertices(shape: AnyShape): ReplicadVertex[] {
-  return Array.from(iterTopo(shape.wrapped, 'vertex'), vertex =>
-    cast(vertex),
-  ) as ReplicadVertex[];
-}
-
-function castShape3D(shape: TopoDS_Shape): Shape3D {
-  let result: ReturnType<typeof cast>;
-  try {
-    result = cast(shape);
-  } finally {
-    shape.delete();
-  }
-  try {
-    return result.asShape3D();
-  } catch (error) {
-    result.delete();
-    throw error;
-  }
+  return shapeSubshapes(shape, 'vertex');
 }
 
 function deleteShapes(shapes: readonly TopologyShape[]): void {

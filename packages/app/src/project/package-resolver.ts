@@ -2,6 +2,18 @@ import enhancedResolve, {type FileSystem} from 'enhanced-resolve';
 import {decodeProjectFile, type ProjectFileReader} from './file-reader';
 import {normalizeProjectPath, projectDirectory} from './project';
 
+const nodeBuiltins = new Set(
+  'assert async_hooks buffer child_process cluster console constants crypto dgram diagnostics_channel dns domain events fs http http2 https inspector module net os path perf_hooks process punycode querystring readline repl stream string_decoder sys timers tls trace_events tty url util v8 vm wasi worker_threads zlib'.split(
+    ' ',
+  ),
+);
+
+export function nodeBuiltinError(specifier: string): Error {
+  return new Error(
+    `Node built-in ${specifier} is not available in the browser. Use a package with a browser implementation.`,
+  );
+}
+
 /** Package semantics belong to the resolver, not to a compiler require shim. */
 export class ProjectPackageResolver {
   private readonly importResolver;
@@ -63,11 +75,7 @@ export class ProjectPackageResolver {
     kind: 'import' | 'require' = 'import',
   ): Promise<string | false> {
     if (specifier.startsWith('node:')) {
-      return Promise.reject(
-        new Error(
-          `Node built-in ${specifier} is not available in the browser.`,
-        ),
-      );
+      return Promise.reject(nodeBuiltinError(specifier));
     }
     const resolver =
       kind === 'require' ? this.requireResolver : this.importResolver;
@@ -78,7 +86,12 @@ export class ProjectPackageResolver {
         specifier,
         {},
         (error, result) => {
-          if (error) reject(error);
+          if (error)
+            reject(
+              nodeBuiltins.has(specifier.split('/')[0])
+                ? nodeBuiltinError(specifier)
+                : error,
+            );
           else if (result === false) resolve(false);
           else if (result) resolve(normalizeProjectPath(result));
           else

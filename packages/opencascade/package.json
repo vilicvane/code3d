@@ -1,0 +1,31 @@
+{
+  "name": "@code3d/opencascade",
+  "version": "0.0.1-alpha.0",
+  "type": "module",
+  "license": "LGPL-2.1-only",
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./wasm/replicad_single.js"
+    },
+    "./wasm": "./wasm/replicad_single.wasm"
+  },
+  "files": [
+    "index.d.ts",
+    "wasm",
+    "native",
+    "scripts",
+    "README.md",
+    "LICENSE.LGPL-2.1"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "replicad-opencascadejs": "1.0.0"
+  }
+}
