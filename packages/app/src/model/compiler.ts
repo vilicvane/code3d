@@ -55,6 +55,8 @@ export type SourceTargetEvaluation = Readonly<{
   runtime: RuntimeReach;
   toolExecutionOrder?: number;
   nodeIds: readonly string[];
+  /** Anchor owners to emphasize while their relation peers remain visible. */
+  focusNodeIds?: readonly string[];
   parameters?: readonly ParameterUsage[];
   toolArguments?: Readonly<Record<number, number>>;
   operationId?: string;
@@ -1387,6 +1389,7 @@ export function createModelCompiler(
             runtime,
             nodeIds,
             topologyReferences,
+            focusNodeIds: topologyReferences.length > 0 ? nodeIds : undefined,
             operationId,
             contextId,
             parameters: sourceExecutionFor(trace.id, contextId, runtime)
@@ -1566,6 +1569,9 @@ export function createModelCompiler(
                   operation?.outputNodeId ?? modelObjectNodeId(receiver),
                 ],
                 operationId: operation?.id,
+                focusNodeIds: operation
+                  ? undefined
+                  : [modelObjectNodeId(receiver)],
                 parameters: execution.parameters,
                 contextId: execution.contextId,
                 selection: {
@@ -1681,64 +1687,95 @@ export function createModelCompiler(
       },
     );
 
-    const elementTargets = [...sourceElementTraces.values()].map(trace => {
-      const containingConstraints = constraintTargets.filter(
-        target =>
-          target.sourceRef.file === trace.sourceRef.file &&
-          target.sourceRef.start <= trace.sourceRef.start &&
-          trace.sourceRef.end <= target.sourceRef.end,
+    const elementTargets = [...sourceElementTraces.values()].map(
+      trace =>
+        ({
+          id: `source:element:${trace.id}`,
+          kind: 'element',
+          sourceRef: trace.sourceRef,
+          receiverRef: trace.receiverRef,
+          functionId: designFunctionAt(trace.sourceRef, designArguments),
+          evaluations: trace.evaluations.map(element => ({
+            runtime: element.runtime,
+            nodeIds: [modelObjectNodeId(element.model)],
+            focusNodeIds: [modelObjectNodeId(element.model)],
+            contextId: element.contextId,
+            element: {
+              nodeId: modelObjectNodeId(element.model),
+              name: element.name,
+              kind: element.kind,
+            },
+          })),
+          contextTargetIds: [],
+        }) satisfies SourceTarget,
+    );
+
+    function withConstraintContext(target: SourceTarget): SourceTarget {
+      if (!target.evaluations.some(evaluation => evaluation.focusNodeIds)) {
+        return target;
+      }
+      const containing = constraintTargets.filter(
+        constraint =>
+          constraint.sourceRef.file === target.sourceRef.file &&
+          constraint.sourceRef.start <= target.sourceRef.start &&
+          target.sourceRef.end <= constraint.sourceRef.end,
       );
-      const narrowestConstraintSpan = Math.min(
-        ...containingConstraints.map(target => sourceSpan(target.sourceRef)),
+      const narrowestSpan = Math.min(
+        ...containing.map(constraint => sourceSpan(constraint.sourceRef)),
       );
-      const relatedConstraints = containingConstraints.filter(
-        target => sourceSpan(target.sourceRef) === narrowestConstraintSpan,
+      const related = containing.filter(
+        constraint => sourceSpan(constraint.sourceRef) === narrowestSpan,
       );
-      const evaluations = trace.evaluations.flatMap<SourceTargetEvaluation>(
-        element => {
-          const related = relatedConstraints.flatMap(target =>
-            target.evaluations
-              .filter(
-                evaluation =>
-                  evaluation.contextId === element.contextId &&
-                  evaluation.nodeIds.includes(modelObjectNodeId(element.model)),
-              )
-              .map(evaluation => ({target, evaluation})),
-          );
-          const elementSnapshot = {
-            nodeId: modelObjectNodeId(element.model),
-            name: element.name,
-            kind: element.kind,
-          } as const;
-          return related.length > 0
-            ? related.map(({evaluation}) => ({
-                ...evaluation,
-                element: elementSnapshot,
-              }))
-            : [
-                {
-                  runtime: element.runtime,
-                  nodeIds: [modelObjectNodeId(element.model)],
-                  contextId: element.contextId,
-                  element: elementSnapshot,
-                },
-              ];
-        },
-      );
-      return {
-        id: `source:element:${trace.id}`,
-        kind: 'element',
-        sourceRef: trace.sourceRef,
-        receiverRef: trace.receiverRef,
-        functionId: designFunctionAt(trace.sourceRef, designArguments),
-        evaluations,
-        contextTargetIds: [
-          ...new Set(
-            relatedConstraints.flatMap(target => target.contextTargetIds),
+      const contextTargetIds = new Set(target.contextTargetIds);
+      const evaluations = target.evaluations.flatMap(evaluation => {
+        const matches = related.flatMap(constraint =>
+          constraint.evaluations
+            .filter(
+              candidate =>
+                candidate.contextId === evaluation.contextId &&
+                (candidate.toolExecutionOrder ?? candidate.runtime.order) >=
+                  evaluation.runtime.order &&
+                evaluation.focusNodeIds?.every(nodeId =>
+                  candidate.nodeIds.includes(nodeId),
+                ),
+            )
+            .map(candidate => ({constraint, candidate})),
+        );
+        // Several calls can share one runtime context and reference model.
+        // The first enclosing constraint to finish owns this anchor occurrence.
+        const enclosingOrder = Math.min(
+          ...matches.map(
+            ({candidate}) =>
+              candidate.toolExecutionOrder ?? candidate.runtime.order,
           ),
-        ],
-      } satisfies SourceTarget;
-    });
+        );
+        return matches.length > 0
+          ? matches
+              .filter(
+                ({candidate}) =>
+                  (candidate.toolExecutionOrder ?? candidate.runtime.order) ===
+                  enclosingOrder,
+              )
+              .map(({constraint, candidate}) => {
+                constraint.contextTargetIds.forEach(id =>
+                  contextTargetIds.add(id),
+                );
+                return {
+                  ...evaluation,
+                  runtime: candidate.runtime,
+                  toolExecutionOrder:
+                    evaluation.toolExecutionOrder ?? evaluation.runtime.order,
+                  nodeIds: candidate.nodeIds,
+                  operationId: candidate.operationId,
+                  operationInput: candidate.operationInput,
+                  constraintId: candidate.constraintId,
+                  constraintSourceNodeId: candidate.constraintSourceNodeId,
+                };
+              })
+          : [evaluation];
+      });
+      return {...target, evaluations, contextTargetIds: [...contextTargetIds]};
+    }
 
     const targets: SourceTarget[] = [
       ...elementTargets,
@@ -1775,7 +1812,7 @@ export function createModelCompiler(
             },
           }) satisfies SourceTarget,
       ),
-    ];
+    ].map(withConstraintContext);
     const fallbackToolTargets: SourceTarget[] = [
       ...toolCallSites.values(),
     ].flatMap(site => {

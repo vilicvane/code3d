@@ -110,9 +110,21 @@ three rotation rings follow the axes of the corresponding angle parameters.
 Solid primitives expose `center`, `top`, `bottom`, and `axis`. Profiles,
 curves, and other geometry provide elements suited to their own shape.
 
-Use `selfAnchor.on(targetAnchor)` to relate complete frames.
-`.flip()` changes orientation, and `.offset(x, y, z)` adjusts the relation
-in the target frame.
+Use `selfAnchor.on(targetAnchor)` to constrain geometry. Points coincide,
+lines become collinear, and faces become coplanar with opposing normals.
+Mixed dimensions constrain a point to a line or plane, or a line to a plane.
+Solid and group intrinsic anchors constrain the complete frame.
+
+Return an array from `relate()` to combine conditions. Default centering and
+orientation choose among valid solutions; they do not force every anchor's
+center to coincide. `.flip()` selects aligned face normals or reverses a line's
+preferred direction. An explicit `.offset(x, y, z)` pins the source anchor
+position in the target frame, even when all three values are zero.
+
+Line and face anchors describe infinite reference lines and planes, including
+the sampled reference frames of curved topology. They do not require the
+finite boundaries of two shapes to match. Related groups move their assembled
+children as rigid bodies.
 
 ## Topology
 

@@ -244,6 +244,140 @@ test('retains topology values at bindings, aliases, and collection results', asy
   assert.equal(binding('repeated').nodeIds.length, 2);
 });
 
+for (const [kind, sourceAnchor, targetAnchor] of [
+  ['edge', 'self.edge(id)', 'base.edge(1)'],
+  ['surface', 'self.surface(id)', 'base.surface(1)'],
+  ['vertex', 'self.vertex(id)', 'base.vertex(1)'],
+  ['named', 'self.top', 'base.bottom'],
+]) {
+  test(`${kind} anchors share relation context across runtime calls and downstream consumers`, async () => {
+    const source = `import {box, group} from '@code3d/core';
+      const base = box(10, 10, 10);
+      function make(id: number) {
+        const part = box(20, 20, 20).relate(self =>
+          ${sourceAnchor}.on(${targetAnchor}).offset(7, 0, 0));
+        const peer = box(2, 2, 2);
+        const first = group([base, part, peer]);
+        const second = group([base, part]);
+        return group([first, second]);
+      }
+      export default group([make(2), make(3)]);`;
+    const module = await compileProject(
+      {files: [{path: '/model.ts', source}]},
+      '/model.ts',
+    );
+    assert.equal(module.diagnostic, undefined);
+    const relation = module.sourceTargets.find(
+      target =>
+        target.kind === 'constraint' &&
+        source.slice(target.sourceRef.start, target.sourceRef.end) ===
+          `${sourceAnchor}.on(${targetAnchor})`,
+    );
+    assert.ok(relation);
+    assert.equal(relation.evaluations.length, 4);
+    for (const [anchor, isSource] of [
+      [sourceAnchor, true],
+      [targetAnchor, false],
+    ]) {
+      const target = ModelViewport.prototype.sourceTargetAt.call(
+        {module},
+        '/model.ts',
+        source.indexOf(anchor) + anchor.length - 1,
+      );
+      assert.equal(
+        target.kind,
+        kind === 'named' ? 'element' : 'topology-selection',
+      );
+      assert.equal(target.evaluations.length, 4);
+      assert.equal(new Set(target.evaluations.map(e => e.contextId)).size, 1);
+      assert.equal(
+        new Set(target.evaluations.map(e => e.constraintSourceNodeId)).size,
+        2,
+      );
+      for (const evaluation of target.evaluations) {
+        const constraint = relation.evaluations.find(
+          candidate =>
+            candidate.contextId === evaluation.contextId &&
+            candidate.operationId === evaluation.operationId,
+        );
+        assert.ok(constraint);
+        assert.deepEqual(evaluation.nodeIds, constraint.nodeIds);
+        assert.equal(evaluation.constraintId, constraint.constraintId);
+        assert.deepEqual(evaluation.operationInput, constraint.operationInput);
+        assert.deepEqual(evaluation.runtime, constraint.runtime);
+        const owner = isSource
+          ? constraint.constraintSourceNodeId
+          : constraint.nodeIds.find(
+              nodeId => nodeId !== constraint.constraintSourceNodeId,
+            );
+        assert.deepEqual(evaluation.focusNodeIds, [owner]);
+        assert.equal(sourceTargetPlacement(evaluation), 'composition');
+        if (kind !== 'named') {
+          assert.equal(evaluation.selection.kind, kind);
+          assert.equal(evaluation.selection.inputNodeId, owner);
+          assert.deepEqual(evaluation.selection.ids, [
+            evaluation.toolArguments[0],
+          ]);
+          assert.ok(
+            isSource
+              ? [2, 3].includes(evaluation.toolArguments[0])
+              : evaluation.toolArguments[0] === 1,
+          );
+          // Topology IDs keep their own call arguments; offset parameters must not leak in.
+          assert.notEqual(
+            evaluation.toolExecutionOrder,
+            constraint.toolExecutionOrder,
+          );
+          assert.deepEqual(evaluation.parameters, []);
+        }
+      }
+      assert.deepEqual(
+        new Set(target.contextTargetIds),
+        new Set(relation.contextTargetIds),
+      );
+    }
+  });
+}
+
+test('anchor context is limited to the enclosing relation in a constraint array', async () => {
+  const source = `import {box, group} from '@code3d/core';
+    const base = box(10, 10, 10);
+    const alone = base.edge(2);
+    const part = box(20, 20, 20).relate(self => [
+      self.edge(3).on(base.edge(1)),
+      self.top.on(base.bottom),
+    ]);
+    export default group([base, part]);`;
+  const module = await compileProject(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  assert.equal(module.diagnostic, undefined);
+  const at = text =>
+    ModelViewport.prototype.sourceTargetAt.call(
+      {module},
+      '/model.ts',
+      source.indexOf(text) + text.length - 1,
+    );
+  const edge = at('self.edge(3)').evaluations[0];
+  const face = at('self.top').evaluations[0];
+  assert.notEqual(edge.constraintId, face.constraintId);
+  assert.equal(
+    edge.constraintId,
+    at('base.edge(1)').evaluations[0].constraintId,
+  );
+  assert.equal(
+    face.constraintId,
+    at('base.bottom').evaluations[0].constraintId,
+  );
+  const alone = at('base.edge(2)').evaluations[0];
+  assert.equal(alone.nodeIds.length, 1);
+  assert.equal(alone.constraintId, undefined);
+  assert.equal(alone.operationId, undefined);
+  assert.equal(sourceTargetPlacement(alone), 'standalone');
+  assert.deepEqual(at('base.edge(2)').contextTargetIds, []);
+});
+
 test('represents an offset call with its constraint target', async () => {
   const source = sharedOffsetSource();
   const module = await compileProject(

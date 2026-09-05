@@ -80,7 +80,7 @@ test('uses face, edge, and vertex topology as relation anchors', () => {
     );
     const relatedSnapshot = snapshotModel(vertexRelated);
     assert.deepEqual(relatedSnapshot.transform.position, [0, 0, 0]);
-    assert.deepEqual(relatedSnapshot.compositionTransform.position, [2, 3, 4]);
+    assertVectorNear(relatedSnapshot.compositionTransform.position, [2, 3, 4]);
   } finally {
     disposeModelObjects([
       face,
@@ -103,9 +103,9 @@ test('resolves relation placement only inside a composition', () => {
     const standalone = snapshotModel(related);
     const assemblySnapshot = snapshotModel(assembly);
     assert.deepEqual(standalone.transform.position, [0, 0, 0]);
-    assert.deepEqual(standalone.compositionTransform.position, [2, 3, 4]);
+    assertVectorNear(standalone.compositionTransform.position, [2, 3, 4]);
     assert.deepEqual(assemblySnapshot.transform.position, [0, 0, 0]);
-    assert.deepEqual(
+    assertVectorNear(
       assemblySnapshot.children[1].transform.position,
       [2, 3, 4],
     );
@@ -168,3 +168,9 @@ test('lofts planar sections without a spine', () => {
     disposeModelObjects([base, location, top, result]);
   }
 });
+
+function assertVectorNear(actual, expected) {
+  actual.forEach((value, index) =>
+    assert.ok(Math.abs(value - expected[index]) < 1e-7),
+  );
+}
