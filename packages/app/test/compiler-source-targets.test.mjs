@@ -1,20 +1,13 @@
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
-import {fileURLToPath} from 'node:url';
-import {createServer} from 'vite';
+import {createAppTestServer} from './vite-test-server.mjs';
 
-const appRoot = fileURLToPath(new URL('..', import.meta.url));
 let compileProject;
 let bundledExamples;
 let server;
 
 before(async () => {
-  server = await createServer({
-    root: appRoot,
-    appType: 'custom',
-    logLevel: 'error',
-    server: {middlewareMode: true, hmr: false},
-  });
+  server = await createAppTestServer();
   ({compileProject} = await server.ssrLoadModule('/src/model/compiler.ts'));
   ({bundledExamples} = await server.ssrLoadModule(
     '/src/project/bundled-examples.ts',

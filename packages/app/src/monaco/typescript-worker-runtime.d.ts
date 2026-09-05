@@ -1,5 +1,6 @@
 declare module 'monaco-editor/language/typescript/ts.worker' {
   import type * as typeScript from '@typescript/typescript6';
+  import type * as typeScriptLanguage from 'monaco-editor/languages/features/typescript/register';
 
   export type TypeScriptWorkerExtraLibs = Readonly<
     Record<string, Readonly<{content: string; version: number}>>
@@ -18,11 +19,18 @@ declare module 'monaco-editor/language/typescript/ts.worker' {
     ): TypeScriptSelectionRange;
   }
 
+  export interface TypeScriptWorker extends typeScript.LanguageServiceHost {}
+
   export class TypeScriptWorker {
     constructor(context: unknown, createData: unknown);
     getExtraLibs(): TypeScriptWorkerExtraLibs;
     getLanguageService(): TypeScriptLanguageService;
     getScriptFileNames(): string[];
+    getSemanticDiagnostics(
+      fileName: string,
+    ): ReturnType<
+      typeScriptLanguage.TypeScriptWorker['getSemanticDiagnostics']
+    >;
   }
 
   export function initialize(

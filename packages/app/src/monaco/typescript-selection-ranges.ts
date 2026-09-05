@@ -7,17 +7,28 @@ export function registerProjectTypeScriptSelectionRanges(
 ): monaco.IDisposable {
   return monaco.languages.registerSelectionRangeProvider(selector, {
     async provideSelectionRanges(model, positions, token) {
+      const version = model.getVersionId();
       const offsets = positions.map(position => model.getOffsetAt(position));
       const worker = await projectTypeScriptWorker(
         model.getLanguageId(),
         model.uri,
       );
-      if (token.isCancellationRequested || model.isDisposed()) return undefined;
+      if (
+        token.isCancellationRequested ||
+        model.isDisposed() ||
+        model.getVersionId() !== version
+      )
+        return undefined;
       const selections = await worker.getProjectSelectionRanges(
         model.uri.toString(),
         offsets,
       );
-      if (token.isCancellationRequested || model.isDisposed()) return undefined;
+      if (
+        token.isCancellationRequested ||
+        model.isDisposed() ||
+        model.getVersionId() !== version
+      )
+        return undefined;
       return selections.map(selection => selectionRangeChain(model, selection));
     },
   });
