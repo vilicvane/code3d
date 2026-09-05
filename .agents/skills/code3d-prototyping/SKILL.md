@@ -34,7 +34,7 @@ code3d 的项目代码始终保持在当前认知下可达到的最佳抽象和�
 ## Work from current intent
 
 - 修改核心语义前读取关联 GitHub issue，以及 `DESIGN.md` 和 `PLAN.md` 中相关部分。GitHub Issues 是需求、讨论、验收和进度的唯一跟踪入口；`requests/` 只保留迁移前的历史，不再新增或移动文件来表达需求状态。不能静默改变当前里程碑。
-- 一句话说清楚的需求直接作为 issue，不要求模板、固定章节或强制验收清单；agent 按实际需要补充上下文，不把填写工作交给用户。操作 issue 时读取 [GitHub Issues 协作约定](../worktree-development/references/github-issues.md)。
+- 一句话说清楚的需求直接作为 issue，不要求模板、固定章节或强制验收清单；agent 创建时记录已有的确定方案，维护时及时同步方案的确定与调整，并按实际需要补充上下文，不把填写工作交给用户。操作 issue 时读取 [GitHub Issues 协作约定](../worktree-development/references/github-issues.md)。
 - 区分已确认决策与讨论中的假设。讨论提案、伪代码和候选 API 默认只留在对话中；除非用户明确要求记录或确认，不得将其提升为 `DESIGN.md`、`PLAN.md` 的确定方向或其他规范性文档内容。
 - 用户的新设计判断覆盖旧草稿和旧实现。发现两者冲突时先明确冲突，再按新判断重构。
 - 修改过程中发现与当前职责直接相关的既有技术债时，将它纳入同一重构；无关区域仍不得借机扩张任务范围。
