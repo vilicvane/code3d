@@ -1,0 +1,83 @@
+---
+title: Adding tools to model functions
+description: Use JSDoc to give ordinary TypeScript functions parameter panels and design-time previews.
+---
+
+import SourceCode from '../../../../components/SourceCode.astro';
+import ArrowIcon from '../../../../components/ArrowIcon.astro';
+import {appUrl} from '../../../../lib/site';
+import source from '../../../../../../app/examples/design-arguments.ts?raw';
+
+A model function can have visual controls without becoming a different kind of
+function. Add JSDoc annotations to describe its parameters; the App reads them
+alongside its TypeScript signature.
+
+<SourceCode source={source} file="design-arguments.ts" />
+
+<p>
+  <a href={appUrl('design-arguments.ts')} target="_blank" rel="noopener">
+    {'Open this example in the App '}
+    <ArrowIcon />
+  </a>
+</p>
+
+## Describe the parameters
+
+Each `@code3d.param` names a parameter in the function's signature:
+
+- `kind: 'length'` describes a dimension.
+- `kind: 'angle'` describes an angle.
+- `kind: 'count'` describes a count.
+- `label` can give the input a readable name.
+- `constraints` can supply `min`, `max`, and `step`.
+
+For example:
+
+```ts
+/** @code3d.param radius {kind: 'length', label: 'Radius', constraints: {min: 1, step: 0.5}} */
+```
+
+Place the cursor in `makeKnob(10, 5, 6)` to open its parameter panel. Change an
+input and the App writes to the corresponding source value. Normal source
+Undo and Redo still apply.
+
+The editor highlights recognized tags, completes configuration fields, and
+reports invalid annotations. Put annotations on the callable declaration,
+not on a variable that happens to hold a dimension. For overloaded functions,
+annotate the overload signatures that should offer tools.
+
+## Preview a function with example arguments
+
+Each `@code3d.arguments [...]` supplies one design-time invocation. In the
+function's source context, the App lets you switch between real calls and
+these candidates. Their values are ordinary TypeScript expressions evaluated
+in the function's module scope, with completion from its signature.
+
+These invocations provide preview contexts; they do not replace the function's
+normal execution or change its exports. Exporting the function remains an
+ordinary choice about reuse by another module.
+
+## What a panel can edit
+
+Controls follow a unique chain of TypeScript definitions to an editable
+numeric source value, including supported variables, object properties, and
+destructuring. A computed value is not automatically reversible. If there is
+no editable source target, a numeric input can show the evaluated value as
+placeholder text; change the expression in source instead.
+
+An incomplete call can still show a panel. Missing arguments remain blank,
+and the next argument that can legally be appended becomes editable. The
+panel does not invent values for the remaining parameters.
+
+Use runtime validation in the function for geometric requirements; input
+constraints do not replace it.
+
+## Custom primitives use the same annotations
+
+For a `definePrimitive` result, put `@code3d.param` directly above the
+`const` declaration. Its argument names, types, and defaults come from the
+builder signature. Use ordinary calls to preview such a primitive;
+`@code3d.arguments` does not create previews of primitive factory definitions.
+
+See [custom primitives](../custom-primitives/) for the complete twisted-knob
+example, including parameter tools, placement, and colors.

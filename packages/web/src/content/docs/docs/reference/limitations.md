@@ -15,6 +15,9 @@ Code3D is Prototype 01. APIs and project behavior are still evolving.
 - Browser-persistent projects and direct local-folder editing in supported
   browsers.
 - Typed named elements and reusable metric fasteners.
+- Browser-compatible npm packages from the project's installed dependencies.
+- Custom solid primitives with parameter tools, built through Replicad.
+- STEP, STL, and 3MF model export, plus PNG viewport images.
 
 ## What to account for
 
@@ -37,8 +40,11 @@ context are required. External edits need an explicit Reload folder.
 **The geometry engine has a substantial initial download.** It loads with
 App, while the website and documentation can be read independently.
 
-**STEP and STL export are not available in this prototype.** Do not depend on
-the current application for a manufacturing export workflow.
+**Export the intended context.** Model export uses the foreground geometry
+currently being inspected, not every model in the file. STEP supports solids,
+curves, and surfaces; STL and 3MF require solids. Check the output scale and
+orientation in the receiving application. Exporting does not validate that
+a part is printable or manufacturable. See [exporting models](../../guides/exporting/).
 
 **A Worker is not a security sandbox.** It keeps modeling code off the UI
 thread and can be terminated, but only run model source you trust.

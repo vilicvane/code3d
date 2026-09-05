@@ -7,7 +7,7 @@ export const renderSamples = [
     description:
       'A rounded base, a cylindrical post, and one relation that brings them together.',
     category: 'The essentials',
-    file: 'first-model.ts',
+    file: 'website/first-model.ts',
     focus: {context: 'group([base, post])', token: 'group'},
     tags: ['box', 'cylinder', 'fillet', 'relate', 'group'],
   },
@@ -17,7 +17,7 @@ export const renderSamples = [
     description:
       'A socket cap screw and its matching counterbored plate, composed through named elements.',
     category: 'An assembly',
-    file: 'fastener.ts',
+    file: 'website/fastener.ts',
     focus: {
       context: "group([plate, screw], 'M6 fastener demo')",
       token: 'group',
@@ -30,9 +30,19 @@ export const renderSamples = [
     description:
       'Give a reusable part meaningful mounting faces. Let the next model work with those names.',
     category: 'Reusable design',
-    file: 'locating-pin.ts',
+    file: 'website/locating-pin.ts',
     focus: {context: 'group([plate, pin, cap])', token: 'group'},
     tags: ['expose', 'cylinder', 'relate', 'group'],
+  },
+  {
+    id: 'custom-primitives',
+    title: 'Geometry of your own',
+    description:
+      'Twisted knobs with D-shaped shaft bores, built with Replicad and adjustable through their own parameter tools.',
+    category: 'Custom primitives',
+    file: 'custom-primitives.ts',
+    focus: {context: 'group(', token: 'group'},
+    tags: ['definePrimitive', 'replicad', '@code3d.param', 'relate'],
   },
 ] as const satisfies readonly {
   id: string;

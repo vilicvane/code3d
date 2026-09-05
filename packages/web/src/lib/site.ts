@@ -9,6 +9,8 @@ export function sitePath(path: string): string {
 export function appUrl(file?: string): string {
   return (
     sitePath('app/') +
-    (file ? `#/file/examples/website/${encodeURIComponent(file)}` : '')
+    (file
+      ? `#/file/examples/${file.split('/').map(encodeURIComponent).join('/')}`
+      : '')
   );
 }
