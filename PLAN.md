@@ -2,7 +2,7 @@
 
 This file is the durable working memory for decisions and multi-step work. Keep
 stable product goals in `DESIGN.md`, source-editing/tool contracts in
-`TOOLING.md`, and detailed not-yet-active refactors under `plans/`; update this
+`TOOLING.md`, and detailed implementation records under `plans/`; update this
 file whenever the confirmed design changes. [GitHub Issues](https://github.com/vilicvane/code3d/issues)
 is the single source for requirements, discussion, acceptance, and current work
 status. A one-sentence issue is welcome; there are no required templates or
@@ -127,6 +127,10 @@ implementation context and historical outcomes, not a competing work queue.
   local bounding box and carried through transforms. `originCenter()` uses
   that anchor; origin edits never move `center`. Center and vertex origin
   drags append or edit `originOffset()` through the same source transaction.
+- `scaled(factor)` derives geometric models about local coordinate zero. Geometry,
+  named anchors, `center`, and the origin position scale together while topology
+  IDs are preserved. The factor is positive and finite; groups do not provide
+  geometric scaling. Export unit conversion is a separate output setting.
 
 ## Invariants
 
@@ -318,7 +322,7 @@ selection per page URL.
 Status: complete. Rootless selection and optional exports were implemented in
 `809fcc7`; the remaining `model()` API entry has now been removed.
 
-### 2. Runtime source context — in progress
+### 2. Runtime source context
 
 Remaining scope and live status: [#2](https://github.com/vilicvane/code3d/issues/2).
 
@@ -372,10 +376,19 @@ Named-element properties and edge, surface, and vertex anchors refine that
 scope through the same context resolver. The owning model and selected anchor
 are highlighted while all relation participants remain visible; each accessor
 keeps its own editing arguments across runtime calls and downstream consumers.
+[#22](https://github.com/vilicvane/code3d/issues/22) completed automatic receiver
+and input tracking, including function parameter bindings. Within `relate`,
+model values, callback parameters, and named or topology anchors share the
+relation context; participants also appear in their solved placement before a
+downstream composition is written. Broader relationship browsing remains the
+separate discussion in #2.
 Focused items in Monaco's native TypeScript member completion reuse the same
 viewport preview immediately, then replace it with a model compiled from the
 hypothetically accepted completion. The incomplete source and caret remain
 unchanged, and the caret-selected scene returns when completion closes.
+Unchanged compiler options and declarations preserve Monaco's TypeScript worker
+and in-flight completion requests; actual language changes still synchronize.
+See [#26](https://github.com/vilicvane/code3d/issues/26).
 [R-017](requests/closed/R-017-completion-derived-model-preview.md) records this
 completion-derived rendering contract.
 [R-004](requests/closed/R-004-source-local-modeling-diagnostics.md) is complete:
@@ -415,7 +428,7 @@ frame decorations without editing source or retaining a parallel selection.
 Status: [R-002](requests/closed/R-002-unified-collapsible-gui-panels.md) is
 implemented as reusable dock panel infrastructure.
 
-### 3. Anchor constraint graph — geometric solver
+### 3. Anchor constraint graph — geometric solver complete
 
 - Keep B-Rep geometry local and store constraints on immutable model copies.
 - Support a model's intrinsic frame and type-safe named point, line, and face
@@ -460,7 +473,7 @@ is complete. Value declarations and operation outputs do not expose the
 translation gizmo or offset controls; eligible composition inputs and explicit
 constraint source sites do.
 
-### 4a. Topology-scoped modeling tools — in progress
+### 4a. Topology-scoped modeling tools — complete
 
 - Assign stable numeric edge IDs at primitive boundaries and carry them across
   scale, fillet, chamfer, and Boolean derivations.
@@ -520,9 +533,10 @@ and multiple-selection viewport picking, before/after comparison, reversible
 selection, and source write-back are implemented. The Properties panel and GUI
 operation-insertion path were removed pending a broader interaction design.
 
-### 4b. Core package and Node-native projects
+### 4b. Core package and Node-native projects — complete
 
-Discussion and acceptance: [#6](https://github.com/vilicvane/code3d/issues/6).
+Implementation and acceptance: [#6](https://github.com/vilicvane/code3d/issues/6)
+and [#12](https://github.com/vilicvane/code3d/issues/12).
 
 - Extract the author runtime into a real ESM `@code3d/core` package with emitted
   JavaScript, declarations, explicit exports, and an explicit tooling boundary.
@@ -574,7 +588,7 @@ package privately caches deterministic thread B-Rep data in a bounded LRU, readi
 an independently owned shape in the current kernel for each invocation. This
 avoids caching disposable model objects or retaining native handles across kernels.
 
-### 4d. Annotation-driven contextual tools — active
+### 4d. Annotation-driven contextual tools
 
 Further parameter/provider design: [#7](https://github.com/vilicvane/code3d/issues/7).
 The implemented contract below remains the baseline; the issue is a discussion,
@@ -699,14 +713,25 @@ Design discussion and live scope: [#8](https://github.com/vilicvane/code3d/issue
 
 ## Open questions
 
-Unresolved constraint, topology naming, Boolean provenance, scaling, and runtime
-retention questions are tracked in [#9](https://github.com/vilicvane/code3d/issues/9).
-The geometric solver implementation belongs to
-[#21](https://github.com/vilicvane/code3d/issues/21). The earlier
-[experiment](plans/constraint-solver-wasm-evaluation.md) records the evidence
-leading to the shared OndselSolver WASM backend.
-Source lifting for combination tools belongs to [#8](https://github.com/vilicvane/code3d/issues/8).
-Public API and interoperability review belongs to [#5](https://github.com/vilicvane/code3d/issues/5).
+Further author-facing Boolean provenance and large-model lineage/mesh retention
+questions are tracked in [#9](https://github.com/vilicvane/code3d/issues/9).
+Geometric constraints (#21), named topology references and retired-ID semantics
+(#27), and geometric scaling (#33) already have implemented, documented behavior.
+The bounded kernel cache and the runtime/resource ownership boundaries are also
+implemented; #9 discusses additional needs at larger scales.
+
+The [solver experiment](plans/constraint-solver-wasm-evaluation.md) records the
+evidence preceding the integrated OndselSolver backend. The completed public API
+and interoperability audit is recorded in
+[plans/public-api-audit.md](plans/public-api-audit.md) and
+[#5](https://github.com/vilicvane/code3d/issues/5).
+
+Relationship browsing belongs to [#2](https://github.com/vilicvane/code3d/issues/2),
+object-parameter controls to [#7](https://github.com/vilicvane/code3d/issues/7), and
+source lifting for combination tools to [#8](https://github.com/vilicvane/code3d/issues/8).
+Sketch editing has its own implementation and acceptance in
+[#23](https://github.com/vilicvane/code3d/issues/23); its development-branch features
+are not part of the integrated capability descriptions above.
 Confirmed outcomes return to the design documents; discussion status stays in
 Issues.
 

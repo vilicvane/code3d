@@ -1,7 +1,9 @@
 # 公开 API 边界与审阅记录
 
-用途：记录已确认的 API 设计、实现背景及推理。剩余讨论与进度统一跟踪在
-[GitHub #5](https://github.com/vilicvane/code3d/issues/5)；不在本文维护另一份待办清单。
+用途：记录已确认的 API 设计、实现背景及推理。
+[GitHub #5](https://github.com/vilicvane/code3d/issues/5) 的审计已完成，相关类型导出
+和内部方法清理已随 `25e0488` 合并并推送。本文保留历史基线及最终结论，
+不维护另一份待办清单。
 
 ## 2026-09-06 包入口复核
 
@@ -73,10 +75,11 @@ Replicad 操作这些几何。当前接口已有真实调用方，不预先将�
 | `expose()` 的结果                                        | 在原有模型能力上增加作者命名的锚点成员。                                            |
 
 因此 `box(...).edge(1).kind` 正式公开，但 `box(...).kind` 不在作者声明中。
-`TopologyKind` 未从 root 导出这一事实，也不意味着拓扑引用的 `kind` 属性不可读。
+接管时 `TopologyKind` 尚未从 root 导出，但拓扑引用的 `kind` 属性已可读；
+#34 现已补齐该类型及其他公开签名涉及的命名类型。
 `Model` 或 `GroupModel` 带显式的具名成员类型时，同样会公开这些成员。
 
-运行时对象目前仍有更多可读字段：模型实例上的 `kind/name/color/children`、
+该基线的运行时对象还有更多可读字段：模型实例上的 `kind/name/color/children`、
 `nodeId/geometry/operation`，普通锚点上的 `reference/elementKind`，拓扑引用上的
 `model/transform/elementKind`，以及约束的内部存储。`@internal` 和 TypeScript
 `private` 不会将这些字段从 JavaScript 对象上删除；当前边界是作者声明的约束，
@@ -121,9 +124,9 @@ screws 也已有具体用途的公开属性：`ISO4762.specifications` 及其规
   `CounterboredSocketCapHoleElements` 也从 `ISO4762` namespace 导出。
   `Quaternion` 当前只涉及
   tooling 变换签名，已由 tooling 导出。类型导出规则及补齐实现由
-  [#34](https://github.com/vilicvane/code3d/issues/34) 跟踪，不再作为待决定事项。
-- 未使用的 `withChildren` 已确认删除，不预留或公开子项替换接口；实施由
-  [#32](https://github.com/vilicvane/code3d/issues/32) 跟踪。
+  [#34](https://github.com/vilicvane/code3d/issues/34) 记录，已实现并交付。
+- 未使用的 `withChildren` 及其专用校验已删除，不预留或公开子项替换接口；
+  [#32](https://github.com/vilicvane/code3d/issues/32) 已完成。
 - `ISO4762.resolveSpecification(input)` 保持公开：规格名解析为规格表条目，自定义
   `Specification` 对象原样返回。`ISO4762.threadLength(spec, length)` 同样保持公开，
   返回构建器使用的名义螺纹长度；实际螺纹仍由 `screw()` 按可用杆长裁剪。
@@ -166,8 +169,8 @@ screws 也已有具体用途的公开属性：`ISO4762.specifications` 及其规
 
 本轮提出的 API 设计问题已全部确认，结论保留在本文。类型导出、group paint、
 withChildren、内部资源生命周期和 screws 查询接口不再列为待决定事项，也不预留
-没有具体需求的更多拓扑维度条目。审计交付及关联实现的进度统一由
-[#5](https://github.com/vilicvane/code3d/issues/5) 和关联 issue 跟踪。
+没有具体需求的更多拓扑维度条目。审计及关联实现已交付，验收记录见
+[#5](https://github.com/vilicvane/code3d/issues/5) 和关联 issue。
 
 ## 已修复：Model 能力分层
 

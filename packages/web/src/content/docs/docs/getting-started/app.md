@@ -41,6 +41,11 @@ aliases, namespace calls, and models in arrays or options objects can retain
 their input contexts too. A failed call can still expose inputs that were
 evaluated before it failed.
 
+Inside `relate(part => ...)`, the parameter declaration and uses of `part`
+show the related model alongside the other participants. Named elements and
+topology references share that context. See
+[inspecting relation scope](../../guides/relations/#inspect-the-right-scope).
+
 Inspection does not automatically add a parameter panel or a drag handle.
 Panels use [parameter annotations](../../guides/model-tools/), while spatial
 handles require an operation with supported positioning or rotation semantics.

@@ -46,7 +46,7 @@ the same source.
 
 ## Run locally
 
-To develop Code3D locally, use Node.js 24 and npm:
+To run the App on your machine, use Node.js 24 and npm:
 
 ```bash
 git clone https://github.com/vilicvane/code3d.git
@@ -55,11 +55,7 @@ npm install
 npm run dev
 ```
 
-The App uses [localhost:3133](http://localhost:3133) (`0xc3d`) by default.
-This port is reserved for the primary worktree. Linked development worktrees
-must [reserve a separate port](.agents/skills/worktree-development/SKILL.md#独立开发服务器)
-and pass it explicitly, for example `npm run dev -- --port 5174`.
-The server fails if its selected port is already in use.
+Open [localhost:3133](http://localhost:3133) in your browser.
 
 ## Project status
 

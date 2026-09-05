@@ -1,13 +1,15 @@
 # `@code3d/core` package and Node-native project refactor
 
-## Status and planning posture
+## Implementation and acceptance
 
-Live scope, discussion, and status: [GitHub #6](https://github.com/vilicvane/code3d/issues/6).
-The following is the implementation baseline at the 2026-09-05 migration,
-not a separate status tracker. The fillet/chamfer edge-selection work is integrated and the
-workspace/package-boundary portion of phase 1 is implemented. Project-local
-package resolution, building, evaluation, and language-service loading were
-the remaining work at that point.
+The project package boundary, lazy dependency resolution, native ESM evaluation,
+and Monaco declaration loading are implemented and accepted in
+[#6](https://github.com/vilicvane/code3d/issues/6) and
+[#12](https://github.com/vilicvane/code3d/issues/12). The final integration is
+[`162497e`](https://github.com/vilicvane/code3d/commit/162497e3887dc5cd5b7936307353d68b4ba5d73f).
+Acceptance covers ordinary Windows npm projects, direct Node execution, actual
+directory handles, repeated Worker compilation, and native resource release.
+The supported layouts and measured lifetime limits are recorded below.
 
 This document is durable working memory, not a frozen implementation spec. It
 separates confirmed product constraints from working technical choices. During
@@ -408,10 +410,11 @@ content-deduplicated. These measurements do not claim zero JS growth for
 unlimited distinct edits. Closing the project or terminating its Worker releases
 the complete native-module cache. Full acceptance details are tracked in #12.
 
-## Implementation sequence
+## Implementation sequence (historical)
 
-The sequence may be refined after the preflight experiments, but the completed
-milestone must leave one coherent path.
+The phases below preserve the migration plan and its verification criteria.
+They are not pending work; the retained implementation and support boundaries
+above and below describe the completed system.
 
 ### Phase 0: integrate the current topology work and run isolated spikes
 

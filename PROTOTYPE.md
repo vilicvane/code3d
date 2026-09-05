@@ -17,9 +17,9 @@
   `/examples` 目录，`Reset examples` 不会改动其他文件。
 - 源码产生任意模型对象即可预览；export 只是可选发布边界和 fallback。
 - `model()` 不是入口要求，源码选择决定主要渲染对象。
-- Monaco 提供 `code3d` API 的类型、补全、格式化和跨文件定义跳转。
+- Monaco 提供 `@code3d/core` 等建模包的类型、补全、格式化和跨文件定义跳转。
 - 用户代码与 OpenCascade 在可终止 Worker 中编译和执行。
-- primitive、平面图形、空间曲线、loft、约束定位、布尔运算、圆角、倒角、棱柱、圆台和螺纹由 OCCT B-Rep 计算。
+- primitive、平面图形、空间曲线、loft、布尔运算、圆角、倒角、棱柱、圆台和螺纹由 OCCT B-Rep 计算；几何关系的位姿由 OndselSolver 求解。
 - Worker 将 B-Rep 三角化为 surface、法线和拓扑边线供 Three.js 渲染。
 - 几何模型的 vertex、edge 和 surface 使用模型内稳定的数字 ID；派生操作保留可一一追踪的旧 ID，新元素递增分配且不复用已消失的 ID。
 - circle、ellipse、rectangle、regularPolygon 平面图形和 line、arc、bezier、spline
@@ -36,6 +36,8 @@
 - 模型接收者与参数按实际求值自动追踪；普通函数、导入别名、namespace 调用，以及
   数组和选项对象中的模型输入都可保留独立源码上下文。调用失败仍保留已求值的输入。
   可预览不意味着自动拥有参数面板或空间手柄，后两者仍由工具注释和操作语义决定。
+- `relate` 回调参数、模型值、具名锚点和拓扑引用共用关系上下文预览；尚未编写下游
+  `group` 或 `loft` 时，也能查看关系参与者的组合位置。
 - 数组、Set 和 Map 中的模型按组合位置预览，即使集合只有一个成员也保留该语义；
   单独模型仍使用自身局部坐标，集合不会隐式变成 group 或额外位置工具 scope。
 - 平移 gizmo 将位置参数追溯到上游变量或源码字面量，拖动时先做临时预览，确认后通过 Monaco 编辑直接写回源码。
