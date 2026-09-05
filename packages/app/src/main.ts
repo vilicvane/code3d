@@ -11,10 +11,8 @@ import type {
   DesignArgumentContext,
   EdgeArgumentTarget,
   ModelModule,
-  SourceTargetEvaluation,
 } from './model/compiler';
 import {ModelDiagnosticError, type ModelDiagnostic} from './model/diagnostic';
-import {preferUpstreamParameterUsages} from './model/parameter-provenance';
 import {bundledExamples} from './project/bundled-examples';
 import {defaultProject} from './project/default-project';
 import {
@@ -36,7 +34,6 @@ import type {
   EdgeId,
   ModelSnapshotObject,
   ParameterTarget,
-  ParameterUsage,
   SourceRef,
   TopologyKind,
 } from '@code3d/core/tooling';
@@ -74,15 +71,20 @@ import {SourceEditPopover} from './ui/source-edit-popover';
 import {
   ContextualToolPanel,
   type ContextualToolPanelView,
-  type ContextualToolParameterView,
 } from './ui/contextual-tool-panel';
 import type {
   ToolArgumentSource,
   ToolSelectionParameterSchema,
   ToolSignatureSchema,
-  ToolValueParameterSchema,
 } from './model/tool-schema';
 import {isToolSelectionParameter} from './model/tool-schema';
+import {
+  contextualToolParameters,
+  contextualParameterIntent,
+  contextualParameterView,
+  validContextualParameter,
+  type ContextualToolParameterState,
+} from './tools/contextual-tool-parameters';
 
 const directoryWorkspaceId = new URL(window.location.href).searchParams.get(
   'workspace',
@@ -148,7 +150,6 @@ app.innerHTML = `
 
       <section class="pane preview-pane">
         <div class="viewport-host" id="viewport-host">
-          <div class="tool-status" id="tool-status" hidden></div>
           <div class="viewport-feedback-stack" id="viewport-feedback-stack">
             <div class="viewport-diagnostic-stack" id="viewport-diagnostic-stack" role="status" aria-live="polite" aria-atomic="true" hidden></div>
           </div>
@@ -207,7 +208,6 @@ const designArgumentsFunction = requiredElement('design-arguments-function');
 const designArgumentsOptions = requiredElement('design-arguments-options');
 const elements = requiredElement('elements');
 const elementsCount = requiredElement('elements-count');
-const toolStatus = requiredElement('tool-status');
 const viewportFeedbackStack = requiredElement('viewport-feedback-stack');
 const viewportDiagnosticStack = requiredElement('viewport-diagnostic-stack');
 const viewportStatus = requiredElement('viewport-status');
@@ -307,14 +307,6 @@ type EdgeEditSession = {
   appliedHasExplicitEdgeSelection: boolean;
   hasEdits: boolean;
   historyState: 'applied' | 'undone';
-};
-type ContextualToolParameterState = {
-  schema: ToolValueParameterSchema;
-  usage?: ParameterUsage;
-  argument?: ToolArgumentSource['target'];
-  value?: number;
-  expressionValue?: number;
-  editable: boolean;
 };
 type TopologyReferenceSelectionTool = {
   targetId: string;
@@ -559,6 +551,10 @@ resetButton.addEventListener('click', () => {
 });
 
 window.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && viewport.cancelPositionTool()) {
+    event.preventDefault();
+    return;
+  }
   if (event.key === 'Escape' && !projectContextMenu.hidden) {
     hideProjectContextMenu();
     event.preventDefault();
@@ -570,17 +566,8 @@ window.addEventListener('keydown', event => {
     event.preventDefault();
     return;
   }
-  if (event.key === 'Escape' && finishContextualTool()) {
-    event.preventDefault();
-    return;
-  }
   if (dockPanels.handleKeyDown(event)) {
     event.preventDefault();
-    return;
-  }
-  if (event.key === 'Escape' && viewport.cancelPositionTool()) {
-    event.preventDefault();
-    return;
   }
 });
 
@@ -1381,52 +1368,6 @@ function syncContextualTool(sourceTargetFocused = true): void {
 
 const contextualParameterCommitDelayMilliseconds = 240;
 
-function contextualToolParameters(
-  signature: ToolSignatureSchema,
-  arguments_: readonly ToolArgumentSource[],
-  operationRef: SourceRef,
-  usages: readonly ParameterUsage[],
-  toolArguments: SourceTargetEvaluation['toolArguments'],
-): Map<string, ContextualToolParameterState> {
-  return new Map(
-    signature.parameters
-      .filter(
-        (parameter): parameter is ToolValueParameterSchema =>
-          !isToolSelectionParameter(parameter),
-      )
-      .map(parameter => {
-        const argument = arguments_.find(
-          candidate => candidate.index === parameter.index,
-        )?.target;
-        const matches = preferUpstreamParameterUsages(
-          usages.filter(
-            usage =>
-              usage.operation === signature.name &&
-              usage.argument === parameter.name &&
-              usage.operationRef.file === operationRef.file &&
-              usage.operationRef.end === operationRef.end &&
-              containsSourceRef(usage.operationRef, operationRef) &&
-              Math.abs(usage.sensitivity) > 1e-9,
-          ),
-        );
-        const editable =
-          matches.length === 1 ||
-          (matches.length === 0 && argument !== undefined);
-        return [
-          parameter.name,
-          {
-            schema: parameter,
-            usage: editable ? matches[0] : undefined,
-            argument: matches.length === 0 ? argument : undefined,
-            value: matches[0]?.value,
-            expressionValue: toolArguments?.[parameter.index],
-            editable,
-          },
-        ];
-      }),
-  );
-}
-
 function parameterValues(
   parameters: ReadonlyMap<string, ContextualToolParameterState>,
 ): Map<string, number> {
@@ -1479,7 +1420,7 @@ function updateContextualToolParameter(
   parameter.value = value;
   const invalid = !validContextualParameter(parameter);
   contextualToolPanel.setInvalid(name, invalid);
-  if (invalid || !parameter.editable) return;
+  if (invalid || !parameter.binding) return;
   const timer = window.setTimeout(() => {
     toolParameterCommitTimers.delete(name);
     commitContextualToolParameter(
@@ -1501,29 +1442,13 @@ function commitContextualToolParameter(
   parameter.value = value;
   const invalid = !validContextualParameter(parameter);
   contextualToolPanel.setInvalid(name, invalid);
-  if (invalid || !parameter.editable) return;
+  if (invalid || !parameter.binding) return;
   const appliedValue = tool.appliedValues.get(name);
   if (appliedValue !== undefined && Math.abs(value! - appliedValue) < 1e-9) {
     return;
   }
-  const usage = parameter.usage;
-  const argument = parameter.argument;
-  let intent: ToolIntent;
-  if (usage) {
-    const sourceValue =
-      usage.target.value + (value! - usage.value) / usage.sensitivity;
-    if (!Number.isFinite(sourceValue)) return;
-    intent = parameterIntent(usage.target, sourceValue);
-  } else if (argument) {
-    intent = {
-      kind: 'argument.set',
-      parameter: parameter.schema.name,
-      target: argument,
-      expression: {kind: 'number', value: value!},
-    };
-  } else {
-    return;
-  }
+  const intent = contextualParameterIntent(parameter);
+  if (!intent) return;
   const committed = commitToolSession(
     toolEngine.begin(
       `contextual-tool.parameter:${tool.callId}:${tool.contextId}:${name}`,
@@ -1532,7 +1457,11 @@ function commitContextualToolParameter(
     {undoGroup: tool.undoGroup},
   );
   if (!committed) {
-    parameter.value = appliedValue ?? usage?.value;
+    parameter.value =
+      appliedValue ??
+      (parameter.binding.kind === 'parameter'
+        ? parameter.binding.usage.value
+        : undefined);
     renderContextualToolPanel();
     return;
   }
@@ -1555,25 +1484,6 @@ function cancelContextualParameterCommit(name: string): void {
 function cancelContextualParameterCommits(): void {
   toolParameterCommitTimers.forEach(timer => window.clearTimeout(timer));
   toolParameterCommitTimers.clear();
-}
-
-function validContextualParameter(
-  parameter: ContextualToolParameterState,
-): boolean {
-  const value = parameter.value;
-  if (value === undefined || !Number.isFinite(value)) return false;
-  if (parameter.schema.kind === 'count' && !Number.isInteger(value)) {
-    return false;
-  }
-  const constraints = parameter.schema.constraints;
-  return !(
-    (constraints?.min !== undefined && value < constraints.min) ||
-    (constraints?.exclusiveMin !== undefined &&
-      value <= constraints.exclusiveMin) ||
-    (constraints?.max !== undefined && value > constraints.max) ||
-    (constraints?.exclusiveMax !== undefined &&
-      value >= constraints.exclusiveMax)
-  );
 }
 
 function runContextualToolAction(id: string): void {
@@ -1642,25 +1552,7 @@ function renderContextualToolPanel(forceParameterValues = false): void {
     topologyReferenceSelectionTool?.targetId === tool.targetId
       ? topologyReferenceSelectionTool
       : undefined;
-  const parameters: ContextualToolParameterView[] = [
-    ...tool.parameters.values(),
-  ].map(parameter => ({
-    name: parameter.schema.name,
-    label: parameter.schema.label,
-    value: parameter.value,
-    placeholder:
-      parameter.value === undefined && parameter.argument?.kind === 'present'
-        ? parameter.expressionValue === undefined
-          ? undefined
-          : formatDisplayNumber(parameter.expressionValue)
-        : undefined,
-    step: contextualParameterStep(parameter),
-    min: parameter.schema.constraints?.min,
-    max: parameter.schema.constraints?.max,
-    invalid:
-      parameter.value !== undefined && !validContextualParameter(parameter),
-    disabled: !parameter.editable,
-  }));
+  const parameters = [...tool.parameters.values()].map(contextualParameterView);
   const actions = tool.signature.parameters.flatMap(parameter =>
     parameter.actions.map(action => ({
       id: `${parameter.name}:${action.action}`,
@@ -1703,18 +1595,6 @@ function renderContextualToolPanel(forceParameterValues = false): void {
   contextualToolPanel.show(view, forceParameterValues);
 }
 
-function contextualParameterStep(
-  parameter: ContextualToolParameterState,
-): number {
-  if (parameter.schema.kind === 'count' || parameter.schema.kind === 'angle') {
-    return 1;
-  }
-  if (parameter.schema.kind === 'length') {
-    return Math.abs(parameter.value ?? 0) < 10 ? 0.1 : 0.5;
-  }
-  return 0.1;
-}
-
 function humanizeToolName(value: string): string {
   const words = value
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
@@ -1733,7 +1613,7 @@ function syncSelectionProvider(
     finishEdgeSelectionTool();
     syncTopologyReferenceSelectionProvider(scope, occurrence);
   } else {
-    finishTopologyReferenceSelectionTool();
+    dismissTopologyReferenceSelectionTool();
     syncEdgeSelectionProvider(scope, occurrence);
   }
 }
@@ -1760,7 +1640,7 @@ function syncTopologyReferenceSelectionProvider(
     !occurrence ||
     occurrence.node.kind === 'group'
   ) {
-    finishTopologyReferenceSelectionTool();
+    dismissTopologyReferenceSelectionTool();
     return;
   }
   const current = topologyReferenceSelectionTool;
@@ -1960,7 +1840,7 @@ function handleTopologyReferenceSelection(
     {undoGroup: contextual?.undoGroup},
   );
   if (!committed) {
-    finishTopologyReferenceSelectionTool();
+    dismissTopologyReferenceSelectionTool();
     renderContextualToolPanel();
     return;
   }
@@ -2029,45 +1909,36 @@ function commitEdgeOperationChange(
   }
 }
 
-function dismissEdgeSelectionTool(updateViewport = true): boolean {
-  if (!edgeSelectionTool) return false;
+function dismissEdgeSelectionTool(updateViewport = true): void {
+  if (!edgeSelectionTool) return;
   edgeSelectionTool = undefined;
   if (updateViewport) viewport.endTopologySelection();
-  return true;
 }
 
-function dismissTopologyReferenceSelectionTool(updateViewport = true): boolean {
-  if (!topologyReferenceSelectionTool) return false;
+function dismissTopologyReferenceSelectionTool(updateViewport = true): void {
+  if (!topologyReferenceSelectionTool) return;
   topologyReferenceSelectionTool = undefined;
   if (updateViewport) viewport.endTopologySelection();
-  return true;
 }
 
-function finishTopologyReferenceSelectionTool(): boolean {
-  return dismissTopologyReferenceSelectionTool();
-}
-
-function finishEdgeSelectionTool(): boolean {
-  const dismissed = dismissEdgeSelectionTool();
+function finishEdgeSelectionTool(): void {
+  dismissEdgeSelectionTool();
   const session = edgeEditSession;
-  if (!session) return dismissed;
-  finishEdgeEditSession(session);
-  return true;
+  if (session) finishEdgeEditSession(session);
 }
 
-function finishContextualTool(): boolean {
+function finishContextualTool(): void {
   cancelContextualParameterCommits();
-  const finishedTopology = finishTopologyReferenceSelectionTool();
-  const finishedEdge = finishEdgeSelectionTool();
+  dismissTopologyReferenceSelectionTool();
+  finishEdgeSelectionTool();
   const tool = contextualTool;
   contextualTool = undefined;
-  const hidden = contextualToolPanel.hide();
-  if (!tool) return finishedTopology || finishedEdge || hidden;
+  contextualToolPanel.hide();
+  if (!tool) return;
   if (!tool.hasEdits || tool.historyState === 'undone') {
     codeEditor.discardPendingToolFormat(tool.sourceFile, tool.undoGroup);
     codeEditor.endSourceEditGroup(tool.undoGroup);
   }
-  return true;
 }
 
 function finishEdgeEditSession(session: EdgeEditSession): void {
@@ -2078,27 +1949,25 @@ function finishEdgeEditSession(session: EdgeEditSession): void {
   }
 }
 
-function abandonEdgeSelectionTool(): boolean {
-  const dismissed = dismissEdgeSelectionTool();
+function abandonEdgeSelectionTool(): void {
+  dismissEdgeSelectionTool();
   const session = edgeEditSession;
-  if (!session) return dismissed;
+  if (!session) return;
   edgeEditSession = undefined;
   codeEditor.discardPendingToolFormat(session.sourceFile, session.undoGroup);
   codeEditor.endSourceEditGroup(session.undoGroup);
-  return true;
 }
 
-function abandonContextualTool(): boolean {
+function abandonContextualTool(): void {
   cancelContextualParameterCommits();
-  const abandonedTopology = finishTopologyReferenceSelectionTool();
-  const abandonedEdge = abandonEdgeSelectionTool();
+  dismissTopologyReferenceSelectionTool();
+  abandonEdgeSelectionTool();
   const tool = contextualTool;
   contextualTool = undefined;
-  const hidden = contextualToolPanel.hide();
-  if (!tool) return abandonedTopology || abandonedEdge || hidden;
+  contextualToolPanel.hide();
+  if (!tool) return;
   codeEditor.discardPendingToolFormat(tool.sourceFile, tool.undoGroup);
   codeEditor.endSourceEditGroup(tool.undoGroup);
-  return true;
 }
 
 function handleContextualEditingHistory(
@@ -2259,7 +2128,6 @@ function handlePositionTool(event: PositionGizmoEvent): void {
       `viewport.translate:${event.binding.axis}:${positionBindingId(event.binding)}`,
     );
     errorBar.hidden = true;
-    showPositionToolStatus(event.binding, event.binding.value);
     return;
   }
 
@@ -2268,7 +2136,6 @@ function handlePositionTool(event: PositionGizmoEvent): void {
     positionToolSession = undefined;
     resumeCompileAfterTool(positionToolInterruptedCompile);
     positionToolInterruptedCompile = false;
-    hidePositionToolStatus();
     return;
   }
 
@@ -2277,7 +2144,6 @@ function handlePositionTool(event: PositionGizmoEvent): void {
     showToolIssue('The position tool session expired. Start the drag again.');
     return;
   }
-  showPositionToolStatus(event.binding, event.value);
 
   if (event.kind === 'preview') {
     const resolution = session.preview(
@@ -2301,7 +2167,6 @@ function handlePositionTool(event: PositionGizmoEvent): void {
   }
   positionToolSession = undefined;
   positionToolInterruptedCompile = false;
-  hidePositionToolStatus();
 }
 
 function positionIntent(
@@ -2334,27 +2199,6 @@ function positionBindingId(binding: PositionGizmoBinding): string {
   }
   const {start, end} = binding.receiver.sourceRef;
   return `expression:${binding.receiver.sourceRef.file}:${start}:${end}`;
-}
-
-function showPositionToolStatus(
-  binding: PositionGizmoBinding,
-  value: number,
-): void {
-  const impact =
-    binding.kind === 'parameter'
-      ? (currentModule?.parameterImpacts.get(binding.target.id) ?? 1)
-      : binding.occurrenceKeys.length;
-  const effect = impact > 1 ? ` · Affects ${formatObjectCount(impact)}` : '';
-  toolStatus.textContent = `${binding.axis.toUpperCase()} · ${binding.label} ${formatDisplayNumber(value)}${effect} · Esc to cancel`;
-  toolStatus.hidden = false;
-}
-
-function hidePositionToolStatus(): void {
-  toolStatus.hidden = true;
-}
-
-function formatDisplayNumber(value: number): string {
-  return String(Number(value.toFixed(3)));
 }
 
 function applyToolPreview(preview: ToolPreview): void {
@@ -2548,10 +2392,6 @@ function restoreModelStatus(): void {
 
 function primarySource(node: ModelSnapshotObject): SourceRef | undefined {
   return node.sourceRefs.at(-1);
-}
-
-function formatObjectCount(count: number): string {
-  return `${count} ${count === 1 ? 'object' : 'objects'}`;
 }
 
 function requiredElement<T extends HTMLElement = HTMLElement>(id: string): T {

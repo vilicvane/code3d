@@ -1,3 +1,5 @@
+import {formatDisplayNumber} from '../tools/parameter-policy';
+
 export type ContextualToolParameterView = Readonly<{
   name: string;
   label: string;
@@ -108,11 +110,9 @@ export class ContextualToolPanel {
     this.root.hidden = false;
   }
 
-  hide(): boolean {
-    if (this.root.hidden) return false;
+  hide(): void {
     this.root.hidden = true;
     this.activeViewId = undefined;
-    return true;
   }
 
   setInvalid(name: string, invalid: boolean): void {
@@ -233,8 +233,4 @@ function sameNames(
     current.length === parameters.length &&
     current.every((name, index) => name === parameters[index].name)
   );
-}
-
-function formatDisplayNumber(value: number): string {
-  return String(Number(value.toFixed(3)));
 }
