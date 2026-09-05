@@ -3,6 +3,7 @@ import type * as Replicad from 'replicad';
 import type {ProjectFileReader} from '../project/file-reader';
 import {ProjectBuilder, type ProjectBundle} from '../project/project-builder';
 import {ModuleEvaluator, type ModuleExports} from './module-evaluator';
+import type {CompilationProgress} from './compilation-progress';
 
 const runtimeUrl = 'code3d-project:/runtime.js';
 
@@ -24,7 +25,9 @@ export class ProjectRuntime {
     files: ProjectFileReader,
     builder: ProjectBuilder,
     evaluator: ModuleEvaluator,
+    onProgress?: CompilationProgress,
   ): Promise<ProjectRuntime> {
+    onProgress?.('loading-runtime');
     const resolve = async (specifier: string, importer?: string) => {
       const path = await builder.resolve(specifier, importer);
       if (path === false)
@@ -92,6 +95,7 @@ export class ProjectRuntime {
       throw new Error(`Installed kernel asset is missing: ${wasmPath}`);
     if (!solverWasm)
       throw new Error(`Installed solver asset is missing: ${solverWasmPath}`);
+    onProgress?.('initializing-runtime');
     const runtime = await evaluator.evaluate(runtimeUrl, bundle.source, {
       __code3dKernelBytes: wasm,
       __code3dSolverBytes: solverWasm,

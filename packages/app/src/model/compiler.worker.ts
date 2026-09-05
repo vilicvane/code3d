@@ -14,10 +14,7 @@ import type {
 
 const workerScope = self as DedicatedWorkerGlobalScope;
 const send = (message: CompilerResponse) => workerScope.postMessage(message);
-const engineReady = esbuild.initialize({
-  wasmURL: esbuildWasmUrl,
-  worker: false,
-});
+let engineReady: Promise<void> | undefined;
 let nextFileId = 1;
 const pendingFiles = new Map<
   number,
@@ -56,21 +53,34 @@ async function drain(): Promise<void> {
   if (running) return;
   running = true;
   try {
-    await engineReady;
     while (queued) {
       const request = queued;
       queued = undefined;
       currentId = request.id;
       try {
+        if (!engineReady) {
+          send({kind: 'progress', id: request.id, phase: 'loading-compiler'});
+          engineReady = esbuild
+            .initialize({wasmURL: esbuildWasmUrl, worker: false})
+            .catch(error => {
+              engineReady = undefined;
+              throw error;
+            });
+        }
+        await engineReady;
+        if (currentId !== request.id || queued) continue;
         const module = await compiler.compile(
           request.project,
           request.rootPath,
           request.designContextId,
           language => send({kind: 'language', id: request.id, language}),
-          () => {
-            if (currentId !== request.id || queued)
+          phase => {
+            if (
+              phase === 'evaluating-model' &&
+              (currentId !== request.id || queued)
+            )
               throw new Error('Compilation superseded.');
-            send({kind: 'evaluating', id: request.id});
+            send({kind: 'progress', id: request.id, phase});
           },
         );
         if (currentId === request.id) {
@@ -86,16 +96,6 @@ async function drain(): Promise<void> {
             diagnostic: diagnosticFromError(error, 'project'),
           });
       }
-    }
-  } catch (error) {
-    if (queued) {
-      send({
-        kind: 'result',
-        id: queued.id,
-        ok: false,
-        diagnostic: diagnosticFromError(error, 'project'),
-      });
-      queued = undefined;
     }
   } finally {
     running = false;

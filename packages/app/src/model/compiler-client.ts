@@ -6,6 +6,7 @@ import type {ProjectFileReader} from '../project/file-reader';
 import type {ProjectLanguage} from '../project/project-language';
 import {browserPackageFiles} from '../project/browser-packages';
 import type {ModelExportInstance, ModelExportOptions} from './model-export';
+import type {CompilationProgress} from './compilation-progress';
 import type {
   CompilerRequest,
   CompilerResponse,
@@ -17,7 +18,12 @@ type PendingRequest = {
   reject(error: Error): void;
   timeout: number;
 } & (
-  | {kind: 'compile'; evaluating: boolean; resolve(module: ModelModule): void}
+  | {
+      kind: 'compile';
+      evaluating: boolean;
+      onProgress?: CompilationProgress;
+      resolve(module: ModelModule): void;
+    }
   | {kind: 'export'; resolve(blob: Blob): void}
 );
 
@@ -38,6 +44,7 @@ export class ModelCompilerClient {
     project: ModelProject,
     rootPath: string,
     designContextId?: string,
+    onProgress?: CompilationProgress,
   ): Promise<ModelModule> {
     this.cancel();
     this.exportable = undefined;
@@ -49,6 +56,7 @@ export class ModelCompilerClient {
         resolve,
         reject,
         evaluating: false,
+        onProgress,
         timeout: this.deadline(id, 120_000),
       };
       this.send({kind: 'compile', id, project, rootPath, designContextId});
@@ -173,14 +181,18 @@ export class ModelCompilerClient {
         this.onLanguage?.(data.language);
         return;
       }
-      window.clearTimeout(pending.timeout);
-      if (data.kind === 'evaluating' && pending.kind === 'compile') {
-        pending.evaluating = true;
-        pending.timeout = this.deadline(data.id, 15_000);
+      if (data.kind === 'progress') {
+        if (pending.kind !== 'compile') return;
+        if (data.phase === 'evaluating-model') {
+          window.clearTimeout(pending.timeout);
+          pending.evaluating = true;
+          pending.timeout = this.deadline(data.id, 15_000);
+        }
+        pending.onProgress?.(data.phase);
         return;
       }
+      window.clearTimeout(pending.timeout);
       this.pending = null;
-      if (data.kind === 'evaluating') return;
       if (!data.ok) pending.reject(new ModelDiagnosticError(data.diagnostic));
       else if (pending.kind === 'compile' && data.kind === 'result') {
         this.exportable = {module: data.module, compileId: data.id};
