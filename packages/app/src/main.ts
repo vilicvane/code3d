@@ -1652,7 +1652,8 @@ function syncTopologyReferenceSelectionProvider(
     !parameter ||
     !argument ||
     !occurrence ||
-    occurrence.node.kind === 'group'
+    (occurrence.node.kind === 'group' &&
+      !('scope' in selection && selection.scope))
   ) {
     dismissTopologyReferenceSelectionTool();
     return;
@@ -1682,6 +1683,7 @@ function syncTopologyReferenceSelectionProvider(
       selection.kind,
       parameter.multiple,
       selectedIds,
+      selection.scope,
     );
   } catch (error) {
     showToolIssue(error instanceof Error ? error.message : String(error));

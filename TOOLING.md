@@ -214,8 +214,13 @@ scope 的 edit plan。
 
 `origin`、`originOffset`、`originVertex`、`originCenter` 和 `rotate` 在 operation snapshot 中记录
 局部几何坐标下的原点和本次操作向量。模型 snapshot 同时提供当前原点，tooling
-protocol 4 统一这些数据与参数 provenance，并从同一依赖图安装 OpenCascade 和约束求解器；
+protocol 5 统一这些数据与参数 provenance，并从同一依赖图安装 OpenCascade 和约束求解器；
 viewport 不从包围盒推断模型旋转中心。
+
+拓扑引用同时报告约束所属模型、几何来源、源拓扑身份和几何到所属模型的变换。
+值预览用来源网格和该变换高亮原拓扑；子拓扑选择在同一坐标关系下只提供所属面/边内的 ID。
+计算锚点直接报告坐标系，预览无需从名字反查模型的固定具名元素。`expose` 的命名成员及嵌套成员
+保留拓扑元数据，补全预览遵循同样的装配坐标语义。见 [#27](https://github.com/vilicvane/code3d/issues/27)。
 
 `originCenter()` 取主体建立时的局部包围盒中心随模型变换后的位置，与 `.center`
 使用同一锚点。无参数操作通过 operation metadata 接入原点标记和手柄，不需要虚构参数。
