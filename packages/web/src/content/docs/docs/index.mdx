@@ -4,6 +4,7 @@ description: Learn solid modeling with TypeScript and direct geometric interacti
 ---
 
 import {LinkCard, CardGrid} from '@astrojs/starlight/components';
+import ArrowIcon from '../../../components/ArrowIcon.astro';
 import {sitePath, appUrl} from '../../../lib/site';
 
 Code3D connects TypeScript source with the geometry it produces. Write a model,
@@ -25,10 +26,15 @@ tools to make supported selections and parameter changes directly in source.
 
 ## Start in the App
 
-<a href={appUrl('first-model.ts')} target="_blank" rel="noopener">
-  Open the first model in Code3D
-</a>
-. You can edit immediately using browser storage. There is no account to create.
+<p>
+  <a href={appUrl('first-model.ts')} target="_blank" rel="noopener">
+    {'Open the first model in Code3D '}
+    <ArrowIcon />
+  </a>
+  {
+    '. You can edit immediately using browser storage. There is no account to create.'
+  }
+</p>
 
 You will benefit from knowing JavaScript variables, functions, arrays, and
 imports. Code3D uses ordinary TypeScript; you do not need to learn a separate

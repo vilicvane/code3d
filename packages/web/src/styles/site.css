@@ -498,7 +498,7 @@
     font: 10px var(--c3-mono);
     color: #9ca58f;
   }
-  .viewport-label > span {
+  .viewport-label > .c3-arrow {
     color: var(--c3-accent);
     margin-left: 8px;
   }
@@ -557,11 +557,12 @@
   }
   .example-copy h3 {
     display: flex;
+    align-items: center;
     justify-content: space-between;
     margin: 10px 0;
     font-size: 1.2rem;
   }
-  .example-copy h3 span {
+  .example-copy h3 .c3-arrow {
     color: var(--c3-accent);
   }
   .example-copy > p:last-child {

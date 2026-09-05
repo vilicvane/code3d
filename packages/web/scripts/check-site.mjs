@@ -25,6 +25,31 @@ for await (const file of glob('**/*.html', {cwd: directory})) {
     const attributes = Object.fromEntries(
       (node.attrs || []).map(a => [a.name, a.value]),
     );
+    if (node.nodeName === '#text' && /[\u2196-\u2199]/u.test(node.value)) {
+      issues.push(`${file}: diagonal arrows must use SVG, not Unicode glyphs`);
+    }
+    if (
+      node.tagName === 'svg' &&
+      attributes.class?.split(/\s+/).includes('c3-arrow') &&
+      (attributes['aria-hidden'] !== 'true' ||
+        attributes.focusable !== 'false' ||
+        attributes.stroke !== 'currentColor')
+    ) {
+      issues.push(
+        `${file}: arrow icons must be decorative and inherit the text color`,
+      );
+    }
+    if (node.tagName === 'a' && attributes.target === '_blank') {
+      let hasIcon = attributes.class?.split(/\s+/).includes('c3-link-arrow');
+      walk(node, child => {
+        if (child.tagName === 'svg') hasIcon = true;
+      });
+      if (!hasIcon) {
+        issues.push(
+          `${file}: new-tab link is missing its icon: ${attributes.href}`,
+        );
+      }
+    }
     if (attributes.id) ids.add(attributes.id);
     if (
       node.tagName === 'a' &&
@@ -152,5 +177,5 @@ for (const file of ['license.txt', 'app/LICENSE']) {
 }
 if (issues.length) throw new Error(issues.join('\n'));
 console.log(
-  `Validated links, anchors, and assets on ${pages.size} pages; search and App present.`,
+  `Validated links, icons, anchors, and assets on ${pages.size} pages; search and App present.`,
 );

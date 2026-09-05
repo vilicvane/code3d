@@ -2,6 +2,7 @@
 import Site from '../layouts/Site.astro';
 import SourceDemo from '../components/SourceDemo.astro';
 import ExampleCards from '../components/ExampleCards.astro';
+import ArrowIcon from '../components/ArrowIcon.astro';
 import {sitePath, appUrl} from '../lib/site';
 ---
 
@@ -26,7 +27,7 @@ import {sitePath, appUrl} from '../lib/site';
           class="button"
           href={appUrl('first-model.ts')}
           target="_blank"
-          rel="noopener">Start building <span aria-hidden="true">↗</span></a
+          rel="noopener">Start building <ArrowIcon /></a
         ><a
           class="text-link"
           href={sitePath('docs/getting-started/first-model/')}
@@ -131,7 +132,7 @@ import {sitePath, appUrl} from '../lib/site';
         class="button"
         href={appUrl('first-model.ts')}
         target="_blank"
-        rel="noopener">Open Code3D <span aria-hidden="true">↗</span></a
+        rel="noopener">Open Code3D <ArrowIcon /></a
       ><a class="text-link" href={sitePath('docs/')}>Read the docs →</a>
     </div>
     <p class="closing-note">

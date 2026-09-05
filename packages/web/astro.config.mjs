@@ -53,9 +53,13 @@ export default defineConfig({
             {label: 'Home', link: '/'},
             {label: 'Examples', link: '/examples/'},
             {
-              label: 'Open App ↗',
+              label: 'Open App',
               link: '/app/',
-              attrs: {target: '_blank', rel: 'noopener'},
+              attrs: {
+                target: '_blank',
+                rel: 'noopener',
+                class: 'c3-link-arrow',
+              },
             },
           ],
         },

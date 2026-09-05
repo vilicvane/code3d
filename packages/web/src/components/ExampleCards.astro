@@ -1,6 +1,7 @@
 ---
 import {getCollection} from 'astro:content';
 import {Image} from 'astro:assets';
+import ArrowIcon from './ArrowIcon.astro';
 import {modelImage} from '../lib/images';
 import {sitePath} from '../lib/site';
 import {renderSamples} from '../../../app/render-samples/catalog';
@@ -28,7 +29,7 @@ examples.sort(
           <>
             <p class="eyebrow">{example.data.category}</p>
             <h3>
-              {example.data.title} <span aria-hidden="true">↗</span>
+              {example.data.title} <ArrowIcon />
             </h3>
             <p>{example.data.description}</p>
           </>

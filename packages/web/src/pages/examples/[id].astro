@@ -2,6 +2,7 @@
 import {getCollection, type CollectionEntry} from 'astro:content';
 import Site from '../../layouts/Site.astro';
 import ModelExample from '../../components/ModelExample.astro';
+import ArrowIcon from '../../components/ArrowIcon.astro';
 import {sitePath, appUrl} from '../../lib/site';
 export async function getStaticPaths() {
   return (await getCollection('examples')).map(example => ({
@@ -31,7 +32,7 @@ const {example} = Astro.props;
         class="button"
         href={appUrl(example.data.file)}
         target="_blank"
-        rel="noopener">Open in Code3D ↗</a
+        rel="noopener">Open in Code3D <ArrowIcon /></a
       >
     </div>
   </article>
