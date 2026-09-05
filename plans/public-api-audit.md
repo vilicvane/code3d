@@ -9,7 +9,7 @@
   清楚的便捷几何原语，不因可组合实现或 UI 入口数量的顾虑刻意排除。
 - 坐标系保持 Y-up。primitive 尺寸参数按轴命名为 `x`、`y`、`z`；
   需要消歧义时使用 `sizeX` 等名称。
-- `@code3d/core` root 只面向作者建模；Studio 能力放在
+- `@code3d/core` root 只面向作者建模；App 能力放在
   `@code3d/core/tooling`。
 - core root 不导出 `ModelObject` 类值或类型；`Constraint` 仅作 type-only
   export。runtime identity、trace、snapshot、资源释放和 kind discriminators
@@ -94,7 +94,7 @@
   实现；`Model` 是只含共同能力的作者类型。
 - `relate`、`expose`、`paint`、`scaled` 和 solid modifiers 会同时保留具体能力层与
   具名元素类型。
-- topology、scale、fillet/chamfer 的 `@code3d.param` 注释放在公共能力签名上，Studio
+- topology、scale、fillet/chamfer 的 `@code3d.param` 注释放在公共能力签名上，App
   继续能从作者实际解析到的 method signature 生成 panel。
 - `paint` 暂时仍属于共同能力，因此 group 上的现有行为不变，等待独立审阅。
 

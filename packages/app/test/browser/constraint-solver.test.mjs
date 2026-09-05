@@ -14,7 +14,7 @@ after(async () => browser?.close());
 
 for (const installed of [false, true]) {
   test(
-    `solves in the Studio Worker with ${installed ? 'project' : 'built-in'} packages`,
+    `solves in the App Worker with ${installed ? 'project' : 'built-in'} packages`,
     {timeout: 120_000},
     async t => {
       const context = await browser.newContext();
