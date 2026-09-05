@@ -27,6 +27,8 @@ browser. The renderer closes its own pages and leaves that browser running.
 - Generated model images: `src/assets/models/`. Regenerate after changing
   examples, source contexts, or the renderer; CI regenerates them on every build.
 - Site identity and URL helpers: `src/lib/site.ts`.
+- License text: the root `LICENSE`, served unchanged at `/license.txt` and
+  included in the App build. Workspace packages copy it during `npm pack`.
 
 Example code is bundled into App's managed examples, loaded by Astro's
 content collection, and executed by the image renderer. Keep snippets and

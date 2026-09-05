@@ -43,6 +43,12 @@ thread and can be terminated, but only run model source you trust.
 
 ## Licensing
 
-Code3D is MIT-licensed. Third-party components retain their own licenses.
+Code3D uses the [Interim Community License](../../../license.txt).
+Community use, modification, and sharing are permitted, as is ordinary
+commercial design. Competing commercial software or services require written
+permission. Your own designs and outputs do not have to be published or use
+this license merely because you use Code3D.
+
+Third-party components retain their own licenses.
 The OpenCascade WASM dependency includes LGPL-licensed OCCT; redistributions
 need to preserve its applicable license and source-availability information.

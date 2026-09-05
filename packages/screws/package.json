@@ -4,9 +4,12 @@
   "publishConfig": {
     "access": "public"
   },
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE",
   "author": "vilicvane",
   "type": "module",
+  "scripts": {
+    "prepack": "node ../../scripts/package-license.mjs"
+  },
   "exports": {
     ".": {
       "types": "./bld/library/index.d.ts",

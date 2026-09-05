@@ -56,5 +56,7 @@ See [PROTOTYPE.md](./PROTOTYPE.md) for the detailed capability snapshot and
 
 ## License
 
-Code3D is licensed under the MIT License. Third-party components retain their
-respective licenses.
+Code3D uses the [Interim Community License](./LICENSE). Community use and
+ordinary commercial design are permitted; competing commercial software or
+services require written permission. Third-party components retain their own
+licenses.
