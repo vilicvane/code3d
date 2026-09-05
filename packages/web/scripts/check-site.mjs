@@ -5,6 +5,7 @@ import {fileURLToPath} from 'node:url';
 import {parse} from 'parse5';
 
 const directory = fileURLToPath(new URL('../dist/www/', import.meta.url));
+const appDirectory = fileURLToPath(new URL('../../app/', import.meta.url));
 const site = new URL(process.env.CODE3D_SITE_URL || 'https://code3d.invalid/');
 const base = site.pathname.replace(/\/$/, '');
 const pages = new Map();
@@ -136,7 +137,14 @@ for (const [route, page] of pages) {
       issues.push(`${page.file}: missing target ${reference}`);
       continue;
     }
-    if (url.hash && !relative.startsWith('/app/')) {
+    if (relative === '/app/' && url.hash.startsWith('#/file/examples/')) {
+      const examplePath = decodeURIComponent(url.hash.slice('#/file/'.length));
+      try {
+        await stat(path.join(appDirectory, examplePath));
+      } catch {
+        issues.push(`${page.file}: missing App example ${examplePath}`);
+      }
+    } else if (url.hash && !relative.startsWith('/app/')) {
       const targetRoute =
         '/' + path.relative(directory, target).replace(/index\.html$/, '');
       const targetPage = pages.get(targetRoute);

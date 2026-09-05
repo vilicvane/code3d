@@ -1,0 +1,46 @@
+---
+title: Building custom primitives
+description: Bring a Replicad solid into Code3D with normal model capabilities and parameter tools.
+---
+
+import ModelExample from '../../../../components/ModelExample.astro';
+
+Start with the built-in [modeling operations](../../reference/core/) when they
+fit the part. For other solid geometry, `definePrimitive` wraps a synchronous
+Replicad builder as a normal Code3D model.
+
+Import both `definePrimitive` and `replicad` from `@code3d/core/replicad`.
+The builder returns one solid; the result supports the usual `paint`,
+`relate`, `expose`, fillet, and chamfer operations.
+
+## A twisted knob with a shaft bore
+
+This example extrudes a hexagonal profile with a twist, cuts a D-shaped bore,
+and places two instances on a base. Its `@code3d.param` annotations make the
+dimensions and twist angle available in call-site panels.
+
+<ModelExample id="custom-primitives" />
+
+Open the example and place the cursor in either `twistKnob(...)` call to
+adjust its inputs. The short knob supplies a twist of 30°; the tall one uses
+the builder's default of 60°.
+
+## Return a model, own the intermediate geometry
+
+Returning the solid transfers it to Code3D. Do not delete, mutate, or return
+that same shape again. Intermediate Replicad resources remain the builder's
+responsibility; the example uses `localGC()` and `finally` to release them.
+Some Replicad operations consume their inputs, so resource handling follows
+the operations used.
+
+Validate dimensions inside the builder. A single-solid aggregate from a
+Replicad boolean can be normalized, but multiple solids, shells, or aggregates
+with stray lower-dimensional geometry are rejected.
+
+The builder executes on each call, including calls with unchanged arguments.
+Code3D can reuse identical returned geometry without hiding changes to values
+captured by the builder.
+
+Your function stays ordinary TypeScript and can be exported for other modules.
+See [adding tools to model functions](../model-tools/) for annotation rules and
+[reusable models](../reusable-models/) for naming attachment points.

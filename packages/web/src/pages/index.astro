@@ -23,7 +23,7 @@ import {sitePath, appUrl} from '../lib/site';
       <div class="hero-actions">
         <a
           class="button"
-          href={appUrl('first-model.ts')}
+          href={appUrl('website/first-model.ts')}
           target="_blank"
           rel="noopener">Start building <ArrowIcon /></a
         ><a
@@ -54,8 +54,8 @@ import {sitePath, appUrl} from '../lib/site';
         <span class="step-number">01 / WRITE</span><h3>
           Think in TypeScript.
         </h3><p>
-          Use variables, functions, loops, and modules to make a model as
-          precise and reusable as the code that defines it.
+          Use variables, functions, modules, and browser-compatible npm packages
+          to make precise, reusable models.
         </p><code>const base = box(36, 4, 24);</code>
       </article>
       <article>
@@ -110,13 +110,17 @@ import {sitePath, appUrl} from '../lib/site';
         </p>
       </article><article>
         <h3>Your project, in source</h3><p>
-          Keep durable changes in TypeScript, ready to read, diff, and reuse.
+          Start in the browser, then open your own project folder. Keep working
+          with your files, editor, and installed npm packages.
+          <a href={sitePath('docs/getting-started/files/')}
+            >Work with a project →</a
+          >
         </p>
       </article><article>
-        <h3>Source you can work with</h3><p>
-          Read, build, and modify Code3D under its <a
-            href={sitePath('license.txt')}>community license</a
-          >. Commercial competition requires permission.
+        <h3>Take the model with you</h3><p>
+          Export the geometry you are inspecting as STEP, STL, or 3MF, or
+          capture the viewport as a PNG.
+          <a href={sitePath('docs/guides/exporting/')}>Export your model →</a>
         </p>
       </article>
     </div>
@@ -128,7 +132,7 @@ import {sitePath, appUrl} from '../lib/site';
     <div class="hero-actions">
       <a
         class="button"
-        href={appUrl('first-model.ts')}
+        href={appUrl('website/first-model.ts')}
         target="_blank"
         rel="noopener">Open Code3D <ArrowIcon /></a
       ><a class="text-link" href={sitePath('docs/')}>Read the docs →</a>
@@ -138,6 +142,9 @@ import {sitePath, appUrl} from '../lib/site';
         href={sitePath('docs/reference/limitations/')}
         >Explore the current capabilities and limitations.</a
       >
+      <br />Read, build, and modify Code3D under its <a
+        href={sitePath('license.txt')}>community license</a
+      >. Commercial competition requires permission.
     </p>
   </section>
 </Site>
