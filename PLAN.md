@@ -645,6 +645,10 @@ Design discussion and live scope: [#8](https://github.com/vilicvane/code3d/issue
 
 Unresolved constraint, topology naming, Boolean provenance, scaling, and runtime
 retention questions are tracked in [#9](https://github.com/vilicvane/code3d/issues/9).
+The C++/WASM rigid-body solver experiment continues under
+[#21](https://github.com/vilicvane/code3d/issues/21); its
+[measured results](plans/constraint-solver-wasm-evaluation.md) establish feasibility
+without changing the current relation API or solver.
 Source lifting for combination tools belongs to [#8](https://github.com/vilicvane/code3d/issues/8).
 Public API and interoperability review belongs to [#5](https://github.com/vilicvane/code3d/issues/5).
 Confirmed outcomes return to the design documents; discussion status stays in
