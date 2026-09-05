@@ -42,29 +42,19 @@ import {
   type Vertex,
   type VertexId,
   type VertexModel,
-} from '../bld/library/index.js';
-import {
-  definePrimitive,
-  replicad,
-  type Shape3D,
-} from '../bld/library/replicad.js';
+} from '@code3d/core';
+import {definePrimitive, replicad, type Shape3D} from '@code3d/core/replicad';
 
 // @ts-expect-error The concrete runtime class is not part of the authoring API.
-import type {ModelObject} from '../bld/library/index.js';
-// @ts-expect-error Runtime element discriminators belong to tooling.
-import type {ElementKind} from '../bld/library/index.js';
-// @ts-expect-error Runtime geometry discriminators belong to tooling.
-import type {ModelGeometryKind} from '../bld/library/index.js';
-// @ts-expect-error Runtime model discriminators belong to tooling.
-import type {ModelKind} from '../bld/library/index.js';
-// @ts-expect-error Runtime topology discriminators belong to tooling.
-import type {TopologyKind} from '../bld/library/index.js';
+import type {ModelObject} from '@code3d/core';
 // @ts-expect-error Quaternions are a tooling transform detail for now.
-import type {Quaternion} from '../bld/library/index.js';
+import type {Quaternion} from '@code3d/core';
 // @ts-expect-error Replicad builders are available only through the explicit subpath.
-import {definePrimitive as rootDefinePrimitive} from '../bld/library/index.js';
+import {definePrimitive as rootDefinePrimitive} from '@code3d/core';
 // @ts-expect-error Replicad values are available only through the explicit subpath.
-import type {Shape3D as RootShape3D} from '../bld/library/index.js';
+import type {Shape3D as RootShape3D} from '@code3d/core';
+// @ts-expect-error Package consumers cannot bypass the whitelist through private paths.
+import type {ModelObject as InternalModelObject} from '@code3d/core/bld/library/runtime.js';
 
 const solid = box(10, 5, 8);
 const related = solid.relate(self => self.center.on(solid.top).flip());
@@ -77,6 +67,25 @@ const surface: Surface = solid.surface(1);
 const vertexId: VertexId = vertex.id;
 const edgeId: EdgeId = edge.id;
 const surfaceId: SurfaceId = surface.id;
+const topologyKinds: readonly ['vertex', 'edge', 'surface'] = [
+  vertex.kind,
+  edge.kind,
+  surface.kind,
+];
+solid.fillet(
+  1,
+  solid.edges().map(edge => edge.id),
+);
+// @ts-expect-error Topology IDs are readonly author properties.
+vertex.id = 2;
+// @ts-expect-error Topology discriminators are readonly author properties.
+edge.kind = 'edge';
+// @ts-expect-error Topology references do not expose their owning runtime model.
+surface.model;
+// @ts-expect-error Topology frames belong to tooling.
+edge.transform;
+// @ts-expect-error Anchor implementation discriminators belong to tooling.
+vertex.elementKind;
 const vector: Vec3 = [1, 2, 3];
 const model: Model = solid;
 const solidModel: SolidModel<CanonicalElements> = solid;
@@ -102,6 +111,12 @@ const groupModel: GroupModel = group([
 const pointAnchor: PointAnchor = solid.center;
 const lineAnchor: LineAnchor = solid.axis;
 const faceAnchor: FaceAnchor = solid.top;
+// @ts-expect-error Plain anchors do not have topology IDs.
+faceAnchor.id;
+// @ts-expect-error Plain anchors do not expose a public discriminator.
+pointAnchor.kind;
+// @ts-expect-error Named anchor storage belongs to tooling.
+lineAnchor.reference;
 const loftOptions: LoftOptions = {spine: edgeModel, ruled: true};
 const customPrimitive = definePrimitive((radius: number, height = 4) =>
   replicad.makeCylinder(radius, height),
@@ -217,6 +232,7 @@ void [
   vertexId,
   edgeId,
   surfaceId,
+  topologyKinds,
   anchor,
   rootDefinePrimitive,
 ];
@@ -239,7 +255,7 @@ solid.sourceRefs;
 solid.parameters;
 // @ts-expect-error Runtime relation references are available only through tooling.
 solid.relationAnchorReference();
-// @ts-expect-error Group child replacement is not an approved author operation.
+// @ts-expect-error Group child replacement is not part of the authoring API.
 group([]).withChildren([]);
 // @ts-expect-error Runtime instrumentation is available only through tooling.
 solid.attachSource({file: 'model.ts', start: 0, end: 1});

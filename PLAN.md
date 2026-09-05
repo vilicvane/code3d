@@ -52,6 +52,11 @@ implementation context and historical outcomes, not a competing work queue.
   model is itself usable as its intrinsic frame Anchor. Solid primitives expose
   `center`, `top`, `bottom`, and `axis` through the same named-element mechanism
   available to user models rather than through a separate fixed-anchor path.
+- Types referenced by the public authoring API are exported with their named
+  dependencies, including generic constraints and result mappings. Model types
+  belong to core's root entry and Replicad builder types to `./replicad`;
+  exposing a type does not add runtime properties or operations. See
+  [#34](https://github.com/vilicvane/code3d/issues/34).
 - `model.expose({...})` creates a semantic-immutable model with a type-inferred
   named-element interface. An element imported from an internal model is
   rebound into the exposed model's local frame, so reusable APIs do not leak
@@ -591,9 +596,15 @@ not approval to predeclare additional parameter kinds.
   the fragment, then join annotation and ordinary source parents without
   exposing generated helper code.
 - Use one semantic `kind` discriminator for value and selectable parameters.
-  Keep runtime defaults, effective selections, environment-dependent steps,
-  display ranges, units, and other presentation policy out of the declaration
-  metadata; resolve them from the reached tool context and current environment.
+  Function implementations own runtime defaults. Optional numeric parameters
+  display defaults for omitted arguments through explicit `@code3d.param`
+  `default` metadata, shared by source and emitted declarations
+  (see [#29](https://github.com/vilicvane/code3d/issues/29)).
+  Do not extract implementation initializers or inject annotation defaults into
+  non-interactive execution. Authors keep the display metadata consistent with
+  the implementation. Resolve effective selections, environment-dependent steps,
+  display ranges, units, and other presentation policy from the reached tool
+  context and current environment.
 - Recognize only callable `@code3d.param` and design `@code3d.arguments`
   annotations. Numeric variables carry no annotation metadata: resolve their
   editable source without inheriting labels, units, kinds, bounds, or steps

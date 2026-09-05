@@ -471,7 +471,7 @@ export interface LineAnchor extends Anchor<'line'> {}
 
 export interface FaceAnchor extends Anchor<'face'> {}
 
-interface GeometryQueryCapabilities {
+export interface GeometryQueryCapabilities {
   /** Local bounding-box center, carried through geometry transforms. */
   readonly center: PointAnchor;
 }
@@ -505,10 +505,10 @@ export interface Solid
   readonly kind: 'solid';
 }
 
-type ElementSources = Readonly<Record<string, Anchor>>;
-type NamedElements = Readonly<Record<string, Anchor>>;
+export type ElementSources = Readonly<Record<string, Anchor>>;
+export type NamedElements = Readonly<Record<string, Anchor>>;
 
-type ExposedValue<Value> = Value extends {
+export type ExposedValue<Value> = Value extends {
   readonly [modelFamily]: infer Family;
   readonly [modelNamedElements]: infer Elements;
 }
@@ -528,16 +528,16 @@ type ExposedValue<Value> = Value extends {
     ? Value
     : never;
 
-type ExposedElements<Sources extends ElementSources> = Readonly<{
+export type ExposedElements<Sources extends ElementSources> = Readonly<{
   [Name in keyof Sources]: ExposedValue<Sources[Name]>;
 }>;
 
-type MergedElements<
+export type MergedElements<
   Existing extends NamedElements,
   Added extends NamedElements,
 > = Omit<Existing, keyof Added> & Added;
 
-type ModelElementKind<Kind extends ModelKind> = Kind extends 'face'
+export type ModelElementKind<Kind extends ModelKind> = Kind extends 'face'
   ? 'face'
   : Kind extends 'edge'
     ? 'line'
@@ -545,12 +545,12 @@ type ModelElementKind<Kind extends ModelKind> = Kind extends 'face'
       ? 'point'
       : 'frame';
 
-type ModelFamily = ModelKind | 'model';
+export type ModelFamily = ModelKind | 'model';
 
-type ModelFamilyElementKind<Family extends ModelFamily> =
+export type ModelFamilyElementKind<Family extends ModelFamily> =
   Family extends ModelKind ? ModelElementKind<Family> : ElementKind;
 
-type ModelForFamily<
+export type ModelForFamily<
   Elements extends NamedElements,
   Family extends ModelFamily,
 > = Family extends 'solid'
@@ -565,7 +565,7 @@ type ModelForFamily<
           ? GroupModel<Elements>
           : Model<Elements>;
 
-interface ModelCapabilities<
+export interface ModelCapabilities<
   Elements extends NamedElements,
   Family extends ModelFamily,
 > extends Anchor<ModelFamilyElementKind<Family>> {
@@ -583,7 +583,7 @@ interface ModelCapabilities<
   paint(color: string): ModelForFamily<Elements, Family>;
 }
 
-interface GeometryCapabilities<
+export interface GeometryCapabilities<
   Elements extends NamedElements,
   Family extends ModelGeometryKind,
 > extends GeometryQueryCapabilities {
@@ -623,28 +623,28 @@ interface GeometryCapabilities<
   scaled(factor: number): ModelForFamily<Elements, Family>;
 }
 
-interface VertexTopologyCapabilities {
+export interface VertexTopologyCapabilities {
   /** @code3d.param id {kind: 'vertex', label: 'Vertex'} */
   vertex(id: VertexId): Vertex;
   /** @code3d.param ids {kind: 'vertex', label: 'Vertices', actions: [{label: 'Use all', action: 'remove-argument'}]} */
   vertices(ids?: readonly VertexId[]): readonly Vertex[];
 }
 
-interface EdgeTopologyCapabilities extends VertexTopologyCapabilities {
+export interface EdgeTopologyCapabilities extends VertexTopologyCapabilities {
   /** @code3d.param id {kind: 'edge', label: 'Edge'} */
   edge(id: EdgeId): Edge;
   /** @code3d.param ids {kind: 'edge', label: 'Edges', actions: [{label: 'Use all', action: 'remove-argument'}]} */
   edges(ids?: readonly EdgeId[]): readonly Edge[];
 }
 
-interface SurfaceTopologyCapabilities extends EdgeTopologyCapabilities {
+export interface SurfaceTopologyCapabilities extends EdgeTopologyCapabilities {
   /** @code3d.param id {kind: 'surface', label: 'Surface'} */
   surface(id: SurfaceId): Surface;
   /** @code3d.param ids {kind: 'surface', label: 'Surfaces', actions: [{label: 'Use all', action: 'remove-argument'}]} */
   surfaces(ids?: readonly SurfaceId[]): readonly Surface[];
 }
 
-interface SolidModificationCapabilities<Elements extends NamedElements> {
+export interface SolidModificationCapabilities<Elements extends NamedElements> {
   /**
    * @code3d.param radius {kind: 'length', label: 'Fillet radius', constraints: {exclusiveMin: 0}}
    * @code3d.param edgeIds {kind: 'edge', actions: [{label: 'Use all', action: 'remove-argument'}]}
@@ -1502,24 +1502,6 @@ export class ModelObject<
         selections: [{kind: 'edge', input: this, ids: selectedEdgeIds}],
       }),
     ) as unknown as SolidModel<Elements>;
-  }
-
-  /** @internal */
-  withChildren(
-    this: ModelObject<Elements, 'group'>,
-    children: readonly ModelObject[],
-  ): RuntimeModel<Elements, 'group'> {
-    if (this.kind !== 'group') {
-      throw new Error('Only a group can contain child objects.');
-    }
-    assertChildren(children);
-    return this.copy(
-      {children},
-      storedOperation(
-        'group',
-        children.map((model, index) => ({model, role: 'child', index})),
-      ),
-    );
   }
 
   /** @internal */
@@ -3391,14 +3373,6 @@ function shapeWithTransform<Shape extends AnyShape>(
   }
   shape = shape.translate(toPoint(transform.position));
   return shape as unknown as Shape;
-}
-
-function assertChildren(children: readonly ModelObject[]): void {
-  for (const child of children) {
-    if (!isModelObject(child)) {
-      throw new Error('Every group child must be a ModelObject.');
-    }
-  }
 }
 
 function requireModelObject(value: unknown, message: string): ModelObject {

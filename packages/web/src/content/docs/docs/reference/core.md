@@ -6,6 +6,12 @@ description: A curated map of the public core modeling operations.
 Import these functions from `@code3d/core`. The editor's TypeScript signatures
 provide exact overloads and inferred model interfaces.
 
+Types used by the authoring API are also exported, including generic constraints,
+named-element result types, and capability interfaces. Use `import type` from
+`@code3d/core` for types such as `ElementKind`, `ModelKind`, `TopologyKind`,
+`NamedElements`, and `ExposedElements`. Replicad builder types such as `Shape3D`
+are available from `@code3d/core/replicad` alongside `definePrimitive`.
+
 ## Solid primitives
 
 | Function                                     | Meaning                           |
@@ -140,6 +146,11 @@ children as rigid bodies.
 
 - `.vertex(id)`, `.edge(id)`, `.surface(id)`: one point, line, or face anchor.
 - `.vertices(ids?)`, `.edges(ids?)`, `.surfaces(ids?)`: arrays of anchors.
+
+These topology references expose readonly `kind` (`vertex`, `edge`, or
+`surface`) and `id` properties. Use `model.edges().map(edge => edge.id)` to
+collect edge IDs for an operation on that model. Plain named anchors such as
+`model.top` do not have these topology properties.
 
 IDs are model-local. See [topology selection](../../guides/topology/) for
 selection behavior and derived-model identity.
