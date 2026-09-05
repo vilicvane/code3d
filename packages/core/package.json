@@ -4,10 +4,11 @@
   "publishConfig": {
     "access": "public"
   },
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE",
   "author": "vilicvane",
   "type": "module",
   "scripts": {
+    "prepack": "node ../../scripts/package-license.mjs",
     "test": "tsc --build src/library/tsconfig.json src/node/tsconfig.json src/tooling/tsconfig.json && tsc --noEmit -p test/tsconfig.json && node --test test/*.test.mjs"
   },
   "exports": {

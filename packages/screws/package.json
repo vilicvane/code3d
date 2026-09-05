@@ -4,10 +4,11 @@
   "publishConfig": {
     "access": "public"
   },
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE",
   "author": "vilicvane",
   "type": "module",
   "scripts": {
+    "prepack": "node ../../scripts/package-license.mjs",
     "test": "node --test test/*.test.mjs"
   },
   "exports": {

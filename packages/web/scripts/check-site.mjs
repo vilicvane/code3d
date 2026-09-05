@@ -1,4 +1,5 @@
 import {glob, readFile, stat} from 'node:fs/promises';
+import assert from 'node:assert/strict';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {parse} from 'parse5';
@@ -94,6 +95,17 @@ for (const [route, page] of pages) {
 }
 await stat(path.join(directory, 'pagefind/pagefind.js'));
 await stat(path.join(directory, 'app/index.html'));
+const license = await readFile(
+  new URL('../../../LICENSE', import.meta.url),
+  'utf8',
+);
+for (const file of ['license.txt', 'app/LICENSE']) {
+  assert.equal(
+    await readFile(path.join(directory, file), 'utf8'),
+    license,
+    `${file} must match the root LICENSE`,
+  );
+}
 if (issues.length) throw new Error(issues.join('\n'));
 console.log(
   `Validated links, anchors, and assets on ${pages.size} pages; search and App present.`,

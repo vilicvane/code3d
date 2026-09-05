@@ -4,6 +4,7 @@ node_modules/
 bld/
 dist/
 .agents/worktree-state.json
+/packages/*/LICENSE
 
 *.local
 *.log
