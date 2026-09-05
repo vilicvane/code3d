@@ -26,6 +26,12 @@ implementation context and historical outcomes, not a competing work queue.
   a code3d-only module syntax or hidden host dependency.
 - Rendering is driven primarily by source or GUI object selection. Exporting is
   a publishing boundary and only a preview fallback, not a render prerequisite.
+- Viewport file export supports STEP, STL and 3MF alongside PNG image export.
+  The context menu has separate image and model entries; the model dialog
+  remembers the last format. Both name files after the rendered value's binding,
+  falling back to a generic name. Model export always uses current foreground
+  geometry, without a separate export scope or viewport helpers/contextual ghosts.
+  See [#13](https://github.com/vilicvane/code3d/issues/13).
 - Base viewport appearance follows geometry kind: face models keep a filled
   surface visible from either side, while edge models render their authored
   color (or the neutral unpainted model color) as the curve itself. Solid

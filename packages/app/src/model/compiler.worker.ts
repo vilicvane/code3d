@@ -2,17 +2,15 @@
 
 import {compileProject} from './compiler';
 import {diagnosticFromError} from './diagnostic';
-import type {ModelProject} from '../project/project';
+import type {CompilerRequest, CompilerResponse} from './compiler-protocol';
+import {exportModel} from './model-export';
 import initOpenCascade from 'replicad-opencascadejs';
 import openCascadeWasmUrl from 'replicad-opencascadejs/wasm?url';
-import {installOpenCascade} from '@code3d/core/tooling';
-
-type CompileRequest = Readonly<{
-  id: number;
-  project: ModelProject;
-  rootPath: string;
-  designContextId?: string;
-}>;
+import {
+  installOpenCascade,
+  retainModelGeometry,
+  type ModelGeometrySnapshot,
+} from '@code3d/core/tooling';
 
 const workerScope = self as DedicatedWorkerGlobalScope;
 const kernelReady = initOpenCascade({
@@ -21,17 +19,43 @@ const kernelReady = initOpenCascade({
   installOpenCascade(openCascade);
 });
 
-workerScope.onmessage = async ({data}: MessageEvent<CompileRequest>) => {
+let geometry: ModelGeometrySnapshot | undefined;
+let compileId: number | undefined;
+const respond = (response: CompilerResponse) =>
+  workerScope.postMessage(response);
+
+workerScope.onmessage = async ({data}: MessageEvent<CompilerRequest>) => {
   try {
     await kernelReady;
+    if (data.kind === 'export') {
+      if (!geometry || compileId !== data.compileId) {
+        throw new Error(
+          'The model has changed. Reopen export after compilation finishes.',
+        );
+      }
+      const blob = exportModel(geometry, data.instances, data.options);
+      respond({kind: 'export', id: data.id, ok: true, blob});
+      return;
+    }
+    geometry?.dispose();
+    geometry = undefined;
+    compileId = undefined;
     const module = compileProject(
       data.project,
       data.rootPath,
       data.designContextId,
+      objects => {
+        geometry = retainModelGeometry(objects);
+      },
     );
-    workerScope.postMessage({id: data.id, ok: true, module});
+    compileId = data.id;
+    respond({kind: 'compile', id: data.id, ok: true, module});
   } catch (error) {
-    workerScope.postMessage({
+    if (data.kind === 'compile') {
+      geometry?.dispose();
+      geometry = undefined;
+    }
+    respond({
       id: data.id,
       ok: false,
       diagnostic: diagnosticFromError(error),

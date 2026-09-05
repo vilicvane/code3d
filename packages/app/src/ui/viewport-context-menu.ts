@@ -7,14 +7,16 @@ type ContextMenuGesture = {
   requested: boolean;
 };
 
+type ViewportMenuAction = Readonly<{label: string; run(): void}>;
+
 export class ViewportContextMenu {
   private readonly menu = document.createElement('div');
-  private readonly exportItem = document.createElement('button');
+  private readonly items: HTMLButtonElement[] = [];
   private gesture?: ContextMenuGesture;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
-    onExportImage: () => void,
+    actions: readonly ViewportMenuAction[],
   ) {
     canvas.tabIndex = 0;
     canvas.setAttribute('aria-label', 'Model viewport');
@@ -22,14 +24,18 @@ export class ViewportContextMenu {
     this.menu.popover = 'auto';
     this.menu.setAttribute('role', 'menu');
     this.menu.setAttribute('aria-label', 'Viewport');
-    this.exportItem.type = 'button';
-    this.exportItem.setAttribute('role', 'menuitem');
-    this.exportItem.textContent = 'Export image…';
-    this.exportItem.addEventListener('click', () => {
-      this.close();
-      onExportImage();
-    });
-    this.menu.append(this.exportItem);
+    for (const action of actions) {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.setAttribute('role', 'menuitem');
+      item.textContent = action.label;
+      item.addEventListener('click', () => {
+        this.close();
+        action.run();
+      });
+      this.items.push(item);
+      this.menu.append(item);
+    }
     document.body.append(this.menu);
 
     canvas.addEventListener('pointerdown', event => {
@@ -95,7 +101,19 @@ export class ViewportContextMenu {
         this.close();
       } else if (['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) {
         event.preventDefault();
-        this.exportItem.focus();
+        const current = this.items.indexOf(
+          document.activeElement as HTMLButtonElement,
+        );
+        const index =
+          event.key === 'Home'
+            ? 0
+            : event.key === 'End'
+              ? this.items.length - 1
+              : (current +
+                  (event.key === 'ArrowUp' ? -1 : 1) +
+                  this.items.length) %
+                this.items.length;
+        this.items[index]?.focus();
       }
     });
   }
@@ -105,7 +123,7 @@ export class ViewportContextMenu {
     const bounds = this.menu.getBoundingClientRect();
     this.menu.style.left = `${Math.max(8, Math.min(x, window.innerWidth - bounds.width - 8))}px`;
     this.menu.style.top = `${Math.max(8, Math.min(y, window.innerHeight - bounds.height - 8))}px`;
-    this.exportItem.focus();
+    this.items[0]?.focus();
   }
 
   private close(): void {

@@ -1004,6 +1004,7 @@ export function compileProject(
   project: ModelProject,
   rootModulePath: string,
   requestedDesignContextId?: string,
+  captureGeometry?: (objects: readonly ModelObject[]) => void,
 ): ModelModule {
   const files = new Map(
     project.files.map(file => [normalizeProjectPath(file.path), file.source]),
@@ -1178,6 +1179,7 @@ export function compileProject(
         object.operation,
       ]),
     );
+    captureGeometry?.(graphObjects);
     return {
       diagnostic,
       fallback: fallbackSnapshot,
