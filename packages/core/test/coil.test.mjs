@@ -27,7 +27,10 @@ test('coil builds a circular swept solid with integer or fractional turns', () =
       assert.deepEqual(
         snapshot.elements.find(element => element.name === 'center').transform
           .position,
-        [0, 0, 0],
+        model.geometry.value.localBounds[0].map(
+          (minimum, axis) =>
+            (minimum + model.geometry.value.localBounds[1][axis]) / 2,
+        ),
       );
       assert.deepEqual(
         snapshot.elements.find(element => element.name === 'axis').transform

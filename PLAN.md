@@ -96,6 +96,17 @@ implementation context and historical outcomes, not a competing work queue.
 - Monaco multi-selection and automatic boolean code generation are deferred
   until single-object discovery, rendering, and position relations are solid.
 
+- Geometric models support `origin(x, y, z)`, `originVertex(id)`, `originCenter()`, and additive
+  `originOffset(dx, dy, dz)`. The three setters replace earlier origin state without
+  moving geometry. `rotate(x, y, z)` applies degree rotations about that origin,
+  in fixed local X/Y/Z order, transforming geometry and named anchors while
+  preserving topology IDs. Viewport origin and rotation tools edit the selected
+  call through source transactions. See [#19](https://github.com/vilicvane/code3d/issues/19).
+  Every geometric model exposes a `center` anchor initialized from its body's
+  local bounding box and carried through transforms. `originCenter()` uses
+  that anchor; origin edits never move `center`. Center and vertex origin
+  drags append or edit `originOffset()` through the same source transaction.
+
 ## Invariants
 
 - Public model values do not expose OpenCascade or Three.js details.

@@ -203,6 +203,24 @@ compiler 在调用进入时记录 receiver 和已求值参数，所以参数缺�
 gizmo。后续 choice UI 可以进一步提供“调整当前关系”或“修改内部组件关系”等不同
 scope 的 edit plan。
 
+## 模型原点与旋转
+
+`origin`、`originOffset`、`originVertex`、`originCenter` 和 `rotate` 在 operation snapshot 中记录
+局部几何坐标下的原点和本次操作向量。模型 snapshot 同时提供当前原点，tooling
+protocol 3 统一这些数据与参数 provenance；viewport 不从包围盒推断模型旋转中心。
+
+`originCenter()` 取主体建立时的局部包围盒中心随模型变换后的位置，与 `.center`
+使用同一锚点。无参数操作通过 operation metadata 接入原点标记和手柄，不需要虚构参数。
+
+`originVertex` 复用 topology selection provider：拾取来自操作输入，显示操作输出及
+其原点。原点坐标和偏移显示平移箭头，`rotate` 显示角度参数对应的旋转环；固定
+X/Y/Z 顺序意味着 X 环包含后续 Y/Z 的方向，Y 环包含后续 Z 的方向。
+
+`model.spatial` intent 通过通用源码事务修改唯一安全的参数，或保留当前参数表达式
+并折叠末尾数值增量。拖动顶点或中心原点时生成或复用 `originOffset`。preview 保存临时
+刚体变换和原点标记；旋转预览使用新旧完整旋转的差，松手写源码，Esc 清除预览。
+原点偏移不会临时移动实体。已有 relation offset 工具与这些操作共用轴手柄和会话机制。
+
 ## 表达式构造
 
 工具使用 `ExpressionDraft` 描述 number、string、identifier、array、binary、call 和 member，而不是直接提交任意字符串。例如边选择工具产生：
