@@ -5,6 +5,10 @@ import {
   type TypeScriptSelectionRange,
 } from 'monaco-editor/language/typescript/ts.worker';
 import {AnnotationLanguageService} from './annotation-language-service';
+import {
+  typeScriptFileName,
+  typeScriptWorkerRequests,
+} from './typescript-file-names';
 
 const completionPreferences = {
   quotePreference: 'single',
@@ -49,20 +53,9 @@ class ProjectTypeScriptWorker extends TypeScriptWorker {
   }
 
   override getScriptFileNames(): string[] {
-    const extraLibFileNames = new Map(
-      Object.keys(this.getExtraLibs()).map(fileName => [
-        uriFileIdentity(fileName),
-        fileName,
-      ]),
-    );
-    return super
-      .getScriptFileNames()
-      .filter(
-        fileName =>
-          !fileName.endsWith('/package.json') &&
-          (extraLibFileNames.get(uriFileIdentity(fileName)) ?? fileName) ===
-            fileName,
-      );
+    return [
+      ...new Set(super.getScriptFileNames().map(typeScriptFileName)),
+    ].filter(fileName => !fileName.endsWith('/package.json'));
   }
 
   async getProjectCompletions(
@@ -142,13 +135,8 @@ class ProjectTypeScriptWorker extends TypeScriptWorker {
   }
 }
 
-/** Monaco models serialize scoped-package paths while extra libs keep them raw. */
-function uriFileIdentity(fileName: string): string {
-  return decodeURIComponent(fileName);
-}
-
 self.onmessage = () => {
-  initialize(
-    (context, createData) => new ProjectTypeScriptWorker(context, createData),
+  initialize((context, createData) =>
+    typeScriptWorkerRequests(new ProjectTypeScriptWorker(context, createData)),
   );
 };

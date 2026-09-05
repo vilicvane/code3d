@@ -1493,18 +1493,18 @@ function updateContextualToolParameter(
 function commitContextualToolParameter(
   name: string,
   value: number | undefined,
-): void {
+): boolean {
   cancelContextualParameterCommit(name);
   const tool = contextualTool;
   const parameter = tool?.parameters.get(name);
-  if (!tool || !parameter) return;
+  if (!tool || !parameter) return false;
   parameter.value = value;
   const invalid = !validContextualParameter(parameter);
   contextualToolPanel.setInvalid(name, invalid);
-  if (invalid || !parameter.editable) return;
+  if (invalid || !parameter.editable) return false;
   const appliedValue = tool.appliedValues.get(name);
   if (appliedValue !== undefined && Math.abs(value! - appliedValue) < 1e-9) {
-    return;
+    return currentModuleSourceVersion !== codeEditor.sourceVersion();
   }
   const usage = parameter.usage;
   const argument = parameter.argument;
@@ -1512,7 +1512,7 @@ function commitContextualToolParameter(
   if (usage) {
     const sourceValue =
       usage.target.value + (value! - usage.value) / usage.sensitivity;
-    if (!Number.isFinite(sourceValue)) return;
+    if (!Number.isFinite(sourceValue)) return false;
     intent = parameterIntent(usage.target, sourceValue);
   } else if (argument) {
     intent = {
@@ -1522,7 +1522,7 @@ function commitContextualToolParameter(
       expression: {kind: 'number', value: value!},
     };
   } else {
-    return;
+    return false;
   }
   const committed = commitToolSession(
     toolEngine.begin(
@@ -1534,7 +1534,7 @@ function commitContextualToolParameter(
   if (!committed) {
     parameter.value = appliedValue ?? usage?.value;
     renderContextualToolPanel();
-    return;
+    return false;
   }
   tool.appliedValues.set(name, value!);
   tool.hasEdits = true;
@@ -1544,6 +1544,7 @@ function commitContextualToolParameter(
     edgeSession.hasEdits = true;
     edgeSession.historyState = 'applied';
   }
+  return true;
 }
 
 function cancelContextualParameterCommit(name: string): void {
