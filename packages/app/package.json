@@ -9,6 +9,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "test": "node --test test/*.test.mjs",
+    "test:browser": "node --test --test-concurrency=1 test/browser/*.test.mjs",
     "test:browser:tool-panel": "node --test test/browser/contextual-tool-panel.test.mjs",
     "preview": "vite preview",
     "render-image": "node scripts/render-image.mjs"
