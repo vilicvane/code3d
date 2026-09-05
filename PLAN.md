@@ -489,9 +489,13 @@ possible lifetime beyond one compiler worker remain adjustable implementation
 choices rather than product semantics.
 
 User-defined Replicad builders execute on every invocation because their
-closures may depend on state beyond their arguments. Each returned geometry
-receives a fresh artifact identity; operations and render queries on that model
-still use the common cache. Custom primitives use the standard mesh tolerance.
+closures may depend on state beyond their arguments. Core identifies the actual
+returned solid by its B-Rep representation so identical output can reuse geometry,
+downstream operations, and meshes across evaluations. Model values and tracing
+remain fresh; custom primitives use the standard mesh tolerance. The screws
+package privately caches deterministic thread B-Rep data in a bounded LRU, reading
+an independently owned shape in the current kernel for each invocation. This
+avoids caching disposable model objects or retaining native handles across kernels.
 
 ### 4d. Annotation-driven contextual tools — active
 

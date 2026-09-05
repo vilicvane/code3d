@@ -39,9 +39,11 @@ definition options, opaque return token, or author-visible build scope.
   from Replicad booleans are normalized; shells, multiple solids, and stray
   lower-dimensional topology are rejected. Rejected returned shapes are released.
 - Builders run synchronously on every invocation, preserving validation and
-  captured-state behavior. They are not memoized by arguments. Produced models
-  have fresh artifact identities and retain ordinary downstream operation and
-  mesh caching.
+  captured-state behavior. They are not memoized by arguments. Core identifies
+  actual returned B-Rep content to reuse geometry, downstream operations, and
+  meshes across evaluations while keeping each model independently disposable.
+  The screws package privately caches deterministic thread B-Rep data with a
+  bounded size; each use reads its own shape in the current kernel.
 - Custom models use standard mesh tolerance and normal canonical anchors.
 - Node imports initialize the shared kernel before author code executes;
   Studio waits for its worker kernel before evaluating models.

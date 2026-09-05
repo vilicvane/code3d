@@ -46,7 +46,6 @@ import {
   type Vec3,
 } from './spatial.js';
 import {
-  createKernelArtifact,
   evaluateKernelOperation,
   type KernelArtifact,
   type KernelKeyPart,
@@ -2044,10 +2043,29 @@ export function modelFromReplicadSolid(shape: Shape3D): SolidModel {
     shape.delete();
     throw error;
   }
+  // The builder still executes on every call. Cache its actual output, not its
+  // arguments: captured state may change the geometry between invocations.
+  let adopted = false;
+  let geometry: SolidGeometry;
+  try {
+    geometry = evaluateSolidGeometry(
+      'replicad-solid',
+      [solid.serialize()],
+      [],
+      () => {
+        adopted = true;
+        return {shape: solid};
+      },
+    );
+  } finally {
+    // A hit returns an independently owned cached copy; discard this output.
+    // A miss transfers ownership to evaluateSolidGeometry, including on error.
+    if (!adopted) solid.delete();
+  }
   return ModelObject.create<CanonicalElements, 'solid'>({
     kind: 'solid',
     name: 'Custom primitive',
-    geometry: createKernelArtifact(createModelGeometryValue(solid)),
+    geometry,
     operation: storedOperation('primitive'),
   }) as unknown as SolidModel;
 }

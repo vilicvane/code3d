@@ -6,15 +6,6 @@ export type KernelArtifact<Value> = Readonly<{
   value: Value;
 }>;
 
-let nextUncachedArtifactId = 1;
-
-/** Creates an identity for geometry whose inputs cannot be safely memoized. */
-export function createKernelArtifact<Value>(
-  value: Value,
-): KernelArtifact<Value> {
-  return {id: `uncached:${nextUncachedArtifactId++}`, value};
-}
-
 export type KernelValueLifecycle<Value> = Readonly<{
   retain(value: Value): Value;
   instantiate(retained: Value): Value;

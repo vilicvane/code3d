@@ -1,13 +1,25 @@
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
-import {createAppTestServer} from './vite-test-server.mjs';
+import {fileURLToPath} from 'node:url';
+import {createServer} from 'vite';
+import {replicad} from '@code3d/core/replicad';
+import {
+  clearKernelOperationCache,
+  kernelOperationCacheStats,
+} from '../../core/bld/library/kernel-cache.js';
 
+const appRoot = fileURLToPath(new URL('..', import.meta.url));
 let compileProject;
 let bundledExamples;
 let server;
 
 before(async () => {
-  server = await createAppTestServer();
+  server = await createServer({
+    root: appRoot,
+    appType: 'custom',
+    logLevel: 'error',
+    server: {middlewareMode: true, hmr: false},
+  });
   ({compileProject} = await server.ssrLoadModule('/src/model/compiler.ts'));
   ({bundledExamples} = await server.ssrLoadModule(
     '/src/project/bundled-examples.ts',
@@ -16,6 +28,51 @@ before(async () => {
 
 after(async () => {
   await server?.close();
+});
+
+test('editing a plate fillet does not rebuild an unchanged screw across compiles', t => {
+  clearKernelOperationCache();
+  const loftWith = replicad.Sketch.prototype.loftWith;
+  const lofts = t.mock.method(
+    replicad.Sketch.prototype,
+    'loftWith',
+    function (...args) {
+      return loftWith.apply(this, args);
+    },
+  );
+  const source = radius =>
+    [
+      'import {box, cut, group} from "@code3d/core";',
+      'import {ISO4762} from "@code3d/screws";',
+      `let plate = box(40, 10, 40).fillet(${radius}, [2, 3, 4, 6, 7, 8, 11, 12]).chamfer(1.2, [10]);`,
+      'const hole = ISO4762.clearanceHole("M6", 10).relate(tool => tool.shaftBottom.on(plate.bottom).flip());',
+      'plate = cut(plate, [hole]).paint("#666");',
+      'const screw = ISO4762.screw("M6", 18).paint("#999").relate(part => part.headBottom.on(hole.counterboreBottom).flip().offset(0, -0.5, 0));',
+      'export default group([plate, screw], "M6 fastener demo");',
+    ].join('\n');
+  let buildCount;
+  try {
+    for (const radius of [2, 2.1, 2]) {
+      const before = kernelOperationCacheStats();
+      const module = compileProject(
+        {files: [{path: '/model.ts', source: source(radius)}]},
+        '/model.ts',
+      );
+      assert.equal(module.diagnostic, undefined);
+      assert.ok(module.exports.has('default'));
+      if (buildCount === undefined) {
+        buildCount = lofts.mock.callCount();
+        assert.ok(buildCount > 0);
+      } else {
+        assert.equal(lofts.mock.callCount(), buildCount);
+        if (radius === 2) {
+          assert.equal(kernelOperationCacheStats().misses, before.misses);
+        }
+      }
+    }
+  } finally {
+    clearKernelOperationCache();
+  }
 });
 
 test('retains topology values at bindings, aliases, and collection results', () => {
