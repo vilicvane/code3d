@@ -1,6 +1,6 @@
 ---
 title: Selecting vertices, edges, and faces
-description: Pick topology for fillets, chamfers, origins, and relation anchors.
+description: Pick topology for fillets, chamfers, shells, origins, and relation anchors.
 ---
 
 Start with a box:
@@ -34,6 +34,29 @@ Selections write back immediately. Pressing `Esc` does not discard them or
 close the tool; move the editor cursor away from the call to leave it, and
 use Undo to revert an edit.
 
+## Hollow a solid
+
+`shell(thickness, removedSurfaceIds?)` creates uniform walls in a connected solid.
+Positive thickness offsets inward and preserves its outside boundary; negative
+thickness offsets outward and preserves the original boundary on the inside.
+Outward offsets use rounded joins where neighboring offset faces separate.
+
+```ts
+const enclosure = box(40, 24, 30).shell(1.5, [4]);
+const sealed = box(40, 24, 30).shell(1.5);
+```
+
+For this box, S4 is its +Y face. Removing it makes an open enclosure. Place the
+cursor inside `shell(...)` to adjust **Wall thickness** and toggle **Openings**
+on the input model while viewing the result. IDs belong to that input model.
+The picker retains removed faces so you can close an opening again.
+
+Omitting the surface array, or passing `[]`, creates an enclosed cavity.
+**Close all openings** removes the array. Selecting every face is an error:
+at least one surface must remain as a wall. Thickness must be finite and nonzero.
+Offsets can fail around narrow features and complex curves; the input remains
+available to correct the thickness or openings.
+
 ## IDs belong to a model
 
 Edge, face, and vertex IDs have separate namespaces within each model. An ID
@@ -46,6 +69,10 @@ from the model that is the input to the operation you are editing.
 After a fillet, some original edges no longer exist. A later chamfer must use
 IDs from the filleted model. Do not copy a list from the original box and assume
 it still selects the same edges.
+
+Shelling follows the same history rules. An unchanged boundary keeps its ID,
+and offset walls get new IDs. An opening rim can retain its former cap's surface
+ID when the kernel records it as a one-to-one modification.
 
 ## Use topology as a relation anchor
 

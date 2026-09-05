@@ -16,7 +16,7 @@ curve models (`line`, `arc`, `bezier`, `spline`), point models, and
 through-section or spine-guided `loft`. Every geometric model is immutable,
 renderable, and relation-aware. Topology capabilities follow dimension:
 vertices provide `.vertex(id)`, edges add `.edge(id)`, and faces and solids
-add `.surface(id)`; only solids provide `fillet` and `chamfer`. Groups retain
+add `.surface(id)`; only solids provide `fillet`, `chamfer`, and `shell`. Groups retain
 the common relation, expose, and paint capabilities without pretending to
 contain geometry. Stable topology references can be used as geometric relation anchors.
 `Vertex`, `Edge`, and `Surface` references expose readonly `kind` and `id`
