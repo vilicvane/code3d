@@ -7,6 +7,8 @@ description: 'code3d 的隔离开发与串行集成流程。USE FOR: 在 code3d 
 
 每个开发需求在自己的 linked worktree 中完成。主 worktree 只用于领取合并队列、合并已提交的分支和执行最终测试；不得在其中实现功能或修复测试。
 
+GitHub Issues 跟踪需求，下面的本地协调文件只负责 agent 活动、开发服务器和串行集成。开始需求、更新 issue 或交付时，读取 [GitHub Issues 协作约定](references/github-issues.md)。不设需求模板；简短需求可以只有一句话。
+
 本技能目录记为 `SKILL_DIR`，协调命令为：
 
 ```bash
@@ -15,19 +17,22 @@ python3 "$SKILL_DIR/scripts/coordination.py" [--repo <worktree>] <command>
 
 命令会从任意 linked worktree 定位主 worktree，并原子更新主 worktree 内被 gitignore 的 `.agents/worktree-state.json`。直接运行 `coordination.py --help` 或子命令的 `--help` 查看参数。
 
+修改协调脚本后运行 `python3 -B -m unittest discover -s .agents/skills/worktree-development/tests`；测试使用临时 Git 仓库，不读写真实队列或 GitHub。
+
 ## 开始开发
 
 1. 检查 `git status --short --branch`、`git worktree list --porcelain` 和协调状态。不得移动、覆盖或带入其他人的未提交改动。
-2. 用任务短名和稳定的 agent 标识创建唯一分支与 sibling worktree。Herdr pane ID 可作为 agent 标识；用时间或随机后缀避免分支、目录重名。基线默认取主分支当前已提交的 `HEAD`，不能隐式复制主 worktree 的未提交内容。
+2. 读取已有 issue；没有时先搜索去重，再为用户已提出的开发需求创建 issue。用 `issue-<编号>-<任务短名>-<agent>` 创建唯一分支与 sibling worktree。Herdr pane ID 可作为 agent 标识；用时间或随机后缀避免分支、目录重名。基线默认取主分支当前已提交的 `HEAD`，不能隐式复制主 worktree 的未提交内容。认证暂不可用或迁移中的既有工作可先隔离开发，恢复访问后补上关联；不创建本地需求收件箱。
 3. 如果当前已经是只属于本需求的 linked worktree，复用它；否则运行 `git worktree add -b <branch> <sibling-path> <base-ref>`。从此以后，所有读取、编辑、格式化、测试和提交都明确以该 worktree 为工作目录。不要在主 worktree 暂存功能文件。
 4. 在开发 worktree 中注册：
 
    ```bash
    python3 "$SKILL_DIR/scripts/coordination.py" register \
-     --task '<简明需求>' --role development
+     --task '<简明需求>' --role development \
+     --issue 'https://github.com/vilicvane/code3d/issues/<编号>'
    ```
 
-   默认 agent ID 是 `$HERDR_PANE_ID`；不在 Herdr 中时必须显式传 `--agent`。注册会记录 worktree、分支、提交以及 Herdr workspace/tab/pane ID。
+   默认 agent ID 是 `$HERDR_PANE_ID`；不在 Herdr 中时必须显式传 `--agent`。注册会记录 issue URL、worktree、分支、提交以及 Herdr workspace/tab/pane ID。多个关联 issue 可重复 `--issue`。同一活跃 agent 重新注册时省略该参数保留关联，显式传入则替换；已完成 agent 用于新任务时不继承旧 issue。
 
 5. 在每轮实质工作开始和结束时运行 `heartbeat`，并用 `--note` 写当前动作。长任务至少每五分钟更新一次。不要用常驻心跳进程。
 
@@ -74,7 +79,7 @@ Herdr 的 workspace/tab/pane ID 是相关终端会话的稳定句柄；协调文
 python3 "$SKILL_DIR/scripts/coordination.py" enqueue --summary '<改动与验证摘要>'
 ```
 
-未提交、detached HEAD 或主 worktree 中的内容不能入队。入队记录固定 `HEAD`；分支之后若有新提交，必须用 `retry` 取代旧队列项并重新排到队尾。等待期间保持开发 worktree、已启动的开发服务器及其 pane，不要自行合并主分支。
+未提交、detached HEAD 或主 worktree 中的内容不能入队。入队记录固定 `HEAD` 和当时的 issue URL；分支之后若有新提交或需更换队列中的 issue 关联，必须用 `retry` 取代旧队列项并重新排到队尾。等待期间保持开发 worktree、已启动的开发服务器及其 pane，不要自行合并主分支。
 
 ## 串行集成
 
@@ -88,6 +93,8 @@ python3 "$SKILL_DIR/scripts/coordination.py" enqueue --summary '<改动与验证
 4. 若不能安全完成，优先在仍存在 `MERGE_HEAD` 时运行 `git merge --abort`。主 worktree恢复 clean 后运行 `block --reason '<原因>'`，把需求退回开发方且释放队列；开发方修复并提交后运行 `retry`，它会排到队尾。
 
 `claimed`、`merging` 或 `testing` owner 即使心跳陈旧也不能被自动抢占，因为主 worktree 可能处于未完成的合并状态。先通过协调文件和 Herdr ID 联系 owner；没有 owner 可恢复时，请用户决定如何处理。
+
+`complete` 只代表本地集成成功，不推送、不评论或关闭 GitHub issue。验收完成且提交实际进入远端默认分支后才关闭需求；未获推送授权时报告本地合并结果并保持 issue 打开，见协作约定。
 
 ## 收尾
 

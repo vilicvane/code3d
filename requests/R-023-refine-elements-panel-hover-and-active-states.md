@@ -1,5 +1,8 @@
 # R-023 Refine Elements panel hover and active states
 
+> Historical snapshot, frozen on 2026-09-05. Live requirement and discussion:
+> [GitHub #4](https://github.com/vilicvane/code3d/issues/4).
+
 ## Bug
 
 - When another element row is hovered or keyboard-focused, temporarily hide

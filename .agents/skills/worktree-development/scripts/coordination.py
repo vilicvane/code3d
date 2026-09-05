@@ -7,6 +7,7 @@ import argparse
 import fcntl
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -259,6 +260,11 @@ def command_register(args: argparse.Namespace, repo: Repository) -> None:
                 f"in {existing.get('worktree')}"
             )
         registered_at = existing.get("registered_at", now())
+        issue_urls = (
+            existing.get("issue_urls", []) if existing.get("status") != "done" else []
+        )
+        if args.issue is not None:
+            issue_urls = list(dict.fromkeys(args.issue))
         agent = {
             **existing,
             "id": identity,
@@ -266,6 +272,7 @@ def command_register(args: argparse.Namespace, repo: Repository) -> None:
             "role": args.role,
             "status": "working" if args.role == "development" else "available",
             "registered_at": registered_at,
+            "issue_urls": issue_urls,
         }
         update_agent_location(agent, repo)
         if args.note:
@@ -395,6 +402,7 @@ def command_enqueue(args: argparse.Namespace, repo: Repository) -> None:
             "id": queue_id(),
             "agent": identity,
             "task": agent["task"],
+            "issue_urls": agent.get("issue_urls", []),
             "summary": args.summary,
             "worktree": str(repo.current_root),
             "branch": branch,
@@ -581,6 +589,7 @@ def command_retry(args: argparse.Namespace, repo: Repository) -> None:
             "id": queue_id(),
             "agent": identity,
             "task": agent["task"],
+            "issue_urls": agent.get("issue_urls", []),
             "summary": args.summary or previous["summary"],
             "worktree": str(repo.current_root),
             "branch": repo.branch(),
@@ -664,6 +673,8 @@ def command_status(args: argparse.Namespace, repo: Repository) -> None:
             f"{server_text}"
         )
         print(f"    task: {agent['task']}")
+        for issue_url in agent.get("issue_urls", []):
+            print(f"    issue: {issue_url}")
         print(f"    worktree: {agent['worktree']}")
         if ids:
             print(f"    herdr: {ids}")
@@ -683,8 +694,18 @@ def command_status(args: argparse.Namespace, repo: Repository) -> None:
             f"@ {item['commit'][:12]} by {item['agent']}"
         )
         print(f"    {item['summary']}")
+        for issue_url in item.get("issue_urls", []):
+            print(f"    issue: {issue_url}")
         if item.get("reason"):
             print(f"    reason: {item['reason']}")
+
+
+def github_issue_url(value: str) -> str:
+    if not re.fullmatch(
+        r"https://github\.com/[^/\s?#]+/[^/\s?#]+/issues/[1-9][0-9]*", value
+    ):
+        raise argparse.ArgumentTypeError("expected a full GitHub issue URL")
+    return value
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -705,6 +726,12 @@ def build_parser() -> argparse.ArgumentParser:
     register = subparsers.add_parser("register", help="register an agent")
     register.add_argument("--agent")
     register.add_argument("--task", required=True)
+    register.add_argument(
+        "--issue",
+        action="append",
+        type=github_issue_url,
+        help="GitHub issue URL; repeat for related issues (omission preserves active links)",
+    )
     register.add_argument(
         "--role", choices=("development", "integration"), required=True
     )

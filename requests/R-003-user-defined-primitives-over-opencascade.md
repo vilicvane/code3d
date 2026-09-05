@@ -1,5 +1,9 @@
 # R-003 User-defined primitives over OpenCascade
 
+> Historical snapshot, frozen on 2026-09-05. The implementation is complete;
+> remaining interoperability decisions are tracked with the API review in
+> [GitHub #5](https://github.com/vilicvane/code3d/issues/5).
+
 ## Request
 
 - Give users a supported path to build their own primitives from OpenCascade

@@ -1,5 +1,9 @@
 # R-001 Object relationships and contextual preview
 
+> Historical snapshot, frozen on 2026-09-05. Remaining work and discussion:
+> [GitHub #2](https://github.com/vilicvane/code3d/issues/2). The text below
+> records the pre-migration state, not a live backlog.
+
 The source-occurrence slice is implemented; richer relationship UI remains
 open.
 

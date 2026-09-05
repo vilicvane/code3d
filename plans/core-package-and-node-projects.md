@@ -2,10 +2,12 @@
 
 ## Status and planning posture
 
-Status: active. The fillet/chamfer edge-selection work is integrated and the
+Live scope, discussion, and status: [GitHub #6](https://github.com/vilicvane/code3d/issues/6).
+The following is the implementation baseline at the 2026-09-05 migration,
+not a separate status tracker. The fillet/chamfer edge-selection work is integrated and the
 workspace/package-boundary portion of phase 1 is implemented. Project-local
-package resolution, building, evaluation, and language-service loading remain
-in progress.
+package resolution, building, evaluation, and language-service loading were
+the remaining work at that point.
 
 This document is durable working memory, not a frozen implementation spec. It
 separates confirmed product constraints from working technical choices. During

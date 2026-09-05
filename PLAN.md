@@ -3,10 +3,13 @@
 This file is the durable working memory for decisions and multi-step work. Keep
 stable product goals in `DESIGN.md`, source-editing/tool contracts in
 `TOOLING.md`, and detailed not-yet-active refactors under `plans/`; update this
-file whenever the active design or milestone changes. Unscheduled product
-feedback lives in one file per request under `requests/` so it does not
-silently reorder the active milestones. Closed requests move to
-`requests/closed/`.
+file whenever the confirmed design changes. [GitHub Issues](https://github.com/vilicvane/code3d/issues)
+is the single source for requirements, discussion, acceptance, and current work
+status. A one-sentence issue is welcome; there are no required templates or
+sections. Link implementation plans to their issues instead of maintaining a
+second backlog here. `requests/` preserves pre-migration history only; its file
+locations no longer track live status. The milestone sections below preserve
+implementation context and historical outcomes, not a competing work queue.
 
 ## Confirmed direction
 
@@ -255,6 +258,8 @@ Status: complete. Rootless selection and optional exports were implemented in
 
 ### 2. Runtime source context — in progress
 
+Remaining scope and live status: [#2](https://github.com/vilicvane/code3d/issues/2).
+
 - Record top-level bindings, source sites, export names, collections, runtime
   instance counts, and evaluation order.
 - Index repeated executions by source site while preserving each evaluation's
@@ -448,6 +453,8 @@ operation-insertion path were removed pending a broader interaction design.
 
 ### 4b. Core package and Node-native projects — active
 
+Remaining scope and live status: [#6](https://github.com/vilicvane/code3d/issues/6).
+
 - Extract the author runtime into a real ESM `@code3d/core` package with emitted
   JavaScript, declarations, explicit exports, and an explicit tooling boundary.
 - Make every real project resolve its own `node_modules`; remove the injected
@@ -498,6 +505,10 @@ an independently owned shape in the current kernel for each invocation. This
 avoids caching disposable model objects or retaining native handles across kernels.
 
 ### 4d. Annotation-driven contextual tools — active
+
+Further parameter/provider design: [#7](https://github.com/vilicvane/code3d/issues/7).
+The implemented contract below remains the baseline; the issue is a discussion,
+not approval to predeclare additional parameter kinds.
 
 - Let an authoring API opt individual parameters into contextual panels with
   per-signature JSDoc such as `@code3d.param width {kind: 'length'}`. Parse the
@@ -601,6 +612,8 @@ and Vertex viewport selectors on the new model kinds and loft result.
 
 ### 5. Object combination tools
 
+Design discussion and live scope: [#8](https://github.com/vilicvane/code3d/issues/8).
+
 - Handwritten standalone `union`, `cut`, and `intersect` functions are now the
   only Boolean API; the old instance methods were removed.
 - Later allow an explicit tool mode to resolve multiple semantic selections.
@@ -610,17 +623,12 @@ and Vertex viewport selectors on the new model kinds and loft result.
 
 ## Open questions
 
-- Whether any solid-modeling use case justifies partially constrained point,
-  line, plane, distance, or angle relations. General partial constraint solving
-  is expected for sketching, but is not assumed to be necessary for solids.
-- Whether topology anchors should be promotable into reusable semantic names,
-  and how those names should behave when the underlying topology is retired.
-- How Boolean results expose operand anchors and provenance for later relations.
-- Whether uniform scaling is geometry derivation, occurrence placement, or two
-  explicitly named operations.
-- How much runtime lineage to retain and mesh eagerly for large models.
-- Rules for lifting inline expressions or values from different lexical scopes
-  when automatic combination tools are eventually introduced.
+Unresolved constraint, topology naming, Boolean provenance, scaling, and runtime
+retention questions are tracked in [#9](https://github.com/vilicvane/code3d/issues/9).
+Source lifting for combination tools belongs to [#8](https://github.com/vilicvane/code3d/issues/8).
+Public API and interoperability review belongs to [#5](https://github.com/vilicvane/code3d/issues/5).
+Confirmed outcomes return to the design documents; discussion status stays in
+Issues.
 
 ## Completed foundation
 
