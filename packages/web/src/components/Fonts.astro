@@ -1,0 +1,17 @@
+---
+import interStyles from '@fontsource-variable/inter/index.css?inline';
+import monoStyles from '@fontsource-variable/jetbrains-mono/index.css?inline';
+import interUrl from '@fontsource-variable/inter/files/inter-latin-wght-normal.woff2?url';
+import monoUrl from '@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2?url';
+
+// Declare faces before the first paint, including in dev where CSS imports
+// otherwise arrive through JavaScript. Keep every Fontsource language subset.
+const styles = `${interStyles}\n${monoStyles}`.replace(
+  /font-display:\s*swap/g,
+  'font-display: optional',
+);
+---
+
+<link rel="preload" href={interUrl} as="font" type="font/woff2" crossorigin />
+<link rel="preload" href={monoUrl} as="font" type="font/woff2" crossorigin />
+<style is:inline set:html={styles}></style>

@@ -76,19 +76,21 @@ input[type='number']::-webkit-outer-spin-button {
 }
 
 .brand {
-  gap: 14px;
+  gap: 10px;
   font-weight: 600;
   letter-spacing: -0.02em;
 }
 
 .brand-mark {
-  width: 11px;
-  height: 11px;
-  border: 2px solid var(--acid);
-  transform: rotate(45deg);
-  box-shadow:
-    5px -5px 0 -2px #0f100e,
-    5px -5px 0 0 #778c27;
+  display: flex;
+  width: 24px;
+  height: 18px;
+  --c3-accent: var(--acid);
+}
+
+.brand-mark svg {
+  width: 100%;
+  height: 100%;
 }
 
 .prototype-tag {

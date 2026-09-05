@@ -15,6 +15,7 @@ const appDirectory = fileURLToPath(new URL('../app/dist/', import.meta.url));
 export default defineConfig({
   site: configuredUrl?.origin,
   base,
+  publicDir: '../../assets/brand',
   outDir: './dist/www',
   trailingSlash: 'always',
   devToolbar: {enabled: false},
@@ -23,7 +24,6 @@ export default defineConfig({
       disable404Route: true,
       title: 'Code3D',
       description: 'Solid modeling with TypeScript and direct manipulation.',
-      logo: {src: './src/assets/logo.svg', replacesTitle: false},
       favicon: '/favicon.svg',
       head: [
         {

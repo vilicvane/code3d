@@ -1,9 +1,11 @@
 ---
 import DefaultHead from '@astrojs/starlight/components/Head.astro';
+import Fonts from './Fonts.astro';
 import {sitePath} from '../lib/site';
 ---
 
 <DefaultHead><slot /></DefaultHead>
+<Fonts />
 <meta
   property="og:image"
   content={new URL(sitePath('og-image.png'), Astro.site ?? Astro.url).href}

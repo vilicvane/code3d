@@ -27,6 +27,12 @@ browser. The renderer closes its own pages and leaves that browser running.
 - Generated model images: `src/assets/models/`. Regenerate after changing
   examples, source contexts, or the renderer; CI regenerates them on every build.
 - Site identity and URL helpers: `src/lib/site.ts`.
+- Website and docs font loading: `src/components/Fonts.astro`. Font faces are
+  declared in the initial HTML and the main Latin subsets are preloaded;
+  optional font display prevents late font swaps from shifting page content.
+- Shared App and website icons: root `assets/brand/`. `mark.svg` is the
+  side-by-side mark used in headers and the social image; `favicon.svg` brings
+  the diamonds closer together for small sizes. Both builds publish these assets.
 - License text: the root `LICENSE`, served unchanged at `/license.txt` and
   included in the App build. Workspace packages copy it during `npm pack`.
 

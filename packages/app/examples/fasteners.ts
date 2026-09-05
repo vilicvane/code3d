@@ -4,7 +4,7 @@ import {ISO4762} from '@code3d/screws';
 const accent = '#d8ff3e';
 const dark = '#222621';
 
-const plate = box(38, 6, 26).paint(dark);
+const plate = box(38, 6, 26);
 const hole = ISO4762.clearanceHole('M6', {
   depth: 10,
   fit: 'normal',
