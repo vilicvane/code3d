@@ -4,7 +4,7 @@ import {
   TypeScriptWorker,
   type TypeScriptSelectionRange,
 } from 'monaco-editor/language/typescript/ts.worker';
-import {ParameterAnnotationLanguageService} from './parameter-annotation-language-service';
+import {AnnotationLanguageService} from './annotation-language-service';
 
 const completionPreferences = {
   quotePreference: 'single',
@@ -34,15 +34,14 @@ const completionFormatSettings = {
 } satisfies typeScript.FormatCodeSettings;
 
 class ProjectTypeScriptWorker extends TypeScriptWorker {
-  private readonly parameterAnnotations =
-    new ParameterAnnotationLanguageService(this);
+  private readonly annotations = new AnnotationLanguageService(this);
 
   override async getSemanticDiagnostics(fileName: string) {
     const diagnostics = await super.getSemanticDiagnostics(fileName);
     if (!this.hasParameterAnnotations(fileName)) return diagnostics;
     return [
       ...diagnostics,
-      ...this.parameterAnnotations.diagnostics(fileName).map(diagnostic => ({
+      ...this.annotations.diagnostics(fileName).map(diagnostic => ({
         ...diagnostic,
         file: undefined,
       })),
@@ -71,15 +70,11 @@ class ProjectTypeScriptWorker extends TypeScriptWorker {
     position: number,
   ): Promise<typeScript.CompletionInfo | undefined> {
     const sourceFile = this.hasParameterAnnotations(fileName)
-      ? this.parameterAnnotations.sourceFile(fileName)
+      ? this.annotations.sourceFile(fileName)
       : undefined;
     const annotations =
       sourceFile &&
-      this.parameterAnnotations.completions(
-        sourceFile,
-        position,
-        completionPreferences,
-      );
+      this.annotations.completions(sourceFile, position, completionPreferences);
     if (annotations) return annotations;
     return this.getLanguageService().getCompletionsAtPosition(
       fileName,
@@ -96,11 +91,11 @@ class ProjectTypeScriptWorker extends TypeScriptWorker {
     data: typeScript.CompletionEntryData | undefined,
   ): Promise<typeScript.CompletionEntryDetails | undefined> {
     const sourceFile = this.hasParameterAnnotations(fileName)
-      ? this.parameterAnnotations.sourceFile(fileName)
+      ? this.annotations.sourceFile(fileName)
       : undefined;
     const annotation =
       sourceFile &&
-      this.parameterAnnotations.details(
+      this.annotations.details(
         sourceFile,
         position,
         name,
@@ -124,9 +119,18 @@ class ProjectTypeScriptWorker extends TypeScriptWorker {
     positions: readonly number[],
   ): Promise<readonly TypeScriptSelectionRange[]> {
     const languageService = this.getLanguageService();
-    return positions.map(position =>
-      languageService.getSmartSelectionRange(fileName, position),
-    );
+    const snapshot = this.getScriptSnapshot(fileName);
+    const sourceFile = snapshot
+      ?.getText(0, snapshot.getLength())
+      .includes('@code3d.')
+      ? this.annotations.sourceFile(fileName)
+      : undefined;
+    return positions.map(position => {
+      const outer = languageService.getSmartSelectionRange(fileName, position);
+      return sourceFile
+        ? this.annotations.selectionRange(sourceFile, position, outer)
+        : outer;
+    });
   }
 
   private hasParameterAnnotations(fileName: string): boolean {

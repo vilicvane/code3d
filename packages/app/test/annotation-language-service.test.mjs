@@ -8,6 +8,8 @@ let annotations;
 let diagnostics;
 let readParameters;
 let languageService;
+let nativeLanguageService;
+let EmbeddedCodeProjection;
 let files;
 let version = 0;
 const preferences = {
@@ -39,9 +41,12 @@ before(async () => {
       ),
     );
   };
-  const {ParameterAnnotationLanguageService} = await server.ssrLoadModule(
-    '/src/monaco/parameter-annotation-language-service.ts',
+  const {AnnotationLanguageService} = await server.ssrLoadModule(
+    '/src/monaco/annotation-language-service.ts',
   );
+  ({EmbeddedCodeProjection} = await server.ssrLoadModule(
+    '/src/monaco/embedded-code.ts',
+  ));
   const {injectedPackageFiles} = await server.ssrLoadModule(
     '/src/monaco/injected-packages.ts',
   );
@@ -49,7 +54,7 @@ before(async () => {
     injectedPackageFiles.map(file => [file.filePath, file.content]),
   );
   const readFile = name => files.get(name) ?? ts.sys.readFile(name);
-  languageService = new ParameterAnnotationLanguageService({
+  const host = {
     getCompilationSettings: () => ({
       strict: true,
       target: ts.ScriptTarget.ESNext,
@@ -68,7 +73,9 @@ before(async () => {
     getDefaultLibFileName: options => ts.getDefaultLibFilePath(options),
     fileExists: name => readFile(name) !== undefined,
     readFile,
-  });
+  };
+  languageService = new AnnotationLanguageService(host);
+  nativeLanguageService = ts.createLanguageService(host);
 });
 
 after(async () => {
@@ -97,6 +104,18 @@ function declaration(value, parameters = 'width: number, edges?: number[]') {
 }
 
 function complete(marked) {
+  const result = markedSource(marked);
+  return {
+    ...result,
+    info: languageService.completions(
+      result.file,
+      result.position,
+      preferences,
+    ),
+  };
+}
+
+function markedSource(marked) {
   const position = marked.indexOf('|');
   assert.notEqual(position, -1);
   const source = marked.replace('|', '');
@@ -107,7 +126,53 @@ function complete(marked) {
     source,
     position,
     file,
-    info: languageService.completions(file, position, preferences),
+  };
+}
+
+function selectionSpans(selection) {
+  const result = [];
+  for (let current = selection; current; current = current.parent)
+    result.push(current.textSpan);
+  return result;
+}
+
+function select(marked) {
+  const result = markedSource(marked);
+  const outer = nativeLanguageService.getSmartSelectionRange(
+    result.file.fileName,
+    result.position,
+  );
+  const selection = languageService.selectionRange(
+    result.file,
+    result.position,
+    outer,
+  );
+  const spans = selectionSpans(selection);
+  for (const [index, span] of spans.entries()) {
+    assert.ok(
+      span.start >= 0 && span.start + span.length <= result.source.length,
+    );
+    assert.ok(
+      span.start <= result.position &&
+        result.position <= span.start + span.length,
+    );
+    if (index) {
+      const inner = spans[index - 1];
+      assert.ok(
+        span.start <= inner.start &&
+          span.start + span.length >= inner.start + inner.length,
+      );
+      assert.notDeepEqual(span, inner);
+    }
+  }
+  return {
+    ...result,
+    outer,
+    selection,
+    spans,
+    texts: spans.map(span =>
+      result.source.slice(span.start, span.start + span.length),
+    ),
   };
 }
 
@@ -325,4 +390,196 @@ test('uses named tuple parameters of emitted callable declarations', () => {
     ].join('\n'),
   );
   assert.deepEqual(names(result), ['radius', 'twist']);
+});
+
+test('projects offsets and spans independently of annotation syntax', () => {
+  const text = '{label: "Width 🌍",\r\n  size: 10}';
+  const prefix = 'export const demo = (';
+  const projection = new EmbeddedCodeProjection(
+    {start: 123, text},
+    prefix,
+    ');',
+  );
+  assert.equal(projection.source, prefix + text + ');');
+  for (let offset = 0; offset <= text.length; offset++) {
+    const generated = projection.toGeneratedOffset(123 + offset);
+    assert.equal(generated, prefix.length + offset);
+    assert.deepEqual(projection.toSourceSpan({start: generated, length: 0}), {
+      start: 123 + offset,
+      length: 0,
+    });
+  }
+  assert.equal(
+    projection.toSourceSpan({start: prefix.length - 1, length: 1}),
+    undefined,
+  );
+  assert.equal(
+    projection.toSourceSpan({start: prefix.length, length: text.length + 1}),
+    undefined,
+  );
+});
+
+test('expands param strings through native syntax and embedding boundaries', () => {
+  const result = select(declaration("width {kind: 'le|ngth'}"));
+  assert.deepEqual(result.texts.slice(0, 5), [
+    'length',
+    "'length'",
+    "kind: 'length'",
+    "{kind: 'length'}",
+    "width {kind: 'length'}",
+  ]);
+  assert.ok(result.texts.includes("@code3d.param width {kind: 'length'}"));
+  assert.ok(
+    result.texts.includes("/** @code3d.param width {kind: 'length'} */"),
+  );
+  assert.equal(result.texts.at(-1), result.source);
+});
+
+test('uses the same expansion pipeline for arguments calls and arrays', () => {
+  const result = select(
+    "/** @code3d.arguments [box(10, 2|0, 30), {color: 'red'}] */\nfunction model(value: unknown) {}",
+  );
+  assert.deepEqual(result.texts.slice(0, 5), [
+    '20',
+    '10, 20, 30',
+    'box(10, 20, 30)',
+    "box(10, 20, 30), {color: 'red'}",
+    "[box(10, 20, 30), {color: 'red'}]",
+  ]);
+  assert.ok(
+    result.texts.includes(
+      "@code3d.arguments [box(10, 20, 30), {color: 'red'}]",
+    ),
+  );
+  assert.equal(result.texts.at(-1), result.source);
+});
+
+test('matches native TypeScript object selections for both annotation kinds', () => {
+  const marked = "{constraints: {min: 1|0, max: 100}, label: 'Width'}";
+  const text = marked.replace('|', '');
+  const prefix = 'const value = (';
+  const reference = 'file:///workspace/reference.ts';
+  files.set(reference, prefix + text + ');');
+  version += 1;
+  const native = nativeLanguageService.getSmartSelectionRange(
+    reference,
+    prefix.length + marked.indexOf('|'),
+  );
+  const expected = selectionSpans(native)
+    .filter(
+      span =>
+        span.start >= prefix.length &&
+        span.start + span.length <= prefix.length + text.length,
+    )
+    .map(span =>
+      files.get(reference).slice(span.start, span.start + span.length),
+    );
+  for (const tag of ['param width', 'arguments']) {
+    const result = select(
+      `/** @code3d.${tag} ${marked} */\nfunction model(width: number) {}`,
+    );
+    assert.deepEqual(result.texts.slice(0, expected.length), expected);
+  }
+  files.delete(reference);
+  version += 1;
+});
+
+test('expands a parameter name without exposing generated helper declarations', () => {
+  const result = select(declaration("wi|dth {kind: 'length'}"));
+  assert.deepEqual(result.texts.slice(0, 3), [
+    'width',
+    "width {kind: 'length'}",
+    "@code3d.param width {kind: 'length'}",
+  ]);
+});
+
+test('keeps CRLF, Unicode and JSDoc prefixes at exact source positions', () => {
+  const result = select(
+    [
+      '/** 🌍',
+      ' * @code3d.param width {',
+      " *   kind: 'length',",
+      " *   label: 'Wi|dth 🌍',",
+      ' *   constraints: {min: 1}',
+      ' * }',
+      ' * @code3d.arguments [40]',
+      ' */',
+      'function model(width: number) {}',
+    ].join('\r\n'),
+  );
+  assert.deepEqual(result.texts.slice(0, 3), [
+    'Width 🌍',
+    "'Width 🌍'",
+    "label: 'Width 🌍'",
+  ]);
+  assert.ok(
+    result.texts.includes(
+      "{\r\n *   kind: 'length',\r\n *   label: 'Width 🌍',\r\n *   constraints: {min: 1}\r\n * }",
+    ),
+  );
+  const tag = result.texts.find(text => text.startsWith('@code3d.param'));
+  assert.ok(tag);
+  assert.ok(!tag.includes('@code3d.arguments'));
+});
+
+test('keeps useful selections while an embedded expression is incomplete', () => {
+  for (const marked of [
+    declaration("width {kind: 'length', constraints: {min: 1|0"),
+    '/** @code3d.arguments [box(10, 2|0 */\nfunction model(value: unknown) {}',
+  ]) {
+    const result = select(marked);
+    assert.match(result.texts[0], /^(10|20)$/);
+    assert.equal(result.texts.at(-1), result.source);
+  }
+});
+
+test('retains ordinary TypeScript selections outside embedded code', () => {
+  for (const marked of [
+    '/** @code3d.arguments | */\nfunction model() {}',
+    declaration("width {kind: 'length'}   |"),
+    declaration("width {kind: 'length'}") + '\nconst x = model(1|0);',
+    '/** A comment about a bo|x. */\nfunction model() {}',
+    'const text = "/** @code3d.param width {kind: \'le|ngth\'} */";',
+  ]) {
+    const result = select(marked);
+    assert.deepEqual(result.selection, result.outer);
+  }
+});
+
+test('handles empty embedded objects and arrays without selecting wrappers', () => {
+  assert.ok(select(declaration('width {|}')).texts.includes('{}'));
+  assert.ok(
+    select('/** @code3d.arguments [|] */\nfunction model() {}').texts.includes(
+      '[]',
+    ),
+  );
+});
+
+test('keeps independent selection chains across multiple annotation positions', () => {
+  const marked =
+    "/**\n * @code3d.param width {kind: 'le|ngth'}\n * @code3d.arguments [40, 20]\n */\nfunction model(width: number, depth: number) {}";
+  const result = markedSource(marked);
+  const positions = [
+    result.position,
+    result.source.indexOf('20') + 1,
+    result.position,
+  ];
+  const selections = positions.map(position =>
+    languageService.selectionRange(
+      result.file,
+      position,
+      nativeLanguageService.getSmartSelectionRange(
+        result.file.fileName,
+        position,
+      ),
+    ),
+  );
+  const texts = selections.map(selection =>
+    selectionSpans(selection).map(span =>
+      result.source.slice(span.start, span.start + span.length),
+    ),
+  );
+  assert.equal(texts[0][0], 'length');
+  assert.equal(texts[1][0], '20');
+  assert.deepEqual(texts[0], texts[2]);
 });

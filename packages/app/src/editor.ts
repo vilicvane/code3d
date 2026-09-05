@@ -20,6 +20,7 @@ import {
 } from './monaco/typescript-completions';
 import type {TypeScriptCompletionEntry} from './monaco/typescript-protocol';
 import {registerProjectTypeScriptSelectionRanges} from './monaco/typescript-selection-ranges';
+import {EmbeddedCodeProjection} from './monaco/embedded-code';
 import {code3dAnnotations, type Code3dAnnotation} from './model/annotations';
 import type {DesignArgumentContext} from './model/compiler';
 import type {ModelDiagnostic} from './model/diagnostic';
@@ -810,7 +811,7 @@ export class CodeEditor {
     const worker = await workerFactory(virtualModel.uri);
     const completions = (await worker.getCompletionsAtPosition(
       virtualModel.uri.toString(),
-      virtualCall.offset,
+      virtualCall.toGeneratedOffset(offset),
     )) as {entries?: TypeScriptCompletionEntry[]} | undefined;
     if (!completions?.entries || token.isCancellationRequested) {
       return undefined;
@@ -828,9 +829,7 @@ export class CodeEditor {
         range: completionRange(
           model,
           position,
-          site,
-          virtualCall.argumentsStart,
-          virtualCall.argumentsEnd,
+          virtualCall,
           entry.replacementSpan,
         ),
       })),
@@ -1380,13 +1379,6 @@ function completionLabel(
   return typeof label === 'string' ? label : label.label;
 }
 
-type DesignArgumentVirtualCall = Readonly<{
-  source: string;
-  offset: number;
-  argumentsStart: number;
-  argumentsEnd: number;
-}>;
-
 type DesignArgumentCompletionSite = Readonly<{
   annotation: Code3dAnnotation;
   context: DesignArgumentContext;
@@ -1396,7 +1388,7 @@ function designArgumentVirtualCall(
   source: string,
   site: DesignArgumentCompletionSite,
   cursorOffset: number,
-): DesignArgumentVirtualCall | undefined {
+): EmbeddedCodeProjection | undefined {
   const {annotation, context} = site;
   if (!annotation.value.startsWith('[')) return undefined;
   const valueEnd = annotation.value.endsWith(']')
@@ -1407,13 +1399,11 @@ function designArgumentVirtualCall(
   const argumentsSource = annotation.value.slice(1, valueEnd);
   const helperName = `__code3dArguments${annotation.start}`;
   const callPrefix = `\nfunction ${helperName}${context.signature.typeParametersSource}(${context.signature.parametersSource}) {}\n${helperName}(`;
-  const argumentsStart = source.length + callPrefix.length;
-  return {
-    source: `${source}${callPrefix}${argumentsSource});\n`,
-    offset: argumentsStart + cursorInValue - 1,
-    argumentsStart,
-    argumentsEnd: argumentsStart + argumentsSource.length,
-  };
+  return new EmbeddedCodeProjection(
+    {start: annotation.valueStart + 1, text: argumentsSource},
+    source + callPrefix,
+    ');\n',
+  );
 }
 
 function designArgumentModelUri(original: monaco.Uri): monaco.Uri {
@@ -1426,22 +1416,14 @@ function designArgumentModelUri(original: monaco.Uri): monaco.Uri {
 function completionRange(
   model: monaco.editor.ITextModel,
   position: monaco.Position,
-  site: DesignArgumentCompletionSite,
-  argumentsStart: number,
-  argumentsEnd: number,
+  projection: EmbeddedCodeProjection,
   replacementSpan?: Readonly<{start: number; length: number}>,
 ): monaco.IRange {
-  if (
-    replacementSpan &&
-    argumentsStart <= replacementSpan.start &&
-    replacementSpan.start + replacementSpan.length <= argumentsEnd
-  ) {
-    const start =
-      site.annotation.valueStart + 1 + replacementSpan.start - argumentsStart;
-    const end = start + replacementSpan.length;
+  const span = replacementSpan && projection.toSourceSpan(replacementSpan);
+  if (span) {
     return monaco.Range.fromPositions(
-      model.getPositionAt(start),
-      model.getPositionAt(end),
+      model.getPositionAt(span.start),
+      model.getPositionAt(span.start + span.length),
     );
   }
   const word = model.getWordUntilPosition(position);

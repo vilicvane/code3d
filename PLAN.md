@@ -505,6 +505,11 @@ still use the common cache. Custom primitives use the standard mesh tolerance.
   the callable signature and configuration from its actual TypeScript types.
   Share static validation with compilation and report errors inline even
   before the callable is used.
+- Give `param` configuration and `arguments` expressions shared embedded
+  TypeScript smart selection. Reuse source-fragment projection and range
+  mapping for selection and completion; retain native syntax parents inside
+  the fragment, then join annotation and ordinary source parents without
+  exposing generated helper code.
 - Use one semantic `kind` discriminator for value and selectable parameters.
   Keep runtime defaults, effective selections, environment-dependent steps,
   display ranges, units, and other presentation policy out of the declaration
