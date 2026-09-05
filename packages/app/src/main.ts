@@ -260,7 +260,9 @@ const projectDirectory = new ProjectTree(projectTree, {
     showProjectContextMenu(path, event.clientX, event.clientY),
 });
 replaceFileRoute(codeEditor.currentFile());
-const compiler = new ModelCompilerClient();
+const compiler = new ModelCompilerClient(projectFileSystem, language =>
+  codeEditor.setProjectLanguage(language),
+);
 let persistenceQueue = Promise.resolve();
 let currentModule: ModelModule | null = null;
 let currentModuleSourceVersion: number | undefined;

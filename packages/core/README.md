@@ -4,6 +4,12 @@ The code3d authoring runtime. Model projects install this package directly and
 may execute the same ESM TypeScript source in code3d or a supported Node.js
 runtime.
 
+Studio also offers zero-install authoring with built-in core and screws. When
+the project's root `package.json` declares `@code3d/core`, Studio uses the
+project's installed packages exclusively, including their declarations; missing
+dependencies are errors rather than a reason to substitute built-in packages.
+Direct Node execution requires installing the project dependencies.
+
 The public API includes solid primitives and Boolean operations, first-class
 planar face models (`circle`, `ellipse`, `rectangle`, `regularPolygon`), 3D
 curve models (`line`, `arc`, `bezier`, `spline`), point models, and
@@ -87,3 +93,19 @@ enable its call-site tool panel, including when consumed through emitted
 declarations. No wrapper or definition options are needed. For a standalone
 preview, export an ordinary example invocation; `@code3d.arguments`
 is not expanded to recognize primitive factory definitions.
+
+## Tooling evaluation lifetime
+
+Studio uses the selected runtime's `@code3d/core/tooling` entry, from the project
+when core is declared or from the built-in package otherwise. Protocol 2
+adds `beginModelEvaluation(): void`: call it before each serial source
+evaluation to reset source locations, parameter provenance, and operation
+traces. Geometry, model identity, relations, and kernel caches are unaffected.
+Already-created snapshots keep their previous evaluation's metadata.
+
+Packages may retain model values privately. Studio therefore drops its own
+references after creating snapshots instead of forcibly disposing every model
+it encounters. Unreachable Replicad wrappers release their native resources
+through their finalizers; explicit disposal is appropriate only when the caller
+owns the complete model lifetime. This boundary is tooling-only: ordinary
+model authors do not initialize an evaluation session.

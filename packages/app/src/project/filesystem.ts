@@ -1,10 +1,10 @@
+import {configureSingle, fs} from '@zenfs/core';
+import {IndexedDB} from '@zenfs/dom';
 import {
-  bindContext,
-  configureSingle,
-  fs,
-  resolveMountConfig,
-} from '@zenfs/core';
-import {IndexedDB, WebAccess} from '@zenfs/dom';
+  DirectoryFileReader,
+  decodeProjectFile,
+  type ProjectFileReader,
+} from './file-reader';
 import {
   isSourceFile,
   normalizeProjectPath,
@@ -26,12 +26,32 @@ type ProjectManifest = Readonly<{
   managedDirectories: Readonly<Record<string, string>>;
 }>;
 
-type ProjectFileOperations = Pick<
-  typeof fs.promises,
-  'mkdir' | 'readFile' | 'readdir' | 'rename' | 'rm' | 'stat' | 'writeFile'
->;
+type ProjectFileOperations = {
+  mkdir(path: string, options: {recursive: true}): Promise<unknown>;
+  readFile(path: string, encoding: 'utf8'): Promise<string>;
+  readdir(
+    path: string,
+    options: {withFileTypes: true},
+  ): Promise<
+    readonly {
+      name: string;
+      isDirectory(): boolean;
+      isFile(): boolean;
+    }[]
+  >;
+  rename(from: string, to: string): Promise<unknown>;
+  rm(
+    path: string,
+    options: {recursive: boolean; force: boolean},
+  ): Promise<unknown>;
+  stat(
+    path: string,
+    options: {throwIfNoEntry: false},
+  ): Promise<unknown | undefined>;
+  writeFile(path: string, source: string, encoding: 'utf8'): Promise<unknown>;
+};
 
-export interface ProjectFileSystem {
+export interface ProjectFileSystem extends ProjectFileReader {
   initialize(seed: ModelProject): Promise<ModelProject>;
   syncDirectory(template: ProjectDirectoryTemplate): Promise<ModelProject>;
   resetDirectory(template: ProjectDirectoryTemplate): Promise<ModelProject>;
@@ -45,23 +65,41 @@ let configureBrowserPromise: Promise<void> | undefined;
 
 export async function openBrowserProjectFileSystem(): Promise<ProjectFileSystem> {
   await configureBrowserFileSystem();
-  return new ZenProjectFileSystem(
+  return new ProjectStore(
     fs.promises,
     browserProjectRoot,
     browserManifestPath,
+    {
+      async readFile(path) {
+        try {
+          return new Uint8Array(await fs.promises.readFile(path));
+        } catch (error) {
+          if (isAbsentFile(error)) return undefined;
+          throw error;
+        }
+      },
+      async stat(path) {
+        const info = await fs.promises.stat(path, {throwIfNoEntry: false});
+        return info
+          ? {
+              kind: info.isDirectory() ? 'directory' : 'file',
+              version: `${info.mtimeMs}:${info.size}`,
+            }
+          : undefined;
+      },
+    },
   );
 }
 
 export async function openDirectoryProjectFileSystem(
   handle: FileSystemDirectoryHandle,
 ): Promise<ProjectFileSystem> {
-  await configureBrowserFileSystem();
-  const fileSystem = await resolveMountConfig({backend: WebAccess, handle});
-  const context = bindContext({mounts: {'/': fileSystem}});
-  return new ZenProjectFileSystem(
-    context.fs.promises,
+  const reader = new DirectoryFileReader(handle);
+  return new ProjectStore(
+    directoryOperations(reader),
     directoryProjectRoot,
     directoryManifestPath,
+    reader,
   );
 }
 
@@ -73,12 +111,21 @@ async function configureBrowserFileSystem(): Promise<void> {
   await configureBrowserPromise;
 }
 
-class ZenProjectFileSystem implements ProjectFileSystem {
+class ProjectStore implements ProjectFileSystem {
   constructor(
     private readonly files: ProjectFileOperations,
     private readonly projectRoot: string,
     private readonly manifestPath: string,
+    private readonly reader: ProjectFileReader,
   ) {}
+
+  readFile(path: string) {
+    return this.reader.readFile(this.toDiskPath(normalizeProjectPath(path)));
+  }
+
+  stat(path: string) {
+    return this.reader.stat(this.toDiskPath(normalizeProjectPath(path)));
+  }
 
   async initialize(seed: ModelProject): Promise<ModelProject> {
     await this.files.mkdir(this.projectRoot, {recursive: true});
@@ -260,4 +307,93 @@ function newManifest(): ProjectManifest {
 
 function joinPath(directory: string, name: string): string {
   return directory === '/' ? `/${name}` : `${directory}/${name}`;
+}
+
+function isAbsentFile(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    ['ENOENT', 'ENOTDIR', 'EISDIR'].includes(String(error.code))
+  );
+}
+
+type IterableDirectory = FileSystemDirectoryHandle & {
+  values(): AsyncIterableIterator<FileSystemHandle>;
+};
+
+function directoryOperations(
+  reader: DirectoryFileReader,
+): ProjectFileOperations {
+  const parent = async (path: string, create = false) => {
+    const normalized = normalizeProjectPath(path);
+    return {
+      directory: await reader.directory(projectDirectory(normalized), create),
+      name: normalized.slice(normalized.lastIndexOf('/') + 1),
+    };
+  };
+  const write = async (path: string, contents: string | Uint8Array) => {
+    const {directory, name} = await parent(path, true);
+    const handle = await directory.getFileHandle(name, {create: true});
+    const stream = await handle.createWritable();
+    try {
+      await stream.write(
+        typeof contents === 'string'
+          ? contents
+          : new Blob([new Uint8Array(contents)]),
+      );
+      await stream.close();
+    } catch (error) {
+      await stream.abort();
+      throw error;
+    }
+  };
+  const list = async (path: string) => {
+    const directory = (await reader.directory(path)) as IterableDirectory;
+    const entries = [];
+    for await (const entry of directory.values()) {
+      entries.push({
+        name: entry.name,
+        isDirectory: () => entry.kind === 'directory',
+        isFile: () => entry.kind === 'file',
+      });
+    }
+    return entries;
+  };
+  const copy = async (from: string, to: string): Promise<void> => {
+    const info = await reader.stat(from);
+    if (!info) throw new Error(`Project file not found: ${from}`);
+    if (info.kind === 'directory') {
+      await reader.directory(to, true);
+      for (const entry of await list(from))
+        await copy(joinPath(from, entry.name), joinPath(to, entry.name));
+    } else {
+      const bytes = await reader.readFile(from);
+      if (!bytes) throw new Error(`Project file not found: ${from}`);
+      await write(to, bytes);
+    }
+  };
+  return {
+    mkdir: path => reader.directory(path, true),
+    async readFile(path) {
+      const bytes = await reader.readFile(path);
+      if (!bytes) throw new Error(`Project file not found: ${path}`);
+      return decodeProjectFile(bytes);
+    },
+    readdir: list,
+    async rename(from, to) {
+      if (await reader.stat(to))
+        throw new Error(`Project destination already exists: ${to}`);
+      await copy(from, to);
+      const {directory, name} = await parent(from);
+      await directory.removeEntry(name, {recursive: true});
+    },
+    async rm(path, options) {
+      if (options.force && !(await reader.stat(path))) return;
+      const {directory, name} = await parent(path);
+      await directory.removeEntry(name, {recursive: options.recursive});
+    },
+    stat: path => reader.stat(path),
+    writeFile: write,
+  };
 }

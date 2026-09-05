@@ -25,9 +25,11 @@ expressions. Code remains available for every model change.
 **Geometric operations can fail.** A fillet or chamfer must fit the input
 geometry. Later operations must select topology from their own input model.
 
-**Third-party package imports are not generally open in App yet.**
-The browser runtime includes Code3D's modeling packages and supports project
-modules. Do not assume it is a general Node.js runtime.
+**Installed packages must support browsers.** The App resolves packages from
+the project's `node_modules`, but does not provide Node's built-in APIs or
+native addons. Core and screws are built in until the project declares core;
+after that, missing project packages are errors. See
+[modeling packages](../../getting-started/files/#modeling-packages).
 
 **Local-folder access depends on the browser.** File System Access and a secure
 context are required. External edits need an explicit Reload folder.

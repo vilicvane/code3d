@@ -6,7 +6,6 @@ import type {
 import {code3dAnnotations} from '../model/annotations';
 import {EmbeddedCodeProjection} from './embedded-code';
 import configTypes from '../model/tool-parameter-config.ts?raw';
-import coreToolingTypes from '../../../core/bld/tooling/index.d.ts?raw';
 import {
   parameterAnnotationSites,
   parameterAnnotationDiagnostics,
@@ -14,7 +13,6 @@ import {
 
 const schemaFile = 'file:///workspace/.__code3d-param-schema.ts';
 const valueFile = 'file:///workspace/.__code3d-annotation-value.ts';
-const toolingFile = 'file:///node_modules/@code3d/core/bld/tooling/index.d.ts';
 const valuePrefix =
   "import type {ToolParameterConfig} from './.__code3d-param-schema.js';\nconst config: ToolParameterConfig = (";
 
@@ -32,11 +30,9 @@ export class AnnotationLanguageService {
     const readFile = (name: string): string | undefined =>
       name === schemaFile
         ? configTypes
-        : name === toolingFile
-          ? coreToolingTypes
-          : name === valueFile
-            ? this.source
-            : host.readFile?.(name);
+        : name === valueFile
+          ? this.source
+          : host.readFile?.(name);
     this.service = ts.createLanguageService({
       getCompilationSettings: () => ({
         ...host.getCompilationSettings(),

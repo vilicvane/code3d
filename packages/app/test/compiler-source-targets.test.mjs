@@ -1,29 +1,52 @@
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
 import {createAppTestServer} from './vite-test-server.mjs';
-import {replicad} from '@code3d/core/replicad';
-import {
-  clearKernelOperationCache,
-  kernelOperationCacheStats,
-} from '../../core/bld/library/kernel-cache.js';
+import {createTestProjectCompiler} from './project-test-files.mjs';
 
 let compileProject;
 let bundledExamples;
 let server;
+let compiler;
+let replicad;
+let clearKernelOperationCache;
+let kernelOperationCacheStats;
 
 before(async () => {
   server = await createAppTestServer();
-  ({compileProject} = await server.ssrLoadModule('/src/model/compiler.ts'));
+  compiler = await createTestProjectCompiler(server);
+  compileProject = compiler.compile.bind(compiler);
+  await compileProject(
+    {
+      files: [
+        {
+          path: '/model.ts',
+          source: 'import {box} from "@code3d/core"; box(1, 1, 1);',
+        },
+      ],
+    },
+    '/model.ts',
+  );
+  // Observe the project's instance, never a second host core/kernel.
+  const replicadModules = [...compiler.runtime.modules].filter(([path]) =>
+    path.endsWith('/replicad/dist/replicad.js'),
+  );
+  assert.equal(replicadModules.length, 1);
+  replicad = replicadModules[0][1];
+  ({clearKernelOperationCache, kernelOperationCacheStats} =
+    compiler.runtime.modules.get(
+      '/node_modules/@code3d/core/bld/library/kernel-cache.js',
+    ));
   ({bundledExamples} = await server.ssrLoadModule(
     '/src/project/bundled-examples.ts',
   ));
 });
 
 after(async () => {
+  compiler?.dispose();
   await server?.close();
 });
 
-test('editing a plate fillet does not rebuild an unchanged screw across compiles', t => {
+test('editing a plate fillet does not rebuild an unchanged screw across compiles', async t => {
   clearKernelOperationCache();
   const loftWith = replicad.Sketch.prototype.loftWith;
   const lofts = t.mock.method(
@@ -47,7 +70,7 @@ test('editing a plate fillet does not rebuild an unchanged screw across compiles
   try {
     for (const radius of [2, 2.1, 2]) {
       const before = kernelOperationCacheStats();
-      const module = compileProject(
+      const module = await compileProject(
         {files: [{path: '/model.ts', source: source(radius)}]},
         '/model.ts',
       );
@@ -68,7 +91,7 @@ test('editing a plate fillet does not rebuild an unchanged screw across compiles
   }
 });
 
-test('retains topology values at bindings, aliases, and collection results', () => {
+test('retains topology values at bindings, aliases, and collection results', async () => {
   const source = [
     'import {box, rectangle} from "@code3d/core";',
     'const plate = box(50, 4, 30);',
@@ -77,7 +100,7 @@ test('retains topology values at bindings, aliases, and collection results', () 
     'const subset = [screwPoints[0], screwPoints[2]];',
     'const repeated = [plate, plate];',
   ].join('\n');
-  const module = compileProject(
+  const module = await compileProject(
     {files: [{path: 'model.ts', source}]},
     'model.ts',
   );
@@ -115,9 +138,9 @@ test('retains topology values at bindings, aliases, and collection results', () 
   assert.equal(binding('repeated').nodeIds.length, 2);
 });
 
-test('represents an offset call with its constraint target', () => {
+test('represents an offset call with its constraint target', async () => {
   const source = sharedOffsetSource();
-  const module = compileProject(
+  const module = await compileProject(
     {files: [{path: 'model.ts', source}]},
     'model.ts',
   );
@@ -135,7 +158,7 @@ test('represents an offset call with its constraint target', () => {
   });
 });
 
-test('derives parameter semantics from the call rather than variable annotations', () => {
+test('derives parameter semantics from the call rather than variable annotations', async () => {
   const source = [
     "import {box} from '@code3d/core';",
     '/**',
@@ -152,7 +175,7 @@ test('derives parameter semantics from the call rather than variable annotations
     'function plate(width: number) {return box(width, 10, 20);}',
     'plate(size * 2);',
   ].join('\n');
-  const module = compileProject(
+  const module = await compileProject(
     {files: [{path: 'model.ts', source}]},
     'model.ts',
   );
@@ -187,9 +210,9 @@ test('derives parameter semantics from the call rather than variable annotations
   ]);
 });
 
-test('retains shared-parameter peers in a group input context', () => {
+test('retains shared-parameter peers in a group input context', async () => {
   const source = sharedOffsetSource();
-  const module = compileProject(
+  const module = await compileProject(
     {files: [{path: 'model.ts', source}]},
     'model.ts',
   );
@@ -230,7 +253,7 @@ test('retains shared-parameter peers in a group input context', () => {
   );
 });
 
-test('evaluates a user-defined Replicad primitive', () => {
+test('evaluates a user-defined Replicad primitive', async () => {
   const source = [
     'import {definePrimitive, replicad} from "@code3d/core/replicad";',
     '/** @code3d.param radius {kind: "length"} */',
@@ -239,7 +262,7 @@ test('evaluates a user-defined Replicad primitive', () => {
     ');',
     'export const model = cylinder(2);',
   ].join('\n');
-  const module = compileProject(
+  const module = await compileProject(
     {files: [{path: 'model.ts', source}]},
     'model.ts',
   );
@@ -259,9 +282,9 @@ test('evaluates a user-defined Replicad primitive', () => {
   assert.equal(output.evaluations[0].parameters[0]?.argument, 'radius');
 });
 
-test('compiles the standalone custom primitive example with direct annotations and a default argument', () => {
+test('compiles the standalone custom primitive example with direct annotations and a default argument', async () => {
   const rootPath = '/examples/custom-primitives.ts';
-  const module = compileProject({files: bundledExamples.files}, rootPath);
+  const module = await compileProject({files: bundledExamples.files}, rootPath);
   assert.equal(module.diagnostic, undefined);
   assert.ok(module.exports.has('customPrimitivesExample'));
   const source = bundledExamples.files.find(
@@ -301,9 +324,9 @@ test('compiles the standalone custom primitive example with direct annotations a
   }
 });
 
-test('compiles one coil in the bundled primitives showcase without a separate coil example', () => {
+test('compiles one coil in the bundled primitives showcase without a separate coil example', async () => {
   const rootPath = '/examples/primitives.ts';
-  const module = compileProject({files: bundledExamples.files}, rootPath);
+  const module = await compileProject({files: bundledExamples.files}, rootPath);
   assert.equal(module.diagnostic, undefined);
   assert.ok(module.exports.has('primitivesExample'));
   assert.ok(
@@ -330,9 +353,9 @@ test('compiles one coil in the bundled primitives showcase without a separate co
   assert.ok(model.mesh.triangles.length > 0);
 });
 
-test('compiles the core tube example with its own operation and editable dimensions', () => {
+test('compiles the core tube example with its own operation and editable dimensions', async () => {
   const rootPath = '/examples/primitives.ts';
-  const module = compileProject({files: bundledExamples.files}, rootPath);
+  const module = await compileProject({files: bundledExamples.files}, rootPath);
   assert.equal(module.diagnostic, undefined);
   const source = bundledExamples.files.find(
     file => file.path === rootPath,

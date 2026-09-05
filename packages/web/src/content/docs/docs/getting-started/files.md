@@ -36,6 +36,23 @@ return the current tab to browser persistence.
 Local folders require a browser with File System Access support and a secure
 context. Browser storage remains available when folder access is unsupported.
 
+## Modeling packages
+
+You can start without installing packages. When the root `package.json` does
+not declare `@code3d/core` (or there is no `package.json`), the App provides
+built-in `@code3d/core` and `@code3d/screws`, with matching editor types.
+This does not install packages or write dependency metadata into your folder.
+
+Declaring `@code3d/core` in `dependencies`, `devDependencies`, `peerDependencies`
+or `optionalDependencies` switches the complete modeling runtime to your
+project's installed packages. Install `@code3d/screws` too if your model imports
+it. Missing declared packages produce an error; the App does not silently use
+its built-in copies. Choose **Reload folder** after external dependency changes.
+
+Other browser-compatible npm packages resolve from the project's `node_modules`
+in either case. Running the same source directly in Node requires installing
+the project dependencies; Node does not have the App's built-in package view.
+
 ## The examples directory
 
 `/examples` is managed by Code3D. **Reset examples** restores it, and a
@@ -56,5 +73,5 @@ npm run dev
 Open the local URL shown in the terminal. The repository builds the modeling
 packages before starting the App.
 
-Third-party package imports in App are not yet generally available.
+The App is a browser runtime, not a general Node.js environment.
 See [current limitations](../../reference/limitations/).

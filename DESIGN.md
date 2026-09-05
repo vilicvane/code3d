@@ -4,7 +4,8 @@
 
 - 使用完整的 JavaScript/TypeScript 自由构建和组合模型。
 - code3d 模型项目是普通的 Node/TypeScript 项目，自行管理 `package.json`、
-  lockfile 和 `node_modules`，也自行安装 `@code3d/core`。
+  lockfile 和 `node_modules`。Studio 在项目未声明 `@code3d/core` 时提供完整内置
+  core/screws，支持零安装开始建模；声明 core 后全部由项目自己的依赖接管。
 - 同一份项目源码遵循标准 Node ESM/TypeScript 规则，既可由 Studio 加载，也可
   在受支持的 Node 环境中直接执行。
 - 关注模型对象本身，而不是它的构建过程。
@@ -25,7 +26,8 @@
 
 - 不把构建步骤、历史记录或特征树作为核心抽象。
 - 不为方便 GUI 同步而限制 JavaScript/TypeScript 的表达能力。
-- 不用编辑器注入的虚构模块、声明副本或宿主 fallback 取代项目实际安装的依赖。
+- 不用虚构模块或声明副本代替真实包产物。项目已声明 core 时，不用内置包掩盖
+  缺失或不兼容的依赖；内置模式与项目模式各自保持一致的类型和运行时实例。
 - 不要求 GUI 能反向编辑任意 JavaScript/TypeScript 代码。
 - 不用 GUI 取代代码，也不复刻完整的传统 CAD 工作流。
 - 不为维持一套平行的 GUI 编辑状态投入复杂的双向同步机制。

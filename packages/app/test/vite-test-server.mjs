@@ -13,9 +13,13 @@ export async function createAppTestServer() {
       cacheDir,
       appType: 'custom',
       logLevel: 'error',
+      // These loaders execute SSR modules only; do not launch a client crawl
+      // that can still be writing its prebundle while close removes the cache.
+      optimizeDeps: {noDiscovery: true, include: []},
       server: {middlewareMode: true, hmr: false, ws: false},
     });
     return {
+      environments: server.environments,
       ssrLoadModule: server.ssrLoadModule.bind(server),
       async close() {
         try {

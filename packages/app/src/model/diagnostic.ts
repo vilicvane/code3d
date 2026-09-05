@@ -1,7 +1,4 @@
-import {
-  describeOpenCascadeException,
-  type SourceRef,
-} from '@code3d/core/tooling';
+import type {SourceRef} from '@code3d/core/tooling';
 
 export type ModelDiagnosticKind =
   'syntax' | 'module' | 'evaluation' | 'project';
@@ -40,11 +37,12 @@ export function createModelDiagnostic(
 export function diagnosticFromError(
   error: unknown,
   kind: ModelDiagnosticKind = 'evaluation',
+  describeNativeError?: (error: unknown) => string | undefined,
 ): ModelDiagnostic {
   if (error instanceof ModelDiagnosticError) return error.diagnostic;
   return createModelDiagnostic(
     kind,
-    describeOpenCascadeException(error) ??
+    describeNativeError?.(error) ??
       (error instanceof Error ? error.message : String(error)),
   );
 }
@@ -53,8 +51,9 @@ export function locateModelError(
   error: unknown,
   sourceRef: SourceRef,
   kind: ModelDiagnosticKind = 'evaluation',
+  describeNativeError?: (error: unknown) => string | undefined,
 ): ModelDiagnosticError {
-  const diagnostic = diagnosticFromError(error, kind);
+  const diagnostic = diagnosticFromError(error, kind, describeNativeError);
   return new ModelDiagnosticError(
     diagnostic.sourceRef ? diagnostic : {...diagnostic, sourceRef},
   );
