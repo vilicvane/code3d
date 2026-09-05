@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 VERSION = 2
+PRIMARY_APP_PORT = 3133
 STATE_RELATIVE_PATH = Path(".agents/worktree-state.json")
 ACTIVE_QUEUE_STATES = {"waiting", "claimed", "merging", "testing"}
 
@@ -376,7 +377,9 @@ def command_reserve_port(args: argparse.Namespace, repo: Repository) -> None:
             (
                 candidate
                 for candidate in range(args.start, args.end + 1)
-                if candidate not in reserved and port_is_free(candidate)
+                if candidate != PRIMARY_APP_PORT
+                and candidate not in reserved
+                and port_is_free(candidate)
             ),
             None,
         )
@@ -394,6 +397,10 @@ def command_reserve_port(args: argparse.Namespace, repo: Repository) -> None:
 
 
 def command_server_started(args: argparse.Namespace, repo: Repository) -> None:
+    if args.port == PRIMARY_APP_PORT:
+        raise CoordinationError(
+            f"port {PRIMARY_APP_PORT} is reserved for the primary worktree"
+        )
     identity = agent_id(args)
     with locked_state(repo, write=True) as state:
         agent = require_task(state, identity, repo)

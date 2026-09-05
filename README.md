@@ -55,6 +55,12 @@ npm install
 npm run dev
 ```
 
+The App uses [localhost:3133](http://localhost:3133) (`0xc3d`) by default.
+This port is reserved for the primary worktree. Linked development worktrees
+must [reserve a separate port](.agents/skills/worktree-development/SKILL.md#独立开发服务器)
+and pass it explicitly, for example `npm run dev -- --port 5174`.
+The server fails if its selected port is already in use.
+
 ## Project status
 
 Code3D is currently Prototype 01. APIs and project behavior are still evolving.
