@@ -37,7 +37,7 @@
 - 相对位置由语义不可变的 `relate()` copy 携带，并在组合或渲染边界求解。
 - 平移工具编辑现有 `offset(x, y, z)`；缺少 offset 时在约束表达式上创建它。
 - 共享参数的其他受影响对象会同步预览并高亮；`Esc` 可取消交互。
-- JSDoc 可以提供参数标签、描述、kind、unit、范围和步长。
+- 可调用 API 的 `@code3d.param` 提供工具参数的 kind、标签和静态约束；变量本身不读取 annotation 元数据。
 - 模型函数可用重复的 `@code3d.arguments [...]` 声明设计时调用参数；GUI 可在真实调用与这些候选上下文之间切换，注解内的值也会按对应函数签名提供 TypeScript 补全。
 - Monaco 会高亮已识别的 `@code3d.*` JSDoc 标签，非法参数候选会得到源码定位诊断。
 - 渲染器只消费模型对象，不依赖对象的构建过程。
@@ -46,14 +46,6 @@
 示例中的共享参数：
 
 ```ts
-/**
- * @code3d.label 支柱间距
- * @code3d.kind length
- * @code3d.unit mm
- * @code3d.min 18
- * @code3d.max 36
- * @code3d.step 0.5
- */
 const postOffset = 27;
 const plate = box(38, 6, 26);
 
@@ -62,7 +54,7 @@ const post = cylinder(4.5, 25).relate(part =>
 );
 ```
 
-`unit` 只影响 UI 提示，不进行运行时换算。
+工具仍会追溯并修改共享变量的数值；步长由当前工具参数的语义决定，不从变量注释推断单位或范围。
 
 圆角和倒角都有明确的单参数重载；第二参数是可选的非空边 ID 过滤：
 

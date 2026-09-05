@@ -1812,10 +1812,6 @@ function positionBindings(
       value: target.value,
       sensitivity,
       parameterKind: target.kind,
-      unit: target.unit,
-      min: target.min,
-      max: target.max,
-      step: target.step,
       frame: constraint.offsetFrame,
     };
     const axisCandidates = candidates.get(axis) ?? [];

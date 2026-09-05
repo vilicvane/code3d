@@ -978,9 +978,7 @@ kbd {
 
 .contextual-tool-parameter-control {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
+  grid-template-columns: minmax(0, 1fr);
   padding: 0 8px;
   border: 1px solid #34382e;
   border-radius: 3px;
@@ -1016,13 +1014,6 @@ kbd {
 
 .contextual-tool-parameter-control:has(input[aria-invalid='true']) {
   border-color: #e8664d;
-}
-
-.contextual-tool-parameter-control span {
-  color: #777d71;
-  font:
-    8px/1 'IBM Plex Mono',
-    monospace;
 }
 
 .contextual-tool-field output {

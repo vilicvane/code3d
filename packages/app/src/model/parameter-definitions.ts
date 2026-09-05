@@ -1,19 +1,12 @@
 import ts from '@typescript/typescript6';
-import type {ParameterKind, SourceRef} from '@code3d/core/tooling';
+import type {SourceRef} from '@code3d/core/tooling';
 import {normalizeProjectPath} from '../project/project';
-import {code3dAnnotations} from './annotations';
 import type {ToolSignatureSchema} from './tool-schema';
 
 export type SourceParameterTarget = Readonly<{
   sourceRef: SourceRef;
   value: number;
   label: string;
-  description?: string;
-  kind?: ParameterKind;
-  unit?: string;
-  min?: number;
-  max?: number;
-  step?: number;
 }>;
 
 export type ParameterDefinitionMap = ReadonlyMap<string, SourceParameterTarget>;
@@ -392,7 +385,6 @@ function sourceParameterTarget(
   value: number,
 ): SourceParameterTarget {
   const sourceFile = expression.getSourceFile();
-  const metadata = parameterMetadata(declaration);
   return {
     sourceRef: {
       file: normalizeProjectPath(sourceFile.fileName),
@@ -400,15 +392,7 @@ function sourceParameterTarget(
       end: expression.getEnd(),
     },
     value,
-    label:
-      metadata.label ??
-      humanizeIdentifier(parameterDefinitionName(declaration)),
-    description: metadata.description,
-    kind: metadata.kind,
-    unit: metadata.unit,
-    min: metadata.min,
-    max: metadata.max,
-    step: metadata.step,
+    label: humanizeIdentifier(parameterDefinitionName(declaration)),
   };
 }
 
@@ -426,49 +410,6 @@ function parameterDefinitionName(declaration: ts.Declaration): string {
     if (ts.isNumericLiteral(name)) return name.text;
   }
   return 'parameter';
-}
-
-function parameterMetadata(
-  declaration: ts.Declaration,
-): Partial<SourceParameterTarget> {
-  const sourceFile = declaration.getSourceFile();
-  const owner = variableStatementFor(declaration) ?? declaration;
-  const metadata: {
-    label?: string;
-    description?: string;
-    kind?: ParameterKind;
-    unit?: string;
-    min?: number;
-    max?: number;
-    step?: number;
-  } = {};
-  const annotations = code3dAnnotations(
-    sourceFile.text,
-    owner.getFullStart(),
-    owner.getStart(sourceFile),
-  );
-  for (const {name, value} of annotations) {
-    if (name === 'label' || name === 'description' || name === 'unit') {
-      metadata[name] = value;
-    } else if (name === 'kind' && isParameterKind(value)) {
-      metadata.kind = value;
-    } else if (name === 'min' || name === 'max' || name === 'step') {
-      const numeric = Number(value);
-      if (Number.isFinite(numeric)) metadata[name] = numeric;
-    }
-  }
-  return metadata;
-}
-
-function variableStatementFor(
-  declaration: ts.Declaration,
-): ts.VariableStatement | undefined {
-  if (!ts.isVariableDeclaration(declaration)) return undefined;
-  const list = declaration.parent;
-  return ts.isVariableDeclarationList(list) &&
-    ts.isVariableStatement(list.parent)
-    ? list.parent
-    : undefined;
 }
 
 function numericExpressionValue(node: ts.Node): number | undefined {
@@ -504,10 +445,6 @@ function isValueIdentifier(identifier: ts.Identifier): boolean {
 
 function isSelectionParameter(kind: string): boolean {
   return kind === 'vertex' || kind === 'edge' || kind === 'surface';
-}
-
-function isParameterKind(value: string): value is ParameterKind {
-  return ['length', 'angle', 'ratio', 'count', 'scalar'].includes(value);
 }
 
 function propertyName(name: ts.PropertyName): string | undefined {

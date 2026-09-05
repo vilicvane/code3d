@@ -85,6 +85,58 @@ test('represents an offset call with its constraint target', () => {
   });
 });
 
+test('derives parameter semantics from the call rather than variable annotations', () => {
+  const source = [
+    "import {box} from '@code3d/core';",
+    '/**',
+    ' * @code3d.label Wrong label',
+    ' * @code3d.description Not a tool description.',
+    ' * @code3d.kind angle',
+    ' * @code3d.unit cm',
+    ' * @code3d.min 1000',
+    ' * @code3d.max 1001',
+    ' * @code3d.step 99',
+    ' */',
+    'const size = 40;',
+    "/** @code3d.param width {kind: 'length', label: 'Width', constraints: {min: 1, max: 100}} */",
+    'function plate(width: number) {return box(width, 10, 20);}',
+    'plate(size * 2);',
+  ].join('\n');
+  const module = compileProject(
+    {files: [{path: 'model.ts', source}]},
+    'model.ts',
+  );
+  assert.equal(module.diagnostic, undefined);
+  const call = exactTargets(module, source, 'plate(size * 2)').find(
+    target => target.tool,
+  );
+  assert.ok(call);
+  assert.deepEqual(call.tool.signature.parameters[0].constraints, {
+    min: 1,
+    max: 100,
+  });
+  assert.equal(call.tool.signature.parameters[0].label, 'Width');
+  const usage = call.evaluations[0].parameters.find(
+    parameter => parameter.operation === 'plate',
+  );
+  assert.equal(usage.target.kind, 'length');
+  assert.equal(usage.target.label, 'Size');
+  assert.equal(usage.target.value, 40);
+  assert.equal(usage.value, 80);
+  assert.equal(usage.sensitivity, 2);
+  assert.equal(
+    source.slice(usage.target.sourceRef.start, usage.target.sourceRef.end),
+    '40',
+  );
+  assert.deepEqual(Object.keys(usage.target).sort(), [
+    'id',
+    'kind',
+    'label',
+    'sourceRef',
+    'value',
+  ]);
+});
+
 test('retains shared-parameter peers in a group input context', () => {
   const source = sharedOffsetSource();
   const module = compileProject(
