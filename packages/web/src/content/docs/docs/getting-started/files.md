@@ -79,7 +79,18 @@ group([base, ...posts]);
 The App reads installed package code and declarations for execution and editor
 types. It does not run `npm install` for you. A package working in Node alone
 does not make it browser-compatible; Node built-ins and native addons are not
-available.
+available. Use ordinary npm installations; pnpm and workspace symbolic-link
+layouts have not been validated for browser directory handles.
+
+Dynamic `import()` specifiers must be string literals, such as
+`await import('./bracket.ts')`. For project assets, use
+`new URL('./dimensions.json', import.meta.url)`. Unsupported imports produce a
+source diagnostic.
+
+Source edits reuse the current project's modeling kernel and dependency caches.
+Each distinct compiled source version remains in the browser's module cache
+until its project Worker ends. Reloading or closing the project releases that
+Worker; ordinary edits preserve its expensive geometry caches.
 
 ## The examples directory
 

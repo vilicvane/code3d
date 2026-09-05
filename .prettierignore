@@ -2,3 +2,4 @@ dist/
 .astro/
 package-lock.json
 packages/solver/wasm/
+packages/opencascade/wasm/

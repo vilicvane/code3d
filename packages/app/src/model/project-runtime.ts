@@ -12,6 +12,12 @@ export class ProjectRuntime {
   private nextDependencyBundle = 1;
   private readonly imported = new Map<string, ModuleExports>();
   private readonly pending = new Map<string, Promise<ModuleExports>>();
+  private preparation = Promise.resolve();
+  private readonly initializing = new Map<
+    string,
+    {ready: Promise<void>; complete(): void}
+  >();
+  private readonly failed = new Map<string, unknown>();
   private constructor(
     readonly tooling: typeof CoreTooling,
     readonly replicad: typeof Replicad,
@@ -38,8 +44,8 @@ export class ProjectRuntime {
     const corePath = await resolve('@code3d/core');
     const interopPath = await resolve('@code3d/core/replicad');
     const replicadPath = await resolve('replicad', toolingPath);
-    const loaderPath = await resolve('replicad-opencascadejs', toolingPath);
-    const wasmPath = await resolve('replicad-opencascadejs/wasm', toolingPath);
+    const loaderPath = await resolve('@code3d/opencascade', toolingPath);
+    const wasmPath = await resolve('@code3d/opencascade/wasm', toolingPath);
     const solverLoaderPath = await resolve('@code3d/solver', toolingPath);
     const solverWasmPath = await resolve('@code3d/solver/wasm', toolingPath);
     const entry = [
@@ -112,6 +118,8 @@ export class ProjectRuntime {
     this.formats.clear();
     this.imported.clear();
     this.pending.clear();
+    this.initializing.clear();
+    this.failed.clear();
   }
 
   async loadDependencies(
@@ -131,6 +139,7 @@ export class ProjectRuntime {
       this.imported.get(path) ??
       (this.formats.get(path) === 'esm' ? this.modules.get(path) : undefined);
     if (existing) return existing;
+    if (this.failed.has(path)) throw this.failed.get(path);
     const pending = this.pending.get(path);
     if (pending) return pending;
     const load = this.evaluateDependency(path);
@@ -144,30 +153,90 @@ export class ProjectRuntime {
 
   private async evaluateDependency(path: string): Promise<ModuleExports> {
     const entry = 'export * as entry from ' + JSON.stringify(path) + ';';
-    const discovery = await this.builder.build(entry, {
-      runtimeFiles: this.formats,
-    });
-    const bundle = await this.builder.build(entry, {
-      runtimeFiles: this.formats,
-      captureModules: discovery.formats,
-    });
-    const loaded = await this.evaluator.evaluate(
-      'code3d-project:/dependency-' + this.nextDependencyBundle++ + '.js',
-      bundle.source,
-      {
-        __code3dModules: this.modules,
-        __code3dImport: this.importModule,
-        __code3dRecordModule: (
-          file: string,
-          namespace: ModuleExports,
-          format: 'esm' | 'cjs',
-        ) => {
-          this.modules.set(file, namespace);
-          this.formats.set(file, format);
-        },
-      },
-    );
-    this.imported.set(path, loaded.entry);
-    return loaded.entry;
+    for (;;) {
+      // Reserve a static graph before another build can include it. Execution
+      // stays outside this lock: top-level await may import another graph.
+      const previous = this.preparation;
+      let release!: () => void;
+      this.preparation = new Promise(resolve => {
+        release = resolve;
+      });
+      await previous;
+      let wait: Promise<unknown> | undefined;
+      let evaluation: Promise<ModuleExports> | undefined;
+      try {
+        if (this.failed.has(path)) throw this.failed.get(path);
+        if (this.formats.get(path) === 'esm' && this.modules.has(path))
+          return this.modules.get(path)!;
+        const discovery = await this.builder.build(entry, {
+          runtimeFiles: this.formats,
+        });
+        const blockers = discovery.files.flatMap(file => {
+          if (this.failed.has(file)) throw this.failed.get(file);
+          const loading = this.initializing.get(file);
+          return loading ? [loading.ready] : [];
+        });
+        if (blockers.length) {
+          wait = Promise.all(blockers);
+        } else {
+          const bundle = await this.builder.build(entry, {
+            runtimeFiles: this.formats,
+            captureModules: discovery.formats,
+          });
+          const reserved = bundle.files.filter(file => !this.modules.has(file));
+          for (const file of reserved) {
+            let complete!: () => void;
+            const ready = new Promise<void>(resolve => {
+              complete = resolve;
+            });
+            this.initializing.set(file, {ready, complete});
+          }
+          evaluation = this.evaluator
+            .evaluate(
+              'code3d-project:/dependency-' +
+                this.nextDependencyBundle++ +
+                '.js',
+              bundle.source,
+              {
+                __code3dModules: this.modules,
+                __code3dImport: this.importModule,
+                __code3dRecordModule: (
+                  file: string,
+                  namespace: ModuleExports,
+                  format: 'esm' | 'cjs',
+                ) => {
+                  this.modules.set(file, namespace);
+                  this.formats.set(file, format);
+                  this.initializing.get(file)?.complete();
+                  this.initializing.delete(file);
+                },
+              },
+            )
+            .then(loaded => {
+              const namespace =
+                this.formats.get(path) === 'esm'
+                  ? this.modules.get(path)!
+                  : loaded.entry;
+              this.imported.set(path, namespace);
+              return namespace;
+            })
+            .catch(error => {
+              for (const file of reserved) {
+                if (!this.initializing.has(file)) continue;
+                this.failed.set(file, error);
+                this.initializing.get(file)!.complete();
+                this.initializing.delete(file);
+              }
+              throw error;
+            });
+        }
+      } finally {
+        release();
+      }
+      if (evaluation) return evaluation;
+      // A shared child can complete while its parent awaits this import.
+      // Waiting for the entire parent bundle here would deadlock that case.
+      await wait;
+    }
   }
 }
