@@ -203,8 +203,11 @@ implementation context and historical outcomes, not a competing work queue.
   collections. Their preview emphasizes the returned vertices, edges, or
   surfaces with the owning geometry dimmed as spatial context; topology
   accessor calls use the same dimmed context while editing the selected IDs.
-- Topology preview and selection use fixed screen-space sizes: vertices are
-  5px and edges are 2px in every state. Available references are dim gray,
+- Topology and relation guides use fixed screen-space sizes: vertices are
+  5px; passive line decorations and source highlights are 1px; interactive
+  topology selection guides and highlights are 2px. Direction arrowheads are
+  10px long and 6px wide at every zoom and device pixel ratio. Align source and
+  target heads share that size; the target uses 40% opacity. Available references are dim gray,
   previewed/selected references yellow-green, hovered unselected references
   cyan, and hovered selected references orange. Hover changes color only;
   face fill opacity stays constant and selected and hovered fills do not stack.
@@ -222,6 +225,14 @@ implementation context and historical outcomes, not a competing work queue.
   context from the concrete downstream composition that consumes the
   constrained value. The constrained value remains the relation-edit scope for
   spatial tools; the relation target does not replace downstream context.
+- Constraint expressions preview the current immutable chain prefix on the
+  receiver's inherited relations. Sibling return expressions are only combined
+  in the completed `relate` value. Offsets and rotations after the caret do not
+  affect its preview; pending pivot/axis selections preserve the preceding pose.
+  Stage placement, constraint geometry and spatial tools share one snapshot,
+  while final model geometry and exports remain unchanged. An unsolvable prefix
+  reports a local preview diagnostic without invalidating a solvable final model.
+  See [#44](https://github.com/vilicvane/code3d/issues/44).
 - Model values inside constraint expressions and function parameter bindings
   share the same relation-context matching as named and topology anchors.
   Parameters are observed at function-body entry, including destructured,

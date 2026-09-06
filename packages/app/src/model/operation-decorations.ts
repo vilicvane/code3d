@@ -56,7 +56,6 @@ const modifiedEdgeSelectionAppearance = {
   color: '#ffad66',
   opacity: 0.96,
   depthTest: false,
-  lineWidth: 1,
 } as const;
 
 const decorations: SourceDecorationProvider['decorations'] = ({

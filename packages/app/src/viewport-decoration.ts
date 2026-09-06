@@ -18,7 +18,6 @@ export type ViewportDecorationAppearance = Readonly<{
   emissiveIntensity?: number;
   edgeColor?: string;
   edgeOpacity?: number;
-  lineWidth?: number;
   depthBias?: number;
   depthTest?: boolean;
   shading?: 'lit' | 'unlit';
@@ -58,8 +57,10 @@ type ViewportAnchorDecorationBase = ViewportDecorationBase &
     markerSize: number;
     facing?: 1 | -1;
     direction?: 1 | -1;
-    arrowStyle?: 'solid' | 'outline';
-    arrowOnly?: boolean;
+    /** Draw a single arrow in a line reference's authored direction. */
+    directed?: boolean;
+    /** Existing curve geometry supplies the shaft; this frame is its endpoint. */
+    headOnly?: boolean;
     layer?: 'reference' | 'foreground';
     appearance: ViewportDecorationAppearance;
   }>;
