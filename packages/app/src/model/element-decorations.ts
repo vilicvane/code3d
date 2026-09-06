@@ -68,6 +68,15 @@ function sourceElementReferences(evaluation: SourceTargetEvaluation) {
 export const elementSourceDecoration = {
   id: 'named-element',
   decorations({module, evaluation}) {
+    if (evaluation.constraintId) {
+      const owner = module.objects.get(evaluation.constraintOwnerNodeId ?? '');
+      if (
+        owner?.constraints.some(
+          c => c.id === evaluation.constraintId && c.kind === 'align',
+        )
+      )
+        return [];
+    }
     return sourceElementReferences(evaluation).flatMap(reference => {
       const node = module.objects.get(reference.nodeId);
       return node ? namedElementDecorations(node, reference) : [];
@@ -240,7 +249,7 @@ function dot(left: Vec3, right: Vec3): number {
 
 function elementDisplaySize(node: ModelSnapshotObject): number {
   const mesh = node.mesh;
-  if (!mesh || mesh.vertices.length < 3) return 2;
+  if (!mesh || meshPoints(mesh).length < 3) return 2;
   const {min, max} = meshBounds(mesh);
   const diagonal = Math.hypot(
     max[0] - min[0],
@@ -282,7 +291,7 @@ function axisDisplaySpan(
 }
 
 function meshBounds(mesh: RenderMesh): Readonly<{min: Vec3; max: Vec3}> {
-  const {vertices} = mesh;
+  const vertices = meshPoints(mesh);
   let minX = vertices[0];
   let minY = vertices[1];
   let minZ = vertices[2];
@@ -298,6 +307,14 @@ function meshBounds(mesh: RenderMesh): Readonly<{min: Vec3; max: Vec3}> {
     maxZ = Math.max(maxZ, vertices[index + 2]);
   }
   return {min: [minX, minY, minZ], max: [maxX, maxY, maxZ]};
+}
+
+function meshPoints(mesh: RenderMesh): Float32Array {
+  return mesh.vertices.length >= 3
+    ? mesh.vertices
+    : mesh.edges.length >= 3
+      ? mesh.edges
+      : mesh.topologyVertices;
 }
 
 function boundMesh(element: ElementSnapshot): RenderMesh {
@@ -341,8 +358,8 @@ function boundMesh(element: ElementSnapshot): RenderMesh {
   };
 }
 
-export const boundRelationSourceDecoration: SourceDecorationProvider = {
-  id: 'bound-relation',
+export const relationSourceDecoration: SourceDecorationProvider = {
+  id: 'relation-geometry',
   decorations({module, evaluation}) {
     if (!evaluation.constraintId || !evaluation.constraintOwnerNodeId)
       return [];
@@ -351,10 +368,95 @@ export const boundRelationSourceDecoration: SourceDecorationProvider = {
       candidate => candidate.id === evaluation.constraintId,
     );
     if (!constraint) return [];
+    if (constraint.kind === 'align') {
+      return [
+        {
+          reference: constraint.source,
+          element: constraint.sourceElement,
+          role: 'source' as const,
+        },
+        {
+          reference: constraint.target,
+          element: constraint.targetElement,
+          role: 'target' as const,
+        },
+      ].flatMap(({reference, element, role}) => {
+        const node = module.objects.get(reference.nodeId);
+        if (!node) return [];
+        const decorations = namedElementDecorations(node, element);
+        const topology = element.topology;
+        const geometry =
+          topology && module.objects.get(topology.geometryNodeId);
+        const curve = element.kind === 'line' && element.arrow;
+        const anchors = decorations
+          .filter(d => d.kind === 'anchor')
+          .map(d => {
+            return {
+              ...d,
+              id: `${constraint.id}:${role}:direction`,
+              transform: curve
+                ? {...element.arrow!, scale: [1, 1, 1] as const}
+                : d.transform,
+              direction: curve ? (1 as const) : (element.direction ?? 1),
+              arrowOnly: !!curve,
+              arrowStyle:
+                role === 'source' ? ('solid' as const) : ('outline' as const),
+              markerSize: d.markerSize * (role === 'target' ? 1.25 : 1),
+            };
+          });
+        if (!geometry?.mesh || !topology)
+          return [...decorations.filter(d => d.kind !== 'anchor'), ...anchors];
+        if (topology.kind === 'edge')
+          return [
+            {
+              kind: 'edges' as const,
+              nodeId: node.nodeId,
+              id: `${constraint.id}:${role}:curve`,
+              mesh: geometry.mesh,
+              edgeIds: [topology.id],
+              transform: topology.transform,
+              appearance: {...axisAppearance, lineWidth: 2},
+            },
+            ...anchors,
+          ];
+        if (topology.kind === 'surface') {
+          const groups = geometry.mesh.surfaceGroups.filter(
+            group =>
+              JSON.stringify(group.surfaceId) === JSON.stringify(topology.id),
+          );
+          const triangles = new Uint32Array(
+            groups.flatMap(group => [
+              ...geometry.mesh!.triangles.slice(
+                group.start,
+                group.start + group.count,
+              ),
+            ]),
+          );
+          const mesh = {
+            ...geometry.mesh,
+            triangles,
+            edges: boundaryEdges(geometry.mesh.vertices, triangles),
+            edgeGroups: [],
+          };
+          return [
+            {
+              kind: 'mesh' as const,
+              nodeId: node.nodeId,
+              id: `${constraint.id}:${role}:surface`,
+              mesh,
+              transform: topology.transform,
+              appearance: faceAppearance,
+            },
+            ...anchors,
+          ];
+        }
+        return anchors;
+      });
+    }
     const references = sourceElementReferences(evaluation);
     return [
-      {nodeId: constraint.source.nodeId, bound: constraint.sourceBound},
-      {nodeId: constraint.target.nodeId, bound: constraint.targetBound},
+      {nodeId: constraint.source.nodeId, bound: constraint.sourceElement},
+      {nodeId: constraint.target.nodeId, bound: constraint.targetElement},
     ]
       .filter(
         ({nodeId, bound}) =>

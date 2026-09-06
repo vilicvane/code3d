@@ -145,6 +145,20 @@ facing without changing geometry or reference axes.
 `part.relate(() => part.on(base.up))`, and `base.on(self.up)` in the callback.
 Returned relations must involve self or the original receiver.
 
+`pointOrCurveOrSurface.align(target)` solves geometric position and orientation.
+Same-dimensional references coincide; a lower-dimensional reference lies on the
+whole supporting geometry of the other. Edges use their underlying curves and
+faces their underlying surfaces, ignoring trims and parameter origins. Supported
+types are points, straight lines, circles, ellipses, planes, cylinders, and
+spheres. Select a solid's center, axis, vertex, edge, or surface first.
+
+Curve–curve alignment is directed; `lineReference.reverse()` selects the opposite
+direction. Surface–surface alignment matches normal sense; `faceReference.flip()`
+selects the opposite facing. Neither changes the reference axes or geometry.
+Point membership ignores direction. `align(...).offset(x,y,z)` translates self
+in the target axes after alignment, before explicit rotations; zero preserves
+the relation's free modes. Use point references for additional positioning.
+
 - `constraint.rotate(x, y, z)`: rotate around self's origin.
 - `constraint.pivot(x, y, z).rotate(x, y, z)`: a pivot in self's local frame.
 - `constraint.pivotVertex(id).rotate(x, y, z)`: a vertex belonging to self.

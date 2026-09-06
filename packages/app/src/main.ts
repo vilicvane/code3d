@@ -54,7 +54,7 @@ import {
 } from './model/operation-decorations';
 import {
   elementSourceDecoration,
-  boundRelationSourceDecoration,
+  relationSourceDecoration,
   namedElementDecorations,
 } from './model/element-decorations';
 import type {
@@ -401,7 +401,7 @@ const viewport = new ModelViewport(viewportHost, {
     booleanOperationSourceDecoration,
     edgeModificationSourceDecoration,
     elementSourceDecoration,
-    boundRelationSourceDecoration,
+    relationSourceDecoration,
     originSourceDecoration,
   ],
 });
