@@ -23,8 +23,9 @@
   ],
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "npm run test:run",
-    "test:run": "node --test \"test/*.test.{mjs,ts}\""
+    "test": "npm run test:types && npm run test:run",
+    "test:run": "node --test \"test/*.test.ts\"",
+    "test:types": "node ../../node_modules/typescript/bin/tsc --noEmit -p test/tsconfig.json"
   },
   "dependencies": {
     "replicad-opencascadejs": "1.0.0"

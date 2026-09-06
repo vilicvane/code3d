@@ -1,11 +1,17 @@
+import {
+  defined,
+  createModelSnapshotter,
+  disposeModelObjects,
+  modelGeometry,
+} from './model-test.ts';
+import type {Shape3D, AnyShape} from 'replicad';
+import type {Model} from '@code3d/core';
+
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {definePrimitive, replicad} from '@code3d/core/replicad';
-import {
-  createModelSnapshotter,
-  disposeModelObjects,
-} from '@code3d/core/tooling';
+
 import {
   clearKernelOperationCache,
   kernelOperationCacheStats,
@@ -13,21 +19,21 @@ import {
 
 test('identical primitive output reuses geometry and meshes without skipping the builder', () => {
   clearKernelOperationCache();
-  const outputs = [];
+  const outputs: Shape3D[] = [];
   const cylinder = definePrimitive(() => {
     const shape = replicad.makeCylinder(2, 4);
     outputs.push(shape);
     return shape;
   });
   const first = cylinder();
-  const firstId = first.geometry.id;
+  const firstId = modelGeometry(first).id;
   const firstMesh = createModelSnapshotter()(first).mesh;
   disposeModelObjects([first]);
   const before = kernelOperationCacheStats();
   const repeat = cylinder();
   try {
     assert.equal(outputs.length, 2);
-    assert.equal(repeat.geometry.id, firstId);
+    assert.equal(modelGeometry(repeat).id, firstId);
     assert.deepEqual(createModelSnapshotter()(repeat).mesh, firstMesh);
     assert.equal(kernelOperationCacheStats().misses, before.misses);
     assert.ok(kernelOperationCacheStats().hits > before.hits);
@@ -45,7 +51,7 @@ test('clearing output caches does not dispose a live primitive', () => {
   clearKernelOperationCache();
   const repeat = cylinder();
   try {
-    assert.equal(first.geometry.id, repeat.geometry.id);
+    assert.equal(modelGeometry(first).id, modelGeometry(repeat).id);
     assert.equal(kernelOperationCacheStats().misses, 1);
     const snapshot = createModelSnapshotter();
     assert.deepEqual(snapshot(first).mesh, snapshot(repeat).mesh);
@@ -56,7 +62,7 @@ test('clearing output caches does not dispose a live primitive', () => {
 });
 
 test('an output that fails serialization is released', () => {
-  let shape;
+  let shape: Shape3D;
   const cylinder = definePrimitive(() => {
     shape = replicad.makeCylinder(2, 4);
     shape.serialize = () => {
@@ -69,8 +75,8 @@ test('an output that fails serialization is released', () => {
 });
 
 test('a primitive owns its returned solid and supplies normal model capabilities', () => {
-  let shape;
-  const cylinder = definePrimitive((radius, height = 4) => {
+  let shape: Shape3D;
+  const cylinder = definePrimitive((radius: number, height = 4) => {
     shape = replicad.makeCylinder(radius, height);
     return shape;
   });
@@ -79,7 +85,7 @@ test('a primitive owns its returned solid and supplies normal model capabilities
     const snapshot = createModelSnapshotter()(model);
     assert.equal(snapshot.kind, 'solid');
     assert.equal(snapshot.operation.kind, 'primitive');
-    assert.ok(snapshot.mesh.triangles.length > 0);
+    assert.ok(defined(snapshot.mesh).triangles.length > 0);
     assert.ok(model.up);
     assert.ok(model.axis);
   } finally {
@@ -92,7 +98,7 @@ test('a primitive owns its returned solid and supplies normal model capabilities
 test('repeated arguments still observe closure changes and keep prior models independent', () => {
   let height = 4;
   let calls = 0;
-  const cylinder = definePrimitive(radius => {
+  const cylinder = definePrimitive((radius: number) => {
     calls += 1;
     if (height <= 0) throw new Error('Height must be positive.');
     return replicad.makeCylinder(radius, height);
@@ -104,12 +110,14 @@ test('repeated arguments still observe closure changes and keep prior models ind
   const secondScaled = second.scaled(2);
   try {
     const snapshot = createModelSnapshotter();
-    const maximumZ = model =>
+    const maximumZ = (model: Model) =>
       Math.max(
-        ...snapshot(model).mesh.vertices.filter((_, index) => index % 3 === 2),
+        ...defined(snapshot(model).mesh).vertices.filter(
+          (_, index) => index % 3 === 2,
+        ),
       );
     assert.equal(calls, 2);
-    assert.notEqual(first.geometry.id, second.geometry.id);
+    assert.notEqual(modelGeometry(first).id, modelGeometry(second).id);
     assert.equal(maximumZ(first), 4);
     assert.equal(maximumZ(second), 8);
     assert.equal(maximumZ(firstScaled), 8);
@@ -136,7 +144,9 @@ test('a single-solid Replicad boolean result is normalized and rendered', () => 
   });
   const model = fusedCylinder();
   try {
-    assert.ok(createModelSnapshotter()(model).mesh.triangles.length > 0);
+    assert.ok(
+      defined(createModelSnapshotter()(model).mesh).triangles.length > 0,
+    );
   } finally {
     disposeModelObjects([model]);
     clearKernelOperationCache();
@@ -144,7 +154,7 @@ test('a single-solid Replicad boolean result is normalized and rendered', () => 
 });
 
 test('multiple-solid output is rejected and released by code3d', () => {
-  let aggregate;
+  let aggregate: AnyShape;
   const disjointCylinders = definePrimitive(() => {
     const left = replicad.makeCylinder(1, 2);
     const right = replicad.makeCylinder(1, 2).translate([4, 0, 0]);
@@ -164,7 +174,8 @@ test('multiple-solid output is rejected and released by code3d', () => {
 });
 
 test('an aggregate with a solid and stray lower-dimensional geometry is rejected', () => {
-  let aggregate;
+  let aggregate: AnyShape;
+  // @ts-expect-error A mixed-dimensional compound must also be rejected at runtime.
   const mixedGeometry = definePrimitive(() => {
     const solid = replicad.makeCylinder(1, 2);
     const edge = replicad.makeLine([4, 0, 0], [5, 0, 0]);

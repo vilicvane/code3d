@@ -1,3 +1,12 @@
+import type {EmbindHandle} from '@code3d/opencascade';
+import {
+  defined,
+  createModelSnapshotter,
+  disposeModelObjects,
+  modelGeometry,
+} from './model-test.ts';
+import type {Model} from '@code3d/core';
+
 import assert from 'node:assert/strict';
 import {afterEach, test} from 'node:test';
 import {getOC, measureShapeVolumeProperties} from 'replicad';
@@ -11,11 +20,7 @@ import {
   sphere,
   union,
 } from '../bld/node/index.js';
-import {
-  createModelSnapshotter,
-  disposeModelObjects,
-  sameTopologyId,
-} from '../bld/tooling/index.js';
+import {sameTopologyId} from '../bld/tooling/index.js';
 import {
   clearKernelOperationCache,
   kernelOperationCacheStats,
@@ -24,8 +29,10 @@ import {shapeSubshapes} from '../bld/library/kernel-shapes.js';
 
 afterEach(() => clearKernelOperationCache());
 
-function volume(model) {
-  const properties = measureShapeVolumeProperties(model.geometry.value.shape);
+function volume(model: Model) {
+  const properties = measureShapeVolumeProperties(
+    modelGeometry(model).value.shape.asShape3D(),
+  );
   try {
     return properties.volume;
   } finally {
@@ -33,13 +40,13 @@ function volume(model) {
   }
 }
 
-function closeTo(actual, expected) {
+function closeTo(actual: number, expected: number) {
   assert.ok(Math.abs(actual - expected) < 1e-5, `${actual} != ${expected}`);
 }
 
-function assertSolid(model, expectedShells = 1) {
+function assertSolid(model: Model, expectedShells = 1) {
   const oc = getOC();
-  const shape = model.geometry.value.shape.wrapped;
+  const shape = modelGeometry(model).value.shape.wrapped;
   assert.equal(shape.ShapeType(), oc.TopAbs_ShapeEnum.TopAbs_SOLID);
   const check = new oc.BRepCheck_Analyzer(shape, true, false, false);
   const shells = new oc.TopExp_Explorer(
@@ -71,8 +78,8 @@ test('inward shell creates uniform walls and one or multiple openings without ch
     closeTo(volume(open), 6000 - 28 * 18 * 9);
     closeTo(volume(through), 6000 - 28 * 18 * 10);
     assert.deepEqual(
-      open.geometry.value.localBounds,
-      base.geometry.value.localBounds,
+      modelGeometry(open).value.localBounds,
+      modelGeometry(base).value.localBounds,
     );
     assert.equal(open.surfaces().length, 11);
     assert.equal(through.surfaces().length, 10);
@@ -102,10 +109,10 @@ test('omitted and empty openings form enclosed box and spherical cavities', () =
     assertSolid(hollowBall, 2);
     closeTo(volume(closed), 6000 - 28 * 18 * 8);
     closeTo(volume(hollowBall), (4 * Math.PI * (1000 - 729)) / 3);
-    assert.equal(closed.geometry.id, explicit.geometry.id);
+    assert.equal(modelGeometry(closed).id, modelGeometry(explicit).id);
     assert.deepEqual(
-      closed.geometry.value.localBounds,
-      base.geometry.value.localBounds,
+      modelGeometry(closed).value.localBounds,
+      modelGeometry(base).value.localBounds,
     );
   } finally {
     disposeModelObjects([base, ball, closed, explicit, hollowBall]);
@@ -120,7 +127,7 @@ test('negative thickness offsets outward with rounded joins and preserves the or
     assertSolid(open);
     assertSolid(closed, 2);
     closeTo(volume(closed), 2200 + 60 * Math.PI + (4 * Math.PI) / 3);
-    const bounds = open.geometry.value.localBounds;
+    const bounds = modelGeometry(open).value.localBounds;
     for (const [axis, min, max] of [
       [0, -16, 16],
       [1, -11, 11],
@@ -129,9 +136,10 @@ test('negative thickness offsets outward with rounded joins and preserves the or
       closeTo(bounds[0][axis], min);
       closeTo(bounds[1][axis], max);
     }
-    for (const id of base.geometry.value.topology.surfaces.ids) {
+    for (const id of modelGeometry(base).value.topology.surfaces.ids) {
+      assert.ok(typeof id === 'number');
       assert.ok(
-        closed.geometry.value.topology.surfaces.ids.some(candidate =>
+        modelGeometry(closed).value.topology.surfaces.ids.some(candidate =>
           sameTopologyId(candidate, [1, id]),
         ),
       );
@@ -207,7 +215,7 @@ test('a mixed-profile loft can enclose a cavity even when its open shell produce
     }
     assert.equal(kernelOperationCacheStats().entries, before);
     closeTo(volume(base), originalVolume);
-    assert.ok(createModelSnapshotter()(base).mesh.triangles.length);
+    assert.ok(defined(createModelSnapshotter()(base).mesh).triangles.length);
     const closed = base.shell(2);
     try {
       assertSolid(closed, 2);
@@ -215,8 +223,14 @@ test('a mixed-profile loft can enclose a cavity even when its open shell produce
       assert.ok(volume(closed) < originalVolume);
       // Spline-offset bounding boxes can overestimate the solid. Verify that
       // the actual outer boundary faces survive the cavity subtraction.
-      const outerFaces = shapeSubshapes(base.geometry.value.shape, 'face');
-      const resultFaces = shapeSubshapes(closed.geometry.value.shape, 'face');
+      const outerFaces = shapeSubshapes(
+        modelGeometry(base).value.shape,
+        'face',
+      );
+      const resultFaces = shapeSubshapes(
+        modelGeometry(closed).value.shape,
+        'face',
+      );
       try {
         assert.ok(
           outerFaces.every(outer =>
@@ -243,12 +257,15 @@ test('shell preserves one-to-one topology and caches canonical selections throug
   const rotated = first.rotate(15, 25, 35);
   const moved = rotated.scaled(2);
   try {
-    assert.equal(first.geometry.id, second.geometry.id);
-    assert.notEqual(first.geometry.id, thicker.geometry.id);
-    assert.notEqual(first.geometry.value.shape, second.geometry.value.shape);
-    const topology = first.geometry.value.topology;
-    assert.deepEqual(topology, second.geometry.value.topology);
-    assert.deepEqual(topology, moved.geometry.value.topology);
+    assert.equal(modelGeometry(first).id, modelGeometry(second).id);
+    assert.notEqual(modelGeometry(first).id, modelGeometry(thicker).id);
+    assert.notEqual(
+      modelGeometry(first).value.shape,
+      modelGeometry(second).value.shape,
+    );
+    const topology = modelGeometry(first).value.topology;
+    assert.deepEqual(topology, modelGeometry(second).value.topology);
+    assert.deepEqual(topology, modelGeometry(moved).value.topology);
     for (const id of [1, 2, 3, 4])
       assert.ok(
         topology.surfaces.ids.some(candidate =>
@@ -266,7 +283,7 @@ test('shell preserves one-to-one topology and caches canonical selections throug
     clearKernelOperationCache();
     const replay = base.shell(1, [5, 6]);
     try {
-      assert.deepEqual(replay.geometry.value.topology, topology);
+      assert.deepEqual(modelGeometry(replay).value.topology, topology);
       closeTo(volume(second), 960);
       closeTo(volume(replay), 960);
     } finally {
@@ -357,19 +374,21 @@ test('disconnected boolean results cannot be shelled as one solid', () => {
 
 test('shell releases native builders, analyzers and volume properties on success and failure', t => {
   const oc = getOC();
-  const handles = [];
+  const handles: EmbindHandle[] = [];
   for (const name of [
     'BRepOffsetAPI_MakeThickSolid',
     'BRepOffsetAPI_MakeOffsetShape',
     'BRepCheck_Analyzer',
     'GProp_GProps',
-  ]) {
-    t.mock.method(
+  ] as const) {
+    t.mock.property(
       oc,
       name,
       new Proxy(oc[name], {
         construct(target, args) {
-          const value = Reflect.construct(target, args);
+          const value = Reflect.construct(target, args) as InstanceType<
+            typeof target
+          >;
           handles.push(value);
           return value;
         },
@@ -387,7 +406,9 @@ test('shell releases native builders, analyzers and volume properties on success
     assert.ok(handles.length > 20);
     assert.ok(handles.every(handle => handle.isDeleted()));
     for (const output of outputs)
-      assert.ok(createModelSnapshotter()(output).mesh.triangles.length);
+      assert.ok(
+        defined(createModelSnapshotter()(output).mesh).triangles.length,
+      );
   } finally {
     disposeModelObjects([base, ...outputs]);
   }

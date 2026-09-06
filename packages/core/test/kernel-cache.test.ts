@@ -6,12 +6,14 @@ import {
   kernelOperationCacheStats,
 } from '../bld/library/kernel-cache.js';
 
-const released = [];
-const lifecycle = {
-  retain: value => ({...value, instance: 'retained'}),
-  instantiate: value => ({...value, instance: 'use'}),
-  release: value => released.push(value),
-};
+type Value = {result: number | string; instance: string};
+const released: Value[] = [];
+const lifecycle: import('../bld/library/kernel-cache.js').KernelValueLifecycle<Value> =
+  {
+    retain: value => ({...value, instance: 'retained'}),
+    instantiate: value => ({...value, instance: 'use'}),
+    release: value => released.push(value),
+  };
 
 afterEach(() => {
   clearKernelOperationCache();

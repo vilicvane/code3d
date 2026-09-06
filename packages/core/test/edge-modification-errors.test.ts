@@ -1,10 +1,10 @@
+import {disposeModelObjects, modelGeometry} from './model-test.ts';
 import assert from 'node:assert/strict';
 import {afterEach, test} from 'node:test';
 import {getOC} from 'replicad';
 import {box} from '../bld/node/index.js';
 import {
   describeOpenCascadeException,
-  disposeModelObjects,
   sameTopologyId,
 } from '../bld/tooling/index.js';
 import {
@@ -37,8 +37,8 @@ test('reports an unbuildable chamfer after reusing its cached prefix', () => {
 test('decodes a raw OpenCascade WebAssembly exception', () => {
   const base = box(40, 10, 40);
   const rounded = base.fillet(2, filletEdges);
-  const shape = rounded.geometry.value.shape;
-  const topology = rounded.geometry.value.topology.edges;
+  const shape = modelGeometry(rounded).value.shape;
+  const topology = modelGeometry(rounded).value.topology.edges;
   const edges = shape.edges;
   const edge = edges[topology.ids.findIndex(id => sameTopologyId(id, [1, 10]))];
   const builder = new (getOC().BRepFilletAPI_MakeChamfer)(shape.wrapped);
@@ -72,7 +72,7 @@ function assertChamferFailure() {
       () => rounded.chamfer(2, [[1, 10]]),
       error => {
         assert.equal(
-          error.message,
+          error instanceof Error ? error.message : String(error),
           'Could not construct chamfer with distance 2 on E[1,10].\n' +
             'OpenCascade expanded the selection to 1 tangent contour containing 8 edges. The edge/distance combination may create degenerate, self-intersecting, or otherwise unsupported geometry. Try a slightly different distance or edge selection.',
         );

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import test from 'node:test';
-import initialize from '../wasm/replicad_single.js';
+import initialize, {type TopoDS_Edge} from '@code3d/opencascade';
 
 const oc = await initialize({
   wasmBinary: await readFile(
@@ -42,7 +42,7 @@ test('repeated fillet builders release their working geometry and result', () =>
   const box = new oc.BRepPrimAPI_MakeBox(30, 20, 4);
   const source = box.Shape();
   box.delete();
-  const edges = [];
+  const edges: TopoDS_Edge[] = [];
   const explorer = new oc.TopExp_Explorer(
     source,
     oc.TopAbs_ShapeEnum.TopAbs_EDGE,

@@ -1,14 +1,19 @@
+import {
+  defined,
+  createModelSnapshotter,
+  disposeModelObjects,
+} from './model-test.ts';
+import type {ModelSnapshotObject} from '@code3d/core/tooling';
+
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {box, circle, group, line, point} from '@code3d/core';
 import {
-  createModelSnapshotter,
-  disposeModelObjects,
   modelElementReference,
   modelTopologyReference,
 } from '@code3d/core/tooling';
 
-const colors = snapshot => [
+const colors = (snapshot: ModelSnapshotObject): (string | undefined)[] => [
   snapshot.color,
   ...snapshot.children.flatMap(colors),
 ];
@@ -98,11 +103,11 @@ test('painting a related assembly preserves member identities and exposed topolo
     const [x, y, z] = after.children[1].transform.position;
     assert.ok(Math.hypot(x, y - 6, z) < 1e-8);
     assert.deepEqual(
-      modelElementReference(painted.mount).transform,
-      modelElementReference(assembly.mount).transform,
+      defined(modelElementReference(painted.mount)).transform,
+      defined(modelElementReference(assembly.mount)).transform,
     );
-    assert.equal(modelTopologyReference(painted.part).model, painted);
-    assert.equal(modelTopologyReference(painted.part).geometry, cap);
+    assert.equal(defined(modelTopologyReference(painted.part)).model, painted);
+    assert.equal(defined(modelTopologyReference(painted.part)).geometry, cap);
     assert.deepEqual(
       painted.part.edges().map(edge => edge.id),
       cap.edges().map(edge => edge.id),

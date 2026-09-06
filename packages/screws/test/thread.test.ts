@@ -1,7 +1,11 @@
+import {
+  disposeModelObjects,
+  modelGeometry,
+} from '../../core/test/model-test.ts';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {replicad} from '@code3d/core/replicad';
-import {disposeModelObjects} from '@code3d/core/tooling';
+
 import {helicalThread} from '../bld/library/thread.js';
 import {clearKernelOperationCache} from '../../core/bld/library/kernel-cache.js';
 
@@ -26,13 +30,16 @@ test('the private thread cache keys every normalized geometric input', () => {
     {leftHanded: true},
   ].map(variant => helicalThread({...options, ...variant}));
   try {
-    assert.equal(first.geometry.id, repeat.geometry.id);
+    assert.equal(modelGeometry(first).id, modelGeometry(repeat).id);
     assert.equal(
-      new Set([first, ...variants].map(model => model.geometry.id)).size,
+      new Set([first, ...variants].map(model => modelGeometry(model).id)).size,
       8,
     );
     for (const model of [first, repeat, ...variants]) {
-      assert.ok(replicad.measureVolume(model.geometry.value.shape) > 0);
+      assert.ok(
+        replicad.measureVolume(modelGeometry(model).value.shape.asShape3D()) >
+          0,
+      );
     }
     // Validation runs even if a related valid shape is already cached.
     assert.throws(
