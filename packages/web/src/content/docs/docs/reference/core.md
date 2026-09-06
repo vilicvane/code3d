@@ -113,7 +113,7 @@ Solids, faces, curves, and points provide these operations:
 
 `origin`, `originVertex`, and `originCenter` replace previous origin settings and accumulated
 offsets. Setting the origin leaves geometry and named anchors in place; it
-changes the model's own relation anchor. Rotation moves geometry and named
+changes the default pivot for later explicit rotations. Rotation moves geometry and named
 anchors together, keeping topology IDs. Later origin settings do not undo
 already-applied rotations.
 
@@ -127,24 +127,33 @@ the vertex picker, origin arrows, and rotation rings, see
 
 ## Anchors and relations
 
-Solid primitives expose `center`, `top`, `bottom`, and `axis`. Profiles,
-curves, and other geometry provide elements suited to their own shape.
+Solid primitives expose `center` and `axis`; every model provides directional
+bounds: `up` (+Y), `down` (−Y), `right` (+X), `left` (−X), `front` (+Z),
+and `back` (−Z), in that model's local frame.
 
-Use `selfAnchor.on(targetAnchor)` to constrain geometry. Points coincide,
-lines become collinear, and faces become coplanar with opposing normals.
-Mixed dimensions constrain a point to a line or plane, or a line to a plane.
-Solid and group intrinsic anchors constrain the complete frame.
+`geometry.on(target.up)` only translates. The source may be a model, point,
+edge, or surface; its own finite extent is measured along the target direction.
+Tangential position and orientation are preserved. Targets must be directional
+bounds. Infinite reference lines and planes cannot supply a finite source extent.
 
-Return an array from `relate()` to combine conditions. Default centering and
-orientation choose among valid solutions; they do not force every anchor's
-center to coincide. `.flip()` selects aligned face normals or reverses a line's
-preferred direction. An explicit `.offset(x, y, z)` pins the source anchor
-position in the target frame, even when all three values are zero.
+Return an array from `relate()` to combine positional conditions. Inconsistent
+positions report a conflict. `offset(x, y, z)` pins matching bound centers in
+the target frame, including explicit zero. `bound.flip()` reverses contact
+facing without changing geometry or reference axes.
 
-Line and face anchors describe infinite reference lines and planes, including
-the sampled reference frames of curved topology. They do not require the
-finite boundaries of two shapes to match. Related groups move their assembled
-children as rigid bodies.
+`relate` owns self's placement, allowing `self.on(base.up)`,
+`part.relate(() => part.on(base.up))`, and `base.on(self.up)` in the callback.
+Returned relations must involve self or the original receiver.
+
+- `constraint.rotate(x, y, z)`: rotate around self's origin.
+- `constraint.pivot(x, y, z).rotate(x, y, z)`: a pivot in self's local frame.
+- `constraint.pivotVertex(id).rotate(x, y, z)`: a vertex belonging to self.
+- `constraint.around(axis).rotate(angle)`: a positioned local or external axis.
+
+Angles are degrees; XYZ rotations apply X, then Y, then Z. Pivot/axis selections
+are intermediate values and must be completed with rotate. Rotation follows
+its chain's contact placement; other contacts constrain the final pose. Groups
+move their assembled children as rigid bodies. Standalone geometry is unchanged.
 
 ## Topology
 
@@ -154,7 +163,7 @@ children as rigid bodies.
 These topology references expose readonly `kind` (`vertex`, `edge`, or
 `surface`) and `id` properties. Use `model.edges().map(edge => edge.id)` to
 collect edge IDs for an operation on that model. Plain named anchors such as
-`model.top` do not have these topology properties.
+`model.up` do not have these topology properties.
 
 IDs are model-local. See [topology selection](../../guides/topology/) for
 selection behavior and derived-model identity.

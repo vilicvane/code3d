@@ -1,5 +1,6 @@
 import {
   rotateVector,
+  composeTransforms,
   type ElementSnapshot,
   type ModelSnapshotObject,
   type RenderMesh,
@@ -59,8 +60,9 @@ export function namedElementDecorations(
   element: ElementSnapshot,
 ): readonly ViewportDecoration[] {
   const markerSize = elementDisplaySize(node);
-  const surface =
-    element.kind === 'face' && node.mesh
+  const surface = element.bound
+    ? boundMesh(element)
+    : element.kind === 'face' && node.mesh
       ? faceSurfaceAt(node.mesh, element.transform)
       : undefined;
   const anchorBase = {
@@ -69,6 +71,7 @@ export function namedElementDecorations(
     nodeId: node.nodeId,
     transform: element.transform,
     markerSize,
+    facing: element.bound?.facing ?? element.facing,
   };
   const anchor: ViewportAnchorDecoration =
     element.kind === 'line'
@@ -273,3 +276,56 @@ function meshBounds(mesh: RenderMesh): Readonly<{min: Vec3; max: Vec3}> {
   }
   return {min: [minX, minY, minZ], max: [maxX, maxY, maxZ]};
 }
+
+function boundMesh(element: ElementSnapshot): RenderMesh {
+  const [x, z] = element.bound!.size;
+  const points: Vec3[] = [
+    [-x / 2, 0, -z / 2],
+    [x / 2, 0, -z / 2],
+    [x / 2, 0, z / 2],
+    [-x / 2, 0, z / 2],
+  ];
+  const positions = points.map(
+    position =>
+      composeTransforms(element.transform, {position, quaternion: [0, 0, 0, 1]})
+        .position,
+  );
+  const normal = rotateVector(
+    [0, element.bound!.facing, 0],
+    element.transform.quaternion,
+  );
+  return {
+    vertices: new Float32Array(positions.flat()),
+    normals: new Float32Array(positions.flatMap(() => normal)),
+    triangles: new Uint32Array([0, 2, 1, 0, 3, 2]),
+    edges: new Float32Array(
+      positions.flatMap((point, i) => [...point, ...positions[(i + 1) % 4]]),
+    ),
+    topologyVertices: new Float32Array(),
+    vertexIds: [],
+    surfaceGroups: [],
+    edgeGroups: [],
+  };
+}
+
+export const boundRelationSourceDecoration: SourceDecorationProvider = {
+  id: 'bound-relation',
+  decorations({module, evaluation}) {
+    if (!evaluation.constraintId || !evaluation.constraintOwnerNodeId)
+      return [];
+    const owner = module.objects.get(evaluation.constraintOwnerNodeId);
+    const constraint = owner?.constraints.find(
+      candidate => candidate.id === evaluation.constraintId,
+    );
+    if (!constraint) return [];
+    return [
+      [constraint.source.nodeId, constraint.sourceBound],
+      [constraint.target.nodeId, constraint.targetBound],
+    ].flatMap(([id, bound]) => {
+      const node = module.objects.get(id as string);
+      return node
+        ? namedElementDecorations(node, bound as ElementSnapshot)
+        : [];
+    });
+  },
+};

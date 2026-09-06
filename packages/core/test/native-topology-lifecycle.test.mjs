@@ -184,8 +184,10 @@ for (const failHistory of [false, true]) {
       [10, 16, 0],
       [10, 24, 0],
     ]);
-    const start = rectangle(6, 4).relate(p => p.plane.on(spine.start).flip());
-    const end = rectangle(4, 3).relate(p => p.plane.on(spine.end).flip());
+    const start = rectangle(6, 4).relate(p =>
+      p.on(spine.start.up).offset(0, 0, 0),
+    );
+    const end = rectangle(4, 3).relate(p => p.on(spine.end.up).offset(0, 0, 0));
     const oc = replicad.getOC();
     const handles = [];
     let generatedCalls = 0;

@@ -2,7 +2,7 @@ import {loft, point, rectangle} from '@code3d/core';
 
 const base = rectangle(28, 20);
 const top = rectangle(18, 12).relate(profile =>
-  profile.plane.on(point([0, 32, 0])).flip(),
+  profile.on(point([0, 32, 0]).up),
 );
 const body = loft([base, top]).paint('#d8ff3e');
 

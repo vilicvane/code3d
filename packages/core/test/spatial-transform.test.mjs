@@ -152,15 +152,15 @@ test('rotated curves and faces retain their named and intrinsic relation anchors
     [0, 10, 0],
   );
   const face = circle(2).rotate(90, 0, 0);
-  const pinned = point().relate(self => self.on(face));
+  const pinned = point().relate(self => self.on(face.up));
   const scene = snapshot(group([face, pinned]));
   near(scene.children[1].transform.position, [0, 0, 0]);
   assert.ok(scene.children[1].transform.quaternion.every(Number.isFinite));
   const mount = box(4, 4, 4).origin(2, 0, 0);
-  const marker = point().relate(self => self.on(mount));
+  const marker = point().relate(self => self.on(mount.up));
   near(
     snapshot(group([mount, marker])).children[1].transform.position,
-    [2, 0, 0],
+    [0, 2, 0],
   );
 });
 

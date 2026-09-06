@@ -15,7 +15,7 @@ after(async () => browser?.close());
 const sourceFor =
   expression => `import {loft, point, rectangle} from '@code3d/core';
 const base = rectangle(28, 20);
-const top = rectangle(18, 12).relate(p => p.plane.on(point([0, 32, 0])).flip());
+const top = rectangle(18, 12).relate(p => p.on(point([0, 32, 0]).up));
 const body = loft([base, top]);
 ${expression};`;
 

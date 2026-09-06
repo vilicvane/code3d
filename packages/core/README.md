@@ -23,7 +23,7 @@ contain geometry. Stable topology references can be used as geometric relation a
 properties. For example, `model.edges().map(edge => edge.id)` collects edge IDs
 for a later operation on that model. Their `kind` values are `vertex`, `edge`,
 and `surface`; IDs belong to that model and topology kind. Plain named anchors
-such as `model.top` do not expose these topology properties.
+such as `model.up` do not expose these topology properties.
 `TopologyId` is a number or a flat numeric path. Topology-changing operations
 prefix one-to-one descendants with their one-based input index, so an input's
 `E3` becomes `[1, 3]`, or `[2, 3]` for the second input. New/ambiguous elements
@@ -76,50 +76,84 @@ const assembly = group([redPart, group([box(4, 4, 4)])]).paint('#345678');
 // Both parts in assembly use #345678; redPart still renders red on its own.
 ```
 
-## Geometric relations
+## Bound relations and rotation
 
-`relate(self => constraint | constraints)` solves the returned relations
-together. `on()` constrains geometry according to the anchors:
+`geometry.on(target.up)` translates the source's matching bounding boundary
+onto a directional `Bound`. Targets are `up` (+Y), `down` (−Y), `right` (+X),
+`left` (−X), `front` (+Z), and `back` (−Z), in the target model's local frame.
+Bounds describe the current finite geometry, including solved children of a
+group. They are references owned by the model, not topology surfaces or extra
+box models. Their calculation uses analytic geometry independently of meshing.
 
-| Anchors                           | Hard condition                                       |
-| --------------------------------- | ---------------------------------------------------- |
-| Point / point                     | Coincident points                                    |
-| Point / line or face              | Point lies on the reference line or plane            |
-| Line / line                       | Collinear reference lines                            |
-| Line / face                       | Reference line lies in the plane                     |
-| Face / face                       | Coincident planes with opposing normals              |
-| Either anchor is a complete frame | Coincident complete frames with opposing orientation |
-
-Centers and default orientation select among geometrically valid poses;
-they do not add hard conditions. Face `.flip()` selects aligned normals.
-Line directions are geometrically unoriented; `.flip()` reverses the preferred
-direction. Point anchors do not impose orientation. An explicit
-`.offset(x, y, z)` pins the source anchor position to that point in the target
-anchor's frame, including `.offset(0, 0, 0)`. Repeated offsets add together.
+The source can be a model, vertex, edge, surface, or finite point anchor.
+Only the selected geometry contributes its extent. Its support boundary is
+computed in the target's direction, even when the geometry is tilted. `on`
+never rotates or centers a model. A single contact preserves tangential
+position; multiple contacts solve their translation conditions together and
+report conflicting positions. Mathematical lines and planes without finite
+geometry cannot be sources. Arbitrary models, points, lines, and surfaces
+cannot be targets.
 
 ```ts
 import {box, group} from '@code3d/core';
-
-const first = box(10, 10, 10);
-const second = box(20, 20, 20).relate(self => [
-  self.edge(3).on(first.edge(1)),
-  self.top.on(first.bottom),
+const base = box(10, 10, 10);
+const part = box(20, 20, 20).relate(self => [
+  self.on(base.right),
+  self.on(base.down),
 ]);
-export default group([first, second]);
+export default group([base, part]); // part at [15, -15, 0]
 ```
 
-Here the second box is placed at `[5, -15, 0]`. A line anchor represents its
-infinite reference line, and a face anchor represents its reference plane;
-this does not require finite edges or face boundaries to match. Curved
-topology retains the sampled tangent/normal reference frame rather than
-constraining complete curves or surfaces to coincide.
+An explicit `.offset(x, y, z)` pins the matching bound centers in all three
+coordinates of the target reference frame, including an all-zero offset.
+Repeated offsets add. `bound.flip()` reverses facing and therefore the side
+from which the source touches it, while leaving the reference frame unchanged.
+Surface `flip()` likewise reverses facing metadata; neither operation mirrors
+or rotates geometry. Two flips restore the original facing.
 
-Related objects are solved together at composition, Boolean, and loft
-boundaries. Models without relations provide fixed references. Each group's
-children are solved in its local space, so relating the group moves the
-assembled children as one rigid body. `expose()` rebinds member anchors into
-that local space. The backend is [`@code3d/solver`](../solver/README.md);
-an unsatisfied local solve is reported without claiming proof of infeasibility.
+`relate` always owns the placement. These forms are legal:
+
+```ts
+part.relate(self => self.on(base.up));
+part.relate(() => part.on(base.up));
+part.relate(self => base.on(self.up)); // moves part below base
+```
+
+References to the original receiver are rebound to the new self. Every
+returned relation must involve self or the original receiver. Old model values
+and old references keep their meaning.
+
+Explicit rotation belongs to a particular contact chain:
+
+```ts
+self.on(base.up).rotate(0, 30, 0);
+self.on(base.up).pivot(50, 0, 0).rotate(0, 0, 45);
+self.on(base.up).pivotVertex(3).rotate(0, 0, 45);
+self.on(base.up).around(base.axis).rotate(30);
+```
+
+`pivot` coordinates, `pivotVertex` IDs, and XYZ axes use relate's **self**,
+regardless of which side of `on` contains self. Direct rotation uses self's
+origin. Angles are degrees, applied X, then Y, then Z. Each pivot or axis
+selection lasts for its next rotation; intermediate chains only complete with
+`rotate`. An axis reference includes position and direction; external axes use
+their resolved composition pose. Rotations compose in call order, following
+that chain's contact placement. Other contacts constrain the final pose.
+Explicit orientations on one self must agree. Remaining translations minimize
+changes at the authored contact stages; duplicate stages do not add bias.
+
+Related objects are solved at composition, Boolean, and loft boundaries.
+Standalone views keep the object's own geometry. A group moves its assembled
+children rigidly. `expose()` carries finite references into the group frame.
+Core and App use the same linear translation solver; there is no automatic
+angular solve or extra constraint-solver WASM initialization.
+
+In the App, selecting a directional property shows the target rectangle and
+matched source boundary. `pivot` has translation handles, `pivotVertex` uses
+self's vertex picker, `around` shows the referenced axis, and `rotate` has
+three angle rings or one axis ring. Source edits retain parameter provenance,
+preview/cancel behavior, and undo. See the
+[bent loft example](../app/examples/bound-rotation.ts).
 
 ## Exposed geometry and topology
 
@@ -128,9 +162,8 @@ A solid, face, edge, or vertex model becomes a `Solid`, `Surface`, `Edge`, or
 `Vertex` reference. Existing topology references retain their identity; pure
 point, line, plane, and frame anchors retain their reference-geometry meaning.
 Named members remain available, including on an exposed group frame.
-An exposed face, edge, or vertex uses the same relation frame as its topology
-accessor, independent of a custom model origin. A whole solid retains its model
-frame for complete-frame relations.
+Selected topology contributes its own finite extent to bound positioning; a
+custom model origin does not change that extent.
 
 ```ts
 const plate = box(32, 4, 24);
@@ -160,8 +193,8 @@ Every geometric reference has a local bounding-box `center` point, carried
 through rotation and scaling. `Edge.start`, `.midpoint`, and `.end` sample curve
 parameters 0, 0.5, and 1; the midpoint need not be the bounding-box center or the
 half-length point. These calculated points are anchors, not topology vertices.
-The reference frame used by `edge.on()` or `surface.on()` retains its tangent
-or normal semantics independently of `.center`.
+`edge.on()` and `surface.on()` use finite geometry extents rather than their
+sampled tangent or normal; `.center.on()` uses only the calculated point.
 
 ## Origins and rotation
 
@@ -184,7 +217,7 @@ const part = box(24, 6, 14)
 
 All three setters replace previous origin settings and accumulated offsets. Setting
 an origin leaves geometry in place, preserves the anchor's orientation, and
-changes the model's own relation anchor. Existing named anchors remain where
+changes the default pivot for later explicit rotations. Existing named anchors remain where
 they were. The default origin is the model's intrinsic anchor: zero for solids
 and profiles, the point itself for points, and the start for curves.
 Rotation carries named anchors along with the shape and preserves topology IDs.
@@ -194,8 +227,8 @@ shape's axis-aligned bounds. All geometric models expose this point anchor;
 changing the origin leaves it in place. `model.originCenter().originOffset(1, 0, 0)`
 sets the origin one local X unit beyond that center.
 Changing the origin afterward does not undo geometry already rotated. Existing
-relations retain the source anchor captured when they were authored; relations
-created afterward use the updated anchors. `scaled()` retains its existing
+bound references retain their captured geometry and facing; newly queried
+bounds describe the current model. Origin changes do not shift bound contact. `scaled()` retains its existing
 geometric scaling about coordinate zero, including the origin position.
 Groups expose composition capabilities rather than these geometric operations.
 
@@ -286,8 +319,7 @@ when core is declared or from the built-in package otherwise. This internal
 integration surface evolves with the App during prototyping and does not promise
 API stability. It includes topology source identities, assembly transforms, and
 calculated-anchor frames alongside origin and spatial-operation snapshots. It
-requires installing both OpenCascade and the constraint solver from that same
-package dependency graph.
+requires installing OpenCascade from that same package dependency graph.
 Call `beginModelEvaluation(): void` before each serial source
 evaluation to reset source locations, parameter provenance, and operation
 traces. Geometry, model identity, relations, and kernel caches are unaffected.

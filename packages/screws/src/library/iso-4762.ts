@@ -5,7 +5,7 @@ import {
   regularPrism,
   union,
   type CanonicalElements,
-  type FaceAnchor,
+  type Bound,
   type LineAnchor,
   type SolidModel,
 } from '@code3d/core';
@@ -146,24 +146,24 @@ export type CounterboredHoleOptions = Omit<
 
 export type SocketCapScrewElements = CanonicalElements &
   Readonly<{
-    headTop: FaceAnchor;
-    headBottom: FaceAnchor;
-    shankTop: FaceAnchor;
-    shankBottom: FaceAnchor;
+    headTop: Bound;
+    headBottom: Bound;
+    shankTop: Bound;
+    shankBottom: Bound;
     shankAxis: LineAnchor;
   }>;
 
 export type SocketCapHoleElements = CanonicalElements &
   Readonly<{
-    shaftTop: FaceAnchor;
-    shaftBottom: FaceAnchor;
+    shaftTop: Bound;
+    shaftBottom: Bound;
     shaftAxis: LineAnchor;
   }>;
 
 export type CounterboredSocketCapHoleElements = SocketCapHoleElements &
   Readonly<{
-    counterboreTop: FaceAnchor;
-    counterboreBottom: FaceAnchor;
+    counterboreTop: Bound;
+    counterboreBottom: Bound;
   }>;
 
 export type Screw = SolidModel<SocketCapScrewElements>;
@@ -193,7 +193,7 @@ export function screw(input: ScrewInput, length: number): Screw {
     spec.headDiameter / 2,
     spec.headDiameter / 2 - headChamfer,
     headChamfer,
-  ).relate(top => top.bottom.on(headBarrel.top));
+  ).relate(top => top.on(headBarrel.up));
   const headBlank = union([headBarrel, headTop]);
 
   const socketToolY = spec.hexSocketDepth + 0.2;
@@ -203,7 +203,7 @@ export function screw(input: ScrewInput, length: number): Screw {
     6,
     30,
   ).relate(tool =>
-    tool.center.on(headBlank.top).offset(0, -spec.hexSocketDepth / 2 + 0.1, 0),
+    tool.center.on(headBlank.up).offset(0, -spec.hexSocketDepth / 2 + 0.1, 0),
   );
   const head = cut(headBlank, [socketTool]);
 
@@ -211,7 +211,7 @@ export function screw(input: ScrewInput, length: number): Screw {
     spec.nominalDiameter / 2,
     spec.nominalDiameter / 2 + spec.underHeadRadius,
     spec.underHeadRadius,
-  ).relate(part => part.top.on(head.bottom));
+  ).relate(part => part.on(head.down));
   const bodyLength = length - spec.underHeadRadius;
   const threadedLength = Math.min(bodyLength, threadLength(spec, length));
   const plainLength = bodyLength - threadedLength;
@@ -223,7 +223,7 @@ export function screw(input: ScrewInput, length: number): Screw {
     const shank = cylinder(
       spec.nominalDiameter / 2,
       plainLength + overlap,
-    ).relate(part => part.top.on(previous.bottom).offset(0, -overlap, 0));
+    ).relate(part => part.on(previous.down).offset(0, -overlap, 0));
     parts.push(shank);
     previous = shank;
   }
@@ -238,14 +238,14 @@ export function screw(input: ScrewInput, length: number): Screw {
     minorDiameter,
     rootWidth: (3 / 4) * spec.pitch,
     crestWidth: (1 / 8) * spec.pitch,
-  }).relate(part => part.top.on(previous.bottom).offset(0, -overlap, 0));
+  }).relate(part => part.on(previous.down).offset(0, -overlap, 0));
   parts.push(thread);
 
   return union(parts).expose({
-    headTop: head.top,
-    headBottom: head.bottom,
-    shankTop: transition.top,
-    shankBottom: thread.bottom,
+    headTop: head.up,
+    headBottom: head.down,
+    shankTop: transition.up,
+    shankBottom: thread.down,
     shankAxis: thread.axis,
   });
 }
@@ -295,8 +295,8 @@ export function clearanceHole(
   const counterboreOption = options.counterbore ?? true;
   if (counterboreOption === false) {
     return shaft.expose({
-      shaftTop: shaft.top,
-      shaftBottom: shaft.bottom,
+      shaftTop: shaft.up,
+      shaftBottom: shaft.down,
       shaftAxis: shaft.axis,
     });
   }
@@ -323,17 +323,14 @@ export function clearanceHole(
     counterboreDiameter / 2,
     counterboreDepth + 0.2,
   ).relate(tool =>
-    tool.center
-      .on(shaft.top)
-      .flip()
-      .offset(0, -counterboreDepth / 2 + 0.1, 0),
+    tool.center.on(shaft.up).offset(0, -counterboreDepth / 2 + 0.1, 0),
   );
   return union([shaft, recess]).expose({
-    shaftTop: shaft.top,
-    shaftBottom: shaft.bottom,
+    shaftTop: shaft.up,
+    shaftBottom: shaft.down,
     shaftAxis: shaft.axis,
-    counterboreTop: recess.top,
-    counterboreBottom: recess.bottom,
+    counterboreTop: recess.up,
+    counterboreBottom: recess.down,
   });
 }
 

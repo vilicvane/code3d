@@ -70,9 +70,7 @@ for (const sides of [4, 5]) {
   test(`loft retains both caps and all section edges/vertices for ${sides} sides`, () => {
     const start = regularPolygon(5, sides);
     const location = point([0, 12, 0]);
-    const end = regularPolygon(3, sides).relate(p =>
-      p.plane.on(location).flip(),
-    );
+    const end = regularPolygon(3, sides).relate(p => p.on(location.up));
     const before = createModelSnapshotter()(start).mesh;
     const result = loft([start, end]);
     try {
@@ -119,8 +117,10 @@ test('curved-spine loft recovers cap boundaries from generated topology', () => 
     [10, 16, 0],
     [10, 24, 0],
   ]);
-  const start = rectangle(6, 4).relate(p => p.plane.on(spine.start).flip());
-  const end = rectangle(4, 3).relate(p => p.plane.on(spine.end).flip());
+  const start = rectangle(6, 4).relate(p =>
+    p.on(spine.start.up).offset(0, 0, 0),
+  );
+  const end = rectangle(4, 3).relate(p => p.on(spine.end.up).offset(0, 0, 0));
   const result = loft([start, end], {spine});
   try {
     for (const input of [1, 2]) {
@@ -144,10 +144,8 @@ test('mixed loft sections retire split edges and do not invent middle cap faces'
   const start = circle(5);
   const middleLocation = point([0, 6, 0]);
   const endLocation = point([0, 12, 0]);
-  const middle = regularPolygon(4, 6).relate(p =>
-    p.plane.on(middleLocation).flip(),
-  );
-  const end = rectangle(6, 4).relate(p => p.plane.on(endLocation).flip());
+  const middle = regularPolygon(4, 6).relate(p => p.on(middleLocation.up));
+  const end = rectangle(6, 4).relate(p => p.on(endLocation.up));
   const result = loft([start, middle, end]);
   try {
     assert.deepEqual(result.surface([1, 1]).id, [1, 1]);
@@ -175,7 +173,9 @@ for (const operation of [
 ]) {
   test(`${operation.name || 'cut'} preserves boundary contributions from both inputs`, () => {
     const left = box(10, 10, 10);
-    const right = box(8, 8, 8).relate(p => p.on(left).offset(6, 3, 2));
+    const right = box(8, 8, 8).relate(p =>
+      p.center.on(left.center.up).offset(6, 3, 2),
+    );
     const result = operation([left, right]);
     try {
       const topology = result.geometry.value.topology;
@@ -197,8 +197,12 @@ for (const operation of [
 
 test('n-ary Boolean input paths exclude internal steps and cached prefixes remain reusable', () => {
   const first = box(4, 4, 4);
-  const second = box(3, 3, 3).relate(p => p.on(first).offset(10, 0, 0));
-  const third = box(2, 2, 2).relate(p => p.on(first).offset(20, 0, 0));
+  const second = box(3, 3, 3).relate(p =>
+    p.center.on(first.center.up).offset(10, 0, 0),
+  );
+  const third = box(2, 2, 2).relate(p =>
+    p.center.on(first.center.up).offset(20, 0, 0),
+  );
   const pair = union([first, second]);
   const before = kernelOperationCacheStats();
   const result = union([first, second, third]);
@@ -304,9 +308,7 @@ function assertMeshIds(model) {
 
 test('shell accepts loft cap paths and adds one operation level to retained boundaries', () => {
   const start = rectangle(28, 20);
-  const end = rectangle(18, 12).relate(p =>
-    p.plane.on(point([0, 32, 0])).flip(),
-  );
+  const end = rectangle(18, 12).relate(p => p.on(point([0, 32, 0]).up));
   const body = loft([start, end]);
   const hollow = body.shell(1, [
     [2, 1],
@@ -343,12 +345,8 @@ test('shell accepts loft cap paths and adds one operation level to retained boun
 
 test('ruled loft retains intermediate section edges without creating a cap', () => {
   const start = rectangle(20, 12);
-  const middle = rectangle(14, 10).relate(p =>
-    p.plane.on(point([0, 10, 0])).flip(),
-  );
-  const end = rectangle(10, 6).relate(p =>
-    p.plane.on(point([0, 20, 0])).flip(),
-  );
+  const middle = rectangle(14, 10).relate(p => p.on(point([0, 10, 0]).up));
+  const end = rectangle(10, 6).relate(p => p.on(point([0, 20, 0]).up));
   const body = loft([start, middle, end], {ruled: true});
   try {
     for (const input of [1, 2, 3])

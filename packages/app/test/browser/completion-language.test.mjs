@@ -37,7 +37,7 @@ async function createEditor(t) {
       files: [
         {
           path: '/model.ts',
-          source: "import {box} from '@code3d/core';\nbox(100, 100, 100).top;",
+          source: "import {box} from '@code3d/core';\nbox(100, 100, 100).up;",
         },
       ],
     };

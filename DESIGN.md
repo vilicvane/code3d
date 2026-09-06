@@ -23,6 +23,9 @@
 - 几何模型经 `expose` 成为相应的拓扑引用，已有拓扑引用保留身份；纯参考几何保留 Anchor 语义。拓扑引用支持按维度继续查询，其几何来源与装配归属分别记录，约束作用于外层模型。见 [#27](https://github.com/vilicvane/code3d/issues/27)。
 - 拓扑 ID 按顶点、边、面分别独立：当前操作新增元素使用从 1 开始的数字，一一对应的继承元素使用 `[输入序号, ...原 ID 路径]`；分裂或合并后归属不唯一的元素不继承旧身份。多输入操作保留所有输入的来源，内部计算步骤不进入路径；不改变拓扑的变换与引用保持完整 ID。见 [#39](https://github.com/vilicvane/code3d/issues/39)。
 
+- `on` 只允许平移，左侧为模型或所选有限点/线/面，右侧仅为 up/down/left/right/front/back 方向 bound。源极值边界在目标方向下计算，不自动转动、居中或匹配真实拓扑面。见 [#38](https://github.com/vilicvane/code3d/issues/38)。
+- `relate` 确定接受摆放的 self，与 on 的书写方向分离；原 receiver 引用可重绑定。旋转用独立的 pivot/pivotVertex/around 与 rotate 链显式表达，局部坐标和顶点归属以 self 为准。见 [#36](https://github.com/vilicvane/code3d/issues/36)。
+
 ## Non-goals
 
 - 不把构建步骤、历史记录或特征树作为核心抽象。

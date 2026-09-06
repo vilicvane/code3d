@@ -43,15 +43,15 @@ test(
       const results = [];
       try {
         for (const [sourceAnchor, targetAnchor] of [
-          ['self.edge(3)', 'base.edge(1)'],
-          ['self.surface(2)', 'base.surface(1)'],
-          ['self.vertex(2)', 'base.vertex(1)'],
-          ['self.top', 'base.bottom'],
+          ['self.edge(3)', 'base.left'],
+          ['self.surface(2)', 'base.up'],
+          ['self.vertex(2)', 'base.up'],
+          ['self.up', 'base.down'],
         ]) {
           const source = `import {box, group} from '@code3d/core';
           const base = box(10, 10, 10);
           const part = box(20, 20, 20).relate(self => ${sourceAnchor}.on(${targetAnchor}));
-          const peer = box(3, 3, 3).relate(self => self.bottom.on(base.top).offset(20, 0, 0));
+          const peer = box(3, 3, 3).relate(self => self.down.on(base.up).offset(20, 0, 0));
           export default group([base, part, peer]);`;
           const module = await client.compile(
             {files: [{path: '/main.ts', source}]},
@@ -121,8 +121,8 @@ test(
           const source = `import {box, circle, loft, rectangle} from '@code3d/core';
             const model = (() => {
               const ref = box(100, 100, 100);
-              const start = circle(20).relate(circle => circle.on(ref.surface(4)));
-              const end = rectangle(40, 40).relate(circle => circle.on(ref.surface(6)));
+              const start = circle(20).relate(circle => circle.on(ref.down));
+              const end = rectangle(40, 40).relate(circle => circle.on(ref.up));
               ${compose ? 'return loft([start, end]);' : ''}
             })();`;
           const module = await client.compile(
@@ -131,14 +131,17 @@ test(
           );
           if (module.diagnostic) throw new Error(module.diagnostic.message);
           viewport.renderModule(module);
-          for (const id of [4, 6]) {
-            const callback = `circle => circle.on(ref.surface(${id}))`;
+          for (const id of ['down', 'up']) {
+            const callback = `circle => circle.on(ref.${id})`;
             const start = source.indexOf(callback);
             for (const [site, offset] of [
               ['parameter', 'cir'.length],
               ['receiver', 'circle => cir'.length],
               ['constraint', 'circle => circle.o'.length],
-              ['anchor', callback.indexOf('surface') + 3],
+              [
+                'anchor',
+                callback.indexOf(`ref.${id}`) + `ref.${id}`.length - 1,
+              ],
             ]) {
               viewport.selectBySourceOffset('/main.ts', start + offset);
               const {target, evaluation} = viewport.sourceEvaluation();
@@ -150,14 +153,13 @@ test(
                 anchor: `${compose ? 'loft' : 'uncomposed'} surface(${id}) ${site}`,
                 focusCount: viewport.occurrences.size,
                 contextCount: viewport.contextOccurrences.size,
-                expectedFocusCount: site === 'constraint' ? 2 : 1,
-                expectedContextCount:
-                  (compose ? 3 : 2) - (site === 'constraint' ? 2 : 1),
+                expectedFocusCount: 1,
+                expectedContextCount: (compose ? 3 : 2) - 1,
                 ownerSelected:
                   viewport.getSelected().node.nodeId ===
                   (site === 'anchor'
-                    ? evaluation.selection.inputNodeId
-                    : evaluation.constraintSourceNodeId),
+                    ? evaluation.element.nodeId
+                    : evaluation.constraintOwnerNodeId),
                 correctPlacements: rendered.every(
                   ({node, object, placement}) =>
                     placement === 'composition' &&

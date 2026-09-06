@@ -18,5 +18,5 @@ export const centered = rotated.originCenter().originOffset(0, 2, 0);
 const reset = rotated.origin(0, 0, 0);
 
 // Named anchors follow rotations and remain available for relations.
-const companion = box(5, 10, 5).relate(self => self.bottom.on(rotated.top));
+const companion = box(5, 10, 5).relate(self => self.on(rotated.up));
 export const assembly = group([rotated, companion]);

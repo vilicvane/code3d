@@ -203,7 +203,7 @@ test('uses installed just-range ESM and types with builtin core across cached mo
                 'const base = box(44, 2, 10);',
                 `const bars = range(${count}).map(i =>`,
                 '  box(4, 4 + i * 3, 4).relate(part =>',
-                '    part.bottom.on(base.top).offset((i - 2) * 8, 0, 0),',
+                '    part.down.on(base.up).offset((i - 2) * 8, 0, 0),',
                 '  ),',
                 ');',
                 'export default group([base, ...bars]);',

@@ -97,7 +97,7 @@ test(
       'compiling-model',
       'evaluating-model',
     ]);
-    assert.equal(result.readsAfterFirst, 2);
+    assert.equal(result.readsAfterFirst, 1);
     assert.equal(result.wasmReads.length, result.readsAfterFirst);
     assert.ok(result.wasmReads.every(read => read.phase === 'loading-runtime'));
     assert.equal(result.diagnostic, undefined);

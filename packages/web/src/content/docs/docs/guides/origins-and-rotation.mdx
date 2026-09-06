@@ -8,7 +8,8 @@ import ArrowIcon from '../../../../components/ArrowIcon.astro';
 import {appUrl} from '../../../../lib/site';
 import source from '../../../../../../app/examples/origin-and-rotation.ts?raw';
 
-An origin gives a part a pivot for rotation and an anchor for placement.
+An origin defines the default pivot for explicit rotation. Bound relations use
+the geometry extent for placement.
 Changing it does not move the geometry. `rotate` changes the geometry about
 that pivot; a [relation](../relations/) places the resulting part in a composition.
 
@@ -48,7 +49,7 @@ in the panel. Angles are in degrees, applied around fixed local X, then Y,
 then Z axes. Each ring follows the effective axis of its angle parameter;
 the rings need not line up with the world axes when other angles are nonzero.
 
-Repeated `rotate` calls compose in source order. Named anchors such as `top`
+Repeated `rotate` calls compose in source order. Named references
 rotate with the shape, and topology IDs are preserved. Changing the origin
 afterward does not undo an earlier rotation.
 
@@ -64,12 +65,11 @@ zero, rather than the body's center. Both keep the already-rotated geometry.
 ## Compose with other parts
 
 Inspect `group([rotated, companion])` to see the companion placed against the
-rotated part's `top` anchor. Inspecting the companion by itself uses its local
+rotated part's `up` bound. Inspecting the companion by itself uses its local
 frame, without its assembly placement.
 
-Setting an origin changes the model's own relation anchor, but leaves named
-anchors where they are. A relation already authored keeps the anchors it
-captured; a relation authored afterward uses the updated ones.
+Setting an origin leaves bound contacts and named references in place. For a
+rotation that only affects composition, use a [constraint pivot or axis](../relations/#choose-a-rotation-pivot-or-axis).
 
 ## Finish or cancel a drag
 

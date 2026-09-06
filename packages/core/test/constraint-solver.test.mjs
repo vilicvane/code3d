@@ -1,231 +1,328 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {box, group, line, point} from '@code3d/core';
+import {
+  box,
+  circle,
+  group,
+  line,
+  loft,
+  point,
+  rectangle,
+  regularPolygon,
+  sphere,
+} from '@code3d/core';
 import {
   composeTransforms,
   createModelSnapshotter,
-  disposeModelObjects,
+  modelElementReference,
   rotateVector,
+  rotationAround,
 } from '@code3d/core/tooling';
 
 const snapshot = createModelSnapshotter();
 const identity = [0, 0, 0, 1];
 function near(actual, expected, tolerance = 1e-6) {
-  actual.forEach((value, index) =>
+  actual.forEach((value, i) =>
     assert.ok(
-      Math.abs(value - expected[index]) < tolerance,
+      Math.abs(value - expected[i]) < tolerance,
       `${actual} differs from ${expected}`,
     ),
   );
 }
-function position(model) {
-  return snapshot(model).compositionTransform.position;
+const pose = model => snapshot(model).compositionTransform;
+const position = model => pose(model).position;
+
+for (const [direction, expected] of Object.entries({
+  up: [0, 7, 0],
+  down: [0, -7, 0],
+  left: [-11, 0, 0],
+  right: [11, 0, 0],
+  front: [0, 0, 18],
+  back: [0, 0, -18],
+})) {
+  test(`on ${direction} translates the matching support boundary`, () => {
+    const base = box(20, 10, 30);
+    const placed = box(2, 4, 6).relate(self => self.on(base[direction]));
+    near(position(placed), expected);
+    near(pose(placed).quaternion, identity);
+    near(snapshot(placed).transform.position, [0, 0, 0]);
+  });
 }
 
 for (const scale of [0.01, 1, 100])
   for (const reverse of [false, true]) {
-    test(`combines the reported edge and face relations (scale ${scale}, reverse ${reverse})`, () => {
-      const first = box(10 * scale, 10 * scale, 10 * scale);
-      const second = box(20 * scale, 20 * scale, 20 * scale).relate(self => {
-        const constraints = [
-          self.edge(3).on(first.edge(1)),
-          self.top.on(first.bottom),
+    test(`joint translations are independent of equation order (${scale}, ${reverse})`, () => {
+      const base = box(10 * scale, 10 * scale, 10 * scale);
+      const placed = box(2 * scale, 2 * scale, 2 * scale).relate(self => {
+        const relations = [
+          self.on(base.up),
+          self.on(base.right),
+          self.on(base.front),
         ];
-        return reverse ? constraints.reverse() : constraints;
+        return reverse ? relations.reverse() : relations;
       });
-      const assembly = group([first, second]);
-      try {
-        const pose = snapshot(assembly).children[1].transform;
-        near(pose.position, [5 * scale, -15 * scale, 0], 1e-6 * scale);
-        near(rotateVector([0, 1, 0], pose.quaternion), [0, 1, 0]);
-        near(snapshot(second).transform.position, [0, 0, 0]);
-      } finally {
-        disposeModelObjects([first, second, assembly]);
-      }
+      near(position(placed), [6 * scale, 6 * scale, 6 * scale], 1e-6 * scale);
+      near(pose(placed).quaternion, identity);
     });
   }
 
-test('a single face relation centers and opposing normals remain directed', () => {
+test('a tilted source uses its actual support, preserves orientation and tangential position', () => {
   const base = box(10, 10, 10);
-  const top = box(20, 20, 20).relate(self => self.bottom.on(base.top));
-  const flipped = box(20, 20, 20).relate(self =>
-    self.bottom.on(base.top).flip(),
-  );
-  try {
-    near(position(top), [0, 15, 0]);
-    near(
-      rotateVector([0, 1, 0], snapshot(top).compositionTransform.quaternion),
-      [0, 1, 0],
-    );
-    near(position(flipped), [0, -5, 0]);
-    near(
-      rotateVector(
-        [0, 1, 0],
-        snapshot(flipped).compositionTransform.quaternion,
-      ),
-      [0, -1, 0],
-    );
-  } finally {
-    disposeModelObjects([base, top, flipped]);
-  }
+  const source = box(4, 6, 8).rotate(0, 0, 30);
+  const placed = source.relate(self => self.on(base.up));
+  near(position(placed), [
+    0,
+    5 + 2 * Math.sin(Math.PI / 6) + 3 * Math.cos(Math.PI / 6),
+    0,
+  ]);
+  near(pose(placed).quaternion, identity);
+  const offsetPoint = point([13, -8, 17]).relate(self => self.on(base.up));
+  near(position(offsetPoint), [0, 13, 0]);
 });
 
-test('explicit offset fixes the specified anchor position, including zero offset', () => {
+test('target local direction determines the shared projection frame', () => {
+  const base = box(10, 20, 30).rotate(0, 0, 90);
+  const placed = box(2, 4, 6).relate(self => self.on(base.up));
+  near(position(placed), [-11, 0, 0]);
+  near(pose(placed).quaternion, identity);
+});
+
+test('selected points, edges and surfaces use only their own finite extent', () => {
+  const base = box(10, 10, 10);
+  const source = box(20, 20, 20);
+  const top = source
+    .surfaces()
+    .find(
+      surface => modelElementReference(surface.down).transform.position[1] > 9,
+    );
+  const edge = source
+    .edges()
+    .find(edge => modelElementReference(edge.down).transform.position[1] > 9);
+  const vertex = source
+    .vertices()
+    .find(vertex => modelElementReference(vertex).transform.position[1] > 9);
+  for (const geometry of [top, edge, vertex]) {
+    const placed = source.relate(() => geometry.on(base.up));
+    near(position(placed), [0, -5, 0]);
+  }
+  near(position(source.relate(self => self.on(base.up))), [0, 15, 0]);
+  const sloped = line([-5, -3, 0], [5, 3, 0]).relate(self =>
+    self.edge(1).on(base.up),
+  );
+  near(position(sloped), [0, 8, 0]);
+});
+
+test('offset pins bound centers in the unchanged target frame, including explicit zero', () => {
   const base = box(10, 10, 10);
   const shifted = box(20, 20, 20).relate(self =>
-    self.top.on(base.bottom).offset(5, 0, 7),
+    self.on(base.down).offset(5, 0, 7),
   );
-  const conflict = box(20, 20, 20).relate(self => [
-    self.edge(3).on(base.edge(1)),
-    self.top.on(base.bottom).offset(0, 0, 0),
-  ]);
-  try {
-    // Bottom's local Z points toward world -Z.
-    near(position(shifted), [5, -15, -7]);
-    assert.throws(() => snapshot(conflict), /Could not satisfy/);
-  } finally {
-    disposeModelObjects([base, shifted, conflict]);
-  }
-});
-
-test('accepts redundant relations but rejects distinct conflicting planes', () => {
-  const base = box(10, 10, 10);
-  const duplicate = box(20, 20, 20).relate(self => [
-    self.top.on(base.bottom),
-    self.top.on(base.bottom),
-  ]);
-  const conflict = box(20, 20, 20).relate(self => [
-    self.top.on(base.bottom),
-    self.top.on(base.top),
-  ]);
-  try {
-    near(position(duplicate), [0, -15, 0]);
-    assert.equal(snapshot(duplicate).constraints.length, 2);
-    assert.throws(() => snapshot(conflict), /Could not satisfy/);
-  } finally {
-    disposeModelObjects([base, duplicate, conflict]);
-  }
-});
-
-test('constant self-relations are checked without a singular-matrix failure', () => {
-  const redundant = box(2, 2, 2).relate(self => self.center.on(self.center));
-  const conflicting = box(2, 2, 2).relate(self => self.top.on(self.bottom));
-  try {
-    near(position(redundant), [0, 0, 0]);
-    assert.throws(() => snapshot(conflicting), /Could not satisfy/);
-  } finally {
-    disposeModelObjects([redundant, conflicting]);
-  }
-});
-
-test('centering follows a target moved by another relation in the same solve', () => {
-  const base = box(10, 10, 10);
-  const middle = box(20, 20, 20).relate(self => [
-    self.edge(3).on(base.edge(1)),
-    self.top.on(base.bottom),
-  ]);
-  const last = box(2, 2, 2).relate(self =>
-    self.bottom.on(middle.bottom).flip(),
+  near(position(shifted), [5, -15, -7]);
+  const centered = point([20, 0, 30]).relate(self =>
+    self.on(base.up).offset(0, 0, 0),
   );
-  const assembly = group([last, middle, base]);
-  try {
-    const [lastNode, middleNode] = snapshot(assembly).children;
-    near(middleNode.transform.position, [5, -15, 0]);
-    near(lastNode.transform.position, [5, -24, 0]);
-  } finally {
-    disposeModelObjects([base, middle, last, assembly]);
-  }
-});
-
-test('point constraints determine a rigid rotation collectively', () => {
-  const references = [point([2, 3, 4]), point([2, 5, 4]), point([0, 3, 4])];
-  const sourcePoints = [point(), point([2, 0, 0]), point([0, 2, 0])];
-  const source = box(1, 1, 1).expose({
-    a: sourcePoints[0],
-    b: sourcePoints[1],
-    c: sourcePoints[2],
-  });
-  const related = source.relate(self => [
-    self.a.on(references[0]).flip(),
-    self.b.on(references[1]).flip(),
-    self.c.on(references[2]).flip(),
-  ]);
-  try {
-    const pose = snapshot(related).compositionTransform;
-    near(pose.position, [2, 3, 4]);
-    near(rotateVector([1, 0, 0], pose.quaternion), [0, 1, 0]);
-    near(rotateVector([0, 1, 0], pose.quaternion), [-1, 0, 0]);
-  } finally {
-    disposeModelObjects([...references, ...sourcePoints, source, related]);
-  }
-});
-
-test('point-on-plane and point-on-line retain their geometric freedoms', () => {
-  const base = box(10, 10, 10);
-  const rail = line([3, 5, -10], [3, 5, 10]);
-  const result = point().relate(self => [
-    self.on(base.top),
-    self.on(rail.edge(1)),
-  ]);
-  try {
-    near(position(result), [3, 5, 0]);
-  } finally {
-    disposeModelObjects([base, rail, result]);
-  }
-});
-
-test('line-on-plane uses the line direction, not an aligned plane normal', () => {
-  const base = box(10, 10, 10);
-  const edge = line([-2, 0, 0], [2, 0, 0]).relate(self =>
-    self.edge(1).on(base.top),
+  near(position(centered), [-20, 5, -30]);
+  const flip = box(20, 20, 20).relate(self =>
+    self.on(base.up.flip()).offset(5, 0, 7),
   );
-  try {
-    const pose = snapshot(edge).compositionTransform;
-    near(pose.position, [0, 5, 0]);
-    const direction = rotateVector([1, 0, 0], pose.quaternion);
-    assert.ok(Math.abs(direction[1]) < 1e-7);
-  } finally {
-    disposeModelObjects([base, edge]);
-  }
+  near(position(flip), [5, -5, 7]);
+  near(pose(flip).quaternion, identity);
+  assert.deepEqual(
+    modelElementReference(base.up.flip()).transform,
+    modelElementReference(base.up).transform,
+  );
+  assert.deepEqual(
+    modelElementReference(base.up.flip().flip()),
+    modelElementReference(base.up),
+  );
 });
 
-test('a group carries its solved child placements when moved as a rigid body', () => {
+test('redundancy is accepted and positional conflicts never rotate the model', () => {
   const base = box(10, 10, 10);
-  const child = box(2, 2, 2).relate(self => self.bottom.on(base.top));
-  const inner = group([base, child]);
+  const duplicate = box(2, 2, 2).relate(self => [
+    self.on(base.up),
+    self.on(base.up),
+  ]);
+  near(position(duplicate), [0, 6, 0]);
+  const conflict = box(2, 2, 2).relate(self => [
+    self.on(base.up),
+    self.on(base.down),
+  ]);
+  assert.throws(() => snapshot(conflict), /Conflicting bound positions/);
+  const pinnedConflict = point().relate(self => [
+    self.on(base.up).offset(0, 0, 0),
+    self.on(base.right),
+  ]);
+  assert.throws(() => snapshot(pinnedConflict), /Conflicting bound positions/);
+  near(position(point().relate(self => self.on(self.up))), [0, 0, 0]);
+  assert.throws(
+    () => snapshot(box(2, 2, 2).relate(self => self.on(self.up))),
+    /Conflicting bound positions/,
+  );
+});
+
+test('relate rebinds the original receiver and supports self on either end', () => {
+  const base = box(10, 10, 10),
+    original = box(2, 2, 2);
+  near(position(original.relate(() => original.on(base.up))), [0, 6, 0]);
+  near(position(original.relate(self => base.on(self.up))), [0, -6, 0]);
+  near(position(original.relate(() => base.on(original.up))), [0, -6, 0]);
+  near(position(original), [0, 0, 0]);
+  assert.throws(
+    () => original.relate(() => base.on(box(1, 1, 1).up)),
+    /must involve self/,
+  );
+});
+
+test('current derived bounds and old references have independent immutable meaning', () => {
+  const original = sphere(10);
+  const old = original.up;
+  const derived = original.scaled(2);
+  near(modelElementReference(old).transform.position, [0, 10, 0]);
+  near(modelElementReference(derived.up).transform.position, [0, 20, 0]);
+  const before = modelElementReference(derived.right);
+  snapshot(derived);
+  assert.deepEqual(modelElementReference(derived.right), before);
+});
+
+test('group bounds include solved child placements and stay rigid in a parent composition', () => {
+  const base = box(10, 10, 10);
+  const cap = box(2, 2, 2).relate(self => self.on(base.up));
+  const inner = group([base, cap]);
   const target = point([20, 30, 40]);
-  const moved = inner.relate(self => self.on(target).flip());
-  const outer = group([target, moved]);
-  try {
-    const movedNode = snapshot(outer).children[1];
-    const childNode = movedNode.children[1];
-    near(movedNode.transform.position, [20, 30, 40]);
-    near(childNode.transform.position, [0, 6, 0]);
-    near(
-      composeTransforms(movedNode.transform, childNode.transform).position,
-      [20, 36, 40],
-    );
-    near(snapshot(inner).children[1].transform.position, [0, 6, 0]);
-  } finally {
-    disposeModelObjects([base, child, inner, target, moved, outer]);
-  }
+  const moved = inner.relate(self => self.on(target.up).offset(0, 0, 0));
+  const outer = snapshot(group([target, moved]));
+  near(outer.children[1].transform.position, [20, 35, 40]);
+  near(outer.children[1].children[1].transform.position, [0, 6, 0]);
+  const exposed = moved.expose({mount: cap.up});
+  near(
+    position(box(2, 2, 2).relate(self => self.on(exposed.mount))),
+    [0, 43, 0],
+  );
 });
 
-test('exposed anchors remain in a moved group’s local frame', () => {
-  const base = box(10, 10, 10);
-  const child = box(2, 2, 2).relate(self => self.bottom.on(base.top));
-  const target = point([20, 30, 40]);
-  const moved = group([base, child]).relate(self => self.on(target).flip());
-  const exposed = moved.expose({mount: child.top});
-  const attached = box(2, 2, 2).relate(self => self.bottom.on(exposed.mount));
-  try {
-    near(
-      snapshot(exposed).elements.find(element => element.name === 'mount')
-        .transform.position,
-      [0, 7, 0],
-    );
-    near(position(attached), [20, 38, 40]);
-  } finally {
-    disposeModelObjects([base, child, target, moved, exposed, attached]);
+test('on rejects arbitrary target anchors and infinite source references', () => {
+  const model = box(2, 2, 2);
+  for (const target of [
+    model,
+    model.center,
+    model.axis,
+    model.surface(1),
+    model.vertex(1),
+  ]) {
+    assert.throws(() => model.on(target), /requires a directional bound/);
   }
+  assert.throws(() => model.axis.on(model.up), /no finite geometry/);
+  assert.throws(() => circle(2).plane.on(model.up), /no finite geometry/);
+});
+
+test('pivot rotation preserves the original bent loft and standalone geometry', () => {
+  const start = circle(20);
+  const via = regularPolygon(20, 8).relate(self =>
+    self.on(start.up).pivot(50, 0, 0).rotate(0, 0, 45),
+  );
+  const end = rectangle(40, 40).relate(self =>
+    self.on(start.up).pivot(50, 0, 0).rotate(0, 0, 90),
+  );
+  near(position(via), [50 - 25 * Math.SQRT2, -25 * Math.SQRT2, 0]);
+  near(position(end), [50, -50, 0]);
+  near(snapshot(via).transform.quaternion, identity);
+  assert.ok(snapshot(loft([start, via, end])).mesh.triangles.length > 0);
+});
+
+test('local pivot, pivotVertex, and direct rotate all refer to relate self', () => {
+  const base = box(10, 10, 10);
+  const original = box(2, 2, 2).origin(3, 4, 5).rotate(0, 0, 30);
+  const atOrigin = original.relate(self => self.on(base.up).rotate(0, 45, 0));
+  const explicit = original.relate(self =>
+    self.on(base.up).pivot(0, 0, 0).rotate(0, 45, 0),
+  );
+  near(position(atOrigin), position(explicit));
+  near(pose(atOrigin).quaternion, pose(explicit).quaternion);
+  const self = box(2, 2, 2);
+  const vertex = modelElementReference(self.vertex(1)).transform.position;
+  const a = self.relate(copy =>
+    base.on(copy.up).pivotVertex(1).rotate(0, 0, 90),
+  );
+  const b = self.relate(copy =>
+    base
+      .on(copy.up)
+      .pivot(...vertex)
+      .rotate(0, 0, 90),
+  );
+  near(position(a), position(b));
+  near(pose(a).quaternion, pose(b).quaternion);
+  assert.throws(
+    () => self.relate(copy => copy.on(base.up).pivot(1, 2, 3)),
+    /completed Constraint/,
+  );
+});
+
+test('successive rotations compose and a second contact constrains the final pose', () => {
+  const base = point();
+  const source = circle(2);
+  const placed = source.relate(self =>
+    self
+      .on(base.up)
+      .pivot(5, 0, 0)
+      .rotate(0, 0, 30)
+      .pivot(0, 0, 3)
+      .rotate(20, 0, 0),
+  );
+  const expected = composeTransforms(
+    rotationAround([5, 0, 0], [0, 0, 30]),
+    rotationAround([0, 0, 3], [20, 0, 0]),
+  );
+  near(position(placed), expected.position);
+  near(pose(placed).quaternion, expected.quaternion);
+  const constrained = source.relate(self => [
+    self.on(base.up).pivot(5, 0, 0).rotate(0, 0, 90),
+    self.on(base.right),
+  ]);
+  near(position(constrained), [0, -5, 0]);
+  const conflict = source.relate(self => [
+    self.on(base.up).rotate(0, 0, 30),
+    self.on(base.right).rotate(0, 0, 45),
+  ]);
+  assert.throws(() => snapshot(conflict), /Conflicting explicit rotations/);
+});
+
+test('around resolves local and positioned external axes', () => {
+  const origin = point();
+  const selfAxis = box(2, 2, 2).relate(self =>
+    self.on(origin.up).around(self.axis).rotate(90),
+  );
+  near(rotateVector([1, 0, 0], pose(selfAxis).quaternion), [0, 0, -1]);
+  const axis = box(2, 2, 2).relate(self =>
+    self.center.on(point([10, 20, 30]).up).offset(0, 0, 0),
+  );
+  const rotated = point().relate(self =>
+    self.on(origin.up).around(axis.axis).rotate(90),
+  );
+  near(position(rotated), [-20, 0, 40]);
+  near(rotateVector([1, 0, 0], pose(rotated).quaternion), [0, 0, -1]);
+});
+
+test('compatible rotation chains choose free translation independently of relation order and duplication', () => {
+  const base = point();
+  for (const reverse of [false, true])
+    for (const duplicate of [false, true]) {
+      const placed = point().relate(self => {
+        const a = self.on(base.up).pivot(0, 0, 0).rotate(0, 90, 0);
+        const b = self.on(base.up).pivot(10, 0, 0).rotate(0, 90, 0);
+        const constraints = [a, b, ...(duplicate ? [a] : [])];
+        return reverse ? constraints.reverse() : constraints;
+      });
+      near(position(placed), [5, 0, 5]);
+    }
+});
+
+test('runtime errors distinguish missing bound targets and curved rotation axes', () => {
+  const part = box(2, 2, 2);
+  for (const target of [undefined, null, 3])
+    assert.throws(() => part.on(target), /directional bound/);
+  assert.throws(
+    () => part.on(part.up).around(circle(3).edge(1)),
+    /straight axis/,
+  );
 });

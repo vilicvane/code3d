@@ -1,4 +1,5 @@
 import {identityRigidTransform, type Vec3} from '@code3d/core/tooling';
+import {namedElementDecorations} from './element-decorations';
 import type {
   SourceDecorationProvider,
   ViewportDecoration,
@@ -24,6 +25,20 @@ export const originSourceDecoration: SourceDecorationProvider = {
   id: 'model-origin',
   previewBehavior: 'hide',
   decorations({module, evaluation}) {
+    const relation = evaluation.constraintSpatial;
+    if (relation) {
+      const {spatial, nodeId, kind} = relation;
+      if (kind !== 'around' && !spatial.axisOnly)
+        return [originDecoration(nodeId, spatial.origin)];
+      const node = module.objects.get(nodeId);
+      return node
+        ? namedElementDecorations(node, {
+            name: 'rotation-axis',
+            kind: 'line',
+            transform: {...spatial.frame!, scale: [1, 1, 1]},
+          })
+        : [];
+    }
     return evaluation.nodeIds.flatMap(nodeId => {
       const node = module.objects.get(nodeId);
       return node?.operation.spatial
