@@ -9,6 +9,7 @@ import type {
   ModelOperationInputRole,
   RenderMesh,
   Transform,
+  Vec3,
 } from '@code3d/core/tooling';
 
 export type ViewportDecorationAppearance = Readonly<{
@@ -41,6 +42,10 @@ export type ViewportMeshDecoration = ViewportDecorationBase &
 export type ViewportEdgeDecoration = ViewportDecorationBase &
   Readonly<{
     kind: 'edges';
+    /** Supplement the outline only while this occurrence has no bounds highlight. */
+    visibility?: 'without-object-bounds';
+    /** Show short, screen-capped segments at each endpoint of the mesh edges. */
+    corners?: boolean;
     /** When present, transform is local to each visible occurrence of this node. */
     nodeId?: string;
     mesh: RenderMesh;
@@ -54,7 +59,6 @@ type ViewportAnchorDecorationBase = ViewportDecorationBase &
     kind: 'anchor';
     nodeId: string;
     transform: Transform;
-    markerSize: number;
     facing?: 1 | -1;
     direction?: 1 | -1;
     /** Draw a single arrow in a line reference's authored direction. */
@@ -84,10 +88,21 @@ export type ViewportSurfaceDecoration = ViewportDecorationBase &
     appearance: ViewportDecorationAppearance;
   }>;
 
+export type ViewportBoundsDecoration = ViewportDecorationBase &
+  Readonly<{
+    kind: 'bounds';
+    nodeId: string;
+    /** Exact reference extent; replaces the occurrence's generic selection box. */
+    size: Vec3;
+    transform: Transform;
+    appearance: ViewportDecorationAppearance;
+  }>;
+
 export type ViewportDecoration =
   | ViewportMeshDecoration
   | ViewportEdgeDecoration
   | ViewportSurfaceDecoration
+  | ViewportBoundsDecoration
   | ViewportAnchorDecoration;
 
 export type SourceDecorationContext = Readonly<{

@@ -14,7 +14,6 @@ export function originDecoration(
     id: `${nodeId}:origin`,
     nodeId,
     elementKind: 'point',
-    markerSize: 1,
     layer: 'foreground',
     transform: {...identityRigidTransform, position, scale: [1, 1, 1]},
     appearance: {color: '#d8ff3e', opacity: 1, depthTest: false},

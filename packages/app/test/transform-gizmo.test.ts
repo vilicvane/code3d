@@ -23,6 +23,7 @@ for (const end of ['commit', 'cancel'] as const) {
     scene.add(object);
     const element = Object.assign(new EventTarget(), {
       style: {},
+      clientHeight: 600,
     }) as HTMLElement;
     const events: TransformGizmoEvent[] = [];
     const navigation: boolean[] = [];
@@ -243,6 +244,7 @@ function pointerFixture(t: TestContext) {
   const captured = new Set<number>();
   const element = Object.assign(new EventTarget(), {
     style: {touchAction: 'pan-y'},
+    clientHeight: 600,
     getBoundingClientRect: () => ({left: 0, top: 0, width: 800, height: 600}),
     setPointerCapture: (id: number) => captured.add(id),
     hasPointerCapture: (id: number) => captured.has(id),
@@ -289,3 +291,35 @@ function pointerFixture(t: TestContext) {
   scene.updateMatrixWorld(true);
   return {gizmo, camera, element, send, events, captured};
 }
+
+test('translation and rotation controls keep their pixel scale through zoom and resize', t => {
+  const {gizmo, camera} = pointerFixture(t);
+  const control = gizmo['axes'][0];
+  for (const mode of ['translate', 'rotate'] as const) {
+    control.controls.setMode(mode);
+    for (const height of [240, 960])
+      for (const distance of [10, 100])
+        for (const zoom of [0.5, 2]) {
+          camera.position.set(0, 0, distance);
+          camera.lookAt(0, 0, 0);
+          camera.zoom = zoom;
+          camera.updateProjectionMatrix();
+          gizmo.updateScreenSize(height);
+          control.proxy.parent!.updateMatrixWorld(true);
+          const handle = defined(
+            control.gizmo.gizmo[mode].children.find(
+              object => object.name === 'X',
+            ),
+          );
+          const origin = handle.getWorldPosition(new THREE.Vector3());
+          const scale = handle.getWorldScale(new THREE.Vector3());
+          const end = origin
+            .clone()
+            .add(new THREE.Vector3(scale.x, 0, 0))
+            .project(camera);
+          origin.project(camera);
+          const pixels = ((end.x - origin.x) * height * camera.aspect) / 2;
+          assert.ok(Math.abs(pixels - 100) < 1e-5, `${mode}: ${pixels}`);
+        }
+  }
+});

@@ -105,7 +105,15 @@ export class ModelRenderer {
     this.renderer.render(this.scene, this.camera);
   }
 
-  async captureImage(width: number, height: number): Promise<Blob> {
+  async captureImage(
+    width: number,
+    height: number,
+    beforeRender?: (
+      camera: THREE.Camera,
+      width: number,
+      height: number,
+    ) => void,
+  ): Promise<Blob> {
     const canvas = document.createElement('canvas');
     const renderer = new THREE.WebGLRenderer({
       canvas,
@@ -120,6 +128,7 @@ export class ModelRenderer {
     const camera = this.camera.clone();
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
+    beforeRender?.(camera, width, height);
     renderer.render(this.scene, camera);
 
     const image = await new Promise<Blob | null>(resolve =>

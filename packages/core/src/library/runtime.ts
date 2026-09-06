@@ -151,7 +151,6 @@ export type ConstraintAnchorSnapshot = Readonly<{
 
 export type ConstraintSnapshot = Readonly<{
   id: string;
-  kind: 'on' | 'align';
   source: ConstraintAnchorSnapshot;
   target: ConstraintAnchorSnapshot;
   sourceElement: ElementSnapshot;
@@ -161,7 +160,15 @@ export type ConstraintSnapshot = Readonly<{
   offsetFrame: Transform;
   sourceRefs: readonly SourceRef[];
   parameters: readonly ParameterUsage[];
-}>;
+}> &
+  (
+    | Readonly<{
+        kind: 'on';
+        /** Finite source extent in the contact frame, local to the source node. */
+        sourceBounds: Readonly<{size: Vec3; transform: Transform}>;
+      }>
+    | Readonly<{kind: 'align'}>
+  );
 
 export type ModelOperationKind =
   | 'box'
@@ -2766,6 +2773,11 @@ export class ModelObject<
       },
       sourcePose,
     );
+    const sourceSize: Vec3 = [
+      bounds[1][0] - bounds[0][0],
+      bounds[1][1] - bounds[0][1],
+      bounds[1][2] - bounds[0][2],
+    ];
     for (const action of actions) {
       if ('body' in action)
         offsetFrame = composeTransforms(
@@ -2784,12 +2796,25 @@ export class ModelObject<
       kind: constraint.kind,
       source: anchorSnapshot(source, constraint.source),
       target: anchorSnapshot(target, constraint.target),
+      sourceBounds: {
+        size: sourceSize,
+        transform: toTransform(
+          composeTransforms(sourceFrame, {
+            position: [
+              0,
+              (constraint.target.bound!.facing * sourceSize[1]) / 2,
+              0,
+            ],
+            quaternion: [0, 0, 0, 1],
+          }),
+        ),
+      },
       sourceElement: {
         name: `${constraint.source.name}:bound`,
         kind: 'face',
         transform: toTransform(sourceFrame),
         bound: {
-          size: [bounds[1][0] - bounds[0][0], bounds[1][2] - bounds[0][2]],
+          size: [sourceSize[0], sourceSize[2]],
           facing: constraint.target.bound!.facing === 1 ? -1 : 1,
         },
       },

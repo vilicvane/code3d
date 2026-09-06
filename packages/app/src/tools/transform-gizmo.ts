@@ -12,6 +12,9 @@ import {spatialAxisColors} from '../spatial-axis-colors';
 import {snapNumericValue} from './parameter-policy';
 import type {SourceAnchor} from './tool-system';
 import type {ModelSpatialBinding} from './model-spatial-tool';
+import {worldUnitsPerPixel} from '../rendering/screen-space';
+
+const handleLengthPixels = 100;
 
 export type TransformAxis = 'x' | 'y' | 'z';
 
@@ -93,7 +96,6 @@ export class TransformGizmo {
       // Axis helpers share one pointer owner instead of competing DOM listeners.
       controls.disconnect();
       controls.setSpace('local');
-      controls.setSize(0.72);
       controls.setColors(
         spatialAxisColors.x,
         spatialAxisColors.y,
@@ -207,6 +209,27 @@ export class TransformGizmo {
         new THREE.Quaternion(...binding.frame.quaternion),
       );
       proxy.updateMatrixWorld(true);
+    }
+    this.updateScreenSize();
+  }
+
+  updateScreenSize(viewportHeight = this.domElement.clientHeight): void {
+    if (viewportHeight === 0) return;
+    this.camera.updateWorldMatrix(true, false);
+    for (const {controls, proxy, binding} of this.axes) {
+      if (!binding) continue;
+      // Convert the library's camera-relative size into CSS pixels. These are
+      // the Perspective/Orthographic factors used by TransformControlsGizmo.
+      const projectionScale = this.camera.projectionMatrix.elements[5];
+      const factor =
+        this.camera instanceof THREE.PerspectiveCamera
+          ? proxy.position.distanceTo(this.camera.position) *
+            Math.min(1.9 / projectionScale, 7)
+          : 2 / projectionScale;
+      const size =
+        worldUnitsPerPixel(this.camera, proxy.position, viewportHeight) *
+        handleLengthPixels;
+      controls.setSize((4 * size) / factor);
     }
   }
 
