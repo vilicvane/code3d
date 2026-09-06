@@ -13,6 +13,7 @@ import type {
   ViewportDecoration,
 } from '../viewport-decoration';
 import type {SourceTargetEvaluation} from './compiler';
+import {boundAppearance} from '../rendering/bound-appearance';
 
 const elementAppearance = {
   color: '#d8ff3e',
@@ -42,20 +43,11 @@ const faceAppearance = {
   shading: 'unlit',
 } as const;
 
-const boundColor = '#6fe39a';
 const boundSurfaceAppearance = {
-  color: boundColor,
+  ...boundAppearance,
   opacity: 0.18,
-  edgeColor: boundColor,
-  edgeOpacity: 0.95,
   depthBias: 3,
-  depthTest: false,
   shading: 'unlit',
-} as const;
-const boundAnchorAppearance = {
-  color: boundColor,
-  opacity: 0.95,
-  depthTest: false,
 } as const;
 
 function sourceElementReferences(evaluation: SourceTargetEvaluation) {
@@ -90,7 +82,6 @@ export function namedElementDecorations(
   node: ModelSnapshotObject,
   element: ElementSnapshot,
 ): readonly ViewportDecoration[] {
-  const markerSize = elementDisplaySize(node);
   const surface = element.bound
     ? boundMesh(element)
     : element.kind === 'face' && node.mesh
@@ -101,7 +92,6 @@ export function namedElementDecorations(
     id: `${node.nodeId}:${element.name}`,
     nodeId: node.nodeId,
     transform: element.transform,
-    markerSize,
     facing: element.bound?.facing ?? element.facing,
   };
   const anchor: ViewportAnchorDecoration =
@@ -109,14 +99,14 @@ export function namedElementDecorations(
       ? {
           ...anchorBase,
           elementKind: element.kind,
-          span: axisDisplaySpan(node, element.transform, markerSize),
+          span: axisDisplaySpan(node, element.transform),
           appearance: axisAppearance,
         }
       : {
           ...anchorBase,
           elementKind: element.kind,
           appearance: element.bound
-            ? boundAnchorAppearance
+            ? boundAppearance
             : element.kind === 'face'
               ? faceAppearance
               : elementAppearance,
@@ -130,6 +120,24 @@ export function namedElementDecorations(
             nodeId: node.nodeId,
             mesh: surface,
             appearance: element.bound ? boundSurfaceAppearance : faceAppearance,
+          },
+        ]
+      : []),
+    ...(surface && element.bound
+      ? [
+          {
+            kind: 'edges' as const,
+            id: `${node.nodeId}:${element.name}:corners`,
+            nodeId: node.nodeId,
+            mesh: surface,
+            transform: {
+              position: [0, 0, 0],
+              quaternion: [0, 0, 0, 1],
+              scale: [1, 1, 1],
+            } as const,
+            visibility: 'without-object-bounds' as const,
+            corners: true,
+            appearance: boundAppearance,
           },
         ]
       : []),
@@ -249,47 +257,56 @@ function dot(left: Vec3, right: Vec3): number {
   return left[0] * right[0] + left[1] * right[1] + left[2] * right[2];
 }
 
-function elementDisplaySize(node: ModelSnapshotObject): number {
-  const mesh = node.mesh;
-  if (!mesh || meshPoints(mesh).length < 3) return 2;
-  const {min, max} = meshBounds(mesh);
-  const diagonal = Math.hypot(
-    max[0] - min[0],
-    max[1] - min[1],
-    max[2] - min[2],
-  );
-  return Math.min(8, Math.max(0.8, diagonal * 0.14));
-}
-
 function axisDisplaySpan(
   node: ModelSnapshotObject,
   transform: Transform,
-  markerSize: number,
 ): Readonly<{negative: number; positive: number}> {
-  const mesh = node.mesh;
-  if (!mesh || mesh.vertices.length < 3) {
-    return {negative: markerSize, positive: markerSize};
-  }
   const direction = rotateVector([0, 1, 0], transform.quaternion);
-  let minimum = Number.POSITIVE_INFINITY;
-  let maximum = Number.NEGATIVE_INFINITY;
-  for (let index = 0; index < mesh.vertices.length; index += 3) {
-    const projection = dot(
-      [
-        mesh.vertices[index] - transform.position[0],
-        mesh.vertices[index + 1] - transform.position[1],
-        mesh.vertices[index + 2] - transform.position[2],
-      ],
-      direction,
-    );
-    minimum = Math.min(minimum, projection);
-    maximum = Math.max(maximum, projection);
-  }
-  const overhang = markerSize * 1.5;
-  return {
-    negative: Math.max(0, -minimum) + overhang,
-    positive: Math.max(0, maximum) + overhang,
+  let negative = 0;
+  let positive = 0;
+  const visit = (
+    node: ModelSnapshotObject,
+    toRoot: (point: Vec3) => Vec3,
+  ): void => {
+    if (node.mesh) {
+      const points = meshPoints(node.mesh);
+      for (let index = 0; index < points.length; index += 3) {
+        const point = toRoot([
+          points[index],
+          points[index + 1],
+          points[index + 2],
+        ]);
+        const projection =
+          dot(
+            [
+              point[0] - transform.position[0],
+              point[1] - transform.position[1],
+              point[2] - transform.position[2],
+            ],
+            direction,
+          ) / transform.scale[1];
+        negative = Math.max(negative, -projection);
+        positive = Math.max(positive, projection);
+      }
+    }
+    for (const child of node.children) {
+      const placement = child.compositionTransform;
+      visit(child, point =>
+        toRoot(
+          composeTransforms(placement, {
+            position: [
+              point[0] * placement.scale[0],
+              point[1] * placement.scale[1],
+              point[2] * placement.scale[2],
+            ],
+            quaternion: [0, 0, 0, 1],
+          }).position,
+        ),
+      );
+    }
   };
+  visit(node, point => point);
+  return {negative, positive};
 }
 
 function meshBounds(mesh: RenderMesh): Readonly<{min: Vec3; max: Vec3}> {
@@ -331,19 +348,6 @@ function boundMesh(element: ElementSnapshot): RenderMesh {
     composeTransforms(element.transform, {position, quaternion: [0, 0, 0, 1]})
       .position;
   const positions = points.map(toWorld);
-  const cornerSize = Math.min(x, z) * 0.18;
-  const corners = points.flatMap((point, index) =>
-    [points[(index + 3) % 4], points[(index + 1) % 4]].flatMap<Vec3>(
-      neighbor => [
-        point,
-        [
-          point[0] + Math.sign(neighbor[0] - point[0]) * cornerSize,
-          0,
-          point[2] + Math.sign(neighbor[2] - point[2]) * cornerSize,
-        ],
-      ],
-    ),
-  );
   const normal = rotateVector(
     [0, element.bound!.facing, 0],
     element.transform.quaternion,
@@ -352,7 +356,12 @@ function boundMesh(element: ElementSnapshot): RenderMesh {
     vertices: new Float32Array(positions.flat()),
     normals: new Float32Array(positions.flatMap(() => normal)),
     triangles: new Uint32Array([0, 2, 1, 0, 3, 2]),
-    edges: new Float32Array(corners.flatMap(toWorld)),
+    edges: new Float32Array(
+      positions.flatMap((point, index) => [
+        ...point,
+        ...positions[(index + 1) % 4],
+      ]),
+    ),
     topologyVertices: new Float32Array(),
     vertexIds: [],
     surfaceGroups: [],
@@ -461,19 +470,28 @@ export const relationSourceDecoration: SourceDecorationProvider = {
     }
     const references = sourceElementReferences(evaluation);
     return [
-      {nodeId: constraint.source.nodeId, bound: constraint.sourceElement},
-      {nodeId: constraint.target.nodeId, bound: constraint.targetElement},
-    ]
-      .filter(
-        ({nodeId, bound}) =>
-          !references.some(
-            reference =>
-              reference.nodeId === nodeId && reference.name === bound.name,
-          ),
-      )
-      .flatMap(({nodeId, bound}) => {
-        const node = module.objects.get(nodeId);
-        return node ? namedElementDecorations(node, bound) : [];
-      });
+      {
+        kind: 'bounds' as const,
+        id: `${constraint.id}:source:bounds`,
+        nodeId: constraint.source.nodeId,
+        ...constraint.sourceBounds,
+        appearance: boundAppearance,
+      },
+      ...[
+        {nodeId: constraint.source.nodeId, bound: constraint.sourceElement},
+        {nodeId: constraint.target.nodeId, bound: constraint.targetElement},
+      ]
+        .filter(
+          ({nodeId, bound}) =>
+            !references.some(
+              reference =>
+                reference.nodeId === nodeId && reference.name === bound.name,
+            ),
+        )
+        .flatMap(({nodeId, bound}) => {
+          const node = module.objects.get(nodeId);
+          return node ? namedElementDecorations(node, bound) : [];
+        }),
+    ];
   },
 };

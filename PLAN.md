@@ -79,6 +79,10 @@ implementation context and historical outcomes, not a competing work queue.
   target bound. Selected topology contributes only its own finite extent. It
   never aligns angles or centers. Offset explicitly pins matched bound centers
   in the target frame; bounds can reverse facing without changing that frame.
+  The source preview shows its complete computed box in that frame, with the
+  support face filled; the target shows its directional bound. This exact box
+  replaces the occurrence's generic selection box while the relation is active,
+  and its support face does not add another set of corners.
 - `relate` determines self independently of written source/target roles and
   rebinds the original receiver. Each returned relation must involve self or the
   original receiver. See [#36](https://github.com/vilicvane/code3d/issues/36).
@@ -215,6 +219,15 @@ implementation context and historical outcomes, not a competing work queue.
   and recompilation. Vertex and edge picking uses a six-CSS-pixel radius and
   chooses the closest projected element, independently of zoom and model scale;
   surfaces use ray/triangle intersection.
+- Face normal shafts, axis-end extensions, point/origin dots and crosses,
+  reference rings and coordinate frames use CSS-pixel sizes independently of
+  model extent, occurrence scale, zoom and viewport dimensions. Axis shafts
+  retain their geometric extent, including group children; curve heads stay
+  on their directed endpoints. Translation and rotation controls also retain
+  their pixel scale through viewport resizing. Image capture sizes decorations
+  for its own camera and output viewport. Shared conventions and current size
+  defaults are recorded in the
+  [visualization skill](.agents/skills/code3d-visualization/SKILL.md).
 - Topology multi-selection tools expose the same Use all action as fillet and
   chamfer: remove the ID argument to select all through the normal source-edit
   transaction and undo history. The omitted-argument state displays All
@@ -271,6 +284,14 @@ implementation context and historical outcomes, not a competing work queue.
   scopes without their own renderable geometry. Parameter and position previews
   use one-pixel geometry-aware emphasis in a secondary color for other affected
   occurrences.
+- Directional bound previews use the selection bounding-box color for their
+  translucent fill, direction marker, and corner lines. The fill remains
+  visible while the same occurrence has a bounding-box highlight; its own
+  corner lines only render when that box is absent. Visibility follows each
+  occurrence independently, including repeated instances and selection changes.
+  Box and face corner segments share a limit of 18% of each edge and 32 CSS
+  pixels at each end, with separate perspective compensation for the two ends.
+  See [#40](https://github.com/vilicvane/code3d/issues/40).
 - Operation-specific emphasis is supplied through generic viewport decoration
   providers. Boolean input scopes can mark exact B-Rep intersection volumes and
   union contact sections without teaching the viewport those semantics.
