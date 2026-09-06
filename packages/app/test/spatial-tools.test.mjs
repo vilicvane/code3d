@@ -310,26 +310,31 @@ test('pivot coordinates have an independent drag and preserve the local frame', 
   near(preview.quaternion, next.compositionTransform.quaternion);
 });
 
-test('pivotVertex selects self topology even when self is the target of on', async () => {
-  const source = `import {box} from '@code3d/core'; const base = box(20, 10, 30); const part = box(8, 6, 4).relate(self => base.on(self.up).pivotVertex(3).rotate(0, 0, 45));`;
-  const {module, node, evaluation, bindings} = await relationTool(
-    source,
-    'pivotVertex',
-  );
-  assert.equal(bindings.length, 0);
-  const selection = module.sourceTargets.find(
-    target =>
-      target.kind === 'topology-selection' &&
-      target.tool?.signature.name === 'pivotVertex',
-  );
-  assert.equal(selection.evaluations[0].selection.inputNodeId, node.nodeId);
-  assert.deepEqual(selection.evaluations[0].selection.ids, [3]);
-  const {originSourceDecoration} = await server.ssrLoadModule(
-    '/src/model/origin-decorations.ts',
-  );
-  const markers = originSourceDecoration.decorations({module, evaluation});
-  assert.equal(markers[0].elementKind, 'point');
-});
+for (const [geometry, id] of [
+  ['box(8, 6, 4)', 3],
+  ['box(8, 6, 4).shell(1)', [1, 3]],
+]) {
+  test(`pivotVertex selects self topology ${JSON.stringify(id)} when self is the target of on`, async () => {
+    const source = `import {box} from '@code3d/core'; const base = box(20, 10, 30); const part = ${geometry}.relate(self => base.on(self.up).pivotVertex(${JSON.stringify(id)}).rotate(0, 0, 45));`;
+    const {module, node, evaluation, bindings} = await relationTool(
+      source,
+      'pivotVertex',
+    );
+    assert.equal(bindings.length, 0);
+    const selection = module.sourceTargets.find(
+      target =>
+        target.kind === 'topology-selection' &&
+        target.tool?.signature.name === 'pivotVertex',
+    );
+    assert.equal(selection.evaluations[0].selection.inputNodeId, node.nodeId);
+    assert.deepEqual(selection.evaluations[0].selection.ids, [id]);
+    const {originSourceDecoration} = await server.ssrLoadModule(
+      '/src/model/origin-decorations.ts',
+    );
+    const markers = originSourceDecoration.decorations({module, evaluation});
+    assert.equal(markers[0].elementKind, 'point');
+  });
+}
 
 test('around exposes a positioned axis and a single angle ring', async () => {
   const source = `import {box, point} from '@code3d/core'; const base = box(20, 10, 30); const axis = box(2, 2, 2).relate(self => self.center.on(point([10, 20, 30]).up).offset(0, 0, 0)); const part = box(8, 6, 4).relate(self => self.on(base.up).around(axis.axis).rotate(25));`;

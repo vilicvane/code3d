@@ -1,3 +1,4 @@
+import {TopologyIdSet} from '@code3d/core/tooling';
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
 import {readFile} from 'node:fs/promises';
@@ -196,10 +197,14 @@ test('topology selection guides contain only the requested original IDs', async 
     '/model.ts',
   );
   const mesh = module.fallback.mesh;
-  const vertices = restrictTopologyMesh(mesh, 'vertex', new Set([2, 4]));
+  const vertices = restrictTopologyMesh(
+    mesh,
+    'vertex',
+    new TopologyIdSet([2, 4]),
+  );
   assert.deepEqual(vertices.vertexIds, [2, 4]);
   assert.equal(vertices.topologyVertices.length, 6);
-  const edges = restrictTopologyMesh(mesh, 'edge', new Set([2, 4]));
+  const edges = restrictTopologyMesh(mesh, 'edge', new TopologyIdSet([2, 4]));
   assert.deepEqual(
     edges.edgeGroups.map(group => group.edgeId),
     [2, 4],
@@ -209,7 +214,11 @@ test('topology selection guides contain only the requested original IDs', async 
     edges.edges.length,
     edges.edgeGroups.reduce((sum, group) => sum + group.count * 3, 0),
   );
-  const faces = restrictTopologyMesh(mesh, 'surface', new Set([2, 4]));
+  const faces = restrictTopologyMesh(
+    mesh,
+    'surface',
+    new TopologyIdSet([2, 4]),
+  );
   assert.deepEqual(
     faces.surfaceGroups.map(group => group.surfaceId),
     [2, 4],
@@ -328,7 +337,7 @@ test('editing a plate fillet does not rebuild an unchanged screw across compiles
     [
       'import {box, cut, group} from "@code3d/core";',
       'import {ISO4762} from "@code3d/screws";',
-      `let plate = box(40, 10, 40).fillet(${radius}, [2, 3, 4, 6, 7, 8, 11, 12]).chamfer(1.2, [10]);`,
+      `let plate = box(40, 10, 40).fillet(${radius}, [2, 3, 4, 6, 7, 8, 11, 12]).chamfer(1.2, [[1, 10]]);`,
       'const hole = ISO4762.clearanceHole("M6", 10).relate(tool => tool.shaftBottom.on(plate.down.flip()));',
       'plate = cut(plate, [hole]).paint("#666");',
       'const screw = ISO4762.screw("M6", 18).paint("#999").relate(part => part.headBottom.on(hole.counterboreBottom.flip()).offset(0, -0.5, 0));',
@@ -1374,3 +1383,60 @@ function exactTargets(module, source, text, context = text) {
     target => target.sourceRef.start === start && target.sourceRef.end === end,
   );
 }
+
+test('path IDs keep singular/list schemas, scope and failed-selection recovery', async () => {
+  const source = `import {loft, rectangle, point} from '@code3d/core';
+const base = rectangle(8, 6);
+const top = rectangle(6, 4).relate(p => p.on(point([0, 12, 0]).up));
+const body = loft([base, top]);
+const cap = body.surface([1, 1]);
+const rims = body.edges([[1, 1], [2, 1], 1]);
+const corner = cap.vertex([1, 1]);
+const invalid = cap.edges([[1, 1], [2, 1]]);`;
+  const module = await compileProject(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  assert.match(module.diagnostic.summary, /E\[2,1\] does not belong/);
+  const target = text =>
+    module.sourceTargets.find(
+      target =>
+        target.kind === 'topology-selection' &&
+        source.slice(target.sourceRef.start, target.sourceRef.end) === text,
+    );
+  for (const expression of ['surface([1, 1])', 'vertex([1, 1])']) {
+    const selection = target(expression);
+    assert.equal(selection.tool.signature.parameters[0].multiple, false);
+    assert.deepEqual(selection.evaluations[0].selection.ids, [[1, 1]]);
+  }
+  const list = target('edges([[1, 1], [2, 1], 1])');
+  assert.equal(list.tool.signature.parameters[0].multiple, true);
+  assert.deepEqual(list.evaluations[0].selection.ids, [[1, 1], [2, 1], 1]);
+  const invalid = target('edges([[1, 1], [2, 1]])').evaluations[0].selection;
+  assert.deepEqual(invalid.ids, [[1, 1]]);
+  assert.deepEqual(invalid.scope.availableIds, [
+    [1, 1],
+    [1, 2],
+    [1, 3],
+    [1, 4],
+  ]);
+  const {restrictTopologyMesh} = await server.ssrLoadModule('/src/viewport.ts');
+  const mesh = structuredClone(
+    module.objects.get(invalid.scope.geometryNodeId).mesh,
+  );
+  const selected = restrictTopologyMesh(
+    mesh,
+    'edge',
+    new TopologyIdSet([
+      [1, 1],
+      [2, 1],
+    ]),
+  );
+  assert.deepEqual(
+    selected.edgeGroups.map(group => group.edgeId),
+    [
+      [1, 1],
+      [2, 1],
+    ],
+  );
+});

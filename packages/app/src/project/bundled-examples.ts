@@ -7,6 +7,7 @@ import exposedTopologySource from '../../examples/exposed-topology.ts?raw';
 import fastenersSource from '../../examples/fasteners.ts?raw';
 import examplesIndexSource from '../../examples/index.ts?raw';
 import primitivesSource from '../../examples/primitives.ts?raw';
+import topologyPathsSource from '../../examples/topology-paths.ts?raw';
 import shellSource from '../../examples/shell.ts?raw';
 import originAndRotationSource from '../../examples/origin-and-rotation.ts?raw';
 import relationsAndElementsSource from '../../examples/relations-and-elements.ts?raw';
@@ -23,6 +24,7 @@ const files = [
   {path: '/examples/primitives.ts', source: primitivesSource},
   {path: '/examples/shell.ts', source: shellSource},
   {path: '/examples/bound-rotation.ts', source: boundRotationSource},
+  {path: '/examples/topology-paths.ts', source: topologyPathsSource},
   {path: '/examples/origin-and-rotation.ts', source: originAndRotationSource},
   {path: '/examples/exposed-topology.ts', source: exposedTopologySource},
   {path: '/examples/custom-primitives.ts', source: customPrimitivesSource},

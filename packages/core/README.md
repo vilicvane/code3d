@@ -24,6 +24,15 @@ properties. For example, `model.edges().map(edge => edge.id)` collects edge IDs
 for a later operation on that model. Their `kind` values are `vertex`, `edge`,
 and `surface`; IDs belong to that model and topology kind. Plain named anchors
 such as `model.up` do not expose these topology properties.
+`TopologyId` is a number or a flat numeric path. Topology-changing operations
+prefix one-to-one descendants with their one-based input index, so an input's
+`E3` becomes `[1, 3]`, or `[2, 3]` for the second input. New/ambiguous elements
+start at numeric `1` in each result. Fillet/chamfer/shell also add input index `1`;
+transforms preserve complete paths. Select a path with `.edge([1, 3])`, or a
+mixed collection with `.edges([1, [1, 3], [2, 3]])`. Loft caps use their endpoint
+section paths; Boolean operations inherit from all inputs. Splits and merges
+retire ambiguous source paths. Full rules are in the
+[topology guide](../web/src/content/docs/docs/guides/topology.md).
 `relate()` records placement for composition with other values; inspecting or
 rendering the resulting value by itself keeps its intrinsic local frame.
 

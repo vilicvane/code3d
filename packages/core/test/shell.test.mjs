@@ -14,6 +14,7 @@ import {
 import {
   createModelSnapshotter,
   disposeModelObjects,
+  sameTopologyId,
 } from '../bld/tooling/index.js';
 import {
   clearKernelOperationCache,
@@ -129,7 +130,11 @@ test('negative thickness offsets outward with rounded joins and preserves the or
       closeTo(bounds[1][axis], max);
     }
     for (const id of base.geometry.value.topology.surfaces.ids) {
-      assert.ok(closed.geometry.value.topology.surfaces.ids.includes(id));
+      assert.ok(
+        closed.geometry.value.topology.surfaces.ids.some(candidate =>
+          sameTopologyId(candidate, [1, id]),
+        ),
+      );
     }
   } finally {
     disposeModelObjects([base, open, closed]);
@@ -161,7 +166,10 @@ test('bent spline lofts can form offset walls', () => {
     profile.on(start.up).pivot(50, 0, 0).rotate(0, 0, 90),
   );
   const base = loft([start, via, end]);
-  const hollow = base.shell(2, [2, 3]);
+  const hollow = base.shell(2, [
+    [1, 1],
+    [3, 1],
+  ]);
   try {
     assertSolid(hollow);
     assert.ok(volume(hollow) > 0);
@@ -189,8 +197,12 @@ test('a mixed-profile loft can enclose a cavity even when its open shell produce
       // OCCT reports IsDone/IsValid, but returns the original solid without
       // generated walls. Reducing the thickness does not resolve this case.
       assert.throws(
-        () => base.shell(thickness, [9, 10]),
-        /S9, S10\.\nOpenCascade generated no offset walls.*not hollow/,
+        () =>
+          base.shell(thickness, [
+            [1, 1],
+            [3, 1],
+          ]),
+        /S\[1,1\], S\[3,1\]\.\nOpenCascade generated no offset walls.*not hollow/,
       );
     }
     assert.equal(kernelOperationCacheStats().entries, before);
@@ -238,14 +250,19 @@ test('shell preserves one-to-one topology and caches canonical selections throug
     assert.deepEqual(topology, second.geometry.value.topology);
     assert.deepEqual(topology, moved.geometry.value.topology);
     for (const id of [1, 2, 3, 4])
-      assert.ok(topology.surfaces.ids.includes(id));
+      assert.ok(
+        topology.surfaces.ids.some(candidate =>
+          sameTopologyId(candidate, [1, id]),
+        ),
+      );
     // A removed cap's one-to-one Modified history identifies the remaining rim.
-    for (const id of [5, 6]) assert.ok(topology.surfaces.ids.includes(id));
-    assert.ok(
-      topology.surfaces.ids.some(
-        id => id >= base.geometry.value.topology.surfaces.nextId,
-      ),
-    );
+    for (const id of [5, 6])
+      assert.ok(
+        topology.surfaces.ids.some(candidate =>
+          sameTopologyId(candidate, [1, id]),
+        ),
+      );
+    assert.ok(topology.surfaces.ids.some(id => typeof id === 'number'));
     clearKernelOperationCache();
     const replay = base.shell(1, [5, 6]);
     try {
@@ -309,7 +326,7 @@ test('failed offsets never enter the cache and leave inputs usable for correctio
       assert.throws(() => base.shell(11), /Could not construct shell/);
       // OCCT reports IsDone on this offset but its face topology is invalid.
       assert.throws(
-        () => rounded.shell(1, [6]),
+        () => rounded.shell(1, [[1, 6]]),
         /invalid or self-intersecting/,
       );
     }

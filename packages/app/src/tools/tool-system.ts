@@ -1,3 +1,4 @@
+import {topologyIdExpression} from './topology-expression';
 import {
   rotateVector,
   type EdgeId,
@@ -502,10 +503,7 @@ class SetEdgeOperationResolver implements ToolIntentResolver {
         intent.edges.kind === 'explicit'
           ? renderExpression({
               kind: 'array',
-              elements: intent.edges.ids.map(value => ({
-                kind: 'number',
-                value,
-              })),
+              elements: intent.edges.ids.map(topologyIdExpression),
             })
           : undefined;
       const replaceExistingArgument =

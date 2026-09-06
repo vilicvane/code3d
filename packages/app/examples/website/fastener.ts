@@ -6,7 +6,7 @@ const gray = '#666';
 
 let plate = box(40, 10, 40)
   .fillet(2, [2, 3, 4, 6, 7, 8, 11, 12])
-  .chamfer(1, [10]);
+  .chamfer(1, [[1, 10]]);
 
 const hole = ISO4762.clearanceHole('M6', 10).relate(tool =>
   tool.shaftBottom.on(plate.down.flip()),

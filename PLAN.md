@@ -103,11 +103,13 @@ implementation context and historical outcomes, not a competing work queue.
   preserves one-to-one topology IDs, rejects invalid or collapsed results, and
   reuses the surface picker with failure recovery. See
   [#37](https://github.com/vilicvane/code3d/issues/37).
-- Geometric model vertices, edges, and surfaces have independent model-local numeric ID
-  namespaces.
-  Primitive traversal assigns the initial IDs; a derived value preserves
-  strict one-to-one topology history, allocates newly created or ambiguous
-  elements above the inherited high-water mark, and never reuses retired IDs.
+- Geometric model vertices, edges, and surfaces have independent model-local ID
+  namespaces. Primitives assign numeric IDs. Topology-changing operations assign
+  strict one-to-one descendants `[inputIndex, ...sourceIdPath]`, including the
+  index 1 for single-input fillet/chamfer/shell; genuinely new or ambiguous elements
+  receive local numeric IDs starting at 1. Paths are flat and input indices are
+  one-based. Internal Boolean prefixes do not add path levels. Transforms and
+  references retain the complete ID. See [#39](https://github.com/vilicvane/code3d/issues/39).
   Deterministic source replay is the persistence mechanism rather than a
   separate topology ledger. `model.vertex(id)`, `model.edge(id)`, and
   `model.surface(id)` return complete point, line, and face anchors: vertices
@@ -164,9 +166,11 @@ implementation context and historical outcomes, not a competing work queue.
   presentation costs than a GUI toolbar; minimizing entry count alone is not
   the scope criterion. Example selection must follow this boundary, not define it.
 - Public topology IDs are deterministic model semantics, not OpenCascade hash
-  codes or current edge-array positions. Boolean results inherit only from the
-  ordered primary operand; every other contributed edge is new in that ID
-  namespace.
+  codes or current edge-array positions. Boolean results inherit unambiguous
+  descendants from every ordered input. Split/merged elements retire ambiguous
+  source paths rather than choosing a contributor. Numeric IDs are local to
+  each result; deterministic allocation is not a guarantee against renumbering
+  newly generated topology when construction changes.
 - GUI tools resolve an explicit source-edit scope and use the common tool intent
   and transaction mechanism.
 - Source undo and redo remain Monaco history operations. Standard shortcuts
@@ -494,8 +498,8 @@ constraint source sites do.
 
 ### 4a. Topology-scoped modeling tools — complete
 
-- Assign stable numeric edge IDs at primitive boundaries and carry them across
-  scale, fillet, chamfer, and Boolean derivations.
+- Assign numeric edge IDs at primitive boundaries; retain complete IDs across
+  scale, and use input paths across fillet, chamfer, Boolean, and loft derivations.
 - Let `fillet(radius, edgeIds)` and `chamfer(distance, edgeIds)` modify an
   explicit edge set while retaining the one-argument all-edge form.
 - Project stable IDs into render meshes and operation trace selections without
@@ -709,6 +713,12 @@ establish the next schema boundary.
   section's frame. Without a spine it builds a through-sections loft; with a
   spine it uses a multi-section pipe shell so the curve affects the generated
   geometry rather than serving only as a placement guide.
+- Loft caps retain their endpoint section face paths. Section edges/vertices
+  use unchanged/modified history and intersections of generated side topology
+  with the endpoint cap; ruled intermediate edges can also inherit through their
+  generated side faces and unchanged endpoint identities. Ambiguous split edges
+  receive new IDs. Middle section faces do not become caps. Through-section
+  construction disables input mutation.
 - Validate the complete path with two non-parallel related planar profiles at
   the endpoints of a curved spine, including Node execution, App rendering,
   source context, and topology selection on the result and inputs.
@@ -732,7 +742,7 @@ Design discussion and live scope: [#8](https://github.com/vilicvane/code3d/issue
 
 ## Open questions
 
-Further author-facing Boolean provenance and large-model lineage/mesh retention
+Additional Boolean operand-anchor APIs and large-model lineage/mesh retention
 questions are tracked in [#9](https://github.com/vilicvane/code3d/issues/9).
 Geometric constraints (#21), named topology references and retired-ID semantics
 (#27), and geometric scaling (#33) already have implemented, documented behavior.

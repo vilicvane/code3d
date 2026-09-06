@@ -38,6 +38,7 @@ import {
   type SolidModel,
   type Surface,
   type SurfaceId,
+  type TopologyId,
   type Vec3,
   type Vertex,
   type VertexId,
@@ -200,6 +201,7 @@ loft([faceModel, faceModel.relate(self => self.on(solid.down))], {
 });
 constraint.pivot(1, 2, 3).rotate(0, 45, 0);
 constraint.pivotVertex(1).rotate(0, 0, 90);
+constraint.pivotVertex([1, 3]).rotate(0, 0, 90);
 constraint.around(solid.axis).rotate(45);
 constraint.rotate(0, 45, 90);
 // @ts-expect-error on only accepts directional bounds.
@@ -365,3 +367,14 @@ geometricMembers.location.edge(1);
 // @ts-expect-error An ordinary plane anchor has no topological boundary.
 solid.up.edges();
 void [exposedSolid, exposedSurface, exposedEdge, exposedVertex];
+
+const inheritedId: TopologyId = [1, 2, 3];
+solid.surface([1, 1]);
+solid.edge(inheritedId);
+solid.vertices([1, [2, 3], inheritedId]);
+solid.fillet(1, [[1, 2], inheritedId]);
+solid.originVertex([1, 2]);
+// @ts-expect-error Paths include at least one input index and a local ID.
+solid.surface([1]);
+// @ts-expect-error Paths are flat numeric tuples.
+solid.surface([1, [2, 3]]);

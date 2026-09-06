@@ -7,7 +7,10 @@ import {
   type Shape3D,
   type Vertex,
 } from 'replicad';
-import type {TopoDS_Shape} from 'replicad-opencascadejs';
+import type {
+  NCollection_List_TopoDS_Shape,
+  TopoDS_Shape,
+} from 'replicad-opencascadejs';
 
 export function centeredBoxShape(x: number, y: number, z: number): Shape3D {
   const oc = getOC();
@@ -81,5 +84,24 @@ export function shapeSubshapes<Kind extends keyof Subshapes>(
     throw error;
   } finally {
     explorer.delete();
+  }
+}
+
+/** Consumes a native list and transfers its owned element handles to the caller. */
+export function consumeShapeList(
+  list: NCollection_List_TopoDS_Shape,
+): TopoDS_Shape[] {
+  const shapes: TopoDS_Shape[] = [];
+  try {
+    while (!list.IsEmpty()) {
+      shapes.push(list.First());
+      list.RemoveFirst();
+    }
+    return shapes;
+  } catch (error) {
+    shapes.forEach(shape => shape.delete());
+    throw error;
+  } finally {
+    list.delete();
   }
 }
