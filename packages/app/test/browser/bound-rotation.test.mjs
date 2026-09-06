@@ -85,11 +85,15 @@ test(
         inspect(module, source, 'pivot(50, 0, 0)');
         inspect(module, source, 'rotate(0, 0, 45)');
         const bound = inspect(module, source, 'start.up');
-        const boundDecorations = boundRelationSourceDecoration.decorations({
+        const boundScope = {
           module,
           target: bound.target,
           evaluation: bound.evaluation,
-        });
+        };
+        const boundDecorations = [
+          ...elementSourceDecoration.decorations(boundScope),
+          ...boundRelationSourceDecoration.decorations(boundScope),
+        ];
         const source2 = `import {box, group} from '@code3d/core'; const base = box(20, 10, 30); const part = box(8, 6, 4).relate(self => base.on(self.up).pivotVertex(3).rotate(0, 0, 45)); export default group([base, part]);`;
         const module2 = await compile(source2);
         const vertex = inspect(module2, source2, 'pivotVertex(3)');
@@ -108,6 +112,7 @@ test(
         return {
           scopes,
           vertexIds,
+          boundaryIds: boundDecorations.map(item => item.id),
           boundarySurfaces: boundDecorations
             .filter(item => item.kind === 'surface')
             .map(item => ({
@@ -131,6 +136,7 @@ test(
     assert.deepEqual(around.axes, []);
     assert.deepEqual(axisRotate.modes, ['rotate']);
     assert.deepEqual(axisRotate.axes, ['y']);
+    assert.equal(new Set(result.boundaryIds).size, result.boundaryIds.length);
     assert.deepEqual(result.boundarySurfaces, [
       {vertices: 12, topology: 0},
       {vertices: 12, topology: 0},
