@@ -206,9 +206,11 @@ relation preserves its pose; remaining freedom is selected deterministically
 by geometric seeds and local numerical solving, without a uniqueness guarantee.
 
 In relation context, axes have one positive arrow and edges retain their actual
-curved highlight with a tangent arrow at the positive endpoint (a stable seam
-point for a closed edge). Solid source and larger outline target arrows remain
-distinguishable when overlaid. Surface normals retain their facing arrows.
+curved highlight as the shaft, with only a tangent arrowhead at the directed
+endpoint (a stable seam for a closed edge). Source and target arrowheads share
+a fixed 10-by-6 CSS-pixel size, with the target at 40% opacity. Passive line
+decorations use 1px; interactive topology selection uses 2px. Surface normals
+retain their facing arrows.
 See [the alignment example](../app/examples/geometric-alignment.ts).
 
 When several relations include align on one model, use the numeric parameter

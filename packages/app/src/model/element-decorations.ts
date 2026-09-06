@@ -69,7 +69,9 @@ export const elementSourceDecoration = {
   id: 'named-element',
   decorations({module, evaluation}) {
     if (evaluation.constraintId) {
-      const owner = module.objects.get(evaluation.constraintOwnerNodeId ?? '');
+      const owner =
+        evaluation.constraintPreview ??
+        module.objects.get(evaluation.constraintOwnerNodeId ?? '');
       if (
         owner?.constraints.some(
           c => c.id === evaluation.constraintId && c.kind === 'align',
@@ -363,7 +365,9 @@ export const relationSourceDecoration: SourceDecorationProvider = {
   decorations({module, evaluation}) {
     if (!evaluation.constraintId || !evaluation.constraintOwnerNodeId)
       return [];
-    const owner = module.objects.get(evaluation.constraintOwnerNodeId);
+    const owner =
+      evaluation.constraintPreview ??
+      module.objects.get(evaluation.constraintOwnerNodeId);
     const constraint = owner?.constraints.find(
       candidate => candidate.id === evaluation.constraintId,
     );
@@ -398,10 +402,12 @@ export const relationSourceDecoration: SourceDecorationProvider = {
                 ? {...element.arrow!, scale: [1, 1, 1] as const}
                 : d.transform,
               direction: curve ? (1 as const) : (element.direction ?? 1),
-              arrowOnly: !!curve,
-              arrowStyle:
-                role === 'source' ? ('solid' as const) : ('outline' as const),
-              markerSize: d.markerSize * (role === 'target' ? 1.25 : 1),
+              headOnly: !!curve,
+              directed: true,
+              appearance: {
+                ...d.appearance,
+                opacity: role === 'target' ? 0.4 : d.appearance.opacity,
+              },
             };
           });
         if (!geometry?.mesh || !topology)
@@ -415,7 +421,7 @@ export const relationSourceDecoration: SourceDecorationProvider = {
               mesh: geometry.mesh,
               edgeIds: [topology.id],
               transform: topology.transform,
-              appearance: {...axisAppearance, lineWidth: 2},
+              appearance: axisAppearance,
             },
             ...anchors,
           ];

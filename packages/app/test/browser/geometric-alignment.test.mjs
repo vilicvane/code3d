@@ -61,15 +61,27 @@ export default group([base,part,rail]);`;
           markers = [];
         viewport.decorationRoot.traverse(object => {
           const decoration = object.userData.decoration;
-          if (decoration?.arrowStyle) {
-            let arrows = 0;
+          if (decoration?.directed) {
+            let shafts = 0;
+            const heads = [];
             object.traverse(child => {
-              if (child.type === 'ArrowHelper') arrows++;
+              if ((child.isLine || child.isLineSegments2) && child.visible)
+                shafts++;
+              if (child.name === 'direction-arrow-head') {
+                child.geometry.computeBoundingBox();
+                heads.push({
+                  visible: child.visible,
+                  opacity: child.material.opacity,
+                  tip: child.geometry.boundingBox.max.y,
+                  size: child.material.uniforms.headSize.value.toArray(),
+                });
+              }
             });
             markers.push({
-              style: decoration.arrowStyle,
-              curve: !!decoration.arrowOnly,
-              arrows,
+              role: decoration.id.includes(':target:') ? 'target' : 'source',
+              heads,
+              curve: !!decoration.headOnly,
+              shafts,
               position: decoration.transform.position,
               direction: decoration.direction,
             });
@@ -79,8 +91,37 @@ export default group([base,part,rail]);`;
       });
     const curves = await inspect();
     assert.equal(curves.length, 2);
-    assert.deepEqual(curves.map(m => m.style).sort(), ['outline', 'solid']);
-    assert.ok(curves.every(m => m.curve && m.arrows === 1));
+    assert.ok(curves.every(m => m.heads.every(h => h.visible)));
+    const sourceOpacity = curves.find(m => m.role === 'source').heads[0]
+      .opacity;
+    const targetOpacity = curves.find(m => m.role === 'target').heads[0]
+      .opacity;
+    assert.deepEqual(
+      curves.map(m => m.heads[0].size),
+      [
+        [6, 10],
+        [6, 10],
+      ],
+    );
+    assert.ok(sourceOpacity > 0.9);
+    assert.ok(targetOpacity > 0 && targetOpacity < sourceOpacity);
+    assert.ok(
+      curves.every(m => m.curve && m.heads.length === 1 && m.shafts === 0),
+    );
+    const passiveWidths = await page.evaluate(() => {
+      const widths = [];
+      window.alignmentTest.viewport.decorationRoot.traverse(object => {
+        if (object.userData.decoration?.kind === 'edges')
+          object.traverse(child => {
+            if (child.isLineSegments2) widths.push(child.material.linewidth);
+          });
+      });
+      return widths;
+    });
+    assert.deepEqual(passiveWidths, [1, 1]);
+    assert.ok(curves.every(m => Math.abs(m.heads[0].tip) < 1e-6));
+    const endpoint = curves.find(m => m.role === 'target').position;
+    endpoint.forEach((v, i) => assert.ok(Math.abs(v - [-20, 0, 0][i]) < 1e-6));
     if (process.env.CODE3D_TEST_SCREENSHOT)
       await page.screenshot({path: process.env.CODE3D_TEST_SCREENSHOT});
     const z = page.locator('[data-parameter=z]');
@@ -118,8 +159,27 @@ export default group([base,part,rail]);`;
     });
     const axes = await inspect();
     assert.equal(axes.length, 2);
-    assert.ok(axes.every(m => m.arrows === 1));
+    assert.ok(axes.every(m => m.heads.length === 1));
+    assert.ok(axes.filter(m => m.curve).every(m => m.shafts === 0));
+    assert.ok(axes.filter(m => !m.curve).every(m => m.shafts === 1));
     assert.ok(axes.some(m => !m.curve && m.direction === -1));
+    const interactiveWidths = await page.evaluate(() => {
+      const vp = window.alignmentTest.viewport;
+      const selected = vp.getSelected();
+      vp.beginTopologySelection(
+        selected.key,
+        selected.node.nodeId,
+        'edge',
+        false,
+      );
+      const widths = [];
+      vp.topologySelection.guide.traverse(object => {
+        if (object.isLineSegments2) widths.push(object.material.linewidth);
+      });
+      vp.endTopologySelection();
+      return widths;
+    });
+    assert.deepEqual(interactiveWidths, [2]);
     assert.deepEqual(errors, []);
   },
 );

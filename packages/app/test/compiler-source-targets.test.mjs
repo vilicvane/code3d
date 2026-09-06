@@ -8,6 +8,40 @@ import {createAppTestServer} from './vite-test-server.mjs';
 import {createTestProjectCompiler} from './project-test-files.mjs';
 import * as THREE from 'three';
 
+test('a conflicting intermediate constraint stage does not invalidate its completed model', async () => {
+  const source = `import {box, group} from '@code3d/core';
+    const base = box(20, 10, 20);
+    const higher = box(20, 10, 20).relate(s => s.on(base.up));
+    const original = box(2, 2, 2).relate(s => s.on(base.up));
+    const part = original.relate(s => s.on(higher.up).offset(0, -10, 0));
+    export default group([base, higher, part]);`;
+  const module = await compileProject(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  assert.equal(module.diagnostic, undefined);
+  const stage = module.sourceTargets.find(
+    target =>
+      target.kind === 'constraint' &&
+      target.evaluations[0].constraintPreviewDiagnostic,
+  );
+  assert.ok(stage);
+  assert.match(
+    stage.evaluations[0].constraintPreviewDiagnostic.details,
+    /Conflicting bound positions/,
+  );
+  const final = module.sourceTargets.find(
+    target =>
+      target.kind === 'constraint' &&
+      source
+        .slice(target.sourceRef.start, target.sourceRef.end)
+        .includes('offset(0, -10, 0)'),
+  );
+  assert.equal(final.evaluations[0].constraintPreviewDiagnostic, undefined);
+  assert.ok(final.evaluations[0].constraintPreview);
+  assert.equal(module.fallback.children.length, 3);
+});
+
 let compileProject;
 let bundledExamples;
 let server;
