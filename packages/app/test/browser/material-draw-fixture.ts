@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import type * as THREE from 'three';
 
 export type MaterialDraw = {
   color: string;
@@ -13,12 +13,7 @@ export function createMaterialDrawObserver() {
   >();
   return (root: THREE.Object3D, onDraw: (draw: MaterialDraw) => void) => {
     root.traverse(part => {
-      if (!(
-        part instanceof THREE.Mesh ||
-        part instanceof THREE.Line ||
-        part instanceof THREE.Points
-      ))
-        return;
+      if (!isDrawable(part)) return;
       const material = Array.isArray(part.material)
         ? part.material[0]
         : part.material;
@@ -34,12 +29,26 @@ export function createMaterialDrawObserver() {
         onDraw({
           color: color.getHexString(),
           opacity: material.opacity,
-          segments:
-            part.geometry instanceof THREE.InstancedBufferGeometry
-              ? part.geometry.instanceCount
-              : undefined,
+          segments: isInstancedGeometry(part.geometry)
+            ? part.geometry.instanceCount
+            : undefined,
         });
       };
     });
   };
+}
+
+// Vite can rebuild its dependency graph between viewport creation and this
+// fixture's dynamic import. Three's flags survive that module boundary;
+// constructor identity does not.
+function isDrawable(
+  object: THREE.Object3D,
+): object is THREE.Mesh | THREE.Line | THREE.Points {
+  return 'isMesh' in object || 'isLine' in object || 'isPoints' in object;
+}
+
+function isInstancedGeometry(
+  geometry: THREE.BufferGeometry,
+): geometry is THREE.InstancedBufferGeometry {
+  return 'isInstancedBufferGeometry' in geometry;
 }
