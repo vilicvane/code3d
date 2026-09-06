@@ -87,14 +87,14 @@ export class SketchEditorController {
       this.host.readSource(this.active.definitionRef);
     if (source === undefined || this.stale)
       throw new Error('Waiting for the updated sketch.');
-    const movable = [...analyzeSketchSource(source).movable];
+    const {editable} = analyzeSketchSource(source);
     const layers = previous
       ? [...this.layers.slice(0, -1), previous.snapshot]
       : this.layers;
     const drag: SketchDrag = {
       id,
       position,
-      movable,
+      editable,
       data: previous?.data ?? this.data,
     };
     // The zero-equation case is kernel-independent. Use the same numeric and
@@ -121,7 +121,7 @@ export class SketchEditorController {
       id: this.active.id,
       layers: this.layers,
       data: this.data,
-      movable: parsed?.movable ?? new Set(),
+      editable: parsed?.editable ?? new Map(),
       referenceable: new Set(Object.keys(this.active.references)),
       readOnlyReason: this.stale
         ? 'Waiting for the updated sketch'

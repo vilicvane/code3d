@@ -5,10 +5,16 @@ import {formatSourceNumber} from '../tools/source-expression';
 /** Evaluated author coordinates, distinct from the constrained display. */
 export type SketchPointData = Readonly<{id: number; position: SketchPosition}>;
 
+/** AST-derived permissions shared by preview, UI and source transactions. */
+export type SketchEditableCoordinates = ReadonlyMap<
+  number,
+  readonly [boolean, boolean]
+>;
+
 export type SketchDrag = Readonly<{
   id: number;
   position: SketchPosition;
-  movable: readonly number[];
+  editable: SketchEditableCoordinates;
   data: readonly SketchPointData[];
 }>;
 
@@ -29,7 +35,14 @@ export function previewSketchDrag(
       e.kind === 'point' ? [[e.id, e.position] as const] : [],
     ),
   );
-  const moved = runtime.solveSketchSnapshot(layers, drag);
+  const locks = drag.data.flatMap(point =>
+    ([0, 1] as const).flatMap(axis =>
+      drag.editable.get(point.id)?.[axis]
+        ? []
+        : [{id: point.id, axis, value: point.position[axis]}],
+    ),
+  );
+  const moved = runtime.solveSketchSnapshot(layers, {...drag, locks});
   const after = new Map(
     moved.entities.flatMap(e =>
       e.kind === 'point' ? [[e.id, e.position] as const] : [],
@@ -44,13 +57,18 @@ export function previewSketchDrag(
   // Applying displacement to an unsolved seed would reintroduce its old error.
   // A zero-motion gesture leaves author data untouched; expressions stay intact.
   const data = drag.data.map(point => {
-    if (!changed || !drag.movable.includes(point.id)) return point;
+    const editable = drag.editable.get(point.id);
+    if (!changed || !editable?.some(Boolean)) return point;
     const position = after.get(point.id)!;
     return {
       ...point,
       position: [
-        Number(formatSourceNumber(position[0])),
-        Number(formatSourceNumber(position[1])),
+        editable[0]
+          ? Number(formatSourceNumber(position[0]))
+          : point.position[0],
+        editable[1]
+          ? Number(formatSourceNumber(position[1]))
+          : point.position[1],
       ] as SketchPosition,
     };
   });

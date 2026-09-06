@@ -40,8 +40,13 @@ implementation context and historical outcomes, not a competing work queue.
   point; this does not persist a fixed constraint or reduce the reported model
   DOF. Unconstrained movement is kernel-independent. Successive frames use the
   preceding solution, and previews forward-solve the rounded source data that
-  will be committed. Preserved expression seeds can still move that temporary
-  anchor during replay; the full stability requirement is not yet accepted.
+  will be committed. During dragging, AST-derived per-axis locks preserve each
+  expression's evaluated author value; literal axes on the same point remain
+  editable. If those locks alter the displayed geometry, solve them before
+  selecting the temporary anchor. Thus initially unsatisfied data can adjust
+  when dragging begins. Normal evaluation remains numeric-only; expressions
+  receive neither offsets nor permanent constraints. Source replay tests use a
+  fresh compiler, not saved gesture state.
   Deletion removes affected local constraints atomically. Snapshots expose DOF
   and redundant indices; conflicting inline constraints are source-located.
   Numeric fields retain native browser text history; SVG nodes retain entity

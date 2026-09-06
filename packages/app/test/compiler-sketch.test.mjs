@@ -3,11 +3,14 @@ import {before, after, test} from 'node:test';
 import {createAppTestServer} from './vite-test-server.mjs';
 import {createTestProjectCompiler} from './project-test-files.mjs';
 
-let server, compiler, ModelViewport;
+let server, compiler, ModelViewport, analyzeSketchSource, SketchEditResolver;
 before(async () => {
   server = await createAppTestServer();
   compiler = await createTestProjectCompiler(server);
   ({ModelViewport} = await server.ssrLoadModule('/src/viewport.ts'));
+  ({analyzeSketchSource, SketchEditResolver} = await server.ssrLoadModule(
+    '/src/tools/sketch-source.ts',
+  ));
 });
 after(async () => {
   compiler?.dispose();
@@ -148,10 +151,136 @@ test('constraint options share the editable source range and use the installed s
   const dragged = compiler.previewSketchDrag([value], {
     id: 2,
     position: [80, 30],
-    movable: [1, 2],
+    editable: new Map([
+      [1, [true, true]],
+      [2, [true, true]],
+    ]),
     data: value.data,
   });
   assert.deepEqual(dragged.snapshot.entities[1].position, [40, 0]);
+});
+
+test('AST coordinate locks preserve expressions through drag, source transactions and a fresh compiler', async () => {
+  const cases = [
+    {args: "[['point', 1, [x, 19]]]", id: 1, target: [30, 25]},
+    {args: "[['point', 1, [22, y]]]", id: 1, target: [30, 25]},
+    {
+      args: "[['point', 1, [x, y]], ['point', 2, [62, 19]], ['line', 3, [1, 2]]], {constraints: [['length', [3, 40]]]}",
+      id: 2,
+      target: [46, 51],
+    },
+    {
+      args: "[['point', 1, [22, 0]], ['point', 2, [62, y]], ['line', 3, [1, 2]]], {constraints: [['horizontal', 3]]}",
+      id: 2,
+      target: [70, 30],
+    },
+    {
+      args: "[['point', 1, [2, 2]], ['point', 2, [x, 19]], ['line', 3, [1, 2]]], {constraints: [['length', [3, 40]]]}",
+      id: 1,
+      target: [-6, -5],
+      initiallyUnsolved: true,
+    },
+  ];
+  const point = (value, id) =>
+    value.entities.find(e => e.kind === 'point' && e.id === id).position;
+  const close = (a, b) =>
+    a.forEach((v, axis) =>
+      assert.ok(Math.abs(v - b[axis]) < 1e-7, `${a} != ${b}`),
+    );
+  for (const {args, id, target, initiallyUnsolved} of cases) {
+    const source = `import {sketch} from '@code3d/core'; const x = 22; const y = 19; const value = sketch(${args});`;
+    const module = await compiler.compile(
+      {files: [{path: '/model.ts', source}]},
+      '/model.ts',
+    );
+    assert.equal(module.diagnostic, undefined);
+    const value = [...module.sketches.values()][0];
+    const {editable} = analyzeSketchSource(args);
+    if (initiallyUnsolved)
+      assert.ok(
+        Math.abs(point(value, 2)[0] - 22) > 1,
+        'normal evaluation still solves numeric seeds freely',
+      );
+    let preview = {snapshot: value, data: value.data};
+    for (let frame = 1; frame <= 10; frame++) {
+      const start = point(value, id);
+      assert.doesNotThrow(
+        () =>
+          (preview = compiler.previewSketchDrag([preview.snapshot], {
+            id,
+            position: start.map(
+              (v, axis) => v + ((target[axis] - v) * frame) / 10,
+            ),
+            editable,
+            data: preview.data,
+          })),
+        `${args}: frame ${frame}`,
+      );
+      for (const data of value.data)
+        for (const axis of [0, 1])
+          if (!editable.get(data.id)[axis]) {
+            assert.equal(
+              preview.data.find(p => p.id === data.id).position[axis],
+              data.position[axis],
+            );
+            assert.ok(
+              Math.abs(
+                point(preview.snapshot, data.id)[axis] - data.position[axis],
+              ) < 1e-7,
+            );
+          }
+      assert.deepEqual(preview.snapshot.constraints, value.constraints);
+    }
+    const sourceRef = value.definitionRef;
+    const resolution = new SketchEditResolver().resolve(
+      {
+        kind: 'sketch.edit',
+        sourceRef,
+        expectedText: args,
+        layer: value.id,
+        references: {},
+        change: {
+          kind: 'move',
+          positions: preview.data.filter(p => editable.get(p.id).some(Boolean)),
+        },
+      },
+      {
+        toolId: 'test',
+        baseVersion: 1,
+        resolveSourceRef: ref => ref,
+        readSource: () => args,
+      },
+    );
+    assert.equal(resolution.status, 'ready');
+    assert.equal(resolution.plan.edits.length, 1);
+    const edited = resolution.plan.edits[0].text;
+    const parsed = analyzeSketchSource(edited);
+    const original = analyzeSketchSource(args);
+    for (const [id, axes] of editable)
+      for (const axis of [0, 1])
+        if (!axes[axis])
+          assert.equal(
+            parsed.entries.get(id).data.elements[axis].getText(),
+            original.entries.get(id).data.elements[axis].getText(),
+          );
+    assert.doesNotMatch(edited, /fixed|offset/);
+    const cold = await createTestProjectCompiler(server);
+    try {
+      const replaySource =
+        source.slice(0, sourceRef.start) + edited + source.slice(sourceRef.end);
+      const replay = await cold.compile(
+        {files: [{path: '/model.ts', source: replaySource}]},
+        '/model.ts',
+      );
+      assert.equal(replay.diagnostic, undefined);
+      const replayValue = [...replay.sketches.values()][0];
+      for (const data of preview.data)
+        close(point(replayValue, data.id), point(preview.snapshot, data.id));
+      assert.equal(replayValue.degreesOfFreedom, value.degreesOfFreedom);
+    } finally {
+      cold.dispose();
+    }
+  }
 });
 
 test('constraint conflicts highlight their source tuples, without persistent constraint IDs', async () => {
@@ -195,7 +324,10 @@ test('temporary drag anchors survive full rotations and exact rounded source rep
     const unchanged = compiler.previewSketchDrag([initial], {
       id,
       position: start,
-      movable: [1, 2],
+      editable: new Map([
+        [1, [true, true]],
+        [2, [true, true]],
+      ]),
       data: initial.data,
     });
     assert.deepEqual(
@@ -212,7 +344,10 @@ test('temporary drag anchors survive full rotations and exact rounded source rep
       preview = compiler.previewSketchDrag([preview.snapshot], {
         id,
         position,
-        movable: [1, 2],
+        editable: new Map([
+          [1, [true, true]],
+          [2, [true, true]],
+        ]),
         data: preview.data,
       });
       close(point(preview.snapshot, anchor), center);

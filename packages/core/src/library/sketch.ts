@@ -311,6 +311,8 @@ export function solveSketchSnapshot(
   drag?: Readonly<{
     id: number;
     position: SketchPosition;
+    /** Numeric, gesture-only locks on local coordinates; never author constraints. */
+    locks?: readonly Readonly<{id: number; axis: 0 | 1; value: number}>[];
   }>,
 ): SketchSnapshot {
   const local = layers.at(-1)!;
@@ -354,14 +356,36 @@ export function solveSketchSnapshot(
     },
   );
   const problem: SketchSolveProblem = {
-    points: points.map(p => ({
-      position: p.position,
-      locked: p.layer !== local.id,
-    })),
+    points: points.map(p => {
+      const position: [number, number] = [...p.position];
+      const upstream = p.layer !== local.id;
+      const locked: [boolean, boolean] = [upstream, upstream];
+      if (!upstream)
+        for (const lock of drag?.locks ?? [])
+          if (lock.id === p.id) {
+            position[lock.axis] = lock.value;
+            locked[lock.axis] = true;
+          }
+      return {position, locked};
+    }),
     constraints,
   };
   const result = solveSketchProblem(
-    problem,
+    // Applying authored coordinate locks can change the displayed geometry.
+    // Satisfy those locks before choosing a gesture anchor, otherwise the old
+    // anchor can contradict a perfectly valid set of persistent constraints.
+    drag &&
+      problem.points.some((p, i) =>
+        p.position.some((v, axis) => v !== points[i].position[axis]),
+      )
+      ? {
+          ...problem,
+          points: solveSketchProblem(problem).positions.map((position, i) => ({
+            ...problem.points[i],
+            position,
+          })),
+        }
+      : problem,
     drag && {
       point: pointIndex({layer: local.id, id: drag.id}),
       position: drag.position,

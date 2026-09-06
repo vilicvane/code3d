@@ -53,7 +53,13 @@ test('moving a numeric point preserves expressions, comments and tuple identitie
   const source =
     "[\n  ['point', 1, [/* x */ -2, /* y */ +3]],\n  ['point', 8, [width * 2, 0]], // driven\n  ['line', 9, [1, 8]],\n]";
   const host = setup(source);
-  assert.deepEqual([...analyzeSketchSource(source).movable], [1]);
+  assert.deepEqual(
+    [...analyzeSketchSource(source).editable],
+    [
+      [1, [true, true]],
+      [8, [false, true]],
+    ],
+  );
   assert.equal(
     host.edit({kind: 'move', positions: [{id: 1, position: [4, 5]}]}).status,
     'committed',
@@ -61,8 +67,41 @@ test('moving a numeric point preserves expressions, comments and tuple identitie
   assert.equal(host.source(), source.replace('-2', '4').replace('+3', '5'));
   assert.equal(
     host.edit({kind: 'move', positions: [{id: 8, position: [4, 5]}]}).status,
+    'committed',
+  );
+  assert.match(host.source(), /\[width \* 2, 5\]/);
+  assert.equal(host.undo.length, 2);
+});
+
+test('coordinate permissions come from the AST and preserve each nonliteral axis verbatim', () => {
+  const source =
+    "[['point', 1, [width, height]], ['point', 2, [+2, /* keep */ height / 2]], ['point', 3, [getX(), -4]], ['point', 4, [(2), 2 + 2]]]";
+  const host = setup(source);
+  assert.deepEqual(
+    [...analyzeSketchSource(source).editable],
+    [
+      [1, [false, false]],
+      [2, [true, false]],
+      [3, [false, true]],
+      [4, [false, false]],
+    ],
+  );
+  assert.equal(
+    host.edit({kind: 'move', positions: [{id: 1, position: [8, 9]}]}).status,
     'unsupported',
   );
+  assert.equal(host.source(), source);
+  assert.equal(
+    host.edit({
+      kind: 'move',
+      positions: [
+        {id: 2, position: [8, 9]},
+        {id: 3, position: [8, 9]},
+      ],
+    }).status,
+    'committed',
+  );
+  assert.equal(host.source(), source.replace('+2', '8').replace('-4', '9'));
   assert.equal(host.undo.length, 1);
 });
 

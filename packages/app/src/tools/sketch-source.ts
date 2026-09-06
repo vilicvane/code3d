@@ -6,6 +6,7 @@ import type {
   SourceRef,
 } from '@code3d/core/tooling';
 import {formatSourceNumber} from './source-expression';
+import type {SketchEditableCoordinates} from '../model/sketch-drag';
 import type {
   ResolveContext,
   ToolIntent,
@@ -57,7 +58,7 @@ const prefix = 'sketch(';
 /** Analyze only the authored tuple structure; never evaluate coordinate code. */
 export function analyzeSketchSource(source: string): {
   entries: ReadonlyMap<number, Entry>;
-  movable: ReadonlySet<number>;
+  editable: SketchEditableCoordinates;
   array?: ts.ArrayLiteralExpression;
   options?: ts.ObjectLiteralExpression;
   constraints?: ts.ArrayLiteralExpression;
@@ -79,10 +80,10 @@ export function analyzeSketchSource(source: string): {
   const array = call?.arguments[0];
   const options = call?.arguments[1];
   const entries = new Map<number, Entry>();
-  const movable = new Set<number>();
+  const editable = new Map<number, readonly [boolean, boolean]>();
   const unsupported = () => ({
     entries,
-    movable,
+    editable,
     reason: 'Visual editing requires explicit [kind, ID, data] tuples.',
   });
   if (!array || !ts.isArrayLiteralExpression(array)) return unsupported();
@@ -132,15 +133,15 @@ export function analyzeSketchSource(source: string): {
     if (!Number.isSafeInteger(id) || id < 1 || entries.has(id))
       return unsupported();
     entries.set(id, {id, kind: kind.text, node, data});
-    if (
-      kind.text === 'point' &&
-      data.elements.every(n => numeric(n) !== undefined)
-    )
-      movable.add(id);
+    if (kind.text === 'point')
+      editable.set(id, [
+        numeric(data.elements[0]) !== undefined,
+        numeric(data.elements[1]) !== undefined,
+      ]);
   }
   return {
     entries,
-    movable,
+    editable,
     array,
     options: options as ts.ObjectLiteralExpression | undefined,
     constraints,
@@ -189,14 +190,16 @@ export class SketchEditResolver implements ToolIntentResolver {
     if (change.kind === 'move') {
       for (const {id, position} of change.positions) {
         const entry = parsed.entries.get(id);
-        if (!entry || !parsed.movable.has(id))
+        const editable = parsed.editable.get(id);
+        if (!entry || !editable?.some(Boolean))
           return {
             status: 'unsupported',
             reason: 'Expression-driven points must be edited in code.',
           };
-        entry.data.elements.forEach((node, i) =>
-          replace(node, formatSourceNumber(position[i])),
-        );
+        entry.data.elements.forEach((node, i) => {
+          if (editable[i] && numeric(node) !== position[i])
+            replace(node, formatSourceNumber(position[i]));
+        });
       }
     } else if (change.kind === 'delete') {
       const remove = (node: ts.Node) => {

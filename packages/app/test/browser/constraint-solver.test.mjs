@@ -103,7 +103,10 @@ for (const installed of [false, true]) {
           const gesture = {
             id: 2,
             position: [60, 20],
-            movable: [1, 2],
+            editable: new Map([
+              [1, [true, true]],
+              [2, [true, true]],
+            ]),
             data: sketch.data,
           };
           const moved = await client.previewSketchDrag([sketch], gesture);

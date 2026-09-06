@@ -12,7 +12,11 @@ import {
   type IconNode,
 } from 'lucide';
 import type {SketchChange} from '../tools/sketch-source';
-import type {SketchDragPreview, SketchPointData} from '../model/sketch-drag';
+import type {
+  SketchDragPreview,
+  SketchPointData,
+  SketchEditableCoordinates,
+} from '../model/sketch-drag';
 import {SketchLineDrawing} from '../tools/sketch-drawing';
 import {
   endpointPosition,
@@ -29,7 +33,7 @@ export type SketchEditorView = Readonly<{
   id: string;
   layers: readonly SketchSnapshot[];
   data: readonly SketchPointData[];
-  movable: ReadonlySet<number>;
+  editable: SketchEditableCoordinates;
   referenceable: ReadonlySet<string>;
   readOnlyReason?: string;
 }>;
@@ -444,7 +448,7 @@ export class SketchEditor {
       } else if (
         !this.view.readOnlyReason &&
         point.layer === this.view.id &&
-        this.view.movable.has(point.id)
+        this.view.editable.get(point.id)?.some(Boolean)
       ) {
         this.gesture = {
           kind: 'move',
@@ -536,7 +540,7 @@ export class SketchEditor {
       this.gesture = undefined;
       if (gesture.preview && !gesture.error) {
         const positions = gesture.preview.data.flatMap(e => {
-          if (!this.view!.movable.has(e.id)) return [];
+          if (!this.view!.editable.get(e.id)?.some(Boolean)) return [];
           const previous = this.view!.data.find(p => p.id === e.id)!;
           return e.position.some(
             (value, axis) => value !== previous.position[axis],
@@ -684,7 +688,8 @@ export class SketchEditor {
         title.append(document.createTextNode(''));
         circle.append(title);
       }
-      const text = `Point ${point.id} (${point.position.join(', ')})${point.layer !== this.view.id ? ' · upstream (locked)' : !this.view.movable.has(point.id) ? ' · expression-driven (edit in code)' : ''}`;
+      const lock = this.expressionLock(point.id);
+      const text = `Point ${point.id} (${point.position.join(', ')})${point.layer !== this.view.id ? ' · upstream (locked)' : lock ? ` · ${lock}` : ''}`;
       if (title.firstChild!.textContent !== text)
         (title.firstChild as Text).data = text;
     }
@@ -712,14 +717,23 @@ export class SketchEditor {
         ? 'Upstream geometry · locked'
         : selected &&
             points.some(p => same(p, selected)) &&
-            !this.view.movable.has(selected.id)
-          ? 'Expression-driven point · edit coordinates in code'
+            this.expressionLock(selected.id)
+          ? this.expressionLock(selected.id)!
           : this.mode === 'Line'
             ? this.drawing?.start
               ? 'Next point · Enter length/angle or click · X/Y locks direction · Esc ends the chain'
               : 'Start point · Enter X/Y or click'
             : `${this.view.layers.at(-1)!.degreesOfFreedom} DOF · ${this.view.layers.at(-1)!.constraints.length} constraints · Drag points · Delete removes connected local lines`);
     if (this.statusText.data !== status) this.statusText.data = status;
+  }
+
+  private expressionLock(id: number): string | undefined {
+    const editable = this.view!.editable.get(id);
+    if (!editable) return undefined;
+    const axes = ['X', 'Y'].filter((_, axis) => !editable[axis]);
+    return axes.length
+      ? `${axes.join('/')} locked by expression · edit in code`
+      : undefined;
   }
 
   private entityClass(layer: string, id: number): string {

@@ -16,7 +16,10 @@ export type SketchSolveConstraint =
     }>;
 
 export type SketchSolveProblem = Readonly<{
-  points: readonly Readonly<{position: SketchPosition; locked: boolean}>[];
+  points: readonly Readonly<{
+    position: SketchPosition;
+    locked: readonly [boolean, boolean];
+  }>[];
   constraints: readonly SketchSolveConstraint[];
 }>;
 
@@ -51,10 +54,11 @@ export function solveSketchProblem(
   // an implicit fixed constraint. Coordinate constraints can also fix a point.
   const anchored = problem.points.some(
     (point, index) =>
-      point.locked ||
       constraints.some(c => c.kind === 'fixed' && c.point === index) ||
-      (constraints.some(c => c.kind === 'x' && c.point === index) &&
-        constraints.some(c => c.kind === 'y' && c.point === index)),
+      ((point.locked[0] ||
+        constraints.some(c => c.kind === 'x' && c.point === index)) &&
+        (point.locked[1] ||
+          constraints.some(c => c.kind === 'y' && c.point === index))),
   );
   const anchor =
     drag && !anchored
@@ -62,7 +66,7 @@ export function solveSketchProblem(
       : -1;
   const points = problem.points.map((point, index) => ({
     ...point,
-    locked: point.locked || index === anchor,
+    locked: index === anchor ? ([true, true] as const) : point.locked,
   }));
   if (!points.length)
     return {positions: [], degreesOfFreedom: 0, redundant: []};
@@ -70,9 +74,17 @@ export function solveSketchProblem(
   if (!constraints.length)
     return {
       positions: points.map((p, index) =>
-        drag?.point === index && !p.locked ? drag.position : p.position,
+        drag?.point === index
+          ? [
+              p.locked[0] ? p.position[0] : drag.position[0],
+              p.locked[1] ? p.position[1] : drag.position[1],
+            ]
+          : p.position,
       ),
-      degreesOfFreedom: points.filter(p => !p.locked).length * 2,
+      degreesOfFreedom: points.reduce(
+        (sum, p) => sum + Number(!p.locked[0]) + Number(!p.locked[1]),
+        0,
+      ),
       redundant: [],
     };
   const origin = points[0].position;
@@ -94,7 +106,9 @@ export function solveSketchProblem(
     gcs.set_max_iterations(100);
     gcs.set_covergence_threshold(1e-10);
     const indices = points.map(p =>
-      normalized(p.position).map(v => gcs.push_p_param(v, p.locked)),
+      normalized(p.position).map((v, axis) =>
+        gcs.push_p_param(v, p.locked[axis]),
+      ),
     );
     const nativePoints = indices.map(([x, y]) => {
       const point = gcs.make_point(x, y);
@@ -170,8 +184,9 @@ export function solveSketchProblem(
     if (drag) {
       // Negative tags are PlaneGCS soft objectives; they neither change DOF nor
       // weaken persistent constraints. The gesture is not part of the model.
-      coordinate(drag.point, 0, drag.position[0], -1);
-      coordinate(drag.point, 1, drag.position[1], -1);
+      for (const axis of [0, 1])
+        if (!points[drag.point].locked[axis])
+          coordinate(drag.point, axis, drag.position[axis], -1);
     }
     const status = gcs.solve_system(2);
     const conflicting = constraintIndices(gcs, 'get_conflicting');
@@ -181,9 +196,13 @@ export function solveSketchProblem(
         `Could not satisfy sketch constraints${conflicting.length ? ` (${conflicting.map(i => i + 1).join(', ')})` : ''}. The constraints may conflict or need a different current geometry.`,
       );
     gcs.apply_solution();
-    const positions = indices.map(([x, y]): SketchPosition => [
-      gcs.get_p_param(x) * scale + origin[0],
-      gcs.get_p_param(y) * scale + origin[1],
+    const positions = indices.map(([x, y], index): SketchPosition => [
+      points[index].locked[0]
+        ? points[index].position[0]
+        : gcs.get_p_param(x) * scale + origin[0],
+      points[index].locked[1]
+        ? points[index].position[1]
+        : gcs.get_p_param(y) * scale + origin[1],
     ]);
     if (!positions.every(p => p.every(Number.isFinite)))
       throw new SketchConstraintError(

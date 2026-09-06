@@ -96,12 +96,18 @@ Dragging previews a soft solver target and writes every changed editable point
 in one transaction. Hard constraints remain satisfied. With no locked point,
 a gesture temporarily anchors the first non-dragged point; this does not add a
 source constraint or reduce the reported model DOF. Unconstrained movement needs
-no native kernel. Expression source is preserved, but replaying unchanged
-expression seeds can still displace the gesture anchor; stability for that case
-remains unresolved in [#23](https://github.com/vilicvane/code3d/issues/23).
+no native kernel. During a drag, the editor uses the AST to lock each expression
+coordinate to its evaluated author value: `[width, 0]` locks X but allows Y to move.
+These numeric locks apply to all local points, not just the dragged point, and do
+not become permanent constraints or change normal evaluation. If imposing these
+locks changes the displayed geometry, the solver satisfies them before choosing
+the temporary anchor. Initially unsatisfied author data can therefore adjust on
+the first drag. Editable axes alone are written back; expressions never gain
+offsets. Previews forward-solve the exact rounded data that recompilation uses.
 Deleting a point also deletes connected local lines and affected constraints. Upstream geometry stays
 locked but can supply endpoints for new lines. Coordinates using expressions
-remain editable in code, not by dragging. The editor preserves existing IDs and
+remain editable in code, not by dragging; literal axes on the same point remain
+draggable. The editor preserves existing IDs and
 allocates new IDs from the current local maximum, without `nextId` metadata.
 Deleted IDs may therefore be reused; downstream references are not automatically
 rewritten. Circles/arcs, trimming and conversion to faces/solids remain outside

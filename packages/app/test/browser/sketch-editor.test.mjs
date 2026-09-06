@@ -144,11 +144,18 @@ test('expression coordinates stay intact and switching named bindings switches t
   await page.keyboard.press('End');
   await page.keyboard.press('ArrowLeft');
   await point(page, 1).waitFor();
+  const before = await screenPoint(point(page, 1));
   await drag(page, point(page, 1), 40, 20);
-  assert.match(await text(page), /width, 0/);
+  await settleDrag(page);
+  await page.getByText('Ready', {exact: true}).waitFor();
+  const after = await screenPoint(point(page, 1));
+  assert.equal(after[0], before[0]);
+  assert.ok(Math.abs(after[1] - before[1]) > 10);
+  assert.match(await text(page), /\[width,\s*-/);
+  await point(page, 1).click();
   assert.match(
     await page.locator('.sketch-editor output').innerText(),
-    /Expression-driven/,
+    /X locked by expression/,
   );
 });
 
@@ -572,6 +579,53 @@ test('constrained drag anchors the opposite endpoint, keeps length and survives 
   await point(page, 2).waitFor();
   assert.match(await text(page), /'point',\s*2,\s*\[40,\s*0\]/);
   assert.doesNotMatch(await text(page), /'horizontal'|'fixed'/);
+});
+
+test('expression locks survive constrained preview, release and undo without rewriting dependencies', async t => {
+  const page = await open(
+    t,
+    `import {sketch} from '@code3d/core';
+const width = 0, height = 0;
+const value = sketch([
+  ['point', 1, [width, height]],
+  ['point', 2, [40, 0]],
+  ['line', 3, [1, 2]],
+], {constraints: [['length', [3, 40]]]});`,
+  );
+  const source = await text(page);
+  const anchor = await screenPoint(point(page, 1));
+  await drag(page, point(page, 1), 40, 30);
+  assert.equal(await text(page), source, 'both expression axes are read-only');
+  assert.deepEqual(await screenPoint(point(page, 1)), anchor);
+  assert.match(
+    await page.locator('.sketch-editor output').innerText(),
+    /X\/Y locked by expression/,
+  );
+
+  const rect = await point(page, 2).boundingBox();
+  await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(
+    rect.x + rect.width / 2 - 40,
+    rect.y + rect.height / 2 - 50,
+    {steps: 8},
+  );
+  await settleDrag(page);
+  const preview = await screenPoint(point(page, 2));
+  assert.deepEqual(await screenPoint(point(page, 1)), anchor);
+  await page.mouse.up();
+  await settleDrag(page);
+  await page.getByText('Ready', {exact: true}).waitFor();
+  assert.deepEqual(await screenPoint(point(page, 1)), anchor);
+  const released = await screenPoint(point(page, 2));
+  released.forEach((v, axis) => assert.ok(Math.abs(v - preview[axis]) < 1e-5));
+  assert.match(await text(page), /\[width,\s*height\]/);
+  assert.doesNotMatch(await text(page), /fixed|offset/);
+  assert.notEqual(await text(page), source);
+  await page.keyboard.press('Control+z');
+  await page.getByText('Ready', {exact: true}).waitFor();
+  assert.match(await text(page), /'point',\s*2,\s*\[40,\s*0\]/);
+  assert.match(await text(page), /\[width,\s*height\]/);
 });
 
 test('fully constrained points resist dragging without writing a source transaction', async t => {

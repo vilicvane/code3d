@@ -226,6 +226,152 @@ test('either endpoint can rotate continuously through 180 degrees with a tempora
   }
 });
 
+test('gesture coordinate locks are numeric, per-axis and absent from ordinary evaluation', () => {
+  for (const axis of [0, 1]) {
+    const original = snapshot(sketch([['point', 1, [22, 19]]]));
+    const moved = solveSketchSnapshot([original], {
+      id: 1,
+      position: [30, 40],
+      locks: [{id: 1, axis, value: original.entities[0].position[axis]}],
+    });
+    assert.equal(position(moved, 1)[axis], position(original, 1)[axis]);
+    assert.equal(position(moved, 1)[1 - axis], [30, 40][1 - axis]);
+    assert.equal(moved.degreesOfFreedom, 2);
+    assert.deepEqual(moved.constraints, []);
+    assert.deepEqual(
+      position(
+        solveSketchSnapshot([original], {
+          id: 1,
+          position: [30, 40],
+        }),
+        1,
+      ),
+      [30, 40],
+    );
+  }
+});
+
+test('a dragged coordinate lock coexists with the first non-dragged anchor and hard constraints', () => {
+  const original = snapshot(
+    sketch(
+      [
+        ['point', 1, [0, 0]],
+        ['point', 2, [20, 0]],
+        ['line', 3, [1, 2]],
+      ],
+      {constraints: [['horizontal', 3]]},
+    ),
+  );
+  const moved = solveSketchSnapshot([original], {
+    id: 2,
+    position: [40, 30],
+    locks: [{id: 2, axis: 1, value: 0}],
+  });
+  assert.deepEqual(position(moved, 1), [0, 0]);
+  close(position(moved, 2)[0], 40);
+  assert.equal(position(moved, 2)[1], 0);
+  assert.equal(moved.degreesOfFreedom, original.degreesOfFreedom);
+});
+
+test('coordinate locks and permanent coordinate constraints together prevent an extra drag anchor', () => {
+  for (const permanentY of [false, true]) {
+    const original = snapshot(
+      sketch([...entries, ['point', 4, [0, 0]]], {
+        constraints: [
+          ['length', [3, 40]],
+          ...(permanentY ? [['y', [4, 0]]] : []),
+        ],
+      }),
+    );
+    const moved = solveSketchSnapshot([original], {
+      id: 2,
+      position: [60, 20],
+      locks: [
+        {id: 4, axis: 0, value: 0},
+        ...(!permanentY ? [{id: 4, axis: 1, value: 0}] : []),
+      ],
+    });
+    position(moved, 2).forEach((v, axis) => close(v, [60, 20][axis]));
+    assert.notDeepEqual(position(moved, 1), position(original, 1));
+    position(moved, 4).forEach(v => close(v, 0));
+    assert.equal(moved.degreesOfFreedom, original.degreesOfFreedom);
+  }
+});
+
+test('changed coordinate locks are satisfied before a temporary anchor is chosen', () => {
+  const original = snapshot(
+    sketch(
+      [
+        ['point', 1, [22, 0]],
+        ['point', 2, [62, 19]],
+        ['line', 3, [1, 2]],
+      ],
+      {constraints: [['horizontal', 3]]},
+    ),
+  );
+  assert.equal(position(original, 2)[1], 0);
+  const moved = solveSketchSnapshot([original], {
+    id: 2,
+    position: [70, 30],
+    locks: [{id: 2, axis: 1, value: 19}],
+  });
+  position(moved, 1).forEach((v, axis) => close(v, [22, 19][axis]));
+  position(moved, 2).forEach((v, axis) => close(v, [70, 19][axis]));
+  assert.deepEqual(moved.constraints, original.constraints);
+  assert.equal(moved.degreesOfFreedom, original.degreesOfFreedom);
+});
+
+test('gesture locks respect explicit fixed and coordinate constraints rather than replacing them', () => {
+  const original = snapshot(
+    sketch(
+      [
+        ['point', 1, [0, 0]],
+        ['point', 2, [40, 0]],
+        ['line', 3, [1, 2]],
+      ],
+      {
+        constraints: [
+          ['fixed', 1],
+          ['length', [3, 40]],
+        ],
+      },
+    ),
+  );
+  const moved = solveSketchSnapshot([original], {
+    id: 2,
+    position: [24, 32],
+    locks: [
+      {id: 1, axis: 0, value: 0},
+      {id: 1, axis: 1, value: 0},
+    ],
+  });
+  assert.deepEqual(position(moved, 1), [0, 0]);
+  position(moved, 2).forEach((v, axis) => close(v, [24, 32][axis]));
+  assert.throws(
+    () =>
+      solveSketchSnapshot([original], {
+        id: 2,
+        position: [24, 32],
+        locks: [{id: 1, axis: 0, value: 10}],
+      }),
+    SketchConstraintError,
+  );
+  const located = snapshot(
+    sketch([['point', 1, [0, 0]]], {
+      constraints: [['x', [1, 10]]],
+    }),
+  );
+  assert.throws(
+    () =>
+      solveSketchSnapshot([located], {
+        id: 1,
+        position: [20, 20],
+        locks: [{id: 1, axis: 0, value: 0}],
+      }),
+    SketchConstraintError,
+  );
+});
+
 test('conflicting dimensions report solve-local constraint indices and redundant constraints stay solvable', () => {
   assert.throws(
     () =>
