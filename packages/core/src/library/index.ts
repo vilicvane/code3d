@@ -63,4 +63,10 @@ export type {
   VertexTopologyCapabilities,
 } from './runtime.js';
 export type {Vec3} from './spatial.js';
-export type {EdgeId, SurfaceId, TopologyKind, VertexId} from './topology.js';
+export type {
+  EdgeId,
+  SurfaceId,
+  TopologyId,
+  TopologyKind,
+  VertexId,
+} from './topology.js';

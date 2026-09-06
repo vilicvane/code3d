@@ -11,16 +11,34 @@ import type {
   TopoDS_Shape,
 } from 'replicad-opencascadejs';
 
-import {castOwnedShape3D, shapeSubshapes} from './kernel-shapes.js';
+import {
+  castOwnedShape3D,
+  consumeShapeList,
+  shapeSubshapes,
+} from './kernel-shapes.js';
 
-export type VertexId = number;
-export type EdgeId = number;
-export type SurfaceId = number;
-
-export type TopologyKind = 'vertex' | 'edge' | 'surface';
+import {
+  formatTopologyId,
+  inheritedTopologyId,
+  isTopologyId,
+  sameTopologyId,
+  TopologyIdSet,
+  type TopologyId,
+  type TopologyKind,
+  type VertexId,
+  type EdgeId,
+  type SurfaceId,
+} from './topology-id.js';
+export type {
+  TopologyId,
+  TopologyKind,
+  VertexId,
+  EdgeId,
+  SurfaceId,
+} from './topology-id.js';
 
 export type TopologySelection =
-  Readonly<{kind: 'solid'}> | Readonly<{kind: TopologyKind; id: number}>;
+  Readonly<{kind: 'solid'}> | Readonly<{kind: TopologyKind; id: TopologyId}>;
 
 /** Visit an owned wrapper; callers must not retain it beyond the callback. */
 export function withTopologyShape<T>(
@@ -52,8 +70,8 @@ export function topologyChildren(
   topology: ShapeTopology,
   selection: TopologySelection,
   kind: TopologyKind,
-  ids?: readonly number[],
-): readonly number[] {
+  ids?: readonly TopologyId[],
+): readonly TopologyId[] {
   const all = topology[topologyMetadata[kind].plural];
   const available =
     selection.kind === 'solid'
@@ -72,13 +90,13 @@ export function topologyChildren(
         });
   if (!ids) return available;
   return ids.map(id => {
-    resolveTopologyId(kind, all, id);
-    if (!available.includes(id)) {
+    const resolved = resolveTopologyId(kind, all, id);
+    if (!available.some(candidate => sameTopologyId(candidate, id))) {
       throw new Error(
-        `${topologyMetadata[kind].prefix}${id} does not belong to ${selection.kind}${selection.kind === 'solid' ? '' : ` ${topologyMetadata[selection.kind].prefix}${selection.id}`}.`,
+        `${formatTopologyId(kind, id)} does not belong to ${selection.kind}${selection.kind === 'solid' ? '' : ` ${formatTopologyId(selection.kind, selection.id)}`}.`,
       );
     }
-    return id;
+    return resolved;
   });
 }
 
@@ -86,16 +104,14 @@ function topologyShapes(shape: AnyShape, kind: TopologyKind): AnyShape[] {
   return shapeSubshapes(shape, kind === 'surface' ? 'face' : kind);
 }
 
-type StableTopology<Id extends number> = Readonly<{
-  /** Stable IDs aligned with the corresponding shape traversal order. */
-  ids: readonly Id[];
-  /** High-water mark. Retired IDs below this value are never reused. */
-  nextId: Id;
+type StableTopology = Readonly<{
+  /** IDs aligned with the corresponding shape traversal order. */
+  ids: readonly TopologyId[];
 }>;
 
-export type VertexTopology = StableTopology<VertexId>;
-export type EdgeTopology = StableTopology<EdgeId>;
-export type SurfaceTopology = StableTopology<SurfaceId>;
+export type VertexTopology = StableTopology;
+export type EdgeTopology = StableTopology;
+export type SurfaceTopology = StableTopology;
 
 export type ShapeTopology = Readonly<{
   vertices: VertexTopology;
@@ -152,6 +168,12 @@ type RawSurfaceGroup = Readonly<{
   faceId: number;
 }>;
 
+type StableEdgeGroup = Readonly<{
+  start: number;
+  count: number;
+  edgeId: EdgeId;
+}>;
+
 type StableSurfaceGroup = Readonly<{
   start: number;
   count: number;
@@ -169,9 +191,9 @@ export function initialShapeTopology(shape: AnyShape): ShapeTopology {
   const surfaces = shapeSubshapes(shape, 'face');
   try {
     return shapeTopology(
-      initialTopology(vertices) as VertexTopology,
-      initialTopology(edges) as EdgeTopology,
-      initialTopology(surfaces) as SurfaceTopology,
+      initialTopology(vertices),
+      initialTopology(edges),
+      initialTopology(surfaces),
     );
   } finally {
     deleteShapes(vertices);
@@ -191,11 +213,7 @@ export function preserveShapeTopology(
     assertTopologyLength('vertex', vertices, source.vertices);
     assertTopologyLength('edge', edges, source.edges);
     assertTopologyLength('surface', surfaces, source.surfaces);
-    return shapeTopology(
-      stableTopology(source.vertices.ids, source.vertices.nextId),
-      stableTopology(source.edges.ids, source.edges.nextId),
-      stableTopology(source.surfaces.ids, source.surfaces.nextId),
-    );
+    return source;
   } finally {
     deleteShapes(vertices);
     deleteShapes(edges);
@@ -222,18 +240,17 @@ export function chamferEdges(
 }
 
 export function booleanWithTopology(
-  left: Shape3D,
-  right: Shape3D,
+  left: TopologyInput,
+  right: TopologyInput,
   operation: BooleanTopologyOperation,
-  source: ShapeTopology,
 ): BooleanTopologyResult {
   const oc = getOC();
   const builder =
     operation === 'fuse'
-      ? new oc.BRepAlgoAPI_Fuse(left.wrapped, right.wrapped)
+      ? new oc.BRepAlgoAPI_Fuse(left.shape.wrapped, right.shape.wrapped)
       : operation === 'cut'
-        ? new oc.BRepAlgoAPI_Cut(left.wrapped, right.wrapped)
-        : new oc.BRepAlgoAPI_Common(left.wrapped, right.wrapped);
+        ? new oc.BRepAlgoAPI_Cut(left.shape.wrapped, right.shape.wrapped)
+        : new oc.BRepAlgoAPI_Common(left.shape.wrapped, right.shape.wrapped);
   let result: Shape3D | undefined;
   try {
     builder.Build();
@@ -241,7 +258,7 @@ export function booleanWithTopology(
     result = castOwnedShape3D(builder.Shape());
     return {
       shape: result,
-      topology: transferShapeTopology(left, source, result, builder),
+      topology: transferShapeTopology([left, right], result, builder),
     };
   } catch (error) {
     result?.delete();
@@ -255,7 +272,7 @@ export function stableEdgeGroups(
   shape: AnyShape,
   topology: EdgeTopology,
   groups: readonly RawEdgeGroup[],
-): readonly RawEdgeGroup[] {
+): readonly StableEdgeGroup[] {
   const edges = shapeSubshapes(shape, 'edge');
   try {
     const ids = stableGroupIds(
@@ -327,16 +344,21 @@ export function resolveEdgeSelection(
 /** Resolve an explicit selection in source order, including an empty selection. */
 export function resolveTopologySelection(
   kind: TopologyKind,
-  topology: StableTopology<number>,
-  requestedIds: readonly number[],
-): readonly number[] {
-  const requested = new Set(requestedIds);
-  for (const id of requested) assertTopologyId(kind, id);
+  topology: StableTopology,
+  requestedIds: readonly TopologyId[],
+): readonly TopologyId[] {
+  const requested = new TopologyIdSet();
+  for (const id of requestedIds) {
+    assertTopologyId(kind, id);
+    requested.add(id);
+  }
   const selected = topology.ids.filter(id => requested.has(id));
-  const missing = [...requested].filter(id => !selected.includes(id));
+  const missing = [...requested].filter(
+    id => !selected.some(candidate => sameTopologyId(candidate, id)),
+  );
   if (missing.length > 0) {
     throw new Error(
-      `Unknown or retired ${kind} ${missing.map(id => `${topologyMetadata[kind].prefix}${id}`).join(', ')}.`,
+      `Unknown or retired ${kind} ${missing.map(id => formatTopologyId(kind, id)).join(', ')}.`,
     );
   }
   return selected;
@@ -437,7 +459,7 @@ function modifyEdges(
   }
 
   const edges = shapeSubshapes(shape, 'edge');
-  const selected = new Set(selectedEdgeIds);
+  const selected = new TopologyIdSet(selectedEdgeIds);
   const oc = getOC();
   const builder =
     kind === 'fillet'
@@ -461,7 +483,11 @@ function modifyEdges(
     result = castOwnedShape3D(builder.Shape());
     return {
       shape: result,
-      topology: transferShapeTopology(shape, source, result, builder),
+      topology: transferShapeTopology(
+        [{shape, topology: source, index: 1}],
+        result,
+        builder,
+      ),
       selectedEdgeIds,
     };
   } catch (error) {
@@ -508,7 +534,9 @@ function propagatedContourDetail(
 }
 
 function formattedEdgeSelection(edgeIds: readonly EdgeId[]): string {
-  const visible = edgeIds.slice(0, 8).map(edgeId => `E${edgeId}`);
+  const visible = edgeIds
+    .slice(0, 8)
+    .map(edgeId => formatTopologyId('edge', edgeId));
   return edgeIds.length <= visible.length
     ? visible.join(', ')
     : `${visible.join(', ')}, and ${edgeIds.length - visible.length} more`;
@@ -518,113 +546,132 @@ function counted(count: number, singular: string): string {
   return `${count} ${singular}${count === 1 ? '' : 's'}`;
 }
 
-function resolveTopologyId<Id extends number>(
+function resolveTopologyId(
   kind: TopologyKind,
-  topology: StableTopology<Id>,
-  id: Id,
-): Id {
-  assertTopologyId(kind, id);
-  if (!topology.ids.includes(id)) {
-    throw new Error(
-      `Unknown or retired ${kind} ${topologyMetadata[kind].prefix}${id}.`,
-    );
-  }
-  return id;
+  topology: StableTopology,
+  id: TopologyId,
+): TopologyId {
+  return topology.ids[resolveTopologyIndex(kind, topology, id)];
 }
 
-function resolveTopologyIndex<Id extends number>(
+function resolveTopologyIndex(
   kind: TopologyKind,
-  topology: StableTopology<Id>,
-  id: Id,
+  topology: StableTopology,
+  id: TopologyId,
 ): number {
-  resolveTopologyId(kind, topology, id);
-  return topology.ids.indexOf(id);
-}
-
-function assertTopologyId(kind: TopologyKind, id: number): void {
-  if (!Number.isSafeInteger(id) || id < 1) {
-    const prefix = topologyMetadata[kind].prefix;
+  assertTopologyId(kind, id);
+  const index = topology.ids.findIndex(candidate =>
+    sameTopologyId(candidate, id),
+  );
+  if (index === -1)
     throw new Error(
-      `${kind[0].toUpperCase()}${kind.slice(1)} IDs must be positive integers; received ${id}. Expected ${prefix}<positive integer>.`,
+      `Unknown or retired ${kind} ${formatTopologyId(kind, id)}.`,
+    );
+  return index;
+}
+
+function assertTopologyId(kind: TopologyKind, id: TopologyId): void {
+  if (!isTopologyId(id)) {
+    throw new Error(
+      `${kind[0].toUpperCase()}${kind.slice(1)} IDs must be positive integers or paths of at least two positive integers; received ${JSON.stringify(id)}.`,
     );
   }
 }
 
-export function transferShapeTopology(
-  input: Shape3D,
-  source: ShapeTopology,
-  output: Shape3D,
-  history: ShapeHistory,
-): ShapeTopology {
-  const inputVertices = shapeVertices(input);
-  const outputVertices = shapeVertices(output);
-  const inputEdges = shapeSubshapes(input, 'edge');
-  const outputEdges = shapeSubshapes(output, 'edge');
-  const inputSurfaces = shapeSubshapes(input, 'face');
-  const outputSurfaces = shapeSubshapes(output, 'face');
-  try {
-    return shapeTopology(
-      transferTopology(
-        'vertex',
-        inputVertices,
-        source.vertices,
-        outputVertices,
-        history,
-      ),
-      transferTopology('edge', inputEdges, source.edges, outputEdges, history),
-      transferTopology(
-        'surface',
-        inputSurfaces,
-        source.surfaces,
-        outputSurfaces,
-        history,
-      ),
-    );
-  } finally {
-    deleteShapes(inputVertices);
-    deleteShapes(outputVertices);
-    deleteShapes(inputEdges);
-    deleteShapes(outputEdges);
-    deleteShapes(inputSurfaces);
-    deleteShapes(outputSurfaces);
-  }
-}
+export type TopologyInput = Readonly<{
+  shape: AnyShape;
+  topology: ShapeTopology;
+  /** Omitted only for intermediate results inside a single operation. */
+  index?: number;
+}>;
 
-function transferTopology<Id extends number>(
+/** Returns owned handles, released by the transfer after matching. */
+type TopologyHistory = (
+  input: TopoDS_Shape,
   kind: TopologyKind,
-  input: readonly TopologyShape[],
-  source: StableTopology<Id>,
-  output: readonly TopologyShape[],
-  history: ShapeHistory,
-): StableTopology<Id> {
-  assertTopologyLength(kind, input, source);
-  const candidates = input.map(shape => {
-    const unchanged = matchingOutputShapes(shape.wrapped, output);
-    return unchanged.length > 0
-      ? unchanged
-      : modifiedOutputShapes(shape.wrapped, output, history);
-  });
-  const inputCountsByOutput = new Array<number>(output.length).fill(0);
-  for (const indices of candidates) {
-    for (const index of indices) inputCountsByOutput[index] += 1;
-  }
+  inputIndex: number,
+) => readonly TopoDS_Shape[];
 
-  const transferred = new Map<number, Id>();
-  candidates.forEach((indices, inputIndex) => {
-    if (indices.length !== 1) return;
-    const [outputIndex] = indices;
-    if (inputCountsByOutput[outputIndex] === 1) {
-      transferred.set(outputIndex, source.ids[inputIndex]);
+/** Resolve all input candidates together so merges never arbitrarily pick an owner. */
+export function transferShapeTopology(
+  inputs: readonly TopologyInput[],
+  output: AnyShape,
+  history: ShapeHistory | TopologyHistory,
+): ShapeTopology {
+  const transfer = (kind: TopologyKind): StableTopology => {
+    const originals: AnyShape[][] = [];
+    const results = topologyShapes(output, kind);
+    try {
+      const candidates = inputs.flatMap((input, inputIndex) => {
+        const shapes = topologyShapes(input.shape, kind);
+        originals.push(shapes);
+        const source = input.topology[topologyMetadata[kind].plural];
+        assertTopologyLength(kind, shapes, source);
+        return shapes.map((shape, index) => {
+          const id = source.ids[index];
+          // Numeric elements in an internal prefix are still new to this
+          // operation. Reallocate them with the final traversal, without exposing
+          // internal creation steps or reserving numbers for discarded geometry.
+          const inherited =
+            input.index !== undefined
+              ? inheritedTopologyId(input.index, id)
+              : typeof id === 'number'
+                ? undefined
+                : id;
+          const unchanged = matchingOutputShapes(shape.wrapped, results);
+          if (unchanged.length) return {id: inherited, matches: unchanged};
+          if (typeof history !== 'function') {
+            return {
+              id: inherited,
+              matches: modifiedOutputShapes(shape.wrapped, results, history),
+            };
+          }
+          const modified = history(shape.wrapped, kind, inputIndex);
+          try {
+            return {
+              id: inherited,
+              matches: [
+                ...new Set(
+                  modified.flatMap(candidate =>
+                    matchingOutputShapes(candidate, results),
+                  ),
+                ),
+              ],
+            };
+          } finally {
+            modified.forEach(candidate => candidate.delete());
+          }
+        });
+      });
+      const counts = new Array<number>(results.length).fill(0);
+      for (const candidate of candidates) {
+        for (const index of candidate.matches) counts[index]++;
+      }
+      const inherited = new Map<number, TopologyId>();
+      for (const candidate of candidates) {
+        const [index] = candidate.matches;
+        if (
+          candidate.id !== undefined &&
+          candidate.matches.length === 1 &&
+          counts[index] === 1
+        ) {
+          inherited.set(index, candidate.id);
+        }
+      }
+      let nextId = 1;
+      return stableTopology(
+        results.map((_, index) => inherited.get(index) ?? nextId++),
+      );
+    } finally {
+      originals.forEach(deleteShapes);
+      deleteShapes(results);
     }
-  });
-
-  let nextId = source.nextId;
-  const ids = output.map((_, outputIndex) => {
-    const inherited = transferred.get(outputIndex);
-    if (inherited !== undefined) return inherited;
-    return nextId++ as Id;
-  });
-  return stableTopology(ids, nextId);
+  };
+  return shapeTopology(
+    transfer('vertex'),
+    transfer('edge'),
+    transfer('surface'),
+  );
 }
 
 function matchingOutputShapes(
@@ -643,41 +690,32 @@ function modifiedOutputShapes(
   output: readonly TopologyShape[],
   history: ShapeHistory,
 ): number[] {
-  const modified = history.Modified(input);
-  const matches = new Set<number>();
+  const modified = consumeShapeList(history.Modified(input));
   try {
-    while (!modified.IsEmpty()) {
-      const candidate = modified.First();
-      modified.RemoveFirst();
-      try {
-        output.forEach((shape, index) => {
-          if (shape.wrapped.IsSame(candidate)) matches.add(index);
-        });
-      } finally {
-        candidate.delete();
-      }
-    }
+    return [
+      ...new Set(
+        modified.flatMap(candidate => matchingOutputShapes(candidate, output)),
+      ),
+    ];
   } finally {
-    modified.delete();
+    modified.forEach(candidate => candidate.delete());
   }
-  return [...matches];
 }
 
-function stableGroupIds<Id extends number>(
+function stableGroupIds(
   kind: Exclude<TopologyKind, 'vertex'>,
   shapes: readonly TopologyShape[],
-  topology: StableTopology<Id>,
+  topology: StableTopology,
   kernelIds: readonly number[],
-): Id[] {
+): TopologyId[] {
   assertTopologyLength(kind, shapes, topology);
-  const prefix = topologyMetadata[kind].prefix;
-  const idsByKernelHash = new Map<number, Id>();
+  const idsByKernelHash = new Map<number, TopologyId>();
   shapes.forEach((shape, index) => {
     const stableId = topology.ids[index];
     const previous = idsByKernelHash.get(shape.hashCode);
-    if (previous !== undefined && previous !== stableId) {
+    if (previous !== undefined && !sameTopologyId(previous, stableId)) {
       throw new Error(
-        `OpenCascade produced colliding ${kind} hashes for ${prefix}${previous} and ${prefix}${stableId}.`,
+        `OpenCascade produced colliding ${kind} hashes for ${formatTopologyId(kind, previous)} and ${formatTopologyId(kind, stableId)}.`,
       );
     }
     idsByKernelHash.set(shape.hashCode, stableId);
@@ -695,18 +733,12 @@ function stableGroupIds<Id extends number>(
 
 function initialTopology(
   shapes: readonly (ReplicadVertex | ReplicadEdge | ReplicadFace)[],
-): StableTopology<number> {
-  return stableTopology(
-    shapes.map((_, index) => index + 1),
-    shapes.length + 1,
-  );
+): StableTopology {
+  return stableTopology(shapes.map((_, index) => index + 1));
 }
 
-function stableTopology<Id extends number>(
-  ids: readonly Id[],
-  nextId: Id,
-): StableTopology<Id> {
-  return Object.freeze({ids: Object.freeze([...ids]), nextId});
+function stableTopology(ids: readonly TopologyId[]): StableTopology {
+  return {ids};
 }
 
 function shapeTopology(
@@ -714,13 +746,13 @@ function shapeTopology(
   edges: EdgeTopology,
   surfaces: SurfaceTopology,
 ): ShapeTopology {
-  return Object.freeze({vertices, edges, surfaces});
+  return {vertices, edges, surfaces};
 }
 
-function assertTopologyLength<Id extends number>(
+function assertTopologyLength(
   kind: TopologyKind,
   shapes: readonly TopologyShape[],
-  topology: StableTopology<Id>,
+  topology: StableTopology,
 ): void {
   if (shapes.length !== topology.ids.length) {
     throw new Error(
@@ -730,13 +762,10 @@ function assertTopologyLength<Id extends number>(
 }
 
 const topologyMetadata = {
-  vertex: {prefix: 'V', plural: 'vertices'},
-  edge: {prefix: 'E', plural: 'edges'},
-  surface: {prefix: 'S', plural: 'surfaces'},
-} as const satisfies Record<
-  TopologyKind,
-  Readonly<{prefix: string; plural: string}>
->;
+  vertex: {plural: 'vertices'},
+  edge: {plural: 'edges'},
+  surface: {plural: 'surfaces'},
+} as const satisfies Record<TopologyKind, Readonly<{plural: string}>>;
 
 function shapeVertices(shape: AnyShape): ReplicadVertex[] {
   return shapeSubshapes(shape, 'vertex');

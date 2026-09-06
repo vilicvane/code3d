@@ -1,3 +1,4 @@
+import {formatTopologyId, TopologyIdSet} from './topology-id.js';
 import {getOC, type Shape3D} from 'replicad';
 import {castOwnedShape3D, shapeSubshapes} from './kernel-shapes.js';
 import {describeOpenCascadeException} from './open-cascade-error.js';
@@ -16,7 +17,7 @@ export function shellWithTopology(
   removedSurfaceIds: readonly SurfaceId[],
 ): {shape: Shape3D; topology: ShapeTopology} {
   const selection = removedSurfaceIds.length
-    ? removedSurfaceIds.map(id => `S${id}`).join(', ')
+    ? removedSurfaceIds.map(id => formatTopologyId('surface', id)).join(', ')
     : 'no openings';
   try {
     if (removedSurfaceIds.length === topology.surfaces.ids.length) {
@@ -52,7 +53,7 @@ function openShell(
 ): {shape: Shape3D; topology: ShapeTopology} {
   const oc = getOC();
   const faces = shapeSubshapes(shape, 'face');
-  const selected = new Set(removedIds);
+  const selected = new TopologyIdSet(removedIds);
   const closingFaces = new oc.NCollection_List_TopoDS_Shape();
   const builder = new oc.BRepOffsetAPI_MakeThickSolid();
   let result: Shape3D | undefined;
@@ -117,7 +118,11 @@ function openShell(
     }
     return {
       shape: result,
-      topology: transferShapeTopology(shape, topology, result, builder),
+      topology: transferShapeTopology(
+        [{shape, topology, index: 1}],
+        result,
+        builder,
+      ),
     };
   } catch (error) {
     result?.delete();
@@ -197,11 +202,15 @@ function closedShell(
       } finally {
         shells.delete();
       }
-      // Original boundaries retain their IDs for either direction. Offset
+      // Original boundaries retain their input paths for either direction. Offset
       // boundaries are new topology, even when OCCT has generation history.
       return {
         shape: result,
-        topology: transferShapeTopology(shape, topology, result, cut),
+        topology: transferShapeTopology(
+          [{shape, topology, index: 1}],
+          result,
+          cut,
+        ),
       };
     } catch (error) {
       result?.delete();

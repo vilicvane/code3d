@@ -62,17 +62,37 @@ available to correct the thickness or openings.
 Edge, face, and vertex IDs have separate namespaces within each model. An ID
 is not a position in a JavaScript array or a globally unique identifier.
 
-Derived operations preserve IDs with a one-to-one history, allocate new IDs
-for new or ambiguous elements, and do not reuse retired IDs. Always select
-from the model that is the input to the operation you are editing.
+Primitives use numbers starting at `1`. An operation that changes topology gives
+an inherited element a path: `[inputIndex, ...previousId]`, with input indices
+starting at `1`. New elements receive numeric IDs starting at `1` in that result.
 
-After a fillet, some original edges no longer exist. A later chamfer must use
-IDs from the filleted model. Do not copy a list from the original box and assume
-it still selects the same edges.
+For `loft([start, end])`, the two cap faces are `surface([1, 1])` and
+`surface([2, 1])`; side faces are `surface(1)`, `surface(2)`, and so on. Changing
+the number of side faces does not move the cap IDs. Boolean operations use the
+same rule for every input, including cutting tools. Edges and vertices follow
+the same rules in their own namespaces.
 
-Shelling follows the same history rules. An unchanged boundary keeps its ID,
-and offset walls get new IDs. An opening rim can retain its former cap's surface
-ID when the kernel records it as a one-to-one modification.
+Single-input operations (`fillet`, `chamfer`, and `shell`) also add a path level.
+After a fillet, an unambiguous original `E10` becomes `E[1,10]`. A later chamfer selects it with
+`rounded.chamfer(0.5, [[1, 10]])`. The outer array is the selection list;
+`[1, 10]` inside it is one edge ID. A subsequent operation prefixes the path
+again, such as `[1, 1, 10]`.
+
+Only one-to-one descendants inherit a path. Deleted elements have no descendant;
+ambiguous splits and merges receive new numeric IDs. A middle loft section is
+not a cap, and a section edge split by loft compatibility does not retain a
+single edge identity. New-element numbering follows deterministic construction
+and can change when that construction changes.
+
+Rotation, scaling, placement, and exposed references keep complete IDs. Always
+select IDs from the model passed into the operation being edited; IDs are not
+interchangeable between a source and its result.
+
+Shelling follows the same history rules: an unchanged boundary inherits
+`[1, ...previousId]`, and offset walls get new numeric IDs. An opening rim can
+inherit its former cap's surface path when the kernel records a one-to-one
+modification. To open both ends of a two-section loft, use
+`body.shell(1, [[1, 1], [2, 1]])`.
 
 ## Use topology as a relation anchor
 
@@ -88,7 +108,7 @@ chamfer's all-edge behavior.
 Continue querying a selected face or edge:
 
 ```ts
-const face = base.surface(1);
+const face = base.surface([1, 1]);
 const boundary = face.edges();
 const corners = boundary[0].vertices();
 const center = face.center;

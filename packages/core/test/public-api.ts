@@ -38,6 +38,7 @@ import {
   type SolidModel,
   type Surface,
   type SurfaceId,
+  type TopologyId,
   type Vec3,
   type Vertex,
   type VertexId,
@@ -354,3 +355,14 @@ geometricMembers.location.edge(1);
 // @ts-expect-error An ordinary plane anchor has no topological boundary.
 solid.top.edges();
 void [exposedSolid, exposedSurface, exposedEdge, exposedVertex];
+
+const inheritedId: TopologyId = [1, 2, 3];
+solid.surface([1, 1]);
+solid.edge(inheritedId);
+solid.vertices([1, [2, 3], inheritedId]);
+solid.fillet(1, [[1, 2], inheritedId]);
+solid.originVertex([1, 2]);
+// @ts-expect-error Paths include at least one input index and a local ID.
+solid.surface([1]);
+// @ts-expect-error Paths are flat numeric tuples.
+solid.surface([1, [2, 3]]);

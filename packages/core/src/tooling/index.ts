@@ -63,6 +63,7 @@ export type {Quaternion, RigidTransform, Vec3} from '../library/spatial.js';
 export type {
   EdgeId,
   SurfaceId,
+  TopologyId,
   TopologyKind,
   VertexId,
 } from '../library/topology.js';
@@ -74,3 +75,12 @@ export function installOpenCascade(openCascade: OpenCascadeInstance): void {
   clearKernelOperationCache();
   setOC(openCascade);
 }
+
+export {
+  compareTopologyIds,
+  formatTopologyId,
+  isTopologyId,
+  sameTopologyId,
+  topologyIdKey,
+  TopologyIdSet,
+} from '../library/topology-id.js';
