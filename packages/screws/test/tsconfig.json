@@ -1,7 +1,7 @@
 {
-  "extends": "../../../tsconfig.base.json",
+  "extends": "../../../tsconfig.test.json",
+  "include": ["**/*.ts"],
   "compilerOptions": {
-    "noEmit": true
-  },
-  "files": ["public-api.ts"]
+    "erasableSyntaxOnly": true
+  }
 }

@@ -38,6 +38,9 @@ jobs:
       - name: Build packages
         run: npm run build:packages
 
+      - name: Check test types and run workspace tests
+        run: npm test
+
       - name: Build app and render-only entry
         run: npm run build --workspace @code3d/app
 

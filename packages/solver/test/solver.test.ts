@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import {fileURLToPath} from 'node:url';
 import test from 'node:test';
-import initialize from '../wasm/solver.js';
+import initialize, {
+  type Pose,
+  type Marker,
+  type Equation,
+  type Relation,
+} from '@code3d/solver';
 
 const solver = await initialize({
   locateFile: () =>
@@ -9,18 +14,26 @@ const solver = await initialize({
   print() {},
   printErr() {},
 });
-const identity = [0, 0, 0, 1];
-const body = (position, fixed = false) => ({
+const identity: Pose['quaternion'] = [0, 0, 0, 1];
+const body = (position: Pose['position'], fixed = false) => ({
   position,
   quaternion: identity,
   fixed,
 });
-const marker = (body, position = [0, 0, 0]) => ({
+const marker = (
+  body: number,
+  position: Pose['position'] = [0, 0, 0],
+): Marker => ({
   body,
   position,
   quaternion: identity,
 });
-const equation = (kind, axisI, axisJ = 0, value = 0) => ({
+const equation = (
+  kind: Equation['kind'],
+  axisI: number,
+  axisJ = 0,
+  value = 0,
+): Equation => ({
   kind,
   axisI,
   axisJ,
@@ -41,14 +54,23 @@ const line = [
   equation('dot', 1, 0),
   equation('dot', 1, 2),
 ];
-const relation = (id, i, j, equations) => ({
+const relation = (
+  id: string,
+  i: Marker,
+  j: Marker,
+  equations: readonly Equation[],
+): Relation => ({
   id,
   i,
   j,
   equations,
   preferences: [...point, ...orientation],
 });
-function near(actual, expected, tolerance = 1e-6) {
+function near(
+  actual: readonly number[],
+  expected: readonly number[],
+  tolerance = 1e-6,
+) {
   actual.forEach((value, i) =>
     assert.ok(
       Math.abs(value - expected[i]) < tolerance,
@@ -113,15 +135,26 @@ test('a point joint retains rotational freedom', () => {
   near(result.poses[1].quaternion, identity);
 });
 
+function mapPosition(
+  position: Pose['position'],
+  map: (value: number, axis: number) => number,
+): Pose['position'] {
+  return [map(position[0], 0), map(position[1], 1), map(position[2], 2)];
+}
+
 for (const count of [3, 10, 30]) {
   test(`assembles a perturbed closed loop of ${count} rigid bodies`, () => {
-    const centers = Array.from({length: count}, (_, index) => {
-      const angle = (2 * Math.PI * index) / count;
-      return [Math.cos(angle), Math.sin(angle), 0];
-    });
+    const centers = Array.from(
+      {length: count},
+      (_, index): Pose['position'] => {
+        const angle = (2 * Math.PI * index) / count;
+        return [Math.cos(angle), Math.sin(angle), 0];
+      },
+    );
     const bodies = centers.map((center, index) =>
       body(
-        center.map(
+        mapPosition(
+          center,
           (value, axis) => value + (index ? 0.01 * Math.sin(index + axis) : 0),
         ),
         index === 0,
@@ -129,18 +162,19 @@ for (const count of [3, 10, 30]) {
     );
     const relations = centers.map((center, index) => {
       const next = (index + 1) % count;
-      const midpoint = center.map(
+      const midpoint = mapPosition(
+        center,
         (value, axis) => (value + centers[next][axis]) / 2,
       );
       return relation(
         `joint-${index}`,
         marker(
           index,
-          midpoint.map((value, axis) => value - center[axis]),
+          mapPosition(midpoint, (value, axis) => value - center[axis]),
         ),
         marker(
           next,
-          midpoint.map((value, axis) => value - centers[next][axis]),
+          mapPosition(midpoint, (value, axis) => value - centers[next][axis]),
         ),
         point,
       );
@@ -153,7 +187,7 @@ for (const count of [3, 10, 30]) {
 }
 
 test('fixed bodies preserve translated and rotated input poses', () => {
-  const quaternion = [0, 0, Math.SQRT1_2, Math.SQRT1_2];
+  const quaternion: Pose['quaternion'] = [0, 0, Math.SQRT1_2, Math.SQRT1_2];
   const result = solver.solve({
     bodies: [{...body([3, 4, 5], true), quaternion}, body([3, 5, 5])],
     relations: [

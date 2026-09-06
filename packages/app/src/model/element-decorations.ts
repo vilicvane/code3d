@@ -380,7 +380,7 @@ export const relationSourceDecoration: SourceDecorationProvider = {
           element: constraint.targetElement,
           role: 'target' as const,
         },
-      ].flatMap(({reference, element, role}) => {
+      ].flatMap<ViewportDecoration>(({reference, element, role}) => {
         const node = module.objects.get(reference.nodeId);
         if (!node) return [];
         const decorations = namedElementDecorations(node, element);
