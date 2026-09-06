@@ -1,3 +1,6 @@
+import {defined, createModelSnapshotter} from './model-test.ts';
+import type {Model} from '@code3d/core';
+
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
@@ -13,7 +16,6 @@ import {
 } from '@code3d/core';
 import {
   composeTransforms,
-  createModelSnapshotter,
   modelElementReference,
   rotateVector,
   rotationAround,
@@ -21,7 +23,11 @@ import {
 
 const snapshot = createModelSnapshotter();
 const identity = [0, 0, 0, 1];
-function near(actual, expected, tolerance = 1e-6) {
+function near(
+  actual: readonly number[],
+  expected: readonly number[],
+  tolerance = 1e-6,
+) {
   actual.forEach((value, i) =>
     assert.ok(
       Math.abs(value - expected[i]) < tolerance,
@@ -29,8 +35,8 @@ function near(actual, expected, tolerance = 1e-6) {
     ),
   );
 }
-const pose = model => snapshot(model).compositionTransform;
-const position = model => pose(model).position;
+const pose = (model: Model) => snapshot(model).compositionTransform;
+const position = (model: Model) => pose(model).position;
 
 for (const [direction, expected] of Object.entries({
   up: [0, 7, 0],
@@ -42,7 +48,11 @@ for (const [direction, expected] of Object.entries({
 })) {
   test(`on ${direction} translates the matching support boundary`, () => {
     const base = box(20, 10, 30);
-    const placed = box(2, 4, 6).relate(self => self.on(base[direction]));
+    const placed = box(2, 4, 6).relate(self =>
+      self.on(
+        base[direction as 'up' | 'down' | 'left' | 'right' | 'front' | 'back'],
+      ),
+    );
     near(position(placed), expected);
     near(pose(placed).quaternion, identity);
     near(snapshot(placed).transform.position, [0, 0, 0]);
@@ -93,16 +103,23 @@ test('selected points, edges and surfaces use only their own finite extent', () 
   const top = source
     .surfaces()
     .find(
-      surface => modelElementReference(surface.down).transform.position[1] > 9,
+      surface =>
+        defined(modelElementReference(surface.down)).transform.position[1] > 9,
     );
   const edge = source
     .edges()
-    .find(edge => modelElementReference(edge.down).transform.position[1] > 9);
+    .find(
+      edge =>
+        defined(modelElementReference(edge.down)).transform.position[1] > 9,
+    );
   const vertex = source
     .vertices()
-    .find(vertex => modelElementReference(vertex).transform.position[1] > 9);
+    .find(
+      vertex =>
+        defined(modelElementReference(vertex)).transform.position[1] > 9,
+    );
   for (const geometry of [top, edge, vertex]) {
-    const placed = source.relate(() => geometry.on(base.up));
+    const placed = source.relate(() => defined(geometry).on(base.up));
     near(position(placed), [0, -5, 0]);
   }
   near(position(source.relate(self => self.on(base.up))), [0, 15, 0]);
@@ -128,8 +145,8 @@ test('offset pins bound centers in the unchanged target frame, including explici
   near(position(flip), [5, -5, 7]);
   near(pose(flip).quaternion, identity);
   assert.deepEqual(
-    modelElementReference(base.up.flip()).transform,
-    modelElementReference(base.up).transform,
+    defined(modelElementReference(base.up.flip())).transform,
+    defined(modelElementReference(base.up)).transform,
   );
   assert.deepEqual(
     modelElementReference(base.up.flip().flip()),
@@ -178,8 +195,11 @@ test('current derived bounds and old references have independent immutable meani
   const original = sphere(10);
   const old = original.up;
   const derived = original.scaled(2);
-  near(modelElementReference(old).transform.position, [0, 10, 0]);
-  near(modelElementReference(derived.up).transform.position, [0, 20, 0]);
+  near(defined(modelElementReference(old)).transform.position, [0, 10, 0]);
+  near(
+    defined(modelElementReference(derived.up)).transform.position,
+    [0, 20, 0],
+  );
   const before = modelElementReference(derived.right);
   snapshot(derived);
   assert.deepEqual(modelElementReference(derived.right), before);
@@ -210,6 +230,7 @@ test('on rejects arbitrary target anchors and infinite source references', () =>
     model.surface(1),
     model.vertex(1),
   ]) {
+    // @ts-expect-error Only directional bounds are valid on targets.
     assert.throws(() => model.on(target), /requires a directional bound/);
   }
   assert.throws(() => model.axis.on(model.up), /no finite geometry/);
@@ -227,7 +248,9 @@ test('pivot rotation preserves the original bent loft and standalone geometry', 
   near(position(via), [50 - 25 * Math.SQRT2, -25 * Math.SQRT2, 0]);
   near(position(end), [50, -50, 0]);
   near(snapshot(via).transform.quaternion, identity);
-  assert.ok(snapshot(loft([start, via, end])).mesh.triangles.length > 0);
+  assert.ok(
+    defined(snapshot(loft([start, via, end])).mesh).triangles.length > 0,
+  );
 });
 
 test('local pivot, pivotVertex, and direct rotate all refer to relate self', () => {
@@ -240,7 +263,8 @@ test('local pivot, pivotVertex, and direct rotate all refer to relate self', () 
   near(position(atOrigin), position(explicit));
   near(pose(atOrigin).quaternion, pose(explicit).quaternion);
   const self = box(2, 2, 2);
-  const vertex = modelElementReference(self.vertex(1)).transform.position;
+  const vertex = defined(modelElementReference(self.vertex(1))).transform
+    .position;
   const a = self.relate(copy =>
     base.on(copy.up).pivotVertex(1).rotate(0, 0, 90),
   );
@@ -253,6 +277,7 @@ test('local pivot, pivotVertex, and direct rotate all refer to relate self', () 
   near(position(a), position(b));
   near(pose(a).quaternion, pose(b).quaternion);
   assert.throws(
+    // @ts-expect-error An unfinished pivot chain must be rejected at runtime.
     () => self.relate(copy => copy.on(base.up).pivot(1, 2, 3)),
     /completed Constraint/,
   );
@@ -320,6 +345,7 @@ test('compatible rotation chains choose free translation independently of relati
 test('runtime errors distinguish missing bound targets and curved rotation axes', () => {
   const part = box(2, 2, 2);
   for (const target of [undefined, null, 3])
+    // @ts-expect-error Missing and scalar targets must fail at runtime.
     assert.throws(() => part.on(target), /directional bound/);
   assert.throws(
     () => part.on(part.up).around(circle(3).edge(1)),

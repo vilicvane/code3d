@@ -1,8 +1,19 @@
+import type {
+  TopoDS_Shape,
+  TopoDS_Vertex,
+  TopoDS_Face,
+  gp_Pnt,
+  TopExp_Explorer,
+  BRepOffsetAPI_MakePipeShell,
+  EmbindHandle,
+} from '@code3d/opencascade';
+import {defined, disposeModelObjects, modelGeometry} from './model-test.ts';
+
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {bezier, loft, rectangle} from '../bld/node/index.js';
-import {disposeModelObjects} from '../bld/tooling/index.js';
+
 import {clearKernelOperationCache} from '../bld/library/kernel-cache.js';
 import * as replicad from 'replicad';
 import {replicad as authorReplicad} from '../bld/node/replicad.js';
@@ -21,13 +32,13 @@ import {
 
 test('box construction releases temporary native points', t => {
   const oc = replicad.getOC();
-  const points = [];
+  const points: gp_Pnt[] = [];
   t.mock.method(
     oc,
     'gp_Pnt',
     new Proxy(oc.gp_Pnt, {
       construct(target, args) {
-        const point = Reflect.construct(target, args);
+        const point = Reflect.construct(target, args) as gp_Pnt;
         points.push(point);
         return point;
       },
@@ -46,19 +57,23 @@ test('box construction releases temporary native points', t => {
 test('B-Rep deserialization releases its original handle while retaining independent geometry', t => {
   const oc = replicad.getOC();
   const source = replicad.makeBox([0, 0, 0], [30, 20, 4]);
-  const handles = [];
+  const handles: EmbindHandle[] = [];
   const read = oc.BRepToolsWrapper.Read;
-  t.mock.method(oc.BRepToolsWrapper, 'Read', (...args) => {
-    const result = read(...args);
-    handles.push(result);
-    return result;
-  });
+  t.mock.method(
+    oc.BRepToolsWrapper,
+    'Read',
+    (...args: Parameters<typeof read>) => {
+      const result = read(...args);
+      handles.push(result);
+      return result;
+    },
+  );
   try {
     const brep = source.serialize();
     for (let iteration = 0; iteration < 20; iteration += 1) {
       const shape = authorReplicad.deserializeShape(brep);
       try {
-        assert.ok(handles.at(-1).isDeleted());
+        assert.ok(defined(handles.at(-1)).isDeleted());
         assert.equal(shape.mesh().triangles.length, 36);
       } finally {
         shape.delete();
@@ -73,13 +88,17 @@ test('B-Rep deserialization releases its original handle while retaining indepen
 test('topology traversal releases every native explorer result, including duplicates', t => {
   const oc = replicad.getOC();
   const shape = replicad.makeBox([0, 0, 0], [30, 20, 4]);
-  const handles = [];
+  const handles: EmbindHandle[] = [];
   const current = oc.TopExp_Explorer.prototype.Current;
-  t.mock.method(oc.TopExp_Explorer.prototype, 'Current', function (...args) {
-    const handle = current.apply(this, args);
-    handles.push(handle);
-    return handle;
-  });
+  t.mock.method(
+    oc.TopExp_Explorer.prototype,
+    'Current',
+    function (this: TopExp_Explorer, ...args: Parameters<typeof current>) {
+      const handle = current.apply(this, args);
+      handles.push(handle);
+      return handle;
+    },
+  );
   let rounded;
   try {
     const topology = initialShapeTopology(shape);
@@ -123,20 +142,24 @@ test('topology traversal releases every native explorer result, including duplic
 test('failed topology traversal releases its partial result and explorer', t => {
   const oc = replicad.getOC();
   const shape = replicad.makeBox([0, 0, 0], [30, 20, 4]);
-  const handles = [];
-  const vertices = [];
-  let explorer;
+  const handles: EmbindHandle[] = [];
+  const vertices: TopoDS_Vertex[] = [];
+  let explorer: TopExp_Explorer | undefined;
   let visits = 0;
   const current = oc.TopExp_Explorer.prototype.Current;
   const vertex = oc.TopoDS.Vertex;
-  t.mock.method(oc.TopExp_Explorer.prototype, 'Current', function (...args) {
-    explorer = this;
-    if (++visits === 5) throw new Error('Interrupted traversal');
-    const handle = current.apply(this, args);
-    handles.push(handle);
-    return handle;
-  });
-  t.mock.method(oc.TopoDS, 'Vertex', (...args) => {
+  t.mock.method(
+    oc.TopExp_Explorer.prototype,
+    'Current',
+    function (this: TopExp_Explorer, ...args: Parameters<typeof current>) {
+      explorer = this;
+      if (++visits === 5) throw new Error('Interrupted traversal');
+      const handle = current.apply(this, args);
+      handles.push(handle);
+      return handle;
+    },
+  );
+  t.mock.method(oc.TopoDS, 'Vertex', (...args: Parameters<typeof vertex>) => {
     const result = vertex(...args);
     vertices.push(result);
     return result;
@@ -147,7 +170,7 @@ test('failed topology traversal releases its partial result and explorer', t => 
       /Interrupted traversal/,
     );
     assert.ok(vertices.length > 0);
-    for (const handle of [...handles, ...vertices, explorer]) {
+    for (const handle of [...handles, ...vertices, defined(explorer)]) {
       assert.ok(handle.isDeleted());
     }
     assert.ok(shape.mesh().triangles.length > 0);
@@ -162,12 +185,16 @@ test('failed solid casting releases both acquired handles and preserves borrowed
   const faces = shapeSubshapes(shape, 'face');
   const raw = faces[0].wrapped.clone();
   const face = oc.TopoDS.Face;
-  let casted;
-  t.mock.method(oc.TopoDS, 'Face', (...args) => (casted = face(...args)));
+  let casted: TopoDS_Face | undefined;
+  t.mock.method(
+    oc.TopoDS,
+    'Face',
+    (...args: Parameters<typeof face>) => (casted = face(...args)),
+  );
   try {
     assert.throws(() => castOwnedShape3D(raw), /not a 3D shape/);
     assert.ok(raw.isDeleted());
-    assert.ok(casted.isDeleted());
+    assert.ok(defined(casted).isDeleted());
     assert.ok(faces[0].mesh().triangles.length > 0);
   } finally {
     faces.forEach(face => face.delete());
@@ -184,37 +211,43 @@ for (const failHistory of [false, true]) {
       [10, 16, 0],
       [10, 24, 0],
     ]);
-    const start = rectangle(6, 4).relate(p =>
-      p.on(spine.start.up).offset(0, 0, 0),
-    );
-    const end = rectangle(4, 3).relate(p => p.on(spine.end.up).offset(0, 0, 0));
+    const start = rectangle(6, 4).relate(p => p.center.align(spine.start));
+    const end = rectangle(4, 3).relate(p => p.center.align(spine.end));
     const oc = replicad.getOC();
-    const handles = [];
+    const handles: EmbindHandle[] = [];
     let generatedCalls = 0;
     const prototype = oc.BRepOffsetAPI_MakePipeShell.prototype;
-    for (const method of [
-      'Shape',
-      'FirstShape',
-      'LastShape',
-      'Modified',
-      'Generated',
-    ]) {
+    for (const method of ['Shape', 'FirstShape', 'LastShape'] as const) {
       const original = prototype[method];
-      t.mock.method(prototype, method, function (...args) {
-        if (method === 'Generated' && failHistory && ++generatedCalls === 2)
-          throw new Error('Interrupted loft history');
-        const result = original.apply(this, args);
-        handles.push(result);
-        if (method === 'Modified' || method === 'Generated') {
+      t.mock.method(
+        prototype,
+        method,
+        function (this: BRepOffsetAPI_MakePipeShell) {
+          const result = original.call(this);
+          handles.push(result);
+          return result;
+        },
+      );
+    }
+    for (const method of ['Modified', 'Generated'] as const) {
+      const original = prototype[method];
+      t.mock.method(
+        prototype,
+        method,
+        function (this: BRepOffsetAPI_MakePipeShell, shape: TopoDS_Shape) {
+          if (method === 'Generated' && failHistory && ++generatedCalls === 2)
+            throw new Error('Interrupted loft history');
+          const result = original.call(this, shape);
+          handles.push(result);
           const first = result.First;
           result.First = function () {
             const handle = first.call(this);
             handles.push(handle);
             return handle;
           };
-        }
-        return result;
-      });
+          return result;
+        },
+      );
     }
     let result;
     try {
@@ -226,12 +259,14 @@ for (const failHistory of [false, true]) {
       else {
         result = loft([start, end], {spine});
         assert.deepEqual(result.surface([1, 1]).id, [1, 1]);
-        assert.ok(result.geometry.value.shape.mesh().triangles.length > 0);
+        assert.ok(
+          modelGeometry(result).value.shape.mesh().triangles.length > 0,
+        );
       }
       assert.ok(handles.length > 5);
       assert.ok(handles.every(handle => handle.isDeleted()));
-      assert.ok(start.geometry.value.shape.mesh().triangles.length > 0);
-      assert.ok(end.geometry.value.shape.mesh().triangles.length > 0);
+      assert.ok(modelGeometry(start).value.shape.mesh().triangles.length > 0);
+      assert.ok(modelGeometry(end).value.shape.mesh().triangles.length > 0);
     } finally {
       disposeModelObjects([spine, start, end, ...(result ? [result] : [])]);
       clearKernelOperationCache();

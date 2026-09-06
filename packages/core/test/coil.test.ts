@@ -1,11 +1,15 @@
+import {
+  defined,
+  createModelSnapshotter,
+  disposeModelObjects,
+  modelGeometry,
+} from './model-test.ts';
+
 import assert from 'node:assert/strict';
 import {afterEach, test} from 'node:test';
 import {coil} from '../bld/node/index.js';
 import {replicad} from '../bld/node/replicad.js';
-import {
-  createModelSnapshotter,
-  disposeModelObjects,
-} from '../bld/tooling/index.js';
+
 import {clearKernelOperationCache} from '../bld/library/kernel-cache.js';
 
 afterEach(() => clearKernelOperationCache());
@@ -14,7 +18,7 @@ test('coil builds a circular swept solid with integer or fractional turns', () =
   for (const turns of [0.25, 1, 2.5]) {
     const model = coil(5, 0.75, 4, turns);
     try {
-      const shape = model.geometry.value.shape;
+      const shape = modelGeometry(model).value.shape;
       assert.ok(shape instanceof replicad.Solid);
       const volume = replicad.measureVolume(shape);
       const expected =
@@ -23,26 +27,28 @@ test('coil builds a circular swept solid with integer or fractional turns', () =
       assert.equal(model.surfaces().length, 3);
       const snapshot = createModelSnapshotter()(model);
       assert.equal(snapshot.operation.kind, 'coil');
-      assert.ok(snapshot.mesh.triangles.length > 0);
+      assert.ok(defined(snapshot.mesh).triangles.length > 0);
       assert.deepEqual(
-        snapshot.elements.find(element => element.name === 'center').transform
-          .position,
-        model.geometry.value.localBounds[0].map(
+        defined(snapshot.elements.find(element => element.name === 'center'))
+          .transform.position,
+        modelGeometry(model).value.localBounds[0].map(
           (minimum, axis) =>
-            (minimum + model.geometry.value.localBounds[1][axis]) / 2,
+            (minimum + modelGeometry(model).value.localBounds[1][axis]) / 2,
         ),
       );
       assert.deepEqual(
-        snapshot.elements.find(element => element.name === 'axis').transform
-          .position,
+        defined(snapshot.elements.find(element => element.name === 'axis'))
+          .transform.position,
         [0, 0, 0],
       );
-      const top = snapshot.elements.find(element => element.name === 'up')
-        .transform.position;
-      const bottom = snapshot.elements.find(element => element.name === 'down')
-        .transform.position;
-      const center = snapshot.elements.find(
-        element => element.name === 'center',
+      const top = defined(
+        snapshot.elements.find(element => element.name === 'up'),
+      ).transform.position;
+      const bottom = defined(
+        snapshot.elements.find(element => element.name === 'down'),
+      ).transform.position;
+      const center = defined(
+        snapshot.elements.find(element => element.name === 'center'),
       ).transform.position;
       assert.ok(Math.abs(top[0] - center[0]) < 1e-6);
       assert.ok(Math.abs(top[2] - center[2]) < 1e-6);
@@ -67,9 +73,9 @@ test('coil caches each input dimension and supports ordinary solid derivation', 
   const filleted = first.fillet(0.1);
   const chamfered = first.chamfer(0.1);
   try {
-    assert.equal(first.geometry.id, repeat.geometry.id);
+    assert.equal(modelGeometry(first).id, modelGeometry(repeat).id);
     assert.equal(
-      new Set([first, ...variants].map(model => model.geometry.id)).size,
+      new Set([first, ...variants].map(model => modelGeometry(model).id)).size,
       5,
     );
     const snapshot = createModelSnapshotter();
@@ -79,7 +85,7 @@ test('coil caches each input dimension and supports ordinary solid derivation', 
       scaled.surfaces().map(face => face.id),
     );
     for (const model of [scaled, filleted, chamfered]) {
-      assert.ok(snapshot(model).mesh.triangles.length > 0);
+      assert.ok(defined(snapshot(model).mesh).triangles.length > 0);
     }
   } finally {
     disposeModelObjects([
@@ -98,7 +104,9 @@ test('a cached coil outlives disposal of its preceding model', () => {
   disposeModelObjects([first]);
   const next = coil(5, 0.75, 4, 1);
   try {
-    assert.ok(createModelSnapshotter()(next).mesh.triangles.length > 0);
+    assert.ok(
+      defined(createModelSnapshotter()(next).mesh).triangles.length > 0,
+    );
   } finally {
     disposeModelObjects([next]);
   }
@@ -112,7 +120,7 @@ test('coil rejects invalid dimensions and touching or overlapping turns', () => 
     'turns',
   ].entries()) {
     for (const value of [0, -1, NaN, Infinity, -Infinity]) {
-      const dimensions = [5, 0.75, 4, 1];
+      const dimensions: Parameters<typeof coil> = [5, 0.75, 4, 1];
       dimensions[index] = value;
       assert.throws(
         () => coil(...dimensions),
@@ -142,8 +150,8 @@ test('coil rejects invalid dimensions and touching or overlapping turns', () => 
   const separated = coil(5, 1, 2.1, 2);
   try {
     const snapshot = createModelSnapshotter();
-    assert.ok(snapshot(partial).mesh.triangles.length > 0);
-    assert.ok(snapshot(separated).mesh.triangles.length > 0);
+    assert.ok(defined(snapshot(partial).mesh).triangles.length > 0);
+    assert.ok(defined(snapshot(separated).mesh).triangles.length > 0);
   } finally {
     disposeModelObjects([partial, separated]);
   }

@@ -1,16 +1,20 @@
+import {
+  defined,
+  createModelSnapshotter,
+  disposeModelObjects,
+  modelGeometry,
+} from './model-test.ts';
+
 import assert from 'node:assert/strict';
 import {afterEach, test} from 'node:test';
 import {cylinder, tube} from '../bld/node/index.js';
 import {replicad} from '../bld/node/replicad.js';
-import {
-  createModelSnapshotter,
-  disposeModelObjects,
-} from '../bld/tooling/index.js';
+
 import {clearKernelOperationCache} from '../bld/library/kernel-cache.js';
 
 afterEach(() => clearKernelOperationCache());
 
-function closeTo(actual, expected) {
+function closeTo(actual: number, expected: number) {
   assert.ok(Math.abs(actual - expected) < 1e-6, `${actual} != ${expected}`);
 }
 
@@ -19,7 +23,7 @@ test('tube is a centered Y-axis solid with a through bore and canonical anchors'
   const reference = cylinder(6, 16);
   const probes = [-8, 0, 8].map(y => replicad.makeVertex([0, y, 0]));
   try {
-    const shape = model.geometry.value.shape;
+    const shape = modelGeometry(model).value.shape;
     assert.ok(shape instanceof replicad.Solid);
     closeTo(replicad.measureVolume(shape), Math.PI * (36 - 16) * 16);
     for (const probe of probes) {
@@ -29,7 +33,7 @@ test('tube is a centered Y-axis solid with a through bore and canonical anchors'
     const snapshot = createModelSnapshotter();
     const value = snapshot(model);
     assert.equal(value.operation.kind, 'tube');
-    assert.ok(value.mesh.triangles.length > 0);
+    assert.ok(defined(value.mesh).triangles.length > 0);
     assert.equal(model.surfaces().length, 4);
     const expected = snapshot(reference).elements;
     for (const [i, element] of value.elements.entries()) {
@@ -43,7 +47,7 @@ test('tube is a centered Y-axis solid with a through bore and canonical anchors'
       );
     }
     // Model bounds are captured before tessellation; render meshes approximate circles.
-    const bounds = model.geometry.value.localBounds;
+    const bounds = modelGeometry(model).value.localBounds;
     for (let axis = 0; axis < 3; axis += 1) {
       const extent = axis === 1 ? 8 : 6;
       closeTo(bounds[0][axis], -extent);
@@ -66,16 +70,16 @@ test('tube caches all dimensions independently and retains topology through soli
   const filleted = first.fillet(0.25);
   try {
     const models = [first, repeat, wider, thicker, taller];
-    assert.equal(first.geometry.id, repeat.geometry.id);
-    assert.equal(new Set(models.map(model => model.geometry.id)).size, 4);
+    assert.equal(modelGeometry(first).id, modelGeometry(repeat).id);
+    assert.equal(new Set(models.map(model => modelGeometry(model).id)).size, 4);
     const snapshot = createModelSnapshotter();
     assert.deepEqual(snapshot(first).mesh, snapshot(repeat).mesh);
     closeTo(
-      replicad.measureVolume(scaled.geometry.value.shape),
+      replicad.measureVolume(modelGeometry(scaled).value.shape.asShape3D()),
       8 * Math.PI * 20 * 12,
     );
     for (const model of [scaled, chamfered, filleted]) {
-      assert.ok(snapshot(model).mesh.triangles.length > 0);
+      assert.ok(defined(snapshot(model).mesh).triangles.length > 0);
     }
     assert.deepEqual(
       scaled.surfaces().map(face => face.id),
@@ -100,7 +104,9 @@ test('a cached tube remains usable after the preceding model is disposed', () =>
   disposeModelObjects([first]);
   const repeat = tube(6, 4, 12);
   try {
-    assert.ok(createModelSnapshotter()(repeat).mesh.triangles.length > 0);
+    assert.ok(
+      defined(createModelSnapshotter()(repeat).mesh).triangles.length > 0,
+    );
   } finally {
     disposeModelObjects([repeat]);
   }
@@ -109,7 +115,7 @@ test('a cached tube remains usable after the preceding model is disposed', () =>
 test('tube rejects nonpositive, nonfinite, or inverted dimensions', () => {
   for (const [index, name] of ['outerRadius', 'innerRadius', 'y'].entries()) {
     for (const value of [0, -1, NaN, Infinity, -Infinity]) {
-      const dimensions = [6, 4, 12];
+      const dimensions: Parameters<typeof tube> = [6, 4, 12];
       dimensions[index] = value;
       assert.throws(
         () => tube(...dimensions),

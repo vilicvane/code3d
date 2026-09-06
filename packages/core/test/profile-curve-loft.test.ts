@@ -1,3 +1,9 @@
+import {
+  defined,
+  createModelSnapshotter,
+  disposeModelObjects,
+} from './model-test.ts';
+
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {
@@ -10,10 +16,6 @@ import {
   rectangle,
   regularPolygon,
 } from '../bld/node/index.js';
-import {
-  createModelSnapshotter,
-  disposeModelObjects,
-} from '../bld/tooling/index.js';
 
 test('constructs renderable planar profiles, curves, and points', () => {
   const snapshotModel = createModelSnapshotter();
@@ -34,16 +36,19 @@ test('constructs renderable planar profiles, curves, and points', () => {
       pointSnapshot,
     ] = models.map(snapshotModel);
     assert.equal(circleSnapshot.kind, 'face');
-    assert.ok(circleSnapshot.mesh.triangles.length > 0);
+    assert.ok(defined(circleSnapshot.mesh).triangles.length > 0);
     assert.equal(rectangleSnapshot.kind, 'face');
-    assert.ok(rectangleSnapshot.mesh.triangles.length > 0);
+    assert.ok(defined(rectangleSnapshot.mesh).triangles.length > 0);
     assert.equal(polygonSnapshot.kind, 'face');
-    assert.ok(polygonSnapshot.mesh.triangles.length > 0);
+    assert.ok(defined(polygonSnapshot.mesh).triangles.length > 0);
     assert.equal(lineSnapshot.kind, 'edge');
-    assert.equal(lineSnapshot.mesh.triangles.length, 0);
-    assert.ok(lineSnapshot.mesh.edges.length > 0);
+    assert.equal(defined(lineSnapshot.mesh).triangles.length, 0);
+    assert.ok(defined(lineSnapshot.mesh).edges.length > 0);
     assert.equal(pointSnapshot.kind, 'vertex');
-    assert.deepEqual([...pointSnapshot.mesh.topologyVertices], [1, 2, 3]);
+    assert.deepEqual(
+      [...defined(pointSnapshot.mesh).topologyVertices],
+      [1, 2, 3],
+    );
   } finally {
     disposeModelObjects(models);
   }
@@ -154,8 +159,8 @@ test('lofts nonparallel planar profiles along a curved spine', () => {
       resultSnapshot.operation.inputs.map(input => input.role),
       ['receiver', 'section', 'spine'],
     );
-    assert.ok(resultSnapshot.mesh.triangles.length > 0);
-    assert.ok(resultSnapshot.mesh.surfaceGroups.length >= 3);
+    assert.ok(defined(resultSnapshot.mesh).triangles.length > 0);
+    assert.ok(defined(resultSnapshot.mesh).surfaceGroups.length >= 3);
   } finally {
     disposeModelObjects([spine, start, end, result]);
   }
@@ -169,13 +174,16 @@ test('lofts planar sections without a spine', () => {
   const result = loft([base, top]);
 
   try {
-    assert.ok(snapshotModel(result).mesh.triangles.length > 0);
+    assert.ok(defined(snapshotModel(result).mesh).triangles.length > 0);
   } finally {
     disposeModelObjects([base, location, top, result]);
   }
 });
 
-function assertVectorNear(actual, expected) {
+function assertVectorNear(
+  actual: readonly number[],
+  expected: readonly number[],
+) {
   actual.forEach((value, index) =>
     assert.ok(Math.abs(value - expected[index]) < 1e-7),
   );
