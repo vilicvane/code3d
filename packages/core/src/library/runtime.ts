@@ -22,6 +22,7 @@ import {
   type AnyShape,
   type Edge as ReplicadEdge,
   type Face as ReplicadFace,
+  type Vertex as ReplicadVertex,
   type Shape3D,
   type Wire as ReplicadWire,
 } from 'replicad';
@@ -48,7 +49,18 @@ import {
   type RigidTransform,
   type Vec3,
 } from './spatial.js';
-import {axisRotation, solveBodies, type BodyRotation} from './bound-solver.js';
+import {
+  axisRotation,
+  solveBodies,
+  type Body,
+  type BodyRotation,
+} from './relation-solver.js';
+import {
+  edgeGeometry,
+  faceGeometry,
+  transformGeometry,
+  type AlignmentGeometry,
+} from './alignment-geometry.js';
 import {shellWithTopology} from './shell.js';
 import {
   evaluateKernelOperation,
@@ -125,6 +137,8 @@ export type ElementSnapshot = Readonly<{
   transform: Transform;
   bound?: Readonly<{size: readonly [number, number]; facing: 1 | -1}>;
   facing?: 1 | -1;
+  direction?: 1 | -1;
+  arrow?: RigidTransform;
   topology?: Readonly<{geometryNodeId: string; transform: Transform}> &
     TopologySelection;
 }>;
@@ -137,11 +151,11 @@ export type ConstraintAnchorSnapshot = Readonly<{
 
 export type ConstraintSnapshot = Readonly<{
   id: string;
-  kind: 'on';
+  kind: 'on' | 'align';
   source: ConstraintAnchorSnapshot;
   target: ConstraintAnchorSnapshot;
-  sourceBound: ElementSnapshot;
-  targetBound: ElementSnapshot;
+  sourceElement: ElementSnapshot;
+  targetElement: ElementSnapshot;
   offsetDirection: 1 | -1;
   offset: Vec3;
   offsetFrame: Transform;
@@ -293,6 +307,7 @@ type StoredElement = Readonly<{
   whole?: boolean;
   bound?: Readonly<{size: readonly [number, number]; facing: 1 | -1}>;
   facing?: 1 | -1;
+  direction?: 1 | -1;
   topology?: StoredTopology;
   members?: StoredElements;
 }>;
@@ -317,6 +332,7 @@ export type ModelElementReference = Readonly<{
   transform: Transform;
   bound?: ElementSnapshot['bound'];
   facing?: 1 | -1;
+  direction?: 1 | -1;
 }>;
 
 export type ModelTopologyReference = Readonly<{
@@ -349,7 +365,7 @@ export type ModelObjectRuntimeInfo = Readonly<{
 
 type StoredConstraint = Readonly<{
   id: string;
-  kind: 'on';
+  kind: 'on' | 'align';
   source: RelationReference;
   target: RelationReference;
   rotations: readonly ConstraintRotation[];
@@ -506,11 +522,19 @@ export interface Anchor<Kind extends ElementKind = ElementKind> {
   readonly [anchorKind]: Kind;
   /** Translate this geometry's matching bound onto the directed target bound. */
   on(target: Bound): Constraint;
+  /** Align the underlying geometry, retaining unconstrained position and orientation. */
+  align(
+    this: Anchor<'point' | 'line' | 'face'>,
+    target: Anchor<'point' | 'line' | 'face'>,
+  ): Constraint;
 }
 
 export interface PointAnchor extends Anchor<'point'> {}
 
-export interface LineAnchor extends Anchor<'line'> {}
+export interface LineAnchor extends Anchor<'line'> {
+  /** Reverse direction without changing geometry or the reference coordinate axes. */
+  reverse(): this;
+}
 
 export interface FaceAnchor extends Anchor<'face'> {
   /** Reverse facing without changing geometry, position, or the reference axes. */
@@ -750,14 +774,12 @@ export type VertexModel<Elements extends NamedElements = {}> =
 export type EdgeModel<Elements extends NamedElements = CurveElements> =
   ModelCapabilities<Elements, 'edge'> &
     GeometryCapabilities<Elements, 'edge'> &
-    EdgeTopologyCapabilities &
-    Elements;
+    EdgeTopologyCapabilities & {reverse(): Edge} & Elements;
 
 export type FaceModel<Elements extends NamedElements = PlanarElements> =
   ModelCapabilities<Elements, 'face'> &
     GeometryCapabilities<Elements, 'face'> &
-    SurfaceTopologyCapabilities &
-    Elements;
+    SurfaceTopologyCapabilities & {flip(): Surface} & Elements;
 
 export type SolidModel<Elements extends NamedElements = CanonicalElements> =
   ModelCapabilities<Elements, 'solid'> &
@@ -848,10 +870,26 @@ class ModelAnchor<
     }) as this;
   }
 
+  reverse(): this {
+    const ref = this[anchorReferenceValue];
+    return modelAnchor(ref.model, ref.name, {
+      ...ref,
+      direction: -(ref.direction ?? 1) as 1 | -1,
+    }) as this;
+  }
+
   on(target: Bound): Constraint {
     return Constraint.create(
       this[anchorReferenceValue],
       boundReference(target),
+    );
+  }
+
+  align(target: Anchor<'point' | 'line' | 'face'>): Constraint {
+    return Constraint.create(
+      this[anchorReferenceValue],
+      anchorReference(target),
+      'align',
     );
   }
 }
@@ -971,6 +1009,7 @@ export function modelElementReference(
     transform: toTransform(value[anchorReferenceValue].transform),
     bound: value[anchorReferenceValue].bound,
     facing: value[anchorReferenceValue].facing ?? 1,
+    direction: value[anchorReferenceValue].direction ?? 1,
   };
 }
 
@@ -1023,6 +1062,7 @@ export abstract class ConstraintExpression {
   }
   protected spatialOperation?: ConstraintSpatialSelection;
   protected constructor(
+    protected readonly kind: StoredConstraint['kind'],
     protected readonly source: AnchorReference,
     protected readonly target: AnchorReference,
     protected readonly displacement: Vec3 | undefined,
@@ -1082,7 +1122,7 @@ export abstract class ConstraintExpression {
     });
     const stored: StoredConstraint = {
       id: this.constraintId,
-      kind: 'on',
+      kind: this.kind,
       source: bind(this.source),
       target: bind(this.target),
       offset: this.displacement,
@@ -1131,6 +1171,7 @@ export abstract class ConstraintExpression {
 
 export class Constraint extends ConstraintExpression {
   private constructor(
+    kind: StoredConstraint['kind'],
     source: AnchorReference,
     target: AnchorReference,
     displacement: Vec3 | undefined = undefined,
@@ -1141,6 +1182,7 @@ export class Constraint extends ConstraintExpression {
     spatialOperation?: ConstraintSpatialSelection,
   ) {
     super(
+      kind,
       source,
       target,
       displacement,
@@ -1152,13 +1194,23 @@ export class Constraint extends ConstraintExpression {
     this.spatialOperation = spatialOperation;
   }
   /** @internal */
-  static create(source: AnchorReference, target: AnchorReference): Constraint {
-    source.model[referenceBounds](source, identityRigidTransform);
-    return new Constraint(source, target);
+  static create(
+    source: AnchorReference,
+    target: AnchorReference,
+    kind: StoredConstraint['kind'] = 'on',
+  ): Constraint {
+    if (kind === 'on')
+      source.model[referenceBounds](source, identityRigidTransform);
+    else if (source.kind === 'frame' || target.kind === 'frame')
+      throw new Error(
+        'align() requires points, curves, or surfaces; select geometry on a solid or group.',
+      );
+    return new Constraint(kind, source, target);
   }
   /**
-   * Pin matching bound centers at this offset in the target reference frame.
-   * Explicit offset(0, 0, 0) also constrains both tangential coordinates.
+   * In the target reference axes, on() pins matching bound centers; align()
+   * translates self after alignment, retaining the relation's free modes.
+   * Explicit zero pins tangential coordinates for on() only.
    * @code3d.param x {kind: 'length', label: 'ΔX'}
    * @code3d.param y {kind: 'length', label: 'ΔY'}
    * @code3d.param z {kind: 'length', label: 'ΔZ'}
@@ -1166,6 +1218,7 @@ export class Constraint extends ConstraintExpression {
   offset(x: number, y: number, z: number): Constraint {
     assertFiniteVector('offset', [x, y, z]);
     return new Constraint(
+      this.kind,
       this.source,
       this.target,
       addVectors(this.displacement ?? origin, [x, y, z]),
@@ -1233,6 +1286,7 @@ export class Constraint extends ConstraintExpression {
       typeof angles === 'number' ? [angles, 0, 0] : angles,
     );
     return new Constraint(
+      this.kind,
       this.source,
       this.target,
       this.displacement,
@@ -1245,6 +1299,7 @@ export class Constraint extends ConstraintExpression {
   }
   /** @internal */
   chainArguments(): [
+    StoredConstraint['kind'],
     AnchorReference,
     AnchorReference,
     Vec3 | undefined,
@@ -1254,6 +1309,7 @@ export class Constraint extends ConstraintExpression {
     ConstraintExpression,
   ] {
     return [
+      this.kind,
       this.source,
       this.target,
       this.displacement,
@@ -1433,6 +1489,21 @@ export class ModelObject<
   /** @internal */
   relationAnchorReference(): AnchorReference {
     return {model: this, name: 'geometry', ...this.intrinsic, whole: true};
+  }
+
+  align(target: Anchor<'point' | 'line' | 'face'>): Constraint {
+    return Constraint.create(
+      this.relationAnchorReference(),
+      anchorReference(target),
+      'align',
+    );
+  }
+
+  reverse(): Edge {
+    return this.edges()[0].reverse();
+  }
+  flip(): Surface {
+    return this.surfaces()[0].flip();
   }
 
   relate(
@@ -2300,6 +2371,100 @@ export class ModelObject<
     );
   }
 
+  private alignmentGeometry(reference: StoredAnchor): AlignmentGeometry {
+    if (reference.kind === 'point')
+      return {
+        kind: 'point',
+        point: reference.whole
+          ? (this.requireGeometry().value.shape as ReplicadVertex).asTuple()
+          : reference.transform.position,
+      };
+    const read = (shape: AnyShape) =>
+      reference.kind === 'line'
+        ? edgeGeometry(shape as ReplicadEdge, reference.direction ?? 1)
+        : faceGeometry(
+            shape as ReplicadFace,
+            reference.facing ?? reference.bound?.facing ?? 1,
+          );
+    if (reference.topology) {
+      const topology = reference.topology,
+        geometry = topology.source.requireGeometry().value;
+      return withTopologyShape(
+        geometry.shape,
+        geometry.topology,
+        topology.selection,
+        shape => {
+          const scaled =
+            topology.scale === 1 ? shape : shape.scale(topology.scale);
+          try {
+            return transformGeometry(read(scaled), topology.transform);
+          } finally {
+            if (scaled !== shape) scaled.delete();
+          }
+        },
+      );
+    }
+    if (reference.whole) return read(this.requireGeometry().value.shape);
+    const direction = rotateVector(
+      [
+        0,
+        reference.kind === 'line'
+          ? (reference.direction ?? 1)
+          : (reference.facing ?? reference.bound?.facing ?? 1),
+        0,
+      ],
+      reference.transform.quaternion,
+    );
+    return reference.kind === 'line'
+      ? {kind: 'line', point: reference.transform.position, direction}
+      : {kind: 'plane', point: reference.transform.position, normal: direction};
+  }
+
+  private relationElement(reference: StoredAnchor): ElementSnapshot {
+    const element = reference.whole
+      ? {
+          ...this.exposedElement(),
+          name: reference.name,
+          direction: reference.direction,
+          facing: reference.facing,
+        }
+      : reference;
+    const topology = element.topology;
+    let arrow: RigidTransform | undefined;
+    if (reference.kind === 'line' && topology) {
+      const geometry = topology.source.requireGeometry().value;
+      arrow = withTopologyShape(
+        geometry.shape,
+        geometry.topology,
+        topology.selection,
+        shape => {
+          const edge = shape as ReplicadEdge;
+          const position = (reference.direction ?? 1) === 1 ? 1 : 0;
+          const point = edge.pointAt(position),
+            tangent = edge.tangentAt(position);
+          try {
+            return topologyTransform(
+              topology,
+              frameFromYAxis(
+                point.toTuple(),
+                tangent
+                  .toTuple()
+                  .map(v => v * (reference.direction ?? 1)) as unknown as Vec3,
+              ),
+            );
+          } finally {
+            point.delete();
+            tangent.delete();
+          }
+        },
+      );
+    }
+    return {
+      ...snapshotElements({[reference.name]: element})[0],
+      arrow,
+    };
+  }
+
   private bodyRotations(
     constraint: StoredConstraint,
     indices: Map<ModelObject, number>,
@@ -2310,9 +2475,14 @@ export class ModelObject<
           ? {
               body: indices.get(pivot.axis.model)!,
               axis: pivot.axis.transform,
-              angle: angles as number,
+              angle: (angles as number) * (pivot.axis.direction ?? 1),
             }
-          : {local: axisRotation(pivot.axis.transform, angles as number)};
+          : {
+              local: axisRotation(
+                pivot.axis.transform,
+                (angles as number) * (pivot.axis.direction ?? 1),
+              ),
+            };
       }
       const frame =
         pivot.kind === 'pivot'
@@ -2385,7 +2555,9 @@ export class ModelObject<
     if (pivot.kind === 'around') {
       frame = composeTransforms(
         pivot.axis.model ? pivot.axis.model.solvePose(context) : before,
-        pivot.axis.transform,
+        (pivot.axis.direction ?? 1) === 1
+          ? pivot.axis.transform
+          : composeTransforms(pivot.axis.transform, rotation([1, 0, 0, 0])),
       );
     } else {
       const local =
@@ -2450,26 +2622,51 @@ export class ModelObject<
     };
     roots.forEach(collect);
     const poses = solveBodies(
-      models.map(model => ({
+      models.map((model): Body => ({
         name: model.name,
-        relations: model.constraints.map(constraint => ({
-          id: constraint.id,
-          source: {
-            body: indices.get(constraint.source.model ?? model)!,
-            bounds: (orientation: Quaternion) =>
-              (constraint.source.model ?? model)[referenceBounds](
-                constraint.source,
-                rotation(orientation),
-              ),
-          },
-          target: {
-            body: indices.get(constraint.target.model ?? model)!,
-            transform: constraint.target.transform,
-            facing: constraint.target.bound!.facing,
-          },
-          offset: constraint.offset,
-          rotations: model.bodyRotations(constraint, indices),
-        })),
+        relations: model.constraints.map(constraint =>
+          constraint.kind === 'align'
+            ? {
+                kind: 'align',
+                id: constraint.id,
+                source: {
+                  body: indices.get(constraint.source.model ?? model)!,
+                  geometry: (
+                    constraint.source.model ?? model
+                  ).alignmentGeometry(constraint.source),
+                  transform: constraint.source.transform,
+                },
+                target: {
+                  body: indices.get(constraint.target.model ?? model)!,
+                  geometry: (
+                    constraint.target.model ?? model
+                  ).alignmentGeometry(constraint.target),
+                  transform: constraint.target.transform,
+                },
+                offset: constraint.offset,
+                rotations: model.bodyRotations(constraint, indices),
+              }
+            : {
+                kind: 'on',
+                id: constraint.id,
+                source: {
+                  body: indices.get(constraint.source.model ?? model)!,
+                  key: constraint.source.name,
+                  bounds: (orientation: Quaternion) =>
+                    (constraint.source.model ?? model)[referenceBounds](
+                      constraint.source,
+                      rotation(orientation),
+                    ),
+                },
+                target: {
+                  body: indices.get(constraint.target.model ?? model)!,
+                  transform: constraint.target.transform,
+                  facing: constraint.target.bound!.facing,
+                },
+                offset: constraint.offset,
+                rotations: model.bodyRotations(constraint, indices),
+              },
+        ),
       })),
     );
     return {
@@ -2510,6 +2707,33 @@ export class ModelObject<
       targetPose,
       constraint.target.transform,
     );
+    if (constraint.kind === 'align') {
+      for (const action of actions)
+        if ('body' in action)
+          offsetFrame = composeTransforms(
+            axisRotation(
+              composeTransforms(
+                models[action.body].solvePose(context),
+                action.axis,
+              ),
+              action.angle,
+            ),
+            offsetFrame,
+          );
+      return {
+        id: constraint.id,
+        kind: 'align',
+        source: anchorSnapshot(source, constraint.source),
+        target: anchorSnapshot(target, constraint.target),
+        sourceElement: source.relationElement(constraint.source),
+        targetElement: target.relationElement(constraint.target),
+        offsetDirection: 1,
+        offset: constraint.offset ?? origin,
+        offsetFrame: toTransform(offsetFrame),
+        sourceRefs: [...valueTrace(constraint).sourceRefs],
+        parameters: [...valueTrace(constraint).parameters],
+      };
+    }
     const orientation = composeTransforms(
       invertTransform(rotation(offsetFrame.quaternion)),
       rotation(sourcePose.quaternion),
@@ -2551,7 +2775,7 @@ export class ModelObject<
       kind: constraint.kind,
       source: anchorSnapshot(source, constraint.source),
       target: anchorSnapshot(target, constraint.target),
-      sourceBound: {
+      sourceElement: {
         name: `${constraint.source.name}:bound`,
         kind: 'face',
         transform: toTransform(sourceFrame),
@@ -2560,7 +2784,7 @@ export class ModelObject<
           facing: constraint.target.bound!.facing === 1 ? -1 : 1,
         },
       },
-      targetBound: {
+      targetElement: {
         name: constraint.target.name,
         kind: 'face',
         transform: toTransform(constraint.target.transform),
@@ -3853,6 +4077,7 @@ function snapshotElements(
         transform: toTransform(element.transform),
         bound: element.bound,
         facing: element.facing,
+        direction: element.direction,
         topology: topology
           ? {
               geometryNodeId: topology.source.nodeId,

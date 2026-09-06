@@ -1,6 +1,6 @@
 ---
 title: Positioning with relations
-description: Position finite geometry against directional bounds and rotate explicitly.
+description: Position geometry with bound contacts, geometric alignment, and explicit rotations.
 ---
 
 import ModelExample from '../../../../components/ModelExample.astro';
@@ -48,6 +48,51 @@ The two contacts place the second box at `[15, -15, 0]`. One determines X,
 the other determines Y, and the free Z position stays unchanged. Conflicting
 position conditions report an error. `on` only solves translation; rotations
 are always authored explicitly.
+
+## Align underlying geometry
+
+Use `align` when the relationship should determine geometry and direction:
+
+```ts
+const post = cylinder(5, 20).relate(self => [
+  self.axis.align(base.axis),
+  self.on(base.up),
+]);
+```
+
+Points coincide or lie on a curve or surface. Curves coincide with one another,
+or lie entirely on a surface. Surfaces coincide with matching normal sense.
+Unlike a bound contact, alignment can rotate self. Lines, circles, ellipses,
+planes, cylinders, and spheres are supported; other underlying geometry types
+report unsupported.
+
+Edges and faces contribute their complete supporting geometry. A point can lie
+on the extension of a short straight edge; two equal-radius arcs can share a
+circle even when their trimmed ranges differ. Endpoints and parameter origins
+are not paired. Use `start`, `midpoint`, `end`, or a vertex when more specific
+positioning is needed. Multiple solutions can remain.
+
+Curve–curve alignment uses the same positive direction. Use `target.reverse()`
+to reverse a line, axis, or edge reference, and `target.flip()` to reverse a
+surface's normal sense. These change direction metadata while preserving the
+reference axes. Point membership ignores direction; a curve lying on a surface
+does not gain an arbitrary heading in that surface.
+
+An align offset translates self in the target reference axes after alignment
+and before explicit rotations. Zero adds no extra position condition. It does
+not pin centers as an on offset does. Source and target can be written in either
+order; `relate` still owns the movable self.
+
+Inspect `geometric-alignment.ts` in the App examples. Relation curves keep their
+actual shape, with arrows at positive endpoints or stable points on closed
+curves. Axes use one positive arrow. A solid source arrow and a larger outline
+target arrow distinguish coincident directions. Unsupported geometry,
+geometric incompatibility, and numerical nonconvergence have separate errors.
+
+For several relations involving align on one model, edit the numeric parameters
+or source so the joint system is solved for each change. Spatial drags are
+available for a single align relation; a coupled system may respond differently
+from a rigid move, so it uses parameter editing instead.
 
 ## Choose a rotation pivot or axis
 
