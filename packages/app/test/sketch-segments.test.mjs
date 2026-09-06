@@ -312,7 +312,10 @@ test('middle trims retire the original line and allocate two fresh IDs without r
     {index: 1, lines: []},
     {index: 2, lines: [6, 7]},
   ]);
-  assert.equal(change.line.id, 5);
+  assert.deepEqual(
+    change.lines.map(line => line.id),
+    [5],
+  );
 });
 
 test('intersections become ordinary local endpoints only when a segment is deleted', () => {

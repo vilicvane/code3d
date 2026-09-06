@@ -26,6 +26,7 @@ import {
   sketchSegments,
   sketchSegmentDistance,
   sameSketchSegment,
+  overlappingSketchSegments,
   trimSketchSegment,
   deleteSketchPoint,
   type SketchSegment,
@@ -764,18 +765,24 @@ export class SketchEditor {
       this.view.id,
       this.showConstraints,
     );
-    for (const segment of sketchSegments(this.view.layers, points)) {
+    const segments = sketchSegments(this.view.layers, points);
+    const selectedSegments =
+      this.selection && 'start' in this.selection
+        ? overlappingSketchSegments(segments, this.selection)
+        : [];
+    const trimmedSegments =
+      trim && 'start' in trim ? overlappingSketchSegments(segments, trim) : [];
+    for (const segment of segments) {
       const positions = [segment.start, segment.end].map(cut =>
         this.screen(endpointPosition(cut.endpoint)),
       );
-      const selected =
-        this.selection &&
-        'start' in this.selection &&
-        sameSketchSegment(segment, this.selection);
+      const selected = selectedSegments.some(value =>
+        sameSketchSegment(segment, value),
+      );
       const element = this.line(
         positions[0],
         positions[1],
-        `${this.entityClass(segment.layer, segment.id)}${selected ? ' selected' : ''}${trim && 'start' in trim && sameSketchSegment(segment, trim) ? ' trim-preview' : ''}`,
+        `${this.entityClass(segment.layer, segment.id)}${selected ? ' selected' : ''}${trimmedSegments.some(value => sameSketchSegment(segment, value)) ? ' trim-preview' : ''}`,
         JSON.stringify([
           segment.layer,
           'line',
@@ -838,17 +845,21 @@ export class SketchEditor {
       this.editError ??
       this.view.readOnlyReason ??
       (this.mode === 'Trim'
-        ? 'Click a highlighted segment or standalone point to trim · Esc exits'
+        ? trimmedSegments.length > 1
+          ? `${trimmedSegments.length} overlapping segments · Click to trim together · Esc exits`
+          : 'Click a highlighted segment or standalone point to trim · Esc exits'
         : undefined) ??
       (selected?.layer && selected.layer !== this.view.id
         ? 'Upstream geometry · locked'
-        : selected &&
-            points.some(p => same(p, selected)) &&
-            this.expressionLock(selected.id)
-          ? this.expressionLock(selected.id)!
-          : this.drawing
-            ? this.drawing.instructions
-            : `${this.view.layers.at(-1)!.degreesOfFreedom} DOF · ${this.view.layers.at(-1)!.constraints.length} constraints · Drag points · Delete removes the selected segment or point`);
+        : selectedSegments.length > 1
+          ? `${selectedSegments.length} overlapping segments · Delete trims them together`
+          : selected &&
+              points.some(p => same(p, selected)) &&
+              this.expressionLock(selected.id)
+            ? this.expressionLock(selected.id)!
+            : this.drawing
+              ? this.drawing.instructions
+              : `${this.view.layers.at(-1)!.degreesOfFreedom} DOF · ${this.view.layers.at(-1)!.constraints.length} constraints · Drag points · Delete removes the selected segment or point`);
     if (this.statusText.data !== status) this.statusText.data = status;
   }
 

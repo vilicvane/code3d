@@ -113,3 +113,19 @@ export const trimming = sketch([
   ['line', 8, [3, 4]],
   ['line', 9, [5, 6]],
 ]);
+
+// Lines 7 and 10 overlap in opposite directions. Trim highlights both and removes
+// their shared middle interval in one click; the cutting lines and outer pieces
+// remain. The new cut points are shared. One Undo restores both original lines.
+export const overlapping = sketch([
+  ['point', 1, [0, 0]],
+  ['point', 2, [40, 0]],
+  ['point', 3, [10, -10]],
+  ['point', 4, [10, 10]],
+  ['point', 5, [30, -10]],
+  ['point', 6, [30, 10]],
+  ['line', 7, [1, 2]],
+  ['line', 8, [3, 4]],
+  ['line', 9, [5, 6]],
+  ['line', 10, [2, 1]],
+]);

@@ -41,7 +41,7 @@ export type SketchChange =
     }>
   | Readonly<{
       kind: 'trim';
-      line: SketchLineSnapshot;
+      lines: readonly SketchLineSnapshot[];
       ids: readonly number[];
       constraints: readonly number[];
       entries: readonly SketchDraftEntry[];
@@ -249,7 +249,8 @@ export class SketchEditResolver implements ToolIntentResolver {
     const {change} = intent;
     if (change.kind === 'delete' || change.kind === 'trim') {
       for (const id of change.ids) {
-        if (change.kind === 'trim' && id === change.line.id) continue;
+        if (change.kind === 'trim' && change.lines.some(line => line.id === id))
+          continue;
         const entry = parsed.entries.get(id);
         if (!entry)
           return {
@@ -283,24 +284,21 @@ export class SketchEditResolver implements ToolIntentResolver {
         });
       }
     } else if (change.kind === 'trim') {
-      const original = parsed.entries.get(change.line.id);
-      if (original?.kind !== 'line')
-        return {
-          status: 'conflict',
-          reason: 'The trimmed line no longer exists.',
-        };
-      const retained = change.entries.find(
-        entry => entry[1] === change.line.id,
-      );
       try {
-        if (retained?.[0] === 'line') {
-          retained[2].forEach((ref, i) => {
-            if (!sameSketchPoint(ref, change.line.points[i]))
-              replace(original.data.elements[i], point(ref));
-          });
-        } else remove(original.node);
+        for (const line of change.lines) {
+          const original = parsed.entries.get(line.id);
+          if (original?.kind !== 'line')
+            throw new Error('The trimmed line no longer exists.');
+          const retained = change.entries.find(entry => entry[1] === line.id);
+          if (retained?.[0] === 'line') {
+            retained[2].forEach((ref, i) => {
+              if (!sameSketchPoint(ref, line.points[i]))
+                replace(original.data.elements[i], point(ref));
+            });
+          } else remove(original.node);
+        }
         const added = change.entries.filter(
-          entry => entry[1] !== change.line.id,
+          entry => !change.lines.some(line => line.id === entry[1]),
         );
         for (const [, id] of added) {
           if (parsed.entries.has(id))
@@ -316,7 +314,11 @@ export class SketchEditResolver implements ToolIntentResolver {
             remove(node);
             continue;
           }
-          if (lines.length === 1 && lines[0] === change.line.id) continue;
+          if (
+            lines.length === 1 &&
+            change.lines.some(line => line.id === lines[0])
+          )
+            continue;
           const kind = node.elements[0];
           const data = node.elements[1];
           if (

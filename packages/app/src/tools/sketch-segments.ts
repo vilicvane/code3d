@@ -32,6 +32,12 @@ const lineTolerance = (a: SketchPosition, b: SketchPosition, length: number) =>
     length * 1e-9,
     Number.EPSILON * 16 * Math.max(...a.map(Math.abs), ...b.map(Math.abs)),
   );
+const snapshotPoints = (layers: readonly SketchSnapshot[]): SketchPoint[] =>
+  layers.flatMap(layer =>
+    layer.entities.flatMap(e =>
+      e.kind === 'point' ? [{...e, layer: layer.id}] : [],
+    ),
+  );
 
 /** Geometric boundaries do not depend on zoom, snapping, or persistent IDs. */
 export function sketchSegments(
@@ -76,12 +82,22 @@ export function sketchSegments(
     }
     for (const other of lines) {
       if (other === line || !other.length) continue;
+      // Collinear endpoints already supply all overlap boundaries. Testing
+      // distance before dividing by the angle avoids spurious intersections
+      // when translated/rotated collinear lines differ by roundoff.
+      if (
+        [other.a, other.b].every(
+          point =>
+            Math.abs(cross(unit, subtract(point.position, a.position))) <=
+            tolerance,
+        )
+      )
+        continue;
       const direction: SketchPosition = [
         other.vector[0] / other.length,
         other.vector[1] / other.length,
       ];
       const denominator = cross(unit, direction);
-      // Collinear overlap is already partitioned by the real endpoints above.
       if (Math.abs(denominator) <= Number.EPSILON * 16) continue;
       const delta = subtract(other.a.position, a.position);
       const t = cross(delta, direction) / denominator / length;
@@ -110,6 +126,25 @@ export function sameSketchSegment(a: SketchSegment, b: SketchSegment): boolean {
   );
 }
 
+/** All lines share the same geometric cuts, so an overlap is an equal interval,
+ * possibly reversed. Never group by screen-space picking distance. */
+export function overlappingSketchSegments(
+  segments: readonly SketchSegment[],
+  selected: SketchSegment,
+): SketchSegment[] {
+  const a = endpointPosition(selected.start.endpoint);
+  const b = endpointPosition(selected.end.endpoint);
+  const tolerance = lineTolerance(a, b, sketchDistance(a, b));
+  const near = (p: SketchPosition, q: SketchPosition) =>
+    sketchDistance(p, q) <= tolerance;
+  return segments.filter(segment => {
+    if (segment.layer !== selected.layer) return false;
+    const start = endpointPosition(segment.start.endpoint);
+    const end = endpointPosition(segment.end.endpoint);
+    return (near(a, start) && near(b, end)) || (near(a, end) && near(b, start));
+  });
+}
+
 export function sketchSegmentDistance(
   p: SketchPosition,
   segment: SketchSegment,
@@ -131,11 +166,7 @@ function disconnectedPoints(
   entries: readonly SketchDraftEntry[] = [],
 ): number[] {
   const local = layers.at(-1)!;
-  const points = layers.flatMap(layer =>
-    layer.entities.flatMap(e =>
-      e.kind === 'point' ? [{...e, layer: layer.id}] : [],
-    ),
-  );
+  const points = snapshotPoints(layers);
   points.push(
     ...entries.flatMap(([kind, id, position]) =>
       kind === 'point' ? [{kind, id, position, layer: local.id}] : [],
@@ -240,39 +271,61 @@ export function deleteSketchPoint(
   return {kind: 'delete', ids, constraints: deletedConstraints(local, ids)};
 }
 
-/** Remove one interval, including newly disconnected local endpoints. */
+/** Remove one geometric interval from all overlapping local lines, atomically. */
 export function trimSketchSegment(
   layers: readonly SketchSnapshot[],
   segment: SketchSegment,
-): SketchChange {
+): Extract<SketchChange, {kind: 'trim'}> {
   const local = layers.at(-1)!;
-  const line = local.entities.find(
-    e => e.id === segment.id,
-  ) as SketchLineSnapshot;
-  const remains = Number(segment.start.t > 0) + Number(segment.end.t < 1);
+  const segments = overlappingSketchSegments(
+    sketchSegments(layers, snapshotPoints(layers)),
+    segment,
+  );
+  const lines = segments.map(
+    segment =>
+      local.entities.find(e => e.id === segment.id) as SketchLineSnapshot,
+  );
   let nextId = Math.max(0, ...local.entities.map(e => e.id)) + 1;
   const entries: SketchDraftEntry[] = [];
+  const generated: {position: SketchPosition; address: SketchPointAddress}[] =
+    [];
+  const a = endpointPosition(segment.start.endpoint),
+    b = endpointPosition(segment.end.endpoint);
+  const tolerance = lineTolerance(a, b, sketchDistance(a, b));
   const point = (cut: SketchCut): SketchPointAddress => {
     if ('point' in cut.endpoint) {
       const {layer, id} = cut.endpoint.point;
       return {layer, id};
     }
+    const raw = cut.endpoint.position;
+    const existing = generated.find(
+      p => sketchDistance(p.position, raw) <= tolerance,
+    );
+    if (existing) return existing.address;
     const id = nextId++;
     const position: SketchPosition = [
       Number(formatSourceNumber(cut.endpoint.position[0])),
       Number(formatSourceNumber(cut.endpoint.position[1])),
     ];
     entries.push(['point', id, position]);
-    return {layer: local.id, id};
+    const address = {layer: local.id, id};
+    generated.push({position: raw, address});
+    return address;
   };
-  const replacements: number[] = [];
-  const add = (points: readonly [SketchPointAddress, SketchPointAddress]) => {
-    const id = remains === 1 ? line.id : nextId++;
-    replacements.push(id);
-    entries.push(['line', id, points]);
-  };
-  if (segment.start.t > 0) add([line.points[0], point(segment.start)]);
-  if (segment.end.t < 1) add([point(segment.end), line.points[1]]);
+  const replacements = new Map<number, number[]>();
+  segments.forEach((segment, index) => {
+    const line = lines[index];
+    const remains = Number(segment.start.t > 0) + Number(segment.end.t < 1);
+    const ids: number[] = [];
+    replacements.set(line.id, ids);
+    const add = (points: readonly [SketchPointAddress, SketchPointAddress]) => {
+      const id = remains === 1 ? line.id : nextId++;
+      ids.push(id);
+      entries.push(['line', id, points]);
+    };
+    if (segment.start.t > 0) add([line.points[0], point(segment.start)]);
+    if (segment.end.t < 1) add([point(segment.end), line.points[1]]);
+  });
   const lineConstraints = local.constraints.flatMap(([kind, data], index) => {
     const id =
       kind === 'horizontal' || kind === 'vertical'
@@ -280,16 +333,18 @@ export function trimSketchSegment(
         : kind === 'length' || kind === 'angle'
           ? data[0]
           : undefined;
-    if (id !== line.id) return [];
-    return [{index, lines: kind === 'length' ? [] : replacements}];
+    const targets = id === undefined ? undefined : replacements.get(id);
+    if (!targets) return [];
+    return [{index, lines: kind === 'length' ? [] : targets}];
   });
-  const orphaned = disconnectedPoints(layers, [line.id], entries);
+  const ids = lines.map(line => line.id);
+  const orphaned = disconnectedPoints(layers, ids, entries);
   return {
     kind: 'trim',
-    line,
+    lines,
     entries,
     lineConstraints,
-    ids: [line.id, ...orphaned],
+    ids: [...ids, ...orphaned],
     constraints: deletedConstraints(local, orphaned),
   };
 }

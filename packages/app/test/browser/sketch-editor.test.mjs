@@ -1,67 +1,13 @@
 import assert from 'node:assert/strict';
-import {after, before, test} from 'node:test';
-import {chromium} from 'playwright-core';
-
-const appUrl = process.env.CODE3D_TEST_URL;
-let browser;
-before(async () => {
-  assert.ok(appUrl, 'Set CODE3D_TEST_URL to the development server URL');
-  browser = await chromium.connectOverCDP(
-    process.env.CODE3D_CDP_URL ?? 'http://localhost:9222',
-  );
-});
-after(async () => browser?.close());
-
-async function open(t, source, cursor) {
-  const context = await browser.newContext({
-    viewport: {width: 1400, height: 900},
-  });
-  t.after(() => context.close());
-  const page = await context.newPage();
-  page.setDefaultTimeout(15_000);
-  const errors = [];
-  page.on('pageerror', e => errors.push(e.message));
-  t.after(() => assert.deepEqual(errors, []));
-  await page.goto(appUrl);
-  await page.getByText('Ready', {exact: true}).waitFor({timeout: 30_000});
-  await page.locator('.monaco-editor .view-lines').first().click();
-  await page.keyboard.press('Control+a');
-  await page.keyboard.insertText(source);
-  if (cursor) {
-    await page.keyboard.press('Control+Home');
-    for (let line = 1; line < cursor.line; line++)
-      await page.keyboard.press('ArrowDown');
-    await page.keyboard.press('Home');
-    for (let column = 1; column < cursor.column; column++)
-      await page.keyboard.press('ArrowRight');
-  } else {
-    await page.keyboard.press('ArrowLeft');
-    await page.keyboard.press('ArrowLeft');
-  }
-  await page.getByRole('region', {name: 'Sketch editor'}).waitFor();
-  return page;
-}
-
-const text = async page =>
-  (await page.locator('.monaco-editor .view-lines').innerText()).replaceAll(
-    '\u00a0',
-    ' ',
-  );
-// Sketch geometry updates synchronously, while Monaco renders source edits on
-// its next frame. Wait for the expected source, not compilation or a fixed delay.
-async function waitForSource(page, pattern) {
-  await page.waitForFunction(
-    ({source, flags}) =>
-      new RegExp(source, flags).test(
-        document
-          .querySelector('.monaco-editor .view-lines')
-          .innerText.replaceAll('\u00a0', ' '),
-      ),
-    {source: pattern.source, flags: pattern.flags},
-  );
-}
-const point = (page, id, layer = 'local') =>
-  page.locator(`.sketch-canvas circle.${layer}[data-id="${id}"]`);
+import {test} from 'node:test';
+import {
+  open,
+  text,
+  waitForSource,
+  point,
+  segment,
+  clickSegment,
+} from './sketch-test.ts';
 async function drag(page, locator, dx, dy) {
   const rect = await locator.boundingBox();
   await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
@@ -811,17 +757,6 @@ test('deleting a constrained line removes its orphan endpoints and undo restores
   assert.match(await text(page), /'length',\s*\[3,\s*40\]/);
 });
 
-const segment = (page, id, start, end, layer = 'local') =>
-  page.locator(
-    `.sketch-canvas line.${layer}[data-id="${id}"][data-start="${start}"][data-end="${end}"]`,
-  );
-async function clickSegment(page, locator) {
-  const bounds = await locator.boundingBox();
-  await page.mouse.click(
-    bounds.x + bounds.width / 2,
-    bounds.y + bounds.height / 2,
-  );
-}
 async function selectSegment(page, locator) {
   await clickSegment(page, locator);
   assert.match(await locator.getAttribute('class'), /\blocal selected\b/);

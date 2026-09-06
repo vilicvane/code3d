@@ -76,6 +76,11 @@ implementation context and historical outcomes, not a competing work queue.
   constraints are removed, while direction constraints and their expressions
   follow surviving lines in the same undo transaction. Upstream geometry can
   delimit a local trim but remains read-only.
+  All local overlapping pieces on the clicked interval are highlighted and
+  trimmed together, including reversed lines. IDs and direction constraints
+  follow each original line; computed cut points are shared and orphan cleanup
+  runs after the whole batch. Uneditable targets reject the entire transaction.
+  Nearby parallel lines, crossings and read-only upstream are not grouped.
   The Scissors/Trim tool previews on hover and trims directly on click without
   selection; Esc exits. Select + Delete/Backspace uses the same transaction.
   Persistent constraints have read-only glyphs and numeric labels, an overall

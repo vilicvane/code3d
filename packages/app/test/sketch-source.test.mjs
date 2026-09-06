@@ -20,7 +20,7 @@ const trim = (
   points = [address(1), address(2)],
 ) => ({
   kind: 'trim',
-  line: {kind: 'line', id, points},
+  lines: [{kind: 'line', id, points}],
   ids: [id],
   constraints: [],
   entries,
