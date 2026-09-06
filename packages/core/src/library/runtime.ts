@@ -3,7 +3,6 @@ import {
   basicFaceExtrusion,
   genericSweep,
   getOC,
-  loft as makeLoft,
   makeBSplineApproximation,
   makeBezierCurve,
   makeCircle,
@@ -55,6 +54,8 @@ import {
   type KernelKeyPart,
   type KernelValueLifecycle,
 } from './kernel-cache.js';
+import {loftWithTopology} from './loft.js';
+import {formatTopologyId, type TopologyId} from './topology-id.js';
 import {
   booleanWithTopology,
   chamferEdges,
@@ -202,7 +203,7 @@ export type ModelOperationRegionSnapshot = Readonly<{
 export type ModelOperationSelectionSnapshot = Readonly<{
   kind: 'edge' | 'surface';
   inputNodeId: string;
-  ids: readonly number[];
+  ids: readonly TopologyId[];
 }>;
 
 export type ModelOperationSnapshot = Readonly<{
@@ -246,7 +247,7 @@ export type RenderMesh = Readonly<{
   edgeGroups: readonly Readonly<{
     start: number;
     count: number;
-    edgeId: number;
+    edgeId: EdgeId;
   }>[];
 }>;
 
@@ -348,7 +349,7 @@ type StoredOperationRegion = Readonly<{
 type StoredOperationSelection = Readonly<{
   kind: 'edge' | 'surface';
   input: ModelObject;
-  ids: readonly number[];
+  ids: readonly TopologyId[];
 }>;
 
 type StoredOperation = {
@@ -775,7 +776,7 @@ class ModelTopologyElement extends ModelAnchor {
   get kind(): TopologySelection['kind'] {
     return this.#topology.selection.kind;
   }
-  get id(): number | undefined {
+  get id(): TopologyId | undefined {
     const selection = this.#topology.selection;
     return selection.kind === 'solid' ? undefined : selection.id;
   }
@@ -848,7 +849,7 @@ class ModelTopologyElement extends ModelAnchor {
 
   #select(
     kind: TopologyKind,
-    ids?: readonly number[],
+    ids?: readonly TopologyId[],
   ): readonly ModelTopologyElement[] {
     const geometry = this.#topology.source[modelGeometry]()!.value;
     const selected = topologyChildren(
@@ -906,7 +907,7 @@ export function modelTopologyReference(
 export function modelTopologyIds(
   value: unknown,
   kind: TopologyKind,
-): readonly number[] | undefined {
+): readonly TopologyId[] | undefined {
   const topology =
     value instanceof ModelTopologyElement
       ? value[anchorReferenceValue].topology
@@ -1251,7 +1252,7 @@ export class ModelObject<
 
   private selectTopology(
     kind: TopologyKind,
-    ids?: readonly number[],
+    ids?: readonly TopologyId[],
   ): readonly ModelTopologyElement[] {
     const geometry = this.requireGeometry().value;
     const selected = topologyChildren(
@@ -1718,9 +1719,7 @@ export class ModelObject<
         ...sectionInputs.map(input => input.geometry),
         ...(spineInput ? [spineInput.geometry] : []),
       ],
-      () => ({
-        shape: buildLoftShape(sectionInputs, spineInput, ruled),
-      }),
+      () => buildLoftGeometry(sectionInputs, spineInput, ruled),
     );
     const inputs = [...sections, ...(spine ? [spine] : [])];
     return ModelObject.create<CanonicalElements, 'solid'>({
@@ -1808,7 +1807,7 @@ export class ModelObject<
     const regions: StoredOperationRegion[] = [];
     let evaluated = false;
     try {
-      for (const other of others) {
+      for (const [otherIndex, other] of others.entries()) {
         const otherGeometry = other.requireSolidGeometry();
         const transform = relativeTransform(
           other.solvePose(solveContext),
@@ -1847,14 +1846,21 @@ export class ModelObject<
           }
           const nextGeometry = evaluateSolidGeometry(
             `boolean-${operation}`,
-            [],
+            [otherIndex],
             [geometry, operand],
             () => {
               const result = booleanWithTopology(
-                geometry.value.shape,
-                operand.value,
+                {
+                  shape: geometry.value.shape,
+                  topology: geometry.value.topology,
+                  index: otherIndex === 0 ? 1 : undefined,
+                },
+                {
+                  shape: operand.value,
+                  topology: otherGeometry.value.topology,
+                  index: otherIndex + 2,
+                },
                 operation,
-                geometry.value.topology,
               );
               return {shape: result.shape, topology: result.topology};
             },
@@ -3054,57 +3060,43 @@ type PositionedModelGeometry = Readonly<{
   transform: RigidTransform;
 }>;
 
-function buildLoftShape(
+function buildLoftGeometry(
   sections: readonly PositionedModelGeometry[],
   spine: PositionedModelGeometry | undefined,
   ruled: boolean,
-): Shape3D {
-  const wires = sections.map(section => {
-    const face = shapeWithTransform(
-      section.geometry.value.shape as ReplicadFace,
-      section.transform,
-    );
-    return face.outerWire();
-  });
+): Readonly<{shape: Shape3D; topology: ShapeTopology}> {
+  const inputs: {
+    shape: ReplicadFace;
+    topology: ShapeTopology;
+    index: number;
+  }[] = [];
   let spineWire: ReplicadWire | undefined;
   try {
-    if (!spine) return makeLoft(wires, {ruled});
-    const edge = shapeWithTransform(
-      spine.geometry.value.shape as ReplicadEdge,
-      spine.transform,
-    );
-    try {
-      spineWire = assembleWire([edge]);
-    } finally {
-      edge.delete();
+    for (const [index, section] of sections.entries()) {
+      inputs.push({
+        shape: shapeWithTransform(
+          section.geometry.value.shape as ReplicadFace,
+          section.transform,
+        ),
+        topology: section.geometry.value.topology,
+        index: index + 1,
+      });
     }
-    return makeSpineLoft(wires, spineWire);
-  } finally {
-    wires.forEach(wire => wire.delete());
-    spineWire?.delete();
-  }
-}
-
-function makeSpineLoft(
-  sections: readonly ReplicadWire[],
-  spine: ReplicadWire,
-): Shape3D {
-  const builder = new (getOC().BRepOffsetAPI_MakePipeShell)(spine.wrapped);
-  try {
-    builder.SetMode(false);
-    sections.forEach(section => builder.Add(section.wrapped, false, false));
-    if (!builder.IsReady()) {
-      throw new Error(
-        'The loft sections could not be associated with the spine.',
+    if (spine) {
+      const edge = shapeWithTransform(
+        spine.geometry.value.shape as ReplicadEdge,
+        spine.transform,
       );
+      try {
+        spineWire = assembleWire([edge]);
+      } finally {
+        edge.delete();
+      }
     }
-    builder.Build();
-    if (!builder.IsDone() || !builder.MakeSolid()) {
-      throw new Error('Could not construct a solid loft along the spine.');
-    }
-    return castOwnedShape3D(builder.Shape());
+    return loftWithTopology(inputs, spineWire, ruled);
   } finally {
-    builder.delete();
+    inputs.forEach(input => input.shape.delete());
+    spineWire?.delete();
   }
 }
 
@@ -3303,7 +3295,7 @@ function transformedReferenceBasis(
 function topologyName(selection: TopologySelection): string {
   return selection.kind === 'solid'
     ? 'solid'
-    : `${{vertex: 'V', edge: 'E', surface: 'S'}[selection.kind]}${selection.id}`;
+    : formatTopologyId(selection.kind, selection.id);
 }
 
 function topologyReferences(
@@ -3311,7 +3303,7 @@ function topologyReferences(
   prefix: string,
   context: Omit<StoredTopology, 'selection'>,
   kind: TopologyKind,
-  ids: readonly number[],
+  ids: readonly TopologyId[],
 ): readonly ModelTopologyElement[] {
   const geometry = context.source[modelGeometry]()!.value;
   const basis = geometry.referenceBasis;

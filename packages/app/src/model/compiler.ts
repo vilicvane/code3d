@@ -1,6 +1,10 @@
 import ts from '@typescript/typescript6';
 import {normalizeProjectPath, type ModelProject} from '../project/project';
 import {
+  isTopologyId,
+  sameTopologyId,
+  TopologyIdSet,
+  type TopologyId,
   type Constraint,
   type EdgeId,
   type ElementKind,
@@ -49,7 +53,7 @@ type TopologyValueReference = Readonly<{
   geometryNodeId: string;
   transform: Transform;
 }> &
-  ({kind: 'solid'} | {kind: TopologyKind; id: number});
+  ({kind: 'solid'} | {kind: TopologyKind; id: TopologyId});
 
 type AnchorValueReference = Readonly<{
   nodeId: string;
@@ -61,7 +65,7 @@ type AnchorValueReference = Readonly<{
 export type TopologySelectionScope = Readonly<{
   geometryNodeId: string;
   transform: Transform;
-  availableIds: readonly number[];
+  availableIds: readonly TopologyId[];
 }>;
 
 export type SourceTargetEvaluation = Readonly<{
@@ -94,7 +98,7 @@ export type SourceTargetEvaluation = Readonly<{
     | Readonly<{
         kind: TopologyKind;
         inputNodeId: string;
-        ids: readonly number[];
+        ids: readonly TopologyId[];
         scope?: TopologySelectionScope;
       }>;
 }>;
@@ -1721,7 +1725,11 @@ export function createModelCompiler(
                             ? [reference.id]
                             : [],
                         )
-                      : attemptedIds.filter(id => availableIds.includes(id)),
+                      : attemptedIds.filter(id =>
+                          availableIds.some(available =>
+                            sameTopologyId(available, id),
+                          ),
+                        ),
                   scope: reference
                     ? {
                         geometryNodeId: modelObjectNodeId(reference.geometry),
@@ -2092,31 +2100,15 @@ export function createModelCompiler(
   }
 
   function attemptedEdgeIds(value: unknown): EdgeId[] {
-    if (!Array.isArray(value)) return [];
-    return [
-      ...new Set(
-        value.filter(
-          (candidate): candidate is EdgeId =>
-            typeof candidate === 'number' &&
-            Number.isSafeInteger(candidate) &&
-            candidate >= 1,
-        ),
-      ),
-    ];
+    return attemptedTopologyIds(value, true);
   }
 
-  function attemptedTopologyIds(value: unknown, multiple: boolean): number[] {
+  function attemptedTopologyIds(
+    value: unknown,
+    multiple: boolean,
+  ): TopologyId[] {
     const values = multiple ? (Array.isArray(value) ? value : []) : [value];
-    return [
-      ...new Set(
-        values.filter(
-          (candidate): candidate is number =>
-            typeof candidate === 'number' &&
-            Number.isSafeInteger(candidate) &&
-            candidate >= 1,
-        ),
-      ),
-    ];
+    return [...new TopologyIdSet(values.filter(isTopologyId))];
   }
 
   function validAttemptedEdgeIds(
@@ -2124,7 +2116,7 @@ export function createModelCompiler(
     attempted: readonly EdgeId[] | undefined,
   ): EdgeId[] {
     if (input.kind !== 'solid' || !input.mesh || !attempted) return [];
-    const available = new Set(
+    const available = new TopologyIdSet(
       input.mesh.edgeGroups.map(edgeGroup => edgeGroup.edgeId),
     );
     return attempted.filter(edgeId => available.has(edgeId));

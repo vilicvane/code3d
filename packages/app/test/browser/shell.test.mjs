@@ -18,18 +18,18 @@ test(
     page.setDefaultTimeout(20_000);
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
+    // Capture the actual instance; Vite can serve timestamped module instances
+    // after edits, so importing and patching a second prototype misses the App.
+    await page.route('**/src/main.ts*', async route => {
+      const response = await route.fetch();
+      await route.fulfill({
+        response,
+        body: (await response.text()) + '\nwindow.shellViewport = viewport;\n',
+      });
+    });
     await page.goto(appUrl);
     await page.getByText('Ready', {exact: true}).waitFor({timeout: 30_000});
-    // Capture the running viewport through its public selection entry point.
     // All source edits and picks below go through the real App event handlers.
-    await page.evaluate(async () => {
-      const {ModelViewport} = await import('/src/viewport.ts');
-      const begin = ModelViewport.prototype.beginTopologySelection;
-      ModelViewport.prototype.beginTopologySelection = function (...args) {
-        window.shellViewport = this;
-        return begin.apply(this, args);
-      };
-    });
     const source =
       "import {box} from '@code3d/core';\nconst body = box(40,24,30).shell(1.5);\nexport default body;";
     await page.locator('.monaco-editor .view-lines').first().click();

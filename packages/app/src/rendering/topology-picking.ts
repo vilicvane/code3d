@@ -1,5 +1,5 @@
 import {Matrix4, Vector4} from 'three';
-import type {RenderMesh} from '@code3d/core/tooling';
+import type {RenderMesh, TopologyId} from '@code3d/core/tooling';
 
 export const topologyPickRadius = 6;
 
@@ -10,8 +10,8 @@ export function pickScreenTopology(
   localToClip: Matrix4,
   pointer: Readonly<{x: number; y: number}>,
   viewport: Readonly<{width: number; height: number}>,
-): number | undefined {
-  let nearestId: number | undefined;
+): TopologyId | undefined {
+  let nearestId: TopologyId | undefined;
   let nearestDistance = topologyPickRadius ** 2;
   let nearestDepth = Infinity;
   const start = new Vector4();
@@ -24,7 +24,12 @@ export function pickScreenTopology(
       1,
     );
   };
-  const consider = (id: number, x: number, y: number, depth: number): void => {
+  const consider = (
+    id: TopologyId,
+    x: number,
+    y: number,
+    depth: number,
+  ): void => {
     const distance = (x - pointer.x) ** 2 + (y - pointer.y) ** 2;
     if (
       distance < nearestDistance ||
