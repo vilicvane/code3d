@@ -1,9 +1,10 @@
+import type {Browser} from 'playwright-core';
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
 import {chromium} from 'playwright-core';
 
 const appUrl = process.env.CODE3D_TEST_URL;
-let browser;
+let browser: Browser;
 before(async () => {
   assert.ok(appUrl, 'Set CODE3D_TEST_URL to the task development server');
   browser = await chromium.connectOverCDP(
@@ -12,7 +13,7 @@ before(async () => {
 });
 after(async () => browser?.close());
 
-for (const installed of [false, true]) {
+for (const installed of [false, true] as const) {
   test(
     `solves in the App Worker with ${installed ? 'project' : 'built-in'} packages`,
     {timeout: 120_000},
@@ -52,7 +53,7 @@ for (const installed of [false, true]) {
           self.up.on(first.down),
         ]);
         export default group([first, second]);`;
-        const compile = text =>
+        const compile = (text: string) =>
           client.compile(
             {
               files: [
@@ -72,8 +73,9 @@ for (const installed of [false, true]) {
             },
             '/main.ts',
           );
-        const root = module =>
-          module.objects.get(module.exports.get('default'));
+        const root = (
+          module: import('../../src/model/compiler.ts').ModelModule,
+        ) => module.objects.get(module.exports.get('default')!);
         try {
           const first = await compile(source);
           const shifted = await compile(
@@ -90,8 +92,9 @@ for (const installed of [false, true]) {
                 'self.up.on(first.down).offset(0, 0, 0)',
               ),
             );
-            conflict = conflicting.diagnostic?.message;
+            conflict = conflicting.diagnostic?.summary;
           } catch (error) {
+            if (!(error instanceof Error)) throw error;
             conflict = error.message;
           }
           const restored = await compile(source);
@@ -124,8 +127,8 @@ for (const installed of [false, true]) {
         [result.first, [5, -15, 0]],
         [result.shifted, [5, -15, -7]],
         [result.restored, [5, -15, 0]],
-      ]) {
-        actual.forEach((value, index) =>
+      ] as const) {
+        actual!.forEach((value, index) =>
           assert.ok(
             Math.abs(value - expected[index]) < 1e-6,
             JSON.stringify(result),
@@ -134,7 +137,7 @@ for (const installed of [false, true]) {
       }
       assert.deepEqual(result.offset, [5, 0, 7]);
       assert.equal(result.constraintSource, '/main.ts');
-      assert.match(result.conflict, /Conflicting bound positions/);
+      assert.match(result.conflict!, /Conflicting bound positions/);
     },
   );
 }

@@ -1,3 +1,4 @@
+import type {ProjectTypeScriptWorker} from '../../src/monaco/typescript-protocol.ts';
 import * as monaco from 'monaco-editor/editor';
 import * as language from 'monaco-editor/languages/features/typescript/register';
 
@@ -23,9 +24,11 @@ export async function inspectWorkerFiles() {
     'typescript',
     monaco.Uri.file('/workspace/@examples/尺寸 box.ts'),
   );
-  const worker = await (
+  const worker = (await (
     await language.getTypeScriptWorker()
-  )(declaration.uri, model.uri);
+  )(declaration.uri, model.uri)) as ProjectTypeScriptWorker & {
+    getScriptFileNames(): Promise<string[]>;
+  };
   const declarationUri = declaration.uri.toString();
   const modelUri = model.uri.toString();
   const diagnostics = await Promise.all([
@@ -41,7 +44,9 @@ export async function inspectWorkerFiles() {
     declarationUri,
     diagnostics,
     files: await worker.getScriptFileNames(),
-    navigation: await worker.getNavigationTree(declarationUri),
+    navigation: (await worker.getNavigationTree(
+      declarationUri,
+    )) as import('@typescript/typescript6').NavigationTree,
     selection: await worker.getProjectSelectionRanges(modelUri, [
       source.indexOf('length') + 2,
     ]),

@@ -1,8 +1,16 @@
+import type {Browser, Page} from 'playwright-core';
+import type {TestContext} from 'node:test';
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
 import {chromium} from 'playwright-core';
+declare const window: Window & {
+  topologyTestApp: {
+    viewport: import('../../src/viewport.ts').ModelViewport;
+    codeEditor: import('../../src/editor.ts').CodeEditor;
+  };
+};
 
-let browser;
+let browser: Browser;
 const appUrl = process.env.CODE3D_TEST_URL;
 before(async () => {
   assert.ok(appUrl, 'Set CODE3D_TEST_URL to the development server');
@@ -12,20 +20,21 @@ before(async () => {
 });
 after(async () => browser?.close());
 
-const sourceFor =
-  expression => `import {loft, point, rectangle} from '@code3d/core';
+const sourceFor = (
+  expression: string,
+) => `import {loft, point, rectangle} from '@code3d/core';
 const base = rectangle(28, 20);
 const top = rectangle(18, 12).relate(p => p.on(point([0, 32, 0]).up));
 const body = loft([base, top]);
 ${expression};`;
 
-async function openApp(t, expression) {
+async function openApp(t: TestContext, expression: string) {
   const context = await browser.newContext({
     viewport: {width: 1400, height: 950},
   });
   t.after(() => context.close());
   const page = await context.newPage();
-  const errors = [];
+  const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   page.setDefaultTimeout(20_000);
   // Expose the running app only in this test response, without product debug hooks.
@@ -38,29 +47,33 @@ async function openApp(t, expression) {
         '\nwindow.topologyTestApp = {codeEditor, viewport};\n',
     });
   });
-  await page.goto(appUrl);
+  await page.goto(appUrl!);
   await page.getByText('Ready', {exact: true}).waitFor({timeout: 40_000});
   await page.evaluate(source => {
     const {editor} = window.topologyTestApp.codeEditor;
     const model = editor.getModel();
-    model.setValue(source);
-    editor.setPosition(model.getPositionAt(source.length - 2));
+    model!.setValue(source);
+    editor.setPosition(model!.getPositionAt(source.length - 2));
     editor.focus();
   }, sourceFor(expression));
   await page.waitForFunction(() =>
-    Boolean(window.topologyTestApp.viewport.topologySelection),
+    Boolean(window.topologyTestApp.viewport['topologySelection']),
   );
   return {page, errors};
 }
 
-async function clickId(page, id) {
+async function clickId(
+  page: Page,
+  id: import('@code3d/core/tooling').TopologyId,
+) {
   const position = await page.evaluate(id => {
     const {viewport} = window.topologyTestApp;
-    const selection = viewport.topologySelection;
+    const selection = viewport['topologySelection']!;
     const {mesh, guide, kind} = selection;
-    const same = value => JSON.stringify(value) === JSON.stringify(id);
+    const same = (value: import('@code3d/core/tooling').TopologyId) =>
+      JSON.stringify(value) === JSON.stringify(id);
     guide.updateWorldMatrix(true, true);
-    viewport.camera.updateWorldMatrix(true, false);
+    viewport['camera'].updateWorldMatrix(true, false);
     const points = [];
     if (kind === 'vertex') {
       const index = mesh.vertexIds.findIndex(same);
@@ -70,8 +83,8 @@ async function clickId(page, id) {
     } else if (kind === 'edge') {
       const group = mesh.edgeGroups.find(group => same(group.edgeId));
       for (
-        let index = group.start * 3;
-        index < (group.start + group.count) * 3;
+        let index = group!.start * 3;
+        index < (group!.start + group!.count) * 3;
         index += 6
       ) {
         points.push(
@@ -85,8 +98,8 @@ async function clickId(page, id) {
     } else {
       const group = mesh.surfaceGroups.find(group => same(group.surfaceId));
       for (
-        let index = group.start;
-        index < group.start + group.count;
+        let index = group!.start;
+        index < group!.start + group!.count;
         index += 3
       ) {
         const point = guide.position.clone().set(0, 0, 0);
@@ -99,25 +112,25 @@ async function clickId(page, id) {
         points.push(point.multiplyScalar(1 / 3));
       }
     }
-    const rect = viewport.renderer.domElement.getBoundingClientRect();
+    const rect = viewport['renderer'].domElement.getBoundingClientRect();
     for (const point of points) {
-      point.applyMatrix4(guide.matrixWorld).project(viewport.camera);
+      point.applyMatrix4(guide.matrixWorld).project(viewport['camera']);
       const position = {
         clientX: rect.left + ((point.x + 1) * rect.width) / 2,
         clientY: rect.top + ((1 - point.y) * rect.height) / 2,
       };
-      if (same(viewport.pickTopology(position))) return position;
+      if (same(viewport['pickTopology'](position)!)) return position;
     }
     throw new Error(`No visible pick point for ${kind} ${JSON.stringify(id)}`);
   }, id);
   await page.mouse.click(position.clientX, position.clientY);
 }
 
-async function expectExpression(page, expression) {
+async function expectExpression(page: Page, expression: string) {
   await page.waitForFunction(
-    expression =>
+    (expression: string) =>
       window.topologyTestApp.codeEditor.editor
-        .getModel()
+        .getModel()!
         .getValue()
         .includes(expression),
     expression,
@@ -125,7 +138,7 @@ async function expectExpression(page, expression) {
   await page.getByText('Ready', {exact: true}).waitFor();
 }
 
-for (const kind of ['surface', 'edge', 'vertex']) {
+for (const kind of ['surface', 'edge', 'vertex'] as const) {
   test(
     `${kind} picks write one path and survive recompilation and Undo/Redo`,
     {timeout: 90_000},
@@ -135,14 +148,14 @@ for (const kind of ['surface', 'edge', 'vertex']) {
       const {page, errors} = await openApp(t, initial);
       assert.equal(
         await page.evaluate(
-          () => window.topologyTestApp.viewport.topologySelection.multiple,
+          () => window.topologyTestApp.viewport['topologySelection']!.multiple,
         ),
         false,
       );
       await clickId(page, [2, 1]);
       await expectExpression(page, changed);
       await page.waitForFunction(() =>
-        window.topologyTestApp.viewport.topologySelection.selectedIds.has([
+        window.topologyTestApp.viewport['topologySelection']!.selectedIds.has([
           2, 1,
         ]),
       );
@@ -171,7 +184,7 @@ test(
     const {page, errors} = await openApp(t, 'body.edges([[2, 1]])');
     assert.equal(
       await page.evaluate(
-        () => window.topologyTestApp.viewport.topologySelection.multiple,
+        () => window.topologyTestApp.viewport['topologySelection']!.multiple,
       ),
       true,
     );

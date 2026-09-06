@@ -1,11 +1,19 @@
+import type {Browser, Page} from 'playwright-core';
+import type {TestContext} from 'node:test';
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
 import {chromium} from 'playwright-core';
+declare const window: Window & {
+  commits: {name: string; value: number | undefined}[];
+  acceptCommit: boolean;
+  panel: import('../../src/ui/contextual-tool-panel.ts').ContextualToolPanel;
+  showPanel(disabled?: string[], id?: string): void;
+};
 
 // Run against this task's dev server and host Chrome, in isolated contexts:
 // CODE3D_TEST_URL=http://127.0.0.1:5175 npm run test:browser:tool-panel -w @code3d/app
 const appUrl = process.env.CODE3D_TEST_URL;
-let browser;
+let browser: Browser;
 
 before(async () => {
   assert.ok(appUrl, 'Set CODE3D_TEST_URL to the development server URL');
@@ -16,7 +24,7 @@ before(async () => {
 
 after(async () => browser?.close());
 
-async function createPage(t) {
+async function createPage(t: TestContext) {
   const context = await browser.newContext();
   t.after(() => context.close());
   const page = await context.newPage();
@@ -24,7 +32,7 @@ async function createPage(t) {
   return page;
 }
 
-async function createPanel(t) {
+async function createPanel(t: TestContext) {
   const page = await createPage(t);
   const url = new URL('/__tool-panel-test__', appUrl).href;
   await page.route(url, route =>
@@ -39,7 +47,7 @@ async function createPanel(t) {
       await import('/src/ui/contextual-tool-panel.ts');
     window.commits = [];
     window.acceptCommit = true;
-    window.panel = new ContextualToolPanel(document.querySelector('main'), {
+    window.panel = new ContextualToolPanel(document.querySelector('main')!, {
       onParameterInput() {},
       onParameterCommit(name, value) {
         window.commits.push({name, value});
@@ -67,10 +75,12 @@ async function createPanel(t) {
   return page;
 }
 
-async function assertFocus(page, parameter) {
+async function assertFocus(page: Page, parameter: string) {
   await page.waitForFunction(
     name =>
-      document.hasFocus() && document.activeElement?.dataset.parameter === name,
+      document.hasFocus() &&
+      (document.activeElement as HTMLElement | null)?.dataset.parameter ===
+        name,
     parameter,
   );
 }
@@ -120,22 +130,23 @@ test('rejected or unchanged settled commits do not defer Tab', async t => {
 });
 
 for (const [name, cancel] of [
-  ['typing', page => page.keyboard.type('2')],
-  ['Escape', page => page.keyboard.press('Escape')],
-  ['reverse Tab', page => page.keyboard.press('Shift+Tab')],
-  ['another Tab', page => page.keyboard.press('Tab')],
-  ['pointer interaction', page => page.locator('#after').click()],
-  ['focus leaving the input', page => page.locator('#after').focus()],
+  ['typing', (page: Page) => page.keyboard.type('2')],
+  ['Escape', (page: Page) => page.keyboard.press('Escape')],
+  ['reverse Tab', (page: Page) => page.keyboard.press('Shift+Tab')],
+  ['another Tab', (page: Page) => page.keyboard.press('Tab')],
+  ['pointer interaction', (page: Page) => page.locator('#after').click()],
+  ['focus leaving the input', (page: Page) => page.locator('#after').focus()],
   [
     'window blur',
-    page => page.evaluate(() => window.dispatchEvent(new Event('blur'))),
+    (page: Page) =>
+      page.evaluate(() => window.dispatchEvent(new Event('blur'))),
   ],
-  ['hiding the tool', page => page.evaluate(() => window.panel.hide())],
+  ['hiding the tool', (page: Page) => page.evaluate(() => window.panel.hide())],
   [
     'switching tools',
-    page => page.evaluate(() => window.showPanel(['y', 'z'], 'other')),
+    (page: Page) => page.evaluate(() => window.showPanel(['y', 'z'], 'other')),
   ],
-]) {
+] as const) {
   test(`${name} cancels deferred navigation without stealing focus later`, async t => {
     const page = await createPanel(t);
     await page.keyboard.press('Tab');
@@ -143,7 +154,9 @@ for (const [name, cancel] of [
     await cancel(page);
     await page.evaluate(() => window.showPanel(['z']));
     assert.notEqual(
-      await page.evaluate(() => document.activeElement?.dataset.parameter),
+      await page.evaluate(
+        () => (document.activeElement as HTMLElement | null)?.dataset.parameter,
+      ),
       'y',
     );
   });
@@ -157,15 +170,15 @@ test('a refresh that leaves the next field disabled expires the navigation reque
   await assertFocus(page, 'x');
 });
 
-for (const timing of ['before debounce', 'after debounce']) {
+for (const timing of ['before debounce', 'after debounce'] as const) {
   test(
     `box() can be filled sequentially with Tab ${timing}`,
     {timeout: 60_000},
     async t => {
       const page = await createPage(t);
-      const errors = [];
+      const errors: string[] = [];
       page.on('pageerror', error => errors.push(error.message));
-      await page.goto(appUrl);
+      await page.goto(appUrl!);
       await page.getByText('Ready', {exact: true}).waitFor({timeout: 30_000});
       await page.locator('.monaco-editor .view-lines').first().click();
       await page.keyboard.press('Control+a');
@@ -178,7 +191,7 @@ for (const timing of ['before debounce', 'after debounce']) {
       for (const [value, next] of [
         ['10', 'y'],
         ['20', 'z'],
-      ]) {
+      ] as const) {
         await page.keyboard.type(value);
         if (timing === 'after debounce') {
           await page.waitForFunction(
@@ -209,9 +222,9 @@ test(
   {timeout: 60_000},
   async t => {
     const page = await createPage(t);
-    const errors = [];
+    const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
-    await page.goto(appUrl);
+    await page.goto(appUrl!);
     await page.getByText('Ready', {exact: true}).waitFor({timeout: 30_000});
     const source = [
       "import {box} from '@code3d/core';",
@@ -272,8 +285,10 @@ test(
     );
     await page.waitForFunction(
       () =>
-        document.querySelector('[data-parameter=x]')?.value === '' &&
-        document.querySelector('[data-parameter=y]')?.disabled,
+        document.querySelector<HTMLInputElement>('[data-parameter=x]')
+          ?.value === '' &&
+        document.querySelector<HTMLInputElement>('[data-parameter=y]')
+          ?.disabled,
     );
     assert.equal(await x.getAttribute('placeholder'), '12');
     assert.equal(await y.getAttribute('placeholder'), '4');

@@ -34,7 +34,7 @@ test(
       const {originSourceDecoration} =
         await import('/src/model/origin-decorations.ts');
       const client = new ModelCompilerClient(browserPackageFiles);
-      const viewport = new ModelViewport(document.querySelector('main'), {
+      const viewport = new ModelViewport(document.querySelector('main')!, {
         onSelect() {},
         onDrillDown() {},
         onNavigateSource() {},
@@ -46,11 +46,19 @@ test(
           originSourceDecoration,
         ],
       });
-      const scopes = [];
+      const scopes: {
+        text: string;
+        kind: string;
+        owner: string | undefined;
+        selected: string | undefined;
+        modes: string[];
+        axes: string[];
+        spatialKind: string | undefined;
+      }[] = [];
       try {
         const source = (await import('/examples/bound-rotation.ts?raw'))
           .default;
-        const compile = async source => {
+        const compile = async (source: string) => {
           const module = await client.compile(
             {files: [{path: '/main.ts', source}]},
             '/main.ts',
@@ -60,14 +68,18 @@ test(
           viewport.renderModule(module);
           return module;
         };
-        const inspect = (module, source, text) => {
+        const inspect = (
+          _module: import('../../src/model/compiler.ts').ModelModule,
+          source: string,
+          text: string,
+        ) => {
           viewport.selectBySourceOffset(
             '/main.ts',
             source.indexOf(text) + (text.includes('(') ? 2 : text.length - 1),
           );
-          const {target, evaluation} = viewport.sourceEvaluation();
+          const {target, evaluation} = viewport.sourceEvaluation()!;
           const selected = viewport.getSelected();
-          const bindings = viewport.transformGizmo.axes.flatMap(axis =>
+          const bindings = viewport['transformGizmo']['axes'].flatMap(axis =>
             axis.binding ? [axis.binding] : [],
           );
           scopes.push({
@@ -99,11 +111,11 @@ test(
         const vertex = inspect(module2, source2, 'pivotVertex(3)');
         const selection = vertex.evaluation.selection;
         const vertexIds = viewport.beginTopologySelection(
-          vertex.selected.key,
-          selection.inputNodeId,
+          vertex.selected!.key,
+          selection!.inputNodeId,
           'vertex',
           false,
-          selection.ids,
+          selection!.ids,
         );
         const source3 = `import {box, group} from '@code3d/core'; const base = box(20, 10, 30); const part = box(8, 6, 4).relate(self => self.on(base.up).around(base.axis).rotate(35)); export default group([base, part]);`;
         const module3 = await compile(source3);
