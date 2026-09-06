@@ -26,6 +26,9 @@ browser. The renderer closes its own pages and leaves that browser running.
   relative to this directory, including both website examples and existing
   App examples; do not copy a model just to add it to the gallery.
 - Example metadata and source contexts: `../app/render-samples/catalog.ts`.
+  `sourceContextSets` supplies the tabs, highlighted source tokens, and image
+  names for the homepage and interactive example pages. The final context is
+  selected initially. Each token must identify one occurrence in its source.
 - Generated model images: `src/assets/models/`. Regenerate after changing
   examples, source contexts, or the renderer; CI regenerates them on every build.
 - Site identity and URL helpers: `src/lib/site.ts`.
@@ -43,6 +46,8 @@ browser. The renderer closes its own pages and leaves that browser running.
 Example code is bundled into App's managed examples, loaded by Astro's
 content collection, and executed by the image renderer. Keep snippets and
 gallery content connected to these source files.
+App and the image renderer share `../app/src/model/source-decorations.ts` so
+relation, bound, operation, and origin markers appear consistently in both.
 
 ## Build and verify
 

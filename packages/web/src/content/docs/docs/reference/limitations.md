@@ -16,6 +16,10 @@ Code3D is Prototype 01. APIs and project behavior are still evolving.
   translation arrows, and rotation rings.
 - Directional bound contacts with combined positional conditions and explicit
   pivot, vertex, or axis rotations when composing parts.
+- Geometric alignment of points, curves, and surfaces, including joint
+  position and orientation solving for supported analytic geometry.
+- Relation previews through each selected call, with distinct emphasis for
+  the selected reference, its counterpart, and surrounding related objects.
 - Topology source paths through lofts, booleans, fillets, chamfers, and shells,
   with face-to-edge-to-vertex queries and named exposed references.
 - Browser-persistent projects and direct local-folder editing in supported
@@ -54,6 +58,15 @@ underlying geometry beyond trimmed edges and face boundaries. Other curve and
 surface types report unsupported. Proven incompatibility (such as different
 circle radii) is distinguished from numerical nonconvergence. Multiple solutions
 can remain; add point relations when a specific position matters.
+For several relations involving align on one model, use numeric parameters or
+source edits so each change resolves the joint system. Spatial drags are
+available for a single align relation. See
+[geometric alignment](../../guides/relations/#align-underlying-geometry).
+
+**Intermediate relation stages have their own diagnostics.** Inspecting an
+early call can expose a conflict with inherited constraints even when the
+completed chain is valid. The preview reports that stage's error and leaves
+the final model available for inspection.
 
 **Installed packages must support browsers.** The App resolves packages from
 the project's `node_modules`, but does not provide Node's built-in APIs or

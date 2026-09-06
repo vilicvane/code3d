@@ -2,7 +2,7 @@ import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {
   renderSamples,
-  firstModelContexts,
+  sourceContextSets,
 } from '../../app/render-samples/catalog.ts';
 
 const appDirectory = fileURLToPath(new URL('../../app/', import.meta.url));
@@ -26,12 +26,11 @@ function render(id, name, focus) {
 }
 
 for (const sample of renderSamples) render(sample.id, sample.id);
-for (const context of firstModelContexts.filter(
-  context => context.id !== 'model',
-)) {
-  // Include the remaining source so each focus string uniquely identifies the
-  // argument occurrence, not the preceding declaration or relation.
-  const source = context.focus.context;
-  const focus = source.slice(source.indexOf(context.focus.token));
-  render('first-model', `first-model-${context.id}`, focus);
+for (const [id, contexts] of Object.entries(sourceContextSets)) {
+  for (const context of contexts.filter(context => context.image !== id)) {
+    // The remaining source identifies the exact occurrence in the model.
+    const source = context.focus.context;
+    const focus = source.slice(source.indexOf(context.focus.token));
+    render(id, context.image, focus);
+  }
 }

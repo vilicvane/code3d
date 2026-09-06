@@ -7,11 +7,7 @@ import {
 } from '../render-samples/source-focus';
 import {renderSamples} from '../render-samples/catalog';
 import {ModelDiagnosticError} from './model/diagnostic';
-import {elementSourceDecoration} from './model/element-decorations';
-import {
-  booleanOperationSourceDecoration,
-  edgeModificationSourceDecoration,
-} from './model/operation-decorations';
+import {sourceDecorationProviders} from './model/source-decorations';
 import type {ModelProject} from './project/project';
 import {ModelViewport} from './viewport';
 import './render-image.css';
@@ -85,11 +81,7 @@ async function renderModel(): Promise<void> {
     onPositionTool: () => undefined,
     onTopologySelection: () => undefined,
     showCoordinateReference: false,
-    sourceDecorationProviders: [
-      booleanOperationSourceDecoration,
-      edgeModificationSourceDecoration,
-      elementSourceDecoration,
-    ],
+    sourceDecorationProviders,
   });
   viewport.renderModule(module);
   const source = project.files.find(
