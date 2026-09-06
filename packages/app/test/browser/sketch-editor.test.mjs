@@ -34,6 +34,7 @@ test('continuous lines reuse endpoints before recompile and undo one segment at 
     'Line',
     'Rectangle',
     'Center rectangle',
+    'Circle',
     'Trim',
     'Fit',
     'Snap',

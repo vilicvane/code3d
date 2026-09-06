@@ -105,17 +105,17 @@ export class SketchRectangleDrawing implements SketchDrawing {
     const c = position;
     return [a, [c[0], a[1]], c, [a[0], c[1]]];
   }
-  segments(
-    position: SketchPosition,
-  ): readonly (readonly [SketchPosition, SketchPosition])[] {
+  preview(position: SketchPosition): ReturnType<SketchDrawing['preview']> {
     if (!this.start) return [];
     const [a, b, c, d] = this.corners(position);
-    return [
-      [a, b],
-      [b, c],
-      [c, d],
-      [d, a],
-    ];
+    return (
+      [
+        [a, b],
+        [b, c],
+        [c, d],
+        [d, a],
+      ] as const
+    ).map(points => ({kind: 'line', points}));
   }
   place(
     endpoint: SketchEndpoint,

@@ -7,6 +7,8 @@ export {
   sketchDefinition,
   snapshotSketch,
   solveSketchSnapshot,
+  sketchEntityParameters,
+  withSketchEntityParameters,
 } from '../library/sketch.js';
 export {
   installSketchSolver,
@@ -21,6 +23,8 @@ export type {
   SketchPointAddress,
   SketchPointSnapshot,
   SketchLineSnapshot,
+  SketchCircleSnapshot,
+  SketchEntitySnapshot,
   SketchSnapshot,
 } from '../library/sketch.js';
 

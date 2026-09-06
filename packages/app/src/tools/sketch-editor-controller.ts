@@ -5,12 +5,15 @@ import type {
   SketchPointAddress,
   SourceRef,
 } from '@code3d/core/tooling';
-import {solveSketchSnapshot} from '@code3d/core/tooling';
+import {
+  solveSketchSnapshot,
+  withSketchEntityParameters,
+} from '@code3d/core/tooling';
 import {
   previewSketchDrag,
   type SketchDrag,
   type SketchDragPreview,
-  type SketchPointData,
+  type SketchGeometryData,
 } from '../model/sketch-drag';
 import type {CompiledSketch} from '../model/sketch-trace';
 import type {ModelDiagnostic} from '../model/diagnostic';
@@ -28,7 +31,7 @@ export class SketchEditorController {
   private layers: readonly SketchSnapshot[] = [];
   private sourceLayers: readonly CompiledSketch[] = [];
   private selectionRef?: SourceRef;
-  private data: readonly SketchPointData[] = [];
+  private data: readonly SketchGeometryData[] = [];
   private stale = false;
   private revision = 0;
 
@@ -211,30 +214,36 @@ export class SketchEditorController {
       change.kind === 'delete' || change.kind === 'trim' ? change.ids : [];
     const entries =
       change.kind === 'append' || change.kind === 'trim' ? change.entries : [];
-    const positions = change.kind === 'move' ? change.positions : [];
+    const data = change.kind === 'move' ? change.data : [];
     this.data = [
       ...this.data
         .filter(point => !removed.includes(point.id))
-        .map(point => positions.find(p => p.id === point.id) ?? point),
-      ...entries.flatMap(([kind, id, position]) =>
-        kind === 'point' ? [{id, position}] : [],
+        .map(point => data.find(p => p.id === point.id) ?? point),
+      ...entries.flatMap<SketchGeometryData>(([kind, id, values]) =>
+        kind === 'point'
+          ? [{id, parameters: values}]
+          : kind === 'circle'
+            ? [{id, parameters: [values[1]]}]
+            : [],
       ),
     ];
     const additions: SketchSnapshot['entities'] = entries.map(
       ([kind, id, data]) =>
         kind === 'point'
           ? {kind, id, position: data}
-          : {kind, id, points: data},
+          : kind === 'circle'
+            ? {kind, id, center: data[0], radius: data[1]}
+            : {kind, id, points: data},
     );
     const entities = [
       ...local.entities.flatMap(entity => {
         const replacement = additions.find(e => e.id === entity.id);
         if (replacement) return [replacement];
         if (removed.includes(entity.id)) return [];
-        const position =
-          entity.kind === 'point' &&
-          positions.find(p => p.id === entity.id)?.position;
-        return [position ? {...entity, position} : entity];
+        const parameters = data.find(p => p.id === entity.id)?.parameters;
+        return [
+          parameters ? withSketchEntityParameters(entity, parameters) : entity,
+        ];
       }),
       ...additions.filter(
         entity => !local.entities.some(e => e.id === entity.id),

@@ -3,6 +3,7 @@ import type {SketchPosition} from './sketch.js';
 
 /** Evaluation-local numeric indices, never author entity or constraint IDs. */
 export type SketchSolveConstraint =
+  | Readonly<{kind: 'radius'; circle: number; value: number}>
   | Readonly<{kind: 'fixed'; point: number; position: SketchPosition}>
   | Readonly<{kind: 'x' | 'y'; point: number; value: number}>
   | Readonly<{kind: 'midpoint'; points: readonly [number, number, number]}>
@@ -21,11 +22,17 @@ export type SketchSolveProblem = Readonly<{
     position: SketchPosition;
     locked: readonly [boolean, boolean];
   }>[];
+  circles: readonly Readonly<{
+    center: number;
+    radius: number;
+    locked: boolean;
+  }>[];
   constraints: readonly SketchSolveConstraint[];
 }>;
 
 export type SketchSolveResult = Readonly<{
   positions: readonly SketchPosition[];
+  radii: readonly number[];
   degreesOfFreedom: number;
   redundant: readonly number[];
 }>;
@@ -48,7 +55,9 @@ export function installSketchSolver(instance: ModuleStatic): void {
 /** A fresh native system per solve: no previous solution or native handles escape. */
 export function solveSketchProblem(
   problem: SketchSolveProblem,
-  drag?: Readonly<{point: number; position: SketchPosition}>,
+  drag?:
+    | Readonly<{kind: 'point'; point: number; position: SketchPosition}>
+    | Readonly<{kind: 'radius'; circle: number; value: number}>,
 ): SketchSolveResult {
   const {constraints} = problem;
   // A gesture may use a temporary anchor, but normal evaluation must not gain
@@ -63,29 +72,38 @@ export function solveSketchProblem(
   );
   const anchor =
     drag && !anchored
-      ? problem.points.findIndex((_, index) => index !== drag.point)
+      ? problem.points.findIndex(
+          (_, index) => drag.kind !== 'point' || index !== drag.point,
+        )
       : -1;
   const points = problem.points.map((point, index) => ({
     ...point,
     locked: index === anchor ? ([true, true] as const) : point.locked,
   }));
   if (!points.length)
-    return {positions: [], degreesOfFreedom: 0, redundant: []};
+    return {positions: [], radii: [], degreesOfFreedom: 0, redundant: []};
   // Unconstrained values and edits do not need a native modeling kernel.
   if (!constraints.length)
     return {
       positions: points.map((p, index) =>
-        drag?.point === index
+        drag?.kind === 'point' && drag.point === index
           ? [
               p.locked[0] ? p.position[0] : drag.position[0],
               p.locked[1] ? p.position[1] : drag.position[1],
             ]
           : p.position,
       ),
-      degreesOfFreedom: points.reduce(
-        (sum, p) => sum + Number(!p.locked[0]) + Number(!p.locked[1]),
-        0,
+      radii: problem.circles.map((circle, index) =>
+        drag?.kind === 'radius' && drag.circle === index && !circle.locked
+          ? drag.value
+          : circle.radius,
       ),
+      degreesOfFreedom:
+        problem.circles.filter(c => !c.locked).length +
+        points.reduce(
+          (sum, p) => sum + Number(!p.locked[0]) + Number(!p.locked[1]),
+          0,
+        ),
       redundant: [],
     };
   const origin = points[0].position;
@@ -94,7 +112,10 @@ export function solveSketchProblem(
       ...points.flatMap(p =>
         p.position.map((v, axis) => Math.abs(v - origin[axis])),
       ),
-      ...constraints.flatMap(c => (c.kind === 'length' ? [c.value] : [])),
+      ...problem.circles.map(c => c.radius),
+      ...constraints.flatMap(c =>
+        c.kind === 'length' || c.kind === 'radius' ? [c.value] : [],
+      ),
     ) || 1;
   const normalized = (p: SketchPosition): SketchPosition => [
     (p[0] - origin[0]) / scale,
@@ -116,13 +137,41 @@ export function solveSketchProblem(
       geometries.push(point);
       return point;
     });
+    const radiusIndices = problem.circles.map(c =>
+      gcs.push_p_param(c.radius / scale, c.locked),
+    );
+    const nativeCircles = problem.circles.map((circle, i) => {
+      const [x, y] = indices[circle.center];
+      const geometry = gcs.make_circle(x, y, radiusIndices[i]);
+      geometries.push(geometry);
+      return geometry;
+    });
     const constant = (value: number) => gcs.push_p_param(value, true);
+    const constantTags = new Set<number>();
+    const activeTags = new Set<number>();
+    // A locked parameter equation has no unknowns. Check it directly instead
+    // of passing a zero-Jacobian row to native redundancy analysis: that
+    // analysis also solves the mouse objective and can mistake an already
+    // satisfied constant row for a conflict when a different axis cannot move.
+    const checkConstant = (actual: number, expected: number, tag: number) => {
+      if (Math.abs(actual - expected) / scale > 1e-7)
+        throw new SketchConstraintError(
+          [tag - 1],
+          `Could not satisfy sketch constraints (${tag}). A locked geometry parameter contradicts the constraint.`,
+        );
+      constantTags.add(tag);
+    };
     const coordinate = (
       point: number,
       axis: number,
       value: number,
       tag: number,
     ) => {
+      if (points[point].locked[axis]) {
+        checkConstant(points[point].position[axis], value, tag);
+        return;
+      }
+      activeTags.add(tag);
       const method =
         axis === 0
           ? 'add_constraint_coordinate_x'
@@ -137,7 +186,20 @@ export function solveSketchProblem(
     };
     constraints.forEach((constraint, index) => {
       const tag = index + 1;
-      if (constraint.kind === 'fixed') {
+      if (constraint.kind === 'radius') {
+        const circle = problem.circles[constraint.circle];
+        if (circle.locked) checkConstant(circle.radius, constraint.value, tag);
+        else {
+          activeTags.add(tag);
+          gcs.add_constraint_circle_radius(
+            nativeCircles[constraint.circle],
+            constant(constraint.value / scale),
+            tag,
+            true,
+            1,
+          );
+        }
+      } else if (constraint.kind === 'fixed') {
         coordinate(constraint.point, 0, constraint.position[0], tag);
         coordinate(constraint.point, 1, constraint.position[1], tag);
       } else if (constraint.kind === 'x' || constraint.kind === 'y') {
@@ -213,9 +275,19 @@ export function solveSketchProblem(
     if (drag) {
       // Negative tags are PlaneGCS soft objectives; they neither change DOF nor
       // weaken persistent constraints. The gesture is not part of the model.
-      for (const axis of [0, 1])
-        if (!points[drag.point].locked[axis])
-          coordinate(drag.point, axis, drag.position[axis], -1);
+      if (drag.kind === 'radius') {
+        if (!problem.circles[drag.circle].locked)
+          gcs.add_constraint_circle_radius(
+            nativeCircles[drag.circle],
+            constant(drag.value / scale),
+            -1,
+            true,
+            1,
+          );
+      } else
+        for (const axis of [0, 1])
+          if (!points[drag.point].locked[axis])
+            coordinate(drag.point, axis, drag.position[axis], -1);
     }
     const status = gcs.solve_system(2);
     const conflicting = constraintIndices(gcs, 'get_conflicting');
@@ -233,17 +305,25 @@ export function solveSketchProblem(
         ? points[index].position[1]
         : gcs.get_p_param(y) * scale + origin[1],
     ]);
-    if (!positions.every(p => p.every(Number.isFinite)))
+    const radii = radiusIndices.map((index, i) =>
+      problem.circles[i].locked
+        ? problem.circles[i].radius
+        : gcs.get_p_param(index) * scale,
+    );
+    if (
+      !positions.every(p => p.every(Number.isFinite)) ||
+      !radii.every(Number.isFinite)
+    )
       throw new SketchConstraintError(
         [],
-        'The sketch solver returned non-finite coordinates.',
+        'The sketch solver returned non-finite geometry parameters.',
       );
     // PlaneGCS can return Converged after removing redundant equations even
     // when the applied solution satisfies every authored constraint. Neither
     // Success nor Converged alone is our acceptance criterion: verify all hard
     // equations independently, in normalized geometry units.
     const unsatisfied = constraints.flatMap((c, i) =>
-      residual(c, positions, scale) <= 1e-7 ? [] : [i],
+      residual(c, positions, radii, scale) <= 1e-7 ? [] : [i],
     );
     if (unsatisfied.length)
       throw new SketchConstraintError(
@@ -252,8 +332,16 @@ export function solveSketchProblem(
       );
     return {
       positions,
+      radii,
       degreesOfFreedom: gcs.dof(),
-      redundant: constraintIndices(gcs, 'get_redundant'),
+      redundant: [
+        ...new Set([
+          ...constraintIndices(gcs, 'get_redundant'),
+          ...[...constantTags]
+            .filter(tag => !activeTags.has(tag))
+            .map(tag => tag - 1),
+        ]),
+      ].sort((a, b) => a - b),
     };
   } finally {
     for (const geometry of geometries) geometry.delete();
@@ -265,9 +353,12 @@ export function solveSketchProblem(
 function residual(
   c: SketchSolveConstraint,
   positions: readonly SketchPosition[],
+  radii: readonly number[],
   scale: number,
 ): number {
   switch (c.kind) {
+    case 'radius':
+      return Math.abs(radii[c.circle] - c.value) / scale;
     case 'fixed':
       return Math.hypot(
         ...positions[c.point].map((v, i) => (v - c.position[i]) / scale),

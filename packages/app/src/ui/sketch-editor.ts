@@ -12,23 +12,25 @@ import {
   Focus,
   Scissors,
   Shapes,
+  Circle,
   type IconNode,
 } from 'lucide';
 import type {SketchChange} from '../tools/sketch-source';
 import type {
   SketchDragPreview,
-  SketchPointData,
-  SketchEditableCoordinates,
+  SketchGeometryData,
+  SketchEditableParameters,
 } from '../model/sketch-drag';
 import {SketchLineDrawing, type SketchDrawing} from '../tools/sketch-drawing';
 import {SketchRectangleDrawing} from '../tools/sketch-rectangle-drawing';
+import {SketchCircleDrawing} from '../tools/sketch-circle-drawing';
 import {
   sketchSegments,
   sketchSegmentDistance,
   sameSketchSegment,
   overlappingSketchSegments,
   trimSketchSegment,
-  deleteSketchPoint,
+  deleteSketchEntity,
   type SketchSegment,
 } from '../tools/sketch-segments';
 import {
@@ -48,13 +50,14 @@ const drawingTools = [
   ['Line', Minus, () => new SketchLineDrawing()],
   ['Rectangle', RectangleHorizontal, () => new SketchRectangleDrawing()],
   ['Center rectangle', Focus, () => new SketchRectangleDrawing('center')],
+  ['Circle', Circle, () => new SketchCircleDrawing()],
 ] as const;
 
 export type SketchEditorView = Readonly<{
   id: string;
   layers: readonly SketchSnapshot[];
-  data: readonly SketchPointData[];
-  editable: SketchEditableCoordinates;
+  data: readonly SketchGeometryData[];
+  editable: SketchEditableParameters;
   referenceable: ReadonlySet<string>;
   readOnlyReason?: string;
 }>;
@@ -62,7 +65,7 @@ export type SketchEditorView = Readonly<{
 type Gesture =
   | {
       kind: 'move';
-      point: Point;
+      target: Point;
       start: SketchPosition;
       position: SketchPosition;
       preview?: SketchDragPreview;
@@ -90,7 +93,7 @@ export class SketchEditor {
   private readonly usedShapes = new Set<string>();
   private readonly buttons = new Map<string, HTMLButtonElement>();
   private readonly overlay = svgElement('g');
-  private readonly draftLines: SVGLineElement[] = [];
+  private readonly draftShapes: SVGElement[] = [];
   private readonly draftMarker = svgElement('circle');
   private readonly snapLabel = svgElement('text');
   private readonly snapText = document.createTextNode('');
@@ -243,7 +246,11 @@ export class SketchEditor {
           ? this.segments().some(segment =>
               sameSketchSegment(segment, selected),
             )
-          : this.points().some(point => same(point, selected));
+          : this.layers().some(
+              layer =>
+                layer.id === selected.layer &&
+                layer.entities.some(e => e.id === selected.id),
+            );
       if (!exists) this.selection = undefined;
     }
     if (view.readOnlyReason) this.tool = 'Select';
@@ -414,6 +421,7 @@ export class SketchEditor {
     this.buttons.get('Rectangle')!.title = 'Rectangle · Opposite corners';
     this.buttons.get('Center rectangle')!.title =
       'Center rectangle · Center and corner';
+    this.buttons.get('Circle')!.title = 'Circle · Center and radius';
     this.buttons.get('Trim')!.title =
       'Trim · Click segments or standalone points · Esc exits';
     this.button(viewing, 'Fit', Maximize, () => this.fit());
@@ -484,29 +492,68 @@ export class SketchEditor {
     toolbar.append(button);
   }
 
+  private layers(): readonly SketchSnapshot[] {
+    if (!this.view) return [];
+    const preview = this.gesture?.kind === 'move' && this.gesture.preview;
+    return preview
+      ? [...this.view.layers.slice(0, -1), preview.snapshot]
+      : this.view.layers;
+  }
+
   private points(): Point[] {
-    return (
-      this.view?.layers.flatMap(layer =>
-        layer.entities.flatMap(entity =>
-          entity.kind === 'point'
-            ? [
-                {
-                  layer: layer.id,
-                  id: entity.id,
-                  position:
-                    this.gesture?.kind === 'move' && layer.id === this.view!.id
-                      ? ((
-                          this.gesture.preview?.snapshot.entities.find(
-                            e => e.kind === 'point' && e.id === entity.id,
-                          ) as {position: SketchPosition} | undefined
-                        )?.position ?? entity.position)
-                      : entity.position,
-                },
-              ]
-            : [],
-        ),
-      ) ?? []
+    return this.layers().flatMap(layer =>
+      layer.entities.flatMap(entity =>
+        entity.kind === 'point'
+          ? [{layer: layer.id, id: entity.id, position: entity.position}]
+          : [],
+      ),
     );
+  }
+
+  private circles() {
+    const points = this.points();
+    return this.layers().flatMap(layer =>
+      layer.entities.flatMap(entity =>
+        entity.kind === 'circle'
+          ? [
+              {
+                ...entity,
+                layer: layer.id,
+                position: points.find(p => same(p, entity.center))!.position,
+              },
+            ]
+          : [],
+      ),
+    );
+  }
+
+  private pickCircle(position: SketchPosition): Point | undefined {
+    const circle = this.circles()
+      .map(circle => ({
+        circle,
+        distance:
+          Math.abs(distance(circle.position, position) - circle.radius) *
+          this.scale,
+      }))
+      .filter(hit => hit.distance < 6)
+      .sort(
+        (a, b) =>
+          Number(b.circle.layer === this.view!.id) -
+            Number(a.circle.layer === this.view!.id) || a.distance - b.distance,
+      )[0]?.circle;
+    if (!circle) return;
+    const angle = Math.atan2(
+      position[1] - circle.position[1],
+      position[0] - circle.position[0],
+    );
+    return {
+      layer: circle.layer,
+      id: circle.id,
+      position: [
+        circle.position[0] + Math.cos(angle) * circle.radius,
+        circle.position[1] + Math.sin(angle) * circle.radius,
+      ],
+    };
   }
 
   private screen(position: SketchPosition): SketchPosition {
@@ -566,6 +613,7 @@ export class SketchEditor {
     if (
       point &&
       point.layer === this.view.id &&
+      !this.circles().some(c => same(c.center, point)) &&
       !this.pickSegment(point.position)
     )
       return point;
@@ -593,7 +641,9 @@ export class SketchEditor {
       this.deleteTarget(this.trimTarget(position));
       return;
     }
-    const point = this.pick(position);
+    const point =
+      this.pick(position) ??
+      (this.mode === 'Select' ? this.pickCircle(position) : undefined);
     if (this.drawing) {
       this.drawing.pointer = position;
       this.place();
@@ -608,7 +658,7 @@ export class SketchEditor {
       ) {
         this.gesture = {
           kind: 'move',
-          point,
+          target: point,
           start: position,
           position: point.position,
           released: false,
@@ -638,14 +688,14 @@ export class SketchEditor {
         gesture.position = endpointPosition(
           snapSketchPointer(
             [
-              gesture.point.position[0] + pointer[0] - gesture.start[0],
-              gesture.point.position[1] + pointer[1] - gesture.start[1],
+              gesture.target.position[0] + pointer[0] - gesture.start[0],
+              gesture.target.position[1] + pointer[1] - gesture.start[1],
             ],
             {kind: 'cartesian'},
             {
               ...this.snapContext(),
               points: this.points().filter(
-                point => !same(point, gesture.point),
+                point => !same(point, gesture.target),
               ),
             },
           ).endpoint,
@@ -665,7 +715,7 @@ export class SketchEditor {
         const version = gesture.version;
         try {
           const preview = await this.solve(
-            gesture.point.id,
+            gesture.target.id,
             gesture.position,
             gesture.preview,
           );
@@ -696,17 +746,17 @@ export class SketchEditor {
       if (this.gesture !== gesture) return;
       this.gesture = undefined;
       if (gesture.preview && !gesture.error) {
-        const positions = gesture.preview.data.flatMap(e => {
+        const data = gesture.preview.data.flatMap(e => {
           if (!this.view!.editable.get(e.id)?.some(Boolean)) return [];
           const previous = this.view!.data.find(p => p.id === e.id)!;
-          return e.position.some(
-            (value, axis) => value !== previous.position[axis],
+          return e.parameters.some(
+            (value, index) => value !== previous.parameters[index],
           )
-            ? [{id: e.id, position: e.position}]
+            ? [e]
             : [];
         });
-        if (positions.length)
-          this.commit({kind: 'move', positions}, gesture.preview.snapshot);
+        if (data.length)
+          this.commit({kind: 'move', data}, gesture.preview.snapshot);
       }
     }
     this.draw();
@@ -745,17 +795,23 @@ export class SketchEditor {
       this.draw();
       return;
     }
-    const change = deleteSketchPoint(this.view.layers, selected.id);
+    const change = deleteSketchEntity(this.view.layers, selected.id);
     this.cancel();
     if (this.commit(change)) this.selection = undefined;
     this.draw();
   }
 
   private fit(): void {
-    const points = this.points();
-    if (points.length) {
-      const xs = points.map(p => p.position[0]),
-        ys = points.map(p => p.position[1]);
+    const positions = [
+      ...this.points().map(p => p.position),
+      ...this.circles().flatMap(c => [
+        [c.position[0] - c.radius, c.position[1] - c.radius],
+        [c.position[0] + c.radius, c.position[1] + c.radius],
+      ]),
+    ];
+    if (positions.length) {
+      const xs = positions.map(p => p[0]),
+        ys = positions.map(p => p[1]);
       const minX = Math.min(...xs),
         maxX = Math.max(...xs),
         minY = Math.min(...ys),
@@ -825,12 +881,12 @@ export class SketchEditor {
     this.line([0, originY], [width, originY], 'axis', 'axis:y', this.grid);
     const points = this.points();
     this.constraints.draw(
-      sketchConstraintDisplays(this.view.layers, points),
+      sketchConstraintDisplays(this.layers(), points),
       position => this.screen(position),
       this.view.id,
       this.showConstraints,
     );
-    const segments = sketchSegments(this.view.layers, points);
+    const segments = sketchSegments(this.layers(), points);
     const selectedSegments =
       this.selection && 'start' in this.selection
         ? overlappingSketchSegments(segments, this.selection)
@@ -860,6 +916,19 @@ export class SketchEditor {
       this.tag(element, segment.layer, segment.id, 'line');
       element.dataset.start = String(segment.start.t);
       element.dataset.end = String(segment.end.t);
+    }
+    for (const circle of this.circles()) {
+      const shape = this.shape(
+        JSON.stringify([circle.layer, 'circle', circle.id]),
+        'circle',
+        this.lines,
+      );
+      const [x, y] = this.screen(circle.position);
+      shape.setAttribute('cx', String(x));
+      shape.setAttribute('cy', String(y));
+      shape.setAttribute('r', String(circle.radius * this.scale));
+      shape.setAttribute('class', this.entityClass(circle.layer, circle.id));
+      this.tag(shape, circle.layer, circle.id, 'circle');
     }
     for (const point of points) {
       const circle = this.shape(
@@ -927,19 +996,21 @@ export class SketchEditor {
         : selectedSegments.length > 1
           ? `${selectedSegments.length} overlapping segments · Delete trims them together`
           : selected &&
-              points.some(p => same(p, selected)) &&
+              !('start' in selected) &&
               this.expressionLock(selected.id)
             ? this.expressionLock(selected.id)!
             : this.drawing
               ? this.drawing.instructions
-              : `${this.view.layers.at(-1)!.degreesOfFreedom} DOF · ${this.view.layers.at(-1)!.constraints.length} constraints · Drag points · Delete removes the selected segment or point`);
+              : `${this.view.layers.at(-1)!.degreesOfFreedom} DOF · ${this.view.layers.at(-1)!.constraints.length} constraints · Drag points or circle edges · Delete removes the selection`);
     if (this.statusText.data !== status) this.statusText.data = status;
   }
 
   private expressionLock(id: number): string | undefined {
     const editable = this.view!.editable.get(id);
     if (!editable) return undefined;
-    const axes = ['X', 'Y'].filter((_, axis) => !editable[axis]);
+    const axes = (editable.length === 1 ? ['Radius'] : ['X', 'Y']).filter(
+      (_, axis) => !editable[axis],
+    );
     return axes.length
       ? `${axes.join('/')} locked by expression · edit in code`
       : undefined;
@@ -951,7 +1022,7 @@ export class SketchEditor {
   private drawDraft(): void {
     if (!this.drawing || !this.view || this.root.hidden) {
       this.overlay.style.display = 'none';
-      for (const line of this.draftLines) line.classList.remove('draft');
+      for (const shape of this.draftShapes) shape.classList.remove('draft');
       this.snapLabel.classList.remove('snap-label');
       this.drawingInputs.hide();
       return;
@@ -967,23 +1038,31 @@ export class SketchEditor {
       this.drawing.measurements(position),
     );
     this.overlay.style.display = position.every(Number.isFinite) ? '' : 'none';
-    const segments = this.drawing.segments(position);
-    while (this.draftLines.length < segments.length) {
-      const line = svgElement('line');
-      this.overlay.prepend(line);
-      this.draftLines.push(line);
-    }
-    for (const [index, line] of this.draftLines.entries()) {
-      const segment = segments[index];
-      line.style.display = segment ? '' : 'none';
-      line.classList.toggle('draft', !!segment);
-      if (!segment) continue;
-      const [a, b] = segment.map(p => this.screen(p));
-      line.setAttribute('x1', String(a[0]));
-      line.setAttribute('y1', String(a[1]));
-      line.setAttribute('x2', String(b[0]));
-      line.setAttribute('y2', String(b[1]));
-    }
+    const curves = this.drawing.preview(position);
+    while (this.draftShapes.length > curves.length)
+      this.draftShapes.pop()!.remove();
+    curves.forEach((curve, index) => {
+      let shape = this.draftShapes[index];
+      if (shape?.tagName !== curve.kind) {
+        shape?.remove();
+        shape = svgElement(curve.kind);
+        this.draftShapes[index] = shape;
+        this.overlay.prepend(shape);
+      }
+      shape.setAttribute('class', 'draft');
+      if (curve.kind === 'line') {
+        const [a, b] = curve.points.map(p => this.screen(p));
+        shape.setAttribute('x1', String(a[0]));
+        shape.setAttribute('y1', String(a[1]));
+        shape.setAttribute('x2', String(b[0]));
+        shape.setAttribute('y2', String(b[1]));
+      } else {
+        const [x, y] = this.screen(curve.center);
+        shape.setAttribute('cx', String(x));
+        shape.setAttribute('cy', String(y));
+        shape.setAttribute('r', String(curve.radius * this.scale));
+      }
+    });
     const [x, y] = this.screen(position);
     this.draftMarker.setAttribute('cx', String(x));
     this.draftMarker.setAttribute('cy', String(y));

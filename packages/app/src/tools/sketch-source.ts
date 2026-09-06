@@ -8,7 +8,10 @@ import type {
 } from '@code3d/core/tooling';
 import {formatSourceNumber} from './source-expression';
 import {sameSketchPoint} from './sketch-snap';
-import type {SketchEditableCoordinates} from '../model/sketch-drag';
+import type {
+  SketchEditableParameters,
+  SketchGeometryData,
+} from '../model/sketch-drag';
 import type {
   ResolveContext,
   ToolIntent,
@@ -18,11 +21,8 @@ import type {
 
 export type SketchDraftEntry =
   | readonly ['point', number, SketchPosition]
-  | readonly [
-      'line',
-      number,
-      readonly [SketchPointAddress, SketchPointAddress],
-    ];
+  | readonly ['line', number, readonly [SketchPointAddress, SketchPointAddress]]
+  | readonly ['circle', number, readonly [SketchPointAddress, number]];
 
 export type SketchChange =
   | Readonly<{
@@ -32,7 +32,7 @@ export type SketchChange =
     }>
   | Readonly<{
       kind: 'move';
-      positions: readonly Readonly<{id: number; position: SketchPosition}>[];
+      data: readonly SketchGeometryData[];
     }>
   | Readonly<{
       kind: 'delete';
@@ -62,16 +62,17 @@ export type SketchEditIntent = Readonly<{
 
 type Entry = {
   id: number;
-  kind: 'point' | 'line';
+  kind: 'point' | 'line' | 'circle';
   node: ts.ArrayLiteralExpression;
   data: ts.ArrayLiteralExpression;
+  parameters: readonly ts.Expression[];
 };
 const prefix = 'sketch(';
 
 /** Analyze only the authored tuple structure; never evaluate coordinate code. */
 export function analyzeSketchSource(source: string): {
   entries: ReadonlyMap<number, Entry>;
-  editable: SketchEditableCoordinates;
+  editable: SketchEditableParameters;
   array?: ts.ArrayLiteralExpression;
   options?: ts.ObjectLiteralExpression;
   constraints?: ts.ArrayLiteralExpression;
@@ -93,7 +94,7 @@ export function analyzeSketchSource(source: string): {
   const array = call?.arguments[0];
   const options = call?.arguments[1];
   const entries = new Map<number, Entry>();
-  const editable = new Map<number, readonly [boolean, boolean]>();
+  const editable = new Map<number, readonly boolean[]>();
   const unsupported = () => ({
     entries,
     editable,
@@ -136,7 +137,9 @@ export function analyzeSketchSource(source: string): {
     const [kind, idNode, data] = node.elements;
     if (
       !ts.isStringLiteral(kind) ||
-      (kind.text !== 'point' && kind.text !== 'line') ||
+      (kind.text !== 'point' &&
+        kind.text !== 'line' &&
+        kind.text !== 'circle') ||
       !ts.isNumericLiteral(idNode) ||
       !ts.isArrayLiteralExpression(data) ||
       data.elements.length !== 2
@@ -145,12 +148,18 @@ export function analyzeSketchSource(source: string): {
     const id = Number(idNode.text);
     if (!Number.isSafeInteger(id) || id < 1 || entries.has(id))
       return unsupported();
-    entries.set(id, {id, kind: kind.text, node, data});
-    if (kind.text === 'point')
-      editable.set(id, [
-        numeric(data.elements[0]) !== undefined,
-        numeric(data.elements[1]) !== undefined,
-      ]);
+    const parameters =
+      kind.text === 'point'
+        ? [...data.elements]
+        : kind.text === 'circle'
+          ? [data.elements[1]]
+          : [];
+    entries.set(id, {id, kind: kind.text, node, data, parameters});
+    if (parameters.length)
+      editable.set(
+        id,
+        parameters.map(node => numeric(node) !== undefined),
+      );
   }
   return {
     entries,
@@ -243,7 +252,11 @@ export class SketchEditResolver implements ToolIntentResolver {
     };
     const entryText = ([kind, id, data]: SketchDraftEntry) => {
       const content =
-        kind === 'point' ? data.map(formatSourceNumber) : data.map(point);
+        kind === 'point'
+          ? data.map(formatSourceNumber)
+          : kind === 'circle'
+            ? [point(data[0]), formatSourceNumber(data[1])]
+            : data.map(point);
       return `  ['${kind}', ${id}, [${content.join(', ')}]],`;
     };
     const {change} = intent;
@@ -270,17 +283,17 @@ export class SketchEditResolver implements ToolIntentResolver {
       }
     }
     if (change.kind === 'move') {
-      for (const {id, position} of change.positions) {
+      for (const {id, parameters} of change.data) {
         const entry = parsed.entries.get(id);
         const editable = parsed.editable.get(id);
         if (!entry || !editable?.some(Boolean))
           return {
             status: 'unsupported',
-            reason: 'Expression-driven points must be edited in code.',
+            reason: 'Expression-driven geometry must be edited in code.',
           };
-        entry.data.elements.forEach((node, i) => {
-          if (editable[i] && numeric(node) !== position[i])
-            replace(node, formatSourceNumber(position[i]));
+        entry.parameters.forEach((node, i) => {
+          if (editable[i] && numeric(node) !== parameters[i])
+            replace(node, formatSourceNumber(parameters[i]));
         });
       }
     } else if (change.kind === 'trim') {
@@ -385,6 +398,7 @@ export class SketchEditResolver implements ToolIntentResolver {
                 break;
               case 'length':
               case 'angle':
+              case 'radius':
                 content = `[${data.map(formatSourceNumber).join(', ')}]`;
                 break;
             }
@@ -431,7 +445,7 @@ export class SketchEditResolver implements ToolIntentResolver {
       plan: {
         toolId: context.toolId,
         baseVersion: context.baseVersion,
-        summary: `${change.kind === 'move' ? 'Move point' : change.kind === 'delete' ? 'Delete entities' : change.kind === 'trim' ? 'Delete segment' : 'Add entities'} in sketch`,
+        summary: `${change.kind === 'move' ? 'Edit geometry' : change.kind === 'delete' ? 'Delete entities' : change.kind === 'trim' ? 'Delete segment' : 'Add entities'} in sketch`,
         intent,
         edits,
         preview: {kind: 'source-edits', edits},

@@ -2,6 +2,18 @@ import {sketch} from '@code3d/core';
 
 const width = 30;
 
+// Circle uses an ordinary center point and a current radius. Drag its edge to
+// resize, or its center to move it. Entering a radius in the drawing tool adds
+// a separate radius constraint, just like the constrained concentric circle.
+export const circles = sketch(
+  [
+    ['point', 1, [0, 0]],
+    ['circle', 2, [1, 15]],
+    ['circle', 3, [1, 8]],
+  ],
+  {constraints: [['radius', [3, 8]]]},
+);
+
 // Current geometry is separate from constraints. The explicit width stays
 // fixed; drag point 3 to change the unconstrained height, or edit width in code.
 // Hover constraint markers to highlight their geometry; Constraints toggles them.

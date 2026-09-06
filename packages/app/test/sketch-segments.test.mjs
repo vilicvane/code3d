@@ -6,7 +6,7 @@ import {createTestProjectCompiler} from './project-test-files.ts';
 let server,
   sketchSegments,
   trimSketchSegment,
-  deleteSketchPoint,
+  deleteSketchEntity,
   sketchSegmentDistance,
   SketchEditResolver;
 before(async () => {
@@ -15,7 +15,7 @@ before(async () => {
     sketchSegments,
     trimSketchSegment,
     sketchSegmentDistance,
-    deleteSketchPoint,
+    deleteSketchEntity,
   } = await server.ssrLoadModule('/src/tools/sketch-segments.ts'));
   ({SketchEditResolver} = await server.ssrLoadModule(
     '/src/tools/sketch-source.ts',
@@ -401,7 +401,7 @@ test('deleting a point prunes newly disconnected line endpoints and their point 
       ['x', [ref(8), 70]],
     ],
   );
-  assert.deepEqual(deleteSketchPoint([value], 1), {
+  assert.deepEqual(deleteSketchEntity([value], 1), {
     kind: 'delete',
     ids: [1, 5, 6, 2],
     constraints: [0, 1, 2, 3, 4, 5, 6, 7, 8],
@@ -424,7 +424,7 @@ test('orphan cleanup respects upstream ownership and counts connections on upstr
     line(3, 1, 2),
     {...line(4, 1, 2), points: [ref(1, 'base'), ref(2)]},
   ]);
-  assert.deepEqual(deleteSketchPoint([base, local], 2).ids, [2, 3, 4]);
+  assert.deepEqual(deleteSketchEntity([base, local], 2).ids, [2, 3, 4]);
 });
 
 test('vertex deletion also prunes points that geometrically subdivided its removed lines', () => {
@@ -435,5 +435,5 @@ test('vertex deletion also prunes points that geometrically subdivided its remov
     point(4, 20, 0),
     point(5, 20, 1),
   ]);
-  assert.deepEqual(deleteSketchPoint([value], 1).ids, [1, 3, 2, 4]);
+  assert.deepEqual(deleteSketchEntity([value], 1).ids, [1, 3, 2, 4]);
 });

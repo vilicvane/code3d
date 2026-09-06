@@ -15,7 +15,7 @@ export type SketchConstraintDisplay = Readonly<{
   title: string;
   anchor: SketchPosition;
   points: readonly SketchPoint[];
-  line?: SketchPointAddress;
+  curve?: SketchPointAddress;
   guides: readonly (readonly [SketchPosition, SketchPosition])[];
 }>;
 
@@ -29,7 +29,9 @@ export function sketchConstraintDisplays(
   const number = (value: number) => String(Number(value.toPrecision(6)));
   return layers.flatMap(layer =>
     layer.constraints.map(([kind, data], index): SketchConstraintDisplay => {
-      let related: readonly SketchPoint[], line: SketchPointAddress | undefined;
+      let related: readonly SketchPoint[],
+        curve: SketchPointAddress | undefined;
+      let radiusAnchor: SketchPosition | undefined;
       let label = '',
         title: string = kind;
       switch (kind) {
@@ -51,6 +53,21 @@ export function sketchConstraintDisplays(
               ? 'Midpoint (center, start, end)'
               : 'Coincident';
           break;
+        case 'radius': {
+          const circle = layer.entities
+            .filter(e => e.kind === 'circle')
+            .find(e => e.id === data[0])!;
+          const center = point(circle.center);
+          related = [center];
+          curve = {layer: layer.id, id: circle.id};
+          radiusAnchor = [
+            center.position[0] + circle.radius / Math.SQRT2,
+            center.position[1] + circle.radius / Math.SQRT2,
+          ];
+          label = `R${number(data[1])}`;
+          title = `Radius ${data[1]} · circle ${circle.id}`;
+          break;
+        }
         case 'horizontal':
         case 'vertical':
         case 'length':
@@ -60,7 +77,7 @@ export function sketchConstraintDisplays(
             .filter(e => e.kind === 'line')
             .find(e => e.id === id)!;
           related = entity.points.map(point);
-          line = {layer: layer.id, id};
+          curve = {layer: layer.id, id};
           if (typeof data === 'number')
             title = kind === 'horizontal' ? 'Horizontal' : 'Vertical';
           else {
@@ -72,12 +89,14 @@ export function sketchConstraintDisplays(
         }
       }
       title += ` · ${related.map(p => `point ${p.id}${p.layer === layer.id ? '' : ' (upstream)'}`).join(', ')}`;
-      const anchor: SketchPosition = line
-        ? [
-            (related[0].position[0] + related[1].position[0]) / 2,
-            (related[0].position[1] + related[1].position[1]) / 2,
-          ]
-        : related[0].position;
+      const anchor: SketchPosition =
+        radiusAnchor ??
+        (curve
+          ? [
+              (related[0].position[0] + related[1].position[0]) / 2,
+              (related[0].position[1] + related[1].position[1]) / 2,
+            ]
+          : related[0].position);
       return {
         key: JSON.stringify([layer.id, index]),
         layer: layer.id,
@@ -86,9 +105,10 @@ export function sketchConstraintDisplays(
         title,
         anchor,
         points: related,
-        line,
-        guides:
-          !line && related.length > 1
+        curve,
+        guides: radiusAnchor
+          ? [[related[0].position, radiusAnchor]]
+          : !curve && related.length > 1
             ? related
                 .slice(1)
                 .map(p => [related[0].position, p.position] as const)

@@ -187,6 +187,7 @@ test('icon toolbar groups tools and supports one Tab stop, arrow navigation and 
     'Line',
     'Rectangle',
     'Center rectangle',
+    'Circle',
     'Fit',
     'Snap',
     'Constraints',
@@ -268,7 +269,7 @@ test('toolbar navigation skips read-only drawing tools but leaves view controls 
     {line: 3, column: 8},
   );
   const toolbar = page.getByRole('toolbar', {name: 'Sketch tools'});
-  assert.equal(await toolbar.locator('button:disabled').count(), 4);
+  assert.equal(await toolbar.locator('button:disabled').count(), 5);
   await toolbar.getByRole('button', {name: 'Select', exact: true}).focus();
   await page.keyboard.press('ArrowRight');
   assert.equal(

@@ -13,6 +13,11 @@ export type SketchEntry =
       kind: 'line',
       id: number,
       points: readonly [start: number | SketchPoint, end: number | SketchPoint],
+    ]
+  | readonly [
+      kind: 'circle',
+      id: number,
+      data: readonly [center: number | SketchPoint, radius: number],
     ];
 
 /** A point reference carries its defining layer, not just a numeric ID. */
@@ -31,8 +36,8 @@ export type SketchConstraint<P = number | SketchPoint> =
       points: readonly [midpoint: P, start: P, end: P],
     ]
   | readonly [
-      kind: 'length' | 'angle',
-      data: readonly [line: number, value: number],
+      kind: 'length' | 'angle' | 'radius',
+      data: readonly [curve: number, value: number],
     ]
   | readonly [kind: 'x' | 'y', data: readonly [point: P, value: number]];
 
@@ -56,6 +61,7 @@ type Definition = Readonly<{
   entries: readonly SketchEntry[];
   constraints: readonly SketchConstraint[];
   points: ReadonlyMap<number, SketchPosition>;
+  radii: ReadonlyMap<number, number>;
   degreesOfFreedom: number;
   redundant: readonly number[];
 }>;
@@ -86,6 +92,13 @@ class SketchValue implements Sketch {
         points.set(id, position);
         return ['point', id, position];
       }
+      if (kind === 'circle') {
+        if (data.length !== 2 || !Number.isFinite(data[1]) || data[1] <= 0)
+          throw new Error(
+            `Sketch circle ${id} requires a positive finite radius.`,
+          );
+        return ['circle', id, [data[0], data[1]]];
+      }
       if (kind !== 'line' || data.length !== 2)
         throw new Error(`Invalid sketch entity ${id}.`);
       return ['line', id, [data[0], data[1]]];
@@ -98,16 +111,16 @@ class SketchValue implements Sketch {
     )
       ancestors.add(ancestor);
     for (const [kind, id, data] of copied) {
-      if (kind !== 'line') continue;
-      for (const ref of data) {
+      if (kind === 'point') continue;
+      for (const ref of kind === 'circle' ? [data[0]] : data) {
         if (typeof ref === 'number') {
           if (!points.has(ref))
             throw new Error(
-              `Sketch line ${id} references missing local point ${ref}.`,
+              `Sketch ${kind} ${id} references missing local point ${ref}.`,
             );
         } else if (!references.has(ref) || !ancestors.has(ref.sketch)) {
           throw new Error(
-            `Sketch line ${id} must reference a local or upstream point.`,
+            `Sketch ${kind} ${id} must reference a local or upstream point.`,
           );
         }
       }
@@ -122,10 +135,10 @@ class SketchValue implements Sketch {
           'Sketch constraints must reference a local or upstream point.',
         );
     };
-    const lineRef = (id: number) => {
-      if (!copied.some(e => e[0] === 'line' && e[1] === id))
+    const curveRef = (id: number, kind: 'line' | 'circle') => {
+      if (!copied.some(e => e[0] === kind && e[1] === id))
         throw new Error(
-          `Sketch constraint references missing local line ${id}.`,
+          `Sketch constraint references missing local ${kind} ${id}.`,
         );
     };
     const constraints = (options?.constraints ?? []).map<SketchConstraint>(
@@ -135,7 +148,7 @@ class SketchValue implements Sketch {
           return [kind, data];
         }
         if (kind === 'horizontal' || kind === 'vertical') {
-          lineRef(data);
+          curveRef(data, 'line');
           return [kind, data];
         }
         if (kind === 'coincident') {
@@ -154,13 +167,16 @@ class SketchValue implements Sketch {
           kind === 'x' ||
           kind === 'y' ||
           kind === 'length' ||
-          kind === 'angle'
+          kind === 'angle' ||
+          kind === 'radius'
         ) {
           if (kind === 'x' || kind === 'y') pointRef(data[0]);
-          else lineRef(data[0] as number);
-          if (!Number.isFinite(data[1]) || (kind === 'length' && data[1] <= 0))
+          else
+            curveRef(data[0] as number, kind === 'radius' ? 'circle' : 'line');
+          const positive = kind === 'length' || kind === 'radius';
+          if (!Number.isFinite(data[1]) || (positive && data[1] <= 0))
             throw new Error(
-              `Sketch ${kind} constraint requires ${kind === 'length' ? 'a positive' : 'a'} finite value.`,
+              `Sketch ${kind} constraint requires ${positive ? 'a positive' : 'a'} finite value.`,
             );
           return [kind, [data[0], data[1]]] as SketchConstraint;
         }
@@ -185,8 +201,10 @@ class SketchValue implements Sketch {
       redundant: [],
     };
     const solved = solveSketchSnapshot([...snapshots, unresolved]);
+    const radii = new Map<number, number>();
     for (const entity of solved.entities)
       if (entity.kind === 'point') points.set(entity.id, entity.position);
+      else if (entity.kind === 'circle') radii.set(entity.id, entity.radius);
     definitions.set(this, {
       base,
       input: entries,
@@ -194,6 +212,7 @@ class SketchValue implements Sketch {
       entries: copied,
       constraints,
       points,
+      radii,
       degreesOfFreedom: solved.degreesOfFreedom,
       redundant: solved.redundant,
     });
@@ -242,11 +261,49 @@ export type SketchLineSnapshot = Readonly<{
   points: readonly [SketchPointAddress, SketchPointAddress];
 }>;
 
+export type SketchCircleSnapshot = Readonly<{
+  kind: 'circle';
+  id: number;
+  center: SketchPointAddress;
+  radius: number;
+}>;
+
+export type SketchEntitySnapshot =
+  SketchPointSnapshot | SketchLineSnapshot | SketchCircleSnapshot;
+
+/** Numeric geometry parameters, excluding identity and point references. */
+export function sketchEntityParameters(
+  entity: SketchEntitySnapshot,
+): readonly number[] {
+  switch (entity.kind) {
+    case 'point':
+      return entity.position;
+    case 'circle':
+      return [entity.radius];
+    case 'line':
+      return [];
+  }
+}
+
+export function withSketchEntityParameters(
+  entity: SketchEntitySnapshot,
+  parameters: readonly number[],
+): SketchEntitySnapshot {
+  switch (entity.kind) {
+    case 'point':
+      return {...entity, position: [parameters[0], parameters[1]]};
+    case 'circle':
+      return {...entity, radius: parameters[0]};
+    case 'line':
+      return entity;
+  }
+}
+
 /** Each snapshot contains only its own definitions; base retains the lineage. */
 export type SketchSnapshot = Readonly<{
   id: string;
   base?: string;
-  entities: readonly (SketchPointSnapshot | SketchLineSnapshot)[];
+  entities: readonly SketchEntitySnapshot[];
   constraints: readonly SketchConstraint<SketchPointAddress>[];
   degreesOfFreedom: number;
   /** Evaluation-local indices into constraints, not persistent identity. */
@@ -257,14 +314,25 @@ export function snapshotSketch(
   value: Sketch,
   identity: (sketch: Sketch) => string,
 ): SketchSnapshot {
-  const {base, entries, constraints, points, degreesOfFreedom, redundant} =
-    sketchDefinition(value);
+  const {
+    base,
+    entries,
+    constraints,
+    points,
+    radii,
+    degreesOfFreedom,
+    redundant,
+  } = sketchDefinition(value);
   const id = identity(value);
   return {
     id,
     base: base && identity(base),
     entities: snapshotEntries(entries, id, identity).map(e =>
-      e.kind === 'point' ? {...e, position: points.get(e.id)!} : e,
+      e.kind === 'point'
+        ? {...e, position: points.get(e.id)!}
+        : e.kind === 'circle'
+          ? {...e, radius: radii.get(e.id)!}
+          : e,
     ),
     constraints: snapshotConstraints(constraints, id, identity),
     degreesOfFreedom,
@@ -288,7 +356,9 @@ function snapshotEntries(
   return entries.map(([kind, entityId, data]) =>
     kind === 'point'
       ? {kind, id: entityId, position: data}
-      : {kind, id: entityId, points: [point(data[0]), point(data[1])]},
+      : kind === 'circle'
+        ? {kind, id: entityId, center: point(data[0]), radius: data[1]}
+        : {kind, id: entityId, points: [point(data[0]), point(data[1])]},
   );
 }
 
@@ -314,6 +384,7 @@ function snapshotConstraints(
         return [kind, data];
       case 'length':
       case 'angle':
+      case 'radius':
         return [kind, data];
     }
   });
@@ -325,8 +396,8 @@ export function solveSketchSnapshot(
   drag?: Readonly<{
     id: number;
     position: SketchPosition;
-    /** Numeric, gesture-only locks on local coordinates; never author constraints. */
-    locks?: readonly Readonly<{id: number; axis: 0 | 1; value: number}>[];
+    /** Numeric, gesture-only parameter locks; never author constraints. */
+    locks?: readonly Readonly<{id: number; parameter: number; value: number}>[];
   }>,
 ): SketchSnapshot {
   const local = layers.at(-1)!;
@@ -347,6 +418,16 @@ export function solveSketchSnapshot(
       SketchLineSnapshot | undefined;
     if (!line) throw new Error(`Missing sketch line ${id}.`);
     return [pointIndex(line.points[0]), pointIndex(line.points[1])];
+  };
+  const circles = layers.flatMap(layer =>
+    layer.entities.flatMap(e =>
+      e.kind === 'circle' ? [{...e, layer: layer.id}] : [],
+    ),
+  );
+  const circleIndex = (id: number) => {
+    const index = circles.findIndex(c => c.id === id && c.layer === local.id);
+    if (index < 0) throw new Error(`Missing sketch circle ${id}.`);
+    return index;
   };
   const constraints = local.constraints.map<SketchSolveConstraint>(
     ([kind, data]) => {
@@ -375,6 +456,8 @@ export function solveSketchSnapshot(
         case 'length':
         case 'angle':
           return {kind, points: linePoints(data[0]), value: data[1]};
+        case 'radius':
+          return {kind, circle: circleIndex(data[0]), value: data[1]};
       }
     },
   );
@@ -386,33 +469,53 @@ export function solveSketchSnapshot(
       if (!upstream)
         for (const lock of drag?.locks ?? [])
           if (lock.id === p.id) {
-            position[lock.axis] = lock.value;
-            locked[lock.axis] = true;
+            position[lock.parameter as 0 | 1] = lock.value;
+            locked[lock.parameter as 0 | 1] = true;
           }
       return {position, locked};
     }),
+    circles: circles.map(c => {
+      const upstream = c.layer !== local.id;
+      const lock = !upstream && drag?.locks?.find(lock => lock.id === c.id);
+      return {
+        center: pointIndex(c.center),
+        radius: lock ? lock.value : c.radius,
+        locked: upstream || !!lock,
+      };
+    }),
     constraints,
   };
+  const target = drag && local.entities.find(e => e.id === drag.id)!;
+  const objective =
+    drag &&
+    target &&
+    (target.kind === 'circle'
+      ? {
+          kind: 'radius' as const,
+          circle: circleIndex(target.id),
+          value: Math.hypot(
+            ...drag.position.map(
+              (v, axis) => v - points[pointIndex(target.center)].position[axis],
+            ),
+          ),
+        }
+      : {
+          kind: 'point' as const,
+          point: pointIndex({layer: local.id, id: drag.id}),
+          position: drag.position,
+        });
   const result = solveSketchProblem(
     // Applying authored coordinate locks can change the displayed geometry.
     // Satisfy those locks before choosing a gesture anchor, otherwise the old
     // anchor can contradict a perfectly valid set of persistent constraints.
     drag &&
-      problem.points.some((p, i) =>
+      (problem.points.some((p, i) =>
         p.position.some((v, axis) => v !== points[i].position[axis]),
-      )
-      ? {
-          ...problem,
-          points: solveSketchProblem(problem).positions.map((position, i) => ({
-            ...problem.points[i],
-            position,
-          })),
-        }
+      ) ||
+        problem.circles.some((c, i) => c.radius !== circles[i].radius))
+      ? solvedProblem(problem)
       : problem,
-    drag && {
-      point: pointIndex({layer: local.id, id: drag.id}),
-      position: drag.position,
-    },
+    objective,
   );
   const entities = local.entities.map(e =>
     e.kind === 'point'
@@ -420,9 +523,18 @@ export function solveSketchSnapshot(
           ...e,
           position: result.positions[pointIndex({layer: local.id, id: e.id})],
         }
-      : e,
+      : e.kind === 'circle'
+        ? {...e, radius: result.radii[circleIndex(e.id)]}
+        : e,
   );
   for (const entity of entities) {
+    if (
+      entity.kind === 'circle' &&
+      (!Number.isFinite(entity.radius) || entity.radius <= 0)
+    )
+      throw new Error(
+        `Sketch circle ${entity.id} requires a positive finite radius.`,
+      );
     if (entity.kind !== 'line') continue;
     const [a, b] = entity.points.map(p => result.positions[pointIndex(p)]);
     if (Math.hypot(a[0] - b[0], a[1] - b[1]) === 0)
@@ -433,5 +545,17 @@ export function solveSketchSnapshot(
     entities,
     degreesOfFreedom: drag ? local.degreesOfFreedom : result.degreesOfFreedom,
     redundant: drag ? local.redundant : result.redundant,
+  };
+}
+
+function solvedProblem(problem: SketchSolveProblem): SketchSolveProblem {
+  const solved = solveSketchProblem(problem);
+  return {
+    ...problem,
+    points: problem.points.map((p, i) => ({
+      ...p,
+      position: solved.positions[i],
+    })),
+    circles: problem.circles.map((c, i) => ({...c, radius: solved.radii[i]})),
   };
 }

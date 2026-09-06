@@ -19,18 +19,19 @@ implementation context and historical outcomes, not a competing work queue.
   source of truth.
 - Source code is the only persistent model state. GUI changes write back to it.
 - Sketches use explicit `[kind, ID, data]` tuples: point data is `[x, y]`,
-  line data is `[startPoint, endPoint]`. `base.derive([...])` retains locked
+  line data is `[startPoint, endPoint]`, and circle data is `[centerPoint, radius]`.
+  `base.derive([...])` retains locked
   upstream layers; local numeric point IDs and named `base.point(id)` handles
   distinguish ownership. IDs are independent per layer; new editor entries use
   local max + 1, without persistent `nextId` or renumbering surviving entries.
-  Selecting a sketch opens a 2D point/line editor. Literal coordinates can be
+  Selecting a sketch opens a 2D geometry editor. Literal coordinates and radii can be
   dragged; expression-driven coordinates stay source-edited. Continuous lines
   create/reuse endpoints without a standalone point creation tool, with numeric
   start X/Y or segment length/angle input, X/Y direction locks, dense adaptive
   snapping, cancellation and one atomic source transaction per segment.
   `sketch(entries, {constraints})` separates current geometry from hard
   conditions, without persistent constraint IDs. Fixed point, coincident,
-  horizontal/vertical, length, angle, midpoint and point X/Y constraints use PlaneGCS;
+  horizontal/vertical, length, angle, radius, midpoint and point X/Y constraints use PlaneGCS;
   assemblies use explicit rotation/translation bounds. Explicit drawing dimensions and the final
   active X/Y lock become constraints when geometry is committed; toggling off
   emits no direction constraint. Ordinary automatic snapping stays temporary.
@@ -87,7 +88,19 @@ implementation context and historical outcomes, not a competing work queue.
   visibility toggle, and hover/focus highlighting of actual participants.
   Midpoint guides link the center to its two endpoints; upstream markers are
   distinct and drag-only locks are not presented as persistent constraints.
-  Circles/arcs, curve trimming, regions and B-Rep generation remain later slices.
+  Circle shares the same drawing, numeric input, snapping and source transaction
+  pipeline. It creates an ordinary center point (or reuses a snapped local/upstream
+  reference) and one analytic circle, not a perimeter point or polyline. Its
+  entered radius emits `['radius', [circleId, value]]`; an unentered radius remains
+  free. Edge dragging edits radius, center dragging edits the center. Geometry
+  parameters share AST permissions, gesture-only locks, rounding and exact source
+  replay; radius expressions are never overwritten. Native circle radius
+  constraints use PlaneGCS. Equations with locked scalar parameters are checked
+  directly, avoiding zero-Jacobian equations in native redundancy analysis while
+  preserving genuine conflict errors. Radius markers link the actual center and
+  circumference. Deleting a circle removes its affected constraints and only
+  newly disconnected local centers, preserving shared/upstream points.
+  Arcs, curve trimming, regions and B-Rep generation remain later slices.
   The sketch canvas fills the viewport with floating controls. Its top-right
   icon toolbar groups editing, drawing and view controls, with native hover
   labels and one keyboard Tab stop; narrow viewports place the whole toolbar
@@ -97,7 +110,7 @@ implementation context and historical outcomes, not a competing work queue.
   Failed recompilation retains the selected last-successful sketch read-only;
   leaving its source selection clears it. Monaco still receives all diagnostics.
   See [research and priorities](plans/sketch-editor.md) and
-  [#23](https://github.com/vilicvane/code3d/issues/23); curve formats
+  [#23](https://github.com/vilicvane/code3d/issues/23); arc formats
   remain unconfirmed.
 - Author code remains ordinary JavaScript/TypeScript and may freely construct,
   reuse, copy, collect, and derive model values.

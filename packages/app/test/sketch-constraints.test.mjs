@@ -50,7 +50,7 @@ test('every persistent constraint exposes its actual participants and value, wit
     ['', '', '', '', '', '40', '180°', 'X=-2', 'Y=3.5'],
   );
   for (const index of [1, 2, 5, 6]) {
-    assert.deepEqual(displays[index].line, ref(4));
+    assert.deepEqual(displays[index].curve, ref(4));
     assert.deepEqual(displays[index].points, points.slice(0, 2));
     assert.deepEqual(displays[index].anchor, [20, 0]);
   }
@@ -97,7 +97,7 @@ test('derived relations retain ownership and distinct upstream/local addresses w
   assert.equal(displays[1].layer, 'local');
   assert.deepEqual(displays[1].points, [local, upstream]);
   assert.match(displays[1].title, /point 1 \(upstream\)/);
-  assert.deepEqual(displays[2].line, ref(2));
+  assert.deepEqual(displays[2].curve, ref(2));
   assert.deepEqual(displays[2].points, [upstream, local]);
 });
 

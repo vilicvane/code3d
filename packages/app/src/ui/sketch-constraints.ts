@@ -7,6 +7,7 @@ import {
   Triangle,
   Ruler,
   DraftingCompass,
+  Radius,
 } from 'lucide';
 import type {SketchConstraintDisplay} from '../tools/sketch-constraints';
 import {createIcon} from './icons';
@@ -21,6 +22,7 @@ const icons = {
   midpoint: Triangle,
   length: Ruler,
   angle: DraftingCompass,
+  radius: Radius,
 };
 const svg = <K extends keyof SVGElementTagNameMap>(tag: K) =>
   document.createElementNS('http://www.w3.org/2000/svg', tag);
@@ -52,7 +54,7 @@ export class SketchConstraints {
     )?.display;
     return (
       !!display &&
-      [...display.points, ...(display.line ? [display.line] : [])].some(
+      [...display.points, ...(display.curve ? [display.curve] : [])].some(
         p => p.layer === layer && p.id === id,
       )
     );

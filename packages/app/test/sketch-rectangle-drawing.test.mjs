@@ -37,7 +37,7 @@ test('a rectangle in every quadrant emits four shared corners and four direction
       assert.equal(changes.length, 0);
       const end = [3 + 40 * x, 5 + 20 * y];
       assert.deepEqual(drawing.measurements(end), {width: 40, height: 20});
-      const segments = drawing.segments(end);
+      const segments = drawing.preview(end).map(curve => curve.points);
       assert.equal(segments.length, 4);
       assert.equal(place(drawing, end, commit, 10), undefined);
       assert.equal(changes.length, 1);
@@ -180,7 +180,10 @@ test('zero area, cancellation and rejected transactions never partially create g
   place(drawing, [40, 50], () => true, 9);
   drawing.reset();
   assert.equal(drawing.hasDraft, false);
-  assert.deepEqual(drawing.segments([40, 60]), []);
+  assert.deepEqual(
+    drawing.preview([40, 60]).map(curve => curve.points),
+    [],
+  );
   assert.deepEqual(
     drawing.dimensions.definitions.map(f => f.id),
     ['x', 'y'],
@@ -206,7 +209,7 @@ test('center rectangles use full dimensions and one persistent midpoint relation
       const end = position({endpoint});
       assert.deepEqual(end, [3 + x * 20, 5 + y * 10]);
       assert.deepEqual(drawing.measurements(end), {width: 40, height: 20});
-      const segments = drawing.segments(end);
+      const segments = drawing.preview(end).map(curve => curve.points);
       let result;
       assert.equal(
         drawing.place(
@@ -324,7 +327,7 @@ test('generated rectangles preserve right angles, dimensions and source replay w
         assert.equal(original.degreesOfFreedom, 4 - fields.length);
         assert.deepEqual(original.redundant, []);
         points(original).forEach((p, i) =>
-          p.forEach((v, axis) => near(v, original.data[i].position[axis])),
+          p.forEach((v, axis) => near(v, original.data[i].parameters[axis])),
         );
         for (const id of mode === 'center' ? [1, 2, 3, 4, 5] : [1, 2, 3, 4]) {
           let preview = {snapshot: original, data: original.data};
@@ -354,7 +357,7 @@ test('generated rectangles preserve right angles, dimensions and source replay w
             if (fields.includes('height')) near(Math.abs(c[1] - b[1]), 30);
           }
           const replay = await compile(
-            edit(args, {kind: 'move', positions: preview.data}),
+            edit(args, {kind: 'move', data: preview.data}),
           );
           points(replay).forEach((p, i) =>
             p.forEach((v, axis) => near(v, points(preview.snapshot)[i][axis])),

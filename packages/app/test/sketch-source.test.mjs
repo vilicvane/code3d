@@ -76,12 +76,12 @@ test('moving a numeric point preserves expressions, comments and tuple identitie
     ],
   );
   assert.equal(
-    host.edit({kind: 'move', positions: [{id: 1, position: [4, 5]}]}).status,
+    host.edit({kind: 'move', data: [{id: 1, parameters: [4, 5]}]}).status,
     'committed',
   );
   assert.equal(host.source(), source.replace('-2', '4').replace('+3', '5'));
   assert.equal(
-    host.edit({kind: 'move', positions: [{id: 8, position: [4, 5]}]}).status,
+    host.edit({kind: 'move', data: [{id: 8, parameters: [4, 5]}]}).status,
     'committed',
   );
   assert.match(host.source(), /\[width \* 2, 5\]/);
@@ -102,16 +102,16 @@ test('coordinate permissions come from the AST and preserve each nonliteral axis
     ],
   );
   assert.equal(
-    host.edit({kind: 'move', positions: [{id: 1, position: [8, 9]}]}).status,
+    host.edit({kind: 'move', data: [{id: 1, parameters: [8, 9]}]}).status,
     'unsupported',
   );
   assert.equal(host.source(), source);
   assert.equal(
     host.edit({
       kind: 'move',
-      positions: [
-        {id: 2, position: [8, 9]},
-        {id: 3, position: [8, 9]},
+      data: [
+        {id: 2, parameters: [8, 9]},
+        {id: 3, parameters: [8, 9]},
       ],
     }).status,
     'committed',
@@ -194,8 +194,7 @@ test('successive appends do not accumulate blank lines between generated tuples'
 test('stale gestures, dynamic tuples and inaccessible upstreams never rewrite source', () => {
   const host = setup("[['point', 1, [0,0]]]");
   assert.equal(
-    host.edit({kind: 'move', positions: [{id: 1, position: [2, 3]}]}, '[]')
-      .status,
+    host.edit({kind: 'move', data: [{id: 1, parameters: [2, 3]}]}, '[]').status,
     'conflict',
   );
   assert.equal(
@@ -340,9 +339,9 @@ test('solved multi-point movement is atomic and does not rewrite dimension expre
   assert.equal(
     host.edit({
       kind: 'move',
-      positions: [
-        {id: 1, position: [10, 5]},
-        {id: 2, position: [50, 5]},
+      data: [
+        {id: 1, parameters: [10, 5]},
+        {id: 2, parameters: [50, 5]},
       ],
     }).status,
     'committed',

@@ -21,6 +21,10 @@ export const sketchCoordinateInputs = () =>
     {id: 'y', label: 'Y'},
   ]);
 
+export type SketchDrawingCurve =
+  | Readonly<{kind: 'line'; points: readonly [SketchPosition, SketchPosition]}>
+  | Readonly<{kind: 'circle'; center: SketchPosition; radius: number}>;
+
 /** Drawing tools share interaction and preview contracts, not persistent entities. */
 export interface SketchDrawing {
   readonly name: string;
@@ -35,9 +39,7 @@ export interface SketchDrawing {
   reset(): void;
   resolve(context: SketchSnapContext): SketchSnap;
   measurements(position: SketchPosition): Readonly<Record<string, number>>;
-  segments(
-    position: SketchPosition,
-  ): readonly (readonly [SketchPosition, SketchPosition])[];
+  preview(position: SketchPosition): readonly SketchDrawingCurve[];
   place(
     endpoint: SketchEndpoint,
     layer: string,
@@ -73,6 +75,12 @@ export class SketchDrawingGeometry {
     this.entries.push(['line', id, [a, b]]);
     return id;
   }
+
+  circle(center: SketchPointAddress, radius: number): number {
+    const id = this.nextId++;
+    this.entries.push(['circle', id, [center, radius]]);
+    return id;
+  }
 }
 
 /** A continuous line chain, independent of DOM focus, rendering, and source parsing. */
@@ -98,10 +106,10 @@ export class SketchLineDrawing implements SketchDrawing {
       : 'Start point · Enter X/Y or click';
   }
 
-  segments(
-    position: SketchPosition,
-  ): readonly (readonly [SketchPosition, SketchPosition])[] {
-    return this.start ? [[endpointPosition(this.start), position]] : [];
+  preview(position: SketchPosition): readonly SketchDrawingCurve[] {
+    return this.start
+      ? [{kind: 'line', points: [endpointPosition(this.start), position]}]
+      : [];
   }
 
   get hasDraft(): boolean {

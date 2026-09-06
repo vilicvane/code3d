@@ -159,7 +159,7 @@ export function sketchSegmentDistance(
   return sketchDistance(p, [a[0] + along * unit[0], a[1] + along * unit[1]]);
 }
 
-/** Only points connected to removed lines are candidates; unrelated standalone points remain. */
+/** Only points connected to removed geometry are candidates; unrelated points remain. */
 function disconnectedPoints(
   layers: readonly SketchSnapshot[],
   removed: readonly number[],
@@ -172,27 +172,42 @@ function disconnectedPoints(
       kind === 'point' ? [{kind, id, position, layer: local.id}] : [],
     ),
   );
-  const removedLines = local.entities.flatMap(e =>
-    e.kind === 'line' && removed.includes(e.id) ? [e.points] : [],
-  );
-  const lines = layers.flatMap(layer =>
-    layer.entities.flatMap(e =>
-      e.kind === 'line' && !(layer.id === local.id && removed.includes(e.id))
+  const removedConnections = local.entities.flatMap<
+    readonly SketchPointAddress[]
+  >(e =>
+    removed.includes(e.id)
+      ? e.kind === 'line'
         ? [e.points]
+        : e.kind === 'circle'
+          ? [[e.center]]
+          : []
+      : [],
+  );
+  const connections = layers.flatMap(layer =>
+    layer.entities.flatMap<readonly SketchPointAddress[]>(e =>
+      !(layer.id === local.id && removed.includes(e.id))
+        ? e.kind === 'line'
+          ? [e.points]
+          : e.kind === 'circle'
+            ? [[e.center]]
+            : []
         : [],
     ),
   );
-  lines.push(
-    ...entries.flatMap(([kind, , data]) => (kind === 'line' ? [data] : [])),
+  connections.push(
+    ...entries.flatMap<readonly SketchPointAddress[]>(([kind, , data]) =>
+      kind === 'line' ? [data] : kind === 'circle' ? [[data[0]]] : [],
+    ),
   );
   const connected = (
     point: SketchPoint,
-    lines: readonly (readonly SketchPointAddress[])[],
+    connections: readonly (readonly SketchPointAddress[])[],
   ) =>
-    lines.some(refs => {
+    connections.some(refs => {
       // Authored references also count for collapsed lines. Geometric
       // connections count at T junctions before source is explicitly split.
       if (refs.some(ref => sameSketchPoint(ref, point))) return true;
+      if (refs.length !== 2) return false;
       const [a, b] = refs.map(
         ref => points.find(p => sameSketchPoint(p, ref))!.position,
       );
@@ -214,8 +229,8 @@ function disconnectedPoints(
       point =>
         point.layer === local.id &&
         !removed.includes(point.id) &&
-        connected(point, removedLines) &&
-        !connected(point, lines),
+        connected(point, removedConnections) &&
+        !connected(point, connections),
     )
     .map(point => point.id);
 }
@@ -246,6 +261,7 @@ function deletedConstraints(
         break;
       case 'length':
       case 'angle':
+      case 'radius':
         deleted = ids.includes(data[0]);
         break;
     }
@@ -253,7 +269,7 @@ function deletedConstraints(
   });
 }
 
-export function deleteSketchPoint(
+export function deleteSketchEntity(
   layers: readonly SketchSnapshot[],
   id: number,
 ): SketchChange {
@@ -261,8 +277,12 @@ export function deleteSketchPoint(
   const ids = [
     id,
     ...local.entities.flatMap(e =>
-      e.kind === 'line' &&
-      e.points.some(p => p.layer === local.id && p.id === id)
+      (e.kind === 'line'
+        ? e.points
+        : e.kind === 'circle'
+          ? [e.center]
+          : []
+      ).some(p => p.layer === local.id && p.id === id)
         ? [e.id]
         : [],
     ),

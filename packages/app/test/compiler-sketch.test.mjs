@@ -220,12 +220,12 @@ test('AST coordinate locks preserve expressions through drag, source transaction
         for (const axis of [0, 1])
           if (!editable.get(data.id)[axis]) {
             assert.equal(
-              preview.data.find(p => p.id === data.id).position[axis],
-              data.position[axis],
+              preview.data.find(p => p.id === data.id).parameters[axis],
+              data.parameters[axis],
             );
             assert.ok(
               Math.abs(
-                point(preview.snapshot, data.id)[axis] - data.position[axis],
+                point(preview.snapshot, data.id)[axis] - data.parameters[axis],
               ) < 1e-7,
             );
           }
@@ -241,7 +241,7 @@ test('AST coordinate locks preserve expressions through drag, source transaction
         references: {},
         change: {
           kind: 'move',
-          positions: preview.data.filter(p => editable.get(p.id).some(Boolean)),
+          data: preview.data.filter(p => editable.get(p.id).some(Boolean)),
         },
       },
       {
@@ -301,12 +301,12 @@ test('constraint conflicts highlight their source tuples, without persistent con
 test('temporary drag anchors survive full rotations and exact rounded source replay', async () => {
   const source = data =>
     `const value = sketch(${JSON.stringify([
-      ...data.map(p => ['point', p.id, p.position]),
+      ...data.map(p => ['point', p.id, p.parameters]),
       ['line', 3, [1, 2]],
     ])}, {constraints: [['length', [3, 40]]]});`;
   const initialData = [
-    {id: 1, position: [2, 2]},
-    {id: 2, position: [22, 19]},
+    {id: 1, parameters: [2, 2]},
+    {id: 2, parameters: [22, 19]},
   ];
   const initial = [
     ...(await compile(source(initialData))).sketches.values(),

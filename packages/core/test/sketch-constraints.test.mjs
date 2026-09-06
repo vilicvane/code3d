@@ -232,7 +232,9 @@ test('gesture coordinate locks are numeric, per-axis and absent from ordinary ev
     const moved = solveSketchSnapshot([original], {
       id: 1,
       position: [30, 40],
-      locks: [{id: 1, axis, value: original.entities[0].position[axis]}],
+      locks: [
+        {id: 1, parameter: axis, value: original.entities[0].position[axis]},
+      ],
     });
     assert.equal(position(moved, 1)[axis], position(original, 1)[axis]);
     assert.equal(position(moved, 1)[1 - axis], [30, 40][1 - axis]);
@@ -265,7 +267,7 @@ test('a dragged coordinate lock coexists with the first non-dragged anchor and h
   const moved = solveSketchSnapshot([original], {
     id: 2,
     position: [40, 30],
-    locks: [{id: 2, axis: 1, value: 0}],
+    locks: [{id: 2, parameter: 1, value: 0}],
   });
   assert.deepEqual(position(moved, 1), [0, 0]);
   close(position(moved, 2)[0], 40);
@@ -287,8 +289,8 @@ test('coordinate locks and permanent coordinate constraints together prevent an 
       id: 2,
       position: [60, 20],
       locks: [
-        {id: 4, axis: 0, value: 0},
-        ...(!permanentY ? [{id: 4, axis: 1, value: 0}] : []),
+        {id: 4, parameter: 0, value: 0},
+        ...(!permanentY ? [{id: 4, parameter: 1, value: 0}] : []),
       ],
     });
     position(moved, 2).forEach((v, axis) => close(v, [60, 20][axis]));
@@ -313,7 +315,7 @@ test('changed coordinate locks are satisfied before a temporary anchor is chosen
   const moved = solveSketchSnapshot([original], {
     id: 2,
     position: [70, 30],
-    locks: [{id: 2, axis: 1, value: 19}],
+    locks: [{id: 2, parameter: 1, value: 19}],
   });
   position(moved, 1).forEach((v, axis) => close(v, [22, 19][axis]));
   position(moved, 2).forEach((v, axis) => close(v, [70, 19][axis]));
@@ -341,8 +343,8 @@ test('gesture locks respect explicit fixed and coordinate constraints rather tha
     id: 2,
     position: [24, 32],
     locks: [
-      {id: 1, axis: 0, value: 0},
-      {id: 1, axis: 1, value: 0},
+      {id: 1, parameter: 0, value: 0},
+      {id: 1, parameter: 1, value: 0},
     ],
   });
   assert.deepEqual(position(moved, 1), [0, 0]);
@@ -352,7 +354,7 @@ test('gesture locks respect explicit fixed and coordinate constraints rather tha
       solveSketchSnapshot([original], {
         id: 2,
         position: [24, 32],
-        locks: [{id: 1, axis: 0, value: 10}],
+        locks: [{id: 1, parameter: 0, value: 10}],
       }),
     SketchConstraintError,
   );
@@ -366,7 +368,7 @@ test('gesture locks respect explicit fixed and coordinate constraints rather tha
       solveSketchSnapshot([located], {
         id: 1,
         position: [20, 20],
-        locks: [{id: 1, axis: 0, value: 0}],
+        locks: [{id: 1, parameter: 0, value: 0}],
       }),
     SketchConstraintError,
   );

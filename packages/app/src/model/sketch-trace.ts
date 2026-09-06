@@ -1,14 +1,14 @@
 import ts from '@typescript/typescript6';
 import type * as CoreTooling from '@code3d/core/tooling';
 import type {Sketch, SketchSnapshot, SourceRef} from '@code3d/core/tooling';
-import type {SketchPointData} from './sketch-drag';
+import type {SketchGeometryData} from './sketch-drag';
 
 export type CompiledSketch = SketchSnapshot &
   Readonly<{
     evaluationId?: string;
     definitionRef?: SourceRef;
     references: Readonly<Record<string, string>>;
-    data: readonly SketchPointData[];
+    data: readonly SketchGeometryData[];
   }>;
 
 type SketchTrace = {
@@ -222,8 +222,12 @@ export class SketchTraceRegistry {
           references: trace.references,
           data: this.runtime
             .sketchDefinition(value)
-            .entries.flatMap(([kind, id, data]) =>
-              kind === 'point' ? [{id, position: data}] : [],
+            .entries.flatMap<SketchGeometryData>(([kind, id, data]) =>
+              kind === 'point'
+                ? [{id, parameters: data}]
+                : kind === 'circle'
+                  ? [{id, parameters: [data[1]]}]
+                  : [],
             ),
         },
       ]),
