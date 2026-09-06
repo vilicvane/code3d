@@ -12,21 +12,97 @@ import {
   type SketchAxis,
   type SketchEndpoint,
   type SketchSnapContext,
+  type SketchSnap,
 } from './sketch-snap';
 
-const coordinates = () =>
+export const sketchCoordinateInputs = () =>
   new DrawingDimensions([
     {id: 'x', label: 'X'},
     {id: 'y', label: 'Y'},
   ]);
 
-/** A continuous line chain, independent of DOM focus, rendering, and source parsing. */
-export class SketchLineDrawing {
+/** Drawing tools share interaction and preview contracts, not persistent entities. */
+export interface SketchDrawing {
+  readonly name: string;
+  readonly title: string;
+  readonly instructions: string;
+  readonly hasDraft: boolean;
+  readonly axis?: SketchAxis;
   start?: SketchEndpoint;
-  dimensions = coordinates();
+  pointer: SketchPosition;
+  dimensions: DrawingDimensions;
+  toggleAxis?(axis: SketchAxis): void;
+  reset(): void;
+  resolve(context: SketchSnapContext): SketchSnap;
+  measurements(position: SketchPosition): Readonly<Record<string, number>>;
+  segments(
+    position: SketchPosition,
+  ): readonly (readonly [SketchPosition, SketchPosition])[];
+  place(
+    endpoint: SketchEndpoint,
+    layer: string,
+    nextId: number,
+    commit: (change: SketchChange) => boolean,
+  ): string | undefined;
+}
+
+export const enteredSketchCoordinates = (dimensions: DrawingDimensions) =>
+  (['x', 'y'] as const).flatMap(axis => {
+    const value = dimensions.value(axis);
+    return value === undefined ? [] : [{axis, value}];
+  });
+
+/** Allocate identities only in an atomic draft, reusing actual snapped references. */
+export class SketchDrawingGeometry {
+  readonly entries: SketchDraftEntry[] = [];
+  constructor(
+    private readonly layer: string,
+    private nextId: number,
+  ) {}
+
+  point(endpoint: SketchEndpoint): SketchPointAddress {
+    if ('point' in endpoint)
+      return {layer: endpoint.point.layer, id: endpoint.point.id};
+    const id = this.nextId++;
+    this.entries.push(['point', id, endpoint.position]);
+    return {layer: this.layer, id};
+  }
+
+  line(a: SketchPointAddress, b: SketchPointAddress): number {
+    const id = this.nextId++;
+    this.entries.push(['line', id, [a, b]]);
+    return id;
+  }
+}
+
+/** A continuous line chain, independent of DOM focus, rendering, and source parsing. */
+export class SketchLineDrawing implements SketchDrawing {
+  readonly name = 'Line';
+  start?: SketchEndpoint;
+  dimensions = sketchCoordinateInputs();
   pointer: SketchPosition = [0, 0];
   axis?: SketchAxis;
   private startCoordinates: {axis: 'x' | 'y'; value: number}[] = [];
+
+  get title(): string {
+    return this.start
+      ? this.axis
+        ? `${this.axis.toUpperCase()} locked`
+        : 'Next point'
+      : 'Start point';
+  }
+
+  get instructions(): string {
+    return this.start
+      ? 'Next point · Enter length/angle or click · X/Y locks direction · Esc ends the chain'
+      : 'Start point · Enter X/Y or click';
+  }
+
+  segments(
+    position: SketchPosition,
+  ): readonly (readonly [SketchPosition, SketchPosition])[] {
+    return this.start ? [[endpointPosition(this.start), position]] : [];
+  }
 
   get hasDraft(): boolean {
     return !!this.start || this.dimensions.edited;
@@ -71,7 +147,7 @@ export class SketchLineDrawing {
     this.start = undefined;
     this.axis = undefined;
     this.startCoordinates = [];
-    this.dimensions = coordinates();
+    this.dimensions = sketchCoordinateInputs();
   }
 
   /** Axis and numeric angle are two mutually exclusive ways to set direction. */
@@ -108,10 +184,7 @@ export class SketchLineDrawing {
       return 'The resulting coordinates must be finite';
     if (!this.start) {
       this.start = endpoint;
-      this.startCoordinates = (['x', 'y'] as const).flatMap(axis => {
-        const value = this.dimensions.value(axis);
-        return value === undefined ? [] : [{axis, value}];
-      });
+      this.startCoordinates = enteredSketchCoordinates(this.dimensions);
       this.dimensions = this.segmentDimensions();
       return undefined;
     }
@@ -122,26 +195,22 @@ export class SketchLineDrawing {
       ) === 0
     )
       return 'Choose a different end point';
-    const entries: SketchDraftEntry[] = [];
-    const address = (value: SketchEndpoint) => {
-      if ('point' in value)
-        return {layer: value.point.layer, id: value.point.id};
-      const id = nextId++;
-      entries.push(['point', id, value.position]);
-      return {layer, id};
-    };
-    const start = address(this.start),
-      end = address(endpoint);
-    entries.push(['line', nextId, [start, end]]);
+    const geometry = new SketchDrawingGeometry(layer, nextId);
+    const start = geometry.point(this.start),
+      end = geometry.point(endpoint);
+    const segment = geometry.line(start, end);
     const constraints: SketchConstraint<SketchPointAddress>[] =
       this.startCoordinates.map(({axis, value}) => [axis, [start, value]]);
     const length = this.dimensions.value('length');
     const angle = this.dimensions.value('angle');
-    if (length !== undefined) constraints.push(['length', [nextId, length]]);
+    if (length !== undefined) constraints.push(['length', [segment, length]]);
     if (this.axis)
-      constraints.push([this.axis === 'x' ? 'horizontal' : 'vertical', nextId]);
-    else if (angle !== undefined) constraints.push(['angle', [nextId, angle]]);
-    if (!commit({kind: 'append', entries, constraints}))
+      constraints.push([
+        this.axis === 'x' ? 'horizontal' : 'vertical',
+        segment,
+      ]);
+    else if (angle !== undefined) constraints.push(['angle', [segment, angle]]);
+    if (!commit({kind: 'append', entries: geometry.entries, constraints}))
       return 'The sketch changed; the drawing was not applied';
     // Reuse the committed endpoint's identity, including a newly allocated ID.
     // Advance only after the transaction succeeds; each segment is one undo step.

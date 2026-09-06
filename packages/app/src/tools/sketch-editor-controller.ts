@@ -153,6 +153,7 @@ export class SketchEditorController {
             deleted = ids.includes(data);
             break;
           case 'coincident':
+          case 'midpoint':
             deleted = data.some(pointDeleted);
             break;
           case 'x':

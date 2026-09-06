@@ -1,5 +1,7 @@
 import {
   box,
+  sketch,
+  type SketchConstraint,
   type EdgeTopologyCapabilities,
   type ElementKind,
   type ElementSources,
@@ -103,3 +105,18 @@ const builder = (size: number): Shape3D =>
 const primitive: (size: number) => SolidModel = definePrimitive(builder);
 
 void [topologyKind, elementKinds, solidKind, groupKind, primitive];
+
+const sketchBase = sketch([['point', 1, [0, 0]]]);
+const midpoint: SketchConstraint = ['midpoint', [1, 2, sketchBase.point(1)]];
+sketchBase.derive(
+  [
+    ['point', 1, [10, 0]],
+    ['point', 2, [20, 0]],
+  ],
+  {constraints: [midpoint]},
+);
+// @ts-expect-error A midpoint constraint requires three point references.
+const missingEndpoint: SketchConstraint = ['midpoint', [1, 2]];
+// @ts-expect-error Coordinates are not point references.
+const coordinateEndpoint: SketchConstraint = ['midpoint', [1, 2, [0, 0]]];
+void [missingEndpoint, coordinateEndpoint];

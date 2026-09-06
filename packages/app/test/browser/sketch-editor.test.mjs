@@ -38,6 +38,19 @@ const text = async page =>
     '\u00a0',
     ' ',
   );
+// Sketch geometry updates synchronously, while Monaco renders source edits on
+// its next frame. Wait for the expected source, not compilation or a fixed delay.
+async function waitForSource(page, pattern) {
+  await page.waitForFunction(
+    ({source, flags}) =>
+      new RegExp(source, flags).test(
+        document
+          .querySelector('.monaco-editor .view-lines')
+          .innerText.replaceAll('\u00a0', ' '),
+      ),
+    {source: pattern.source, flags: pattern.flags},
+  );
+}
 const point = (page, id, layer = 'local') =>
   page.locator(`.sketch-canvas circle.${layer}[data-id="${id}"]`);
 async function drag(page, locator, dx, dy) {
@@ -61,7 +74,15 @@ test('continuous lines reuse endpoints before recompile and undo one segment at 
     await page.getByRole('button', {name: 'Point', exact: true}).count(),
     0,
   );
-  for (const name of ['Select', 'Line', 'Delete', 'Fit', 'Snap']) {
+  for (const name of [
+    'Select',
+    'Line',
+    'Rectangle',
+    'Center rectangle',
+    'Delete',
+    'Fit',
+    'Snap',
+  ]) {
     const button = page.getByRole('button', {name, exact: true});
     const icon = button.locator('svg.ui-icon');
     assert.equal(await icon.count(), 1);
@@ -84,6 +105,7 @@ test('continuous lines reuse endpoints before recompile and undo one segment at 
     rect.y + rect.height / 2,
   );
   assert.equal(await page.locator('.sketch-canvas circle.local').count(), 2);
+  await waitForSource(page, /'line',\s*3,\s*\[1,\s*2\]/);
   assert.match(await text(page), /'point',\s*1/);
   assert.match(await text(page), /'point',\s*2/);
   await page.mouse.click(
@@ -91,7 +113,7 @@ test('continuous lines reuse endpoints before recompile and undo one segment at 
     rect.y + rect.height / 2 - 60,
   );
   assert.equal(await page.locator('.sketch-canvas circle.local').count(), 3);
-  assert.match(await text(page), /'line',\s*5,\s*\[2,\s*4\]/);
+  await waitForSource(page, /'line',\s*5,\s*\[2,\s*4\]/);
   assert.equal(await page.locator('.source-edit-popover').isVisible(), false);
   await page.getByRole('textbox', {name: 'Length', exact: true}).click();
   assert.equal(await activeDimension(page), 'length');
@@ -121,7 +143,7 @@ test('derived editing connects named upstream points and cannot drag or delete u
   await page.getByRole('button', {name: 'Line', exact: true}).click();
   await point(page, 2, 'upstream').click();
   await point(page, 1).click();
-  assert.match(await text(page), /base\.point\(2\), 1/);
+  await waitForSource(page, /base\.point\(2\), 1/);
   assert.equal(await page.locator('.sketch-canvas line.local').count(), 1);
   await page.getByRole('button', {name: 'Select', exact: true}).click();
   await drag(page, point(page, 1), 40, -20);
@@ -172,7 +194,7 @@ test('a line between empty positions commits its points atomically and Escape ca
   await page.mouse.click(rect.x + 160, rect.y + 200);
   await page.mouse.click(rect.x + 280, rect.y + 200);
   assert.equal(await page.locator('.sketch-canvas circle.local').count(), 2);
-  assert.match(await text(page), /'line',\s*3,\s*\[1,\s*2\]/);
+  await waitForSource(page, /'line',\s*3,\s*\[1,\s*2\]/);
   await page.getByRole('button', {name: 'Select', exact: true}).click();
   const created = await text(page);
   const anchor = await screenPoint(point(page, 2));
@@ -230,9 +252,9 @@ test('line start XY and length/angle retain entered values through pointer movem
   assert.equal(await field(page, 'Length').inputValue(), '40');
   assert.equal(await field(page, 'Angle').inputValue(), '90');
   await page.keyboard.press('Enter');
+  await waitForSource(page, /'line',\s*3,\s*\[1,\s*2\]/);
   assert.match(await text(page), /'point',\s*1,\s*\[1.25,\s*-3.5\]/);
   assert.match(await text(page), /'point',\s*2,\s*\[1.25,\s*36.5\]/);
-  assert.match(await text(page), /'line',\s*3,\s*\[1,\s*2\]/);
   assert.equal(await page.locator('.sketch-canvas line.local').count(), 1);
 
   await page.locator('.monaco-editor .view-lines').click();
@@ -297,7 +319,7 @@ test('numeric entry can finish on a named upstream point without losing the refe
     /Point 1 · upstream/,
   );
   await page.keyboard.press('Enter');
-  assert.match(await text(page), /'line',\s*2,\s*\[1,\s*base.point\(1\)\]/);
+  await waitForSource(page, /'line',\s*2,\s*\[1,\s*base\.point\(1\)\]/);
   assert.equal(await page.locator('.sketch-canvas circle.local').count(), 1);
   assert.equal(await page.locator('.sketch-canvas circle.upstream').count(), 1);
   // Recompilation must retain the continuing chain and its active numeric input.
@@ -308,7 +330,7 @@ test('numeric entry can finish on a named upstream point without losing the refe
   assert.equal(await field(page, 'Angle').inputValue(), '90');
   assert.equal(await activeDimension(page), 'angle');
   await page.keyboard.press('Enter');
-  assert.match(await text(page), /'line',\s*4,\s*\[base.point\(1\),\s*3\]/);
+  await waitForSource(page, /'line',\s*4,\s*\[base\.point\(1\),\s*3\]/);
   assert.equal(await page.locator('.sketch-canvas circle.upstream').count(), 1);
 });
 
@@ -353,7 +375,7 @@ test('snap guides are visible, can be bypassed with Alt and never become persist
   assert.equal(await page.locator('.snap-label').count(), 0);
   assert.equal(await page.locator('.sketch-canvas .draft').count(), 1);
   await page.keyboard.press('Enter');
-  assert.match(await text(page), /'line'/);
+  await waitForSource(page, /'line'/);
   assert.doesNotMatch(await text(page), /constraint|horizontal/);
 });
 
@@ -364,6 +386,7 @@ test('numeric fields retain native undo including the first character, independe
   await field(page, 'Length').fill('10');
   await field(page, 'Angle').fill('0');
   await page.keyboard.press('Enter');
+  await waitForSource(page, /'line',\s*3,\s*\[1,\s*2\]/);
   const before = await text(page);
   await page.keyboard.type('40');
   assert.equal(await field(page, 'Length').inputValue(), '40');
@@ -441,6 +464,7 @@ test('X/Y switch and cancel bidirectional axis locks independently of snap and k
   await page.keyboard.press('Enter');
   assert.equal(await drawingTitle(page), 'Next point');
   assert.equal(await page.locator('.sketch-canvas line.local').count(), 1);
+  await waitForSource(page, /\['horizontal',\s*3\]/);
   const completed = await text(page);
   assert.match(completed, /constraints/);
   assert.match(completed, /\['horizontal',\s*3\]/);
@@ -493,7 +517,7 @@ test('axis shortcuts share direction with Angle while preserving Length focus, t
   assert.equal(await page.locator('.drawing-input-error').textContent(), '');
   assert.equal(await field(page, 'Angle').getAttribute('aria-invalid'), null);
   await page.keyboard.press('Enter');
-  assert.match(await text(page), /'point',\s*2,\s*\[40,\s*0\]/);
+  await waitForSource(page, /'point',\s*2,\s*\[40,\s*0\]/);
   assert.equal(await drawingTitle(page), 'Next point');
   await page.keyboard.press('y');
   await page.getByText('Ready', {exact: true}).waitFor();
@@ -641,6 +665,120 @@ test('fully constrained points resist dragging without writing a source transact
   assert.equal(await text(page), before);
 });
 
+test('rectangle dimensions retain native input, emit persistent sizes and undo the whole rectangle', async t => {
+  const page = await open(t, emptySketch);
+  await page.getByRole('button', {name: 'Rectangle', exact: true}).click();
+  const canvas = await page.locator('.sketch-canvas').boundingBox();
+  await page.mouse.click(
+    canvas.x + canvas.width / 2,
+    canvas.y + canvas.height / 2,
+  );
+  await page.mouse.move(
+    canvas.x + canvas.width / 2 + 90,
+    canvas.y + canvas.height / 2 - 70,
+  );
+  assert.equal(await page.locator('.drawing-overlay line.draft').count(), 4);
+  assert.equal(await drawingTitle(page), 'Opposite corner');
+  await page.keyboard.type('40');
+  await page.keyboard.press('Control+z');
+  assert.equal(await field(page, 'Width').inputValue(), '');
+  await page.keyboard.press('Control+Shift+z');
+  assert.equal(await field(page, 'Width').inputValue(), '40');
+  await page.keyboard.press('Tab');
+  await page.keyboard.type('30');
+  await page.mouse.move(
+    canvas.x + canvas.width / 2 - 90,
+    canvas.y + canvas.height / 2 + 70,
+  );
+  assert.equal(await field(page, 'Width').inputValue(), '40');
+  assert.equal(await field(page, 'Height').inputValue(), '30');
+  await page.keyboard.press('Enter');
+  await page.getByText('Ready', {exact: true}).waitFor();
+  assert.equal(await page.locator('.sketch-canvas circle.local').count(), 4);
+  assert.equal(await page.locator('.sketch-canvas line.local').count(), 4);
+  assert.match(await text(page), /'point',\s*3,\s*\[-40,\s*-30\]/);
+  assert.match(await text(page), /'length',\s*\[5,\s*40\]/);
+  assert.match(await text(page), /'length',\s*\[6,\s*30\]/);
+  assert.equal(await drawingTitle(page), 'First corner');
+  assert.equal(await page.locator('.drawing-overlay line.draft').count(), 0);
+  await page.keyboard.press('Control+z');
+  await page
+    .locator('.sketch-canvas line.local')
+    .first()
+    .waitFor({state: 'detached'});
+  assert.equal(await page.locator('.sketch-canvas circle.local').count(), 0);
+  assert.doesNotMatch(await text(page), /constraints/);
+  await page.keyboard.press('Control+Shift+z');
+  await point(page, 3).waitFor();
+  assert.equal(await page.locator('.sketch-canvas line.local').count(), 4);
+});
+
+test('a free rectangle keeps its right angles after a corner drag and recompilation', async t => {
+  const page = await open(t, emptySketch);
+  await page.getByRole('button', {name: 'Rectangle', exact: true}).click();
+  const canvas = await page.locator('.sketch-canvas').boundingBox();
+  await page.mouse.click(
+    canvas.x + canvas.width / 2,
+    canvas.y + canvas.height / 2,
+  );
+  await page.mouse.click(
+    canvas.x + canvas.width / 2 + 100,
+    canvas.y + canvas.height / 2 - 80,
+  );
+  await page.getByText('Ready', {exact: true}).waitFor();
+  assert.equal(await page.locator('.sketch-canvas line.local').count(), 4);
+  assert.doesNotMatch(await text(page), /'length'|'fixed'/);
+  const before = await screenPoint(point(page, 3));
+  await page.getByRole('button', {name: 'Select', exact: true}).click();
+  await drag(page, point(page, 3), 40, -30);
+  await settleDrag(page);
+  await page.getByText('Ready', {exact: true}).waitFor();
+  const [a, b, c, d] = await Promise.all(
+    [1, 2, 3, 4].map(id => screenPoint(point(page, id))),
+  );
+  const near = (a, b) => assert.ok(Math.abs(a - b) < 1e-5);
+  near(a[1], b[1]);
+  near(b[0], c[0]);
+  near(c[1], d[1]);
+  near(d[0], a[0]);
+  assert.ok(c[0] - before[0] > 20 && before[1] - c[1] > 15);
+});
+
+test('rectangle validation and cancellation preserve source, while snapped upstream corners stay named', async t => {
+  const page = await open(
+    t,
+    `import {sketch} from '@code3d/core';
+const base = sketch([['point',1,[0,0]]]);
+const child = base.derive([]);`,
+  );
+  await page.getByRole('button', {name: 'Rectangle', exact: true}).click();
+  await point(page, 1, 'upstream').click();
+  await field(page, 'Width').fill('0');
+  await field(page, 'Height').fill('20');
+  await page.keyboard.press('Enter');
+  assert.match(
+    await page.locator('.drawing-input-error').innerText(),
+    /greater than zero/,
+  );
+  assert.match(await text(page), /derive\(\[\]\)/);
+  await page.keyboard.press('Escape');
+  assert.equal(await drawingTitle(page), 'First corner');
+  await point(page, 1, 'upstream').click();
+  await field(page, 'Width').fill('30');
+  await page.keyboard.press('Tab');
+  await page.keyboard.type('20');
+  await page.keyboard.press('Enter');
+  await page.getByText('Ready', {exact: true}).waitFor();
+  assert.match(await text(page), /base\.point\(1\)/);
+  assert.equal(await page.locator('.sketch-canvas circle.local').count(), 3);
+  assert.equal(await page.locator('.sketch-canvas line.local').count(), 4);
+  assert.equal(await point(page, 1, 'upstream').count(), 1);
+  const complete = await text(page);
+  await page.getByRole('button', {name: 'Select', exact: true}).click();
+  await drag(page, point(page, 1, 'upstream'), 30, 20);
+  assert.equal(await text(page), complete);
+});
+
 test('deleting a constrained line removes only its constraints and undo restores them together', async t => {
   const page = await open(t, constrainedLine);
   const a = await point(page, 1).boundingBox(),
@@ -655,4 +793,136 @@ test('deleting a constrained line removes only its constraints and undo restores
   await page.locator('.sketch-canvas line.local').waitFor({state: 'attached'});
   assert.match(await text(page), /'horizontal',\s*3/);
   assert.match(await text(page), /'length',\s*\[3,\s*40\]/);
+});
+
+test('center rectangle numeric sizes are full side lengths and its center undoes atomically', async t => {
+  const page = await open(t, emptySketch);
+  await page
+    .getByRole('button', {name: 'Center rectangle', exact: true})
+    .click();
+  assert.equal(await drawingTitle(page), 'Center');
+  await field(page, 'X').fill('5');
+  await page.keyboard.press('Tab');
+  await page.keyboard.type('-3');
+  await page.keyboard.press('Enter');
+  assert.equal(await drawingTitle(page), 'Corner');
+  await page.keyboard.type('40');
+  await page.keyboard.press('Tab');
+  await page.keyboard.type('20');
+  assert.equal(await activeDimension(page), 'height');
+  assert.equal(await page.locator('.drawing-overlay line.draft').count(), 4);
+  await page.keyboard.press('Enter');
+  await waitForSource(page, /'midpoint',\s*\[1,\s*2,\s*4\]/);
+  await page.getByText('Ready', {exact: true}).waitFor();
+  assert.equal(await page.locator('.sketch-canvas circle.local').count(), 5);
+  assert.equal(await page.locator('.sketch-canvas line.local').count(), 4);
+  assert.match(await text(page), /'point',\s*1,\s*\[5,\s*-3\]/);
+  assert.match(await text(page), /'length',\s*\[6,\s*40\]/);
+  assert.match(await text(page), /'length',\s*\[7,\s*20\]/);
+  const [m, a, b, c] = await Promise.all(
+    [1, 2, 3, 4].map(id => screenPoint(point(page, id))),
+  );
+  assert.ok(Math.abs(Math.abs(b[0] - a[0]) - 240) < 1e-5);
+  assert.ok(Math.abs(Math.abs(c[1] - b[1]) - 120) < 1e-5);
+  m.forEach((v, axis) =>
+    assert.ok(Math.abs(v - (a[axis] + c[axis]) / 2) < 1e-5),
+  );
+  assert.equal(await drawingTitle(page), 'Center');
+  await page.keyboard.press('Control+z');
+  await point(page, 1).waitFor({state: 'detached'});
+  await waitForSource(page, /sketch\(\[\]\)/);
+  assert.equal(await page.locator('.sketch-canvas .local').count(), 0);
+  await page.keyboard.press('Control+Shift+z');
+  await point(page, 1).waitFor();
+  assert.equal(await page.locator('.sketch-canvas circle.local').count(), 5);
+});
+
+test('center rectangle corners resize symmetrically through preview, recompilation and undo', async t => {
+  const page = await open(t, emptySketch);
+  await page
+    .getByRole('button', {name: 'Center rectangle', exact: true})
+    .click();
+  const canvas = await page.locator('.sketch-canvas').boundingBox();
+  await page.mouse.click(
+    canvas.x + canvas.width / 2,
+    canvas.y + canvas.height / 2,
+  );
+  await page.mouse.click(
+    canvas.x + canvas.width / 2 + 120,
+    canvas.y + canvas.height / 2 - 90,
+  );
+  await waitForSource(page, /'midpoint'/);
+  await page.getByText('Ready', {exact: true}).waitFor();
+  const before = await text(page);
+  const center = await screenPoint(point(page, 1));
+  const corner = await screenPoint(point(page, 4));
+  await page.getByRole('button', {name: 'Select', exact: true}).click();
+  await drag(page, point(page, 4), 45, -30);
+  await settleDrag(page);
+  await page.getByText('Ready', {exact: true}).waitFor();
+  const [m, a, b, c, d] = await Promise.all(
+    [1, 2, 3, 4, 5].map(id => screenPoint(point(page, id))),
+  );
+  assert.deepEqual(m, center);
+  assert.ok(c[0] - corner[0] > 30 && corner[1] - c[1] > 20);
+  const near = (a, b) => assert.ok(Math.abs(a - b) < 1e-5);
+  m.forEach((v, axis) => {
+    near(v, (a[axis] + c[axis]) / 2);
+    near(v, (b[axis] + d[axis]) / 2);
+  });
+  near(a[1], b[1]);
+  near(b[0], c[0]);
+  near(c[1], d[1]);
+  near(d[0], a[0]);
+  assert.notEqual(await text(page), before);
+  assert.doesNotMatch(await text(page), /'fixed'|'length'/);
+  await page.keyboard.press('Control+z');
+  await page.getByText('Ready', {exact: true}).waitFor();
+  assert.deepEqual(await screenPoint(point(page, 4)), corner);
+});
+
+test('center rectangles preserve named upstream centers and remove midpoint constraints with deleted corners', async t => {
+  const page = await open(
+    t,
+    `import {sketch} from '@code3d/core';
+const base = sketch([['point',1,[0,0]]]);
+const child = base.derive([]);`,
+  );
+  await page
+    .getByRole('button', {name: 'Center rectangle', exact: true})
+    .click();
+  await point(page, 1, 'upstream').click();
+  await field(page, 'Width').fill('-');
+  await page.keyboard.press('Enter');
+  assert.match(
+    await page.locator('.drawing-input-error').innerText(),
+    /finite/,
+  );
+  await page.keyboard.press('Escape');
+  assert.equal(await drawingTitle(page), 'Center');
+  await point(page, 1, 'upstream').click();
+  await field(page, 'Width').fill('40');
+  await page.keyboard.press('Tab');
+  await page.keyboard.type('30');
+  await page.keyboard.press('Enter');
+  await waitForSource(page, /'midpoint',\s*\[base\.point\(1\),\s*1,\s*3\]/);
+  await page.getByText('Ready', {exact: true}).waitFor();
+  // The initial single upstream point is zoomed in; numeric creation may extend
+  // beyond that view. Fit the completed geometry before picking its corners.
+  await page.getByRole('button', {name: 'Fit', exact: true}).click();
+  assert.equal(await page.locator('.sketch-canvas circle.local').count(), 4);
+  const center = await screenPoint(point(page, 1, 'upstream'));
+  await page.getByRole('button', {name: 'Select', exact: true}).click();
+  await drag(page, point(page, 1, 'upstream'), 30, 20);
+  assert.deepEqual(await screenPoint(point(page, 1, 'upstream')), center);
+  await point(page, 1).click();
+  await page.keyboard.press('Delete');
+  await page.getByText('Ready', {exact: true}).waitFor();
+  assert.doesNotMatch(await text(page), /'midpoint'/);
+  assert.equal(await page.locator('.sketch-canvas circle.local').count(), 3);
+  assert.equal(await page.locator('.sketch-canvas line.local').count(), 2);
+  await page.keyboard.press('Control+z');
+  await waitForSource(page, /'midpoint'/);
+  await point(page, 1).waitFor();
+  assert.equal(await page.locator('.sketch-canvas line.local').count(), 4);
 });

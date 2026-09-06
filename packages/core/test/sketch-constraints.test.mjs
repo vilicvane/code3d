@@ -469,6 +469,16 @@ test('repeated successes and failures release native systems, vectors and geomet
           }),
         SketchConstraintError,
       );
+      snapshot(
+        sketch(
+          [
+            ['point', 1, [0, 0]],
+            ['point', 2, [-20, -15]],
+            ['point', 3, [20, 15]],
+          ],
+          {constraints: [['midpoint', [1, 2, 3]]]},
+        ),
+      );
     }
   };
   run(100);
@@ -477,4 +487,127 @@ test('repeated successes and failures release native systems, vectors and geomet
   run(2000);
   assert.equal(native.HEAPU8.buffer.byteLength, size);
   assert.equal(native.count_emval_handles(), handles);
+});
+
+test('midpoints solve both coordinates without a line entity across scales', () => {
+  for (const scale of [1e-6, 1, 1e6]) {
+    const value = snapshot(
+      sketch(
+        [
+          ['point', 1, [100 * scale, -200 * scale]],
+          ['point', 2, [110 * scale, -200 * scale]],
+          ['point', 3, [180 * scale, -180 * scale]],
+        ],
+        {
+          constraints: [
+            ['fixed', 2],
+            ['fixed', 3],
+            ['midpoint', [1, 2, 3]],
+          ],
+        },
+      ),
+    );
+    close(position(value, 1)[0] / scale, 145);
+    close(position(value, 1)[1] / scale, -190);
+    assert.equal(value.degreesOfFreedom, 0);
+    assert.equal(value.entities.length, 3);
+    assert.deepEqual(value.redundant, []);
+  }
+});
+
+test('already satisfied free midpoints preserve their source seed through repeated normal solves', () => {
+  let data = [
+    ['point', 1, [7, -2]],
+    ['point', 2, [-13, -17]],
+    ['point', 3, [27, 13]],
+  ];
+  const original = data.map(e => e[2]);
+  for (let i = 0; i < 20; i++) {
+    const value = snapshot(
+      sketch(data, {constraints: [['midpoint', [1, 2, 3]]]}),
+    );
+    assert.equal(value.degreesOfFreedom, 4);
+    data = data.map(([kind, id]) => [kind, id, position(value, id)]);
+    data.forEach((e, i) =>
+      e[2].forEach((v, axis) => close(v, original[i][axis])),
+    );
+  }
+});
+
+test('midpoints remain linear at coincident coordinates and repeated references', () => {
+  const points = [1, 2, 3].map(id => ['point', id, [0, 0]]);
+  for (const [refs, dof] of [
+    [[1, 2, 3], 4],
+    [[1, 2, 2], 4],
+    [[1, 1, 2], 4],
+    [[1, 1, 1], 6],
+  ]) {
+    const value = snapshot(sketch(points, {constraints: [['midpoint', refs]]}));
+    assert.equal(value.degreesOfFreedom, dof);
+    for (const id of [1, 2, 3]) assert.deepEqual(position(value, id), [0, 0]);
+  }
+});
+
+test('midpoints resolve named upstream endpoints and retain immutable point references', () => {
+  const base = sketch([
+    ['point', 1, [0, 2]],
+    ['point', 2, [40, 18]],
+  ]);
+  const constraints = [['midpoint', [1, base.point(1), base.point(2)]]];
+  const child = base.derive([['point', 1, [3, 4]]], {constraints});
+  const id = s => (s === base ? 'base' : 'child');
+  const result = snapshotSketch(child, id);
+  close(position(result, 1)[0], 20);
+  close(position(result, 1)[1], 10);
+  assert.equal(result.degreesOfFreedom, 0);
+  assert.deepEqual(result.constraints[0], [
+    'midpoint',
+    [
+      {layer: 'child', id: 1},
+      {layer: 'base', id: 1},
+      {layer: 'base', id: 2},
+    ],
+  ]);
+  assert.equal(child.point(1).sketch, child);
+  constraints[0][1][0] = 999;
+  assert.deepEqual(snapshotSketch(child, id), result);
+  assert.deepEqual(position(snapshot(base), 1), [0, 2]);
+});
+
+test('midpoint references, arity and genuine conflicts are diagnosed', () => {
+  const points = [
+    ['point', 1, [0, 0]],
+    ['point', 2, [10, 0]],
+    ['point', 3, [30, 0]],
+  ];
+  assert.throws(
+    () => sketch(points, {constraints: [['midpoint', [1, 2]]]}),
+    /three points/,
+  );
+  assert.throws(
+    () => sketch(points, {constraints: [['midpoint', [1, 2, 9]]]}),
+    /local or upstream point/,
+  );
+  const unrelated = sketch([['point', 1, [0, 0]]]);
+  assert.throws(
+    () =>
+      sketch(points, {constraints: [['midpoint', [1, 2, unrelated.point(1)]]]}),
+    /local or upstream point/,
+  );
+  assert.throws(
+    () =>
+      sketch(points, {
+        constraints: [
+          ['fixed', 1],
+          ['fixed', 2],
+          ['fixed', 3],
+          ['midpoint', [1, 2, 3]],
+        ],
+      }),
+    error => {
+      assert.ok(error instanceof SketchConstraintError);
+      assert.ok(error.constraints.includes(3));
+      return true;
+    },
+  );
 });

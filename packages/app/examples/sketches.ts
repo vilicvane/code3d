@@ -37,3 +37,60 @@ export const sketch2 = sketch1.derive(
     ],
   },
 );
+
+// Rectangle creates the same ordinary points, lines and direction constraints.
+// Entered Width/Height become length constraints; blank dimensions remain free.
+// Here only width is constrained: select rectangle and drag point 3 to resize height.
+export const rectangle = sketch(
+  [
+    ['point', 1, [0, 0]],
+    ['point', 2, [30, 0]],
+    ['point', 3, [30, 20]],
+    ['point', 4, [0, 20]],
+    ['line', 5, [1, 2]],
+    ['line', 6, [2, 3]],
+    ['line', 7, [3, 4]],
+    ['line', 8, [4, 1]],
+  ],
+  {
+    constraints: [
+      ['horizontal', 5],
+      ['vertical', 6],
+      ['horizontal', 7],
+      ['vertical', 8],
+      ['length', [5, width]],
+    ],
+  },
+);
+
+// Center rectangle retains a normal center point (1), referenceable downstream.
+// Width is fixed; in this fresh sketch, drag a corner to resize height around it.
+export const centeredRectangle = sketch(
+  [
+    ['point', 1, [0, 0]],
+    ['point', 2, [-15, -10]],
+    ['point', 3, [15, -10]],
+    ['point', 4, [15, 10]],
+    ['point', 5, [-15, 10]],
+    ['line', 6, [2, 3]],
+    ['line', 7, [3, 4]],
+    ['line', 8, [4, 5]],
+    ['line', 9, [5, 2]],
+  ],
+  {
+    constraints: [
+      ['horizontal', 6],
+      ['vertical', 7],
+      ['horizontal', 8],
+      ['vertical', 9],
+      ['midpoint', [1, 2, 4]],
+      ['length', [6, width]],
+    ],
+  },
+);
+
+// The center remains a locked upstream reference when editing this derived sketch.
+export const centeredDetail = centeredRectangle.derive([
+  ['point', 1, [0, 30]],
+  ['line', 2, [centeredRectangle.point(1), 1]],
+]);

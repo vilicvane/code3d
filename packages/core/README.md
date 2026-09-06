@@ -66,13 +66,15 @@ meaning whether computed from an expression or written as literals. They may
 move during solving unless constrained. `fixed` locks one point at its supplied
 coordinates; `horizontal` / `vertical` target one local line. `length` / `angle`
 take `[lineId, value]` (angles in degrees); `x` / `y` take `[pointRef, value]`, and
-`coincident` takes `[pointRef, pointRef]`. A point reference may name locked upstream
+`coincident` takes `[pointRef, pointRef]`. `midpoint` takes `[midpointRef, startRef, endRef]`
+and places the first point halfway between the other two, with no line entity required.
+A point reference may name locked upstream
 geometry. Lines must have nonzero length; length constraints must be positive.
 PlaneGCS solves each layer without modifying upstream values. The snapshot
 reports degrees of freedom and redundant constraint indices. Conflicts are
 located at their source tuples when inline source is available.
 
-In Studio, select a sketch expression or variable to open its 2D editor. Draw
+In the App, select a sketch expression or variable to open its 2D editor. Draw
 continuous lines, drag literal-coordinate points, and delete local entities.
 Endpoints are created or reused by Line; there is no standalone Point tool.
 Type X/Y for the start, then length/angle for each segment. Tab switches fields
@@ -92,10 +94,24 @@ the lock off before committing creates no direction constraint; resetting the
 next segment does not remove existing constraints. Ordinary automatic snapping
 does not create constraints. Numeric fields keep native text undo/redo, whose
 grouping belongs to the browser; canvas undo edits source.
+Rectangle uses two opposite corners. Enter Width/Height or let the pointer set
+them; positive dimensions retain their magnitude while the pointer chooses the
+quadrant. It creates ordinary points and lines with horizontal/vertical constraints,
+so later edits preserve right angles. Entered sizes constrain adjacent sides.
+Snapped corners reuse existing point references, including named upstream points.
+The entire rectangle is one source transaction and undo step. Escape cancels its
+draft; a successful rectangle starts a new draft. No rectangle entity is added
+to the author format. Center rectangle chooses a center and corner instead;
+Width/Height are still full side lengths. It retains an ordinary referenceable
+center point, allocated before new corners, and adds one midpoint constraint
+between it and opposite corners. A derived sketch can reference that center
+with `base.point(id)`. Both rectangle modes share inputs, snapping and undo.
 Dragging previews a soft solver target and writes every changed editable point
 in one transaction. Hard constraints remain satisfied. With no locked point,
 a gesture temporarily anchors the first non-dragged point; this does not add a
-source constraint or reduce the reported model DOF. Unconstrained movement needs
+source constraint or reduce the reported model DOF. This also applies to center
+rectangles; dragging their center does not imply a whole-rectangle translation.
+Unconstrained movement needs
 no native kernel. During a drag, the editor uses the AST to lock each expression
 coordinate to its evaluated author value: `[width, 0]` locks X but allows Y to move.
 These numeric locks apply to all local points, not just the dragged point, and do

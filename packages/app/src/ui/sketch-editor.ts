@@ -8,6 +8,8 @@ import {
   Magnet,
   Minus,
   MousePointer2,
+  RectangleHorizontal,
+  Focus,
   Trash2,
   type IconNode,
 } from 'lucide';
@@ -17,7 +19,8 @@ import type {
   SketchPointData,
   SketchEditableCoordinates,
 } from '../model/sketch-drag';
-import {SketchLineDrawing} from '../tools/sketch-drawing';
+import {SketchLineDrawing, type SketchDrawing} from '../tools/sketch-drawing';
+import {SketchRectangleDrawing} from '../tools/sketch-rectangle-drawing';
 import {
   endpointPosition,
   sameSketchPoint as same,
@@ -28,6 +31,12 @@ import {
 } from '../tools/sketch-snap';
 import {DrawingInputs} from './drawing-inputs';
 import {createIcon} from './icon';
+
+const drawingTools = [
+  ['Line', Minus, () => new SketchLineDrawing()],
+  ['Rectangle', RectangleHorizontal, () => new SketchRectangleDrawing()],
+  ['Center rectangle', Focus, () => new SketchRectangleDrawing('center')],
+] as const;
 
 export type SketchEditorView = Readonly<{
   id: string;
@@ -65,7 +74,7 @@ export class SketchEditor {
   private readonly usedShapes = new Set<string>();
   private readonly buttons = new Map<string, HTMLButtonElement>();
   private readonly overlay = svgElement('g');
-  private readonly draftLine = svgElement('line');
+  private readonly draftLines: SVGLineElement[] = [];
   private readonly draftMarker = svgElement('circle');
   private readonly snapLabel = svgElement('text');
   private readonly snapText = document.createTextNode('');
@@ -77,7 +86,7 @@ export class SketchEditor {
   private readonly abort = new AbortController();
   private readonly resize: ResizeObserver;
   private view?: SketchEditorView;
-  private drawing?: SketchLineDrawing;
+  private drawing?: SketchDrawing;
   private snapping = true;
   private bypassSnap = false;
   private center: SketchPosition = [0, 0];
@@ -87,7 +96,7 @@ export class SketchEditor {
   private space = false;
 
   private get mode() {
-    return this.drawing ? 'Line' : 'Select';
+    return this.drawing?.name ?? 'Select';
   }
 
   constructor(
@@ -109,13 +118,13 @@ export class SketchEditor {
     const title = document.createElement('strong');
     title.textContent = 'Sketch';
     toolbar.append(title);
-    for (const [mode, icon] of [
-      ['Select', MousePointer2],
-      ['Line', Minus],
+    for (const [mode, icon, create] of [
+      ['Select', MousePointer2, () => undefined],
+      ...drawingTools,
     ] as const)
       this.button(toolbar, mode, icon, () => {
         this.cancel();
-        this.drawing = mode === 'Select' ? undefined : new SketchLineDrawing();
+        this.drawing = create();
         this.svg.focus();
         this.draw();
       });
@@ -198,7 +207,7 @@ export class SketchEditor {
     stage.append(this.svg, this.drawingInputs.root);
     this.overlay.classList.add('drawing-overlay');
     this.snapLabel.append(this.snapText);
-    this.overlay.append(this.draftLine, this.draftMarker, this.snapLabel);
+    this.overlay.append(this.draftMarker, this.snapLabel);
     this.svg.append(this.grid, this.lines, this.vertices, this.overlay);
     this.status.append(this.statusText);
     this.root.append(toolbar, stage, this.status);
@@ -271,6 +280,7 @@ export class SketchEditor {
       const axis = event.key.toLowerCase();
       if (
         this.drawing.start &&
+        this.drawing.toggleAxis &&
         !event.altKey &&
         (axis === 'x' || axis === 'y')
       ) {
@@ -700,14 +710,15 @@ export class SketchEditor {
       }
     this.drawDraft();
     for (const [name, button] of this.buttons) {
-      if (name === 'Select' || name === 'Line')
+      const drawingTool = drawingTools.some(([tool]) => tool === name);
+      if (name === 'Select' || drawingTool)
         button.setAttribute('aria-pressed', String(name === this.mode));
       if (name === 'Snap')
         button.setAttribute('aria-pressed', String(this.snapping));
       button.disabled =
         name === 'Delete'
           ? !!this.view.readOnlyReason || this.selection?.layer !== this.view.id
-          : name === 'Line' && !!this.view.readOnlyReason;
+          : drawingTool && !!this.view.readOnlyReason;
     }
     const selected = this.selection;
     const status =
@@ -719,10 +730,8 @@ export class SketchEditor {
             points.some(p => same(p, selected)) &&
             this.expressionLock(selected.id)
           ? this.expressionLock(selected.id)!
-          : this.mode === 'Line'
-            ? this.drawing?.start
-              ? 'Next point · Enter length/angle or click · X/Y locks direction · Esc ends the chain'
-              : 'Start point · Enter X/Y or click'
+          : this.drawing
+            ? this.drawing.instructions
             : `${this.view.layers.at(-1)!.degreesOfFreedom} DOF · ${this.view.layers.at(-1)!.constraints.length} constraints · Drag points · Delete removes connected local lines`);
     if (this.statusText.data !== status) this.statusText.data = status;
   }
@@ -742,7 +751,7 @@ export class SketchEditor {
   private drawDraft(): void {
     if (!this.drawing || !this.view || this.root.hidden) {
       this.overlay.style.display = 'none';
-      this.draftLine.classList.remove('draft');
+      for (const line of this.draftLines) line.classList.remove('draft');
       this.snapLabel.classList.remove('snap-label');
       this.drawingInputs.hide();
       return;
@@ -753,23 +762,29 @@ export class SketchEditor {
       ? `${this.drawing.axis.toUpperCase()} locked`
       : undefined;
     this.drawingInputs.show(
-      this.drawing.start ? (lock ?? 'Next point') : 'Start point',
+      this.drawing.title,
       this.drawing.dimensions,
       this.drawing.measurements(position),
     );
     this.overlay.style.display = position.every(Number.isFinite) ? '' : 'none';
-    this.draftLine.style.display = this.drawing.start ? '' : 'none';
-    this.draftLine.classList.toggle('draft', !!this.drawing.start);
-    const [x, y] = this.screen(position);
-    if (this.drawing.start) {
-      const [startX, startY] = this.screen(
-        endpointPosition(this.drawing.start),
-      );
-      this.draftLine.setAttribute('x1', String(startX));
-      this.draftLine.setAttribute('y1', String(startY));
-      this.draftLine.setAttribute('x2', String(x));
-      this.draftLine.setAttribute('y2', String(y));
+    const segments = this.drawing.segments(position);
+    while (this.draftLines.length < segments.length) {
+      const line = svgElement('line');
+      this.overlay.prepend(line);
+      this.draftLines.push(line);
     }
+    for (const [index, line] of this.draftLines.entries()) {
+      const segment = segments[index];
+      line.style.display = segment ? '' : 'none';
+      line.classList.toggle('draft', !!segment);
+      if (!segment) continue;
+      const [a, b] = segment.map(p => this.screen(p));
+      line.setAttribute('x1', String(a[0]));
+      line.setAttribute('y1', String(a[1]));
+      line.setAttribute('x2', String(b[0]));
+      line.setAttribute('y2', String(b[1]));
+    }
+    const [x, y] = this.screen(position);
     this.draftMarker.setAttribute('cx', String(x));
     this.draftMarker.setAttribute('cy', String(y));
     this.draftMarker.setAttribute('r', hint ? '7' : '4');

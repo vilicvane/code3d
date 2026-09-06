@@ -30,7 +30,7 @@ implementation context and historical outcomes, not a competing work queue.
   snapping, cancellation and one atomic source transaction per segment.
   `sketch(entries, {constraints})` separates current geometry from hard
   conditions, without persistent constraint IDs. Fixed point, coincident,
-  horizontal/vertical, length, angle and point X/Y constraints use PlaneGCS;
+  horizontal/vertical, length, angle, midpoint and point X/Y constraints use PlaneGCS;
   assemblies retain OndselSolver. Explicit drawing dimensions and the final
   active X/Y lock become constraints when geometry is committed; toggling off
   emits no direction constraint. Ordinary automatic snapping stays temporary.
@@ -52,6 +52,19 @@ implementation context and historical outcomes, not a competing work queue.
   Numeric fields retain native browser text history; SVG nodes retain entity
   identities across redraws. PlaneGCS 1.2.0 is a pinned, unmodified dependency;
   native systems and vectors are released after every solve.
+  The two-corner Rectangle tool shares drawing inputs, snapping and source
+  transactions with Line. It emits ordinary points and lines with four
+  horizontal/vertical constraints; entered width/height constrain adjacent
+  sides, not both pairs of equal sides. The whole rectangle is one undo step.
+  Snapped corner references remain local or named upstream references. Center
+  rectangle shares the same implementation with a referenceable ordinary center
+  point, allocated before new corners, and one `midpoint` relationship to opposite
+  corners. Its dimensions are full side lengths. The generic midpoint tuple is
+  `['midpoint', [midpoint, start, end]]`, with no line entity required; two native
+  linear difference equations per axis share a temporary parameter and one
+  diagnostic tag. It works at coincident coordinates without changing already
+  satisfied geometry. Both modes retain the common gesture anchor rule; dragging
+  the center does not implicitly mean translating the entire rectangle.
   Circles/arcs, trimming, regions and B-Rep generation remain later slices.
   See [research and priorities](plans/sketch-editor.md) and
   [#23](https://github.com/vilicvane/code3d/issues/23); curve and trimming formats

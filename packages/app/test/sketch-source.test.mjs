@@ -273,6 +273,48 @@ test('geometry and constraints append in one source edit without replacing exist
   }
 });
 
+test('midpoint constraints retain three local or named upstream references in one transaction', () => {
+  const host = setup("[['point', 1, [0,0]], ['point', 2, [20,0]]]");
+  assert.equal(
+    host.edit({
+      kind: 'append',
+      entries: [['point', 3, [10, 0]]],
+      constraints: [
+        [
+          'midpoint',
+          [
+            {layer: 'local', id: 3},
+            {layer: 'local', id: 1},
+            {layer: 'base', id: 2},
+          ],
+        ],
+      ],
+    }).status,
+    'committed',
+  );
+  assert.match(host.source(), /'midpoint', \[3, 1, sketch1\.point\(2\)\]/);
+  assert.equal(host.undo.length, 1);
+  const before = host.source();
+  assert.equal(
+    host.edit({
+      kind: 'append',
+      entries: [],
+      constraints: [
+        [
+          'midpoint',
+          [
+            {layer: 'local', id: 3},
+            {layer: 'local', id: 1},
+            {layer: 'unknown', id: 2},
+          ],
+        ],
+      ],
+    }).status,
+    'conflict',
+  );
+  assert.equal(host.source(), before);
+});
+
 test('solved multi-point movement is atomic and does not rewrite dimension expressions', () => {
   const source =
     "[['point', 1, [0,0]], ['point', 2, [40,0]], ['line', 3, [1,2]]], {constraints: [['length', [3, width]], ['horizontal', 3]]}";

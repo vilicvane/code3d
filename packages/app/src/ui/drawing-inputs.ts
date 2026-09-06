@@ -29,7 +29,7 @@ export class DrawingInputs {
     this.error.append(this.errorText);
     this.root.append(this.title, this.fields);
     for (const [label, icon, action] of [
-      ['Apply point', Check, apply],
+      ['Apply drawing step', Check, apply],
       ['Cancel drawing', X, cancel],
     ] as const) {
       const button = document.createElement('button');

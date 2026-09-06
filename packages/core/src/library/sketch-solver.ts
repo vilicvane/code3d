@@ -5,6 +5,7 @@ import type {SketchPosition} from './sketch.js';
 export type SketchSolveConstraint =
   | Readonly<{kind: 'fixed'; point: number; position: SketchPosition}>
   | Readonly<{kind: 'x' | 'y'; point: number; value: number}>
+  | Readonly<{kind: 'midpoint'; points: readonly [number, number, number]}>
   | Readonly<{
       kind: 'horizontal' | 'vertical' | 'coincident';
       points: readonly [number, number];
@@ -146,6 +147,34 @@ export function solveSketchProblem(
           constraint.value,
           tag,
         );
+      } else if (constraint.kind === 'midpoint') {
+        const [m, a, b] = constraint.points;
+        // M - A = B - M, independently on each axis. Shared free difference
+        // parameters keep these equations linear, even when A and B coincide.
+        // Native point symmetry uses a line/bisector and is singular there.
+        for (const axis of [0, 1]) {
+          const difference = gcs.push_p_param(
+            (points[m].position[axis] - points[a].position[axis]) / scale,
+            false,
+          );
+          // PlaneGCS difference is second - first, not first - second.
+          gcs.add_constraint_difference(
+            indices[a][axis],
+            indices[m][axis],
+            difference,
+            tag,
+            true,
+            1,
+          );
+          gcs.add_constraint_difference(
+            indices[m][axis],
+            indices[b][axis],
+            difference,
+            tag,
+            true,
+            1,
+          );
+        }
       } else if ('points' in constraint) {
         const [a, b] = constraint.points.map(i => nativePoints[i]);
         switch (constraint.kind) {
@@ -248,6 +277,14 @@ function residual(
       return (
         Math.abs(positions[c.point][c.kind === 'x' ? 0 : 1] - c.value) / scale
       );
+    case 'midpoint': {
+      const [m, a, b] = c.points.map(i => positions[i]);
+      return Math.hypot(
+        ...m.map(
+          (v, axis) => ((v - a[axis]) / scale + (v - b[axis]) / scale) / 2,
+        ),
+      );
+    }
     default: {
       const [a, b] = c.points.map(i => positions[i]);
       const dx = (b[0] - a[0]) / scale,

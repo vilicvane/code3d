@@ -271,6 +271,7 @@ export class SketchEditResolver implements ToolIntentResolver {
                 content = String(data);
                 break;
               case 'coincident':
+              case 'midpoint':
                 content = `[${data.map(point).join(', ')}]`;
                 break;
               case 'x':

@@ -27,6 +27,10 @@ export type SketchConstraint<P = number | SketchPoint> =
   | readonly [kind: 'horizontal' | 'vertical', line: number]
   | readonly [kind: 'coincident', points: readonly [P, P]]
   | readonly [
+      kind: 'midpoint',
+      points: readonly [midpoint: P, start: P, end: P],
+    ]
+  | readonly [
       kind: 'length' | 'angle',
       data: readonly [line: number, value: number],
     ]
@@ -137,6 +141,14 @@ class SketchValue implements Sketch {
         if (kind === 'coincident') {
           data.forEach(pointRef);
           return [kind, [data[0], data[1]]];
+        }
+        if (kind === 'midpoint') {
+          if (data.length !== 3)
+            throw new Error(
+              'Sketch midpoint constraint requires three points.',
+            );
+          data.forEach(pointRef);
+          return [kind, [data[0], data[1], data[2]]];
         }
         if (
           kind === 'x' ||
@@ -292,6 +304,8 @@ function snapshotConstraints(
         return [kind, point(data)];
       case 'coincident':
         return [kind, [point(data[0]), point(data[1])]];
+      case 'midpoint':
+        return [kind, [point(data[0]), point(data[1]), point(data[2])]];
       case 'x':
       case 'y':
         return [kind, [point(data[0]), data[1]]];
@@ -349,6 +363,15 @@ export function solveSketchSnapshot(
           return {kind, points: linePoints(data)};
         case 'coincident':
           return {kind, points: [pointIndex(data[0]), pointIndex(data[1])]};
+        case 'midpoint':
+          return {
+            kind,
+            points: [
+              pointIndex(data[0]),
+              pointIndex(data[1]),
+              pointIndex(data[2]),
+            ],
+          };
         case 'length':
         case 'angle':
           return {kind, points: linePoints(data[0]), value: data[1]};
