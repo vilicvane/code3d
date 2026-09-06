@@ -202,7 +202,7 @@ implementation context and historical outcomes, not a competing work queue.
   its peer inputs as dimmed context that can switch input focus. Mouse hover
   over source code does not change the viewport. In a layered source scene,
   focus solids are slightly translucent while context remains strongly dimmed,
-  so overlaps stay legible; a single focus solid remains opaque.
+  so overlaps stay legible; a single focus solid keeps its own material opacity.
 - Topology reference values retain their selected IDs through bindings and
   collections. Their preview emphasizes the returned vertices, edges, or
   surfaces with the owning geometry dimmed as spatial context; topology

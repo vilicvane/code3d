@@ -8,7 +8,7 @@ import {TopologyIdSet} from '@code3d/core/tooling';
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
 import {readFile} from 'node:fs/promises';
-import {renderSamples} from '../render-samples/catalog.ts';
+import {renderSamples, sourceContextSets} from '../render-samples/catalog.ts';
 import {sourceTokenOffset} from '../render-samples/source-focus.ts';
 import {createAppTestServer} from './vite-test-server.ts';
 import {createTestProjectCompiler} from './project-test-files.ts';
@@ -1377,17 +1377,25 @@ for (const sample of renderSamples) {
     assert.ok(file, `Gallery source must be bundled in App: ${rootPath}`);
     const module = await compileProject({files: [file]}, rootPath);
     assert.equal(module.diagnostic, undefined);
-    const offset = sourceTokenOffset(file.source, sample.focus);
-    assert.ok(
-      module.sourceTargets.some(
-        target =>
-          target.sourceRef.file === rootPath &&
-          target.sourceRef.start <= offset &&
-          target.sourceRef.end > offset &&
-          target.evaluations.some(evaluation => evaluation.nodeIds.length > 0),
-      ),
-      'The gallery image must focus a renderable source context',
-    );
+    const focuses = [
+      sample.focus,
+      ...(sourceContextSets[sample.id] ?? []).map(context => context.focus),
+    ];
+    for (const focus of focuses) {
+      const offset = sourceTokenOffset(file.source, focus);
+      assert.ok(
+        module.sourceTargets.some(
+          target =>
+            target.sourceRef.file === rootPath &&
+            target.sourceRef.start <= offset &&
+            target.sourceRef.end > offset &&
+            target.evaluations.some(
+              evaluation => evaluation.nodeIds.length > 0,
+            ),
+        ),
+        `The gallery image must focus a renderable source context: ${focus.token}`,
+      );
+    }
   });
 }
 

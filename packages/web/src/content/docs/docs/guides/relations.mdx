@@ -6,7 +6,7 @@ description: Position geometry with bound contacts, geometric alignment, and exp
 import ModelExample from '../../../../components/ModelExample.astro';
 import SourceCode from '../../../../components/SourceCode.astro';
 import ArrowIcon from '../../../../components/ArrowIcon.astro';
-import {appUrl} from '../../../../lib/site';
+import {appUrl, sitePath} from '../../../../lib/site';
 import source from '../../../../../../app/examples/combined-constraints.ts?raw';
 
 A relation describes how one part sits against another. It is attached to a
@@ -83,13 +83,15 @@ and before explicit rotations. Zero adds no extra position condition. It does
 not pin centers as an on offset does. Source and target can be written in either
 order; `relate` still owns the movable self.
 
-Inspect `geometric-alignment.ts` in the App examples. Relation curves keep their
-actual shape and serve as the arrow shaft. Only the arrowhead is added at
-the directed endpoint (or seam for a closed curve), following its tangent.
+<ModelExample id="geometric-alignment" />
+
+Relation curves keep their actual shape and serve as the arrow shaft. Only
+the arrowhead is added at the directed endpoint (or seam for a closed curve),
+following its tangent.
 `reverse()` uses the opposite endpoint and tangent. Axes use one positive
-arrow. Source and target arrowheads share a fixed 10-by-6 CSS-pixel size;
-the target uses 40% opacity. Passive curve highlights are 1px wide; interactive topology
-selection guides are 2px wide. Unsupported geometry,
+arrow while inspecting a relation; passive axis references have arrows at
+both ends.
+Arrowheads keep the same screen size as you zoom. Unsupported geometry,
 geometric incompatibility, and numerical nonconvergence have separate errors.
 
 For several relations involving align on one model, edit the numeric parameters
@@ -155,6 +157,45 @@ current callback are combined when inspecting the completed `relate` result.
 If an intermediate stage conflicts with inherited constraints, the App reports
 that stage's preview error and keeps the valid final model available.
 
+<p>
+  <a href={sitePath('examples/relation-preview/')}>
+    Step through contact, target, offset, and rotation in the relation preview →
+  </a>
+</p>
+
+## Read the relation highlights
+
+The viewport distinguishes three levels: the reference you are inspecting,
+the other reference in the same constraint, and the remaining related objects.
+The current pair uses the same yellow-green marker color. The selected side
+keeps each marker's normal opacity; the other side uses 70% of that opacity.
+Other related geometry stays dimmed in gray.
+
+On `self.on(...)` or `self.align(...)`, and through the following `offset`,
+`pivot`, `pivotVertex`, `around`, and `rotate` calls, self is selected. Inside
+the parentheses of `on(...)` or `align(...)`, the target reference is selected.
+In the reverse spelling `base.on(self.up).offset(...)`, both the target
+argument and the offset therefore focus self. Selecting an explicit reference
+such as the receiver `base` focuses that reference. Switching sides changes
+emphasis without changing marker size or color.
+
+Model surfaces remain translucent so you can see overlapping references.
+Their opacity is capped for the current role instead of multiplied by the
+material's existing opacity. A model that is already more transparent keeps
+its paint; the marker groups still show which side is selected.
+
+A bound face adds translucent fill in the same color as its bounding box.
+If that box is already visible, the face does not add another corner outline.
+When no box is visible, it supplies its own corner brackets. The source of
+`on` shows its complete measured bounding box, since contact is calculated
+from that whole extent. For a selected vertex, edge, or surface, this box
+encloses only the selected geometry. Bounds describe finite extents rather
+than selecting a real topology face.
+
+Face arrows, axis arrowheads, point markers, and spatial controls keep their
+screen size through zoom and viewport resizing. Axis shafts and curved
+highlights still follow their actual geometry.
+
 ## Group or fuse
 
 Use `group([base, post])` for separate parts. Use `union([base, post])`
@@ -184,10 +225,7 @@ closing the panel. Use Undo after an edit has been committed. Numeric panel
 input has a different meaning when an expression appears as a placeholder:
 it [replaces the whole argument](../model-tools/#what-a-panel-can-edit).
 
-Selecting a bound shows a translucent green rectangle with green corner
-brackets, together with the automatically matched source boundary. These
-helpers describe finite extents; they do not select a topology face. Select
-`pivot` for point handles, `pivotVertex` for a vertex picker,
+Select `pivot` for point handles, `pivotVertex` for a vertex picker,
 `around` for its axis, or `rotate` for three rings or one axis ring.
 
 To change the standalone geometry and its origin, see

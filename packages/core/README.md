@@ -149,8 +149,10 @@ Core and App share the same solvers. Pure bound assemblies use exact linear
 translation equations; geometric align relations add joint rigid-pose solving
 without another WASM initialization.
 
-In the App, selecting a directional property shows the target rectangle and
-matched source boundary with translucent green fill and green corner brackets.
+In the App, selecting a directional property fills its bound face with the
+same translucent yellow-green as its bounding box, adding corner brackets
+only when that box is absent. The source of `on` shows the complete measured
+bounding box; a topology source limits it to the selected geometry.
 `pivot` has translation handles, `pivotVertex` uses
 self's vertex picker, `around` shows the referenced axis, and `rotate` has
 three angle rings or one axis ring. Source edits retain parameter provenance,
@@ -208,10 +210,20 @@ by geometric seeds and local numerical solving, without a uniqueness guarantee.
 In relation context, axes have one positive arrow and edges retain their actual
 curved highlight as the shaft, with only a tangent arrowhead at the directed
 endpoint (a stable seam for a closed edge). Source and target arrowheads share
-a fixed 10-by-6 CSS-pixel size, with the target at 40% opacity. Passive line
+a fixed 10-by-6 CSS-pixel size. Passive axes have arrows at both ends. Passive line
 decorations use 1px; interactive topology selection uses 2px. Surface normals
 retain their facing arrows.
 See [the alignment example](../app/examples/geometric-alignment.ts).
+
+Source inspection previews each relation call through that stage, before later
+offsets or rotations. The current pair shares one marker color: the inspected
+side keeps its base opacity and the other uses 70% of that opacity. Remaining
+related objects are dim gray. `on`/`align` and subsequent chain calls focus
+self; their target arguments focus the actual target reference, which is self
+in a reverse-written relation. Model opacity uses role-specific caps rather than
+multiplying existing paint opacity. See the
+[relation guide](../web/src/content/docs/docs/guides/relations.mdx) and
+[visualization conventions](../../.agents/skills/code3d-visualization/SKILL.md).
 
 When several relations include align on one model, use the numeric parameter
 panel or source to edit offsets and rotations. Each edit resolves the coupled
