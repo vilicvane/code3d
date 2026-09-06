@@ -9,7 +9,7 @@ provide exact overloads and inferred model interfaces.
 Types used by the authoring API are also exported, including generic constraints,
 named-element result types, and capability interfaces. Use `import type` from
 `@code3d/core` for types such as `ElementKind`, `ModelKind`, `TopologyKind`,
-`NamedElements`, and `ExposedElements`. Replicad builder types such as `Shape3D`
+`NamedElements`, `ExposedElements`, `Bound`, and `TopologyId`. Replicad builder types such as `Shape3D`
 are available from `@code3d/core/replicad` alongside `definePrimitive`.
 
 ## Solid primitives
@@ -75,7 +75,7 @@ shows which operations are supported by the value you hold.
 - `.shell(thickness, removedSurfaceIds?)`: hollow one connected solid. Positive
   thickness offsets inward; negative thickness offsets outward. Selected surfaces
   become openings; omission or `[]` creates an enclosed cavity. See
-  [shelling](../../guides/topology/#hollow-a-solid).
+  [making hollow parts](../../guides/shells/).
 - `.scaled(factor)`: uniformly scale a geometric model about local coordinate zero.
 - `.paint(color)`: return a recolored model; a group recursively overrides
   every descendant's color, including already-painted parts and nested groups.
@@ -167,6 +167,19 @@ collect edge IDs for an operation on that model. Plain named anchors such as
 
 IDs are model-local. See [topology selection](../../guides/topology/) for
 selection behavior and derived-model identity.
+
+`TopologyId` (also used by `VertexId`, `EdgeId`, and `SurfaceId`) is a
+positive integer or a flat numeric source path. A loft cap can be selected with
+`body.surface([1, 1])`; a mixed selection uses an outer list, such as
+`body.surfaces([1, [1, 1], [2, 1]])`. Each topology-changing operation prefixes
+one-to-one inherited IDs with its one-based input index; new or ambiguous
+elements receive numeric IDs in that result. Transforms preserve complete IDs.
+
+A surface can query its edges and vertices; an edge can query its vertices.
+These queries retain the source model's IDs and validate membership.
+`.center` is a transformed local bounding-box center; edges also provide
+`.start`, `.midpoint`, and `.end` at curve parameters 0, 0.5, and 1.
+Calculated points are anchors, not topology vertices.
 
 Model dimensions use a consistent coordinate scale. When
 [exporting](../../guides/exporting/#scale-and-orientation), choose how many

@@ -16,6 +16,10 @@ The function exposes `mountingFace`, `tipFace`, and `centerline`.
 Callers receive these as typed elements: they can place the pin on the plate,
 or attach a cap to its tip, without knowing how the pin was constructed.
 
+Here `mountingFace` and `tipFace` name the body's `down` and `up`
+directional bounds. Their type is `Bound`, and they describe finite extents.
+Use `surface(id)` when the interface needs a particular topology face.
+
 The exposed references are rebound into the returned model's frame. They
 describe its public interface rather than leaking the placement of an internal
 construction object.

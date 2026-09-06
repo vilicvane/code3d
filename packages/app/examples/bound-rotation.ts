@@ -9,4 +9,4 @@ const end = rectangle(40, 40).relate(self =>
 );
 
 export const sections = group([start, via, end], 'Loft sections');
-export default loft([start, via, end]);
+export default loft([start, via, end]).paint('#d8ff3e');

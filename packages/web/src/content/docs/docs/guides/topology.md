@@ -46,7 +46,8 @@ const enclosure = box(40, 24, 30).shell(1.5, [4]);
 const sealed = box(40, 24, 30).shell(1.5);
 ```
 
-For this box, S4 is its +Y face. Removing it makes an open enclosure. Place the
+For this box, S4 is its +Y face. Removing it makes an open enclosure. Follow the
+[hollow-part guide](../shells/) for the runnable example. Place the
 cursor inside `shell(...)` to adjust **Wall thickness** and toggle **Openings**
 on the input model while viewing the result. IDs belong to that input model.
 The picker retains removed faces so you can close an opening again.
@@ -77,6 +78,11 @@ After a fillet, an unambiguous original `E10` becomes `E[1,10]`. A later chamfer
 `rounded.chamfer(0.5, [[1, 10]])`. The outer array is the selection list;
 `[1, 10]` inside it is one edge ID. A subsequent operation prefixes the path
 again, such as `[1, 1, 10]`.
+
+In the [topology paths example](../../../examples/topology-paths/), inspect
+`inlet`, `outlet`, and `side` to compare inherited cap IDs with a new side
+face. The viewport labels paths as S[1,1] or E[1,10]; selections write the
+corresponding arrays into source.
 
 Only one-to-one descendants inherit a path. Deleted elements have no descendant;
 ambiguous splits and merges receive new numeric IDs. A middle loft section is

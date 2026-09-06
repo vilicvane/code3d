@@ -78,6 +78,7 @@ export default defineConfig({
             {slug: 'docs/guides/relations'},
             {slug: 'docs/guides/origins-and-rotation'},
             {slug: 'docs/guides/topology'},
+            {slug: 'docs/guides/shells'},
             {slug: 'docs/guides/reusable-models'},
             {slug: 'docs/guides/model-tools'},
             {slug: 'docs/guides/custom-primitives'},

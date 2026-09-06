@@ -304,6 +304,7 @@ Resolver 再生成带 source anchor 的编辑计划。当前 prototype 已具备
 以 owner 确定接受摆放的 self；反向书写时，offset 的源码数值仍按目标参考系定义，
 预览位移使用对应的反号。Bound 装饰直接使用运行时返回的有限矩形和 facing，
 不从网格猜测一个同向的真实拓扑面。关系快照同时给出自动匹配的源边界。
+辅助矩形使用半透明绿色填充和同色角框；目标与匹配源边界沿用同一视觉语义。
 
 完整 Constraint 和未完成的 pivot/axis 选择共用 ConstraintExpression trace。
 中间值保留原关系、self 和参数来源，但 relate 只接受完成的 Constraint。

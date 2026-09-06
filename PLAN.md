@@ -186,10 +186,10 @@ implementation context and historical outcomes, not a competing work queue.
 - Units remain UI metadata; no implicit runtime conversion occurs.
 - Runtime trace data may explain and locate values, but must not constrain which
   JavaScript/TypeScript construction patterns users can write.
-- Named point, line, and face elements retain complete local reference frames
-  while their kinds determine geometric degrees of freedom. A composition's
-  relations are solved jointly by the OndselSolver WASM backend. Groups retain
-  their children's local assembly and move as rigid bodies in outer groups.
+- Named references retain their geometry and local frames. Bound contacts
+  measure finite source geometry in the target direction and solve translation
+  conditions jointly; rotation is authored explicitly. Groups retain their
+  children's local assembly and move as rigid bodies in outer groups.
 - The editor caret resolves the exact source occurrence being inspected. A
   value site renders that value alone. A collection result places its members
   together using their resolved relations, including singleton collections;
@@ -750,7 +750,10 @@ The bounded kernel cache and the runtime/resource ownership boundaries are also
 implemented; #9 discusses additional needs at larger scales.
 
 The [solver experiment](plans/constraint-solver-wasm-evaluation.md) records the
-evidence preceding the integrated OndselSolver backend. The completed public API
+earlier OndselSolver investigation. The independent solver package remains,
+while current core/App bound positioning uses a linear translation solver and
+explicit rotations, as delivered in [#38](https://github.com/vilicvane/code3d/issues/38).
+The completed public API
 and interoperability audit is recorded in
 [plans/public-api-audit.md](plans/public-api-audit.md) and
 [#5](https://github.com/vilicvane/code3d/issues/5).
