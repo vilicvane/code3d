@@ -16,6 +16,7 @@ export class EditorSplitLayout {
   private width = 0;
   private minimumWidth = 0;
   private maximumWidth = 0;
+  private frameWidth = 0;
   private gesture?: ResizeGesture;
 
   constructor(
@@ -43,28 +44,31 @@ export class EditorSplitLayout {
   }
 
   private readonly render = (): void => {
-    if (getComputedStyle(this.separator).display === 'none') {
+    const stacked = getComputedStyle(this.separator).display === 'none';
+    if (stacked && this.gesture) {
       this.cancelResize();
       return;
     }
-    const explorerWidth = this.explorer.getBoundingClientRect().width;
-    const borderWidth = Number.parseFloat(
-      getComputedStyle(this.separator.parentElement!).borderRightWidth,
-    );
-    this.maximumWidth = Math.max(
-      0,
-      Math.floor(
-        this.workspace.clientWidth -
-          minimumPreviewWidth -
-          explorerWidth -
-          borderWidth,
-      ),
-    );
-    this.minimumWidth = Math.min(minimumCodeWidth, this.maximumWidth);
+    if (!stacked) {
+      this.frameWidth =
+        this.explorer.getBoundingClientRect().width +
+        Number.parseFloat(
+          getComputedStyle(this.separator.parentElement!).borderRightWidth,
+        );
+      this.maximumWidth = Math.max(
+        0,
+        Math.floor(
+          this.workspace.clientWidth - minimumPreviewWidth - this.frameWidth,
+        ),
+      );
+      this.minimumWidth = Math.min(minimumCodeWidth, this.maximumWidth);
+    }
+    // Keep the last side-by-side metrics while stacked, but always apply a
+    // cancelled width. A quick round trip may coalesce resize notifications.
     this.width = this.clampWidth(this.preferredWidth);
     this.workspace.style.setProperty(
       '--editor-pane-width',
-      `${this.width + explorerWidth + borderWidth}px`,
+      `${this.width + this.frameWidth}px`,
     );
     this.separator.setAttribute('aria-valuemin', String(this.minimumWidth));
     this.separator.setAttribute('aria-valuemax', String(this.maximumWidth));

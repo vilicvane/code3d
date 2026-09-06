@@ -456,7 +456,7 @@ export function createModelCompiler(
       const runtime = sourceExecutionRuntime(executionTrace);
       sketches.call(
         result,
-        `${id}:execution:${execution}`,
+        traceExecutionKey(id, execution),
         location,
         executionTrace.arguments.get(0),
         executionTrace.arguments.get(1),
@@ -1336,8 +1336,8 @@ export function createModelCompiler(
           'The current program did not produce a renderable ModelObject.',
         );
       }
-      if (diagnostic && fallbackObject) {
-        diagnostic = relateDiagnosticToFallback(diagnostic, fallbackObject);
+      if (diagnostic) {
+        diagnostic = relateDiagnostic(diagnostic, fallbackObject);
       }
 
       const snapshotModel = createModelSnapshotter();
@@ -1528,20 +1528,23 @@ export function createModelCompiler(
     return modelObjectRuntimeInfo(object).sourceRefs;
   }
 
-  function relateDiagnosticToFallback(
+  function relateDiagnostic(
     diagnostic: ModelDiagnostic,
-    fallback: ModelObject,
+    fallback: ModelObject | undefined,
   ): ModelDiagnostic {
     if (diagnostic.kind !== 'evaluation') return diagnostic;
-    const failureInputs = [...sourceExecutionTraces.values()]
-      .filter(execution => execution.failure === diagnostic)
-      .flatMap(execution => [
-        ...execution.inputs.flatMap(input => input.objects),
-        ...modelObjectsIn(execution.receiver),
-      ]);
-    if (failureInputs.length === 0) return diagnostic;
+    const failures = [...sourceExecutionTraces.values()].filter(
+      execution => execution.failure === diagnostic,
+    );
+    const failedEvaluationIds = failures.map(execution =>
+      traceExecutionKey(execution.siteId, execution.execution),
+    );
+    const failureInputs = failures.flatMap(execution => [
+      ...execution.inputs.flatMap(input => input.objects),
+      ...modelObjectsIn(execution.receiver),
+    ]);
     const fallbackNodeIds = new Set(
-      collectObjectGraph([fallback]).map(modelObjectNodeId),
+      collectObjectGraph(fallback ? [fallback] : []).map(modelObjectNodeId),
     );
     const relatedModelNodeIds = [
       ...new Set(
@@ -1550,9 +1553,11 @@ export function createModelCompiler(
           .filter(nodeId => fallbackNodeIds.has(nodeId)),
       ),
     ];
-    return relatedModelNodeIds.length > 0
-      ? {...diagnostic, relatedModelNodeIds}
-      : diagnostic;
+    return {
+      ...diagnostic,
+      ...(failedEvaluationIds.length ? {failedEvaluationIds} : {}),
+      ...(relatedModelNodeIds.length ? {relatedModelNodeIds} : {}),
+    };
   }
 
   function buildSourceTargets(

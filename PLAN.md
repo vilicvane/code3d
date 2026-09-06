@@ -88,6 +88,14 @@ implementation context and historical outcomes, not a competing work queue.
   Midpoint guides link the center to its two endpoints; upstream markers are
   distinct and drag-only locks are not presented as persistent constraints.
   Circles/arcs, curve trimming, regions and B-Rep generation remain later slices.
+  The sketch canvas fills the viewport with floating controls. Its top-right
+  icon toolbar groups editing, drawing and view controls, with native hover
+  labels and one keyboard Tab stop; narrow viewports place the whole toolbar
+  below the compilation status. Both viewport
+  status and error cards are scoped to the defining evaluations of the selected
+  sketch and its upstream layers, excluding sibling/downstream and 3D errors.
+  Failed recompilation retains the selected last-successful sketch read-only;
+  leaving its source selection clears it. Monaco still receives all diagnostics.
   See [research and priorities](plans/sketch-editor.md) and
   [#23](https://github.com/vilicvane/code3d/issues/23); curve formats
   remain unconfirmed.

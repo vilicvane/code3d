@@ -15,6 +15,7 @@ import type {
   ModelModule,
 } from './model/compiler';
 import {ModelDiagnosticError, type ModelDiagnostic} from './model/diagnostic';
+import {viewportDiagnostic} from './model/viewport-diagnostic';
 import {
   originDecoration,
   originSourceDecoration,
@@ -311,6 +312,8 @@ let persistenceQueue = Promise.resolve();
 let currentModule: ModelModule | null = null;
 let currentModuleSourceVersion: number | undefined;
 let modelStatus: 'ready' | 'error' = 'ready';
+let currentDiagnostic: ModelDiagnostic | undefined;
+let sourcePreviewDiagnostic: ModelDiagnostic | undefined;
 let compileTimer: number | undefined;
 let completionPreviewTimer: number | undefined;
 let runRevision = 0;
@@ -382,13 +385,10 @@ type ContextualToolState = {
 };
 
 const viewport = new ModelViewport(viewportHost, {
-  onSourcePreviewDiagnostic: diagnostic =>
-    renderViewportDiagnostic(
-      diagnostic ??
-        (currentModule?.diagnostic?.relatedModelNodeIds?.length
-          ? currentModule.diagnostic
-          : undefined),
-    ),
+  onSourcePreviewDiagnostic: diagnostic => {
+    sourcePreviewDiagnostic = diagnostic;
+    refreshViewportFeedback();
+  },
   onSelect: occurrence => {
     if (occurrence.view === 'model') {
       preferredEvaluationContextId = undefined;
@@ -489,6 +489,7 @@ const toolEngine = new ToolEngine({
 });
 const sketchEditor = new SketchEditorController(viewportHost, {
   solve: (layers, drag) => compiler.previewSketchDrag(layers, drag),
+  resolveSourceRef: ref => codeEditor.resolveSourceRef(ref),
   readSource: ref => {
     const current = codeEditor.resolveSourceRef(ref);
     return current && codeEditor.readSource(current);
@@ -551,6 +552,7 @@ codeEditor.onEditorActivation(cursor => {
 codeEditor.onActiveFile((path, reason) => {
   finishContextualTool();
   sketchEditor.hide();
+  refreshViewportFeedback();
   renderProjectNavigation();
   if (!applyingFileRoute) updateFileRoute(path, reason);
   preferredEvaluationContextId = undefined;
@@ -884,7 +886,7 @@ function deleteContextFile(): void {
 
 function showProjectIssue(error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
-  renderViewportDiagnostic();
+  refreshViewportFeedback();
   errorBar.textContent = message;
   errorBar.hidden = false;
 }
@@ -932,7 +934,11 @@ async function runModel(
       return;
     }
     codeEditor.setDesignArguments(nextModule.designArguments);
-    codeEditor.trackSourceRefs(toolSourceRefs(nextModule));
+    sketchEditor.retain(nextModule.diagnostic, codeEditor.cursorSource());
+    codeEditor.trackSourceRefs([
+      ...toolSourceRefs(nextModule),
+      ...sketchEditor.sourceRefs(),
+    ]);
     selectedDesignContextId = nextModule.activeDesignContextId;
     compilingDesignContextId = undefined;
     if (
@@ -989,8 +995,9 @@ async function runModel(
     if (diagnostic) {
       await presentModelDiagnostic(diagnostic, revision, sourceVersion);
     } else {
+      currentDiagnostic = undefined;
       codeEditor.setModelDiagnostic();
-      renderViewportDiagnostic();
+      refreshViewportFeedback();
       errorBar.textContent =
         error instanceof Error ? error.message : String(error);
       errorBar.hidden = false;
@@ -1004,10 +1011,8 @@ async function presentModelDiagnostic(
   sourceVersion: number,
 ): Promise<boolean> {
   codeEditor.setModelDiagnostic(diagnostic);
-  renderViewportDiagnostic(
-    viewport.sourceEvaluation()?.evaluation.constraintPreviewDiagnostic ??
-      (diagnostic?.relatedModelNodeIds?.length ? diagnostic : undefined),
-  );
+  currentDiagnostic = diagnostic;
+  refreshViewportFeedback();
   if (!diagnostic || diagnostic.sourceRef) {
     errorBar.hidden = true;
     return true;
@@ -1030,9 +1035,15 @@ async function presentModelDiagnostic(
   return true;
 }
 
-function renderViewportDiagnostic(diagnostic?: ModelDiagnostic): void {
+function refreshViewportFeedback(): void {
+  const diagnostic = viewportDiagnostic(
+    currentDiagnostic,
+    sourcePreviewDiagnostic,
+    sketchEditor.diagnosticScope,
+  );
   viewportDiagnosticStack.replaceChildren();
   viewportDiagnosticStack.hidden = !diagnostic;
+  if (viewportStatus.dataset.state !== 'busy') restoreModelStatus();
   if (!diagnostic) return;
 
   const item = document.createElement('section');
@@ -1376,21 +1387,30 @@ function renderCurrentPanels(): void {
 }
 
 function syncContextualTool(sourceTargetFocused = true): void {
-  if (!sourceTargetFocused) sketchEditor.hide();
-  else if (
+  const scope = viewport.sourceEvaluation();
+  if (
+    sourceTargetFocused &&
     currentModule &&
-    currentModuleSourceVersion === codeEditor.sourceVersion()
+    currentModuleSourceVersion === codeEditor.sourceVersion() &&
+    scope?.evaluation.sketchIds?.[0]
   ) {
     sketchEditor.show(
-      viewport.sourceEvaluation()?.evaluation.sketchIds?.[0],
+      scope.evaluation.sketchIds[0],
       currentModule.sketches,
+      scope.target.sourceRef,
     );
+  } else if (
+    (!sourceTargetFocused ||
+      currentModuleSourceVersion === codeEditor.sourceVersion()) &&
+    !sketchEditor.retain(currentDiagnostic, codeEditor.cursorSource())
+  ) {
+    sketchEditor.hide();
   }
+  refreshViewportFeedback();
   if (!sourceTargetFocused) {
     finishContextualTool();
     return;
   }
-  const scope = viewport.sourceEvaluation();
   const previous = contextualTool;
   const continuesPrevious =
     previous !== undefined &&
@@ -2502,9 +2522,19 @@ function setViewportStatus(
 }
 
 function restoreModelStatus(): void {
+  const sketch = sketchEditor.diagnosticScope;
+  const state = sketch
+    ? viewportDiagnostic(currentDiagnostic, sourcePreviewDiagnostic, sketch)
+      ? 'error'
+      : 'ready'
+    : modelStatus;
   setViewportStatus(
-    modelStatus,
-    modelStatus === 'ready' ? 'Ready' : 'Model error',
+    state,
+    state === 'error'
+      ? 'Model error'
+      : sketchEditor.isStale
+        ? 'Last valid sketch'
+        : 'Ready',
   );
 }
 

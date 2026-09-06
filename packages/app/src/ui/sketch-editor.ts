@@ -136,39 +136,7 @@ export class SketchEditor {
     this.root.className = 'sketch-editor';
     this.root.setAttribute('aria-label', 'Sketch editor');
     this.root.hidden = true;
-    const toolbar = document.createElement('header');
-    const title = document.createElement('strong');
-    title.textContent = 'Sketch';
-    toolbar.append(title);
-    for (const [mode, icon, create] of [
-      ['Select', MousePointer2, () => 'Select' as const],
-      ...drawingTools,
-      ['Trim', Scissors, () => 'Trim' as const],
-    ] as const)
-      this.button(toolbar, mode, icon, () => {
-        this.cancel();
-        this.tool = create();
-        this.selection = undefined;
-        this.svg.focus();
-        this.draw();
-      });
-    this.buttons.get('Trim')!.title =
-      'Trim · Click segments or standalone points · Esc exits';
-    this.button(toolbar, 'Fit', Maximize, () => this.fit());
-    this.button(toolbar, 'Snap', Magnet, () => {
-      this.snapping = !this.snapping;
-      this.svg.focus();
-      this.draw();
-    });
-    this.buttons.get('Snap')!.title =
-      'Snap to points, origin, grid and directions · Hold Alt to bypass';
-    this.button(toolbar, 'Constraints', Shapes, () => {
-      this.showConstraints = !this.showConstraints;
-      this.svg.focus();
-      this.draw();
-    });
-    this.buttons.get('Constraints')!.title =
-      'Show constraints · Hover or focus a marker to highlight related geometry';
+    const toolbar = this.createToolbar();
     this.svg.classList.add('sketch-canvas');
     this.svg.setAttribute('tabindex', '0');
     this.svg.setAttribute('aria-label', 'Sketch drawing');
@@ -405,6 +373,100 @@ export class SketchEditor {
     if (error) this.drawingInputs.report(error);
   }
 
+  private createToolbar(): HTMLElement {
+    const toolbar = document.createElement('header');
+    toolbar.className = 'sketch-toolbar';
+    toolbar.setAttribute('role', 'toolbar');
+    toolbar.setAttribute('aria-label', 'Sketch tools');
+    const group = (label: string) => {
+      const element = document.createElement('div');
+      element.className = 'sketch-tool-group';
+      element.setAttribute('role', 'group');
+      element.setAttribute('aria-label', label);
+      toolbar.append(element);
+      return element;
+    };
+    const editing = group('Edit');
+    const drawing = group('Draw');
+    const viewing = group('View');
+    viewing.classList.add('sketch-view-options');
+    for (const [mode, icon, create] of [
+      ['Select', MousePointer2, () => 'Select' as const],
+      ['Trim', Scissors, () => 'Trim' as const],
+      ...drawingTools,
+    ] as const)
+      this.button(
+        mode === 'Select' || mode === 'Trim' ? editing : drawing,
+        mode,
+        icon,
+        () => {
+          this.cancel();
+          this.tool = create();
+          this.selection = undefined;
+          this.svg.focus();
+          this.draw();
+        },
+      );
+    this.buttons.get('Select')!.title =
+      'Select · Drag points or select a segment';
+    this.buttons.get('Line')!.title =
+      'Line · Continuous segments · Esc ends the chain';
+    this.buttons.get('Rectangle')!.title = 'Rectangle · Opposite corners';
+    this.buttons.get('Center rectangle')!.title =
+      'Center rectangle · Center and corner';
+    this.buttons.get('Trim')!.title =
+      'Trim · Click segments or standalone points · Esc exits';
+    this.button(viewing, 'Fit', Maximize, () => this.fit());
+    this.buttons.get('Fit')!.title = 'Fit · Show the whole sketch';
+    this.button(viewing, 'Snap', Magnet, () => {
+      this.snapping = !this.snapping;
+      this.svg.focus();
+      this.draw();
+    });
+    this.buttons.get('Snap')!.title =
+      'Snap to points, origin, grid and directions · Hold Alt to bypass';
+    this.button(viewing, 'Constraints', Shapes, () => {
+      this.showConstraints = !this.showConstraints;
+      this.svg.focus();
+      this.draw();
+    });
+    this.buttons.get('Constraints')!.title =
+      'Show constraints · Hover or focus a marker to highlight related geometry';
+    toolbar.addEventListener('focusin', event => {
+      for (const button of this.buttons.values())
+        button.tabIndex = button === event.target ? 0 : -1;
+    });
+    toolbar.addEventListener('keydown', event => {
+      if (event.altKey || event.ctrlKey || event.metaKey || event.isComposing)
+        return;
+      const buttons = [...this.buttons.values()].filter(
+        button => !button.disabled,
+      );
+      const index = buttons.findIndex(button => button === event.target);
+      if (index < 0) return;
+      let next: number;
+      switch (event.key) {
+        case 'ArrowLeft':
+          next = (index + buttons.length - 1) % buttons.length;
+          break;
+        case 'ArrowRight':
+          next = (index + 1) % buttons.length;
+          break;
+        case 'Home':
+          next = 0;
+          break;
+        case 'End':
+          next = buttons.length - 1;
+          break;
+        default:
+          return;
+      }
+      event.preventDefault();
+      buttons[next].focus();
+    });
+    return toolbar;
+  }
+
   private button(
     toolbar: HTMLElement,
     label: string,
@@ -413,7 +475,10 @@ export class SketchEditor {
   ): void {
     const button = document.createElement('button');
     button.type = 'button';
-    button.append(createIcon(icon), label);
+    button.setAttribute('aria-label', label);
+    button.title = label;
+    button.tabIndex = this.buttons.size ? -1 : 0;
+    button.append(createIcon(icon));
     button.addEventListener('click', action);
     this.buttons.set(label, button);
     toolbar.append(button);
@@ -838,6 +903,14 @@ export class SketchEditor {
         button.setAttribute('aria-pressed', String(this.showConstraints));
       button.disabled =
         (name === 'Trim' || drawingTool) && !!this.view.readOnlyReason;
+    }
+    if (
+      ![...this.buttons.values()].some(
+        button => !button.disabled && button.tabIndex === 0,
+      )
+    ) {
+      for (const [name, button] of this.buttons)
+        button.tabIndex = name === this.mode ? 0 : -1;
     }
     const selected = this.selection;
     const status =

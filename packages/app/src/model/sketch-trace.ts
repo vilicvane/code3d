@@ -5,6 +5,7 @@ import type {SketchPointData} from './sketch-drag';
 
 export type CompiledSketch = SketchSnapshot &
   Readonly<{
+    evaluationId?: string;
     definitionRef?: SourceRef;
     references: Readonly<Record<string, string>>;
     data: readonly SketchPointData[];
@@ -12,6 +13,7 @@ export type CompiledSketch = SketchSnapshot &
 
 type SketchTrace = {
   id: string;
+  evaluationId?: string;
   definitionRef?: SourceRef;
   references: Record<string, string>;
 };
@@ -142,6 +144,7 @@ export class SketchTraceRegistry {
       ts.isArrayLiteralExpression(call.arguments[0]);
     const trace: SketchTrace = {
       id: `sketch:${id}`,
+      evaluationId: id,
       definitionRef: editable
         ? {...nodeRef(call.arguments[0]), end: call.arguments.at(-1)!.end}
         : undefined,
@@ -215,6 +218,7 @@ export class SketchTraceRegistry {
             this.identity(sketch),
           ),
           definitionRef: trace.definitionRef,
+          evaluationId: trace.evaluationId,
           references: trace.references,
           data: this.runtime
             .sketchDefinition(value)

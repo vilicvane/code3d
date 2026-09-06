@@ -96,6 +96,56 @@ async function startDrag(page: Page, delta: number) {
   await page.mouse.move(x + delta, y, {steps: 5});
 }
 
+test('hidden cancellation restores the saved width before any workspace resize notification', async t => {
+  const page = await fixture(t, {controlledResize: true});
+  const separator = page.locator('#workspace-resizer');
+  const savedWidth = (await width(page)) + 16;
+  await separator.focus();
+  await page.keyboard.press('ArrowRight');
+  await waitWidth(page, savedWidth);
+  const savedStyle = await page.evaluate(() =>
+    document
+      .querySelector<HTMLElement>('#workspace')!
+      .style.getPropertyValue('--editor-pane-width'),
+  );
+  await startDrag(page, 80);
+  await waitWidth(page, savedWidth + 80);
+  await page.evaluate(() => {
+    window.pauseLayoutObserver = true;
+  });
+  await page.setViewportSize({width: 680, height: 800});
+  await page.mouse.up();
+  await page.waitForFunction(
+    () => !document.querySelector('#workspace')!.hasAttribute('data-resizing'),
+  );
+  // Cancellation must update the CSS even while stacked layout ignores it.
+  assert.equal(
+    await page.evaluate(() =>
+      document
+        .querySelector<HTMLElement>('#workspace')!
+        .style.getPropertyValue('--editor-pane-width'),
+    ),
+    savedStyle,
+  );
+  assert.equal(
+    await separator.getAttribute('aria-valuenow'),
+    String(savedWidth),
+  );
+  await page.setViewportSize({width: 1440, height: 900});
+  await waitWidth(page, savedWidth);
+  assert.equal(
+    await page.evaluate(() => localStorage.getItem('code3d:editor-width')),
+    String(savedWidth),
+  );
+  await page.evaluate(() => {
+    window.pauseLayoutObserver = false;
+    for (const callback of window.pendingLayoutObservers.splice(0)) callback();
+  });
+  await page.reload();
+  await page.getByText('Ready', {exact: true}).waitFor();
+  await waitWidth(page, savedWidth);
+});
+
 test(
   'dragged code width survives window resizing, explorer toggles and refresh',
   {timeout: 120_000},

@@ -13,6 +13,7 @@ import {
   type SketchPointData,
 } from '../model/sketch-drag';
 import type {CompiledSketch} from '../model/sketch-trace';
+import type {ModelDiagnostic} from '../model/diagnostic';
 import {SketchEditor} from '../ui/sketch-editor';
 import {
   analyzeSketchSource,
@@ -25,6 +26,8 @@ export class SketchEditorController {
   private readonly editor: SketchEditor;
   private active?: CompiledSketch;
   private layers: readonly SketchSnapshot[] = [];
+  private sourceLayers: readonly CompiledSketch[] = [];
+  private selectionRef?: SourceRef;
   private data: readonly SketchPointData[] = [];
   private stale = false;
   private revision = 0;
@@ -33,6 +36,7 @@ export class SketchEditorController {
     container: HTMLElement,
     private readonly host: {
       readSource(ref: SourceRef): string | undefined;
+      resolveSourceRef(ref: SourceRef): SourceRef | undefined;
       commit(intent: SketchEditIntent): boolean;
       solve(
         layers: readonly SketchSnapshot[],
@@ -50,25 +54,78 @@ export class SketchEditorController {
   show(
     id: string | undefined,
     sketches: ReadonlyMap<string, CompiledSketch>,
+    selectionRef: SourceRef | undefined,
   ): void {
     this.revision++;
     this.active = id ? sketches.get(id) : undefined;
     this.data = this.active?.data ?? [];
     this.stale = false;
-    const layers: SketchSnapshot[] = [];
+    this.selectionRef = selectionRef;
+    const layers: CompiledSketch[] = [];
     for (
-      let layer: SketchSnapshot | undefined = this.active;
+      let layer: CompiledSketch | undefined = this.active;
       layer;
       layer = layer.base ? sketches.get(layer.base) : undefined
     )
       layers.unshift(layer);
     this.layers = layers;
+    this.sourceLayers = layers;
     this.render();
+  }
+
+  get diagnosticScope(): readonly CompiledSketch[] | undefined {
+    return this.active ? this.sourceLayers : undefined;
+  }
+
+  get isStale(): boolean {
+    return !!this.active && this.stale;
+  }
+
+  sourceRefs(): SourceRef[] {
+    return this.active
+      ? [
+          ...(this.selectionRef ? [this.selectionRef] : []),
+          ...this.sourceLayers.flatMap(layer =>
+            layer.definitionRef ? [layer.definitionRef] : [],
+          ),
+        ]
+      : [];
+  }
+
+  /** Keep an explicitly selected last-good view when evaluation cannot reach it. */
+  retain(
+    diagnostic: ModelDiagnostic | undefined,
+    cursor: {file: string; offset: number} | undefined,
+  ): boolean {
+    const selection =
+      this.selectionRef && this.host.resolveSourceRef(this.selectionRef);
+    if (
+      !this.active ||
+      !diagnostic ||
+      !cursor ||
+      !selection ||
+      selection.file !== cursor.file ||
+      cursor.offset < selection.start ||
+      cursor.offset > selection.end
+    )
+      return false;
+    this.selectionRef = selection;
+    this.sourceLayers = this.sourceLayers.map(layer => ({
+      ...layer,
+      definitionRef:
+        layer.definitionRef && this.host.resolveSourceRef(layer.definitionRef),
+    }));
+    this.active = this.sourceLayers.at(-1);
+    this.stale = true;
+    this.render();
+    return true;
   }
 
   hide(): void {
     this.revision++;
     this.active = undefined;
+    this.sourceLayers = [];
+    this.selectionRef = undefined;
     this.editor.hide();
   }
   invalidate(): void {
@@ -126,7 +183,7 @@ export class SketchEditorController {
       editable: parsed?.editable ?? new Map(),
       referenceable: new Set(Object.keys(this.active.references)),
       readOnlyReason: this.stale
-        ? 'Waiting for the updated sketch'
+        ? 'Last successful sketch · Editing unavailable until code compiles'
         : source === undefined
           ? 'This sketch has no editable inline tuple array.'
           : parsed?.reason,

@@ -10,6 +10,8 @@ export type ModelDiagnostic = Readonly<{
   sourceRef?: SourceRef;
   /** Nodes shared by the failed evaluation inputs and rendered fallback graph. */
   relatedModelNodeIds?: readonly string[];
+  /** Failed call executions, including calls that did not produce a new value. */
+  failedEvaluationIds?: readonly string[];
 }>;
 
 export class ModelDiagnosticError extends Error {
