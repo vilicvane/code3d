@@ -2,6 +2,8 @@
 import {getCollection, type CollectionEntry} from 'astro:content';
 import Site from '../../layouts/Site.astro';
 import ModelExample from '../../components/ModelExample.astro';
+import SourceDemo from '../../components/SourceDemo.astro';
+import {sourceContextSets} from '../../../../app/render-samples/catalog';
 import ArrowIcon from '../../components/ArrowIcon.astro';
 import {sitePath, appUrl} from '../../lib/site';
 export async function getStaticPaths() {
@@ -23,7 +25,13 @@ const {example} = Astro.props;
     <h1>{example.data.title}</h1>
     <p class="lead">{example.data.description}</p>
     <div class="tags">{example.data.tags.map(tag => <span>{tag}</span>)}</div>
-    <ModelExample id={example.id} />
+    {
+      sourceContextSets[example.id] ? (
+        <SourceDemo id={example.id} />
+      ) : (
+        <ModelExample id={example.id} />
+      )
+    }
     <div class="detail-next">
       <h2>Make it yours.</h2><p>
         Open the example, move the cursor through its source, and try changing a

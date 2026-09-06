@@ -20,11 +20,18 @@ test(
       route.fulfill({contentType: 'text/html', body: '<main></main>'}),
     );
     await page.goto(url);
-    const samples = await page.evaluate(async () => {
-      const {measureDirectionHeads} =
+    const {samples, corners} = await page.evaluate(async () => {
+      const {measureDirectionHeads, measureCornerFrames} =
         await import('/test/browser/screen-space-arrow-fixture.ts');
-      return measureDirectionHeads();
+      return {samples: measureDirectionHeads(), corners: measureCornerFrames()};
     });
+    for (const {runs, expected} of corners) {
+      assert.equal(runs.length, 2, JSON.stringify({runs, expected}));
+      assert.ok(
+        runs.every(length => Math.abs(length - expected) <= 2),
+        JSON.stringify({runs, expected}),
+      );
+    }
     for (const sample of samples) {
       assert.ok(Math.abs(sample.width - 6) <= 1, JSON.stringify(sample));
       assert.ok(Math.abs(sample.height - 10) <= 1, JSON.stringify(sample));

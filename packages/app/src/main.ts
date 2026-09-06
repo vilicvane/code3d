@@ -16,10 +16,7 @@ import type {
 } from './model/compiler';
 import {ModelDiagnosticError, type ModelDiagnostic} from './model/diagnostic';
 import {viewportDiagnostic} from './model/viewport-diagnostic';
-import {
-  originDecoration,
-  originSourceDecoration,
-} from './model/origin-decorations';
+import {originDecoration} from './model/origin-decorations';
 import {spatialIntent} from './tools/model-spatial-tool';
 import {SketchEditorController} from './tools/sketch-editor-controller';
 import {bundledExamples} from './project/bundled-examples';
@@ -50,13 +47,9 @@ import {
   type TopologyKind,
 } from '@code3d/core/tooling';
 import {topologyIdExpression} from './tools/topology-expression';
-import {
-  booleanOperationSourceDecoration,
-  edgeModificationSourceDecoration,
-} from './model/operation-decorations';
+import {sourceDecorationProviders} from './model/source-decorations';
 import {
   elementSourceDecoration,
-  relationSourceDecoration,
   namedElementDecorations,
 } from './model/element-decorations';
 import type {
@@ -405,13 +398,7 @@ const viewport = new ModelViewport(viewportHost, {
   },
   onPositionTool: handlePositionTool,
   onTopologySelection: handleTopologySelection,
-  sourceDecorationProviders: [
-    booleanOperationSourceDecoration,
-    edgeModificationSourceDecoration,
-    elementSourceDecoration,
-    relationSourceDecoration,
-    originSourceDecoration,
-  ],
+  sourceDecorationProviders,
 });
 const imageExportDialog = new ImageExportDialog(viewportHost, {
   capture: (width, height) => viewport.captureImage(width, height),

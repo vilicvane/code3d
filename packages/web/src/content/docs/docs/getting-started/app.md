@@ -7,6 +7,19 @@ The App places the project files, TypeScript editor, and viewport beside one
 another. The active file is the execution root. Open any source file to preview
 the models it produces.
 
+## Arrange your workspace
+
+Use **Hide file explorer** beside the open-file tabs to give the editor more
+space; **Show file explorer** brings the project tree back. Click a folder to
+expand or collapse it, then select a file to open it. Open files remain
+available in the tabs while the explorer is hidden.
+
+Drag the divider between the editor and viewport to resize the code pane.
+The App remembers your preferred width in this browser and fits it to the
+available window space. You can also focus **Resize code editor** with `Tab`
+and use `←` or `→`; hold `Shift` for larger steps, or use `Home` and `End` for
+the minimum and maximum widths. Press `Esc` during a drag to cancel it.
+
 ## Move through a model
 
 - Place the editor cursor in an expression to inspect its runtime object.
@@ -43,7 +56,10 @@ evaluated before it failed.
 
 Inside `relate(part => ...)`, the parameter declaration and uses of `part`
 show the related model alongside the other participants. Named elements and
-topology references share that context. See
+topology references share that context. Each call in the relation chain shows
+its own stage, before later offsets or rotations. The current pair's markers
+distinguish the selected side from its counterpart and the dimmed surrounding
+objects. See
 [inspecting relation scope](../../guides/relations/#inspect-the-right-scope).
 
 Inspection does not automatically add a parameter panel or a drag handle.

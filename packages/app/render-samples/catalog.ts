@@ -68,6 +68,26 @@ export const renderSamples = [
     tags: ['relate', 'on', 'pivot', 'rotate', 'loft'],
   },
   {
+    id: 'geometric-alignment',
+    title: 'Let the geometry line up',
+    description:
+      'Align axes, supporting circles, points, and planes, then choose offsets and rotations explicitly.',
+    category: 'Geometric relations',
+    file: 'geometric-alignment.ts',
+    focus: {context: 'export default group(', token: 'group'},
+    tags: ['align', 'flip', 'offset', 'pivot', 'rotate'],
+  },
+  {
+    id: 'relation-preview',
+    title: 'Read a relation, one step at a time',
+    description:
+      'Move between contact, target, offset, and rotation to follow the current pose and its two reference elements.',
+    category: 'Source and viewport',
+    file: 'website/relation-preview.ts',
+    focus: {context: '.rotate(0, 0, 25)', token: 'rotate'},
+    tags: ['relate', 'on', 'offset', 'pivot', 'inspect'],
+  },
+  {
     id: 'topology-paths',
     title: 'Follow a face to its source',
     description:
@@ -90,15 +110,17 @@ export const renderSamples = [
   tags: readonly string[];
 }[];
 
-export const firstModelContexts = [
+const firstModelContexts = [
   {
     id: 'base',
+    image: 'first-model-base',
     label: 'Inspect the base',
     description: 'Focus on the rounded plate and its connection to the source.',
     focus: {context: 'group([base, post])', token: 'base'},
   },
   {
     id: 'post',
+    image: 'first-model-post',
     label: 'Inspect the post',
     description:
       'Focus on the cylinder, with surrounding geometry for context.',
@@ -106,9 +128,58 @@ export const firstModelContexts = [
   },
   {
     id: 'model',
+    image: 'first-model',
     label: 'See them together',
     description:
       'Select the group to see both parts with their relation resolved.',
     focus: {context: 'group([base, post])', token: 'group'},
   },
 ] as const;
+
+export type SourceContext = Readonly<{
+  id: string;
+  image: string;
+  label: string;
+  description: string;
+  focus: SourceToken;
+}>;
+
+export const sourceContextSets: Readonly<
+  Record<string, readonly SourceContext[]>
+> = {
+  'first-model': firstModelContexts,
+  'relation-preview': [
+    {
+      id: 'contact',
+      image: 'relation-preview-contact',
+      label: 'Contact',
+      description:
+        'At on, the part touches the base. Its complete source box is highlighted; the later offset and rotation have not happened yet.',
+      focus: {context: '.on(base.up) // Touch the base.', token: 'on'},
+    },
+    {
+      id: 'target',
+      image: 'relation-preview-target',
+      label: 'Target',
+      description:
+        'Inside on, base.up becomes the bright reference. The part is still visible, and the neighboring object stays in the background.',
+      focus: {context: '.on(base.up) // Touch the base.', token: 'base.up'},
+    },
+    {
+      id: 'offset',
+      image: 'relation-preview-offset',
+      label: 'Offset',
+      description:
+        'At offset, the part moves in the target frame. Focus returns to self, while the later rotation remains outside this preview.',
+      focus: {context: '.offset(6, 0, 0)', token: 'offset'},
+    },
+    {
+      id: 'rotation',
+      image: 'relation-preview',
+      label: 'Rotation',
+      description:
+        'At rotate, the part turns about its chosen pivot. The box, contact reference, and controls share this stage’s pose.',
+      focus: {context: '.rotate(0, 0, 25)', token: 'rotate'},
+    },
+  ],
+};

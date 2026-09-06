@@ -58,9 +58,23 @@ test('constraint prefixes keep their own offset, pivot and rotation after the ca
   chains.forEach((expression, index) => {
     const preview = previewOf(expression);
     const expected = original.relate(self => stages(self)[completed[index]]);
+    const expectedSnapshot = snapshot(expected);
     samePose(
       preview.object.compositionTransform,
-      snapshot(expected).compositionTransform,
+      expectedSnapshot.compositionTransform,
+    );
+    const actualConstraint = preview.object.constraints[0];
+    const expectedConstraint = expectedSnapshot.constraints[0];
+    assert.ok(
+      actualConstraint.kind === 'on' && expectedConstraint.kind === 'on',
+    );
+    near(
+      actualConstraint.sourceBounds.size,
+      expectedConstraint.sourceBounds.size,
+    );
+    samePose(
+      actualConstraint.sourceBounds.transform,
+      expectedConstraint.sourceBounds.transform,
     );
     assert.equal(preview.object.nodeId, final.nodeId);
     assert.equal(preview.object.constraints[0].source.nodeId, final.nodeId);

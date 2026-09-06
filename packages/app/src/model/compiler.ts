@@ -29,6 +29,7 @@ import {ProjectBuilder, type ProjectBundle} from '../project/project-builder';
 import {ModuleEvaluator, type ModuleExports} from './module-evaluator';
 import {code3dAnnotations} from './annotations';
 import {SketchTraceRegistry, type CompiledSketch} from './sketch-trace';
+import {evaluatedConstraint, focusedConstraintSide} from './constraint-context';
 import {designArgumentAnnotationSites} from './design-functions';
 import {
   isToolSelectionParameter,
@@ -84,6 +85,8 @@ export type SourceTargetEvaluation = Readonly<{
   runtime: RuntimeReach;
   toolExecutionOrder?: number;
   nodeIds: readonly string[];
+  /** Referenced values before relation participants expand the rendered context. */
+  valueNodeIds?: readonly string[];
   /** Models to emphasize while their relation peers remain visible. */
   focusNodeIds?: readonly string[];
   parameters?: readonly ParameterUsage[];
@@ -95,6 +98,8 @@ export type SourceTargetEvaluation = Readonly<{
   }>;
   constraintId?: string;
   constraintOwnerNodeId?: string;
+  /** Chain operations focus self; relation receiver/argument scopes identify a side. */
+  constraintFocus?: 'self' | 'source' | 'target';
   constraintSpatial?: ConstraintSpatialReference;
   constraintPreview?: ConstraintPreview['object'];
   constraintPreviewDiagnostic?: ModelDiagnostic;
@@ -390,6 +395,10 @@ export function createModelCompiler(
   const sourceElementTraces = new Map<string, SourceElementTrace>();
   const edgeSelectionSites = new Map<string, EdgeSelectionSite>();
   const toolCallSites = new Map<string, ToolCallSite>();
+  const relationCallSites = new Map<
+    string,
+    Readonly<{receiverRef: SourceRef; targetRef: SourceRef}>
+  >();
   const sourceExecutionTraces = new Map<string, SourceExecutionTrace>();
   const catalogTraces = new Map<string, CatalogTrace>();
   const parameterFrames: ParameterUsage[][] = [];
@@ -1230,6 +1239,7 @@ export function createModelCompiler(
     sourceElementTraces.clear();
     edgeSelectionSites.clear();
     toolCallSites.clear();
+    relationCallSites.clear();
     sourceExecutionTraces.clear();
     catalogTraces.clear();
     parameterFrames.length = 0;
@@ -1452,6 +1462,7 @@ export function createModelCompiler(
       sourceElementTraces.clear();
       edgeSelectionSites.clear();
       toolCallSites.clear();
+      relationCallSites.clear();
       sourceExecutionTraces.clear();
       catalogTraces.clear();
       parameterFrames.length = 0;
@@ -1848,9 +1859,10 @@ export function createModelCompiler(
           : [];
       },
     );
-    const constraintTargets = [...sourceConstraintTraces.values()].map(
+    const constraintTargets = [...sourceConstraintTraces.values()].flatMap(
       trace => {
         const toolSite = toolCallSites.get(trace.id);
+        const relationSite = relationCallSites.get(trace.id);
         const evaluations = trace.evaluations.flatMap<SourceTargetEvaluation>(
           evaluation => {
             const execution = sourceExecutionFor(
@@ -1903,6 +1915,7 @@ export function createModelCompiler(
                     modelObjectNodeId(evaluation.self ?? evaluation.source),
                   ],
                   constraintId: evaluation.constraintId,
+                  constraintFocus: 'self',
                   constraintOwnerNodeId: modelObjectNodeId(
                     evaluation.self ?? evaluation.source,
                   ),
@@ -1924,6 +1937,7 @@ export function createModelCompiler(
                       modelObjectNodeId(evaluation.self ?? evaluation.source),
                     ],
                     constraintId: evaluation.constraintId,
+                    constraintFocus: 'self',
                     constraintOwnerNodeId: modelObjectNodeId(
                       evaluation.self ?? evaluation.source,
                     ),
@@ -1940,10 +1954,11 @@ export function createModelCompiler(
             evaluation.operationId ? [evaluation.operationId] : [],
           ),
         );
-        return {
+        const target: SourceTarget = {
           id: `source:constraint:${trace.id}`,
           kind: 'constraint',
           sourceRef: toolSite?.sourceRef ?? trace.sourceRef,
+          receiverRef: relationSite?.receiverRef,
           functionId: designFunctionAt(trace.sourceRef, designArguments),
           evaluations,
           tool: sourceTool(toolSite),
@@ -1956,7 +1971,26 @@ export function createModelCompiler(
               ),
             )
             .map(target => target.id),
-        } satisfies SourceTarget;
+        };
+        if (!relationSite) return [target];
+        return [
+          target,
+          {
+            ...target,
+            id: `${target.id}:argument`,
+            sourceRef: relationSite.targetRef,
+            evaluations: evaluations.map(evaluation => {
+              const constraint = evaluatedConstraint(objects, evaluation);
+              return {
+                ...evaluation,
+                constraintFocus: 'target' as const,
+                focusNodeIds: constraint
+                  ? [constraint.target.nodeId]
+                  : evaluation.focusNodeIds,
+              };
+            }),
+          },
+        ];
       },
     );
 
@@ -1997,7 +2031,8 @@ export function createModelCompiler(
         constraint =>
           constraint.sourceRef.file === target.sourceRef.file &&
           (scopeRef
-            ? scopeRef.start <= constraint.sourceRef.start &&
+            ? constraint.evaluations[0]?.constraintFocus !== 'target' &&
+              scopeRef.start <= constraint.sourceRef.start &&
               constraint.sourceRef.end <= scopeRef.end
             : constraint.sourceRef.start <= target.sourceRef.start &&
               target.sourceRef.end <= constraint.sourceRef.end),
@@ -2013,9 +2048,10 @@ export function createModelCompiler(
                 candidate.contextId === evaluation.contextId &&
                 (candidate.toolExecutionOrder ?? candidate.runtime.order) >=
                   evaluation.runtime.order &&
-                focusNodeIds.every(nodeId =>
-                  candidate.nodeIds.includes(nodeId),
-                ),
+                (!scopeRef ||
+                  focusNodeIds.every(nodeId =>
+                    candidate.nodeIds.includes(nodeId),
+                  )),
             )
             .map(candidate => ({constraint, candidate})),
         );
@@ -2048,9 +2084,19 @@ export function createModelCompiler(
                 constraint.contextTargetIds.forEach(id =>
                   contextTargetIds.add(id),
                 );
-                return {
+                const constraintFocus = scopeRef
+                  ? 'self'
+                  : candidate.constraintFocus === 'target'
+                    ? 'target'
+                    : constraint.receiverRef &&
+                        constraint.receiverRef.start <=
+                          target.sourceRef.start &&
+                        target.sourceRef.end <= constraint.receiverRef.end
+                      ? 'source'
+                      : 'self';
+                const context = {
                   ...evaluation,
-                  focusNodeIds,
+                  valueNodeIds: evaluation.nodeIds,
                   runtime: candidate.runtime,
                   toolExecutionOrder:
                     evaluation.toolExecutionOrder ?? evaluation.runtime.order,
@@ -2059,9 +2105,26 @@ export function createModelCompiler(
                   operationInput: candidate.operationInput,
                   constraintId: candidate.constraintId,
                   constraintOwnerNodeId: candidate.constraintOwnerNodeId,
+                  constraintFocus,
+                  constraintSpatial: candidate.constraintSpatial,
                   constraintPreview: candidate.constraintPreview,
                   constraintPreviewDiagnostic:
                     candidate.constraintPreviewDiagnostic,
+                } satisfies SourceTargetEvaluation;
+                const relation = evaluatedConstraint(objects, context);
+                return {
+                  ...context,
+                  // An auxiliary reference (e.g. around(axis)) remains available
+                  // while the relation's self stays the primary model.
+                  nodeIds: [
+                    ...new Set([...candidate.nodeIds, ...evaluation.nodeIds]),
+                  ],
+                  focusNodeIds: relation
+                    ? [
+                        relation[focusedConstraintSide(context, relation)]
+                          .nodeId,
+                      ]
+                    : candidate.focusNodeIds,
                 };
               })
           : [evaluation];
@@ -2134,24 +2197,26 @@ export function createModelCompiler(
           ]
         : [];
     });
-    return [...fallbackToolTargets, ...targets].map(target => ({
-      ...target,
-      evaluations: target.evaluations
-        .map(evaluation => {
-          const execution = target.tool
-            ? sourceExecutionFor(target.tool.callId, evaluation.contextId, {
-                ...evaluation.runtime,
-                order:
-                  evaluation.toolExecutionOrder ?? evaluation.runtime.order,
-              })
-            : undefined;
-          const toolArguments = execution
-            ? numericToolArguments(execution.arguments)
-            : undefined;
-          return toolArguments ? {...evaluation, toolArguments} : evaluation;
-        })
-        .sort((left, right) => right.runtime.order - left.runtime.order),
-    }));
+    return [...fallbackToolTargets.map(withConstraintContext), ...targets].map(
+      target => ({
+        ...target,
+        evaluations: target.evaluations
+          .map(evaluation => {
+            const execution = target.tool
+              ? sourceExecutionFor(target.tool.callId, evaluation.contextId, {
+                  ...evaluation.runtime,
+                  order:
+                    evaluation.toolExecutionOrder ?? evaluation.runtime.order,
+                })
+              : undefined;
+            const toolArguments = execution
+              ? numericToolArguments(execution.arguments)
+              : undefined;
+            return toolArguments ? {...evaluation, toolArguments} : evaluation;
+          })
+          .sort((left, right) => right.runtime.order - left.runtime.order),
+      }),
+    );
   }
 
   function numericToolArguments(
@@ -2479,6 +2544,8 @@ export function createModelCompiler(
             !continuesOptionalChain(node)
           ) {
             const siteId = stableSourceId('expression', node, sourceFile);
+            const relationSite = relationCallSite(node, sourceFile);
+            if (relationSite) relationCallSites.set(siteId, relationSite);
             const toolSignature = toolCalls?.get(
               toolCallKey(node.getStart(sourceFile), node.getEnd()),
             );
@@ -2765,6 +2832,36 @@ export function createModelCompiler(
         ),
       ],
     );
+  }
+
+  function relationCallSite(
+    call: ts.CallExpression,
+    sourceFile: ts.SourceFile,
+  ) {
+    const expression = call.expression;
+    if (
+      !ts.isPropertyAccessExpression(expression) &&
+      !ts.isElementAccessExpression(expression)
+    )
+      return undefined;
+    const name = ts.isPropertyAccessExpression(expression)
+      ? expression.name.text
+      : ts.isStringLiteral(expression.argumentExpression)
+        ? expression.argumentExpression.text
+        : undefined;
+    if (name !== 'on' && name !== 'align') return undefined;
+    return {
+      receiverRef: sourceRef(
+        sourceFile.fileName,
+        expression.expression.getStart(sourceFile),
+        expression.expression.getEnd(),
+      ),
+      targetRef: sourceRef(
+        sourceFile.fileName,
+        call.arguments.pos,
+        call.getEnd() - 1,
+      ),
+    };
   }
 
   function callSourceStart(

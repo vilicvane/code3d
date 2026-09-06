@@ -1,23 +1,28 @@
 ---
 import {getEntry} from 'astro:content';
 import {Image} from 'astro:assets';
-import {firstModelContexts} from '../../../app/render-samples/catalog';
+import {sourceContextSets} from '../../../app/render-samples/catalog';
 import {modelImage} from '../lib/images';
 import {highlightedSource} from '../lib/code';
 import {appUrl} from '../lib/site';
 import ArrowIcon from './ArrowIcon.astro';
-const example = (await getEntry('examples', 'first-model'))!;
+interface Props {
+  id?: string;
+}
+const {id = 'first-model'} = Astro.props;
+const example = (await getEntry('examples', id))!;
 const contexts = await Promise.all(
-  firstModelContexts.map(async context => ({
+  sourceContextSets[id]!.map(async context => ({
     ...context,
     html: await highlightedSource(example.data.source, context.focus),
   })),
 );
+const selectedIndex = contexts.length - 1;
 ---
 
 <source-demo class="source-demo">
   <div class="demo-toolbar">
-    <span><i></i> first-model.ts</span><a
+    <span><i></i> {example.data.file.split('/').at(-1)}</span><a
       href={appUrl(example.data.file)}
       target="_blank"
       rel="noopener">Open this model <ArrowIcon /></a
@@ -33,10 +38,11 @@ const contexts = await Promise.all(
         <button
           type="button"
           role="tab"
-          id={`tab-${context.id}`}
-          aria-selected={index === 2 ? 'true' : 'false'}
-          aria-controls={`context-${context.id}`}
-          tabindex={index === 2 ? 0 : -1}
+          id={`${id}-tab-${context.id}`}
+          aria-label={context.label}
+          aria-selected={index === selectedIndex ? 'true' : 'false'}
+          aria-controls={`${id}-context-${context.id}`}
+          tabindex={index === selectedIndex ? 0 : -1}
         >
           {String(index + 1).padStart(2, '0')} <span>{context.label}</span>
         </button>
@@ -47,9 +53,9 @@ const contexts = await Promise.all(
     contexts.map((context, index) => (
       <div
         role="tabpanel"
-        id={`context-${context.id}`}
-        aria-labelledby={`tab-${context.id}`}
-        hidden={index !== 2}
+        id={`${id}-context-${context.id}`}
+        aria-labelledby={`${id}-tab-${context.id}`}
+        hidden={index !== selectedIndex}
         tabindex="0"
       >
         <div class="demo-split">
@@ -59,15 +65,11 @@ const contexts = await Promise.all(
               {context.id === 'model' ? 'model' : context.id} <ArrowIcon />
             </span>
             <Image
-              src={modelImage(
-                context.id === 'model'
-                  ? 'first-model'
-                  : `first-model-${context.id}`,
-              )}
+              src={modelImage(context.image)}
               alt={context.description}
               widths={[640, 960, 1440]}
               sizes="(max-width: 52rem) 100vw, 50vw"
-              loading={index === 2 ? 'eager' : 'lazy'}
+              loading={index === selectedIndex ? 'eager' : 'lazy'}
             />
             <span class="viewport-axis" aria-hidden="true">
               <>

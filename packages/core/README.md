@@ -63,11 +63,30 @@ const sketch2 = sketch1.derive([
 ]);
 ```
 
-Each tuple is `[kind, ID, data]`. Numeric line endpoints name local points;
+Each tuple is `[kind, ID, data]`. Numeric line endpoints and circle centers name local points;
 `sketch1.point(id)` names a point owned by an upstream layer. Each layer has an
-independent positive-integer ID space shared by points and lines. Definitions
+independent positive-integer ID space shared by its geometry entities. Definitions
 may be empty, open, or contain crossing lines; crossings do not automatically
 split entities. Missing point references are errors.
+
+Circles use a center point reference and a current radius, not polygon segments:
+
+```ts
+const circles = sketch(
+  [
+    ['point', 1, [0, 0]],
+    ['circle', 2, [1, 15]],
+    ['circle', 3, [1, 8]],
+  ],
+  {constraints: [['radius', [3, 8]]]},
+);
+```
+
+`radius` takes `[circleId, value]`. Both current radii and radius constraints
+must be positive and finite. The outer circle above remains free; the inner
+circle's independent constraint preserves its radius. A circle center may also
+use a named upstream point. Circle and point parameters have the same numeric
+runtime semantics, whether computed from expressions or written as literals.
 
 Geometry tuples hold current data; `constraints` specify what must remain true.
 Constraints have no persistent IDs. Point coordinates have the same runtime
@@ -85,6 +104,14 @@ located at their source tuples when inline source is available.
 
 In the App, select a sketch expression or variable to open its 2D editor. Draw
 continuous lines, drag literal-coordinate points, and delete local entities.
+Circle takes a center (with optional X/Y input), followed by a radius or a
+circumference click. Entered Radius creates a persistent radius constraint;
+blank Radius follows the pointer and remains free. Drag a circle edge to change
+its radius, or its center to move it. Expression radii remain source-edited;
+gesture locks, numeric writeback and rounded-source replay use the same pipeline
+as point coordinates. Circle creation, deletion and associated constraint changes
+are single undo steps; deleting a circle retains shared and upstream centers,
+and removes only newly disconnected local points.
 Endpoints are created or reused by Line; there is no standalone Point tool.
 Type X/Y for the start, then length/angle for each segment. Tab switches fields
 and Enter accepts the next endpoint. Each segment is one undo step and reuses
@@ -252,8 +279,10 @@ Core and App share the same solvers. Pure bound assemblies use exact linear
 translation equations; geometric align relations add joint rigid-pose solving
 without another WASM initialization.
 
-In the App, selecting a directional property shows the target rectangle and
-matched source boundary with translucent green fill and green corner brackets.
+In the App, selecting a directional property fills its bound face with the
+same translucent yellow-green as its bounding box, adding corner brackets
+only when that box is absent. The source of `on` shows the complete measured
+bounding box; a topology source limits it to the selected geometry.
 `pivot` has translation handles, `pivotVertex` uses
 self's vertex picker, `around` shows the referenced axis, and `rotate` has
 three angle rings or one axis ring. Source edits retain parameter provenance,
@@ -311,10 +340,20 @@ by geometric seeds and local numerical solving, without a uniqueness guarantee.
 In relation context, axes have one positive arrow and edges retain their actual
 curved highlight as the shaft, with only a tangent arrowhead at the directed
 endpoint (a stable seam for a closed edge). Source and target arrowheads share
-a fixed 10-by-6 CSS-pixel size, with the target at 40% opacity. Passive line
+a fixed 10-by-6 CSS-pixel size. Passive axes have arrows at both ends. Passive line
 decorations use 1px; interactive topology selection uses 2px. Surface normals
 retain their facing arrows.
 See [the alignment example](../app/examples/geometric-alignment.ts).
+
+Source inspection previews each relation call through that stage, before later
+offsets or rotations. The current pair shares one marker color: the inspected
+side keeps its base opacity and the other uses 70% of that opacity. Remaining
+related objects are dim gray. `on`/`align` and subsequent chain calls focus
+self; their target arguments focus the actual target reference, which is self
+in a reverse-written relation. Model opacity uses role-specific caps rather than
+multiplying existing paint opacity. See the
+[relation guide](../web/src/content/docs/docs/guides/relations.mdx) and
+[visualization conventions](../../.agents/skills/code3d-visualization/SKILL.md).
 
 When several relations include align on one model, use the numeric parameter
 panel or source to edit offsets and rotations. Each edit resolves the coupled

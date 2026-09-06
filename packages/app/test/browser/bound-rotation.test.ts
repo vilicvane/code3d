@@ -3,6 +3,157 @@ import {test} from 'node:test';
 import {chromium} from 'playwright-core';
 
 test(
+  'bound fills share the box style and corners follow each occurrence selection',
+  {timeout: 120_000},
+  async t => {
+    const appUrl = process.env.CODE3D_TEST_URL;
+    assert.ok(appUrl, 'Set CODE3D_TEST_URL to the task development server');
+    const browser = await chromium.connectOverCDP(
+      process.env.CODE3D_CDP_URL ?? 'http://localhost:9222',
+    );
+    t.after(() => browser.close());
+    const context = await browser.newContext();
+    t.after(() => context.close());
+    const page = await context.newPage();
+    const url = new URL('/__bound-highlight-test__', appUrl).href;
+    await page.route(url, route =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: '<main style="width:900px;height:700px"></main>',
+      }),
+    );
+    await page.goto(url);
+    const results = await page.evaluate(async () => {
+      const {ModelCompilerClient} =
+        await import('/src/model/compiler-client.ts');
+      const {browserPackageFiles} =
+        await import('/src/project/browser-packages.ts');
+      const {ModelViewport} = await import('/src/viewport.ts');
+      const {namedElementDecorations} =
+        await import('/src/model/element-decorations.ts');
+      const client = new ModelCompilerClient(browserPackageFiles);
+      const viewport = new ModelViewport(document.querySelector('main')!, {
+        onSelect() {},
+        onDrillDown() {},
+        onNavigateSource() {},
+        onPositionTool() {},
+        onTopologySelection() {},
+      });
+      try {
+        const source = `import {box, group} from '@code3d/core';
+        const solid = box(20, 10, 30);
+        const assembly = group([solid]);
+        export default group([assembly, assembly]);`;
+        const module = await client.compile(
+          {files: [{path: '/main.ts', source}]},
+          '/main.ts',
+        );
+        if (module.diagnostic)
+          throw new Error(JSON.stringify(module.diagnostic));
+        viewport.renderModule(module);
+        const groups = [...viewport['occurrences'].values()].filter(
+          item => item.node.kind === 'group' && item.depth === 1,
+        );
+        const solid = [...viewport['occurrences'].values()].find(
+          item => item.node.mesh,
+        )!;
+        const group = groups[0];
+        const bound = group.node.elements.find(
+          element => element.name === 'up',
+        )!;
+        viewport.setDecorations(
+          'group-bound',
+          namedElementDecorations(group.node, bound),
+        );
+        viewport.setDecorations(
+          'solid-bound',
+          namedElementDecorations(
+            solid.node,
+            solid.node.elements.find(element => element.name === 'up')!,
+          ),
+          {occurrenceKeys: [solid.key]},
+        );
+        const {createMaterialDrawObserver} =
+          await import('/test/browser/material-draw-fixture.ts');
+        const observe = createMaterialDrawObserver();
+        const inspect = (key: string) => {
+          viewport['selectKey'](key, false);
+          const drawn: Array<
+            import('./material-draw-fixture.ts').MaterialDraw & {
+              owner: string;
+              occurrenceKey: string | undefined;
+              line: boolean;
+            }
+          > = [];
+          const collect = (
+            owner: string,
+            occurrenceKey: string | undefined,
+            object: import('three').Object3D,
+          ) => {
+            observe(object, draw =>
+              drawn.push({
+                ...draw,
+                owner,
+                occurrenceKey,
+                line: object.children[0]?.userData.decoration?.kind === 'edges',
+              }),
+            );
+          };
+          for (const [owner, instances] of viewport['decorationLayers']) {
+            for (const instance of instances)
+              collect(owner, instance.occurrenceKey, instance.object);
+          }
+          if (viewport['selectionHighlight'])
+            collect('box', key, viewport['selectionHighlight']);
+          viewport['rendering'].renderFrame();
+          return drawn;
+        };
+        return {
+          keys: groups.map(item => item.key),
+          frames: [
+            ...groups.map(item => inspect(item.key)),
+            inspect(solid.key),
+            inspect(group.key),
+          ],
+        };
+      } finally {
+        client.dispose();
+      }
+    });
+    assert.equal(results.keys.length, 2);
+    for (const [index, frame] of results.frames.entries()) {
+      const selectedGroup = [
+        results.keys[0],
+        results.keys[1],
+        undefined,
+        results.keys[0],
+      ][index];
+      const boxes = frame.filter(item => item.owner === 'box');
+      assert.equal(boxes.length, selectedGroup ? 1 : 0);
+      const color = boxes[0]?.color ?? 'd8ff3e';
+      for (const key of results.keys) {
+        const parts = frame.filter(
+          item => item.owner === 'group-bound' && item.occurrenceKey === key,
+        );
+        assert.equal(
+          parts.filter(item => item.line).length,
+          key === selectedGroup ? 0 : 1,
+        );
+        assert.equal(parts.filter(item => item.opacity === 0.18).length, 1);
+        assert.ok(parts.every(item => item.color === color));
+        assert.ok(
+          parts.filter(item => item.line).every(item => item.opacity === 0.85),
+        );
+      }
+      const solidParts = frame.filter(item => item.owner === 'solid-bound');
+      assert.equal(solidParts.filter(item => item.line).length, 1);
+      assert.equal(solidParts.filter(item => item.opacity === 0.18).length, 1);
+      assert.ok(solidParts.every(item => item.color === color));
+    }
+  },
+);
+
+test(
   'directional boundaries and each rotation-chain scope render in the host browser',
   {timeout: 120_000},
   async t => {

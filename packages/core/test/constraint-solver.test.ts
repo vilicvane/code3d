@@ -20,6 +20,7 @@ import {
   modelElementReference,
   rotateVector,
   rotationAround,
+  relativeTransform,
 } from '@code3d/core/tooling';
 
 const snapshot = createModelSnapshotter();
@@ -98,6 +99,47 @@ test('target local direction determines the shared projection frame', () => {
   near(pose(placed).quaternion, identity);
 });
 
+test('on snapshots retain the complete source box in the target projection frame', () => {
+  const source = box(4, 6, 8).rotate(0, 0, 30);
+  const base = box(10, 20, 30).rotate(0, 0, 90);
+  for (const target of [base.up, base.up.flip()]) {
+    const result = snapshot(source.relate(self => self.on(target)));
+    const constraint = result.constraints[0];
+    assert.equal(constraint.kind, 'on');
+    if (constraint.kind !== 'on') return;
+    near(constraint.sourceBounds.size, [
+      6 * Math.cos(Math.PI / 6) + 4 * Math.sin(Math.PI / 6),
+      4 * Math.cos(Math.PI / 6) + 6 * Math.sin(Math.PI / 6),
+      8,
+    ]);
+    const contact = relativeTransform(
+      constraint.sourceElement.transform,
+      constraint.sourceBounds.transform,
+    );
+    near(contact.position, [
+      0,
+      (defined(constraint.sourceElement.bound).facing *
+        constraint.sourceBounds.size[1]) /
+        2,
+      0,
+    ]);
+    near(contact.quaternion, identity);
+  }
+  const assembly = group([box(2, 4, 6), point([10, 12, 14])]);
+  const constraint = snapshot(
+    assembly.relate(self => self.on(box(10, 10, 10).up)),
+  ).constraints[0];
+  assert.equal(constraint.kind, 'on');
+  if (constraint.kind === 'on')
+    near(constraint.sourceBounds.size, [11, 14, 17]);
+
+  const reverse = snapshot(
+    box(2, 4, 6).relate(self => box(20, 10, 30).on(self.up)),
+  ).constraints[0];
+  assert.equal(reverse.kind, 'on');
+  if (reverse.kind === 'on') near(reverse.sourceBounds.size, [20, 10, 30]);
+});
+
 test('selected points, edges and surfaces use only their own finite extent', () => {
   const base = box(10, 10, 10);
   const source = box(20, 20, 20);
@@ -122,6 +164,9 @@ test('selected points, edges and surfaces use only their own finite extent', () 
   for (const geometry of [top, edge, vertex]) {
     const placed = source.relate(() => defined(geometry).on(base.up));
     near(position(placed), [0, -5, 0]);
+    const constraint = snapshot(placed).constraints[0];
+    assert.equal(constraint.kind, 'on');
+    if (constraint.kind === 'on') near([constraint.sourceBounds.size[1]], [0]);
   }
   near(position(source.relate(self => self.on(base.up))), [0, 15, 0]);
   const sloped = line([-5, -3, 0], [5, 3, 0]).relate(self =>

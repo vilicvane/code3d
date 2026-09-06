@@ -36,6 +36,30 @@ const near = (actual: readonly number[], expected: readonly number[]) =>
     assert.ok(Math.abs(x - expected[i]) < 1e-6, `${actual} != ${expected}`),
   );
 
+test('a group axis includes its child geometry without model-unit padding', async () => {
+  const source = `import {box,group,line} from '@code3d/core'; export default group([line([0,10,0],[0,20,0]), line([0,-4,0],[0,-3,0])]).expose({guide: box(1,1,1).axis});`;
+  const module = await compiler.compile(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  assert.equal(module.diagnostic, undefined);
+  const node = defined(module.fallback);
+  const {namedElementDecorations} = await server.ssrLoadModule<
+    typeof import('../src/model/element-decorations.ts')
+  >('/src/model/element-decorations.ts');
+  const element = defined(
+    node.elements.find(element => element.name === 'guide'),
+  );
+  const axis = namedElementDecorations(node, element).find(
+    decoration => decoration.kind === 'anchor',
+  );
+  assert.ok(axis?.elementKind === 'line');
+  near(
+    [axis.span.negative, axis.span.positive],
+    [4 + element.transform.position[1], 20 - element.transform.position[1]],
+  );
+});
+
 async function build(source: string, name: string) {
   const module = await compiler.compile(
     {files: [{path: '/model.ts', source}]},
@@ -465,10 +489,15 @@ test('a bound selection renders each computed plane once across named and relati
   assert.ok(target);
   const scope = {module, target, evaluation: defined(target).evaluations[0]};
   const named = elementSourceDecoration.decorations(scope);
-  const targetMesh = named.find(decoration => decoration.kind === 'surface');
-  assert.equal(defined(targetMesh).mesh.vertices.length, 12);
-  assert.deepEqual(defined(targetMesh).mesh.surfaceGroups, []);
+  assert.equal(named.length, 0);
   const contacts = relationSourceDecoration.decorations(scope);
+  const targetMesh = contacts.find(
+    decoration =>
+      decoration.kind === 'surface' && decoration.id.includes(':target:'),
+  );
+  assert.ok(targetMesh?.kind === 'surface');
+  assert.equal(targetMesh.mesh.vertices.length, 12);
+  assert.deepEqual(targetMesh.mesh.surfaceGroups, []);
   const combined = [...named, ...contacts];
   assert.equal(new Set(combined.map(item => item.id)).size, combined.length);
   assert.equal(
@@ -485,6 +514,18 @@ test('a bound selection renders each computed plane once across named and relati
     evaluation: defined(relationTarget).evaluations[0],
   });
   assert.equal(relation.filter(item => item.kind === 'surface').length, 2);
+  const bounds = relation.filter(item => item.kind === 'bounds');
+  assert.equal(bounds.length, 1);
+  near(bounds[0].size, [
+    8 * Math.cos(Math.PI / 6) + 6 * Math.sin(Math.PI / 6),
+    8 * Math.sin(Math.PI / 6) + 6 * Math.cos(Math.PI / 6),
+    4,
+  ]);
+  const sourcePlane = relation.find(
+    item => item.kind === 'surface' && item.nodeId === bounds[0].nodeId,
+  );
+  assert.ok(sourcePlane);
+  assert.equal(sourcePlane.appearance.color, bounds[0].appearance.color);
 });
 
 for (const [call, kind] of [
