@@ -1,7 +1,7 @@
 import type {ModelSnapshotObject} from '@code3d/core/tooling';
 import type {Anchor} from '@code3d/core';
+import {defined} from '../../../test/assert.ts';
 import {
-  defined,
   createModelSnapshotter,
   disposeModelObjects,
   modelGeometry,

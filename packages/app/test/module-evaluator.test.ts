@@ -1,20 +1,20 @@
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
-import {createAppTestServer} from './vite-test-server.mjs';
-import {importTestModule} from './project-test-files.mjs';
+import {createAppTestServer} from './vite-test-server.ts';
+import {importTestModule} from './project-test-files.ts';
 import {transform} from 'esbuild';
-let server;
-let ModuleEvaluator;
+let server: Awaited<ReturnType<typeof createAppTestServer>>;
+let ModuleEvaluator: (typeof import('../src/model/module-evaluator.ts'))['ModuleEvaluator'];
 before(async () => {
   server = await createAppTestServer();
-  const {ModuleEvaluator: Evaluator} = await server.ssrLoadModule(
-    '/src/model/module-evaluator.ts',
-  );
+  const {ModuleEvaluator: Evaluator} = await server.ssrLoadModule<
+    typeof import('../src/model/module-evaluator.ts')
+  >('/src/model/module-evaluator.ts');
   ModuleEvaluator = class extends Evaluator {
     constructor() {
       super(importTestModule);
     }
-    async evaluate(url, source) {
+    override async evaluate(url: string, source: string) {
       const {code} = await transform(source, {format: 'esm', target: 'es2022'});
       return super.evaluate(url, code);
     }

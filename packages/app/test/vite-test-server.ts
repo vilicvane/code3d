@@ -20,7 +20,9 @@ export async function createAppTestServer() {
     });
     return {
       environments: server.environments,
-      ssrLoadModule: server.ssrLoadModule.bind(server),
+      async ssrLoadModule<Module extends object>(url: string): Promise<Module> {
+        return (await server.ssrLoadModule(url)) as Module;
+      },
       async close() {
         try {
           await server.close();
@@ -34,3 +36,5 @@ export async function createAppTestServer() {
     throw error;
   }
 }
+
+export type AppTestServer = Awaited<ReturnType<typeof createAppTestServer>>;

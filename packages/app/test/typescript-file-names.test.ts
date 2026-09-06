@@ -1,16 +1,16 @@
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
-import {createAppTestServer} from './vite-test-server.mjs';
+import {createAppTestServer} from './vite-test-server.ts';
 
-let server;
-let typeScriptFileName;
-let typeScriptWorkerRequests;
+let server: Awaited<ReturnType<typeof createAppTestServer>>;
+let typeScriptFileName: (typeof import('../src/monaco/typescript-file-names.ts'))['typeScriptFileName'];
+let typeScriptWorkerRequests: (typeof import('../src/monaco/typescript-file-names.ts'))['typeScriptWorkerRequests'];
 
 before(async () => {
   server = await createAppTestServer();
-  ({typeScriptFileName, typeScriptWorkerRequests} = await server.ssrLoadModule(
-    '/src/monaco/typescript-file-names.ts',
-  ));
+  ({typeScriptFileName, typeScriptWorkerRequests} = await server.ssrLoadModule<
+    typeof import('../src/monaco/typescript-file-names.ts')
+  >('/src/monaco/typescript-file-names.ts'));
 });
 
 after(async () => server?.close());
@@ -30,7 +30,7 @@ test('serialized package and project URIs share the literal TypeScript identity'
       'file:///workspace/hash%23query%3F.ts',
     ],
     ['/lib.es5.d.ts', '/lib.es5.d.ts'],
-  ]) {
+  ] as const) {
     assert.equal(typeScriptFileName(serialized), literal);
     assert.equal(typeScriptFileName(literal), literal);
   }
@@ -39,10 +39,10 @@ test('serialized package and project URIs share the literal TypeScript identity'
 test('worker requests normalize the document while preserving receiver and other arguments', () => {
   const worker = {
     marker: {},
-    getProjectCompletionDetails(...args) {
+    getProjectCompletionDetails(...args: unknown[]) {
       return {receiver: this, args};
     },
-    updateExtraLibs(libs) {
+    updateExtraLibs<T>(libs: T) {
       return libs;
     },
     getLibFiles() {
@@ -76,7 +76,7 @@ test('worker requests normalize the document while preserving receiver and other
 
 test('document highlights normalize every searched URI without mutating the request', () => {
   const requests = typeScriptWorkerRequests({
-    getDocumentHighlights(...args) {
+    getDocumentHighlights(...args: unknown[]) {
       return args;
     },
   });

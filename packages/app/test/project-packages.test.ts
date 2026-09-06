@@ -1,43 +1,50 @@
+import type {ProjectLanguage} from '../src/project/project-language.ts';
+import type {ModelProject} from '../src/project/project.ts';
+import {defined} from '../../../test/assert.ts';
+import type {ProjectFileReader} from '../src/project/file-reader.ts';
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
 import * as esbuild from 'esbuild';
 import ts from '@typescript/typescript6';
-import {createAppTestServer} from './vite-test-server.mjs';
+import {createAppTestServer} from './vite-test-server.ts';
 import {
   createTestEvaluator,
+  testEvaluatorClass,
   importTestModule,
   packageTestFiles,
-} from './project-test-files.mjs';
+} from './project-test-files.ts';
 
-let server;
-let ProjectPackages;
-let ProjectPackageResolver;
-let ProjectBuilder;
-let ProjectCompiler;
-let loadProjectLanguage;
-let Evaluator;
+let server: Awaited<ReturnType<typeof createAppTestServer>>;
+let ProjectPackages: (typeof import('../src/project/project-packages.ts'))['ProjectPackages'];
+let ProjectPackageResolver: (typeof import('../src/project/package-resolver.ts'))['ProjectPackageResolver'];
+let ProjectBuilder: (typeof import('../src/project/project-builder.ts'))['ProjectBuilder'];
+let ProjectCompiler: (typeof import('../src/model/project-compiler.ts'))['ProjectCompiler'];
+let loadProjectLanguage: (typeof import('../src/project/project-language.ts'))['loadProjectLanguage'];
+let Evaluator: Awaited<ReturnType<typeof testEvaluatorClass>>;
 before(async () => {
   server = await createAppTestServer();
-  ({ProjectPackages} = await server.ssrLoadModule(
-    '/src/project/project-packages.ts',
-  ));
-  ({ProjectPackageResolver} = await server.ssrLoadModule(
-    '/src/project/package-resolver.ts',
-  ));
-  ({ProjectBuilder} = await server.ssrLoadModule(
-    '/src/project/project-builder.ts',
-  ));
-  ({ProjectCompiler} = await server.ssrLoadModule(
-    '/src/model/project-compiler.ts',
-  ));
-  ({loadProjectLanguage} = await server.ssrLoadModule(
-    '/src/project/project-language.ts',
-  ));
-  Evaluator = (await createTestEvaluator(server)).constructor;
+  ({ProjectPackages} = await server.ssrLoadModule<
+    typeof import('../src/project/project-packages.ts')
+  >('/src/project/project-packages.ts'));
+  ({ProjectPackageResolver} = await server.ssrLoadModule<
+    typeof import('../src/project/package-resolver.ts')
+  >('/src/project/package-resolver.ts'));
+  ({ProjectBuilder} = await server.ssrLoadModule<
+    typeof import('../src/project/project-builder.ts')
+  >('/src/project/project-builder.ts'));
+  ({ProjectCompiler} = await server.ssrLoadModule<
+    typeof import('../src/model/project-compiler.ts')
+  >('/src/model/project-compiler.ts'));
+  ({loadProjectLanguage} = await server.ssrLoadModule<
+    typeof import('../src/project/project-language.ts')
+  >('/src/project/project-language.ts'));
+  Evaluator = await testEvaluatorClass(server);
 });
 after(async () => server?.close());
 
-function memoryFiles(entries = {}) {
+function memoryFiles(
+  entries: Record<string, unknown> = {},
+): ProjectFileReader & {contents: Map<string, string>} {
   const contents = new Map(
     Object.entries(entries).map(([path, value]) => [
       path,
@@ -52,13 +59,14 @@ function memoryFiles(entries = {}) {
     },
     async stat(path) {
       if (contents.has(path))
-        return {kind: 'file', version: contents.get(path)};
+        return {kind: 'file', version: contents.get(path)!};
       if (
         [...contents.keys()].some(file =>
           file.startsWith(path === '/' ? '/' : path + '/'),
         )
       )
         return {kind: 'directory', version: ''};
+      return undefined;
     },
   };
 }
@@ -78,7 +86,7 @@ for (const field of [
   'devDependencies',
   'peerDependencies',
   'optionalDependencies',
-]) {
+] as const) {
   test(`${field} declaration selects project packages, even before installation`, async () => {
     const files = memoryFiles({
       '/package.json': {[field]: {'@code3d/core': '*'}},
@@ -240,7 +248,7 @@ test('isolates the built-in dependency closure and gives source, screws and reus
       readFile: path => sources.get(path),
       getSourceFile: (path, target) =>
         sources.has(path)
-          ? ts.createSourceFile(path, sources.get(path), target, true)
+          ? ts.createSourceFile(path, defined(sources.get(path)), target, true)
           : undefined,
       directoryExists: () => true,
       getDirectories: () => [],
@@ -271,10 +279,10 @@ test('runs a zero-install screw model, retains its runtime on edits, and switche
   const files = memoryFiles();
   let installed = false;
   const projectFiles = {
-    readFile: async path =>
+    readFile: async (path: string) =>
       (await files.readFile(path)) ??
       (installed ? packageTestFiles.readFile(path) : undefined),
-    stat: async path =>
+    stat: async (path: string) =>
       (await files.stat(path)) ??
       (installed ? packageTestFiles.stat(path) : undefined),
   };
@@ -284,7 +292,7 @@ test('runs a zero-install screw model, retains its runtime on edits, and switche
     esbuild,
     () => new Evaluator(),
   );
-  const project = radius => ({
+  const project = (radius: number) => ({
     files: [
       {
         path: '/model.ts',
@@ -298,28 +306,28 @@ test('runs a zero-install screw model, retains its runtime on edits, and switche
       },
     ],
   });
-  let language;
-  const compile = model =>
+  let language: ProjectLanguage | undefined;
+  const compile = (model: ModelProject) =>
     compiler.compile(model, '/model.ts', undefined, value => {
       language = value;
     });
   try {
     const first = await compile(project(1));
     assert.equal(first.diagnostic, undefined);
-    const builtinRuntime = compiler.runtime;
+    const builtinRuntime = compiler['runtime'];
     assert.ok(
-      [...builtinRuntime.modules.keys()].some(path =>
+      [...defined(builtinRuntime).modules.keys()].some(path =>
         path.startsWith('/node_modules/@code3d/node_modules/replicad/'),
       ),
     );
     assert.ok(
-      language.files.some(
+      defined(language).files.some(
         file =>
           file.path === '/node_modules/@code3d/screws/bld/library/index.d.ts',
       ),
     );
     assert.equal((await compile(project(1.1))).diagnostic, undefined);
-    assert.equal(compiler.runtime, builtinRuntime);
+    assert.equal(compiler['runtime'], builtinRuntime);
     assert.equal(files.contents.size, 0);
 
     files.contents.set(
@@ -327,24 +335,25 @@ test('runs a zero-install screw model, retains its runtime on edits, and switche
       '{"type":"module","dependencies":{"@code3d/core":"*","@code3d/screws":"*"}}',
     );
     await assert.rejects(compile(project(1.1)), /@code3d\/core/);
-    assert.equal(compiler.runtime, undefined);
+    assert.equal(compiler['runtime'], undefined);
     assert.ok(
-      !language.files.some(file =>
+      !defined(language).files.some(file =>
         file.path.includes('/node_modules/@code3d/core/'),
       ),
     );
 
     installed = true;
     assert.equal((await compile(project(1.1))).diagnostic, undefined);
-    const projectRuntime = compiler.runtime;
+    const runtime = () => compiler['runtime'];
+    const projectRuntime = runtime();
     assert.notEqual(projectRuntime, builtinRuntime);
     assert.ok(
-      [...projectRuntime.modules.keys()].some(path =>
+      [...defined(projectRuntime).modules.keys()].some(path =>
         path.startsWith('/node_modules/replicad/'),
       ),
     );
     assert.ok(
-      ![...projectRuntime.modules.keys()].some(path =>
+      ![...defined(projectRuntime).modules.keys()].some(path =>
         path.includes('/@code3d/node_modules/'),
       ),
     );
@@ -352,9 +361,9 @@ test('runs a zero-install screw model, retains its runtime on edits, and switche
     const unsaved = project(1.2);
     unsaved.files.push({path: '/package.json', source: '{"type":"module"}'});
     assert.equal((await compile(unsaved)).diagnostic, undefined);
-    assert.notEqual(compiler.runtime, projectRuntime);
+    assert.notEqual(compiler['runtime'], projectRuntime);
     assert.ok(
-      [...compiler.runtime.modules.keys()].some(path =>
+      [...defined(runtime()).modules.keys()].some(path =>
         path.startsWith('/node_modules/@code3d/node_modules/replicad/'),
       ),
     );

@@ -1,18 +1,22 @@
+import type {ToolIntent, ToolPreview} from '../src/tools/tool-system.ts';
+import type {Vec3} from '@code3d/core';
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
-import {createAppTestServer} from './vite-test-server.mjs';
+import {createAppTestServer} from './vite-test-server.ts';
 
-let server;
-let offsetRelationSource;
-let ToolEngine;
+let server: Awaited<ReturnType<typeof createAppTestServer>>;
+let offsetRelationSource: (source: string, delta: Vec3) => string;
+let ToolEngine: (typeof import('../src/tools/tool-system.ts'))['ToolEngine'];
 before(async () => {
   server = await createAppTestServer();
-  const {offsetCallSource} = await server.ssrLoadModule(
-    '/src/tools/source-expression.ts',
-  );
+  const {offsetCallSource} = await server.ssrLoadModule<
+    typeof import('../src/tools/source-expression.ts')
+  >('/src/tools/source-expression.ts');
   offsetRelationSource = (source, delta) =>
     offsetCallSource(source, 'offset', delta);
-  ({ToolEngine} = await server.ssrLoadModule('/src/tools/tool-system.ts'));
+  ({ToolEngine} = await server.ssrLoadModule<
+    typeof import('../src/tools/tool-system.ts')
+  >('/src/tools/tool-system.ts'));
 });
 after(async () => {
   await server?.close();
@@ -25,7 +29,7 @@ test('repeated drags combine signed increments without nesting offsets', () => {
     [3, '(i - 2) * 8 + 5'],
     [-8, '(i - 2) * 8 - 3'],
     [3, '(i - 2) * 8'],
-  ]) {
+  ] as const) {
     source = offsetRelationSource(source, [delta, 0, 0]);
     assert.equal(source, `part.down.on(base.up).offset(${expression}, 0, 0)`);
   }
@@ -35,7 +39,7 @@ test('an absent or spread offset gets one reusable literal call', () => {
   for (const source of [
     'part.down.on(base.up)',
     'relation.offset(...values)',
-  ]) {
+  ] as const) {
     const first = offsetRelationSource(source, [2, -3, 0]);
     assert.equal(first, `${source}.offset(2, -3, 0)`);
     assert.equal(
@@ -75,17 +79,17 @@ test('expression increments preserve operator precedence and evaluation count', 
     'next()',
     'i ** 2',
     'i - -2',
-  ]) {
+  ] as const) {
     const original = `relation.offset(${expression}, 0, 0)`;
     const adjusted = offsetRelationSource(original, [3, 0, 0]);
     let calls = 0;
-    const evaluate = source =>
+    const evaluate = (source: string) =>
       Function(
         'relation',
         'i',
         'next',
         `return ${source};`,
-      )({offset: x => x}, 2, () => {
+      )({offset: (x: number) => x}, 2, () => {
         calls++;
         return 4;
       });
@@ -111,7 +115,11 @@ test('cancelling an increment preserves line-comment boundaries', () => {
   const adjusted = offsetRelationSource(source, [-2, 0, 0]);
   assert.ok(adjusted.includes('// keep this comment\n'));
   assert.equal(
-    Function('relation', 'x', `return ${adjusted};`)({offset: x => x}, 4),
+    Function(
+      'relation',
+      'x',
+      `return ${adjusted};`,
+    )({offset: (x: number) => x}, 4),
     4,
   );
 });
@@ -126,7 +134,7 @@ test('tool transactions read relocated anchors and accumulate before recompilati
     end: source.length,
   };
   let version = 1;
-  const previews = [];
+  const previews: ToolPreview[] = [];
   const engine = new ToolEngine({
     sourceVersion: () => version,
     resolveSourceRef: ref => {
@@ -152,9 +160,9 @@ test('tool transactions read relocated anchors and accumulate before recompilati
     commitPreview() {},
     clearPreview() {},
   });
-  for (const increment of [2, 3, -1]) {
+  for (const increment of [2, 3, -1] as const) {
     const session = engine.begin('position');
-    const intent = {
+    const intent: ToolIntent = {
       kind: 'relation.offset',
       receiver: {sourceRef: anchor},
       occurrenceKeys: ['source/0', 'context/0'],
@@ -163,16 +171,19 @@ test('tool transactions read relocated anchors and accumulate before recompilati
       direction: 1,
     };
     const before = source;
-    assert.equal(session.preview(intent).status, 'ready');
+    assert.ok(session.preview(intent).status === 'ready');
     assert.equal(source, before);
-    assert.equal(session.commit(intent).status, 'committed');
+    assert.ok(session.commit(intent).status === 'committed');
   }
   assert.equal(
     source,
     '// inserted above after compile\nrelation.offset((i - 2) * 8 + 4, 0, 0)',
   );
   assert.deepEqual(
-    previews.map(preview => preview.delta),
+    previews.map(preview => {
+      assert.ok(preview.kind === 'occurrence-translation');
+      return preview.delta;
+    }),
     [
       [2, 0, 0],
       [2, 0, 0],
@@ -182,7 +193,12 @@ test('tool transactions read relocated anchors and accumulate before recompilati
       [-1, 0, 0],
     ],
   );
-  assert.ok(previews.every(preview => preview.occurrenceKeys.length === 2));
+  assert.ok(
+    previews.every(preview => {
+      assert.ok(preview.kind === 'occurrence-translation');
+      return preview.occurrenceKeys.length === 2;
+    }),
+  );
 });
 
 test('a lost receiver anchor conflicts without reading stale source', () => {
@@ -190,6 +206,10 @@ test('a lost receiver anchor conflicts without reading stale source', () => {
     sourceVersion: () => 2,
     resolveSourceRef: () => undefined,
     readSource: () => assert.fail('must resolve the anchor first'),
+    applySourceEdits: () => assert.fail('must resolve the anchor first'),
+    applyPreview: () => assert.fail('must resolve the anchor first'),
+    commitPreview: () => assert.fail('must resolve the anchor first'),
+    clearPreview: () => assert.fail('must resolve the anchor first'),
   });
   const result = engine.resolve('position', {
     kind: 'relation.offset',
@@ -199,5 +219,5 @@ test('a lost receiver anchor conflicts without reading stale source', () => {
     frameQuaternion: [0, 0, 0, 1],
     direction: 1,
   });
-  assert.equal(result.status, 'conflict');
+  assert.ok(result.status === 'conflict');
 });

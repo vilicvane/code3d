@@ -1,22 +1,25 @@
+import {assertModelDiagnosticError} from './project-test-files.ts';
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
 import * as esbuild from 'esbuild';
-import {createAppTestServer} from './vite-test-server.mjs';
-import {importTestModule} from './project-test-files.mjs';
+import {createAppTestServer} from './vite-test-server.ts';
+import {importTestModule} from './project-test-files.ts';
 
-let server, ProjectBuilder, ModuleEvaluator;
+let server: Awaited<ReturnType<typeof createAppTestServer>>,
+  ProjectBuilder: (typeof import('../src/project/project-builder.ts'))['ProjectBuilder'],
+  ModuleEvaluator: (typeof import('../src/model/module-evaluator.ts'))['ModuleEvaluator'];
 before(async () => {
   server = await createAppTestServer();
-  ({ProjectBuilder} = await server.ssrLoadModule(
-    '/src/project/project-builder.ts',
-  ));
-  ({ModuleEvaluator} = await server.ssrLoadModule(
-    '/src/model/module-evaluator.ts',
-  ));
+  ({ProjectBuilder} = await server.ssrLoadModule<
+    typeof import('../src/project/project-builder.ts')
+  >('/src/project/project-builder.ts'));
+  ({ModuleEvaluator} = await server.ssrLoadModule<
+    typeof import('../src/model/module-evaluator.ts')
+  >('/src/model/module-evaluator.ts'));
 });
 after(async () => server?.close());
 
-function builder(source, extra = {}) {
+function builder(source: string, extra: Record<string, string> = {}) {
   const files = new Map(
     Object.entries({
       '/package.json': '{"type":"module"}',
@@ -28,11 +31,13 @@ function builder(source, extra = {}) {
     {
       async readFile(path) {
         if (files.has(path)) return new TextEncoder().encode(files.get(path));
+        return undefined;
       },
       async stat(path) {
-        if (files.has(path)) return {kind: 'file', version: files.get(path)};
+        if (files.has(path)) return {kind: 'file', version: files.get(path)!};
         if ([...files.keys()].some(file => file.startsWith(path + '/')))
           return {kind: 'directory', version: ''};
+        return undefined;
       },
     },
     esbuild,
@@ -103,13 +108,14 @@ for (const [name, statement, span, message, extra] of [
     },
   ],
   ['syntax', 'export const width = ;', ';', /Unexpected/, {}],
-]) {
+] as const) {
   test(`locates ${name} in the original multi-file source, including UTF-8 columns`, async () => {
     const prefix = '// child module\r\nconst 中文 = "🧱"; ';
     const source = prefix + statement;
     await assert.rejects(
       builder(source, extra).build('import "/src/child.ts";'),
       error => {
+        assertModelDiagnosticError(error);
         assert.match(error.diagnostic.summary, message);
         assert.deepEqual(error.diagnostic.sourceRef, {
           file: '/src/child.ts',

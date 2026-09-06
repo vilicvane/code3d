@@ -13,7 +13,7 @@
     "test:browser:tool-panel": "node --test test/browser/contextual-tool-panel.test.mjs",
     "preview": "vite preview",
     "render-image": "node scripts/render-image.mjs",
-    "test:run": "node --test \"test/*.test.{mjs,ts}\"",
+    "test:run": "node --test \"test/*.test.ts\"",
     "test:types": "node ../../node_modules/typescript/bin/tsc --noEmit -p test/tsconfig.json"
   },
   "dependencies": {

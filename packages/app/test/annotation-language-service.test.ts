@@ -1,20 +1,25 @@
+import {defined} from '../../../test/assert.ts';
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
 import ts from '@typescript/typescript6';
-import {createAppTestServer} from './vite-test-server.mjs';
-import {packageTestLanguage} from './project-test-files.mjs';
+import {createAppTestServer} from './vite-test-server.ts';
+import {packageTestLanguage} from './project-test-files.ts';
 
-let server;
-let annotations;
-let annotationNames;
-let diagnostics;
-let readParameters;
-let languageService;
-let nativeLanguageService;
-let EmbeddedCodeProjection;
-let files;
+let server: Awaited<ReturnType<typeof createAppTestServer>>;
+let annotations: (typeof import('../src/model/annotations.ts'))['code3dAnnotations'];
+let annotationNames: (typeof import('../src/model/annotations.ts'))['code3dAnnotationNames'];
+let diagnostics: (file: ts.SourceFile) => ts.Diagnostic[];
+let readParameters: (
+  declaration: ts.Node,
+) => ReturnType<
+  (typeof import('../src/model/tool-parameter-annotations.ts'))['readToolParameterAnnotations']
+>;
+let languageService: import('../src/monaco/annotation-language-service.ts').AnnotationLanguageService;
+let nativeLanguageService: ts.LanguageService;
+let EmbeddedCodeProjection: (typeof import('../src/monaco/embedded-code.ts'))['EmbeddedCodeProjection'];
+let files: Map<string, string>;
 let version = 0;
-const preferences = {
+const preferences: ts.UserPreferences = {
   quotePreference: 'single',
   includeCompletionsWithInsertText: true,
 };
@@ -22,38 +27,41 @@ const preferences = {
 before(async () => {
   server = await createAppTestServer();
   ({code3dAnnotations: annotations, code3dAnnotationNames: annotationNames} =
-    await server.ssrLoadModule('/src/model/annotations.ts'));
-  const shared = await server.ssrLoadModule(
-    '/src/model/tool-parameter-annotations.ts',
-  );
+    await server.ssrLoadModule<typeof import('../src/model/annotations.ts')>(
+      '/src/model/annotations.ts',
+    ));
+  const shared = await server.ssrLoadModule<
+    typeof import('../src/model/tool-parameter-annotations.ts')
+  >('/src/model/tool-parameter-annotations.ts');
   diagnostics = file =>
     shared.parameterAnnotationDiagnostics(
       file,
       programFor(file).getTypeChecker(),
     );
   readParameters = declaration => {
+    assert.ok(ts.isFunctionDeclaration(declaration));
     const checker = programFor(declaration.getSourceFile()).getTypeChecker();
     return shared.readToolParameterAnnotations(
       declaration,
       shared.signatureParameters(
-        checker.getSignatureFromDeclaration(declaration),
+        defined(checker.getSignatureFromDeclaration(declaration)),
         checker,
         declaration,
       ),
     );
   };
-  const {AnnotationLanguageService} = await server.ssrLoadModule(
-    '/src/monaco/annotation-language-service.ts',
-  );
-  ({EmbeddedCodeProjection} = await server.ssrLoadModule(
-    '/src/monaco/embedded-code.ts',
-  ));
+  const {AnnotationLanguageService} = await server.ssrLoadModule<
+    typeof import('../src/monaco/annotation-language-service.ts')
+  >('/src/monaco/annotation-language-service.ts');
+  ({EmbeddedCodeProjection} = await server.ssrLoadModule<
+    typeof import('../src/monaco/embedded-code.ts')
+  >('/src/monaco/embedded-code.ts'));
   const language = await packageTestLanguage(server);
   files = new Map(
     language.files.map(file => [`file:///workspace${file.path}`, file.source]),
   );
-  const readFile = name => files.get(name) ?? ts.sys.readFile(name);
-  const host = {
+  const readFile = (name: string) => files.get(name) ?? ts.sys.readFile(name);
+  const host: ts.LanguageServiceHost = {
     getCompilationSettings: () => ({
       strict: true,
       target: ts.ScriptTarget.ESNext,
@@ -81,7 +89,7 @@ after(async () => {
   await server?.close();
 });
 
-function sourceFile(source) {
+function sourceFile(source: string) {
   return ts.createSourceFile(
     'file:///workspace/model.ts',
     source,
@@ -90,7 +98,7 @@ function sourceFile(source) {
   );
 }
 
-function programFor(file) {
+function programFor(file: ts.SourceFile) {
   const host = ts.createCompilerHost({});
   const getSourceFile = host.getSourceFile;
   host.getSourceFile = (name, ...args) =>
@@ -98,23 +106,26 @@ function programFor(file) {
   return ts.createProgram([file.fileName], {}, host);
 }
 
-function declaration(value, parameters = 'width: number, edges?: number[]') {
+function declaration(
+  value: string,
+  parameters = 'width: number, edges?: number[]',
+) {
   return `/** @code3d.param ${value} */\nfunction model(${parameters}) {return width;}`;
 }
 
-function complete(marked) {
+function complete(marked: string) {
   const result = markedSource(marked);
   return {
     ...result,
     info: languageService.completions(
-      result.file,
+      defined(result.file),
       result.position,
       preferences,
     ),
   };
 }
 
-function markedSource(marked) {
+function markedSource(marked: string) {
   const position = marked.indexOf('|');
   assert.notEqual(position, -1);
   const source = marked.replace('|', '');
@@ -128,21 +139,25 @@ function markedSource(marked) {
   };
 }
 
-function selectionSpans(selection) {
+function selectionSpans(selection: ts.SelectionRange | undefined) {
   const result = [];
-  for (let current = selection; current; current = current.parent)
+  for (
+    let current: ts.SelectionRange | undefined = selection;
+    current;
+    current = current.parent
+  )
     result.push(current.textSpan);
   return result;
 }
 
-function select(marked) {
+function select(marked: string) {
   const result = markedSource(marked);
   const outer = nativeLanguageService.getSmartSelectionRange(
-    result.file.fileName,
+    defined(result.file).fileName,
     result.position,
   );
   const selection = languageService.selectionRange(
-    result.file,
+    defined(result.file),
     result.position,
     outer,
   );
@@ -175,7 +190,7 @@ function select(marked) {
   };
 }
 
-function names(result) {
+function names(result: ReturnType<typeof complete>) {
   return result.info?.entries.map(entry => entry.name).sort();
 }
 
@@ -251,9 +266,12 @@ test('validates unused functions, methods and overloads independently', () => {
   assert.deepEqual(diagnostics(sourceFile(source)), []);
   const invalid = declaration("missing {kind: 'length'}");
   const [issue] = diagnostics(sourceFile(invalid));
-  assert.match(issue.messageText, /unknown parameter: missing/);
+  assert.match(
+    ts.flattenDiagnosticMessageText(issue.messageText, '\n'),
+    /unknown parameter: missing/,
+  );
   assert.equal(
-    invalid.slice(issue.start, issue.start + issue.length),
+    invalid.slice(issue.start, defined(issue.start) + defined(issue.length)),
     'missing',
   );
 });
@@ -279,11 +297,16 @@ test('uses the same static configuration validation for editing and compilation'
     const file = sourceFile(declaration(value));
     const [issue] = diagnostics(file);
     assert.ok(issue, value);
-    assert.ok(issue.start >= file.text.indexOf(value));
-    assert.ok(issue.start + issue.length <= file.text.indexOf('*/'));
+    assert.ok(defined(issue.start) >= file.text.indexOf(value));
+    assert.ok(
+      defined(issue.start) + defined(issue.length) <= file.text.indexOf('*/'),
+    );
     assert.throws(
       () => readParameters(file.statements[0]),
-      error => error.message === issue.messageText,
+      error =>
+        error instanceof Error &&
+        error.message ===
+          ts.flattenDiagnosticMessageText(issue.messageText, '\n'),
       value,
     );
   }
@@ -293,13 +316,19 @@ test('reports duplicate parameter tags and annotations on unsupported declaratio
   const source =
     '/**\n * @code3d.param width {kind: "length"}\n * @code3d.param width {kind: "angle"}\n */\nfunction model(width: number) {}';
   assert.match(
-    diagnostics(sourceFile(source))[0].messageText,
+    ts.flattenDiagnosticMessageText(
+      diagnostics(sourceFile(source))[0].messageText,
+      '\n',
+    ),
     /more than once/,
   );
   assert.match(
-    diagnostics(
-      sourceFile('/** @code3d.param width {} */\nconst width = 1;'),
-    )[0].messageText,
+    ts.flattenDiagnosticMessageText(
+      diagnostics(
+        sourceFile('/** @code3d.param width {} */\nconst width = 1;'),
+      )[0].messageText,
+      '\n',
+    ),
     /callable declaration/,
   );
 });
@@ -319,11 +348,15 @@ test('accepts static defaults for optional numeric parameters', () => {
       'width = 3',
       3,
     ],
-  ]) {
+  ] as const) {
     const file = sourceFile(declaration(`width ${config}`, parameters));
     assert.deepEqual(diagnostics(file), [], config);
     assert.equal(
-      readParameters(file.statements[0])[0].config.default,
+      (() => {
+        const config = readParameters(file.statements[0])[0].config;
+        assert.ok('default' in config);
+        return config.default;
+      })(),
       expected,
     );
   }
@@ -351,29 +384,36 @@ test('reports invalid defaults through the shared annotation diagnostics and par
     ["{kind: 'length', default: 2, constraints: {max: 1}}"],
     ["{kind: 'length', default: 1, constraints: {exclusiveMin: 1}}"],
     ["{kind: 'length', default: 1, constraints: {exclusiveMax: 1}}"],
-  ]) {
+  ] as const) {
     const file = sourceFile(declaration(`width ${config}`, parameters));
     const [issue] = diagnostics(file);
     assert.ok(issue, config);
-    assert.ok(issue.start >= file.text.indexOf('width'));
-    assert.ok(issue.start + issue.length <= file.text.indexOf('*/'));
+    assert.ok(defined(issue.start) >= file.text.indexOf('width'));
+    assert.ok(
+      defined(issue.start) + defined(issue.length) <= file.text.indexOf('*/'),
+    );
     assert.throws(
       () => readParameters(file.statements[0]),
-      error => error.message === issue.messageText,
+      error =>
+        error instanceof Error &&
+        error.message ===
+          ts.flattenDiagnosticMessageText(issue.messageText, '\n'),
       config,
     );
   }
 });
 
 test('completes parameter names with replacement ranges, including an empty name', () => {
-  for (const fragment of ['|', 'wi|', 'wi|dth']) {
+  for (const fragment of ['|', 'wi|', 'wi|dth'] as const) {
     const result = complete(declaration(fragment));
     assert.deepEqual(names(result), ['edges', 'width']);
-    const width = result.info.entries.find(entry => entry.name === 'width');
-    const {start, length} = width.replacementSpan;
+    const width = defined(result.info).entries.find(
+      entry => entry.name === 'width',
+    );
+    const {start, length} = defined(defined(width).replacementSpan);
     const replaced =
       result.source.slice(0, start) +
-      width.name +
+      defined(width).name +
       result.source.slice(start + length);
     assert.match(replaced, /@code3d\.param width \*\//);
   }
@@ -412,28 +452,30 @@ test('completes config fields, kind values, numeric constraints and actions from
     ['remove-argument'],
   );
   assert.ok(
-    !names(complete(declaration("edges {kind: 'edge', |}"))).includes(
+    !defined(names(complete(declaration("edges {kind: 'edge', |}")))).includes(
       'constraints',
     ),
   );
   assert.ok(
-    !names(complete(declaration("edges {kind: 'edge', |}"))).includes(
+    !defined(names(complete(declaration("edges {kind: 'edge', |}")))).includes(
       'default',
     ),
   );
   const result = complete(
     declaration("width {kind: 'length', def|}", 'width = 4'),
   );
-  assert.ok(names(result).includes('default'));
+  assert.ok(defined(names(result)).includes('default'));
   const details = languageService.details(
-    result.file,
+    defined(result.file),
     result.position,
     'default',
     {},
     preferences,
   );
   assert.match(
-    details.displayParts.map(part => part.text).join(''),
+    defined(details)
+      .displayParts.map(part => part.text)
+      .join(''),
     /default\?: number/,
   );
 });
@@ -442,22 +484,25 @@ test('maps string completions and details back into multiline configuration', ()
   const result = complete(
     '/**\r\n * @code3d.param width {\r\n *   kind: "le|ngth",\r\n * }\r\n */\r\nfunction model(width: number) {}',
   );
-  const entry = result.info.entries.find(entry => entry.name === 'length');
+  const entry = defined(result.info).entries.find(
+    entry => entry.name === 'length',
+  );
   assert.equal(
     result.source.slice(
-      entry.replacementSpan.start,
-      entry.replacementSpan.start + entry.replacementSpan.length,
+      defined(defined(entry).replacementSpan).start,
+      defined(defined(entry).replacementSpan).start +
+        defined(defined(entry).replacementSpan).length,
     ),
     'length',
   );
   const details = languageService.details(
-    result.file,
+    defined(result.file),
     result.position,
     'length',
     {},
     preferences,
   );
-  assert.equal(details.name, 'length');
+  assert.equal(defined(details).name, 'length');
 });
 
 test('does not offer parameter config completions in arguments or ordinary source', () => {
@@ -481,12 +526,21 @@ test('completes and validates inferred callable parameter names before any call'
   const result = complete(source);
   assert.deepEqual(names(result), ['radius', 'twist']);
   complete(source.replace('r|', "radius {kind: 'length'}|"));
-  assert.deepEqual(languageService.diagnostics(result.file.fileName), []);
+  assert.deepEqual(
+    languageService.diagnostics(defined(result.file).fileName),
+    [],
+  );
   const invalid = complete(source.replace('r|', "missing {kind: 'length'}|"));
-  const [issue] = languageService.diagnostics(invalid.file.fileName);
-  assert.match(issue.messageText, /unknown parameter: missing/);
+  const [issue] = languageService.diagnostics(defined(invalid.file).fileName);
+  assert.match(
+    ts.flattenDiagnosticMessageText(issue.messageText, '\n'),
+    /unknown parameter: missing/,
+  );
   assert.equal(
-    invalid.source.slice(issue.start, issue.start + issue.length),
+    invalid.source.slice(
+      issue.start,
+      defined(issue.start) + defined(issue.length),
+    ),
     'missing',
   );
 });
@@ -581,9 +635,9 @@ test('matches native TypeScript object selections for both annotation kinds', ()
         span.start + span.length <= prefix.length + text.length,
     )
     .map(span =>
-      files.get(reference).slice(span.start, span.start + span.length),
+      defined(files.get(reference)).slice(span.start, span.start + span.length),
     );
-  for (const tag of ['param width', 'arguments']) {
+  for (const tag of ['param width', 'arguments'] as const) {
     const result = select(
       `/** @code3d.${tag} ${marked} */\nfunction model(width: number) {}`,
     );
@@ -635,7 +689,7 @@ test('keeps useful selections while an embedded expression is incomplete', () =>
   for (const marked of [
     declaration("width {kind: 'length', constraints: {min: 1|0"),
     '/** @code3d.arguments [box(10, 2|0 */\nfunction model(value: unknown) {}',
-  ]) {
+  ] as const) {
     const result = select(marked);
     assert.match(result.texts[0], /^(10|20)$/);
     assert.equal(result.texts.at(-1), result.source);
@@ -649,7 +703,7 @@ test('retains ordinary TypeScript selections outside embedded code', () => {
     declaration("width {kind: 'length'}") + '\nconst x = model(1|0);',
     '/** A comment about a bo|x. */\nfunction model() {}',
     'const text = "/** @code3d.param width {kind: \'le|ngth\'} */";',
-  ]) {
+  ] as const) {
     const result = select(marked);
     assert.deepEqual(result.selection, result.outer);
   }
@@ -675,10 +729,10 @@ test('keeps independent selection chains across multiple annotation positions', 
   ];
   const selections = positions.map(position =>
     languageService.selectionRange(
-      result.file,
+      defined(result.file),
       position,
       nativeLanguageService.getSmartSelectionRange(
-        result.file.fileName,
+        defined(result.file).fileName,
         position,
       ),
     ),

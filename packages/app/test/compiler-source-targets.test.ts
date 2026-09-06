@@ -1,32 +1,40 @@
+import type {
+  SourceTarget,
+  SourceTargetEvaluation,
+} from '../src/model/compiler.ts';
+import type {ToolParameterSchema} from '../src/model/tool-schema.ts';
+import {defined} from '../../../test/assert.ts';
 import {TopologyIdSet} from '@code3d/core/tooling';
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
 import {readFile} from 'node:fs/promises';
 import {renderSamples} from '../render-samples/catalog.ts';
 import {sourceTokenOffset} from '../render-samples/source-focus.ts';
-import {createAppTestServer} from './vite-test-server.mjs';
-import {createTestProjectCompiler} from './project-test-files.mjs';
+import {createAppTestServer} from './vite-test-server.ts';
+import {createTestProjectCompiler} from './project-test-files.ts';
 import * as THREE from 'three';
 
-let compileProject;
-let bundledExamples;
-let server;
-let compiler;
-let replicad;
-let clearKernelOperationCache;
-let kernelOperationCacheStats;
-let ModelViewport;
-let sourceTargetPlacement;
-let positionBindings;
-let applyNodeTransform;
+let compileProject: import('../src/model/project-compiler.ts').ProjectCompiler['compile'];
+let bundledExamples: (typeof import('../src/project/bundled-examples.ts'))['bundledExamples'];
+let server: Awaited<ReturnType<typeof createAppTestServer>>;
+let compiler: Awaited<ReturnType<typeof createTestProjectCompiler>>;
+let replicad: typeof import('replicad');
+let clearKernelOperationCache: (typeof import('../../core/bld/library/kernel-cache.js'))['clearKernelOperationCache'];
+let kernelOperationCacheStats: (typeof import('../../core/bld/library/kernel-cache.js'))['kernelOperationCacheStats'];
+let ModelViewport: (typeof import('../src/viewport.ts'))['ModelViewport'];
+let sourceTargetPlacement: (typeof import('../src/viewport.ts'))['sourceTargetPlacement'];
+let positionBindings: (typeof import('../src/viewport.ts'))['positionBindings'];
+let applyNodeTransform: (typeof import('../src/rendering/model-renderer.ts'))['applyNodeTransform'];
 
 before(async () => {
   server = await createAppTestServer();
   ({ModelViewport, sourceTargetPlacement, positionBindings} =
-    await server.ssrLoadModule('/src/viewport.ts'));
-  ({applyNodeTransform} = await server.ssrLoadModule(
-    '/src/rendering/model-renderer.ts',
-  ));
+    await server.ssrLoadModule<typeof import('../src/viewport.ts')>(
+      '/src/viewport.ts',
+    ));
+  ({applyNodeTransform} = await server.ssrLoadModule<
+    typeof import('../src/rendering/model-renderer.ts')
+  >('/src/rendering/model-renderer.ts'));
   compiler = await createTestProjectCompiler(server);
   compileProject = compiler.compile.bind(compiler);
   await compileProject(
@@ -41,18 +49,19 @@ before(async () => {
     '/model.ts',
   );
   // Observe the project's instance, never a second host core/kernel.
-  const replicadModules = [...compiler.runtime.modules].filter(([path]) =>
-    path.endsWith('/replicad/dist/replicad.js'),
+  const replicadModules = [...defined(compiler['runtime']).modules].filter(
+    ([path]) => path.endsWith('/replicad/dist/replicad.js'),
   );
   assert.equal(replicadModules.length, 1);
-  replicad = replicadModules[0][1];
-  ({clearKernelOperationCache, kernelOperationCacheStats} =
-    compiler.runtime.modules.get(
-      '/node_modules/@code3d/core/bld/library/kernel-cache.js',
-    ));
-  ({bundledExamples} = await server.ssrLoadModule(
-    '/src/project/bundled-examples.ts',
-  ));
+  replicad = replicadModules[0][1] as typeof replicad;
+  ({clearKernelOperationCache, kernelOperationCacheStats} = defined(
+    compiler['runtime'],
+  ).modules.get(
+    '/node_modules/@code3d/core/bld/library/kernel-cache.js',
+  ) as typeof import('../../core/bld/library/kernel-cache.js'));
+  ({bundledExamples} = await server.ssrLoadModule<
+    typeof import('../src/project/bundled-examples.ts')
+  >('/src/project/bundled-examples.ts'));
 });
 
 after(async () => {
@@ -68,7 +77,7 @@ test('shell tools select input surfaces while displaying the result, including f
     ['shell(11, [6])', [6], true],
     ['shell(1, [99, 6])', [6], true],
     ['shell(1, [1, 2, 3, 4, 5, 6])', [1, 2, 3, 4, 5, 6], true],
-  ]) {
+  ] as const) {
     const source = `import {box} from '@code3d/core';
 const stock = box(30, 20, 10);
 const hollow = stock.${call};
@@ -85,26 +94,33 @@ export default hollow;`;
     );
     assert.ok(target, call);
     const evaluation = target.evaluations[0];
-    assert.equal(evaluation.selection.kind, 'surface');
-    assert.deepEqual(evaluation.selection.ids, selected);
-    const input = module.objects.get(evaluation.selection.inputNodeId);
+    assert.ok(defined(evaluation.selection).kind === 'surface');
+    assert.deepEqual(defined(evaluation.selection).ids, selected);
+    const input = module.objects.get(defined(evaluation.selection).inputNodeId);
     assert.equal(
-      new Set(input.mesh.surfaceGroups.map(group => group.surfaceId)).size,
+      new Set(
+        defined(defined(input).mesh).surfaceGroups.map(
+          group => group.surfaceId,
+        ),
+      ).size,
       6,
     );
-    const parameter = target.tool.signature.parameters[1];
+    const parameter = defined(target.tool).signature.parameters[1];
     assert.equal(parameter.name, 'removedSurfaceIds');
-    assert.equal(parameter.multiple, true);
+    assert.equal(selectionParameter(parameter).multiple, true);
     assert.equal(parameter.label, 'Openings');
     assert.equal(
-      target.tool.arguments[1].target.kind,
+      defined(defined(target.tool).arguments[1].target).kind,
       call === 'shell(1)' ? 'omitted' : 'present',
     );
     if (failure) {
-      assert.deepEqual(evaluation.nodeIds, [input.nodeId]);
+      assert.deepEqual(evaluation.nodeIds, [defined(input).nodeId]);
     } else {
-      assert.notEqual(evaluation.nodeIds[0], input.nodeId);
-      assert.equal(module.operations.get(evaluation.operationId).kind, 'shell');
+      assert.notEqual(evaluation.nodeIds[0], defined(input).nodeId);
+      assert.ok(
+        defined(module.operations.get(defined(evaluation.operationId))).kind ===
+          'shell',
+      );
     }
   }
 });
@@ -124,42 +140,58 @@ export default assembly;`;
     '/model.ts',
   );
   assert.equal(module.diagnostic, undefined);
-  const binding = name =>
-    module.sourceTargets.find(
-      target =>
-        target.kind === 'value' &&
-        source.slice(target.sourceRef.start).startsWith(name + ' ='),
+  const binding = (name: string) =>
+    defined(
+      module.sourceTargets.find(
+        target =>
+          target.kind === 'value' &&
+          source.slice(target.sourceRef.start).startsWith(name + ' ='),
+      ),
     ).evaluations[0];
   const outline = binding('outline');
-  assert.equal(outline.topologyReferences.length, 4);
+  assert.equal(defined(outline.topologyReferences).length, 4);
   assert.equal(outline.nodeIds.length, 1);
   const ownerId = outline.nodeIds[0];
-  assert.equal(module.objects.get(ownerId).kind, 'group');
-  for (const reference of outline.topologyReferences) {
+  assert.ok(defined(module.objects.get(ownerId)).kind === 'group');
+  for (const reference of defined(outline.topologyReferences)) {
     assert.equal(reference.nodeId, ownerId);
-    assert.equal(module.objects.get(reference.geometryNodeId).kind, 'solid');
+    assert.ok(
+      defined(module.objects.get(reference.geometryNodeId)).kind === 'solid',
+    );
     assert.deepEqual(reference.transform.position, [40, 50, 60]);
   }
-  const selection = module.sourceTargets.find(
-    target =>
-      target.kind === 'topology-selection' &&
-      source.slice(target.sourceRef.start, target.sourceRef.end) === 'edges()',
+  const selection = defined(
+    module.sourceTargets.find(
+      target =>
+        target.kind === 'topology-selection' &&
+        source.slice(target.sourceRef.start, target.sourceRef.end) ===
+          'edges()',
+    ),
   ).evaluations[0].selection;
-  assert.equal(selection.inputNodeId, ownerId);
-  assert.deepEqual(selection.scope.availableIds, [1, 2, 3, 4]);
-  assert.deepEqual(selection.scope.transform.position, [40, 50, 60]);
+  assert.equal(defined(selection).inputNodeId, ownerId);
   assert.deepEqual(
-    binding('ends').topologyReferences.map(reference => reference.id),
+    selectionScope(defined(selection)).availableIds,
+    [1, 2, 3, 4],
+  );
+  assert.deepEqual(
+    selectionScope(defined(selection)).transform.position,
+    [40, 50, 60],
+  );
+  assert.deepEqual(
+    defined(binding('ends').topologyReferences).map(reference => {
+      assert.ok('id' in reference);
+      return reference.id;
+    }),
     [1, 2],
   );
-  assert.equal(binding('center').anchorReferences.length, 1);
+  assert.equal(defined(binding('center').anchorReferences).length, 1);
   assert.deepEqual(
-    binding('center').anchorReferences[0].transform.position,
+    defined(binding('center').anchorReferences)[0].transform.position,
     [35, 50, 60],
   );
   assert.equal(binding('center').isCollection, false);
-  assert.equal(binding('mixed').topologyReferences.length, 1);
-  assert.equal(binding('mixed').anchorReferences.length, 1);
+  assert.equal(defined(binding('mixed').topologyReferences).length, 1);
+  assert.equal(defined(binding('mixed').anchorReferences).length, 1);
 });
 
 test('a failed chained selection keeps only the containing face selectable', async () => {
@@ -171,20 +203,29 @@ const invalid = assembly.mount.edge(12);`;
     {files: [{path: '/model.ts', source}]},
     '/model.ts',
   );
-  assert.match(module.diagnostic.summary, /does not belong/);
+  assert.match(defined(module.diagnostic).summary, /does not belong/);
   const target = module.sourceTargets.find(
     target =>
       target.kind === 'topology-selection' &&
       source.slice(target.sourceRef.start, target.sourceRef.end) === 'edge(12)',
   );
-  const selection = target.evaluations[0].selection;
-  assert.deepEqual(selection.ids, []);
-  assert.deepEqual(selection.scope.availableIds, [1, 2, 3, 4]);
-  assert.equal(module.objects.get(selection.inputNodeId).kind, 'group');
+  const selection = defined(target).evaluations[0].selection;
+  assert.deepEqual(defined(selection).ids, []);
+  assert.deepEqual(
+    selectionScope(defined(selection)).availableIds,
+    [1, 2, 3, 4],
+  );
+  assert.ok(
+    defined(module.objects.get(defined(selection).inputNodeId)).kind ===
+      'group',
+  );
 });
 
 test('topology selection guides contain only the requested original IDs', async () => {
-  const {restrictTopologyMesh} = await server.ssrLoadModule('/src/viewport.ts');
+  const {restrictTopologyMesh} =
+    await server.ssrLoadModule<typeof import('../src/viewport.ts')>(
+      '/src/viewport.ts',
+    );
   const module = await compileProject(
     {
       files: [
@@ -196,15 +237,19 @@ test('topology selection guides contain only the requested original IDs', async 
     },
     '/model.ts',
   );
-  const mesh = module.fallback.mesh;
+  const mesh = defined(module.fallback).mesh;
   const vertices = restrictTopologyMesh(
-    mesh,
+    defined(mesh),
     'vertex',
     new TopologyIdSet([2, 4]),
   );
   assert.deepEqual(vertices.vertexIds, [2, 4]);
   assert.equal(vertices.topologyVertices.length, 6);
-  const edges = restrictTopologyMesh(mesh, 'edge', new TopologyIdSet([2, 4]));
+  const edges = restrictTopologyMesh(
+    defined(mesh),
+    'edge',
+    new TopologyIdSet([2, 4]),
+  );
   assert.deepEqual(
     edges.edgeGroups.map(group => group.edgeId),
     [2, 4],
@@ -215,7 +260,7 @@ test('topology selection guides contain only the requested original IDs', async 
     edges.edgeGroups.reduce((sum, group) => sum + group.count * 3, 0),
   );
   const faces = restrictTopologyMesh(
-    mesh,
+    defined(mesh),
     'surface',
     new TopologyIdSet([2, 4]),
   );
@@ -231,7 +276,7 @@ test('topology selection guides contain only the requested original IDs', async 
 });
 
 test('a caret on range previews one map result with resolved collection placement', async () => {
-  for (const count of [5, 1]) {
+  for (const count of [5, 1] as const) {
     const source = [
       "import range from 'just-range';",
       "import {box, group} from '@code3d/core';",
@@ -248,24 +293,24 @@ test('a caret on range previews one map result with resolved collection placemen
       '/model.ts',
     );
     assert.equal(module.diagnostic, undefined);
-    const at = text =>
-      ModelViewport.prototype.sourceTargetAt.call(
+    const at = (text: string) =>
+      ModelViewport.prototype['sourceTargetAt'].call(
         {module},
         '/model.ts',
         source.indexOf(text) + text.length,
       );
     const target = at('const bars = range');
     // Caret range|(n) belongs to the surrounding model-valued map call.
-    assert.equal(target.kind, 'value');
-    assert.equal(target.evaluations.length, 1);
-    const evaluation = target.evaluations[0];
+    assert.ok(defined(target).kind === 'value');
+    assert.equal(defined(target).evaluations.length, 1);
+    const evaluation = defined(target).evaluations[0];
     assert.equal(evaluation.nodeIds.length, count);
     assert.equal(sourceTargetPlacement(evaluation), 'composition');
     const positions = evaluation.nodeIds.map(nodeId => {
       const object = new THREE.Object3D();
       applyNodeTransform(
         object,
-        module.objects.get(nodeId),
+        defined(module.objects.get(nodeId)),
         sourceTargetPlacement(evaluation),
       );
       return object.position.x;
@@ -275,12 +320,12 @@ test('a caret on range previews one map result with resolved collection placemen
       Array.from({length: count}, (_, i) => (i - 2) * 8),
     );
     assert.equal(
-      sourceTargetPlacement(at('const first').evaluations[0]),
+      sourceTargetPlacement(defined(at('const first')).evaluations[0]),
       'standalone',
     );
-    for (const binding of ['singleton', 'set', 'map']) {
+    for (const binding of ['singleton', 'set', 'map'] as const) {
       assert.equal(
-        sourceTargetPlacement(at(`const ${binding}`).evaluations[0]),
+        sourceTargetPlacement(defined(at(`const ${binding}`)).evaluations[0]),
         'composition',
       );
     }
@@ -304,19 +349,23 @@ test('position bindings preserve inline expressions and prioritize safe upstream
     '/model.ts',
   );
   assert.equal(module.diagnostic, undefined);
-  const occurrences = module.fallback.children.map((node, i) => ({
+  const occurrences = defined(module.fallback).children.map((node, i) => ({
     key: `root/${i}`,
     node,
+    object: new THREE.Object3D(),
+    depth: 1,
+    view: 'source' as const,
+    placement: 'composition' as const,
   }));
   const bindings = [1, 2, 3].map(index =>
     positionBindings(occurrences[index], occurrences, null),
   );
-  assert.equal(bindings[0][0].kind, 'expression');
-  assert.equal(bindings[0][1].kind, 'parameter');
+  assert.ok(bindings[0][0].kind === 'expression');
+  assert.ok(bindings[0][1].kind === 'parameter');
   assert.deepEqual(bindings[0][0].occurrenceKeys, ['root/1', 'root/4']);
-  assert.equal(bindings[1][0].kind, 'parameter');
+  assert.ok(bindings[1][0].kind === 'parameter');
   assert.equal(bindings[1][0].target.sourceRef.start, source.indexOf('8;'));
-  assert.equal(bindings[2][0].kind, 'parameter');
+  assert.ok(bindings[2][0].kind === 'parameter');
   assert.equal(
     bindings[2][0].target.sourceRef.start,
     source.indexOf('.offset(2') + '.offset('.length,
@@ -329,11 +378,14 @@ test('editing a plate fillet does not rebuild an unchanged screw across compiles
   const lofts = t.mock.method(
     replicad.Sketch.prototype,
     'loftWith',
-    function (...args) {
+    function (
+      this: import('replicad').Sketch,
+      ...args: Parameters<typeof loftWith>
+    ) {
       return loftWith.apply(this, args);
     },
   );
-  const source = radius =>
+  const source = (radius: number) =>
     [
       'import {box, cut, group} from "@code3d/core";',
       'import {ISO4762} from "@code3d/screws";',
@@ -345,7 +397,7 @@ test('editing a plate fillet does not rebuild an unchanged screw across compiles
     ].join('\n');
   let buildCount;
   try {
-    for (const radius of [2, 2.1, 2]) {
+    for (const radius of [2, 2.1, 2] as const) {
       const before = kernelOperationCacheStats();
       const module = await compileProject(
         {files: [{path: '/model.ts', source: source(radius)}]},
@@ -382,24 +434,29 @@ test('retains topology values at bindings, aliases, and collection results', asy
     'model.ts',
   );
   assert.equal(module.diagnostic, undefined);
-  const binding = name =>
-    module.sourceTargets.find(
-      target =>
-        target.kind === 'value' &&
-        source.slice(target.sourceRef.start).startsWith(name + ' ='),
+  const binding = (name: string) =>
+    defined(
+      module.sourceTargets.find(
+        target =>
+          target.kind === 'value' &&
+          source.slice(target.sourceRef.start).startsWith(name + ' ='),
+      ),
     ).evaluations[0];
   const points = binding('screwPoints');
   assert.equal(points.nodeIds.length, 1);
-  assert.equal(points.topologyReferences.length, 4);
+  assert.equal(defined(points.topologyReferences).length, 4);
   const call = module.sourceTargets.find(
     target => target.kind === 'topology-selection',
   );
   assert.deepEqual(
-    call.evaluations[0].selection.ids,
-    points.topologyReferences.map(reference => reference.id),
+    defined(defined(call).evaluations[0].selection).ids,
+    defined(points.topologyReferences).map(reference => {
+      assert.ok('id' in reference);
+      return reference.id;
+    }),
   );
   assert.ok(
-    points.topologyReferences.every(
+    defined(points.topologyReferences).every(
       reference =>
         reference.kind === 'vertex' && reference.nodeId === points.nodeIds[0],
     ),
@@ -409,8 +466,8 @@ test('retains topology values at bindings, aliases, and collection results', asy
     points.topologyReferences,
   );
   assert.deepEqual(binding('subset').topologyReferences, [
-    points.topologyReferences[0],
-    points.topologyReferences[2],
+    defined(points.topologyReferences)[0],
+    defined(points.topologyReferences)[2],
   ]);
   assert.equal(binding('repeated').nodeIds.length, 2);
 });
@@ -444,23 +501,24 @@ test('parameter previews observe bound values without changing function executio
     ['peer', 'function unpack(', 1, false],
     ['remaining', 'function unpack(', 1, true],
     ['part', 'const identity = (', 4, false],
-  ]) {
+  ] as const) {
     const start = source.indexOf(binding, source.indexOf(context));
-    const target = ModelViewport.prototype.sourceTargetAt.call(
+    const target = ModelViewport.prototype['sourceTargetAt'].call(
       {module},
       '/model.ts',
       start + 1,
     );
-    assert.equal(target.kind, 'value');
-    assert.equal(target.sourceRef.start, start);
-    assert.equal(target.sourceRef.end, start + binding.length);
-    assert.equal(target.evaluations.length, count);
+    assert.ok(defined(target).kind === 'value');
+    assert.equal(defined(target).sourceRef.start, start);
+    assert.equal(defined(target).sourceRef.end, start + binding.length);
+    assert.equal(defined(target).evaluations.length, count);
     assert.equal(
-      new Set(target.evaluations.flatMap(evaluation => evaluation.nodeIds))
-        .size,
+      new Set(
+        defined(target).evaluations.flatMap(evaluation => evaluation.nodeIds),
+      ).size,
       count,
     );
-    for (const evaluation of target.evaluations) {
+    for (const evaluation of defined(target).evaluations) {
       assert.equal(evaluation.isCollection, collection);
       assert.equal(evaluation.constraintId, undefined);
       assert.equal(evaluation.nodeIds.length, 1);
@@ -468,7 +526,7 @@ test('parameter previews observe bound values without changing function executio
   }
 });
 
-for (const compose of [true, false]) {
+for (const compose of [true, false] as const) {
   test(`relate model values retain their relation context ${compose ? 'with' : 'without'} a loft consumer`, async () => {
     const source = `import {box, circle, loft, rectangle} from '@code3d/core';
       const model = (() => {
@@ -482,27 +540,29 @@ for (const compose of [true, false]) {
       '/model.ts',
     );
     assert.equal(module.diagnostic, undefined);
-    for (const id of ['down', 'up']) {
+    for (const id of ['down', 'up'] as const) {
       const callback = `circle => circle.on(ref.${id})`;
       const callbackStart = source.indexOf(callback);
-      const relation = module.sourceTargets.find(
-        target =>
-          target.kind === 'constraint' &&
-          source.slice(target.sourceRef.start, target.sourceRef.end) ===
-            `circle.on(ref.${id})`,
+      const relation = defined(
+        module.sourceTargets.find(
+          target =>
+            target.kind === 'constraint' &&
+            source.slice(target.sourceRef.start, target.sourceRef.end) ===
+              `circle.on(ref.${id})`,
+        ),
       ).evaluations[0];
       for (const offset of [
         callbackStart + 3,
         callbackStart + 'circle => cir'.length,
-      ]) {
-        const target = ModelViewport.prototype.sourceTargetAt.call(
+      ] as const) {
+        const target = ModelViewport.prototype['sourceTargetAt'].call(
           {module},
           '/model.ts',
           offset,
         );
-        assert.equal(target.kind, 'value');
-        assert.equal(target.evaluations.length, 1);
-        const evaluation = target.evaluations[0];
+        assert.ok(defined(target).kind === 'value');
+        assert.equal(defined(target).evaluations.length, 1);
+        const evaluation = defined(target).evaluations[0];
         assert.deepEqual(evaluation.nodeIds, relation.nodeIds);
         assert.deepEqual(evaluation.focusNodeIds, [
           relation.constraintOwnerNodeId,
@@ -510,21 +570,25 @@ for (const compose of [true, false]) {
         assert.equal(evaluation.constraintId, relation.constraintId);
         assert.equal(sourceTargetPlacement(evaluation), 'composition');
         assert.deepEqual(
-          target.contextTargetIds,
-          module.sourceTargets.find(
-            candidate =>
-              candidate.kind === 'constraint' &&
-              candidate.evaluations[0] === relation,
+          defined(target).contextTargetIds,
+          defined(
+            module.sourceTargets.find(
+              candidate =>
+                candidate.kind === 'constraint' &&
+                candidate.evaluations[0] === relation,
+            ),
           ).contextTargetIds,
         );
       }
-      const focused = module.objects.get(relation.constraintOwnerNodeId);
+      const focused = module.objects.get(
+        defined(relation.constraintOwnerNodeId),
+      );
       assert.ok(
-        focused.compositionTransform.position.some(
+        defined(focused).compositionTransform.position.some(
           value => Math.abs(value) > 49,
         ),
       );
-      assert.deepEqual(focused.transform.position, [0, 0, 0]);
+      assert.deepEqual(defined(focused).transform.position, [0, 0, 0]);
     }
   });
 }
@@ -535,7 +599,7 @@ for (const [kind, sourceAnchor, targetAnchor] of [
   ['surface', 'self.surface(id)', 'base.up'],
   ['vertex', 'self.vertex(id)', 'base.up'],
   ['named', 'self.up', 'base.down'],
-]) {
+] as const) {
   test(`${kind} anchors share relation context across runtime calls and downstream consumers`, async () => {
     const source = `import {box, group} from '@code3d/core';
       const base = box(10, 10, 10);
@@ -564,8 +628,8 @@ for (const [kind, sourceAnchor, targetAnchor] of [
     for (const [anchor, isSource] of [
       [sourceAnchor, true],
       [targetAnchor, false],
-    ]) {
-      const target = ModelViewport.prototype.sourceTargetAt.call(
+    ] as const) {
+      const target = ModelViewport.prototype['sourceTargetAt'].call(
         {module},
         '/model.ts',
         source.indexOf(anchor, source.indexOf(`${sourceAnchor}.on(`)) +
@@ -573,7 +637,7 @@ for (const [kind, sourceAnchor, targetAnchor] of [
           1,
       );
       assert.equal(
-        target.kind,
+        defined(target).kind,
         !isSource
           ? 'element'
           : kind === 'model'
@@ -582,24 +646,29 @@ for (const [kind, sourceAnchor, targetAnchor] of [
               ? 'element'
               : 'topology-selection',
       );
-      assert.equal(target.evaluations.length, 4);
-      assert.equal(new Set(target.evaluations.map(e => e.contextId)).size, 1);
+      assert.equal(defined(target).evaluations.length, 4);
       assert.equal(
-        new Set(target.evaluations.map(e => e.constraintOwnerNodeId)).size,
+        new Set(defined(target).evaluations.map(e => e.contextId)).size,
+        1,
+      );
+      assert.equal(
+        new Set(defined(target).evaluations.map(e => e.constraintOwnerNodeId))
+          .size,
         2,
       );
-      for (const evaluation of target.evaluations) {
-        const constraint = relation.evaluations.find(
-          candidate =>
-            candidate.contextId === evaluation.contextId &&
-            candidate.operationId === evaluation.operationId,
-        );
+      for (const evaluation of defined(target).evaluations) {
+        const constraint: SourceTargetEvaluation | undefined =
+          relation.evaluations.find(
+            candidate =>
+              candidate.contextId === evaluation.contextId &&
+              candidate.operationId === evaluation.operationId,
+          );
         assert.ok(constraint);
         assert.deepEqual(evaluation.nodeIds, constraint.nodeIds);
         assert.equal(evaluation.constraintId, constraint.constraintId);
         assert.deepEqual(evaluation.operationInput, constraint.operationInput);
         assert.deepEqual(evaluation.runtime, constraint.runtime);
-        const owner = isSource
+        const owner: string | undefined = isSource
           ? constraint.constraintOwnerNodeId
           : constraint.nodeIds.find(
               nodeId => nodeId !== constraint.constraintOwnerNodeId,
@@ -607,15 +676,15 @@ for (const [kind, sourceAnchor, targetAnchor] of [
         assert.deepEqual(evaluation.focusNodeIds, [owner]);
         assert.equal(sourceTargetPlacement(evaluation), 'composition');
         if (isSource && kind !== 'named' && kind !== 'model') {
-          assert.equal(evaluation.selection.kind, kind);
-          assert.equal(evaluation.selection.inputNodeId, owner);
-          assert.deepEqual(evaluation.selection.ids, [
-            evaluation.toolArguments[0],
+          assert.equal(defined(evaluation.selection).kind, kind);
+          assert.equal(defined(evaluation.selection).inputNodeId, owner);
+          assert.deepEqual(defined(evaluation.selection).ids, [
+            defined(evaluation.toolArguments)[0],
           ]);
           assert.ok(
             isSource
-              ? [2, 3].includes(evaluation.toolArguments[0])
-              : evaluation.toolArguments[0] === 1,
+              ? [2, 3].includes(defined(evaluation.toolArguments)[0])
+              : defined(evaluation.toolArguments)[0] === 1,
           );
           // Topology IDs keep their own call arguments; offset parameters must not leak in.
           assert.notEqual(
@@ -626,7 +695,7 @@ for (const [kind, sourceAnchor, targetAnchor] of [
         }
       }
       assert.deepEqual(
-        new Set(target.contextTargetIds),
+        new Set(defined(target).contextTargetIds),
         new Set(relation.contextTargetIds),
       );
     }
@@ -647,23 +716,29 @@ test('anchor context is limited to the enclosing relation in a constraint array'
     '/model.ts',
   );
   assert.equal(module.diagnostic, undefined);
-  const at = text =>
-    ModelViewport.prototype.sourceTargetAt.call(
+  const at = (text: string) =>
+    ModelViewport.prototype['sourceTargetAt'].call(
       {module},
       '/model.ts',
       source.indexOf(text) + text.length - 1,
     );
-  const edge = at('self.edge(3)').evaluations[0];
-  const face = at('self.up').evaluations[0];
+  const edge = defined(at('self.edge(3)')).evaluations[0];
+  const face = defined(at('self.up')).evaluations[0];
   assert.notEqual(edge.constraintId, face.constraintId);
-  assert.equal(edge.constraintId, at('base.left').evaluations[0].constraintId);
-  assert.equal(face.constraintId, at('base.down').evaluations[0].constraintId);
-  const alone = at('base.edge(2)').evaluations[0];
+  assert.equal(
+    edge.constraintId,
+    defined(at('base.left')).evaluations[0].constraintId,
+  );
+  assert.equal(
+    face.constraintId,
+    defined(at('base.down')).evaluations[0].constraintId,
+  );
+  const alone = defined(at('base.edge(2)')).evaluations[0];
   assert.equal(alone.nodeIds.length, 1);
   assert.equal(alone.constraintId, undefined);
   assert.equal(alone.operationId, undefined);
   assert.equal(sourceTargetPlacement(alone), 'standalone');
-  assert.deepEqual(at('base.edge(2)').contextTargetIds, []);
+  assert.deepEqual(defined(at('base.edge(2)')).contextTargetIds, []);
 });
 
 test('represents an offset call with its constraint target', async () => {
@@ -712,24 +787,30 @@ test('derives parameter semantics from the call rather than variable annotations
     target => target.tool,
   );
   assert.ok(call);
-  assert.deepEqual(call.tool.signature.parameters[0].constraints, {
-    min: 1,
-    max: 100,
-  });
-  assert.equal(call.tool.signature.parameters[0].label, 'Width');
-  const usage = call.evaluations[0].parameters.find(
+  assert.deepEqual(
+    valueParameter(defined(call.tool).signature.parameters[0]).constraints,
+    {
+      min: 1,
+      max: 100,
+    },
+  );
+  assert.equal(defined(call.tool).signature.parameters[0].label, 'Width');
+  const usage = defined(call.evaluations[0].parameters).find(
     parameter => parameter.operation === 'plate',
   );
-  assert.equal(usage.target.kind, 'length');
-  assert.equal(usage.target.label, 'Size');
-  assert.equal(usage.target.value, 40);
-  assert.equal(usage.value, 80);
-  assert.equal(usage.sensitivity, 2);
+  assert.ok(defined(usage).target.kind === 'length');
+  assert.equal(defined(usage).target.label, 'Size');
+  assert.equal(defined(usage).target.value, 40);
+  assert.equal(defined(usage).value, 80);
+  assert.equal(defined(usage).sensitivity, 2);
   assert.equal(
-    source.slice(usage.target.sourceRef.start, usage.target.sourceRef.end),
+    source.slice(
+      defined(usage).target.sourceRef.start,
+      defined(usage).target.sourceRef.end,
+    ),
     '40',
   );
-  assert.deepEqual(Object.keys(usage.target).sort(), [
+  assert.deepEqual(Object.keys(defined(usage).target).sort(), [
     'id',
     'kind',
     'label',
@@ -762,11 +843,10 @@ test('retains shared-parameter peers in a group input context', async () => {
       )?.nodeIds ?? []
     );
   });
-  const spacingTargetId = exactTargets(
-    module,
-    source,
-    'offset(-spacing, 0, 0)',
-  )[0].evaluations[0].parameters.find(
+  const spacingTargetId = defined(
+    exactTargets(module, source, 'offset(-spacing, 0, 0)')[0].evaluations[0]
+      .parameters,
+  ).find(
     parameter => parameter.operation === 'offset' && parameter.argument === 'x',
   )?.target.id;
 
@@ -786,7 +866,7 @@ for (const call of [
   'originVertex(3)',
   'originCenter()',
   'rotate(0, 0, 90)',
-]) {
+] as const) {
   test(`retains the model before ${call} at its receiver source range`, async () => {
     const source = [
       'import {box} from "@code3d/core";',
@@ -802,7 +882,7 @@ for (const call of [
     for (const [binding, receiver, origin] of [
       ['direct', 'pivoted', [1, 2, 3]],
       ['chained', 'pivoted.originOffset(0, 5, 0)', [1, 7, 3]],
-    ]) {
+    ] as const) {
       const context = `const ${binding} = ${receiver}.${call}`;
       const input = exactTargets(module, source, receiver, context).find(
         target => target.kind === 'operation-input',
@@ -823,13 +903,15 @@ for (const call of [
       assert.equal(source[input.sourceRef.end], '.');
       assert.equal(output.sourceRef.start, input.sourceRef.end + 1);
       const evaluation = input.evaluations[0];
-      const operation = module.operations.get(evaluation.operationId);
+      const operation = module.operations.get(defined(evaluation.operationId));
       assert.equal(evaluation.operationId, output.evaluations[0].operationId);
-      assert.equal(operation.kind, call.slice(0, call.indexOf('(')));
-      assert.deepEqual(evaluation.nodeIds, [operation.inputs[0].nodeId]);
-      assert.notEqual(evaluation.nodeIds[0], operation.outputNodeId);
+      assert.equal(defined(operation).kind, call.slice(0, call.indexOf('(')));
+      assert.deepEqual(evaluation.nodeIds, [
+        defined(operation).inputs[0].nodeId,
+      ]);
+      assert.notEqual(evaluation.nodeIds[0], defined(operation).outputNodeId);
       assert.deepEqual(
-        module.objects.get(evaluation.nodeIds[0]).origin,
+        defined(module.objects.get(evaluation.nodeIds[0])).origin,
         origin,
       );
     }
@@ -855,17 +937,18 @@ test('captures computed methods and model-valued inputs without operation metada
     ['pivoted', 'changed = pivoted', [1, 2, 3]],
     ['changed', 'inspect(changed)', [1, 7, 3]],
     ['changed', 'vertex = changed', [1, 7, 3]],
-  ]) {
+  ] as const) {
     const start = source.indexOf(text, source.indexOf(context));
-    const target = ModelViewport.prototype.sourceTargetAt.call(
+    const target = ModelViewport.prototype['sourceTargetAt'].call(
       {module},
       '/model.ts',
       start + text.length,
     );
-    assert.equal(target.sourceRef.start, start);
-    assert.equal(target.sourceRef.end, start + text.length);
+    assert.equal(defined(target).sourceRef.start, start);
+    assert.equal(defined(target).sourceRef.end, start + text.length);
     assert.deepEqual(
-      module.objects.get(target.evaluations[0].nodeIds[0]).origin,
+      defined(module.objects.get(defined(target).evaluations[0].nodeIds[0]))
+        .origin,
       expected,
     );
   }
@@ -896,23 +979,23 @@ test('derives composition roles for imported aliases, namespace calls, and neste
     ['sections', 'core.loft(sections', 'collection'],
     ['options', 'core.loft(sections, options', 'spine'],
     ['body', 'assemble([body', 'child'],
-  ]) {
+  ] as const) {
     const target = exactTargets(module, source, text, context).find(
       target => target.kind === 'operation-input',
     );
     assert.ok(target, `${context}: missing ${text}`);
-    assert.equal(target.operation.role, role);
+    assert.equal(defined(target.operation).role, role);
     const evaluation = target.evaluations[0];
-    const operation = module.operations.get(evaluation.operationId);
+    const operation = module.operations.get(defined(evaluation.operationId));
     assert.ok(
       evaluation.nodeIds.every(id =>
-        operation.inputs.some(input => input.nodeId === id),
+        defined(operation).inputs.some(input => input.nodeId === id),
       ),
     );
     // Container tracing must not create duplicate sibling previews.
     const peers = target.contextTargetIds.flatMap(
       id =>
-        module.sourceTargets.find(candidate => candidate.id === id)
+        defined(module.sourceTargets.find(candidate => candidate.id === id))
           .evaluations[0].nodeIds,
     );
     assert.equal(peers.length, new Set(peers).size);
@@ -935,19 +1018,23 @@ test('keeps repeated and failed receiver evaluations separate', async () => {
   const repeated = exactTargets(module, source, 'pivoted', 'y => pivoted').find(
     target => target.kind === 'operation-input',
   );
-  assert.equal(repeated.evaluations.length, 2);
+  assert.equal(defined(repeated).evaluations.length, 2);
   assert.equal(
-    new Set(repeated.evaluations.map(evaluation => evaluation.operationId))
-      .size,
+    new Set(
+      defined(repeated).evaluations.map(evaluation => evaluation.operationId),
+    ).size,
     2,
   );
   assert.deepEqual(
-    [...repeated.evaluations]
+    [...defined(repeated).evaluations]
       .sort((a, b) => a.runtime.order - b.runtime.order)
       .map(
         evaluation =>
-          module.objects.get(
-            module.operations.get(evaluation.operationId).outputNodeId,
+          defined(
+            module.objects.get(
+              defined(module.operations.get(defined(evaluation.operationId)))
+                .outputNodeId,
+            ),
           ).origin,
       ),
     [
@@ -963,14 +1050,14 @@ test('keeps repeated and failed receiver evaluations separate', async () => {
   ).find(target => target.kind === 'value');
   assert.ok(beforeFailure);
   assert.deepEqual(
-    module.objects.get(beforeFailure.evaluations[0].nodeIds[0]).origin,
+    defined(module.objects.get(beforeFailure.evaluations[0].nodeIds[0])).origin,
     [1, 7, 3],
   );
   const failure = exactTargets(module, source, 'originVertex(9999)').find(
     target => target.kind === 'topology-selection',
   );
-  assert.equal(failure.evaluations[0].runtime.outcome, 'failed');
-  assert.deepEqual(failure.evaluations[0].selection.ids, []);
+  assert.equal(defined(failure).evaluations[0].runtime.outcome, 'failed');
+  assert.deepEqual(defined(defined(failure).evaluations[0].selection).ids, []);
 });
 
 test('input observation preserves getters, this, argument order, and optional calls', async () => {
@@ -1008,23 +1095,23 @@ test('a failed repetition retains its own receiver instead of the previous succe
     '/model.ts',
   );
   assert.ok(module.diagnostic);
-  const target = ModelViewport.prototype.sourceTargetAt.call(
+  const target = ModelViewport.prototype['sourceTargetAt'].call(
     {module},
     '/model.ts',
     source.indexOf('current.origin') + 'current'.length,
   );
-  assert.equal(target.evaluations.length, 2);
+  assert.equal(defined(target).evaluations.length, 2);
   assert.deepEqual(
-    target.evaluations.map(
-      evaluation => module.objects.get(evaluation.nodeIds[0]).origin,
+    defined(target).evaluations.map(
+      evaluation => defined(module.objects.get(evaluation.nodeIds[0])).origin,
     ),
     [
       [0, 9999, 0],
       [0, 1, 0],
     ],
   );
-  assert.equal(target.evaluations[0].operationId, undefined);
-  assert.ok(target.evaluations[1].operationId);
+  assert.equal(defined(target).evaluations[0].operationId, undefined);
+  assert.ok(defined(target).evaluations[1].operationId);
 });
 
 test('input target identities survive preceding text edits', async () => {
@@ -1034,8 +1121,8 @@ test('input target identities survive preceding text edits', async () => {
     'const moved = base.originOffset(0, 2, 0);',
     'export default assemble([base, moved]);',
   ].join('\n');
-  const targets = [];
-  for (const source of [body, '// preceding edit\n' + body]) {
+  const targets: SourceTarget[][] = [];
+  for (const source of [body, '// preceding edit\n' + body] as const) {
     const module = await compileProject(
       {files: [{path: '/model.ts', source}]},
       '/model.ts',
@@ -1073,7 +1160,7 @@ test('evaluates a user-defined Replicad primitive', async () => {
   assert.equal(module.diagnostic, undefined);
   const modelId = module.exports.get('model');
   assert.ok(modelId);
-  assert.equal(module.objects.get(modelId)?.operation.kind, 'primitive');
+  assert.ok(module.objects.get(modelId)?.operation.kind === 'primitive');
   assert.ok(
     exactTargets(module, source, 'cylinder(2)').some(
       target => target.kind === 'operation-output',
@@ -1082,7 +1169,10 @@ test('evaluates a user-defined Replicad primitive', async () => {
   const output = exactTargets(module, source, 'cylinder(2)').find(
     target => target.kind === 'operation-output',
   );
-  assert.equal(output.evaluations[0].parameters[0]?.argument, 'radius');
+  assert.equal(
+    defined(defined(output).evaluations[0].parameters)[0]?.argument,
+    'radius',
+  );
 });
 
 test('compiles the standalone custom primitive example with direct annotations and a default argument', async () => {
@@ -1090,14 +1180,14 @@ test('compiles the standalone custom primitive example with direct annotations a
   const module = await compileProject({files: bundledExamples.files}, rootPath);
   assert.equal(module.diagnostic, undefined);
   assert.ok(module.exports.has('customPrimitivesExample'));
-  const source = bundledExamples.files.find(
-    file => file.path === rootPath,
+  const source = defined(
+    bundledExamples.files.find(file => file.path === rootPath),
   ).source;
 
   for (const [call, arguments_] of [
     ['twistKnob(10, 3, 14)', ['radius', 'shaftRadius', 'y']],
     ['twistKnob(10, 3, 8, 30)', ['radius', 'shaftRadius', 'y', 'twist']],
-  ]) {
+  ] as const) {
     const start = source.indexOf(call);
     assert.notEqual(start, -1);
     const target = module.sourceTargets.find(
@@ -1109,21 +1199,22 @@ test('compiles the standalone custom primitive example with direct annotations a
     assert.ok(target);
     const evaluation = target.evaluations[0];
     assert.deepEqual(
-      evaluation.parameters.map(parameter => parameter.argument),
+      defined(evaluation.parameters).map(parameter => parameter.argument),
       arguments_,
     );
     assert.deepEqual(
-      evaluation.parameters.map(parameter => parameter.target.kind),
+      defined(evaluation.parameters).map(parameter => parameter.target.kind),
       arguments_.map(argument => (argument === 'twist' ? 'angle' : 'length')),
     );
     assert.equal(
-      evaluation.parameters.find(parameter => parameter.argument === 'twist')
-        ?.value,
-      arguments_.includes('twist') ? 30 : undefined,
+      defined(evaluation.parameters).find(
+        parameter => parameter.argument === 'twist',
+      )?.value,
+      arguments_.some(argument => argument === 'twist') ? 30 : undefined,
     );
     const model = module.objects.get(evaluation.nodeIds[0]);
-    assert.equal(model.operation.kind, 'primitive');
-    assert.ok(model.mesh.triangles.length > 0);
+    assert.ok(defined(model).operation.kind === 'primitive');
+    assert.ok(defined(defined(model).mesh).triangles.length > 0);
   }
 });
 
@@ -1139,19 +1230,21 @@ test('the documented origin example exposes each spatial operation and its assem
     ['offset.rotate(15, 35, 0)', 'rotate', ['x', 'y', 'z']],
     ['rotated.originCenter()', 'originCenter', undefined],
     ['rotated.origin(0, 0, 0)', 'origin', ['x', 'y', 'z']],
-  ]) {
+  ] as const) {
     // The receiver is a separate input scope; the tool starts at the method name.
     const targets = exactTargets(
       module,
       file.source,
-      text.slice(text.indexOf('.') + 1),
+      defined(text).slice(defined(text).indexOf('.') + 1),
       text,
     );
     assert.ok(
       targets.some(target =>
         target.evaluations.some(evaluation => {
-          const operation = module.operations.get(evaluation.operationId);
-          return operation?.kind === kind && operation.spatial;
+          const operation = module.operations.get(
+            defined(evaluation.operationId),
+          );
+          return operation?.kind === kind && defined(operation).spatial;
         }),
       ),
       `The guide needs an inspectable spatial context for ${text}`,
@@ -1159,7 +1252,9 @@ test('the documented origin example exposes each spatial operation and its assem
     if (parameters) {
       const target = targets.find(target => target.tool);
       assert.deepEqual(
-        target?.tool.signature.parameters.map(parameter => parameter.name),
+        defined(target?.tool).signature.parameters.map(
+          parameter => parameter.name,
+        ),
         parameters,
       );
     }
@@ -1184,12 +1279,12 @@ test('the shared combined-constraints guide retains both inspectable relations',
   assert.equal(module.diagnostic, undefined);
   assert.ok(module.exports.has('default'));
   const relations = ['first.right', 'first.down'].map(text => {
-    const target = ModelViewport.prototype.sourceTargetAt.call(
+    const target = ModelViewport.prototype['sourceTargetAt'].call(
       {module},
       rootPath,
       file.source.indexOf(text) + text.length - 1,
     );
-    const evaluation = target.evaluations[0];
+    const evaluation = defined(target).evaluations[0];
     assert.ok(evaluation.constraintId);
     assert.equal(sourceTargetPlacement(evaluation), 'composition');
     assert.equal(evaluation.nodeIds.length, 2);
@@ -1216,9 +1311,9 @@ test('the App guide distinguishes a method receiver, its result and an ordinary 
     rootPath,
   );
   assert.equal(module.diagnostic, undefined);
-  const at = (text, context = text) => {
+  const at = (text: string, context = text) => {
     const start = source.indexOf(text, source.indexOf(context));
-    return ModelViewport.prototype.sourceTargetAt.call(
+    return ModelViewport.prototype['sourceTargetAt'].call(
       {module},
       rootPath,
       start + text.length - 1,
@@ -1228,14 +1323,14 @@ test('the App guide distinguishes a method receiver, its result and an ordinary 
   const result = at('fillet(1)');
   const argument = at('rounded', 'centered(rounded)');
   assert.notDeepEqual(
-    receiver.evaluations[0].nodeIds,
-    result.evaluations[0].nodeIds,
+    defined(receiver).evaluations[0].nodeIds,
+    defined(result).evaluations[0].nodeIds,
   );
   assert.deepEqual(
-    argument.evaluations[0].nodeIds,
-    result.evaluations[0].nodeIds,
+    defined(argument).evaluations[0].nodeIds,
+    defined(result).evaluations[0].nodeIds,
   );
-  assert.equal(at('centered(rounded)').tool, undefined);
+  assert.equal(defined(at('centered(rounded)')).tool, undefined);
 });
 
 for (const sample of renderSamples) {
@@ -1262,23 +1357,32 @@ for (const sample of renderSamples) {
 test('the documented function offers parameter tools and design-time arguments', async () => {
   const rootPath = '/examples/design-arguments.ts';
   const file = bundledExamples.files.find(file => file.path === rootPath);
-  const module = await compileProject({files: [file]}, rootPath);
+  const module = await compileProject({files: [defined(file)]}, rootPath);
   assert.equal(module.diagnostic, undefined);
-  const call = exactTargets(module, file.source, 'makeKnob(10, 5, 6)').find(
-    target => target.tool,
-  );
+  const call = exactTargets(
+    module,
+    defined(file).source,
+    'makeKnob(10, 5, 6)',
+  ).find(target => target.tool);
   assert.ok(call);
   assert.deepEqual(
-    call.tool.signature.parameters.map(parameter => parameter.name),
+    defined(call.tool).signature.parameters.map(parameter => parameter.name),
     ['radius', 'height', 'sides'],
   );
-  assert.deepEqual(call.tool.signature.parameters[2].constraints, {min: 3});
+  assert.deepEqual(
+    valueParameter(defined(call.tool).signature.parameters[2]).constraints,
+    {min: 3},
+  );
   assert.deepEqual(
     module.designArguments.map(context => context.label),
     ['10, 5, 6', '14, 7, 8'],
   );
   for (const context of module.designArguments) {
-    const preview = await compileProject({files: [file]}, rootPath, context.id);
+    const preview = await compileProject(
+      {files: [defined(file)]},
+      rootPath,
+      context.id,
+    );
     assert.equal(preview.diagnostic, undefined);
     assert.equal(preview.activeDesignContextId, context.id);
   }
@@ -1312,8 +1416,8 @@ test('compiles one coil in the bundled primitives showcase without a separate co
   assert.ok(
     !bundledExamples.files.some(file => file.path === '/examples/coils.ts'),
   );
-  const source = bundledExamples.files.find(
-    file => file.path === rootPath,
+  const source = defined(
+    bundledExamples.files.find(file => file.path === rootPath),
   ).source;
   assert.equal([...source.matchAll(/\bcoil\(/g)].length, 1);
   const start = source.indexOf('coil(5, 0.75, 4, 2.5)');
@@ -1325,20 +1429,22 @@ test('compiles one coil in the bundled primitives showcase without a separate co
       target.sourceRef.start === start,
   );
   assert.deepEqual(
-    target?.evaluations[0].parameters.map(parameter => parameter.argument),
+    defined(target?.evaluations[0].parameters).map(
+      parameter => parameter.argument,
+    ),
     ['coilRadius', 'wireRadius', 'pitch', 'turns'],
   );
-  const model = module.objects.get(target.evaluations[0].nodeIds[0]);
-  assert.equal(model.operation.kind, 'coil');
-  assert.ok(model.mesh.triangles.length > 0);
+  const model = module.objects.get(defined(target).evaluations[0].nodeIds[0]);
+  assert.ok(defined(model).operation.kind === 'coil');
+  assert.ok(defined(defined(model).mesh).triangles.length > 0);
 });
 
 test('compiles the core tube example with its own operation and editable dimensions', async () => {
   const rootPath = '/examples/primitives.ts';
   const module = await compileProject({files: bundledExamples.files}, rootPath);
   assert.equal(module.diagnostic, undefined);
-  const source = bundledExamples.files.find(
-    file => file.path === rootPath,
+  const source = defined(
+    bundledExamples.files.find(file => file.path === rootPath),
   ).source;
   const start = source.indexOf('tube(5.5, 4.5, 4)');
   assert.notEqual(start, -1);
@@ -1349,12 +1455,14 @@ test('compiles the core tube example with its own operation and editable dimensi
       target.sourceRef.start === start,
   );
   assert.deepEqual(
-    target?.evaluations[0].parameters.map(parameter => parameter.argument),
+    defined(target?.evaluations[0].parameters).map(
+      parameter => parameter.argument,
+    ),
     ['outerRadius', 'innerRadius', 'y'],
   );
-  const model = module.objects.get(target.evaluations[0].nodeIds[0]);
-  assert.equal(model.operation.kind, 'tube');
-  assert.ok(model.mesh.triangles.length > 0);
+  const model = module.objects.get(defined(target).evaluations[0].nodeIds[0]);
+  assert.ok(defined(model).operation.kind === 'tube');
+  assert.ok(defined(defined(model).mesh).triangles.length > 0);
 });
 
 function sharedOffsetSource() {
@@ -1372,7 +1480,12 @@ function sharedOffsetSource() {
   ].join('\n');
 }
 
-function exactTargets(module, source, text, context = text) {
+function exactTargets(
+  module: Awaited<ReturnType<typeof compileProject>>,
+  source: string,
+  text: string,
+  context = text,
+) {
   const contextStart = source.indexOf(context);
   assert.notEqual(contextStart, -1, `missing fixture context: ${context}`);
   const textStart = context.indexOf(text);
@@ -1397,35 +1510,55 @@ const invalid = cap.edges([[1, 1], [2, 1]]);`;
     {files: [{path: '/model.ts', source}]},
     '/model.ts',
   );
-  assert.match(module.diagnostic.summary, /E\[2,1\] does not belong/);
-  const target = text =>
+  assert.match(defined(module.diagnostic).summary, /E\[2,1\] does not belong/);
+  const target = (text: string) =>
     module.sourceTargets.find(
       target =>
         target.kind === 'topology-selection' &&
         source.slice(target.sourceRef.start, target.sourceRef.end) === text,
     );
-  for (const expression of ['surface([1, 1])', 'vertex([1, 1])']) {
+  for (const expression of ['surface([1, 1])', 'vertex([1, 1])'] as const) {
     const selection = target(expression);
-    assert.equal(selection.tool.signature.parameters[0].multiple, false);
-    assert.deepEqual(selection.evaluations[0].selection.ids, [[1, 1]]);
+    assert.equal(
+      selectionParameter(
+        defined(defined(selection).tool).signature.parameters[0],
+      ).multiple,
+      false,
+    );
+    assert.deepEqual(defined(defined(selection).evaluations[0].selection).ids, [
+      [1, 1],
+    ]);
   }
   const list = target('edges([[1, 1], [2, 1], 1])');
-  assert.equal(list.tool.signature.parameters[0].multiple, true);
-  assert.deepEqual(list.evaluations[0].selection.ids, [[1, 1], [2, 1], 1]);
-  const invalid = target('edges([[1, 1], [2, 1]])').evaluations[0].selection;
-  assert.deepEqual(invalid.ids, [[1, 1]]);
-  assert.deepEqual(invalid.scope.availableIds, [
+  assert.equal(
+    selectionParameter(defined(defined(list).tool).signature.parameters[0])
+      .multiple,
+    true,
+  );
+  assert.deepEqual(defined(defined(list).evaluations[0].selection).ids, [
+    [1, 1],
+    [2, 1],
+    1,
+  ]);
+  const invalid = defined(target('edges([[1, 1], [2, 1]])')).evaluations[0]
+    .selection;
+  assert.deepEqual(defined(invalid).ids, [[1, 1]]);
+  assert.deepEqual(selectionScope(defined(invalid)).availableIds, [
     [1, 1],
     [1, 2],
     [1, 3],
     [1, 4],
   ]);
-  const {restrictTopologyMesh} = await server.ssrLoadModule('/src/viewport.ts');
+  const {restrictTopologyMesh} =
+    await server.ssrLoadModule<typeof import('../src/viewport.ts')>(
+      '/src/viewport.ts',
+    );
   const mesh = structuredClone(
-    module.objects.get(invalid.scope.geometryNodeId).mesh,
+    defined(module.objects.get(selectionScope(defined(invalid)).geometryNodeId))
+      .mesh,
   );
   const selected = restrictTopologyMesh(
-    mesh,
+    defined(mesh),
     'edge',
     new TopologyIdSet([
       [1, 1],
@@ -1440,3 +1573,27 @@ const invalid = cap.edges([[1, 1], [2, 1]]);`;
     ],
   );
 });
+
+function selectionParameter(parameter: ToolParameterSchema) {
+  assert.ok(
+    parameter.kind === 'vertex' ||
+      parameter.kind === 'edge' ||
+      parameter.kind === 'surface',
+  );
+  return parameter;
+}
+function valueParameter(parameter: ToolParameterSchema) {
+  assert.ok(
+    parameter.kind === 'length' ||
+      parameter.kind === 'angle' ||
+      parameter.kind === 'scalar' ||
+      parameter.kind === 'count',
+  );
+  return parameter;
+}
+function selectionScope(
+  selection: NonNullable<SourceTargetEvaluation['selection']>,
+) {
+  assert.ok('scope' in selection);
+  return defined(selection.scope);
+}

@@ -10,7 +10,7 @@ const moduleId = 'virtual:code3d-browser-packages';
 const assetPrefix = '/__code3d-packages/';
 
 /** Distribute npm's published file lists, never the App's bundled modules. */
-export function browserPackages(repository: string): Plugin {
+export function browserPackages(repository: string) {
   type Artifact = {path: string; disk: string; version: string; bytes: Buffer};
   type PackageMetadata = {
     dependencies?: Record<string, string>;
@@ -108,6 +108,7 @@ export function browserPackages(repository: string): Plugin {
     },
     resolveId(id) {
       if (id === moduleId) return '\0' + moduleId;
+      return undefined;
     },
     async load(id) {
       if (id !== '\0' + moduleId) return;
@@ -188,5 +189,5 @@ export function browserPackages(repository: string): Plugin {
         response.end(bytes);
       });
     },
-  };
+  } satisfies Plugin;
 }

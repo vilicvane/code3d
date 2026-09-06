@@ -1,6 +1,6 @@
 import type {EmbindHandle} from '@code3d/opencascade';
+import {defined} from '../../../test/assert.ts';
 import {
-  defined,
   createModelSnapshotter,
   disposeModelObjects,
   modelGeometry,
