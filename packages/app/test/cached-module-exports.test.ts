@@ -1,24 +1,26 @@
+import type {ModuleExports} from '../src/model/module-evaluator.ts';
+import type {ProjectFileReader} from '../src/project/file-reader.ts';
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
 import * as esbuild from 'esbuild';
-import {createAppTestServer} from './vite-test-server.mjs';
-import {importTestModule} from './project-test-files.mjs';
+import {createAppTestServer} from './vite-test-server.ts';
+import {importTestModule} from './project-test-files.ts';
 
-let server;
-let ProjectBuilder;
-let ModuleEvaluator;
+let server: Awaited<ReturnType<typeof createAppTestServer>>;
+let ProjectBuilder: (typeof import('../src/project/project-builder.ts'))['ProjectBuilder'];
+let ModuleEvaluator: (typeof import('../src/model/module-evaluator.ts'))['ModuleEvaluator'];
 before(async () => {
   server = await createAppTestServer();
-  ({ProjectBuilder} = await server.ssrLoadModule(
-    '/src/project/project-builder.ts',
-  ));
-  ({ModuleEvaluator} = await server.ssrLoadModule(
-    '/src/model/module-evaluator.ts',
-  ));
+  ({ProjectBuilder} = await server.ssrLoadModule<
+    typeof import('../src/project/project-builder.ts')
+  >('/src/project/project-builder.ts'));
+  ({ModuleEvaluator} = await server.ssrLoadModule<
+    typeof import('../src/model/module-evaluator.ts')
+  >('/src/model/module-evaluator.ts'));
 });
 after(async () => server?.close());
 
-function projectFiles(entries) {
+function projectFiles(entries: Record<string, string>): ProjectFileReader {
   const files = new Map(Object.entries(entries));
   return {
     async readFile(path) {
@@ -28,18 +30,19 @@ function projectFiles(entries) {
         : new TextEncoder().encode(source);
     },
     async stat(path) {
-      if (files.has(path)) return {kind: 'file', version: files.get(path)};
+      if (files.has(path)) return {kind: 'file', version: files.get(path)!};
       if (
         [...files.keys()].some(file =>
           file.startsWith(path === '/' ? '/' : path + '/'),
         )
       )
         return {kind: 'directory', version: ''};
+      return undefined;
     },
   };
 }
 
-for (const extension of ['js', 'mjs', 'mts']) {
+for (const extension of ['js', 'mjs', 'mts'] as const) {
   test(`retains a cached .mjs default, live bindings and re-exports when imported from .${extension}`, async () => {
     const packagePath = '/node_modules/range/index.mjs';
     const sourcePath = '/model.' + extension;
@@ -71,7 +74,7 @@ for (const extension of ['js', 'mjs', 'mts']) {
         {runtimeFiles: initial.formats},
       );
       assert.deepEqual(bundle.staticPackages, [packagePath]);
-      let previous;
+      let previous: ModuleExports | undefined;
       for (let revision = 0; revision < 2; revision++) {
         const result = await evaluator.evaluate('model.js', bundle.source, {
           __code3dModules: modules,
@@ -101,7 +104,7 @@ for (const source of [
   'export {default} from "./child.mjs";',
   'export {value as default} from "./child.mjs";',
   'export * from "./child.mjs";',
-]) {
+] as const) {
   test(`preserves the default export shape for cached ESM: ${source}`, async () => {
     const packagePath = '/node_modules/exports/index.mjs';
     const files = projectFiles({
@@ -152,7 +155,8 @@ test('retains Node-style CommonJS default imports for .mjs consumers', async () 
     });
     await evaluator.evaluate('initial.js', captured.source, {
       __code3dModules: modules,
-      __code3dRecordModule: (path, namespace) => modules.set(path, namespace),
+      __code3dRecordModule: (path: string, namespace: ModuleExports) =>
+        modules.set(path, namespace),
     });
     const original = await builder.build('export * from "/model.mjs";');
     const expected = await evaluator.evaluate('original.js', original.source);

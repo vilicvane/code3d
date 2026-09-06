@@ -1,41 +1,50 @@
+import type {RenderMesh, Vec3} from '@code3d/core/tooling';
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
 import {Matrix4, PerspectiveCamera} from 'three';
-import {createAppTestServer} from './vite-test-server.mjs';
+import {createAppTestServer} from './vite-test-server.ts';
 
-let server;
-let pickScreenTopology;
+let server: Awaited<ReturnType<typeof createAppTestServer>>;
+let pickScreenTopology: (typeof import('../src/rendering/topology-picking.ts'))['pickScreenTopology'];
 const viewport = {width: 1000, height: 800};
 const camera = new PerspectiveCamera(60, 1.25, 0.1, 1000);
 
 before(async () => {
   server = await createAppTestServer();
-  ({pickScreenTopology} = await server.ssrLoadModule(
-    '/src/rendering/topology-picking.ts',
-  ));
+  ({pickScreenTopology} = await server.ssrLoadModule<
+    typeof import('../src/rendering/topology-picking.ts')
+  >('/src/rendering/topology-picking.ts'));
 });
 after(async () => {
   await server?.close();
 });
 
-function vertices(positions) {
+function vertices(positions: readonly Vec3[]): RenderMesh {
   return {
+    ...emptyMesh(),
     topologyVertices: new Float32Array(positions.flat()),
     vertexIds: positions.map((_, index) => index + 1),
   };
 }
-function edges(positions) {
+function edges(positions: readonly Vec3[]): RenderMesh {
   return {
+    ...emptyMesh(),
     edges: new Float32Array(positions.flat()),
     edgeGroups: [{start: 0, count: positions.length, edgeId: 17}],
   };
 }
-function pick(mesh, kind, x, y, matrix = camera.projectionMatrix) {
+function pick(
+  mesh: RenderMesh,
+  kind: 'vertex' | 'edge',
+  x: number,
+  y: number,
+  matrix = camera.projectionMatrix,
+) {
   return pickScreenTopology(mesh, kind, matrix, {x, y}, viewport);
 }
 
 test('vertex tolerance stays six CSS pixels across zoom and model scale', () => {
-  for (const depth of [1, 10, 100]) {
+  for (const depth of [1, 10, 100] as const) {
     const mesh = vertices([[0, 0, -depth]]);
     assert.equal(pick(mesh, 'vertex', 505, 400), 1);
     assert.equal(pick(mesh, 'vertex', 507, 400), undefined);
@@ -79,7 +88,7 @@ test('chooses the nearest screen point, using depth for overlapping points', () 
 });
 
 test('edge tolerance is measured from the segment in CSS pixels', () => {
-  for (const depth of [1, 10, 100]) {
+  for (const depth of [1, 10, 100] as const) {
     const mesh = edges([
       [-2, 0, -depth],
       [2, 0, -depth],
@@ -116,3 +125,16 @@ test('rejects geometry behind the camera and clips segments crossing the near pl
     17,
   );
 });
+
+function emptyMesh(): RenderMesh {
+  return {
+    vertices: new Float32Array(),
+    normals: new Float32Array(),
+    triangles: new Uint32Array(),
+    edges: new Float32Array(),
+    topologyVertices: new Float32Array(),
+    vertexIds: [],
+    surfaceGroups: [],
+    edgeGroups: [],
+  };
+}

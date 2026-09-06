@@ -1,18 +1,18 @@
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
-import {createAppTestServer} from './vite-test-server.mjs';
+import {createAppTestServer} from './vite-test-server.ts';
 
-let server;
-let ProjectPackageResolver;
+let server: Awaited<ReturnType<typeof createAppTestServer>>;
+let ProjectPackageResolver: (typeof import('../src/project/package-resolver.ts'))['ProjectPackageResolver'];
 before(async () => {
   server = await createAppTestServer();
-  ({ProjectPackageResolver} = await server.ssrLoadModule(
-    '/src/project/package-resolver.ts',
-  ));
+  ({ProjectPackageResolver} = await server.ssrLoadModule<
+    typeof import('../src/project/package-resolver.ts')
+  >('/src/project/package-resolver.ts'));
 });
 after(async () => server?.close());
 
-function resolver(entries) {
+function resolver(entries: Record<string, unknown>) {
   const files = new Map(
     Object.entries(entries).map(([path, source]) => [
       path,
@@ -27,7 +27,7 @@ function resolver(entries) {
         : new TextEncoder().encode(source);
     },
     async stat(path) {
-      if (files.has(path)) return {kind: 'file', version: files.get(path)};
+      if (files.has(path)) return {kind: 'file', version: files.get(path)!};
       if (
         [...files.keys()].some(file =>
           file.startsWith(path === '/' ? '/' : path + '/'),
@@ -35,6 +35,7 @@ function resolver(entries) {
       ) {
         return {kind: 'directory', version: ''};
       }
+      return undefined;
     },
   });
 }

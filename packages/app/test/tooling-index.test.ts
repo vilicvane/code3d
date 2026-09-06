@@ -1,17 +1,26 @@
+import type {ModelProject, ProjectSourceFile} from '../src/project/project.ts';
+import type {
+  ProjectToolingIndex,
+  ParameterDefinitionMap,
+  ToolCallSchemaMap,
+} from '../src/model/tool-schema.ts';
+import {defined} from '../../../test/assert.ts';
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
 import {fileURLToPath} from 'node:url';
 import ts from '@typescript/typescript6';
-import {createAppTestServer} from './vite-test-server.mjs';
-import {packageTestLanguage} from './project-test-files.mjs';
+import {createAppTestServer} from './vite-test-server.ts';
+import {packageTestLanguage} from './project-test-files.ts';
 
-let server;
-let resolveProjectTooling;
-let sourceNodeKey;
+let server: Awaited<ReturnType<typeof createAppTestServer>>;
+let resolveProjectTooling: (project: ModelProject) => ProjectToolingIndex;
+let sourceNodeKey: (typeof import('../src/model/tool-schema.ts'))['sourceNodeKey'];
 
 before(async () => {
   server = await createAppTestServer();
-  const tooling = await server.ssrLoadModule('/src/model/tool-schema.ts');
+  const tooling = await server.ssrLoadModule<
+    typeof import('../src/model/tool-schema.ts')
+  >('/src/model/tool-schema.ts');
   const language = await packageTestLanguage(server);
   sourceNodeKey = tooling.sourceNodeKey;
   resolveProjectTooling = project =>
@@ -95,7 +104,7 @@ test('does not choose a property from a runtime-ambiguous receiver', () => {
   const definitions = indexDefinitions([{path: 'model.ts', source}]);
 
   assert.equal(targetAt(definitions, source, 'dimensions.width'), undefined);
-  assert.equal(definitions.size, 0);
+  assert.equal(defined(definitions).size, 0);
 });
 
 test('does not fall back to a same-named outer binding', () => {
@@ -128,11 +137,18 @@ test('ignores variable annotation metadata while preserving the resolved source'
   const definitions = indexDefinitions([{path: 'model.ts', source}]);
 
   const target = targetAt(definitions, source, 'dimensions.width');
-  assert.deepEqual(Object.keys(target).sort(), ['label', 'sourceRef', 'value']);
-  assert.equal(target.label, 'Width');
-  assert.equal(target.value, 40);
+  assert.deepEqual(Object.keys(defined(target)).sort(), [
+    'label',
+    'sourceRef',
+    'value',
+  ]);
+  assert.equal(defined(target).label, 'Width');
+  assert.equal(defined(target).value, 40);
   assert.equal(
-    source.slice(target.sourceRef.start, target.sourceRef.end),
+    source.slice(
+      defined(target).sourceRef.start,
+      defined(target).sourceRef.end,
+    ),
     '40',
   );
 });
@@ -144,11 +160,12 @@ test('keeps coil turn counts fractional in the tool panel', () => {
   }).toolCalls.get('/model.ts');
   const schema = toolSchemaAt(calls, source, 'coil(5, 0.75, 4, 0.25)');
   assert.deepEqual(
-    schema.parameters.map(parameter => parameter.name),
+    defined(schema).parameters.map(parameter => parameter.name),
     ['coilRadius', 'wireRadius', 'pitch', 'turns'],
   );
-  assert.equal(schema.parameters[3].kind, 'scalar');
-  assert.deepEqual(schema.parameters[3].constraints, {exclusiveMin: 0});
+  const turns = defined(schema).parameters[3];
+  assert.ok(turns.kind === 'scalar');
+  assert.deepEqual(turns.constraints, {exclusiveMin: 0});
 });
 
 test('resolves tool schemas from layered model capabilities', () => {
@@ -264,7 +281,7 @@ test('keeps an unannotated resolved overload separate from its annotated peers',
   );
 });
 
-for (const declarationOnly of [false, true]) {
+for (const declarationOnly of [false, true] as const) {
   test(`reads primitive annotations through imports and aliases from ${declarationOnly ? 'emitted declarations' : 'source'}`, () => {
     const source = [
       'import {sleeve as imported} from "./bridge.ts";',
@@ -306,8 +323,11 @@ for (const declarationOnly of [false, true]) {
     const calls = index.toolCalls.get('/model.ts');
     const schema = toolSchemaAt(calls, source, 'renamed(radius)');
     assert.equal(schema?.name, 'sleeve');
-    assert.equal(schema.parameters[0].default, undefined);
-    assert.equal(schema.parameters[1].default, 4);
+    const [radiusParameter, heightParameter] = defined(schema).parameters;
+    assert.ok(radiusParameter.kind === 'length');
+    assert.ok(heightParameter.kind === 'length');
+    assert.equal(radiusParameter.default, undefined);
+    assert.equal(heightParameter.default, 4);
     assert.deepEqual(
       schema?.parameters.map(({name, index, optional, label}) => ({
         name,
@@ -325,7 +345,7 @@ for (const declarationOnly of [false, true]) {
       schema.parameters,
     );
     assertTarget(
-      index.parameterDefinitions.get('/model.ts'),
+      defined(index.parameterDefinitions.get('/model.ts')),
       source,
       'radius',
       source,
@@ -369,7 +389,7 @@ test('reports annotations naming a parameter missing from the returned signature
   );
 });
 
-function emitPrimitiveDeclaration(source) {
+function emitPrimitiveDeclaration(source: string) {
   const fileName = fileURLToPath(
     new URL('./primitive-fixture.ts', import.meta.url),
   );
@@ -398,27 +418,38 @@ function emitPrimitiveDeclaration(source) {
       ),
     [],
   );
-  let declaration;
+  let declaration: string | undefined;
   program.emit(undefined, (path, text) => {
     if (path.endsWith('primitive-fixture.d.ts')) declaration = text;
   });
   assert.ok(declaration?.includes('@code3d.param radius'));
-  assert.ok(declaration.includes('default: 4'));
-  assert.ok(!declaration.includes('y = 4'));
-  return declaration;
+  assert.ok(defined(declaration).includes('default: 4'));
+  assert.ok(!defined(declaration).includes('y = 4'));
+  return defined(declaration);
 }
 
-function indexDefinitions(files) {
-  return resolveProjectTooling({files}).parameterDefinitions.get('/model.ts');
+function indexDefinitions(files: readonly ProjectSourceFile[]) {
+  return defined(
+    resolveProjectTooling({files}).parameterDefinitions.get('/model.ts'),
+  );
 }
 
-function toolSchemaAt(calls, source, call) {
+function toolSchemaAt(
+  calls: ToolCallSchemaMap | undefined,
+  source: string,
+  call: string,
+) {
   const start = source.indexOf(call);
   assert.notEqual(start, -1, `missing call fixture: ${call}`);
   return calls?.get(sourceNodeKey(start, start + call.length));
 }
 
-function targetAt(definitions, source, reference, context = reference) {
+function targetAt(
+  definitions: ParameterDefinitionMap,
+  source: string,
+  reference: string,
+  context = reference,
+) {
   const contextStart = source.lastIndexOf(context);
   assert.notEqual(contextStart, -1, `missing fixture context: ${context}`);
   const referenceOffset = context.indexOf(reference);
@@ -428,12 +459,12 @@ function targetAt(definitions, source, reference, context = reference) {
 }
 
 function assertTarget(
-  definitions,
-  source,
-  reference,
-  targetSource,
-  expected,
-  context,
+  definitions: ParameterDefinitionMap,
+  source: string,
+  reference: string,
+  targetSource: string,
+  expected: string,
+  context?: string,
 ) {
   const target = targetAt(definitions, source, reference, context);
   assert.ok(target, `missing definition for ${reference}`);

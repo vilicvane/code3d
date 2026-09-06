@@ -5,16 +5,21 @@ import {box, group} from '@code3d/core';
 import {
   createModelSnapshotter,
   disposeModelObjects,
-} from '@code3d/core/tooling';
-import {createAppTestServer} from './vite-test-server.mjs';
+} from '../../core/test/model-test.ts';
+import type {ModelSnapshotObject, ModelKind} from '@code3d/core/tooling';
+import {createAppTestServer} from './vite-test-server.ts';
 
-let createRenderedModelNode, createRenderedModel, disposeObject;
-let server;
+let createRenderedModelNode: (typeof import('../src/rendering/model-renderer.ts'))['createRenderedModelNode'],
+  createRenderedModel: (typeof import('../src/rendering/model-renderer.ts'))['createRenderedModel'],
+  disposeObject: (typeof import('../src/rendering/model-renderer.ts'))['disposeObject'];
+let server: Awaited<ReturnType<typeof createAppTestServer>>;
 
 before(async () => {
   server = await createAppTestServer();
   ({createRenderedModelNode, createRenderedModel, disposeObject} =
-    await server.ssrLoadModule('/src/rendering/model-renderer.ts'));
+    await server.ssrLoadModule<
+      typeof import('../src/rendering/model-renderer.ts')
+    >('/src/rendering/model-renderer.ts'));
 });
 
 after(async () => {
@@ -27,9 +32,16 @@ test('renders a group override on nested painted and unpainted parts', () => {
   const assembly = group([first, group([second])]).paint('#345678');
   const rendered = createRenderedModel(createModelSnapshotter()(assembly));
   try {
-    const meshes = [];
+    const meshes: THREE.Mesh<
+      THREE.BufferGeometry,
+      THREE.MeshStandardMaterial
+    >[] = [];
     rendered.traverse(object => {
-      if (object instanceof THREE.Mesh) meshes.push(object);
+      if (
+        object instanceof THREE.Mesh &&
+        object.material instanceof THREE.MeshStandardMaterial
+      )
+        meshes.push(object);
     });
     assert.equal(meshes.length, 2);
     for (const mesh of meshes) {
@@ -62,11 +74,13 @@ test('renders curves in their model color with a visible neutral fallback', () =
   assert.equal(unpainted.children[0].material.opacity, 1);
   assert.equal(unpainted.children[0].material.transparent, false);
   assert.equal(unpainted.children[0].material.toneMapped, false);
+  assert.ok(painted.children[0] instanceof THREE.LineSegments);
   assert.equal(painted.children[0].material.color.getHexString(), 'ff4d81');
 });
 
-function snapshot(kind, color) {
+function snapshot(kind: ModelKind, color?: string): ModelSnapshotObject {
   return {
+    ...createModelSnapshotter()(group([])),
     kind,
     name: kind,
     color,

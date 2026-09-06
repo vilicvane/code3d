@@ -1,30 +1,41 @@
+import {assertModelDiagnosticError} from './project-test-files.ts';
+import type {ProjectLanguage} from '../src/project/project-language.ts';
+import type {ModelProject} from '../src/project/project.ts';
+import {defined} from '../../../test/assert.ts';
+import type {ProjectFileReader} from '../src/project/file-reader.ts';
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
 import * as esbuild from 'esbuild';
-import {createAppTestServer} from './vite-test-server.mjs';
-import {createTestEvaluator, packageTestFiles} from './project-test-files.mjs';
+import {createAppTestServer} from './vite-test-server.ts';
+import {
+  createTestEvaluator,
+  testEvaluatorClass,
+  packageTestFiles,
+} from './project-test-files.ts';
 
-let server;
-let ProjectBuilder;
-let ProjectRuntime;
-let ProjectCompiler;
-let Evaluator;
+let server: Awaited<ReturnType<typeof createAppTestServer>>;
+let ProjectBuilder: (typeof import('../src/project/project-builder.ts'))['ProjectBuilder'];
+let ProjectRuntime: (typeof import('../src/model/project-runtime.ts'))['ProjectRuntime'];
+let ProjectCompiler: (typeof import('../src/model/project-compiler.ts'))['ProjectCompiler'];
+let Evaluator: Awaited<ReturnType<typeof testEvaluatorClass>>;
 before(async () => {
   server = await createAppTestServer();
-  ({ProjectBuilder} = await server.ssrLoadModule(
-    '/src/project/project-builder.ts',
-  ));
-  ({ProjectRuntime} = await server.ssrLoadModule(
-    '/src/model/project-runtime.ts',
-  ));
-  ({ProjectCompiler} = await server.ssrLoadModule(
-    '/src/model/project-compiler.ts',
-  ));
-  Evaluator = (await createTestEvaluator(server)).constructor;
+  ({ProjectBuilder} = await server.ssrLoadModule<
+    typeof import('../src/project/project-builder.ts')
+  >('/src/project/project-builder.ts'));
+  ({ProjectRuntime} = await server.ssrLoadModule<
+    typeof import('../src/model/project-runtime.ts')
+  >('/src/model/project-runtime.ts'));
+  ({ProjectCompiler} = await server.ssrLoadModule<
+    typeof import('../src/model/project-compiler.ts')
+  >('/src/model/project-compiler.ts'));
+  Evaluator = await testEvaluatorClass(server);
 });
 after(async () => server?.close());
 
-function projectFiles(entries) {
+function projectFiles(
+  entries: Record<string, string>,
+): ProjectFileReader & {files: Map<string, string>} {
   const files = new Map(Object.entries(entries));
   return {
     files,
@@ -34,7 +45,7 @@ function projectFiles(entries) {
         : packageTestFiles.readFile(path);
     },
     async stat(path) {
-      if (files.has(path)) return {kind: 'file', version: files.get(path)};
+      if (files.has(path)) return {kind: 'file', version: files.get(path)!};
       if ([...files.keys()].some(file => file.startsWith(path + '/')))
         return {kind: 'directory', version: ''};
       return packageTestFiles.stat(path);
@@ -122,7 +133,7 @@ test('reads installed declarations, reruns changed child source, and invalidates
     esbuild,
     () => new Evaluator(),
   );
-  const project = height => ({
+  const project = (height: number) => ({
     files: [
       {
         path: '/model.ts',
@@ -132,7 +143,7 @@ test('reads installed declarations, reruns changed child source, and invalidates
       {path: '/child.ts', source: 'export const height = ' + height + ';'},
     ],
   });
-  let language;
+  let language: ProjectLanguage | undefined;
   try {
     const first = await compiler.compile(
       project(4),
@@ -141,23 +152,23 @@ test('reads installed declarations, reruns changed child source, and invalidates
       value => (language = value),
     );
     assert.equal(first.diagnostic, undefined);
-    const runtime = compiler.runtime;
+    const runtime = compiler['runtime'];
     const second = await compiler.compile(project(5), '/model.ts');
     assert.equal(second.diagnostic, undefined);
-    assert.equal(compiler.runtime, runtime);
+    assert.equal(compiler['runtime'], runtime);
     assert.notDeepEqual(
-      second.fallback.mesh.vertices,
-      first.fallback.mesh.vertices,
+      defined(defined(second.fallback).mesh).vertices,
+      defined(defined(first.fallback).mesh).vertices,
     );
     assert.ok(
-      language.files.some(
+      defined(language).files.some(
         file =>
           file.path === '/node_modules/custom-size/index.d.ts' &&
           file.source.includes('13'),
       ),
     );
     assert.ok(
-      !language.files.some(
+      !defined(language).files.some(
         file => file.path === '/node_modules/custom-size/index.js',
       ),
     );
@@ -167,10 +178,10 @@ test('reads installed declarations, reruns changed child source, and invalidates
     );
     const third = await compiler.compile(project(5), '/model.ts');
     assert.equal(third.diagnostic, undefined);
-    assert.notEqual(compiler.runtime, runtime);
+    assert.notEqual(compiler['runtime'], runtime);
     assert.notDeepEqual(
-      third.fallback.mesh.vertices,
-      second.fallback.mesh.vertices,
+      defined(defined(third.fallback).mesh).vertices,
+      defined(defined(second.fallback).mesh).vertices,
     );
   } finally {
     compiler.dispose();
@@ -189,9 +200,9 @@ test('uses installed just-range ESM and types with builtin core across cached mo
   );
   let runtime;
   let range;
-  let language;
+  let language: ProjectLanguage | undefined;
   try {
-    for (const count of [5, 3, 5]) {
+    for (const count of [5, 3, 5] as const) {
       const module = await compiler.compile(
         {
           files: [
@@ -218,18 +229,18 @@ test('uses installed just-range ESM and types with builtin core across cached mo
         },
       );
       assert.equal(module.diagnostic, undefined);
-      assert.equal(module.fallback.children.length, count + 1);
-      runtime ??= compiler.runtime;
-      assert.equal(compiler.runtime, runtime);
-      const cachedRange = runtime.modules.get(
-        '/node_modules/just-range/index.mjs',
+      assert.equal(defined(module.fallback).children.length, count + 1);
+      runtime ??= compiler['runtime'];
+      assert.equal(compiler['runtime'], runtime);
+      const cachedRange: (count: number) => number[] = defined(
+        defined(runtime).modules.get('/node_modules/just-range/index.mjs'),
       ).default;
       range ??= cachedRange;
       assert.equal(cachedRange, range);
       assert.deepEqual(cachedRange(3), [0, 1, 2]);
     }
     assert.ok(
-      language.files.some(
+      defined(language).files.some(
         file => file.path === '/node_modules/just-range/index.d.ts',
       ),
     );
@@ -239,7 +250,14 @@ test('uses installed just-range ESM and types with builtin core across cached mo
 });
 
 test('does not substitute App packages when a project declares but has not installed core', async () => {
-  const files = {async readFile() {}, async stat() {}};
+  const files: ProjectFileReader = {
+    async readFile() {
+      return undefined;
+    },
+    async stat() {
+      return undefined;
+    },
+  };
   const compiler = new ProjectCompiler(
     files,
     packageTestFiles,
@@ -264,6 +282,7 @@ test('does not substitute App packages when a project declares but has not insta
         '/model.ts',
       ),
       error => {
+        assertModelDiagnosticError(error);
         assert.match(error.diagnostic.summary, /@code3d\/core/);
         assert.deepEqual(error.diagnostic.sourceRef, {
           file: '/model.ts',
@@ -348,8 +367,8 @@ test('loads a static asset URL from the project and observes changed asset bytes
     const second = await compiler.compile(project, '/model.ts');
     assert.equal(second.diagnostic, undefined);
     assert.notDeepEqual(
-      first.fallback.mesh.vertices,
-      second.fallback.mesh.vertices,
+      defined(defined(first.fallback).mesh).vertices,
+      defined(defined(second.fallback).mesh).vertices,
     );
   } finally {
     compiler.dispose();
@@ -369,12 +388,12 @@ test('keeps a model retained privately by an installed package valid across sour
     esbuild,
     () => new Evaluator(),
   );
-  const source = radius =>
+  const source = (radius: number) =>
     'import {template} from "template"; export default template().fillet(' +
     radius +
     ');';
   try {
-    for (const radius of [1, 1.1, 1.2]) {
+    for (const radius of [1, 1.1, 1.2] as const) {
       const module = await compiler.compile(
         {files: [{path: '/model.ts', source: source(radius)}]},
         '/model.ts',
@@ -393,7 +412,7 @@ test('does not execute a dynamically imported source module before its branch is
     esbuild,
     () => new Evaluator(),
   );
-  const project = enabled => ({
+  const project = (enabled: boolean) => ({
     files: [
       {
         path: '/model.ts',
@@ -411,7 +430,7 @@ test('does not execute a dynamically imported source module before its branch is
     const first = await compiler.compile(project(false), '/model.ts');
     assert.equal(first.diagnostic, undefined);
     const second = await compiler.compile(project(true), '/model.ts');
-    assert.equal(second.diagnostic.summary, 'lazy module executed');
+    assert.equal(defined(second.diagnostic).summary, 'lazy module executed');
   } finally {
     compiler.dispose();
   }
@@ -433,29 +452,31 @@ test('does not inherit old source offsets when an installed package returns the 
   const body = 'import {template} from "template"; export default template();';
   try {
     let nodeId;
-    for (const prefix of ['', '\n\n// shifted source\n', '\n']) {
+    for (const prefix of ['', '\n\n// shifted source\n', '\n'] as const) {
       const source = prefix + body;
       const module = await compiler.compile(
         {files: [{path: '/model.ts', source}]},
         '/model.ts',
       );
       assert.equal(module.diagnostic, undefined);
-      const model = module.objects.get(module.exports.get('default'));
-      nodeId ??= model.nodeId;
-      assert.equal(model.nodeId, nodeId);
+      const model = module.objects.get(defined(module.exports.get('default')));
+      nodeId ??= defined(model).nodeId;
+      assert.equal(defined(model).nodeId, nodeId);
       assert.equal(
-        model.operation.sourceRef.start,
+        defined(defined(model).operation.sourceRef).start,
         source.indexOf('template()'),
       );
-      assert.ok(model.sourceRefs.length > 0);
-      assert.ok(model.sourceRefs.every(ref => ref.start >= prefix.length));
+      assert.ok(defined(model).sourceRefs.length > 0);
+      assert.ok(
+        defined(model).sourceRefs.every(ref => ref.start >= prefix.length),
+      );
     }
   } finally {
     compiler.dispose();
   }
 });
 
-for (const throughSource of [false, true]) {
+for (const throughSource of [false, true] as const) {
   test(`initializes a lazy package only on demand and retains it across edits (${throughSource ? 'through source' : 'direct import'})`, async () => {
     const files = projectFiles({
       '/node_modules/template/package.json':
@@ -469,7 +490,7 @@ for (const throughSource of [false, true]) {
       esbuild,
       () => new Evaluator(),
     );
-    const project = enabled => ({
+    const project = (enabled: boolean) => ({
       files: [
         {
           path: '/model.ts',
@@ -486,13 +507,17 @@ for (const throughSource of [false, true]) {
       const first = await compiler.compile(project(false), '/model.ts');
       assert.equal(first.diagnostic, undefined);
       assert.equal(
-        compiler.runtime.modules.has('/node_modules/template/index.js'),
+        defined(compiler['runtime']).modules.has(
+          '/node_modules/template/index.js',
+        ),
         false,
       );
       const second = await compiler.compile(project(true), '/model.ts');
       assert.equal(second.diagnostic, undefined);
       assert.equal(
-        compiler.runtime.modules.has('/node_modules/template/index.js'),
+        defined(compiler['runtime']).modules.has(
+          '/node_modules/template/index.js',
+        ),
         true,
       );
       const third = await compiler.compile(project(true), '/model.ts');
@@ -561,6 +586,7 @@ test('locates installed tooling initialization failures at the author import', a
     await assert.rejects(
       compiler.compile({files: [{path: '/model.ts', source}]}, '/model.ts'),
       error => {
+        assertModelDiagnosticError(error);
         assert.match(error.diagnostic.summary, /broken installed core/);
         assert.deepEqual(error.diagnostic.sourceRef, {
           file: '/model.ts',
@@ -591,6 +617,7 @@ test('locates a missing relative asset in the original author source', async () 
     await assert.rejects(
       compiler.compile({files: [{path: '/model.ts', source}]}, '/model.ts'),
       error => {
+        assertModelDiagnosticError(error);
         assert.match(error.diagnostic.summary, /Project asset not found/);
         assert.deepEqual(error.diagnostic.sourceRef, {
           file: '/model.ts',

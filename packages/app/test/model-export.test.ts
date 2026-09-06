@@ -1,35 +1,51 @@
+import {defined} from '../../../test/assert.ts';
+import {
+  modelObject,
+  createModelSnapshotter,
+  disposeModelObjects,
+} from '../../core/test/model-test.ts';
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
 import {box, circle, cylinder, group, line, sphere} from '@code3d/core';
 import {
-  createModelSnapshotter,
-  disposeModelObjects,
-  retainModelGeometry,
+  retainModelGeometry as retainGeometry,
+  type ModelSnapshotObject,
 } from '@code3d/core/tooling';
+import type {Model} from '@code3d/core';
+import type {Occurrence} from '../src/viewport.ts';
+import type {ModelExportOptions} from '../src/model/model-export.ts';
 import * as replicad from 'replicad';
 import {importSTEP} from 'replicad';
 import {strFromU8, unzipSync} from 'fflate';
 import {Group, Object3D} from 'three';
 import {STLLoader} from 'three/addons/loaders/STLLoader.js';
-import {createAppTestServer} from './vite-test-server.mjs';
-import {createTestProjectCompiler} from './project-test-files.mjs';
+import {createAppTestServer} from './vite-test-server.ts';
+import {createTestProjectCompiler} from './project-test-files.ts';
 
-let server,
-  exportModel,
-  collectExportInstances,
-  renderedModelName,
-  compileProject,
-  applyNodeTransform;
+let server: Awaited<ReturnType<typeof createAppTestServer>>,
+  exportModel: (
+    ...args: Parameters<
+      (typeof import('../src/model/model-export.ts'))['exportModel']
+    > extends [...infer Args, unknown]
+      ? Args
+      : never
+  ) => Blob,
+  collectExportInstances: (typeof import('../src/rendering/model-export-scene.ts'))['collectExportInstances'],
+  renderedModelName: (typeof import('../src/rendering/model-export-scene.ts'))['renderedModelName'],
+  compileProject: import('../src/model/project-compiler.ts').ProjectCompiler['compile'],
+  applyNodeTransform: (typeof import('../src/rendering/model-renderer.ts'))['applyNodeTransform'];
 before(async () => {
   server = await createAppTestServer();
-  const exporter = await server.ssrLoadModule('/src/model/model-export.ts');
+  const exporter = await server.ssrLoadModule<
+    typeof import('../src/model/model-export.ts')
+  >('/src/model/model-export.ts');
   exportModel = (...args) => exporter.exportModel(...args, replicad);
-  ({collectExportInstances, renderedModelName} = await server.ssrLoadModule(
-    '/src/rendering/model-export-scene.ts',
-  ));
-  ({applyNodeTransform} = await server.ssrLoadModule(
-    '/src/rendering/model-renderer.ts',
-  ));
+  ({collectExportInstances, renderedModelName} = await server.ssrLoadModule<
+    typeof import('../src/rendering/model-export-scene.ts')
+  >('/src/rendering/model-export-scene.ts'));
+  ({applyNodeTransform} = await server.ssrLoadModule<
+    typeof import('../src/rendering/model-renderer.ts')
+  >('/src/rendering/model-renderer.ts'));
   compileProject = async (...args) => {
     const compiler = await createTestProjectCompiler(server);
     try {
@@ -43,7 +59,7 @@ after(async () => {
   await server?.close();
 });
 
-const defaults = {
+const defaults: ModelExportOptions = {
   format: 'step',
   scale: 1,
   upAxis: 'y',
@@ -52,20 +68,34 @@ const defaults = {
   binary: true,
 };
 
-function scene(snapshot) {
-  const occurrences = [];
-  function add(node, key, parent) {
+function scene(snapshot: ModelSnapshotObject) {
+  const occurrences: Occurrence[] = [];
+  function add(
+    node: ModelSnapshotObject,
+    key: string,
+    parent: Object3D,
+    depth = 0,
+  ) {
     const object = new Object3D();
     applyNodeTransform(object, node, 'composition');
     parent.add(object);
-    occurrences.push({key, node, object});
-    node.children.forEach((child, i) => add(child, `${key}/${i}`, object));
+    occurrences.push({
+      key,
+      node,
+      object,
+      depth,
+      view: 'source',
+      placement: 'composition',
+    });
+    node.children.forEach((child, i) =>
+      add(child, `${key}/${i}`, object, depth + 1),
+    );
   }
   add(snapshot, 'root', new Group());
   return occurrences;
 }
 
-function read3mf(bytes) {
+function read3mf(bytes: ArrayBuffer) {
   const archive = unzipSync(new Uint8Array(bytes));
   assert.deepEqual(Object.keys(archive).sort(), [
     '3D/3dmodel.model',
@@ -89,8 +119,8 @@ function read3mf(bytes) {
   return {model, meshes};
 }
 
-function closedMesh(mesh) {
-  const edges = new Map();
+function closedMesh(mesh: ReturnType<typeof read3mf>['meshes'][number]) {
+  const edges = new Map<string, {count: number; balance: number}>();
   let volume = 0;
   for (const triangle of mesh.triangles) {
     assert.equal(new Set(triangle).size, 3);
@@ -130,8 +160,8 @@ export default group([base, top], 'Assembly');`;
       '/model.ts',
     );
     assert.equal(module.diagnostic, undefined);
-    const snapshot = module.objects.get(module.exports.get('default'));
-    const instances = collectExportInstances(scene(snapshot));
+    const snapshot = module.objects.get(defined(module.exports.get('default')));
+    const instances = collectExportInstances(scene(defined(snapshot)));
     assert.equal(instances.length, 2);
     const blob = compiler.export(instances, defaults);
     const text = await blob.text();
@@ -173,8 +203,8 @@ export default group([base, group([top]).paint('#00ff00')]).paint('#345678');`;
       '/model.ts',
     );
     assert.equal(module.diagnostic, undefined);
-    const snapshot = module.objects.get(module.exports.get('default'));
-    const instances = collectExportInstances(scene(snapshot));
+    const snapshot = module.objects.get(defined(module.exports.get('default')));
+    const instances = collectExportInstances(scene(defined(snapshot)));
     assert.deepEqual(
       instances.map(instance => instance.color),
       ['#345678', '#345678'],
@@ -192,13 +222,13 @@ export default group([base, group([top]).paint('#00ff00')]).paint('#345678');`;
   }
 });
 
-for (const mode of ['builtin', 'installed']) {
+for (const mode of ['builtin', 'installed'] as const) {
   test(`exports with the ${mode} project kernel across cached npm model edits and releases old geometry`, async () => {
     const compiler = await createTestProjectCompiler(server);
     let retained;
     let runtime;
     try {
-      for (const count of [2, 3]) {
+      for (const count of [2, 3] as const) {
         const module = await compiler.compile(
           {
             files: [
@@ -221,11 +251,16 @@ for (const mode of ['builtin', 'installed']) {
         );
         assert.equal(module.diagnostic, undefined);
         if (retained) assert.equal(retained.shapes.size, 0);
-        retained = compiler.geometry;
-        runtime ??= compiler.runtime;
-        assert.equal(compiler.runtime, runtime);
-        assert.notEqual(runtime.replicad.exportSTEP, replicad.exportSTEP);
-        const instances = collectExportInstances(scene(module.fallback));
+        retained = compiler['geometry'];
+        runtime ??= compiler['runtime'];
+        assert.equal(compiler['runtime'], runtime);
+        assert.notEqual(
+          defined(runtime).replicad.exportSTEP,
+          replicad.exportSTEP,
+        );
+        const instances = collectExportInstances(
+          scene(defined(module.fallback)),
+        );
         assert.equal(instances.length, count);
         assert.throws(
           () => compiler.export(instances, {...defaults, scale: 0}),
@@ -257,7 +292,7 @@ for (const mode of ['builtin', 'installed']) {
         ),
         /missing-package/,
       );
-      assert.equal(retained.shapes.size, 0);
+      assert.equal(defined(retained).shapes.size, 0);
       assert.throws(() => compiler.export([], defaults), /model has changed/);
     } finally {
       compiler.dispose();
@@ -270,11 +305,11 @@ test('STL binary and ASCII encode rendered occurrences with scale and Z-up conve
   const snapshot = createModelSnapshotter()(model);
   const geometry = retainModelGeometry([model]);
   disposeModelObjects([model]);
-  const occurrences = scene(snapshot);
+  const occurrences = scene(defined(snapshot));
   occurrences[0].object.position.set(5, 7, 11);
   const instances = collectExportInstances(occurrences);
   try {
-    for (const binary of [true, false]) {
+    for (const binary of [true, false] as const) {
       const blob = exportModel(geometry, instances, {
         ...defaults,
         format: 'stl',
@@ -292,11 +327,11 @@ test('STL binary and ASCII encode rendered occurrences with scale and Z-up conve
       const mesh = new STLLoader().parse(data);
       mesh.computeBoundingBox();
       assert.deepEqual(
-        mesh.boundingBox.min.toArray().map(Math.round),
+        defined(mesh.boundingBox).min.toArray().map(Math.round),
         [8, -28, 10],
       );
       assert.deepEqual(
-        mesh.boundingBox.max.toArray().map(Math.round),
+        defined(mesh.boundingBox).max.toArray().map(Math.round),
         [12, -16, 18],
       );
       mesh.dispose();
@@ -312,7 +347,7 @@ test('STEP also supports profile and curve geometry', async () => {
   const geometry = retainModelGeometry(models);
   disposeModelObjects(models);
   try {
-    const instances = collectExportInstances(scene(snapshot));
+    const instances = collectExportInstances(scene(defined(snapshot)));
     const blob = exportModel(geometry, instances, defaults);
     const imported = await importSTEP(blob);
     const edges = imported.edges;
@@ -342,8 +377,8 @@ test('retained geometry shares one owned clone and can be released without consu
   assert.equal(retained[0], retained[1]);
   geometry.dispose();
   assert.equal(geometry.shapes.size, 0);
-  assert.throws(() => retained[0].wrapped, /deleted/);
-  assert.ok(createModelSnapshotter()(model).mesh.vertices.length > 0);
+  assert.throws(() => defined(retained[0]).wrapped, /deleted/);
+  assert.ok(defined(createModelSnapshotter()(model).mesh).vertices.length > 0);
   disposeModelObjects([model, painted]);
 });
 
@@ -423,9 +458,9 @@ test('mesh precision changes curved tessellation while 3MF stays closed at seams
 });
 
 test('export file names retain Unicode and version suffixes while replacing format extensions', async () => {
-  const {exportFileName} = await server.ssrLoadModule(
-    '/src/ui/export-dialog.ts',
-  );
+  const {exportFileName} = await server.ssrLoadModule<
+    typeof import('../src/ui/export-dialog.ts')
+  >('/src/ui/export-dialog.ts');
   assert.equal(exportFileName('旋钮.v2.step', '3mf'), '旋钮.v2.3mf');
   assert.equal(exportFileName('model.ts', 'stl'), 'model.stl');
   assert.equal(exportFileName('part.v2', 'step'), 'part.v2.step');
@@ -443,23 +478,27 @@ export default group([assembly]);`;
     {files: [{path: '/model.ts', source}]},
     '/model.ts',
   );
-  const binding = name =>
+  const binding = (name: string) =>
     module.catalog.find(
       entry => entry.category === 'binding' && entry.label === name,
     );
-  for (const name of ['plate', 'alias', 'parts', 'assembly']) {
+  for (const name of ['plate', 'alias', 'parts', 'assembly'] as const) {
     const entry = binding(name);
     assert.equal(
-      renderedModelName(module, entry.nodeIds, entry.sourceRef),
+      renderedModelName(
+        module,
+        defined(entry).nodeIds,
+        defined(entry).sourceRef,
+      ),
       name,
     );
   }
   assert.equal(
-    renderedModelName(module, binding('assembly').nodeIds),
+    renderedModelName(module, defined(binding('assembly')).nodeIds),
     'assembly',
   );
   assert.equal(
-    renderedModelName(module, [module.fallback.nodeId]),
+    renderedModelName(module, [defined(module.fallback).nodeId]),
     'code3d-model',
   );
   assert.equal(renderedModelName(module, []), 'code3d-model');
@@ -477,21 +516,28 @@ const plate = makePart(3);`;
   const local = module.catalog.find(
     entry => entry.category === 'binding' && entry.label === 'part',
   );
-  assert.ok(local.occurrences.length > 1);
+  assert.ok(defined(local).occurrences.length > 1);
   assert.equal(
-    renderedModelName(module, [local.occurrences[1].nodeId]),
+    renderedModelName(module, [defined(local).occurrences[1].nodeId]),
     'part',
   );
-  assert.equal(renderedModelName(module, [module.fallback.nodeId]), 'plate');
   assert.equal(
-    renderedModelName(module, [module.fallback.nodeId], local.sourceRef),
+    renderedModelName(module, [defined(module.fallback).nodeId]),
+    'plate',
+  );
+  assert.equal(
+    renderedModelName(
+      module,
+      [defined(module.fallback).nodeId],
+      defined(local).sourceRef,
+    ),
     'part',
   );
 });
 
 test('export rejects empty, stale, non-solid and invalid parameter requests', () => {
   const geometry = retainModelGeometry([]);
-  const instance = {
+  const instance: import('../src/model/model-export.ts').ModelExportInstance = {
     nodeId: 'missing',
     kind: 'solid',
     name: 'missing',
@@ -525,3 +571,7 @@ test('export rejects empty, stale, non-solid and invalid parameter requests', ()
   );
   geometry.dispose();
 });
+
+function retainModelGeometry(models: Iterable<Model>) {
+  return retainGeometry(Array.from(models, modelObject));
+}

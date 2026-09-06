@@ -1,3 +1,4 @@
+import {defined} from '../../../test/assert.ts';
 import assert from 'node:assert/strict';
 import type {Model} from '@code3d/core';
 import {
@@ -28,13 +29,8 @@ export function disposeModelObjects(
 /** White-box cache/lifecycle assertions use the source's private geometry type. */
 export function modelGeometry(model: Model | ModelObject) {
   const geometry = Reflect.get(
-    modelObject(model),
+    model,
     'geometry',
   ) as SourceModelObject['geometry'];
   return defined(geometry);
-}
-
-export function defined<T>(value: T | undefined | null): T {
-  assert.ok(value !== undefined && value !== null);
-  return value;
 }

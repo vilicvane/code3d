@@ -1,21 +1,22 @@
+import type {ProjectFileReader} from '../src/project/file-reader.ts';
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
-import {createAppTestServer} from './vite-test-server.mjs';
+import {createAppTestServer} from './vite-test-server.ts';
 
-let server;
-let ProjectFileCache;
+let server: Awaited<ReturnType<typeof createAppTestServer>>;
+let ProjectFileCache: (typeof import('../src/project/file-cache.ts'))['ProjectFileCache'];
 before(async () => {
   server = await createAppTestServer();
-  ({ProjectFileCache} = await server.ssrLoadModule(
-    '/src/project/file-cache.ts',
-  ));
+  ({ProjectFileCache} = await server.ssrLoadModule<
+    typeof import('../src/project/file-cache.ts')
+  >('/src/project/file-cache.ts'));
 });
 after(async () => server?.close());
 
-for (const operation of ['stat', 'readFile']) {
-  test(`does not retain a failed ${operation} when the next request can succeed`, async () => {
+for (const operation of ['stat', 'readFile'] as const) {
+  test(`does not retain a failed ${operation} when the next request can succeed`, async t => {
     let failed = false;
-    const reader = {
+    const reader: ProjectFileReader = {
       async stat() {
         return {kind: 'file', version: 'unchanged'};
       },
@@ -24,13 +25,13 @@ for (const operation of ['stat', 'readFile']) {
       },
     };
     const original = reader[operation];
-    reader[operation] = async () => {
+    t.mock.method(reader, operation, async (path: string) => {
       if (!failed) {
         failed = true;
         throw new Error('Temporarily unavailable');
       }
-      return original();
-    };
+      return original(path);
+    });
     const cache = new ProjectFileCache(reader);
     await assert.rejects(
       cache.readFile('/package.js'),
@@ -46,13 +47,14 @@ for (const operation of ['stat', 'readFile']) {
 test('caches reached bytes and misses, and refreshes additions, replacements and removals', async () => {
   const files = new Map([['/value.js', 'one']]);
   let reads = 0;
-  const reader = {
+  const reader: ProjectFileReader = {
     async readFile(path) {
       reads++;
       return new TextEncoder().encode(files.get(path));
     },
     async stat(path) {
-      if (files.has(path)) return {kind: 'file', version: files.get(path)};
+      if (files.has(path)) return {kind: 'file', version: files.get(path)!};
+      return undefined;
     },
   };
   const cache = new ProjectFileCache(reader);

@@ -71,7 +71,7 @@ export function spatialBindings(
   occurrences: readonly SpatialToolOccurrence[],
   committed: ReadonlyMap<string, SpatialObjectPreview>,
   parameterValues: ReadonlyMap<string, number>,
-): TransformGizmoBinding[] {
+): Extract<TransformGizmoBinding, {kind: 'spatial'}>[] {
   const {target, evaluation} = scope;
   const relation = evaluation.constraintSpatial;
   if (relation && !canPreviewConstraintTransform(occurrence.node)) return [];
@@ -210,7 +210,7 @@ export function spatialBindings(
 export function spatialIntent(
   binding: Extract<TransformGizmoBinding, {kind: 'spatial'}>,
   value: number,
-): ToolIntent {
+): Extract<ToolIntent, {kind: 'model.spatial'}> {
   const delta = value - binding.value;
   const index = axisIndex(binding.axis);
   const source = binding.spatial.source;

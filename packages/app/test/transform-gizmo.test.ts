@@ -1,25 +1,31 @@
+import type {TestContext} from 'node:test';
+import type {TransformGizmoEvent} from '../src/tools/transform-gizmo.ts';
+import {defined} from '../../../test/assert.ts';
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
 import * as THREE from 'three';
-import {createAppTestServer} from './vite-test-server.mjs';
+import {createAppTestServer} from './vite-test-server.ts';
 
-let server, TransformGizmo;
+let server: Awaited<ReturnType<typeof createAppTestServer>>,
+  TransformGizmo: (typeof import('../src/tools/transform-gizmo.ts'))['TransformGizmo'];
 before(async () => {
   server = await createAppTestServer();
-  ({TransformGizmo} = await server.ssrLoadModule(
-    '/src/tools/transform-gizmo.ts',
-  ));
+  ({TransformGizmo} = await server.ssrLoadModule<
+    typeof import('../src/tools/transform-gizmo.ts')
+  >('/src/tools/transform-gizmo.ts'));
 });
 after(async () => server?.close());
 
-for (const end of ['commit', 'cancel']) {
+for (const end of ['commit', 'cancel'] as const) {
   test(`translation keeps all axes together through snapping and ${end}`, () => {
     const scene = new THREE.Scene();
     const object = new THREE.Object3D();
     scene.add(object);
-    const element = Object.assign(new EventTarget(), {style: {}});
-    const events = [];
-    const navigation = [];
+    const element = Object.assign(new EventTarget(), {
+      style: {},
+    }) as HTMLElement;
+    const events: TransformGizmoEvent[] = [];
+    const navigation: boolean[] = [];
     const gizmo = new TransformGizmo(
       scene,
       new THREE.PerspectiveCamera(),
@@ -39,7 +45,7 @@ for (const end of ['commit', 'cancel']) {
     );
     gizmo.attach(
       object,
-      ['x', 'y', 'z'].map((axis, i) => ({
+      (['x', 'y', 'z'] as const).map((axis, i) => ({
         kind: 'expression',
         receiver: {sourceRef: {file: '/model.ts', start: 0, end: 4}},
         occurrenceKeys: ['part'],
@@ -57,12 +63,12 @@ for (const end of ['commit', 'cancel']) {
         },
       })),
     );
-    const active = gizmo.axes[0];
+    const active = gizmo['axes'][0];
     const direction = new THREE.Vector3(1, 0, 0).applyQuaternion(
       orientations[0],
     );
-    const positionsAre = expected => {
-      for (const [i, {proxy}] of gizmo.axes.entries()) {
+    const positionsAre = (expected: THREE.Vector3) => {
+      for (const [i, {proxy}] of gizmo['axes'].entries()) {
         assert.ok(proxy.position.distanceTo(expected) < 1e-10);
         assert.ok(
           proxy.getWorldPosition(new THREE.Vector3()).distanceTo(expected) <
@@ -72,34 +78,37 @@ for (const end of ['commit', 'cancel']) {
       }
     };
     try {
-      active.controls.dispatchEvent({type: 'mouseDown'});
+      active.controls.dispatchEvent({type: 'mouseDown', mode: 'translate'});
       assert.deepEqual(
-        gizmo.axes.map(axis => axis.controls.axis),
+        gizmo['axes'].map(axis => axis.controls.axis),
         ['X', null, null],
       );
       for (const [distance, expectedDistance, value] of [
         [3.2, 3, 6.5],
         [-1.2, -1, 4.5],
-      ]) {
+      ] as const) {
         active.proxy.position.copy(origin).addScaledVector(direction, distance);
         active.controls.dispatchEvent({type: 'objectChange'});
         positionsAre(
           origin.clone().addScaledVector(direction, expectedDistance),
         );
-        assert.equal(events.at(-1).kind, 'preview');
-        assert.equal(events.at(-1).value, value);
+        const preview = defined(events.at(-1));
+        assert.ok(preview.kind === 'preview');
+        assert.equal(preview.value, value);
       }
       if (end === 'cancel') {
         assert.equal(gizmo.cancel(), true);
         positionsAre(origin);
       } else {
-        active.controls.dispatchEvent({type: 'mouseUp'});
+        active.controls.dispatchEvent({type: 'mouseUp', mode: 'translate'});
         positionsAre(origin.clone().addScaledVector(direction, -1));
-        assert.equal(events.at(-1).value, 4.5);
+        const commit = defined(events.at(-1));
+        assert.ok(commit.kind === 'commit');
+        assert.equal(commit.value, 4.5);
       }
-      assert.equal(events.at(-1).kind, end);
+      assert.equal(defined(events.at(-1)).kind, end);
       assert.deepEqual(navigation, [false, true]);
-      assert.ok(gizmo.axes.every(axis => axis.controls.axis === null));
+      assert.ok(gizmo['axes'].every(axis => axis.controls.axis === null));
     } finally {
       gizmo.dispose();
     }
@@ -110,7 +119,7 @@ test('overlapping pickers highlight only the nearest axis and lock it for the ow
   const {gizmo, camera, send, events, captured} = pointerFixture(t);
   const ray = new THREE.Raycaster();
   ray.setFromCamera(new THREE.Vector2(), camera);
-  const hits = gizmo.axes
+  const hits = gizmo['axes']
     .flatMap(axis => {
       const hit = ray
         .intersectObject(axis.gizmo.picker.translate, true)
@@ -122,12 +131,12 @@ test('overlapping pickers highlight only the nearest axis and lock it for the ow
   send('pointermove');
   const selected = hits[0].axis;
   assert.deepEqual(
-    gizmo.axes.filter(axis => axis.controls.axis !== null),
+    gizmo['axes'].filter(axis => axis.controls.axis !== null),
     [selected],
   );
   send('pointerdown');
   assert.deepEqual(
-    gizmo.axes.filter(axis => axis.controls.dragging),
+    gizmo['axes'].filter(axis => axis.controls.dragging),
     [selected],
   );
   assert.ok(captured.has(1));
@@ -140,40 +149,46 @@ test('overlapping pickers highlight only the nearest axis and lock it for the ow
   send('pointermove', {clientX: 480, clientY: 340});
   assert.ok(events.some(event => event.kind === 'preview'));
   assert.ok(
-    events.every(event => event.binding.axis === selected.binding.axis),
+    events.every(
+      event => event.binding.axis === defined(selected.binding).axis,
+    ),
   );
   assert.deepEqual(
-    gizmo.axes.filter(axis => axis.controls.axis !== null),
+    gizmo['axes'].filter(axis => axis.controls.axis !== null),
     [selected],
   );
   send('pointerup');
-  assert.equal(events.at(-1).kind, 'commit');
+  assert.ok(defined(events.at(-1)).kind === 'commit');
   assert.equal(events.filter(event => event.kind === 'commit').length, 1);
   assert.ok(
-    gizmo.axes.every(
+    gizmo['axes'].every(
       axis => !axis.controls.dragging && axis.controls.axis === null,
     ),
   );
   assert.equal(captured.size, 0);
 });
 
-for (const interruption of ['cancel', 'pointercancel', 'lostpointercapture']) {
+for (const interruption of [
+  'cancel',
+  'pointercancel',
+  'lostpointercapture',
+] as const) {
   test(`${interruption} releases the pointer and all axis interaction state`, t => {
     const {gizmo, send, events, captured} = pointerFixture(t);
     send('pointerdown');
     send('pointermove', {clientX: 450});
-    assert.ok(gizmo.axes[0].proxy.position.length() > 0);
+    assert.ok(gizmo['axes'][0].proxy.position.length() > 0);
     if (interruption === 'cancel') assert.equal(gizmo.cancel(), true);
     else {
       if (interruption === 'lostpointercapture') captured.clear();
       send(interruption);
     }
-    assert.equal(events.at(-1).kind, 'cancel');
+    assert.ok(defined(events.at(-1)).kind === 'cancel');
     assert.equal(events.filter(event => event.kind === 'cancel').length, 1);
     assert.equal(captured.size, 0);
     assert.equal(gizmo.isPointerActive(), false);
     assert.ok(
-      gizmo.axes.every(
+      gizmo['axes'].every(
         axis =>
           !axis.controls.dragging &&
           axis.controls.axis === null &&
@@ -181,10 +196,13 @@ for (const interruption of ['cancel', 'pointercancel', 'lostpointercapture']) {
       ),
     );
     send('pointerup');
-    assert.equal(events.at(-1).kind, 'cancel');
+    assert.ok(defined(events.at(-1)).kind === 'cancel');
     send('pointerdown');
-    assert.equal(events.at(-1).kind, 'begin');
-    assert.equal(gizmo.axes.filter(axis => axis.controls.dragging).length, 1);
+    assert.ok(defined(events.at(-1)).kind === 'begin');
+    assert.equal(
+      gizmo['axes'].filter(axis => axis.controls.dragging).length,
+      1,
+    );
   });
 }
 
@@ -214,7 +232,7 @@ test('pointer leave, detach and disposal clear hover and release listeners', t =
   });
 });
 
-function pointerFixture(t) {
+function pointerFixture(t: TestContext) {
   const scene = new THREE.Scene();
   const object = new THREE.Object3D();
   scene.add(object);
@@ -222,18 +240,18 @@ function pointerFixture(t) {
   camera.position.set(8, 6, 10);
   camera.lookAt(0, 0, 0);
   camera.updateMatrixWorld();
-  const captured = new Set();
+  const captured = new Set<number>();
   const element = Object.assign(new EventTarget(), {
     style: {touchAction: 'pan-y'},
     getBoundingClientRect: () => ({left: 0, top: 0, width: 800, height: 600}),
-    setPointerCapture: id => captured.add(id),
-    hasPointerCapture: id => captured.has(id),
-    releasePointerCapture: id => {
+    setPointerCapture: (id: number) => captured.add(id),
+    hasPointerCapture: (id: number) => captured.has(id),
+    releasePointerCapture: (id: number) => {
       captured.delete(id);
       send('lostpointercapture', {pointerId: id});
     },
-  });
-  const send = (type, overrides = {}) =>
+  }) as unknown as HTMLElement;
+  const send = (type: string, overrides: Partial<PointerEvent> = {}) =>
     element.dispatchEvent(
       Object.assign(new Event(type), {
         pointerId: 1,
@@ -244,7 +262,7 @@ function pointerFixture(t) {
         ...overrides,
       }),
     );
-  const events = [];
+  const events: TransformGizmoEvent[] = [];
   const gizmo = new TransformGizmo(
     scene,
     camera,
@@ -255,7 +273,7 @@ function pointerFixture(t) {
   t.after(() => gizmo.dispose());
   gizmo.attach(
     object,
-    ['x', 'y', 'z'].map(axis => ({
+    (['x', 'y', 'z'] as const).map(axis => ({
       kind: 'expression',
       receiver: {sourceRef: {file: '/model.ts', start: 0, end: 4}},
       occurrenceKeys: ['part'],
