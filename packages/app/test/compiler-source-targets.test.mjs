@@ -59,6 +59,55 @@ after(async () => {
   await server?.close();
 });
 
+test('shell tools select input surfaces while displaying the result, including failed offsets', async () => {
+  for (const [call, selected, failure] of [
+    ['shell(1)', [], false],
+    ['shell(1, [])', [], false],
+    ['shell(-1, [6, 5, 6])', [5, 6], false],
+    ['shell(11, [6])', [6], true],
+    ['shell(1, [99, 6])', [6], true],
+    ['shell(1, [1, 2, 3, 4, 5, 6])', [1, 2, 3, 4, 5, 6], true],
+  ]) {
+    const source = `import {box} from '@code3d/core';
+const stock = box(30, 20, 10);
+const hollow = stock.${call};
+export default hollow;`;
+    const module = await compileProject(
+      {files: [{path: '/model.ts', source}]},
+      '/model.ts',
+    );
+    assert.equal(Boolean(module.diagnostic), failure, call);
+    const target = module.sourceTargets.find(
+      target =>
+        target.kind === 'topology-selection' &&
+        source.slice(target.sourceRef.start, target.sourceRef.end) === call,
+    );
+    assert.ok(target, call);
+    const evaluation = target.evaluations[0];
+    assert.equal(evaluation.selection.kind, 'surface');
+    assert.deepEqual(evaluation.selection.ids, selected);
+    const input = module.objects.get(evaluation.selection.inputNodeId);
+    assert.equal(
+      new Set(input.mesh.surfaceGroups.map(group => group.surfaceId)).size,
+      6,
+    );
+    const parameter = target.tool.signature.parameters[1];
+    assert.equal(parameter.name, 'removedSurfaceIds');
+    assert.equal(parameter.multiple, true);
+    assert.equal(parameter.label, 'Openings');
+    assert.equal(
+      target.tool.arguments[1].target.kind,
+      call === 'shell(1)' ? 'omitted' : 'present',
+    );
+    if (failure) {
+      assert.deepEqual(evaluation.nodeIds, [input.nodeId]);
+    } else {
+      assert.notEqual(evaluation.nodeIds[0], input.nodeId);
+      assert.equal(module.operations.get(evaluation.operationId).kind, 'shell');
+    }
+  }
+});
+
 test('exposed topology retains its geometry, placement and child selection scope', async () => {
   const source = `import {box, group, point} from '@code3d/core';
 const part = box(10, 20, 30);

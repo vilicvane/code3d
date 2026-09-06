@@ -113,6 +113,9 @@ solid.fillet(
   1,
   solid.edges().map(edge => edge.id),
 );
+solid.shell(1);
+solid.shell(-1, [surfaceId]);
+solid.shell(1, []);
 // @ts-expect-error Topology IDs are readonly author properties.
 vertex.id = 2;
 // @ts-expect-error Topology discriminators are readonly author properties.
@@ -335,6 +338,10 @@ edgeModel.surface(1);
 faceModel.fillet(1);
 // @ts-expect-error Face models do not support solid chamfers.
 faceModel.chamfer(1);
+// @ts-expect-error Face models do not support solid shelling.
+faceModel.shell(1);
+// @ts-expect-error Groups do not support solid shelling.
+groupModel.shell(1);
 // @ts-expect-error The general Model type contains only common capabilities.
 model.scaled(2);
 

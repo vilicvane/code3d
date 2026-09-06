@@ -48,6 +48,7 @@ import {
   type Vec3,
 } from './spatial.js';
 import {solveBodies} from './constraint-solver.js';
+import {shellWithTopology} from './shell.js';
 import {
   evaluateKernelOperation,
   type KernelArtifact,
@@ -61,6 +62,7 @@ import {
   initialShapeTopology,
   preserveShapeTopology,
   resolveEdgeSelection,
+  resolveTopologySelection,
   stableEdgeGroups,
   stableSurfaceGroups,
   stableVertexData,
@@ -170,6 +172,7 @@ export type ModelOperationKind =
   | 'rotate'
   | 'fillet'
   | 'chamfer'
+  | 'shell'
   | 'relate'
   | 'expose'
   | 'group'
@@ -199,9 +202,9 @@ export type ModelOperationRegionSnapshot = Readonly<{
 }>;
 
 export type ModelOperationSelectionSnapshot = Readonly<{
-  kind: 'edge';
+  kind: 'edge' | 'surface';
   inputNodeId: string;
-  ids: readonly EdgeId[];
+  ids: readonly number[];
 }>;
 
 export type ModelOperationSnapshot = Readonly<{
@@ -345,9 +348,9 @@ type StoredOperationRegion = Readonly<{
 }>;
 
 type StoredOperationSelection = Readonly<{
-  kind: 'edge';
+  kind: 'edge' | 'surface';
   input: ModelObject;
-  ids: readonly EdgeId[];
+  ids: readonly number[];
 }>;
 
 type StoredOperation = {
@@ -657,6 +660,17 @@ export interface SolidModificationCapabilities<Elements extends NamedElements> {
    * @code3d.param edgeIds {kind: 'edge', actions: [{label: 'Use all', action: 'remove-argument'}]}
    */
   chamfer(distance: number, edgeIds?: readonly EdgeId[]): SolidModel<Elements>;
+  /**
+   * Hollow a solid with uniform walls. Positive thickness offsets inward;
+   * negative thickness offsets outward. Selected surfaces become openings.
+   * Omit the selection, or use [], for a fully enclosed cavity.
+   * @code3d.param thickness {kind: 'length', label: 'Wall thickness'}
+   * @code3d.param removedSurfaceIds {kind: 'surface', label: 'Openings', actions: [{label: 'Close all openings', action: 'remove-argument'}]}
+   */
+  shell(
+    thickness: number,
+    removedSurfaceIds?: readonly SurfaceId[],
+  ): SolidModel<Elements>;
 }
 
 export type Model<Elements extends NamedElements = {}> = ModelCapabilities<
@@ -1502,6 +1516,41 @@ export class ModelObject<
       {},
       storedOperation('chamfer', [{model: this, role: 'source', index: 0}], {
         selections: [{kind: 'edge', input: this, ids: selectedEdgeIds}],
+      }),
+    ) as unknown as SolidModel<Elements>;
+  }
+
+  shell(
+    this: ModelObject<Elements, 'solid'>,
+    thickness: number,
+    removedSurfaceIds: readonly SurfaceId[] = [],
+  ): SolidModel<Elements> {
+    if (!Number.isFinite(thickness) || thickness === 0) {
+      throw new Error('thickness must be a nonzero finite number.');
+    }
+    const source = this.requireSolidGeometry();
+    const selectedIds = resolveTopologySelection(
+      'surface',
+      source.value.topology.surfaces,
+      removedSurfaceIds,
+    );
+    const geometry = evaluateSolidGeometry(
+      'shell',
+      [thickness, selectedIds],
+      [source],
+      () =>
+        shellWithTopology(
+          source.value.shape,
+          source.value.topology,
+          thickness,
+          selectedIds,
+        ),
+    );
+    return this.copyWithGeometry(
+      geometry,
+      {},
+      storedOperation('shell', [{model: this, role: 'source', index: 0}], {
+        selections: [{kind: 'surface', input: this, ids: selectedIds}],
       }),
     ) as unknown as SolidModel<Elements>;
   }

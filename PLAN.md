@@ -129,6 +129,12 @@ implementation context and historical outcomes, not a competing work queue.
 - Model values have no chainable `named()` operation. Source bindings identify
   authored values; intrinsic primitive and group names remain only as runtime
   display and diagnostic fallbacks.
+- Solid models provide `shell(thickness, removedSurfaceIds?)` for uniform walls:
+  positive thickness offsets inward, negative thickness outward, and omitted or
+  empty openings create an enclosed cavity. Shelling uses OCCT offset history,
+  preserves one-to-one topology IDs, rejects invalid or collapsed results, and
+  reuses the surface picker with failure recovery. See
+  [#37](https://github.com/vilicvane/code3d/issues/37).
 - Geometric model vertices, edges, and surfaces have independent model-local numeric ID
   namespaces.
   Primitive traversal assigns the initial IDs; a derived value preserves

@@ -157,6 +157,7 @@ test('resolves tool schemas from layered model capabilities', () => {
     'const solid = box(10, 20, 30);',
     'const face = circle(4);',
     'solid.fillet(2, [1]);',
+    'solid.shell(-1, [6]);',
     'solid.edge(1);',
     'solid.scaled(2);',
     'face.surface(1);',
@@ -206,6 +207,29 @@ test('resolves tool schemas from layered model capabilities', () => {
   assert.equal(
     toolSchemaAt(calls, source, 'face.surface(1)')?.parameters[0]?.kind,
     'surface',
+  );
+  assert.deepEqual(
+    toolSchemaAt(calls, source, 'solid.shell(-1, [6])')?.parameters,
+    [
+      {
+        index: 0,
+        name: 'thickness',
+        optional: false,
+        label: 'Wall thickness',
+        actions: [],
+        kind: 'length',
+        constraints: undefined,
+      },
+      {
+        index: 1,
+        name: 'removedSurfaceIds',
+        optional: true,
+        label: 'Openings',
+        actions: [{label: 'Close all openings', action: 'remove-argument'}],
+        kind: 'surface',
+        multiple: true,
+      },
+    ],
   );
 });
 

@@ -85,6 +85,7 @@ test('geometry models expose queryable topology without model operations', () =>
         'rotate',
         'scaled',
         'fillet',
+        'shell',
       ])
         assert.equal(value[method], undefined);
     }

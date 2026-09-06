@@ -196,6 +196,17 @@ compiler 在调用进入时记录 receiver 和已求值参数，所以参数缺�
 源码事务。复数引用允许空数组，并在省略参数时返回全部当前稳定拓扑引用；fillet/chamfer
 的省略参数全选语义仍由专用 provider 处理。
 
+`shell(thickness, removedSurfaceIds?)` 复用通用 surface 多选与数值参数工具：
+正厚度向内，负厚度向外；省略或空数组表示没有开口的封闭空腔。
+通用选择器按运行时解析后的选择显示摘要和高亮，不把省略参数硬编码为全选。
+操作 snapshot 的 selections 支持 edge 与 surface；抽壳选择指向操作输入，
+视图显示操作输出，失败时仍可修改输入面与厚度。Close all openings 删除面数组，
+恢复封闭空腔；全部选中面会报错，因为必须保留壳壁。见 [#37](https://github.com/vilicvane/code3d/issues/37)。
+
+工具在已有表达式边界插入相邻参数时，不扩张该表达式的源码范围；零长度插入槽
+则跟踪刚写入的文本，以便下一次工具操作直接替换。用户输入允许在词法边界扩展
+范围。这样选面后立即修改厚度无需等待编译，也不会将面数组误当作数字的一部分。
+
 数值参数的源码 provenance 与工具签名共用一个 TypeScript semantic program。调用参数中的
 标识符、具体对象属性、字面量类型的计算属性和对象解构会沿唯一 symbol definition 继续
 追溯，也可以穿过 import 和 re-export，直到静态数值 initializer。任一步存在多个定义、
