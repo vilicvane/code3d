@@ -5,6 +5,8 @@ import {
   type ItemInstance,
   type TreeInstance,
 } from '@headless-tree/core';
+import {ChevronDown, ChevronRight, File, Folder, FolderOpen} from 'lucide';
+import {createIcon} from './icons';
 
 type ProjectTreeNode = Readonly<{
   id: string;
@@ -112,7 +114,6 @@ export class ProjectTree {
     button.type = 'button';
     button.className = `project-tree-item ${node.kind}`;
     button.classList.toggle('active', node.path === this.activePath);
-    button.classList.toggle('expanded', item.isExpanded());
     button.style.setProperty(
       '--project-tree-level',
       String(item.getItemMeta().level),
@@ -139,9 +140,16 @@ export class ProjectTree {
     const chevron = document.createElement('span');
     chevron.className = 'project-tree-chevron';
     chevron.setAttribute('aria-hidden', 'true');
-    const icon = document.createElement('span');
-    icon.className = 'project-tree-icon';
-    icon.setAttribute('aria-hidden', 'true');
+    const isFolder = node.kind === 'folder';
+    if (isFolder) {
+      chevron.append(
+        createIcon(item.isExpanded() ? ChevronDown : ChevronRight),
+      );
+    }
+    const icon = createIcon(
+      isFolder ? (item.isExpanded() ? FolderOpen : Folder) : File,
+      `project-entry-icon ${isFolder ? 'folder-icon' : 'file-icon'}`,
+    );
     const label = document.createElement('span');
     label.className = 'project-tree-label';
     label.textContent = node.name;
