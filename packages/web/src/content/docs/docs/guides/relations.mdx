@@ -84,9 +84,12 @@ not pin centers as an on offset does. Source and target can be written in either
 order; `relate` still owns the movable self.
 
 Inspect `geometric-alignment.ts` in the App examples. Relation curves keep their
-actual shape, with arrows at positive endpoints or stable points on closed
-curves. Axes use one positive arrow. A solid source arrow and a larger outline
-target arrow distinguish coincident directions. Unsupported geometry,
+actual shape and serve as the arrow shaft. Only the arrowhead is added at
+the directed endpoint (or seam for a closed curve), following its tangent.
+`reverse()` uses the opposite endpoint and tangent. Axes use one positive
+arrow. Source and target arrowheads share a fixed 10-by-6 CSS-pixel size;
+the target uses 40% opacity. Passive curve highlights are 1px wide; interactive topology
+selection guides are 2px wide. Unsupported geometry,
 geometric incompatibility, and numerical nonconvergence have separate errors.
 
 For several relations involving align on one model, edit the numeric parameters
@@ -142,6 +145,15 @@ callback to inspect the same relationship. Even before you write a consuming
 `group` or `loft`, the relation context shows the participants in their solved
 positions. Selecting the related model's standalone binding shows it in its local
 frame. Operations preserve the observable meaning of existing model values.
+
+Within a relation chain, the cursor previews the result through the selected
+call: `on`/`align` show the base relation, and each `offset` or `rotate` shows its
+own result. `pivot`, `pivotVertex`, and `around` show the preceding pose with
+the selected rotation reference. Later calls do not move this preview or its
+handles. Earlier `relate` calls remain in effect; sibling constraints in the
+current callback are combined when inspecting the completed `relate` result.
+If an intermediate stage conflicts with inherited constraints, the App reports
+that stage's preview error and keeps the valid final model available.
 
 ## Group or fuse
 

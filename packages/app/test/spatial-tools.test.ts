@@ -260,9 +260,12 @@ async function relationTool(source: string, name: string) {
   );
   assert.ok(target, `No relation tool for ${name}`);
   const evaluation = target.evaluations[0];
-  const node = defined(
-    module.objects.get(defined(evaluation.constraintSpatial).nodeId),
-  );
+  const node = {
+    ...defined(
+      module.objects.get(defined(evaluation.constraintSpatial).nodeId),
+    ),
+    ...evaluation.constraintPreview,
+  };
   const occurrence = {
     key: 'source/self',
     node,
@@ -369,7 +372,7 @@ for (const [geometry, id] of [
 }
 
 test('around exposes a positioned axis and a single angle ring', async () => {
-  const source = `import {box, point} from '@code3d/core'; const base = box(20, 10, 30); const axis = box(2, 2, 2).relate(self => self.center.on(point([10, 20, 30]).up).offset(0, 0, 0)); const part = box(8, 6, 4).relate(self => self.on(base.up).around(axis.axis).rotate(25));`;
+  const source = `import {box, point} from '@code3d/core'; const base = box(20, 10, 30); const axis = box(2, 2, 2).relate(self => self.center.on(point([10, 20, 30]).up).offset(0, 0, 0)); const part = box(8, 6, 4).relate(self => self.on(base.up).around(axis.axis).rotate(25).pivot(2, 3, 4).rotate(10, 20, 30).offset(7, 0, 0));`;
   const {node, bindings} = await relationTool(source, 'rotate');
   assert.equal(bindings.length, 1);
   assert.equal(bindings[0].axis, 'y');
@@ -405,7 +408,7 @@ test('around exposes a positioned axis and a single angle ring', async () => {
 
 for (const reverse of [false, true] as const) {
   test(`align rotation edits self and preserves preview consistency with ${reverse ? 'reversed' : 'forward'} source`, async () => {
-    const source = `import {box, point} from '@code3d/core'; const base = point([20, 10, 30]); const part = box(8, 6, 4).relate(self => ${reverse ? 'base.align(self.center)' : 'self.center.align(base)'}.offset(2, 3, 4).pivot(1, 2, 3).rotate(25, 35, 10));`;
+    const source = `import {box, point} from '@code3d/core'; const base = point([20, 10, 30]); const part = box(8, 6, 4).relate(self => ${reverse ? 'base.align(self.center)' : 'self.center.align(base)'}.offset(2, 3, 4).pivot(1, 2, 3).rotate(25, 35, 10).around(box(1, 1, 1).axis).rotate(45).offset(7, 0, 0));`;
     const {node, bindings} = await relationTool(source, 'rotate');
     const intent = spatialIntent(bindings[0], 55),
       host = hostFor(source);
@@ -515,10 +518,10 @@ for (const [call, kind] of [
   });
 }
 
-test('coupled align equations use source parameter edits instead of an incorrect rigid drag preview', async () => {
+test('a constraint expression previews its own chain before sibling constraints are committed', async () => {
   const source = `import {box} from '@code3d/core'; const base=box(20,10,20); const part=box(2,2,2).relate(self=>[self.axis.align(base.axis).rotate(0,25,0),self.on(base.up)]);`;
   const {bindings, target} = await relationTool(source, 'rotate');
-  assert.equal(bindings.length, 0);
+  assert.equal(bindings.length, 3);
   assert.equal(defined(target.tool).signature.name, 'rotate');
   const {positionBindings} =
     await server.ssrLoadModule<typeof import('../src/viewport.ts')>(
@@ -533,10 +536,14 @@ test('coupled align equations use source parameter edits instead of an incorrect
     key: 'coupled',
     placement: 'composition' as const,
   };
+  assert.equal(node.constraints.length, 1);
+  const final = defined(module.objects.get(node.nodeId));
+  assert.equal(final.constraints.length, 2);
+  const finalOccurrence = {...occurrence, node: final};
   assert.deepEqual(
     positionBindings(
-      occurrence,
-      [occurrence],
+      finalOccurrence,
+      [finalOccurrence],
       defined(evaluation.constraintId),
     ),
     [],
