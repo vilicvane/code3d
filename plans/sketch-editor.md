@@ -152,13 +152,13 @@ P1/P2 是其后的扩展，不代表现在就承诺全部实现，也不以工�
 
 2026-09-06 已完成[第一轮隔离技术验证](sketch-solver-evaluation.md)：
 现有 Ondsel 桥接与 PlaneGCS 的小规模几何检查在 Node / Chrome Worker 均通过。
-用户已确认后端分工：刚体装配保留 OndselSolver，二维草图采用 PlaneGCS。
+当时确认的后端分工为刚体装配保留 OndselSolver，二维草图采用 PlaneGCS。
 点线已接入固定版本 `@salusoft89/planegcs@1.2.0` 的原始 JS/WASM，直接使用
-`GcsSystem`，不引入其 JSON 几何模型作为公开格式；装配继续保留 OndselSolver。
+`GcsSystem`，不引入其 JSON 几何模型作为公开格式。
 
-主分支已有 [`@code3d/solver`](../packages/solver/README.md)，使用 OndselSolver
-处理刚体位姿及局部 marker 之间的关系。当前公开桥接并不直接接收任意 2D 点坐标、
-圆半径和草图约束；“项目已有约束求解器”不等于“草图约束已经可用”。
+随后同步的 main 已将方向 bound 关系改为显式旋转加平移求解，core/App 不再加载
+OndselSolver；[`@code3d/solver`](../packages/solver/README.md) 保留为独立工作区包。
+草图的 PlaneGCS 后端不受这次装配求解变更影响，Node 与项目运行时仍初始化它。
 
 P0 · B 的点线约束部分已实现：固定点、重合、中点、水平/垂直、长度/角度、点 X/Y。
 Node 与项目 Worker 加载同一固定依赖；每次求解独立创建并释放原生系统、点和诊断

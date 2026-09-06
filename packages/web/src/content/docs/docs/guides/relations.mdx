@@ -1,6 +1,6 @@
 ---
 title: Positioning with relations
-description: Compose parts by combining relations between points, lines, planes, and frames.
+description: Position finite geometry against directional bounds and rotate explicitly.
 ---
 
 import ModelExample from '../../../../components/ModelExample.astro';
@@ -14,16 +14,22 @@ model value and resolved when the parts are composed.
 
 <ModelExample id="first-model" />
 
-## Connect two faces
+## Touch a directional bound
 
-In the example, `part.bottom.on(base.top)` makes the two planes coincide with
-opposing normals. Their centers align by default, but centering is a preference:
-other relations can slide the faces along their shared plane. Use `.flip()`
-when their normals should point in the same direction.
+`part.on(base.up)` places the part above the base by translating its matching
+bound into contact. The six target directions are `up` (+Y), `down` (−Y),
+`right` (+X), `left` (−X), `front` (+Z), and `back` (−Z), measured in the base's
+local frame. They describe its finite bounding extent, not particular faces.
 
-An explicit `offset(x, y, z)` fixes the source anchor's position in the
-**target anchor's frame**, including when all three values are zero. This lets
-placement follow the part it is attached to. Repeated offsets add together.
+The source can also be a selected vertex, edge, or surface. Only that selected
+geometry contributes its extent. A tilted shape still has a support boundary
+in the target direction; `on` never rotates it. Without an offset, its position
+along the boundary plane stays unchanged.
+
+An explicit `offset(x, y, z)` fixes the matching bound centers in the **target
+reference frame**, including when all values are zero. Repeated offsets add.
+`base.up.flip()` reverses the side of contact while keeping that frame and the
+geometry unchanged. Arbitrary models or topology elements are not valid targets.
 
 ## Combine conditions
 
@@ -38,19 +44,44 @@ Return an array from `relate()` to solve several relations together:
   </a>
 </p>
 
-The edge relation makes the reference lines collinear, while the face relation
-places the second box below the first. Together they place the second box at
-`[5, -15, 0]`; neither relation forces both anchor centers to match.
+The two contacts place the second box at `[15, -15, 0]`. One determines X,
+the other determines Y, and the free Z position stays unchanged. Conflicting
+position conditions report an error. `on` only solves translation; rotations
+are always authored explicitly.
 
-Points coincide with points or lie on reference lines and planes. Lines can
-coincide or lie in a plane; two planes coincide with opposing normals. A
-relation involving a complete frame fixes the complete pose. Edge and surface
-anchors describe reference lines and planes, so their finite boundaries need
-not match. Curved topology uses a sampled tangent or normal frame.
+## Choose a rotation pivot or axis
 
-The solver chooses a nearby valid pose using centering and orientation
-preferences. Conflicting relations report a failure; because solving is local
-and nonlinear, a failure is not proof that every possible pose is invalid.
+```ts
+const placed = part.relate(self =>
+  self.on(base.up).pivot(50, 0, 0).rotate(0, 0, 45),
+);
+```
+
+The pivot is expressed in self's local coordinates. Use `pivotVertex(id)` to
+choose one of self's vertices, or omit the pivot and call `rotate(x, y, z)`
+to rotate around self's origin. Angles are degrees, applied X, then Y, then Z.
+`around(base.axis).rotate(angle)` instead uses a positioned line axis; external
+axes follow their own composition placement. Each selection applies only to
+the next rotation.
+
+Each chain's rotation follows its contact placement, so the contact does not
+cancel the authored rotation. Other relations constrain the resulting pose.
+All explicit orientations on one self must agree.
+
+### Bend a loft with explicit rotations
+
+<ModelExample id="bound-rotation" />
+
+The octagonal and rectangular sections first touch the circle's `up` bound,
+then turn 45° and 90° around a pivot 50 units along self's X axis.
+Inspect `sections` to see the positioned profiles, or `loft` to see the solid
+through them. Editing `pivot` or `rotate` changes the same source used here.
+
+## Choose which part moves
+
+`relate` determines the movable self, even in `base.on(self.up)`. References to
+the original receiver also work: `part.relate(() => part.on(base.up))`.
+Relations that involve neither self nor the original receiver are rejected.
 
 ## Inspect the right scope
 
@@ -96,7 +127,13 @@ closing the panel. Use Undo after an edit has been committed. Numeric panel
 input has a different meaning when an expression appears as a placeholder:
 it [replaces the whole argument](../model-tools/#what-a-panel-can-edit).
 
-To rotate the geometry itself or choose its pivot, see
+Selecting a bound shows a translucent green rectangle with green corner
+brackets, together with the automatically matched source boundary. These
+helpers describe finite extents; they do not select a topology face. Select
+`pivot` for point handles, `pivotVertex` for a vertex picker,
+`around` for its axis, or `rotate` for three rings or one axis ring.
+
+To change the standalone geometry and its origin, see
 [origins and rotation](../origins-and-rotation/).
 
 See [code and geometry](../../concepts/code-and-geometry/) for the distinction

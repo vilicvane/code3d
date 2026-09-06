@@ -19,7 +19,7 @@ after(async () => {
 });
 
 test('repeated drags combine signed increments without nesting offsets', () => {
-  let source = 'part.bottom.on(base.top).offset((i - 2) * 8, 0, 0)';
+  let source = 'part.down.on(base.up).offset((i - 2) * 8, 0, 0)';
   for (const [delta, expression] of [
     [2, '(i - 2) * 8 + 2'],
     [3, '(i - 2) * 8 + 5'],
@@ -27,16 +27,13 @@ test('repeated drags combine signed increments without nesting offsets', () => {
     [3, '(i - 2) * 8'],
   ]) {
     source = offsetRelationSource(source, [delta, 0, 0]);
-    assert.equal(
-      source,
-      `part.bottom.on(base.top).offset(${expression}, 0, 0)`,
-    );
+    assert.equal(source, `part.down.on(base.up).offset(${expression}, 0, 0)`);
   }
 });
 
 test('an absent or spread offset gets one reusable literal call', () => {
   for (const source of [
-    'part.bottom.on(base.top)',
+    'part.down.on(base.up)',
     'relation.offset(...values)',
   ]) {
     const first = offsetRelationSource(source, [2, -3, 0]);
@@ -163,6 +160,7 @@ test('tool transactions read relocated anchors and accumulate before recompilati
       occurrenceKeys: ['source/0', 'context/0'],
       delta: [increment, 0, 0],
       frameQuaternion: [0, 0, 0, 1],
+      direction: 1,
     };
     const before = source;
     assert.equal(session.preview(intent).status, 'ready');
@@ -199,6 +197,7 @@ test('a lost receiver anchor conflicts without reading stale source', () => {
     occurrenceKeys: ['source/0'],
     delta: [1, 0, 0],
     frameQuaternion: [0, 0, 0, 1],
+    direction: 1,
   });
   assert.equal(result.status, 'conflict');
 });

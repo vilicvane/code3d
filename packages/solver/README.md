@@ -1,9 +1,9 @@
 # `@code3d/solver`
 
-The synchronous rigid-body constraint backend used by `@code3d/core`, compiled
-from [OndselSolver](https://github.com/FreeCAD/OndselSolver) to WebAssembly.
-Node and App Workers load the same JavaScript and WASM artifacts. Model
-authors initialize neither module themselves.
+An independent rigid-body constraint solver compiled from
+[OndselSolver](https://github.com/FreeCAD/OndselSolver) to WebAssembly.
+Current core/App directional-bound relations use a translation-only solver and
+do not depend on or initialize this package.
 
 The package is LGPL-2.1-or-later. It includes the code3d binding source and the
 license text; upstream OndselSolver is copyright Ondsel, Inc. and contributors.
@@ -33,7 +33,7 @@ are explicit initialization inputs, including inside a bundled Blob module.
 `solve()` receives body poses, fixed-body flags, and relations between local
 markers. Equations describe point-coordinate differences, displacement along
 a marker axis, and direction cosines. Positions must use normalized units;
-core handles model-scale normalization and anchor semantics. Quaternion order
+callers handle model-scale normalization and marker semantics. Quaternion order
 is `[x, y, z, w]`.
 
 Solving has two phases. All authored equations first participate in a least
@@ -46,8 +46,8 @@ pose regularizer selects otherwise undetermined freedoms.
 This avoids treating a Jacobian dependency at an unassembled pose as proof of
 nonlinear redundancy. Redundancy-removal retries are bounded. Every original
 equation is retained and refreshed after solving, including equations removed
-by Ondsel; a successful upstream return alone does not mean success. Core also
-checks directed face and complete-frame orientation branches.
+by Ondsel; a successful upstream return alone does not mean success. Callers
+are responsible for any additional directed-frame semantics.
 
 Results distinguish `solved`, `unsatisfied` residuals, and `failed` numerical
 iteration. This is a local nonlinear solver: failure does not prove the

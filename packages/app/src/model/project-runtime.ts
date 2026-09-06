@@ -46,8 +46,6 @@ export class ProjectRuntime {
     const replicadPath = await resolve('replicad', toolingPath);
     const loaderPath = await resolve('@code3d/opencascade', toolingPath);
     const wasmPath = await resolve('@code3d/opencascade/wasm', toolingPath);
-    const solverLoaderPath = await resolve('@code3d/solver', toolingPath);
-    const solverWasmPath = await resolve('@code3d/solver/wasm', toolingPath);
     const sketchLoaderPath = await resolve(
       '@salusoft89/planegcs/dist/planegcs_dist/planegcs.js',
       toolingPath,
@@ -62,7 +60,6 @@ export class ProjectRuntime {
       interopPath,
       loaderPath,
       replicadPath,
-      solverLoaderPath,
       sketchLoaderPath,
     ]
       .map(
@@ -90,13 +87,6 @@ export class ProjectRuntime {
         locateFile: () => ${JSON.stringify(wasmPath)},
       });
       tooling.installOpenCascade(kernel);
-      const initializeSolver = modules.get(${JSON.stringify(solverLoaderPath)}).default;
-      tooling.installConstraintSolver(await initializeSolver({
-        wasmBinary: __code3dSolverBytes,
-        locateFile: () => ${JSON.stringify(solverWasmPath)},
-        print() {},
-        printErr() {},
-      }));
       const initializeSketchSolver = modules.get(${JSON.stringify(sketchLoaderPath)}).default;
       tooling.installSketchSolver(await initializeSketchSolver({
         wasmBinary: __code3dSketchBytes,
@@ -105,16 +95,13 @@ export class ProjectRuntime {
         printErr() {},
       }));
     `;
-    const [bundle, wasm, solverWasm, sketchWasm] = await Promise.all([
+    const [bundle, wasm, sketchWasm] = await Promise.all([
       builder.build(runtimeSource),
       files.readFile(wasmPath),
-      files.readFile(solverWasmPath),
       files.readFile(sketchWasmPath),
     ]);
     if (!wasm)
       throw new Error(`Installed kernel asset is missing: ${wasmPath}`);
-    if (!solverWasm)
-      throw new Error(`Installed solver asset is missing: ${solverWasmPath}`);
     if (!sketchWasm)
       throw new Error(
         `Installed sketch solver asset is missing: ${sketchWasmPath}`,
@@ -122,7 +109,6 @@ export class ProjectRuntime {
     onProgress?.('initializing-runtime');
     const runtime = await evaluator.evaluate(runtimeUrl, bundle.source, {
       __code3dKernelBytes: wasm,
-      __code3dSolverBytes: solverWasm,
       __code3dSketchBytes: sketchWasm,
     });
     return new ProjectRuntime(

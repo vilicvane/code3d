@@ -77,15 +77,15 @@ export function centerOf(model: GeometryQueryCapabilities) {
 }
 
 const solid = box(10, 10, 10);
-const exposed = exposeElements(solid, {body: solid, mount: solid.bottom});
+const exposed = exposeElements(solid, {body: solid, mount: solid.down});
 const body: ExposedValue<typeof solid> = exposed.body;
 const topologyKind: TopologyKind = body.surface(1).kind;
 const colored: typeof exposed = recolor(exposed);
 const rotated: typeof exposed = rotate(exposed);
 const rounded: typeof exposed = round(exposed);
-colored.mount.on(solid.top);
+colored.mount.on(solid.up);
 rotated.body.edges();
-rounded.mount.on(solid.bottom);
+rounded.mount.on(solid.down);
 // @ts-expect-error Exposed geometry is a reference, not a model value.
 body.paint('#ffffff');
 

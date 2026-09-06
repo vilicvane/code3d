@@ -7,8 +7,8 @@ function locatingPin(radius: number, height: number) {
   const blank = cylinder(radius, height);
   return blank.expose({
     datum: blank.center,
-    mountingFace: blank.bottom,
-    tipFace: blank.top,
+    mountingFace: blank.down,
+    tipFace: blank.up,
     centerline: blank.axis,
     referenceFrame: blank,
   });
@@ -17,10 +17,10 @@ function locatingPin(radius: number, height: number) {
 const bracket = box(26, 5, 18).chamfer(1).paint(neutral);
 const pin = locatingPin(3, 12)
   .paint(accent)
-  .relate(part => part.mountingFace.on(bracket.top));
+  .relate(part => part.mountingFace.on(bracket.up));
 const cap = cylinder(5, 2)
   .paint(neutral)
-  .relate(part => part.bottom.on(pin.tipFace));
+  .relate(part => part.on(pin.tipFace));
 
 export const relationsAndElementsExample = group(
   [bracket, pin, cap],

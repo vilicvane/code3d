@@ -25,7 +25,11 @@ TypeScript, so the model never splits into code and hidden UI state.
 - Export the model you are inspecting as STEP, STL, or 3MF.
 
 Code3D evaluates precise B-Rep geometry with OpenCascade and exposes typed
-points, edges, faces, and frames for reusable model APIs.
+points, edges, faces, bounds, and frames for reusable model APIs. Hollow solids
+with [uniform walls and selected openings](https://www.code3d.org/docs/guides/shells/),
+position parts with [directional bounds and explicit rotations](https://www.code3d.org/docs/guides/relations/),
+and follow [topology source paths](https://www.code3d.org/docs/guides/topology/)
+through derived geometry.
 
 ## Example
 
@@ -33,9 +37,7 @@ points, edges, faces, and frames for reusable model APIs.
 import {box, cylinder, group} from '@code3d/core';
 
 const base = box(36, 4, 24).fillet(1);
-const post = cylinder(4, 14).relate(part =>
-  part.bottom.on(base.top).offset(-10, 0, 0),
-);
+const post = cylinder(4, 14).relate(part => part.on(base.up).offset(-10, 0, 0));
 
 export const model = group([base, post]);
 ```

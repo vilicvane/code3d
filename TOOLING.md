@@ -238,7 +238,7 @@ scope 的 edit plan。
 
 `origin`、`originOffset`、`originVertex`、`originCenter` 和 `rotate` 在 operation snapshot 中记录
 局部几何坐标下的原点和本次操作向量。模型 snapshot 同时提供当前原点，tooling
-统一这些数据、参数 provenance 和草图快照，并从同一依赖图安装 OpenCascade 和约束求解器；
+统一这些数据、参数 provenance 和草图快照，并从同一依赖图安装 OpenCascade 和草图约束求解器；
 viewport 不从包围盒推断模型旋转中心。
 
 拓扑引用同时报告约束所属模型、几何来源、源拓扑身份和几何到所属模型的变换。
@@ -388,3 +388,21 @@ Resolver 再生成带 source anchor 的编辑计划。当前 prototype 已具备
 
 对于没有自身位置关系的布尔结果，工具不会猜测应修改哪个输入实体，也不会为结果发明绝对位置；
 只有用户选定具体关系 scope 后才生成对应的 edit plan。
+
+## 方向 bound 与关系旋转
+
+`on` 的左右书写角色与 `relate` owner 分别记录。源码预览、位置工具和顶点选择
+以 owner 确定接受摆放的 self；反向书写时，offset 的源码数值仍按目标参考系定义，
+预览位移使用对应的反号。Bound 装饰直接使用运行时返回的有限矩形和 facing，
+不从网格猜测一个同向的真实拓扑面。关系快照同时给出自动匹配的源边界。
+辅助矩形使用半透明绿色填充和同色角框；目标与匹配源边界沿用同一视觉语义。
+
+完整 Constraint 和未完成的 pivot/axis 选择共用 ConstraintExpression trace。
+中间值保留原关系、self 和参数来源，但 relate 只接受完成的 Constraint。
+每次调用有独立源码位置：pivot 显示支点与三个平移轴；pivotVertex 使用 self 的
+顶点命名空间；around 显示解析后的轴；rotate 显示三个 Euler 环或一个轴环。
+旋转操作元数据以最终 self 的局部坐标表达当前调用的参考系，保留实际组合位置，
+因此反向关系、非零 XYZ 角度及外部轴均可生成与重算一致的预览。
+
+位置和旋转工具使用现有参数来源、安全上游参数判断、表达式增量、预览/取消、
+源码写回与撤销流程。Bound 翻面只改变 facing；offset 与编辑坐标系保持不变。

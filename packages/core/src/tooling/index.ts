@@ -28,11 +28,13 @@ export {
   authoringApi,
   beginModelEvaluation,
   constraintTraceReference,
+  constraintSpatialReference,
   createModelSnapshotter,
   disposeModelObjects,
   instrumentConstraint,
   instrumentModelOperation,
   isConstraint,
+  isConstraintExpression,
   isModelObject,
   modelElementReference,
   modelObjectRuntimeInfo,
@@ -43,6 +45,8 @@ export {
 } from '../library/runtime.js';
 export type {
   Constraint,
+  ConstraintExpression,
+  ConstraintSpatialReference,
   ConstraintAnchorSnapshot,
   ConstraintSnapshot,
   ConstraintTraceReference,
@@ -85,14 +89,22 @@ export type {Quaternion, RigidTransform, Vec3} from '../library/spatial.js';
 export type {
   EdgeId,
   SurfaceId,
+  TopologyId,
   TopologyKind,
   VertexId,
 } from '../library/topology.js';
 export {describeOpenCascadeException} from '../library/open-cascade-error.js';
 
-export {installConstraintSolver} from '../library/constraint-solver.js';
-
 export function installOpenCascade(openCascade: OpenCascadeInstance): void {
   clearKernelOperationCache();
   setOC(openCascade);
 }
+
+export {
+  compareTopologyIds,
+  formatTopologyId,
+  isTopologyId,
+  sameTopologyId,
+  topologyIdKey,
+  TopologyIdSet,
+} from '../library/topology-id.js';

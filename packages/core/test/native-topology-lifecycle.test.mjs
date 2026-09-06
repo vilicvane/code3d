@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import '../bld/node/index.js';
+import {bezier, loft, rectangle} from '../bld/node/index.js';
+import {disposeModelObjects} from '../bld/tooling/index.js';
+import {clearKernelOperationCache} from '../bld/library/kernel-cache.js';
 import * as replicad from 'replicad';
 import {replicad as authorReplicad} from '../bld/node/replicad.js';
 import {
@@ -172,3 +174,68 @@ test('failed solid casting releases both acquired handles and preserves borrowed
     shape.delete();
   }
 });
+
+for (const failHistory of [false, true]) {
+  test(`loft releases cap and generated history handles${failHistory ? ' on failure' : ''}`, t => {
+    clearKernelOperationCache();
+    const spine = bezier([
+      [0, 0, 0],
+      [0, 8, 0],
+      [10, 16, 0],
+      [10, 24, 0],
+    ]);
+    const start = rectangle(6, 4).relate(p =>
+      p.on(spine.start.up).offset(0, 0, 0),
+    );
+    const end = rectangle(4, 3).relate(p => p.on(spine.end.up).offset(0, 0, 0));
+    const oc = replicad.getOC();
+    const handles = [];
+    let generatedCalls = 0;
+    const prototype = oc.BRepOffsetAPI_MakePipeShell.prototype;
+    for (const method of [
+      'Shape',
+      'FirstShape',
+      'LastShape',
+      'Modified',
+      'Generated',
+    ]) {
+      const original = prototype[method];
+      t.mock.method(prototype, method, function (...args) {
+        if (method === 'Generated' && failHistory && ++generatedCalls === 2)
+          throw new Error('Interrupted loft history');
+        const result = original.apply(this, args);
+        handles.push(result);
+        if (method === 'Modified' || method === 'Generated') {
+          const first = result.First;
+          result.First = function () {
+            const handle = first.call(this);
+            handles.push(handle);
+            return handle;
+          };
+        }
+        return result;
+      });
+    }
+    let result;
+    try {
+      if (failHistory)
+        assert.throws(
+          () => loft([start, end], {spine}),
+          /Interrupted loft history/,
+        );
+      else {
+        result = loft([start, end], {spine});
+        assert.deepEqual(result.surface([1, 1]).id, [1, 1]);
+        assert.ok(result.geometry.value.shape.mesh().triangles.length > 0);
+      }
+      assert.ok(handles.length > 5);
+      assert.ok(handles.every(handle => handle.isDeleted()));
+      assert.ok(start.geometry.value.shape.mesh().triangles.length > 0);
+      assert.ok(end.geometry.value.shape.mesh().triangles.length > 0);
+    } finally {
+      disposeModelObjects([spine, start, end, ...(result ? [result] : [])]);
+      clearKernelOperationCache();
+      for (const handle of handles) if (!handle.isDeleted()) handle.delete();
+    }
+  });
+}

@@ -65,10 +65,13 @@ export function signatureParameters(
       checker.getNonNullableType(type),
       checker.getNumberType(),
     );
-  const acceptsArray = (type: ts.Type): boolean =>
-    type.isUnion()
-      ? type.types.some(acceptsArray)
-      : checker.isArrayType(type) || checker.isTupleType(type);
+  const acceptsArray = (type: ts.Type): boolean => {
+    const value = checker.getNonNullableType(type);
+    // A single topology ID is number | path; its path is not a selection list.
+    return value.isUnion()
+      ? value.types.every(acceptsArray)
+      : checker.isArrayType(value) || checker.isTupleType(value);
+  };
 
   return signature.getParameters().flatMap(parameter => {
     const declaration = parameter.valueDeclaration;

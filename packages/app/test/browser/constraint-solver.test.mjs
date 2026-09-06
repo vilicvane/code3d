@@ -48,8 +48,8 @@ for (const installed of [false, true]) {
         const source = `import {box, group} from '@code3d/core';
         const first = box(10, 10, 10);
         const second = box(20, 20, 20).relate(self => [
-          self.edge(3).on(first.edge(1)),
-          self.top.on(first.bottom),
+          self.edge(3).on(first.left),
+          self.up.on(first.down),
         ]);
         export default group([first, second]);`;
         const compile = text =>
@@ -78,16 +78,16 @@ for (const installed of [false, true]) {
           const first = await compile(source);
           const shifted = await compile(
             source.replace(
-              'self.top.on(first.bottom)',
-              'self.top.on(first.bottom).offset(5, 0, 7)',
+              'self.up.on(first.down)',
+              'self.up.on(first.down).offset(5, 0, 7)',
             ),
           );
           let conflict;
           try {
             const conflicting = await compile(
               source.replace(
-                'self.top.on(first.bottom)',
-                'self.top.on(first.bottom).offset(0, 0, 0)',
+                'self.up.on(first.down)',
+                'self.up.on(first.down).offset(0, 0, 0)',
               ),
             );
             conflict = conflicting.diagnostic?.message;
@@ -164,7 +164,7 @@ for (const installed of [false, true]) {
       }
       assert.deepEqual(result.offset, [5, 0, 7]);
       assert.equal(result.constraintSource, '/main.ts');
-      assert.match(result.conflict, /Could not satisfy/);
+      assert.match(result.conflict, /Conflicting bound positions/);
       assert.equal(result.sketchDiagnostic, undefined);
       assert.match(result.cancelled, /superseded/);
       const originalPoints = result.originalSketch.entities.filter(

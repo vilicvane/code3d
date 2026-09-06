@@ -17,10 +17,11 @@ export default defineConfig({
   plugins: [
     {
       name: 'code3d-development-port',
+      apply(_config, {command, isPreview}) {
+        return command === 'serve' && !isPreview;
+      },
       configResolved(config) {
         if (
-          config.command === 'serve' &&
-          !config.isPreview &&
           !config.server.middlewareMode &&
           config.server.port === primaryDevelopmentPort &&
           statSync(path.resolve(packageDirectory, '../../.git'), {

@@ -37,19 +37,24 @@ import {
 } from './project/filesystem';
 import {filePathFromRoute, fileRoute} from './project/file-route';
 import type {ModelProject} from './project/project';
-import type {
-  EdgeId,
-  ModelSnapshotObject,
-  ParameterTarget,
-  SourceRef,
-  TopologyKind,
+import {
+  compareTopologyIds,
+  formatTopologyId,
+  type TopologyId,
+  type EdgeId,
+  type ModelSnapshotObject,
+  type ParameterTarget,
+  type SourceRef,
+  type TopologyKind,
 } from '@code3d/core/tooling';
+import {topologyIdExpression} from './tools/topology-expression';
 import {
   booleanOperationSourceDecoration,
   edgeModificationSourceDecoration,
 } from './model/operation-decorations';
 import {
   elementSourceDecoration,
+  boundRelationSourceDecoration,
   namedElementDecorations,
 } from './model/element-decorations';
 import type {
@@ -323,8 +328,8 @@ type TopologyReferenceSelectionTool = {
   parameter: ToolSelectionParameterSchema;
   argument: ToolArgumentEditTarget;
   occurrenceKey: string;
-  availableIds: readonly number[];
-  selectedIds: readonly number[];
+  availableIds: readonly TopologyId[];
+  selectedIds: readonly TopologyId[];
 };
 type ContextualToolState = {
   callId: string;
@@ -367,6 +372,7 @@ const viewport = new ModelViewport(viewportHost, {
     booleanOperationSourceDecoration,
     edgeModificationSourceDecoration,
     elementSourceDecoration,
+    boundRelationSourceDecoration,
     originSourceDecoration,
   ],
 });
@@ -1699,7 +1705,7 @@ function syncTopologyReferenceSelectionProvider(
   }
   dismissTopologyReferenceSelectionTool();
   viewport.cancelPositionTool();
-  let availableIds: readonly number[];
+  let availableIds: readonly TopologyId[];
   try {
     availableIds = viewport.beginTopologySelection(
       occurrence.key,
@@ -1871,9 +1877,9 @@ function handleTopologyReferenceSelection(
       expression: tool.parameter.multiple
         ? {
             kind: 'array',
-            elements: tool.selectedIds.map(value => ({kind: 'number', value})),
+            elements: tool.selectedIds.map(topologyIdExpression),
           }
-        : {kind: 'number', value: event.id},
+        : topologyIdExpression(event.id),
     },
     {undoGroup: contextual?.undoGroup},
   );
@@ -2096,22 +2102,18 @@ function edgeSelectionIntent(tool: EdgeSelectionTool): ToolIntent {
 
 function formatEdgeIds(edgeIds: readonly EdgeId[]): string {
   if (edgeIds.length === 0) return 'None';
-  const visible = edgeIds.slice(0, 8).map(edgeId => `E${edgeId}`);
+  const visible = edgeIds
+    .slice(0, 8)
+    .map(edgeId => formatTopologyId('edge', edgeId));
   return edgeIds.length > visible.length
     ? `${visible.join(', ')} +${edgeIds.length - visible.length}`
     : visible.join(', ');
 }
 
-function formatTopologyId(kind: TopologyKind, id: number): string {
-  const prefixes = {
-    vertex: 'V',
-    edge: 'E',
-    surface: 'S',
-  } as const satisfies Record<TopologyKind, string>;
-  return `${prefixes[kind]}${id}`;
-}
-
-function formatTopologyIds(kind: TopologyKind, ids: readonly number[]): string {
+function formatTopologyIds(
+  kind: TopologyKind,
+  ids: readonly TopologyId[],
+): string {
   if (ids.length === 0) return 'None';
   const visible = ids.slice(0, 8).map(id => formatTopologyId(kind, id));
   return ids.length > visible.length
@@ -2130,12 +2132,12 @@ function topologySelectionLabel(
   }[parameter.kind];
 }
 
-function sortedTopologyIds(ids: readonly number[]): number[] {
-  return [...ids].sort((left, right) => left - right);
+function sortedTopologyIds(ids: readonly TopologyId[]): TopologyId[] {
+  return [...ids].sort(compareTopologyIds);
 }
 
 function sortedEdgeIds(edgeIds: readonly EdgeId[]): EdgeId[] {
-  return [...edgeIds].sort((left, right) => left - right);
+  return [...edgeIds].sort(compareTopologyIds);
 }
 
 function interruptCompileForTool(): boolean {
@@ -2223,6 +2225,7 @@ function positionIntent(
     occurrenceKeys: binding.occurrenceKeys,
     delta,
     frameQuaternion: binding.frame.quaternion,
+    direction: binding.sensitivity as 1 | -1,
   };
 }
 

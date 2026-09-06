@@ -99,10 +99,10 @@ implementation context and historical outcomes, not a competing work queue.
   visibility.
 - `model()` is not a required entry wrapper. Any runtime model object can be
   selected and rendered.
-- `Model` and typed point, line, face, and frame Anchors are core abstractions. A
-  model is itself usable as its intrinsic frame Anchor. Solid primitives expose
-  `center`, `top`, `bottom`, and `axis` through the same named-element mechanism
-  available to user models rather than through a separate fixed-anchor path.
+- Models and finite geometric references can source `on(targetBound)`. All models
+  expose `up/down/left/right/front/back` bounds in their local frame; primitives
+  also retain their named `center` and `axis`. Bounds are computed from current
+  geometry, independently of triangulation, and are not topology surfaces.
 - Types referenced by the public authoring API are exported with their named
   dependencies, including generic constraints and result mappings. Model types
   belong to core's root entry and Replicad builder types to `./replicad`;
@@ -126,11 +126,17 @@ implementation context and historical outcomes, not a competing work queue.
   Rendering this value on its own preserves its intrinsic local placement;
   relation placement is resolved only when the value participates in a
   composition.
-- Anchor methods return immutable constraint expressions. `on()` constrains
-  points, lines, planes, or complete frames according to the anchor kinds.
-  Centering and default orientation are secondary preferences. Face `flip()`
-  selects aligned normals; explicit `offset(x, y, z)` pins the anchor position
-  in the target frame, including an explicit zero offset.
+- `on` only translates the source's matching support boundary to a directional
+  target bound. Selected topology contributes only its own finite extent. It
+  never aligns angles or centers. Offset explicitly pins matched bound centers
+  in the target frame; bounds can reverse facing without changing that frame.
+- `relate` determines self independently of written source/target roles and
+  rebinds the original receiver. Each returned relation must involve self or the
+  original receiver. See [#36](https://github.com/vilicvane/code3d/issues/36).
+- Constraint `rotate`, `pivot(...).rotate`, `pivotVertex(...).rotate`, and
+  `around(axis).rotate` provide explicit, traceable rotations. XYZ coordinates,
+  vertices and default origin use self. Rotations follow their contact stage;
+  other contacts constrain the final pose. See [#38](https://github.com/vilicvane/code3d/issues/38).
 - Standalone `union`, `cut`, and `intersect` functions are geometry-evaluation
   boundaries. They collect and solve operand relations without introducing an
   author-facing composition object.
@@ -148,11 +154,13 @@ implementation context and historical outcomes, not a competing work queue.
   preserves one-to-one topology IDs, rejects invalid or collapsed results, and
   reuses the surface picker with failure recovery. See
   [#37](https://github.com/vilicvane/code3d/issues/37).
-- Geometric model vertices, edges, and surfaces have independent model-local numeric ID
-  namespaces.
-  Primitive traversal assigns the initial IDs; a derived value preserves
-  strict one-to-one topology history, allocates newly created or ambiguous
-  elements above the inherited high-water mark, and never reuses retired IDs.
+- Geometric model vertices, edges, and surfaces have independent model-local ID
+  namespaces. Primitives assign numeric IDs. Topology-changing operations assign
+  strict one-to-one descendants `[inputIndex, ...sourceIdPath]`, including the
+  index 1 for single-input fillet/chamfer/shell; genuinely new or ambiguous elements
+  receive local numeric IDs starting at 1. Paths are flat and input indices are
+  one-based. Internal Boolean prefixes do not add path levels. Transforms and
+  references retain the complete ID. See [#39](https://github.com/vilicvane/code3d/issues/39).
   Deterministic source replay is the persistence mechanism rather than a
   separate topology ledger. `model.vertex(id)`, `model.edge(id)`, and
   `model.surface(id)` return complete point, line, and face anchors: vertices
@@ -209,9 +217,11 @@ implementation context and historical outcomes, not a competing work queue.
   presentation costs than a GUI toolbar; minimizing entry count alone is not
   the scope criterion. Example selection must follow this boundary, not define it.
 - Public topology IDs are deterministic model semantics, not OpenCascade hash
-  codes or current edge-array positions. Boolean results inherit only from the
-  ordered primary operand; every other contributed edge is new in that ID
-  namespace.
+  codes or current edge-array positions. Boolean results inherit unambiguous
+  descendants from every ordered input. Split/merged elements retire ambiguous
+  source paths rather than choosing a contributor. Numeric IDs are local to
+  each result; deterministic allocation is not a guarantee against renumbering
+  newly generated topology when construction changes.
 - GUI tools resolve an explicit source-edit scope and use the common tool intent
   and transaction mechanism.
 - Source undo and redo remain Monaco history operations. Standard shortcuts
@@ -227,10 +237,10 @@ implementation context and historical outcomes, not a competing work queue.
 - Units remain UI metadata; no implicit runtime conversion occurs.
 - Runtime trace data may explain and locate values, but must not constrain which
   JavaScript/TypeScript construction patterns users can write.
-- Named point, line, and face elements retain complete local reference frames
-  while their kinds determine geometric degrees of freedom. A composition's
-  relations are solved jointly by the OndselSolver WASM backend. Groups retain
-  their children's local assembly and move as rigid bodies in outer groups.
+- Named references retain their geometry and local frames. Bound contacts
+  measure finite source geometry in the target direction and solve translation
+  conditions jointly; rotation is authored explicitly. Groups retain their
+  children's local assembly and move as rigid bodies in outer groups.
 - The editor caret resolves the exact source occurrence being inspected. A
   value site renders that value alone. A collection result places its members
   together using their resolved relations, including singleton collections;
@@ -485,37 +495,44 @@ frame decorations without editing source or retaining a parallel selection.
 Status: [R-002](requests/closed/R-002-unified-collapsible-gui-panels.md) is
 implemented as reusable dock panel infrastructure.
 
-### 3. Anchor constraint graph — geometric solver complete
+### 3. Directional bounds and explicit rotations
 
-- Keep B-Rep geometry local and store constraints on immutable model copies.
-- Support a model's intrinsic frame and type-safe named point, line, and face
-  elements. Primitives provide canonical center, top, bottom, and axis elements;
-  reusable models can expose and rename internal elements in their own frame.
-- Solve simultaneous geometric `on()` relations using the shared Node/Worker
-  WASM module, with geometric feasibility preceding secondary placement
-  preferences. Validate every original equation after redundancy handling.
-- Check directed face and complete-frame orientation branches. Line anchors
-  are geometrically unoriented, with `flip()` changing the preferred direction.
-- Preserve a related value's intrinsic local placement when it is rendered on
-  its own. Resolve relation placement when rendering a composition or evaluating
-  a compositional geometry operation such as a Boolean or loft.
-- Preserve constraint source and parameter provenance for GUI tools.
+Keep B-Rep geometry local and store relations on immutable model copies.
+Models without relations are fixed references. `on` contributes linear
+translation conditions; explicit rotations determine orientation. Remaining
+position freedom minimizes displacement at authored contact stages, with
+redundant stages counted once. Conflicting translations or explicit
+orientations report errors. The nonlinear core solver adapter and its Node/Worker
+WASM initialization have been removed.
 
-The independently determined full-pose comparison path has been removed.
-Primitive canonical anchors use their exact dimensions instead of padded
-OpenCascade bounds. Build and solver details are in
-[`@code3d/solver`](packages/solver/README.md).
+Use the target's local +Y/−Y/+X/−X/+Z/−Z for up/down/right/left/front/back.
+Project the selected source geometry into that same direction to obtain its
+matching support boundary. Group bounds include solved child placements;
+point and planar sources allow degenerate ranges. Only finite sources and
+directional targets are accepted. Old bound references retain their value;
+new bounds describe derived geometry. `flip` changes only facing metadata.
 
-### 4. Relation-aware GUI tools — translation slice complete
+Constraint rotations use self even when self is the written target. Local
+pivot coordinates and vertex IDs resolve against self; external axes resolve
+against their model's composition. Contact and explicit rotations compose in
+source order. Other relations still constrain the resulting pose.
+
+See [#36](https://github.com/vilicvane/code3d/issues/36),
+[#38](https://github.com/vilicvane/code3d/issues/38), and
+[core semantics](packages/core/README.md#bound-relations-and-rotation).
+
+### 4. Relation-aware GUI tools — contact and rotation tools
 
 - Show the translation gizmo only when the selected model carries a constraint
   and the caret-selected operation input supplies relative-position context.
 - Edit traced `offset()` parameters at their upstream source target.
 - When an `on()` relation has no offset yet, insert one on the constraint
   expression; later drags edit that call's parameters instead of stacking calls.
-- Orient gizmo axes and previews in the target Anchor frame.
-- Add rotation relations and previews once their author-facing constraint
-  vocabulary is selected.
+- Orient offset axes and previews in the target bound frame, accounting for
+  self on either side of the written relationship.
+- Show matched boundaries, editable relation pivots, self's pivot vertices,
+  positioned axes, and three-angle or single-axis rotation handles at their
+  respective source sites, including unfinished pivot and axis chains.
 - Preview the relation source as a ghost when useful.
 - Add copy and pattern tools on top of the same relation intents.
 - Keep the caret-selected context stable across gizmo and contextual tool commits;
@@ -532,8 +549,8 @@ constraint source sites do.
 
 ### 4a. Topology-scoped modeling tools — complete
 
-- Assign stable numeric edge IDs at primitive boundaries and carry them across
-  scale, fillet, chamfer, and Boolean derivations.
+- Assign numeric edge IDs at primitive boundaries; retain complete IDs across
+  scale, and use input paths across fillet, chamfer, Boolean, and loft derivations.
 - Let `fillet(radius, edgeIds)` and `chamfer(distance, edgeIds)` modify an
   explicit edge set while retaining the one-argument all-edge form.
 - Project stable IDs into render meshes and operation trace selections without
@@ -741,12 +758,18 @@ establish the next schema boundary.
 - Make `.surface(id)`, `.edge(id)`, and `.vertex(id)` usable as face, line, and
   point anchors. Faces use their center and normal, edges use their midpoint
   and tangent, and vertices use their point with the owning model orientation.
-  The solver constrains the resulting reference lines and planes, including
-  those of curved topology; it does not match complete curves or surfaces.
+  Bound relations use the selected finite topology extent, including curved
+  geometry; sampled directions remain available for geometric queries.
 - Let `loft(sections, {spine})` transform every related input into the first
   section's frame. Without a spine it builds a through-sections loft; with a
   spine it uses a multi-section pipe shell so the curve affects the generated
   geometry rather than serving only as a placement guide.
+- Loft caps retain their endpoint section face paths. Section edges/vertices
+  use unchanged/modified history and intersections of generated side topology
+  with the endpoint cap; ruled intermediate edges can also inherit through their
+  generated side faces and unchanged endpoint identities. Ambiguous split edges
+  receive new IDs. Middle section faces do not become caps. Through-section
+  construction disables input mutation.
 - Validate the complete path with two non-parallel related planar profiles at
   the endpoints of a curved spine, including Node execution, App rendering,
   source context, and topology selection on the result and inputs.
@@ -770,7 +793,7 @@ Design discussion and live scope: [#8](https://github.com/vilicvane/code3d/issue
 
 ## Open questions
 
-Further author-facing Boolean provenance and large-model lineage/mesh retention
+Additional Boolean operand-anchor APIs and large-model lineage/mesh retention
 questions are tracked in [#9](https://github.com/vilicvane/code3d/issues/9).
 Geometric constraints (#21), named topology references and retired-ID semantics
 (#27), and geometric scaling (#33) already have implemented, documented behavior.
@@ -778,7 +801,10 @@ The bounded kernel cache and the runtime/resource ownership boundaries are also
 implemented; #9 discusses additional needs at larger scales.
 
 The [solver experiment](plans/constraint-solver-wasm-evaluation.md) records the
-evidence preceding the integrated OndselSolver backend. The completed public API
+earlier OndselSolver investigation. The independent solver package remains,
+while current core/App bound positioning uses a linear translation solver and
+explicit rotations, as delivered in [#38](https://github.com/vilicvane/code3d/issues/38).
+The completed public API
 and interoperability audit is recorded in
 [plans/public-api-audit.md](plans/public-api-audit.md) and
 [#5](https://github.com/vilicvane/code3d/issues/5).

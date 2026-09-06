@@ -197,15 +197,21 @@ test('a line between empty positions commits its points atomically and Escape ca
   await waitForSource(page, /'line',\s*3,\s*\[1,\s*2\]/);
   await page.getByRole('button', {name: 'Select', exact: true}).click();
   const created = await text(page);
+  const start = await screenPoint(point(page, 1));
   const anchor = await screenPoint(point(page, 2));
   await drag(page, point(page, 1), 35, -25);
   await settleDrag(page);
-  assert.notEqual(
-    await text(page),
-    created,
+  assert.notDeepEqual(
+    await screenPoint(point(page, 1)),
+    start,
     'new point data is available before recompilation',
   );
   assert.deepEqual(await screenPoint(point(page, 2)), anchor);
+  // Source edits are synchronous; Monaco's view-lines render on a later frame.
+  await page
+    .locator('.monaco-editor .view-lines')
+    .filter({hasNotText: created})
+    .waitFor();
   const before = await text(page);
   const p = await point(page, 1).boundingBox();
   await page.mouse.move(p.x + p.width / 2, p.y + p.height / 2);

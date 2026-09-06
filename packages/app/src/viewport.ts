@@ -9,17 +9,20 @@ import type {
   SourceTargetEvaluation,
   TopologySelectionScope,
 } from './model/compiler';
-import type {
-  EdgeId,
-  ModelOperationInputRole,
-  ModelSnapshotObject,
-  ParameterUsage,
-  RenderMesh,
-  SourceRef,
-  TopologyKind,
-  Vec3,
+import {
+  compareTopologyIds,
+  sameTopologyId,
+  TopologyIdSet,
+  composeTransforms,
+  type TopologyId,
+  type ModelOperationInputRole,
+  type ModelSnapshotObject,
+  type ParameterUsage,
+  type RenderMesh,
+  type SourceRef,
+  type TopologyKind,
+  type Vec3,
 } from '@code3d/core/tooling';
-import {composeTransforms} from '@code3d/core/tooling';
 import {
   ModelRenderer,
   applyNodeTransform,
@@ -113,14 +116,14 @@ export type TopologySelectionEvent =
   | Readonly<{
       kind: 'hover';
       topology: TopologyKind;
-      id?: number;
-      selectedIds: readonly number[];
+      id?: TopologyId;
+      selectedIds: readonly TopologyId[];
     }>
   | Readonly<{
       kind: 'change';
       topology: TopologyKind;
-      id: number;
-      selectedIds: readonly number[];
+      id: TopologyId;
+      selectedIds: readonly TopologyId[];
     }>
   | Readonly<{kind: 'cancel'}>;
 
@@ -131,8 +134,8 @@ type TopologySelectionState = {
   mesh: RenderMesh;
   guide: THREE.Group;
   pickObject?: THREE.Mesh;
-  selectedIds: Set<number>;
-  hoveredId?: number;
+  selectedIds: TopologyIdSet;
+  hoveredId?: TopologyId;
 };
 
 const boxCornerPairs = [
@@ -675,9 +678,9 @@ export class ModelViewport {
     inputNodeId: string,
     kind: TopologyKind,
     multiple: boolean,
-    initialIds: readonly number[] = [],
+    initialIds: readonly TopologyId[] = [],
     scope?: TopologySelectionScope,
-  ): readonly number[] {
+  ): readonly TopologyId[] {
     const occurrence = this.occurrences.get(occurrenceKey);
     const input = this.module?.objects.get(
       scope?.geometryNodeId ?? inputNodeId,
@@ -687,10 +690,12 @@ export class ModelViewport {
     }
     const renderedIds = topologyIds(input.mesh, kind);
     const availableIds = scope
-      ? renderedIds.filter(id => scope.availableIds.includes(id))
+      ? renderedIds.filter(id =>
+          scope.availableIds.some(available => sameTopologyId(available, id)),
+        )
       : renderedIds;
     const mesh = scope
-      ? restrictTopologyMesh(input.mesh, kind, new Set(availableIds))
+      ? restrictTopologyMesh(input.mesh, kind, new TopologyIdSet(availableIds))
       : input.mesh;
     if (availableIds.length === 0) {
       throw new Error(`The model has no selectable ${kind}s.`);
@@ -715,7 +720,7 @@ export class ModelViewport {
       mesh,
       guide,
       pickObject,
-      selectedIds: new Set(initialIds),
+      selectedIds: new TopologyIdSet(initialIds),
     };
     this.rebuildSelectionHighlight();
     this.updateTransformGizmo();
@@ -730,9 +735,9 @@ export class ModelViewport {
     this.updateTransformGizmo();
   }
 
-  setSelectedTopologyIds(ids: readonly number[]): void {
+  setSelectedTopologyIds(ids: readonly TopologyId[]): void {
     if (!this.topologySelection) return;
-    this.topologySelection.selectedIds = new Set(ids);
+    this.topologySelection.selectedIds = new TopologyIdSet(ids);
     this.rebuildTopologySelectionOverlay();
     this.refreshTopologyHover();
   }
@@ -1099,7 +1104,7 @@ export class ModelViewport {
         const mesh = this.module!.objects.get(reference.geometryNodeId)?.mesh;
         if (!mesh) continue;
         const kind = reference.kind === 'solid' ? 'surface' : reference.kind;
-        const ids = new Set(
+        const ids = new TopologyIdSet(
           reference.kind === 'solid'
             ? topologyIds(mesh, 'surface')
             : [reference.id],
@@ -1361,6 +1366,10 @@ export class ModelViewport {
         this.transformGizmo.attach(occurrence.object, bindings);
         return;
       }
+      if (scope.evaluation.constraintSpatial) {
+        this.transformGizmo.detach();
+        return;
+      }
     }
     if (
       this.topologySelection ||
@@ -1463,9 +1472,9 @@ export class ModelViewport {
       const worldOffset = new THREE.Vector3(...localOffset).applyQuaternion(
         frame,
       );
-      offset[0] += worldOffset.x;
-      offset[1] += worldOffset.y;
-      offset[2] += worldOffset.z;
+      offset[0] += worldOffset.x * constraint.offsetDirection;
+      offset[1] += worldOffset.y * constraint.offsetDirection;
+      offset[2] += worldOffset.z * constraint.offsetDirection;
     }
     return offset;
   }
@@ -1587,7 +1596,7 @@ export class ModelViewport {
     }
   }
 
-  private selectTopology(id: number): void {
+  private selectTopology(id: TopologyId): void {
     const selection = this.topologySelection;
     if (!selection) return;
     if (selection.multiple && selection.selectedIds.has(id)) {
@@ -1605,9 +1614,9 @@ export class ModelViewport {
     });
   }
 
-  private updateTopologyHover(id: number | undefined): void {
+  private updateTopologyHover(id: TopologyId | undefined): void {
     const selection = this.topologySelection;
-    if (!selection || selection.hoveredId === id) return;
+    if (!selection || sameTopologyId(selection.hoveredId, id)) return;
     selection.hoveredId = id;
     this.rebuildTopologySelectionOverlay();
     this.onTopologySelection({
@@ -1635,8 +1644,10 @@ export class ModelViewport {
     const selected = createTopologyHighlight(
       selection.mesh,
       selection.kind,
-      new Set(
-        [...selection.selectedIds].filter(id => id !== selection.hoveredId),
+      new TopologyIdSet(
+        [...selection.selectedIds].filter(
+          id => !sameTopologyId(id, selection.hoveredId),
+        ),
       ),
       '#d8ff3e',
       31,
@@ -1646,7 +1657,7 @@ export class ModelViewport {
       const hovered = createTopologyHighlight(
         selection.mesh,
         selection.kind,
-        new Set([selection.hoveredId]),
+        new TopologyIdSet([selection.hoveredId]),
         selection.selectedIds.has(selection.hoveredId) ? '#ffad66' : '#63dcff',
         33,
       );
@@ -1674,7 +1685,7 @@ export class ModelViewport {
 
   private pickTopology(
     event: Readonly<{clientX: number; clientY: number}>,
-  ): number | undefined {
+  ): TopologyId | undefined {
     const selection = this.topologySelection;
     if (!selection) return undefined;
     selection.guide.updateWorldMatrix(true, false);
@@ -1943,7 +1954,7 @@ export function positionBindings(
       target,
       label: target.label,
       value: target.value,
-      sensitivity,
+      sensitivity: sensitivity * constraint.offsetDirection,
       parameterKind: target.kind,
       frame: constraint.offsetFrame,
     };
@@ -1977,7 +1988,7 @@ export function positionBindings(
         axis,
         label: `Δ${axis.toUpperCase()}`,
         value: 0,
-        sensitivity: 1,
+        sensitivity: constraint.offsetDirection,
         parameterKind: 'length',
         step: 0.5,
         frame: constraint.offsetFrame,
@@ -2058,8 +2069,8 @@ function sourceOperationRole(
   if (module.toolNodeIds.has(nodeId)) return 'tool';
   const input = evaluation.operationInput;
   if (!input) return undefined;
-  const sourceNodeIds = evaluation.constraintSourceNodeId
-    ? [evaluation.constraintSourceNodeId]
+  const sourceNodeIds = evaluation.constraintOwnerNodeId
+    ? [evaluation.constraintOwnerNodeId]
     : evaluation.nodeIds;
   return sourceNodeIds.includes(nodeId) ? input.role : undefined;
 }
@@ -2112,7 +2123,7 @@ function axisIndex(argument: string): 0 | 1 | 2 | undefined {
 export function restrictTopologyMesh(
   mesh: RenderMesh,
   kind: TopologyKind,
-  ids: ReadonlySet<number>,
+  ids: TopologyIdSet,
 ): RenderMesh {
   if (kind === 'vertex') {
     const indices = mesh.vertexIds.flatMap((id, index) =>
@@ -2225,7 +2236,10 @@ function createEdgeDecorationObject(
   container.name = decoration.id;
   container.userData.decoration = decoration;
   const positions = decoration.edgeIds
-    ? edgeSelectionPositions(decoration.mesh, new Set(decoration.edgeIds))
+    ? edgeSelectionPositions(
+        decoration.mesh,
+        new TopologyIdSet(decoration.edgeIds),
+      )
     : decoration.mesh.edges;
   if (positions && positions.length > 0) {
     const {appearance} = decoration;
@@ -2342,7 +2356,12 @@ function createAnchorDecorationObject(
     container.add(
       anchorRing(markerSize * 0.14, appearance),
       anchorOriginPoint(appearance),
-      anchorArrow(new THREE.Vector3(0, 1, 0), markerSize, markerSize, color),
+      anchorArrow(
+        new THREE.Vector3(0, decoration.facing ?? 1, 0),
+        markerSize,
+        markerSize,
+        color,
+      ),
     );
   } else {
     container.add(
@@ -2622,7 +2641,7 @@ function createObjectGeometryHighlight(
 
 function vertexSelectionPositions(
   mesh: RenderMesh,
-  vertexIds: ReadonlySet<number>,
+  vertexIds: TopologyIdSet,
 ): Float32Array | undefined {
   const positions: number[] = [];
   mesh.vertexIds.forEach((vertexId, index) => {
@@ -2639,7 +2658,7 @@ function vertexSelectionPositions(
 
 function edgeSelectionPositions(
   mesh: RenderMesh,
-  edgeIds: ReadonlySet<EdgeId>,
+  edgeIds: TopologyIdSet,
 ): Float32Array | undefined {
   const groups = mesh.edgeGroups.filter(group => edgeIds.has(group.edgeId));
   const coordinateCount = groups.reduce(
@@ -2663,7 +2682,7 @@ function edgeSelectionPositions(
 function createTopologyHighlight(
   mesh: RenderMesh,
   kind: TopologyKind,
-  ids: ReadonlySet<number>,
+  ids: TopologyIdSet,
   color: string,
   renderOrder: number,
 ): THREE.Object3D | undefined {
@@ -2725,23 +2744,23 @@ function createTopologyHighlight(
   return surface;
 }
 
-function topologyIds(mesh: RenderMesh, kind: TopologyKind): number[] {
+function topologyIds(mesh: RenderMesh, kind: TopologyKind): TopologyId[] {
   const ids =
     kind === 'vertex'
       ? mesh.vertexIds
       : kind === 'edge'
         ? mesh.edgeGroups.map(group => group.edgeId)
         : mesh.surfaceGroups.map(group => group.surfaceId);
-  return [...new Set(ids)].sort((left, right) => left - right);
+  return [...new TopologyIdSet(ids)].sort(compareTopologyIds);
 }
 
-function selectedTopologyIds(selection: TopologySelectionState): number[] {
-  return [...selection.selectedIds].sort((left, right) => left - right);
+function selectedTopologyIds(selection: TopologySelectionState): TopologyId[] {
+  return [...selection.selectedIds].sort(compareTopologyIds);
 }
 
 function surfaceIdFromIntersection(
   hit: THREE.Intersection,
-): number | undefined {
+): TopologyId | undefined {
   if (hit.faceIndex == null) return undefined;
   const groups = hit.object.userData.surfaceGroups as
     RenderMesh['surfaceGroups'] | undefined;

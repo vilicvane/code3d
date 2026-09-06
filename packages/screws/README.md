@@ -38,3 +38,9 @@ The `ISO4762` namespace also exports the types used by these APIs, including
 The package currently implements ISO 4762 socket-head cap screws. Its source
 is organized by standard so additional screw families can be added without
 mixing their dimensional tables or model-specific elements.
+
+Named mounting references such as `headBottom`, `shaftBottom`, and
+`counterboreBottom` are finite `Bound` values. For example,
+`tool.shaftBottom.on(plate.down.flip())` aligns the shaft's lower boundary with
+the plate's lower boundary without rotating the hole tool. `flip()` reverses
+facing while preserving the offset coordinate frame.

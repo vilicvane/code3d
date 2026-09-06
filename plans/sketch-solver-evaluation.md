@@ -12,9 +12,11 @@
 
 PlaneGCS 的二维参数接口更贴合需求。本次在 Node 与主机 Chrome module Worker
 分别通过 92 个检查，覆盖可变半径、相切、圆弧及约束诊断。
-用户已于 2026-09-06 确认：装配继续用 OndselSolver，草图使用 PlaneGCS。
+用户在本轮实验后确认：装配继续用 OndselSolver，草图使用 PlaneGCS。
 可以共用运行时加载、生命周期和诊断来源映射，不强行共用刚体问题格式。
 没有将实验使用的第三方 JSON 模型或 `GcsWrapper` 选定为 Code3D 的公开 API。
+后续 main 的方向 bound 关系改用显式旋转和平移求解，core/App 已不再加载 Ondsel；
+这是装配方案的后续变化，不改变本文实验结果或草图的 PlaneGCS 接入。
 
 ## 固定环境与来源
 
@@ -113,7 +115,7 @@ Chrome 中这批 40 步小矩形拖动的中位数约为 Ondsel 2.6 ms、PlaneGC
 不采用第三方 JSON 模型或 `GcsWrapper`。来源与许可原文位置见
 [core 第三方说明](../packages/core/THIRD_PARTY.md)；未声称已完成自行重建产物。
 
-- App 的项目包运行时和 Node 入口加载同一求解器；装配仍使用 Ondsel。
+- App 的项目包运行时和 Node 入口加载同一草图求解器。
 - 作者格式为 `sketch(entries, {constraints})` / `base.derive(entries, {constraints})`，
   约束不持久化 ID。点线支持 fixed、x/y、horizontal/vertical、coincident、length、angle。
 - 每次从当前几何和约束创建独立原生系统，归一化后求解；拖动仅是负 tag 软目标。

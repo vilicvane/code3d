@@ -3,6 +3,7 @@ import {
   identityRigidTransform,
   invertTransform,
   rotationAround,
+  rotateVector,
   xyzRotation,
   type ModelOperationSnapshot,
   type ModelSnapshotObject,
@@ -43,7 +44,12 @@ export type SpatialBindingObject = Readonly<{
 
 export type ModelSpatialBinding = Readonly<{
   operation:
-    'origin' | 'originOffset' | 'originVertex' | 'originCenter' | 'rotate';
+    | 'origin'
+    | 'originOffset'
+    | 'originVertex'
+    | 'originCenter'
+    | 'rotate'
+    | 'pivot';
   source: SpatialBindingSource;
   objects: readonly SpatialBindingObject[];
 }>;
@@ -57,14 +63,25 @@ export function spatialBindings(
   parameterValues: ReadonlyMap<string, number>,
 ): TransformGizmoBinding[] {
   const {target, evaluation} = scope;
-  const operation = evaluation.operationId
+  const relation = evaluation.constraintSpatial;
+  if (relation && relation.kind !== 'rotate' && relation.kind !== 'pivot')
+    return [];
+  const modelOperation = evaluation.operationId
     ? module.operations.get(evaluation.operationId)
     : undefined;
+  const operation = relation
+    ? {
+        kind: relation.kind as 'rotate' | 'pivot',
+        outputNodeId: relation.nodeId,
+        spatial: relation.spatial,
+        siteId: undefined,
+      }
+    : modelOperation;
   const spatial = committed.get(occurrence.key)?.spatial ?? operation?.spatial;
   if (
     !operation ||
     !spatial ||
-    !isSpatialOperation(operation.kind) ||
+    !(operation.kind === 'pivot' || isSpatialOperation(operation.kind)) ||
     operation.outputNodeId !== occurrence.node.nodeId
   )
     return [];
@@ -72,16 +89,41 @@ export function spatialBindings(
   const offsetOrigin = kind === 'originVertex' || kind === 'originCenter';
   const mode = kind === 'rotate' ? 'rotate' : 'translate';
   const usages = editableParameterUsages(evaluation.parameters ?? []);
-  const matching = occurrences.filter(
-    candidate =>
-      candidate.node.operation.siteId === operation.siteId &&
-      candidate.node.operation.spatial,
-  );
-  return (['x', 'y', 'z'] as const).flatMap((axis, index) => {
+  const matching = occurrences.flatMap(candidate => {
+    const candidateEvaluation = relation
+      ? target.evaluations.find(
+          evaluation =>
+            evaluation.constraintSpatial?.nodeId === candidate.node.nodeId,
+        )
+      : undefined;
+    const candidateSpatial = relation
+      ? candidateEvaluation?.constraintSpatial?.spatial
+      : candidate.node.operation.siteId === operation.siteId
+        ? candidate.node.operation.spatial
+        : undefined;
+    return candidateSpatial
+      ? [
+          {
+            ...candidate,
+            spatial: candidateSpatial,
+            parameters:
+              candidateEvaluation?.parameters ?? candidate.node.parameters,
+          },
+        ]
+      : [];
+  });
+  const axes = spatial.axisOnly ? (['y'] as const) : (['x', 'y', 'z'] as const);
+  return axes.flatMap(axis => {
+    const index = axisIndex(axis);
+    const argumentIndex = spatial.axisOnly ? 0 : index;
     const argument = target.tool?.arguments.find(
-      argument => argument.index === index,
+      argument => argument.index === argumentIndex,
     )?.target;
-    const parameterName = kind === 'originOffset' ? `d${axis}` : axis;
+    const parameterName = spatial.axisOnly
+      ? 'angle'
+      : kind === 'originOffset'
+        ? `d${axis}`
+        : axis;
     const candidates = usages.filter(
       usage =>
         usage.argument === parameterName && Math.abs(usage.sensitivity) > 1e-9,
@@ -102,8 +144,11 @@ export function spatialBindings(
       position: spatial.origin,
       quaternion:
         kind === 'rotate'
-          ? rotationAxisFrame(spatial.vector, axis)
-          : identityRigidTransform.quaternion,
+          ? composeTransforms(spatial.frame ?? identityRigidTransform, {
+              position: [0, 0, 0],
+              quaternion: rotationAxisFrame(spatial.vector, axis),
+            }).quaternion
+          : (spatial.frame?.quaternion ?? identityRigidTransform.quaternion),
       scale: [1, 1, 1],
     };
     return [
@@ -115,7 +160,7 @@ export function spatialBindings(
             : occurrence.node.transform,
         mode,
         axis,
-        label: `${kind === 'rotate' ? 'Rotate' : 'Origin'} ${axis.toUpperCase()}`,
+        label: `${kind === 'rotate' ? 'Rotate' : kind === 'pivot' ? 'Pivot' : 'Origin'} ${axis.toUpperCase()}`,
         value: parameter
           ? (parameterValues.get(parameter.target.id) ?? parameter.target.value)
           : offsetOrigin
@@ -132,12 +177,10 @@ export function spatialBindings(
           objects: matching.map(candidate => ({
             key: candidate.key,
             nodeId: candidate.node.nodeId,
-            spatial:
-              committed.get(candidate.key)?.spatial ??
-              candidate.node.operation.spatial!,
+            spatial: committed.get(candidate.key)?.spatial ?? candidate.spatial,
             sensitivity:
               source.kind === 'parameter'
-                ? candidate.node.parameters
+                ? candidate.parameters
                     .filter(
                       usage =>
                         usage.target.id === source.target.id &&
@@ -183,6 +226,41 @@ export function spatialIntent(
       objects: binding.spatial.objects.map(object => {
         const offset = delta * object.sensitivity;
         const spatial = object.spatial;
+        if (binding.spatial.operation === 'pivot') {
+          const delta: [number, number, number] = [0, 0, 0];
+          delta[index] = offset;
+          const rotated = rotateVector(
+            delta,
+            xyzRotation(spatial.rotation ?? [0, 0, 0]),
+          );
+          const frame = spatial.frame!;
+          const movement = rotateVector(
+            [
+              delta[0] - rotated[0],
+              delta[1] - rotated[1],
+              delta[2] - rotated[2],
+            ],
+            frame.quaternion,
+          );
+          const pivotMovement = rotateVector(delta, frame.quaternion);
+          const origin = spatial.origin.map(
+            (value, i) => value + pivotMovement[i],
+          ) as unknown as Vec3;
+          const vector = spatial.vector.map(
+            (value, i) => value + delta[i],
+          ) as unknown as Vec3;
+          return {
+            key: object.key,
+            nodeId: object.nodeId,
+            transform: {...identityRigidTransform, position: movement},
+            spatial: {
+              ...spatial,
+              origin,
+              vector,
+              frame: {...frame, position: origin},
+            },
+          };
+        }
         if (binding.spatial.operation !== 'rotate') {
           const origin: [number, number, number] = [...spatial.origin];
           origin[index] += offset;
@@ -201,10 +279,21 @@ export function spatialIntent(
           key: object.key,
           nodeId: object.nodeId,
           spatial: {...spatial, vector: angles},
-          transform: composeTransforms(
-            rotationAround(spatial.origin, angles),
-            invertTransform(rotationAround(spatial.origin, spatial.vector)),
-          ),
+          transform: spatial.frame
+            ? composeTransforms(
+                composeTransforms(
+                  spatial.frame,
+                  composeTransforms(
+                    rotationAround([0, 0, 0], angles),
+                    invertTransform(rotationAround([0, 0, 0], spatial.vector)),
+                  ),
+                ),
+                invertTransform(spatial.frame),
+              )
+            : composeTransforms(
+                rotationAround(spatial.origin, angles),
+                invertTransform(rotationAround(spatial.origin, spatial.vector)),
+              ),
         };
       }),
     },
@@ -242,7 +331,7 @@ function safeSpatialParameter(
 
 export function isSpatialOperation(
   kind: ModelOperationSnapshot['kind'],
-): kind is ModelSpatialBinding['operation'] {
+): kind is Exclude<ModelSpatialBinding['operation'], 'pivot'> {
   return (
     kind === 'origin' ||
     kind === 'originOffset' ||

@@ -1,0 +1,68 @@
+---
+title: Making hollow parts
+description: Create uniform walls and choose openings directly on a solid.
+---
+
+import ModelExample from '../../../../components/ModelExample.astro';
+
+Start with a solid that describes the outside of your part. Use
+`shell(thickness, removedSurfaceIds?)` to hollow it and choose which faces
+become openings.
+
+<ModelExample id="shell" />
+
+## Set the wall thickness
+
+Positive thickness offsets inward, preserving the outside dimensions.
+The example keeps its 40 × 24 × 30 outside size with walls 1.5 units thick.
+Negative thickness offsets outward, keeping the original boundary on the
+inside; neighboring offset faces use rounded joins where they separate.
+
+Place the cursor inside `shell(1.5, [4])` to edit **Wall thickness** in the
+panel. Thickness must be finite and nonzero.
+
+## Pick the openings
+
+S4 is the input box's +Y face. In the **Openings** tool, click another face to
+open it, or click a selected face again to restore the wall. The viewport
+keeps the input faces available while showing the hollow result, so a removed
+face can still be selected.
+
+Selections write back immediately. **Close all openings** removes the surface
+array. Omitting it, or passing `[]`, creates a sealed cavity:
+
+```ts
+const sealed = box(40, 24, 30).shell(1.5);
+```
+
+At least one face must remain as a wall. Use Undo to revert a committed
+selection; moving the source cursor out of the call leaves the tool.
+
+## Select faces from the input
+
+An opening ID belongs to the solid before `shell`. For a two-section loft,
+the cap IDs carry their source-section paths:
+
+```ts
+const openEnds = body.shell(1, [
+  [1, 1],
+  [2, 1],
+]);
+```
+
+The outer array lists two openings; each inner array is one surface ID.
+After shelling, one-to-one inherited topology gains another input prefix.
+Offset walls receive new numeric IDs. Pick later fillet or chamfer edges
+from the shell result. See [topology paths](../topology/#ids-belong-to-a-model)
+and the [loft cap example](../../../examples/topology-paths/).
+
+## Correct a failed shell
+
+Shelling requires one connected solid. Tight curves, narrow features, and
+complex intersections can prevent a valid offset or opening. The tool keeps
+the input available so you can change the thickness or selected faces.
+
+On some lofts between different profile shapes, a sealed cavity succeeds
+while opening an end fails, even at smaller thicknesses. The
+[bent loft example](../../../examples/bound-rotation/) has this known
+limitation. See [geometric operation limits](../../reference/limitations/#what-to-account-for).

@@ -44,9 +44,11 @@ test('resolves stable vertex, edge, and surface references', () => {
     const roundedSnapshot = snapshotModel(rounded);
     assert.deepEqual(topologyIds(scaledSnapshot), topologyIds(baseSnapshot));
     assert.deepEqual(vertexIds(baseSnapshot), [1, 2, 3, 4, 5, 6, 7, 8]);
-    assert.ok(vertexIds(roundedSnapshot).some(id => id > 8));
+    assert.ok(vertexIds(roundedSnapshot).some(id => typeof id === 'number'));
+    assert.ok(vertexIds(roundedSnapshot).some(Array.isArray));
     assert.deepEqual(surfaceIds(baseSnapshot), [1, 2, 3, 4, 5, 6]);
-    assert.ok(surfaceIds(roundedSnapshot).some(id => id > 6));
+    assert.ok(surfaceIds(roundedSnapshot).some(id => id === 1));
+    assert.ok(surfaceIds(roundedSnapshot).some(Array.isArray));
     assert.deepEqual(
       referenceIds(rounded.vertices()),
       vertexIds(roundedSnapshot),

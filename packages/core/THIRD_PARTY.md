@@ -23,4 +23,6 @@ instructions. This change consumes the published artifact, not a locally
 rebuilt binary. The archive SHA-1 is
 `b43dae3ab1e8eabdc693a56682894b72db953558`; the lockfile pins its SHA-512 integrity.
 
-The independent assembly backend remains `@code3d/solver` / OndselSolver.
+`@code3d/solver` / OndselSolver remains an independent workspace package.
+Current core/App directional-bound relations solve translations directly and
+do not depend on or initialize that package.

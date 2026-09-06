@@ -75,7 +75,7 @@ test('clears cached constraint provenance without losing the stored relation or 
   const trace = instrumentation(10);
   let constraint;
   const related = base.relate(copy => {
-    constraint = copy.top.on(target.bottom).offset(2, 3, 4);
+    constraint = copy.on(target.down).offset(2, 3, 4);
     instrumentConstraint(constraint, trace.sourceRef, trace.parameters);
     return constraint;
   });

@@ -36,7 +36,6 @@
   ],
   "dependencies": {
     "@code3d/opencascade": "0.0.1-alpha.0",
-    "@code3d/solver": "0.0.1-alpha.0",
     "@salusoft89/planegcs": "1.2.0",
     "replicad": "^1.0.1",
     "replicad-opencascadejs": "1.0.0"
