@@ -38,7 +38,7 @@ import {
   type SketchPoint as Point,
 } from '../tools/sketch-snap';
 import {DrawingInputs} from './drawing-inputs';
-import {createIcon} from './icon';
+import {createIcon} from './icons';
 
 const drawingTools = [
   ['Line', Minus, () => new SketchLineDrawing()],

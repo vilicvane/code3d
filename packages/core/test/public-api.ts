@@ -415,3 +415,21 @@ solid.originVertex([1, 2]);
 solid.surface([1]);
 // @ts-expect-error Paths are flat numeric tuples.
 solid.surface([1, [2, 3]]);
+
+const alignPoint: Constraint = point().align(line([0, 0, 0], [1, 0, 0]));
+const alignCurve: Constraint = line([0, 0, 0], [0, 1, 0])
+  .reverse()
+  .align(box(1, 1, 1).axis.reverse());
+const alignSurface: Constraint = rectangle(2, 3)
+  .flip()
+  .align(circle(2).plane.flip());
+box(2, 2, 2).relate(self =>
+  self.center.align(point()).offset(1, 2, 3).pivotVertex(1).rotate(20, 30, 40),
+);
+// @ts-expect-error Solids do not describe one point, curve, or surface.
+box(1, 1, 1).align(point());
+// @ts-expect-error Select a solid's geometry before using it as an align target.
+point().align(box(1, 1, 1));
+// @ts-expect-error Points have no curve direction.
+point().center.reverse();
+void [alignPoint, alignCurve, alignSurface];

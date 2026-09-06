@@ -29,7 +29,7 @@ test(
       const {browserPackageFiles} =
         await import('/src/project/browser-packages.ts');
       const {ModelViewport} = await import('/src/viewport.ts');
-      const {elementSourceDecoration, boundRelationSourceDecoration} =
+      const {elementSourceDecoration, relationSourceDecoration} =
         await import('/src/model/element-decorations.ts');
       const {originSourceDecoration} =
         await import('/src/model/origin-decorations.ts');
@@ -42,7 +42,7 @@ test(
         onTopologySelection() {},
         sourceDecorationProviders: [
           elementSourceDecoration,
-          boundRelationSourceDecoration,
+          relationSourceDecoration,
           originSourceDecoration,
         ],
       });
@@ -92,7 +92,7 @@ test(
         };
         const boundDecorations = [
           ...elementSourceDecoration.decorations(boundScope),
-          ...boundRelationSourceDecoration.decorations(boundScope),
+          ...relationSourceDecoration.decorations(boundScope),
         ];
         const source2 = `import {box, group} from '@code3d/core'; const base = box(20, 10, 30); const part = box(8, 6, 4).relate(self => base.on(self.up).pivotVertex(3).rotate(0, 0, 45)); export default group([base, part]);`;
         const module2 = await compile(source2);

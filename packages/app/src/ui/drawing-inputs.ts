@@ -1,6 +1,6 @@
 import {Check, X} from 'lucide';
 import type {DrawingDimensions} from '../tools/drawing-dimensions';
-import {createIcon} from './icon';
+import {createIcon} from './icons';
 
 /** Reusable numeric entry for an active drawing command, not a second model. */
 export class DrawingInputs {

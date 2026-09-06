@@ -248,8 +248,9 @@ changes at the authored contact stages; duplicate stages do not add bias.
 Related objects are solved at composition, Boolean, and loft boundaries.
 Standalone views keep the object's own geometry. A group moves its assembled
 children rigidly. `expose()` carries finite references into the group frame.
-Core and App use the same linear translation solver; there is no automatic
-angular solve or extra constraint-solver WASM initialization.
+Core and App share the same solvers. Pure bound assemblies use exact linear
+translation equations; geometric align relations add joint rigid-pose solving
+without another WASM initialization.
 
 In the App, selecting a directional property shows the target rectangle and
 matched source boundary with translucent green fill and green corner brackets.
@@ -258,6 +259,65 @@ self's vertex picker, `around` shows the referenced axis, and `rotate` has
 three angle rings or one axis ring. Source edits retain parameter provenance,
 preview/cancel behavior, and undo. See the
 [bent loft example](../app/examples/bound-rotation.ts).
+
+## Geometric alignment
+
+`source.align(target)` relates points, curves, and surfaces and can determine
+both position and orientation. Select a solid's `center`, `axis`, `vertex`,
+`edge`, or `surface`; a solid or group itself is not an align reference.
+
+| Pair            | Meaning                                                      |
+| --------------- | ------------------------------------------------------------ |
+| point–point     | Coincident points                                            |
+| point–curve     | Point lies on the underlying curve                           |
+| point–surface   | Point lies on the underlying surface                         |
+| curve–curve     | Complete underlying curves coincide, with the same direction |
+| curve–surface   | The whole underlying curve lies on the surface               |
+| surface–surface | Underlying surfaces coincide, with matching normal sense     |
+
+The first implementation supports points, straight lines, circles, ellipses,
+planes, cylinders, and spheres. Edge trims, arc ranges, face boundaries, and
+holes do not limit the supporting geometry. Equal-radius arcs may coincide
+without matching endpoints; straight lines retain axial sliding and twisting.
+Use a curve's `start`, `midpoint`, `end`, or a selected vertex for more specific
+positioning. Unsupported geometry reports an error. Different radii and other
+proven impossibilities report geometric incompatibility; numerical
+nonconvergence does not prove that no solution exists.
+
+```ts
+const placed = cylinder(5, 20).relate(self => [
+  self.axis.align(base.axis),
+  self.on(base.up),
+]);
+const backwards = line([0, 0, 0], [0, 10, 0]).relate(self =>
+  self.align(base.axis.reverse()),
+);
+```
+
+`reverse()` changes a line reference's positive direction. `flip()` changes a
+surface's normal sense. Both preserve geometry and reference axes. Point
+membership ignores direction, and curve-to-surface membership adds no arbitrary
+heading within the surface. `around(axis.reverse())` reverses the signed
+rotation direction; curved edges still do not define a single rotation axis.
+
+`align(...).offset(x, y, z)` translates **self** in the target reference axes
+after alignment, then applies the authored `rotate`/`pivot`/`around` chain.
+Repeated offsets add; zero adds no positioning condition. Unlike `on.offset`,
+it does not pin trim centers or parameter origins. This holds when self is the
+written target too. Multiple relations are solved jointly. An already satisfied
+relation preserves its pose; remaining freedom is selected deterministically
+by geometric seeds and local numerical solving, without a uniqueness guarantee.
+
+In relation context, axes have one positive arrow and edges retain their actual
+curved highlight with a tangent arrow at the positive endpoint (a stable seam
+point for a closed edge). Solid source and larger outline target arrows remain
+distinguishable when overlaid. Surface normals retain their facing arrows.
+See [the alignment example](../app/examples/geometric-alignment.ts).
+
+When several relations include align on one model, use the numeric parameter
+panel or source to edit offsets and rotations. Each edit resolves the coupled
+equations. Spatial drags are available for a single align relation; combined
+geometric relations do not show a misleading rigid-transform preview.
 
 ## Exposed geometry and topology
 

@@ -532,6 +532,29 @@ See [#36](https://github.com/vilicvane/code3d/issues/36),
 [#38](https://github.com/vilicvane/code3d/issues/38), and
 [core semantics](packages/core/README.md#bound-relations-and-rotation).
 
+`align` adds joint rigid-pose solving for point/curve/surface coincidence and
+membership ([#43](https://github.com/vilicvane/code3d/issues/43)). Its analytic
+geometry representation is independent of trims and parameter origins: points,
+lines, circles, ellipses, planes, cylinders, and spheres. Complete locus
+equations determine coincidence or inclusion; no sampled tangent frame stands
+in for curved geometry. Other geometry types report unsupported. Proven
+incompatibility and numerical nonconvergence are distinct errors.
+
+Pure bound assemblies retain the exact linear specialization. Mixed assemblies
+solve poses jointly; bodies with only on relations retain their authored
+orientation, while align can determine orientation. Deterministic geometric
+seeds preserve an already satisfied relation and resolve antipodal directions;
+damped least squares solves remaining conditions without asserting uniqueness
+or a global optimum. Duplicate semantic conditions share one equation set.
+align offsets translate self in target reference axes after alignment and before
+authored rotations; unlike on offsets, zero does not constrain free coordinates.
+Line direction and surface facing remain separate from coordinate frames.
+Relation snapshots carry actual source and target elements for curve highlights,
+directed axis/tangent arrows, and surface normals that follow source previews.
+Single align chains use rigid spatial previews. Multiple relations involving
+align use numeric/source editing and recomputation, since a rigid preview does
+not represent the response of coupled equations.
+
 ### 4. Relation-aware GUI tools — contact and rotation tools
 
 - Show the translation gizmo only when the selected model carries a constraint
@@ -815,6 +838,8 @@ The [solver experiment](plans/constraint-solver-wasm-evaluation.md) records the
 earlier OndselSolver investigation. The independent solver package remains,
 while current core/App bound positioning uses a linear translation solver and
 explicit rotations, as delivered in [#38](https://github.com/vilicvane/code3d/issues/38).
+Geometric `align` uses analytic loci and joint rigid-pose equations, described
+in [#43](https://github.com/vilicvane/code3d/issues/43).
 The completed public API
 and interoperability audit is recorded in
 [plans/public-api-audit.md](plans/public-api-audit.md) and

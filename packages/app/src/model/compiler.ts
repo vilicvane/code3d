@@ -61,6 +61,7 @@ type TopologyValueReference = Readonly<{
 type AnchorValueReference = Readonly<{
   bound?: ElementSnapshot['bound'];
   facing?: 1 | -1;
+  direction?: 1 | -1;
   nodeId: string;
   name: string;
   kind: ElementKind;
@@ -312,6 +313,7 @@ type SourceElementTrace = {
       topology?: TopologyValueReference;
       bound?: ElementSnapshot['bound'];
       facing?: 1 | -1;
+      direction?: 1 | -1;
       contextId: string;
       runtime: RuntimeReach;
     }>
@@ -964,6 +966,7 @@ export function createModelCompiler(
         transform: anchor.transform,
         bound: anchor.bound,
         facing: anchor.facing,
+        direction: anchor.direction,
       });
       return ownerRecorded ? [] : [anchor.model];
     }
@@ -1943,6 +1946,7 @@ export function createModelCompiler(
               transform: element.transform,
               bound: element.bound,
               facing: element.facing,
+              direction: element.direction,
             },
           })),
           contextTargetIds: [],

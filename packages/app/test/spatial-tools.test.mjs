@@ -368,6 +368,45 @@ test('around exposes a positioned axis and a single angle ring', async () => {
   );
 });
 
+for (const reverse of [false, true]) {
+  test(`align rotation edits self and preserves preview consistency with ${reverse ? 'reversed' : 'forward'} source`, async () => {
+    const source = `import {box, point} from '@code3d/core'; const base = point([20, 10, 30]); const part = box(8, 6, 4).relate(self => ${reverse ? 'base.align(self.center)' : 'self.center.align(base)'}.offset(2, 3, 4).pivot(1, 2, 3).rotate(25, 35, 10));`;
+    const {node, bindings} = await relationTool(source, 'rotate');
+    const intent = spatialIntent(bindings[0], 55),
+      host = hostFor(source);
+    const cancelled = new ToolEngine(host.host).begin('align-rotate');
+    cancelled.preview(intent);
+    cancelled.cancel();
+    assert.equal(host.source(), source);
+    new ToolEngine(host.host).begin('align-rotate').commit(intent);
+    const {node: next} = await relationTool(host.source(), 'rotate');
+    const {composeTransforms} = await import('../../core/bld/tooling/index.js');
+    const preview = composeTransforms(
+      node.compositionTransform,
+      intent.preview.objects[0].transform,
+    );
+    near(preview.position, next.compositionTransform.position);
+    near(preview.quaternion, next.compositionTransform.quaternion);
+  });
+}
+
+test('a reversed around axis previews the authored signed angle', async () => {
+  const source = `import {box, point} from '@code3d/core'; const base=point([20,10,30]); const axis=box(1,1,1).axis.reverse(); const part=box(8,6,4).relate(self=>self.center.align(base).around(axis).rotate(25));`;
+  const {node, bindings} = await relationTool(source, 'rotate');
+  assert.equal(bindings.length, 1);
+  const intent = spatialIntent(bindings[0], 55),
+    host = hostFor(source);
+  new ToolEngine(host.host).begin('reverse-axis').commit(intent);
+  const {node: next} = await relationTool(host.source(), 'rotate');
+  const {composeTransforms} = await import('../../core/bld/tooling/index.js');
+  const preview = composeTransforms(
+    node.compositionTransform,
+    intent.preview.objects[0].transform,
+  );
+  near(preview.position, next.compositionTransform.position);
+  near(preview.quaternion, next.compositionTransform.quaternion);
+});
+
 test('a bound selection renders each computed plane once across named and relation previews', async () => {
   const source = `import {box} from '@code3d/core'; const base = box(20, 10, 30); const part = box(8, 6, 4).rotate(0, 0, 30).relate(self => self.on(base.up));`;
   const module = await compiler.compile(
@@ -381,14 +420,14 @@ test('a bound selection renders each computed plane once across named and relati
       source.slice(target.sourceRef.start, target.sourceRef.end) === 'up',
   );
   assert.ok(target.evaluations[0].element.bound);
-  const {elementSourceDecoration, boundRelationSourceDecoration} =
+  const {elementSourceDecoration, relationSourceDecoration} =
     await server.ssrLoadModule('/src/model/element-decorations.ts');
   const scope = {module, target, evaluation: target.evaluations[0]};
   const named = elementSourceDecoration.decorations(scope);
   const targetMesh = named.find(decoration => decoration.kind === 'surface');
   assert.equal(targetMesh.mesh.vertices.length, 12);
   assert.deepEqual(targetMesh.mesh.surfaceGroups, []);
-  const contacts = boundRelationSourceDecoration.decorations(scope);
+  const contacts = relationSourceDecoration.decorations(scope);
   const combined = [...named, ...contacts];
   assert.equal(new Set(combined.map(item => item.id)).size, combined.length);
   assert.equal(
@@ -399,7 +438,7 @@ test('a bound selection renders each computed plane once across named and relati
     target =>
       target.kind === 'constraint' && target.evaluations[0].constraintId,
   );
-  const relation = boundRelationSourceDecoration.decorations({
+  const relation = relationSourceDecoration.decorations({
     module,
     target: relationTarget,
     evaluation: relationTarget.evaluations[0],
@@ -437,3 +476,25 @@ for (const [call, kind] of [
     assert.equal(markers[0].nodeId, evaluation.constraintOwnerNodeId);
   });
 }
+
+test('coupled align equations use source parameter edits instead of an incorrect rigid drag preview', async () => {
+  const source = `import {box} from '@code3d/core'; const base=box(20,10,20); const part=box(2,2,2).relate(self=>[self.axis.align(base.axis).rotate(0,25,0),self.on(base.up)]);`;
+  const {bindings, target} = await relationTool(source, 'rotate');
+  assert.equal(bindings.length, 0);
+  assert.equal(target.tool.signature.name, 'rotate');
+  const {positionBindings} = await server.ssrLoadModule('/src/viewport.ts');
+  const {module, node, evaluation} = await relationTool(source, 'rotate');
+  const occurrence = {node, key: 'coupled', placement: 'composition'};
+  assert.deepEqual(
+    positionBindings(occurrence, [occurrence], evaluation.constraintId),
+    [],
+  );
+  const changed = source.replace('25', '55');
+  const {node: next} = await relationTool(changed, 'rotate');
+  near(next.compositionTransform.position, node.compositionTransform.position);
+  assert.notDeepEqual(
+    next.compositionTransform.quaternion,
+    node.compositionTransform.quaternion,
+  );
+  assert.equal(module.diagnostic, undefined);
+});

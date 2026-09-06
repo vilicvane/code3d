@@ -48,6 +48,13 @@ and conflicting positions report errors. Rotation must be explicit. Directional
 bounds are the only `on` targets; finite source geometry may be a whole model or
 selected point, edge, or surface. See [positioning with relations](../../guides/relations/).
 
+**Geometric alignment supports analytic geometry.** `align` supports points,
+straight lines, circles, ellipses, planes, cylinders, and spheres. It uses the
+underlying geometry beyond trimmed edges and face boundaries. Other curve and
+surface types report unsupported. Proven incompatibility (such as different
+circle radii) is distinguished from numerical nonconvergence. Multiple solutions
+can remain; add point relations when a specific position matters.
+
 **Installed packages must support browsers.** The App resolves packages from
 the project's `node_modules`, but does not provide Node's built-in APIs or
 native addons. Core and screws are built in until the project declares core;

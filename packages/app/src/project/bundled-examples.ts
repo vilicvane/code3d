@@ -1,6 +1,7 @@
 import booleanOperationsSource from '../../examples/boolean-operations.ts?raw';
 import combinedConstraintsSource from '../../examples/combined-constraints.ts?raw';
 import boundRotationSource from '../../examples/bound-rotation.ts?raw';
+import geometricAlignmentSource from '../../examples/geometric-alignment.ts?raw';
 import customPrimitivesSource from '../../examples/custom-primitives.ts?raw';
 import designArgumentsSource from '../../examples/design-arguments.ts?raw';
 import exposedTopologySource from '../../examples/exposed-topology.ts?raw';
@@ -26,6 +27,7 @@ const files = [
   {path: '/examples/sketches.ts', source: sketchesSource},
   {path: '/examples/shell.ts', source: shellSource},
   {path: '/examples/bound-rotation.ts', source: boundRotationSource},
+  {path: '/examples/geometric-alignment.ts', source: geometricAlignmentSource},
   {path: '/examples/topology-paths.ts', source: topologyPathsSource},
   {path: '/examples/origin-and-rotation.ts', source: originAndRotationSource},
   {path: '/examples/exposed-topology.ts', source: exposedTopologySource},

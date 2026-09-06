@@ -20,7 +20,11 @@ export type BodyRotation =
 
 export type BodyRelation = Readonly<{
   id: string;
-  source: Readonly<{body: number; bounds: (orientation: Quaternion) => Bounds}>;
+  source: Readonly<{
+    body: number;
+    key: string;
+    bounds: (orientation: Quaternion) => Bounds;
+  }>;
   target: Readonly<{body: number; transform: RigidTransform; facing: 1 | -1}>;
   offset: Vec3 | undefined;
   rotations: readonly BodyRotation[];

@@ -54,6 +54,16 @@ export type ModelSpatialBinding = Readonly<{
   objects: readonly SpatialBindingObject[];
 }>;
 
+/** Coupled geometric equations require solving; a rigid preview cannot predict them. */
+export function canPreviewConstraintTransform(
+  node: ModelSnapshotObject,
+): boolean {
+  return (
+    node.constraints.length <= 1 ||
+    node.constraints.every(constraint => constraint.kind === 'on')
+  );
+}
+
 export function spatialBindings(
   module: ModelModule,
   scope: Readonly<{target: SourceTarget; evaluation: SourceTargetEvaluation}>,
@@ -64,6 +74,7 @@ export function spatialBindings(
 ): TransformGizmoBinding[] {
   const {target, evaluation} = scope;
   const relation = evaluation.constraintSpatial;
+  if (relation && !canPreviewConstraintTransform(occurrence.node)) return [];
   if (relation && relation.kind !== 'rotate' && relation.kind !== 'pivot')
     return [];
   const modelOperation = evaluation.operationId

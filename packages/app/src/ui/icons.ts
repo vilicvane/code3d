@@ -1,11 +1,11 @@
 import {createElement, type IconNode} from 'lucide';
 
-/** Decorative UI glyph; its control owns the visible/accessibility label. */
-export function createIcon(node: IconNode): SVGElement {
+export function createIcon(node: IconNode, className = ''): SVGElement {
   return createElement(node, {
-    class: 'ui-icon',
+    class: `ui-icon ${className}`.trim(),
     width: 16,
     height: 16,
+    'stroke-width': 1.75,
     'aria-hidden': 'true',
     focusable: 'false',
   });

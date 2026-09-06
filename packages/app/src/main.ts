@@ -1,4 +1,5 @@
 import './style.css';
+import {File, FilePlus, PanelLeftClose, PanelLeftOpen, X} from 'lucide';
 import brandMark from '../../../assets/brand/mark.svg?raw';
 import {
   CodeEditor,
@@ -54,7 +55,7 @@ import {
 } from './model/operation-decorations';
 import {
   elementSourceDecoration,
-  boundRelationSourceDecoration,
+  relationSourceDecoration,
   namedElementDecorations,
 } from './model/element-decorations';
 import type {
@@ -79,6 +80,8 @@ import {ImageExportDialog} from './ui/image-export';
 import {ModelExportDialog} from './ui/model-export';
 import {ViewportContextMenu} from './ui/viewport-context-menu';
 import {ProjectTree} from './ui/project-tree';
+import {EditorSplitLayout} from './ui/editor-split-layout';
+import {createIcon} from './ui/icons';
 import {SourceEditPopover} from './ui/source-edit-popover';
 import {
   ContextualToolPanel,
@@ -137,14 +140,14 @@ app.innerHTML = `
       </div>
     </header>
 
-    <main class="workspace">
+    <main class="workspace" id="workspace">
       <section class="pane editor-pane">
         <div class="editor-workspace">
-          <aside class="project-explorer" aria-label="Project files">
+          <aside class="project-explorer" id="project-explorer" aria-label="Project files">
             <header>
               <span>PROJECT</span>
               <div class="project-actions">
-                <button id="new-file-button" type="button" title="New file">＋</button>
+                <button id="new-file-button" type="button" title="New file" aria-label="New file"></button>
               </div>
             </header>
             <nav class="project-tree" id="project-tree"></nav>
@@ -153,12 +156,16 @@ app.innerHTML = `
             <button id="context-rename-file" type="button">Rename</button>
             <button id="context-delete-file" type="button">Delete</button>
           </div>
-          <section class="editor-document">
-            <nav class="editor-tabs" id="editor-tabs" aria-label="Open files"></nav>
+          <section class="editor-document" id="editor-document">
+            <div class="editor-tab-bar">
+              <button class="project-explorer-toggle" id="project-explorer-toggle" type="button" aria-controls="project-explorer"></button>
+              <nav class="editor-tabs" id="editor-tabs" aria-label="Open files"></nav>
+            </div>
             <div class="editor-host" id="editor-host"></div>
           </section>
         </div>
         <div class="error-bar" id="error-bar" hidden></div>
+        <div class="workspace-resizer" id="workspace-resizer" role="separator" aria-label="Resize code editor" aria-orientation="vertical" aria-controls="editor-document" tabindex="0" title="Drag to resize · Arrow keys to adjust"></div>
       </section>
 
       <section class="pane preview-pane">
@@ -226,6 +233,10 @@ const viewportDiagnosticStack = requiredElement('viewport-diagnostic-stack');
 const viewportStatus = requiredElement('viewport-status');
 const viewportStatusLabel = requiredElement('viewport-status-label');
 const projectTree = requiredElement('project-tree');
+const projectExplorer = requiredElement('project-explorer');
+const projectExplorerToggle = requiredElement<HTMLButtonElement>(
+  'project-explorer-toggle',
+);
 const editorTabs = requiredElement('editor-tabs');
 const projectLocation = requiredElement('project-location');
 const openFolderButton =
@@ -247,6 +258,25 @@ const contextRenameFile = requiredElement<HTMLButtonElement>(
 );
 const contextDeleteFile = requiredElement<HTMLButtonElement>(
   'context-delete-file',
+);
+newFileButton.append(createIcon(FilePlus));
+
+const projectExplorerStorageKey = 'code3d:project-explorer-expanded';
+setProjectExplorerExpanded(
+  localStorage.getItem(projectExplorerStorageKey) !== 'false',
+);
+projectExplorerToggle.addEventListener('click', () => {
+  setProjectExplorerExpanded(projectExplorer.hidden === true);
+  localStorage.setItem(
+    projectExplorerStorageKey,
+    String(!projectExplorer.hidden),
+  );
+});
+
+new EditorSplitLayout(
+  requiredElement('workspace'),
+  projectExplorer,
+  requiredElement('workspace-resizer'),
 );
 
 const dockPanels = new DockPanelCoordinator();
@@ -372,7 +402,7 @@ const viewport = new ModelViewport(viewportHost, {
     booleanOperationSourceDecoration,
     edgeModificationSourceDecoration,
     elementSourceDecoration,
-    boundRelationSourceDecoration,
+    relationSourceDecoration,
     originSourceDecoration,
   ],
 });
@@ -760,6 +790,17 @@ function replaceFileRoute(path: string): void {
   window.history.replaceState(null, '', url);
 }
 
+function setProjectExplorerExpanded(expanded: boolean): void {
+  projectExplorer.hidden = !expanded;
+  projectExplorerToggle.replaceChildren(
+    createIcon(expanded ? PanelLeftClose : PanelLeftOpen),
+  );
+  projectExplorerToggle.setAttribute('aria-expanded', String(expanded));
+  const label = expanded ? 'Hide file explorer' : 'Show file explorer';
+  projectExplorerToggle.setAttribute('aria-label', label);
+  projectExplorerToggle.title = label;
+}
+
 function renderProjectNavigation(): void {
   const active = codeEditor.currentFile();
   projectDirectory.update(codeEditor.filePaths(), active);
@@ -770,13 +811,16 @@ function renderProjectNavigation(): void {
       tab.classList.toggle('active', path === active);
       const open = document.createElement('button');
       open.type = 'button';
-      open.textContent = path.slice(path.lastIndexOf('/') + 1);
+      const label = document.createElement('span');
+      label.className = 'editor-tab-label';
+      label.textContent = path.slice(path.lastIndexOf('/') + 1);
+      open.append(createIcon(File, 'project-entry-icon file-icon'), label);
       open.title = path;
       open.addEventListener('click', () => codeEditor.switchFile(path, true));
       const close = document.createElement('button');
       close.type = 'button';
       close.className = 'editor-tab-close';
-      close.textContent = '×';
+      close.append(createIcon(X));
       close.setAttribute('aria-label', `Close ${path}`);
       close.addEventListener('click', event => {
         event.stopPropagation();

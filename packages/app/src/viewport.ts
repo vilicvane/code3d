@@ -44,7 +44,10 @@ import type {
   ViewportDecoration,
 } from './viewport-decoration';
 import {editableParameterUsages} from './model/parameter-provenance';
-import {spatialBindings} from './tools/model-spatial-tool';
+import {
+  canPreviewConstraintTransform,
+  spatialBindings,
+} from './tools/model-spatial-tool';
 import type {SpatialObjectPreview} from './tools/spatial-edit';
 import {ViewportCoordinateReference} from './ui/viewport-coordinate-reference';
 import {pickScreenTopology} from './rendering/topology-picking';
@@ -867,7 +870,10 @@ export class ModelViewport {
     const occurrenceKeys = scope ? new Set(scope.occurrenceKeys) : undefined;
     this.root.updateMatrixWorld(true);
     const instances = decorations.flatMap<DecorationInstance>(decoration => {
-      if (decoration.kind === 'mesh' || decoration.kind === 'edges') {
+      if (
+        (decoration.kind === 'mesh' || decoration.kind === 'edges') &&
+        !decoration.nodeId
+      ) {
         const object =
           decoration.kind === 'mesh'
             ? createMeshDecorationObject(decoration)
@@ -875,7 +881,7 @@ export class ModelViewport {
         this.decorationRoot.add(object);
         return [{object}];
       }
-      return [...this.occurrences.values()]
+      return this.renderedOccurrences()
         .filter(
           occurrence =>
             occurrence.node.nodeId === decoration.nodeId &&
@@ -883,12 +889,16 @@ export class ModelViewport {
         )
         .map(occurrence => {
           const decorationObject =
-            decoration.kind === 'surface'
-              ? createSurfaceDecorationObject(
-                  decoration,
-                  decoration.operationRole ?? occurrence.operationRole,
-                )
-              : createAnchorDecorationObject(decoration);
+            decoration.kind === 'mesh'
+              ? createMeshDecorationObject(decoration)
+              : decoration.kind === 'edges'
+                ? createEdgeDecorationObject(decoration)
+                : decoration.kind === 'surface'
+                  ? createSurfaceDecorationObject(
+                      decoration,
+                      decoration.operationRole ?? occurrence.operationRole,
+                    )
+                  : createAnchorDecorationObject(decoration);
           const object = new THREE.Group();
           object.matrixAutoUpdate = false;
           object.add(decorationObject);
@@ -1869,7 +1879,9 @@ export class ModelViewport {
 
   private updateDecorationTransform(instance: DecorationInstance): void {
     if (!instance.occurrenceKey) return;
-    const occurrence = this.occurrences.get(instance.occurrenceKey);
+    const occurrence =
+      this.occurrences.get(instance.occurrenceKey) ??
+      this.contextOccurrences.get(instance.occurrenceKey);
     if (!occurrence) return;
     instance.object.matrix.copy(occurrence.object.matrixWorld);
     instance.object.matrixWorldNeedsUpdate = true;
@@ -1897,7 +1909,7 @@ export function positionBindings(
       : occurrence.node.constraints.find(
           candidate => candidate.id === constraintId,
         );
-  if (!constraint) {
+  if (!constraint || !canPreviewConstraintTransform(occurrence.node)) {
     return [];
   }
   const receiver = constraint.sourceRefs.at(-1);
@@ -2351,17 +2363,46 @@ function createAnchorDecorationObject(
       anchorCross(markerSize * 0.38, appearance),
     );
   } else if (decoration.elementKind === 'line') {
-    container.add(anchorAxis(decoration.span, markerSize, appearance));
+    if (decoration.arrowStyle) {
+      const direction = decoration.direction ?? 1;
+      const end = decoration.arrowOnly
+        ? 0
+        : direction === 1
+          ? decoration.span.positive
+          : -decoration.span.negative;
+      const length = decoration.arrowOnly
+        ? markerSize
+        : decoration.span.positive + decoration.span.negative;
+      container.add(
+        directedAnchorArrow(
+          new THREE.Vector3(0, direction, 0),
+          length,
+          markerSize,
+          appearance,
+          decoration.arrowStyle,
+          end,
+        ),
+      );
+    } else container.add(anchorAxis(decoration.span, markerSize, appearance));
   } else if (decoration.elementKind === 'face') {
     container.add(
       anchorRing(markerSize * 0.14, appearance),
       anchorOriginPoint(appearance),
-      anchorArrow(
-        new THREE.Vector3(0, decoration.facing ?? 1, 0),
-        markerSize,
-        markerSize,
-        color,
-      ),
+      decoration.arrowStyle
+        ? directedAnchorArrow(
+            new THREE.Vector3(0, decoration.facing ?? 1, 0),
+            markerSize,
+            markerSize,
+            appearance,
+            decoration.arrowStyle,
+            (decoration.facing ?? 1) * markerSize,
+          )
+        : anchorArrow(
+            new THREE.Vector3(0, decoration.facing ?? 1, 0),
+            markerSize,
+            markerSize,
+            color,
+          ),
     );
   } else {
     container.add(
@@ -2385,6 +2426,36 @@ function createAnchorDecorationObject(
     });
   });
   return container;
+}
+
+function directedAnchorArrow(
+  direction: THREE.Vector3,
+  length: number,
+  size: number,
+  appearance: ViewportDecoration['appearance'],
+  style: 'solid' | 'outline',
+  end: number,
+): THREE.Object3D {
+  const arrow = anchorArrow(
+    direction,
+    length,
+    size,
+    new THREE.Color(appearance.color),
+  );
+  arrow.position.y = end - direction.y * length;
+  if (style === 'outline') {
+    const cone = arrow.cone;
+    const outline = new THREE.LineSegments(
+      new THREE.EdgesGeometry(cone.geometry),
+      anchorLineMaterial(appearance),
+    );
+    outline.position.copy(cone.position);
+    outline.quaternion.copy(cone.quaternion);
+    outline.scale.copy(cone.scale);
+    cone.visible = false;
+    arrow.add(outline);
+  }
+  return arrow;
 }
 
 function anchorAxis(
