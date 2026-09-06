@@ -68,7 +68,7 @@ Node.js 24 runs the files directly; use erasable TypeScript syntax and explicit
 
 ```bash
 npm test                         # build packages, check types, run workspace tests
-npm run test:types               # check all migrated tests, including browser tests
+npm run test:types               # check all tests, including browser tests
 npm test --workspace @code3d/core
 ```
 
@@ -79,6 +79,11 @@ server:
 ```bash
 CODE3D_TEST_URL=http://localhost:3133 npm run test:browser --workspace @code3d/app
 ```
+
+Browser callbacks import App modules through Vite URLs such as `/src/viewport.ts`.
+The test TypeScript configuration maps these URLs for type checking. Declare
+page state in the owning test; keep browser fixtures in `test/browser/` and
+import them inside the callback so they execute in the browser.
 
 ## Project status
 

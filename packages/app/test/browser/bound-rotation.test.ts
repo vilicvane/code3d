@@ -32,7 +32,7 @@ test(
       const {namedElementDecorations} =
         await import('/src/model/element-decorations.ts');
       const client = new ModelCompilerClient(browserPackageFiles);
-      const viewport = new ModelViewport(document.querySelector('main'), {
+      const viewport = new ModelViewport(document.querySelector('main')!, {
         onSelect() {},
         onDrillDown() {},
         onNavigateSource() {},
@@ -51,16 +51,16 @@ test(
         if (module.diagnostic)
           throw new Error(JSON.stringify(module.diagnostic));
         viewport.renderModule(module);
-        const groups = [...viewport.occurrences.values()].filter(
+        const groups = [...viewport['occurrences'].values()].filter(
           item => item.node.kind === 'group' && item.depth === 1,
         );
-        const solid = [...viewport.occurrences.values()].find(
+        const solid = [...viewport['occurrences'].values()].find(
           item => item.node.mesh,
-        );
+        )!;
         const group = groups[0];
         const bound = group.node.elements.find(
           element => element.name === 'up',
-        );
+        )!;
         viewport.setDecorations(
           'group-bound',
           namedElementDecorations(group.node, bound),
@@ -69,42 +69,43 @@ test(
           'solid-bound',
           namedElementDecorations(
             solid.node,
-            solid.node.elements.find(element => element.name === 'up'),
+            solid.node.elements.find(element => element.name === 'up')!,
           ),
           {occurrenceKeys: [solid.key]},
         );
-        const renderCallbacks = new WeakMap();
-        const inspect = key => {
-          viewport.selectKey(key, false);
-          const drawn = [];
-          const collect = (owner, occurrenceKey, object) => {
-            object.traverse(part => {
-              if (!part.material) return;
-              const beforeRender =
-                renderCallbacks.get(part) ?? part.onBeforeRender;
-              renderCallbacks.set(part, beforeRender);
-              part.onBeforeRender = function (...args) {
-                beforeRender.apply(this, args);
-                drawn.push({
-                  owner,
-                  occurrenceKey,
-                  color: (
-                    part.material.color ?? part.material.uniforms.color.value
-                  ).getHexString(),
-                  opacity: part.material.opacity,
-                  line:
-                    object.children[0]?.userData.decoration?.kind === 'edges',
-                });
-              };
-            });
+        const {createMaterialDrawObserver} =
+          await import('/test/browser/material-draw-fixture.ts');
+        const observe = createMaterialDrawObserver();
+        const inspect = (key: string) => {
+          viewport['selectKey'](key, false);
+          const drawn: Array<
+            import('./material-draw-fixture.ts').MaterialDraw & {
+              owner: string;
+              occurrenceKey: string | undefined;
+              line: boolean;
+            }
+          > = [];
+          const collect = (
+            owner: string,
+            occurrenceKey: string | undefined,
+            object: import('three').Object3D,
+          ) => {
+            observe(object, draw =>
+              drawn.push({
+                ...draw,
+                owner,
+                occurrenceKey,
+                line: object.children[0]?.userData.decoration?.kind === 'edges',
+              }),
+            );
           };
-          for (const [owner, instances] of viewport.decorationLayers) {
+          for (const [owner, instances] of viewport['decorationLayers']) {
             for (const instance of instances)
               collect(owner, instance.occurrenceKey, instance.object);
           }
-          if (viewport.selectionHighlight)
-            collect('box', key, viewport.selectionHighlight);
-          viewport.rendering.renderFrame();
+          if (viewport['selectionHighlight'])
+            collect('box', key, viewport['selectionHighlight']);
+          viewport['rendering'].renderFrame();
           return drawn;
         };
         return {
@@ -184,7 +185,7 @@ test(
       const {originSourceDecoration} =
         await import('/src/model/origin-decorations.ts');
       const client = new ModelCompilerClient(browserPackageFiles);
-      const viewport = new ModelViewport(document.querySelector('main'), {
+      const viewport = new ModelViewport(document.querySelector('main')!, {
         onSelect() {},
         onDrillDown() {},
         onNavigateSource() {},
@@ -196,11 +197,19 @@ test(
           originSourceDecoration,
         ],
       });
-      const scopes = [];
+      const scopes: {
+        text: string;
+        kind: string;
+        owner: string | undefined;
+        selected: string | undefined;
+        modes: string[];
+        axes: string[];
+        spatialKind: string | undefined;
+      }[] = [];
       try {
         const source = (await import('/examples/bound-rotation.ts?raw'))
           .default;
-        const compile = async source => {
+        const compile = async (source: string) => {
           const module = await client.compile(
             {files: [{path: '/main.ts', source}]},
             '/main.ts',
@@ -210,14 +219,18 @@ test(
           viewport.renderModule(module);
           return module;
         };
-        const inspect = (module, source, text) => {
+        const inspect = (
+          _module: import('../../src/model/compiler.ts').ModelModule,
+          source: string,
+          text: string,
+        ) => {
           viewport.selectBySourceOffset(
             '/main.ts',
             source.indexOf(text) + (text.includes('(') ? 2 : text.length - 1),
           );
-          const {target, evaluation} = viewport.sourceEvaluation();
+          const {target, evaluation} = viewport.sourceEvaluation()!;
           const selected = viewport.getSelected();
-          const bindings = viewport.transformGizmo.axes.flatMap(axis =>
+          const bindings = viewport['transformGizmo']['axes'].flatMap(axis =>
             axis.binding ? [axis.binding] : [],
           );
           scopes.push({
@@ -249,11 +262,11 @@ test(
         const vertex = inspect(module2, source2, 'pivotVertex(3)');
         const selection = vertex.evaluation.selection;
         const vertexIds = viewport.beginTopologySelection(
-          vertex.selected.key,
-          selection.inputNodeId,
+          vertex.selected!.key,
+          selection!.inputNodeId,
           'vertex',
           false,
-          selection.ids,
+          selection!.ids,
         );
         const source3 = `import {box, group} from '@code3d/core'; const base = box(20, 10, 30); const part = box(8, 6, 4).relate(self => self.on(base.up).around(base.axis).rotate(35)); export default group([base, part]);`;
         const module3 = await compile(source3);

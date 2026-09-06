@@ -34,7 +34,7 @@ test(
       const {elementSourceDecoration, relationSourceDecoration} =
         await import('/src/model/element-decorations.ts');
       const client = new ModelCompilerClient(browserPackageFiles);
-      const viewport = new ModelViewport(document.querySelector('main'), {
+      const viewport = new ModelViewport(document.querySelector('main')!, {
         onSelect() {},
         onDrillDown() {},
         onNavigateSource() {},
@@ -79,31 +79,25 @@ test(
             throw new Error(JSON.stringify(module.diagnostic));
           viewport.renderModule(module);
           viewport.selectBySourceOffset('/main.ts', source.indexOf('.on(') + 2);
-          const evaluation = viewport.sourceEvaluation().evaluation;
-          const constraint = evaluation.constraintPreview.constraints.find(
+          const evaluation = viewport.sourceEvaluation()!.evaluation;
+          const constraint = evaluation.constraintPreview!.constraints.find(
             c => c.id === evaluation.constraintId,
-          );
-          const drawn = [];
-          const callbacks = new WeakMap();
-          const collect = (object, kind, nodeId) =>
-            object.traverse(part => {
-              if (!part.material) return;
-              const before = callbacks.get(part) ?? part.onBeforeRender;
-              callbacks.set(part, before);
-              part.onBeforeRender = function (...args) {
-                before.apply(this, args);
-                drawn.push({
-                  kind,
-                  nodeId,
-                  segments: part.geometry.instanceCount,
-                  opacity: part.material.opacity,
-                  color: (
-                    part.material.color ?? part.material.uniforms.color.value
-                  ).getHexString(),
-                });
-              };
-            });
-          for (const instances of viewport.decorationLayers.values()) {
+          )!;
+          const drawn: Array<
+            import('./material-draw-fixture.ts').MaterialDraw & {
+              kind: string;
+              nodeId: string;
+            }
+          > = [];
+          const {createMaterialDrawObserver} =
+            await import('/test/browser/material-draw-fixture.ts');
+          const observe = createMaterialDrawObserver();
+          const collect = (
+            object: import('three').Object3D,
+            kind: string,
+            nodeId: string,
+          ) => observe(object, draw => drawn.push({...draw, kind, nodeId}));
+          for (const instances of viewport['decorationLayers'].values()) {
             for (const instance of instances) {
               const decoration =
                 instance.object.children[0].userData.decoration;
@@ -111,14 +105,14 @@ test(
                 collect(instance.object, decoration.kind, decoration.nodeId);
             }
           }
-          if (viewport.selectionHighlight)
+          if (viewport['selectionHighlight'])
             collect(
-              viewport.selectionHighlight,
+              viewport['selectionHighlight'],
               'selection',
-              viewport.getSelected().node.nodeId,
+              viewport.getSelected()!.node.nodeId,
             );
-          viewport.rendering.renderFrame();
-          const groupBoxBefore = viewport.selectionHighlight?.visible;
+          viewport['rendering'].renderFrame();
+          const groupBoxBefore = viewport['selectionHighlight']?.visible;
           viewport.clearDecorations('source-context:relation-geometry');
           results.push({
             spec,
@@ -126,8 +120,8 @@ test(
             sourceId: constraint.source.nodeId,
             targetId: constraint.target.nodeId,
             groupBoxBefore,
-            groupBoxAfter: viewport.selectionHighlight?.visible,
-            selectedId: viewport.getSelected().node.nodeId,
+            groupBoxAfter: viewport['selectionHighlight']?.visible,
+            selectedId: viewport.getSelected()!.node.nodeId,
           });
         }
         return results;
@@ -146,7 +140,7 @@ test(
       );
       if (spec.edges)
         assert.equal(
-          source.find(part => part.kind === 'bounds').segments,
+          source.find(part => part.kind === 'bounds')!.segments,
           spec.edges * 2,
         );
       assert.equal(source.filter(part => part.kind === 'edges').length, 0);
@@ -159,7 +153,7 @@ test(
           .every(part => part.color === 'd8ff3e'),
       );
       assert.equal(
-        source.find(part => part.kind === 'surface').opacity,
+        source.find(part => part.kind === 'surface')!.opacity,
         0.18 * (sourceId === result.selectedId ? 1 : 0.7),
       );
       if (spec.geometry.startsWith('group') && sourceId === result.selectedId) {

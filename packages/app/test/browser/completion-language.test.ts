@@ -1,8 +1,24 @@
+import type {ProjectTypeScriptWorker} from '../../src/monaco/typescript-protocol.ts';
+import type {TestContext} from 'node:test';
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {chromium} from 'playwright-core';
 
-async function createEditor(t) {
+interface CompletionHarness {
+  editor: import('../../src/editor.ts').CodeEditor;
+  model: import('monaco-editor/editor').editor.ITextModel;
+  language: import('../../src/project/project-language.ts').ProjectLanguage;
+  worker(): Promise<ProjectTypeScriptWorker>;
+  complete(
+    worker: ProjectTypeScriptWorker,
+  ): ReturnType<ProjectTypeScriptWorker['getProjectCompletions']>;
+  originalWorker?: ProjectTypeScriptWorker;
+  setDeclaration?: (source: string | undefined) => void;
+}
+declare const harness: CompletionHarness;
+declare const window: Window & {harness: CompletionHarness};
+
+async function createEditor(t: TestContext) {
   assert.ok(
     process.env.CODE3D_TEST_URL,
     'Set CODE3D_TEST_URL to the task server',
@@ -42,11 +58,13 @@ async function createEditor(t) {
       ],
     };
     const editor = new CodeEditor(
-      document.querySelector('main'),
+      document.querySelector('main')!,
       project,
       '/model.ts',
     );
-    let language;
+    let language:
+      | import('../../src/project/project-language.ts').ProjectLanguage
+      | undefined;
     const compiler = new ModelCompilerClient(browserPackageFiles, next => {
       language = next;
       editor.setProjectLanguage(next);
@@ -56,16 +74,16 @@ async function createEditor(t) {
     } finally {
       compiler.dispose();
     }
-    const model = editor.editor.getModel();
+    const model = editor.editor.getModel()!;
     window.harness = {
       editor,
       model,
-      language,
-      worker: () => projectTypeScriptWorker('typescript', model.uri),
+      language: language!,
+      worker: () => projectTypeScriptWorker('typescript', model!.uri),
       complete: worker =>
         worker.getProjectCompletions(
-          model.uri.toString(),
-          model.getValueLength(),
+          model!.uri.toString(),
+          model!.getValueLength(),
         ),
     };
   });
@@ -83,7 +101,9 @@ test(
       const worker = await h.worker();
       const pending = h.complete(worker).then(
         info => info?.entries.map(entry => entry.name),
-        error => ({error: error.message}),
+        (error: unknown) => ({
+          error: error instanceof Error ? error.message : String(error),
+        }),
       );
       h.editor.setProjectLanguage(structuredClone(h.language));
       const current = await h.worker();
@@ -97,6 +117,7 @@ test(
       true,
       'ordinary model recompilation must not terminate the language worker',
     );
+    assert.ok(Array.isArray(result.entries), JSON.stringify(result.entries));
     assert.ok(result.entries.includes('on'));
   },
 );
@@ -120,7 +141,7 @@ test(
         });
       h.setDeclaration('declare const external: {before: number};');
     });
-    const hasCompletion = name =>
+    const hasCompletion = (name: string) =>
       page.waitForFunction(
         async name => {
           const h = window.harness;
@@ -133,7 +154,7 @@ test(
       );
     await hasCompletion('before');
     await page.evaluate(() =>
-      harness.setDeclaration('declare const external: {after: number};'),
+      harness.setDeclaration!('declare const external: {after: number};'),
     );
     await hasCompletion('after');
     assert.equal(
@@ -142,7 +163,7 @@ test(
       ),
       true,
     );
-    await page.evaluate(() => harness.setDeclaration(undefined));
+    await page.evaluate(() => harness.setDeclaration!(undefined));
     await page.waitForFunction(
       async () =>
         !(await harness.complete(await harness.worker()))?.entries.some(

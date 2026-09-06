@@ -75,7 +75,7 @@ export function measureDirectionHeads() {
       [20, 0.001, 1, 720, 480],
       [20, 1, 2, 360, 240],
       [200, 1000, 2, 720, 480],
-    ]) {
+    ] as const) {
       renderer.setPixelRatio(ratio);
       renderer.setSize(width, height);
       camera.aspect = width / height;

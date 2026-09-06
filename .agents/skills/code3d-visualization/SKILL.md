@@ -67,8 +67,8 @@ description: 'code3d App 的既定三维可视化约定。USE FOR: 修改 viewpo
 
 - [辅助标记](../../../packages/app/src/rendering/anchor-decoration.ts)、[箭头头部](../../../packages/app/src/rendering/screen-space-arrow-head.ts)、[屏幕线与角线](../../../packages/app/src/rendering/screen-space-lines.ts)、[bound 样式](../../../packages/app/src/rendering/bound-appearance.ts)。
 - [元素/关系装饰](../../../packages/app/src/model/element-decorations.ts)、[空间控件](../../../packages/app/src/tools/transform-gizmo.ts)、[viewport](../../../packages/app/src/viewport.ts)。
-- `.on` 的完整源包围盒来自 [运行时](../../../packages/core/src/library/runtime.ts) 的 `ConstraintSnapshot.sourceBounds`；[浏览器回归](../../../packages/app/test/browser/on-source-bounds.test.mjs) 检查实际绘制与选择框恢复。
+- `.on` 的完整源包围盒来自 [运行时](../../../packages/core/src/library/runtime.ts) 的 `ConstraintSnapshot.sourceBounds`；[浏览器回归](../../../packages/app/test/browser/on-source-bounds.test.ts) 检查实际绘制与选择框恢复。
 - 主次规则见 [#46](https://github.com/vilicvane/code3d/issues/46)；[关系上下文](../../../packages/app/src/model/constraint-context.ts) 解析关注侧，[源码预览样式](../../../packages/app/src/rendering/source-appearance.ts) 定义模型各层级的不透明度上限，[焦点测试](../../../packages/app/test/relation-focus.test.ts) 覆盖源码边界与补全归属，[绘制测试](../../../packages/app/test/browser/relation-focus.test.ts) 核对多对象三级显示、材质透明度阈值、切换关系、整组标记不透明度和导出。
 - 边界与选择的完整上下文见 [PLAN.md](../../../PLAN.md)，已确认需求见 [#40](https://github.com/vilicvane/code3d/issues/40)、[#43](https://github.com/vilicvane/code3d/issues/43)、[#44](https://github.com/vilicvane/code3d/issues/44)。
 - 改尺寸时验证缩放、大小模型、组合体、实例缩放、视口调整与 DPR；改 bound 时验证有/无包围盒、重复实例和切换选择；改关系时验证曲线端点、反向与阶段姿态。验证实际绘制和至少一组视觉结果，不只检查装饰数据。
-- 使用现有 [尺寸测试](../../../packages/app/test/anchor-decoration.test.ts)、[角线测试](../../../packages/app/test/screen-space-lines.test.ts) 和 [浏览器回归](../../../packages/app/test/browser/screen-space-arrow-head.test.mjs)；涉及拖拽时同时验证拾取、取消与写回，涉及截图时验证导出尺寸。
+- 使用现有 [尺寸测试](../../../packages/app/test/anchor-decoration.test.ts)、[角线测试](../../../packages/app/test/screen-space-lines.test.ts) 和 [浏览器回归](../../../packages/app/test/browser/screen-space-arrow-head.test.ts)；涉及拖拽时同时验证拾取、取消与写回，涉及截图时验证导出尺寸。

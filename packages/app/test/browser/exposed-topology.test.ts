@@ -32,7 +32,7 @@ test(
       const {elementSourceDecoration} =
         await import('/src/model/element-decorations.ts');
       const client = new ModelCompilerClient(browserPackageFiles);
-      const viewport = new ModelViewport(document.querySelector('main'), {
+      const viewport = new ModelViewport(document.querySelector('main')!, {
         onSelect() {},
         onDrillDown() {},
         onNavigateSource() {},
@@ -59,30 +59,30 @@ export default assembly;`;
         for (const [expression, expectedCount] of [
           ['assembly.mount.edges()', 4],
           ['assembly.mount.edge(1).vertices()', 2],
-        ]) {
+        ] as const) {
           viewport.selectBySourceOffset(
             '/main.ts',
             source.indexOf(expression) + expression.length - 1,
           );
-          const {evaluation, target} = viewport.sourceEvaluation();
+          const {evaluation, target} = viewport.sourceEvaluation()!;
           const selection = evaluation.selection;
-          if (!selection)
+          if (!selection || selection.kind === 'edges')
             throw new Error(`No selection for ${expression} (${target.kind})`);
-          const occurrence = [...viewport.occurrences.values()].find(
+          const occurrence = [...viewport['occurrences'].values()].find(
             occurrence => occurrence.node.nodeId === selection.inputNodeId,
           );
           const available = viewport.beginTopologySelection(
-            occurrence.key,
+            occurrence!.key,
             selection.inputNodeId,
             selection.kind,
             true,
             selection.ids,
             selection.scope,
           );
-          const guide = viewport.topologySelection.guide;
+          const guide = viewport['topologySelection']!.guide;
           guide.updateWorldMatrix(true, true);
-          viewport.camera.updateWorldMatrix(true, false);
-          const mesh = viewport.topologySelection.mesh;
+          viewport['camera'].updateWorldMatrix(true, false);
+          const mesh = viewport['topologySelection']!.mesh;
           const sample = guide.position.clone();
           if (selection.kind === 'vertex')
             sample.fromArray(mesh.topologyVertices, 0);
@@ -91,9 +91,9 @@ export default assembly;`;
               .fromArray(mesh.edges, 0)
               .add(guide.position.clone().fromArray(mesh.edges, 3))
               .multiplyScalar(0.5);
-          sample.applyMatrix4(guide.matrixWorld).project(viewport.camera);
-          const rect = viewport.renderer.domElement.getBoundingClientRect();
-          const picked = viewport.pickTopology({
+          sample.applyMatrix4(guide.matrixWorld).project(viewport['camera']);
+          const rect = viewport['renderer'].domElement.getBoundingClientRect();
+          const picked = viewport['pickTopology']({
             clientX: rect.left + ((sample.x + 1) * rect.width) / 2,
             clientY: rect.top + ((1 - sample.y) * rect.height) / 2,
           });
@@ -106,12 +106,12 @@ export default assembly;`;
               .toArray(),
             meshIds:
               selection.kind === 'edge'
-                ? viewport.topologySelection.mesh.edgeGroups.map(
+                ? viewport['topologySelection']!.mesh.edgeGroups.map(
                     group => group.edgeId,
                   )
-                : viewport.topologySelection.mesh.vertexIds,
-            ownerKind: occurrence.node.kind,
-            selectedIds: [...viewport.topologySelection.selectedIds],
+                : viewport['topologySelection']!.mesh.vertexIds,
+            ownerKind: occurrence!.node.kind,
+            selectedIds: [...viewport['topologySelection']!.selectedIds],
             picked,
           });
           viewport.endTopologySelection();
@@ -120,13 +120,13 @@ export default assembly;`;
           '/main.ts',
           source.indexOf('const outline') + 'const out'.length,
         );
-        const outlineEvaluation = viewport.sourceEvaluation().evaluation;
-        const owner = [...viewport.occurrences.values()].find(
+        const outlineEvaluation = viewport.sourceEvaluation()!.evaluation;
+        const owner = [...viewport['occurrences'].values()].find(
           occurrence =>
             occurrence.node.nodeId ===
-            outlineEvaluation.topologyReferences[0].nodeId,
+            outlineEvaluation.topologyReferences![0].nodeId,
         );
-        const highlights = owner.object.children.filter(
+        const highlights = owner!.object.children.filter(
           child => child.renderOrder === 24,
         );
         viewport.selectBySourceOffset(
@@ -135,9 +135,9 @@ export default assembly;`;
             'assembly.mount.center'.length -
             1,
         );
-        const center = viewport.sourceEvaluation().evaluation.element;
+        const center = viewport.sourceEvaluation()!.evaluation.element;
         const markers =
-          viewport.decorationLayers.get('source-context:named-element')
+          viewport['decorationLayers'].get('source-context:named-element')
             ?.length ?? 0;
         return {
           checks,
@@ -145,12 +145,12 @@ export default assembly;`;
           highlightPositions: highlights.map(highlight =>
             highlight.position.toArray(),
           ),
-          center: center.transform.position,
+          center: center!.transform.position,
           markers,
         };
       } finally {
-        viewport.renderer.dispose();
-        viewport.controls.dispose();
+        viewport['renderer'].dispose();
+        viewport['controls'].dispose();
         client.dispose();
       }
     });

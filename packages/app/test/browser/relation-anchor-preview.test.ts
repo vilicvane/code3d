@@ -32,7 +32,7 @@ test(
       const {elementSourceDecoration} =
         await import('/src/model/element-decorations.ts');
       const client = new ModelCompilerClient(browserPackageFiles);
-      const viewport = new ModelViewport(document.querySelector('main'), {
+      const viewport = new ModelViewport(document.querySelector('main')!, {
         onSelect() {},
         onDrillDown() {},
         onNavigateSource() {},
@@ -47,7 +47,7 @@ test(
           ['self.surface(2)', 'base.up'],
           ['self.vertex(2)', 'base.up'],
           ['self.up', 'base.down'],
-        ]) {
+        ] as const) {
           const source = `import {box, group} from '@code3d/core';
           const base = box(10, 10, 10);
           const part = box(20, 20, 20).relate(self => ${sourceAnchor}.on(${targetAnchor}));
@@ -57,24 +57,26 @@ test(
             {files: [{path: '/main.ts', source}]},
             '/main.ts',
           );
-          if (module.diagnostic) throw new Error(module.diagnostic.message);
+          if (module.diagnostic) throw new Error(module.diagnostic.summary);
           viewport.renderModule(module);
-          for (const anchor of [sourceAnchor, targetAnchor]) {
+          for (const anchor of [sourceAnchor, targetAnchor] as const) {
             viewport.selectBySourceOffset(
               '/main.ts',
               source.indexOf(anchor) + anchor.length - 1,
             );
-            const {target, evaluation} = viewport.sourceEvaluation();
+            const {target, evaluation} = viewport.sourceEvaluation()!;
             const selected = viewport.getSelected();
             const rendered = [
-              ...viewport.occurrences.values(),
-              ...viewport.contextOccurrences.values(),
+              ...viewport['occurrences'].values(),
+              ...viewport['contextOccurrences'].values(),
             ];
             const selection = evaluation.selection;
             let availableIds;
             if (selection) {
+              if (selection.kind === 'edges')
+                throw new Error('Expected a topology selection');
               availableIds = viewport.beginTopologySelection(
-                selected.key,
+                selected!.key,
                 selection.inputNodeId,
                 selection.kind,
                 false,
@@ -87,11 +89,11 @@ test(
               expectedFocusCount: 1,
               hasOverlay: true,
               kind: target.kind,
-              focusCount: viewport.occurrences.size,
-              contextCount: viewport.contextOccurrences.size,
+              focusCount: viewport['occurrences'].size,
+              contextCount: viewport['contextOccurrences'].size,
               ownerSelected:
-                selected.node.nodeId ===
-                (selection?.inputNodeId ?? evaluation.element.nodeId),
+                selected!.node.nodeId ===
+                (selection?.inputNodeId ?? evaluation.element!.nodeId),
               correctPlacements: rendered.every(
                 ({node, object, placement}) =>
                   placement === 'composition' &&
@@ -106,18 +108,19 @@ test(
               ),
               availableIds,
               selectedIds: selection
-                ? [...viewport.topologySelection.selectedIds]
+                ? [...viewport['topologySelection']!.selectedIds]
                 : undefined,
               overlayCount: selection
-                ? viewport.topologySelectionOverlay?.children.length
-                : viewport.decorationLayers.get('source-context:named-element')
-                    ?.length,
+                ? viewport['topologySelectionOverlay']?.children.length
+                : viewport['decorationLayers'].get(
+                    'source-context:named-element',
+                  )?.length,
               toolArgument: evaluation.toolArguments?.[0],
             });
             viewport.endTopologySelection();
           }
         }
-        for (const compose of [true, false]) {
+        for (const compose of [true, false] as const) {
           const source = `import {box, circle, loft, rectangle} from '@code3d/core';
             const model = (() => {
               const ref = box(100, 100, 100);
@@ -129,9 +132,9 @@ test(
             {files: [{path: '/main.ts', source}]},
             '/main.ts',
           );
-          if (module.diagnostic) throw new Error(module.diagnostic.message);
+          if (module.diagnostic) throw new Error(module.diagnostic.summary);
           viewport.renderModule(module);
-          for (const id of ['down', 'up']) {
+          for (const id of ['down', 'up'] as const) {
             const callback = `circle => circle.on(ref.${id})`;
             const start = source.indexOf(callback);
             for (const [site, offset] of [
@@ -142,23 +145,23 @@ test(
                 'anchor',
                 callback.indexOf(`ref.${id}`) + `ref.${id}`.length - 1,
               ],
-            ]) {
+            ] as const) {
               viewport.selectBySourceOffset('/main.ts', start + offset);
-              const {target, evaluation} = viewport.sourceEvaluation();
+              const {target, evaluation} = viewport.sourceEvaluation()!;
               const rendered = [
-                ...viewport.occurrences.values(),
-                ...viewport.contextOccurrences.values(),
+                ...viewport['occurrences'].values(),
+                ...viewport['contextOccurrences'].values(),
               ];
               results.push({
                 anchor: `${compose ? 'loft' : 'uncomposed'} surface(${id}) ${site}`,
-                focusCount: viewport.occurrences.size,
-                contextCount: viewport.contextOccurrences.size,
+                focusCount: viewport['occurrences'].size,
+                contextCount: viewport['contextOccurrences'].size,
                 expectedFocusCount: 1,
                 expectedContextCount: (compose ? 3 : 2) - 1,
                 ownerSelected:
-                  viewport.getSelected().node.nodeId ===
+                  viewport.getSelected()!.node.nodeId ===
                   (site === 'anchor'
-                    ? evaluation.element.nodeId
+                    ? evaluation.element!.nodeId
                     : evaluation.constraintOwnerNodeId),
                 correctPlacements: rendered.every(
                   ({node, object, placement}) =>
@@ -202,12 +205,12 @@ test(
       );
       assert.equal(result.ownerSelected, true, result.anchor);
       assert.equal(result.correctPlacements, true, result.anchor);
-      if (result.hasOverlay) assert.ok(result.overlayCount > 0, result.anchor);
+      if (result.hasOverlay) assert.ok(result.overlayCount! > 0, result.anchor);
       if (result.separated !== undefined)
         assert.equal(result.separated, true, result.anchor);
       if (result.kind === 'topology-selection') {
         assert.deepEqual(result.selectedIds, [result.toolArgument]);
-        assert.ok(result.availableIds.includes(result.toolArgument));
+        assert.ok(result.availableIds!.includes(result.toolArgument!));
       }
     }
   },

@@ -1,6 +1,10 @@
+import type {Page} from 'playwright-core';
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {chromium} from 'playwright-core';
+declare const window: Window & {
+  shellViewport: import('../../src/viewport.ts').ModelViewport;
+};
 
 test(
   'shell face picking, failed thickness correction and source undo work in the App',
@@ -16,7 +20,7 @@ test(
     t.after(() => context.close());
     const page = await context.newPage();
     page.setDefaultTimeout(20_000);
-    const errors = [];
+    const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
     // Capture the actual instance; Vite can serve timestamped module instances
     // after edits, so importing and patching a second prototype misses the App.
@@ -27,7 +31,7 @@ test(
         body: (await response.text()) + '\nwindow.shellViewport = viewport;\n',
       });
     });
-    await page.goto(appUrl);
+    await page.goto(appUrl!);
     await page.getByText('Ready', {exact: true}).waitFor({timeout: 30_000});
     // All source edits and picks below go through the real App event handlers.
     const source =
@@ -98,7 +102,7 @@ test(
   },
 );
 
-async function waitCall(page, call) {
+async function waitCall(page: Page, call: string) {
   await page.waitForFunction(
     expected =>
       document
@@ -109,11 +113,15 @@ async function waitCall(page, call) {
   );
 }
 
-async function waitSelection(page, ids) {
+async function waitSelection(page: Page, ids: number[]) {
   await page.waitForFunction(expected => {
     const viewport = window.shellViewport;
-    const state = viewport?.topologySelection;
-    const actual = [...(state?.selectedIds ?? [])].sort((a, b) => a - b);
+    const state = viewport?.['topologySelection'];
+    const actual = [...(state?.selectedIds ?? [])].sort((a, b) => {
+      if (typeof a !== 'number' || typeof b !== 'number')
+        throw new Error('Expected box face IDs');
+      return a - b;
+    });
     const available = new Set(
       state?.mesh.surfaceGroups.map(group => group.surfaceId),
     );
@@ -125,27 +133,27 @@ async function waitSelection(page, ids) {
   }, ids);
 }
 
-async function pickFace(page, id) {
+async function pickFace(page: Page, id: number) {
   const point = await page.evaluate(id => {
     const viewport = window.shellViewport;
-    const selection = viewport.topologySelection;
+    const selection = viewport['topologySelection']!;
     const {mesh, guide} = selection;
     const group = mesh.surfaceGroups.find(group => group.surfaceId === id);
     const center = guide.position.clone().set(0, 0, 0);
     const vertex = center.clone();
-    for (let i = group.start; i < group.start + group.count; i++) {
+    for (let i = group!.start; i < group!.start + group!.count; i++) {
       center.add(vertex.fromArray(mesh.vertices, mesh.triangles[i] * 3));
     }
-    center.divideScalar(group.count);
+    center.divideScalar(group!.count);
     guide.updateWorldMatrix(true, true);
-    viewport.camera.updateWorldMatrix(true, false);
-    center.applyMatrix4(guide.matrixWorld).project(viewport.camera);
-    const rect = viewport.renderer.domElement.getBoundingClientRect();
+    viewport['camera'].updateWorldMatrix(true, false);
+    center.applyMatrix4(guide.matrixWorld).project(viewport['camera']);
+    const rect = viewport['renderer'].domElement.getBoundingClientRect();
     const point = {
       clientX: rect.left + ((center.x + 1) * rect.width) / 2,
       clientY: rect.top + ((1 - center.y) * rect.height) / 2,
     };
-    if (viewport.pickTopology(point) !== id)
+    if (viewport['pickTopology'](point) !== id)
       throw new Error(`S${id} is not visible at its center`);
     return point;
   }, id);

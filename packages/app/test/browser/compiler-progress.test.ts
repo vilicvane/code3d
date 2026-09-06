@@ -1,8 +1,23 @@
+import type {Browser} from 'playwright-core';
+import type {TestContext} from 'node:test';
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
 import {chromium} from 'playwright-core';
+type CompilationPhase =
+  import('../../src/model/compilation-progress.ts').CompilationPhase;
+declare const packageFiles: typeof import('../../src/project/browser-packages.ts').browserPackageFiles;
+declare const compile: (
+  onProgress?: (phase: CompilationPhase) => void,
+  source?: string,
+) => ReturnType<typeof client.compile>;
+declare const client: import('../../src/model/compiler-client.ts').ModelCompilerClient;
+declare const window: Window & {
+  client: typeof client;
+  compile: typeof compile;
+  packageFiles: typeof packageFiles;
+};
 
-let browser;
+let browser: Browser;
 before(async () => {
   assert.ok(
     process.env.CODE3D_TEST_URL,
@@ -14,7 +29,7 @@ before(async () => {
 });
 after(async () => browser?.close());
 
-async function fixture(t) {
+async function fixture(t: TestContext) {
   const context = await browser.newContext();
   t.after(() => context.close());
   const page = await context.newPage();
@@ -35,8 +50,12 @@ async function fixture(t) {
       await import('/src/project/browser-packages.ts');
     window.packageFiles = browserPackageFiles;
     window.client = new ModelCompilerClient({
-      async readFile() {},
-      async stat() {},
+      async readFile() {
+        return undefined;
+      },
+      async stat() {
+        return undefined;
+      },
     });
     window.compile = (
       onProgress,
@@ -66,9 +85,10 @@ test(
   async t => {
     const page = await fixture(t);
     const result = await page.evaluate(async () => {
-      const cold = [];
-      const warm = [];
-      const wasmReads = [];
+      const cold: CompilationPhase[] = [];
+      const warm: CompilationPhase[] = [];
+      const wasmReads: {path: string; phase: CompilationPhase | undefined}[] =
+        [];
       const read = packageFiles.readFile;
       packageFiles.readFile = async path => {
         if (path.endsWith('.wasm')) wasmReads.push({path, phase: cold.at(-1)});
@@ -112,8 +132,8 @@ test(
   async t => {
     const page = await fixture(t);
     const result = await page.evaluate(async () => {
-      const cancelled = [];
-      const next = [];
+      const cancelled: CompilationPhase[] = [];
+      const next: CompilationPhase[] = [];
       try {
         let error;
         try {
@@ -122,6 +142,7 @@ test(
             if (phase === 'loading-runtime') client.cancel();
           });
         } catch (failure) {
+          if (!(failure instanceof Error)) throw failure;
           error = failure.message;
         }
         const model = await compile(phase => next.push(phase));
@@ -130,7 +151,7 @@ test(
         client.dispose();
       }
     });
-    assert.match(result.error, /superseded/);
+    assert.match(result.error!, /superseded/);
     assert.deepEqual(result.cancelled, [
       'loading-compiler',
       'loading-project',
@@ -151,8 +172,8 @@ test(
   async t => {
     const page = await fixture(t);
     const result = await page.evaluate(async () => {
-      const failed = [];
-      const retried = [];
+      const failed: CompilationPhase[] = [];
+      const retried: CompilationPhase[] = [];
       const read = packageFiles.readFile;
       let fail = true;
       packageFiles.readFile = async path => {
@@ -167,7 +188,11 @@ test(
         try {
           await compile(phase => failed.push(phase));
         } catch (failure) {
-          error = [failure.message, failure.diagnostic?.details].join('\n');
+          if (!(failure instanceof Error)) throw failure;
+          const {ModelDiagnosticError} =
+            await import('/src/model/diagnostic.ts');
+          if (!(failure instanceof ModelDiagnosticError)) throw failure;
+          error = [failure.message, failure.diagnostic.details].join('\n');
         }
         const model = await compile(phase => retried.push(phase));
         return {failed, retried, error, diagnostic: model.diagnostic};
@@ -175,7 +200,7 @@ test(
         client.dispose();
       }
     });
-    assert.match(result.error, /Simulated WASM download failure/);
+    assert.match(result.error!, /Simulated WASM download failure/);
     assert.deepEqual(result.failed, [
       'loading-compiler',
       'loading-project',
@@ -199,13 +224,14 @@ test('can retry a failed compiler download', {timeout: 120_000}, async t => {
     },
   );
   const result = await page.evaluate(async () => {
-    const failed = [];
-    const retried = [];
+    const failed: CompilationPhase[] = [];
+    const retried: CompilationPhase[] = [];
     try {
       let error;
       try {
         await compile(phase => failed.push(phase));
       } catch (failure) {
+        if (!(failure instanceof Error)) throw failure;
         error = failure.message;
       }
       const model = await compile(phase => retried.push(phase));
@@ -215,7 +241,7 @@ test('can retry a failed compiler download', {timeout: 120_000}, async t => {
     }
   });
   assert.equal(downloads, 2);
-  assert.match(result.error, /Failed to download/);
+  assert.match(result.error!, /Failed to download/);
   assert.deepEqual(result.failed, ['loading-compiler']);
   assert.deepEqual(result.retried, ['loading-compiler', ...runtimePhases]);
   assert.equal(result.diagnostic, undefined);
@@ -227,9 +253,9 @@ test(
   async t => {
     const page = await fixture(t);
     const result = await page.evaluate(async () => {
-      const phases = [];
-      const recovered = [];
-      const deadlines = [];
+      const phases: CompilationPhase[] = [];
+      const recovered: CompilationPhase[] = [];
+      const deadlines: (number | undefined)[] = [];
       const setTimeout = window.setTimeout;
       window.setTimeout = (callback, delay, ...args) => {
         deadlines.push(delay);
@@ -240,6 +266,7 @@ test(
         try {
           await compile(phase => phases.push(phase), 'while (true) {}');
         } catch (failure) {
+          if (!(failure instanceof Error)) throw failure;
           error = failure.message;
         }
         window.setTimeout = setTimeout;
@@ -258,7 +285,7 @@ test(
     });
     assert.equal(result.phases.at(-1), 'evaluating-model');
     assert.deepEqual(result.deadlines, [120_000, 15_000]);
-    assert.match(result.error, /Model execution exceeded 15 seconds/);
+    assert.match(result.error!, /Model execution exceeded 15 seconds/);
     assert.deepEqual(result.recovered, ['loading-compiler', ...runtimePhases]);
     assert.equal(result.diagnostic, undefined);
   },
