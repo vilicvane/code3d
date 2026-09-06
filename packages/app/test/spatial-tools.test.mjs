@@ -368,7 +368,7 @@ test('around exposes a positioned axis and a single angle ring', async () => {
   );
 });
 
-test('a bound selection renders computed rectangles rather than real topology surfaces', async () => {
+test('a bound selection renders each computed plane once across named and relation previews', async () => {
   const source = `import {box} from '@code3d/core'; const base = box(20, 10, 30); const part = box(8, 6, 4).rotate(0, 0, 30).relate(self => self.on(base.up));`;
   const module = await compiler.compile(
     {files: [{path: '/model.ts', source}]},
@@ -384,16 +384,27 @@ test('a bound selection renders computed rectangles rather than real topology su
   const {elementSourceDecoration, boundRelationSourceDecoration} =
     await server.ssrLoadModule('/src/model/element-decorations.ts');
   const scope = {module, target, evaluation: target.evaluations[0]};
-  const targetMesh = elementSourceDecoration
-    .decorations(scope)
-    .find(decoration => decoration.kind === 'surface');
+  const named = elementSourceDecoration.decorations(scope);
+  const targetMesh = named.find(decoration => decoration.kind === 'surface');
   assert.equal(targetMesh.mesh.vertices.length, 12);
   assert.deepEqual(targetMesh.mesh.surfaceGroups, []);
   const contacts = boundRelationSourceDecoration.decorations(scope);
+  const combined = [...named, ...contacts];
+  assert.equal(new Set(combined.map(item => item.id)).size, combined.length);
   assert.equal(
-    contacts.filter(decoration => decoration.kind === 'surface').length,
+    combined.filter(decoration => decoration.kind === 'surface').length,
     2,
   );
+  const relationTarget = module.sourceTargets.find(
+    target =>
+      target.kind === 'constraint' && target.evaluations[0].constraintId,
+  );
+  const relation = boundRelationSourceDecoration.decorations({
+    module,
+    target: relationTarget,
+    evaluation: relationTarget.evaluations[0],
+  });
+  assert.equal(relation.filter(item => item.kind === 'surface').length, 2);
 });
 
 for (const [call, kind] of [
