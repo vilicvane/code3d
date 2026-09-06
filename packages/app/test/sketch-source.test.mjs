@@ -12,6 +12,21 @@ before(async () => {
 });
 after(async () => server?.close());
 
+const address = (id, layer = 'local') => ({id, layer});
+const trim = (
+  entries,
+  lineConstraints = [],
+  id = 5,
+  points = [address(1), address(2)],
+) => ({
+  kind: 'trim',
+  line: {kind: 'line', id, points},
+  ids: [id],
+  constraints: [],
+  entries,
+  lineConstraints,
+});
+
 function setup(source) {
   let version = 1;
   const undo = [];
@@ -142,7 +157,10 @@ test('deleting any tuple subset retains valid separators and surviving comments'
       const host = setup(
         `[['point', 1, [0,0]], /* keep 2 */ ['point', 2, [2,0]], ['point', 3, [3,0]]${trailing}]`,
       );
-      assert.equal(host.edit({kind: 'delete', ids}).status, 'committed');
+      assert.equal(
+        host.edit({kind: 'delete', ids, constraints: []}).status,
+        'committed',
+      );
       const expected = [1, 2, 3].filter(id => !ids.includes(id));
       assert.deepEqual(
         [...analyzeSketchSource(host.source()).entries.keys()],
@@ -347,6 +365,162 @@ test('entity deletion removes its constraints in the same undo transaction while
   assert.equal(entries.length, 2);
   assert.deepEqual(options.constraints, [['fixed', 1]]);
   assert.equal(host.undo.length, 1);
+});
+
+test('middle trims preserve direction expressions and unrelated source in one transaction', () => {
+  for (const trailing of ['', ',']) {
+    const source = `[
+      ['point', 1, [width, 0]], // authored expression
+      ['point', 2, [40, 0]],
+      ['point', 3, [10, 0]],
+      ['point', 4, [30, 0]],
+      ['line', 5, [1, 2]]${trailing}
+    ], {constraints: [
+      ['fixed', 1],
+      ['horizontal', /* direction */ 5],
+      ['angle', [5, theta /* keep expression */]],
+      ['length', [5, length]]${trailing}
+    ]}`;
+    const host = setup(source);
+    const change = trim(
+      [
+        ['line', 6, [address(1), address(3)]],
+        ['line', 7, [address(4), address(2)]],
+      ],
+      [
+        {index: 1, lines: [6, 7]},
+        {index: 2, lines: [6, 7]},
+        {index: 3, lines: []},
+      ],
+    );
+    assert.equal(host.edit(change).status, 'committed');
+    assert.equal(host.undo.length, 1);
+    assert.equal(host.undo[0], source);
+    assert.match(host.source(), /\[width, 0\]/);
+    assert.match(host.source(), /authored expression/);
+    assert.equal(
+      host.source().match(/theta \/\* keep expression \*\//g).length,
+      2,
+    );
+    const [entries, options] = Function(
+      'width',
+      'theta',
+      `return [${host.source()}]`,
+    )(0, 0);
+    assert.deepEqual(
+      entries.map(e => e[1]),
+      [1, 2, 3, 4, 6, 7],
+    );
+    assert.deepEqual(options.constraints, [
+      ['fixed', 1],
+      ['horizontal', 6],
+      ['angle', [6, 0]],
+      ['horizontal', 7],
+      ['angle', [7, 0]],
+    ]);
+  }
+});
+
+test('end trims keep the line tuple and unchanged endpoint source while reusing upstream boundaries', () => {
+  const source =
+    "[['point', 1, [0,0]], ['point', 2, [40,0]], ['line', 5, [/* keep start */ 1, /* end */ 2]]], {constraints: [['length', [5, width]], ['horizontal', 5]]}";
+  const host = setup(source);
+  assert.equal(
+    host.edit(
+      trim(
+        [['line', 5, [address(1), address(8, 'base')]]],
+        [
+          {index: 0, lines: []},
+          {index: 1, lines: [5]},
+        ],
+      ),
+    ).status,
+    'committed',
+  );
+  assert.match(
+    host.source(),
+    /\[\/\* keep start \*\/ 1, \/\* end \*\/ sketch1.point\(8\)\]/,
+  );
+  assert.match(host.source(), /\['horizontal', 5\]/);
+  assert.doesNotMatch(host.source(), /length/);
+  const inaccessible = setup(source);
+  assert.equal(
+    inaccessible.edit(trim([['line', 5, [address(1), address(8, 'missing')]]]))
+      .status,
+    'conflict',
+  );
+  assert.equal(inaccessible.source(), source);
+  assert.equal(inaccessible.undo.length, 0);
+});
+
+test('trim replacements append intersection points without holes when the removed line is last', () => {
+  for (const source of [
+    "[['point', 1, [0,0]], ['point', 2, [40,0]], ['line', 5, [1,2]]]",
+    "[['point', 1, [0,0]], ['point', 2, [40,0]], ['line', 5, [1,2]], /* closing */ ]",
+  ]) {
+    const host = setup(source);
+    const additions = [
+      ['point', 6, [10, 0]],
+      ['line', 7, [address(1), address(6)]],
+      ['point', 8, [30, 0]],
+      ['line', 9, [address(8), address(2)]],
+    ];
+    assert.equal(host.edit(trim(additions)).status, 'committed');
+    const entries = Function(`return ${host.source()}`)();
+    assert.deepEqual(
+      entries.map(e => e[1]),
+      [1, 2, 6, 7, 8, 9],
+    );
+    assert.deepEqual(
+      entries.filter(e => e[0] === 'line').map(e => e[2]),
+      [
+        [1, 6],
+        [8, 2],
+      ],
+    );
+  }
+});
+
+test('a full-line trim removes orphan points and all affected constraints in one source transaction', () => {
+  const host = setup(
+    "[['point', 1, [0,0]], ['point', 2, [40,0]], ['line', 5, [1,2]]], {constraints: [['horizontal', 5], ['length', [5, 40]], ['fixed', 1]]}",
+  );
+  assert.equal(
+    host.edit({
+      ...trim(
+        [],
+        [
+          {index: 0, lines: []},
+          {index: 1, lines: []},
+        ],
+      ),
+      ids: [5, 1, 2],
+      constraints: [2],
+    }).status,
+    'committed',
+  );
+  const [entries, options] = Function(`return [${host.source()}]`)();
+  assert.equal(entries.length, 0);
+  assert.deepEqual(options.constraints, []);
+});
+
+test('hidden direction targets refuse a split instead of baking their expression into a number', () => {
+  const source = "[['line', 5, [1,2]]], {constraints: [['angle', direction]]}";
+  const host = setup(source);
+  assert.equal(
+    host.edit(
+      trim(
+        [
+          ['line', 6, [address(1), address(3)]],
+          ['line', 7, [address(4), address(2)]],
+        ],
+        [{index: 0, lines: [6, 7]}],
+      ),
+    ).status,
+    'conflict',
+  );
+  assert.equal(host.source(), source);
+  assert.equal(host.undo.length, 0);
 });
 
 test('computed options and constraints never get silently replaced by generated constraints', () => {

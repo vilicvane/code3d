@@ -1,6 +1,8 @@
 import type {
   SketchSnapshot,
   SketchPosition,
+  SketchConstraint,
+  SketchPointAddress,
   SourceRef,
 } from '@code3d/core/tooling';
 import {solveSketchSnapshot} from '@code3d/core/tooling';
@@ -138,37 +140,6 @@ export class SketchEditorController {
     if (!active?.definitionRef || expectedText === undefined || this.stale)
       return false;
     const local = this.layers.at(-1)!;
-    if (change.kind === 'delete') {
-      const ids = change.ids;
-      const pointDeleted = (p: {layer: string; id: number}) =>
-        p.layer === local.id && ids.includes(p.id);
-      const constraints = local.constraints.flatMap(([kind, data], index) => {
-        let deleted: boolean;
-        switch (kind) {
-          case 'fixed':
-            deleted = pointDeleted(data);
-            break;
-          case 'horizontal':
-          case 'vertical':
-            deleted = ids.includes(data);
-            break;
-          case 'coincident':
-          case 'midpoint':
-            deleted = data.some(pointDeleted);
-            break;
-          case 'x':
-          case 'y':
-            deleted = pointDeleted(data[0]);
-            break;
-          case 'length':
-          case 'angle':
-            deleted = ids.includes(data[0]);
-            break;
-        }
-        return deleted ? [index] : [];
-      });
-      change = {...change, constraints};
-    }
     const committed = this.host.commit({
       kind: 'sketch.edit',
       sourceRef: active.definitionRef,
@@ -179,46 +150,67 @@ export class SketchEditorController {
     });
     if (!committed) return false;
     this.revision++;
-    this.data =
-      change.kind === 'append'
-        ? [
-            ...this.data,
-            ...change.entries.flatMap(([kind, id, position]) =>
-              kind === 'point' ? [{id, position}] : [],
-            ),
-          ]
-        : change.kind === 'delete'
-          ? this.data.filter(point => !change.ids.includes(point.id))
-          : this.data.map(
-              point => change.positions.find(p => p.id === point.id) ?? point,
-            );
-    const entities =
-      change.kind === 'delete'
-        ? local.entities.filter(e => !change.ids.includes(e.id))
-        : change.kind === 'move'
-          ? local.entities.map(e =>
-              e.kind === 'point' && change.positions.some(p => p.id === e.id)
-                ? {
-                    ...e,
-                    position: change.positions.find(p => p.id === e.id)!
-                      .position,
-                  }
-                : e,
-            )
-          : [
-              ...local.entities,
-              ...change.entries.map(([kind, id, data]) =>
-                kind === 'point'
-                  ? {kind, id, position: data}
-                  : {kind, id, points: data},
-              ),
-            ];
-    const constraints =
-      change.kind === 'append'
-        ? [...local.constraints, ...(change.constraints ?? [])]
-        : change.kind === 'delete'
-          ? local.constraints.filter((_, i) => !change.constraints?.includes(i))
-          : local.constraints;
+    const removed =
+      change.kind === 'delete' || change.kind === 'trim' ? change.ids : [];
+    const entries =
+      change.kind === 'append' || change.kind === 'trim' ? change.entries : [];
+    const positions = change.kind === 'move' ? change.positions : [];
+    this.data = [
+      ...this.data
+        .filter(point => !removed.includes(point.id))
+        .map(point => positions.find(p => p.id === point.id) ?? point),
+      ...entries.flatMap(([kind, id, position]) =>
+        kind === 'point' ? [{id, position}] : [],
+      ),
+    ];
+    const additions: SketchSnapshot['entities'] = entries.map(
+      ([kind, id, data]) =>
+        kind === 'point'
+          ? {kind, id, position: data}
+          : {kind, id, points: data},
+    );
+    const entities = [
+      ...local.entities.flatMap(entity => {
+        const replacement = additions.find(e => e.id === entity.id);
+        if (replacement) return [replacement];
+        if (removed.includes(entity.id)) return [];
+        const position =
+          entity.kind === 'point' &&
+          positions.find(p => p.id === entity.id)?.position;
+        return [position ? {...entity, position} : entity];
+      }),
+      ...additions.filter(
+        entity => !local.entities.some(e => e.id === entity.id),
+      ),
+    ];
+    const copiedConstraints: SketchConstraint<SketchPointAddress>[] = [];
+    const constraints = local.constraints.flatMap(
+      (constraint, index): SketchConstraint<SketchPointAddress>[] => {
+        if (
+          (change.kind === 'delete' || change.kind === 'trim') &&
+          change.constraints.includes(index)
+        )
+          return [];
+        const rewrite =
+          change.kind === 'trim' &&
+          change.lineConstraints.find(c => c.index === index);
+        if (!rewrite) return [constraint];
+        const [kind, data] = constraint;
+        const replacements: SketchConstraint<SketchPointAddress>[] =
+          kind === 'horizontal' || kind === 'vertical'
+            ? rewrite.lines.map(id => [kind, id])
+            : kind === 'length' || kind === 'angle'
+              ? rewrite.lines.map(id => [kind, [id, data[1]]])
+              : [constraint];
+        // The source resolver replaces the first target in place and appends
+        // copies. Keep the same indices for another edit before compilation.
+        copiedConstraints.push(...replacements.slice(1));
+        return replacements.slice(0, 1);
+      },
+    );
+    constraints.push(...copiedConstraints);
+    if (change.kind === 'append')
+      constraints.push(...(change.constraints ?? []));
     this.layers = [
       ...this.layers.slice(0, -1),
       preview ?? {...local, entities, constraints},

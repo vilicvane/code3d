@@ -785,7 +785,7 @@ const child = base.derive([]);`,
   assert.equal(await text(page), complete);
 });
 
-test('deleting a constrained line removes only its constraints and undo restores them together', async t => {
+test('deleting a constrained line removes its orphan endpoints and undo restores them together', async t => {
   const page = await open(t, constrainedLine);
   const a = await point(page, 1).boundingBox(),
     b = await point(page, 2).boundingBox();
@@ -793,12 +793,196 @@ test('deleting a constrained line removes only its constraints and undo restores
   await page.keyboard.press('Delete');
   assert.equal(await page.locator('.sketch-canvas line.local').count(), 0);
   assert.doesNotMatch(await text(page), /'horizontal'|'length'/);
-  assert.equal(await page.locator('.sketch-canvas circle.local').count(), 2);
+  assert.equal(await page.locator('.sketch-canvas circle.local').count(), 0);
   await page.getByText('Ready', {exact: true}).waitFor();
   await page.keyboard.press('Control+z');
   await page.locator('.sketch-canvas line.local').waitFor({state: 'attached'});
   assert.match(await text(page), /'horizontal',\s*3/);
   assert.match(await text(page), /'length',\s*\[3,\s*40\]/);
+});
+
+const segment = (page, id, start, end, layer = 'local') =>
+  page.locator(
+    `.sketch-canvas line.${layer}[data-id="${id}"][data-start="${start}"][data-end="${end}"]`,
+  );
+async function selectSegment(page, locator) {
+  const bounds = await locator.boundingBox();
+  await page.mouse.click(
+    bounds.x + bounds.width / 2,
+    bounds.y + bounds.height / 2,
+  );
+  assert.match(await locator.getAttribute('class'), /\blocal selected\b/);
+  assert.equal(await page.locator('.sketch-canvas line.selected').count(), 1);
+}
+
+test('point-delimited selection trims only the middle interval and undoes geometry and constraints together', async t => {
+  const source = `import {sketch} from '@code3d/core';
+const width = 40, theta = 0;
+const value = sketch([
+  ['point', 1, [0, 0]], ['point', 2, [width, 0]],
+  ['point', 3, [10, 0]], ['point', 4, [30, 0]],
+  ['line', 5, [1, 2]],
+], {constraints: [['angle', [5, theta]], ['length', [5, width]]]});`;
+  const page = await open(t, source);
+  assert.equal(await page.locator('.sketch-canvas line.local').count(), 3);
+  const before = await text(page);
+  await selectSegment(page, segment(page, 5, 0.25, 0.75));
+  assert.equal(await text(page), before, 'selection does not split source');
+  await page.keyboard.press('Delete');
+  await waitForSource(page, /'line',\s*6,\s*\[1,\s*3\]/);
+  await page.getByText('Ready', {exact: true}).waitFor();
+  assert.equal(await page.locator('.sketch-canvas line.local').count(), 2);
+  assert.equal(await page.locator('.sketch-canvas circle.local').count(), 4);
+  assert.match(await text(page), /'line',\s*7,\s*\[4,\s*2\]/);
+  assert.match(await text(page), /'angle',\s*\[6,\s*theta\]/);
+  assert.match(await text(page), /'angle',\s*\[7,\s*theta\]/);
+  assert.doesNotMatch(await text(page), /'length'|'line',\s*5,/);
+  await page.keyboard.press('Control+z');
+  await segment(page, 5, 0.25, 0.75).waitFor({state: 'attached'});
+  await waitForSource(page, /'length',\s*\[5,\s*width\]/);
+  assert.equal(await page.locator('.sketch-canvas line.local').count(), 3);
+  assert.doesNotMatch(await text(page), /'line',\s*[67],/);
+});
+
+test('crossings delimit deletion without creating points until the selected interval is removed', async t => {
+  const page = await open(
+    t,
+    `import {sketch} from '@code3d/core';
+const value = sketch([
+  ['point', 1, [0, 0]], ['point', 2, [40, 0]],
+  ['point', 3, [10, -10]], ['point', 4, [10, 10]],
+  ['point', 5, [30, -10]], ['point', 6, [30, 10]],
+  ['line', 7, [1, 2]], ['line', 8, [3, 4]], ['line', 9, [5, 6]],
+]);`,
+  );
+  assert.equal(await page.locator('.sketch-canvas circle.local').count(), 6);
+  assert.equal(await page.locator('.sketch-canvas line.local').count(), 7);
+  await selectSegment(page, segment(page, 7, 0.25, 0.75));
+  await page.getByRole('button', {name: 'Delete', exact: true}).click();
+  await waitForSource(page, /'line',\s*13,\s*\[12,\s*2\]/);
+  await page.getByText('Ready', {exact: true}).waitFor();
+  assert.equal(await page.locator('.sketch-canvas circle.local').count(), 8);
+  assert.equal(await page.locator('.sketch-canvas line.local').count(), 6);
+  assert.match(await text(page), /'point',\s*10,\s*\[10,\s*0\]/);
+  assert.match(await text(page), /'point',\s*12,\s*\[30,\s*0\]/);
+  assert.match(await text(page), /'line',\s*8,\s*\[3,\s*4\]/);
+  assert.match(await text(page), /'line',\s*9,\s*\[5,\s*6\]/);
+  await page.locator('.sketch-canvas').focus();
+  await page.keyboard.press('Control+z');
+  await segment(page, 7, 0.25, 0.75).waitFor({state: 'attached'});
+  assert.equal(await page.locator('.sketch-canvas circle.local').count(), 6);
+});
+
+test('an upstream point delimits a local end trim, retaining the line ID and a named reference', async t => {
+  const page = await open(
+    t,
+    `import {sketch} from '@code3d/core';
+const base = sketch([['point', 1, [10, 0]]]);
+const value = base.derive([
+  ['point', 1, [0, 0]], ['point', 2, [40, 0]], ['line', 3, [1, 2]],
+], {constraints: [['horizontal', 3], ['length', [3, 40]]]});`,
+  );
+  await selectSegment(page, segment(page, 3, 0.25, 1));
+  await page.keyboard.press('Delete');
+  await waitForSource(page, /'line',\s*3,\s*\[1,\s*base\.point\(1\)\]/);
+  await page.getByText('Ready', {exact: true}).waitFor();
+  assert.equal(await page.locator('.sketch-canvas line.local').count(), 1);
+  assert.equal(await point(page, 1, 'upstream').count(), 1);
+  assert.equal(await page.locator('.sketch-canvas circle.local').count(), 1);
+  assert.doesNotMatch(await text(page), /'point',\s*2,/);
+  assert.match(await text(page), /'horizontal',\s*3/);
+  assert.doesNotMatch(await text(page), /'length'/);
+  await point(page, 1, 'upstream').click();
+  await page.keyboard.press('Delete');
+  assert.equal(await page.locator('.sketch-canvas line.local').count(), 1);
+  assert.equal(await point(page, 1, 'upstream').count(), 1);
+});
+
+test('segment deletion cleans orphan point constraints but preserves unrelated standalone points with one undo', async t => {
+  const page = await open(
+    t,
+    `import {sketch} from '@code3d/core';
+const value = sketch([
+  ['point', 1, [0, 0]], ['point', 2, [40, 0]], ['line', 3, [1, 2]],
+  ['point', 4, [50, 20]],
+], {constraints: [['fixed', 1], ['horizontal', 3], ['length', [3, 40]], ['x', [4, 50]]]});`,
+  );
+  await selectSegment(page, segment(page, 3, 0, 1));
+  await page.keyboard.press('Delete');
+  assert.equal(await page.locator('.sketch-canvas circle.local').count(), 1);
+  assert.equal(await point(page, 4).count(), 1);
+  await waitForSource(page, /sketch\(\[\s*\['point',\s*4,/);
+  await page.getByText('Ready', {exact: true}).waitFor();
+  assert.doesNotMatch(await text(page), /'fixed'|'horizontal'|'length'/);
+  assert.match(await text(page), /'x',\s*\[4,\s*50\]/);
+  await page.keyboard.press('Control+z');
+  await point(page, 1).waitFor({state: 'attached'});
+  await waitForSource(page, /'fixed',\s*1/);
+  assert.equal(await page.locator('.sketch-canvas circle.local').count(), 3);
+  assert.equal(await page.locator('.sketch-canvas line.local').count(), 1);
+});
+
+test('deleting a shared vertex also removes the isolated endpoints of its removed lines', async t => {
+  const page = await open(
+    t,
+    `import {sketch} from '@code3d/core';
+const value = sketch([
+  ['point', 1, [0, 0]], ['point', 2, [20, 0]], ['point', 3, [20, 20]],
+  ['line', 4, [1, 2]], ['line', 5, [2, 3]], ['point', 6, [10, 0]],
+], {constraints: [['fixed', 1], ['horizontal', 4], ['vertical', 5]]});`,
+  );
+  await point(page, 2).click();
+  await page.keyboard.press('Delete');
+  assert.equal(await page.locator('.sketch-canvas .local').count(), 0);
+  await waitForSource(page, /sketch\(\[\s*\],\s*\{constraints:\s*\[\s*\]\}/);
+  await page.getByText('Ready', {exact: true}).waitFor();
+  await page.keyboard.press('Control+z');
+  await point(page, 2).waitFor({state: 'attached'});
+  await waitForSource(page, /'fixed',\s*1/);
+  assert.equal(await page.locator('.sketch-canvas circle.local').count(), 4);
+  assert.equal(await page.locator('.sketch-canvas line.local').count(), 3);
+});
+
+test('successive segment deletes before recompilation retain source constraint indices', async t => {
+  const page = await open(
+    t,
+    `import {sketch} from '@code3d/core';
+const value = sketch([
+  ['point', 1, [0, 0]], ['point', 2, [40, 0]],
+  ['point', 3, [10, 0]], ['point', 4, [30, 0]], ['line', 5, [1, 2]],
+], {constraints: [['angle', [5, 0]], ['fixed', 1], ['length', [5, 40]]]});`,
+  );
+  // Both transactions run in one task: no Worker compile result can arrive
+  // between the split and deleting one of its new lines.
+  await page.locator('.sketch-canvas').evaluate(canvas => {
+    const remove = selector => {
+      const bounds = canvas.querySelector(selector).getBoundingClientRect();
+      canvas.dispatchEvent(
+        new PointerEvent('pointerdown', {
+          bubbles: true,
+          pointerId: 1,
+          button: 0,
+          buttons: 1,
+          clientX: bounds.x + bounds.width / 2,
+          clientY: bounds.y + bounds.height / 2,
+        }),
+      );
+      canvas.dispatchEvent(
+        new KeyboardEvent('keydown', {key: 'Delete', bubbles: true}),
+      );
+    };
+    remove('line[data-id="5"][data-start="0.25"][data-end="0.75"]');
+    remove('line[data-id="7"]');
+  });
+  await waitForSource(page, /'line',\s*6,\s*\[1,\s*3\]/);
+  await page.getByText('Ready', {exact: true}).waitFor();
+  assert.equal(await page.locator('.sketch-canvas line.local').count(), 1);
+  assert.match(await text(page), /'fixed',\s*1/);
+  assert.match(await text(page), /'angle',\s*\[6,\s*0\]/);
+  assert.doesNotMatch(
+    await text(page),
+    /'angle',\s*\[7,|'line',\s*[57],|'length'/,
+  );
 });
 
 test('center rectangle numeric sizes are full side lengths and its center undoes atomically', async t => {

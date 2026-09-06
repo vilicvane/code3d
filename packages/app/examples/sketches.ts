@@ -94,3 +94,19 @@ export const centeredDetail = centeredRectangle.derive([
   ['point', 1, [0, 30]],
   ['line', 2, [centeredRectangle.point(1), 1]],
 ]);
+
+// Select the middle of line 7 and press Delete: only the part between the two
+// crossings is removed. The original line splits into two new IDs; the cutting
+// lines stay intact. Undo restores the unsplit source in one step.
+// Deleting an outer segment also removes its now-disconnected endpoint.
+export const trimming = sketch([
+  ['point', 1, [0, 0]],
+  ['point', 2, [40, 0]],
+  ['point', 3, [10, -10]],
+  ['point', 4, [10, 10]],
+  ['point', 5, [30, -10]],
+  ['point', 6, [30, 10]],
+  ['line', 7, [1, 2]],
+  ['line', 8, [3, 4]],
+  ['line', 9, [5, 6]],
+]);

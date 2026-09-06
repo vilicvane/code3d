@@ -3,9 +3,11 @@ import type {
   SketchPointAddress,
   SketchPosition,
   SketchConstraint,
+  SketchLineSnapshot,
   SourceRef,
 } from '@code3d/core/tooling';
 import {formatSourceNumber} from './source-expression';
+import {sameSketchPoint} from './sketch-snap';
 import type {SketchEditableCoordinates} from '../model/sketch-drag';
 import type {
   ResolveContext,
@@ -35,7 +37,18 @@ export type SketchChange =
   | Readonly<{
       kind: 'delete';
       ids: readonly number[];
-      constraints?: readonly number[];
+      constraints: readonly number[];
+    }>
+  | Readonly<{
+      kind: 'trim';
+      line: SketchLineSnapshot;
+      ids: readonly number[];
+      constraints: readonly number[];
+      entries: readonly SketchDraftEntry[];
+      lineConstraints: readonly Readonly<{
+        index: number;
+        lines: readonly number[];
+      }>[];
     }>;
 
 export type SketchEditIntent = Readonly<{
@@ -186,7 +199,75 @@ export class SketchEditResolver implements ToolIntentResolver {
         end: node.end - prefix.length,
         text,
       });
+    const removed = new Set<ts.Node>();
+    const followingComma = (node: ts.Node) => {
+      const scanner = ts.createScanner(
+        ts.ScriptTarget.Latest,
+        true,
+        ts.LanguageVariant.Standard,
+        source.slice(node.end - prefix.length),
+      );
+      return scanner.scan() === ts.SyntaxKind.CommaToken
+        ? scanner.getTextPos()
+        : 0;
+    };
+    const remove = (node: ts.Node) => {
+      removed.add(node);
+      changes.push({
+        start: node.pos - prefix.length,
+        end: node.end - prefix.length + followingComma(node),
+        text: '',
+      });
+    };
+    const append = (array: ts.ArrayLiteralExpression, text: string) => {
+      if (!text) return;
+      const last = array.elements.filter(node => !removed.has(node)).at(-1);
+      if (last && !followingComma(last)) {
+        const end = last.end - prefix.length;
+        changes.push({start: end, end, text: ','});
+      }
+      const end = array.end - prefix.length - 1;
+      const closingIndent = source.slice(0, end).match(/[ \t]*$/)![0];
+      const start = end - closingIndent.length;
+      const separator = source[start - 1] === '\n' ? '' : '\n';
+      changes.push({start, end, text: `${separator}${text}\n${closingIndent}`});
+    };
+    const point = (ref: SketchPointAddress): string => {
+      if (ref.layer === intent.layer) return String(ref.id);
+      const name = intent.references[ref.layer];
+      if (!name)
+        throw new Error(
+          'This upstream point has no accessible sketch binding.',
+        );
+      return `${name}.point(${ref.id})`;
+    };
+    const entryText = ([kind, id, data]: SketchDraftEntry) => {
+      const content =
+        kind === 'point' ? data.map(formatSourceNumber) : data.map(point);
+      return `  ['${kind}', ${id}, [${content.join(', ')}]],`;
+    };
     const {change} = intent;
+    if (change.kind === 'delete' || change.kind === 'trim') {
+      for (const id of change.ids) {
+        if (change.kind === 'trim' && id === change.line.id) continue;
+        const entry = parsed.entries.get(id);
+        if (!entry)
+          return {
+            status: 'conflict',
+            reason: `Sketch entity ${id} no longer exists.`,
+          };
+        remove(entry.node);
+      }
+      for (const index of change.constraints) {
+        const node = parsed.constraints?.elements[index];
+        if (!node)
+          return {
+            status: 'conflict',
+            reason: 'The sketch constraints changed.',
+          };
+        remove(node);
+      }
+    }
     if (change.kind === 'move') {
       for (const {id, position} of change.positions) {
         const entry = parsed.entries.get(id);
@@ -201,62 +282,84 @@ export class SketchEditResolver implements ToolIntentResolver {
             replace(node, formatSourceNumber(position[i]));
         });
       }
-    } else if (change.kind === 'delete') {
-      const remove = (node: ts.Node) => {
-        const end = node.end - prefix.length;
-        const scanner = ts.createScanner(
-          ts.ScriptTarget.Latest,
-          true,
-          ts.LanguageVariant.Standard,
-          source.slice(end),
+    } else if (change.kind === 'trim') {
+      const original = parsed.entries.get(change.line.id);
+      if (original?.kind !== 'line')
+        return {
+          status: 'conflict',
+          reason: 'The trimmed line no longer exists.',
+        };
+      const retained = change.entries.find(
+        entry => entry[1] === change.line.id,
+      );
+      try {
+        if (retained?.[0] === 'line') {
+          retained[2].forEach((ref, i) => {
+            if (!sameSketchPoint(ref, change.line.points[i]))
+              replace(original.data.elements[i], point(ref));
+          });
+        } else remove(original.node);
+        const added = change.entries.filter(
+          entry => entry[1] !== change.line.id,
         );
-        const comma = scanner.scan() === ts.SyntaxKind.CommaToken;
-        changes.push({
-          start: node.pos - prefix.length,
-          end: end + (comma ? scanner.getTextPos() : 0),
-          text: '',
-        });
-      };
-      for (const id of change.ids) {
-        const entry = parsed.entries.get(id);
-        if (!entry)
-          return {
-            status: 'conflict',
-            reason: `Sketch entity ${id} no longer exists.`,
-          };
-        remove(entry.node);
+        for (const [, id] of added) {
+          if (parsed.entries.has(id))
+            throw new Error(`Sketch entity ${id} already exists.`);
+        }
+        append(parsed.array, added.map(entryText).join('\n'));
+        const copies: string[] = [];
+        for (const {index, lines} of change.lineConstraints) {
+          const node = parsed.constraints?.elements[index];
+          if (!node || !ts.isArrayLiteralExpression(node))
+            throw new Error('The sketch constraints changed.');
+          if (!lines.length) {
+            remove(node);
+            continue;
+          }
+          if (lines.length === 1 && lines[0] === change.line.id) continue;
+          const kind = node.elements[0];
+          const data = node.elements[1];
+          if (
+            !ts.isStringLiteral(kind) ||
+            !['horizontal', 'vertical', 'angle'].includes(kind.text)
+          )
+            throw new Error(
+              'Splitting requires explicit direction constraint targets.',
+            );
+          const target =
+            kind.text === 'angle'
+              ? ts.isArrayLiteralExpression(data)
+                ? data.elements[0]
+                : undefined
+              : data;
+          if (!target)
+            throw new Error(
+              'Splitting requires explicit direction constraint targets.',
+            );
+          replace(target, String(lines[0]));
+          const start = node.getStart() - prefix.length;
+          const raw = source.slice(start, node.end - prefix.length);
+          for (const id of lines.slice(1))
+            copies.push(
+              `  ${raw.slice(0, target.getStart() - prefix.length - start)}${id}${raw.slice(target.end - prefix.length - start)},`,
+            );
+        }
+        if (copies.length) append(parsed.constraints!, copies.join('\n'));
+      } catch (error) {
+        return {status: 'conflict', reason: (error as Error).message};
       }
-      for (const index of change.constraints ?? []) {
-        const node = parsed.constraints?.elements[index];
-        if (!node)
-          return {
-            status: 'conflict',
-            reason: 'The sketch constraints changed.',
-          };
-        remove(node);
-      }
-    } else {
+    } else if (change.kind === 'append') {
       const ids = new Set(parsed.entries.keys());
-      const point = (ref: SketchPointAddress): string => {
-        if (ref.layer === intent.layer) return String(ref.id);
-        const name = intent.references[ref.layer];
-        if (!name)
-          throw new Error(
-            'This upstream point has no accessible sketch binding.',
-          );
-        return `${name}.point(${ref.id})`;
-      };
       let text: string;
       let constraints: string;
       try {
         text = change.entries
-          .map(([kind, id, data]) => {
+          .map(entry => {
+            const id = entry[1];
             if (ids.has(id))
               throw new Error(`Sketch entity ${id} already exists.`);
             ids.add(id);
-            const content =
-              kind === 'point' ? data.map(formatSourceNumber) : data.map(point);
-            return `  ['${kind}', ${id}, [${content.join(', ')}]],`;
+            return entryText(entry);
           })
           .join('\n');
         constraints = (change.constraints ?? [])
@@ -289,25 +392,10 @@ export class SketchEditResolver implements ToolIntentResolver {
       } catch (error) {
         return {status: 'conflict', reason: (error as Error).message};
       }
-      const elements = parsed.array.elements;
-      if (elements.length && !elements.hasTrailingComma) {
-        const end = elements[elements.length - 1].end - prefix.length;
-        changes.push({start: end, end, text: ','});
-      }
-      const end = parsed.array.end - prefix.length - 1;
-      const closingIndent = source.slice(0, end).match(/[ \t]*$/)![0];
-      const start = end - closingIndent.length;
-      const separator = source[start - 1] === '\n' ? '' : '\n';
-      changes.push({start, end, text: `${separator}${text}\n${closingIndent}`});
+      append(parsed.array, text);
       if (change.constraints?.length) {
         if (parsed.constraints) {
-          const array = parsed.constraints;
-          if (array.elements.length && !array.elements.hasTrailingComma) {
-            const end = array.elements.at(-1)!.end - prefix.length;
-            changes.push({start: end, end, text: ','});
-          }
-          const end = array.end - prefix.length - 1;
-          changes.push({start: end, end, text: `\n  ${constraints},\n`});
+          append(parsed.constraints, `  ${constraints},`);
         } else if (parsed.options) {
           const options = parsed.options;
           if (
@@ -341,7 +429,7 @@ export class SketchEditResolver implements ToolIntentResolver {
       plan: {
         toolId: context.toolId,
         baseVersion: context.baseVersion,
-        summary: `${change.kind === 'move' ? 'Move point' : change.kind === 'delete' ? 'Delete entities' : 'Add entities'} in sketch`,
+        summary: `${change.kind === 'move' ? 'Move point' : change.kind === 'delete' ? 'Delete entities' : change.kind === 'trim' ? 'Delete segment' : 'Add entities'} in sketch`,
         intent,
         edits,
         preview: {kind: 'source-edits', edits},

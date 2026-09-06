@@ -31,7 +31,7 @@ implementation context and historical outcomes, not a competing work queue.
   `sketch(entries, {constraints})` separates current geometry from hard
   conditions, without persistent constraint IDs. Fixed point, coincident,
   horizontal/vertical, length, angle, midpoint and point X/Y constraints use PlaneGCS;
-  assemblies retain OndselSolver. Explicit drawing dimensions and the final
+  assemblies use explicit rotation/translation bounds. Explicit drawing dimensions and the final
   active X/Y lock become constraints when geometry is committed; toggling off
   emits no direction constraint. Ordinary automatic snapping stays temporary.
   Dragging uses a soft Worker solve and writes all changed editable coordinates
@@ -65,9 +65,20 @@ implementation context and historical outcomes, not a competing work queue.
   diagnostic tag. It works at coincident coordinates without changing already
   satisfied geometry. Both modes retain the common gesture anchor rule; dragging
   the center does not implicitly mean translating the entire rectangle.
-  Circles/arcs, trimming, regions and B-Rep generation remain later slices.
+  Straight-line selection and deletion use intervals delimited by existing
+  points, finite line intersections and overlapping endpoints. Merely crossing
+  or selecting geometry does not split the source. Deleting an end interval
+  retains the line ID; deleting an interior interval retires it and assigns two
+  fresh IDs. Points disconnected by the deletion and their constraints are
+  removed atomically; shared points (including geometric T junctions), upstream
+  points, unrelated standalone points and other lines remain. Computed cuts
+  create ordinary numeric endpoints only when needed. Original full-line length
+  constraints are removed, while direction constraints and their expressions
+  follow surviving lines in the same undo transaction. Upstream geometry can
+  delimit a local trim but remains read-only.
+  Circles/arcs, curve trimming, regions and B-Rep generation remain later slices.
   See [research and priorities](plans/sketch-editor.md) and
-  [#23](https://github.com/vilicvane/code3d/issues/23); curve and trimming formats
+  [#23](https://github.com/vilicvane/code3d/issues/23); curve formats
   remain unconfirmed.
 - Author code remains ordinary JavaScript/TypeScript and may freely construct,
   reuse, copy, collect, and derive model values.

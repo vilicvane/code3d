@@ -22,6 +22,14 @@ import type {
 import {SketchLineDrawing, type SketchDrawing} from '../tools/sketch-drawing';
 import {SketchRectangleDrawing} from '../tools/sketch-rectangle-drawing';
 import {
+  sketchSegments,
+  sketchSegmentDistance,
+  sameSketchSegment,
+  trimSketchSegment,
+  deleteSketchPoint,
+  type SketchSegment,
+} from '../tools/sketch-segments';
+import {
   endpointPosition,
   sameSketchPoint as same,
   sketchDistance as distance,
@@ -91,7 +99,8 @@ export class SketchEditor {
   private bypassSnap = false;
   private center: SketchPosition = [0, 0];
   private scale = 6;
-  private selection?: SketchPointAddress;
+  private selection?: SketchPointAddress | SketchSegment;
+  private editError?: string;
   private gesture?: Gesture;
   private space = false;
 
@@ -224,6 +233,17 @@ export class SketchEditor {
       this.drawing = undefined;
     }
     this.view = view;
+    this.editError = undefined;
+    if (this.selection) {
+      const selected = this.selection;
+      const exists =
+        'start' in selected
+          ? this.segments().some(segment =>
+              sameSketchSegment(segment, selected),
+            )
+          : this.points().some(point => same(point, selected));
+      if (!exists) this.selection = undefined;
+    }
     if (view.readOnlyReason) this.drawing = undefined;
     const start = this.drawing?.start;
     if (start && 'point' in start) {
@@ -420,6 +440,7 @@ export class SketchEditor {
     if (!this.view || (event.button !== 0 && event.button !== 1)) return;
     event.preventDefault();
     this.svg.focus();
+    this.editError = undefined;
     const position = this.coordinates(event);
     this.bypassSnap = event.altKey;
     if (event.button === 1 || this.space) {
@@ -439,22 +460,19 @@ export class SketchEditor {
     } else {
       this.selection = point;
       if (!point) {
-        const points = this.points();
-        for (const layer of [...this.view.layers].reverse()) {
-          const line = layer.entities.find(entity => {
-            if (entity.kind !== 'line') return false;
-            const [a, b] = entity.points.map(ref =>
-              points.find(p => same(p, ref))!,
-            );
-            return (
-              segmentDistance(position, a.position, b.position) * this.scale < 6
-            );
-          });
-          if (line) {
-            this.selection = {layer: layer.id, id: line.id};
-            break;
-          }
-        }
+        this.selection = this.segments()
+          .reverse()
+          .map(segment => ({
+            segment,
+            distance: sketchSegmentDistance(position, segment) * this.scale,
+          }))
+          .filter(hit => hit.distance < 6)
+          .sort(
+            (a, b) =>
+              Number(b.segment.layer === this.view!.id) -
+                Number(a.segment.layer === this.view!.id) ||
+              a.distance - b.distance,
+          )[0]?.segment;
       } else if (
         !this.view.readOnlyReason &&
         point.layer === this.view.id &&
@@ -571,6 +589,10 @@ export class SketchEditor {
     );
   }
 
+  private segments(): SketchSegment[] {
+    return this.view ? sketchSegments(this.view.layers, this.points()) : [];
+  }
+
   private deleteSelection(): void {
     if (
       !this.view ||
@@ -578,21 +600,24 @@ export class SketchEditor {
       this.selection?.layer !== this.view.id
     )
       return;
-    const id = this.selection.id;
-    const ids = [
-      id,
-      ...this.view.layers
-        .at(-1)!
-        .entities.flatMap(entity =>
-          entity.kind === 'line' &&
-          entity.points.some(p => p.layer === this.view!.id && p.id === id)
-            ? [entity.id]
-            : [],
-        ),
-    ];
+    const selected = this.selection;
+    if ('start' in selected) {
+      const segment = this.segments().find(value =>
+        sameSketchSegment(value, selected),
+      );
+      if (!segment) return;
+      const change = trimSketchSegment(this.view.layers, segment);
+      this.cancel();
+      if (this.commit(change)) this.selection = undefined;
+      else
+        this.editError =
+          'The segment could not be deleted; its source or references are not editable.';
+      this.draw();
+      return;
+    }
+    const change = deleteSketchPoint(this.view.layers, selected.id);
     this.cancel();
-    if (this.commit({kind: 'delete', ids: [...new Set(ids)]}))
-      this.selection = undefined;
+    if (this.commit(change)) this.selection = undefined;
     this.draw();
   }
 
@@ -664,21 +689,30 @@ export class SketchEditor {
     this.line([originX, 0], [originX, height], 'axis', 'axis:x', this.grid);
     this.line([0, originY], [width, originY], 'axis', 'axis:y', this.grid);
     const points = this.points();
-    for (const layer of this.view.layers) {
-      for (const entity of layer.entities) {
-        if (entity.kind !== 'line') continue;
-        const positions = entity.points.map(ref =>
-          this.screen(points.find(p => same(p, ref))!.position),
-        );
-        const element = this.line(
-          positions[0],
-          positions[1],
-          this.entityClass(layer.id, entity.id),
-          JSON.stringify([layer.id, 'line', entity.id]),
-          this.lines,
-        );
-        this.tag(element, layer.id, entity.id, 'line');
-      }
+    for (const segment of sketchSegments(this.view.layers, points)) {
+      const positions = [segment.start, segment.end].map(cut =>
+        this.screen(endpointPosition(cut.endpoint)),
+      );
+      const selected =
+        this.selection &&
+        'start' in this.selection &&
+        sameSketchSegment(segment, this.selection);
+      const element = this.line(
+        positions[0],
+        positions[1],
+        `${this.entityClass(segment.layer, segment.id)}${selected ? ' selected' : ''}`,
+        JSON.stringify([
+          segment.layer,
+          'line',
+          segment.id,
+          segment.start.t,
+          segment.end.t,
+        ]),
+        this.lines,
+      );
+      this.tag(element, segment.layer, segment.id, 'line');
+      element.dataset.start = String(segment.start.t);
+      element.dataset.end = String(segment.end.t);
     }
     for (const point of points) {
       const circle = this.shape(
@@ -723,6 +757,7 @@ export class SketchEditor {
     const selected = this.selection;
     const status =
       (this.gesture?.kind === 'move' ? this.gesture.error : undefined) ??
+      this.editError ??
       this.view.readOnlyReason ??
       (selected?.layer && selected.layer !== this.view.id
         ? 'Upstream geometry · locked'
@@ -732,7 +767,7 @@ export class SketchEditor {
           ? this.expressionLock(selected.id)!
           : this.drawing
             ? this.drawing.instructions
-            : `${this.view.layers.at(-1)!.degreesOfFreedom} DOF · ${this.view.layers.at(-1)!.constraints.length} constraints · Drag points · Delete removes connected local lines`);
+            : `${this.view.layers.at(-1)!.degreesOfFreedom} DOF · ${this.view.layers.at(-1)!.constraints.length} constraints · Drag points · Delete removes the selected segment or point`);
     if (this.statusText.data !== status) this.statusText.data = status;
   }
 
@@ -746,7 +781,7 @@ export class SketchEditor {
   }
 
   private entityClass(layer: string, id: number): string {
-    return `entity ${layer === this.view!.id ? 'local' : 'upstream'}${same(this.selection, {layer, id}) ? ' selected' : ''}`;
+    return `entity ${layer === this.view!.id ? 'local' : 'upstream'}${this.selection && !('start' in this.selection) && same(this.selection, {layer, id}) ? ' selected' : ''}`;
   }
   private drawDraft(): void {
     if (!this.drawing || !this.view || this.root.hidden) {
@@ -853,22 +888,4 @@ function svgElement<K extends keyof SVGElementTagNameMap>(
   name: K,
 ): SVGElementTagNameMap[K] {
   return document.createElementNS('http://www.w3.org/2000/svg', name);
-}
-function segmentDistance(
-  p: SketchPosition,
-  a: SketchPosition,
-  b: SketchPosition,
-): number {
-  const length2 = (b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2;
-  const t = length2
-    ? Math.max(
-        0,
-        Math.min(
-          1,
-          ((p[0] - a[0]) * (b[0] - a[0]) + (p[1] - a[1]) * (b[1] - a[1])) /
-            length2,
-        ),
-      )
-    : 0;
-  return distance(p, [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])]);
 }
