@@ -1,7 +1,11 @@
 {
   "extends": "../tsconfig.json",
   "compilerOptions": {
-    "types": ["node"]
+    "types": ["node"],
+    "paths": {
+      "/src/*": ["../src/*"],
+      "/test/*": ["./*"]
+    }
   },
   "include": ["**/*.ts", "../src/**/*.d.ts"]
 }

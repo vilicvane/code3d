@@ -1,8 +1,18 @@
+import type {Browser} from 'playwright-core';
+import type {TestContext} from 'node:test';
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
 import {chromium} from 'playwright-core';
+declare const files: Map<string, string>;
+declare const compile: (source: string) => ReturnType<typeof client.compile>;
+declare const client: import('../../src/model/compiler-client.ts').ModelCompilerClient;
+declare const window: Window & {
+  client: typeof client;
+  compile: typeof compile;
+  files: typeof files;
+};
 
-let browser;
+let browser: Browser;
 before(async () => {
   assert.ok(
     process.env.CODE3D_TEST_URL,
@@ -14,7 +24,7 @@ before(async () => {
 });
 after(async () => browser?.close());
 
-async function fixture(t) {
+async function fixture(t: TestContext) {
   const context = await browser.newContext();
   t.after(() => context.close());
   const page = await context.newPage();
@@ -33,11 +43,13 @@ async function fixture(t) {
     window.client = new ModelCompilerClient({
       async readFile(path) {
         if (files.has(path)) return new TextEncoder().encode(files.get(path));
+        return undefined;
       },
       async stat(path) {
-        if (files.has(path)) return {kind: 'file', version: files.get(path)};
+        if (files.has(path)) return {kind: 'file', version: files.get(path)!};
         if ([...files.keys()].some(file => file.startsWith(path + '/')))
           return {kind: 'directory', version: ''};
+        return undefined;
       },
     });
     window.compile = source =>
@@ -73,8 +85,8 @@ test(
         return {
           diagnostics: [first.diagnostic, second.diagnostic],
           sameSize:
-            JSON.stringify(first.fallback.mesh.vertices) ===
-            JSON.stringify(second.fallback.mesh.vertices),
+            JSON.stringify(first.fallback!.mesh!.vertices) ===
+            JSON.stringify(second.fallback!.mesh!.vertices),
           exportable: client.canExport(second),
         };
       } finally {
@@ -95,10 +107,15 @@ test(
     const result = await page.evaluate(async () => {
       const source = 'const 中文="🧱";\nimport "node:fs";';
       try {
-        let diagnostic;
+        let diagnostic:
+          import('../../src/model/diagnostic.ts').ModelDiagnostic | undefined;
         try {
           await compile(source);
         } catch (error) {
+          if (!(error instanceof Error)) throw error;
+          const {ModelDiagnosticError} =
+            await import('/src/model/diagnostic.ts');
+          if (!(error instanceof ModelDiagnosticError)) throw error;
           diagnostic = error.diagnostic;
         }
         const model = await compile(
@@ -113,8 +130,8 @@ test(
         client.dispose();
       }
     });
-    assert.match(result.diagnostic.summary, /Node built-in node:fs.*browser/);
-    assert.deepEqual(result.diagnostic.sourceRef, {
+    assert.match(result.diagnostic!.summary, /Node built-in node:fs.*browser/);
+    assert.deepEqual(result.diagnostic!.sourceRef, {
       file: '/model.ts',
       start: result.start,
       end: result.start + 9,

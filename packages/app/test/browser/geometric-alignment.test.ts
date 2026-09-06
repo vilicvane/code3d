@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {chromium} from 'playwright-core';
+declare const window: Window & {
+  alignmentTest: {
+    viewport: import('../../src/viewport.ts').ModelViewport;
+    codeEditor: import('../../src/editor.ts').CodeEditor;
+  };
+};
 
 test(
   'align direction markers, offset writeback and undo work in the App',
@@ -16,7 +22,7 @@ test(
     t.after(() => context.close());
     const page = await context.newPage();
     page.setDefaultTimeout(20000);
-    const errors = [];
+    const errors: string[] = [];
     page.on('pageerror', e => errors.push(e.message));
     await page.route('**/src/main.ts*', async route => {
       const response = await route.fetch();
@@ -27,7 +33,7 @@ test(
           '\nwindow.alignmentTest = {viewport, codeEditor};\n',
       });
     });
-    await page.goto(appUrl);
+    await page.goto(appUrl!);
     await page.getByText('Ready', {exact: true}).waitFor({timeout: 30000});
     const source = `import {arc, box, group, line} from '@code3d/core';
 const base=arc([20,0,0],[0,20,0],[-20,0,0]);
@@ -38,12 +44,12 @@ export default group([base,part,rail]);`;
     await page.locator('.monaco-editor .view-lines').first().click();
     await page.keyboard.press('Control+a');
     await page.keyboard.insertText(source);
-    const select = async text => {
+    const select = async (text: string) => {
       await page.evaluate(text => {
         const editor = window.alignmentTest.codeEditor.editor,
           model = editor.getModel();
         editor.setPosition(
-          model.getPositionAt(model.getValue().indexOf(text) + 2),
+          model!.getPositionAt(model!.getValue().indexOf(text) + 2),
         );
         editor.focus();
       }, text);
@@ -56,45 +62,19 @@ export default group([base,part,rail]);`;
           .constraintId,
     );
     const inspect = () =>
-      page.evaluate(() => {
-        const viewport = window.alignmentTest.viewport,
-          markers = [];
-        viewport.decorationRoot.traverse(object => {
-          const decoration = object.userData.decoration;
-          if (decoration?.directed) {
-            let shafts = 0;
-            const heads = [];
-            object.traverse(child => {
-              if ((child.isLine || child.isLineSegments2) && child.visible)
-                shafts++;
-              if (child.name === 'direction-arrow-head') {
-                child.geometry.computeBoundingBox();
-                heads.push({
-                  visible: child.visible,
-                  opacity: child.material.opacity,
-                  tip: child.geometry.boundingBox.max.y,
-                  size: child.material.uniforms.headSize.value.toArray(),
-                });
-              }
-            });
-            markers.push({
-              role: decoration.id.includes(':target:') ? 'target' : 'source',
-              heads,
-              curve: !!decoration.headOnly,
-              shafts,
-              position: decoration.transform.position,
-              direction: decoration.direction,
-            });
-          }
-        });
-        return markers;
+      page.evaluate(async () => {
+        const {inspectDirectionMarkers} =
+          await import('/test/browser/direction-marker-fixture.ts');
+        return inspectDirectionMarkers(
+          window.alignmentTest.viewport['decorationRoot'],
+        );
       });
     const curves = await inspect();
     assert.equal(curves.length, 2);
     assert.ok(curves.every(m => m.heads.every(h => h.visible)));
-    const sourceOpacity = curves.find(m => m.role === 'source').heads[0]
+    const sourceOpacity = curves.find(m => m.role === 'source')!.heads[0]
       .opacity;
-    const targetOpacity = curves.find(m => m.role === 'target').heads[0]
+    const targetOpacity = curves.find(m => m.role === 'target')!.heads[0]
       .opacity;
     assert.deepEqual(
       curves.map(m => m.heads[0].size),
@@ -108,19 +88,19 @@ export default group([base,part,rail]);`;
     assert.ok(
       curves.every(m => m.curve && m.heads.length === 1 && m.shafts === 0),
     );
-    const passiveWidths = await page.evaluate(() => {
-      const widths = [];
-      window.alignmentTest.viewport.decorationRoot.traverse(object => {
+    const passiveWidths = await page.evaluate(async () => {
+      const {lineWidths} =
+        await import('/test/browser/direction-marker-fixture.ts');
+      const widths: number[] = [];
+      window.alignmentTest.viewport['decorationRoot'].traverse(object => {
         if (object.userData.decoration?.kind === 'edges')
-          object.traverse(child => {
-            if (child.isLineSegments2) widths.push(child.material.linewidth);
-          });
+          widths.push(...lineWidths(object));
       });
       return widths;
     });
     assert.deepEqual(passiveWidths, [1, 1]);
     assert.ok(curves.every(m => Math.abs(m.heads[0].tip) < 1e-6));
-    const endpoint = curves.find(m => m.role === 'target').position;
+    const endpoint = curves.find(m => m.role === 'target')!.position;
     endpoint.forEach((v, i) => assert.ok(Math.abs(v - [-20, 0, 0][i]) < 1e-6));
     if (process.env.CODE3D_TEST_SCREENSHOT)
       await page.screenshot({path: process.env.CODE3D_TEST_SCREENSHOT});
@@ -153,8 +133,8 @@ export default group([base,part,rail]);`;
       const vp = window.alignmentTest.viewport,
         scope = vp.sourceEvaluation();
       const owner = scope?.evaluation.constraintOwnerNodeId;
-      return vp.module?.objects
-        .get(owner)
+      return vp['module']?.objects
+        .get(owner!)
         ?.constraints.some(c => c.targetElement.name === 'axis');
     });
     const axes = await inspect();
@@ -163,19 +143,19 @@ export default group([base,part,rail]);`;
     assert.ok(axes.filter(m => m.curve).every(m => m.shafts === 0));
     assert.ok(axes.filter(m => !m.curve).every(m => m.shafts === 1));
     assert.ok(axes.some(m => !m.curve && m.direction === -1));
-    const interactiveWidths = await page.evaluate(() => {
+    const interactiveWidths = await page.evaluate(async () => {
+      const {lineWidths} =
+        await import('/test/browser/direction-marker-fixture.ts');
       const vp = window.alignmentTest.viewport;
       const selected = vp.getSelected();
       vp.beginTopologySelection(
-        selected.key,
-        selected.node.nodeId,
+        selected!.key,
+        selected!.node.nodeId,
         'edge',
         false,
       );
-      const widths = [];
-      vp.topologySelection.guide.traverse(object => {
-        if (object.isLineSegments2) widths.push(object.material.linewidth);
-      });
+      const widths: number[] = [];
+      widths.push(...lineWidths(vp['topologySelection']!.guide));
       vp.endTopologySelection();
       return widths;
     });

@@ -1,8 +1,21 @@
+import type {Browser, Page} from 'playwright-core';
+import type {TestContext} from 'node:test';
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
 import {chromium} from 'playwright-core';
+declare const window: Window & {
+  layoutEditor: import('../../src/editor.ts').CodeEditor;
+  pendingLayoutObservers: (() => void)[];
+  pauseLayoutObserver: boolean;
+  ResizeObserver: typeof ResizeObserver;
+  layoutSnapshot: {
+    model: import('monaco-editor/editor').editor.ITextModel | null;
+    source: string;
+    selection: import('monaco-editor/editor').Selection | null;
+  };
+};
 
-let browser;
+let browser: Browser;
 before(async () => {
   assert.ok(
     process.env.CODE3D_TEST_URL,
@@ -14,7 +27,7 @@ before(async () => {
 });
 after(async () => browser?.close());
 
-async function fixture(t, {controlledResize = false} = {}) {
+async function fixture(t: TestContext, {controlledResize = false} = {}) {
   const context = await browser.newContext({
     viewport: {width: 1440, height: 900},
   });
@@ -27,7 +40,7 @@ async function fixture(t, {controlledResize = false} = {}) {
       const Observer = ResizeObserver;
       window.pendingLayoutObservers = [];
       window.ResizeObserver = class extends Observer {
-        constructor(callback) {
+        constructor(callback: ResizeObserverCallback) {
           super((entries, observer) => {
             if (
               window.pauseLayoutObserver &&
@@ -45,7 +58,7 @@ async function fixture(t, {controlledResize = false} = {}) {
     });
   }
   page.setDefaultTimeout(15_000);
-  const errors = [];
+  const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   t.after(() => assert.deepEqual(errors, []));
   await page.route('**/src/main.ts*', async route => {
@@ -55,18 +68,18 @@ async function fixture(t, {controlledResize = false} = {}) {
       body: (await response.text()) + '\nwindow.layoutEditor = codeEditor;\n',
     });
   });
-  await page.goto(process.env.CODE3D_TEST_URL);
+  await page.goto(process.env.CODE3D_TEST_URL!);
   await page.getByText('Ready', {exact: true}).waitFor({timeout: 60_000});
   return page;
 }
 
-async function width(page, selector = '#editor-host') {
-  return Math.round((await page.locator(selector).boundingBox()).width);
+async function width(page: Page, selector = '#editor-host') {
+  return Math.round((await page.locator(selector).boundingBox())!.width);
 }
 
-async function waitWidth(page, expected) {
+async function waitWidth(page: Page, expected: number) {
   await page.waitForFunction(value => {
-    const width = document.querySelector('#editor-host').clientWidth;
+    const width = document.querySelector('#editor-host')!.clientWidth;
     return (
       width === value &&
       Math.abs(window.layoutEditor.editor.getLayoutInfo().width - width) < 1
@@ -74,10 +87,10 @@ async function waitWidth(page, expected) {
   }, expected);
 }
 
-async function startDrag(page, delta) {
+async function startDrag(page: Page, delta: number) {
   const rect = await page.locator('#workspace-resizer').boundingBox();
-  const x = rect.x + rect.width / 2;
-  const y = rect.y + rect.height / 2;
+  const x = rect!.x + rect!.width / 2;
+  const y = rect!.y + rect!.height / 2;
   await page.mouse.move(x, y);
   await page.mouse.down();
   await page.mouse.move(x + delta, y, {steps: 5});
@@ -113,7 +126,7 @@ test(
     await page.setViewportSize({width: 1000, height: 900});
     await page.waitForFunction(
       preferred =>
-        document.querySelector('#editor-host').clientWidth < preferred,
+        document.querySelector('#editor-host')!.clientWidth < preferred,
       preferredWidth,
     );
     assert.ok((await width(page)) > 0);
@@ -130,14 +143,14 @@ test(
     await page.locator('#project-explorer-toggle').click();
     await page.waitForFunction(
       expected =>
-        document.querySelector('.editor-pane').clientWidth + 1 === expected,
+        document.querySelector('.editor-pane')!.clientWidth + 1 === expected,
       paneWidth - explorerWidth,
     );
     await waitWidth(page, preferredWidth);
     await page.locator('#project-explorer-toggle').click();
     await page.waitForFunction(
       expected =>
-        document.querySelector('.editor-pane').clientWidth + 1 === expected,
+        document.querySelector('.editor-pane')!.clientWidth + 1 === expected,
       paneWidth,
     );
     await waitWidth(page, preferredWidth);

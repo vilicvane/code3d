@@ -16,13 +16,13 @@ test(
     const context = await browser.newContext();
     try {
       const page = await context.newPage();
-      const errors = [];
+      const errors: string[] = [];
       page.on('pageerror', error => errors.push(error.message));
-      await page.goto(process.env.CODE3D_TEST_URL);
+      await page.goto(process.env.CODE3D_TEST_URL!);
       await page.getByText('Ready', {exact: true}).waitFor({timeout: 30_000});
       const result = await page.evaluate(async () => {
         const {inspectWorkerFiles} =
-          await import('/test/browser/typescript-worker-fixture.mjs');
+          await import('/test/browser/typescript-worker-fixture.ts');
         return inspectWorkerFiles();
       });
       assert.ok(result.declarationUri.includes('%40code3d'));
@@ -32,14 +32,16 @@ test(
         1,
       );
       assert.ok(!result.files.includes(result.declarationUri));
-      assert.ok(result.navigation.childItems.some(item => item.text === 'box'));
+      assert.ok(
+        result.navigation.childItems!.some(item => item.text === 'box'),
+      );
       assert.ok(result.selection[0].parent);
       assert.ok(
-        result.completions.entries.some(entry => entry.name === 'length'),
+        result.completions!.entries.some(entry => entry.name === 'length'),
       );
-      assert.equal(result.highlights[0].highlightSpans.length, 2);
+      assert.equal(result.highlights![0].highlightSpans.length, 2);
       assert.ok(
-        result.definition.some(
+        result.definition!.some(
           entry => entry.fileName === result.declarationFile,
         ),
       );

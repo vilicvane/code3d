@@ -22,7 +22,7 @@ test(
     await page.goto(url);
     const samples = await page.evaluate(async () => {
       const {measureDirectionHeads} =
-        await import('/test/browser/screen-space-arrow-fixture.mjs');
+        await import('/test/browser/screen-space-arrow-fixture.ts');
       return measureDirectionHeads();
     });
     for (const sample of samples) {
