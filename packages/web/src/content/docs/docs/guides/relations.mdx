@@ -68,6 +68,17 @@ Each chain's rotation follows its contact placement, so the contact does not
 cancel the authored rotation. Other relations constrain the resulting pose.
 All explicit orientations on one self must agree.
 
+### Bend a loft with explicit rotations
+
+<ModelExample id="bound-rotation" />
+
+The octagonal and rectangular sections first touch the circle's `up` bound,
+then turn 45° and 90° around a pivot 50 units along self's X axis.
+Inspect `sections` to see the positioned profiles, or `loft` to see the solid
+through them. Editing `pivot` or `rotate` changes the same source used here.
+
+## Choose which part moves
+
 `relate` determines the movable self, even in `base.on(self.up)`. References to
 the original receiver also work: `part.relate(() => part.on(base.up))`.
 Relations that involve neither self nor the original receiver are rejected.
@@ -116,8 +127,10 @@ closing the panel. Use Undo after an edit has been committed. Numeric panel
 input has a different meaning when an expression appears as a placeholder:
 it [replaces the whole argument](../model-tools/#what-a-panel-can-edit).
 
-Selecting a bound shows a rectangle and the automatically matched source
-boundary. Select `pivot` for point handles, `pivotVertex` for a vertex picker,
+Selecting a bound shows a translucent green rectangle with green corner
+brackets, together with the automatically matched source boundary. These
+helpers describe finite extents; they do not select a topology face. Select
+`pivot` for point handles, `pivotVertex` for a vertex picker,
 `around` for its axis, or `rotate` for three rings or one axis ring.
 
 To change the standalone geometry and its origin, see

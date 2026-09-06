@@ -14,8 +14,10 @@ Code3D is Prototype 01. APIs and project behavior are still evolving.
   and relative-position tools.
 - Editable model origins and geometric rotation, with vertex picking,
   translation arrows, and rotation rings.
-- Combined geometric relations between points, lines, planes, and complete
-  frames, solved together when composing parts.
+- Directional bound contacts with combined positional conditions and explicit
+  pivot, vertex, or axis rotations when composing parts.
+- Topology source paths through lofts, booleans, fillets, chamfers, and shells,
+  with face-to-edge-to-vertex queries and named exposed references.
 - Browser-persistent projects and direct local-folder editing in supported
   browsers.
 - Typed named elements and reusable metric fasteners.

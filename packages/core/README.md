@@ -149,7 +149,8 @@ Core and App use the same linear translation solver; there is no automatic
 angular solve or extra constraint-solver WASM initialization.
 
 In the App, selecting a directional property shows the target rectangle and
-matched source boundary. `pivot` has translation handles, `pivotVertex` uses
+matched source boundary with translucent green fill and green corner brackets.
+`pivot` has translation handles, `pivotVertex` uses
 self's vertex picker, `around` shows the referenced axis, and `rotate` has
 three angle rings or one axis ring. Source edits retain parameter provenance,
 preview/cancel behavior, and undo. See the

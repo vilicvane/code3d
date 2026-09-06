@@ -28,7 +28,7 @@ export const renderSamples = [
     id: 'locating-pin',
     title: 'A model with an API',
     description:
-      'Give a reusable part meaningful mounting faces. Let the next model work with those names.',
+      'Give a reusable part named mounting bounds and an axis. Let the next model work with those names.',
     category: 'Reusable design',
     file: 'website/locating-pin.ts',
     focus: {context: 'group([plate, pin, cap])', token: 'group'},
@@ -43,6 +43,42 @@ export const renderSamples = [
     file: 'custom-primitives.ts',
     focus: {context: 'group(', token: 'group'},
     tags: ['definePrimitive', 'replicad', '@code3d.param', 'relate'],
+  },
+  {
+    id: 'shell',
+    title: 'Make room inside',
+    description:
+      'Hollow a box with uniform walls, then pick the faces to leave open.',
+    category: 'Shells and openings',
+    file: 'shell.ts',
+    focus: {context: "enclosure.paint('#d8ff3e')", token: 'paint'},
+    tags: ['box', 'shell', 'surface selection'],
+  },
+  {
+    id: 'bound-rotation',
+    title: 'Bend through three profiles',
+    description:
+      'Position a circle, an octagon, and a rectangle with bound contacts and pivot rotations, then loft through them.',
+    category: 'Placement and rotation',
+    file: 'bound-rotation.ts',
+    focus: {
+      context: "loft([start, via, end]).paint('#d8ff3e')",
+      token: 'paint',
+    },
+    tags: ['relate', 'on', 'pivot', 'rotate', 'loft'],
+  },
+  {
+    id: 'topology-paths',
+    title: 'Follow a face to its source',
+    description:
+      'A tapered loft with named inlet, outlet, and side surfaces. Its cap IDs record the source profiles.',
+    category: 'Topology and reuse',
+    file: 'topology-paths.ts',
+    focus: {
+      context: 'body.expose({inlet, outlet, side})',
+      token: 'expose',
+    },
+    tags: ['loft', 'surface', 'edges', 'expose'],
   },
 ] as const satisfies readonly {
   id: string;

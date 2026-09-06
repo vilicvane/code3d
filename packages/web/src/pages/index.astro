@@ -72,8 +72,8 @@ import {sitePath, appUrl} from '../lib/site';
         <span class="step-number">03 / ADJUST</span><h3>
           Let the geometry help.
         </h3><p>
-          Pick edges and adjust supported parameters in the viewport. Your
-          changes return to the same TypeScript source.
+          Pick edges and faces, position parts, and adjust parameters in the
+          viewport. Your changes return to the same TypeScript source.
         </p><a class="text-link" href={sitePath('docs/guides/topology/')}
           >See how selection works →</a
         >
@@ -101,12 +101,18 @@ import {sitePath, appUrl} from '../lib/site';
     <div class="foundation-grid">
       <article>
         <h3>OpenCascade solids</h3><p>
-          Build with B-Rep geometry, boolean operations, fillets, and chamfers.
+          Build with B-Rep geometry, lofts, boolean operations, fillets, and
+          chamfers. Hollow solids with uniform walls and choose their openings.
+          <a href={sitePath('docs/guides/shells/')}>Make a hollow part →</a>
         </p>
       </article><article>
         <h3>Typed model interfaces</h3><p>
-          Expose meaningful points, edges, faces, and frames for the next model
-          to use.
+          Expose named bounds and topology for the next model to use. Position
+          parts against directional bounds and rotate around a chosen pivot or
+          axis.
+          <a href={sitePath('docs/guides/relations/')}
+            >Position and rotate parts →</a
+          >
         </p>
       </article><article>
         <h3>Your project, in source</h3><p>

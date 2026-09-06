@@ -19,13 +19,13 @@
 - `model()` 不是入口要求，源码选择决定主要渲染对象。
 - Monaco 提供 `@code3d/core` 等建模包的类型、补全、格式化和跨文件定义跳转。
 - 用户代码与 OpenCascade 在可终止 Worker 中编译和执行。
-- primitive、平面图形、空间曲线、loft、布尔运算、圆角、倒角、棱柱、圆台和螺纹由 OCCT B-Rep 计算；几何关系的位姿由 OndselSolver 求解。
+- primitive、平面图形、空间曲线、loft、布尔运算、圆角、倒角、抽壳、棱柱、圆台和螺纹由 OCCT B-Rep 计算；方向 bound 关系使用线性平移求解，旋转由源码显式表达。
 - Worker 将 B-Rep 三角化为 surface、法线和拓扑边线供 Three.js 渲染。
-- 几何模型的 vertex、edge 和 surface 使用模型内稳定的数字 ID；派生操作保留可一一追踪的旧 ID，新元素递增分配且不复用已消失的 ID。
+- 几何模型的 vertex、edge 和 surface 分别使用模型内的数字 ID 或来源路径；改变拓扑的操作给一一对应的继承元素添加输入序号，新增或归属不唯一的元素在当前结果中从 1 编号。
 - circle、ellipse、rectangle、regularPolygon 平面图形和 line、arc、bezier、spline
   曲线都是可独立渲染、选择和 `relate()` 的一等模型值；平面图形局部位于 XZ 面，法向为 +Y。
 - `loft(sections)` 构造普通多截面放样，`loft(sections, {spine})` 使用曲线作为真实 sweep spine；section 和 spine 都保留为源码运行时上下文。
-- `.surface(id)`、`.edge(id)` 和 `.vertex(id)` 分别提供带中心/法向、中点/切向和位置的完整关系锚点；对应的 `.surfaces(ids)`、`.edges(ids)` 和 `.vertices(ids)` 返回引用数组，省略数组时返回全部引用，并共享 viewport 单选或多选交互。
+- `.surface(id)`、`.edge(id)` 和 `.vertex(id)` 提供保留来源几何及 ID 的面、边、顶点引用，可继续按维度查询子拓扑，也可将所选有限几何作为 bound 定位的源。对应的复数方法返回引用数组，省略数组时返回全部引用，并共享 viewport 单选或多选交互。
 - 用户手写 `fillet(radius)`、`fillet(radius, edgeIds)` 或对应的 `chamfer`
   调用后，光标进入整个参数区域即可开启 viewport 选边；viewport 以已应用的操作结果
   为主体，同时在原位置保留可 hover、可 toggle 的输入边。边和参数修改会立即写回源码并
@@ -44,8 +44,9 @@
 - Monaco 使用 Prettier 格式化模型源码；GUI 写回后自动格式化，也可使用 `Shift+Alt+F`。
 - 选中对象后可用平移 gizmo 直接调整能唯一追溯的位置参数。
 - 相对位置由语义不可变的 `relate()` copy 携带，并在组合或渲染边界求解。
-- `relate()` 可返回多个点、线、平面或完整 frame 条件，由 OndselSolver WASM 联合
-  求解；几何条件优先，中心及朝向偏好选择剩余自由度。显式 offset 增加位置条件。
+- `relate()` 可返回多个方向 bound 接触条件，联合求解平移。单个接触保留切向位置；
+  显式 offset 在目标参考系固定匹配边界中心。旋转使用 pivot/pivotVertex/around 与
+  rotate 链表达，接受摆放的 self 由 relate 确定，与 on 的左右书写方向无关。
 - 几何模型支持 `origin`、`originOffset`、`originVertex`、`originCenter` 与 `rotate`；原点设置不移动几何，旋转按局部固定 X/Y/Z 轴顺序使用角度制。`originCenter()` 取主体包围盒中心随模型变换后的 `.center` 锚点。原点坐标和偏移提供平移手柄，顶点原点复用拾取，中心及顶点原点拖动会生成偏移，旋转提供与角度参数对应的环形手柄。
 - 平移工具优先修改唯一安全的上游位置参数，否则在最外层 offset 的参数表达式上
   加减并合并增量，保留原表达式；缺少可逐轴编辑的 offset 时追加一次并在后续拖动中复用。
@@ -79,7 +80,7 @@ const post = cylinder(4.5, 25).relate(part =>
 ```ts
 const allRounded = box(38, 6, 26).fillet(2);
 const rounded = box(38, 6, 26).fillet(2, [1, 5, 9]);
-const finished = rounded.chamfer(0.5, [13]);
+const finished = rounded.chamfer(0.5, [[1, 10]]);
 ```
 
 已有数组会在 viewport 中预先选中并可继续 toggle；`Use all edges` 删除第二参数并
@@ -96,8 +97,11 @@ const finished = rounded.chamfer(0.5, [13]);
 已成功求值的输入模型为主体，并过滤已经不存在的边 ID，使该调用自己的边和尺寸参数也
 可以直接修复。
 
-这些数字是随模型派生传递的拓扑 ID，而不是当前边数组的下标或 OCCT hash。
-相同源码、参数和内核版本会确定性地产生相同 ID；被删除边的 ID 不会在后续步骤中复用。
+拓扑 ID 是数字或扁平来源路径，不是当前边数组的下标或 OCCT hash。
+改变拓扑的操作给一一对应的元素添加从 1 开始的输入序号：E3 经 fillet 后为 E[1,3]，
+再经 chamfer 后为 E[1,1,3]。新增、分裂或合并后无法唯一对应的元素在每次结果中
+从 1 独立编号；删除的来源路径退休。变换和引用保留完整 ID。相同源码、参数和内核
+版本确定性地产生相同 ID，后续操作须使用其自身输入模型的命名空间。
 
 关系只求平移；用独立 pivot/rotate 链构造弯曲放样：
 
@@ -189,8 +193,9 @@ npm run lint-prettier
   完整规则见 [工具参数默认值](TOOLING.md#当前接入的工具)。
 - 源码编辑影响共享调用或变量的全部求值实例，不是只针对当前点中的 occurrence 创建覆盖值。
 - 数值和单个 topology ID 已能通过 panel 写回；曲线控制点数组仍只通过代码编辑。
-- 约束求解是局部非线性求解，失败不构成全局无解证明。线和面约束使用参考直线及
-  平面，不要求有限边界吻合；曲线和曲面的拓扑锚点使用采样的切线及法向参考。
+- `on` 使用线性平移求解，将模型或所选有限几何贴靠方向 bound；多个位置条件共同
+  求解，冲突时报错，自由方向保留确定的最小位移选择。旋转必须通过显式旋转链表达；
+  无限参考线和平面不能作为有限源，普通点、线、面和模型不能直接作为目标。
 - Worker 防止用户代码锁死 UI，但不是安全沙箱。
 - 当前精简 OCCT WASM 约 23 MB，gzip 约 7.3 MB。
 - 本地目录模式依赖支持 File System Access API 的浏览器和安全上下文；不支持时仍可
