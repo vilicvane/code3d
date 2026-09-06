@@ -49,6 +49,7 @@ import {
 } from './model/operation-decorations';
 import {
   elementSourceDecoration,
+  boundRelationSourceDecoration,
   namedElementDecorations,
 } from './model/element-decorations';
 import type {
@@ -366,6 +367,7 @@ const viewport = new ModelViewport(viewportHost, {
     booleanOperationSourceDecoration,
     edgeModificationSourceDecoration,
     elementSourceDecoration,
+    boundRelationSourceDecoration,
     originSourceDecoration,
   ],
 });
@@ -2201,6 +2203,7 @@ function positionIntent(
     occurrenceKeys: binding.occurrenceKeys,
     delta,
     frameQuaternion: binding.frame.quaternion,
+    direction: binding.sensitivity as 1 | -1,
   };
 }
 

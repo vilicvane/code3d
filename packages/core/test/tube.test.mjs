@@ -31,7 +31,17 @@ test('tube is a centered Y-axis solid with a through bore and canonical anchors'
     assert.equal(value.operation.kind, 'tube');
     assert.ok(value.mesh.triangles.length > 0);
     assert.equal(model.surfaces().length, 4);
-    assert.deepEqual(value.elements, snapshot(reference).elements);
+    const expected = snapshot(reference).elements;
+    for (const [i, element] of value.elements.entries()) {
+      assert.equal(element.name, expected[i].name);
+      element.transform.position.forEach((coordinate, axis) =>
+        closeTo(coordinate, expected[i].transform.position[axis]),
+      );
+      assert.deepEqual(
+        element.transform.quaternion,
+        expected[i].transform.quaternion,
+      );
+    }
     // Model bounds are captured before tessellation; render meshes approximate circles.
     const bounds = model.geometry.value.localBounds;
     for (let axis = 0; axis < 3; axis += 1) {

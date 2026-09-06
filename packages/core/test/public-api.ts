@@ -57,9 +57,9 @@ import type {Shape3D as RootShape3D} from '@code3d/core';
 import type {ModelObject as InternalModelObject} from '@code3d/core/bld/library/runtime.js';
 
 const solid = box(10, 5, 8);
-const related = solid.relate(self => self.center.on(solid.top).flip());
-const exposed = related.expose({mount: related.bottom});
-const constraint: Constraint = exposed.mount.on(solid.center).offset(1, 2, 3);
+const related = solid.relate(self => self.center.on(solid.up.flip()));
+const exposed = related.expose({mount: related.down});
+const constraint: Constraint = exposed.mount.on(solid.up).offset(1, 2, 3);
 const anchor: Anchor = exposed.mount;
 const vertex: Vertex = solid.vertex(1);
 const edge: Edge = solid.edge(1);
@@ -113,7 +113,7 @@ const groupModel: GroupModel = group([
 ]);
 const pointAnchor: PointAnchor = solid.center;
 const lineAnchor: LineAnchor = solid.axis;
-const faceAnchor: FaceAnchor = solid.top;
+const faceAnchor: FaceAnchor = solid.up;
 // @ts-expect-error Plain anchors do not have topology IDs.
 faceAnchor.id;
 // @ts-expect-error Plain anchors do not expose a public discriminator.
@@ -153,8 +153,8 @@ solid.vertices();
 solid.edges();
 solid.surfaces();
 solid
-  .expose({mount: solid.bottom})
-  .relate(self => self.mount.on(solid.top))
+  .expose({mount: solid.down})
+  .relate(self => self.mount.on(solid.up))
   .fillet(1, [edgeId]);
 faceModel
   .originCenter()
@@ -162,8 +162,8 @@ faceModel
   .originOffset(0, 2, 0)
   .rotate(90, 0, 0)
   .scaled(2)
-  .relate(self => self.plane.on(solid.top))
-  .expose({mount: solid.bottom})
+  .relate(self => self.on(solid.up))
+  .expose({mount: solid.down})
   .surface(1);
 faceModel.vertex(1);
 faceModel.edge(1);
@@ -173,7 +173,7 @@ edgeModel
   .origin(0, 0, 0)
   .rotate(0, 0, 90)
   .scaled(2)
-  .relate(self => self.start.on(solid.center))
+  .relate(self => self.start.on(solid.up))
   .expose({mount: solid.axis})
   .edge(1);
 edgeModel.vertex(1);
@@ -183,21 +183,32 @@ vertexModel
   .origin(0, 0, 0)
   .rotate(0, 90, 0)
   .scaled(2)
-  .relate(self => self.on(solid.center))
+  .relate(self => self.on(solid.up))
   .expose({mount: solid.center})
   .vertex(1);
 vertexModel.vertices();
 groupModel
   .paint('#fff')
-  .relate(self => self.on(solid.center))
-  .expose({mount: solid.top})
-  .relate(self => self.mount.on(solid.bottom));
+  .relate(self => self.on(solid.up))
+  .expose({mount: solid.up})
+  .relate(self => self.mount.on(solid.down));
 union([solid, exposed]);
 cut(solid, [exposed]);
 intersect([solid, exposed]);
-loft([faceModel, faceModel.relate(self => self.plane.on(solid.bottom))], {
+loft([faceModel, faceModel.relate(self => self.on(solid.down))], {
   spine: edgeModel,
 });
+constraint.pivot(1, 2, 3).rotate(0, 45, 0);
+constraint.pivotVertex(1).rotate(0, 0, 90);
+constraint.around(solid.axis).rotate(45);
+constraint.rotate(0, 45, 90);
+// @ts-expect-error on only accepts directional bounds.
+solid.on(solid.center);
+// @ts-expect-error on does not accept a whole target model.
+solid.on(solid);
+// @ts-expect-error unfinished pivot selection is not a Constraint.
+solid.relate(self => self.on(solid.up).pivot(1, 2, 3));
+// @ts-expect-error Constraint no longer has flip.
 constraint.flip();
 
 void [
@@ -343,8 +354,8 @@ rebound.component.body.surface(1).center;
 geometricMembers.body.surface(1).edge(1).vertex(1).center;
 geometricMembers.mount.edges();
 geometricMembers.rim.midpoint;
-geometricMembers.body.top.on(solid.bottom);
-geometricMembers.relate(self => self.mount.center.on(solid.center));
+geometricMembers.body.on(solid.down);
+geometricMembers.relate(self => self.mount.center.on(solid.up));
 // @ts-expect-error Exposed geometry is a topology reference, not a mutable member model.
 geometricMembers.body.fillet(1);
 // @ts-expect-error Topology references do not expose model transforms.
@@ -352,5 +363,5 @@ geometricMembers.path.rotate(0, 90, 0);
 // @ts-expect-error Vertices do not contain edges.
 geometricMembers.location.edge(1);
 // @ts-expect-error An ordinary plane anchor has no topological boundary.
-solid.top.edges();
+solid.up.edges();
 void [exposedSolid, exposedSurface, exposedEdge, exposedVertex];

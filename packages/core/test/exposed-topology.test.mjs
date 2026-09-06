@@ -93,7 +93,7 @@ test('geometry models expose queryable topology without model operations', () =>
     assert.equal(assembly.profile.edges().length, 1);
     near(position(assembly.path.start), [1, 2, 3]);
     near(position(assembly.path.end), [4, 6, 8]);
-    assert.equal(modelElementReference(assembly.body.top).model, assembly);
+    assert.equal(modelElementReference(assembly.body.up).model, assembly);
   } finally {
     disposeModelObjects([...models, assembly]);
   }
@@ -103,13 +103,17 @@ test('nested exposure and chained constraints move the containing assembly', () 
   const body = box(10, 20, 30);
   const inner = group([body]).expose({body});
   const target = point([40, 50, 60]);
-  const moved = inner.relate(self => self.body.center.on(target));
+  const moved = inner.relate(self =>
+    self.body.center.on(target.up).offset(0, 0, 0),
+  );
   const outer = group([moved]).expose({
     mount: moved.body.surface(1),
     component: moved,
   });
   const anchor = point([10, 0, 0]);
-  const placed = outer.relate(self => self.mount.center.on(anchor));
+  const placed = outer.relate(self =>
+    self.mount.center.on(anchor.up).offset(0, 0, 0),
+  );
   try {
     near(position(outer.mount.center), [35, 50, 60]);
     near(position(outer.component.body.center), [40, 50, 60]);
@@ -130,8 +134,12 @@ test('the same geometry retains independent placement in two exposed occurrences
   const part = group([body]).expose({body});
   const leftTarget = point([-20, 0, 0]);
   const rightTarget = point([20, 0, 0]);
-  const left = part.relate(self => self.body.center.on(leftTarget));
-  const right = part.relate(self => self.body.center.on(rightTarget));
+  const left = part.relate(self =>
+    self.body.center.on(leftTarget.up).offset(0, 0, 0),
+  );
+  const right = part.relate(self =>
+    self.body.center.on(rightTarget.up).offset(0, 0, 0),
+  );
   const assembly = group([left, right]).expose({
     leftBody: left.body,
     rightBody: right.body,

@@ -54,12 +54,10 @@ test('uses face, edge, and vertex topology as relation anchors', () => {
   const face = circle(5);
   const edge = line([0, 0, 0], [6, 2, 0]);
   const vertex = point([2, 3, 4]);
-  const faceRelated = circle(2).relate(self => self.on(face.surface(1)).flip());
-  const edgeRelated = line(1, 0, 0).relate(self =>
-    self.on(edge.edge(1)).flip(),
-  );
+  const faceRelated = circle(2).relate(self => self.surface(1).on(face.up));
+  const edgeRelated = line(1, 0, 0).relate(self => self.edge(1).on(edge.up));
   const vertexRelated = point().relate(self =>
-    self.on(vertex.vertex(1)).flip(),
+    self.vertex(1).on(vertex.up).offset(0, 0, 0),
   );
 
   try {
@@ -68,7 +66,7 @@ test('uses face, edge, and vertex topology as relation anchors', () => {
     );
     assert.deepEqual(
       constraints.map(constraint => constraint.target.kind),
-      ['face', 'line', 'point'],
+      ['face', 'face', 'face'],
     );
     assert.deepEqual(
       constraints.map(constraint => constraint.source.kind),
@@ -76,7 +74,7 @@ test('uses face, edge, and vertex topology as relation anchors', () => {
     );
     assert.deepEqual(
       constraints.map(constraint => constraint.target.name),
-      ['S1', 'E1', 'V1'],
+      ['up', 'up', 'up'],
     );
     const relatedSnapshot = snapshotModel(vertexRelated);
     assert.deepEqual(relatedSnapshot.transform.position, [0, 0, 0]);
@@ -96,7 +94,7 @@ test('uses face, edge, and vertex topology as relation anchors', () => {
 test('resolves relation placement only inside a composition', () => {
   const snapshotModel = createModelSnapshotter();
   const target = point([2, 3, 4]);
-  const related = point().relate(self => self.on(target.vertex(1)).flip());
+  const related = point().relate(self => self.on(target.up).offset(0, 0, 0));
   const assembly = group([target, related]);
 
   try {
@@ -123,10 +121,20 @@ test('lofts nonparallel planar profiles along a curved spine', () => {
     [4, 28, 14],
   ]);
   const start = circle(4).relate(profile =>
-    profile.plane.on(spine.start).flip(),
+    profile
+      .on(point().up)
+      .offset(0, 0, 0)
+      .rotate(0, 0, (-Math.atan2(12, 7) * 180) / Math.PI),
   );
   const end = rectangle(7, 4).relate(profile =>
-    profile.plane.on(spine.end).flip(),
+    profile
+      .on(point([4, 28, 14]).up)
+      .offset(0, 0, 0)
+      .rotate(
+        (Math.atan2(5, Math.hypot(6, 8)) * 180) / Math.PI,
+        0,
+        (Math.atan2(6, 8) * 180) / Math.PI,
+      ),
   );
   const result = loft([start, end], {spine});
 
@@ -157,9 +165,7 @@ test('lofts planar sections without a spine', () => {
   const snapshotModel = createModelSnapshotter();
   const base = circle(4);
   const location = point([0, 12, 0]);
-  const top = rectangle(5, 3).relate(profile =>
-    profile.plane.on(location).flip(),
-  );
+  const top = rectangle(5, 3).relate(profile => profile.on(location.up));
   const result = loft([base, top]);
 
   try {

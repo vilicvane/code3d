@@ -80,7 +80,7 @@ test('a primitive owns its returned solid and supplies normal model capabilities
     assert.equal(snapshot.kind, 'solid');
     assert.equal(snapshot.operation.kind, 'primitive');
     assert.ok(snapshot.mesh.triangles.length > 0);
-    assert.ok(model.top);
+    assert.ok(model.up);
     assert.ok(model.axis);
   } finally {
     disposeModelObjects([model]);

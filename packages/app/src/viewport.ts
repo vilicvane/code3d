@@ -1361,6 +1361,10 @@ export class ModelViewport {
         this.transformGizmo.attach(occurrence.object, bindings);
         return;
       }
+      if (scope.evaluation.constraintSpatial) {
+        this.transformGizmo.detach();
+        return;
+      }
     }
     if (
       this.topologySelection ||
@@ -1463,9 +1467,9 @@ export class ModelViewport {
       const worldOffset = new THREE.Vector3(...localOffset).applyQuaternion(
         frame,
       );
-      offset[0] += worldOffset.x;
-      offset[1] += worldOffset.y;
-      offset[2] += worldOffset.z;
+      offset[0] += worldOffset.x * constraint.offsetDirection;
+      offset[1] += worldOffset.y * constraint.offsetDirection;
+      offset[2] += worldOffset.z * constraint.offsetDirection;
     }
     return offset;
   }
@@ -1943,7 +1947,7 @@ export function positionBindings(
       target,
       label: target.label,
       value: target.value,
-      sensitivity,
+      sensitivity: sensitivity * constraint.offsetDirection,
       parameterKind: target.kind,
       frame: constraint.offsetFrame,
     };
@@ -1977,7 +1981,7 @@ export function positionBindings(
         axis,
         label: `Δ${axis.toUpperCase()}`,
         value: 0,
-        sensitivity: 1,
+        sensitivity: constraint.offsetDirection,
         parameterKind: 'length',
         step: 0.5,
         frame: constraint.offsetFrame,
@@ -2058,8 +2062,8 @@ function sourceOperationRole(
   if (module.toolNodeIds.has(nodeId)) return 'tool';
   const input = evaluation.operationInput;
   if (!input) return undefined;
-  const sourceNodeIds = evaluation.constraintSourceNodeId
-    ? [evaluation.constraintSourceNodeId]
+  const sourceNodeIds = evaluation.constraintOwnerNodeId
+    ? [evaluation.constraintOwnerNodeId]
     : evaluation.nodeIds;
   return sourceNodeIds.includes(nodeId) ? input.role : undefined;
 }
@@ -2342,7 +2346,12 @@ function createAnchorDecorationObject(
     container.add(
       anchorRing(markerSize * 0.14, appearance),
       anchorOriginPoint(appearance),
-      anchorArrow(new THREE.Vector3(0, 1, 0), markerSize, markerSize, color),
+      anchorArrow(
+        new THREE.Vector3(0, decoration.facing ?? 1, 0),
+        markerSize,
+        markerSize,
+        color,
+      ),
     );
   } else {
     container.add(

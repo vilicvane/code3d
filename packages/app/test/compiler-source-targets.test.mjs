@@ -111,7 +111,7 @@ export default hollow;`;
 test('exposed topology retains its geometry, placement and child selection scope', async () => {
   const source = `import {box, group, point} from '@code3d/core';
 const part = box(10, 20, 30);
-const shifted = group([part]).expose({body: part}).relate(self => self.body.center.on(point([40, 50, 60])));
+const shifted = group([part]).expose({body: part}).relate(self => self.body.center.on(point([40, 50, 60]).up).offset(0, 0, 0));
 const assembly = group([shifted]).expose({mount: shifted.body.surface(1), body: shifted.body});
 const outline = assembly.mount.edges();
 const ends = assembly.mount.edge(1).vertices();
@@ -227,7 +227,7 @@ test('a caret on range previews one map result with resolved collection placemen
       "import range from 'just-range';",
       "import {box, group} from '@code3d/core';",
       'const base = box(44, 2, 10);',
-      `const bars = range(${count}).map(i => box(4, 4 + i * 3, 4).relate(part => part.bottom.on(base.top).offset((i - 2) * 8, 0, 0)));`,
+      `const bars = range(${count}).map(i => box(4, 4 + i * 3, 4).relate(part => part.down.on(base.up).offset((i - 2) * 8, 0, 0)));`,
       'const first = bars[0];',
       'const singleton = [first];',
       'const set = new Set(bars);',
@@ -284,9 +284,9 @@ test('position bindings preserve inline expressions and prioritize safe upstream
     'const base = box(44, 2, 10);',
     'const spacing = 8;',
     'const bars = [1, 2].flatMap(i => [',
-    '  box(4, 4, 4).relate(p => p.bottom.on(base.top).offset(i * 8, 0, 0)),',
-    '  box(4, 4, 4).relate(p => p.bottom.on(base.top).offset(i * spacing, 0, 0)),',
-    '  box(4, 4, 4).relate(p => p.bottom.on(base.top).offset(i * spacing, 0, 0).offset(2, 0, 0)),',
+    '  box(4, 4, 4).relate(p => p.down.on(base.up).offset(i * 8, 0, 0)),',
+    '  box(4, 4, 4).relate(p => p.down.on(base.up).offset(i * spacing, 0, 0)),',
+    '  box(4, 4, 4).relate(p => p.down.on(base.up).offset(i * spacing, 0, 0).offset(2, 0, 0)),',
     ']);',
     'export default group([base, ...bars]);',
   ].join('\n');
@@ -329,9 +329,9 @@ test('editing a plate fillet does not rebuild an unchanged screw across compiles
       'import {box, cut, group} from "@code3d/core";',
       'import {ISO4762} from "@code3d/screws";',
       `let plate = box(40, 10, 40).fillet(${radius}, [2, 3, 4, 6, 7, 8, 11, 12]).chamfer(1.2, [10]);`,
-      'const hole = ISO4762.clearanceHole("M6", 10).relate(tool => tool.shaftBottom.on(plate.bottom).flip());',
+      'const hole = ISO4762.clearanceHole("M6", 10).relate(tool => tool.shaftBottom.on(plate.down.flip()));',
       'plate = cut(plate, [hole]).paint("#666");',
-      'const screw = ISO4762.screw("M6", 18).paint("#999").relate(part => part.headBottom.on(hole.counterboreBottom).flip().offset(0, -0.5, 0));',
+      'const screw = ISO4762.screw("M6", 18).paint("#999").relate(part => part.headBottom.on(hole.counterboreBottom.flip()).offset(0, -0.5, 0));',
       'export default group([plate, screw], "M6 fastener demo");',
     ].join('\n');
   let buildCount;
@@ -363,7 +363,7 @@ test('retains topology values at bindings, aliases, and collection results', asy
   const source = [
     'import {box, rectangle} from "@code3d/core";',
     'const plate = box(50, 4, 30);',
-    'let screwPoints = rectangle(40, 20).relate(plane => plane.on(plate.top)).vertices();',
+    'let screwPoints = rectangle(40, 20).relate(plane => plane.on(plate.up)).vertices();',
     'const alias = screwPoints;',
     'const subset = [screwPoints[0], screwPoints[2]];',
     'const repeated = [plate, plate];',
@@ -464,8 +464,8 @@ for (const compose of [true, false]) {
     const source = `import {box, circle, loft, rectangle} from '@code3d/core';
       const model = (() => {
         const ref = box(100, 100, 100);
-        const start = circle(20).relate(circle => circle.on(ref.surface(4)));
-        const end = rectangle(40, 40).relate(circle => circle.on(ref.surface(6)));
+        const start = circle(20).relate(circle => circle.on(ref.down));
+        const end = rectangle(40, 40).relate(circle => circle.on(ref.up));
         ${compose ? 'return loft([start, end]);' : ''}
       })();`;
     const module = await compileProject(
@@ -473,14 +473,14 @@ for (const compose of [true, false]) {
       '/model.ts',
     );
     assert.equal(module.diagnostic, undefined);
-    for (const id of [4, 6]) {
-      const callback = `circle => circle.on(ref.surface(${id}))`;
+    for (const id of ['down', 'up']) {
+      const callback = `circle => circle.on(ref.${id})`;
       const callbackStart = source.indexOf(callback);
       const relation = module.sourceTargets.find(
         target =>
           target.kind === 'constraint' &&
           source.slice(target.sourceRef.start, target.sourceRef.end) ===
-            `circle.on(ref.surface(${id}))`,
+            `circle.on(ref.${id})`,
       ).evaluations[0];
       for (const offset of [
         callbackStart + 3,
@@ -496,7 +496,7 @@ for (const compose of [true, false]) {
         const evaluation = target.evaluations[0];
         assert.deepEqual(evaluation.nodeIds, relation.nodeIds);
         assert.deepEqual(evaluation.focusNodeIds, [
-          relation.constraintSourceNodeId,
+          relation.constraintOwnerNodeId,
         ]);
         assert.equal(evaluation.constraintId, relation.constraintId);
         assert.equal(sourceTargetPlacement(evaluation), 'composition');
@@ -509,7 +509,7 @@ for (const compose of [true, false]) {
           ).contextTargetIds,
         );
       }
-      const focused = module.objects.get(relation.constraintSourceNodeId);
+      const focused = module.objects.get(relation.constraintOwnerNodeId);
       assert.ok(
         focused.compositionTransform.position.some(
           value => Math.abs(value) > 49,
@@ -521,11 +521,11 @@ for (const compose of [true, false]) {
 }
 
 for (const [kind, sourceAnchor, targetAnchor] of [
-  ['model', 'self', 'base'],
-  ['edge', 'self.edge(id)', 'base.edge(1)'],
-  ['surface', 'self.surface(id)', 'base.surface(1)'],
-  ['vertex', 'self.vertex(id)', 'base.vertex(1)'],
-  ['named', 'self.top', 'base.bottom'],
+  ['model', 'self', 'base.up'],
+  ['edge', 'self.edge(id)', 'base.left'],
+  ['surface', 'self.surface(id)', 'base.up'],
+  ['vertex', 'self.vertex(id)', 'base.up'],
+  ['named', 'self.up', 'base.down'],
 ]) {
   test(`${kind} anchors share relation context across runtime calls and downstream consumers`, async () => {
     const source = `import {box, group} from '@code3d/core';
@@ -565,16 +565,18 @@ for (const [kind, sourceAnchor, targetAnchor] of [
       );
       assert.equal(
         target.kind,
-        kind === 'model'
-          ? 'value'
-          : kind === 'named'
-            ? 'element'
-            : 'topology-selection',
+        !isSource
+          ? 'element'
+          : kind === 'model'
+            ? 'value'
+            : kind === 'named'
+              ? 'element'
+              : 'topology-selection',
       );
       assert.equal(target.evaluations.length, 4);
       assert.equal(new Set(target.evaluations.map(e => e.contextId)).size, 1);
       assert.equal(
-        new Set(target.evaluations.map(e => e.constraintSourceNodeId)).size,
+        new Set(target.evaluations.map(e => e.constraintOwnerNodeId)).size,
         2,
       );
       for (const evaluation of target.evaluations) {
@@ -589,13 +591,13 @@ for (const [kind, sourceAnchor, targetAnchor] of [
         assert.deepEqual(evaluation.operationInput, constraint.operationInput);
         assert.deepEqual(evaluation.runtime, constraint.runtime);
         const owner = isSource
-          ? constraint.constraintSourceNodeId
+          ? constraint.constraintOwnerNodeId
           : constraint.nodeIds.find(
-              nodeId => nodeId !== constraint.constraintSourceNodeId,
+              nodeId => nodeId !== constraint.constraintOwnerNodeId,
             );
         assert.deepEqual(evaluation.focusNodeIds, [owner]);
         assert.equal(sourceTargetPlacement(evaluation), 'composition');
-        if (kind !== 'named' && kind !== 'model') {
+        if (isSource && kind !== 'named' && kind !== 'model') {
           assert.equal(evaluation.selection.kind, kind);
           assert.equal(evaluation.selection.inputNodeId, owner);
           assert.deepEqual(evaluation.selection.ids, [
@@ -627,8 +629,8 @@ test('anchor context is limited to the enclosing relation in a constraint array'
     const base = box(10, 10, 10);
     const alone = base.edge(2);
     const part = box(20, 20, 20).relate(self => [
-      self.edge(3).on(base.edge(1)),
-      self.top.on(base.bottom),
+      self.edge(3).on(base.left),
+      self.up.on(base.down),
     ]);
     export default group([base, part]);`;
   const module = await compileProject(
@@ -643,16 +645,10 @@ test('anchor context is limited to the enclosing relation in a constraint array'
       source.indexOf(text) + text.length - 1,
     );
   const edge = at('self.edge(3)').evaluations[0];
-  const face = at('self.top').evaluations[0];
+  const face = at('self.up').evaluations[0];
   assert.notEqual(edge.constraintId, face.constraintId);
-  assert.equal(
-    edge.constraintId,
-    at('base.edge(1)').evaluations[0].constraintId,
-  );
-  assert.equal(
-    face.constraintId,
-    at('base.bottom').evaluations[0].constraintId,
-  );
+  assert.equal(edge.constraintId, at('base.left').evaluations[0].constraintId);
+  assert.equal(face.constraintId, at('base.down').evaluations[0].constraintId);
   const alone = at('base.edge(2)').evaluations[0];
   assert.equal(alone.nodeIds.length, 1);
   assert.equal(alone.constraintId, undefined);
@@ -871,8 +867,8 @@ test('derives composition roles for imported aliases, namespace calls, and neste
     'import * as core from "@code3d/core";',
     'import {loft as skin, group as assemble} from "@code3d/core";',
     'const spine = core.bezier([[0, 0, 0], [12, 7, 0], [10, 20, 9], [4, 28, 14]]);',
-    'const start = core.circle(4).relate(p => p.plane.on(spine.start).flip());',
-    'const end = core.rectangle(7, 4).relate(p => p.plane.on(spine.end).flip());',
+    'const start = core.circle(4).relate(p => p.on(core.point().up).offset(0, 0, 0).rotate(0, 0, -Math.atan2(12, 7) * 180 / Math.PI));',
+    'const end = core.rectangle(7, 4).relate(p => p.on(core.point([4, 28, 14]).up).offset(0, 0, 0).rotate(Math.atan2(5, 10) * 180 / Math.PI, 0, Math.atan2(6, 8) * 180 / Math.PI));',
     'const body = skin([...[start], end], {spine});',
     'const sections = [start, end];',
     'const options = {spine};',
@@ -1178,7 +1174,7 @@ test('the shared combined-constraints guide retains both inspectable relations',
   const module = await compileProject({files: [file]}, rootPath);
   assert.equal(module.diagnostic, undefined);
   assert.ok(module.exports.has('default'));
-  const relations = ['self.edge(3)', 'self.top'].map(text => {
+  const relations = ['first.right', 'first.down'].map(text => {
     const target = ModelViewport.prototype.sourceTargetAt.call(
       {module},
       rootPath,
@@ -1358,10 +1354,10 @@ function sharedOffsetSource() {
     'const spacing = 24;',
     'const base = box(12, 4, 12);',
     'const left = box(8, 8, 8).relate(part =>',
-    '  part.center.on(base.center).offset(-spacing, 0, 0),',
+    '  part.center.on(base.up).offset(-spacing, 0, 0),',
     ');',
     'const right = box(8, 8, 8).relate(part =>',
-    '  part.center.on(base.center).offset(spacing, 0, 0),',
+    '  part.center.on(base.up).offset(spacing, 0, 0),',
     ');',
     'export const model = group([base, left, right]);',
   ].join('\n');

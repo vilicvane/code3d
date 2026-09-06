@@ -92,6 +92,7 @@ export type ToolIntent =
       occurrenceKeys: readonly string[];
       delta: Vec3;
       frameQuaternion: Quaternion;
+      direction: 1 | -1;
     }>;
 
 export type SourceTextEdit = Readonly<{
@@ -608,7 +609,12 @@ class OffsetRelationResolver implements ToolIntentResolver {
         preview: {
           kind: 'occurrence-translation',
           occurrenceKeys: intent.occurrenceKeys,
-          delta: rotateVector(intent.delta, intent.frameQuaternion),
+          delta: rotateVector(
+            intent.delta.map(
+              value => value * intent.direction,
+            ) as unknown as Vec3,
+            intent.frameQuaternion,
+          ),
         },
       },
     };

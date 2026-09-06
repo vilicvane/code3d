@@ -23,7 +23,14 @@ test(
     // Capture the running viewport through its public selection entry point.
     // All source edits and picks below go through the real App event handlers.
     await page.evaluate(async () => {
-      const {ModelViewport} = await import('/src/viewport.ts');
+      // Vite may have added an HMR timestamp to the App's module URL.
+      const viewportUrl = performance
+        .getEntriesByType('resource')
+        .find(
+          entry => new URL(entry.name).pathname === '/src/viewport.ts',
+        )?.name;
+      if (!viewportUrl) throw new Error('The App has not loaded its viewport.');
+      const {ModelViewport} = await import(viewportUrl);
       const begin = ModelViewport.prototype.beginTopologySelection;
       ModelViewport.prototype.beginTopologySelection = function (...args) {
         window.shellViewport = this;

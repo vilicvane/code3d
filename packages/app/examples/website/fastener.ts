@@ -9,7 +9,7 @@ let plate = box(40, 10, 40)
   .chamfer(1, [10]);
 
 const hole = ISO4762.clearanceHole('M6', 10).relate(tool =>
-  tool.shaftBottom.on(plate.bottom).flip(),
+  tool.shaftBottom.on(plate.down.flip()),
 );
 
 plate = cut(plate, [hole]).paint(gray);
@@ -17,7 +17,7 @@ plate = cut(plate, [hole]).paint(gray);
 const screw = ISO4762.screw('M6', 18)
   .paint(metal)
   .relate(part =>
-    part.headBottom.on(hole.counterboreBottom).flip().offset(0, -10, 0),
+    part.headBottom.on(hole.counterboreBottom.flip()).offset(0, -10, 0),
   );
 
 export default group([plate, screw], 'M6 fastener demo');

@@ -68,9 +68,7 @@ import {box, group} from '@code3d/core';
 
 const base = box(50, 4, 16);
 const posts = range(3).map(index =>
-  box(6, 10, 6).relate(part =>
-    part.bottom.on(base.top).offset((index - 1) * 16, 0, 0),
-  ),
+  box(6, 10, 6).relate(part => part.on(base.up).offset((index - 1) * 16, 0, 0)),
 );
 
 group([base, ...posts]);

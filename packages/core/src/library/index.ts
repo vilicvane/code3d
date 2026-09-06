@@ -24,6 +24,10 @@ export {
 
 export type {
   Anchor,
+  Bound,
+  DirectionalBounds,
+  ConstraintPivotChain,
+  ConstraintAroundChain,
   CanonicalElements,
   Constraint,
   CurveElements,

@@ -122,7 +122,7 @@ test('project runtime retains export geometry and preserves STEP placements, nam
   const compiler = await createTestProjectCompiler(server);
   const source = `import {box, group} from '@code3d/core';
 const base = box(10, 20, 30).paint('#123456');
-const top = box(2, 4, 6).relate(self => self.bottom.on(base.top));
+const top = box(2, 4, 6).relate(self => self.down.on(base.up));
 export default group([base, top], 'Assembly');`;
   try {
     const module = await compiler.compile(
@@ -165,7 +165,7 @@ test('project compilation carries recursive group colors into exported materials
   const compiler = await createTestProjectCompiler(server);
   const source = `import {box, group} from '@code3d/core';
 const base = box(10, 4, 10).paint('#ff0000');
-const top = box(2, 2, 2).relate(self => self.bottom.on(base.top));
+const top = box(2, 2, 2).relate(self => self.down.on(base.up));
 export default group([base, group([top]).paint('#00ff00')]).paint('#345678');`;
   try {
     const module = await compiler.compile(

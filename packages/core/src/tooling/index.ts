@@ -6,11 +6,13 @@ export {
   authoringApi,
   beginModelEvaluation,
   constraintTraceReference,
+  constraintSpatialReference,
   createModelSnapshotter,
   disposeModelObjects,
   instrumentConstraint,
   instrumentModelOperation,
   isConstraint,
+  isConstraintExpression,
   isModelObject,
   modelElementReference,
   modelObjectRuntimeInfo,
@@ -21,6 +23,8 @@ export {
 } from '../library/runtime.js';
 export type {
   Constraint,
+  ConstraintExpression,
+  ConstraintSpatialReference,
   ConstraintAnchorSnapshot,
   ConstraintSnapshot,
   ConstraintTraceReference,
@@ -67,8 +71,6 @@ export type {
   VertexId,
 } from '../library/topology.js';
 export {describeOpenCascadeException} from '../library/open-cascade-error.js';
-
-export {installConstraintSolver} from '../library/constraint-solver.js';
 
 export function installOpenCascade(openCascade: OpenCascadeInstance): void {
   clearKernelOperationCache();

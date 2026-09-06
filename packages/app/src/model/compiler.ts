@@ -1,9 +1,11 @@
 import ts from '@typescript/typescript6';
 import {normalizeProjectPath, type ModelProject} from '../project/project';
 import {
-  type Constraint,
+  type ConstraintExpression,
+  type ConstraintSpatialReference,
   type EdgeId,
   type ElementKind,
+  type ElementSnapshot,
   type ModelOperationInputRole,
   type ModelOperationKind,
   type ModelOperationSnapshot,
@@ -52,6 +54,8 @@ type TopologyValueReference = Readonly<{
   ({kind: 'solid'} | {kind: TopologyKind; id: number});
 
 type AnchorValueReference = Readonly<{
+  bound?: ElementSnapshot['bound'];
+  facing?: 1 | -1;
   nodeId: string;
   name: string;
   kind: ElementKind;
@@ -82,7 +86,8 @@ export type SourceTargetEvaluation = Readonly<{
     nodeIds: readonly string[];
   }>;
   constraintId?: string;
-  constraintSourceNodeId?: string;
+  constraintOwnerNodeId?: string;
+  constraintSpatial?: ConstraintSpatialReference;
   contextId: string;
   element?: AnchorValueReference;
   selection?:
@@ -278,6 +283,8 @@ type SourceConstraintTrace = {
       constraintId: string;
       source: ModelObject;
       target: ModelObject;
+      self?: ModelObject;
+      expression: ConstraintExpression;
       contextId: string;
       runtime: RuntimeReach;
     }>
@@ -295,6 +302,8 @@ type SourceElementTrace = {
       kind: ElementKind;
       transform: Transform;
       topology?: TopologyValueReference;
+      bound?: ElementSnapshot['bound'];
+      facing?: 1 | -1;
       contextId: string;
       runtime: RuntimeReach;
     }>
@@ -340,10 +349,11 @@ export function createModelCompiler(
   const {
     beginModelEvaluation,
     constraintTraceReference,
+    constraintSpatialReference,
     createModelSnapshotter,
     instrumentConstraint,
     instrumentModelOperation,
-    isConstraint,
+    isConstraintExpression,
     isModelObject,
     modelElementReference,
     modelObjectRuntimeInfo,
@@ -427,7 +437,7 @@ export function createModelCompiler(
       executionTrace.outcome = 'completed';
       executionTrace.order = nextSourceReachOrder();
       const runtime = sourceExecutionRuntime(executionTrace);
-      if (isConstraint(result)) {
+      if (isConstraintExpression(result)) {
         instrumentConstraint(result, location, parameters);
         recordSourceConstraint(id, location, result, context.id, runtime);
       } else if (isModelObject(result)) {
@@ -507,7 +517,7 @@ export function createModelCompiler(
         throw locateModelError(error, location);
       }
       const runtime = completedRuntimeReach();
-      if (isConstraint(result)) {
+      if (isConstraintExpression(result)) {
         recordSourceConstraint(id, location, result, context.id, runtime);
       } else {
         recordSourceValue(id, 'value', location, result, context.id, runtime);
@@ -651,7 +661,11 @@ export function createModelCompiler(
       if (executionTrace?.siteId === siteId) {
         executionTrace.receiver = value;
         const reference = modelTopologyReference(value);
-        const model = isModelObject(value) ? value : reference?.model;
+        const model = isModelObject(value)
+          ? value
+          : isConstraintExpression(value)
+            ? constraintTraceReference(value).self
+            : reference?.model;
         if (model) tracedObjects.add(model);
       }
       return traceRuntime.input(file, start, end, siteId, id, value);
@@ -823,7 +837,7 @@ export function createModelCompiler(
   function recordSourceConstraint(
     id: string,
     location: SourceRef,
-    constraint: Constraint,
+    constraint: ConstraintExpression,
     contextId: string,
     runtime: RuntimeReach,
   ): void {
@@ -834,7 +848,12 @@ export function createModelCompiler(
       sourceRef: location,
       evaluations: [],
     };
-    trace.evaluations.push({...reference, contextId, runtime});
+    trace.evaluations.push({
+      ...reference,
+      expression: constraint,
+      contextId,
+      runtime,
+    });
     sourceConstraintTraces.set(key, trace);
     tracedObjects.add(reference.source);
     tracedObjects.add(reference.target);
@@ -887,6 +906,10 @@ export function createModelCompiler(
     if (isModelObject(value)) {
       return [value];
     }
+    if (isConstraintExpression(value)) {
+      const self = constraintTraceReference(value).self;
+      return self ? [self] : [];
+    }
     const topology = modelTopologyReference(value);
     if (topology) {
       const nodeId = modelObjectNodeId(topology.model);
@@ -908,6 +931,8 @@ export function createModelCompiler(
         name: anchor.name,
         kind: anchor.kind,
         transform: anchor.transform,
+        bound: anchor.bound,
+        facing: anchor.facing,
       });
       return ownerRecorded ? [] : [anchor.model];
     }
@@ -1680,7 +1705,11 @@ export function createModelCompiler(
             if (execution.siteId !== site.siteId) return [];
             const receiver = execution.receiver;
             const reference = modelTopologyReference(receiver);
-            const owner = isModelObject(receiver) ? receiver : reference?.model;
+            const owner = isModelObject(receiver)
+              ? receiver
+              : isConstraintExpression(receiver)
+                ? constraintTraceReference(receiver).self
+                : reference?.model;
             if (!owner) return [];
             const availableIds = modelTopologyIds(receiver, parameter.kind);
             if (!availableIds) return [];
@@ -1767,7 +1796,7 @@ export function createModelCompiler(
                   sourceLineageContains(
                     operationsByOutputNodeId,
                     modelObjectNodeId(object),
-                    modelObjectNodeId(evaluation.source),
+                    modelObjectNodeId(evaluation.self ?? evaluation.source),
                   ),
                 )
                   ? [{input, role: input.role}]
@@ -1785,8 +1814,16 @@ export function createModelCompiler(
                     role: consumer.role,
                     nodeIds: consumer.input.objects.map(modelObjectNodeId),
                   },
+                  focusNodeIds: [
+                    modelObjectNodeId(evaluation.self ?? evaluation.source),
+                  ],
                   constraintId: evaluation.constraintId,
-                  constraintSourceNodeId: modelObjectNodeId(evaluation.source),
+                  constraintOwnerNodeId: modelObjectNodeId(
+                    evaluation.self ?? evaluation.source,
+                  ),
+                  constraintSpatial: constraintSpatialReference(
+                    evaluation.expression,
+                  ),
                   contextId: evaluation.contextId,
                 }))
               : [
@@ -1798,9 +1835,15 @@ export function createModelCompiler(
                       evaluation.source,
                       evaluation.target,
                     ),
+                    focusNodeIds: [
+                      modelObjectNodeId(evaluation.self ?? evaluation.source),
+                    ],
                     constraintId: evaluation.constraintId,
-                    constraintSourceNodeId: modelObjectNodeId(
-                      evaluation.source,
+                    constraintOwnerNodeId: modelObjectNodeId(
+                      evaluation.self ?? evaluation.source,
+                    ),
+                    constraintSpatial: constraintSpatialReference(
+                      evaluation.expression,
                     ),
                     contextId: evaluation.contextId,
                   },
@@ -1853,6 +1896,8 @@ export function createModelCompiler(
               name: element.name,
               kind: element.kind,
               transform: element.transform,
+              bound: element.bound,
+              facing: element.facing,
             },
           })),
           contextTargetIds: [],
@@ -1927,7 +1972,7 @@ export function createModelCompiler(
                   operationId: candidate.operationId,
                   operationInput: candidate.operationInput,
                   constraintId: candidate.constraintId,
-                  constraintSourceNodeId: candidate.constraintSourceNodeId,
+                  constraintOwnerNodeId: candidate.constraintOwnerNodeId,
                 };
               })
           : [evaluation];

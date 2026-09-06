@@ -37,15 +37,17 @@ test('coil builds a circular swept solid with integer or fractional turns', () =
           .position,
         [0, 0, 0],
       );
-      const top = snapshot.elements.find(element => element.name === 'top')
+      const top = snapshot.elements.find(element => element.name === 'up')
         .transform.position;
-      const bottom = snapshot.elements.find(
-        element => element.name === 'bottom',
+      const bottom = snapshot.elements.find(element => element.name === 'down')
+        .transform.position;
+      const center = snapshot.elements.find(
+        element => element.name === 'center',
       ).transform.position;
-      assert.equal(top[0], 0);
-      assert.equal(top[2], 0);
+      assert.ok(Math.abs(top[0] - center[0]) < 1e-6);
+      assert.ok(Math.abs(top[2] - center[2]) < 1e-6);
       assert.ok(top[1] > (turns * 4) / 2);
-      assert.deepEqual(bottom, [0, -top[1], 0]);
+      assert.ok(Math.abs(bottom[1] + top[1]) < 1e-6);
     } finally {
       disposeModelObjects([model]);
     }

@@ -84,8 +84,8 @@ test('shared children keep independent appearance in differently painted groups'
 
 test('painting a related assembly preserves member identities and exposed topology', () => {
   const base = box(10, 10, 10);
-  const cap = box(4, 2, 4).relate(self => self.bottom.on(base.top));
-  const assembly = group([base, cap]).expose({part: cap, mount: base.bottom});
+  const cap = box(4, 2, 4).relate(self => self.on(base.up));
+  const assembly = group([base, cap]).expose({part: cap, mount: base.down});
   const painted = assembly.paint('#aabbcc');
   try {
     const snapshot = createModelSnapshotter();

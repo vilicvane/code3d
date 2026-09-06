@@ -68,7 +68,7 @@ const postOffset = 27;
 const plate = box(38, 6, 26);
 
 const post = cylinder(4.5, 25).relate(part =>
-  part.bottom.on(plate.top).offset(postOffset, 0, 0),
+  part.on(plate.up).offset(postOffset, 0, 0),
 );
 ```
 
@@ -99,20 +99,17 @@ const finished = rounded.chamfer(0.5, [13]);
 这些数字是随模型派生传递的拓扑 ID，而不是当前边数组的下标或 OCCT hash。
 相同源码、参数和内核版本会确定性地产生相同 ID；被删除边的 ID 不会在后续步骤中复用。
 
-沿曲线放样两个方向不同的平面图形：
+关系只求平移；用独立 pivot/rotate 链构造弯曲放样：
 
 ```ts
-const spine = bezier([
-  [0, 0, 0],
-  [12, 7, 0],
-  [10, 20, 9],
-  [4, 28, 14],
-]);
-const start = circle(4).relate(profile => profile.plane.on(spine.start).flip());
-const end = rectangle(7, 4).relate(profile =>
-  profile.plane.on(spine.end).flip(),
+const start = circle(20);
+const via = regularPolygon(20, 8).relate(self =>
+  self.on(start.up).pivot(50, 0, 0).rotate(0, 0, 45),
 );
-const result = loft([start, end], {spine});
+const end = rectangle(40, 40).relate(self =>
+  self.on(start.up).pivot(50, 0, 0).rotate(0, 0, 90),
+);
+const result = loft([start, via, end]);
 ```
 
 函数的设计时参数使用普通 TypeScript 表达式，并在函数所在模组的作用域中求值：
@@ -210,7 +207,8 @@ npm run lint-prettier
 ## 依赖许可
 
 - RepliCAD 使用 MIT 许可。
-- `@code3d/solver` 将 OndselSolver 编译为 WASM，使用 LGPL-2.1-or-later；
+- 独立的 `@code3d/solver` 包将 OndselSolver 编译为 WASM，使用 LGPL-2.1-or-later；
+  当前 core/App 的 bound 定位使用线性平移求解，不加载该包。
   [包说明](packages/solver/README.md)记录上游版本与构建方式，
   [许可证](packages/solver/LICENSE.LGPL-2.1)随包保留。
 - `replicad-opencascadejs` 包含 Open CASCADE Technology 的定制 WASM 构建，使用 LGPL-2.1-only 许可；发布产品时需要保留相应许可和源码获取信息。

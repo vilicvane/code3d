@@ -292,7 +292,7 @@ test('runs a zero-install screw model, retains its runtime on edits, and switche
           'import {box, group} from "@code3d/core";',
           'import {ISO4762} from "@code3d/screws";',
           `const plate = box(40, 10, 30).fillet(${radius});`,
-          'const screw = ISO4762.screw("M6", 18).relate(part => part.center.on(plate.center).offset(30, 0, 0));',
+          'const screw = ISO4762.screw("M6", 18).relate(part => part.center.on(plate.up).offset(30, 0, 0));',
           'export default group([plate, screw]);',
         ].join('\n'),
       },
