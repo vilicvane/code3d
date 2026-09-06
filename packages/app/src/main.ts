@@ -382,6 +382,13 @@ type ContextualToolState = {
 };
 
 const viewport = new ModelViewport(viewportHost, {
+  onSourcePreviewDiagnostic: diagnostic =>
+    renderViewportDiagnostic(
+      diagnostic ??
+        (currentModule?.diagnostic?.relatedModelNodeIds?.length
+          ? currentModule.diagnostic
+          : undefined),
+    ),
   onSelect: occurrence => {
     if (occurrence.view === 'model') {
       preferredEvaluationContextId = undefined;
@@ -998,7 +1005,8 @@ async function presentModelDiagnostic(
 ): Promise<boolean> {
   codeEditor.setModelDiagnostic(diagnostic);
   renderViewportDiagnostic(
-    diagnostic?.relatedModelNodeIds?.length ? diagnostic : undefined,
+    viewport.sourceEvaluation()?.evaluation.constraintPreviewDiagnostic ??
+      (diagnostic?.relatedModelNodeIds?.length ? diagnostic : undefined),
   );
   if (!diagnostic || diagnostic.sourceRef) {
     errorBar.hidden = true;

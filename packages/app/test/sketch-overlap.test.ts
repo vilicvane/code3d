@@ -7,8 +7,8 @@ import type {
 } from '@code3d/core/tooling';
 import type {SketchChange} from '../src/tools/sketch-source.ts';
 import type {ProjectCompiler} from '../src/model/project-compiler.ts';
-import {createAppTestServer} from './vite-test-server.mjs';
-import {createTestProjectCompiler} from './project-test-files.mjs';
+import {createAppTestServer} from './vite-test-server.ts';
+import {createTestProjectCompiler} from './project-test-files.ts';
 
 let server: Awaited<ReturnType<typeof createAppTestServer>>;
 let geometry: typeof import('../src/tools/sketch-segments.ts');

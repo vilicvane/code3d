@@ -7,6 +7,7 @@ import {
   type TopologyId,
   type ConstraintExpression,
   type ConstraintSpatialReference,
+  type ConstraintPreview,
   type EdgeId,
   type ElementKind,
   type ElementSnapshot,
@@ -95,6 +96,8 @@ export type SourceTargetEvaluation = Readonly<{
   constraintId?: string;
   constraintOwnerNodeId?: string;
   constraintSpatial?: ConstraintSpatialReference;
+  constraintPreview?: ConstraintPreview['object'];
+  constraintPreviewDiagnostic?: ModelDiagnostic;
   contextId: string;
   element?: AnchorValueReference;
   selection?:
@@ -359,7 +362,7 @@ export function createModelCompiler(
   const {
     beginModelEvaluation,
     constraintTraceReference,
-    constraintSpatialReference,
+    constraintPreview,
     createModelSnapshotter,
     instrumentConstraint,
     instrumentModelOperation,
@@ -638,6 +641,16 @@ export function createModelCompiler(
       if (executionTrace?.siteId !== siteId) {
         return value;
       }
+      if (isConstraintExpression(value)) {
+        recordSourceConstraint(
+          id,
+          sourceRef(file, start, end),
+          value,
+          executionTrace.contextId,
+          completedRuntimeReach(),
+        );
+        return value;
+      }
       const objects = modelObjectsIn(value).filter(
         object =>
           !executionTrace.inputs.some(
@@ -821,6 +834,10 @@ export function createModelCompiler(
     runtime: RuntimeReach,
     scopeRef?: SourceRef,
   ): void {
+    if (isConstraintExpression(value)) {
+      recordSourceConstraint(id, sourceRef, value, contextId, runtime);
+      return;
+    }
     const topologyReferences: TopologyValueReference[] = [];
     const anchorReferences: AnchorValueReference[] = [];
     const objects = modelObjectsIn(
@@ -1836,6 +1853,21 @@ export function createModelCompiler(
               evaluation.contextId,
               evaluation.runtime,
             );
+            let preview: ConstraintPreview | undefined;
+            let previewDiagnostic: ModelDiagnostic | undefined;
+            try {
+              preview = constraintPreview(evaluation.expression);
+            } catch (error) {
+              const diagnostic = diagnosticFromError(error);
+              previewDiagnostic = {
+                ...diagnostic,
+                summary: 'Cannot preview this constraint stage',
+                details: [diagnostic.summary, diagnostic.details]
+                  .filter(Boolean)
+                  .join('\n'),
+                sourceRef: trace.sourceRef,
+              };
+            }
             const consumers = operationInputTargets.flatMap(target =>
               target.evaluations.flatMap(input =>
                 input.role &&
@@ -1869,9 +1901,9 @@ export function createModelCompiler(
                   constraintOwnerNodeId: modelObjectNodeId(
                     evaluation.self ?? evaluation.source,
                   ),
-                  constraintSpatial: constraintSpatialReference(
-                    evaluation.expression,
-                  ),
+                  constraintSpatial: preview?.spatial,
+                  constraintPreview: preview?.object,
+                  constraintPreviewDiagnostic: previewDiagnostic,
                   contextId: evaluation.contextId,
                 }))
               : [
@@ -1890,9 +1922,9 @@ export function createModelCompiler(
                     constraintOwnerNodeId: modelObjectNodeId(
                       evaluation.self ?? evaluation.source,
                     ),
-                    constraintSpatial: constraintSpatialReference(
-                      evaluation.expression,
-                    ),
+                    constraintSpatial: preview?.spatial,
+                    constraintPreview: preview?.object,
+                    constraintPreviewDiagnostic: previewDiagnostic,
                     contextId: evaluation.contextId,
                   },
                 ];
@@ -2022,6 +2054,9 @@ export function createModelCompiler(
                   operationInput: candidate.operationInput,
                   constraintId: candidate.constraintId,
                   constraintOwnerNodeId: candidate.constraintOwnerNodeId,
+                  constraintPreview: candidate.constraintPreview,
+                  constraintPreviewDiagnostic:
+                    candidate.constraintPreviewDiagnostic,
                 };
               })
           : [evaluation];

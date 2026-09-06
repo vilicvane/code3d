@@ -1,4 +1,5 @@
-import {defined, createModelSnapshotter} from './model-test.ts';
+import {defined} from '../../../test/assert.ts';
+import {createModelSnapshotter} from './model-test.ts';
 import type {Model, Anchor} from '@code3d/core';
 
 import assert from 'node:assert/strict';

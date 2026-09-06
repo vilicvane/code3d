@@ -1,3 +1,5 @@
+import {ScreenSpaceArrowHead} from './rendering/screen-space-arrow-head';
+import type {ModelDiagnostic} from './model/diagnostic';
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {LineMaterial} from 'three/addons/lines/LineMaterial.js';
@@ -106,6 +108,7 @@ type DecorationInstance = Readonly<{
 }>;
 
 export type ModelViewportOptions = Readonly<{
+  onSourcePreviewDiagnostic?: (diagnostic: ModelDiagnostic | undefined) => void;
   onSelect: (occurrence: Occurrence) => void;
   onDrillDown: (node: ModelSnapshotObject) => void;
   onNavigateSource: (sourceRef: SourceRef) => void;
@@ -345,6 +348,7 @@ export class ModelViewport {
   >();
   private readonly spatialParameterValues = new Map<string, number>();
   private readonly onSelect: ModelViewportOptions['onSelect'];
+  private readonly onSourcePreviewDiagnostic: ModelViewportOptions['onSourcePreviewDiagnostic'];
   private readonly onDrillDown: ModelViewportOptions['onDrillDown'];
   private readonly onNavigateSource: ModelViewportOptions['onNavigateSource'];
   private readonly onTopologySelection: ModelViewportOptions['onTopologySelection'];
@@ -371,12 +375,14 @@ export class ModelViewport {
       onDrillDown,
       onNavigateSource,
       onPositionTool,
+      onSourcePreviewDiagnostic,
       onTopologySelection,
       sourceDecorationProviders = [],
       showCoordinateReference = true,
     }: ModelViewportOptions,
   ) {
     this.onSelect = onSelect;
+    this.onSourcePreviewDiagnostic = onSourcePreviewDiagnostic;
     this.onDrillDown = onDrillDown;
     this.onNavigateSource = onNavigateSource;
     this.onTopologySelection = onTopologySelection;
@@ -1054,7 +1060,17 @@ export class ModelViewport {
     selectedKey?: string,
     focusNodeIds = evaluation.focusNodeIds,
   ): void {
-    const relatedNodes = this.resolveNodes(evaluation.nodeIds);
+    const relatedNodes = this.resolveNodes(evaluation.nodeIds)
+      .filter(
+        node =>
+          !evaluation.constraintPreviewDiagnostic ||
+          node.nodeId !== evaluation.constraintOwnerNodeId,
+      )
+      .map(node =>
+        node.nodeId === evaluation.constraintPreview?.nodeId
+          ? {...node, ...evaluation.constraintPreview}
+          : node,
+      );
     const placement = sourceTargetPlacement(evaluation);
     const focusNodes = focusNodeIds
       ? relatedNodes.filter(node => focusNodeIds.includes(node.nodeId))
@@ -1071,12 +1087,17 @@ export class ModelViewport {
         evaluation.operationId,
         evaluation.nodeIds,
       ),
-    ]);
+    ]).filter(
+      ({node}) =>
+        !evaluation.constraintPreviewDiagnostic ||
+        node.nodeId !== evaluation.constraintOwnerNodeId,
+    );
     const layeredScene = focusNodes.length + contextNodes.length > 1;
     this.selectionEmphasized =
       focusNodeIds !== undefined || target.kind !== 'constraint';
     this.renderedViewTarget = renderedViewTarget;
     this.resetRenderedView();
+    this.onSourcePreviewDiagnostic?.(evaluation.constraintPreviewDiagnostic);
     contextNodes.forEach(({node, targetId}, index) => {
       this.root.add(
         this.buildContextObject(node, `context/${index}`, targetId, placement),
@@ -1125,6 +1146,7 @@ export class ModelViewport {
           ids,
           '#d8ff3e',
           24,
+          symbolLineWidth,
         );
         if (highlight) {
           highlight.raycast = () => undefined;
@@ -1287,6 +1309,7 @@ export class ModelViewport {
   }
 
   private resetRenderedView(): void {
+    this.onSourcePreviewDiagnostic?.(undefined);
     if (this.topologySelection) {
       this.clearTopologySelection();
       this.onTopologySelection({kind: 'cancel'});
@@ -1494,6 +1517,7 @@ export class ModelViewport {
     target: SourceTarget,
     evaluation: SourceTargetEvaluation,
   ): void {
+    if (evaluation.constraintPreviewDiagnostic) return;
     for (const provider of this.sourceDecorationProviders) {
       const decorations = provider.decorations({module, target, evaluation});
       this.setDecorations(sourceDecorationOwner(provider.id), decorations);
@@ -2259,7 +2283,7 @@ function createEdgeDecorationObject(
       createScreenSpaceEdgeLines(
         positions,
         appearance.color,
-        appearance.lineWidth ?? symbolLineWidth,
+        symbolLineWidth,
         appearance.opacity,
         appearance.depthTest,
         7,
@@ -2325,22 +2349,17 @@ function createDecoratedMesh(
   surface.renderOrder = 4;
   container.add(surface);
 
-  const edgeGeometry = createEdgeGeometry(mesh);
-  if (edgeGeometry && appearance.edgeColor) {
-    const edges = new THREE.LineSegments(
-      edgeGeometry,
-      new THREE.LineBasicMaterial({
-        color: appearance.edgeColor,
-        transparent: (appearance.edgeOpacity ?? 1) < 1,
-        opacity: appearance.edgeOpacity ?? 1,
-        depthTest: appearance.depthTest ?? true,
-        depthWrite: false,
-      }),
+  if (mesh.edges.length > 0 && appearance.edgeColor) {
+    container.add(
+      createScreenSpaceEdgeLines(
+        mesh.edges,
+        appearance.edgeColor,
+        symbolLineWidth,
+        appearance.edgeOpacity,
+        appearance.depthTest,
+        5,
+      ),
     );
-    edges.renderOrder = 5;
-    container.add(edges);
-  } else {
-    edgeGeometry?.dispose();
   }
   return container;
 }
@@ -2363,23 +2382,19 @@ function createAnchorDecorationObject(
       anchorCross(markerSize * 0.38, appearance),
     );
   } else if (decoration.elementKind === 'line') {
-    if (decoration.arrowStyle) {
-      const direction = decoration.direction ?? 1;
-      const end = decoration.arrowOnly
-        ? 0
-        : direction === 1
+    const direction = new THREE.Vector3(0, decoration.direction ?? 1, 0);
+    if (decoration.headOnly) {
+      container.add(new ScreenSpaceArrowHead(direction, color));
+    } else if (decoration.directed) {
+      const end =
+        direction.y === 1
           ? decoration.span.positive
           : -decoration.span.negative;
-      const length = decoration.arrowOnly
-        ? markerSize
-        : decoration.span.positive + decoration.span.negative;
       container.add(
         directedAnchorArrow(
-          new THREE.Vector3(0, direction, 0),
-          length,
-          markerSize,
+          direction,
+          decoration.span.positive + decoration.span.negative,
           appearance,
-          decoration.arrowStyle,
           end,
         ),
       );
@@ -2388,21 +2403,11 @@ function createAnchorDecorationObject(
     container.add(
       anchorRing(markerSize * 0.14, appearance),
       anchorOriginPoint(appearance),
-      decoration.arrowStyle
-        ? directedAnchorArrow(
-            new THREE.Vector3(0, decoration.facing ?? 1, 0),
-            markerSize,
-            markerSize,
-            appearance,
-            decoration.arrowStyle,
-            (decoration.facing ?? 1) * markerSize,
-          )
-        : anchorArrow(
-            new THREE.Vector3(0, decoration.facing ?? 1, 0),
-            markerSize,
-            markerSize,
-            color,
-          ),
+      anchorArrow(
+        new THREE.Vector3(0, decoration.facing ?? 1, 0),
+        markerSize,
+        appearance,
+      ),
     );
   } else {
     container.add(
@@ -2419,6 +2424,7 @@ function createAnchorDecorationObject(
         object.renderOrder = 24;
         candidate.depthTest = appearance.depthTest ?? false;
         candidate.depthWrite = false;
+        candidate.opacity = appearance.opacity ?? 1;
         // Full-opacity anchors must also draw after transparent model surfaces.
         candidate.transparent = true;
         candidate.toneMapped = false;
@@ -2431,30 +2437,11 @@ function createAnchorDecorationObject(
 function directedAnchorArrow(
   direction: THREE.Vector3,
   length: number,
-  size: number,
   appearance: ViewportDecoration['appearance'],
-  style: 'solid' | 'outline',
   end: number,
 ): THREE.Object3D {
-  const arrow = anchorArrow(
-    direction,
-    length,
-    size,
-    new THREE.Color(appearance.color),
-  );
+  const arrow = anchorArrow(direction, length, appearance);
   arrow.position.y = end - direction.y * length;
-  if (style === 'outline') {
-    const cone = arrow.cone;
-    const outline = new THREE.LineSegments(
-      new THREE.EdgesGeometry(cone.geometry),
-      anchorLineMaterial(appearance),
-    );
-    outline.position.copy(cone.position);
-    outline.quaternion.copy(cone.quaternion);
-    outline.scale.copy(cone.scale);
-    cone.visible = false;
-    arrow.add(outline);
-  }
   return arrow;
 }
 
@@ -2463,11 +2450,10 @@ function anchorAxis(
   markerSize: number,
   appearance: ViewportDecoration['appearance'],
 ): THREE.Object3D {
-  const color = new THREE.Color(appearance.color);
   const axis = new THREE.Group();
   axis.add(
-    anchorArrow(new THREE.Vector3(0, 1, 0), span.positive, markerSize, color),
-    anchorArrow(new THREE.Vector3(0, -1, 0), span.negative, markerSize, color),
+    anchorArrow(new THREE.Vector3(0, 1, 0), span.positive, appearance),
+    anchorArrow(new THREE.Vector3(0, -1, 0), span.negative, appearance),
     anchorRing(markerSize * 0.14, appearance),
   );
   return axis;
@@ -2476,34 +2462,48 @@ function anchorAxis(
 function anchorArrow(
   direction: THREE.Vector3,
   length: number,
-  size: number,
-  color: THREE.Color,
-): THREE.ArrowHelper {
-  return new THREE.ArrowHelper(
+  appearance: ViewportDecoration['appearance'],
+): THREE.Object3D {
+  const end = direction.clone().multiplyScalar(length);
+  const arrow = new THREE.Group();
+  const head = new ScreenSpaceArrowHead(
     direction,
-    new THREE.Vector3(),
-    length,
-    color.getHex(),
-    size * 0.28,
-    size * 0.16,
+    new THREE.Color(appearance.color),
   );
+  head.position.copy(end);
+  arrow.add(anchorLine([0, 0, 0], end.toArray(), appearance), head);
+  return arrow;
 }
 
 function anchorCross(
   radius: number,
   appearance: ViewportDecoration['appearance'],
-): THREE.LineSegments {
-  const points = [
-    new THREE.Vector3(-radius, 0, 0),
-    new THREE.Vector3(radius, 0, 0),
-    new THREE.Vector3(0, -radius, 0),
-    new THREE.Vector3(0, radius, 0),
-    new THREE.Vector3(0, 0, -radius),
-    new THREE.Vector3(0, 0, radius),
-  ];
-  return new THREE.LineSegments(
-    new THREE.BufferGeometry().setFromPoints(points),
-    anchorLineMaterial(appearance),
+): LineSegments2 {
+  return createScreenSpaceEdgeLines(
+    new Float32Array([
+      -radius,
+      0,
+      0,
+      radius,
+      0,
+      0,
+      0,
+      -radius,
+      0,
+      0,
+      radius,
+      0,
+      0,
+      0,
+      -radius,
+      0,
+      0,
+      radius,
+    ]),
+    appearance.color,
+    symbolLineWidth,
+    appearance.opacity,
+    appearance.depthTest ?? false,
   );
 }
 
@@ -2520,18 +2520,21 @@ function anchorDot(
 function anchorRing(
   radius: number,
   appearance: ViewportDecoration['appearance'],
-): THREE.LineLoop {
-  const points = Array.from({length: 32}, (_, index) => {
+): LineSegments2 {
+  const point = (index: number) => {
     const angle = (index / 32) * Math.PI * 2;
-    return new THREE.Vector3(
-      Math.cos(angle) * radius,
-      0,
-      Math.sin(angle) * radius,
-    );
-  });
-  return new THREE.LineLoop(
-    new THREE.BufferGeometry().setFromPoints(points),
-    anchorLineMaterial(appearance, 1),
+    return [Math.cos(angle) * radius, 0, Math.sin(angle) * radius];
+  };
+  const positions = Array.from({length: 32}, (_, i) => [
+    ...point(i),
+    ...point(i + 1),
+  ]).flat();
+  return createScreenSpaceEdgeLines(
+    new Float32Array(positions),
+    appearance.color,
+    symbolLineWidth,
+    appearance.opacity,
+    appearance.depthTest ?? false,
   );
 }
 
@@ -2557,13 +2560,13 @@ function anchorLine(
   from: readonly [number, number, number],
   to: readonly [number, number, number],
   appearance: ViewportDecoration['appearance'],
-): THREE.Line {
-  return new THREE.Line(
-    new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(...from),
-      new THREE.Vector3(...to),
-    ]),
-    anchorLineMaterial(appearance),
+): LineSegments2 {
+  return createScreenSpaceEdgeLines(
+    new Float32Array([...from, ...to]),
+    appearance.color,
+    symbolLineWidth,
+    appearance.opacity,
+    appearance.depthTest ?? false,
   );
 }
 
@@ -2578,20 +2581,6 @@ function anchorSurfaceMaterial(
     depthTest: appearance.depthTest ?? false,
     depthWrite: false,
     side: THREE.DoubleSide,
-    toneMapped: false,
-  });
-}
-
-function anchorLineMaterial(
-  appearance: ViewportDecoration['appearance'],
-  opacity = appearance.opacity ?? 1,
-): THREE.LineBasicMaterial {
-  return new THREE.LineBasicMaterial({
-    color: appearance.color,
-    transparent: opacity < 1,
-    opacity,
-    depthTest: appearance.depthTest ?? false,
-    depthWrite: false,
     toneMapped: false,
   });
 }
@@ -2756,6 +2745,7 @@ function createTopologyHighlight(
   ids: TopologyIdSet,
   color: string,
   renderOrder: number,
+  lineWidth = interactiveLineWidth,
 ): THREE.Object3D | undefined {
   if (kind === 'vertex') {
     const positions = vertexSelectionPositions(mesh, ids);
@@ -2776,7 +2766,7 @@ function createTopologyHighlight(
       ? createScreenSpaceEdgeLines(
           positions,
           color,
-          interactiveLineWidth,
+          lineWidth,
           1,
           false,
           renderOrder,

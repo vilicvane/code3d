@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
-import {createAppTestServer} from './vite-test-server.mjs';
-import {createTestProjectCompiler} from './project-test-files.mjs';
+import {createAppTestServer} from './vite-test-server.ts';
+import {createTestProjectCompiler} from './project-test-files.ts';
 
 let server,
   sketchSegments,

@@ -7,7 +7,8 @@ import type {
   BRepOffsetAPI_MakePipeShell,
   EmbindHandle,
 } from '@code3d/opencascade';
-import {defined, disposeModelObjects, modelGeometry} from './model-test.ts';
+import {defined} from '../../../test/assert.ts';
+import {disposeModelObjects, modelGeometry} from './model-test.ts';
 
 import assert from 'node:assert/strict';
 import test from 'node:test';

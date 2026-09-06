@@ -1,5 +1,5 @@
+import {defined} from '../../../test/assert.ts';
 import {
-  defined,
   modelObject,
   createModelSnapshotter,
   disposeModelObjects,

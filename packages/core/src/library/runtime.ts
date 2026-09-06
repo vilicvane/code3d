@@ -262,6 +262,14 @@ export type ConstraintSpatialReference = Readonly<{
   spatial: ModelSpatialOperation;
 }>;
 
+export type ConstraintPreview = Readonly<{
+  object: Pick<
+    ModelSnapshotObject,
+    'nodeId' | 'compositionTransform' | 'constraints'
+  >;
+  spatial?: ConstraintSpatialReference;
+}>;
+
 export type RenderMesh = Readonly<{
   /** Tessellation vertices used by the triangle mesh. */
   vertices: Float32Array;
@@ -1143,13 +1151,13 @@ export abstract class ConstraintExpression {
     return stored;
   }
   /** @internal */
-  spatialReference(): ConstraintSpatialReference | undefined {
-    if (!this.context || !this.spatialOperation) return undefined;
-    const {pivot} = this.spatialOperation;
+  preview(): ConstraintPreview | undefined {
+    if (!this.context) return undefined;
+    const pivot = this.spatialOperation?.pivot;
     const selection =
-      pivot.kind === 'around'
+      pivot?.kind === 'around'
         ? {
-            ...this.spatialOperation,
+            ...this.spatialOperation!,
             pivot: {
               ...pivot,
               axis: {
@@ -1163,9 +1171,9 @@ export abstract class ConstraintExpression {
             },
           }
         : this.spatialOperation;
-    return this.context.self[relationSpatial](
+    return this.context.original[relationPreview](
+      this.context.self.nodeId,
       this.storeFor(this.context.self, this.context.original),
-      this.rotations.length,
       selection,
     );
   }
@@ -1359,7 +1367,7 @@ export class ConstraintAroundChain extends ConstraintExpression {
 const modelGeometry = Symbol('modelGeometry');
 const referenceBounds = Symbol('referenceBounds');
 const referenceFrame = Symbol('referenceFrame');
-const relationSpatial = Symbol('relationSpatial');
+const relationPreview = Symbol('relationPreview');
 
 export class ModelObject<
   Elements extends NamedElements = {},
@@ -2507,34 +2515,49 @@ export class ModelObject<
   }
 
   /** @internal */
-  [relationSpatial](
-    fallback: StoredConstraint,
-    completed: number,
-    selection: ConstraintSpatialSelection,
-  ): ConstraintSpatialReference {
-    const stored = this.constraints.find(
-      constraint => constraint.id === fallback.id,
+  [relationPreview](
+    nodeId: string,
+    constraint: StoredConstraint,
+    selection: ConstraintSpatialSelection | undefined,
+  ): ConstraintPreview {
+    // This expression starts from the relate receiver, before sibling constraints
+    // are returned and committed to self. Geometry and node identity stay shared.
+    const owner = this.copy(
+      {nodeId, constraints: [...this.constraints, constraint]},
+      this.operation,
     );
-    const owner = stored
-      ? this
-      : this.copy(
-          {constraints: [...this.constraints, fallback]},
-          this.operation,
-        );
-    const constraint = stored ?? fallback;
     const context = ModelObject.createSolveContext([
       owner,
-      ...(selection.pivot.kind === 'around' && selection.pivot.axis.model
+      ...(selection?.pivot.kind === 'around' && selection.pivot.axis.model
         ? [selection.pivot.axis.model]
         : []),
     ]);
+    return {
+      object: {
+        nodeId,
+        compositionTransform: toTransform(owner.solvePose(context)),
+        constraints: owner.constraints.map(value =>
+          owner.constraintSnapshot(value, context),
+        ),
+      },
+      spatial: selection
+        ? owner.constraintSpatial(constraint, selection, context)
+        : undefined,
+    };
+  }
+
+  private constraintSpatial(
+    constraint: StoredConstraint,
+    selection: ConstraintSpatialSelection,
+    context: SolveContext,
+  ): ConstraintSpatialReference {
     const models = [...context.poses.keys()];
-    const actions = owner.bodyRotations(
+    const actions = this.bodyRotations(
       constraint,
       new Map(models.map((model, i) => [model, i])),
     );
-    const stage = selection.kind === 'rotate' ? completed - 1 : completed;
-    const finalPose = owner.solvePose(context);
+    const stage = actions.length - (selection.kind === 'rotate' ? 1 : 0);
+    const finalPose = this.solvePose(context);
     let before = finalPose;
     for (let i = actions.length - 1; i >= stage; i--) {
       const action = actions[i];
@@ -2574,20 +2597,6 @@ export class ModelObject<
                 .position,
             };
       frame = composeTransforms(before, local);
-    }
-    // Later rotations about external axes transport this operation's gizmo.
-    for (const action of actions.slice(stage + 1)) {
-      if ('body' in action)
-        frame = composeTransforms(
-          axisRotation(
-            composeTransforms(
-              models[action.body].solvePose(context),
-              action.axis,
-            ),
-            action.angle,
-          ),
-          frame,
-        );
     }
     const angles = constraint.rotations[stage]?.angles ?? origin;
     const rotationVector: Vec3 =
@@ -3509,10 +3518,10 @@ export function isConstraintExpression(
   return value instanceof ConstraintExpression;
 }
 
-export function constraintSpatialReference(
+export function constraintPreview(
   value: ConstraintExpression,
-): ConstraintSpatialReference | undefined {
-  return value.spatialReference();
+): ConstraintPreview | undefined {
+  return value.preview();
 }
 
 export function instrumentConstraint(

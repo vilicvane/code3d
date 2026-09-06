@@ -10,7 +10,7 @@
     "build": "node ../../node_modules/typescript/bin/tsc --noEmit && vite build",
     "test": "npm run test:types && npm run test:run",
     "test:browser": "node --test --test-concurrency=1 \"test/browser/*.test.{mjs,ts}\"",
-    "test:browser:tool-panel": "node --test test/browser/contextual-tool-panel.test.mjs",
+    "test:browser:tool-panel": "node --test test/browser/contextual-tool-panel.test.ts",
     "preview": "vite preview",
     "render-image": "node scripts/render-image.mjs",
     "test:run": "node --test \"test/*.test.{mjs,ts}\"",

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {before, after, test} from 'node:test';
-import {createAppTestServer} from './vite-test-server.mjs';
+import {createAppTestServer} from './vite-test-server.ts';
 
 let server, ToolEngine, analyzeSketchSource;
 before(async () => {
