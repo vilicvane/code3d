@@ -12,7 +12,7 @@ before(async () => {
 });
 after(async () => browser?.close());
 
-async function open(t, source) {
+async function open(t, source, cursor) {
   const context = await browser.newContext({
     viewport: {width: 1400, height: 900},
   });
@@ -27,8 +27,17 @@ async function open(t, source) {
   await page.locator('.monaco-editor .view-lines').first().click();
   await page.keyboard.press('Control+a');
   await page.keyboard.insertText(source);
-  await page.keyboard.press('ArrowLeft');
-  await page.keyboard.press('ArrowLeft');
+  if (cursor) {
+    await page.keyboard.press('Control+Home');
+    for (let line = 1; line < cursor.line; line++)
+      await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('Home');
+    for (let column = 1; column < cursor.column; column++)
+      await page.keyboard.press('ArrowRight');
+  } else {
+    await page.keyboard.press('ArrowLeft');
+    await page.keyboard.press('ArrowLeft');
+  }
   await page.getByRole('region', {name: 'Sketch editor'}).waitFor();
   return page;
 }
@@ -79,9 +88,10 @@ test('continuous lines reuse endpoints before recompile and undo one segment at 
     'Line',
     'Rectangle',
     'Center rectangle',
-    'Delete',
+    'Trim',
     'Fit',
     'Snap',
+    'Constraints',
   ]) {
     const button = page.getByRole('button', {name, exact: true});
     const icon = button.locator('svg.ui-icon');
@@ -805,12 +815,15 @@ const segment = (page, id, start, end, layer = 'local') =>
   page.locator(
     `.sketch-canvas line.${layer}[data-id="${id}"][data-start="${start}"][data-end="${end}"]`,
   );
-async function selectSegment(page, locator) {
+async function clickSegment(page, locator) {
   const bounds = await locator.boundingBox();
   await page.mouse.click(
     bounds.x + bounds.width / 2,
     bounds.y + bounds.height / 2,
   );
+}
+async function selectSegment(page, locator) {
+  await clickSegment(page, locator);
   assert.match(await locator.getAttribute('class'), /\blocal selected\b/);
   assert.equal(await page.locator('.sketch-canvas line.selected').count(), 1);
 }
@@ -844,7 +857,7 @@ const value = sketch([
   assert.doesNotMatch(await text(page), /'line',\s*[67],/);
 });
 
-test('crossings delimit deletion without creating points until the selected interval is removed', async t => {
+test('Trim previews and removes a crossing-delimited interval directly without selection', async t => {
   const page = await open(
     t,
     `import {sketch} from '@code3d/core';
@@ -857,8 +870,26 @@ const value = sketch([
   );
   assert.equal(await page.locator('.sketch-canvas circle.local').count(), 6);
   assert.equal(await page.locator('.sketch-canvas line.local').count(), 7);
-  await selectSegment(page, segment(page, 7, 0.25, 0.75));
-  await page.getByRole('button', {name: 'Delete', exact: true}).click();
+  const before = await text(page);
+  const trim = page.getByRole('button', {name: 'Trim', exact: true});
+  assert.equal(await trim.isEnabled(), true);
+  assert.equal(
+    await page.getByRole('button', {name: 'Delete', exact: true}).count(),
+    0,
+  );
+  await trim.click();
+  const bounds = await segment(page, 7, 0.25, 0.75).boundingBox();
+  const x = bounds.x + bounds.width / 2,
+    y = bounds.y + bounds.height / 2;
+  await page.mouse.move(x, y);
+  assert.equal(await page.locator('.sketch-canvas .selected').count(), 0);
+  assert.equal(await page.locator('.sketch-canvas .trim-preview').count(), 1);
+  assert.match(
+    await segment(page, 7, 0.25, 0.75).getAttribute('class'),
+    /trim-preview/,
+  );
+  assert.equal(await text(page), before);
+  await page.mouse.click(x, y);
   await waitForSource(page, /'line',\s*13,\s*\[12,\s*2\]/);
   await page.getByText('Ready', {exact: true}).waitFor();
   assert.equal(await page.locator('.sketch-canvas circle.local').count(), 8);
@@ -867,10 +898,20 @@ const value = sketch([
   assert.match(await text(page), /'point',\s*12,\s*\[30,\s*0\]/);
   assert.match(await text(page), /'line',\s*8,\s*\[3,\s*4\]/);
   assert.match(await text(page), /'line',\s*9,\s*\[5,\s*6\]/);
+  assert.equal(await trim.getAttribute('aria-pressed'), 'true');
   await page.locator('.sketch-canvas').focus();
   await page.keyboard.press('Control+z');
   await segment(page, 7, 0.25, 0.75).waitFor({state: 'attached'});
   assert.equal(await page.locator('.sketch-canvas circle.local').count(), 6);
+  await trim.click();
+  await page.keyboard.press('Escape');
+  assert.equal(
+    await page
+      .getByRole('button', {name: 'Select', exact: true})
+      .getAttribute('aria-pressed'),
+    'true',
+  );
+  assert.equal(await page.locator('.sketch-canvas .trim-preview').count(), 0);
 });
 
 test('an upstream point delimits a local end trim, retaining the line ID and a named reference', async t => {
@@ -896,6 +937,125 @@ const value = base.derive([
   await page.keyboard.press('Delete');
   assert.equal(await page.locator('.sketch-canvas line.local').count(), 1);
   assert.equal(await point(page, 1, 'upstream').count(), 1);
+});
+
+test('Trim stays active for consecutive clicks, cleans orphan points and never removes upstream geometry', async t => {
+  const page = await open(
+    t,
+    `import {sketch} from '@code3d/core';
+const base = sketch([['point', 1, [0, 0]], ['point', 2, [40, 0]], ['line', 3, [1, 2]]]);
+const child = base.derive([
+  ['point', 1, [0, 20]], ['point', 2, [40, 20]], ['line', 3, [1, 2]], ['point', 4, [50, 30]],
+]);`,
+  );
+  const trim = page.getByRole('button', {name: 'Trim', exact: true});
+  await trim.click();
+  const before = await text(page);
+  await clickSegment(page, segment(page, 3, 0, 1, 'upstream'));
+  assert.equal(await text(page), before);
+  assert.equal(await page.locator('.sketch-canvas .trim-preview').count(), 0);
+  await clickSegment(page, segment(page, 3, 0, 1));
+  await point(page, 1).waitFor({state: 'detached'});
+  assert.equal(await page.locator('.sketch-canvas .local').count(), 1);
+  assert.equal(await trim.getAttribute('aria-pressed'), 'true');
+  await point(page, 4).hover();
+  assert.match(await point(page, 4).getAttribute('class'), /trim-preview/);
+  await point(page, 4).click();
+  await waitForSource(page, /base\.derive\(\[\s*\]\)/);
+  assert.equal(await page.locator('.sketch-canvas .upstream').count(), 3);
+  await page.keyboard.press('Control+z');
+  await point(page, 4).waitFor();
+  assert.equal(await page.locator('.sketch-canvas .local').count(), 1);
+  await page.keyboard.press('Escape');
+  assert.equal(await trim.getAttribute('aria-pressed'), 'false');
+});
+
+test('Trim is disabled when sketch entries cannot be edited in source', async t => {
+  const page = await open(
+    t,
+    `import {sketch} from '@code3d/core';
+const entries = [['point', 1, [0, 0]], ['point', 2, [40, 0]], ['line', 3, [1, 2]]] as const;
+const value = sketch(entries);`,
+    // Select the sketch binding, not the argument's separate array binding.
+    {line: 3, column: 8},
+  );
+  assert.equal(
+    await page.getByRole('button', {name: 'Trim', exact: true}).isDisabled(),
+    true,
+  );
+  const before = await text(page);
+  await clickSegment(page, segment(page, 3, 0, 1));
+  await page.keyboard.press('Delete');
+  assert.equal(await text(page), before);
+});
+
+test('constraint markers show fixed and numeric relations, are keyboard inspectable and cannot trim geometry', async t => {
+  const page = await open(
+    t,
+    `import {sketch} from '@code3d/core';
+const value = sketch([
+  ['point', 1, [0, 0]], ['point', 2, [40, 0]], ['point', 3, [40, 20]],
+  ['line', 4, [1, 2]], ['line', 5, [2, 3]], ['point', 6, [0, 0]],
+], {constraints: [['fixed', 1], ['horizontal', 4], ['vertical', 5],
+  ['length', [4, 40]], ['angle', [4, 0]], ['x', [3, 40]], ['y', [3, 20]], ['coincident', [1, 6]]]});`,
+  );
+  const badges = page.locator('.constraint-badge');
+  assert.equal(await badges.count(), 8);
+  const fixed = page.getByRole('img', {name: 'Fixed · point 1', exact: true});
+  await fixed.hover();
+  assert.equal(
+    await page.locator('.sketch-canvas .constraint-related').count(),
+    1,
+  );
+  assert.match(
+    await point(page, 1).getAttribute('class'),
+    /constraint-related/,
+  );
+  assert.equal(await fixed.locator('svg').getAttribute('aria-hidden'), 'true');
+  const length = page.getByRole('img', {
+    name: 'Length 40 · line 4 · point 1, point 2',
+    exact: true,
+  });
+  await page.mouse.move(10, 10);
+  await length.focus();
+  assert.equal(
+    await page.locator('.sketch-canvas .constraint-related').count(),
+    3,
+  );
+  assert.equal(await length.locator('text').textContent(), '40');
+  assert.equal(
+    await page
+      .locator('.constraint-badge[data-kind="angle"] text')
+      .textContent(),
+    '0°',
+  );
+  assert.equal(
+    await page.locator('.constraint-badge[data-kind="x"] text').textContent(),
+    'X=40',
+  );
+  assert.equal(
+    await page.locator('.constraint-badge[data-kind="y"] text').textContent(),
+    'Y=20',
+  );
+  const before = await text(page);
+  await page.getByRole('button', {name: 'Trim', exact: true}).click();
+  await length.click();
+  assert.equal(await text(page), before);
+  assert.equal(await page.locator('.sketch-canvas .trim-preview').count(), 0);
+  const constraints = page.getByRole('button', {
+    name: 'Constraints',
+    exact: true,
+  });
+  await constraints.click();
+  assert.equal(await fixed.isVisible(), false);
+  assert.equal(
+    await page.locator('.sketch-canvas .constraint-related').count(),
+    0,
+  );
+  await constraints.click();
+  assert.equal(await badges.count(), 8);
+  assert.equal(await fixed.isVisible(), true);
+  assert.equal(await text(page), before);
 });
 
 test('segment deletion cleans orphan point constraints but preserves unrelated standalone points with one undo', async t => {
@@ -1046,6 +1206,36 @@ test('center rectangle corners resize symmetrically through preview, recompilati
   const before = await text(page);
   const center = await screenPoint(point(page, 1));
   const corner = await screenPoint(point(page, 4));
+  const midpoint = page.locator('.constraint-badge[data-kind="midpoint"]');
+  assert.equal(await midpoint.count(), 1);
+  assert.equal(await page.locator('.constraint-badge').count(), 5);
+  await midpoint.hover();
+  assert.deepEqual(
+    await page
+      .locator('circle.constraint-related')
+      .evaluateAll(nodes => nodes.map(n => Number(n.dataset.id))),
+    [1, 2, 4],
+  );
+  assert.equal(await page.locator('line.constraint-related').count(), 0);
+  const guides = page.locator('.constraint-guides line');
+  const assertGuides = async () => {
+    const endpoints = await guides.evaluateAll(nodes =>
+      nodes.map(n =>
+        ['x1', 'y1', 'x2', 'y2'].map(a => Number(n.getAttribute(a))),
+      ),
+    );
+    const positions = await Promise.all(
+      [1, 2, 4].map(id => screenPoint(point(page, id))),
+    );
+    assert.deepEqual(endpoints, [
+      [...positions[0], ...positions[1]],
+      [...positions[0], ...positions[2]],
+    ]);
+  };
+  await assertGuides();
+  await midpoint.evaluate(node => {
+    globalThis.midpointMarker = node;
+  });
   await page.getByRole('button', {name: 'Select', exact: true}).click();
   await drag(page, point(page, 4), 45, -30);
   await settleDrag(page);
@@ -1066,16 +1256,33 @@ test('center rectangle corners resize symmetrically through preview, recompilati
   near(d[0], a[0]);
   assert.notEqual(await text(page), before);
   assert.doesNotMatch(await text(page), /'fixed'|'length'/);
+  await assertGuides();
+  assert.equal(
+    await midpoint.evaluate(node => node === globalThis.midpointMarker),
+    true,
+  );
   await page.keyboard.press('Control+z');
   await page.getByText('Ready', {exact: true}).waitFor();
   assert.deepEqual(await screenPoint(point(page, 4)), corner);
+  await assertGuides();
+  const beforeZoom = await midpoint.getAttribute('transform');
+  await point(page, 4).hover();
+  await page.mouse.wheel(0, -120);
+  await page.waitForFunction(
+    previous =>
+      document
+        .querySelector('.constraint-badge[data-kind="midpoint"]')
+        .getAttribute('transform') !== previous,
+    beforeZoom,
+  );
+  await assertGuides();
 });
 
 test('center rectangles preserve named upstream centers and remove midpoint constraints with deleted corners', async t => {
   const page = await open(
     t,
     `import {sketch} from '@code3d/core';
-const base = sketch([['point',1,[0,0]]]);
+const base = sketch([['point',1,[0,0]]], {constraints: [['fixed', 1]]});
 const child = base.derive([]);`,
   );
   await page
@@ -1101,6 +1308,25 @@ const child = base.derive([]);`,
   // beyond that view. Fit the completed geometry before picking its corners.
   await page.getByRole('button', {name: 'Fit', exact: true}).click();
   assert.equal(await page.locator('.sketch-canvas circle.local').count(), 4);
+  const upstreamFixed = page.locator(
+    '.constraint-badge.constraint-upstream[data-kind="fixed"]',
+  );
+  assert.equal(await upstreamFixed.count(), 1);
+  await upstreamFixed.hover();
+  assert.match(
+    await point(page, 1, 'upstream').getAttribute('class'),
+    /constraint-related/,
+  );
+  assert.doesNotMatch(
+    await point(page, 1).getAttribute('class'),
+    /constraint-related/,
+  );
+  await page.locator('.constraint-badge[data-kind="midpoint"]').hover();
+  assert.equal(await page.locator('circle.constraint-related').count(), 3);
+  assert.match(
+    await point(page, 1, 'upstream').getAttribute('class'),
+    /constraint-related/,
+  );
   const center = await screenPoint(point(page, 1, 'upstream'));
   await page.getByRole('button', {name: 'Select', exact: true}).click();
   await drag(page, point(page, 1, 'upstream'), 30, 20);

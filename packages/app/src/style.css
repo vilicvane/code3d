@@ -1192,9 +1192,56 @@ kbd {
   stroke: #6b7063;
   fill: var(--panel);
 }
+.sketch-canvas .constraint-related {
+  stroke: #dbe9a0;
+  stroke-width: 3;
+}
 .sketch-canvas .selected {
   stroke: var(--acid);
   stroke-width: 3;
+}
+.sketch-canvas[data-tool='Trim'] {
+  cursor: crosshair;
+}
+.sketch-canvas .trim-preview {
+  stroke: #ed897b;
+  stroke-width: 4;
+}
+.sketch-canvas .constraint-badge {
+  color: #bac78f;
+  cursor: help;
+  outline: none;
+}
+.sketch-canvas .constraint-badge rect {
+  fill: #20251d;
+  stroke: #515b40;
+}
+.sketch-canvas .constraint-badge text {
+  fill: currentColor;
+  font:
+    10px 'IBM Plex Mono',
+    monospace;
+}
+.sketch-canvas .constraint-upstream {
+  color: #91998a;
+}
+.sketch-canvas .constraint-upstream rect {
+  fill: #1e211c;
+  stroke: #3e4539;
+}
+.sketch-canvas .constraint-active rect {
+  stroke: #dbe9a0;
+}
+.sketch-canvas .constraint-guides {
+  color: #818b64;
+  stroke: currentColor;
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+  pointer-events: none;
+}
+.sketch-canvas .constraint-guides.constraint-active {
+  color: #dbe9a0;
+  stroke-width: 2;
 }
 .sketch-canvas .draft {
   stroke: var(--acid);

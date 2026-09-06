@@ -76,6 +76,12 @@ implementation context and historical outcomes, not a competing work queue.
   constraints are removed, while direction constraints and their expressions
   follow surviving lines in the same undo transaction. Upstream geometry can
   delimit a local trim but remains read-only.
+  The Scissors/Trim tool previews on hover and trims directly on click without
+  selection; Esc exits. Select + Delete/Backspace uses the same transaction.
+  Persistent constraints have read-only glyphs and numeric labels, an overall
+  visibility toggle, and hover/focus highlighting of actual participants.
+  Midpoint guides link the center to its two endpoints; upstream markers are
+  distinct and drag-only locks are not presented as persistent constraints.
   Circles/arcs, curve trimming, regions and B-Rep generation remain later slices.
   See [research and priorities](plans/sketch-editor.md) and
   [#23](https://github.com/vilicvane/code3d/issues/23); curve formats

@@ -4,6 +4,7 @@ const width = 30;
 
 // Current geometry is separate from constraints. The explicit width stays
 // fixed; drag point 3 to change the unconstrained height, or edit width in code.
+// Hover constraint markers to highlight their geometry; Constraints toggles them.
 export const sketch1 = sketch(
   [
     ['point', 1, [0, 0]],
@@ -65,6 +66,7 @@ export const rectangle = sketch(
 
 // Center rectangle retains a normal center point (1), referenceable downstream.
 // Width is fixed; in this fresh sketch, drag a corner to resize height around it.
+// The midpoint marker links the center to two opposite corners with dashed guides.
 export const centeredRectangle = sketch(
   [
     ['point', 1, [0, 0]],
@@ -95,10 +97,11 @@ export const centeredDetail = centeredRectangle.derive([
   ['line', 2, [centeredRectangle.point(1), 1]],
 ]);
 
-// Select the middle of line 7 and press Delete: only the part between the two
+// Activate Trim (scissors), hover and click the middle of line 7: only the part between the two
 // crossings is removed. The original line splits into two new IDs; the cutting
 // lines stay intact. Undo restores the unsplit source in one step.
 // Deleting an outer segment also removes its now-disconnected endpoint.
+// Esc exits Trim. Select + Delete/Backspace remains available.
 export const trimming = sketch([
   ['point', 1, [0, 0]],
   ['point', 2, [40, 0]],
