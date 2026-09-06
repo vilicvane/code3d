@@ -211,7 +211,8 @@ implementation context and historical outcomes, not a competing work queue.
   5px; passive line decorations and source highlights are 1px; interactive
   topology selection guides and highlights are 2px. Direction arrowheads are
   10px long and 6px wide at every zoom and device pixel ratio. Align source and
-  target heads share that size; the target uses 40% opacity. Available references are dim gray,
+  target heads share that size; relation emphasis scales the entire secondary
+  marker group to 70% of its base opacity. Available references are dim gray,
   previewed/selected references yellow-green, hovered unselected references
   cyan, and hovered selected references orange. Hover changes color only;
   face fill opacity stays constant and selected and hovered fills do not stack.
@@ -246,6 +247,26 @@ implementation context and historical outcomes, not a competing work queue.
   while final model geometry and exports remain unchanged. An unsolvable prefix
   reports a local preview diagnostic without invalidating a solvable final model.
   See [#44](https://github.com/vilicvane/code3d/issues/44).
+- Relation marker focus follows source scopes: on/align methods and later
+  chain operations (including their arguments) emphasize self; the target
+  argument range, including whitespace and nested expressions, emphasizes the
+  target element. Explicit receiver references emphasize the source. Reverse
+  syntax still assigns chain operations to self. Each relation side retains
+  its own identity even when both reference the same model node. Main markers
+  keep their base opacity; all secondary arrows, rings, bounds, surfaces and
+  edges multiply it by 0.7. Model translucency instead ensures visibility
+  through geometry using an opacity cap, never a multiplier on paint:
+  `min(materialOpacity, levelLimit)`. Primary surfaces are capped at 0.82;
+  secondary surfaces, lines and points at 0.7. Default surfaces already at
+  0.68 remain at 0.68 on both sides, with markers expressing focus. These
+  models retain their colors, including group children. Other related models
+  form a third, dimmed context level (surface cap 0.18, line and point cap
+  0.28), preserving any already lower material opacity. Model caps and marker
+  multipliers are separate settings. The other side of the current constraint
+  must not share the outer context's dimming. One relation decoration provider
+  owns both groups, without an additional ordinary topology-reference highlight.
+  Value identities remain separate from marker focus so completion uses the
+  actual reference receiver. See [#46](https://github.com/vilicvane/code3d/issues/46).
 - Model values inside constraint expressions and function parameter bindings
   share the same relation-context matching as named and topology anchors.
   Parameters are observed at function-body entry, including destructured,
@@ -256,8 +277,9 @@ implementation context and historical outcomes, not a competing work queue.
   their standalone frames. Ordinary value sites outside relation construction
   retain standalone placement. See [#22](https://github.com/vilicvane/code3d/issues/22).
 - Named-element properties and topology anchors share one relation-preview
-  context: the owning model is the focus, with the other participant and the
-  concrete downstream composition visible as dimmed peers. Matching uses the
+  context: the current relation side is the focus, the other participant has
+  secondary emphasis, and the remaining concrete downstream composition is
+  dimmed context. Matching uses the
   enclosing constraint's source range and execution, including repeated calls
   sharing a reference model. Topology accessors retain their own selection IDs,
   arguments, and tool execution. Named point, line, face, and frame elements

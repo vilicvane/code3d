@@ -12,7 +12,8 @@ import type {
   ViewportAnchorDecoration,
   ViewportDecoration,
 } from '../viewport-decoration';
-import type {SourceTargetEvaluation} from './compiler';
+import type {ModelModule, SourceTargetEvaluation} from './compiler';
+import {evaluatedConstraint, focusedConstraintSide} from './constraint-context';
 import {boundAppearance} from '../rendering/bound-appearance';
 
 const elementAppearance = {
@@ -60,17 +61,7 @@ function sourceElementReferences(evaluation: SourceTargetEvaluation) {
 export const elementSourceDecoration = {
   id: 'named-element',
   decorations({module, evaluation}) {
-    if (evaluation.constraintId) {
-      const owner =
-        evaluation.constraintPreview ??
-        module.objects.get(evaluation.constraintOwnerNodeId ?? '');
-      if (
-        owner?.constraints.some(
-          c => c.id === evaluation.constraintId && c.kind === 'align',
-        )
-      )
-        return [];
-    }
+    if (evaluatedConstraint(module.objects, evaluation)) return [];
     return sourceElementReferences(evaluation).flatMap(reference => {
       const node = module.objects.get(reference.nodeId);
       return node ? namedElementDecorations(node, reference) : [];
@@ -369,129 +360,116 @@ function boundMesh(element: ElementSnapshot): RenderMesh {
   };
 }
 
+const secondaryRelationMarkerOpacity = 0.7;
+
 export const relationSourceDecoration: SourceDecorationProvider = {
   id: 'relation-geometry',
   decorations({module, evaluation}) {
-    if (!evaluation.constraintId || !evaluation.constraintOwnerNodeId)
-      return [];
-    const owner =
-      evaluation.constraintPreview ??
-      module.objects.get(evaluation.constraintOwnerNodeId);
-    const constraint = owner?.constraints.find(
-      candidate => candidate.id === evaluation.constraintId,
-    );
+    const constraint = evaluatedConstraint(module.objects, evaluation);
     if (!constraint) return [];
-    if (constraint.kind === 'align') {
-      return [
-        {
-          reference: constraint.source,
-          element: constraint.sourceElement,
-          role: 'source' as const,
+    const focus = focusedConstraintSide(evaluation, constraint);
+    return (['source', 'target'] as const).flatMap(side => {
+      const node = module.objects.get(constraint[side].nodeId);
+      if (!node) return [];
+      const element =
+        side === 'source' ? constraint.sourceElement : constraint.targetElement;
+      const decorations: readonly ViewportDecoration[] =
+        constraint.kind === 'align'
+          ? alignedElementDecorations(module, node, element)
+          : [
+              ...(side === 'source'
+                ? [
+                    {
+                      kind: 'bounds' as const,
+                      id: 'bounds',
+                      nodeId: node.nodeId,
+                      ...constraint.sourceBounds,
+                      appearance: boundAppearance,
+                    },
+                  ]
+                : []),
+              ...namedElementDecorations(node, element),
+            ];
+      const opacity = side === focus ? 1 : secondaryRelationMarkerOpacity;
+      return decorations.map(decoration => ({
+        ...decoration,
+        id: `${constraint.id}:${side}:${decoration.id}`,
+        appearance: {
+          ...decoration.appearance,
+          opacity: (decoration.appearance.opacity ?? 1) * opacity,
+          edgeOpacity: decoration.appearance.edgeColor
+            ? (decoration.appearance.edgeOpacity ?? 1) * opacity
+            : undefined,
         },
-        {
-          reference: constraint.target,
-          element: constraint.targetElement,
-          role: 'target' as const,
-        },
-      ].flatMap<ViewportDecoration>(({reference, element, role}) => {
-        const node = module.objects.get(reference.nodeId);
-        if (!node) return [];
-        const decorations = namedElementDecorations(node, element);
-        const topology = element.topology;
-        const geometry =
-          topology && module.objects.get(topology.geometryNodeId);
-        const curve = element.kind === 'line' && element.arrow;
-        const anchors = decorations
-          .filter(d => d.kind === 'anchor')
-          .map(d => {
-            return {
-              ...d,
-              id: `${constraint.id}:${role}:direction`,
-              transform: curve
-                ? {...element.arrow!, scale: [1, 1, 1] as const}
-                : d.transform,
-              direction: curve ? (1 as const) : (element.direction ?? 1),
-              headOnly: !!curve,
-              directed: true,
-              appearance: {
-                ...d.appearance,
-                opacity: role === 'target' ? 0.4 : d.appearance.opacity,
-              },
-            };
-          });
-        if (!geometry?.mesh || !topology)
-          return [...decorations.filter(d => d.kind !== 'anchor'), ...anchors];
-        if (topology.kind === 'edge')
-          return [
-            {
-              kind: 'edges' as const,
-              nodeId: node.nodeId,
-              id: `${constraint.id}:${role}:curve`,
-              mesh: geometry.mesh,
-              edgeIds: [topology.id],
-              transform: topology.transform,
-              appearance: axisAppearance,
-            },
-            ...anchors,
-          ];
-        if (topology.kind === 'surface') {
-          const groups = geometry.mesh.surfaceGroups.filter(
-            group =>
-              JSON.stringify(group.surfaceId) === JSON.stringify(topology.id),
-          );
-          const triangles = new Uint32Array(
-            groups.flatMap(group => [
-              ...geometry.mesh!.triangles.slice(
-                group.start,
-                group.start + group.count,
-              ),
-            ]),
-          );
-          const mesh = {
-            ...geometry.mesh,
-            triangles,
-            edges: boundaryEdges(geometry.mesh.vertices, triangles),
-            edgeGroups: [],
-          };
-          return [
-            {
-              kind: 'mesh' as const,
-              nodeId: node.nodeId,
-              id: `${constraint.id}:${role}:surface`,
-              mesh,
-              transform: topology.transform,
-              appearance: faceAppearance,
-            },
-            ...anchors,
-          ];
-        }
-        return anchors;
-      });
-    }
-    const references = sourceElementReferences(evaluation);
-    return [
-      {
-        kind: 'bounds' as const,
-        id: `${constraint.id}:source:bounds`,
-        nodeId: constraint.source.nodeId,
-        ...constraint.sourceBounds,
-        appearance: boundAppearance,
-      },
-      ...[
-        {nodeId: constraint.source.nodeId, bound: constraint.sourceElement},
-        {nodeId: constraint.target.nodeId, bound: constraint.targetElement},
-      ]
-        .filter(
-          ({nodeId, bound}) =>
-            !references.some(
-              reference =>
-                reference.nodeId === nodeId && reference.name === bound.name,
-            ),
-        )
-        .flatMap(({nodeId, bound}) => {
-          const node = module.objects.get(nodeId);
-          return node ? namedElementDecorations(node, bound) : [];
-        }),
-    ];
+      }));
+    });
   },
 };
+
+function alignedElementDecorations(
+  module: ModelModule,
+  node: ModelSnapshotObject,
+  element: ElementSnapshot,
+): readonly ViewportDecoration[] {
+  const decorations = namedElementDecorations(node, element);
+  const topology = element.topology;
+  const geometry = topology && module.objects.get(topology.geometryNodeId);
+  const curve = element.kind === 'line' && element.arrow;
+  const anchors = decorations
+    .filter(d => d.kind === 'anchor')
+    .map(d => ({
+      ...d,
+      transform: curve
+        ? {...element.arrow!, scale: [1, 1, 1] as const}
+        : d.transform,
+      direction: curve ? (1 as const) : (element.direction ?? 1),
+      headOnly: !!curve,
+      directed: true,
+    }));
+  if (!geometry?.mesh || !topology)
+    return [...decorations.filter(d => d.kind !== 'anchor'), ...anchors];
+  if (topology.kind === 'edge')
+    return [
+      {
+        kind: 'edges',
+        nodeId: node.nodeId,
+        id: 'curve',
+        mesh: geometry.mesh,
+        edgeIds: [topology.id],
+        transform: topology.transform,
+        appearance: axisAppearance,
+      },
+      ...anchors,
+    ];
+  if (topology.kind === 'surface') {
+    const groups = geometry.mesh.surfaceGroups.filter(
+      group => JSON.stringify(group.surfaceId) === JSON.stringify(topology.id),
+    );
+    const triangles = new Uint32Array(
+      groups.flatMap(group => [
+        ...geometry.mesh!.triangles.slice(
+          group.start,
+          group.start + group.count,
+        ),
+      ]),
+    );
+    const mesh = {
+      ...geometry.mesh,
+      triangles,
+      edges: boundaryEdges(geometry.mesh.vertices, triangles),
+      edgeGroups: [],
+    };
+    return [
+      {
+        kind: 'mesh',
+        nodeId: node.nodeId,
+        id: 'surface',
+        mesh,
+        transform: topology.transform,
+        appearance: faceAppearance,
+      },
+      ...anchors,
+    ];
+  }
+  return anchors;
+}

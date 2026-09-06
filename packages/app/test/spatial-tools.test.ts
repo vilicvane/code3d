@@ -489,10 +489,15 @@ test('a bound selection renders each computed plane once across named and relati
   assert.ok(target);
   const scope = {module, target, evaluation: defined(target).evaluations[0]};
   const named = elementSourceDecoration.decorations(scope);
-  const targetMesh = named.find(decoration => decoration.kind === 'surface');
-  assert.equal(defined(targetMesh).mesh.vertices.length, 12);
-  assert.deepEqual(defined(targetMesh).mesh.surfaceGroups, []);
+  assert.equal(named.length, 0);
   const contacts = relationSourceDecoration.decorations(scope);
+  const targetMesh = contacts.find(
+    decoration =>
+      decoration.kind === 'surface' && decoration.id.includes(':target:'),
+  );
+  assert.ok(targetMesh?.kind === 'surface');
+  assert.equal(targetMesh.mesh.vertices.length, 12);
+  assert.deepEqual(targetMesh.mesh.surfaceGroups, []);
   const combined = [...named, ...contacts];
   assert.equal(new Set(combined.map(item => item.id)).size, combined.length);
   assert.equal(

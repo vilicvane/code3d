@@ -158,7 +158,10 @@ test(
           .filter(part => part.kind !== 'selection')
           .every(part => part.color === 'd8ff3e'),
       );
-      assert.equal(source.find(part => part.kind === 'surface').opacity, 0.18);
+      assert.equal(
+        source.find(part => part.kind === 'surface').opacity,
+        0.18 * (sourceId === result.selectedId ? 1 : 0.7),
+      );
       if (spec.geometry.startsWith('group') && sourceId === result.selectedId) {
         assert.equal(result.groupBoxBefore, false);
         assert.equal(result.groupBoxAfter, true);

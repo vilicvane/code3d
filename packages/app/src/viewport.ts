@@ -52,6 +52,11 @@ import type {SpatialObjectPreview} from './tools/spatial-edit';
 import {ViewportCoordinateReference} from './ui/viewport-coordinate-reference';
 import {pickScreenTopology} from './rendering/topology-picking';
 import {boundAppearance} from './rendering/bound-appearance';
+import {
+  applySourceEmphasis,
+  type SourceEmphasis,
+} from './rendering/source-appearance';
+import {evaluatedConstraint} from './model/constraint-context';
 import {writeBoxEdges} from './rendering/box-edges';
 import {AnchorDecorationObject} from './rendering/anchor-decoration';
 import {
@@ -492,6 +497,7 @@ export class ModelViewport {
     const evaluation = target.evaluations[evaluationIndex];
     if (!this.module || !evaluation) return false;
     const receiverNodeId =
+      evaluation.valueNodeIds?.[0] ??
       evaluation.focusNodeIds?.[0] ??
       evaluation.nodeIds.find(nodeId => this.module?.objects.has(nodeId));
     const receiver = receiverNodeId
@@ -507,16 +513,22 @@ export class ModelViewport {
     );
     const previewEvaluation: SourceTargetEvaluation = {
       ...evaluation,
+      // This immediate member preview precedes recompiling its relation.
+      // Keep its actual receiver and never draw the previous contact snapshot.
+      constraintId: undefined,
+      constraintOwnerNodeId: undefined,
+      constraintFocus: undefined,
+      constraintPreview: undefined,
+      constraintPreviewDiagnostic: undefined,
+      constraintSpatial: undefined,
       topologyReferences: element?.topology
         ? [{nodeId: receiver.nodeId, name: element.name, ...element.topology}]
         : undefined,
       anchorReferences: undefined,
       element: element
         ? {
+            ...element,
             nodeId: receiver.nodeId,
-            name: element.name,
-            kind: element.kind,
-            transform: element.transform,
           }
         : undefined,
     };
@@ -1070,9 +1082,20 @@ export class ModelViewport {
     this.renderedViewTarget = renderedViewTarget;
     this.resetRenderedView();
     this.onSourcePreviewDiagnostic?.(evaluation.constraintPreviewDiagnostic);
+    const constraint = evaluatedConstraint(this.module!.objects, evaluation);
     contextNodes.forEach(({node, targetId}, index) => {
       this.root.add(
-        this.buildContextObject(node, `context/${index}`, targetId, placement),
+        this.buildContextObject(
+          node,
+          `context/${index}`,
+          targetId,
+          placement,
+          constraint &&
+            (node.nodeId === constraint.source.nodeId ||
+              node.nodeId === constraint.target.nodeId)
+            ? 'secondary'
+            : 'context',
+        ),
       );
     });
     focusNodes.forEach((node, index) => {
@@ -1089,19 +1112,23 @@ export class ModelViewport {
         placement,
         operationRole,
       );
-      const references =
-        evaluation.topologyReferences?.filter(
-          reference => reference.nodeId === node.nodeId,
-        ) ?? [];
-      if (
+      // The current relation provider already owns both element highlights.
+      const references = constraint
+        ? []
+        : (evaluation.topologyReferences?.filter(
+            reference => reference.nodeId === node.nodeId,
+          ) ?? []);
+      if (constraint) {
+        applySourceEmphasis(object, 'primary');
+      } else if (
         references.length > 0 ||
         (target.kind === 'topology-selection' && !evaluation.operationId)
       ) {
-        dimObject(object);
+        applySourceEmphasis(object, 'context');
       } else if (operationRole === 'tool') {
         makeToolObjectTranslucent(object);
       } else if (layeredScene) {
-        makeFocusObjectTranslucent(object);
+        applySourceEmphasis(object, 'primary');
       }
       for (const reference of references) {
         const mesh = this.module!.objects.get(reference.geometryNodeId)?.mesh;
@@ -1199,6 +1226,7 @@ export class ModelViewport {
     key: string,
     targetId: string,
     placement: ModelPlacement,
+    emphasis: Exclude<SourceEmphasis, 'primary'>,
   ): THREE.Object3D {
     const object = createRenderedModelNode(node);
     object.name = `${node.name} (context)`;
@@ -1206,7 +1234,7 @@ export class ModelViewport {
     object.userData.sourceTargetId = targetId;
     object.userData.sourceNodeId = node.nodeId;
     applyNodeTransform(object, node, placement);
-    dimObject(object);
+    applySourceEmphasis(object, emphasis);
     this.contextOccurrences.set(key, {
       key,
       node,
@@ -1217,7 +1245,13 @@ export class ModelViewport {
     });
     node.children.forEach((child, index) => {
       object.add(
-        this.buildContextObject(child, `${key}/${index}`, targetId, placement),
+        this.buildContextObject(
+          child,
+          `${key}/${index}`,
+          targetId,
+          placement,
+          emphasis,
+        ),
       );
     });
     return object;
@@ -2675,44 +2709,8 @@ function surfaceIdFromIntersection(
   )?.surfaceId;
 }
 
-function dimObject(object: THREE.Object3D): void {
-  object.traverse(child => {
-    if (child instanceof THREE.Mesh) {
-      const materials = Array.isArray(child.material)
-        ? child.material
-        : [child.material];
-      materials.forEach(material => {
-        if (material instanceof THREE.MeshStandardMaterial) {
-          material.color.set('#788078');
-          material.transparent = true;
-          material.opacity = 0.18;
-          material.depthWrite = false;
-        }
-      });
-      child.renderOrder = -2;
-    } else if (child instanceof THREE.LineSegments) {
-      const materials = Array.isArray(child.material)
-        ? child.material
-        : [child.material];
-      materials.forEach(material => {
-        if (material instanceof THREE.LineBasicMaterial) {
-          material.color.set('#a1aa9d');
-          material.transparent = true;
-          material.opacity = 0.28;
-          material.depthWrite = false;
-        }
-      });
-      child.renderOrder = -1;
-    }
-  });
-}
-
 function makeToolObjectTranslucent(object: THREE.Object3D): void {
   makeObjectSurfacesTranslucent(object, toolSurfaceOpacity);
-}
-
-function makeFocusObjectTranslucent(object: THREE.Object3D): void {
-  makeObjectSurfacesTranslucent(object, 0.82);
 }
 
 function makeObjectSurfacesTranslucent(
