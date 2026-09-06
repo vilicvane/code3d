@@ -1,15 +1,24 @@
+import {
+  defined,
+  modelObject,
+  createModelSnapshotter,
+  disposeModelObjects,
+} from './model-test.ts';
+import type {
+  ModelOperationInstrumentation,
+  Constraint,
+} from '@code3d/core/tooling';
+
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {box} from '../bld/node/index.js';
 import {
   beginModelEvaluation,
-  createModelSnapshotter,
-  disposeModelObjects,
   instrumentConstraint,
   instrumentModelOperation,
 } from '../bld/tooling/index.js';
 
-function instrumentation(start) {
+function instrumentation(start: number): ModelOperationInstrumentation {
   const sourceRef = {file: '/model.ts', start, end: start + 10};
   return {
     siteId: `site-${start}`,
@@ -41,7 +50,7 @@ test('starts fresh provenance for a retained model without changing its geometry
   const model = box(10, 12, 14);
   try {
     const firstTrace = instrumentation(0);
-    instrumentModelOperation(model, firstTrace);
+    instrumentModelOperation(modelObject(model), firstTrace);
     const first = createModelSnapshotter()(model);
     assert.deepEqual(first.sourceRefs, [firstTrace.sourceRef]);
     assert.deepEqual(first.parameters, firstTrace.parameters);
@@ -56,7 +65,7 @@ test('starts fresh provenance for a retained model without changing its geometry
     assert.deepEqual(fresh.mesh, first.mesh);
 
     const secondTrace = instrumentation(100);
-    instrumentModelOperation(model, secondTrace);
+    instrumentModelOperation(modelObject(model), secondTrace);
     const second = createModelSnapshotter()(model);
     assert.deepEqual(second.sourceRefs, [secondTrace.sourceRef]);
     assert.deepEqual(second.parameters, secondTrace.parameters);
@@ -73,7 +82,7 @@ test('clears cached constraint provenance without losing the stored relation or 
   const base = box(10, 12, 14);
   const target = box(20, 24, 28);
   const trace = instrumentation(10);
-  let constraint;
+  let constraint: Constraint | undefined;
   const related = base.relate(copy => {
     constraint = copy.on(target.down).offset(2, 3, 4);
     instrumentConstraint(constraint, trace.sourceRef, trace.parameters);
@@ -93,9 +102,9 @@ test('clears cached constraint provenance without losing the stored relation or 
     assert.deepEqual(second.constraints[0].offset, [2, 3, 4]);
     assert.deepEqual(second.mesh, first.mesh);
     // A cached Constraint also copies only the current evaluation's metadata.
-    const shifted = constraint.offset(1, 0, 0);
-    assert.deepEqual(shifted.sourceRefs, []);
-    assert.deepEqual(shifted.parameters, []);
+    const shifted = defined(constraint).offset(1, 0, 0);
+    assert.deepEqual(Reflect.get(shifted, 'sourceRefs'), []);
+    assert.deepEqual(Reflect.get(shifted, 'parameters'), []);
   } finally {
     disposeModelObjects([base, target, related]);
   }

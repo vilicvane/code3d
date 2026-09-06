@@ -59,6 +59,27 @@ npm run dev
 
 Open [localhost:3133](http://localhost:3133) in your browser.
 
+## Tests
+
+Write runtime tests as `*.test.ts` with `node:test` and `node:assert/strict`.
+Node.js 24 runs the files directly; use erasable TypeScript syntax and explicit
+`.ts` extensions when importing test helpers. Type-only fixtures such as
+`public-api.ts` are checked but never executed by the test runner.
+
+```bash
+npm test                         # build packages, check types, run workspace tests
+npm run test:types               # check all migrated tests, including browser tests
+npm test --workspace @code3d/core
+```
+
+App tests use Vite when the tested module needs its transformations. Browser
+tests connect to host Chrome over CDP and run against an existing development
+server:
+
+```bash
+CODE3D_TEST_URL=http://localhost:3133 npm run test:browser --workspace @code3d/app
+```
+
 ## Project status
 
 Code3D is currently Prototype 01. APIs and project behavior are still evolving.

@@ -1,3 +1,6 @@
+import {defined, createModelSnapshotter} from './model-test.ts';
+import type {Model, Anchor} from '@code3d/core';
+
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
@@ -15,23 +18,25 @@ import {
 } from '@code3d/core';
 import {
   composeTransforms,
-  createModelSnapshotter,
   modelElementReference,
   rotateVector,
 } from '@code3d/core/tooling';
 
 const snapshot = createModelSnapshotter();
-const pose = model => snapshot(model).compositionTransform;
-const near = (a, b, tolerance = 1e-6) =>
+const pose = (model: Model) => snapshot(model).compositionTransform;
+const near = (a: readonly number[], b: readonly number[], tolerance = 1e-6) =>
   a.forEach((v, i) =>
     assert.ok(Math.abs(v - b[i]) < tolerance, `${a} != ${b}`),
   );
-const position = model => pose(model).position;
-const world = (model, reference) =>
-  composeTransforms(pose(model), modelElementReference(reference).transform);
-const direction = (model, reference) =>
+const position = (model: Model) => pose(model).position;
+const world = (model: Model, reference: Anchor) =>
+  composeTransforms(
+    pose(model),
+    defined(modelElementReference(reference)).transform,
+  );
+const direction = (model: Model, reference: Anchor) =>
   rotateVector(
-    [0, modelElementReference(reference).direction ?? 1, 0],
+    [0, defined(modelElementReference(reference)).direction ?? 1, 0],
     world(model, reference).quaternion,
   );
 
@@ -39,8 +44,8 @@ test('point coincidence translates self on either written side and preserves ori
   const original = point([1, 2, 3]),
     target = point([10, 20, 30]);
   for (const build of [
-    s => s.align(target),
-    s => target.align(s),
+    (s: typeof original) => s.align(target),
+    (s: typeof original) => target.align(s),
     () => original.align(target),
   ]) {
     const placed = original.relate(build);
@@ -81,7 +86,7 @@ test('directed line coincidence is independent of parameter origins and reverse 
   const edge = target.edge(1),
     before = modelElementReference(edge),
     after = modelElementReference(edge.reverse());
-  assert.deepEqual(before.transform, after.transform);
+  assert.deepEqual(defined(before).transform, defined(after).transform);
   assert.deepEqual(modelElementReference(edge.reverse().reverse()), before);
 });
 
@@ -176,8 +181,8 @@ test('align offset moves self in the target frame and zero does not pin a trim c
       (reverse ? target.align(s) : s.align(target)).offset(0, 5, 0),
     );
     const axes = reverse
-      ? modelElementReference(original.center).transform.quaternion
-      : modelElementReference(target.edge(1)).transform.quaternion;
+      ? defined(modelElementReference(original.center)).transform.quaternion
+      : defined(modelElementReference(target.edge(1))).transform.quaternion;
     const offset = rotateVector([0, 5, 0], axes);
     near(
       position(placed),
@@ -196,11 +201,11 @@ test('elliptic cylinder sections and spherical latitude circles constrain the wh
     s.edge(1).align(ball.surface(1)),
   );
   for (const [model, radial] of [
-    [ellipseOnCylinder, p => Math.hypot(p[0], p[2])],
-    [circleOnSphere, p => Math.hypot(...p)],
-  ]) {
+    [ellipseOnCylinder, (p: readonly number[]) => Math.hypot(p[0], p[2])],
+    [circleOnSphere, (p: readonly number[]) => Math.hypot(...p)],
+  ] as const) {
     const value = snapshot(model),
-      edges = value.mesh.edges;
+      edges = defined(value.mesh).edges;
     for (let i = 0; i < edges.length; i += 3) {
       const p = composeTransforms(value.compositionTransform, {
         position: [edges[i], edges[i + 1], edges[i + 2]],
@@ -234,7 +239,7 @@ test('rotation, pivot and reversed around axes remain authored after alignment',
 
 test('multiple point relations jointly determine orientation and compose with on', () => {
   const original = line([0, 0, 0], [0, 10, 0]);
-  const build = reverse =>
+  const build = (reverse: boolean) =>
     original.relate(s => {
       const conditions = [
         s.start.align(point([20, 0, 0])),

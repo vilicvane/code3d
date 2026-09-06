@@ -9,7 +9,9 @@
   "type": "module",
   "scripts": {
     "prepack": "node ../../scripts/package-license.mjs",
-    "test": "tsc --build src/library/tsconfig.json && tsc --noEmit -p test/tsconfig.json && node --test test/*.test.mjs"
+    "test": "node ../../node_modules/typescript/bin/tsc --build src/library/tsconfig.json && npm run test:types && npm run test:run",
+    "test:run": "node --test \"test/*.test.ts\"",
+    "test:types": "node ../../node_modules/typescript/bin/tsc --noEmit -p test/tsconfig.json"
   },
   "exports": {
     ".": {

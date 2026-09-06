@@ -1,7 +1,4 @@
 {
-  "extends": "../../../tsconfig.base.json",
-  "compilerOptions": {
-    "noEmit": true
-  },
-  "files": ["public-api.ts"]
+  "extends": "../../../tsconfig.test.json",
+  "include": ["**/*.ts"]
 }

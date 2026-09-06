@@ -1,3 +1,6 @@
+import {defined, createModelSnapshotter} from './model-test.ts';
+import type {Model} from '@code3d/core';
+
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {
@@ -10,24 +13,22 @@ import {
   regularPolygon,
   regularPrism,
 } from '../bld/node/index.js';
-import {
-  createModelSnapshotter,
-  rotationAround,
-  composeTransforms,
-} from '../bld/tooling/index.js';
+import {rotationAround, composeTransforms} from '../bld/tooling/index.js';
 
 const snapshot = createModelSnapshotter();
-const near = (actual, expected) => {
+const near = (actual: readonly number[], expected: readonly number[]) => {
   assert.equal(actual.length, expected.length);
   actual.forEach((value, i) =>
     assert.ok(Math.abs(value - expected[i]) < 1e-6, `${actual} != ${expected}`),
   );
 };
-const vertices = model => [...snapshot(model).mesh.topologyVertices];
-const center = model =>
-  snapshot(model).elements.find(element => element.name === 'center').transform
-    .position;
-function boundsCenter(model) {
+const vertices = (model: Model) => [
+  ...defined(snapshot(model).mesh).topologyVertices,
+];
+const center = (model: Model) =>
+  defined(snapshot(model).elements.find(element => element.name === 'center'))
+    .transform.position;
+function boundsCenter(model: Model) {
   const points = vertices(model);
   return [0, 1, 2].map(axis => {
     const coordinates = points.filter((_, index) => index % 3 === axis);
@@ -59,9 +60,9 @@ test('originCenter uses the original body center carried through transforms, not
   );
   near(snapshot(centered.origin(4, 5, 6)).origin, [4, 5, 6]);
   const mesh = snapshot(centered).mesh;
-  const index = mesh.vertexIds.indexOf(1) * 3;
+  const index = defined(mesh).vertexIds.indexOf(1) * 3;
   near(snapshot(centered.originVertex(1)).origin, [
-    ...mesh.topologyVertices.slice(index, index + 3),
+    ...defined(mesh).topologyVertices.slice(index, index + 3),
   ]);
 });
 
@@ -90,13 +91,13 @@ test('origin setters replace and offsets accumulate without moving geometry or o
   near(vertices(offset), vertices(base));
   const pivot = offset.originVertex(3);
   const mesh = snapshot(base).mesh;
-  const index = mesh.vertexIds.indexOf(3) * 3;
+  const index = defined(mesh).vertexIds.indexOf(3) * 3;
   near(snapshot(pivot).origin, [
-    ...mesh.topologyVertices.slice(index, index + 3),
+    ...defined(mesh).topologyVertices.slice(index, index + 3),
   ]);
   near(snapshot(pivot.originOffset(1, 2, 3).origin(9, 8, 7)).origin, [9, 8, 7]);
   assert.throws(() => base.originVertex(99), /Unknown or retired vertex V99/);
-  for (const method of ['origin', 'originOffset', 'rotate']) {
+  for (const method of ['origin', 'originOffset', 'rotate'] as const) {
     assert.throws(() => base[method](NaN, 0, 0), /finite/);
     assert.throws(() => base[method](0, Infinity, 0), /finite/);
   }
@@ -108,24 +109,27 @@ test('rotation fixes its selected pivot and preserves topology and semantic anch
   const rotated = base.rotate(0, 0, 90);
   const after = snapshot(rotated);
   near(after.origin, before.origin);
-  assert.deepEqual(after.mesh.vertexIds, before.mesh.vertexIds);
   assert.deepEqual(
-    after.mesh.edgeGroups.map(x => x.edgeId),
-    before.mesh.edgeGroups.map(x => x.edgeId),
+    defined(after.mesh).vertexIds,
+    defined(before.mesh).vertexIds,
   );
   assert.deepEqual(
-    after.mesh.surfaceGroups.map(x => x.surfaceId),
-    before.mesh.surfaceGroups.map(x => x.surfaceId),
+    defined(after.mesh).edgeGroups.map(x => x.edgeId),
+    defined(before.mesh).edgeGroups.map(x => x.edgeId),
+  );
+  assert.deepEqual(
+    defined(after.mesh).surfaceGroups.map(x => x.surfaceId),
+    defined(before.mesh).surfaceGroups.map(x => x.surfaceId),
   );
   const [px, py, pz] = before.origin;
-  const expected = vertices(base).reduce((out, _, i, all) => {
+  const expected = vertices(base).reduce<number[]>((out, _, i, all) => {
     if (i % 3 === 0)
       out.push(px - (all[i + 1] - py), py + (all[i] - px), all[i + 2]);
     return out;
   }, []);
   near(vertices(rotated), expected);
   const center = after.elements.find(x => x.name === 'center');
-  near(center.transform.position, [px + py, py - px, 0]);
+  near(defined(center).transform.position, [px + py, py - px, 0]);
   near(vertices(rotated.origin(0, 0, 0)), expected);
   near(vertices(rotated.rotate(0, 0, -90)), vertices(base));
 });
@@ -148,7 +152,8 @@ test('rotation uses fixed local X then Y then Z axes and composes in call order'
 test('rotated curves and faces retain their named and intrinsic relation anchors', () => {
   const curve = line(10, 0, 0).origin(0, 0, 0).rotate(0, 0, 90);
   near(
-    snapshot(curve).elements.find(x => x.name === 'end').transform.position,
+    defined(snapshot(curve).elements.find(x => x.name === 'end')).transform
+      .position,
     [0, 10, 0],
   );
   const face = circle(2).rotate(90, 0, 0);
@@ -168,8 +173,8 @@ test('rotated B-Reps participate in booleans and edge modifications', () => {
   const stock = box(12, 4, 8).origin(2, 0, 1);
   const tool = box(2, 8, 2).rotate(0, 30, 0);
   const drilled = cut(stock, [tool]);
-  assert.ok(snapshot(drilled).mesh.triangles.length > 0);
+  assert.ok(defined(snapshot(drilled).mesh).triangles.length > 0);
   near(snapshot(drilled).origin, [2, 0, 1]);
   const rotated = stock.rotate(23, 45, 67).fillet(0.3, [1]);
-  assert.ok(snapshot(rotated).mesh.triangles.length > 0);
+  assert.ok(defined(snapshot(rotated).mesh).triangles.length > 0);
 });

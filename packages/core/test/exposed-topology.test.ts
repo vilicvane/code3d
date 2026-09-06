@@ -1,9 +1,14 @@
+import type {Anchor, TopologyId} from '@code3d/core';
+import {
+  defined,
+  createModelSnapshotter,
+  disposeModelObjects,
+} from './model-test.ts';
+
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {bezier, box, circle, group, line, point} from '../bld/node/index.js';
 import {
-  createModelSnapshotter,
-  disposeModelObjects,
   modelElementReference,
   modelTopologyReference,
   modelTopologyIds,
@@ -11,9 +16,11 @@ import {
   transformsAreEquivalent,
 } from '../bld/tooling/index.js';
 
-const position = anchor => modelElementReference(anchor).transform.position;
-const ids = elements => elements.map(element => element.id);
-const near = (actual, expected) =>
+const position = (anchor: Anchor) =>
+  defined(modelElementReference(anchor)).transform.position;
+const ids = (elements: readonly {id: TopologyId}[]) =>
+  elements.map(element => element.id);
+const near = (actual: readonly number[], expected: readonly number[]) =>
   actual.forEach((value, index) =>
     assert.ok(
       Math.abs(value - expected[index]) < 1e-5,
@@ -44,9 +51,12 @@ test('subtopology navigation preserves original IDs and restricts membership', (
     const outside = body
       .edges()
       .find(candidate => !ids(face.edges()).includes(candidate.id));
-    assert.throws(() => face.edge(outside.id), /does not belong/);
+    assert.throws(() => face.edge(defined(outside).id), /does not belong/);
     assert.throws(() => face.edge(999), /Unknown or retired edge/);
-    assert.equal(modelTopologyReference(face.edge(first.id)).geometry, body);
+    assert.equal(
+      defined(modelTopologyReference(face.edge(first.id))).geometry,
+      body,
+    );
   } finally {
     disposeModelObjects([body]);
   }
@@ -58,7 +68,7 @@ test('geometry models expose queryable topology without model operations', () =>
     circle(4),
     line([1, 2, 3], [4, 6, 8]),
     point([3, 4, 5]),
-  ];
+  ] as const;
   const assembly = group(models).expose({
     body: models[0],
     profile: models[1],
@@ -71,11 +81,11 @@ test('geometry models expose queryable topology without model operations', () =>
       ['profile', 'surface', models[1]],
       ['path', 'edge', models[2]],
       ['location', 'vertex', models[3]],
-    ]) {
+    ] as const) {
       const value = assembly[name];
       assert.equal(value.kind, kind);
-      assert.equal(modelTopologyReference(value).model, assembly);
-      assert.equal(modelTopologyReference(value).geometry, model);
+      assert.equal(defined(modelTopologyReference(value)).model, assembly);
+      assert.equal(defined(modelTopologyReference(value)).geometry, model);
       near(position(value.center), position(model.center));
       for (const method of [
         'relate',
@@ -87,13 +97,16 @@ test('geometry models expose queryable topology without model operations', () =>
         'fillet',
         'shell',
       ])
-        assert.equal(value[method], undefined);
+        assert.equal(Reflect.get(value, method), undefined);
     }
     assert.equal(assembly.body.surfaces().length, 6);
     assert.equal(assembly.profile.edges().length, 1);
     near(position(assembly.path.start), [1, 2, 3]);
     near(position(assembly.path.end), [4, 6, 8]);
-    assert.equal(modelElementReference(assembly.body.up).model, assembly);
+    assert.equal(
+      defined(modelElementReference(assembly.body.up)).model,
+      assembly,
+    );
   } finally {
     disposeModelObjects([...models, assembly]);
   }
@@ -118,9 +131,9 @@ test('nested exposure and chained constraints move the containing assembly', () 
     near(position(outer.mount.center), [35, 50, 60]);
     near(position(outer.component.body.center), [40, 50, 60]);
     const edge = outer.mount.edges()[0];
-    assert.equal(modelTopologyReference(edge).model, outer);
-    assert.equal(modelTopologyReference(edge).geometry, body);
-    assert.equal(modelElementReference(edge.midpoint).model, outer);
+    assert.equal(defined(modelTopologyReference(edge)).model, outer);
+    assert.equal(defined(modelTopologyReference(edge)).geometry, body);
+    assert.equal(defined(modelElementReference(edge.midpoint)).model, outer);
     const snapshot = createModelSnapshotter()(placed);
     near(snapshot.compositionTransform.position, [-25, -50, -60]);
     assert.equal(snapshot.constraints[0].source.nodeId, snapshot.nodeId);
@@ -149,8 +162,8 @@ test('the same geometry retains independent placement in two exposed occurrences
     const b = assembly.rightBody.surface(1);
     assert.equal(a.id, b.id);
     assert.equal(
-      modelTopologyReference(a).geometry,
-      modelTopologyReference(b).geometry,
+      defined(modelTopologyReference(a)).geometry,
+      defined(modelTopologyReference(b)).geometry,
     );
     near(position(a.center), [-25, 0, 0]);
     near(position(b.center), [15, 0, 0]);
@@ -193,12 +206,15 @@ test('exposed model members retain overrides without colliding with reference in
   });
   const assembly = group([path]).expose({path});
   try {
-    for (const name of ['start', 'reference', 'topology']) {
+    for (const name of ['start', 'reference', 'topology'] as const) {
       near(position(assembly.path[name]), [10, 20, 30]);
-      assert.equal(modelElementReference(assembly.path[name]).model, assembly);
+      assert.equal(
+        defined(modelElementReference(assembly.path[name])).model,
+        assembly,
+      );
     }
     near(position(assembly.path.edge(1).start), [0, 0, 0]);
-    assert.equal(modelTopologyReference(assembly.path).geometry, path);
+    assert.equal(defined(modelTopologyReference(assembly.path)).geometry, path);
   } finally {
     disposeModelObjects([location, path, assembly]);
   }
@@ -214,7 +230,9 @@ test('centers and chained geometry follow rotation and scaling without changing 
   const exposed = path.expose({path}).rotate(20, 35, 70).scaled(2);
   try {
     const original = path.edge(1).center;
-    const frame = modelElementReference(rotated.edge(1).center).transform;
+    const frame = defined(
+      modelElementReference(rotated.edge(1).center),
+    ).transform;
     near(
       position(rotated.edge(1).center),
       rotateVector(position(original), frame.quaternion).map(
@@ -275,8 +293,8 @@ test('querying before or after a geometry transform preserves the same anchor fr
     ])
       assert.ok(
         transformsAreEquivalent(
-          modelElementReference(a).transform,
-          modelElementReference(b).transform,
+          defined(modelElementReference(a)).transform,
+          defined(modelElementReference(b)).transform,
         ),
       );
   } finally {
@@ -305,8 +323,8 @@ test('exposing a model uses the same geometric anchor as its topology element', 
     ]) {
       assert.ok(
         transformsAreEquivalent(
-          modelElementReference(exposed).transform,
-          modelElementReference(selected).transform,
+          defined(modelElementReference(exposed)).transform,
+          defined(modelElementReference(selected)).transform,
         ),
       );
     }

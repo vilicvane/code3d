@@ -1,11 +1,16 @@
+import type {ModelSnapshotObject} from '@code3d/core/tooling';
+import type {Anchor} from '@code3d/core';
+import {
+  defined,
+  createModelSnapshotter,
+  disposeModelObjects,
+  modelGeometry,
+} from './model-test.ts';
+
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {box, cylinder, sphere} from '../bld/node/index.js';
-import {
-  createModelSnapshotter,
-  disposeModelObjects,
-  modelTopologyReference,
-} from '../bld/tooling/index.js';
+import {modelTopologyReference} from '../bld/tooling/index.js';
 
 test('resolves stable vertex, edge, and surface references', () => {
   const snapshotModel = createModelSnapshotter();
@@ -137,7 +142,7 @@ test('resolves curved face anchors even when their centroids are off-surface', (
   try {
     for (const model of models) {
       const surfaces = model.surfaces();
-      const expectedIds = model.geometry.value.topology.surfaces.ids;
+      const expectedIds = modelGeometry(model).value.topology.surfaces.ids;
       assert.deepEqual(referenceIds(surfaces), expectedIds);
       const exposed = model.expose(
         Object.fromEntries(
@@ -159,7 +164,7 @@ test('resolves curved face anchors even when their centroids are off-surface', (
   }
 });
 
-function topologyIds(snapshot) {
+function topologyIds(snapshot: ModelSnapshotObject) {
   return {
     vertices: vertexIds(snapshot),
     edges: edgeIds(snapshot),
@@ -167,21 +172,30 @@ function topologyIds(snapshot) {
   };
 }
 
-function referenceIds(references) {
-  return references.map(reference => modelTopologyReference(reference)?.id);
+function referenceIds(references: readonly Anchor[]) {
+  return references.map(reference => {
+    const value = defined(modelTopologyReference(reference));
+    assert.notEqual(value.kind, 'solid');
+    assert.ok('id' in value);
+    return value.id;
+  });
 }
 
-function vertexIds(snapshot) {
-  return [...snapshot.mesh.vertexIds];
+function vertexIds(snapshot: ModelSnapshotObject) {
+  return [...defined(snapshot.mesh).vertexIds];
 }
 
-function edgeIds(snapshot) {
-  return [...new Set(snapshot.mesh.edgeGroups.map(group => group.edgeId))];
-}
-
-function surfaceIds(snapshot) {
+function edgeIds(snapshot: ModelSnapshotObject) {
   return [
-    ...new Set(snapshot.mesh.surfaceGroups.map(group => group.surfaceId)),
+    ...new Set(defined(snapshot.mesh).edgeGroups.map(group => group.edgeId)),
+  ];
+}
+
+function surfaceIds(snapshot: ModelSnapshotObject) {
+  return [
+    ...new Set(
+      defined(snapshot.mesh).surfaceGroups.map(group => group.surfaceId),
+    ),
   ];
 }
 
