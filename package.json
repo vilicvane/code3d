@@ -7,7 +7,7 @@
   "scripts": {
     "3": "npm install && npm dedupe && npm install",
     "clean": "rimraf dist --glob packages/*/{.cache,bld,dist}",
-    "build:packages": "tsc --build",
+    "build:packages": "node node_modules/typescript/bin/tsc --build",
     "build:solver": "npm run build --workspace @code3d/solver",
     "build": "npm run lint-prettier && npm run clean && npm run build:packages && npm run build --workspace @code3d/app && npm run build --workspace @code3d/web",
     "render:web-images": "npm run render-images --workspace @code3d/web",
@@ -19,7 +19,9 @@
     "core": "npm run --workspace @code3d/core",
     "screws": "npm run --workspace @code3d/screws",
     "web": "npm run --workspace @code3d/web",
-    "build:opencascade": "npm run build --workspace @code3d/opencascade"
+    "build:opencascade": "npm run build --workspace @code3d/opencascade",
+    "test:types": "npm run test:types --workspaces --if-present",
+    "test": "npm run build:packages && npm run test:types && npm run test:run --workspaces --if-present"
   },
   "workspaces": [
     "packages/app",

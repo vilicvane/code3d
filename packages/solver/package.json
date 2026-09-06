@@ -23,6 +23,8 @@
   ],
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "node --test test/*.test.mjs"
+    "test": "npm run test:types && npm run test:run",
+    "test:run": "node --test \"test/*.test.{mjs,ts}\"",
+    "test:types": "node ../../node_modules/typescript/bin/tsc --noEmit -p test/tsconfig.json"
   }
 }

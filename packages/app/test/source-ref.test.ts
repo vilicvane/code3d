@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
+import type {SourceRef} from '@code3d/core/tooling';
 import {rebaseSourceRef} from '../src/tools/source-ref.ts';
 
-function ref(start, end) {
+function ref(start: number, end: number): SourceRef {
   return {file: '/model.ts', start, end};
 }
 
@@ -10,8 +11,9 @@ test('appending openings preserves the neighboring thickness and expands only th
   const original = 'shell(1.5)';
   const source = 'shell(1.5, [4])';
   const changes = [{rangeOffset: 9, rangeLength: 0, text: ', [4]'}];
-  const textAt = originalRef => {
+  const textAt = (originalRef: SourceRef) => {
     const current = rebaseSourceRef(originalRef, changes, false);
+    assert.ok(current);
     return source.slice(current.start, current.end);
   };
   assert.equal(textAt(ref(6, 9)), '1.5');
@@ -24,6 +26,8 @@ test('successive tool edits can change thickness and replace the just-inserted o
   const inserted = [{rangeOffset: 9, rangeLength: 0, text: ', [4]'}];
   const thickness = rebaseSourceRef(ref(6, 9), inserted, false);
   const openings = rebaseSourceRef(ref(9, 9), inserted, false);
+  assert.ok(thickness);
+  assert.ok(openings);
   const changed = [
     {
       rangeOffset: thickness.start,
@@ -32,6 +36,7 @@ test('successive tool edits can change thickness and replace the just-inserted o
     },
   ];
   const current = rebaseSourceRef(openings, changed, false);
+  assert.ok(current);
   const source = 'shell(100, [4])';
   assert.equal(source.slice(current.start, current.end), ', [4]');
   const result =
@@ -44,6 +49,8 @@ test('user typing extends numeric tokens while tool insertion before a token shi
   const source = 'shell(-1.5)';
   const user = rebaseSourceRef(ref(6, 9), insert, true);
   const tool = rebaseSourceRef(ref(6, 9), insert, false);
+  assert.ok(user);
+  assert.ok(tool);
   assert.equal(source.slice(user.start, user.end), '-1.5');
   assert.equal(source.slice(tool.start, tool.end), '1.5');
   assert.deepEqual(

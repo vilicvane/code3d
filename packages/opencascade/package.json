@@ -23,7 +23,8 @@
   ],
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "node --test test/*.test.mjs"
+    "test": "npm run test:run",
+    "test:run": "node --test \"test/*.test.{mjs,ts}\""
   },
   "dependencies": {
     "replicad-opencascadejs": "1.0.0"
