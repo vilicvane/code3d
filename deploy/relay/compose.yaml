@@ -12,6 +12,7 @@ services:
       ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./cloudflare.caddy:/etc/caddy/cloudflare.caddy:ro
       - certificates:/data
       - caddy_config:/config
     networks:

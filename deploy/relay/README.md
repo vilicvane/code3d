@@ -14,7 +14,8 @@ the OS and image builds (a 1 GiB server may need swap while building).
 
 Point a DNS A record at the server; add AAAA only if IPv6 also reaches it. Allow
 inbound TCP 80 and 443 in the firewall. The domain must reach this Caddy instance
-directly so certificate validation and per-client IP limits work correctly.
+for certificate validation. Direct DNS and Cloudflare proxied DNS are both
+supported; for Cloudflare, first follow the certificate setup below.
 
 From a checkout containing this deployment:
 
@@ -41,6 +42,43 @@ Certificates and Caddy configuration live in named volumes. Keep those volumes
 when updating or recreating containers. `.env` is ignored by Git. The gateway
 uses automatic HTTP-to-HTTPS redirection, and its 120-second response deadline
 allows the relay's 115-second exchange deadline to report an explicit failure.
+
+## Cloudflare proxied DNS
+
+Cloudflare supplies the browser-facing certificate, but its connection to the
+origin still needs HTTPS for [Full (strict)](https://developers.cloudflare.com/ssl/origin-configuration/ssl-modes/full-strict/).
+Use that mode and keep this Compose project's Caddy certificate automation.
+Flexible mode leaves the origin connection unencrypted and conflicts with
+Caddy's HTTP-to-HTTPS redirect.
+
+For a reliable first start, set the relay record to **DNS only**, start Compose,
+and confirm `https://relay.example.com/health` succeeds with a valid certificate.
+Then select **Full (strict)** in Cloudflare and enable the record's **Proxied**
+status. Keep TCP 80 open for ACME HTTP validation and allow
+`/.well-known/acme-challenge/*` through without edge caching, redirects or
+challenges. TLS-ALPN validation cannot pass through a terminating TLS proxy;
+Caddy can use HTTP validation instead. Keep the certificate volumes for renewals.
+
+The Caddy configuration trusts `CF-Connecting-IP` only from Cloudflare's published
+IPv4/IPv6 ranges, preserving individual client quotas behind the proxy. Keep the
+**Remove visitor IP headers** transform disabled, and do not select **Overwrite
+Headers** for Pseudo IPv4: the relay needs the original IPv6 address to apply its
+/64 budget. Avoid browser challenges on the relay hostname, since CLI requests
+and App WebSocket upgrades cannot solve them.
+
+The [Cloudflare range list](cloudflare.caddy) records its source URLs and check
+date. When updating the deployment, compare it with both official lists, replace
+changed ranges, then validate and reload:
+
+```sh
+docker compose exec gateway caddy validate --config /etc/caddy/Caddyfile
+docker compose exec gateway caddy reload --config /etc/caddy/Caddyfile
+```
+
+The list is intentionally local; container startup does not fetch network
+configuration. Local regression simulates a trusted upstream and tests TLS with
+Caddy's internal CA; it does not verify public DNS, Cloudflare's edge or public
+ACME issuance for your hostname.
 
 ## Traffic budgets
 
@@ -95,12 +133,14 @@ the indicated delay, instead of creating a new mutation.
 
 ## Proxy trust and resources
 
-Caddy overwrites `X-Real-IP` with the actual peer address. The Node service trusts
+Caddy resolves the client IP from `CF-Connecting-IP` only when the immediate peer
+is in the Cloudflare range list; all other connections use their socket address.
+It ignores caller-supplied `X-Forwarded-For` and `X-Real-IP` for this decision,
+then overwrites `X-Real-IP` before forwarding to Node. The Node service trusts
 that header only because `RELAY_TRUST_PROXY=true` is combined with an unpublished,
 private backend network. Do not publish port 3134, attach untrusted containers to
-that network, or place another proxy in front without explicitly redesigning the
-trusted-client-address chain. Direct Node deployments default to socket IPs and
-ignore caller-supplied proxy headers.
+that network, or add another proxy without defining its trust boundary. Direct
+Node deployments default to socket IPs and ignore caller-supplied proxy headers.
 
 The relay runs as the image's non-root `node` user, with a read-only filesystem,
 no Linux capabilities and a 512 MiB memory ceiling. Caddy has a 128 MiB ceiling;
@@ -137,7 +177,8 @@ npm run test:relay-docker
 The test creates its own Compose project and loopback ports, builds the production
 image, and asks Caddy to issue a localhost certificate through its internal CA.
 Only the test child process trusts that CA. It verifies encrypted HTTPS/WSS
-round-trips, large legal messages, proxy-header handling, upload/response limits,
+round-trips, large legal messages, direct and trusted proxy IP handling over
+HTTPS/WSS, IPv6 /64 budgets, upload/response limits,
 App receipt recovery after relay restart, backend isolation and certificate
 reuse. Its containers, networks and certificate volumes are removed afterward;
 ordinary workspace tests do not require Docker.

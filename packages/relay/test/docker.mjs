@@ -115,9 +115,19 @@ async function orchestrate() {
     await readFile(join(deployment, 'limits.json')),
   );
   await writeFile(
+    join(directory, 'cloudflare.caddy'),
+    await readFile(join(deployment, 'cloudflare.caddy')),
+  );
+  await writeFile(
     join(directory, 'override.json'),
     JSON.stringify({
       services: {
+        gateway: {
+          volumes: [
+            join(directory, 'cloudflare.caddy') +
+              ':/etc/caddy/cloudflare.caddy:ro',
+          ],
+        },
         relay: {
           volumes: [
             join(directory, 'limits.json') + ':/etc/code3d/limits.json:ro',
@@ -164,13 +174,14 @@ async function probe() {
   const directory = process.env.CODE3D_COMPOSE_TEST_DIRECTORY;
   const fetchRelay = (path, options) =>
     fetch(url + path, {signal: AbortSignal.timeout(10_000), ...options});
-  await until(async () => {
+  const healthy = async () => {
     try {
       return (await fetchRelay('/health')).status === 200;
     } catch {
       return false;
     }
-  }, 'trusted HTTPS health check');
+  };
+  await until(healthy, 'trusted HTTPS health check');
   const redirect = await fetch(
     process.env.CODE3D_COMPOSE_TEST_HTTP_URL + '/health',
     {redirect: 'manual', signal: AbortSignal.timeout(10_000)},
@@ -300,6 +311,7 @@ async function probe() {
         headers: {
           'x-real-ip': `192.0.2.${i + 1}`,
           'x-forwarded-for': `198.51.100.${i + 1}`,
+          'cf-connecting-ip': `203.0.113.${i + 1}`,
         },
       });
       if (result.status === 429) {
@@ -311,7 +323,7 @@ async function probe() {
     assert.ok(limited, 'forged proxy headers must not create fresh IP quotas');
     assert.ok(Number(limited.headers.get('retry-after')) > 0);
     assert.equal((await fetchRelay('/health')).status, 200);
-    console.log('Proxy IP overwrite and HTTP request limits passed.');
+    console.log('Direct clients cannot forge Cloudflare or proxy IP headers.');
 
     await restart({session: {dailyMiB: 0.02}});
     const beforeUpload = calls;
@@ -353,6 +365,44 @@ async function probe() {
     host.close();
     endpoint.close();
   }
+
+  // Only the disposable snippet trusts the test container as a Cloudflare peer.
+  // The preceding checks used exactly the production Cloudflare range list.
+  const peer = inspect.NetworkSettings.Networks[networks[0]].IPAddress;
+  assert.ok(peer, 'test relay container must have an IPv4 address');
+  const ranges = await readFile(join(deployment, 'cloudflare.caddy'), 'utf8');
+  await writeFile(
+    join(directory, 'cloudflare.caddy'),
+    ranges.replace(/^(trusted_proxies static .*)$/m, `$1 ${peer}/32`),
+  );
+  await compose([
+    'exec',
+    '-T',
+    'gateway',
+    'caddy',
+    'reload',
+    '--config',
+    '/etc/caddy/Caddyfile',
+  ]);
+  await writeFile(
+    join(directory, 'limits.json'),
+    JSON.stringify({ip: {requestsPerSecond: 0.001, requestBurst: 4}}),
+  );
+  await compose(['restart', 'relay']);
+  await until(healthy, 'relay restart for trusted proxy checks');
+  const {stdout} = await compose([
+    'exec',
+    '-T',
+    '-e',
+    'CODE3D_COMPOSE_TEST_CA=' +
+      (await readFile(join(directory, 'root.crt'), 'utf8')),
+    'relay',
+    'node',
+    '--input-type=module',
+    '--eval',
+    await readFile(join(dirname(script), 'proxy-probe.mjs'), 'utf8'),
+  ]);
+  process.stdout.write(stdout);
 }
 
 if (process.argv.includes('--probe')) await probe();
