@@ -8,6 +8,7 @@ import {
   sketchCurveClosestParameter,
   sketchCurvePosition,
   sketchCurveBounds,
+  sketchPointResolver,
   type SketchCurve,
 } from '@code3d/core/tooling';
 import {
@@ -76,8 +77,10 @@ type Gesture =
   | {
       kind: 'move';
       target: Point;
+      parameter: 'point' | 'radius';
       start: SketchPosition;
       position: SketchPosition;
+      mergeTarget?: SketchPointAddress;
       preview?: SketchDragPreview;
       pending?: Promise<void>;
       released: boolean;
@@ -144,6 +147,7 @@ export class SketchEditor {
       id: number,
       position: SketchPosition,
       previous?: SketchDragPreview,
+      mergeTarget?: SketchPointAddress,
     ) => Promise<SketchDragPreview>,
   ) {
     this.root.className = 'sketch-editor';
@@ -644,7 +648,7 @@ export class SketchEditor {
       !vertex && this.mode === 'Select'
         ? this.pickSegment(position)
         : undefined;
-    const point =
+    const pickedPoint =
       vertex ??
       (segment && segment.kind !== 'line'
         ? {
@@ -656,6 +660,10 @@ export class SketchEditor {
             ),
           }
         : undefined);
+    const canonical = vertex && sketchPointResolver(this.layers())(vertex);
+    const point = canonical
+      ? {...canonical, position: vertex!.position}
+      : pickedPoint;
     if (this.drawing) {
       this.drawing.pointer = position;
       this.place();
@@ -670,6 +678,7 @@ export class SketchEditor {
         this.gesture = {
           kind: 'move',
           target: point,
+          parameter: vertex ? 'point' : 'radius',
           start: position,
           position: point.position,
           released: false,
@@ -696,21 +705,28 @@ export class SketchEditor {
       if (this.drawing) this.drawing.pointer = pointer;
       const gesture = this.gesture;
       if (gesture?.kind === 'move' && !gesture.released) {
-        gesture.position = endpointPosition(
-          snapSketchPointer(
-            [
-              gesture.target.position[0] + pointer[0] - gesture.start[0],
-              gesture.target.position[1] + pointer[1] - gesture.start[1],
-            ],
-            {kind: 'cartesian'},
-            {
-              ...this.snapContext(),
-              points: this.points().filter(
-                point => !same(point, gesture.target),
-              ),
-            },
-          ).endpoint,
-        );
+        const resolve = sketchPointResolver(this.layers());
+        const endpoint = snapSketchPointer(
+          [
+            gesture.target.position[0] + pointer[0] - gesture.start[0],
+            gesture.target.position[1] + pointer[1] - gesture.start[1],
+          ],
+          {kind: 'cartesian'},
+          {
+            ...this.snapContext(),
+            points: this.points().filter(
+              point =>
+                !same(resolve(point), gesture.target) &&
+                (point.layer === this.view!.id ||
+                  this.view!.referenceable.has(point.layer)),
+            ),
+          },
+        ).endpoint;
+        gesture.position = endpointPosition(endpoint);
+        gesture.mergeTarget =
+          gesture.parameter === 'point' && 'point' in endpoint
+            ? {layer: endpoint.point.layer, id: endpoint.point.id}
+            : undefined;
         gesture.version++;
         this.previewMove(gesture);
       }
@@ -755,7 +771,21 @@ export class SketchEditor {
     if (gesture?.kind === 'move') {
       await gesture.pending;
       if (this.gesture !== gesture) return;
+      if (gesture.preview && !gesture.error && gesture.mergeTarget) {
+        try {
+          gesture.preview = await this.solve(
+            gesture.target.id,
+            gesture.position,
+            gesture.preview,
+            gesture.mergeTarget,
+          );
+        } catch (error) {
+          gesture.error = (error as Error).message;
+        }
+        if (this.gesture !== gesture) return;
+      }
       this.gesture = undefined;
+      this.editError = gesture.error;
       if (gesture.preview && !gesture.error) {
         const data = gesture.preview.data.flatMap(e => {
           if (!this.view!.editable.get(e.id)?.some(Boolean)) return [];
@@ -766,8 +796,11 @@ export class SketchEditor {
             ? [e]
             : [];
         });
-        if (data.length)
-          this.commit({kind: 'move', data}, gesture.preview.snapshot);
+        if (data.length || gesture.preview.merge)
+          this.commit(
+            {kind: 'move', data, merge: gesture.preview.merge},
+            gesture.preview.snapshot,
+          );
       }
     }
     this.draw();
@@ -1022,6 +1055,18 @@ export class SketchEditor {
   }
 
   private expressionLock(id: number): string | undefined {
+    const entity = this.layers()
+      .at(-1)!
+      .entities.find(e => e.id === id);
+    if (entity?.kind === 'point') {
+      const canonical = sketchPointResolver(this.layers())({
+        layer: this.view!.id,
+        id,
+      });
+      if (canonical.layer !== this.view!.id)
+        return 'Upstream point · read-only';
+      id = canonical.id;
+    }
     const editable = this.view!.editable.get(id);
     if (!editable) return undefined;
     const axes = (editable.length === 1 ? ['Radius'] : ['X', 'Y']).filter(

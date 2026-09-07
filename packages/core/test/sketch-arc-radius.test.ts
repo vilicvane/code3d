@@ -102,12 +102,12 @@ test('fixed endpoints and explicit dimensions override radius initial data witho
 test('explicit radius seeds do not translate an unanchored arc away from already satisfied endpoint geometry', () => {
   for (const scale of [1e-6, 1, 1e6])
     for (const direction of ['cw', 'ccw'] as const) {
-      const input: SketchEntry[] = [
+      const input = [
         ['point', 1, [3 * scale, -2 * scale]],
         ['point', 2, [3 * scale, 8 * scale]],
         ['point', 3, [3 * scale, -12 * scale]],
         ['arc', 4, [1, 15 * scale, 3, 2, direction]],
-      ];
+      ] as const satisfies readonly SketchEntry[];
       const value = sketch(input, {constraints: [['radius', [4, 10 * scale]]]});
       const view = snapshotSketch(value, () => 'local');
       for (const entry of input)

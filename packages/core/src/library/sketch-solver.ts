@@ -85,6 +85,7 @@ export function solveSketchProblem(
   problem: SketchSolveProblem,
   objectives: readonly SketchSolveObjective[] = [],
 ): SketchSolveResult {
+  const authored = problem;
   problem = initializeArcEndpoints(problem);
   const {constraints, points} = problem;
   if (!points.length)
@@ -540,9 +541,12 @@ export function solveSketchProblem(
         `Sketch constraints ${unsatisfied.map(i => i + 1).join(', ')} did not converge to a valid solution.`,
       );
     return {
-      positions,
-      radii,
-      arcRadii,
+      ...cleanSolution(
+        problem,
+        {positions, radii, arcRadii},
+        authored,
+        objectives,
+      ),
       degreesOfFreedom: gcs.dof(),
       redundant: [
         ...new Set([
@@ -559,6 +563,141 @@ export function solveSketchProblem(
     gcs.clear_data();
     gcs.delete();
   }
+}
+
+type Geometry = Pick<SketchSolveResult, 'positions' | 'radii' | 'arcRadii'>;
+
+/**
+ * Remove numerical tails only within local feature scale, then independently
+ * check the complete hard system. Exact input/gesture values take precedence;
+ * close points never acquire shared identity through this numeric operation.
+ */
+function cleanSolution(
+  problem: SketchSolveProblem,
+  result: Geometry,
+  authored: SketchSolveProblem,
+  objectives: readonly SketchSolveObjective[],
+): Geometry {
+  const pointScales = problem.points.map((point, index) => {
+    const sizes = [
+      ...problem.lines
+        .filter(line => line.includes(index))
+        .map(([a, b]) =>
+          Math.hypot(
+            ...problem.points[a].position.map(
+              (v, axis) => v - problem.points[b].position[axis],
+            ),
+          ),
+        ),
+      ...problem.circles.filter(c => c.center === index).map(c => c.radius),
+      ...problem.arcs
+        .filter(a => a.center === index || a.points.includes(index))
+        .map(a => a.radius),
+    ].filter(size => size > 0);
+    return sizes.length
+      ? Math.min(...sizes)
+      : Math.max(...point.position.map(Math.abs)) || 1;
+  });
+  const clean = (
+    value: number,
+    scale: number,
+    preferred: readonly number[],
+  ) => {
+    const tolerance = Math.max(
+      scale * 1e-11,
+      Math.abs(value) * Number.EPSILON * 8,
+    );
+    for (const target of preferred)
+      if (Math.abs(target - value) <= tolerance) return target;
+    if (Math.abs(value) <= tolerance) return 0;
+    for (let digits = 1; digits < 16; digits++) {
+      const rounded = Number(value.toPrecision(digits));
+      if (Math.abs(rounded - value) <= tolerance) return rounded;
+    }
+    return value;
+  };
+  const coordinate = (index: number, axis: number, value: number) => {
+    if (problem.points[index].locked[axis]) return value;
+    const fixed = problem.constraints.find(
+      c =>
+        (c.kind === 'fixed' || c.kind === (axis === 0 ? 'x' : 'y')) &&
+        c.point === index,
+    );
+    if (fixed?.kind === 'fixed') return fixed.position[axis];
+    if (fixed?.kind === 'x' || fixed?.kind === 'y') return fixed.value;
+    return clean(value, pointScales[index], [
+      ...objectives
+        .filter(o => o.kind === 'point')
+        .filter(o => o.point === index)
+        .map(o => o.position[axis]),
+      authored.points[index].position[axis],
+    ]);
+  };
+  const radius = (curve: 'circle' | 'arc', index: number, value: number) => {
+    const entities = curve === 'circle' ? problem.circles : problem.arcs;
+    if (entities[index].locked) return value;
+    const dimension = problem.constraints.find(
+      c => c.kind === 'radius' && c.curve === curve && c.index === index,
+    );
+    if (dimension?.kind === 'radius') return dimension.value;
+    return clean(value, value, [
+      (curve === 'circle' ? authored.circles : authored.arcs)[index].radius,
+    ]);
+  };
+  const candidate: Geometry = {
+    positions: result.positions.map(
+      (p, i) =>
+        p.map((value, axis) => coordinate(i, axis, value)) as [number, number],
+    ),
+    radii: result.radii.map((value, i) => radius('circle', i, value)),
+    arcRadii: result.arcRadii.map((value, i) => radius('arc', i, value)),
+  };
+  // A stricter threshold than native solve acceptance prevents cleanup from
+  // consuming its tolerance budget. Use each equation's own geometry scale.
+  const valid =
+    problem.constraints.every(c => {
+      const scale =
+        c.kind === 'length' || c.kind === 'radius'
+          ? c.value
+          : c.kind === 'sweep'
+            ? problem.arcs[c.index].radius
+            : 'point' in c
+              ? pointScales[c.point]
+              : Math.min(...c.points.map(i => pointScales[i]));
+      return (
+        residual(
+          c,
+          candidate.positions,
+          candidate.radii,
+          candidate.arcRadii,
+          problem.arcs,
+          scale,
+        ) <= 1e-10
+      );
+    }) &&
+    problem.arcs.every(
+      (arc, i) =>
+        candidate.positions[arc.points[0]].some(
+          (v, axis) => v !== candidate.positions[arc.points[1]][axis],
+        ) &&
+        arc.points.every(
+          index =>
+            Math.abs(
+              Math.hypot(
+                ...candidate.positions[index].map(
+                  (v, axis) => v - candidate.positions[arc.center][axis],
+                ),
+              ) - candidate.arcRadii[i],
+            ) <=
+            arc.radius * 1e-10,
+        ),
+    ) &&
+    problem.lines.every(([a, b]) =>
+      candidate.positions[a].some(
+        (v, axis) => v !== candidate.positions[b][axis],
+      ),
+    );
+  return valid ? candidate : result;
 }
 
 /**

@@ -306,21 +306,27 @@ export function deleteSketchEntity(
   id: number,
 ): SketchChange {
   const local = layers.at(-1)!;
-  const ids = [
-    id,
-    ...local.entities.flatMap(e =>
-      (e.kind === 'line'
-        ? e.points
-        : e.kind === 'circle'
-          ? [e.center]
-          : e.kind === 'arc'
-            ? [e.center, ...e.points]
-            : []
-      ).some(p => p.layer === local.id && p.id === id)
-        ? [e.id]
-        : [],
-    ),
-  ];
+  const ids = [id];
+  // Removing an owner also removes its aliases and their dependent curves.
+  // Deleting an alias does not remove the owner or rewrite surviving IDs.
+  for (let index = 0; index < ids.length; index++)
+    for (const e of local.entities) {
+      const refs =
+        e.kind === 'line'
+          ? e.points
+          : e.kind === 'circle'
+            ? [e.center]
+            : e.kind === 'arc'
+              ? [e.center, ...e.points]
+              : e.alias
+                ? [e.alias]
+                : [];
+      if (
+        !ids.includes(e.id) &&
+        refs.some(p => p.layer === local.id && p.id === ids[index])
+      )
+        ids.push(e.id);
+    }
   ids.push(...disconnectedPoints(layers, ids));
   return {kind: 'delete', ids, constraints: deletedConstraints(local, ids)};
 }

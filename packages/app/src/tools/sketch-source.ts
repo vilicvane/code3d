@@ -12,6 +12,7 @@ import {sameSketchPoint} from './sketch-snap';
 import type {
   SketchEditableParameters,
   SketchGeometryData,
+  SketchPointMerge,
 } from '../model/sketch-drag';
 import type {
   ResolveContext,
@@ -69,6 +70,7 @@ export type SketchChange =
   | Readonly<{
       kind: 'move';
       data: readonly SketchGeometryData[];
+      merge?: SketchPointMerge;
     }>
   | Readonly<{
       kind: 'delete';
@@ -101,11 +103,12 @@ export type SketchEditIntent = Readonly<{
 
 type Entry = {
   id: number;
-  kind: 'point' | 'line' | 'circle' | 'arc';
   node: ts.ArrayLiteralExpression;
-  data: ts.ArrayLiteralExpression;
   parameters: readonly ts.Expression[];
-};
+} & (
+  | {kind: 'point'; data: ts.Expression}
+  | {kind: 'line' | 'circle' | 'arc'; data: ts.ArrayLiteralExpression}
+);
 const prefix = 'sketch(';
 
 /** Analyze only the authored tuple structure; never evaluate coordinate code. */
@@ -180,13 +183,20 @@ export function analyzeSketchSource(source: string): {
         kind.text !== 'line' &&
         kind.text !== 'circle' &&
         kind.text !== 'arc') ||
-      !ts.isNumericLiteral(idNode) ||
-      !ts.isArrayLiteralExpression(data) ||
-      data.elements.length !== (kind.text === 'arc' ? 5 : 2)
+      !ts.isNumericLiteral(idNode)
     )
       return unsupported();
     const id = Number(idNode.text);
     if (!Number.isSafeInteger(id) || id < 1 || entries.has(id))
+      return unsupported();
+    if (kind.text === 'point' && !ts.isArrayLiteralExpression(data)) {
+      entries.set(id, {id, kind: 'point', node, data, parameters: []});
+      continue;
+    }
+    if (
+      !ts.isArrayLiteralExpression(data) ||
+      data.elements.length !== (kind.text === 'arc' ? 5 : 2)
+    )
       return unsupported();
     const parameters =
       kind.text === 'point'
@@ -334,7 +344,23 @@ export class SketchEditResolver implements ToolIntentResolver {
       }
     }
     if (change.kind === 'move') {
+      if (change.merge) {
+        const {id, target} = change.merge;
+        const entry = parsed.entries.get(id);
+        if (entry?.kind !== 'point' || !parsed.editable.get(id)?.every(Boolean))
+          return {
+            status: 'unsupported',
+            reason:
+              'Merging a point requires two editable coordinate literals.',
+          };
+        try {
+          replace(entry.data, point(target));
+        } catch (error) {
+          return {status: 'unsupported', reason: (error as Error).message};
+        }
+      }
       for (const {id, parameters} of change.data) {
+        if (id === change.merge?.id) continue;
         const entry = parsed.entries.get(id);
         const editable = parsed.editable.get(id);
         if (!entry || !editable?.some(Boolean))
@@ -344,14 +370,19 @@ export class SketchEditResolver implements ToolIntentResolver {
           };
         entry.parameters.forEach((node, i) => {
           if (editable[i] && numeric(node) !== parameters[i])
-            replace(node, formatSourceNumber(parameters[i]));
+            // Solver cleanup already checked the geometry. Do not round again
+            // here: the source must replay the exact parameters from preview.
+            replace(node, String(parameters[i]));
         });
       }
     } else if (change.kind === 'trim') {
       try {
         const copiesOf = new Map<
           number,
-          {entry: Entry; entity: Exclude<SketchEntitySnapshot, {kind: 'point'}>}
+          {
+            entry: Extract<Entry, {kind: 'line' | 'circle' | 'arc'}>;
+            entity: Exclude<SketchEntitySnapshot, {kind: 'point'}>;
+          }
         >();
         const raw = (node: ts.Node) =>
           source.slice(

@@ -20,6 +20,10 @@ implementation context and historical outcomes, not a competing work queue.
 - Source code is the only persistent model state. GUI changes write back to it.
 - Sketches use explicit `[kind, ID, data]` tuples: point data is `[x, y]`,
   line data is `[startPoint, endPoint]`, and circle data is `[centerPoint, radius]`.
+  Point data can instead be a local ID or named upstream point reference:
+  aliases retain author IDs but share one canonical solve point. Dragging follows
+  the canonical owner's edit permissions; explicit point snapping writes an
+  alias on release, without coordinate-based deduplication or replacing expressions.
   `base.derive([...])` retains locked
   upstream layers; local numeric point IDs and named `base.point(id)` handles
   distinguish ownership. IDs are independent per layer; new editor entries use
@@ -34,7 +38,8 @@ implementation context and historical outcomes, not a competing work queue.
   horizontal/vertical, length, angle, radius, sweep, midpoint and point X/Y constraints use PlaneGCS;
   assemblies use explicit rotation/translation bounds. Explicit drawing dimensions and the final
   active X/Y lock become constraints when geometry is committed; toggling off
-  emits no direction constraint. Ordinary automatic snapping stays temporary.
+  emits no direction constraint. Grid/axis snapping stays temporary; snapping
+  onto an existing point retains that identity.
   Dragging uses a soft Worker solve and writes all changed editable coordinates
   together, preserving hard constraints, upstream values and expression source.
   Drag rules receive the complete numeric context; the dispatcher does not
@@ -47,7 +52,7 @@ implementation context and historical outcomes, not a competing work queue.
   temporary objectives do not enter source or the reported model DOF.
   Unconstrained movement is kernel-independent. Successive frames use the
   preceding solution and an immutable gesture-start reference; previews
-  forward-solve the rounded source data that
+  forward-solve the exact source data that
   will be committed. During dragging, AST-derived per-axis locks preserve each
   expression's evaluated author value; literal axes on the same point remain
   editable. If those locks alter the displayed geometry, solve them before
@@ -55,6 +60,10 @@ implementation context and historical outcomes, not a competing work queue.
   when dragging begins. Normal evaluation remains numeric-only; expressions
   receive neither offsets nor permanent constraints. Source replay tests use a
   fresh compiler, not saved gesture state.
+  Numeric tail cleanup uses local feature scales and independently rechecks all
+  hard constraints and arc structure. Exact input/gesture coordinates take
+  precedence over shorter decimals; source writes serialize the checked numbers
+  losslessly, without a second precision limit.
   Deletion removes affected local constraints atomically. Snapshots expose DOF
   and redundant indices; conflicting inline constraints are source-located.
   Numeric fields retain native browser text history; SVG nodes retain entity

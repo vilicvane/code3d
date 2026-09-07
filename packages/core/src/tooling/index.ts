@@ -7,6 +7,7 @@ export {
   sketchDefinition,
   snapshotSketch,
   solveSketchSnapshot,
+  sketchPointResolver,
   sketchEntityParameters,
   withSketchEntityParameters,
 } from '../library/sketch.js';

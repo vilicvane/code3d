@@ -10,7 +10,11 @@ export type SketchPosition = readonly [x: number, y: number];
 export type SketchArcDirection = 'cw' | 'ccw';
 
 export type SketchEntry =
-  | readonly [kind: 'point', id: number, position: SketchPosition]
+  | readonly [
+      kind: 'point',
+      id: number,
+      data: SketchPosition | number | SketchPoint,
+    ]
   | readonly [
       kind: 'line',
       id: number,
@@ -97,6 +101,7 @@ class SketchValue implements Sketch {
       if (ids.has(id)) throw new Error(`Duplicate sketch entity ID ${id}.`);
       ids.add(id);
       if (kind === 'point') {
+        if (!Array.isArray(data)) return ['point', id, data];
         if (data.length !== 2 || !data.every(Number.isFinite))
           throw new Error(
             `Sketch point ${id} requires two finite coordinates.`,
@@ -135,16 +140,18 @@ class SketchValue implements Sketch {
     )
       ancestors.add(ancestor);
     for (const [kind, id, data] of copied) {
-      if (kind === 'point') continue;
+      if (kind === 'point' && Array.isArray(data)) continue;
       const refs =
-        kind === 'circle'
-          ? [data[0]]
-          : kind === 'arc'
-            ? [data[0], data[2], data[3]]
-            : data;
+        kind === 'point'
+          ? [data as number | SketchPoint]
+          : kind === 'circle'
+            ? [data[0]]
+            : kind === 'arc'
+              ? [data[0], data[2], data[3]]
+              : data;
       for (const ref of refs) {
         if (typeof ref === 'number') {
-          if (!points.has(ref))
+          if (!copied.some(e => e[0] === 'point' && e[1] === ref))
             throw new Error(
               `Sketch ${kind} ${id} references missing local point ${ref}.`,
             );
@@ -155,6 +162,24 @@ class SketchValue implements Sketch {
         }
       }
     }
+    const resolving = new Set<number>();
+    const resolve = (id: number): SketchPosition => {
+      const position = points.get(id);
+      if (position) return position;
+      if (resolving.has(id))
+        throw new Error(`Cyclic sketch point alias at ${id}.`);
+      resolving.add(id);
+      const entry = copied.find(e => e[0] === 'point' && e[1] === id)!;
+      const ref = entry[2] as number | SketchPoint;
+      const resolved =
+        typeof ref === 'number'
+          ? resolve(ref)
+          : definitions.get(ref.sketch)!.points.get(ref.id)!;
+      resolving.delete(id);
+      points.set(id, resolved);
+      return resolved;
+    };
+    for (const [kind, id] of copied) if (kind === 'point') resolve(id);
     const pointRef = (ref: number | SketchPoint) => {
       if (
         typeof ref === 'number'
@@ -244,7 +269,7 @@ class SketchValue implements Sketch {
       .map(value => snapshotSketch(value, identity));
     const unresolved: SketchSnapshot = {
       id: local,
-      entities: snapshotEntries(copied, local, identity),
+      entities: snapshotEntries(copied, local, identity, points),
       constraints: snapshotConstraints(constraints, local, identity),
       degreesOfFreedom: 0,
       redundant: [],
@@ -301,6 +326,8 @@ export type SketchPointSnapshot = Readonly<{
   kind: 'point';
   id: number;
   position: SketchPosition;
+  /** Same geometric point, retaining this authored ID for references. */
+  alias?: SketchPointAddress;
 }>;
 
 export type SketchPointAddress = Readonly<{layer: string; id: number}>;
@@ -339,7 +366,7 @@ export function sketchEntityParameters(
 ): readonly number[] {
   switch (entity.kind) {
     case 'point':
-      return entity.position;
+      return entity.alias ? [] : entity.position;
     case 'circle':
     case 'arc':
       return [entity.radius];
@@ -354,7 +381,9 @@ export function withSketchEntityParameters(
 ): SketchEntitySnapshot {
   switch (entity.kind) {
     case 'point':
-      return {...entity, position: [parameters[0], parameters[1]]};
+      return entity.alias
+        ? entity
+        : {...entity, position: [parameters[0], parameters[1]]};
     case 'circle':
     case 'arc':
       return {...entity, radius: parameters[0]};
@@ -391,7 +420,7 @@ export function snapshotSketch(
   return {
     id,
     base: base && identity(base),
-    entities: snapshotEntries(entries, id, identity).map(e =>
+    entities: snapshotEntries(entries, id, identity, points).map(e =>
       e.kind === 'point'
         ? {...e, position: points.get(e.id)!}
         : e.kind === 'circle' || e.kind === 'arc'
@@ -415,11 +444,19 @@ function snapshotEntries(
   entries: readonly SketchEntry[],
   id: string,
   identity: (sketch: Sketch) => string,
+  positions: ReadonlyMap<number, SketchPosition>,
 ): SketchSnapshot['entities'] {
   const point = pointAddress(id, identity);
   return entries.map(([kind, entityId, data]) =>
     kind === 'point'
-      ? {kind, id: entityId, position: data}
+      ? Array.isArray(data)
+        ? {kind, id: entityId, position: data as SketchPosition}
+        : {
+            kind,
+            id: entityId,
+            position: positions.get(entityId)!,
+            alias: point(data as number | SketchPoint),
+          }
       : kind === 'circle'
         ? {kind, id: entityId, center: point(data[0]), radius: data[1]}
         : kind === 'arc'
@@ -433,6 +470,44 @@ function snapshotEntries(
             }
           : {kind, id: entityId, points: [point(data[0]), point(data[1])]},
   );
+}
+
+/** Resolve identity once for solving, dragging, snapping and topology edits. */
+export function sketchPointResolver(layers: readonly SketchSnapshot[]) {
+  const points = new Map(
+    layers.flatMap(layer =>
+      layer.entities.flatMap(e =>
+        e.kind === 'point'
+          ? [
+              [
+                JSON.stringify([layer.id, e.id]),
+                {...e, layer: layer.id},
+              ] as const,
+            ]
+          : [],
+      ),
+    ),
+  );
+  const resolved = new Map<string, SketchPointAddress>();
+  const visiting = new Set<string>();
+  const resolve = (ref: SketchPointAddress): SketchPointAddress => {
+    const key = JSON.stringify([ref.layer, ref.id]);
+    const cached = resolved.get(key);
+    if (cached) return cached;
+    const point = points.get(key);
+    if (!point) throw new Error(`Missing sketch point ${ref.id}.`);
+    if (visiting.has(key))
+      throw new Error(`Cyclic sketch point alias at ${ref.id}.`);
+    visiting.add(key);
+    const target = point.alias
+      ? resolve(point.alias)
+      : {layer: ref.layer, id: ref.id};
+    visiting.delete(key);
+    resolved.set(key, target);
+    return target;
+  };
+  for (const point of points.values()) resolve(point);
+  return resolve;
 }
 
 function snapshotConstraints(
@@ -477,12 +552,14 @@ export function solveSketchSnapshot(
   }>,
 ): SketchSnapshot {
   const local = layers.at(-1)!;
+  const resolve = sketchPointResolver(layers);
   const points = layers.flatMap(layer =>
     layer.entities.flatMap(e =>
-      e.kind === 'point' ? [{...e, layer: layer.id}] : [],
+      e.kind === 'point' && !e.alias ? [{...e, layer: layer.id}] : [],
     ),
   );
   const pointIndex = (ref: SketchPointAddress) => {
+    ref = resolve(ref);
     const index = points.findIndex(
       p => p.id === ref.id && p.layer === ref.layer,
     );
@@ -563,7 +640,10 @@ export function solveSketchSnapshot(
       const locked: [boolean, boolean] = [upstream, upstream];
       if (!upstream)
         for (const lock of drag?.locks ?? [])
-          if (lock.id === p.id) {
+          if (
+            local.entities.some(e => e.kind === 'point' && e.id === lock.id) &&
+            pointIndex({layer: local.id, id: lock.id}) === pointIndex(p)
+          ) {
             position[lock.parameter as 0 | 1] = lock.value;
             locked[lock.parameter as 0 | 1] = true;
           }

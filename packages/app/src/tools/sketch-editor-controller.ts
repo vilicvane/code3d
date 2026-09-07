@@ -51,7 +51,8 @@ export class SketchEditorController {
     this.editor = new SketchEditor(
       container,
       (change, preview) => this.commit(change, preview),
-      (id, position, previous) => this.preview(id, position, previous),
+      (id, position, previous, mergeTarget) =>
+        this.preview(id, position, previous, mergeTarget),
     );
   }
 
@@ -143,6 +144,7 @@ export class SketchEditorController {
     id: number,
     position: SketchPosition,
     previous?: SketchDragPreview,
+    mergeTarget?: SketchPointAddress,
   ): Promise<SketchDragPreview> {
     const revision = this.revision;
     const source =
@@ -160,6 +162,7 @@ export class SketchEditorController {
       editable,
       data: previous?.data ?? this.data,
       reference: previous?.reference,
+      mergeTarget,
     };
     // The zero-equation case is kernel-independent. Use the same numeric and
     // source-replay logic without waiting for the preceding edit's compilation.
@@ -221,7 +224,11 @@ export class SketchEditorController {
     const data = change.kind === 'move' ? change.data : [];
     this.data = [
       ...this.data
-        .filter(point => !removed.includes(point.id))
+        .filter(
+          point =>
+            !removed.includes(point.id) &&
+            !(change.kind === 'move' && change.merge?.id === point.id),
+        )
         .map(point => data.find(p => p.id === point.id) ?? point),
       ...entries.flatMap<SketchGeometryData>(([kind, id, values]) => {
         if (kind === 'point') return [{id, parameters: values}];
