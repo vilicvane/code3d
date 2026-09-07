@@ -12,6 +12,7 @@ import {createRelay} from '../../../relay/bld/server.js';
 
 declare const window: Window & {
   agentTestEditor: import('../../src/editor.ts').CodeEditor;
+  agentTestCamera: import('three').PerspectiveCamera;
 };
 
 for (const storage of ['browser', 'directory'] as const)
@@ -44,7 +45,7 @@ for (const storage of ['browser', 'directory'] as const)
           response,
           body:
             (await response.text()) +
-            '\nwindow.agentTestEditor = codeEditor;\n',
+            '\nwindow.agentTestEditor = codeEditor; window.agentTestCamera = viewport.camera;\n',
         });
       });
       const appUrl = new URL(process.env.CODE3D_TEST_URL);
@@ -203,7 +204,7 @@ for (const storage of ['browser', 'directory'] as const)
       const version = read.result.data.version;
       const inspect = await cli(
         0,
-        ['apply', '--input', '-', '--render', '--topology'],
+        ['apply', '--input', '-', '--render', '--topology', '--type'],
         {
           cursor: {
             ...liveContext.result.data.cursor,
@@ -212,6 +213,12 @@ for (const storage of ['browser', 'directory'] as const)
         },
       );
       assert.equal(inspect.code, 0, JSON.stringify(inspect.result));
+      assert.ok(
+        inspect.result.data.observation.type.members.some(
+          (member: {name: string}) => member.name === 'fillet',
+        ),
+        JSON.stringify(inspect.result.data.observation.type),
+      );
       assert.equal(
         inspect.result.data.observation.models[0].role,
         'operation-input',
@@ -248,6 +255,39 @@ for (const storage of ['browser', 'directory'] as const)
       assert.equal(image.readUInt32BE(20), 720);
       await writeFile('/tmp/code3d-agent-workflow-render.png', image);
       const snapshotId = inspect.result.data.observation.snapshotId;
+      const cameraBefore = await page.evaluate(() => ({
+        position: window.agentTestCamera.position.toArray(),
+        quaternion: window.agentTestCamera.quaternion.toArray(),
+      }));
+      const front = await cli(0, ['apply', '--input', '-', '--view', 'front'], {
+        topology: {snapshotId, model: 'm0', kind: 'edge', limit: 1},
+      });
+      const top = await cli(0, ['apply', '--input', '-', '--render'], {
+        render: {view: {direction: [0, 2, 0], up: [0, 0, -1]}},
+        topology: {snapshotId, model: 'm0', kind: 'edge', limit: 1},
+      });
+      assert.equal(front.code, 0, JSON.stringify(front.result));
+      assert.equal(top.code, 0, JSON.stringify(top.result));
+      assert.deepEqual(
+        front.result.data.observation.render.view.direction,
+        [0, 0, 1],
+      );
+      assert.deepEqual(
+        top.result.data.observation.render.view.direction,
+        [0, 1, 0],
+      );
+      const frontImage = await readFile(front.result.artifacts[0].path);
+      const topImage = await readFile(top.result.artifacts[0].path);
+      assert.notDeepEqual(frontImage, topImage);
+      await writeFile('/tmp/code3d-agent-front.png', frontImage);
+      await writeFile('/tmp/code3d-agent-top.png', topImage);
+      assert.deepEqual(
+        await page.evaluate(() => ({
+          position: window.agentTestCamera.position.toArray(),
+          quaternion: window.agentTestCamera.quaternion.toArray(),
+        })),
+        cameraBefore,
+      );
       const pageResult = await cli(0, ['apply', '--input', '-', '--topology'], {
         topology: {snapshotId, model: 'm0', kind: 'edge', offset: 3, limit: 2},
       });
@@ -390,6 +430,17 @@ for (const storage of ['browser', 'directory'] as const)
       assert.equal(bad.result.error.details.saved, true);
       assert.equal(bad.result.error.details.observation.kind, 'evaluation');
       assert.equal(bad.result.error.details.observation.sourceRef.file, path);
+      // Static types remain available when the model fails at runtime.
+      const staticType = await cli(0, ['apply', '--input', '-', '--type'], {
+        cursor: {file: path, regex: 'const (width) ='},
+      });
+      assert.equal(staticType.code, 0, JSON.stringify(staticType.result));
+      assert.equal(staticType.result.data.observation.type.type, '12');
+      assert.equal(staticType.result.data.observation.models, undefined);
+      // Restore Alice's label to the model expression for the remaining UI checks.
+      await cli(0, ['apply', '--input', '-'], {
+        cursor: {file: path, regex: '(box\\(-1, 6, 8\\))'},
+      });
       await page.getByRole('button', {name: 'Agents', exact: true}).click();
       await page
         .locator('.agent-row')

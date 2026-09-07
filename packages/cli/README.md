@@ -25,6 +25,7 @@ c3d project.json fs read /model.ts
 c3d project.json fs stat /model.ts
 c3d project.json apply --input changes.json
 c3d project.json apply --input - --render --topology < inspection.json
+c3d project.json apply --input inspection.json --view top --type
 c3d project.json --request-id edit-42 apply --input changes.json
 c3d project.json result edit-42
 ```
@@ -39,9 +40,9 @@ For modeling APIs, use the [Code3D documentation](https://www.code3d.org/docs/)
 and [Modeling API reference](https://www.code3d.org/docs/reference/core/).
 
 `apply` takes JSON from `--input <file>` or `--input -` (stdin). Omitting input
-sends an empty apply. `--render` and `--topology` request observation outputs;
-their absence leaves any corresponding JSON input option unchanged. --topology
-preserves paging/filter options supplied in the input JSON. By default
+sends an empty apply. `--render`, `--topology` and `--type` request observation outputs;
+their absence leaves any corresponding JSON input option unchanged. `--render`
+preserves JSON view options and `--topology` preserves paging/filter options. By default
 no observation output is requested. See the [protocol](../agent/README.md) for
 the full configuration and input schema.
 
@@ -66,6 +67,28 @@ unique full match, optionally within a 1-based inclusive `lines` range. The App
 performs source-dependent preflight before accepting the batch. Explicit cursor
 `arguments` is a TypeScript array-expression string such as `"[10, 5]"`; omit it
 to use JSDoc arguments or the ordinary execution context.
+
+`--view isometric|front|back|left|right|top|bottom` implies rendering and overrides
+the JSON view. For a custom direction, submit `"render": {"view": {"direction":
+[1, 1, 1], "up": [0, 1, 0]}}`; `--render` retains this configuration. Directions
+point from the observation's center toward the camera: +X right, +Y top, +Z front.
+The image uses perspective projection and automatically fits the observed scene.
+The user's camera stays unchanged. Omitted views use isometric.
+
+`--type` queries Monaco's static TypeScript type at the agent selection, without
+running the model. `observation.type` includes the source range, type, signatures,
+documentation and members, or null when no type-bearing syntax is selected.
+Calls expose result types; function names expose callable signatures. The first
+100 members are listed along with `membersTotal`; select a specific member to
+inspect it further. This also works when the model throws or loops at runtime.
+Temporary `cursor.arguments` values do not change static types.
+
+Model execution and topology no longer stop at 15 seconds. Editing source in
+the App or through `apply` terminates the previous compilation. An in-flight
+agent observation returns `observation_superseded` with its accepted/saved
+outcome, and new observations can proceed. The CLI and relay request deadlines
+still apply; after transport timeout, query the request receipt or edit the
+source to replace a stuck model rather than resubmitting a mutation blindly.
 
 ## Output and retries
 

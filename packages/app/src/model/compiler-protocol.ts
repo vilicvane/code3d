@@ -42,7 +42,6 @@ export type CompilerRequest =
       instances: readonly ModelExportInstance[];
       options: ModelExportOptions;
     }>
-  | Readonly<{kind: 'cancel'; id: number}>
   | Readonly<{
       kind: 'file-result';
       id: number;

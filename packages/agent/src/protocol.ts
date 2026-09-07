@@ -1,4 +1,8 @@
 import {
+  parseRenderOptions,
+  type RenderOutputOptions,
+} from './render-options.js';
+import {
   AgentError,
   boolean,
   decodeBase64,
@@ -28,7 +32,8 @@ export type AgentCursor = Readonly<{
 export type ApplyInput = Readonly<{
   files?: readonly FileChange[];
   cursor?: AgentCursor;
-  render?: boolean;
+  render?: boolean | RenderOutputOptions;
+  type?: boolean;
   topology?: boolean | TopologyOutputOptions;
 }>;
 
@@ -140,7 +145,7 @@ export function failure(
 export function parseApplyInput(value: unknown): ApplyInput {
   const input = object(
     value,
-    ['files', 'cursor', 'render', 'topology'],
+    ['files', 'cursor', 'render', 'topology', 'type'],
     'Apply input',
   );
   let files: FileChange[] | undefined;
@@ -224,7 +229,8 @@ export function parseApplyInput(value: unknown): ApplyInput {
     ...(cursor === undefined ? {} : {cursor}),
     ...(input.render === undefined
       ? {}
-      : {render: boolean(input.render, 'render')}),
+      : {render: parseRenderOptions(input.render)}),
+    ...(input.type === undefined ? {} : {type: boolean(input.type, 'type')}),
     ...(topology === undefined ? {} : {topology}),
   };
 }

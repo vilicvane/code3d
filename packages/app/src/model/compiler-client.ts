@@ -20,11 +20,10 @@ import type {
 type PendingRequest = {
   id: number;
   reject(error: Error): void;
-  timeout: number;
+  timeout?: number;
 } & (
   | {
       kind: 'compile';
-      evaluating: boolean;
       onProgress?: CompilationProgress;
       resolve(module: ModelModule): void;
     }
@@ -60,7 +59,6 @@ export class ModelCompilerClient {
         id,
         resolve,
         reject,
-        evaluating: false,
         onProgress,
         timeout: this.deadline(id, 120_000),
       };
@@ -111,13 +109,12 @@ export class ModelCompilerClient {
       new Error(
         pending.kind === 'compile'
           ? 'Compilation superseded.'
-          : 'Export cancelled because the model changed.',
+          : 'Model operation cancelled because the project changed.',
       ),
     );
-    // An executing model may contain a synchronous infinite loop. Preparation
-    // can finish asynchronously without throwing away the installed kernel.
-    if (pending.kind !== 'compile' || pending.evaluating) this.restartWorker();
-    else this.send({kind: 'cancel', id: pending.id});
+    // Termination also covers synchronous work before its progress message
+    // reaches the UI. A cancelled Worker can never block the next revision.
+    this.restartWorker();
     return true;
   }
 
@@ -148,7 +145,6 @@ export class ModelCompilerClient {
         id,
         resolve,
         reject,
-        timeout: this.deadline(id, 15_000),
       };
       this.send({kind: 'topology', id, compileId, nodeId, options});
     });
@@ -164,11 +160,7 @@ export class ModelCompilerClient {
         new Error(
           pending.kind === 'export'
             ? 'Export exceeded 30 seconds and was terminated. Run the model again before retrying.'
-            : pending.kind === 'topology'
-              ? 'Topology inspection exceeded 15 seconds and was terminated. Request a new observation.'
-              : pending.evaluating
-                ? 'Model execution exceeded 15 seconds and was terminated.'
-                : 'Project preparation exceeded 120 seconds and was terminated.',
+            : 'Project preparation exceeded 120 seconds and was terminated.',
         ),
       );
     }, milliseconds);
@@ -215,8 +207,7 @@ export class ModelCompilerClient {
         if (pending.kind !== 'compile') return;
         if (data.phase === 'evaluating-model') {
           window.clearTimeout(pending.timeout);
-          pending.evaluating = true;
-          pending.timeout = this.deadline(data.id, 15_000);
+          pending.timeout = undefined;
         }
         pending.onProgress?.(data.phase);
         return;

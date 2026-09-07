@@ -79,21 +79,29 @@ test('CLI reads remote files and submits full changes from stdin or a JSON file'
       '-',
       '--render',
       '--topology',
+      '--view',
+      'top',
+      '--type',
     ],
     JSON.stringify(input),
   );
   assert.equal(apply.code, 0, apply.stdout + apply.stderr);
   assert.deepEqual(requests[1], {
     operation: 'apply',
-    input: {...input, render: true, topology: true},
+    input: {...input, render: {view: 'top'}, topology: true, type: true},
   });
   assert.equal(JSON.parse(apply.stdout).requestId, 'edit-1');
   const inputPath = join(directory, 'apply.json');
-  await writeFile(inputPath, JSON.stringify(input));
+  const customView = {
+    ...input,
+    render: {view: {direction: [1, 2, 3], up: [0, 1, 0]}},
+  };
+  await writeFile(inputPath, JSON.stringify(customView));
   assert.equal(
-    (await run([configPath, 'apply', '--input', inputPath])).code,
+    (await run([configPath, 'apply', '--input', inputPath, '--render'])).code,
     0,
   );
+  assert.deepEqual(requests[2], {operation: 'apply', input: customView});
   const result = await run([configPath, 'result', 'edit-1']);
   assert.equal(JSON.parse(result.stdout).data.version, 'v2');
   assert.equal(requests.length, 3);

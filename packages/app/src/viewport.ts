@@ -1,5 +1,6 @@
 import type {ModelDiagnostic} from './model/diagnostic';
 import * as THREE from 'three';
+import type {ImageView} from './rendering/image-camera';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {LineMaterial} from 'three/addons/lines/LineMaterial.js';
 import {LineSegments2} from 'three/addons/lines/LineSegments2.js';
@@ -953,12 +954,18 @@ export class ModelViewport {
     this.hasFramedView = true;
   }
 
-  captureImage(width: number, height: number): Promise<Blob> {
+  captureImage(width: number, height: number, view?: ImageView): Promise<Blob> {
     this.selectionHighlight?.update();
     this.impactHighlights.forEach(highlight => highlight.update());
     this.updateDecorationVisibilities();
-    return this.rendering.captureImage(width, height, (camera, width, height) =>
-      this.updateDecorationSizes(camera, width, height),
+    return this.rendering.captureImage(
+      width,
+      height,
+      (camera, width, height) =>
+        this.updateDecorationSizes(camera, width, height),
+      view
+        ? {view, bounds: new THREE.Box3().setFromObject(this.root)}
+        : undefined,
     );
   }
 

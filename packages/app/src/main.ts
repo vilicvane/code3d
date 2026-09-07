@@ -322,6 +322,7 @@ const agentProject = new AgentProjectSession(
   },
   error => showProjectIssue(error),
 );
+agentProject.onRevision(() => agentObserver.invalidate());
 agentPanel = new AgentPanel(
   codeEditor,
   agentProject,

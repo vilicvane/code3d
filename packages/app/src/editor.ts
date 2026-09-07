@@ -1,4 +1,7 @@
 import * as monaco from 'monaco-editor/editor';
+import {AgentError} from '@code3d/agent';
+import {projectTypeScriptWorker} from './monaco/typescript-worker-client';
+import type {CursorTypeInfo} from './monaco/type-info';
 import 'monaco-editor/features/register.all';
 import 'monaco-editor/languages/definitions/typescript/register';
 import * as typeScriptLanguage from 'monaco-editor/languages/features/typescript/register';
@@ -678,6 +681,28 @@ export class CodeEditor {
   agentCursor(id: string): {ref?: SourceRef; invalid: boolean} {
     const cursor = this.agentCursors.get(id);
     return {ref: cursor?.ref, invalid: cursor?.invalid ?? false};
+  }
+
+  async inspectType(ref: SourceRef): Promise<CursorTypeInfo | null> {
+    const model = this.requireDocument(ref.file).model;
+    const version = this.revision;
+    const worker = await projectTypeScriptWorker(
+      model.getLanguageId(),
+      model.uri,
+    );
+    const info = await worker.getProjectTypeInfo(
+      model.uri.toString(),
+      ref.start,
+      ref.end,
+    );
+    if (model.isDisposed() || version !== this.revision)
+      throw new AgentError(
+        'observation_superseded',
+        'Project changed during type inspection. Request a new observation.',
+      );
+    return info
+      ? {...info, sourceRef: {...info.sourceRef, file: ref.file}}
+      : null;
   }
 
   removeAgentCursor(id: string): void {

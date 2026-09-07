@@ -10,6 +10,7 @@ import {
 } from '@code3d/agent';
 import type {SourceRef} from '@code3d/core/tooling';
 import type {ProjectEditorChange} from '../editor';
+import type {CursorTypeInfo} from '../monaco/type-info';
 import type {ProjectFileSystem} from '../project/filesystem';
 import {
   isSourceFile,
@@ -28,6 +29,7 @@ export interface AgentProjectEditor {
   applyFiles(files: readonly {path: string; content: string | null}[]): void;
   setAgentCursor(id: string, name: string, ref?: SourceRef): void;
   agentCursor(id: string): {ref?: SourceRef; invalid: boolean};
+  inspectType(ref: SourceRef): Promise<CursorTypeInfo | null>;
 }
 
 export type AgentObservation = Readonly<{
@@ -56,6 +58,7 @@ export class AgentProjectSession {
   private readonly drafts = new Map<string, Draft>();
   private accepting = false;
   private revision = 1;
+  private readonly revisionListeners = new Set<() => void>();
 
   constructor(
     readonly fileSystem: ProjectFileSystem,
@@ -75,9 +78,19 @@ export class AgentProjectSession {
     return this.revision;
   }
 
+  onRevision(listener: () => void): () => void {
+    this.revisionListeners.add(listener);
+    return () => this.revisionListeners.delete(listener);
+  }
+
+  private advanceRevision(): void {
+    this.revision++;
+    for (const listener of this.revisionListeners) listener();
+  }
+
   recordEditorChange(change: ProjectEditorChange): void {
     if (this.accepting) return;
-    this.revision++;
+    this.advanceRevision();
     const files =
       change.kind === 'rename'
         ? [
@@ -117,7 +130,7 @@ export class AgentProjectSession {
     return this.enqueue(async () => {
       if (this.drafts.size)
         throw new Error('Save pending project changes before replacing files.');
-      this.revision++;
+      this.advanceRevision();
       return operation();
     });
   }
@@ -157,7 +170,44 @@ export class AgentProjectSession {
         return accepted.response;
       let observed: AgentResponse;
       try {
-        observed = await this.observe(accepted.observation);
+        const observation = accepted.observation;
+        const geometry: AgentResponse =
+          observation.input.render || observation.input.topology
+            ? await this.observe(observation)
+            : {
+                ok: true,
+                data: {
+                  revision: observation.revision,
+                  cursor: observation.cursor,
+                },
+              };
+        // A retained topology snapshot may predate a cursor-only move. Type
+        // feedback must describe that snapshot's source selection too.
+        const type = observation.input.type
+          ? await this.editor.inspectType(
+              geometry.ok
+                ? (geometry.data as {cursor: SourceRef}).cursor
+                : observation.cursor,
+            )
+          : undefined;
+        observed = geometry.ok
+          ? {
+              ...geometry,
+              data: {
+                ...(geometry.data as object),
+                ...(type === undefined ? {} : {type}),
+              },
+            }
+          : {
+              ...geometry,
+              error: {
+                ...geometry.error,
+                details: {
+                  ...(geometry.error.details as object),
+                  ...(type === undefined ? {} : {type}),
+                },
+              },
+            };
       } catch (error) {
         observed = failure(
           error instanceof AgentError ? error.code : 'observation_failed',
@@ -505,7 +555,7 @@ export class AgentProjectSession {
         start: resolved.start,
         end: resolved.end,
       });
-    if (files.length) this.revision++;
+    if (files.length) this.advanceRevision();
     this.changed();
     const acceptedVersions = new Map(
       files.map(file => [file.path, this.editor.fileState(file.path)?.version]),
@@ -563,7 +613,8 @@ export class AgentProjectSession {
           data,
         ),
       };
-    if (!(input.render || input.topology)) return {response: {ok: true, data}};
+    if (!(input.render || input.topology || input.type))
+      return {response: {ok: true, data}};
     if (!cursor.ref)
       return {
         response: failure(

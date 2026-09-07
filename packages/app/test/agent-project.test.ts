@@ -132,6 +132,7 @@ function fixture(
       else cursors.delete(id);
     },
     agentCursor: id => ({ref: cursors.get(id), invalid: false}),
+    inspectType: async () => null,
   };
   const session = new AgentProjectSession(
     fileSystem,

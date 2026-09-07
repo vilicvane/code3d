@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {orientImageCamera, type ImageView} from './image-camera';
 import type {
   ModelSnapshotObject,
   RenderMesh,
@@ -113,6 +114,7 @@ export class ModelRenderer {
       width: number,
       height: number,
     ) => void,
+    framing?: Readonly<{view: ImageView; bounds: THREE.Box3}>,
   ): Promise<Blob> {
     const canvas = document.createElement('canvas');
     const renderer = new THREE.WebGLRenderer({
@@ -127,6 +129,7 @@ export class ModelRenderer {
 
     const camera = this.camera.clone();
     camera.aspect = width / height;
+    if (framing) orientImageCamera(camera, framing.bounds, framing.view);
     camera.updateProjectionMatrix();
     beforeRender?.(camera, width, height);
     renderer.render(this.scene, camera);

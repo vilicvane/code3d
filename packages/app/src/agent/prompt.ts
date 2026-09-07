@@ -14,6 +14,12 @@ export function agentPrompt(
 
 Prefer the public @code3d/core API when modeling. Build models by composing basic topology and modeling operations. Use meaningful names, explicit parameters and readable intermediate steps so people and agents can understand the construction and continue editing it together. Use lower-level geometry only when the core API cannot express the required shape; preserve the modeling intent in the source.
 
+Use --type to get the static TypeScript type at your selected expression, including call signatures and up to 100 members (membersTotal reports the full count). It does not execute the model and works on non-model values. Combine it with --render/--topology when useful. observation.type is null when the cursor has no type-bearing syntax. These are static source types; temporary cursor.arguments do not change them.
+
+Use --view isometric|front|back|left|right|top|bottom to render from a named direction (it implies --render). For a custom view, put render: {view: {direction: [1, 1, 1], up: [0, 1, 0]}} in the apply JSON. direction points from the observed scene center toward the camera; +X is right, +Y is top, +Z is front. Vectors are in the current observation scene, not a model's unrelated local frame. The image automatically fits the selected scene using perspective projection. up sets image roll and must not be parallel to direction. Omitted views use isometric. View options affect only the agent screenshot and can also be used when rendering a retained topology snapshot.
+
+Model execution and topology inspection have no 15-second deadline. Editing project files terminates the previous compilation and supersedes its observation, so correct a stuck model through apply; request transport timeouts do not mean the App rolled back the change.
+
 Get the current context through the CLI. The examples use ./project.c3d.json; replace it with your configuration filename.
 
 1. Read the App's current file and user selection, then explore the project:

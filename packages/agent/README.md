@@ -114,8 +114,9 @@ refer to the CLI machine's project files. `apply.input` accepts:
     "lines": [20, 40],
     "arguments": "[10, 5, 6]"
   },
-  "render": true,
-  "topology": true
+  "render": {"view": "front"},
+  "topology": true,
+  "type": true
 }
 ```
 
@@ -127,6 +128,36 @@ are implied. The protocol checks the cursor payload shape; the App resolves it
 against the post-change source. Arguments are a TypeScript array expression, not
 JSON values; omission falls back to JSDoc arguments and then ordinary execution
 context.
+
+`render` accepts a boolean or `{view}`. Views are `isometric` (default), `front`,
+`back`, `left`, `right`, `top`, `bottom`, or `{direction: [x, y, z], up?: [x, y, z]}`.
+Direction points from the observed scene center toward the camera; front is +Z,
+right is +X and top is +Y. Custom vectors must be finite and nonzero; an explicit
+up vector cannot be parallel to the direction. Default up is +Y, or -Z/+Z for
+top/bottom directions. Perspective capture automatically fits the scene bounds
+for the output aspect ratio and does not change the user's camera. The response
+reports normalized direction/up and `coordinates: "observation-scene"`.
+Each requested view gets its own image, including renders of retained topology
+snapshots; images from a different view are never reused.
+
+`type: true` returns `observation.type` without requiring model execution.
+It describes the smallest syntax node covering the captured selection, or the
+node at an empty capture: sourceRef, static type, syntax kind, documentation,
+call/construct signatures and up to 100 members (name, type, optional). The
+`membersTotal` field makes truncation explicit. A cursor without type-bearing
+syntax returns null. Selecting a call returns its result type; selecting the
+function name returns its callable type. Temporary arguments do not alter
+static source types. Combined geometry/type output, including snapshot pages,
+uses the same source selection; runtime failures can still include static types.
+
+Model execution and topology inspection have no 15-second deadline. Every
+accepted project revision invalidates the old observation and terminates its
+Worker, releasing the observation queue. User edits immediately cancel the
+App's old compilation and schedule the latest source. Terminating the Worker
+also interrupts synchronous loops during preparation or execution; completed
+compilations retain the kernel cache for later edits. Superseded observations
+preserve their accepted/saved file outcomes. Project preparation (120 seconds),
+CAD export (30 seconds) and transport deadlines remain separate.
 
 ### App cursor preflight
 

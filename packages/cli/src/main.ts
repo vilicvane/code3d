@@ -3,7 +3,7 @@ import {randomUUID} from 'node:crypto';
 import {mkdir, mkdtemp, open, readFile, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
-import {Command, CommanderError, InvalidArgumentError} from 'commander';
+import {Command, CommanderError, InvalidArgumentError, Option} from 'commander';
 import {
   AgentClient,
   AgentError,
@@ -12,6 +12,8 @@ import {
   parseAgentConfig,
   parseApplyInput,
   parseRequest,
+  renderViewNames,
+  type RenderViewName,
   type AgentRequest,
   type AgentResponse,
 } from '@code3d/agent';
@@ -87,9 +89,25 @@ program
   )
   .option('--input <file>', 'Apply JSON file, or - to read stdin')
   .option('--render', 'Return a rendered image for the applied context')
+  .addOption(
+    new Option(
+      '--view <direction>',
+      'Render from a named view (implies --render)',
+    ).choices([...renderViewNames]),
+  )
+  .option(
+    '--type',
+    'Return static type information at the agent cursor without evaluating the model',
+  )
   .option('--topology', 'Return topology for the applied context')
   .action(
-    async (options: {input?: string; render?: boolean; topology?: boolean}) => {
+    async (options: {
+      input?: string;
+      render?: boolean;
+      view?: RenderViewName;
+      topology?: boolean;
+      type?: boolean;
+    }) => {
       const input = parseApplyInput(
         options.input === undefined
           ? {}
@@ -99,7 +117,17 @@ program
         operation: 'apply',
         input: {
           ...input,
-          ...(options.render === undefined ? {} : {render: options.render}),
+          ...(options.view
+            ? {render: {view: options.view}}
+            : options.render === undefined
+              ? {}
+              : {
+                  render:
+                    typeof input.render === 'object'
+                      ? input.render
+                      : options.render,
+                }),
+          ...(options.type === undefined ? {} : {type: options.type}),
           ...(options.topology === undefined
             ? {}
             : {

@@ -43,6 +43,13 @@ export {
 } from './protocol.js';
 export {AgentError, decodeBase64, encodeBase64} from './validation.js';
 export {
+  renderViewNames,
+  resolveRenderView,
+  type RenderView,
+  type RenderViewName,
+  type RenderOutputOptions,
+} from './render-options.js';
+export {
   parseRelayMessage,
   parseHostMessage,
   maxRelayMessageBytes,

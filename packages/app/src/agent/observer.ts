@@ -2,6 +2,7 @@ import {
   AgentError,
   encodeBase64,
   failure,
+  resolveRenderView,
   type AgentResponse,
   type Artifact,
   type TopologyOutputOptions,
@@ -38,7 +39,6 @@ type Snapshot = {
   module: ModelModule;
   models: ObservedModel[];
   createdAt: string;
-  artifacts?: Artifact[];
   summaries: Map<
     string,
     Pick<import('@code3d/core/tooling').TopologyInspection, 'counts' | 'bounds'>
@@ -72,6 +72,11 @@ export class AgentObserver {
       });
     this.queue = pending.catch(() => {});
     return pending;
+  }
+
+  invalidate(): void {
+    this.snapshot = undefined;
+    this.compiler.cancel();
   }
 
   private async run(request: AgentObservation): Promise<AgentResponse> {
@@ -237,9 +242,15 @@ export class AgentObserver {
       }
       described.push(this.describeModel(snapshot, entry));
     }
-    if (request.input.render && !snapshot.artifacts) {
-      const blob = await this.getViewport().captureImage(960, 720);
-      snapshot.artifacts = [
+    const view = resolveRenderView(
+      typeof request.input.render === 'object'
+        ? request.input.render.view
+        : undefined,
+    );
+    let artifacts: Artifact[] | undefined;
+    if (request.input.render) {
+      const blob = await this.getViewport().captureImage(960, 720, view);
+      artifacts = [
         {
           name: 'render.png',
           mimeType: 'image/png',
@@ -271,10 +282,19 @@ export class AgentObserver {
           : {}),
         ...(topology ? {topology: {model: model.key, ...topology}} : {}),
         ...(request.input.render
-          ? {render: {width: 960, height: 720, mimeType: 'image/png'}}
+          ? {
+              render: {
+                width: 960,
+                height: 720,
+                mimeType: 'image/png',
+                view,
+                projection: 'perspective',
+                coordinates: 'observation-scene',
+              },
+            }
           : {}),
       },
-      ...(request.input.render ? {artifacts: snapshot.artifacts} : {}),
+      ...(artifacts ? {artifacts} : {}),
     };
   }
 

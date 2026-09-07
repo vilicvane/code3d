@@ -1,4 +1,5 @@
 import type * as typeScript from '@typescript/typescript6';
+import type {CursorTypeInfo} from './type-info';
 import type {TypeScriptSelectionRange} from 'monaco-editor/language/typescript/ts.worker';
 import type * as typeScriptLanguage from 'monaco-editor/languages/features/typescript/register';
 
@@ -12,6 +13,11 @@ export type TypeScriptCompletionEntryDetails =
 
 export interface ProjectTypeScriptWorker
   extends typeScriptLanguage.TypeScriptWorker {
+  getProjectTypeInfo(
+    file: string,
+    start: number,
+    end: number,
+  ): Promise<CursorTypeInfo | undefined>;
   getProjectCompletions(
     fileName: string,
     position: number,
