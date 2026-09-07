@@ -51,6 +51,9 @@ Planar profiles lie in the local XZ plane with a +Y normal.
 | `spline(points)`                           | Interpolating spline                         |
 | `loft(sections, options?)`                 | Solid through sections; optional curve spine |
 
+See [local coordinates and placement](../../concepts/local-coordinates/) for
+the coordinate frame of a model, reference, or composition.
+
 Position coordinates use arrays; dimensions, offsets and angles use scalar
 arguments. `point([x, y, z])` equals `point().originOffset(-x, -y, -z)`.
 `line([x, y, z])` starts at zero; the two-array form uses both supplied local

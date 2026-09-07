@@ -19,6 +19,11 @@ A group composes values. A boolean operation evaluates its operands into new
 geometry. These operations are distinct even when their viewport results look
 similar.
 
+Each value has [local coordinates](../local-coordinates/). Changing its origin
+changes point coordinates; a relation supplies placement when the model is
+used in a composition. Positions use coordinate arrays, such as
+`point([10, 0, 0])`, while dimensions and displacements use separate numbers.
+
 ## Runtime contexts
 
 One source expression can execute multiple times, such as inside a loop or

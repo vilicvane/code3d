@@ -31,6 +31,11 @@ position parts with [directional bounds and explicit rotations](https://www.code
 and follow [topology source paths](https://www.code3d.org/docs/guides/topology/)
 through derived geometry.
 
+Each model has [local coordinates](https://www.code3d.org/docs/concepts/local-coordinates/).
+Choose a vertex or center as its origin, rotate around local zero, and use
+relations to place the part in a composition. The [origin and rotation guide](https://www.code3d.org/docs/guides/origins-and-rotation/)
+shows each step with the same editable source used by the App.
+
 ## Example
 
 ```ts

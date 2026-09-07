@@ -10,7 +10,10 @@ import {appUrl, sitePath} from '../../../../lib/site';
 import source from '../../../../../../app/examples/combined-constraints.ts?raw';
 
 A relation describes how one part sits against another. It is attached to a
-model value and resolved when the parts are composed.
+model value and resolved when the parts are composed. The part keeps its own
+[local coordinates](../../concepts/local-coordinates/): `originOffset()` changes
+those geometry coordinates, while a relation's `offset()` participates in
+placement. Multiple relations are solved together with their offsets.
 
 <ModelExample id="first-model" />
 
