@@ -68,7 +68,7 @@ export function installSketchSolver(instance: ModuleStatic): void {
   module = instance;
 }
 
-type SketchDrag =
+export type SketchSolveTarget =
   | Readonly<{kind: 'point'; point: number; position: SketchPosition}>
   | Readonly<{
       kind: 'radius';
@@ -77,61 +77,16 @@ type SketchDrag =
       value: number;
     }>;
 
-/** Connectivity is by point identity, not incidental intersections or positions. */
-function gestureAnchor(problem: SketchSolveProblem, drag: SketchDrag): number {
-  const neighbors = problem.points.map(() => new Set<number>());
-  const connect = (points: readonly number[]) => {
-    for (const point of points.slice(1)) {
-      neighbors[points[0]].add(point);
-      neighbors[point].add(points[0]);
-    }
-  };
-  problem.lines.forEach(connect);
-  problem.arcs.forEach(arc => connect([arc.center, ...arc.points]));
-  for (const constraint of problem.constraints)
-    if ('points' in constraint) connect(constraint.points);
-  const seed =
-    drag.kind === 'point'
-      ? drag.point
-      : (drag.curve === 'circle' ? problem.circles : problem.arcs)[drag.index]
-          .center;
-  const related = new Set([seed]);
-  for (const point of related)
-    for (const neighbor of neighbors[point]) related.add(neighbor);
-
-  // Only a lock in this component replaces the temporary anchor. A normal
-  // evaluation never gains an implicit fixed constraint.
-  const anchored = problem.points.some(
-    (point, index) =>
-      related.has(index) &&
-      (problem.constraints.some(c => c.kind === 'fixed' && c.point === index) ||
-        ((point.locked[0] ||
-          problem.constraints.some(c => c.kind === 'x' && c.point === index)) &&
-          (point.locked[1] ||
-            problem.constraints.some(
-              c => c.kind === 'y' && c.point === index,
-            )))),
-  );
-  return anchored
-    ? -1
-    : problem.points.findIndex(
-        (_, index) =>
-          related.has(index) && (drag.kind !== 'point' || index !== drag.point),
-      );
-}
+export type SketchSolveObjective = SketchSolveTarget &
+  Readonly<{weight: number}>;
 
 /** A fresh native system per solve: no previous solution or native handles escape. */
 export function solveSketchProblem(
   problem: SketchSolveProblem,
-  drag?: SketchDrag,
+  objectives: readonly SketchSolveObjective[] = [],
 ): SketchSolveResult {
   problem = initializeArcEndpoints(problem);
-  const {constraints} = problem;
-  const anchor = drag ? gestureAnchor(problem, drag) : -1;
-  const points = problem.points.map((point, index) => ({
-    ...point,
-    locked: index === anchor ? ([true, true] as const) : point.locked,
-  }));
+  const {constraints, points} = problem;
   if (!points.length)
     return {
       positions: [],
@@ -143,21 +98,31 @@ export function solveSketchProblem(
   // Unconstrained values and edits do not need a native modeling kernel.
   if (!constraints.length && !problem.arcs.length)
     return {
-      positions: points.map((p, index) =>
-        drag?.kind === 'point' && drag.point === index
-          ? [
-              p.locked[0] ? p.position[0] : drag.position[0],
-              p.locked[1] ? p.position[1] : drag.position[1],
-            ]
-          : p.position,
-      ),
+      positions: points.map((p, index) => {
+        const targets = objectives
+          .filter(o => o.kind === 'point')
+          .filter(o => o.point === index);
+        return p.position.map((value, axis) =>
+          p.locked[axis]
+            ? value
+            : leastSquaresTarget(
+                value,
+                targets.map(o => ({
+                  value: o.position[axis],
+                  weight: o.weight,
+                })),
+              ),
+        ) as [number, number];
+      }),
       radii: problem.circles.map((circle, index) =>
-        drag?.kind === 'radius' &&
-        drag.curve === 'circle' &&
-        drag.index === index &&
-        !circle.locked
-          ? drag.value
-          : circle.radius,
+        circle.locked
+          ? circle.radius
+          : leastSquaresTarget(
+              circle.radius,
+              objectives
+                .filter(o => o.kind === 'radius')
+                .filter(o => o.curve === 'circle' && o.index === index),
+            ),
       ),
       arcRadii: [],
       degreesOfFreedom:
@@ -314,6 +279,7 @@ export function solveSketchProblem(
       axis: number,
       value: number,
       tag: number,
+      weight = 1,
     ) => {
       if (points[point].locked[axis]) {
         checkConstant(points[point].position[axis], value, tag);
@@ -329,7 +295,7 @@ export function solveSketchProblem(
         constant((value - origin[axis]) / scale),
         tag,
         true,
-        1,
+        weight,
       );
     };
     constraints.forEach((constraint, index) => {
@@ -454,33 +420,63 @@ export function solveSketchProblem(
         }
       }
     });
-    if (drag) {
+    const solve = (algorithm: number) => {
+      const status = gcs.solve_system(algorithm);
+      const conflicting = constraintIndices(gcs, 'get_conflicting');
+      if (status > 1 || conflicting.length)
+        throw new SketchConstraintError(
+          conflicting,
+          `Could not satisfy sketch constraints${conflicting.length ? ` (${conflicting.map(i => i + 1).join(', ')})` : ''}. The constraints may conflict or need a different current geometry.`,
+        );
+      gcs.apply_solution();
+    };
+    const redundant: number[] = [];
+    if (objectives.length) {
+      // Diagnose the actual model before adding soft objectives. PlaneGCS 1.2
+      // otherwise includes negative tags in its redundancy consistency solve.
+      // Remove only constraints proved fully redundant, retaining every author
+      // equation for the independent final residual check below.
+      for (;;) {
+        solve(2);
+        const found = constraintIndices(gcs, 'get_redundant');
+        if (!found.length) break;
+        redundant.push(...found);
+        for (const index of found) gcs.clear_by_id(index + 1);
+      }
+    }
+    for (const objective of objectives) {
       // Negative tags are PlaneGCS soft objectives; they neither change DOF nor
       // weaken persistent constraints. The gesture is not part of the model.
-      if (drag.kind === 'radius') {
-        if (knownRadius(drag.curve, drag.index) === undefined) {
-          const args = [constant(drag.value / scale), -1, true, 1] as const;
-          if (drag.curve === 'arc')
-            gcs.add_constraint_arc_radius(nativeArcs[drag.index], ...args);
+      if (objective.kind === 'radius') {
+        if (knownRadius(objective.curve, objective.index) === undefined) {
+          const args = [
+            constant(objective.value / scale),
+            -1,
+            true,
+            objective.weight,
+          ] as const;
+          if (objective.curve === 'arc')
+            gcs.add_constraint_arc_radius(nativeArcs[objective.index], ...args);
           else
             gcs.add_constraint_circle_radius(
-              nativeCircles[drag.index],
+              nativeCircles[objective.index],
               ...args,
             );
         }
       } else
         for (const axis of [0, 1])
-          if (knownCoordinate(drag.point, axis) === undefined)
-            coordinate(drag.point, axis, drag.position[axis], -1);
+          if (knownCoordinate(objective.point, axis) === undefined)
+            coordinate(
+              objective.point,
+              axis,
+              objective.position[axis],
+              -1,
+              objective.weight,
+            );
     }
-    const status = gcs.solve_system(2);
-    const conflicting = constraintIndices(gcs, 'get_conflicting');
-    if (status > 1 || conflicting.length)
-      throw new SketchConstraintError(
-        conflicting,
-        `Could not satisfy sketch constraints${conflicting.length ? ` (${conflicting.map(i => i + 1).join(', ')})` : ''}. The constraints may conflict or need a different current geometry.`,
-      );
-    gcs.apply_solution();
+    // Equal-coordinate reduction can leave a soft-only subsystem. BFGS accepts
+    // a least-squares optimum there; DogLeg expects all residuals to vanish.
+    solve(objectives.length ? 0 : 2);
     const positions = indices.map(([x, y], index): SketchPosition => [
       points[index].locked[0]
         ? points[index].position[0]
@@ -551,6 +547,7 @@ export function solveSketchProblem(
       redundant: [
         ...new Set([
           ...constraintIndices(gcs, 'get_redundant'),
+          ...redundant,
           ...[...constantTags]
             .filter(tag => !activeTags.has(tag))
             .map(tag => tag - 1),
@@ -696,6 +693,21 @@ function residual(
       }
     }
   }
+}
+
+/** Native scale weights multiply residuals, so their squares weight the mean. */
+function leastSquaresTarget(
+  current: number,
+  targets: readonly Readonly<{value: number; weight: number}>[],
+): number {
+  if (!targets.length) return current;
+  const total = targets.reduce((sum, target) => sum + target.weight ** 2, 0);
+  return (
+    targets.reduce(
+      (sum, target) => sum + target.value * target.weight ** 2,
+      0,
+    ) / total
+  );
 }
 
 function constraintIndices(

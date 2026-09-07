@@ -71,8 +71,10 @@ test('dimensions and direction survive drag and deterministic source replay', ()
     b = position(moved, 2);
   close(b[0] - a[0], 40);
   close(a[1], b[1]);
-  position(original, 1).forEach((v, axis) => close(a[axis], v));
-  position(original, 2).forEach((v, axis) => close(b[axis], v));
+  close(a[0], 20);
+  close(a[1], 20);
+  close(b[0], 60);
+  close(b[1], 20);
   assert.equal(moved.degreesOfFreedom, 2);
   const replay = snapshot(
     sketch(
@@ -160,20 +162,21 @@ test('derived solving locks upstream geometry and resolves layer-local IDs indep
   assert.equal(b.degreesOfFreedom, 0);
 });
 
-test('the first non-dragged point anchors a gesture without new persistent constraints', () => {
+test('a soft reference yields to horizontal motion without new persistent constraints', () => {
   const s = snapshot(sketch(entries, {constraints: [['horizontal', 3]]}));
   for (const id of [1, 2]) {
     const anchor = id === 1 ? 2 : 1;
     const moved = solveSketchSnapshot([s], {id, position: [60, 50]});
-    assert.deepEqual(position(s, anchor), position(moved, anchor));
-    close(position(moved, id)[1], position(s, anchor)[1]);
+    close(position(moved, anchor)[0], position(s, anchor)[0]);
+    close(position(moved, anchor)[1], 50);
+    close(position(moved, id)[1], 50);
     close(position(moved, id)[0], 60);
     assert.deepEqual(moved.constraints, s.constraints);
     assert.equal(moved.degreesOfFreedom, 3);
   }
 });
 
-test('an existing connected fixed point prevents an extra automatic gesture anchor', () => {
+test('a real connected fixed point stays fixed while soft references can yield', () => {
   for (const fixed of [
     [['fixed', 4]],
     [
@@ -194,7 +197,7 @@ test('an existing connected fixed point prevents an extra automatic gesture anch
   }
 });
 
-test('either endpoint can rotate continuously through 180 degrees with a temporary opposite anchor', () => {
+test('either endpoint can rotate continuously through 180 degrees with a soft opposite reference', () => {
   const initial = snapshot(
     sketch([['point', 9, [-60, -20]], ...entries], {
       constraints: [['length', [3, 40]]],
@@ -212,7 +215,11 @@ test('either endpoint can rotate continuously through 180 degrees with a tempora
         center[0] + 40 * Math.cos(theta),
         center[1] + 40 * Math.sin(theta),
       ];
-      const moved = solveSketchSnapshot([previous], {id, position: target});
+      const moved = solveSketchSnapshot([previous], {
+        id,
+        position: target,
+        reference: initial,
+      });
       position(moved, anchor).forEach((v, axis) => close(v, center[axis]));
       position(moved, id).forEach((v, axis) => close(v, target[axis]));
       assert.ok(
@@ -255,7 +262,7 @@ test('gesture coordinate locks are numeric, per-axis and absent from ordinary ev
   }
 });
 
-test('a dragged coordinate lock coexists with the first non-dragged anchor and hard constraints', () => {
+test('a dragged coordinate lock coexists with a soft reference and hard constraints', () => {
   const original = snapshot(
     sketch(
       [
@@ -302,7 +309,7 @@ test('connected coordinate locks and permanent coordinate constraints together p
   }
 });
 
-test('changed coordinate locks are satisfied before a temporary anchor is chosen', () => {
+test('changed coordinate locks are satisfied before the drag reference is prepared', () => {
   const original = snapshot(
     sketch(
       [

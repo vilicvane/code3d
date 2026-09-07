@@ -1251,18 +1251,15 @@ kbd {
 }
 .sketch-canvas .constraint-related {
   stroke: #dbe9a0;
-  stroke-width: 3;
 }
 .sketch-canvas .selected {
   stroke: var(--acid);
-  stroke-width: 3;
 }
 .sketch-canvas[data-tool='Trim'] {
   cursor: crosshair;
 }
 .sketch-canvas .trim-preview {
   stroke: #ed897b;
-  stroke-width: 4;
 }
 .sketch-canvas .constraint-badge {
   color: #bac78f;

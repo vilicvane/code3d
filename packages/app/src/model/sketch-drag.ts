@@ -20,12 +20,14 @@ export type SketchDrag = Readonly<{
   position: SketchPosition;
   editable: SketchEditableParameters;
   data: readonly SketchGeometryData[];
+  reference?: SketchSnapshot;
 }>;
 
 /** Preview and commit share these exact author data, including rounding. */
 export type SketchDragPreview = Readonly<{
   snapshot: SketchSnapshot;
   data: readonly SketchGeometryData[];
+  reference: SketchSnapshot;
 }>;
 
 export function previewSketchDrag(
@@ -86,6 +88,7 @@ export function previewSketchDrag(
   // source. Neither the mouse objective nor gesture-only locks escape here.
   return {
     data,
+    reference: drag.reference ?? local,
     snapshot: runtime.solveSketchSnapshot([...layers.slice(0, -1), authored]),
   };
 }

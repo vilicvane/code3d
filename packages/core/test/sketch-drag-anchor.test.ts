@@ -106,18 +106,23 @@ test('only referenced upstream points count as anchors, even with matching local
       id: 2,
       position: [60, 20],
     });
-    if (connected) {
-      close(point(moved, 2).position, [60, 20]);
-      assert.notDeepEqual(point(moved, 1).position, point(local, 1).position);
-    } else {
-      close(point(moved, 1).position, [0, 0]);
-      close([Math.hypot(...point(moved, 2).position)], [40]);
-    }
+    close(point(moved, 2).position, [60, 20]);
+    assert.notDeepEqual(point(moved, 1).position, point(local, 1).position);
+    close(
+      [
+        Math.hypot(
+          ...point(moved, 2).position.map(
+            (v, axis) => v - point(moved, 1).position[axis],
+          ),
+        ),
+      ],
+      [40],
+    );
     close(point(upstream, 1).position, [-20, 0]);
   }
 });
 
-test('shared endpoints and constraint-only connections select in declaration order, not ID or traversal order', () => {
+test('shared endpoints and constraint-only connections preserve constraints while references yield', () => {
   for (const connection of ['lines', 'coincident', 'midpoint'] as const) {
     const initial = snapshot(
       [
@@ -142,12 +147,20 @@ test('shared endpoints and constraint-only connections select in declaration ord
       ],
     );
     const moved = solveSketchSnapshot([initial], {id: 2, position: [60, 20]});
-    close(point(moved, 8).position, point(initial, 8).position);
     close(point(moved, 99).position, point(initial, 99).position);
-    if (connection === 'coincident')
-      close(point(moved, 1).position, point(initial, 1).position);
+    close(point(moved, 2).position, [60, 20]);
+    close([point(moved, 1).position[1]], [20]);
+    if (connection === 'lines')
+      close(point(moved, 8).position, point(initial, 8).position);
+    else if (connection === 'coincident')
+      close(point(moved, 8).position, point(moved, 1).position);
     else
-      assert.notDeepEqual(point(moved, 1).position, point(initial, 1).position);
+      close(
+        point(moved, 8).position,
+        point(moved, 1).position.map(
+          (v, axis) => (v + point(moved, 2).position[axis]) / 2,
+        ),
+      );
     assert.equal(moved.degreesOfFreedom, initial.degreesOfFreedom);
   }
 });

@@ -3,6 +3,7 @@ import {
   type SketchSolveProblem,
   type SketchSolveConstraint,
 } from './sketch-solver.js';
+import {solveSketchDrag} from './sketch-drag-rules.js';
 
 /** Current coordinates in a sketch's local two-dimensional plane. */
 export type SketchPosition = readonly [x: number, y: number];
@@ -469,6 +470,8 @@ export function solveSketchSnapshot(
   drag?: Readonly<{
     id: number;
     position: SketchPosition;
+    /** Gesture-start geometry; previous-frame geometry remains the numeric seed. */
+    reference?: SketchSnapshot;
     /** Numeric, gesture-only parameter locks; never author constraints. */
     locks?: readonly Readonly<{id: number; parameter: number; value: number}>[];
   }>,
@@ -613,20 +616,55 @@ export function solveSketchSnapshot(
           point: pointIndex({layer: local.id, id: drag.id}),
           position: drag.position,
         });
-  const result = solveSketchProblem(
+  const prepared =
     // Applying authored coordinate locks can change the displayed geometry.
-    // Satisfy those locks before choosing a gesture anchor, otherwise the old
-    // anchor can contradict a perfectly valid set of persistent constraints.
+    // Satisfy those locks before matching a drag rule or preparing its reference.
     drag &&
-      (problem.points.some((p, i) =>
-        p.position.some((v, axis) => v !== points[i].position[axis]),
-      ) ||
-        problem.circles.some((c, i) => c.radius !== circles[i].radius) ||
-        problem.arcs.some((a, i) => a.radius !== arcs[i].radius))
+    (problem.points.some((p, i) =>
+      p.position.some((v, axis) => v !== points[i].position[axis]),
+    ) ||
+      problem.circles.some((c, i) => c.radius !== circles[i].radius) ||
+      problem.arcs.some((a, i) => a.radius !== arcs[i].radius))
       ? solvedProblem(problem)
-      : problem,
-    objective,
+      : problem;
+  const referenceEntities = new Map(
+    drag?.reference?.entities.map(e => [e.id, e]),
   );
+  const reference = drag?.reference
+    ? solvedProblem({
+        ...prepared,
+        points: prepared.points.map((p, index) => {
+          const entity =
+            points[index].layer === local.id &&
+            referenceEntities.get(points[index].id);
+          return entity && entity.kind === 'point'
+            ? {
+                ...p,
+                position: p.position.map((v, axis) =>
+                  p.locked[axis] ? v : entity.position[axis],
+                ) as [number, number],
+              }
+            : p;
+        }),
+        circles: prepared.circles.map((c, index) => {
+          const entity =
+            circles[index].layer === local.id &&
+            referenceEntities.get(circles[index].id);
+          return !c.locked && entity && entity.kind === 'circle'
+            ? {...c, radius: entity.radius}
+            : c;
+        }),
+        arcs: prepared.arcs.map((a, index) => {
+          const entity = referenceEntities.get(arcs[index].id);
+          return !a.locked && entity?.kind === 'arc'
+            ? {...a, radius: entity.radius}
+            : a;
+        }),
+      })
+    : prepared;
+  const result = objective
+    ? solveSketchDrag(prepared, objective, reference)
+    : solveSketchProblem(prepared);
   const entities = local.entities.map(e =>
     e.kind === 'point'
       ? {

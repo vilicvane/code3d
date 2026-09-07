@@ -170,22 +170,23 @@ for (const installed of [false, true] as const) {
       assert.match(result.conflict!, /Conflicting bound positions/);
       assert.equal(result.sketchDiagnostic, undefined);
       assert.match(result.cancelled, /superseded/);
-      const originalPoints = result.originalSketch.entities.filter(
-        e => e.kind === 'point',
-      );
-      for (const snapshot of [result.moved.snapshot, result.next.snapshot]) {
+      for (const [snapshot, target] of [
+        [result.moved.snapshot, [60, 20]],
+        [result.next.snapshot, [70, 30]],
+      ] as const) {
         const [a, b] = snapshot.entities
           .filter(e => e.kind === 'point')
           .map(e => e.position);
-        for (const [index, p] of [a, b].entries())
-          p.forEach((v, axis) =>
-            assert.ok(
-              Math.abs(v - originalPoints[index].position[axis]) < 1e-6,
-            ),
-          );
+        b.forEach((value, axis) =>
+          assert.ok(Math.abs(value - target[axis]) < 1e-6),
+        );
         assert.ok(Math.abs(b[0] - a[0] - 40) < 1e-6);
         assert.ok(Math.abs(b[1] - a[1]) < 1e-6);
         assert.equal(snapshot.degreesOfFreedom, 2);
+        assert.deepEqual(
+          snapshot.constraints,
+          result.originalSketch.constraints,
+        );
       }
     },
   );

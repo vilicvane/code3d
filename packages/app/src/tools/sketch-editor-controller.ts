@@ -159,6 +159,7 @@ export class SketchEditorController {
       position,
       editable,
       data: previous?.data ?? this.data,
+      reference: previous?.reference,
     };
     // The zero-equation case is kernel-independent. Use the same numeric and
     // source-replay logic without waiting for the preceding edit's compilation.

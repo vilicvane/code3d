@@ -338,8 +338,11 @@ test('generated rectangles preserve right angles, dimensions and source replay w
               position: [start[0] + step / 2, start[1] + step / 3],
               editable: analyzeSketchSource(args).editable,
               data: preview.data,
+              reference: original,
             });
             const solved = points(preview.snapshot);
+            near(solved[id - 1][0], start[0] + step / 2);
+            near(solved[id - 1][1], start[1] + step / 3);
             const [a, b, c, d] = solved.slice(mode === 'center' ? 1 : 0);
             near(a[1], b[1]);
             near(b[0], c[0]);
@@ -350,7 +353,13 @@ test('generated rectangles preserve right angles, dimensions and source replay w
               near(solved[0][1], (a[1] + c[1]) / 2);
               if (id !== 1)
                 solved[0].forEach((v, axis) =>
-                  near(v, points(original)[0][axis]),
+                  near(
+                    v,
+                    points(original)[0][axis] +
+                      (fields.includes(axis === 0 ? 'width' : 'height')
+                        ? step / (axis === 0 ? 2 : 3)
+                        : 0),
+                  ),
                 );
             }
             if (fields.includes('width')) near(Math.abs(b[0] - a[0]), 40);

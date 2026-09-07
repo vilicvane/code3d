@@ -211,23 +211,25 @@ center point, allocated before new corners, and adds one midpoint constraint
 between it and opposite corners. A derived sketch can reference that center
 with `base.point(id)`. Both rectangle modes share inputs, snapping and undo.
 Dragging previews a soft solver target and writes every changed editable point
-in one transaction. Hard constraints remain satisfied. Within the dragged
-geometry's connected component, with no locked point, a gesture temporarily
-fixes the first non-dragged point in declaration order. Connections follow shared
-endpoints, arc centers and explicit constraints, not coincident coordinates or
-intersections. Unrelated fixed/upstream/expression-locked points do not suppress
-the anchor; radius gestures start from the curve center's component. This does not add a
-source constraint or reduce the reported model DOF. This also applies to center
-rectangles; dragging their center does not imply a whole-rectangle translation.
+in one transaction. Hard constraints remain satisfied. Rules receive the whole
+gesture context, without framework-level point classification or partitioning.
+They recognize unrestricted centers for whole-geometry translation, prefer related
+centers or far connected points as soft references, and handle an unconstrained
+sole junction per branch. Radius gestures prefer the curve center.
+The closest feasible mouse result takes priority over reference positions;
+references can yield and are never automatically fixed. None of this adds
+source constraints or reduces the reported model DOF. An unrestricted center
+rectangle translates when its center moves, without hidden editor metadata.
 Unconstrained movement needs
 no native kernel. During a drag, the editor uses the AST to lock each expression
 coordinate to its evaluated author value: `[width, 0]` locks X but allows Y to move.
 These numeric locks apply to all local points, not just the dragged point, and do
 not become permanent constraints or change normal evaluation. If imposing these
-locks changes the displayed geometry, the solver satisfies them before choosing
-the temporary anchor. Initially unsatisfied author data can therefore adjust on
+locks changes the displayed geometry, the solver satisfies them before preparing
+the rule context. Initially unsatisfied author data can therefore adjust on
 the first drag. Editable axes alone are written back; expressions never gain
-offsets. Previews forward-solve the exact rounded data that recompilation uses.
+offsets. Frames retain a gesture-start reference alongside the preceding solution.
+Previews forward-solve the exact rounded data that recompilation uses.
 Deleting a point also deletes connected local lines and affected constraints. Upstream geometry stays
 locked but can supply endpoints for new lines. Coordinates using expressions
 remain editable in code, not by dragging; literal axes on the same point remain

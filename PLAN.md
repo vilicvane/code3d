@@ -37,18 +37,21 @@ implementation context and historical outcomes, not a competing work queue.
   emits no direction constraint. Ordinary automatic snapping stays temporary.
   Dragging uses a soft Worker solve and writes all changed editable coordinates
   together, preserving hard constraints, upstream values and expression source.
-  Within the dragged geometry's connected component, a gesture with no locked
-  point temporarily fixes the first non-dragged point in declaration order.
-  Connectivity follows shared endpoints, arc centers and explicit constraints,
-  not coordinate coincidence or intersections. Unrelated locked points do not
-  suppress this anchor; radius gestures start from the curve center's component.
-  This does not persist a fixed constraint or reduce the reported model
-  DOF. Unconstrained movement is kernel-independent. Successive frames use the
-  preceding solution, and previews forward-solve the rounded source data that
+  Drag rules receive the complete numeric context; the dispatcher does not
+  classify points or partition geometry. Rules recognize unrestricted curve and
+  rectangle centers for translation, prefer centers or far connected endpoints
+  as soft references, and handle an unconstrained sole junction per branch.
+  Connectivity and role recognition belong to those rules, not the framework.
+  First solve for the closest feasible mouse target, then preserve that achieved
+  value while optimizing soft references. No reference point is implicitly fixed;
+  temporary objectives do not enter source or the reported model DOF.
+  Unconstrained movement is kernel-independent. Successive frames use the
+  preceding solution and an immutable gesture-start reference; previews
+  forward-solve the rounded source data that
   will be committed. During dragging, AST-derived per-axis locks preserve each
   expression's evaluated author value; literal axes on the same point remain
   editable. If those locks alter the displayed geometry, solve them before
-  selecting the temporary anchor. Thus initially unsatisfied data can adjust
+  preparing the rule context. Thus initially unsatisfied data can adjust
   when dragging begins. Normal evaluation remains numeric-only; expressions
   receive neither offsets nor permanent constraints. Source replay tests use a
   fresh compiler, not saved gesture state.
@@ -68,8 +71,9 @@ implementation context and historical outcomes, not a competing work queue.
   `['midpoint', [midpoint, start, end]]`, with no line entity required; two native
   linear difference equations per axis share a temporary parameter and one
   diagnostic tag. It works at coincident coordinates without changing already
-  satisfied geometry. Both modes retain the common gesture anchor rule; dragging
-  the center does not implicitly mean translating the entire rectangle.
+  satisfied geometry. The center rule recognizes this authored structure without
+  hidden GUI state; without additional restrictions, dragging its center
+  translates the rectangle. Interactive strokes remain 2px in all highlight states.
   Curve selection and deletion use intervals delimited by existing
   points, finite line/circle/arc intersections and overlapping endpoints. Merely crossing
   or selecting geometry does not split the source. Deleting an end interval

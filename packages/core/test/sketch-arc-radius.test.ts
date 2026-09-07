@@ -182,7 +182,7 @@ test('free arc radius and endpoint drags update the same radius parameter and re
   for (const id of [3, 4]) {
     const moved = solveSketchSnapshot([before], {id, position: [0, 16]});
     near(arc(moved).radius, 16);
-    assert.deepEqual(point(moved, 1).position, [0, 0]);
+    point(moved, 1).position.forEach(v => near(v, 0));
     assert.equal(moved.degreesOfFreedom, 5);
     geometry(moved);
     const replay = solveSketchSnapshot([moved]);
@@ -210,7 +210,7 @@ test('arc radius gesture locks preserve expression values and still allow endpoi
     locks: [{id: 4, parameter: 0, value: 12}],
   });
   near(arc(resizedLock).radius, 12);
-  assert.deepEqual(point(resizedLock, 1).position, [0, 0]);
+  point(resizedLock, 1).position.forEach(v => near(v, 0));
   geometry(resizedLock);
   const dimensioned = snapshotSketch(
     sketch(data(), {

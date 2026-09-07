@@ -524,12 +524,13 @@ const settleDrag = page =>
       });
     });
 
-test('constrained drag anchors the opposite endpoint, keeps length and survives recompilation with one undo', async t => {
+test('constrained drag follows the mouse, softly retains the opposite endpoint and replays with one undo', async t => {
   const page = await open(
     t,
     constrainedLine.replace("['horizontal', 3], ", ''),
   );
   const source = await text(page);
+  await page.getByRole('button', {name: 'Snap', exact: true}).click();
   const a = await screenPoint(point(page, 1)),
     b = await screenPoint(point(page, 2));
   await page.evaluate(
@@ -543,7 +544,16 @@ test('constrained drag anchors the opposite endpoint, keeps length and survives 
   await page.getByText('Ready', {exact: true}).waitFor();
   const movedA = await screenPoint(point(page, 1)),
     movedB = await screenPoint(point(page, 2));
-  assert.deepEqual(movedA, a);
+  assert.ok(Math.hypot(movedB[0] - (b[0] - 40), movedB[1] - (b[1] - 50)) < 0.1);
+  const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
+  const distance = Math.hypot(movedB[0] - a[0], movedB[1] - a[1]);
+  movedA.forEach((value, axis) =>
+    assert.ok(
+      Math.abs(
+        value - (movedB[axis] + ((a[axis] - movedB[axis]) * length) / distance),
+      ) < 0.1,
+    ),
+  );
   assert.ok(
     Math.abs(
       Math.hypot(movedB[0] - movedA[0], movedB[1] - movedA[1]) -

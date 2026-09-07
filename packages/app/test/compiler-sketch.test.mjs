@@ -219,6 +219,7 @@ test('AST coordinate locks preserve expressions through drag, source transaction
             ),
             editable,
             data: preview.data,
+            reference: value,
           })),
         `${args}: frame ${frame}`,
       );
@@ -236,7 +237,7 @@ test('AST coordinate locks preserve expressions through drag, source transaction
             );
           }
       assert.deepEqual(preview.snapshot.constraints, value.constraints);
-      if (anchor !== undefined)
+      if (anchor !== undefined && frame === 10)
         close(point(preview.snapshot, anchor), point(value, anchor));
     }
     const sourceRef = value.definitionRef;
@@ -306,7 +307,7 @@ test('constraint conflicts highlight their source tuples, without persistent con
   );
 });
 
-test('temporary drag anchors survive full rotations and exact rounded source replay', async () => {
+test('soft drag references survive full rotations and exact rounded source replay', async () => {
   const source = data =>
     `const value = sketch(${JSON.stringify([
       ...data.map(p => ['point', p.id, p.parameters]),
@@ -357,6 +358,7 @@ test('temporary drag anchors survive full rotations and exact rounded source rep
           [2, [true, true]],
         ]),
         data: preview.data,
+        reference: initial,
       });
       close(point(preview.snapshot, anchor), center);
       close(point(preview.snapshot, id), position);

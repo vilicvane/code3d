@@ -60,7 +60,11 @@ const value = sketch([
       const actual = (await point(page, id).boundingBox())!;
       assert.ok(Math.hypot(actual.x - expected.x, actual.y - expected.y) < 0.1);
     }
-    assert.match(await text(page), /'point',\s*1,\s*\[0,\s*0\]/);
+    const persisted = (await text(page)).match(
+      /'point',\s*1,\s*\[([^,]+),\s*([^\]]+)\]/,
+    )!;
+    // Soft stays are numerical optima, not bitwise-fixed source parameters.
+    assert.ok(Math.hypot(Number(persisted[1]), Number(persisted[2])) < 1e-5);
     if (expression)
       assert.match(await text(page), /'point',\s*9,\s*\[x,\s*y\]/);
     assert.doesNotMatch(await text(page), /'fixed'/);
