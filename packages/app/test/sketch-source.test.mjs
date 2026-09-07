@@ -159,6 +159,50 @@ test('appending uses named upstream references and current local IDs without nex
   }
 });
 
+test('omitted entries materialize together with first geometry and constraints, retaining comments', () => {
+  for (const source of ['', '  ', '/* empty */', '// empty\n'])
+    for (const constraints of [
+      [],
+      [
+        ['horizontal', 3],
+        ['length', [3, 10]],
+      ],
+    ]) {
+      const host = setup(source);
+      const initial = analyzeSketchSource(source);
+      assert.equal(initial.reason, undefined);
+      assert.equal(initial.array, undefined);
+      assert.equal(initial.entries.size, 0);
+      assert.equal(host.source(), source);
+      assert.equal(
+        host.edit({
+          kind: 'append',
+          entries: [
+            ['point', 1, [0, 0]],
+            ['point', 2, [10, 0]],
+            ['line', 3, [address(1), address(2)]],
+          ],
+          constraints,
+        }).status,
+        'committed',
+      );
+      const [entries, options] = Function('return [' + host.source() + ']')();
+      assert.equal(entries.length, 3);
+      assert.deepEqual(options?.constraints ?? [], constraints);
+      assert.equal(host.source().startsWith(source), true);
+      assert.deepEqual(host.undo, [source]);
+      assert.equal(analyzeSketchSource(host.source()).reason, undefined);
+      assert.equal(
+        host.edit({
+          kind: 'append',
+          entries: [['point', 4, [20, 0]]],
+        }).status,
+        'committed',
+      );
+      assert.equal(analyzeSketchSource(host.source()).entries.size, 4);
+    }
+});
+
 test('deleting any tuple subset retains valid separators and surviving comments', () => {
   for (const trailing of ['', ',']) {
     for (const ids of [[1], [2], [3], [1, 2], [2, 3], [1, 3], [1, 2, 3]]) {

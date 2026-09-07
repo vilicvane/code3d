@@ -4,6 +4,13 @@ import {
   type SketchSolveConstraint,
 } from './sketch-solver.js';
 import {solveSketchDrag} from './sketch-drag-rules.js';
+import {sketchRegions} from './sketch-regions.js';
+import {
+  sketchFaceModel,
+  disposeModelObjects,
+  isModelObject,
+  type FaceModel,
+} from './runtime.js';
 import {
   sketchIncidences,
   sketchIncidencePoints,
@@ -74,13 +81,17 @@ export interface Sketch {
   /** References a point defined in this layer. */
   point(id: number): SketchPoint;
   /** Adds a local layer while retaining the upstream sketch as read-only input. */
-  derive(entries: readonly SketchEntry[], options?: SketchOptions): Sketch;
+  derive(entries?: readonly SketchEntry[], options?: SketchOptions): Sketch;
+  /** Creates the only closed region, including holes. Requires exactly one face. */
+  face(): FaceModel;
+  /** Creates all closed regions, including upstream boundaries. Returns an ordinary array. */
+  faces(): readonly FaceModel[];
 }
 
 type Definition = Readonly<{
   base?: Sketch;
   /** Used only to identify the authored argument during source tracing. */
-  input: readonly SketchEntry[];
+  input?: readonly SketchEntry[];
   inputOptions?: SketchOptions;
   entries: readonly SketchEntry[];
   constraints: readonly SketchConstraint[];
@@ -95,13 +106,13 @@ const references = new WeakSet<SketchPoint>();
 
 class SketchValue implements Sketch {
   constructor(
-    entries: readonly SketchEntry[],
+    entries?: readonly SketchEntry[],
     options?: SketchOptions,
     base?: Sketch,
   ) {
     const ids = new Set<number>();
     const points = new Map<number, SketchPosition>();
-    const copied = entries.map<SketchEntry>(entry => {
+    const copied = (entries ?? []).map<SketchEntry>(entry => {
       const [kind, id, data] = entry;
       if (!Number.isSafeInteger(id) || id < 1)
         throw new Error('Sketch entity IDs must be positive safe integers.');
@@ -308,14 +319,50 @@ class SketchValue implements Sketch {
     return ref;
   }
 
-  derive(entries: readonly SketchEntry[], options?: SketchOptions): Sketch {
+  derive(entries?: readonly SketchEntry[], options?: SketchOptions): Sketch {
     return new SketchValue(entries, options, this);
+  }
+
+  face(): FaceModel {
+    const regions = sketchRegions(this.layers());
+    if (regions.length !== 1)
+      throw new Error(
+        `sketch.face() requires exactly one closed region; found ${regions.length}. Use faces() for multiple regions.`,
+      );
+    return sketchFaceModel(regions[0]);
+  }
+
+  faces(): readonly FaceModel[] {
+    const faces: FaceModel[] = [];
+    try {
+      for (const region of sketchRegions(this.layers()))
+        faces.push(sketchFaceModel(region));
+      return faces;
+    } catch (error) {
+      disposeModelObjects(
+        faces.flatMap(face => (isModelObject(face) ? [face] : [])),
+      );
+      throw error;
+    }
+  }
+
+  private layers(): readonly SketchSnapshot[] {
+    const values: Sketch[] = [];
+    for (
+      let value: Sketch | undefined = this;
+      value;
+      value = definitions.get(value)!.base
+    )
+      values.unshift(value);
+    return values.map(value =>
+      snapshotSketch(value, s => String(values.indexOf(s))),
+    );
   }
 }
 
 /** Defines a sketch using [kind, ID, data] tuples. IDs belong to this layer. */
 export function sketch(
-  entries: readonly SketchEntry[],
+  entries?: readonly SketchEntry[],
   options?: SketchOptions,
 ): Sketch {
   return new SketchValue(entries, options);

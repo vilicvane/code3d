@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
 import {createAppTestServer} from './vite-test-server.ts';
 import {createTestProjectCompiler} from './project-test-files.ts';
+import {trimmedArcSketchArguments} from './sketch-fixtures.ts';
 
 let server, compiler, analyzeSketchSource, SketchEditResolver;
 before(async () => {
@@ -79,6 +80,75 @@ const online = (s, id = 4) => {
 };
 const entries =
   "[['point', 1, [0, 0]], ['point', 2, [20, 0]], ['line', 3, [1, 2]], ['point', 4, [10, 0]]]";
+
+test('staged connected-center dragging preserves shape through continuous preview and fresh source replay into extrusion', async () => {
+  let args = trimmedArcSketchArguments(10);
+  const source = () => 'const s = sketch(' + args + ');\ns.face().extrude(10);';
+  let [local] = await compile(source());
+  const before = local.entities;
+  const verify = (snapshot, y) => {
+    for (const [id, x] of [
+      [10, 0],
+      [13, -10],
+      [15, 10],
+      [4, 20],
+      [5, -20],
+    ])
+      assert.deepEqual(position(snapshot, id), [x, y]);
+    assert.deepEqual(position(snapshot, 2), [-20, -10]);
+    assert.deepEqual(position(snapshot, 3), [20, -10]);
+    assert.equal(snapshot.entities.find(e => e.id === 11).radius, 10);
+    assert.equal(snapshot.entities.find(e => e.id === 16).radius, 2.5);
+    assert.deepEqual(snapshot.constraints, local.constraints);
+  };
+  let continuous;
+  for (const y of [15, 7, 10]) {
+    continuous = drag([local], args, 10, [0, y], continuous);
+    verify(continuous.snapshot, y);
+  }
+  assert.deepEqual(continuous.snapshot.entities, before);
+  for (const y of [15, 7, 10]) {
+    const preview = drag([local], args, 10, [0, y]);
+    args = apply(local, args, preview);
+    assert.doesNotMatch(args, /'fixed'|'radius'|'sweep'/);
+    const fresh = await createTestProjectCompiler(server);
+    try {
+      [local] = await compile(source(), fresh);
+      assert.deepEqual(local.entities, preview.snapshot.entities);
+      verify(local, y);
+    } finally {
+      fresh.dispose();
+    }
+  }
+  assert.deepEqual(local.entities, before);
+});
+
+test('returning a trimmed arc endpoint keeps the opposite horizontal coordinate exact through source replay', async () => {
+  let args = trimmedArcSketchArguments();
+  let [local] = await compile('const s = sketch(' + args + ');');
+  const initial = local.entities;
+  let continuous;
+  for (const x of [8, 9, 7.5]) {
+    continuous = drag([local], args, 15, [x, 10], continuous);
+    assert.deepEqual(position(continuous.snapshot, 13), [-x, 10]);
+  }
+  assert.deepEqual(continuous.snapshot.entities, initial);
+  for (const x of [8, 7.5, 10, 7.5]) {
+    const preview = drag([local], args, 15, [x, 10]);
+    assert.deepEqual(position(preview.snapshot, 13), [-x, 10]);
+    assert.deepEqual(position(preview.snapshot, 15), [x, 10]);
+    args = apply(local, args, preview);
+    assert.ok(args.includes(`['point', 13, [-${x}, 10]]`));
+    const fresh = await createTestProjectCompiler(server);
+    try {
+      [local] = await compile('const s = sketch(' + args + ');', fresh);
+      assert.deepEqual(local.entities, preview.snapshot.entities);
+    } finally {
+      fresh.dispose();
+    }
+    if (x === 7.5) assert.deepEqual(local.entities, initial);
+  }
+});
 
 test('unconstrained point-on-line motion writes actual data and replays exactly in a fresh compiler', async () => {
   const [local] = await compile('const s = sketch(' + entries + ');');

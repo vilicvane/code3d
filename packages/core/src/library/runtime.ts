@@ -71,6 +71,9 @@ import {
   type KernelValueLifecycle,
 } from './kernel-cache.js';
 import {loftWithTopology} from './loft.js';
+import {extrudeWithTopology} from './extrude.js';
+import {sketchRegionFace} from './sketch-face.js';
+import type {SketchRegion} from './sketch-regions.js';
 import {formatTopologyId, type TopologyId} from './topology-id.js';
 import {
   booleanWithTopology,
@@ -192,6 +195,8 @@ export type ModelOperationKind =
   | 'bezier'
   | 'spline'
   | 'loft'
+  | 'sketchFace'
+  | 'extrude'
   | 'primitive'
   | 'paint'
   | 'scaled'
@@ -751,6 +756,8 @@ export interface SurfaceTopologyCapabilities extends EdgeTopologyCapabilities {
 }
 
 export interface SolidModificationCapabilities<Elements extends NamedElements> {
+  /** Subtracts all tools in one boolean operation, equivalent to cut(stock, tools). */
+  cut(tools: readonly SolidModel<{}>[]): SolidModel;
   /**
    * @code3d.param radius {kind: 'length', label: 'Fillet radius', constraints: {exclusiveMin: 0}}
    * @code3d.param edgeIds {kind: 'edge', actions: [{label: 'Use all', action: 'remove-argument'}]}
@@ -800,7 +807,14 @@ export type EdgeModel<Elements extends NamedElements = CurveElements> =
 export type FaceModel<Elements extends NamedElements = PlanarElements> =
   ModelCapabilities<Elements, 'face'> &
     GeometryCapabilities<Elements, 'face'> &
-    SurfaceTopologyCapabilities & {flip(): Surface} & Elements;
+    SurfaceTopologyCapabilities & {
+      flip(): Surface;
+      /**
+       * Extrudes along the face's local plane normal. Signed distance; no recentering.
+       * @code3d.param distance {kind: 'length', label: 'Extrusion distance'}
+       */
+      extrude(distance: number): SolidModel;
+    } & Elements;
 
 export type SolidModel<Elements extends NamedElements = CanonicalElements> =
   ModelCapabilities<Elements, 'solid'> &
@@ -1875,6 +1889,52 @@ export class ModelObject<
       },
       storedOperation('scaled', [{model: this, role: 'source', index: 0}]),
     );
+  }
+
+  extrude(this: ModelObject<Elements, 'face'>, distance: number): SolidModel {
+    if (this.kind !== 'face')
+      throw new Error('extrude requires a single face model.');
+    if (!Number.isFinite(distance) || distance === 0)
+      throw new Error('Extrusion distance must be finite and non-zero.');
+    const source = this.requireGeometry();
+    const direction = rotateVector(
+      [0, distance, 0],
+      this.geometryAnchor.transform.quaternion,
+    );
+    const geometry = evaluateSolidGeometry(
+      'extrude',
+      [direction],
+      [source],
+      () =>
+        extrudeWithTopology(
+          {
+            shape: source.value.shape,
+            topology: source.value.topology,
+            index: 1,
+          },
+          direction,
+        ),
+    );
+    return ModelObject.create<CanonicalElements, 'solid'>({
+      kind: 'solid',
+      name: 'Extrude',
+      geometry,
+      color: this.color,
+      constraints: this.constraints,
+      sourceRefs: this.sourceRefs,
+      parameters: this.allParameters(),
+      meshTolerance: this.meshTolerance,
+      operation: storedOperation('extrude', [
+        {model: this, role: 'receiver', index: 0},
+      ]),
+    }) as unknown as SolidModel;
+  }
+
+  cut(
+    this: ModelObject<Elements, 'solid'>,
+    tools: readonly SolidModel<{}>[],
+  ): SolidModel {
+    return cut(this as unknown as SolidModel<{}>, tools);
   }
 
   fillet(
@@ -3531,6 +3591,18 @@ export function union(operands: readonly SolidModel<{}>[]): SolidModel {
   return first[combineModels]('fuse', others);
 }
 
+/**
+ * Extrudes a single face; use faces.map(face => extrude(face, distance)) for multiple regions.
+ * @code3d.param distance {kind: 'length', label: 'Extrusion distance'}
+ */
+export function extrude(face: FaceModel<{}>, distance: number): SolidModel {
+  return requireModelKind(
+    face,
+    'face',
+    'extrude requires a single face model.',
+  ).extrude(distance);
+}
+
 export function cut(
   stock: SolidModel<{}>,
   tools: readonly SolidModel<{}>[],
@@ -3680,6 +3752,7 @@ export const authoringApi = Object.freeze({
   bezier,
   spline,
   loft,
+  extrude,
   box,
   cylinder,
   tube,
@@ -3878,6 +3951,34 @@ type PlanarSketch = Readonly<{
   face(): ReplicadFace;
   delete(): void;
 }>;
+
+/** Internal bridge from the kernel-independent sketch definition to model geometry. */
+export function sketchFaceModel(region: SketchRegion): FaceModel {
+  const curves = [region.outer, ...region.holes].map(loop =>
+    loop.map(curve =>
+      curve.kind === 'line'
+        ? ['line', curve.points]
+        : curve.kind === 'circle'
+          ? ['circle', curve.center, curve.radius]
+          : ['arc', curve.center, curve.radius, curve.start, curve.sweep],
+    ),
+  );
+  const geometry = evaluateModelGeometry('sketchFace', curves, [], () => ({
+    shape: sketchRegionFace(region),
+  }));
+  const plane: StoredElement = {
+    kind: 'face',
+    transform: identityRigidTransform,
+  };
+  return ModelObject.create<PlanarElements, 'face'>({
+    kind: 'face',
+    name: 'Sketch face',
+    geometry,
+    geometryAnchor: plane,
+    elements: {plane},
+    operation: storedOperation('sketchFace'),
+  }) as unknown as FaceModel;
+}
 
 function planarFaceModel(
   operation: Extract<

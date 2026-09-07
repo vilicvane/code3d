@@ -1,10 +1,32 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {open, point, text} from './sketch-test.ts';
+import {trimmedArcSketchArguments} from '../sketch-fixtures.ts';
 
 const arc = `['point', 1, [0, 0]], ['point', 2, [10, 0]],
   ['point', 3, [0, 10]], ['arc', 4, [1, 10, 2, 3, 'ccw']]`;
-const cases = [
+const cases: {
+  name: string;
+  id: number;
+  args: string;
+  delta?: readonly [number, number];
+  follow: number[][];
+}[] = [
+  ...[-60, 60].map(dy => ({
+    name: `connected arc and concentric circle center ${dy < 0 ? 'up' : 'down'}`,
+    id: 10,
+    args: trimmedArcSketchArguments(10),
+    delta: [0, dy] as const,
+    follow: [
+      [10, 1, 1],
+      [13, 1, 1],
+      [15, 1, 1],
+      [4, 0, 1],
+      [5, 0, 1],
+      [2, 0, 0],
+      [3, 0, 0],
+    ],
+  })),
   {
     name: 'arc center',
     id: 1,
@@ -79,8 +101,8 @@ const value = sketch(${scenario.args});`,
       });
     }
     const start = original.get(scenario.id)!;
-    const dx = 38,
-      dy = -24;
+    const dx = scenario.delta?.[0] ?? 38,
+      dy = scenario.delta?.[1] ?? -24;
     const verify = async (moved: boolean) => {
       for (const [id, x, y] of scenario.follow) {
         const origin = original.get(id)!;

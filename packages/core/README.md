@@ -40,6 +40,11 @@ rendering the resulting value by itself uses its own local geometry.
 
 Sketches are immutable 2D definitions, separate from geometric models and B-Reps:
 
+Start with `sketch()` for an empty sketch, or `base.derive()` for an empty local
+layer over an existing sketch. Omitting entries is equivalent to passing `[]`.
+The editor inserts the array only when the first drawing is completed; cancelling
+leaves the call unchanged, and undo restores the original call and its comments.
+
 ```ts
 import {sketch} from '@code3d/core';
 
@@ -178,8 +183,7 @@ Trimming a circle leaves a CW arc with the same ID. End trims retain an arc ID;
 interior trims retire it and allocate two fresh IDs, preserving direction.
 Center/radius expressions and radius constraints follow surviving arcs; original
 whole-arc sweep constraints are removed. Coincident intervals are trimmed
-together, sharing cut points and one undo transaction. Region extraction and
-sketch B-Rep generation are not yet available.
+together, sharing cut points and one undo transaction.
 Endpoints are created or reused by Line; there is no standalone Point tool.
 Type X/Y for the start, then length/angle for each segment. Tab switches fields
 and Enter accepts the next endpoint. Each segment is one undo step and reuses
@@ -213,20 +217,24 @@ with `base.point(id)`. Both rectangle modes share inputs, snapping and undo.
 Dragging previews a soft solver target and writes every changed editable point
 in one transaction. Hard constraints remain satisfied. Rules receive the whole
 gesture context, without framework-level point classification or partitioning.
-They recognize unrestricted centers for whole-geometry translation, prefer related
+They recognize centers for preferred local translation, prefer related
 centers or far connected points as soft references, and handle an unconstrained
 sole junction per branch. Radius gestures prefer the curve center.
-The closest feasible mouse result takes priority over reference positions;
-references can yield and are never automatically fixed. None of this adds
-source constraints or reduces the reported model DOF. An unrestricted center
+Ordered soft stages first reach the closest feasible mouse position, then prefer
+local translation, then minimize exterior movement. Connected lines do not disable
+center translation: their constraints determine how exterior points follow.
+Each stage respects all hard constraints; later stages retain earlier achieved
+target parameter values for this frame, not every equivalent optimum. No original
+reference position is made an unconditional anchor, and no stage lock survives
+the frame, adds source constraints or reduces the reported model DOF. An unrestricted center
 rectangle translates when its center moves, without hidden editor metadata.
 Points already on lines, circles or directed arcs at gesture start retain that relation:
 they can slide along the curve, and follow changes to endpoints, centers and radii. The editor
 uses model-space geometric tolerance, not pointer hit areas; lines crossed during
 a gesture do not become sticky. Curves keep their IDs and types, without
 splitting or adding author constraints. Lines and arcs retain their finite bounds;
-CW/CCW arcs never include their missing circular portion. An unrestricted center
-move translates its followers, while radius gestures prefer their existing polar
+CW/CCW arcs never include their missing circular portion. Center moves prefer
+translating their followers, while radius gestures prefer their existing polar
 directions. Read-only upstream curves can guide local
 points. Source replay checks that these gesture-only connections remain satisfied.
 This does not create intersection points or persist curve parameters.
@@ -247,7 +255,49 @@ draggable. The editor preserves existing IDs and
 allocates new IDs from the current local maximum, without `nextId` metadata.
 Deleted IDs may therefore be reused; downstream references are not automatically
 rewritten. Conversion to faces/solids remains a later slice.
-See the [sketch example](../app/examples/sketches.ts) and
+
+### Closed regions and modeling
+
+`s.face()` requires exactly one closed region, including its holes. `s.faces()`
+returns all regions as an ordinary readonly array; a sketch without curves returns
+`[]`. Neither query assigns persistent region IDs. Future ID-based selection will
+retain the no-argument meanings; array positions are not stable identifiers.
+
+Straight lines, circles and finite CW/CCW arcs form exact B-Rep boundaries.
+Upstream geometry is included. Disconnected contours produce separate faces;
+nested contours alternate material, holes and islands. Standalone points do not
+form boundaries. Open, crossing, touching, overlapping or branched contours report
+an error instead of implicitly trimming, closing, discarding or rewriting entities.
+The editor previews valid regions with a subtle fill and leaves unfinished sketches
+editable; construction diagnostics belong to the `.face()` / `.faces()` call.
+
+```ts
+const ring = sketch([
+  ['point', 1, [0, 0]],
+  ['circle', 2, [1, 12]],
+  ['circle', 3, [1, 8]],
+]);
+const sleeve = ring.face().extrude(20);
+const tools = anotherSketch.faces().map(face => face.extrude(10));
+const result = stock.cut(tools); // equivalent to cut(stock, tools)
+```
+
+Sketch `[x, y]` maps to model `[x, 0, -y]`, without recentering. Face extrusion
+follows its plane normal (`+Y` before rotation). Distance is signed, finite and
+nonzero; the start cap stays at the original face. `extrude(face, distance)` is
+equivalent to `face.extrude(distance)` and takes one face, never an array. Results
+are normal immutable solid models with caching, rendering, topology and source
+tracing; ordinary `.map()` handles multiple independent outputs.
+
+`loft(sections, options)` still takes one face per section. Zero holes and one
+corresponding hole per section work with ordinary or spine-guided lofts. Different
+hole counts and multiple unpaired holes produce explicit errors; holes are never
+silently filled. Arrays in `cut` and `loft` describe one operation's inputs, not
+automatic mapping. General hole correspondence and region ID selectors remain
+future API work.
+
+See the [modeling example](../app/examples/sketch-modeling.ts),
+the [sketch example](../app/examples/sketches.ts) and
 [third-party solver sources](THIRD_PARTY.md).
 
 ## Type imports

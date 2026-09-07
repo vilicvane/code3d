@@ -28,7 +28,8 @@ export async function open(
   const errors: string[] = [];
   page.on('pageerror', e => errors.push(e.message));
   t.after(() => assert.deepEqual(errors, []));
-  await page.goto(process.env.CODE3D_TEST_URL!);
+  // A cold Vite module graph needs the same initialization budget as compilation.
+  await page.goto(process.env.CODE3D_TEST_URL!, {timeout: 30_000});
   await page.getByText('Ready', {exact: true}).waitFor({timeout: 30_000});
   await page.locator('.monaco-editor .view-lines').first().click();
   await page.keyboard.press('Control+a');

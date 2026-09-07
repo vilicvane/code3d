@@ -95,6 +95,100 @@ test('computed arrays remain visible without pretending they have an editable tu
   assert.equal(value.entities.length, 1);
 });
 
+test('zero-argument public sketch constructors expose writable source ranges and replay first geometry', async () => {
+  for (const [imports, prefix, call, args] of [
+    ["import {sketch} from '@code3d/core';", '', 'sketch', ''],
+    [
+      "import {sketch as create} from '@code3d/core';",
+      '',
+      'create',
+      '/* keep */',
+    ],
+    ["import * as core from '@code3d/core';", '', 'core.sketch', ''],
+    [
+      "import {sketch} from '@code3d/core';",
+      "const base = sketch([['point', 8, [30, 0]]]);",
+      'base.derive',
+      '// keep\n',
+    ],
+  ]) {
+    const source =
+      imports + '\n' + prefix + '\nconst s = ' + call + '(' + args + ');';
+    const module = await compiler.compile(
+      {files: [{path: '/model.ts', source}]},
+      '/model.ts',
+    );
+    assert.equal(module.diagnostic, undefined);
+    const value = [...module.sketches.values()].at(-1);
+    assert.deepEqual(value.entities, []);
+    assert.ok(value.definitionRef);
+    assert.equal(
+      source.slice(value.definitionRef.start, value.definitionRef.end),
+      args,
+    );
+    const {id: layer, definitionRef: sourceRef} = value;
+    const result = new SketchEditResolver().resolve(
+      {
+        kind: 'sketch.edit',
+        sourceRef,
+        expectedText: args,
+        layer,
+        references: value.references,
+        change: {
+          kind: 'append',
+          entries: [
+            ['point', 1, [0, 0]],
+            ['point', 2, [10, 0]],
+            [
+              'line',
+              3,
+              [
+                {layer, id: 1},
+                {layer, id: 2},
+              ],
+            ],
+          ],
+          constraints: [['horizontal', 3]],
+        },
+      },
+      {
+        toolId: 'test',
+        baseVersion: 1,
+        resolveSourceRef: ref => ref,
+        readSource: ref => source.slice(ref.start, ref.end),
+      },
+    );
+    assert.equal(result.status, 'ready');
+    const text = result.plan.edits[0].text;
+    const edited =
+      source.slice(0, sourceRef.start) + text + source.slice(sourceRef.end);
+    const replay = await compiler.compile(
+      {files: [{path: '/model.ts', source: edited}]},
+      '/model.ts',
+    );
+    assert.equal(replay.diagnostic, undefined);
+    const after = [...replay.sketches.values()].at(-1);
+    assert.equal(after.entities.length, 3);
+    assert.equal(after.constraints.length, 1);
+    assert.equal(after.id, value.id);
+    assert.ok(after.definitionRef);
+    if (prefix) {
+      const [base] = replay.sketches.values();
+      assert.equal(after.references[base.id], 'base');
+      assert.deepEqual(base.entities[0].position, [30, 0]);
+    }
+  }
+});
+
+test('untraced empty factories do not masquerade as editable zero-argument constructors', async () => {
+  const module = await compile(`
+const wrapped = Function('sketch', 'return () => sketch()')(sketch);
+const value = wrapped();`);
+  const value = [...module.sketches.values()][0];
+  assert.deepEqual(value.entities, []);
+  assert.equal(value.definitionRef, undefined);
+});
+
 test('argument-side reassignment does not turn the receiver name into a false upstream reference', async () => {
   const module = await compile(`let base = sketch([['point', 1, [0,0]]]);
 const original = base;
@@ -381,4 +475,47 @@ const value = wrapped([['point', 1, [0,0]]]);`);
   const value = [...module.sketches.values()][0];
   assert.equal(value.definitionRef, undefined);
   assert.equal(value.constraints.length, 1);
+});
+
+test('sketch faces, mapped extrusion and cut retain source targets and editable upstream definitions', async () => {
+  const source = `import {sketch, box} from '@code3d/core';
+const profile = sketch([['point',1,[-8,0]],['circle',2,[1,3]],['point',3,[8,0]],['circle',4,[3,3]]]);
+const faces = profile.faces();
+const tools = faces.map(face => face.extrude(20).originOffset(0,10,0));
+export const result = box(30,10,20).cut(tools);`;
+  const module = await compiler.compile(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  assert.equal(module.diagnostic, undefined);
+  assert.equal(module.sketches.size, 1);
+  assert.ok([...module.sketches.values()][0].definitionRef);
+  for (const name of ['profile.faces()', 'face.extrude(20)', 'cut(tools)']) {
+    const target = ModelViewport.prototype.sourceTargetAt.call(
+      {module},
+      '/model.ts',
+      source.indexOf(name) + name.indexOf('.') + 2,
+    );
+    assert.ok(target, name);
+    assert.ok(
+      target.evaluations.some(e => e.nodeIds.length),
+      name,
+    );
+  }
+  assert.ok(module.fallback);
+});
+
+test('sketch face diagnostics locate the modeling call without invalidating the editable sketch', async () => {
+  const source = `import {sketch} from '@code3d/core';
+const profile = sketch([['point',1,[0,0]],['point',2,[10,0]],['line',3,[1,2]]]);
+export const body = profile.face().extrude(10);`;
+  const module = await compiler.compile(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  assert.equal(module.diagnostic.kind, 'evaluation');
+  assert.match(module.diagnostic.summary, /open/);
+  const ref = module.diagnostic.sourceRef;
+  assert.match(source.slice(ref.start, ref.end), /face/);
+  assert.equal(module.sketches.size, 1);
 });

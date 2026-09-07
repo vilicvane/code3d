@@ -43,10 +43,14 @@ implementation context and historical outcomes, not a competing work queue.
   Dragging uses a soft Worker solve and writes all changed editable coordinates
   together, preserving hard constraints, upstream values and expression source.
   Drag rules receive the complete numeric context; the dispatcher does not
-  classify points or partition geometry. Rules recognize unrestricted curve and
-  rectangle centers for translation, prefer centers or far connected endpoints
+  classify points or partition geometry. Rules recognize curve and
+  rectangle centers for preferred local translation, prefer centers or far connected endpoints
   as soft references, and handle an unconstrained sole junction per branch.
   Connectivity and role recognition belong to those rules, not the framework.
+  Ordered soft stages preserve the feasible mouse result, then local translation,
+  then minimize exterior movement. Later stages retain the earlier chosen target
+  parameters for this frame only; hard constraints always hold. Connected external
+  geometry no longer disqualifies a center gesture, and no stage locks persist.
   First solve for the closest feasible mouse target, then preserve that achieved
   value while optimizing soft references. No reference point is implicitly fixed;
   temporary objectives do not enter source or the reported model DOF.
@@ -161,7 +165,16 @@ implementation context and historical outcomes, not a competing work queue.
   whole-arc sweep is removed. Circular overlaps share one trim transaction, cut
   points and orphan cleanup, just like lines. Select + Delete and hover/click Trim
   use the same intervals; radius dragging remains available.
-  Regions and B-Rep generation remain later slices.
+  Closed non-intersecting line/circle/arc contours now produce exact face models:
+  `face()` requires one region (with holes), `faces()` returns an ordinary array.
+  Upstream boundaries, disconnected regions and nested holes/islands are included;
+  open, touching, crossing and branching boundaries diagnose without source edits.
+  Sketch `[x,y]` maps to `[x,0,-y]`. Single-face chain/free extrusion uses a signed
+  finite nonzero distance along the plane normal; collections use explicit `map`.
+  Chain `cut(tools)` delegates to the existing boolean operation. Loft retains zero
+  or one hole per section, diagnosing mismatched counts or unpaired multiple holes.
+  The canvas shares analytic extraction for a noninteractive region fill. Persistent
+  region selection IDs and arbitrary multi-hole loft correspondence remain later work.
   The sketch canvas fills the viewport with floating controls. Its top-right
   icon toolbar groups editing, drawing and view controls, with native hover
   labels and one keyboard Tab stop; narrow viewports place the whole toolbar

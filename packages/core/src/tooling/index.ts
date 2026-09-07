@@ -43,6 +43,8 @@ export {
   sketchPositiveAngle,
 } from '../library/sketch-curves.js';
 export type {SketchCurve} from '../library/sketch-curves.js';
+export {sketchRegions} from '../library/sketch-regions.js';
+export type {SketchRegion} from '../library/sketch-regions.js';
 export {sketchCurveIntersections} from '../library/sketch-curve-intersections.js';
 export type {SketchCurveIntersection} from '../library/sketch-curve-intersections.js';
 

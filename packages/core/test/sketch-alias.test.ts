@@ -164,6 +164,41 @@ test('precision cleanup retains deliberate tiny features and distinct close poin
   assert.equal(point(snapshot, 2).alias, undefined);
 });
 
+test('radial drag seeds preserve axial coordinates on both sides of an offset center', () => {
+  for (const scale of [1e-8, 1, 1e8])
+    for (const axis of [0, 1])
+      for (const id of [3, 4]) {
+        const position = (distance: number): [number, number] =>
+          axis === 0
+            ? [distance * scale, 10 * scale]
+            : [10 * scale, distance * scale];
+        const initial = snapshotSketch(
+          sketch([
+            ['point', 1, position(0)],
+            ['point', 2, position(-7.5)],
+            ['point', 3, position(7.5)],
+            ['arc', 4, [1, 7.5 * scale, 2, 3, 'cw']],
+          ]),
+          () => 's',
+        );
+        let current = initial;
+        for (const distance of [8, 9, 7.5, 8, 7.5]) {
+          current = solveSketchSnapshot([current], {
+            id,
+            position: position(distance),
+            reference: initial,
+          });
+          assert.deepEqual(point(current, 1).position, position(0));
+          assert.deepEqual(point(current, 2).position, position(-distance));
+          assert.deepEqual(point(current, 3).position, position(distance));
+          assert.deepEqual(
+            solveSketchSnapshot([current]).entities,
+            current.entities,
+          );
+        }
+      }
+});
+
 test('numeric cleanup cannot turn a nearby mouse target or seed into a changed hard value', () => {
   const snapshot = snapshotSketch(
     sketch(
@@ -189,4 +224,29 @@ test('numeric cleanup cannot turn a nearby mouse target or seed into a changed h
   assert.deepEqual(point(moved, 1).position, [0, 0]);
   const circle = moved.entities.find(e => e.kind === 'circle')!;
   assert.equal(circle.radius, 15);
+});
+
+test('a fixed-radius endpoint target at the center retains a valid radial seed', () => {
+  const initial = snapshotSketch(
+    sketch(
+      [
+        ['point', 1, [0, 10]],
+        ['point', 2, [-7.5, 10]],
+        ['point', 3, [7.5, 10]],
+        ['arc', 4, [1, 7.5, 2, 3, 'cw']],
+      ],
+      {
+        constraints: [
+          ['fixed', 1],
+          ['radius', [4, 7.5]],
+        ],
+      },
+    ),
+    () => 's',
+  );
+  const moved = solveSketchSnapshot([initial], {
+    id: 3,
+    position: [0, 10],
+  });
+  assert.deepEqual(moved.entities, initial.entities);
 });

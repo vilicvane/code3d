@@ -142,6 +142,8 @@ export function analyzeSketchSource(source: string): {
     editable,
     reason: 'Visual editing requires explicit [kind, ID, data] tuples.',
   });
+  if (!call) return unsupported();
+  if (!call.arguments.length) return {entries, editable};
   if (!array || !ts.isArrayLiteralExpression(array)) return unsupported();
   let constraints: ts.ArrayLiteralExpression | undefined;
   if (options) {
@@ -250,7 +252,7 @@ export class SketchEditResolver implements ToolIntentResolver {
         reason: 'The sketch source changed during this gesture.',
       };
     const parsed = analyzeSketchSource(source);
-    if (!parsed.array) return {status: 'unsupported', reason: parsed.reason!};
+    if (parsed.reason) return {status: 'unsupported', reason: parsed.reason};
     const changes: {start: number; end: number; text: string}[] = [];
     const replace = (node: ts.Node, text: string) =>
       changes.push({
@@ -290,6 +292,15 @@ export class SketchEditResolver implements ToolIntentResolver {
       const start = end - closingIndent.length;
       const separator = source[start - 1] === '\n' ? '' : '\n';
       changes.push({start, end, text: `${separator}${text}\n${closingIndent}`});
+    };
+    const appendEntries = (text: string, required = false) => {
+      if (parsed.array) append(parsed.array, text);
+      else if (text || required)
+        changes.push({
+          start: source.length,
+          end: source.length,
+          text: `${source ? '\n' : ''}[${text ? '\n' + text + '\n' : ''}]`,
+        });
     };
     const point = (ref: SketchPointAddress): string => {
       if (ref.layer === intent.layer) return String(ref.id);
@@ -451,7 +462,7 @@ export class SketchEditResolver implements ToolIntentResolver {
           if (parsed.entries.has(id))
             throw new Error(`Sketch entity ${id} already exists.`);
         }
-        append(parsed.array, added.map(replacementText).join('\n'));
+        appendEntries(added.map(replacementText).join('\n'));
         const copies: string[] = [];
         for (const {index, ids} of change.constraintReplacements) {
           const node = parsed.constraints?.elements[index];
@@ -539,7 +550,7 @@ export class SketchEditResolver implements ToolIntentResolver {
       } catch (error) {
         return {status: 'conflict', reason: (error as Error).message};
       }
-      append(parsed.array, text);
+      appendEntries(text, !!change.constraints?.length);
       if (change.constraints?.length) {
         if (parsed.constraints) {
           append(parsed.constraints, `  ${constraints},`);

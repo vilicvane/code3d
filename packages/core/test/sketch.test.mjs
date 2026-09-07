@@ -25,6 +25,28 @@ test('sketches exist without a kernel, a closed region, or any entities', () => 
   );
 });
 
+test('omitted entries create an empty layer and retain the upstream definition', () => {
+  const empty = sketch();
+  assert.deepEqual(
+    snapshotSketch(empty, () => 's'),
+    snapshotSketch(sketch([]), () => 's'),
+  );
+  assert.equal(sketchDefinition(empty).input, undefined);
+  assert.deepEqual(sketchDefinition(empty).entries, []);
+  const base = sketch([['point', 1, [2, 3]]]);
+  const derived = base.derive();
+  assert.equal(sketchDefinition(derived).base, base);
+  assert.deepEqual(sketchDefinition(derived).entries, []);
+  assert.deepEqual(
+    snapshotSketch(derived, s => (s === base ? 'base' : 'child')),
+    snapshotSketch(base.derive([]), s => (s === base ? 'base' : 'child')),
+  );
+  assert.deepEqual(
+    snapshotSketch(base, () => 'base').entities[0].position,
+    [2, 3],
+  );
+});
+
 test('IDs are explicit, unordered and permit forward references', () => {
   const value = sketch([
     ['line', 3, [1, 2]],

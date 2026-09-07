@@ -24,6 +24,7 @@ export class SketchTraceRegistry {
   private readonly bindings = new Map<string, Set<Sketch>>();
   private readonly calls = new Map<string, ts.CallExpression>();
   private readonly writtenSymbols = new Set<ts.Symbol>();
+  private readonly constructors = new Set<ts.Signature['declaration']>();
   private checker!: ts.TypeChecker;
 
   constructor(private readonly runtime: typeof CoreTooling) {}
@@ -34,6 +35,12 @@ export class SketchTraceRegistry {
     for (const file of program.getSourceFiles()) {
       if (file.isDeclarationFile) continue;
       const visit = (node: ts.Node): void => {
+        if (
+          ts.isImportDeclaration(node) &&
+          ts.isStringLiteral(node.moduleSpecifier) &&
+          node.moduleSpecifier.text === '@code3d/core'
+        )
+          this.collectConstructors(node.moduleSpecifier);
         if (ts.isCallExpression(node)) this.calls.set(nodeKey(node), node);
         const written =
           ts.isBinaryExpression(node) &&
@@ -67,6 +74,25 @@ export class SketchTraceRegistry {
     this.bindings.clear();
     this.calls.clear();
     this.writtenSymbols.clear();
+    this.constructors.clear();
+  }
+
+  private collectConstructors(module: ts.StringLiteral): void {
+    const symbol = this.checker.getSymbolAtLocation(module);
+    const exported =
+      symbol &&
+      this.checker.getExportsOfModule(symbol).find(s => s.name === 'sketch');
+    if (!exported) return;
+    const factory = this.checker.getTypeOfSymbolAtLocation(exported, module);
+    for (const signature of factory.getCallSignatures()) {
+      if (signature.declaration) this.constructors.add(signature.declaration);
+      const derive = signature.getReturnType().getProperty('derive');
+      if (!derive) continue;
+      for (const method of this.checker
+        .getTypeOfSymbolAtLocation(derive, module)
+        .getCallSignatures())
+        if (method.declaration) this.constructors.add(method.declaration);
+    }
   }
 
   get size(): number {
@@ -140,13 +166,22 @@ export class SketchTraceRegistry {
       call &&
       definition.input === argument &&
       definition.inputOptions === options &&
-      call.arguments[0] &&
-      ts.isArrayLiteralExpression(call.arguments[0]);
+      (call.arguments.length
+        ? ts.isArrayLiteralExpression(call.arguments[0])
+        : // With no argument identity to compare, require a public constructor
+          // signature, not an arbitrary uninstrumented zero-argument factory.
+          this.constructors.has(
+            this.checker.getResolvedSignature(call)?.declaration,
+          ));
     const trace: SketchTrace = {
       id: `sketch:${id}`,
       evaluationId: id,
       definitionRef: editable
-        ? {...nodeRef(call.arguments[0]), end: call.arguments.at(-1)!.end}
+        ? {
+            ...nodeRef(call),
+            start: call.arguments[0]?.getStart() ?? call.arguments.pos,
+            end: call.arguments.at(-1)?.end ?? call.end - 1,
+          }
         : undefined,
       references: {},
     };

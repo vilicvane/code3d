@@ -4,6 +4,7 @@ import {
   type SketchSolveProblem,
   type SketchSolveTarget,
   type SketchSolveConstraint,
+  type SketchSolveResult,
 } from './sketch-solver.js';
 import type {SketchPosition} from './sketch.js';
 import {
@@ -28,9 +29,13 @@ export type SketchDragContext = Readonly<{
 }>;
 export type SketchDragPlan = Readonly<{
   problem: SketchSolveProblem;
-  objectives: readonly [SketchSolveObjective, ...SketchSolveObjective[]];
+  stages: readonly [SketchDragStage, ...SketchDragStage[]];
   incidences?: readonly SketchIncidence[];
 }>;
+/** Targets may depend on the feasible geometry reached by earlier stages. */
+export type SketchDragStage = (
+  current: SketchSolveProblem,
+) => readonly SketchSolveObjective[];
 export type SketchDragSession = (
   current: SketchSolveProblem,
   target: SketchSolveTarget,
@@ -73,7 +78,7 @@ export function solveSketchDrag(
         })),
       ],
     };
-    const result = solveDragPlan({...plan, problem});
+    const result = solveSketchDragPlan({...plan, problem});
     const solved = sketchIncidenceGeometry(problem, result);
     const outside = plan.incidences?.flatMap(contact => {
       const endpoint = bounds.has(contact)
@@ -86,51 +91,57 @@ export function solveSketchDrag(
   }
 }
 
-function solveDragPlan(plan: SketchDragPlan) {
-  const [primary, ...preferences] = plan.objectives;
-  const reached = solveSketchProblem(plan.problem, [primary]);
-  if (!preferences.length) return reached;
-  // Lexicographic stages, not tiny weights: find the closest feasible mouse
-  // target first, then preserve that achieved value while optimizing soft stays.
-  // No automatically selected anchor ever becomes a fixed parameter.
-  return solveSketchProblem(
-    {
-      ...plan.problem,
-      points: plan.problem.points.map((point, index) => ({
-        position: reached.positions[index],
-        locked:
-          primary.kind === 'point' && primary.point === index
-            ? [true, true]
-            : point.locked,
+/** Each stage keeps the preceding stage's chosen parameter values, not all
+ * equivalent optima. These locks belong to this solve, never the next frame. */
+export function solveSketchDragPlan(plan: SketchDragPlan): SketchSolveResult {
+  let problem = plan.problem;
+  let result: SketchSolveResult | undefined;
+  for (const stage of plan.stages) {
+    const objectives = stage(problem);
+    if (result && !objectives.length) continue;
+    const solved = solveSketchProblem(problem, objectives);
+    result = solved;
+    const points = new Set(
+      objectives.filter(o => o.kind === 'point').map(o => o.point),
+    );
+    const radii = objectives.filter(o => o.kind === 'radius');
+    problem = {
+      ...problem,
+      points: problem.points.map((point, index) => ({
+        position: solved.positions[index],
+        locked: points.has(index) ? [true, true] : point.locked,
       })),
-      circles: plan.problem.circles.map((circle, index) => ({
+      circles: problem.circles.map((circle, index) => ({
         ...circle,
-        radius: reached.radii[index],
+        radius: solved.radii[index],
         locked:
           circle.locked ||
-          (primary.kind === 'radius' &&
-            primary.curve === 'circle' &&
-            primary.index === index),
+          radii.some(o => o.curve === 'circle' && o.index === index),
       })),
-      arcs: plan.problem.arcs.map((arc, index) => ({
+      arcs: problem.arcs.map((arc, index) => ({
         ...arc,
-        radius: reached.arcRadii[index],
+        radius: solved.arcRadii[index],
         locked:
-          arc.locked ||
-          (primary.kind === 'radius' &&
-            primary.curve === 'arc' &&
-            primary.index === index),
+          arc.locked || radii.some(o => o.curve === 'arc' && o.index === index),
       })),
-    },
-    preferences,
-  );
+    };
+  }
+  return result!;
 }
 
-type PointPolicy = Readonly<{
-  anchors: readonly number[];
-  translate: readonly number[];
-  arcs: readonly number[];
-}>;
+type PointPolicy = Readonly<
+  | {
+      kind: 'translation';
+      points: readonly number[];
+      radii: readonly SketchSolveObjective[];
+      exterior: readonly SketchSolveObjective[];
+    }
+  | {
+      kind: 'endpoint';
+      anchors: readonly number[];
+      arcs: readonly number[];
+    }
+>;
 
 const radiusRule: SketchDragRule = ({reference, target}) => {
   if (target.kind !== 'radius') return;
@@ -180,13 +191,15 @@ const radiusRule: SketchDragRule = ({reference, target}) => {
         suggestions,
         next.curve === 'arc' ? new Map([[next.index, radius]]) : new Map(),
       ),
-      objectives: [
-        {...next, weight: 1},
-        anchor(reference, curve.center),
-        ...[...suggestions].map(([point, positions]) => ({
-          ...anchor(reference, point),
-          position: positions[0],
-        })),
+      stages: [
+        () => [{...next, weight: 1}],
+        () => [
+          anchor(reference, curve.center),
+          ...[...suggestions].map(([point, positions]) => ({
+            ...anchor(reference, point),
+            position: positions[0],
+          })),
+        ],
       ],
     };
   };
@@ -338,18 +351,27 @@ const incidenceRule: SketchDragRule = ({reference, target, geometry}) => {
     // Incidence leaves a tangential freedom. Keep followers near their
     // gesture-start positions instead of accepting an arbitrary slide.
     for (const {point} of contacts) preferences.add(point);
-    const present = new Set(
-      plan.objectives.filter(o => o.kind === 'point').map(o => o.point),
-    );
+    const stages: [SketchDragStage, ...SketchDragStage[]] = [...plan.stages];
+    const last = stages.at(-1)!;
+    stages[stages.length - 1] = current => {
+      const objectives = last(current);
+      const present = new Set(
+        objectives.filter(o => o.kind === 'point').map(o => o.point),
+      );
+      if (updated.kind === 'point') present.add(updated.point);
+      return [
+        ...objectives,
+        ...[...preferences]
+          .filter(
+            p => !present.has(p) && !current.points[p].locked.every(Boolean),
+          )
+          .map(p => anchor(reference, p)),
+      ];
+    };
     return {
       ...plan,
       incidences: contacts,
-      objectives: [
-        ...plan.objectives,
-        ...[...preferences]
-          .filter(p => !present.has(p))
-          .map(p => anchor(reference, p)),
-      ],
+      stages,
     };
   };
 };
@@ -361,72 +383,84 @@ function pointSession(
   policies: readonly PointPolicy[],
 ): SketchDragSession {
   const {reference} = context;
-  const anchors = [...new Set(policies.flatMap(p => p.anchors))];
+  const translations = policies.filter(p => p.kind === 'translation');
+  const endpoints = policies.filter(p => p.kind === 'endpoint');
+  const anchors = [...new Set(endpoints.flatMap(p => p.anchors))];
+  const translated = [...new Set(translations.flatMap(p => p.points))];
   return (current, updated) => {
     const target = updated as Extract<SketchSolveTarget, {kind: 'point'}>;
     const suggestions = new Map<number, SketchPosition[]>();
     const radii = new Map<number, number>();
     const from = reference.points[target.point].position;
-    for (const policy of policies) {
-      for (const point of policy.translate)
-        suggest(
-          suggestions,
-          point,
-          reference.points[point].position.map(
-            (v, axis) => v + target.position[axis] - from[axis],
-          ) as [number, number],
-        );
-      for (const index of policy.arcs) {
-        const arc = reference.arcs[index];
-        const center = reference.points[arc.center].position;
-        const dimension = reference.constraints.find(
-          c => c.kind === 'radius' && c.curve === 'arc' && c.index === index,
-        );
-        const radius = arc.locked
-          ? arc.radius
-          : dimension?.kind === 'radius'
-            ? dimension.value
-            : Math.hypot(
-                target.position[0] - center[0],
-                target.position[1] - center[1],
-              );
-        if (radius === 0) continue;
-        radii.set(index, radius);
-        const sweep = reference.constraints.some(
-          c => c.kind === 'sweep' && c.index === index,
-        );
-        const turn =
-          Math.atan2(
-            target.position[1] - center[1],
-            target.position[0] - center[0],
-          ) - Math.atan2(from[1] - center[1], from[0] - center[0]);
-        for (const point of arc.points) {
-          let position =
-            point === target.point
-              ? target.position
-              : reference.points[point].position;
-          if (sweep && point !== target.point) {
-            const [x, y] = [position[0] - center[0], position[1] - center[1]];
-            position = [
-              center[0] + x * Math.cos(turn) - y * Math.sin(turn),
-              center[1] + x * Math.sin(turn) + y * Math.cos(turn),
-            ];
-          }
-          suggest(suggestions, point, radialPosition(center, position, radius));
+    for (const point of translated)
+      suggest(
+        suggestions,
+        point,
+        reference.points[point].position.map(
+          (v, axis) => v + target.position[axis] - from[axis],
+        ) as [number, number],
+      );
+    for (const index of endpoints.flatMap(p => p.arcs)) {
+      const arc = reference.arcs[index];
+      const center = reference.points[arc.center].position;
+      const dimension = reference.constraints.find(
+        c => c.kind === 'radius' && c.curve === 'arc' && c.index === index,
+      );
+      const radius = arc.locked
+        ? arc.radius
+        : dimension?.kind === 'radius'
+          ? dimension.value
+          : Math.hypot(
+              target.position[0] - center[0],
+              target.position[1] - center[1],
+            );
+      if (radius === 0) continue;
+      radii.set(index, radius);
+      const sweep = reference.constraints.some(
+        c => c.kind === 'sweep' && c.index === index,
+      );
+      // A mouse target at the center has no radial direction. For a fixed
+      // radius keep the current endpoint direction as the seed; the mouse
+      // objective still participates in the constrained solve.
+      const direction = target.position.every((v, axis) => v === center[axis])
+        ? current.points[target.point].position
+        : target.position;
+      const turn =
+        Math.atan2(direction[1] - center[1], direction[0] - center[0]) -
+        Math.atan2(from[1] - center[1], from[0] - center[0]);
+      for (const point of arc.points) {
+        let position =
+          point === target.point ? direction : reference.points[point].position;
+        if (sweep && point !== target.point) {
+          const [x, y] = [position[0] - center[0], position[1] - center[1]];
+          position = [
+            center[0] + x * Math.cos(turn) - y * Math.sin(turn),
+            center[1] + x * Math.sin(turn) + y * Math.cos(turn),
+          ];
         }
+        suggest(suggestions, point, radialPosition(center, position, radius));
       }
     }
     return {
       problem: seed(current, suggestions, radii),
-      objectives: [
-        {...target, weight: 1},
-        ...anchors.map(point => anchor(reference, point)),
-        ...[...new Set(policies.flatMap(p => p.translate))]
-          .filter(p => p !== target.point)
-          .map(p => ({
-            ...anchor(reference, p),
-            position: suggestions.get(p)![0],
-          })),
+      stages: [
+        () => [{...target, weight: 1}],
+        reached => [
+          ...anchors.map(point => anchor(reference, point)),
+          ...translated
+            .filter(p => p !== target.point)
+            .map(p => ({
+              ...anchor(reference, p),
+              position: reference.points[p].position.map(
+                (v, axis) =>
+                  v + reached.points[target.point].position[axis] - from[axis],
+              ) as [number, number],
+            })),
+          ...translations.flatMap(p => p.radii),
+        ],
+        ...(translations.length
+          ? [() => translations.flatMap(p => p.exterior)]
+          : []),
       ],
     };
   };
@@ -437,7 +471,6 @@ function translationPolicy(
   point: number,
   scope: ReadonlySet<number>,
 ): PointPolicy | undefined {
-  if ([...scope].some(i => problem.points[i].locked.some(Boolean))) return;
   const curves = problem.arcs.filter(
     a => a.center === point && a.points.every(p => scope.has(p)),
   );
@@ -452,24 +485,25 @@ function translationPolicy(
     !!rectangle;
   if (!isCenter) return;
   if (rectangle) for (const p of rectangle) owned.add(p);
-  if ([...scope].some(p => !owned.has(p))) return;
-  const relevant = problem.constraints.filter(
-    c =>
-      !(c.kind === 'pointOnCircle' && c.points[1] === point) &&
-      constraintPoints(problem, c).some(p => scope.has(p)),
+  const radii = (['circle', 'arc'] as const).flatMap(curve =>
+    (curve === 'circle' ? problem.circles : problem.arcs).flatMap((c, index) =>
+      scope.has(c.center)
+        ? [{kind: 'radius' as const, curve, index, value: c.radius, weight: 1}]
+        : [],
+    ),
   );
-  if (rectangle) {
-    if (
-      relevant.some(
-        c =>
-          c.kind !== 'horizontal' &&
-          c.kind !== 'vertical' &&
-          !(c.kind === 'midpoint' && c.points[0] === point),
-      )
-    )
-      return;
-  } else if (relevant.length) return;
-  return {anchors: [], translate: [...owned], arcs: []};
+  const ownRadius = (o: Extract<SketchSolveObjective, {kind: 'radius'}>) =>
+    (o.curve === 'circle' ? problem.circles : problem.arcs)[o.index].center ===
+    point;
+  return {
+    kind: 'translation',
+    points: [...owned],
+    radii: radii.filter(ownRadius),
+    exterior: [
+      ...[...scope].filter(p => !owned.has(p)).map(p => anchor(problem, p)),
+      ...radii.filter(o => !ownRadius(o)),
+    ],
+  };
 }
 
 function endpointPolicy(
@@ -496,7 +530,7 @@ function endpointPolicy(
     )
       controls.add(c.points[0]);
   controls.delete(point);
-  if (controls.size) return {anchors: [...controls], translate: [], arcs};
+  if (controls.size) return {kind: 'endpoint', anchors: [...controls], arcs};
   const graph = neighbors(problem);
   const distance = new Map([[point, 0]]);
   for (const [p, d] of distance)
@@ -509,7 +543,7 @@ function endpointPolicy(
       farthest = p;
       max = distance.get(p)!;
     }
-  return {anchors: farthest < 0 ? [] : [farthest], translate: [], arcs};
+  return {kind: 'endpoint', anchors: farthest < 0 ? [] : [farthest], arcs};
 }
 
 /** Recognize the actual four-edge/midpoint structure, not tool creation history. */
@@ -611,10 +645,14 @@ function radialPosition(
   position: SketchPosition,
   radius: number,
 ): SketchPosition {
-  const angle = Math.atan2(position[1] - center[1], position[0] - center[0]);
+  // Rescale the actual direction: atan2 -> sin/cos would turn an exact
+  // horizontal/vertical coordinate into a tail that is then kept as a seed.
+  const dx = position[0] - center[0],
+    dy = position[1] - center[1];
+  const length = Math.hypot(dx, dy);
   return [
-    center[0] + radius * Math.cos(angle),
-    center[1] + radius * Math.sin(angle),
+    center[0] + (dx / length) * radius,
+    center[1] + (dy / length) * radius,
   ];
 }
 

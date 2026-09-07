@@ -9,6 +9,7 @@ import {
   sketchCurvePosition,
   sketchCurveBounds,
   sketchPointResolver,
+  sketchRegions,
   type SketchCurve,
 } from '@code3d/core/tooling';
 import {
@@ -96,6 +97,7 @@ export class SketchEditor {
   private readonly status = document.createElement('output');
   private readonly statusText = document.createTextNode('');
   private readonly grid = svgElement('g');
+  private readonly regions = svgElement('g');
   private readonly lines = svgElement('g');
   private readonly vertices = svgElement('g');
   private readonly constraints = new SketchConstraints(() => {
@@ -231,6 +233,7 @@ export class SketchEditor {
     this.overlay.append(this.draftMarker, this.snapLabel);
     this.svg.append(
       this.grid,
+      this.regions,
       this.constraints.guides,
       this.lines,
       this.vertices,
@@ -544,6 +547,7 @@ export class SketchEditor {
 
   private circularCurves() {
     const points = this.points();
+    this.drawRegions();
     return this.layers().flatMap(layer =>
       layer.entities.flatMap(entity => {
         if (entity.kind !== 'circle' && entity.kind !== 'arc') return [];
@@ -1052,6 +1056,45 @@ export class SketchEditor {
               ? this.drawing.instructions
               : `${this.view.layers.at(-1)!.degreesOfFreedom} DOF · ${this.view.layers.at(-1)!.constraints.length} constraints · Drag points or curve radii · Delete removes the selection`);
     if (this.statusText.data !== status) this.statusText.data = status;
+  }
+
+  private drawRegions(): void {
+    // An unfinished/invalid sketch stays editable; .face(s) supplies diagnostics
+    // when the author asks to construct geometry. This preview shares extraction
+    // with B-Rep construction and does not introduce region identities or picking.
+    let regions;
+    try {
+      regions = sketchRegions(this.layers());
+    } catch {
+      return;
+    }
+    for (const [index, region] of regions.entries()) {
+      const shape = this.shape(`region:${index}`, 'path', this.regions);
+      shape.setAttribute('class', 'sketch-region');
+      shape.setAttribute('fill-rule', 'evenodd');
+      shape.setAttribute(
+        'd',
+        [region.outer, ...region.holes]
+          .map(loop => {
+            let path = `M ${this.screen(sketchCurvePosition(loop[0], 0)).join(' ')}`;
+            for (const curve of loop) {
+              if (curve.kind === 'line')
+                path += ` L ${this.screen(curve.points[1]).join(' ')}`;
+              else {
+                const sweep =
+                  curve.kind === 'circle' ? 2 * Math.PI : curve.sweep;
+                const pieces = Math.ceil(Math.abs(sweep) / Math.PI);
+                for (let i = 1; i <= pieces; i++) {
+                  const r = curve.radius * this.scale;
+                  path += ` A ${r} ${r} 0 0 ${sweep < 0 ? 1 : 0} ${this.screen(sketchCurvePosition(curve, i / pieces)).join(' ')}`;
+                }
+              }
+            }
+            return `${path} Z`;
+          })
+          .join(' '),
+      );
+    }
   }
 
   private expressionLock(id: number): string | undefined {

@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import type {Page} from 'playwright-core';
 import {open, point, text, waitForSource} from './sketch-test.ts';
+import {trimmedArcSketchArguments} from '../sketch-fixtures.ts';
+import {sketchGridStep} from '../../src/tools/sketch-snap.ts';
 
 const center = async (page: Page, id: number, layer = 'local') => {
   const box = (await point(page, id, layer).boundingBox())!;
@@ -17,6 +19,57 @@ const s = sketch([
   ['point', 11, [0, 10]],
   ['line', 3, [11, 2]],
 ]);`;
+
+test('returning a trimmed arc endpoint writes exact opposite coordinates and undoes atomically', async t => {
+  const page = await open(
+    t,
+    "import {sketch} from '@code3d/core';\nconst s = sketch(" +
+      trimmedArcSketchArguments() +
+      ');',
+  );
+  const fitted = await center(page, 15),
+    pivot = await center(page, 10);
+  // At the fitted scale this contour has a unit grid, so 7.5 snaps to 8.
+  // Zoom to a half-unit grid before testing an exact return to 7.5.
+  await page.mouse.move(pivot.x, pivot.y);
+  await page.mouse.wheel(
+    0,
+    -Math.log((20 * 7.5) / (fitted.x - pivot.x)) * 1000,
+  );
+  await page.waitForFunction(before => {
+    const x = (id: number) =>
+      Number(
+        document
+          .querySelector(`.sketch-canvas circle.local[data-id="${id}"]`)!
+          .getAttribute('cx'),
+      );
+    return x(15) - x(10) > before + 1;
+  }, fitted.x - pivot.x);
+  const start = await center(page, 15),
+    origin = await center(page, 10);
+  const unit = (start.x - origin.x) / 7.5;
+  assert.equal(sketchGridStep(unit), 0.5);
+  for (const x of [10, 7.5]) {
+    const current = await center(page, 15);
+    await page.mouse.move(current.x, current.y);
+    await page.mouse.down();
+    await page.mouse.move(origin.x + unit * x, origin.y, {steps: 8});
+    await page.mouse.up();
+    await waitForSource(
+      page,
+      new RegExp(String.raw`\['point',\s*15,\s*\[${x},\s*10\]\]`),
+    );
+    await page.getByText('Ready', {exact: true}).waitFor();
+    assert.match(
+      await text(page),
+      new RegExp(String.raw`\['point',\s*13,\s*\[-${x},\s*10\]\]`),
+    );
+  }
+  near(await center(page, 15), start);
+  await page.keyboard.press('Control+z');
+  await waitForSource(page, /\['point',\s*15,\s*\[10,\s*10\]\]/);
+  assert.match(await text(page), /\['point',\s*13,\s*\[-10,\s*10\]\]/);
+});
 
 test('Worker arc endpoint snapping commits alias identity through compilation', async t => {
   const page = await open(

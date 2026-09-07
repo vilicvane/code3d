@@ -494,6 +494,7 @@ codeEditor.onChange(change => {
   const editingHistoryChange =
     historyChange && handleContextualEditingHistory(change);
   if (!toolChange && !editingHistoryChange) abandonContextualTool();
+  if (toolChange) renderContextualToolPanel();
   if (!toolChange) sketchEditor.invalidate();
   persistProjectChange(projectFileSystem, change);
   if (!toolChange) sourceEditPopover.dismiss();
@@ -1653,7 +1654,19 @@ function renderContextualToolPanel(forceParameterValues = false): void {
     topologyReferenceSelectionTool?.targetId === tool.targetId
       ? topologyReferenceSelectionTool
       : undefined;
-  const parameters = [...tool.parameters.values()].map(contextualParameterView);
+  const parameters = [...tool.parameters.values()].map(parameter => {
+    const binding = parameter.binding;
+    const sourceRef =
+      binding?.kind === 'parameter'
+        ? binding.usage.target.sourceRef
+        : binding?.target.sourceRef;
+    return {
+      ...contextualParameterView(parameter),
+      // Full-document formatting can invalidate source ranges before the next
+      // compile replaces this panel. Do not accept edits that cannot be written.
+      disabled: !sourceRef || !codeEditor.resolveSourceRef(sourceRef),
+    };
+  });
   const actions = tool.signature.parameters.flatMap(parameter =>
     parameter.actions.map(action => ({
       id: `${parameter.name}:${action.action}`,

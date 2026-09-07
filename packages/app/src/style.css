@@ -1236,6 +1236,11 @@ kbd {
 .sketch-canvas .entity {
   stroke-width: 2;
 }
+.sketch-canvas .sketch-region {
+  fill: rgb(169 198 50 / 8%);
+  stroke: none;
+  pointer-events: none;
+}
 .sketch-canvas .entity[data-kind='circle'],
 .sketch-canvas .entity[data-kind='arc'],
 .sketch-canvas .entity[data-kind='segment'] {
