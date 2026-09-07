@@ -202,6 +202,13 @@ for (const storage of ['browser', 'directory'] as const)
         userCursor,
       );
       assert.ok(await page.locator('.agent-caret').count());
+      const aliceLabel = page
+        .locator('.agent-cursor-label')
+        .filter({hasText: /^Alice$/});
+      const bobLabel = page
+        .locator('.agent-cursor-label')
+        .filter({hasText: /^Bob$/});
+      await aliceLabel.waitFor();
       const image = await readFile(inspect.result.artifacts[0].path);
       assert.equal(image.subarray(1, 4).toString(), 'PNG');
       assert.equal(image.readUInt32BE(16), 960);
@@ -225,6 +232,7 @@ for (const storage of ['browser', 'directory'] as const)
         cursor: {file: path, regex: '(box\\(size, 6, 8\\))'},
       });
       assert.equal(bob.code, 0);
+      await bobLabel.waitFor();
       assert.equal(
         await page.evaluate(
           id => window.agentTestEditor.agentCursor(id).ref?.file,
@@ -232,13 +240,39 @@ for (const storage of ['browser', 'directory'] as const)
         ),
         path,
       );
-      const modified = source.replace('width = 10', 'width = 12');
+      const alternateFile = await page.evaluate(path => {
+        const editor = window.agentTestEditor;
+        const alternate = editor.filePaths().find(file => file !== path)!;
+        editor.switchFile(alternate);
+        return alternate;
+      }, path);
+      assert.notEqual(alternateFile, path);
+      await aliceLabel.waitFor({state: 'hidden'});
+      await bobLabel.waitFor({state: 'hidden'});
+      await page.evaluate(
+        path => window.agentTestEditor.switchFile(path),
+        path,
+      );
+      await aliceLabel.waitFor();
+      await bobLabel.waitFor();
+      await page.screenshot({path: '/tmp/code3d-agent-cursor-labels.png'});
+      const labelTop = (await aliceLabel.boundingBox())!.y;
+      const modified =
+        '// Revised by Alice\n' + source.replace('width = 10', 'width = 12');
       const changed = await cli(
         0,
         ['--request-id', 'edit-model', 'apply', '--input', '-'],
         {files: [{path, version, content: modified}]},
       );
       assert.equal(changed.code, 0, JSON.stringify(changed.result));
+      await page.waitForFunction(top => {
+        const label = [
+          ...document.querySelectorAll('.agent-cursor-label'),
+        ].find(node => node.textContent === 'Alice');
+        return (
+          label && Math.abs(label.getBoundingClientRect().y - top - 22) < 1
+        );
+      }, labelTop);
       if (storage === 'directory')
         assert.equal(
           await page.evaluate(async () => {
@@ -287,6 +321,26 @@ for (const storage of ['browser', 'directory'] as const)
             item.id === 4 && item.selectable,
         ),
       );
+      const syntax = await cli(0, ['apply', '--input', '-', '--topology'], {
+        cursor: {
+          file: path,
+          regex: '(box\\(size, 6, 8\\))',
+          arguments: '[',
+        },
+      });
+      assert.equal(syntax.code, 1);
+      assert.equal(syntax.result.error.code, 'model_failed');
+      assert.equal(syntax.result.error.details.accepted, true);
+      assert.equal(syntax.result.error.details.saved, true);
+      assert.equal(syntax.result.error.details.observation.kind, 'syntax');
+      assert.equal(
+        syntax.result.error.details.observation.sourceRef.file,
+        path,
+      );
+      assert.equal(
+        syntax.result.error.details.observation.summary,
+        syntax.result.error.message,
+      );
       const bad = await cli(0, ['apply', '--input', '-', '--render'], {
         files: [
           {
@@ -301,12 +355,16 @@ for (const storage of ['browser', 'directory'] as const)
       assert.equal(bad.result.error.code, 'model_failed');
       assert.equal(bad.result.error.details.accepted, true);
       assert.equal(bad.result.error.details.saved, true);
+      assert.equal(bad.result.error.details.observation.kind, 'evaluation');
+      assert.equal(bad.result.error.details.observation.sourceRef.file, path);
       await page.getByRole('button', {name: 'Agents', exact: true}).click();
       await page
         .locator('.agent-row')
         .filter({hasText: 'Bob'})
         .getByRole('button', {name: 'Revoke'})
         .click();
+      await bobLabel.waitFor({state: 'detached'});
+      await aliceLabel.waitFor();
       await assert.rejects(
         () =>
           AgentClient.create(configs[1]).then(client =>

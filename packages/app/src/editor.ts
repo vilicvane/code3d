@@ -257,6 +257,8 @@ export class CodeEditor {
     string,
     {
       name: string;
+      label: HTMLElement;
+      widget: monaco.editor.IContentWidget;
       ref?: SourceRef;
       invalid: boolean;
       decorations: string[];
@@ -297,6 +299,11 @@ export class CodeEditor {
       tabSize: 2,
     });
     this.sourceDecoration = this.editor.createDecorationsCollection();
+    this.editor.onDidChangeModel(() => {
+      for (const cursor of this.agentCursors.values()) {
+        this.editor.layoutContentWidget(cursor.widget);
+      }
+    });
     this.editor.onDidChangeCursorSelection(({selection, reason}) => {
       this.cursorSelectionVersion += 1;
       // History and marker recovery move Monaco's cursor without the user
@@ -590,15 +597,36 @@ export class CodeEditor {
   }
 
   setAgentCursor(id: string, name: string, ref?: SourceRef): void {
-    const cursor = this.agentCursors.get(id) ?? {
-      name,
-      invalid: false,
-      decorations: [],
-    };
+    let cursor = this.agentCursors.get(id);
+    if (!cursor) {
+      const label = document.createElement('div');
+      label.className = `agent-cursor-label agent-color-${agentColor(id)}`;
+      const widget: monaco.editor.IContentWidget = {
+        getId: () => `agent-cursor-${id}`,
+        getDomNode: () => label,
+        getPosition: () => {
+          const ref = this.agentCursors.get(id)?.ref;
+          const model = this.editor.getModel();
+          return ref && model && this.documents.get(ref.file)?.model === model
+            ? {
+                position: model.getPositionAt(ref.start),
+                preference: [
+                  monaco.editor.ContentWidgetPositionPreference.ABOVE,
+                  monaco.editor.ContentWidgetPositionPreference.BELOW,
+                ],
+              }
+            : null;
+        },
+        suppressMouseDown: true,
+      };
+      cursor = {name, label, widget, invalid: false, decorations: []};
+      this.agentCursors.set(id, cursor);
+      this.editor.addContentWidget(widget);
+    }
     cursor.name = name;
+    cursor.label.textContent = name;
     cursor.ref = ref;
     cursor.invalid = false;
-    this.agentCursors.set(id, cursor);
     this.refreshAgentCursor(id);
   }
 
@@ -609,10 +637,12 @@ export class CodeEditor {
 
   removeAgentCursor(id: string): void {
     const cursor = this.agentCursors.get(id);
-    if (cursor?.decoratedFile)
+    if (!cursor) return;
+    if (cursor.decoratedFile)
       this.documents
         .get(cursor.decoratedFile)
         ?.model.deltaDecorations(cursor.decorations, []);
+    this.editor.removeContentWidget(cursor.widget);
     this.agentCursors.delete(id);
   }
 
@@ -642,6 +672,7 @@ export class CodeEditor {
           ],
         )
       : [];
+    this.editor.layoutContentWidget(cursor.widget);
   }
 
   ownsFocus(): boolean {

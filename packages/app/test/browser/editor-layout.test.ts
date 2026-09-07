@@ -218,7 +218,16 @@ test(
       window.pauseLayoutObserver = true;
     });
     await page.setViewportSize({width: 680, height: 800});
+    await page.waitForFunction(
+      () =>
+        getComputedStyle(document.querySelector('#workspace-resizer')!)
+          .display === 'none',
+    );
     await page.mouse.up();
+    await page.waitForFunction(
+      () =>
+        !document.querySelector('#workspace')!.hasAttribute('data-resizing'),
+    );
     await page.setViewportSize({width: 1440, height: 900});
     await page.evaluate(() => {
       window.pauseLayoutObserver = false;

@@ -1830,3 +1830,18 @@ kbd {
   border-left: 2px solid var(--agent-color);
   margin-left: -1px;
 }
+.monaco-editor .agent-cursor-label {
+  max-width: 160px;
+  padding: 0 5px;
+  border-radius: 3px 3px 3px 0;
+  background: var(--agent-color);
+  color: #161b22;
+  font:
+    500 11px/18px 'Inter',
+    sans-serif;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+}

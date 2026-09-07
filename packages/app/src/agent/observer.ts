@@ -14,6 +14,7 @@ import {
 } from '@code3d/core/tooling';
 import {Matrix4, Quaternion, Vector3} from 'three';
 import {ModelCompilerClient} from '../model/compiler-client';
+import {ModelDiagnosticError} from '../model/diagnostic';
 import type {ModelModule} from '../model/compiler';
 import {sourceDecorationProviders} from '../model/source-decorations';
 import type {ProjectFileReader} from '../project/file-reader';
@@ -59,7 +60,16 @@ export class AgentObserver {
   }
 
   observe(request: AgentObservation): Promise<AgentResponse> {
-    const pending = this.queue.then(() => this.run(request));
+    const pending = this.queue
+      .then(() => this.run(request))
+      .catch(error => {
+        if (!(error instanceof ModelDiagnosticError)) throw error;
+        return failure(
+          'model_failed',
+          error.diagnostic.summary,
+          error.diagnostic,
+        );
+      });
     this.queue = pending.catch(() => {});
     return pending;
   }
