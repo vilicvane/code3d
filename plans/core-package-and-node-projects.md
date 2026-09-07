@@ -321,8 +321,12 @@ and reproducible build command.
 Node's core entry performs both installations; App installs both through the selected
 tooling entry before evaluating author code.
 
-Call `beginModelEvaluation(): void` before each serial source
-evaluation. Source locations, parameter provenance, and operation traces live
+Call `beginModelEvaluation(): () => void` before each serial source
+evaluation and call its returned function in `finally` after snapshotting.
+The kernel cache protects the previous and current evaluation's working sets
+until completion, then retains the current set plus a bounded LRU of unused
+history. Exact transformed-bound queries and meshes share the operation cache.
+Source locations, parameter provenance, and operation traces live
 in per-evaluation weak maps, separate from model geometry and stored relations.
 Reusing a dependency's model must not reuse the previous revision's source
 offsets. Completed snapshots remain independent of the next evaluation.

@@ -677,10 +677,14 @@ remain adjustable as implementation evidence arrives.
   instance.
 
 Status: [R-024](requests/closed/R-024-cache-opencascade-operation-results.md)
-is implemented as a bounded, content-addressed kernel-operation LRU covering
+is implemented as a content-addressed kernel-operation cache covering
 solid construction and modification, Boolean prefixes and context regions,
-relative transforms, topology sidecars, bounds, and render meshes. JavaScript
-and provenance are still evaluated afresh. Cache encoding, capacity, and a
+relative transforms, topology sidecars, exact transformed bounds, and render meshes.
+The latest evaluation's full working set is retained, with at most 256 additional
+unused historical entries managed by LRU. The previous and current sets remain
+protected until evaluation and snapshotting finish, avoiding cache thrashing when
+a model exceeds the historical capacity; see [#52](https://github.com/vilicvane/code3d/issues/52).
+JavaScript and provenance are still evaluated afresh. Cache encoding, capacity, and a
 possible lifetime beyond one compiler worker remain adjustable implementation
 choices rather than product semantics.
 
