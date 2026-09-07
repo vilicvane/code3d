@@ -1433,6 +1433,63 @@ test('the documented function offers parameter tools and design-time arguments',
   }
 });
 
+test('source-located temporary arguments use module scope and fall back to JSDoc on the next request', async () => {
+  const source = `import {box} from '@code3d/core';
+const width = 12;
+/** @code3d.arguments [4] */
+function design(size = 2) { return box(size, 3, 5); }
+export default design(7);`;
+  const project = {files: [{path: '/model.ts', source}]};
+  const offset = source.indexOf('box(size');
+  const widths = async (argumentsSource?: string) => {
+    const module = await compileProject(project, '/model.ts', {
+      file: '/model.ts',
+      offset,
+      ...(argumentsSource === undefined ? {} : {arguments: argumentsSource}),
+    });
+    assert.equal(module.diagnostic, undefined);
+    const target = exactTargets(module, source, 'box(size, 3, 5)').find(
+      target => target.tool,
+    );
+    assert.ok(target);
+    const preview = target.evaluations.find(
+      evaluation => evaluation.contextId === module.activeDesignContextId,
+    );
+    assert.ok(preview);
+    const mesh = module.objects.get(preview.nodeIds[0])!.mesh!;
+    const xs = mesh.vertices.filter((_value, index) => index % 3 === 0);
+    return Math.max(...xs) - Math.min(...xs);
+  };
+  assert.equal(await widths('[width]'), 12);
+  assert.equal(await widths(), 4);
+  assert.equal(await widths('[]'), 2);
+  assert.equal(project.files[0].source, source);
+});
+
+test('temporary arguments inspect unannotated functions and can pass imported model objects', async () => {
+  const source = `import {box} from '@code3d/core';
+function design(part) { return part.fillet(0.5); }`;
+  const module = await compileProject(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+    {
+      file: '/model.ts',
+      offset: source.indexOf('part.fillet'),
+      arguments: '[box(10, 6, 8)]',
+    },
+  );
+  assert.equal(module.diagnostic, undefined);
+  assert.ok(module.activeDesignContextId?.endsWith(':temporary'));
+  const target = exactTargets(module, source, 'fillet(0.5)').find(
+    target => target.kind === 'operation-output',
+  );
+  assert.ok(target);
+  assert.equal(target.functionId, '/model.ts:function:design');
+  assert.equal(target.evaluations[0].contextId, module.activeDesignContextId);
+  assert.ok(module.objects.get(target.evaluations[0].nodeIds[0])?.mesh);
+  assert.deepEqual(module.designArguments, []);
+});
+
 test('the npm documentation example compiles with the installed just-range package', async () => {
   const document = await readFile(
     new URL(

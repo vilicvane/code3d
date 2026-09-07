@@ -1,5 +1,5 @@
 import CompilerWorker from './compiler.worker?worker';
-import type {ModelModule} from './compiler';
+import type {DesignContext, ModelModule} from './compiler';
 import {ModelDiagnosticError} from './diagnostic';
 import type {ModelProject} from '../project/project';
 import type {ProjectFileReader} from '../project/file-reader';
@@ -43,7 +43,7 @@ export class ModelCompilerClient {
   compile(
     project: ModelProject,
     rootPath: string,
-    designContextId?: string,
+    designContext?: DesignContext,
     onProgress?: CompilationProgress,
   ): Promise<ModelModule> {
     this.cancel();
@@ -59,7 +59,7 @@ export class ModelCompilerClient {
         onProgress,
         timeout: this.deadline(id, 120_000),
       };
-      this.send({kind: 'compile', id, project, rootPath, designContextId});
+      this.send({kind: 'compile', id, project, rootPath, designContext});
     });
   }
 

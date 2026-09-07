@@ -11,7 +11,11 @@ import {
   type ProjectLanguage,
 } from '../project/project-language';
 import {normalizeProjectPath, type ModelProject} from '../project/project';
-import {createModelCompiler, type ModelModule} from './compiler';
+import {
+  createModelCompiler,
+  type DesignContext,
+  type ModelModule,
+} from './compiler';
 import {ProjectRuntime} from './project-runtime';
 import {ModuleEvaluator} from './module-evaluator';
 import type {CompilationProgress} from './compilation-progress';
@@ -49,7 +53,7 @@ export class ProjectCompiler {
   async compile(
     project: ModelProject,
     rootPath: string,
-    designContextId?: string,
+    designContext?: DesignContext,
     onLanguage?: (language: ProjectLanguage) => void,
     onProgress?: CompilationProgress,
   ): Promise<ModelModule> {
@@ -132,7 +136,7 @@ export class ProjectCompiler {
     const root = normalizeProjectPath(rootPath);
     const contextFile = this.compiler!.designContextFile(
       project,
-      designContextId,
+      designContext,
     );
     const discovery = await this.runtime.loadDependencies(
       builder,
@@ -150,7 +154,7 @@ export class ProjectCompiler {
       this.runtime.importModule,
       language,
       discovery,
-      designContextId,
+      designContext,
       () => onProgress?.('evaluating-model'),
       objects => {
         this.geometry = this.runtime!.tooling.retainModelGeometry(objects);

@@ -72,7 +72,7 @@ async function drain(): Promise<void> {
         const module = await compiler.compile(
           request.project,
           request.rootPath,
-          request.designContextId,
+          request.designContext,
           language => send({kind: 'language', id: request.id, language}),
           phase => {
             if (

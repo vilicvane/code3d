@@ -1,7 +1,7 @@
 import type {ModelProject} from '../project/project';
 import type {ProjectFileInfo} from '../project/file-reader';
 import type {ProjectLanguage} from '../project/project-language';
-import type {ModelModule} from './compiler';
+import type {DesignContext, ModelModule} from './compiler';
 import type {ModelDiagnostic} from './diagnostic';
 import type {ModelExportInstance, ModelExportOptions} from './model-export';
 import type {CompilationPhase} from './compilation-progress';
@@ -11,7 +11,7 @@ export type CompileRequest = Readonly<{
   id: number;
   project: ModelProject;
   rootPath: string;
-  designContextId?: string;
+  designContext?: DesignContext;
 }>;
 
 export type FileRequest = Readonly<{

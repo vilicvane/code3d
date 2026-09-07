@@ -70,7 +70,7 @@ type ProjectDocument = {
   subscription: monaco.IDisposable;
 };
 
-type ContentChangeOrigin = 'user' | 'tool' | 'undo' | 'redo';
+type ContentChangeOrigin = 'user' | 'tool' | 'agent' | 'undo' | 'redo';
 
 type FormatOptions = Readonly<{
   origin?: 'user' | 'tool';
@@ -244,7 +244,7 @@ export class CodeEditor {
   >();
   private readonly pendingToolFormats = new Map<string, string | undefined>();
   private completionFocusVersion = 0;
-  private contentChangeOrigin: 'user' | 'tool' = 'user';
+  private contentChangeOrigin: 'user' | 'tool' | 'agent' = 'user';
   private readonly sourceEditUndoGroups = new Map<string, string>();
   private readonly sourceDecoration: monaco.editor.IEditorDecorationsCollection;
   private activePath: string;
@@ -252,6 +252,17 @@ export class CodeEditor {
   private pointerActivatingEditor = false;
   private revision = 1;
   private suppressCursorEventDepth = 0;
+  private queuedChanges?: ProjectEditorChange[];
+  private readonly agentCursors = new Map<
+    string,
+    {
+      name: string;
+      ref?: SourceRef;
+      invalid: boolean;
+      decorations: string[];
+      decoratedFile?: string;
+    }
+  >();
 
   constructor(
     private readonly container: HTMLElement,
@@ -504,6 +515,133 @@ export class CodeEditor {
 
   sourceVersion(): number {
     return this.revision;
+  }
+
+  fileState(path: string): {content: string; version: string} | undefined {
+    const model = this.documents.get(path)?.model;
+    return model
+      ? {
+          content: model.getValue(),
+          version: `${model.id}:${model.getVersionId()}`,
+        }
+      : undefined;
+  }
+
+  /** Called only after the project service has checked the complete proposed batch. */
+  applyFiles(files: readonly {path: string; content: string | null}[]): void {
+    const changes: ProjectEditorChange[] = [];
+    this.queuedChanges = changes;
+    try {
+      this.withSuppressedCursorEvents(() =>
+        this.withContentChangeOrigin('agent', () => {
+          for (const file of files) {
+            if (file.content === null) continue;
+            const document = this.documents.get(file.path);
+            if (!document) {
+              this.addDocument(file.path, file.content);
+              this.revision++;
+              this.emitChange({
+                kind: 'create',
+                path: file.path,
+                source: file.content,
+              });
+            } else {
+              const before = document.model.getValue();
+              if (before === file.content) continue;
+              let start = 0;
+              while (
+                start < before.length &&
+                start < file.content.length &&
+                before[start] === file.content[start]
+              )
+                start++;
+              let oldEnd = before.length;
+              let newEnd = file.content.length;
+              while (
+                oldEnd > start &&
+                newEnd > start &&
+                before[oldEnd - 1] === file.content[newEnd - 1]
+              ) {
+                oldEnd--;
+                newEnd--;
+              }
+              this.pushSourceEdits(file.path, [
+                {
+                  range: sourceRange(document.model, {
+                    file: file.path,
+                    start,
+                    end: oldEnd,
+                  }),
+                  text: file.content.slice(start, newEnd),
+                  forceMoveMarkers: true,
+                },
+              ]);
+            }
+          }
+          for (const file of files)
+            if (file.content === null && this.documents.has(file.path))
+              this.deleteFile(file.path);
+        }),
+      );
+    } finally {
+      this.queuedChanges = undefined;
+    }
+    for (const change of changes) this.emitChange(change);
+  }
+
+  setAgentCursor(id: string, name: string, ref?: SourceRef): void {
+    const cursor = this.agentCursors.get(id) ?? {
+      name,
+      invalid: false,
+      decorations: [],
+    };
+    cursor.name = name;
+    cursor.ref = ref;
+    cursor.invalid = false;
+    this.agentCursors.set(id, cursor);
+    this.refreshAgentCursor(id);
+  }
+
+  agentCursor(id: string): {ref?: SourceRef; invalid: boolean} {
+    const cursor = this.agentCursors.get(id);
+    return {ref: cursor?.ref, invalid: cursor?.invalid ?? false};
+  }
+
+  removeAgentCursor(id: string): void {
+    const cursor = this.agentCursors.get(id);
+    if (cursor?.decoratedFile)
+      this.documents
+        .get(cursor.decoratedFile)
+        ?.model.deltaDecorations(cursor.decorations, []);
+    this.agentCursors.delete(id);
+  }
+
+  private refreshAgentCursor(id: string): void {
+    const cursor = this.agentCursors.get(id)!;
+    if (cursor.decoratedFile)
+      this.documents
+        .get(cursor.decoratedFile)
+        ?.model.deltaDecorations(cursor.decorations, []);
+    const model = cursor.ref && this.documents.get(cursor.ref.file)?.model;
+    cursor.decoratedFile = model ? cursor.ref!.file : undefined;
+    cursor.decorations = model
+      ? model.deltaDecorations(
+          [],
+          [
+            {
+              range: sourceRange(model, cursor.ref!),
+              options: {
+                className: 'agent-selection',
+                beforeContentClassName: 'agent-caret',
+                hoverMessage: {value: cursor.name, isTrusted: false},
+                stickiness:
+                  monaco.editor.TrackedRangeStickiness
+                    .NeverGrowsWhenTypingAtEdges,
+              },
+            },
+          ],
+        )
+      : [];
   }
 
   ownsFocus(): boolean {
@@ -887,7 +1025,7 @@ export class CodeEditor {
     const model = monaco.editor.createModel(
       source,
       languageForPath(normalized),
-      monaco.Uri.parse(`file:///workspace${normalized}`),
+      monaco.Uri.file('/workspace' + normalized),
     );
     this.refreshAnnotationDecorations(normalized, model);
     const document: ProjectDocument = {
@@ -927,6 +1065,13 @@ export class CodeEditor {
     document.model.dispose();
     this.annotationDecorations.delete(path);
     this.documents.delete(path);
+    for (const [id, cursor] of this.agentCursors) {
+      if (cursor.ref?.file === path) {
+        cursor.ref = undefined;
+        cursor.invalid = true;
+        this.refreshAgentCursor(id);
+      }
+    }
   }
 
   private rebaseTrackedSourceRefs(
@@ -934,6 +1079,21 @@ export class CodeEditor {
     changes: readonly monaco.editor.IModelContentChange[],
     origin: ContentChangeOrigin,
   ): void {
+    for (const [id, cursor] of this.agentCursors) {
+      if (cursor.ref?.file !== path) continue;
+      const deleted = changes.some(
+        change =>
+          change.rangeLength > 0 &&
+          !change.text &&
+          change.rangeOffset <= cursor.ref!.start &&
+          change.rangeOffset + change.rangeLength >= cursor.ref!.end,
+      );
+      cursor.ref = deleted
+        ? undefined
+        : rebaseSourceRef(cursor.ref, changes, false);
+      cursor.invalid = !cursor.ref;
+      this.refreshAgentCursor(id);
+    }
     for (const [key, sourceRef] of this.trackedSourceRefs) {
       if (sourceRef.file !== path) continue;
       const rebased = rebaseSourceRef(sourceRef, changes, origin === 'user');
@@ -970,6 +1130,10 @@ export class CodeEditor {
   }
 
   private emitChange(change: ProjectEditorChange): void {
+    if (this.queuedChanges) {
+      this.queuedChanges.push(change);
+      return;
+    }
     this.changeListeners.forEach(listener => listener(change));
   }
 
@@ -1096,7 +1260,7 @@ export class CodeEditor {
   }
 
   private withContentChangeOrigin<T>(
-    origin: 'user' | 'tool',
+    origin: 'user' | 'tool' | 'agent',
     action: () => T,
   ): T {
     const previous = this.contentChangeOrigin;

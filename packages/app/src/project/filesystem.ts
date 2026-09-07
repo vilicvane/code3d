@@ -52,6 +52,9 @@ type ProjectFileOperations = {
 };
 
 export interface ProjectFileSystem extends ProjectFileReader {
+  list(
+    path: string,
+  ): Promise<readonly {name: string; kind: 'file' | 'directory'}[]>;
   initialize(seed: ModelProject): Promise<ModelProject>;
   syncDirectory(template: ProjectDirectoryTemplate): Promise<ModelProject>;
   resetDirectory(template: ProjectDirectoryTemplate): Promise<ModelProject>;
@@ -84,6 +87,7 @@ export async function openBrowserProjectFileSystem(): Promise<ProjectFileSystem>
           ? {
               kind: info.isDirectory() ? 'directory' : 'file',
               version: `${info.mtimeMs}:${info.size}`,
+              size: info.size,
             }
           : undefined;
       },
@@ -125,6 +129,22 @@ class ProjectStore implements ProjectFileSystem {
 
   stat(path: string) {
     return this.reader.stat(this.toDiskPath(normalizeProjectPath(path)));
+  }
+
+  async list(
+    path: string,
+  ): Promise<readonly {name: string; kind: 'file' | 'directory'}[]> {
+    const entries = await this.files.readdir(
+      this.toDiskPath(normalizeProjectPath(path)),
+      {withFileTypes: true},
+    );
+    return entries
+      .filter(entry => entry.isFile() || entry.isDirectory())
+      .map(entry => ({
+        name: entry.name,
+        kind: entry.isDirectory() ? ('directory' as const) : ('file' as const),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
   }
 
   async initialize(seed: ModelProject): Promise<ModelProject> {
