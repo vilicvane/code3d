@@ -6,6 +6,8 @@ import {
   AgentEndpoint,
   AgentError,
   createAgentConfig,
+  createHostIdentity,
+  sessionIdForToken,
   encodeBase64,
   maxMessageBytes,
   parseAgentConfig,
@@ -24,6 +26,15 @@ const settings = {
 };
 const read: AgentRequest = {operation: 'fs.read', path: '/model.ts'};
 const saved: AgentResponse = {ok: true, data: {status: 'saved', version: 'v2'}};
+
+test('App-generated host tokens derive routes without sharing hosting authority with agents', async () => {
+  const host = await createHostIdentity();
+  assert.equal(await sessionIdForToken(host.token), host.sessionId);
+  assert.notEqual(host.token, host.sessionId);
+  assert.notEqual(await sessionIdForToken(host.sessionId), host.sessionId);
+  const config = createAgentConfig({...settings, sessionId: host.sessionId});
+  assert.ok(!JSON.stringify(config).includes(host.token));
+});
 
 test('encrypted messages authenticate the agent, session, direction, request and payload', async () => {
   const config = createAgentConfig(settings);
@@ -63,7 +74,7 @@ test('encrypted messages authenticate the agent, session, direction, request and
 
 test('configuration never accepts remote plaintext transport or embeds credentials in URLs', () => {
   const config = createAgentConfig(settings);
-  assert.notEqual(config.key, config.accessToken);
+  assert.equal('accessToken' in config, false);
   for (const relay of [
     'http://remote.example',
     'https://user:secret@relay.example',
@@ -211,7 +222,7 @@ test('HTTP transport separates agent identities and only carries ciphertext and 
   }
   const impostor = await AgentClient.create({
     ...alice,
-    accessToken: bob.accessToken,
+    key: bob.key,
   });
   await assert.rejects(() => impostor.request(read), {code: 'relay_error'});
   assert.equal(calls, 2);

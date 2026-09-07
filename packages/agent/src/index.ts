@@ -1,5 +1,8 @@
 export {
   createAgentConfig,
+  createHostIdentity,
+  sessionIdForToken,
+  normalizeRelayUrl,
   parseAgentConfig,
   requestUrl,
   type AgentConfig,
@@ -15,6 +18,11 @@ export {
 export {AgentClient, readBoundedBody, type RequestOptions} from './client.js';
 export {AgentEndpoint, type RequestHandler} from './endpoint.js';
 export {
+  RelayHost,
+  type HostState,
+  type RelayHostOptions,
+} from './relay-host.js';
+export {
   parseApplyInput,
   parseRequest,
   parseResponse,
@@ -27,3 +35,10 @@ export {
   type Artifact,
 } from './protocol.js';
 export {AgentError, decodeBase64, encodeBase64} from './validation.js';
+export {
+  parseRelayMessage,
+  parseHostMessage,
+  maxRelayMessageBytes,
+  type RelayMessage,
+  type HostMessage,
+} from './relay-protocol.js';

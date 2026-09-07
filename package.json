@@ -26,6 +26,7 @@
   "workspaces": [
     "packages/agent",
     "packages/cli",
+    "packages/relay",
     "packages/app",
     "packages/core",
     "packages/opencascade",

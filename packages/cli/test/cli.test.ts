@@ -99,7 +99,6 @@ test('CLI reads remote files and submits full changes from stdin or a JSON file'
   assert.equal(requests.length, 3);
   for (const invocation of [read, apply, result]) {
     assert.ok(!invocation.stdout.includes(config.key));
-    assert.ok(!invocation.stderr.includes(config.accessToken));
   }
   assert.ok(
     server.received.every(message => !message.body.includes('privateSource')),
@@ -163,7 +162,7 @@ test('application errors, invalid input, and missing transport have distinct exi
   assert.equal(server.received.length, 1);
   await writeFile(
     configPath,
-    JSON.stringify({...config, accessToken: encodeBase64(new Uint8Array(32))}),
+    JSON.stringify({...config, key: encodeBase64(new Uint8Array(32))}),
   );
   const rejected = await run([
     configPath,

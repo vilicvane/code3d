@@ -14,26 +14,39 @@ hands the complete JSON configuration to that agent through a copied prompt:
 {
   "version": 1,
   "relay": "https://relay.example",
-  "sessionId": "app-session-id",
+  "sessionId": "<base64url SHA-256 of the App host token>",
   "agentId": "stable-agent-id",
   "name": "Modeling agent",
-  "accessToken": "<32 random bytes as unpadded base64url>",
-  "key": "<independent 32 random bytes as unpadded base64url>"
+  "key": "<32 random bytes as unpadded base64url>"
 }
 ```
 
 The agent saves this file wherever convenient. Each agent needs its own grant;
-separate CLI invocations reuse it. `accessToken` authorizes relay routing, while
-`key` encrypts content and **must never be registered with the relay**. Project
+separate CLI invocations reuse it. The App uses `createHostIdentity()` to generate
+a random host token and derive its SHA-256 session ID. Only the App knows the host
+token; agents receive the route ID and their own `key`. This key authenticates and
+encrypts content and **must never be registered with the relay**. Project
 contents, cursor expressions, arguments and response artifacts are all encrypted.
 Session IDs, agent IDs, request IDs, message sizes/timing and relay credentials
 are visible to the relay. HTTPS is required except for loopback development.
 
-The App must revoke routing and close the endpoint when ending a grant. Receipts
+The App removes the grant and closes its endpoint when revoking an agent. Receipts
 currently live in that endpoint's memory. After a reload or lost receipt journal,
 issue fresh grants and keys; never reopen the old grant with an empty journal.
 Closing an endpoint prevents further replies and requests; it does not roll back
 work already accepted by the App handler.
+
+## Stateless routing
+
+`RelayHost` opens `<relay>/sessions/<sessionId>/host` as a WebSocket and sends the
+host token in its first frame, keeping it out of URL logs. The relay verifies its
+hash and pairs the connection with CLI HTTP requests. Routing frames carry an
+ephemeral transport ID, agent ID and opaque encrypted body. The transport ID only
+correlates a live HTTP response; application request IDs and receipts stay in the
+App. Reconnects reuse the same App endpoints; page reloads must issue new grants.
+
+The Node implementation lives in [@code3d/relay](../relay/README.md). It has no
+database, session registration API, agent authorization table or response cache.
 
 ## Wire contract
 
@@ -41,7 +54,6 @@ The client posts an encrypted JSON envelope to:
 
 ```text
 POST <relay>/sessions/<sessionId>/agents/<agentId>/requests
-Authorization: Bearer <accessToken>
 Content-Type: application/json
 ```
 
@@ -53,8 +65,9 @@ the 128-bit tag authenticates protocol version, session, agent, direction and
 request ID. Plaintext JSON is limited to 16 MiB, including encoded artifacts.
 
 `AgentEndpoint.handle(envelope)` decrypts and validates a request, invokes its
-handler and encrypts the result. Relay adapters must authenticate before routing
-to this endpoint. Multiple endpoints share the App's project service; that service
+handler and encrypts the result. The App chooses the grant by agent ID and the
+endpoint authenticates its ciphertext. No agent registry exists in the relay.
+Multiple endpoints share the App's project service; that service
 owns version checks, batch preflight, serialization and persistence. The endpoint
 alone does not supply transactional file writes or model observation semantics.
 
@@ -119,8 +132,9 @@ positions and the selected text.
 The resolver runs in a disposable Web Worker with a one-second deadline and
 cancellation. A slow regex fails preflight without blocking the editor. The
 caller supplies the proposed source and must reject the file batch if this
-check fails, then recheck versions after asynchronous preflight. This stage
-provides the resolver; it does not yet connect App file commits or decorations.
+check fails, then recheck versions after asynchronous preflight. The App project
+service provides this validation and a shared queue for user saves and agent
+batches, retaining accepted content when persistence fails.
 
 Responses are `{ok: true, data, artifacts?}` or
 `{ok: false, error: {code, message, details?}}`. Artifact fields are `name`,

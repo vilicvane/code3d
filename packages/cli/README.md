@@ -12,7 +12,7 @@ from the current App is not available yet.
 ## Usage
 
 Save the complete JSON configuration supplied by the App to a file of your
-choice. It contains a stable agent identity, relay credential and content key;
+choice. It contains a stable agent identity, relay route and content key;
 keep it private and give each agent its own configuration. There is no `connect`
 or configuration initialization command.
 

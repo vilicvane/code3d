@@ -1,5 +1,6 @@
 import {
   AgentError,
+  decodeBase64,
   encodeBase64,
   identifier,
   object,
@@ -13,14 +14,13 @@ export type AgentConfig = Readonly<{
   sessionId: string;
   agentId: string;
   name: string;
-  accessToken: string;
   key: string;
 }>;
 
 export function parseAgentConfig(value: unknown): AgentConfig {
   const config = object(
     value,
-    ['version', 'relay', 'sessionId', 'agentId', 'name', 'accessToken', 'key'],
+    ['version', 'relay', 'sessionId', 'agentId', 'name', 'key'],
     'Agent configuration',
   );
   if (config.version !== 1)
@@ -28,9 +28,20 @@ export function parseAgentConfig(value: unknown): AgentConfig {
       'invalid_config',
       'Unsupported agent configuration version.',
     );
+  return {
+    version: 1,
+    relay: normalizeRelayUrl(config.relay),
+    sessionId: identifier(config.sessionId, 'Session ID'),
+    agentId: identifier(config.agentId, 'Agent ID'),
+    name: string(config.name, 'Agent name'),
+    key: secret(config.key, 'Content key'),
+  };
+}
+
+export function normalizeRelayUrl(value: unknown): string {
   let relay: URL;
   try {
-    relay = new URL(string(config.relay, 'Relay URL'));
+    relay = new URL(string(value, 'Relay URL'));
   } catch {
     throw new AgentError(
       'invalid_config',
@@ -49,15 +60,7 @@ export function parseAgentConfig(value: unknown): AgentConfig {
       'invalid_config',
       'Relay URL must use HTTPS (HTTP is allowed on loopback), without credentials, query or fragment.',
     );
-  return {
-    version: 1,
-    relay: relay.href.replace(/\/$/, ''),
-    sessionId: identifier(config.sessionId, 'Session ID'),
-    agentId: identifier(config.agentId, 'Agent ID'),
-    name: string(config.name, 'Agent name'),
-    accessToken: secret(config.accessToken, 'Relay access token'),
-    key: secret(config.key, 'Content key'),
-  };
+  return relay.href.replace(/\/$/, '');
 }
 
 /** Called by the App when issuing an agent's configuration, never by the relay. */
@@ -68,9 +71,26 @@ export function createAgentConfig(
     version: 1,
     ...options,
     agentId: crypto.randomUUID(),
-    accessToken: encodeBase64(crypto.getRandomValues(new Uint8Array(32))),
     key: encodeBase64(crypto.getRandomValues(new Uint8Array(32))),
   });
+}
+
+/** The host token stays in the App. Its one-way route ID is safe to hand to agents. */
+export async function sessionIdForToken(token: string): Promise<string> {
+  secret(token, 'Host token');
+  return encodeBase64(
+    new Uint8Array(
+      await crypto.subtle.digest('SHA-256', decodeBase64(token, 'Host token')),
+    ),
+  );
+}
+
+export async function createHostIdentity(): Promise<{
+  token: string;
+  sessionId: string;
+}> {
+  const token = encodeBase64(crypto.getRandomValues(new Uint8Array(32)));
+  return {token, sessionId: await sessionIdForToken(token)};
 }
 
 export function requestUrl(config: AgentConfig): URL {

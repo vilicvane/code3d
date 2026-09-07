@@ -38,11 +38,8 @@ export async function relay(t: TestContext, handler: RequestHandler) {
           request.url ===
           `/sessions/${config.sessionId}/agents/${config.agentId}/requests`,
       );
-      if (
-        !grant ||
-        request.headers.authorization !== 'Bearer ' + grant.config.accessToken
-      ) {
-        response.writeHead(401).end();
+      if (!grant) {
+        response.writeHead(403).end();
         return;
       }
       let envelope = await grant.endpoint.handle(JSON.parse(body));

@@ -44,7 +44,6 @@ export class AgentClient {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          authorization: 'Bearer ' + this.config.accessToken,
         },
         body: JSON.stringify(body),
         redirect: 'error',
