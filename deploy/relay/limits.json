@@ -1,0 +1,24 @@
+{
+  "global": {
+    "kibPerSecond": 2048,
+    "burstMiB": 128,
+    "dailyMiB": 10240,
+    "requestsPerSecond": 100,
+    "requestBurst": 200
+  },
+  "ip": {
+    "kibPerSecond": 512,
+    "burstMiB": 64,
+    "dailyMiB": 1024,
+    "requestsPerSecond": 20,
+    "requestBurst": 60
+  },
+  "session": {
+    "kibPerSecond": 512,
+    "burstMiB": 64,
+    "dailyMiB": 512,
+    "requestsPerSecond": 10,
+    "requestBurst": 30
+  },
+  "maxSubjects": 4096
+}

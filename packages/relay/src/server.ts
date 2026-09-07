@@ -8,8 +8,12 @@ import {
   sessionIdForToken,
   type RelayMessage,
 } from '@code3d/agent';
+import {clientAddress} from './client-address.js';
+import {TrafficLimiter, type TrafficOptions} from './traffic.js';
 
-type Pending = {finish(status: number, body?: string): void};
+type Pending = {
+  finish(status: number, body?: string, retryAfter?: number): void;
+};
 type Host = {socket: WebSocket; requests: Map<string, Pending>};
 export type RelayOptions = {
   requestTimeoutMs?: number;
@@ -17,10 +21,13 @@ export type RelayOptions = {
   maxConnections?: number;
   maxPending?: number;
   maxBufferedBytes?: number;
+  traffic?: TrafficOptions;
+  trustProxy?: boolean;
 };
 
-/** Only live sockets and unfinished HTTP exchanges exist here. No session registration or storage. */
+/** Live routing plus bounded in-memory traffic counters; no business state or storage. */
 export function createRelay(options: RelayOptions = {}) {
+  const traffic = new TrafficLimiter(options.traffic);
   const hosts = new Map<string, Host>();
   const maxPending = options.maxPending ?? 32;
   const maxBufferedBytes = options.maxBufferedBytes ?? 64 * 1024 * 1024;
@@ -32,18 +39,40 @@ export function createRelay(options: RelayOptions = {}) {
     (request, response) => {
       response.setHeader('cache-control', 'no-store');
       response.setHeader('x-content-type-options', 'nosniff');
+      const reject = (status: number, retryAfter?: number) => {
+        response.setHeader('connection', 'close');
+        if (retryAfter) response.setHeader('retry-after', retryAfter);
+        response.writeHead(status).end();
+      };
       if (request.method === 'GET' && request.url === '/health') {
         response.writeHead(200).end('ok');
+        return;
+      }
+      let ip: string;
+      try {
+        ip = clientAddress(request, options.trustProxy ?? false);
+      } catch {
+        reject(400);
         return;
       }
       const route = request.url?.match(
         /^\/sessions\/([A-Za-z0-9_-]{43})\/agents\/([A-Za-z0-9_-]{1,128})\/requests$/,
       );
+      const host = route ? hosts.get(route[1]) : undefined;
+      const admissionWait = traffic.take(
+        ip,
+        host ? route![1] : undefined,
+        0,
+        1,
+      );
+      if (admissionWait) {
+        reject(429, admissionWait);
+        return;
+      }
       if (request.method !== 'POST' || !route) {
         response.writeHead(404).end();
         return;
       }
-      const host = hosts.get(route[1]);
       if (!host || host.socket.readyState !== WebSocket.OPEN) {
         response.writeHead(503).end();
         return;
@@ -54,12 +83,12 @@ export function createRelay(options: RelayOptions = {}) {
         host.requests.size >= 8 ||
         host.socket.bufferedAmount > maxEnvelopeBytes
       ) {
-        response.writeHead(429).end();
+        reject(429, 1);
         return;
       }
       const contentLength = Number(request.headers['content-length'] ?? 0);
       if (contentLength > maxEnvelopeBytes) {
-        response.writeHead(413).end();
+        reject(413);
         return;
       }
       const id = randomUUID();
@@ -76,7 +105,7 @@ export function createRelay(options: RelayOptions = {}) {
         () => finish(504),
         options.requestTimeoutMs ?? 115_000,
       );
-      const finish = (status: number, body?: string) => {
+      const finish = (status: number, body?: string, retryAfter?: number) => {
         if (finished) return;
         finished = true;
         clearTimeout(timer);
@@ -84,6 +113,8 @@ export function createRelay(options: RelayOptions = {}) {
         pendingCount--;
         release();
         if (!response.destroyed) {
+          if (retryAfter) response.setHeader('retry-after', retryAfter);
+          if (status !== 200) response.setHeader('connection', 'close');
           if (body) response.setHeader('content-type', 'application/json');
           response.writeHead(status).end(body);
         }
@@ -94,13 +125,18 @@ export function createRelay(options: RelayOptions = {}) {
       request.on('error', () => finish(400));
       request.on('data', (chunk: Buffer) => {
         if (finished) return;
+        const retryAfter = traffic.take(ip, route[1], chunk.byteLength);
+        if (retryAfter) {
+          finish(429, undefined, retryAfter);
+          return;
+        }
         size += chunk.byteLength;
         if (size > maxEnvelopeBytes) {
           finish(413);
           return;
         }
         if (bufferedBytes + chunk.byteLength > maxBufferedBytes) {
-          finish(429);
+          finish(429, undefined, 1);
           return;
         }
         bufferedBytes += chunk.byteLength;
@@ -123,7 +159,27 @@ export function createRelay(options: RelayOptions = {}) {
           agentId: route[2],
           body,
         };
-        host.socket.send(JSON.stringify(message), error => {
+        const wire = JSON.stringify(message);
+        const wireBytes = Buffer.byteLength(wire);
+        if (wireBytes > maxRelayMessageBytes) {
+          finish(413);
+          return;
+        }
+        // Opaque uploads can expand through JSON escaping or UTF-8 replacement.
+        // Charge that expansion so forwarded payload cannot amplify unmetered traffic.
+        const extraBytes = Math.max(0, wireBytes - size);
+        const retryAfter = traffic.take(ip, route[1], extraBytes);
+        if (retryAfter) {
+          finish(429, undefined, retryAfter);
+          return;
+        }
+        if (bufferedBytes + extraBytes > maxBufferedBytes) {
+          finish(429, undefined, 1);
+          return;
+        }
+        bufferedBytes += extraBytes;
+        reserved += extraBytes;
+        host.socket.send(wire, error => {
           release();
           if (error) finish(502);
         });
@@ -138,6 +194,20 @@ export function createRelay(options: RelayOptions = {}) {
   });
   const alive = new Set<WebSocket>();
   server.on('upgrade', (request, socket, head) => {
+    let ip: string;
+    try {
+      ip = clientAddress(request, options.trustProxy ?? false);
+    } catch {
+      socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n');
+      return;
+    }
+    const retryAfter = traffic.take(ip, undefined, 0, 1);
+    if (retryAfter) {
+      socket.end(
+        `HTTP/1.1 429 Too Many Requests\r\nRetry-After: ${retryAfter}\r\nConnection: close\r\n\r\n`,
+      );
+      return;
+    }
     const route = request.url?.match(/^\/sessions\/([A-Za-z0-9_-]{43})\/host$/);
     if (
       closing ||
@@ -154,13 +224,26 @@ export function createRelay(options: RelayOptions = {}) {
     );
   });
   sockets.on('connection', (socket, request) => {
+    const ip = clientAddress(request, options.trustProxy ?? false);
     const expectedSessionId = request.url!.split('/')[2];
     let host: Host | undefined;
     let sessionId: string | undefined;
     let authenticating = false;
     const deadline = setTimeout(() => socket.terminate(), 5000);
     alive.add(socket);
-    socket.on('pong', () => alive.add(socket));
+    const admit = (bytes: number): boolean => {
+      if (socket.readyState !== WebSocket.OPEN) return false;
+      const retryAfter = traffic.take(ip, sessionId, bytes, 1);
+      if (!retryAfter) return true;
+      for (const pending of host?.requests.values() ?? [])
+        pending.finish(429, undefined, retryAfter);
+      socket.close(1008, 'Traffic limit exceeded');
+      return false;
+    };
+    socket.on('ping', data => admit(data.byteLength));
+    socket.on('pong', data => {
+      if (admit(data.byteLength)) alive.add(socket);
+    });
     socket.on('error', () => socket.terminate());
     socket.on('close', () => {
       clearTimeout(deadline);
@@ -169,6 +252,10 @@ export function createRelay(options: RelayOptions = {}) {
       for (const pending of host?.requests.values() ?? []) pending.finish(503);
     });
     socket.on('message', (data, binary) => {
+      const size = Array.isArray(data)
+        ? data.reduce((sum, chunk) => sum + chunk.byteLength, 0)
+        : data.byteLength;
+      if (!admit(size)) return;
       void (async () => {
         if (binary || authenticating) {
           socket.close(1008);
@@ -216,6 +303,7 @@ export function createRelay(options: RelayOptions = {}) {
     });
   });
   const heartbeat = setInterval(() => {
+    traffic.sweep();
     for (const socket of sockets.clients) {
       if (!alive.delete(socket)) socket.terminate();
       else socket.ping();

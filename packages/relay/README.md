@@ -4,8 +4,14 @@ Stateless HTTP/WebSocket forwarding for Code3D App and local agents, following
 the caller-generated token and derived routing identity used by
 [BackPage](https://github.com/vilicvane/backpage). The App owns agent grants,
 decryption, request receipts and project operations. This service retains only
-online connections and unfinished HTTP exchanges, all removed on disconnect.
-It has no database, session registration, offline queue or business snapshot.
+online connections, unfinished HTTP exchanges and bounded in-memory traffic
+counters. Routing disappears on disconnect; spent daily traffic quota survives
+reconnections until the next UTC day or process restart. It has no database,
+session registration, offline queue or business snapshot.
+
+For a public server, use the [Docker Compose deployment](../../deploy/relay/README.md).
+It includes Caddy-managed HTTPS/WSS, a private relay backend, traffic budgets,
+container resource limits and a repeatable deployment regression test.
 
 From the repository root, with Node.js 24+:
 
@@ -39,7 +45,12 @@ per-request load balancing cannot pair a request with another process's socket.
 After a process restart, App reconnects recreate routes without storage recovery.
 
 Limits bound frame/body sizes, connection count, buffered request bytes and
-in-flight requests. Heartbeats remove dead sockets. Offline hosts return 503,
+in-flight requests. Global, IP and session budgets also bound admitted byte
+traffic, daily volume and request/message frequency; they inspect sizes, never
+encrypted contents. Extra bytes introduced by the forwarding wrapper or escaping
+also spend the upload's budget before forwarding. HTTP 429 includes `Retry-After`
+when a traffic budget is exhausted. An over-budget WebSocket closes with code 1008, after returning 429
+to its pending HTTP callers. Heartbeats remove dead sockets. Offline hosts return 503,
 capacity returns 429, and an exchange exceeding 115 seconds returns 504. These
 transport errors never mean a mutation was rolled back: its App endpoint may
 still be running. CLI must query or retry the original application request ID.

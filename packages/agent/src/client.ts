@@ -57,12 +57,18 @@ export class AgentClient {
       );
     }
     if (!response.ok) {
+      const retryAfter = response.headers.get('retry-after');
+      const seconds =
+        retryAfter && /^\d+$/.test(retryAfter) ? Number(retryAfter) : NaN;
       await response.body?.cancel();
       throw new AgentError(
         'relay_error',
         'Relay returned HTTP ' +
           response.status +
-          '. The application result is not confirmed.',
+          '. The application result is not confirmed.' +
+          (Number.isSafeInteger(seconds) && seconds >= 0
+            ? ` Retry after ${seconds} seconds using the original request ID, or query that ID.`
+            : ''),
       );
     }
     let raw: unknown;

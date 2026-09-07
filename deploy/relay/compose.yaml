@@ -1,0 +1,66 @@
+name: code3d-relay
+
+services:
+  gateway:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - '${RELAY_BIND_ADDRESS:-0.0.0.0}:${RELAY_HTTP_PORT:-80}:80'
+      - '${RELAY_BIND_ADDRESS:-0.0.0.0}:${RELAY_HTTPS_PORT:-443}:443'
+    environment:
+      RELAY_DOMAIN: ${RELAY_DOMAIN:?Set RELAY_DOMAIN in .env}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - certificates:/data
+      - caddy_config:/config
+    networks:
+      - edge
+      - backend
+    depends_on:
+      relay:
+        condition: service_healthy
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 128m
+    pids_limit: 128
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: '3'
+
+  relay:
+    build:
+      context: ../..
+      dockerfile: packages/relay/Dockerfile
+    restart: unless-stopped
+    init: true
+    environment:
+      RELAY_TRUST_PROXY: 'true'
+      RELAY_LIMITS_FILE: /etc/code3d/limits.json
+    volumes:
+      - ./limits.json:/etc/code3d/limits.json:ro
+    networks:
+      - backend
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    pids_limit: 128
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: '3'
+
+networks:
+  edge:
+  backend:
+    internal: true
+
+volumes:
+  certificates:
+  caddy_config:

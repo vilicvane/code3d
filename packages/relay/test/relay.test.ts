@@ -9,6 +9,7 @@ import {
   RelayHost,
   createAgentConfig,
   createHostIdentity,
+  maxRelayMessageBytes,
   sessionIdForToken,
   type AgentConfig,
   type AgentResponse,
@@ -302,5 +303,184 @@ test(
     await assert.rejects(() => client.request(read), /HTTP 429/);
     await timeout;
     finish(saved);
+  },
+);
+
+test(
+  'client headers cannot bypass IP limits unless proxy trust is explicitly enabled',
+  {timeout: 10_000},
+  async t => {
+    for (const trustProxy of [false, true]) {
+      const relay = createRelay({
+        trustProxy,
+        traffic: {ip: {requestsPerSecond: 0.001, requestBurst: 1}},
+      });
+      const {url} = await listen(relay);
+      t.after(() => relay.close());
+      const request = (ip: string) =>
+        fetch(url + '/unknown', {headers: {'x-real-ip': ip}});
+      assert.equal((await request('192.0.2.1')).status, 404);
+      const second = await request('192.0.2.2');
+      assert.equal(second.status, trustProxy ? 404 : 429);
+      const limited = await request('192.0.2.2');
+      assert.equal(limited.status, 429);
+      assert.ok(Number(limited.headers.get('retry-after')) > 0);
+      assert.equal(limited.headers.get('connection'), 'close');
+      if (trustProxy) {
+        assert.equal((await request('2001:db8:1:2::1')).status, 404);
+        assert.equal((await request('2001:db8:1:2::2')).status, 429);
+        assert.equal((await request('192.0.2.3, 192.0.2.4')).status, 400);
+        assert.equal((await fetch(url + '/unknown')).status, 400);
+      }
+    }
+  },
+);
+
+test(
+  'HTTP upload byte quotas reject before App execution and expose retry guidance',
+  {timeout: 10_000},
+  async t => {
+    const relay = createRelay({traffic: {session: {dailyMiB: 0.002}}});
+    const {url} = await listen(relay);
+    t.after(() => relay.close());
+    let calls = 0;
+    const app = await application(t, url, async () => {
+      calls++;
+      return saved;
+    });
+    const client = await AgentClient.create(await app.grant());
+    await assert.rejects(
+      () =>
+        client.request({
+          operation: 'apply',
+          input: {
+            files: [
+              {path: '/large.ts', version: null, content: 'x'.repeat(16384)},
+            ],
+          },
+        }),
+      /HTTP 429.*Retry after \d+ seconds using the original request ID/,
+    );
+    assert.equal(calls, 0);
+    assert.equal((await fetch(url + '/health')).status, 200);
+  },
+);
+
+test(
+  'opaque uploads cannot amplify escaped bytes or exceed forwarding capacity',
+  {timeout: 10_000},
+  async t => {
+    for (const sample of [
+      {
+        body: Buffer.alloc(512),
+        traffic: {session: {dailyMiB: 0.002}},
+        status: 429,
+      },
+      {
+        body: Buffer.alloc(1024, 255),
+        traffic: {session: {dailyMiB: 0.002}},
+        status: 429,
+      },
+      {
+        body: Buffer.alloc(Math.floor(maxRelayMessageBytes / 6) + 1),
+        status: 413,
+      },
+      {body: Buffer.alloc(256, 97), maxBufferedBytes: 256, status: 429},
+    ]) {
+      const relay = createRelay(sample);
+      const {url} = await listen(relay);
+      t.after(() => relay.close());
+      const identity = await createHostIdentity();
+      const socket = new WebSocket(
+        url.replace('http', 'ws') + '/sessions/' + identity.sessionId + '/host',
+      );
+      t.after(() => socket.close());
+      await once(socket, 'open');
+      const ready = once(socket, 'message');
+      socket.send(JSON.stringify({type: 'host', token: identity.token}));
+      await ready;
+      let forwarded = 0;
+      socket.addEventListener('message', event => {
+        const message = JSON.parse(event.data as string) as {
+          type: string;
+          id: string;
+        };
+        if (message.type === 'request') {
+          forwarded++;
+          socket.send(
+            JSON.stringify({
+              type: 'response',
+              id: message.id,
+              status: 200,
+              body: '{}',
+            }),
+          );
+        }
+      });
+      const response = await fetch(
+        url + '/sessions/' + identity.sessionId + '/agents/test/requests',
+        {
+          method: 'POST',
+          body: sample.body,
+          signal: AbortSignal.timeout(5000),
+        },
+      );
+      assert.equal(response.status, sample.status);
+      if (sample.status === 429)
+        assert.ok(Number(response.headers.get('retry-after')) > 0);
+      assert.equal(
+        forwarded,
+        0,
+        'unmetered or oversized expansion must never reach the App',
+      );
+    }
+  },
+);
+
+test(
+  'App WebSocket response bytes are limited without claiming accepted work was undone',
+  {timeout: 10_000},
+  async t => {
+    const relay = createRelay({traffic: {session: {dailyMiB: 0.004}}});
+    const {url} = await listen(relay);
+    t.after(() => relay.close());
+    let calls = 0;
+    const app = await application(t, url, async () => {
+      calls++;
+      return {ok: true, data: 'x'.repeat(16384)};
+    });
+    const client = await AgentClient.create(await app.grant());
+    await assert.rejects(
+      () => client.request(read),
+      /HTTP 429.*application result is not confirmed.*Retry after/,
+    );
+    assert.equal(calls, 1);
+  },
+);
+
+test(
+  'reconnecting the App and replacing an agent cannot reset its session byte quota',
+  {timeout: 10_000},
+  async t => {
+    const relay = createRelay({traffic: {session: {dailyMiB: 0.01}}});
+    const {url} = await listen(relay);
+    t.after(() => relay.close());
+    let calls = 0;
+    const handler: RequestHandler = async () => {
+      calls++;
+      return saved;
+    };
+    const app = await application(t, url, handler);
+    const request = {
+      operation: 'fs.read',
+      path: '/' + 'x'.repeat(5000) + '.ts',
+    } as const;
+    const client = await AgentClient.create(await app.grant());
+    assert.deepEqual((await client.request(request)).response, saved);
+    app.host.close();
+    const restored = await application(t, url, handler, app.identity);
+    const other = await AgentClient.create(await restored.grant());
+    await assert.rejects(() => other.request(request), /HTTP 429/);
+    assert.equal(calls, 1);
   },
 );

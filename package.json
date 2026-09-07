@@ -21,6 +21,7 @@
     "web": "npm run --workspace @code3d/web",
     "build:opencascade": "npm run build --workspace @code3d/opencascade",
     "test:types": "npm run test:types --workspaces --if-present",
+    "test:relay-docker": "npm run build --workspace @code3d/agent && node packages/relay/test/docker.mjs",
     "test": "npm run build:packages && npm run test:types && npm run test:run --workspaces --if-present"
   },
   "workspaces": [

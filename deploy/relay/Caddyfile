@@ -1,0 +1,15 @@
+{
+	email {$ACME_EMAIL}
+}
+
+{$RELAY_DOMAIN} {
+	request_body {
+		max_size 24MB
+	}
+	reverse_proxy relay:3134 {
+		header_up X-Real-IP {remote_host}
+		transport http {
+			response_header_timeout 120s
+		}
+	}
+}
