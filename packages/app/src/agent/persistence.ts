@@ -1,9 +1,10 @@
 import type {AgentConfig, ReceiptJournal, StoredReceipt} from '@code3d/agent';
+import {randomAgentColor} from './colors';
 
 export type PersistedAgentSession = {
   relay: string;
   identity: {token: string; sessionId: string};
-  grants: {config: AgentConfig; lastSeen?: string}[];
+  grants: {config: AgentConfig; color: number; lastSeen?: string}[];
 };
 
 /** One project owner per browser origin. The relay never stores this data. */
@@ -24,12 +25,44 @@ export class AgentPersistence {
             throw new Error(
               'Agents are active in another tab for this project. Close that tab and reload this page to take over.',
             );
-          const request = indexedDB.open('code3d-agents-v1', 1);
-          request.onupgradeneeded = () => {
-            request.result.createObjectStore('sessions');
-            request.result.createObjectStore('receipts');
+          const request = indexedDB.open('code3d-agents-v1', 2);
+          request.onupgradeneeded = event => {
+            if (event.oldVersion === 0) {
+              request.result.createObjectStore('sessions');
+              request.result.createObjectStore('receipts');
+            } else {
+              // Assign existing grants once while retaining their credentials and receipts.
+              const cursor = request
+                .transaction!.objectStore('sessions')
+                .openCursor();
+              cursor.onsuccess = () => {
+                const entry = cursor.result;
+                if (!entry) return;
+                const session = entry.value as PersistedAgentSession;
+                for (const grant of session.grants)
+                  grant.color = randomAgentColor();
+                entry.update(session);
+                entry.continue();
+              };
+            }
           };
-          const database = await requestResult(request);
+          const database = await new Promise<IDBDatabase>((resolve, reject) => {
+            let blocked = false;
+            request.onblocked = () => {
+              blocked = true;
+              reject(
+                new Error(
+                  'Close other Code3D tabs and reload this page to upgrade agent storage.',
+                ),
+              );
+            };
+            request.onsuccess = () => {
+              if (blocked) request.result.close();
+              else resolve(request.result);
+            };
+            request.onerror = () => reject(request.error);
+          });
+          database.onversionchange = () => database.close();
           let release!: () => void;
           const held = new Promise<void>(done => {
             release = done;
@@ -83,6 +116,28 @@ export class AgentPersistence {
       }
       if (session) sessions.put(session, this.workspace);
       else sessions.delete(this.workspace);
+    };
+    await complete;
+  }
+
+  async recordActivity(config: AgentConfig, lastSeen: string): Promise<void> {
+    const transaction = this.database.transaction('sessions', 'readwrite');
+    const complete = transactionComplete(transaction);
+    const sessions = transaction.objectStore('sessions');
+    const request = sessions.get(this.workspace);
+    request.onsuccess = () => {
+      const session = request.result as PersistedAgentSession | undefined;
+      const grant = session?.grants.find(
+        grant =>
+          grant.config.agentId === config.agentId &&
+          grant.config.sessionId === config.sessionId,
+      );
+      if (!grant) {
+        transaction.abort();
+        return;
+      }
+      grant.lastSeen = lastSeen;
+      sessions.put(session, this.workspace);
     };
     await complete;
   }

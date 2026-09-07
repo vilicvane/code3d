@@ -1,5 +1,6 @@
 import * as monaco from 'monaco-editor/editor';
 import {AgentError} from '@code3d/agent';
+import {randomAgentColor} from './agent/colors';
 import {projectTypeScriptWorker} from './monaco/typescript-worker-client';
 import type {CursorTypeInfo} from './monaco/type-info';
 import 'monaco-editor/features/register.all';
@@ -270,6 +271,7 @@ export class CodeEditor {
     string,
     {
       name: string;
+      color: number;
       label: HTMLElement;
       widget: monaco.editor.IContentWidget;
       ref?: SourceRef;
@@ -620,11 +622,17 @@ export class CodeEditor {
     for (const change of changes) this.emitChange(change);
   }
 
-  setAgentCursor(id: string, name: string, ref?: SourceRef): void {
+  setAgentCursor(
+    id: string,
+    name: string,
+    ref?: SourceRef,
+    color?: number,
+  ): void {
     let cursor = this.agentCursors.get(id);
     if (!cursor) {
+      color ??= randomAgentColor();
       const caret = document.createElement('div');
-      caret.className = `agent-caret agent-color-${agentColor(id)}`;
+      caret.className = `agent-caret agent-color-${color}`;
       const label = document.createElement('div');
       label.className = 'agent-cursor-label';
       caret.append(label);
@@ -667,7 +675,7 @@ export class CodeEditor {
         },
         suppressMouseDown: true,
       };
-      cursor = {name, label, widget, invalid: false, decorations: []};
+      cursor = {name, color, label, widget, invalid: false, decorations: []};
       this.agentCursors.set(id, cursor);
       this.editor.addContentWidget(widget);
     }
@@ -732,7 +740,7 @@ export class CodeEditor {
             {
               range: sourceRange(model, cursor.ref!),
               options: {
-                className: `agent-selection agent-color-${agentColor(id)}`,
+                className: `agent-selection agent-color-${cursor.color}`,
                 hoverMessage: {value: cursor.name, isTrusted: false},
                 stickiness:
                   monaco.editor.TrackedRangeStickiness
@@ -754,7 +762,7 @@ export class CodeEditor {
               id,
               name: cursor.name,
               file: cursor.ref.file,
-              color: agentColor(id),
+              color: cursor.color,
             },
           ]
         : [],
@@ -1481,13 +1489,6 @@ function modelDiagnosticMarker(
     endLineNumber: end.lineNumber,
     endColumn: end.column,
   };
-}
-
-function agentColor(id: string): number {
-  let hash = 0;
-  for (const character of id)
-    hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
-  return hash % 6;
 }
 
 function sourceRefKey(sourceRef: SourceRef): string {

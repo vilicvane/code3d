@@ -1,10 +1,6 @@
 import type {AgentConfig} from '@code3d/agent';
 
-export function agentPrompt(
-  config: AgentConfig,
-  initial: boolean,
-  task: string,
-): string {
+export function agentPrompt(config: AgentConfig, initial: boolean): string {
   const cli =
     'Run `npx --yes @code3d/cli <config-file> <operation>` with Node.js 24+. npx obtains the CLI when needed.\n';
   const guide = `Read the Code3D documentation before choosing modeling APIs:
@@ -42,7 +38,7 @@ npx --yes @code3d/cli ./project.c3d.json apply --input inspect.json --render --t
 If data.cursor is null, or another target better fits the task, choose your own one-capture regex from the source you read. Inspect the returned image path and topology; an error response contains the model diagnostic. Reread context/source if a cursor no longer matches.
 `;
   if (!initial)
-    return `Continue the Code3D task using your existing configuration for ${config.name} (agentId ${config.agentId}).\n\n${cli}\n${guide}\nTask:\n${task.trim()}`;
+    return `Continue the Code3D task using your existing configuration for ${config.name} (agentId ${config.agentId}).\n\n${cli}\n${guide}`;
   return `Work on the project open in Code3D through the c3d CLI (Node.js 24+). The App owns the project files.\n\n${cli}\nSave this complete private configuration to a JSON file wherever convenient; use its filename explicitly for every command. You are ${config.name}.\n\n\`\`\`json\n${JSON.stringify(config, null, 2)}\n\`\`\`\n
 ${guide}
 
@@ -54,5 +50,5 @@ Use cursor.arguments as a TypeScript array-expression string to inspect inside a
 
 Add --render and/or --topology for model feedback, including cursor-only apply. Default output confirms acceptance and saving without running an observation. The same engine selects and renders models for the user and agent. Render images are written as local artifacts; JSON reports paths. Topology distinguishes operation-input IDs from result geometry. IDs and selectors belong to their model and snapshot; do not invent variable bindings or assume millimeters. Expand topology with input.topology {snapshotId, model, kind, ids?, offset?, limit?}, using the returned model key and snapshot ID; pages cannot also change files or cursor. A snapshot can expire after another observation, a source change or five minutes.
 
-Keep the requestId printed before each request. If transport fails, use \`npx --yes @code3d/cli <config-file> result <requestId>\` or retry identical input with --request-id <requestId>; never submit a fresh mutation ID merely because a response was lost. Check accepted/saved in error details: a model error does not undo saved source, and a save error may leave accepted pending content. Keep the project open while working. Its grants and request receipts persist across reloads and reconnect automatically when reopened; only revocation or ending the session invalidates this configuration. After a reload, re-read file versions and supply a new cursor before observing. result_interrupted means the App closed without recording the outcome: inspect the files, and never assume the change did not happen.\n\nTask:\n${task.trim()}`;
+Keep the requestId printed before each request. If transport fails, use \`npx --yes @code3d/cli <config-file> result <requestId>\` or retry identical input with --request-id <requestId>; never submit a fresh mutation ID merely because a response was lost. Check accepted/saved in error details: a model error does not undo saved source, and a save error may leave accepted pending content. Keep the project open while working. Its grants and request receipts persist across reloads and reconnect automatically when reopened; only revocation or ending the session invalidates this configuration. After a reload, re-read file versions and supply a new cursor before observing. result_interrupted means the App closed without recording the outcome: inspect the files, and never assume the change did not happen.`;
 }

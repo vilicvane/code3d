@@ -74,6 +74,77 @@ test('encrypted messages authenticate the agent, session, direction, request and
     await assert.rejects(attempt, {code: 'authentication_failed'});
 });
 
+test('request activity only records authenticated requests and failures cannot start operations', async () => {
+  const config = createAgentConfig(settings);
+  const cipher = await AgentCipher.create(config);
+  let activity = 0;
+  let executions = 0;
+  let fail = true;
+  const endpoint = await AgentEndpoint.create(
+    config,
+    async () => {
+      executions++;
+      return saved;
+    },
+    {
+      onRequest: async () => {
+        activity++;
+        if (fail) throw new Error('Storage unavailable');
+      },
+    },
+  );
+  const envelope = await cipher.seal('request', 'r1', read);
+  await assert.rejects(
+    () => endpoint.handle({...envelope, requestId: 'tampered'}),
+    {code: 'authentication_failed'},
+  );
+  assert.equal(activity, 0);
+  const failed = await cipher.open('response', await endpoint.handle(envelope));
+  assert.deepEqual(failed.value, {
+    ok: false,
+    error: {
+      code: 'request_initialization_failed',
+      message:
+        'The App could not initialize the request. No operation was started.',
+      details: {accepted: false},
+    },
+  });
+  assert.equal(executions, 0);
+  fail = false;
+  await endpoint.handle(envelope);
+  await endpoint.handle(envelope);
+  await endpoint.handle(
+    await cipher.seal('request', 'lookup', {
+      operation: 'result',
+      requestId: 'r1',
+    }),
+  );
+  assert.equal(activity, 4);
+  assert.equal(executions, 1);
+});
+
+test('revocation while request initialization awaits cannot execute the handler', async () => {
+  const config = createAgentConfig(settings);
+  const cipher = await AgentCipher.create(config);
+  const started = deferred<void>();
+  const proceed = deferred<void>();
+  const endpoint = await AgentEndpoint.create(
+    config,
+    async () => assert.fail('Revoked request executed'),
+    {
+      onRequest: () => {
+        started.resolve();
+        return proceed.promise;
+      },
+    },
+  );
+  const pending = endpoint.handle(await cipher.seal('request', 'r1', read));
+  await started.promise;
+  endpoint.close();
+  proceed.resolve();
+  await assert.rejects(() => pending, {code: 'session_closed'});
+});
+
 test('configuration never accepts remote plaintext transport or embeds credentials in URLs', () => {
   const config = createAgentConfig(settings);
   assert.equal('accessToken' in config, false);

@@ -3,6 +3,120 @@ import {test} from 'node:test';
 import {chromium} from 'playwright-core';
 import {createAgentConfig, createHostIdentity} from '@code3d/agent';
 
+for (const blocked of [false, true])
+  test(
+    `legacy agent storage assigns persistent colors and retains grants/receipts${blocked ? ' after a blocked upgrade' : ''}`,
+    {timeout: 30_000},
+    async t => {
+      assert.ok(process.env.CODE3D_TEST_URL);
+      const browser = await chromium.connectOverCDP(
+        process.env.CODE3D_CDP_URL ?? 'http://localhost:9222',
+      );
+      t.after(() => browser.close());
+      const context = await browser.newContext();
+      t.after(() => context.close());
+      const page = await context.newPage();
+      const url = new URL(
+        '/__agent-migration-test__',
+        process.env.CODE3D_TEST_URL,
+      ).href;
+      await page.route(url, route =>
+        route.fulfill({
+          contentType: 'text/html',
+          body: '<main>Agent migration</main>',
+        }),
+      );
+      await page.goto(url);
+      const identity = await createHostIdentity();
+      const config = createAgentConfig({
+        relay: 'http://127.0.0.1:3134',
+        sessionId: identity.sessionId,
+        name: 'Euler',
+      });
+      const result = await page.evaluate(
+        async ({identity, config, blocked}) => {
+          const legacy = await new Promise<IDBDatabase>((resolve, reject) => {
+            const request = indexedDB.open('code3d-agents-v1', 1);
+            request.onupgradeneeded = () => {
+              request.result.createObjectStore('sessions');
+              request.result.createObjectStore('receipts');
+            };
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+          });
+          const session = {
+            identity,
+            relay: config.relay,
+            grants: [{config, lastSeen: '2026-09-08T12:00:00.000Z'}],
+          };
+          const receipt = {
+            requestId: 'r1',
+            fingerprint: 'fingerprint',
+            response: {ok: true, data: {saved: true}},
+          };
+          await new Promise<void>((resolve, reject) => {
+            const transaction = legacy.transaction(
+              ['sessions', 'receipts'],
+              'readwrite',
+            );
+            for (const workspace of ['first', 'second']) {
+              transaction.objectStore('sessions').put(session, workspace);
+              transaction
+                .objectStore('receipts')
+                .put(receipt, [workspace, config.agentId, 'r1']);
+            }
+            transaction.oncomplete = () => resolve();
+            transaction.onerror = () => reject(transaction.error);
+          });
+          const {AgentPersistence} = await import('/src/agent/persistence.ts');
+          let error: string | undefined;
+          if (blocked) {
+            try {
+              await AgentPersistence.open('first');
+            } catch (caught) {
+              error = (caught as Error).message;
+            }
+          }
+          legacy.close();
+          const projects = [];
+          for (const workspace of ['first', 'second']) {
+            const persistence = await AgentPersistence.open(workspace);
+            const saved = (await persistence.load())!;
+            const receipts = await persistence.journal(config).load();
+            await persistence.close();
+            const reopened = await AgentPersistence.open(workspace);
+            const restored = await reopened.load();
+            await reopened.close();
+            projects.push({saved, restored, receipts});
+          }
+          return {error, projects};
+        },
+        {identity, config, blocked},
+      );
+      assert.equal(
+        result.error,
+        blocked
+          ? 'Close other Code3D tabs and reload this page to upgrade agent storage.'
+          : undefined,
+      );
+      for (const project of result.projects) {
+        assert.deepEqual(project.saved, project.restored);
+        assert.deepEqual(project.saved.identity, identity);
+        const grant = project.saved.grants[0];
+        assert.deepEqual(grant.config, config);
+        assert.equal(grant.lastSeen, '2026-09-08T12:00:00.000Z');
+        assert.ok(
+          Number.isInteger(grant.color) && grant.color >= 0 && grant.color < 6,
+        );
+        assert.equal(project.receipts[0].requestId, 'r1');
+        assert.deepEqual(project.receipts[0].response, {
+          ok: true,
+          data: {saved: true},
+        });
+      }
+    },
+  );
+
 test(
   'project storage retains receipts, isolates projects and cannot revive revoked grants',
   {timeout: 30_000},
@@ -47,7 +161,12 @@ test(
           await root.getDirectoryHandle('other', {create: true}),
         );
         const first = await AgentPersistence.open('first');
-        await first.save({identity, relay: config.relay, grants: [{config}]});
+        await first.save({
+          identity,
+          relay: config.relay,
+          grants: [{config, color: 0}],
+        });
+        await first.recordActivity(config, '2026-09-08T12:00:00.000Z');
         const journal = first.journal(config);
         await journal.write({
           requestId: 'r1',
@@ -63,6 +182,12 @@ test(
         const session = await reopened.load();
         const receipts = await reopened.journal(config).load();
         await reopened.save({...session!, grants: []});
+        let activityBlocked = false;
+        try {
+          await reopened.recordActivity(config, '2026-09-08T12:01:00.000Z');
+        } catch {
+          activityBlocked = true;
+        }
         let blocked = false;
         try {
           await reopened
@@ -81,6 +206,7 @@ test(
           isolated,
           isolatedReceipts,
           blocked,
+          activityBlocked,
           removed,
           ended,
           workspaceId,
@@ -93,7 +219,7 @@ test(
     assert.deepEqual(result.session, {
       identity,
       relay: config.relay,
-      grants: [{config}],
+      grants: [{config, color: 0, lastSeen: '2026-09-08T12:00:00.000Z'}],
     });
     assert.equal(result.receipts.length, 1);
     assert.deepEqual(result.receipts[0].response, {
@@ -103,6 +229,7 @@ test(
     assert.equal(result.isolated, undefined);
     assert.deepEqual(result.isolatedReceipts, []);
     assert.equal(result.blocked, true);
+    assert.equal(result.activityBlocked, true);
     assert.deepEqual(result.removed, []);
     assert.equal(result.ended, undefined);
     assert.equal(result.workspaceId, result.reopenedId);

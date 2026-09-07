@@ -125,7 +125,6 @@ app.innerHTML = `
         <span class="prototype-tag">prototype 01</span>
       </div>
       <div class="topbar-actions">
-        <button class="quiet-button" id="agents-button" type="button">Agents</button>
         <button class="quiet-button" id="retry-save-button" type="button" hidden>Retry saving</button>
         <span class="project-location" id="project-location"></span>
         <button class="quiet-button" id="open-folder-button" type="button">Open folder</button>
@@ -133,6 +132,7 @@ app.innerHTML = `
         <button class="quiet-button" id="reload-folder-button" type="button" hidden>Reload folder</button>
         <button class="quiet-button" id="browser-storage-button" type="button" hidden>Use browser storage</button>
         <button class="quiet-button" id="reset-button" type="button">Reset examples</button>
+        <button class="quiet-button button-primary agent-nav" id="agents-button" type="button">Connect Agent</button>
       </div>
     </header>
 

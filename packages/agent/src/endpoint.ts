@@ -30,6 +30,8 @@ export type ReceiptJournal = Readonly<{
 export type EndpointOptions = Readonly<{
   limits?: Readonly<{requests: number; bytes: number}>;
   journal?: ReceiptJournal;
+  /** Runs after authentication; rejection prevents application execution. */
+  onRequest?: () => void | Promise<void>;
 }>;
 
 /**
@@ -48,6 +50,7 @@ export class AgentEndpoint {
     private readonly handler: RequestHandler,
     private readonly limits: Readonly<{requests: number; bytes: number}>,
     private readonly journal?: ReceiptJournal,
+    private readonly onRequest?: () => void | Promise<void>,
   ) {}
 
   static async create(
@@ -70,6 +73,7 @@ export class AgentEndpoint {
       handler,
       limits,
       options.journal,
+      options.onRequest,
     );
     for (const stored of (await options.journal?.load()) ?? []) {
       const response =
@@ -103,17 +107,27 @@ export class AgentEndpoint {
     const opened = await this.cipher.open('request', envelope);
     if (this.closed)
       throw new AgentError('session_closed', 'Agent grant is closed.');
-    let response: AgentResponse;
+    let response: AgentResponse | undefined;
     try {
-      const request = parseRequest(opened.value);
-      response =
-        request.operation === 'result'
-          ? this.result(request.requestId)
-          : await this.execute(opened.requestId, request);
-    } catch (error) {
-      if (!(error instanceof AgentError)) throw error;
-      response = failure(error.code, error.message);
+      await this.onRequest?.();
+    } catch {
+      response = failure(
+        'request_initialization_failed',
+        'The App could not initialize the request. No operation was started.',
+        {accepted: false},
+      );
     }
+    if (!response)
+      try {
+        const request = parseRequest(opened.value);
+        response =
+          request.operation === 'result'
+            ? this.result(request.requestId)
+            : await this.execute(opened.requestId, request);
+      } catch (error) {
+        if (!(error instanceof AgentError)) throw error;
+        response = failure(error.code, error.message);
+      }
     if (this.closed)
       throw new AgentError('session_closed', 'Agent grant is closed.');
     return this.cipher.seal('response', opened.requestId, response);

@@ -77,7 +77,7 @@ for (const storage of ['browser', 'directory'] as const)
         appUrl.searchParams.set('workspace', 'agent-workflow-test');
       }
       await page.goto(appUrl.href);
-      await page.getByRole('button', {name: 'Agents', exact: true}).click();
+      await page.locator('#agents-button').click();
       await page
         .getByLabel('Relay URL')
         .fill(`http://127.0.0.1:${address.port}`);
@@ -109,7 +109,7 @@ for (const storage of ['browser', 'directory'] as const)
           ) as AgentConfig,
         );
       }
-      await page.getByText('App connected to relay', {exact: true}).waitFor();
+      await page.locator('.agent-status[data-state="online"]').waitFor();
       await page
         .locator('.agent-row')
         .filter({hasText: 'Alice'})
@@ -441,7 +441,7 @@ for (const storage of ['browser', 'directory'] as const)
       await cli(0, ['apply', '--input', '-'], {
         cursor: {file: path, regex: '(box\\(-1, 6, 8\\))'},
       });
-      await page.getByRole('button', {name: 'Agents', exact: true}).click();
+      await page.locator('#agents-button').click();
       await page
         .locator('.agent-row')
         .filter({hasText: 'Bob'})
@@ -458,11 +458,12 @@ for (const storage of ['browser', 'directory'] as const)
       );
       await page.screenshot({path: '/tmp/code3d-agent-workflow-panel.png'});
       await page.reload();
-      await page.getByRole('button', {name: 'Agents', exact: true}).waitFor();
-      await page.waitForFunction(() =>
-        document
-          .querySelector('.agent-status')
-          ?.textContent?.includes('App connected to relay'),
+      await page.locator('#agents-button').waitFor();
+      await page.waitForFunction(
+        () =>
+          document
+            .querySelector('.agent-status')
+            ?.getAttribute('data-state') === 'online',
       );
       assert.equal(
         await page
@@ -499,7 +500,7 @@ for (const storage of ['browser', 'directory'] as const)
       );
       const otherTab = await context.newPage();
       await otherTab.goto(page.url());
-      await otherTab.getByRole('button', {name: 'Agents', exact: true}).click();
+      await otherTab.locator('#agents-button').click();
       await otherTab
         .getByText(
           'Agents are active in another tab for this project. Close that tab and reload this page to take over.',
@@ -508,14 +509,15 @@ for (const storage of ['browser', 'directory'] as const)
         .waitFor();
       assert.equal((await cli(0, ['fs', 'list', '/'])).code, 0);
       await otherTab.close();
-      await page.getByRole('button', {name: 'Agents', exact: true}).click();
+      await page.locator('#agents-button').click();
       assert.equal(await page.locator('.agent-row').count(), 1);
+      await page.getByLabel('Relay connection', {exact: true}).click();
       await page
         .getByRole('button', {name: 'End session', exact: true})
         .click();
       await page.locator('.agent-row').waitFor({state: 'detached'});
       await page.reload();
-      await page.getByRole('button', {name: 'Agents', exact: true}).waitFor();
+      await page.locator('#agents-button').waitFor();
       await assert.rejects(
         () =>
           AgentClient.create(configs[0]).then(client =>

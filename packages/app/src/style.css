@@ -115,6 +115,64 @@ input[type='number']::-webkit-outer-spin-button {
   gap: 8px;
 }
 
+.agent-nav {
+  color-scheme: dark;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 36vw;
+  margin-left: 6px;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.agent-nav:has(.agent-badge) {
+  padding: 2px;
+}
+
+.agent-nav.button-primary {
+  font-weight: 500;
+}
+
+.agent-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  margin-inline: -2px;
+  padding: 5px 9px;
+  border: 1px solid color-mix(in srgb, var(--agent-color) 20%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--agent-color) 10%, transparent);
+  color: #c3c8bd;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 14px;
+  white-space: nowrap;
+}
+
+.agent-nav .agent-badge:hover {
+  background: color-mix(in srgb, var(--agent-color) 18%, transparent);
+}
+
+.agent-badge-dot {
+  flex: 0 0 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--agent-color) 40%, transparent);
+}
+
+.agent-badge-dot.interacted {
+  background: var(--agent-color);
+}
+
+.agent-badge-name {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .project-location {
   max-width: 180px;
   overflow: hidden;
@@ -838,7 +896,8 @@ kbd {
   outline: none;
 }
 
-.viewport-export-dialog {
+.app-dialog {
+  color-scheme: dark;
   width: 340px;
   max-width: calc(100vw - 32px);
   max-height: calc(100dvh - 32px);
@@ -851,40 +910,56 @@ kbd {
   box-shadow: 0 16px 42px #0009;
 }
 
-.viewport-export-dialog::backdrop {
+.app-dialog::backdrop {
   background: #0008;
 }
 
-.viewport-export-dialog form {
+.agent-nav,
+.app-dialog,
+.app-dialog textarea {
+  scrollbar-width: thin;
+  scrollbar-color: #41473b transparent;
+}
+
+.agent-nav:hover,
+.app-dialog:hover,
+.app-dialog textarea:hover {
+  scrollbar-color: #59614f transparent;
+}
+
+.app-dialog-content {
   display: grid;
   gap: 20px;
 }
 
-.viewport-export-dialog h2 {
+.app-dialog h2 {
   margin: 0 0 8px;
   font-size: 15px;
   font-weight: 500;
 }
 
-.viewport-export-dialog p {
-  margin: 0;
+.app-dialog p {
+  margin: 0 0 0 2px;
   color: #858b7f;
   font-size: 11px;
   line-height: 1.5;
 }
 
-.viewport-export-dialog footer {
+.app-dialog footer {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
 }
 
-.viewport-export-dialog label > span {
+.app-dialog label > span {
+  margin-left: 2px;
   color: #858d77;
   font:
     500 8px/1 'IBM Plex Mono',
     monospace;
   letter-spacing: 0.1em;
+  text-transform: uppercase;
 }
 
 .viewport-export-dimensions {
@@ -902,14 +977,15 @@ kbd {
     monospace;
 }
 
-.viewport-export-dialog label {
+.app-dialog label {
   display: grid;
   min-width: 0;
   gap: 6px;
 }
 
-.viewport-export-dialog input,
-.viewport-export-dialog select {
+.app-dialog input,
+.app-dialog select,
+.app-dialog textarea {
   width: 100%;
   min-width: 0;
   padding: 7px 8px;
@@ -923,8 +999,9 @@ kbd {
     monospace;
 }
 
-.viewport-export-dialog input:focus,
-.viewport-export-dialog select:focus {
+.app-dialog input:focus,
+.app-dialog select:focus,
+.app-dialog textarea:focus {
   border-color: var(--acid);
 }
 
@@ -953,7 +1030,11 @@ kbd {
   transform: translateY(-70%) rotate(45deg);
 }
 
-.viewport-export-dialog fieldset {
+.app-dialog textarea {
+  resize: none;
+}
+
+.app-dialog fieldset {
   display: grid;
   min-width: 0;
   margin: 0;
@@ -962,18 +1043,17 @@ kbd {
   gap: 14px;
 }
 
-.viewport-export-dialog [hidden] {
+.app-dialog [hidden] {
   display: none;
 }
 
-.viewport-export-submit,
-.viewport-export-cancel {
+.dialog-button {
   min-height: 30px;
   padding: 0 12px;
-  color: #11120f;
-  border: 1px solid var(--acid);
+  color: #a4aa9d;
+  border: 1px solid #393d34;
   border-radius: 3px;
-  background: var(--acid);
+  background: transparent;
   cursor: pointer;
   font:
     600 9px/1 'IBM Plex Mono',
@@ -982,30 +1062,64 @@ kbd {
   text-transform: uppercase;
 }
 
-.viewport-export-cancel {
-  color: #a4aa9d;
-  border-color: #393d34;
-  background: transparent;
-}
-
-.viewport-export-cancel:hover:not(:disabled) {
+.dialog-button:hover:not(:disabled) {
   color: #dfe5ca;
   background: #272a22;
 }
 
-.viewport-export-submit:hover:not(:disabled) {
-  background: #e3ff73;
+.button-primary {
+  color: #11120f;
+  border: 1px solid var(--acid);
+  border-radius: 3px;
+  background: var(--acid);
+  transition:
+    background-color 140ms ease,
+    box-shadow 140ms ease;
 }
 
-.viewport-export-submit:disabled,
-.viewport-export-cancel:disabled {
+.button-primary:hover:not(:disabled) {
+  color: #11120f;
+  background: color-mix(in srgb, var(--acid) 92%, black);
+  box-shadow: inset 0 0 0 1px #11120f1f;
+}
+
+.button-primary:active:not(:disabled) {
+  background: color-mix(in srgb, var(--acid) 86%, black);
+  box-shadow: inset 0 1px 3px #0003;
+}
+
+.button-primary:focus-visible {
+  outline: 2px solid var(--acid);
+  outline-offset: 3px;
+}
+
+.button-danger {
+  color: #f18b82;
+  border-color: #f18b8240;
+}
+
+.button-danger:hover:not(:disabled) {
+  color: #ffa298;
+  background: #f18b8214;
+}
+
+.dialog-button:disabled,
+.button-primary:disabled {
   color: #676d5f;
   border-color: #34382e;
   background: #1b1d18;
+  box-shadow: none;
   cursor: wait;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .button-primary {
+    transition: none;
+  }
+}
+
 .viewport-export-status {
+  margin-left: 2px;
   color: #ffb7aa;
   font:
     500 9px/1.45 'IBM Plex Mono',
@@ -1754,75 +1868,210 @@ kbd {
 }
 
 .agent-dialog {
-  width: min(800px, calc(100vw - 48px));
-  max-height: calc(100vh - 64px);
-  padding: 24px;
-  border: 1px solid #4c5145;
-  border-radius: 12px;
-  color: #e4e8dc;
-  background: #20221d;
-  overflow: auto;
+  width: 680px;
 }
-.agent-dialog::backdrop {
-  background: #0008;
+
+.agent-header-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
 }
-.agent-dialog header,
-.agent-actions,
+
+.agent-header-title h2 {
+  margin: 0;
+}
+
+.agent-connection {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.agent-connection > summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 9px;
+  color: #a4aa9d;
+  border: 1px solid #34382e;
+  border-radius: 999px;
+  background: #11130f;
+  cursor: pointer;
+  list-style: none;
+  font:
+    500 10px/1 'IBM Plex Mono',
+    monospace;
+}
+
+.agent-connection > summary::-webkit-details-marker {
+  display: none;
+}
+
+.agent-connection > summary::after {
+  width: 5px;
+  height: 5px;
+  margin: -3px 1px 0 3px;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  content: '';
+  transform: rotate(45deg);
+}
+
+.agent-connection > summary:hover,
+.agent-connection[open] > summary {
+  color: #dfe5ca;
+  border-color: #4a5138;
+  background: #1b1e16;
+}
+
+.agent-connection-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 1;
+  display: grid;
+  width: 260px;
+  max-width: calc(100vw - 74px);
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid #393d34;
+  border-radius: 5px;
+  background: #15180f;
+  box-shadow: 0 8px 24px #0008;
+}
+
+.agent-connection-url {
+  overflow: hidden;
+  color: #c3c8bd;
+  font:
+    500 10px/1.5 'IBM Plex Mono',
+    monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-end-session {
+  margin-top: 6px;
+}
+
+.agent-end-session:disabled {
+  cursor: default;
+}
+
+.agent-status {
+  display: grid;
+  flex: 0 0 12px;
+  height: 14px;
+  place-items: center;
+  color: #666b62;
+  border-radius: 50%;
+}
+
+.agent-status::before {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 12%, transparent);
+  content: '';
+}
+
+.agent-status[data-state='online'] {
+  color: #8adcab;
+}
+
+.agent-status[data-state='connecting'] {
+  color: #efad6c;
+}
+
+.agent-status[data-state='offline'] {
+  color: #f18cac;
+}
+
+.agent-connection > summary:focus-visible {
+  outline: 1px solid currentColor;
+  outline-offset: 2px;
+}
+
+.agent-prompt-actions,
+.agent-feedback,
+.agent-row-identity,
+.agent-row-actions,
 .agent-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
 }
-.agent-dialog header {
+
+.agent-prompt-actions,
+.agent-feedback {
   justify-content: space-between;
 }
-.agent-dialog h2 {
-  margin: 0;
-  font-size: 20px;
+
+.agent-list:empty,
+.agent-message:empty,
+.agent-feedback:has(.agent-message:empty):has(button[hidden]) {
+  display: none;
 }
-.agent-note,
-.agent-status {
-  color: #aeb5a5;
-  font-size: 13px;
-  line-height: 1.5;
-}
-.agent-field {
+
+.agent-prompt {
   display: grid;
-  gap: 6px;
-  margin: 16px 0;
-  font-size: 13px;
+  flex: 1 1 100%;
+  min-width: 0;
+  gap: 8px;
 }
-.agent-dialog input,
-.agent-dialog textarea {
-  box-sizing: border-box;
-  width: 100%;
-  border: 1px solid #4c5145;
-  border-radius: 5px;
-  padding: 9px;
-  background: #161813;
-  color: inherit;
-  font: inherit;
+
+.agent-list:not(:empty) {
+  margin-inline: -20px;
+  border-bottom: 1px solid #34382e;
 }
-.agent-dialog textarea {
-  resize: vertical;
-}
-.agent-dialog textarea[readonly] {
-  margin: 12px 0;
-  font: 12px/1.5 monospace;
-}
+
 .agent-row {
-  padding: 12px 0;
-  border-top: 1px solid #41473b;
+  gap: 12px;
+  padding: 12px 20px;
+  border-top: 1px solid #34382e;
 }
-.agent-row > span {
-  flex: 1 1 240px;
-  font-size: 13px;
-  overflow-wrap: anywhere;
+
+.agent-row-summary {
+  display: grid;
+  flex: 1 1 200px;
+  min-width: 0;
+  justify-items: start;
+  gap: 6px;
 }
-.agent-message {
-  color: #d8ff3e;
-  font-size: 13px;
+
+.agent-row-identity {
+  gap: 10px;
+}
+
+.agent-row-status {
+  color: #858b7f;
+  font-size: 10px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.agent-row-location {
+  max-width: 100%;
+  overflow: hidden;
+  color: #858d77;
+  font:
+    500 9px/1.5 'IBM Plex Mono',
+    monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-dialog .agent-message,
+.agent-dialog .agent-prompt-message {
+  color: var(--acid);
+}
+
+.agent-row-status,
+.agent-row-location,
+.agent-connection-url {
+  margin-left: 2px;
 }
 .agent-color-0 {
   --agent-color: #70c8f0;
