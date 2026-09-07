@@ -846,6 +846,14 @@ between nonparallel circle and rectangle profiles. Host-Chrome validation also
 confirmed App rendering, section/spine source context, and Surface, Edge,
 and Vertex viewport selectors on the new model kinds and loft result.
 
+The generic face extrusion from the sketch work in
+[#23](https://github.com/vilicvane/code3d/issues/23) is integrated independently
+in [#56](https://github.com/vilicvane/code3d/issues/56):
+`face.extrude(distance)` and `extrude(face, distance)` share one kernel operation,
+cache, topology lineage, and source tracing path. Signed non-zero distance follows
+the face's local normal without recentering; the result is an ordinary solid.
+This does not integrate the sketch system itself.
+
 ### 5. Object combination tools
 
 Design discussion and live scope: [#8](https://github.com/vilicvane/code3d/issues/8).

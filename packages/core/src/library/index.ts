@@ -7,6 +7,7 @@ export {
   cut,
   cylinder,
   ellipse,
+  extrude,
   frustum,
   group,
   intersect,

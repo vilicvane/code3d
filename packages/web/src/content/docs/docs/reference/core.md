@@ -50,6 +50,7 @@ Planar profiles lie in the local XZ plane with a +Y normal.
 | `bezier(points)`                           | Bézier curve                                 |
 | `spline(points)`                           | Interpolating spline                         |
 | `loft(sections, options?)`                 | Solid through sections; optional curve spine |
+| `extrude(face, distance)`                  | Solid extruded along one face's local normal |
 
 See [local coordinates and placement](../../concepts/local-coordinates/) for
 the coordinate frame of a model, reference, or composition.
@@ -61,6 +62,21 @@ endpoints. Curve tangents do not redefine the model's XYZ axes.
 
 Profiles and curves are model values that can be inspected and related to
 other models.
+
+Face models also support `face.extrude(distance)`. Both forms accept a finite,
+non-zero signed distance and preserve the starting face's coordinates. For an
+unrotated profile, positive distance extends along +Y; negative distance extends
+along −Y. Rotating the face rotates its extrusion direction; changing its origin
+does not recenter the result. The returned solid supports Boolean operations,
+fillets, chamfers, and shells. Use `faces.map(face => face.extrude(3))` for a list
+of profiles.
+
+```ts
+import {circle, extrude, rectangle} from '@code3d/core';
+
+export const plate = rectangle(30, 20).extrude(3).fillet(0.5);
+export const pin = extrude(circle(2), -10);
+```
 
 ## Composition and boolean operations
 

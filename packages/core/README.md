@@ -12,7 +12,7 @@ Direct Node execution requires installing the project dependencies.
 
 The public API includes solid primitives and Boolean operations, first-class
 planar face models (`circle`, `ellipse`, `rectangle`, `regularPolygon`), 3D
-curve models (`line`, `arc`, `bezier`, `spline`), point models, and
+curve models (`line`, `arc`, `bezier`, `spline`), point models, face extrusion, and
 through-section or spine-guided `loft`. Every geometric model is immutable,
 renderable, and relation-aware. Topology capabilities follow dimension:
 vertices provide `.vertex(id)`, edges add `.edge(id)`, and faces and solids
@@ -35,6 +35,22 @@ retire ambiguous source paths. Full rules are in the
 [topology guide](../web/src/content/docs/docs/guides/topology.md).
 `relate()` records placement for composition with other values; inspecting or
 rendering the resulting value by itself uses its own local geometry.
+
+## Face extrusion
+
+`face.extrude(distance)` and `extrude(face, distance)` produce a `SolidModel`
+from one planar face model. The finite, non-zero signed distance follows the
+face's local normal, including any prior rotation. The starting face stays in
+place: an unrotated profile extruded by `3` spans Y = 0 to 3; `-3` spans -3 to 0.
+Origin offsets and input geometry are preserved, and the result supports ordinary
+solid operations. To extrude multiple faces, map them explicitly.
+
+```ts
+import {circle, extrude, rectangle} from '@code3d/core';
+
+export const plate = rectangle(30, 20).extrude(3).fillet(0.5);
+export const pin = extrude(circle(2), -10);
+```
 
 ## Type imports
 
