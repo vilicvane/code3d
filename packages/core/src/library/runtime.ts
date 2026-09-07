@@ -71,6 +71,7 @@ import {
   type KernelValueLifecycle,
 } from './kernel-cache.js';
 import {loftWithTopology} from './loft.js';
+import {extrudeWithTopology} from './extrude.js';
 import {formatTopologyId, type TopologyId} from './topology-id.js';
 import {
   booleanWithTopology,
@@ -190,6 +191,7 @@ export type ModelOperationKind =
   | 'bezier'
   | 'spline'
   | 'loft'
+  | 'extrude'
   | 'primitive'
   | 'paint'
   | 'scaled'
@@ -816,7 +818,14 @@ export type EdgeModel<Elements extends NamedElements = CurveElements> =
 export type FaceModel<Elements extends NamedElements = PlanarElements> =
   ModelCapabilities<Elements, 'face'> &
     GeometryCapabilities<Elements, 'face'> &
-    SurfaceTopologyCapabilities & {flip(): Surface} & Elements;
+    SurfaceTopologyCapabilities & {
+      flip(): Surface;
+      /**
+       * Extrudes along the face's local plane normal. Signed distance; no recentering.
+       * @code3d.param distance {kind: 'length', label: 'Extrusion distance'}
+       */
+      extrude(distance: number): SolidModel;
+    } & Elements;
 
 export type SolidModel<Elements extends NamedElements = CanonicalElements> =
   ModelCapabilities<Elements, 'solid'> &
@@ -1926,6 +1935,45 @@ export class ModelObject<
       },
       storedOperation('scaled', [{model: this, role: 'source', index: 0}]),
     );
+  }
+
+  extrude(this: ModelObject<Elements, 'face'>, distance: number): SolidModel {
+    if (this.kind !== 'face')
+      throw new Error('extrude requires a single face model.');
+    if (!Number.isFinite(distance) || distance === 0)
+      throw new Error('Extrusion distance must be finite and non-zero.');
+    const source = this.requireGeometry();
+    const direction = rotateVector(
+      [0, distance, 0],
+      this.geometryAnchor.transform.quaternion,
+    );
+    const geometry = evaluateSolidGeometry(
+      'extrude',
+      [direction],
+      [source],
+      () =>
+        extrudeWithTopology(
+          {
+            shape: source.value.shape,
+            topology: source.value.topology,
+            index: 1,
+          },
+          direction,
+        ),
+    );
+    return ModelObject.create<CanonicalElements, 'solid'>({
+      kind: 'solid',
+      name: 'Extrude',
+      geometry,
+      color: this.color,
+      constraints: this.constraints,
+      sourceRefs: this.sourceRefs,
+      parameters: this.allParameters(),
+      meshTolerance: this.meshTolerance,
+      operation: storedOperation('extrude', [
+        {model: this, role: 'receiver', index: 0},
+      ]),
+    }) as unknown as SolidModel;
   }
 
   fillet(
@@ -3596,6 +3644,18 @@ export function union(operands: readonly SolidModel<{}>[]): SolidModel {
   return first[combineModels]('fuse', others);
 }
 
+/**
+ * Extrudes a single face; use faces.map(face => extrude(face, distance)) for multiple regions.
+ * @code3d.param distance {kind: 'length', label: 'Extrusion distance'}
+ */
+export function extrude(face: FaceModel<{}>, distance: number): SolidModel {
+  return requireModelKind(
+    face,
+    'face',
+    'extrude requires a single face model.',
+  ).extrude(distance);
+}
+
 export function cut(
   stock: SolidModel<{}>,
   tools: readonly SolidModel<{}>[],
@@ -3736,6 +3796,7 @@ export function retainModelGeometry(
 export const authoringApi = Object.freeze({
   circle,
   ellipse,
+  extrude,
   rectangle,
   regularPolygon,
   point,
