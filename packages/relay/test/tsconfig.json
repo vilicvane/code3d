@@ -1,5 +1,0 @@
-{
-  "extends": "../../../tsconfig.test.json",
-  "compilerOptions": {"erasableSyntaxOnly": true, "lib": ["ESNext", "DOM"]},
-  "include": ["**/*.ts"]
-}
