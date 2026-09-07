@@ -109,14 +109,16 @@ conversion, use the [export scale](../../guides/exporting/#scale-and-orientation
 
 ## Origins and rotation
 
-Solids, faces, curves, and points provide these operations:
+All models provide `originPoint()` and `originOffset()`. Solids, faces, curves,
+and points additionally provide vertex/center selection and geometric rotation:
 
-| Method                      | Behavior                                                   |
-| --------------------------- | ---------------------------------------------------------- |
-| `.originVertex(id)`         | Set the origin to an input-model vertex                    |
-| `.originCenter()`           | Set the origin to the model's center anchor                |
-| `.originOffset(dx, dy, dz)` | Add a local-coordinate offset to the current origin        |
-| `.rotate(x, y, z)`          | Rotate about the origin, in degrees, fixed X then Y then Z |
+| Method                      | Behavior                                                      |
+| --------------------------- | ------------------------------------------------------------- |
+| `.originPoint(pointRef)`    | Set the origin to a point reference, including a group member |
+| `.originVertex(id)`         | Set the origin to an input-model vertex                       |
+| `.originCenter()`           | Set the origin to the model's center anchor                   |
+| `.originOffset(dx, dy, dz)` | Add a local-coordinate offset to the current origin           |
+| `.rotate(x, y, z)`          | Rotate about the origin, in degrees, fixed X then Y then Z    |
 
 The origin is always zero in model coordinates. `originOffset(dx, dy, dz)`
 re-expresses every local point as `p - [dx, dy, dz]`; offsets accumulate and can
@@ -129,7 +131,16 @@ Every geometric model exposes `center`: its initial local bounding-box center,
 carried along by subsequent transforms. Rotation does not recalculate it from
 the rotated shape's axis-aligned bounds. Origin edits change its coordinates;
 `.originCenter().originOffset(1, 0, 0)` leaves it at `[-1, 0, 0]`.
-Groups do not provide these geometric operations. For a runnable example and
+A group chooses its default origin from the bounding-box center of its solved
+direct member origins, keeping the assembly axes. Geometry size does not change
+this default, and nested groups contribute only their own origins. Group origin
+edits move the entire assembly's local coordinates together; they preserve its
+internal relations. `originPoint(part.center)` resolves the member's actual
+placement; repeated sources need a specific instance reference. Groups do not
+have aggregate vertex IDs, a geometric center, geometric rotation or scaling.
+See [group coordinates](../../concepts/local-coordinates/#group-origins).
+
+For a runnable example and
 the vertex picker, origin arrows, and rotation rings, see
 [choosing an origin and rotating a part](../../guides/origins-and-rotation/).
 

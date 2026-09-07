@@ -107,7 +107,7 @@ test('resolves relation placement only inside a composition', () => {
     assert.deepEqual(assemblySnapshot.transform.position, [0, 0, 0]);
     assertVectorNear(
       assemblySnapshot.children[1].transform.position,
-      [2, 3, 4],
+      [1, 1.5, 2],
     );
   } finally {
     disposeModelObjects([target, related, assembly]);

@@ -219,6 +219,137 @@ test(
   },
 );
 
+test(
+  'group originPoint drags keep assembly geometry rigid and support cancellation, commit and undo',
+  {timeout: 120_000},
+  async t => {
+    const {page, errors} = await openApp(t);
+    const source = `import {box, group} from '@code3d/core';
+const base = box(24, 6, 14).paint('#8ed5d1');
+const cap = box(8, 4, 8).paint('#d9b478').relate(self => self.on(base.up));
+export const assembly = group([base, cap]).originPoint(cap.center);`;
+    await setSource(page, source, 'originPoint');
+    const before = await groupState(page);
+    assert.equal(before.origins.length, 2);
+    assert.equal(before.geometry.length, 16);
+    near(before.origins[0], [0, -5, 0]);
+    near(before.origins[1], [0, 0, 0]);
+    assert.equal(before.bindings, 3);
+    await assertOriginForeground(page);
+    if (process.env.CODE3D_GROUP_ORIGIN_SCREENSHOT)
+      await page.screenshot({path: process.env.CODE3D_GROUP_ORIGIN_SCREENSHOT});
+
+    const drag = async () => {
+      const handle = await xHandle(page);
+      await page.mouse.move(handle.x, handle.y);
+      await page.mouse.down();
+      await page.mouse.move(
+        handle.x + handle.dx * 40,
+        handle.y + handle.dy * 40,
+        {steps: 5},
+      );
+      const current = await groupState(page);
+      assert.ok(
+        current.active && current.delta && Math.abs(current.delta[0]) > 0.1,
+      );
+      assert.deepEqual(current.geometry, before.geometry);
+      assert.equal(current.source, source);
+      return current.delta[0];
+    };
+    await drag();
+    await page.keyboard.press('Escape');
+    await page.mouse.up();
+    const cancelled = await groupState(page);
+    assert.equal(cancelled.source, source);
+    assert.deepEqual(cancelled.geometry, before.geometry);
+    assert.equal(cancelled.active, false);
+
+    const delta = await drag();
+    await page.mouse.up();
+    await page.waitForFunction(() =>
+      window.coordinateApp.codeEditor.editor
+        .getValue()
+        .includes('.originPoint(cap.center).originOffset('),
+    );
+    await page.waitForFunction(delta => {
+      const node = window.coordinateApp.viewport.getSelected()?.node;
+      return (
+        node?.kind === 'group' &&
+        Math.abs(node.children[1].transform.position[0] + delta) < 1e-5
+      );
+    }, delta);
+    const committed = await groupState(page);
+    near(committed.origin, [0, 0, 0]);
+    for (let i = 0; i < before.geometry.length; i++)
+      near(
+        committed.geometry[i],
+        before.geometry[i].map((v, axis) => v - (axis === 0 ? delta : 0)),
+      );
+    near(
+      committed.origins[1].map((v, i) => v - committed.origins[0][i]),
+      [0, 5, 0],
+    );
+    await assertOriginForeground(page);
+    await page.evaluate(() => window.coordinateApp.codeEditor.editor.focus());
+    await page.keyboard.press('Control+z');
+    await page.waitForFunction(
+      original =>
+        window.coordinateApp.codeEditor.editor.getValue() === original,
+      source,
+    );
+    await page.waitForFunction(
+      () =>
+        Math.abs(
+          window.coordinateApp.viewport.getSelected()?.node.children[1]
+            .transform.position[0] ?? Infinity,
+        ) < 1e-5,
+    );
+    assert.deepEqual((await groupState(page)).geometry, before.geometry);
+    assert.deepEqual(errors, []);
+  },
+);
+
+function near(actual: readonly number[], expected: readonly number[]) {
+  actual.forEach((v, i) =>
+    assert.ok(Math.abs(v - expected[i]) < 1e-5, `${actual} != ${expected}`),
+  );
+}
+
+async function groupState(page: Page) {
+  return page.evaluate(() => {
+    const {viewport, codeEditor} = window.coordinateApp;
+    const selected = viewport.getSelected()!;
+    const children = [...viewport['occurrences'].values()].filter(
+      occurrence =>
+        selected.node.children.some(
+          child => child.nodeId === occurrence.node.nodeId,
+        ) && occurrence.key.startsWith(selected.key + '/'),
+    );
+    const geometry = children.flatMap(occurrence => {
+      occurrence.object.updateWorldMatrix(true, false);
+      const vertices = occurrence.node.mesh!.topologyVertices;
+      return Array.from({length: vertices.length / 3}, (_, i) =>
+        occurrence.object.position
+          .clone()
+          .fromArray(vertices, i * 3)
+          .applyMatrix4(occurrence.object.matrixWorld)
+          .toArray(),
+      );
+    });
+    const preview = [...viewport['spatialPreviews'].values()][0];
+    return {
+      source: codeEditor.editor.getValue(),
+      origin: selected.node.origin,
+      origins: selected.node.children.map(child => child.transform.position),
+      geometry,
+      bindings: viewport['transformGizmo']['axes'].filter(axis => axis.binding)
+        .length,
+      active: Boolean(viewport['transformGizmo']['active']),
+      delta: preview?.spatial.origin,
+    };
+  });
+}
+
 async function waitVertexSelection(page: Page, id: number) {
   await page
     .waitForFunction(id => {
@@ -318,12 +449,10 @@ async function setSource(page: Page, source: string, method: string) {
       editor.getModel()!.getPositionAt(editor.getValue().indexOf(method) + 2),
     );
   }, method);
-  await page.waitForFunction(
-    method =>
-      window.coordinateApp.viewport.sourceEvaluation()?.target.tool?.signature
-        .name === method,
-    method,
-  );
+  await page.waitForFunction(method => {
+    const target = window.coordinateApp.viewport.sourceEvaluation()?.target;
+    return (target?.tool?.signature.name ?? target?.operation?.kind) === method;
+  }, method);
   await page.getByText('Ready', {exact: true}).waitFor();
 }
 

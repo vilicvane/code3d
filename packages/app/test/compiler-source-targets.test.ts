@@ -195,7 +195,7 @@ export default assembly;`;
     assert.ok(
       defined(module.objects.get(reference.geometryNodeId)).kind === 'solid',
     );
-    assert.deepEqual(reference.transform.position, [40, 50, 60]);
+    assert.deepEqual(reference.transform.position, [0, 0, 0]);
   }
   const selection = defined(
     module.sourceTargets.find(
@@ -212,7 +212,7 @@ export default assembly;`;
   );
   assert.deepEqual(
     selectionScope(defined(selection)).transform.position,
-    [40, 50, 60],
+    [0, 0, 0],
   );
   assert.deepEqual(
     defined(binding('ends').topologyReferences).map(reference => {
@@ -224,7 +224,7 @@ export default assembly;`;
   assert.equal(defined(binding('center').anchorReferences).length, 1);
   assert.deepEqual(
     defined(binding('center').anchorReferences)[0].transform.position,
-    [35, 50, 60],
+    [-5, 0, 0],
   );
   assert.equal(binding('center').isCollection, false);
   assert.equal(defined(binding('mixed').topologyReferences).length, 1);
