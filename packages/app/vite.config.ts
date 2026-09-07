@@ -7,27 +7,10 @@ import {browserPackages} from './build/browser-packages.ts';
 
 const packageDirectory = path.dirname(fileURLToPath(import.meta.url));
 const primaryDevelopmentPort = 0xc3d;
-const quoteCliArgument = (value: string) =>
-  "'" +
-  value.replaceAll("'", process.platform === 'win32' ? "''" : "'\\''") +
-  "'";
 
-export default defineConfig(({command, isPreview}) => ({
+export default defineConfig({
   base: './',
   publicDir: '../../assets/brand',
-  define: {
-    __CODE3D_CLI_COMMAND__: JSON.stringify(
-      command === 'serve' && !isPreview
-        ? (process.platform === 'win32' ? '& ' : '') +
-            [
-              process.execPath,
-              path.resolve(packageDirectory, '../cli/bld/main.js'),
-            ]
-              .map(quoteCliArgument)
-              .join(' ')
-        : 'c3d',
-    ),
-  },
   server: {port: primaryDevelopmentPort, strictPort: true},
   plugins: [
     {
@@ -73,4 +56,4 @@ export default defineConfig(({command, isPreview}) => ({
       },
     },
   },
-}));
+});

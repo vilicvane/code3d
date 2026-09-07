@@ -7,8 +7,8 @@ It never writes local copies of the project's source files.
 Open **Agents** in the App, enter the relay address, and choose **Add agent & copy
 prompt**. Each agent receives its own configuration. The App handles browser
 storage and connected directories. The [stateless relay](../relay/README.md) runs
-as a separate Node service; no production deployment or npm publication is part
-of this branch. Implementation and scope are tracked in
+as a separate Node service. The 0.0.0 package is an empty placeholder;
+the actual CLI is used through a local development link. Implementation and scope are tracked in
 [issue #50](https://github.com/vilicvane/code3d/issues/50).
 
 ## Usage
@@ -122,24 +122,27 @@ from tessellation.
 
 ## Repository development
 
-The development App includes absolute paths to its Node executable and the CLI
-in both initial and update prompts. Agents can run that command from any working
-directory in the same environment as the dev server, using the CLI from the
-matching checkout. The developer prepares the build; agents do not clone or build
-Code3D. Production builds use the installed `c3d` command and contain no local
-development paths.
+Initial and update prompts use the same command in every environment:
+`npx --yes @code3d/cli <config-file> <operation>`. The prompt contains no local
+paths or instructions to build Code3D. The developer prepares and links the CLI:
 
 ```sh
 npm run build:packages
-node packages/cli/bld/main.js --help
+npm link --workspace @code3d/cli
+npx --yes @code3d/cli --version
 npm test --workspace @code3d/cli
 ```
 
-For a global development command, run `npm link --workspace @code3d/cli` from the
-repository root, then invoke `c3d` directly. The link points to that checkout;
-rebuild after CLI changes. A single global link can target only one checkout,
-so generated development prompts use the explicit local path.
+The unversioned package name lets npx use a local or globally linked development
+version. It may fetch registry metadata first to discover the `c3d` executable.
+The global link points to one checkout at a time; relink when switching the
+development checkout and rebuild after CLI changes. npm's global prefix must be
+writable when creating the link.
 
-The package installs a `c3d` executable through npm's `bin` field. It has not been
-published as part of this development stage. CLI integration tests launch real
-processes against a loopback encrypted endpoint.
+The 0.0.0 placeholder contains only package metadata, a notice, the license and a
+minimal `c3d` entry that reports the CLI is not released and exits with status 1.
+It contains no implementation or dependencies. A linked development CLI reports
+its own version instead. A fresh environment without the link will run the
+placeholder until an actual release is published; do not pin development commands
+to `@0.0.0` or `@latest`. CLI integration tests launch real processes against a
+loopback encrypted endpoint.
