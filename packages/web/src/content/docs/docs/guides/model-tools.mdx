@@ -113,6 +113,22 @@ the original expression.
 This differs from [dragging a position tool](../relations/#make-visual-adjustments),
 which can preserve an expression by adding a numeric increment.
 
+### Coordinate arrays
+
+Position arguments such as `point([x, y, z])` and `pivot([x, y, z])` expose
+separate X, Y, and Z fields. With a literal array, each field edits its own
+component and can follow that component to a safe upstream numeric value.
+For example, editing X in `pivot([reach, 0, 0])` can update `reach`.
+
+The pivot's viewport handles use the same component mapping. If the argument
+is an array expression whose individual components cannot be located in
+source, the App does not guess where to write the three coordinates. Use a
+literal array of editable components to make those controls available.
+See [local coordinates](../../concepts/local-coordinates/) for the difference
+between position arrays and scalar dimensions, offsets, and angles.
+
+### Missing and spread arguments
+
 An incomplete call can still show a panel. Omitted optional parameters show
 their annotated defaults; other missing arguments remain blank. Only the next
 argument that can be appended is editable, even when later parameters have
