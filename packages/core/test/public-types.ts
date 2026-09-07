@@ -125,7 +125,7 @@ sketchBase.derive(
   [
     ['point', 1, [10, 0]],
     ['point', 2, [0, 10]],
-    ['arc', 3, [sketchBase.point(1), 1, 2, 'cw']],
+    ['arc', 3, [sketchBase.point(1), 10, 1, 2, 'cw']],
   ],
   {
     constraints: [
@@ -135,9 +135,9 @@ sketchBase.derive(
   },
 );
 // @ts-expect-error Arc direction is explicit, not an omitted default.
-sketch([['arc', 1, [2, 3, 4]]]);
+sketch([['arc', 1, [2, 10, 3, 4]]]);
 // @ts-expect-error Arc endpoints are point references, not coordinate tuples.
-sketch([['arc', 1, [2, [10, 0], 4, 'ccw']]]);
+sketch([['arc', 1, [2, 10, [10, 0], 4, 'ccw']]]);
 // @ts-expect-error Sweep references a local arc ID, not a point handle.
 const invalidSweep: SketchConstraint = ['sweep', [sketchBase.point(1), 90]];
 void invalidSweep;

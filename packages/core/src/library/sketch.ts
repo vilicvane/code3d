@@ -25,6 +25,7 @@ export type SketchEntry =
       id: number,
       data: readonly [
         center: number | SketchPoint,
+        radius: number,
         start: number | SketchPoint,
         end: number | SketchPoint,
         direction: SketchArcDirection,
@@ -103,19 +104,23 @@ class SketchValue implements Sketch {
         points.set(id, position);
         return ['point', id, position];
       }
-      if (kind === 'circle') {
-        if (data.length !== 2 || !Number.isFinite(data[1]) || data[1] <= 0)
+      if (kind === 'circle' || kind === 'arc') {
+        if (!Number.isFinite(data[1]) || data[1] <= 0)
           throw new Error(
-            `Sketch circle ${id} requires a positive finite radius.`,
+            `Sketch ${kind} ${id} requires a positive finite radius.`,
           );
+      }
+      if (kind === 'circle') {
+        if (data.length !== 2)
+          throw new Error(`Sketch circle ${id} requires center and radius.`);
         return ['circle', id, [data[0], data[1]]];
       }
       if (kind === 'arc') {
-        if (data.length !== 4 || (data[3] !== 'cw' && data[3] !== 'ccw'))
+        if (data.length !== 5 || (data[4] !== 'cw' && data[4] !== 'ccw'))
           throw new Error(
-            `Sketch arc ${id} requires center, start, end and cw/ccw direction.`,
+            `Sketch arc ${id} requires center, radius, start, end and cw/ccw direction.`,
           );
-        return ['arc', id, [data[0], data[1], data[2], data[3]]];
+        return ['arc', id, [data[0], data[1], data[2], data[3], data[4]]];
       }
       if (kind !== 'line' || data.length !== 2)
         throw new Error(`Invalid sketch entity ${id}.`);
@@ -134,7 +139,7 @@ class SketchValue implements Sketch {
         kind === 'circle'
           ? [data[0]]
           : kind === 'arc'
-            ? [data[0], data[1], data[2]]
+            ? [data[0], data[2], data[3]]
             : data;
       for (const ref of refs) {
         if (typeof ref === 'number') {
@@ -247,7 +252,8 @@ class SketchValue implements Sketch {
     const radii = new Map<number, number>();
     for (const entity of solved.entities)
       if (entity.kind === 'point') points.set(entity.id, entity.position);
-      else if (entity.kind === 'circle') radii.set(entity.id, entity.radius);
+      else if (entity.kind === 'circle' || entity.kind === 'arc')
+        radii.set(entity.id, entity.radius);
     definitions.set(this, {
       base,
       input: entries,
@@ -315,6 +321,7 @@ export type SketchArcSnapshot = Readonly<{
   kind: 'arc';
   id: number;
   center: SketchPointAddress;
+  radius: number;
   points: readonly [SketchPointAddress, SketchPointAddress];
   direction: SketchArcDirection;
 }>;
@@ -333,9 +340,9 @@ export function sketchEntityParameters(
     case 'point':
       return entity.position;
     case 'circle':
+    case 'arc':
       return [entity.radius];
     case 'line':
-    case 'arc':
       return [];
   }
 }
@@ -348,9 +355,9 @@ export function withSketchEntityParameters(
     case 'point':
       return {...entity, position: [parameters[0], parameters[1]]};
     case 'circle':
+    case 'arc':
       return {...entity, radius: parameters[0]};
     case 'line':
-    case 'arc':
       return entity;
   }
 }
@@ -386,7 +393,7 @@ export function snapshotSketch(
     entities: snapshotEntries(entries, id, identity).map(e =>
       e.kind === 'point'
         ? {...e, position: points.get(e.id)!}
-        : e.kind === 'circle'
+        : e.kind === 'circle' || e.kind === 'arc'
           ? {...e, radius: radii.get(e.id)!}
           : e,
     ),
@@ -419,8 +426,9 @@ function snapshotEntries(
               kind,
               id: entityId,
               center: point(data[0]),
-              points: [point(data[1]), point(data[2])],
-              direction: data[3],
+              radius: data[1],
+              points: [point(data[2]), point(data[3])],
+              direction: data[4],
             }
           : {kind, id: entityId, points: [point(data[0]), point(data[1])]},
   );
@@ -567,21 +575,30 @@ export function solveSketchSnapshot(
         locked: upstream || !!lock,
       };
     }),
-    arcs: arcs.map(a => ({
-      center: pointIndex(a.center),
-      points: [pointIndex(a.points[0]), pointIndex(a.points[1])],
-      direction: a.direction,
-    })),
+    arcs: arcs.map(a => {
+      const lock = drag?.locks?.find(lock => lock.id === a.id);
+      return {
+        center: pointIndex(a.center),
+        radius: lock ? lock.value : a.radius,
+        locked: !!lock,
+        points: [pointIndex(a.points[0]), pointIndex(a.points[1])],
+        direction: a.direction,
+      };
+    }),
     constraints,
   };
   const target = drag && local.entities.find(e => e.id === drag.id)!;
   const objective =
     drag &&
     target &&
-    (target.kind === 'circle'
+    (target.kind === 'circle' || target.kind === 'arc'
       ? {
           kind: 'radius' as const,
-          circle: circleIndex(target.id),
+          curve: target.kind,
+          index:
+            target.kind === 'circle'
+              ? circleIndex(target.id)
+              : arcs.findIndex(a => a.id === target.id),
           value: Math.hypot(
             ...drag.position.map(
               (v, axis) => v - points[pointIndex(target.center)].position[axis],
@@ -601,7 +618,8 @@ export function solveSketchSnapshot(
       (problem.points.some((p, i) =>
         p.position.some((v, axis) => v !== points[i].position[axis]),
       ) ||
-        problem.circles.some((c, i) => c.radius !== circles[i].radius))
+        problem.circles.some((c, i) => c.radius !== circles[i].radius) ||
+        problem.arcs.some((a, i) => a.radius !== arcs[i].radius))
       ? solvedProblem(problem)
       : problem,
     objective,
@@ -614,15 +632,17 @@ export function solveSketchSnapshot(
         }
       : e.kind === 'circle'
         ? {...e, radius: result.radii[circleIndex(e.id)]}
-        : e,
+        : e.kind === 'arc'
+          ? {...e, radius: result.arcRadii[arcs.findIndex(a => a.id === e.id)]}
+          : e,
   );
   for (const entity of entities) {
     if (
-      entity.kind === 'circle' &&
+      (entity.kind === 'circle' || entity.kind === 'arc') &&
       (!Number.isFinite(entity.radius) || entity.radius <= 0)
     )
       throw new Error(
-        `Sketch circle ${entity.id} requires a positive finite radius.`,
+        `Sketch ${entity.kind} ${entity.id} requires a positive finite radius.`,
       );
     if (entity.kind === 'arc') {
       const [center, a, b] = [entity.center, ...entity.points].map(
@@ -658,5 +678,6 @@ function solvedProblem(problem: SketchSolveProblem): SketchSolveProblem {
       position: solved.positions[i],
     })),
     circles: problem.circles.map((c, i) => ({...c, radius: solved.radii[i]})),
+    arcs: problem.arcs.map((a, i) => ({...a, radius: solved.arcRadii[i]})),
   };
 }

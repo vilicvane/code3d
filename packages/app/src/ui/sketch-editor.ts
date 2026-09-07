@@ -1021,7 +1021,7 @@ export class SketchEditor {
             ? this.expressionLock(selected.id)!
             : this.drawing
               ? this.drawing.instructions
-              : `${this.view.layers.at(-1)!.degreesOfFreedom} DOF · ${this.view.layers.at(-1)!.constraints.length} constraints · Drag points or circle edges · Delete removes the selection`);
+              : `${this.view.layers.at(-1)!.degreesOfFreedom} DOF · ${this.view.layers.at(-1)!.constraints.length} constraints · Drag points or curve radii · Delete removes the selection`);
     if (this.statusText.data !== status) this.statusText.data = status;
   }
 

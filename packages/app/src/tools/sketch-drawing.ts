@@ -85,12 +85,13 @@ export class SketchDrawingGeometry {
 
   arc(
     center: SketchPointAddress,
+    radius: number,
     start: SketchPointAddress,
     end: SketchPointAddress,
     direction: SketchArcDirection,
   ): number {
     const id = this.nextId++;
-    this.entries.push(['arc', id, [center, start, end, direction]]);
+    this.entries.push(['arc', id, [center, radius, start, end, direction]]);
     return id;
   }
 }

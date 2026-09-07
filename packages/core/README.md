@@ -88,7 +88,7 @@ circle's independent constraint preserves its radius. A circle center may also
 use a named upstream point. Circle and point parameters have the same numeric
 runtime semantics, whether computed from expressions or written as literals.
 
-Arcs reference a center, start and end point and explicitly select the direction:
+Arcs store a current radius, reference a center, start and end point, and explicitly select the direction:
 
 ```ts
 const rounded = sketch(
@@ -96,7 +96,7 @@ const rounded = sketch(
     ['point', 1, [0, 0]],
     ['point', 2, [10, 0]],
     ['point', 3, [0, 10]],
-    ['arc', 4, [1, 2, 3, 'ccw']],
+    ['arc', 4, [1, 10, 2, 3, 'ccw']],
   ],
   {
     constraints: [
@@ -109,8 +109,17 @@ const rounded = sketch(
 
 `ccw` selects the counterclockwise arc in sketch coordinates; `cw` selects the
 clockwise arc, including major arcs. Native arc equations keep both endpoints
-equidistant from the center; current point coordinates may move to satisfy them.
-The tuple does not persist a second radius or hidden angles. Center and endpoints
+on the circle; point coordinates and radius may move to satisfy them.
+The radius is ordinary current data, not an implicit radius constraint.
+To initialize inconsistent data, endpoints are projected along their supplied
+directions to the supplied radius. Shared endpoints average simultaneous
+proposals, without giving one arc ownership; locked/upstream, fixed and explicitly
+positioned axes are not overwritten. The resulting seed is then solved against
+all structural equations and explicit constraints. Thus an isolated arc with
+radius 15 and endpoints initially at distances 10 starts at radius 15; if the
+center and endpoints are explicitly fixed at radius 10, its radius solves to 10.
+No extra lock, soft objective or degree of freedom is introduced.
+Center and endpoints
 can each reference a named upstream point. Zero-radius and coincident-endpoint arcs
 are errors; use `circle` for a full circle.
 The independent `sweep` constraint takes `[arcId, degrees]`, strictly greater than
@@ -150,9 +159,11 @@ existing arcs keep their explicit direction.
 Entered Radius and end-point Sweep become independent persistent
 constraints; blank fields remain free. R preserves the entered sweep magnitude.
 All points, the arc and
-constraints are one source transaction/undo. Drag its ordinary center or endpoints,
+constraints are one source transaction/undo. Drag its edge to edit a literal
+radius, or drag its ordinary center or endpoints;
 or select the arc and Delete to remove it. Radius and sweep labels lie on the
-directed arc; sweep guides connect its center and endpoints.
+directed arc; sweep guides connect its center and endpoints. Arc radius expressions
+use the same source protection and gesture-only locks as circle radii.
 Deletion also recognizes ordinary points lying on finite curves, not just explicit
 references, and preserves points still connected to other curves.
 Circles and finite arcs can delimit line trims, including upstream curves; the

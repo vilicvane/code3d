@@ -30,6 +30,7 @@ export type SketchDraftEntry =
       number,
       readonly [
         SketchPointAddress,
+        number,
         SketchPointAddress,
         SketchPointAddress,
         SketchArcDirection,
@@ -53,8 +54,9 @@ export function sketchDraftEntity([
         kind,
         id,
         center: data[0],
-        points: [data[1], data[2]],
-        direction: data[3],
+        radius: data[1],
+        points: [data[2], data[3]],
+        direction: data[4],
       };
   }
 }
@@ -178,7 +180,7 @@ export function analyzeSketchSource(source: string): {
         kind.text !== 'arc') ||
       !ts.isNumericLiteral(idNode) ||
       !ts.isArrayLiteralExpression(data) ||
-      data.elements.length !== (kind.text === 'arc' ? 4 : 2)
+      data.elements.length !== (kind.text === 'arc' ? 5 : 2)
     )
       return unsupported();
     const id = Number(idNode.text);
@@ -187,7 +189,7 @@ export function analyzeSketchSource(source: string): {
     const parameters =
       kind.text === 'point'
         ? [...data.elements]
-        : kind.text === 'circle'
+        : kind.text === 'circle' || kind.text === 'arc'
           ? [data.elements[1]]
           : [];
     entries.set(id, {id, kind: kind.text, node, data, parameters});
@@ -293,7 +295,13 @@ export class SketchEditResolver implements ToolIntentResolver {
           : kind === 'circle'
             ? [point(data[0]), formatSourceNumber(data[1])]
             : kind === 'arc'
-              ? [point(data[0]), point(data[1]), point(data[2]), `'${data[3]}'`]
+              ? [
+                  point(data[0]),
+                  formatSourceNumber(data[1]),
+                  point(data[2]),
+                  point(data[3]),
+                  `'${data[4]}'`,
+                ]
               : data.map(point);
       return `  ['${kind}', ${id}, [${content.join(', ')}]],`;
     };

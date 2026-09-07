@@ -64,12 +64,15 @@ export function sketchCurveGeometry(
         radius: entity.radius,
       };
     case 'arc':
-      return sketchArcGeometry(
-        point(entity.center),
-        point(entity.points[0]),
-        point(entity.points[1]),
-        entity.direction,
-      );
+      return {
+        ...sketchArcGeometry(
+          point(entity.center),
+          point(entity.points[0]),
+          point(entity.points[1]),
+          entity.direction,
+        ),
+        radius: entity.radius,
+      };
   }
 }
 

@@ -30,7 +30,7 @@ const position = (view: SketchSnapshot, id: number) =>
 const near = (a: number, b: number, tolerance = 1e-7) =>
   assert.ok(Math.abs(a - b) < tolerance, `${a} != ${b}`);
 const entries = (direction: 'cw' | 'ccw' = 'ccw'): SketchEntry[] => [
-  ['arc', 4, [1, 2, 3, direction]],
+  ['arc', 4, [1, 10, 2, 3, direction]],
   ['point', 1, [0, 0]],
   ['point', 2, [10, 0]],
   ['point', 3, [0, 10]],
@@ -44,6 +44,7 @@ test('arcs retain point identity and explicit direction, with five geometric fre
       kind: 'arc',
       id: 4,
       center: {layer: view.id, id: 1},
+      radius: 10,
       points: [
         {layer: view.id, id: 2},
         {layer: view.id, id: 3},
@@ -109,7 +110,7 @@ test('arc radius constraints respect locked upstream centers and coordinate lock
       [
         ['point', 1, [110 * size, -20 * size]],
         ['point', 2, [100 * size, -10 * size]],
-        ['arc', 3, [base.point(1), 1, 2, 'cw']],
+        ['arc', 3, [base.point(1), 10 * size, 1, 2, 'cw']],
       ],
       {constraints: [['radius', [3, 10 * size]]]},
     );
@@ -130,12 +131,12 @@ test('arc radius constraints respect locked upstream centers and coordinate lock
 
 test('invalid references, collapsed arcs and conflicting radii are hard errors', () => {
   assert.throws(
-    () => sketch([['arc', 4, [1, 2, 3, 'ccw']]]),
+    () => sketch([['arc', 4, [1, 10, 2, 3, 'ccw']]]),
     /missing local point/,
   );
   for (const data of [
-    [1, 1, 3, 'ccw'],
-    [1, 2, 2, 'cw'],
+    [1, 10, 1, 3, 'ccw'],
+    [1, 10, 2, 2, 'cw'],
   ] as const)
     assert.throws(
       () => sketch([...entries().slice(1), ['arc', 4, data]]),

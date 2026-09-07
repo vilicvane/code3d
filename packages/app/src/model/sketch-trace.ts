@@ -225,7 +225,7 @@ export class SketchTraceRegistry {
             .entries.flatMap<SketchGeometryData>(([kind, id, data]) =>
               kind === 'point'
                 ? [{id, parameters: data}]
-                : kind === 'circle'
+                : kind === 'circle' || kind === 'arc'
                   ? [{id, parameters: [data[1]]}]
                   : [],
             ),

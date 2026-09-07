@@ -36,6 +36,8 @@ export type SketchSolveProblem = Readonly<{
   }>[];
   arcs: readonly Readonly<{
     center: number;
+    radius: number;
+    locked: boolean;
     points: readonly [number, number];
     direction: SketchArcDirection;
   }>[];
@@ -45,6 +47,7 @@ export type SketchSolveProblem = Readonly<{
 export type SketchSolveResult = Readonly<{
   positions: readonly SketchPosition[];
   radii: readonly number[];
+  arcRadii: readonly number[];
   degreesOfFreedom: number;
   redundant: readonly number[];
 }>;
@@ -69,8 +72,14 @@ export function solveSketchProblem(
   problem: SketchSolveProblem,
   drag?:
     | Readonly<{kind: 'point'; point: number; position: SketchPosition}>
-    | Readonly<{kind: 'radius'; circle: number; value: number}>,
+    | Readonly<{
+        kind: 'radius';
+        curve: 'circle' | 'arc';
+        index: number;
+        value: number;
+      }>,
 ): SketchSolveResult {
+  problem = initializeArcEndpoints(problem);
   const {constraints} = problem;
   // A gesture may use a temporary anchor, but normal evaluation must not gain
   // an implicit fixed constraint. Coordinate constraints can also fix a point.
@@ -93,7 +102,13 @@ export function solveSketchProblem(
     locked: index === anchor ? ([true, true] as const) : point.locked,
   }));
   if (!points.length)
-    return {positions: [], radii: [], degreesOfFreedom: 0, redundant: []};
+    return {
+      positions: [],
+      radii: [],
+      arcRadii: [],
+      degreesOfFreedom: 0,
+      redundant: [],
+    };
   // Unconstrained values and edits do not need a native modeling kernel.
   if (!constraints.length && !problem.arcs.length)
     return {
@@ -106,10 +121,14 @@ export function solveSketchProblem(
           : p.position,
       ),
       radii: problem.circles.map((circle, index) =>
-        drag?.kind === 'radius' && drag.circle === index && !circle.locked
+        drag?.kind === 'radius' &&
+        drag.curve === 'circle' &&
+        drag.index === index &&
+        !circle.locked
           ? drag.value
           : circle.radius,
       ),
+      arcRadii: [],
       degreesOfFreedom:
         problem.circles.filter(c => !c.locked).length +
         points.reduce(
@@ -125,6 +144,7 @@ export function solveSketchProblem(
         p.position.map((v, axis) => Math.abs(v - origin[axis])),
       ),
       ...problem.circles.map(c => c.radius),
+      ...problem.arcs.map(a => a.radius),
       ...constraints.flatMap(c =>
         c.kind === 'length' || c.kind === 'radius' ? [c.value] : [],
       ),
@@ -179,7 +199,7 @@ export function solveSketchProblem(
         gcs.push_p_param(angle, false),
       );
       arcAngleIndices.push(angles);
-      const radiusIndex = gcs.push_p_param(radius / scale, false);
+      const radiusIndex = gcs.push_p_param(arc.radius / scale, arc.locked);
       arcRadiusIndices.push(radiusIndex);
       const [cx, cy] = indices[arc.center],
         [sx, sy] = indices[arc.points[0]],
@@ -243,6 +263,21 @@ export function solveSketchProblem(
         y = knownCoordinate(index, 1);
       return x !== undefined && y !== undefined ? [x, y] : undefined;
     };
+    const knownRadius = (
+      kind: 'circle' | 'arc',
+      index: number,
+    ): number | undefined => {
+      const curve = (kind === 'circle' ? problem.circles : problem.arcs)[index];
+      if (curve.locked) return curve.radius;
+      if (kind === 'circle') return undefined;
+      const arc = problem.arcs[index];
+      const center = knownPosition(arc.center);
+      const endpoint =
+        knownPosition(arc.points[0]) ?? knownPosition(arc.points[1]);
+      return center && endpoint
+        ? Math.hypot(endpoint[0] - center[0], endpoint[1] - center[1])
+        : undefined;
+    };
     const coordinate = (
       point: number,
       axis: number,
@@ -294,25 +329,8 @@ export function solveSketchProblem(
           1,
         );
       } else if (constraint.kind === 'radius') {
-        if (constraint.curve === 'arc') {
-          const arc = problem.arcs[constraint.index];
-          const center = knownPosition(arc.center),
-            endpoint =
-              knownPosition(arc.points[0]) ?? knownPosition(arc.points[1]);
-          if (center && endpoint) {
-            checkConstant(
-              Math.hypot(endpoint[0] - center[0], endpoint[1] - center[1]),
-              constraint.value,
-              tag,
-            );
-            return;
-          }
-        }
-        const circle =
-          constraint.curve === 'circle'
-            ? problem.circles[constraint.index]
-            : undefined;
-        if (circle?.locked) checkConstant(circle.radius, constraint.value, tag);
+        const known = knownRadius(constraint.curve, constraint.index);
+        if (known !== undefined) checkConstant(known, constraint.value, tag);
         else {
           activeTags.add(tag);
           const args = [
@@ -409,14 +427,16 @@ export function solveSketchProblem(
       // Negative tags are PlaneGCS soft objectives; they neither change DOF nor
       // weaken persistent constraints. The gesture is not part of the model.
       if (drag.kind === 'radius') {
-        if (!problem.circles[drag.circle].locked)
-          gcs.add_constraint_circle_radius(
-            nativeCircles[drag.circle],
-            constant(drag.value / scale),
-            -1,
-            true,
-            1,
-          );
+        if (knownRadius(drag.curve, drag.index) === undefined) {
+          const args = [constant(drag.value / scale), -1, true, 1] as const;
+          if (drag.curve === 'arc')
+            gcs.add_constraint_arc_radius(nativeArcs[drag.index], ...args);
+          else
+            gcs.add_constraint_circle_radius(
+              nativeCircles[drag.index],
+              ...args,
+            );
+        }
       } else
         for (const axis of [0, 1])
           if (knownCoordinate(drag.point, axis) === undefined)
@@ -443,8 +463,10 @@ export function solveSketchProblem(
         ? problem.circles[i].radius
         : gcs.get_p_param(index) * scale,
     );
-    const arcRadii = arcRadiusIndices.map(
-      index => gcs.get_p_param(index) * scale,
+    const arcRadii = arcRadiusIndices.map((index, i) =>
+      problem.arcs[i].locked
+        ? problem.arcs[i].radius
+        : gcs.get_p_param(index) * scale,
     );
     if (
       !positions.every(p => p.every(Number.isFinite)) ||
@@ -493,6 +515,7 @@ export function solveSketchProblem(
     return {
       positions,
       radii,
+      arcRadii,
       degreesOfFreedom: gcs.dof(),
       redundant: [
         ...new Set([
@@ -508,6 +531,62 @@ export function solveSketchProblem(
     gcs.clear_data();
     gcs.delete();
   }
+}
+
+/**
+ * Radius is current geometry, not a fixed dimension. Seed free endpoint axes
+ * along their authored directions before solving structural and authored
+ * equations together. Shared endpoints average simultaneous proposals, the
+ * least-squares starting position, rather than giving the last arc ownership.
+ * No initialization objective or lock enters the solver or model DOF.
+ */
+function initializeArcEndpoints(
+  problem: SketchSolveProblem,
+): SketchSolveProblem {
+  if (!problem.arcs.length) return problem;
+  const proposals = problem.points.map(() => [] as SketchPosition[]);
+  for (const arc of problem.arcs) {
+    const center = problem.points[arc.center].position;
+    for (const index of arc.points) {
+      const point = problem.points[index].position;
+      const dx = point[0] - center[0],
+        dy = point[1] - center[1];
+      const length = Math.hypot(dx, dy);
+      if (!length)
+        throw new Error(
+          'Sketch arcs require a nonzero radius and distinct endpoints; use circle for a full circle.',
+        );
+      proposals[index].push([
+        center[0] + (dx / length) * arc.radius,
+        center[1] + (dy / length) * arc.radius,
+      ]);
+    }
+  }
+  return {
+    ...problem,
+    points: problem.points.map((point, index) => {
+      const coordinate = (axis: 0 | 1) => {
+        const value = point.position[axis];
+        const targets = proposals[index];
+        if (
+          !targets.length ||
+          point.locked[axis] ||
+          problem.constraints.some(
+            c =>
+              (c.kind === 'fixed' || c.kind === 'x' || c.kind === 'y') &&
+              c.point === index &&
+              (c.kind === 'fixed' || c.kind === (axis === 0 ? 'x' : 'y')),
+          )
+        )
+          return value;
+        return targets.reduce(
+          (sum, p) => sum + (p[axis] - value) / targets.length,
+          value,
+        );
+      };
+      return {...point, position: [coordinate(0), coordinate(1)]};
+    }),
+  };
 }
 
 function residual(

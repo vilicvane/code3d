@@ -50,7 +50,7 @@ for (const direction of ['cw', 'ccw'])
   test(`finite ${direction} arc crossings trim a line without cutting through the arc gap`, async t => {
     const page = await open(
       t,
-      `import {sketch} from '@code3d/core'; const value = sketch([['point', 1, [-10, 0]], ['point', 2, [10, 0]], ['line', 3, [1, 2]], ['point', 4, [0, 3]], ['point', 5, [-5, 3]], ['point', 6, [0, -2]], ['arc', 7, [4, 5, 6, '${direction}']]]);`,
+      `import {sketch} from '@code3d/core'; const value = sketch([['point', 1, [-10, 0]], ['point', 2, [10, 0]], ['line', 3, [1, 2]], ['point', 4, [0, 3]], ['point', 5, [-5, 3]], ['point', 6, [0, -2]], ['arc', 7, [4, 5, 5, 6, '${direction}']]]);`,
     );
     const cut = direction === 'cw' ? 0.7 : 0.3;
     const right = segment(page, 3, cut, 1);

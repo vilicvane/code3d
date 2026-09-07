@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
-import type {SketchSnapshot} from '@code3d/core/tooling';
+import {
+  sketchEntityParameters,
+  type SketchSnapshot,
+} from '@code3d/core/tooling';
 import type {SketchChange} from '../src/tools/sketch-source.ts';
 import {createAppTestServer} from './vite-test-server.ts';
 import {createTestProjectCompiler} from './project-test-files.ts';
@@ -26,7 +29,7 @@ before(async () => {
   )) as typeof drawing;
 });
 after(async () => server?.close());
-function edit(
+function resolveEdit(
   args: string,
   change: SketchChange,
   layer = 'local',
@@ -49,10 +52,16 @@ function edit(
       readSource: () => args,
     },
   );
+  return result;
+}
+function edit(...args: Parameters<typeof resolveEdit>) {
+  const result = resolveEdit(...args);
   assert.equal(result.status, 'ready');
   return result.plan.edits[0].text;
 }
 const ref = (id: number, layer = 'local') => ({id, layer});
+const numbers = (view: SketchSnapshot) =>
+  view.entities.flatMap(sketchEntityParameters);
 
 test('arc drawings default to CW after construction, cancellation and a completed CCW arc', () => {
   const tool = new drawing.SketchArcDrawing();
@@ -69,7 +78,7 @@ test('arc drawings default to CW after construction, cancellation and a complete
         assert.deepEqual(change.entries.at(-1), [
           'arc',
           4,
-          [ref(1), ref(2), ref(3), 'ccw'],
+          [ref(1), 10, ref(2), ref(3), 'ccw'],
         ]);
         return true;
       });
@@ -112,7 +121,7 @@ test('entered sweep projects the endpoint, preserves compatible references and c
     assert.match(
       args,
       new RegExp(
-        `\\['arc', 3, \\[1, 2, base.point\\(9\\), '${direction}'\\]\\]`,
+        `\\['arc', 3, \\[1, 10, 2, base.point\\(9\\), '${direction}'\\]\\]`,
       ),
     );
     assert.doesNotMatch(args, /radius/);
@@ -164,6 +173,7 @@ test('sweep badges expose center and both endpoints, and deletion removes the ex
         kind: 'arc',
         id: 4,
         center: ref(1),
+        radius: 10,
         points: [ref(2), ref(3)],
         direction: 'cw',
       },
@@ -193,7 +203,7 @@ test('sweep badges expose center and both endpoints, and deletion removes the ex
   ]);
   assert.ok(display.anchor[0] < 0 && display.anchor[1] < 0);
   const args =
-    "[['point', 1, [0, 0]], ['point', 2, [10, 0]], ['point', 3, [0, 10]], ['arc', 4, [1, 2, 3, 'cw']]], {constraints: [['sweep', [4, angle /* keep expression */]]]}";
+    "[['point', 1, [0, 0]], ['point', 2, [10, 0]], ['point', 3, [0, 10]], ['arc', 4, [1, 10, 2, 3, 'cw']]], {constraints: [['sweep', [4, angle /* keep expression */]]]}";
   const moved = edit(args, {kind: 'move', data: [{id: 2, parameters: [9, 1]}]});
   assert.match(moved, /angle \/\* keep expression \*\//);
   const deleted = edit(args, segments.deleteSketchEntity([local], 4));
@@ -219,7 +229,7 @@ test('sweep and radius drag previews replay through rounded AST edits and fresh 
       return [...module.sketches.values()][0];
     };
     for (const direction of ['cw', 'ccw']) {
-      const args = `[['point', 1, [center, 0]], ['point', 2, [10, 0]], ['point', 3, [0, ${direction === 'cw' ? 10 : -10}]], ['arc', 4, [1, 2, 3, '${direction}']]], {constraints: [['fixed', 1], ['radius', [4, 10]], ['sweep', [4, angle /* degrees */]]]}`;
+      const args = `[['point', 1, [center, 0]], ['point', 2, [10, 0]], ['point', 3, [0, ${direction === 'cw' ? 10 : -10}]], ['arc', 4, [1, 10, 2, 3, '${direction}']]], {constraints: [['fixed', 1], ['radius', [4, 10]], ['sweep', [4, angle /* degrees */]]]}`;
       const original = await compile(args),
         editable = source.analyzeSketchSource(args).editable;
       let preview = {snapshot: original as SketchSnapshot, data: original.data};
@@ -242,8 +252,6 @@ test('sweep and radius drag previews replay through rounded AST edits and fresh 
         assert.match(updated, /center/);
         assert.match(updated, /angle \/\* degrees \*\//);
         const replay = await compile(updated);
-        const numbers = (s: SketchSnapshot) =>
-          s.entities.flatMap(e => (e.kind === 'point' ? e.position : []));
         numbers(preview.snapshot).forEach((v, i) =>
           assert.ok(Math.abs(v - numbers(replay)[i]) < 1e-6),
         );
@@ -290,7 +298,7 @@ test('arc drawing is one atomic center/start/end transaction with direction and 
       ['point', 1, [0, 0]],
       ['point', 2, [10, 0]],
       ['point', 3, [0, 10]],
-      ['arc', 4, [ref(1), ref(2), ref(3), 'cw']],
+      ['arc', 4, [ref(1), 10, ref(2), ref(3), 'cw']],
     ],
     constraints: [
       ['x', [ref(1), 0]],
@@ -324,7 +332,7 @@ test('arc drawing projects to its finite radius, preserves compatible point refe
   );
   assert.match(
     args,
-    /\['arc', 1, \[base.point\(7\), base.point\(8\), base.point\(9\), 'cw'\]\]/,
+    /\['arc', 1, \[base.point\(7\), 10, base.point\(8\), base.point\(9\), 'cw'\]\]/,
   );
   tool.place({position: [0, 0]}, 'local', 2, () => assert.fail());
   tool.reset();
@@ -335,14 +343,17 @@ test('arc drawing projects to its finite radius, preserves compatible point refe
 test('arc source serialization retains named upstream points and only rewrites literal point parameters', () => {
   const appended = edit('[]', {
     kind: 'append',
-    entries: [['arc', 4, [ref(1, 'base'), ref(2), ref(3), 'cw']]],
+    entries: [['arc', 4, [ref(1, 'base'), 10, ref(2), ref(3), 'cw']]],
   });
-  assert.match(appended, /\['arc', 4, \[base\.point\(1\), 2, 3, 'cw'\]\]/);
+  assert.match(appended, /\['arc', 4, \[base\.point\(1\), 10, 2, 3, 'cw'\]\]/);
   const initial =
-    "[['point', 2, [width, /* y */ +2]], ['arc', 4, [base.point(1), 2, base.point(3), 'ccw']]]";
+    "[['point', 2, [width, /* y */ +2]], ['arc', 4, [base.point(1), radius, 2, base.point(3), 'ccw']]]";
   assert.deepEqual(
     [...source.analyzeSketchSource(initial).editable],
-    [[2, [false, true]]],
+    [
+      [2, [false, true]],
+      [4, [false]],
+    ],
   );
   assert.equal(
     edit(initial, {kind: 'move', data: [{id: 2, parameters: [50, 7]}]}),
@@ -369,7 +380,7 @@ test('arc endpoint preview, rounded source transactions and fresh compiler evalu
       return [...module.sketches.values()][0];
     };
     for (const direction of ['cw', 'ccw']) {
-      const args = `[['point', 1, [width, 0]], ['point', 2, [10, 0]], ['point', 3, [0, 10]], ['arc', 4, [1, 2, 3, '${direction}']]], {constraints: [['fixed', 1], ['radius', [4, 10]]]}`;
+      const args = `[['point', 1, [width, 0]], ['point', 2, [10, 0]], ['point', 3, [0, 10]], ['arc', 4, [1, 10, 2, 3, '${direction}']]], {constraints: [['fixed', 1], ['radius', [4, 10]]]}`;
       const original = await compile(args),
         editable = source.analyzeSketchSource(args).editable;
       let preview = {snapshot: original as SketchSnapshot, data: original.data};
@@ -393,11 +404,92 @@ test('arc endpoint preview, rounded source transactions and fresh compiler evalu
         assert.match(updated, new RegExp(`'${direction}'`));
         assert.doesNotMatch(updated, /'point',\s*4/);
         const replay = await compile(updated);
-        const numbers = (s: SketchSnapshot) =>
-          s.entities.flatMap(e => (e.kind === 'point' ? e.position : []));
         numbers(preview.snapshot).forEach((v, i) =>
           assert.ok(Math.abs(v - numbers(replay)[i]) < 1e-6),
         );
+      }
+    }
+  } finally {
+    compiler.dispose();
+  }
+});
+
+test('literal arc radius is editable data while radius expressions are retained by source edits', () => {
+  for (const radius of ['+15', 'r /* radius expression */']) {
+    const args = `[['point', 1, [0, 0]], ['point', 2, [10, 0]], ['point', 3, [0, 10]], ['arc', 4, [1, ${radius}, 2, 3, 'cw']]]`;
+    const parsed = source.analyzeSketchSource(args);
+    assert.deepEqual(parsed.editable.get(4), [radius === '+15']);
+    const change = {kind: 'move', data: [{id: 4, parameters: [18]}]} as const;
+    if (radius === '+15') {
+      const changed = edit(args, change);
+      assert.equal(changed, args.replace('+15', '18'));
+      assert.doesNotMatch(changed, /constraints/);
+    } else assert.equal(resolveEdit(args, change).status, 'unsupported');
+  }
+  assert.ok(source.analyzeSketchSource("[['arc', 4, [1, 2, 3, 'cw']]]").reason);
+});
+
+test('arc radius initial data, expression locks, rounding and fresh compilation share one geometry', async () => {
+  const compiler = await createTestProjectCompiler(server);
+  const compile = async (args: string) => {
+    const module = await compiler.compile(
+      {
+        files: [
+          {
+            path: '/model.ts',
+            source: `import {sketch} from '@code3d/core'; const r = 15; const value = sketch(${args});`,
+          },
+        ],
+      },
+      '/model.ts',
+    );
+    assert.equal(module.diagnostic, undefined);
+    return [...module.sketches.values()][0];
+  };
+  try {
+    for (const radius of ['15', 'r /* radius expression */']) {
+      const args = `[['point', 1, [0, 0]], ['point', 2, [10, 0]], ['point', 3, [0, 10]], ['arc', 4, [1, ${radius}, 2, 3, 'cw']]]`;
+      const original = await compile(args);
+      assert.deepEqual(original.data.find(d => d.id === 4)?.parameters, [15]);
+      assert.deepEqual(
+        original.data.find(d => d.id === 2)?.parameters,
+        [10, 0],
+      );
+      const endpoint = original.entities
+        .filter(e => e.kind === 'point')
+        .find(e => e.id === 2)!;
+      assert.deepEqual(endpoint.position, [15, 0]);
+      const editable = source.analyzeSketchSource(args).editable;
+      for (const target of [
+        {id: 3, position: [-9, 12] as const},
+        {id: 4, position: [0, 18] as const},
+      ]) {
+        const preview = compiler.previewSketchDrag([original], {
+          ...target,
+          editable,
+          data: original.data,
+        });
+        const updated = edit(
+          args,
+          {
+            kind: 'move',
+            data: preview.data.filter(p => editable.get(p.id)?.some(Boolean)),
+          },
+          original.id,
+        );
+        if (radius !== '15') assert.ok(updated.includes(radius));
+        assert.doesNotMatch(updated, /constraints/);
+        const replay = await compile(updated);
+        numbers(preview.snapshot).forEach((v, i) =>
+          assert.ok(Math.abs(v - numbers(replay)[i]) < 1e-6),
+        );
+        if (radius !== '15')
+          assert.equal(replay.entities.find(e => e.kind === 'arc')!.radius, 15);
+        else if (target.id === 4)
+          assert.ok(
+            Math.abs(replay.entities.find(e => e.kind === 'arc')!.radius - 18) <
+              1e-6,
+          );
       }
     }
   } finally {
@@ -419,6 +511,7 @@ test('arc radius badges follow the directed arc midpoint and deletion cleans onl
         kind: 'arc',
         id: 4,
         center: ref(1),
+        radius: 10,
         points: [ref(2), ref(3)],
         direction: 'cw',
       },
@@ -464,6 +557,7 @@ test('orphan cleanup uses finite analytic curves, including interior points and 
         kind: 'arc',
         id: 4,
         center: ref(1),
+        radius: 10,
         points: [ref(2), ref(3)],
         direction: 'ccw',
       },

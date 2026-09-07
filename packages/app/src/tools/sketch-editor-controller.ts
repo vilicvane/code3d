@@ -225,7 +225,7 @@ export class SketchEditorController {
       ...entries.flatMap<SketchGeometryData>(([kind, id, values]) =>
         kind === 'point'
           ? [{id, parameters: values}]
-          : kind === 'circle'
+          : kind === 'circle' || kind === 'arc'
             ? [{id, parameters: [values[1]]}]
             : [],
       ),

@@ -100,9 +100,14 @@ implementation context and historical outcomes, not a competing work queue.
   preserving genuine conflict errors. Radius markers link the actual center and
   circumference. Deleting a circle removes its affected constraints and only
   newly disconnected local centers, preserving shared/upstream points.
-  Arcs use `['arc', id, [centerPoint, startPoint, endPoint, 'cw' | 'ccw']]`
-  and native ArcRules, with radius constraints shared with circles. No hidden
-  angles or second radius are authored. Center/start/end drawing supports entered
+  Arcs use `['arc', id, [centerPoint, radius, startPoint, endPoint, 'cw' | 'ccw']]`
+  and native ArcRules, with radius constraints shared with circles. Radius is
+  current geometry, not a hard dimension; no hidden angles are authored.
+  Initialization projects endpoints radially, averaging simultaneous proposals
+  for shared points while respecting locked/fixed/positioned axes. The seed then
+  solves against all structural and authored constraints, with radius still free.
+  Edge and endpoint dragging share radius tracking, AST permissions, expression
+  locks and exact rounded source replay. Center/start/end drawing supports entered
   center coordinates, radius and sweep. Drawing defaults to CW, R reverses direction, and one transaction creates
   or undoes the whole arc. Ordinary point dragging replays the exact rounded source.
   Analytic curves share finite hit testing, display, bounds, radius badges and

@@ -6,7 +6,54 @@ import {open, point, text, waitForSource} from './sketch-test.ts';
 const arc = (page: Page, id = 4) =>
   page.locator(`.sketch-canvas path.local[data-kind="arc"][data-id="${id}"]`);
 const source = (direction = 'ccw') =>
-  `import {sketch} from '@code3d/core';\nconst width = 0;\nconst value = sketch([['point', 1, [width, 0]], ['point', 2, [10, 0]], ['point', 3, [0, 10]], ['arc', 4, [1, 2, 3, '${direction}']]], {constraints: [['fixed', 1], ['radius', [4, 10]]]});`;
+  `import {sketch} from '@code3d/core';\nconst width = 0;\nconst value = sketch([['point', 1, [width, 0]], ['point', 2, [10, 0]], ['point', 3, [0, 10]], ['arc', 4, [1, 10, 2, 3, '${direction}']]], {constraints: [['fixed', 1], ['radius', [4, 10]]]});`;
+
+const arcRadius = async (page: Page) =>
+  Number((await arc(page).getAttribute('d'))!.split(' A ')[1].split(' ')[0]);
+
+for (const expression of [false, true])
+  test(`arc radius current data ${expression ? 'preserves an expression during endpoint dragging' : 'resizes from its edge and undoes atomically'}`, async t => {
+    const page = await open(
+      t,
+      `import {sketch} from '@code3d/core'; const r = 15; const value = sketch([['point', 1, [0, 0]], ['point', 2, [10, 0]], ['point', 3, [0, 10]], ['arc', 4, [1, ${expression ? 'r /* radius data */' : '15'}, 2, 3, 'cw']]]);`,
+    );
+    await arc(page).waitFor();
+    await page.getByRole('button', {name: 'Snap', exact: true}).click();
+    const before = await arcRadius(page);
+    const center = (await point(page, 1).boundingBox())!;
+    const cx = center.x + center.width / 2,
+      cy = center.y + center.height / 2;
+    if (expression) {
+      const end = (await point(page, 3).boundingBox())!;
+      await page.mouse.move(end.x + end.width / 2, end.y + end.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(cx - before * 0.6, cy - before * 0.8, {steps: 8});
+    } else {
+      await page.mouse.move(cx - before, cy);
+      await page.mouse.down();
+      await page.mouse.move(cx - before - 40, cy, {steps: 8});
+    }
+    await page.mouse.up();
+    await waitForSource(page, /'point',\s*2,\s*\[(?!10[,\s])/);
+    await page.getByText('Ready', {exact: true}).waitFor();
+    if (expression) {
+      assert.ok(Math.abs((await arcRadius(page)) - before) < 0.1);
+      assert.match(await text(page), /r \/\* radius data \*\//);
+    } else assert.ok((await arcRadius(page)) > before + 30);
+    assert.doesNotMatch(await text(page), /constraints/);
+    await page.keyboard.press('Control+z');
+    await waitForSource(page, /'point',\s*2,\s*\[10,\s*0\]/);
+    await page.waitForFunction(before => {
+      const path = document
+        .querySelector('.sketch-canvas path[data-kind="arc"]')
+        ?.getAttribute('d');
+      return (
+        path &&
+        Math.abs(Number(path.split(' A ')[1].split(' ')[0]) - before) < 0.1
+      );
+    }, before);
+    assert.doesNotMatch(await text(page), /constraints/);
+  });
 
 test('arc sweep input validates its open range, reverses direction without changing magnitude and undoes atomically', async t => {
   const page = await open(
@@ -47,7 +94,7 @@ test('arc sweep input validates its open range, reverses direction without chang
   await page.keyboard.press('Enter');
   await arc(page).waitFor();
   await waitForSource(page, /'sweep',\s*\[4,\s*270\]/);
-  await waitForSource(page, /'arc',\s*4,\s*\[1,\s*2,\s*3,\s*'cw'\]/);
+  await waitForSource(page, /'arc',\s*4,\s*\[1,\s*10,\s*2,\s*3,\s*'cw'\]/);
   const badge = page.locator('.constraint-badge[data-kind="sweep"]');
   await badge.hover();
   assert.match((await badge.getAttribute('aria-label'))!, /Sweep 270° · CW/);
@@ -148,7 +195,7 @@ test('arc tool creates center/start/end with numeric radius, reverses the previe
   );
   await page.keyboard.press('Enter');
   await arc(page).waitFor();
-  await waitForSource(page, /'arc',\s*4,\s*\[1,\s*2,\s*3,\s*'ccw'\]/);
+  await waitForSource(page, /'arc',\s*4,\s*\[1,\s*10,\s*2,\s*3,\s*'ccw'\]/);
   await waitForSource(page, /'radius',\s*\[4,\s*10\]/);
   await page.keyboard.press('Escape');
   await page.keyboard.press('Control+z');

@@ -46,7 +46,7 @@ const entries = (
   ['point', 1, [0, 0]],
   ['point', 2, polar(start)],
   ['point', 3, polar(start + (direction === 'ccw' ? sweep : -sweep))],
-  ['arc', 4, [1, 2, 3, direction]],
+  ['arc', 4, [1, 10, 2, 3, direction]],
 ];
 const curve = (view: SketchSnapshot) => {
   const arc = view.entities.find(e => e.kind === 'arc')!;
@@ -131,7 +131,7 @@ test('sweep preserves upstream centers and authored coordinate locks across scal
       [
         ['point', 1, [radius, 0]],
         ['point', 2, [0, radius]],
-        ['arc', 3, [base.point(1), 1, 2, 'cw']],
+        ['arc', 3, [base.point(1), radius, 1, 2, 'cw']],
       ],
       {
         constraints: [
@@ -256,7 +256,7 @@ test('sweep indices remain local to their arcs, independently of entity ordering
       [
         ['circle', 99, [1, 3]],
         ...entries(90, 'ccw', 0),
-        ['arc', 8, [1, 2, 3, 'cw']],
+        ['arc', 8, [1, 10, 2, 3, 'cw']],
       ],
       {
         constraints: [

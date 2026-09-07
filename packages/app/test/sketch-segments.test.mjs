@@ -178,7 +178,14 @@ test('only the finite directed arc cuts a line, not the missing portion of its s
       point(4, 0, 3),
       point(5, -5, 3),
       point(6, 0, -2),
-      {kind: 'arc', id: 7, center: ref(4), points: [ref(5), ref(6)], direction},
+      {
+        kind: 'arc',
+        id: 7,
+        center: ref(4),
+        radius: 5,
+        points: [ref(5), ref(6)],
+        direction,
+      },
     ]);
     const cut = direction === 'cw' ? 0.7 : 0.3;
     const parts = segments(value);
