@@ -85,7 +85,13 @@ export default defineConfig({
             {slug: 'docs/guides/exporting'},
           ],
         },
-        {label: 'Concepts', items: [{slug: 'docs/concepts/code-and-geometry'}]},
+        {
+          label: 'Concepts',
+          items: [
+            {slug: 'docs/concepts/code-and-geometry'},
+            {slug: 'docs/concepts/local-coordinates'},
+          ],
+        },
         {
           label: 'Reference',
           items: [

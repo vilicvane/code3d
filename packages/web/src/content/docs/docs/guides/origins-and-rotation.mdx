@@ -3,24 +3,20 @@ title: Choosing an origin and rotating a part
 description: Set a pivot, rotate geometry, and adjust both directly in the viewport.
 ---
 
-import SourceCode from '../../../../components/SourceCode.astro';
-import ArrowIcon from '../../../../components/ArrowIcon.astro';
-import {appUrl} from '../../../../lib/site';
-import source from '../../../../../../app/examples/origin-and-rotation.ts?raw';
+import ModelExample from '../../../../components/ModelExample.astro';
 
 The origin defines local coordinates and is always zero in the resulting model.
 An origin offset `d` changes every point coordinate from `p` to `p - d`, preserving
 the shape. `rotate` turns the geometry around that local zero; a
-[relation](../relations/) places the resulting part in a composition.
+[relation](../relations/) places the resulting part in a composition. For
+positions, dimensions, and reference axes, start with
+[local coordinates and placement](../../concepts/local-coordinates/).
 
-<SourceCode source={source} file="origin-and-rotation.ts" />
+<ModelExample id="origin-and-rotation" />
 
-<p>
-  <a href={appUrl('origin-and-rotation.ts')} target="_blank" rel="noopener">
-    {'Open this example in the App '}
-    <ArrowIcon />
-  </a>
-</p>
+In the [interactive preview](../../../examples/origin-and-rotation/), switch
+between **Corner origin**, **Origin offset**, **Rotate**, and **Compose** to
+follow the same source through its local geometry and assembly placement.
 
 ## Choose a pivot
 
@@ -28,7 +24,7 @@ Place the cursor in `blank.originVertex(3)`. Pick a vertex in the viewport to
 use it as the origin. The ID belongs to the operation's input model, just like
 other [topology selections](../topology/).
 
-Use `.originOffset(dx, dy, dz)` for a displacement or `.originCenter()` to make
+Use `.originOffset(dx, dy, dz)` to move the origin by a displacement or `.originCenter()` to make
 the body's center local zero. `originVertex()` similarly makes the chosen
 vertex zero. These operations return new model values; `blank` is unchanged.
 

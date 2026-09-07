@@ -6,7 +6,7 @@ import {
 } from '../../app/render-samples/catalog.ts';
 
 const appDirectory = fileURLToPath(new URL('../../app/', import.meta.url));
-function render(id, name, focus) {
+function render(id, name, context) {
   execFileSync(
     process.execPath,
     [
@@ -19,7 +19,7 @@ function render(id, name, focus) {
       '1440',
       '--height',
       '1080',
-      ...(focus ? ['--focus', focus] : []),
+      ...(context ? ['--context', context] : []),
     ],
     {cwd: appDirectory, stdio: 'inherit', timeout: 120_000},
   );
@@ -28,9 +28,6 @@ function render(id, name, focus) {
 for (const sample of renderSamples) render(sample.id, sample.id);
 for (const [id, contexts] of Object.entries(sourceContextSets)) {
   for (const context of contexts.filter(context => context.image !== id)) {
-    // The remaining source identifies the exact occurrence in the model.
-    const source = context.focus.context;
-    const focus = source.slice(source.indexOf(context.focus.token));
-    render(id, context.image, focus);
+    render(id, context.image, context.id);
   }
 }
