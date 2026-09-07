@@ -269,6 +269,37 @@ test('shared size and angle parameters keep the size expression while editing th
   assert.match(host.source(), /rotate\(size \+ 10, 35, 10\)/);
 });
 
+test('group rotation tools preview the same assembly poses as committed XYZ angle edits', async () => {
+  const source = `import {box, group} from '@code3d/core';
+const base = box(10, 10, 10);
+const cap = box(2, 2, 2).relate(self => self.on(base.up));
+const angle = 25;
+export default group([base, cap]).originPoint(cap.center).rotate(angle, 35, 10);`;
+  const {node, bindings} = await build(source, 'rotate');
+  assert.equal(bindings.length, 3);
+  const binding = defined(bindings.find(binding => binding.axis === 'x'));
+  assert.equal(binding.spatial.source.kind, 'parameter');
+  const intent = spatialIntent(binding, 55);
+  const host = hostFor(source);
+  const session = new ToolEngine(host.host).begin('group-rotation');
+  assert.equal(session.preview(intent).status, 'ready');
+  assert.equal(host.source(), source);
+  assert.equal(session.commit(intent).status, 'committed');
+  assert.match(host.source(), /const angle = 55/);
+  const {node: next} = await build(host.source(), 'rotate');
+  const {composeTransforms} = await import('../../core/bld/tooling/index.js');
+  for (let i = 0; i < node.children.length; i++) {
+    const expected = composeTransforms(
+      intent.preview.objects[0].transform,
+      node.children[i].transform,
+    );
+    near(next.children[i].transform.position, expected.position);
+    near(next.children[i].transform.quaternion, expected.quaternion);
+    assert.deepEqual(next.children[i].mesh, node.children[i].mesh);
+  }
+  near(next.origin, [0, 0, 0]);
+});
+
 test('originOffset drag accumulates on the selected offset and cancel preserves source', async () => {
   const source =
     'import {box} from "@code3d/core"; box(8, 6, 4).originVertex(3).originOffset(4, 0, 0);';

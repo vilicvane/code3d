@@ -273,8 +273,7 @@ sampled tangent or normal; `.center.on()` uses only the calculated point.
 
 ## Origins and rotation
 
-All models support immutable origin editing. Geometric models (solids, faces,
-curves, and points) also support rotation:
+All models, including groups, support immutable origin editing and rotation:
 
 ```ts
 const part = box(24, 6, 14)
@@ -307,26 +306,30 @@ has center `[5, 0, 0]`, and `.rotate(0, 90, 0)` takes its end to `[0, 0, -10]`.
 A curve's tangent reference frame does not redefine model XYZ. Directional
 bounds use the model axes, including after geometric rotation.
 
-Groups provide `originPoint()` and `originOffset()`. Their default origin is
+Groups provide `originPoint()`, `originOffset()` and `rotate()`. Their default origin is
 chosen when constructed: solve the direct members' placement, then take the
 axis-aligned bounding-box center of their **origins**, retaining the assembly
 axes. Geometry size does not affect this choice. A nested group contributes
 only its own origin; an empty group defaults to zero. Explicit origin edits
 re-express the assembled result together, preserving internal constraints and
 member spacing. The default is not recalculated on later operations.
+`rotate(x, y, z)` turns the solved assembly together about its current origin,
+including nested instances, without re-solving internal relations. Named
+references and topology follow the members; directional bounds use group axes.
 
 ```ts
 const base = box(20, 4, 10).originOffset(0, 2, 0);
 const lid = box(20, 2, 10).originOffset(0, -1, 0);
 const assembly = group([base, lid]); // Common origins at their contact plane.
 const mounted = assembly.originPoint(lid.center);
+const tilted = mounted.rotate(0, 0, 30); // Rotate the whole assembly about the lid center.
 ```
 
 `originPoint()` converts references to the receiver's local frame, including
 solved member placements. With repeated geometry, select a specific instance's
 named point, for example `assembly.originPoint(rightPart.body.center)`; an
 ambiguous shared source is rejected. Groups have no aggregate vertex IDs or
-geometric `center`, rotation, or scaling methods. The
+geometric `center` or scaling methods. The
 [group origins example](../app/examples/group-origins.ts) shows direct assembly
 and selection in repeated instances.
 

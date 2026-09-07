@@ -85,7 +85,10 @@ panel can instead replace that expression: see
 [what a panel can edit](../model-tools/#what-a-panel-can-edit).
 
 Solids, faces, curves, and points provide all these operations. Groups provide
-`originPoint()` and `originOffset()`; their default origin comes from the center
+`originPoint()`, `originOffset()` and `rotate()`; their default origin comes from the center
 of their direct members’ origin bounds. See [group origins](../../concepts/local-coordinates/#group-origins)
-for direct assembly and instance selection. See the [API reference](../../reference/core/#origins-and-rotation)
+for direct assembly and instance selection. To rotate the whole assembly about
+a member point, use `assembly.originPoint(part.center).rotate(0, 0, 30)`. Its
+internal placements remain intact, including nested groups; angle inputs and
+rotation rings work the same way as on a single part. See the [API reference](../../reference/core/#origins-and-rotation)
 for the complete method list.

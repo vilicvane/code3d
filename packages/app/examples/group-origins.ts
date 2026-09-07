@@ -20,3 +20,7 @@ const rightPart = direct.relate(self =>
 );
 const pair = group([leftPart, rightPart]).expose({leftPart, rightPart});
 export const mounted = pair.originPoint(rightPart.lid.center);
+
+// Rotate both instances together about the selected lid center. Drag the rings
+// inside rotate() to change the angles without changing the internal assembly.
+export const rotated = mounted.rotate(0, 0, 30);

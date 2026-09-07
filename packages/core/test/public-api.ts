@@ -321,10 +321,9 @@ groupModel.shell(1);
 // @ts-expect-error The general Model type contains only common capabilities.
 model.scaled(2);
 
-// @ts-expect-error Groups do not contain geometry to rotate.
 groupModel.rotate(0, 90, 0);
 groupModel.originOffset(0, 0, 0).originPoint(solid.center);
-model.originPoint(pointAnchor).originOffset(1, 2, 3);
+model.originPoint(pointAnchor).originOffset(1, 2, 3).rotate(10, 20, 30);
 solid.originPoint(solid.vertex(1)).fillet(1);
 faceModel.originPoint(faceModel.center).surface(1);
 edgeModel.originPoint(edgeModel.start).edge(1);
