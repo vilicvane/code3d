@@ -719,6 +719,13 @@ export interface ModelCapabilities<
   ): ModelForFamily<Elements, Family>;
   /** Re-express the model with this point reference at local zero. */
   originPoint(point: PointAnchor): ModelForFamily<Elements, Family>;
+  /**
+   * Rotate about the current origin, in degrees, about fixed local X, Y, then Z axes.
+   * @code3d.param x {kind: 'angle', label: 'Rotate X'}
+   * @code3d.param y {kind: 'angle', label: 'Rotate Y'}
+   * @code3d.param z {kind: 'angle', label: 'Rotate Z'}
+   */
+  rotate(x: number, y: number, z: number): ModelForFamily<Elements, Family>;
   /** Return a recolored value; a group overrides the color of every descendant. */
   paint(color: string): ModelForFamily<Elements, Family>;
 }
@@ -734,13 +741,6 @@ export interface GeometryCapabilities<
    * @code3d.param id {kind: 'vertex', label: 'Origin vertex'}
    */
   originVertex(id: VertexId): ModelForFamily<Elements, Family>;
-  /**
-   * Rotate about the current origin, in degrees, about fixed local X, Y, then Z axes.
-   * @code3d.param x {kind: 'angle', label: 'Rotate X'}
-   * @code3d.param y {kind: 'angle', label: 'Rotate Y'}
-   * @code3d.param z {kind: 'angle', label: 'Rotate Z'}
-   */
-  rotate(x: number, y: number, z: number): ModelForFamily<Elements, Family>;
   /** @code3d.param factor {kind: 'ratio', label: 'Scale'} */
   scaled(factor: number): ModelForFamily<Elements, Family>;
 }
@@ -1812,7 +1812,6 @@ export class ModelObject<
   }
 
   rotate(x: number, y: number, z: number): RuntimeModel<Elements, Kind> {
-    this.requireGeometry();
     const angles: Vec3 = [x, y, z];
     assertFiniteVector('rotate', angles);
     const operation = storedOperation('rotate', [

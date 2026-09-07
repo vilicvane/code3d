@@ -5,6 +5,7 @@ import {box, group, line, point, rectangle} from '../bld/node/index.js';
 import {
   composeTransforms,
   modelElementReference,
+  rotateVector,
 } from '../bld/tooling/index.js';
 import {defined} from '../../../test/assert.ts';
 import {createModelSnapshotter} from './model-test.ts';
@@ -221,7 +222,125 @@ test('group origin edits carry its existing self relation references without mov
 test('empty groups retain zero as their default and allow explicit origin edits', () => {
   const empty = group([])
     .originOffset(1, 2, 3)
+    .rotate(10, 20, 30)
     .originPoint(point([4, 5, 6]));
   near(snapshot(empty).origin, [0, 0, 0]);
   assert.deepEqual(snapshot(empty).children, []);
+});
+
+test('group rotation carries solved members, references and bounds around the selected origin', () => {
+  const base = box(10, 10, 10);
+  const cap = box(2, 2, 2).relate(self => self.on(base.up));
+  const original = group([base, cap])
+    .expose({base, cap})
+    .originPoint(cap.center);
+  const rotated = original.rotate(0, 0, 90);
+  const before = snapshot(original),
+    after = snapshot(rotated);
+  near(position(rotated.cap.center), [0, 0, 0]);
+  near(position(rotated.base.center), [6, 0, 0]);
+  // Member contact frames turn with their poses; queried directional bounds
+  // continue to use the receiving model's fixed axes.
+  near(
+    composeTransforms(after.children[0].transform, frame(base.up)).position,
+    composeTransforms(after.children[1].transform, frame(cap.down)).position,
+  );
+  near(position(rotated.right), [11, 0, 0]);
+  near(position(rotated.left), [-1, 0, 0]);
+  near(position(rotated.up), [5, 5, 0]);
+  near(
+    position(rotated.expose({corner: cap.vertex(3)}).corner),
+    position(rotated.cap.vertex(3)),
+  );
+  near(snapshot(rotated).origin, [0, 0, 0]);
+  near(position(original.base.center), [0, -6, 0]);
+  for (let i = 0; i < before.children.length; i++) {
+    assert.deepEqual(after.children[i].mesh, before.children[i].mesh);
+    near(after.children[i].transform.quaternion, [
+      0,
+      0,
+      Math.SQRT1_2,
+      Math.SQRT1_2,
+    ]);
+  }
+  const placed = box(2, 2, 2).relate(self => self.on(rotated.right));
+  near(
+    snapshot(group([rotated, placed])).children[1].transform.position,
+    [6, 0, 0],
+  );
+  near(
+    position(rotated.rotate(0, 0, -90).base.center),
+    position(original.base.center),
+  );
+  near(position(rotated.originOffset(2, 3, 4).cap.center), [-2, -3, -4]);
+  assert.throws(() => original.rotate(NaN, 0, 0), /finite/);
+});
+
+test('nested repeated assemblies rotate rigidly in fixed XYZ order without re-solving member relations', () => {
+  const base = box(10, 4, 6);
+  const cap = box(2, 2, 2).relate(self =>
+    self.on(base.up).around(base.axis).rotate(35),
+  );
+  const part = group([base, cap]).expose({base, cap});
+  const left = part.relate(self =>
+    self.base.center.align(point([-10, 0, 0])).rotate(10, 20, 30),
+  );
+  const right = part.relate(self => self.base.center.align(point([30, 0, 0])));
+  const original = group([left, right])
+    .expose({leftPart: left, rightPart: right})
+    .originPoint(right.base.center);
+  const rotated = original
+    .rotate(25, 35, 45)
+    .rotate(-10, 15, 20)
+    .paint('#abcdef');
+  for (const name of ['leftPart', 'rightPart'] as const) {
+    const expected = point(position(original[name].cap.vertex(3)))
+      .rotate(25, 35, 45)
+      .rotate(-10, 15, 20);
+    near(position(rotated[name].cap.vertex(3)), position(expected.center));
+  }
+  const before = snapshot(original),
+    after = snapshot(rotated);
+  for (let i = 0; i < before.children.length; i++)
+    for (let j = 0; j < before.children[i].children.length; j++) {
+      const a = before.children[i].children[j],
+        b = after.children[i].children[j];
+      assert.deepEqual(b.transform, a.transform);
+      assert.deepEqual(b.constraints, a.constraints);
+      assert.deepEqual(b.mesh, a.mesh);
+    }
+  near(position(rotated.rightPart.base.center), [0, 0, 0]);
+  assert.throws(() => rotated.originPoint(base.center), /multiple occurrences/);
+  near(
+    position(
+      rotated
+        .originPoint(rotated.leftPart.cap.vertex(3))
+        .leftPart.cap.vertex(3),
+    ),
+    [0, 0, 0],
+  );
+});
+
+test('direct group rotation updates stored self references and preserves external placement targets', () => {
+  const body = box(8, 6, 4);
+  const target = point([20, 30, 40]);
+  const original = group([body])
+    .expose({body})
+    .relate(self => self.body.vertex(3).align(target));
+  const rotated = original.rotate(15, 25, 35);
+  const result = snapshot(rotated);
+  near(
+    composeTransforms(
+      result.compositionTransform,
+      frame(rotated.body.vertex(3)),
+    ).position,
+    [20, 30, 40],
+  );
+  const child = result.children[0];
+  const localVertex = position(body.vertex(3));
+  near(
+    rotateVector(localVertex, child.transform.quaternion),
+    position(rotated.body.vertex(3)),
+  );
+  near(position(original.body.vertex(3)), localVertex);
 });

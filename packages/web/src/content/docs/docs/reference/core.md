@@ -109,8 +109,8 @@ conversion, use the [export scale](../../guides/exporting/#scale-and-orientation
 
 ## Origins and rotation
 
-All models provide `originPoint()` and `originOffset()`. Solids, faces, curves,
-and points additionally provide vertex/center selection and geometric rotation:
+All models provide `originPoint()`, `originOffset()` and `rotate()`. Solids, faces,
+curves and points additionally provide vertex/center selection:
 
 | Method                      | Behavior                                                      |
 | --------------------------- | ------------------------------------------------------------- |
@@ -135,9 +135,10 @@ A group chooses its default origin from the bounding-box center of its solved
 direct member origins, keeping the assembly axes. Geometry size does not change
 this default, and nested groups contribute only their own origins. Group origin
 edits move the entire assembly's local coordinates together; they preserve its
-internal relations. `originPoint(part.center)` resolves the member's actual
+internal relations. `rotate(x, y, z)` turns the solved assembly about its current
+origin, including nested instances. `originPoint(part.center)` resolves the member's actual
 placement; repeated sources need a specific instance reference. Groups do not
-have aggregate vertex IDs, a geometric center, geometric rotation or scaling.
+have aggregate vertex IDs, a geometric center or scaling.
 See [group coordinates](../../concepts/local-coordinates/#group-origins).
 
 For a runnable example and

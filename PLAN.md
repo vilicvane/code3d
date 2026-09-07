@@ -153,9 +153,11 @@ implementation context and historical outcomes, not a competing work queue.
   center of solved direct member origins, retaining assembly axes; empty groups
   default to zero. Nested groups contribute only their own origin. This frame
   is fixed at construction. Group origin edits re-express the assembly together,
-  preserving internal constraints and spacing. Point selection shares expose's
+  preserving internal constraints and spacing. Direct `rotate(x, y, z)` rotates
+  the saved assembly about its current origin, retaining nested placements and
+  transforming references, bounds, rendering and export consistently. Point selection shares expose's
   occurrence resolution and rejects ambiguous repeated sources. Groups have no
-  aggregate vertex IDs or geometric center/rotation/scaling capabilities.
+  aggregate vertex IDs or geometric center/scaling capabilities.
   See [#54](https://github.com/vilicvane/code3d/issues/54).
 - Origin drags freeze the gesture-start snapshot and show a candidate origin
   against it. Commit switches to result coordinates; cancel restores the start.
