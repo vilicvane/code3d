@@ -44,7 +44,12 @@ export type SpatialBindingObject = Readonly<{
 
 export type ModelSpatialBinding = Readonly<{
   operation:
-    'originOffset' | 'originVertex' | 'originCenter' | 'rotate' | 'pivot';
+    | 'originOffset'
+    | 'originPoint'
+    | 'originVertex'
+    | 'originCenter'
+    | 'rotate'
+    | 'pivot';
   source: SpatialBindingSource;
   objects: readonly SpatialBindingObject[];
 }>;
@@ -92,7 +97,10 @@ export function spatialBindings(
   )
     return [];
   const kind = operation.kind;
-  const offsetOrigin = kind === 'originVertex' || kind === 'originCenter';
+  const offsetOrigin =
+    kind === 'originPoint' ||
+    kind === 'originVertex' ||
+    kind === 'originCenter';
   const mode = kind === 'rotate' ? 'rotate' : 'translate';
   const usages = editableParameterUsages(evaluation.parameters ?? []);
   const matching = occurrences.flatMap(candidate => {
@@ -343,6 +351,7 @@ export function isSpatialOperation(
 ): kind is Exclude<ModelSpatialBinding['operation'], 'pivot'> {
   return (
     kind === 'originOffset' ||
+    kind === 'originPoint' ||
     kind === 'originVertex' ||
     kind === 'originCenter' ||
     kind === 'rotate'

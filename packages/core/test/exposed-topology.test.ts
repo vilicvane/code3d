@@ -125,14 +125,14 @@ test('nested exposure and chained constraints move the containing assembly', () 
     self.mount.center.on(anchor.up).offset(0, 0, 0),
   );
   try {
-    near(position(outer.mount.center), [35, 50, 60]);
-    near(position(outer.component.body.center), [40, 50, 60]);
+    near(position(outer.mount.center), [-5, 0, 0]);
+    near(position(outer.component.body.center), [0, 0, 0]);
     const edge = outer.mount.edges()[0];
     assert.equal(defined(modelTopologyReference(edge)).model, outer);
     assert.equal(defined(modelTopologyReference(edge)).geometry, body);
     assert.equal(defined(modelElementReference(edge.midpoint)).model, outer);
     const snapshot = createModelSnapshotter()(placed);
-    near(snapshot.compositionTransform.position, [-25, -50, -60]);
+    near(snapshot.compositionTransform.position, [15, 0, 0]);
     assert.equal(snapshot.constraints[0].source.nodeId, snapshot.nodeId);
   } finally {
     disposeModelObjects([body, inner, target, moved, outer, anchor, placed]);

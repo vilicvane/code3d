@@ -675,3 +675,44 @@ test('origin drag uses its initial snapshot and switches to result coordinates o
   near([...defined(defined(next).mesh).topologyVertices], [3, 17, 26]);
   near(defined(next).origin, [0, 0, 0]);
 });
+
+test('originPoint on geometry and groups appends an offset and preserves point references through preview and commit', async () => {
+  for (const expression of [
+    'base.originPoint(base.vertex(3))',
+    'group([base, cap]).originPoint(cap.center)',
+  ]) {
+    const source = `import {box, group} from '@code3d/core';
+const base = box(10, 10, 10);
+const cap = box(2, 2, 2).relate(self => self.on(base.up));
+export default ${expression};`;
+    const {node, bindings} = await build(source, 'originPoint');
+    assert.equal(bindings.length, 3);
+    near(bindings[0].frame.position, [0, 0, 0]);
+    const intent = spatialIntent(bindings[0], 2);
+    const host = hostFor(source);
+    const session = new ToolEngine(host.host).begin('point-origin');
+    assert.equal(session.preview(intent).status, 'ready');
+    assert.equal(host.source(), source);
+    near(intent.preview.objects[0].transform.position, [0, 0, 0]);
+    assert.equal(session.commit(intent).status, 'committed');
+    assert.ok(host.source().includes(`${expression}.originOffset(2, 0, 0)`));
+    const {node: next} = await build(host.source(), 'originOffset');
+    near(next.origin, [0, 0, 0]);
+    if (node.kind === 'group') {
+      for (let i = 0; i < node.children.length; i++)
+        near(
+          next.children[i].transform.position,
+          node.children[i].transform.position.map(
+            (v, axis) => v - (axis === 0 ? 2 : 0),
+          ),
+        );
+    } else {
+      near(
+        [...defined(next.mesh).topologyVertices],
+        [...defined(node.mesh).topologyVertices].map(
+          (v, i) => v - (i % 3 === 0 ? 2 : 0),
+        ),
+      );
+    }
+  }
+});

@@ -24,7 +24,8 @@ Place the cursor in `blank.originVertex(3)`. Pick a vertex in the viewport to
 use it as the origin. The ID belongs to the operation's input model, just like
 other [topology selections](../topology/).
 
-Use `.originOffset(dx, dy, dz)` to move the origin by a displacement or `.originCenter()` to make
+Use `.originPoint(pointRef)` to select a center, named point, or topology vertex
+on any model, including a group member. Use `.originOffset(dx, dy, dz)` to move the origin by a displacement or `.originCenter()` to make
 the body's center local zero. `originVertex()` similarly makes the chosen
 vertex zero. These operations return new model values; `blank` is unchanged.
 
@@ -35,7 +36,7 @@ marker moves against the snapshot captured at drag start. On release, the
 geometry switches to the resulting coordinates and the marker returns to local
 zero. Offsets accumulate across calls.
 
-You can also drag the origin marker's arrows while inspecting `originVertex`
+You can also drag the origin marker's arrows while inspecting `originPoint`, `originVertex`
 or `originCenter`. The App adds or updates an `originOffset(...)` call so the
 chosen vertex or center remains the starting point.
 
@@ -83,6 +84,8 @@ adjusts the current expression by a numeric increment. Entering a number in a
 panel can instead replace that expression: see
 [what a panel can edit](../model-tools/#what-a-panel-can-edit).
 
-These operations are available on solids, faces, curves, and points, not
-groups. See the [API reference](../../reference/core/#origins-and-rotation)
+Solids, faces, curves, and points provide all these operations. Groups provide
+`originPoint()` and `originOffset()`; their default origin comes from the center
+of their direct members’ origin bounds. See [group origins](../../concepts/local-coordinates/#group-origins)
+for direct assembly and instance selection. See the [API reference](../../reference/core/#origins-and-rotation)
 for the complete method list.

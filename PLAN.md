@@ -135,8 +135,8 @@ implementation context and historical outcomes, not a competing work queue.
 - Monaco multi-selection and automatic boolean code generation are deferred
   until single-object discovery, rendering, and position relations are solid.
 
-- Geometric models provide `originOffset(dx, dy, dz)`, `originVertex(id)` and
-  `originCenter()`. Origin is always model-local zero; an offset d re-expresses
+- All models provide `originOffset(dx, dy, dz)` and `originPoint(pointRef)`.
+  Geometric models also provide `originVertex(id)` and `originCenter()`. Origin is always model-local zero; an offset d re-expresses
   all point coordinates as p-d, preserving shape, directions, topology IDs and
   earlier model values. Centers and named references follow the same transform.
   `center` is carried from the body's initial bounds rather than recalculated
@@ -149,8 +149,14 @@ implementation context and historical outcomes, not a competing work queue.
 - `rotate(x, y, z)` and positive finite `scaled(factor)` act about current local
   zero. Geometry, named anchors and references transform together. Booleans
   keep the primary operand's coordinates; loft keeps the first section's
-  coordinates. Groups preserve their assembled local placement and do not
-  provide geometric scaling or origin edits.
+  coordinates. Groups choose their default local zero from the bounding-box
+  center of solved direct member origins, retaining assembly axes; empty groups
+  default to zero. Nested groups contribute only their own origin. This frame
+  is fixed at construction. Group origin edits re-express the assembly together,
+  preserving internal constraints and spacing. Point selection shares expose's
+  occurrence resolution and rejects ambiguous repeated sources. Groups have no
+  aggregate vertex IDs or geometric center/rotation/scaling capabilities.
+  See [#54](https://github.com/vilicvane/code3d/issues/54).
 - Origin drags freeze the gesture-start snapshot and show a candidate origin
   against it. Commit switches to result coordinates; cancel restores the start.
   Coordinate tuple components retain numeric tools and source provenance.

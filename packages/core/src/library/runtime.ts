@@ -195,6 +195,7 @@ export type ModelOperationKind =
   | 'scaled'
   | 'originOffset'
   | 'originVertex'
+  | 'originPoint'
   | 'originCenter'
   | 'rotate'
   | 'fillet'
@@ -483,6 +484,7 @@ type ModelObjectInit<Kind extends ModelKind = ModelKind> = Readonly<{
   name?: string;
   color?: string;
   children?: readonly ModelObject[];
+  assembly?: SolveContext;
   constraints?: readonly StoredConstraint[];
   elements?: StoredElements;
   sourceRefs?: readonly SourceRef[];
@@ -513,8 +515,22 @@ type SolidGeometry = KernelArtifact<
 >;
 
 type SolveContext = {
-  poses: Map<ModelObject, RigidTransform>;
+  poses: ReadonlyMap<ModelObject, RigidTransform>;
 };
+
+function transformSolveContext(
+  context: SolveContext,
+  transform: RigidTransform,
+): SolveContext {
+  return {
+    poses: new Map(
+      [...context.poses].map(([model, pose]) => [
+        model,
+        composeTransforms(transform, pose),
+      ]),
+    ),
+  };
+}
 
 const unitScale: Vec3 = [1, 1, 1];
 let nextNodeId = 1;
@@ -690,16 +706,6 @@ export interface ModelCapabilities<
   expose<const Sources extends ElementSources>(
     sources: Sources,
   ): ModelForFamily<MergedElements<Elements, ExposedElements<Sources>>, Family>;
-  /** Return a recolored value; a group overrides the color of every descendant. */
-  paint(color: string): ModelForFamily<Elements, Family>;
-}
-
-export interface GeometryCapabilities<
-  Elements extends NamedElements,
-  Family extends ModelGeometryKind,
-> extends GeometryQueryCapabilities {
-  /** Re-express the model with its geometric center at local zero. */
-  originCenter(): ModelForFamily<Elements, Family>;
   /**
    * Shift the origin by this displacement: every local point becomes p - d.
    * @code3d.param dx {kind: 'length', label: 'Origin ΔX'}
@@ -711,6 +717,18 @@ export interface GeometryCapabilities<
     dy: number,
     dz: number,
   ): ModelForFamily<Elements, Family>;
+  /** Re-express the model with this point reference at local zero. */
+  originPoint(point: PointAnchor): ModelForFamily<Elements, Family>;
+  /** Return a recolored value; a group overrides the color of every descendant. */
+  paint(color: string): ModelForFamily<Elements, Family>;
+}
+
+export interface GeometryCapabilities<
+  Elements extends NamedElements,
+  Family extends ModelGeometryKind,
+> extends GeometryQueryCapabilities {
+  /** Re-express the model with its geometric center at local zero. */
+  originCenter(): ModelForFamily<Elements, Family>;
   /**
    * Re-express the model with the selected vertex at local zero.
    * @code3d.param id {kind: 'vertex', label: 'Origin vertex'}
@@ -1405,6 +1423,7 @@ export class ModelObject<
     return valueTrace(this).parameters;
   }
   private readonly geometry?: ModelGeometry;
+  private readonly assembly?: SolveContext;
   private readonly meshTolerance: number;
   private readonly geometryAnchor: StoredElement;
   private readonly elements: StoredElements;
@@ -1436,6 +1455,11 @@ export class ModelObject<
     this.name = init.name ?? defaultModelNames[init.kind];
     this.color = init.color;
     this.children = init.children ?? [];
+    this.assembly =
+      init.assembly ??
+      (this.kind === 'group'
+        ? ModelObject.createAssembly(this.children)
+        : undefined);
     this.constraints = [...(init.constraints ?? [])];
     valueTraces.set(this, {
       sourceRefs: [...(init.sourceRefs ?? [])],
@@ -1567,45 +1591,13 @@ export class ModelObject<
   expose<const Sources extends ElementSources>(
     sources: Sources,
   ): RuntimeModel<MergedElements<Elements, ExposedElements<Sources>>, Kind> {
-    const members = this.memberPoses();
-    const context = ModelObject.createSolveContext([
-      this,
-      ...Object.values(sources)
-        .map(source => anchorReference(source).model)
-        .filter(model => !members.has(model)),
-    ]);
-    const ownPose = this.solvePose(context);
-    const references: ModelObject[] = [];
+    const entries = Object.entries(sources);
+    const elements = this.localElements(entries.map(([, source]) => source));
     const exposed = Object.fromEntries(
-      Object.entries(sources).map(([name, source]) => {
-        const reference = anchorReference(source);
-        references.push(reference.model);
-        const {
-          kind,
-          transform: frame,
-          topology,
-          members: nested,
-          bound,
-          facing,
-        } = source instanceof ModelObject
-          ? source.exposedElement()
-          : (source as ModelAnchor)[anchorReferenceValue];
-        const memberPose = members.get(reference.model);
-        if (memberPose === null)
-          throw new Error(
-            `The exposed element ${name} belongs to multiple occurrences. Expose it through the intended child model's named reference.`,
-          );
-        const transform =
-          memberPose ??
-          relativeTransform(reference.model.solvePose(context), ownPose);
-        return [
-          name,
-          transformElement(
-            {kind, transform: frame, topology, members: nested, bound, facing},
-            transform,
-          ),
-        ];
-      }),
+      entries.map(([name], index) => [name, elements[index]]),
+    );
+    const references = entries.map(
+      ([, source]) => anchorReference(source).model,
     );
     const operation = storedOperation('expose', [
       {model: this, role: 'source', index: 0},
@@ -1624,6 +1616,43 @@ export class ModelObject<
       MergedElements<Elements, ExposedElements<Sources>>,
       Kind
     >;
+  }
+
+  /** Resolve both own and occurrence references into this model's local frame. */
+  private localElements(sources: readonly Anchor[]): StoredElement[] {
+    const members = this.memberPoses();
+    const external = sources
+      .map(source => anchorReference(source).model)
+      .filter(model => !members.has(model));
+    const context = external.length
+      ? ModelObject.createSolveContext([this, ...external])
+      : undefined;
+    return sources.map(source => {
+      const reference = anchorReference(source);
+      const {
+        kind,
+        transform: frame,
+        topology,
+        members: nested,
+        bound,
+        facing,
+      } = source instanceof ModelObject ? source.exposedElement() : reference;
+      const memberPose = members.get(reference.model);
+      if (memberPose === null)
+        throw new Error(
+          "The point or element belongs to multiple occurrences. Expose it through the intended child model's named reference.",
+        );
+      const transform =
+        memberPose ??
+        relativeTransform(
+          reference.model.solvePose(context!),
+          this.solvePose(context!),
+        );
+      return transformElement(
+        {kind, transform: frame, topology, members: nested, bound, facing},
+        transform,
+      );
+    });
   }
 
   vertex(id: VertexId): Vertex {
@@ -1723,7 +1752,18 @@ export class ModelObject<
   ): RuntimeModel<Elements, Kind> {
     const offset: Vec3 = [dx, dy, dz];
     assertFiniteVector('originOffset', offset);
-    return this.withOrigin(offset, 'originOffset');
+    return this.withOrigin(offset, {kind: 'originOffset'});
+  }
+
+  originPoint(point: PointAnchor): RuntimeModel<Elements, Kind> {
+    const reference = anchorReference(point);
+    if (reference.kind !== 'point')
+      throw new Error('originPoint() requires a point reference.');
+    const [element] = this.localElements([point]);
+    return this.withOrigin(element.transform.position, {
+      kind: 'originPoint',
+      model: reference.model,
+    });
   }
 
   originVertex(id: VertexId): RuntimeModel<Elements, Kind> {
@@ -1733,30 +1773,38 @@ export class ModelObject<
       geometry.topology.vertices,
       [id],
     );
-    return this.withOrigin(position, 'originVertex', id);
+    return this.withOrigin(position, {kind: 'originVertex', id});
   }
 
   originCenter(): RuntimeModel<Elements, Kind> {
     this.requireGeometry();
     const position = this.elements.center.transform.position;
-    return this.withOrigin(position, 'originCenter');
+    return this.withOrigin(position, {kind: 'originCenter'});
   }
 
   private withOrigin(
     offset: Vec3,
-    kind: 'originOffset' | 'originVertex' | 'originCenter',
-    vertexId?: VertexId,
+    selection:
+      | {kind: 'originOffset' | 'originCenter'}
+      | {kind: 'originVertex'; id: VertexId}
+      | {kind: 'originPoint'; model: ModelObject},
   ): RuntimeModel<Elements, Kind> {
     const transform = translation(negateVector(offset));
-    const operation = storedOperation(kind, [
+    const operation = storedOperation(selection.kind, [
       {model: this, role: 'source', index: 0},
     ]);
+    if (selection.kind === 'originPoint' && selection.model !== this)
+      operation.inputs.push({
+        model: selection.model,
+        role: 'reference',
+        index: 0,
+      });
     operation.spatial = {origin, vector: offset};
-    if (vertexId !== undefined) {
+    if (selection.kind === 'originVertex') {
       operation.selections.push({
         kind: 'vertex',
         input: this,
-        ids: [vertexId],
+        ids: [selection.id],
         transform,
       });
     }
@@ -1764,6 +1812,7 @@ export class ModelObject<
   }
 
   rotate(x: number, y: number, z: number): RuntimeModel<Elements, Kind> {
+    this.requireGeometry();
     const angles: Vec3 = [x, y, z];
     assertFiniteVector('rotate', angles);
     const operation = storedOperation('rotate', [
@@ -1777,6 +1826,27 @@ export class ModelObject<
     transform: RigidTransform,
     operation: StoredOperation,
   ): RuntimeModel<Elements, Kind> {
+    const overrides: Partial<ModelObjectInit<Kind>> = {
+      geometryAnchor: transformElement(this.geometryAnchor, transform),
+      elements: Object.fromEntries(
+        Object.entries(this.elements).map(([name, element]) => [
+          name,
+          transformElement(element, transform),
+        ]),
+      ),
+      constraints: this.mapConstraintGeometry(
+        element => transformElement(element, transform),
+        point => composeTransforms(transform, translation(point)).position,
+      ),
+    };
+    if (this.assembly)
+      return this.copy(
+        {
+          ...overrides,
+          assembly: transformSolveContext(this.assembly, transform),
+        },
+        operation,
+      );
     const source = this.requireGeometry();
     const geometry = evaluateModelGeometry(
       'transform',
@@ -1796,23 +1866,7 @@ export class ModelObject<
         }
       },
     );
-    return this.copyWithGeometry(
-      geometry,
-      {
-        geometryAnchor: transformElement(this.geometryAnchor, transform),
-        elements: Object.fromEntries(
-          Object.entries(this.elements).map(([name, element]) => [
-            name,
-            transformElement(element, transform),
-          ]),
-        ),
-        constraints: this.mapConstraintGeometry(
-          element => transformElement(element, transform),
-          point => composeTransforms(transform, translation(point)).position,
-        ),
-      },
-      operation,
-    );
+    return this.copyWithGeometry(geometry, overrides, operation);
   }
 
   private mapConstraintGeometry(
@@ -2089,7 +2143,7 @@ export class ModelObject<
     } as const;
 
     if (this.kind === 'group') {
-      const childContext = ModelObject.createSolveContext(this.children);
+      const childContext = this.assembly!;
       return {
         ...common,
         children: this.children.map(child =>
@@ -2357,7 +2411,7 @@ export class ModelObject<
       [this, identityRigidTransform],
     ]);
     if (this.children.length) {
-      const context = ModelObject.createSolveContext(this.children);
+      const context = this.assembly!;
       for (const child of this.children) {
         const pose = child.solvePose(context);
         for (const [member, localPose] of child.memberPoses()) {
@@ -2395,7 +2449,7 @@ export class ModelObject<
     }
     if (reference.whole) {
       if (this.geometry) return transformedBounds(this.geometry, transform);
-      const context = ModelObject.createSolveContext(this.children);
+      const context = this.assembly!;
       return combineBounds(
         this.children.map(child =>
           child[referenceBounds](
@@ -2648,6 +2702,19 @@ export class ModelObject<
         axisOnly: pivot.kind === 'around',
       },
     };
+  }
+
+  /** Fix the assembly frame once, using only its direct member origins. */
+  private static createAssembly(
+    children: readonly ModelObject[],
+  ): SolveContext {
+    const context = ModelObject.createSolveContext(children);
+    const center = children.length
+      ? boundsCenter(
+          pointBounds(children.map(child => child.solvePose(context).position)),
+        )
+      : origin;
+    return transformSolveContext(context, translation(negateVector(center)));
   }
 
   private static createSolveContext(
@@ -2937,6 +3004,7 @@ export class ModelObject<
       name: this.name,
       color: this.color,
       children: this.children,
+      assembly: this.assembly,
       constraints: this.constraints,
       elements: this.elements,
       sourceRefs: this.sourceRefs,

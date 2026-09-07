@@ -273,8 +273,8 @@ sampled tangent or normal; `.center.on()` uses only the calculated point.
 
 ## Origins and rotation
 
-Geometric models (solids, faces, curves, and points) support immutable origin
-editing and rotation:
+All models support immutable origin editing. Geometric models (solids, faces,
+curves, and points) also support rotation:
 
 ```ts
 const part = box(24, 6, 14)
@@ -283,7 +283,9 @@ const part = box(24, 6, 14)
   .rotate(15, 35, 0);
 ```
 
-- `originVertex(id)` makes the selected input vertex local zero.
+- `originPoint(pointRef)` makes a center, named point, or topology vertex local zero.
+- `originVertex(id)` selects a geometric model’s own input vertex; it is equivalent
+  to `model.originPoint(model.vertex(id))`.
 - `originCenter()` makes the model's `center` anchor local zero.
 - `originOffset(dx, dy, dz)` re-expresses every local point as `p - [dx, dy, dz]`.
 - `rotate(x, y, z)` rotates about local zero in degrees, applying fixed local
@@ -305,10 +307,31 @@ has center `[5, 0, 0]`, and `.rotate(0, 90, 0)` takes its end to `[0, 0, -10]`.
 A curve's tangent reference frame does not redefine model XYZ. Directional
 bounds use the model axes, including after geometric rotation.
 
-Groups expose composition capabilities rather than these geometric operations.
+Groups provide `originPoint()` and `originOffset()`. Their default origin is
+chosen when constructed: solve the direct members' placement, then take the
+axis-aligned bounding-box center of their **origins**, retaining the assembly
+axes. Geometry size does not affect this choice. A nested group contributes
+only its own origin; an empty group defaults to zero. Explicit origin edits
+re-express the assembled result together, preserving internal constraints and
+member spacing. The default is not recalculated on later operations.
+
+```ts
+const base = box(20, 4, 10).originOffset(0, 2, 0);
+const lid = box(20, 2, 10).originOffset(0, -1, 0);
+const assembly = group([base, lid]); // Common origins at their contact plane.
+const mounted = assembly.originPoint(lid.center);
+```
+
+`originPoint()` converts references to the receiver's local frame, including
+solved member placements. With repeated geometry, select a specific instance's
+named point, for example `assembly.originPoint(rightPart.body.center)`; an
+ambiguous shared source is rejected. Groups have no aggregate vertex IDs or
+geometric `center`, rotation, or scaling methods. The
+[group origins example](../app/examples/group-origins.ts) shows direct assembly
+and selection in repeated instances.
 
 In the App, origin offsets have translation arrows; `originVertex`
-uses vertex picking and an origin marker. Dragging an `originCenter()` or
+uses vertex picking and an origin marker. Dragging an `originPoint()`, `originCenter()` or
 `originVertex()` marker adds or edits an `originOffset()` call. Rotation rings edit the corresponding
 angle about its effective axis, including when other angles are nonzero. Dragging
 uses the gesture-start snapshot: the candidate origin moves against fixed

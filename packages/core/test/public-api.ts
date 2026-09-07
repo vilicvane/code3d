@@ -323,8 +323,20 @@ model.scaled(2);
 
 // @ts-expect-error Groups do not contain geometry to rotate.
 groupModel.rotate(0, 90, 0);
-// @ts-expect-error Groups do not expose geometric origin editing.
-groupModel.originOffset(0, 0, 0);
+groupModel.originOffset(0, 0, 0).originPoint(solid.center);
+model.originPoint(pointAnchor).originOffset(1, 2, 3);
+solid.originPoint(solid.vertex(1)).fillet(1);
+faceModel.originPoint(faceModel.center).surface(1);
+edgeModel.originPoint(edgeModel.start).edge(1);
+vertexModel.originPoint(vertexModel).vertex(1);
+// @ts-expect-error Choose a point on an edge rather than the edge itself.
+solid.originPoint(edgeModel);
+// @ts-expect-error A plane has no unique point.
+solid.originPoint(solid.up);
+// @ts-expect-error Coordinates are offsets, not point references.
+solid.originPoint([1, 2, 3]);
+// @ts-expect-error Groups have no aggregated topology vertex namespace.
+groupModel.originVertex(1);
 // @ts-expect-error Groups do not have a geometric center.
 groupModel.originCenter();
 // @ts-expect-error Center setters do not take coordinates.

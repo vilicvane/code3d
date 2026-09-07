@@ -47,8 +47,9 @@ Directions and normals keep their direction. The operation returns a new
 model value and preserves topology IDs; earlier values and references retain
 their meaning. Successive origin offsets add and opposite offsets cancel.
 
-Use `originVertex(id)` to make a chosen vertex zero, or `originCenter()` to
-make the center anchor zero. The [origin and rotation guide](../../guides/origins-and-rotation/)
+Use `originPoint(pointRef)` on any model to make a referenced point zero.
+For geometric models, `originVertex(id)` selects an own topology vertex and
+`originCenter()` selects the carried center anchor. The [origin and rotation guide](../../guides/origins-and-rotation/)
 shows how to select and drag these in the viewport.
 
 ## The origin, center, and axes have different roles
@@ -93,3 +94,37 @@ New model values also have a coordinate frame:
 Export uses these same coordinates: a standalone part has local geometry,
 and a composition includes its parts' resolved placement. The chosen output
 scale and up axis are applied afterward. See [exporting models](../../guides/exporting/).
+
+## Group origins
+
+A group first solves the placement of its direct members, then chooses the
+bounding-box center of their origins as its local zero. The axes stay aligned
+with the assembly reference axes. This uses member origins, not geometry bounds
+or an average of points. Nested groups contribute just their own origin; an
+empty group starts at zero.
+
+```ts
+import {box, group} from '@code3d/core';
+
+const base = box(20, 4, 10).originOffset(0, 2, 0);
+const lid = box(20, 2, 10).originOffset(0, -1, 0);
+const assembly = group([base, lid]);
+const mounted = assembly.originPoint(lid.center);
+```
+
+Here the unrestrained member origins coincide at the contact plane. That point
+becomes the group origin. `originPoint(lid.center)` chooses the lid's center in
+the assembled coordinates; `originOffset()` can then shift it further. Both
+operations re-express the whole group, preserving member spacing and internal
+relations. The default is chosen once and does not overwrite explicit edits.
+
+Changing a member's origin before constructing a new group may change its
+default, even if constraints keep the member's physical geometry in place.
+Within an existing model, origin edits also update its own stored relation
+references, so a constraint on a selected geometric point still follows that
+same point.
+
+For repeated geometry, select an instance's named reference, such as
+`assembly.originPoint(rightPart.body.center)`. A reference to the shared source
+alone is ambiguous and is rejected. The same instance resolution applies to
+`expose()`.
