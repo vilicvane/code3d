@@ -222,13 +222,20 @@ export class SketchEditorController {
       ...this.data
         .filter(point => !removed.includes(point.id))
         .map(point => data.find(p => p.id === point.id) ?? point),
-      ...entries.flatMap<SketchGeometryData>(([kind, id, values]) =>
-        kind === 'point'
-          ? [{id, parameters: values}]
-          : kind === 'circle' || kind === 'arc'
-            ? [{id, parameters: [values[1]]}]
-            : [],
-      ),
+      ...entries.flatMap<SketchGeometryData>(([kind, id, values]) => {
+        if (kind === 'point') return [{id, parameters: values}];
+        if (kind === 'line') return [];
+        const original =
+          change.kind === 'trim'
+            ? change.replacements.find(r => r.ids.includes(id))?.original
+            : undefined;
+        // Trim copies the authored radius, which may differ from its solved
+        // value. Keep that same data for edits made before compilation returns.
+        const parameters = original
+          ? this.data.find(p => p.id === original.id)!.parameters
+          : [values[1]];
+        return [{id, parameters}];
+      }),
     ];
     const additions = entries.map(sketchDraftEntity);
     const entities = [
@@ -255,14 +262,17 @@ export class SketchEditorController {
           return [];
         const rewrite =
           change.kind === 'trim' &&
-          change.lineConstraints.find(c => c.index === index);
+          change.constraintReplacements.find(c => c.index === index);
         if (!rewrite) return [constraint];
         const [kind, data] = constraint;
         const replacements: SketchConstraint<SketchPointAddress>[] =
           kind === 'horizontal' || kind === 'vertical'
-            ? rewrite.lines.map(id => [kind, id])
-            : kind === 'length' || kind === 'angle'
-              ? rewrite.lines.map(id => [kind, [id, data[1]]])
+            ? rewrite.ids.map(id => [kind, id])
+            : kind === 'length' ||
+                kind === 'angle' ||
+                kind === 'radius' ||
+                kind === 'sweep'
+              ? rewrite.ids.map(id => [kind, [id, data[1]]])
               : [constraint];
         // The source resolver replaces the first target in place and appends
         // copies. Keep the same indices for another edit before compilation.

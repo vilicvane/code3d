@@ -46,7 +46,9 @@ function segments(...layers) {
       .filter(e => e.kind === 'point')
       .map(p => ({...p, layer: layer.id})),
   );
-  return sketchSegments(layers, points);
+  return sketchSegments(layers, points).filter(
+    segment => segment.kind === 'line',
+  );
 }
 
 test('trimmed crossing geometry and direction constraints survive fresh compiler replay', async () => {
@@ -226,7 +228,7 @@ test('upstream circular boundaries stay read-only during a local line trim', () 
   const change = trimSketchSegment([base, local], segments(base, local)[1]);
   assert.deepEqual(change.ids, [3]);
   assert.deepEqual(
-    change.lines.map(e => e.id),
+    change.replacements.map(r => r.original.id),
     [3],
   );
   assert.equal(change.entries.filter(e => e[0] === 'line').length, 2);
@@ -425,10 +427,10 @@ test('end trims keep the line ID and remove its length, while complete deletion 
     assert.deepEqual(change.entries, [['line', 3, expected]]);
     assert.deepEqual(change.ids, [3, index + 1]);
     assert.deepEqual(change.constraints, index === 0 ? [3] : []);
-    assert.deepEqual(change.lineConstraints, [
-      {index: 0, lines: [3]},
-      {index: 1, lines: []},
-      {index: 2, lines: [3]},
+    assert.deepEqual(change.constraintReplacements, [
+      {index: 0, ids: [3]},
+      {index: 1, ids: []},
+      {index: 2, ids: [3]},
     ]);
   }
   const whole = {...value, entities: value.entities.filter(e => e.id !== 4)};
@@ -436,7 +438,7 @@ test('end trims keep the line ID and remove its length, while complete deletion 
   assert.deepEqual(change.ids, [3, 1, 2]);
   assert.deepEqual(change.constraints, [3]);
   assert.deepEqual(change.entries, []);
-  assert.ok(change.lineConstraints.every(c => !c.lines.length));
+  assert.ok(change.constraintReplacements.every(c => !c.ids.length));
 });
 
 test('middle trims retire the original line and allocate two fresh IDs without renumbering points', () => {
@@ -460,13 +462,13 @@ test('middle trims retire the original line and allocate two fresh IDs without r
     ['line', 6, [ref(1), ref(3)]],
     ['line', 7, [ref(4), ref(2)]],
   ]);
-  assert.deepEqual(change.lineConstraints, [
-    {index: 0, lines: [6, 7]},
-    {index: 1, lines: []},
-    {index: 2, lines: [6, 7]},
+  assert.deepEqual(change.constraintReplacements, [
+    {index: 0, ids: [6, 7]},
+    {index: 1, ids: []},
+    {index: 2, ids: [6, 7]},
   ]);
   assert.deepEqual(
-    change.lines.map(line => line.id),
+    change.replacements.map(r => r.original.id),
     [5],
   );
 });

@@ -66,10 +66,10 @@ implementation context and historical outcomes, not a competing work queue.
   diagnostic tag. It works at coincident coordinates without changing already
   satisfied geometry. Both modes retain the common gesture anchor rule; dragging
   the center does not implicitly mean translating the entire rectangle.
-  Straight-line selection and deletion use intervals delimited by existing
+  Curve selection and deletion use intervals delimited by existing
   points, finite line/circle/arc intersections and overlapping endpoints. Merely crossing
   or selecting geometry does not split the source. Deleting an end interval
-  retains the line ID; deleting an interior interval retires it and assigns two
+  retains the line/arc ID; deleting an interior interval retires it and assigns two
   fresh IDs. Points disconnected by the deletion and their constraints are
   removed atomically; shared points (including geometric T junctions), upstream
   points, unrelated standalone points and other lines remain. Computed cuts
@@ -103,7 +103,8 @@ implementation context and historical outcomes, not a competing work queue.
   Arcs use `['arc', id, [centerPoint, radius, startPoint, endPoint, 'cw' | 'ccw']]`
   and native ArcRules, with radius constraints shared with circles. Radius is
   current geometry, not a hard dimension; no hidden angles are authored.
-  Initialization projects endpoints radially, averaging simultaneous proposals
+  Initialization projects endpoints radially, using an explicit radius dimension
+  when present and current radius data otherwise, averaging simultaneous proposals
   for shared points while respecting locked/fixed/positioned axes. The seed then
   solves against all structural and authored constraints, with radius still free.
   Edge and endpoint dragging share radius tracking, AST permissions, expression
@@ -122,7 +123,14 @@ implementation context and historical outcomes, not a competing work queue.
   Analytic intersections share model-space tolerances, finite-arc filtering and
   tangency/overlap boundaries. Circles and arcs can delimit straight-line trims,
   including read-only upstream curves; their source and constraints stay unchanged.
-  Trimming circles/arcs themselves, regions and B-Rep generation remain later slices.
+  Circles use cyclic intervals without an artificial zero-angle seam; zero or one
+  boundary means whole-circle deletion. A surviving circle interval becomes a CW
+  arc with the same ID. Arc trims preserve direction and center/radius source,
+  including expressions; radius constraints follow survivors, while the original
+  whole-arc sweep is removed. Circular overlaps share one trim transaction, cut
+  points and orphan cleanup, just like lines. Select + Delete and hover/click Trim
+  use the same intervals; radius dragging remains available.
+  Regions and B-Rep generation remain later slices.
   The sketch canvas fills the viewport with floating controls. Its top-right
   icon toolbar groups editing, drawing and view controls, with native hover
   labels and one keyboard Tab stop; narrow viewports place the whole toolbar

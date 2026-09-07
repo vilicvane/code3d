@@ -191,15 +191,15 @@ test('whole overlap removal cleans all newly orphaned endpoints and their constr
   const change = geometry.trimSketchSegment([value], segments(value)[0]);
   assert.equal(change.kind, 'trim');
   assert.deepEqual(
-    change.lines.map(l => l.id),
+    change.replacements.map(r => r.original.id),
     [5, 6],
   );
   assert.deepEqual(change.ids, [5, 6, 1, 2, 3, 4]);
   assert.deepEqual(change.entries, []);
   assert.deepEqual(change.constraints, [0, 3, 4]);
-  assert.deepEqual(change.lineConstraints, [
-    {index: 1, lines: []},
-    {index: 2, lines: []},
+  assert.deepEqual(change.constraintReplacements, [
+    {index: 1, ids: []},
+    {index: 2, ids: []},
   ]);
 });
 
@@ -271,11 +271,11 @@ test('computed cut points are shared by all overlapping survivors and direction 
       ['line', 18, [ref(13), ref(3)]],
     ],
   );
-  assert.deepEqual(change.lineConstraints, [
-    {index: 0, lines: [17, 18]},
-    {index: 1, lines: []},
-    {index: 2, lines: [14, 16]},
-    {index: 3, lines: []},
+  assert.deepEqual(change.constraintReplacements, [
+    {index: 0, ids: [17, 18]},
+    {index: 1, ids: []},
+    {index: 2, ids: [14, 16]},
+    {index: 3, ids: []},
   ]);
 });
 

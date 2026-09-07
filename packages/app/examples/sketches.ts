@@ -14,6 +14,8 @@ export const radiusData = sketch([
 
 // Trim the line between circle/arc crossings. The curves stay unchanged;
 // the missing lower-left part of the CW arc is not a cutting boundary.
+// Or trim the circular edges themselves: only the highlighted interval goes.
+// A circle becomes a CW arc; one Undo restores its original tuple and points.
 export const curveCuts = sketch([
   ['point', 1, [-30, 0]],
   ['point', 2, [30, 0]],

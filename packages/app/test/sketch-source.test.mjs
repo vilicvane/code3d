@@ -20,11 +20,19 @@ const trim = (
   points = [address(1), address(2)],
 ) => ({
   kind: 'trim',
-  lines: [{kind: 'line', id, points}],
+  replacements: [
+    {
+      original: {kind: 'line', id, points},
+      ids: entries.filter(e => e[0] === 'line').map(e => e[1]),
+    },
+  ],
   ids: [id],
   constraints: [],
   entries,
-  lineConstraints,
+  constraintReplacements: lineConstraints.map(({index, lines}) => ({
+    index,
+    ids: lines,
+  })),
 });
 
 function setup(source) {

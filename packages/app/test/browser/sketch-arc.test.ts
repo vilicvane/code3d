@@ -234,7 +234,11 @@ test('directed arcs render as finite SVG curves, expose radius relations and und
       return {x: r.x + p.x, y: r.y + p.y};
     });
     await page.mouse.click(spot.x, spot.y);
-    assert.match((await arc(page).getAttribute('class')) ?? '', /selected/);
+    const selected = page.locator(
+      '.sketch-canvas path.selected[data-kind="segment"]',
+    );
+    await selected.waitFor();
+    assert.equal(await selected.getAttribute('d'), path);
     await page.keyboard.press('Delete');
     await arc(page).waitFor({state: 'detached'});
     assert.equal(await point(page, 1).count(), 0);

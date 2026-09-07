@@ -554,33 +554,6 @@ export class SketchEditor {
     );
   }
 
-  private pickCurve(position: SketchPosition): Point | undefined {
-    const hit = this.circularCurves()
-      .map(curve => {
-        const nearest = sketchCurvePosition(
-          curve.geometry,
-          sketchCurveClosestParameter(curve.geometry, position),
-        );
-        return {
-          curve,
-          nearest,
-          distance: distance(nearest, position) * this.scale,
-        };
-      })
-      .filter(hit => hit.distance < 6)
-      .sort(
-        (a, b) =>
-          Number(b.curve.layer === this.view!.id) -
-            Number(a.curve.layer === this.view!.id) || a.distance - b.distance,
-      )[0];
-    if (!hit) return;
-    return {
-      layer: hit.curve.layer,
-      id: hit.curve.id,
-      position: hit.nearest,
-    };
-  }
-
   private screen(position: SketchPosition): SketchPosition {
     return [
       (position[0] - this.center[0]) * this.scale + this.svg.clientWidth / 2,
@@ -639,7 +612,6 @@ export class SketchEditor {
       point &&
       point.layer === this.view.id &&
       !this.circularCurves().some(c => same(c.center, point)) &&
-      !this.pickCurve(point.position) &&
       !this.pickSegment(point.position)
     )
       return point;
@@ -667,17 +639,30 @@ export class SketchEditor {
       this.deleteTarget(this.trimTarget(position));
       return;
     }
+    const vertex = this.pick(position);
+    const segment =
+      !vertex && this.mode === 'Select'
+        ? this.pickSegment(position)
+        : undefined;
     const point =
-      this.pick(position) ??
-      (this.mode === 'Select' ? this.pickCurve(position) : undefined);
+      vertex ??
+      (segment && segment.kind !== 'line'
+        ? {
+            layer: segment.layer,
+            id: segment.id,
+            position: sketchCurvePosition(
+              segment.curve,
+              sketchCurveClosestParameter(segment.curve, position),
+            ),
+          }
+        : undefined);
     if (this.drawing) {
       this.drawing.pointer = position;
       this.place();
     } else {
-      this.selection = point;
-      if (!point) {
-        this.selection = this.pickSegment(position);
-      } else if (
+      this.selection = vertex ?? segment;
+      if (
+        point &&
         !this.view.readOnlyReason &&
         point.layer === this.view.id &&
         this.view.editable.get(point.id)?.some(Boolean)
@@ -916,30 +901,6 @@ export class SketchEditor {
         : [];
     const trimmedSegments =
       trim && 'start' in trim ? overlappingSketchSegments(segments, trim) : [];
-    for (const segment of segments) {
-      const positions = [segment.start, segment.end].map(cut =>
-        this.screen(endpointPosition(cut.endpoint)),
-      );
-      const selected = selectedSegments.some(value =>
-        sameSketchSegment(segment, value),
-      );
-      const element = this.line(
-        positions[0],
-        positions[1],
-        `${this.entityClass(segment.layer, segment.id)}${selected ? ' selected' : ''}${trimmedSegments.some(value => sameSketchSegment(segment, value)) ? ' trim-preview' : ''}`,
-        JSON.stringify([
-          segment.layer,
-          'line',
-          segment.id,
-          segment.start.t,
-          segment.end.t,
-        ]),
-        this.lines,
-      );
-      this.tag(element, segment.layer, segment.id, 'line');
-      element.dataset.start = String(segment.start.t);
-      element.dataset.end = String(segment.end.t);
-    }
     for (const curve of this.circularCurves()) {
       const shape = this.shape(
         JSON.stringify([curve.layer, curve.geometry.kind, curve.id]),
@@ -949,6 +910,41 @@ export class SketchEditor {
       this.drawCurve(shape, curve.geometry);
       shape.setAttribute('class', this.entityClass(curve.layer, curve.id));
       this.tag(shape, curve.layer, curve.id, curve.geometry.kind);
+    }
+    for (const segment of segments) {
+      const selected = selectedSegments.some(value =>
+        sameSketchSegment(segment, value),
+      );
+      const trimmed = trimmedSegments.some(value =>
+        sameSketchSegment(segment, value),
+      );
+      // Circular curves retain one base node during interaction. Only highlighted
+      // intervals need an overlay; cuts never mutate or fragment authored geometry.
+      if (segment.kind !== 'line' && !selected && !trimmed) continue;
+      const element = this.shape(
+        JSON.stringify([
+          segment.layer,
+          'segment',
+          segment.id,
+          segment.start.t,
+          segment.end.t,
+        ]),
+        segment.curve.kind === 'arc' ? 'path' : segment.curve.kind,
+        this.lines,
+      );
+      this.drawCurve(element, segment.curve);
+      element.setAttribute(
+        'class',
+        `${this.entityClass(segment.layer, segment.id)}${selected ? ' selected' : ''}${trimmed ? ' trim-preview' : ''}`,
+      );
+      this.tag(
+        element,
+        segment.layer,
+        segment.id,
+        segment.kind === 'line' ? 'line' : 'segment',
+      );
+      element.dataset.start = String(segment.start.t);
+      element.dataset.end = String(segment.end.t);
     }
     for (const point of points) {
       const circle = this.shape(

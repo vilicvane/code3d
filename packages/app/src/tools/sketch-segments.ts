@@ -2,7 +2,6 @@ import type {
   SketchPointAddress,
   SketchPosition,
   SketchSnapshot,
-  SketchLineSnapshot,
   SketchEntitySnapshot,
   SketchCurve,
 } from '@code3d/core/tooling';
@@ -29,19 +28,35 @@ import {
 
 export type SketchCut = {t: number; endpoint: SketchEndpoint};
 export type SketchSegment = SketchPointAddress & {
+  kind: SketchCurve['kind'];
+  curve: SketchCurve;
   start: SketchCut;
   end: SketchCut;
 };
 
-const segmentCurve = (
-  segment: SketchSegment,
-): Extract<SketchCurve, {kind: 'line'}> => ({
-  kind: 'line',
-  points: [
-    endpointPosition(segment.start.endpoint),
-    endpointPosition(segment.end.endpoint),
-  ],
-});
+const tau = Math.PI * 2;
+function curveInterval(
+  curve: SketchCurve,
+  start: number,
+  end: number,
+): SketchCurve {
+  if (curve.kind === 'line')
+    return {
+      kind: 'line',
+      points: [
+        sketchCurvePosition(curve, start),
+        sketchCurvePosition(curve, end),
+      ],
+    };
+  return {
+    kind: 'arc',
+    center: curve.center,
+    radius: curve.radius,
+    start:
+      curve.kind === 'circle' ? start * tau : curve.start + start * curve.sweep,
+    sweep: (end - start) * (curve.kind === 'circle' ? tau : curve.sweep),
+  };
+}
 const snapshotPoints = (layers: readonly SketchSnapshot[]): SketchPoint[] =>
   layers.flatMap(layer =>
     layer.entities.flatMap(e =>
@@ -63,29 +78,43 @@ export function sketchSegments(
       return geometry ? [{layer: layer.id, entity, geometry}] : [];
     }),
   );
-  return curves.flatMap(line => {
-    if (line.entity.kind !== 'line' || line.geometry.kind !== 'line') return [];
-    const {geometry, entity} = line;
-    const [a, b] = entity.points.map(ref =>
-      points.find(p => sameSketchPoint(p, ref))!,
-    );
-    const length = sketchDistance(a.position, b.position);
+  return curves.flatMap(owner => {
+    const {geometry, entity} = owner;
+    const length =
+      geometry.kind === 'line'
+        ? sketchDistance(...geometry.points)
+        : geometry.radius *
+          (geometry.kind === 'circle' ? tau : Math.abs(geometry.sweep));
     if (!length) return [];
     const tolerance = sketchCurveTolerance(geometry);
     const parameterTolerance = tolerance / length;
-    const cuts: SketchCut[] = [
-      {t: 0, endpoint: {point: a}},
-      {t: 1, endpoint: {point: b}},
-    ];
+    const cuts: SketchCut[] =
+      entity.kind === 'line' || entity.kind === 'arc'
+        ? entity.points.map((ref, t) => ({
+            t,
+            endpoint: {point: points.find(p => sameSketchPoint(p, ref))!},
+          }))
+        : [];
     const add = (t: number, endpoint: SketchEndpoint) => {
-      if (t <= parameterTolerance || t >= 1 - parameterTolerance) return;
-      if (cuts.some(cut => Math.abs(cut.t - t) <= parameterTolerance)) return;
+      if (geometry.kind === 'circle') {
+        if (t >= 1 - parameterTolerance) t = 0;
+      } else if (t <= parameterTolerance || t >= 1 - parameterTolerance) return;
+      if (
+        cuts.some(
+          cut =>
+            Math.abs(cut.t - t) <= parameterTolerance ||
+            (geometry.kind === 'circle' &&
+              1 - Math.abs(cut.t - t) <= parameterTolerance),
+        )
+      )
+        return;
       cuts.push({t, endpoint});
     };
     // Real points take precedence over computed intersections; prefer local
     // ownership when several distinct point identities share a coordinate.
     const ordered = [...points].sort(
-      (p, q) => Number(q.layer === line.layer) - Number(p.layer === line.layer),
+      (p, q) =>
+        Number(q.layer === owner.layer) - Number(p.layer === owner.layer),
     );
     for (const point of ordered) {
       const t = sketchCurveClosestParameter(geometry, point.position);
@@ -96,16 +125,29 @@ export function sketchSegments(
         add(t, {point});
     }
     for (const other of curves)
-      if (other !== line)
+      if (other !== owner)
         for (const contact of sketchCurveIntersections(
           geometry,
           other.geometry,
         ))
           add(contact.parameters[0], {position: contact.position});
     cuts.sort((p, q) => p.t - q.t);
+    if (geometry.kind === 'circle') {
+      if (!cuts.length)
+        cuts.push({
+          t: 0,
+          endpoint: {position: sketchCurvePosition(geometry, 0)},
+        });
+      cuts.push({...cuts[0], t: cuts[0].t + 1});
+    }
     return cuts.slice(1).map((end, index) => ({
-      layer: line.layer,
+      layer: owner.layer,
       id: entity.id,
+      kind: geometry.kind,
+      curve:
+        geometry.kind === 'circle' && cuts.length === 2
+          ? geometry
+          : curveInterval(geometry, cuts[index].t, end.t),
       start: cuts[index],
       end,
     }));
@@ -118,7 +160,7 @@ export function sameSketchSegment(a: SketchSegment, b: SketchSegment): boolean {
   );
 }
 
-/** All lines share the same geometric cuts, so an overlap is an equal interval,
+/** All curves share the same geometric cuts, so an overlap is an equal interval,
  * possibly reversed. Never group by screen-space picking distance. */
 export function overlappingSketchSegments(
   segments: readonly SketchSegment[],
@@ -126,11 +168,27 @@ export function overlappingSketchSegments(
 ): SketchSegment[] {
   const a = endpointPosition(selected.start.endpoint);
   const b = endpointPosition(selected.end.endpoint);
-  const tolerance = sketchCurveTolerance(segmentCurve(selected));
-  const near = (p: SketchPosition, q: SketchPosition) =>
-    sketchDistance(p, q) <= tolerance;
   return segments.filter(segment => {
     if (segment.layer !== selected.layer) return false;
+    const tolerance = Math.min(
+      sketchCurveTolerance(selected.curve),
+      sketchCurveTolerance(segment.curve),
+    );
+    const near = (p: SketchPosition, q: SketchPosition) =>
+      sketchDistance(p, q) <= tolerance;
+    const p = selected.curve,
+      q = segment.curve;
+    if ((p.kind === 'line') !== (q.kind === 'line')) return false;
+    if (p.kind !== 'line' && q.kind !== 'line') {
+      if (
+        !near(p.center, q.center) ||
+        Math.abs(p.radius - q.radius) > tolerance
+      )
+        return false;
+      if (p.kind === 'circle' || q.kind === 'circle') return p.kind === q.kind;
+      if (!near(sketchCurvePosition(p, 0.5), sketchCurvePosition(q, 0.5)))
+        return false;
+    }
     const start = endpointPosition(segment.start.endpoint);
     const end = endpointPosition(segment.end.endpoint);
     return (near(a, start) && near(b, end)) || (near(a, end) && near(b, start));
@@ -141,7 +199,7 @@ export function sketchSegmentDistance(
   p: SketchPosition,
   segment: SketchSegment,
 ): number {
-  const curve = segmentCurve(segment);
+  const curve = segment.curve;
   return sketchDistance(
     p,
     sketchCurvePosition(curve, sketchCurveClosestParameter(curve, p)),
@@ -267,7 +325,7 @@ export function deleteSketchEntity(
   return {kind: 'delete', ids, constraints: deletedConstraints(local, ids)};
 }
 
-/** Remove one geometric interval from all overlapping local lines, atomically. */
+/** Remove one geometric interval from all overlapping local curves, atomically. */
 export function trimSketchSegment(
   layers: readonly SketchSnapshot[],
   segment: SketchSegment,
@@ -277,15 +335,18 @@ export function trimSketchSegment(
     sketchSegments(layers, snapshotPoints(layers)),
     segment,
   );
-  const lines = segments.map(
+  const curves = segments.map(
     segment =>
-      local.entities.find(e => e.id === segment.id) as SketchLineSnapshot,
+      local.entities.find(e => e.id === segment.id) as Exclude<
+        SketchEntitySnapshot,
+        {kind: 'point'}
+      >,
   );
   let nextId = Math.max(0, ...local.entities.map(e => e.id)) + 1;
   const entries: SketchDraftEntry[] = [];
   const generated: {position: SketchPosition; address: SketchPointAddress}[] =
     [];
-  const tolerance = sketchCurveTolerance(segmentCurve(segment));
+  const tolerance = sketchCurveTolerance(segment.curve);
   const point = (cut: SketchCut): SketchPointAddress => {
     if ('point' in cut.endpoint) {
       const {layer, id} = cut.endpoint.point;
@@ -308,36 +369,67 @@ export function trimSketchSegment(
   };
   const replacements = new Map<number, number[]>();
   segments.forEach((segment, index) => {
-    const line = lines[index];
-    const remains = Number(segment.start.t > 0) + Number(segment.end.t < 1);
+    const curve = curves[index];
+    const remains =
+      curve.kind === 'circle'
+        ? Number(segment.curve.kind !== 'circle')
+        : Number(segment.start.t > 0) + Number(segment.end.t < 1);
     const ids: number[] = [];
-    replacements.set(line.id, ids);
+    replacements.set(curve.id, ids);
     const add = (points: readonly [SketchPointAddress, SketchPointAddress]) => {
-      const id = remains === 1 ? line.id : nextId++;
+      const id = remains === 1 ? curve.id : nextId++;
       ids.push(id);
-      entries.push(['line', id, points]);
+      entries.push(
+        curve.kind === 'line'
+          ? ['line', id, points]
+          : [
+              'arc',
+              id,
+              [
+                curve.center,
+                curve.radius,
+                ...points,
+                curve.kind === 'circle' ? 'cw' : curve.direction,
+              ],
+            ],
+      );
     };
-    if (segment.start.t > 0) add([line.points[0], point(segment.start)]);
-    if (segment.end.t < 1) add([point(segment.end), line.points[1]]);
+    if (curve.kind === 'circle') {
+      // Circle parameters run CCW; its surviving complement is CW from start to end.
+      if (remains) add([point(segment.start), point(segment.end)]);
+    } else {
+      if (segment.start.t > 0) add([curve.points[0], point(segment.start)]);
+      if (segment.end.t < 1) add([point(segment.end), curve.points[1]]);
+    }
   });
-  const lineConstraints = local.constraints.flatMap(([kind, data], index) => {
-    const id =
-      kind === 'horizontal' || kind === 'vertical'
-        ? data
-        : kind === 'length' || kind === 'angle'
-          ? data[0]
-          : undefined;
-    const targets = id === undefined ? undefined : replacements.get(id);
-    if (!targets) return [];
-    return [{index, lines: kind === 'length' ? [] : targets}];
-  });
-  const ids = lines.map(line => line.id);
+  const constraintReplacements = local.constraints.flatMap(
+    ([kind, data], index) => {
+      const id =
+        kind === 'horizontal' || kind === 'vertical'
+          ? data
+          : kind === 'length' ||
+              kind === 'angle' ||
+              kind === 'radius' ||
+              kind === 'sweep'
+            ? data[0]
+            : undefined;
+      const targets = id === undefined ? undefined : replacements.get(id);
+      if (!targets) return [];
+      return [
+        {index, ids: kind === 'length' || kind === 'sweep' ? [] : targets},
+      ];
+    },
+  );
+  const ids = curves.map(curve => curve.id);
   const orphaned = disconnectedPoints(layers, ids, entries);
   return {
     kind: 'trim',
-    lines,
+    replacements: curves.map(original => ({
+      original,
+      ids: replacements.get(original.id)!,
+    })),
     entries,
-    lineConstraints,
+    constraintReplacements,
     ids: [...ids, ...orphaned],
     constraints: deletedConstraints(local, orphaned),
   };

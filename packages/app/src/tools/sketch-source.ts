@@ -3,7 +3,6 @@ import type {
   SketchPointAddress,
   SketchPosition,
   SketchConstraint,
-  SketchLineSnapshot,
   SketchArcDirection,
   SketchEntitySnapshot,
   SourceRef,
@@ -78,13 +77,16 @@ export type SketchChange =
     }>
   | Readonly<{
       kind: 'trim';
-      lines: readonly SketchLineSnapshot[];
+      replacements: readonly Readonly<{
+        original: Exclude<SketchEntitySnapshot, {kind: 'point'}>;
+        ids: readonly number[];
+      }>[];
       ids: readonly number[];
       constraints: readonly number[];
       entries: readonly SketchDraftEntry[];
-      lineConstraints: readonly Readonly<{
+      constraintReplacements: readonly Readonly<{
         index: number;
-        lines: readonly number[];
+        ids: readonly number[];
       }>[];
     }>;
 
@@ -308,7 +310,10 @@ export class SketchEditResolver implements ToolIntentResolver {
     const {change} = intent;
     if (change.kind === 'delete' || change.kind === 'trim') {
       for (const id of change.ids) {
-        if (change.kind === 'trim' && change.lines.some(line => line.id === id))
+        if (
+          change.kind === 'trim' &&
+          change.replacements.some(r => r.original.id === id)
+        )
           continue;
         const entry = parsed.entries.get(id);
         if (!entry)
@@ -344,63 +349,111 @@ export class SketchEditResolver implements ToolIntentResolver {
       }
     } else if (change.kind === 'trim') {
       try {
-        for (const line of change.lines) {
-          const original = parsed.entries.get(line.id);
-          if (original?.kind !== 'line')
-            throw new Error('The trimmed line no longer exists.');
-          const retained = change.entries.find(entry => entry[1] === line.id);
-          if (retained?.[0] === 'line') {
-            retained[2].forEach((ref, i) => {
-              if (!sameSketchPoint(ref, line.points[i]))
-                replace(original.data.elements[i], point(ref));
+        const copiesOf = new Map<
+          number,
+          {entry: Entry; entity: Exclude<SketchEntitySnapshot, {kind: 'point'}>}
+        >();
+        const raw = (node: ts.Node) =>
+          source.slice(
+            node.getStart() - prefix.length,
+            node.end - prefix.length,
+          );
+        const replacementText = (entry: SketchDraftEntry) => {
+          const original = copiesOf.get(entry[1]);
+          if (!original || entry[0] === 'point' || entry[0] === 'circle')
+            return entryText(entry);
+          const parsedEntry = original.entry;
+          const entity = original.entity;
+          const start = parsedEntry.node.getStart();
+          const edits: {start: number; end: number; text: string}[] = [];
+          const patch = (node: ts.Node, text: string) =>
+            edits.push({
+              start: node.getStart() - start,
+              end: node.end - start,
+              text,
             });
-          } else remove(original.node);
+          if (entry[1] !== entity.id)
+            patch(parsedEntry.node.elements[1], String(entry[1]));
+          if (entity.kind === 'circle' && entry[0] === 'arc') {
+            patch(parsedEntry.node.elements[0], "'arc'");
+            const data = raw(parsedEntry.data).slice(0, -1);
+            patch(
+              parsedEntry.data,
+              `${data}${parsedEntry.data.elements.hasTrailingComma ? '' : ','} ${point(entry[2][2])}, ${point(entry[2][3])}, 'cw']`,
+            );
+          } else if (entity.kind === 'line' || entity.kind === 'arc') {
+            const refs =
+              entry[0] === 'line' ? entry[2] : [entry[2][2], entry[2][3]];
+            refs.forEach((ref, i) => {
+              if (!sameSketchPoint(ref, entity.points[i]))
+                patch(
+                  parsedEntry.data.elements[
+                    i + (entity.kind === 'arc' ? 2 : 0)
+                  ],
+                  point(ref),
+                );
+            });
+          }
+          let text = raw(parsedEntry.node);
+          for (const edit of edits.sort((a, b) => b.start - a.start))
+            text = text.slice(0, edit.start) + edit.text + text.slice(edit.end);
+          return `  ${text},`;
+        };
+        for (const {original: entity, ids} of change.replacements) {
+          const original = parsed.entries.get(entity.id);
+          if (original?.kind !== entity.kind)
+            throw new Error('The trimmed curve no longer exists.');
+          for (const id of ids) copiesOf.set(id, {entry: original, entity});
+          const retained = change.entries.find(entry => entry[1] === entity.id);
+          if (!retained) remove(original.node);
+          else {
+            replace(
+              original.node,
+              replacementText(retained).trim().slice(0, -1),
+            );
+          }
         }
         const added = change.entries.filter(
-          entry => !change.lines.some(line => line.id === entry[1]),
+          entry => !change.replacements.some(r => r.original.id === entry[1]),
         );
         for (const [, id] of added) {
           if (parsed.entries.has(id))
             throw new Error(`Sketch entity ${id} already exists.`);
         }
-        append(parsed.array, added.map(entryText).join('\n'));
+        append(parsed.array, added.map(replacementText).join('\n'));
         const copies: string[] = [];
-        for (const {index, lines} of change.lineConstraints) {
+        for (const {index, ids} of change.constraintReplacements) {
           const node = parsed.constraints?.elements[index];
           if (!node || !ts.isArrayLiteralExpression(node))
             throw new Error('The sketch constraints changed.');
-          if (!lines.length) {
+          if (!ids.length) {
             remove(node);
             continue;
           }
           if (
-            lines.length === 1 &&
-            change.lines.some(line => line.id === lines[0])
+            ids.length === 1 &&
+            change.replacements.some(r => r.original.id === ids[0])
           )
             continue;
           const kind = node.elements[0];
           const data = node.elements[1];
           if (
             !ts.isStringLiteral(kind) ||
-            !['horizontal', 'vertical', 'angle'].includes(kind.text)
+            !['horizontal', 'vertical', 'angle', 'radius'].includes(kind.text)
           )
-            throw new Error(
-              'Splitting requires explicit direction constraint targets.',
-            );
+            throw new Error('Splitting requires explicit constraint targets.');
           const target =
-            kind.text === 'angle'
+            kind.text === 'angle' || kind.text === 'radius'
               ? ts.isArrayLiteralExpression(data)
                 ? data.elements[0]
                 : undefined
               : data;
           if (!target)
-            throw new Error(
-              'Splitting requires explicit direction constraint targets.',
-            );
-          replace(target, String(lines[0]));
+            throw new Error('Splitting requires explicit constraint targets.');
+          replace(target, String(ids[0]));
           const start = node.getStart() - prefix.length;
           const raw = source.slice(start, node.end - prefix.length);
-          for (const id of lines.slice(1))
+          for (const id of ids.slice(1))
             copies.push(
               `  ${raw.slice(0, target.getStart() - prefix.length - start)}${id}${raw.slice(target.end - prefix.length - start)},`,
             );

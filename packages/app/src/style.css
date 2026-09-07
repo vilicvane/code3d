@@ -1237,7 +1237,8 @@ kbd {
   stroke-width: 2;
 }
 .sketch-canvas .entity[data-kind='circle'],
-.sketch-canvas .entity[data-kind='arc'] {
+.sketch-canvas .entity[data-kind='arc'],
+.sketch-canvas .entity[data-kind='segment'] {
   fill: none;
 }
 .sketch-canvas .local {

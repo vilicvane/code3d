@@ -544,8 +544,20 @@ function initializeArcEndpoints(
   problem: SketchSolveProblem,
 ): SketchSolveProblem {
   if (!problem.arcs.length) return problem;
+  // An explicit radius already determines this scalar. Start there rather than
+  // projecting satisfied endpoints to conflicting data and asking an
+  // underconstrained solve to shrink them again (which can translate the arc).
+  // Keep locked values and all equations: contradictory dimensions still fail.
+  const arcs = problem.arcs.map((arc, index) => {
+    const dimension = problem.constraints.find(
+      c => c.kind === 'radius' && c.curve === 'arc' && c.index === index,
+    );
+    return !arc.locked && dimension?.kind === 'radius'
+      ? {...arc, radius: dimension.value}
+      : arc;
+  });
   const proposals = problem.points.map(() => [] as SketchPosition[]);
-  for (const arc of problem.arcs) {
+  for (const arc of arcs) {
     const center = problem.points[arc.center].position;
     for (const index of arc.points) {
       const point = problem.points[index].position;
@@ -564,6 +576,7 @@ function initializeArcEndpoints(
   }
   return {
     ...problem,
+    arcs,
     points: problem.points.map((point, index) => {
       const coordinate = (axis: 0 | 1) => {
         const value = point.position[axis];

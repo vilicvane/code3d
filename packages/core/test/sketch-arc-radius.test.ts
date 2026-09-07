@@ -99,6 +99,47 @@ test('fixed endpoints and explicit dimensions override radius initial data witho
   );
 });
 
+test('explicit radius seeds do not translate an unanchored arc away from already satisfied endpoint geometry', () => {
+  for (const scale of [1e-6, 1, 1e6])
+    for (const direction of ['cw', 'ccw'] as const) {
+      const input: SketchEntry[] = [
+        ['point', 1, [3 * scale, -2 * scale]],
+        ['point', 2, [3 * scale, 8 * scale]],
+        ['point', 3, [3 * scale, -12 * scale]],
+        ['arc', 4, [1, 15 * scale, 3, 2, direction]],
+      ];
+      const value = sketch(input, {constraints: [['radius', [4, 10 * scale]]]});
+      const view = snapshotSketch(value, () => 'local');
+      for (const entry of input)
+        if (entry[0] === 'point')
+          point(view, entry[1]).position.forEach((v, axis) =>
+            near(v / scale, entry[2][axis] / scale),
+          );
+      near(arc(view).radius / scale, 10);
+      assert.equal(view.degreesOfFreedom, 4);
+      assert.deepEqual(sketchDefinition(value).entries, input);
+      assert.throws(
+        () =>
+          sketch(input, {
+            constraints: [
+              ['radius', [4, 10 * scale]],
+              ['radius', [4, 12 * scale]],
+            ],
+          }),
+        SketchConstraintError,
+      );
+      assert.throws(
+        () =>
+          solveSketchSnapshot([view], {
+            id: 4,
+            position: [20 * scale, 0],
+            locks: [{id: 4, parameter: 0, value: 15 * scale}],
+          }),
+        SketchConstraintError,
+      );
+    }
+});
+
 test('shared endpoints use simultaneous initial proposals and remain one point across connected arcs and lines', () => {
   const points: SketchEntry[] = [
     ['point', 1, [0, 0]],

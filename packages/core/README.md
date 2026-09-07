@@ -112,7 +112,10 @@ clockwise arc, including major arcs. Native arc equations keep both endpoints
 on the circle; point coordinates and radius may move to satisfy them.
 The radius is ordinary current data, not an implicit radius constraint.
 To initialize inconsistent data, endpoints are projected along their supplied
-directions to the supplied radius. Shared endpoints average simultaneous
+directions to the supplied radius, or to an explicit radius dimension when one
+already exists. This avoids projecting satisfied endpoints outward and then
+allowing an underconstrained solve to translate the arc while shrinking it back.
+Shared endpoints average simultaneous
 proposals, without giving one arc ownership; locked/upstream, fixed and explicitly
 positioned axes are not overwritten. The resulting seed is then solved against
 all structural equations and explicit constraints. Thus an isolated arc with
@@ -161,15 +164,22 @@ constraints; blank fields remain free. R preserves the entered sweep magnitude.
 All points, the arc and
 constraints are one source transaction/undo. Drag its edge to edit a literal
 radius, or drag its ordinary center or endpoints;
-or select the arc and Delete to remove it. Radius and sweep labels lie on the
+or select an interval and Delete to trim it. Radius and sweep labels lie on the
 directed arc; sweep guides connect its center and endpoints. Arc radius expressions
 use the same source protection and gesture-only locks as circle radii.
 Deletion also recognizes ordinary points lying on finite curves, not just explicit
 references, and preserves points still connected to other curves.
 Circles and finite arcs can delimit line trims, including upstream curves; the
 cutting curves and their expressions/constraints stay unchanged. Tangencies
-provide one boundary and arc gaps provide none. Trimming circles/arcs themselves,
-region extraction and sketch B-Rep generation are not yet available.
+provide one boundary and arc gaps provide none. Circles and arcs use the same
+interval selection and Trim tool. Circles have cyclic intervals without an
+artificial zero-angle seam; zero or one boundary means whole-circle deletion.
+Trimming a circle leaves a CW arc with the same ID. End trims retain an arc ID;
+interior trims retire it and allocate two fresh IDs, preserving direction.
+Center/radius expressions and radius constraints follow surviving arcs; original
+whole-arc sweep constraints are removed. Coincident intervals are trimmed
+together, sharing cut points and one undo transaction. Region extraction and
+sketch B-Rep generation are not yet available.
 Endpoints are created or reused by Line; there is no standalone Point tool.
 Type X/Y for the start, then length/angle for each segment. Tab switches fields
 and Enter accepts the next endpoint. Each segment is one undo step and reuses
@@ -220,7 +230,7 @@ remain editable in code, not by dragging; literal axes on the same point remain
 draggable. The editor preserves existing IDs and
 allocates new IDs from the current local maximum, without `nextId` metadata.
 Deleted IDs may therefore be reused; downstream references are not automatically
-rewritten. Trimming circles/arcs themselves and conversion to faces/solids remain later slices.
+rewritten. Conversion to faces/solids remains a later slice.
 See the [sketch example](../app/examples/sketches.ts) and
 [third-party solver sources](THIRD_PARTY.md).
 
