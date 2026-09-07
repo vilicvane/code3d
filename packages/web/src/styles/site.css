@@ -381,6 +381,9 @@
     color: var(--c3-muted);
     font-size: 1.1rem;
   }
+  .example-detail > .tags {
+    margin-bottom: 2rem;
+  }
   .detail-next {
     margin-top: 42px;
     padding-top: 40px;
