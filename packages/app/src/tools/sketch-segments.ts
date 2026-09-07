@@ -4,12 +4,14 @@ import type {
   SketchSnapshot,
   SketchLineSnapshot,
   SketchEntitySnapshot,
+  SketchCurve,
 } from '@code3d/core/tooling';
 import {
   sketchCurveGeometry,
   sketchCurveClosestParameter,
   sketchCurvePosition,
   sketchCurveTolerance,
+  sketchCurveIntersections,
 } from '@code3d/core/tooling';
 import {formatSourceNumber} from './source-expression';
 import {
@@ -31,18 +33,15 @@ export type SketchSegment = SketchPointAddress & {
   end: SketchCut;
 };
 
-const subtract = (a: SketchPosition, b: SketchPosition): SketchPosition => [
-  a[0] - b[0],
-  a[1] - b[1],
-];
-const cross = (a: SketchPosition, b: SketchPosition) =>
-  a[0] * b[1] - a[1] * b[0];
-const dot = (a: SketchPosition, b: SketchPosition) => a[0] * b[0] + a[1] * b[1];
-const lineTolerance = (a: SketchPosition, b: SketchPosition, length: number) =>
-  Math.max(
-    length * 1e-9,
-    Number.EPSILON * 16 * Math.max(...a.map(Math.abs), ...b.map(Math.abs)),
-  );
+const segmentCurve = (
+  segment: SketchSegment,
+): Extract<SketchCurve, {kind: 'line'}> => ({
+  kind: 'line',
+  points: [
+    endpointPosition(segment.start.endpoint),
+    endpointPosition(segment.end.endpoint),
+  ],
+});
 const snapshotPoints = (layers: readonly SketchSnapshot[]): SketchPoint[] =>
   layers.flatMap(layer =>
     layer.entities.flatMap(e =>
@@ -55,22 +54,24 @@ export function sketchSegments(
   layers: readonly SketchSnapshot[],
   points: readonly SketchPoint[],
 ): SketchSegment[] {
-  const lines = layers.flatMap(layer =>
+  const curves = layers.flatMap(layer =>
     layer.entities.flatMap(entity => {
-      if (entity.kind !== 'line') return [];
-      const [a, b] = entity.points.map(ref =>
-        points.find(p => sameSketchPoint(p, ref))!,
+      const geometry = sketchCurveGeometry(
+        entity,
+        ref => points.find(p => sameSketchPoint(p, ref))!.position,
       );
-      const vector = subtract(b.position, a.position);
-      const length = Math.hypot(...vector);
-      return [{layer: layer.id, id: entity.id, a, b, vector, length}];
+      return geometry ? [{layer: layer.id, entity, geometry}] : [];
     }),
   );
-  return lines.flatMap(line => {
-    if (!line.length) return [];
-    const {a, b, vector, length} = line;
-    const unit: SketchPosition = [vector[0] / length, vector[1] / length];
-    const tolerance = lineTolerance(a.position, b.position, length);
+  return curves.flatMap(line => {
+    if (line.entity.kind !== 'line' || line.geometry.kind !== 'line') return [];
+    const {geometry, entity} = line;
+    const [a, b] = entity.points.map(ref =>
+      points.find(p => sameSketchPoint(p, ref))!,
+    );
+    const length = sketchDistance(a.position, b.position);
+    if (!length) return [];
+    const tolerance = sketchCurveTolerance(geometry);
     const parameterTolerance = tolerance / length;
     const cuts: SketchCut[] = [
       {t: 0, endpoint: {point: a}},
@@ -87,44 +88,24 @@ export function sketchSegments(
       (p, q) => Number(q.layer === line.layer) - Number(p.layer === line.layer),
     );
     for (const point of ordered) {
-      const delta = subtract(point.position, a.position);
-      if (Math.abs(cross(unit, delta)) <= tolerance)
-        add(dot(delta, unit) / length, {point});
-    }
-    for (const other of lines) {
-      if (other === line || !other.length) continue;
-      // Collinear endpoints already supply all overlap boundaries. Testing
-      // distance before dividing by the angle avoids spurious intersections
-      // when translated/rotated collinear lines differ by roundoff.
+      const t = sketchCurveClosestParameter(geometry, point.position);
       if (
-        [other.a, other.b].every(
-          point =>
-            Math.abs(cross(unit, subtract(point.position, a.position))) <=
-            tolerance,
-        )
+        sketchDistance(sketchCurvePosition(geometry, t), point.position) <=
+        tolerance
       )
-        continue;
-      const direction: SketchPosition = [
-        other.vector[0] / other.length,
-        other.vector[1] / other.length,
-      ];
-      const denominator = cross(unit, direction);
-      if (Math.abs(denominator) <= Number.EPSILON * 16) continue;
-      const delta = subtract(other.a.position, a.position);
-      const t = cross(delta, direction) / denominator / length;
-      const u = cross(delta, unit) / denominator / other.length;
-      if (u < 0 || u > 1) continue;
-      add(t, {
-        position: [
-          a.position[0] + t * vector[0],
-          a.position[1] + t * vector[1],
-        ],
-      });
+        add(t, {point});
     }
+    for (const other of curves)
+      if (other !== line)
+        for (const contact of sketchCurveIntersections(
+          geometry,
+          other.geometry,
+        ))
+          add(contact.parameters[0], {position: contact.position});
     cuts.sort((p, q) => p.t - q.t);
     return cuts.slice(1).map((end, index) => ({
       layer: line.layer,
-      id: line.id,
+      id: entity.id,
       start: cuts[index],
       end,
     }));
@@ -145,7 +126,7 @@ export function overlappingSketchSegments(
 ): SketchSegment[] {
   const a = endpointPosition(selected.start.endpoint);
   const b = endpointPosition(selected.end.endpoint);
-  const tolerance = lineTolerance(a, b, sketchDistance(a, b));
+  const tolerance = sketchCurveTolerance(segmentCurve(selected));
   const near = (p: SketchPosition, q: SketchPosition) =>
     sketchDistance(p, q) <= tolerance;
   return segments.filter(segment => {
@@ -160,14 +141,11 @@ export function sketchSegmentDistance(
   p: SketchPosition,
   segment: SketchSegment,
 ): number {
-  const a = endpointPosition(segment.start.endpoint),
-    b = endpointPosition(segment.end.endpoint);
-  const vector = subtract(b, a);
-  const length = Math.hypot(...vector);
-  if (!length) return sketchDistance(p, a);
-  const unit: SketchPosition = [vector[0] / length, vector[1] / length];
-  const along = Math.max(0, Math.min(length, dot(subtract(p, a), unit)));
-  return sketchDistance(p, [a[0] + along * unit[0], a[1] + along * unit[1]]);
+  const curve = segmentCurve(segment);
+  return sketchDistance(
+    p,
+    sketchCurvePosition(curve, sketchCurveClosestParameter(curve, p)),
+  );
 }
 
 /** Only points connected to removed geometry are candidates; unrelated points remain. */
@@ -307,9 +285,7 @@ export function trimSketchSegment(
   const entries: SketchDraftEntry[] = [];
   const generated: {position: SketchPosition; address: SketchPointAddress}[] =
     [];
-  const a = endpointPosition(segment.start.endpoint),
-    b = endpointPosition(segment.end.endpoint);
-  const tolerance = lineTolerance(a, b, sketchDistance(a, b));
+  const tolerance = sketchCurveTolerance(segmentCurve(segment));
   const point = (cut: SketchCut): SketchPointAddress => {
     if ('point' in cut.endpoint) {
       const {layer, id} = cut.endpoint.point;

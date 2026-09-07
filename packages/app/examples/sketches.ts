@@ -2,6 +2,20 @@ import {sketch} from '@code3d/core';
 
 const width = 30;
 
+// Trim the line between circle/arc crossings. The curves stay unchanged;
+// the missing lower-left part of the CW arc is not a cutting boundary.
+export const curveCuts = sketch([
+  ['point', 1, [-30, 0]],
+  ['point', 2, [30, 0]],
+  ['line', 3, [1, 2]],
+  ['point', 4, [-15, 3]],
+  ['circle', 5, [4, 5]],
+  ['point', 6, [15, 3]],
+  ['point', 7, [10, 3]],
+  ['point', 8, [15, -2]],
+  ['arc', 9, [6, 7, 8, 'cw']],
+]);
+
 // Arc references center/start/end, with explicit direction (cw or ccw).
 // Drag either endpoint: both rotate, preserving the radius and 270° sweep.
 // Arc tool: center, start/Radius, end/Sweep; defaults to CW, R reverses it.

@@ -40,6 +40,8 @@ export {
   sketchPositiveAngle,
 } from '../library/sketch-curves.js';
 export type {SketchCurve} from '../library/sketch-curves.js';
+export {sketchCurveIntersections} from '../library/sketch-curve-intersections.js';
+export type {SketchCurveIntersection} from '../library/sketch-curve-intersections.js';
 
 export {
   authoringApi,

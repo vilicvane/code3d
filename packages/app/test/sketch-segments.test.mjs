@@ -149,6 +149,152 @@ test('trimmed crossing geometry and direction constraints survive fresh compiler
 });
 const intervals = values => values.map(s => [s.start.t, s.end.t]);
 
+test('analytic circles split lines at crossings without changing the circle or creating source points', () => {
+  const value = snapshot([
+    point(1, -10, 0),
+    point(2, 10, 0),
+    line(3, 1, 2),
+    point(4, 0, 3),
+    {kind: 'circle', id: 5, center: ref(4), radius: 5},
+  ]);
+  const original = structuredClone(value);
+  const parts = segments(value);
+  assert.deepEqual(intervals(parts), [
+    [0, 0.3],
+    [0.3, 0.7],
+    [0.7, 1],
+  ]);
+  assert.deepEqual(parts[1].start.endpoint, {position: [-4, 0]});
+  assert.deepEqual(parts[1].end.endpoint, {position: [4, 0]});
+  assert.deepEqual(value, original);
+});
+
+test('only the finite directed arc cuts a line, not the missing portion of its supporting circle', () => {
+  for (const direction of ['cw', 'ccw']) {
+    const value = snapshot([
+      point(1, -10, 0),
+      point(2, 10, 0),
+      line(3, 1, 2),
+      point(4, 0, 3),
+      point(5, -5, 3),
+      point(6, 0, -2),
+      {kind: 'arc', id: 7, center: ref(4), points: [ref(5), ref(6)], direction},
+    ]);
+    const cut = direction === 'cw' ? 0.7 : 0.3;
+    const parts = segments(value);
+    assert.equal(parts.length, 2);
+    assert.ok(Math.abs(parts[0].end.t - cut) < 1e-9);
+  }
+});
+
+test('tangent circles supply one cut and actual coincident point identities take precedence', () => {
+  const value = snapshot([
+    point(1, -10, 0),
+    point(2, 10, 0),
+    line(3, 1, 2),
+    point(4, 0, 5),
+    {kind: 'circle', id: 5, center: ref(4), radius: 5},
+    {kind: 'circle', id: 6, center: ref(4), radius: 5},
+    point(7, 0, 0),
+  ]);
+  const parts = segments(value);
+  assert.deepEqual(intervals(parts), [
+    [0, 0.5],
+    [0.5, 1],
+  ]);
+  assert.equal(parts[0].end.endpoint.point.id, 7);
+});
+
+test('upstream circular boundaries stay read-only during a local line trim', () => {
+  const base = snapshot(
+    [
+      point(1, 0, 3),
+      {kind: 'circle', id: 2, center: ref(1, 'base'), radius: 5},
+    ],
+    [],
+    'base',
+  );
+  const local = snapshot([point(1, -10, 0), point(2, 10, 0), line(3, 1, 2)]);
+  const original = structuredClone(base);
+  const change = trimSketchSegment([base, local], segments(base, local)[1]);
+  assert.deepEqual(change.ids, [3]);
+  assert.deepEqual(
+    change.lines.map(e => e.id),
+    [3],
+  );
+  assert.equal(change.entries.filter(e => e[0] === 'line').length, 2);
+  assert.deepEqual(base, original);
+});
+
+test('circle-delimited line trim preserves boundary expressions and constraints through fresh compilation', async () => {
+  const compiler = await createTestProjectCompiler(server);
+  const compile = async args => {
+    const module = await compiler.compile(
+      {
+        files: [
+          {
+            path: '/model.ts',
+            source: `import {sketch} from '@code3d/core'; const r = 5; const theta = 0; const value = sketch(${args});`,
+          },
+        ],
+      },
+      '/model.ts',
+    );
+    assert.equal(module.diagnostic, undefined);
+    return [...module.sketches.values()][0];
+  };
+  try {
+    const args =
+      "[['point', 1, [-10, 0]], ['point', 2, [10, 0]], ['line', 3, [1, 2]], ['point', 4, [0, 3]], ['circle', 5, [4, r]]], {constraints: [['angle', [3, theta]], ['length', [3, 20]], ['radius', [5, r]]]}";
+    const original = await compile(args);
+    const change = trimSketchSegment([original], segments(original)[1]);
+    const sourceRef = {file: '/model.ts', start: 0, end: args.length};
+    const resolved = new SketchEditResolver().resolve(
+      {
+        kind: 'sketch.edit',
+        sourceRef,
+        expectedText: args,
+        layer: original.id,
+        references: {},
+        change,
+      },
+      {
+        toolId: 'trim',
+        baseVersion: 1,
+        resolveSourceRef: ref => ref,
+        readSource: () => args,
+      },
+    );
+    assert.equal(resolved.status, 'ready');
+    const text = resolved.plan.edits[0].text;
+    assert.ok(text.includes("['circle', 5, [4, r]]"));
+    assert.ok(text.includes("['radius', [5, r]]"));
+    assert.equal(text.match(/theta/g).length, 2);
+    assert.doesNotMatch(text, /'length'/);
+    const replay = await compile(text);
+    assert.deepEqual(
+      replay.entities.filter(e => e.kind === 'circle'),
+      original.entities.filter(e => e.kind === 'circle'),
+    );
+    assert.deepEqual(
+      replay.entities.filter(e => e.kind === 'point').map(e => e.position),
+      [
+        [-10, 0],
+        [10, 0],
+        [0, 3],
+        [-4, 0],
+        [4, 0],
+      ],
+    );
+    assert.deepEqual(
+      replay.entities.filter(e => e.kind === 'line').map(e => e.id),
+      [7, 9],
+    );
+  } finally {
+    compiler.dispose();
+  }
+});
+
 test('existing points partition a line without altering its authored geometry', () => {
   const value = snapshot([
     point(1, 0, 0),

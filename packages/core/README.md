@@ -155,7 +155,10 @@ or select the arc and Delete to remove it. Radius and sweep labels lie on the
 directed arc; sweep guides connect its center and endpoints.
 Deletion also recognizes ordinary points lying on finite curves, not just explicit
 references, and preserves points still connected to other curves.
-Curve trimming, region extraction and sketch B-Rep generation are not yet available.
+Circles and finite arcs can delimit line trims, including upstream curves; the
+cutting curves and their expressions/constraints stay unchanged. Tangencies
+provide one boundary and arc gaps provide none. Trimming circles/arcs themselves,
+region extraction and sketch B-Rep generation are not yet available.
 Endpoints are created or reused by Line; there is no standalone Point tool.
 Type X/Y for the start, then length/angle for each segment. Tab switches fields
 and Enter accepts the next endpoint. Each segment is one undo step and reuses
@@ -206,7 +209,7 @@ remain editable in code, not by dragging; literal axes on the same point remain
 draggable. The editor preserves existing IDs and
 allocates new IDs from the current local maximum, without `nextId` metadata.
 Deleted IDs may therefore be reused; downstream references are not automatically
-rewritten. Curve trimming and conversion to faces/solids remain later slices.
+rewritten. Trimming circles/arcs themselves and conversion to faces/solids remain later slices.
 See the [sketch example](../app/examples/sketches.ts) and
 [third-party solver sources](THIRD_PARTY.md).
 

@@ -67,7 +67,7 @@ implementation context and historical outcomes, not a competing work queue.
   satisfied geometry. Both modes retain the common gesture anchor rule; dragging
   the center does not implicitly mean translating the entire rectangle.
   Straight-line selection and deletion use intervals delimited by existing
-  points, finite line intersections and overlapping endpoints. Merely crossing
+  points, finite line/circle/arc intersections and overlapping endpoints. Merely crossing
   or selecting geometry does not split the source. Deleting an end interval
   retains the line ID; deleting an interior interval retires it and assigns two
   fresh IDs. Points disconnected by the deletion and their constraints are
@@ -114,7 +114,10 @@ implementation context and historical outcomes, not a competing work queue.
   that directed branch, and residuals check the actual finite arc after solving.
   Already-known dimensions are verified directly; mouse objectives omit coordinates
   fixed by authored or gesture locks. Sweep badges link center and both endpoints.
-  Curve trimming, regions and B-Rep generation remain later slices.
+  Analytic intersections share model-space tolerances, finite-arc filtering and
+  tangency/overlap boundaries. Circles and arcs can delimit straight-line trims,
+  including read-only upstream curves; their source and constraints stay unchanged.
+  Trimming circles/arcs themselves, regions and B-Rep generation remain later slices.
   The sketch canvas fills the viewport with floating controls. Its top-right
   icon toolbar groups editing, drawing and view controls, with native hover
   labels and one keyboard Tab stop; narrow viewports place the whole toolbar
