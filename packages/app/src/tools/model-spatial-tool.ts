@@ -44,12 +44,7 @@ export type SpatialBindingObject = Readonly<{
 
 export type ModelSpatialBinding = Readonly<{
   operation:
-    | 'origin'
-    | 'originOffset'
-    | 'originVertex'
-    | 'originCenter'
-    | 'rotate'
-    | 'pivot';
+    'originOffset' | 'originVertex' | 'originCenter' | 'rotate' | 'pivot';
   source: SpatialBindingSource;
   objects: readonly SpatialBindingObject[];
 }>;
@@ -280,7 +275,10 @@ export function spatialIntent(
           return {
             key: object.key,
             nodeId: object.nodeId,
+            // Hold the gesture-start geometry fixed while showing its candidate origin.
+            // Committing re-expresses it in the result frame through originDelta.
             transform: identityRigidTransform,
+            originDelta: origin,
             spatial: {origin, vector},
           };
         }
@@ -344,7 +342,6 @@ export function isSpatialOperation(
   kind: ModelOperationSnapshot['kind'],
 ): kind is Exclude<ModelSpatialBinding['operation'], 'pivot'> {
   return (
-    kind === 'origin' ||
     kind === 'originOffset' ||
     kind === 'originVertex' ||
     kind === 'originCenter' ||

@@ -103,7 +103,7 @@ from a rigid move, so it uses parameter editing instead.
 
 ```ts
 const placed = part.relate(self =>
-  self.on(base.up).pivot(50, 0, 0).rotate(0, 0, 45),
+  self.on(base.up).pivot([50, 0, 0]).rotate(0, 0, 45),
 );
 ```
 

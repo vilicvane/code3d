@@ -898,7 +898,6 @@ test('retains shared-parameter peers in a group input context', async () => {
 });
 
 for (const call of [
-  'origin(9, 8, 7)',
   'originOffset(0, 2, 0)',
   'originVertex(3)',
   'originCenter()',
@@ -907,7 +906,7 @@ for (const call of [
   test(`retains the model before ${call} at its receiver source range`, async () => {
     const source = [
       'import {box} from "@code3d/core";',
-      'const pivoted = box(8, 6, 4).origin(1, 2, 3);',
+      'const pivoted = box(8, 6, 4).originOffset(1, 2, 3);',
       `const direct = pivoted.${call};`,
       `const chained = pivoted.originOffset(0, 5, 0).${call};`,
     ].join('\n');
@@ -916,9 +915,9 @@ for (const call of [
       '/model.ts',
     );
     assert.equal(module.diagnostic, undefined);
-    for (const [binding, receiver, origin] of [
-      ['direct', 'pivoted', [1, 2, 3]],
-      ['chained', 'pivoted.originOffset(0, 5, 0)', [1, 7, 3]],
+    for (const [binding, receiver, expectedCenter] of [
+      ['direct', 'pivoted', [-1, -2, -3]],
+      ['chained', 'pivoted.originOffset(0, 5, 0)', [-1, -7, -3]],
     ] as const) {
       const context = `const ${binding} = ${receiver}.${call}`;
       const input = exactTargets(module, source, receiver, context).find(
@@ -948,8 +947,10 @@ for (const call of [
       ]);
       assert.notEqual(evaluation.nodeIds[0], defined(operation).outputNodeId);
       assert.deepEqual(
-        defined(module.objects.get(evaluation.nodeIds[0])).origin,
-        origin,
+        defined(module.objects.get(evaluation.nodeIds[0])).elements.find(
+          element => element.name === 'center',
+        )!.transform.position,
+        expectedCenter,
       );
     }
   });
@@ -958,7 +959,7 @@ for (const call of [
 test('captures computed methods and model-valued inputs without operation metadata', async () => {
   const source = [
     'import {box} from "@code3d/core";',
-    'const pivoted = box(8, 6, 4).origin(1, 2, 3);',
+    'const pivoted = box(8, 6, 4).originOffset(1, 2, 3);',
     'const method = "originOffset";',
     'const changed = pivoted[method](0, 5, 0);',
     'function inspect(model) { return model.originCenter(); }',
@@ -971,9 +972,9 @@ test('captures computed methods and model-valued inputs without operation metada
   );
   assert.equal(module.diagnostic, undefined);
   for (const [text, context, expected] of [
-    ['pivoted', 'changed = pivoted', [1, 2, 3]],
-    ['changed', 'inspect(changed)', [1, 7, 3]],
-    ['changed', 'vertex = changed', [1, 7, 3]],
+    ['pivoted', 'changed = pivoted', [-1, -2, -3]],
+    ['changed', 'inspect(changed)', [-1, -7, -3]],
+    ['changed', 'vertex = changed', [-1, -7, -3]],
   ] as const) {
     const start = source.indexOf(text, source.indexOf(context));
     const target = ModelViewport.prototype['sourceTargetAt'].call(
@@ -984,8 +985,9 @@ test('captures computed methods and model-valued inputs without operation metada
     assert.equal(defined(target).sourceRef.start, start);
     assert.equal(defined(target).sourceRef.end, start + text.length);
     assert.deepEqual(
-      defined(module.objects.get(defined(target).evaluations[0].nodeIds[0]))
-        .origin,
+      defined(
+        module.objects.get(defined(target).evaluations[0].nodeIds[0]),
+      ).elements.find(element => element.name === 'center')!.transform.position,
       expected,
     );
   }
@@ -995,9 +997,9 @@ test('derives composition roles for imported aliases, namespace calls, and neste
   const source = [
     'import * as core from "@code3d/core";',
     'import {loft as skin, group as assemble} from "@code3d/core";',
-    'const spine = core.bezier([[0, 0, 0], [12, 7, 0], [10, 20, 9], [4, 28, 14]]);',
+    'const spine = core.bezier([[0, 0, 0], [-12, -7, 0], [-10, -20, -9], [-4, -28, -14]]);',
     'const start = core.circle(4).relate(p => p.on(core.point().up).offset(0, 0, 0).rotate(0, 0, -Math.atan2(12, 7) * 180 / Math.PI));',
-    'const end = core.rectangle(7, 4).relate(p => p.on(core.point([4, 28, 14]).up).offset(0, 0, 0).rotate(Math.atan2(5, 10) * 180 / Math.PI, 0, Math.atan2(6, 8) * 180 / Math.PI));',
+    'const end = core.rectangle(7, 4).relate(p => p.on(core.point([-4, -28, -14]).up).offset(0, 0, 0).rotate(Math.atan2(5, 10) * 180 / Math.PI, 0, Math.atan2(6, 8) * 180 / Math.PI));',
     'const body = skin([...[start], end], {spine});',
     'const sections = [start, end];',
     'const options = {spine};',
@@ -1042,7 +1044,7 @@ test('derives composition roles for imported aliases, namespace calls, and neste
 test('keeps repeated and failed receiver evaluations separate', async () => {
   const source = [
     'import {box} from "@code3d/core";',
-    'const pivoted = box(8, 6, 4).origin(1, 2, 3);',
+    'const pivoted = box(8, 6, 4).originOffset(1, 2, 3);',
     'const results = [2, 5].map(y => pivoted.originOffset(0, y, 0));',
     'const changed = results[1];',
     'export const failed = changed.originVertex(9999);',
@@ -1072,11 +1074,12 @@ test('keeps repeated and failed receiver evaluations separate', async () => {
               defined(module.operations.get(defined(evaluation.operationId)))
                 .outputNodeId,
             ),
-          ).origin,
+          ).elements.find(element => element.name === 'center')!.transform
+            .position,
       ),
     [
-      [1, 4, 3],
-      [1, 7, 3],
+      [-1, -4, -3],
+      [-1, -7, -3],
     ],
   );
   const beforeFailure = exactTargets(
@@ -1087,8 +1090,10 @@ test('keeps repeated and failed receiver evaluations separate', async () => {
   ).find(target => target.kind === 'value');
   assert.ok(beforeFailure);
   assert.deepEqual(
-    defined(module.objects.get(beforeFailure.evaluations[0].nodeIds[0])).origin,
-    [1, 7, 3],
+    defined(
+      module.objects.get(beforeFailure.evaluations[0].nodeIds[0]),
+    ).elements.find(element => element.name === 'center')!.transform.position,
+    [-1, -7, -3],
   );
   const failure = exactTargets(module, source, 'originVertex(9999)').find(
     target => target.kind === 'topology-selection',
@@ -1123,7 +1128,7 @@ test('a failed repetition retains its own receiver instead of the previous succe
     'import {box} from "@code3d/core";',
     'const base = box(8, 6, 4);',
     'for (const id of [1, 9999]) {',
-    '  const current = base.origin(0, id, 0);',
+    '  const current = base.originOffset(0, id, 0);',
     '  current.originVertex(id);',
     '}',
   ].join('\n');
@@ -1140,11 +1145,14 @@ test('a failed repetition retains its own receiver instead of the previous succe
   assert.equal(defined(target).evaluations.length, 2);
   assert.deepEqual(
     defined(target).evaluations.map(
-      evaluation => defined(module.objects.get(evaluation.nodeIds[0])).origin,
+      evaluation =>
+        defined(module.objects.get(evaluation.nodeIds[0])).elements.find(
+          element => element.name === 'center',
+        )!.transform.position,
     ),
     [
-      [0, 9999, 0],
-      [0, 1, 0],
+      [0, -9999, 0],
+      [0, -1, 0],
     ],
   );
   assert.equal(defined(target).evaluations[0].operationId, undefined);
@@ -1266,7 +1274,7 @@ test('the documented origin example exposes each spatial operation and its assem
     ['pivoted.originOffset(0, 2, 0)', 'originOffset', ['dx', 'dy', 'dz']],
     ['offset.rotate(15, 35, 0)', 'rotate', ['x', 'y', 'z']],
     ['rotated.originCenter()', 'originCenter', undefined],
-    ['rotated.origin(0, 0, 0)', 'origin', ['x', 'y', 'z']],
+    ['centered.originOffset(0, -2, 0)', 'originOffset', ['dx', 'dy', 'dz']],
   ] as const) {
     // The receiver is a separate input scope; the tool starts at the method name.
     const targets = exactTargets(
@@ -1642,3 +1650,51 @@ function selectionScope(
   assert.ok('scope' in selection);
   return defined(selection.scope);
 }
+
+test('coordinate tuple components retain numeric tools and upstream scalar provenance', async () => {
+  const source = `import {point, line} from '@code3d/core';
+const distance = 6;
+export const marker = point([distance * 2, 3, -4]);
+export const segment = line(([1, 2, 3] as const), [distance, 8, 9]);
+export const ray = line([10, 0, 0]);`;
+  const module = await compileProject(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  assert.equal(module.diagnostic, undefined);
+  for (const [name, count, values] of [
+    ['point', 3, [12, 3, -4]],
+    ['line', 6, [1, 2, 3, 6, 8, 9]],
+  ] as const) {
+    const target = defined(
+      module.sourceTargets.find(
+        target =>
+          target.tool?.signature.name === name &&
+          target.tool.signature.parameters.length === count,
+      ),
+    );
+    const tool = defined(target.tool);
+    assert.deepEqual(
+      Object.values(defined(target.evaluations[0].toolArguments)),
+      values,
+    );
+    assert.equal(tool.arguments.length, count);
+    assert.ok(
+      tool.arguments.every(argument => argument.target?.kind === 'present'),
+    );
+    const distance = defined(
+      target.evaluations[0].parameters?.find(
+        usage => usage.target.label === 'Distance',
+      ),
+    );
+    assert.equal(distance.sensitivity, name === 'point' ? 2 : 1);
+    assert.equal(
+      source.slice(
+        distance.target.sourceRef.start,
+        distance.target.sourceRef.end,
+      ),
+      '6',
+    );
+    assert.equal(distance.argument, name === 'point' ? 'x' : 'endX');
+  }
+});

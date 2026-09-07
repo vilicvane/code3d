@@ -28,11 +28,11 @@ function previewOf(expression: ConstraintExpression | undefined) {
 
 test('constraint prefixes keep their own offset, pivot and rotation after the callback finishes', () => {
   const base = box(20, 10, 30);
-  const original = box(8, 6, 4).origin(1, 2, 3).rotate(10, 20, 30);
+  const original = box(8, 6, 4).originOffset(1, 2, 3).rotate(10, 20, 30);
   const stages = (self: SolidModel) => {
     const on = self.on(base.up);
     const offset = on.offset(10, 2, 3);
-    const pivot = offset.pivot(5, 0, 0);
+    const pivot = offset.pivot([5, 0, 0]);
     const rotate = pivot.rotate(25, 35, 10);
     const around = rotate.around(base.axis.reverse());
     const axisRotate = around.rotate(45);
@@ -105,7 +105,7 @@ test('align previews inherit earlier relate calls while excluding sibling return
 
 test('reverse-written align and its earlier rotations retain self as their preview owner', () => {
   const base = line([10, 0, 0], [10, 30, 0]);
-  const original = line(30, 0, 0);
+  const original = line([30, 0, 0]);
   let early: Constraint | undefined;
   const placed = original.relate(self => {
     early = base.align(self).rotate(10, 20, 30);

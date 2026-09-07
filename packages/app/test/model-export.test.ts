@@ -575,3 +575,36 @@ test('export rejects empty, stale, non-solid and invalid parameter requests', ()
 function retainModelGeometry(models: Iterable<Model>) {
   return retainGeometry(Array.from(models, modelObject));
 }
+
+test('rebased coordinates survive STEP encoding and readback', async () => {
+  const model = box(2, 4, 6).originOffset(10, -20, 30);
+  const snapshot = createModelSnapshotter()(model);
+  const geometry = retainModelGeometry([model]);
+  try {
+    const blob = exportModel(
+      geometry,
+      collectExportInstances(scene(snapshot)),
+      defaults,
+    );
+    const imported = await importSTEP(blob);
+    try {
+      const bounds = imported.boundingBox;
+      try {
+        assert.deepEqual(
+          bounds.bounds.map(point => point.map(value => Math.round(value))),
+          [
+            [-11, 18, -33],
+            [-9, 22, -27],
+          ],
+        );
+      } finally {
+        bounds.delete();
+      }
+    } finally {
+      imported.delete();
+    }
+  } finally {
+    geometry.dispose();
+    disposeModelObjects([model]);
+  }
+});

@@ -88,7 +88,7 @@ test('geometry models expose queryable topology without model operations', () =>
         'relate',
         'expose',
         'paint',
-        'origin',
+        'originOffset',
         'rotate',
         'scaled',
         'fillet',
@@ -300,13 +300,13 @@ test('querying before or after a geometry transform preserves the same anchor fr
 });
 
 test('exposing a model uses the same geometric anchor as its topology element', () => {
-  const profile = circle(4).origin(0, 10, 0);
+  const profile = circle(4).originOffset(0, 10, 0);
   const path = bezier([
     [0, 0, 0],
     [12, 4, 0],
     [3, 9, 2],
-  ]).origin(8, 8, 8);
-  const location = point([1, 2, 3]).origin(9, 9, 9);
+  ]).originOffset(8, 8, 8);
+  const location = point([1, 2, 3]).originOffset(9, 9, 9);
   const assembly = group([profile, path, location]).expose({
     profile,
     path,

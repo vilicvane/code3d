@@ -4,6 +4,7 @@ import type {
   SourceTargetEvaluation,
 } from './compiler';
 import type {SourceDecorationProvider} from '../viewport-decoration';
+import {identityRigidTransform} from '@code3d/core/tooling';
 
 type BooleanInputContext = Readonly<{
   operation: Readonly<{
@@ -75,7 +76,6 @@ const decorations: SourceDecorationProvider['decorations'] = ({
     evaluation.operationInput?.nodeIds ?? evaluation.nodeIds,
   );
   const operation = module.operations.get(evaluation.operationId)!;
-  const output = module.objects.get(operation.outputNodeId)!;
 
   return operation.regions
     .filter(
@@ -89,8 +89,9 @@ const decorations: SourceDecorationProvider['decorations'] = ({
       kind: 'mesh' as const,
       id: `${operation.id}:${region.kind}:${region.inputNodeId}:${index}`,
       operationRole: inputRole,
+      nodeId: region.frameNodeId,
       mesh: region.mesh,
-      transform: output.compositionTransform,
+      transform: {...identityRigidTransform, scale: [1, 1, 1] as const},
       appearance:
         operationKind === 'union' && region.kind === 'section'
           ? unionSectionAppearance
@@ -131,16 +132,18 @@ export const edgeModificationSourceDecoration = {
       {
         kind: 'mesh' as const,
         id: `${operation.id}:input-shape`,
+        nodeId: operation.outputNodeId,
         mesh: input.mesh,
-        transform: input.transform,
+        transform: selection.transform,
         appearance: modifiedEdgeInputAppearance,
       },
       {
         kind: 'edges' as const,
         id: `${operation.id}:input-edges`,
+        nodeId: operation.outputNodeId,
         mesh: input.mesh,
         edgeIds: selection.ids,
-        transform: input.transform,
+        transform: selection.transform,
         appearance: modifiedEdgeSelectionAppearance,
       },
     ];

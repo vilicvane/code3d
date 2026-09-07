@@ -44,12 +44,17 @@ Planar profiles lie in the local XZ plane with a +Y normal.
 | `ellipse(xRadius, zRadius)`                | Elliptical face                              |
 | `rectangle(x, z)`                          | Rectangular face                             |
 | `regularPolygon(radius, sides, rotation?)` | Regular polygonal face                       |
-| `point(x, y, z)` or `point([x, y, z])`     | Vertex model                                 |
-| `line(x, y, z)` or `line(start, end)`      | Straight edge                                |
+| `point()` or `point([x, y, z])`            | Vertex model                                 |
+| `line([x, y, z])` or `line(start, end)`    | Straight edge                                |
 | `arc(start, middle, end)`                  | Arc through three points                     |
 | `bezier(points)`                           | Bézier curve                                 |
 | `spline(points)`                           | Interpolating spline                         |
 | `loft(sections, options?)`                 | Solid through sections; optional curve spine |
+
+Position coordinates use arrays; dimensions, offsets and angles use scalar
+arguments. `point([x, y, z])` equals `point().originOffset(-x, -y, -z)`.
+`line([x, y, z])` starts at zero; the two-array form uses both supplied local
+endpoints. Curve tangents do not redefine the model's XYZ axes.
 
 Profiles and curves are model values that can be inspected and related to
 other models.
@@ -94,7 +99,7 @@ positive and finite. For example, `box(20, 8, 12).scaled(0.5)` returns a new box
 with dimensions 10, 4, and 6, leaving the original model unchanged.
 
 Scaling uses local coordinate zero even after an origin edit. Geometry, named
-anchors, the `center` anchor, and the model's origin position scale together;
+anchors and the `center` anchor scale together; the model origin stays zero;
 topology IDs are preserved. Groups do not provide `.scaled()`; scale their
 geometric parts before composing them. To change only an exported file's unit
 conversion, use the [export scale](../../guides/exporting/#scale-and-orientation).
@@ -105,22 +110,22 @@ Solids, faces, curves, and points provide these operations:
 
 | Method                      | Behavior                                                   |
 | --------------------------- | ---------------------------------------------------------- |
-| `.origin(x, y, z)`          | Set the origin in local geometry coordinates               |
 | `.originVertex(id)`         | Set the origin to an input-model vertex                    |
 | `.originCenter()`           | Set the origin to the model's center anchor                |
 | `.originOffset(dx, dy, dz)` | Add a local-coordinate offset to the current origin        |
 | `.rotate(x, y, z)`          | Rotate about the origin, in degrees, fixed X then Y then Z |
 
-`origin`, `originVertex`, and `originCenter` replace previous origin settings and accumulated
-offsets. Setting the origin leaves geometry and named anchors in place; it
-changes the default pivot for later explicit rotations. Rotation moves geometry and named
-anchors together, keeping topology IDs. Later origin settings do not undo
-already-applied rotations.
+The origin is always zero in model coordinates. `originOffset(dx, dy, dz)`
+re-expresses every local point as `p - [dx, dy, dz]`; offsets accumulate and can
+cancel. `originVertex` and `originCenter` make the selected point local zero.
+Geometry, named anchors and topology positions use the resulting coordinates;
+directions and topology IDs are preserved. Old model values remain unchanged.
+Rotation and scaling act about current local zero.
 
-Every geometric model exposes `center`: the body's local bounding-box center,
+Every geometric model exposes `center`: its initial local bounding-box center,
 carried along by subsequent transforms. Rotation does not recalculate it from
-the rotated shape's axis-aligned bounds. Changing the origin leaves `center`
-in place. Use `.originCenter().originOffset(1, 0, 0)` to offset from this center.
+the rotated shape's axis-aligned bounds. Origin edits change its coordinates;
+`.originCenter().originOffset(1, 0, 0)` leaves it at `[-1, 0, 0]`.
 Groups do not provide these geometric operations. For a runnable example and
 the vertex picker, origin arrows, and rotation rings, see
 [choosing an origin and rotating a part](../../guides/origins-and-rotation/).
@@ -160,7 +165,7 @@ in the target axes after alignment, before explicit rotations; zero preserves
 the relation's free modes. Use point references for additional positioning.
 
 - `constraint.rotate(x, y, z)`: rotate around self's origin.
-- `constraint.pivot(x, y, z).rotate(x, y, z)`: a pivot in self's local frame.
+- `constraint.pivot([x, y, z]).rotate(x, y, z)`: a pivot in self's local frame.
 - `constraint.pivotVertex(id).rotate(x, y, z)`: a vertex belonging to self.
 - `constraint.around(axis).rotate(angle)`: a positioned local or external axis.
 
