@@ -36,6 +36,7 @@ export type {
 
 type ToolParameterSchemaBase = Readonly<{
   index: number;
+  path?: readonly number[];
   name: string;
   optional: boolean;
   label: string;
@@ -334,6 +335,7 @@ function toolSignatureSchema(
   const parameters = annotations.map(({parameter, index, name, config}) => {
     const common = {
       index,
+      ...(parameter.path ? {path: parameter.path} : {}),
       name,
       optional: parameter.optional,
       label: config.label ?? humanizeIdentifier(name),

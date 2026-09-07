@@ -31,7 +31,7 @@ const platform = rectangle(18, 12)
     self
       .align(circle(12).plane.flip())
       .offset(25, 35, 0)
-      .pivot(4, 0, 0)
+      .pivot([4, 0, 0])
       .rotate(0, 0, 20),
   )
   .paint('#92ddaa');

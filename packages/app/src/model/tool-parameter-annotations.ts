@@ -49,6 +49,7 @@ export function isToolSelectionKind(kind: unknown): kind is TopologyKind {
 }
 
 export type SignatureParameter = Readonly<{
+  path?: readonly number[];
   name: string;
   optional: boolean;
   numeric: boolean;
@@ -73,46 +74,81 @@ export function signatureParameters(
       : checker.isArrayType(value) || checker.isTupleType(value);
   };
 
-  return signature.getParameters().flatMap(parameter => {
-    const declaration = parameter.valueDeclaration;
-    const type = checker.getTypeOfSymbolAtLocation(parameter, location);
-    if (
-      declaration &&
-      ts.isParameter(declaration) &&
-      declaration.dotDotDotToken &&
-      checker.isTupleType(type)
-    ) {
-      const reference = type as ts.TypeReference;
-      const tuple = reference.target as ts.TupleType;
-      return checker.getTypeArguments(reference).map((element, index) => {
-        const label = tuple.labeledElementDeclarations?.[index];
-        return {
-          name:
-            label && ts.isIdentifier(label.name)
-              ? label.name.text
-              : `arg${index}`,
+  return signature
+    .getParameters()
+    .flatMap((parameter, argumentIndex) => {
+      const declaration = parameter.valueDeclaration;
+      const type = checker.getTypeOfSymbolAtLocation(parameter, location);
+      if (
+        declaration &&
+        ts.isParameter(declaration) &&
+        declaration.dotDotDotToken &&
+        checker.isTupleType(type)
+      ) {
+        const reference = type as ts.TypeReference;
+        const tuple = reference.target as ts.TupleType;
+        return checker.getTypeArguments(reference).map((element, index) => {
+          const label = tuple.labeledElementDeclarations?.[index];
+          return {
+            path: [argumentIndex + index],
+            name:
+              label && ts.isIdentifier(label.name)
+                ? label.name.text
+                : `arg${index}`,
+            optional: Boolean(
+              tuple.elementFlags[index] & ts.ElementFlags.Optional,
+            ),
+            numeric: isNumeric(element),
+            multiple: acceptsArray(element),
+          };
+        });
+      }
+      if (
+        declaration &&
+        ts.isParameter(declaration) &&
+        ts.isArrayBindingPattern(declaration.name)
+      ) {
+        return declaration.name.elements.flatMap((element, index) => {
+          if (!ts.isBindingElement(element) || !ts.isIdentifier(element.name))
+            return [];
+          const elementType = checker.getTypeAtLocation(element);
+          return [
+            {
+              name: element.name.text,
+              path: [argumentIndex, index],
+              optional: Boolean(
+                declaration.questionToken ||
+                declaration.initializer ||
+                element.initializer,
+              ),
+              numeric: isNumeric(elementType),
+              multiple: acceptsArray(elementType),
+            },
+          ];
+        });
+      }
+      return [
+        {
+          name: parameter.getName(),
+          path: [argumentIndex],
           optional: Boolean(
-            tuple.elementFlags[index] & ts.ElementFlags.Optional,
+            parameter.flags & ts.SymbolFlags.Optional ||
+            (declaration &&
+              ts.isParameter(declaration) &&
+              (declaration.questionToken || declaration.initializer)),
           ),
-          numeric: isNumeric(element),
-          multiple: acceptsArray(element),
-        };
-      });
-    }
-    return [
-      {
-        name: parameter.getName(),
-        optional: Boolean(
-          parameter.flags & ts.SymbolFlags.Optional ||
-          (declaration &&
-            ts.isParameter(declaration) &&
-            (declaration.questionToken || declaration.initializer)),
-        ),
-        numeric: isNumeric(type),
-        multiple: acceptsArray(type),
-      },
-    ];
-  });
+          numeric: isNumeric(type),
+          multiple: acceptsArray(type),
+        },
+      ];
+    })
+    .map((parameter, index) => {
+      if (parameter.path?.length === 1 && parameter.path[0] === index) {
+        const {path, ...scalar} = parameter;
+        return scalar;
+      }
+      return parameter;
+    });
 }
 
 export function parameterAnnotations(

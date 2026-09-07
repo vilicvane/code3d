@@ -3,6 +3,7 @@ import {
   offsetCallSource,
   formatSourceNumber,
 } from './source-expression';
+import {identityRigidTransform} from '@code3d/core/tooling';
 import type {
   ModelSpatialOperation,
   ParameterTarget,
@@ -27,7 +28,25 @@ export type SpatialObjectPreview = Readonly<{
   nodeId: string;
   transform: RigidTransform;
   spatial: ModelSpatialOperation;
+  /** Origin drag stays in the gesture's input frame until commit. */
+  originDelta?: Vec3;
 }>;
+
+/** Switch from the frozen drag frame to the resulting model coordinates. */
+export function committedSpatialObject(
+  preview: SpatialObjectPreview,
+): SpatialObjectPreview {
+  if (!preview.originDelta) return preview;
+  const {originDelta, ...result} = preview;
+  return {
+    ...result,
+    transform: {
+      ...identityRigidTransform,
+      position: [-originDelta[0], -originDelta[1], -originDelta[2]],
+    },
+    spatial: {...preview.spatial, origin: [0, 0, 0]},
+  };
+}
 
 export type SpatialPreview = Readonly<{
   kind: 'model-spatial';

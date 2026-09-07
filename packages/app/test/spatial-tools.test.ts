@@ -1,4 +1,4 @@
-import {Object3D} from 'three';
+import {Matrix4, Object3D, Quaternion, Vector3} from 'three';
 import type {ViewportDecoration} from '../src/viewport-decoration.ts';
 import type {ToolHost} from '../src/tools/tool-system.ts';
 import {defined} from '../../../test/assert.ts';
@@ -151,13 +151,12 @@ test('originCenter without parameters displays its center and drags by appending
   assert.ok(session.commit(intent).status === 'committed');
   assert.match(host.source(), /originCenter\(\)\.originOffset\(2, 0, 0\)/);
   const {node: next} = await build(host.source(), 'originOffset');
-  near(
-    defined(next).origin,
-    defined(node).origin.map((value, axis) => value + (axis === 0 ? 2 : 0)),
-  );
+  near(defined(next).origin, [0, 0, 0]);
   near(
     [...defined(defined(next).mesh).topologyVertices],
-    [...defined(defined(node).mesh).topologyVertices],
+    [...defined(defined(node).mesh).topologyVertices].map(
+      (v, i) => v - (i % 3 === 0 ? 2 : 0),
+    ),
   );
 });
 
@@ -188,9 +187,48 @@ test('originVertex exposes the output origin and retains its input for vertex se
   ]);
 });
 
+test('originVertex candidates map from input topology to the displayed result after earlier transforms', async () => {
+  for (const prefix of [
+    '',
+    '.originOffset(5, -2, 3).rotate(15, 35, 10).scaled(2)',
+  ]) {
+    for (const id of [3, 6]) {
+      const {module, node, evaluation} = await build(
+        `import {box} from '@code3d/core'; box(8, 6, 4)${prefix}.originVertex(${id});`,
+        'originVertex',
+      );
+      const selection = defined(evaluation.selection);
+      const scope = defined(selection.scope);
+      assert.equal(scope.geometryNodeId, selection.inputNodeId);
+      const input = defined(
+        defined(module.objects.get(scope.geometryNodeId)).mesh,
+      );
+      const output = defined(node.mesh);
+      assert.deepEqual(scope.availableIds, input.vertexIds);
+      assert.deepEqual(output.vertexIds, input.vertexIds);
+      const transform = new Matrix4().compose(
+        new Vector3(...scope.transform.position),
+        new Quaternion(...scope.transform.quaternion),
+        new Vector3(...scope.transform.scale),
+      );
+      input.vertexIds.forEach((vertexId, i) => {
+        const candidate = new Vector3()
+          .fromArray(input.topologyVertices, i * 3)
+          .applyMatrix4(transform);
+        const actual = new Vector3().fromArray(output.topologyVertices, i * 3);
+        assert.ok(
+          candidate.distanceTo(actual) < 1e-5,
+          `V${vertexId} must stay on the output geometry`,
+        );
+        if (vertexId === id) near(actual.toArray(), [0, 0, 0]);
+      });
+    }
+  }
+});
+
 test('rotation edits an upstream angle and preview matches recomputed B-Rep vertices', async () => {
   const source =
-    'import {box} from "@code3d/core"; const angle = 25; const part = box(8, 6, 4).origin(1, 2, 3).rotate(angle, 35, 10);';
+    'import {box} from "@code3d/core"; const angle = 25; const part = box(8, 6, 4).originOffset(1, 2, 3).rotate(angle, 35, 10);';
   const {node, bindings} = await build(source, 'rotate');
   const binding = bindings.find(binding => binding.axis === 'x');
   assert.ok(defined(binding).spatial.source.kind === 'parameter');
@@ -233,16 +271,16 @@ test('shared size and angle parameters keep the size expression while editing th
 
 test('originOffset drag accumulates on the selected offset and cancel preserves source', async () => {
   const source =
-    'import {box} from "@code3d/core"; box(8, 6, 4).origin(1, 2, 3).originOffset(4, 0, 0);';
+    'import {box} from "@code3d/core"; box(8, 6, 4).originVertex(3).originOffset(4, 0, 0);';
   const {node, bindings} = await build(source, 'originOffset');
   const host = hostFor(source);
   const session = new ToolEngine(host.host).begin('offset');
   const intent = spatialIntent(bindings[0], 7);
-  near(intent.preview.objects[0].spatial.origin, [8, 2, 3]);
+  near(intent.preview.objects[0].spatial.origin, [3, 0, 0]);
   session.preview(intent);
   session.cancel();
   assert.equal(host.source(), source);
-  near(defined(node).origin, [5, 2, 3]);
+  near(defined(node).origin, [0, 0, 0]);
 });
 
 test('numeric adjustment folds repeated deltas while preserving expressions', () => {
@@ -308,7 +346,7 @@ async function relationTool(source: string, name: string) {
 
 for (const reverse of [false, true] as const) {
   test(`relation rotation previews and edits self with ${reverse ? 'reversed' : 'forward'} on syntax`, async () => {
-    const source = `import {box} from '@code3d/core'; const angle = 25; const base = box(20, 10, 30); const part = box(8, 6, 4).relate(self => ${reverse ? 'base.on(self.up)' : 'self.on(base.up)'}.pivot(1, 2, 3).rotate(angle, 35, 10));`;
+    const source = `import {box} from '@code3d/core'; const angle = 25; const base = box(20, 10, 30); const part = box(8, 6, 4).relate(self => ${reverse ? 'base.on(self.up)' : 'self.on(base.up)'}.pivot([1, 2, 3]).rotate(angle, 35, 10));`;
     const {node, bindings, evaluation} = await relationTool(source, 'rotate');
     assert.equal(bindings.length, 3);
     assert.equal(evaluation.constraintOwnerNodeId, defined(node).nodeId);
@@ -340,7 +378,7 @@ for (const reverse of [false, true] as const) {
 }
 
 test('pivot coordinates have an independent drag and preserve the local frame', async () => {
-  const source = `import {box} from '@code3d/core'; const base = box(20, 10, 30); const part = box(8, 6, 4).origin(1, 2, 3).rotate(10, 20, 30).relate(self => self.on(base.up).pivot(5, 0, 0).rotate(25, 35, 10));`;
+  const source = `import {box} from '@code3d/core'; const base = box(20, 10, 30); const part = box(8, 6, 4).originOffset(1, 2, 3).rotate(10, 20, 30).relate(self => self.on(base.up).pivot([5, 0, 0]).rotate(25, 35, 10));`;
   const {node, bindings} = await relationTool(source, 'pivot');
   assert.equal(bindings.length, 3);
   const intent = spatialIntent(bindings[0], 8);
@@ -349,7 +387,7 @@ test('pivot coordinates have an independent drag and preserve the local frame', 
     new ToolEngine(host.host).begin('pivot').commit(intent).status,
     'committed',
   );
-  assert.match(host.source(), /pivot\(8, 0, 0\)/);
+  assert.match(host.source(), /pivot\(\[8, 0, 0\]\)/);
   const {node: next} = await relationTool(host.source(), 'pivot');
   const {composeTransforms} = await import('../../core/bld/tooling/index.js');
   const preview = composeTransforms(
@@ -396,7 +434,7 @@ for (const [geometry, id] of [
 }
 
 test('around exposes a positioned axis and a single angle ring', async () => {
-  const source = `import {box, point} from '@code3d/core'; const base = box(20, 10, 30); const axis = box(2, 2, 2).relate(self => self.center.on(point([10, 20, 30]).up).offset(0, 0, 0)); const part = box(8, 6, 4).relate(self => self.on(base.up).around(axis.axis).rotate(25).pivot(2, 3, 4).rotate(10, 20, 30).offset(7, 0, 0));`;
+  const source = `import {box, point} from '@code3d/core'; const base = box(20, 10, 30); const axis = box(2, 2, 2).relate(self => self.center.on(point([10, 20, 30]).up).offset(0, 0, 0)); const part = box(8, 6, 4).relate(self => self.on(base.up).around(axis.axis).rotate(25).pivot([2, 3, 4]).rotate(10, 20, 30).offset(7, 0, 0));`;
   const {node, bindings} = await relationTool(source, 'rotate');
   assert.equal(bindings.length, 1);
   assert.equal(bindings[0].axis, 'y');
@@ -432,7 +470,7 @@ test('around exposes a positioned axis and a single angle ring', async () => {
 
 for (const reverse of [false, true] as const) {
   test(`align rotation edits self and preserves preview consistency with ${reverse ? 'reversed' : 'forward'} source`, async () => {
-    const source = `import {box, point} from '@code3d/core'; const base = point([20, 10, 30]); const part = box(8, 6, 4).relate(self => ${reverse ? 'base.align(self.center)' : 'self.center.align(base)'}.offset(2, 3, 4).pivot(1, 2, 3).rotate(25, 35, 10).around(box(1, 1, 1).axis).rotate(45).offset(7, 0, 0));`;
+    const source = `import {box, point} from '@code3d/core'; const base = point([20, 10, 30]); const part = box(8, 6, 4).relate(self => ${reverse ? 'base.align(self.center)' : 'self.center.align(base)'}.offset(2, 3, 4).pivot([1, 2, 3]).rotate(25, 35, 10).around(box(1, 1, 1).axis).rotate(45).offset(7, 0, 0));`;
     const {node, bindings} = await relationTool(source, 'rotate');
     const intent = spatialIntent(bindings[0], 55),
       host = hostFor(source);
@@ -529,7 +567,7 @@ test('a bound selection renders each computed plane once across named and relati
 });
 
 for (const [call, kind] of [
-  ['pivot(5, 0, 0)', 'point'],
+  ['pivot([5, 0, 0])', 'point'],
   ['around(axis.axis)', 'line'],
 ] as const) {
   test(`an unfinished ${call} retains a source reference and visible marker`, async () => {
@@ -606,3 +644,34 @@ function anchorDecoration(decoration: ViewportDecoration) {
   assert.ok(decoration.kind === 'anchor');
   return decoration;
 }
+
+test('origin drag uses its initial snapshot and switches to result coordinates on commit', async () => {
+  const source = `import {point} from '@code3d/core'; point([10, 20, 30]).originOffset(2, 3, 4);`;
+  const {node, bindings} = await build(source, 'originOffset');
+  const {committedSpatialObject} = await server.ssrLoadModule<
+    typeof import('../src/tools/spatial-edit.ts')
+  >('/src/tools/spatial-edit.ts');
+  const binding = defined(bindings.find(binding => binding.axis === 'x'));
+  const host = hostFor(source);
+  const session = new ToolEngine(host.host).begin('origin-snapshot');
+  const first = spatialIntent(binding, 5);
+  const second = spatialIntent(binding, 7);
+  session.preview(first);
+  session.preview(second);
+  near(first.preview.objects[0].spatial.origin, [3, 0, 0]);
+  near(second.preview.objects[0].spatial.origin, [5, 0, 0]);
+  near(second.preview.objects[0].transform.position, [0, 0, 0]);
+  near([...defined(defined(node).mesh).topologyVertices], [8, 17, 26]);
+  session.cancel();
+  assert.equal(host.source(), source);
+  const result = new ToolEngine(host.host)
+    .begin('origin-commit')
+    .commit(second);
+  assert.equal(result.status, 'committed');
+  const committed = committedSpatialObject(second.preview.objects[0]);
+  near(committed.spatial.origin, [0, 0, 0]);
+  near(committed.transform.position, [-5, 0, 0]);
+  const {node: next} = await build(host.source(), 'originOffset');
+  near([...defined(defined(next).mesh).topologyVertices], [3, 17, 26]);
+  near(defined(next).origin, [0, 0, 0]);
+});

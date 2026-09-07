@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
 import * as THREE from 'three';
-import {box, group} from '@code3d/core';
+import {box, group, point} from '@code3d/core';
 import {
   createModelSnapshotter,
   disposeModelObjects,
@@ -97,3 +97,30 @@ function snapshot(kind: ModelKind, color?: string): ModelSnapshotObject {
     },
   };
 }
+
+test('rendered point coordinates match direct construction and origin rebasing', () => {
+  const direct = point([10, 2, -3]);
+  const rebased = point().originOffset(-10, -2, 3);
+  const assembly = group([direct, rebased]);
+  const rendered = createRenderedModel(createModelSnapshotter()(assembly));
+  try {
+    const positions: number[][] = [];
+    rendered.updateWorldMatrix(true, true);
+    rendered.traverse(object => {
+      if (!(object instanceof THREE.Points)) return;
+      positions.push(
+        new THREE.Vector3()
+          .fromBufferAttribute(object.geometry.getAttribute('position'), 0)
+          .applyMatrix4(object.matrixWorld)
+          .toArray(),
+      );
+    });
+    assert.deepEqual(positions, [
+      [10, 2, -3],
+      [10, 2, -3],
+    ]);
+  } finally {
+    disposeObject(rendered);
+    disposeModelObjects([direct, rebased, assembly]);
+  }
+});

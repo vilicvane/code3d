@@ -41,9 +41,7 @@ export class ModelRenderer {
     rim.position.set(-80, 55, -65);
     this.scene.add(rim);
 
-    const grid = new THREE.GridHelper(360, 36, '#4b5046', '#282b26');
-    grid.position.y = -0.08;
-    this.scene.add(grid);
+    this.scene.add(createGrid(this.scene.background));
 
     this.camera.position.set(105, 82, 120);
     this.resize();
@@ -139,6 +137,23 @@ export class ModelRenderer {
     if (!image) throw new Error('The browser could not encode the PNG image.');
     return image;
   }
+}
+
+function createGrid(background: THREE.Color): THREE.GridHelper {
+  const color = background.clone().convertLinearToSRGB();
+  color.setRGB(1 - color.r, 1 - color.g, 1 - color.b, THREE.SRGBColorSpace);
+
+  const grid = new THREE.GridHelper(360, 36);
+  const positions = grid.geometry.getAttribute('position');
+  const colors = new THREE.Float32BufferAttribute(positions.count * 4, 4);
+  for (let index = 0; index < positions.count; index++) {
+    const center = positions.getX(index) === 0 || positions.getZ(index) === 0;
+    colors.setXYZW(index, color.r, color.g, color.b, center ? 0.2 : 0.08);
+  }
+  grid.geometry.setAttribute('color', colors);
+  grid.material.transparent = true;
+  grid.material.depthWrite = false;
+  return grid;
 }
 
 function configureRenderer(
