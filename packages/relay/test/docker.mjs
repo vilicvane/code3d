@@ -1,85 +1,53 @@
 import assert from 'node:assert/strict';
-import {execFile} from 'node:child_process';
+import {execFile, spawn} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {once} from 'node:events';
 import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
-import {createServer} from 'node:net';
 import {tmpdir} from 'node:os';
 import {dirname, join, resolve} from 'node:path';
+import {createInterface} from 'node:readline';
 import {setTimeout as delay} from 'node:timers/promises';
 import {fileURLToPath} from 'node:url';
 import {promisify} from 'node:util';
-import {
-  AgentClient,
-  AgentEndpoint,
-  RelayHost,
-  createAgentConfig,
-  createHostIdentity,
-} from '@code3d/agent';
 
 const runFile = promisify(execFile);
-const script = fileURLToPath(import.meta.url);
-const root = resolve(dirname(script), '../../..');
+const tests = dirname(fileURLToPath(import.meta.url));
+const root = resolve(tests, '../../..');
 const deployment = join(root, 'deploy/relay');
+const directory = await mkdtemp(join(tmpdir(), 'code3d-relay-compose-'));
+const project = 'code3d-relay-test-' + randomUUID().slice(0, 8);
+// Deliberately unparsable, so the connector never authenticates or contacts an edge.
+const token = 'invalid-offline-test-token-' + randomUUID();
+const environment = {...process.env};
+// Shell variables override .env. Never use a developer's real tunnel credentials.
+delete environment.TUNNEL_TOKEN;
+const composeArgs = [
+  'compose',
+  '--project-name',
+  project,
+  '--env-file',
+  join(directory, '.env'),
+  '-f',
+  join(deployment, 'compose.yaml'),
+  '-f',
+  join(directory, 'override.json'),
+];
 
 async function run(command, args, options = {}) {
-  try {
-    return await runFile(command, args, {
-      cwd: root,
-      timeout: 180_000,
-      maxBuffer: 8 * 1024 * 1024,
-      ...options,
-    });
-  } catch (error) {
-    throw new Error(
-      `${command} ${args.join(' ')} failed:\n${error.stdout ?? ''}${error.stderr ?? ''}`,
-      {cause: error},
-    );
-  }
+  return runFile(command, args, {
+    cwd: root,
+    env: environment,
+    timeout: 180_000,
+    maxBuffer: 8 * 1024 * 1024,
+    ...options,
+  });
 }
 
-async function freePorts() {
-  const servers = [createServer(), createServer()];
-  try {
-    for (const server of servers) {
-      server.listen(0, '127.0.0.1');
-      await once(server, 'listening');
-    }
-    return servers.map(server => server.address().port);
-  } finally {
-    await Promise.all(
-      servers.map(server => new Promise(resolve => server.close(resolve))),
-    );
-  }
-}
-
-function compose(args) {
-  return run(
-    'docker',
-    [
-      'compose',
-      '--project-name',
-      process.env.CODE3D_COMPOSE_TEST_PROJECT,
-      '--env-file',
-      join(process.env.CODE3D_COMPOSE_TEST_DIRECTORY, '.env'),
-      '-f',
-      join(deployment, 'compose.yaml'),
-      '-f',
-      join(process.env.CODE3D_COMPOSE_TEST_DIRECTORY, 'override.json'),
-      ...args,
-    ],
-    {
-      env: {
-        ...process.env,
-        // Shell variables override .env in Compose; never inherit a public domain.
-        RELAY_DOMAIN: 'localhost',
-        ACME_EMAIL: 'relay-test@example.invalid',
-        RELAY_BIND_ADDRESS: '127.0.0.1',
-        RELAY_HTTP_PORT: new URL(process.env.CODE3D_COMPOSE_TEST_HTTP_URL).port,
-        RELAY_HTTPS_PORT: new URL(process.env.CODE3D_COMPOSE_TEST_URL).port,
-      },
-    },
-  );
+const compose = args => run('docker', [...composeArgs, ...args]);
+async function inspect(service) {
+  const id = (await compose(['ps', '--all', '-q', service])).stdout.trim();
+  assert.ok(id, service + ' container must exist');
+  return JSON.parse((await run('docker', ['inspect', id])).stdout)[0];
 }
 
 async function until(check, description) {
@@ -91,319 +59,198 @@ async function until(check, description) {
   throw new Error('Timed out waiting for ' + description);
 }
 
-async function orchestrate() {
-  const directory = await mkdtemp(join(tmpdir(), 'code3d-relay-compose-'));
-  const project = 'code3d-relay-test-' + randomUUID().slice(0, 8);
-  const [httpPort, httpsPort] = await freePorts();
-  process.env.CODE3D_COMPOSE_TEST_PROJECT = project;
-  process.env.CODE3D_COMPOSE_TEST_DIRECTORY = directory;
-  process.env.CODE3D_COMPOSE_TEST_URL = `https://localhost:${httpsPort}`;
-  process.env.CODE3D_COMPOSE_TEST_HTTP_URL = `http://localhost:${httpPort}`;
-  await writeFile(
-    join(directory, '.env'),
-    [
-      'RELAY_DOMAIN=localhost',
-      'ACME_EMAIL=relay-test@example.invalid',
-      'RELAY_BIND_ADDRESS=127.0.0.1',
-      'RELAY_HTTP_PORT=' + httpPort,
-      'RELAY_HTTPS_PORT=' + httpsPort,
-      '',
-    ].join('\n'),
+async function probe() {
+  const child = spawn(
+    'docker',
+    [...composeArgs, 'run', '--rm', '--no-deps', '-T', 'probe'],
+    {cwd: root, env: environment, stdio: ['pipe', 'pipe', 'inherit']},
   );
+  const exited = once(child, 'exit');
+  const timeout = setTimeout(() => child.kill('SIGTERM'), 120_000);
+  const lines = createInterface({input: child.stdout});
+  try {
+    for await (const line of lines) {
+      if (!line.startsWith('@restart ')) {
+        console.log(line);
+        continue;
+      }
+      await writeFile(join(directory, 'limits.json'), line.slice(9));
+      await compose(['restart', 'relay']);
+      child.stdin.write('restarted\n');
+    }
+    const [code, signal] = await exited;
+    assert.equal(code, 0, 'internal probe failed: ' + signal);
+  } finally {
+    clearTimeout(timeout);
+    child.stdin.end();
+    if (child.exitCode === null) child.kill('SIGTERM');
+  }
+}
+
+try {
+  await writeFile(join(directory, '.env'), 'TUNNEL_TOKEN=' + token + '\n', {
+    mode: 0o600,
+  });
   await writeFile(
     join(directory, 'limits.json'),
     await readFile(join(deployment, 'limits.json')),
   );
   await writeFile(
-    join(directory, 'cloudflare.caddy'),
-    await readFile(join(deployment, 'cloudflare.caddy')),
-  );
-  await writeFile(
     join(directory, 'override.json'),
     JSON.stringify({
       services: {
-        gateway: {
-          volumes: [
-            join(directory, 'cloudflare.caddy') +
-              ':/etc/caddy/cloudflare.caddy:ro',
-          ],
-        },
+        cloudflared: {restart: 'no'},
         relay: {
+          image: project + ':test',
           volumes: [
             join(directory, 'limits.json') + ':/etc/code3d/limits.json:ro',
           ],
           healthcheck: {interval: '1s', start_period: '1s'},
         },
+        // Disposable client only; it has no Docker socket, token or published port.
+        probe: {
+          image: project + ':test',
+          entrypoint: ['node', '/app/packages/relay/test/docker-probe.mjs'],
+          volumes: [tests + ':/app/packages/relay/test:ro'],
+          networks: ['backend'],
+          read_only: true,
+          cap_drop: ['ALL'],
+          security_opt: ['no-new-privileges:true'],
+        },
       },
     }),
   );
-  try {
-    console.log('Building and starting isolated Compose project ' + project);
-    await compose(['up', '-d', '--build', '--wait', '--wait-timeout', '60']);
-    const certificate = join(directory, 'root.crt');
-    await until(async () => {
-      try {
-        await compose([
-          'cp',
-          'gateway:/data/caddy/pki/authorities/local/root.crt',
-          certificate,
-        ]);
-        return true;
-      } catch {
-        return false;
-      }
-    }, 'Caddy localhost CA');
-    const {stdout} = await run(process.execPath, [script, '--probe'], {
-      env: {...process.env, NODE_EXTRA_CA_CERTS: certificate},
-    });
-    process.stdout.write(stdout);
-  } catch (error) {
-    const logs = await compose(['logs', '--no-color', '--tail=100']).catch(
-      () => ({stdout: 'Could not read Compose logs.'}),
+  const config = JSON.parse(
+    (await compose(['config', '--format', 'json'])).stdout,
+  );
+  assert.deepEqual(Object.keys(config.secrets), ['tunnel_token']);
+  assert.equal(config.secrets.tunnel_token.environment, 'TUNNEL_TOKEN');
+  assert.equal(config.networks.backend.internal, true);
+  assert.equal(config.networks.edge.internal ?? false, false);
+  for (const [name, service] of Object.entries(config.services)) {
+    assert.equal(
+      service.ports?.length ?? 0,
+      0,
+      name + ' must not publish ports',
     );
-    process.stderr.write(logs.stdout);
-    throw error;
-  } finally {
-    await compose(['down', '--volumes', '--rmi', 'local', '--remove-orphans']);
-    await rm(directory, {recursive: true, force: true});
+    assert.equal(service.secrets?.length ?? 0, name === 'cloudflared' ? 1 : 0);
+    assert.ok(!JSON.stringify(service).includes(token));
   }
-}
+  assert.deepEqual(Object.keys(config.services.relay.networks), ['backend']);
+  assert.deepEqual(Object.keys(config.services.cloudflared.networks).sort(), [
+    'backend',
+    'edge',
+  ]);
 
-async function probe() {
-  const url = process.env.CODE3D_COMPOSE_TEST_URL;
-  const directory = process.env.CODE3D_COMPOSE_TEST_DIRECTORY;
-  const fetchRelay = (path, options) =>
-    fetch(url + path, {signal: AbortSignal.timeout(10_000), ...options});
-  const healthy = async () => {
-    try {
-      return (await fetchRelay('/health')).status === 200;
-    } catch {
-      return false;
-    }
-  };
-  await until(healthy, 'trusted HTTPS health check');
-  const redirect = await fetch(
-    process.env.CODE3D_COMPOSE_TEST_HTTP_URL + '/health',
-    {redirect: 'manual', signal: AbortSignal.timeout(10_000)},
+  console.log('Building and starting isolated Compose project ' + project);
+  await compose([
+    'up',
+    '-d',
+    '--build',
+    '--wait',
+    '--wait-timeout',
+    '60',
+    'relay',
+  ]);
+  await compose(['up', '-d', '--no-deps', 'cloudflared']);
+  await until(
+    async () => (await inspect('cloudflared')).State.Status === 'exited',
+    'invalid tunnel token rejection',
   );
-  assert.equal(redirect.status, 308);
-  assert.equal(new URL(redirect.headers.get('location')).protocol, 'https:');
-  const relayId = (await compose(['ps', '-q', 'relay'])).stdout.trim();
-  const inspect = JSON.parse(
-    (await run('docker', ['inspect', relayId])).stdout,
-  )[0];
-  assert.equal(inspect.HostConfig.Memory, 512 * 1024 * 1024);
-  assert.equal(inspect.HostConfig.ReadonlyRootfs, true);
-  assert.equal(inspect.Config.User, 'node');
-  assert.ok(
-    Object.values(inspect.NetworkSettings.Ports).every(value => value === null),
-    'relay backend must have no published ports',
+  const connector = await inspect('cloudflared');
+  assert.notEqual(connector.State.ExitCode, 0);
+  assert.notEqual(connector.State.Health.Status, 'healthy');
+  assert.equal(connector.Config.User, '65532:65532');
+  assert.ok(!JSON.stringify(connector.Config).includes(token));
+  const logs = (await compose(['logs', '--no-color', 'cloudflared'])).stdout;
+  assert.match(logs, /Provided Tunnel token is not valid/);
+  assert.ok(!logs.includes(token), 'connector must not log the token');
+  await compose([
+    'cp',
+    'cloudflared:/run/secrets/tunnel_token',
+    join(directory, 'secret'),
+  ]);
+  assert.equal(await readFile(join(directory, 'secret'), 'utf8'), token);
+  await assert.rejects(
+    () =>
+      run('docker', [
+        'run',
+        '--rm',
+        '--network',
+        'none',
+        '--entrypoint',
+        connector.Config.Healthcheck.Test[1],
+        connector.Config.Image,
+        ...connector.Config.Healthcheck.Test.slice(2),
+      ]),
+    error => /connect: connection refused/.test(error.stderr),
   );
-  const networks = Object.keys(inspect.NetworkSettings.Networks);
-  assert.equal(networks.length, 1);
-  const network = JSON.parse(
-    (await run('docker', ['network', 'inspect', networks[0]])).stdout,
-  )[0];
-  assert.equal(network.Internal, true);
+  await assert.rejects(
+    () =>
+      run('docker', [
+        'run',
+        '--rm',
+        '--network',
+        'none',
+        connector.Config.Image,
+        'tunnel',
+        'run',
+        '--token-file',
+        '/run/secrets/tunnel_token',
+      ]),
+    error => /no such file or directory/.test(error.stderr),
+  );
   console.log(
-    'HTTPS redirect, trusted TLS, private backend and resource limits passed.',
+    'Official cloudflared reads its secret as non-root, rejects an invalid token, and cannot report ready offline.',
   );
 
-  const identity = await createHostIdentity();
-  const config = createAgentConfig({
-    relay: url,
-    sessionId: identity.sessionId,
-    name: 'Euler',
-  });
-  let calls = 0;
-  let response = {ok: true, data: 'saved model'};
-  const endpoint = await AgentEndpoint.create(config, async () => {
-    calls++;
-    return response;
-  });
-  let onlineCount = 0;
-  const host = new RelayHost({
-    relay: url,
-    ...identity,
-    stateChanged(state) {
-      if (state === 'online') onlineCount++;
-    },
-    handle(agentId, envelope) {
-      assert.equal(agentId, config.agentId);
-      return endpoint.handle(envelope);
-    },
-  });
-  const client = await AgentClient.create(config);
-  const read = {operation: 'fs.read', path: '/model.ts'};
-  const restart = async (limits, service = 'relay') => {
-    if (limits)
-      await writeFile(join(directory, 'limits.json'), JSON.stringify(limits));
-    const previous = onlineCount;
-    await compose(['restart', service]);
-    await until(
-      () => onlineCount > previous,
-      'App re-registration after ' + service + ' restart',
+  const relay = await inspect('relay');
+  assert.equal(relay.HostConfig.Memory, 512 * 1024 * 1024);
+  assert.equal(relay.HostConfig.ReadonlyRootfs, true);
+  assert.equal(relay.Config.User, 'node');
+  for (const service of [connector, relay]) {
+    assert.ok(
+      Object.values(service.NetworkSettings.Ports).every(
+        value => value === null,
+      ),
     );
-  };
-  try {
-    await until(() => host.status === 'online', 'encrypted App host route');
-    response = {
-      ok: true,
-      data: 'large render payload: ' + 'x'.repeat(8 * 1024 * 1024),
-    };
-    const large = {
-      operation: 'apply',
-      input: {
-        files: [
-          {
-            path: '/model.ts',
-            version: null,
-            content: 'x'.repeat(8 * 1024 * 1024),
-          },
-        ],
-      },
-    };
-    const first = await client.request(large, {requestId: 'large-mutation'});
-    assert.deepEqual(first.response, response);
-    assert.equal(calls, 1);
-    await restart();
-    assert.deepEqual(
-      (await client.request({operation: 'result', requestId: first.requestId}))
-        .response,
-      response,
-    );
-    assert.deepEqual(
-      (await client.request(large, {requestId: first.requestId})).response,
-      response,
-    );
-    assert.equal(
-      calls,
-      1,
-      'relay restart must preserve App receipt deduplication',
-    );
-    assert.equal(
-      JSON.parse((await run('docker', ['inspect', relayId])).stdout)[0].State
-        .OOMKilled,
-      false,
-    );
-    console.log(
-      '8 MiB source/result round-trip and App receipts across relay restart passed.',
-    );
-
-    const certificate = await readFile(join(directory, 'root.crt'));
-    await restart(undefined, 'gateway');
-    await compose([
-      'cp',
-      'gateway:/data/caddy/pki/authorities/local/root.crt',
-      join(directory, 'reused.crt'),
-    ]);
-    assert.deepEqual(
-      await readFile(join(directory, 'reused.crt')),
-      certificate,
-    );
-    assert.equal((await fetchRelay('/health')).status, 200);
-    console.log('Caddy certificate volume reuse and App reconnection passed.');
-
-    await restart({ip: {requestsPerSecond: 0.001, requestBurst: 8}});
-    let limited;
-    for (let i = 0; i < 12; i++) {
-      const result = await fetchRelay('/unknown', {
-        headers: {
-          'x-real-ip': `192.0.2.${i + 1}`,
-          'x-forwarded-for': `198.51.100.${i + 1}`,
-          'cf-connecting-ip': `203.0.113.${i + 1}`,
-        },
-      });
-      if (result.status === 429) {
-        limited = result;
-        break;
-      }
-      assert.equal(result.status, 404);
-    }
-    assert.ok(limited, 'forged proxy headers must not create fresh IP quotas');
-    assert.ok(Number(limited.headers.get('retry-after')) > 0);
-    assert.equal((await fetchRelay('/health')).status, 200);
-    console.log('Direct clients cannot forge Cloudflare or proxy IP headers.');
-
-    await restart({session: {dailyMiB: 0.02}});
-    const beforeUpload = calls;
-    await assert.rejects(
-      () =>
-        client.request({
-          operation: 'apply',
-          input: {
-            files: [
-              {
-                path: '/large.ts',
-                version: null,
-                content: 'x'.repeat(32 * 1024),
-              },
-            ],
-          },
-        }),
-      /HTTP 429.*Retry after/,
-    );
-    assert.equal(
-      calls,
-      beforeUpload,
-      'over-budget upload must not execute in App',
-    );
-    await restart({session: {dailyMiB: 0.02}});
-    response = {ok: true, data: 'x'.repeat(32 * 1024)};
-    const beforeResponse = calls;
-    await assert.rejects(
-      () => client.request(read),
-      /HTTP 429.*application result is not confirmed/,
-    );
-    assert.equal(
-      calls,
-      beforeResponse + 1,
-      'response rejection cannot undo accepted App work',
-    );
-    console.log('Encrypted upload and WebSocket response byte limits passed.');
-  } finally {
-    host.close();
-    endpoint.close();
   }
-
-  // Only the disposable snippet trusts the test container as a Cloudflare peer.
-  // The preceding checks used exactly the production Cloudflare range list.
-  const peer = inspect.NetworkSettings.Networks[networks[0]].IPAddress;
-  assert.ok(peer, 'test relay container must have an IPv4 address');
-  const ranges = await readFile(join(deployment, 'cloudflare.caddy'), 'utf8');
-  await writeFile(
-    join(directory, 'cloudflare.caddy'),
-    ranges.replace(/^(trusted_proxies static .*)$/m, `$1 ${peer}/32`),
+  const networks = Object.keys(relay.NetworkSettings.Networks);
+  assert.equal(networks.length, 1);
+  assert.equal(
+    JSON.parse(
+      (await run('docker', ['network', 'inspect', networks[0]])).stdout,
+    )[0].Internal,
+    true,
   );
   await compose([
     'exec',
     '-T',
-    'gateway',
-    'caddy',
-    'reload',
-    '--config',
-    '/etc/caddy/Caddyfile',
-  ]);
-  await writeFile(
-    join(directory, 'limits.json'),
-    JSON.stringify({ip: {requestsPerSecond: 0.001, requestBurst: 4}}),
-  );
-  await compose(['restart', 'relay']);
-  await until(healthy, 'relay restart for trusted proxy checks');
-  const {stdout} = await compose([
-    'exec',
-    '-T',
-    '-e',
-    'CODE3D_COMPOSE_TEST_CA=' +
-      (await readFile(join(directory, 'root.crt'), 'utf8')),
     'relay',
     'node',
     '--input-type=module',
     '--eval',
-    await readFile(join(dirname(script), 'proxy-probe.mjs'), 'utf8'),
+    "import assert from 'node:assert/strict'; import {existsSync} from 'node:fs'; assert.equal(existsSync('/run/secrets/tunnel_token'), false);",
   ]);
-  process.stdout.write(stdout);
+  console.log(
+    'No published ports; relay has only the private backend and no tunnel secret.',
+  );
+  await probe();
+  const completed = await inspect('relay');
+  assert.equal(completed.State.OOMKilled, false);
+  assert.equal(
+    completed.RestartCount,
+    0,
+    'relay must not crash or restart automatically',
+  );
+} catch (error) {
+  const logs = await compose(['logs', '--no-color', '--tail=100']).catch(
+    () => ({stdout: 'Could not read Compose logs.'}),
+  );
+  process.stderr.write(logs.stdout);
+  throw error;
+} finally {
+  await compose(['down', '--volumes', '--rmi', 'local', '--remove-orphans']);
+  await run('docker', ['image', 'rm', project + ':test']).catch(() => {});
+  await rm(directory, {recursive: true, force: true});
 }
-
-if (process.argv.includes('--probe')) await probe();
-else await orchestrate();

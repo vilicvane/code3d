@@ -22,7 +22,7 @@ export type RelayOptions = {
   maxPending?: number;
   maxBufferedBytes?: number;
   traffic?: TrafficOptions;
-  trustProxy?: boolean;
+  trustCloudflared?: boolean;
 };
 
 /** Live routing plus bounded in-memory traffic counters; no business state or storage. */
@@ -50,7 +50,7 @@ export function createRelay(options: RelayOptions = {}) {
       }
       let ip: string;
       try {
-        ip = clientAddress(request, options.trustProxy ?? false);
+        ip = clientAddress(request, options.trustCloudflared ?? false);
       } catch {
         reject(400);
         return;
@@ -196,7 +196,7 @@ export function createRelay(options: RelayOptions = {}) {
   server.on('upgrade', (request, socket, head) => {
     let ip: string;
     try {
-      ip = clientAddress(request, options.trustProxy ?? false);
+      ip = clientAddress(request, options.trustCloudflared ?? false);
     } catch {
       socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n');
       return;
@@ -224,7 +224,7 @@ export function createRelay(options: RelayOptions = {}) {
     );
   });
   sockets.on('connection', (socket, request) => {
-    const ip = clientAddress(request, options.trustProxy ?? false);
+    const ip = clientAddress(request, options.trustCloudflared ?? false);
     const expectedSessionId = request.url!.split('/')[2];
     let host: Host | undefined;
     let sessionId: string | undefined;

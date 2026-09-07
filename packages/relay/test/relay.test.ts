@@ -307,30 +307,41 @@ test(
 );
 
 test(
-  'client headers cannot bypass IP limits unless proxy trust is explicitly enabled',
+  'client headers cannot bypass IP limits unless cloudflared trust is explicitly enabled',
   {timeout: 10_000},
   async t => {
-    for (const trustProxy of [false, true]) {
+    for (const trustCloudflared of [false, true]) {
       const relay = createRelay({
-        trustProxy,
+        trustCloudflared,
         traffic: {ip: {requestsPerSecond: 0.001, requestBurst: 1}},
       });
       const {url} = await listen(relay);
       t.after(() => relay.close());
       const request = (ip: string) =>
-        fetch(url + '/unknown', {headers: {'x-real-ip': ip}});
+        fetch(url + '/unknown', {
+          headers: {
+            'cf-connecting-ip': ip,
+            'x-real-ip': ip,
+            'x-forwarded-for': ip,
+          },
+        });
       assert.equal((await request('192.0.2.1')).status, 404);
       const second = await request('192.0.2.2');
-      assert.equal(second.status, trustProxy ? 404 : 429);
+      assert.equal(second.status, trustCloudflared ? 404 : 429);
       const limited = await request('192.0.2.2');
       assert.equal(limited.status, 429);
       assert.ok(Number(limited.headers.get('retry-after')) > 0);
       assert.equal(limited.headers.get('connection'), 'close');
-      if (trustProxy) {
+      if (trustCloudflared) {
         assert.equal((await request('2001:db8:1:2::1')).status, 404);
         assert.equal((await request('2001:db8:1:2::2')).status, 429);
         assert.equal((await request('192.0.2.3, 192.0.2.4')).status, 400);
         assert.equal((await fetch(url + '/unknown')).status, 400);
+        assert.equal(
+          (await fetch(url + '/unknown', {headers: {'x-real-ip': '192.0.2.1'}}))
+            .status,
+          400,
+        );
       }
     }
   },

@@ -10,7 +10,7 @@ reconnections until the next UTC day or process restart. It has no database,
 session registration, offline queue or business snapshot.
 
 For a public server, use the [Docker Compose deployment](../../deploy/relay/README.md).
-It includes Caddy-managed HTTPS/WSS, a private relay backend, traffic budgets,
+It includes Cloudflare Tunnel with no published host ports, traffic budgets,
 container resource limits and a repeatable deployment regression test.
 
 From the repository root, with Node.js 24+:
@@ -22,9 +22,8 @@ PORT=3134 HOST=127.0.0.1 npm start --workspace @code3d/relay
 ```
 
 Use `http://127.0.0.1:3134` as the App relay address for local development.
-For a remote relay, terminate HTTPS/WSS at a reverse proxy and forward both
-HTTP requests and WebSocket upgrades. Set its response deadline above 115 seconds
-and body limit to at least 23 MiB. `GET /health` reports process availability.
+For a remote relay, use the Tunnel deployment above; App/CLI still use the public
+HTTPS hostname. `GET /health` reports process availability.
 No production deployment is performed by build or start.
 
 The App generates a random 32-byte host token and a base64url SHA-256 session ID.

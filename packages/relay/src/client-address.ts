@@ -1,13 +1,13 @@
 import type {IncomingMessage} from 'node:http';
 import {isIP, SocketAddress} from 'node:net';
 
-/** Only enable proxy trust on the private, unpublished Compose backend network. */
+/** Only trust cloudflared on the private, unpublished Compose backend network. */
 export function clientAddress(
   request: IncomingMessage,
-  trustProxy: boolean,
+  trustCloudflared: boolean,
 ): string {
-  const value = trustProxy
-    ? request.headers['x-real-ip']
+  const value = trustCloudflared
+    ? request.headers['cf-connecting-ip']
     : request.socket.remoteAddress;
   if (typeof value !== 'string' || !isIP(value))
     throw new Error('A valid client IP is required.');
