@@ -211,8 +211,12 @@ center point, allocated before new corners, and adds one midpoint constraint
 between it and opposite corners. A derived sketch can reference that center
 with `base.point(id)`. Both rectangle modes share inputs, snapping and undo.
 Dragging previews a soft solver target and writes every changed editable point
-in one transaction. Hard constraints remain satisfied. With no locked point,
-a gesture temporarily anchors the first non-dragged point; this does not add a
+in one transaction. Hard constraints remain satisfied. Within the dragged
+geometry's connected component, with no locked point, a gesture temporarily
+fixes the first non-dragged point in declaration order. Connections follow shared
+endpoints, arc centers and explicit constraints, not coincident coordinates or
+intersections. Unrelated fixed/upstream/expression-locked points do not suppress
+the anchor; radius gestures start from the curve center's component. This does not add a
 source constraint or reduce the reported model DOF. This also applies to center
 rectangles; dragging their center does not imply a whole-rectangle translation.
 Unconstrained movement needs

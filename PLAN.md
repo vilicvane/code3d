@@ -37,8 +37,12 @@ implementation context and historical outcomes, not a competing work queue.
   emits no direction constraint. Ordinary automatic snapping stays temporary.
   Dragging uses a soft Worker solve and writes all changed editable coordinates
   together, preserving hard constraints, upstream values and expression source.
-  Without a locked point, a gesture temporarily anchors the first non-dragged
-  point; this does not persist a fixed constraint or reduce the reported model
+  Within the dragged geometry's connected component, a gesture with no locked
+  point temporarily fixes the first non-dragged point in declaration order.
+  Connectivity follows shared endpoints, arc centers and explicit constraints,
+  not coordinate coincidence or intersections. Unrelated locked points do not
+  suppress this anchor; radius gestures start from the curve center's component.
+  This does not persist a fixed constraint or reduce the reported model
   DOF. Unconstrained movement is kernel-independent. Successive frames use the
   preceding solution, and previews forward-solve the rounded source data that
   will be committed. During dragging, AST-derived per-axis locks preserve each

@@ -173,7 +173,7 @@ test('the first non-dragged point anchors a gesture without new persistent const
   }
 });
 
-test('an existing fixed point prevents an extra automatic gesture anchor', () => {
+test('an existing connected fixed point prevents an extra automatic gesture anchor', () => {
   for (const fixed of [
     [['fixed', 4]],
     [
@@ -182,7 +182,7 @@ test('an existing fixed point prevents an extra automatic gesture anchor', () =>
     ],
   ]) {
     const s = snapshot(
-      sketch([...entries, ['point', 4, [0, 0]]], {
+      sketch([...entries, ['point', 4, [0, 0]], ['line', 5, [4, 2]]], {
         constraints: [...fixed, ['length', [3, 40]]],
       }),
     );
@@ -196,7 +196,9 @@ test('an existing fixed point prevents an extra automatic gesture anchor', () =>
 
 test('either endpoint can rotate continuously through 180 degrees with a temporary opposite anchor', () => {
   const initial = snapshot(
-    sketch(entries, {constraints: [['length', [3, 40]]]}),
+    sketch([['point', 9, [-60, -20]], ...entries], {
+      constraints: [['length', [3, 40]]],
+    }),
   );
   for (const id of [1, 2]) {
     const anchor = id === 1 ? 2 : 1;
@@ -275,10 +277,10 @@ test('a dragged coordinate lock coexists with the first non-dragged anchor and h
   assert.equal(moved.degreesOfFreedom, original.degreesOfFreedom);
 });
 
-test('coordinate locks and permanent coordinate constraints together prevent an extra drag anchor', () => {
+test('connected coordinate locks and permanent coordinate constraints together prevent an extra drag anchor', () => {
   for (const permanentY of [false, true]) {
     const original = snapshot(
-      sketch([...entries, ['point', 4, [0, 0]]], {
+      sketch([...entries, ['point', 4, [0, 0]], ['line', 5, [4, 2]]], {
         constraints: [
           ['length', [3, 40]],
           ...(permanentY ? [['y', [4, 0]]] : []),

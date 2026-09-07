@@ -162,6 +162,12 @@ test('constraint options share the editable source range and use the installed s
 
 test('AST coordinate locks preserve expressions through drag, source transactions and a fresh compiler', async () => {
   const cases = [
+    {
+      args: "[['point', 9, [x, y]], ['point', 1, [0, 0]], ['point', 2, [40, 0]], ['line', 3, [1, 2]]], {constraints: [['length', [3, 40]]]}",
+      id: 2,
+      target: [0, 40],
+      anchor: 1,
+    },
     {args: "[['point', 1, [x, 19]]]", id: 1, target: [30, 25]},
     {args: "[['point', 1, [22, y]]]", id: 1, target: [30, 25]},
     {
@@ -187,7 +193,7 @@ test('AST coordinate locks preserve expressions through drag, source transaction
     a.forEach((v, axis) =>
       assert.ok(Math.abs(v - b[axis]) < 1e-7, `${a} != ${b}`),
     );
-  for (const {args, id, target, initiallyUnsolved} of cases) {
+  for (const {args, id, target, anchor, initiallyUnsolved} of cases) {
     const source = `import {sketch} from '@code3d/core'; const x = 22; const y = 19; const value = sketch(${args});`;
     const module = await compiler.compile(
       {files: [{path: '/model.ts', source}]},
@@ -230,6 +236,8 @@ test('AST coordinate locks preserve expressions through drag, source transaction
             );
           }
       assert.deepEqual(preview.snapshot.constraints, value.constraints);
+      if (anchor !== undefined)
+        close(point(preview.snapshot, anchor), point(value, anchor));
     }
     const sourceRef = value.definitionRef;
     const resolution = new SketchEditResolver().resolve(

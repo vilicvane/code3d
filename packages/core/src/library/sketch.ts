@@ -566,6 +566,9 @@ export function solveSketchSnapshot(
           }
       return {position, locked};
     }),
+    lines: local.entities
+      .filter(e => e.kind === 'line')
+      .map(e => [pointIndex(e.points[0]), pointIndex(e.points[1])]),
     circles: circles.map(c => {
       const upstream = c.layer !== local.id;
       const lock = !upstream && drag?.locks?.find(lock => lock.id === c.id);

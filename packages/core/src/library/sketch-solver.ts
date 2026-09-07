@@ -29,6 +29,7 @@ export type SketchSolveProblem = Readonly<{
     position: SketchPosition;
     locked: readonly [boolean, boolean];
   }>[];
+  lines: readonly (readonly [number, number])[];
   circles: readonly Readonly<{
     center: number;
     radius: number;
@@ -67,36 +68,66 @@ export function installSketchSolver(instance: ModuleStatic): void {
   module = instance;
 }
 
+type SketchDrag =
+  | Readonly<{kind: 'point'; point: number; position: SketchPosition}>
+  | Readonly<{
+      kind: 'radius';
+      curve: 'circle' | 'arc';
+      index: number;
+      value: number;
+    }>;
+
+/** Connectivity is by point identity, not incidental intersections or positions. */
+function gestureAnchor(problem: SketchSolveProblem, drag: SketchDrag): number {
+  const neighbors = problem.points.map(() => new Set<number>());
+  const connect = (points: readonly number[]) => {
+    for (const point of points.slice(1)) {
+      neighbors[points[0]].add(point);
+      neighbors[point].add(points[0]);
+    }
+  };
+  problem.lines.forEach(connect);
+  problem.arcs.forEach(arc => connect([arc.center, ...arc.points]));
+  for (const constraint of problem.constraints)
+    if ('points' in constraint) connect(constraint.points);
+  const seed =
+    drag.kind === 'point'
+      ? drag.point
+      : (drag.curve === 'circle' ? problem.circles : problem.arcs)[drag.index]
+          .center;
+  const related = new Set([seed]);
+  for (const point of related)
+    for (const neighbor of neighbors[point]) related.add(neighbor);
+
+  // Only a lock in this component replaces the temporary anchor. A normal
+  // evaluation never gains an implicit fixed constraint.
+  const anchored = problem.points.some(
+    (point, index) =>
+      related.has(index) &&
+      (problem.constraints.some(c => c.kind === 'fixed' && c.point === index) ||
+        ((point.locked[0] ||
+          problem.constraints.some(c => c.kind === 'x' && c.point === index)) &&
+          (point.locked[1] ||
+            problem.constraints.some(
+              c => c.kind === 'y' && c.point === index,
+            )))),
+  );
+  return anchored
+    ? -1
+    : problem.points.findIndex(
+        (_, index) =>
+          related.has(index) && (drag.kind !== 'point' || index !== drag.point),
+      );
+}
+
 /** A fresh native system per solve: no previous solution or native handles escape. */
 export function solveSketchProblem(
   problem: SketchSolveProblem,
-  drag?:
-    | Readonly<{kind: 'point'; point: number; position: SketchPosition}>
-    | Readonly<{
-        kind: 'radius';
-        curve: 'circle' | 'arc';
-        index: number;
-        value: number;
-      }>,
+  drag?: SketchDrag,
 ): SketchSolveResult {
   problem = initializeArcEndpoints(problem);
   const {constraints} = problem;
-  // A gesture may use a temporary anchor, but normal evaluation must not gain
-  // an implicit fixed constraint. Coordinate constraints can also fix a point.
-  const anchored = problem.points.some(
-    (point, index) =>
-      constraints.some(c => c.kind === 'fixed' && c.point === index) ||
-      ((point.locked[0] ||
-        constraints.some(c => c.kind === 'x' && c.point === index)) &&
-        (point.locked[1] ||
-          constraints.some(c => c.kind === 'y' && c.point === index))),
-  );
-  const anchor =
-    drag && !anchored
-      ? problem.points.findIndex(
-          (_, index) => drag.kind !== 'point' || index !== drag.point,
-        )
-      : -1;
+  const anchor = drag ? gestureAnchor(problem, drag) : -1;
   const points = problem.points.map((point, index) => ({
     ...point,
     locked: index === anchor ? ([true, true] as const) : point.locked,
