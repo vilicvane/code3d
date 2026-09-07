@@ -27,7 +27,7 @@ export class SketchArcDrawing implements SketchDrawing {
   readonly name = 'Arc';
   start?: SketchEndpoint;
   private arcStart?: SketchEndpoint;
-  private direction: SketchArcDirection = 'ccw';
+  private direction: SketchArcDirection = 'cw';
   private centerCoordinates: {axis: 'x' | 'y'; value: number}[] = [];
   private radius?: number;
   pointer: SketchPosition = [0, 0];
@@ -42,7 +42,7 @@ export class SketchArcDrawing implements SketchDrawing {
   }
   get instructions() {
     return this.arcStart
-      ? 'Arc end point · R reverses direction · Esc cancels'
+      ? 'Arc end point · Enter sweep or click · R reverses direction · Esc cancels'
       : this.start
         ? 'Arc start point · Enter radius or click · Esc cancels'
         : 'Arc center · Enter X/Y or click';
@@ -55,6 +55,15 @@ export class SketchArcDrawing implements SketchDrawing {
   }
 
   resolve(context: SketchSnapContext) {
+    const sweep = this.arcStart && this.dimensions.value('sweep');
+    const curve =
+      this.arcStart &&
+      sketchArcGeometry(
+        endpointPosition(this.start!),
+        endpointPosition(this.arcStart),
+        this.pointer,
+        this.direction,
+      );
     return snapSketchPointer(
       this.pointer,
       this.start
@@ -67,6 +76,15 @@ export class SketchArcDrawing implements SketchDrawing {
                   endpointPosition(this.arcStart),
                 )
               : this.dimensions.value('radius'),
+            direction:
+              sweep !== undefined && curve
+                ? {
+                    kind: 'angle',
+                    degrees:
+                      (curve.start * 180) / Math.PI +
+                      (this.direction === 'ccw' ? sweep : -sweep),
+                  }
+                : undefined,
           }
         : {
             kind: 'cartesian',
@@ -77,6 +95,20 @@ export class SketchArcDrawing implements SketchDrawing {
     );
   }
   measurements(position: SketchPosition): Readonly<Record<string, number>> {
+    if (this.arcStart)
+      return {
+        sweep:
+          (Math.abs(
+            sketchArcGeometry(
+              endpointPosition(this.start!),
+              endpointPosition(this.arcStart),
+              position,
+              this.direction,
+            ).sweep,
+          ) *
+            180) /
+          Math.PI,
+      };
     return this.start
       ? {radius: sketchDistance(endpointPosition(this.start), position)}
       : {x: position[0], y: position[1]};
@@ -100,7 +132,7 @@ export class SketchArcDrawing implements SketchDrawing {
     this.start = undefined;
     this.arcStart = undefined;
     this.radius = undefined;
-    this.direction = 'ccw';
+    this.direction = 'cw';
     this.centerCoordinates = [];
     this.dimensions = sketchCoordinateInputs();
   }
@@ -132,7 +164,15 @@ export class SketchArcDrawing implements SketchDrawing {
     if (!this.arcStart) {
       this.arcStart = endpoint;
       this.radius = this.dimensions.value('radius');
-      this.dimensions = new DrawingDimensions([]);
+      this.dimensions = new DrawingDimensions([
+        {
+          id: 'sweep',
+          label: 'Sweep',
+          unit: '°',
+          positive: true,
+          exclusiveMaximum: 360,
+        },
+      ]);
       return;
     }
     if (
@@ -149,6 +189,8 @@ export class SketchArcDrawing implements SketchDrawing {
       this.centerCoordinates.map(({axis, value}) => [axis, [c, value]]);
     if (this.radius !== undefined)
       constraints.push(['radius', [arc, this.radius]]);
+    const sweep = this.dimensions.value('sweep');
+    if (sweep !== undefined) constraints.push(['sweep', [arc, sweep]]);
     if (!commit({kind: 'append', entries: geometry.entries, constraints}))
       return 'The sketch changed; the drawing was not applied';
     this.reset();

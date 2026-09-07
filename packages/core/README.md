@@ -98,7 +98,12 @@ const rounded = sketch(
     ['point', 3, [0, 10]],
     ['arc', 4, [1, 2, 3, 'ccw']],
   ],
-  {constraints: [['radius', [4, 10]]]},
+  {
+    constraints: [
+      ['radius', [4, 10]],
+      ['sweep', [4, 90]],
+    ],
+  },
 );
 ```
 
@@ -108,6 +113,11 @@ equidistant from the center; current point coordinates may move to satisfy them.
 The tuple does not persist a second radius or hidden angles. Center and endpoints
 can each reference a named upstream point. Zero-radius and coincident-endpoint arcs
 are errors; use `circle` for a full circle.
+The independent `sweep` constraint takes `[arcId, degrees]`, strictly greater than
+0 and less than 360. Its positive magnitude follows the tuple's `cw`/`ccw`
+direction, so 270 means a major arc in either direction. It does not fix the arc's
+orientation: with a fixed center and radius, dragging an endpoint can rotate both
+endpoints while preserving the sweep.
 
 Geometry tuples hold current data; `constraints` specify what must remain true.
 Constraints have no persistent IDs. Point coordinates have the same runtime
@@ -134,10 +144,15 @@ as point coordinates. Circle creation, deletion and associated constraint change
 are single undo steps; deleting a circle retains shared and upstream centers,
 and removes only newly disconnected local points.
 Arc takes a center (optional X/Y), a start point (optional Radius), and an end
-point projected to that radius. It defaults to counterclockwise; press R to reverse
-the preview. Entered Radius is a persistent constraint; all points, the arc and
+point projected to that radius. New drawings default to clockwise (CW); press R to
+reverse the preview. Completing or canceling restores CW for the next drawing;
+existing arcs keep their explicit direction.
+Entered Radius and end-point Sweep become independent persistent
+constraints; blank fields remain free. R preserves the entered sweep magnitude.
+All points, the arc and
 constraints are one source transaction/undo. Drag its ordinary center or endpoints,
-or select the arc and Delete to remove it. Radius labels lie on the directed arc.
+or select the arc and Delete to remove it. Radius and sweep labels lie on the
+directed arc; sweep guides connect its center and endpoints.
 Deletion also recognizes ordinary points lying on finite curves, not just explicit
 references, and preserves points still connected to other curves.
 Curve trimming, region extraction and sketch B-Rep generation are not yet available.
@@ -191,8 +206,8 @@ remain editable in code, not by dragging; literal axes on the same point remain
 draggable. The editor preserves existing IDs and
 allocates new IDs from the current local maximum, without `nextId` metadata.
 Deleted IDs may therefore be reused; downstream references are not automatically
-rewritten. Circles/arcs, trimming and conversion to faces/solids remain outside
-this point/line slice. See the [sketch example](../app/examples/sketches.ts) and
+rewritten. Curve trimming and conversion to faces/solids remain later slices.
+See the [sketch example](../app/examples/sketches.ts) and
 [third-party solver sources](THIRD_PARTY.md).
 
 ## Type imports

@@ -31,11 +31,22 @@ test('numeric circles use analytic previews, native input history and one atomic
   await page.mouse.click(x, y);
   await page.mouse.move(x + 80, y);
   assert.equal(await page.locator('.drawing-overlay circle.draft').count(), 1);
-  await page.keyboard.type('12');
+  await page.keyboard.type('12', {delay: 30});
   assert.equal(await field(page, 'Radius').inputValue(), '12');
   await page.keyboard.press('Control+z');
+  // Chrome may split typing groups when Monaco replaces an unrelated text
+  // node. Both native groupings must retain the complete undo/redo history;
+  // only the source transaction below promises exactly one undo step.
+  const undone = await field(page, 'Radius').inputValue();
+  assert.ok(undone === '' || undone === '1');
+  if (undone === '1') await page.keyboard.press('Control+z');
   assert.equal(await field(page, 'Radius').inputValue(), '');
   await page.keyboard.press('Control+Shift+z');
+  if (undone === '1') {
+    assert.equal(await field(page, 'Radius').inputValue(), '1');
+    await page.keyboard.press('Control+Shift+z');
+  }
+  assert.equal(await field(page, 'Radius').inputValue(), '12');
   await page.keyboard.press('Enter');
   await circle(page, 2).waitFor();
   await waitForSource(page, /'radius',\s*\[2,\s*12\]/);

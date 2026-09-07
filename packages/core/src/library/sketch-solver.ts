@@ -1,8 +1,10 @@
 import type {GcsSystem, ModuleStatic} from '@salusoft89/planegcs';
-import type {SketchPosition} from './sketch.js';
+import type {SketchArcDirection, SketchPosition} from './sketch.js';
+import {sketchArcGeometry} from './sketch-curves.js';
 
 /** Evaluation-local numeric indices, never author entity or constraint IDs. */
 export type SketchSolveConstraint =
+  | Readonly<{kind: 'sweep'; index: number; value: number}>
   | Readonly<{
       kind: 'radius';
       curve: 'circle' | 'arc';
@@ -35,6 +37,7 @@ export type SketchSolveProblem = Readonly<{
   arcs: readonly Readonly<{
     center: number;
     points: readonly [number, number];
+    direction: SketchArcDirection;
   }>[];
   constraints: readonly SketchSolveConstraint[];
 }>;
@@ -156,6 +159,7 @@ export function solveSketchProblem(
       return geometry;
     });
     const arcRadiusIndices: number[] = [];
+    const arcAngleIndices: number[][] = [];
     const nativeArcs = problem.arcs.map(arc => {
       const center = points[arc.center].position;
       const [start, end] = arc.points.map(i => points[i].position);
@@ -168,9 +172,13 @@ export function solveSketchProblem(
         throw new Error(
           'Sketch arcs require a nonzero radius and distinct endpoints; use circle for a full circle.',
         );
-      const angles = [start, end].map(p =>
-        gcs.push_p_param(Math.atan2(p[1] - center[1], p[0] - center[0]), false),
+      const curve = sketchArcGeometry(center, start, end, arc.direction);
+      // Unwrap on the authored directed branch, including major arcs. These
+      // parameters are solve-local; persisted endpoints reconstruct the branch.
+      const angles = [curve.start, curve.start + curve.sweep].map(angle =>
+        gcs.push_p_param(angle, false),
       );
+      arcAngleIndices.push(angles);
       const radiusIndex = gcs.push_p_param(radius / scale, false);
       arcRadiusIndices.push(radiusIndex);
       const [cx, cy] = indices[arc.center],
@@ -199,13 +207,41 @@ export function solveSketchProblem(
     // of passing a zero-Jacobian row to native redundancy analysis: that
     // analysis also solves the mouse objective and can mistake an already
     // satisfied constant row for a conflict when a different axis cannot move.
-    const checkConstant = (actual: number, expected: number, tag: number) => {
-      if (Math.abs(actual - expected) / scale > 1e-7)
+    const checkConstant = (
+      actual: number,
+      expected: number,
+      tag: number,
+      normalization = scale,
+    ) => {
+      if (Math.abs(actual - expected) / normalization > 1e-7)
         throw new SketchConstraintError(
           [tag - 1],
           `Could not satisfy sketch constraints (${tag}). A locked geometry parameter contradicts the constraint.`,
         );
       constantTags.add(tag);
+    };
+    // ArcRules also determine dimensions from known point coordinates. Such
+    // dimensions are constant equations just like a locked circle radius;
+    // sending them again to native redundancy analysis can falsely conflict
+    // with an unreachable mouse target even though all hard equations hold.
+    const knownCoordinate = (
+      index: number,
+      axis: number,
+    ): number | undefined => {
+      if (points[index].locked[axis]) return points[index].position[axis];
+      const fixed = constraints.find(
+        c => c.kind === 'fixed' && c.point === index,
+      );
+      if (fixed?.kind === 'fixed') return fixed.position[axis];
+      const coordinate = constraints.find(
+        c => c.kind === (axis === 0 ? 'x' : 'y') && c.point === index,
+      );
+      return coordinate && 'value' in coordinate ? coordinate.value : undefined;
+    };
+    const knownPosition = (index: number): SketchPosition | undefined => {
+      const x = knownCoordinate(index, 0),
+        y = knownCoordinate(index, 1);
+      return x !== undefined && y !== undefined ? [x, y] : undefined;
     };
     const coordinate = (
       point: number,
@@ -232,7 +268,46 @@ export function solveSketchProblem(
     };
     constraints.forEach((constraint, index) => {
       const tag = index + 1;
-      if (constraint.kind === 'radius') {
+      if (constraint.kind === 'sweep') {
+        const arc = problem.arcs[constraint.index];
+        const center = knownPosition(arc.center),
+          a = knownPosition(arc.points[0]),
+          b = knownPosition(arc.points[1]);
+        if (center && a && b) {
+          checkConstant(
+            Math.abs(sketchArcGeometry(center, a, b, arc.direction).sweep),
+            (constraint.value * Math.PI) / 180,
+            tag,
+            1,
+          );
+          return;
+        }
+        const [start, end] = arcAngleIndices[constraint.index];
+        const sign =
+          problem.arcs[constraint.index].direction === 'ccw' ? 1 : -1;
+        gcs.add_constraint_difference(
+          start,
+          end,
+          constant((sign * constraint.value * Math.PI) / 180),
+          tag,
+          true,
+          1,
+        );
+      } else if (constraint.kind === 'radius') {
+        if (constraint.curve === 'arc') {
+          const arc = problem.arcs[constraint.index];
+          const center = knownPosition(arc.center),
+            endpoint =
+              knownPosition(arc.points[0]) ?? knownPosition(arc.points[1]);
+          if (center && endpoint) {
+            checkConstant(
+              Math.hypot(endpoint[0] - center[0], endpoint[1] - center[1]),
+              constraint.value,
+              tag,
+            );
+            return;
+          }
+        }
         const circle =
           constraint.curve === 'circle'
             ? problem.circles[constraint.index]
@@ -344,7 +419,7 @@ export function solveSketchProblem(
           );
       } else
         for (const axis of [0, 1])
-          if (!points[drag.point].locked[axis])
+          if (knownCoordinate(drag.point, axis) === undefined)
             coordinate(drag.point, axis, drag.position[axis], -1);
     }
     const status = gcs.solve_system(2);
@@ -385,7 +460,9 @@ export function solveSketchProblem(
     // Success nor Converged alone is our acceptance criterion: verify all hard
     // equations independently, in normalized geometry units.
     const unsatisfied = constraints.flatMap((c, i) =>
-      residual(c, positions, radii, arcRadii, scale) <= 1e-7 ? [] : [i],
+      residual(c, positions, radii, arcRadii, problem.arcs, scale) <= 1e-7
+        ? []
+        : [i],
     );
     for (const [i, arc] of problem.arcs.entries()) {
       const center = positions[arc.center];
@@ -438,9 +515,20 @@ function residual(
   positions: readonly SketchPosition[],
   radii: readonly number[],
   arcRadii: readonly number[],
+  arcs: SketchSolveProblem['arcs'],
   scale: number,
 ): number {
   switch (c.kind) {
+    case 'sweep': {
+      const arc = arcs[c.index];
+      const curve = sketchArcGeometry(
+        positions[arc.center],
+        positions[arc.points[0]],
+        positions[arc.points[1]],
+        arc.direction,
+      );
+      return Math.abs(Math.abs(curve.sweep) - (c.value * Math.PI) / 180);
+    }
     case 'radius':
       return (
         Math.abs((c.curve === 'circle' ? radii : arcRadii)[c.index] - c.value) /

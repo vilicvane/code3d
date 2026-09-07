@@ -257,6 +257,7 @@ function deletedConstraints(
       case 'length':
       case 'angle':
       case 'radius':
+      case 'sweep':
         deleted = ids.includes(data[0]);
         break;
     }

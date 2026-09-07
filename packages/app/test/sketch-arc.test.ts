@@ -54,6 +54,206 @@ function edit(
 }
 const ref = (id: number, layer = 'local') => ({id, layer});
 
+test('arc drawings default to CW after construction, cancellation and a completed CCW arc', () => {
+  const tool = new drawing.SketchArcDrawing();
+  for (const finish of ['cancel', 'commit'] as const) {
+    tool.place({position: [0, 0]}, 'local', 1, () => assert.fail());
+    tool.place({position: [10, 0]}, 'local', 1, () => assert.fail());
+    assert.equal(tool.title, 'End point · CW');
+    tool.toggleDirection();
+    assert.equal(tool.title, 'End point · CCW');
+    if (finish === 'cancel') tool.reset();
+    else
+      tool.place({position: [0, 10]}, 'local', 1, change => {
+        assert.equal(change.kind, 'append');
+        assert.deepEqual(change.entries.at(-1), [
+          'arc',
+          4,
+          [ref(1), ref(2), ref(3), 'ccw'],
+        ]);
+        return true;
+      });
+    assert.equal(tool.title, 'Center');
+  }
+  tool.place({position: [0, 0]}, 'local', 1, () => assert.fail());
+  tool.place({position: [10, 0]}, 'local', 1, () => assert.fail());
+  assert.equal(tool.title, 'End point · CW');
+});
+
+test('entered sweep projects the endpoint, preserves compatible references and commits one independent constraint', () => {
+  for (const direction of ['ccw', 'cw']) {
+    const tool = new drawing.SketchArcDrawing();
+    tool.place({position: [0, 0]}, 'local', 1, () => assert.fail());
+    tool.place({position: [10, 0]}, 'local', 1, () => assert.fail());
+    tool.dimensions.set('sweep', '270');
+    if (direction === 'ccw') tool.toggleDirection();
+    tool.pointer = [10, 0];
+    const end = {
+      layer: 'base',
+      id: 9,
+      position: [0, direction === 'cw' ? 10 : -10] as const,
+    };
+    const resolved = tool.resolve({
+      points: [end],
+      scale: 10,
+      gridStep: 1,
+      enabled: true,
+    });
+    assert.deepEqual(resolved.endpoint, {point: end});
+    assert.ok(Math.abs(tool.measurements(end.position).sweep - 270) < 1e-8);
+    let args = '[]';
+    tool.place(
+      resolved.endpoint,
+      'local',
+      1,
+      change => ((args = edit(args, change)), true),
+    );
+    assert.match(args, /\['sweep', \[3, 270\]\]/);
+    assert.match(
+      args,
+      new RegExp(
+        `\\['arc', 3, \\[1, 2, base.point\\(9\\), '${direction}'\\]\\]`,
+      ),
+    );
+    assert.doesNotMatch(args, /radius/);
+    assert.equal(tool.title, 'Center');
+    assert.equal(tool.hasDraft, false);
+  }
+});
+
+test('sweep field rejects zero/full turns, retains valid preview during incomplete input and resets cleanly', () => {
+  const tool = new drawing.SketchArcDrawing();
+  tool.place({position: [0, 0]}, 'local', 1, () => assert.fail());
+  tool.place({position: [10, 0]}, 'local', 1, () => assert.fail());
+  tool.dimensions.set('sweep', '90');
+  for (const value of ['0', '-90', '360', '361', '1e999', '-']) {
+    tool.dimensions.set('sweep', value);
+    assert.ok(tool.dimensions.error('sweep'));
+    assert.equal(tool.dimensions.value('sweep'), 90);
+    assert.ok(tool.place({position: [0, 10]}, 'local', 1, () => assert.fail()));
+  }
+  for (const value of ['.001', '359.999']) {
+    tool.dimensions.set('sweep', value);
+    assert.equal(tool.dimensions.error('sweep'), undefined);
+  }
+  tool.dimensions.set('sweep', '');
+  assert.equal(tool.dimensions.value('sweep'), undefined);
+  tool.pointer = [0, 10];
+  assert.deepEqual(
+    tool.resolve({points: [], scale: 10, gridStep: 1, enabled: false}).endpoint,
+    {position: [0, 10]},
+  );
+  tool.reset();
+  assert.equal(tool.hasDraft, false);
+  assert.deepEqual(
+    tool.dimensions.definitions.map(d => d.id),
+    ['x', 'y'],
+  );
+});
+
+test('sweep badges expose center and both endpoints, and deletion removes the expression constraint atomically', () => {
+  const local: SketchSnapshot = {
+    id: 'local',
+    degreesOfFreedom: 4,
+    redundant: [],
+    entities: [
+      {kind: 'point', id: 1, position: [0, 0]},
+      {kind: 'point', id: 2, position: [10, 0]},
+      {kind: 'point', id: 3, position: [0, 10]},
+      {
+        kind: 'arc',
+        id: 4,
+        center: ref(1),
+        points: [ref(2), ref(3)],
+        direction: 'cw',
+      },
+    ],
+    constraints: [['sweep', [4, 270]]],
+  };
+  const points = local.entities
+    .filter(e => e.kind === 'point')
+    .map(e => ({...e, layer: local.id}));
+  const display = constraints.sketchConstraintDisplays([local], points)[0];
+  assert.equal(display.label, '270°');
+  assert.match(display.title, /Sweep 270° · CW · arc 4/);
+  assert.deepEqual(display.curve, ref(4));
+  assert.deepEqual(
+    display.points.map(p => p.id),
+    [1, 2, 3],
+  );
+  assert.deepEqual(display.guides, [
+    [
+      [0, 0],
+      [10, 0],
+    ],
+    [
+      [0, 0],
+      [0, 10],
+    ],
+  ]);
+  assert.ok(display.anchor[0] < 0 && display.anchor[1] < 0);
+  const args =
+    "[['point', 1, [0, 0]], ['point', 2, [10, 0]], ['point', 3, [0, 10]], ['arc', 4, [1, 2, 3, 'cw']]], {constraints: [['sweep', [4, angle /* keep expression */]]]}";
+  const moved = edit(args, {kind: 'move', data: [{id: 2, parameters: [9, 1]}]});
+  assert.match(moved, /angle \/\* keep expression \*\//);
+  const deleted = edit(args, segments.deleteSketchEntity([local], 4));
+  assert.doesNotMatch(deleted, /'arc'|'point'|'sweep'/);
+});
+
+test('sweep and radius drag previews replay through rounded AST edits and fresh compilation without losing expressions', async () => {
+  const compiler = await createTestProjectCompiler(server);
+  try {
+    const compile = async (args: string) => {
+      const module = await compiler.compile(
+        {
+          files: [
+            {
+              path: '/model.ts',
+              source: `import {sketch} from '@code3d/core'; const center = 0; const angle = 270; const value = sketch(${args});`,
+            },
+          ],
+        },
+        '/model.ts',
+      );
+      assert.equal(module.diagnostic, undefined);
+      return [...module.sketches.values()][0];
+    };
+    for (const direction of ['cw', 'ccw']) {
+      const args = `[['point', 1, [center, 0]], ['point', 2, [10, 0]], ['point', 3, [0, ${direction === 'cw' ? 10 : -10}]], ['arc', 4, [1, 2, 3, '${direction}']]], {constraints: [['fixed', 1], ['radius', [4, 10]], ['sweep', [4, angle /* degrees */]]]}`;
+      const original = await compile(args),
+        editable = source.analyzeSketchSource(args).editable;
+      let preview = {snapshot: original as SketchSnapshot, data: original.data};
+      for (const degrees of [110, 145, 179, 181, 220, 270, 315, 359, 361]) {
+        const radians = (degrees * Math.PI) / 180;
+        preview = compiler.previewSketchDrag([preview.snapshot], {
+          id: 3,
+          position: [10 * Math.cos(radians), 10 * Math.sin(radians)],
+          editable,
+          data: preview.data,
+        });
+        const updated = edit(
+          args,
+          {
+            kind: 'move',
+            data: preview.data.filter(p => editable.get(p.id)?.some(Boolean)),
+          },
+          original.id,
+        );
+        assert.match(updated, /center/);
+        assert.match(updated, /angle \/\* degrees \*\//);
+        const replay = await compile(updated);
+        const numbers = (s: SketchSnapshot) =>
+          s.entities.flatMap(e => (e.kind === 'point' ? e.position : []));
+        numbers(preview.snapshot).forEach((v, i) =>
+          assert.ok(Math.abs(v - numbers(replay)[i]) < 1e-6),
+        );
+      }
+    }
+  } finally {
+    compiler.dispose();
+  }
+});
+
 test('arc drawing is one atomic center/start/end transaction with direction and entered radius', () => {
   const tool = new drawing.SketchArcDrawing();
   tool.dimensions.set('x', '0');
@@ -66,7 +266,6 @@ test('arc drawing is one atomic center/start/end transaction with direction and 
     tool.place({position: [10, 0]}, 'local', 1, () => assert.fail()),
     undefined,
   );
-  tool.toggleDirection();
   const preview = tool.preview([0, 10])[0];
   assert.equal(preview.kind, 'arc');
   assert.ok(preview.sweep < -Math.PI);
@@ -125,7 +324,7 @@ test('arc drawing projects to its finite radius, preserves compatible point refe
   );
   assert.match(
     args,
-    /\['arc', 1, \[base.point\(7\), base.point\(8\), base.point\(9\), 'ccw'\]\]/,
+    /\['arc', 1, \[base.point\(7\), base.point\(8\), base.point\(9\), 'cw'\]\]/,
   );
   tool.place({position: [0, 0]}, 'local', 2, () => assert.fail());
   tool.reset();

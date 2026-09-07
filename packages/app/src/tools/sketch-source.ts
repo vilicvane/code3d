@@ -437,6 +437,7 @@ export class SketchEditResolver implements ToolIntentResolver {
               case 'length':
               case 'angle':
               case 'radius':
+              case 'sweep':
                 content = `[${data.map(formatSourceNumber).join(', ')}]`;
                 break;
             }

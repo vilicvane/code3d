@@ -8,6 +8,121 @@ const arc = (page: Page, id = 4) =>
 const source = (direction = 'ccw') =>
   `import {sketch} from '@code3d/core';\nconst width = 0;\nconst value = sketch([['point', 1, [width, 0]], ['point', 2, [10, 0]], ['point', 3, [0, 10]], ['arc', 4, [1, 2, 3, '${direction}']]], {constraints: [['fixed', 1], ['radius', [4, 10]]]});`;
 
+test('arc sweep input validates its open range, reverses direction without changing magnitude and undoes atomically', async t => {
+  const page = await open(
+    t,
+    "import {sketch} from '@code3d/core';\nconst value = sketch([]);",
+  );
+  await page.getByRole('button', {name: 'Arc', exact: true}).click();
+  const box = (await page.locator('.sketch-canvas').boundingBox())!;
+  const x = box.x + box.width / 2,
+    y = box.y + box.height / 2;
+  await page.mouse.click(x, y);
+  await page.mouse.move(x + 60, y);
+  await page.keyboard.type('10');
+  await page.keyboard.press('Enter');
+  const sweep = page.getByRole('textbox', {name: 'Sweep', exact: true});
+  await sweep.fill('360');
+  await page.keyboard.press('Enter');
+  assert.equal(await arc(page).count(), 0);
+  await page.getByText('Sweep must be less than 360', {exact: true}).waitFor();
+  await sweep.fill('270');
+  await page.keyboard.press('Tab');
+  assert.equal(await sweep.evaluate(e => document.activeElement === e), true);
+  assert.match(
+    (await page.locator('.drawing-overlay path.draft').getAttribute('d'))!,
+    / 0 1 1 /,
+  );
+  await page.keyboard.press('r');
+  assert.match(
+    (await page.locator('.drawing-overlay path.draft').getAttribute('d'))!,
+    / 0 1 0 /,
+  );
+  assert.equal(await sweep.inputValue(), '270');
+  await page.keyboard.press('r');
+  assert.match(
+    (await page.locator('.drawing-overlay path.draft').getAttribute('d'))!,
+    / 0 1 1 /,
+  );
+  await page.keyboard.press('Enter');
+  await arc(page).waitFor();
+  await waitForSource(page, /'sweep',\s*\[4,\s*270\]/);
+  await waitForSource(page, /'arc',\s*4,\s*\[1,\s*2,\s*3,\s*'cw'\]/);
+  const badge = page.locator('.constraint-badge[data-kind="sweep"]');
+  await badge.hover();
+  assert.match((await badge.getAttribute('aria-label'))!, /Sweep 270° · CW/);
+  assert.match((await arc(page).getAttribute('class'))!, /constraint-related/);
+  for (const id of [1, 2, 3])
+    assert.match(
+      (await point(page, id).getAttribute('class'))!,
+      /constraint-related/,
+    );
+  assert.equal(
+    await page.locator('.constraint-guides.constraint-active line').count(),
+    2,
+  );
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Control+z');
+  await arc(page).waitFor({state: 'detached'});
+  assert.doesNotMatch(await text(page), /'sweep'|'radius'/);
+});
+
+test('sweep-constrained arc drag rotates its start too, preserving major direction and compiled positions', async t => {
+  const page = await open(
+    t,
+    source('cw').replace(
+      "['radius', [4, 10]]",
+      "['radius', [4, 10]], ['sweep', [4, 270]]",
+    ),
+  );
+  await page.getByRole('button', {name: 'Snap', exact: true}).click();
+  const center = (await point(page, 1).boundingBox())!,
+    start = (await point(page, 2).boundingBox())!,
+    end = (await point(page, 3).boundingBox())!;
+  const cx = center.x + center.width / 2,
+    cy = center.y + center.height / 2,
+    radius = start.x - center.x;
+  await page.mouse.move(end.x + end.width / 2, end.y + end.height / 2);
+  await page.mouse.down();
+  for (const degrees of [110, 140, 170, 179, 181, 210])
+    await page.mouse.move(
+      cx + radius * Math.cos((degrees * Math.PI) / 180),
+      cy - radius * Math.sin((degrees * Math.PI) / 180),
+      {steps: 3},
+    );
+  await page.mouse.up();
+  await waitForSource(page, /'point',\s*3,\s*\[-/);
+  await page.getByText('Ready', {exact: true}).waitFor();
+  for (const [id, angle] of [
+    [2, 120],
+    [3, 210],
+  ]) {
+    const p = (await point(page, id).boundingBox())!;
+    assert.ok(
+      Math.abs(
+        p.x + p.width / 2 - cx - radius * Math.cos((angle * Math.PI) / 180),
+      ) < 1,
+    );
+    assert.ok(
+      Math.abs(
+        p.y + p.height / 2 - cy + radius * Math.sin((angle * Math.PI) / 180),
+      ) < 1,
+    );
+  }
+  assert.match((await arc(page).getAttribute('d'))!, / 0 1 1 /);
+  assert.match(await text(page), /'sweep',\s*\[4,\s*270\]/);
+  await page.keyboard.press('Control+z');
+  await page.waitForFunction(() => {
+    const c = document.querySelector('.sketch-canvas circle[data-id="1"]'),
+      p = document.querySelector('.sketch-canvas circle[data-id="2"]');
+    return (
+      c &&
+      p &&
+      Math.abs(Number(c.getAttribute('cy')) - Number(p.getAttribute('cy'))) < 1
+    );
+  });
+});
+
 test('arc tool creates center/start/end with numeric radius, reverses the preview, cancels and undoes atomically', async t => {
   const page = await open(
     t,
@@ -22,14 +137,18 @@ test('arc tool creates center/start/end with numeric radius, reverses the previe
   await page.keyboard.type('10');
   await page.keyboard.press('Enter');
   await page.mouse.move(x, y - 60);
+  assert.match(
+    (await page.locator('.drawing-overlay path.draft').getAttribute('d'))!,
+    / 0 1 1 /,
+  );
   await page.keyboard.press('r');
   assert.match(
     (await page.locator('.drawing-overlay path.draft').getAttribute('d')) ?? '',
-    / 0 1 1 /,
+    / 0 0 0 /,
   );
   await page.keyboard.press('Enter');
   await arc(page).waitFor();
-  await waitForSource(page, /'arc',\s*4,\s*\[1,\s*2,\s*3,\s*'cw'\]/);
+  await waitForSource(page, /'arc',\s*4,\s*\[1,\s*2,\s*3,\s*'ccw'\]/);
   await waitForSource(page, /'radius',\s*\[4,\s*10\]/);
   await page.keyboard.press('Escape');
   await page.keyboard.press('Control+z');

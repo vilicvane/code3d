@@ -23,6 +23,7 @@ const icons = {
   length: Ruler,
   angle: DraftingCompass,
   radius: Radius,
+  sweep: DraftingCompass,
 };
 const svg = <K extends keyof SVGElementTagNameMap>(tag: K) =>
   document.createElementNS('http://www.w3.org/2000/svg', tag);

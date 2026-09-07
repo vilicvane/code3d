@@ -47,7 +47,7 @@ export type SketchConstraint<P = number | SketchPoint> =
       points: readonly [midpoint: P, start: P, end: P],
     ]
   | readonly [
-      kind: 'length' | 'angle' | 'radius',
+      kind: 'length' | 'angle' | 'radius' | 'sweep',
       data: readonly [curve: number, value: number],
     ]
   | readonly [kind: 'x' | 'y', data: readonly [point: P, value: number]];
@@ -159,13 +159,13 @@ class SketchValue implements Sketch {
           'Sketch constraints must reference a local or upstream point.',
         );
     };
-    const curveRef = (id: number, kind: 'line' | 'circular curve') => {
+    const curveRef = (id: number, kind: 'line' | 'arc' | 'circular curve') => {
       if (
         !copied.some(
           e =>
-            (kind === 'line'
-              ? e[0] === 'line'
-              : e[0] === 'circle' || e[0] === 'arc') && e[1] === id,
+            (kind === 'circular curve'
+              ? e[0] === 'circle' || e[0] === 'arc'
+              : e[0] === kind) && e[1] === id,
         )
       )
         throw new Error(
@@ -199,13 +199,22 @@ class SketchValue implements Sketch {
           kind === 'y' ||
           kind === 'length' ||
           kind === 'angle' ||
-          kind === 'radius'
+          kind === 'radius' ||
+          kind === 'sweep'
         ) {
           if (kind === 'x' || kind === 'y') pointRef(data[0]);
           else
             curveRef(
               data[0] as number,
-              kind === 'radius' ? 'circular curve' : 'line',
+              kind === 'radius'
+                ? 'circular curve'
+                : kind === 'sweep'
+                  ? 'arc'
+                  : 'line',
+            );
+          if (kind === 'sweep' && !(data[1] > 0 && data[1] < 360))
+            throw new Error(
+              'Sketch sweep constraint requires degrees strictly between 0 and 360.',
             );
           const positive = kind === 'length' || kind === 'radius';
           if (!Number.isFinite(data[1]) || (positive && data[1] <= 0))
@@ -440,6 +449,7 @@ function snapshotConstraints(
       case 'length':
       case 'angle':
       case 'radius':
+      case 'sweep':
         return [kind, data];
     }
   });
@@ -526,6 +536,12 @@ export function solveSketchSnapshot(
                 index: circleIndex(data[0]),
                 value: data[1],
               };
+        case 'sweep':
+          return {
+            kind,
+            index: arcs.findIndex(a => a.id === data[0]),
+            value: data[1],
+          };
       }
     },
   );
@@ -554,6 +570,7 @@ export function solveSketchSnapshot(
     arcs: arcs.map(a => ({
       center: pointIndex(a.center),
       points: [pointIndex(a.points[0]), pointIndex(a.points[1])],
+      direction: a.direction,
     })),
     constraints,
   };

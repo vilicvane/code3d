@@ -32,7 +32,8 @@ export function sketchConstraintDisplays(
     layer.constraints.map(([kind, data], index): SketchConstraintDisplay => {
       let related: readonly SketchPoint[],
         curve: SketchPointAddress | undefined;
-      let radiusAnchor: SketchPosition | undefined;
+      let curveAnchor: SketchPosition | undefined;
+      let guides: SketchConstraintDisplay['guides'] | undefined;
       let label = '',
         title: string = kind;
       switch (kind) {
@@ -61,12 +62,28 @@ export function sketchConstraintDisplays(
           const center = point(circle.center);
           related = [center];
           curve = {layer: layer.id, id: circle.id};
-          radiusAnchor = sketchCurvePosition(
+          curveAnchor = sketchCurvePosition(
             sketchCurveGeometry(circle, ref => point(ref).position),
             circle.kind === 'circle' ? 1 / 8 : 1 / 2,
           );
           label = `R${number(data[1])}`;
           title = `Radius ${data[1]} · ${circle.kind} ${circle.id}`;
+          guides = [[center.position, curveAnchor]];
+          break;
+        }
+        case 'sweep': {
+          const arc = layer.entities
+            .filter(e => e.kind === 'arc')
+            .find(e => e.id === data[0])!;
+          related = [point(arc.center), ...arc.points.map(point)];
+          curve = {layer: layer.id, id: arc.id};
+          curveAnchor = sketchCurvePosition(
+            sketchCurveGeometry(arc, ref => point(ref).position),
+            1 / 2,
+          );
+          label = `${number(data[1])}°`;
+          title = `Sweep ${data[1]}° · ${arc.direction.toUpperCase()} · arc ${arc.id}`;
+          guides = related.slice(1).map(p => [related[0].position, p.position]);
           break;
         }
         case 'horizontal':
@@ -91,7 +108,7 @@ export function sketchConstraintDisplays(
       }
       title += ` · ${related.map(p => `point ${p.id}${p.layer === layer.id ? '' : ' (upstream)'}`).join(', ')}`;
       const anchor: SketchPosition =
-        radiusAnchor ??
+        curveAnchor ??
         (curve
           ? [
               (related[0].position[0] + related[1].position[0]) / 2,
@@ -107,13 +124,13 @@ export function sketchConstraintDisplays(
         anchor,
         points: related,
         curve,
-        guides: radiusAnchor
-          ? [[related[0].position, radiusAnchor]]
-          : !curve && related.length > 1
+        guides:
+          guides ??
+          (!curve && related.length > 1
             ? related
                 .slice(1)
                 .map(p => [related[0].position, p.position] as const)
-            : [],
+            : []),
       };
     }),
   );

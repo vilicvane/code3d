@@ -2,20 +2,21 @@ import {sketch} from '@code3d/core';
 
 const width = 30;
 
-// Arc references center/start/end, with explicit direction (ccw or cw).
-// Drag either endpoint through 180 degrees; the radius constraint stays true.
-// Arc tool: center, start/radius, end; R reverses the preview direction.
+// Arc references center/start/end, with explicit direction (cw or ccw).
+// Drag either endpoint: both rotate, preserving the radius and 270° sweep.
+// Arc tool: center, start/Radius, end/Sweep; defaults to CW, R reverses it.
 export const arcs = sketch(
   [
     ['point', 1, [0, 0]],
     ['point', 2, [15, 0]],
     ['point', 3, [0, 15]],
-    ['arc', 4, [1, 2, 3, 'ccw']],
+    ['arc', 4, [1, 2, 3, 'cw']],
   ],
   {
     constraints: [
       ['fixed', 1],
       ['radius', [4, 15]],
+      ['sweep', [4, 270]],
     ],
   },
 );

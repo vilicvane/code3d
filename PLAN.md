@@ -31,7 +31,7 @@ implementation context and historical outcomes, not a competing work queue.
   snapping, cancellation and one atomic source transaction per segment.
   `sketch(entries, {constraints})` separates current geometry from hard
   conditions, without persistent constraint IDs. Fixed point, coincident,
-  horizontal/vertical, length, angle, radius, midpoint and point X/Y constraints use PlaneGCS;
+  horizontal/vertical, length, angle, radius, sweep, midpoint and point X/Y constraints use PlaneGCS;
   assemblies use explicit rotation/translation bounds. Explicit drawing dimensions and the final
   active X/Y lock become constraints when geometry is committed; toggling off
   emits no direction constraint. Ordinary automatic snapping stays temporary.
@@ -103,11 +103,17 @@ implementation context and historical outcomes, not a competing work queue.
   Arcs use `['arc', id, [centerPoint, startPoint, endPoint, 'cw' | 'ccw']]`
   and native ArcRules, with radius constraints shared with circles. No hidden
   angles or second radius are authored. Center/start/end drawing supports entered
-  center coordinates and radius, R reverses direction, and one transaction creates
+  center coordinates, radius and sweep. Drawing defaults to CW, R reverses direction, and one transaction creates
   or undoes the whole arc. Ordinary point dragging replays the exact rounded source.
   Analytic curves share finite hit testing, display, bounds, radius badges and
   orphan cleanup. Whole-arc deletion retains shared/upstream points; zero-radius
   or coincident-endpoint arcs are errors, not implicit full circles.
+  `['sweep', [arcId, degrees]]` independently constrains the directed arc angle,
+  strictly between 0 and 360 degrees; the arc tuple still owns cw/ccw. Blank sweep
+  input follows the mouse without a constraint. Native angle parameters unwrap on
+  that directed branch, and residuals check the actual finite arc after solving.
+  Already-known dimensions are verified directly; mouse objectives omit coordinates
+  fixed by authored or gesture locks. Sweep badges link center and both endpoints.
   Curve trimming, regions and B-Rep generation remain later slices.
   The sketch canvas fills the viewport with floating controls. Its top-right
   icon toolbar groups editing, drawing and view controls, with native hover
@@ -118,8 +124,8 @@ implementation context and historical outcomes, not a competing work queue.
   Failed recompilation retains the selected last-successful sketch read-only;
   leaving its source selection clears it. Monaco still receives all diagnostics.
   See [research and priorities](plans/sketch-editor.md) and
-  [#23](https://github.com/vilicvane/code3d/issues/23); arc formats
-  remain unconfirmed.
+  [#23](https://github.com/vilicvane/code3d/issues/23); region identity and modeling
+  selection APIs remain to be confirmed.
 - Author code remains ordinary JavaScript/TypeScript and may freely construct,
   reuse, copy, collect, and derive model values.
 - A real code3d project is an ordinary Node/TypeScript package that owns its

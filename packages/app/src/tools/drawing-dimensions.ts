@@ -3,6 +3,7 @@ export type DrawingDimension = Readonly<{
   label: string;
   unit?: string;
   positive?: boolean;
+  exclusiveMaximum?: number;
 }>;
 
 /** Text in progress and accepted preview values have separate lifetimes. */
@@ -51,6 +52,11 @@ export class DrawingDimensions {
       return `${field.label}: enter a finite number`;
     if (field.positive && Number(text) <= 0)
       return `${field.label} must be greater than zero`;
+    if (
+      field.exclusiveMaximum !== undefined &&
+      Number(text) >= field.exclusiveMaximum
+    )
+      return `${field.label} must be less than ${field.exclusiveMaximum}`;
     return undefined;
   }
 }
