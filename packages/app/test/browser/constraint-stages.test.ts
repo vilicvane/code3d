@@ -90,7 +90,7 @@ test(
         const source = `import {box, group} from '@code3d/core';
         const base = box(20, 10, 30);
         const part = box(8, 6, 4).relate(self => self.on(base.up)
-          .offset(10, 0, 0).pivot(5, 0, 0).rotate(0, 0, 90)
+          .offset(10, 0, 0).pivot([5, 0, 0]).rotate(0, 0, 90)
           .around(base.axis).rotate(30).offset(7, 0, 0));
         export default group([base, part]);`;
         const module = await compile(source);
@@ -98,7 +98,7 @@ test(
         const stages = [
           'on(base.up)',
           'offset(10',
-          'pivot(5',
+          'pivot([5',
           'rotate(0',
           'around(base.axis)',
           'rotate(30)',

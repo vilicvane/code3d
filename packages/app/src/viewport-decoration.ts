@@ -26,14 +26,14 @@ export type ViewportDecorationAppearance = Readonly<{
 
 type ViewportDecorationBase = Readonly<{
   id: string;
+  /** Geometry and transforms are local to each visible occurrence of this node. */
+  nodeId: string;
   operationRole?: ModelOperationInputRole;
 }>;
 
 export type ViewportMeshDecoration = ViewportDecorationBase &
   Readonly<{
     kind: 'mesh';
-    /** When present, transform is local to each visible occurrence of this node. */
-    nodeId?: string;
     mesh: RenderMesh;
     transform: Transform;
     appearance: ViewportDecorationAppearance;
@@ -46,8 +46,6 @@ export type ViewportEdgeDecoration = ViewportDecorationBase &
     visibility?: 'without-object-bounds';
     /** Show short, screen-capped segments at each endpoint of the mesh edges. */
     corners?: boolean;
-    /** When present, transform is local to each visible occurrence of this node. */
-    nodeId?: string;
     mesh: RenderMesh;
     edgeIds?: readonly EdgeId[];
     transform: Transform;
@@ -57,7 +55,8 @@ export type ViewportEdgeDecoration = ViewportDecorationBase &
 type ViewportAnchorDecorationBase = ViewportDecorationBase &
   Readonly<{
     kind: 'anchor';
-    nodeId: string;
+    /** Geometry follows spatial previews; the operation frame excludes their geometric delta. */
+    frame?: 'geometry' | 'operation';
     transform: Transform;
     facing?: 1 | -1;
     direction?: 1 | -1;
@@ -83,7 +82,6 @@ export type ViewportAnchorDecoration =
 export type ViewportSurfaceDecoration = ViewportDecorationBase &
   Readonly<{
     kind: 'surface';
-    nodeId: string;
     mesh: RenderMesh;
     appearance: ViewportDecorationAppearance;
   }>;
@@ -91,7 +89,6 @@ export type ViewportSurfaceDecoration = ViewportDecorationBase &
 export type ViewportBoundsDecoration = ViewportDecorationBase &
   Readonly<{
     kind: 'bounds';
-    nodeId: string;
     /** Exact reference extent; replaces the occurrence's generic selection box. */
     size: Vec3;
     transform: Transform;

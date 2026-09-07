@@ -112,9 +112,13 @@ test(
                 : undefined,
               overlayCount: selection
                 ? viewport['topologySelectionOverlay']?.children.length
-                : viewport['decorationLayers'].get(
-                    'source-context:relation-geometry',
-                  )?.length,
+                : ['named-element', 'relation-geometry'].reduce(
+                    (count, id) =>
+                      count +
+                      (viewport['decorationLayers'].get(`source-context:${id}`)
+                        ?.length ?? 0),
+                    0,
+                  ),
               toolArgument: evaluation.toolArguments?.[0],
             });
             viewport.endTopologySelection();

@@ -129,6 +129,12 @@ occurrence，`anchor` decoration 携带模型 node、point/line/face/frame 类�
 frame。viewport 只把这些数据渲染为辅助几何，并按 owner 设置或清除 decoration
 layer，不理解具体工具、建模操作或元素名称的语义。
 
+所有 decoration 都必须声明 `nodeId`，几何和 transform 属于该模型的局部坐标；
+viewport 按当前可见 occurrence 放置，不把缺少归属的 transform 默认为世界坐标。
+布尔 region 的 `frameNodeId` 与用于区分操作数的 `inputNodeId` 分别记录；其几何
+属于主输入，不能借用可能因形状变化而重新求解的输出位姿。圆角/倒角对比使用
+selection 的输入到输出变换，并附着到结果实例。
+
 与源码 scope 相关的辅助显示实现为 `SourceDecorationProvider`。provider 读取 runtime operation metadata 并返回 decoration；工具开发者可以注册新的 provider，无需修改 viewport 的选择或渲染主路径。交互中的工具则返回 `viewport-decorations` preview，由 host 按 owner 应用和清理对应 layer，工具本身仍不直接调用 viewport。
 
 需要精确派生几何时由 kernel/runtime 产生 operation region，provider 只决定何时、
@@ -211,7 +217,7 @@ compiler 在调用进入时记录 receiver 和已求值参数，所以参数缺�
 `shell(thickness, removedSurfaceIds?)` 复用通用 surface 多选与数值参数工具：
 正厚度向内，负厚度向外；省略或空数组表示没有开口的封闭空腔。
 通用选择器按运行时解析后的选择显示摘要和高亮，不把省略参数硬编码为全选。
-操作 snapshot 的 selections 支持 edge 与 surface；抽壳选择指向操作输入，
+操作 snapshot 的 selections 支持 vertex、edge 与 surface，并记录输入几何到输出局部坐标的变换；抽壳选择指向操作输入，
 视图显示操作输出，失败时仍可修改输入面与厚度。Close all openings 删除面数组，
 恢复封闭空腔；全部选中面会报错，因为必须保留壳壁。见 [#37](https://github.com/vilicvane/code3d/issues/37)。
 
@@ -248,8 +254,8 @@ scope 的 edit plan。
 
 ## 模型原点与旋转
 
-`origin`、`originOffset`、`originVertex`、`originCenter` 和 `rotate` 在 operation snapshot 中记录
-局部几何坐标下的原点和本次操作向量。模型 snapshot 同时提供当前原点，tooling
+`originOffset`、`originVertex`、`originCenter` 和 `rotate` 在 operation snapshot 中记录
+结果模型坐标下的局部零点和本次操作向量。模型 snapshot 的原点恒为零，tooling
 统一这些数据、参数 provenance 和草图快照，并从同一依赖图安装 OpenCascade 和草图约束求解器；
 viewport 不从包围盒推断模型旋转中心。
 
@@ -261,14 +267,28 @@ viewport 不从包围盒推断模型旋转中心。
 `originCenter()` 取主体建立时的局部包围盒中心随模型变换后的位置，与 `.center`
 使用同一锚点。无参数操作通过 operation metadata 接入原点标记和手柄，不需要虚构参数。
 
-`originVertex` 复用 topology selection provider：拾取来自操作输入，显示操作输出及
-其原点。原点坐标和偏移显示平移箭头，`rotate` 显示角度参数对应的旋转环；固定
+`originVertex` 复用 topology selection provider：候选 ID 来自操作输入，候选几何通过
+selection 的 transform 转换到操作输出的局部坐标，再应用当前 occurrence 位姿。
+候选绘制、悬停、拾取与选择高亮共用该变换，并随 occurrence 预览一起更新；重新选择
+原点后候选点仍贴合结果模型。背景网格位于 XZ 零平面，不用几何偏移规避深度冲突。
+原点和偏移显示平移箭头，`rotate` 显示角度参数对应的旋转环；固定
 X/Y/Z 顺序意味着 X 环包含后续 Y/Z 的方向，Y 环包含后续 Z 的方向。
 
 `model.spatial` intent 通过通用源码事务修改唯一安全的参数，或保留当前参数表达式
 并折叠末尾数值增量。拖动顶点或中心原点时生成或复用 `originOffset`。preview 保存临时
 刚体变换和原点标记；旋转预览使用新旧完整旋转的差，松手写源码，Esc 清除预览。
-原点偏移不会临时移动实体。已有 relation offset 工具与这些操作共用轴手柄和会话机制。
+原点拖动固定开始时的 snapshot，候选标记显示总偏移，几何保持在该输入参考系；
+提交时将几何重表达为 p-d，标记回到结果模型零点，取消恢复起始状态。
+原点标记的 `frame: 'operation'` 表明其位置属于空间操作的参考系，排除 occurrence
+上为预览几何而叠加的变换；普通几何锚点则随几何变换。提交到重新编译之间以及
+这一期间继续拖动时，也使用同一规则，不能让原点标记再次减去几何偏移。
+已有 relation offset 工具与这些操作共用轴手柄和会话机制。
+
+坐标参数使用解构数组声明，例如 `pivot([x, y, z]: Vec3)`，各分量通过
+`@code3d.param x/y/z` 标注。signature 保存参数到调用实参及数组分量的路径，
+源码范围、运行值和数值 provenance 按同一路径解释；不把整个数组作为一个数值。
+字面量数组及其括号/类型断言可逐分量编辑，无法静态定位的数组表达式保留运行值，
+不猜测源码写入位置。
 
 ## 表达式构造
 

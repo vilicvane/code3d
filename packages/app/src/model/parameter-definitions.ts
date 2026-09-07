@@ -1,4 +1,5 @@
 import ts from '@typescript/typescript6';
+import {argumentExpression} from './argument-path';
 import type {SourceRef} from '@code3d/core/tooling';
 import {normalizeProjectPath} from '../project/project';
 import type {ToolSignatureSchema} from './tool-schema';
@@ -21,7 +22,10 @@ export function indexParameterDefinitions(
 ): void {
   for (const parameter of signature.parameters) {
     if (isSelectionParameter(parameter.kind)) continue;
-    const argument = call.arguments[parameter.index];
+    const argument = argumentExpression(
+      call.arguments,
+      parameter.path ?? [parameter.index],
+    );
     if (!argument) continue;
     const visit = (node: ts.Node): void => {
       if (isParameterReference(node)) {

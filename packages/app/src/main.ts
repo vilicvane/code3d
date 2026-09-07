@@ -13,6 +13,7 @@ import type {
   DesignArgumentContext,
   EdgeArgumentTarget,
   ModelModule,
+  TopologySelectionScope,
 } from './model/compiler';
 import {ModelDiagnosticError, type ModelDiagnostic} from './model/diagnostic';
 import {viewportDiagnostic} from './model/viewport-diagnostic';
@@ -1825,6 +1826,7 @@ function syncEdgeSelectionProvider(
     selection.inputNodeId,
     selection.ids,
     occurrence,
+    selection.scope,
   );
 }
 
@@ -1837,6 +1839,7 @@ function startEdgeSelection(
   inputNodeId: string,
   initialEdgeIds: readonly EdgeId[],
   occurrence: Occurrence,
+  scope?: TopologySelectionScope,
 ): void {
   dismissEdgeSelectionTool();
   if (edgeEditSession && edgeEditSession.targetId !== targetId) {
@@ -1872,6 +1875,7 @@ function startEdgeSelection(
       'edge',
       true,
       selectedEdgeIds,
+      scope,
     );
   } catch (error) {
     showToolIssue(error instanceof Error ? error.message : String(error));
@@ -2313,9 +2317,11 @@ function applyToolPreview(preview: ToolPreview): void {
     viewport.setSpatialPreview(preview.objects);
     viewport.setDecorations(
       'spatial-preview',
-      preview.objects.map(object =>
-        originDecoration(object.nodeId, object.spatial.origin),
-      ),
+      [
+        ...new Map(
+          preview.objects.map(object => [object.nodeId, object]),
+        ).values(),
+      ].map(object => originDecoration(object.nodeId, object.spatial.origin)),
     );
   } else if (preview.kind === 'parameter') {
     viewport.setParameterPreview(preview.targetId, preview.value);

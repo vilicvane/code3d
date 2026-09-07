@@ -179,7 +179,7 @@ replicad.setOC(undefined);
 
 solid
   .paint('#fff')
-  .origin(1, 2, 3)
+  .originOffset(1, 2, 3)
   .originOffset(0, 1, 0)
   .originVertex(1)
   .originCenter()
@@ -208,7 +208,7 @@ faceModel.edge(1);
 faceModel.surfaces();
 edgeModel
   .originCenter()
-  .origin(0, 0, 0)
+  .originOffset(0, 0, 0)
   .rotate(0, 0, 90)
   .scaled(2)
   .relate(self => self.start.on(solid.up))
@@ -218,7 +218,7 @@ edgeModel.vertex(1);
 edgeModel.edges();
 vertexModel
   .originCenter()
-  .origin(0, 0, 0)
+  .originOffset(0, 0, 0)
   .rotate(0, 90, 0)
   .scaled(2)
   .relate(self => self.on(solid.up))
@@ -236,7 +236,7 @@ intersect([solid, exposed]);
 loft([faceModel, faceModel.relate(self => self.on(solid.down))], {
   spine: edgeModel,
 });
-constraint.pivot(1, 2, 3).rotate(0, 45, 0);
+constraint.pivot([1, 2, 3]).rotate(0, 45, 0);
 constraint.pivotVertex(1).rotate(0, 0, 90);
 constraint.pivotVertex([1, 3]).rotate(0, 0, 90);
 constraint.around(solid.axis).rotate(45);
@@ -246,7 +246,7 @@ solid.on(solid.center);
 // @ts-expect-error on does not accept a whole target model.
 solid.on(solid);
 // @ts-expect-error unfinished pivot selection is not a Constraint.
-solid.relate(self => self.on(solid.up).pivot(1, 2, 3));
+solid.relate(self => self.on(solid.up).pivot([1, 2, 3]));
 // @ts-expect-error Constraint no longer has flip.
 constraint.flip();
 
@@ -361,7 +361,7 @@ model.scaled(2);
 // @ts-expect-error Groups do not contain geometry to rotate.
 groupModel.rotate(0, 90, 0);
 // @ts-expect-error Groups do not expose geometric origin editing.
-groupModel.origin(0, 0, 0);
+groupModel.originOffset(0, 0, 0);
 // @ts-expect-error Groups do not have a geometric center.
 groupModel.originCenter();
 // @ts-expect-error Center setters do not take coordinates.
@@ -433,3 +433,17 @@ point().align(box(1, 1, 1));
 // @ts-expect-error Points have no curve direction.
 point().center.reverse();
 void [alignPoint, alignCurve, alignSurface];
+
+// @ts-expect-error Positions use an array, not scalar coordinates.
+point(1, 2, 3);
+// @ts-expect-error A line endpoint is a position array.
+line(10, 0, 0);
+// @ts-expect-error Model origin is always local zero and has no setter.
+box(1, 2, 3).origin(1, 2, 3);
+box(1, 2, 3).relate(self =>
+  self
+    .on(box(4, 5, 6).up)
+    // @ts-expect-error A pivot is a position array.
+    .pivot(1, 2, 3)
+    .rotate(0, 0, 90),
+);

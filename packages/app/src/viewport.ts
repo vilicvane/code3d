@@ -1,3 +1,4 @@
+import {committedSpatialObject} from './tools/spatial-edit';
 import type {ModelDiagnostic} from './model/diagnostic';
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
@@ -114,7 +115,8 @@ type SelectionClick = Readonly<{
 
 type DecorationInstance = Readonly<{
   object: THREE.Object3D;
-  occurrenceKey?: string;
+  occurrenceKey: string;
+  frame: 'geometry' | 'operation';
   anchor?: AnchorDecorationObject;
   corners?: ScreenSpaceCornerLines;
   bounds?: boolean;
@@ -153,6 +155,8 @@ type TopologySelectionState = {
   occurrenceKey: string;
   mesh: RenderMesh;
   guide: THREE.Group;
+  /** Candidate geometry expressed in the displayed occurrence's local frame. */
+  localTransform: THREE.Matrix4;
   pickObject?: THREE.Mesh;
   selectedIds: TopologyIdSet;
   hoveredId?: TopologyId;
@@ -664,17 +668,11 @@ export class ModelViewport {
       throw new Error(`The model has no selectable ${kind}s.`);
     }
     this.clearTopologySelection();
-    const {guide, pickObject} = createTopologySelectionGuide(
-      input,
-      mesh,
-      kind,
-      occurrence.placement,
-    );
-    if (scope) {
-      occurrence.object.updateWorldMatrix(true, false);
-      applyTransform(guide, scope.transform);
-      guide.applyMatrix4(occurrence.object.matrixWorld);
-    }
+    const {guide, pickObject} = createTopologySelectionGuide(input, mesh, kind);
+    if (scope) applyTransform(guide, scope.transform);
+    guide.updateMatrix();
+    const localTransform = guide.matrix.clone();
+    guide.matrixAutoUpdate = false;
     this.decorationRoot.add(guide);
     this.topologySelection = {
       kind,
@@ -682,9 +680,11 @@ export class ModelViewport {
       occurrenceKey,
       mesh,
       guide,
+      localTransform,
       pickObject,
       selectedIds: new TopologyIdSet(initialIds),
     };
+    this.updateTopologySelectionTransform();
     this.rebuildSelectionHighlight();
     this.updateTransformGizmo();
     this.rebuildTopologySelectionOverlay();
@@ -810,7 +810,7 @@ export class ModelViewport {
     objects: readonly SpatialObjectPreview[],
     parameter?: Readonly<{id: string; value: number}>,
   ): void {
-    this.setSpatialPreview(objects);
+    this.setSpatialPreview(objects.map(committedSpatialObject));
     for (const {key} of objects)
       this.committedSpatialPreviews.set(key, this.spatialPreviews.get(key)!);
     if (parameter)
@@ -830,17 +830,6 @@ export class ModelViewport {
     const occurrenceKeys = scope ? new Set(scope.occurrenceKeys) : undefined;
     this.root.updateMatrixWorld(true);
     const instances = decorations.flatMap<DecorationInstance>(decoration => {
-      if (
-        (decoration.kind === 'mesh' || decoration.kind === 'edges') &&
-        !decoration.nodeId
-      ) {
-        const object =
-          decoration.kind === 'mesh'
-            ? createMeshDecorationObject(decoration)
-            : createEdgeDecorationObject(decoration);
-        this.decorationRoot.add(object);
-        return [{object}];
-      }
       return this.renderedOccurrences()
         .filter(
           occurrence =>
@@ -868,6 +857,10 @@ export class ModelViewport {
           const instance: DecorationInstance = {
             object,
             occurrenceKey: occurrence.key,
+            frame:
+              decoration.kind === 'anchor'
+                ? (decoration.frame ?? 'geometry')
+                : 'geometry',
             bounds: decoration.kind === 'bounds',
             anchor:
               decorationObject instanceof AnchorDecorationObject
@@ -1912,6 +1905,21 @@ export class ModelViewport {
     for (const instances of this.decorationLayers.values()) {
       instances.forEach(instance => this.updateDecorationTransform(instance));
     }
+    this.updateTopologySelectionTransform();
+  }
+
+  private updateTopologySelectionTransform(): void {
+    const selection = this.topologySelection;
+    if (!selection) return;
+    const occurrence = this.occurrences.get(selection.occurrenceKey);
+    if (!occurrence) return;
+    occurrence.object.updateWorldMatrix(true, false);
+    selection.guide.matrix.multiplyMatrices(
+      occurrence.object.matrixWorld,
+      selection.localTransform,
+    );
+    selection.guide.matrixWorldNeedsUpdate = true;
+    selection.guide.updateWorldMatrix(true, true);
   }
 
   private updateDecorationSizes(
@@ -1943,7 +1951,7 @@ export class ModelViewport {
     const boundsTargets = new Set<THREE.Object3D>();
     for (const instances of this.decorationLayers.values()) {
       for (const instance of instances) {
-        if (!instance.bounds || !instance.occurrenceKey) continue;
+        if (!instance.bounds) continue;
         boundsKeys.add(instance.occurrenceKey);
         const occurrence =
           this.occurrences.get(instance.occurrenceKey) ??
@@ -1966,11 +1974,7 @@ export class ModelViewport {
     instance: DecorationInstance,
     boundsKeys: ReadonlySet<string>,
   ): void {
-    if (
-      instance.visibility !== 'without-object-bounds' ||
-      !instance.occurrenceKey
-    )
-      return;
+    if (instance.visibility !== 'without-object-bounds') return;
     const occurrence =
       this.occurrences.get(instance.occurrenceKey) ??
       this.contextOccurrences.get(instance.occurrenceKey);
@@ -1985,12 +1989,20 @@ export class ModelViewport {
   }
 
   private updateDecorationTransform(instance: DecorationInstance): void {
-    if (!instance.occurrenceKey) return;
     const occurrence =
       this.occurrences.get(instance.occurrenceKey) ??
       this.contextOccurrences.get(instance.occurrenceKey);
     if (!occurrence) return;
     instance.object.matrix.copy(occurrence.object.matrixWorld);
+    const spatial = this.spatialPreviews.get(occurrence.key);
+    if (instance.frame === 'operation' && spatial) {
+      const delta = new THREE.Matrix4().compose(
+        new THREE.Vector3(...spatial.transform.position),
+        new THREE.Quaternion(...spatial.transform.quaternion),
+        new THREE.Vector3(1, 1, 1),
+      );
+      instance.object.matrix.multiply(delta.invert());
+    }
     instance.object.matrixWorldNeedsUpdate = true;
   }
 
@@ -2290,11 +2302,9 @@ function createTopologySelectionGuide(
   node: ModelSnapshotObject,
   mesh: RenderMesh,
   kind: TopologyKind,
-  placement: ModelPlacement,
 ): Readonly<{guide: THREE.Group; pickObject?: THREE.Mesh}> {
   const guide = new THREE.Group();
   guide.name = `${node.name} (selectable ${kind}s)`;
-  applyNodeTransform(guide, node, placement);
   if (kind === 'vertex') {
     if (mesh.topologyVertices.length === 0) {
       throw new Error('The model has no renderable vertices.');

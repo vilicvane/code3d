@@ -34,7 +34,7 @@ section paths; Boolean operations inherit from all inputs. Splits and merges
 retire ambiguous source paths. Full rules are in the
 [topology guide](../web/src/content/docs/docs/guides/topology.md).
 `relate()` records placement for composition with other values; inspecting or
-rendering the resulting value by itself keeps its intrinsic local frame.
+rendering the resulting value by itself uses its own local geometry.
 
 ## Editable sketches
 
@@ -325,7 +325,7 @@ Explicit rotation belongs to a particular contact chain:
 
 ```ts
 self.on(base.up).rotate(0, 30, 0);
-self.on(base.up).pivot(50, 0, 0).rotate(0, 0, 45);
+self.on(base.up).pivot([50, 0, 0]).rotate(0, 0, 45);
 self.on(base.up).pivotVertex(3).rotate(0, 0, 45);
 self.on(base.up).around(base.axis).rotate(30);
 ```
@@ -481,35 +481,38 @@ const part = box(24, 6, 14)
   .rotate(15, 35, 0);
 ```
 
-- `origin(x, y, z)` sets the origin to local geometry coordinates.
-- `originVertex(id)` sets it to the selected vertex of the input model.
-- `originCenter()` sets it to the model's `center` anchor.
-- `originOffset(dx, dy, dz)` adds a local-coordinate offset to the current origin.
-- `rotate(x, y, z)` rotates geometry about that origin in degrees, applying
-  fixed local X, then Y, then Z rotations. Repeated calls compose in source order.
+- `originVertex(id)` makes the selected input vertex local zero.
+- `originCenter()` makes the model's `center` anchor local zero.
+- `originOffset(dx, dy, dz)` re-expresses every local point as `p - [dx, dy, dz]`.
+- `rotate(x, y, z)` rotates about local zero in degrees, applying fixed local
+  X, then Y, then Z rotations. Repeated calls compose in source order.
 
-All three setters replace previous origin settings and accumulated offsets. Setting
-an origin leaves geometry in place, preserves the anchor's orientation, and
-changes the default pivot for later explicit rotations. Existing named anchors remain where
-they were. The default origin is the model's intrinsic anchor: zero for solids
-and profiles, the point itself for points, and the start for curves.
-Rotation carries named anchors along with the shape and preserves topology IDs.
-`center` starts at the body's local bounding-box center and follows its
-translation, rotation, and scaling. It is not recomputed from the rotated
-shape's axis-aligned bounds. All geometric models expose this point anchor;
-changing the origin leaves it in place. `model.originCenter().originOffset(1, 0, 0)`
-sets the origin one local X unit beyond that center.
-Changing the origin afterward does not undo geometry already rotated. Existing
-bound references retain their captured geometry and facing; newly queried
-bounds describe the current model. Origin changes do not shift bound contact. `scaled()` retains its existing
-geometric scaling about coordinate zero, including the origin position.
+The model origin is always zero in its own coordinates. Origin offsets compose
+and cancel; geometry, centers, named references and topology positions all use
+the resulting coordinates. Directions and topology IDs are preserved. Old model
+values and captured references keep their original meaning. `center` begins at
+the body's local bounding-box center and follows transforms; rotating does not
+recalculate it from the new axis-aligned bounds. `scaled()` scales about current
+local zero. Later origin edits preserve the already-rotated shape.
+
+Dimensions use scalar arguments; positions use arrays. `point()` is local zero;
+`point([x, y, z])` equals `point().originOffset(-x, -y, -z)`. `line([x, y, z])`
+starts at zero; `line(start, end)` accepts two position arrays. Their input
+coordinates remain local geometry coordinates. For example, `line([10, 0, 0])`
+has center `[5, 0, 0]`, and `.rotate(0, 90, 0)` takes its end to `[0, 0, -10]`.
+A curve's tangent reference frame does not redefine model XYZ. Directional
+bounds use the model axes, including after geometric rotation.
+
 Groups expose composition capabilities rather than these geometric operations.
 
-In the App, origin coordinates and offsets have translation arrows; `originVertex`
+In the App, origin offsets have translation arrows; `originVertex`
 uses vertex picking and an origin marker. Dragging an `originCenter()` or
 `originVertex()` marker adds or edits an `originOffset()` call. Rotation rings edit the corresponding
 angle about its effective axis, including when other angles are nonzero. Dragging
-previews the change; release writes source and Escape cancels. The
+uses the gesture-start snapshot: the candidate origin moves against fixed
+geometry. Release writes source and switches to result coordinates, with origin
+zero and geometry shifted by the negative displacement; Escape restores the
+start state. The
 [origin and rotation example](../app/examples/origin-and-rotation.ts) demonstrates
 these scopes.
 

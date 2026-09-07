@@ -92,10 +92,10 @@ test('a tilted source uses its actual support, preserves orientation and tangent
   near(position(offsetPoint), [0, 13, 0]);
 });
 
-test('target local direction determines the shared projection frame', () => {
+test('target model axes determine bounds after geometry rotates', () => {
   const base = box(10, 20, 30).rotate(0, 0, 90);
   const placed = box(2, 4, 6).relate(self => self.on(base.up));
-  near(position(placed), [-11, 0, 0]);
+  near(position(placed), [0, 7, 0]);
   near(pose(placed).quaternion, identity);
 });
 
@@ -108,8 +108,8 @@ test('on snapshots retain the complete source box in the target projection frame
     assert.equal(constraint.kind, 'on');
     if (constraint.kind !== 'on') return;
     near(constraint.sourceBounds.size, [
-      6 * Math.cos(Math.PI / 6) + 4 * Math.sin(Math.PI / 6),
       4 * Math.cos(Math.PI / 6) + 6 * Math.sin(Math.PI / 6),
+      6 * Math.cos(Math.PI / 6) + 4 * Math.sin(Math.PI / 6),
       8,
     ]);
     const contact = relativeTransform(
@@ -286,10 +286,10 @@ test('on rejects arbitrary target anchors and infinite source references', () =>
 test('pivot rotation preserves the original bent loft and standalone geometry', () => {
   const start = circle(20);
   const via = regularPolygon(20, 8).relate(self =>
-    self.on(start.up).pivot(50, 0, 0).rotate(0, 0, 45),
+    self.on(start.up).pivot([50, 0, 0]).rotate(0, 0, 45),
   );
   const end = rectangle(40, 40).relate(self =>
-    self.on(start.up).pivot(50, 0, 0).rotate(0, 0, 90),
+    self.on(start.up).pivot([50, 0, 0]).rotate(0, 0, 90),
   );
   near(position(via), [50 - 25 * Math.SQRT2, -25 * Math.SQRT2, 0]);
   near(position(end), [50, -50, 0]);
@@ -301,10 +301,10 @@ test('pivot rotation preserves the original bent loft and standalone geometry', 
 
 test('local pivot, pivotVertex, and direct rotate all refer to relate self', () => {
   const base = box(10, 10, 10);
-  const original = box(2, 2, 2).origin(3, 4, 5).rotate(0, 0, 30);
+  const original = box(2, 2, 2).originOffset(3, 4, 5).rotate(0, 0, 30);
   const atOrigin = original.relate(self => self.on(base.up).rotate(0, 45, 0));
   const explicit = original.relate(self =>
-    self.on(base.up).pivot(0, 0, 0).rotate(0, 45, 0),
+    self.on(base.up).pivot([0, 0, 0]).rotate(0, 45, 0),
   );
   near(position(atOrigin), position(explicit));
   near(pose(atOrigin).quaternion, pose(explicit).quaternion);
@@ -315,16 +315,13 @@ test('local pivot, pivotVertex, and direct rotate all refer to relate self', () 
     base.on(copy.up).pivotVertex(1).rotate(0, 0, 90),
   );
   const b = self.relate(copy =>
-    base
-      .on(copy.up)
-      .pivot(...vertex)
-      .rotate(0, 0, 90),
+    base.on(copy.up).pivot(vertex).rotate(0, 0, 90),
   );
   near(position(a), position(b));
   near(pose(a).quaternion, pose(b).quaternion);
   assert.throws(
     // @ts-expect-error An unfinished pivot chain must be rejected at runtime.
-    () => self.relate(copy => copy.on(base.up).pivot(1, 2, 3)),
+    () => self.relate(copy => copy.on(base.up).pivot([1, 2, 3])),
     /completed Constraint/,
   );
 });
@@ -335,9 +332,9 @@ test('successive rotations compose and a second contact constrains the final pos
   const placed = source.relate(self =>
     self
       .on(base.up)
-      .pivot(5, 0, 0)
+      .pivot([5, 0, 0])
       .rotate(0, 0, 30)
-      .pivot(0, 0, 3)
+      .pivot([0, 0, 3])
       .rotate(20, 0, 0),
   );
   const expected = composeTransforms(
@@ -347,7 +344,7 @@ test('successive rotations compose and a second contact constrains the final pos
   near(position(placed), expected.position);
   near(pose(placed).quaternion, expected.quaternion);
   const constrained = source.relate(self => [
-    self.on(base.up).pivot(5, 0, 0).rotate(0, 0, 90),
+    self.on(base.up).pivot([5, 0, 0]).rotate(0, 0, 90),
     self.on(base.right),
   ]);
   near(position(constrained), [0, -5, 0]);
@@ -379,8 +376,8 @@ test('compatible rotation chains choose free translation independently of relati
   for (const reverse of [false, true])
     for (const duplicate of [false, true]) {
       const placed = point().relate(self => {
-        const a = self.on(base.up).pivot(0, 0, 0).rotate(0, 90, 0);
-        const b = self.on(base.up).pivot(10, 0, 0).rotate(0, 90, 0);
+        const a = self.on(base.up).pivot([0, 0, 0]).rotate(0, 90, 0);
+        const b = self.on(base.up).pivot([10, 0, 0]).rotate(0, 90, 0);
         const constraints = [a, b, ...(duplicate ? [a] : [])];
         return reverse ? constraints.reverse() : constraints;
       });

@@ -1,3 +1,4 @@
+import {argumentExpression} from './argument-path';
 import ts from '@typescript/typescript6';
 import {normalizeProjectPath, type ModelProject} from '../project/project';
 import {
@@ -110,6 +111,7 @@ export type SourceTargetEvaluation = Readonly<{
         kind: 'edges';
         inputNodeId: string;
         ids: readonly EdgeId[];
+        scope?: TopologySelectionScope;
       }>
     | Readonly<{
         kind: TopologyKind;
@@ -234,6 +236,7 @@ type ParsedDesignArgumentContext = DesignArgumentContext &
   }>;
 
 type ParameterArgument = Readonly<{
+  path: readonly number[];
   name: string;
   label: string;
   kind: ParameterKind;
@@ -244,7 +247,7 @@ type CallParameterTarget = SourceParameterTarget &
 
 type ParameterSignature = Readonly<{
   operation: string;
-  arguments: readonly (ParameterArgument | undefined)[];
+  arguments: readonly ParameterArgument[];
 }>;
 
 type CatalogTrace = {
@@ -1718,6 +1721,11 @@ export function createModelCompiler(
                   kind: 'edges',
                   inputNodeId: selection.inputNodeId,
                   ids: selection.ids,
+                  scope: {
+                    geometryNodeId: selection.inputNodeId,
+                    transform: selection.transform,
+                    availableIds: modelTopologyIds(sourceObject, 'edge')!,
+                  },
                 },
               },
             ];
@@ -1832,13 +1840,19 @@ export function createModelCompiler(
                             sameTopologyId(available, id),
                           ),
                         ),
-                  scope: reference
+                  scope: operationSelection
                     ? {
-                        geometryNodeId: modelObjectNodeId(reference.geometry),
-                        transform: reference.transform,
+                        geometryNodeId: operationSelection.inputNodeId,
+                        transform: operationSelection.transform,
                         availableIds,
                       }
-                    : undefined,
+                    : reference
+                      ? {
+                          geometryNodeId: modelObjectNodeId(reference.geometry),
+                          transform: reference.transform,
+                          availableIds,
+                        }
+                      : undefined,
                 },
               } satisfies SourceTargetEvaluation,
             ];
@@ -2210,7 +2224,10 @@ export function createModelCompiler(
                 })
               : undefined;
             const toolArguments = execution
-              ? numericToolArguments(execution.arguments)
+              ? numericToolArguments(
+                  execution.arguments,
+                  target.tool!.signature,
+                )
               : undefined;
             return toolArguments ? {...evaluation, toolArguments} : evaluation;
           })
@@ -2221,11 +2238,16 @@ export function createModelCompiler(
 
   function numericToolArguments(
     arguments_: ReadonlyMap<number, unknown>,
+    signature: ToolSignatureSchema,
   ): Readonly<Record<number, number>> | undefined {
     const values: Record<number, number> = {};
-    arguments_.forEach((value, index) => {
-      if (typeof value === 'number') values[index] = value;
-    });
+    for (const parameter of signature.parameters) {
+      const [index, ...components] = parameter.path ?? [parameter.index];
+      let value = arguments_.get(index);
+      for (const component of components)
+        value = Array.isArray(value) ? value[component] : undefined;
+      if (typeof value === 'number') values[parameter.index] = value;
+    }
     return Object.keys(values).length > 0 ? values : undefined;
   }
 
@@ -3178,12 +3200,17 @@ export function createModelCompiler(
     sourceFile: ts.SourceFile,
     factory: ts.NodeFactory,
   ): ts.CallExpression {
-    const argumentsWithTracing = visited.arguments.map((argument, index) => {
-      const originalArgument = original.arguments[index];
-      const argumentDefinition = signature.arguments[index];
-      if (!originalArgument || !argumentDefinition) {
-        return argument;
-      }
+    const argumentsWithTracing = [...visited.arguments];
+    for (const argumentDefinition of signature.arguments) {
+      const originalArgument = argumentExpression(
+        original.arguments,
+        argumentDefinition.path,
+      );
+      const argument = argumentExpression(
+        argumentsWithTracing,
+        argumentDefinition.path,
+      );
+      if (!originalArgument || !argument) continue;
 
       const targets = collectExpressionTargets(
         originalArgument,
@@ -3210,10 +3237,10 @@ export function createModelCompiler(
         );
 
       if (targets.length === 0) {
-        return argument;
+        continue;
       }
 
-      return factory.createCallExpression(
+      const traced = factory.createCallExpression(
         factory.createPropertyAccessExpression(
           factory.createIdentifier('__code3d'),
           'parameter',
@@ -3231,7 +3258,19 @@ export function createModelCompiler(
           factory.createArrayLiteralExpression(targets),
         ],
       );
-    });
+      const root = argumentDefinition.path[0];
+      const transformed = ts.transform(argumentsWithTracing[root], [
+        context => node => {
+          const replace: ts.Visitor = child =>
+            child === argument
+              ? traced
+              : ts.visitEachChild(child, replace, context);
+          return ts.visitNode(node, replace, ts.isExpression)!;
+        },
+      ]);
+      argumentsWithTracing[root] = transformed.transformed[0];
+      transformed.dispose();
+    }
 
     return updateCall(
       visited,
@@ -3608,18 +3647,21 @@ export function createModelCompiler(
       sourceRef: sourceRef(sourceFile.fileName, sourceStart, node.getEnd()),
       signature,
       arguments: signature.parameters.map(parameter => {
-        const unknown = spreadIndex >= 0 && parameter.index >= spreadIndex;
+        const path = parameter.path ?? [parameter.index];
+        const unknown =
+          (spreadIndex >= 0 && path[0] >= spreadIndex) ||
+          (path.length > 1 && !argumentExpression(node.arguments, path));
         return {
           name: parameter.name,
           index: parameter.index,
           presence: unknown
             ? 'unknown'
-            : parameter.index < node.arguments.length
+            : path[0] < node.arguments.length
               ? 'present'
               : 'omitted',
           target: unknown
             ? undefined
-            : toolArgumentSource(node, parameter.index, sourceFile),
+            : toolArgumentSource(node, path, sourceFile),
         };
       }),
     };
@@ -3627,10 +3669,20 @@ export function createModelCompiler(
 
   function toolArgumentSource(
     call: ts.CallExpression,
-    index: number,
+    path: readonly number[],
     sourceFile: ts.SourceFile,
   ): ToolArgumentSource['target'] | undefined {
-    const argument = call.arguments[index];
+    const index = path[0];
+    const argument = argumentExpression(call.arguments, path);
+    if (path.length > 1) {
+      if (!argument) return undefined;
+      const location = sourceRef(
+        sourceFile.fileName,
+        argument.getStart(sourceFile),
+        argument.getEnd(),
+      );
+      return {kind: 'present', sourceRef: location, removalSourceRef: location};
+    }
     if (argument) {
       const previous = call.arguments[index - 1];
       const next = call.arguments[index + 1];
@@ -3675,20 +3727,15 @@ export function createModelCompiler(
         !isToolSelectionParameter(parameter),
     );
     if (numericParameters.length === 0) return undefined;
-    const lastIndex = Math.max(
-      ...numericParameters.map(parameter => parameter.index),
-    );
-    const arguments_: Array<ParameterArgument | undefined> = Array.from({
-      length: lastIndex + 1,
-    });
-    numericParameters.forEach(parameter => {
-      arguments_[parameter.index] = {
+    return {
+      operation: schema.name,
+      arguments: numericParameters.map(parameter => ({
         name: parameter.name,
         label: parameter.label,
         kind: parameter.kind,
-      };
-    });
-    return {operation: schema.name, arguments: arguments_};
+        path: parameter.path ?? [parameter.index],
+      })),
+    };
   }
 
   function numericExpressionValue(node: ts.Node): number | undefined {

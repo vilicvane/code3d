@@ -196,7 +196,7 @@ implementation context and historical outcomes, not a competing work queue.
 - `model.relate(self => constraint | constraints)` creates a new
   semantic-immutable model value that shares geometry and carries the returned
   constraint or constraint array. The callback parameter is that new value.
-  Rendering this value on its own preserves its intrinsic local placement;
+  Rendering this value on its own uses its own local geometry;
   relation placement is resolved only when the value participates in a
   composition.
 - `on` only translates the source's matching support boundary to a directional
@@ -259,20 +259,25 @@ implementation context and historical outcomes, not a competing work queue.
 - Monaco multi-selection and automatic boolean code generation are deferred
   until single-object discovery, rendering, and position relations are solid.
 
-- Geometric models support `origin(x, y, z)`, `originVertex(id)`, `originCenter()`, and additive
-  `originOffset(dx, dy, dz)`. The three setters replace earlier origin state without
-  moving geometry. `rotate(x, y, z)` applies degree rotations about that origin,
-  in fixed local X/Y/Z order, transforming geometry and named anchors while
-  preserving topology IDs. Viewport origin and rotation tools edit the selected
-  call through source transactions. See [#19](https://github.com/vilicvane/code3d/issues/19).
-  Every geometric model exposes a `center` anchor initialized from its body's
-  local bounding box and carried through transforms. `originCenter()` uses
-  that anchor; origin edits never move `center`. Center and vertex origin
-  drags append or edit `originOffset()` through the same source transaction.
-- `scaled(factor)` derives geometric models about local coordinate zero. Geometry,
-  named anchors, `center`, and the origin position scale together while topology
-  IDs are preserved. The factor is positive and finite; groups do not provide
-  geometric scaling. Export unit conversion is a separate output setting.
+- Geometric models provide `originOffset(dx, dy, dz)`, `originVertex(id)` and
+  `originCenter()`. Origin is always model-local zero; an offset d re-expresses
+  all point coordinates as p-d, preserving shape, directions, topology IDs and
+  earlier model values. Centers and named references follow the same transform.
+  `center` is carried from the body's initial bounds rather than recalculated
+  after rotation. See [#48](https://github.com/vilicvane/code3d/issues/48).
+- Coordinates use arrays: `point()` / `point([x, y, z])`, `line([x, y, z])` /
+  `line(start, end)` and `pivot([x, y, z])`. Dimensions, displacement increments
+  and XYZ angles use scalar arguments. Geometric anchor frames retain their
+  tangents and normals independently of the model's fixed XYZ axes; directional
+  bounds and relation pivot XYZ use model axes.
+- `rotate(x, y, z)` and positive finite `scaled(factor)` act about current local
+  zero. Geometry, named anchors and references transform together. Booleans
+  keep the primary operand's coordinates; loft keeps the first section's
+  coordinates. Groups preserve their assembled local placement and do not
+  provide geometric scaling or origin edits.
+- Origin drags freeze the gesture-start snapshot and show a candidate origin
+  against it. Commit switches to result coordinates; cancel restores the start.
+  Coordinate tuple components retain numeric tools and source provenance.
 
 ## Invariants
 
@@ -321,7 +326,7 @@ implementation context and historical outcomes, not a competing work queue.
 - The editor caret resolves the exact source occurrence being inspected. A
   value site renders that value alone. A collection result places its members
   together using their resolved relations, including singleton collections;
-  selecting one member as a value still renders it in its intrinsic frame.
+  selecting one member as a value still renders its own local geometry.
   An operation-input site may also render
   its peer inputs as dimmed context that can switch input focus. Mouse hover
   over source code does not change the viewport. In a layered source scene,

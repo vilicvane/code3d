@@ -38,7 +38,6 @@ export class AnchorDecorationObject extends THREE.Group {
     const {appearance} = decoration;
     this.name = decoration.id;
     this.userData.decoration = decoration;
-    this.renderOrder = decoration.layer === 'foreground' ? 1 : 0;
     applyTransform(this, decoration.transform);
     const marker = (glyph: THREE.Object3D, y = 0) => {
       const object = new THREE.Group();
@@ -125,6 +124,10 @@ export class AnchorDecorationObject extends THREE.Group {
       marker(frame);
     }
     this.traverse(object => {
+      // Nested groups replace, rather than inherit, Three's render-group order.
+      // Keep foreground glyphs above gizmos whose object order is Infinity.
+      if (object instanceof THREE.Group)
+        object.renderOrder = decoration.layer === 'foreground' ? 1 : 0;
       const material = 'material' in object ? object.material : undefined;
       for (const candidate of Array.isArray(material) ? material : [material]) {
         if (!(candidate instanceof THREE.Material)) continue;

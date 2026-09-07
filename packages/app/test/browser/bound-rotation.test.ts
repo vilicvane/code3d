@@ -245,7 +245,7 @@ test(
           return {target, evaluation, selected, bindings};
         };
         const module = await compile(source);
-        inspect(module, source, 'pivot(50, 0, 0)');
+        inspect(module, source, 'pivot([50, 0, 0])');
         inspect(module, source, 'rotate(0, 0, 45)');
         const bound = inspect(module, source, 'start.up');
         const boundScope = {
