@@ -37,15 +37,21 @@ export function agentPrompt(
   task: string,
   cursor?: AgentCursor,
 ): string {
+  const cli =
+    __CODE3D_CLI_COMMAND__ === 'c3d'
+      ? 'Use the installed `c3d` executable (Node.js 24+).\n'
+      : 'Use the existing development CLI in the same environment as the App dev server. In every command, replace `c3d` with the following command; it works from any directory (POSIX shell, or PowerShell on Windows):\n```sh\n' +
+        __CODE3D_CLI_COMMAND__ +
+        '\n```\n';
   const context = cursor
     ? '\nPinned observation at prompt-copy time (re-read if the source has since changed):\n```json\n' +
       JSON.stringify({cursor}, null, 2) +
       '\n```\n'
     : '';
   if (!initial)
-    return `Continue the Code3D task using your existing configuration for ${config.name} (agentId ${config.agentId}).\n${task.trim()}\n${context}`;
-  return `Work on the project open in Code3D through the c3d CLI (Node.js 24+). The App owns the project files. Save this complete private configuration to a JSON file wherever convenient; use its filename explicitly for every command. You are ${config.name}.\n\n\`\`\`json\n${JSON.stringify(config, null, 2)}\n\`\`\`\n
-Use \`c3d <config-file> fs list /\`, \`fs read /model.ts\`, and \`fs stat /model.ts\` to inspect the App's current project. A source checkout containing packages/cli can build the CLI with \`npm install\` and \`npm run build:packages\`, then run \`node <checkout>/packages/cli/bld/main.js\` in place of c3d.
+    return `Continue the Code3D task using your existing configuration for ${config.name} (agentId ${config.agentId}).\n\n${cli}\nTask:\n${task.trim()}\n${context}`;
+  return `Work on the project open in Code3D through the c3d CLI (Node.js 24+). The App owns the project files.\n\n${cli}\nSave this complete private configuration to a JSON file wherever convenient; use its filename explicitly for every command. You are ${config.name}.\n\n\`\`\`json\n${JSON.stringify(config, null, 2)}\n\`\`\`\n
+Use \`c3d <config-file> fs list /\`, \`fs read /model.ts\`, and \`fs stat /model.ts\` to inspect the App's current project.
 
 Modify project files only through \`c3d <config-file> apply --input <json-file|->\`. Each files entry is {path, version, content}: send the full new UTF-8 content with the version returned by fs read. version:null creates an absent file; content:null deletes an existing version. Rename using a delete/create batch. The App checks the whole batch before accepting it; conflicts require re-reading. Never edit a separate local copy of the project.
 

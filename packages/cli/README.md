@@ -122,11 +122,23 @@ from tessellation.
 
 ## Repository development
 
+The development App includes absolute paths to its Node executable and the CLI
+in both initial and update prompts. Agents can run that command from any working
+directory in the same environment as the dev server, using the CLI from the
+matching checkout. The developer prepares the build; agents do not clone or build
+Code3D. Production builds use the installed `c3d` command and contain no local
+development paths.
+
 ```sh
 npm run build:packages
 node packages/cli/bld/main.js --help
 npm test --workspace @code3d/cli
 ```
+
+For a global development command, run `npm link --workspace @code3d/cli` from the
+repository root, then invoke `c3d` directly. The link points to that checkout;
+rebuild after CLI changes. A single global link can target only one checkout,
+so generated development prompts use the explicit local path.
 
 The package installs a `c3d` executable through npm's `bin` field. It has not been
 published as part of this development stage. CLI integration tests launch real
