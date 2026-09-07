@@ -30,7 +30,7 @@ const snapshot = (
   constraints: SketchConstraint[] = [],
 ) => snapshotSketch(sketch(entries, {constraints}), () => 'local');
 
-test('unrelated earlier points, coincident coordinates and crossings cannot steal the anchor', () => {
+test('unrelated points and crossings do not steal the anchor, and a contacting point stays stable', () => {
   for (const extra of [
     [['point', 9, [-20, 0]]],
     [['point', 9, [0, 0]]],
@@ -151,7 +151,9 @@ test('shared endpoints and constraint-only connections preserve constraints whil
     close(point(moved, 2).position, [60, 20]);
     close([point(moved, 1).position[1]], [20]);
     if (connection === 'lines')
-      close(point(moved, 8).position, point(initial, 8).position);
+      // Point 8 also lies on line 3: its contact now follows the horizontal
+      // line instead of treating its coincident starting position as unrelated.
+      close([point(moved, 8).position[1]], [20]);
     else if (connection === 'coincident')
       close(point(moved, 8).position, point(moved, 1).position);
     else

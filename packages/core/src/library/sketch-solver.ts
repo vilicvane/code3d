@@ -1,9 +1,20 @@
 import type {GcsSystem, ModuleStatic} from '@salusoft89/planegcs';
 import type {SketchArcDirection, SketchPosition} from './sketch.js';
 import {sketchArcGeometry} from './sketch-curves.js';
+import {pointLineDistance} from './sketch-incidence.js';
 
 /** Evaluation-local numeric indices, never author entity or constraint IDs. */
 export type SketchSolveConstraint =
+  | Readonly<{
+      kind: 'pointOnCircle';
+      points: readonly [point: number, center: number];
+      curve: 'circle' | 'arc';
+      index: number;
+    }>
+  | Readonly<{
+      kind: 'pointOnLine';
+      points: readonly [point: number, start: number, end: number];
+    }>
   | Readonly<{kind: 'sweep'; index: number; value: number}>
   | Readonly<{
       kind: 'radius';
@@ -357,6 +368,44 @@ export function solveSketchProblem(
           constraint.kind === 'x' ? 0 : 1,
           constraint.value,
           tag,
+        );
+      } else if (constraint.kind === 'pointOnCircle') {
+        const [p, center] = constraint.points;
+        const a = knownPosition(p),
+          b = knownPosition(center);
+        const radius = knownRadius(constraint.curve, constraint.index);
+        if (a && b && radius !== undefined) {
+          checkConstant(Math.hypot(a[0] - b[0], a[1] - b[1]), radius, tag);
+          return;
+        }
+        gcs.add_constraint_p2p_distance(
+          nativePoints[p],
+          nativePoints[center],
+          (constraint.curve === 'circle' ? radiusIndices : arcRadiusIndices)[
+            constraint.index
+          ],
+          tag,
+          true,
+          1,
+        );
+      } else if (constraint.kind === 'pointOnLine') {
+        const [p, a, b] = constraint.points;
+        const known = constraint.points.map(knownPosition);
+        if (known.every(p => p !== undefined)) {
+          checkConstant(
+            pointLineDistance(known[0], known[1], known[2]),
+            0,
+            tag,
+          );
+          return;
+        }
+        gcs.add_constraint_point_on_line_ppp(
+          nativePoints[p],
+          nativePoints[a],
+          nativePoints[b],
+          tag,
+          true,
+          1,
         );
       } else if (constraint.kind === 'midpoint') {
         const [m, a, b] = constraint.points;
@@ -778,6 +827,18 @@ function residual(
   scale: number,
 ): number {
   switch (c.kind) {
+    case 'pointOnCircle': {
+      const [p, center] = c.points.map(i => positions[i]);
+      const radius = (c.curve === 'circle' ? radii : arcRadii)[c.index];
+      return (
+        Math.abs(Math.hypot(p[0] - center[0], p[1] - center[1]) - radius) /
+        scale
+      );
+    }
+    case 'pointOnLine': {
+      const [p, a, b] = c.points.map(i => positions[i]);
+      return pointLineDistance(p, a, b) / scale;
+    }
     case 'sweep': {
       const arc = arcs[c.index];
       const curve = sketchArcGeometry(

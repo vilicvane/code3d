@@ -220,8 +220,18 @@ The closest feasible mouse result takes priority over reference positions;
 references can yield and are never automatically fixed. None of this adds
 source constraints or reduces the reported model DOF. An unrestricted center
 rectangle translates when its center moves, without hidden editor metadata.
-Unconstrained movement needs
-no native kernel. During a drag, the editor uses the AST to lock each expression
+Points already on lines, circles or directed arcs at gesture start retain that relation:
+they can slide along the curve, and follow changes to endpoints, centers and radii. The editor
+uses model-space geometric tolerance, not pointer hit areas; lines crossed during
+a gesture do not become sticky. Curves keep their IDs and types, without
+splitting or adding author constraints. Lines and arcs retain their finite bounds;
+CW/CCW arcs never include their missing circular portion. An unrestricted center
+move translates its followers, while radius gestures prefer their existing polar
+directions. Read-only upstream curves can guide local
+points. Source replay checks that these gesture-only connections remain satisfied.
+This does not create intersection points or persist curve parameters.
+Movement without authored or inferred equations needs no native kernel;
+point-on-curve dragging uses the Worker solver. During a drag, the editor uses the AST to lock each expression
 coordinate to its evaluated author value: `[width, 0]` locks X but allows Y to move.
 These numeric locks apply to all local points, not just the dragged point, and do
 not become permanent constraints or change normal evaluation. If imposing these
@@ -229,7 +239,7 @@ locks changes the displayed geometry, the solver satisfies them before preparing
 the rule context. Initially unsatisfied author data can therefore adjust on
 the first drag. Editable axes alone are written back; expressions never gain
 offsets. Frames retain a gesture-start reference alongside the preceding solution.
-Previews forward-solve the exact rounded data that recompilation uses.
+Previews forward-solve the exact, losslessly serialized data that recompilation uses.
 Deleting a point also deletes connected local lines and affected constraints. Upstream geometry stays
 locked but can supply endpoints for new lines. Coordinates using expressions
 remain editable in code, not by dragging; literal axes on the same point remain

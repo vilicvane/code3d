@@ -8,6 +8,7 @@ import {
   sketchEntityParameters,
   withSketchEntityParameters,
   sketchPointResolver,
+  assertSketchDragConnections,
 } from '@code3d/core/tooling';
 
 /** Evaluated author parameters, distinct from the constrained display. */
@@ -120,6 +121,10 @@ export function previewSketchDrag(
     ...layers.slice(0, -1),
     authored,
   ]);
+  assertSketchDragConnections(
+    [...layers.slice(0, -1), snapshot],
+    drag.reference ?? local,
+  );
   if (merge) {
     // Identity changes must not silently redefine fixed points or consume
     // expression-driven coordinates. Reject the entire transaction if needed.

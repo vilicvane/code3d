@@ -50,7 +50,21 @@ implementation context and historical outcomes, not a competing work queue.
   First solve for the closest feasible mouse target, then preserve that achieved
   value while optimizing soft references. No reference point is implicitly fixed;
   temporary objectives do not enter source or the reported model DOF.
-  Unconstrained movement is kernel-independent. Successive frames use the
+  A drag rule recognizes points on lines, circles and finite directed arcs from displayed
+  gesture-start geometry using the same model-space tolerance as trimming.
+  Temporary line/radial equations and finite endpoint bounds retain those connections
+  without splitting curves, merging identities or adding author constraints.
+  Interior points can slide; endpoints and followers have soft pose preferences.
+  Unrestricted center moves translate followers, radius gestures preserve their
+  polar directions, and polar drag seeds follow half turns without requiring a
+  local solver to choose the opposite branch. Arc bounds respect CW/CCW and do
+  not include the missing part of the circle. Curves crossed during a gesture
+  do not become sticky. Local points can slide on read-only upstream curves;
+  real constraints and AST locks remain
+  authoritative. Source replay independently checks every original incidence.
+  This does not generate intersection points or persist curve parameters.
+  Movement without authored or inferred equations is kernel-independent; inferred
+  curve connections use the Worker solver as well. Successive frames use the
   preceding solution and an immutable gesture-start reference; previews
   forward-solve the exact source data that
   will be committed. During dragging, AST-derived per-axis locks preserve each

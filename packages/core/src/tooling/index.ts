@@ -7,6 +7,8 @@ export {
   sketchDefinition,
   snapshotSketch,
   solveSketchSnapshot,
+  sketchDragRequiresSolver,
+  assertSketchDragConnections,
   sketchPointResolver,
   sketchEntityParameters,
   withSketchEntityParameters,

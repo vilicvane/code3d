@@ -4,6 +4,13 @@ import {
   type SketchSolveConstraint,
 } from './sketch-solver.js';
 import {solveSketchDrag} from './sketch-drag-rules.js';
+import {
+  sketchIncidences,
+  sketchIncidencePoints,
+  sketchIncidenceCurve,
+  isPointOnSketchCurve,
+  type SketchIncidenceGeometry,
+} from './sketch-incidence.js';
 
 /** Current coordinates in a sketch's local two-dimensional plane. */
 export type SketchPosition = readonly [x: number, y: number];
@@ -539,19 +546,7 @@ function snapshotConstraints(
   });
 }
 
-/** The same solver and snapshot contract serve evaluation and interactive dragging. */
-export function solveSketchSnapshot(
-  layers: readonly SketchSnapshot[],
-  drag?: Readonly<{
-    id: number;
-    position: SketchPosition;
-    /** Gesture-start geometry; previous-frame geometry remains the numeric seed. */
-    reference?: SketchSnapshot;
-    /** Numeric, gesture-only parameter locks; never author constraints. */
-    locks?: readonly Readonly<{id: number; parameter: number; value: number}>[];
-  }>,
-): SketchSnapshot {
-  const local = layers.at(-1)!;
+function sketchGeometry(layers: readonly SketchSnapshot[]) {
   const resolve = sketchPointResolver(layers);
   const points = layers.flatMap(layer =>
     layer.entities.flatMap(e =>
@@ -566,23 +561,107 @@ export function solveSketchSnapshot(
     if (index < 0) throw new Error(`Missing sketch point ${ref.id}.`);
     return index;
   };
+  const lines = layers.flatMap(layer =>
+    layer.entities
+      .filter(e => e.kind === 'line')
+      .map(e => [pointIndex(e.points[0]), pointIndex(e.points[1])] as const),
+  );
+  const circles = layers.flatMap(layer =>
+    layer.entities.flatMap(e =>
+      e.kind === 'circle' ? [{...e, layer: layer.id}] : [],
+    ),
+  );
+  const arcs = layers.flatMap(layer =>
+    layer.entities.flatMap(e =>
+      e.kind === 'arc' ? [{...e, layer: layer.id}] : [],
+    ),
+  );
+  const geometry: SketchIncidenceGeometry = {
+    points: points.map(p => p.position),
+    lines,
+    circles: circles.map(c => ({
+      center: pointIndex(c.center),
+      radius: c.radius,
+    })),
+    arcs: arcs.map(a => ({
+      center: pointIndex(a.center),
+      radius: a.radius,
+      points: [pointIndex(a.points[0]), pointIndex(a.points[1])],
+      direction: a.direction,
+    })),
+  };
+  return {points, pointIndex, lines, circles, arcs, geometry};
+}
+
+/** Includes gesture-only equations, not merely authored constraints. */
+export function sketchDragRequiresSolver(
+  layers: readonly SketchSnapshot[],
+): boolean {
+  const local = layers.at(-1)!;
+  if (
+    local.constraints.length ||
+    layers.some(layer => layer.entities.some(e => e.kind === 'arc'))
+  )
+    return true;
+  const {points, geometry} = sketchGeometry(layers);
+  return sketchIncidences(geometry).some(contact =>
+    sketchIncidencePoints(geometry, contact).some(
+      i => points[i].layer === local.id,
+    ),
+  );
+}
+
+/** Source replay must retain every gesture-start incidence, including aliases. */
+export function assertSketchDragConnections(
+  layers: readonly SketchSnapshot[],
+  reference: SketchSnapshot,
+): void {
+  const original = sketchGeometry([...layers.slice(0, -1), reference]);
+  const current = sketchGeometry(layers);
+  for (const contact of sketchIncidences(original.geometry)) {
+    const point =
+      current.points[current.pointIndex(original.points[contact.point])]
+        .position;
+    if (
+      !isPointOnSketchCurve(
+        point,
+        sketchIncidenceCurve(current.geometry, contact),
+      )
+    )
+      throw new Error(
+        'The source replay could not retain a point on its curve. No changes were applied.',
+      );
+  }
+}
+
+/** The same solver and snapshot contract serve evaluation and interactive dragging. */
+export function solveSketchSnapshot(
+  layers: readonly SketchSnapshot[],
+  drag?: Readonly<{
+    id: number;
+    position: SketchPosition;
+    /** Gesture-start geometry; previous-frame geometry remains the numeric seed. */
+    reference?: SketchSnapshot;
+    /** Numeric, gesture-only parameter locks; never author constraints. */
+    locks?: readonly Readonly<{id: number; parameter: number; value: number}>[];
+  }>,
+): SketchSnapshot {
+  const local = layers.at(-1)!;
+  const {points, pointIndex, lines, circles, arcs, geometry} =
+    sketchGeometry(layers);
   const linePoints = (id: number): readonly [number, number] => {
     const line = local.entities.find(e => e.kind === 'line' && e.id === id) as
       SketchLineSnapshot | undefined;
     if (!line) throw new Error(`Missing sketch line ${id}.`);
     return [pointIndex(line.points[0]), pointIndex(line.points[1])];
   };
-  const circles = layers.flatMap(layer =>
-    layer.entities.flatMap(e =>
-      e.kind === 'circle' ? [{...e, layer: layer.id}] : [],
-    ),
-  );
   const circleIndex = (id: number) => {
     const index = circles.findIndex(c => c.id === id && c.layer === local.id);
     if (index < 0) throw new Error(`Missing sketch circle ${id}.`);
     return index;
   };
-  const arcs = local.entities.filter(e => e.kind === 'arc');
+  const arcIndex = (id: number) =>
+    arcs.findIndex(a => a.id === id && a.layer === local.id);
   const constraints = local.constraints.map<SketchSolveConstraint>(
     ([kind, data]) => {
       switch (kind) {
@@ -611,11 +690,11 @@ export function solveSketchSnapshot(
         case 'angle':
           return {kind, points: linePoints(data[0]), value: data[1]};
         case 'radius':
-          return arcs.some(a => a.id === data[0])
+          return arcIndex(data[0]) >= 0
             ? {
                 kind,
                 curve: 'arc',
-                index: arcs.findIndex(a => a.id === data[0]),
+                index: arcIndex(data[0]),
                 value: data[1],
               }
             : {
@@ -627,7 +706,7 @@ export function solveSketchSnapshot(
         case 'sweep':
           return {
             kind,
-            index: arcs.findIndex(a => a.id === data[0]),
+            index: arcIndex(data[0]),
             value: data[1],
           };
       }
@@ -649,9 +728,7 @@ export function solveSketchSnapshot(
           }
       return {position, locked};
     }),
-    lines: local.entities
-      .filter(e => e.kind === 'line')
-      .map(e => [pointIndex(e.points[0]), pointIndex(e.points[1])]),
+    lines,
     circles: circles.map(c => {
       const upstream = c.layer !== local.id;
       const lock = !upstream && drag?.locks?.find(lock => lock.id === c.id);
@@ -662,11 +739,12 @@ export function solveSketchSnapshot(
       };
     }),
     arcs: arcs.map(a => {
-      const lock = drag?.locks?.find(lock => lock.id === a.id);
+      const upstream = a.layer !== local.id;
+      const lock = !upstream && drag?.locks?.find(lock => lock.id === a.id);
       return {
         center: pointIndex(a.center),
         radius: lock ? lock.value : a.radius,
-        locked: !!lock,
+        locked: upstream || !!lock,
         points: [pointIndex(a.points[0]), pointIndex(a.points[1])],
         direction: a.direction,
       };
@@ -684,7 +762,7 @@ export function solveSketchSnapshot(
           index:
             target.kind === 'circle'
               ? circleIndex(target.id)
-              : arcs.findIndex(a => a.id === target.id),
+              : arcIndex(target.id),
           value: Math.hypot(
             ...drag.position.map(
               (v, axis) => v - points[pointIndex(target.center)].position[axis],
@@ -735,15 +813,24 @@ export function solveSketchSnapshot(
             : c;
         }),
         arcs: prepared.arcs.map((a, index) => {
-          const entity = referenceEntities.get(arcs[index].id);
-          return !a.locked && entity?.kind === 'arc'
+          const entity =
+            arcs[index].layer === local.id &&
+            referenceEntities.get(arcs[index].id);
+          return !a.locked && entity && entity.kind === 'arc'
             ? {...a, radius: entity.radius}
             : a;
         }),
       })
     : prepared;
   const result = objective
-    ? solveSketchDrag(prepared, objective, reference)
+    ? solveSketchDrag(
+        prepared,
+        objective,
+        reference,
+        drag?.reference
+          ? sketchGeometry([...layers.slice(0, -1), drag.reference]).geometry
+          : geometry,
+      )
     : solveSketchProblem(prepared);
   const entities = local.entities.map(e =>
     e.kind === 'point'
@@ -754,7 +841,7 @@ export function solveSketchSnapshot(
       : e.kind === 'circle'
         ? {...e, radius: result.radii[circleIndex(e.id)]}
         : e.kind === 'arc'
-          ? {...e, radius: result.arcRadii[arcs.findIndex(a => a.id === e.id)]}
+          ? {...e, radius: result.arcRadii[arcIndex(e.id)]}
           : e,
   );
   for (const entity of entities) {

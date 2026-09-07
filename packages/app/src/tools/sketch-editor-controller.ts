@@ -7,6 +7,7 @@ import type {
 } from '@code3d/core/tooling';
 import {
   solveSketchSnapshot,
+  sketchDragRequiresSolver,
   withSketchEntityParameters,
 } from '@code3d/core/tooling';
 import {
@@ -166,11 +167,13 @@ export class SketchEditorController {
     };
     // The zero-equation case is kernel-independent. Use the same numeric and
     // source-replay logic without waiting for the preceding edit's compilation.
-    const solved =
-      layers.at(-1)!.constraints.length ||
-      layers.at(-1)!.entities.some(e => e.kind === 'arc')
-        ? await this.host.solve(layers, drag)
-        : previewSketchDrag({solveSketchSnapshot}, layers, drag);
+    const solved = sketchDragRequiresSolver(
+      previous?.reference
+        ? [...layers.slice(0, -1), previous.reference]
+        : layers,
+    )
+      ? await this.host.solve(layers, drag)
+      : previewSketchDrag({solveSketchSnapshot}, layers, drag);
     if (revision !== this.revision)
       throw new Error('The sketch changed during this gesture.');
     return solved;
