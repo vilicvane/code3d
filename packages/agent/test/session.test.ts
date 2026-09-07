@@ -6,8 +6,6 @@ import {
   AgentEndpoint,
   AgentError,
   createAgentConfig,
-  createHostIdentity,
-  sessionIdForToken,
   encodeBase64,
   maxMessageBytes,
   parseAgentConfig,
@@ -19,24 +17,16 @@ import {
   type StoredReceipt,
   type ReceiptJournal,
 } from '../bld/index.js';
-import {deferred, relay} from './relay.ts';
+import {deferred, transport} from './transport.ts';
 
 const settings = {
-  relay: 'https://relay.example',
+  port: 54321,
+  origin: 'https://app.code3d.test',
   sessionId: 'session',
   name: 'Local agent',
 };
 const read: AgentRequest = {operation: 'fs.read', path: '/model.ts'};
 const saved: AgentResponse = {ok: true, data: {status: 'saved', version: 'v2'}};
-
-test('App-generated host tokens derive routes without sharing hosting authority with agents', async () => {
-  const host = await createHostIdentity();
-  assert.equal(await sessionIdForToken(host.token), host.sessionId);
-  assert.notEqual(host.token, host.sessionId);
-  assert.notEqual(await sessionIdForToken(host.sessionId), host.sessionId);
-  const config = createAgentConfig({...settings, sessionId: host.sessionId});
-  assert.ok(!JSON.stringify(config).includes(host.token));
-});
 
 test('encrypted messages authenticate the agent, session, direction, request and payload', async () => {
   const config = createAgentConfig(settings);
@@ -145,15 +135,19 @@ test('revocation while request initialization awaits cannot execute the handler'
   await assert.rejects(() => pending, {code: 'session_closed'});
 });
 
-test('configuration never accepts remote plaintext transport or embeds credentials in URLs', () => {
+test('configuration accepts only a fixed loopback port and a trustworthy exact App origin', () => {
   const config = createAgentConfig(settings);
-  assert.equal('accessToken' in config, false);
-  for (const relay of [
+  for (const port of [0, 1023, 65536, 1.5, '54321'])
+    assert.throws(() => parseAgentConfig({...config, port}), {
+      code: 'invalid_config',
+    });
+  for (const origin of [
     'http://remote.example',
-    'https://user:secret@relay.example',
-    'https://relay.example?token=secret',
+    'https://app.code3d.test/',
+    'https://user:secret@app.code3d.test',
+    'https://app.code3d.test?token=secret',
   ])
-    assert.throws(() => parseAgentConfig({...config, relay}), {
+    assert.throws(() => parseAgentConfig({...config, origin}), {
       code: 'invalid_config',
     });
   assert.throws(
@@ -399,7 +393,7 @@ test('persistent receipts are committed before execution and failed storage prev
 
 test('HTTP transport separates agent identities and only carries ciphertext and routing credentials', async t => {
   let calls = 0;
-  const server = await relay(t, async () => {
+  const server = await transport(t, async () => {
     calls++;
     return saved;
   });
@@ -423,7 +417,7 @@ test('HTTP transport separates agent identities and only carries ciphertext and 
     ...alice,
     key: bob.key,
   });
-  await assert.rejects(() => impostor.request(read), {code: 'relay_error'});
+  await assert.rejects(() => impostor.request(read), {code: 'bridge_error'});
   assert.equal(calls, 2);
 });
 
@@ -431,7 +425,7 @@ test('a timed-out apply can be queried or retried without a second execution', a
   const started = deferred<void>();
   const finish = deferred<AgentResponse>();
   let calls = 0;
-  const server = await relay(t, async () => {
+  const server = await transport(t, async () => {
     calls++;
     started.resolve();
     return finish.promise;
@@ -465,7 +459,7 @@ test('a timed-out apply can be queried or retried without a second execution', a
 });
 
 test('client rejects a valid response belonging to another request', async t => {
-  const server = await relay(t, async () => saved);
+  const server = await transport(t, async () => saved);
   const config = await server.grant();
   const cipher = await AgentCipher.create(config);
   server.transform(() => cipher.seal('response', 'another-request', saved));

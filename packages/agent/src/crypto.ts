@@ -10,7 +10,7 @@ import {
 
 export const maxMessageBytes = 16 * 1024 * 1024;
 export const maxEnvelopeBytes = Math.ceil((maxMessageBytes * 4) / 3) + 1024;
-export type Direction = 'request' | 'response';
+export type Direction = 'request' | 'response' | 'bridge-proof' | 'app-proof';
 export type Envelope = Readonly<{
   version: 1;
   requestId: string;
@@ -78,11 +78,18 @@ export class AgentCipher {
         false,
         ['encrypt', 'decrypt'],
       );
-    const [request, response] = await Promise.all([
+    const [request, response, bridgeProof, appProof] = await Promise.all([
       derive('request'),
       derive('response'),
+      derive('bridge-proof'),
+      derive('app-proof'),
     ]);
-    return new AgentCipher(config, {request, response});
+    return new AgentCipher(config, {
+      request,
+      response,
+      'bridge-proof': bridgeProof,
+      'app-proof': appProof,
+    });
   }
 
   async seal(

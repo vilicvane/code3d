@@ -53,7 +53,7 @@ export class AgentClient {
     } catch {
       throw new AgentError(
         signal.aborted ? 'request_aborted' : 'transport_failed',
-        'Request result is unknown. Query the request ID before submitting another change.',
+        'Request result is unknown. Ensure the c3d MCP server is running and the App is connected. Query the request ID before submitting another change.',
       );
     }
     if (!response.ok) {
@@ -62,8 +62,8 @@ export class AgentClient {
         retryAfter && /^\d+$/.test(retryAfter) ? Number(retryAfter) : NaN;
       await response.body?.cancel();
       throw new AgentError(
-        'relay_error',
-        'Relay returned HTTP ' +
+        'bridge_error',
+        'Local bridge returned HTTP ' +
           response.status +
           '. The application result is not confirmed.' +
           (Number.isSafeInteger(seconds) && seconds >= 0
@@ -79,7 +79,7 @@ export class AgentClient {
       if (error instanceof AgentError) throw error;
       throw new AgentError(
         'invalid_response',
-        'Relay did not return a complete encrypted response.',
+        'Local bridge did not return a complete encrypted response.',
       );
     }
     const opened = await this.cipher.open('response', raw);

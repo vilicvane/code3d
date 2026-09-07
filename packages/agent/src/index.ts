@@ -1,8 +1,8 @@
 export {
   createAgentConfig,
-  createHostIdentity,
-  sessionIdForToken,
-  normalizeRelayUrl,
+  parsePort,
+  randomAgentPort,
+  connectionUrl,
   parseAgentConfig,
   requestUrl,
   type AgentConfig,
@@ -24,10 +24,10 @@ export {
   type EndpointOptions,
 } from './endpoint.js';
 export {
-  RelayHost,
+  LocalHost,
   type HostState,
-  type RelayHostOptions,
-} from './relay-host.js';
+  type LocalHostOptions,
+} from './local-host.js';
 export {
   parseApplyInput,
   parseRequest,
@@ -50,9 +50,9 @@ export {
   type RenderOutputOptions,
 } from './render-options.js';
 export {
-  parseRelayMessage,
-  parseHostMessage,
-  maxRelayMessageBytes,
-  type RelayMessage,
-  type HostMessage,
-} from './relay-protocol.js';
+  parseBridgeMessage,
+  parseAppMessage,
+  maxBridgeMessageBytes,
+  type BridgeMessage,
+  type AppMessage,
+} from './bridge-protocol.js';

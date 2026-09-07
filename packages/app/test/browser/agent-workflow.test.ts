@@ -8,7 +8,8 @@ import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {chromium} from 'playwright-core';
 import {AgentClient, type AgentConfig} from '@code3d/agent';
-import {createRelay} from '../../../relay/bld/server.js';
+import {createLocalBridge} from '../../../cli/bld/bridge.js';
+import {reserveLocalPort} from './local-port.ts';
 
 declare const window: Window & {
   agentTestEditor: import('../../src/editor.ts').CodeEditor;
@@ -21,12 +22,6 @@ for (const storage of ['browser', 'directory'] as const)
     {timeout: 180_000},
     async t => {
       assert.ok(process.env.CODE3D_TEST_URL);
-      const relay = createRelay();
-      relay.server.listen(0, '127.0.0.1');
-      await once(relay.server, 'listening');
-      t.after(() => relay.close());
-      const address = relay.server.address();
-      assert.ok(address && typeof address !== 'string');
       const browser = await chromium.connectOverCDP(
         process.env.CODE3D_CDP_URL ?? 'http://localhost:9222',
       );
@@ -78,11 +73,12 @@ for (const storage of ['browser', 'directory'] as const)
       }
       await page.goto(appUrl.href);
       await page.locator('#agents-button').click();
-      await page
-        .getByLabel('Relay URL')
-        .fill(`http://127.0.0.1:${address.port}`);
       const configs: AgentConfig[] = [];
       for (const name of ['Alice', 'Bob']) {
+        const lease = await reserveLocalPort(t);
+        await page
+          .getByLabel('Local port', {exact: true})
+          .fill(String(lease.port));
         await page.getByLabel('Agent name', {exact: true}).fill(name);
         await page
           .getByRole('button', {name: 'Add agent & copy prompt', exact: true})
@@ -99,16 +95,18 @@ for (const storage of ['browser', 'directory'] as const)
         assert.ok(
           prompt.includes('https://www.code3d.org/docs/reference/core/'),
         );
-        assert.ok(
-          prompt.includes('npx --yes @code3d/cli ./project.c3d.json context'),
-        );
+        assert.ok(prompt.includes('Call context with {}'));
         assert.ok(!prompt.includes('Pinned observation'));
         configs.push(
           JSON.parse(
             prompt.match(/```json\n([\s\S]*?)\n```/)![1],
           ) as AgentConfig,
         );
+        await lease.release();
+        const bridge = await createLocalBridge(configs.at(-1)!);
+        t.after(() => bridge.close());
       }
+      assert.notEqual(configs[0].port, configs[1].port);
       await page.locator('.agent-status[data-state="online"]').waitFor();
       await page
         .locator('.agent-row')
@@ -119,10 +117,8 @@ for (const storage of ['browser', 'directory'] as const)
         .getByLabel('Agent prompt', {exact: true})
         .inputValue();
       assert.ok(update.includes('https://www.code3d.org/docs/'));
-      assert.ok(
-        update.includes('npx --yes @code3d/cli ./project.c3d.json context'),
-      );
-      assert.ok(!update.includes(configs[0].key));
+      assert.ok(update.includes('Call context with {}'));
+      assert.ok(update.includes(configs[0].key));
       await page.getByRole('button', {name: 'Close', exact: true}).click();
       const directory = await mkdtemp(join(tmpdir(), 'c3d-browser-'));
       t.after(() => rm(directory, {recursive: true, force: true}));
@@ -454,7 +450,7 @@ for (const storage of ['browser', 'directory'] as const)
           AgentClient.create(configs[1]).then(client =>
             client.request({operation: 'fs.list', path: '/'}),
           ),
-        {code: 'relay_error'},
+        {code: 'bridge_error'},
       );
       await page.screenshot({path: '/tmp/code3d-agent-workflow-panel.png'});
       await page.reload();
@@ -496,7 +492,7 @@ for (const storage of ['browser', 'directory'] as const)
           AgentClient.create(configs[1]).then(client =>
             client.request({operation: 'fs.list', path: '/'}),
           ),
-        {code: 'relay_error'},
+        {code: 'bridge_error'},
       );
       const otherTab = await context.newPage();
       await otherTab.goto(page.url());
@@ -511,7 +507,7 @@ for (const storage of ['browser', 'directory'] as const)
       await otherTab.close();
       await page.locator('#agents-button').click();
       assert.equal(await page.locator('.agent-row').count(), 1);
-      await page.getByLabel('Relay connection', {exact: true}).click();
+      await page.getByLabel('Local agent connections', {exact: true}).click();
       await page
         .getByRole('button', {name: 'End session', exact: true})
         .click();
@@ -523,7 +519,7 @@ for (const storage of ['browser', 'directory'] as const)
           AgentClient.create(configs[0]).then(client =>
             client.request({operation: 'fs.list', path: '/'}),
           ),
-        {code: 'relay_error'},
+        {code: 'bridge_error'},
       );
       assert.deepEqual(errors, []);
     },

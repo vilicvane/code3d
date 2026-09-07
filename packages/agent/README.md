@@ -1,61 +1,73 @@
 # @code3d/agent
 
-Shared browser/Node protocol for Code3D App sessions and the `c3d` CLI. The App
-executes requests; a relay transports authenticated ciphertext. This package
-provides configuration, encryption, the HTTP client and an App-side endpoint.
-It does not itself implement project storage, model evaluation or a relay server.
+Shared browser/Node protocol for the Code3D App and local `c3d` MCP/CLI process.
+The App executes requests and owns all project data and receipts. This package
+provides configuration, encryption, the local HTTP client, reconnecting App
+WebSocket transport and per-agent request endpoint. The Node bridge and MCP
+adapter live in [@code3d/cli](../cli/README.md).
 
 ## Agent grants
 
-The App calls `createAgentConfig({relay, sessionId, name})` for each agent and
-hands the complete JSON configuration to that agent through a copied prompt:
+The App calls `createAgentConfig({port, origin, sessionId, name})` for each agent
+and hands the complete private configuration to it through a copied prompt:
 
 ```json
 {
-  "version": 1,
-  "relay": "https://relay.example",
-  "sessionId": "<base64url SHA-256 of the App host token>",
+  "version": 2,
+  "port": 54321,
+  "origin": "https://www.code3d.org",
+  "sessionId": "stable-project-session-id",
   "agentId": "stable-agent-id",
-  "name": "Modeling agent",
+  "name": "Euler",
   "key": "<32 random bytes as unpadded base64url>"
 }
 ```
 
-The agent saves this file wherever convenient. Each agent needs its own grant;
-separate CLI invocations reuse it. The App uses `createHostIdentity()` to generate
-a random host token and derive its SHA-256 session ID. Only the App knows the host
-token; agents receive the route ID and their own `key`. This key authenticates and
-encrypts content and **must never be registered with the relay**. Project
-contents, cursor expressions, arguments and response artifacts are all encrypted.
-Session IDs, agent IDs, request IDs, message sizes/timing and relay credentials
-are visible to the relay. HTTPS is required except for loopback development.
+Each agent has its own secret and local server port. Ports must be integers in
+1024–65535; suggestions use 49152–65535. The server binds only `127.0.0.1` on that
+exact port and never probes alternative ports. The App persists grants per
+project, including port, color, connection history and receipts. Opening the
+project restores connections without opening the panel. Changing a port keeps
+the identity and journal, closes the old socket/retry, and generates an updated
+prompt. Revoke deletes that grant/journal and stops retries; End session does
+so for every agent in the current project. Accepted changes continue saving.
 
-The App stores its host identity, per-agent grants and receipt journals in
-project-scoped IndexedDB. Opening the project restores the same credentials and
-connects to the relay automatically. Revoking an agent atomically removes its
-grant and journal, then closes its endpoint. Never reopen an existing grant with
-an empty journal.
-Closing an endpoint prevents further replies and requests; it does not roll back
-work already accepted by the App handler.
+IndexedDB version 3 migrates existing remote grants once: it retains session ID,
+agent ID, key, names, colors, lastSeen and receipt keys, assigns local ports and
+records the current App origin. Obsolete host tokens/relay addresses are removed.
+Agents need to copy the updated configuration and start a local MCP server; no
+remote fallback remains. Never reopen an existing grant with an empty journal.
 
-## Stateless routing
+## Local authentication and lifecycle
 
-`RelayHost` opens `<relay>/sessions/<sessionId>/host` as a WebSocket and sends the
-host token in its first frame, keeping it out of URL logs. The relay verifies its
-hash and pairs the connection with CLI HTTP requests. Routing frames carry an
-ephemeral transport ID, agent ID and opaque encrypted body. The transport ID only
-correlates a live HTTP response; application request IDs and receipts stay in the
-App. Reconnects reuse the same App endpoints; page reloads restore their durable journals.
+`LocalHost` opens `ws://127.0.0.1:<port>/sessions/<sessionId>/agents/<agentId>/app`.
+The Node service checks the exact Host, App Origin and path before upgrading.
+Each side contributes a fresh random challenge. The bridge encrypts both with
+its `bridge-proof` key, and the App responds with the same challenge pair using
+its separate `app-proof` key. Both verify freshness before becoming ready.
+Separate HKDF domains prevent reflection into either proof or request/response.
+Neither the secret nor source content appears in URLs or plaintext frames.
 
-The Node implementation lives in [@code3d/relay](../relay/README.md). It has no
-database, session registration API, agent authorization table or response cache.
+The authenticated App connection accepts encrypted requests and sends encrypted
+responses. Ephemeral transport IDs only correlate current HTTP responses; the
+stable operation IDs and receipts belong to the App. A service restart loses
+connections and pending waits, and the App reconnects using its original journal.
+Handshake authentication does not mark an agent as having interacted; its first
+valid operation does. The App retries with bounded exponential backoff until
+revoked, ended or the project is closed/switched away.
+
+Local HTTP operations reject any Origin header and require the exact loopback
+Host and configured grant path. Ciphertext is authenticated before forwarding.
+The local service has no project registration database, offline queue or receipt
+cache. Resource bounds cover messages, sockets, uploading requests, buffered
+bytes and pending responses; there are no public proxy or billing quotas.
 
 ## Wire contract
 
 The client posts an encrypted JSON envelope to:
 
 ```text
-POST <relay>/sessions/<sessionId>/agents/<agentId>/requests
+POST http://127.0.0.1:<port>/sessions/<sessionId>/agents/<agentId>/requests
 Content-Type: application/json
 ```
 
@@ -68,7 +80,7 @@ request ID. Plaintext JSON is limited to 16 MiB, including encoded artifacts.
 
 `AgentEndpoint.handle(envelope)` decrypts and validates a request, invokes its
 handler and encrypts the result. The App chooses the grant by agent ID and the
-endpoint authenticates its ciphertext. No agent registry exists in the relay.
+endpoint authenticates its ciphertext. The local service has exactly its configured grant.
 Multiple endpoints share the App's project service; that service
 owns version checks, batch preflight, serialization and persistence. The endpoint
 alone does not supply transactional file writes or model observation semantics.
@@ -215,8 +227,8 @@ observed response. Inspect current files before deciding on a new change.
 
 Run `npm test --workspace @code3d/agent` from the repository root. Tests include
 real loopback HTTP exchanges, tampering, cross-agent isolation, concurrent retries
-and recovering the result after a lost response. The relay tests additionally
-exercise real WebSockets, restart/reconnect and App-side revocation. App browser
+and recovering the result after a lost response. The CLI tests additionally
+exercise real MCP stdio, WebSockets, restart/reconnect and App-side revocation. App browser
 tests run the real CLI against both storage backends, render PNGs, page topology,
 verify temporary/JSDoc arguments and check independent cursors.
 

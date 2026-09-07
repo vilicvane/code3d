@@ -4,6 +4,7 @@ import {mkdir, mkdtemp, open, readFile, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {Command, CommanderError, InvalidArgumentError, Option} from 'commander';
+import {runMcp} from './mcp.js';
 import {
   AgentClient,
   AgentError,
@@ -25,6 +26,7 @@ const configFile =
 const program = new Command();
 let activeRequestId: string | undefined;
 let remoteResult: AgentResponse | undefined;
+let mcpMode = false;
 
 program
   .name('c3d')
@@ -53,6 +55,16 @@ program
   .showSuggestionAfterError(false)
   .exitOverride()
   .configureOutput({writeErr: () => {}});
+
+program
+  .command('mcp')
+  .description(
+    'Start an MCP stdio server and listen for the Code3D App on its configured loopback port',
+  )
+  .action(async () => {
+    mcpMode = true;
+    await runMcp(await configuration(), program.version()!);
+  });
 
 program
   .command('context')
@@ -168,26 +180,23 @@ try {
       error instanceof AgentError || error instanceof CommanderError
         ? error.message
         : 'CLI operation failed.';
-    emit({
+    const result = {
       ...(activeRequestId ? {requestId: activeRequestId} : {}),
       ok: false,
       error: {code, message},
       ...(remoteResult
         ? {remoteResult: withoutArtifactData(remoteResult)}
         : {}),
-    });
+    };
+    if (mcpMode) process.stderr.write(JSON.stringify(result) + '\n');
+    else emit(result);
     process.exitCode = activeRequestId ? 3 : 2;
   }
 }
 
 async function invoke(request: AgentRequest): Promise<void> {
   request = parseRequest(request);
-  if (!configFile)
-    throw new AgentError(
-      'invalid_config',
-      'Supply the App-provided JSON configuration as the first argument.',
-    );
-  const config = parseAgentConfig(await readJson(configFile, 64 * 1024));
+  const config = await configuration();
   const options = program.opts<Options>();
   const client = await AgentClient.create(config);
   activeRequestId = options.requestId ?? randomUUID();
@@ -199,6 +208,23 @@ async function invoke(request: AgentRequest): Promise<void> {
     timeoutMs: options.timeout,
   });
   remoteResult = response;
+  await outputResult(response, options);
+  process.exitCode = response.ok ? 0 : 1;
+}
+
+async function configuration() {
+  if (!configFile)
+    throw new AgentError(
+      'invalid_config',
+      'Supply the App-provided JSON configuration as the first argument.',
+    );
+  return parseAgentConfig(await readJson(configFile, 64 * 1024));
+}
+
+async function outputResult(
+  response: AgentResponse,
+  options: Options,
+): Promise<void> {
   if (!response.ok || !response.artifacts?.length) {
     emit({requestId: activeRequestId, ...response});
   } else {
@@ -231,7 +257,6 @@ async function invoke(request: AgentRequest): Promise<void> {
       artifacts,
     });
   }
-  process.exitCode = response.ok ? 0 : 1;
 }
 
 function withoutArtifactData(response: AgentResponse): unknown {

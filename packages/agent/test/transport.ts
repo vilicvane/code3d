@@ -9,8 +9,8 @@ import {
   type RequestHandler,
 } from '../bld/index.js';
 
-/** A loopback transport fixture; the production relay must never receive a content key. */
-export async function relay(t: TestContext, handler: RequestHandler) {
+/** An encrypted HTTP fixture for the transport-independent client and endpoint tests. */
+export async function transport(t: TestContext, handler: RequestHandler) {
   const received: {
     url: string | undefined;
     authorization: string | undefined;
@@ -71,7 +71,8 @@ export async function relay(t: TestContext, handler: RequestHandler) {
     },
     async grant(name = 'Agent'): Promise<AgentConfig> {
       const config = createAgentConfig({
-        relay: `http://127.0.0.1:${address.port}`,
+        port: address.port,
+        origin: 'https://app.code3d.test',
         sessionId: 'project-session',
         name,
       });

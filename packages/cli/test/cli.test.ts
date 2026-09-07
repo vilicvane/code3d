@@ -6,7 +6,7 @@ import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {test} from 'node:test';
 import {encodeBase64, type AgentRequest} from '@code3d/agent';
-import {relay} from '../../agent/test/relay.ts';
+import {transport} from '../../agent/test/transport.ts';
 
 const main = fileURLToPath(new URL('../bld/main.js', import.meta.url));
 async function run(args: string[], stdin = '') {
@@ -39,11 +39,25 @@ test('help documents config-first syntax without connecting', async () => {
   assert.equal(result.stderr, '');
 });
 
+test('MCP startup reports an occupied port on stderr without corrupting protocol stdout', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'c3d-test-'));
+  t.after(() => rm(directory, {recursive: true, force: true}));
+  const server = await transport(t, async () => ({ok: true, data: null}));
+  const config = await server.grant();
+  const path = join(directory, 'project.json');
+  await writeFile(path, JSON.stringify(config));
+  const result = await run([path, 'mcp']);
+  assert.equal(result.code, 2);
+  assert.equal(result.stdout, '');
+  assert.equal(JSON.parse(result.stderr).error.code, 'port_in_use');
+  assert.ok(!result.stderr.includes(config.key));
+});
+
 test('CLI reads remote files and submits full changes from stdin or a JSON file', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'c3d-test-'));
   t.after(() => rm(directory, {recursive: true, force: true}));
   const requests: AgentRequest[] = [];
-  const server = await relay(t, async request => {
+  const server = await transport(t, async request => {
     requests.push(request);
     return {
       ok: true,
@@ -117,7 +131,7 @@ test('CLI saves artifacts using safe generated names and reports paths instead o
   const directory = await mkdtemp(join(tmpdir(), 'c3d-test-'));
   t.after(() => rm(directory, {recursive: true, force: true}));
   const bytes = new Uint8Array([137, 80, 78, 71]);
-  const server = await relay(t, async () => ({
+  const server = await transport(t, async () => ({
     ok: true,
     data: {snapshot: 'v3'},
     artifacts: [
@@ -150,7 +164,7 @@ test('CLI saves artifacts using safe generated names and reports paths instead o
 test('application errors, invalid input, and missing transport have distinct exit codes', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'c3d-test-'));
   t.after(() => rm(directory, {recursive: true, force: true}));
-  const server = await relay(t, async () => ({
+  const server = await transport(t, async () => ({
     ok: false,
     error: {code: 'version_conflict', message: 'File changed.'},
   }));
@@ -180,5 +194,5 @@ test('application errors, invalid input, and missing transport have distinct exi
   ]);
   assert.equal(rejected.code, 3);
   assert.equal(JSON.parse(rejected.stdout).requestId, 'recover-this');
-  assert.equal(JSON.parse(rejected.stdout).error.code, 'relay_error');
+  assert.equal(JSON.parse(rejected.stdout).error.code, 'bridge_error');
 });

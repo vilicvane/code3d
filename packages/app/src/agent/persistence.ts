@@ -1,13 +1,17 @@
-import type {AgentConfig, ReceiptJournal, StoredReceipt} from '@code3d/agent';
+import {
+  randomAgentPort,
+  type AgentConfig,
+  type ReceiptJournal,
+  type StoredReceipt,
+} from '@code3d/agent';
 import {randomAgentColor} from './colors';
 
 export type PersistedAgentSession = {
-  relay: string;
-  identity: {token: string; sessionId: string};
+  sessionId: string;
   grants: {config: AgentConfig; color: number; lastSeen?: string}[];
 };
 
-/** One project owner per browser origin. The relay never stores this data. */
+/** One project owner per browser origin. Local servers never store this data. */
 export class AgentPersistence {
   private constructor(
     private readonly database: IDBDatabase,
@@ -25,7 +29,7 @@ export class AgentPersistence {
             throw new Error(
               'Agents are active in another tab for this project. Close that tab and reload this page to take over.',
             );
-          const request = indexedDB.open('code3d-agents-v1', 2);
+          const request = indexedDB.open('code3d-agents-v1', 3);
           request.onupgradeneeded = event => {
             if (event.oldVersion === 0) {
               request.result.createObjectStore('sessions');
@@ -38,9 +42,41 @@ export class AgentPersistence {
               cursor.onsuccess = () => {
                 const entry = cursor.result;
                 if (!entry) return;
-                const session = entry.value as PersistedAgentSession;
-                for (const grant of session.grants)
-                  grant.color = randomAgentColor();
+                const legacy = entry.value as {
+                  identity: {sessionId: string};
+                  grants: {
+                    config: Omit<AgentConfig, 'version' | 'port' | 'origin'> & {
+                      version: 1;
+                      relay: string;
+                    };
+                    color: number;
+                    lastSeen?: string;
+                  }[];
+                };
+                const ports: number[] = [];
+                const session: PersistedAgentSession = {
+                  sessionId: legacy.identity.sessionId,
+                  grants: legacy.grants.map(grant => {
+                    const port = randomAgentPort(ports);
+                    ports.push(port);
+                    const {
+                      relay: _relay,
+                      version: _version,
+                      ...identity
+                    } = grant.config;
+                    return {
+                      ...grant,
+                      color:
+                        event.oldVersion < 2 ? randomAgentColor() : grant.color,
+                      config: {
+                        ...identity,
+                        version: 2,
+                        port,
+                        origin: location.origin,
+                      },
+                    };
+                  }),
+                };
                 entry.update(session);
                 entry.continue();
               };

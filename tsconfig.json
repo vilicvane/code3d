@@ -2,7 +2,6 @@
   "references": [
     {"path": "packages/agent"},
     {"path": "packages/cli"},
-    {"path": "packages/relay"},
     {"path": "packages/core/src/library"},
     {"path": "packages/core/src/tooling"},
     {"path": "packages/core/src/node"},

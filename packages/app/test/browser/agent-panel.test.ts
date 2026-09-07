@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import {once} from 'node:events';
 import {test} from 'node:test';
 import {chromium, type ElementHandle, type Locator} from 'playwright-core';
 import {AgentClient, type AgentConfig} from '@code3d/agent';
-import {createRelay} from '../../../relay/bld/server.js';
+import {createLocalBridge} from '../../../cli/bld/bridge.js';
+import {reserveLocalPort} from './local-port.ts';
 
 declare const window: Window & {settleAgentCopy(): void};
 
@@ -12,12 +12,6 @@ test(
   {timeout: 60_000},
   async t => {
     assert.ok(process.env.CODE3D_TEST_URL);
-    const relay = createRelay();
-    relay.server.listen(0, '127.0.0.1');
-    await once(relay.server, 'listening');
-    t.after(() => relay.close());
-    const address = relay.server.address();
-    assert.ok(address && typeof address !== 'string');
     const browser = await chromium.connectOverCDP(
       process.env.CODE3D_CDP_URL ?? 'http://localhost:9222',
     );
@@ -78,11 +72,12 @@ test(
       await page.evaluate(() => document.documentElement.dataset.globalKeydown),
       undefined,
     );
-    await dialog
-      .getByLabel('Relay URL')
-      .fill(`http://127.0.0.1:${address.port}`);
     const configs: AgentConfig[] = [];
     for (const name of ['Euler', 'Gauss']) {
+      const lease = await reserveLocalPort(t);
+      await dialog
+        .getByLabel('Local port', {exact: true})
+        .fill(String(lease.port));
       await dialog.getByLabel('Agent name', {exact: true}).fill(name);
       await dialog
         .getByRole('button', {name: 'Add agent & copy prompt', exact: true})
@@ -92,6 +87,9 @@ test(
       configs.push(
         JSON.parse(text.match(/```json\n([\s\S]*?)\n```/)![1]) as AgentConfig,
       );
+      await lease.release();
+      const bridge = await createLocalBridge(configs.at(-1)!);
+      t.after(() => bridge.close());
       assert.equal(await dialog.locator('.agent-prompt').count(), 1);
       assert.notEqual(
         await dialog.getByLabel('Agent name', {exact: true}).inputValue(),
@@ -186,7 +184,7 @@ test(
     await row('Euler')
       .getByRole('button', {name: 'Copy update', exact: true})
       .click();
-    assert.ok(!(await prompt.inputValue()).includes(configs[0].key));
+    assert.ok((await prompt.inputValue()).includes(configs[0].key));
     await page.clock.install();
     const copied = row('Euler').getByText('Prompt copied.', {exact: true});
     const copy = row('Euler').getByRole('button', {
@@ -255,7 +253,9 @@ test(
       );
     }
     await checkFooter(dialog);
-    const connection = dialog.getByLabel('Relay connection', {exact: true});
+    const connection = dialog.getByLabel('Local agent connections', {
+      exact: true,
+    });
     const end = dialog.getByRole('button', {name: 'End session', exact: true});
     await connection.focus();
     await page.keyboard.press('Enter');
@@ -293,7 +293,7 @@ test(
         AgentClient.create(configs[1]).then(client =>
           client.request({operation: 'context'}),
         ),
-      {code: 'relay_error'},
+      {code: 'bridge_error'},
     );
     await dialog.getByRole('button', {name: 'Close', exact: true}).click();
     await page.setViewportSize({width: 1440, height: 1000});
@@ -329,7 +329,7 @@ test(
     await nav.waitFor();
     assert.equal(await nav.textContent(), 'Connect Agent');
     await assert.rejects(() => client.request({operation: 'context'}), {
-      code: 'relay_error',
+      code: 'bridge_error',
     });
     assert.deepEqual(errors, []);
   },

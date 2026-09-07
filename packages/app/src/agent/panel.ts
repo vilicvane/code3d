@@ -1,10 +1,10 @@
 import {
   AgentEndpoint,
   AgentError,
-  RelayHost,
+  LocalHost,
   createAgentConfig,
-  createHostIdentity,
-  normalizeRelayUrl,
+  parsePort,
+  randomAgentPort,
   type AgentConfig,
   type HostState,
 } from '@code3d/agent';
@@ -22,6 +22,8 @@ type Grant = {
   endpoint: AgentEndpoint;
   lastSeen?: string;
   busy: number;
+  host?: LocalHost;
+  state: HostState;
 };
 
 type AgentRow = {
@@ -33,7 +35,7 @@ type AgentRow = {
 
 export class AgentPanel {
   private readonly dialog = document.createElement('dialog');
-  private readonly relay = document.createElement('input');
+  private readonly port = document.createElement('input');
   private readonly name = document.createElement('input');
   private readonly prompt = document.createElement('textarea');
   private readonly promptSection = document.createElement('section');
@@ -60,9 +62,7 @@ export class AgentPanel {
   );
   private readonly grants = new Map<string, Grant>();
   private readonly rows = new Map<string, AgentRow>();
-  private host?: RelayHost;
-  private identity?: Awaited<ReturnType<typeof createHostIdentity>>;
-  private hostState: HostState = 'closed';
+  private sessionId?: string;
   private adding = false;
   private generation = 0;
   private displayedAgentId?: string;
@@ -89,13 +89,12 @@ export class AgentPanel {
     titleLine.className = 'agent-header-title';
     const title = document.createElement('h2');
     title.textContent = 'Connect Agent';
-    this.relay.type = 'url';
-    this.relay.required = true;
-    this.relay.value =
-      localStorage.getItem('code3d:agent-relay') ??
-      import.meta.env.VITE_AGENT_RELAY_URL ??
-      (import.meta.env.DEV ? 'http://127.0.0.1:3134' : '');
-    this.relay.placeholder = 'https://your-relay.example';
+    this.port.type = 'number';
+    this.port.required = true;
+    this.port.min = '1024';
+    this.port.max = '65535';
+    this.port.step = '1';
+    this.port.value = String(randomAgentPort());
     this.name.value = this.suggestName();
     this.name.maxLength = 64;
     this.prompt.rows = 12;
@@ -104,8 +103,8 @@ export class AgentPanel {
     this.status.className = 'agent-status';
     this.status.setAttribute('role', 'status');
     this.connection.className = 'agent-connection';
-    this.connectionToggle.setAttribute('aria-label', 'Relay connection');
-    this.connectionToggle.append(this.status, 'Relay');
+    this.connectionToggle.setAttribute('aria-label', 'Local agent connections');
+    this.connectionToggle.append(this.status, 'Local');
     const connectionMenu = document.createElement('div');
     connectionMenu.className = 'agent-connection-menu';
     this.connectionUrl.className = 'agent-connection-url';
@@ -120,8 +119,7 @@ export class AgentPanel {
     );
     this.connection.append(this.connectionToggle, connectionMenu);
     this.connection.addEventListener('toggle', () => {
-      this.connectionUrl.textContent = this.relay.value;
-      this.connectionUrl.title = this.relay.value;
+      this.connectionUrl.textContent = '127.0.0.1 · one local port per agent';
     });
     this.message.className = 'agent-message';
     this.message.setAttribute('role', 'status');
@@ -141,13 +139,13 @@ export class AgentPanel {
     const note = document.createElement('p');
     note.className = 'agent-note';
     note.textContent =
-      'Agents are saved for this project and reconnect automatically when you open it. Keep the page open while agents work. Revoke stops new requests while accepted changes finish saving.';
+      'Copy a prompt to your local agent to start its MCP server. Allow this site to connect to your local network when asked. This page keeps reconnecting until you revoke access or end the session. Keep it open while agents work.';
     titleLine.append(title, this.connection);
     heading.append(titleLine, note);
     const fields = document.createElement('fieldset');
     fields.append(
       field('Agent name', this.name),
-      field('Relay URL', this.relay),
+      field('Local port', this.port),
     );
     const promptActions = document.createElement('div');
     promptActions.className = 'agent-prompt-actions';
@@ -195,16 +193,22 @@ export class AgentPanel {
     if (!this.grants.size) this.open.textContent = 'Connect Agent';
     for (const grant of this.grants.values())
       this.open.append(agentBadge(grant));
-    this.relay.disabled = this.identity !== undefined;
     this.addButton.disabled = !this.available || this.adding;
     this.retry.hidden = !this.project.hasUnsaved;
-    this.status.dataset.state = this.hostState;
-    this.status.title = `${this.hostState === 'closed' ? 'No active session' : this.hostState === 'online' ? 'App connected to relay' : this.hostState === 'connecting' ? 'Connecting to relay…' : 'Relay offline · reconnecting…'}${this.project.hasUnsaved ? ' · Changes waiting to be saved' : ''}`;
+    const online = [...this.grants.values()].filter(
+      grant => grant.state === 'online',
+    ).length;
+    this.status.dataset.state = !this.grants.size
+      ? 'closed'
+      : online === this.grants.size
+        ? 'online'
+        : 'connecting';
+    this.status.title = `${!this.grants.size ? 'No active agents' : `${online} of ${this.grants.size} local agents connected${online < this.grants.size ? ' · retrying disconnected agents' : ''}`}${this.project.hasUnsaved ? ' · Changes waiting to be saved' : ''}`;
     this.status.setAttribute('aria-label', this.status.title);
     this.connectionToggle.title = this.status.title;
     this.connectionStatus.textContent = this.status.title;
-    this.connectionUrl.textContent = this.relay.value;
-    this.endSession.disabled = !this.identity;
+    this.connectionUrl.textContent = '127.0.0.1 · one local port per agent';
+    this.endSession.disabled = !this.grants.size;
     for (const [agentId, row] of this.rows) {
       if (this.grants.has(agentId)) continue;
       row.element.remove();
@@ -218,6 +222,10 @@ export class AgentPanel {
         this.rows.set(agentId, row);
         this.list.append(row.element);
       }
+      row.activity.title =
+        grant.state === 'online'
+          ? 'Connected to the local MCP server'
+          : 'Waiting for the local MCP server · retrying automatically';
       row.activity.textContent = grant.busy
         ? 'Working'
         : grant.lastSeen
@@ -255,6 +263,7 @@ export class AgentPanel {
     const revoke = button('Revoke', () =>
       this.run(async () => {
         await this.persist(grant.config.agentId);
+        grant.host?.close();
         grant.endpoint.close();
         this.grants.delete(grant.config.agentId);
         this.editor.removeAgentCursor(grant.config.agentId);
@@ -271,6 +280,21 @@ export class AgentPanel {
       button('Copy update', () => this.copyGrant(grant, false)),
       revoke,
     );
+    const port = document.createElement('input');
+    port.type = 'number';
+    port.min = '1024';
+    port.max = '65535';
+    port.step = '1';
+    port.value = String(grant.config.port);
+    port.className = 'agent-port-input';
+    port.setAttribute('aria-label', `${grant.config.name} port`);
+    port.addEventListener('change', () =>
+      this.run(() => this.updatePort(grant, port)),
+    );
+    const local = document.createElement('label');
+    local.className = 'agent-port';
+    local.append('Port', port);
+    actions.prepend(local);
     row.append(summary, actions);
     return {element: row, identity, activity, location};
   }
@@ -289,16 +313,12 @@ export class AgentPanel {
           throw new Error(
             'This page supports up to 16 agent grants. Revoke an unused grant first.',
           );
-        const relay = normalizeRelayUrl(this.relay.value);
-        if (!this.identity) {
-          const identity = await createHostIdentity();
-          if (generation !== this.generation) return;
-          this.identity = identity;
-          localStorage.setItem('code3d:agent-relay', relay);
-        }
+        const port = this.availablePort(Number(this.port.value));
+        this.sessionId ??= crypto.randomUUID();
         const config = createAgentConfig({
-          relay,
-          sessionId: this.identity.sessionId,
+          port,
+          origin: location.origin,
+          sessionId: this.sessionId,
           name,
         });
         const endpoint = await this.createEndpoint(config);
@@ -312,6 +332,7 @@ export class AgentPanel {
           endpoint,
           busy: 0,
           interacted: false,
+          state: 'closed',
         };
         this.grants.set(config.agentId, grant);
         try {
@@ -319,7 +340,7 @@ export class AgentPanel {
         } catch (error) {
           this.grants.delete(config.agentId);
           endpoint.close();
-          if (!this.host) this.identity = undefined;
+          if (!this.grants.size) this.sessionId = undefined;
           throw error;
         }
         if (generation !== this.generation) return;
@@ -329,7 +350,12 @@ export class AgentPanel {
           undefined,
           grant.color,
         );
-        if (!this.host) this.connect();
+        this.connect(grant);
+        this.port.value = String(
+          randomAgentPort(
+            [...this.grants.values()].map(grant => grant.config.port),
+          ),
+        );
         this.name.value = this.suggestName();
         await this.copy(config.agentId, agentPrompt(config, true));
       },
@@ -445,6 +471,7 @@ export class AgentPanel {
             lastSeen,
             busy: 0,
             interacted: false,
+            state: 'closed' as const,
           };
         }),
       );
@@ -452,8 +479,7 @@ export class AgentPanel {
         for (const grant of restored) grant.endpoint.close();
         return;
       }
-      this.identity = saved.identity;
-      this.relay.value = saved.relay;
+      this.sessionId = saved.sessionId;
       for (const grant of restored) {
         this.grants.set(grant.config.agentId, grant);
         this.editor.setAgentCursor(
@@ -465,7 +491,12 @@ export class AgentPanel {
       }
       if (this.name.value === suggestedName)
         this.name.value = this.suggestName();
-      this.connect();
+      for (const grant of this.grants.values()) this.connect(grant);
+      this.port.value = String(
+        randomAgentPort(
+          [...this.grants.values()].map(grant => grant.config.port),
+        ),
+      );
     }
     this.available = true;
   }
@@ -476,16 +507,53 @@ export class AgentPanel {
     );
   }
 
-  private connect(): void {
-    this.host = new RelayHost({
-      relay: this.relay.value,
-      ...this.identity!,
+  private availablePort(value: number, agentId?: string): number {
+    const port = parsePort(value);
+    if (
+      [...this.grants.values()].some(
+        grant => grant.config.agentId !== agentId && grant.config.port === port,
+      )
+    )
+      throw new Error(
+        'Another agent in this project uses that port. Choose a different port.',
+      );
+    return port;
+  }
+
+  private async updatePort(
+    grant: Grant,
+    input: HTMLInputElement,
+  ): Promise<void> {
+    if (!this.available) return;
+    const generation = this.generation;
+    const previous = grant.config;
+    try {
+      const port = this.availablePort(Number(input.value), previous.agentId);
+      if (port === previous.port) return;
+      grant.config = {...previous, port};
+      await this.persist();
+    } catch (error) {
+      grant.config = previous;
+      input.value = String(previous.port);
+      throw error;
+    }
+    if (generation !== this.generation) return;
+    grant.host?.close();
+    this.connect(grant);
+    await this.copy(grant.config.agentId, agentPrompt(grant.config, true));
+    this.message.textContent =
+      'Port saved. Give the updated prompt to your agent to restart its MCP server.';
+  }
+
+  private connect(grant: Grant): void {
+    grant.host = new LocalHost({
+      config: grant.config,
       stateChanged: state => {
-        this.hostState = state;
+        grant.state = state;
         this.refresh();
       },
-      handle: (agentId, envelope) => {
-        const pending = this.handle(agentId, envelope);
+      handle: envelope => {
+        const pending = this.handle(grant.config.agentId, envelope);
         this.inFlight.add(pending);
         void pending
           .finally(() => this.inFlight.delete(pending))
@@ -497,10 +565,9 @@ export class AgentPanel {
 
   private persist(excludeAgentId?: string): Promise<void> {
     return this.storage!.save(
-      this.identity
+      this.sessionId
         ? {
-            relay: this.relay.value,
-            identity: this.identity,
+            sessionId: this.sessionId,
             grants: [...this.grants.values()]
               .filter(grant => grant.config.agentId !== excludeAgentId)
               .map(({config, color, lastSeen}) => ({config, color, lastSeen})),
@@ -513,8 +580,10 @@ export class AgentPanel {
     this.clearPromptMessage();
     this.generation++;
     this.available = false;
-    this.host?.close();
-    for (const grant of this.grants.values()) grant.endpoint.close();
+    for (const grant of this.grants.values()) {
+      grant.host?.close();
+      grant.endpoint.close();
+    }
     void Promise.allSettled([...this.inFlight]).then(() =>
       this.storage?.close(),
     );
@@ -524,11 +593,9 @@ export class AgentPanel {
     await this.initialization;
     await this.storage!.save();
     this.generation++;
-    this.host?.close();
-    this.host = undefined;
-    this.identity = undefined;
-    this.hostState = 'closed';
+    this.sessionId = undefined;
     for (const grant of this.grants.values()) {
+      grant.host?.close();
       grant.endpoint.close();
       this.editor.removeAgentCursor(grant.config.agentId);
     }

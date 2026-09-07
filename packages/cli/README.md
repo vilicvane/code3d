@@ -1,22 +1,104 @@
 # @code3d/cli
 
-`c3d` is the Node.js 24+ command-line client for Code3D agent sessions. It reads
-and modifies the project through the App, using the shared encrypted protocol.
-It never writes local copies of the project's source files.
+`c3d` provides a local MCP server and command-line tools for Code3D, using Node.js
+24+. The browser App owns project files, version checks, saves, model execution
+and receipts. The local process bridges MCP/CLI requests to the open App through
+an authenticated, encrypted loopback connection. No public relay, account or
+server deployment is needed.
 
-Open **Agents** in the App, enter the relay address, and choose **Add agent & copy
-prompt**. Each agent receives its own configuration. The App handles browser
-storage and connected directories. The [stateless relay](../relay/README.md) runs
-as a separate Node service. The 0.0.0 package is an empty placeholder;
-the actual CLI is used through a local development link. Implementation and scope are tracked in
-[issue #50](https://github.com/vilicvane/code3d/issues/50).
+## Connect an agent
 
-## Usage
+1. Open **Connect Agent** in the App. Choose a name and local port, then **Add
+   agent & copy prompt**. A random port in 49152–65535 is suggested; each agent
+   has its own persisted port, identity and secret.
+2. Give the prompt to your local agent. It saves the complete private JSON
+   configuration wherever convenient and registers this stdio MCP command in
+   its client's supported configuration:
 
-Save the complete JSON configuration supplied by the App to a file of your
-choice. It contains a stable agent identity, relay route and content key;
-keep it private and give each agent its own configuration. There is no `connect`
-or configuration initialization command.
+   ```sh
+   npx --yes @code3d/cli /absolute/path/to/project.c3d.json mcp
+   ```
+
+   For clients with `mcpServers` configuration:
+
+   ```json
+   {
+     "mcpServers": {
+       "code3d-modeling": {
+         "command": "npx",
+         "args": [
+           "--yes",
+           "@code3d/cli",
+           "/absolute/path/to/project.c3d.json",
+           "mcp"
+         ]
+       }
+     }
+   }
+   ```
+
+3. The MCP client starts and manages the process. Allow the Code3D page's local
+   network permission if the browser asks. The App retries automatically before
+   the process starts, after a disconnect, and when the project is reopened.
+
+Register or reload MCP through the client's supported mechanism; starting a
+background process alone does not attach tools to an existing conversation.
+The MCP process exits on stdin EOF, SIGINT or SIGTERM and releases its listening
+port. Do not launch multiple instances for the same agent. A port conflict is
+reported as `port_in_use`; the service never silently chooses another port.
+
+To change an existing agent's port, edit its **Port** field in the App. The App
+persists it, closes the old connection/retry, and copies an updated prompt. Have
+the agent replace its saved configuration and restart the registered MCP server.
+Other agents continue independently. Revoke stops this grant's connections and
+requests; End session revokes all agents in the current project. Accepted file
+changes still finish saving. Switching projects disconnects the old project;
+returning to it restores its own grants and receipts.
+
+An HTTPS App connects to `ws://127.0.0.1:<port>` with its exact Origin. Current
+Chrome can require local-network permission; a denied permission prevents the
+connection before it reaches the process. Allow it in the site's permissions
+and the App's retry will connect. The browser and MCP process must share a
+reachable loopback interface. WSL/containers/remote SSH setups need their local
+port forwarding; an agent on another machine cannot use the browser's loopback.
+
+The registry's `0.0.0` package remains an empty placeholder. A real development
+CLI must be globally linked as described below; it is not yet published. The
+copied prompt uses the same unversioned npx command in both environments.
+
+## MCP tools
+
+| Tool      | Input                                                     | Purpose                                           |
+| --------- | --------------------------------------------------------- | ------------------------------------------------- |
+| `context` | `{}`                                                      | Read the current App file and user selection      |
+| `fs_list` | `{path}`                                                  | List a project directory                          |
+| `fs_read` | `{path}`                                                  | Read current content and file version             |
+| `fs_stat` | `{path}`                                                  | Read file/directory metadata                      |
+| `apply`   | `{requestId, files?, cursor?, render?, topology?, type?}` | Submit files and/or an independent agent cursor   |
+| `result`  | `{requestId}`                                             | Recover an earlier result without executing again |
+
+Start with `context`, then `fs_read` using `data.file`. Use its returned version
+for changes. To observe the user's selection, call `apply` with a new ID,
+`cursor: data.cursor`, `render: true` and `topology: true`.
+
+**Choose the apply requestId before calling the tool.** This required field
+allows recovery even when the MCP client times out, cancels or closes before it
+receives a result. Query `result` or retry identical input with the same ID;
+never create a fresh mutation merely because a response was lost. A cancellation
+ends the wait, not an already accepted file change.
+
+Tool content includes a JSON text result with `requestId`, `ok`, and `data` or
+`error`. Render artifacts are native MCP image content; other binary artifacts
+are embedded resources. JSON includes artifact names/MIME types, not duplicate
+binary payloads. Standard Base64 is used on MCP, while the App's encrypted wire
+contract uses base64url. Operation errors set MCP `isError: true` and retain the
+domain code and accepted/saved details. No project result is persisted locally.
+
+## Command-line operations
+
+While the MCP process is running and the App is connected, ordinary CLI calls
+use the same local bridge, identity and receipts. Save the complete App-provided
+configuration to a private file; there is no connect/init command.
 
 ```sh
 c3d project.json context
@@ -86,7 +168,7 @@ Temporary `cursor.arguments` values do not change static types.
 Model execution and topology no longer stop at 15 seconds. Editing source in
 the App or through `apply` terminates the previous compilation. An in-flight
 agent observation returns `observation_superseded` with its accepted/saved
-outcome, and new observations can proceed. The CLI and relay request deadlines
+outcome, and new observations can proceed. The CLI and local transport deadlines
 still apply; after transport timeout, query the request receipt or edit the
 source to replace a stuck model rather than resubmitting a mutation blindly.
 
@@ -110,7 +192,7 @@ interrupted. Help and version output are plain text. Exit codes are:
 | `2`  | Usage, configuration or input error before sending                       |
 | `3`  | Request outcome or local result handling failed; inspect the returned ID |
 
-Use `--timeout <ms>` to change the 120-second request deadline. A timeout or relay
+Use `--timeout <ms>` to change the 120-second request deadline. A timeout or transport
 error does **not** mean a change was rejected. Use `result <original-request-id>`
 or resubmit the same input with `--request-id <original-request-id>`; never assume
 it is safe to create another mutation merely because the response was lost.
@@ -184,5 +266,6 @@ minimal `c3d` entry that reports the CLI is not released and exits with status 1
 It contains no implementation or dependencies. A linked development CLI reports
 its own version instead. A fresh environment without the link will run the
 placeholder until an actual release is published; do not pin development commands
-to `@0.0.0` or `@latest`. CLI integration tests launch real processes against a
-loopback encrypted endpoint.
+to `@0.0.0` or `@latest`. Integration tests launch actual MCP stdio clients and CLI processes, authenticate
+real WebSockets, reject replay/reflection/foreign origins, and recover App
+receipts after the local process restarts.
