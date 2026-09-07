@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
 import type {SourceRef} from '@code3d/core/tooling';
-import type {AgentResponse, ApplyInput} from '@code3d/agent';
+import type {AgentCursor, AgentResponse, ApplyInput} from '@code3d/agent';
 import type {ProjectFileSystem} from '../src/project/filesystem.ts';
 import type {AgentProjectEditor} from '../src/agent/project-session.ts';
 import {createAppTestServer} from './vite-test-server.ts';
@@ -99,6 +99,8 @@ function fixture(
     async createDirectory() {},
   };
   const editor: AgentProjectEditor = {
+    currentFile: () => '/model.ts',
+    selectedSource: () => undefined,
     project: () => ({
       files: [...documents].map(([path, value]) => ({
         path,
@@ -147,6 +149,7 @@ function fixture(
     errors,
     failing,
     cursors,
+    editor,
     session,
     apply: (input: ApplyInput, agent = 'alice') =>
       session.handle(agent, agent, {operation: 'apply', input}),
@@ -182,6 +185,41 @@ function gate<T>() {
   });
   return {promise, resolve};
 }
+
+test('context reads the current user target without adopting it or modifying files', async () => {
+  const f = fixture({
+    observe: async () => {
+      throw new Error('Context must not evaluate models.');
+    },
+  });
+  const first = await f.session.handle('alice', 'Alice', {
+    operation: 'context',
+  });
+  assert.deepEqual(first, {
+    ok: true,
+    data: {file: '/model.ts', revision: 1, cursor: null},
+  });
+  f.cursors.set('alice', {file: '/model.ts', start: 6, end: 11});
+  const selection = {file: '/lib.ts', start: 13, end: 18};
+  f.editor.currentFile = () => '/lib.ts';
+  f.editor.selectedSource = () => selection;
+  const next = await f.session.handle('alice', 'Alice', {operation: 'context'});
+  assert.ok(next.ok);
+  const data = next.data as {file: string; cursor: AgentCursor};
+  assert.equal(data.file, '/lib.ts');
+  const resolved = resolveAgentCursor(
+    f.documents.get('/lib.ts')!.content,
+    data.cursor,
+  );
+  assert.equal(resolved.text, 'value');
+  assert.deepEqual(f.cursors.get('alice'), {
+    file: '/model.ts',
+    start: 6,
+    end: 11,
+  });
+  assert.deepEqual(f.editor.selectedSource(), selection);
+  assert.deepEqual(f.writes, []);
+});
 
 test('two agents sharing a file version cannot silently overwrite each other', async () => {
   const f = fixture();

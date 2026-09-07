@@ -95,6 +95,13 @@ for (const storage of ['browser', 'directory'] as const)
         const prompt = await page
           .getByLabel('Agent prompt', {exact: true})
           .inputValue();
+        assert.ok(
+          prompt.includes('https://www.code3d.org/docs/reference/core/'),
+        );
+        assert.ok(
+          prompt.includes('npx --yes @code3d/cli ./project.c3d.json context'),
+        );
+        assert.ok(!prompt.includes('Pinned observation'));
         configs.push(
           JSON.parse(
             prompt.match(/```json\n([\s\S]*?)\n```/)![1],
@@ -102,6 +109,19 @@ for (const storage of ['browser', 'directory'] as const)
         );
       }
       await page.getByText('App connected to relay', {exact: true}).waitFor();
+      await page
+        .locator('.agent-row')
+        .filter({hasText: 'Alice'})
+        .getByRole('button', {name: 'Copy update', exact: true})
+        .click();
+      const update = await page
+        .getByLabel('Agent prompt', {exact: true})
+        .inputValue();
+      assert.ok(update.includes('https://www.code3d.org/docs/'));
+      assert.ok(
+        update.includes('npx --yes @code3d/cli ./project.c3d.json context'),
+      );
+      assert.ok(!update.includes(configs[0].key));
       await page.getByRole('button', {name: 'Close', exact: true}).click();
       const directory = await mkdtemp(join(tmpdir(), 'c3d-browser-'));
       t.after(() => rm(directory, {recursive: true, force: true}));
@@ -157,13 +177,27 @@ for (const storage of ['browser', 'directory'] as const)
         },
       );
       assert.equal(first.code, 0, JSON.stringify(first.result));
-      await page.evaluate(
-        path => window.agentTestEditor.switchFile(path, true),
-        path,
-      );
+      await page.evaluate(path => {
+        const editor = window.agentTestEditor;
+        editor.switchFile(path, true);
+        const model = editor.editor.getModel()!;
+        const start = model.getValue().indexOf('fillet(0.5, [1])');
+        const from = model.getPositionAt(start);
+        const to = model.getPositionAt(start + 'fillet(0.5, [1])'.length);
+        editor.editor.setSelection({
+          startLineNumber: from.lineNumber,
+          startColumn: from.column,
+          endLineNumber: to.lineNumber,
+          endColumn: to.column,
+        });
+      }, path);
       const userCursor = await page.evaluate(() =>
         window.agentTestEditor.cursorSource(),
       );
+      const liveContext = await cli(0, ['context']);
+      assert.equal(liveContext.code, 0, JSON.stringify(liveContext.result));
+      assert.equal(liveContext.result.data.file, path);
+      assert.ok(liveContext.result.data.cursor);
       const read = await cli(0, ['fs', 'read', path]);
       assert.equal(read.result.data.content, source);
       const version = read.result.data.version;
@@ -172,8 +206,7 @@ for (const storage of ['browser', 'directory'] as const)
         ['apply', '--input', '-', '--render', '--topology'],
         {
           cursor: {
-            file: path,
-            regex: '(fillet\\(0.5, \\[1\\]\\))',
+            ...liveContext.result.data.cursor,
             arguments: '[width]',
           },
         },

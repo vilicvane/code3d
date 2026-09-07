@@ -18,8 +18,11 @@ import {
 } from '../project/project';
 import {inspectAgentCursor} from './cursor-resolver';
 import type {ResolvedAgentCursor} from './cursor';
+import {contextCursor} from './context';
 
 export interface AgentProjectEditor {
+  currentFile(): string;
+  selectedSource(): SourceRef | undefined;
   project(): ModelProject;
   fileState(path: string): {content: string; version: string} | undefined;
   applyFiles(files: readonly {path: string; content: string | null}[]): void;
@@ -128,6 +131,21 @@ export class AgentProjectSession {
     if (request.operation === 'result')
       throw new Error('Result queries belong to the session endpoint.');
     try {
+      if (request.operation === 'context')
+        return await this.enqueue(async () => {
+          const file = this.editor.currentFile();
+          const ref = this.editor.selectedSource();
+          return {
+            ok: true,
+            data: {
+              file,
+              revision: this.revision,
+              cursor: ref
+                ? contextCursor(this.editor.fileState(ref.file)!.content, ref)
+                : null,
+            },
+          };
+        });
       if (request.operation !== 'apply')
         return await this.enqueue(() =>
           this.read(request.operation, request.path),

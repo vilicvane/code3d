@@ -10,7 +10,7 @@ import {
 } from '@code3d/agent';
 import type {CodeEditor} from '../editor';
 import type {AgentProjectSession} from './project-session';
-import {agentPrompt, promptCursor} from './prompt';
+import {agentPrompt} from './prompt';
 import {AgentPersistence} from './persistence';
 
 type Grant = {
@@ -165,10 +165,6 @@ export class AgentPanel {
 
   private add(): void {
     if (this.adding) return;
-    const ref = this.editor.selectedSource();
-    const cursor = ref
-      ? promptCursor(this.editor.fileState(ref.file)!.content, ref)
-      : undefined;
     const task = this.task.value;
     const name = this.name.value.trim() || `Agent ${this.grants.size + 1}`;
     this.adding = true;
@@ -217,7 +213,7 @@ export class AgentPanel {
         this.name.value = `Agent ${this.grants.size + 1}`;
         this.refresh();
         this.displayedAgentId = config.agentId;
-        await this.copy(agentPrompt(config, true, task, cursor));
+        await this.copy(agentPrompt(config, true, task));
       },
       () => {
         this.adding = false;
@@ -245,11 +241,7 @@ export class AgentPanel {
   }
 
   private copyGrant(grant: Grant, initial: boolean): void {
-    const ref = this.editor.selectedSource();
-    const cursor = ref
-      ? promptCursor(this.editor.fileState(ref.file)!.content, ref)
-      : undefined;
-    const value = agentPrompt(grant.config, initial, this.task.value, cursor);
+    const value = agentPrompt(grant.config, initial, this.task.value);
     this.displayedAgentId = grant.config.agentId;
     this.run(() => this.copy(value));
   }

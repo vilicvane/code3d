@@ -109,6 +109,7 @@ function topologyOptions(value: unknown): boolean | TopologyOutputOptions {
 }
 
 export type AgentRequest =
+  | Readonly<{operation: 'context'}>
   | Readonly<{operation: 'fs.list' | 'fs.read' | 'fs.stat'; path: string}>
   | Readonly<{operation: 'apply'; input: ApplyInput}>
   | Readonly<{operation: 'result'; requestId: string}>;
@@ -240,6 +241,9 @@ export function parseRequest(value: unknown): AgentRequest {
     case 'fs.stat':
       object(value, ['operation', 'path'], 'File request');
       return {operation: request.operation, path: projectPath(request.path)};
+    case 'context':
+      object(value, ['operation'], 'Context request');
+      return {operation: 'context'};
     case 'apply':
       object(value, ['operation', 'input'], 'Apply request');
       return {operation: 'apply', input: parseApplyInput(request.input)};

@@ -77,11 +77,24 @@ Supported requests:
 
 | Operation | Fields      | Purpose                                           |
 | --------- | ----------- | ------------------------------------------------- |
+| `context` | none        | Read the current App file and user selection      |
 | `fs.list` | `path`      | List a project directory                          |
 | `fs.read` | `path`      | Read file content and its version                 |
 | `fs.stat` | `path`      | Inspect a project path                            |
 | `apply`   | `input`     | Submit a file batch, cursor and requested outputs |
 | `result`  | `requestId` | Query the original result without executing again |
+
+`context` returns `{file, revision, cursor}` for the current user editor state.
+The cursor is a one-capture regex and line range suitable for `apply`, or null
+when the editor has no selection. Reading context neither moves the user/agent
+cursor nor evaluates the model. Use `fs.read` on the returned file to obtain its
+source and modification version; supply the returned cursor explicitly to
+`apply` when adopting the user's target. Each new context invocation reads live
+state; retrying an old request ID still returns its original receipt.
+
+Copied initial and update prompts demonstrate this flow instead of embedding a
+source selection. Both link to the [Code3D documentation](https://www.code3d.org/docs/)
+and [Modeling API](https://www.code3d.org/docs/reference/core/).
 
 Project paths are absolute within the App project, such as `/model.ts`, and never
 refer to the CLI machine's project files. `apply.input` accepts:

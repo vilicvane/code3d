@@ -19,6 +19,7 @@ keep it private and give each agent its own configuration. There is no `connect`
 or configuration initialization command.
 
 ```sh
+c3d project.json context
 c3d project.json fs list /
 c3d project.json fs read /model.ts
 c3d project.json fs stat /model.ts
@@ -27,6 +28,15 @@ c3d project.json apply --input - --render --topology < inspection.json
 c3d project.json --request-id edit-42 apply --input changes.json
 c3d project.json result edit-42
 ```
+
+Start with `context` to get the App's current `data.file` and `data.cursor`.
+Read that file with `fs read`, then save `{cursor: <returned cursor>}` to a local
+inspection JSON and submit it with `apply --input ... --render --topology`.
+The context query does not move either cursor or run the model. Choose your own
+regex from the source when the current user target does not fit the task.
+
+For modeling APIs, use the [Code3D documentation](https://www.code3d.org/docs/)
+and [Modeling API reference](https://www.code3d.org/docs/reference/core/).
 
 `apply` takes JSON from `--input <file>` or `--input -` (stdin). Omitting input
 sends an empty apply. `--render` and `--topology` request observation outputs;

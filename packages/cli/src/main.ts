@@ -52,6 +52,15 @@ program
   .exitOverride()
   .configureOutput({writeErr: () => {}});
 
+program
+  .command('context')
+  .description(
+    'Read the App current file and user selection without moving cursors',
+  )
+  .action(async () => {
+    await invoke({operation: 'context'});
+  });
+
 const fs = program
   .command('fs')
   .description('Read the project filesystem owned by the App');

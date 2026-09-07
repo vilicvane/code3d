@@ -2,12 +2,12 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {createAppTestServer} from './vite-test-server.ts';
 
-test('copied prompts pin one capture even for repeated lines, special characters and empty selections', async t => {
+test('live context preserves one capture even for repeated lines, special characters and empty selections', async t => {
   const server = await createAppTestServer();
   t.after(() => server.close());
-  const {promptCursor} = await server.ssrLoadModule<
-    typeof import('../src/agent/prompt.ts')
-  >('/src/agent/prompt.ts');
+  const {contextCursor} = await server.ssrLoadModule<
+    typeof import('../src/agent/context.ts')
+  >('/src/agent/context.ts');
   const {resolveAgentCursor} = await server.ssrLoadModule<
     typeof import('../src/agent/cursor.ts')
   >('/src/agent/cursor.ts');
@@ -20,7 +20,7 @@ test('copied prompts pin one capture even for repeated lines, special characters
     [source.indexOf('const', 2), source.indexOf('/*')],
     [source.length, source.length],
   ]) {
-    const cursor = promptCursor(source, {file: '/model.ts', start, end});
+    const cursor = contextCursor(source, {file: '/model.ts', start, end});
     const resolved = resolveAgentCursor(source, cursor);
     assert.equal(resolved.start, start);
     assert.equal(resolved.end, end);
