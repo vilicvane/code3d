@@ -92,12 +92,35 @@ refer to the CLI machine's project files. `apply.input` accepts:
 ```
 
 All top-level input fields are optional. A file's `version: null` requires absence
-and creates it; `content: null` deletes an existing version. Rename is an atomic
-delete/create batch. No partial text patches or silent overwrites are implied.
-Cursor resolution and the exactly-one-capture rule are App preflight semantics;
-the protocol checks the payload shape. The inclusive line range addresses the
-post-change source. Arguments are a TypeScript array expression, not JSON values;
-omission falls back to JSDoc arguments and then ordinary execution context.
+and creates it; `content: null` deletes an existing version. Rename is represented
+as a delete/create batch with joint preflight; persistence failures must still
+report any partial disk changes. No partial text patches or silent overwrites
+are implied. The protocol checks the cursor payload shape; the App resolves it
+against the post-change source. Arguments are a TypeScript array expression, not
+JSON values; omission falls back to JSDoc arguments and then ordinary execution
+context.
+
+### App cursor preflight
+
+The App's `inspectAgentCursor(source, cursor, signal?)` resolves exactly one
+capturing group in exactly one full regex match. Empty captures are carets;
+captures that did not participate in the match are errors. Noncapturing groups,
+named captures and lookarounds use JavaScript regex semantics. Overlapping full
+matches count toward ambiguity as well.
+
+`lines: [first, last]` uses 1-based inclusive line numbers, excluding the final
+line's terminator. The full match and captured selection must lie in that range.
+The range filters positions in the original source, so anchors and lookarounds
+retain full-file context. Flags default to `u`; optional `i`, `m`, `s`, `u` or `v`
+are accepted, while search and capture-index flags are managed by the App.
+Returned offsets use UTF-16 with exclusive ends, alongside 1-based Monaco
+positions and the selected text.
+
+The resolver runs in a disposable Web Worker with a one-second deadline and
+cancellation. A slow regex fails preflight without blocking the editor. The
+caller supplies the proposed source and must reject the file batch if this
+check fails, then recheck versions after asynchronous preflight. This stage
+provides the resolver; it does not yet connect App file commits or decorations.
 
 Responses are `{ok: true, data, artifacts?}` or
 `{ok: false, error: {code, message, details?}}`. Artifact fields are `name`,
