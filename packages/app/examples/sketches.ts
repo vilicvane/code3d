@@ -2,6 +2,24 @@ import {sketch} from '@code3d/core';
 
 const width = 30;
 
+// Arc references center/start/end, with explicit direction (ccw or cw).
+// Drag either endpoint through 180 degrees; the radius constraint stays true.
+// Arc tool: center, start/radius, end; R reverses the preview direction.
+export const arcs = sketch(
+  [
+    ['point', 1, [0, 0]],
+    ['point', 2, [15, 0]],
+    ['point', 3, [0, 15]],
+    ['arc', 4, [1, 2, 3, 'ccw']],
+  ],
+  {
+    constraints: [
+      ['fixed', 1],
+      ['radius', [4, 15]],
+    ],
+  },
+);
+
 // Circle uses an ordinary center point and a current radius. Drag its edge to
 // resize, or its center to move it. Entering a radius in the drawing tool adds
 // a separate radius constraint, just like the constrained concentric circle.

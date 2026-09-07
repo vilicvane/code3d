@@ -5,6 +5,7 @@ import type {
   SketchSnapshot,
 } from '@code3d/core/tooling';
 import {sameSketchPoint, type SketchPoint} from './sketch-snap';
+import {sketchCurveGeometry, sketchCurvePosition} from '@code3d/core/tooling';
 
 export type SketchConstraintDisplay = Readonly<{
   /** Evaluation-local display identity, never an authored constraint ID. */
@@ -55,17 +56,17 @@ export function sketchConstraintDisplays(
           break;
         case 'radius': {
           const circle = layer.entities
-            .filter(e => e.kind === 'circle')
+            .filter(e => e.kind === 'circle' || e.kind === 'arc')
             .find(e => e.id === data[0])!;
           const center = point(circle.center);
           related = [center];
           curve = {layer: layer.id, id: circle.id};
-          radiusAnchor = [
-            center.position[0] + circle.radius / Math.SQRT2,
-            center.position[1] + circle.radius / Math.SQRT2,
-          ];
+          radiusAnchor = sketchCurvePosition(
+            sketchCurveGeometry(circle, ref => point(ref).position),
+            circle.kind === 'circle' ? 1 / 8 : 1 / 2,
+          );
           label = `R${number(data[1])}`;
-          title = `Radius ${data[1]} · circle ${circle.id}`;
+          title = `Radius ${data[1]} · ${circle.kind} ${circle.id}`;
           break;
         }
         case 'horizontal':

@@ -3,9 +3,20 @@ import type {
   SketchPosition,
   SketchSnapshot,
   SketchLineSnapshot,
+  SketchEntitySnapshot,
+} from '@code3d/core/tooling';
+import {
+  sketchCurveGeometry,
+  sketchCurveClosestParameter,
+  sketchCurvePosition,
+  sketchCurveTolerance,
 } from '@code3d/core/tooling';
 import {formatSourceNumber} from './source-expression';
-import type {SketchChange, SketchDraftEntry} from './sketch-source';
+import {
+  sketchDraftEntity,
+  type SketchChange,
+  type SketchDraftEntry,
+} from './sketch-source';
 import {
   endpointPosition,
   sameSketchPoint,
@@ -172,56 +183,40 @@ function disconnectedPoints(
       kind === 'point' ? [{kind, id, position, layer: local.id}] : [],
     ),
   );
-  const removedConnections = local.entities.flatMap<
-    readonly SketchPointAddress[]
-  >(e =>
-    removed.includes(e.id)
-      ? e.kind === 'line'
-        ? [e.points]
-        : e.kind === 'circle'
-          ? [[e.center]]
-          : []
-      : [],
-  );
+  const removedConnections = local.entities.filter(e => removed.includes(e.id));
   const connections = layers.flatMap(layer =>
-    layer.entities.flatMap<readonly SketchPointAddress[]>(e =>
-      !(layer.id === local.id && removed.includes(e.id))
-        ? e.kind === 'line'
-          ? [e.points]
-          : e.kind === 'circle'
-            ? [[e.center]]
-            : []
-        : [],
+    layer.entities.filter(
+      e => !(layer.id === local.id && removed.includes(e.id)),
     ),
   );
-  connections.push(
-    ...entries.flatMap<readonly SketchPointAddress[]>(([kind, , data]) =>
-      kind === 'line' ? [data] : kind === 'circle' ? [[data[0]]] : [],
-    ),
-  );
+  connections.push(...entries.map(sketchDraftEntity));
   const connected = (
     point: SketchPoint,
-    connections: readonly (readonly SketchPointAddress[])[],
+    connections: readonly SketchEntitySnapshot[],
   ) =>
-    connections.some(refs => {
-      // Authored references also count for collapsed lines. Geometric
-      // connections count at T junctions before source is explicitly split.
+    connections.some(entity => {
+      const refs =
+        entity.kind === 'line'
+          ? entity.points
+          : entity.kind === 'circle'
+            ? [entity.center]
+            : entity.kind === 'arc'
+              ? [entity.center, ...entity.points]
+              : [];
       if (refs.some(ref => sameSketchPoint(ref, point))) return true;
-      if (refs.length !== 2) return false;
-      const [a, b] = refs.map(
+      const curve = sketchCurveGeometry(
+        entity,
         ref => points.find(p => sameSketchPoint(p, ref))!.position,
       );
-      const vector = subtract(b, a),
-        length = Math.hypot(...vector);
-      const tolerance = lineTolerance(a, b, length);
-      if (!length) return sketchDistance(point.position, a) <= tolerance;
-      const unit: SketchPosition = [vector[0] / length, vector[1] / length];
-      const delta = subtract(point.position, a),
-        along = dot(delta, unit);
       return (
-        along >= -tolerance &&
-        along <= length + tolerance &&
-        Math.abs(cross(unit, delta)) <= tolerance
+        !!curve &&
+        sketchDistance(
+          point.position,
+          sketchCurvePosition(
+            curve,
+            sketchCurveClosestParameter(curve, point.position),
+          ),
+        ) <= sketchCurveTolerance(curve)
       );
     });
   return points
@@ -281,7 +276,9 @@ export function deleteSketchEntity(
         ? e.points
         : e.kind === 'circle'
           ? [e.center]
-          : []
+          : e.kind === 'arc'
+            ? [e.center, ...e.points]
+            : []
       ).some(p => p.layer === local.id && p.id === id)
         ? [e.id]
         : [],

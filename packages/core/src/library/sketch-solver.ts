@@ -3,7 +3,12 @@ import type {SketchPosition} from './sketch.js';
 
 /** Evaluation-local numeric indices, never author entity or constraint IDs. */
 export type SketchSolveConstraint =
-  | Readonly<{kind: 'radius'; circle: number; value: number}>
+  | Readonly<{
+      kind: 'radius';
+      curve: 'circle' | 'arc';
+      index: number;
+      value: number;
+    }>
   | Readonly<{kind: 'fixed'; point: number; position: SketchPosition}>
   | Readonly<{kind: 'x' | 'y'; point: number; value: number}>
   | Readonly<{kind: 'midpoint'; points: readonly [number, number, number]}>
@@ -26,6 +31,10 @@ export type SketchSolveProblem = Readonly<{
     center: number;
     radius: number;
     locked: boolean;
+  }>[];
+  arcs: readonly Readonly<{
+    center: number;
+    points: readonly [number, number];
   }>[];
   constraints: readonly SketchSolveConstraint[];
 }>;
@@ -83,7 +92,7 @@ export function solveSketchProblem(
   if (!points.length)
     return {positions: [], radii: [], degreesOfFreedom: 0, redundant: []};
   // Unconstrained values and edits do not need a native modeling kernel.
-  if (!constraints.length)
+  if (!constraints.length && !problem.arcs.length)
     return {
       positions: points.map((p, index) =>
         drag?.kind === 'point' && drag.point === index
@@ -146,6 +155,43 @@ export function solveSketchProblem(
       geometries.push(geometry);
       return geometry;
     });
+    const arcRadiusIndices: number[] = [];
+    const nativeArcs = problem.arcs.map(arc => {
+      const center = points[arc.center].position;
+      const [start, end] = arc.points.map(i => points[i].position);
+      const radius = Math.hypot(start[0] - center[0], start[1] - center[1]);
+      if (
+        radius === 0 ||
+        Math.hypot(end[0] - center[0], end[1] - center[1]) === 0 ||
+        Math.hypot(end[0] - start[0], end[1] - start[1]) === 0
+      )
+        throw new Error(
+          'Sketch arcs require a nonzero radius and distinct endpoints; use circle for a full circle.',
+        );
+      const angles = [start, end].map(p =>
+        gcs.push_p_param(Math.atan2(p[1] - center[1], p[0] - center[0]), false),
+      );
+      const radiusIndex = gcs.push_p_param(radius / scale, false);
+      arcRadiusIndices.push(radiusIndex);
+      const [cx, cy] = indices[arc.center],
+        [sx, sy] = indices[arc.points[0]],
+        [ex, ey] = indices[arc.points[1]];
+      const geometry = gcs.make_arc(
+        cx,
+        cy,
+        sx,
+        sy,
+        ex,
+        ey,
+        angles[0],
+        angles[1],
+        radiusIndex,
+      );
+      geometries.push(geometry);
+      // Structural equations, not authored constraints or persistent angles.
+      gcs.add_constraint_arc_rules(geometry, 0, true, 1);
+      return geometry;
+    });
     const constant = (value: number) => gcs.push_p_param(value, true);
     const constantTags = new Set<number>();
     const activeTags = new Set<number>();
@@ -187,17 +233,29 @@ export function solveSketchProblem(
     constraints.forEach((constraint, index) => {
       const tag = index + 1;
       if (constraint.kind === 'radius') {
-        const circle = problem.circles[constraint.circle];
-        if (circle.locked) checkConstant(circle.radius, constraint.value, tag);
+        const circle =
+          constraint.curve === 'circle'
+            ? problem.circles[constraint.index]
+            : undefined;
+        if (circle?.locked) checkConstant(circle.radius, constraint.value, tag);
         else {
           activeTags.add(tag);
-          gcs.add_constraint_circle_radius(
-            nativeCircles[constraint.circle],
+          const args = [
             constant(constraint.value / scale),
             tag,
             true,
             1,
-          );
+          ] as const;
+          if (constraint.curve === 'arc')
+            gcs.add_constraint_arc_radius(
+              nativeArcs[constraint.index],
+              ...args,
+            );
+          else
+            gcs.add_constraint_circle_radius(
+              nativeCircles[constraint.index],
+              ...args,
+            );
         }
       } else if (constraint.kind === 'fixed') {
         coordinate(constraint.point, 0, constraint.position[0], tag);
@@ -310,9 +368,13 @@ export function solveSketchProblem(
         ? problem.circles[i].radius
         : gcs.get_p_param(index) * scale,
     );
+    const arcRadii = arcRadiusIndices.map(
+      index => gcs.get_p_param(index) * scale,
+    );
     if (
       !positions.every(p => p.every(Number.isFinite)) ||
-      !radii.every(Number.isFinite)
+      !radii.every(Number.isFinite) ||
+      !arcRadii.every(Number.isFinite)
     )
       throw new SketchConstraintError(
         [],
@@ -323,8 +385,29 @@ export function solveSketchProblem(
     // Success nor Converged alone is our acceptance criterion: verify all hard
     // equations independently, in normalized geometry units.
     const unsatisfied = constraints.flatMap((c, i) =>
-      residual(c, positions, radii, scale) <= 1e-7 ? [] : [i],
+      residual(c, positions, radii, arcRadii, scale) <= 1e-7 ? [] : [i],
     );
+    for (const [i, arc] of problem.arcs.entries()) {
+      const center = positions[arc.center];
+      if (
+        arcRadii[i] <= 0 ||
+        arc.points.some(
+          point =>
+            Math.abs(
+              Math.hypot(
+                positions[point][0] - center[0],
+                positions[point][1] - center[1],
+              ) - arcRadii[i],
+            ) /
+              scale >
+            1e-7,
+        )
+      )
+        throw new SketchConstraintError(
+          [],
+          'The sketch solver did not satisfy the arc geometry.',
+        );
+    }
     if (unsatisfied.length)
       throw new SketchConstraintError(
         unsatisfied,
@@ -354,11 +437,15 @@ function residual(
   c: SketchSolveConstraint,
   positions: readonly SketchPosition[],
   radii: readonly number[],
+  arcRadii: readonly number[],
   scale: number,
 ): number {
   switch (c.kind) {
     case 'radius':
-      return Math.abs(radii[c.circle] - c.value) / scale;
+      return (
+        Math.abs((c.curve === 'circle' ? radii : arcRadii)[c.index] - c.value) /
+        scale
+      );
     case 'fixed':
       return Math.hypot(
         ...positions[c.point].map((v, i) => (v - c.position[i]) / scale),

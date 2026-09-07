@@ -20,6 +20,7 @@ import type {ModelDiagnostic} from '../model/diagnostic';
 import {SketchEditor} from '../ui/sketch-editor';
 import {
   analyzeSketchSource,
+  sketchDraftEntity,
   type SketchChange,
   type SketchEditIntent,
 } from './sketch-source';
@@ -161,9 +162,11 @@ export class SketchEditorController {
     };
     // The zero-equation case is kernel-independent. Use the same numeric and
     // source-replay logic without waiting for the preceding edit's compilation.
-    const solved = layers.at(-1)!.constraints.length
-      ? await this.host.solve(layers, drag)
-      : previewSketchDrag({solveSketchSnapshot}, layers, drag);
+    const solved =
+      layers.at(-1)!.constraints.length ||
+      layers.at(-1)!.entities.some(e => e.kind === 'arc')
+        ? await this.host.solve(layers, drag)
+        : previewSketchDrag({solveSketchSnapshot}, layers, drag);
     if (revision !== this.revision)
       throw new Error('The sketch changed during this gesture.');
     return solved;
@@ -227,14 +230,7 @@ export class SketchEditorController {
             : [],
       ),
     ];
-    const additions: SketchSnapshot['entities'] = entries.map(
-      ([kind, id, data]) =>
-        kind === 'point'
-          ? {kind, id, position: data}
-          : kind === 'circle'
-            ? {kind, id, center: data[0], radius: data[1]}
-            : {kind, id, points: data},
-    );
+    const additions = entries.map(sketchDraftEntity);
     const entities = [
       ...local.entities.flatMap(entity => {
         const replacement = additions.find(e => e.id === entity.id);

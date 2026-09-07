@@ -2,6 +2,8 @@ import type {
   SketchPosition,
   SketchConstraint,
   SketchPointAddress,
+  SketchCurve,
+  SketchArcDirection,
 } from '@code3d/core/tooling';
 import {DrawingDimensions} from './drawing-dimensions';
 import type {SketchChange, SketchDraftEntry} from './sketch-source';
@@ -21,9 +23,7 @@ export const sketchCoordinateInputs = () =>
     {id: 'y', label: 'Y'},
   ]);
 
-export type SketchDrawingCurve =
-  | Readonly<{kind: 'line'; points: readonly [SketchPosition, SketchPosition]}>
-  | Readonly<{kind: 'circle'; center: SketchPosition; radius: number}>;
+export type SketchDrawingCurve = SketchCurve;
 
 /** Drawing tools share interaction and preview contracts, not persistent entities. */
 export interface SketchDrawing {
@@ -36,6 +36,7 @@ export interface SketchDrawing {
   pointer: SketchPosition;
   dimensions: DrawingDimensions;
   toggleAxis?(axis: SketchAxis): void;
+  toggleDirection?(): void;
   reset(): void;
   resolve(context: SketchSnapContext): SketchSnap;
   measurements(position: SketchPosition): Readonly<Record<string, number>>;
@@ -79,6 +80,17 @@ export class SketchDrawingGeometry {
   circle(center: SketchPointAddress, radius: number): number {
     const id = this.nextId++;
     this.entries.push(['circle', id, [center, radius]]);
+    return id;
+  }
+
+  arc(
+    center: SketchPointAddress,
+    start: SketchPointAddress,
+    end: SketchPointAddress,
+    direction: SketchArcDirection,
+  ): number {
+    const id = this.nextId++;
+    this.entries.push(['arc', id, [center, start, end, direction]]);
     return id;
   }
 }

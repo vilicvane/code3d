@@ -1043,7 +1043,7 @@ kbd {
   bottom: 48px;
 }
 #viewport-host:has(.sketch-editor:not([hidden])) .viewport-status {
-  max-width: calc(100% - 380px);
+  max-width: calc(100% - 412px);
 }
 .sketch-toolbar {
   position: absolute;
@@ -1236,7 +1236,8 @@ kbd {
 .sketch-canvas .entity {
   stroke-width: 2;
 }
-.sketch-canvas .entity[data-kind='circle'] {
+.sketch-canvas .entity[data-kind='circle'],
+.sketch-canvas .entity[data-kind='arc'] {
   fill: none;
 }
 .sketch-canvas .local {

@@ -120,3 +120,16 @@ const missingEndpoint: SketchConstraint = ['midpoint', [1, 2]];
 // @ts-expect-error Coordinates are not point references.
 const coordinateEndpoint: SketchConstraint = ['midpoint', [1, 2, [0, 0]]];
 void [missingEndpoint, coordinateEndpoint];
+
+sketchBase.derive(
+  [
+    ['point', 1, [10, 0]],
+    ['point', 2, [0, 10]],
+    ['arc', 3, [sketchBase.point(1), 1, 2, 'cw']],
+  ],
+  {constraints: [['radius', [3, 10]]]},
+);
+// @ts-expect-error Arc direction is explicit, not an omitted default.
+sketch([['arc', 1, [2, 3, 4]]]);
+// @ts-expect-error Arc endpoints are point references, not coordinate tuples.
+sketch([['arc', 1, [2, [10, 0], 4, 'ccw']]]);

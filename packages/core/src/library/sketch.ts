@@ -6,6 +6,7 @@ import {
 
 /** Current coordinates in a sketch's local two-dimensional plane. */
 export type SketchPosition = readonly [x: number, y: number];
+export type SketchArcDirection = 'cw' | 'ccw';
 
 export type SketchEntry =
   | readonly [kind: 'point', id: number, position: SketchPosition]
@@ -18,6 +19,16 @@ export type SketchEntry =
       kind: 'circle',
       id: number,
       data: readonly [center: number | SketchPoint, radius: number],
+    ]
+  | readonly [
+      kind: 'arc',
+      id: number,
+      data: readonly [
+        center: number | SketchPoint,
+        start: number | SketchPoint,
+        end: number | SketchPoint,
+        direction: SketchArcDirection,
+      ],
     ];
 
 /** A point reference carries its defining layer, not just a numeric ID. */
@@ -99,6 +110,13 @@ class SketchValue implements Sketch {
           );
         return ['circle', id, [data[0], data[1]]];
       }
+      if (kind === 'arc') {
+        if (data.length !== 4 || (data[3] !== 'cw' && data[3] !== 'ccw'))
+          throw new Error(
+            `Sketch arc ${id} requires center, start, end and cw/ccw direction.`,
+          );
+        return ['arc', id, [data[0], data[1], data[2], data[3]]];
+      }
       if (kind !== 'line' || data.length !== 2)
         throw new Error(`Invalid sketch entity ${id}.`);
       return ['line', id, [data[0], data[1]]];
@@ -112,7 +130,13 @@ class SketchValue implements Sketch {
       ancestors.add(ancestor);
     for (const [kind, id, data] of copied) {
       if (kind === 'point') continue;
-      for (const ref of kind === 'circle' ? [data[0]] : data) {
+      const refs =
+        kind === 'circle'
+          ? [data[0]]
+          : kind === 'arc'
+            ? [data[0], data[1], data[2]]
+            : data;
+      for (const ref of refs) {
         if (typeof ref === 'number') {
           if (!points.has(ref))
             throw new Error(
@@ -135,8 +159,15 @@ class SketchValue implements Sketch {
           'Sketch constraints must reference a local or upstream point.',
         );
     };
-    const curveRef = (id: number, kind: 'line' | 'circle') => {
-      if (!copied.some(e => e[0] === kind && e[1] === id))
+    const curveRef = (id: number, kind: 'line' | 'circular curve') => {
+      if (
+        !copied.some(
+          e =>
+            (kind === 'line'
+              ? e[0] === 'line'
+              : e[0] === 'circle' || e[0] === 'arc') && e[1] === id,
+        )
+      )
         throw new Error(
           `Sketch constraint references missing local ${kind} ${id}.`,
         );
@@ -172,7 +203,10 @@ class SketchValue implements Sketch {
         ) {
           if (kind === 'x' || kind === 'y') pointRef(data[0]);
           else
-            curveRef(data[0] as number, kind === 'radius' ? 'circle' : 'line');
+            curveRef(
+              data[0] as number,
+              kind === 'radius' ? 'circular curve' : 'line',
+            );
           const positive = kind === 'length' || kind === 'radius';
           if (!Number.isFinite(data[1]) || (positive && data[1] <= 0))
             throw new Error(
@@ -268,8 +302,19 @@ export type SketchCircleSnapshot = Readonly<{
   radius: number;
 }>;
 
+export type SketchArcSnapshot = Readonly<{
+  kind: 'arc';
+  id: number;
+  center: SketchPointAddress;
+  points: readonly [SketchPointAddress, SketchPointAddress];
+  direction: SketchArcDirection;
+}>;
+
 export type SketchEntitySnapshot =
-  SketchPointSnapshot | SketchLineSnapshot | SketchCircleSnapshot;
+  | SketchPointSnapshot
+  | SketchLineSnapshot
+  | SketchCircleSnapshot
+  | SketchArcSnapshot;
 
 /** Numeric geometry parameters, excluding identity and point references. */
 export function sketchEntityParameters(
@@ -281,6 +326,7 @@ export function sketchEntityParameters(
     case 'circle':
       return [entity.radius];
     case 'line':
+    case 'arc':
       return [];
   }
 }
@@ -295,6 +341,7 @@ export function withSketchEntityParameters(
     case 'circle':
       return {...entity, radius: parameters[0]};
     case 'line':
+    case 'arc':
       return entity;
   }
 }
@@ -358,7 +405,15 @@ function snapshotEntries(
       ? {kind, id: entityId, position: data}
       : kind === 'circle'
         ? {kind, id: entityId, center: point(data[0]), radius: data[1]}
-        : {kind, id: entityId, points: [point(data[0]), point(data[1])]},
+        : kind === 'arc'
+          ? {
+              kind,
+              id: entityId,
+              center: point(data[0]),
+              points: [point(data[1]), point(data[2])],
+              direction: data[3],
+            }
+          : {kind, id: entityId, points: [point(data[0]), point(data[1])]},
   );
 }
 
@@ -429,6 +484,7 @@ export function solveSketchSnapshot(
     if (index < 0) throw new Error(`Missing sketch circle ${id}.`);
     return index;
   };
+  const arcs = local.entities.filter(e => e.kind === 'arc');
   const constraints = local.constraints.map<SketchSolveConstraint>(
     ([kind, data]) => {
       switch (kind) {
@@ -457,7 +513,19 @@ export function solveSketchSnapshot(
         case 'angle':
           return {kind, points: linePoints(data[0]), value: data[1]};
         case 'radius':
-          return {kind, circle: circleIndex(data[0]), value: data[1]};
+          return arcs.some(a => a.id === data[0])
+            ? {
+                kind,
+                curve: 'arc',
+                index: arcs.findIndex(a => a.id === data[0]),
+                value: data[1],
+              }
+            : {
+                kind,
+                curve: 'circle',
+                index: circleIndex(data[0]),
+                value: data[1],
+              };
       }
     },
   );
@@ -483,6 +551,10 @@ export function solveSketchSnapshot(
         locked: upstream || !!lock,
       };
     }),
+    arcs: arcs.map(a => ({
+      center: pointIndex(a.center),
+      points: [pointIndex(a.points[0]), pointIndex(a.points[1])],
+    })),
     constraints,
   };
   const target = drag && local.entities.find(e => e.id === drag.id)!;
@@ -535,6 +607,18 @@ export function solveSketchSnapshot(
       throw new Error(
         `Sketch circle ${entity.id} requires a positive finite radius.`,
       );
+    if (entity.kind === 'arc') {
+      const [center, a, b] = [entity.center, ...entity.points].map(
+        p => result.positions[pointIndex(p)],
+      );
+      if (
+        Math.hypot(a[0] - center[0], a[1] - center[1]) === 0 ||
+        Math.hypot(a[0] - b[0], a[1] - b[1]) === 0
+      )
+        throw new Error(
+          `Sketch arc ${entity.id} requires a nonzero radius and distinct endpoints; use circle for a full circle.`,
+        );
+    }
     if (entity.kind !== 'line') continue;
     const [a, b] = entity.points.map(p => result.positions[pointIndex(p)]);
     if (Math.hypot(a[0] - b[0], a[1] - b[1]) === 0)

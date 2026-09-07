@@ -100,7 +100,15 @@ implementation context and historical outcomes, not a competing work queue.
   preserving genuine conflict errors. Radius markers link the actual center and
   circumference. Deleting a circle removes its affected constraints and only
   newly disconnected local centers, preserving shared/upstream points.
-  Arcs, curve trimming, regions and B-Rep generation remain later slices.
+  Arcs use `['arc', id, [centerPoint, startPoint, endPoint, 'cw' | 'ccw']]`
+  and native ArcRules, with radius constraints shared with circles. No hidden
+  angles or second radius are authored. Center/start/end drawing supports entered
+  center coordinates and radius, R reverses direction, and one transaction creates
+  or undoes the whole arc. Ordinary point dragging replays the exact rounded source.
+  Analytic curves share finite hit testing, display, bounds, radius badges and
+  orphan cleanup. Whole-arc deletion retains shared/upstream points; zero-radius
+  or coincident-endpoint arcs are errors, not implicit full circles.
+  Curve trimming, regions and B-Rep generation remain later slices.
   The sketch canvas fills the viewport with floating controls. Its top-right
   icon toolbar groups editing, drawing and view controls, with native hover
   labels and one keyboard Tab stop; narrow viewports place the whole toolbar

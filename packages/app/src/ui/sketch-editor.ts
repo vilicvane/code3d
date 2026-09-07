@@ -4,6 +4,13 @@ import type {
   SketchSnapshot,
 } from '@code3d/core/tooling';
 import {
+  sketchCurveGeometry,
+  sketchCurveClosestParameter,
+  sketchCurvePosition,
+  sketchCurveBounds,
+  type SketchCurve,
+} from '@code3d/core/tooling';
+import {
   Maximize,
   Magnet,
   Minus,
@@ -13,6 +20,7 @@ import {
   Scissors,
   Shapes,
   Circle,
+  Spline,
   type IconNode,
 } from 'lucide';
 import type {SketchChange} from '../tools/sketch-source';
@@ -24,6 +32,7 @@ import type {
 import {SketchLineDrawing, type SketchDrawing} from '../tools/sketch-drawing';
 import {SketchRectangleDrawing} from '../tools/sketch-rectangle-drawing';
 import {SketchCircleDrawing} from '../tools/sketch-circle-drawing';
+import {SketchArcDrawing} from '../tools/sketch-arc-drawing';
 import {
   sketchSegments,
   sketchSegmentDistance,
@@ -51,6 +60,7 @@ const drawingTools = [
   ['Rectangle', RectangleHorizontal, () => new SketchRectangleDrawing()],
   ['Center rectangle', Focus, () => new SketchRectangleDrawing('center')],
   ['Circle', Circle, () => new SketchCircleDrawing()],
+  ['Arc', Spline, () => new SketchArcDrawing()],
 ] as const;
 
 export type SketchEditorView = Readonly<{
@@ -320,13 +330,31 @@ export class SketchEditor {
           this.drawingInputs.clearError();
           this.drawDraft();
         }
-      } else if (event.key === 'Tab') {
+      } else if (
+        this.drawing.toggleDirection &&
+        !event.altKey &&
+        axis === 'r'
+      ) {
+        event.preventDefault();
+        if (!event.repeat) {
+          this.drawing.toggleDirection();
+          this.drawDraft();
+        }
+      } else if (
+        event.key === 'Tab' &&
+        this.drawing.dimensions.definitions.length
+      ) {
         event.preventDefault();
         this.drawingInputs.focusField(event.shiftKey);
       } else if (event.key === 'Enter') {
         event.preventDefault();
         this.place();
-      } else if (canvas && !event.altKey && /^[\d.+-]$/.test(event.key)) {
+      } else if (
+        canvas &&
+        this.drawing.dimensions.definitions.length &&
+        !event.altKey &&
+        /^[\d.+-]$/.test(event.key)
+      ) {
         // Move focus before the native character insertion. Do not synthesize
         // input or assign the first character: it must participate in undo/IME.
         this.drawingInputs.focusField();
@@ -510,49 +538,46 @@ export class SketchEditor {
     );
   }
 
-  private circles() {
+  private circularCurves() {
     const points = this.points();
     return this.layers().flatMap(layer =>
-      layer.entities.flatMap(entity =>
-        entity.kind === 'circle'
-          ? [
-              {
-                ...entity,
-                layer: layer.id,
-                position: points.find(p => same(p, entity.center))!.position,
-              },
-            ]
-          : [],
-      ),
+      layer.entities.flatMap(entity => {
+        if (entity.kind !== 'circle' && entity.kind !== 'arc') return [];
+        const geometry = sketchCurveGeometry(
+          entity,
+          ref => points.find(p => same(p, ref))!.position,
+        );
+        return [
+          {id: entity.id, center: entity.center, layer: layer.id, geometry},
+        ];
+      }),
     );
   }
 
-  private pickCircle(position: SketchPosition): Point | undefined {
-    const circle = this.circles()
-      .map(circle => ({
-        circle,
-        distance:
-          Math.abs(distance(circle.position, position) - circle.radius) *
-          this.scale,
-      }))
+  private pickCurve(position: SketchPosition): Point | undefined {
+    const hit = this.circularCurves()
+      .map(curve => {
+        const nearest = sketchCurvePosition(
+          curve.geometry,
+          sketchCurveClosestParameter(curve.geometry, position),
+        );
+        return {
+          curve,
+          nearest,
+          distance: distance(nearest, position) * this.scale,
+        };
+      })
       .filter(hit => hit.distance < 6)
       .sort(
         (a, b) =>
-          Number(b.circle.layer === this.view!.id) -
-            Number(a.circle.layer === this.view!.id) || a.distance - b.distance,
-      )[0]?.circle;
-    if (!circle) return;
-    const angle = Math.atan2(
-      position[1] - circle.position[1],
-      position[0] - circle.position[0],
-    );
+          Number(b.curve.layer === this.view!.id) -
+            Number(a.curve.layer === this.view!.id) || a.distance - b.distance,
+      )[0];
+    if (!hit) return;
     return {
-      layer: circle.layer,
-      id: circle.id,
-      position: [
-        circle.position[0] + Math.cos(angle) * circle.radius,
-        circle.position[1] + Math.sin(angle) * circle.radius,
-      ],
+      layer: hit.curve.layer,
+      id: hit.curve.id,
+      position: hit.nearest,
     };
   }
 
@@ -613,7 +638,8 @@ export class SketchEditor {
     if (
       point &&
       point.layer === this.view.id &&
-      !this.circles().some(c => same(c.center, point)) &&
+      !this.circularCurves().some(c => same(c.center, point)) &&
+      !this.pickCurve(point.position) &&
       !this.pickSegment(point.position)
     )
       return point;
@@ -643,7 +669,7 @@ export class SketchEditor {
     }
     const point =
       this.pick(position) ??
-      (this.mode === 'Select' ? this.pickCircle(position) : undefined);
+      (this.mode === 'Select' ? this.pickCurve(position) : undefined);
     if (this.drawing) {
       this.drawing.pointer = position;
       this.place();
@@ -804,10 +830,7 @@ export class SketchEditor {
   private fit(): void {
     const positions = [
       ...this.points().map(p => p.position),
-      ...this.circles().flatMap(c => [
-        [c.position[0] - c.radius, c.position[1] - c.radius],
-        [c.position[0] + c.radius, c.position[1] + c.radius],
-      ]),
+      ...this.circularCurves().flatMap(c => sketchCurveBounds(c.geometry)),
     ];
     if (positions.length) {
       const xs = positions.map(p => p[0]),
@@ -917,18 +940,15 @@ export class SketchEditor {
       element.dataset.start = String(segment.start.t);
       element.dataset.end = String(segment.end.t);
     }
-    for (const circle of this.circles()) {
+    for (const curve of this.circularCurves()) {
       const shape = this.shape(
-        JSON.stringify([circle.layer, 'circle', circle.id]),
-        'circle',
+        JSON.stringify([curve.layer, curve.geometry.kind, curve.id]),
+        curve.geometry.kind === 'arc' ? 'path' : 'circle',
         this.lines,
       );
-      const [x, y] = this.screen(circle.position);
-      shape.setAttribute('cx', String(x));
-      shape.setAttribute('cy', String(y));
-      shape.setAttribute('r', String(circle.radius * this.scale));
-      shape.setAttribute('class', this.entityClass(circle.layer, circle.id));
-      this.tag(shape, circle.layer, circle.id, 'circle');
+      this.drawCurve(shape, curve.geometry);
+      shape.setAttribute('class', this.entityClass(curve.layer, curve.id));
+      this.tag(shape, curve.layer, curve.id, curve.geometry.kind);
     }
     for (const point of points) {
       const circle = this.shape(
@@ -1043,25 +1063,15 @@ export class SketchEditor {
       this.draftShapes.pop()!.remove();
     curves.forEach((curve, index) => {
       let shape = this.draftShapes[index];
-      if (shape?.tagName !== curve.kind) {
+      const tag = curve.kind === 'arc' ? 'path' : curve.kind;
+      if (shape?.tagName !== tag) {
         shape?.remove();
-        shape = svgElement(curve.kind);
+        shape = svgElement(tag);
         this.draftShapes[index] = shape;
         this.overlay.prepend(shape);
       }
       shape.setAttribute('class', 'draft');
-      if (curve.kind === 'line') {
-        const [a, b] = curve.points.map(p => this.screen(p));
-        shape.setAttribute('x1', String(a[0]));
-        shape.setAttribute('y1', String(a[1]));
-        shape.setAttribute('x2', String(b[0]));
-        shape.setAttribute('y2', String(b[1]));
-      } else {
-        const [x, y] = this.screen(curve.center);
-        shape.setAttribute('cx', String(x));
-        shape.setAttribute('cy', String(y));
-        shape.setAttribute('r', String(curve.radius * this.scale));
-      }
+      this.drawCurve(shape, curve);
     });
     const [x, y] = this.screen(position);
     this.draftMarker.setAttribute('cx', String(x));
@@ -1084,6 +1094,30 @@ export class SketchEditor {
       // Updating the existing text node preserves native input undo grouping;
       // replacing a connected text node during input ends Chrome's typing group.
       if (this.snapText.data !== text) this.snapText.data = text;
+    }
+  }
+
+  private drawCurve(shape: SVGElement, curve: SketchCurve): void {
+    if (curve.kind === 'line') {
+      const [a, b] = curve.points.map(p => this.screen(p));
+      shape.setAttribute('x1', String(a[0]));
+      shape.setAttribute('y1', String(a[1]));
+      shape.setAttribute('x2', String(b[0]));
+      shape.setAttribute('y2', String(b[1]));
+    } else if (curve.kind === 'circle') {
+      const [x, y] = this.screen(curve.center);
+      shape.setAttribute('cx', String(x));
+      shape.setAttribute('cy', String(y));
+      shape.setAttribute('r', String(curve.radius * this.scale));
+    } else {
+      const [a, b] = [0, 1].map(t =>
+        this.screen(sketchCurvePosition(curve, t)),
+      );
+      const radius = curve.radius * this.scale;
+      shape.setAttribute(
+        'd',
+        `M ${a.join(' ')} A ${radius} ${radius} 0 ${Number(Math.abs(curve.sweep) > Math.PI)} ${Number(curve.sweep < 0)} ${b.join(' ')}`,
+      );
     }
   }
   private tag(

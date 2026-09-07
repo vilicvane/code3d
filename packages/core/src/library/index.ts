@@ -6,6 +6,7 @@ export type {
   SketchOptions,
   SketchPoint,
   SketchPosition,
+  SketchArcDirection,
 } from './sketch.js';
 
 export {

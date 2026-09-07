@@ -63,7 +63,7 @@ const sketch2 = sketch1.derive([
 ]);
 ```
 
-Each tuple is `[kind, ID, data]`. Numeric line endpoints and circle centers name local points;
+Each tuple is `[kind, ID, data]`. Numeric curve point references name local points;
 `sketch1.point(id)` names a point owned by an upstream layer. Each layer has an
 independent positive-integer ID space shared by its geometry entities. Definitions
 may be empty, open, or contain crossing lines; crossings do not automatically
@@ -82,11 +82,32 @@ const circles = sketch(
 );
 ```
 
-`radius` takes `[circleId, value]`. Both current radii and radius constraints
+`radius` takes `[circleOrArcId, value]`. Both current radii and radius constraints
 must be positive and finite. The outer circle above remains free; the inner
 circle's independent constraint preserves its radius. A circle center may also
 use a named upstream point. Circle and point parameters have the same numeric
 runtime semantics, whether computed from expressions or written as literals.
+
+Arcs reference a center, start and end point and explicitly select the direction:
+
+```ts
+const rounded = sketch(
+  [
+    ['point', 1, [0, 0]],
+    ['point', 2, [10, 0]],
+    ['point', 3, [0, 10]],
+    ['arc', 4, [1, 2, 3, 'ccw']],
+  ],
+  {constraints: [['radius', [4, 10]]]},
+);
+```
+
+`ccw` selects the counterclockwise arc in sketch coordinates; `cw` selects the
+clockwise arc, including major arcs. Native arc equations keep both endpoints
+equidistant from the center; current point coordinates may move to satisfy them.
+The tuple does not persist a second radius or hidden angles. Center and endpoints
+can each reference a named upstream point. Zero-radius and coincident-endpoint arcs
+are errors; use `circle` for a full circle.
 
 Geometry tuples hold current data; `constraints` specify what must remain true.
 Constraints have no persistent IDs. Point coordinates have the same runtime
@@ -112,6 +133,14 @@ gesture locks, numeric writeback and rounded-source replay use the same pipeline
 as point coordinates. Circle creation, deletion and associated constraint changes
 are single undo steps; deleting a circle retains shared and upstream centers,
 and removes only newly disconnected local points.
+Arc takes a center (optional X/Y), a start point (optional Radius), and an end
+point projected to that radius. It defaults to counterclockwise; press R to reverse
+the preview. Entered Radius is a persistent constraint; all points, the arc and
+constraints are one source transaction/undo. Drag its ordinary center or endpoints,
+or select the arc and Delete to remove it. Radius labels lie on the directed arc.
+Deletion also recognizes ordinary points lying on finite curves, not just explicit
+references, and preserves points still connected to other curves.
+Curve trimming, region extraction and sketch B-Rep generation are not yet available.
 Endpoints are created or reused by Line; there is no standalone Point tool.
 Type X/Y for the start, then length/angle for each segment. Tab switches fields
 and Enter accepts the next endpoint. Each segment is one undo step and reuses

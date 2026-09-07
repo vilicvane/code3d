@@ -24,9 +24,22 @@ export type {
   SketchPointSnapshot,
   SketchLineSnapshot,
   SketchCircleSnapshot,
+  SketchArcSnapshot,
+  SketchArcDirection,
   SketchEntitySnapshot,
   SketchSnapshot,
 } from '../library/sketch.js';
+
+export {
+  sketchArcGeometry,
+  sketchCurveGeometry,
+  sketchCurvePosition,
+  sketchCurveClosestParameter,
+  sketchCurveBounds,
+  sketchCurveTolerance,
+  sketchPositiveAngle,
+} from '../library/sketch-curves.js';
+export type {SketchCurve} from '../library/sketch-curves.js';
 
 export {
   authoringApi,

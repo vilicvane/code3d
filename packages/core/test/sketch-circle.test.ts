@@ -214,7 +214,7 @@ test('radius conflicts and invalid circles remain located hard failures', () => 
   assert.throws(() => sketch([['circle', 2, [1, 10]]]), /missing local point/);
   assert.throws(
     () => sketch(entries, {constraints: [['radius', [1, 10]]]}),
-    /missing local circle/,
+    /missing local circular curve/,
   );
   const view = snapshot(sketch(entries, {constraints: [['radius', [2, 10]]]}));
   assert.throws(

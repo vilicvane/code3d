@@ -4,6 +4,8 @@ import type {
   SketchPosition,
   SketchConstraint,
   SketchLineSnapshot,
+  SketchArcDirection,
+  SketchEntitySnapshot,
   SourceRef,
 } from '@code3d/core/tooling';
 import {formatSourceNumber} from './source-expression';
@@ -22,7 +24,40 @@ import type {
 export type SketchDraftEntry =
   | readonly ['point', number, SketchPosition]
   | readonly ['line', number, readonly [SketchPointAddress, SketchPointAddress]]
-  | readonly ['circle', number, readonly [SketchPointAddress, number]];
+  | readonly ['circle', number, readonly [SketchPointAddress, number]]
+  | readonly [
+      'arc',
+      number,
+      readonly [
+        SketchPointAddress,
+        SketchPointAddress,
+        SketchPointAddress,
+        SketchArcDirection,
+      ],
+    ];
+
+export function sketchDraftEntity([
+  kind,
+  id,
+  data,
+]: SketchDraftEntry): SketchEntitySnapshot {
+  switch (kind) {
+    case 'point':
+      return {kind, id, position: data};
+    case 'line':
+      return {kind, id, points: data};
+    case 'circle':
+      return {kind, id, center: data[0], radius: data[1]};
+    case 'arc':
+      return {
+        kind,
+        id,
+        center: data[0],
+        points: [data[1], data[2]],
+        direction: data[3],
+      };
+  }
+}
 
 export type SketchChange =
   | Readonly<{
@@ -62,7 +97,7 @@ export type SketchEditIntent = Readonly<{
 
 type Entry = {
   id: number;
-  kind: 'point' | 'line' | 'circle';
+  kind: 'point' | 'line' | 'circle' | 'arc';
   node: ts.ArrayLiteralExpression;
   data: ts.ArrayLiteralExpression;
   parameters: readonly ts.Expression[];
@@ -139,10 +174,11 @@ export function analyzeSketchSource(source: string): {
       !ts.isStringLiteral(kind) ||
       (kind.text !== 'point' &&
         kind.text !== 'line' &&
-        kind.text !== 'circle') ||
+        kind.text !== 'circle' &&
+        kind.text !== 'arc') ||
       !ts.isNumericLiteral(idNode) ||
       !ts.isArrayLiteralExpression(data) ||
-      data.elements.length !== 2
+      data.elements.length !== (kind.text === 'arc' ? 4 : 2)
     )
       return unsupported();
     const id = Number(idNode.text);
@@ -256,7 +292,9 @@ export class SketchEditResolver implements ToolIntentResolver {
           ? data.map(formatSourceNumber)
           : kind === 'circle'
             ? [point(data[0]), formatSourceNumber(data[1])]
-            : data.map(point);
+            : kind === 'arc'
+              ? [point(data[0]), point(data[1]), point(data[2]), `'${data[3]}'`]
+              : data.map(point);
       return `  ['${kind}', ${id}, [${content.join(', ')}]],`;
     };
     const {change} = intent;
