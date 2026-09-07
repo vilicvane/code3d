@@ -16,6 +16,8 @@ import {
   readBoundedBody,
   type AgentRequest,
   type AgentResponse,
+  type StoredReceipt,
+  type ReceiptJournal,
 } from '../bld/index.js';
 import {deferred, relay} from './relay.ts';
 
@@ -208,7 +210,7 @@ test('receipts retain failures and reject new work at capacity without forgettin
       calls++;
       throw new Error('private source');
     },
-    {requests: 1, bytes: maxMessageBytes},
+    {limits: {requests: 1, bytes: maxMessageBytes}},
   );
   const send = async (id: string, request: AgentRequest) =>
     parseResponse(
@@ -230,6 +232,98 @@ test('receipts retain failures and reject new work at capacity without forgettin
     result,
   );
   assert.equal(calls, 1);
+});
+
+test('reopening a grant restores outcomes and never re-executes an interrupted request', async () => {
+  const config = createAgentConfig(settings);
+  const cipher = await AgentCipher.create(config);
+  const records = new Map<string, StoredReceipt>();
+  let failCompletion = false;
+  let calls = 0;
+  const journal: ReceiptJournal = {
+    load: async () => structuredClone([...records.values()]),
+    write: async receipt => {
+      if (failCompletion && receipt.response) throw new Error('disk full');
+      records.set(receipt.requestId, structuredClone(receipt));
+    },
+  };
+  const create = () =>
+    AgentEndpoint.create(
+      config,
+      async () => {
+        calls++;
+        return saved;
+      },
+      {journal},
+    );
+  const send = async (
+    endpoint: AgentEndpoint,
+    id: string,
+    request: AgentRequest = read,
+  ) =>
+    parseResponse(
+      (
+        await cipher.open(
+          'response',
+          await endpoint.handle(await cipher.seal('request', id, request)),
+        )
+      ).value,
+    );
+  const first = await create();
+  assert.deepEqual(await send(first, 'finished'), saved);
+  failCompletion = true;
+  const uncertain = await send(first, 'interrupted');
+  assert.ok(!uncertain.ok && uncertain.error.code === 'receipt_storage_failed');
+  assert.equal(calls, 2);
+  first.close();
+  const reopened = await create();
+  assert.deepEqual(await send(reopened, 'finished'), saved);
+  assert.deepEqual(
+    await send(reopened, 'lookup', {
+      operation: 'result',
+      requestId: 'finished',
+    }),
+    saved,
+  );
+  const interrupted = await send(reopened, 'interrupted');
+  assert.ok(!interrupted.ok && interrupted.error.code === 'result_interrupted');
+  const conflict = await send(reopened, 'interrupted', {
+    operation: 'fs.list',
+    path: '/',
+  });
+  assert.ok(!conflict.ok && conflict.error.code === 'request_conflict');
+  assert.equal(calls, 2);
+});
+
+test('persistent receipts are committed before execution and failed storage prevents changes', async () => {
+  const config = createAgentConfig(settings);
+  const cipher = await AgentCipher.create(config);
+  let calls = 0;
+  const endpoint = await AgentEndpoint.create(
+    config,
+    async () => {
+      calls++;
+      return saved;
+    },
+    {
+      journal: {
+        load: async () => [],
+        write: async () => {
+          throw new Error('disk full');
+        },
+      },
+    },
+  );
+  const response = parseResponse(
+    (
+      await cipher.open(
+        'response',
+        await endpoint.handle(await cipher.seal('request', 'first', read)),
+      )
+    ).value,
+  );
+  assert.ok(!response.ok && response.error.code === 'receipt_storage_failed');
+  assert.equal(calls, 0);
 });
 
 test('HTTP transport separates agent identities and only carries ciphertext and routing credentials', async t => {

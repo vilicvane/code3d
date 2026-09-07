@@ -18,11 +18,24 @@ type Receipt = {
   pending: Promise<AgentResponse>;
   response?: AgentResponse;
 };
+export type StoredReceipt = Readonly<{
+  requestId: string;
+  fingerprint: string;
+  response?: AgentResponse;
+}>;
+export type ReceiptJournal = Readonly<{
+  load(): Promise<readonly StoredReceipt[]>;
+  write(receipt: StoredReceipt): Promise<void>;
+}>;
+export type EndpointOptions = Readonly<{
+  limits?: Readonly<{requests: number; bytes: number}>;
+  journal?: ReceiptJournal;
+}>;
 
 /**
  * Owned by one App session/agent grant. Never evict mutation receipts and then
- * accept the same request ID again: closing/replacing an endpoint requires a
- * fresh grant, and an exhausted endpoint rejects new work while results remain readable.
+ * accept the same request ID again. Reopening a grant restores its journal;
+ * an interrupted execution has an unknown outcome and must never run again.
  */
 export class AgentEndpoint {
   private readonly receipts = new Map<string, Receipt>();
@@ -34,13 +47,15 @@ export class AgentEndpoint {
     private readonly cipher: AgentCipher,
     private readonly handler: RequestHandler,
     private readonly limits: Readonly<{requests: number; bytes: number}>,
+    private readonly journal?: ReceiptJournal,
   ) {}
 
   static async create(
     config: AgentConfig,
     handler: RequestHandler,
-    limits = {requests: 4096, bytes: 64 * 1024 * 1024},
+    options: EndpointOptions = {},
   ): Promise<AgentEndpoint> {
+    const limits = options.limits ?? {requests: 4096, bytes: 64 * 1024 * 1024};
     if (
       !Number.isSafeInteger(limits.requests) ||
       limits.requests < 1 ||
@@ -50,7 +65,30 @@ export class AgentEndpoint {
       throw new RangeError(
         'Receipt limits require at least one request and one maximum-size response.',
       );
-    return new AgentEndpoint(await AgentCipher.create(config), handler, limits);
+    const endpoint = new AgentEndpoint(
+      await AgentCipher.create(config),
+      handler,
+      limits,
+      options.journal,
+    );
+    for (const stored of (await options.journal?.load()) ?? []) {
+      const response =
+        stored.response ??
+        failure(
+          'result_interrupted',
+          'The App closed before recording the outcome. Inspect the current files before deciding on a new change; this request will not run again.',
+          {outcome: 'unknown'},
+        );
+      endpoint.receipts.set(stored.requestId, {
+        fingerprint: stored.fingerprint,
+        pending: Promise.resolve(response),
+        response,
+      });
+      endpoint.responseBytes += new TextEncoder().encode(
+        JSON.stringify(response),
+      ).length;
+    }
+    return endpoint;
   }
 
   close(): void {
@@ -146,6 +184,25 @@ export class AgentEndpoint {
     this.reservedBytes += maxMessageBytes;
     let response: AgentResponse;
     try {
+      await this.journal?.write({requestId, fingerprint});
+    } catch {
+      response = failure(
+        'receipt_storage_failed',
+        'Cannot record the request. No changes were started.',
+        {accepted: false},
+      );
+      receipt.response = response;
+      this.reservedBytes -= maxMessageBytes;
+      if (!this.closed)
+        this.responseBytes += new TextEncoder().encode(
+          JSON.stringify(response),
+        ).length;
+      complete(response);
+      return response;
+    }
+    try {
+      if (this.closed)
+        throw new AgentError('session_closed', 'Agent grant is closed.');
       response = parseResponse(await this.handler(request));
       if (
         new TextEncoder().encode(JSON.stringify(response)).length >
@@ -163,6 +220,24 @@ export class AgentEndpoint {
           : failure('application_error', 'Application request failed.', {
               outcome: 'unknown',
             });
+    }
+    try {
+      await this.journal?.write({requestId, fingerprint, response});
+    } catch {
+      response = failure(
+        'receipt_storage_failed',
+        'The request finished but its receipt could not be saved. Check the reported response and current files before making another change.',
+        {outcome: 'unknown', response},
+      );
+      if (
+        new TextEncoder().encode(JSON.stringify(response)).length >
+        maxMessageBytes
+      )
+        response = failure(
+          'receipt_storage_failed',
+          'The request finished but its receipt could not be saved. Its response is too large to include; inspect the current files before making another change.',
+          {outcome: 'unknown'},
+        );
     }
     receipt.response = response;
     this.reservedBytes -= maxMessageBytes;

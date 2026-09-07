@@ -89,6 +89,36 @@ function directoryHandleKey(workspaceId: string): string {
   return `${directoryHandleKeyPrefix}${workspaceId}`;
 }
 
+/** Reopening the same directory retains its workspace and agent identities. */
+export async function rememberProjectDirectory(
+  handle: FileSystemDirectoryHandle,
+): Promise<string> {
+  return navigator.locks.request('code3d:project-directories', async () => {
+    const database = await openDatabase();
+    let entries: [IDBValidKey[], FileSystemDirectoryHandle[]];
+    try {
+      const store = database.transaction(storeName).objectStore(storeName);
+      const range = IDBKeyRange.bound(
+        directoryHandleKeyPrefix,
+        directoryHandleKeyPrefix + '\uffff',
+      );
+      entries = await Promise.all([
+        requestResult(store.getAllKeys(range)),
+        requestResult<FileSystemDirectoryHandle[]>(store.getAll(range)),
+      ]);
+    } finally {
+      database.close();
+    }
+    for (const [index, stored] of entries[1].entries()) {
+      if (await handle.isSameEntry(stored))
+        return String(entries[0][index]).slice(directoryHandleKeyPrefix.length);
+    }
+    const workspaceId = crypto.randomUUID();
+    await storeProjectDirectory(workspaceId, handle);
+    return workspaceId;
+  });
+}
+
 async function openDatabase(): Promise<IDBDatabase> {
   const request = indexedDB.open(databaseName, 1);
   request.onupgradeneeded = () => {

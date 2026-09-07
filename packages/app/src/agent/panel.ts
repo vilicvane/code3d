@@ -11,6 +11,7 @@ import {
 import type {CodeEditor} from '../editor';
 import type {AgentProjectSession} from './project-session';
 import {agentPrompt, promptCursor} from './prompt';
+import {AgentPersistence} from './persistence';
 
 type Grant = {
   config: AgentConfig;
@@ -41,11 +42,17 @@ export class AgentPanel {
   private adding = false;
   private generation = 0;
   private displayedAgentId?: string;
+  private storage?: AgentPersistence;
+  private readonly initialization: Promise<void>;
+  private readonly inFlight = new Set<Promise<unknown>>();
+  private available = false;
+  private operations = Promise.resolve();
 
   constructor(
     private readonly editor: CodeEditor,
     private readonly project: AgentProjectSession,
     open: HTMLButtonElement,
+    private readonly workspace: string | undefined,
   ) {
     this.dialog.className = 'agent-dialog';
     this.dialog.setAttribute('aria-label', 'Local agents');
@@ -80,7 +87,7 @@ export class AgentPanel {
     actions.className = 'agent-actions';
     actions.append(
       button('Add agent & copy prompt', () => this.add()),
-      button('End session', () => this.end()),
+      button('End session', () => this.run(() => this.end())),
       this.retry,
     );
     const copy = button('Copy displayed prompt', () =>
@@ -89,7 +96,7 @@ export class AgentPanel {
     const note = document.createElement('p');
     note.className = 'agent-note';
     note.textContent =
-      'Each agent gets its own configuration. Keep this page open; refreshing or switching projects ends the session. Revoke stops new requests while accepted changes finish saving.';
+      'Agents are saved for this project and reconnect automatically when you open it. Keep the page open while agents work. Revoke stops new requests while accepted changes finish saving.';
     this.dialog.append(
       heading,
       note,
@@ -111,7 +118,12 @@ export class AgentPanel {
     this.dialog.addEventListener('click', event => {
       if (event.target === this.dialog) this.dialog.close();
     });
-    window.addEventListener('pagehide', () => this.end());
+    window.addEventListener('pagehide', () => this.suspend());
+    window.addEventListener('pageshow', event => {
+      if (event.persisted) window.location.reload();
+    });
+    this.initialization = this.restore();
+    this.run(() => this.initialization);
     this.refresh();
   }
 
@@ -130,18 +142,21 @@ export class AgentPanel {
           label,
           button('Copy initial prompt', () => this.copyGrant(grant, true)),
           button('Copy update', () => this.copyGrant(grant, false)),
-          button('Revoke', () => {
-            grant.endpoint.close();
-            this.grants.delete(grant.config.agentId);
-            this.editor.removeAgentCursor(grant.config.agentId);
-            if (this.displayedAgentId === grant.config.agentId) {
-              this.prompt.value = '';
-              this.prompt.hidden = true;
-              this.displayedAgentId = undefined;
-              this.message.textContent = 'Agent revoked.';
-            }
-            this.refresh();
-          }),
+          button('Revoke', () =>
+            this.run(async () => {
+              await this.persist(grant.config.agentId);
+              grant.endpoint.close();
+              this.grants.delete(grant.config.agentId);
+              this.editor.removeAgentCursor(grant.config.agentId);
+              if (this.displayedAgentId === grant.config.agentId) {
+                this.prompt.value = '';
+                this.prompt.hidden = true;
+                this.displayedAgentId = undefined;
+                this.message.textContent = 'Agent revoked.';
+              }
+              this.refresh();
+            }),
+          ),
         );
         return row;
       }),
@@ -160,6 +175,8 @@ export class AgentPanel {
     const generation = this.generation;
     this.run(
       async () => {
+        await this.initialization;
+        if (!this.available || generation !== this.generation) return;
         if (this.grants.size >= 16)
           throw new Error(
             'This page supports up to 16 agent grants. Revoke an unused grant first.',
@@ -170,23 +187,16 @@ export class AgentPanel {
           if (generation !== this.generation) return;
           this.identity = identity;
           localStorage.setItem('code3d:agent-relay', relay);
-          this.host = new RelayHost({
-            relay,
-            ...this.identity,
-            stateChanged: state => {
-              this.hostState = state;
-              this.refresh();
-            },
-            handle: (agentId, envelope) => this.handle(agentId, envelope),
-          });
         }
         const config = createAgentConfig({
           relay,
           sessionId: this.identity.sessionId,
           name,
         });
-        const endpoint = await AgentEndpoint.create(config, request =>
-          this.project.handle(config.agentId, name, request),
+        const endpoint = await AgentEndpoint.create(
+          config,
+          request => this.project.handle(config.agentId, name, request),
+          {journal: this.storage!.journal(config)},
         );
         if (generation !== this.generation) {
           endpoint.close();
@@ -194,6 +204,16 @@ export class AgentPanel {
         }
         const grant: Grant = {config, endpoint, busy: 0};
         this.grants.set(config.agentId, grant);
+        try {
+          await this.persist();
+        } catch (error) {
+          this.grants.delete(config.agentId);
+          endpoint.close();
+          if (!this.host) this.identity = undefined;
+          throw error;
+        }
+        if (generation !== this.generation) return;
+        if (!this.host) this.connect();
         this.name.value = `Agent ${this.grants.size + 1}`;
         this.refresh();
         this.displayedAgentId = config.agentId;
@@ -247,7 +267,90 @@ export class AgentPanel {
     }
   }
 
-  private end(): void {
+  private async restore(): Promise<void> {
+    if (!this.workspace)
+      throw new Error('Reconnect the project folder to activate its agents.');
+    const generation = this.generation;
+    const storage = await AgentPersistence.open(this.workspace);
+    if (generation !== this.generation) {
+      await storage.close();
+      return;
+    }
+    this.storage = storage;
+    const saved = await storage.load();
+    if (generation !== this.generation) return;
+    if (saved) {
+      const restored = await Promise.all(
+        saved.grants.map(async ({config, lastSeen}) => {
+          const endpoint = await AgentEndpoint.create(
+            config,
+            request =>
+              this.project.handle(config.agentId, config.name, request),
+            {journal: storage.journal(config)},
+          );
+          return {config, endpoint, lastSeen, busy: 0};
+        }),
+      );
+      if (generation !== this.generation) {
+        for (const grant of restored) grant.endpoint.close();
+        return;
+      }
+      this.identity = saved.identity;
+      this.relay.value = saved.relay;
+      for (const grant of restored)
+        this.grants.set(grant.config.agentId, grant);
+      this.name.value = `Agent ${this.grants.size + 1}`;
+      this.connect();
+    }
+    this.available = true;
+  }
+
+  private connect(): void {
+    this.host = new RelayHost({
+      relay: this.relay.value,
+      ...this.identity!,
+      stateChanged: state => {
+        this.hostState = state;
+        this.refresh();
+      },
+      handle: (agentId, envelope) => {
+        const pending = this.handle(agentId, envelope);
+        this.inFlight.add(pending);
+        void pending
+          .finally(() => this.inFlight.delete(pending))
+          .catch(() => {});
+        return pending;
+      },
+    });
+  }
+
+  private persist(excludeAgentId?: string): Promise<void> {
+    return this.storage!.save(
+      this.identity
+        ? {
+            relay: this.relay.value,
+            identity: this.identity,
+            grants: [...this.grants.values()]
+              .filter(grant => grant.config.agentId !== excludeAgentId)
+              .map(({config, lastSeen}) => ({config, lastSeen})),
+          }
+        : undefined,
+    );
+  }
+
+  private suspend(): void {
+    this.generation++;
+    this.available = false;
+    this.host?.close();
+    for (const grant of this.grants.values()) grant.endpoint.close();
+    void Promise.allSettled([...this.inFlight]).then(() =>
+      this.storage?.close(),
+    );
+  }
+
+  private async end(): Promise<void> {
+    await this.initialization;
+    await this.storage!.save();
     this.generation++;
     this.host?.close();
     this.host = undefined;
@@ -264,7 +367,8 @@ export class AgentPanel {
   }
 
   private run(operation: () => Promise<void>, finallyRun?: () => void): void {
-    void operation()
+    this.operations = this.operations
+      .then(operation)
       .catch(error => {
         this.message.textContent =
           error instanceof Error ? error.message : 'Agent session failed.';

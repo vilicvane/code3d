@@ -59,6 +59,13 @@ to use JSDoc arguments or the ordinary execution context.
 
 ## Output and retries
 
+Agent configurations and request receipts persist in the App for each project.
+Opening that project reconnects automatically; revoking the agent or ending the
+session invalidates its configuration. After reopening, read fresh file versions
+and supply a cursor before requesting an observation. `result_interrupted` means
+the App closed before recording the outcome: inspect the files before deciding
+on a new change. Retrying the same request ID never executes it again.
+
 Each invocation writes one JSON result to stdout. Request metadata goes to
 stderr so the ID is available before a response, including if the process is
 interrupted. Help and version output are plain text. Exit codes are:

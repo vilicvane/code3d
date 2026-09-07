@@ -24,7 +24,7 @@ import {
   projectDirectoryPermission,
   requestProjectDirectoryPermission,
   storedProjectDirectory,
-  storeProjectDirectory,
+  rememberProjectDirectory,
   supportsProjectDirectories,
 } from './project/directory-access';
 import {
@@ -323,6 +323,11 @@ agentPanel = new AgentPanel(
   codeEditor,
   agentProject,
   requiredElement<HTMLButtonElement>('agents-button'),
+  directoryWorkspaceId
+    ? directoryConnected
+      ? `directory:${directoryWorkspaceId}`
+      : undefined
+    : 'browser',
 );
 retrySaveButton.addEventListener('click', () => {
   void agentProject.retrySaves().catch(showProjectIssue);
@@ -679,8 +684,7 @@ async function openProjectDirectory(): Promise<void> {
     const target = await openDirectoryProjectFileSystem(handle);
     await target.initialize(codeEditor.project());
     await target.syncDirectory(bundledExamples);
-    const workspaceId = crypto.randomUUID();
-    await storeProjectDirectory(workspaceId, handle);
+    const workspaceId = await rememberProjectDirectory(handle);
     openDirectoryWorkspace(workspaceId);
   } catch (error) {
     showProjectIssue(error);

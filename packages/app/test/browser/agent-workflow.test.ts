@@ -375,6 +375,63 @@ for (const storage of ['browser', 'directory'] as const)
       await page.screenshot({path: '/tmp/code3d-agent-workflow-panel.png'});
       await page.reload();
       await page.getByRole('button', {name: 'Agents', exact: true}).waitFor();
+      await page.waitForFunction(() =>
+        document
+          .querySelector('.agent-status')
+          ?.textContent?.includes('App connected to relay'),
+      );
+      assert.equal(
+        await page
+          .locator('.agent-dialog')
+          .evaluate(dialog => dialog.hasAttribute('open')),
+        false,
+      );
+      const recovered = await cli(0, ['result', 'create-model']);
+      assert.equal(recovered.code, 0);
+      assert.deepEqual(recovered.result.data, first.result.data);
+      const duplicate = await cli(
+        0,
+        ['--request-id', 'create-model', 'apply', '--input', '-'],
+        {
+          files: [{path, version: null, content: source}],
+          cursor: {
+            file: path,
+            regex: '(fillet\\(0.5, \\[1\\]\\))',
+            arguments: '[width]',
+          },
+        },
+      );
+      assert.deepEqual(duplicate.result, first.result);
+      assert.equal(
+        (await cli(0, ['fs', 'read', path])).result.data.content,
+        modified.replace('box(size, 6, 8)', 'box(-1, 6, 8)'),
+      );
+      await assert.rejects(
+        () =>
+          AgentClient.create(configs[1]).then(client =>
+            client.request({operation: 'fs.list', path: '/'}),
+          ),
+        {code: 'relay_error'},
+      );
+      const otherTab = await context.newPage();
+      await otherTab.goto(page.url());
+      await otherTab.getByRole('button', {name: 'Agents', exact: true}).click();
+      await otherTab
+        .getByText(
+          'Agents are active in another tab for this project. Close that tab and reload this page to take over.',
+          {exact: true},
+        )
+        .waitFor();
+      assert.equal((await cli(0, ['fs', 'list', '/'])).code, 0);
+      await otherTab.close();
+      await page.getByRole('button', {name: 'Agents', exact: true}).click();
+      assert.equal(await page.locator('.agent-row').count(), 1);
+      await page
+        .getByRole('button', {name: 'End session', exact: true})
+        .click();
+      await page.locator('.agent-row').waitFor({state: 'detached'});
+      await page.reload();
+      await page.getByRole('button', {name: 'Agents', exact: true}).waitFor();
       await assert.rejects(
         () =>
           AgentClient.create(configs[0]).then(client =>

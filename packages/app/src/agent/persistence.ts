@@ -1,0 +1,151 @@
+import type {AgentConfig, ReceiptJournal, StoredReceipt} from '@code3d/agent';
+
+export type PersistedAgentSession = {
+  relay: string;
+  identity: {token: string; sessionId: string};
+  grants: {config: AgentConfig; lastSeen?: string}[];
+};
+
+/** One project owner per browser origin. The relay never stores this data. */
+export class AgentPersistence {
+  private constructor(
+    private readonly database: IDBDatabase,
+    private readonly workspace: string,
+    private readonly release: () => Promise<void>,
+  ) {}
+
+  static open(workspace: string): Promise<AgentPersistence> {
+    return new Promise((resolve, reject) => {
+      const holding = navigator.locks.request(
+        `code3d:agents:${workspace}`,
+        {ifAvailable: true},
+        async lock => {
+          if (!lock)
+            throw new Error(
+              'Agents are active in another tab for this project. Close that tab and reload this page to take over.',
+            );
+          const request = indexedDB.open('code3d-agents-v1', 1);
+          request.onupgradeneeded = () => {
+            request.result.createObjectStore('sessions');
+            request.result.createObjectStore('receipts');
+          };
+          const database = await requestResult(request);
+          let release!: () => void;
+          const held = new Promise<void>(done => {
+            release = done;
+          });
+          resolve(
+            new AgentPersistence(database, workspace, () => {
+              release();
+              return holding;
+            }),
+          );
+          await held;
+          database.close();
+        },
+      );
+      void holding.catch(reject);
+    });
+  }
+
+  close(): Promise<void> {
+    return this.release();
+  }
+
+  async load(): Promise<PersistedAgentSession | undefined> {
+    return requestResult(
+      this.database
+        .transaction('sessions')
+        .objectStore('sessions')
+        .get(this.workspace),
+    );
+  }
+
+  async save(session?: PersistedAgentSession): Promise<void> {
+    const transaction = this.database.transaction(
+      ['sessions', 'receipts'],
+      'readwrite',
+    );
+    const complete = transactionComplete(transaction);
+    const sessions = transaction.objectStore('sessions');
+    const request = sessions.get(this.workspace);
+    request.onsuccess = () => {
+      const previous = request.result as PersistedAgentSession | undefined;
+      for (const grant of previous?.grants ?? []) {
+        if (
+          !session?.grants.some(
+            next => next.config.agentId === grant.config.agentId,
+          )
+        )
+          transaction
+            .objectStore('receipts')
+            .delete(this.receiptRange(grant.config.agentId));
+      }
+      if (session) sessions.put(session, this.workspace);
+      else sessions.delete(this.workspace);
+    };
+    await complete;
+  }
+
+  journal(config: AgentConfig): ReceiptJournal {
+    return {
+      load: () =>
+        requestResult<StoredReceipt[]>(
+          this.database
+            .transaction('receipts')
+            .objectStore('receipts')
+            .getAll(this.receiptRange(config.agentId)),
+        ),
+      write: async receipt => {
+        const transaction = this.database.transaction(
+          ['sessions', 'receipts'],
+          'readwrite',
+        );
+        const complete = transactionComplete(transaction);
+        const request = transaction.objectStore('sessions').get(this.workspace);
+        request.onsuccess = () => {
+          const session = request.result as PersistedAgentSession | undefined;
+          if (
+            !session?.grants.some(
+              grant =>
+                grant.config.agentId === config.agentId &&
+                grant.config.sessionId === config.sessionId,
+            )
+          ) {
+            transaction.abort();
+            return;
+          }
+          transaction
+            .objectStore('receipts')
+            .put(receipt, [this.workspace, config.agentId, receipt.requestId]);
+        };
+        await complete;
+      },
+    };
+  }
+
+  private receiptRange(agentId: string): IDBKeyRange {
+    return IDBKeyRange.bound(
+      [this.workspace, agentId, ''],
+      [this.workspace, agentId, '\uffff'],
+    );
+  }
+}
+
+function requestResult<T>(request: IDBRequest<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function transactionComplete(transaction: IDBTransaction): Promise<void> {
+  return new Promise((resolve, reject) => {
+    transaction.oncomplete = () => resolve();
+    transaction.onabort = () =>
+      reject(
+        transaction.error ?? new Error('Agent authorization was removed.'),
+      );
+    transaction.onerror = () => reject(transaction.error);
+  });
+}

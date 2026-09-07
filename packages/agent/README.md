@@ -30,9 +30,11 @@ contents, cursor expressions, arguments and response artifacts are all encrypted
 Session IDs, agent IDs, request IDs, message sizes/timing and relay credentials
 are visible to the relay. HTTPS is required except for loopback development.
 
-The App removes the grant and closes its endpoint when revoking an agent. Receipts
-currently live in that endpoint's memory. After a reload or lost receipt journal,
-issue fresh grants and keys; never reopen the old grant with an empty journal.
+The App stores its host identity, per-agent grants and receipt journals in
+project-scoped IndexedDB. Opening the project restores the same credentials and
+connects to the relay automatically. Revoking an agent atomically removes its
+grant and journal, then closes its endpoint. Never reopen an existing grant with
+an empty journal.
 Closing an endpoint prevents further replies and requests; it does not roll back
 work already accepted by the App handler.
 
@@ -43,7 +45,7 @@ host token in its first frame, keeping it out of URL logs. The relay verifies it
 hash and pairs the connection with CLI HTTP requests. Routing frames carry an
 ephemeral transport ID, agent ID and opaque encrypted body. The transport ID only
 correlates a live HTTP response; application request IDs and receipts stay in the
-App. Reconnects reuse the same App endpoints; page reloads must issue new grants.
+App. Reconnects reuse the same App endpoints; page reloads restore their durable journals.
 
 The Node implementation lives in [@code3d/relay](../relay/README.md). It has no
 database, session registration API, agent authorization table or response cache.
@@ -149,7 +151,7 @@ content with the same ID returns `request_conflict`. Errors from the handler are
 also retained, since work may have started before failure. Transport failures
 never imply rollback, and the client does not automatically resubmit changes.
 
-`result` returns the saved response, `result_pending`, or `result_unknown` in the
+`result` returns the saved response, `result_pending`, `result_interrupted`, or `result_unknown` in the
 current grant. A missing result is not proof of non-execution after a grant was
 replaced. Keep the original request ID to query or retry the identical request.
 
@@ -160,6 +162,13 @@ capacity, or `session_capacity` when retained receipts exhaust it. Old results
 and matching retries remain readable. Request fingerprints use SHA-256 so the
 journal does not retain additional copies of full source submissions.
 
+A `ReceiptJournal` records a request fingerprint before the handler can start,
+then saves the completed response before replying. Failure to write the initial
+record prevents execution. A record without a response after reopening returns
+`result_interrupted` with an unknown outcome; matching retries cannot execute it
+again. Failure to save the outcome returns `receipt_storage_failed` with the
+observed response. Inspect current files before deciding on a new change.
+
 Run `npm test --workspace @code3d/agent` from the repository root. Tests include
 real loopback HTTP exchanges, tampering, cross-agent isolation, concurrent retries
 and recovering the result after a lost response. The relay tests additionally
@@ -169,15 +178,19 @@ verify temporary/JSDoc arguments and check independent cursors.
 
 ## App integration
 
-The App's Agents panel issues, copies and revokes grants. Configurations and
-receipt journals live only in that page. Network reconnects retain them; a page
-reload or project switch ends the session. A failed save retains accepted drafts
+The App's Agents panel issues, copies and revokes persistent grants. Closing or
+switching away from a project disconnects its transport; reopening restores its
+identity and journals without opening the panel. A Web Lock allows one tab per
+project to serve agents; another tab reports that ownership instead of taking
+over the connection. A directory without restored permission cannot expose the
+browser fallback project under that directory's credentials. Cursor positions
+and model snapshots are transient; select a new cursor after reopening. A failed save retains accepted drafts
 and exposes Retry saving. Protected `.git` and `.code3d` paths cannot be modified.
 Text apply/read is bounded at 8 MiB per file; binary files can be read as artifacts.
 
 `AgentObserver` serializes offscreen requests through the existing model compiler,
 viewport source selection and screenshot exporter. It does not change the user's
-viewport or cursor. Collaborator cursors are Monaco decorations. Screenshot
+viewport or cursor. Collaborator selections are Monaco decorations with matching name labels anchored by content widgets. Screenshot
 corner views and history remain deferred while viewport work proceeds separately.
 See the [CLI observation contract](../cli/README.md#observation-pages) for topology
 paging, identity scope, geometry coordinates and snapshot expiration.
