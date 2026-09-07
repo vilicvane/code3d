@@ -313,6 +313,29 @@ implementation context and historical outcomes, not a competing work queue.
   input's source target and makes it the new focus; decorations are never
   selection candidates. Normal recompilation preserves an occurrence selection
   when it still exists.
+- Viewport navigation uses Three.js Arcball rotation across both poles, with
+  left-button rotation, right-button panning and wheel/middle-button zoom.
+  Camera distance has no fixed limits; framing follows geometry size, and
+  clipping and distance fog follow zoom.
+  Wheel zoom keeps the focus-plane point under the pointer fixed on screen;
+  wheel input outside the viewport does not navigate the camera.
+  Rotation has a short release inertia, interrupted while a spatial tool owns
+  the drag. Framing and previews use Arcball's live focus after pan or cursor
+  zoom. Resize updates the control bounds; completion previews restore camera
+  up together with position and focus. See [#55](https://github.com/vilicvane/code3d/issues/55).
+- The upper-right coordinate indicator aligns the view to any of its six axis
+  ends in the displayed world or selected occurrence's local frame, preserving
+  the current focus and zoom distance. Clicking the facing endpoint again flips
+  to its opposite side. Double-clicking the indicator restores the default
+  oblique orientation in that frame and fits the model. Positive endpoints have
+  white axis labels; negative endpoints are unlabeled dots. Both actions use a
+  300ms eased rotation, with focus and distance included when resetting.
+  New view requests continue from the displayed pose; direct navigation and
+  spatial tools interrupt transitions. Reduced-motion preferences skip them.
+  Framing uses the limiting horizontal/vertical field of view so narrow
+  viewports still contain the fitted geometry. Axis buttons support
+  Enter/Space; Enter/Space on the indicator itself resets the view. Camera
+  changes stop navigation inertia without changing model selection or source.
 - Viewport occurrence selection leaves the focused geometry's materials
   unchanged; source context dimming carries the primary focus contrast. A
   passive one-pixel screen-space corner bound marks only groups and other
