@@ -18,7 +18,7 @@ import type {SketchDrag, SketchDragPreview} from './sketch-drag';
 type PendingRequest = {
   id: number;
   reject(error: Error): void;
-  timeout: number;
+  timeout?: number;
 } & (
   | {
       kind: 'compile';
@@ -166,9 +166,7 @@ export class ModelCompilerClient {
             ? 'Export exceeded 30 seconds and was terminated. Run the model again before retrying.'
             : pending.kind === 'sketch'
               ? 'Sketch solving exceeded 15 seconds and was terminated.'
-              : pending.evaluating
-                ? 'Model execution exceeded 15 seconds and was terminated.'
-                : 'Project preparation exceeded 120 seconds and was terminated.',
+              : 'Project preparation exceeded 120 seconds and was terminated.',
         ),
       );
     }, milliseconds);
@@ -216,7 +214,7 @@ export class ModelCompilerClient {
         if (data.phase === 'evaluating-model') {
           window.clearTimeout(pending.timeout);
           pending.evaluating = true;
-          pending.timeout = this.deadline(data.id, 15_000);
+          pending.timeout = undefined;
         }
         pending.onProgress?.(data.phase);
         return;

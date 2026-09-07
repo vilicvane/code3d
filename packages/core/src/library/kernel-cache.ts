@@ -19,10 +19,32 @@ type CacheEntry<Value> = Readonly<{
   release(value: Value): void;
 }>;
 
-const maximumEntries = 256;
+const maximumHistoricalEntries = 256;
 const entries = new Map<string, CacheEntry<unknown>>();
+const historicalEntries = new Map<string, CacheEntry<unknown>>();
+let retainedEvaluation = new Set<string>();
+let currentEvaluation: Set<string> | undefined;
 let hits = 0;
 let misses = 0;
+
+/**
+ * Keep a serial evaluation's complete working set, including snapshot queries.
+ * The previous working set stays available until this evaluation finishes so
+ * a changed prefix cannot evict unchanged operations that execute later.
+ * Outside evaluations, only the bounded historical LRU admits new entries.
+ */
+export function beginKernelOperationEvaluation(): () => void {
+  const used = new Set<string>();
+  currentEvaluation = used;
+  return () => {
+    for (const id of retainedEvaluation) {
+      if (!used.has(id)) historicalEntries.set(id, entries.get(id)!);
+    }
+    retainedEvaluation = used;
+    currentEvaluation = undefined;
+    evictHistoricalEntries();
+  };
+}
 
 /**
  * Reuses one complete, deterministic kernel operation. Arguments describe
@@ -48,8 +70,7 @@ export function evaluateKernelOperation<Value>(
       throw new Error(`Kernel operation cache identity collision: ${id}`);
     }
     hits += 1;
-    entries.delete(id);
-    entries.set(id, cached as CacheEntry<unknown>);
+    touchEntry(id, cached as CacheEntry<unknown>);
     return {id, value: cached.instantiate(cached.value)};
   }
 
@@ -62,14 +83,26 @@ export function evaluateKernelOperation<Value>(
     lifecycle.release(value);
     throw error;
   }
-  entries.set(id, {
+  const entry = {
     signature,
     value: retained,
     instantiate: lifecycle.instantiate,
     release: lifecycle.release,
-  } as CacheEntry<unknown>);
-  evictOldestEntries();
+  } as CacheEntry<unknown>;
+  entries.set(id, entry);
+  touchEntry(id, entry);
   return {id, value};
+}
+
+function touchEntry(id: string, entry: CacheEntry<unknown>): void {
+  historicalEntries.delete(id);
+  if (currentEvaluation) {
+    currentEvaluation.delete(id);
+    currentEvaluation.add(id);
+  } else if (!retainedEvaluation.has(id)) {
+    historicalEntries.set(id, entry);
+    evictHistoricalEntries();
+  }
 }
 
 function contentId(value: string): string {
@@ -94,6 +127,9 @@ export function clearKernelOperationCache(): void {
     entry.release(entry.value);
   }
   entries.clear();
+  historicalEntries.clear();
+  retainedEvaluation.clear();
+  currentEvaluation?.clear();
   hits = 0;
   misses = 0;
 }
@@ -106,12 +142,10 @@ export function kernelOperationCacheStats(): Readonly<{
   return {entries: entries.size, hits, misses};
 }
 
-function evictOldestEntries(): void {
-  while (entries.size > maximumEntries) {
-    const oldest = entries.entries().next().value as
-      [string, CacheEntry<unknown>] | undefined;
-    if (!oldest) return;
-    const [id, entry] = oldest;
+function evictHistoricalEntries(): void {
+  while (historicalEntries.size > maximumHistoricalEntries) {
+    const [id, entry] = historicalEntries.entries().next().value!;
+    historicalEntries.delete(id);
     entries.delete(id);
     entry.release(entry.value);
   }

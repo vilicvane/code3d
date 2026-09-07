@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {afterEach, test} from 'node:test';
 import {
+  beginKernelOperationEvaluation,
   clearKernelOperationCache,
   evaluateKernelOperation,
   kernelOperationCacheStats,
@@ -108,4 +109,114 @@ test('bounds retained values and releases them on eviction and clear', () => {
     hits: 0,
     misses: 0,
   });
+});
+
+function primitive(index: number) {
+  return evaluateKernelOperation('primitive', [index], [], lifecycle, () => ({
+    result: index,
+    instance: 'computed',
+  }));
+}
+
+function evaluate(compute: () => void): void {
+  const finish = beginKernelOperationEvaluation();
+  try {
+    compute();
+  } finally {
+    finish();
+  }
+}
+
+test('reuses an entire evaluation larger than the historical cache', () => {
+  evaluate(() => {
+    for (let index = 0; index < 600; index++) primitive(index);
+  });
+  for (let revision = 0; revision < 3; revision++) {
+    evaluate(() => {
+      for (let index = 0; index < 600; index++) {
+        assert.equal(primitive(index).value.instance, 'use');
+      }
+    });
+  }
+  assert.deepEqual(kernelOperationCacheStats(), {
+    entries: 600,
+    hits: 1800,
+    misses: 600,
+  });
+  assert.equal(released.length, 0);
+});
+
+test('a changed prefix preserves later operations from the previous evaluation', () => {
+  evaluate(() => {
+    for (let index = 0; index < 600; index++) primitive(index);
+  });
+  evaluate(() => {
+    for (let index = 600; index < 1200; index++) primitive(index);
+    for (let index = 0; index < 600; index++) {
+      assert.equal(primitive(index).value.instance, 'use');
+    }
+  });
+  assert.equal(kernelOperationCacheStats().entries, 1200);
+  assert.equal(released.length, 0);
+});
+
+test('shrinking evaluations release old working sets and bound unused history', () => {
+  let owned: ReturnType<typeof primitive> | undefined;
+  evaluate(() => {
+    for (let index = 0; index < 600; index++) owned = primitive(index);
+  });
+  evaluate(() => {
+    primitive(0);
+  });
+  assert.equal(kernelOperationCacheStats().entries, 257);
+  assert.equal(released.length, 343);
+  assert.equal(owned?.value.result, 599);
+  assert.ok(released.every(value => value.instance === 'retained'));
+
+  // Outside operations can churn the history without evicting the last model.
+  for (let index = 600; index < 1200; index++) primitive(index);
+  assert.equal(kernelOperationCacheStats().entries, 257);
+  assert.equal(primitive(0).value.instance, 'use');
+
+  evaluate(() => {});
+  assert.equal(kernelOperationCacheStats().entries, 256);
+  clearKernelOperationCache();
+  assert.equal(released.length, 1200);
+});
+
+test('a failed evaluation retains its reusable prefix and closes its scope', () => {
+  assert.throws(
+    () =>
+      evaluate(() => {
+        for (let index = 0; index < 400; index++) primitive(index);
+        throw new Error('Model failed');
+      }),
+    /Model failed/,
+  );
+  for (let index = 400; index < 800; index++) primitive(index);
+  assert.equal(kernelOperationCacheStats().entries, 656);
+  evaluate(() => {
+    for (let index = 0; index < 400; index++) {
+      assert.equal(primitive(index).value.instance, 'use');
+    }
+  });
+});
+
+test('clearing a cache also clears its active and previous working sets', () => {
+  evaluate(() => {
+    primitive(0);
+  });
+  evaluate(() => {
+    primitive(1);
+    clearKernelOperationCache();
+    primitive(2);
+  });
+  assert.equal(released.length, 2);
+  assert.deepEqual(kernelOperationCacheStats(), {
+    entries: 1,
+    hits: 0,
+    misses: 1,
+  });
+  clearKernelOperationCache();
+  assert.equal(released.length, 3);
 });

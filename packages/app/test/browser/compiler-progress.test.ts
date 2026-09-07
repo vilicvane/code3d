@@ -248,7 +248,7 @@ test('can retry a failed compiler download', {timeout: 120_000}, async t => {
 });
 
 test(
-  'execution progress still arms the execution deadline and restarts a stuck worker',
+  'long model execution has no deadline and can be cancelled for a fresh worker',
   {timeout: 120_000},
   async t => {
     const page = await fixture(t);
@@ -259,12 +259,18 @@ test(
       const setTimeout = window.setTimeout;
       window.setTimeout = (callback, delay, ...args) => {
         deadlines.push(delay);
-        return setTimeout(callback, delay === 15_000 ? 100 : delay, ...args);
+        return setTimeout(callback, delay, ...args);
       };
       try {
         let error;
         try {
-          await compile(phase => phases.push(phase), 'while (true) {}');
+          await compile(phase => {
+            phases.push(phase);
+            if (phase === 'evaluating-model') {
+              // Cross the old deadline, then explicitly replace the stuck model.
+              setTimeout(() => client.cancel(), 16_000);
+            }
+          }, 'while (true) {}');
         } catch (failure) {
           if (!(failure instanceof Error)) throw failure;
           error = failure.message;
@@ -284,8 +290,8 @@ test(
       }
     });
     assert.equal(result.phases.at(-1), 'evaluating-model');
-    assert.deepEqual(result.deadlines, [120_000, 15_000]);
-    assert.match(result.error!, /Model execution exceeded 15 seconds/);
+    assert.deepEqual(result.deadlines, [120_000]);
+    assert.match(result.error!, /Compilation superseded/);
     assert.deepEqual(result.recovered, ['loading-compiler', ...runtimePhases]);
     assert.equal(result.diagnostic, undefined);
   },

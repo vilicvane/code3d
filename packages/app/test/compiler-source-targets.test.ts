@@ -409,6 +409,76 @@ test('position bindings preserve inline expressions and prioritize safe upstream
   );
 });
 
+test('export-only edits reuse a large model including exact directional bounds', async t => {
+  clearKernelOperationCache();
+  const bounding = replicad.getOC().BRepBndLib;
+  const addOptimal = bounding.AddOptimal;
+  const bounds = t.mock.method(
+    bounding,
+    'AddOptimal',
+    (...args: Parameters<typeof addOptimal>) => addOptimal(...args),
+  );
+  const source = [
+    'import {box, group} from "@code3d/core";',
+    'const parts = Array.from({length: 140}, (_, i) => box(i + 1, 2, 3));',
+    'const assembly = group(parts);',
+  ].join('\n');
+  let initial: Awaited<ReturnType<typeof compileProject>> | undefined;
+  let computations = 0;
+  let boundsQueries = 0;
+  try {
+    for (const exported of [false, true, false]) {
+      const module = await compileProject(
+        {
+          files: [
+            {
+              path: '/model.ts',
+              source: exported
+                ? source.replace('const assembly', 'export const assembly')
+                : source,
+            },
+          ],
+        },
+        '/model.ts',
+      );
+      assert.equal(module.diagnostic, undefined);
+      assert.equal(module.exports.has('assembly'), exported);
+      const stats = kernelOperationCacheStats();
+      if (!initial) {
+        initial = module;
+        computations = stats.misses;
+        boundsQueries = bounds.mock.callCount();
+        assert.ok(stats.entries > 256);
+        assert.ok(boundsQueries > 0);
+      } else {
+        assert.equal(stats.misses, computations);
+        assert.equal(bounds.mock.callCount(), boundsQueries);
+        assert.deepEqual(
+          [...module.objects.values()].map(object => object.mesh),
+          [...initial.objects.values()].map(object => object.mesh),
+        );
+        assert.notEqual(
+          module.objects.keys().next().value,
+          initial.objects.keys().next().value,
+        );
+      }
+    }
+    // A diagnosed source failure also finishes the evaluation and trims history.
+    const failed = await compileProject(
+      {
+        files: [
+          {path: '/model.ts', source: 'throw new Error("failed model");'},
+        ],
+      },
+      '/model.ts',
+    );
+    assert.match(defined(failed.diagnostic).summary, /failed model/);
+    assert.ok(kernelOperationCacheStats().entries <= 256);
+  } finally {
+    clearKernelOperationCache();
+  }
+});
+
 test('editing a plate fillet does not rebuild an unchanged screw across compiles', async t => {
   clearKernelOperationCache();
   const loftWith = replicad.Sketch.prototype.loftWith;
