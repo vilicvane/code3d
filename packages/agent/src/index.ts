@@ -30,6 +30,7 @@ export {
   type AgentRequest,
   type AgentResponse,
   type ApplyInput,
+  type TopologyOutputOptions,
   type AgentCursor,
   type FileChange,
   type Artifact,

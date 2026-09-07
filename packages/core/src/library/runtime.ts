@@ -1,4 +1,9 @@
 import {
+  inspectShapeTopology,
+  type TopologyInspection,
+  type TopologyInspectionOptions,
+} from './topology-inspection.js';
+import {
   assembleWire,
   basicFaceExtrusion,
   BoundingBox,
@@ -3610,6 +3615,10 @@ export function disposeModelObjects(objects: Iterable<ModelObject>): void {
 export type ModelGeometrySnapshot = Readonly<{
   /** Borrowed shapes; clone before passing them to consuming operations. */
   shapes: ReadonlyMap<string, AnyShape>;
+  inspect(
+    nodeId: string,
+    options?: TopologyInspectionOptions,
+  ): TopologyInspection;
   dispose(): void;
 }>;
 
@@ -3618,14 +3627,17 @@ export function retainModelGeometry(
 ): ModelGeometrySnapshot {
   const retained = new Map<AnyShape, AnyShape>();
   const shapes = new Map<string, AnyShape>();
+  const topologies = new Map<string, ShapeTopology>();
   const dispose = () => {
     for (const shape of retained.values()) shape.delete();
     retained.clear();
     shapes.clear();
+    topologies.clear();
   };
   try {
     for (const object of objects) {
-      const original = object[modelGeometry]()?.value.shape;
+      const geometry = object[modelGeometry]()?.value;
+      const original = geometry?.shape;
       if (!original) continue;
       let shape = retained.get(original);
       if (!shape) {
@@ -3633,8 +3645,19 @@ export function retainModelGeometry(
         retained.set(original, shape);
       }
       shapes.set(object.nodeId, shape);
+      topologies.set(object.nodeId, geometry!.topology);
     }
-    return {shapes, dispose};
+    return {
+      shapes,
+      dispose,
+      inspect(nodeId, options) {
+        const shape = shapes.get(nodeId);
+        const topology = topologies.get(nodeId);
+        if (!shape || !topology)
+          throw new Error('The model geometry snapshot is unavailable.');
+        return inspectShapeTopology(shape, topology, options);
+      },
+    };
   } catch (error) {
     dispose();
     throw error;

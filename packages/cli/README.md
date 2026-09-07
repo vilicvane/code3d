@@ -4,10 +4,12 @@
 and modifies the project through the App, using the shared encrypted protocol.
 It never writes local copies of the project's source files.
 
-This implementation contains the CLI and protocol. App integration and the
-production relay are separate implementation stages tracked in
-[issue #50](https://github.com/vilicvane/code3d/issues/50); copying a session prompt
-from the current App is not available yet.
+Open **Agents** in the App, enter the relay address, and choose **Add agent & copy
+prompt**. Each agent receives its own configuration. The App handles browser
+storage and connected directories. The [stateless relay](../relay/README.md) runs
+as a separate Node service; no production deployment or npm publication is part
+of this branch. Implementation and scope are tracked in
+[issue #50](https://github.com/vilicvane/code3d/issues/50).
 
 ## Usage
 
@@ -28,7 +30,8 @@ c3d project.json result edit-42
 
 `apply` takes JSON from `--input <file>` or `--input -` (stdin). Omitting input
 sends an empty apply. `--render` and `--topology` request observation outputs;
-their absence leaves any corresponding JSON input option unchanged. By default
+their absence leaves any corresponding JSON input option unchanged. --topology
+preserves paging/filter options supplied in the input JSON. By default
 no observation output is requested. See the [protocol](../agent/README.md) for
 the full configuration and input schema.
 
@@ -78,6 +81,44 @@ absolute paths, names and MIME types, without flooding stdout with image data.
 Artifact labels never control filesystem paths. If local artifact saving fails,
 the error includes `remoteResult` without binary data, preserving the App's
 reported outcome; query the original request to retrieve its artifacts again.
+
+## Observation pages
+
+`--render` returns a 960×720 PNG from the same compiler, source-selection and
+image-export path as the GUI. `--topology` returns kernel geometry, actual numeric
+or path IDs, measurements and incidence. Input models for fillet, chamfer, shell
+and topology references are distinguished from result models. `selector` is a
+member suffix; combine it only with a valid receiver in scope. Reported binding
+names include source locations and do not guarantee visibility from another scope.
+
+The first page includes up to 16 model summaries and 48 topology entries from the
+selected model (prefer the operation input when present). Select a model by its
+returned key, and page or filter with:
+
+```json
+{
+  "topology": {
+    "snapshotId": "<returned-snapshot-id>",
+    "model": "m0",
+    "kind": "edge",
+    "offset": 48,
+    "limit": 48
+  }
+}
+```
+
+Use `ids` instead of or alongside paging to request specific IDs, for example
+`[1, [2, 3]]`. Limits are 1–200 entries. An existing snapshot page cannot also
+change source or cursor. The latest observation snapshot is kept in the App for
+up to five minutes; another observation, project edit, worker restart or page
+reload can invalidate it. `snapshot_expired` requires a new observation.
+
+Positions and directions are in the observation scene; `geometryToScene` maps
+retained geometry into that scene, and `storedOrigin` identifies its origin
+reference. Units are model units. Bounds are kernel enclosures; curved-face
+normals are labeled samples on the underlying surface with unchecked membership
+in the trimmed face. Unavailable kernel measurements are explicit, never inferred
+from tessellation.
 
 ## Repository development
 

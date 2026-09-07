@@ -66,6 +66,12 @@ export {
 } from '../library/spatial.js';
 export type {Quaternion, RigidTransform, Vec3} from '../library/spatial.js';
 export type {
+  TopologyInspectionOptions,
+  TopologyInspection,
+  TopologyInspectionItem,
+  TopologyGeometry,
+} from '../library/topology-inspection.js';
+export type {
   EdgeId,
   SurfaceId,
   TopologyId,

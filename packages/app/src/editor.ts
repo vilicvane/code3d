@@ -631,8 +631,8 @@ export class CodeEditor {
             {
               range: sourceRange(model, cursor.ref!),
               options: {
-                className: 'agent-selection',
-                beforeContentClassName: 'agent-caret',
+                className: `agent-selection agent-color-${agentColor(id)}`,
+                beforeContentClassName: `agent-caret agent-color-${agentColor(id)}`,
                 hoverMessage: {value: cursor.name, isTrusted: false},
                 stickiness:
                   monaco.editor.TrackedRangeStickiness
@@ -665,6 +665,17 @@ export class CodeEditor {
           offset: this.activeModel().getOffsetAt(position),
         }
       : undefined;
+  }
+
+  selectedSource(): SourceRef | undefined {
+    const selection = this.editor.getSelection();
+    const model = this.editor.getModel();
+    if (!selection || !model) return undefined;
+    return {
+      file: this.activePath,
+      start: model.getOffsetAt(selection.getStartPosition()),
+      end: model.getOffsetAt(selection.getEndPosition()),
+    };
   }
 
   readSource(sourceRef: SourceRef): string {
@@ -1345,6 +1356,13 @@ function modelDiagnosticMarker(
     endLineNumber: end.lineNumber,
     endColumn: end.column,
   };
+}
+
+function agentColor(id: string): number {
+  let hash = 0;
+  for (const character of id)
+    hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
+  return hash % 6;
 }
 
 function sourceRefKey(sourceRef: SourceRef): string {

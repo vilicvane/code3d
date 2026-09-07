@@ -8,6 +8,10 @@ import {browserPackageFiles} from '../project/browser-packages';
 import type {ModelExportInstance, ModelExportOptions} from './model-export';
 import type {CompilationProgress} from './compilation-progress';
 import type {
+  TopologyInspection,
+  TopologyInspectionOptions,
+} from '@code3d/core/tooling';
+import type {
   CompilerRequest,
   CompilerResponse,
   FileRequest,
@@ -25,6 +29,7 @@ type PendingRequest = {
       resolve(module: ModelModule): void;
     }
   | {kind: 'export'; resolve(blob: Blob): void}
+  | {kind: 'topology'; resolve(topology: TopologyInspection): void}
 );
 
 export class ModelCompilerClient {
@@ -111,7 +116,7 @@ export class ModelCompilerClient {
     );
     // An executing model may contain a synchronous infinite loop. Preparation
     // can finish asynchronously without throwing away the installed kernel.
-    if (pending.kind === 'export' || pending.evaluating) this.restartWorker();
+    if (pending.kind !== 'compile' || pending.evaluating) this.restartWorker();
     else this.send({kind: 'cancel', id: pending.id});
     return true;
   }
@@ -126,6 +131,29 @@ export class ModelCompilerClient {
     this.exportable = undefined;
   }
 
+  inspectTopology(
+    module: ModelModule,
+    nodeId: string,
+    options: TopologyInspectionOptions,
+  ): Promise<TopologyInspection> {
+    if (!this.canExport(module))
+      return Promise.reject(
+        new Error('The model geometry snapshot is unavailable.'),
+      );
+    const compileId = this.exportable!.compileId;
+    const id = this.nextId++;
+    return new Promise((resolve, reject) => {
+      this.pending = {
+        kind: 'topology',
+        id,
+        resolve,
+        reject,
+        timeout: this.deadline(id, 15_000),
+      };
+      this.send({kind: 'topology', id, compileId, nodeId, options});
+    });
+  }
+
   private deadline(id: number, milliseconds: number): number {
     return window.setTimeout(() => {
       const pending = this.pending;
@@ -136,9 +164,11 @@ export class ModelCompilerClient {
         new Error(
           pending.kind === 'export'
             ? 'Export exceeded 30 seconds and was terminated. Run the model again before retrying.'
-            : pending.evaluating
-              ? 'Model execution exceeded 15 seconds and was terminated.'
-              : 'Project preparation exceeded 120 seconds and was terminated.',
+            : pending.kind === 'topology'
+              ? 'Topology inspection exceeded 15 seconds and was terminated. Request a new observation.'
+              : pending.evaluating
+                ? 'Model execution exceeded 15 seconds and was terminated.'
+                : 'Project preparation exceeded 120 seconds and was terminated.',
         ),
       );
     }, milliseconds);
@@ -199,6 +229,8 @@ export class ModelCompilerClient {
         pending.resolve(data.module);
       } else if (pending.kind === 'export' && data.kind === 'export') {
         pending.resolve(data.blob);
+      } else if (pending.kind === 'topology' && data.kind === 'topology') {
+        pending.resolve(data.topology);
       }
     };
     worker.onerror = ({message}) => {

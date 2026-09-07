@@ -112,14 +112,19 @@ workerScope.onmessage = ({data}: MessageEvent<CompilerRequest>) => {
   } else if (data.kind === 'cancel') {
     if (queued?.id === data.id) queued = undefined;
     if (currentId === data.id) currentId = undefined;
-  } else if (data.kind === 'export') {
+  } else if (data.kind === 'export' || data.kind === 'topology') {
     try {
       if (running || queued || compileId !== data.compileId)
         throw new Error(
           'The model has changed. Reopen export after compilation finishes.',
         );
-      const blob = compiler.export(data.instances, data.options);
-      send({kind: 'export', id: data.id, ok: true, blob});
+      if (data.kind === 'export') {
+        const blob = compiler.export(data.instances, data.options);
+        send({kind: 'export', id: data.id, ok: true, blob});
+      } else {
+        const topology = compiler.inspectTopology(data.nodeId, data.options);
+        send({kind: 'topology', id: data.id, ok: true, topology});
+      }
     } catch (error) {
       send({
         kind: 'result',

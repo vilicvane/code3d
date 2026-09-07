@@ -93,7 +93,12 @@ program
           ...(options.render === undefined ? {} : {render: options.render}),
           ...(options.topology === undefined
             ? {}
-            : {topology: options.topology}),
+            : {
+                topology:
+                  typeof input.topology === 'object'
+                    ? input.topology
+                    : options.topology,
+              }),
         },
       });
     },

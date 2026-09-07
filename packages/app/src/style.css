@@ -1723,3 +1723,110 @@ kbd {
     max-width: none;
   }
 }
+.agent-render-host {
+  position: fixed;
+  left: -10000px;
+  top: 0;
+  width: 960px;
+  height: 720px;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.agent-dialog {
+  width: min(800px, calc(100vw - 48px));
+  max-height: calc(100vh - 64px);
+  padding: 24px;
+  border: 1px solid #4c5145;
+  border-radius: 12px;
+  color: #e4e8dc;
+  background: #20221d;
+  overflow: auto;
+}
+.agent-dialog::backdrop {
+  background: #0008;
+}
+.agent-dialog header,
+.agent-actions,
+.agent-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.agent-dialog header {
+  justify-content: space-between;
+}
+.agent-dialog h2 {
+  margin: 0;
+  font-size: 20px;
+}
+.agent-note,
+.agent-status {
+  color: #aeb5a5;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.agent-field {
+  display: grid;
+  gap: 6px;
+  margin: 16px 0;
+  font-size: 13px;
+}
+.agent-dialog input,
+.agent-dialog textarea {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid #4c5145;
+  border-radius: 5px;
+  padding: 9px;
+  background: #161813;
+  color: inherit;
+  font: inherit;
+}
+.agent-dialog textarea {
+  resize: vertical;
+}
+.agent-dialog textarea[readonly] {
+  margin: 12px 0;
+  font: 12px/1.5 monospace;
+}
+.agent-row {
+  padding: 12px 0;
+  border-top: 1px solid #41473b;
+}
+.agent-row > span {
+  flex: 1 1 240px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.agent-message {
+  color: #d8ff3e;
+  font-size: 13px;
+}
+.agent-color-0 {
+  --agent-color: #70c8f0;
+}
+.agent-color-1 {
+  --agent-color: #d8a0f5;
+}
+.agent-color-2 {
+  --agent-color: #efad6c;
+}
+.agent-color-3 {
+  --agent-color: #8adcab;
+}
+.agent-color-4 {
+  --agent-color: #f18cac;
+}
+.agent-color-5 {
+  --agent-color: #d6d983;
+}
+.monaco-editor .agent-selection {
+  background: color-mix(in srgb, var(--agent-color) 22%, transparent);
+  border-bottom: 1px solid var(--agent-color);
+}
+.monaco-editor .agent-caret {
+  border-left: 2px solid var(--agent-color);
+  margin-left: -1px;
+}

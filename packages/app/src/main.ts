@@ -30,7 +30,6 @@ import {
 import {
   openBrowserProjectFileSystem,
   openDirectoryProjectFileSystem,
-  type ProjectFileSystem,
 } from './project/filesystem';
 import {filePathFromRoute, fileRoute} from './project/file-route';
 import type {ModelProject} from './project/project';
@@ -86,6 +85,9 @@ import type {
   ToolSignatureSchema,
 } from './model/tool-schema';
 import {isToolSelectionParameter} from './model/tool-schema';
+import {AgentProjectSession} from './agent/project-session';
+import {AgentObserver} from './agent/observer';
+import {AgentPanel} from './agent/panel';
 import {
   contextualToolParameters,
   contextualParameterIntent,
@@ -123,6 +125,8 @@ app.innerHTML = `
         <span class="prototype-tag">prototype 01</span>
       </div>
       <div class="topbar-actions">
+        <button class="quiet-button" id="agents-button" type="button">Agents</button>
+        <button class="quiet-button" id="retry-save-button" type="button" hidden>Retry saving</button>
         <span class="project-location" id="project-location"></span>
         <button class="quiet-button" id="open-folder-button" type="button">Open folder</button>
         <button class="quiet-button" id="reconnect-folder-button" type="button" hidden>Reconnect folder</button>
@@ -299,7 +303,36 @@ replaceFileRoute(codeEditor.currentFile());
 const compiler = new ModelCompilerClient(projectFileSystem, language =>
   codeEditor.setProjectLanguage(language),
 );
-let persistenceQueue = Promise.resolve();
+const retrySaveButton = requiredElement<HTMLButtonElement>('retry-save-button');
+const agentObserver = new AgentObserver(
+  projectFileSystem,
+  () => agentProject.currentRevision,
+);
+let agentPanel: AgentPanel | undefined;
+const agentProject = new AgentProjectSession(
+  projectFileSystem,
+  codeEditor,
+  request => agentObserver.observe(request),
+  () => {
+    retrySaveButton.hidden = !agentProject.hasUnsaved;
+    agentPanel?.refresh();
+  },
+  error => showProjectIssue(error),
+);
+agentPanel = new AgentPanel(
+  codeEditor,
+  agentProject,
+  requiredElement<HTMLButtonElement>('agents-button'),
+);
+retrySaveButton.addEventListener('click', () => {
+  void agentProject.retrySaves().catch(showProjectIssue);
+});
+window.addEventListener('beforeunload', event => {
+  if (agentProject.hasUnsaved) {
+    event.preventDefault();
+    event.returnValue = '';
+  }
+});
 let currentModule: ModelModule | null = null;
 let currentModuleSourceVersion: number | undefined;
 let modelStatus: 'ready' | 'error' = 'ready';
@@ -482,7 +515,7 @@ codeEditor.onChange(change => {
   const editingHistoryChange =
     historyChange && handleContextualEditingHistory(change);
   if (!toolChange && !editingHistoryChange) abandonContextualTool();
-  persistProjectChange(projectFileSystem, change);
+  agentProject.recordEditorChange(change);
   if (!toolChange) sourceEditPopover.dismiss();
   if (change.kind !== 'content') renderProjectNavigation();
   requestModelUpdate(toolChange || historyChange ? 0 : 420);
@@ -640,7 +673,7 @@ function renderProjectLocation(): void {
 async function openProjectDirectory(): Promise<void> {
   setProjectLocationBusy(true);
   try {
-    await persistenceQueue;
+    await agentProject.flush();
     const handle = await pickProjectDirectory();
     if (!handle) return;
     const target = await openDirectoryProjectFileSystem(handle);
@@ -676,14 +709,19 @@ async function reconnectProjectDirectory(): Promise<void> {
 
 async function reloadProjectDirectory(): Promise<void> {
   setProjectLocationBusy(true);
-  await persistenceQueue;
-  window.location.reload();
+  try {
+    await agentProject.flush();
+    window.location.reload();
+  } catch (error) {
+    showProjectIssue(error);
+    setProjectLocationBusy(false);
+  }
 }
 
 async function useBrowserStorage(): Promise<void> {
   setProjectLocationBusy(true);
   try {
-    await persistenceQueue;
+    await agentProject.flush();
     openBrowserWorkspace();
   } catch (error) {
     showProjectIssue(error);
@@ -710,28 +748,13 @@ function setProjectLocationBusy(busy: boolean): void {
   browserStorageButton.disabled = busy;
 }
 
-function persistProjectChange(
-  fileSystem: ProjectFileSystem,
-  change: ProjectEditorChange,
-): void {
-  persistenceQueue = persistenceQueue
-    .then(async () => {
-      if (change.kind === 'content' || change.kind === 'create') {
-        await fileSystem.writeFile(change.path, change.source);
-      } else if (change.kind === 'rename') {
-        await fileSystem.rename(change.from, change.to);
-      } else {
-        await fileSystem.remove(change.path);
-      }
-    })
-    .catch(error => showProjectIssue(error));
-}
-
 async function resetExamples(): Promise<void> {
   try {
-    await persistenceQueue;
-    const project = await projectFileSystem.resetDirectory(bundledExamples);
-    codeEditor.replaceDirectory(project, bundledExamples.directory);
+    await agentProject.flush();
+    await agentProject.update(async () => {
+      const project = await projectFileSystem.resetDirectory(bundledExamples);
+      codeEditor.replaceDirectory(project, bundledExamples.directory);
+    });
   } catch (error) {
     showProjectIssue(error);
   }

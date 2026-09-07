@@ -94,6 +94,40 @@ test('configuration never accepts remote plaintext transport or embeds credentia
 });
 
 test('apply validates the batch before it reaches the application', () => {
+  assert.deepEqual(
+    parseApplyInput({
+      topology: {
+        snapshotId: 'snapshot',
+        model: 'm0',
+        kind: 'edge',
+        ids: [[1, 2], 3],
+        offset: 0,
+        limit: 2,
+      },
+    }).topology,
+    {
+      snapshotId: 'snapshot',
+      model: 'm0',
+      kind: 'edge',
+      ids: [[1, 2], 3],
+      offset: 0,
+      limit: 2,
+    },
+  );
+  for (const topology of [
+    {limit: 201},
+    {offset: -1},
+    {ids: [1]},
+    {kind: 'edge', ids: [[1]]},
+    {kind: 'edge', ids: [0]},
+  ])
+    assert.throws(() => parseApplyInput({topology}));
+  assert.throws(() =>
+    parseApplyInput({
+      topology: {snapshotId: 'snapshot'},
+      cursor: {file: '/model.ts', regex: '(model)'},
+    }),
+  );
   assert.throws(() => parseApplyInput({files: [{path: '/a.ts', content: ''}]}));
   assert.throws(() =>
     parseApplyInput({files: [{path: '/a.ts', version: null, content: null}]}),

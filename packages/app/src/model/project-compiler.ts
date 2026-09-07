@@ -1,6 +1,10 @@
 import type * as esbuild from 'esbuild-wasm';
 import ts from '@typescript/typescript6';
-import type {ModelGeometrySnapshot} from '@code3d/core/tooling';
+import type {
+  ModelGeometrySnapshot,
+  TopologyInspection,
+  TopologyInspectionOptions,
+} from '@code3d/core/tooling';
 import {ProjectFileCache} from '../project/file-cache';
 import type {ProjectFileReader} from '../project/file-reader';
 import {ProjectPackages} from '../project/project-packages';
@@ -181,6 +185,15 @@ export class ProjectCompiler {
   dispose(): void {
     this.disposeRuntime();
     this.evaluator.dispose();
+  }
+
+  inspectTopology(
+    nodeId: string,
+    options: TopologyInspectionOptions,
+  ): TopologyInspection {
+    if (!this.geometry)
+      throw new Error('The model geometry snapshot is unavailable.');
+    return this.geometry.inspect(nodeId, options);
   }
 
   get compiledBytes(): number {

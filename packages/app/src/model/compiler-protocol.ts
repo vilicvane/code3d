@@ -5,6 +5,10 @@ import type {DesignContext, ModelModule} from './compiler';
 import type {ModelDiagnostic} from './diagnostic';
 import type {ModelExportInstance, ModelExportOptions} from './model-export';
 import type {CompilationPhase} from './compilation-progress';
+import type {
+  TopologyInspection,
+  TopologyInspectionOptions,
+} from '@code3d/core/tooling';
 
 export type CompileRequest = Readonly<{
   kind: 'compile';
@@ -25,6 +29,13 @@ export type FileRequest = Readonly<{
 export type CompilerRequest =
   | CompileRequest
   | Readonly<{
+      kind: 'topology';
+      id: number;
+      compileId: number;
+      nodeId: string;
+      options: TopologyInspectionOptions;
+    }>
+  | Readonly<{
       kind: 'export';
       id: number;
       compileId: number;
@@ -41,6 +52,12 @@ export type CompilerRequest =
 
 export type CompilerResponse =
   | FileRequest
+  | Readonly<{
+      kind: 'topology';
+      id: number;
+      ok: true;
+      topology: TopologyInspection;
+    }>
   | Readonly<{kind: 'language'; id: number; language: ProjectLanguage}>
   | Readonly<{kind: 'progress'; id: number; phase: CompilationPhase}>
   | Readonly<{kind: 'result'; id: number; ok: true; module: ModelModule}>

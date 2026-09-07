@@ -29,8 +29,84 @@ export type ApplyInput = Readonly<{
   files?: readonly FileChange[];
   cursor?: AgentCursor;
   render?: boolean;
-  topology?: boolean;
+  topology?: boolean | TopologyOutputOptions;
 }>;
+
+export type TopologyOutputOptions = Readonly<{
+  snapshotId?: string;
+  model?: string;
+  kind?: 'vertex' | 'edge' | 'surface';
+  ids?: readonly (number | readonly [number, number, ...number[]])[];
+  offset?: number;
+  limit?: number;
+}>;
+
+function topologyOptions(value: unknown): boolean | TopologyOutputOptions {
+  if (typeof value === 'boolean') return value;
+  const data = object(
+    value,
+    ['snapshotId', 'model', 'kind', 'ids', 'offset', 'limit'],
+    'Topology output',
+  );
+  if (
+    data.kind !== undefined &&
+    !['vertex', 'edge', 'surface'].includes(data.kind as string)
+  )
+    throw new AgentError(
+      'invalid_input',
+      'Topology kind must be vertex, edge or surface.',
+    );
+  let ids: (number | readonly [number, number, ...number[]])[] | undefined;
+  if (data.ids !== undefined) {
+    if (
+      !data.kind ||
+      !Array.isArray(data.ids) ||
+      data.ids.length < 1 ||
+      data.ids.length > 200
+    )
+      throw new AgentError(
+        'invalid_input',
+        'Topology IDs require a kind and an array of 1 to 200 IDs.',
+      );
+    ids = data.ids.map(value => {
+      if (!Array.isArray(value)) return positiveInteger(value, 'Topology ID');
+      if (value.length < 2 || value.length > 32)
+        throw new AgentError(
+          'invalid_input',
+          'A topology path contains 2 to 32 positive integers.',
+        );
+      return value.map(part =>
+        positiveInteger(part, 'Topology path component'),
+      ) as [number, number, ...number[]];
+    });
+  }
+  const offset =
+    data.offset === undefined
+      ? undefined
+      : data.offset === 0
+        ? 0
+        : positiveInteger(data.offset, 'Topology offset');
+  const limit =
+    data.limit === undefined
+      ? undefined
+      : positiveInteger(data.limit, 'Topology limit');
+  if (limit !== undefined && limit > 200)
+    throw new AgentError('invalid_input', 'Topology limit is at most 200.');
+  return {
+    ...(data.snapshotId === undefined
+      ? {}
+      : {snapshotId: identifier(data.snapshotId, 'Snapshot ID')}),
+    ...(data.model === undefined
+      ? {}
+      : {model: string(data.model, 'Topology model')}),
+    ...(data.kind === undefined
+      ? {}
+      : {kind: data.kind as 'vertex' | 'edge' | 'surface'}),
+    ...(ids === undefined ? {} : {ids}),
+    ...(offset === undefined ? {} : {offset}),
+    ...(limit === undefined ? {} : {limit}),
+  };
+}
 
 export type AgentRequest =
   | Readonly<{operation: 'fs.list' | 'fs.read' | 'fs.stat'; path: string}>
@@ -131,15 +207,24 @@ export function parseApplyInput(value: unknown): ApplyInput {
         : {arguments: string(source.arguments, 'Function arguments')}),
     };
   }
+  const topology =
+    input.topology === undefined ? undefined : topologyOptions(input.topology);
+  if (
+    typeof topology === 'object' &&
+    topology.snapshotId &&
+    (files?.length || cursor)
+  )
+    throw new AgentError(
+      'invalid_input',
+      'Paging an existing snapshot cannot also change files or cursor.',
+    );
   return {
     ...(files === undefined ? {} : {files}),
     ...(cursor === undefined ? {} : {cursor}),
     ...(input.render === undefined
       ? {}
       : {render: boolean(input.render, 'render')}),
-    ...(input.topology === undefined
-      ? {}
-      : {topology: boolean(input.topology, 'topology')}),
+    ...(topology === undefined ? {} : {topology}),
   };
 }
 

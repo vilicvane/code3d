@@ -162,4 +162,22 @@ journal does not retain additional copies of full source submissions.
 
 Run `npm test --workspace @code3d/agent` from the repository root. Tests include
 real loopback HTTP exchanges, tampering, cross-agent isolation, concurrent retries
-and recovering the result after a lost response.
+and recovering the result after a lost response. The relay tests additionally
+exercise real WebSockets, restart/reconnect and App-side revocation. App browser
+tests run the real CLI against both storage backends, render PNGs, page topology,
+verify temporary/JSDoc arguments and check independent cursors.
+
+## App integration
+
+The App's Agents panel issues, copies and revokes grants. Configurations and
+receipt journals live only in that page. Network reconnects retain them; a page
+reload or project switch ends the session. A failed save retains accepted drafts
+and exposes Retry saving. Protected `.git` and `.code3d` paths cannot be modified.
+Text apply/read is bounded at 8 MiB per file; binary files can be read as artifacts.
+
+`AgentObserver` serializes offscreen requests through the existing model compiler,
+viewport source selection and screenshot exporter. It does not change the user's
+viewport or cursor. Collaborator cursors are Monaco decorations. Screenshot
+corner views and history remain deferred while viewport work proceeds separately.
+See the [CLI observation contract](../cli/README.md#observation-pages) for topology
+paging, identity scope, geometry coordinates and snapshot expiration.
