@@ -12,6 +12,8 @@ export function agentPrompt(
 - Modeling API: https://www.code3d.org/docs/reference/core/
 - Current limitations: https://www.code3d.org/docs/reference/limitations/
 
+Prefer the public @code3d/core API when modeling. Build models by composing basic topology and modeling operations. Use meaningful names, explicit parameters and readable intermediate steps so people and agents can understand the construction and continue editing it together. Use lower-level geometry only when the core API cannot express the required shape; preserve the modeling intent in the source.
+
 Get the current context through the CLI. The examples use ./project.c3d.json; replace it with your configuration filename.
 
 1. Read the App's current file and user selection, then explore the project:

@@ -403,6 +403,26 @@ kbd {
   white-space: nowrap;
 }
 
+.project-tree-agents {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+}
+
+.project-tree-agent {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--agent-color);
+}
+
+.project-tree-agent-count {
+  color: #bfc4b7;
+  font-size: 8px;
+}
+
 .editor-document {
   display: grid;
   grid-column: 2;
@@ -1827,10 +1847,14 @@ kbd {
   border-bottom: 1px solid var(--agent-color);
 }
 .monaco-editor .agent-caret {
-  border-left: 2px solid var(--agent-color);
-  margin-left: -1px;
+  background: var(--agent-color);
+  pointer-events: none;
+  user-select: none;
 }
 .monaco-editor .agent-cursor-label {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
   max-width: 160px;
   padding: 0 5px;
   border-radius: 3px 3px 3px 0;

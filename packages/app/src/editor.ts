@@ -50,6 +50,13 @@ export type ProjectEditorChange =
 
 export type ActiveFileChangeReason = 'switch' | 'rename' | 'delete' | 'reset';
 
+export type AgentLocation = Readonly<{
+  id: string;
+  name: string;
+  file: string;
+  color: number;
+}>;
+
 export type CompletionFocus = Readonly<{
   receiverRef?: SourceRef;
   definitionRef?: SourceRef;
@@ -233,6 +240,9 @@ export class CodeEditor {
     (change: ProjectEditorChange) => void
   >();
   private readonly cursorListeners = new Set<(source: EditorCursor) => void>();
+  private readonly agentLocationListeners = new Set<
+    (locations: readonly AgentLocation[]) => void
+  >();
   private readonly activeFileListeners = new Set<
     (path: string, reason: ActiveFileChangeReason) => void
   >();
@@ -302,6 +312,17 @@ export class CodeEditor {
     this.editor.onDidChangeModel(() => {
       for (const cursor of this.agentCursors.values()) {
         this.editor.layoutContentWidget(cursor.widget);
+      }
+    });
+    this.editor.onDidChangeConfiguration(event => {
+      if (
+        event.hasChanged(monaco.editor.EditorOption.lineHeight) ||
+        event.hasChanged(monaco.editor.EditorOption.cursorWidth) ||
+        event.hasChanged(monaco.editor.EditorOption.fontInfo) ||
+        event.hasChanged(monaco.editor.EditorOption.pixelRatio)
+      ) {
+        for (const cursor of this.agentCursors.values())
+          this.editor.layoutContentWidget(cursor.widget);
       }
     });
     this.editor.onDidChangeCursorSelection(({selection, reason}) => {
@@ -599,11 +620,36 @@ export class CodeEditor {
   setAgentCursor(id: string, name: string, ref?: SourceRef): void {
     let cursor = this.agentCursors.get(id);
     if (!cursor) {
+      const caret = document.createElement('div');
+      caret.className = `agent-caret agent-color-${agentColor(id)}`;
       const label = document.createElement('div');
-      label.className = `agent-cursor-label agent-color-${agentColor(id)}`;
+      label.className = 'agent-cursor-label';
+      caret.append(label);
       const widget: monaco.editor.IContentWidget = {
         getId: () => `agent-cursor-${id}`,
-        getDomNode: () => label,
+        getDomNode: () => caret,
+        beforeRender: () => {
+          const options = monaco.editor.EditorOption;
+          const ratio = this.editor.getOption(options.pixelRatio);
+          const lineWidth =
+            Math.min(
+              this.editor.getOption(options.cursorWidth),
+              this.editor.getOption(options.fontInfo)
+                .typicalHalfwidthCharacterWidth,
+            ) || 2;
+          // Match Monaco's normal line caret, including physical pixel rounding.
+          const width = Math.max(1, Math.floor(lineWidth * ratio)) / ratio;
+          const height = this.editor.getOption(options.lineHeight);
+          caret.style.width = `${width}px`;
+          caret.style.height = `${height}px`;
+          const ref = this.agentCursors.get(id)?.ref;
+          const column =
+            ref &&
+            this.documents.get(ref.file)?.model.getPositionAt(ref.start).column;
+          caret.style.transform =
+            width >= 2 && column && column > 1 ? 'translateX(-1px)' : '';
+          return {width, height};
+        },
         getPosition: () => {
           const ref = this.agentCursors.get(id)?.ref;
           const model = this.editor.getModel();
@@ -611,8 +657,7 @@ export class CodeEditor {
             ? {
                 position: model.getPositionAt(ref.start),
                 preference: [
-                  monaco.editor.ContentWidgetPositionPreference.ABOVE,
-                  monaco.editor.ContentWidgetPositionPreference.BELOW,
+                  monaco.editor.ContentWidgetPositionPreference.EXACT,
                 ],
               }
             : null;
@@ -644,6 +689,7 @@ export class CodeEditor {
         ?.model.deltaDecorations(cursor.decorations, []);
     this.editor.removeContentWidget(cursor.widget);
     this.agentCursors.delete(id);
+    this.emitAgentLocations();
   }
 
   private refreshAgentCursor(id: string): void {
@@ -662,7 +708,6 @@ export class CodeEditor {
               range: sourceRange(model, cursor.ref!),
               options: {
                 className: `agent-selection agent-color-${agentColor(id)}`,
-                beforeContentClassName: `agent-caret agent-color-${agentColor(id)}`,
                 hoverMessage: {value: cursor.name, isTrusted: false},
                 stickiness:
                   monaco.editor.TrackedRangeStickiness
@@ -673,6 +718,23 @@ export class CodeEditor {
         )
       : [];
     this.editor.layoutContentWidget(cursor.widget);
+    this.emitAgentLocations();
+  }
+
+  private emitAgentLocations(): void {
+    const locations = [...this.agentCursors].flatMap(([id, cursor]) =>
+      cursor.ref
+        ? [
+            {
+              id,
+              name: cursor.name,
+              file: cursor.ref.file,
+              color: agentColor(id),
+            },
+          ]
+        : [],
+    );
+    for (const listener of this.agentLocationListeners) listener(locations);
   }
 
   ownsFocus(): boolean {
@@ -821,6 +883,13 @@ export class CodeEditor {
   onChange(listener: (change: ProjectEditorChange) => void): () => void {
     this.changeListeners.add(listener);
     return () => this.changeListeners.delete(listener);
+  }
+
+  onAgentLocations(
+    listener: (locations: readonly AgentLocation[]) => void,
+  ): () => void {
+    this.agentLocationListeners.add(listener);
+    return () => this.agentLocationListeners.delete(listener);
   }
 
   onCursorOffset(

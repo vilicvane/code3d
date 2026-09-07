@@ -299,6 +299,9 @@ const projectDirectory = new ProjectTree(projectTree, {
   onFileContextMenu: (path, event) =>
     showProjectContextMenu(path, event.clientX, event.clientY),
 });
+codeEditor.onAgentLocations(locations =>
+  projectDirectory.setAgentLocations(locations),
+);
 replaceFileRoute(codeEditor.currentFile());
 const compiler = new ModelCompilerClient(projectFileSystem, language =>
   codeEditor.setProjectLanguage(language),
