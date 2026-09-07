@@ -1226,6 +1226,7 @@ export function createModelCompiler(
     latestTracedObject = undefined;
     evaluationOrder = 0;
     sourceReachOrder = 0;
+    let finishEvaluation: (() => void) | undefined;
     try {
       let modules = new Map<string, Record<string, unknown>>();
       let diagnostic: ModelDiagnostic | undefined;
@@ -1269,7 +1270,7 @@ export function createModelCompiler(
             ),
         });
         onEvaluate?.();
-        beginModelEvaluation();
+        finishEvaluation = beginModelEvaluation();
         const result = await evaluator.evaluate(
           'code3d-project:/model.js',
           bundle.source,
@@ -1424,6 +1425,7 @@ export function createModelCompiler(
       // Installed modules may retain model values (including private memoized
       // values). Drop this evaluation's references; Replicad's native wrappers
       // release shapes when their actual owners become unreachable.
+      finishEvaluation?.();
       tracedObjects.clear();
       sourceValueTraces.clear();
       sourceConstraintTraces.clear();

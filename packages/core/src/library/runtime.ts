@@ -64,6 +64,7 @@ import {
 } from './alignment-geometry.js';
 import {shellWithTopology} from './shell.js';
 import {
+  beginKernelOperationEvaluation,
   evaluateKernelOperation,
   type KernelArtifact,
   type KernelKeyPart,
@@ -449,10 +450,14 @@ type OperationTrace = Omit<ModelOperationInstrumentation, 'parameters'>;
 let valueTraces = new WeakMap<object, ValueTrace>();
 let operationTraces = new WeakMap<StoredOperation, OperationTrace>();
 
-/** Start a fresh, serial tooling evaluation without invalidating model geometry. */
-export function beginModelEvaluation(): void {
+/**
+ * Start a fresh, serial tooling evaluation without invalidating model geometry.
+ * Finish in finally after snapshotting to retain this evaluation's kernel work.
+ */
+export function beginModelEvaluation(): () => void {
   valueTraces = new WeakMap();
   operationTraces = new WeakMap();
+  return beginKernelOperationEvaluation();
 }
 
 function valueTrace(value: object): ValueTrace {
@@ -2389,8 +2394,7 @@ export class ModelObject<
       );
     }
     if (reference.whole) {
-      if (this.geometry)
-        return transformedBounds(this.geometry.value.shape, transform);
+      if (this.geometry) return transformedBounds(this.geometry, transform);
       const context = ModelObject.createSolveContext(this.children);
       return combineBounds(
         this.children.map(child =>
@@ -2403,23 +2407,11 @@ export class ModelObject<
     }
     if (reference.topology) {
       const topology = reference.topology;
-      const geometry = topology.source.requireGeometry().value;
-      return withTopologyShape(
-        geometry.shape,
-        geometry.topology,
+      return transformedBounds(
+        topology.source.requireGeometry(),
+        composeTransforms(transform, topology.transform),
         topology.selection,
-        shape => {
-          const scaled =
-            topology.scale === 1 ? shape : shape.scale(topology.scale);
-          try {
-            return transformedBounds(
-              scaled,
-              composeTransforms(transform, topology.transform),
-            );
-          } finally {
-            if (scaled !== shape) scaled.delete();
-          }
-        },
+        topology.scale,
       );
     }
     if (reference.kind === 'point') {
@@ -4049,16 +4041,49 @@ function constraintReferences(constraint: StoredConstraint): ModelObject[] {
   ].filter((model): model is ModelObject => !!model);
 }
 
+const boundsLifecycle: KernelValueLifecycle<LocalBounds> = {
+  retain: bounds => bounds,
+  instantiate: bounds => bounds,
+  release: () => undefined,
+};
+
 function transformedBounds(
-  shape: AnyShape,
+  geometry: ModelGeometry,
   transform: RigidTransform,
+  selection: TopologySelection = {kind: 'solid'},
+  scale = 1,
 ): LocalBounds {
-  const moved = shapeWithTransform(shape, transform);
-  try {
-    return shapeBounds(moved);
-  } finally {
-    moved.delete();
-  }
+  return evaluateKernelOperation(
+    'transformed-bounds',
+    [
+      transform.position,
+      transform.quaternion,
+      selection.kind,
+      selection.kind === 'solid' ? null : selection.id,
+      scale,
+    ],
+    [geometry],
+    boundsLifecycle,
+    () =>
+      withTopologyShape(
+        geometry.value.shape,
+        geometry.value.topology,
+        selection,
+        shape => {
+          const scaled = scale === 1 ? shape : shape.scale(scale);
+          try {
+            const moved = shapeWithTransform(scaled, transform);
+            try {
+              return shapeBounds(moved);
+            } finally {
+              moved.delete();
+            }
+          } finally {
+            if (scaled !== shape) scaled.delete();
+          }
+        },
+      ),
+  ).value;
 }
 
 function pointBounds(points: readonly Vec3[]): LocalBounds {

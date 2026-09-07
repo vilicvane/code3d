@@ -46,7 +46,7 @@ function instrumentation(start: number): ModelOperationInstrumentation {
 }
 
 test('starts fresh provenance for a retained model without changing its geometry or snapshots', () => {
-  beginModelEvaluation();
+  let finishEvaluation = beginModelEvaluation();
   const model = box(10, 12, 14);
   try {
     const firstTrace = instrumentation(0);
@@ -55,7 +55,8 @@ test('starts fresh provenance for a retained model without changing its geometry
     assert.deepEqual(first.sourceRefs, [firstTrace.sourceRef]);
     assert.deepEqual(first.parameters, firstTrace.parameters);
 
-    beginModelEvaluation();
+    finishEvaluation();
+    finishEvaluation = beginModelEvaluation();
     const fresh = createModelSnapshotter()(model);
     assert.deepEqual(fresh.sourceRefs, []);
     assert.deepEqual(fresh.parameters, []);
@@ -73,12 +74,13 @@ test('starts fresh provenance for a retained model without changing its geometry
     assert.deepEqual(first.sourceRefs, [firstTrace.sourceRef]);
     assert.deepEqual(first.operation.sourceRef, firstTrace.sourceRef);
   } finally {
+    finishEvaluation();
     disposeModelObjects([model]);
   }
 });
 
 test('clears cached constraint provenance without losing the stored relation or offset', () => {
-  beginModelEvaluation();
+  let finishEvaluation = beginModelEvaluation();
   const base = box(10, 12, 14);
   const target = box(20, 24, 28);
   const trace = instrumentation(10);
@@ -93,7 +95,8 @@ test('clears cached constraint provenance without losing the stored relation or 
     assert.deepEqual(first.constraints[0].sourceRefs, [trace.sourceRef]);
     assert.deepEqual(first.parameters, trace.parameters);
 
-    beginModelEvaluation();
+    finishEvaluation();
+    finishEvaluation = beginModelEvaluation();
     const second = createModelSnapshotter()(related);
     assert.deepEqual(second.constraints[0].sourceRefs, []);
     assert.deepEqual(second.constraints[0].parameters, []);
@@ -106,6 +109,7 @@ test('clears cached constraint provenance without losing the stored relation or 
     assert.deepEqual(Reflect.get(shifted, 'sourceRefs'), []);
     assert.deepEqual(Reflect.get(shifted, 'parameters'), []);
   } finally {
+    finishEvaluation();
     disposeModelObjects([base, target, related]);
   }
 });

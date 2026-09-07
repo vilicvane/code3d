@@ -398,10 +398,18 @@ integration surface evolves with the App during prototyping and does not promise
 API stability. It includes topology source identities, assembly transforms, and
 calculated-anchor frames alongside origin and spatial-operation snapshots. It
 requires installing OpenCascade from that same package dependency graph.
-Call `beginModelEvaluation(): void` before each serial source
+Call `beginModelEvaluation(): () => void` before each serial source
 evaluation to reset source locations, parameter provenance, and operation
-traces. Geometry, model identity, relations, and kernel caches are unaffected.
-Already-created snapshots keep their previous evaluation's metadata.
+traces. Call the returned function in `finally`, after creating snapshots.
+Geometry, model identity, and relations remain unchanged; already-created
+snapshots keep their previous evaluation's metadata.
+
+The kernel cache retains the complete working set of the latest evaluation,
+including exact transformed-bound queries and render meshes. During evaluation,
+both the previous and current working sets are protected from eviction. Finishing
+keeps the current set and at most 256 unused historical entries, releasing older
+native values. This scales retention with the current model without accumulating
+every edited revision. Calls outside an evaluation use the bounded history.
 
 Packages may retain model values privately. The App therefore drops its own
 references after creating snapshots instead of forcibly disposing every model
