@@ -104,7 +104,7 @@ test('selected lines batch constraints once, toggle them off and undo either edi
   assert.equal(await text(page), original);
 });
 
-test('mixed selections fill missing constraints and then remove the selected group', async t => {
+test('mixed selections remove existing constraints without filling the selected group', async t => {
   const page = await open(
     t,
     lines.replace(']]);', "]], {constraints:[['horizontal',5]]});"),
@@ -117,16 +117,14 @@ test('mixed selections fill missing constraints and then remove the selected gro
   });
   assert.equal(await horizontal.getAttribute('aria-pressed'), 'mixed');
   await horizontal.click();
-  await waitForSource(page, /'horizontal',\s*6/);
-  await page.getByText('Ready', {exact: true}).waitFor();
-  assert.equal((await text(page)).match(/'horizontal'/g)?.length, 2);
-  assert.equal(await horizontal.getAttribute('aria-pressed'), 'true');
-  await horizontal.click();
   await page
     .locator('.constraint-badge[data-kind="horizontal"]')
     .first()
     .waitFor({state: 'detached'});
   assert.doesNotMatch(await text(page), /'horizontal'/);
+  await page.keyboard.press('Control+z');
+  await waitForSource(page, /'horizontal',\s*5/);
+  assert.doesNotMatch(await text(page), /'horizontal',\s*6/);
 });
 
 test('Fixed captures a solved point position instead of returning to its source seed', async t => {

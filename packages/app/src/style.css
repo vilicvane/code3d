@@ -1398,6 +1398,16 @@ kbd {
 .drawing-overlay {
   pointer-events: none;
 }
+.sketch-selection-box {
+  pointer-events: none;
+  fill: var(--acid);
+  fill-opacity: 0.08;
+  stroke: var(--acid);
+  stroke-width: 1;
+}
+.sketch-selection-box.crossing {
+  stroke-dasharray: 4 3;
+}
 .snap-marker,
 .draft-marker {
   stroke: var(--acid);

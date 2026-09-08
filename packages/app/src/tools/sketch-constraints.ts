@@ -8,6 +8,16 @@ import {sameSketchPoint, type SketchPoint} from './sketch-snap';
 import {sketchCurveGeometry, sketchCurvePosition} from '@code3d/core/tooling';
 import type {DrawingDimension} from './drawing-dimensions';
 
+/** Direct relation targets; a line constraint does not implicitly target its endpoints. */
+export function sketchConstraintTargets(
+  layer: string,
+  [kind, target]: SketchConstraint<SketchPointAddress>,
+): readonly SketchPointAddress[] {
+  if (typeof target === 'number') return [{layer, id: target}];
+  if (kind === 'coincident' || kind === 'midpoint') return target;
+  return [target];
+}
+
 export const sketchConstraintNames = {
   fixed: 'Fixed',
   horizontal: 'Horizontal',

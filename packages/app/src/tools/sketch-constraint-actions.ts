@@ -13,13 +13,14 @@ import type {
 } from '../model/sketch-drag';
 import type {SketchChange} from './sketch-source';
 import type {SketchSegment} from './sketch-segments';
+import type {SketchPick} from './sketch-selection';
 import {sameSketchPoint} from './sketch-snap';
 import {
   sketchConstraintDimensions,
   sketchConstraintNames,
+  sketchConstraintTargets,
 } from './sketch-constraints';
 
-export type SketchPick = SketchPointAddress | SketchSegment;
 type Constraint = SketchConstraint<SketchPointAddress>;
 export type SketchConstraintAction = Readonly<{
   kind: Constraint[0];
@@ -29,6 +30,7 @@ export type SketchConstraintAction = Readonly<{
   active: boolean | 'mixed';
   dimension?: DrawingDimension;
   value?: number;
+  related: readonly SketchPointAddress[];
   create(value?: number): Extract<SketchChange, {kind: 'constrain'}>;
 }>;
 
@@ -57,12 +59,17 @@ export function sketchConstraintActions(
   const curves = selection
     .filter((p): p is SketchSegment => 'start' in p)
     .filter((p, i, all) => all.findIndex(q => sameSketchPoint(p, q)) === i);
-  if (
-    points.some(p => p.layer !== local.id && !referenceable.has(p.layer)) ||
-    curves.some(p => p.layer !== local.id)
-  )
-    return [];
   const actions: SketchConstraintAction[] = [];
+  const selected = [...points, ...curves];
+  const canonical = (p: SketchPointAddress) =>
+    entity(p).kind === 'point' ? resolve(p) : p;
+  const targets = (c: Constraint) =>
+    sketchConstraintTargets(local.id, c).map(canonical);
+  const removals = local.constraints.flatMap((c, index) =>
+    targets(c).some(p => selected.some(q => sameSketchPoint(p, q)))
+      ? [{c, index}]
+      : [],
+  );
   const identity = ([kind, data]: Constraint): string => {
     const key = (p: SketchPointAddress) => JSON.stringify(resolve(p));
     if (kind === 'fixed') return `${kind}:${key(data)}`;
@@ -80,18 +87,26 @@ export function sketchConstraintActions(
     value = 0,
   ) => {
     const name = sketchConstraintNames[kind];
-    const dimension = sketchConstraintDimensions[kind];
+    const dimension = constraints(value).length
+      ? sketchConstraintDimensions[kind]
+      : undefined;
     const pending = (value: number) =>
       constraints(value).filter(c => !existing.has(identity(c)));
-    const targets = pending(value);
-    const active = !targets.length
-      ? true
-      : targets.length < constraints(value).length
-        ? 'mixed'
-        : false;
+    const additions = pending(value);
+    const removed = removals.filter(({c}) => c[0] === kind);
+    const affected = removed.length
+      ? removed.map(({c}) => c)
+      : constraints(value);
+    const affectedTargets = affected.flatMap(targets);
+    const active = removed.length
+      ? selected.every(p => affectedTargets.some(q => sameSketchPoint(p, q)))
+        ? true
+        : 'mixed'
+      : false;
     const mismatch =
+      !active &&
       kind === 'fixed' &&
-      targets.some(
+      additions.some(
         ([kind, ref]) =>
           kind === 'fixed' &&
           data
@@ -109,16 +124,26 @@ export function sketchConstraintActions(
       value,
       disabled,
       active,
-      title: `${active === true ? 'Remove' : 'Add'} ${name}${kind === 'x' || kind === 'y' ? ' · Fix the coordinate value, not the movement direction' : kind === 'midpoint' && points.length === 3 ? ' · First selected point is the center of the other two' : ''}${curves.length ? ' · Applies to whole source entities' : ''}${mismatch ? ' · The displayed expression coordinate differs from its source value; use X/Y coordinate constraints' : active === 'mixed' ? ' · Apply to remaining selected entities' : ''}`,
+      related: affectedTargets.flatMap(p => {
+        const e = entity(p);
+        return [
+          p,
+          ...(e.kind === 'line'
+            ? e.points
+            : e.kind === 'arc'
+              ? [e.center, ...e.points]
+              : e.kind === 'circle'
+                ? [e.center]
+                : []),
+        ];
+      }),
+      title: `${active ? 'Remove' : 'Add'} ${name}${kind === 'x' || kind === 'y' ? ' · Fix the coordinate value, not the movement direction' : kind === 'midpoint' && points.length === 3 ? ' · First selected point is the center of the other two' : ''}${curves.length ? ' · Applies to whole source entities' : ''}${mismatch ? ' · The displayed expression coordinate differs from its source value; use X/Y coordinate constraints' : active === 'mixed' ? ' · Remove existing constraints touching the selection' : ''}`,
       create: (entered = value) => {
-        if (active === true) {
-          const targets = new Set(constraints(entered).map(identity));
+        if (active) {
           return {
             kind: 'constrain',
             constraints: [],
-            removedConstraints: local.constraints.flatMap((c, i) =>
-              targets.has(identity(c)) ? [i] : [],
-            ),
+            removedConstraints: removed.map(({index}) => index),
             // Removing a relation releases the displayed geometry; it must not
             // restore an old unsolved seed. Expressions remain source-owned.
             data: data
@@ -149,9 +174,19 @@ export function sketchConstraintActions(
       },
     });
   };
+  const finish = () => {
+    for (const {c} of removals)
+      if (!actions.some(a => a.kind === c[0])) add(c[0], () => [], c[2] ?? 0);
+    return actions;
+  };
+  if (
+    points.some(p => p.layer !== local.id && !referenceable.has(p.layer)) ||
+    curves.some(p => p.layer !== local.id)
+  )
+    return finish();
   if (points.length && !curves.length) {
     const owned = points.filter(p => p.layer === local.id);
-    if (owned.length) {
+    if (owned.length === points.length) {
       add('fixed', () => owned.map(p => ['fixed', p]));
       for (const [axis, index] of [
         ['x', 0],
@@ -177,7 +212,7 @@ export function sketchConstraintActions(
     )
       add('midpoint', () => [['midpoint', [points[0], ...line.points]]]);
   }
-  if (points.length || !curves.length) return actions;
+  if (points.length || !curves.length) return finish();
   if (lines.length === curves.length) {
     for (const kind of ['horizontal', 'vertical'] as const)
       add(kind, () => lines.map(p => [kind, p.id]));
@@ -213,5 +248,5 @@ export function sketchConstraintActions(
         );
     }
   }
-  return actions;
+  return finish();
 }

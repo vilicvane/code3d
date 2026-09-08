@@ -193,7 +193,12 @@ implementation context and historical outcomes, not a competing work queue.
   icon toolbar orders selection, drawing, modification and view controls; rectangle
   variants share a remembered entry. Right dragging pans without cancelling a draft;
   the permanent lower-left instructions are gone, while errors/read-only reasons remain.
-  Shift-click multi-selection exposes existing point/line/curve constraint actions;
+  Shift-click and analytic box selection expose point/line/curve constraint actions:
+  left-to-right contains whole intervals, right-to-left intersects finite geometry,
+  Shift adds, and Escape restores the pre-gesture selection. Existing local relation
+  removal uses the selection's union, including mixed geometry; mixed state removes
+  instead of filling missing constraints. Additions require the complete selection
+  to be applicable, and hovering highlights all affected relation partners.
   dimensions share drawing numeric entry and a batch is one source edit/undo.
   Selection Delete retains interval trimming and orphan cleanup. New inter-line
   constraint kinds remain later work. The toolbar has native hover
