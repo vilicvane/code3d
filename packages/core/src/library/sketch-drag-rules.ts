@@ -141,7 +141,6 @@ type PointPolicy = Readonly<
   | {
       kind: 'endpoint';
       anchors: readonly number[];
-      arcs: readonly number[];
     }
 >;
 
@@ -387,22 +386,24 @@ function pointSession(
   const {reference} = context;
   const translations = policies.filter(p => p.kind === 'translation');
   const endpoints = policies.filter(p => p.kind === 'endpoint');
-  const anchors = [...new Set(endpoints.flatMap(p => p.anchors))];
+  // An endpoint can also be another curve's center. Its incident arcs retain
+  // their center preference regardless of the point's other motion roles.
+  const arcs = reference.arcs.flatMap((arc, index) =>
+    context.target.kind === 'point' && arc.points.includes(context.target.point)
+      ? [index]
+      : [],
+  );
+  const centers = new Set(arcs.map(index => reference.arcs[index].center));
+  const anchors = [...new Set(endpoints.flatMap(p => p.anchors))].filter(
+    point => !centers.has(point),
+  );
   const translated = [...new Set(translations.flatMap(p => p.points))];
   return (current, updated) => {
     const target = updated as Extract<SketchSolveTarget, {kind: 'point'}>;
     const suggestions = new Map<number, SketchPosition[]>();
     const radii = new Map<number, number>();
     const from = reference.points[target.point].position;
-    for (const point of translated)
-      suggest(
-        suggestions,
-        point,
-        reference.points[point].position.map(
-          (v, axis) => v + target.position[axis] - from[axis],
-        ) as [number, number],
-      );
-    for (const index of endpoints.flatMap(p => p.arcs)) {
+    for (const index of arcs) {
       const arc = reference.arcs[index];
       const center = reference.points[arc.center].position;
       const dimension = reference.constraints.find(
@@ -443,28 +444,43 @@ function pointSession(
         suggest(suggestions, point, radialPosition(center, position, radius));
       }
     }
-    return {
-      problem: seed(current, suggestions, radii),
-      stages: [
-        () => [{...target, weight: 1}],
-        reached => [
-          ...anchors.map(point => anchor(reference, point)),
-          ...translated
-            .filter(p => p !== target.point)
-            .map(p => ({
-              ...anchor(reference, p),
-              position: reference.points[p].position.map(
-                (v, axis) =>
-                  v - from[axis] + reached.points[target.point].position[axis],
-              ) as [number, number],
-            })),
-          ...translations.flatMap(p => p.radii),
-        ],
-        ...(translations.length
-          ? [() => translations.flatMap(p => p.exterior)]
-          : []),
+    // Seed a center's followers from the same proposed position as the center.
+    // Mixing a projected arc endpoint with a raw mouse translation distorts
+    // the attached arc before its translation stage can preserve its shape.
+    const endpoint = suggestions.get(target.point);
+    const destination = endpoint ? averagePosition(endpoint) : target.position;
+    for (const point of translated) {
+      if (point === target.point && endpoint) continue;
+      suggest(
+        suggestions,
+        point,
+        reference.points[point].position.map(
+          (v, axis) => v + destination[axis] - from[axis],
+        ) as [number, number],
+      );
+    }
+    const stages: [SketchDragStage, ...SketchDragStage[]] = [
+      () => [{...target, weight: 1}],
+      reached => [
+        ...anchors.map(point => anchor(reference, point)),
+        ...translated
+          .filter(p => p !== target.point)
+          .map(p => ({
+            ...anchor(reference, p),
+            position: reference.points[p].position.map(
+              (v, axis) =>
+                v - from[axis] + reached.points[target.point].position[axis],
+            ) as [number, number],
+          })),
+        ...translations.flatMap(p => p.radii),
       ],
-    };
+      ...(translations.length
+        ? [() => translations.flatMap(p => p.exterior)]
+        : []),
+    ];
+    if (centers.size)
+      stages.unshift(() => [...centers].map(point => anchor(reference, point)));
+    return {problem: seed(current, suggestions, radii), stages};
   };
 }
 
@@ -532,7 +548,7 @@ function endpointPolicy(
     )
       controls.add(c.points[0]);
   controls.delete(point);
-  if (controls.size) return {kind: 'endpoint', anchors: [...controls], arcs};
+  if (controls.size) return {kind: 'endpoint', anchors: [...controls]};
   const graph = neighbors(problem);
   const distance = new Map([[point, 0]]);
   for (const [p, d] of distance)
@@ -545,7 +561,7 @@ function endpointPolicy(
       farthest = p;
       max = distance.get(p)!;
     }
-  return {kind: 'endpoint', anchors: farthest < 0 ? [] : [farthest], arcs};
+  return {kind: 'endpoint', anchors: farthest < 0 ? [] : [farthest]};
 }
 
 /** Recognize the actual four-edge/midpoint structure, not tool creation history. */
@@ -668,6 +684,7 @@ function seed(
     points: problem.points.map((p, index) => {
       const values = suggestions.get(index);
       if (!values) return p;
+      const position = averagePosition(values);
       return {
         ...p,
         position: p.position.map((v, axis) =>
@@ -679,8 +696,7 @@ function seed(
               (c.kind === 'fixed' || c.kind === (axis === 0 ? 'x' : 'y')),
           )
             ? v
-            : values.reduce((sum, value) => sum + value[axis], 0) /
-              values.length,
+            : position[axis],
         ) as [number, number],
       };
     }),
@@ -690,4 +706,10 @@ function seed(
         : {...arc, radius: radii.get(index)!},
     ),
   };
+}
+
+function averagePosition(values: readonly SketchPosition[]): SketchPosition {
+  return [0, 1].map(
+    axis => values.reduce((sum, value) => sum + value[axis], 0) / values.length,
+  ) as [number, number];
 }
