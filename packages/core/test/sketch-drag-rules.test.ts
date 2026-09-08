@@ -88,6 +88,82 @@ const connectedConstraints: readonly SketchConstraint[] = [
   ['horizontal', 14],
 ];
 
+test('dragging circle and arc centers preserves their radii before following the mouse', () => {
+  for (const kind of ['circle', 'arc'] as const) {
+    const before = snapshot(
+      [
+        ['point', 1, [0, 0]],
+        ['point', 2, [10, 0]],
+        ['point', 3, [0, 10]],
+        kind === 'arc'
+          ? ['arc', 4, [1, 10, 2, 3, 'ccw']]
+          : ['circle', 4, [1, 10]],
+        ['circle', 5, [1, 3]],
+      ],
+      [['fixed', 2]],
+    );
+    let moved = before;
+    for (const [target, expected] of [
+      [
+        [10, 20],
+        [10, 10],
+      ],
+      [
+        [30, 0],
+        [20, 0],
+      ],
+      [
+        [-2, -16],
+        [4, -8],
+      ],
+      [
+        [-10, 0],
+        [0, 0],
+      ],
+    ] as const) {
+      moved = solveSketchSnapshot([moved], {
+        id: 1,
+        position: target,
+        reference: before,
+      });
+      const curve = moved.entities.find(e => e.id === 4)!;
+      assert.ok(curve.kind === 'circle' || curve.kind === 'arc');
+      close([curve.radius], [10]);
+      close(point(moved, 1), expected);
+      close(point(moved, 2), [10, 0]);
+      close(point(moved, 3), [expected[0], expected[1] + 10]);
+      const concentric = moved.entities.find(e => e.id === 5)!;
+      assert.equal(concentric.kind, 'circle');
+      close([concentric.radius], [3]);
+      assert.deepEqual(moved.constraints, before.constraints);
+      assert.equal(moved.degreesOfFreedom, before.degreesOfFreedom);
+      assert.deepEqual(solveSketchSnapshot([moved]).entities, moved.entities);
+    }
+    assert.deepEqual(moved.entities, before.entities);
+    const resized = solveSketchSnapshot([moved], {id: 4, position: [20, 0]});
+    const resizedCurve = resized.entities.find(e => e.id === 4)!;
+    assert.ok(resizedCurve.kind === 'circle' || resizedCurve.kind === 'arc');
+    close([resizedCurve.radius], [20]);
+  }
+});
+
+test('center radius preference yields to coordinate locks that make the original radius impossible', () => {
+  const before = snapshot(arcEntries, [
+    ['fixed', 2],
+    ['y', 1, 0],
+  ]);
+  const moved = solveSketchSnapshot([before], {
+    id: 1,
+    position: [30, 20],
+    reference: before,
+    locks: [{id: 1, parameter: 0, value: 30}],
+  });
+  close(point(moved, 2), [10, 0]);
+  close(point(moved, 1), [30, 0]);
+  close([moved.entities.find(e => e.kind === 'arc')!.radius], [20]);
+  assert.deepEqual(moved.constraints, before.constraints);
+});
+
 test('ordered stages retain achieved soft compromises and hard locks without mutating subsequent frames', () => {
   const problem: SketchSolveProblem = {
     points: [
@@ -189,12 +265,12 @@ test('center translation uses the reachable mouse position and yields to fixed e
     position: [0, 15],
     reference: fixed,
   });
-  close(point(moved, 10), [0, 15]);
+  close(point(moved, 10), [
+    10 - 100 / Math.hypot(10, 5),
+    10 + 50 / Math.hypot(10, 5),
+  ]);
   close(point(moved, 15), [10, 10]);
-  close(
-    [moved.entities.find(e => e.kind === 'arc')!.radius],
-    [Math.hypot(10, 5)],
-  );
+  close([moved.entities.find(e => e.kind === 'arc')!.radius], [10]);
   assert.deepEqual(moved.constraints, fixed.constraints);
 });
 
@@ -373,7 +449,7 @@ test('center translation does not override an additional fixed endpoint or coord
     reference: before,
   });
   close(point(moved, 2), [10, 0]);
-  close(point(moved, 1), [2, 3]);
+  close(point(moved, 1), [10 - 80 / Math.hypot(8, 3), 30 / Math.hypot(8, 3)]);
   const locked = solveSketchSnapshot([snapshot(arcEntries)], {
     id: 1,
     position: [2, 3],
