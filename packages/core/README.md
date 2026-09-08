@@ -355,6 +355,14 @@ The outermost painted group wins within that composition; shared parts retain
 their own colors when used elsewhere. Painting the same value again uses the
 latest color. Previews and exports use the same effective colors.
 
+Colors accept CSS names, `#RGB`, `#RGBA`, `#RRGGBB`, `#RRGGBBAA`,
+`rgb(...)` and `rgba(...)`. Alpha controls opacity: `0` is fully transparent,
+`1` is opaque. For example, `.paint('#f008')` is equivalent to
+`.paint('#ff000088')`, and `.paint('rgba(255, 0, 0, 0.5)')` is half-opaque red.
+RGB functions also accept percentage channels and space-separated values with
+slash alpha, such as `rgb(100% 0% 0% / 50%)`. Previews, PNG images, STEP and
+3MF exports preserve the specified opacity; STL contains geometry only.
+
 ```ts
 import {box, group} from '@code3d/core';
 

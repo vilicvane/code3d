@@ -222,6 +222,50 @@ export default group([base, group([top]).paint('#00ff00')]).paint('#345678');`;
   }
 });
 
+test('STEP and 3MF preserve the RGB and alpha of authored paint formats', async () => {
+  for (const [paint, hex, alpha] of [
+    ['#1a28', '#11aa2288', 8 / 15],
+    ['#11223344', '#11223344', 68 / 255],
+    ['rgb(100%, 50%, 0%)', '#ff8000', 1],
+    ['rgba(17, 170, 34, 0.25)', '#11aa2240', 0.25],
+    ['rgb(17 170 34 / 25%)', '#11aa2240', 0.25],
+    ['#12345600', '#12345600', 0],
+    ['rebeccapurple', '#663399', 1],
+  ] as const) {
+    const model = box(2, 4, 6).paint(paint);
+    const geometry = retainModelGeometry([model]);
+    try {
+      const instances = collectExportInstances(
+        scene(createModelSnapshotter()(model)),
+      );
+      const {model: xml} = read3mf(
+        await exportModel(geometry, instances, {
+          ...defaults,
+          format: '3mf',
+        }).arrayBuffer(),
+      );
+      assert.ok(xml.includes(`displaycolor="${hex}"`), paint);
+      const step = await exportModel(geometry, instances, defaults).text();
+      const reference = await exportModel(
+        geometry,
+        instances.map(instance => ({...instance, color: hex.slice(0, 7)})),
+        defaults,
+      ).text();
+      const color = /(?:COLOUR_RGB|DRAUGHTING_PRE_DEFINED_COLOUR)\([^)]*\)/g;
+      assert.ok(step.match(color)?.length, paint);
+      assert.deepEqual(step.match(color), reference.match(color), paint);
+      const transparency = step.match(/SURFACE_STYLE_TRANSPARENT\(([^)]+)\)/);
+      assert.ok(
+        Math.abs(Number(transparency?.[1] ?? 0) - (1 - alpha)) < 1e-7,
+        paint,
+      );
+    } finally {
+      geometry.dispose();
+      disposeModelObjects([model]);
+    }
+  }
+});
+
 for (const mode of ['builtin', 'installed'] as const) {
   test(`exports with the ${mode} project kernel across cached npm model edits and releases old geometry`, async () => {
     const compiler = await createTestProjectCompiler(server);
