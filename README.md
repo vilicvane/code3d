@@ -13,6 +13,8 @@ The viewport is more than a preview: it understands source expressions,
 runtime objects, and model topology. Interactive changes return as readable
 TypeScript, so the model never splits into code and hidden UI state.
 
+![Code3D App showing TypeScript source alongside an iPhone model and an agent render preview](./assets/readme/iphone-modeling.png)
+
 ## Code and geometry, connected
 
 - Build with ordinary TypeScript: parameters, functions, control flow, and
