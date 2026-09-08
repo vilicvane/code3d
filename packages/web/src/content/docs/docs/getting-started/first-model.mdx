@@ -19,16 +19,18 @@ import {appUrl} from '../../../../lib/site';
 
 ## Read the model
 
-`box(36, 4, 24)` creates a box with dimensions along X, Y, and Z.
-`.fillet(1)` rounds all its edges with radius 1. The result is bound to
-`base`.
+`box(36, baseHeight, 24)` creates a box with dimensions along X, Y, and Z.
+`.fillet(1)` rounds all its edges with radius 1. Both the box and the cylinder
+start centered at their local origin.
 
-`cylinder(4, 14)` creates a cylinder of radius 4 and height 14 along Y.
-Its relation translates its matching lower bound onto the base's up bound. The
-`offset(-10, 0, 0)` moves it within that relation's target frame.
+`originOffset(dx, dy, dz)` subtracts the offset from every point's coordinates.
+For the base, `baseHeight / 2` moves its geometry down so its top is at Y = 0.
+For the post, `-postHeight / 2` moves its geometry up so its bottom is at Y = 0,
+and the X offset of `10` places its axis at X = −10.
 
-`group([base, post])` brings the parts together and resolves their relative
-placement. Grouping keeps separate parts; it does not fuse them into one solid.
+`group([base, post])` combines the parts with their origins coincident. That
+shared zero point is also the group's origin. Grouping keeps separate parts;
+it does not fuse them into one solid.
 
 ## Follow the source
 
@@ -37,8 +39,9 @@ Move to `post` to inspect the cylinder. Other parts may stay dimmed to provide
 context. Move into the
 `group` call to see the assembly.
 
-A part viewed alone appears in its own local frame. You see its relation to
-other parts when you inspect the composition that contains them.
+A part viewed alone appears in its own local frame, including the geometry
+coordinates set by `originOffset()`. In this assembly, those local origins
+coincide, so grouping needs no further placement.
 
 ## Change a dimension
 
@@ -49,10 +52,14 @@ to your workspace.
 Place the cursor in the `box` arguments to explore the parameter tool.
 Parameters that can be traced to editable source can also be changed there.
 
-## Adjust the relation
+Change `baseHeight` or `postHeight` to change a part's height. The same value
+sets its origin offset, so the contact plane stays at Y = 0.
 
-Place the cursor in `offset(-10, 0, 0)`. Use the position tool to adjust
-the relation visually. Watch the numeric source change with your adjustment.
+## Adjust the origin
+
+Place the cursor in `originOffset(10, -postHeight / 2, 0)`. Use the position tool
+to adjust the post's origin visually. Increasing the X offset moves its
+geometry toward negative X. Watch the numeric source change with your adjustment.
 The App writes the edit back to TypeScript and formats it.
 
 Use Undo to revert an edit. During a position drag, Escape cancels the temporary
@@ -65,5 +72,6 @@ Code3D and can be reset or refreshed with a new version of the application.
 Create a file outside `/examples` and paste the source there to keep a model
 you want to develop.
 
-Continue with [the App guide](../app/) or
-[relations](../../guides/relations/).
+Continue with [the App guide](../app/) or use
+[relations](../../guides/relations/) to place parts by geometric contacts and
+alignment.

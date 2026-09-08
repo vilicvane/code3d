@@ -64,12 +64,19 @@ export const twistKnob = definePrimitive(
   },
 );
 
-const base = box(58, 3, 28).paint('#353a33');
-const tall = twistKnob(10, 3, 14)
-  .relate(part => part.on(base.up).offset(-15, 0, 0))
+const baseHeight = 3;
+const tallHeight = 14;
+const shortHeight = 8;
+
+// The shared origin is on the base's top plane, between the two knobs.
+const base = box(58, baseHeight, 28)
+  .originOffset(0, baseHeight / 2, 0)
+  .paint('#353a33');
+const tall = twistKnob(10, 3, tallHeight)
+  .originOffset(15, -tallHeight / 2, 0)
   .paint('#d8ff3e');
-const short = twistKnob(10, 3, 8, 30)
-  .relate(part => part.on(base.up).offset(15, 0, 0))
+const short = twistKnob(10, 3, shortHeight, 30)
+  .originOffset(-15, -shortHeight / 2, 0)
   .paint('#8ed5d1');
 
 export const customPrimitivesExample = group(
