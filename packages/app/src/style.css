@@ -23,6 +23,29 @@
   box-sizing: border-box;
 }
 
+:where(
+  :not(
+    .monaco-editor,
+    .monaco-editor *,
+    .monaco-diff-editor,
+    .monaco-diff-editor *,
+    .monaco-component,
+    .monaco-component *
+  )
+) {
+  scrollbar-width: thin;
+  scrollbar-color: #41473b transparent;
+
+  &:hover {
+    scrollbar-color: #59614f transparent;
+  }
+}
+
+/* Stop the inherited color at Monaco roots, including detached widgets. */
+:where(.monaco-editor, .monaco-diff-editor, .monaco-component) {
+  scrollbar-color: auto;
+}
+
 html,
 body,
 #app {
@@ -1001,19 +1024,6 @@ kbd {
 
 .app-dialog::backdrop {
   background: #0008;
-}
-
-.agent-nav,
-.app-dialog,
-.app-dialog textarea {
-  scrollbar-width: thin;
-  scrollbar-color: #41473b transparent;
-}
-
-.agent-nav:hover,
-.app-dialog:hover,
-.app-dialog textarea:hover {
-  scrollbar-color: #59614f transparent;
 }
 
 .app-dialog-content {
@@ -2098,8 +2108,6 @@ kbd {
   margin-inline: -10px;
   padding-inline: 10px;
   overflow: auto;
-  scrollbar-width: thin;
-  scrollbar-color: #414839 transparent;
 }
 
 .elements-heading {
@@ -2882,8 +2890,6 @@ kbd {
   gap: 8px;
   padding: 2px 2px 6px;
   overflow-x: auto;
-  scrollbar-width: thin;
-  scrollbar-color: #41473b transparent;
 }
 .agent-render-thumb {
   display: grid;
