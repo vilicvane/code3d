@@ -60,3 +60,25 @@ export function parseAppMessage(value: unknown): AppMessage {
     };
   throw new AgentError('invalid_message', 'Unknown App message.');
 }
+
+/** This attempt's forwarding state, never the historical state of a request ID. */
+export type RequestDelivery = 'not_sent' | 'unknown';
+export type TransportFailure = {
+  code: string;
+  message: string;
+  delivery: RequestDelivery;
+};
+export function parseTransportFailure(value: unknown): TransportFailure {
+  const data = object(
+    value,
+    ['code', 'message', 'delivery'],
+    'Transport failure',
+  );
+  if (data.delivery !== 'not_sent' && data.delivery !== 'unknown')
+    throw new AgentError('invalid_response', 'Invalid request delivery state.');
+  return {
+    code: identifier(data.code, 'Transport error code'),
+    message: string(data.message, 'Transport error message'),
+    delivery: data.delivery,
+  };
+}

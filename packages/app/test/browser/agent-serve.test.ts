@@ -5,27 +5,13 @@ import {tmpdir} from 'node:os';
 import {join, extname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {chromium} from 'playwright-core';
-import {Client} from '@modelcontextprotocol/sdk/client/index.js';
-import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
+import {runCli, startServe} from '../../../cli/test/process.ts';
 import {type AgentConfig} from '@code3d/agent';
 import {createLocalBridge} from '../../../cli/bld/bridge.js';
 import {reserveLocalPort} from './local-port.ts';
 
-function output(result: Record<string, unknown>): {
-  requestId: string;
-  ok: boolean;
-  data: Record<string, unknown>;
-  error?: unknown;
-} {
-  const text = (result.content as {type: string; text?: string}[]).find(
-    content => content.type === 'text',
-  );
-  assert.ok(text?.text);
-  return JSON.parse(text.text!);
-}
-
 test(
-  'HTTPS App prompt starts a real MCP server, permits local access, renders models and persists editable agent ports',
+  'HTTPS App prompt starts a real CLI service, permits local access, renders models and persists editable agent ports',
   {timeout: 180_000},
   async t => {
     const browser = await chromium.connectOverCDP(
@@ -42,7 +28,7 @@ test(
       });
     });
     const origin = 'https://www.code3d.org';
-    const prefix = '/__agent-mcp__/';
+    const prefix = '/__agent-serve__/';
     const directory = fileURLToPath(new URL('../../dist/', import.meta.url));
     // Serve this commit's production build under a real secure origin in an isolated
     // context. No public deployment or browser security bypass is involved.
@@ -119,30 +105,23 @@ test(
     assert.equal(alice.version, 2);
     assert.equal(alice.origin, origin);
     assert.equal(alice.port, firstPort.port);
-    const temp = await mkdtemp(join(tmpdir(), 'code3d-app-mcp-'));
+    const temp = await mkdtemp(join(tmpdir(), 'code3d-app-serve-'));
     t.after(() => rm(temp, {recursive: true, force: true}));
     const configFile = join(temp, 'project.c3d.json');
     const launch = async () => {
       await writeFile(configFile, JSON.stringify(alice), {mode: 0o600});
-      const client = new Client({
-        name: 'code3d-browser-test',
-        version: '1.0.0',
-      });
-      t.after(() => client.close());
-      const transport = new StdioClientTransport({
-        command: process.execPath,
-        args: [
-          fileURLToPath(new URL('../../../cli/bld/main.js', import.meta.url)),
-          configFile,
-          'mcp',
-        ],
-        stderr: 'pipe',
-      });
-      transport.stderr?.on('data', () => {});
-      await client.connect(transport);
-      return client;
+      return startServe(t, configFile);
     };
-    let client = await launch();
+    const call = async (args: string[], input?: unknown) => {
+      const result = await runCli(
+        [configFile, '--output-dir', temp, ...args],
+        input === undefined ? '' : JSON.stringify(input),
+      );
+      const value = JSON.parse(result.stdout);
+      assert.equal(result.code, 0, result.stdout + result.stderr);
+      return value;
+    };
+    let service = await launch();
     const connected = async (config: AgentConfig) =>
       (
         (await fetch(`http://127.0.0.1:${config.port}/health`).then(response =>
@@ -161,13 +140,9 @@ test(
       await row('Alice').locator('.agent-row-status').textContent(),
       'Never connected',
     );
-    const current = output(
-      await client.callTool({name: 'context', arguments: {}}),
-    );
+    const current = await call(['context']);
     const file = current.data.file as string;
-    const read = output(
-      await client.callTool({name: 'fs_read', arguments: {path: file}}),
-    );
+    const read = await call(['fs', 'read', file]);
     const source =
       "import {box} from '@code3d/core';\nexport default box(10, 6, 8);\n";
     const request = {
@@ -178,12 +153,11 @@ test(
       topology: true,
       type: true,
     };
-    const result = await client.callTool(
-      {name: 'apply', arguments: request},
-      undefined,
-      {timeout: 120_000},
+    const {requestId, ...input} = request;
+    const data = await call(
+      ['--request-id', requestId, 'apply', '--input', '-'],
+      input,
     );
-    const data = output(result);
     assert.equal(data.ok, true, JSON.stringify(data));
     assert.equal(data.data.accepted, true);
     assert.equal(data.data.saved, true);
@@ -193,11 +167,11 @@ test(
     };
     assert.ok(observation.topology);
     assert.ok(observation.type);
-    const image = (
-      result.content as {type: string; data?: string; mimeType?: string}[]
-    ).find(content => content.type === 'image');
-    assert.equal(image?.mimeType, 'image/png');
-    const png = Buffer.from(image!.data!, 'base64');
+    const image = data.artifacts.find(
+      (artifact: {mimeType: string}) => artifact.mimeType === 'image/png',
+    );
+    assert.ok(image);
+    const png = await readFile(image.path);
     assert.deepEqual(
       [...png.subarray(0, 8)],
       [137, 80, 78, 71, 13, 10, 26, 10],
@@ -206,15 +180,7 @@ test(
     await page.reload();
     await page.locator('#agents-button').click();
     await dialog.locator('.agent-status[data-state="online"]').waitFor();
-    assert.equal(
-      output(
-        await client.callTool({
-          name: 'result',
-          arguments: {requestId: request.requestId},
-        }),
-      ).ok,
-      true,
-    );
+    assert.equal((await call(['result', request.requestId])).ok, true);
     const old = alice;
     const nextPort = await reserveLocalPort(t);
     const newPort = nextPort.port;
@@ -238,19 +204,11 @@ test(
     assert.equal(alice.agentId, old.agentId);
     await page.waitForTimeout(600);
     assert.equal(await connected(old), false);
-    await client.close();
+    await service.stop();
     await nextPort.release();
-    client = await launch();
+    service = await launch();
     await dialog.locator('.agent-status[data-state="online"]').waitFor();
-    assert.equal(
-      output(
-        await client.callTool({
-          name: 'result',
-          arguments: {requestId: request.requestId},
-        }),
-      ).ok,
-      true,
-    );
+    assert.equal((await call(['result', request.requestId])).ok, true);
     const bobPort = await reserveLocalPort(t);
     await dialog
       .getByLabel('Local port', {exact: true})
@@ -271,11 +229,9 @@ test(
     assert.equal(bobBridge.connected, false);
     assert.equal(attempts, 0);
     assert.equal(await connected(alice), true);
-    await page.screenshot({path: '/tmp/code3d-local-mcp-panel.png'});
+    await page.screenshot({path: '/tmp/code3d-local-serve-panel.png'});
     await dialog.getByLabel('Local agent connections', {exact: true}).click();
-    await dialog
-      .getByRole('button', {name: 'End session', exact: true})
-      .click();
+    await dialog.getByRole('button', {name: 'Revoke all', exact: true}).click();
     await dialog.locator('.agent-row').waitFor({state: 'detached'});
     await page.waitForTimeout(1200);
     assert.equal(await connected(alice), false);

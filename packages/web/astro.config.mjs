@@ -75,6 +75,7 @@ export default defineConfig({
         {
           label: 'Guides',
           items: [
+            {slug: 'docs/guides/agents'},
             {slug: 'docs/guides/relations'},
             {slug: 'docs/guides/origins-and-rotation'},
             {slug: 'docs/guides/topology'},
@@ -109,6 +110,7 @@ export default defineConfig({
   ],
   vite: {
     server: {strictPort: true},
+    preview: {strictPort: true},
     plugins: [
       {
         name: 'code3d-app-preview',

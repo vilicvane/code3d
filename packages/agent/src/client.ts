@@ -7,6 +7,10 @@ import {
   parseResponse,
 } from './protocol.js';
 import {AgentError} from './validation.js';
+import {
+  parseTransportFailure,
+  type RequestDelivery,
+} from './bridge-protocol.js';
 
 export type RequestOptions = Readonly<{
   requestId?: string;
@@ -50,45 +54,59 @@ export class AgentClient {
         credentials: 'omit',
         signal,
       });
-    } catch {
-      throw new AgentError(
-        signal.aborted ? 'request_aborted' : 'transport_failed',
-        'Request result is unknown. Ensure the c3d MCP server is running and the App is connected. Query the request ID before submitting another change.',
+    } catch (error) {
+      const refused =
+        !signal.aborted &&
+        error instanceof Error &&
+        (error.cause as {code?: string} | undefined)?.code === 'ECONNREFUSED';
+      throw new AgentTransportError(
+        refused
+          ? 'service_unavailable'
+          : signal.aborted
+            ? 'request_aborted'
+            : 'transport_failed',
+        refused
+          ? 'The local c3d service is not listening. Start serve in the current agent session. This attempt did not connect; earlier attempts with the same ID may still have been accepted.'
+          : 'The request outcome is unknown. Restore the service and App connection, then query the original request ID before another change.',
+        refused ? 'not_sent' : 'unknown',
       );
     }
     if (!response.ok) {
-      const retryAfter = response.headers.get('retry-after');
-      const seconds =
-        retryAfter && /^\d+$/.test(retryAfter) ? Number(retryAfter) : NaN;
       await response.body?.cancel();
-      throw new AgentError(
+      throw new AgentTransportError(
         'bridge_error',
-        'Local bridge returned HTTP ' +
-          response.status +
-          '. The application result is not confirmed.' +
-          (Number.isSafeInteger(seconds) && seconds >= 0
-            ? ` Retry after ${seconds} seconds using the original request ID, or query that ID.`
-            : ''),
+        `Local service returned HTTP ${response.status}. The application outcome is unknown; query the original request ID after restoring the connection.`,
+        'unknown',
       );
     }
-    let raw: unknown;
     try {
-      const text = await readBoundedBody(response, maxEnvelopeBytes);
-      raw = JSON.parse(text) as unknown;
+      const raw: unknown = JSON.parse(
+        await readBoundedBody(response, maxEnvelopeBytes),
+      );
+      const opened = await this.cipher.open('response', raw);
+      if (opened.requestId !== requestId)
+        throw new AgentError(
+          'response_mismatch',
+          'Response belongs to a different request.',
+        );
+      const value = opened.value as {transportError?: unknown} | null;
+      if (value && typeof value === 'object' && 'transportError' in value) {
+        const failure = parseTransportFailure(value.transportError);
+        throw new AgentTransportError(
+          failure.code,
+          failure.message,
+          failure.delivery,
+        );
+      }
+      return {requestId, response: parseResponse(opened.value)};
     } catch (error) {
-      if (error instanceof AgentError) throw error;
-      throw new AgentError(
-        'invalid_response',
-        'Local bridge did not return a complete encrypted response.',
+      if (error instanceof AgentTransportError) throw error;
+      throw new AgentTransportError(
+        error instanceof AgentError ? error.code : 'invalid_response',
+        'No complete authenticated result was received. Query the original request ID after restoring the connection.',
+        'unknown',
       );
     }
-    const opened = await this.cipher.open('response', raw);
-    if (opened.requestId !== requestId)
-      throw new AgentError(
-        'response_mismatch',
-        'Response belongs to a different request.',
-      );
-    return {requestId, response: parseResponse(opened.value)};
   }
 }
 
@@ -126,4 +144,14 @@ export async function readBoundedBody(
     offset += chunk.length;
   }
   return new TextDecoder('utf-8', {fatal: true}).decode(bytes);
+}
+
+export class AgentTransportError extends AgentError {
+  constructor(
+    code: string,
+    message: string,
+    readonly delivery: RequestDelivery,
+  ) {
+    super(code, message, {delivery});
+  }
 }

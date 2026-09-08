@@ -12,9 +12,11 @@ import {
   requestUrl,
   type AgentConfig,
   type BridgeMessage,
+  type TransportFailure,
 } from '@code3d/agent';
 
 type Pending = {
+  requestId: string;
   response: ServerResponse;
   timer: ReturnType<typeof setTimeout>;
   socket: WebSocket;
@@ -30,6 +32,29 @@ export async function createLocalBridge(config: AgentConfig) {
   let inFlight = 0;
   let bufferedBytes = 0;
   const maxBufferedBytes = 128 * 1024 * 1024;
+  const fail = async (
+    response: ServerResponse,
+    requestId: string,
+    failure: TransportFailure,
+  ) => {
+    const envelope = await cipher.seal('response', requestId, {
+      transportError: failure,
+    });
+    if (!response.destroyed)
+      response
+        .writeHead(200, {
+          'content-type': 'application/json',
+          'cache-control': 'no-store',
+        })
+        .end(JSON.stringify(envelope));
+  };
+  const unknown = (request: Pending, code: string, message: string) => {
+    void fail(request.response, request.requestId, {
+      code,
+      message,
+      delivery: 'unknown',
+    }).catch(() => request.response.destroy());
+  };
   const server = createServer(
     {requestTimeout: 30_000, headersTimeout: 10_000},
     (request, response) => {
@@ -57,10 +82,6 @@ export async function createLocalBridge(config: AgentConfig) {
         reject(404);
         return;
       }
-      if (!app || app.readyState !== WebSocket.OPEN) {
-        reject(503);
-        return;
-      }
       if (inFlight >= 32) {
         reject(429);
         return;
@@ -73,7 +94,6 @@ export async function createLocalBridge(config: AgentConfig) {
       response.once('close', () => {
         inFlight--;
       });
-      const socket = app;
       let size = 0;
       void (async () => {
         const chunks: Buffer[] = [];
@@ -96,8 +116,14 @@ export async function createLocalBridge(config: AgentConfig) {
         // Local callers must prove possession before consuming App work or receipts.
         await cipher.open('request', envelope);
         if (response.destroyed) return;
-        if (app !== socket || socket.readyState !== WebSocket.OPEN) {
-          reject(503);
+        const socket = app;
+        if (!socket || socket.readyState !== WebSocket.OPEN) {
+          await fail(response, envelope.requestId, {
+            code: 'app_disconnected',
+            message:
+              'The local service is running, but the App is not connected. Open the project and allow local-network access. This attempt was not forwarded.',
+            delivery: 'not_sent',
+          });
           return;
         }
         if (
@@ -110,9 +136,18 @@ export async function createLocalBridge(config: AgentConfig) {
         const id = randomUUID();
         const timer = setTimeout(() => {
           pending.delete(id);
-          response.writeHead(504).end();
+          unknown(
+            {response, requestId: envelope.requestId, timer, socket},
+            'request_timeout',
+            'The App did not return a result before the transport deadline. The outcome is unknown.',
+          );
         }, 115_000);
-        pending.set(id, {response, timer, socket});
+        pending.set(id, {
+          response,
+          requestId: envelope.requestId,
+          timer,
+          socket,
+        });
         response.once('close', () => {
           clearTimeout(timer);
           pending.delete(id);
@@ -183,7 +218,11 @@ export async function createLocalBridge(config: AgentConfig) {
         if (request.socket !== socket) continue;
         clearTimeout(request.timer);
         pending.delete(id);
-        request.response.writeHead(503).end();
+        unknown(
+          request,
+          'app_disconnected',
+          'The App disconnected after forwarding this request. Its outcome is unknown.',
+        );
       }
     });
     socket.on('message', (data, binary) => {
@@ -289,7 +328,7 @@ export async function createLocalBridge(config: AgentConfig) {
       for (const socket of sockets) socket.terminate();
       for (const request of pending.values()) {
         clearTimeout(request.timer);
-        request.response.writeHead(503).end();
+        request.response.destroy();
       }
       pending.clear();
       websocket.close();

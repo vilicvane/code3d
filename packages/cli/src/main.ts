@@ -4,9 +4,10 @@ import {mkdir, mkdtemp, open, readFile, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {Command, CommanderError, InvalidArgumentError, Option} from 'commander';
-import {runMcp} from './mcp.js';
+import {runServe} from './serve.js';
 import {
   AgentClient,
+  AgentTransportError,
   AgentError,
   decodeBase64,
   maxMessageBytes,
@@ -26,7 +27,7 @@ const configFile =
 const program = new Command();
 let activeRequestId: string | undefined;
 let remoteResult: AgentResponse | undefined;
-let mcpMode = false;
+let recoveryRequestId: string | undefined;
 
 program
   .name('c3d')
@@ -57,13 +58,10 @@ program
   .configureOutput({writeErr: () => {}});
 
 program
-  .command('mcp')
-  .description(
-    'Start an MCP stdio server and listen for the Code3D App on its configured loopback port',
-  )
+  .command('serve')
+  .description('Listen for the Code3D App while this session keeps stdin open')
   .action(async () => {
-    mcpMode = true;
-    await runMcp(await configuration(), program.version()!);
+    await runServe(await configuration());
   });
 
 program
@@ -183,13 +181,21 @@ try {
     const result = {
       ...(activeRequestId ? {requestId: activeRequestId} : {}),
       ok: false,
-      error: {code, message},
+      error: {
+        code,
+        message,
+        ...(error instanceof AgentError && error.details !== undefined
+          ? {details: error.details}
+          : {}),
+      },
+      ...(error instanceof AgentTransportError
+        ? {recovery: recovery(error)}
+        : {}),
       ...(remoteResult
         ? {remoteResult: withoutArtifactData(remoteResult)}
         : {}),
     };
-    if (mcpMode) process.stderr.write(JSON.stringify(result) + '\n');
-    else emit(result);
+    emit(result);
     process.exitCode = activeRequestId ? 3 : 2;
   }
 }
@@ -200,6 +206,8 @@ async function invoke(request: AgentRequest): Promise<void> {
   const options = program.opts<Options>();
   const client = await AgentClient.create(config);
   activeRequestId = options.requestId ?? randomUUID();
+  recoveryRequestId =
+    request.operation === 'result' ? request.requestId : activeRequestId;
   process.stderr.write(
     JSON.stringify({requestId: activeRequestId, phase: 'request'}) + '\n',
   );
@@ -210,6 +218,53 @@ async function invoke(request: AgentRequest): Promise<void> {
   remoteResult = response;
   await outputResult(response, options);
   process.exitCode = response.ok ? 0 : 1;
+}
+
+function recovery(error: AgentTransportError) {
+  const command = `npx --yes @code3d/cli ${shellArgument(resolve(configFile!))}`;
+  const start = `${command} serve`;
+  const query = `${command} result ${shellArgument(recoveryRequestId!)}`;
+  const action =
+    error.code === 'service_unavailable'
+      ? 'start_service'
+      : error.code === 'app_disconnected'
+        ? 'connect_app'
+        : 'query_result';
+  return {
+    action,
+    requestId: recoveryRequestId,
+    ...(action === 'start_service'
+      ? {
+          command: start,
+          argv: ['npx', '--yes', '@code3d/cli', resolve(configFile!), 'serve'],
+        }
+      : {}),
+    ...(error.delivery === 'unknown' ||
+    action === 'query_result' ||
+    recoveryRequestId !== activeRequestId
+      ? {
+          queryCommand: query,
+          queryArgv: [
+            'npx',
+            '--yes',
+            '@code3d/cli',
+            resolve(configFile!),
+            'result',
+            recoveryRequestId!,
+          ],
+        }
+      : {}),
+    message:
+      action === 'start_service'
+        ? `Start ${start} using this agent session's managed process tool with stdin or PTY kept open, then ${recoveryRequestId !== activeRequestId ? `run ${query}` : 'retry with the original request ID'}. Do not detach it or restart the agent session.`
+        : action === 'connect_app'
+          ? `The service is running. Keep the Code3D project open and allow its local-network connection. Do not restart a working service.${error.delivery === 'unknown' ? ` After reconnecting, run ${query} before another change.` : ' Retry with the original request ID after connection.'}`
+          : `The outcome is unknown. Check the managed service and App connection, then run ${query}. Retry only identical input with the original request ID; never assume the change was rolled back.`,
+  };
+}
+
+function shellArgument(value: string): string {
+  return "'" + value.replaceAll("'", "'\\''") + "'";
 }
 
 async function configuration() {

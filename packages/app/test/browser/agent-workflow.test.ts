@@ -92,10 +92,8 @@ for (const storage of ['browser', 'directory'] as const)
         const prompt = await page
           .getByLabel('Agent prompt', {exact: true})
           .inputValue();
-        assert.ok(
-          prompt.includes('https://www.code3d.org/docs/reference/core/'),
-        );
-        assert.ok(prompt.includes('Call context with {}'));
+        assert.ok(prompt.includes('/docs/guides/agents.md'));
+        assert.ok(prompt.includes('project.c3d.json context'));
         assert.ok(!prompt.includes('Pinned observation'));
         configs.push(
           JSON.parse(
@@ -116,8 +114,8 @@ for (const storage of ['browser', 'directory'] as const)
       const update = await page
         .getByLabel('Agent prompt', {exact: true})
         .inputValue();
-      assert.ok(update.includes('https://www.code3d.org/docs/'));
-      assert.ok(update.includes('Call context with {}'));
+      assert.ok(update.includes('/docs/guides/agents.md'));
+      assert.ok(update.includes('project.c3d.json context'));
       assert.ok(update.includes(configs[0].key));
       await page.getByRole('button', {name: 'Close', exact: true}).click();
       const directory = await mkdtemp(join(tmpdir(), 'c3d-browser-'));
@@ -450,7 +448,7 @@ for (const storage of ['browser', 'directory'] as const)
           AgentClient.create(configs[1]).then(client =>
             client.request({operation: 'fs.list', path: '/'}),
           ),
-        {code: 'bridge_error'},
+        {code: 'app_disconnected'},
       );
       await page.screenshot({path: '/tmp/code3d-agent-workflow-panel.png'});
       await page.reload();
@@ -492,7 +490,7 @@ for (const storage of ['browser', 'directory'] as const)
           AgentClient.create(configs[1]).then(client =>
             client.request({operation: 'fs.list', path: '/'}),
           ),
-        {code: 'bridge_error'},
+        {code: 'app_disconnected'},
       );
       const otherTab = await context.newPage();
       await otherTab.goto(page.url());
@@ -508,9 +506,7 @@ for (const storage of ['browser', 'directory'] as const)
       await page.locator('#agents-button').click();
       assert.equal(await page.locator('.agent-row').count(), 1);
       await page.getByLabel('Local agent connections', {exact: true}).click();
-      await page
-        .getByRole('button', {name: 'End session', exact: true})
-        .click();
+      await page.getByRole('button', {name: 'Revoke all', exact: true}).click();
       await page.locator('.agent-row').waitFor({state: 'detached'});
       await page.reload();
       await page.locator('#agents-button').waitFor();
@@ -519,7 +515,7 @@ for (const storage of ['browser', 'directory'] as const)
           AgentClient.create(configs[0]).then(client =>
             client.request({operation: 'fs.list', path: '/'}),
           ),
-        {code: 'bridge_error'},
+        {code: 'app_disconnected'},
       );
       assert.deepEqual(errors, []);
     },

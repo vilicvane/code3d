@@ -39,17 +39,17 @@ test('help documents config-first syntax without connecting', async () => {
   assert.equal(result.stderr, '');
 });
 
-test('MCP startup reports an occupied port on stderr without corrupting protocol stdout', async t => {
+test('serve startup reports an occupied port as structured JSON', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'c3d-test-'));
   t.after(() => rm(directory, {recursive: true, force: true}));
   const server = await transport(t, async () => ({ok: true, data: null}));
   const config = await server.grant();
   const path = join(directory, 'project.json');
   await writeFile(path, JSON.stringify(config));
-  const result = await run([path, 'mcp']);
+  const result = await run([path, 'serve']);
   assert.equal(result.code, 2);
-  assert.equal(result.stdout, '');
-  assert.equal(JSON.parse(result.stderr).error.code, 'port_in_use');
+  assert.equal(result.stderr, '');
+  assert.equal(JSON.parse(result.stdout).error.code, 'port_in_use');
   assert.ok(!result.stderr.includes(config.key));
 });
 

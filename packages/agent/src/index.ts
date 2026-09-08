@@ -15,7 +15,12 @@ export {
   type Envelope,
   type Direction,
 } from './crypto.js';
-export {AgentClient, readBoundedBody, type RequestOptions} from './client.js';
+export {
+  AgentClient,
+  AgentTransportError,
+  readBoundedBody,
+  type RequestOptions,
+} from './client.js';
 export {
   AgentEndpoint,
   type RequestHandler,
@@ -52,6 +57,9 @@ export {
 export {
   parseBridgeMessage,
   parseAppMessage,
+  parseTransportFailure,
+  type TransportFailure,
+  type RequestDelivery,
   maxBridgeMessageBytes,
   type BridgeMessage,
   type AppMessage,

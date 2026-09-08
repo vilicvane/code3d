@@ -49,7 +49,7 @@ export class AgentPanel {
   private readonly addButton = button('Add agent & copy prompt', () =>
     this.add(),
   );
-  private readonly endSession = button('End session', () => {
+  private readonly revokeAll = button('Revoke all', () => {
     this.connection.open = false;
     this.run(() => this.end());
   });
@@ -108,14 +108,11 @@ export class AgentPanel {
     const connectionMenu = document.createElement('div');
     connectionMenu.className = 'agent-connection-menu';
     this.connectionUrl.className = 'agent-connection-url';
-    this.endSession.classList.add('agent-end-session', 'button-danger');
-    const endNote = document.createElement('p');
-    endNote.textContent = 'Revokes access for all agents in this project.';
+    this.revokeAll.classList.add('agent-revoke-all', 'button-danger');
     connectionMenu.append(
       this.connectionStatus,
       this.connectionUrl,
-      this.endSession,
-      endNote,
+      this.revokeAll,
     );
     this.connection.append(this.connectionToggle, connectionMenu);
     this.connection.addEventListener('toggle', () => {
@@ -139,7 +136,7 @@ export class AgentPanel {
     const note = document.createElement('p');
     note.className = 'agent-note';
     note.textContent =
-      'Copy a prompt to your local agent to start its MCP server. Allow this site to connect to your local network when asked. This page keeps reconnecting until you revoke access or end the session. Keep it open while agents work.';
+      'Copy a prompt to your local agent to start its CLI service. Allow this site to connect to your local network when asked. This page keeps reconnecting until you revoke access. Keep it open while agents work.';
     titleLine.append(title, this.connection);
     heading.append(titleLine, note);
     const fields = document.createElement('fieldset');
@@ -208,7 +205,7 @@ export class AgentPanel {
     this.connectionToggle.title = this.status.title;
     this.connectionStatus.textContent = this.status.title;
     this.connectionUrl.textContent = '127.0.0.1 · one local port per agent';
-    this.endSession.disabled = !this.grants.size;
+    this.revokeAll.disabled = !this.grants.size;
     for (const [agentId, row] of this.rows) {
       if (this.grants.has(agentId)) continue;
       row.element.remove();
@@ -224,8 +221,8 @@ export class AgentPanel {
       }
       row.activity.title =
         grant.state === 'online'
-          ? 'Connected to the local MCP server'
-          : 'Waiting for the local MCP server · retrying automatically';
+          ? 'Connected to the local CLI service'
+          : 'Waiting for the local CLI service · retrying automatically';
       row.activity.textContent = grant.busy
         ? 'Working'
         : grant.lastSeen
@@ -293,7 +290,9 @@ export class AgentPanel {
     );
     const local = document.createElement('label');
     local.className = 'agent-port';
-    local.append('Port', port);
+    const portLabel = document.createElement('span');
+    portLabel.textContent = 'Port';
+    local.append(portLabel, port);
     actions.prepend(local);
     row.append(summary, actions);
     return {element: row, identity, activity, location};
@@ -542,7 +541,7 @@ export class AgentPanel {
     this.connect(grant);
     await this.copy(grant.config.agentId, agentPrompt(grant.config, true));
     this.message.textContent =
-      'Port saved. Give the updated prompt to your agent to restart its MCP server.';
+      'Port saved. Give the updated prompt to your agent to restart its CLI service.';
   }
 
   private connect(grant: Grant): void {

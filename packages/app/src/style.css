@@ -1950,11 +1950,11 @@ kbd {
   white-space: nowrap;
 }
 
-.agent-end-session {
+.agent-revoke-all {
   margin-top: 6px;
 }
 
-.agent-end-session:disabled {
+.agent-revoke-all:disabled {
   cursor: default;
 }
 
@@ -2033,19 +2033,36 @@ kbd {
   border-top: 1px solid #34382e;
 }
 
-.agent-port {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: #a5a99f;
-  font-size: 11px;
+.agent-dialog .agent-port {
+  position: relative;
+  display: block;
+  flex: 0 0 auto;
+}
+
+.agent-dialog .agent-port > span {
+  position: absolute;
+  top: 50%;
+  left: 8px;
+  margin: 0;
+  color: #747b6e;
+  letter-spacing: 0;
+  text-transform: none;
+  transform: translateY(-50%);
+  pointer-events: none;
 }
 
 .agent-dialog .agent-port-input {
-  width: 76px;
+  width: calc(5ch + 44px);
   min-width: 0;
-  padding: 4px 6px;
+  padding: 6px 8px 6px 34px;
   font-size: 11px;
+  appearance: textfield;
+}
+
+.agent-port-input::-webkit-inner-spin-button,
+.agent-port-input::-webkit-outer-spin-button {
+  margin: 0;
+  appearance: none;
 }
 
 .agent-row-summary {

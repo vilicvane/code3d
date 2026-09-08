@@ -1,9 +1,9 @@
 # @code3d/agent
 
-Shared browser/Node protocol for the Code3D App and local `c3d` MCP/CLI process.
+Shared browser/Node protocol for the Code3D App and local `c3d` CLI process.
 The App executes requests and owns all project data and receipts. This package
 provides configuration, encryption, the local HTTP client, reconnecting App
-WebSocket transport and per-agent request endpoint. The Node bridge and MCP
+WebSocket transport and per-agent request endpoint. The Node bridge and CLI
 adapter live in [@code3d/cli](../cli/README.md).
 
 ## Agent grants
@@ -29,13 +29,13 @@ exact port and never probes alternative ports. The App persists grants per
 project, including port, color, connection history and receipts. Opening the
 project restores connections without opening the panel. Changing a port keeps
 the identity and journal, closes the old socket/retry, and generates an updated
-prompt. Revoke deletes that grant/journal and stops retries; End session does
+prompt. Revoke deletes that grant/journal and stops retries; Revoke all does
 so for every agent in the current project. Accepted changes continue saving.
 
 IndexedDB version 3 migrates existing remote grants once: it retains session ID,
 agent ID, key, names, colors, lastSeen and receipt keys, assigns local ports and
 records the current App origin. Obsolete host tokens/relay addresses are removed.
-Agents need to copy the updated configuration and start a local MCP server; no
+Agents need to copy the updated configuration and start a local CLI service; no
 remote fallback remains. Never reopen an existing grant with an empty journal.
 
 ## Local authentication and lifecycle
@@ -105,8 +105,8 @@ source and modification version; supply the returned cursor explicitly to
 state; retrying an old request ID still returns its original receipt.
 
 Copied initial and update prompts demonstrate this flow instead of embedding a
-source selection. Both link to the [Code3D documentation](https://www.code3d.org/docs/)
-and [Modeling API](https://www.code3d.org/docs/reference/core/).
+source selection. Both link to the [website agent guide](https://www.code3d.org/docs/guides/agents/)
+for the command contract and public modeling APIs.
 
 Project paths are absolute within the App project, such as `/model.ts`, and never
 refer to the CLI machine's project files. `apply.input` accepts:
@@ -199,6 +199,14 @@ Responses are `{ok: true, data, artifacts?}` or
 `mimeType`, and `base64` (unpadded base64url). App responses must distinguish a
 saved change from a later evaluation failure; transport success cannot do this.
 
+A local transport failure after authenticating the request uses an encrypted
+`{transportError: {code, message, delivery}}` response instead of an App result.
+`delivery: "not_sent"` proves only that this attempt was not forwarded; it does
+not describe earlier attempts with the same ID. Disconnection after forwarding
+and exchange timeout use `"unknown"`. Unauthenticated HTTP failures or incomplete
+responses cannot establish non-execution. The client exposes `AgentTransportError`
+and the CLI adds recovery commands for its configuration file.
+
 ## Retries and uncertain outcomes
 
 Request IDs are scoped to an agent grant. Identical normalized requests with the
@@ -228,7 +236,7 @@ observed response. Inspect current files before deciding on a new change.
 Run `npm test --workspace @code3d/agent` from the repository root. Tests include
 real loopback HTTP exchanges, tampering, cross-agent isolation, concurrent retries
 and recovering the result after a lost response. The CLI tests additionally
-exercise real MCP stdio, WebSockets, restart/reconnect and App-side revocation. App browser
+exercise real session-managed CLI, WebSockets, restart/reconnect and App-side revocation. App browser
 tests run the real CLI against both storage backends, render PNGs, page topology,
 verify temporary/JSDoc arguments and check independent cursors.
 
@@ -248,5 +256,5 @@ Text apply/read is bounded at 8 MiB per file; binary files can be read as artifa
 viewport source selection and screenshot exporter. It does not change the user's
 viewport or cursor. Collaborator selections are Monaco decorations with matching name labels anchored by content widgets. Screenshot
 corner views and history remain deferred while viewport work proceeds separately.
-See the [CLI observation contract](../cli/README.md#observation-pages) for topology
+See the [agent guide](../web/src/content/docs/docs/guides/agents.md#render-types-and-topology) for topology
 paging, identity scope, geometry coordinates and snapshot expiration.

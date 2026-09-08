@@ -1,20 +1,17 @@
 import assert from 'node:assert/strict';
 import {once} from 'node:events';
-import {spawn} from 'node:child_process';
 import {createServer} from 'node:net';
 import {
   createServer as createHttpServer,
   request as httpRequest,
 } from 'node:http';
-import {mkdtemp, writeFile, rm} from 'node:fs/promises';
+import {mkdtemp, writeFile, readFile, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {fileURLToPath} from 'node:url';
 import {test, type TestContext} from 'node:test';
 import {setTimeout as delay} from 'node:timers/promises';
 import {WebSocket, WebSocketServer} from 'ws';
-import {Client} from '@modelcontextprotocol/sdk/client/index.js';
-import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
+import {runCli, startServe} from './process.ts';
 import {
   AgentCipher,
   AgentClient,
@@ -31,21 +28,12 @@ import {
 import {createLocalBridge} from '../bld/bridge.js';
 
 const origin = 'https://app.code3d.test';
-const main = fileURLToPath(new URL('../bld/main.js', import.meta.url));
 // Native browser WebSocket supplies Origin. Node's test adapter supplies the same header.
 globalThis.WebSocket = class extends WebSocket {
   constructor(url: string | URL) {
     super(url, {origin});
   }
 } as unknown as typeof globalThis.WebSocket;
-
-function toolData(result: Record<string, unknown>): Record<string, unknown> {
-  const text = (result.content as {type: string; text?: string}[]).find(
-    content => content.type === 'text',
-  );
-  assert.ok(text?.text);
-  return JSON.parse(text.text) as Record<string, unknown>;
-}
 
 async function configuration(): Promise<AgentConfig> {
   const listener = createServer();
@@ -74,48 +62,56 @@ async function until(
   }
 }
 
-async function mcp(t: TestContext, config: AgentConfig) {
-  const directory = await mkdtemp(join(tmpdir(), 'code3d-mcp-'));
+async function fixture(t: TestContext, config: AgentConfig) {
+  const directory = await mkdtemp(join(tmpdir(), 'code3d-serve-'));
   t.after(() => rm(directory, {recursive: true, force: true}));
-  const file = join(directory, 'project.json');
+  const file = join(directory, "project's config.json");
   await writeFile(file, JSON.stringify(config), {mode: 0o600});
-  const transport = new StdioClientTransport({
-    command: process.execPath,
-    args: [main, file, 'mcp'],
-    stderr: 'pipe',
-  });
-  let stderr = '';
-  transport.stderr?.on('data', chunk => {
-    stderr += String(chunk);
-  });
-  const client = new Client({name: 'code3d-test', version: '1.0.0'});
-  t.after(() => client.close());
-  await client.connect(transport);
-  return {client, transport, stderr: () => stderr};
+  return {
+    file,
+    directory,
+    call: async (args: string[], input = '') => {
+      const result = await runCli(
+        [file, '--output-dir', directory, ...args],
+        input,
+      );
+      return {...result, value: JSON.parse(result.stdout)};
+    },
+  };
 }
 
 test(
-  'real MCP stdio maps tools, requires mutation IDs, returns images and preserves App receipts across restart',
+  'serve supports independent CLI commands, artifacts and receipt recovery across process restart',
   {timeout: 30_000},
   async t => {
     const config = await configuration();
-    let service = await mcp(t, config);
-    const tools = (await service.client.listTools()).tools;
-    assert.deepEqual(
-      tools.map(tool => tool.name),
-      ['context', 'fs_list', 'fs_read', 'fs_stat', 'apply', 'result'],
+    const f = await fixture(t, config);
+    const missing = await f.call(['--request-id', 'absent-service', 'apply']);
+    assert.equal(missing.code, 3);
+    assert.equal(missing.value.error.code, 'service_unavailable');
+    assert.equal(missing.value.error.details.delivery, 'not_sent');
+    assert.match(
+      missing.value.recovery.command,
+      /npx --yes @code3d\/cli .* serve$/,
     );
+    assert.ok(!missing.stdout.includes(config.key));
+    assert.deepEqual(missing.value.recovery.argv, [
+      'npx',
+      '--yes',
+      '@code3d/cli',
+      f.file,
+      'serve',
+    ]);
     assert.ok(
-      tools
-        .find(tool => tool.name === 'apply')!
-        .inputSchema.required!.includes('requestId'),
+      missing.value.recovery.command.includes("project'\\''s config.json"),
     );
-    const offline = await service.client.callTool({
-      name: 'context',
-      arguments: {},
-    });
-    assert.equal(offline.isError, true);
-    assert.equal(toolData(offline).ok, false);
+    let service = await startServe(t, f.file);
+    const offline = await f.call(['context']);
+    assert.equal(offline.code, 3);
+    assert.equal(offline.value.error.code, 'app_disconnected');
+    assert.equal(offline.value.error.details.delivery, 'not_sent');
+    assert.equal(offline.value.recovery.action, 'connect_app');
+    assert.equal(offline.value.recovery.command, undefined);
     const receipts: StoredReceipt[] = [];
     let executions = 0;
     const bytes = new Uint8Array([137, 80, 78, 71, 255, 254, 251]);
@@ -128,30 +124,15 @@ test(
         if (request.operation === 'fs.read')
           return {
             ok: true,
-            data: {
-              content:
-                request.path === '/large.ts'
-                  ? 'x'.repeat(8 * 1024 * 1024)
-                  : 'source',
-              version: 'v1',
-            },
+            data: {content: 'x'.repeat(8 * 1024 * 1024), version: 'v1'},
           };
         return {
           ok: true,
-          data: {
-            accepted: true,
-            saved: true,
-            observation: {topology: {models: []}, type: {text: 'Model'}},
-          },
+          data: {accepted: true, saved: true},
           artifacts: [
             {
               name: 'render.png',
               mimeType: 'image/png',
-              base64: encodeBase64(bytes),
-            },
-            {
-              name: 'source.bin',
-              mimeType: 'application/octet-stream',
               base64: encodeBase64(bytes),
             },
           ],
@@ -177,96 +158,43 @@ test(
     });
     t.after(() => host.close());
     await until(() => host.status === 'online');
-    const context = await service.client.callTool({
-      name: 'context',
-      arguments: {},
-    });
-    assert.equal((toolData(context).data as {file: string}).file, '/model.ts');
-    const large = await service.client.callTool({
-      name: 'fs_read',
-      arguments: {path: '/large.ts'},
-    });
+    assert.equal((await f.call(['context'])).value.data.file, '/model.ts');
     assert.equal(
-      (toolData(large).data as {content: string}).content.length,
+      (await f.call(['fs', 'read', '/large.ts'])).value.data.content.length,
       8 * 1024 * 1024,
     );
-    assert.equal(large.structuredContent, undefined);
-    const apply = {
-      requestId: 'edit-1',
+    const input = JSON.stringify({
       files: [{path: '/model.ts', version: 'v1', content: 'new source'}],
       cursor: {file: '/model.ts', regex: '(new source)'},
       render: {view: 'top'},
       type: true,
       topology: true,
-    };
-    const result = await service.client.callTool({
-      name: 'apply',
-      arguments: apply,
     });
-    assert.equal(toolData(result).requestId, 'edit-1');
-    assert.equal(toolData(result).ok, true);
-    const image = (result.content as {type: string; data?: string}[]).find(
-      content => content.type === 'image',
-    )!;
-    assert.match(image.data!, /^[A-Za-z0-9+/]*={0,2}$/);
-    assert.equal(image.data, Buffer.from(bytes).toString('base64'));
-    assert.deepEqual(Buffer.from(image.data!, 'base64'), Buffer.from(bytes));
-    assert.equal(result.isError, undefined);
-    await service.client.callTool({name: 'apply', arguments: apply});
+    const args = ['--request-id', 'edit-1', 'apply', '--input', '-'];
+    const result = await f.call(args, input);
+    assert.equal(result.code, 0, result.stdout);
+    assert.equal(result.value.requestId, 'edit-1');
+    assert.deepEqual(
+      new Uint8Array(await readFile(result.value.artifacts[0].path)),
+      bytes,
+    );
+    assert.equal(result.value.artifacts[0].base64, undefined);
+    await f.call(args, input);
     assert.equal(executions, 3);
-    const conflict = await service.client.callTool({
-      name: 'apply',
-      arguments: {...apply, files: []},
-    });
     assert.equal(
-      (toolData(conflict).error as {code: string}).code,
+      (await f.call(args, '{}')).value.error.code,
       'request_conflict',
     );
-    const invalid = await service.client.callTool({
-      name: 'apply',
-      arguments: {
-        requestId: 'bad-lines',
-        cursor: {file: '/model.ts', regex: '(x)', lines: [4, 2]},
-      },
-    });
-    assert.equal(toolData(invalid).requestId, 'bad-lines');
-    assert.equal(
-      (toolData(invalid).error as {code: string}).code,
-      'invalid_input',
-    );
-    const missing = await service.client.callTool({
-      name: 'apply',
-      arguments: {},
-    });
-    assert.equal(missing.isError, true);
-    assert.equal(executions, 3);
-    assert.ok(!service.stderr().includes(config.key));
-    await service.client.close();
+    assert.ok(!service.stdout().includes(config.key));
+    await service.stop();
     await until(() => host.status !== 'online');
-    service = await mcp(t, config);
+    const stopped = await f.call(['result', 'edit-1']);
+    assert.equal(stopped.value.recovery.requestId, 'edit-1');
+    service = await startServe(t, f.file);
     await until(() => host.status === 'online');
-    const recovered = await service.client.callTool({
-      name: 'result',
-      arguments: {requestId: 'edit-1'},
-    });
-    assert.equal(toolData(recovered).ok, true);
-    await service.client.callTool({name: 'apply', arguments: apply});
+    assert.equal((await f.call(['result', 'edit-1'])).value.ok, true);
+    await f.call(args, input);
     assert.equal(executions, 3);
-    host.close();
-    endpoint.close();
-    await until(
-      async () =>
-        !(
-          (await fetch(`http://127.0.0.1:${config.port}/health`).then(
-            response => response.json(),
-          )) as {connected: boolean}
-        ).connected,
-    );
-    const revoked = await service.client.callTool({
-      name: 'context',
-      arguments: {},
-    });
-    assert.equal(revoked.isError, true);
   },
 );
 
@@ -436,61 +364,80 @@ test(
 );
 
 test(
-  'MCP cancellation preserves the caller-chosen ID and an accepted change can be recovered',
-  {timeout: 10_000},
+  'CLI timeout and App disconnect preserve the original mutation ID and recover accepted work',
+  {timeout: 15_000},
   async t => {
     const config = await configuration();
-    const {client} = await mcp(t, config);
+    const f = await fixture(t, config);
+    await startServe(t, f.file);
     let start!: () => void;
-    const started = new Promise<void>(resolve => {
+    let started = new Promise<void>(resolve => {
       start = resolve;
     });
     let finish!: () => void;
-    const finished = new Promise<void>(resolve => {
+    let finished = new Promise<void>(resolve => {
       finish = resolve;
     });
     let calls = 0;
-    let saved = false;
     const endpoint = await AgentEndpoint.create(config, async () => {
       calls++;
       start();
       await finished;
-      saved = true;
       return {ok: true, data: {accepted: true, saved: true}};
     });
     t.after(() => {
       finish();
       endpoint.close();
     });
-    const host = new LocalHost({
+    let host = new LocalHost({
       config,
       handle: envelope => endpoint.handle(envelope),
     });
     t.after(() => host.close());
     await until(() => host.status === 'online');
-    const controller = new AbortController();
-    const request = {
-      requestId: 'cancelled-edit',
-      files: [{path: '/model.ts', version: 'v1', content: 'accepted source'}],
-    };
-    const pending = client.callTool(
-      {name: 'apply', arguments: request},
-      undefined,
-      {signal: controller.signal},
-    );
-    const rejected = assert.rejects(() => pending);
+    const pending = f.call([
+      '--request-id',
+      'timed-edit',
+      '--timeout',
+      '300',
+      'apply',
+    ]);
     await started;
-    controller.abort();
-    await rejected;
+    const timed = await pending;
+    assert.equal(timed.code, 3);
+    assert.equal(timed.value.error.details.delivery, 'unknown');
+    assert.match(timed.value.recovery.queryCommand, /result 'timed-edit'$/);
     finish();
-    await until(() => saved);
-    const result = await client.callTool({
-      name: 'result',
-      arguments: {requestId: request.requestId},
-    });
-    assert.equal(toolData(result).ok, true);
-    await client.callTool({name: 'apply', arguments: request});
+    assert.equal((await f.call(['result', 'timed-edit'])).value.ok, true);
+    await f.call(['--request-id', 'timed-edit', 'apply']);
     assert.equal(calls, 1);
+    started = new Promise<void>(resolve => {
+      start = resolve;
+    });
+    finished = new Promise<void>(resolve => {
+      finish = resolve;
+    });
+    const disconnected = f.call(['--request-id', 'disconnected-edit', 'apply']);
+    await started;
+    host.close();
+    const lost = await disconnected;
+    assert.equal(lost.value.error.code, 'app_disconnected');
+    assert.equal(lost.value.error.details.delivery, 'unknown');
+    assert.match(
+      lost.value.recovery.queryCommand,
+      /result 'disconnected-edit'$/,
+    );
+    finish();
+    host = new LocalHost({
+      config,
+      handle: envelope => endpoint.handle(envelope),
+    });
+    await until(() => host.status === 'online');
+    assert.equal(
+      (await f.call(['result', 'disconnected-edit'])).value.ok,
+      true,
+    );
+    assert.equal(calls, 2);
   },
 );
 
@@ -544,37 +491,44 @@ test(
   },
 );
 
+for (const signal of [undefined, 'SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
+  test(
+    `serve exits naturally on ${signal ?? 'stdin EOF'} and releases its port`,
+    {
+      timeout: 10_000,
+      skip: process.platform === 'win32' && signal !== undefined,
+    },
+    async t => {
+      const config = await configuration();
+      const f = await fixture(t, config);
+      const service = await startServe(t, f.file);
+      await service.stop(signal);
+      assert.ok(!service.stdout().includes(config.key));
+      const events = service
+        .stdout()
+        .trim()
+        .split('\n')
+        .map(line => JSON.parse(line));
+      assert.equal(events.at(-1).event, 'stopped');
+      assert.equal(events.at(-1).reason, signal ?? 'stdin_closed');
+      const replacement = await createLocalBridge(config);
+      await replacement.close();
+    },
+  );
+}
+
 test(
-  'native stdio EOF exits the MCP process naturally and releases its port',
+  'serve exits naturally when stdin is already closed at launch',
   {timeout: 10_000},
   async t => {
     const config = await configuration();
-    const directory = await mkdtemp(join(tmpdir(), 'code3d-mcp-eof-'));
-    t.after(() => rm(directory, {recursive: true, force: true}));
-    const file = join(directory, 'project.json');
-    await writeFile(file, JSON.stringify(config), {mode: 0o600});
-    const child = spawn(process.execPath, [main, file, 'mcp'], {
-      stdio: 'pipe',
-      timeout: 5000,
-    });
-    t.after(() => {
-      if (child.exitCode === null) child.kill();
-    });
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', chunk => {
-      stdout += String(chunk);
-    });
-    child.stderr.on('data', chunk => {
-      stderr += String(chunk);
-    });
-    child.stdin.end();
-    const [code, signal] = await once(child, 'exit');
-    assert.equal(code, 0, stderr);
-    assert.equal(signal, null);
-    assert.equal(stdout, '');
-    assert.match(stderr, /Code3D MCP listening/);
-    assert.ok(!stderr.includes(config.key));
+    const f = await fixture(t, config);
+    const result = await runCli([f.file, 'serve'], '', 5000);
+    assert.equal(result.code, 0, result.stdout + result.stderr);
+    assert.equal(result.signal, null);
+    const last = JSON.parse(result.stdout.trim().split('\n').at(-1)!);
+    assert.equal(last.event, 'stopped');
+    assert.equal(last.reason, 'stdin_closed');
     const replacement = await createLocalBridge(config);
     await replacement.close();
   },

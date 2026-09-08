@@ -256,7 +256,7 @@ test(
     const connection = dialog.getByLabel('Local agent connections', {
       exact: true,
     });
-    const end = dialog.getByRole('button', {name: 'End session', exact: true});
+    const end = dialog.getByRole('button', {name: 'Revoke all', exact: true});
     await connection.focus();
     await page.keyboard.press('Enter');
     await end.waitFor();
@@ -293,7 +293,7 @@ test(
         AgentClient.create(configs[1]).then(client =>
           client.request({operation: 'context'}),
         ),
-      {code: 'bridge_error'},
+      {code: 'app_disconnected'},
     );
     await dialog.getByRole('button', {name: 'Close', exact: true}).click();
     await page.setViewportSize({width: 1440, height: 1000});
@@ -329,7 +329,7 @@ test(
     await nav.waitFor();
     assert.equal(await nav.textContent(), 'Connect Agent');
     await assert.rejects(() => client.request({operation: 'context'}), {
-      code: 'bridge_error',
+      code: 'app_disconnected',
     });
     assert.deepEqual(errors, []);
   },
