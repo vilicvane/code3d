@@ -31,7 +31,6 @@ type AgentRow = {
   element: HTMLDivElement;
   identity: HTMLDivElement;
   activity: HTMLSpanElement;
-  location: HTMLSpanElement;
 };
 
 export class AgentPanel {
@@ -228,15 +227,10 @@ export class AgentPanel {
       row.activity.textContent = grant.busy
         ? 'Working'
         : grant.lastSeen
-          ? 'Last active ' + new Date(grant.lastSeen).toLocaleTimeString()
+          ? ''
           : 'Never connected';
+      row.activity.hidden = !row.activity.textContent;
       row.identity.replaceChildren(agentBadge(grant), row.activity);
-      const cursor = this.editor.agentCursor(agentId);
-      row.location.hidden = !cursor.invalid && !cursor.ref;
-      row.location.textContent = cursor.invalid
-        ? 'Cursor lost'
-        : (cursor.ref?.file ?? '');
-      row.location.title = row.location.textContent;
       if (
         this.displayedAgentId === agentId &&
         this.promptSection.parentElement !== row.element
@@ -254,9 +248,7 @@ export class AgentPanel {
     activity.className = 'agent-row-status';
     const identity = document.createElement('div');
     identity.className = 'agent-row-identity';
-    const location = document.createElement('span');
-    location.className = 'agent-row-location';
-    summary.append(identity, location);
+    summary.append(identity);
     const actions = document.createElement('div');
     actions.className = 'agent-row-actions';
     const revoke = button('Revoke', () =>
@@ -298,7 +290,7 @@ export class AgentPanel {
     local.append(portLabel, port);
     actions.prepend(local);
     row.append(summary, actions);
-    return {element: row, identity, activity, location};
+    return {element: row, identity, activity};
   }
 
   private add(): void {
@@ -418,6 +410,7 @@ export class AgentPanel {
           const grant = this.grants.get(config.agentId)!;
           grant.interacted = true;
           grant.lastSeen = new Date().toISOString();
+          this.editor.setAgentActivity(config.agentId, grant.lastSeen);
           this.refresh();
           await this.storage!.recordActivity(config, grant.lastSeen);
         },
@@ -513,6 +506,8 @@ export class AgentPanel {
           undefined,
           grant.color,
         );
+        if (grant.lastSeen)
+          this.editor.setAgentActivity(grant.config.agentId, grant.lastSeen);
       }
       if (this.name.value === suggestedName)
         this.name.value = this.suggestName();

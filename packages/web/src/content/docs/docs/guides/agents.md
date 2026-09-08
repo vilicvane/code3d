@@ -72,7 +72,9 @@ receipts. **Revoke** removes one agent's authorization; **Revoke all** removes a
 agents for that project. These actions stop webpage retries, but do not own or
 kill the local processes. Opening the project again restores remaining grants.
 User and agent cursors are independent. Agents appear at their nearest visible
-file or collapsed parent folder in the file tree.
+file or collapsed parent folder in the file tree. Cursor labels show the agent's
+last activity as a relative time; hover the time for the exact date. Formatting
+keeps their selections and carets attached to the corresponding source.
 
 `npx --yes @code3d/cli` downloads the published CLI when needed; version
 `0.0.1-alpha.0` is the first functional release. Development uses the same prompt

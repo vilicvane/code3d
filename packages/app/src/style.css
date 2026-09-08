@@ -41,6 +41,16 @@ button {
   color: inherit;
 }
 
+select {
+  appearance: none;
+  padding-right: 30px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='m1 1 4 4 4-4' fill='none' stroke='%23858d77' stroke-width='1.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 10px 6px;
+  color-scheme: dark;
+}
+
 .ui-icon {
   display: block;
   flex: none;
@@ -1041,12 +1051,13 @@ kbd {
 .app-dialog textarea {
   width: 100%;
   min-width: 0;
-  padding: 7px 8px;
+  padding-block: 7px;
+  padding-left: 8px;
   color: #edf3d5;
   border: 1px solid #34382e;
   border-radius: 3px;
   outline: 0;
-  background: #11130f;
+  background-color: #11130f;
   font:
     500 10px/1.4 'IBM Plex Mono',
     monospace;
@@ -1058,29 +1069,13 @@ kbd {
   border-color: var(--acid);
 }
 
-.viewport-export-select {
-  position: relative;
-  min-width: 0;
-}
-
-.viewport-export-select select {
-  appearance: none;
-  padding-right: 30px;
+.app-dialog select {
   color: #c7cebb;
-  color-scheme: dark;
 }
 
-.viewport-export-select::after {
-  position: absolute;
-  top: 50%;
-  right: 12px;
-  width: 6px;
-  height: 6px;
-  border-right: 1.5px solid #858d77;
-  border-bottom: 1.5px solid #858d77;
-  content: '';
-  pointer-events: none;
-  transform: translateY(-70%) rotate(45deg);
+.app-dialog input,
+.app-dialog textarea {
+  padding-right: 8px;
 }
 
 .app-dialog textarea {
@@ -2552,24 +2547,12 @@ kbd {
   white-space: nowrap;
 }
 
-.agent-row-location {
-  max-width: 100%;
-  overflow: hidden;
-  color: #858d77;
-  font:
-    500 9px/1.5 'IBM Plex Mono',
-    monospace;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .agent-dialog .agent-message,
 .agent-dialog .agent-prompt-message {
   color: var(--acid);
 }
 
 .agent-row-status,
-.agent-row-location,
 .agent-connection-url {
   margin-left: 2px;
 }
@@ -2637,6 +2620,7 @@ kbd {
 }
 .agent-render-preview-caption .agent-render-agent {
   flex: 1;
+  text-align: left;
 }
 .agent-render-preview-caption > svg {
   width: 12px;
@@ -2687,11 +2671,12 @@ kbd {
 }
 .agent-render-viewer select {
   max-width: 40%;
-  padding: 4px 6px;
+  padding-block: 4px;
+  padding-left: 6px;
   color: #b5baaa;
   border: 1px solid var(--line);
   border-radius: 4px;
-  background: var(--panel);
+  background-color: var(--panel);
   font: inherit;
   font-size: 10px;
 }
@@ -2825,7 +2810,10 @@ kbd {
   position: absolute;
   bottom: 100%;
   left: 0;
-  max-width: 160px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 240px;
   padding: 0 5px;
   border-radius: 3px 3px 3px 0;
   background: var(--agent-color);
@@ -2838,4 +2826,16 @@ kbd {
   white-space: nowrap;
   pointer-events: none;
   user-select: none;
+}
+
+.monaco-editor .agent-cursor-label > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.monaco-editor .agent-cursor-label > time {
+  flex-shrink: 0;
+  opacity: 0.65;
+  font-size: 9px;
+  pointer-events: auto;
 }

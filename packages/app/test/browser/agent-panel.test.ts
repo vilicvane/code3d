@@ -173,10 +173,11 @@ test(
     );
     await nav.click();
     assert.equal(await prompt.count(), 0);
-    assert.match(
-      (await row('Euler').locator('.agent-row-status').textContent())!,
-      /^Last active /,
+    assert.equal(
+      await row('Euler').locator('.agent-row-status').isVisible(),
+      false,
     );
+    assert.equal(await dialog.locator('.agent-row-location').count(), 0);
     assert.equal(
       await row('Gauss').locator('.agent-row-status').textContent(),
       'Never connected',
