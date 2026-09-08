@@ -398,6 +398,7 @@ function pointSession(
     point => !centers.has(point),
   );
   const translated = [...new Set(translations.flatMap(p => p.points))];
+  const preservedRadii = translations.flatMap(p => p.radii);
   return (current, updated) => {
     const target = updated as Extract<SketchSolveTarget, {kind: 'point'}>;
     const suggestions = new Map<number, SketchPosition[]>();
@@ -472,12 +473,14 @@ function pointSession(
                 v - from[axis] + reached.points[target.point].position[axis],
             ) as [number, number],
           })),
-        ...translations.flatMap(p => p.radii),
       ],
       ...(translations.length
         ? [() => translations.flatMap(p => p.exterior)]
         : []),
     ];
+    // A center's radii take precedence over following the mouse. A shared
+    // endpoint still retains its incident centers before these radius goals.
+    if (preservedRadii.length) stages.unshift(() => preservedRadii);
     if (centers.size)
       stages.unshift(() => [...centers].map(point => anchor(reference, point)));
     return {problem: seed(current, suggestions, radii), stages};

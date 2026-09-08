@@ -99,3 +99,54 @@ const s = sketch([
     }
   });
 }
+
+for (const kind of ['circle', 'arc'] as const) {
+  test(`dragging a ${kind} center preserves concentric radii with a fixed endpoint through cancellation, replay and undo`, async t => {
+    const page = await open(
+      t,
+      `import {sketch} from '@code3d/core';
+const s = sketch([
+  ['point', 1, [0, 0]], ['point', 2, [10, 0]], ['point', 3, [0, 10]],
+  ${kind === 'arc' ? "['arc', 4, [1, 10, 2, 3, 'ccw']]" : "['circle', 4, [1, 10]]"},
+  ['circle', 5, [1, 3]],
+  ['point', 98, [-25, -25]], ['point', 99, [30, 30]],
+], {constraints: [['fixed', 2]]});`,
+    );
+    await page.getByRole('button', {name: 'Snap', exact: true}).click();
+    const original = await text(page);
+    const start = await center(page, 1),
+      fixed = await center(page, 2);
+    const scale = (fixed.x - start.x) / 10;
+    const destination = {x: start.x + 10 * scale, y: start.y - 20 * scale};
+    const reached = {x: start.x + 10 * scale, y: start.y - 10 * scale};
+    for (const cancel of [true, false]) {
+      await page.mouse.move(start.x, start.y);
+      await page.mouse.down();
+      await page.mouse.move(destination.x, destination.y, {steps: 8});
+      await waitAt(page, 1, reached);
+      await waitAt(page, 2, fixed);
+      assert.equal(await text(page), original);
+      if (cancel) await page.keyboard.press('Escape');
+      await page.mouse.up();
+      if (cancel) {
+        await waitAt(page, 1, start);
+        assert.equal(await text(page), original);
+      }
+    }
+    await waitForSource(page, /\['point', 1, \[(?!0, 0\])/);
+    await page.getByText('Ready', {exact: true}).waitFor();
+    await waitAt(page, 1, reached);
+    await waitAt(page, 2, fixed);
+    const updated = await text(page);
+    assert.match(updated, new RegExp(`\\['${kind}', 4, \\[1, 10(?:,|\\])`));
+    assert.match(updated, /\['circle', 5, \[1, 3\]\]/);
+    assert.match(updated, /\['point', 2, \[10, 0\]\]/);
+    assert.match(updated, /constraints:\s*\[\['fixed', 2\]\]/);
+    assert.doesNotMatch(updated, /'radius'/);
+    await page.keyboard.press('Control+z');
+    await waitForSource(page, /\['point', 1, \[0, 0\]\]/);
+    await page.getByText('Ready', {exact: true}).waitFor();
+    await waitAt(page, 1, start);
+    assert.equal(await text(page), original);
+  });
+}

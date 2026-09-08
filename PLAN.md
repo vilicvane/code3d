@@ -55,7 +55,7 @@ implementation context and historical outcomes, not a competing work queue.
   rectangle centers for preferred local translation, prefer centers or far connected endpoints
   as soft references, and handle an unconstrained sole junction per branch.
   Connectivity and role recognition belong to those rules, not the framework.
-  Ordered soft stages preserve the feasible mouse result, then local translation,
+  Ordered soft stages preserve gesture-specific priorities, the feasible mouse result, then local translation,
   then minimize exterior movement. Later stages retain the earlier chosen target
   parameters for this frame only; hard constraints always hold. Connected external
   geometry no longer disqualifies a center gesture, and no stage locks persist.
@@ -64,7 +64,11 @@ implementation context and historical outcomes, not a competing work queue.
   keep the endpoint on the feasible circle. This also applies when an endpoint
   is another curve's center: translation seeds use the same projected endpoint
   position and followers use its achieved movement. See [#61](https://github.com/vilicvane/code3d/issues/61).
-  Other gestures start with the closest feasible mouse target. Subsequent stages
+  Circle and arc center gestures preserve their own curves' radii before following
+  the mouse; concentric curves participate together. A point with both roles first
+  preserves incident centers, then its own radii. Hard constraints remain authoritative,
+  and radius goals do not persist as authored dimensions. Other gestures start with
+  the closest feasible mouse target. Subsequent stages
   preserve achieved values while optimizing soft references. No reference point is permanently fixed;
   temporary objectives do not enter source or the reported model DOF.
   A drag rule recognizes points on lines, circles and finite directed arcs from displayed
