@@ -20,6 +20,7 @@
     "@code3d/agent": "*",
     "@code3d/core": "*",
     "@code3d/screws": "*",
+    "@ctrl/tinycolor": "^4.2.0",
     "@headless-tree/core": "^1.7.0",
     "@typescript/typescript6": "^6.0.2",
     "@zenfs/core": "^2.7.0",

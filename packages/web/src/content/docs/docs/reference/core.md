@@ -157,6 +157,13 @@ The outermost painted group determines the color of its complete subtree.
 Painting again replaces that override. Original models and shared parts used
 elsewhere retain their colors; previews and exports use the same result.
 
+Colors accept CSS names, `#RGB`, `#RGBA`, `#RRGGBB`, `#RRGGBBAA`, `rgb(...)`
+and `rgba(...)`. Alpha controls opacity: `0` is transparent and `1` is opaque.
+For example, `.paint('#f008')` is equivalent to `.paint('#ff000088')`;
+`.paint('rgba(255, 0, 0, 0.5)')` and `.paint('rgb(100% 0% 0% / 50%)')`
+both produce half-opaque red. Previews, PNG images, STEP and 3MF preserve
+the specified opacity; STL contains geometry only.
+
 ## Scaling
 
 Solids, faces, curves, and points support `.scaled(factor)`. The factor must be

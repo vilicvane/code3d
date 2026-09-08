@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {parseModelColor} from '../model/model-color';
 import {orientImageCamera, type ImageView} from './image-camera';
 import type {
   ModelSnapshotObject,
@@ -198,6 +199,10 @@ export function createRenderedModelNode(
     throw new Error(`OpenCascade solid ${node.name} has no renderable mesh.`);
   }
 
+  const paint =
+    node.color === undefined ? undefined : parseModelColor(node.color);
+  const color = paint?.rgb ?? unpaintedSurfaceColor;
+  const alpha = paint?.alpha ?? 1;
   const container = new THREE.Group();
   if (node.kind === 'vertex') {
     const pointGeometry = new THREE.BufferGeometry();
@@ -206,7 +211,10 @@ export function createRenderedModelNode(
       new THREE.BufferAttribute(node.mesh.topologyVertices, 3),
     );
     const pointMaterial = new THREE.PointsMaterial({
-      color: node.color ?? unpaintedSurfaceColor,
+      color,
+      opacity: alpha,
+      transparent: alpha < 1,
+      depthWrite: alpha === 1,
       size: 5,
       sizeAttenuation: false,
     });
@@ -219,7 +227,10 @@ export function createRenderedModelNode(
       const curve = new THREE.LineSegments(
         edgeGeometry,
         new THREE.LineBasicMaterial({
-          color: node.color ?? unpaintedSurfaceColor,
+          color,
+          opacity: alpha,
+          transparent: alpha < 1,
+          depthWrite: alpha === 1,
           toneMapped: false,
         }),
       );
@@ -229,12 +240,12 @@ export function createRenderedModelNode(
     return container;
   }
 
-  const isUnpainted = node.color === undefined;
+  const opacity = paint?.alpha ?? unpaintedSurfaceOpacity;
   const material = new THREE.MeshStandardMaterial({
-    color: node.color ?? unpaintedSurfaceColor,
-    transparent: isUnpainted,
-    opacity: isUnpainted ? unpaintedSurfaceOpacity : 1,
-    depthWrite: !isUnpainted,
+    color,
+    transparent: opacity < 1,
+    opacity,
+    depthWrite: opacity === 1,
     roughness: 0.52,
     metalness: 0.12,
     polygonOffset: true,
@@ -248,7 +259,8 @@ export function createRenderedModelNode(
     const edgeMaterial = new THREE.LineBasicMaterial({
       color: boundaryColor,
       transparent: true,
-      opacity: boundaryOpacity,
+      opacity: boundaryOpacity * alpha,
+      depthWrite: alpha === 1,
     });
     const edges = new THREE.LineSegments(edgeGeometry, edgeMaterial);
     edges.userData.edgeGroups = node.mesh.edgeGroups;

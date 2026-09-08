@@ -738,7 +738,10 @@ export interface ModelCapabilities<
    * @code3d.param z {kind: 'angle', label: 'Rotate Z'}
    */
   rotate(x: number, y: number, z: number): ModelForFamily<Elements, Family>;
-  /** Return a recolored value; a group overrides the color of every descendant. */
+  /**
+   * Return a recolored value; a group overrides the color of every descendant.
+   * Accepts CSS names, hex colors (including alpha), and rgb()/rgba().
+   */
   paint(color: string): ModelForFamily<Elements, Family>;
 }
 
