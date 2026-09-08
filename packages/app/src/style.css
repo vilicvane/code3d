@@ -1341,14 +1341,15 @@ kbd {
   color: inherit;
   background: #ffffff0b;
 }
-.sketch-toolbar button[aria-pressed='true'] {
+.sketch-toolbar button[aria-pressed='true'],
+.sketch-toolbar button[aria-pressed='mixed'] {
   color: var(--acid);
   border-color: #66752c;
   background: #d8ff3e12;
 }
 
 .sketch-toolbar button[aria-pressed='mixed'] {
-  box-shadow: inset 0 -2px var(--acid);
+  border-style: dashed;
 }
 .sketch-view-options button[aria-pressed='true'] {
   border-color: transparent;
@@ -1397,6 +1398,16 @@ kbd {
 }
 .drawing-overlay {
   pointer-events: none;
+}
+.sketch-selection-box {
+  pointer-events: none;
+  fill: var(--acid);
+  fill-opacity: 0.08;
+  stroke: var(--acid);
+  stroke-width: 1;
+}
+.sketch-selection-box.crossing {
+  stroke-dasharray: 4 3;
 }
 .snap-marker,
 .draft-marker {
@@ -1540,6 +1551,9 @@ kbd {
 }
 .sketch-canvas .constraint-active rect {
   stroke: #dbe9a0;
+}
+.sketch-canvas .constraint-badge.constraint-active {
+  color: #dbe9a0;
 }
 .sketch-canvas .constraint-badge:focus-visible rect {
   stroke: var(--acid);

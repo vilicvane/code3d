@@ -95,7 +95,7 @@ export type SketchChange =
       entries: readonly SketchDraftEntry[];
       constraintReplacements: readonly Readonly<{
         index: number;
-        ids: readonly number[];
+        targets: readonly (number | readonly [number, number])[];
       }>[];
     }>;
 
@@ -533,34 +533,71 @@ export class SketchEditResolver implements ToolIntentResolver {
         }
         appendEntries(added.map(replacementText));
         const copies: string[] = [];
-        for (const {index, ids} of change.constraintReplacements) {
+        for (const {index, targets} of change.constraintReplacements) {
           const node = parsed.constraints?.elements[index];
           if (!node || !ts.isArrayLiteralExpression(node))
             throw new Error('The sketch constraints changed.');
-          if (!ids.length) {
+          if (!targets.length) {
             remove(node);
             continue;
           }
-          if (
-            ids.length === 1 &&
-            change.replacements.some(r => r.original.id === ids[0])
-          )
-            continue;
           const kind = node.elements[0];
           const target = node.elements[1];
           if (
             !ts.isStringLiteral(kind) ||
-            !['horizontal', 'vertical', 'angle', 'radius'].includes(kind.text)
+            ![
+              'horizontal',
+              'vertical',
+              'angle',
+              'radius',
+              'parallel',
+              'perpendicular',
+            ].includes(kind.text)
           )
             throw new Error('Splitting requires explicit constraint targets.');
-          if (!target || !ts.isNumericLiteral(target))
+          if (
+            !target ||
+            !(
+              ts.isNumericLiteral(target) ||
+              (ts.isArrayLiteralExpression(target) &&
+                target.elements.length === 2 &&
+                target.elements.every(ts.isNumericLiteral))
+            )
+          )
             throw new Error('Splitting requires explicit constraint targets.');
-          replace(target, String(ids[0]));
+          const targetText = (
+            replacement: number | readonly [number, number],
+          ) => {
+            if (typeof replacement === 'number') return String(replacement);
+            if (!ts.isArrayLiteralExpression(target))
+              throw new Error(
+                'Splitting requires explicit constraint targets.',
+              );
+            let text = raw(target);
+            for (let i = 1; i >= 0; i--) {
+              const element = target.elements[i];
+              const start = element.getStart() - target.getStart();
+              const end = element.end - target.getStart();
+              text = text.slice(0, start) + replacement[i] + text.slice(end);
+            }
+            return text;
+          };
+          const original = ts.isNumericLiteral(target)
+            ? Number(target.text)
+            : target.elements.map(node =>
+                Number((node as ts.NumericLiteral).text),
+              );
+          if (
+            targets.length === 1 &&
+            JSON.stringify(targets[0]) === JSON.stringify(original)
+          )
+            continue;
+          replace(target, targetText(targets[0]));
           const start = node.getStart() - prefix.length;
-          const raw = source.slice(start, node.end - prefix.length);
-          for (const id of ids.slice(1))
+          const tupleText = source.slice(start, node.end - prefix.length);
+          for (const replacement of targets.slice(1))
             copies.push(
-              `${raw.slice(0, target.getStart() - prefix.length - start)}${id}${raw.slice(target.end - prefix.length - start)}`,
+              `${tupleText.slice(0, target.getStart() - prefix.length - start)}${targetText(replacement)}${tupleText.slice(target.end - prefix.length - start)}`,
             );
         }
         if (copies.length) append(parsed.constraints!, copies);
@@ -591,6 +628,10 @@ export class SketchEditResolver implements ToolIntentResolver {
             case 'vertical':
               content = String(data);
               break;
+            case 'parallel':
+            case 'perpendicular':
+              content = `[${data.join(', ')}]`;
+              break;
             case 'coincident':
             case 'midpoint':
               content = `[${data.map(point).join(', ')}]`;
@@ -600,10 +641,12 @@ export class SketchEditResolver implements ToolIntentResolver {
               content = `${point(data)}, ${formatSourceNumber(value)}`;
               break;
             case 'length':
-            case 'angle':
             case 'radius':
             case 'sweep':
               content = `${data}, ${formatSourceNumber(value)}`;
+              break;
+            case 'angle':
+              content = `${typeof data === 'number' ? data : `[${data.join(', ')}]`}, ${formatSourceNumber(value)}`;
               break;
           }
           return `['${kind}', ${content}]`;

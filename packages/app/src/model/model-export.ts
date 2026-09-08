@@ -1,6 +1,7 @@
 import type * as Replicad from 'replicad';
 import type {AnyShape} from 'replicad';
 import {strToU8, zipSync} from 'fflate';
+import {parseModelColor, type ModelColor} from './model-color';
 import {
   quaternionAxisAngle,
   type ModelGeometrySnapshot,
@@ -24,6 +25,12 @@ export type ModelExportOptions = Readonly<{
   tolerance: number;
   angularTolerance: number;
   binary: boolean;
+}>;
+
+type ExportShape = Readonly<{
+  shape: AnyShape;
+  name: string;
+  color?: ModelColor;
 }>;
 
 export function exportModel(
@@ -56,7 +63,7 @@ export function exportModel(
     }
   }
 
-  const shapes: {shape: AnyShape; name: string; color?: string}[] = [];
+  const shapes: ExportShape[] = [];
   try {
     for (const instance of instances) {
       const original = geometry.shapes.get(instance.nodeId);
@@ -75,14 +82,29 @@ export function exportModel(
         if (options.upAxis === 'z')
           shape = shape.rotate(90, [0, 0, 0], [1, 0, 0]);
         if (options.scale !== 1) shape = shape.scale(options.scale);
-        shapes.push({shape, name: instance.name, color: instance.color});
+        shapes.push({
+          shape,
+          name: instance.name,
+          color:
+            instance.color === undefined || options.format === 'stl'
+              ? undefined
+              : parseModelColor(instance.color),
+        });
       } catch (error) {
         shape.delete();
         throw error;
       }
     }
     if (options.format === 'step') {
-      return exportSTEP(shapes, {unit: 'MM', modelUnit: 'MM'});
+      return exportSTEP(
+        shapes.map(({shape, name, color}) => ({
+          shape,
+          name,
+          color: color?.rgb,
+          alpha: color?.alpha,
+        })),
+        {unit: 'MM', modelUnit: 'MM'},
+      );
     }
     if (options.format === 'stl') {
       const compound = makeCompound(shapes.map(item => item.shape));
@@ -101,7 +123,7 @@ export function exportModel(
 }
 
 function export3mf(
-  shapes: readonly {shape: AnyShape; name: string; color?: string}[],
+  shapes: readonly ExportShape[],
   options: ModelExportOptions,
 ): Blob {
   const resources: string[] = [];
@@ -116,7 +138,7 @@ function export3mf(
     const material = color ? ` pid="${materialId}" pindex="0"` : '';
     if (color) {
       resources.push(
-        `<basematerials id="${materialId}"><base name="${xml(name)}" displaycolor="${xml(color)}"/></basematerials>`,
+        `<basematerials id="${materialId}"><base name="${xml(name)}" displaycolor="${color.hex}"/></basematerials>`,
       );
     }
     resources.push(

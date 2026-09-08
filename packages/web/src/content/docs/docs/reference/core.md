@@ -97,6 +97,28 @@ const sleeve = profile.face().extrude(20);
 const parts = profile.faces().map(face => face.extrude(10));
 ```
 
+Geometry tuples store current data; the second argument's `constraints` array
+specifies relations that must remain true. Constraints have no IDs and use
+`['kind', target, value?]`. For local lines:
+
+- `['horizontal', line]` and `['vertical', line]` set an axis direction;
+  `['length', line, distance]` sets a positive length.
+- `['angle', line, degrees]` sets Orientation relative to +X.
+- `['parallel', [line1, line2]]` and `['perpendicular', [line1, line2]]`
+  relate two lines without requiring their finite segments to intersect.
+- `['angle', [line1, line2], degrees]` sets Angle between lines: the signed
+  rotation from the first line's authored start-to-end direction to the second,
+  positive counterclockwise and equivalent modulo 360.
+
+In Select, an ordinary click or box selection replaces the selection, Ctrl
+toggles elements, and Shift only adds them. Drag a box left-to-right for fully
+enclosed geometry or right-to-left for intersecting geometry. A multi-selection
+can remove any editable local constraint on its elements, while adding one
+requires the entire selection to satisfy the tool's prerequisites. Parallel
+accepts two or more local lines and creates pairwise relations; Perpendicular
+and Angle between lines require exactly two. Rectangle tools still create
+horizontal and vertical constraints by default.
+
 Drag an arc endpoint to reshape it while preferring to keep its center in place.
 Drag a circle or arc center to move it while preferring to keep its radius
 unchanged. Hard constraints, expression-controlled values and read-only upstream
@@ -156,6 +178,13 @@ shows which operations are supported by the value you hold.
 The outermost painted group determines the color of its complete subtree.
 Painting again replaces that override. Original models and shared parts used
 elsewhere retain their colors; previews and exports use the same result.
+
+Colors accept CSS names, `#RGB`, `#RGBA`, `#RRGGBB`, `#RRGGBBAA`, `rgb(...)`
+and `rgba(...)`. Alpha controls opacity: `0` is transparent and `1` is opaque.
+For example, `.paint('#f008')` is equivalent to `.paint('#ff000088')`;
+`.paint('rgba(255, 0, 0, 0.5)')` and `.paint('rgb(100% 0% 0% / 50%)')`
+both produce half-opaque red. Previews, PNG images, STEP and 3MF preserve
+the specified opacity; STL contains geometry only.
 
 ## Scaling
 

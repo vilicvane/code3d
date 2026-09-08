@@ -54,10 +54,14 @@ import {
   type SketchConstraintDisplay,
 } from '../tools/sketch-constraints';
 import {SketchConstraints} from './sketch-constraints';
+import {sketchConstraintActions} from '../tools/sketch-constraint-actions';
 import {
-  sketchConstraintActions,
+  boxSelectSketch,
+  sketchSelectionMode,
+  updateSketchSelection,
+  type SketchSelectionMode,
   type SketchPick,
-} from '../tools/sketch-constraint-actions';
+} from '../tools/sketch-selection';
 import {SketchConstraintTools} from './sketch-constraint-tools';
 
 const drawingTools = [
@@ -97,7 +101,15 @@ type Gesture =
       version: number;
       error?: string;
     }
-  | {kind: 'pan'; start: SketchPosition; center: SketchPosition};
+  | {kind: 'pan'; start: SketchPosition; center: SketchPosition}
+  | {
+      kind: 'box';
+      start: SketchPosition;
+      position: SketchPosition;
+      before: SketchPick[];
+      mode: SketchSelectionMode;
+      dragging: boolean;
+    };
 
 /** Pure 2D interaction: source parsing, runtime tracing and transactions live outside this view. */
 export class SketchEditor {
@@ -130,7 +142,9 @@ export class SketchEditor {
       return committed;
     },
     () => this.svg.focus(),
+    () => this.draw(),
   );
+  private readonly selectionBox = svgElement('rect');
   private readonly overlay = svgElement('g');
   private readonly draftShapes: SVGElement[] = [];
   private readonly draftMarker = svgElement('circle');
@@ -202,6 +216,7 @@ export class SketchEditor {
       'wheel',
       event => {
         event.preventDefault();
+        if (this.gesture?.kind === 'box') return;
         const before = this.coordinates(event);
         this.scale = Math.min(
           1000,
@@ -252,6 +267,8 @@ export class SketchEditor {
     stage.className = 'sketch-stage';
     stage.append(this.svg, this.drawingInputs.root);
     this.overlay.classList.add('drawing-overlay');
+    this.selectionBox.classList.add('sketch-selection-box');
+    this.selectionBox.setAttribute('aria-hidden', 'true');
     this.snapLabel.append(this.snapText);
     this.overlay.append(this.draftMarker, this.snapLabel);
     this.svg.append(
@@ -262,6 +279,7 @@ export class SketchEditor {
       this.vertices,
       this.constraints.labels,
       this.overlay,
+      this.selectionBox,
     );
     this.status.append(this.statusText);
     this.root.append(
@@ -397,6 +415,7 @@ export class SketchEditor {
     this.constraintTools.cancel();
     if (this.drawingInputs.root.contains(document.activeElement))
       this.svg.focus();
+    if (this.gesture?.kind === 'box') this.selection = this.gesture.before;
     this.gesture = undefined;
     this.trimPointer = undefined;
     this.drawing?.reset();
@@ -414,12 +433,13 @@ export class SketchEditor {
   }
 
   private keyDown(event: KeyboardEvent): void {
-    if (event.isComposing || event.ctrlKey || event.metaKey) return;
+    if (event.isComposing) return;
     if (event.key === 'Escape') {
       event.preventDefault();
       this.escape();
       return;
     }
+    if (event.ctrlKey || event.metaKey) return;
     if (event.key === 'Alt') {
       this.bypassSnap = true;
       this.drawDraft();
@@ -531,7 +551,8 @@ export class SketchEditor {
     this.toolbar.add(this.toolbar.group('Select'), {
       name: 'Select',
       icon: MousePointer2,
-      title: 'Select · Drag points · Shift-click to toggle selection',
+      title:
+        'Select · Click or drag blank space to replace selection · Ctrl toggles · Shift adds · Left to right: inside · Right to left: crossing',
       run: select(() => 'Select'),
     });
     const drawing = this.toolbar.group('Draw');
@@ -736,19 +757,23 @@ export class SketchEditor {
       this.place();
     } else {
       const picked = vertex ?? segment;
-      if (event.shiftKey) {
-        if (picked) {
-          const matches = (p: SketchPick) =>
-            'start' in p && 'start' in picked
-              ? sameSketchSegment(p, picked)
-              : !('start' in p) && !('start' in picked) && same(p, picked);
-          this.selection = this.selection.some(matches)
-            ? this.selection.filter(p => !matches(p))
-            : [...this.selection, picked];
-        }
-      } else this.selection = picked ? [picked] : [];
+      const mode = sketchSelectionMode(event);
+      if (!picked) {
+        this.gesture = {
+          kind: 'box',
+          start: position,
+          position,
+          before: [...this.selection],
+          mode,
+          dragging: false,
+        };
+        this.svg.setPointerCapture(event.pointerId);
+        this.draw();
+        return;
+      }
+      this.selection = updateSketchSelection(this.selection, [picked], mode);
       if (
-        !event.shiftKey &&
+        mode === 'replace' &&
         point &&
         !this.view.readOnlyReason &&
         point.layer === this.view.id &&
@@ -773,8 +798,10 @@ export class SketchEditor {
     if (!this.view) return;
     this.cancel();
     this.tool = 'Select';
-    this.selection = display.curve
-      ? this.segments().filter(segment => same(segment, display.curve!))
+    this.selection = display.curves.length
+      ? this.segments().filter(segment =>
+          display.curves.some(curve => same(segment, curve)),
+        )
       : [...display.points];
     this.svg.focus();
     this.draw();
@@ -784,12 +811,30 @@ export class SketchEditor {
       !this.view.readOnlyReason &&
       value !== undefined
     )
-      this.constraintTools.edit(display.index, display.kind, value);
+      this.constraintTools.edit(display.index, display.tool, value);
   }
 
   private pointerMove(event: PointerEvent): void {
     this.bypassSnap = event.altKey;
-    if (this.gesture?.kind === 'pan') {
+    if (this.gesture?.kind === 'box') {
+      const gesture = this.gesture;
+      gesture.position = this.coordinates(event);
+      gesture.dragging ||=
+        distance(gesture.start, gesture.position) * this.scale >= 3;
+      if (gesture.dragging) {
+        const picks = boxSelectSketch(
+          this.points(),
+          this.segments(),
+          gesture.start,
+          gesture.position,
+        );
+        this.selection = updateSketchSelection(
+          gesture.before,
+          picks,
+          gesture.mode,
+        );
+      }
+    } else if (this.gesture?.kind === 'pan') {
       this.center = [
         this.gesture.center[0] -
           (event.clientX - this.gesture.start[0]) / this.scale,
@@ -864,6 +909,8 @@ export class SketchEditor {
 
   private async pointerUp(event: PointerEvent): Promise<void> {
     const gesture = this.gesture;
+    if (gesture?.kind === 'box' && !gesture.dragging)
+      this.selection = updateSketchSelection(gesture.before, [], gesture.mode);
     if (gesture?.kind === 'move') gesture.released = true;
     else this.gesture = undefined;
     if (this.svg.hasPointerCapture(event.pointerId))
@@ -996,6 +1043,26 @@ export class SketchEditor {
       String(this.gesture?.kind === 'move' && !!this.gesture.pending),
     );
     this.usedShapes.clear();
+    const box =
+      this.gesture?.kind === 'box' && this.gesture.dragging
+        ? this.gesture
+        : undefined;
+    this.selectionBox.style.display = box ? '' : 'none';
+    if (box) {
+      const start = this.screen(box.start),
+        end = this.screen(box.position);
+      this.selectionBox.setAttribute('x', String(Math.min(start[0], end[0])));
+      this.selectionBox.setAttribute('y', String(Math.min(start[1], end[1])));
+      this.selectionBox.setAttribute(
+        'width',
+        String(Math.abs(end[0] - start[0])),
+      );
+      this.selectionBox.setAttribute(
+        'height',
+        String(Math.abs(end[1] - start[1])),
+      );
+      this.selectionBox.classList.toggle('crossing', end[0] < start[0]);
+    }
     const width = this.svg.clientWidth,
       height = this.svg.clientHeight;
     const step = sketchGridStep(this.scale);
@@ -1229,7 +1296,7 @@ export class SketchEditor {
   }
 
   private entityClass(layer: string, id: number): string {
-    return `entity ${layer === this.view!.id ? 'local' : 'upstream'}${this.constraints.related(layer, id) ? ' constraint-related' : ''}${this.selection.some(p => !('start' in p) && same(p, {layer, id})) ? ' selected' : ''}`;
+    return `entity ${layer === this.view!.id ? 'local' : 'upstream'}${this.constraints.related(layer, id) || this.constraintTools.related(layer, id) ? ' constraint-related' : ''}${this.selection.some(p => !('start' in p) && same(p, {layer, id})) ? ' selected' : ''}`;
   }
   private drawDraft(): void {
     if (!this.drawing || !this.view || this.root.hidden) {
