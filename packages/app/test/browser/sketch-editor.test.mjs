@@ -7,6 +7,7 @@ import {
   point,
   segment,
   clickSegment,
+  selectTool,
 } from './sketch-test.ts';
 async function drag(page, locator, dx, dy) {
   const rect = await locator.boundingBox();
@@ -33,7 +34,6 @@ test('continuous lines reuse endpoints before recompile and undo one segment at 
     'Select',
     'Line',
     'Rectangle',
-    'Center rectangle',
     'Circle',
     'Trim',
     'Fit',
@@ -133,7 +133,7 @@ test('expression coordinates stay intact and switching named bindings switches t
   assert.match(await text(page), /\[width,\s*-/);
   await point(page, 1).click();
   assert.match(
-    await page.locator('.sketch-editor output').innerText(),
+    await point(page, 1).locator('title').textContent(),
     /X locked by expression/,
   );
 });
@@ -498,7 +498,7 @@ const value = sketch([
   ['point', 1, [0, 0]],
   ['point', 2, [40, 0]],
   ['line', 3, [1, 2]],
-], {constraints: [['horizontal', 3], ['length', [3, 40]]]});`;
+], {constraints: [['horizontal', 3], ['length', 3, 40]]});`;
 const screenPoint = locator =>
   locator.evaluate(e => [
     Number(e.getAttribute('cx')),
@@ -562,7 +562,7 @@ test('constrained drag follows the mouse, softly retains the opposite endpoint a
   );
   assert.ok(Math.abs(movedB[1] - b[1]) > 20);
   assert.notEqual(await text(page), source);
-  assert.match(await text(page), /'length',\s*\[3,\s*40\]/);
+  assert.match(await text(page), /'length',\s*3,\s*40/);
   assert.equal(
     await page.evaluate(
       () =>
@@ -587,7 +587,7 @@ const value = sketch([
   ['point', 1, [width, height]],
   ['point', 2, [40, 0]],
   ['line', 3, [1, 2]],
-], {constraints: [['length', [3, 40]]]});`,
+], {constraints: [['length', 3, 40]]});`,
   );
   const source = await text(page);
   const anchor = await screenPoint(point(page, 1));
@@ -595,7 +595,7 @@ const value = sketch([
   assert.equal(await text(page), source, 'both expression axes are read-only');
   assert.deepEqual(await screenPoint(point(page, 1)), anchor);
   assert.match(
-    await page.locator('.sketch-editor output').innerText(),
+    await point(page, 1).locator('title').textContent(),
     /X\/Y locked by expression/,
   );
 
@@ -670,8 +670,8 @@ test('rectangle dimensions retain native input, emit persistent sizes and undo t
   assert.equal(await page.locator('.sketch-canvas circle.local').count(), 4);
   assert.equal(await page.locator('.sketch-canvas line.local').count(), 4);
   assert.match(await text(page), /'point',\s*3,\s*\[-40,\s*-30\]/);
-  assert.match(await text(page), /'length',\s*\[5,\s*40\]/);
-  assert.match(await text(page), /'length',\s*\[6,\s*30\]/);
+  assert.match(await text(page), /'length',\s*5,\s*40/);
+  assert.match(await text(page), /'length',\s*6,\s*30/);
   assert.equal(await drawingTitle(page), 'First corner');
   assert.equal(await page.locator('.drawing-overlay line.draft').count(), 0);
   await page.keyboard.press('Control+z');
@@ -765,7 +765,7 @@ test('deleting a constrained line removes its orphan endpoints and undo restores
   await page.keyboard.press('Control+z');
   await page.locator('.sketch-canvas line.local').waitFor({state: 'attached'});
   assert.match(await text(page), /'horizontal',\s*3/);
-  assert.match(await text(page), /'length',\s*\[3,\s*40\]/);
+  assert.match(await text(page), /'length',\s*3,\s*40/);
 });
 
 async function selectSegment(page, locator) {
@@ -781,7 +781,7 @@ const value = sketch([
   ['point', 1, [0, 0]], ['point', 2, [width, 0]],
   ['point', 3, [10, 0]], ['point', 4, [30, 0]],
   ['line', 5, [1, 2]],
-], {constraints: [['angle', [5, theta]], ['length', [5, width]]]});`;
+], {constraints: [['angle', 5, theta], ['length', 5, width]]});`;
   const page = await open(t, source);
   assert.equal(await page.locator('.sketch-canvas line.local').count(), 3);
   const before = await text(page);
@@ -793,12 +793,12 @@ const value = sketch([
   assert.equal(await page.locator('.sketch-canvas line.local').count(), 2);
   assert.equal(await page.locator('.sketch-canvas circle.local').count(), 4);
   assert.match(await text(page), /'line',\s*7,\s*\[4,\s*2\]/);
-  assert.match(await text(page), /'angle',\s*\[6,\s*theta\]/);
-  assert.match(await text(page), /'angle',\s*\[7,\s*theta\]/);
+  assert.match(await text(page), /'angle',\s*6,\s*theta/);
+  assert.match(await text(page), /'angle',\s*7,\s*theta/);
   assert.doesNotMatch(await text(page), /'length'|'line',\s*5,/);
   await page.keyboard.press('Control+z');
   await segment(page, 5, 0.25, 0.75).waitFor({state: 'attached'});
-  await waitForSource(page, /'length',\s*\[5,\s*width\]/);
+  await waitForSource(page, /'length',\s*5,\s*width/);
   assert.equal(await page.locator('.sketch-canvas line.local').count(), 3);
   assert.doesNotMatch(await text(page), /'line',\s*[67],/);
 });
@@ -867,7 +867,7 @@ test('an upstream point delimits a local end trim, retaining the line ID and a n
 const base = sketch([['point', 1, [10, 0]]]);
 const value = base.derive([
   ['point', 1, [0, 0]], ['point', 2, [40, 0]], ['line', 3, [1, 2]],
-], {constraints: [['horizontal', 3], ['length', [3, 40]]]});`,
+], {constraints: [['horizontal', 3], ['length', 3, 40]]});`,
   );
   await selectSegment(page, segment(page, 3, 0.25, 1));
   await page.keyboard.press('Delete');
@@ -943,7 +943,7 @@ const value = sketch([
   ['point', 1, [0, 0]], ['point', 2, [40, 0]], ['point', 3, [40, 20]],
   ['line', 4, [1, 2]], ['line', 5, [2, 3]], ['point', 6, [0, 0]],
 ], {constraints: [['fixed', 1], ['horizontal', 4], ['vertical', 5],
-  ['length', [4, 40]], ['angle', [4, 0]], ['x', [3, 40]], ['y', [3, 20]], ['coincident', [1, 6]]]});`,
+  ['length', 4, 40], ['angle', 4, 0], ['x', 3, 40], ['y', 3, 20], ['coincident', [1, 6]]]});`,
   );
   const badges = page.locator('.constraint-badge');
   assert.equal(await badges.count(), 8);
@@ -1011,7 +1011,7 @@ test('segment deletion cleans orphan point constraints but preserves unrelated s
 const value = sketch([
   ['point', 1, [0, 0]], ['point', 2, [40, 0]], ['line', 3, [1, 2]],
   ['point', 4, [50, 20]],
-], {constraints: [['fixed', 1], ['horizontal', 3], ['length', [3, 40]], ['x', [4, 50]]]});`,
+], {constraints: [['fixed', 1], ['horizontal', 3], ['length', 3, 40], ['x', 4, 50]]});`,
   );
   await selectSegment(page, segment(page, 3, 0, 1));
   await page.keyboard.press('Delete');
@@ -1020,7 +1020,7 @@ const value = sketch([
   await waitForSource(page, /sketch\(\[\s*\['point',\s*4,/);
   await page.getByText('Ready', {exact: true}).waitFor();
   assert.doesNotMatch(await text(page), /'fixed'|'horizontal'|'length'/);
-  assert.match(await text(page), /'x',\s*\[4,\s*50\]/);
+  assert.match(await text(page), /'x',\s*4,\s*50/);
   await page.keyboard.press('Control+z');
   await point(page, 1).waitFor({state: 'attached'});
   await waitForSource(page, /'fixed',\s*1/);
@@ -1056,7 +1056,7 @@ test('successive segment deletes before recompilation retain source constraint i
 const value = sketch([
   ['point', 1, [0, 0]], ['point', 2, [40, 0]],
   ['point', 3, [10, 0]], ['point', 4, [30, 0]], ['line', 5, [1, 2]],
-], {constraints: [['angle', [5, 0]], ['fixed', 1], ['length', [5, 40]]]});`,
+], {constraints: [['angle', 5, 0], ['fixed', 1], ['length', 5, 40]]});`,
   );
   // Both transactions run in one task: no Worker compile result can arrive
   // between the split and deleting one of its new lines.
@@ -1084,18 +1084,16 @@ const value = sketch([
   await page.getByText('Ready', {exact: true}).waitFor();
   assert.equal(await page.locator('.sketch-canvas line.local').count(), 1);
   assert.match(await text(page), /'fixed',\s*1/);
-  assert.match(await text(page), /'angle',\s*\[6,\s*0\]/);
+  assert.match(await text(page), /'angle',\s*6,\s*0/);
   assert.doesNotMatch(
     await text(page),
-    /'angle',\s*\[7,|'line',\s*[57],|'length'/,
+    /'angle',\s*7,|'line',\s*[57],|'length'/,
   );
 });
 
 test('center rectangle numeric sizes are full side lengths and its center undoes atomically', async t => {
   const page = await open(t, emptySketch);
-  await page
-    .getByRole('button', {name: 'Center rectangle', exact: true})
-    .click();
+  await selectTool(page, 'Center rectangle');
   assert.equal(await drawingTitle(page), 'Center');
   await field(page, 'X').fill('5');
   await page.keyboard.press('Tab');
@@ -1113,8 +1111,8 @@ test('center rectangle numeric sizes are full side lengths and its center undoes
   assert.equal(await page.locator('.sketch-canvas circle.local').count(), 5);
   assert.equal(await page.locator('.sketch-canvas line.local').count(), 4);
   assert.match(await text(page), /'point',\s*1,\s*\[5,\s*-3\]/);
-  assert.match(await text(page), /'length',\s*\[6,\s*40\]/);
-  assert.match(await text(page), /'length',\s*\[7,\s*20\]/);
+  assert.match(await text(page), /'length',\s*6,\s*40/);
+  assert.match(await text(page), /'length',\s*7,\s*20/);
   const [m, a, b, c] = await Promise.all(
     [1, 2, 3, 4].map(id => screenPoint(point(page, id))),
   );
@@ -1135,9 +1133,7 @@ test('center rectangle numeric sizes are full side lengths and its center undoes
 
 test('center rectangle corners resize symmetrically through preview, recompilation and undo', async t => {
   const page = await open(t, emptySketch);
-  await page
-    .getByRole('button', {name: 'Center rectangle', exact: true})
-    .click();
+  await selectTool(page, 'Center rectangle');
   const canvas = await page.locator('.sketch-canvas').boundingBox();
   await page.mouse.click(
     canvas.x + canvas.width / 2,
@@ -1231,9 +1227,7 @@ test('center rectangles preserve named upstream centers and remove midpoint cons
 const base = sketch([['point',1,[0,0]]], {constraints: [['fixed', 1]]});
 const child = base.derive([]);`,
   );
-  await page
-    .getByRole('button', {name: 'Center rectangle', exact: true})
-    .click();
+  await selectTool(page, 'Center rectangle');
   await point(page, 1, 'upstream').click();
   await field(page, 'Width').fill('-');
   await page.keyboard.press('Enter');

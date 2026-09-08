@@ -228,7 +228,7 @@ const value = sketch([]);`);
 
 test('constraint options share the editable source range and use the installed sketch solver', async () => {
   const args =
-    "[['point', 1, [0,0]], ['point', 2, [38,2]], ['line', 3, [1,2]]], {constraints: [['fixed', 1], ['horizontal', 3], ['length', [3, width]]]}";
+    "[['point', 1, [0,0]], ['point', 2, [38,2]], ['line', 3, [1,2]]], {constraints: [['fixed', 1], ['horizontal', 3], ['length', 3, width]]}";
   const source = `import {sketch} from '@code3d/core'; const width = 40; const value = sketch(${args});`;
   const module = await compiler.compile(
     {files: [{path: '/model.ts', source}]},
@@ -257,7 +257,7 @@ test('constraint options share the editable source range and use the installed s
 test('AST coordinate locks preserve expressions through drag, source transactions and a fresh compiler', async () => {
   const cases = [
     {
-      args: "[['point', 9, [x, y]], ['point', 1, [0, 0]], ['point', 2, [40, 0]], ['line', 3, [1, 2]]], {constraints: [['length', [3, 40]]]}",
+      args: "[['point', 9, [x, y]], ['point', 1, [0, 0]], ['point', 2, [40, 0]], ['line', 3, [1, 2]]], {constraints: [['length', 3, 40]]}",
       id: 2,
       target: [0, 40],
       anchor: 1,
@@ -265,7 +265,7 @@ test('AST coordinate locks preserve expressions through drag, source transaction
     {args: "[['point', 1, [x, 19]]]", id: 1, target: [30, 25]},
     {args: "[['point', 1, [22, y]]]", id: 1, target: [30, 25]},
     {
-      args: "[['point', 1, [x, y]], ['point', 2, [62, 19]], ['line', 3, [1, 2]]], {constraints: [['length', [3, 40]]]}",
+      args: "[['point', 1, [x, y]], ['point', 2, [62, 19]], ['line', 3, [1, 2]]], {constraints: [['length', 3, 40]]}",
       id: 2,
       target: [46, 51],
     },
@@ -275,7 +275,7 @@ test('AST coordinate locks preserve expressions through drag, source transaction
       target: [70, 30],
     },
     {
-      args: "[['point', 1, [2, 2]], ['point', 2, [x, 19]], ['line', 3, [1, 2]]], {constraints: [['length', [3, 40]]]}",
+      args: "[['point', 1, [2, 2]], ['point', 2, [x, 19]], ['line', 3, [1, 2]]], {constraints: [['length', 3, 40]]}",
       id: 1,
       target: [-6, -5],
       initiallyUnsolved: true,
@@ -387,7 +387,7 @@ test('AST coordinate locks preserve expressions through drag, source transaction
 });
 
 test('constraint conflicts highlight their source tuples, without persistent constraint IDs', async () => {
-  const source = `import {sketch} from '@code3d/core'; const value = sketch([['point', 1, [0,0]], ['point', 2, [40,0]], ['line', 3, [1,2]]], {constraints: [['length', [3, 40]], ['length', [3, 50]]]});`;
+  const source = `import {sketch} from '@code3d/core'; const value = sketch([['point', 1, [0,0]], ['point', 2, [40,0]], ['line', 3, [1,2]]], {constraints: [['length', 3, 40], ['length', 3, 50]]});`;
   const module = await compiler.compile(
     {files: [{path: '/model.ts', source}]},
     '/model.ts',
@@ -397,7 +397,7 @@ test('constraint conflicts highlight their source tuples, without persistent con
   const ref = module.diagnostic.sourceRef;
   assert.equal(
     source.slice(ref.start, ref.end),
-    "['length', [3, 40]], ['length', [3, 50]]",
+    "['length', 3, 40], ['length', 3, 50]",
   );
 });
 
@@ -406,7 +406,7 @@ test('soft drag references survive full rotations and exact rounded source repla
     `const value = sketch(${JSON.stringify([
       ...data.map(p => ['point', p.id, p.parameters]),
       ['line', 3, [1, 2]],
-    ])}, {constraints: [['length', [3, 40]]]});`;
+    ])}, {constraints: [['length', 3, 40]]});`;
   const initialData = [
     {id: 1, parameters: [2, 2]},
     {id: 2, parameters: [22, 19]},

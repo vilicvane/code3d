@@ -29,7 +29,6 @@ export type SketchDrawingCurve = SketchCurve;
 export interface SketchDrawing {
   readonly name: string;
   readonly title: string;
-  readonly instructions: string;
   readonly hasDraft: boolean;
   readonly axis?: SketchAxis;
   start?: SketchEndpoint;
@@ -111,12 +110,6 @@ export class SketchLineDrawing implements SketchDrawing {
         ? `${this.axis.toUpperCase()} locked`
         : 'Next point'
       : 'Start point';
-  }
-
-  get instructions(): string {
-    return this.start
-      ? 'Next point · Enter length/angle or click · X/Y locks direction · Esc ends the chain'
-      : 'Start point · Enter X/Y or click';
   }
 
   preview(position: SketchPosition): readonly SketchDrawingCurve[] {
@@ -221,16 +214,16 @@ export class SketchLineDrawing implements SketchDrawing {
       end = geometry.point(endpoint);
     const segment = geometry.line(start, end);
     const constraints: SketchConstraint<SketchPointAddress>[] =
-      this.startCoordinates.map(({axis, value}) => [axis, [start, value]]);
+      this.startCoordinates.map(({axis, value}) => [axis, start, value]);
     const length = this.dimensions.value('length');
     const angle = this.dimensions.value('angle');
-    if (length !== undefined) constraints.push(['length', [segment, length]]);
+    if (length !== undefined) constraints.push(['length', segment, length]);
     if (this.axis)
       constraints.push([
         this.axis === 'x' ? 'horizontal' : 'vertical',
         segment,
       ]);
-    else if (angle !== undefined) constraints.push(['angle', [segment, angle]]);
+    else if (angle !== undefined) constraints.push(['angle', segment, angle]);
     if (!commit({kind: 'append', entries: geometry.entries, constraints}))
       return 'The sketch changed; the drawing was not applied';
     // Reuse the committed endpoint's identity, including a newly allocated ID.

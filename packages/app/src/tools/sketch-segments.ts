@@ -288,13 +288,13 @@ function deletedConstraints(
         break;
       case 'x':
       case 'y':
-        deleted = pointDeleted(data[0]);
+        deleted = pointDeleted(data);
         break;
       case 'length':
       case 'angle':
       case 'radius':
       case 'sweep':
-        deleted = ids.includes(data[0]);
+        deleted = ids.includes(data);
         break;
     }
     return deleted ? [index] : [];
@@ -303,10 +303,10 @@ function deletedConstraints(
 
 export function deleteSketchEntity(
   layers: readonly SketchSnapshot[],
-  id: number,
-): SketchChange {
+  id: number | readonly number[],
+): Extract<SketchChange, {kind: 'delete'}> {
   const local = layers.at(-1)!;
-  const ids = [id];
+  const ids = typeof id === 'number' ? [id] : [...id];
   // Removing an owner also removes its aliases and their dependent curves.
   // Deleting an alias does not remove the owner or rewrite surviving IDs.
   for (let index = 0; index < ids.length; index++)
@@ -331,42 +331,45 @@ export function deleteSketchEntity(
   return {kind: 'delete', ids, constraints: deletedConstraints(local, ids)};
 }
 
-/** Remove one geometric interval from all overlapping local curves, atomically. */
+/** Remove selected intervals and their local overlaps in one source transaction. */
 export function trimSketchSegment(
   layers: readonly SketchSnapshot[],
-  segment: SketchSegment,
+  selection: SketchSegment | readonly SketchSegment[],
+  removed: readonly number[] = [],
 ): Extract<SketchChange, {kind: 'trim'}> {
   const local = layers.at(-1)!;
-  const segments = overlappingSketchSegments(
-    sketchSegments(layers, snapshotPoints(layers)),
-    segment,
+  const all = sketchSegments(layers, snapshotPoints(layers));
+  const selected = 'start' in selection ? [selection] : selection;
+  const segments = selected.flatMap(segment =>
+    overlappingSketchSegments(all, segment),
   );
-  const curves = segments.map(
-    segment =>
-      local.entities.find(e => e.id === segment.id) as Exclude<
-        SketchEntitySnapshot,
-        {kind: 'point'}
-      >,
-  );
+  const curves = [...new Set(segments.map(s => s.id))]
+    .filter(id => !removed.includes(id))
+    .map(
+      id =>
+        local.entities.find(e => e.id === id) as Exclude<
+          SketchEntitySnapshot,
+          {kind: 'point'}
+        >,
+    );
   let nextId = Math.max(0, ...local.entities.map(e => e.id)) + 1;
   const entries: SketchDraftEntry[] = [];
   const generated: {position: SketchPosition; address: SketchPointAddress}[] =
     [];
-  const tolerance = sketchCurveTolerance(segment.curve);
-  const point = (cut: SketchCut): SketchPointAddress => {
+  const point = (cut: SketchCut, tolerance: number): SketchPointAddress => {
     if ('point' in cut.endpoint) {
       const {layer, id} = cut.endpoint.point;
-      return {layer, id};
+      if (layer !== local.id || !removed.includes(id)) return {layer, id};
     }
-    const raw = cut.endpoint.position;
+    const raw = endpointPosition(cut.endpoint);
     const existing = generated.find(
       p => sketchDistance(p.position, raw) <= tolerance,
     );
     if (existing) return existing.address;
     const id = nextId++;
     const position: SketchPosition = [
-      Number(formatSourceNumber(cut.endpoint.position[0])),
-      Number(formatSourceNumber(cut.endpoint.position[1])),
+      Number(formatSourceNumber(raw[0])),
+      Number(formatSourceNumber(raw[1])),
     ];
     entries.push(['point', id, position]);
     const address = {layer: local.id, id};
@@ -374,16 +377,29 @@ export function trimSketchSegment(
     return address;
   };
   const replacements = new Map<number, number[]>();
-  segments.forEach((segment, index) => {
-    const curve = curves[index];
-    const remains =
-      curve.kind === 'circle'
-        ? Number(segment.curve.kind !== 'circle')
-        : Number(segment.start.t > 0) + Number(segment.end.t < 1);
+  curves.forEach(curve => {
+    const intervals: {start: SketchCut; end: SketchCut}[] = [];
+    const owned = all.filter(s => s.layer === local.id && s.id === curve.id);
+    for (const segment of owned) {
+      if (segments.some(s => sameSketchSegment(s, segment))) continue;
+      const last = intervals.at(-1);
+      if (last?.end.t === segment.start.t) last.end = segment.end;
+      else intervals.push({start: segment.start, end: segment.end});
+    }
+    if (
+      curve.kind === 'circle' &&
+      intervals.length > 1 &&
+      intervals[0].start.t === owned[0].start.t &&
+      intervals.at(-1)!.end.t === owned.at(-1)!.end.t
+    ) {
+      const last = intervals.pop()!;
+      intervals[0] = {start: last.start, end: intervals[0].end};
+    }
+    const tolerance = sketchCurveTolerance(owned[0].curve);
     const ids: number[] = [];
     replacements.set(curve.id, ids);
     const add = (points: readonly [SketchPointAddress, SketchPointAddress]) => {
-      const id = remains === 1 ? curve.id : nextId++;
+      const id = intervals.length === 1 ? curve.id : nextId++;
       ids.push(id);
       entries.push(
         curve.kind === 'line'
@@ -400,12 +416,14 @@ export function trimSketchSegment(
             ],
       );
     };
-    if (curve.kind === 'circle') {
-      // Circle parameters run CCW; its surviving complement is CW from start to end.
-      if (remains) add([point(segment.start), point(segment.end)]);
-    } else {
-      if (segment.start.t > 0) add([curve.points[0], point(segment.start)]);
-      if (segment.end.t < 1) add([point(segment.end), curve.points[1]]);
+    for (const interval of intervals) {
+      const endpoints: [SketchPointAddress, SketchPointAddress] = [
+        point(interval.start, tolerance),
+        point(interval.end, tolerance),
+      ];
+      // Circle intervals run CCW; new arcs keep the conventional CW construction.
+      if (curve.kind === 'circle') endpoints.reverse();
+      add(endpoints);
     }
   });
   const constraintReplacements = local.constraints.flatMap(
@@ -417,7 +435,7 @@ export function trimSketchSegment(
               kind === 'angle' ||
               kind === 'radius' ||
               kind === 'sweep'
-            ? data[0]
+            ? data
             : undefined;
       const targets = id === undefined ? undefined : replacements.get(id);
       if (!targets) return [];
@@ -426,7 +444,7 @@ export function trimSketchSegment(
       ];
     },
   );
-  const ids = curves.map(curve => curve.id);
+  const ids = [...new Set([...removed, ...curves.map(curve => curve.id)])];
   const orphaned = disconnectedPoints(layers, ids, entries);
   return {
     kind: 'trim',
@@ -437,6 +455,6 @@ export function trimSketchSegment(
     entries,
     constraintReplacements,
     ids: [...ids, ...orphaned],
-    constraints: deletedConstraints(local, orphaned),
+    constraints: deletedConstraints(local, [...removed, ...orphaned]),
   };
 }

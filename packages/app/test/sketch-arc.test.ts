@@ -117,7 +117,7 @@ test('entered sweep projects the endpoint, preserves compatible references and c
       1,
       change => ((args = edit(args, change)), true),
     );
-    assert.match(args, /\['sweep', \[3, 270\]\]/);
+    assert.match(args, /\['sweep', 3, 270\]/);
     assert.match(
       args,
       new RegExp(
@@ -178,7 +178,7 @@ test('sweep badges expose center and both endpoints, and deletion removes the ex
         direction: 'cw',
       },
     ],
-    constraints: [['sweep', [4, 270]]],
+    constraints: [['sweep', 4, 270]],
   };
   const points = local.entities
     .filter(e => e.kind === 'point')
@@ -203,7 +203,7 @@ test('sweep badges expose center and both endpoints, and deletion removes the ex
   ]);
   assert.ok(display.anchor[0] < 0 && display.anchor[1] < 0);
   const args =
-    "[['point', 1, [0, 0]], ['point', 2, [10, 0]], ['point', 3, [0, 10]], ['arc', 4, [1, 10, 2, 3, 'cw']]], {constraints: [['sweep', [4, angle /* keep expression */]]]}";
+    "[['point', 1, [0, 0]], ['point', 2, [10, 0]], ['point', 3, [0, 10]], ['arc', 4, [1, 10, 2, 3, 'cw']]], {constraints: [['sweep', 4, angle /* keep expression */]]}";
   const moved = edit(args, {kind: 'move', data: [{id: 2, parameters: [9, 1]}]});
   assert.match(moved, /angle \/\* keep expression \*\//);
   const deleted = edit(args, segments.deleteSketchEntity([local], 4));
@@ -229,7 +229,7 @@ test('sweep and radius drag previews replay through rounded AST edits and fresh 
       return [...module.sketches.values()][0];
     };
     for (const direction of ['cw', 'ccw']) {
-      const args = `[['point', 1, [center, 0]], ['point', 2, [10, 0]], ['point', 3, [0, ${direction === 'cw' ? 10 : -10}]], ['arc', 4, [1, 10, 2, 3, '${direction}']]], {constraints: [['fixed', 1], ['radius', [4, 10]], ['sweep', [4, angle /* degrees */]]]}`;
+      const args = `[['point', 1, [center, 0]], ['point', 2, [10, 0]], ['point', 3, [0, ${direction === 'cw' ? 10 : -10}]], ['arc', 4, [1, 10, 2, 3, '${direction}']]], {constraints: [['fixed', 1], ['radius', 4, 10], ['sweep', 4, angle /* degrees */]]}`;
       const original = await compile(args),
         editable = source.analyzeSketchSource(args).editable;
       let preview = {snapshot: original as SketchSnapshot, data: original.data};
@@ -301,8 +301,8 @@ test('arc drawing is one atomic center/start/end transaction with direction and 
       ['arc', 4, [ref(1), 10, ref(2), ref(3), 'cw']],
     ],
     constraints: [
-      ['x', [ref(1), 0]],
-      ['radius', [4, 10]],
+      ['x', ref(1), 0],
+      ['radius', 4, 10],
     ],
   });
   assert.equal(tool.hasDraft, false);
@@ -380,7 +380,7 @@ test('arc endpoint preview, rounded source transactions and fresh compiler evalu
       return [...module.sketches.values()][0];
     };
     for (const direction of ['cw', 'ccw']) {
-      const args = `[['point', 1, [width, 0]], ['point', 2, [10, 0]], ['point', 3, [0, 10]], ['arc', 4, [1, 10, 2, 3, '${direction}']]], {constraints: [['fixed', 1], ['radius', [4, 10]]]}`;
+      const args = `[['point', 1, [width, 0]], ['point', 2, [10, 0]], ['point', 3, [0, 10]], ['arc', 4, [1, 10, 2, 3, '${direction}']]], {constraints: [['fixed', 1], ['radius', 4, 10]]}`;
       const original = await compile(args),
         editable = source.analyzeSketchSource(args).editable;
       let preview = {snapshot: original as SketchSnapshot, data: original.data};
@@ -518,7 +518,7 @@ test('arc radius badges follow the directed arc midpoint and deletion cleans onl
       {kind: 'circle', id: 5, center: ref(1), radius: 3},
     ],
     constraints: [
-      ['radius', [4, 10]],
+      ['radius', 4, 10],
       ['fixed', ref(3)],
     ],
   };

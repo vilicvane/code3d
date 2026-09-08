@@ -40,7 +40,7 @@ test('unrelated points and crossings do not steal the anchor, and a contacting p
       ['line', 11, [9, 10]],
     ],
   ] satisfies SketchEntry[][]) {
-    const initial = snapshot([...extra, ...entries], [['length', [3, 40]]]);
+    const initial = snapshot([...extra, ...entries], [['length', 3, 40]]);
     const moved = solveSketchSnapshot([initial], {id: 2, position: [0, 40]});
     close(point(moved, 1).position, [0, 0]);
     close(point(moved, 2).position, [0, 40]);
@@ -55,16 +55,16 @@ test('unrelated fixed points and complete coordinate locks do not suppress a rel
     const initial = snapshot(
       [['point', 9, [-20, 0]], ...entries],
       [
-        ['length', [3, 40]],
+        ['length', 3, 40],
         ...(mode === 'fixed'
           ? ([['fixed', 9]] as const)
           : mode === 'coordinates'
             ? ([
-                ['x', [9, -20]],
-                ['y', [9, 0]],
+                ['x', 9, -20],
+                ['y', 9, 0],
               ] as const)
             : mode === 'mixed'
-              ? ([['y', [9, 0]]] as const)
+              ? ([['y', 9, 0]] as const)
               : []),
       ],
     );
@@ -97,7 +97,7 @@ test('only referenced upstream points count as anchors, even with matching local
           ? ([['line', 4, [base.point(1), 2]]] satisfies SketchEntry[])
           : []),
       ],
-      {constraints: [['length', [3, 40]]]},
+      {constraints: [['length', 3, 40]]},
     );
     const identity = (s: object) => (s === base ? 'base' : 'local');
     const upstream = snapshotSketch(base, identity),

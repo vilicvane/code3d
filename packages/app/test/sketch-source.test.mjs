@@ -128,6 +128,51 @@ test('coordinate permissions come from the AST and preserve each nonliteral axis
   assert.equal(host.undo.length, 1);
 });
 
+test('post-selection constraints and fixed display coordinates are one edit without replacing expressions or comments', () => {
+  const original =
+    "[['point', 1, [width, /* y */ 0]], ['point', 2, [20, 0]], ['line', 3, [1, 2]]], {constraints: [/* keep */ ['horizontal', 3]]}";
+  const host = setup(original);
+  assert.equal(
+    host.edit({
+      kind: 'constrain',
+      data: [{id: 1, parameters: [10, 4]}],
+      constraints: [['fixed', address(1)]],
+    }).status,
+    'committed',
+  );
+  assert.match(host.source(), /\[width, \/\* y \*\/ 4\]/);
+  assert.match(host.source(), /\/\* keep \*\/ \['horizontal', 3\]/);
+  assert.match(host.source(), /\['fixed', 1\]/);
+  assert.equal(host.undo.length, 1);
+  assert.equal(host.undo[0], original);
+});
+
+test('removing constraints retains geometry, expressions and surviving comments in one undo transaction', () => {
+  const original =
+    "[['point',1,[width,0]],['point',2,[20,0]],['line',3,[1,2]]], {constraints: [['length',3,30], /* keep */ ['horizontal',3], ['x',1,width]]}";
+  const host = setup(original);
+  assert.equal(
+    host.edit({
+      kind: 'constrain',
+      constraints: [],
+      removedConstraints: [0, 2],
+      data: [
+        {id: 1, parameters: [10, 0]},
+        {id: 2, parameters: [40, 0]},
+      ],
+    }).status,
+    'committed',
+  );
+  assert.deepEqual(
+    Function('const width=10;return [' + host.source() + ']')()[1].constraints,
+    [['horizontal', 3]],
+  );
+  assert.match(host.source(), /\/\* keep \*\//);
+  assert.match(host.source(), /\[width,0\]/);
+  assert.match(host.source(), /\[40,0\]/);
+  assert.deepEqual(host.undo, [original]);
+});
+
 test('appending uses named upstream references and current local IDs without nextId metadata', () => {
   for (const source of [
     '[]',
@@ -165,7 +210,7 @@ test('omitted entries materialize together with first geometry and constraints, 
       [],
       [
         ['horizontal', 3],
-        ['length', [3, 10]],
+        ['length', 3, 10],
       ],
     ]) {
       const host = setup(source);
@@ -302,7 +347,7 @@ test('geometry and constraints append in one source edit without replacing exist
   for (const source of [
     "[['point', 1, [0,0]]]",
     "[['point', 1, [0,0]]], {}",
-    "[['point', 1, [0,0]]], {constraints: [/* keep */ ['x', [1, width]] /* end */]}",
+    "[['point', 1, [0,0]]], {constraints: [/* keep */ ['x', 1, width] /* end */]}",
   ]) {
     const host = setup(source);
     assert.equal(
@@ -320,7 +365,7 @@ test('geometry and constraints append in one source edit without replacing exist
           ],
         ],
         constraints: [
-          ['length', [3, 40]],
+          ['length', 3, 40],
           ['horizontal', 3],
         ],
       }).status,
@@ -332,13 +377,13 @@ test('geometry and constraints append in one source edit without replacing exist
     )(0);
     assert.equal(entries.length, 3);
     assert.deepEqual(options.constraints.slice(-2), [
-      ['length', [3, 40]],
+      ['length', 3, 40],
       ['horizontal', 3],
     ]);
     assert.equal(host.undo.length, 1);
     assert.ok(analyzeSketchSource(host.source()).constraints);
     if (source.includes('width'))
-      assert.match(host.source(), /\/\* keep \*\/ \['x', \[1, width\]\]/);
+      assert.match(host.source(), /\/\* keep \*\/ \['x', 1, width\]/);
   }
 });
 
@@ -386,7 +431,7 @@ test('midpoint constraints retain three local or named upstream references in on
 
 test('solved multi-point movement is atomic and does not rewrite dimension expressions', () => {
   const source =
-    "[['point', 1, [0,0]], ['point', 2, [40,0]], ['line', 3, [1,2]]], {constraints: [['length', [3, width]], ['horizontal', 3]]}";
+    "[['point', 1, [0,0]], ['point', 2, [40,0]], ['line', 3, [1,2]]], {constraints: [['length', 3, width], ['horizontal', 3]]}";
   const host = setup(source);
   assert.equal(
     host.edit({
@@ -400,13 +445,13 @@ test('solved multi-point movement is atomic and does not rewrite dimension expre
   );
   assert.match(host.source(), /\[10,5\]/);
   assert.match(host.source(), /\[50,5\]/);
-  assert.match(host.source(), /\['length', \[3, width\]\]/);
+  assert.match(host.source(), /\['length', 3, width\]/);
   assert.equal(host.undo.length, 1);
 });
 
 test('entity deletion removes its constraints in the same undo transaction while keeping others', () => {
   const host = setup(
-    "[['point', 1, [0,0]], ['point', 2, [40,0]], ['line', 3, [1,2]]], {constraints: [['fixed', 1], ['horizontal', 3], /* width */ ['length', [3, width]]]}",
+    "[['point', 1, [0,0]], ['point', 2, [40,0]], ['line', 3, [1,2]]], {constraints: [['fixed', 1], ['horizontal', 3], /* width */ ['length', 3, width]]}",
   );
   assert.equal(
     host.edit({kind: 'delete', ids: [3], constraints: [1, 2]}).status,
@@ -429,8 +474,8 @@ test('middle trims preserve direction expressions and unrelated source in one tr
     ], {constraints: [
       ['fixed', 1],
       ['horizontal', /* direction */ 5],
-      ['angle', [5, theta /* keep expression */]],
-      ['length', [5, length]]${trailing}
+      ['angle', 5, theta /* keep expression */],
+      ['length', 5, length]${trailing}
     ]}`;
     const host = setup(source);
     const change = trim(
@@ -465,16 +510,16 @@ test('middle trims preserve direction expressions and unrelated source in one tr
     assert.deepEqual(options.constraints, [
       ['fixed', 1],
       ['horizontal', 6],
-      ['angle', [6, 0]],
+      ['angle', 6, 0],
       ['horizontal', 7],
-      ['angle', [7, 0]],
+      ['angle', 7, 0],
     ]);
   }
 });
 
 test('end trims keep the line tuple and unchanged endpoint source while reusing upstream boundaries', () => {
   const source =
-    "[['point', 1, [0,0]], ['point', 2, [40,0]], ['line', 5, [/* keep start */ 1, /* end */ 2]]], {constraints: [['length', [5, width]], ['horizontal', 5]]}";
+    "[['point', 1, [0,0]], ['point', 2, [40,0]], ['line', 5, [/* keep start */ 1, /* end */ 2]]], {constraints: [['length', 5, width], ['horizontal', 5]]}";
   const host = setup(source);
   assert.equal(
     host.edit(
@@ -534,7 +579,7 @@ test('trim replacements append intersection points without holes when the remove
 
 test('a full-line trim removes orphan points and all affected constraints in one source transaction', () => {
   const host = setup(
-    "[['point', 1, [0,0]], ['point', 2, [40,0]], ['line', 5, [1,2]]], {constraints: [['horizontal', 5], ['length', [5, 40]], ['fixed', 1]]}",
+    "[['point', 1, [0,0]], ['point', 2, [40,0]], ['line', 5, [1,2]]], {constraints: [['horizontal', 5], ['length', 5, 40], ['fixed', 1]]}",
   );
   assert.equal(
     host.edit({
@@ -556,7 +601,8 @@ test('a full-line trim removes orphan points and all affected constraints in one
 });
 
 test('hidden direction targets refuse a split instead of baking their expression into a number', () => {
-  const source = "[['line', 5, [1,2]]], {constraints: [['angle', direction]]}";
+  const source =
+    "[['line', 5, [1,2]]], {constraints: [['angle', target, direction]]}";
   const host = setup(source);
   assert.equal(
     host.edit(

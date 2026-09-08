@@ -17,7 +17,7 @@ async function center(page: Page, id: number) {
 test('Trim converts a circle interval to an arc with expression radius, stable geometry and one source undo', async t => {
   const page = await open(
     t,
-    "import {sketch} from '@code3d/core'; const r = 15; const value = sketch([['point', 1, [0, 0]], ['circle', 2, [1, r]], ['point', 3, [0, 10]], ['point', 4, [0, -10]]], {constraints: [['radius', [2, 10]]]});",
+    "import {sketch} from '@code3d/core'; const r = 15; const value = sketch([['point', 1, [0, 0]], ['circle', 2, [1, r]], ['point', 3, [0, 10]], ['point', 4, [0, -10]]], {constraints: [['radius', 2, 10]]});",
   );
   const original = await center(page, 1);
   const radius = Number(await circle(page, 2).getAttribute('r'));
@@ -39,7 +39,7 @@ test('Trim converts a circle interval to an arc with expression radius, stable g
   assert.ok(Math.hypot(current.x - original.x, current.y - original.y) < 0.01);
   const path = (await arcs(page).getAttribute('d'))!;
   assert.equal(Number(path.split(' A ')[1].split(' ')[0]), radius);
-  assert.match(await text(page), /'radius',\s*\[2,\s*10\]/);
+  assert.match(await text(page), /'radius',\s*2,\s*10/);
   await page.keyboard.press('Control+z');
   await circle(page, 2).waitFor();
   assert.equal(await arcs(page).count(), 0);
@@ -49,7 +49,7 @@ test('Trim converts a circle interval to an arc with expression radius, stable g
 test('Select and Delete trim an interior arc, preserving radius dimensions and undoing both survivors atomically', async t => {
   const page = await open(
     t,
-    "import {sketch} from '@code3d/core'; const r = 10; const value = sketch([['point', 1, [0, 0]], ['point', 2, [10, 0]], ['point', 3, [0, -10]], ['point', 4, [0, 10]], ['point', 5, [-10, 0]], ['arc', 6, [1, r, 2, 3, 'ccw']]], {constraints: [['radius', [6, 10]], ['sweep', [6, 270]]]});",
+    "import {sketch} from '@code3d/core'; const r = 10; const value = sketch([['point', 1, [0, 0]], ['point', 2, [10, 0]], ['point', 3, [0, -10]], ['point', 4, [0, 10]], ['point', 5, [-10, 0]], ['arc', 6, [1, r, 2, 3, 'ccw']]], {constraints: [['radius', 6, 10], ['sweep', 6, 270]]});",
   );
   const c = await center(page, 1);
   const p = await center(page, 2);
@@ -69,7 +69,7 @@ test('Select and Delete trim an interior arc, preserving radius dimensions and u
   assert.equal(source.match(/'radius'/g)?.length, 2);
   assert.equal(source.match(/\[1,\s*r,/g)?.length, 2);
   await page.keyboard.press('Control+z');
-  await waitForSource(page, /'sweep',\s*\[6,\s*270\]/);
+  await waitForSource(page, /'sweep',\s*6,\s*270/);
   await page
     .locator('.sketch-canvas path.local[data-kind="arc"][data-id="6"]')
     .waitFor();

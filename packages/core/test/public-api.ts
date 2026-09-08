@@ -74,9 +74,9 @@ sketch(
     constraints: [
       ['fixed', 1],
       ['horizontal', 3],
-      ['length', [3, 40]],
-      ['angle', [3, 0]],
-      ['x', [1, 0]],
+      ['length', 3, 40],
+      ['angle', 3, 0],
+      ['x', 1, 0],
       ['coincident', [1, 2]],
     ],
   },

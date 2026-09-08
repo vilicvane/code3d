@@ -181,11 +181,11 @@ test('whole overlap removal cleans all newly orphaned endpoints and their constr
     ],
     [
       ['fixed', ref(1)],
-      ['length', [5, 40]],
-      ['angle', [6, 180]],
+      ['length', 5, 40],
+      ['angle', 6, 180],
       ['coincident', [ref(1), ref(3)]],
-      ['x', [ref(4), 40]],
-      ['y', [ref(7), 20]],
+      ['x', ref(4), 40],
+      ['y', ref(7), 20],
     ],
   );
   const change = geometry.trimSketchSegment([value], segments(value)[0]);
@@ -244,10 +244,10 @@ test('computed cut points are shared by all overlapping survivors and direction 
       line(12, 7, 8),
     ],
     [
-      ['angle', [10, 180]],
-      ['length', [9, 40]],
-      ['angle', [9, 0]],
-      ['length', [10, 40]],
+      ['angle', 10, 180],
+      ['length', 9, 40],
+      ['angle', 9, 0],
+      ['length', 10, 40],
     ],
   );
   const change = geometry.trimSketchSegment(
@@ -290,13 +290,13 @@ test('an uneditable direction in a later overlapping line rejects the entire sou
       line(6, 2, 1),
     ],
     [
-      ['angle', [5, 0]],
-      ['angle', [6, 180]],
+      ['angle', 5, 0],
+      ['angle', 6, 180],
     ],
   );
   const change = geometry.trimSketchSegment([value], segments(value)[1]);
   const source =
-    "[['point',1,[0,0]], ['point',2,[40,0]], ['point',3,[10,0]], ['point',4,[30,0]], ['line',5,[1,2]], ['line',6,[2,1]]], {constraints: [['angle', [5, theta]], ['angle', hidden]]}";
+    "[['point',1,[0,0]], ['point',2,[40,0]], ['point',3,[10,0]], ['point',4,[30,0]], ['line',5,[1,2]], ['line',6,[2,1]]], {constraints: [['angle', 5, theta], ['angle', hidden, 180]]}";
   const result = resolve(source, change);
   assert.equal(result.status, 'conflict');
   assert.ok(!('plan' in result));
@@ -319,7 +319,7 @@ test('all overlapping lines are rewritten in one edit and survive fresh compiler
       [30, -10],
       [30, 10],
     ].map(([x, y], i) => ['point', i + 1, rotate(x, y)]);
-    const args = `${JSON.stringify([...data, ['line', 9, [1, 2]], ['line', 10, [4, 3]], ['line', 11, [5, 6]], ['line', 12, [7, 8]]])}, {constraints: [['angle',[10, theta + 180 /* reversed */]], ['length',[9,40]], ['angle',[9,theta]], ['length',[10,40]]]}`;
+    const args = `${JSON.stringify([...data, ['line', 9, [1, 2]], ['line', 10, [4, 3]], ['line', 11, [5, 6]], ['line', 12, [7, 8]]])}, {constraints: [['angle',10, theta + 180 /* reversed */], ['length',9,40], ['angle',9,theta], ['length',10,40]]}`;
     const compile = async (args: string) => {
       const compiler: ProjectCompiler = await createTestProjectCompiler(server);
       try {
@@ -355,10 +355,10 @@ test('all overlapping lines are rewritten in one edit and survive fresh compiler
     assert.equal(replay.entities.filter(e => e.kind === 'point').length, 10);
     assert.equal(replay.entities.filter(e => e.kind === 'line').length, 6);
     assert.deepEqual(replay.constraints, [
-      ['angle', [17, angle + 180]],
-      ['angle', [14, angle]],
-      ['angle', [18, angle + 180]],
-      ['angle', [16, angle]],
+      ['angle', 17, angle + 180],
+      ['angle', 14, angle],
+      ['angle', 18, angle + 180],
+      ['angle', 16, angle],
     ]);
     const remaining = segments(replay).filter(p =>
       [14, 16, 17, 18].includes(p.id),

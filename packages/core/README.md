@@ -58,7 +58,7 @@ const sketch1 = sketch(
     constraints: [
       ['fixed', 1],
       ['horizontal', 3],
-      ['length', [3, 30]],
+      ['length', 3, 30],
     ],
   },
 );
@@ -83,7 +83,7 @@ const circles = sketch(
     ['circle', 2, [1, 15]],
     ['circle', 3, [1, 8]],
   ],
-  {constraints: [['radius', [3, 8]]]},
+  {constraints: [['radius', 3, 8]]},
 );
 ```
 
@@ -105,8 +105,8 @@ const rounded = sketch(
   ],
   {
     constraints: [
-      ['radius', [4, 10]],
-      ['sweep', [4, 90]],
+      ['radius', 4, 10],
+      ['sweep', 4, 90],
     ],
   },
 );

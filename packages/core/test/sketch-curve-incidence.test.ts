@@ -56,7 +56,7 @@ const arc: readonly SketchEntry[] = [
 test('a point slides on a fixed circle through half turns and a full turn without changing source topology', () => {
   const initial = make(circle, [
     ['fixed', 1],
-    ['radius', [2, 10]],
+    ['radius', 2, 10],
   ]);
   assert.equal(sketchDragRequiresSolver([initial]), true);
   let moved = initial;
@@ -144,7 +144,7 @@ test('moving an arc endpoint retains additional points within the resulting fini
   const initial = make(arc, [
     ['fixed', 1],
     ['fixed', 2],
-    ['radius', [4, 10]],
+    ['radius', 4, 10],
   ]);
   const end = [Math.sqrt(75), 5] as const;
   const moved = solveSketchSnapshot([initial], {id: 3, position: end});
@@ -211,7 +211,7 @@ test('circle incidence detection and solving scale with geometry and respect coo
       ],
       [
         ['fixed', 1],
-        ['radius', [2, 10 * scale]],
+        ['radius', 2, 10 * scale],
       ],
     );
     const moved = solveSketchSnapshot([initial], {
@@ -234,9 +234,9 @@ test('a constrained line attached to a circle follows it continuously without lo
     [...circle, ['point', 4, [20, 0]], ['line', 5, [3, 4]]],
     [
       ['fixed', 1],
-      ['radius', [2, 10]],
+      ['radius', 2, 10],
       ['horizontal', 5],
-      ['length', [5, 10]],
+      ['length', 5, 10],
     ],
   );
   let moved = initial;
@@ -255,8 +255,8 @@ test('duplicate circular geometry remains redundant and genuine expression confl
     [...circle, ['circle', 4, [1, 10]]],
     [
       ['fixed', 1],
-      ['radius', [2, 10]],
-      ['radius', [4, 10]],
+      ['radius', 2, 10],
+      ['radius', 4, 10],
     ],
   );
   const moved = solveSketchSnapshot([initial], {id: 3, position: [0, 20]});
@@ -299,7 +299,7 @@ test('upstream arc IDs do not capture local radius constraints or result indices
       {
         constraints: [
           ['fixed', 1],
-          ['radius', [4, 5]],
+          ['radius', 4, 5],
         ],
       },
     );

@@ -132,6 +132,13 @@ const missingEndpoint: SketchConstraint = ['midpoint', [1, 2]];
 // @ts-expect-error Coordinates are not point references.
 const coordinateEndpoint: SketchConstraint = ['midpoint', [1, 2, [0, 0]]];
 void [missingEndpoint, coordinateEndpoint];
+// @ts-expect-error Constraint dimensions use separate target and value fields.
+const nestedLength: SketchConstraint = ['length', [3, 20]];
+// @ts-expect-error A dimensional constraint requires its third value field.
+const missingLength: SketchConstraint = ['length', 3];
+// @ts-expect-error Coordinate constraints likewise keep target and value separate.
+const nestedX: SketchConstraint = ['x', [1, 10]];
+void [nestedLength, missingLength, nestedX];
 
 sketchBase.derive(
   [
@@ -141,8 +148,8 @@ sketchBase.derive(
   ],
   {
     constraints: [
-      ['radius', [3, 10]],
-      ['sweep', [3, 270]],
+      ['radius', 3, 10],
+      ['sweep', 3, 270],
     ],
   },
 );
@@ -151,5 +158,5 @@ sketch([['arc', 1, [2, 10, 3, 4]]]);
 // @ts-expect-error Arc endpoints are point references, not coordinate tuples.
 sketch([['arc', 1, [2, 10, [10, 0], 4, 'ccw']]]);
 // @ts-expect-error Sweep references a local arc ID, not a point handle.
-const invalidSweep: SketchConstraint = ['sweep', [sketchBase.point(1), 90]];
+const invalidSweep: SketchConstraint = ['sweep', sketchBase.point(1), 90];
 void invalidSweep;

@@ -40,7 +40,7 @@ test('current geometry and explicit constraints are separate; variable and liter
         constraints: [
           ['fixed', 1],
           ['horizontal', 3],
-          ['length', [3, length]],
+          ['length', 3, length],
         ],
       }),
     );
@@ -60,7 +60,7 @@ test('current geometry and explicit constraints are separate; variable and liter
 test('dimensions and direction survive drag and deterministic source replay', () => {
   const constraints = [
     ['horizontal', 3],
-    ['length', [3, 40]],
+    ['length', 3, 40],
   ];
   const original = snapshot(sketch(entries, {constraints}));
   const moved = solveSketchSnapshot([original], {
@@ -98,7 +98,7 @@ test('fixed geometry resists a soft drag without turning drag into a constraint'
       constraints: [
         ['fixed', 1],
         ['horizontal', 3],
-        ['length', [3, 40]],
+        ['length', 3, 40],
       ],
     }),
   );
@@ -117,10 +117,10 @@ test('fixed geometry resists a soft drag without turning drag into a constraint'
 test('coordinate, angle and coincident constraints solve against current geometry', () => {
   const value = sketch([...entries, ['point', 4, [0.2, 0.3]]], {
     constraints: [
-      ['x', [1, 5]],
-      ['y', [1, -3]],
-      ['length', [3, 10]],
-      ['angle', [3, 90]],
+      ['x', 1, 5],
+      ['y', 1, -3],
+      ['length', 3, 10],
+      ['angle', 3, 90],
       ['coincident', [1, 4]],
     ],
   });
@@ -143,7 +143,7 @@ test('derived solving locks upstream geometry and resolves layer-local IDs indep
     {
       constraints: [
         ['vertical', 2],
-        ['length', [2, 10]],
+        ['length', 2, 10],
       ],
     },
   );
@@ -180,13 +180,13 @@ test('a real connected fixed point stays fixed while soft references can yield',
   for (const fixed of [
     [['fixed', 4]],
     [
-      ['x', [4, 0]],
-      ['y', [4, 0]],
+      ['x', 4, 0],
+      ['y', 4, 0],
     ],
   ]) {
     const s = snapshot(
       sketch([...entries, ['point', 4, [0, 0]], ['line', 5, [4, 2]]], {
-        constraints: [...fixed, ['length', [3, 40]]],
+        constraints: [...fixed, ['length', 3, 40]],
       }),
     );
     const moved = solveSketchSnapshot([s], {id: 2, position: [60, 20]});
@@ -200,7 +200,7 @@ test('a real connected fixed point stays fixed while soft references can yield',
 test('either endpoint can rotate continuously through 180 degrees with a soft opposite reference', () => {
   const initial = snapshot(
     sketch([['point', 9, [-60, -20]], ...entries], {
-      constraints: [['length', [3, 40]]],
+      constraints: [['length', 3, 40]],
     }),
   );
   for (const id of [1, 2]) {
@@ -288,10 +288,7 @@ test('connected coordinate locks and permanent coordinate constraints together p
   for (const permanentY of [false, true]) {
     const original = snapshot(
       sketch([...entries, ['point', 4, [0, 0]], ['line', 5, [4, 2]]], {
-        constraints: [
-          ['length', [3, 40]],
-          ...(permanentY ? [['y', [4, 0]]] : []),
-        ],
+        constraints: [['length', 3, 40], ...(permanentY ? [['y', 4, 0]] : [])],
       }),
     );
     const moved = solveSketchSnapshot([original], {
@@ -343,7 +340,7 @@ test('gesture locks respect explicit fixed and coordinate constraints rather tha
       {
         constraints: [
           ['fixed', 1],
-          ['length', [3, 40]],
+          ['length', 3, 40],
         ],
       },
     ),
@@ -369,7 +366,7 @@ test('gesture locks respect explicit fixed and coordinate constraints rather tha
   );
   const located = snapshot(
     sketch([['point', 1, [0, 0]]], {
-      constraints: [['x', [1, 10]]],
+      constraints: [['x', 1, 10]],
     }),
   );
   assert.throws(
@@ -388,8 +385,8 @@ test('conflicting dimensions report solve-local constraint indices and redundant
     () =>
       sketch(entries, {
         constraints: [
-          ['length', [3, 40]],
-          ['length', [3, 50]],
+          ['length', 3, 40],
+          ['length', 3, 50],
         ],
       }),
     error => {
@@ -424,7 +421,7 @@ test('normalization handles translated small and large models', () => {
           constraints: [
             ['fixed', 1],
             ['horizontal', 3],
-            ['length', [3, 40 * scale]],
+            ['length', 3, 40 * scale],
           ],
         },
       ),
@@ -445,7 +442,7 @@ test('invalid constraint references, dimensions and collapsed geometry fail clea
   );
   for (const value of [0, -1, Infinity, NaN])
     assert.throws(
-      () => sketch(entries, {constraints: [['length', [3, value]]]}),
+      () => sketch(entries, {constraints: [['length', 3, value]]}),
       /positive.*finite/,
     );
   assert.throws(
@@ -466,7 +463,7 @@ test('repeated successes and failures release native systems, vectors and geomet
           constraints: [
             ['fixed', 1],
             ['horizontal', 3],
-            ['length', [3, 40]],
+            ['length', 3, 40],
           ],
         }),
       );
@@ -474,8 +471,8 @@ test('repeated successes and failures release native systems, vectors and geomet
         () =>
           sketch(entries, {
             constraints: [
-              ['length', [3, 40]],
-              ['length', [3, 50]],
+              ['length', 3, 40],
+              ['length', 3, 50],
             ],
           }),
         SketchConstraintError,

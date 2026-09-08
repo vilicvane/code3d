@@ -15,7 +15,7 @@ const value = sketch([
   ['point', 1, [0, 0]],
   ['point', 2, [40, 0]],
   ['line', 3, [1, 2]],
-], {constraints: [['length', [3, 40]]]});`,
+], {constraints: [['length', 3, 40]]});`,
     );
     await point(page, 2).waitFor();
     await page.getByRole('button', {name: 'Snap', exact: true}).click();

@@ -71,6 +71,19 @@ export async function waitForSource(
 }
 export const point = (page: Page, id: number, layer = 'local'): Locator =>
   page.locator(`.sketch-canvas circle.${layer}[data-id="${id}"]`);
+
+export async function selectTool(page: Page, name: string): Promise<void> {
+  const button = page.getByRole('button', {name, exact: true});
+  if (await button.isVisible()) {
+    await button.click();
+    return;
+  }
+  // Rectangle construction variants share a remembered primary button.
+  await page
+    .getByRole('button', {name: 'Rectangle tools', exact: true})
+    .click();
+  await page.getByRole('menuitemradio', {name, exact: true}).click();
+}
 export const segment = (
   page: Page,
   id: number,

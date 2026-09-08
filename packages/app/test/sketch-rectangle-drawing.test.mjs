@@ -117,12 +117,12 @@ test('explicit first-corner coordinates and sizes become constraints without con
     ],
   );
   assert.deepEqual(result.constraints, [
-    ['x', [{layer: 'local', id: 1}, 2]],
+    ['x', {layer: 'local', id: 1}, 2],
     ['horizontal', 5],
     ['vertical', 6],
     ['horizontal', 7],
     ['vertical', 8],
-    ['length', [6, 20]],
+    ['length', 6, 20],
   ]);
 });
 
@@ -227,14 +227,14 @@ test('center rectangles use full dimensions and one persistent midpoint relation
         segments.map(e => e[0]),
       );
       assert.deepEqual(result.constraints, [
-        ['x', [{layer: 'local', id: 1}, 3]],
+        ['x', {layer: 'local', id: 1}, 3],
         ['horizontal', 6],
         ['vertical', 7],
         ['horizontal', 8],
         ['vertical', 9],
         ['midpoint', [1, 2, 4].map(id => ({layer: 'local', id}))],
-        ['length', [6, 40]],
-        ['length', [7, 20]],
+        ['length', 6, 40],
+        ['length', 7, 20],
       ]);
       assert.equal(drawing.title, 'Center');
       assert.equal(drawing.hasDraft, false);
@@ -394,7 +394,7 @@ test('a generated center stays referenceable by a derived sketch after source di
             {
               path: '/model.ts',
               source: `import {sketch} from '@code3d/core';
-const base = sketch(${args.replace("['length', [6, 40]]", `['length', [6, ${width}]]`)});
+const base = sketch(${args.replace("['length', 6, 40]", `['length', 6, ${width}]`)});
 const child = base.derive([['point', 1, [0, 0]], ['line', 2, [base.point(1), 1]]]);`,
             },
           ],

@@ -224,7 +224,8 @@ export class SketchEditorController {
       change.kind === 'delete' || change.kind === 'trim' ? change.ids : [];
     const entries =
       change.kind === 'append' || change.kind === 'trim' ? change.entries : [];
-    const data = change.kind === 'move' ? change.data : [];
+    const data =
+      change.kind === 'move' || change.kind === 'constrain' ? change.data : [];
     this.data = [
       ...this.data
         .filter(
@@ -267,15 +268,17 @@ export class SketchEditorController {
     const constraints = local.constraints.flatMap(
       (constraint, index): SketchConstraint<SketchPointAddress>[] => {
         if (
-          (change.kind === 'delete' || change.kind === 'trim') &&
-          change.constraints.includes(index)
+          ((change.kind === 'delete' || change.kind === 'trim') &&
+            change.constraints.includes(index)) ||
+          (change.kind === 'constrain' &&
+            change.removedConstraints?.includes(index))
         )
           return [];
         const rewrite =
           change.kind === 'trim' &&
           change.constraintReplacements.find(c => c.index === index);
         if (!rewrite) return [constraint];
-        const [kind, data] = constraint;
+        const [kind, , value] = constraint;
         const replacements: SketchConstraint<SketchPointAddress>[] =
           kind === 'horizontal' || kind === 'vertical'
             ? rewrite.ids.map(id => [kind, id])
@@ -283,7 +286,7 @@ export class SketchEditorController {
                 kind === 'angle' ||
                 kind === 'radius' ||
                 kind === 'sweep'
-              ? rewrite.ids.map(id => [kind, [id, data[1]]])
+              ? rewrite.ids.map(id => [kind, id, value])
               : [constraint];
         // The source resolver replaces the first target in place and appends
         // copies. Keep the same indices for another edit before compilation.
@@ -292,7 +295,7 @@ export class SketchEditorController {
       },
     );
     constraints.push(...copiedConstraints);
-    if (change.kind === 'append')
+    if (change.kind === 'append' || change.kind === 'constrain')
       constraints.push(...(change.constraints ?? []));
     this.layers = [
       ...this.layers.slice(0, -1),

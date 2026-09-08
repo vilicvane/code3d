@@ -1,10 +1,41 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {open, point, text} from './sketch-test.ts';
+import {open, point, text, waitForSource} from './sketch-test.ts';
 import {trimmedArcSketchArguments} from '../sketch-fixtures.ts';
 
 const arc = `['point', 1, [0, 0]], ['point', 2, [10, 0]],
   ['point', 3, [0, 10]], ['arc', 4, [1, 10, 2, 3, 'ccw']]`;
+
+test('a fixed neighbor does not leave tails after an arc center grid drag, recompile and undo', async t => {
+  const page = await open(
+    t,
+    `import {sketch} from '@code3d/core';
+const value=sketch(${trimmedArcSketchArguments(10, 5, 4)});`,
+  );
+  const original = await text(page);
+  const center = (await point(page, 10).boundingBox())!;
+  const corner = (await point(page, 4).boundingBox())!;
+  const unit = (corner.x - center.x) / 20;
+  await page.mouse.move(
+    center.x + center.width / 2,
+    center.y + center.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    center.x + center.width / 2,
+    center.y + center.height / 2 - unit * 10,
+    {steps: 5},
+  );
+  await page.mouse.up();
+  await waitForSource(page, /'point',\s*5,\s*\[-20,\s*15\]/);
+  await page.getByText('Ready', {exact: true}).waitFor();
+  assert.match(await text(page), /'point',\s*13,\s*\[[^,]+,\s*15\]/);
+  assert.match(await text(page), /'point',\s*4,\s*\[20,\s*5\]/);
+  assert.deepEqual(await point(page, 4).boundingBox(), corner);
+  await page.keyboard.press('Control+z');
+  await waitForSource(page, /'point',\s*10,\s*\[0,\s*5\]/);
+  assert.equal(await text(page), original);
+});
 const cases: {
   name: string;
   id: number;

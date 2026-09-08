@@ -63,10 +63,10 @@ test('sweep constrains the directed angle, not orientation or a second authored 
     for (const degrees of [0.001, 15, 90, 180, 270, 345, 359.999]) {
       const data = entries(degrees, direction);
       const view = snapshot(
-        sketch(data, {constraints: [['sweep', [4, degrees]]]}),
+        sketch(data, {constraints: [['sweep', 4, degrees]]}),
       );
       assert.equal(view.degreesOfFreedom, 4);
-      assert.deepEqual(view.constraints, [['sweep', [4, degrees]]]);
+      assert.deepEqual(view.constraints, [['sweep', 4, degrees]]);
       near((Math.abs(curve(view).sweep) * 180) / Math.PI, degrees);
       for (const id of [1, 2, 3])
         position(view, id).forEach((v, axis) =>
@@ -82,8 +82,8 @@ test('radius and sweep solve changed current geometry on both minor and major br
         sketch(entries(120, direction), {
           constraints: [
             ['fixed', 1],
-            ['radius', [4, 10]],
-            ['sweep', [4, degrees]],
+            ['radius', 4, 10],
+            ['sweep', 4, degrees],
           ],
         }),
       );
@@ -100,8 +100,8 @@ test('sweep endpoint dragging rotates both endpoints continuously through half t
         sketch(entries(degrees, direction), {
           constraints: [
             ['fixed', 1],
-            ['radius', [4, 10]],
-            ['sweep', [4, degrees]],
+            ['radius', 4, 10],
+            ['sweep', 4, degrees],
           ],
         }),
       );
@@ -135,8 +135,8 @@ test('sweep preserves upstream centers and authored coordinate locks across scal
       ],
       {
         constraints: [
-          ['radius', [3, radius]],
-          ['sweep', [3, 270]],
+          ['radius', 3, radius],
+          ['sweep', 3, 270],
         ],
       },
     );
@@ -162,7 +162,7 @@ test('sweep preserves upstream centers and authored coordinate locks across scal
 test('sweep rejects non-arc targets, full circles, non-finite values and genuine contradictions', () => {
   for (const value of [0, -1, 360, 361, Infinity, NaN])
     assert.throws(
-      () => sketch(entries(90, 'ccw'), {constraints: [['sweep', [4, value]]]}),
+      () => sketch(entries(90, 'ccw'), {constraints: [['sweep', 4, value]]}),
       /strictly between/,
     );
   for (const target of [1, 5, 6, 99])
@@ -171,21 +171,21 @@ test('sweep rejects non-arc targets, full circles, non-finite values and genuine
         sketch(
           [...entries(90, 'ccw'), ['line', 5, [1, 2]], ['circle', 6, [1, 10]]],
           {
-            constraints: [['sweep', [target, 90]]],
+            constraints: [['sweep', target, 90]],
           },
         ),
       /missing local arc/,
     );
   for (const constraints of [
     [
-      ['sweep', [4, 90]],
-      ['sweep', [4, 270]],
+      ['sweep', 4, 90],
+      ['sweep', 4, 270],
     ],
     [
       ['fixed', 1],
       ['fixed', 2],
       ['fixed', 3],
-      ['sweep', [4, 270]],
+      ['sweep', 4, 270],
     ],
   ] as const satisfies readonly (readonly SketchConstraint[])[])
     assert.throws(
@@ -198,9 +198,9 @@ test('equal sweep constraints remain redundant without changing geometry or losi
   const view = snapshot(
     sketch(entries(270, 'cw'), {
       constraints: [
-        ['radius', [4, 10]],
-        ['sweep', [4, 270]],
-        ['sweep', [4, 270]],
+        ['radius', 4, 10],
+        ['sweep', 4, 270],
+        ['sweep', 4, 270],
       ],
     }),
   );
@@ -217,17 +217,17 @@ test('dimensions already determined by known points are checked directly, includ
       ['fixed', 3],
     ],
     [
-      ['x', [1, 0]],
-      ['y', [1, 0]],
-      ['x', [2, 10]],
-      ['y', [2, 0]],
-      ['x', [3, 0]],
-      ['y', [3, 10]],
+      ['x', 1, 0],
+      ['y', 1, 0],
+      ['x', 2, 10],
+      ['y', 2, 0],
+      ['x', 3, 0],
+      ['y', 3, 10],
     ],
   ] as const satisfies readonly (readonly SketchConstraint[])[]) {
     const view = snapshot(
       sketch(entries(90, 'ccw', 0), {
-        constraints: [...fixed, ['radius', [4, 10]], ['sweep', [4, 90]]],
+        constraints: [...fixed, ['radius', 4, 10], ['sweep', 4, 90]],
       }),
     );
     assert.equal(view.degreesOfFreedom, 0);
@@ -238,8 +238,8 @@ test('dimensions already determined by known points are checked directly, includ
     near(position(moved, 3)[0], 0);
     near(position(moved, 3)[1], 10);
     for (const bad of [
-      ['radius', [4, 11]],
-      ['sweep', [4, 270]],
+      ['radius', 4, 11],
+      ['sweep', 4, 270],
     ] as const)
       assert.throws(
         () => sketch(entries(90, 'ccw', 0), {constraints: [...fixed, bad]}),
@@ -260,9 +260,9 @@ test('sweep indices remain local to their arcs, independently of entity ordering
       ],
       {
         constraints: [
-          ['sweep', [8, 270]],
-          ['radius', [99, 3]],
-          ['sweep', [4, 90]],
+          ['sweep', 8, 270],
+          ['radius', 99, 3],
+          ['sweep', 4, 90],
         ],
       },
     ),
@@ -278,8 +278,8 @@ test('repeated successful and conflicting sweep systems release native heap and 
     const value = sketch(entries(270, direction), {
       constraints: [
         ['fixed', 1],
-        ['radius', [4, 10]],
-        ['sweep', [4, 270]],
+        ['radius', 4, 10],
+        ['sweep', 4, 270],
       ],
     });
     solveSketchSnapshot([snapshot(value)], {id: 3, position: polar(210)});
@@ -287,8 +287,8 @@ test('repeated successful and conflicting sweep systems release native heap and 
       () =>
         sketch(entries(270, direction), {
           constraints: [
-            ['sweep', [4, 270]],
-            ['sweep', [4, 90]],
+            ['sweep', 4, 270],
+            ['sweep', 4, 90],
           ],
         }),
       SketchConstraintError,

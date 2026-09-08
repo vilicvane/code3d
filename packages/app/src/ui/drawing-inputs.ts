@@ -17,9 +17,14 @@ export class DrawingInputs {
     private readonly changed: () => void,
     apply: () => void,
     cancel: () => void,
+    labels = {
+      region: 'Drawing dimensions',
+      apply: 'Apply drawing step',
+      cancel: 'Cancel drawing',
+    },
   ) {
     this.root.className = 'drawing-inputs';
-    this.root.setAttribute('aria-label', 'Drawing dimensions');
+    this.root.setAttribute('aria-label', labels.region);
     this.root.hidden = true;
     this.title.className = 'drawing-input-title';
     this.title.append(this.titleText);
@@ -29,8 +34,8 @@ export class DrawingInputs {
     this.error.append(this.errorText);
     this.root.append(this.title, this.fields);
     for (const [label, icon, action] of [
-      ['Apply drawing step', Check, apply],
-      ['Cancel drawing', X, cancel],
+      [labels.apply, Check, apply],
+      [labels.cancel, X, cancel],
     ] as const) {
       const button = document.createElement('button');
       button.type = 'button';

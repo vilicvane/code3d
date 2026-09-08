@@ -31,11 +31,6 @@ export class SketchCircleDrawing implements SketchDrawing {
   get title() {
     return this.start ? 'Radius' : 'Center';
   }
-  get instructions() {
-    return this.start
-      ? 'Circle radius · Enter radius or click · Esc cancels'
-      : 'Circle center · Enter X/Y or click';
-  }
   get hasDraft() {
     return !!this.start || this.dimensions.edited;
   }
@@ -103,10 +98,10 @@ export class SketchCircleDrawing implements SketchDrawing {
     const center = geometry.point(this.start);
     const circle = geometry.circle(center, radius);
     const constraints: SketchConstraint<SketchPointAddress>[] =
-      this.centerCoordinates.map(({axis, value}) => [axis, [center, value]]);
+      this.centerCoordinates.map(({axis, value}) => [axis, center, value]);
     const enteredRadius = this.dimensions.value('radius');
     if (enteredRadius !== undefined)
-      constraints.push(['radius', [circle, enteredRadius]]);
+      constraints.push(['radius', circle, enteredRadius]);
     if (!commit({kind: 'append', entries: geometry.entries, constraints}))
       return 'The sketch changed; the drawing was not applied';
     this.reset();

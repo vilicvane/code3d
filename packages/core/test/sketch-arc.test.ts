@@ -78,7 +78,7 @@ test('arc endpoint dragging crosses 180 degrees and zero without flipping or cha
       sketch(entries(direction), {
         constraints: [
           ['fixed', 1],
-          ['radius', [4, 10]],
+          ['radius', 4, 10],
         ],
       }),
     );
@@ -112,7 +112,7 @@ test('arc radius constraints respect locked upstream centers and coordinate lock
         ['point', 2, [100 * size, -10 * size]],
         ['arc', 3, [base.point(1), 10 * size, 1, 2, 'cw']],
       ],
-      {constraints: [['radius', [3, 10 * size]]]},
+      {constraints: [['radius', 3, 10 * size]]},
     );
     const upstream = snapshot(base),
       local = snapshot(derived);
@@ -146,8 +146,8 @@ test('invalid references, collapsed arcs and conflicting radii are hard errors',
     () =>
       sketch(entries(), {
         constraints: [
-          ['radius', [4, 10]],
-          ['radius', [4, 11]],
+          ['radius', 4, 10],
+          ['radius', 4, 11],
         ],
       }),
     SketchConstraintError,

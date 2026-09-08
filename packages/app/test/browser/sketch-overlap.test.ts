@@ -24,10 +24,7 @@ async function preview(
     await page.locator('.sketch-canvas line.trim-preview').count(),
     count,
   );
-  assert.match(
-    await page.locator('.sketch-editor output').innerText(),
-    new RegExp(`${count} overlapping segments`),
-  );
+  assert.equal(await page.locator('.sketch-editor output').isVisible(), false);
 }
 
 test('Trim and Select + Delete remove reversed duplicates and their orphan points in one undo step', async t => {
@@ -38,8 +35,8 @@ const value = sketch([
   ['point', 1, [0, 0]], ['point', 2, [40, 0]],
   ['point', 3, [0, 0]], ['point', 4, [40, 0]],
   ['line', 5, [1, 2]], ['line', 6, [4, 3]], ['point', 7, [60, 20]],
-], {constraints: [['fixed', 1], ['length', [5, 40]], ['angle', [6, 180]],
-  ['coincident', [1, 3]], ['x', [4, 40]], ['y', [7, 20]]]});`,
+], {constraints: [['fixed', 1], ['length', 5, 40], ['angle', 6, 180],
+  ['coincident', [1, 3]], ['x', 4, 40], ['y', 7, 20]]});`,
   );
   for (const mode of ['Trim', 'Select']) {
     await page.getByRole('button', {name: mode, exact: true}).click();
@@ -53,9 +50,9 @@ const value = sketch([
         await page.locator('.sketch-canvas line.selected').count(),
         2,
       );
-      assert.match(
-        await page.locator('.sketch-editor output').innerText(),
-        /2 overlapping segments/,
+      assert.equal(
+        await page.locator('.sketch-editor output').isVisible(),
+        false,
       );
       assert.equal(await text(page), before);
       await page.keyboard.press('Delete');
@@ -68,10 +65,10 @@ const value = sketch([
       await text(page),
       /'fixed'|'length'|'angle'|'coincident'|'x'/,
     );
-    assert.match(await text(page), /'y',\s*\[7,\s*20\]/);
+    assert.match(await text(page), /'y',\s*7,\s*20/);
     await page.keyboard.press('Control+z');
     await segment(page, 5, 0, 1).waitFor({state: 'attached'});
-    await waitForSource(page, /'length',\s*\[5,\s*40\]/);
+    await waitForSource(page, /'length',\s*5,\s*40/);
     assert.equal(await page.locator('.sketch-canvas line.local').count(), 2);
     assert.equal(await page.locator('.sketch-canvas circle.local').count(), 5);
     assert.equal(await page.locator('.constraint-badge').count(), 6);
@@ -90,8 +87,8 @@ const value = sketch([
   ['point', 7, [30, -10]], ['point', 8, [30, 10]],
   ['line', 9, [1, 2]], ['line', 10, [4, 3]],
   ['line', 11, [5, 6]], ['line', 12, [7, 8]],
-], {constraints: [['angle', [10, theta + 180]], ['length', [9, 40]],
-  ['angle', [9, theta]], ['length', [10, 40]]]});`,
+], {constraints: [['angle', 10, theta + 180], ['length', 9, 40],
+  ['angle', 9, theta], ['length', 10, 40]]});`,
   );
   const before = await text(page);
   await page.getByRole('button', {name: 'Trim', exact: true}).click();
@@ -107,12 +104,9 @@ const value = sketch([
   assert.match(source, /'point',\s*13,\s*\[10,\s*0\]/);
   assert.match(source, /'point',\s*15,\s*\[30,\s*0\]/);
   for (const id of [17, 18])
-    assert.match(
-      source,
-      new RegExp(`'angle',\\s*\\[${id},\\s*theta \\+ 180\\]`),
-    );
+    assert.match(source, new RegExp(`'angle',\\s*${id},\\s*theta \\+ 180\\]`));
   for (const id of [14, 16])
-    assert.match(source, new RegExp(`'angle',\\s*\\[${id},\\s*theta\\]`));
+    assert.match(source, new RegExp(`'angle',\\s*${id},\\s*theta\\]`));
   assert.doesNotMatch(source, /'length'|'line',\s*(9|10),/);
   for (const id of [11, 12])
     assert.equal(
@@ -121,7 +115,7 @@ const value = sketch([
     );
   await page.keyboard.press('Control+z');
   await segment(page, 9, 0.25, 0.75).waitFor({state: 'attached'});
-  await waitForSource(page, /'length',\s*\[10,\s*40\]/);
+  await waitForSource(page, /'length',\s*10,\s*40/);
   assert.equal(await page.locator('.sketch-canvas circle.local').count(), 8);
   assert.equal(await page.locator('.sketch-canvas line.local').count(), 10);
 });
@@ -171,12 +165,12 @@ test('an uneditable constraint on a later overlapping line rejects the whole Tri
   const page = await open(
     t,
     `import {sketch} from '@code3d/core';
-const hidden = [6, 180] as const;
+const hidden = 6 as const;
 const value = sketch([
   ['point', 1, [0, 0]], ['point', 2, [40, 0]],
   ['point', 3, [10, 0]], ['point', 4, [30, 0]],
   ['line', 5, [1, 2]], ['line', 6, [2, 1]],
-], {constraints: [['angle', [5, 0]], ['angle', hidden]]});`,
+], {constraints: [['angle', 5, 0], ['angle', hidden, 180]]});`,
   );
   const before = await text(page);
   await page.getByRole('button', {name: 'Trim', exact: true}).click();
@@ -200,8 +194,8 @@ const value = sketch([
   ['point', 1, [0, 0]], ['point', 2, [40, 0]],
   ['point', 3, [10, 0]], ['point', 4, [30, 0]],
   ['line', 5, [1, 2]], ['line', 6, [2, 1]],
-], {constraints: [['angle', [6, 180]], ['fixed', 1], ['length', [5, 40]],
-  ['angle', [5, 0]], ['length', [6, 40]]]});`,
+], {constraints: [['angle', 6, 180], ['fixed', 1], ['length', 5, 40],
+  ['angle', 5, 0], ['length', 6, 40]]});`,
   );
   await page.getByRole('button', {name: 'Trim', exact: true}).click();
   await page.locator('.sketch-canvas').evaluate(canvas => {
@@ -226,10 +220,10 @@ const value = sketch([
   assert.equal(await page.locator('.sketch-canvas line.local').count(), 2);
   assert.equal(await page.locator('.sketch-canvas circle.local').count(), 2);
   const source = await text(page);
-  assert.match(source, /'angle',\s*\[10,\s*180\]/);
-  assert.match(source, /'angle',\s*\[7,\s*0\]/);
+  assert.match(source, /'angle',\s*10,\s*180/);
+  assert.match(source, /'angle',\s*7,\s*0/);
   assert.match(source, /'fixed',\s*1/);
-  assert.doesNotMatch(source, /'line',\s*[5689],|'length'|'angle',\s*\[[689],/);
+  assert.doesNotMatch(source, /'line',\s*[5689],|'length'|'angle',\s*[689],/);
   await page.keyboard.press('Control+z');
   await segment(page, 8, 0, 1).waitFor({state: 'attached'});
   assert.equal(await page.locator('.sketch-canvas line.local').count(), 4);

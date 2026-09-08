@@ -34,8 +34,11 @@ implementation context and historical outcomes, not a competing work queue.
   start X/Y or segment length/angle input, X/Y direction locks, dense adaptive
   snapping, cancellation and one atomic source transaction per segment.
   `sketch(entries, {constraints})` separates current geometry from hard
-  conditions, without persistent constraint IDs. Fixed point, coincident,
-  horizontal/vertical, length, angle, radius, sweep, midpoint and point X/Y constraints use PlaneGCS;
+  conditions, without persistent constraint IDs.
+  Constraints use `['kind', target, value?]`, with array targets only for
+  multi-point relations. Dimension values occupy the third tuple field.
+  Fixed point, coincident, horizontal/vertical, length, angle, radius, sweep,
+  midpoint and point X/Y constraints use PlaneGCS;
   assemblies use explicit rotation/translation bounds. Explicit drawing dimensions and the final
   active X/Y lock become constraints when geometry is committed; toggling off
   emits no direction constraint. Grid/axis snapping stays temporary; snapping
@@ -82,6 +85,9 @@ implementation context and historical outcomes, not a competing work queue.
   hard constraints and arc structure. Exact input/gesture coordinates take
   precedence over shorter decimals; source writes serialize the checked numbers
   losslessly, without a second precision limit.
+  Native convergence, cleanup and geometric tolerance share a feature-local
+  numeric budget. Iterative stage seeds are not promoted to exact authored
+  values, and valid arc data are not reprojected on each forward solve.
   Deletion removes affected local constraints atomically. Snapshots expose DOF
   and redundant indices; conflicting inline constraints are source-located.
   Numeric fields retain native browser text history; SVG nodes retain entity
@@ -126,7 +132,7 @@ implementation context and historical outcomes, not a competing work queue.
   Circle shares the same drawing, numeric input, snapping and source transaction
   pipeline. It creates an ordinary center point (or reuses a snapped local/upstream
   reference) and one analytic circle, not a perimeter point or polyline. Its
-  entered radius emits `['radius', [circleId, value]]`; an unentered radius remains
+  entered radius emits `['radius', circleId, value]`; an unentered radius remains
   free. Edge dragging edits radius, center dragging edits the center. Geometry
   parameters share AST permissions, gesture-only locks, rounding and exact source
   replay; radius expressions are never overwritten. Native circle radius
@@ -149,7 +155,7 @@ implementation context and historical outcomes, not a competing work queue.
   Analytic curves share finite hit testing, display, bounds, radius badges and
   orphan cleanup. Whole-arc deletion retains shared/upstream points; zero-radius
   or coincident-endpoint arcs are errors, not implicit full circles.
-  `['sweep', [arcId, degrees]]` independently constrains the directed arc angle,
+  `['sweep', arcId, degrees]` independently constrains the directed arc angle,
   strictly between 0 and 360 degrees; the arc tuple still owns cw/ccw. Blank sweep
   input follows the mouse without a constraint. Native angle parameters unwrap on
   that directed branch, and residuals check the actual finite arc after solving.
@@ -176,7 +182,13 @@ implementation context and historical outcomes, not a competing work queue.
   The canvas shares analytic extraction for a noninteractive region fill. Persistent
   region selection IDs and arbitrary multi-hole loft correspondence remain later work.
   The sketch canvas fills the viewport with floating controls. Its top-right
-  icon toolbar groups editing, drawing and view controls, with native hover
+  icon toolbar orders selection, drawing, modification and view controls; rectangle
+  variants share a remembered entry. Right dragging pans without cancelling a draft;
+  the permanent lower-left instructions are gone, while errors/read-only reasons remain.
+  Shift-click multi-selection exposes existing point/line/curve constraint actions;
+  dimensions share drawing numeric entry and a batch is one source edit/undo.
+  Selection Delete retains interval trimming and orphan cleanup. New inter-line
+  constraint kinds remain later work. The toolbar has native hover
   labels and one keyboard Tab stop; narrow viewports place the whole toolbar
   below the compilation status. Both viewport
   status and error cards are scoped to the defining evaluations of the selected

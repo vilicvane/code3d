@@ -32,10 +32,10 @@ test('every persistent constraint exposes its actual participants and value, wit
     ['vertical', 4],
     ['coincident', [ref(1), ref(2)]],
     ['midpoint', [ref(3), ref(1), ref(2)]],
-    ['length', [4, 40]],
-    ['angle', [4, 180]],
-    ['x', [ref(1), -2]],
-    ['y', [ref(2), 3.5]],
+    ['length', 4, 40],
+    ['angle', 4, 180],
+    ['x', ref(1), -2],
+    ['y', ref(2), 3.5],
   ];
   const layers = [layer('local', [line(4, ref(1), ref(2))], constraints)];
   const before = structuredClone({layers, points});
@@ -86,7 +86,7 @@ test('derived relations retain ownership and distinct upstream/local addresses w
         [line(2, ref(1, 'base'), ref(1))],
         [
           ['coincident', [ref(1), ref(1, 'base')]],
-          ['length', [2, 20]],
+          ['length', 2, 20],
         ],
       ),
     ],

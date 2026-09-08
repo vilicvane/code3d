@@ -86,8 +86,8 @@ test('circle creates only a center and analytic circle, with explicitly entered 
         ],
         constraints: constrained
           ? [
-              ['x', [ref(7), 3]],
-              ['radius', [8, 5]],
+              ['x', ref(7), 3],
+              ['radius', 8, 5],
             ]
           : [],
       },
@@ -192,7 +192,7 @@ test('circle radius and center previews replay the exact rounded author data wit
     for (const options of [
       '',
       ", {constraints: [['fixed', 1]]}",
-      ", {constraints: [['radius', [2, 8]]]}",
+      ", {constraints: [['radius', 2, 8]]}",
     ])
       for (const radius of ['5', 'radius']) {
         const args = `[['point', 1, [width, 4]], ['circle', 2, [1, ${radius}]]]${options}`;
@@ -274,8 +274,8 @@ test('deleting circles cleans only newly disconnected centers and affected const
     ],
     constraints: [
       ['fixed', ref(1)],
-      ['radius', [2, 5]],
-      ['radius', [3, 8]],
+      ['radius', 2, 5],
+      ['radius', 3, 8],
     ],
   };
   assert.deepEqual(geometry.deleteSketchEntity([local], 2), {

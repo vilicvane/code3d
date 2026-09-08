@@ -77,7 +77,7 @@ test('fixed endpoints and explicit dimensions override radius initial data witho
     sketch(data(), {
       constraints: [
         ['fixed', 1],
-        ['radius', [4, 20]],
+        ['radius', 4, 20],
       ],
     }),
     () => 'local',
@@ -92,7 +92,7 @@ test('fixed endpoints and explicit dimensions override radius initial data witho
           ['fixed', 1],
           ['fixed', 2],
           ['fixed', 3],
-          ['radius', [4, 20]],
+          ['radius', 4, 20],
         ],
       }),
     SketchConstraintError,
@@ -108,7 +108,7 @@ test('explicit radius seeds do not translate an unanchored arc away from already
         ['point', 3, [3 * scale, -12 * scale]],
         ['arc', 4, [1, 15 * scale, 3, 2, direction]],
       ] as const satisfies readonly SketchEntry[];
-      const value = sketch(input, {constraints: [['radius', [4, 10 * scale]]]});
+      const value = sketch(input, {constraints: [['radius', 4, 10 * scale]]});
       const view = snapshotSketch(value, () => 'local');
       for (const entry of input)
         if (entry[0] === 'point')
@@ -122,8 +122,8 @@ test('explicit radius seeds do not translate an unanchored arc away from already
         () =>
           sketch(input, {
             constraints: [
-              ['radius', [4, 10 * scale]],
-              ['radius', [4, 12 * scale]],
+              ['radius', 4, 10 * scale],
+              ['radius', 4, 12 * scale],
             ],
           }),
         SketchConstraintError,
@@ -216,7 +216,7 @@ test('arc radius gesture locks preserve expression values and still allow endpoi
     sketch(data(), {
       constraints: [
         ['fixed', 1],
-        ['radius', [4, 15]],
+        ['radius', 4, 15],
       ],
     }),
     () => 'local',

@@ -81,6 +81,37 @@ const online = (s, id = 4) => {
 const entries =
   "[['point', 1, [0, 0]], ['point', 2, [20, 0]], ['line', 3, [1, 2]], ['point', 4, [10, 0]]]";
 
+test('fixed-neighbor center dragging keeps exact coordinates through staged preview and fresh source replay', async () => {
+  const args = trimmedArcSketchArguments(10, 5, 4);
+  const [local] = await compile('const s=sketch(' + args + ');');
+  let preview;
+  for (const target of [
+    [0, 15],
+    [-2, 7],
+    [-5, 8],
+    [-7.5, 10],
+  ]) {
+    preview = drag([local], args, 10, target, preview);
+    for (const id of [5, 13]) {
+      assert.equal(position(preview.snapshot, id)[1], target[1]);
+      assert.equal(
+        preview.data.find(p => p.id === id).parameters[1],
+        target[1],
+      );
+    }
+    assert.deepEqual(position(preview.snapshot, 4), [20, 5]);
+    const source = apply(local, args, preview);
+    const fresh = await createTestProjectCompiler(server);
+    try {
+      const [replay] = await compile('const s=sketch(' + source + ');', fresh);
+      assert.deepEqual(replay.entities, preview.snapshot.entities);
+      assert.deepEqual(replay.data, preview.data);
+    } finally {
+      fresh.dispose();
+    }
+  }
+});
+
 test('staged connected-center dragging preserves shape through continuous preview and fresh source replay into extrusion', async () => {
   let args = trimmedArcSketchArguments(10);
   const source = () => 'const s = sketch(' + args + ');\ns.face().extrude(10);';
@@ -178,7 +209,7 @@ test('unconstrained point-on-line motion writes actual data and replays exactly 
 test('a T-junction follows both its geometric line and authored branch constraints across source replay', async () => {
   const args =
     entries.slice(0, -1) +
-    ", ['point', 5, [10, 10]], ['line', 6, [4, 5]]], {constraints: [['horizontal', 3], ['vertical', 6], ['length', [6, 10]]]}";
+    ", ['point', 5, [10, 10]], ['line', 6, [4, 5]]], {constraints: [['horizontal', 3], ['vertical', 6], ['length', 6, 10]]}";
   const [local] = await compile('const s = sketch(' + args + ');');
   const preview = drag([local], args, 5, [15, 15]);
   online(preview.snapshot);

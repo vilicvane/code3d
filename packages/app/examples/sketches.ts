@@ -41,8 +41,8 @@ export const arcs = sketch(
   {
     constraints: [
       ['fixed', 1],
-      ['radius', [4, 15]],
-      ['sweep', [4, 270]],
+      ['radius', 4, 15],
+      ['sweep', 4, 270],
     ],
   },
 );
@@ -56,7 +56,7 @@ export const circles = sketch(
     ['circle', 2, [1, 15]],
     ['circle', 3, [1, 8]],
   ],
-  {constraints: [['radius', [3, 8]]]},
+  {constraints: [['radius', 3, 8]]},
 );
 
 // Current geometry is separate from constraints. The explicit width stays
@@ -75,7 +75,7 @@ export const sketch1 = sketch(
       ['fixed', 1],
       ['horizontal', 4],
       ['vertical', 5],
-      ['length', [4, width]],
+      ['length', 4, width],
     ],
   },
 );
@@ -116,7 +116,7 @@ export const rectangle = sketch(
       ['vertical', 6],
       ['horizontal', 7],
       ['vertical', 8],
-      ['length', [5, width]],
+      ['length', 5, width],
     ],
   },
 );
@@ -143,7 +143,7 @@ export const centeredRectangle = sketch(
       ['horizontal', 8],
       ['vertical', 9],
       ['midpoint', [1, 2, 4]],
-      ['length', [6, width]],
+      ['length', 6, width],
     ],
   },
 );

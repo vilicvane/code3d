@@ -58,18 +58,18 @@ test('the current failing sketch retains last-good geometry, reports its own err
 const value = sketch([
   ['point', 1, [0, 0]], ['point', 2, [40, 0]], ['line', 3, [1, 2]],
 ], {constraints: [
-  ['length', [3, 40]],
-  ['length', [3, 40]],
+  ['length', 3, 40],
+  ['length', 3, 40],
 ]});`;
   const page = await open(t, source);
   await cursor(page, 6, 1);
-  // Monaco indents pasted lines. Locate the value from the stable `]],` suffix.
+  // Monaco indents pasted lines. Locate the value from the stable `],` suffix.
   await page.keyboard.press('End');
-  for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowLeft');
+  for (let i = 0; i < 2; i++) await page.keyboard.press('ArrowLeft');
   await page.keyboard.press('Shift+ArrowLeft');
   await page.keyboard.press('Shift+ArrowLeft');
   await page.keyboard.insertText('50');
-  await waitForSource(page, /\['length', \[3, 50\]\]/);
+  await waitForSource(page, /\['length', 3, 50\]/);
   await page.getByText('Model error', {exact: true}).waitFor();
   assert.equal(await page.locator('.sketch-editor').isVisible(), true);
   assert.equal(await page.locator('.sketch-canvas line.local').count(), 1);
@@ -162,8 +162,11 @@ test('the sketch canvas fills the viewport with floating controls at wide and na
     const input = page.locator('.drawing-inputs input').first();
     assert.equal(await input.isVisible(), true);
     const inputs = await page.locator('.drawing-inputs').boundingBox();
-    const footer = await page.locator('.sketch-editor output').boundingBox();
-    assert.ok(inputs && footer && inputs.y + inputs.height < footer.y);
+    assert.ok(inputs && inputs.y + inputs.height < canvas.y + canvas.height);
+    assert.equal(
+      await page.locator('.sketch-editor output').isVisible(),
+      false,
+    );
     await page.keyboard.press('Escape');
     await page.keyboard.press('Escape');
   }
@@ -179,14 +182,13 @@ test('icon toolbar groups tools and supports one Tab stop, arrow navigation and 
       .evaluateAll(groups =>
         groups.map(group => group.getAttribute('aria-label')),
       ),
-    ['Edit', 'Draw', 'View'],
+    ['Select', 'Draw', 'Modify', 'View'],
   );
   for (const name of [
     'Select',
     'Trim',
     'Line',
     'Rectangle',
-    'Center rectangle',
     'Circle',
     'Arc',
     'Fit',
@@ -221,9 +223,8 @@ test('icon toolbar groups tools and supports one Tab stop, arrow navigation and 
     await page.evaluate(() =>
       document.activeElement?.getAttribute('aria-label'),
     ),
-    'Trim',
+    'Line',
   );
-  await page.keyboard.press('ArrowRight');
   await page.keyboard.press('Enter');
   assert.equal(
     await toolbar
@@ -294,6 +295,137 @@ test('toolbar navigation skips read-only drawing tools but leaves view controls 
       .getAttribute('aria-pressed'),
     'false',
   );
+});
+
+test('rectangle variants share one remembered tool and an accessible dismissible menu', async t => {
+  const page = await open(t, `import {sketch} from '@code3d/core';\n${sketch}`);
+  const toolbar = page.getByRole('toolbar', {name: 'Sketch tools'});
+  const trigger = toolbar.getByRole('button', {
+    name: 'Rectangle tools',
+    exact: true,
+  });
+  assert.equal(
+    await toolbar
+      .getByRole('button', {name: 'Center rectangle', exact: true})
+      .count(),
+    0,
+  );
+  await trigger.focus();
+  await page.keyboard.press('ArrowDown');
+  const menu = page.getByRole('menu', {name: 'Rectangle tools'});
+  await menu.waitFor();
+  assert.equal(await trigger.getAttribute('aria-expanded'), 'true');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await menu.waitFor({state: 'hidden'});
+  assert.equal(
+    await toolbar
+      .getByRole('button', {name: 'Center rectangle', exact: true})
+      .getAttribute('aria-pressed'),
+    'true',
+  );
+  assert.equal(
+    await toolbar.getByRole('button', {name: 'Rectangle', exact: true}).count(),
+    0,
+  );
+  await page.keyboard.press('Escape');
+  await toolbar
+    .getByRole('button', {name: 'Center rectangle', exact: true})
+    .click();
+  assert.equal(
+    await page.locator('.drawing-input-title').innerText(),
+    'Center',
+  );
+  await trigger.click();
+  assert.equal(
+    await menu
+      .getByRole('menuitemradio', {name: 'Center rectangle', exact: true})
+      .getAttribute('aria-checked'),
+    'true',
+  );
+  await page.keyboard.press('Escape');
+  await menu.waitFor({state: 'hidden'});
+  assert.equal(
+    await trigger.evaluate(button => document.activeElement === button),
+    true,
+  );
+  assert.equal(
+    await toolbar
+      .getByRole('button', {name: 'Center rectangle', exact: true})
+      .getAttribute('aria-pressed'),
+    'true',
+  );
+  await trigger.click();
+  await page.locator('.sketch-canvas').click({position: {x: 30, y: 150}});
+  await menu.waitFor({state: 'hidden'});
+  assert.equal(await trigger.getAttribute('aria-expanded'), 'false');
+  // The native toggle event is queued: accessibility must already match when
+  // show/hide returns, including native dismissal outside the trigger handler.
+  assert.deepEqual(
+    await page
+      .getByRole('menu', {name: 'Rectangle tools', includeHidden: true})
+      .evaluate(element => {
+        const menu = element as HTMLElement;
+        const trigger = menu.previousElementSibling!;
+        menu.showPopover();
+        const opened = trigger.getAttribute('aria-expanded');
+        menu.hidePopover();
+        return [opened, trigger.getAttribute('aria-expanded')];
+      }),
+    ['true', 'false'],
+  );
+});
+
+test('right drag pans over geometry and constraint glyphs without editing or cancelling a drawing', async t => {
+  const source = `import {sketch} from '@code3d/core';\nconst value = sketch([['point',1,[0,0]],['point',2,[40,0]],['line',3,[1,2]]], {constraints: [['fixed',1]]});`;
+  const page = await open(t, source);
+  const original = await text(page);
+  const position = () =>
+    point(page, 1).evaluate(element => {
+      const r = element.getBoundingClientRect();
+      return [r.x + r.width / 2, r.y + r.height / 2];
+    });
+  for (const target of [
+    point(page, 1),
+    page.locator('.constraint-badge').first(),
+  ]) {
+    const before = await position();
+    const bounds = (await target.boundingBox())!;
+    const x = bounds.x + bounds.width / 2,
+      y = bounds.y + bounds.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down({button: 'right'});
+    await page.mouse.move(x + 35, y + 25, {steps: 5});
+    await page.mouse.up({button: 'right'});
+    const after = await position();
+    assert.ok(Math.abs(after[0] - before[0] - 35) < 0.5);
+    assert.ok(Math.abs(after[1] - before[1] - 25) < 0.5);
+    assert.equal(await text(page), original);
+  }
+  await page.getByRole('button', {name: 'Line', exact: true}).click();
+  const canvas = (await page.locator('.sketch-canvas').boundingBox())!;
+  const x = canvas.x + 100,
+    y = canvas.y + 180;
+  await page.mouse.click(x, y);
+  await page.getByRole('textbox', {name: 'Length', exact: true}).fill('10');
+  await page.mouse.move(x + 50, y + 30);
+  await page.mouse.down({button: 'right'});
+  await page.mouse.move(x + 80, y + 60, {steps: 5});
+  await page.mouse.up({button: 'right'});
+  assert.equal(
+    await page.getByRole('textbox', {name: 'Length', exact: true}).inputValue(),
+    '10',
+  );
+  assert.equal(
+    await page
+      .getByRole('button', {name: 'Line', exact: true})
+      .getAttribute('aria-pressed'),
+    'true',
+  );
+  assert.equal(await text(page), original);
+  assert.equal(await page.locator('.sketch-editor output').isVisible(), false);
+  await page.keyboard.press('Escape');
+  assert.equal(await text(page), original);
 });
 
 test('syntax errors retain an explicitly stale sketch without a model error, and leaving its source exits the view', async t => {

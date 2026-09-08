@@ -63,6 +63,12 @@ export function sketchDraftEntity([
 
 export type SketchChange =
   | Readonly<{
+      kind: 'constrain';
+      constraints: readonly SketchConstraint<SketchPointAddress>[];
+      removedConstraints?: readonly number[];
+      data: readonly SketchGeometryData[];
+    }>
+  | Readonly<{
       kind: 'append';
       entries: readonly SketchDraftEntry[];
       constraints?: readonly SketchConstraint<SketchPointAddress>[];
@@ -344,18 +350,24 @@ export class SketchEditResolver implements ToolIntentResolver {
           };
         remove(entry.node);
       }
-      for (const index of change.constraints) {
-        const node = parsed.constraints?.elements[index];
-        if (!node)
-          return {
-            status: 'conflict',
-            reason: 'The sketch constraints changed.',
-          };
-        remove(node);
-      }
     }
-    if (change.kind === 'move') {
-      if (change.merge) {
+    const removedConstraints =
+      change.kind === 'delete' || change.kind === 'trim'
+        ? change.constraints
+        : change.kind === 'constrain'
+          ? (change.removedConstraints ?? [])
+          : [];
+    for (const index of removedConstraints) {
+      const node = parsed.constraints?.elements[index];
+      if (!node)
+        return {
+          status: 'conflict',
+          reason: 'The sketch constraints changed.',
+        };
+      remove(node);
+    }
+    if (change.kind === 'move' || change.kind === 'constrain') {
+      if (change.kind === 'move' && change.merge) {
         const {id, target} = change.merge;
         const entry = parsed.entries.get(id);
         if (entry?.kind !== 'point' || !parsed.editable.get(id)?.every(Boolean))
@@ -371,7 +383,7 @@ export class SketchEditResolver implements ToolIntentResolver {
         }
       }
       for (const {id, parameters} of change.data) {
-        if (id === change.merge?.id) continue;
+        if (change.kind === 'move' && id === change.merge?.id) continue;
         const entry = parsed.entries.get(id);
         const editable = parsed.editable.get(id);
         if (!entry || !editable?.some(Boolean))
@@ -386,7 +398,8 @@ export class SketchEditResolver implements ToolIntentResolver {
             replace(node, String(parameters[i]));
         });
       }
-    } else if (change.kind === 'trim') {
+    }
+    if (change.kind === 'trim') {
       try {
         const copiesOf = new Map<
           number,
@@ -478,19 +491,13 @@ export class SketchEditResolver implements ToolIntentResolver {
           )
             continue;
           const kind = node.elements[0];
-          const data = node.elements[1];
+          const target = node.elements[1];
           if (
             !ts.isStringLiteral(kind) ||
             !['horizontal', 'vertical', 'angle', 'radius'].includes(kind.text)
           )
             throw new Error('Splitting requires explicit constraint targets.');
-          const target =
-            kind.text === 'angle' || kind.text === 'radius'
-              ? ts.isArrayLiteralExpression(data)
-                ? data.elements[0]
-                : undefined
-              : data;
-          if (!target)
+          if (!target || !ts.isNumericLiteral(target))
             throw new Error('Splitting requires explicit constraint targets.');
           replace(target, String(ids[0]));
           const start = node.getStart() - prefix.length;
@@ -504,12 +511,12 @@ export class SketchEditResolver implements ToolIntentResolver {
       } catch (error) {
         return {status: 'conflict', reason: (error as Error).message};
       }
-    } else if (change.kind === 'append') {
+    } else if (change.kind === 'append' || change.kind === 'constrain') {
       const ids = new Set(parsed.entries.keys());
       let text: string;
       let constraints: string;
       try {
-        text = change.entries
+        text = (change.kind === 'append' ? change.entries : [])
           .map(entry => {
             const id = entry[1];
             if (ids.has(id))
@@ -519,7 +526,7 @@ export class SketchEditResolver implements ToolIntentResolver {
           })
           .join('\n');
         constraints = (change.constraints ?? [])
-          .map(([kind, data]) => {
+          .map(([kind, data, value]) => {
             let content: string;
             switch (kind) {
               case 'fixed':
@@ -535,13 +542,13 @@ export class SketchEditResolver implements ToolIntentResolver {
                 break;
               case 'x':
               case 'y':
-                content = `[${point(data[0])}, ${formatSourceNumber(data[1])}]`;
+                content = `${point(data)}, ${formatSourceNumber(value)}`;
                 break;
               case 'length':
               case 'angle':
               case 'radius':
               case 'sweep':
-                content = `[${data.map(formatSourceNumber).join(', ')}]`;
+                content = `${data}, ${formatSourceNumber(value)}`;
                 break;
             }
             return `['${kind}', ${content}]`;
@@ -587,7 +594,7 @@ export class SketchEditResolver implements ToolIntentResolver {
       plan: {
         toolId: context.toolId,
         baseVersion: context.baseVersion,
-        summary: `${change.kind === 'move' ? 'Edit geometry' : change.kind === 'delete' ? 'Delete entities' : change.kind === 'trim' ? 'Delete segment' : 'Add entities'} in sketch`,
+        summary: `${change.kind === 'move' ? 'Edit geometry' : change.kind === 'constrain' ? 'Constrain selection' : change.kind === 'delete' ? 'Delete entities' : change.kind === 'trim' ? 'Delete segment' : 'Add entities'} in sketch`,
         intent,
         edits,
         preview: {kind: 'source-edits', edits},

@@ -18,12 +18,9 @@ import {
   Minus,
   MousePointer2,
   RectangleHorizontal,
-  Focus,
   Scissors,
   Shapes,
   Circle,
-  Spline,
-  type IconNode,
 } from 'lucide';
 import type {SketchChange} from '../tools/sketch-source';
 import type {
@@ -53,16 +50,26 @@ import {
   type SketchPoint as Point,
 } from '../tools/sketch-snap';
 import {DrawingInputs} from './drawing-inputs';
-import {createIcon} from './icons';
+import {SketchToolbar, type SketchToolAction} from './sketch-toolbar';
+import {CenterArc, CenterRectangle} from './sketch-icons';
 import {sketchConstraintDisplays} from '../tools/sketch-constraints';
 import {SketchConstraints} from './sketch-constraints';
+import {
+  sketchConstraintActions,
+  type SketchPick,
+} from '../tools/sketch-constraint-actions';
+import {SketchConstraintTools} from './sketch-constraint-tools';
 
 const drawingTools = [
   ['Line', Minus, () => new SketchLineDrawing()],
   ['Rectangle', RectangleHorizontal, () => new SketchRectangleDrawing()],
-  ['Center rectangle', Focus, () => new SketchRectangleDrawing('center')],
+  [
+    'Center rectangle',
+    CenterRectangle,
+    () => new SketchRectangleDrawing('center'),
+  ],
   ['Circle', Circle, () => new SketchCircleDrawing()],
-  ['Arc', Spline, () => new SketchArcDrawing()],
+  ['Arc', CenterArc, () => new SketchArcDrawing()],
 ] as const;
 
 export type SketchEditorView = Readonly<{
@@ -106,7 +113,19 @@ export class SketchEditor {
   });
   private readonly shapes = new Map<string, SVGElement>();
   private readonly usedShapes = new Set<string>();
-  private readonly buttons = new Map<string, HTMLButtonElement>();
+  private readonly toolbar = new SketchToolbar();
+  private readonly constraintTools = new SketchConstraintTools(
+    change => {
+      this.editError = undefined;
+      const committed = this.commit(change);
+      if (!committed)
+        this.editError =
+          'The sketch constraints could not be edited; select the geometry again.';
+      this.draw();
+      return committed;
+    },
+    () => this.svg.focus(),
+  );
   private readonly overlay = svgElement('g');
   private readonly draftShapes: SVGElement[] = [];
   private readonly draftMarker = svgElement('circle');
@@ -127,7 +146,7 @@ export class SketchEditor {
   private bypassSnap = false;
   private center: SketchPosition = [0, 0];
   private scale = 6;
-  private selection?: SketchPointAddress | SketchSegment;
+  private selection: SketchPick[] = [];
   private editError?: string;
   private gesture?: Gesture;
   private space = false;
@@ -155,7 +174,7 @@ export class SketchEditor {
     this.root.className = 'sketch-editor';
     this.root.setAttribute('aria-label', 'Sketch editor');
     this.root.hidden = true;
-    const toolbar = this.createToolbar();
+    this.createToolbar();
     this.svg.classList.add('sketch-canvas');
     this.svg.setAttribute('tabindex', '0');
     this.svg.setAttribute('aria-label', 'Sketch drawing');
@@ -195,7 +214,6 @@ export class SketchEditor {
     this.root.addEventListener('contextmenu', event => {
       event.preventDefault();
       event.stopPropagation();
-      this.escape();
     });
     this.root.addEventListener('pointerdown', event => event.stopPropagation());
     this.root.addEventListener('keydown', event => this.keyDown(event));
@@ -241,7 +259,12 @@ export class SketchEditor {
       this.overlay,
     );
     this.status.append(this.statusText);
-    this.root.append(toolbar, stage, this.status);
+    this.root.append(
+      this.toolbar.root,
+      this.constraintTools.root,
+      stage,
+      this.status,
+    );
     container.append(this.root);
     this.resize = new ResizeObserver(() => this.draw());
     this.resize.observe(this.svg);
@@ -251,25 +274,25 @@ export class SketchEditor {
     const changed = this.view?.id !== view.id;
     if (changed) {
       this.cancel();
-      this.selection = undefined;
+      this.selection = [];
       this.tool = 'Select';
     }
     this.view = view;
     this.editError = undefined;
-    if (this.selection) {
-      const selected = this.selection;
-      const exists =
-        'start' in selected
-          ? this.segments().some(segment =>
-              sameSketchSegment(segment, selected),
-            )
-          : this.layers().some(
+    const segments = this.segments();
+    // Retain the source interval identity, but replace its old coordinates.
+    // Constraint solving can move it without changing the selected entity.
+    this.selection = this.selection.flatMap((selected): SketchPick[] =>
+      'start' in selected
+        ? segments.filter(segment => sameSketchSegment(segment, selected))
+        : this.layers().some(
               layer =>
                 layer.id === selected.layer &&
                 layer.entities.some(e => e.id === selected.id),
-            );
-      if (!exists) this.selection = undefined;
-    }
+            )
+          ? [selected]
+          : [],
+    );
     if (view.readOnlyReason) this.tool = 'Select';
     const start = this.drawing?.start;
     if (start && 'point' in start) {
@@ -283,6 +306,7 @@ export class SketchEditor {
   }
 
   hide(): void {
+    this.toolbar.close();
     this.cancel();
     this.view = undefined;
     this.root.hidden = true;
@@ -293,6 +317,7 @@ export class SketchEditor {
     this.root.remove();
   }
   cancel(): void {
+    this.constraintTools.cancel();
     if (this.drawingInputs.root.contains(document.activeElement))
       this.svg.focus();
     this.gesture = undefined;
@@ -304,7 +329,10 @@ export class SketchEditor {
   private escape(): void {
     const hasDraft = this.gesture || this.drawing?.hasDraft;
     this.svg.focus();
-    if (!hasDraft) this.tool = 'Select';
+    if (!hasDraft) {
+      this.tool = 'Select';
+      this.selection = [];
+    }
     this.cancel();
   }
 
@@ -373,7 +401,7 @@ export class SketchEditor {
       (event.key === 'Delete' || event.key === 'Backspace')
     ) {
       event.preventDefault();
-      this.deleteTarget(this.selection);
+      this.deleteSelection();
     }
     if (canvas && event.code === 'Space') {
       event.preventDefault();
@@ -415,116 +443,74 @@ export class SketchEditor {
     if (error) this.drawingInputs.report(error);
   }
 
-  private createToolbar(): HTMLElement {
-    const toolbar = document.createElement('header');
-    toolbar.className = 'sketch-toolbar';
-    toolbar.setAttribute('role', 'toolbar');
-    toolbar.setAttribute('aria-label', 'Sketch tools');
-    const group = (label: string) => {
-      const element = document.createElement('div');
-      element.className = 'sketch-tool-group';
-      element.setAttribute('role', 'group');
-      element.setAttribute('aria-label', label);
-      toolbar.append(element);
-      return element;
+  private createToolbar(): void {
+    const select = (create: () => 'Select' | 'Trim' | SketchDrawing) => () => {
+      this.cancel();
+      this.tool = create();
+      this.selection = [];
+      this.svg.focus();
+      this.draw();
     };
-    const editing = group('Edit');
-    const drawing = group('Draw');
-    const viewing = group('View');
-    viewing.classList.add('sketch-view-options');
-    for (const [mode, icon, create] of [
-      ['Select', MousePointer2, () => 'Select' as const],
-      ['Trim', Scissors, () => 'Trim' as const],
-      ...drawingTools,
-    ] as const)
-      this.button(
-        mode === 'Select' || mode === 'Trim' ? editing : drawing,
-        mode,
+    this.toolbar.add(this.toolbar.group('Select'), {
+      name: 'Select',
+      icon: MousePointer2,
+      title: 'Select · Drag points · Shift-click to toggle selection',
+      run: select(() => 'Select'),
+    });
+    const drawing = this.toolbar.group('Draw');
+    const titles = [
+      'Line · Continuous segments · Esc ends the chain',
+      'Rectangle · Opposite corners',
+      'Center rectangle · Center and corner',
+      'Circle · Center and radius',
+      'Arc · Center, start and end · R reverses direction',
+    ];
+    const actions = drawingTools.map(
+      ([name, icon, create], i): SketchToolAction => ({
+        name,
         icon,
-        () => {
-          this.cancel();
-          this.tool = create();
-          this.selection = undefined;
-          this.svg.focus();
-          this.draw();
-        },
-      );
-    this.buttons.get('Select')!.title =
-      'Select · Drag points or select a segment';
-    this.buttons.get('Line')!.title =
-      'Line · Continuous segments · Esc ends the chain';
-    this.buttons.get('Rectangle')!.title = 'Rectangle · Opposite corners';
-    this.buttons.get('Center rectangle')!.title =
-      'Center rectangle · Center and corner';
-    this.buttons.get('Circle')!.title = 'Circle · Center and radius';
-    this.buttons.get('Trim')!.title =
-      'Trim · Click segments or standalone points · Esc exits';
-    this.button(viewing, 'Fit', Maximize, () => this.fit());
-    this.buttons.get('Fit')!.title = 'Fit · Show the whole sketch';
-    this.button(viewing, 'Snap', Magnet, () => {
-      this.snapping = !this.snapping;
-      this.svg.focus();
-      this.draw();
+        title: titles[i],
+        run: select(create),
+      }),
+    );
+    this.toolbar.add(drawing, actions[0]);
+    this.toolbar.variants(drawing, 'Rectangle tools', actions.slice(1, 3));
+    for (const action of actions.slice(3)) this.toolbar.add(drawing, action);
+    this.toolbar.add(this.toolbar.group('Modify'), {
+      name: 'Trim',
+      icon: Scissors,
+      title: 'Trim · Click segments or standalone points · Esc exits',
+      run: select(() => 'Trim'),
     });
-    this.buttons.get('Snap')!.title =
-      'Snap to points, origin, grid and directions · Hold Alt to bypass';
-    this.button(viewing, 'Constraints', Shapes, () => {
-      this.showConstraints = !this.showConstraints;
-      this.svg.focus();
-      this.draw();
+    const viewing = this.toolbar.group('View');
+    viewing.classList.add('sketch-view-options');
+    this.toolbar.add(viewing, {
+      name: 'Fit',
+      icon: Maximize,
+      title: 'Fit · Show the whole sketch',
+      run: () => this.fit(),
     });
-    this.buttons.get('Constraints')!.title =
-      'Show constraints · Hover or focus a marker to highlight related geometry';
-    toolbar.addEventListener('focusin', event => {
-      for (const button of this.buttons.values())
-        button.tabIndex = button === event.target ? 0 : -1;
+    this.toolbar.add(viewing, {
+      name: 'Snap',
+      icon: Magnet,
+      title: 'Snap to points, origin, grid and directions · Hold Alt to bypass',
+      run: () => {
+        this.snapping = !this.snapping;
+        this.svg.focus();
+        this.draw();
+      },
     });
-    toolbar.addEventListener('keydown', event => {
-      if (event.altKey || event.ctrlKey || event.metaKey || event.isComposing)
-        return;
-      const buttons = [...this.buttons.values()].filter(
-        button => !button.disabled,
-      );
-      const index = buttons.findIndex(button => button === event.target);
-      if (index < 0) return;
-      let next: number;
-      switch (event.key) {
-        case 'ArrowLeft':
-          next = (index + buttons.length - 1) % buttons.length;
-          break;
-        case 'ArrowRight':
-          next = (index + 1) % buttons.length;
-          break;
-        case 'Home':
-          next = 0;
-          break;
-        case 'End':
-          next = buttons.length - 1;
-          break;
-        default:
-          return;
-      }
-      event.preventDefault();
-      buttons[next].focus();
+    this.toolbar.add(viewing, {
+      name: 'Constraints',
+      icon: Shapes,
+      title:
+        'Show constraints · Hover or focus a marker to highlight related geometry',
+      run: () => {
+        this.showConstraints = !this.showConstraints;
+        this.svg.focus();
+        this.draw();
+      },
     });
-    return toolbar;
-  }
-
-  private button(
-    toolbar: HTMLElement,
-    label: string,
-    icon: IconNode,
-    action: () => void,
-  ): void {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.setAttribute('aria-label', label);
-    button.title = label;
-    button.tabIndex = this.buttons.size ? -1 : 0;
-    button.append(createIcon(icon));
-    button.addEventListener('click', action);
-    this.buttons.set(label, button);
-    toolbar.append(button);
   }
 
   private layers(): readonly SketchSnapshot[] {
@@ -627,13 +613,13 @@ export class SketchEditor {
   }
 
   private pointerDown(event: PointerEvent): void {
-    if (!this.view || (event.button !== 0 && event.button !== 1)) return;
+    if (!this.view || ![0, 1, 2].includes(event.button) || this.gesture) return;
     event.preventDefault();
     this.svg.focus();
     this.editError = undefined;
     const position = this.coordinates(event);
     this.bypassSnap = event.altKey;
-    if (event.button === 1 || this.space) {
+    if (event.button === 1 || event.button === 2 || this.space) {
       this.gesture = {
         kind: 'pan',
         start: [event.clientX, event.clientY],
@@ -672,8 +658,20 @@ export class SketchEditor {
       this.drawing.pointer = position;
       this.place();
     } else {
-      this.selection = vertex ?? segment;
+      const picked = vertex ?? segment;
+      if (event.shiftKey) {
+        if (picked) {
+          const matches = (p: SketchPick) =>
+            'start' in p && 'start' in picked
+              ? sameSketchSegment(p, picked)
+              : !('start' in p) && !('start' in picked) && same(p, picked);
+          this.selection = this.selection.some(matches)
+            ? this.selection.filter(p => !matches(p))
+            : [...this.selection, picked];
+        }
+      } else this.selection = picked ? [picked] : [];
       if (
+        !event.shiftKey &&
         point &&
         !this.view.readOnlyReason &&
         point.layer === this.view.id &&
@@ -836,7 +834,7 @@ export class SketchEditor {
       if (!segment) return;
       const change = trimSketchSegment(this.view.layers, segment);
       this.cancel();
-      if (this.commit(change)) this.selection = undefined;
+      if (this.commit(change)) this.selection = [];
       else
         this.editError =
           'The segment could not be deleted; its source or references are not editable.';
@@ -845,7 +843,31 @@ export class SketchEditor {
     }
     const change = deleteSketchEntity(this.view.layers, selected.id);
     this.cancel();
-    if (this.commit(change)) this.selection = undefined;
+    if (this.commit(change)) this.selection = [];
+    this.draw();
+  }
+
+  private deleteSelection(): void {
+    if (!this.view || this.view.readOnlyReason) return;
+    const selected = this.selection.filter(p => p.layer === this.view!.id);
+    if (selected.length <= 1) {
+      this.deleteTarget(selected[0]);
+      return;
+    }
+    const points = selected.filter(p => !('start' in p));
+    const segments = selected.filter((p): p is SketchSegment => 'start' in p);
+    const removal = deleteSketchEntity(
+      this.view.layers,
+      points.map(p => p.id),
+    );
+    const change = segments.length
+      ? trimSketchSegment(this.view.layers, segments, removal.ids)
+      : removal;
+    this.cancel();
+    if (this.commit(change)) this.selection = [];
+    else
+      this.editError =
+        'The selection could not be deleted; its source or references are not editable.';
     this.draw();
   }
 
@@ -932,10 +954,9 @@ export class SketchEditor {
       this.showConstraints,
     );
     const segments = sketchSegments(this.layers(), points);
-    const selectedSegments =
-      this.selection && 'start' in this.selection
-        ? overlappingSketchSegments(segments, this.selection)
-        : [];
+    const selectedSegments = this.selection.flatMap(p =>
+      'start' in p ? overlappingSketchSegments(segments, p) : [],
+    );
     const trimmedSegments =
       trim && 'start' in trim ? overlappingSketchSegments(segments, trim) : [];
     for (const curve of this.circularCurves()) {
@@ -1015,46 +1036,47 @@ export class SketchEditor {
         this.shapes.delete(key);
       }
     this.drawDraft();
-    for (const [name, button] of this.buttons) {
+    this.toolbar.update(name => {
       const drawingTool = drawingTools.some(([tool]) => tool === name);
-      if (name === 'Select' || name === 'Trim' || drawingTool)
-        button.setAttribute('aria-pressed', String(name === this.mode));
-      if (name === 'Snap')
-        button.setAttribute('aria-pressed', String(this.snapping));
-      if (name === 'Constraints')
-        button.setAttribute('aria-pressed', String(this.showConstraints));
-      button.disabled =
-        (name === 'Trim' || drawingTool) && !!this.view.readOnlyReason;
-    }
-    if (
-      ![...this.buttons.values()].some(
-        button => !button.disabled && button.tabIndex === 0,
-      )
-    ) {
-      for (const [name, button] of this.buttons)
-        button.tabIndex = name === this.mode ? 0 : -1;
-    }
-    const selected = this.selection;
+      return {
+        pressed:
+          name === 'Snap'
+            ? this.snapping
+            : name === 'Constraints'
+              ? this.showConstraints
+              : name === this.mode,
+        disabled:
+          (name === 'Trim' || drawingTool) && !!this.view!.readOnlyReason,
+      };
+    });
+    this.constraintTools.show(
+      JSON.stringify([
+        this.view.id,
+        this.selection.map(p => [
+          p.layer,
+          p.id,
+          'start' in p ? 'curve' : 'point',
+        ]),
+      ]),
+      this.mode === 'Select' && !this.view.readOnlyReason
+        ? sketchConstraintActions(
+            this.layers(),
+            [
+              ...this.selection.filter(p => !('start' in p)),
+              ...selectedSegments,
+            ],
+            this.view.editable,
+            this.view.referenceable,
+            this.view.data,
+          )
+        : [],
+    );
     const status =
       (this.gesture?.kind === 'move' ? this.gesture.error : undefined) ??
       this.editError ??
       this.view.readOnlyReason ??
-      (this.mode === 'Trim'
-        ? trimmedSegments.length > 1
-          ? `${trimmedSegments.length} overlapping segments · Click to trim together · Esc exits`
-          : 'Click a highlighted segment or standalone point to trim · Esc exits'
-        : undefined) ??
-      (selected?.layer && selected.layer !== this.view.id
-        ? 'Upstream geometry · locked'
-        : selectedSegments.length > 1
-          ? `${selectedSegments.length} overlapping segments · Delete trims them together`
-          : selected &&
-              !('start' in selected) &&
-              this.expressionLock(selected.id)
-            ? this.expressionLock(selected.id)!
-            : this.drawing
-              ? this.drawing.instructions
-              : `${this.view.layers.at(-1)!.degreesOfFreedom} DOF · ${this.view.layers.at(-1)!.constraints.length} constraints · Drag points or curve radii · Delete removes the selection`);
+      '';
+    this.status.hidden = !status;
     if (this.statusText.data !== status) this.statusText.data = status;
   }
 
@@ -1121,7 +1143,7 @@ export class SketchEditor {
   }
 
   private entityClass(layer: string, id: number): string {
-    return `entity ${layer === this.view!.id ? 'local' : 'upstream'}${this.constraints.related(layer, id) ? ' constraint-related' : ''}${this.selection && !('start' in this.selection) && same(this.selection, {layer, id}) ? ' selected' : ''}`;
+    return `entity ${layer === this.view!.id ? 'local' : 'upstream'}${this.constraints.related(layer, id) ? ' constraint-related' : ''}${this.selection.some(p => !('start' in p) && same(p, {layer, id})) ? ' selected' : ''}`;
   }
   private drawDraft(): void {
     if (!this.drawing || !this.view || this.root.hidden) {

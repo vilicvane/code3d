@@ -307,10 +307,10 @@ test('the two-click line draft commits new endpoints and line as one transaction
     {
       kind: 'append',
       constraints: [
-        ['x', [{layer: 'local', id: 10}, 1.5]],
-        ['y', [{layer: 'local', id: 10}, -2]],
-        ['length', [12, 12]],
-        ['angle', [12, 90]],
+        ['x', {layer: 'local', id: 10}, 1.5],
+        ['y', {layer: 'local', id: 10}, -2],
+        ['length', 12, 12],
+        ['angle', 12, 90],
       ],
       entries: [
         ['point', 10, [1.5, -2]],
@@ -431,7 +431,7 @@ test('only the final explicit axis or angle becomes a constraint and cancellatio
       return true;
     });
     assert.deepEqual(edits[0].constraints, [
-      ['length', [3, 10]],
+      ['length', 3, 10],
       ...(finalAxis
         ? [[finalAxis === 'x' ? 'horizontal' : 'vertical', 3]]
         : []),

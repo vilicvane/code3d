@@ -40,13 +40,6 @@ export class SketchArcDrawing implements SketchDrawing {
         ? 'Start point'
         : 'Center';
   }
-  get instructions() {
-    return this.arcStart
-      ? 'Arc end point · Enter sweep or click · R reverses direction · Esc cancels'
-      : this.start
-        ? 'Arc start point · Enter radius or click · Esc cancels'
-        : 'Arc center · Enter X/Y or click';
-  }
   get hasDraft() {
     return !!this.start || this.dimensions.edited;
   }
@@ -186,11 +179,11 @@ export class SketchArcDrawing implements SketchDrawing {
       b = geometry.point(endpoint);
     const arc = geometry.arc(c, radius, a, b, this.direction);
     const constraints: SketchConstraint<SketchPointAddress>[] =
-      this.centerCoordinates.map(({axis, value}) => [axis, [c, value]]);
+      this.centerCoordinates.map(({axis, value}) => [axis, c, value]);
     if (this.radius !== undefined)
-      constraints.push(['radius', [arc, this.radius]]);
+      constraints.push(['radius', arc, this.radius]);
     const sweep = this.dimensions.value('sweep');
-    if (sweep !== undefined) constraints.push(['sweep', [arc, sweep]]);
+    if (sweep !== undefined) constraints.push(['sweep', arc, sweep]);
     if (!commit({kind: 'append', entries: geometry.entries, constraints}))
       return 'The sketch changed; the drawing was not applied';
     this.reset();

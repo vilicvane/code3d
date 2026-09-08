@@ -23,7 +23,7 @@ after(async () => {
 const entries =
   "[['point', 1, [0,0]], ['point', 2, [40,0]], ['line', 3, [1,2]]]";
 const options = (length = 40) =>
-  `{constraints: [['length', [3, 40]], ['length', [3, ${length}]]]}`;
+  `{constraints: [['length', 3, 40], ['length', 3, ${length}]]}`;
 const compile = (source: string) =>
   compiler.compile(
     {
@@ -97,7 +97,7 @@ const solid = box(10, 10, 10);
 
 test('repeated factory evaluations with shared source locations retain distinct sketch error scopes', async () => {
   const source = (length = 40) => `
-function create(length) { return sketch(${entries}, {constraints: [['length', [3, 40]], ['length', [3, length]]]}); }
+function create(length) { return sketch(${entries}, {constraints: [['length', 3, 40], ['length', 3, length]]}); }
 const first = create(40);
 const second = create(${length});`;
   const good = await compile(source());

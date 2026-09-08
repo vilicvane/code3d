@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {open, point, text, waitForSource} from './sketch-test.ts';
+import {open, point, selectTool, text, waitForSource} from './sketch-test.ts';
 
 const tools = ['Line', 'Rectangle', 'Center rectangle', 'Circle', 'Arc'];
 for (const [index, tool] of tools.entries())
@@ -12,12 +12,12 @@ for (const [index, tool] of tools.entries())
       {line: 2, column: 8},
     );
     const original = await text(page);
-    for (const name of tools)
+    for (const name of tools.filter(name => name !== 'Center rectangle'))
       assert.equal(
         await page.getByRole('button', {name, exact: true}).isEnabled(),
         true,
       );
-    await page.getByRole('button', {name: tool, exact: true}).click();
+    await selectTool(page, tool);
     const bounds = (await page.locator('.sketch-canvas').boundingBox())!;
     const x = bounds.x + bounds.width / 2,
       y = bounds.y + bounds.height / 2;

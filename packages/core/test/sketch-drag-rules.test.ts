@@ -198,6 +198,52 @@ test('center translation uses the reachable mouse position and yields to fixed e
   assert.deepEqual(moved.constraints, fixed.constraints);
 });
 
+test('staged compromises clean exact coordinates before retaining them, across scales and forward solves', () => {
+  for (const scale of [1e-8, 1, 1e8]) {
+    const entries = connectedArc.map<SketchEntry>(([kind, id, data]) => {
+      if (kind === 'point' && Array.isArray(data))
+        return [
+          kind,
+          id,
+          [data[0] * scale, (data[1] === 10 ? 5 : data[1]) * scale],
+        ];
+      if (kind === 'arc')
+        return [
+          kind,
+          id,
+          [data[0], data[1] * scale, data[2], data[3], data[4]],
+        ];
+      if (kind === 'circle') return [kind, id, [data[0], data[1] * scale]];
+      return [kind, id, data] as SketchEntry;
+    });
+    const before = snapshot(entries, [...connectedConstraints, ['fixed', 4]]);
+    let current = before;
+    for (const [x, y] of [
+      [0, 15],
+      [-2, 7],
+      [-5, 8],
+      [-7.5, 10],
+      [0, 5],
+    ]) {
+      const target = [x * scale, y * scale] as const;
+      current = solveSketchSnapshot([current], {
+        id: 10,
+        position: target,
+        reference: before,
+      });
+      assert.deepEqual(point(current, 10), target);
+      assert.equal(point(current, 5)[1], target[1]);
+      assert.equal(point(current, 13)[1], target[1]);
+      assert.deepEqual(point(current, 4), [20 * scale, 5 * scale]);
+      assert.equal(point(current, 15)[1], 5 * scale);
+      assert.deepEqual(
+        solveSketchSnapshot([current]).entities,
+        current.entities,
+      );
+    }
+  }
+});
+
 test('a connected arc center carries an on-arc point before minimizing exterior movement', () => {
   const before = snapshot(
     [
@@ -433,7 +479,7 @@ test('a shared point can translate its arc while acting as a line endpoint in an
 test('a constrained rectangle corner prefers its center while real dimensions remain in force', () => {
   const before = snapshot(rectangle, [
     ...rectangleConstraints,
-    ['length', [6, 20]],
+    ['length', 6, 20],
   ]);
   const moved = solveSketchSnapshot([before], {
     id: 4,

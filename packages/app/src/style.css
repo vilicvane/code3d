@@ -1039,9 +1039,6 @@ kbd {
 #viewport-host:has(.sketch-editor:not([hidden])) .contextual-tool-panel {
   display: none;
 }
-#viewport-host:has(.sketch-editor:not([hidden])) .viewport-feedback-stack {
-  bottom: 48px;
-}
 #viewport-host:has(.sketch-editor:not([hidden])) .viewport-status {
   max-width: calc(100% - 412px);
 }
@@ -1068,6 +1065,62 @@ kbd {
 .sketch-tool-group + .sketch-tool-group {
   padding-left: 8px;
   border-left: 1px solid var(--line);
+}
+.sketch-tool-variants {
+  display: flex;
+}
+.sketch-toolbar .sketch-tool-caret {
+  width: 14px;
+  margin-left: -2px;
+}
+.sketch-tool-caret .ui-icon {
+  width: 12px;
+}
+.sketch-tool-menu {
+  margin: 0;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #181a16;
+  color: inherit;
+  min-width: 172px;
+}
+.sketch-tool-menu:popover-open {
+  display: grid;
+  gap: 2px;
+}
+.sketch-toolbar .sketch-tool-menu button {
+  width: auto;
+  padding: 6px 10px;
+  justify-content: flex-start;
+  gap: 10px;
+  color: inherit;
+}
+.sketch-tool-menu button[aria-checked='true'] {
+  color: var(--acid);
+  background: #d8ff3e12;
+}
+.sketch-constraint-tools {
+  position: absolute;
+  top: 54px;
+  right: 14px;
+  z-index: 1;
+  max-width: calc(100% - 28px);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+.sketch-constraint-tools[hidden] {
+  display: none;
+}
+.sketch-constraint-tools .sketch-toolbar,
+.sketch-constraint-tools .drawing-inputs {
+  position: static;
+  max-width: 100%;
+}
+.sketch-constraint-tools .drawing-input-title {
+  display: none;
 }
 .sketch-editor button {
   display: inline-flex;
@@ -1106,6 +1159,10 @@ kbd {
   border-color: #66752c;
   background: #d8ff3e12;
 }
+
+.sketch-toolbar button[aria-pressed='mixed'] {
+  box-shadow: inset 0 -2px var(--acid);
+}
 .sketch-view-options button[aria-pressed='true'] {
   border-color: transparent;
   background: transparent;
@@ -1113,6 +1170,9 @@ kbd {
 @container (max-width: 540px) {
   .sketch-toolbar {
     top: 58px;
+  }
+  .sketch-constraint-tools {
+    top: 102px;
   }
   #viewport-host:has(.sketch-editor:not([hidden])) .viewport-status {
     max-width: calc(100% - 28px);
@@ -1134,6 +1194,9 @@ kbd {
   border-radius: 3px;
   background: #11120feb;
   pointer-events: none;
+}
+.sketch-editor output[hidden] {
+  display: none;
 }
 .sketch-canvas {
   width: 100%;

@@ -102,7 +102,7 @@ test('hard constraints on an alias apply to its canonical point, including confl
       ['point', 1, [3, 4]],
       ['point', 2, 1],
     ],
-    {constraints: [['x', [2, 7]]]},
+    {constraints: [['x', 2, 7]]},
   );
   const snapshot = snapshotSketch(value, () => 's');
   assert.deepEqual(point(snapshot, 1).position, point(snapshot, 2).position);
@@ -116,8 +116,8 @@ test('hard constraints on an alias apply to its canonical point, including confl
         ],
         {
           constraints: [
-            ['x', [1, 1]],
-            ['x', [2, 2]],
+            ['x', 1, 1],
+            ['x', 2, 2],
           ],
         },
       ),
@@ -211,7 +211,7 @@ test('numeric cleanup cannot turn a nearby mouse target or seed into a changed h
       {
         constraints: [
           ['fixed', 1],
-          ['radius', [4, 15]],
+          ['radius', 4, 15],
         ],
       },
     ),
@@ -238,7 +238,7 @@ test('a fixed-radius endpoint target at the center retains a valid radial seed',
       {
         constraints: [
           ['fixed', 1],
-          ['radius', [4, 7.5]],
+          ['radius', 4, 7.5],
         ],
       },
     ),

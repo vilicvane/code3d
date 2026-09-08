@@ -92,7 +92,7 @@ test('a point on a fixed circle follows its circumference through a half turn an
   const page = await open(
     t,
     `import {sketch} from '@code3d/core';
-const s=sketch([['point',1,[0,0]],['circle',2,[1,10]],['point',3,[10,0]]],{constraints:[['fixed',1],['radius',[2,10]]]});`,
+const s=sketch([['point',1,[0,0]],['circle',2,[1,10]],['point',3,[10,0]]],{constraints:[['fixed',1],['radius',2,10]]});`,
   );
   await page.getByRole('button', {name: 'Snap', exact: true}).click();
   const origin = await center(page, 1),

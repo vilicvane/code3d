@@ -11,11 +11,12 @@ import {
 } from 'lucide';
 import type {SketchConstraintDisplay} from '../tools/sketch-constraints';
 import {createIcon} from './icons';
+import {CoordinateX, CoordinateY} from './sketch-icons';
 
-const icons = {
+export const sketchConstraintIcons = {
   fixed: LockKeyhole,
-  x: LockKeyhole,
-  y: LockKeyhole,
+  x: CoordinateX,
+  y: CoordinateY,
   horizontal: MoveHorizontal,
   vertical: MoveVertical,
   coincident: CircleDot,
@@ -88,7 +89,7 @@ export class SketchConstraints {
           background = svg('rect'),
           text = svg('text'),
           title = svg('title');
-        const icon = createIcon(icons[display.kind]);
+        const icon = createIcon(sketchConstraintIcons[display.kind]);
         icon.setAttribute('x', '3');
         icon.setAttribute('y', '2');
         background.setAttribute('rx', '3');
@@ -116,6 +117,7 @@ export class SketchConstraints {
         });
         // Glyph inspection must not start drawing, moving or trimming underneath.
         root.addEventListener('pointerdown', event => {
+          if (event.button !== 0) return;
           event.stopPropagation();
           event.preventDefault();
         });
@@ -127,7 +129,7 @@ export class SketchConstraints {
         this.guides.append(guides);
       }
       if (badge.display.kind !== display.kind) {
-        const icon = createIcon(icons[display.kind]);
+        const icon = createIcon(sketchConstraintIcons[display.kind]);
         icon.setAttribute('x', '3');
         icon.setAttribute('y', '2');
         badge.icon.replaceWith(icon);

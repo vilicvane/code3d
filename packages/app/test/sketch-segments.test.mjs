@@ -89,7 +89,7 @@ test('trimmed crossing geometry and direction constraints survive fresh compiler
         ['line', 8, [3, 4]],
         ['line', 9, [5, 6]],
       ];
-      const args = `${JSON.stringify(entries)}, {constraints: [['angle', [7, theta]], ['length', [7, 40]]]}`;
+      const args = `${JSON.stringify(entries)}, {constraints: [['angle', 7, theta], ['length', 7, 40]]}`;
       const original = await compile(args, angle);
       const selected = segments(original).find(
         s => s.id === 7 && s.start.t > 0 && s.end.t < 1,
@@ -130,8 +130,8 @@ test('trimmed crossing geometry and direction constraints survive fresh compiler
         ),
       );
       assert.deepEqual(replay.constraints, [
-        ['angle', [11, angle]],
-        ['angle', [13, angle]],
+        ['angle', 11, angle],
+        ['angle', 13, angle],
       ]);
       assert.deepEqual(
         replay.entities
@@ -254,7 +254,7 @@ test('circle-delimited line trim preserves boundary expressions and constraints 
   };
   try {
     const args =
-      "[['point', 1, [-10, 0]], ['point', 2, [10, 0]], ['line', 3, [1, 2]], ['point', 4, [0, 3]], ['circle', 5, [4, r]]], {constraints: [['angle', [3, theta]], ['length', [3, 20]], ['radius', [5, r]]]}";
+      "[['point', 1, [-10, 0]], ['point', 2, [10, 0]], ['line', 3, [1, 2]], ['point', 4, [0, 3]], ['circle', 5, [4, r]]], {constraints: [['angle', 3, theta], ['length', 3, 20], ['radius', 5, r]]}";
     const original = await compile(args);
     const change = trimSketchSegment([original], segments(original)[1]);
     const sourceRef = {file: '/model.ts', start: 0, end: args.length};
@@ -277,7 +277,7 @@ test('circle-delimited line trim preserves boundary expressions and constraints 
     assert.equal(resolved.status, 'ready');
     const text = resolved.plan.edits[0].text;
     assert.ok(text.includes("['circle', 5, [4, r]]"));
-    assert.ok(text.includes("['radius', [5, r]]"));
+    assert.ok(text.includes("['radius', 5, r]"));
     assert.equal(text.match(/theta/g).length, 2);
     assert.doesNotMatch(text, /'length'/);
     const replay = await compile(text);
@@ -413,8 +413,8 @@ test('end trims keep the line ID and remove its length, while complete deletion 
     [point(1, 0, 0), point(2, 40, 0), line(3, 1, 2), point(4, 20, 0)],
     [
       ['horizontal', 3],
-      ['length', [3, 40]],
-      ['angle', [3, 0]],
+      ['length', 3, 40],
+      ['angle', 3, 0],
       ['fixed', ref(1)],
     ],
   );
@@ -441,6 +441,53 @@ test('end trims keep the line ID and remove its length, while complete deletion 
   assert.ok(change.constraintReplacements.every(c => !c.ids.length));
 });
 
+test('multi-interval trim merges adjacent survivors and keeps circle wraparound as one surviving arc', () => {
+  const local = snapshot([
+    point(1, 0, 0),
+    point(2, 10, 0),
+    point(3, 0, 10),
+    point(4, -10, 0),
+    point(5, 0, -10),
+    {kind: 'circle', id: 6, center: ref(1), radius: 10},
+  ]);
+  const picks = sketchSegments(
+    [local],
+    local.entities
+      .filter(e => e.kind === 'point')
+      .map(p => ({...p, layer: 'local'})),
+  );
+  const change = trimSketchSegment([local], [picks[1], picks[2]]);
+  const arcs = change.entries.filter(e => e[0] === 'arc');
+  assert.equal(arcs.length, 1);
+  assert.equal(arcs[0][1], 6);
+  assert.deepEqual(arcs[0][2], [ref(1), 10, ref(3), ref(5), 'cw']);
+  assert.ok(change.ids.includes(4));
+  assert.ok(!change.ids.includes(1));
+  const split = trimSketchSegment([local], [picks[0], picks[2]]);
+  assert.deepEqual(
+    split.entries.filter(e => e[0] === 'arc').map(e => e[1]),
+    [7, 8],
+  );
+});
+
+test('mixed point and interval deletion creates a valid boundary without dangling deleted point references', () => {
+  const local = snapshot([
+    point(1, 0, 0),
+    point(2, 40, 0),
+    point(3, 10, 0),
+    point(4, 20, 0),
+    line(5, 1, 2),
+  ]);
+  const change = trimSketchSegment([local], segments(local)[1], [4]);
+  assert.ok(change.ids.includes(4));
+  assert.ok(change.entries.some(e => e[0] === 'point' && e[2][0] === 20));
+  assert.ok(
+    change.entries
+      .filter(e => e[0] === 'line')
+      .every(e => e[2].every(p => p.id !== 4)),
+  );
+});
+
 test('middle trims retire the original line and allocate two fresh IDs without renumbering points', () => {
   const value = snapshot(
     [
@@ -452,8 +499,8 @@ test('middle trims retire the original line and allocate two fresh IDs without r
     ],
     [
       ['vertical', 5],
-      ['length', [5, 40]],
-      ['angle', [5, 0]],
+      ['length', 5, 40],
+      ['angle', 5, 0],
     ],
   );
   const change = trimSketchSegment([value], segments(value)[1]);
@@ -543,17 +590,17 @@ test('deleting a point prunes newly disconnected line endpoints and their point 
     ],
     [
       ['fixed', ref(1)],
-      ['x', [ref(2), 20]],
-      ['y', [ref(2), 0]],
+      ['x', ref(2), 20],
+      ['y', ref(2), 0],
       ['coincident', [ref(1), ref(2)]],
       ['midpoint', [ref(8), ref(1), ref(4)]],
       ['horizontal', 5],
       ['vertical', 6],
-      ['length', [5, 20]],
-      ['angle', [6, 90]],
+      ['length', 5, 20],
+      ['angle', 6, 90],
       ['fixed', ref(3)],
       ['horizontal', 7],
-      ['x', [ref(8), 70]],
+      ['x', ref(8), 70],
     ],
   );
   assert.deepEqual(deleteSketchEntity([value], 1), {

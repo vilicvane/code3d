@@ -75,7 +75,7 @@ test('T-junction motion retains the line incidence together with the connected l
     [
       ['horizontal', 3],
       ['vertical', 6],
-      ['length', [6, 10]],
+      ['length', 6, 10],
     ],
   );
   let previous = initial;

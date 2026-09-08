@@ -99,7 +99,9 @@ export function solveSketchDragPlan(plan: SketchDragPlan): SketchSolveResult {
   for (const stage of plan.stages) {
     const objectives = stage(problem);
     if (result && !objectives.length) continue;
-    const solved = solveSketchProblem(problem, objectives);
+    // Stage output is an iterative seed, not a new authored exact value.
+    // Otherwise cleanup can undo a later hard solve to restore an earlier tail.
+    const solved = solveSketchProblem(problem, objectives, plan.problem);
     result = solved;
     const points = new Set(
       objectives.filter(o => o.kind === 'point').map(o => o.point),
@@ -453,7 +455,7 @@ function pointSession(
               ...anchor(reference, p),
               position: reference.points[p].position.map(
                 (v, axis) =>
-                  v + reached.points[target.point].position[axis] - from[axis],
+                  v - from[axis] + reached.points[target.point].position[axis],
               ) as [number, number],
             })),
           ...translations.flatMap(p => p.radii),

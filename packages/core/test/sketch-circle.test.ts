@@ -56,7 +56,7 @@ test('radius constraints solve the current value without changing the authored s
       ['point', 1, [20, 30]],
       ['circle', 2, [1, 15]],
     ],
-    {constraints: [['radius', [2, 8]]]},
+    {constraints: [['radius', 2, 8]]},
   );
   const view = snapshot(value);
   near(circle(view).radius, 8);
@@ -108,10 +108,10 @@ test('radius normalization covers translated tiny and large circles and retains 
         ['point', 1, [100 * size, -20 * size]],
         ['circle', 2, [1, size]],
       ],
-      {constraints: [['radius', [2, size * 2]]]},
+      {constraints: [['radius', 2, size * 2]]},
     );
     const child = base.derive([['circle', 2, [base.point(1), size * 3]]], {
-      constraints: [['radius', [2, size * 4]]],
+      constraints: [['radius', 2, size * 4]],
     });
     const upstream = snapshot(base),
       local = snapshot(child);
@@ -126,8 +126,8 @@ test('matching constant equations do not conflict with a mouse goal on another f
   for (const constraints of [
     [['fixed', 1]],
     [
-      ['x', [1, 3]],
-      ['y', [1, 4]],
+      ['x', 1, 3],
+      ['y', 1, 4],
     ],
   ] as const) {
     const view = snapshot(
@@ -162,7 +162,7 @@ test('matching constant equations do not conflict with a mouse goal on another f
         ['point', 1, [3, 4]],
         ['circle', 2, [1, 5]],
       ],
-      {constraints: [['radius', [2, 5]]]},
+      {constraints: [['radius', 2, 5]]},
     ),
   );
   const result = solveSketchSnapshot([view], {
@@ -187,8 +187,8 @@ test('radius conflicts and invalid circles remain located hard failures', () => 
     () =>
       sketch(entries, {
         constraints: [
-          ['radius', [2, 10]],
-          ['radius', [2, 11]],
+          ['radius', 2, 10],
+          ['radius', 2, 11],
         ],
       }),
     SketchConstraintError,
@@ -196,8 +196,8 @@ test('radius conflicts and invalid circles remain located hard failures', () => 
   const redundant = snapshot(
     sketch(entries, {
       constraints: [
-        ['radius', [2, 10]],
-        ['radius', [2, 10]],
+        ['radius', 2, 10],
+        ['radius', 2, 10],
       ],
     }),
   );
@@ -213,10 +213,10 @@ test('radius conflicts and invalid circles remain located hard failures', () => 
     );
   assert.throws(() => sketch([['circle', 2, [1, 10]]]), /missing local point/);
   assert.throws(
-    () => sketch(entries, {constraints: [['radius', [1, 10]]]}),
+    () => sketch(entries, {constraints: [['radius', 1, 10]]}),
     /missing local circular curve/,
   );
-  const view = snapshot(sketch(entries, {constraints: [['radius', [2, 10]]]}));
+  const view = snapshot(sketch(entries, {constraints: [['radius', 2, 10]]}));
   assert.throws(
     () =>
       solveSketchSnapshot([view], {

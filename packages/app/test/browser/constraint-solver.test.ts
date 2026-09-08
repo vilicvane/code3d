@@ -101,7 +101,7 @@ for (const installed of [false, true] as const) {
           const sketchModule =
             await compile(`import {sketch} from '@code3d/core';
             const value = sketch([['point', 1, [0,0]], ['point', 2, [38,2]], ['line', 3, [1,2]]],
-              {constraints: [['horizontal', 3], ['length', [3, 40]]]});`);
+              {constraints: [['horizontal', 3], ['length', 3, 40]]});`);
           const sketch = [...sketchModule.sketches.values()][0];
           const gesture: import('../../src/model/sketch-drag.ts').SketchDrag = {
             id: 2,

@@ -1,0 +1,233 @@
+import {
+  sketchCurveGeometry,
+  sketchPointResolver,
+  sketchEntityParameters,
+  type SketchConstraint,
+  type SketchPointAddress,
+  type SketchSnapshot,
+} from '@code3d/core/tooling';
+import type {DrawingDimension} from './drawing-dimensions';
+import type {
+  SketchEditableParameters,
+  SketchGeometryData,
+} from '../model/sketch-drag';
+import type {SketchChange} from './sketch-source';
+import type {SketchSegment} from './sketch-segments';
+import {sameSketchPoint} from './sketch-snap';
+
+export type SketchPick = SketchPointAddress | SketchSegment;
+type Constraint = SketchConstraint<SketchPointAddress>;
+export type SketchConstraintAction = Readonly<{
+  kind: Constraint[0];
+  name: string;
+  title: string;
+  disabled: boolean;
+  active: boolean | 'mixed';
+  dimension?: DrawingDimension;
+  value?: number;
+  create(value?: number): Extract<SketchChange, {kind: 'constrain'}>;
+}>;
+
+/** Applicability follows authored entities; a picked trim interval is not a new line ID. */
+export function sketchConstraintActions(
+  layers: readonly SketchSnapshot[],
+  selection: readonly SketchPick[],
+  editable: SketchEditableParameters,
+  referenceable: ReadonlySet<string>,
+  data: readonly SketchGeometryData[],
+): SketchConstraintAction[] {
+  if (!selection.length) return [];
+  const local = layers.at(-1)!;
+  const resolve = sketchPointResolver(layers);
+  const entity = (p: SketchPointAddress) =>
+    layers.find(l => l.id === p.layer)!.entities.find(e => e.id === p.id)!;
+  const position = (p: SketchPointAddress) => {
+    const e = entity(p);
+    if (e.kind !== 'point') throw new Error('Expected a selected point.');
+    return e.position;
+  };
+  const points = selection
+    .filter(p => !('start' in p))
+    .map(resolve)
+    .filter((p, i, all) => all.findIndex(q => sameSketchPoint(p, q)) === i);
+  const curves = selection
+    .filter((p): p is SketchSegment => 'start' in p)
+    .filter((p, i, all) => all.findIndex(q => sameSketchPoint(p, q)) === i);
+  if (
+    points.some(p => p.layer !== local.id && !referenceable.has(p.layer)) ||
+    curves.some(p => p.layer !== local.id)
+  )
+    return [];
+  const actions: SketchConstraintAction[] = [];
+  const identity = ([kind, data]: Constraint): string => {
+    const key = (p: SketchPointAddress) => JSON.stringify(resolve(p));
+    if (kind === 'fixed') return `${kind}:${key(data)}`;
+    if (kind === 'coincident')
+      return `${kind}:${data.map(key).sort().join(':')}`;
+    if (kind === 'midpoint')
+      return `${kind}:${key(data[0])}:${data.slice(1).map(key).sort().join(':')}`;
+    if (kind === 'x' || kind === 'y') return `${kind}:${key(data)}`;
+    return `${kind}:${data}`;
+  };
+  const existing = new Set(local.constraints.map(identity));
+  const add = (
+    kind: Constraint[0],
+    name: string,
+    constraints: (value: number) => Constraint[],
+    dimension?: DrawingDimension,
+    value = 0,
+  ) => {
+    const pending = (value: number) =>
+      constraints(value).filter(c => !existing.has(identity(c)));
+    const targets = pending(value);
+    const active = !targets.length
+      ? true
+      : targets.length < constraints(value).length
+        ? 'mixed'
+        : false;
+    const mismatch =
+      kind === 'fixed' &&
+      targets.some(
+        ([kind, ref]) =>
+          kind === 'fixed' &&
+          data
+            .find(p => p.id === ref.id)!
+            .parameters.some(
+              (value, axis) =>
+                !editable.get(ref.id)?.[axis] && value !== position(ref)[axis],
+            ),
+      );
+    const disabled = mismatch;
+    actions.push({
+      kind,
+      name,
+      dimension,
+      value,
+      disabled,
+      active,
+      title: `${active === true ? 'Remove' : 'Add'} ${name}${curves.length ? ' · Applies to whole source entities' : ''}${mismatch ? ' · The displayed expression coordinate differs from its source value; use X/Y constraints' : active === 'mixed' ? ' · Apply to remaining selected entities' : ''}`,
+      create: (entered = value) => {
+        if (active === true) {
+          const targets = new Set(constraints(entered).map(identity));
+          return {
+            kind: 'constrain',
+            constraints: [],
+            removedConstraints: local.constraints.flatMap((c, i) =>
+              targets.has(identity(c)) ? [i] : [],
+            ),
+            // Removing a relation releases the displayed geometry; it must not
+            // restore an old unsolved seed. Expressions remain source-owned.
+            data: data
+              .filter(p => editable.get(p.id)?.some(Boolean))
+              .map(p => ({
+                id: p.id,
+                parameters: p.parameters.map((value, axis) =>
+                  editable.get(p.id)?.[axis]
+                    ? sketchEntityParameters(
+                        entity({layer: local.id, id: p.id}),
+                      )[axis]
+                    : value,
+                ),
+              })),
+          };
+        }
+        const additions = pending(entered);
+        // Fixed captures the displayed position, not an unsolved source seed.
+        // Write only literal axes; expressions and point aliases remain authored.
+        const fixedData = additions.flatMap(([kind, ref]) =>
+          kind === 'fixed' &&
+          ref.layer === local.id &&
+          editable.get(ref.id)?.some(Boolean)
+            ? [{id: ref.id, parameters: position(ref)}]
+            : [],
+        );
+        return {kind: 'constrain', constraints: additions, data: fixedData};
+      },
+    });
+  };
+  if (points.length && !curves.length) {
+    const owned = points.filter(p => p.layer === local.id);
+    if (owned.length) {
+      add('fixed', 'Fixed', () => owned.map(p => ['fixed', p]));
+      for (const [axis, index] of [
+        ['x', 0],
+        ['y', 1],
+      ] as const)
+        add(
+          axis,
+          axis.toUpperCase(),
+          value => owned.map(p => [axis, p, value]),
+          {id: axis, label: axis.toUpperCase()},
+          position(owned[0])[index],
+        );
+    }
+    if (points.length === 2 && owned.length)
+      add('coincident', 'Coincident', () => [
+        ['coincident', [points[0], points[1]]],
+      ]);
+  }
+  const lines = curves.filter(p => entity(p).kind === 'line');
+  if (points.length === 1 && lines.length === 1 && curves.length === 1) {
+    const line = entity(lines[0]);
+    if (
+      line.kind === 'line' &&
+      !line.points.some(p => sameSketchPoint(resolve(p), points[0]))
+    )
+      add('midpoint', 'Midpoint', () => [
+        ['midpoint', [points[0], ...line.points]],
+      ]);
+  }
+  if (points.length || !curves.length) return actions;
+  if (lines.length === curves.length) {
+    for (const kind of ['horizontal', 'vertical'] as const)
+      add(kind, kind === 'horizontal' ? 'Horizontal' : 'Vertical', () =>
+        lines.map(p => [kind, p.id]),
+      );
+    const line = entity(lines[0]);
+    if (line.kind === 'line') {
+      const [a, b] = line.points.map(position);
+      add(
+        'length',
+        'Length',
+        value => lines.map(p => ['length', p.id, value]),
+        {id: 'length', label: 'Length', positive: true},
+        Math.hypot(b[0] - a[0], b[1] - a[1]),
+      );
+      add(
+        'angle',
+        'Angle',
+        value => lines.map(p => ['angle', p.id, value]),
+        {id: 'angle', label: 'Angle', unit: '°'},
+        (Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI,
+      );
+    }
+  } else if (!lines.length) {
+    const first = entity(curves[0]);
+    if (first.kind === 'circle' || first.kind === 'arc')
+      add(
+        'radius',
+        'Radius',
+        value => curves.map(p => ['radius', p.id, value]),
+        {id: 'radius', label: 'Radius', positive: true},
+        first.radius,
+      );
+    if (curves.every(p => entity(p).kind === 'arc')) {
+      const geometry = sketchCurveGeometry(first, position)!;
+      if (geometry.kind === 'arc')
+        add(
+          'sweep',
+          'Sweep',
+          value => curves.map(p => ['sweep', p.id, value]),
+          {
+            id: 'sweep',
+            label: 'Sweep',
+            unit: '°',
+            positive: true,
+            exclusiveMaximum: 360,
+          },
+          (Math.abs(geometry.sweep) * 180) / Math.PI,
+        );
+    }
+  }
+  return actions;
+}

@@ -6,7 +6,7 @@ import {open, point, text, waitForSource} from './sketch-test.ts';
 const arc = (page: Page, id = 4) =>
   page.locator(`.sketch-canvas path.local[data-kind="arc"][data-id="${id}"]`);
 const source = (direction = 'ccw') =>
-  `import {sketch} from '@code3d/core';\nconst width = 0;\nconst value = sketch([['point', 1, [width, 0]], ['point', 2, [10, 0]], ['point', 3, [0, 10]], ['arc', 4, [1, 10, 2, 3, '${direction}']]], {constraints: [['fixed', 1], ['radius', [4, 10]]]});`;
+  `import {sketch} from '@code3d/core';\nconst width = 0;\nconst value = sketch([['point', 1, [width, 0]], ['point', 2, [10, 0]], ['point', 3, [0, 10]], ['arc', 4, [1, 10, 2, 3, '${direction}']]], {constraints: [['fixed', 1], ['radius', 4, 10]]});`;
 
 const arcRadius = async (page: Page) =>
   Number((await arc(page).getAttribute('d'))!.split(' A ')[1].split(' ')[0]);
@@ -93,7 +93,7 @@ test('arc sweep input validates its open range, reverses direction without chang
   );
   await page.keyboard.press('Enter');
   await arc(page).waitFor();
-  await waitForSource(page, /'sweep',\s*\[4,\s*270\]/);
+  await waitForSource(page, /'sweep',\s*4,\s*270/);
   await waitForSource(page, /'arc',\s*4,\s*\[1,\s*10,\s*2,\s*3,\s*'cw'\]/);
   const badge = page.locator('.constraint-badge[data-kind="sweep"]');
   await badge.hover();
@@ -118,8 +118,8 @@ test('sweep-constrained arc drag rotates its start too, preserving major directi
   const page = await open(
     t,
     source('cw').replace(
-      "['radius', [4, 10]]",
-      "['radius', [4, 10]], ['sweep', [4, 270]]",
+      "['radius', 4, 10]",
+      "['radius', 4, 10], ['sweep', 4, 270]",
     ),
   );
   await page.getByRole('button', {name: 'Snap', exact: true}).click();
@@ -157,7 +157,7 @@ test('sweep-constrained arc drag rotates its start too, preserving major directi
     );
   }
   assert.match((await arc(page).getAttribute('d'))!, / 0 1 1 /);
-  assert.match(await text(page), /'sweep',\s*\[4,\s*270\]/);
+  assert.match(await text(page), /'sweep',\s*4,\s*270/);
   await page.keyboard.press('Control+z');
   await page.waitForFunction(() => {
     const c = document.querySelector('.sketch-canvas circle[data-id="1"]'),
@@ -196,7 +196,7 @@ test('arc tool creates center/start/end with numeric radius, reverses the previe
   await page.keyboard.press('Enter');
   await arc(page).waitFor();
   await waitForSource(page, /'arc',\s*4,\s*\[1,\s*10,\s*2,\s*3,\s*'ccw'\]/);
-  await waitForSource(page, /'radius',\s*\[4,\s*10\]/);
+  await waitForSource(page, /'radius',\s*4,\s*10/);
   await page.keyboard.press('Escape');
   await page.keyboard.press('Control+z');
   await arc(page).waitFor({state: 'detached'});

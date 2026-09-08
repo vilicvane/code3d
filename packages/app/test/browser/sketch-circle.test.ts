@@ -49,7 +49,7 @@ test('numeric circles use analytic previews, native input history and one atomic
   assert.equal(await field(page, 'Radius').inputValue(), '12');
   await page.keyboard.press('Enter');
   await circle(page, 2).waitFor();
-  await waitForSource(page, /'radius',\s*\[2,\s*12\]/);
+  await waitForSource(page, /'radius',\s*2,\s*12/);
   assert.equal(
     await page
       .locator('.sketch-canvas circle.local[data-kind="point"]')
@@ -118,7 +118,7 @@ test('free radius drags survive recompilation and undo; deleting the circle clea
 
 test('hard radius and expression radius remain unchanged while their centers can move', async t => {
   for (const [data, options] of [
-    ['10', ", {constraints: [['radius', [2, 10]]]}"],
+    ['10', ", {constraints: [['radius', 2, 10]]}"],
     ['size', ''],
   ]) {
     const page = await open(

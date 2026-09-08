@@ -68,9 +68,10 @@ export type SketchConstraint<P = number | SketchPoint> =
     ]
   | readonly [
       kind: 'length' | 'angle' | 'radius' | 'sweep',
-      data: readonly [curve: number, value: number],
+      curve: number,
+      value: number,
     ]
-  | readonly [kind: 'x' | 'y', data: readonly [point: P, value: number]];
+  | readonly [kind: 'x' | 'y', point: P, value: number];
 
 export type SketchOptions = Readonly<{
   constraints?: readonly SketchConstraint[];
@@ -222,7 +223,7 @@ class SketchValue implements Sketch {
         );
     };
     const constraints = (options?.constraints ?? []).map<SketchConstraint>(
-      ([kind, data]) => {
+      ([kind, data, value]) => {
         if (kind === 'fixed') {
           pointRef(data);
           return [kind, data];
@@ -251,26 +252,26 @@ class SketchValue implements Sketch {
           kind === 'radius' ||
           kind === 'sweep'
         ) {
-          if (kind === 'x' || kind === 'y') pointRef(data[0]);
+          if (kind === 'x' || kind === 'y') pointRef(data);
           else
             curveRef(
-              data[0] as number,
+              data as number,
               kind === 'radius'
                 ? 'circular curve'
                 : kind === 'sweep'
                   ? 'arc'
                   : 'line',
             );
-          if (kind === 'sweep' && !(data[1] > 0 && data[1] < 360))
+          if (kind === 'sweep' && !(value > 0 && value < 360))
             throw new Error(
               'Sketch sweep constraint requires degrees strictly between 0 and 360.',
             );
           const positive = kind === 'length' || kind === 'radius';
-          if (!Number.isFinite(data[1]) || (positive && data[1] <= 0))
+          if (!Number.isFinite(value) || (positive && value <= 0))
             throw new Error(
               `Sketch ${kind} constraint requires ${positive ? 'a positive' : 'a'} finite value.`,
             );
-          return [kind, [data[0], data[1]]] as SketchConstraint;
+          return [kind, data, value] as SketchConstraint;
         }
         throw new Error(`Unknown sketch constraint ${kind}.`);
       },
@@ -570,7 +571,7 @@ function snapshotConstraints(
   identity: (sketch: Sketch) => string,
 ): SketchSnapshot['constraints'] {
   const point = pointAddress(id, identity);
-  return constraints.map(([kind, data]) => {
+  return constraints.map(([kind, data, value]) => {
     switch (kind) {
       case 'fixed':
         return [kind, point(data)];
@@ -580,7 +581,7 @@ function snapshotConstraints(
         return [kind, [point(data[0]), point(data[1]), point(data[2])]];
       case 'x':
       case 'y':
-        return [kind, [point(data[0]), data[1]]];
+        return [kind, point(data), value];
       case 'horizontal':
       case 'vertical':
         return [kind, data];
@@ -588,7 +589,7 @@ function snapshotConstraints(
       case 'angle':
       case 'radius':
       case 'sweep':
-        return [kind, data];
+        return [kind, data, value];
     }
   });
 }
@@ -710,7 +711,7 @@ export function solveSketchSnapshot(
   const arcIndex = (id: number) =>
     arcs.findIndex(a => a.id === id && a.layer === local.id);
   const constraints = local.constraints.map<SketchSolveConstraint>(
-    ([kind, data]) => {
+    ([kind, data, value]) => {
       switch (kind) {
         case 'fixed': {
           const point = pointIndex(data);
@@ -718,7 +719,7 @@ export function solveSketchSnapshot(
         }
         case 'x':
         case 'y':
-          return {kind, point: pointIndex(data[0]), value: data[1]};
+          return {kind, point: pointIndex(data), value};
         case 'horizontal':
         case 'vertical':
           return {kind, points: linePoints(data)};
@@ -735,26 +736,26 @@ export function solveSketchSnapshot(
           };
         case 'length':
         case 'angle':
-          return {kind, points: linePoints(data[0]), value: data[1]};
+          return {kind, points: linePoints(data), value};
         case 'radius':
-          return arcIndex(data[0]) >= 0
+          return arcIndex(data) >= 0
             ? {
                 kind,
                 curve: 'arc',
-                index: arcIndex(data[0]),
-                value: data[1],
+                index: arcIndex(data),
+                value,
               }
             : {
                 kind,
                 curve: 'circle',
-                index: circleIndex(data[0]),
-                value: data[1],
+                index: circleIndex(data),
+                value,
               };
         case 'sweep':
           return {
             kind,
-            index: arcIndex(data[0]),
-            value: data[1],
+            index: arcIndex(data),
+            value,
           };
       }
     },

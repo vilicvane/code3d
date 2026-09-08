@@ -2,6 +2,7 @@ import type {GcsSystem, ModuleStatic} from '@salusoft89/planegcs';
 import type {SketchArcDirection, SketchPosition} from './sketch.js';
 import {sketchArcGeometry} from './sketch-curves.js';
 import {pointLineDistance} from './sketch-incidence.js';
+import {SketchPrecision} from './sketch-precision.js';
 
 /** Evaluation-local numeric indices, never author entity or constraint IDs. */
 export type SketchSolveConstraint =
@@ -95,9 +96,11 @@ export type SketchSolveObjective = SketchSolveTarget &
 export function solveSketchProblem(
   problem: SketchSolveProblem,
   objectives: readonly SketchSolveObjective[] = [],
+  preferredGeometry: SketchSolveProblem = problem,
 ): SketchSolveResult {
-  const authored = problem;
-  problem = initializeArcEndpoints(problem);
+  const authored = preferredGeometry;
+  const precision = new SketchPrecision(problem);
+  problem = initializeArcEndpoints(problem, precision);
   const {constraints, points} = problem;
   if (!points.length)
     return {
@@ -145,18 +148,7 @@ export function solveSketchProblem(
         ),
       redundant: [],
     };
-  const origin = points[0].position;
-  const scale =
-    Math.max(
-      ...points.flatMap(p =>
-        p.position.map((v, axis) => Math.abs(v - origin[axis])),
-      ),
-      ...problem.circles.map(c => c.radius),
-      ...problem.arcs.map(a => a.radius),
-      ...constraints.flatMap(c =>
-        c.kind === 'length' || c.kind === 'radius' ? [c.value] : [],
-      ),
-    ) || 1;
+  const {origin, scale} = precision;
   const normalized = (p: SketchPosition): SketchPosition => [
     (p[0] - origin[0]) / scale,
     (p[1] - origin[1]) / scale,
@@ -166,7 +158,7 @@ export function solveSketchProblem(
   try {
     gcs.set_debug_mode(0);
     gcs.set_max_iterations(100);
-    gcs.set_covergence_threshold(1e-10);
+    gcs.set_covergence_threshold(precision.convergence);
     const indices = points.map(p =>
       normalized(p.position).map((v, axis) =>
         gcs.push_p_param(v, p.locked[axis]),
@@ -241,7 +233,10 @@ export function solveSketchProblem(
       tag: number,
       normalization = scale,
     ) => {
-      if (Math.abs(actual - expected) / normalization > 1e-7)
+      if (
+        Math.abs(actual - expected) / normalization >
+        precision.nativeAcceptance
+      )
         throw new SketchConstraintError(
           [tag - 1],
           `Could not satisfy sketch constraints (${tag}). A locked geometry parameter contradicts the constraint.`,
@@ -559,7 +554,8 @@ export function solveSketchProblem(
     // Success nor Converged alone is our acceptance criterion: verify all hard
     // equations independently, in normalized geometry units.
     const unsatisfied = constraints.flatMap((c, i) =>
-      residual(c, positions, radii, arcRadii, problem.arcs, scale) <= 1e-7
+      residual(c, positions, radii, arcRadii, problem.arcs, scale) <=
+      precision.nativeAcceptance
         ? []
         : [i],
     );
@@ -576,7 +572,7 @@ export function solveSketchProblem(
               ) - arcRadii[i],
             ) /
               scale >
-            1e-7,
+            precision.nativeAcceptance,
         )
       )
         throw new SketchConstraintError(
@@ -595,6 +591,7 @@ export function solveSketchProblem(
         {positions, radii, arcRadii},
         authored,
         objectives,
+        precision,
       ),
       degreesOfFreedom: gcs.dof(),
       redundant: [
@@ -626,45 +623,9 @@ function cleanSolution(
   result: Geometry,
   authored: SketchSolveProblem,
   objectives: readonly SketchSolveObjective[],
+  precision: SketchPrecision,
 ): Geometry {
-  const pointScales = problem.points.map((point, index) => {
-    const sizes = [
-      ...problem.lines
-        .filter(line => line.includes(index))
-        .map(([a, b]) =>
-          Math.hypot(
-            ...problem.points[a].position.map(
-              (v, axis) => v - problem.points[b].position[axis],
-            ),
-          ),
-        ),
-      ...problem.circles.filter(c => c.center === index).map(c => c.radius),
-      ...problem.arcs
-        .filter(a => a.center === index || a.points.includes(index))
-        .map(a => a.radius),
-    ].filter(size => size > 0);
-    return sizes.length
-      ? Math.min(...sizes)
-      : Math.max(...point.position.map(Math.abs)) || 1;
-  });
-  const clean = (
-    value: number,
-    scale: number,
-    preferred: readonly number[],
-  ) => {
-    const tolerance = Math.max(
-      scale * 1e-11,
-      Math.abs(value) * Number.EPSILON * 8,
-    );
-    for (const target of preferred)
-      if (Math.abs(target - value) <= tolerance) return target;
-    if (Math.abs(value) <= tolerance) return 0;
-    for (let digits = 1; digits < 16; digits++) {
-      const rounded = Number(value.toPrecision(digits));
-      if (Math.abs(rounded - value) <= tolerance) return rounded;
-    }
-    return value;
-  };
+  const {pointScales} = precision;
   const coordinate = (index: number, axis: number, value: number) => {
     if (problem.points[index].locked[axis]) return value;
     const fixed = problem.constraints.find(
@@ -674,7 +635,7 @@ function cleanSolution(
     );
     if (fixed?.kind === 'fixed') return fixed.position[axis];
     if (fixed?.kind === 'x' || fixed?.kind === 'y') return fixed.value;
-    return clean(value, pointScales[index], [
+    return precision.clean(value, pointScales[index], [
       ...objectives
         .filter(o => o.kind === 'point')
         .filter(o => o.point === index)
@@ -689,7 +650,7 @@ function cleanSolution(
       c => c.kind === 'radius' && c.curve === curve && c.index === index,
     );
     if (dimension?.kind === 'radius') return dimension.value;
-    return clean(value, value, [
+    return precision.clean(value, value, [
       (curve === 'circle' ? authored.circles : authored.arcs)[index].radius,
     ]);
   };
@@ -721,7 +682,7 @@ function cleanSolution(
           candidate.arcRadii,
           problem.arcs,
           scale,
-        ) <= 1e-10
+        ) <= precision.relative
       );
     }) &&
     problem.arcs.every(
@@ -737,8 +698,7 @@ function cleanSolution(
                   (v, axis) => v - candidate.positions[arc.center][axis],
                 ),
               ) - candidate.arcRadii[i],
-            ) <=
-            arc.radius * 1e-10,
+            ) <= precision.tolerance(arc.radius, candidate.arcRadii[i]),
         ),
     ) &&
     problem.lines.every(([a, b]) =>
@@ -758,6 +718,7 @@ function cleanSolution(
  */
 function initializeArcEndpoints(
   problem: SketchSolveProblem,
+  precision: SketchPrecision,
 ): SketchSolveProblem {
   if (!problem.arcs.length) return problem;
   // An explicit radius already determines this scalar. Start there rather than
@@ -784,6 +745,10 @@ function initializeArcEndpoints(
         throw new Error(
           'Sketch arcs require a nonzero radius and distinct endpoints; use circle for a full circle.',
         );
+      // Already valid current geometry is a seed, not an instruction to
+      // re-project rounded solver output on every forward compilation.
+      if (Math.abs(length - arc.radius) <= precision.tolerance(arc.radius))
+        continue;
       proposals[index].push([
         center[0] + (dx / length) * arc.radius,
         center[1] + (dy / length) * arc.radius,

@@ -29,109 +29,113 @@ export function sketchConstraintDisplays(
     points.find(p => sameSketchPoint(p, address))!;
   const number = (value: number) => String(Number(value.toPrecision(6)));
   return layers.flatMap(layer =>
-    layer.constraints.map(([kind, data], index): SketchConstraintDisplay => {
-      let related: readonly SketchPoint[],
-        curve: SketchPointAddress | undefined;
-      let curveAnchor: SketchPosition | undefined;
-      let guides: SketchConstraintDisplay['guides'] | undefined;
-      let label = '',
-        title: string = kind;
-      switch (kind) {
-        case 'fixed':
-          related = [point(data)];
-          title = 'Fixed';
-          break;
-        case 'x':
-        case 'y':
-          related = [point(data[0])];
-          label = `${kind.toUpperCase()}=${number(data[1])}`;
-          title = `Coordinate ${kind.toUpperCase()}=${data[1]}`;
-          break;
-        case 'coincident':
-        case 'midpoint':
-          related = data.map(point);
-          title =
-            kind === 'midpoint'
-              ? 'Midpoint (center, start, end)'
-              : 'Coincident';
-          break;
-        case 'radius': {
-          const circle = layer.entities
-            .filter(e => e.kind === 'circle' || e.kind === 'arc')
-            .find(e => e.id === data[0])!;
-          const center = point(circle.center);
-          related = [center];
-          curve = {layer: layer.id, id: circle.id};
-          curveAnchor = sketchCurvePosition(
-            sketchCurveGeometry(circle, ref => point(ref).position),
-            circle.kind === 'circle' ? 1 / 8 : 1 / 2,
-          );
-          label = `R${number(data[1])}`;
-          title = `Radius ${data[1]} · ${circle.kind} ${circle.id}`;
-          guides = [[center.position, curveAnchor]];
-          break;
-        }
-        case 'sweep': {
-          const arc = layer.entities
-            .filter(e => e.kind === 'arc')
-            .find(e => e.id === data[0])!;
-          related = [point(arc.center), ...arc.points.map(point)];
-          curve = {layer: layer.id, id: arc.id};
-          curveAnchor = sketchCurvePosition(
-            sketchCurveGeometry(arc, ref => point(ref).position),
-            1 / 2,
-          );
-          label = `${number(data[1])}°`;
-          title = `Sweep ${data[1]}° · ${arc.direction.toUpperCase()} · arc ${arc.id}`;
-          guides = related.slice(1).map(p => [related[0].position, p.position]);
-          break;
-        }
-        case 'horizontal':
-        case 'vertical':
-        case 'length':
-        case 'angle': {
-          const id = typeof data === 'number' ? data : data[0];
-          const entity = layer.entities
-            .filter(e => e.kind === 'line')
-            .find(e => e.id === id)!;
-          related = entity.points.map(point);
-          curve = {layer: layer.id, id};
-          if (typeof data === 'number')
-            title = kind === 'horizontal' ? 'Horizontal' : 'Vertical';
-          else {
-            label = `${number(data[1])}${kind === 'angle' ? '°' : ''}`;
-            title = `${kind === 'length' ? 'Length' : 'Angle'} ${data[1]}${kind === 'angle' ? '°' : ''}`;
+    layer.constraints.map(
+      ([kind, data, value], index): SketchConstraintDisplay => {
+        let related: readonly SketchPoint[],
+          curve: SketchPointAddress | undefined;
+        let curveAnchor: SketchPosition | undefined;
+        let guides: SketchConstraintDisplay['guides'] | undefined;
+        let label = '',
+          title: string = kind;
+        switch (kind) {
+          case 'fixed':
+            related = [point(data)];
+            title = 'Fixed';
+            break;
+          case 'x':
+          case 'y':
+            related = [point(data)];
+            label = `${kind.toUpperCase()}=${number(value)}`;
+            title = `Coordinate ${kind.toUpperCase()}=${value}`;
+            break;
+          case 'coincident':
+          case 'midpoint':
+            related = data.map(point);
+            title =
+              kind === 'midpoint'
+                ? 'Midpoint (center, start, end)'
+                : 'Coincident';
+            break;
+          case 'radius': {
+            const circle = layer.entities
+              .filter(e => e.kind === 'circle' || e.kind === 'arc')
+              .find(e => e.id === data)!;
+            const center = point(circle.center);
+            related = [center];
+            curve = {layer: layer.id, id: circle.id};
+            curveAnchor = sketchCurvePosition(
+              sketchCurveGeometry(circle, ref => point(ref).position),
+              circle.kind === 'circle' ? 1 / 8 : 1 / 2,
+            );
+            label = `R${number(value)}`;
+            title = `Radius ${value} · ${circle.kind} ${circle.id}`;
+            guides = [[center.position, curveAnchor]];
+            break;
           }
-          title += ` · line ${id}`;
-          break;
+          case 'sweep': {
+            const arc = layer.entities
+              .filter(e => e.kind === 'arc')
+              .find(e => e.id === data)!;
+            related = [point(arc.center), ...arc.points.map(point)];
+            curve = {layer: layer.id, id: arc.id};
+            curveAnchor = sketchCurvePosition(
+              sketchCurveGeometry(arc, ref => point(ref).position),
+              1 / 2,
+            );
+            label = `${number(value)}°`;
+            title = `Sweep ${value}° · ${arc.direction.toUpperCase()} · arc ${arc.id}`;
+            guides = related
+              .slice(1)
+              .map(p => [related[0].position, p.position]);
+            break;
+          }
+          case 'horizontal':
+          case 'vertical':
+          case 'length':
+          case 'angle': {
+            const id = data;
+            const entity = layer.entities
+              .filter(e => e.kind === 'line')
+              .find(e => e.id === id)!;
+            related = entity.points.map(point);
+            curve = {layer: layer.id, id};
+            if (value === undefined)
+              title = kind === 'horizontal' ? 'Horizontal' : 'Vertical';
+            else {
+              label = `${number(value)}${kind === 'angle' ? '°' : ''}`;
+              title = `${kind === 'length' ? 'Length' : 'Angle'} ${value}${kind === 'angle' ? '°' : ''}`;
+            }
+            title += ` · line ${id}`;
+            break;
+          }
         }
-      }
-      title += ` · ${related.map(p => `point ${p.id}${p.layer === layer.id ? '' : ' (upstream)'}`).join(', ')}`;
-      const anchor: SketchPosition =
-        curveAnchor ??
-        (curve
-          ? [
-              (related[0].position[0] + related[1].position[0]) / 2,
-              (related[0].position[1] + related[1].position[1]) / 2,
-            ]
-          : related[0].position);
-      return {
-        key: JSON.stringify([layer.id, index]),
-        layer: layer.id,
-        kind,
-        label,
-        title,
-        anchor,
-        points: related,
-        curve,
-        guides:
-          guides ??
-          (!curve && related.length > 1
-            ? related
-                .slice(1)
-                .map(p => [related[0].position, p.position] as const)
-            : []),
-      };
-    }),
+        title += ` · ${related.map(p => `point ${p.id}${p.layer === layer.id ? '' : ' (upstream)'}`).join(', ')}`;
+        const anchor: SketchPosition =
+          curveAnchor ??
+          (curve
+            ? [
+                (related[0].position[0] + related[1].position[0]) / 2,
+                (related[0].position[1] + related[1].position[1]) / 2,
+              ]
+            : related[0].position);
+        return {
+          key: JSON.stringify([layer.id, index]),
+          layer: layer.id,
+          kind,
+          label,
+          title,
+          anchor,
+          points: related,
+          curve,
+          guides:
+            guides ??
+            (!curve && related.length > 1
+              ? related
+                  .slice(1)
+                  .map(p => [related[0].position, p.position] as const)
+              : []),
+        };
+      },
+    ),
   );
 }

@@ -42,11 +42,6 @@ export class SketchRectangleDrawing implements SketchDrawing {
         ? 'Center'
         : 'First corner';
   }
-  get instructions(): string {
-    return this.start
-      ? `${this.title} · Enter full width/height or click · Esc cancels`
-      : `${this.title} · Enter X/Y or click`;
-  }
   reset(): void {
     this.start = undefined;
     this.startCoordinates = [];
@@ -160,7 +155,8 @@ export class SketchRectangleDrawing implements SketchDrawing {
       ...this.startCoordinates.map(
         ({axis, value}): SketchConstraint<SketchPointAddress> => [
           axis,
-          [center ?? a, value],
+          center ?? a,
+          value,
         ],
       ),
       ['horizontal', bottom],
@@ -171,8 +167,8 @@ export class SketchRectangleDrawing implements SketchDrawing {
     if (center) constraints.push(['midpoint', [center, a, c]]);
     const width = this.dimensions.value('width'),
       height = this.dimensions.value('height');
-    if (width !== undefined) constraints.push(['length', [bottom, width]]);
-    if (height !== undefined) constraints.push(['length', [right, height]]);
+    if (width !== undefined) constraints.push(['length', bottom, width]);
+    if (height !== undefined) constraints.push(['length', right, height]);
     if (!commit({kind: 'append', entries: geometry.entries, constraints}))
       return 'The sketch changed; the drawing was not applied';
     this.pointer = end;

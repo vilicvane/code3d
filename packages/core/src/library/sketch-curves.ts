@@ -1,3 +1,4 @@
+import {sketchRelativePrecision} from './sketch-precision.js';
 import type {
   SketchArcDirection,
   SketchEntitySnapshot,
@@ -152,7 +153,7 @@ export function sketchCurveTolerance(curve: SketchCurve): number {
         )
       : curve.radius;
   return Math.max(
-    size * 1e-9,
+    size * sketchRelativePrecision,
     Number.EPSILON *
       16 *
       Math.max(...sketchCurveBounds(curve).flatMap(p => p.map(Math.abs))),

@@ -213,8 +213,8 @@ test('arc end and interior trims preserve direction, allocate IDs per survivor c
         },
       ],
       [
-        ['radius', [6, 10]],
-        ['sweep', [6, 270]],
+        ['radius', 6, 10],
+        ['sweep', 6, 270],
       ],
     );
     const parts = segments(value);
@@ -304,11 +304,11 @@ test('named upstream cut points and center expressions survive circle conversion
         direction: 'ccw',
       },
     ],
-    [['radius', [6, 10]]],
+    [['radius', 6, 10]],
   );
   const split = geometry.trimSketchSegment([value], segments(value)[1]);
   const hidden =
-    "[['point',1,[0,0]],['point',2,[10,0]],['point',3,[0,-10]],['point',4,[0,10]],['point',5,[-10,0]],['arc',6,[1,r,2,3,'ccw']]], {constraints:[['radius', dimension]]}";
+    "[['point',1,[0,0]],['point',2,[10,0]],['point',3,[0,-10]],['point',4,[0,10]],['point',5,[-10,0]],['arc',6,[1,r,2,3,'ccw']]], {constraints:[['radius', curveId, dimension]]}";
   const result = resolve(hidden, split);
   assert.equal(result.status, 'conflict');
   assert.ok(!('plan' in result));
@@ -317,14 +317,14 @@ test('named upstream cut points and center expressions survive circle conversion
 test('circle-to-arc source retains radius and center expressions and fresh compilation preserves the surviving interval', async () => {
   for (const radius of [10, 15]) {
     const args =
-      "[['point', 1, [0, 0]], ['circle', 2, [1, r]], ['point', 3, [0, 10]], ['point', 4, [0, -10]]], {constraints: [['radius', [2, dimension]]]}";
+      "[['point', 1, [0, 0]], ['circle', 2, [1, r]], ['point', 3, [0, 10]], ['point', 4, [0, -10]]], {constraints: [['radius', 2, dimension]]}";
     const declarations = `const r = ${radius}; const dimension = 10;`;
     const original = await compile(args, declarations);
     const selected = segments(original).find(p => p.start.t === 0.75)!;
     const change = geometry.trimSketchSegment([original], selected);
     const rewritten = edit(args, change, original.id);
     assert.match(rewritten, /'arc',\s*2,\s*\[1,\s*r,\s*4,\s*3,\s*'cw'\]/);
-    assert.match(rewritten, /'radius',\s*\[2,\s*dimension\]/);
+    assert.match(rewritten, /'radius',\s*2,\s*dimension/);
     const replay = await compile(rewritten, declarations);
     const arc = replay.entities.find(e => e.kind === 'arc')!;
     assert.equal(arc.kind, 'arc');
@@ -338,7 +338,7 @@ test('circle-to-arc source retains radius and center expressions and fresh compi
 test('interior arc splits copy radius source and dimension expressions, remove sweep and replay both finite arcs', async () => {
   for (const direction of ['cw', 'ccw']) {
     const sign = direction === 'cw' ? -1 : 1;
-    const args = `[['point', 1, [0, 0]], ['point', 2, [10, 0]], ['point', 3, [0, ${-sign * 10}]], ['point', 4, [0, ${sign * 10}]], ['point', 5, [-10, 0]], ['arc', 6, [1, r /* data */, 2, 3, '${direction}']]], {constraints: [['radius', [6, dimension /* constraint */]], ['sweep', [6, 270]]]}`;
+    const args = `[['point', 1, [0, 0]], ['point', 2, [10, 0]], ['point', 3, [0, ${-sign * 10}]], ['point', 4, [0, ${sign * 10}]], ['point', 5, [-10, 0]], ['arc', 6, [1, r /* data */, 2, 3, '${direction}']]], {constraints: [['radius', 6, dimension /* constraint */], ['sweep', 6, 270]]}`;
     const declarations = 'const r = 10; const dimension = 10;';
     const original = await compile(args, declarations);
     const change = geometry.trimSketchSegment(
