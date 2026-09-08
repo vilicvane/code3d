@@ -1300,8 +1300,11 @@ test('compiles the standalone custom primitive example with direct annotations a
   ).source;
 
   for (const [call, arguments_] of [
-    ['twistKnob(10, 3, 14)', ['radius', 'shaftRadius', 'y']],
-    ['twistKnob(10, 3, 8, 30)', ['radius', 'shaftRadius', 'y', 'twist']],
+    ['twistKnob(10, 3, tallHeight)', ['radius', 'shaftRadius', 'y']],
+    [
+      'twistKnob(10, 3, shortHeight, 30)',
+      ['radius', 'shaftRadius', 'y', 'twist'],
+    ],
   ] as const) {
     const start = source.indexOf(call);
     assert.notEqual(start, -1);
@@ -1569,7 +1572,7 @@ test('compiles the core tube example with its own operation and editable dimensi
   const source = defined(
     bundledExamples.files.find(file => file.path === rootPath),
   ).source;
-  const start = source.indexOf('tube(5.5, 4.5, 4)');
+  const start = source.indexOf('tube(5.5, 4.5, collarHeight)');
   assert.notEqual(start, -1);
   const target = module.sourceTargets.find(
     target =>

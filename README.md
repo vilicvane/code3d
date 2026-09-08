@@ -32,8 +32,8 @@ and follow [topology source paths](https://www.code3d.org/docs/guides/topology/)
 through derived geometry.
 
 Each model has [local coordinates](https://www.code3d.org/docs/concepts/local-coordinates/).
-Choose a vertex or center as its origin, rotate around local zero, and use
-relations to place the part in a composition. The [origin and rotation guide](https://www.code3d.org/docs/guides/origins-and-rotation/)
+Choose a shared origin to assemble parts directly with `group`, rotate around
+local zero, or use relations for geometry-based placement. The [origin and rotation guide](https://www.code3d.org/docs/guides/origins-and-rotation/)
 shows each step with the same editable source used by the App.
 
 ## Example
@@ -41,15 +41,23 @@ shows each step with the same editable source used by the App.
 ```ts
 import {box, cylinder, group} from '@code3d/core';
 
-const base = box(36, 4, 24).fillet(1);
-const post = cylinder(4, 14).relate(part => part.on(base.up).offset(-10, 0, 0));
+const baseHeight = 4;
+const postHeight = 14;
+
+// Share an origin on the contact plane: the base below, the post above.
+const base = box(36, baseHeight, 24)
+  .fillet(1)
+  .originOffset(0, baseHeight / 2, 0);
+const post = cylinder(4, postHeight).originOffset(10, -postHeight / 2, 0);
 
 export const model = group([base, post]);
 ```
 
-Place the cursor on `base`, `post`, or their relation to inspect that exact
-context. Adjust the relation interactively and Code3D writes the result back to
-the same source.
+`originOffset()` subtracts its offset from the geometry's coordinates. Here the
+base's top and the post's bottom share Y = 0, with the post at X = −10. `group`
+assembles them at their common origin. Place the cursor on `base`, `post`, or
+`originOffset` to inspect and adjust that context; Code3D writes interactive
+changes back to the same source.
 
 ## Run locally
 

@@ -5,11 +5,11 @@ export const renderSamples = [
     id: 'first-model',
     title: 'A place to start',
     description:
-      'A rounded base, a cylindrical post, and one relation that brings them together.',
+      'A rounded base and a cylindrical post, assembled directly at a shared origin on their contact plane.',
     category: 'The essentials',
     file: 'website/first-model.ts',
     focus: {context: 'group([base, post])', token: 'group'},
-    tags: ['box', 'cylinder', 'fillet', 'relate', 'group'],
+    tags: ['box', 'cylinder', 'fillet', 'originOffset', 'group'],
   },
   {
     id: 'fastener',
@@ -42,7 +42,7 @@ export const renderSamples = [
     category: 'Custom primitives',
     file: 'custom-primitives.ts',
     focus: {context: 'group(', token: 'group'},
-    tags: ['definePrimitive', 'replicad', '@code3d.param', 'relate'],
+    tags: ['definePrimitive', 'replicad', '@code3d.param', 'originOffset'],
   },
   {
     id: 'shell',
@@ -141,7 +141,7 @@ const firstModelContexts = [
     image: 'first-model',
     label: 'See them together',
     description:
-      'Select the group to see both parts with their relation resolved.',
+      'Select the group to see both parts assembled at their shared origin.',
     focus: {context: 'group([base, post])', token: 'group'},
   },
 ] as const;

@@ -66,9 +66,11 @@ then use the package in a TypeScript file:
 import range from 'just-range';
 import {box, group} from '@code3d/core';
 
-const base = box(50, 4, 16);
+const baseHeight = 4;
+const postHeight = 10;
+const base = box(50, baseHeight, 16).originOffset(0, baseHeight / 2, 0);
 const posts = range(3).map(index =>
-  box(6, 10, 6).relate(part => part.on(base.up).offset((index - 1) * 16, 0, 0)),
+  box(6, postHeight, 6).originOffset((1 - index) * 16, -postHeight / 2, 0),
 );
 
 group([base, ...posts]);
