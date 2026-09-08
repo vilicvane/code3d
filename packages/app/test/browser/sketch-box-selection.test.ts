@@ -36,6 +36,76 @@ async function box(
   if (release) await page.mouse.up();
 }
 
+test('plain clicks replace, Ctrl toggles, Shift only adds, and modifier clicks never drag geometry', async t => {
+  const page = await open(t, source);
+  const original = await text(page);
+  const selected = () =>
+    page
+      .locator('.sketch-canvas circle.selected')
+      .evaluateAll(points =>
+        points.map(p => Number((p as SVGElement).dataset.id)).sort(),
+      );
+  await point(page, 1).click();
+  await page.keyboard.down('Shift');
+  await point(page, 2).click();
+  await point(page, 1).click();
+  assert.deepEqual(await selected(), [1, 2]);
+  await page.keyboard.up('Shift');
+  await page.keyboard.down('Control');
+  await point(page, 1).click();
+  await point(page, 3).click();
+  assert.deepEqual(await selected(), [2, 3]);
+  await page.keyboard.up('Control');
+  await point(page, 4).click();
+  assert.deepEqual(await selected(), [4]);
+  for (const key of ['Shift', 'Control']) {
+    await page.keyboard.down(key);
+    await page.locator('.sketch-canvas').click({position: {x: 30, y: 150}});
+    assert.deepEqual(await selected(), [4]);
+    await page.keyboard.up(key);
+  }
+  const r = (await point(page, 4).boundingBox())!;
+  await page.keyboard.down('Control');
+  await page.mouse.move(r.x + r.width / 2, r.y + r.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(r.x + r.width / 2 + 10, r.y + r.height / 2 + 10);
+  await page.mouse.up();
+  await page.keyboard.up('Control');
+  assert.deepEqual(await selected(), []);
+  assert.deepEqual(await point(page, 4).boundingBox(), r);
+  assert.equal(await text(page), original);
+});
+
+test('Ctrl crossing boxes toggle relative to the original set on every frame and Escape works while Ctrl is held', async t => {
+  const page = await open(t, source);
+  const original = await text(page);
+  await box(page, [15, -2], [5, 2]);
+  assert.deepEqual(await selectedLines(page), [5]);
+  await page.keyboard.down('Control');
+  await box(page, [15, -2], [5, 12], false);
+  assert.deepEqual(await selectedLines(page), [6]);
+  const screen = await project(page);
+  await page.mouse.move(...screen(6, 11));
+  assert.deepEqual(await selectedLines(page), [6]);
+  await page.mouse.move(...screen(5, 2));
+  assert.deepEqual(await selectedLines(page), []);
+  await page.mouse.move(...screen(5, 12));
+  assert.deepEqual(await selectedLines(page), [6]);
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+  await page.keyboard.up('Control');
+  assert.deepEqual(await selectedLines(page), [5]);
+  await page.keyboard.down('Shift');
+  await box(page, [15, -2], [5, 12]);
+  await page.keyboard.up('Shift');
+  assert.deepEqual(await selectedLines(page), [5, 6]);
+  await page.keyboard.down('Control');
+  await box(page, [15, -2], [5, 2]);
+  assert.deepEqual(await selectedLines(page), [6]);
+  await page.keyboard.up('Control');
+  assert.equal(await text(page), original);
+});
+
 test('window and crossing box selection preserve source, Shift adds and Escape restores the previous selection', async t => {
   const page = await open(t, source);
   const original = await text(page);

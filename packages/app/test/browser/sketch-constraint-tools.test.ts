@@ -15,14 +15,14 @@ const names = (page: Page) =>
     );
 const line = (page: Page, id: number) =>
   page.locator(`.sketch-canvas line.local[data-id="${id}"]`);
-async function click(page: Page, target: Locator, shift = false) {
+async function click(page: Page, target: Locator, ctrl = false) {
   const r = (await target.boundingBox())!;
-  if (shift) await page.keyboard.down('Shift');
+  if (ctrl) await page.keyboard.down('Control');
   await page.mouse.click(r.x + r.width / 2, r.y + r.height / 2);
-  if (shift) await page.keyboard.up('Shift');
+  if (ctrl) await page.keyboard.up('Control');
 }
 
-test('point and line selection expose applicable tools, Shift toggles and blank or Escape clears them', async t => {
+test('point and line selection expose applicable tools, Ctrl toggles and blank or Escape clears them', async t => {
   const page = await open(t, lines);
   const original = await text(page);
   assert.equal(await toolbar(page).isVisible(), false);

@@ -9,6 +9,34 @@ import {sameSketchSegment, type SketchSegment} from './sketch-segments';
 import {sameSketchPoint, type SketchPoint} from './sketch-snap';
 
 export type SketchPick = SketchPointAddress | SketchSegment;
+export type SketchSelectionMode = 'replace' | 'add' | 'toggle';
+
+export function sketchSelectionMode(modifiers: {
+  ctrlKey: boolean;
+  shiftKey: boolean;
+}): SketchSelectionMode {
+  return modifiers.ctrlKey ? 'toggle' : modifiers.shiftKey ? 'add' : 'replace';
+}
+
+/** Click and box selection use the same set operation. Gestures supply their
+ * original selection on every frame, never the result of the preceding frame.
+ */
+export function updateSketchSelection(
+  before: readonly SketchPick[],
+  picks: readonly SketchPick[],
+  mode: SketchSelectionMode,
+): SketchPick[] {
+  const hits = picks.filter(
+    (p, i) => picks.findIndex(q => sameSketchPick(p, q)) === i,
+  );
+  if (mode === 'replace') return hits;
+  return [
+    ...before.filter(
+      p => mode !== 'toggle' || !hits.some(q => sameSketchPick(p, q)),
+    ),
+    ...hits.filter(p => !before.some(q => sameSketchPick(p, q))),
+  ];
+}
 
 export function sameSketchPick(a: SketchPick, b: SketchPick): boolean {
   return 'start' in a && 'start' in b

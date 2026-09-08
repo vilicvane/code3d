@@ -57,7 +57,9 @@ import {SketchConstraints} from './sketch-constraints';
 import {sketchConstraintActions} from '../tools/sketch-constraint-actions';
 import {
   boxSelectSketch,
-  sameSketchPick,
+  sketchSelectionMode,
+  updateSketchSelection,
+  type SketchSelectionMode,
   type SketchPick,
 } from '../tools/sketch-selection';
 import {SketchConstraintTools} from './sketch-constraint-tools';
@@ -105,7 +107,7 @@ type Gesture =
       start: SketchPosition;
       position: SketchPosition;
       before: SketchPick[];
-      additive: boolean;
+      mode: SketchSelectionMode;
       dragging: boolean;
     };
 
@@ -431,12 +433,13 @@ export class SketchEditor {
   }
 
   private keyDown(event: KeyboardEvent): void {
-    if (event.isComposing || event.ctrlKey || event.metaKey) return;
+    if (event.isComposing) return;
     if (event.key === 'Escape') {
       event.preventDefault();
       this.escape();
       return;
     }
+    if (event.ctrlKey || event.metaKey) return;
     if (event.key === 'Alt') {
       this.bypassSnap = true;
       this.drawDraft();
@@ -549,7 +552,7 @@ export class SketchEditor {
       name: 'Select',
       icon: MousePointer2,
       title:
-        'Select · Drag blank space to box select · Left to right: inside · Right to left: crossing · Shift adds',
+        'Select · Click or drag blank space to replace selection · Ctrl toggles · Shift adds · Left to right: inside · Right to left: crossing',
       run: select(() => 'Select'),
     });
     const drawing = this.toolbar.group('Draw');
@@ -754,29 +757,23 @@ export class SketchEditor {
       this.place();
     } else {
       const picked = vertex ?? segment;
+      const mode = sketchSelectionMode(event);
       if (!picked) {
         this.gesture = {
           kind: 'box',
           start: position,
           position,
           before: [...this.selection],
-          additive: event.shiftKey,
+          mode,
           dragging: false,
         };
         this.svg.setPointerCapture(event.pointerId);
         this.draw();
         return;
       }
-      if (event.shiftKey) {
-        if (picked) {
-          const matches = (p: SketchPick) => sameSketchPick(p, picked);
-          this.selection = this.selection.some(matches)
-            ? this.selection.filter(p => !matches(p))
-            : [...this.selection, picked];
-        }
-      } else this.selection = picked ? [picked] : [];
+      this.selection = updateSketchSelection(this.selection, [picked], mode);
       if (
-        !event.shiftKey &&
+        mode === 'replace' &&
         point &&
         !this.view.readOnlyReason &&
         point.layer === this.view.id &&
@@ -831,14 +828,11 @@ export class SketchEditor {
           gesture.start,
           gesture.position,
         );
-        this.selection = gesture.additive
-          ? [
-              ...gesture.before,
-              ...picks.filter(
-                p => !gesture.before.some(q => sameSketchPick(p, q)),
-              ),
-            ]
-          : picks;
+        this.selection = updateSketchSelection(
+          gesture.before,
+          picks,
+          gesture.mode,
+        );
       }
     } else if (this.gesture?.kind === 'pan') {
       this.center = [
@@ -916,7 +910,7 @@ export class SketchEditor {
   private async pointerUp(event: PointerEvent): Promise<void> {
     const gesture = this.gesture;
     if (gesture?.kind === 'box' && !gesture.dragging)
-      this.selection = gesture.additive ? gesture.before : [];
+      this.selection = updateSketchSelection(gesture.before, [], gesture.mode);
     if (gesture?.kind === 'move') gesture.released = true;
     else this.gesture = undefined;
     if (this.svg.hasPointerCapture(event.pointerId))

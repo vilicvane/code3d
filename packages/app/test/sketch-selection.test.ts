@@ -6,9 +6,15 @@ import {createAppTestServer} from './vite-test-server.ts';
 
 let server: Awaited<ReturnType<typeof createAppTestServer>>;
 let select: typeof import('../src/tools/sketch-selection.ts').boxSelectSketch;
+let update: typeof import('../src/tools/sketch-selection.ts').updateSketchSelection;
+let mode: typeof import('../src/tools/sketch-selection.ts').sketchSelectionMode;
 before(async () => {
   server = await createAppTestServer();
-  ({boxSelectSketch: select} = await server.ssrLoadModule<
+  ({
+    boxSelectSketch: select,
+    updateSketchSelection: update,
+    sketchSelectionMode: mode,
+  } = await server.ssrLoadModule<
     typeof import('../src/tools/sketch-selection.ts')
   >('/src/tools/sketch-selection.ts'));
 });
@@ -30,6 +36,32 @@ const line = segment({
     [-10, 0],
     [10, 0],
   ],
+});
+
+test('click and box share replacement, additive union and baseline-relative Ctrl toggle semantics', () => {
+  const a = {layer: 'local', id: 2},
+    b = {layer: 'local', id: 3},
+    c = {layer: 'base', id: 2};
+  const before = [a, b];
+  assert.deepEqual(update(before, [b, c], 'replace'), [b, c]);
+  assert.deepEqual(update(before, [b, c, b], 'add'), [a, b, c]);
+  assert.deepEqual(update(before, [b, c, b], 'toggle'), [a, c]);
+  assert.deepEqual(update(before, [], 'replace'), []);
+  assert.deepEqual(update(before, [], 'add'), before);
+  assert.deepEqual(update(before, [], 'toggle'), before);
+  for (let frame = 0; frame < 4; frame++)
+    assert.deepEqual(update(before, [b, c], 'toggle'), [a, c]);
+  assert.deepEqual(before, [a, b]);
+  assert.equal(mode({ctrlKey: false, shiftKey: false}), 'replace');
+  assert.equal(mode({ctrlKey: false, shiftKey: true}), 'add');
+  assert.equal(mode({ctrlKey: true, shiftKey: false}), 'toggle');
+  assert.equal(mode({ctrlKey: true, shiftKey: true}), 'toggle');
+  const half = {...line, end: {...line.end, t: 0.5}};
+  assert.deepEqual(
+    update([line], [half], 'toggle'),
+    [line, half],
+    'different trim intervals are distinct selections',
+  );
 });
 
 test('window selection contains finite geometry while crossing selection intersects it', () => {
