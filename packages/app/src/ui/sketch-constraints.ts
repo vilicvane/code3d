@@ -1,35 +1,11 @@
 import type {SketchPosition} from '@code3d/core/tooling';
-import {
-  LockKeyhole,
-  MoveHorizontal,
-  MoveVertical,
-  CircleDot,
-  Triangle,
-  Ruler,
-  DraftingCompass,
-  Radius,
-} from 'lucide';
 import type {SketchConstraintDisplay} from '../tools/sketch-constraints';
 import {createIcon} from './icons';
-import {CoordinateX, CoordinateY} from './sketch-icons';
-
-export const sketchConstraintIcons = {
-  fixed: LockKeyhole,
-  x: CoordinateX,
-  y: CoordinateY,
-  horizontal: MoveHorizontal,
-  vertical: MoveVertical,
-  coincident: CircleDot,
-  midpoint: Triangle,
-  length: Ruler,
-  angle: DraftingCompass,
-  radius: Radius,
-  sweep: DraftingCompass,
-};
+import {sketchConstraintIcons} from './sketch-icons';
 const svg = <K extends keyof SVGElementTagNameMap>(tag: K) =>
   document.createElementNS('http://www.w3.org/2000/svg', tag);
 
-/** Read-only, screen-sized constraint glyphs; ownership and relations stay in snapshots. */
+/** Screen-sized constraint selectors; ownership and relations stay in snapshots. */
 export class SketchConstraints {
   readonly guides = svg('g');
   readonly labels = svg('g');
@@ -48,7 +24,10 @@ export class SketchConstraints {
   private hovered?: string;
   private focused?: string;
 
-  constructor(private readonly change: () => void) {}
+  constructor(
+    private readonly change: () => void,
+    private readonly select: (display: SketchConstraintDisplay) => void,
+  ) {}
 
   related(layer: string, id: number): boolean {
     const display = this.badges.get(
@@ -97,7 +76,7 @@ export class SketchConstraints {
         text.setAttribute('x', '23');
         text.setAttribute('y', '14');
         root.setAttribute('tabindex', '0');
-        root.setAttribute('role', 'img');
+        root.setAttribute('role', 'button');
         root.append(title, background, icon, text);
         root.addEventListener('pointerenter', () => {
           this.hovered = display.key;
@@ -122,6 +101,17 @@ export class SketchConstraints {
           event.preventDefault();
         });
         root.addEventListener('pointermove', event => event.stopPropagation());
+        root.addEventListener('click', event => {
+          if (event.button !== 0) return;
+          event.stopPropagation();
+          this.select(this.badges.get(display.key)!.display);
+        });
+        root.addEventListener('keydown', event => {
+          if (event.key !== 'Enter' && event.key !== ' ') return;
+          event.preventDefault();
+          event.stopPropagation();
+          this.select(this.badges.get(display.key)!.display);
+        });
         const guides = svg('g');
         badge = {root, background, icon, text, title, guides, display};
         this.badges.set(display.key, badge);

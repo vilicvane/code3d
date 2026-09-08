@@ -1,9 +1,16 @@
 import type {SketchChange} from '../tools/sketch-source';
 import type {SketchConstraintAction} from '../tools/sketch-constraint-actions';
-import {DrawingDimensions} from '../tools/drawing-dimensions';
+import {
+  DrawingDimensions,
+  type DrawingDimension,
+} from '../tools/drawing-dimensions';
 import {DrawingInputs} from './drawing-inputs';
 import {SketchToolbar} from './sketch-toolbar';
-import {sketchConstraintIcons} from './sketch-constraints';
+import {sketchConstraintIcons} from './sketch-icons';
+import {
+  sketchConstraintDimensions,
+  sketchConstraintNames,
+} from '../tools/sketch-constraints';
 
 /** Selection actions reuse drawing numeric entry and the same atomic source transaction. */
 export class SketchConstraintTools {
@@ -22,7 +29,10 @@ export class SketchConstraintTools {
   private actions: readonly SketchConstraintAction[] = [];
   private identity = '';
   private current?: {
-    action: SketchConstraintAction;
+    kind: SketchConstraintAction['kind'];
+    field: DrawingDimension;
+    value: number;
+    create(value: number): SketchChange;
     dimensions: DrawingDimensions;
   };
 
@@ -48,9 +58,7 @@ export class SketchConstraintTools {
       identity !== this.identity ||
       keys !== this.actions.map(a => a.kind).join(',')
     ) {
-      this.inputs.hide();
-      this.inputs.root.remove();
-      this.current = undefined;
+      this.cancel();
       this.identity = identity;
       const toolbar = new SketchToolbar('Selection constraints');
       const group = toolbar.group('Constrain');
@@ -72,7 +80,7 @@ export class SketchConstraintTools {
   private update(): void {
     this.toolbar.update(name => ({
       pressed:
-        this.current?.action.name === name ||
+        this.current?.kind === this.actions.find(a => a.name === name)!.kind ||
         this.actions.find(a => a.name === name)!.active,
       disabled: this.actions.find(a => a.name === name)!.disabled,
       title: this.actions.find(a => a.name === name)!.title,
@@ -82,8 +90,10 @@ export class SketchConstraintTools {
   cancel(): void {
     const focused = this.root.contains(document.activeElement);
     this.current = undefined;
-    this.inputs.hide();
+    // Transfer focus while the form is still attached. Removing a focused
+    // input fires blur with no related target, reentering sketch cancellation.
     if (focused) this.focusCanvas();
+    this.inputs.hide();
     this.inputs.root.remove();
     this.update();
   }
@@ -96,12 +106,40 @@ export class SketchConstraintTools {
       this.focusCanvas();
       return;
     }
-    const dimensions = new DrawingDimensions([action.dimension]);
-    // Empty entry accepts the displayed value; native typing/undo stays intact.
-    this.current = {action, dimensions};
+    this.openValue(kind, action.value!, value => action.create(value));
+  }
+
+  edit(
+    index: number,
+    kind: SketchConstraintAction['kind'],
+    value: number,
+  ): void {
+    // A local relation may target only read-only upstream points, in which
+    // case the selection has no editable dimension tool to focus.
+    if (!this.actions.find(action => action.kind === kind)?.dimension) return;
+    this.openValue(
+      kind,
+      value,
+      value => ({kind: 'dimension', index, value}),
+      true,
+    );
+  }
+
+  private openValue(
+    kind: SketchConstraintAction['kind'],
+    value: number,
+    create: (value: number) => SketchChange,
+    editing = false,
+  ): void {
+    const field = sketchConstraintDimensions[kind]!;
+    const dimensions = new DrawingDimensions([field]);
+    // Editing starts with the complete authored number selected, never the
+    // shortened display label. Adding still accepts an empty displayed default.
+    if (editing) dimensions.set(field.id, String(value));
+    this.current = {kind, field, value, create, dimensions};
     this.root.append(this.inputs.root);
-    this.inputs.show(action.name, dimensions, {
-      [action.dimension.id]: action.value!,
+    this.inputs.show(sketchConstraintNames[kind], dimensions, {
+      [field.id]: value,
     });
     this.inputs.focusField();
     this.update();
@@ -109,14 +147,14 @@ export class SketchConstraintTools {
 
   private apply(): void {
     if (!this.current) return;
-    const {action, dimensions} = this.current;
-    const id = action.dimension!.id;
+    const {field, value, create, dimensions} = this.current;
+    const id = field.id;
     const error = dimensions.error(id);
     if (error) {
       this.inputs.report(error);
       return;
     }
-    if (this.commit(action.create(dimensions.value(id)))) {
+    if (this.commit(create(dimensions.value(id) ?? value))) {
       this.cancel();
       this.focusCanvas();
     } else this.inputs.report('The sketch changed; select the geometry again.');

@@ -191,9 +191,11 @@ export class SketchEditorController {
       source === undefined ? undefined : analyzeSketchSource(source);
     this.editor.show({
       id: this.active.id,
+      revision: this.revision,
       layers: this.layers,
       data: this.data,
       editable: parsed?.editable ?? new Map(),
+      constraintValues: parsed?.constraintValues ?? new Map(),
       referenceable: new Set(Object.keys(this.active.references)),
       readOnlyReason: this.stale
         ? 'Last successful sketch · Editing unavailable until code compiles'
@@ -267,6 +269,14 @@ export class SketchEditorController {
     const copiedConstraints: SketchConstraint<SketchPointAddress>[] = [];
     const constraints = local.constraints.flatMap(
       (constraint, index): SketchConstraint<SketchPointAddress>[] => {
+        if (change.kind === 'dimension' && change.index === index)
+          return [
+            [
+              constraint[0],
+              constraint[1],
+              change.value,
+            ] as SketchConstraint<SketchPointAddress>,
+          ];
         if (
           ((change.kind === 'delete' || change.kind === 'trim') &&
             change.constraints.includes(index)) ||

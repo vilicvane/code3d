@@ -14,6 +14,10 @@ import type {
 import type {SketchChange} from './sketch-source';
 import type {SketchSegment} from './sketch-segments';
 import {sameSketchPoint} from './sketch-snap';
+import {
+  sketchConstraintDimensions,
+  sketchConstraintNames,
+} from './sketch-constraints';
 
 export type SketchPick = SketchPointAddress | SketchSegment;
 type Constraint = SketchConstraint<SketchPointAddress>;
@@ -72,11 +76,11 @@ export function sketchConstraintActions(
   const existing = new Set(local.constraints.map(identity));
   const add = (
     kind: Constraint[0],
-    name: string,
     constraints: (value: number) => Constraint[],
-    dimension?: DrawingDimension,
     value = 0,
   ) => {
+    const name = sketchConstraintNames[kind];
+    const dimension = sketchConstraintDimensions[kind];
     const pending = (value: number) =>
       constraints(value).filter(c => !existing.has(identity(c)));
     const targets = pending(value);
@@ -105,7 +109,7 @@ export function sketchConstraintActions(
       value,
       disabled,
       active,
-      title: `${active === true ? 'Remove' : 'Add'} ${name}${curves.length ? ' · Applies to whole source entities' : ''}${mismatch ? ' · The displayed expression coordinate differs from its source value; use X/Y constraints' : active === 'mixed' ? ' · Apply to remaining selected entities' : ''}`,
+      title: `${active === true ? 'Remove' : 'Add'} ${name}${kind === 'x' || kind === 'y' ? ' · Fix the coordinate value, not the movement direction' : kind === 'midpoint' && points.length === 3 ? ' · First selected point is the center of the other two' : ''}${curves.length ? ' · Applies to whole source entities' : ''}${mismatch ? ' · The displayed expression coordinate differs from its source value; use X/Y coordinate constraints' : active === 'mixed' ? ' · Apply to remaining selected entities' : ''}`,
       create: (entered = value) => {
         if (active === true) {
           const targets = new Set(constraints(entered).map(identity));
@@ -148,23 +152,21 @@ export function sketchConstraintActions(
   if (points.length && !curves.length) {
     const owned = points.filter(p => p.layer === local.id);
     if (owned.length) {
-      add('fixed', 'Fixed', () => owned.map(p => ['fixed', p]));
+      add('fixed', () => owned.map(p => ['fixed', p]));
       for (const [axis, index] of [
         ['x', 0],
         ['y', 1],
       ] as const)
         add(
           axis,
-          axis.toUpperCase(),
           value => owned.map(p => [axis, p, value]),
-          {id: axis, label: axis.toUpperCase()},
           position(owned[0])[index],
         );
     }
     if (points.length === 2 && owned.length)
-      add('coincident', 'Coincident', () => [
-        ['coincident', [points[0], points[1]]],
-      ]);
+      add('coincident', () => [['coincident', [points[0], points[1]]]]);
+    if (points.length === 3 && owned.length)
+      add('midpoint', () => [['midpoint', [points[0], points[1], points[2]]]]);
   }
   const lines = curves.filter(p => entity(p).kind === 'line');
   if (points.length === 1 && lines.length === 1 && curves.length === 1) {
@@ -173,31 +175,23 @@ export function sketchConstraintActions(
       line.kind === 'line' &&
       !line.points.some(p => sameSketchPoint(resolve(p), points[0]))
     )
-      add('midpoint', 'Midpoint', () => [
-        ['midpoint', [points[0], ...line.points]],
-      ]);
+      add('midpoint', () => [['midpoint', [points[0], ...line.points]]]);
   }
   if (points.length || !curves.length) return actions;
   if (lines.length === curves.length) {
     for (const kind of ['horizontal', 'vertical'] as const)
-      add(kind, kind === 'horizontal' ? 'Horizontal' : 'Vertical', () =>
-        lines.map(p => [kind, p.id]),
-      );
+      add(kind, () => lines.map(p => [kind, p.id]));
     const line = entity(lines[0]);
     if (line.kind === 'line') {
       const [a, b] = line.points.map(position);
       add(
         'length',
-        'Length',
         value => lines.map(p => ['length', p.id, value]),
-        {id: 'length', label: 'Length', positive: true},
         Math.hypot(b[0] - a[0], b[1] - a[1]),
       );
       add(
         'angle',
-        'Angle',
         value => lines.map(p => ['angle', p.id, value]),
-        {id: 'angle', label: 'Angle', unit: '°'},
         (Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI,
       );
     }
@@ -206,9 +200,7 @@ export function sketchConstraintActions(
     if (first.kind === 'circle' || first.kind === 'arc')
       add(
         'radius',
-        'Radius',
         value => curves.map(p => ['radius', p.id, value]),
-        {id: 'radius', label: 'Radius', positive: true},
         first.radius,
       );
     if (curves.every(p => entity(p).kind === 'arc')) {
@@ -216,15 +208,7 @@ export function sketchConstraintActions(
       if (geometry.kind === 'arc')
         add(
           'sweep',
-          'Sweep',
           value => curves.map(p => ['sweep', p.id, value]),
-          {
-            id: 'sweep',
-            label: 'Sweep',
-            unit: '°',
-            positive: true,
-            exclusiveMaximum: 360,
-          },
           (Math.abs(geometry.sweep) * 180) / Math.PI,
         );
     }

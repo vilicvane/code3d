@@ -27,12 +27,25 @@ test('point and line selection expose applicable tools, Shift toggles and blank 
   const original = await text(page);
   assert.equal(await toolbar(page).isVisible(), false);
   await point(page, 1).click();
-  assert.deepEqual(await names(page), ['Fixed', 'X', 'Y']);
+  assert.deepEqual(await names(page), [
+    'Fixed',
+    'X coordinate',
+    'Y coordinate',
+  ]);
   await click(page, point(page, 3), true);
-  assert.deepEqual(await names(page), ['Fixed', 'X', 'Y', 'Coincident']);
+  assert.deepEqual(await names(page), [
+    'Fixed',
+    'X coordinate',
+    'Y coordinate',
+    'Coincident',
+  ]);
   assert.equal(await page.locator('.sketch-canvas circle.selected').count(), 2);
   await click(page, point(page, 3), true);
-  assert.deepEqual(await names(page), ['Fixed', 'X', 'Y']);
+  assert.deepEqual(await names(page), [
+    'Fixed',
+    'X coordinate',
+    'Y coordinate',
+  ]);
   await click(page, line(page, 5));
   assert.deepEqual(await names(page), [
     'Horizontal',

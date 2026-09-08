@@ -12,16 +12,7 @@ import {
   sketchRegions,
   type SketchCurve,
 } from '@code3d/core/tooling';
-import {
-  Maximize,
-  Magnet,
-  Minus,
-  MousePointer2,
-  RectangleHorizontal,
-  Scissors,
-  Shapes,
-  Circle,
-} from 'lucide';
+import {Maximize, Magnet, MousePointer2, Scissors, Shapes} from 'lucide';
 import type {SketchChange} from '../tools/sketch-source';
 import type {
   SketchDragPreview,
@@ -51,8 +42,17 @@ import {
 } from '../tools/sketch-snap';
 import {DrawingInputs} from './drawing-inputs';
 import {SketchToolbar, type SketchToolAction} from './sketch-toolbar';
-import {CenterArc, CenterRectangle} from './sketch-icons';
-import {sketchConstraintDisplays} from '../tools/sketch-constraints';
+import {
+  CenterArc,
+  CenterCircle,
+  CenterRectangle,
+  LineSegment,
+  Rectangle,
+} from './sketch-icons';
+import {
+  sketchConstraintDisplays,
+  type SketchConstraintDisplay,
+} from '../tools/sketch-constraints';
 import {SketchConstraints} from './sketch-constraints';
 import {
   sketchConstraintActions,
@@ -61,22 +61,24 @@ import {
 import {SketchConstraintTools} from './sketch-constraint-tools';
 
 const drawingTools = [
-  ['Line', Minus, () => new SketchLineDrawing()],
-  ['Rectangle', RectangleHorizontal, () => new SketchRectangleDrawing()],
+  ['Line', LineSegment, () => new SketchLineDrawing()],
+  ['Rectangle', Rectangle, () => new SketchRectangleDrawing()],
   [
     'Center rectangle',
     CenterRectangle,
     () => new SketchRectangleDrawing('center'),
   ],
-  ['Circle', Circle, () => new SketchCircleDrawing()],
+  ['Circle', CenterCircle, () => new SketchCircleDrawing()],
   ['Arc', CenterArc, () => new SketchArcDrawing()],
 ] as const;
 
 export type SketchEditorView = Readonly<{
   id: string;
+  revision: number;
   layers: readonly SketchSnapshot[];
   data: readonly SketchGeometryData[];
   editable: SketchEditableParameters;
+  constraintValues: ReadonlyMap<number, number>;
   referenceable: ReadonlySet<string>;
   readOnlyReason?: string;
 }>;
@@ -107,10 +109,13 @@ export class SketchEditor {
   private readonly regions = svgElement('g');
   private readonly lines = svgElement('g');
   private readonly vertices = svgElement('g');
-  private readonly constraints = new SketchConstraints(() => {
-    this.trimPointer = undefined;
-    this.draw();
-  });
+  private readonly constraints = new SketchConstraints(
+    () => {
+      this.trimPointer = undefined;
+      this.draw();
+    },
+    display => this.selectConstraint(display),
+  );
   private readonly shapes = new Map<string, SVGElement>();
   private readonly usedShapes = new Set<string>();
   private readonly toolbar = new SketchToolbar();
@@ -504,7 +509,7 @@ export class SketchEditor {
       name: 'Constraints',
       icon: Shapes,
       title:
-        'Show constraints · Hover or focus a marker to highlight related geometry',
+        'Show constraints · Click a marker to select its geometry and edit its value',
       run: () => {
         this.showConstraints = !this.showConstraints;
         this.svg.focus();
@@ -690,6 +695,24 @@ export class SketchEditor {
       }
     }
     this.draw();
+  }
+
+  private selectConstraint(display: SketchConstraintDisplay): void {
+    if (!this.view) return;
+    this.cancel();
+    this.tool = 'Select';
+    this.selection = display.curve
+      ? this.segments().filter(segment => same(segment, display.curve!))
+      : [...display.points];
+    this.svg.focus();
+    this.draw();
+    const value = this.view.constraintValues.get(display.index);
+    if (
+      display.layer === this.view.id &&
+      !this.view.readOnlyReason &&
+      value !== undefined
+    )
+      this.constraintTools.edit(display.index, display.kind, value);
   }
 
   private pointerMove(event: PointerEvent): void {
@@ -1052,6 +1075,7 @@ export class SketchEditor {
     this.constraintTools.show(
       JSON.stringify([
         this.view.id,
+        this.view.revision,
         this.selection.map(p => [
           p.layer,
           p.id,

@@ -173,6 +173,46 @@ test('removing constraints retains geometry, expressions and surviving comments 
   assert.deepEqual(host.undo, [original]);
 });
 
+test('constraint value editing replaces only its exact literal in place and retains full precision', () => {
+  const source =
+    "[['point',1,[0,0]],['point',2,[20,0]],['line',3,[1,2]]], {constraints: [['length',3,20], /* keep duplicate */ ['length',3, /* value */ +20], ['x',1,width]]}";
+  const host = setup(source);
+  assert.deepEqual(
+    [...analyzeSketchSource(source).constraintValues],
+    [
+      [0, 20],
+      [1, 20],
+    ],
+  );
+  assert.equal(
+    host.edit({kind: 'dimension', index: 1, value: 21.12345678912345}).status,
+    'committed',
+  );
+  assert.equal(host.source(), source.replace('+20', '21.12345678912345'));
+  assert.deepEqual(host.undo, [source]);
+  const before = host.source();
+  assert.equal(
+    host.edit({kind: 'dimension', index: 0, value: 30}, source).status,
+    'conflict',
+  );
+  assert.equal(host.source(), before);
+});
+
+test('constraint value editing rejects expressions, missing indices and nonnumeric relations without rewriting source', () => {
+  const source =
+    "[['point',1,[0,0]]], {constraints: [['x',1,width],['y',1,(20)],['fixed',1]]}";
+  const host = setup(source);
+  assert.equal(analyzeSketchSource(source).constraintValues.size, 0);
+  for (const index of [0, 1, 2, 3]) {
+    assert.equal(
+      host.edit({kind: 'dimension', index, value: 30}).status,
+      'unsupported',
+    );
+    assert.equal(host.source(), source);
+  }
+  assert.deepEqual(host.undo, []);
+});
+
 test('appending uses named upstream references and current local IDs without nextId metadata', () => {
   for (const source of [
     '[]',

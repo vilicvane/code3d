@@ -62,6 +62,7 @@ export function sketchDraftEntity([
 }
 
 export type SketchChange =
+  | Readonly<{kind: 'dimension'; index: number; value: number}>
   | Readonly<{
       kind: 'constrain';
       constraints: readonly SketchConstraint<SketchPointAddress>[];
@@ -124,6 +125,7 @@ export function analyzeSketchSource(source: string): {
   array?: ts.ArrayLiteralExpression;
   options?: ts.ObjectLiteralExpression;
   constraints?: ts.ArrayLiteralExpression;
+  constraintValues?: ReadonlyMap<number, number>;
   reason?: string;
 } {
   const file = ts.createSourceFile(
@@ -225,6 +227,13 @@ export function analyzeSketchSource(source: string): {
     array,
     options: options as ts.ObjectLiteralExpression | undefined,
     constraints,
+    constraintValues: new Map(
+      constraints?.elements.flatMap((node, index) => {
+        const value = ts.isArrayLiteralExpression(node) && node.elements[2];
+        const literal = value ? numeric(value) : undefined;
+        return literal === undefined ? [] : [[index, literal] as const];
+      }),
+    ),
   };
 }
 
@@ -335,6 +344,17 @@ export class SketchEditResolver implements ToolIntentResolver {
       return `  ['${kind}', ${id}, [${content.join(', ')}]],`;
     };
     const {change} = intent;
+    if (change.kind === 'dimension') {
+      const node = parsed.constraints?.elements[change.index];
+      const value =
+        node && ts.isArrayLiteralExpression(node) && node.elements[2];
+      if (!value || numeric(value) === undefined)
+        return {
+          status: 'unsupported',
+          reason: 'Expression-driven constraint values must be edited in code.',
+        };
+      if (numeric(value) !== change.value) replace(value, String(change.value));
+    }
     if (change.kind === 'delete' || change.kind === 'trim') {
       for (const id of change.ids) {
         if (
@@ -594,7 +614,7 @@ export class SketchEditResolver implements ToolIntentResolver {
       plan: {
         toolId: context.toolId,
         baseVersion: context.baseVersion,
-        summary: `${change.kind === 'move' ? 'Edit geometry' : change.kind === 'constrain' ? 'Constrain selection' : change.kind === 'delete' ? 'Delete entities' : change.kind === 'trim' ? 'Delete segment' : 'Add entities'} in sketch`,
+        summary: `${change.kind === 'dimension' ? 'Edit constraint value' : change.kind === 'move' ? 'Edit geometry' : change.kind === 'constrain' ? 'Constrain selection' : change.kind === 'delete' ? 'Delete entities' : change.kind === 'trim' ? 'Delete segment' : 'Add entities'} in sketch`,
         intent,
         edits,
         preview: {kind: 'source-edits', edits},

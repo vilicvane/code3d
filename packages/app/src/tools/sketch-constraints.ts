@@ -6,10 +6,43 @@ import type {
 } from '@code3d/core/tooling';
 import {sameSketchPoint, type SketchPoint} from './sketch-snap';
 import {sketchCurveGeometry, sketchCurvePosition} from '@code3d/core/tooling';
+import type {DrawingDimension} from './drawing-dimensions';
+
+export const sketchConstraintNames = {
+  fixed: 'Fixed',
+  horizontal: 'Horizontal',
+  vertical: 'Vertical',
+  coincident: 'Coincident',
+  midpoint: 'Midpoint',
+  length: 'Length',
+  angle: 'Angle',
+  radius: 'Radius',
+  sweep: 'Sweep',
+  x: 'X coordinate',
+  y: 'Y coordinate',
+} satisfies Record<SketchConstraint[0], string>;
+
+export const sketchConstraintDimensions: Partial<
+  Record<SketchConstraint[0], DrawingDimension>
+> = {
+  length: {id: 'length', label: 'Length', positive: true},
+  angle: {id: 'angle', label: 'Angle', unit: '°'},
+  radius: {id: 'radius', label: 'Radius', positive: true},
+  sweep: {
+    id: 'sweep',
+    label: 'Sweep',
+    unit: '°',
+    positive: true,
+    exclusiveMaximum: 360,
+  },
+  x: {id: 'x', label: 'X coordinate'},
+  y: {id: 'y', label: 'Y coordinate'},
+};
 
 export type SketchConstraintDisplay = Readonly<{
   /** Evaluation-local display identity, never an authored constraint ID. */
   key: string;
+  index: number;
   layer: string;
   kind: SketchConstraint[0];
   label: string;
@@ -45,8 +78,8 @@ export function sketchConstraintDisplays(
           case 'x':
           case 'y':
             related = [point(data)];
-            label = `${kind.toUpperCase()}=${number(value)}`;
-            title = `Coordinate ${kind.toUpperCase()}=${value}`;
+            label = number(value);
+            title = `${sketchConstraintNames[kind]}=${value}`;
             break;
           case 'coincident':
           case 'midpoint':
@@ -120,6 +153,7 @@ export function sketchConstraintDisplays(
             : related[0].position);
         return {
           key: JSON.stringify([layer.id, index]),
+          index,
           layer: layer.id,
           kind,
           label,

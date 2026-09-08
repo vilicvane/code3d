@@ -125,8 +125,11 @@ implementation context and historical outcomes, not a competing work queue.
   Nearby parallel lines, crossings and read-only upstream are not grouped.
   The Scissors/Trim tool previews on hover and trims directly on click without
   selection; Esc exits. Select + Delete/Backspace uses the same transaction.
-  Persistent constraints have read-only glyphs and numeric labels, an overall
+  Persistent constraints have selectable glyphs and numeric labels, an overall
   visibility toggle, and hover/focus highlighting of actual participants.
+  Clicking a marker selects its participants; local literal dimensions open a
+  focused input and update only that constraint value in one undo transaction.
+  Expression-driven values and upstream constraints remain read-only.
   Midpoint guides link the center to its two endpoints; upstream markers are
   distinct and drag-only locks are not presented as persistent constraints.
   Circle shares the same drawing, numeric input, snapping and source transaction
