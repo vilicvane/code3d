@@ -35,14 +35,21 @@ const trim = (
   })),
 });
 
-function setup(source) {
+function setup(source, before = '') {
   let version = 1;
   const undo = [];
-  const sourceRef = {file: '/model.ts', start: 0, end: source.length};
+  const sourceRef = {
+    file: '/model.ts',
+    start: before.length,
+    end: before.length + source.length,
+  };
   const engine = new ToolEngine({
     sourceVersion: () => version,
-    readSource: () => source,
-    resolveSourceRef: () => ({...sourceRef, end: source.length}),
+    readSource: ref => (before + source).slice(ref.start, ref.end),
+    resolveSourceRef: () => ({
+      ...sourceRef,
+      end: before.length + source.length,
+    }),
     applySourceEdits(base, edits) {
       assert.equal(base, version);
       assert.equal(edits.length, 1);
@@ -71,6 +78,105 @@ function setup(source) {
     },
   };
 }
+
+for (const newline of ['\n', '\r\n']) {
+  for (const indentation of ['', '  ', '    ', '\t']) {
+    const unit = indentation + '  ';
+    const entries = `[
+${unit}  ['point', 1, [width, 0]], // keep expression
+${unit}]`;
+    const constraints = `{
+${unit}  constraints: [
+${unit}    ['x', 1, width], // keep constraint
+${unit}  ],
+${unit}}`;
+    const convert = text => text.replaceAll('\n', newline);
+    const before = convert(
+      `function build() {\n${indentation}const value = base.derive(\n${unit}`,
+    );
+    for (const options of ['', `, ${constraints}`, `, {\n${unit}}`]) {
+      test(`generated geometry and constraints use the enclosing indentation ${JSON.stringify([newline, indentation, options])}`, () => {
+        const host = setup(convert(entries + options), before);
+        assert.equal(
+          host.edit({
+            kind: 'append',
+            entries: [['point', 2, [20, 0]]],
+            constraints: [
+              ['y', address(2), 0],
+              ['fixed', address(2)],
+            ],
+          }).status,
+          'committed',
+        );
+        const result = host.source().split(newline);
+        assert.ok(result.includes(`${unit}  ['point', 2, [20, 0]],`));
+        assert.ok(result.includes(`${unit}    ['y', 2, 0],`));
+        assert.ok(result.includes(`${unit}    ['fixed', 2],`));
+        assert.ok(result.includes(`${unit}  constraints: [`));
+        assert.ok(result.includes(`${unit}  ],`));
+        assert.match(host.source(), /\[width, 0\]/);
+        assert.match(host.source(), /\/\/ keep expression/);
+        assert.equal(host.undo.length, 1);
+        if (newline === '\r\n') assert.doesNotMatch(host.source(), /(?<!\r)\n/);
+      });
+    }
+  }
+}
+
+for (const trivia of ['', '/* empty */', '// empty\n']) {
+  test(`creating the first argument in a nested empty call uses its real line indentation (${JSON.stringify(trivia)})`, () => {
+    const host = setup(trivia, 'function build() {\n  const value = sketch(');
+    assert.equal(
+      host.edit({
+        kind: 'append',
+        entries: [['point', 1, [0, 0]]],
+        constraints: [['fixed', address(1)]],
+      }).status,
+      'committed',
+    );
+    assert.equal(
+      host.source(),
+      `${trivia ? trivia + (trivia.endsWith('\n') ? '' : '\n') + '  ' : ''}[
+    ['point', 1, [0, 0]],
+  ], {
+    constraints: [
+      ['fixed', 1],
+    ],
+  }`,
+    );
+  });
+}
+
+test('trim copies curve and constraint expressions with their containing list indentation', () => {
+  const host = setup(
+    `[
+      ['line', 5, [/* a */ 1, 2]],
+    ], {
+      constraints: [
+        ['angle', 5, direction],
+      ],
+    }`,
+    'function build() {\n  return sketch(\n    ',
+  );
+  assert.equal(
+    host.edit(
+      trim(
+        [
+          ['point', 6, [10, 0]],
+          ['point', 7, [20, 0]],
+          ['line', 8, [address(1), address(6)]],
+          ['line', 9, [address(7), address(2)]],
+        ],
+        [{index: 0, lines: [8, 9]}],
+      ),
+    ).status,
+    'committed',
+  );
+  const result = host.source().split('\n');
+  assert.ok(result.includes("      ['line', 8, [/* a */ 1, 6]],"));
+  assert.ok(result.includes("      ['line', 9, [/* a */ 7, 2]],"));
+  assert.ok(result.includes("        ['angle', 9, direction],"));
+});
 
 test('moving a numeric point preserves expressions, comments and tuple identities', () => {
   const source =

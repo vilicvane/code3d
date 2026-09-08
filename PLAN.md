@@ -196,7 +196,8 @@ implementation context and historical outcomes, not a competing work queue.
   below the compilation status. Both viewport
   status and error cards are scoped to the defining evaluations of the selected
   sketch and its upstream layers, excluding sibling/downstream and 3D errors.
-  Failed recompilation retains the selected last-successful sketch read-only;
+  Recompilation that cannot evaluate the selected sketch retains its last-successful
+  result read-only; downstream/sibling errors do not reset its active drawing/Trim tool.
   leaving its source selection clears it. Monaco still receives all diagnostics.
   See [research and priorities](plans/sketch-editor.md) and
   [#23](https://github.com/vilicvane/code3d/issues/23); region identity and modeling

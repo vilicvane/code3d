@@ -52,7 +52,7 @@ function apply(local, args, preview) {
   const resolution = new SketchEditResolver().resolve(
     {
       kind: 'sketch.edit',
-      sourceRef: local.definitionRef,
+      sourceRef: {file: '/model.ts', start: 0, end: args.length},
       expectedText: args,
       layer: local.id,
       references: local.references,
@@ -68,7 +68,7 @@ function apply(local, args, preview) {
       toolId: 'test',
       baseVersion: 1,
       resolveSourceRef: ref => ref,
-      readSource: () => args,
+      readSource: ref => args.slice(ref.start, ref.end),
     },
   );
   assert.equal(resolution.status, 'ready');

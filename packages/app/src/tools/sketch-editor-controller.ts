@@ -98,15 +98,20 @@ export class SketchEditorController {
       : [];
   }
 
-  /** Keep an explicitly selected last-good view when evaluation cannot reach it. */
+  /** Keep an explicitly selected last-good view only when evaluation cannot reach it.
+   * An error after a successful sketch must not put it through a read-only state:
+   * that would cancel the active tool even though this sketch remains editable.
+   */
   retain(
     diagnostic: ModelDiagnostic | undefined,
     cursor: {file: string; offset: number} | undefined,
+    sketches: ReadonlyMap<string, CompiledSketch>,
   ): boolean {
     const selection =
       this.selectionRef && this.host.resolveSourceRef(this.selectionRef);
     if (
       !this.active ||
+      sketches.has(this.active.id) ||
       !diagnostic ||
       !cursor ||
       !selection ||

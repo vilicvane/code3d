@@ -286,7 +286,7 @@ function edit(args, change) {
       toolId: 'rectangle',
       baseVersion: 1,
       resolveSourceRef: ref => ref,
-      readSource: () => args,
+      readSource: ref => args.slice(ref.start, ref.end),
     },
   );
   assert.equal(result.status, 'ready');

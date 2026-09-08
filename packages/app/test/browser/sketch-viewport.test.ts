@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import type {Page} from 'playwright-core';
-import {open, point, text, waitForSource} from './sketch-test.ts';
+import {
+  open,
+  point,
+  text,
+  waitForSource,
+  segment,
+  clickSegment,
+} from './sketch-test.ts';
 
 async function cursor(page: Page, line: number, column: number): Promise<void> {
   await page.locator('.monaco-editor .view-lines').click();
@@ -12,6 +19,47 @@ async function cursor(page: Page, line: number, column: number): Promise<void> {
 }
 const sketch =
   "const value = sketch([['point', 1, [0, 0]], ['point', 2, [40, 0]], ['line', 3, [1, 2]]]);";
+
+for (const failure of [
+  'value.face().extrude(10);',
+  "sketch([['line', 1, [9, 10]]]);",
+]) {
+  test(`Trim remains active across successive edits with an error from ${failure}`, async t => {
+    const page = await open(
+      t,
+      `import {sketch} from '@code3d/core';
+const value = sketch([
+  ['point', 1, [0, 0]], ['point', 2, [20, 0]],
+  ['point', 3, [20, 20]], ['point', 4, [0, 20]],
+  ['line', 5, [1, 2]], ['line', 6, [2, 3]],
+  ['line', 7, [3, 4]], ['line', 8, [4, 1]],
+]);
+${failure}`,
+      {line: 2, column: 8},
+    );
+    await page.getByText('Ready', {exact: true}).waitFor();
+    const trim = page.getByRole('button', {name: 'Trim', exact: true});
+    await trim.click();
+    for (const id of [5, 6]) {
+      const target = segment(page, id, 0, 1);
+      await clickSegment(page, target);
+      await target.waitFor({state: 'detached'});
+      await page.locator('.monaco-editor .squiggly-error').first().waitFor();
+      await page.getByText('Ready', {exact: true}).waitFor();
+      assert.equal(await trim.getAttribute('aria-pressed'), 'true');
+      assert.equal(await trim.isEnabled(), true);
+      assert.equal(
+        await page.locator('.sketch-editor output').isVisible(),
+        false,
+      );
+    }
+    await page.keyboard.press('Control+z');
+    await segment(page, 6, 0, 1).waitFor({state: 'attached'});
+    await page.getByText('Ready', {exact: true}).waitFor();
+    await page.keyboard.press('Control+z');
+    await segment(page, 5, 0, 1).waitFor({state: 'attached'});
+  });
+}
 
 for (const [name, failure] of [
   ['another sketch', "const other = sketch([['line', 1, [9, 10]]]);"],

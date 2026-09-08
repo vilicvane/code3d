@@ -269,6 +269,27 @@ export class SketchEditResolver implements ToolIntentResolver {
     const parsed = analyzeSketchSource(source);
     if (parsed.reason) return {status: 'unsupported', reason: parsed.reason};
     const changes: {start: number; end: number; text: string}[] = [];
+    // The traced span starts at the first argument, not at its enclosing line.
+    // Read the preceding source too so nested constructors/derivations retain
+    // their real indentation instead of treating the synthetic call as column 0.
+    const before = context.readSource({
+      ...sourceRef,
+      start: 0,
+      end: sourceRef.start,
+    });
+    const lineIndent = (offset: number) => {
+      const text = before + source.slice(0, offset);
+      return text.slice(text.lastIndexOf('\n') + 1).match(/^[ \t]*/)![0];
+    };
+    const newline = (before + source).includes('\r\n') ? '\r\n' : '\n';
+    const indentStep = '  ';
+    type List = ts.ArrayLiteralExpression | ts.ObjectLiteralExpression;
+    const indent = (list: List): string =>
+      list === parsed.constraints
+        ? indent(parsed.options!) + indentStep
+        : lineIndent(list.getStart() - prefix.length);
+    const listText = (items: readonly string[], indentation: string) =>
+      items.map(text => `${indentation}${indentStep}${text},`).join(newline);
     const replace = (node: ts.Node, text: string) =>
       changes.push({
         start: node.getStart() - prefix.length,
@@ -295,27 +316,40 @@ export class SketchEditResolver implements ToolIntentResolver {
         text: '',
       });
     };
-    const append = (array: ts.ArrayLiteralExpression, text: string) => {
-      if (!text) return;
-      const last = array.elements.filter(node => !removed.has(node)).at(-1);
+    const append = (list: List, items: readonly string[]) => {
+      if (!items.length) return;
+      const children = ts.isArrayLiteralExpression(list)
+        ? list.elements
+        : list.properties;
+      const last = children.filter(node => !removed.has(node)).at(-1);
       if (last && !followingComma(last)) {
         const end = last.end - prefix.length;
         changes.push({start: end, end, text: ','});
       }
-      const end = array.end - prefix.length - 1;
+      const end = list.end - prefix.length - 1;
       const closingIndent = source.slice(0, end).match(/[ \t]*$/)![0];
       const start = end - closingIndent.length;
-      const separator = source[start - 1] === '\n' ? '' : '\n';
-      changes.push({start, end, text: `${separator}${text}\n${closingIndent}`});
+      const separator = source[start - 1] === '\n' ? '' : newline;
+      const indentation = indent(list);
+      changes.push({
+        start,
+        end,
+        text: `${separator}${listText(items, indentation)}${newline}${indentation}`,
+      });
     };
-    const appendEntries = (text: string, required = false) => {
-      if (parsed.array) append(parsed.array, text);
-      else if (text || required)
+    const appendEntries = (items: readonly string[], required = false) => {
+      if (parsed.array) append(parsed.array, items);
+      else if (items.length || required) {
+        const indentation = lineIndent(0);
+        const separator = source
+          ? (source.endsWith('\n') ? '' : newline) + indentation
+          : '';
         changes.push({
           start: source.length,
           end: source.length,
-          text: `${source ? '\n' : ''}[${text ? '\n' + text + '\n' : ''}]`,
+          text: `${separator}[${items.length ? newline + listText(items, indentation) + newline + indentation : ''}]`,
         });
+      }
     };
     const point = (ref: SketchPointAddress): string => {
       if (ref.layer === intent.layer) return String(ref.id);
@@ -341,7 +375,7 @@ export class SketchEditResolver implements ToolIntentResolver {
                   `'${data[4]}'`,
                 ]
               : data.map(point);
-      return `  ['${kind}', ${id}, [${content.join(', ')}]],`;
+      return `['${kind}', ${id}, [${content.join(', ')}]]`;
     };
     const {change} = intent;
     if (change.kind === 'dimension') {
@@ -472,7 +506,7 @@ export class SketchEditResolver implements ToolIntentResolver {
           let text = raw(parsedEntry.node);
           for (const edit of edits.sort((a, b) => b.start - a.start))
             text = text.slice(0, edit.start) + edit.text + text.slice(edit.end);
-          return `  ${text},`;
+          return text;
         };
         for (const {original: entity, ids} of change.replacements) {
           const original = parsed.entries.get(entity.id);
@@ -482,10 +516,7 @@ export class SketchEditResolver implements ToolIntentResolver {
           const retained = change.entries.find(entry => entry[1] === entity.id);
           if (!retained) remove(original.node);
           else {
-            replace(
-              original.node,
-              replacementText(retained).trim().slice(0, -1),
-            );
+            replace(original.node, replacementText(retained));
           }
         }
         const added = change.entries.filter(
@@ -495,7 +526,7 @@ export class SketchEditResolver implements ToolIntentResolver {
           if (parsed.entries.has(id))
             throw new Error(`Sketch entity ${id} already exists.`);
         }
-        appendEntries(added.map(replacementText).join('\n'));
+        appendEntries(added.map(replacementText));
         const copies: string[] = [];
         for (const {index, ids} of change.constraintReplacements) {
           const node = parsed.constraints?.elements[index];
@@ -524,84 +555,76 @@ export class SketchEditResolver implements ToolIntentResolver {
           const raw = source.slice(start, node.end - prefix.length);
           for (const id of ids.slice(1))
             copies.push(
-              `  ${raw.slice(0, target.getStart() - prefix.length - start)}${id}${raw.slice(target.end - prefix.length - start)},`,
+              `${raw.slice(0, target.getStart() - prefix.length - start)}${id}${raw.slice(target.end - prefix.length - start)}`,
             );
         }
-        if (copies.length) append(parsed.constraints!, copies.join('\n'));
+        if (copies.length) append(parsed.constraints!, copies);
       } catch (error) {
         return {status: 'conflict', reason: (error as Error).message};
       }
     } else if (change.kind === 'append' || change.kind === 'constrain') {
       const ids = new Set(parsed.entries.keys());
-      let text: string;
-      let constraints: string;
+      let entries: string[];
+      let constraints: string[];
       try {
-        text = (change.kind === 'append' ? change.entries : [])
-          .map(entry => {
+        entries = (change.kind === 'append' ? change.entries : []).map(
+          entry => {
             const id = entry[1];
             if (ids.has(id))
               throw new Error(`Sketch entity ${id} already exists.`);
             ids.add(id);
             return entryText(entry);
-          })
-          .join('\n');
-        constraints = (change.constraints ?? [])
-          .map(([kind, data, value]) => {
-            let content: string;
-            switch (kind) {
-              case 'fixed':
-                content = point(data);
-                break;
-              case 'horizontal':
-              case 'vertical':
-                content = String(data);
-                break;
-              case 'coincident':
-              case 'midpoint':
-                content = `[${data.map(point).join(', ')}]`;
-                break;
-              case 'x':
-              case 'y':
-                content = `${point(data)}, ${formatSourceNumber(value)}`;
-                break;
-              case 'length':
-              case 'angle':
-              case 'radius':
-              case 'sweep':
-                content = `${data}, ${formatSourceNumber(value)}`;
-                break;
-            }
-            return `['${kind}', ${content}]`;
-          })
-          .join(',\n  ');
+          },
+        );
+        constraints = (change.constraints ?? []).map(([kind, data, value]) => {
+          let content: string;
+          switch (kind) {
+            case 'fixed':
+              content = point(data);
+              break;
+            case 'horizontal':
+            case 'vertical':
+              content = String(data);
+              break;
+            case 'coincident':
+            case 'midpoint':
+              content = `[${data.map(point).join(', ')}]`;
+              break;
+            case 'x':
+            case 'y':
+              content = `${point(data)}, ${formatSourceNumber(value)}`;
+              break;
+            case 'length':
+            case 'angle':
+            case 'radius':
+            case 'sweep':
+              content = `${data}, ${formatSourceNumber(value)}`;
+              break;
+          }
+          return `['${kind}', ${content}]`;
+        });
       } catch (error) {
         return {status: 'conflict', reason: (error as Error).message};
       }
-      appendEntries(text, !!change.constraints?.length);
+      appendEntries(entries, !!change.constraints?.length);
       if (change.constraints?.length) {
         if (parsed.constraints) {
-          append(parsed.constraints, `  ${constraints},`);
-        } else if (parsed.options) {
-          const options = parsed.options;
-          if (
-            options.properties.length &&
-            !options.properties.hasTrailingComma
-          ) {
-            const end = options.properties.at(-1)!.end - prefix.length;
-            changes.push({start: end, end, text: ','});
-          }
-          const end = options.end - prefix.length - 1;
-          changes.push({
-            start: end,
-            end,
-            text: `\nconstraints: [${constraints}],\n`,
-          });
+          append(parsed.constraints, constraints);
         } else {
-          changes.push({
-            start: source.length,
-            end: source.length,
-            text: `, {constraints: [\n  ${constraints},\n]}`,
-          });
+          const indentation = parsed.options
+            ? indent(parsed.options)
+            : parsed.array
+              ? indent(parsed.array)
+              : lineIndent(0);
+          const propertyIndent = indentation + indentStep;
+          const property = `constraints: [${newline}${listText(constraints, propertyIndent)}${newline}${propertyIndent}]`;
+          if (parsed.options) append(parsed.options, [property]);
+          else
+            changes.push({
+              start: source.length,
+              end: source.length,
+              text: `, {${newline}${listText([property], indentation)}${newline}${indentation}}`,
+            });
         }
       }
     }

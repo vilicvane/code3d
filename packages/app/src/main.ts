@@ -923,7 +923,11 @@ async function runModel(
       return;
     }
     codeEditor.setDesignArguments(nextModule.designArguments);
-    sketchEditor.retain(nextModule.diagnostic, codeEditor.cursorSource());
+    sketchEditor.retain(
+      nextModule.diagnostic,
+      codeEditor.cursorSource(),
+      nextModule.sketches,
+    );
     codeEditor.trackSourceRefs([
       ...toolSourceRefs(nextModule),
       ...sketchEditor.sourceRefs(),
@@ -1391,7 +1395,11 @@ function syncContextualTool(sourceTargetFocused = true): void {
   } else if (
     (!sourceTargetFocused ||
       currentModuleSourceVersion === codeEditor.sourceVersion()) &&
-    !sketchEditor.retain(currentDiagnostic, codeEditor.cursorSource())
+    !sketchEditor.retain(
+      currentDiagnostic,
+      codeEditor.cursorSource(),
+      currentModule?.sketches ?? new Map(),
+    )
   ) {
     sketchEditor.hide();
   }

@@ -78,7 +78,7 @@ function resolve(
       toolId: 'trim',
       baseVersion: 1,
       resolveSourceRef: r => r,
-      readSource: () => args,
+      readSource: ref => args.slice(ref.start, ref.end),
     },
   );
 }

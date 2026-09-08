@@ -14,11 +14,7 @@ before(async () => {
 });
 after(async () => browser?.close());
 
-export async function open(
-  t: TestContext,
-  source: string,
-  cursor?: {line: number; column: number},
-): Promise<Page> {
+export async function openPage(t: TestContext): Promise<Page> {
   const context = await browser.newContext({
     viewport: {width: 1400, height: 900},
   });
@@ -31,6 +27,15 @@ export async function open(
   // A cold Vite module graph needs the same initialization budget as compilation.
   await page.goto(process.env.CODE3D_TEST_URL!, {timeout: 30_000});
   await page.getByText('Ready', {exact: true}).waitFor({timeout: 30_000});
+  return page;
+}
+
+export async function open(
+  t: TestContext,
+  source: string,
+  cursor?: {line: number; column: number},
+): Promise<Page> {
+  const page = await openPage(t);
   await page.locator('.monaco-editor .view-lines').first().click();
   await page.keyboard.press('Control+a');
   await page.keyboard.insertText(source);
