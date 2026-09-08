@@ -20,6 +20,14 @@ export class AgentRenderView {
   private readonly closeButton = control('Back to live view', X, () =>
     this.close(),
   );
+  private readonly dismissButton = control(
+    'Dismiss snapshot preview',
+    X,
+    () => {
+      this.dismissedFrames = new Set(this.history.items.map(item => item.id));
+      this.refreshPreviewVisibility();
+    },
+  );
   private readonly previous = control('Previous snapshot', ChevronLeft, () =>
     this.move(-1),
   );
@@ -32,8 +40,10 @@ export class AgentRenderView {
   private readonly inactive = new Map<HTMLElement, boolean>();
   private readonly unsubscribe: () => void;
   private selected?: string;
+  private dismissedFrames?: ReadonlySet<string>;
   private following = true;
   private agent = '';
+  private activeAgents: ReadonlySet<string> = new Set();
 
   constructor(
     private readonly host: HTMLElement,
@@ -117,7 +127,8 @@ export class AgentRenderView {
     });
     footer.append(navigation, this.timeline);
     this.viewer.append(header, figure, footer);
-    this.root.append(this.preview, this.viewer);
+    this.dismissButton.classList.add('agent-render-dismiss');
+    this.root.append(this.preview, this.dismissButton, this.viewer);
     this.host.append(this.root);
     this.root.addEventListener('keydown', event => {
       event.stopPropagation();
@@ -141,11 +152,26 @@ export class AgentRenderView {
     this.refresh();
   }
 
+  setActiveAgents(agents: ReadonlySet<string>): void {
+    this.activeAgents = agents;
+    // Presence updates must not move the selected frame or the timeline scroll.
+    for (const label of [this.previewName, this.name])
+      label.dataset.active = String(agents.has(label.dataset.agentId ?? ''));
+  }
+
+  private refreshPreviewVisibility(): void {
+    const dismissed = this.dismissedFrames;
+    if (dismissed && this.history.items.some(item => !dismissed.has(item.id)))
+      this.dismissedFrames = undefined;
+    const hidden = !this.viewer.hidden || !!this.dismissedFrames;
+    this.preview.hidden = this.dismissButton.hidden = hidden;
+  }
+
   private open(): void {
     this.agent = '';
     this.following = true;
     this.viewer.hidden = false;
-    this.preview.hidden = true;
+    this.refreshPreviewVisibility();
     this.preview.setAttribute('aria-expanded', 'true');
     for (const child of this.host.children) {
       if (!(child instanceof HTMLElement) || child === this.root) continue;
@@ -158,11 +184,12 @@ export class AgentRenderView {
 
   private close(): void {
     this.viewer.hidden = true;
-    this.preview.hidden = false;
+    this.refreshPreviewVisibility();
     this.preview.setAttribute('aria-expanded', 'false');
     for (const [child, inert] of this.inactive) child.inert = inert;
     this.inactive.clear();
-    if (!this.root.hidden) this.preview.focus({preventScroll: true});
+    if (!this.root.hidden && !this.preview.hidden)
+      this.preview.focus({preventScroll: true});
   }
 
   private items(): readonly AgentRender[] {
@@ -199,6 +226,7 @@ export class AgentRenderView {
     }
     const latest = all.at(-1);
     this.root.hidden = !latest;
+    this.refreshPreviewVisibility();
     if (!latest) {
       this.close();
       this.image.removeAttribute('src');
@@ -210,7 +238,12 @@ export class AgentRenderView {
     }
     this.previewImage.src = this.url(latest);
     this.previewName.textContent = latest.agent.name;
+    this.previewName.dataset.agentId = latest.agent.id;
+    this.previewName.dataset.active = String(
+      this.activeAgents.has(latest.agent.id),
+    );
     this.preview.className = `agent-render-preview agent-color-${latest.agent.color}`;
+    this.dismissButton.className = `quiet-button agent-render-control agent-render-dismiss agent-color-${latest.agent.color}`;
     stamp(this.previewTime, latest.capturedAt);
     this.preview.setAttribute(
       'aria-label',
@@ -247,6 +280,8 @@ export class AgentRenderView {
     this.image.alt = `Render from ${selected.agent.name} at ${new Date(selected.capturedAt).toLocaleString()}`;
     this.name.className = `agent-render-agent agent-color-${selected.agent.color}`;
     this.name.textContent = selected.agent.name;
+    this.name.dataset.agentId = selected.agent.id;
+    this.name.dataset.active = String(this.activeAgents.has(selected.agent.id));
     stamp(this.time, selected.capturedAt);
     this.count.textContent = `${index + 1} / ${items.length}`;
     this.previous.disabled = index === 0;

@@ -236,10 +236,13 @@ not roll back changes. A stuck compilation can be replaced by applying new sourc
 
 ### View agent snapshots in the App
 
-Each successful render appears in a corner of the visualization view with the
-agent's name, color, and capture time. It is the same PNG returned to the CLI,
+Each successful render appears below the controls in the top-right corner of
+Modeling and sketch views, with the agent's name, color, and capture time. It is the same PNG returned to the CLI,
 including sketch renders and the agent's requested camera angle. Click the preview
 to fill the visualization view and browse the screenshot timeline below it.
+The close button hides the preview until a new image arrives. Render mode hides
+it while preserving the history. Agent dots dim while disconnected or until the
+agent first interacts after the page opens.
 
 Filter by agent, use the previous/next controls, or focus the timeline and use
 Left/Right, Home, and End. Selecting an older image keeps it in view as new renders

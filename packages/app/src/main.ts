@@ -330,7 +330,7 @@ const agentObserver = new AgentObserver(
   () => agentProject.currentRevision,
 );
 const agentRenders = new AgentRenderHistory();
-new AgentRenderView(viewportHost, agentRenders);
+const agentRenderView = new AgentRenderView(viewportHost, agentRenders);
 let agentPanel: AgentPanel | undefined;
 const agentProject = new AgentProjectSession(
   projectFileSystem,
@@ -353,6 +353,7 @@ agentPanel = new AgentPanel(
       : undefined
     : 'browser',
   agentRenders,
+  activeAgents => agentRenderView.setActiveAgents(activeAgents),
 );
 retrySaveButton.addEventListener('click', () => {
   void agentProject.retrySaves().catch(showProjectIssue);

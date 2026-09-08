@@ -1,3 +1,4 @@
+import {appIsolationHeaders} from '../../build/isolation.ts';
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {mkdtemp, readFile, writeFile, rm} from 'node:fs/promises';
@@ -49,6 +50,7 @@ test(
     t.after(() => rm(temp, {recursive: true, force: true}));
     const configs: string[] = [];
     const agentIds: string[] = [];
+    const servers: Awaited<ReturnType<typeof startServe>>[] = [];
     await page.locator('#agents-button').click();
     for (const name of ['Euler', 'Noether']) {
       const port = await reserveLocalPort(t);
@@ -82,9 +84,11 @@ test(
       configs.push(file);
       agentIds.push(config.agentId);
       await port.release();
-      await startServe(t, file);
+      servers.push(await startServe(t, file));
     }
-    await page.locator('.agent-status[data-state="online"]').waitFor();
+    await page
+      .locator('.agent-status[data-state="online"]')
+      .waitFor({state: 'attached'});
     await page.getByRole('button', {name: 'Close', exact: true}).click();
     const cli = async (
       agent: number,
@@ -102,6 +106,13 @@ test(
     const apply = (agent: number, id: string, input: object, code = 0) =>
       cli(agent, ['--request-id', id, 'apply', '--input', '-'], input, code);
     const preview = page.locator('.agent-render-preview');
+    const viewportInset = await page
+      .locator('#viewport-host')
+      .evaluate(element =>
+        parseFloat(
+          getComputedStyle(element).getPropertyValue('--viewport-inset'),
+        ),
+      );
     const viewer = page.locator('.agent-render-viewer');
     const image = page.locator('.agent-render-image img');
     const thumbnails = page
@@ -152,6 +163,18 @@ test(
       await preview.locator('time').getAttribute('datetime'),
       first.data.observation.render.capturedAt,
     );
+    const coordinate = (await page
+      .locator('#viewport-host > .viewport-coordinate-reference')
+      .boundingBox())!;
+    const corner = (await preview.boundingBox())!;
+    assert.ok(
+      Math.abs(corner.y - coordinate.y - coordinate.height - viewportInset) < 1,
+    );
+    await page.locator('#viewport-mode-render').click();
+    assert.equal(await preview.isVisible(), false);
+    await page.locator('#viewport-mode-modeling').click();
+    assert.equal(await preview.isVisible(), true);
+    assert.equal(await preview.locator('img').getAttribute('src'), firstUrl);
     await page.screenshot({path: '/tmp/code3d-agent-render-preview.png'});
     const before = await liveState();
     await preview.click();
@@ -173,6 +196,60 @@ test(
         .evaluate(element => Boolean(element.closest('[inert]'))),
       false,
     );
+    // A real service disconnect dims every live identity indicator, even for
+    // a pinned historical image. Reconnection must not alter that image.
+    const badge = page
+      .locator('#agents-button .agent-badge')
+      .filter({hasText: 'Euler'});
+    const dotOpacity = (label: Locator, pseudo = false) =>
+      label.evaluate(
+        (element, pseudo) =>
+          getComputedStyle(element, pseudo ? '::before' : null).opacity,
+        pseudo,
+      );
+    const caption = viewer.locator('figcaption .agent-render-agent');
+    const previewLabel = preview.locator('.agent-render-agent');
+    assert.equal(await dotOpacity(badge.locator('.agent-badge-dot')), '1');
+    assert.equal(await dotOpacity(caption, true), '1');
+    const pinnedImage = await image.getAttribute('src');
+    const scroll = await page
+      .locator('.agent-render-timeline')
+      .evaluate(element => element.scrollLeft);
+    await servers[0].stop();
+    await page.waitForFunction(() =>
+      [...document.querySelectorAll('#agents-button .agent-badge')].some(
+        element =>
+          element.textContent === 'Euler' &&
+          (element as HTMLElement).dataset.active === 'false',
+      ),
+    );
+    assert.equal(await dotOpacity(badge.locator('.agent-badge-dot')), '0.4');
+    assert.equal(await dotOpacity(caption, true), '0.4');
+    assert.equal(await dotOpacity(previewLabel, true), '0.4');
+    assert.equal(await image.getAttribute('src'), pinnedImage);
+    assert.equal(await count.textContent(), '1 / 1');
+    assert.equal(
+      await page
+        .locator('.agent-render-timeline')
+        .evaluate(element => element.scrollLeft),
+      scroll,
+    );
+    await page.screenshot({path: '/tmp/code3d-agent-dot-offline.png'});
+    await page.locator('#agents-button').click();
+    const row = page.locator('.agent-row').filter({hasText: 'Euler'});
+    assert.equal(await dotOpacity(row.locator('.agent-badge-dot')), '0.4');
+    await page.getByRole('button', {name: 'Close', exact: true}).click();
+    servers[0] = await startServe(t, configs[0]);
+    await page.waitForFunction(() =>
+      [...document.querySelectorAll('#agents-button .agent-badge')].some(
+        element =>
+          element.textContent === 'Euler' &&
+          (element as HTMLElement).dataset.active === 'true',
+      ),
+    );
+    assert.equal(await dotOpacity(caption, true), '1');
+    assert.equal(await dotOpacity(previewLabel, true), '1');
+    assert.equal(await image.getAttribute('src'), pinnedImage);
     const second = await apply(0, 'top', {...render, render: {view: 'top'}});
     await waitCount('2 / 2');
     assert.equal(
@@ -195,6 +272,36 @@ test(
     await waitCount('1 / 3');
     await assertImage(image, first.artifacts[0].path);
     await assertImage(preview.locator('img'), sketch.artifacts[0].path);
+    const sketchPixels = await preview
+      .locator('img')
+      .evaluate(async element => {
+        const bitmap = await createImageBitmap(element as HTMLImageElement);
+        const canvas = document.createElement('canvas');
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        const context = canvas.getContext('2d')!;
+        context.drawImage(bitmap, 0, 0);
+        const pixels = context.getImageData(
+          0,
+          0,
+          canvas.width,
+          canvas.height,
+        ).data;
+        let visible = 0;
+        for (let offset = 0; offset < pixels.length; offset += 4)
+          if (
+            pixels[offset] > 120 &&
+            pixels[offset + 1] > 120 &&
+            pixels[offset + 2] < 160
+          )
+            visible++;
+        bitmap.close();
+        return visible;
+      });
+    assert.ok(
+      sketchPixels > 300,
+      `Expected a visible circle, found ${sketchPixels} foreground pixels`,
+    );
     assert.equal(
       await preview.locator('.agent-render-agent').textContent(),
       'Noether',
@@ -249,7 +356,7 @@ test(
       false,
     );
 
-    // The corner preview leaves sketch tools available as the human changes focus.
+    // The preview stacks directly below visible sketch controls as focus changes.
     await page.evaluate(
       ({file, source}) => {
         const start = source.indexOf('sketch([');
@@ -269,10 +376,67 @@ test(
       .locator('.sketch-toolbar')
       .first()
       .boundingBox())!;
-    assert.ok(thumbnailBounds.y >= toolbarBounds.y + toolbarBounds.height);
+    assert.ok(
+      Math.abs(
+        thumbnailBounds.y -
+          toolbarBounds.y -
+          toolbarBounds.height -
+          viewportInset,
+      ) < 1,
+    );
+    assert.ok(
+      Math.abs(
+        thumbnailBounds.x +
+          thumbnailBounds.width -
+          toolbarBounds.x -
+          toolbarBounds.width,
+      ) < 1,
+    );
     await page.screenshot({
       path: '/tmp/code3d-agent-render-sketch-preview.png',
     });
+    await liveSketch
+      .locator('.sketch-canvas circle.local[data-id="1"]')
+      .click();
+    const constraints = liveSketch.locator('.sketch-constraint-tools');
+    await constraints.waitFor();
+    const constraintBounds = (await constraints.boundingBox())!;
+    const pushedPreview = (await preview.boundingBox())!;
+    assert.ok(
+      Math.abs(
+        pushedPreview.y -
+          constraintBounds.y -
+          constraintBounds.height -
+          viewportInset,
+      ) < 1,
+    );
+    await page.setViewportSize({width: 1050, height: 720});
+    const narrowControls = (await constraints.boundingBox())!;
+    const narrowPreview = (await preview.boundingBox())!;
+    const narrowToolbar = (await liveSketch
+      .locator('.sketch-toolbar')
+      .first()
+      .boundingBox())!;
+    const header = (await page.locator('.viewport-header').boundingBox())!;
+    assert.ok(narrowToolbar.y >= header.y + header.height + viewportInset - 1);
+    assert.ok(
+      Math.abs(
+        narrowPreview.y -
+          narrowControls.y -
+          narrowControls.height -
+          viewportInset,
+      ) < 1,
+    );
+    await page.screenshot({path: '/tmp/code3d-agent-render-sketch-stack.png'});
+    await page.keyboard.press('Escape');
+    await constraints.waitFor({state: 'hidden'});
+    const collapsed = (await preview.boundingBox())!;
+    assert.ok(
+      Math.abs(
+        collapsed.y - narrowToolbar.y - narrowToolbar.height - viewportInset,
+      ) < 1,
+    );
+    await page.setViewportSize({width: 1440, height: 900});
     const sketchState = await liveState();
     await preview.click();
     assert.equal(
@@ -291,6 +455,12 @@ test(
 
     await page.reload();
     await preview.waitFor();
+    assert.equal(await dotOpacity(previewLabel, true), '0.4');
+    await page
+      .locator('.agent-status[data-state="online"]')
+      .waitFor({state: 'attached'});
+    await cli(1, ['context']);
+    assert.equal(await dotOpacity(previewLabel, true), '1');
     await preview.click();
     await waitCount('4 / 4');
     assert.equal(await thumbnails.count(), 4);
@@ -328,10 +498,32 @@ test(
     );
     assert.notEqual(await image.getAttribute('src'), firstUrl);
     // Removing a pinned agent falls back to following the remaining agent's latest.
+    await viewer
+      .getByRole('button', {name: 'Back to live view', exact: true})
+      .click();
+    const dismiss = page.getByRole('button', {
+      name: 'Dismiss snapshot preview',
+      exact: true,
+    });
+    await dismiss.click();
+    assert.equal(await preview.isVisible(), false);
+    assert.equal(await dismiss.isVisible(), false);
+    await cli(0, ['context']);
+    await cli(0, ['result', 'front']);
+    assert.equal(await preview.isVisible(), false);
     await apply(0, 'after-revoke', {cursor, render: true});
+    await preview.waitFor();
+    assert.equal(await dismiss.isVisible(), true);
+    await preview.click();
     await waitCount('3 / 3');
     await page.reload();
     await preview.waitFor();
+    assert.equal(await dotOpacity(previewLabel, true), '0.4');
+    await page
+      .locator('.agent-status[data-state="online"]')
+      .waitFor({state: 'attached'});
+    await cli(0, ['context']);
+    assert.equal(await dotOpacity(previewLabel, true), '1');
     await preview.click();
     await waitCount('3 / 3');
     await page.locator('#agents-button').click();
@@ -369,6 +561,7 @@ test(
     await page.route(url, route =>
       route.fulfill({
         contentType: 'text/html',
+        headers: appIsolationHeaders,
         body: '<link rel="stylesheet" href="/src/style.css"><main id="viewport-host" class="viewport-host" style="width:360px;height:500px"></main>',
       }),
     );
@@ -470,5 +663,19 @@ test(
     assert.equal(await count.textContent(), '100 / 100');
     await page.evaluate(() => window.agentTestHistory.clear());
     assert.equal(await page.locator('.agent-renders').isVisible(), false);
+    // Removing a dismissed frame does not reopen the preview; a newly received
+    // frame does, including a concurrent render captured earlier but delivered late.
+    await add(2, 2);
+    await add(3, 3, 'Noether');
+    await page
+      .getByRole('button', {name: 'Dismiss snapshot preview', exact: true})
+      .click();
+    await page.evaluate(() => window.agentTestHistory.remove('Noether'));
+    assert.equal(
+      await page.locator('.agent-render-preview').isVisible(),
+      false,
+    );
+    await add(1, 1);
+    assert.equal(await page.locator('.agent-render-preview').isVisible(), true);
   },
 );

@@ -170,11 +170,17 @@ input[type='number']::-webkit-outer-spin-button {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: color-mix(in srgb, var(--agent-color) 40%, transparent);
 }
 
-.agent-badge-dot.interacted {
+.agent-badge-dot,
+.agent-render-agent::before {
   background: var(--agent-color);
+  opacity: 0.4;
+}
+
+.agent-badge[data-active='true'] .agent-badge-dot,
+.agent-render-agent[data-active='true']::before {
+  opacity: 1;
 }
 
 .agent-badge-name {
@@ -838,11 +844,23 @@ kbd {
   line-height: 1.5;
 }
 
-.viewport-host {
+.viewport-host,
+.agent-render-host {
   position: relative;
   container-type: inline-size;
   --viewport-inset: 14px;
   --viewport-coordinate-size: 77px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  /* Shared auto-sized rows stack controls across their existing overlay layers. */
+  grid-template-rows:
+    [start] var(--viewport-inset)
+    [header] auto
+    [tools] auto
+    [constraints] auto
+    [agent] auto
+    [content] minmax(0, 1fr)
+    [end];
   --expanded-arguments-width: 310px;
   --expanded-elements-width: 248px;
   overflow: hidden;
@@ -850,6 +868,9 @@ kbd {
 }
 
 .viewport-canvas {
+  grid-area: start / 1 / end / -1;
+  min-width: 0;
+  min-height: 0;
   display: block;
   width: 100%;
   height: 100%;
@@ -858,9 +879,10 @@ kbd {
 }
 
 .viewport-coordinate-reference {
-  position: absolute;
-  top: var(--viewport-inset);
-  right: var(--viewport-inset);
+  position: relative;
+  grid-area: tools / 1;
+  justify-self: end;
+  margin: 0 var(--viewport-inset) var(--viewport-inset) 0;
   z-index: 2;
   width: var(--viewport-coordinate-size);
   user-select: none;
@@ -1203,8 +1225,11 @@ kbd {
 }
 
 .sketch-editor {
-  position: absolute;
-  inset: 0;
+  position: relative;
+  grid-area: start / 1 / end / -1;
+  display: grid;
+  grid-template-rows: subgrid;
+  grid-template-columns: minmax(0, 1fr);
   z-index: 5;
   background: var(--panel);
   overflow: hidden;
@@ -1213,7 +1238,10 @@ kbd {
 .sketch-editor[hidden] {
   display: none;
 }
-#viewport-host:has(.sketch-editor:not([hidden])) .viewport-coordinate-reference,
+#viewport-host:has(.sketch-editor:not([hidden]))
+  .viewport-coordinate-reference {
+  display: none;
+}
 #viewport-host:has(.sketch-editor:not([hidden])) .viewport-canvas {
   visibility: hidden;
 }
@@ -1229,9 +1257,10 @@ kbd {
 }
 .sketch-toolbar {
   --sketch-tool-inset: 3px;
-  position: absolute;
-  top: var(--viewport-inset);
-  right: var(--viewport-inset);
+  position: relative;
+  grid-area: tools / 1;
+  justify-self: end;
+  margin: 0 var(--viewport-inset) var(--viewport-inset) 0;
   z-index: 1;
   display: flex;
   align-items: stretch;
@@ -1288,9 +1317,10 @@ kbd {
   background: #d8ff3e12;
 }
 .sketch-constraint-tools {
-  position: absolute;
-  top: calc(var(--viewport-inset) + 44px);
-  right: var(--viewport-inset);
+  position: relative;
+  grid-area: constraints / 1;
+  justify-self: end;
+  margin: 0 var(--viewport-inset) var(--viewport-inset) 0;
   z-index: 1;
   max-width: calc(100% - 2 * var(--viewport-inset));
   display: flex;
@@ -1304,6 +1334,7 @@ kbd {
 .sketch-constraint-tools .sketch-toolbar,
 .sketch-constraint-tools .drawing-inputs {
   position: static;
+  margin: 0;
   max-width: 100%;
 }
 .sketch-constraint-tools .drawing-input-title {
@@ -1356,13 +1387,13 @@ kbd {
   background: transparent;
 }
 @container (max-width: 540px) {
-  .sketch-toolbar {
-    top: calc(var(--viewport-inset) + 48px);
-  }
-  .sketch-constraint-tools {
-    top: calc(var(--viewport-inset) + 92px);
-  }
   #viewport-host:has(.sketch-editor:not([hidden])) .viewport-header {
+    position: relative;
+    grid-area: header / 1;
+    justify-self: start;
+    top: auto;
+    left: auto;
+    margin: 0 var(--viewport-inset) var(--viewport-inset);
     max-width: calc(100% - 2 * var(--viewport-inset));
   }
 }
@@ -2652,20 +2683,24 @@ kbd {
   --agent-color: #d6d983;
 }
 .agent-renders {
-  position: absolute;
-  inset: 0;
+  position: relative;
+  grid-area: start / 1 / end / -1;
+  display: grid;
+  grid-template-rows: subgrid;
+  grid-template-columns: minmax(0, 1fr);
   z-index: 7;
   pointer-events: none;
 }
 .agent-renders[hidden],
 .agent-render-preview[hidden],
+.agent-render-dismiss[hidden],
 .agent-render-viewer[hidden] {
   display: none;
 }
 .agent-render-preview {
-  position: absolute;
-  top: 110px;
-  right: 14px;
+  grid-area: agent / 1;
+  justify-self: end;
+  margin-right: var(--viewport-inset);
   width: min(180px, 32cqw);
   padding: 0;
   overflow: hidden;
@@ -2676,6 +2711,10 @@ kbd {
   box-shadow: 0 4px 16px #0003;
   cursor: pointer;
   pointer-events: auto;
+}
+.viewport-host[data-render-mode='render'] .agent-render-preview,
+.viewport-host[data-render-mode='render'] .agent-render-dismiss {
+  display: none;
 }
 .agent-render-preview:hover {
   border-color: var(--agent-color);
@@ -2716,7 +2755,6 @@ kbd {
   height: 6px;
   margin-right: 6px;
   border-radius: 50%;
-  background: var(--agent-color);
   content: '';
 }
 .agent-renders time {
@@ -2759,11 +2797,39 @@ kbd {
 }
 .agent-render-control {
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 6px;
 }
 .agent-render-control > svg {
   width: 16px;
   height: 16px;
+}
+.agent-render-dismiss {
+  grid-area: agent / 1;
+  align-self: start;
+  justify-self: end;
+  z-index: 1;
+  width: 20px;
+  height: 20px;
+  margin: 6px calc(var(--viewport-inset) + 6px) 0 0;
+  padding: 0;
+  color: color-mix(in srgb, var(--agent-color) 30%, var(--line));
+  border-radius: 4px;
+  background: #171815cc;
+  pointer-events: auto;
+}
+.agent-render-dismiss:hover {
+  color: var(--agent-color);
+  background: color-mix(in srgb, var(--agent-color) 12%, var(--panel));
+}
+.agent-renders .agent-render-dismiss:focus-visible {
+  outline-color: var(--agent-color);
+}
+.agent-render-dismiss > svg {
+  width: 12px;
+  height: 12px;
+  stroke-width: 2.25;
 }
 .agent-render-viewer > figure {
   display: grid;
@@ -2858,14 +2924,9 @@ kbd {
   outline: 1px solid var(--acid);
   outline-offset: 2px;
 }
-#viewport-host:has(.sketch-editor:not([hidden])) .agent-render-preview {
-  top: auto;
-  bottom: 46px;
-}
 @container (max-width: 440px) {
   .agent-render-preview {
     width: 120px;
-    right: 10px;
   }
   .agent-render-preview-caption > time {
     display: none;

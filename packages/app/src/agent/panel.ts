@@ -80,6 +80,9 @@ export class AgentPanel {
     private readonly open: HTMLButtonElement,
     private readonly workspace: string | undefined,
     private readonly renders: AgentRenderHistory,
+    private readonly presenceChanged: (
+      activeAgents: ReadonlySet<string>,
+    ) => void,
   ) {
     this.dialog.className = 'app-dialog agent-dialog';
     this.dialog.setAttribute('aria-label', 'Connect Agent');
@@ -186,6 +189,13 @@ export class AgentPanel {
   }
 
   refresh(): void {
+    this.presenceChanged(
+      new Set(
+        [...this.grants.values()]
+          .filter(isActive)
+          .map(grant => grant.config.agentId),
+      ),
+    );
     this.open.replaceChildren();
     this.open.classList.toggle('button-primary', !this.grants.size);
     if (!this.grants.size) this.open.textContent = 'Connect Agent';
@@ -641,13 +651,17 @@ export class AgentPanel {
   }
 }
 
+function isActive(grant: Grant): boolean {
+  return grant.state === 'online' && grant.interacted;
+}
+
 function agentBadge(grant: Grant): HTMLSpanElement {
   const badge = document.createElement('span');
   badge.className = `agent-badge agent-color-${grant.color}`;
-  badge.title = `${grant.config.name} · ${grant.interacted ? 'Has interacted in this page' : 'No interaction since this page opened'}`;
+  badge.dataset.active = String(isActive(grant));
+  badge.title = `${grant.config.name} · ${grant.state === 'online' ? 'Connected' : 'Disconnected'} · ${grant.interacted ? 'Has interacted in this page' : 'No interaction since this page opened'}`;
   const dot = document.createElement('span');
   dot.className = 'agent-badge-dot';
-  dot.classList.toggle('interacted', grant.interacted);
   dot.setAttribute('aria-hidden', 'true');
   const name = document.createElement('span');
   name.className = 'agent-badge-name';
