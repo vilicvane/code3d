@@ -34,7 +34,9 @@ import {
   createRenderedModelNode,
   createSurfaceGeometry,
   disposeObject,
+  modelingHelper,
   type ModelPlacement,
+  type ModelRenderMode,
 } from './rendering/model-renderer';
 import {
   TransformGizmo,
@@ -282,7 +284,7 @@ export class ModelViewport {
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointer = new THREE.Vector2();
   private readonly root = new THREE.Group();
-  private readonly decorationRoot = new THREE.Group();
+  private readonly decorationRoot = modelingHelper(new THREE.Group());
   private readonly occurrences = new Map<string, Occurrence>();
   private readonly contextOccurrences = new Map<string, Occurrence>();
   private readonly parameterPreviews = new Map<string, number>();
@@ -401,6 +403,19 @@ export class ModelViewport {
     new ResizeObserver(() => this.resize()).observe(this.container);
     this.resize();
     this.animate();
+  }
+
+  setRenderMode(mode: ModelRenderMode): void {
+    if (this.rendering.mode === mode) return;
+    this.rendering.mode = mode;
+    this.container.dataset.renderMode = mode;
+    this.selectionGesture = undefined;
+    this.selectionClick = undefined;
+    this.topologyPointer = undefined;
+    this.updateTopologyHover(undefined);
+    this.coordinateReference?.setVisible(mode === 'modeling');
+    this.updateTransformGizmo();
+    this.rendering.renderFrame();
   }
 
   renderModule(
@@ -1183,7 +1198,7 @@ export class ModelViewport {
         if (highlight) {
           highlight.raycast = () => undefined;
           applyTransform(highlight, reference.transform);
-          object.add(highlight);
+          object.add(modelingHelper(highlight));
         }
       }
       this.root.add(object);
@@ -1423,10 +1438,14 @@ export class ModelViewport {
         renderOrder: 20,
       },
     );
-    this.scene.add(this.selectionHighlight);
+    this.scene.add(modelingHelper(this.selectionHighlight));
   }
 
   private updateTransformGizmo(): void {
+    if (this.rendering.mode === 'render') {
+      this.transformGizmo.detach();
+      return;
+    }
     const occurrence = this.getSelected();
     const scope = this.renderedSourceScope();
     if (occurrence && scope && this.module) {
@@ -1568,7 +1587,11 @@ export class ModelViewport {
   }
 
   private beginSelectionGesture(event: PointerEvent): void {
-    if (!event.isPrimary || event.button !== 0) {
+    if (
+      this.rendering.mode === 'render' ||
+      !event.isPrimary ||
+      event.button !== 0
+    ) {
       this.selectionGesture = undefined;
       this.selectionClick = undefined;
       return;
@@ -1763,6 +1786,7 @@ export class ModelViewport {
   private pickTopology(
     event: Readonly<{clientX: number; clientY: number}>,
   ): TopologyId | undefined {
+    if (this.rendering.mode === 'render') return undefined;
     const selection = this.topologySelection;
     if (!selection) return undefined;
     selection.guide.updateWorldMatrix(true, false);
@@ -1933,7 +1957,7 @@ export class ModelViewport {
         },
       );
       this.impactHighlights.push(highlight);
-      this.scene.add(highlight);
+      this.scene.add(modelingHelper(highlight));
     }
   }
 
