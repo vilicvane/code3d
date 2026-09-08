@@ -1,3 +1,4 @@
+import {appIsolationHeaders} from '../../build/isolation.ts';
 import type {Browser, Page} from 'playwright-core';
 import type {TestContext} from 'node:test';
 import assert from 'node:assert/strict';
@@ -38,6 +39,7 @@ async function createPanel(t: TestContext) {
   await page.route(url, route =>
     route.fulfill({
       contentType: 'text/html',
+      headers: appIsolationHeaders,
       body: '<button id="before">Before</button><main></main><button id="after">After</button>',
     }),
   );

@@ -920,13 +920,33 @@ Status: [R-024](requests/closed/R-024-cache-opencascade-operation-results.md)
 is implemented as a content-addressed kernel-operation cache covering
 solid construction and modification, Boolean prefixes and context regions,
 relative transforms, topology sidecars, exact transformed bounds, and render meshes.
-The latest evaluation's full working set is retained, with at most 256 additional
-unused historical entries managed by LRU. The previous and current sets remain
+The latest evaluation's full working set is retained. Unused historical entries
+are managed by LRU against a default 2 GiB memory budget, without a fixed entry
+count. The budget combines allocated native block sizes from the pinned
+mimalloc heap with estimated JavaScript cache storage (including mesh buffers,
+topology paths and cache keys). Native geometry shared across handles is counted
+once by the allocator; JavaScript objects shared across entries may be counted
+more than once. The previous and current sets remain
 protected until evaluation and snapshotting finish, avoiding cache thrashing when
 a model exceeds the historical capacity; see [#52](https://github.com/vilicvane/code3d/issues/52).
+The budget is a trimming target, not a hard limit on the page or the protected
+working set. Released native blocks are reusable even when WASM's capacity does
+not shrink. Compiler code, non-cache JavaScript objects, rendering/GPU resources
+and temporary operation peaks are outside the JavaScript estimate.
 JavaScript and provenance are still evaluated afresh. Cache encoding, capacity, and a
 possible lifetime beyond one compiler worker remain adjustable implementation
 choices rather than product semantics.
+
+Ordinary cancellation retains that Worker: the client sets a shared flag,
+kernel operation boundaries check it before starting work, and evaluation exits
+through its existing `finally` to retain the completed prefix and trim history.
+The latest queued revision starts only after cleanup; intermediate queued edits
+are rejected without evaluation. Preparation applies dependency invalidation
+before checking cancellation. A five-second cancellation grace period bounds
+unresponsive synchronous/native code, after which the Worker and its caches are
+discarded. Project close, preparation/export deadlines and Worker crashes retain
+their hard-stop behavior. App documents and Workers use COOP/COEP headers in dev,
+preview and static hosting to enable the shared flag; see #52.
 
 User-defined Replicad builders execute on every invocation because their
 closures may depend on state beyond their arguments. Core identifies the actual

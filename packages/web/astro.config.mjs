@@ -1,9 +1,13 @@
 import {defineConfig} from 'astro/config';
 import starlight from '@astrojs/starlight';
 import sitemap from '@astrojs/sitemap';
-import {cp, access} from 'node:fs/promises';
+import {cp, access, writeFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import sirv from 'sirv';
+import {
+  appIsolationHeaders,
+  appIsolationRules,
+} from '../app/build/isolation.ts';
 
 const configuredUrl = process.env.CODE3D_SITE_URL
   ? new URL(process.env.CODE3D_SITE_URL)
@@ -107,9 +111,19 @@ export default defineConfig({
     {
       name: 'code3d-app',
       hooks: {
+        'astro:config:setup': ({command, updateConfig}) => {
+          // Astro preview excludes user Vite plugins, so configure its native
+          // response headers. Production rules remain limited to the App path.
+          if (command === 'preview')
+            updateConfig({server: {headers: appIsolationHeaders}});
+        },
         'astro:build:done': async ({dir}) => {
           await access(new URL('../app/dist/index.html', import.meta.url));
           await cp(appDirectory, new URL('app/', dir), {recursive: true});
+          await writeFile(
+            new URL('_headers', dir),
+            appIsolationRules(`${sitePath('app')}/*`),
+          );
         },
       },
     },
@@ -123,7 +137,13 @@ export default defineConfig({
         configureServer(server) {
           server.middlewares.use(
             sitePath('app'),
-            sirv(appDirectory, {dev: true}),
+            sirv(appDirectory, {
+              dev: true,
+              setHeaders(response) {
+                for (const [name, value] of Object.entries(appIsolationHeaders))
+                  response.setHeader(name, value);
+              },
+            }),
           );
         },
       },

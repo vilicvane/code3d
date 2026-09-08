@@ -118,7 +118,7 @@ test('retains callable CommonJS exports and JSON values when a later dependency 
   }
 });
 
-test('reads installed declarations, reruns changed child source, and invalidates changed package implementations', async () => {
+test('reads installed declarations, reruns changed source, and preserves invalidation across cancelled preparation', async () => {
   const files = projectFiles({
     '/package.json':
       '{"type":"module","dependencies":{"@code3d/core":"*","custom-size":"1.0.0"}}',
@@ -176,6 +176,29 @@ test('reads installed declarations, reruns changed child source, and invalidates
       '/node_modules/custom-size/index.js',
       'export const width = 20;',
     );
+    let cancelled = false;
+    const stat = files.stat;
+    files.stat = async path => {
+      const value = await stat(path);
+      if (path === '/node_modules/custom-size/index.js') cancelled = true;
+      return value;
+    };
+    const stopped = new Error('Cancelled after detecting a dependency change');
+    await assert.rejects(
+      compiler.compile(
+        project(5),
+        '/model.ts',
+        undefined,
+        undefined,
+        undefined,
+        () => {
+          if (cancelled) throw stopped;
+        },
+      ),
+      error => error === stopped,
+    );
+    files.stat = stat;
+    assert.equal(compiler['runtime'], undefined);
     const third = await compiler.compile(project(5), '/model.ts');
     assert.equal(third.diagnostic, undefined);
     assert.notEqual(compiler['runtime'], runtime);

@@ -321,11 +321,20 @@ and reproducible build command.
 Node's core entry performs both installations; App installs both through the selected
 tooling entry before evaluating author code.
 
-Call `beginModelEvaluation(): () => void` before each serial source
+Call `beginModelEvaluation(checkCancelled?: () => void): () => void` before each serial source
 evaluation and call its returned function in `finally` after snapshotting.
 The kernel cache protects the previous and current evaluation's working sets
 until completion, then retains the current set plus a bounded LRU of unused
-history. Exact transformed-bound queries and meshes share the operation cache.
+history. Its default 2 GiB budget combines allocated native block bytes with
+estimated JavaScript cache storage; there is no fixed historical entry limit.
+The pinned mimalloc is measured through its heap-area visitor, independently of
+WASM buffer capacity. Protected working sets can exceed this trimming target.
+Exact transformed-bound queries and meshes share the operation cache.
+The optional check runs before each kernel operation, including cache hits;
+throwing aborts at a complete-operation boundary. A result finished after the
+cancel request is retained before the next check. The callback is scoped to this
+evaluation and removed on cleanup. App also checks after asynchronous preparation
+and evaluation so cancellation skips snapshots even without another kernel call.
 Source locations, parameter provenance, and operation traces live
 in per-evaluation weak maps, separate from model geometry and stored relations.
 Reusing a dependency's model must not reuse the previous revision's source
@@ -362,13 +371,30 @@ core, declaration loading, and repeated model edits retaining dependency identit
 
 Compiled native functions are deduplicated by content hash within the project
 Worker. Revoking a Blob URL releases its mapping, not the native module record.
-Distinct compiled code remains until the Worker ends (project close, execution
-cancellation, or timeout). Ordinary completed source edits retain that Worker
+Distinct compiled code remains until the Worker ends (project close, forced
+cancellation, or timeout). Completed and normally cancelled source edits retain that Worker
 and its expensive kernel caches. The 360-edit isolated natural-GC experiment
 released obsolete model wrappers and kept geometry caches hot; full project
 Worker acceptance now also covers a real Windows npm directory through the native
 picker and a `DirectoryFileReader`. The full Worker reads only reached package
 files, without enumerating `node_modules`.
+
+App cancellation uses an `Int32Array` backed by `SharedArrayBuffer`, observable
+without dispatching Worker messages during synchronous JS/WASM execution. The
+client rejects a cancelled request immediately, keeps one latest queued compile,
+and waits for the old request's completion acknowledgement before dispatching it.
+Cancelled queued requests never start; a five-second grace timer is tied to the
+running request and is not renewed by subsequent edits. Successful cleanup clears
+that timer. A hung loop or native operation is terminated when the grace expires.
+Worker messages and file replies are scoped to the Worker instance and request ID.
+
+Shared memory requires a secure, cross-origin isolated App: serve both documents
+and Worker resources with `Cross-Origin-Opener-Policy: same-origin` and
+`Cross-Origin-Embedder-Policy: require-corp`. Vite dev/preview and Astro App previews
+apply these headers; standalone App and website builds emit the corresponding
+`_headers` rules (the website limits them to `/app/*`, respecting its configured
+base). Other static hosts must configure equivalent headers. Cross-origin assets
+must permit CORS or CORP. Synthetic browser test documents use the same policy.
 
 Dependency graph preparation is serialized only until its unevaluated static
 modules are reserved. Execution runs outside that lock; each completed module

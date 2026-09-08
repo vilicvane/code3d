@@ -1302,7 +1302,9 @@ export function createModelCompiler(
     requestedDesignContext?: DesignContext,
     onEvaluate?: () => void,
     captureGeometry?: (objects: readonly ModelObject[]) => void,
+    checkCancelled: () => void = () => {},
   ): Promise<ModelModule> {
+    checkCancelled();
     const files = new Map(
       project.files.map(file => [normalizeProjectPath(file.path), file.source]),
     );
@@ -1385,7 +1387,8 @@ export function createModelCompiler(
             ),
         });
         onEvaluate?.();
-        finishEvaluation = beginModelEvaluation();
+        checkCancelled();
+        finishEvaluation = beginModelEvaluation(checkCancelled);
         const result = await evaluator.evaluate(
           'code3d-project:/model.js',
           bundle.source,
@@ -1403,9 +1406,11 @@ export function createModelCompiler(
         for (const [path, namespace] of result.modules)
           modules.set(path, namespace);
       } catch (error) {
+        checkCancelled();
         diagnostic = diagnosticFromError(error);
       }
 
+      checkCancelled();
       const modelExports = new Map<string, ModelObject>();
       const exportNamesByObject = new Map<ModelObject, Set<string>>();
       for (const [modulePath, module] of modules) {
@@ -1445,6 +1450,7 @@ export function createModelCompiler(
       const snapshotModel = createModelSnapshotter();
       const snapshots = new Map<ModelObject, ModelSnapshotObject>();
       const snapshotOf = (object: ModelObject): ModelSnapshotObject => {
+        checkCancelled();
         const existing = snapshots.get(object);
         if (existing) return existing;
         let snapshot: ModelSnapshotObject;

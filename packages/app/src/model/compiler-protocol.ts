@@ -11,10 +11,12 @@ import type {
   TopologyInspectionOptions,
 } from '@code3d/core/tooling';
 import type {SketchDrag, SketchDragPreview} from './sketch-drag';
+import type {CompilationCancellation} from './compilation-cancellation';
 
 export type CompileRequest = Readonly<{
   kind: 'compile';
   id: number;
+  cancellation: CompilationCancellation;
   project: ModelProject;
   rootPath: string;
   designContext?: DesignContext;
@@ -59,6 +61,7 @@ export type CompilerRequest =
 
 export type CompilerResponse =
   | FileRequest
+  | Readonly<{kind: 'cancelled'; id: number}>
   | Readonly<{
       kind: 'topology';
       id: number;

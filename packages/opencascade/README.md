@@ -5,6 +5,15 @@ binding ABI and corrects native object destruction in the binding generator.
 The dependency on `replicad-opencascadejs` supplies the matching declarations
 used by Replicad and core. This package exports its own generated loader and WASM.
 
+`Code3dMemory.AllocatedBytes()` reports the native allocator's current occupancy
+by summing allocated block sizes in the pinned mimalloc's heap areas, including
+geometry shared between shape handles. The build explicitly selects mimalloc.
+The binding parser receives the allocator's include directory from the same
+pinned toolchain; it otherwise uses host Clang's system include paths.
+Core combines this with estimated JavaScript cache storage for its memory budget.
+The WASM buffer capacity is a growth high-water mark and is not used to decide
+whether releasing cached geometry has reduced memory usage.
+
 The upstream generator treats any two-argument `operator delete` as evidence
 that a class cannot be destroyed. OCCT's allocation macros provide both ordinary
 and placement delete, so this incorrectly emits empty destructors for shapes,

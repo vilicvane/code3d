@@ -1,3 +1,4 @@
+import {appIsolationHeaders} from '../../build/isolation.ts';
 import assert from 'node:assert/strict';
 import {after, before, test, type TestContext} from 'node:test';
 import {chromium, type Browser} from 'playwright-core';
@@ -23,6 +24,7 @@ async function fixture(t: TestContext) {
   await page.route(url, route =>
     route.fulfill({
       contentType: 'text/html',
+      headers: appIsolationHeaders,
       body: '<main>Agent cursor</main>',
     }),
   );
@@ -94,6 +96,26 @@ test(
     assert.ok(result.pageTicks > 0);
     assert.ok(result.elapsed < 5000);
     assert.equal(result.recovered, 'next');
+  },
+);
+
+test(
+  'loading the cursor Worker does not consume the regex execution deadline',
+  {timeout: 15_000},
+  async t => {
+    const page = await fixture(t);
+    await page.route('**/src/agent/cursor.worker.ts*', async route => {
+      await new Promise(resolve => setTimeout(resolve, 1_200));
+      await route.continue();
+    });
+    const text = await page.evaluate(async () => {
+      const {inspectAgentCursor} =
+        await import('/src/agent/cursor-resolver.ts');
+      return (
+        await inspectAgentCursor('model', {file: '/model.ts', regex: '(model)'})
+      ).text;
+    });
+    assert.equal(text, 'model');
   },
 );
 
