@@ -177,6 +177,27 @@ test(
       [137, 80, 78, 71, 13, 10, 26, 10],
     );
     assert.ok(png.length > 1000);
+    // The production bundle must also export the SVG sketch scene under HTTPS.
+    const sketch = await call(['apply', '--input', '-'], {
+      files: [
+        {
+          path: '/agent-sketch.ts',
+          version: null,
+          content:
+            "import {sketch} from '@code3d/core'; const profile = sketch([['point', 1, [0, 0]], ['circle', 2, [1, 3]]], {constraints: [['radius', 2, 8]]}); export default profile;",
+        },
+      ],
+      cursor: {file: '/agent-sketch.ts', regex: 'const (profile) ='},
+      topology: true,
+      render: true,
+    });
+    assert.equal(sketch.data.observation.topology.kind, 'sketch');
+    assert.equal(sketch.data.observation.render.projection, 'orthographic');
+    assert.equal(sketch.data.observation.topology.items[1].radius, 8);
+    const sketchPng = await readFile(sketch.artifacts[0].path);
+    assert.equal(sketchPng.readUInt32BE(16), 960);
+    assert.equal(sketchPng.readUInt32BE(20), 720);
+    assert.ok(sketchPng.length > 1000);
     await page.reload();
     await page.locator('#agents-button').click();
     await dialog.locator('.agent-status[data-state="online"]').waitFor();
