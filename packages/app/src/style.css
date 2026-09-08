@@ -918,6 +918,166 @@ kbd {
   cursor: default;
 }
 
+.viewport-empty-state {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  pointer-events: none;
+  user-select: none;
+}
+
+.viewport-empty-state[hidden] {
+  display: none;
+}
+
+.viewport-preview-selection {
+  display: grid;
+  place-items: center;
+  font-family: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
+  font-size: 24px;
+  font-weight: 400;
+  line-height: 1.1;
+  color: #d5d8cd;
+}
+
+.viewport-preview-word {
+  position: relative;
+  width: calc(var(--word-length) * 1ch);
+}
+
+.viewport-preview-word::before {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  right: 0;
+  width: 100%;
+  background: #53651566;
+  animation: viewport-preview-highlight 2.5s step-end -1.32s infinite;
+}
+
+.viewport-preview-text {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  white-space: pre;
+  animation: viewport-preview-type 2.5s steps(var(--word-length), end) -1.32s
+    infinite;
+}
+
+.viewport-preview-caret {
+  position: absolute;
+  inset-block: 0;
+  left: 100%;
+  width: 1.5px;
+  transform: translateX(-50%);
+  animation: viewport-preview-position 2.5s
+    steps(var(--word-length), end) -1.32s infinite;
+}
+
+.viewport-preview-caret::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: #d8ff3e;
+  animation: viewport-preview-blink 1s step-end infinite;
+}
+
+@keyframes viewport-preview-type {
+  0% {
+    width: 0;
+  }
+
+  /* Type 720ms, wait 600ms, select for 860ms, then clear for 320ms. */
+  28.8% {
+    width: 100%;
+    animation-timing-function: step-end;
+  }
+
+  87.2%,
+  100% {
+    width: 0;
+  }
+}
+
+@keyframes viewport-preview-highlight {
+  0% {
+    width: 0;
+  }
+
+  52.8% {
+    width: 100%;
+  }
+
+  87.2%,
+  100% {
+    width: 0;
+  }
+}
+
+@keyframes viewport-preview-position {
+  0% {
+    left: 0;
+  }
+
+  28.8% {
+    left: 100%;
+    animation-timing-function: step-end;
+  }
+
+  87.2%,
+  100% {
+    left: 0;
+  }
+}
+
+@keyframes viewport-preview-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .viewport-preview-word::before,
+  .viewport-preview-text,
+  .viewport-preview-caret,
+  .viewport-preview-caret::before {
+    animation: none;
+  }
+}
+
+.viewport-empty-state strong {
+  position: absolute;
+  inset-inline: var(--viewport-inset);
+  bottom: var(--viewport-inset);
+  color: #8c9185;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+}
+
+.viewport-host[data-empty='true'] .viewport-canvas,
+.viewport-host[data-empty='true'] .viewport-coordinate-reference {
+  visibility: hidden;
+}
+
+.viewport-host[data-empty='true'] .viewport-mode,
+.viewport-host[data-empty='true'] .viewport-dock-panels,
+.viewport-host[data-empty='true'] .contextual-tool-panel {
+  display: none;
+}
+
+.viewport-host[data-empty='true'] .viewport-header {
+  max-width: calc(100% - 2 * var(--viewport-inset));
+}
+
 .viewport-coordinate-reference {
   position: relative;
   grid-area: tools / 1;
