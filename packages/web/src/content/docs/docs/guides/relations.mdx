@@ -174,6 +174,14 @@ The current pair uses the same yellow-green marker color. The selected side
 keeps each marker's normal opacity; the other side uses 70% of that opacity.
 Other related geometry stays dimmed in gray.
 
+On the `relate` method name or the call area outside its callback, the completed
+part is selected. All references used by this `relate` call share the second
+highlight level, including references from multiple returned constraints. Other
+inputs of the downstream composition stay at the third, dimmed level. Earlier
+inherited constraints still affect the solved position, but their references do
+not become second-level highlights unless the current call also uses them.
+Entering an individual constraint returns to its existing step-by-step preview.
+
 On `self.on(...)` or `self.align(...)`, and through the following `offset`,
 `pivot`, `pivotVertex`, `around`, and `rotate` calls, self is selected. Inside
 the parentheses of `on(...)` or `align(...)`, the target reference is selected.
