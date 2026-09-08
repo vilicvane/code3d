@@ -259,6 +259,11 @@ then prefers local translation and minimizes exterior movement. A constrained
 center or endpoint can therefore stop short of the pointer. Dragging the curve
 itself still adjusts an editable radius. Connected lines do not disable center
 translation: their constraints determine how exterior points follow.
+Finally, a common lowest-priority preference keeps every other point near its
+gesture-start position, resolving only freedom left by those earlier stages.
+It does not pull a translated shape back or turn the other points into fixed
+anchors. Point aliases share one preference, and radius gestures apply this
+final preference to all points without adding new radius constraints.
 Each stage respects all hard constraints; later stages retain earlier achieved
 target parameter values for this frame, not every equivalent optimum. No original
 reference position is made an unconditional anchor, and no stage lock survives

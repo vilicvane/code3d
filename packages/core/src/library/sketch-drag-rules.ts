@@ -32,10 +32,15 @@ export type SketchDragPlan = Readonly<{
   stages: readonly [SketchDragStage, ...SketchDragStage[]];
   incidences?: readonly SketchIncidence[];
 }>;
-/** Targets may depend on the feasible geometry reached by earlier stages. */
-export type SketchDragStage = (
-  current: SketchSolveProblem,
-) => readonly SketchSolveObjective[];
+/** A rule may prepare a stage's seed from the preceding feasible geometry.
+ * The seed is only an initial guess; all accumulated locks still apply. */
+export type SketchDragStage = Readonly<{
+  objectives: (current: SketchSolveProblem) => readonly SketchSolveObjective[];
+  seed?: (
+    current: SketchSolveProblem,
+    objectives: readonly SketchSolveObjective[],
+  ) => SketchSolveProblem;
+}>;
 export type SketchDragSession = (
   current: SketchSolveProblem,
   target: SketchSolveTarget,
@@ -66,6 +71,21 @@ export function solveSketchDrag(
     current,
     target,
   );
+  // Resolve remaining freedom only after every gesture-specific preference.
+  // Earlier stages' achieved positions stay fixed; references never follow
+  // the iterative seed. Solver points are canonical, so aliases add no weight.
+  const stages: [SketchDragStage, ...SketchDragStage[]] = [
+    ...plan.stages,
+    {
+      objectives: reached =>
+        reference.points.flatMap((_, point) =>
+          (target.kind === 'point' && point === target.point) ||
+          reached.points[point].locked.every(Boolean)
+            ? []
+            : [anchor(reference, point)],
+        ),
+    },
+  ];
   const bounds = new Map<SketchIncidence, number>();
   for (;;) {
     const problem = {
@@ -78,7 +98,7 @@ export function solveSketchDrag(
         })),
       ],
     };
-    const result = solveSketchDragPlan({...plan, problem});
+    const result = solveSketchDragPlan({...plan, problem, stages});
     const solved = sketchIncidenceGeometry(problem, result);
     const outside = plan.incidences?.flatMap(contact => {
       const endpoint = bounds.has(contact)
@@ -97,11 +117,15 @@ export function solveSketchDragPlan(plan: SketchDragPlan): SketchSolveResult {
   let problem = plan.problem;
   let result: SketchSolveResult | undefined;
   for (const stage of plan.stages) {
-    const objectives = stage(problem);
+    const objectives = stage.objectives(problem);
     if (result && !objectives.length) continue;
     // Stage output is an iterative seed, not a new authored exact value.
     // Otherwise cleanup can undo a later hard solve to restore an earlier tail.
-    const solved = solveSketchProblem(problem, objectives, plan.problem);
+    const solved = solveSketchProblem(
+      stage.seed?.(problem, objectives) ?? problem,
+      objectives,
+      plan.problem,
+    );
     result = solved;
     const points = new Set(
       objectives.filter(o => o.kind === 'point').map(o => o.point),
@@ -193,14 +217,16 @@ const radiusRule: SketchDragRule = ({reference, target}) => {
         next.curve === 'arc' ? new Map([[next.index, radius]]) : new Map(),
       ),
       stages: [
-        () => [{...next, weight: 1}],
-        () => [
-          anchor(reference, curve.center),
-          ...[...suggestions].map(([point, positions]) => ({
-            ...anchor(reference, point),
-            position: positions[0],
-          })),
-        ],
+        {objectives: () => [{...next, weight: 1}]},
+        {
+          objectives: () => [
+            anchor(reference, curve.center),
+            ...[...suggestions].map(([point, positions]) => ({
+              ...anchor(reference, point),
+              position: positions[0],
+            })),
+          ],
+        },
       ],
     };
   };
@@ -354,20 +380,23 @@ const incidenceRule: SketchDragRule = ({reference, target, geometry}) => {
     for (const {point} of contacts) preferences.add(point);
     const stages: [SketchDragStage, ...SketchDragStage[]] = [...plan.stages];
     const last = stages.at(-1)!;
-    stages[stages.length - 1] = current => {
-      const objectives = last(current);
-      const present = new Set(
-        objectives.filter(o => o.kind === 'point').map(o => o.point),
-      );
-      if (updated.kind === 'point') present.add(updated.point);
-      return [
-        ...objectives,
-        ...[...preferences]
-          .filter(
-            p => !present.has(p) && !current.points[p].locked.every(Boolean),
-          )
-          .map(p => anchor(reference, p)),
-      ];
+    stages[stages.length - 1] = {
+      ...last,
+      objectives: current => {
+        const objectives = last.objectives(current);
+        const present = new Set(
+          objectives.filter(o => o.kind === 'point').map(o => o.point),
+        );
+        if (updated.kind === 'point') present.add(updated.point);
+        return [
+          ...objectives,
+          ...[...preferences]
+            .filter(
+              p => !present.has(p) && !current.points[p].locked.every(Boolean),
+            )
+            .map(p => anchor(reference, p)),
+        ];
+      },
     };
     return {
       ...plan,
@@ -461,28 +490,48 @@ function pointSession(
       );
     }
     const stages: [SketchDragStage, ...SketchDragStage[]] = [
-      () => [{...target, weight: 1}],
-      reached => [
-        ...anchors.map(point => anchor(reference, point)),
-        ...translated
-          .filter(p => p !== target.point)
-          .map(p => ({
-            ...anchor(reference, p),
-            position: reference.points[p].position.map(
-              (v, axis) =>
-                v - from[axis] + reached.points[target.point].position[axis],
-            ) as [number, number],
-          })),
-      ],
+      {objectives: () => [{...target, weight: 1}]},
+      {
+        objectives: reached => [
+          ...anchors.map(point => anchor(reference, point)),
+          ...translated
+            .filter(p => p !== target.point)
+            .map(p => ({
+              ...anchor(reference, p),
+              position: reference.points[p].position.map(
+                (v, axis) =>
+                  v - from[axis] + reached.points[target.point].position[axis],
+              ) as [number, number],
+            })),
+        ],
+        // Earlier radius/mouse stages may leave arbitrary follower angles.
+        // Start local translation at its actual, now-known destination rather
+        // than asking a near-singular soft solve to remove that inherited pose.
+        seed: (reached, objectives) =>
+          seed(
+            reached,
+            new Map(
+              objectives.flatMap(o =>
+                o.kind === 'point' && translated.includes(o.point)
+                  ? [[o.point, [o.position]] as const]
+                  : [],
+              ),
+            ),
+            new Map(),
+          ),
+      },
       ...(translations.length
-        ? [() => translations.flatMap(p => p.exterior)]
+        ? [{objectives: () => translations.flatMap(p => p.exterior)}]
         : []),
     ];
     // A center's radii take precedence over following the mouse. A shared
     // endpoint still retains its incident centers before these radius goals.
-    if (preservedRadii.length) stages.unshift(() => preservedRadii);
+    if (preservedRadii.length)
+      stages.unshift({objectives: () => preservedRadii});
     if (centers.size)
-      stages.unshift(() => [...centers].map(point => anchor(reference, point)));
+      stages.unshift({
+        objectives: () => [...centers].map(point => anchor(reference, point)),
+      });
     return {problem: seed(current, suggestions, radii), stages};
   };
 }

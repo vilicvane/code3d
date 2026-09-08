@@ -59,6 +59,15 @@ implementation context and historical outcomes, not a competing work queue.
   then minimize exterior movement. Later stages retain the earlier chosen target
   parameters for this frame only; hard constraints always hold. Connected external
   geometry no longer disqualifies a center gesture, and no stage locks persist.
+  Every gesture finishes with a common lowest-priority stay for all non-dragged
+  canonical points, referenced to gesture-start geometry rather than the preceding
+  frame. It only resolves remaining freedom; earlier achieved parameters and
+  all hard constraints remain authoritative. Radius gestures include all points
+  in this final stay, without adding generic radius objectives.
+  Stages can supply rule-owned initial guesses as well as objectives. Local
+  translation reseeds its followers from the now-feasible center movement,
+  avoiding inherited endpoint-angle errors at near-singular arc configurations.
+  It retains accumulated locks and still solves the complete hard system.
   Arc endpoint gestures first optimize their incident centers' original positions,
   then the closest feasible mouse target. Free radii can change; constrained radii
   keep the endpoint on the feasible circle. This also applies when an endpoint

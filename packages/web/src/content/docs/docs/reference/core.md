@@ -126,6 +126,10 @@ geometry take precedence; these preferences can keep the dragged point from
 reaching the pointer. They apply only during the gesture and do not add persistent
 fixed or radius constraints. To change an editable radius, drag the curve itself
 or edit its source or dimension.
+After the gesture-specific preferences, all other points prefer staying near
+their gesture-start positions. This lowest-priority step only resolves remaining
+freedom: it does not pull back a translated shape, weaken hard constraints or
+add fixed-point constraints to the source.
 
 Derived sketches include their read-only upstream boundaries. Separate contours
 produce separate faces; nested contours alternate material, holes and islands.
