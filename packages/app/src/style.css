@@ -1118,11 +1118,16 @@ kbd {
 .viewport-coordinate-axis line {
   stroke: currentColor;
   stroke-width: 2;
+  opacity: var(--axis-intensity);
   pointer-events: none;
 }
 
 .viewport-coordinate-marker {
-  fill: currentColor;
+  fill: color-mix(
+    in srgb,
+    currentColor calc(var(--axis-intensity) * 100%),
+    #11130f
+  );
   stroke: #11130f;
   stroke-width: 1;
 }
@@ -1132,11 +1137,20 @@ kbd {
   pointer-events: all;
 }
 
-.viewport-coordinate-axis:hover .viewport-coordinate-marker,
-.viewport-coordinate-axis:focus-visible .viewport-coordinate-marker,
-.viewport-coordinate-axis[aria-pressed='true'] .viewport-coordinate-marker {
-  stroke: #dfe5ca;
+.viewport-coordinate-outline {
+  fill: none;
+  stroke: currentColor;
+  stroke-opacity: 0.5;
   stroke-width: 2;
+  opacity: var(--axis-intensity);
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.viewport-coordinate-axis:hover .viewport-coordinate-outline,
+.viewport-coordinate-axis:focus-visible .viewport-coordinate-outline,
+.viewport-coordinate-axis[aria-pressed='true'] .viewport-coordinate-outline {
+  visibility: visible;
 }
 
 .viewport-coordinate-axis text {
