@@ -80,7 +80,11 @@ test('drag merge preserves the old ID and replays exactly through a fresh compil
     "[['point', 1, [0, 0]], ['point', 2, [10, 0]], ['point', 11, [0, 5]], ['line', 3, [11, 2]]]";
   const [local] = await compile('const s = sketch(' + args + ');');
   const preview = drag([local], args, 11, [0, 0], {layer: local.id, id: 1});
-  assert.deepEqual(preview.merge, {id: 11, target: {layer: local.id, id: 1}});
+  assert.deepEqual(preview.merge, {
+    id: 11,
+    target: {layer: local.id, id: 1},
+    deleted: {ids: [], constraints: []},
+  });
   const source = apply(local, args, preview);
   assert.match(source, /\['point', 11, 1\]/);
   assert.match(source, /\['line', 3, \[11, 2\]\]/);
@@ -124,12 +128,24 @@ test('merging into a named ancestor emits a reference and retains upstream coord
   assert.deepEqual(replay.entities, preview.snapshot.entities);
 });
 
+test('merging connected endpoints keeps both point IDs and removes the collapsed line', async () => {
+  const args =
+    "[['point', 1, [0, 0]], ['point', 2, [10, 0]], ['line', 3, [1, 2]]]";
+  const [local] = await compile('const s = sketch(' + args + ');');
+  const preview = drag([local], args, 2, [0, 0], {layer: local.id, id: 1});
+  assert.deepEqual(
+    preview.snapshot.entities.map(e => e.id),
+    [1, 2],
+  );
+  const source = apply(local, args, preview);
+  assert.match(source, /\['point', 2, 1\]/);
+  assert.doesNotMatch(source, /'line'/);
+  const [replay] = await compile('const s = sketch(' + source + ');');
+  assert.deepEqual(replay.entities, preview.snapshot.entities);
+});
+
 test('invalid merges reject atomically instead of moving a fixed point or replacing an expression', async () => {
   for (const {args, prefix = '', pattern} of [
-    {
-      args: "[['point', 1, [0, 0]], ['point', 2, [10, 0]], ['line', 3, [1, 2]]]",
-      pattern: /zero length/,
-    },
     {
       args: "[['point', 1, [0, 0]], ['point', 2, [10, 0]]], {constraints: [['fixed', 2]]}",
       pattern: /fixed point/,
@@ -207,4 +223,86 @@ test('the reported two-arc near-origin case merges endpoints with radius express
     replay.entities.find(e => e.id === 11).position,
     replay.entities.find(e => e.id === 1).position,
   );
+});
+
+for (const upstream of [false, true]) {
+  test(`point merge removes every collapsed alias-connected line and only its constraints (upstream=${upstream})`, async () => {
+    const prefix = upstream
+      ? "const base = sketch([['point', 1, [0, 0]]]);\n"
+      : '';
+    const args = `[
+      ['point', 1, ${upstream ? 'base.point(1)' : '[0, 0]'}],
+      ['point', 2, [10, 0]], ['point', 12, 2],
+      ['point', 4, [0, 10]], ['point', 5, [10, 10]],
+      ['line', 3, [1, 2]], ['line', 13, [12, 1]],
+      ['line', 6, [4, 5]],
+    ], {constraints: [
+      ['horizontal', 3], ['length', 3, 10], ['angle', 13, 180],
+      ['horizontal', 6], ['length', 6, width], ['fixed', 1],
+    ]}`;
+    const layers = await compile(
+      'const width = 10; ' +
+        prefix +
+        `const s = ${upstream ? 'base.derive' : 'sketch'}(${args});`,
+    );
+    const local = layers.at(-1);
+    const before = structuredClone(layers);
+    const preview = drag(layers, args, 12, [0, 0], {
+      layer: layers[0].id,
+      id: 1,
+    });
+    assert.deepEqual(preview.merge.deleted, {
+      ids: [3, 13],
+      constraints: [0, 1, 2],
+    });
+    assert.equal(preview.merge.id, 2);
+    assert.deepEqual(
+      preview.snapshot.entities.map(e => e.id),
+      [1, 2, 12, 4, 5, 6],
+    );
+    const source = apply(local, args, preview);
+    assert.match(source, /\['point', 12, 2\]/);
+    assert.doesNotMatch(source, /\['line', (3|13),/);
+    assert.doesNotMatch(source, /\['(horizontal|length|angle)', (3|13),?/);
+    assert.match(source, /\['length', 6, width\]/);
+    const replay = await compile(
+      'const width = 10; ' +
+        prefix +
+        `const s = ${upstream ? 'base.derive' : 'sketch'}(${source});`,
+    );
+    assert.deepEqual(replay.at(-1).entities, preview.snapshot.entities);
+    assert.deepEqual(replay.at(-1).constraints, preview.snapshot.constraints);
+    assert.deepEqual(layers, before);
+  });
+}
+
+test('removing a collapsed line keeps gesture-start incidences on subsequent surviving curves', async () => {
+  const args = `[
+    ['point',1,[0,0]], ['point',2,[10,0]], ['line',3,[1,2]],
+    ['point',4,[0,10]], ['point',5,[20,10]], ['line',6,[4,5]],
+    ['point',7,[10,10]],
+  ]`;
+  const [local] = await compile(`const s = sketch(${args});`);
+  const preview = drag([local], args, 2, [0, 0], {layer: local.id, id: 1});
+  assert.deepEqual(preview.merge.deleted.ids, [3]);
+  const source = apply(local, args, preview);
+  const [replay] = await compile(`const s = sketch(${source});`);
+  assert.deepEqual(replay.entities, preview.snapshot.entities);
+  assert.deepEqual(replay.entities.find(e => e.id === 7).position, [10, 10]);
+});
+
+test('snapping a circle center carries its attached points before establishing the alias', async () => {
+  const args = `[
+    ['point',1,[7,5]], ['point',2,[0,0]], ['circle',3,[2,10]],
+    ['point',4,[10,0]],
+  ]`;
+  const [local] = await compile(`const s = sketch(${args});`);
+  const preview = drag([local], args, 2, [7, 5], {layer: local.id, id: 1});
+  assert.deepEqual(
+    preview.snapshot.entities.find(e => e.id === 4).position,
+    [17, 5],
+  );
+  const source = apply(local, args, preview);
+  const [replay] = await compile(`const s = sketch(${source});`);
+  assert.deepEqual(replay.entities, preview.snapshot.entities);
 });

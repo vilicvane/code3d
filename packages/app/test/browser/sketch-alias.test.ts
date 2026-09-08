@@ -173,3 +173,63 @@ const s = sketch([
   assert.match(await text(page), /\[1, r, 2, 3, 'cw'\]/);
   near(await center(page, 1), origin);
 });
+
+for (const fixedLength of [false, true]) {
+  test(`connected endpoints preview deletion, detach, cancel, commit references and undo together (fixed length=${fixedLength})`, async t => {
+    const page = await open(
+      t,
+      `import {sketch} from '@code3d/core';
+const s = sketch([
+  ['point', 1, [0, 0]], ['point', 2, [20, 0]], ['point', 4, [30, 10]],
+  ['line', 3, [1, 2]], ['line', 5, [1, 4]],
+], {constraints: [['horizontal', 3]${fixedLength ? ", ['length', 3, 20]" : ''}]});`,
+    );
+    const before = await text(page);
+    const start = await center(page, 2),
+      target = await center(page, 1);
+    const line = page.locator('.sketch-canvas line.local[data-id="3"]');
+    for (const cancel of [true, false]) {
+      await page.mouse.move(start.x, start.y);
+      await page.mouse.down();
+      await page.mouse.move(target.x, target.y, {steps: fixedLength ? 1 : 5});
+      await line.waitFor({state: 'detached'});
+      assert.equal(await text(page), before);
+      near(await center(page, 2), await center(page, 1));
+      assert.equal(
+        await page
+          .getByRole('region', {name: 'Sketch editor'})
+          .locator(':scope > output')
+          .innerText(),
+        '',
+      );
+      // Another pointer event over the candidate must keep the same target.
+      await page.mouse.move(target.x + 1, target.y);
+      await line.waitFor({state: 'detached'});
+      if (cancel) {
+        await page.mouse.move(start.x, start.y, {steps: 5});
+        await line.waitFor({state: 'attached'});
+        await page.mouse.move(target.x, target.y, {steps: fixedLength ? 1 : 5});
+        await line.waitFor({state: 'detached'});
+        await page.keyboard.press('Escape');
+      }
+      await page.mouse.up();
+      if (cancel) {
+        await line.waitFor({state: 'attached'});
+        near(await center(page, 2), start);
+        assert.equal(await text(page), before);
+      }
+    }
+    await waitForSource(page, /\['point', 2, 1\]/);
+    await page.getByText('Ready', {exact: true}).waitFor();
+    const after = await text(page);
+    assert.doesNotMatch(after, /\['line', 3,/);
+    assert.doesNotMatch(after, /\['(horizontal|length)', 3,/);
+    assert.match(after, /\['line', 5, \[1, 4\]\]/);
+    near(await center(page, 2), await center(page, 1));
+    await page.keyboard.press('Control+z');
+    await line.waitFor({state: 'attached'});
+    await waitForSource(page, /\['point', 2, \[20, 0\]\]/);
+    assert.equal(await text(page), before);
+    near(await center(page, 2), start);
+  });
+}

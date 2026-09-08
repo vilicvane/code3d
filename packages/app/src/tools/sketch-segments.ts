@@ -1,3 +1,4 @@
+import {deletedSketchConstraints} from '../model/sketch-topology';
 import type {
   SketchPointAddress,
   SketchPosition,
@@ -266,41 +267,6 @@ function disconnectedPoints(
     .map(point => point.id);
 }
 
-function deletedConstraints(
-  local: SketchSnapshot,
-  ids: readonly number[],
-): number[] {
-  const pointDeleted = (point: SketchPointAddress) =>
-    point.layer === local.id && ids.includes(point.id);
-  return local.constraints.flatMap(([kind, data], index) => {
-    let deleted: boolean;
-    switch (kind) {
-      case 'fixed':
-        deleted = pointDeleted(data);
-        break;
-      case 'horizontal':
-      case 'vertical':
-        deleted = ids.includes(data);
-        break;
-      case 'coincident':
-      case 'midpoint':
-        deleted = data.some(pointDeleted);
-        break;
-      case 'x':
-      case 'y':
-        deleted = pointDeleted(data);
-        break;
-      case 'length':
-      case 'angle':
-      case 'radius':
-      case 'sweep':
-        deleted = ids.includes(data);
-        break;
-    }
-    return deleted ? [index] : [];
-  });
-}
-
 export function deleteSketchEntity(
   layers: readonly SketchSnapshot[],
   id: number | readonly number[],
@@ -328,7 +294,11 @@ export function deleteSketchEntity(
         ids.push(e.id);
     }
   ids.push(...disconnectedPoints(layers, ids));
-  return {kind: 'delete', ids, constraints: deletedConstraints(local, ids)};
+  return {
+    kind: 'delete',
+    ids,
+    constraints: deletedSketchConstraints(local, ids),
+  };
 }
 
 /** Remove selected intervals and their local overlaps in one source transaction. */
@@ -455,6 +425,6 @@ export function trimSketchSegment(
     entries,
     constraintReplacements,
     ids: [...ids, ...orphaned],
-    constraints: deletedConstraints(local, [...removed, ...orphaned]),
+    constraints: deletedSketchConstraints(local, [...removed, ...orphaned]),
   };
 }

@@ -389,8 +389,14 @@ export class SketchEditResolver implements ToolIntentResolver {
         };
       if (numeric(value) !== change.value) replace(value, String(change.value));
     }
-    if (change.kind === 'delete' || change.kind === 'trim') {
-      for (const id of change.ids) {
+    const deletion =
+      change.kind === 'delete' || change.kind === 'trim'
+        ? change
+        : change.kind === 'move'
+          ? change.merge?.deleted
+          : undefined;
+    if (deletion) {
+      for (const id of deletion.ids) {
         if (
           change.kind === 'trim' &&
           change.replacements.some(r => r.original.id === id)
@@ -405,12 +411,11 @@ export class SketchEditResolver implements ToolIntentResolver {
         remove(entry.node);
       }
     }
-    const removedConstraints =
-      change.kind === 'delete' || change.kind === 'trim'
-        ? change.constraints
-        : change.kind === 'constrain'
-          ? (change.removedConstraints ?? [])
-          : [];
+    const removedConstraints = deletion
+      ? deletion.constraints
+      : change.kind === 'constrain'
+        ? (change.removedConstraints ?? [])
+        : [];
     for (const index of removedConstraints) {
       const node = parsed.constraints?.elements[index];
       if (!node)

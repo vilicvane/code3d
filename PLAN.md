@@ -24,6 +24,11 @@ implementation context and historical outcomes, not a competing work queue.
   aliases retain author IDs but share one canonical solve point. Dragging follows
   the canonical owner's edit permissions; explicit point snapping writes an
   alias on release, without coordinate-based deduplication or replacing expressions.
+  Snapped previews remove local lines collapsed by the proposed alias and their
+  constraints before solving, preserving both point IDs and other curve contacts.
+  Leaving the snap or cancelling restores the original topology; release writes
+  coordinates, the alias and deletions in one undoable source transaction.
+  See [#59](https://github.com/vilicvane/code3d/issues/59).
   `base.derive([...])` retains locked
   upstream layers; local numeric point IDs and named `base.point(id)` handles
   distinguish ownership. IDs are independent per layer; new editor entries use

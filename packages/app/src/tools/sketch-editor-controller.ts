@@ -159,14 +159,15 @@ export class SketchEditorController {
     if (source === undefined || this.stale)
       throw new Error('Waiting for the updated sketch.');
     const {editable} = analyzeSketchSource(source);
-    const layers = previous
-      ? [...this.layers.slice(0, -1), previous.snapshot]
+    const continuation = previous?.continuation ?? previous;
+    const layers = continuation
+      ? [...this.layers.slice(0, -1), continuation.snapshot]
       : this.layers;
     const drag: SketchDrag = {
       id,
       position,
       editable,
-      data: previous?.data ?? this.data,
+      data: continuation?.data ?? this.data,
       reference: previous?.reference,
       mergeTarget,
     };

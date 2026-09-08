@@ -730,7 +730,9 @@ export class SketchEditor {
       if (this.drawing) this.drawing.pointer = pointer;
       const gesture = this.gesture;
       if (gesture?.kind === 'move' && !gesture.released) {
-        const resolve = sketchPointResolver(this.layers());
+        // A snapped preview can alias the dragged point; candidate ownership
+        // still belongs to the unchanged gesture-start topology.
+        const resolve = sketchPointResolver(this.view!.layers);
         const endpoint = snapSketchPointer(
           [
             gesture.target.position[0] + pointer[0] - gesture.start[0],
@@ -770,6 +772,7 @@ export class SketchEditor {
             gesture.target.id,
             gesture.position,
             gesture.preview,
+            gesture.mergeTarget,
           );
           if (this.gesture !== gesture) return;
           gesture.preview = preview;
@@ -796,19 +799,6 @@ export class SketchEditor {
     if (gesture?.kind === 'move') {
       await gesture.pending;
       if (this.gesture !== gesture) return;
-      if (gesture.preview && !gesture.error && gesture.mergeTarget) {
-        try {
-          gesture.preview = await this.solve(
-            gesture.target.id,
-            gesture.position,
-            gesture.preview,
-            gesture.mergeTarget,
-          );
-        } catch (error) {
-          gesture.error = (error as Error).message;
-        }
-        if (this.gesture !== gesture) return;
-      }
       this.gesture = undefined;
       this.editError = gesture.error;
       if (gesture.preview && !gesture.error) {
