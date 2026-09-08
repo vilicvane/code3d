@@ -44,7 +44,9 @@ async function fixture(t: TestContext, {controlledResize = false} = {}) {
           super((entries, observer) => {
             if (
               window.pauseLayoutObserver &&
-              entries.some(entry => entry.target.id === 'workspace')
+              entries.some(entry =>
+                ['workspace', 'project-explorer'].includes(entry.target.id),
+              )
             ) {
               window.pendingLayoutObservers.push(() =>
                 callback(entries, observer),
@@ -77,24 +79,201 @@ async function width(page: Page, selector = '#editor-host') {
   return Math.round((await page.locator(selector).boundingBox())!.width);
 }
 
-async function waitWidth(page: Page, expected: number) {
-  await page.waitForFunction(value => {
-    const width = document.querySelector('#editor-host')!.clientWidth;
-    return (
-      width === value &&
-      Math.abs(window.layoutEditor.editor.getLayoutInfo().width - width) < 1
-    );
-  }, expected);
+async function waitWidth(
+  page: Page,
+  expected: number,
+  selector = '#editor-host',
+) {
+  await page.waitForFunction(
+    ({expected, selector}) => {
+      const width = Math.round(
+        document.querySelector(selector)!.getBoundingClientRect().width,
+      );
+      const codeWidth = document.querySelector('#editor-host')!.clientWidth;
+      return (
+        width === expected &&
+        Math.abs(window.layoutEditor.editor.getLayoutInfo().width - codeWidth) <
+          1
+      );
+    },
+    {expected, selector},
+  );
 }
 
-async function startDrag(page: Page, delta: number) {
-  const rect = await page.locator('#workspace-resizer').boundingBox();
+async function startDrag(
+  page: Page,
+  delta: number,
+  selector = '#workspace-resizer',
+) {
+  const rect = await page.locator(selector).boundingBox();
   const x = rect!.x + rect!.width / 2;
   const y = rect!.y + rect!.height / 2;
   await page.mouse.move(x, y);
   await page.mouse.down();
   await page.mouse.move(x + delta, y, {steps: 5});
 }
+
+test(
+  'file explorer width persists independently through toggles, window constraints and stacked layout',
+  {timeout: 120_000},
+  async t => {
+    const page = await fixture(t);
+    const explorer = '#project-explorer';
+    const separator = '#project-explorer-resizer';
+    const codeWidth = await width(page);
+    assert.equal(await width(page, explorer), 184);
+    await startDrag(page, 100, separator);
+    await page.mouse.up();
+    await waitWidth(page, 284, explorer);
+    await waitWidth(page, codeWidth);
+    // The divider must leave the file tree's adjacent native scrollbar usable.
+    await page.evaluate(() => {
+      const tree = document.querySelector('#project-tree')!;
+      for (let index = 0; index < 65; index++) {
+        const row = document.createElement('div');
+        row.className = 'project-tree-item';
+        row.textContent = `file-${index}.ts`;
+        tree.append(row);
+      }
+    });
+    const treeRect = (await page.locator('#project-tree').boundingBox())!;
+    const scrollX = treeRect.x + treeRect.width - 6;
+    await page.mouse.move(scrollX, treeRect.y + 40);
+    await page.mouse.down();
+    await page.mouse.move(scrollX, treeRect.y + 160, {steps: 5});
+    await page.mouse.up();
+    await page.waitForFunction(
+      () => document.querySelector('#project-tree')!.scrollTop > 0,
+    );
+    await waitWidth(page, 284, explorer);
+    assert.equal(
+      await page.evaluate(() =>
+        localStorage.getItem('code3d:project-explorer-width'),
+      ),
+      '284',
+    );
+
+    await page.locator('#project-explorer-toggle').click();
+    assert.equal(await page.locator(separator).isVisible(), false);
+    await waitWidth(page, codeWidth);
+    await page.locator('#project-explorer-toggle').click();
+    await waitWidth(page, 284, explorer);
+    await waitWidth(page, codeWidth);
+    await page.reload();
+    await page.getByText('Ready', {exact: true}).waitFor({timeout: 60_000});
+    await waitWidth(page, 284, explorer);
+    await waitWidth(page, codeWidth);
+
+    for (const windowWidth of [900, 851]) {
+      await page.setViewportSize({width: windowWidth, height: 900});
+      await waitWidth(page, windowWidth - 460 - 280 - 1, explorer);
+      await waitWidth(page, 280);
+      assert.equal(await width(page, '.preview-pane'), 460);
+      assert.equal(
+        await page.evaluate(() => document.documentElement.scrollWidth),
+        windowWidth,
+      );
+      assert.equal(
+        await page.evaluate(() =>
+          localStorage.getItem('code3d:project-explorer-width'),
+        ),
+        '284',
+      );
+    }
+
+    await page.setViewportSize({width: 680, height: 800});
+    await waitWidth(page, 284, explorer);
+    assert.equal(await page.locator(separator).isVisible(), true);
+    await startDrag(page, 32, separator);
+    await page.mouse.up();
+    await waitWidth(page, 316, explorer);
+    await page.setViewportSize({width: 1440, height: 900});
+    await waitWidth(page, 316, explorer);
+    await waitWidth(page, codeWidth);
+    await startDrag(page, 64);
+    await page.mouse.up();
+    await waitWidth(page, codeWidth + 64);
+    await waitWidth(page, 316, explorer);
+  },
+);
+
+test(
+  'file explorer separator supports keyboard bounds and restores cancelled or hidden drags',
+  {timeout: 120_000},
+  async t => {
+    const page = await fixture(t, {controlledResize: true});
+    const explorer = '#project-explorer';
+    const selector = '#project-explorer-resizer';
+    const separator = page.getByRole('separator', {
+      name: 'Resize file explorer',
+      includeHidden: true,
+    });
+    await separator.focus();
+    await page.keyboard.press('ArrowRight');
+    await waitWidth(page, 200, explorer);
+    await page.keyboard.press('Shift+ArrowRight');
+    await waitWidth(page, 264, explorer);
+    await page.keyboard.press('Home');
+    await waitWidth(page, 140, explorer);
+    await page.keyboard.press('End');
+    await waitWidth(page, 420, explorer);
+    assert.equal(await separator.getAttribute('aria-valuenow'), '420');
+    await page.keyboard.press('Shift+ArrowLeft');
+    await waitWidth(page, 356, explorer);
+
+    for (const cancel of ['escape', 'pointercancel', 'blur'] as const) {
+      await startDrag(page, -80, selector);
+      await waitWidth(page, 276, explorer);
+      if (cancel === 'escape') await page.keyboard.press('Escape');
+      else if (cancel === 'pointercancel')
+        await separator.dispatchEvent('pointercancel', {pointerId: 1});
+      else await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+      await page.mouse.up();
+      await waitWidth(page, 356, explorer);
+      assert.equal(
+        await page.locator('#workspace').getAttribute('data-resizing'),
+        null,
+      );
+      assert.equal(
+        await page.evaluate(() =>
+          localStorage.getItem('code3d:project-explorer-width'),
+        ),
+        '356',
+      );
+    }
+
+    await startDrag(page, -80, selector);
+    await waitWidth(page, 276, explorer);
+    await page.evaluate(() => {
+      window.pauseLayoutObserver = true;
+      document.querySelector<HTMLElement>('#project-explorer')!.hidden = true;
+    });
+    await page.mouse.up();
+    await page.waitForFunction(
+      () =>
+        !document.querySelector('#workspace')!.hasAttribute('data-resizing'),
+    );
+    assert.equal(await separator.getAttribute('aria-valuenow'), '356');
+    assert.equal(
+      await page.evaluate(() =>
+        document
+          .querySelector<HTMLElement>('#workspace')!
+          .style.getPropertyValue('--project-explorer-width'),
+      ),
+      '356px',
+    );
+    await page.evaluate(() => {
+      document.querySelector<HTMLElement>('#project-explorer')!.hidden = false;
+      window.pauseLayoutObserver = false;
+      for (const callback of window.pendingLayoutObservers.splice(0))
+        callback();
+    });
+    await waitWidth(page, 356, explorer);
+    await page.reload();
+    await page.getByText('Ready', {exact: true}).waitFor({timeout: 60_000});
+    await waitWidth(page, 356, explorer);
+  },
+);
 
 test('hidden cancellation restores the saved width before any workspace resize notification', async t => {
   const page = await fixture(t, {controlledResize: true});

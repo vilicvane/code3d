@@ -153,6 +153,7 @@ app.innerHTML = `
             </header>
             <nav class="project-tree" id="project-tree"></nav>
           </aside>
+          <div class="pane-resizer project-explorer-resizer" id="project-explorer-resizer" role="separator" aria-label="Resize file explorer" aria-orientation="vertical" aria-controls="project-explorer" tabindex="0" title="Drag to resize · Arrow keys to adjust"></div>
           <div class="project-context-menu" id="project-context-menu" hidden>
             <button id="context-rename-file" type="button">Rename</button>
             <button id="context-delete-file" type="button">Delete</button>
@@ -166,7 +167,7 @@ app.innerHTML = `
           </section>
         </div>
         <div class="error-bar" id="error-bar" hidden></div>
-        <div class="workspace-resizer" id="workspace-resizer" role="separator" aria-label="Resize code editor" aria-orientation="vertical" aria-controls="editor-document" tabindex="0" title="Drag to resize · Arrow keys to adjust"></div>
+        <div class="pane-resizer workspace-resizer" id="workspace-resizer" role="separator" aria-label="Resize code editor" aria-orientation="vertical" aria-controls="editor-document" tabindex="0" title="Drag to resize · Arrow keys to adjust"></div>
       </section>
 
       <section class="pane preview-pane">
@@ -291,6 +292,7 @@ new EditorSplitLayout(
   requiredElement('workspace'),
   projectExplorer,
   requiredElement('workspace-resizer'),
+  requiredElement('project-explorer-resizer'),
 );
 
 const dockPanels = new DockPanelCoordinator();
