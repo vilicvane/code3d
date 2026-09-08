@@ -463,7 +463,8 @@ test('export-only edits reuse a large model including exact directional bounds',
         );
       }
     }
-    // A diagnosed source failure also finishes the evaluation and trims history.
+    // A source failure closes the scope while retaining history within budget.
+    const beforeFailure = kernelOperationCacheStats();
     const failed = await compileProject(
       {
         files: [
@@ -473,7 +474,17 @@ test('export-only edits reuse a large model including exact directional bounds',
       '/model.ts',
     );
     assert.match(defined(failed.diagnostic).summary, /failed model/);
-    assert.ok(kernelOperationCacheStats().entries <= 256);
+    assert.equal(kernelOperationCacheStats().entries, beforeFailure.entries);
+    assert.equal(
+      kernelOperationCacheStats().historicalEntries,
+      beforeFailure.entries,
+    );
+    const restored = await compileProject(
+      {files: [{path: '/model.ts', source}]},
+      '/model.ts',
+    );
+    assert.equal(restored.diagnostic, undefined);
+    assert.equal(kernelOperationCacheStats().misses, beforeFailure.misses);
   } finally {
     clearKernelOperationCache();
   }

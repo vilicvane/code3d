@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {chromium} from 'playwright-core';
+import {appIsolationHeaders} from '../../build/isolation.ts';
 
 test(
   'paint alpha survives browser drawing and PNG export for every geometry kind',
@@ -21,6 +22,7 @@ test(
     await page.route(url, route =>
       route.fulfill({
         contentType: 'text/html',
+        headers: appIsolationHeaders,
         body: '<main style="width:800px;height:600px"></main>',
       }),
     );

@@ -247,6 +247,7 @@ mainBuild:
     - symbol: ReplicadMeshExtractor
     - symbol: ReplicadEdgeMeshData
     - symbol: ReplicadEdgeMeshExtractor
+    - symbol: Code3dMemory
   emccFlags:
     - -fwasm-exceptions
     - -sEXPORT_EXCEPTION_HANDLING_HELPERS
@@ -271,3 +272,4 @@ additionalCppFiles:
   - wrappers/edge-mesh-extractor.cpp
   - wrappers/brep-io.cpp
   - wrappers/geom2d-io.cpp
+  - wrappers/memory.cpp

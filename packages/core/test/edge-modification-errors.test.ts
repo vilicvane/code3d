@@ -20,14 +20,14 @@ afterEach(() => {
 
 test('reports an unbuildable chamfer after reusing its cached prefix', () => {
   assertChamferFailure();
-  assert.deepEqual(kernelOperationCacheStats(), {
+  assert.partialDeepStrictEqual(kernelOperationCacheStats(), {
     entries: 2,
     hits: 0,
     misses: 3,
   });
 
   assertChamferFailure();
-  assert.deepEqual(kernelOperationCacheStats(), {
+  assert.partialDeepStrictEqual(kernelOperationCacheStats(), {
     entries: 2,
     hits: 2,
     misses: 4,

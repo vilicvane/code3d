@@ -5,6 +5,7 @@ import path from 'node:path';
 import {builtinModules} from 'node:module';
 import {defineConfig} from 'vite';
 import {browserPackages} from './build/browser-packages.ts';
+import {appIsolationHeaders, appIsolationRules} from './build/isolation.ts';
 
 const packageDirectory = path.dirname(fileURLToPath(import.meta.url));
 const primaryDevelopmentPort = 0xc3d;
@@ -13,8 +14,23 @@ export default defineConfig({
   define: {__CODE3D_NODE_BUILTINS__: JSON.stringify(builtinModules)},
   base: './',
   publicDir: '../../assets/brand',
-  server: {port: primaryDevelopmentPort, strictPort: true},
+  server: {
+    port: primaryDevelopmentPort,
+    strictPort: true,
+    headers: appIsolationHeaders,
+  },
+  preview: {headers: appIsolationHeaders},
   plugins: [
+    {
+      name: 'code3d-app-isolation',
+      generateBundle() {
+        this.emitFile({
+          type: 'asset',
+          fileName: '_headers',
+          source: appIsolationRules('/*'),
+        });
+      },
+    },
     {
       name: 'code3d-development-port',
       apply(_config, {command, isPreview}) {

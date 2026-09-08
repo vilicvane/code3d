@@ -7,6 +7,18 @@ The App places the project files, TypeScript editor, and viewport beside one
 another. The active file is the execution root. Open any source file to preview
 the models it produces.
 
+You can keep editing while a model is building. The App cancels the older
+revision and builds the latest one, reusing completed geometry calculations.
+The operation currently running may need to finish first. If the old build
+cannot stop within five seconds, the App restarts its model runtime; the next
+build then starts with an empty geometry cache. Cancelled results never replace
+the current preview.
+
+The App keeps previous calculation results for later edits and undo, using a
+default 2 GiB memory budget. It removes the least recently used historical
+results when over budget and keeps the current model's complete working set.
+This budget does not cap the total memory used by the browser tab.
+
 ## Arrange your workspace
 
 Use **Hide file explorer** beside the open-file tabs to give the editor more

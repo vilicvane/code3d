@@ -1,3 +1,4 @@
+import {appIsolationHeaders} from '../../build/isolation.ts';
 import type {Browser} from 'playwright-core';
 import type {TestContext} from 'node:test';
 import assert from 'node:assert/strict';
@@ -33,6 +34,7 @@ async function fixture(t: TestContext) {
   await page.route(url, route =>
     route.fulfill({
       contentType: 'text/html',
+      headers: appIsolationHeaders,
       body: '<main>Project modules</main>',
     }),
   );

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {chromium, type Page} from 'playwright-core';
+import {appIsolationHeaders} from '../../build/isolation.ts';
 
 declare const window: Window & {
   renderModeApp: {
@@ -29,6 +30,7 @@ test(
     await page.route(url, route =>
       route.fulfill({
         contentType: 'text/html',
+        headers: appIsolationHeaders,
         body: '<main style="width:800px;height:600px"></main>',
       }),
     );

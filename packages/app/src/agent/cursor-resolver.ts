@@ -1,6 +1,6 @@
 import {AgentError, type AgentCursor} from '@code3d/agent';
 import type {ResolvedAgentCursor} from './cursor';
-import type {CursorWorkerResult} from './cursor.worker';
+import type {CursorWorkerMessage} from './cursor.worker';
 
 /** Each preflight gets an isolated worker, terminated on completion, cancellation or timeout. */
 export async function inspectAgentCursor(
@@ -22,14 +22,30 @@ export async function inspectAgentCursor(
         () =>
           reject(
             new AgentError(
-              'cursor_timeout',
-              'Cursor regex exceeded the 1-second resolution deadline. Simplify it or narrow the line range.',
+              'cursor_startup_timeout',
+              'Cursor worker did not finish loading within 10 seconds.',
             ),
           ),
-        1000,
+        10_000,
       );
-      worker.onmessage = (event: MessageEvent<CursorWorkerResult>) => {
-        const result = event.data;
+      worker.onmessage = (event: MessageEvent<CursorWorkerMessage>) => {
+        if (event.data.kind === 'ready') {
+          clearTimeout(timer);
+          // Downloading and starting the Worker is not regex execution time.
+          timer = setTimeout(
+            () =>
+              reject(
+                new AgentError(
+                  'cursor_timeout',
+                  'Cursor regex exceeded the 1-second resolution deadline. Simplify it or narrow the line range.',
+                ),
+              ),
+            1000,
+          );
+          worker.postMessage({source, cursor});
+          return;
+        }
+        const result = event.data.result;
         if (result.ok) resolve(result.cursor);
         else reject(new AgentError(result.code, result.message));
       };
@@ -44,7 +60,6 @@ export async function inspectAgentCursor(
             'Cursor worker returned an unreadable message.',
           ),
         );
-      worker.postMessage({source, cursor});
     });
   } finally {
     clearTimeout(timer);

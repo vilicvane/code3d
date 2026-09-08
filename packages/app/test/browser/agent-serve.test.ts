@@ -9,6 +9,7 @@ import {runCli, startServe} from '../../../cli/test/process.ts';
 import {type AgentConfig} from '@code3d/agent';
 import {createLocalBridge} from '../../../cli/bld/bridge.js';
 import {reserveLocalPort} from './local-port.ts';
+import {appIsolationHeaders} from '../../build/isolation.ts';
 
 test(
   'HTTPS App prompt starts a real CLI service, permits local access, renders models and persists editable agent ports',
@@ -46,6 +47,7 @@ test(
         '.svg': 'image/svg+xml',
       };
       await route.fulfill({
+        headers: appIsolationHeaders,
         body: await readFile(join(directory, path)),
         contentType: types[extname(path)] ?? 'application/octet-stream',
       });
@@ -70,6 +72,7 @@ test(
     };
     await permission('denied');
     await page.goto(origin + prefix);
+    assert.equal(await page.evaluate(() => crossOriginIsolated), true);
     await page.locator('#agents-button').click();
     const dialog = page.getByRole('dialog', {
       name: 'Connect Agent',

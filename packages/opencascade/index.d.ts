@@ -1,5 +1,13 @@
-export {default} from 'replicad-opencascadejs';
+import type {OpenCascadeInstance as ReplicadOpenCascadeInstance} from 'replicad-opencascadejs';
 export type * from 'replicad-opencascadejs';
+
+export type OpenCascadeInstance = ReplicadOpenCascadeInstance & {
+  Code3dMemory: {AllocatedBytes(): number};
+};
+
+export default function initialize(
+  options?: Record<string, unknown>,
+): Promise<OpenCascadeInstance>;
 
 // Embind supplies these handle operations, omitted by the generated declarations.
 export interface EmbindHandle {

@@ -9,6 +9,40 @@ const oc = await initialize({
   ),
 });
 
+test('allocator statistics decrease after releasing geometry without shrinking WASM memory', () => {
+  const before = oc.Code3dMemory.AllocatedBytes();
+  const shapes = Array.from({length: 500}, () => {
+    const builder = new oc.BRepPrimAPI_MakeBox(10, 20, 30);
+    try {
+      return builder.Shape();
+    } finally {
+      builder.delete();
+    }
+  });
+  const allocated = oc.Code3dMemory.AllocatedBytes();
+  const capacity = oc.wasmMemory.buffer.byteLength;
+  for (const shape of shapes) shape.delete();
+  const released = oc.Code3dMemory.AllocatedBytes();
+  assert.ok(allocated > before + 1024 * 1024);
+  assert.ok(released < allocated - 1024 * 1024);
+  assert.equal(oc.wasmMemory.buffer.byteLength, capacity);
+  assert.ok(released >= 0);
+});
+
+test('allocator statistics include allocations larger than an ordinary heap page', () => {
+  const before = oc.Code3dMemory.AllocatedBytes();
+  const values = new oc.NCollection_Array1_double(1_000_000);
+  let allocated: number;
+  try {
+    values.Init(1);
+    allocated = oc.Code3dMemory.AllocatedBytes();
+    assert.ok(allocated >= before + 8_000_000);
+  } finally {
+    values.delete();
+  }
+  assert.ok(oc.Code3dMemory.AllocatedBytes() <= allocated - 8_000_000);
+});
+
 test('owned native shapes outlive their builder and release their geometry', () => {
   const initial = oc.wasmMemory.buffer.byteLength;
   for (let iteration = 0; iteration < 10_000; iteration += 1) {
