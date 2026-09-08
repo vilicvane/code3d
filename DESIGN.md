@@ -62,6 +62,7 @@
 - `align` 独立表达底层几何重合或包含关系，可求解位置和姿态；忽略曲线/曲面裁剪边界和参数起点，保留未约束自由度。线以 `reverse()`、面以 `flip()` 选择方向，不改变参考轴。`align.offset` 在目标参考轴中对 self 做对齐后的平移，再执行旋转链；零偏移不额外定位。见 [#43](https://github.com/vilicvane/code3d/issues/43)。
 - `relate` 确定接受摆放的 self，与 on 的书写方向分离；原 receiver 引用可重绑定。旋转用独立的 pivot/pivotVertex/around 与 rotate 链显式表达，局部坐标和顶点归属以 self 为准。见 [#36](https://github.com/vilicvane/code3d/issues/36)。
 
+- group 默认原点在构造时取已求解的直接成员原点包围盒中心，轴向不变；嵌套 group 仅贡献自身原点。所有模型支持 originPoint(pointRef) 与 originOffset，组合体原点操作统一重表达已装配结果并保留内部约束；重复来源须选择具体实例。见 [#54](https://github.com/vilicvane/code3d/issues/54)。
 - 模型原点在自身局部坐标恒为零；originOffset(d) 将内部点坐标重表达为 p-d，旧模型值保持不变。位置用数组，尺寸、位移增量和分轴角度用独立数值。模型 XYZ 与几何参考架分开；默认 rotate/scaled 围绕当前局部零点。见 [#48](https://github.com/vilicvane/code3d/issues/48)。
 
 ## Non-goals

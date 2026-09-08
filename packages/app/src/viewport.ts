@@ -1,7 +1,7 @@
 import {committedSpatialObject} from './tools/spatial-edit';
 import type {ModelDiagnostic} from './model/diagnostic';
 import * as THREE from 'three';
-import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {ViewportNavigation} from './ui/viewport-navigation';
 import {LineMaterial} from 'three/addons/lines/LineMaterial.js';
 import {LineSegments2} from 'three/addons/lines/LineSegments2.js';
 import type {
@@ -93,6 +93,7 @@ type TransientPreviewRestore = Readonly<{
   module: ModelModule;
   selectedKey: string;
   cameraPosition: THREE.Vector3;
+  cameraUp: THREE.Vector3;
   controlsTarget: THREE.Vector3;
   cameraNear: number;
   cameraFar: number;
@@ -274,7 +275,7 @@ export class ModelViewport {
   private readonly scene: THREE.Scene;
   private readonly camera: THREE.PerspectiveCamera;
   private readonly renderer: THREE.WebGLRenderer;
-  private readonly controls: OrbitControls;
+  private readonly controls: ViewportNavigation;
   private readonly coordinateReference?: ViewportCoordinateReference;
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointer = new THREE.Vector2();
@@ -343,17 +344,29 @@ export class ModelViewport {
     this.camera = this.rendering.camera;
     this.renderer = this.rendering.renderer;
     this.scene.add(this.root, this.decorationRoot);
-    this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-    this.controls.enableDamping = true;
-    this.controls.dampingFactor = 0.075;
-    this.controls.target.set(0, 20, 0);
-    this.controls.minDistance = 20;
-    this.controls.maxDistance = 650;
-    this.controls.addEventListener('change', () => this.refreshTopologyHover());
+    this.controls = new ViewportNavigation(
+      this.camera,
+      this.renderer.domElement,
+    );
+    this.controls.addEventListener('change', () => {
+      this.rendering.updateCameraRange(this.controls.focus);
+      this.refreshTopologyHover();
+    });
     if (showCoordinateReference) {
       this.coordinateReference = new ViewportCoordinateReference(
         this.container,
         this.camera,
+        {
+          onSelect: (direction, up) => {
+            if (this.controls.enabled)
+              this.controls.setViewDirection(direction, up);
+          },
+          onReset: frame => {
+            if (!this.controls.enabled) return;
+            this.controls.resetView(frame, this.cameraFraming(this.root));
+            this.hasFramedView = true;
+          },
+        },
       );
     }
     this.transformGizmo = new TransformGizmo(
@@ -361,7 +374,7 @@ export class ModelViewport {
       this.camera,
       this.renderer.domElement,
       enabled => {
-        this.controls.enabled = enabled;
+        this.controls.setNavigationEnabled(enabled);
       },
       onPositionTool,
     );
@@ -609,11 +622,12 @@ export class ModelViewport {
       }
     }
     this.camera.position.copy(restore.cameraPosition);
-    this.controls.target.copy(restore.controlsTarget);
+    this.camera.up.copy(restore.cameraUp);
+    this.controls.focus.copy(restore.controlsTarget);
     this.camera.near = restore.cameraNear;
     this.camera.far = restore.cameraFar;
     this.camera.updateProjectionMatrix();
-    this.controls.update();
+    this.controls.syncCamera();
   }
 
   getSelected(): Occurrence | undefined {
@@ -961,13 +975,16 @@ export class ModelViewport {
   }
 
   private frame(target: THREE.Object3D, allowZoomIn: boolean): void {
-    this.rendering.frame(
+    const framing = this.cameraFraming(target);
+    if (framing) this.controls.frame(framing, allowZoomIn);
+  }
+
+  private cameraFraming(target: THREE.Object3D) {
+    return this.rendering.framing(
       target,
-      allowZoomIn,
-      this.controls.target,
+      this.camera.position.distanceTo(this.controls.focus),
       this.transformGizmo.framing(),
     );
-    this.controls.update();
   }
 
   private buildObject(
@@ -1301,7 +1318,8 @@ export class ModelViewport {
       module: this.module,
       selectedKey: this.selectedKey,
       cameraPosition: this.camera.position.clone(),
-      controlsTarget: this.controls.target.clone(),
+      cameraUp: this.camera.up.clone(),
+      controlsTarget: this.controls.focus.clone(),
       cameraNear: this.camera.near,
       cameraFar: this.camera.far,
     };
@@ -1838,12 +1856,14 @@ export class ModelViewport {
 
   private resize(): void {
     this.rendering.resize();
+    this.controls.resize();
     this.refreshTopologyHover();
   }
 
   private animate = (): void => {
     requestAnimationFrame(this.animate);
-    this.controls.update();
+    this.controls.updateTransition(performance.now());
+    this.rendering.updateCameraRange(this.controls.focus);
     this.coordinateReference?.update();
     this.rendering.renderFrame(() => {
       this.selectionHighlight?.update();

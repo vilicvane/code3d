@@ -50,7 +50,7 @@ Planar profiles lie in the local XZ plane with a +Y normal.
 | `bezier(points)`                           | Bézier curve                                 |
 | `spline(points)`                           | Interpolating spline                         |
 | `loft(sections, options?)`                 | Solid through sections; optional curve spine |
-| `extrude(face, distance)`                  | Extrude one face along its plane normal      |
+| `extrude(face, distance)`                  | Solid extruded along one face's local normal |
 
 See [local coordinates and placement](../../concepts/local-coordinates/) for
 the coordinate frame of a model, reference, or composition.
@@ -62,6 +62,21 @@ endpoints. Curve tangents do not redefine the model's XYZ axes.
 
 Profiles and curves are model values that can be inspected and related to
 other models.
+
+Face models also support `face.extrude(distance)`. Both forms accept a finite,
+non-zero signed distance and preserve the starting face's coordinates. For an
+unrotated profile, positive distance extends along +Y; negative distance extends
+along −Y. Rotating the face rotates its extrusion direction; changing its origin
+does not recenter the result. The returned solid supports Boolean operations,
+fillets, chamfers, and shells. Use `faces.map(face => face.extrude(3))` for a list
+of profiles.
+
+```ts
+import {circle, extrude, rectangle} from '@code3d/core';
+
+export const plate = rectangle(30, 20).extrude(3).fillet(0.5);
+export const pin = extrude(circle(2), -10);
+```
 
 ## Editable sketch regions
 
@@ -148,14 +163,16 @@ conversion, use the [export scale](../../guides/exporting/#scale-and-orientation
 
 ## Origins and rotation
 
-Solids, faces, curves, and points provide these operations:
+All models provide `originPoint()`, `originOffset()` and `rotate()`. Solids, faces,
+curves and points additionally provide vertex/center selection:
 
-| Method                      | Behavior                                                   |
-| --------------------------- | ---------------------------------------------------------- |
-| `.originVertex(id)`         | Set the origin to an input-model vertex                    |
-| `.originCenter()`           | Set the origin to the model's center anchor                |
-| `.originOffset(dx, dy, dz)` | Add a local-coordinate offset to the current origin        |
-| `.rotate(x, y, z)`          | Rotate about the origin, in degrees, fixed X then Y then Z |
+| Method                      | Behavior                                                      |
+| --------------------------- | ------------------------------------------------------------- |
+| `.originPoint(pointRef)`    | Set the origin to a point reference, including a group member |
+| `.originVertex(id)`         | Set the origin to an input-model vertex                       |
+| `.originCenter()`           | Set the origin to the model's center anchor                   |
+| `.originOffset(dx, dy, dz)` | Add a local-coordinate offset to the current origin           |
+| `.rotate(x, y, z)`          | Rotate about the origin, in degrees, fixed X then Y then Z    |
 
 The origin is always zero in model coordinates. `originOffset(dx, dy, dz)`
 re-expresses every local point as `p - [dx, dy, dz]`; offsets accumulate and can
@@ -168,7 +185,17 @@ Every geometric model exposes `center`: its initial local bounding-box center,
 carried along by subsequent transforms. Rotation does not recalculate it from
 the rotated shape's axis-aligned bounds. Origin edits change its coordinates;
 `.originCenter().originOffset(1, 0, 0)` leaves it at `[-1, 0, 0]`.
-Groups do not provide these geometric operations. For a runnable example and
+A group chooses its default origin from the bounding-box center of its solved
+direct member origins, keeping the assembly axes. Geometry size does not change
+this default, and nested groups contribute only their own origins. Group origin
+edits move the entire assembly's local coordinates together; they preserve its
+internal relations. `rotate(x, y, z)` turns the solved assembly about its current
+origin, including nested instances. `originPoint(part.center)` resolves the member's actual
+placement; repeated sources need a specific instance reference. Groups do not
+have aggregate vertex IDs, a geometric center or scaling.
+See [group coordinates](../../concepts/local-coordinates/#group-origins).
+
+For a runnable example and
 the vertex picker, origin arrows, and rotation rings, see
 [choosing an origin and rotating a part](../../guides/origins-and-rotation/).
 

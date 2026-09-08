@@ -7,6 +7,7 @@ import {
   cut,
   cylinder,
   ellipse,
+  extrude,
   frustum,
   group,
   intersect,
@@ -141,6 +142,18 @@ tube(6, {wall: 2}, 12);
 // @ts-expect-error Tube dimensions are required.
 tube(6, 4);
 const faceModel: FaceModel<PlanarElements> = circle(4);
+const extrudedFace: SolidModel = faceModel.extrude(3);
+const extrudedProfile: SolidModel = extrude(faceModel.rotate(0, 0, 90), -3);
+// @ts-expect-error Extrusion accepts one face; map multiple faces explicitly.
+extrude([faceModel], 3);
+// @ts-expect-error A solid is not an extrusion profile.
+extrude(solid, 3);
+// @ts-expect-error Only face models expose extrusion.
+solid.extrude(3);
+// @ts-expect-error Extrusion distance is required.
+faceModel.extrude();
+// @ts-expect-error Extrusion distance is numeric.
+faceModel.extrude('3');
 const edgeModel: EdgeModel<CurveElements> = line([0, 0, 0], vector);
 const vertexModel: VertexModel = point(vector);
 const groupModel: GroupModel = group([
@@ -259,6 +272,8 @@ void [
   customSolid,
   definePrimitive,
   ellipse,
+  extrudedFace,
+  extrudedProfile,
   faceModel,
   frustum,
   group,
@@ -358,10 +373,21 @@ groupModel.shell(1);
 // @ts-expect-error The general Model type contains only common capabilities.
 model.scaled(2);
 
-// @ts-expect-error Groups do not contain geometry to rotate.
 groupModel.rotate(0, 90, 0);
-// @ts-expect-error Groups do not expose geometric origin editing.
-groupModel.originOffset(0, 0, 0);
+groupModel.originOffset(0, 0, 0).originPoint(solid.center);
+model.originPoint(pointAnchor).originOffset(1, 2, 3).rotate(10, 20, 30);
+solid.originPoint(solid.vertex(1)).fillet(1);
+faceModel.originPoint(faceModel.center).surface(1);
+edgeModel.originPoint(edgeModel.start).edge(1);
+vertexModel.originPoint(vertexModel).vertex(1);
+// @ts-expect-error Choose a point on an edge rather than the edge itself.
+solid.originPoint(edgeModel);
+// @ts-expect-error A plane has no unique point.
+solid.originPoint(solid.up);
+// @ts-expect-error Coordinates are offsets, not point references.
+solid.originPoint([1, 2, 3]);
+// @ts-expect-error Groups have no aggregated topology vertex namespace.
+groupModel.originVertex(1);
 // @ts-expect-error Groups do not have a geometric center.
 groupModel.originCenter();
 // @ts-expect-error Center setters do not take coordinates.

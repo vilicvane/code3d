@@ -735,8 +735,10 @@ kbd {
   right: 14px;
   z-index: 2;
   width: 88px;
-  pointer-events: none;
   user-select: none;
+  touch-action: none;
+  border-radius: 50%;
+  outline-offset: -4px;
 }
 
 .viewport-coordinate-reference svg {
@@ -759,25 +761,37 @@ kbd {
 
 .viewport-coordinate-axis {
   color: #dfe5ca;
+  cursor: pointer;
+  outline: none;
 }
 
 .viewport-coordinate-axis line {
   stroke: currentColor;
   stroke-width: 2;
+  pointer-events: none;
 }
 
-.viewport-coordinate-axis circle {
+.viewport-coordinate-marker {
   fill: currentColor;
   stroke: #11130f;
   stroke-width: 1;
 }
 
-.viewport-coordinate-axis[data-direction='negative'] circle {
-  stroke: none;
+.viewport-coordinate-hit-area {
+  fill: transparent;
+  pointer-events: all;
+}
+
+.viewport-coordinate-axis:hover .viewport-coordinate-marker,
+.viewport-coordinate-axis:focus-visible .viewport-coordinate-marker,
+.viewport-coordinate-axis[aria-pressed='true'] .viewport-coordinate-marker {
+  stroke: #dfe5ca;
+  stroke-width: 2;
 }
 
 .viewport-coordinate-axis text {
-  fill: #10120e;
+  pointer-events: none;
+  fill: #fff;
   font:
     700 8px/1 'IBM Plex Mono',
     monospace;

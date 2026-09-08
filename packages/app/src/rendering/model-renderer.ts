@@ -10,11 +10,15 @@ const unpaintedSurfaceOpacity = 0.68;
 const boundaryColor = '#080a07';
 const boundaryOpacity = 0.72;
 
+export type CameraFraming = Readonly<{
+  focus: THREE.Vector3;
+  distance: number;
+}>;
+
 export class ModelRenderer {
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(42, 1, 0.1, 2000);
   readonly renderer: THREE.WebGLRenderer;
-  private readonly cameraTarget = new THREE.Vector3(0, 20, 0);
 
   constructor(private readonly container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({
@@ -57,21 +61,16 @@ export class ModelRenderer {
     this.camera.updateProjectionMatrix();
   }
 
-  frame(
+  framing(
     target: THREE.Object3D,
-    allowZoomIn: boolean,
-    cameraTarget = this.cameraTarget,
+    currentDistance: number,
     additional?: Readonly<{bounds: THREE.Box3; paddingPixels: number}>,
-  ): void {
+  ): CameraFraming | undefined {
     const box = new THREE.Box3().setFromObject(target);
     if (additional) box.union(additional.bounds);
     if (box.isEmpty()) return;
 
     const sphere = box.getBoundingSphere(new THREE.Sphere());
-    const direction = this.camera.position
-      .clone()
-      .sub(cameraTarget)
-      .normalize();
     const availableFraction = additional
       ? Math.max(
           0.25,
@@ -80,22 +79,34 @@ export class ModelRenderer {
               Math.min(this.container.clientWidth, this.container.clientHeight),
         )
       : 1;
-    const fittedDistance = Math.max(
-      (sphere.radius * 2.8) / availableFraction,
-      24,
+    const verticalHalfFov =
+      THREE.MathUtils.degToRad(this.camera.getEffectiveFOV()) / 2;
+    const halfFov = Math.min(
+      verticalHalfFov,
+      Math.atan(Math.tan(verticalHalfFov) * this.camera.aspect),
     );
-    const currentDistance = this.camera.position.distanceTo(cameraTarget);
-    const distance = allowZoomIn
-      ? fittedDistance
-      : Math.max(fittedDistance, currentDistance);
-    cameraTarget.copy(sphere.center);
-    this.camera.position
-      .copy(sphere.center)
-      .addScaledVector(direction, distance);
-    this.camera.lookAt(cameraTarget);
-    this.camera.near = Math.max(distance / 1000, 0.05);
-    this.camera.far = Math.max(distance * 20, 1000);
-    this.camera.updateProjectionMatrix();
+    return {
+      focus: sphere.center,
+      distance: sphere.radius
+        ? sphere.radius / Math.sin(halfFov) / availableFraction
+        : currentDistance,
+    };
+  }
+
+  updateCameraRange(cameraTarget: THREE.Vector3): void {
+    const distance = this.camera.position.distanceTo(cameraTarget);
+    const near = distance / 1000;
+    const far = Math.max(distance * 20, 1000);
+    if (near !== this.camera.near || far !== this.camera.far) {
+      this.camera.near = near;
+      this.camera.far = far;
+      this.camera.updateProjectionMatrix();
+    }
+    const fog = this.scene.fog;
+    if (fog instanceof THREE.Fog) {
+      fog.near = Math.max(180, distance * 2);
+      fog.far = Math.max(430, distance * 5);
+    }
   }
 
   renderFrame(beforeRender?: () => void): void {

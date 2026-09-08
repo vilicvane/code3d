@@ -5,6 +5,7 @@ import type {
   gp_Pnt,
   TopExp_Explorer,
   BRepOffsetAPI_MakePipeShell,
+  BRepPrimAPI_MakePrism,
   EmbindHandle,
 } from '@code3d/opencascade';
 import {defined} from '../../../test/assert.ts';
@@ -23,6 +24,7 @@ import {
   centeredBoxShape,
   shapeSubshapes,
 } from '../bld/library/kernel-shapes.js';
+import {extrudeWithTopology} from '../bld/library/extrude.js';
 import {
   filletEdges,
   initialShapeTopology,
@@ -120,6 +122,81 @@ test('box construction releases temporary native points', t => {
     shape.delete();
   }
 });
+
+for (const failTopology of [false, true]) {
+  test(`extrusion releases its native builder and vector${failTopology ? ' and partial solid on failure' : ''}`, t => {
+    const profile = rectangle(4, 6);
+    const geometry = modelGeometry(profile).value;
+    const oc = replicad.getOC();
+    const temporaries: EmbindHandle[] = [];
+    const solids: EmbindHandle[] = [];
+    t.mock.method(
+      oc,
+      'BRepPrimAPI_MakePrism',
+      new Proxy(oc.BRepPrimAPI_MakePrism, {
+        construct(target, args) {
+          const builder = Reflect.construct(
+            target,
+            args,
+          ) as BRepPrimAPI_MakePrism & EmbindHandle;
+          temporaries.push(builder, args[1] as EmbindHandle);
+          return builder;
+        },
+      }),
+    );
+    const castSolid = oc.TopoDS.Solid;
+    t.mock.method(
+      oc.TopoDS,
+      'Solid',
+      (...args: Parameters<typeof castSolid>) => {
+        const solid = castSolid(...args);
+        solids.push(solid);
+        return solid;
+      },
+    );
+    if (failTopology) {
+      const current = oc.TopExp_Explorer.prototype.Current;
+      let visits = 0;
+      t.mock.method(
+        oc.TopExp_Explorer.prototype,
+        'Current',
+        function (this: TopExp_Explorer) {
+          if (++visits === 5) throw new Error('Interrupted extrusion topology');
+          return current.call(this);
+        },
+      );
+    }
+    let result: ReturnType<typeof extrudeWithTopology> | undefined;
+    try {
+      const run = () =>
+        (result = extrudeWithTopology(
+          {
+            shape: geometry.shape,
+            topology: geometry.topology,
+            index: 1,
+          },
+          [0, 3, 0],
+        ));
+      if (failTopology) assert.throws(run, /Interrupted extrusion topology/);
+      else {
+        result = run();
+        assert.ok(result.shape.mesh().triangles.length > 0);
+      }
+      assert.equal(temporaries.length, 2);
+      assert.ok(temporaries.every(handle => handle.isDeleted()));
+      assert.ok(solids.length > 0);
+      if (failTopology) assert.ok(solids.every(handle => handle.isDeleted()));
+      assert.ok(geometry.shape.mesh().triangles.length > 0);
+    } finally {
+      result?.shape.delete();
+      disposeModelObjects([profile]);
+      clearKernelOperationCache();
+      for (const handle of [...temporaries, ...solids]) {
+        if (!handle.isDeleted()) handle.delete();
+      }
+    }
+  });
+}
 
 test('B-Rep deserialization releases its original handle while retaining independent geometry', t => {
   const oc = replicad.getOC();

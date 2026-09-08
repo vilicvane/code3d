@@ -195,7 +195,7 @@ export default assembly;`;
     assert.ok(
       defined(module.objects.get(reference.geometryNodeId)).kind === 'solid',
     );
-    assert.deepEqual(reference.transform.position, [40, 50, 60]);
+    assert.deepEqual(reference.transform.position, [0, 0, 0]);
   }
   const selection = defined(
     module.sourceTargets.find(
@@ -212,7 +212,7 @@ export default assembly;`;
   );
   assert.deepEqual(
     selectionScope(defined(selection)).transform.position,
-    [40, 50, 60],
+    [0, 0, 0],
   );
   assert.deepEqual(
     defined(binding('ends').topologyReferences).map(reference => {
@@ -224,7 +224,7 @@ export default assembly;`;
   assert.equal(defined(binding('center').anchorReferences).length, 1);
   assert.deepEqual(
     defined(binding('center').anchorReferences)[0].transform.position,
-    [35, 50, 60],
+    [-5, 0, 0],
   );
   assert.equal(binding('center').isCollection, false);
   assert.equal(defined(binding('mixed').topologyReferences).length, 1);
@@ -1618,6 +1618,88 @@ function exactTargets(
   return module.sourceTargets.filter(
     target => target.sourceRef.start === start && target.sourceRef.end === end,
   );
+}
+
+for (const call of ['profile.extrude(-3)', 'extrude(profile, -3)']) {
+  test(`${call} exposes a signed distance tool, source face and solid output`, async () => {
+    const source = `import {rectangle, extrude} from '@code3d/core';
+const profile = rectangle(8, 6).rotate(0, 0, 90).originOffset(-10, 0, 0);
+export const body = ${call};`;
+    const module = await compileProject(
+      {files: [{path: '/model.ts', source}]},
+      '/model.ts',
+    );
+    assert.equal(module.diagnostic, undefined);
+    const body = defined(
+      module.objects.get(defined(module.exports.get('body'))),
+    );
+    assert.equal(body.kind, 'solid');
+    assert.equal(body.operation.kind, 'extrude');
+    assert.ok(defined(body.mesh).triangles.length > 0);
+    const face = defined(module.objects.get(body.operation.inputs[0].nodeId));
+    assert.equal(face.kind, 'face');
+    const input = exactTargets(
+      module,
+      source,
+      'profile',
+      `export const body = ${call}`,
+    ).find(target => target.kind === 'operation-input');
+    assert.deepEqual(defined(input).evaluations[0].nodeIds, [face.nodeId]);
+    const output = module.sourceTargets.find(
+      target =>
+        target.kind === 'operation-output' &&
+        target.evaluations[0].operationId === body.operation.id,
+    );
+    assert.ok(output);
+    const distance = defined(output.tool).signature.parameters.find(
+      parameter => parameter.name === 'distance',
+    );
+    assert.equal(defined(distance).kind, 'length');
+    const parameter = defined(output.evaluations[0].parameters).find(
+      parameter => parameter.argument === 'distance',
+    );
+    assert.equal(defined(parameter).value, -3);
+    assert.equal(defined(parameter).target.kind, 'length');
+    assert.deepEqual(
+      body.operation.inputs.map(input => input.role),
+      ['receiver'],
+    );
+  });
+}
+
+for (const call of ['profile.extrude(0)', 'extrude(profile, 0)']) {
+  test(`${call} keeps the distance tool and face available after a failed extrusion`, async () => {
+    const source = `import {rectangle, extrude} from '@code3d/core';
+const profile = rectangle(8, 6);
+export const body = ${call};`;
+    const module = await compileProject(
+      {files: [{path: '/model.ts', source}]},
+      '/model.ts',
+    );
+    assert.match(defined(module.diagnostic).summary, /finite and non-zero/);
+    const target = ModelViewport.prototype['sourceTargetAt'].call(
+      {module},
+      '/model.ts',
+      source.lastIndexOf('0)'),
+    );
+    assert.ok(target);
+    assert.equal(
+      defined(target.tool).signature.parameters.find(
+        parameter => parameter.name === 'distance',
+      )?.kind,
+      'length',
+    );
+    assert.equal(
+      defined(target.evaluations[0].parameters).find(
+        parameter => parameter.argument === 'distance',
+      )?.value,
+      0,
+    );
+    assert.equal(
+      defined(module.objects.get(target.evaluations[0].nodeIds[0])).kind,
+      'face',
+    );
+  });
 }
 
 test('path IDs keep singular/list schemas, scope and failed-selection recovery', async () => {

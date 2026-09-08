@@ -315,8 +315,8 @@ implementation context and historical outcomes, not a competing work queue.
 - Monaco multi-selection and automatic boolean code generation are deferred
   until single-object discovery, rendering, and position relations are solid.
 
-- Geometric models provide `originOffset(dx, dy, dz)`, `originVertex(id)` and
-  `originCenter()`. Origin is always model-local zero; an offset d re-expresses
+- All models provide `originOffset(dx, dy, dz)` and `originPoint(pointRef)`.
+  Geometric models also provide `originVertex(id)` and `originCenter()`. Origin is always model-local zero; an offset d re-expresses
   all point coordinates as p-d, preserving shape, directions, topology IDs and
   earlier model values. Centers and named references follow the same transform.
   `center` is carried from the body's initial bounds rather than recalculated
@@ -329,8 +329,16 @@ implementation context and historical outcomes, not a competing work queue.
 - `rotate(x, y, z)` and positive finite `scaled(factor)` act about current local
   zero. Geometry, named anchors and references transform together. Booleans
   keep the primary operand's coordinates; loft keeps the first section's
-  coordinates. Groups preserve their assembled local placement and do not
-  provide geometric scaling or origin edits.
+  coordinates. Groups choose their default local zero from the bounding-box
+  center of solved direct member origins, retaining assembly axes; empty groups
+  default to zero. Nested groups contribute only their own origin. This frame
+  is fixed at construction. Group origin edits re-express the assembly together,
+  preserving internal constraints and spacing. Direct `rotate(x, y, z)` rotates
+  the saved assembly about its current origin, retaining nested placements and
+  transforming references, bounds, rendering and export consistently. Point selection shares expose's
+  occurrence resolution and rejects ambiguous repeated sources. Groups have no
+  aggregate vertex IDs or geometric center/scaling capabilities.
+  See [#54](https://github.com/vilicvane/code3d/issues/54).
 - Origin drags freeze the gesture-start snapshot and show a candidate origin
   against it. Commit switches to result coordinates; cancel restores the start.
   Coordinate tuple components retain numeric tools and source provenance.
@@ -485,6 +493,29 @@ implementation context and historical outcomes, not a competing work queue.
   input's source target and makes it the new focus; decorations are never
   selection candidates. Normal recompilation preserves an occurrence selection
   when it still exists.
+- Viewport navigation uses Three.js Arcball rotation across both poles, with
+  left-button rotation, right-button panning and wheel/middle-button zoom.
+  Camera distance has no fixed limits; framing follows geometry size, and
+  clipping and distance fog follow zoom.
+  Wheel zoom keeps the focus-plane point under the pointer fixed on screen;
+  wheel input outside the viewport does not navigate the camera.
+  Rotation has a short release inertia, interrupted while a spatial tool owns
+  the drag. Framing and previews use Arcball's live focus after pan or cursor
+  zoom. Resize updates the control bounds; completion previews restore camera
+  up together with position and focus. See [#55](https://github.com/vilicvane/code3d/issues/55).
+- The upper-right coordinate indicator aligns the view to any of its six axis
+  ends in the displayed world or selected occurrence's local frame, preserving
+  the current focus and zoom distance. Clicking the facing endpoint again flips
+  to its opposite side. Double-clicking the indicator restores the default
+  oblique orientation in that frame and fits the model. Positive endpoints have
+  white axis labels; negative endpoints are unlabeled dots. Both actions use a
+  300ms eased rotation, with focus and distance included when resetting.
+  New view requests continue from the displayed pose; direct navigation and
+  spatial tools interrupt transitions. Reduced-motion preferences skip them.
+  Framing uses the limiting horizontal/vertical field of view so narrow
+  viewports still contain the fitted geometry. Axis buttons support
+  Enter/Space; Enter/Space on the indicator itself resets the view. Camera
+  changes stop navigation inertia without changing model selection or source.
 - Viewport occurrence selection leaves the focused geometry's materials
   unchanged; source context dimming carries the primary focus contrast. A
   passive one-pixel screen-space corner bound marks only groups and other
@@ -994,6 +1025,14 @@ topology anchor kinds, ordinary through-section loft, and a curved-spine loft
 between nonparallel circle and rectangle profiles. Host-Chrome validation also
 confirmed App rendering, section/spine source context, and Surface, Edge,
 and Vertex viewport selectors on the new model kinds and loft result.
+
+The generic face extrusion from the sketch work in
+[#23](https://github.com/vilicvane/code3d/issues/23) is integrated independently
+in [#56](https://github.com/vilicvane/code3d/issues/56):
+`face.extrude(distance)` and `extrude(face, distance)` share one kernel operation,
+cache, topology lineage, and source tracing path. Signed non-zero distance follows
+the face's local normal without recentering; the result is an ordinary solid.
+This does not integrate the sketch system itself.
 
 ### 5. Object combination tools
 

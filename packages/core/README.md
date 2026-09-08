@@ -12,7 +12,7 @@ Direct Node execution requires installing the project dependencies.
 
 The public API includes solid primitives and Boolean operations, first-class
 planar face models (`circle`, `ellipse`, `rectangle`, `regularPolygon`), 3D
-curve models (`line`, `arc`, `bezier`, `spline`), point models, and
+curve models (`line`, `arc`, `bezier`, `spline`), point models, face extrusion, and
 through-section or spine-guided `loft`. Every geometric model is immutable,
 renderable, and relation-aware. Topology capabilities follow dimension:
 vertices provide `.vertex(id)`, edges add `.edge(id)`, and faces and solids
@@ -35,6 +35,22 @@ retire ambiguous source paths. Full rules are in the
 [topology guide](../web/src/content/docs/docs/guides/topology.md).
 `relate()` records placement for composition with other values; inspecting or
 rendering the resulting value by itself uses its own local geometry.
+
+## Face extrusion
+
+`face.extrude(distance)` and `extrude(face, distance)` produce a `SolidModel`
+from one planar face model. The finite, non-zero signed distance follows the
+face's local normal, including any prior rotation. The starting face stays in
+place: an unrotated profile extruded by `3` spans Y = 0 to 3; `-3` spans -3 to 0.
+Origin offsets and input geometry are preserved, and the result supports ordinary
+solid operations. To extrude multiple faces, map them explicitly.
+
+```ts
+import {circle, extrude, rectangle} from '@code3d/core';
+
+export const plate = rectangle(30, 20).extrude(3).fillet(0.5);
+export const pin = extrude(circle(2), -10);
+```
 
 ## Editable sketches
 
@@ -87,7 +103,7 @@ const circles = sketch(
 );
 ```
 
-`radius` takes `[circleOrArcId, value]`. Both current radii and radius constraints
+`radius` uses `['radius', circleOrArcId, value]`. Both current radii and radius constraints
 must be positive and finite. The outer circle above remains free; the inner
 circle's independent constraint preserves its radius. A circle center may also
 use a named upstream point. Circle and point parameters have the same numeric
@@ -130,18 +146,19 @@ No extra lock, soft objective or degree of freedom is introduced.
 Center and endpoints
 can each reference a named upstream point. Zero-radius and coincident-endpoint arcs
 are errors; use `circle` for a full circle.
-The independent `sweep` constraint takes `[arcId, degrees]`, strictly greater than
+The independent `sweep` constraint uses `['sweep', arcId, degrees]`, strictly greater than
 0 and less than 360. Its positive magnitude follows the tuple's `cw`/`ccw`
 direction, so 270 means a major arc in either direction. It does not fix the arc's
 orientation: with a fixed center and radius, dragging an endpoint can rotate both
 endpoints while preserving the sweep.
 
 Geometry tuples hold current data; `constraints` specify what must remain true.
-Constraints have no persistent IDs. Point coordinates have the same runtime
+Constraints use `['kind', target, value?]` and have no persistent IDs. Point coordinates have the same runtime
 meaning whether computed from an expression or written as literals. They may
 move during solving unless constrained. `fixed` locks one point at its supplied
 coordinates; `horizontal` / `vertical` target one local line. `length` / `angle`
-take `[lineId, value]` (angles in degrees); `x` / `y` take `[pointRef, value]`, and
+target one local line and take the value in the third field (angles in degrees);
+`x` / `y` likewise target one point with a third-field coordinate value, and
 `coincident` takes `[pointRef, pointRef]`. `midpoint` takes `[midpointRef, startRef, endRef]`
 and places the first point halfway between the other two, with no line entity required.
 A point reference may name locked upstream
@@ -254,7 +271,7 @@ remain editable in code, not by dragging; literal axes on the same point remain
 draggable. The editor preserves existing IDs and
 allocates new IDs from the current local maximum, without `nextId` metadata.
 Deleted IDs may therefore be reused; downstream references are not automatically
-rewritten. Conversion to faces/solids remains a later slice.
+rewritten.
 
 ### Closed regions and modeling
 
@@ -537,8 +554,7 @@ sampled tangent or normal; `.center.on()` uses only the calculated point.
 
 ## Origins and rotation
 
-Geometric models (solids, faces, curves, and points) support immutable origin
-editing and rotation:
+All models, including groups, support immutable origin editing and rotation:
 
 ```ts
 const part = box(24, 6, 14)
@@ -547,7 +563,9 @@ const part = box(24, 6, 14)
   .rotate(15, 35, 0);
 ```
 
-- `originVertex(id)` makes the selected input vertex local zero.
+- `originPoint(pointRef)` makes a center, named point, or topology vertex local zero.
+- `originVertex(id)` selects a geometric model’s own input vertex; it is equivalent
+  to `model.originPoint(model.vertex(id))`.
 - `originCenter()` makes the model's `center` anchor local zero.
 - `originOffset(dx, dy, dz)` re-expresses every local point as `p - [dx, dy, dz]`.
 - `rotate(x, y, z)` rotates about local zero in degrees, applying fixed local
@@ -569,10 +587,35 @@ has center `[5, 0, 0]`, and `.rotate(0, 90, 0)` takes its end to `[0, 0, -10]`.
 A curve's tangent reference frame does not redefine model XYZ. Directional
 bounds use the model axes, including after geometric rotation.
 
-Groups expose composition capabilities rather than these geometric operations.
+Groups provide `originPoint()`, `originOffset()` and `rotate()`. Their default origin is
+chosen when constructed: solve the direct members' placement, then take the
+axis-aligned bounding-box center of their **origins**, retaining the assembly
+axes. Geometry size does not affect this choice. A nested group contributes
+only its own origin; an empty group defaults to zero. Explicit origin edits
+re-express the assembled result together, preserving internal constraints and
+member spacing. The default is not recalculated on later operations.
+`rotate(x, y, z)` turns the solved assembly together about its current origin,
+including nested instances, without re-solving internal relations. Named
+references and topology follow the members; directional bounds use group axes.
+
+```ts
+const base = box(20, 4, 10).originOffset(0, 2, 0);
+const lid = box(20, 2, 10).originOffset(0, -1, 0);
+const assembly = group([base, lid]); // Common origins at their contact plane.
+const mounted = assembly.originPoint(lid.center);
+const tilted = mounted.rotate(0, 0, 30); // Rotate the whole assembly about the lid center.
+```
+
+`originPoint()` converts references to the receiver's local frame, including
+solved member placements. With repeated geometry, select a specific instance's
+named point, for example `assembly.originPoint(rightPart.body.center)`; an
+ambiguous shared source is rejected. Groups have no aggregate vertex IDs or
+geometric `center` or scaling methods. The
+[group origins example](../app/examples/group-origins.ts) shows direct assembly
+and selection in repeated instances.
 
 In the App, origin offsets have translation arrows; `originVertex`
-uses vertex picking and an origin marker. Dragging an `originCenter()` or
+uses vertex picking and an origin marker. Dragging an `originPoint()`, `originCenter()` or
 `originVertex()` marker adds or edits an `originOffset()` call. Rotation rings edit the corresponding
 angle about its effective axis, including when other angles are nonzero. Dragging
 uses the gesture-start snapshot: the candidate origin moves against fixed

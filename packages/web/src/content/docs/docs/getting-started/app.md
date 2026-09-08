@@ -23,7 +23,21 @@ the minimum and maximum widths. Press `Esc` during a drag to cancel it.
 ## Move through a model
 
 - Place the editor cursor in an expression to inspect its runtime object.
-- Drag the viewport to orbit; scroll to zoom.
+- Drag with the left mouse button to rotate freely using Arcball, including
+  over the top and bottom of the model, with a short glide after release.
+  Drag with the right button to pan; scroll or drag with the middle button
+  to zoom. Scrolling over the viewport zooms around the mouse position.
+  Zoom has no fixed distance limits.
+- Click an axis endpoint in the upper-right coordinate indicator to view from
+  +X, −X, +Y, −Y, +Z, or −Z. It uses the selected object's local frame, or the
+  world frame when nothing is selected, and keeps your zoom distance. Click
+  the facing endpoint again to flip to the other side. Positive directions
+  have white X/Y/Z labels; negative directions are plain dots. Double-click
+  anywhere on the indicator to restore the default angled view and fit the
+  model. View changes animate smoothly; dragging or scrolling immediately
+  takes over. The system's reduced-motion preference skips these animations.
+  You can also focus an axis with Tab and press Enter or Space to select it;
+  pressing Enter or Space on the indicator itself resets the view.
 - Click geometry to select an occurrence or an available source context.
 - Double-click the active object to navigate to its source.
 
