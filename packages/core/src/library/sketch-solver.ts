@@ -465,7 +465,14 @@ export function solveSketchProblem(
         }
       }
     });
-    const solve = (algorithm: number) => {
+    // ArcRules introduce an underdetermined radius/angle system. PlaneGCS
+    // sorts its parameters by native address; DogLeg's FullPivLU step then
+    // chooses free variables based on allocation history. BFGS initializes
+    // arcs without that basic-solution pivot choice or new reference locks.
+    // Keep the existing non-arc seed policy: changing it can create new
+    // point-on-line incidences before a later drag begins.
+    const hardAlgorithm = problem.arcs.length ? 0 : 2;
+    const solve = (algorithm = hardAlgorithm) => {
       const status = gcs.solve_system(algorithm);
       const conflicting = constraintIndices(gcs, 'get_conflicting');
       if (status > 1 || conflicting.length)
@@ -482,7 +489,7 @@ export function solveSketchProblem(
       // Remove only constraints proved fully redundant, retaining every author
       // equation for the independent final residual check below.
       for (;;) {
-        solve(2);
+        solve();
         const found = constraintIndices(gcs, 'get_redundant');
         if (!found.length) break;
         redundant.push(...found);
@@ -519,9 +526,9 @@ export function solveSketchProblem(
               objective.weight,
             );
     }
-    // Equal-coordinate reduction can leave a soft-only subsystem. BFGS accepts
-    // a least-squares optimum there; DogLeg expects all residuals to vanish.
-    solve(objectives.length ? 0 : 2);
+    // BFGS also accepts a least-squares optimum in soft-only subsystems left
+    // by equal-coordinate reduction; their residuals need not all vanish.
+    solve(objectives.length ? 0 : hardAlgorithm);
     const positions = indices.map(([x, y], index): SketchPosition => [
       points[index].locked[0]
         ? points[index].position[0]

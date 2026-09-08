@@ -596,11 +596,15 @@ function snapshotConstraints(
 
 function sketchGeometry(layers: readonly SketchSnapshot[]) {
   const resolve = sketchPointResolver(layers);
-  const points = layers.flatMap(layer =>
-    layer.entities.flatMap(e =>
-      e.kind === 'point' && !e.alias ? [{...e, layer: layer.id}] : [],
-    ),
+  // Array order is source layout, not numeric priority. Keep a stable local
+  // parameter basis (including the normalization origin), without reordering
+  // author entries, snapshots, layers, or constraint diagnostic indices.
+  const entities = layers.flatMap(layer =>
+    [...layer.entities]
+      .sort((a, b) => a.id - b.id)
+      .map(e => ({...e, layer: layer.id})),
   );
+  const points = entities.filter(e => e.kind === 'point').filter(e => !e.alias);
   const pointIndex = (ref: SketchPointAddress) => {
     ref = resolve(ref);
     const index = points.findIndex(
@@ -609,21 +613,11 @@ function sketchGeometry(layers: readonly SketchSnapshot[]) {
     if (index < 0) throw new Error(`Missing sketch point ${ref.id}.`);
     return index;
   };
-  const lines = layers.flatMap(layer =>
-    layer.entities
-      .filter(e => e.kind === 'line')
-      .map(e => [pointIndex(e.points[0]), pointIndex(e.points[1])] as const),
-  );
-  const circles = layers.flatMap(layer =>
-    layer.entities.flatMap(e =>
-      e.kind === 'circle' ? [{...e, layer: layer.id}] : [],
-    ),
-  );
-  const arcs = layers.flatMap(layer =>
-    layer.entities.flatMap(e =>
-      e.kind === 'arc' ? [{...e, layer: layer.id}] : [],
-    ),
-  );
+  const lines = entities
+    .filter(e => e.kind === 'line')
+    .map(e => [pointIndex(e.points[0]), pointIndex(e.points[1])] as const);
+  const circles = entities.filter(e => e.kind === 'circle');
+  const arcs = entities.filter(e => e.kind === 'arc');
   const geometry: SketchIncidenceGeometry = {
     points: points.map(p => p.position),
     lines,

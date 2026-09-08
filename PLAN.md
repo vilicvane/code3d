@@ -382,8 +382,9 @@ implementation context and historical outcomes, not a competing work queue.
   state shows a subdued `Ready` or `Model error`. The application header has no
   parallel run state.
 - Tool commits preserve the editor caret and its rendering scope. A non-focusing
-  GUI popover shows a trimmed, syntax-highlighted source excerpt with the
-  changed range marked.
+  GUI popover shows a compact filename and actual line-level `+n −m` counts,
+  with an expandable diff and explicit navigation to the current source.
+  Sketch and 3D tools share this feedback; sketch numeric inputs stay above it.
 - Units remain UI metadata; no implicit runtime conversion occurs.
 - Runtime trace data may explain and locate values, but must not constrain which
   JavaScript/TypeScript construction patterns users can write.
@@ -792,7 +793,7 @@ not represent the response of coupled equations.
 - Preview the relation source as a ghost when useful.
 - Add copy and pattern tools on top of the same relation intents.
 - Keep the caret-selected context stable across gizmo and contextual tool commits;
-  present the applied edit plan in a temporary code popover instead of moving
+  present the actual source diff in a compact temporary popover instead of moving
   the editor selection.
 - Let `Escape` cancel the active drag before handling menus or transient docks.
   Cancellation restores the pre-drag preview without writing source and leaves

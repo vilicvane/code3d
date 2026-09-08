@@ -621,6 +621,8 @@ kbd {
 
 .source-edit-popover {
   position: relative;
+  display: flex;
+  flex-direction: column;
   width: fit-content;
   max-width: 100%;
   max-height: 100%;
@@ -633,7 +635,8 @@ kbd {
   backdrop-filter: blur(14px);
 }
 
-.source-edit-popover[hidden] {
+.source-edit-popover[hidden],
+.source-edit-popover-edits[hidden] {
   display: none;
 }
 
@@ -641,32 +644,61 @@ kbd {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 30px;
-  padding: 6px 8px 6px 10px;
-  border-bottom: 1px solid #303526;
+  flex-shrink: 0;
+  gap: 2px;
+  height: 28px;
+  padding: 0 3px;
 }
 
-.source-edit-popover-eyebrow,
+.source-edit-popover-summary,
 .source-edit-block-label {
-  color: #aab88a;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 8px;
-  letter-spacing: 0.12em;
+  font-size: 11px;
+  line-height: 20px;
+  white-space: nowrap;
 }
 
+.source-edit-popover-toggle,
 .source-edit-popover-close {
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  color: #7f8578;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  height: 24px;
+  padding: 3px;
+  color: inherit;
   border: 0;
   border-radius: 3px;
   background: transparent;
   cursor: pointer;
-  font-size: 16px;
-  line-height: 1;
 }
 
+.source-edit-popover-toggle {
+  justify-content: flex-start;
+  gap: 8px;
+  flex-shrink: 1;
+  min-width: 0;
+  padding-left: 7px;
+}
+
+.source-edit-popover-toggle > .ui-icon,
+.source-edit-popover-close > .ui-icon {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  color: var(--muted);
+}
+
+.source-edit-popover-toggle[aria-expanded='true'] > .ui-icon {
+  transform: rotate(180deg);
+}
+
+.source-edit-popover-toggle:hover,
+.source-edit-popover-toggle:focus-visible,
 .source-edit-popover-close:hover,
 .source-edit-popover-close:focus-visible {
   color: var(--acid);
@@ -674,19 +706,32 @@ kbd {
   outline: none;
 }
 
-.source-edit-popover-summary {
-  margin: 0;
-  padding: 9px 10px;
-  color: #c7cabf;
-  border-bottom: 1px solid #282c22;
-  font-size: 10px;
-  line-height: 1.45;
+.source-edit-file {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.source-edit-added,
+.source-edit-removed {
+  flex-shrink: 0;
+}
+
+.source-edit-added {
+  color: #a9cf79;
+}
+
+.source-edit-removed {
+  color: #ed897b;
 }
 
 .source-edit-popover-edits {
-  max-height: 245px;
-  padding: 7px;
+  min-height: 0;
+  max-height: min(245px, 30vh);
+  width: min(560px, 100%);
+  padding: 7px 0;
   overflow: auto;
+  border-bottom: 1px solid #303526;
 }
 
 .source-edit-block + .source-edit-block {
@@ -696,80 +741,73 @@ kbd {
 }
 
 .source-edit-block-label {
-  display: block;
-  margin: 1px 5px 6px;
-  color: #6f7667;
-  font-size: 7px;
+  margin: 0 10px 6px;
+  color: var(--muted);
 }
 
-.source-edit-code {
+.source-edit-hunk + .source-edit-hunk {
+  margin-top: 8px;
+  border-top: 1px dashed var(--line);
+}
+
+.source-edit-line {
   appearance: none;
   display: grid;
-  grid-template-columns: 30px minmax(0, 1fr);
+  grid-template-columns: 28px 28px 18px minmax(0, 1fr);
   width: 100%;
   min-width: 0;
-  padding: 0;
+  padding: 0 8px;
   overflow: hidden;
   color: #dfe2d8;
-  border: 1px solid #303527;
-  border-radius: 3px;
-  background: #10120d;
+  border: 0;
+  background: transparent;
   font-family: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
-  font-size: 13px;
+  font-size: 11px;
   font-feature-settings: 'liga', 'calt';
-  line-height: 22px;
+  line-height: 20px;
   text-align: left;
   cursor: pointer;
 }
 
-.source-edit-code:hover,
-.source-edit-code:focus-visible {
-  border-color: #758341;
-  outline: none;
+.source-edit-line[data-kind='+'] {
+  background: #9dc66b15;
+}
+
+.source-edit-line[data-kind='-'] {
+  background: #ed897b15;
+}
+
+.source-edit-line[data-kind='+'] .source-edit-line-marker {
+  color: #a9cf79;
+}
+
+.source-edit-line[data-kind='-'] .source-edit-line-marker {
+  color: #ed897b;
+}
+
+.source-edit-line:hover,
+.source-edit-line:focus-visible {
+  outline: 1px solid #758341;
+  outline-offset: -1px;
 }
 
 .source-edit-line-number {
-  padding: 6px 7px 6px 0;
-  color: #555b4e;
-  border-right: 1px solid #282c22;
+  padding-right: 6px;
+  color: var(--muted);
   text-align: right;
   user-select: none;
 }
 
-.source-edit-code code {
+.source-edit-line-marker {
+  text-align: center;
+  user-select: none;
+}
+
+.source-edit-line code {
   min-width: 0;
-  padding: 6px 8px;
   overflow-wrap: anywhere;
   font: inherit;
-  font-feature-settings: inherit;
   white-space: pre-wrap;
-}
-
-.source-edit-change {
-  padding: 1px 0;
-  border-bottom: 1px solid #d8ff3ecc;
-  background: #d8ff3e1c;
-  box-decoration-break: clone;
-}
-
-.source-token-comment {
-  color: #6f756b;
-}
-
-.source-token-keyword {
-  color: #d8ff3e;
-}
-
-.source-token-string {
-  color: #e8bd76;
-}
-
-.source-token-number {
-  color: #8ed5d1;
-}
-
-.source-token-type {
-  color: #aebcff;
 }
 
 .error-bar {
@@ -1182,7 +1220,6 @@ kbd {
 #viewport-host:has(.sketch-editor:not([hidden])) .viewport-canvas {
   visibility: hidden;
 }
-#viewport-host:has(.sketch-editor:not([hidden])) .source-edit-popover,
 #viewport-host:has(.sketch-editor:not([hidden])) .viewport-dock-panels,
 #viewport-host:has(.sketch-editor:not([hidden])) .contextual-tool-panel {
   display: none;
@@ -1379,7 +1416,7 @@ kbd {
 .drawing-inputs {
   position: absolute;
   left: 12px;
-  bottom: 44px;
+  bottom: calc(var(--viewport-feedback-height, 0px) + 22px);
   display: flex;
   flex-wrap: wrap;
   align-items: center;

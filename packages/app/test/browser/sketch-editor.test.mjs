@@ -71,7 +71,11 @@ test('continuous lines reuse endpoints before recompile and undo one segment at 
   );
   assert.equal(await page.locator('.sketch-canvas circle.local').count(), 3);
   await waitForSource(page, /'line',\s*5,\s*\[2,\s*4\]/);
-  assert.equal(await page.locator('.source-edit-popover').isVisible(), false);
+  assert.equal(await page.locator('.source-edit-popover').isVisible(), true);
+  assert.equal(
+    await page.locator('.source-edit-popover-edits').isVisible(),
+    false,
+  );
   await page.getByRole('textbox', {name: 'Length', exact: true}).click();
   assert.equal(await activeDimension(page), 'length');
   const completed = await text(page);

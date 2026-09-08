@@ -229,6 +229,13 @@ const elements = requiredElement('elements');
 const elementsCount = requiredElement('elements-count');
 const viewportFeedbackStack = requiredElement('viewport-feedback-stack');
 const viewportDiagnosticStack = requiredElement('viewport-diagnostic-stack');
+// Keep sketch numeric entry above both compact feedback and expanded diffs.
+new ResizeObserver(([entry]) => {
+  viewportHost.style.setProperty(
+    '--viewport-feedback-height',
+    `${entry.borderBoxSize[0].blockSize}px`,
+  );
+}).observe(viewportFeedbackStack);
 const viewportStatus = requiredElement('viewport-status');
 const viewportStatusLabel = requiredElement('viewport-status-label');
 const projectTree = requiredElement('project-tree');
@@ -2431,10 +2438,7 @@ function commitToolSession(
     showToolIssue(result.reason);
     return false;
   }
-  sourceEditPopover.show(
-    result.plan.summary,
-    codeEditor.sourceEditExcerpts(result.plan.edits),
-  );
+  sourceEditPopover.show(codeEditor.sourceEditDiffs(result.plan.edits));
   return true;
 }
 
