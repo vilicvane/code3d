@@ -177,6 +177,65 @@ test('shared endpoints use simultaneous initial proposals and remain one point a
     );
 });
 
+test('shared arc solves are independent of entity order and native allocation history', () => {
+  const entries: SketchEntry[] = [
+    ['point', 1, [0, 0]],
+    ['point', 2, [20, 0]],
+    ['point', 3, [10, 0]],
+    ['point', 4, [0, 10]],
+    ['point', 5, [20, 10]],
+    ['point', 6, [10, -20]],
+    ['arc', 7, [1, 15, 3, 4, 'ccw']],
+    ['arc', 8, [2, 10, 5, 3, 'ccw']],
+    ['line', 9, [3, 6]],
+  ];
+  const variants = [
+    entries,
+    [...entries].reverse(),
+    [...entries.slice(6), ...entries.slice(0, 6)],
+    [...entries.slice(0, 6), ...entries.slice(6).reverse()],
+  ];
+  let expected: SketchSnapshot | undefined;
+  for (let pass = 0; pass < 8; pass++) {
+    for (const variant of variants) {
+      // Different-sized systems exercise the native allocator between solves.
+      snapshotSketch(
+        sketch(data(10 + pass), {constraints: [['fixed', 1]]}),
+        () => 'other',
+      );
+      const value = sketch(variant, {
+        constraints:
+          pass % 2
+            ? [
+                ['fixed', 2],
+                ['fixed', 1],
+              ]
+            : [
+                ['fixed', 1],
+                ['fixed', 2],
+              ],
+      });
+      const view = snapshotSketch(value, () => 'local');
+      expected ??= view;
+      geometry(view);
+      assert.equal(view.degreesOfFreedom, expected.degreesOfFreedom);
+      assert.deepEqual(
+        view.entities.map(e => e.id),
+        variant.map(e => e[1]),
+        'do not reorder author entries or snapshots',
+      );
+      assert.deepEqual(sketchDefinition(value).entries, variant);
+      for (const id of [1, 2, 3, 4, 5, 6]) {
+        point(view, id).position.forEach((value, axis) =>
+          near(value, point(expected!, id).position[axis]),
+        );
+      }
+      for (const id of [7, 8])
+        near(arc(view, id).radius, arc(expected, id).radius);
+    }
+  }
+});
+
 test('free arc radius and endpoint drags update the same radius parameter and replay their solution', () => {
   const before = snapshot(data(10));
   for (const id of [3, 4]) {
