@@ -31,6 +31,7 @@ import {ModuleEvaluator, type ModuleExports} from './module-evaluator';
 import {code3dAnnotations} from './annotations';
 import {SketchTraceRegistry, type CompiledSketch} from './sketch-trace';
 import {evaluatedConstraint, focusedConstraintSide} from './constraint-context';
+import {isCompositionInputRole} from './operation-context';
 import {designArgumentAnnotationSites} from './design-functions';
 import {
   isToolSelectionParameter,
@@ -88,17 +89,24 @@ export type SourceTargetEvaluation = Readonly<{
   nodeIds: readonly string[];
   /** Referenced values before relation participants expand the rendered context. */
   valueNodeIds?: readonly string[];
-  /** Models to emphasize while their relation peers remain visible. */
+  /** Models to emphasize while their composition peers remain visible. */
   focusNodeIds?: readonly string[];
   parameters?: readonly ParameterUsage[];
   toolArguments?: Readonly<Record<number, number>>;
   operationId?: string;
+  /** The consuming operation is independent of the operation being edited. */
   operationInput?: Readonly<{
+    operationId: string;
     role: ModelOperationInputRole;
     nodeIds: readonly string[];
   }>;
   constraintId?: string;
   constraintOwnerNodeId?: string;
+  /** Completed relate call: only constraints and references added by this call. */
+  relationContext?: Readonly<{
+    constraintIds: readonly string[];
+    referenceNodeIds: readonly string[];
+  }>;
   /** Chain operations focus self; relation receiver/argument scopes identify a side. */
   constraintFocus?: 'self' | 'source' | 'target';
   constraintSpatial?: ConstraintSpatialReference;
@@ -1693,6 +1701,126 @@ export function createModelCompiler(
     }
 
     const operationInputTargets = [...inputTargets.values()];
+
+    function compositionConsumers(nodeIds: readonly string[]) {
+      return operationInputTargets.flatMap(target =>
+        target.evaluations.flatMap(input => {
+          if (!input.role || !isCompositionInputRole(input.role)) return [];
+          const consumedNodeIds = input.objects
+            .map(modelObjectNodeId)
+            .filter(nodeId =>
+              nodeIds.some(sourceNodeId =>
+                sourceLineageContains(
+                  operationsByOutputNodeId,
+                  nodeId,
+                  sourceNodeId,
+                ),
+              ),
+            );
+          return consumedNodeIds.length > 0
+            ? [
+                {
+                  runtime: input.runtime,
+                  operationInput: {
+                    operationId: input.operationId!,
+                    role: input.role,
+                    nodeIds: consumedNodeIds,
+                  },
+                },
+              ]
+            : [];
+        }),
+      );
+    }
+
+    function compositionContextTargets(
+      evaluations: readonly SourceTargetEvaluation[],
+    ) {
+      const operationIds = new Set(
+        evaluations.flatMap(evaluation =>
+          evaluation.operationInput
+            ? [evaluation.operationInput.operationId]
+            : [],
+        ),
+      );
+      return operationInputTargets
+        .filter(target =>
+          target.evaluations.some(
+            evaluation =>
+              evaluation.operationId !== undefined &&
+              operationIds.has(evaluation.operationId),
+          ),
+        )
+        .map(target => target.id);
+    }
+
+    function withOperationContext(target: SourceTarget): SourceTarget {
+      if (
+        target.kind !== 'operation-output' &&
+        target.kind !== 'topology-selection'
+      )
+        return target;
+      const evaluations = target.evaluations.flatMap(evaluation => {
+        if (evaluation.constraintId || !evaluation.operationId)
+          return [evaluation];
+        const operation = operations.get(evaluation.operationId)!;
+        if (
+          !operation.spatial &&
+          operation.kind !== 'scaled' &&
+          operation.kind !== 'relate'
+        )
+          return [evaluation];
+        const consumers = compositionConsumers(evaluation.nodeIds);
+        if (operation.kind === 'relate') {
+          const owner = objects.get(operation.outputNodeId)!;
+          const source = operation.inputs.find(
+            input => input.role === 'source',
+          );
+          const inheritedIds = new Set(
+            objects.get(source?.nodeId ?? '')?.constraints.map(c => c.id),
+          );
+          const referenceNodeIds = [
+            ...new Set(
+              operation.inputs
+                .filter(input => input.role === 'reference')
+                .map(input => input.nodeId),
+            ),
+          ].filter(nodeId => !evaluation.nodeIds.includes(nodeId));
+          evaluation = {
+            ...evaluation,
+            focusNodeIds: evaluation.nodeIds,
+            nodeIds: [...evaluation.nodeIds, ...referenceNodeIds],
+            constraintOwnerNodeId: owner.nodeId,
+            relationContext: {
+              constraintIds: owner.constraints
+                .filter(constraint => !inheritedIds.has(constraint.id))
+                .map(constraint => constraint.id),
+              referenceNodeIds,
+            },
+          };
+        }
+        return consumers.length > 0
+          ? consumers.map(consumer => ({
+              ...evaluation,
+              runtime: consumer.runtime,
+              toolExecutionOrder:
+                evaluation.toolExecutionOrder ?? evaluation.runtime.order,
+              operationInput: consumer.operationInput,
+              focusNodeIds: evaluation.focusNodeIds ?? evaluation.nodeIds,
+            }))
+          : [evaluation];
+      });
+      return {
+        ...target,
+        evaluations,
+        contextTargetIds: [
+          ...new Set([
+            ...target.contextTargetIds,
+            ...compositionContextTargets(evaluations),
+          ]),
+        ],
+      };
+    }
     const operationSelectionTargets = [...edgeSelectionSites.values()].flatMap(
       site => {
         const evaluations = [
@@ -1901,32 +2029,16 @@ export function createModelCompiler(
                 sourceRef: trace.sourceRef,
               };
             }
-            const consumers = operationInputTargets.flatMap(target =>
-              target.evaluations.flatMap(input =>
-                input.role &&
-                isCompositionInputRole(input.role) &&
-                input.objects.some(object =>
-                  sourceLineageContains(
-                    operationsByOutputNodeId,
-                    modelObjectNodeId(object),
-                    modelObjectNodeId(evaluation.self ?? evaluation.source),
-                  ),
-                )
-                  ? [{input, role: input.role}]
-                  : [],
-              ),
-            );
+            const consumers = compositionConsumers([
+              modelObjectNodeId(evaluation.self ?? evaluation.source),
+            ]);
             return consumers.length > 0
               ? consumers.map(consumer => ({
-                  runtime: consumer.input.runtime,
+                  runtime: consumer.runtime,
                   toolExecutionOrder: evaluation.runtime.order,
                   parameters: execution?.parameters,
                   nodeIds: uniqueNodeIds(evaluation.source, evaluation.target),
-                  operationId: consumer.input.operationId,
-                  operationInput: {
-                    role: consumer.role,
-                    nodeIds: consumer.input.objects.map(modelObjectNodeId),
-                  },
+                  operationInput: consumer.operationInput,
                   focusNodeIds: [
                     modelObjectNodeId(evaluation.self ?? evaluation.source),
                   ],
@@ -1965,11 +2077,6 @@ export function createModelCompiler(
                 ];
           },
         );
-        const consumerOperationIds = new Set(
-          evaluations.flatMap(evaluation =>
-            evaluation.operationId ? [evaluation.operationId] : [],
-          ),
-        );
         const target: SourceTarget = {
           id: `source:constraint:${trace.id}`,
           kind: 'constraint',
@@ -1978,15 +2085,7 @@ export function createModelCompiler(
           functionId: designFunctionAt(trace.sourceRef, designArguments),
           evaluations,
           tool: sourceTool(toolSite),
-          contextTargetIds: operationInputTargets
-            .filter(target =>
-              target.evaluations.some(
-                evaluation =>
-                  evaluation.operationId !== undefined &&
-                  consumerOperationIds.has(evaluation.operationId),
-              ),
-            )
-            .map(target => target.id),
+          contextTargetIds: compositionContextTargets(evaluations),
         };
         if (!relationSite) return [target];
         return [
@@ -2117,7 +2216,6 @@ export function createModelCompiler(
                   toolExecutionOrder:
                     evaluation.toolExecutionOrder ?? evaluation.runtime.order,
                   nodeIds: candidate.nodeIds,
-                  operationId: candidate.operationId,
                   operationInput: candidate.operationInput,
                   constraintId: candidate.constraintId,
                   constraintOwnerNodeId: candidate.constraintOwnerNodeId,
@@ -2167,6 +2265,7 @@ export function createModelCompiler(
               operationId: evaluation.operationId,
               operationInput: evaluation.role
                 ? {
+                    operationId: evaluation.operationId!,
                     role: evaluation.role,
                     nodeIds: evaluation.objects.map(modelObjectNodeId),
                   }
@@ -2183,7 +2282,9 @@ export function createModelCompiler(
             operation: target.operation,
           }) satisfies SourceTarget,
       ),
-    ].map(withConstraintContext);
+    ]
+      .map(withConstraintContext)
+      .map(withOperationContext);
     const fallbackToolTargets: SourceTarget[] = [
       ...toolCallSites.values(),
     ].flatMap(site => {
@@ -2433,18 +2534,6 @@ export function createModelCompiler(
       evaluation =>
         evaluation.operationId !== undefined &&
         rightIds.has(evaluation.operationId),
-    );
-  }
-
-  function isCompositionInputRole(role: ModelOperationInputRole): boolean {
-    return (
-      role === 'receiver' ||
-      role === 'operand' ||
-      role === 'tool' ||
-      role === 'child' ||
-      role === 'collection' ||
-      role === 'section' ||
-      role === 'spine'
     );
   }
 

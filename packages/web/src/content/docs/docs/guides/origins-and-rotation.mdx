@@ -62,6 +62,18 @@ local zero, and the shape retains its rotation.
 
 ## Compose with other parts
 
+While the cursor is inside an origin operation, `rotate()`, or `scaled()`, the
+App also shows peers from the downstream `group`, `union`, `cut`, `intersect`,
+or `loft` that consumes the value. The current step stays highlighted and
+editable; peers appear dimmed and can be clicked to inspect their input source.
+Function aliases, object methods, and array arguments use the same behavior.
+
+Later transformations do not replace the geometry at the cursor. The later
+version of the same part is omitted from the context, and Boolean overlap
+regions are hidden if they belong to that later version. A standalone binding
+still shows its own local value. When a value has several consumers, the App
+initially shows the most recently evaluated consumer's context.
+
 Inspect `group([rotated, companion])` to see the companion placed against the
 rotated part's `up` bound. Inspecting the companion by itself uses its local
 frame, without its assembly placement.

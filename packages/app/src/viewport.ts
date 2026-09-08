@@ -1,4 +1,5 @@
 import {committedSpatialObject} from './tools/spatial-edit';
+import {isCompositionInputRole} from './model/operation-context';
 import type {ModelDiagnostic} from './model/diagnostic';
 import * as THREE from 'three';
 import {ViewportNavigation} from './ui/viewport-navigation';
@@ -57,7 +58,7 @@ import {
   applySourceEmphasis,
   type SourceEmphasis,
 } from './rendering/source-appearance';
-import {evaluatedConstraint} from './model/constraint-context';
+import {evaluatedConstraints} from './model/constraint-context';
 import {writeBoxEdges} from './rendering/box-edges';
 import {AnchorDecorationObject} from './rendering/anchor-decoration';
 import {
@@ -534,6 +535,7 @@ export class ModelViewport {
       // Keep its actual receiver and never draw the previous contact snapshot.
       constraintId: undefined,
       constraintOwnerNodeId: undefined,
+      relationContext: undefined,
       constraintFocus: undefined,
       constraintPreview: undefined,
       constraintPreviewDiagnostic: undefined,
@@ -1078,8 +1080,8 @@ export class ModelViewport {
       ...relationContextNodes,
       ...this.resolveContextNodes(
         target.contextTargetIds,
-        evaluation.operationId,
-        evaluation.nodeIds,
+        evaluation.operationInput?.operationId,
+        [...evaluation.nodeIds, ...(evaluation.operationInput?.nodeIds ?? [])],
       ),
     ]).filter(
       ({node}) =>
@@ -1092,7 +1094,16 @@ export class ModelViewport {
     this.renderedViewTarget = renderedViewTarget;
     this.resetRenderedView();
     this.onSourcePreviewDiagnostic?.(evaluation.constraintPreviewDiagnostic);
-    const constraint = evaluatedConstraint(this.module!.objects, evaluation);
+    const constraints = evaluatedConstraints(this.module!.objects, evaluation);
+    const relationContext =
+      evaluation.relationContext !== undefined || constraints.length > 0;
+    const secondaryNodeIds = new Set(
+      evaluation.relationContext?.referenceNodeIds ??
+        constraints.flatMap(constraint => [
+          constraint.source.nodeId,
+          constraint.target.nodeId,
+        ]),
+    );
     contextNodes.forEach(({node, targetId}, index) => {
       this.root.add(
         this.buildContextObject(
@@ -1100,11 +1111,7 @@ export class ModelViewport {
           `context/${index}`,
           targetId,
           placement,
-          constraint &&
-            (node.nodeId === constraint.source.nodeId ||
-              node.nodeId === constraint.target.nodeId)
-            ? 'secondary'
-            : 'context',
+          secondaryNodeIds.has(node.nodeId) ? 'secondary' : 'context',
         ),
       );
     });
@@ -1123,12 +1130,12 @@ export class ModelViewport {
         operationRole,
       );
       // The current relation provider already owns both element highlights.
-      const references = constraint
+      const references = relationContext
         ? []
         : (evaluation.topologyReferences?.filter(
             reference => reference.nodeId === node.nodeId,
           ) ?? []);
-      if (constraint) {
+      if (relationContext) {
         applySourceEmphasis(object, 'primary');
       } else if (
         references.length > 0 ||
@@ -1807,7 +1814,8 @@ export class ModelViewport {
   private hasCompositionSourceContext(): boolean {
     const scope = this.renderedSourceScope();
     return Boolean(
-      scope?.evaluation.operationId && scope.target.contextTargetIds.length > 0,
+      scope?.evaluation.operationInput &&
+      scope.target.contextTargetIds.length > 0,
     );
   }
 
@@ -2190,7 +2198,8 @@ export function sourceTargetPlacement(
 ): ModelPlacement {
   return evaluation.isCollection ||
     evaluation.constraintId !== undefined ||
-    isCompositionRole(evaluation.operationInput?.role)
+    evaluation.relationContext !== undefined ||
+    isCompositionInputRole(evaluation.operationInput?.role)
     ? 'composition'
     : 'standalone';
 }
@@ -2198,18 +2207,7 @@ export function sourceTargetPlacement(
 function isRelativePositionContext(target: SourceTarget | undefined): boolean {
   if (target?.kind === 'constraint') return true;
   const role = target?.operation?.role;
-  return target?.kind === 'operation-input' && isCompositionRole(role);
-}
-
-function isCompositionRole(role: ModelOperationInputRole | undefined): boolean {
-  return (
-    role === 'receiver' ||
-    role === 'operand' ||
-    role === 'tool' ||
-    role === 'child' ||
-    role === 'section' ||
-    role === 'spine'
-  );
+  return target?.kind === 'operation-input' && isCompositionInputRole(role);
 }
 
 function sourceOperationRole(
