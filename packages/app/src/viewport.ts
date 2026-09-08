@@ -866,7 +866,16 @@ export class ModelViewport {
                         decoration,
                         decoration.operationRole ?? occurrence.operationRole,
                       )
-                    : new AnchorDecorationObject(decoration);
+                    : decoration.kind === 'topology'
+                      ? createTopologyHighlight(
+                          decoration.mesh,
+                          decoration.topologyKind,
+                          new TopologyIdSet(decoration.ids),
+                          decoration.appearance.color,
+                          28,
+                          symbolLineWidth,
+                        )!
+                      : new AnchorDecorationObject(decoration);
           const object = new THREE.Group();
           object.matrixAutoUpdate = false;
           object.add(decorationObject);
