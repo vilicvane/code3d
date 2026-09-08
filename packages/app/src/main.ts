@@ -613,7 +613,7 @@ window.addEventListener('popstate', () => {
 });
 
 newFileButton.addEventListener('click', () => {
-  const path = window.prompt('New file path', '/lib/model.ts')?.trim();
+  const path = window.prompt('New file path')?.trim();
   if (!path) return;
   try {
     codeEditor.createFile(path, "import {box} from '@code3d/core';\n\n");
