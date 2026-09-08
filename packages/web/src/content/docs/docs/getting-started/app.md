@@ -136,6 +136,9 @@ to a failed operation.
 Code and tool changes share the editor's source history. Use the usual Undo
 and Redo shortcuts. `Shift+Alt+F` formats the current source.
 
+With the editor focused, `Ctrl+Shift+P` (`Cmd+Shift+P` on macOS) or `F1`
+opens the command palette for editor actions.
+
 During a viewport drag, `Esc` cancels the temporary preview without changing
 source. It does not close the contextual tool panel or end topology selection.
 The panel follows the editor cursor and closes when you leave its call.

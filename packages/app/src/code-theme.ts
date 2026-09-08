@@ -15,3 +15,12 @@ export const code3dCodeFocusColors = {
   currentSymbol: '#34362f',
   bracketMatch: '#9b7ad9',
 } as const;
+
+export const code3dEditorWidgetColors = {
+  accent: code3dCodeColors.keyword,
+  background: '#1a1b17',
+  border: '#34362f',
+  hoverBackground: '#272923',
+  selectedBackground: '#303527',
+  selectionBackground: '#53651566',
+} as const;
