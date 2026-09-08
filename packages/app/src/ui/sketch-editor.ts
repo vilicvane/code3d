@@ -316,6 +316,78 @@ export class SketchEditor {
     this.view = undefined;
     this.root.hidden = true;
   }
+
+  /** Export the same solved SVG scene, including grid and constraint labels. */
+  async captureImage(width: number, height: number): Promise<Blob> {
+    const svg = this.svg.cloneNode(true) as SVGSVGElement;
+    const sources = [this.svg, ...this.svg.querySelectorAll('*')];
+    const targets = [svg, ...svg.querySelectorAll('*')];
+    // SVG images cannot resolve the page's stylesheets or inherited theme variables.
+    const properties = [
+      'color',
+      'fill',
+      'fill-opacity',
+      'stroke',
+      'stroke-opacity',
+      'stroke-width',
+      'stroke-dasharray',
+      'stroke-dashoffset',
+      'stroke-linecap',
+      'stroke-linejoin',
+      'opacity',
+      'visibility',
+      'display',
+      'font-family',
+      'font-size',
+      'font-weight',
+      'font-style',
+      'text-anchor',
+      'dominant-baseline',
+      'paint-order',
+      'vector-effect',
+    ];
+    for (const [index, source] of sources.entries()) {
+      const style = getComputedStyle(source);
+      const target = targets[index] as SVGElement;
+      for (const property of properties)
+        target.style.setProperty(property, style.getPropertyValue(property));
+    }
+    svg.setAttribute('width', String(width));
+    svg.setAttribute('height', String(height));
+    svg.setAttribute(
+      'viewBox',
+      `0 0 ${this.svg.clientWidth} ${this.svg.clientHeight}`,
+    );
+    const url = URL.createObjectURL(
+      new Blob([new XMLSerializer().serializeToString(svg)], {
+        type: 'image/svg+xml',
+      }),
+    );
+    try {
+      const image = new Image();
+      image.src = url;
+      await image.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext('2d')!;
+      context.fillStyle = getComputedStyle(this.root).backgroundColor;
+      context.fillRect(0, 0, width, height);
+      context.drawImage(image, 0, 0, width, height);
+      return await new Promise<Blob>((resolve, reject) =>
+        canvas.toBlob(
+          blob =>
+            blob
+              ? resolve(blob)
+              : reject(new Error('Sketch image encoding failed.')),
+          'image/png',
+        ),
+      );
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
   dispose(): void {
     this.abort.abort();
     this.resize.disconnect();
