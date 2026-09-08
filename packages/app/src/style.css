@@ -289,11 +289,10 @@ kbd {
   background: var(--panel);
 }
 
-.workspace-resizer {
+.pane-resizer {
   position: absolute;
   z-index: 3;
   top: 0;
-  right: -4px;
   bottom: 0;
   width: 8px;
   outline: none;
@@ -301,7 +300,7 @@ kbd {
   touch-action: none;
 }
 
-.workspace-resizer::after {
+.pane-resizer::after {
   position: absolute;
   top: 0;
   bottom: 0;
@@ -310,10 +309,26 @@ kbd {
   content: '';
 }
 
-.workspace-resizer:hover::after,
-.workspace-resizer:focus-visible::after,
-.workspace[data-resizing] .workspace-resizer::after {
+.pane-resizer:hover::after,
+.pane-resizer:focus-visible::after,
+.pane-resizer[data-resizing]::after {
   background: var(--acid);
+}
+
+.workspace-resizer {
+  right: -4px;
+}
+
+.project-explorer-resizer {
+  left: calc(var(--project-explorer-width) - 1px);
+}
+
+.project-explorer-resizer::after {
+  left: 0;
+}
+
+.project-explorer[hidden] + .project-explorer-resizer {
+  display: none;
 }
 
 .workspace[data-resizing],
@@ -347,7 +362,7 @@ kbd {
   grid-column: 1;
   grid-row: 1;
   grid-template-rows: 30px minmax(0, 1fr);
-  width: 184px;
+  width: var(--project-explorer-width);
   min-width: 0;
   min-height: 0;
   overflow: hidden;

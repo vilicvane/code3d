@@ -26,11 +26,16 @@ space; **Show file explorer** brings the project tree back. Click a folder to
 expand or collapse it, then select a file to open it. Open files remain
 available in the tabs while the explorer is hidden.
 
-Drag the divider between the editor and viewport to resize the code pane.
-The App remembers your preferred width in this browser and fits it to the
-available window space. You can also focus **Resize code editor** with `Tab`
-and use `←` or `→`; hold `Shift` for larger steps, or use `Home` and `End` for
-the minimum and maximum widths. Press `Esc` during a drag to cancel it.
+Drag the file explorer's right edge to resize the tree, or the divider between
+the editor and viewport to resize the code pane. The App remembers both widths
+in this browser and fits them to the available window space. Resizing the tree
+keeps the code width where space allows; hiding and showing the tree restores
+its preferred width. The tree remains resizable in the stacked layout on
+narrow screens.
+
+You can also focus **Resize file explorer** or **Resize code editor** with
+`Tab` and use `←` or `→`; hold `Shift` for larger steps, or use `Home` and `End`
+for the minimum and maximum widths. Press `Esc` during a drag to cancel it.
 
 ## Move through a model
 
