@@ -252,6 +252,7 @@ export class AgentObserver {
         ...(request.input.render
           ? {
               render: {
+                capturedAt: new Date().toISOString(),
                 width: 960,
                 height: 720,
                 mimeType: 'image/png',

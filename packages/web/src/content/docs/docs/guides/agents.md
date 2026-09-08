@@ -72,7 +72,9 @@ receipts. **Revoke** removes one agent's authorization; **Revoke all** removes a
 agents for that project. These actions stop webpage retries, but do not own or
 kill the local processes. Opening the project again restores remaining grants.
 User and agent cursors are independent. Agents appear at their nearest visible
-file or collapsed parent folder in the file tree.
+file or collapsed parent folder in the file tree. Cursor labels show the agent's
+last activity as a relative time; hover the time for the exact date. Formatting
+keeps their selections and carets attached to the corresponding source.
 
 `npx --yes @code3d/cli` downloads the published CLI when needed; version
 `0.0.1-alpha.0` is the first functional release. Development uses the same prompt
@@ -231,6 +233,32 @@ worker restart, reload, or five minutes; `snapshot_expired` requires a fresh obs
 Model execution has no 15-second limit. Applying new source stops the old compiler
 worker and supersedes its observation. Transport deadlines are independent and do
 not roll back changes. A stuck compilation can be replaced by applying new source.
+
+### View agent snapshots in the App
+
+Each successful render appears below the controls in the top-right corner of
+Modeling and sketch views, with the agent's name, color, and capture time. It is the same PNG returned to the CLI,
+including sketch renders and the agent's requested camera angle. Click the preview
+to fill the visualization view and browse the screenshot timeline below it.
+The close button hides the preview until a new image arrives. Render mode hides
+it while preserving the history. Agent dots dim while disconnected or until the
+agent first interacts after the page opens.
+
+Filter by agent, use the previous/next controls, or focus the timeline and use
+Left/Right, Home, and End. Selecting an older image keeps it in view as new renders
+arrive; **Latest** resumes following the newest image. Escape or **Back to live
+view** closes the viewer. The source editor remains available throughout.
+
+The timeline shows the latest 100 renders across this project's agents and is
+restored from saved request receipts after reloading the page. Retrying a request
+or querying its result does not add another image. Revoke removes that agent's
+images; Revoke all clears the history. Failed requests and observations without a
+render do not add images. Receipts created before capture timestamps were added
+are not included.
+
+This is an image history, separate from the short-lived `snapshotId` used to query
+topology. Opening a screenshot never restores old code, moves a cursor, or changes
+the live model or camera. Agent cursor decorations continue to show current work.
 
 ## Edit and observe sketches
 

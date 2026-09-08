@@ -101,7 +101,10 @@ test(
       await dialog.locator('.agent-row-status').allTextContents(),
       ['Never connected', 'Never connected'],
     );
-    assert.equal(await nav.locator('.agent-badge-dot.interacted').count(), 0);
+    assert.equal(
+      await nav.locator('.agent-badge[data-active="true"]').count(),
+      0,
+    );
     const colors = await nav
       .locator('.agent-badge')
       .evaluateAll(elements =>
@@ -153,14 +156,20 @@ test(
       ),
       true,
     );
-    assert.equal(await nav.locator('.agent-badge-dot.interacted').count(), 1);
+    assert.equal(
+      await nav.locator('.agent-badge[data-active="true"]').count(),
+      1,
+    );
     await page.reload();
     await page.waitForFunction(
       () =>
         document.querySelector('.agent-status')?.getAttribute('data-state') ===
         'online',
     );
-    assert.equal(await nav.locator('.agent-badge-dot.interacted').count(), 0);
+    assert.equal(
+      await nav.locator('.agent-badge[data-active="true"]').count(),
+      0,
+    );
     assert.deepEqual(
       await nav
         .locator('.agent-badge')
@@ -173,10 +182,11 @@ test(
     );
     await nav.click();
     assert.equal(await prompt.count(), 0);
-    assert.match(
-      (await row('Euler').locator('.agent-row-status').textContent())!,
-      /^Last active /,
+    assert.equal(
+      await row('Euler').locator('.agent-row-status').isVisible(),
+      false,
     );
+    assert.equal(await dialog.locator('.agent-row-location').count(), 0);
     assert.equal(
       await row('Gauss').locator('.agent-row-status').textContent(),
       'Never connected',

@@ -91,6 +91,8 @@ import {isToolSelectionParameter} from './model/tool-schema';
 import {AgentProjectSession} from './agent/project-session';
 import {AgentObserver} from './agent/observer';
 import {AgentPanel} from './agent/panel';
+import {AgentRenderHistory} from './agent/render-history';
+import {AgentRenderView} from './ui/agent-renders';
 import {
   contextualToolParameters,
   contextualParameterIntent,
@@ -327,6 +329,8 @@ const agentObserver = new AgentObserver(
   projectFileSystem,
   () => agentProject.currentRevision,
 );
+const agentRenders = new AgentRenderHistory();
+const agentRenderView = new AgentRenderView(viewportHost, agentRenders);
 let agentPanel: AgentPanel | undefined;
 const agentProject = new AgentProjectSession(
   projectFileSystem,
@@ -348,6 +352,8 @@ agentPanel = new AgentPanel(
       ? `directory:${directoryWorkspaceId}`
       : undefined
     : 'browser',
+  agentRenders,
+  activeAgents => agentRenderView.setActiveAgents(activeAgents),
 );
 retrySaveButton.addEventListener('click', () => {
   void agentProject.retrySaves().catch(showProjectIssue);

@@ -41,6 +41,18 @@ button {
   color: inherit;
 }
 
+select {
+  --select-scale: 1;
+  appearance: none;
+  padding-right: calc(26px * var(--select-scale));
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='m1 1 4 4 4-4' fill='none' stroke='%23858d77' stroke-width='1.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right calc(8px * var(--select-scale)) center;
+  background-size: calc(10px * var(--select-scale))
+    calc(6px * var(--select-scale));
+  color-scheme: dark;
+}
+
 .ui-icon {
   display: block;
   flex: none;
@@ -160,11 +172,17 @@ input[type='number']::-webkit-outer-spin-button {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: color-mix(in srgb, var(--agent-color) 40%, transparent);
 }
 
-.agent-badge-dot.interacted {
+.agent-badge-dot,
+.agent-render-agent::before {
   background: var(--agent-color);
+  opacity: 0.4;
+}
+
+.agent-badge[data-active='true'] .agent-badge-dot,
+.agent-render-agent[data-active='true']::before {
+  opacity: 1;
 }
 
 .agent-badge-name {
@@ -828,11 +846,23 @@ kbd {
   line-height: 1.5;
 }
 
-.viewport-host {
+.viewport-host,
+.agent-render-host {
   position: relative;
   container-type: inline-size;
   --viewport-inset: 14px;
   --viewport-coordinate-size: 77px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  /* Shared auto-sized rows stack controls across their existing overlay layers. */
+  grid-template-rows:
+    [start] var(--viewport-inset)
+    [header] auto
+    [tools] auto
+    [constraints] auto
+    [agent] auto
+    [content] minmax(0, 1fr)
+    [end];
   --expanded-arguments-width: 310px;
   --expanded-elements-width: 248px;
   overflow: hidden;
@@ -840,6 +870,9 @@ kbd {
 }
 
 .viewport-canvas {
+  grid-area: start / 1 / end / -1;
+  min-width: 0;
+  min-height: 0;
   display: block;
   width: 100%;
   height: 100%;
@@ -848,9 +881,10 @@ kbd {
 }
 
 .viewport-coordinate-reference {
-  position: absolute;
-  top: var(--viewport-inset);
-  right: var(--viewport-inset);
+  position: relative;
+  grid-area: tools / 1;
+  justify-self: end;
+  margin: 0 var(--viewport-inset) var(--viewport-inset) 0;
   z-index: 2;
   width: var(--viewport-coordinate-size);
   user-select: none;
@@ -1043,12 +1077,13 @@ kbd {
 .app-dialog textarea {
   width: 100%;
   min-width: 0;
-  padding: 7px 8px;
+  padding-block: 7px;
+  padding-left: 8px;
   color: #edf3d5;
   border: 1px solid #34382e;
   border-radius: 3px;
   outline: 0;
-  background: #11130f;
+  background-color: #11130f;
   font:
     500 10px/1.4 'IBM Plex Mono',
     monospace;
@@ -1060,29 +1095,13 @@ kbd {
   border-color: var(--acid);
 }
 
-.viewport-export-select {
-  position: relative;
-  min-width: 0;
-}
-
-.viewport-export-select select {
-  appearance: none;
-  padding-right: 30px;
+.app-dialog select {
   color: #c7cebb;
-  color-scheme: dark;
 }
 
-.viewport-export-select::after {
-  position: absolute;
-  top: 50%;
-  right: 12px;
-  width: 6px;
-  height: 6px;
-  border-right: 1.5px solid #858d77;
-  border-bottom: 1.5px solid #858d77;
-  content: '';
-  pointer-events: none;
-  transform: translateY(-70%) rotate(45deg);
+.app-dialog input,
+.app-dialog textarea {
+  padding-right: 8px;
 }
 
 .app-dialog textarea {
@@ -1208,8 +1227,11 @@ kbd {
 }
 
 .sketch-editor {
-  position: absolute;
-  inset: 0;
+  position: relative;
+  grid-area: start / 1 / end / -1;
+  display: grid;
+  grid-template-rows: subgrid;
+  grid-template-columns: minmax(0, 1fr);
   z-index: 5;
   background: var(--panel);
   overflow: hidden;
@@ -1218,7 +1240,10 @@ kbd {
 .sketch-editor[hidden] {
   display: none;
 }
-#viewport-host:has(.sketch-editor:not([hidden])) .viewport-coordinate-reference,
+#viewport-host:has(.sketch-editor:not([hidden]))
+  .viewport-coordinate-reference {
+  display: none;
+}
 #viewport-host:has(.sketch-editor:not([hidden])) .viewport-canvas {
   visibility: hidden;
 }
@@ -1234,9 +1259,10 @@ kbd {
 }
 .sketch-toolbar {
   --sketch-tool-inset: 3px;
-  position: absolute;
-  top: var(--viewport-inset);
-  right: var(--viewport-inset);
+  position: relative;
+  grid-area: tools / 1;
+  justify-self: end;
+  margin: 0 var(--viewport-inset) var(--viewport-inset) 0;
   z-index: 1;
   display: flex;
   align-items: stretch;
@@ -1293,9 +1319,10 @@ kbd {
   background: #d8ff3e12;
 }
 .sketch-constraint-tools {
-  position: absolute;
-  top: calc(var(--viewport-inset) + 44px);
-  right: var(--viewport-inset);
+  position: relative;
+  grid-area: constraints / 1;
+  justify-self: end;
+  margin: 0 var(--viewport-inset) var(--viewport-inset) 0;
   z-index: 1;
   max-width: calc(100% - 2 * var(--viewport-inset));
   display: flex;
@@ -1309,6 +1336,7 @@ kbd {
 .sketch-constraint-tools .sketch-toolbar,
 .sketch-constraint-tools .drawing-inputs {
   position: static;
+  margin: 0;
   max-width: 100%;
 }
 .sketch-constraint-tools .drawing-input-title {
@@ -1361,13 +1389,13 @@ kbd {
   background: transparent;
 }
 @container (max-width: 540px) {
-  .sketch-toolbar {
-    top: calc(var(--viewport-inset) + 48px);
-  }
-  .sketch-constraint-tools {
-    top: calc(var(--viewport-inset) + 92px);
-  }
   #viewport-host:has(.sketch-editor:not([hidden])) .viewport-header {
+    position: relative;
+    grid-area: header / 1;
+    justify-self: start;
+    top: auto;
+    left: auto;
+    margin: 0 var(--viewport-inset) var(--viewport-inset);
     max-width: calc(100% - 2 * var(--viewport-inset));
   }
 }
@@ -2629,24 +2657,12 @@ kbd {
   white-space: nowrap;
 }
 
-.agent-row-location {
-  max-width: 100%;
-  overflow: hidden;
-  color: #858d77;
-  font:
-    500 9px/1.5 'IBM Plex Mono',
-    monospace;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .agent-dialog .agent-message,
 .agent-dialog .agent-prompt-message {
   color: var(--acid);
 }
 
 .agent-row-status,
-.agent-row-location,
 .agent-connection-url {
   margin-left: 2px;
 }
@@ -2668,6 +2684,260 @@ kbd {
 .agent-color-5 {
   --agent-color: #d6d983;
 }
+.agent-renders {
+  position: relative;
+  grid-area: start / 1 / end / -1;
+  display: grid;
+  grid-template-rows: subgrid;
+  grid-template-columns: minmax(0, 1fr);
+  z-index: 7;
+  pointer-events: none;
+}
+.agent-renders[hidden],
+.agent-render-preview[hidden],
+.agent-render-dismiss[hidden],
+.agent-render-viewer[hidden] {
+  display: none;
+}
+.agent-render-preview {
+  grid-area: agent / 1;
+  justify-self: end;
+  margin-right: var(--viewport-inset);
+  width: min(180px, 32cqw);
+  padding: 0;
+  overflow: hidden;
+  color: #c4c8bb;
+  border: 1px solid color-mix(in srgb, var(--agent-color) 30%, var(--line));
+  border-radius: 6px;
+  background: var(--panel);
+  box-shadow: 0 4px 16px #0003;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.viewport-host[data-render-mode='render'] .agent-render-preview,
+.viewport-host[data-render-mode='render'] .agent-render-dismiss {
+  display: none;
+}
+.agent-render-preview:hover {
+  border-color: var(--agent-color);
+}
+.agent-render-preview > img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: contain;
+  background: #171815;
+}
+.agent-render-preview-caption {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  background: color-mix(in srgb, var(--agent-color) 7%, var(--panel));
+  font-size: 10px;
+}
+.agent-render-preview-caption .agent-render-agent {
+  flex: 1;
+  text-align: left;
+}
+.agent-render-preview-caption > svg {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+.agent-render-agent {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-render-agent::before {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  content: '';
+}
+.agent-renders time {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+}
+.agent-render-viewer {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  color: #c4c8bb;
+  background: var(--panel);
+  pointer-events: auto;
+}
+.agent-render-viewer > header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px 8px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.agent-render-viewer > header > strong {
+  flex: 1;
+  font-size: 11px;
+  font-weight: 500;
+}
+.agent-render-viewer select {
+  --select-scale: 0.75;
+  max-width: 40%;
+  padding-block: 4px;
+  padding-left: 6px;
+  color: #b5baaa;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background-color: var(--panel);
+  font: inherit;
+  font-size: 10px;
+}
+.agent-render-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+}
+.agent-render-control > svg {
+  width: 16px;
+  height: 16px;
+}
+.agent-render-dismiss {
+  grid-area: agent / 1;
+  align-self: start;
+  justify-self: end;
+  z-index: 1;
+  width: 20px;
+  height: 20px;
+  margin: 6px calc(var(--viewport-inset) + 6px) 0 0;
+  padding: 0;
+  color: color-mix(in srgb, var(--agent-color) 30%, var(--line));
+  border-radius: 4px;
+  background: #171815cc;
+  pointer-events: auto;
+}
+.agent-render-dismiss:hover {
+  color: var(--agent-color);
+  background: color-mix(in srgb, var(--agent-color) 12%, var(--panel));
+}
+.agent-renders .agent-render-dismiss:focus-visible {
+  outline-color: var(--agent-color);
+}
+.agent-render-dismiss > svg {
+  width: 12px;
+  height: 12px;
+  stroke-width: 2.25;
+}
+.agent-render-viewer > figure {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+}
+.agent-render-image {
+  min-width: 0;
+  min-height: 0;
+  background: #171815;
+}
+.agent-render-image > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.agent-render-viewer figcaption {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  font-size: 11px;
+}
+.agent-render-count {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.agent-render-viewer > footer {
+  min-width: 0;
+  padding: 4px 10px 10px;
+}
+.agent-render-viewer nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+.agent-render-timeline {
+  display: flex;
+  gap: 8px;
+  padding: 2px 2px 6px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #41473b transparent;
+}
+.agent-render-thumb {
+  display: grid;
+  flex: 0 0 96px;
+  gap: 4px;
+  min-width: 0;
+  padding: 3px 3px 6px;
+  overflow: hidden;
+  color: #a5ac98;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: transparent;
+  font: inherit;
+  font-size: 10px;
+  text-align: left;
+  cursor: pointer;
+}
+.agent-render-thumb:hover {
+  border-color: color-mix(in srgb, var(--agent-color) 55%, var(--line));
+}
+.agent-render-thumb[aria-selected='true'] {
+  color: #dcddd6;
+  border-color: var(--agent-color);
+  background: color-mix(in srgb, var(--agent-color) 10%, transparent);
+}
+.agent-render-thumb > img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: contain;
+  background: #171815;
+}
+.agent-render-thumb > span,
+.agent-render-thumb > time {
+  padding: 0 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-renders :focus-visible {
+  outline: 1px solid var(--acid);
+  outline-offset: 2px;
+}
+@container (max-width: 440px) {
+  .agent-render-preview {
+    width: 120px;
+  }
+  .agent-render-preview-caption > time {
+    display: none;
+  }
+  .agent-render-thumb {
+    flex-basis: 80px;
+  }
+}
 .monaco-editor .agent-selection {
   background: color-mix(in srgb, var(--agent-color) 22%, transparent);
   border-bottom: 1px solid var(--agent-color);
@@ -2681,7 +2951,10 @@ kbd {
   position: absolute;
   bottom: 100%;
   left: 0;
-  max-width: 160px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 240px;
   padding: 0 5px;
   border-radius: 3px 3px 3px 0;
   background: var(--agent-color);
@@ -2694,4 +2967,16 @@ kbd {
   white-space: nowrap;
   pointer-events: none;
   user-select: none;
+}
+
+.monaco-editor .agent-cursor-label > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.monaco-editor .agent-cursor-label > time {
+  flex-shrink: 0;
+  opacity: 0.65;
+  font-size: 9px;
+  pointer-events: auto;
 }

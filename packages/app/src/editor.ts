@@ -1,5 +1,6 @@
 import * as monaco from 'monaco-editor/editor';
 import {AgentError} from '@code3d/agent';
+import {diffChars} from 'diff';
 import {randomAgentColor} from './agent/colors';
 import {projectTypeScriptWorker} from './monaco/typescript-worker-client';
 import type {CursorTypeInfo} from './monaco/type-info';
@@ -154,7 +155,7 @@ monaco.languages.registerDocumentFormattingEditProvider('typescript', {
   async provideDocumentFormattingEdits(model) {
     const source = model.getValue();
     const text = await formatTypeScript(source, prettierEndOfLine(model));
-    return text === source ? [] : [{range: model.getFullModelRange(), text}];
+    return formattingEdits(model, source, text);
   },
 });
 
@@ -273,6 +274,7 @@ export class CodeEditor {
       name: string;
       color: number;
       label: HTMLElement;
+      activity: HTMLTimeElement;
       widget: monaco.editor.IContentWidget;
       ref?: SourceRef;
       invalid: boolean;
@@ -398,6 +400,15 @@ export class CodeEditor {
         this.refreshAnnotationDecorations(document.path, document.model);
       }
     });
+    const activityTimer = window.setInterval(
+      () => this.refreshAgentActivity(),
+      10_000,
+    );
+    window.addEventListener(
+      'pagehide',
+      () => window.clearInterval(activityTimer),
+      {once: true},
+    );
   }
 
   project(): ModelProject {
@@ -635,6 +646,10 @@ export class CodeEditor {
       caret.className = `agent-caret agent-color-${color}`;
       const label = document.createElement('div');
       label.className = 'agent-cursor-label';
+      const nameLabel = document.createElement('span');
+      const activity = document.createElement('time');
+      activity.hidden = true;
+      label.append(nameLabel, activity);
       caret.append(label);
       const widget: monaco.editor.IContentWidget = {
         getId: () => `agent-cursor-${id}`,
@@ -675,7 +690,15 @@ export class CodeEditor {
         },
         suppressMouseDown: true,
       };
-      cursor = {name, color, label, widget, invalid: false, decorations: []};
+      cursor = {
+        name,
+        color,
+        label: nameLabel,
+        activity,
+        widget,
+        invalid: false,
+        decorations: [],
+      };
       this.agentCursors.set(id, cursor);
       this.editor.addContentWidget(widget);
     }
@@ -684,6 +707,34 @@ export class CodeEditor {
     cursor.ref = ref;
     cursor.invalid = false;
     this.refreshAgentCursor(id);
+  }
+
+  setAgentActivity(id: string, at: string): void {
+    const activity = this.agentCursors.get(id)!.activity;
+    activity.dateTime = at;
+    activity.title = 'Last active ' + new Date(at).toLocaleString();
+    activity.hidden = false;
+    this.refreshAgentActivity();
+  }
+
+  private refreshAgentActivity(): void {
+    for (const {activity} of this.agentCursors.values()) {
+      if (activity.hidden) continue;
+      const seconds = Math.max(
+        0,
+        Math.floor((Date.now() - Date.parse(activity.dateTime)) / 1000),
+      );
+      activity.textContent =
+        seconds < 10
+          ? 'just now'
+          : seconds < 60
+            ? `${seconds}s ago`
+            : seconds < 3600
+              ? `${Math.floor(seconds / 60)}m ago`
+              : seconds < 86400
+                ? `${Math.floor(seconds / 3600)}h ago`
+                : `${Math.floor(seconds / 86400)}d ago`;
+    }
   }
 
   agentCursor(id: string): {ref?: SourceRef; invalid: boolean} {
@@ -1172,6 +1223,7 @@ export class CodeEditor {
       monaco.Uri.file('/workspace' + normalized),
     );
     this.refreshAnnotationDecorations(normalized, model);
+    let previousSource = model.getValue();
     const document: ProjectDocument = {
       path: normalized,
       model,
@@ -1182,7 +1234,13 @@ export class CodeEditor {
             ? 'redo'
             : this.contentChangeOrigin;
         if (origin !== 'tool') this.sourceEditUndoGroups.delete(normalized);
-        this.rebaseTrackedSourceRefs(normalized, event.changes, origin);
+        this.rebaseTrackedSourceRefs(
+          normalized,
+          event.changes,
+          origin,
+          previousSource,
+        );
+        previousSource = model.getValue();
         this.refreshAnnotationDecorations(normalized, model);
         this.revision += 1;
         this.emitChange({
@@ -1222,10 +1280,42 @@ export class CodeEditor {
     path: string,
     changes: readonly monaco.editor.IModelContentChange[],
     origin: ContentChangeOrigin,
+    previousSource: string,
   ): void {
+    // Monaco coalesces adjacent edits in undo/redo. Recover their local differences
+    // so replacing a quote beside whitespace does not swallow a cursor boundary.
+    const agentChanges = changes.flatMap(change =>
+      minimalTextChanges(
+        previousSource.slice(
+          change.rangeOffset,
+          change.rangeOffset + change.rangeLength,
+        ),
+        change.text,
+      ).map(edit => ({
+        ...edit,
+        rangeOffset: edit.rangeOffset + change.rangeOffset,
+      })),
+    );
     for (const [id, cursor] of this.agentCursors) {
       if (cursor.ref?.file !== path) continue;
-      const deleted = changes.some(
+      if (cursor.ref.start === cursor.ref.end) {
+        // A collaboration caret stays empty. Insertions move it forward; a
+        // replacement keeps its start boundary or collapses an interior caret.
+        let offset = cursor.ref.start;
+        for (const change of [...agentChanges].sort(
+          (a, b) => b.rangeOffset - a.rangeOffset,
+        )) {
+          if (change.rangeOffset > offset) continue;
+          if (change.rangeOffset === offset && change.rangeLength > 0) continue;
+          offset =
+            Math.max(change.rangeOffset, offset - change.rangeLength) +
+            change.text.length;
+        }
+        cursor.ref = {...cursor.ref, start: offset, end: offset};
+        this.refreshAgentCursor(id);
+        continue;
+      }
+      const deleted = agentChanges.some(
         change =>
           change.rangeLength > 0 &&
           !change.text &&
@@ -1234,7 +1324,7 @@ export class CodeEditor {
       );
       cursor.ref = deleted
         ? undefined
-        : rebaseSourceRef(cursor.ref, changes, false);
+        : rebaseSourceRef(cursor.ref, agentChanges, false);
       cursor.invalid = !cursor.ref;
       this.refreshAgentCursor(id);
     }
@@ -1376,13 +1466,7 @@ export class CodeEditor {
         this.withSuppressedCursorEvents(() => {
           this.pushSourceEdits(
             path,
-            [
-              {
-                range: model.getFullModelRange(),
-                text: result.formatted,
-                forceMoveMarkers: true,
-              },
-            ],
+            formattingEdits(model, source, result.formatted),
             options.undoGroup,
           );
           if (cursorOffset !== undefined && this.editor.getModel() === model) {
@@ -1448,6 +1532,87 @@ export class CodeEditor {
       this.suppressCursorEventDepth -= 1;
     }
   }
+}
+
+/** Preserve tracked ranges and undo positions by editing only formatting differences. */
+function formattingEdits(
+  model: monaco.editor.ITextModel,
+  source: string,
+  formatted: string,
+): (monaco.editor.IIdentifiedSingleEditOperation & {text: string})[] {
+  return minimalTextChanges(source, formatted).map(change => ({
+    range: monaco.Range.fromPositions(
+      model.getPositionAt(change.rangeOffset),
+      model.getPositionAt(change.rangeOffset + change.rangeLength),
+    ),
+    text: change.text,
+    forceMoveMarkers: true,
+  }));
+}
+
+function minimalTextChanges(
+  source: string,
+  target: string,
+): {
+  rangeOffset: number;
+  rangeLength: number;
+  text: string;
+}[] {
+  const changes: {rangeOffset: number; rangeLength: number; text: string}[] =
+    [];
+  let offset = 0;
+  let pending: {start: number; end: number; text: string} | undefined;
+  const flush = () => {
+    if (!pending) return;
+    const removed = source.slice(pending.start, pending.end);
+    // Separate surrounding whitespace from token replacements in both directions,
+    // e.g. ="value" <-> = 'value', keeping selected quotes inside their range.
+    if (removed.trim() && pending.text.trim()) {
+      const leading = /^\s*/.exec(removed)![0].length;
+      const insertedLeading = /^\s*/.exec(pending.text)![0];
+      if (leading || insertedLeading) {
+        changes.push({
+          rangeOffset: pending.start,
+          rangeLength: leading,
+          text: insertedLeading,
+        });
+        pending.start += leading;
+        pending.text = pending.text.slice(insertedLeading.length);
+      }
+      const trailing = /\s*$/.exec(removed)![0].length;
+      const insertedTrailing = /\s*$/.exec(pending.text)![0];
+      if (trailing || insertedTrailing) {
+        changes.push({
+          rangeOffset: pending.end - trailing,
+          rangeLength: trailing,
+          text: insertedTrailing,
+        });
+        pending.end -= trailing;
+        pending.text = pending.text.slice(
+          0,
+          pending.text.length - insertedTrailing.length,
+        );
+      }
+    }
+    changes.push({
+      rangeOffset: pending.start,
+      rangeLength: pending.end - pending.start,
+      text: pending.text,
+    });
+    pending = undefined;
+  };
+  for (const change of diffChars(source, target)) {
+    if (change.added || change.removed) {
+      pending ??= {start: offset, end: offset, text: ''};
+      if (change.added) pending.text += change.value;
+      else pending.end = offset += change.value.length;
+    } else {
+      flush();
+      offset += change.value.length;
+    }
+  }
+  flush();
+  return changes;
 }
 
 function sourceRange(

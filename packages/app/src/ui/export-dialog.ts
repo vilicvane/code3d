@@ -111,13 +111,6 @@ export function exportField(
   const field = document.createElement('label');
   const caption = document.createElement('span');
   caption.textContent = label;
-  if (input instanceof HTMLSelectElement) {
-    const select = document.createElement('div');
-    select.className = 'viewport-export-select';
-    select.append(input);
-    field.append(caption, select);
-  } else {
-    field.append(caption, input);
-  }
+  field.append(caption, input);
   return field;
 }

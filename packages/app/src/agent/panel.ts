@@ -14,6 +14,7 @@ import {agentPrompt} from './prompt';
 import {AgentPersistence} from './persistence';
 import {randomAgentColor} from './colors';
 import {randomAgentName} from './names';
+import type {AgentRenderHistory} from './render-history';
 
 type Grant = {
   config: AgentConfig;
@@ -30,7 +31,6 @@ type AgentRow = {
   element: HTMLDivElement;
   identity: HTMLDivElement;
   activity: HTMLSpanElement;
-  location: HTMLSpanElement;
 };
 
 export class AgentPanel {
@@ -79,6 +79,10 @@ export class AgentPanel {
     private readonly project: AgentProjectSession,
     private readonly open: HTMLButtonElement,
     private readonly workspace: string | undefined,
+    private readonly renders: AgentRenderHistory,
+    private readonly presenceChanged: (
+      activeAgents: ReadonlySet<string>,
+    ) => void,
   ) {
     this.dialog.className = 'app-dialog agent-dialog';
     this.dialog.setAttribute('aria-label', 'Connect Agent');
@@ -185,6 +189,13 @@ export class AgentPanel {
   }
 
   refresh(): void {
+    this.presenceChanged(
+      new Set(
+        [...this.grants.values()]
+          .filter(isActive)
+          .map(grant => grant.config.agentId),
+      ),
+    );
     this.open.replaceChildren();
     this.open.classList.toggle('button-primary', !this.grants.size);
     if (!this.grants.size) this.open.textContent = 'Connect Agent';
@@ -226,15 +237,10 @@ export class AgentPanel {
       row.activity.textContent = grant.busy
         ? 'Working'
         : grant.lastSeen
-          ? 'Last active ' + new Date(grant.lastSeen).toLocaleTimeString()
+          ? ''
           : 'Never connected';
+      row.activity.hidden = !row.activity.textContent;
       row.identity.replaceChildren(agentBadge(grant), row.activity);
-      const cursor = this.editor.agentCursor(agentId);
-      row.location.hidden = !cursor.invalid && !cursor.ref;
-      row.location.textContent = cursor.invalid
-        ? 'Cursor lost'
-        : (cursor.ref?.file ?? '');
-      row.location.title = row.location.textContent;
       if (
         this.displayedAgentId === agentId &&
         this.promptSection.parentElement !== row.element
@@ -252,9 +258,7 @@ export class AgentPanel {
     activity.className = 'agent-row-status';
     const identity = document.createElement('div');
     identity.className = 'agent-row-identity';
-    const location = document.createElement('span');
-    location.className = 'agent-row-location';
-    summary.append(identity, location);
+    summary.append(identity);
     const actions = document.createElement('div');
     actions.className = 'agent-row-actions';
     const revoke = button('Revoke', () =>
@@ -263,6 +267,7 @@ export class AgentPanel {
         grant.host?.close();
         grant.endpoint.close();
         this.grants.delete(grant.config.agentId);
+        this.renders.remove(grant.config.agentId);
         this.editor.removeAgentCursor(grant.config.agentId);
         if (this.displayedAgentId === grant.config.agentId) {
           this.hidePrompt();
@@ -295,7 +300,7 @@ export class AgentPanel {
     local.append(portLabel, port);
     actions.prepend(local);
     row.append(summary, actions);
-    return {element: row, identity, activity, location};
+    return {element: row, identity, activity};
   }
 
   private add(): void {
@@ -320,14 +325,15 @@ export class AgentPanel {
           sessionId: this.sessionId,
           name,
         });
-        const endpoint = await this.createEndpoint(config);
+        const color = randomAgentColor();
+        const endpoint = await this.createEndpoint(config, color);
         if (generation !== this.generation) {
           endpoint.close();
           return;
         }
         const grant: Grant = {
           config,
-          color: randomAgentColor(),
+          color,
           endpoint,
           busy: 0,
           interacted: false,
@@ -382,16 +388,39 @@ export class AgentPanel {
     }
   }
 
-  private createEndpoint(config: AgentConfig): Promise<AgentEndpoint> {
+  private createEndpoint(
+    config: AgentConfig,
+    color: number,
+  ): Promise<AgentEndpoint> {
+    const journal = this.storage!.journal(config);
+    const generation = this.generation;
+    const agent = {id: config.agentId, name: config.name, color};
     return AgentEndpoint.create(
       config,
       request => this.project.handle(config.agentId, config.name, request),
       {
-        journal: this.storage!.journal(config),
+        journal: {
+          load: async () => {
+            const receipts = await journal.load();
+            if (generation === this.generation)
+              for (const receipt of receipts)
+                this.renders.record(agent, receipt);
+            return receipts;
+          },
+          write: async receipt => {
+            await journal.write(receipt);
+            if (
+              generation === this.generation &&
+              this.grants.has(config.agentId)
+            )
+              this.renders.record(agent, receipt);
+          },
+        },
         onRequest: async () => {
           const grant = this.grants.get(config.agentId)!;
           grant.interacted = true;
           grant.lastSeen = new Date().toISOString();
+          this.editor.setAgentActivity(config.agentId, grant.lastSeen);
           this.refresh();
           await this.storage!.recordActivity(config, grant.lastSeen);
         },
@@ -462,7 +491,7 @@ export class AgentPanel {
     if (saved) {
       const restored = await Promise.all(
         saved.grants.map(async ({config, color, lastSeen}) => {
-          const endpoint = await this.createEndpoint(config);
+          const endpoint = await this.createEndpoint(config, color);
           return {
             config,
             color,
@@ -487,6 +516,8 @@ export class AgentPanel {
           undefined,
           grant.color,
         );
+        if (grant.lastSeen)
+          this.editor.setAgentActivity(grant.config.agentId, grant.lastSeen);
       }
       if (this.name.value === suggestedName)
         this.name.value = this.suggestName();
@@ -579,6 +610,7 @@ export class AgentPanel {
     this.clearPromptMessage();
     this.generation++;
     this.available = false;
+    this.renders.clear();
     for (const grant of this.grants.values()) {
       grant.host?.close();
       grant.endpoint.close();
@@ -599,6 +631,7 @@ export class AgentPanel {
       this.editor.removeAgentCursor(grant.config.agentId);
     }
     this.grants.clear();
+    this.renders.clear();
     this.hidePrompt();
     this.message.textContent = 'All agent access revoked.';
     this.refresh();
@@ -618,13 +651,17 @@ export class AgentPanel {
   }
 }
 
+function isActive(grant: Grant): boolean {
+  return grant.state === 'online' && grant.interacted;
+}
+
 function agentBadge(grant: Grant): HTMLSpanElement {
   const badge = document.createElement('span');
   badge.className = `agent-badge agent-color-${grant.color}`;
-  badge.title = `${grant.config.name} · ${grant.interacted ? 'Has interacted in this page' : 'No interaction since this page opened'}`;
+  badge.dataset.active = String(isActive(grant));
+  badge.title = `${grant.config.name} · ${grant.state === 'online' ? 'Connected' : 'Disconnected'} · ${grant.interacted ? 'Has interacted in this page' : 'No interaction since this page opened'}`;
   const dot = document.createElement('span');
   dot.className = 'agent-badge-dot';
-  dot.classList.toggle('interacted', grant.interacted);
   dot.setAttribute('aria-hidden', 'true');
   const name = document.createElement('span');
   name.className = 'agent-badge-name';
