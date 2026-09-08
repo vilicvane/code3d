@@ -831,6 +831,8 @@ kbd {
 .viewport-host {
   position: relative;
   container-type: inline-size;
+  --viewport-inset: 14px;
+  --viewport-coordinate-size: 77px;
   --expanded-arguments-width: 310px;
   --expanded-elements-width: 248px;
   overflow: hidden;
@@ -847,10 +849,10 @@ kbd {
 
 .viewport-coordinate-reference {
   position: absolute;
-  top: 10px;
-  right: 14px;
+  top: var(--viewport-inset);
+  right: var(--viewport-inset);
   z-index: 2;
-  width: 88px;
+  width: var(--viewport-coordinate-size);
   user-select: none;
   touch-action: none;
   border-radius: 50%;
@@ -859,8 +861,8 @@ kbd {
 
 .viewport-coordinate-reference svg {
   display: block;
-  width: 88px;
-  height: 88px;
+  width: var(--viewport-coordinate-size);
+  height: var(--viewport-coordinate-size);
   overflow: visible;
   filter: drop-shadow(0 4px 12px #0008);
 }
@@ -1185,13 +1187,13 @@ kbd {
 
 .contextual-tool-panel {
   position: absolute;
-  top: 60px;
-  left: 14px;
+  top: calc(var(--viewport-inset) + 50px);
+  left: var(--viewport-inset);
   z-index: 5;
   display: grid;
   gap: 12px;
   width: 248px;
-  max-width: calc(100% - 28px);
+  max-width: calc(100% - 2 * var(--viewport-inset));
   padding: 12px;
   color: #dfe5ca;
   border: 1px solid #66752c;
@@ -1224,20 +1226,23 @@ kbd {
 #viewport-host:has(.sketch-editor:not([hidden])) .contextual-tool-panel {
   display: none;
 }
-#viewport-host:has(.sketch-editor:not([hidden])) .viewport-status {
-  max-width: calc(100% - 412px);
+#viewport-host:has(.sketch-editor:not([hidden])) .viewport-mode {
+  display: none;
+}
+#viewport-host:has(.sketch-editor:not([hidden])) .viewport-header {
+  max-width: calc(100% - 2 * var(--viewport-inset) - 384px);
 }
 .sketch-toolbar {
   --sketch-tool-inset: 3px;
   position: absolute;
-  top: 10px;
-  right: 14px;
+  top: var(--viewport-inset);
+  right: var(--viewport-inset);
   z-index: 1;
   display: flex;
   align-items: stretch;
   gap: 0;
   width: fit-content;
-  max-width: calc(100% - 28px);
+  max-width: calc(100% - 2 * var(--viewport-inset));
   padding: 0;
   border: 1px solid #353831;
   border-radius: 5px;
@@ -1289,10 +1294,10 @@ kbd {
 }
 .sketch-constraint-tools {
   position: absolute;
-  top: 54px;
-  right: 14px;
+  top: calc(var(--viewport-inset) + 44px);
+  right: var(--viewport-inset);
   z-index: 1;
-  max-width: calc(100% - 28px);
+  max-width: calc(100% - 2 * var(--viewport-inset));
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -1356,13 +1361,13 @@ kbd {
 }
 @container (max-width: 540px) {
   .sketch-toolbar {
-    top: 58px;
+    top: calc(var(--viewport-inset) + 48px);
   }
   .sketch-constraint-tools {
-    top: 102px;
+    top: calc(var(--viewport-inset) + 92px);
   }
-  #viewport-host:has(.sketch-editor:not([hidden])) .viewport-status {
-    max-width: calc(100% - 28px);
+  #viewport-host:has(.sketch-editor:not([hidden])) .viewport-header {
+    max-width: calc(100% - 2 * var(--viewport-inset));
   }
 }
 .sketch-editor button:disabled {
@@ -1371,10 +1376,10 @@ kbd {
 }
 .sketch-editor output {
   position: absolute;
-  left: 14px;
-  bottom: 10px;
+  left: var(--viewport-inset);
+  bottom: var(--viewport-inset);
   z-index: 1;
-  max-width: calc(100% - 28px);
+  max-width: calc(100% - 2 * var(--viewport-inset));
   padding: 6px 8px;
   color: var(--muted);
   font-size: 10px;
@@ -1415,13 +1420,15 @@ kbd {
 }
 .drawing-inputs {
   position: absolute;
-  left: 12px;
-  bottom: calc(var(--viewport-feedback-height, 0px) + 22px);
+  left: var(--viewport-inset);
+  bottom: calc(
+    var(--viewport-feedback-height, 0px) + var(--viewport-inset) + 8px
+  );
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  max-width: calc(100% - 24px);
+  max-width: calc(100% - 2 * var(--viewport-inset));
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 5px;
@@ -1686,15 +1693,15 @@ kbd {
 
 .viewport-feedback-stack {
   position: absolute;
-  bottom: 14px;
-  left: 14px;
+  bottom: var(--viewport-inset);
+  left: var(--viewport-inset);
   z-index: 6;
   display: flex;
   flex-direction: column-reverse;
   align-items: flex-start;
   gap: 8px;
-  width: calc(100% - 28px);
-  max-height: calc(100% - 28px);
+  width: calc(100% - 2 * var(--viewport-inset));
+  max-height: calc(100% - 2 * var(--viewport-inset));
   pointer-events: none;
 }
 
@@ -1741,16 +1748,72 @@ kbd {
   white-space: pre-wrap;
 }
 
-.viewport-status {
+.viewport-header {
   position: absolute;
-  top: 10px;
-  left: 14px;
+  top: var(--viewport-inset);
+  left: var(--viewport-inset);
   z-index: 6;
+  display: flex;
+  gap: 8px;
+  max-width: calc(
+    100% - 2 * var(--viewport-inset) - var(--viewport-coordinate-size) - 8px
+  );
+  pointer-events: none;
+}
+
+.viewport-mode {
+  display: flex;
+  flex-shrink: 0;
+  align-items: stretch;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid #353831;
+  border-radius: 5px;
+  background: #11120feb;
+  backdrop-filter: blur(12px);
+  pointer-events: auto;
+}
+
+.viewport-mode button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: #a3aa96;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.viewport-mode button:hover {
+  background: #272b21;
+  color: #edf3d5;
+}
+
+.viewport-mode button[aria-pressed='true'] {
+  background: #303922;
+  color: #d8ff3e;
+}
+
+.viewport-mode button:focus-visible {
+  outline: 1px solid #d8ff3e;
+  outline-offset: -1px;
+}
+
+.viewport-host[data-render-mode='render'] .viewport-dock-panels,
+.viewport-host[data-render-mode='render'] .contextual-tool-panel {
+  display: none;
+}
+
+.viewport-status {
   display: flex;
   align-items: center;
   gap: 8px;
   min-height: 38px;
-  max-width: calc(100% - 124px);
+  min-width: 0;
   padding: 9px 13px 9px 11px;
   color: #a3aa96;
   border: 1px solid #353831;
@@ -1906,15 +1969,15 @@ kbd {
 
 .viewport-dock-panels {
   position: absolute;
-  right: 14px;
-  bottom: 14px;
+  right: var(--viewport-inset);
+  bottom: var(--viewport-inset);
   z-index: 3;
   display: flex;
   align-items: flex-end;
   justify-content: flex-end;
   gap: 6px;
-  width: calc(100% - 28px);
-  max-height: calc(100% - 28px);
+  width: calc(100% - 2 * var(--viewport-inset));
+  max-height: calc(100% - 2 * var(--viewport-inset));
   pointer-events: none;
 }
 
