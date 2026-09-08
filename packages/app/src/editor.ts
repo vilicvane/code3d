@@ -29,7 +29,7 @@ import {
 } from './project/project';
 import type {SourceTextEdit, ToolCommitOptions} from './tools/tool-system';
 import {rebaseSourceRef} from './tools/source-ref';
-import type {SourceEditExcerpt} from './ui/source-edit-popover';
+import {sourceEditDiff, type SourceEditDiff} from './source-edit-diff';
 
 type MonacoEnvironment = typeof self & {
   MonacoEnvironment: {
@@ -631,10 +631,10 @@ export class CodeEditor {
     }
   }
 
-  sourceEditExcerpts(edits: readonly SourceTextEdit[]): SourceEditExcerpt[] {
-    return [...groupEditsByFile(edits)].flatMap(([file, fileEdits]) => {
+  sourceEditDiffs(edits: readonly SourceTextEdit[]): SourceEditDiff[] {
+    return [...groupEditsByFile(edits)].map(([file, fileEdits]) => {
       const source = this.requireDocument(file).model.getValue();
-      return sourceEditExcerpts(source, fileEdits, file);
+      return sourceEditDiff(file, source, fileEdits);
     });
   }
 
@@ -1214,38 +1214,6 @@ function groupEditsByFile(
     grouped.set(edit.sourceRef.file, fileEdits);
   }
   return grouped;
-}
-
-function sourceEditExcerpts(
-  source: string,
-  edits: readonly SourceTextEdit[],
-  file: string,
-): SourceEditExcerpt[] {
-  let offsetDelta = 0;
-  return [...edits]
-    .sort((left, right) => left.sourceRef.start - right.sourceRef.start)
-    .map(edit => {
-      const start = edit.sourceRef.start + offsetDelta;
-      const end = start + edit.text.length;
-      offsetDelta +=
-        edit.text.length - (edit.sourceRef.end - edit.sourceRef.start);
-      const lineStart = source.lastIndexOf('\n', start - 1) + 1;
-      const followingLineBreak = source.indexOf('\n', end);
-      const lineEnd =
-        followingLineBreak === -1 ? source.length : followingLineBreak;
-      const lineNumber = source.slice(0, lineStart).split('\n').length;
-      const rawSource = source.slice(lineStart, lineEnd);
-      const contentStart = rawSource.length - rawSource.trimStart().length;
-      const contentEnd = rawSource.trimEnd().length;
-      return {
-        file,
-        lineNumber,
-        source: rawSource.slice(contentStart, contentEnd),
-        changedStart: start - lineStart - contentStart,
-        changedEnd: end - lineStart - contentStart,
-        sourceRef: {file, start, end},
-      };
-    });
 }
 
 function completionProject(
