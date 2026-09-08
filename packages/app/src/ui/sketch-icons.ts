@@ -1,6 +1,6 @@
 import type {IconNode} from 'lucide';
 import {CircleDot, LockKeyhole, Ruler} from 'lucide';
-import type {SketchConstraint} from '@code3d/core/tooling';
+import type {SketchConstraintTool} from '../tools/sketch-constraints';
 
 // Geometry-specific construction glyphs use Lucide's 24-unit, rounded-stroke grammar.
 // Show exactly the point roles the drawing creates, with one shared point size.
@@ -46,7 +46,7 @@ const referenceAxis = {
 
 // Coordinate equations, line directions and dimensions are distinct symbols;
 // the toolbar and in-canvas badges share this exact icon vocabulary.
-export const sketchConstraintIcons: Record<SketchConstraint[0], IconNode> = {
+export const sketchConstraintIcons: Record<SketchConstraintTool, IconNode> = {
   fixed: LockKeyhole,
   coincident: CircleDot,
   x: CoordinateX,
@@ -64,7 +64,10 @@ export const sketchConstraintIcons: Record<SketchConstraint[0], IconNode> = {
     ['circle', {cx: '12', cy: '12', r: '3'}],
   ],
   length: Ruler,
-  angle: Protractor,
+  orientation: Protractor,
+  parallel: [['path', {d: 'm4 19 7-14m2 14 7-14'}]],
+  perpendicular: [['path', {d: 'M5 3v16h16M5 13h6v6'}]],
+  angle: [['path', {d: 'm20 4-16 16h17M10 14a9 9 0 0 1 3 6'}]],
   radius: [
     ['path', {d: 'M20 12a8 8 0 1 1-8-8M12 12l6-6m-4 0h4v4'}],
     ['circle', {cx: '12', cy: '12', r: '1'}],

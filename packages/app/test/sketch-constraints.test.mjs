@@ -24,6 +24,40 @@ const layer = (id, entities, constraints) => ({
   redundant: [],
 });
 
+test('line relation displays carry both curves and directed measurement rays without requiring an intersection', () => {
+  const points = [
+    point(1, [0, 0]),
+    point(2, [10, 0]),
+    point(3, [0, 10]),
+    point(4, [-5, 10 + 5 * Math.sqrt(3)]),
+  ];
+  const local = layer(
+    'local',
+    [line(5, ref(1), ref(2)), line(6, ref(3), ref(4))],
+    [
+      ['parallel', [5, 6]],
+      ['perpendicular', [5, 6]],
+      ['angle', [5, 6], 120],
+      ['angle', 5, 0],
+    ],
+  );
+  const displays = sketchConstraintDisplays([local], points);
+  assert.deepEqual(
+    displays.map(d => d.tool),
+    ['parallel', 'perpendicular', 'angle', 'orientation'],
+  );
+  for (const d of displays.slice(0, 3)) {
+    assert.deepEqual(d.curves, [ref(5), ref(6)]);
+    assert.deepEqual(d.points, points);
+  }
+  assert.equal(displays[2].label, '120°');
+  assert.ok(Math.abs(displays[2].angle.sweep - (2 * Math.PI) / 3) < 1e-10);
+  assert.ok(
+    Math.abs(displays[2].angle.directions[1] - (2 * Math.PI) / 3) < 1e-10,
+  );
+  assert.match(displays[2].title, /line 5 → line 6.*positive CCW/);
+});
+
 test('every persistent constraint exposes its actual participants and value, without changing snapshots', () => {
   const points = [point(1, [0, 0]), point(2, [40, 0]), point(3, [20, 0])];
   const constraints = [
@@ -54,7 +88,7 @@ test('every persistent constraint exposes its actual participants and value, wit
     ['', '', '', '', '', '40', '180°', '-2', '3.5'],
   );
   for (const index of [1, 2, 5, 6]) {
-    assert.deepEqual(displays[index].curve, ref(4));
+    assert.deepEqual(displays[index].curves, [ref(4)]);
     assert.deepEqual(displays[index].points, points.slice(0, 2));
     assert.deepEqual(displays[index].anchor, [20, 0]);
   }
@@ -103,7 +137,7 @@ test('derived relations retain ownership and distinct upstream/local addresses w
   assert.equal(displays[1].index, 0);
   assert.deepEqual(displays[1].points, [local, upstream]);
   assert.match(displays[1].title, /point 1 \(upstream\)/);
-  assert.deepEqual(displays[2].curve, ref(2));
+  assert.deepEqual(displays[2].curves, [ref(2)]);
   assert.deepEqual(displays[2].points, [upstream, local]);
 });
 

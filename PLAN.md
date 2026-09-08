@@ -205,8 +205,14 @@ implementation context and historical outcomes, not a competing work queue.
   instead of filling missing constraints. Additions require the complete selection
   to be applicable, and hovering highlights all affected relation partners.
   dimensions share drawing numeric entry and a batch is one source edit/undo.
-  Selection Delete retains interval trimming and orphan cleanup. New inter-line
-  constraint kinds remain later work. The toolbar has native hover
+  Selection Delete retains interval trimming and orphan cleanup. Parallel accepts
+  two or more local lines as deterministic pairs; perpendicular and relative angle
+  require exactly two. Single-line angle is named Orientation in the UI; pair angle
+  follows authored endpoint directions, signed CCW from first to second (modulo 360).
+  Direction rays and a measurement arc distinguish supplementary branches even for
+  disjoint lines. Trim propagates relations to surviving pieces, preserving expressions;
+  deleting a participant drops the relation. Rectangle defaults remain horizontal/vertical.
+  The toolbar has native hover
   labels and one keyboard Tab stop; narrow viewports place the whole toolbar
   below the compilation status. Both viewport
   status and error cards are scoped to the defining evaluations of the selected

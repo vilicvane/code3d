@@ -19,11 +19,13 @@ import {
   sketchConstraintDimensions,
   sketchConstraintNames,
   sketchConstraintTargets,
+  sketchConstraintTool,
+  type SketchConstraintTool,
 } from './sketch-constraints';
 
 type Constraint = SketchConstraint<SketchPointAddress>;
 export type SketchConstraintAction = Readonly<{
-  kind: Constraint[0];
+  kind: SketchConstraintTool;
   name: string;
   title: string;
   disabled: boolean;
@@ -78,11 +80,13 @@ export function sketchConstraintActions(
     if (kind === 'midpoint')
       return `${kind}:${key(data[0])}:${data.slice(1).map(key).sort().join(':')}`;
     if (kind === 'x' || kind === 'y') return `${kind}:${key(data)}`;
+    if (kind === 'parallel' || kind === 'perpendicular')
+      return `${kind}:${[...data].sort((a, b) => a - b).join(':')}`;
     return `${kind}:${data}`;
   };
   const existing = new Set(local.constraints.map(identity));
   const add = (
-    kind: Constraint[0],
+    kind: SketchConstraintTool,
     constraints: (value: number) => Constraint[],
     value = 0,
   ) => {
@@ -93,7 +97,7 @@ export function sketchConstraintActions(
     const pending = (value: number) =>
       constraints(value).filter(c => !existing.has(identity(c)));
     const additions = pending(value);
-    const removed = removals.filter(({c}) => c[0] === kind);
+    const removed = removals.filter(({c}) => sketchConstraintTool(c) === kind);
     const affected = removed.length
       ? removed.map(({c}) => c)
       : constraints(value);
@@ -176,7 +180,8 @@ export function sketchConstraintActions(
   };
   const finish = () => {
     for (const {c} of removals)
-      if (!actions.some(a => a.kind === c[0])) add(c[0], () => [], c[2] ?? 0);
+      if (!actions.some(a => a.kind === sketchConstraintTool(c)))
+        add(sketchConstraintTool(c), () => [], c[2] ?? 0);
     return actions;
   };
   if (
@@ -225,9 +230,31 @@ export function sketchConstraintActions(
         Math.hypot(b[0] - a[0], b[1] - a[1]),
       );
       add(
-        'angle',
+        'orientation',
         value => lines.map(p => ['angle', p.id, value]),
         (Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI,
+      );
+    }
+    const sorted = [...lines].sort((a, b) => a.id - b.id);
+    if (sorted.length >= 2) {
+      add('parallel', () =>
+        sorted.slice(1).map(line => ['parallel', [sorted[0].id, line.id]]),
+      );
+    }
+    if (sorted.length === 2) {
+      const targets = [sorted[0].id, sorted[1].id] as const;
+      add('perpendicular', () => [['perpendicular', targets]]);
+      const directions = sorted.map(line => {
+        const e = entity(line);
+        if (e.kind !== 'line') throw new Error('Expected selected lines.');
+        const [a, b] = e.points.map(position);
+        return Math.atan2(b[1] - a[1], b[0] - a[0]);
+      });
+      const delta = directions[1] - directions[0];
+      add(
+        'angle',
+        value => [['angle', targets, value]],
+        (Math.atan2(Math.sin(delta), Math.cos(delta)) * 180) / Math.PI,
       );
     }
   } else if (!lines.length) {

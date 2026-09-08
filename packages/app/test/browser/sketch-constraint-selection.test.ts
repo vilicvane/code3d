@@ -32,7 +32,7 @@ const cases = [
   },
   {
     kind: 'angle',
-    name: 'Angle',
+    name: 'Orientation',
     entries: "['point',1,[0,0]],['point',2,[20,0]],['line',3,[1,2]]",
     target: 3,
     value: 0,

@@ -51,6 +51,71 @@ function segments(...layers) {
   );
 }
 
+test('trimming both lines distributes pair relations across every survivor; deleting either line removes them', () => {
+  const local = snapshot(
+    [
+      point(1, 0, 0),
+      point(2, 40, 0),
+      point(3, 0, 10),
+      point(4, 40, 10),
+      line(5, 1, 2),
+      line(6, 3, 4),
+      point(7, 10, 0),
+      point(8, 30, 0),
+      point(9, 10, 10),
+      point(10, 30, 10),
+    ],
+    [
+      ['parallel', [5, 6]],
+      ['angle', [5, 6], 0],
+      ['angle', 5, 0],
+    ],
+  );
+  const change = trimSketchSegment(
+    [local],
+    segments(local).filter(s => s.start.t > 0 && s.end.t < 1),
+  );
+  assert.deepEqual(change.constraintReplacements, [
+    {
+      index: 0,
+      targets: [
+        [11, 13],
+        [11, 14],
+        [12, 13],
+        [12, 14],
+      ],
+    },
+    {
+      index: 1,
+      targets: [
+        [11, 13],
+        [11, 14],
+        [12, 13],
+        [12, 14],
+      ],
+    },
+    {index: 2, targets: [11, 12]},
+  ]);
+  assert.deepEqual(deleteSketchEntity([local], 6).constraints, [0, 1]);
+  assert.deepEqual(
+    trimSketchSegment([local], segments(local)[0]).constraintReplacements,
+    [],
+    'unchanged line IDs leave even computed relation targets untouched',
+  );
+  const whole = {
+    ...local,
+    entities: local.entities.filter(e => e.id !== 9 && e.id !== 10),
+  };
+  const removed = trimSketchSegment(
+    [whole],
+    segments(whole).find(s => s.id === 6),
+  );
+  assert.deepEqual(removed.constraintReplacements, [
+    {index: 0, targets: []},
+    {index: 1, targets: []},
+  ]);
+});
+
 test('trimmed crossing geometry and direction constraints survive fresh compiler replay', async () => {
   const compiler = await createTestProjectCompiler(server);
   const compile = async (args, angle) => {
@@ -427,18 +492,14 @@ test('end trims keep the line ID and remove its length, while complete deletion 
     assert.deepEqual(change.entries, [['line', 3, expected]]);
     assert.deepEqual(change.ids, [3, index + 1]);
     assert.deepEqual(change.constraints, index === 0 ? [3] : []);
-    assert.deepEqual(change.constraintReplacements, [
-      {index: 0, ids: [3]},
-      {index: 1, ids: []},
-      {index: 2, ids: [3]},
-    ]);
+    assert.deepEqual(change.constraintReplacements, [{index: 1, targets: []}]);
   }
   const whole = {...value, entities: value.entities.filter(e => e.id !== 4)};
   const change = trimSketchSegment([whole], segments(whole)[0]);
   assert.deepEqual(change.ids, [3, 1, 2]);
   assert.deepEqual(change.constraints, [3]);
   assert.deepEqual(change.entries, []);
-  assert.ok(change.constraintReplacements.every(c => !c.ids.length));
+  assert.ok(change.constraintReplacements.every(c => !c.targets.length));
 });
 
 test('multi-interval trim merges adjacent survivors and keeps circle wraparound as one surviving arc', () => {
@@ -510,9 +571,9 @@ test('middle trims retire the original line and allocate two fresh IDs without r
     ['line', 7, [ref(4), ref(2)]],
   ]);
   assert.deepEqual(change.constraintReplacements, [
-    {index: 0, ids: [6, 7]},
-    {index: 1, ids: []},
-    {index: 2, ids: [6, 7]},
+    {index: 0, targets: [6, 7]},
+    {index: 1, targets: []},
+    {index: 2, targets: [6, 7]},
   ]);
   assert.deepEqual(
     change.replacements.map(r => r.original.id),

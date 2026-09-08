@@ -35,7 +35,7 @@ export class SketchConstraints {
     )?.display;
     return (
       !!display &&
-      [...display.points, ...(display.curve ? [display.curve] : [])].some(
+      [...display.points, ...display.curves].some(
         p => p.layer === layer && p.id === id,
       )
     );
@@ -68,7 +68,7 @@ export class SketchConstraints {
           background = svg('rect'),
           text = svg('text'),
           title = svg('title');
-        const icon = createIcon(sketchConstraintIcons[display.kind]);
+        const icon = createIcon(sketchConstraintIcons[display.tool]);
         icon.setAttribute('x', '3');
         icon.setAttribute('y', '2');
         background.setAttribute('rx', '3');
@@ -118,8 +118,8 @@ export class SketchConstraints {
         this.labels.append(root);
         this.guides.append(guides);
       }
-      if (badge.display.kind !== display.kind) {
-        const icon = createIcon(sketchConstraintIcons[display.kind]);
+      if (badge.display.tool !== display.tool) {
+        const icon = createIcon(sketchConstraintIcons[display.tool]);
         icon.setAttribute('x', '3');
         icon.setAttribute('y', '2');
         badge.icon.replaceWith(icon);
@@ -131,6 +131,7 @@ export class SketchConstraints {
       badge.root.setAttribute('class', `constraint-badge ${classes}`);
       badge.guides.setAttribute('class', `constraint-guides ${classes}`);
       badge.root.dataset.kind = display.kind;
+      badge.root.dataset.tool = display.tool;
       badge.root.dataset.key = display.key;
       badge.guides.dataset.key = display.key;
       const title = `${display.title}${display.layer !== local ? ' · upstream (locked)' : ''}`;
@@ -140,7 +141,7 @@ export class SketchConstraints {
         badge.text.textContent = display.label;
       const [anchorX, anchorY] = project(display.anchor);
       const width = display.label ? 28 + display.label.length * 6.5 : 22;
-      const x = anchorX + 10;
+      const x = anchorX + (display.angle ? 42 : 10);
       let y = anchorY - 28;
       // Deterministic screen-space stacking; no label coordinates enter the model.
       while (
@@ -171,6 +172,30 @@ export class SketchConstraints {
         line.setAttribute('x2', String(end[0]));
         line.setAttribute('y2', String(end[1]));
       });
+      if (display.angle) {
+        const {origin, directions, sweep} = display.angle;
+        const [x, y] = project(origin);
+        const position = (angle: number, radius: number) => [
+          x + Math.cos(angle) * radius,
+          y - Math.sin(angle) * radius,
+        ];
+        const guide = svg('path');
+        guide.classList.add('constraint-angle-guide');
+        const rays = directions.map(direction => {
+          const [a, b] = position(direction, 32);
+          const [cx, cy] = position(direction, 27);
+          const dx = Math.sin(direction) * 3,
+            dy = Math.cos(direction) * 3;
+          return `M${x} ${y}L${a} ${b}M${cx - dx} ${cy - dy}L${a} ${b}L${cx + dx} ${cy + dy}`;
+        });
+        const start = position(directions[0], 22),
+          end = position(directions[0] + sweep, 22);
+        guide.setAttribute(
+          'd',
+          `${rays.join(' ')} M${start[0]} ${start[1]}A22 22 0 0 ${sweep >= 0 ? 0 : 1} ${end[0]} ${end[1]}`,
+        );
+        badge.guides.append(guide);
+      }
     }
   }
 }

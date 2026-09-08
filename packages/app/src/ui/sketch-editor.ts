@@ -729,8 +729,10 @@ export class SketchEditor {
     if (!this.view) return;
     this.cancel();
     this.tool = 'Select';
-    this.selection = display.curve
-      ? this.segments().filter(segment => same(segment, display.curve!))
+    this.selection = display.curves.length
+      ? this.segments().filter(segment =>
+          display.curves.some(curve => same(segment, curve)),
+        )
       : [...display.points];
     this.svg.focus();
     this.draw();
@@ -740,7 +742,7 @@ export class SketchEditor {
       !this.view.readOnlyReason &&
       value !== undefined
     )
-      this.constraintTools.edit(display.index, display.kind, value);
+      this.constraintTools.edit(display.index, display.tool, value);
   }
 
   private pointerMove(event: PointerEvent): void {

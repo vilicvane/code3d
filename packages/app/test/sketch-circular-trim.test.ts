@@ -229,8 +229,8 @@ test('arc end and interior trims preserve direction, allocate IDs per survivor c
       );
       assert.ok(arcs.every(e => e[2][4] === direction));
       assert.deepEqual(change.constraintReplacements, [
-        {index: 0, ids: arcs.map(e => e[1])},
-        {index: 1, ids: []},
+        ...(index === 1 ? [{index: 0, targets: arcs.map(e => e[1])}] : []),
+        {index: 1, targets: []},
       ]);
       assert.ok(!change.ids.includes(1));
     }

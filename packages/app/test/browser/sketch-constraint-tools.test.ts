@@ -51,7 +51,7 @@ test('point and line selection expose applicable tools, Shift toggles and blank 
     'Horizontal',
     'Vertical',
     'Length',
-    'Angle',
+    'Orientation',
   ]);
   await click(page, line(page, 6), true);
   assert.equal(await page.locator('.sketch-canvas line.selected').count(), 2);

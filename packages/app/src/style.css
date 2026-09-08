@@ -1566,6 +1566,10 @@ kbd {
   color: #dbe9a0;
   stroke-width: 2;
 }
+.sketch-canvas .constraint-angle-guide {
+  fill: none;
+  stroke-dasharray: none;
+}
 .sketch-canvas .draft {
   fill: none;
   stroke: var(--acid);
