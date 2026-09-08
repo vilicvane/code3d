@@ -129,6 +129,7 @@ type DecorationInstance = Readonly<{
 }>;
 
 export type ModelViewportOptions = Readonly<{
+  onViewChange?: () => void;
   onSourcePreviewDiagnostic?: (diagnostic: ModelDiagnostic | undefined) => void;
   onSelect: (occurrence: Occurrence) => void;
   onDrillDown: (node: ModelSnapshotObject) => void;
@@ -304,6 +305,7 @@ export class ModelViewport {
   >();
   private readonly spatialParameterValues = new Map<string, number>();
   private readonly onSelect: ModelViewportOptions['onSelect'];
+  private readonly onViewChange: ModelViewportOptions['onViewChange'];
   private readonly onSourcePreviewDiagnostic: ModelViewportOptions['onSourcePreviewDiagnostic'];
   private readonly onDrillDown: ModelViewportOptions['onDrillDown'];
   private readonly onNavigateSource: ModelViewportOptions['onNavigateSource'];
@@ -328,6 +330,7 @@ export class ModelViewport {
     private readonly container: HTMLElement,
     {
       onSelect,
+      onViewChange,
       onDrillDown,
       onNavigateSource,
       onPositionTool,
@@ -338,6 +341,7 @@ export class ModelViewport {
     }: ModelViewportOptions,
   ) {
     this.onSelect = onSelect;
+    this.onViewChange = onViewChange;
     this.onSourcePreviewDiagnostic = onSourcePreviewDiagnostic;
     this.onDrillDown = onDrillDown;
     this.onNavigateSource = onNavigateSource;
@@ -431,7 +435,20 @@ export class ModelViewport {
     } else {
       this.renderedViewTarget = {kind: 'model'};
       this.resetRenderedView();
+      this.onViewChange?.();
     }
+  }
+
+  hasRenderableGeometry(): boolean {
+    return this.renderedOccurrences().some(({node}) => {
+      const mesh = node.mesh;
+      return (
+        mesh !== undefined &&
+        (mesh.triangles.length > 0 ||
+          mesh.edges.length > 0 ||
+          mesh.topologyVertices.length > 0)
+      );
+    });
   }
 
   selectBySourceOffset(
@@ -1215,6 +1232,7 @@ export class ModelViewport {
     if (fitCamera) {
       this.frameChangedView();
     }
+    this.onViewChange?.();
   }
 
   private renderModelView(
@@ -1244,6 +1262,7 @@ export class ModelViewport {
     if (fitCamera) {
       this.frameChangedView();
     }
+    this.onViewChange?.();
   }
 
   private sourceTargetAt(

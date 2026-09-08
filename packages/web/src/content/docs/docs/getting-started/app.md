@@ -34,6 +34,12 @@ the minimum and maximum widths. Press `Esc` during a drag to cancel it.
 
 ## Move through a model
 
+When you load a file without a preview, the viewport shows **Select to preview**.
+Place the cursor in a model or sketch expression to open it. The hint stays
+dismissed after your first preview until you load another file. Moving outside
+an expression keeps the last 3D preview. An empty sketch still opens its drawing
+tools.
+
 - Place the editor cursor in an expression to inspect its runtime object.
 - Drag with the left mouse button to rotate freely using Arcball, including
   over the top and bottom of the model, with a short glide after release.

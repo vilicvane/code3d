@@ -269,6 +269,19 @@ implementation context and historical outcomes, not a competing work queue.
   version or stability guarantee. See [#30](https://github.com/vilicvane/code3d/issues/30).
 - Rendering is driven primarily by source or GUI object selection. Exporting is
   a publishing boundary and only a preview fallback, not a render prerequisite.
+- Before the first preview, App shows **Select to preview** with an animated
+  text selection. Each round starts with `model`, then `sketch`, then an explicit
+  list of transformation and composition/Boolean API names in shuffled order.
+  Transformations cover origins, rotation/scale and spatial relations; operations
+  are `group`, `union`, `intersect` and `cut`. The list lives in the UI module,
+  with ordinary type checking of API names and no additional build-time scan.
+  The UI advances one word per CSS animation cycle without background timers.
+  Once geometry or a sketch has been previewed, this initial hint stays dismissed
+  for the current file load. Loading another file starts a new preview cycle, so
+  new or reopened empty files show the hint after the old scene is replaced.
+  Moving the cursor outside a previewable expression keeps
+  the existing selection behavior, including the last 3D preview. Empty sketches
+  remain valid drawing targets. See [#68](https://github.com/vilicvane/code3d/issues/68).
 - Viewport file export supports STEP, STL and 3MF alongside PNG image export.
   The context menu has separate image and model entries; the model dialog
   remembers the last format. Both name files after the rendered value's binding,

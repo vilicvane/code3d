@@ -83,6 +83,10 @@ export class SketchEditorController {
     return this.active ? this.sourceLayers : undefined;
   }
 
+  get hasTarget(): boolean {
+    return this.active !== undefined;
+  }
+
   get isStale(): boolean {
     return !!this.active && this.stale;
   }

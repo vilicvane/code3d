@@ -1,0 +1,414 @@
+import assert from 'node:assert/strict';
+import {after, before, test, type TestContext} from 'node:test';
+import {chromium, type Browser, type Page} from 'playwright-core';
+import {previewOperations} from '../../src/ui/viewport-empty-state.ts';
+
+declare const window: Window & {
+  emptyViewportApp: {
+    viewport: import('../../src/viewport.ts').ModelViewport;
+    codeEditor: import('../../src/editor.ts').CodeEditor;
+    previousModule?: import('../../src/model/compiler.ts').ModelModule | null;
+  };
+};
+
+let browser: Browser;
+before(async () => {
+  assert.ok(process.env.CODE3D_TEST_URL);
+  browser = await chromium.connectOverCDP(
+    process.env.CODE3D_CDP_URL ?? 'http://localhost:9222',
+  );
+});
+after(async () => browser?.close());
+
+async function open(
+  t: TestContext,
+  source = '// Choose a preview',
+): Promise<Page> {
+  const context = await browser.newContext({
+    viewport: {width: 1400, height: 900},
+    reducedMotion: 'reduce',
+  });
+  t.after(() => context.close());
+  const page = await context.newPage();
+  page.setDefaultTimeout(15_000);
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  t.after(() => assert.deepEqual(errors, []));
+  await page.route('**/src/project/default-project.ts*', route =>
+    route.fulfill({
+      contentType: 'text/javascript',
+      body: `export const defaultProject = ${JSON.stringify({files: [{path: '/model.ts', source}]})};`,
+    }),
+  );
+  await page.route('**/src/main.ts*', async route => {
+    const response = await route.fetch();
+    await route.fulfill({
+      response,
+      body:
+        (await response.text()) +
+        '\nwindow.emptyViewportApp = {codeEditor, viewport};\n',
+    });
+  });
+  await page.goto(process.env.CODE3D_TEST_URL!);
+  await page.getByText('Ready', {exact: true}).waitFor({timeout: 40_000});
+  return page;
+}
+
+async function select(page: Page, text: string): Promise<void> {
+  await page.evaluate(text => {
+    const editor = window.emptyViewportApp.codeEditor.editor;
+    const model = editor.getModel()!;
+    const offset = model.getValue().indexOf(text);
+    if (offset < 0) throw new Error(`Missing source selection: ${text}`);
+    editor.setPosition(model.getPositionAt(offset + 1));
+    editor.focus();
+  }, text);
+}
+
+async function setSource(
+  page: Page,
+  source: string,
+  selection: string,
+  state = 'ready',
+): Promise<void> {
+  await page.evaluate(source => {
+    const app = window.emptyViewportApp;
+    app.previousModule = app.viewport['module'];
+    app.codeEditor.editor.getModel()!.setValue(source);
+  }, source);
+  await select(page, selection);
+  await page.waitForFunction(
+    state =>
+      window.emptyViewportApp.viewport['module'] !==
+        window.emptyViewportApp.previousModule &&
+      document.querySelector('#viewport-status')?.getAttribute('data-state') ===
+        state,
+    state,
+  );
+}
+
+async function expectEmpty(page: Page): Promise<void> {
+  await page.locator('#viewport-empty-state').waitFor();
+  assert.equal(await page.locator('.viewport-canvas').isVisible(), false);
+  assert.equal(await page.locator('.sketch-editor').isVisible(), false);
+  assert.equal(await page.locator('.viewport-mode').isVisible(), false);
+  assert.equal(
+    await page.locator('.viewport-coordinate-reference').isVisible(),
+    false,
+  );
+  assert.equal(await page.locator('.viewport-dock-panels').isVisible(), false);
+  assert.equal(
+    await page.evaluate(() => window.emptyViewportApp.viewport.getSelected()),
+    undefined,
+  );
+}
+
+test('the initial hint disappears after previewing and moving the cursor preserves the last 3D view', async t => {
+  const page = await open(t);
+  await expectEmpty(page);
+  assert.equal(
+    await page.locator('#viewport-empty-state strong').innerText(),
+    'Select to preview',
+  );
+  assert.equal(await page.locator('#viewport-empty-state p').count(), 0);
+  await setSource(
+    page,
+    `import {box} from '@code3d/core';
+const body = box(24, 30, 20);
+// No target here`,
+    '// No target',
+  );
+  // The compiler still automatically previews its last model when no source target is focused.
+  await page.locator('.viewport-canvas').waitFor();
+  assert.equal(await page.locator('#viewport-empty-state').isVisible(), false);
+  await select(page, 'body =');
+  await page.locator('.viewport-canvas').waitFor();
+  await page.getByRole('button', {name: 'Render', exact: true}).click();
+  await page.evaluate(() => {
+    const viewport = window.emptyViewportApp.viewport;
+    viewport['camera'].position.set(60, 40, 80);
+    viewport['controls'].syncCamera();
+  });
+  const before = await page.evaluate(() => {
+    const viewport = window.emptyViewportApp.viewport;
+    return {
+      key: viewport.getSelected()!.key,
+      nodeId: viewport.getSelected()!.node.nodeId,
+      camera: viewport['camera'].position.toArray(),
+    };
+  });
+  await select(page, '// No target');
+  assert.equal(await page.locator('#viewport-empty-state').isVisible(), false);
+  assert.equal(await page.locator('.viewport-canvas').isVisible(), true);
+  assert.deepEqual(
+    await page.evaluate(() => {
+      const viewport = window.emptyViewportApp.viewport;
+      return {
+        key: viewport.getSelected()!.key,
+        nodeId: viewport.getSelected()!.node.nodeId,
+        camera: viewport['camera'].position.toArray(),
+      };
+    }),
+    before,
+  );
+  assert.equal(
+    await page
+      .getByRole('button', {name: 'Render', exact: true})
+      .getAttribute('aria-pressed'),
+    'true',
+  );
+});
+
+test('an empty sketch dismisses the hint for that file and a new file gets its own hint', async t => {
+  const page = await open(
+    t,
+    `import {sketch} from '@code3d/core';
+const profile = sketch([]);
+// No target here`,
+  );
+  await expectEmpty(page);
+  await select(page, 'profile =');
+  await page.getByRole('region', {name: 'Sketch editor'}).waitFor();
+  assert.equal(await page.locator('#viewport-empty-state').isVisible(), false);
+  assert.equal(
+    await page.getByRole('button', {name: 'Line', exact: true}).isEnabled(),
+    true,
+  );
+  await select(page, '// No target');
+  await page.locator('.sketch-editor').waitFor({state: 'hidden'});
+  assert.equal(await page.locator('#viewport-empty-state').isVisible(), false);
+  await page.evaluate(() => {
+    const app = window.emptyViewportApp;
+    app.previousModule = app.viewport['module'];
+    app.codeEditor.createFile('/empty.ts', '// No target');
+  });
+  await page.waitForFunction(
+    () =>
+      window.emptyViewportApp.viewport['module'] !==
+        window.emptyViewportApp.previousModule &&
+      document.querySelector('#viewport-status')?.getAttribute('data-state') ===
+        'ready',
+  );
+  await expectEmpty(page);
+});
+
+test('creating an empty file after a 3D preview shows the hint and switching files resets it', async t => {
+  const page = await open(
+    t,
+    "import {box} from '@code3d/core';\nbox(20, 20, 20);",
+  );
+  assert.equal(await page.locator('#viewport-empty-state').isVisible(), false);
+  await page.evaluate(() => {
+    const app = window.emptyViewportApp;
+    app.previousModule = app.viewport['module'];
+  });
+  page.once('dialog', dialog => dialog.accept('/new.ts'));
+  await page.getByRole('button', {name: 'New file', exact: true}).click();
+  await page.waitForFunction(
+    () =>
+      window.emptyViewportApp.codeEditor.currentFile() === '/new.ts' &&
+      window.emptyViewportApp.viewport['module'] !==
+        window.emptyViewportApp.previousModule &&
+      document.querySelector('#viewport-status')?.getAttribute('data-state') ===
+        'ready',
+  );
+  assert.equal(await page.locator('#viewport-empty-state').isVisible(), true);
+  await expectEmpty(page);
+
+  await page.evaluate(() =>
+    window.emptyViewportApp.codeEditor.switchFile('/model.ts'),
+  );
+  await page.waitForFunction(
+    () =>
+      window.emptyViewportApp.viewport.hasRenderableGeometry() &&
+      document.querySelector('#viewport-status')?.getAttribute('data-state') ===
+        'ready',
+  );
+  assert.equal(await page.locator('#viewport-empty-state').isVisible(), false);
+
+  await page.evaluate(() =>
+    window.emptyViewportApp.codeEditor.switchFile('/new.ts'),
+  );
+  await page.waitForFunction(
+    () =>
+      !window.emptyViewportApp.viewport.hasRenderableGeometry() &&
+      document.querySelector('#viewport-status')?.getAttribute('data-state') ===
+        'ready',
+  );
+  await expectEmpty(page);
+});
+
+test('the initial hint fits narrow viewports and geometry of every dimension dismisses it', async t => {
+  const page = await open(
+    t,
+    "import {group} from '@code3d/core';\nconst empty = group([]);",
+  );
+  await page.locator('#viewport-empty-state').waitFor();
+  for (const width of [1400, 960, 680]) {
+    await page.setViewportSize({width, height: 900});
+    const layout = await page.evaluate(() => {
+      const host = document
+        .querySelector('#viewport-host')!
+        .getBoundingClientRect();
+      const prompt = document
+        .querySelector('#viewport-empty-state')!
+        .getBoundingClientRect();
+      const animation = document
+        .querySelector('.viewport-preview-selection')!
+        .getBoundingClientRect();
+      return {
+        centered:
+          Math.abs(
+            (prompt.left + prompt.right) / 2 - (host.left + host.right) / 2,
+          ) < 1,
+        fits: animation.left >= host.left && animation.right <= host.right,
+        pageFits: document.documentElement.scrollWidth <= innerWidth,
+      };
+    });
+    assert.deepEqual(layout, {centered: true, fits: true, pageFits: true});
+  }
+  await setSource(
+    page,
+    `import {group, rectangle, line, point} from '@code3d/core';
+const empty = group([]);
+const face = rectangle(10, 20);
+const edge = line([0, 0, 0], [10, 0, 0]);
+const vertex = point([0, 0, 0]);`,
+    'empty =',
+  );
+  for (const target of ['face =', 'edge =', 'vertex =']) {
+    await select(page, target);
+    await page.locator('.viewport-canvas').waitFor();
+    assert.equal(
+      await page.locator('#viewport-empty-state').isVisible(),
+      false,
+    );
+  }
+  await setSource(page, 'const scalar = 42;', 'scalar');
+  assert.equal(await page.locator('#viewport-empty-state').isVisible(), false);
+});
+
+test('an exported initial model keeps its existing automatic preview', async t => {
+  const page = await open(
+    t,
+    "import {box} from '@code3d/core';\nexport default box(20, 20, 20);",
+  );
+  await page.locator('.viewport-canvas').waitFor();
+  assert.equal(await page.locator('#viewport-empty-state').isVisible(), false);
+  assert.equal(
+    await page.evaluate(() =>
+      window.emptyViewportApp.viewport.hasRenderableGeometry(),
+    ),
+    true,
+  );
+});
+
+test('the animation preserves selection timing and visits the hint vocabulary after model and sketch', async t => {
+  const page = await open(t);
+  const catalog = previewOperations;
+  assert.equal(
+    await page.locator('.viewport-preview-text').textContent(),
+    'model',
+  );
+  assert.equal(
+    await page
+      .locator('.viewport-preview-selection')
+      .evaluate(element => element.getAnimations({subtree: true}).length),
+    0,
+  );
+  await page.emulateMedia({reducedMotion: 'no-preference'});
+  const sample = (time: number) =>
+    page.evaluate(async time => {
+      const selection = document.querySelector('.viewport-preview-selection')!;
+      for (const animation of selection.getAnimations({subtree: true})) {
+        animation.pause();
+        animation.currentTime =
+          (animation as CSSAnimation).animationName === 'viewport-preview-blink'
+            ? 0
+            : time;
+      }
+      // CSS iteration events advance the word on the rendering timeline.
+      await new Promise(requestAnimationFrame);
+      await new Promise(requestAnimationFrame);
+      const word = selection.querySelector<HTMLElement>(
+        '.viewport-preview-word',
+      )!;
+      const text = word.querySelector('.viewport-preview-text')!;
+      const caret = word.querySelector('.viewport-preview-caret')!;
+      const bounds = word.getBoundingClientRect();
+      const caretBounds = caret.getBoundingClientRect();
+      return {
+        word: text.textContent,
+        width: bounds.width,
+        textWidth: text.getBoundingClientRect().width,
+        highlightWidth: parseFloat(getComputedStyle(word, '::before').width),
+        caret: caretBounds.x + caretBounds.width / 2 - bounds.x,
+      };
+    }, time);
+  const near = (a: number, b: number) =>
+    assert.ok(Math.abs(a - b) < 0.1, `${a} ≈ ${b}`);
+  const selected = await sample(0);
+  assert.equal(selected.word, 'model');
+  near(selected.highlightWidth, selected.width);
+  near(selected.caret, selected.width);
+  for (const time of [861, 1179]) {
+    const blank = await sample(time);
+    assert.equal(blank.textWidth, 0);
+    assert.equal(blank.highlightWidth, 0);
+    near(blank.caret, 0);
+  }
+  const typing = await sample(1541);
+  assert.equal(typing.word, 'sketch');
+  near(typing.textWidth, typing.width / 2);
+  near(typing.caret, typing.textWidth);
+  assert.equal(typing.highlightWidth, 0);
+  for (const time of [1901, 2499]) {
+    const waiting = await sample(time);
+    near(waiting.textWidth, waiting.width);
+    near(waiting.caret, waiting.width);
+    assert.equal(waiting.highlightWidth, 0);
+  }
+  for (const time of [2501, 3359]) {
+    const selected = await sample(time);
+    near(selected.highlightWidth, selected.width);
+    near(selected.caret, selected.width);
+  }
+  const seen: string[] = [];
+  const longest = catalog.reduce((a, b) => (a.length > b.length ? a : b));
+  for (let index = 0; index < catalog.length; index++) {
+    const operation = await sample((index + 2) * 2500 + 1);
+    seen.push(operation.word!);
+    near(operation.highlightWidth, operation.width);
+    near(operation.caret, operation.width);
+    if (operation.word === longest) {
+      for (const width of [680, 960, 1400]) {
+        await page.setViewportSize({width, height: 900});
+        assert.ok(
+          await page
+            .locator('.viewport-preview-selection')
+            .evaluate(element => {
+              const word = element.getBoundingClientRect();
+              const host = document
+                .querySelector('#viewport-host')!
+                .getBoundingClientRect();
+              return word.left >= host.left && word.right <= host.right;
+            }),
+        );
+      }
+    }
+  }
+  assert.deepEqual(seen.sort(), [...catalog].sort());
+  assert.equal((await sample((catalog.length + 2) * 2500 + 1)).word, 'model');
+  assert.equal((await sample((catalog.length + 3) * 2500 + 1)).word, 'sketch');
+  await setSource(
+    page,
+    "import {box} from '@code3d/core';\nbox(10, 10, 10);",
+    'box(10',
+  );
+  assert.equal(
+    await page
+      .locator('.viewport-preview-selection')
+      .evaluate(element => element.getAnimations({subtree: true}).length),
+    0,
+  );
+});

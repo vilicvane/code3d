@@ -73,6 +73,7 @@ import {ElementsPanel} from './ui/elements-panel';
 import {ImageExportDialog} from './ui/image-export';
 import {ModelExportDialog} from './ui/model-export';
 import {ViewportContextMenu} from './ui/viewport-context-menu';
+import {ViewportEmptyState} from './ui/viewport-empty-state';
 import {ProjectTree} from './ui/project-tree';
 import {EditorSplitLayout} from './ui/editor-split-layout';
 import {createIcon} from './ui/icons';
@@ -171,6 +172,12 @@ app.innerHTML = `
 
       <section class="pane preview-pane">
         <div class="viewport-host" id="viewport-host">
+          <div class="viewport-empty-state" id="viewport-empty-state" role="status" aria-live="polite" hidden>
+            <span class="viewport-preview-selection" aria-hidden="true">
+              <span class="viewport-preview-word"><span class="viewport-preview-text"></span><span class="viewport-preview-caret"></span></span>
+            </span>
+            <strong>Select to preview</strong>
+          </div>
           <div class="viewport-feedback-stack" id="viewport-feedback-stack">
             <div class="viewport-diagnostic-stack" id="viewport-diagnostic-stack" role="status" aria-live="polite" aria-atomic="true" hidden></div>
           </div>
@@ -229,6 +236,11 @@ app.innerHTML = `
 
 const editorHost = requiredElement('editor-host');
 const viewportHost = requiredElement('viewport-host');
+const viewportEmptyState = new ViewportEmptyState(
+  requiredElement('viewport-empty-state'),
+);
+let hasPreviewedTarget = false;
+let previewFile: string | undefined;
 const errorBar = requiredElement('error-bar');
 const designArgumentsCount = requiredElement('design-arguments-count');
 const designArgumentsFunction = requiredElement('design-arguments-function');
@@ -440,6 +452,7 @@ type ContextualToolState = {
 };
 
 const viewport = new ModelViewport(viewportHost, {
+  onViewChange: refreshViewportEmptyState,
   onSourcePreviewDiagnostic: diagnostic => {
     sourcePreviewDiagnostic = diagnostic;
     refreshViewportFeedback();
@@ -965,6 +978,7 @@ async function runModel(
   viewport.restoreTransientPreview();
   const revision = ++runRevision;
   const sourceVersion = codeEditor.sourceVersion();
+  const file = codeEditor.currentFile();
   compilingDesignContextId = designContextId;
   setViewportStatus('busy', 'Preparing model');
   if (designContextId) {
@@ -977,7 +991,7 @@ async function runModel(
     const firstRun = currentModule === null;
     const nextModule = await compiler.compile(
       codeEditor.project(),
-      codeEditor.currentFile(),
+      file,
       designContextId,
       phase => setViewportStatus('busy', compilationPhaseLabels[phase]),
     );
@@ -1018,6 +1032,12 @@ async function runModel(
       preferredEvaluationContextId = undefined;
     }
     viewport.renderModule(currentModule, selectedKey, firstRun);
+    if (previewFile !== file) {
+      previewFile = file;
+      // Reset after replacing the scene: callbacks while clearing it still
+      // observe the previous file's geometry and must not dismiss this hint.
+      hasPreviewedTarget = false;
+    }
     const cursor = codeEditor.cursorSource();
     if (cursor) {
       const matched = viewport.selectBySourceOffset(
@@ -1106,6 +1126,7 @@ async function presentModelDiagnostic(
 }
 
 function refreshViewportFeedback(): void {
+  refreshViewportEmptyState();
   const diagnostic = viewportDiagnostic(
     currentDiagnostic,
     sourcePreviewDiagnostic,
@@ -2607,6 +2628,17 @@ function setViewportStatus(
   viewportStatus.dataset.state = state;
   viewportStatusLabel.textContent = label;
   viewportStatus.setAttribute('aria-busy', String(state === 'busy'));
+  refreshViewportEmptyState();
+}
+
+function refreshViewportEmptyState(): void {
+  hasPreviewedTarget ||=
+    viewport.hasRenderableGeometry() || sketchEditor.hasTarget;
+  const empty = !hasPreviewedTarget;
+  viewportHost.dataset.empty = String(empty);
+  viewportEmptyState.setVisible(
+    empty && viewportStatus.dataset.state !== 'busy',
+  );
 }
 
 function restoreModelStatus(): void {
