@@ -232,6 +232,29 @@ Model execution has no 15-second limit. Applying new source stops the old compil
 worker and supersedes its observation. Transport deadlines are independent and do
 not roll back changes. A stuck compilation can be replaced by applying new source.
 
+### View agent snapshots in the App
+
+Each successful render appears in a corner of the visualization view with the
+agent's name, color, and capture time. It is the same PNG returned to the CLI,
+including sketch renders and the agent's requested camera angle. Click the preview
+to fill the visualization view and browse the screenshot timeline below it.
+
+Filter by agent, use the previous/next controls, or focus the timeline and use
+Left/Right, Home, and End. Selecting an older image keeps it in view as new renders
+arrive; **Latest** resumes following the newest image. Escape or **Back to live
+view** closes the viewer. The source editor remains available throughout.
+
+The timeline shows the latest 100 renders across this project's agents and is
+restored from saved request receipts after reloading the page. Retrying a request
+or querying its result does not add another image. Revoke removes that agent's
+images; Revoke all clears the history. Failed requests and observations without a
+render do not add images. Receipts created before capture timestamps were added
+are not included.
+
+This is an image history, separate from the short-lived `snapshotId` used to query
+topology. Opening a screenshot never restores old code, moves a cursor, or changes
+the live model or camera. Agent cursor decorations continue to show current work.
+
 ## Edit and observe sketches
 
 Use the same full-source `apply` workflow for sketch entries and constraints. Read

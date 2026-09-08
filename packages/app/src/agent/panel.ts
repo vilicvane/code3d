@@ -14,6 +14,7 @@ import {agentPrompt} from './prompt';
 import {AgentPersistence} from './persistence';
 import {randomAgentColor} from './colors';
 import {randomAgentName} from './names';
+import type {AgentRenderHistory} from './render-history';
 
 type Grant = {
   config: AgentConfig;
@@ -79,6 +80,7 @@ export class AgentPanel {
     private readonly project: AgentProjectSession,
     private readonly open: HTMLButtonElement,
     private readonly workspace: string | undefined,
+    private readonly renders: AgentRenderHistory,
   ) {
     this.dialog.className = 'app-dialog agent-dialog';
     this.dialog.setAttribute('aria-label', 'Connect Agent');
@@ -263,6 +265,7 @@ export class AgentPanel {
         grant.host?.close();
         grant.endpoint.close();
         this.grants.delete(grant.config.agentId);
+        this.renders.remove(grant.config.agentId);
         this.editor.removeAgentCursor(grant.config.agentId);
         if (this.displayedAgentId === grant.config.agentId) {
           this.hidePrompt();
@@ -320,14 +323,15 @@ export class AgentPanel {
           sessionId: this.sessionId,
           name,
         });
-        const endpoint = await this.createEndpoint(config);
+        const color = randomAgentColor();
+        const endpoint = await this.createEndpoint(config, color);
         if (generation !== this.generation) {
           endpoint.close();
           return;
         }
         const grant: Grant = {
           config,
-          color: randomAgentColor(),
+          color,
           endpoint,
           busy: 0,
           interacted: false,
@@ -382,12 +386,34 @@ export class AgentPanel {
     }
   }
 
-  private createEndpoint(config: AgentConfig): Promise<AgentEndpoint> {
+  private createEndpoint(
+    config: AgentConfig,
+    color: number,
+  ): Promise<AgentEndpoint> {
+    const journal = this.storage!.journal(config);
+    const generation = this.generation;
+    const agent = {id: config.agentId, name: config.name, color};
     return AgentEndpoint.create(
       config,
       request => this.project.handle(config.agentId, config.name, request),
       {
-        journal: this.storage!.journal(config),
+        journal: {
+          load: async () => {
+            const receipts = await journal.load();
+            if (generation === this.generation)
+              for (const receipt of receipts)
+                this.renders.record(agent, receipt);
+            return receipts;
+          },
+          write: async receipt => {
+            await journal.write(receipt);
+            if (
+              generation === this.generation &&
+              this.grants.has(config.agentId)
+            )
+              this.renders.record(agent, receipt);
+          },
+        },
         onRequest: async () => {
           const grant = this.grants.get(config.agentId)!;
           grant.interacted = true;
@@ -462,7 +488,7 @@ export class AgentPanel {
     if (saved) {
       const restored = await Promise.all(
         saved.grants.map(async ({config, color, lastSeen}) => {
-          const endpoint = await this.createEndpoint(config);
+          const endpoint = await this.createEndpoint(config, color);
           return {
             config,
             color,
@@ -579,6 +605,7 @@ export class AgentPanel {
     this.clearPromptMessage();
     this.generation++;
     this.available = false;
+    this.renders.clear();
     for (const grant of this.grants.values()) {
       grant.host?.close();
       grant.endpoint.close();
@@ -599,6 +626,7 @@ export class AgentPanel {
       this.editor.removeAgentCursor(grant.config.agentId);
     }
     this.grants.clear();
+    this.renders.clear();
     this.hidePrompt();
     this.message.textContent = 'All agent access revoked.';
     this.refresh();
