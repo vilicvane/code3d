@@ -146,6 +146,26 @@ test('box-selected mixed points and lines remove existing dimension and directio
     ),
   );
   const original = await text(page);
+  const screen = await project(page);
+  await page.mouse.click(...screen(7, 10));
+  const length = tools(page).getByRole('button', {name: 'Length', exact: true});
+  const appearance = () =>
+    length.evaluate(button => {
+      const style = getComputedStyle(button);
+      return {
+        color: style.color,
+        background: style.backgroundColor,
+        borderColor: style.borderColor,
+        borderStyle: style.borderStyle,
+        shadow: style.boxShadow,
+        width: style.width,
+        height: style.height,
+      };
+    });
+  assert.equal(await length.getAttribute('aria-pressed'), 'true');
+  const fullyMatched = await appearance();
+  assert.equal(fullyMatched.borderStyle, 'solid');
+  assert.equal(fullyMatched.shadow, 'none');
   await box(page, [-2, -2], [22, 12]);
   assert.equal(
     await tools(page)
@@ -153,8 +173,11 @@ test('box-selected mixed points and lines remove existing dimension and directio
       .count(),
     0,
   );
-  const length = tools(page).getByRole('button', {name: 'Length', exact: true});
   assert.equal(await length.getAttribute('aria-pressed'), 'mixed');
+  assert.deepEqual(await appearance(), {
+    ...fullyMatched,
+    borderStyle: 'dashed',
+  });
   await length.click();
   await page
     .locator('.constraint-badge[data-kind="length"]')

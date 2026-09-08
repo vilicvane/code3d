@@ -1,5 +1,10 @@
 import type {SketchPosition} from '@code3d/core/tooling';
 import type {SketchConstraintDisplay} from '../tools/sketch-constraints';
+import {
+  layoutSketchConstraintMarkers,
+  sketchConstraintLabelHeight,
+  sketchConstraintLabelBorder,
+} from '../tools/sketch-constraint-layout';
 import {createIcon} from './icons';
 import {sketchConstraintIcons} from './sketch-icons';
 const svg = <K extends keyof SVGElementTagNameMap>(tag: K) =>
@@ -51,7 +56,15 @@ export class SketchConstraints {
       ? ''
       : 'none';
     if (!visible) this.hovered = this.focused = undefined;
-    const used = new Set(displays.map(d => d.key));
+    const markers = displays.flatMap(display =>
+      display.markers.map((marker, index) => ({
+        display,
+        marker,
+        width: display.label ? 28 + display.label.length * 6.5 : 22,
+        key: JSON.stringify([display.key, index]),
+      })),
+    );
+    const used = new Set(markers.map(m => m.key));
     if (!used.has(this.hovered ?? '')) this.hovered = undefined;
     if (!used.has(this.focused ?? '')) this.focused = undefined;
     for (const [key, badge] of this.badges) {
@@ -60,9 +73,11 @@ export class SketchConstraints {
       badge.guides.remove();
       this.badges.delete(key);
     }
-    const occupied: {x: number; y: number; width: number}[] = [];
-    for (const display of displays) {
-      let badge = this.badges.get(display.key);
+    const positions = layoutSketchConstraintMarkers(markers, project);
+    const activeKey = this.badges.get(this.hovered ?? this.focused ?? '')
+      ?.display.key;
+    for (const [index, {display, key, width}] of markers.entries()) {
+      let badge = this.badges.get(key);
       if (!badge) {
         const root = svg('g'),
           background = svg('rect'),
@@ -72,14 +87,18 @@ export class SketchConstraints {
         icon.setAttribute('x', '3');
         icon.setAttribute('y', '2');
         background.setAttribute('rx', '3');
-        background.setAttribute('height', '20');
+        background.setAttribute('height', String(sketchConstraintLabelHeight));
+        background.setAttribute(
+          'stroke-width',
+          String(sketchConstraintLabelBorder),
+        );
         text.setAttribute('x', '23');
         text.setAttribute('y', '14');
         root.setAttribute('tabindex', '0');
         root.setAttribute('role', 'button');
         root.append(title, background, icon, text);
         root.addEventListener('pointerenter', () => {
-          this.hovered = display.key;
+          this.hovered = key;
           this.change();
         });
         root.addEventListener('pointerleave', () => {
@@ -87,7 +106,7 @@ export class SketchConstraints {
           this.change();
         });
         root.addEventListener('focus', () => {
-          this.focused = display.key;
+          this.focused = key;
           this.change();
         });
         root.addEventListener('blur', () => {
@@ -104,17 +123,17 @@ export class SketchConstraints {
         root.addEventListener('click', event => {
           if (event.button !== 0) return;
           event.stopPropagation();
-          this.select(this.badges.get(display.key)!.display);
+          this.select(this.badges.get(key)!.display);
         });
         root.addEventListener('keydown', event => {
           if (event.key !== 'Enter' && event.key !== ' ') return;
           event.preventDefault();
           event.stopPropagation();
-          this.select(this.badges.get(display.key)!.display);
+          this.select(this.badges.get(key)!.display);
         });
         const guides = svg('g');
         badge = {root, background, icon, text, title, guides, display};
-        this.badges.set(display.key, badge);
+        this.badges.set(key, badge);
         this.labels.append(root);
         this.guides.append(guides);
       }
@@ -126,7 +145,7 @@ export class SketchConstraints {
         badge.icon = icon;
       }
       badge.display = display;
-      const active = display.key === (this.hovered ?? this.focused);
+      const active = display.key === activeKey;
       const classes = `${display.layer === local ? 'constraint-local' : 'constraint-upstream'}${active ? ' constraint-active' : ''}`;
       badge.root.setAttribute('class', `constraint-badge ${classes}`);
       badge.guides.setAttribute('class', `constraint-guides ${classes}`);
@@ -139,23 +158,12 @@ export class SketchConstraints {
       if (badge.title.textContent !== title) badge.title.textContent = title;
       if (badge.text.textContent !== display.label)
         badge.text.textContent = display.label;
-      const [anchorX, anchorY] = project(display.anchor);
-      const width = display.label ? 28 + display.label.length * 6.5 : 22;
-      const x = anchorX + (display.angle ? 42 : 10);
-      let y = anchorY - 28;
-      // Deterministic screen-space stacking; no label coordinates enter the model.
-      while (
-        occupied.some(
-          r =>
-            x < r.x + r.width + 3 &&
-            x + width + 3 > r.x &&
-            y < r.y + 23 &&
-            y + 23 > r.y,
-        )
-      )
-        y += 23;
-      occupied.push({x, y, width});
-      badge.root.setAttribute('transform', `translate(${x}, ${y})`);
+      const {x, y} = positions[index];
+      const border = sketchConstraintLabelBorder / 2;
+      badge.root.setAttribute(
+        'transform',
+        `translate(${x + border}, ${y + border})`,
+      );
       badge.background.setAttribute('width', String(width));
       while (badge.guides.children.length > display.guides.length)
         badge.guides.lastChild!.remove();
@@ -172,30 +180,6 @@ export class SketchConstraints {
         line.setAttribute('x2', String(end[0]));
         line.setAttribute('y2', String(end[1]));
       });
-      if (display.angle) {
-        const {origin, directions, sweep} = display.angle;
-        const [x, y] = project(origin);
-        const position = (angle: number, radius: number) => [
-          x + Math.cos(angle) * radius,
-          y - Math.sin(angle) * radius,
-        ];
-        const guide = svg('path');
-        guide.classList.add('constraint-angle-guide');
-        const rays = directions.map(direction => {
-          const [a, b] = position(direction, 32);
-          const [cx, cy] = position(direction, 27);
-          const dx = Math.sin(direction) * 3,
-            dy = Math.cos(direction) * 3;
-          return `M${x} ${y}L${a} ${b}M${cx - dx} ${cy - dy}L${a} ${b}L${cx + dx} ${cy + dy}`;
-        });
-        const start = position(directions[0], 22),
-          end = position(directions[0] + sweep, 22);
-        guide.setAttribute(
-          'd',
-          `${rays.join(' ')} M${start[0]} ${start[1]}A22 22 0 0 ${sweep >= 0 ? 0 : 1} ${end[0]} ${end[1]}`,
-        );
-        badge.guides.append(guide);
-      }
     }
   }
 }

@@ -5,7 +5,11 @@ import type {
   SketchSnapshot,
 } from '@code3d/core/tooling';
 import {sameSketchPoint, type SketchPoint} from './sketch-snap';
-import {sketchCurveGeometry, sketchCurvePosition} from '@code3d/core/tooling';
+import {
+  sketchCurveGeometry,
+  sketchCurvePosition,
+  sketchPointResolver,
+} from '@code3d/core/tooling';
 import type {DrawingDimension} from './drawing-dimensions';
 
 /** Direct relation targets; a line constraint does not implicitly target its endpoints. */
@@ -68,6 +72,19 @@ export const sketchConstraintDimensions: Partial<
   y: {id: 'y', label: 'Y coordinate'},
 };
 
+export type SketchConstraintMarker =
+  | Readonly<{kind: 'point'; position: SketchPosition}>
+  | Readonly<{
+      kind: 'line';
+      curve: SketchPointAddress;
+      points: readonly [SketchPosition, SketchPosition];
+    }>
+  | Readonly<{
+      kind: 'corner';
+      /** Shared vertex, then the opposite endpoint of each participating line. */
+      points: readonly [SketchPosition, SketchPosition, SketchPosition];
+    }>;
+
 export type SketchConstraintDisplay = Readonly<{
   /** Evaluation-local display identity, never an authored constraint ID. */
   key: string;
@@ -77,15 +94,10 @@ export type SketchConstraintDisplay = Readonly<{
   tool: SketchConstraintTool;
   label: string;
   title: string;
-  anchor: SketchPosition;
+  markers: readonly SketchConstraintMarker[];
   points: readonly SketchPoint[];
   curves: readonly SketchPointAddress[];
   guides: readonly (readonly [SketchPosition, SketchPosition])[];
-  angle?: Readonly<{
-    origin: SketchPosition;
-    directions: readonly [number, number];
-    sweep: number;
-  }>;
 }>;
 
 /** Read persistent relations against the current geometry (including drag preview). */
@@ -93,6 +105,7 @@ export function sketchConstraintDisplays(
   layers: readonly SketchSnapshot[],
   points: readonly SketchPoint[],
 ): SketchConstraintDisplay[] {
+  const resolve = sketchPointResolver(layers);
   const point = (address: SketchPointAddress) =>
     points.find(p => sameSketchPoint(p, address))!;
   const number = (value: number) => String(Number(value.toPrecision(6)));
@@ -103,7 +116,7 @@ export function sketchConstraintDisplays(
       let related: readonly SketchPoint[],
         curve: SketchPointAddress | undefined;
       let curves: readonly SketchPointAddress[] = [];
-      let angle: SketchConstraintDisplay['angle'];
+      let markers: readonly SketchConstraintMarker[] | undefined;
       let curveAnchor: SketchPosition | undefined;
       let guides: SketchConstraintDisplay['guides'] | undefined;
       let label = '',
@@ -119,32 +132,41 @@ export function sketchConstraintDisplays(
         );
         related = lines.flatMap(line => line.points.map(point));
         curves = ids.map(id => ({layer: layer.id, id}));
-        const [a, b, c, d] = related.map(p => p.position);
-        const centers = [
-          [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2],
-          [(c[0] + d[0]) / 2, (c[1] + d[1]) / 2],
-        ] as const;
-        curveAnchor = [
-          (centers[0][0] + centers[1][0]) / 2,
-          (centers[0][1] + centers[1][1]) / 2,
-        ];
-        guides = [[centers[0], centers[1]]];
+        const shared = lines[0].points.find(a =>
+          lines[1].points.some(b => sameSketchPoint(resolve(a), resolve(b))),
+        );
+        if (kind !== 'parallel' && shared) {
+          const opposite = (line: (typeof lines)[number]) =>
+            point(
+              line.points.find(
+                p => !sameSketchPoint(resolve(p), resolve(shared)),
+              )!,
+            ).position;
+          markers = [
+            {
+              kind: 'corner',
+              points: [
+                point(shared).position,
+                opposite(lines[0]),
+                opposite(lines[1]),
+              ],
+            },
+          ];
+        } else {
+          markers = lines.map(line => ({
+            kind: 'line',
+            curve: {layer: layer.id, id: line.id},
+            points: [
+              point(line.points[0]).position,
+              point(line.points[1]).position,
+            ],
+          }));
+        }
+        guides = [];
         title = `${sketchConstraintNames[tool]} · line ${ids[0]} → line ${ids[1]}`;
         if (kind === 'angle') {
           label = `${number(value!)}°`;
           title += ` · ${value}° · authored start → end directions; positive CCW`;
-          const directions = [
-            Math.atan2(b[1] - a[1], b[0] - a[0]),
-            Math.atan2(d[1] - c[1], d[0] - c[0]),
-          ] as const;
-          // A common-origin directional diagram works for disjoint and parallel
-          // finite lines too; it never implies a persistent intersection point.
-          const radians = (value! * Math.PI) / 180;
-          angle = {
-            origin: curveAnchor,
-            directions,
-            sweep: Math.atan2(Math.sin(radians), Math.cos(radians)),
-          };
         }
       } else {
         switch (kind) {
@@ -209,6 +231,13 @@ export function sketchConstraintDisplays(
               .find(e => e.id === id)!;
             related = entity.points.map(point);
             curve = {layer: layer.id, id};
+            markers = [
+              {
+                kind: 'line',
+                curve,
+                points: [related[0].position, related[1].position],
+              },
+            ];
             if (value === undefined)
               title = kind === 'horizontal' ? 'Horizontal' : 'Vertical';
             else {
@@ -221,14 +250,6 @@ export function sketchConstraintDisplays(
         }
       }
       title += ` · ${related.map(p => `point ${p.id}${p.layer === layer.id ? '' : ' (upstream)'}`).join(', ')}`;
-      const anchor: SketchPosition =
-        curveAnchor ??
-        (curve
-          ? [
-              (related[0].position[0] + related[1].position[0]) / 2,
-              (related[0].position[1] + related[1].position[1]) / 2,
-            ]
-          : related[0].position);
       return {
         key: JSON.stringify([layer.id, index]),
         index,
@@ -237,10 +258,11 @@ export function sketchConstraintDisplays(
         tool,
         label,
         title,
-        anchor,
+        markers: markers ?? [
+          {kind: 'point', position: curveAnchor ?? related[0].position},
+        ],
         points: related,
         curves: curve ? [curve] : curves,
-        angle,
         guides:
           guides ??
           (!curve && related.length > 1
