@@ -17,6 +17,7 @@ import {
   rectangle,
   regularPolygon,
   regularPrism,
+  sketch,
   spline,
   sphere,
   tube,
@@ -59,6 +60,42 @@ import type {Shape3D as RootShape3D} from '@code3d/core';
 import type {ModelObject as InternalModelObject} from '@code3d/core/bld/library/runtime.js';
 
 const solid = box(10, 5, 8);
+const sketchValue = sketch([
+  ['point', 1, [0, 0]],
+  ['point', 2, [10, 0]],
+  ['line', 3, [1, 2]],
+]);
+sketch(
+  [
+    ['point', 1, [0, 0]],
+    ['point', 2, [40, 0]],
+    ['line', 3, [1, 2]],
+  ],
+  {
+    constraints: [
+      ['fixed', 1],
+      ['horizontal', 3],
+      ['length', 3, 40],
+      ['angle', 3, 0],
+      ['x', 1, 0],
+      ['coincident', [1, 2]],
+    ],
+  },
+);
+// @ts-expect-error Constraints do not carry persistent IDs.
+sketch([], {constraints: [['horizontal', 10, 3]]});
+// @ts-expect-error Single-target constraints take a scalar reference, not an array.
+sketch([], {constraints: [['fixed', [1]]]});
+sketchValue.derive([
+  ['point', 1, [0, 5]],
+  ['line', 2, [sketchValue.point(2), 1]],
+]);
+// @ts-expect-error Point coordinates are a nested two-number tuple.
+sketch([['point', 1, 0, 0]]);
+// @ts-expect-error There is no persistent nextId item.
+sketch([['point', 1, [0, 0]], 2]);
+// @ts-expect-error A line has exactly two point references.
+sketch([['line', 3, [1, 2, 4]]]);
 const related = solid.relate(self => self.center.on(solid.up.flip()));
 const exposed = related.expose({mount: related.down});
 const constraint: Constraint = exposed.mount.on(solid.up).offset(1, 2, 3);

@@ -14,7 +14,7 @@ import {disposeModelObjects, modelGeometry} from './model-test.ts';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import {bezier, loft, rectangle} from '../bld/node/index.js';
+import {bezier, loft, rectangle, sketch} from '../bld/node/index.js';
 
 import {clearKernelOperationCache} from '../bld/library/kernel-cache.js';
 import * as replicad from 'replicad';
@@ -32,6 +32,72 @@ import {
   stableVertexData,
   topologyChildren,
 } from '../bld/library/topology.js';
+
+test('sketch region and extrusion release their native builders and validation handles', t => {
+  clearKernelOperationCache();
+  const oc = replicad.getOC();
+  const handles: EmbindHandle[] = [];
+  for (const key of [
+    'BRepBuilderAPI_MakeWire',
+    'BRepBuilderAPI_MakeFace',
+    'BRepCheck_Analyzer',
+    'BRepPrimAPI_MakePrism',
+  ] as const) {
+    t.mock.method(
+      oc,
+      key,
+      new Proxy(oc[key], {
+        construct(target, args) {
+          const value = Reflect.construct(target, args) as EmbindHandle;
+          handles.push(value);
+          return value;
+        },
+      }),
+    );
+  }
+  const face = sketch([
+    ['point', 1, [0, 0]],
+    ['circle', 2, [1, 9]],
+    ['circle', 3, [1, 3]],
+  ]).face();
+  const solid = face.extrude(4);
+  try {
+    assert.ok(handles.length >= 5);
+    assert.ok(handles.every(handle => handle.isDeleted()));
+    assert.ok(modelGeometry(solid).value.shape.mesh().triangles.length);
+  } finally {
+    disposeModelObjects([face, solid]);
+    clearKernelOperationCache();
+  }
+});
+
+test('rejected sketch face validation releases its acquired native face and builder', t => {
+  clearKernelOperationCache();
+  const oc = replicad.getOC();
+  const handles: EmbindHandle[] = [];
+  const originalFace = oc.TopoDS.Face;
+  t.mock.method(
+    oc.TopoDS,
+    'Face',
+    (...args: Parameters<typeof originalFace>) => {
+      const face = originalFace(...args);
+      handles.push(face);
+      return face;
+    },
+  );
+  t.mock.method(oc.BRepCheck_Analyzer.prototype, 'IsValid', () => false);
+  assert.throws(
+    () =>
+      sketch([
+        ['point', 1, [0, 0]],
+        ['circle', 2, [1, 7]],
+      ]).face(),
+    /valid planar face/,
+  );
+  assert.ok(handles.length);
+  assert.ok(handles.every(handle => handle.isDeleted()));
+  clearKernelOperationCache();
+});
 
 test('box construction releases temporary native points', t => {
   const oc = replicad.getOC();

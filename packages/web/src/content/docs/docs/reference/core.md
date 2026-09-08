@@ -78,6 +78,42 @@ export const plate = rectangle(30, 20).extrude(3).fillet(0.5);
 export const pin = extrude(circle(2), -10);
 ```
 
+## Editable sketch regions
+
+Select a `sketch([...])` expression or variable in the App to open its 2D editor.
+Points, lines, circles and arcs use explicit layer-local entity IDs. `face()`
+requires exactly one closed region, including holes; `faces()` returns all regions
+as an ordinary readonly array. Use `map` for independent modeling operations:
+
+```ts
+import {sketch} from '@code3d/core';
+
+const profile = sketch([
+  ['point', 1, [0, 0]],
+  ['circle', 2, [1, 12]],
+  ['circle', 3, [1, 8]],
+]);
+const sleeve = profile.face().extrude(20);
+const parts = profile.faces().map(face => face.extrude(10));
+```
+
+Derived sketches include their read-only upstream boundaries. Separate contours
+produce separate faces; nested contours alternate material, holes and islands.
+Open, crossing, touching, overlapping and branched boundaries must be trimmed into
+valid closed contours before creating faces. The editor leaves unfinished sketches
+editable and previews valid regions without changing entity IDs.
+
+Sketch `[x, y]` maps to model `[x, 0, -y]`, without recentering. `.extrude(distance)`
+and `extrude(face, distance)` are equivalent single-face operations. Distance must
+be finite and nonzero; positive follows the plane normal, negative reverses it.
+Rotating the face rotates its extrusion direction too.
+
+`loft` takes one face per section and preserves a single corresponding hole, with
+or without a spine. Different hole counts or multiple unpaired holes report an
+error rather than silently filling holes. Persistent region IDs and general
+multi-hole correspondence are not available yet. Try `examples/sketch-modeling.ts`
+in the App for a plate, multiple cutting tools and a hollow loft.
+
 ## Composition and boolean operations
 
 | Function               | Result                                        |
@@ -88,6 +124,8 @@ export const pin = extrude(circle(2), -10);
 | `intersect(solids)`    | Shared solid volume                           |
 
 Relations are resolved at composition and geometry evaluation boundaries.
+`stock.cut(tools)` is equivalent to `cut(stock, tools)`. Arrays in booleans and
+loft describe the inputs of one operation; they do not automatically map it.
 
 ## Model operations
 

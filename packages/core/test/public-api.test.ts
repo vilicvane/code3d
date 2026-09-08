@@ -26,6 +26,7 @@ const authoringValues = [
   'rectangle',
   'regularPolygon',
   'regularPrism',
+  'sketch',
   'sphere',
   'spline',
   'tube',

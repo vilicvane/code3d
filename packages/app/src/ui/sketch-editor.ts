@@ -1,0 +1,1275 @@
+import type {
+  SketchPointAddress,
+  SketchPosition,
+  SketchSnapshot,
+} from '@code3d/core/tooling';
+import {
+  sketchCurveGeometry,
+  sketchCurveClosestParameter,
+  sketchCurvePosition,
+  sketchCurveBounds,
+  sketchPointResolver,
+  sketchRegions,
+  type SketchCurve,
+} from '@code3d/core/tooling';
+import {
+  Maximize,
+  Magnet,
+  Minus,
+  MousePointer2,
+  RectangleHorizontal,
+  Scissors,
+  Shapes,
+  Circle,
+} from 'lucide';
+import type {SketchChange} from '../tools/sketch-source';
+import type {
+  SketchDragPreview,
+  SketchGeometryData,
+  SketchEditableParameters,
+} from '../model/sketch-drag';
+import {SketchLineDrawing, type SketchDrawing} from '../tools/sketch-drawing';
+import {SketchRectangleDrawing} from '../tools/sketch-rectangle-drawing';
+import {SketchCircleDrawing} from '../tools/sketch-circle-drawing';
+import {SketchArcDrawing} from '../tools/sketch-arc-drawing';
+import {
+  sketchSegments,
+  sketchSegmentDistance,
+  sameSketchSegment,
+  overlappingSketchSegments,
+  trimSketchSegment,
+  deleteSketchEntity,
+  type SketchSegment,
+} from '../tools/sketch-segments';
+import {
+  endpointPosition,
+  sameSketchPoint as same,
+  sketchDistance as distance,
+  sketchGridStep,
+  snapSketchPointer,
+  type SketchPoint as Point,
+} from '../tools/sketch-snap';
+import {DrawingInputs} from './drawing-inputs';
+import {SketchToolbar, type SketchToolAction} from './sketch-toolbar';
+import {CenterArc, CenterRectangle} from './sketch-icons';
+import {sketchConstraintDisplays} from '../tools/sketch-constraints';
+import {SketchConstraints} from './sketch-constraints';
+import {
+  sketchConstraintActions,
+  type SketchPick,
+} from '../tools/sketch-constraint-actions';
+import {SketchConstraintTools} from './sketch-constraint-tools';
+
+const drawingTools = [
+  ['Line', Minus, () => new SketchLineDrawing()],
+  ['Rectangle', RectangleHorizontal, () => new SketchRectangleDrawing()],
+  [
+    'Center rectangle',
+    CenterRectangle,
+    () => new SketchRectangleDrawing('center'),
+  ],
+  ['Circle', Circle, () => new SketchCircleDrawing()],
+  ['Arc', CenterArc, () => new SketchArcDrawing()],
+] as const;
+
+export type SketchEditorView = Readonly<{
+  id: string;
+  layers: readonly SketchSnapshot[];
+  data: readonly SketchGeometryData[];
+  editable: SketchEditableParameters;
+  referenceable: ReadonlySet<string>;
+  readOnlyReason?: string;
+}>;
+
+type Gesture =
+  | {
+      kind: 'move';
+      target: Point;
+      parameter: 'point' | 'radius';
+      start: SketchPosition;
+      position: SketchPosition;
+      mergeTarget?: SketchPointAddress;
+      preview?: SketchDragPreview;
+      pending?: Promise<void>;
+      released: boolean;
+      version: number;
+      error?: string;
+    }
+  | {kind: 'pan'; start: SketchPosition; center: SketchPosition};
+
+/** Pure 2D interaction: source parsing, runtime tracing and transactions live outside this view. */
+export class SketchEditor {
+  readonly root = document.createElement('section');
+  private readonly svg = svgElement('svg');
+  private readonly status = document.createElement('output');
+  private readonly statusText = document.createTextNode('');
+  private readonly grid = svgElement('g');
+  private readonly regions = svgElement('g');
+  private readonly lines = svgElement('g');
+  private readonly vertices = svgElement('g');
+  private readonly constraints = new SketchConstraints(() => {
+    this.trimPointer = undefined;
+    this.draw();
+  });
+  private readonly shapes = new Map<string, SVGElement>();
+  private readonly usedShapes = new Set<string>();
+  private readonly toolbar = new SketchToolbar();
+  private readonly constraintTools = new SketchConstraintTools(
+    change => {
+      this.editError = undefined;
+      const committed = this.commit(change);
+      if (!committed)
+        this.editError =
+          'The sketch constraints could not be edited; select the geometry again.';
+      this.draw();
+      return committed;
+    },
+    () => this.svg.focus(),
+  );
+  private readonly overlay = svgElement('g');
+  private readonly draftShapes: SVGElement[] = [];
+  private readonly draftMarker = svgElement('circle');
+  private readonly snapLabel = svgElement('text');
+  private readonly snapText = document.createTextNode('');
+  private readonly drawingInputs = new DrawingInputs(
+    () => this.drawDraft(),
+    () => this.place(),
+    () => this.escape(),
+  );
+  private readonly abort = new AbortController();
+  private readonly resize: ResizeObserver;
+  private view?: SketchEditorView;
+  private tool: 'Select' | 'Trim' | SketchDrawing = 'Select';
+  private trimPointer?: SketchPosition;
+  private snapping = true;
+  private showConstraints = true;
+  private bypassSnap = false;
+  private center: SketchPosition = [0, 0];
+  private scale = 6;
+  private selection: SketchPick[] = [];
+  private editError?: string;
+  private gesture?: Gesture;
+  private space = false;
+
+  private get mode() {
+    return typeof this.tool === 'string' ? this.tool : this.tool.name;
+  }
+  private get drawing(): SketchDrawing | undefined {
+    return typeof this.tool === 'string' ? undefined : this.tool;
+  }
+
+  constructor(
+    container: HTMLElement,
+    private readonly commit: (
+      change: SketchChange,
+      preview?: SketchSnapshot,
+    ) => boolean,
+    private readonly solve: (
+      id: number,
+      position: SketchPosition,
+      previous?: SketchDragPreview,
+      mergeTarget?: SketchPointAddress,
+    ) => Promise<SketchDragPreview>,
+  ) {
+    this.root.className = 'sketch-editor';
+    this.root.setAttribute('aria-label', 'Sketch editor');
+    this.root.hidden = true;
+    this.createToolbar();
+    this.svg.classList.add('sketch-canvas');
+    this.svg.setAttribute('tabindex', '0');
+    this.svg.setAttribute('aria-label', 'Sketch drawing');
+    this.svg.addEventListener('pointerdown', event => this.pointerDown(event));
+    this.svg.addEventListener('pointermove', event => this.pointerMove(event));
+    this.svg.addEventListener('pointerleave', () => {
+      this.trimPointer = undefined;
+      this.draw();
+    });
+    this.svg.addEventListener('pointerup', event => void this.pointerUp(event));
+    this.svg.addEventListener('pointercancel', () => this.cancel());
+    this.svg.addEventListener('lostpointercapture', () => {
+      if (
+        this.gesture &&
+        (this.gesture.kind !== 'move' || !this.gesture.released)
+      )
+        this.cancel();
+    });
+    this.svg.addEventListener(
+      'wheel',
+      event => {
+        event.preventDefault();
+        const before = this.coordinates(event);
+        this.scale = Math.min(
+          1000,
+          Math.max(0.05, this.scale * Math.exp(-event.deltaY * 0.001)),
+        );
+        const after = this.coordinates(event);
+        this.center = [
+          this.center[0] + before[0] - after[0],
+          this.center[1] + before[1] - after[1],
+        ];
+        this.draw();
+      },
+      {passive: false},
+    );
+    this.root.addEventListener('contextmenu', event => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    this.root.addEventListener('pointerdown', event => event.stopPropagation());
+    this.root.addEventListener('keydown', event => this.keyDown(event));
+    this.root.addEventListener('keyup', event => {
+      if (event.code === 'Space') this.space = false;
+      if (event.key === 'Alt') {
+        this.bypassSnap = false;
+        this.drawDraft();
+      }
+    });
+    this.root.addEventListener('focusout', event => {
+      if (
+        event.relatedTarget instanceof Node &&
+        this.root.contains(event.relatedTarget)
+      )
+        return;
+      this.space = false;
+      this.bypassSnap = false;
+      this.cancel();
+    });
+    window.addEventListener(
+      'blur',
+      () => {
+        this.space = false;
+        this.bypassSnap = false;
+        this.cancel();
+      },
+      {signal: this.abort.signal},
+    );
+    const stage = document.createElement('div');
+    stage.className = 'sketch-stage';
+    stage.append(this.svg, this.drawingInputs.root);
+    this.overlay.classList.add('drawing-overlay');
+    this.snapLabel.append(this.snapText);
+    this.overlay.append(this.draftMarker, this.snapLabel);
+    this.svg.append(
+      this.grid,
+      this.regions,
+      this.constraints.guides,
+      this.lines,
+      this.vertices,
+      this.constraints.labels,
+      this.overlay,
+    );
+    this.status.append(this.statusText);
+    this.root.append(
+      this.toolbar.root,
+      this.constraintTools.root,
+      stage,
+      this.status,
+    );
+    container.append(this.root);
+    this.resize = new ResizeObserver(() => this.draw());
+    this.resize.observe(this.svg);
+  }
+
+  show(view: SketchEditorView): void {
+    const changed = this.view?.id !== view.id;
+    if (changed) {
+      this.cancel();
+      this.selection = [];
+      this.tool = 'Select';
+    }
+    this.view = view;
+    this.editError = undefined;
+    const segments = this.segments();
+    // Retain the source interval identity, but replace its old coordinates.
+    // Constraint solving can move it without changing the selected entity.
+    this.selection = this.selection.flatMap((selected): SketchPick[] =>
+      'start' in selected
+        ? segments.filter(segment => sameSketchSegment(segment, selected))
+        : this.layers().some(
+              layer =>
+                layer.id === selected.layer &&
+                layer.entities.some(e => e.id === selected.id),
+            )
+          ? [selected]
+          : [],
+    );
+    if (view.readOnlyReason) this.tool = 'Select';
+    const start = this.drawing?.start;
+    if (start && 'point' in start) {
+      const point = this.points().find(point => same(point, start.point));
+      if (point) this.drawing!.start = {point};
+      else this.drawing!.reset();
+    }
+    this.root.hidden = false;
+    if (changed) this.fit();
+    else this.draw();
+  }
+
+  hide(): void {
+    this.toolbar.close();
+    this.cancel();
+    this.view = undefined;
+    this.root.hidden = true;
+  }
+  dispose(): void {
+    this.abort.abort();
+    this.resize.disconnect();
+    this.root.remove();
+  }
+  cancel(): void {
+    this.constraintTools.cancel();
+    if (this.drawingInputs.root.contains(document.activeElement))
+      this.svg.focus();
+    this.gesture = undefined;
+    this.trimPointer = undefined;
+    this.drawing?.reset();
+    this.draw();
+  }
+
+  private escape(): void {
+    const hasDraft = this.gesture || this.drawing?.hasDraft;
+    this.svg.focus();
+    if (!hasDraft) {
+      this.tool = 'Select';
+      this.selection = [];
+    }
+    this.cancel();
+  }
+
+  private keyDown(event: KeyboardEvent): void {
+    if (event.isComposing || event.ctrlKey || event.metaKey) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      this.escape();
+      return;
+    }
+    if (event.key === 'Alt') {
+      this.bypassSnap = true;
+      this.drawDraft();
+    }
+    const canvas = event.target === this.svg;
+    const input =
+      event.target instanceof HTMLInputElement &&
+      this.drawingInputs.root.contains(event.target);
+    if (this.drawing && (canvas || input)) {
+      const axis = event.key.toLowerCase();
+      if (
+        this.drawing.start &&
+        this.drawing.toggleAxis &&
+        !event.altKey &&
+        (axis === 'x' || axis === 'y')
+      ) {
+        event.preventDefault();
+        if (!event.repeat) {
+          this.drawing.toggleAxis(axis);
+          this.drawingInputs.clearError();
+          this.drawDraft();
+        }
+      } else if (
+        this.drawing.toggleDirection &&
+        !event.altKey &&
+        axis === 'r'
+      ) {
+        event.preventDefault();
+        if (!event.repeat) {
+          this.drawing.toggleDirection();
+          this.drawDraft();
+        }
+      } else if (
+        event.key === 'Tab' &&
+        this.drawing.dimensions.definitions.length
+      ) {
+        event.preventDefault();
+        this.drawingInputs.focusField(event.shiftKey);
+      } else if (event.key === 'Enter') {
+        event.preventDefault();
+        this.place();
+      } else if (
+        canvas &&
+        this.drawing.dimensions.definitions.length &&
+        !event.altKey &&
+        /^[\d.+-]$/.test(event.key)
+      ) {
+        // Move focus before the native character insertion. Do not synthesize
+        // input or assign the first character: it must participate in undo/IME.
+        this.drawingInputs.focusField();
+      }
+    }
+    if (
+      canvas &&
+      this.mode === 'Select' &&
+      (event.key === 'Delete' || event.key === 'Backspace')
+    ) {
+      event.preventDefault();
+      this.deleteSelection();
+    }
+    if (canvas && event.code === 'Space') {
+      event.preventDefault();
+      this.space = true;
+    }
+  }
+
+  private snapContext() {
+    return {
+      points: this.points().reverse(),
+      scale: this.scale,
+      gridStep: sketchGridStep(this.scale),
+      enabled: this.snapping && !this.bypassSnap,
+    };
+  }
+
+  private place(): void {
+    const drawing = this.drawing;
+    if (!drawing || !this.view || this.view.readOnlyReason) return;
+    this.svg.focus();
+    const {endpoint} = drawing.resolve(this.snapContext());
+    if (
+      'point' in endpoint &&
+      endpoint.point.layer !== this.view.id &&
+      !this.view.referenceable.has(endpoint.point.layer)
+    ) {
+      this.drawingInputs.report(
+        'This upstream point has no accessible named sketch',
+      );
+      return;
+    }
+    const error = drawing.place(
+      endpoint,
+      this.view.id,
+      this.nextId(),
+      this.commit,
+    );
+    this.draw();
+    if (error) this.drawingInputs.report(error);
+  }
+
+  private createToolbar(): void {
+    const select = (create: () => 'Select' | 'Trim' | SketchDrawing) => () => {
+      this.cancel();
+      this.tool = create();
+      this.selection = [];
+      this.svg.focus();
+      this.draw();
+    };
+    this.toolbar.add(this.toolbar.group('Select'), {
+      name: 'Select',
+      icon: MousePointer2,
+      title: 'Select · Drag points · Shift-click to toggle selection',
+      run: select(() => 'Select'),
+    });
+    const drawing = this.toolbar.group('Draw');
+    const titles = [
+      'Line · Continuous segments · Esc ends the chain',
+      'Rectangle · Opposite corners',
+      'Center rectangle · Center and corner',
+      'Circle · Center and radius',
+      'Arc · Center, start and end · R reverses direction',
+    ];
+    const actions = drawingTools.map(
+      ([name, icon, create], i): SketchToolAction => ({
+        name,
+        icon,
+        title: titles[i],
+        run: select(create),
+      }),
+    );
+    this.toolbar.add(drawing, actions[0]);
+    this.toolbar.variants(drawing, 'Rectangle tools', actions.slice(1, 3));
+    for (const action of actions.slice(3)) this.toolbar.add(drawing, action);
+    this.toolbar.add(this.toolbar.group('Modify'), {
+      name: 'Trim',
+      icon: Scissors,
+      title: 'Trim · Click segments or standalone points · Esc exits',
+      run: select(() => 'Trim'),
+    });
+    const viewing = this.toolbar.group('View');
+    viewing.classList.add('sketch-view-options');
+    this.toolbar.add(viewing, {
+      name: 'Fit',
+      icon: Maximize,
+      title: 'Fit · Show the whole sketch',
+      run: () => this.fit(),
+    });
+    this.toolbar.add(viewing, {
+      name: 'Snap',
+      icon: Magnet,
+      title: 'Snap to points, origin, grid and directions · Hold Alt to bypass',
+      run: () => {
+        this.snapping = !this.snapping;
+        this.svg.focus();
+        this.draw();
+      },
+    });
+    this.toolbar.add(viewing, {
+      name: 'Constraints',
+      icon: Shapes,
+      title:
+        'Show constraints · Hover or focus a marker to highlight related geometry',
+      run: () => {
+        this.showConstraints = !this.showConstraints;
+        this.svg.focus();
+        this.draw();
+      },
+    });
+  }
+
+  private layers(): readonly SketchSnapshot[] {
+    if (!this.view) return [];
+    const preview = this.gesture?.kind === 'move' && this.gesture.preview;
+    return preview
+      ? [...this.view.layers.slice(0, -1), preview.snapshot]
+      : this.view.layers;
+  }
+
+  private points(): Point[] {
+    return this.layers().flatMap(layer =>
+      layer.entities.flatMap(entity =>
+        entity.kind === 'point'
+          ? [{layer: layer.id, id: entity.id, position: entity.position}]
+          : [],
+      ),
+    );
+  }
+
+  private circularCurves() {
+    const points = this.points();
+    this.drawRegions();
+    return this.layers().flatMap(layer =>
+      layer.entities.flatMap(entity => {
+        if (entity.kind !== 'circle' && entity.kind !== 'arc') return [];
+        const geometry = sketchCurveGeometry(
+          entity,
+          ref => points.find(p => same(p, ref))!.position,
+        );
+        return [
+          {id: entity.id, center: entity.center, layer: layer.id, geometry},
+        ];
+      }),
+    );
+  }
+
+  private screen(position: SketchPosition): SketchPosition {
+    return [
+      (position[0] - this.center[0]) * this.scale + this.svg.clientWidth / 2,
+      (this.center[1] - position[1]) * this.scale + this.svg.clientHeight / 2,
+    ];
+  }
+
+  private coordinates(event: MouseEvent): SketchPosition {
+    const rect = this.svg.getBoundingClientRect();
+    return [
+      this.center[0] +
+        (event.clientX - rect.left - rect.width / 2) / this.scale,
+      this.center[1] -
+        (event.clientY - rect.top - rect.height / 2) / this.scale,
+    ];
+  }
+
+  private pick(position: SketchPosition): Point | undefined {
+    return this.points()
+      .reverse()
+      .filter(point => distance(point.position, position) * this.scale < 9)
+      .sort(
+        (a, b) =>
+          distance(a.position, position) - distance(b.position, position),
+      )[0];
+  }
+
+  private pickSegment(
+    position: SketchPosition,
+    localOnly = false,
+  ): SketchSegment | undefined {
+    return this.segments()
+      .reverse()
+      .filter(segment => !localOnly || segment.layer === this.view!.id)
+      .map(segment => ({
+        segment,
+        distance: sketchSegmentDistance(position, segment) * this.scale,
+      }))
+      .filter(hit => hit.distance < 6)
+      .sort(
+        (a, b) =>
+          Number(b.segment.layer === this.view!.id) -
+            Number(a.segment.layer === this.view!.id) ||
+          a.distance - b.distance,
+      )[0]?.segment;
+  }
+
+  private trimTarget(
+    position: SketchPosition,
+  ): Point | SketchSegment | undefined {
+    if (!this.view || this.view.readOnlyReason) return undefined;
+    const segment = this.pickSegment(position, true);
+    if (segment) return segment;
+    const point = this.pick(position);
+    if (
+      point &&
+      point.layer === this.view.id &&
+      !this.circularCurves().some(c => same(c.center, point)) &&
+      !this.pickSegment(point.position)
+    )
+      return point;
+    return undefined;
+  }
+
+  private pointerDown(event: PointerEvent): void {
+    if (!this.view || ![0, 1, 2].includes(event.button) || this.gesture) return;
+    event.preventDefault();
+    this.svg.focus();
+    this.editError = undefined;
+    const position = this.coordinates(event);
+    this.bypassSnap = event.altKey;
+    if (event.button === 1 || event.button === 2 || this.space) {
+      this.gesture = {
+        kind: 'pan',
+        start: [event.clientX, event.clientY],
+        center: this.center,
+      };
+      this.svg.setPointerCapture(event.pointerId);
+      return;
+    }
+    if (this.mode !== 'Select' && this.view.readOnlyReason) return;
+    if (this.mode === 'Trim') {
+      this.deleteTarget(this.trimTarget(position));
+      return;
+    }
+    const vertex = this.pick(position);
+    const segment =
+      !vertex && this.mode === 'Select'
+        ? this.pickSegment(position)
+        : undefined;
+    const pickedPoint =
+      vertex ??
+      (segment && segment.kind !== 'line'
+        ? {
+            layer: segment.layer,
+            id: segment.id,
+            position: sketchCurvePosition(
+              segment.curve,
+              sketchCurveClosestParameter(segment.curve, position),
+            ),
+          }
+        : undefined);
+    const canonical = vertex && sketchPointResolver(this.layers())(vertex);
+    const point = canonical
+      ? {...canonical, position: vertex!.position}
+      : pickedPoint;
+    if (this.drawing) {
+      this.drawing.pointer = position;
+      this.place();
+    } else {
+      const picked = vertex ?? segment;
+      if (event.shiftKey) {
+        if (picked) {
+          const matches = (p: SketchPick) =>
+            'start' in p && 'start' in picked
+              ? sameSketchSegment(p, picked)
+              : !('start' in p) && !('start' in picked) && same(p, picked);
+          this.selection = this.selection.some(matches)
+            ? this.selection.filter(p => !matches(p))
+            : [...this.selection, picked];
+        }
+      } else this.selection = picked ? [picked] : [];
+      if (
+        !event.shiftKey &&
+        point &&
+        !this.view.readOnlyReason &&
+        point.layer === this.view.id &&
+        this.view.editable.get(point.id)?.some(Boolean)
+      ) {
+        this.gesture = {
+          kind: 'move',
+          target: point,
+          parameter: vertex ? 'point' : 'radius',
+          start: position,
+          position: point.position,
+          released: false,
+          version: 0,
+        };
+        this.svg.setPointerCapture(event.pointerId);
+      }
+    }
+    this.draw();
+  }
+
+  private pointerMove(event: PointerEvent): void {
+    this.bypassSnap = event.altKey;
+    if (this.gesture?.kind === 'pan') {
+      this.center = [
+        this.gesture.center[0] -
+          (event.clientX - this.gesture.start[0]) / this.scale,
+        this.gesture.center[1] +
+          (event.clientY - this.gesture.start[1]) / this.scale,
+      ];
+    } else {
+      const pointer = this.coordinates(event);
+      this.trimPointer = this.mode === 'Trim' ? pointer : undefined;
+      if (this.drawing) this.drawing.pointer = pointer;
+      const gesture = this.gesture;
+      if (gesture?.kind === 'move' && !gesture.released) {
+        const resolve = sketchPointResolver(this.layers());
+        const endpoint = snapSketchPointer(
+          [
+            gesture.target.position[0] + pointer[0] - gesture.start[0],
+            gesture.target.position[1] + pointer[1] - gesture.start[1],
+          ],
+          {kind: 'cartesian'},
+          {
+            ...this.snapContext(),
+            points: this.points().filter(
+              point =>
+                !same(resolve(point), gesture.target) &&
+                (point.layer === this.view!.id ||
+                  this.view!.referenceable.has(point.layer)),
+            ),
+          },
+        ).endpoint;
+        gesture.position = endpointPosition(endpoint);
+        gesture.mergeTarget =
+          gesture.parameter === 'point' && 'point' in endpoint
+            ? {layer: endpoint.point.layer, id: endpoint.point.id}
+            : undefined;
+        gesture.version++;
+        this.previewMove(gesture);
+      }
+    }
+    if (this.gesture || this.mode === 'Trim') this.draw();
+    else this.drawDraft();
+  }
+
+  private previewMove(gesture: Extract<Gesture, {kind: 'move'}>): void {
+    if (gesture.pending) return;
+    gesture.pending = (async () => {
+      while (this.gesture === gesture) {
+        const version = gesture.version;
+        try {
+          const preview = await this.solve(
+            gesture.target.id,
+            gesture.position,
+            gesture.preview,
+          );
+          if (this.gesture !== gesture) return;
+          gesture.preview = preview;
+          gesture.error = undefined;
+        } catch (error) {
+          if (this.gesture !== gesture) return;
+          gesture.error = (error as Error).message;
+        }
+        this.draw();
+        if (version === gesture.version) return;
+      }
+    })().finally(() => {
+      gesture.pending = undefined;
+      this.draw();
+    });
+  }
+
+  private async pointerUp(event: PointerEvent): Promise<void> {
+    const gesture = this.gesture;
+    if (gesture?.kind === 'move') gesture.released = true;
+    else this.gesture = undefined;
+    if (this.svg.hasPointerCapture(event.pointerId))
+      this.svg.releasePointerCapture(event.pointerId);
+    if (gesture?.kind === 'move') {
+      await gesture.pending;
+      if (this.gesture !== gesture) return;
+      if (gesture.preview && !gesture.error && gesture.mergeTarget) {
+        try {
+          gesture.preview = await this.solve(
+            gesture.target.id,
+            gesture.position,
+            gesture.preview,
+            gesture.mergeTarget,
+          );
+        } catch (error) {
+          gesture.error = (error as Error).message;
+        }
+        if (this.gesture !== gesture) return;
+      }
+      this.gesture = undefined;
+      this.editError = gesture.error;
+      if (gesture.preview && !gesture.error) {
+        const data = gesture.preview.data.flatMap(e => {
+          if (!this.view!.editable.get(e.id)?.some(Boolean)) return [];
+          const previous = this.view!.data.find(p => p.id === e.id)!;
+          return e.parameters.some(
+            (value, index) => value !== previous.parameters[index],
+          )
+            ? [e]
+            : [];
+        });
+        if (data.length || gesture.preview.merge)
+          this.commit(
+            {kind: 'move', data, merge: gesture.preview.merge},
+            gesture.preview.snapshot,
+          );
+      }
+    }
+    this.draw();
+  }
+
+  private nextId(): number {
+    return (
+      Math.max(0, ...this.view!.layers.at(-1)!.entities.map(e => e.id)) + 1
+    );
+  }
+
+  private segments(): SketchSegment[] {
+    return this.view ? sketchSegments(this.view.layers, this.points()) : [];
+  }
+
+  private deleteTarget(
+    selected: SketchPointAddress | SketchSegment | undefined,
+  ): void {
+    if (
+      !this.view ||
+      this.view.readOnlyReason ||
+      selected?.layer !== this.view.id
+    )
+      return;
+    if ('start' in selected) {
+      const segment = this.segments().find(value =>
+        sameSketchSegment(value, selected),
+      );
+      if (!segment) return;
+      const change = trimSketchSegment(this.view.layers, segment);
+      this.cancel();
+      if (this.commit(change)) this.selection = [];
+      else
+        this.editError =
+          'The segment could not be deleted; its source or references are not editable.';
+      this.draw();
+      return;
+    }
+    const change = deleteSketchEntity(this.view.layers, selected.id);
+    this.cancel();
+    if (this.commit(change)) this.selection = [];
+    this.draw();
+  }
+
+  private deleteSelection(): void {
+    if (!this.view || this.view.readOnlyReason) return;
+    const selected = this.selection.filter(p => p.layer === this.view!.id);
+    if (selected.length <= 1) {
+      this.deleteTarget(selected[0]);
+      return;
+    }
+    const points = selected.filter(p => !('start' in p));
+    const segments = selected.filter((p): p is SketchSegment => 'start' in p);
+    const removal = deleteSketchEntity(
+      this.view.layers,
+      points.map(p => p.id),
+    );
+    const change = segments.length
+      ? trimSketchSegment(this.view.layers, segments, removal.ids)
+      : removal;
+    this.cancel();
+    if (this.commit(change)) this.selection = [];
+    else
+      this.editError =
+        'The selection could not be deleted; its source or references are not editable.';
+    this.draw();
+  }
+
+  private fit(): void {
+    const positions = [
+      ...this.points().map(p => p.position),
+      ...this.circularCurves().flatMap(c => sketchCurveBounds(c.geometry)),
+    ];
+    if (positions.length) {
+      const xs = positions.map(p => p[0]),
+        ys = positions.map(p => p[1]);
+      const minX = Math.min(...xs),
+        maxX = Math.max(...xs),
+        minY = Math.min(...ys),
+        maxY = Math.max(...ys);
+      this.center = [(minX + maxX) / 2, (minY + maxY) / 2];
+      this.scale = Math.max(
+        0.05,
+        Math.min(
+          20,
+          (this.svg.clientWidth - 100) / Math.max(1, maxX - minX),
+          (this.svg.clientHeight - 100) / Math.max(1, maxY - minY),
+        ),
+      );
+    } else {
+      this.center = [0, 0];
+      this.scale = 6;
+    }
+    this.draw();
+  }
+
+  private draw(): void {
+    if (!this.view || this.root.hidden) return;
+    const trim =
+      this.mode === 'Trim' && this.trimPointer && !this.gesture
+        ? this.trimTarget(this.trimPointer)
+        : undefined;
+    this.svg.dataset.tool = this.mode;
+    this.root.setAttribute(
+      'aria-busy',
+      String(this.gesture?.kind === 'move' && !!this.gesture.pending),
+    );
+    this.usedShapes.clear();
+    const width = this.svg.clientWidth,
+      height = this.svg.clientHeight;
+    const step = sketchGridStep(this.scale);
+    const [originX, originY] = this.screen([0, 0]);
+    const spacing = step * this.scale;
+    for (
+      let i = Math.ceil(-originX / spacing);
+      originX + i * spacing < width;
+      i++
+    ) {
+      const x = originX + i * spacing;
+      this.line(
+        [x, 0],
+        [x, height],
+        i % 5 === 0 ? 'grid major' : 'grid',
+        `grid:x:${i}`,
+        this.grid,
+      );
+    }
+    for (
+      let i = Math.ceil(-originY / spacing);
+      originY + i * spacing < height;
+      i++
+    ) {
+      const y = originY + i * spacing;
+      this.line(
+        [0, y],
+        [width, y],
+        i % 5 === 0 ? 'grid major' : 'grid',
+        `grid:y:${i}`,
+        this.grid,
+      );
+    }
+    this.line([originX, 0], [originX, height], 'axis', 'axis:x', this.grid);
+    this.line([0, originY], [width, originY], 'axis', 'axis:y', this.grid);
+    const points = this.points();
+    this.constraints.draw(
+      sketchConstraintDisplays(this.layers(), points),
+      position => this.screen(position),
+      this.view.id,
+      this.showConstraints,
+    );
+    const segments = sketchSegments(this.layers(), points);
+    const selectedSegments = this.selection.flatMap(p =>
+      'start' in p ? overlappingSketchSegments(segments, p) : [],
+    );
+    const trimmedSegments =
+      trim && 'start' in trim ? overlappingSketchSegments(segments, trim) : [];
+    for (const curve of this.circularCurves()) {
+      const shape = this.shape(
+        JSON.stringify([curve.layer, curve.geometry.kind, curve.id]),
+        curve.geometry.kind === 'arc' ? 'path' : 'circle',
+        this.lines,
+      );
+      this.drawCurve(shape, curve.geometry);
+      shape.setAttribute('class', this.entityClass(curve.layer, curve.id));
+      this.tag(shape, curve.layer, curve.id, curve.geometry.kind);
+    }
+    for (const segment of segments) {
+      const selected = selectedSegments.some(value =>
+        sameSketchSegment(segment, value),
+      );
+      const trimmed = trimmedSegments.some(value =>
+        sameSketchSegment(segment, value),
+      );
+      // Circular curves retain one base node during interaction. Only highlighted
+      // intervals need an overlay; cuts never mutate or fragment authored geometry.
+      if (segment.kind !== 'line' && !selected && !trimmed) continue;
+      const element = this.shape(
+        JSON.stringify([
+          segment.layer,
+          'segment',
+          segment.id,
+          segment.start.t,
+          segment.end.t,
+        ]),
+        segment.curve.kind === 'arc' ? 'path' : segment.curve.kind,
+        this.lines,
+      );
+      this.drawCurve(element, segment.curve);
+      element.setAttribute(
+        'class',
+        `${this.entityClass(segment.layer, segment.id)}${selected ? ' selected' : ''}${trimmed ? ' trim-preview' : ''}`,
+      );
+      this.tag(
+        element,
+        segment.layer,
+        segment.id,
+        segment.kind === 'line' ? 'line' : 'segment',
+      );
+      element.dataset.start = String(segment.start.t);
+      element.dataset.end = String(segment.end.t);
+    }
+    for (const point of points) {
+      const circle = this.shape(
+        JSON.stringify([point.layer, 'point', point.id]),
+        'circle',
+        this.vertices,
+      );
+      const [x, y] = this.screen(point.position);
+      circle.setAttribute('cx', String(x));
+      circle.setAttribute('cy', String(y));
+      circle.setAttribute('r', '4');
+      circle.setAttribute(
+        'class',
+        `${this.entityClass(point.layer, point.id)}${trim && !('start' in trim) && same(point, trim) ? ' trim-preview' : ''}`,
+      );
+      this.tag(circle, point.layer, point.id, 'point');
+      let title = circle.querySelector<SVGTitleElement>('title');
+      if (!title) {
+        title = svgElement('title');
+        title.append(document.createTextNode(''));
+        circle.append(title);
+      }
+      const lock = this.expressionLock(point.id);
+      const text = `Point ${point.id} (${point.position.join(', ')})${point.layer !== this.view.id ? ' · upstream (locked)' : lock ? ` · ${lock}` : ''}`;
+      if (title.firstChild!.textContent !== text)
+        (title.firstChild as Text).data = text;
+    }
+    for (const [key, shape] of this.shapes)
+      if (!this.usedShapes.has(key)) {
+        shape.remove();
+        this.shapes.delete(key);
+      }
+    this.drawDraft();
+    this.toolbar.update(name => {
+      const drawingTool = drawingTools.some(([tool]) => tool === name);
+      return {
+        pressed:
+          name === 'Snap'
+            ? this.snapping
+            : name === 'Constraints'
+              ? this.showConstraints
+              : name === this.mode,
+        disabled:
+          (name === 'Trim' || drawingTool) && !!this.view!.readOnlyReason,
+      };
+    });
+    this.constraintTools.show(
+      JSON.stringify([
+        this.view.id,
+        this.selection.map(p => [
+          p.layer,
+          p.id,
+          'start' in p ? 'curve' : 'point',
+        ]),
+      ]),
+      this.mode === 'Select' && !this.view.readOnlyReason
+        ? sketchConstraintActions(
+            this.layers(),
+            [
+              ...this.selection.filter(p => !('start' in p)),
+              ...selectedSegments,
+            ],
+            this.view.editable,
+            this.view.referenceable,
+            this.view.data,
+          )
+        : [],
+    );
+    const status =
+      (this.gesture?.kind === 'move' ? this.gesture.error : undefined) ??
+      this.editError ??
+      this.view.readOnlyReason ??
+      '';
+    this.status.hidden = !status;
+    if (this.statusText.data !== status) this.statusText.data = status;
+  }
+
+  private drawRegions(): void {
+    // An unfinished/invalid sketch stays editable; .face(s) supplies diagnostics
+    // when the author asks to construct geometry. This preview shares extraction
+    // with B-Rep construction and does not introduce region identities or picking.
+    let regions;
+    try {
+      regions = sketchRegions(this.layers());
+    } catch {
+      return;
+    }
+    for (const [index, region] of regions.entries()) {
+      const shape = this.shape(`region:${index}`, 'path', this.regions);
+      shape.setAttribute('class', 'sketch-region');
+      shape.setAttribute('fill-rule', 'evenodd');
+      shape.setAttribute(
+        'd',
+        [region.outer, ...region.holes]
+          .map(loop => {
+            let path = `M ${this.screen(sketchCurvePosition(loop[0], 0)).join(' ')}`;
+            for (const curve of loop) {
+              if (curve.kind === 'line')
+                path += ` L ${this.screen(curve.points[1]).join(' ')}`;
+              else {
+                const sweep =
+                  curve.kind === 'circle' ? 2 * Math.PI : curve.sweep;
+                const pieces = Math.ceil(Math.abs(sweep) / Math.PI);
+                for (let i = 1; i <= pieces; i++) {
+                  const r = curve.radius * this.scale;
+                  path += ` A ${r} ${r} 0 0 ${sweep < 0 ? 1 : 0} ${this.screen(sketchCurvePosition(curve, i / pieces)).join(' ')}`;
+                }
+              }
+            }
+            return `${path} Z`;
+          })
+          .join(' '),
+      );
+    }
+  }
+
+  private expressionLock(id: number): string | undefined {
+    const entity = this.layers()
+      .at(-1)!
+      .entities.find(e => e.id === id);
+    if (entity?.kind === 'point') {
+      const canonical = sketchPointResolver(this.layers())({
+        layer: this.view!.id,
+        id,
+      });
+      if (canonical.layer !== this.view!.id)
+        return 'Upstream point · read-only';
+      id = canonical.id;
+    }
+    const editable = this.view!.editable.get(id);
+    if (!editable) return undefined;
+    const axes = (editable.length === 1 ? ['Radius'] : ['X', 'Y']).filter(
+      (_, axis) => !editable[axis],
+    );
+    return axes.length
+      ? `${axes.join('/')} locked by expression · edit in code`
+      : undefined;
+  }
+
+  private entityClass(layer: string, id: number): string {
+    return `entity ${layer === this.view!.id ? 'local' : 'upstream'}${this.constraints.related(layer, id) ? ' constraint-related' : ''}${this.selection.some(p => !('start' in p) && same(p, {layer, id})) ? ' selected' : ''}`;
+  }
+  private drawDraft(): void {
+    if (!this.drawing || !this.view || this.root.hidden) {
+      this.overlay.style.display = 'none';
+      for (const shape of this.draftShapes) shape.classList.remove('draft');
+      this.snapLabel.classList.remove('snap-label');
+      this.drawingInputs.hide();
+      return;
+    }
+    const {endpoint, hint} = this.drawing.resolve(this.snapContext());
+    const position = endpointPosition(endpoint);
+    const lock = this.drawing.axis
+      ? `${this.drawing.axis.toUpperCase()} locked`
+      : undefined;
+    this.drawingInputs.show(
+      this.drawing.title,
+      this.drawing.dimensions,
+      this.drawing.measurements(position),
+    );
+    this.overlay.style.display = position.every(Number.isFinite) ? '' : 'none';
+    const curves = this.drawing.preview(position);
+    while (this.draftShapes.length > curves.length)
+      this.draftShapes.pop()!.remove();
+    curves.forEach((curve, index) => {
+      let shape = this.draftShapes[index];
+      const tag = curve.kind === 'arc' ? 'path' : curve.kind;
+      if (shape?.tagName !== tag) {
+        shape?.remove();
+        shape = svgElement(tag);
+        this.draftShapes[index] = shape;
+        this.overlay.prepend(shape);
+      }
+      shape.setAttribute('class', 'draft');
+      this.drawCurve(shape, curve);
+    });
+    const [x, y] = this.screen(position);
+    this.draftMarker.setAttribute('cx', String(x));
+    this.draftMarker.setAttribute('cy', String(y));
+    this.draftMarker.setAttribute('r', hint ? '7' : '4');
+    this.draftMarker.setAttribute(
+      'class',
+      hint ? 'snap-marker' : 'draft-marker',
+    );
+    this.snapLabel.style.display = hint || lock ? '' : 'none';
+    this.snapLabel.classList.toggle('snap-label', !!hint || !!lock);
+    if (hint || lock) {
+      this.snapLabel.setAttribute('x', String(x + 12));
+      this.snapLabel.setAttribute('y', String(y - 12));
+      const snap =
+        'point' in endpoint
+          ? `Point ${endpoint.point.id}${endpoint.point.layer !== this.view.id ? ' · upstream' : ''}`
+          : hint;
+      const text = [lock, snap].filter(Boolean).join(' · ');
+      // Updating the existing text node preserves native input undo grouping;
+      // replacing a connected text node during input ends Chrome's typing group.
+      if (this.snapText.data !== text) this.snapText.data = text;
+    }
+  }
+
+  private drawCurve(shape: SVGElement, curve: SketchCurve): void {
+    if (curve.kind === 'line') {
+      const [a, b] = curve.points.map(p => this.screen(p));
+      shape.setAttribute('x1', String(a[0]));
+      shape.setAttribute('y1', String(a[1]));
+      shape.setAttribute('x2', String(b[0]));
+      shape.setAttribute('y2', String(b[1]));
+    } else if (curve.kind === 'circle') {
+      const [x, y] = this.screen(curve.center);
+      shape.setAttribute('cx', String(x));
+      shape.setAttribute('cy', String(y));
+      shape.setAttribute('r', String(curve.radius * this.scale));
+    } else {
+      const [a, b] = [0, 1].map(t =>
+        this.screen(sketchCurvePosition(curve, t)),
+      );
+      const radius = curve.radius * this.scale;
+      shape.setAttribute(
+        'd',
+        `M ${a.join(' ')} A ${radius} ${radius} 0 ${Number(Math.abs(curve.sweep) > Math.PI)} ${Number(curve.sweep < 0)} ${b.join(' ')}`,
+      );
+    }
+  }
+  private tag(
+    element: SVGElement,
+    layer: string,
+    id: number,
+    kind: string,
+  ): void {
+    element.dataset.layer = layer;
+    element.dataset.id = String(id);
+    element.dataset.kind = kind;
+  }
+  private line(
+    a: SketchPosition,
+    b: SketchPosition,
+    className: string,
+    key: string,
+    parent: SVGElement,
+  ): SVGLineElement {
+    const line = this.shape(key, 'line', parent);
+    line.setAttribute('x1', String(a[0]));
+    line.setAttribute('y1', String(a[1]));
+    line.setAttribute('x2', String(b[0]));
+    line.setAttribute('y2', String(b[1]));
+    line.setAttribute('class', className);
+    return line;
+  }
+
+  private shape<K extends keyof SVGElementTagNameMap>(
+    key: string,
+    kind: K,
+    parent: SVGElement,
+  ): SVGElementTagNameMap[K] {
+    this.usedShapes.add(key);
+    let shape = this.shapes.get(key);
+    if (!shape) {
+      shape = svgElement(kind);
+      this.shapes.set(key, shape);
+      parent.append(shape);
+    }
+    return shape as SVGElementTagNameMap[K];
+  }
+}
+
+function svgElement<K extends keyof SVGElementTagNameMap>(
+  name: K,
+): SVGElementTagNameMap[K] {
+  return document.createElementNS('http://www.w3.org/2000/svg', name);
+}

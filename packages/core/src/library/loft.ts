@@ -15,6 +15,7 @@ import {
 } from './kernel-shapes.js';
 import {
   transferShapeTopology,
+  booleanWithTopology,
   type TopologyInput,
   type ShapeTopology,
 } from './topology.js';
@@ -24,6 +25,57 @@ export function loftWithTopology(
   spine: Wire | undefined,
   ruled: boolean,
 ): Readonly<{shape: Shape3D; topology: ShapeTopology}> {
+  const holes: Wire[][] = [];
+  let outer: {shape: Shape3D; topology: ShapeTopology} | undefined;
+  let inner: {shape: Shape3D; topology: ShapeTopology} | undefined;
+  try {
+    for (const section of sections) {
+      const boundary = (section.shape as Face).clone().outerWire();
+      try {
+        const wires = shapeSubshapes(section.shape, 'wire');
+        holes.push(
+          wires.filter(wire => {
+            if (!wire.isSame(boundary)) return true;
+            wire.delete();
+            return false;
+          }),
+        );
+      } finally {
+        boundary.delete();
+      }
+    }
+    if (holes.some(wires => wires.length !== holes[0].length))
+      throw new Error('Loft sections must have matching hole counts.');
+    if (holes[0].length > 1)
+      throw new Error(
+        'Loft currently supports at most one hole per section; multiple holes need explicit correspondence.',
+      );
+    outer = loftContoursWithTopology(sections, spine, ruled);
+    if (!holes[0].length) {
+      const result = outer;
+      outer = undefined;
+      return result;
+    }
+    inner = loftContoursWithTopology(
+      sections,
+      spine,
+      ruled,
+      holes.map(wires => wires[0]),
+    );
+    return booleanWithTopology(outer, inner, 'cut');
+  } finally {
+    inner?.shape.delete();
+    outer?.shape.delete();
+    holes.flat().forEach(wire => wire.delete());
+  }
+}
+
+function loftContoursWithTopology(
+  sections: readonly TopologyInput[],
+  spine: Wire | undefined,
+  ruled: boolean,
+  holes?: readonly Wire[],
+): Readonly<{shape: Shape3D; topology: ShapeTopology}> {
   const oc = getOC();
   const builder = spine
     ? new oc.BRepOffsetAPI_MakePipeShell(spine.wrapped)
@@ -32,8 +84,12 @@ export function loftWithTopology(
   let result: Shape3D | undefined;
   const caps: (Face | undefined)[] = [];
   try {
-    for (const section of sections)
-      wires.push((section.shape as Face).clone().outerWire());
+    for (const [index, section] of sections.entries())
+      wires.push(
+        holes
+          ? holes[index].clone()
+          : (section.shape as Face).clone().outerWire(),
+      );
     if (builder instanceof oc.BRepOffsetAPI_MakePipeShell) {
       builder.SetMode(false);
       for (const wire of wires) builder.Add(wire.wrapped, false, false);
@@ -59,7 +115,7 @@ export function loftWithTopology(
         const cap = caps[index];
         // The builder consumes wires, so the profile faces need explicit cap history.
         if (kind === 'surface')
-          return cap ? [copyShapeHandle(cap.wrapped)] : [];
+          return cap && !holes ? [copyShapeHandle(cap.wrapped)] : [];
         const modified = consumeShapeList(builder.Modified(input));
         if (!cap && kind === 'vertex') return modified;
         let generated: TopoDS_Shape[] = [];

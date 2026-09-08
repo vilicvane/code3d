@@ -13,6 +13,8 @@ import shellSource from '../../examples/shell.ts?raw';
 import groupOriginsSource from '../../examples/group-origins.ts?raw';
 import originAndRotationSource from '../../examples/origin-and-rotation.ts?raw';
 import relationsAndElementsSource from '../../examples/relations-and-elements.ts?raw';
+import sketchesSource from '../../examples/sketches.ts?raw';
+import sketchModelingSource from '../../examples/sketch-modeling.ts?raw';
 import type {ProjectDirectoryTemplate, ProjectSourceFile} from './project';
 
 const websiteSources = import.meta.glob<string>('../../examples/website/*.ts', {
@@ -24,6 +26,8 @@ const websiteSources = import.meta.glob<string>('../../examples/website/*.ts', {
 const files = [
   {path: '/examples/index.ts', source: examplesIndexSource},
   {path: '/examples/primitives.ts', source: primitivesSource},
+  {path: '/examples/sketches.ts', source: sketchesSource},
+  {path: '/examples/sketch-modeling.ts', source: sketchModelingSource},
   {path: '/examples/shell.ts', source: shellSource},
   {path: '/examples/bound-rotation.ts', source: boundRotationSource},
   {path: '/examples/geometric-alignment.ts', source: geometricAlignmentSource},

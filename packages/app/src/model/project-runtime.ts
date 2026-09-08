@@ -46,7 +46,22 @@ export class ProjectRuntime {
     const replicadPath = await resolve('replicad', toolingPath);
     const loaderPath = await resolve('@code3d/opencascade', toolingPath);
     const wasmPath = await resolve('@code3d/opencascade/wasm', toolingPath);
-    const entry = [toolingPath, corePath, interopPath, loaderPath, replicadPath]
+    const sketchLoaderPath = await resolve(
+      '@salusoft89/planegcs/dist/planegcs_dist/planegcs.js',
+      toolingPath,
+    );
+    const sketchWasmPath = await resolve(
+      '@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm',
+      toolingPath,
+    );
+    const entry = [
+      toolingPath,
+      corePath,
+      interopPath,
+      loaderPath,
+      replicadPath,
+      sketchLoaderPath,
+    ]
       .map(
         (path, index) =>
           `export * as entry${index} from ${JSON.stringify(path)};`,
@@ -72,16 +87,29 @@ export class ProjectRuntime {
         locateFile: () => ${JSON.stringify(wasmPath)},
       });
       tooling.installOpenCascade(kernel);
+      const initializeSketchSolver = modules.get(${JSON.stringify(sketchLoaderPath)}).default;
+      tooling.installSketchSolver(await initializeSketchSolver({
+        wasmBinary: __code3dSketchBytes,
+        locateFile: () => ${JSON.stringify(sketchWasmPath)},
+        print() {},
+        printErr() {},
+      }));
     `;
-    const [bundle, wasm] = await Promise.all([
+    const [bundle, wasm, sketchWasm] = await Promise.all([
       builder.build(runtimeSource),
       files.readFile(wasmPath),
+      files.readFile(sketchWasmPath),
     ]);
     if (!wasm)
       throw new Error(`Installed kernel asset is missing: ${wasmPath}`);
+    if (!sketchWasm)
+      throw new Error(
+        `Installed sketch solver asset is missing: ${sketchWasmPath}`,
+      );
     onProgress?.('initializing-runtime');
     const runtime = await evaluator.evaluate(runtimeUrl, bundle.source, {
       __code3dKernelBytes: wasm,
+      __code3dSketchBytes: sketchWasm,
     });
     return new ProjectRuntime(
       runtime.tooling,

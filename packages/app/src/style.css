@@ -714,6 +714,7 @@ kbd {
 
 .viewport-host {
   position: relative;
+  container-type: inline-size;
   --expanded-arguments-width: 310px;
   --expanded-elements-width: 248px;
   overflow: hidden;
@@ -1030,6 +1031,359 @@ kbd {
 
 .contextual-tool-panel[hidden] {
   display: none;
+}
+
+.sketch-editor {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.sketch-editor[hidden] {
+  display: none;
+}
+#viewport-host:has(.sketch-editor:not([hidden])) .viewport-coordinate-reference,
+#viewport-host:has(.sketch-editor:not([hidden])) .viewport-canvas {
+  visibility: hidden;
+}
+#viewport-host:has(.sketch-editor:not([hidden])) .source-edit-popover,
+#viewport-host:has(.sketch-editor:not([hidden])) .viewport-dock-panels,
+#viewport-host:has(.sketch-editor:not([hidden])) .contextual-tool-panel {
+  display: none;
+}
+#viewport-host:has(.sketch-editor:not([hidden])) .viewport-status {
+  max-width: calc(100% - 412px);
+}
+.sketch-toolbar {
+  position: absolute;
+  top: 10px;
+  right: 14px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  max-width: calc(100% - 28px);
+  padding: 3px;
+  border: 1px solid #353831;
+  border-radius: 5px;
+  background: #11120feb;
+  backdrop-filter: blur(12px);
+}
+.sketch-tool-group {
+  display: flex;
+  gap: 2px;
+}
+.sketch-tool-group + .sketch-tool-group {
+  padding-left: 8px;
+  border-left: 1px solid var(--line);
+}
+.sketch-tool-variants {
+  display: flex;
+}
+.sketch-toolbar .sketch-tool-caret {
+  width: 14px;
+  margin-left: -2px;
+}
+.sketch-tool-caret .ui-icon {
+  width: 12px;
+}
+.sketch-tool-menu {
+  margin: 0;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #181a16;
+  color: inherit;
+  min-width: 172px;
+}
+.sketch-tool-menu:popover-open {
+  display: grid;
+  gap: 2px;
+}
+.sketch-toolbar .sketch-tool-menu button {
+  width: auto;
+  padding: 6px 10px;
+  justify-content: flex-start;
+  gap: 10px;
+  color: inherit;
+}
+.sketch-tool-menu button[aria-checked='true'] {
+  color: var(--acid);
+  background: #d8ff3e12;
+}
+.sketch-constraint-tools {
+  position: absolute;
+  top: 54px;
+  right: 14px;
+  z-index: 1;
+  max-width: calc(100% - 28px);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+.sketch-constraint-tools[hidden] {
+  display: none;
+}
+.sketch-constraint-tools .sketch-toolbar,
+.sketch-constraint-tools .drawing-inputs {
+  position: static;
+  max-width: 100%;
+}
+.sketch-constraint-tools .drawing-input-title {
+  display: none;
+}
+.sketch-editor button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 5px 8px;
+  font-size: 11px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--soft);
+  cursor: pointer;
+}
+.sketch-editor button:focus-visible {
+  outline: 1px solid var(--acid);
+  outline-offset: 2px;
+}
+.sketch-editor button[aria-pressed='true'] {
+  color: var(--acid);
+  border-color: #66752c;
+}
+.sketch-toolbar button {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+.sketch-toolbar button:not(:disabled):hover {
+  color: inherit;
+  background: #ffffff0b;
+}
+.sketch-toolbar button[aria-pressed='true'] {
+  color: var(--acid);
+  border-color: #66752c;
+  background: #d8ff3e12;
+}
+
+.sketch-toolbar button[aria-pressed='mixed'] {
+  box-shadow: inset 0 -2px var(--acid);
+}
+.sketch-view-options button[aria-pressed='true'] {
+  border-color: transparent;
+  background: transparent;
+}
+@container (max-width: 540px) {
+  .sketch-toolbar {
+    top: 58px;
+  }
+  .sketch-constraint-tools {
+    top: 102px;
+  }
+  #viewport-host:has(.sketch-editor:not([hidden])) .viewport-status {
+    max-width: calc(100% - 28px);
+  }
+}
+.sketch-editor button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.sketch-editor output {
+  position: absolute;
+  left: 14px;
+  bottom: 10px;
+  z-index: 1;
+  max-width: calc(100% - 28px);
+  padding: 6px 8px;
+  color: var(--muted);
+  font-size: 10px;
+  border-radius: 3px;
+  background: #11120feb;
+  pointer-events: none;
+}
+.sketch-editor output[hidden] {
+  display: none;
+}
+.sketch-canvas {
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  outline: none;
+}
+.sketch-stage {
+  position: absolute;
+  inset: 0;
+}
+.drawing-overlay {
+  pointer-events: none;
+}
+.snap-marker,
+.draft-marker {
+  stroke: var(--acid);
+  fill: none;
+  stroke-width: 1.5;
+}
+.snap-label {
+  fill: var(--acid);
+  font:
+    11px Inter,
+    sans-serif;
+  paint-order: stroke;
+  stroke: var(--panel);
+  stroke-width: 3px;
+}
+.drawing-inputs {
+  position: absolute;
+  left: 12px;
+  bottom: 44px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 24px);
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--panel);
+  box-shadow: 0 3px 16px #0005;
+  font-size: 11px;
+}
+.drawing-inputs[hidden] {
+  display: none;
+}
+.drawing-input-title {
+  color: var(--muted);
+}
+.drawing-input-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.drawing-input-fields label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.drawing-input-fields input {
+  width: 82px;
+  padding: 5px;
+  color: inherit;
+  background: var(--soft);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  outline: none;
+}
+.drawing-input-fields input:focus,
+.drawing-input-fields input[data-entered='true'] {
+  border-color: #66752c;
+}
+.drawing-input-fields input:focus {
+  outline: 1px solid var(--acid);
+}
+.drawing-input-fields input[aria-invalid='true'] {
+  border-color: #ed897b;
+}
+.drawing-input-error {
+  color: #ed897b;
+  flex-basis: 100%;
+}
+.drawing-input-error:empty {
+  display: none;
+}
+.sketch-canvas:focus-visible {
+  box-shadow: inset 0 0 0 1px #66752c;
+}
+.sketch-canvas .grid {
+  stroke: #ffffff07;
+}
+.sketch-canvas .grid.major {
+  stroke: #ffffff10;
+}
+.sketch-canvas .axis {
+  stroke: #ffffff20;
+}
+.sketch-canvas .entity {
+  stroke-width: 2;
+}
+.sketch-canvas .sketch-region {
+  fill: rgb(169 198 50 / 8%);
+  stroke: none;
+  pointer-events: none;
+}
+.sketch-canvas .entity[data-kind='circle'],
+.sketch-canvas .entity[data-kind='arc'],
+.sketch-canvas .entity[data-kind='segment'] {
+  fill: none;
+}
+.sketch-canvas .local {
+  stroke: #cee691;
+  fill: var(--panel);
+}
+.sketch-canvas .upstream {
+  stroke: #6b7063;
+  fill: var(--panel);
+}
+.sketch-canvas .constraint-related {
+  stroke: #dbe9a0;
+}
+.sketch-canvas .selected {
+  stroke: var(--acid);
+}
+.sketch-canvas[data-tool='Trim'] {
+  cursor: crosshair;
+}
+.sketch-canvas .trim-preview {
+  stroke: #ed897b;
+}
+.sketch-canvas .constraint-badge {
+  color: #bac78f;
+  cursor: help;
+  outline: none;
+}
+.sketch-canvas .constraint-badge rect {
+  fill: #20251d;
+  stroke: #515b40;
+}
+.sketch-canvas .constraint-badge text {
+  fill: currentColor;
+  font:
+    10px 'IBM Plex Mono',
+    monospace;
+}
+.sketch-canvas .constraint-upstream {
+  color: #91998a;
+}
+.sketch-canvas .constraint-upstream rect {
+  fill: #1e211c;
+  stroke: #3e4539;
+}
+.sketch-canvas .constraint-active rect {
+  stroke: #dbe9a0;
+}
+.sketch-canvas .constraint-guides {
+  color: #818b64;
+  stroke: currentColor;
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+  pointer-events: none;
+}
+.sketch-canvas .constraint-guides.constraint-active {
+  color: #dbe9a0;
+  stroke-width: 2;
+}
+.sketch-canvas .draft {
+  fill: none;
+  stroke: var(--acid);
+  stroke-dasharray: 4 4;
+  pointer-events: none;
 }
 
 .contextual-tool-header {

@@ -89,6 +89,7 @@ export type ToolArgumentSource = Readonly<{
 export type ToolCallSchemaMap = ReadonlyMap<string, ToolSignatureSchema>;
 
 export type ProjectToolingIndex = Readonly<{
+  program: ts.Program;
   toolCalls: ReadonlyMap<string, ToolCallSchemaMap>;
   parameterDefinitions: ReadonlyMap<string, ParameterDefinitionMap>;
 }>;
@@ -217,7 +218,7 @@ export function resolveProjectTooling(
     toolCalls.set(path, calls);
     parameterDefinitions.set(path, definitions);
   }
-  return {toolCalls, parameterDefinitions};
+  return {program, toolCalls, parameterDefinitions};
 }
 
 const callSignatureDiagnosticCodes = new Set([

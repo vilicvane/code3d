@@ -72,6 +72,8 @@ import {
 } from './kernel-cache.js';
 import {loftWithTopology} from './loft.js';
 import {extrudeWithTopology} from './extrude.js';
+import {sketchRegionFace} from './sketch-face.js';
+import type {SketchRegion} from './sketch-regions.js';
 import {formatTopologyId, type TopologyId} from './topology-id.js';
 import {
   booleanWithTopology,
@@ -96,6 +98,8 @@ import {
   type TopologySelection,
   type VertexId,
 } from './topology.js';
+
+import {sketch} from './sketch.js';
 
 export type {Quaternion, Vec3} from './spatial.js';
 export type {EdgeId, SurfaceId, TopologyKind, VertexId} from './topology.js';
@@ -191,6 +195,7 @@ export type ModelOperationKind =
   | 'bezier'
   | 'spline'
   | 'loft'
+  | 'sketchFace'
   | 'extrude'
   | 'primitive'
   | 'paint'
@@ -769,6 +774,8 @@ export interface SurfaceTopologyCapabilities extends EdgeTopologyCapabilities {
 }
 
 export interface SolidModificationCapabilities<Elements extends NamedElements> {
+  /** Subtracts all tools in one boolean operation, equivalent to cut(stock, tools). */
+  cut(tools: readonly SolidModel<{}>[]): SolidModel;
   /**
    * @code3d.param radius {kind: 'length', label: 'Fillet radius', constraints: {exclusiveMin: 0}}
    * @code3d.param edgeIds {kind: 'edge', actions: [{label: 'Use all', action: 'remove-argument'}]}
@@ -1974,6 +1981,13 @@ export class ModelObject<
         {model: this, role: 'receiver', index: 0},
       ]),
     }) as unknown as SolidModel;
+  }
+
+  cut(
+    this: ModelObject<Elements, 'solid'>,
+    tools: readonly SolidModel<{}>[],
+  ): SolidModel {
+    return cut(this as unknown as SolidModel<{}>, tools);
   }
 
   fillet(
@@ -3794,6 +3808,7 @@ export function retainModelGeometry(
 }
 
 export const authoringApi = Object.freeze({
+  sketch,
   circle,
   ellipse,
   extrude,
@@ -4003,6 +4018,34 @@ type PlanarSketch = Readonly<{
   face(): ReplicadFace;
   delete(): void;
 }>;
+
+/** Internal bridge from the kernel-independent sketch definition to model geometry. */
+export function sketchFaceModel(region: SketchRegion): FaceModel {
+  const curves = [region.outer, ...region.holes].map(loop =>
+    loop.map(curve =>
+      curve.kind === 'line'
+        ? ['line', curve.points]
+        : curve.kind === 'circle'
+          ? ['circle', curve.center, curve.radius]
+          : ['arc', curve.center, curve.radius, curve.start, curve.sweep],
+    ),
+  );
+  const geometry = evaluateModelGeometry('sketchFace', curves, [], () => ({
+    shape: sketchRegionFace(region),
+  }));
+  const plane: StoredElement = {
+    kind: 'face',
+    transform: identityRigidTransform,
+  };
+  return ModelObject.create<PlanarElements, 'face'>({
+    kind: 'face',
+    name: 'Sketch face',
+    geometry,
+    geometryAnchor: plane,
+    elements: {plane},
+    operation: storedOperation('sketchFace'),
+  }) as unknown as FaceModel;
+}
 
 function planarFaceModel(
   operation: Extract<
