@@ -153,10 +153,12 @@ for (const installed of [false, true] as const) {
         undefined,
         JSON.stringify(result.shiftedDiagnostic),
       );
+      // The group origin is the midpoint of its two member origins, so the
+      // second child's group-local position is half their relative displacement.
       for (const [actual, expected] of [
-        [result.first, [5, -15, 0]],
-        [result.shifted, [5, -15, -7]],
-        [result.restored, [5, -15, 0]],
+        [result.first, [2.5, -7.5, 0]],
+        [result.shifted, [2.5, -7.5, -3.5]],
+        [result.restored, [2.5, -7.5, 0]],
       ] as const) {
         actual!.forEach((value, index) =>
           assert.ok(
