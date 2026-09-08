@@ -97,6 +97,14 @@ const sleeve = profile.face().extrude(20);
 const parts = profile.faces().map(face => face.extrude(10));
 ```
 
+Drag an arc endpoint to reshape it while preferring to keep its center in place.
+Drag a circle or arc center to move it while preferring to keep its radius
+unchanged. Hard constraints, expression-controlled values and read-only upstream
+geometry take precedence; these preferences can keep the dragged point from
+reaching the pointer. They apply only during the gesture and do not add persistent
+fixed or radius constraints. To change an editable radius, drag the curve itself
+or edit its source or dimension.
+
 Derived sketches include their read-only upstream boundaries. Separate contours
 produce separate faces; nested contours alternate material, holes and islands.
 Open, crossing, touching, overlapping and branched boundaries must be trimmed into

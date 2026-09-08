@@ -237,9 +237,15 @@ gesture context, without framework-level point classification or partitioning.
 They recognize centers for preferred local translation, prefer related
 centers or far connected points as soft references, and handle an unconstrained
 sole junction per branch. Radius gestures prefer the curve center.
-Ordered soft stages first reach the closest feasible mouse position, then prefer
-local translation, then minimize exterior movement. Connected lines do not disable
-center translation: their constraints determine how exterior points follow.
+Dragging an arc endpoint first prefers keeping its related arc centers in place.
+Dragging a circle or arc center prefers keeping the radii of its curves unchanged
+before following the mouse. A point that is both an arc endpoint and another
+curve's center retains both preferences, with the related arc centers first.
+Within those preferences, the gesture reaches the closest feasible mouse position,
+then prefers local translation and minimizes exterior movement. A constrained
+center or endpoint can therefore stop short of the pointer. Dragging the curve
+itself still adjusts an editable radius. Connected lines do not disable center
+translation: their constraints determine how exterior points follow.
 Each stage respects all hard constraints; later stages retain earlier achieved
 target parameter values for this frame, not every equivalent optimum. No original
 reference position is made an unconditional anchor, and no stage lock survives
