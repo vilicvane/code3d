@@ -1,10 +1,4 @@
-import {
-  randomAgentPort,
-  type AgentConfig,
-  type ReceiptJournal,
-  type StoredReceipt,
-} from '@code3d/agent';
-import {randomAgentColor} from './colors';
+import type {AgentConfig, ReceiptJournal, StoredReceipt} from '@code3d/agent';
 
 export type PersistedAgentSession = {
   sessionId: string;
@@ -29,73 +23,13 @@ export class AgentPersistence {
             throw new Error(
               'Agents are active in another tab for this project. Close that tab and reload this page to take over.',
             );
-          const request = indexedDB.open('code3d-agents-v1', 3);
-          request.onupgradeneeded = event => {
-            if (event.oldVersion === 0) {
-              request.result.createObjectStore('sessions');
-              request.result.createObjectStore('receipts');
-            } else {
-              // Assign existing grants once while retaining their credentials and receipts.
-              const cursor = request
-                .transaction!.objectStore('sessions')
-                .openCursor();
-              cursor.onsuccess = () => {
-                const entry = cursor.result;
-                if (!entry) return;
-                const legacy = entry.value as {
-                  identity: {sessionId: string};
-                  grants: {
-                    config: Omit<AgentConfig, 'version' | 'port' | 'origin'> & {
-                      version: 1;
-                      relay: string;
-                    };
-                    color: number;
-                    lastSeen?: string;
-                  }[];
-                };
-                const ports: number[] = [];
-                const session: PersistedAgentSession = {
-                  sessionId: legacy.identity.sessionId,
-                  grants: legacy.grants.map(grant => {
-                    const port = randomAgentPort(ports);
-                    ports.push(port);
-                    const {
-                      relay: _relay,
-                      version: _version,
-                      ...identity
-                    } = grant.config;
-                    return {
-                      ...grant,
-                      color:
-                        event.oldVersion < 2 ? randomAgentColor() : grant.color,
-                      config: {
-                        ...identity,
-                        version: 2,
-                        port,
-                        origin: location.origin,
-                      },
-                    };
-                  }),
-                };
-                entry.update(session);
-                entry.continue();
-              };
-            }
+          const request = indexedDB.open('code3d-agents');
+          request.onupgradeneeded = () => {
+            request.result.createObjectStore('sessions');
+            request.result.createObjectStore('receipts');
           };
           const database = await new Promise<IDBDatabase>((resolve, reject) => {
-            let blocked = false;
-            request.onblocked = () => {
-              blocked = true;
-              reject(
-                new Error(
-                  'Close other Code3D tabs and reload this page to upgrade agent storage.',
-                ),
-              );
-            };
-            request.onsuccess = () => {
-              if (blocked) request.result.close();
-              else resolve(request.result);
-            };
+            request.onsuccess = () => resolve(request.result);
             request.onerror = () => reject(request.error);
           });
           database.onversionchange = () => database.close();

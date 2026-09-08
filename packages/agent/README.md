@@ -13,7 +13,6 @@ and hands the complete private configuration to it through a copied prompt:
 
 ```json
 {
-  "version": 2,
   "port": 54321,
   "origin": "https://www.code3d.org",
   "sessionId": "stable-project-session-id",
@@ -32,11 +31,9 @@ the identity and journal, closes the old socket/retry, and generates an updated
 prompt. Revoke deletes that grant/journal and stops retries; Revoke all does
 so for every agent in the current project. Accepted changes continue saving.
 
-IndexedDB version 3 migrates existing remote grants once: it retains session ID,
-agent ID, key, names, colors, lastSeen and receipt keys, assigns local ports and
-records the current App origin. Obsolete host tokens/relay addresses are removed.
-Agents need to copy the updated configuration and start a local CLI service; no
-remote fallback remains. Never reopen an existing grant with an empty journal.
+Configuration and storage have one current format, with no configuration version
+or migration path. The App stores grants and receipts in `code3d-agents`.
+Never reopen an existing grant with an empty journal.
 
 ## Local authentication and lifecycle
 

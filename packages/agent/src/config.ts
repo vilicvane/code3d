@@ -8,7 +8,6 @@ import {
 } from './validation.js';
 
 export type AgentConfig = Readonly<{
-  version: 2;
   port: number;
   origin: string;
   sessionId: string;
@@ -42,14 +41,9 @@ export function randomAgentPort(excluded: readonly number[] = []): number {
 export function parseAgentConfig(value: unknown): AgentConfig {
   const config = object(
     value,
-    ['version', 'port', 'origin', 'sessionId', 'agentId', 'name', 'key'],
+    ['port', 'origin', 'sessionId', 'agentId', 'name', 'key'],
     'Agent configuration',
   );
-  if (config.version !== 2)
-    throw new AgentError(
-      'invalid_config',
-      'Unsupported agent configuration version. Copy the current prompt from Code3D.',
-    );
   let origin: URL;
   try {
     origin = new URL(string(config.origin, 'App origin'));
@@ -69,7 +63,6 @@ export function parseAgentConfig(value: unknown): AgentConfig {
       'App origin must be an HTTPS origin (HTTP is allowed on loopback), without a path or credentials.',
     );
   return {
-    version: 2,
     port: parsePort(config.port),
     origin: origin.origin,
     sessionId: identifier(config.sessionId, 'Session ID'),
@@ -84,7 +77,6 @@ export function createAgentConfig(
   options: Pick<AgentConfig, 'port' | 'origin' | 'sessionId' | 'name'>,
 ): AgentConfig {
   return parseAgentConfig({
-    version: 2,
     ...options,
     agentId: crypto.randomUUID(),
     key: encodeBase64(crypto.getRandomValues(new Uint8Array(32))),

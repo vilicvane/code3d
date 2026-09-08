@@ -54,7 +54,7 @@ updated file. The current agent conversation continues.
 
 ### Connection and configuration
 
-The JSON contains `version`, `port`, `origin`, `sessionId`, `agentId`, `name`, and
+The JSON contains `port`, `origin`, `sessionId`, `agentId`, `name`, and
 `key`. Keep it private and outside committed source; use a file readable only by
 your account. Neither source code nor secrets belong in process command-line
 arguments. The service binds only to `127.0.0.1`, checks the App's exact Origin,
