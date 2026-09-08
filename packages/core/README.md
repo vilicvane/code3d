@@ -12,7 +12,7 @@ Direct Node execution requires installing the project dependencies.
 
 The public API includes solid primitives and Boolean operations, first-class
 planar face models (`circle`, `ellipse`, `rectangle`, `regularPolygon`), 3D
-curve models (`line`, `arc`, `bezier`, `spline`), point models, and
+curve models (`line`, `arc`, `bezier`, `spline`), point models, face extrusion, and
 through-section or spine-guided `loft`. Every geometric model is immutable,
 renderable, and relation-aware. Topology capabilities follow dimension:
 vertices provide `.vertex(id)`, edges add `.edge(id)`, and faces and solids
@@ -34,7 +34,288 @@ section paths; Boolean operations inherit from all inputs. Splits and merges
 retire ambiguous source paths. Full rules are in the
 [topology guide](../web/src/content/docs/docs/guides/topology.md).
 `relate()` records placement for composition with other values; inspecting or
-rendering the resulting value by itself keeps its intrinsic local frame.
+rendering the resulting value by itself uses its own local geometry.
+
+## Face extrusion
+
+`face.extrude(distance)` and `extrude(face, distance)` produce a `SolidModel`
+from one planar face model. The finite, non-zero signed distance follows the
+face's local normal, including any prior rotation. The starting face stays in
+place: an unrotated profile extruded by `3` spans Y = 0 to 3; `-3` spans -3 to 0.
+Origin offsets and input geometry are preserved, and the result supports ordinary
+solid operations. To extrude multiple faces, map them explicitly.
+
+```ts
+import {circle, extrude, rectangle} from '@code3d/core';
+
+export const plate = rectangle(30, 20).extrude(3).fillet(0.5);
+export const pin = extrude(circle(2), -10);
+```
+
+## Editable sketches
+
+Sketches are immutable 2D definitions, separate from geometric models and B-Reps:
+
+Start with `sketch()` for an empty sketch, or `base.derive()` for an empty local
+layer over an existing sketch. Omitting entries is equivalent to passing `[]`.
+The editor inserts the array only when the first drawing is completed; cancelling
+leaves the call unchanged, and undo restores the original call and its comments.
+
+```ts
+import {sketch} from '@code3d/core';
+
+const sketch1 = sketch(
+  [
+    ['point', 1, [0, 0]],
+    ['point', 2, [30, 0]],
+    ['line', 3, [1, 2]],
+  ],
+  {
+    constraints: [
+      ['fixed', 1],
+      ['horizontal', 3],
+      ['length', 3, 30],
+    ],
+  },
+);
+const sketch2 = sketch1.derive([
+  ['point', 1, [10, 20]],
+  ['line', 2, [sketch1.point(2), 1]],
+]);
+```
+
+Each tuple is `[kind, ID, data]`. Numeric curve point references name local points;
+`sketch1.point(id)` names a point owned by an upstream layer. Each layer has an
+independent positive-integer ID space shared by its geometry entities. Definitions
+may be empty, open, or contain crossing lines; crossings do not automatically
+split entities. Missing point references are errors.
+
+Circles use a center point reference and a current radius, not polygon segments:
+
+```ts
+const circles = sketch(
+  [
+    ['point', 1, [0, 0]],
+    ['circle', 2, [1, 15]],
+    ['circle', 3, [1, 8]],
+  ],
+  {constraints: [['radius', 3, 8]]},
+);
+```
+
+`radius` uses `['radius', circleOrArcId, value]`. Both current radii and radius constraints
+must be positive and finite. The outer circle above remains free; the inner
+circle's independent constraint preserves its radius. A circle center may also
+use a named upstream point. Circle and point parameters have the same numeric
+runtime semantics, whether computed from expressions or written as literals.
+
+Arcs store a current radius, reference a center, start and end point, and explicitly select the direction:
+
+```ts
+const rounded = sketch(
+  [
+    ['point', 1, [0, 0]],
+    ['point', 2, [10, 0]],
+    ['point', 3, [0, 10]],
+    ['arc', 4, [1, 10, 2, 3, 'ccw']],
+  ],
+  {
+    constraints: [
+      ['radius', 4, 10],
+      ['sweep', 4, 90],
+    ],
+  },
+);
+```
+
+`ccw` selects the counterclockwise arc in sketch coordinates; `cw` selects the
+clockwise arc, including major arcs. Native arc equations keep both endpoints
+on the circle; point coordinates and radius may move to satisfy them.
+The radius is ordinary current data, not an implicit radius constraint.
+To initialize inconsistent data, endpoints are projected along their supplied
+directions to the supplied radius, or to an explicit radius dimension when one
+already exists. This avoids projecting satisfied endpoints outward and then
+allowing an underconstrained solve to translate the arc while shrinking it back.
+Shared endpoints average simultaneous
+proposals, without giving one arc ownership; locked/upstream, fixed and explicitly
+positioned axes are not overwritten. The resulting seed is then solved against
+all structural equations and explicit constraints. Thus an isolated arc with
+radius 15 and endpoints initially at distances 10 starts at radius 15; if the
+center and endpoints are explicitly fixed at radius 10, its radius solves to 10.
+No extra lock, soft objective or degree of freedom is introduced.
+Center and endpoints
+can each reference a named upstream point. Zero-radius and coincident-endpoint arcs
+are errors; use `circle` for a full circle.
+The independent `sweep` constraint uses `['sweep', arcId, degrees]`, strictly greater than
+0 and less than 360. Its positive magnitude follows the tuple's `cw`/`ccw`
+direction, so 270 means a major arc in either direction. It does not fix the arc's
+orientation: with a fixed center and radius, dragging an endpoint can rotate both
+endpoints while preserving the sweep.
+
+Geometry tuples hold current data; `constraints` specify what must remain true.
+Constraints use `['kind', target, value?]` and have no persistent IDs. Point coordinates have the same runtime
+meaning whether computed from an expression or written as literals. They may
+move during solving unless constrained. `fixed` locks one point at its supplied
+coordinates; `horizontal` / `vertical` target one local line. `length` / `angle`
+target one local line and take the value in the third field (angles in degrees);
+`x` / `y` likewise target one point with a third-field coordinate value, and
+`coincident` takes `[pointRef, pointRef]`. `midpoint` takes `[midpointRef, startRef, endRef]`
+and places the first point halfway between the other two, with no line entity required.
+A point reference may name locked upstream
+geometry. Lines must have nonzero length; length constraints must be positive.
+PlaneGCS solves each layer without modifying upstream values. The snapshot
+reports degrees of freedom and redundant constraint indices. Conflicts are
+located at their source tuples when inline source is available.
+
+In the App, select a sketch expression or variable to open its 2D editor. Draw
+continuous lines, drag literal-coordinate points, and delete local entities.
+Circle takes a center (with optional X/Y input), followed by a radius or a
+circumference click. Entered Radius creates a persistent radius constraint;
+blank Radius follows the pointer and remains free. Drag a circle edge to change
+its radius, or its center to move it. Expression radii remain source-edited;
+gesture locks, numeric writeback and rounded-source replay use the same pipeline
+as point coordinates. Circle creation, deletion and associated constraint changes
+are single undo steps; deleting a circle retains shared and upstream centers,
+and removes only newly disconnected local points.
+Arc takes a center (optional X/Y), a start point (optional Radius), and an end
+point projected to that radius. New drawings default to clockwise (CW); press R to
+reverse the preview. Completing or canceling restores CW for the next drawing;
+existing arcs keep their explicit direction.
+Entered Radius and end-point Sweep become independent persistent
+constraints; blank fields remain free. R preserves the entered sweep magnitude.
+All points, the arc and
+constraints are one source transaction/undo. Drag its edge to edit a literal
+radius, or drag its ordinary center or endpoints;
+or select an interval and Delete to trim it. Radius and sweep labels lie on the
+directed arc; sweep guides connect its center and endpoints. Arc radius expressions
+use the same source protection and gesture-only locks as circle radii.
+Deletion also recognizes ordinary points lying on finite curves, not just explicit
+references, and preserves points still connected to other curves.
+Circles and finite arcs can delimit line trims, including upstream curves; the
+cutting curves and their expressions/constraints stay unchanged. Tangencies
+provide one boundary and arc gaps provide none. Circles and arcs use the same
+interval selection and Trim tool. Circles have cyclic intervals without an
+artificial zero-angle seam; zero or one boundary means whole-circle deletion.
+Trimming a circle leaves a CW arc with the same ID. End trims retain an arc ID;
+interior trims retire it and allocate two fresh IDs, preserving direction.
+Center/radius expressions and radius constraints follow surviving arcs; original
+whole-arc sweep constraints are removed. Coincident intervals are trimmed
+together, sharing cut points and one undo transaction.
+Endpoints are created or reused by Line; there is no standalone Point tool.
+Type X/Y for the start, then length/angle for each segment. Tab switches fields
+and Enter accepts the next endpoint. Each segment is one undo step and reuses
+its endpoint for the next segment. Escape ends the chain without removing
+completed segments; press it again to exit the tool. Blank fields follow the
+pointer. Snap uses points, the origin, a dense adaptive grid and horizontal/vertical
+directions; hold Alt to bypass it.
+After choosing the start point, press X for a horizontal axis lock or Y for
+vertical; press the same key again to unlock. This also works in numeric fields.
+The pointer chooses either direction along the locked axis; Length still applies.
+Entering Angle replaces the axis lock and locking an axis clears Angle.
+Snap/Alt do not override the lock; finishing or canceling a segment clears it.
+Entered coordinates, length and angle, and the final active X/Y lock generate
+explicit constraints in the same source transaction as the new segment. Turning
+the lock off before committing creates no direction constraint; resetting the
+next segment does not remove existing constraints. Ordinary automatic snapping
+does not create constraints. Numeric fields keep native text undo/redo, whose
+grouping belongs to the browser; canvas undo edits source.
+Rectangle uses two opposite corners. Enter Width/Height or let the pointer set
+them; positive dimensions retain their magnitude while the pointer chooses the
+quadrant. It creates ordinary points and lines with horizontal/vertical constraints,
+so later edits preserve right angles. Entered sizes constrain adjacent sides.
+Snapped corners reuse existing point references, including named upstream points.
+The entire rectangle is one source transaction and undo step. Escape cancels its
+draft; a successful rectangle starts a new draft. No rectangle entity is added
+to the author format. Center rectangle chooses a center and corner instead;
+Width/Height are still full side lengths. It retains an ordinary referenceable
+center point, allocated before new corners, and adds one midpoint constraint
+between it and opposite corners. A derived sketch can reference that center
+with `base.point(id)`. Both rectangle modes share inputs, snapping and undo.
+Dragging previews a soft solver target and writes every changed editable point
+in one transaction. Hard constraints remain satisfied. Rules receive the whole
+gesture context, without framework-level point classification or partitioning.
+They recognize centers for preferred local translation, prefer related
+centers or far connected points as soft references, and handle an unconstrained
+sole junction per branch. Radius gestures prefer the curve center.
+Ordered soft stages first reach the closest feasible mouse position, then prefer
+local translation, then minimize exterior movement. Connected lines do not disable
+center translation: their constraints determine how exterior points follow.
+Each stage respects all hard constraints; later stages retain earlier achieved
+target parameter values for this frame, not every equivalent optimum. No original
+reference position is made an unconditional anchor, and no stage lock survives
+the frame, adds source constraints or reduces the reported model DOF. An unrestricted center
+rectangle translates when its center moves, without hidden editor metadata.
+Points already on lines, circles or directed arcs at gesture start retain that relation:
+they can slide along the curve, and follow changes to endpoints, centers and radii. The editor
+uses model-space geometric tolerance, not pointer hit areas; lines crossed during
+a gesture do not become sticky. Curves keep their IDs and types, without
+splitting or adding author constraints. Lines and arcs retain their finite bounds;
+CW/CCW arcs never include their missing circular portion. Center moves prefer
+translating their followers, while radius gestures prefer their existing polar
+directions. Read-only upstream curves can guide local
+points. Source replay checks that these gesture-only connections remain satisfied.
+This does not create intersection points or persist curve parameters.
+Movement without authored or inferred equations needs no native kernel;
+point-on-curve dragging uses the Worker solver. During a drag, the editor uses the AST to lock each expression
+coordinate to its evaluated author value: `[width, 0]` locks X but allows Y to move.
+These numeric locks apply to all local points, not just the dragged point, and do
+not become permanent constraints or change normal evaluation. If imposing these
+locks changes the displayed geometry, the solver satisfies them before preparing
+the rule context. Initially unsatisfied author data can therefore adjust on
+the first drag. Editable axes alone are written back; expressions never gain
+offsets. Frames retain a gesture-start reference alongside the preceding solution.
+Previews forward-solve the exact, losslessly serialized data that recompilation uses.
+Deleting a point also deletes connected local lines and affected constraints. Upstream geometry stays
+locked but can supply endpoints for new lines. Coordinates using expressions
+remain editable in code, not by dragging; literal axes on the same point remain
+draggable. The editor preserves existing IDs and
+allocates new IDs from the current local maximum, without `nextId` metadata.
+Deleted IDs may therefore be reused; downstream references are not automatically
+rewritten.
+
+### Closed regions and modeling
+
+`s.face()` requires exactly one closed region, including its holes. `s.faces()`
+returns all regions as an ordinary readonly array; a sketch without curves returns
+`[]`. Neither query assigns persistent region IDs. Future ID-based selection will
+retain the no-argument meanings; array positions are not stable identifiers.
+
+Straight lines, circles and finite CW/CCW arcs form exact B-Rep boundaries.
+Upstream geometry is included. Disconnected contours produce separate faces;
+nested contours alternate material, holes and islands. Standalone points do not
+form boundaries. Open, crossing, touching, overlapping or branched contours report
+an error instead of implicitly trimming, closing, discarding or rewriting entities.
+The editor previews valid regions with a subtle fill and leaves unfinished sketches
+editable; construction diagnostics belong to the `.face()` / `.faces()` call.
+
+```ts
+const ring = sketch([
+  ['point', 1, [0, 0]],
+  ['circle', 2, [1, 12]],
+  ['circle', 3, [1, 8]],
+]);
+const sleeve = ring.face().extrude(20);
+const tools = anotherSketch.faces().map(face => face.extrude(10));
+const result = stock.cut(tools); // equivalent to cut(stock, tools)
+```
+
+Sketch `[x, y]` maps to model `[x, 0, -y]`, without recentering. Face extrusion
+follows its plane normal (`+Y` before rotation). Distance is signed, finite and
+nonzero; the start cap stays at the original face. `extrude(face, distance)` is
+equivalent to `face.extrude(distance)` and takes one face, never an array. Results
+are normal immutable solid models with caching, rendering, topology and source
+tracing; ordinary `.map()` handles multiple independent outputs.
+
+`loft(sections, options)` still takes one face per section. Zero holes and one
+corresponding hole per section work with ordinary or spine-guided lofts. Different
+hole counts and multiple unpaired holes produce explicit errors; holes are never
+silently filled. Arrays in `cut` and `loft` describe one operation's inputs, not
+automatic mapping. General hole correspondence and region ID selectors remain
+future API work.
+
+See the [modeling example](../app/examples/sketch-modeling.ts),
+the [sketch example](../app/examples/sketches.ts) and
+[third-party solver sources](THIRD_PARTY.md).
 
 ## Type imports
 
@@ -127,7 +408,7 @@ Explicit rotation belongs to a particular contact chain:
 
 ```ts
 self.on(base.up).rotate(0, 30, 0);
-self.on(base.up).pivot(50, 0, 0).rotate(0, 0, 45);
+self.on(base.up).pivot([50, 0, 0]).rotate(0, 0, 45);
 self.on(base.up).pivotVertex(3).rotate(0, 0, 45);
 self.on(base.up).around(base.axis).rotate(30);
 ```
@@ -273,8 +554,7 @@ sampled tangent or normal; `.center.on()` uses only the calculated point.
 
 ## Origins and rotation
 
-Geometric models (solids, faces, curves, and points) support immutable origin
-editing and rotation:
+All models, including groups, support immutable origin editing and rotation:
 
 ```ts
 const part = box(24, 6, 14)
@@ -283,35 +563,65 @@ const part = box(24, 6, 14)
   .rotate(15, 35, 0);
 ```
 
-- `origin(x, y, z)` sets the origin to local geometry coordinates.
-- `originVertex(id)` sets it to the selected vertex of the input model.
-- `originCenter()` sets it to the model's `center` anchor.
-- `originOffset(dx, dy, dz)` adds a local-coordinate offset to the current origin.
-- `rotate(x, y, z)` rotates geometry about that origin in degrees, applying
-  fixed local X, then Y, then Z rotations. Repeated calls compose in source order.
+- `originPoint(pointRef)` makes a center, named point, or topology vertex local zero.
+- `originVertex(id)` selects a geometric model’s own input vertex; it is equivalent
+  to `model.originPoint(model.vertex(id))`.
+- `originCenter()` makes the model's `center` anchor local zero.
+- `originOffset(dx, dy, dz)` re-expresses every local point as `p - [dx, dy, dz]`.
+- `rotate(x, y, z)` rotates about local zero in degrees, applying fixed local
+  X, then Y, then Z rotations. Repeated calls compose in source order.
 
-All three setters replace previous origin settings and accumulated offsets. Setting
-an origin leaves geometry in place, preserves the anchor's orientation, and
-changes the default pivot for later explicit rotations. Existing named anchors remain where
-they were. The default origin is the model's intrinsic anchor: zero for solids
-and profiles, the point itself for points, and the start for curves.
-Rotation carries named anchors along with the shape and preserves topology IDs.
-`center` starts at the body's local bounding-box center and follows its
-translation, rotation, and scaling. It is not recomputed from the rotated
-shape's axis-aligned bounds. All geometric models expose this point anchor;
-changing the origin leaves it in place. `model.originCenter().originOffset(1, 0, 0)`
-sets the origin one local X unit beyond that center.
-Changing the origin afterward does not undo geometry already rotated. Existing
-bound references retain their captured geometry and facing; newly queried
-bounds describe the current model. Origin changes do not shift bound contact. `scaled()` retains its existing
-geometric scaling about coordinate zero, including the origin position.
-Groups expose composition capabilities rather than these geometric operations.
+The model origin is always zero in its own coordinates. Origin offsets compose
+and cancel; geometry, centers, named references and topology positions all use
+the resulting coordinates. Directions and topology IDs are preserved. Old model
+values and captured references keep their original meaning. `center` begins at
+the body's local bounding-box center and follows transforms; rotating does not
+recalculate it from the new axis-aligned bounds. `scaled()` scales about current
+local zero. Later origin edits preserve the already-rotated shape.
 
-In the App, origin coordinates and offsets have translation arrows; `originVertex`
-uses vertex picking and an origin marker. Dragging an `originCenter()` or
+Dimensions use scalar arguments; positions use arrays. `point()` is local zero;
+`point([x, y, z])` equals `point().originOffset(-x, -y, -z)`. `line([x, y, z])`
+starts at zero; `line(start, end)` accepts two position arrays. Their input
+coordinates remain local geometry coordinates. For example, `line([10, 0, 0])`
+has center `[5, 0, 0]`, and `.rotate(0, 90, 0)` takes its end to `[0, 0, -10]`.
+A curve's tangent reference frame does not redefine model XYZ. Directional
+bounds use the model axes, including after geometric rotation.
+
+Groups provide `originPoint()`, `originOffset()` and `rotate()`. Their default origin is
+chosen when constructed: solve the direct members' placement, then take the
+axis-aligned bounding-box center of their **origins**, retaining the assembly
+axes. Geometry size does not affect this choice. A nested group contributes
+only its own origin; an empty group defaults to zero. Explicit origin edits
+re-express the assembled result together, preserving internal constraints and
+member spacing. The default is not recalculated on later operations.
+`rotate(x, y, z)` turns the solved assembly together about its current origin,
+including nested instances, without re-solving internal relations. Named
+references and topology follow the members; directional bounds use group axes.
+
+```ts
+const base = box(20, 4, 10).originOffset(0, 2, 0);
+const lid = box(20, 2, 10).originOffset(0, -1, 0);
+const assembly = group([base, lid]); // Common origins at their contact plane.
+const mounted = assembly.originPoint(lid.center);
+const tilted = mounted.rotate(0, 0, 30); // Rotate the whole assembly about the lid center.
+```
+
+`originPoint()` converts references to the receiver's local frame, including
+solved member placements. With repeated geometry, select a specific instance's
+named point, for example `assembly.originPoint(rightPart.body.center)`; an
+ambiguous shared source is rejected. Groups have no aggregate vertex IDs or
+geometric `center` or scaling methods. The
+[group origins example](../app/examples/group-origins.ts) shows direct assembly
+and selection in repeated instances.
+
+In the App, origin offsets have translation arrows; `originVertex`
+uses vertex picking and an origin marker. Dragging an `originPoint()`, `originCenter()` or
 `originVertex()` marker adds or edits an `originOffset()` call. Rotation rings edit the corresponding
 angle about its effective axis, including when other angles are nonzero. Dragging
-previews the change; release writes source and Escape cancels. The
+uses the gesture-start snapshot: the candidate origin moves against fixed
+geometry. Release writes source and switches to result coordinates, with origin
+zero and geometry shifted by the negative displacement; Escape restores the
+start state. The
 [origin and rotation example](../app/examples/origin-and-rotation.ts) demonstrates
 these scopes.
 
@@ -393,12 +703,21 @@ The App uses the selected runtime's `@code3d/core/tooling` entry, from the proje
 when core is declared or from the built-in package otherwise. This internal
 integration surface evolves with the App during prototyping and does not promise
 API stability. It includes topology source identities, assembly transforms, and
-calculated-anchor frames alongside origin and spatial-operation snapshots. It
-requires installing OpenCascade from that same package dependency graph.
-Call `beginModelEvaluation(): void` before each serial source
+calculated-anchor frames alongside origin, spatial-operation, and sketch layer
+snapshots. It requires installing OpenCascade and the sketch constraint solver
+from that same package dependency graph.
+Call `beginModelEvaluation(): () => void` before each serial source
 evaluation to reset source locations, parameter provenance, and operation
-traces. Geometry, model identity, relations, and kernel caches are unaffected.
-Already-created snapshots keep their previous evaluation's metadata.
+traces. Call the returned function in `finally`, after creating snapshots.
+Geometry, model identity, and relations remain unchanged; already-created
+snapshots keep their previous evaluation's metadata.
+
+The kernel cache retains the complete working set of the latest evaluation,
+including exact transformed-bound queries and render meshes. During evaluation,
+both the previous and current working sets are protected from eviction. Finishing
+keeps the current set and at most 256 unused historical entries, releasing older
+native values. This scales retention with the current model without accumulating
+every edited revision. Calls outside an evaluation use the bounded history.
 
 Packages may retain model values privately. The App therefore drops its own
 references after creating snapshots instead of forcibly disposing every model

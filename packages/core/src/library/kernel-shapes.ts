@@ -6,6 +6,7 @@ import {
   type Face,
   type Shape3D,
   type Vertex,
+  type Wire,
 } from 'replicad';
 import type {
   NCollection_List_TopoDS_Shape,
@@ -46,7 +47,7 @@ export function castOwnedShape3D(shape: TopoDS_Shape): Shape3D {
   }
 }
 
-type Subshapes = {vertex: Vertex; edge: Edge; face: Face};
+type Subshapes = {vertex: Vertex; edge: Edge; face: Face; wire: Wire};
 
 /** Returns owned, distinct subshapes in kernel traversal order. */
 export function shapeSubshapes<Kind extends keyof Subshapes>(
@@ -58,6 +59,7 @@ export function shapeSubshapes<Kind extends keyof Subshapes>(
     vertex: oc.TopAbs_ShapeEnum.TopAbs_VERTEX,
     edge: oc.TopAbs_ShapeEnum.TopAbs_EDGE,
     face: oc.TopAbs_ShapeEnum.TopAbs_FACE,
+    wire: oc.TopAbs_ShapeEnum.TopAbs_WIRE,
   };
   const explorer = new oc.TopExp_Explorer(
     shape.wrapped,

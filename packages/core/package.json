@@ -10,7 +10,7 @@
   "scripts": {
     "prepack": "node ../../scripts/package-license.mjs",
     "test": "node ../../node_modules/typescript/bin/tsc --build src/library/tsconfig.json src/node/tsconfig.json src/tooling/tsconfig.json && npm run test:types && npm run test:run",
-    "test:run": "node --test \"test/*.test.ts\"",
+    "test:run": "node --test \"test/*.test.{mjs,ts}\"",
     "test:types": "node ../../node_modules/typescript/bin/tsc --noEmit -p test/tsconfig.json"
   },
   "exports": {
@@ -33,10 +33,12 @@
   },
   "files": [
     "bld",
+    "THIRD_PARTY.md",
     "README.md"
   ],
   "dependencies": {
     "@code3d/opencascade": "0.0.1-alpha.0",
+    "@salusoft89/planegcs": "1.2.0",
     "replicad": "^1.0.1",
     "replicad-opencascadejs": "1.0.0"
   }

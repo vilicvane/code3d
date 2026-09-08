@@ -36,6 +36,7 @@ export type {
 
 type ToolParameterSchemaBase = Readonly<{
   index: number;
+  path?: readonly number[];
   name: string;
   optional: boolean;
   label: string;
@@ -88,6 +89,7 @@ export type ToolArgumentSource = Readonly<{
 export type ToolCallSchemaMap = ReadonlyMap<string, ToolSignatureSchema>;
 
 export type ProjectToolingIndex = Readonly<{
+  program: ts.Program;
   toolCalls: ReadonlyMap<string, ToolCallSchemaMap>;
   parameterDefinitions: ReadonlyMap<string, ParameterDefinitionMap>;
 }>;
@@ -216,7 +218,7 @@ export function resolveProjectTooling(
     toolCalls.set(path, calls);
     parameterDefinitions.set(path, definitions);
   }
-  return {toolCalls, parameterDefinitions};
+  return {program, toolCalls, parameterDefinitions};
 }
 
 const callSignatureDiagnosticCodes = new Set([
@@ -334,6 +336,7 @@ function toolSignatureSchema(
   const parameters = annotations.map(({parameter, index, name, config}) => {
     const common = {
       index,
+      ...(parameter.path ? {path: parameter.path} : {}),
       name,
       optional: parameter.optional,
       label: config.label ?? humanizeIdentifier(name),

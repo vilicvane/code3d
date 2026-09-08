@@ -3,24 +3,20 @@ title: Choosing an origin and rotating a part
 description: Set a pivot, rotate geometry, and adjust both directly in the viewport.
 ---
 
-import SourceCode from '../../../../components/SourceCode.astro';
-import ArrowIcon from '../../../../components/ArrowIcon.astro';
-import {appUrl} from '../../../../lib/site';
-import source from '../../../../../../app/examples/origin-and-rotation.ts?raw';
+import ModelExample from '../../../../components/ModelExample.astro';
 
-An origin defines the default pivot for explicit rotation. Bound relations use
-the geometry extent for placement.
-Changing it does not move the geometry. `rotate` changes the geometry about
-that pivot; a [relation](../relations/) places the resulting part in a composition.
+The origin defines local coordinates and is always zero in the resulting model.
+An origin offset `d` changes every point coordinate from `p` to `p - d`, preserving
+the shape. `rotate` turns the geometry around that local zero; a
+[relation](../relations/) places the resulting part in a composition. For
+positions, dimensions, and reference axes, start with
+[local coordinates and placement](../../concepts/local-coordinates/).
 
-<SourceCode source={source} file="origin-and-rotation.ts" />
+<ModelExample id="origin-and-rotation" />
 
-<p>
-  <a href={appUrl('origin-and-rotation.ts')} target="_blank" rel="noopener">
-    {'Open this example in the App '}
-    <ArrowIcon />
-  </a>
-</p>
+In the [interactive preview](../../../examples/origin-and-rotation/), switch
+between **Corner origin**, **Origin offset**, **Rotate**, and **Compose** to
+follow the same source through its local geometry and assembly placement.
 
 ## Choose a pivot
 
@@ -28,17 +24,19 @@ Place the cursor in `blank.originVertex(3)`. Pick a vertex in the viewport to
 use it as the origin. The ID belongs to the operation's input model, just like
 other [topology selections](../topology/).
 
-For an exact coordinate, use `.origin(x, y, z)`. For the body's center, use
-`.originCenter()`. Each of these replaces the previous origin and any
-accumulated origin offset. They return new model values; `blank` is unchanged.
+Use `.originPoint(pointRef)` to select a center, named point, or topology vertex
+on any model, including a group member. Use `.originOffset(dx, dy, dz)` to move the origin by a displacement or `.originCenter()` to make
+the body's center local zero. `originVertex()` similarly makes the chosen
+vertex zero. These operations return new model values; `blank` is unchanged.
 
 ## Fine-tune the origin
 
 Move to `pivoted.originOffset(0, 2, 0)` and drag an axis arrow. The origin
-marker moves while the geometry stays in place. The offsets use local
-geometry coordinates and accumulate across calls.
+marker moves against the snapshot captured at drag start. On release, the
+geometry switches to the resulting coordinates and the marker returns to local
+zero. Offsets accumulate across calls.
 
-You can also drag the origin marker's arrows while inspecting `originVertex`
+You can also drag the origin marker's arrows while inspecting `originPoint`, `originVertex`
 or `originCenter`. The App adds or updates an `originOffset(...)` call so the
 chosen vertex or center remains the starting point.
 
@@ -59,8 +57,8 @@ Inspect `rotated.originCenter()`. The `center` anchor follows the body's
 transforms; it is not recalculated from the rotated shape's axis-aligned
 bounding box. The next `originOffset(0, 2, 0)` moves the pivot beyond that center.
 
-Compare this with `rotated.origin(0, 0, 0)`: it sets the origin to coordinate
-zero, rather than the body's center. Both keep the already-rotated geometry.
+`centered.originOffset(0, -2, 0)` cancels that last offset. The center is again
+local zero, and the shape retains its rotation.
 
 ## Compose with other parts
 
@@ -68,8 +66,11 @@ Inspect `group([rotated, companion])` to see the companion placed against the
 rotated part's `up` bound. Inspecting the companion by itself uses its local
 frame, without its assembly placement.
 
-Setting an origin leaves bound contacts and named references in place. For a
-rotation that only affects composition, use a [constraint pivot or axis](../relations/#choose-a-rotation-pivot-or-axis).
+Origin edits update the local coordinates of geometry, bounds and named
+references together. The model's `up` direction remains local +Y even after
+geometry rotates. For a rotation that only affects composition, use a
+[constraint pivot or axis](../relations/#choose-a-rotation-pivot-or-axis), with
+coordinates written as `pivot([x, y, z])`.
 
 ## Finish or cancel a drag
 
@@ -83,6 +84,11 @@ adjusts the current expression by a numeric increment. Entering a number in a
 panel can instead replace that expression: see
 [what a panel can edit](../model-tools/#what-a-panel-can-edit).
 
-These operations are available on solids, faces, curves, and points, not
-groups. See the [API reference](../../reference/core/#origins-and-rotation)
+Solids, faces, curves, and points provide all these operations. Groups provide
+`originPoint()`, `originOffset()` and `rotate()`; their default origin comes from the center
+of their direct members’ origin bounds. See [group origins](../../concepts/local-coordinates/#group-origins)
+for direct assembly and instance selection. To rotate the whole assembly about
+a member point, use `assembly.originPoint(part.center).rotate(0, 0, 30)`. Its
+internal placements remain intact, including nested groups; angle inputs and
+rotation rings work the same way as on a single part. See the [API reference](../../reference/core/#origins-and-rotation)
 for the complete method list.

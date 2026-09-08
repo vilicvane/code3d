@@ -13,10 +13,13 @@ import type {
   DesignArgumentContext,
   EdgeArgumentTarget,
   ModelModule,
+  TopologySelectionScope,
 } from './model/compiler';
 import {ModelDiagnosticError, type ModelDiagnostic} from './model/diagnostic';
+import {viewportDiagnostic} from './model/viewport-diagnostic';
 import {originDecoration} from './model/origin-decorations';
 import {spatialIntent} from './tools/model-spatial-tool';
+import {SketchEditorController} from './tools/sketch-editor-controller';
 import {bundledExamples} from './project/bundled-examples';
 import {defaultProject} from './project/default-project';
 import {
@@ -345,6 +348,8 @@ window.addEventListener('beforeunload', event => {
 let currentModule: ModelModule | null = null;
 let currentModuleSourceVersion: number | undefined;
 let modelStatus: 'ready' | 'error' = 'ready';
+let currentDiagnostic: ModelDiagnostic | undefined;
+let sourcePreviewDiagnostic: ModelDiagnostic | undefined;
 let compileTimer: number | undefined;
 let completionPreviewTimer: number | undefined;
 let runRevision = 0;
@@ -416,13 +421,10 @@ type ContextualToolState = {
 };
 
 const viewport = new ModelViewport(viewportHost, {
-  onSourcePreviewDiagnostic: diagnostic =>
-    renderViewportDiagnostic(
-      diagnostic ??
-        (currentModule?.diagnostic?.relatedModelNodeIds?.length
-          ? currentModule.diagnostic
-          : undefined),
-    ),
+  onSourcePreviewDiagnostic: diagnostic => {
+    sourcePreviewDiagnostic = diagnostic;
+    refreshViewportFeedback();
+  },
   onSelect: occurrence => {
     if (occurrence.view === 'model') {
       preferredEvaluationContextId = undefined;
@@ -515,6 +517,16 @@ const toolEngine = new ToolEngine({
   commitPreview: preview => commitToolPreview(preview),
   clearPreview: (preview, reason) => clearToolPreview(preview, reason),
 });
+const sketchEditor = new SketchEditorController(viewportHost, {
+  solve: (layers, drag) => compiler.previewSketchDrag(layers, drag),
+  resolveSourceRef: ref => codeEditor.resolveSourceRef(ref),
+  readSource: ref => {
+    const current = codeEditor.resolveSourceRef(ref);
+    return current && codeEditor.readSource(current);
+  },
+  commit: intent =>
+    commitToolSession(toolEngine.begin(`sketch:${intent.layer}`), intent),
+});
 
 codeEditor.onChange(change => {
   const toolChange = change.kind === 'content' && change.origin === 'tool';
@@ -524,6 +536,8 @@ codeEditor.onChange(change => {
   const editingHistoryChange =
     historyChange && handleContextualEditingHistory(change);
   if (!toolChange && !editingHistoryChange) abandonContextualTool();
+  if (toolChange) renderContextualToolPanel();
+  if (!toolChange) sketchEditor.invalidate();
   agentProject.recordEditorChange(change);
   if (!toolChange) sourceEditPopover.dismiss();
   if (change.kind !== 'content') renderProjectNavigation();
@@ -568,6 +582,8 @@ codeEditor.onEditorActivation(cursor => {
 });
 codeEditor.onActiveFile((path, reason) => {
   finishContextualTool();
+  sketchEditor.hide();
+  refreshViewportFeedback();
   renderProjectNavigation();
   if (!applyingFileRoute) updateFileRoute(path, reason);
   preferredEvaluationContextId = undefined;
@@ -890,7 +906,7 @@ function deleteContextFile(): void {
 
 function showProjectIssue(error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
-  renderViewportDiagnostic();
+  refreshViewportFeedback();
   errorBar.textContent = message;
   errorBar.hidden = false;
 }
@@ -938,7 +954,11 @@ async function runModel(
       return;
     }
     codeEditor.setDesignArguments(nextModule.designArguments);
-    codeEditor.trackSourceRefs(toolSourceRefs(nextModule));
+    sketchEditor.retain(nextModule.diagnostic, codeEditor.cursorSource());
+    codeEditor.trackSourceRefs([
+      ...toolSourceRefs(nextModule),
+      ...sketchEditor.sourceRefs(),
+    ]);
     selectedDesignContextId = nextModule.activeDesignContextId;
     compilingDesignContextId = undefined;
     if (
@@ -995,8 +1015,9 @@ async function runModel(
     if (diagnostic) {
       await presentModelDiagnostic(diagnostic, revision, sourceVersion);
     } else {
+      currentDiagnostic = undefined;
       codeEditor.setModelDiagnostic();
-      renderViewportDiagnostic();
+      refreshViewportFeedback();
       errorBar.textContent =
         error instanceof Error ? error.message : String(error);
       errorBar.hidden = false;
@@ -1010,10 +1031,8 @@ async function presentModelDiagnostic(
   sourceVersion: number,
 ): Promise<boolean> {
   codeEditor.setModelDiagnostic(diagnostic);
-  renderViewportDiagnostic(
-    viewport.sourceEvaluation()?.evaluation.constraintPreviewDiagnostic ??
-      (diagnostic?.relatedModelNodeIds?.length ? diagnostic : undefined),
-  );
+  currentDiagnostic = diagnostic;
+  refreshViewportFeedback();
   if (!diagnostic || diagnostic.sourceRef) {
     errorBar.hidden = true;
     return true;
@@ -1036,9 +1055,15 @@ async function presentModelDiagnostic(
   return true;
 }
 
-function renderViewportDiagnostic(diagnostic?: ModelDiagnostic): void {
+function refreshViewportFeedback(): void {
+  const diagnostic = viewportDiagnostic(
+    currentDiagnostic,
+    sourcePreviewDiagnostic,
+    sketchEditor.diagnosticScope,
+  );
   viewportDiagnosticStack.replaceChildren();
   viewportDiagnosticStack.hidden = !diagnostic;
+  if (viewportStatus.dataset.state !== 'busy') restoreModelStatus();
   if (!diagnostic) return;
 
   const item = document.createElement('section');
@@ -1382,11 +1407,30 @@ function renderCurrentPanels(): void {
 }
 
 function syncContextualTool(sourceTargetFocused = true): void {
+  const scope = viewport.sourceEvaluation();
+  if (
+    sourceTargetFocused &&
+    currentModule &&
+    currentModuleSourceVersion === codeEditor.sourceVersion() &&
+    scope?.evaluation.sketchIds?.[0]
+  ) {
+    sketchEditor.show(
+      scope.evaluation.sketchIds[0],
+      currentModule.sketches,
+      scope.target.sourceRef,
+    );
+  } else if (
+    (!sourceTargetFocused ||
+      currentModuleSourceVersion === codeEditor.sourceVersion()) &&
+    !sketchEditor.retain(currentDiagnostic, codeEditor.cursorSource())
+  ) {
+    sketchEditor.hide();
+  }
+  refreshViewportFeedback();
   if (!sourceTargetFocused) {
     finishContextualTool();
     return;
   }
-  const scope = viewport.sourceEvaluation();
   const previous = contextualTool;
   const continuesPrevious =
     previous !== undefined &&
@@ -1641,7 +1685,19 @@ function renderContextualToolPanel(forceParameterValues = false): void {
     topologyReferenceSelectionTool?.targetId === tool.targetId
       ? topologyReferenceSelectionTool
       : undefined;
-  const parameters = [...tool.parameters.values()].map(contextualParameterView);
+  const parameters = [...tool.parameters.values()].map(parameter => {
+    const binding = parameter.binding;
+    const sourceRef =
+      binding?.kind === 'parameter'
+        ? binding.usage.target.sourceRef
+        : binding?.target.sourceRef;
+    return {
+      ...contextualParameterView(parameter),
+      // Full-document formatting can invalidate source ranges before the next
+      // compile replaces this panel. Do not accept edits that cannot be written.
+      disabled: !sourceRef || !codeEditor.resolveSourceRef(sourceRef),
+    };
+  });
   const actions = tool.signature.parameters.flatMap(parameter =>
     parameter.actions.map(action => ({
       id: `${parameter.name}:${action.action}`,
@@ -1814,6 +1870,7 @@ function syncEdgeSelectionProvider(
     selection.inputNodeId,
     selection.ids,
     occurrence,
+    selection.scope,
   );
 }
 
@@ -1826,6 +1883,7 @@ function startEdgeSelection(
   inputNodeId: string,
   initialEdgeIds: readonly EdgeId[],
   occurrence: Occurrence,
+  scope?: TopologySelectionScope,
 ): void {
   dismissEdgeSelectionTool();
   if (edgeEditSession && edgeEditSession.targetId !== targetId) {
@@ -1861,6 +1919,7 @@ function startEdgeSelection(
       'edge',
       true,
       selectedEdgeIds,
+      scope,
     );
   } catch (error) {
     showToolIssue(error instanceof Error ? error.message : String(error));
@@ -2302,9 +2361,11 @@ function applyToolPreview(preview: ToolPreview): void {
     viewport.setSpatialPreview(preview.objects);
     viewport.setDecorations(
       'spatial-preview',
-      preview.objects.map(object =>
-        originDecoration(object.nodeId, object.spatial.origin),
-      ),
+      [
+        ...new Map(
+          preview.objects.map(object => [object.nodeId, object]),
+        ).values(),
+      ].map(object => originDecoration(object.nodeId, object.spatial.origin)),
     );
   } else if (preview.kind === 'parameter') {
     viewport.setParameterPreview(preview.targetId, preview.value);
@@ -2371,6 +2432,9 @@ function commitToolSession(
 
 function toolSourceRefs(module: ModelModule): SourceRef[] {
   const refs = [
+    ...[...module.sketches.values()].flatMap(sketch =>
+      sketch.definitionRef ? [sketch.definitionRef] : [],
+    ),
     ...module.sourceTargets.flatMap(target => [
       target.sourceRef,
       ...(target.receiverRef ? [target.receiverRef] : []),
@@ -2495,9 +2559,19 @@ function setViewportStatus(
 }
 
 function restoreModelStatus(): void {
+  const sketch = sketchEditor.diagnosticScope;
+  const state = sketch
+    ? viewportDiagnostic(currentDiagnostic, sourcePreviewDiagnostic, sketch)
+      ? 'error'
+      : 'ready'
+    : modelStatus;
   setViewportStatus(
-    modelStatus,
-    modelStatus === 'ready' ? 'Ready' : 'Model error',
+    state,
+    state === 'error'
+      ? 'Model error'
+      : sketchEditor.isStale
+        ? 'Last valid sketch'
+        : 'Ready',
   );
 }
 

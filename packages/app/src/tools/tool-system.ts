@@ -15,6 +15,7 @@ import {
   type SpatialPreview,
 } from './spatial-edit';
 import {formatSourceNumber, offsetCallSource} from './source-expression';
+import {SketchEditResolver, type SketchEditIntent} from './sketch-source';
 
 export type ExpressionDraft =
   | Readonly<{kind: 'number'; value: number}>
@@ -47,6 +48,7 @@ export type SourceAnchor = Readonly<{
 }>;
 
 export type ToolIntent =
+  | SketchEditIntent
   | Readonly<{
       kind: 'model.spatial';
       operation: string;
@@ -199,6 +201,7 @@ export class ToolEngine {
     this.register(new SetEdgeOperationResolver());
     this.register(new OffsetRelationResolver());
     this.register(new SpatialTransformResolver());
+    this.register(new SketchEditResolver());
   }
 
   begin(toolId: string): ToolSession {

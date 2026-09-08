@@ -1,5 +1,8 @@
 import {
   box,
+  extrude,
+  sketch,
+  type SketchConstraint,
   type EdgeTopologyCapabilities,
   type ElementKind,
   type ElementSources,
@@ -103,3 +106,57 @@ const builder = (size: number): Shape3D =>
 const primitive: (size: number) => SolidModel = definePrimitive(builder);
 
 void [topologyKind, elementKinds, solidKind, groupKind, primitive];
+
+const sketchBase = sketch([['point', 1, [0, 0]]]);
+sketch();
+sketchBase.derive();
+const sketchFaces = sketchBase.faces();
+sketchFaces.map(face => extrude(face, 10));
+sketchBase.face().extrude(10).cut([solid]);
+// @ts-expect-error A face array is ordinary data, not a geometry operation receiver.
+sketchFaces.extrude(10);
+// @ts-expect-error Extrusion takes one face. Use map for a collection.
+extrude(sketchFaces, 10);
+// @ts-expect-error Extrusion is a face operation, not a solid modification.
+solid.extrude(10);
+const midpoint: SketchConstraint = ['midpoint', [1, 2, sketchBase.point(1)]];
+sketchBase.derive(
+  [
+    ['point', 1, [10, 0]],
+    ['point', 2, [20, 0]],
+  ],
+  {constraints: [midpoint]},
+);
+// @ts-expect-error A midpoint constraint requires three point references.
+const missingEndpoint: SketchConstraint = ['midpoint', [1, 2]];
+// @ts-expect-error Coordinates are not point references.
+const coordinateEndpoint: SketchConstraint = ['midpoint', [1, 2, [0, 0]]];
+void [missingEndpoint, coordinateEndpoint];
+// @ts-expect-error Constraint dimensions use separate target and value fields.
+const nestedLength: SketchConstraint = ['length', [3, 20]];
+// @ts-expect-error A dimensional constraint requires its third value field.
+const missingLength: SketchConstraint = ['length', 3];
+// @ts-expect-error Coordinate constraints likewise keep target and value separate.
+const nestedX: SketchConstraint = ['x', [1, 10]];
+void [nestedLength, missingLength, nestedX];
+
+sketchBase.derive(
+  [
+    ['point', 1, [10, 0]],
+    ['point', 2, [0, 10]],
+    ['arc', 3, [sketchBase.point(1), 10, 1, 2, 'cw']],
+  ],
+  {
+    constraints: [
+      ['radius', 3, 10],
+      ['sweep', 3, 270],
+    ],
+  },
+);
+// @ts-expect-error Arc direction is explicit, not an omitted default.
+sketch([['arc', 1, [2, 10, 3, 4]]]);
+// @ts-expect-error Arc endpoints are point references, not coordinate tuples.
+sketch([['arc', 1, [2, 10, [10, 0], 4, 'ccw']]]);
+// @ts-expect-error Sweep references a local arc ID, not a point handle.
+const invalidSweep: SketchConstraint = ['sweep', sketchBase.point(1), 90];
+void invalidSweep;

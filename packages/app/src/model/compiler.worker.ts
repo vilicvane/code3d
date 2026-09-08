@@ -86,6 +86,22 @@ workerScope.onmessage = ({data}: MessageEvent<CompilerRequest>) => {
     pendingFiles.delete(data.id);
     if (data.error) pending?.reject(new Error(data.error));
     else pending?.resolve(data.value);
+  } else if (data.kind === 'sketch') {
+    try {
+      send({
+        kind: 'sketch',
+        id: data.id,
+        ok: true,
+        preview: compiler.previewSketchDrag(data.layers, data.drag),
+      });
+    } catch (error) {
+      send({
+        kind: 'result',
+        id: data.id,
+        ok: false,
+        diagnostic: diagnosticFromError(error),
+      });
+    }
   } else if (data.kind === 'export' || data.kind === 'topology') {
     try {
       if (compileId !== data.compileId)

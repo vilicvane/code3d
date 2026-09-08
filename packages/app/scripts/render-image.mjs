@@ -20,7 +20,7 @@ const output = path.resolve(
 );
 const width = Number(option('width', '1200'));
 const height = Number(option('height', '900'));
-const focus = option('focus');
+const sourceContext = option('context');
 
 if (!Number.isInteger(width) || width <= 0) {
   throw new Error(`Invalid image width: ${width}`);
@@ -51,12 +51,19 @@ await page.setViewportSize({width, height});
 try {
   const url = new URL('render.html', baseUrl);
   url.searchParams.set('model', model);
-  if (focus) url.searchParams.set('focus', focus);
+  if (sourceContext) url.searchParams.set('context', sourceContext);
   await page.goto(url.href, {waitUntil: 'networkidle'});
-  await page.locator('html[data-render-state="ready"]').waitFor({
-    state: 'attached',
-    timeout: 60_000,
-  });
+  await page
+    .locator('html[data-render-state="ready"], html[data-render-state="error"]')
+    .waitFor({
+      state: 'attached',
+      timeout: 60_000,
+    });
+  if (
+    (await page.locator('html').getAttribute('data-render-state')) === 'error'
+  ) {
+    throw new Error(await page.locator('body').innerText());
+  }
   const image = await page.evaluate(() => window.code3dRenderedImage);
   if (!image) throw new Error('The render page did not produce an image.');
   const encoded = image.slice(image.indexOf(',') + 1);

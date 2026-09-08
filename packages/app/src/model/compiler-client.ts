@@ -8,6 +8,7 @@ import {browserPackageFiles} from '../project/browser-packages';
 import type {ModelExportInstance, ModelExportOptions} from './model-export';
 import type {CompilationProgress} from './compilation-progress';
 import type {
+  SketchSnapshot,
   TopologyInspection,
   TopologyInspectionOptions,
 } from '@code3d/core/tooling';
@@ -16,6 +17,7 @@ import type {
   CompilerResponse,
   FileRequest,
 } from './compiler-protocol';
+import type {SketchDrag, SketchDragPreview} from './sketch-drag';
 
 type PendingRequest = {
   id: number;
@@ -29,6 +31,7 @@ type PendingRequest = {
     }
   | {kind: 'export'; resolve(blob: Blob): void}
   | {kind: 'topology'; resolve(topology: TopologyInspection): void}
+  | {kind: 'sketch'; resolve(preview: SketchDragPreview): void}
 );
 
 export class ModelCompilerClient {
@@ -109,13 +112,35 @@ export class ModelCompilerClient {
       new Error(
         pending.kind === 'compile'
           ? 'Compilation superseded.'
-          : 'Model operation cancelled because the project changed.',
+          : pending.kind === 'sketch'
+            ? 'Sketch preview superseded.'
+            : 'Model operation cancelled because the project changed.',
       ),
     );
-    // Termination also covers synchronous work before its progress message
-    // reaches the UI. A cancelled Worker can never block the next revision.
-    this.restartWorker();
+    // Restart compilation even before its progress message reaches the UI,
+    // so synchronous work cannot block the next revision. Sketch previews
+    // retain their compiled model; stale replies are ignored by request ID.
+    if (pending.kind !== 'sketch') this.restartWorker();
     return true;
+  }
+
+  previewSketchDrag(
+    layers: readonly SketchSnapshot[],
+    drag: SketchDrag,
+  ): Promise<SketchDragPreview> {
+    if (this.pending || !this.exportable)
+      return Promise.reject(new Error('Waiting for the updated sketch.'));
+    const id = this.nextId++;
+    return new Promise((resolve, reject) => {
+      this.pending = {
+        kind: 'sketch',
+        id,
+        resolve,
+        reject,
+        timeout: this.deadline(id, 15_000),
+      };
+      this.send({kind: 'sketch', id, layers, drag});
+    });
   }
 
   dispose(): void {
@@ -160,7 +185,9 @@ export class ModelCompilerClient {
         new Error(
           pending.kind === 'export'
             ? 'Export exceeded 30 seconds and was terminated. Run the model again before retrying.'
-            : 'Project preparation exceeded 120 seconds and was terminated.',
+            : pending.kind === 'sketch'
+              ? 'Sketch solving exceeded 15 seconds and was terminated.'
+              : 'Project preparation exceeded 120 seconds and was terminated.',
         ),
       );
     }, milliseconds);
@@ -222,6 +249,8 @@ export class ModelCompilerClient {
         pending.resolve(data.blob);
       } else if (pending.kind === 'topology' && data.kind === 'topology') {
         pending.resolve(data.topology);
+      } else if (pending.kind === 'sketch' && data.kind === 'sketch') {
+        pending.resolve(data.preview);
       }
     };
     worker.onerror = ({message}) => {

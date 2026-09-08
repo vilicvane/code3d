@@ -15,30 +15,42 @@ const neutral = '#353a33';
 
 // Width shared by the primitive showcase base.
 const baseWidth = 36;
+const baseHeight = 4;
+const columnHeight = 14;
+const taperedHeight = 12;
+const prismHeight = 6;
+const collarHeight = 4;
+const sphereRadius = 5;
+const sphereScale = 0.8;
 
-const base = box(baseWidth, 4, 34).fillet(1).paint(neutral);
+// Put the base's top plane at local Y = 0 for the parts with known dimensions.
+const base = box(baseWidth, baseHeight, 34)
+  .fillet(1)
+  .originOffset(0, baseHeight / 2, 0)
+  .paint(neutral);
 
-const column = cylinder(4, 14)
-  .relate(part => part.on(base.up).offset(-10, 0, 0))
+const column = cylinder(4, columnHeight)
+  .originOffset(10, -columnHeight / 2, 0)
   .paint(accent);
 
-const taperedColumn = frustum(5, 3, 12)
-  .relate(part => part.on(base.up).offset(10, 0, 0))
+const taperedColumn = frustum(5, 3, taperedHeight)
+  .originOffset(-10, -taperedHeight / 2, 0)
   .paint(secondary);
 
-const prism = regularPrism(4.5, 6, 6, 30)
-  .relate(part => part.on(taperedColumn.up))
+const prism = regularPrism(4.5, prismHeight, 6, 30)
+  .originOffset(0, -(taperedHeight + prismHeight / 2), 0)
   .paint(accent);
 
-const collar = tube(5.5, 4.5, 4)
-  .relate(part => part.on(base.up).offset(-10, 0, 0))
+const collar = tube(5.5, 4.5, collarHeight)
+  .originOffset(10, -collarHeight / 2, 0)
   .paint(secondary);
 
-const scaledSphere = sphere(5)
-  .scaled(0.8)
-  .relate(part => part.center.on(base.up).offset(0, 4, 0))
+const scaledSphere = sphere(sphereRadius)
+  .scaled(sphereScale)
+  .originOffset(0, -sphereRadius * sphereScale, 0)
   .paint(secondary);
 
+// Use a relation for contact with the actual swept wire's lower bound.
 const winding = coil(5, 0.75, 4, 2.5)
   .relate(part => part.on(base.up).offset(0, 0, 10))
   .paint(accent);

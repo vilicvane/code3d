@@ -44,15 +44,75 @@ Planar profiles lie in the local XZ plane with a +Y normal.
 | `ellipse(xRadius, zRadius)`                | Elliptical face                              |
 | `rectangle(x, z)`                          | Rectangular face                             |
 | `regularPolygon(radius, sides, rotation?)` | Regular polygonal face                       |
-| `point(x, y, z)` or `point([x, y, z])`     | Vertex model                                 |
-| `line(x, y, z)` or `line(start, end)`      | Straight edge                                |
+| `point()` or `point([x, y, z])`            | Vertex model                                 |
+| `line([x, y, z])` or `line(start, end)`    | Straight edge                                |
 | `arc(start, middle, end)`                  | Arc through three points                     |
 | `bezier(points)`                           | Bézier curve                                 |
 | `spline(points)`                           | Interpolating spline                         |
 | `loft(sections, options?)`                 | Solid through sections; optional curve spine |
+| `extrude(face, distance)`                  | Solid extruded along one face's local normal |
+
+See [local coordinates and placement](../../concepts/local-coordinates/) for
+the coordinate frame of a model, reference, or composition.
+
+Position coordinates use arrays; dimensions, offsets and angles use scalar
+arguments. `point([x, y, z])` equals `point().originOffset(-x, -y, -z)`.
+`line([x, y, z])` starts at zero; the two-array form uses both supplied local
+endpoints. Curve tangents do not redefine the model's XYZ axes.
 
 Profiles and curves are model values that can be inspected and related to
 other models.
+
+Face models also support `face.extrude(distance)`. Both forms accept a finite,
+non-zero signed distance and preserve the starting face's coordinates. For an
+unrotated profile, positive distance extends along +Y; negative distance extends
+along −Y. Rotating the face rotates its extrusion direction; changing its origin
+does not recenter the result. The returned solid supports Boolean operations,
+fillets, chamfers, and shells. Use `faces.map(face => face.extrude(3))` for a list
+of profiles.
+
+```ts
+import {circle, extrude, rectangle} from '@code3d/core';
+
+export const plate = rectangle(30, 20).extrude(3).fillet(0.5);
+export const pin = extrude(circle(2), -10);
+```
+
+## Editable sketch regions
+
+Select a `sketch([...])` expression or variable in the App to open its 2D editor.
+Points, lines, circles and arcs use explicit layer-local entity IDs. `face()`
+requires exactly one closed region, including holes; `faces()` returns all regions
+as an ordinary readonly array. Use `map` for independent modeling operations:
+
+```ts
+import {sketch} from '@code3d/core';
+
+const profile = sketch([
+  ['point', 1, [0, 0]],
+  ['circle', 2, [1, 12]],
+  ['circle', 3, [1, 8]],
+]);
+const sleeve = profile.face().extrude(20);
+const parts = profile.faces().map(face => face.extrude(10));
+```
+
+Derived sketches include their read-only upstream boundaries. Separate contours
+produce separate faces; nested contours alternate material, holes and islands.
+Open, crossing, touching, overlapping and branched boundaries must be trimmed into
+valid closed contours before creating faces. The editor leaves unfinished sketches
+editable and previews valid regions without changing entity IDs.
+
+Sketch `[x, y]` maps to model `[x, 0, -y]`, without recentering. `.extrude(distance)`
+and `extrude(face, distance)` are equivalent single-face operations. Distance must
+be finite and nonzero; positive follows the plane normal, negative reverses it.
+Rotating the face rotates its extrusion direction too.
+
+`loft` takes one face per section and preserves a single corresponding hole, with
+or without a spine. Different hole counts or multiple unpaired holes report an
+error rather than silently filling holes. Persistent region IDs and general
+multi-hole correspondence are not available yet. Try `examples/sketch-modeling.ts`
+in the App for a plate, multiple cutting tools and a hollow loft.
 
 ## Composition and boolean operations
 
@@ -64,6 +124,8 @@ other models.
 | `intersect(solids)`    | Shared solid volume                           |
 
 Relations are resolved at composition and geometry evaluation boundaries.
+`stock.cut(tools)` is equivalent to `cut(stock, tools)`. Arrays in booleans and
+loft describe the inputs of one operation; they do not automatically map it.
 
 ## Model operations
 
@@ -94,34 +156,46 @@ positive and finite. For example, `box(20, 8, 12).scaled(0.5)` returns a new box
 with dimensions 10, 4, and 6, leaving the original model unchanged.
 
 Scaling uses local coordinate zero even after an origin edit. Geometry, named
-anchors, the `center` anchor, and the model's origin position scale together;
+anchors and the `center` anchor scale together; the model origin stays zero;
 topology IDs are preserved. Groups do not provide `.scaled()`; scale their
 geometric parts before composing them. To change only an exported file's unit
 conversion, use the [export scale](../../guides/exporting/#scale-and-orientation).
 
 ## Origins and rotation
 
-Solids, faces, curves, and points provide these operations:
+All models provide `originPoint()`, `originOffset()` and `rotate()`. Solids, faces,
+curves and points additionally provide vertex/center selection:
 
-| Method                      | Behavior                                                   |
-| --------------------------- | ---------------------------------------------------------- |
-| `.origin(x, y, z)`          | Set the origin in local geometry coordinates               |
-| `.originVertex(id)`         | Set the origin to an input-model vertex                    |
-| `.originCenter()`           | Set the origin to the model's center anchor                |
-| `.originOffset(dx, dy, dz)` | Add a local-coordinate offset to the current origin        |
-| `.rotate(x, y, z)`          | Rotate about the origin, in degrees, fixed X then Y then Z |
+| Method                      | Behavior                                                      |
+| --------------------------- | ------------------------------------------------------------- |
+| `.originPoint(pointRef)`    | Set the origin to a point reference, including a group member |
+| `.originVertex(id)`         | Set the origin to an input-model vertex                       |
+| `.originCenter()`           | Set the origin to the model's center anchor                   |
+| `.originOffset(dx, dy, dz)` | Add a local-coordinate offset to the current origin           |
+| `.rotate(x, y, z)`          | Rotate about the origin, in degrees, fixed X then Y then Z    |
 
-`origin`, `originVertex`, and `originCenter` replace previous origin settings and accumulated
-offsets. Setting the origin leaves geometry and named anchors in place; it
-changes the default pivot for later explicit rotations. Rotation moves geometry and named
-anchors together, keeping topology IDs. Later origin settings do not undo
-already-applied rotations.
+The origin is always zero in model coordinates. `originOffset(dx, dy, dz)`
+re-expresses every local point as `p - [dx, dy, dz]`; offsets accumulate and can
+cancel. `originVertex` and `originCenter` make the selected point local zero.
+Geometry, named anchors and topology positions use the resulting coordinates;
+directions and topology IDs are preserved. Old model values remain unchanged.
+Rotation and scaling act about current local zero.
 
-Every geometric model exposes `center`: the body's local bounding-box center,
+Every geometric model exposes `center`: its initial local bounding-box center,
 carried along by subsequent transforms. Rotation does not recalculate it from
-the rotated shape's axis-aligned bounds. Changing the origin leaves `center`
-in place. Use `.originCenter().originOffset(1, 0, 0)` to offset from this center.
-Groups do not provide these geometric operations. For a runnable example and
+the rotated shape's axis-aligned bounds. Origin edits change its coordinates;
+`.originCenter().originOffset(1, 0, 0)` leaves it at `[-1, 0, 0]`.
+A group chooses its default origin from the bounding-box center of its solved
+direct member origins, keeping the assembly axes. Geometry size does not change
+this default, and nested groups contribute only their own origins. Group origin
+edits move the entire assembly's local coordinates together; they preserve its
+internal relations. `rotate(x, y, z)` turns the solved assembly about its current
+origin, including nested instances. `originPoint(part.center)` resolves the member's actual
+placement; repeated sources need a specific instance reference. Groups do not
+have aggregate vertex IDs, a geometric center or scaling.
+See [group coordinates](../../concepts/local-coordinates/#group-origins).
+
+For a runnable example and
 the vertex picker, origin arrows, and rotation rings, see
 [choosing an origin and rotating a part](../../guides/origins-and-rotation/).
 
@@ -160,7 +234,7 @@ in the target axes after alignment, before explicit rotations; zero preserves
 the relation's free modes. Use point references for additional positioning.
 
 - `constraint.rotate(x, y, z)`: rotate around self's origin.
-- `constraint.pivot(x, y, z).rotate(x, y, z)`: a pivot in self's local frame.
+- `constraint.pivot([x, y, z]).rotate(x, y, z)`: a pivot in self's local frame.
 - `constraint.pivotVertex(id).rotate(x, y, z)`: a vertex belonging to self.
 - `constraint.around(axis).rotate(angle)`: a positioned local or external axis.
 

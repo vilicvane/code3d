@@ -3,9 +3,8 @@ import {ModelCompilerClient} from './model/compiler-client';
 import {
   sourceTokenOffset,
   type SourceToken,
-  uniqueSourceOffset,
 } from '../render-samples/source-focus';
-import {renderSamples} from '../render-samples/catalog';
+import {renderSamples, sourceContextSets} from '../render-samples/catalog';
 import {ModelDiagnosticError} from './model/diagnostic';
 import {sourceDecorationProviders} from './model/source-decorations';
 import type {ModelProject} from './project/project';
@@ -48,14 +47,19 @@ function requestedModel(): ModelName {
 }
 
 function requestedSourceOffset(
+  name: ModelName,
   source: string,
   defaultFocus: SourceToken,
-): number | undefined {
+): number {
   const parameters = new URLSearchParams(location.search);
-  const focus = parameters.get('focus');
-  return focus
-    ? uniqueSourceOffset(source, focus)
-    : sourceTokenOffset(source, defaultFocus);
+  const contextId = parameters.get('context');
+  if (!contextId) return sourceTokenOffset(source, defaultFocus);
+  const context = sourceContextSets[name]?.find(
+    context => context.id === contextId,
+  );
+  if (!context)
+    throw new Error(`Unknown source context for ${name}: ${contextId}`);
+  return sourceTokenOffset(source, context.focus);
 }
 
 async function renderModel(): Promise<void> {
@@ -64,7 +68,8 @@ async function renderModel(): Promise<void> {
     throw new Error('The render root is missing.');
   }
 
-  const project = renderProjects[requestedModel()];
+  const name = requestedModel();
+  const project = renderProjects[name];
   const compiler = new ModelCompilerClient(
     await openBrowserProjectFileSystem(),
   );
@@ -87,17 +92,11 @@ async function renderModel(): Promise<void> {
   const source = project.files.find(
     file => file.path === project.rootPath,
   )!.source;
-  const sourceOffset = requestedSourceOffset(source, project.focus);
-  if (sourceOffset !== undefined) {
-    if (!viewport.selectBySourceOffset(project.rootPath, sourceOffset)) {
-      throw new Error(
-        'The requested source position has no renderable context.',
-      );
-    }
-    document.documentElement.dataset.renderFocus = 'source';
-  } else {
-    document.documentElement.dataset.renderFocus = 'model';
+  const sourceOffset = requestedSourceOffset(name, source, project.focus);
+  if (!viewport.selectBySourceOffset(project.rootPath, sourceOffset)) {
+    throw new Error('The requested source position has no renderable context.');
   }
+  document.documentElement.dataset.renderFocus = 'source';
 
   await new Promise<void>(resolve =>
     requestAnimationFrame(() => requestAnimationFrame(() => resolve())),

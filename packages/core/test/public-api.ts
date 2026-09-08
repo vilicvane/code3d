@@ -7,6 +7,7 @@ import {
   cut,
   cylinder,
   ellipse,
+  extrude,
   frustum,
   group,
   intersect,
@@ -16,6 +17,7 @@ import {
   rectangle,
   regularPolygon,
   regularPrism,
+  sketch,
   spline,
   sphere,
   tube,
@@ -58,6 +60,42 @@ import type {Shape3D as RootShape3D} from '@code3d/core';
 import type {ModelObject as InternalModelObject} from '@code3d/core/bld/library/runtime.js';
 
 const solid = box(10, 5, 8);
+const sketchValue = sketch([
+  ['point', 1, [0, 0]],
+  ['point', 2, [10, 0]],
+  ['line', 3, [1, 2]],
+]);
+sketch(
+  [
+    ['point', 1, [0, 0]],
+    ['point', 2, [40, 0]],
+    ['line', 3, [1, 2]],
+  ],
+  {
+    constraints: [
+      ['fixed', 1],
+      ['horizontal', 3],
+      ['length', 3, 40],
+      ['angle', 3, 0],
+      ['x', 1, 0],
+      ['coincident', [1, 2]],
+    ],
+  },
+);
+// @ts-expect-error Constraints do not carry persistent IDs.
+sketch([], {constraints: [['horizontal', 10, 3]]});
+// @ts-expect-error Single-target constraints take a scalar reference, not an array.
+sketch([], {constraints: [['fixed', [1]]]});
+sketchValue.derive([
+  ['point', 1, [0, 5]],
+  ['line', 2, [sketchValue.point(2), 1]],
+]);
+// @ts-expect-error Point coordinates are a nested two-number tuple.
+sketch([['point', 1, 0, 0]]);
+// @ts-expect-error There is no persistent nextId item.
+sketch([['point', 1, [0, 0]], 2]);
+// @ts-expect-error A line has exactly two point references.
+sketch([['line', 3, [1, 2, 4]]]);
 const related = solid.relate(self => self.center.on(solid.up.flip()));
 const exposed = related.expose({mount: related.down});
 const constraint: Constraint = exposed.mount.on(solid.up).offset(1, 2, 3);
@@ -104,6 +142,18 @@ tube(6, {wall: 2}, 12);
 // @ts-expect-error Tube dimensions are required.
 tube(6, 4);
 const faceModel: FaceModel<PlanarElements> = circle(4);
+const extrudedFace: SolidModel = faceModel.extrude(3);
+const extrudedProfile: SolidModel = extrude(faceModel.rotate(0, 0, 90), -3);
+// @ts-expect-error Extrusion accepts one face; map multiple faces explicitly.
+extrude([faceModel], 3);
+// @ts-expect-error A solid is not an extrusion profile.
+extrude(solid, 3);
+// @ts-expect-error Only face models expose extrusion.
+solid.extrude(3);
+// @ts-expect-error Extrusion distance is required.
+faceModel.extrude();
+// @ts-expect-error Extrusion distance is numeric.
+faceModel.extrude('3');
 const edgeModel: EdgeModel<CurveElements> = line([0, 0, 0], vector);
 const vertexModel: VertexModel = point(vector);
 const groupModel: GroupModel = group([
@@ -142,7 +192,7 @@ replicad.setOC(undefined);
 
 solid
   .paint('#fff')
-  .origin(1, 2, 3)
+  .originOffset(1, 2, 3)
   .originOffset(0, 1, 0)
   .originVertex(1)
   .originCenter()
@@ -171,7 +221,7 @@ faceModel.edge(1);
 faceModel.surfaces();
 edgeModel
   .originCenter()
-  .origin(0, 0, 0)
+  .originOffset(0, 0, 0)
   .rotate(0, 0, 90)
   .scaled(2)
   .relate(self => self.start.on(solid.up))
@@ -181,7 +231,7 @@ edgeModel.vertex(1);
 edgeModel.edges();
 vertexModel
   .originCenter()
-  .origin(0, 0, 0)
+  .originOffset(0, 0, 0)
   .rotate(0, 90, 0)
   .scaled(2)
   .relate(self => self.on(solid.up))
@@ -199,7 +249,7 @@ intersect([solid, exposed]);
 loft([faceModel, faceModel.relate(self => self.on(solid.down))], {
   spine: edgeModel,
 });
-constraint.pivot(1, 2, 3).rotate(0, 45, 0);
+constraint.pivot([1, 2, 3]).rotate(0, 45, 0);
 constraint.pivotVertex(1).rotate(0, 0, 90);
 constraint.pivotVertex([1, 3]).rotate(0, 0, 90);
 constraint.around(solid.axis).rotate(45);
@@ -209,7 +259,7 @@ solid.on(solid.center);
 // @ts-expect-error on does not accept a whole target model.
 solid.on(solid);
 // @ts-expect-error unfinished pivot selection is not a Constraint.
-solid.relate(self => self.on(solid.up).pivot(1, 2, 3));
+solid.relate(self => self.on(solid.up).pivot([1, 2, 3]));
 // @ts-expect-error Constraint no longer has flip.
 constraint.flip();
 
@@ -222,6 +272,8 @@ void [
   customSolid,
   definePrimitive,
   ellipse,
+  extrudedFace,
+  extrudedProfile,
   faceModel,
   frustum,
   group,
@@ -321,10 +373,21 @@ groupModel.shell(1);
 // @ts-expect-error The general Model type contains only common capabilities.
 model.scaled(2);
 
-// @ts-expect-error Groups do not contain geometry to rotate.
 groupModel.rotate(0, 90, 0);
-// @ts-expect-error Groups do not expose geometric origin editing.
-groupModel.origin(0, 0, 0);
+groupModel.originOffset(0, 0, 0).originPoint(solid.center);
+model.originPoint(pointAnchor).originOffset(1, 2, 3).rotate(10, 20, 30);
+solid.originPoint(solid.vertex(1)).fillet(1);
+faceModel.originPoint(faceModel.center).surface(1);
+edgeModel.originPoint(edgeModel.start).edge(1);
+vertexModel.originPoint(vertexModel).vertex(1);
+// @ts-expect-error Choose a point on an edge rather than the edge itself.
+solid.originPoint(edgeModel);
+// @ts-expect-error A plane has no unique point.
+solid.originPoint(solid.up);
+// @ts-expect-error Coordinates are offsets, not point references.
+solid.originPoint([1, 2, 3]);
+// @ts-expect-error Groups have no aggregated topology vertex namespace.
+groupModel.originVertex(1);
 // @ts-expect-error Groups do not have a geometric center.
 groupModel.originCenter();
 // @ts-expect-error Center setters do not take coordinates.
@@ -396,3 +459,17 @@ point().align(box(1, 1, 1));
 // @ts-expect-error Points have no curve direction.
 point().center.reverse();
 void [alignPoint, alignCurve, alignSurface];
+
+// @ts-expect-error Positions use an array, not scalar coordinates.
+point(1, 2, 3);
+// @ts-expect-error A line endpoint is a position array.
+line(10, 0, 0);
+// @ts-expect-error Model origin is always local zero and has no setter.
+box(1, 2, 3).origin(1, 2, 3);
+box(1, 2, 3).relate(self =>
+  self
+    .on(box(4, 5, 6).up)
+    // @ts-expect-error A pivot is a position array.
+    .pivot(1, 2, 3)
+    .rotate(0, 0, 90),
+);

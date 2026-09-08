@@ -57,7 +57,7 @@ test('uses face, edge, and vertex topology as relation anchors', () => {
   const edge = line([0, 0, 0], [6, 2, 0]);
   const vertex = point([2, 3, 4]);
   const faceRelated = circle(2).relate(self => self.surface(1).on(face.up));
-  const edgeRelated = line(1, 0, 0).relate(self => self.edge(1).on(edge.up));
+  const edgeRelated = line([1, 0, 0]).relate(self => self.edge(1).on(edge.up));
   const vertexRelated = point().relate(self =>
     self.vertex(1).on(vertex.up).offset(0, 0, 0),
   );
@@ -107,7 +107,7 @@ test('resolves relation placement only inside a composition', () => {
     assert.deepEqual(assemblySnapshot.transform.position, [0, 0, 0]);
     assertVectorNear(
       assemblySnapshot.children[1].transform.position,
-      [2, 3, 4],
+      [1, 1.5, 2],
     );
   } finally {
     disposeModelObjects([target, related, assembly]);

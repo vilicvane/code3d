@@ -1,3 +1,4 @@
+import {argumentExpression} from './argument-path';
 import ts from '@typescript/typescript6';
 import {normalizeProjectPath, type ModelProject} from '../project/project';
 import {
@@ -28,6 +29,7 @@ import type {ProjectLanguage} from '../project/project-language';
 import {ProjectBuilder, type ProjectBundle} from '../project/project-builder';
 import {ModuleEvaluator, type ModuleExports} from './module-evaluator';
 import {code3dAnnotations} from './annotations';
+import {SketchTraceRegistry, type CompiledSketch} from './sketch-trace';
 import {evaluatedConstraint, focusedConstraintSide} from './constraint-context';
 import {
   designArgumentAnnotationSites,
@@ -79,6 +81,7 @@ export type TopologySelectionScope = Readonly<{
 }>;
 
 export type SourceTargetEvaluation = Readonly<{
+  sketchIds?: readonly string[];
   /** A container's members share relation placement, unlike a single value. */
   isCollection?: boolean;
   topologyReferences?: readonly TopologyValueReference[];
@@ -111,6 +114,7 @@ export type SourceTargetEvaluation = Readonly<{
         kind: 'edges';
         inputNodeId: string;
         ids: readonly EdgeId[];
+        scope?: TopologySelectionScope;
       }>
     | Readonly<{
         kind: TopologyKind;
@@ -218,6 +222,7 @@ export type ObjectCatalogEntry = Readonly<{
 }>;
 
 export type ModelModule = Readonly<{
+  sketches: ReadonlyMap<string, CompiledSketch>;
   diagnostic?: ModelDiagnostic;
   fallback?: ModelSnapshotObject;
   objects: ReadonlyMap<string, ModelSnapshotObject>;
@@ -243,6 +248,7 @@ type ParsedDesignArgumentContext = DesignArgumentContext &
   }>;
 
 type ParameterArgument = Readonly<{
+  path: readonly number[];
   name: string;
   label: string;
   kind: ParameterKind;
@@ -253,7 +259,7 @@ type CallParameterTarget = SourceParameterTarget &
 
 type ParameterSignature = Readonly<{
   operation: string;
-  arguments: readonly (ParameterArgument | undefined)[];
+  arguments: readonly ParameterArgument[];
 }>;
 
 type CatalogTrace = {
@@ -281,6 +287,7 @@ type SourceValueTrace = {
     Readonly<{
       objects: readonly ModelObject[];
       isCollection: boolean;
+      sketchIds: readonly string[];
       topologyReferences: readonly TopologyValueReference[];
       anchorReferences: readonly AnchorValueReference[];
       contextId: string;
@@ -397,6 +404,7 @@ export function createModelCompiler(
       runtime.describeOpenCascadeException,
     );
   const tracedObjects = new Set<ModelObject>();
+  const sketches = new SketchTraceRegistry(runtime);
   const sourceValueTraces = new Map<string, SourceValueTrace>();
   const sourceConstraintTraces = new Map<string, SourceConstraintTrace>();
   const sourceElementTraces = new Map<string, SourceElementTrace>();
@@ -457,7 +465,10 @@ export function createModelCompiler(
       } catch (error) {
         executionTrace.outcome = 'failed';
         executionTrace.order = nextSourceReachOrder();
-        const failure = locateModelError(error, callLocation);
+        const failure = locateModelError(
+          error,
+          sketches.constraintErrorSource(error, location) ?? callLocation,
+        );
         executionTrace.failure = failure.diagnostic;
         throw failure;
       } finally {
@@ -467,6 +478,14 @@ export function createModelCompiler(
       executionTrace.outcome = 'completed';
       executionTrace.order = nextSourceReachOrder();
       const runtime = sourceExecutionRuntime(executionTrace);
+      sketches.call(
+        result,
+        traceExecutionKey(id, execution),
+        location,
+        executionTrace.arguments.get(0),
+        executionTrace.arguments.get(1),
+        executionTrace.receiver,
+      );
       if (isConstraintExpression(result)) {
         instrumentConstraint(result, location, parameters);
         recordSourceConstraint(id, location, result, context.id, runtime);
@@ -547,6 +566,7 @@ export function createModelCompiler(
         throw locateModelError(error, location);
       }
       const runtime = completedRuntimeReach();
+      sketches.bind(result, location);
       if (isConstraintExpression(result)) {
         recordSourceConstraint(id, location, result, context.id, runtime);
       } else {
@@ -850,7 +870,8 @@ export function createModelCompiler(
       topologyReferences,
       anchorReferences,
     );
-    if (objects.length === 0) {
+    const sketchIds = runtimeSketchIds(value);
+    if (objects.length === 0 && sketchIds.length === 0) {
       return;
     }
     const key = `${kind}:${id}:${sourceRef.file}:${sourceRef.start}:${sourceRef.end}`;
@@ -863,7 +884,11 @@ export function createModelCompiler(
     };
     sourceTrace.evaluations.push({
       objects,
-      isCollection: !isModelObject(value) && !modelElementReference(value),
+      sketchIds,
+      isCollection:
+        !isModelObject(value) &&
+        sketchIds.length === 0 &&
+        !modelElementReference(value),
       topologyReferences,
       anchorReferences,
       contextId,
@@ -876,6 +901,11 @@ export function createModelCompiler(
       }
     });
     sourceValueTraces.set(key, sourceTrace);
+  }
+
+  function runtimeSketchIds(value: unknown): string[] {
+    if (runtime.isSketch(value)) return [sketches.identity(value)];
+    return [];
   }
 
   function recordSourceConstraint(
@@ -1302,6 +1332,8 @@ export function createModelCompiler(
     latestTracedObject = undefined;
     evaluationOrder = 0;
     sourceReachOrder = 0;
+    sketches.begin(tooling.program);
+    let finishEvaluation: (() => void) | undefined;
     try {
       let modules = new Map<string, Record<string, unknown>>();
       let diagnostic: ModelDiagnostic | undefined;
@@ -1345,7 +1377,7 @@ export function createModelCompiler(
             ),
         });
         onEvaluate?.();
-        beginModelEvaluation();
+        finishEvaluation = beginModelEvaluation();
         const result = await evaluator.evaluate(
           'code3d-project:/model.js',
           bundle.source,
@@ -1391,14 +1423,15 @@ export function createModelCompiler(
         !fallbackObject &&
         !diagnostic &&
         designArguments.length === 0 &&
-        !activeDesignContext
+        !activeDesignContext &&
+        sketches.size === 0
       ) {
         throw new Error(
           'The current program did not produce a renderable ModelObject.',
         );
       }
-      if (diagnostic && fallbackObject) {
-        diagnostic = relateDiagnosticToFallback(diagnostic, fallbackObject);
+      if (diagnostic) {
+        diagnostic = relateDiagnostic(diagnostic, fallbackObject);
       }
 
       const snapshotModel = createModelSnapshotter();
@@ -1436,6 +1469,7 @@ export function createModelCompiler(
       );
       captureGeometry?.(graphObjects);
       return {
+        sketches: sketches.snapshots(),
         diagnostic,
         fallback: fallbackSnapshot,
         objects: objectSnapshots,
@@ -1504,8 +1538,10 @@ export function createModelCompiler(
       // Installed modules may retain model values (including private memoized
       // values). Drop this evaluation's references; Replicad's native wrappers
       // release shapes when their actual owners become unreachable.
+      finishEvaluation?.();
       tracedObjects.clear();
       sourceValueTraces.clear();
+      sketches.clear();
       sourceConstraintTraces.clear();
       sourceElementTraces.clear();
       edgeSelectionSites.clear();
@@ -1585,20 +1621,23 @@ export function createModelCompiler(
     return modelObjectRuntimeInfo(object).sourceRefs;
   }
 
-  function relateDiagnosticToFallback(
+  function relateDiagnostic(
     diagnostic: ModelDiagnostic,
-    fallback: ModelObject,
+    fallback: ModelObject | undefined,
   ): ModelDiagnostic {
     if (diagnostic.kind !== 'evaluation') return diagnostic;
-    const failureInputs = [...sourceExecutionTraces.values()]
-      .filter(execution => execution.failure === diagnostic)
-      .flatMap(execution => [
-        ...execution.inputs.flatMap(input => input.objects),
-        ...modelObjectsIn(execution.receiver),
-      ]);
-    if (failureInputs.length === 0) return diagnostic;
+    const failures = [...sourceExecutionTraces.values()].filter(
+      execution => execution.failure === diagnostic,
+    );
+    const failedEvaluationIds = failures.map(execution =>
+      traceExecutionKey(execution.siteId, execution.execution),
+    );
+    const failureInputs = failures.flatMap(execution => [
+      ...execution.inputs.flatMap(input => input.objects),
+      ...modelObjectsIn(execution.receiver),
+    ]);
     const fallbackNodeIds = new Set(
-      collectObjectGraph([fallback]).map(modelObjectNodeId),
+      collectObjectGraph(fallback ? [fallback] : []).map(modelObjectNodeId),
     );
     const relatedModelNodeIds = [
       ...new Set(
@@ -1607,9 +1646,11 @@ export function createModelCompiler(
           .filter(nodeId => fallbackNodeIds.has(nodeId)),
       ),
     ];
-    return relatedModelNodeIds.length > 0
-      ? {...diagnostic, relatedModelNodeIds}
-      : diagnostic;
+    return {
+      ...diagnostic,
+      ...(failedEvaluationIds.length ? {failedEvaluationIds} : {}),
+      ...(relatedModelNodeIds.length ? {relatedModelNodeIds} : {}),
+    };
   }
 
   function buildSourceTargets(
@@ -1642,6 +1683,7 @@ export function createModelCompiler(
         ({
           objects,
           isCollection,
+          sketchIds,
           topologyReferences,
           anchorReferences,
           contextId,
@@ -1657,6 +1699,7 @@ export function createModelCompiler(
             isCollection,
             runtime,
             nodeIds,
+            sketchIds,
             topologyReferences,
             anchorReferences,
             focusNodeIds:
@@ -1760,6 +1803,11 @@ export function createModelCompiler(
                   kind: 'edges',
                   inputNodeId: selection.inputNodeId,
                   ids: selection.ids,
+                  scope: {
+                    geometryNodeId: selection.inputNodeId,
+                    transform: selection.transform,
+                    availableIds: modelTopologyIds(sourceObject, 'edge')!,
+                  },
                 },
               },
             ];
@@ -1874,13 +1922,19 @@ export function createModelCompiler(
                             sameTopologyId(available, id),
                           ),
                         ),
-                  scope: reference
+                  scope: operationSelection
                     ? {
-                        geometryNodeId: modelObjectNodeId(reference.geometry),
-                        transform: reference.transform,
+                        geometryNodeId: operationSelection.inputNodeId,
+                        transform: operationSelection.transform,
                         availableIds,
                       }
-                    : undefined,
+                    : reference
+                      ? {
+                          geometryNodeId: modelObjectNodeId(reference.geometry),
+                          transform: reference.transform,
+                          availableIds,
+                        }
+                      : undefined,
                 },
               } satisfies SourceTargetEvaluation,
             ];
@@ -2252,7 +2306,10 @@ export function createModelCompiler(
                 })
               : undefined;
             const toolArguments = execution
-              ? numericToolArguments(execution.arguments)
+              ? numericToolArguments(
+                  execution.arguments,
+                  target.tool!.signature,
+                )
               : undefined;
             return toolArguments ? {...evaluation, toolArguments} : evaluation;
           })
@@ -2263,11 +2320,16 @@ export function createModelCompiler(
 
   function numericToolArguments(
     arguments_: ReadonlyMap<number, unknown>,
+    signature: ToolSignatureSchema,
   ): Readonly<Record<number, number>> | undefined {
     const values: Record<number, number> = {};
-    arguments_.forEach((value, index) => {
-      if (typeof value === 'number') values[index] = value;
-    });
+    for (const parameter of signature.parameters) {
+      const [index, ...components] = parameter.path ?? [parameter.index];
+      let value = arguments_.get(index);
+      for (const component of components)
+        value = Array.isArray(value) ? value[component] : undefined;
+      if (typeof value === 'number') values[parameter.index] = value;
+    }
     return Object.keys(values).length > 0 ? values : undefined;
   }
 
@@ -2585,7 +2647,8 @@ export function createModelCompiler(
           if (
             ts.isCallExpression(node) &&
             ts.isCallExpression(visited) &&
-            isTraceableCall(node, sourceFile)
+            isTraceableCall(node, sourceFile) &&
+            !continuesOptionalChain(node)
           ) {
             const siteId = stableSourceId('expression', node, sourceFile);
             const relationSite = relationCallSite(node, sourceFile);
@@ -2646,6 +2709,7 @@ export function createModelCompiler(
             ts.isPropertyAccessExpression(node) &&
             ts.isPropertyAccessExpression(visited) &&
             !ts.isMetaProperty(node.expression) &&
+            !continuesOptionalChain(node) &&
             isReadablePropertyAccess(node)
           ) {
             return traceElementExpression(node, visited, sourceFile, factory);
@@ -2826,6 +2890,18 @@ export function createModelCompiler(
       return false;
     }
     return !(ts.isDeleteExpression(parent) && parent.expression === node);
+  }
+
+  function continuesOptionalChain(node: ts.Node): boolean {
+    const parent = node.parent;
+    return (
+      ts.isOptionalChain(node) &&
+      ts.isOptionalChain(parent) &&
+      (ts.isPropertyAccessExpression(parent) ||
+        ts.isElementAccessExpression(parent) ||
+        ts.isCallExpression(parent)) &&
+      parent.expression === node
+    );
   }
 
   function traceExpression(
@@ -3030,7 +3106,9 @@ export function createModelCompiler(
         ts.isElementAccessExpression(originalAccess)) &&
       (ts.isPropertyAccessExpression(expression) ||
         ts.isElementAccessExpression(expression)) &&
-      originalAccess.expression.kind !== ts.SyntaxKind.SuperKeyword
+      originalAccess.expression.kind !== ts.SyntaxKind.SuperKeyword &&
+      // Do not terminate the short-circuit boundary of an intermediate chain.
+      !ts.isOptionalChain(originalAccess.expression)
     ) {
       const receiver = callInputExpression(
         expression.expression,
@@ -3207,12 +3285,17 @@ export function createModelCompiler(
     sourceFile: ts.SourceFile,
     factory: ts.NodeFactory,
   ): ts.CallExpression {
-    const argumentsWithTracing = visited.arguments.map((argument, index) => {
-      const originalArgument = original.arguments[index];
-      const argumentDefinition = signature.arguments[index];
-      if (!originalArgument || !argumentDefinition) {
-        return argument;
-      }
+    const argumentsWithTracing = [...visited.arguments];
+    for (const argumentDefinition of signature.arguments) {
+      const originalArgument = argumentExpression(
+        original.arguments,
+        argumentDefinition.path,
+      );
+      const argument = argumentExpression(
+        argumentsWithTracing,
+        argumentDefinition.path,
+      );
+      if (!originalArgument || !argument) continue;
 
       const targets = collectExpressionTargets(
         originalArgument,
@@ -3239,10 +3322,10 @@ export function createModelCompiler(
         );
 
       if (targets.length === 0) {
-        return argument;
+        continue;
       }
 
-      return factory.createCallExpression(
+      const traced = factory.createCallExpression(
         factory.createPropertyAccessExpression(
           factory.createIdentifier('__code3d'),
           'parameter',
@@ -3260,7 +3343,19 @@ export function createModelCompiler(
           factory.createArrayLiteralExpression(targets),
         ],
       );
-    });
+      const root = argumentDefinition.path[0];
+      const transformed = ts.transform(argumentsWithTracing[root], [
+        context => node => {
+          const replace: ts.Visitor = child =>
+            child === argument
+              ? traced
+              : ts.visitEachChild(child, replace, context);
+          return ts.visitNode(node, replace, ts.isExpression)!;
+        },
+      ]);
+      argumentsWithTracing[root] = transformed.transformed[0];
+      transformed.dispose();
+    }
 
     return updateCall(
       visited,
@@ -3637,18 +3732,21 @@ export function createModelCompiler(
       sourceRef: sourceRef(sourceFile.fileName, sourceStart, node.getEnd()),
       signature,
       arguments: signature.parameters.map(parameter => {
-        const unknown = spreadIndex >= 0 && parameter.index >= spreadIndex;
+        const path = parameter.path ?? [parameter.index];
+        const unknown =
+          (spreadIndex >= 0 && path[0] >= spreadIndex) ||
+          (path.length > 1 && !argumentExpression(node.arguments, path));
         return {
           name: parameter.name,
           index: parameter.index,
           presence: unknown
             ? 'unknown'
-            : parameter.index < node.arguments.length
+            : path[0] < node.arguments.length
               ? 'present'
               : 'omitted',
           target: unknown
             ? undefined
-            : toolArgumentSource(node, parameter.index, sourceFile),
+            : toolArgumentSource(node, path, sourceFile),
         };
       }),
     };
@@ -3656,10 +3754,20 @@ export function createModelCompiler(
 
   function toolArgumentSource(
     call: ts.CallExpression,
-    index: number,
+    path: readonly number[],
     sourceFile: ts.SourceFile,
   ): ToolArgumentSource['target'] | undefined {
-    const argument = call.arguments[index];
+    const index = path[0];
+    const argument = argumentExpression(call.arguments, path);
+    if (path.length > 1) {
+      if (!argument) return undefined;
+      const location = sourceRef(
+        sourceFile.fileName,
+        argument.getStart(sourceFile),
+        argument.getEnd(),
+      );
+      return {kind: 'present', sourceRef: location, removalSourceRef: location};
+    }
     if (argument) {
       const previous = call.arguments[index - 1];
       const next = call.arguments[index + 1];
@@ -3704,20 +3812,15 @@ export function createModelCompiler(
         !isToolSelectionParameter(parameter),
     );
     if (numericParameters.length === 0) return undefined;
-    const lastIndex = Math.max(
-      ...numericParameters.map(parameter => parameter.index),
-    );
-    const arguments_: Array<ParameterArgument | undefined> = Array.from({
-      length: lastIndex + 1,
-    });
-    numericParameters.forEach(parameter => {
-      arguments_[parameter.index] = {
+    return {
+      operation: schema.name,
+      arguments: numericParameters.map(parameter => ({
         name: parameter.name,
         label: parameter.label,
         kind: parameter.kind,
-      };
-    });
-    return {operation: schema.name, arguments: arguments_};
+        path: parameter.path ?? [parameter.index],
+      })),
+    };
   }
 
   function numericExpressionValue(node: ts.Node): number | undefined {

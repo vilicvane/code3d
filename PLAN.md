@@ -18,6 +18,186 @@ implementation context and historical outcomes, not a competing work queue.
   use the GUI much more broadly because it does not create a second editable
   source of truth.
 - Source code is the only persistent model state. GUI changes write back to it.
+- Sketches use explicit `[kind, ID, data]` tuples: point data is `[x, y]`,
+  line data is `[startPoint, endPoint]`, and circle data is `[centerPoint, radius]`.
+  Point data can instead be a local ID or named upstream point reference:
+  aliases retain author IDs but share one canonical solve point. Dragging follows
+  the canonical owner's edit permissions; explicit point snapping writes an
+  alias on release, without coordinate-based deduplication or replacing expressions.
+  `base.derive([...])` retains locked
+  upstream layers; local numeric point IDs and named `base.point(id)` handles
+  distinguish ownership. IDs are independent per layer; new editor entries use
+  local max + 1, without persistent `nextId` or renumbering surviving entries.
+  Selecting a sketch opens a 2D geometry editor. Literal coordinates and radii can be
+  dragged; expression-driven coordinates stay source-edited. Continuous lines
+  create/reuse endpoints without a standalone point creation tool, with numeric
+  start X/Y or segment length/angle input, X/Y direction locks, dense adaptive
+  snapping, cancellation and one atomic source transaction per segment.
+  `sketch(entries, {constraints})` separates current geometry from hard
+  conditions, without persistent constraint IDs.
+  Constraints use `['kind', target, value?]`, with array targets only for
+  multi-point relations. Dimension values occupy the third tuple field.
+  Fixed point, coincident, horizontal/vertical, length, angle, radius, sweep,
+  midpoint and point X/Y constraints use PlaneGCS;
+  assemblies use explicit rotation/translation bounds. Explicit drawing dimensions and the final
+  active X/Y lock become constraints when geometry is committed; toggling off
+  emits no direction constraint. Grid/axis snapping stays temporary; snapping
+  onto an existing point retains that identity.
+  Dragging uses a soft Worker solve and writes all changed editable coordinates
+  together, preserving hard constraints, upstream values and expression source.
+  Drag rules receive the complete numeric context; the dispatcher does not
+  classify points or partition geometry. Rules recognize curve and
+  rectangle centers for preferred local translation, prefer centers or far connected endpoints
+  as soft references, and handle an unconstrained sole junction per branch.
+  Connectivity and role recognition belong to those rules, not the framework.
+  Ordered soft stages preserve the feasible mouse result, then local translation,
+  then minimize exterior movement. Later stages retain the earlier chosen target
+  parameters for this frame only; hard constraints always hold. Connected external
+  geometry no longer disqualifies a center gesture, and no stage locks persist.
+  First solve for the closest feasible mouse target, then preserve that achieved
+  value while optimizing soft references. No reference point is implicitly fixed;
+  temporary objectives do not enter source or the reported model DOF.
+  A drag rule recognizes points on lines, circles and finite directed arcs from displayed
+  gesture-start geometry using the same model-space tolerance as trimming.
+  Temporary line/radial equations and finite endpoint bounds retain those connections
+  without splitting curves, merging identities or adding author constraints.
+  Interior points can slide; endpoints and followers have soft pose preferences.
+  Unrestricted center moves translate followers, radius gestures preserve their
+  polar directions, and polar drag seeds follow half turns without requiring a
+  local solver to choose the opposite branch. Arc bounds respect CW/CCW and do
+  not include the missing part of the circle. Curves crossed during a gesture
+  do not become sticky. Local points can slide on read-only upstream curves;
+  real constraints and AST locks remain
+  authoritative. Source replay independently checks every original incidence.
+  This does not generate intersection points or persist curve parameters.
+  Movement without authored or inferred equations is kernel-independent; inferred
+  curve connections use the Worker solver as well. Successive frames use the
+  preceding solution and an immutable gesture-start reference; previews
+  forward-solve the exact source data that
+  will be committed. During dragging, AST-derived per-axis locks preserve each
+  expression's evaluated author value; literal axes on the same point remain
+  editable. If those locks alter the displayed geometry, solve them before
+  preparing the rule context. Thus initially unsatisfied data can adjust
+  when dragging begins. Normal evaluation remains numeric-only; expressions
+  receive neither offsets nor permanent constraints. Source replay tests use a
+  fresh compiler, not saved gesture state.
+  Numeric tail cleanup uses local feature scales and independently rechecks all
+  hard constraints and arc structure. Exact input/gesture coordinates take
+  precedence over shorter decimals; source writes serialize the checked numbers
+  losslessly, without a second precision limit.
+  Native convergence, cleanup and geometric tolerance share a feature-local
+  numeric budget. Iterative stage seeds are not promoted to exact authored
+  values, and valid arc data are not reprojected on each forward solve.
+  Deletion removes affected local constraints atomically. Snapshots expose DOF
+  and redundant indices; conflicting inline constraints are source-located.
+  Numeric fields retain native browser text history; SVG nodes retain entity
+  identities across redraws. PlaneGCS 1.2.0 is a pinned, unmodified dependency;
+  native systems and vectors are released after every solve.
+  The two-corner Rectangle tool shares drawing inputs, snapping and source
+  transactions with Line. It emits ordinary points and lines with four
+  horizontal/vertical constraints; entered width/height constrain adjacent
+  sides, not both pairs of equal sides. The whole rectangle is one undo step.
+  Snapped corner references remain local or named upstream references. Center
+  rectangle shares the same implementation with a referenceable ordinary center
+  point, allocated before new corners, and one `midpoint` relationship to opposite
+  corners. Its dimensions are full side lengths. The generic midpoint tuple is
+  `['midpoint', [midpoint, start, end]]`, with no line entity required; two native
+  linear difference equations per axis share a temporary parameter and one
+  diagnostic tag. It works at coincident coordinates without changing already
+  satisfied geometry. The center rule recognizes this authored structure without
+  hidden GUI state; without additional restrictions, dragging its center
+  translates the rectangle. Interactive strokes remain 2px in all highlight states.
+  Curve selection and deletion use intervals delimited by existing
+  points, finite line/circle/arc intersections and overlapping endpoints. Merely crossing
+  or selecting geometry does not split the source. Deleting an end interval
+  retains the line/arc ID; deleting an interior interval retires it and assigns two
+  fresh IDs. Points disconnected by the deletion and their constraints are
+  removed atomically; shared points (including geometric T junctions), upstream
+  points, unrelated standalone points and other lines remain. Computed cuts
+  create ordinary numeric endpoints only when needed. Original full-line length
+  constraints are removed, while direction constraints and their expressions
+  follow surviving lines in the same undo transaction. Upstream geometry can
+  delimit a local trim but remains read-only.
+  All local overlapping pieces on the clicked interval are highlighted and
+  trimmed together, including reversed lines. IDs and direction constraints
+  follow each original line; computed cut points are shared and orphan cleanup
+  runs after the whole batch. Uneditable targets reject the entire transaction.
+  Nearby parallel lines, crossings and read-only upstream are not grouped.
+  The Scissors/Trim tool previews on hover and trims directly on click without
+  selection; Esc exits. Select + Delete/Backspace uses the same transaction.
+  Persistent constraints have read-only glyphs and numeric labels, an overall
+  visibility toggle, and hover/focus highlighting of actual participants.
+  Midpoint guides link the center to its two endpoints; upstream markers are
+  distinct and drag-only locks are not presented as persistent constraints.
+  Circle shares the same drawing, numeric input, snapping and source transaction
+  pipeline. It creates an ordinary center point (or reuses a snapped local/upstream
+  reference) and one analytic circle, not a perimeter point or polyline. Its
+  entered radius emits `['radius', circleId, value]`; an unentered radius remains
+  free. Edge dragging edits radius, center dragging edits the center. Geometry
+  parameters share AST permissions, gesture-only locks, rounding and exact source
+  replay; radius expressions are never overwritten. Native circle radius
+  constraints use PlaneGCS. Equations with locked scalar parameters are checked
+  directly, avoiding zero-Jacobian equations in native redundancy analysis while
+  preserving genuine conflict errors. Radius markers link the actual center and
+  circumference. Deleting a circle removes its affected constraints and only
+  newly disconnected local centers, preserving shared/upstream points.
+  Arcs use `['arc', id, [centerPoint, radius, startPoint, endPoint, 'cw' | 'ccw']]`
+  and native ArcRules, with radius constraints shared with circles. Radius is
+  current geometry, not a hard dimension; no hidden angles are authored.
+  Initialization projects endpoints radially, using an explicit radius dimension
+  when present and current radius data otherwise, averaging simultaneous proposals
+  for shared points while respecting locked/fixed/positioned axes. The seed then
+  solves against all structural and authored constraints, with radius still free.
+  Edge and endpoint dragging share radius tracking, AST permissions, expression
+  locks and exact rounded source replay. Center/start/end drawing supports entered
+  center coordinates, radius and sweep. Drawing defaults to CW, R reverses direction, and one transaction creates
+  or undoes the whole arc. Ordinary point dragging replays the exact rounded source.
+  Analytic curves share finite hit testing, display, bounds, radius badges and
+  orphan cleanup. Whole-arc deletion retains shared/upstream points; zero-radius
+  or coincident-endpoint arcs are errors, not implicit full circles.
+  `['sweep', arcId, degrees]` independently constrains the directed arc angle,
+  strictly between 0 and 360 degrees; the arc tuple still owns cw/ccw. Blank sweep
+  input follows the mouse without a constraint. Native angle parameters unwrap on
+  that directed branch, and residuals check the actual finite arc after solving.
+  Already-known dimensions are verified directly; mouse objectives omit coordinates
+  fixed by authored or gesture locks. Sweep badges link center and both endpoints.
+  Analytic intersections share model-space tolerances, finite-arc filtering and
+  tangency/overlap boundaries. Circles and arcs can delimit straight-line trims,
+  including read-only upstream curves; their source and constraints stay unchanged.
+  Circles use cyclic intervals without an artificial zero-angle seam; zero or one
+  boundary means whole-circle deletion. A surviving circle interval becomes a CW
+  arc with the same ID. Arc trims preserve direction and center/radius source,
+  including expressions; radius constraints follow survivors, while the original
+  whole-arc sweep is removed. Circular overlaps share one trim transaction, cut
+  points and orphan cleanup, just like lines. Select + Delete and hover/click Trim
+  use the same intervals; radius dragging remains available.
+  Closed non-intersecting line/circle/arc contours now produce exact face models:
+  `face()` requires one region (with holes), `faces()` returns an ordinary array.
+  Upstream boundaries, disconnected regions and nested holes/islands are included;
+  open, touching, crossing and branching boundaries diagnose without source edits.
+  Sketch `[x,y]` maps to `[x,0,-y]`. Single-face chain/free extrusion uses a signed
+  finite nonzero distance along the plane normal; collections use explicit `map`.
+  Chain `cut(tools)` delegates to the existing boolean operation. Loft retains zero
+  or one hole per section, diagnosing mismatched counts or unpaired multiple holes.
+  The canvas shares analytic extraction for a noninteractive region fill. Persistent
+  region selection IDs and arbitrary multi-hole loft correspondence remain later work.
+  The sketch canvas fills the viewport with floating controls. Its top-right
+  icon toolbar orders selection, drawing, modification and view controls; rectangle
+  variants share a remembered entry. Right dragging pans without cancelling a draft;
+  the permanent lower-left instructions are gone, while errors/read-only reasons remain.
+  Shift-click multi-selection exposes existing point/line/curve constraint actions;
+  dimensions share drawing numeric entry and a batch is one source edit/undo.
+  Selection Delete retains interval trimming and orphan cleanup. New inter-line
+  constraint kinds remain later work. The toolbar has native hover
+  labels and one keyboard Tab stop; narrow viewports place the whole toolbar
+  below the compilation status. Both viewport
+  status and error cards are scoped to the defining evaluations of the selected
+  sketch and its upstream layers, excluding sibling/downstream and 3D errors.
+  Failed recompilation retains the selected last-successful sketch read-only;
+  leaving its source selection clears it. Monaco still receives all diagnostics.
+  See [research and priorities](plans/sketch-editor.md) and
+  [#23](https://github.com/vilicvane/code3d/issues/23); region identity and modeling
+  selection APIs remain to be confirmed.
 - Author code remains ordinary JavaScript/TypeScript and may freely construct,
   reuse, copy, collect, and derive model values.
 - A real code3d project is an ordinary Node/TypeScript package that owns its
@@ -72,7 +252,7 @@ implementation context and historical outcomes, not a competing work queue.
 - `model.relate(self => constraint | constraints)` creates a new
   semantic-immutable model value that shares geometry and carries the returned
   constraint or constraint array. The callback parameter is that new value.
-  Rendering this value on its own preserves its intrinsic local placement;
+  Rendering this value on its own uses its own local geometry;
   relation placement is resolved only when the value participates in a
   composition.
 - `on` only translates the source's matching support boundary to a directional
@@ -135,20 +315,33 @@ implementation context and historical outcomes, not a competing work queue.
 - Monaco multi-selection and automatic boolean code generation are deferred
   until single-object discovery, rendering, and position relations are solid.
 
-- Geometric models support `origin(x, y, z)`, `originVertex(id)`, `originCenter()`, and additive
-  `originOffset(dx, dy, dz)`. The three setters replace earlier origin state without
-  moving geometry. `rotate(x, y, z)` applies degree rotations about that origin,
-  in fixed local X/Y/Z order, transforming geometry and named anchors while
-  preserving topology IDs. Viewport origin and rotation tools edit the selected
-  call through source transactions. See [#19](https://github.com/vilicvane/code3d/issues/19).
-  Every geometric model exposes a `center` anchor initialized from its body's
-  local bounding box and carried through transforms. `originCenter()` uses
-  that anchor; origin edits never move `center`. Center and vertex origin
-  drags append or edit `originOffset()` through the same source transaction.
-- `scaled(factor)` derives geometric models about local coordinate zero. Geometry,
-  named anchors, `center`, and the origin position scale together while topology
-  IDs are preserved. The factor is positive and finite; groups do not provide
-  geometric scaling. Export unit conversion is a separate output setting.
+- All models provide `originOffset(dx, dy, dz)` and `originPoint(pointRef)`.
+  Geometric models also provide `originVertex(id)` and `originCenter()`. Origin is always model-local zero; an offset d re-expresses
+  all point coordinates as p-d, preserving shape, directions, topology IDs and
+  earlier model values. Centers and named references follow the same transform.
+  `center` is carried from the body's initial bounds rather than recalculated
+  after rotation. See [#48](https://github.com/vilicvane/code3d/issues/48).
+- Coordinates use arrays: `point()` / `point([x, y, z])`, `line([x, y, z])` /
+  `line(start, end)` and `pivot([x, y, z])`. Dimensions, displacement increments
+  and XYZ angles use scalar arguments. Geometric anchor frames retain their
+  tangents and normals independently of the model's fixed XYZ axes; directional
+  bounds and relation pivot XYZ use model axes.
+- `rotate(x, y, z)` and positive finite `scaled(factor)` act about current local
+  zero. Geometry, named anchors and references transform together. Booleans
+  keep the primary operand's coordinates; loft keeps the first section's
+  coordinates. Groups choose their default local zero from the bounding-box
+  center of solved direct member origins, retaining assembly axes; empty groups
+  default to zero. Nested groups contribute only their own origin. This frame
+  is fixed at construction. Group origin edits re-express the assembly together,
+  preserving internal constraints and spacing. Direct `rotate(x, y, z)` rotates
+  the saved assembly about its current origin, retaining nested placements and
+  transforming references, bounds, rendering and export consistently. Point selection shares expose's
+  occurrence resolution and rejects ambiguous repeated sources. Groups have no
+  aggregate vertex IDs or geometric center/scaling capabilities.
+  See [#54](https://github.com/vilicvane/code3d/issues/54).
+- Origin drags freeze the gesture-start snapshot and show a candidate origin
+  against it. Commit switches to result coordinates; cancel restores the start.
+  Coordinate tuple components retain numeric tools and source provenance.
 
 ## Invariants
 
@@ -197,7 +390,7 @@ implementation context and historical outcomes, not a competing work queue.
 - The editor caret resolves the exact source occurrence being inspected. A
   value site renders that value alone. A collection result places its members
   together using their resolved relations, including singleton collections;
-  selecting one member as a value still renders it in its intrinsic frame.
+  selecting one member as a value still renders its own local geometry.
   An operation-input site may also render
   its peer inputs as dimmed context that can switch input focus. Mouse hover
   over source code does not change the viewport. In a layered source scene,
@@ -300,6 +493,29 @@ implementation context and historical outcomes, not a competing work queue.
   input's source target and makes it the new focus; decorations are never
   selection candidates. Normal recompilation preserves an occurrence selection
   when it still exists.
+- Viewport navigation uses Three.js Arcball rotation across both poles, with
+  left-button rotation, right-button panning and wheel/middle-button zoom.
+  Camera distance has no fixed limits; framing follows geometry size, and
+  clipping and distance fog follow zoom.
+  Wheel zoom keeps the focus-plane point under the pointer fixed on screen;
+  wheel input outside the viewport does not navigate the camera.
+  Rotation has a short release inertia, interrupted while a spatial tool owns
+  the drag. Framing and previews use Arcball's live focus after pan or cursor
+  zoom. Resize updates the control bounds; completion previews restore camera
+  up together with position and focus. See [#55](https://github.com/vilicvane/code3d/issues/55).
+- The upper-right coordinate indicator aligns the view to any of its six axis
+  ends in the displayed world or selected occurrence's local frame, preserving
+  the current focus and zoom distance. Clicking the facing endpoint again flips
+  to its opposite side. Double-clicking the indicator restores the default
+  oblique orientation in that frame and fits the model. Positive endpoints have
+  white axis labels; negative endpoints are unlabeled dots. Both actions use a
+  300ms eased rotation, with focus and distance included when resetting.
+  New view requests continue from the displayed pose; direct navigation and
+  spatial tools interrupt transitions. Reduced-motion preferences skip them.
+  Framing uses the limiting horizontal/vertical field of view so narrow
+  viewports still contain the fitted geometry. Axis buttons support
+  Enter/Space; Enter/Space on the indicator itself resets the view. Camera
+  changes stop navigation inertia without changing model selection or source.
 - Viewport occurrence selection leaves the focused geometry's materials
   unchanged; source context dimming carries the primary focus contrast. A
   passive one-pixel screen-space corner bound marks only groups and other
@@ -672,10 +888,14 @@ remain adjustable as implementation evidence arrives.
   instance.
 
 Status: [R-024](requests/closed/R-024-cache-opencascade-operation-results.md)
-is implemented as a bounded, content-addressed kernel-operation LRU covering
+is implemented as a content-addressed kernel-operation cache covering
 solid construction and modification, Boolean prefixes and context regions,
-relative transforms, topology sidecars, bounds, and render meshes. JavaScript
-and provenance are still evaluated afresh. Cache encoding, capacity, and a
+relative transforms, topology sidecars, exact transformed bounds, and render meshes.
+The latest evaluation's full working set is retained, with at most 256 additional
+unused historical entries managed by LRU. The previous and current sets remain
+protected until evaluation and snapshotting finish, avoiding cache thrashing when
+a model exceeds the historical capacity; see [#52](https://github.com/vilicvane/code3d/issues/52).
+JavaScript and provenance are still evaluated afresh. Cache encoding, capacity, and a
 possible lifetime beyond one compiler worker remain adjustable implementation
 choices rather than product semantics.
 
@@ -805,6 +1025,14 @@ topology anchor kinds, ordinary through-section loft, and a curved-spine loft
 between nonparallel circle and rectangle profiles. Host-Chrome validation also
 confirmed App rendering, section/spine source context, and Surface, Edge,
 and Vertex viewport selectors on the new model kinds and loft result.
+
+The generic face extrusion from the sketch work in
+[#23](https://github.com/vilicvane/code3d/issues/23) is integrated independently
+in [#56](https://github.com/vilicvane/code3d/issues/56):
+`face.extrude(distance)` and `extrude(face, distance)` share one kernel operation,
+cache, topology lineage, and source tracing path. Signed non-zero distance follows
+the face's local normal without recentering; the result is an ordinary solid.
+This does not integrate the sketch system itself.
 
 ### 5. Object combination tools
 

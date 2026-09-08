@@ -98,7 +98,7 @@ test('painting a related assembly preserves member identities and exposed topolo
       before.children.map(child => ({...child, color: '#aabbcc'})),
     );
     const [x, y, z] = after.children[1].transform.position;
-    assert.ok(Math.hypot(x, y - 6, z) < 1e-8);
+    assert.ok(Math.hypot(x, y - 3, z) < 1e-8);
     assert.deepEqual(
       defined(modelElementReference(painted.mount)).transform,
       defined(modelElementReference(assembly.mount)).transform,

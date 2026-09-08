@@ -7,6 +7,8 @@ description: 'code3d 所有非临时开发的持续重构原则。USE FOR: 修�
 
 code3d 的项目代码始终保持在当前认知下可达到的最佳抽象和实现。原型阶段不是积累技术债的理由。
 
+涉及坐标构造器、原点、空间变换、关系摆放或组合坐标转换时，同时读取 [code3d coordinate semantics](../code3d-coordinate-semantics/SKILL.md)，按模型局部坐标与相对位置的已确认语义设计和核对实现。
+
 修改三维视口的辅助标记、高亮、关系方向或空间控件时，同时读取 [code3d visualization](../code3d-visualization/SKILL.md)，沿用已确认的尺寸、颜色和几何范围约定。
 
 ## Always refactor

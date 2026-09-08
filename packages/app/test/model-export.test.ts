@@ -173,8 +173,8 @@ export default group([base, top], 'Assembly');`;
       assert.deepEqual(
         bounds.bounds.map(point => point.map(value => Math.round(value))),
         [
-          [-5, -10, -15],
-          [5, 14, 15],
+          [-5, -16, -15],
+          [5, 8, 15],
         ],
       );
       bounds.delete();
@@ -575,3 +575,123 @@ test('export rejects empty, stale, non-solid and invalid parameter requests', ()
 function retainModelGeometry(models: Iterable<Model>) {
   return retainGeometry(Array.from(models, modelObject));
 }
+
+test('rebased coordinates survive STEP encoding and readback', async () => {
+  const model = box(2, 4, 6).originOffset(10, -20, 30);
+  const snapshot = createModelSnapshotter()(model);
+  const geometry = retainModelGeometry([model]);
+  try {
+    const blob = exportModel(
+      geometry,
+      collectExportInstances(scene(snapshot)),
+      defaults,
+    );
+    const imported = await importSTEP(blob);
+    try {
+      const bounds = imported.boundingBox;
+      try {
+        assert.deepEqual(
+          bounds.bounds.map(point => point.map(value => Math.round(value))),
+          [
+            [-11, 18, -33],
+            [-9, 22, -27],
+          ],
+        );
+      } finally {
+        bounds.delete();
+      }
+    } finally {
+      imported.delete();
+    }
+  } finally {
+    geometry.dispose();
+    disposeModelObjects([model]);
+  }
+});
+
+test('nested group point origins and offsets survive rendered placement and STEP readback', async () => {
+  const base = box(10, 10, 10);
+  const cap = box(2, 2, 2).relate(self => self.on(base.up));
+  const selected = group([base, cap])
+    .originPoint(cap.center)
+    .originOffset(2, 4, 6);
+  const model = group([selected]);
+  const geometry = retainModelGeometry([base, cap]);
+  try {
+    const instances = collectExportInstances(
+      scene(createModelSnapshotter()(model)),
+    );
+    assert.deepEqual(
+      instances.map(instance => instance.transform.position.map(Math.round)),
+      [
+        [-2, -10, -6],
+        [-2, -4, -6],
+      ],
+    );
+    const blob = exportModel(geometry, instances, defaults);
+    const imported = await importSTEP(blob);
+    try {
+      const bounds = imported.boundingBox;
+      try {
+        assert.deepEqual(
+          bounds.bounds.map(point => point.map(Math.round)),
+          [
+            [-7, -15, -11],
+            [3, -3, -1],
+          ],
+        );
+      } finally {
+        bounds.delete();
+      }
+    } finally {
+      imported.delete();
+    }
+  } finally {
+    geometry.dispose();
+    disposeModelObjects([model]);
+  }
+});
+
+test('nested group rotation about a selected origin survives rendered placement and STEP readback', async () => {
+  const base = box(10, 10, 10);
+  const cap = box(2, 2, 2).relate(self => self.on(base.up));
+  const selected = group([base, cap])
+    .originPoint(cap.center)
+    .originOffset(2, 4, 6)
+    .rotate(0, 0, 90);
+  const model = group([selected]);
+  const geometry = retainModelGeometry([base, cap]);
+  try {
+    const instances = collectExportInstances(
+      scene(createModelSnapshotter()(model)),
+    );
+    assert.deepEqual(
+      instances.map(instance => instance.transform.position.map(Math.round)),
+      [
+        [10, -2, -6],
+        [4, -2, -6],
+      ],
+    );
+    const blob = exportModel(geometry, instances, defaults);
+    const imported = await importSTEP(blob);
+    try {
+      const bounds = imported.boundingBox;
+      try {
+        assert.deepEqual(
+          bounds.bounds.map(point => point.map(Math.round)),
+          [
+            [3, -7, -11],
+            [15, 3, -1],
+          ],
+        );
+      } finally {
+        bounds.delete();
+      }
+    } finally {
+      imported.delete();
+    }
+  } finally {
+    geometry.dispose();
+    disposeModelObjects([model]);
+  }
+});

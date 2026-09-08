@@ -74,10 +74,10 @@ kill the local processes. Opening the project again restores remaining grants.
 User and agent cursors are independent. Agents appear at their nearest visible
 file or collapsed parent folder in the file tree.
 
-During development the real CLI is globally linked; the public
-`@code3d/cli@0.0.0` package is an empty placeholder. The unversioned `npx` command
-is the same for development and release. A placeholder cannot run this workflow;
-use the linked development package until a real release is published.
+`npx --yes @code3d/cli` downloads the published CLI when needed; version
+`0.0.1-alpha.0` is the first functional release. Development uses the same prompt
+with a built, globally linked checkout. Run `npm link` in `packages/cli`, then
+verify `npx --yes @code3d/cli --help` resolves that checkout.
 
 ## Read context and project files
 

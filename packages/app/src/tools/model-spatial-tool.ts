@@ -44,8 +44,8 @@ export type SpatialBindingObject = Readonly<{
 
 export type ModelSpatialBinding = Readonly<{
   operation:
-    | 'origin'
     | 'originOffset'
+    | 'originPoint'
     | 'originVertex'
     | 'originCenter'
     | 'rotate'
@@ -97,7 +97,10 @@ export function spatialBindings(
   )
     return [];
   const kind = operation.kind;
-  const offsetOrigin = kind === 'originVertex' || kind === 'originCenter';
+  const offsetOrigin =
+    kind === 'originPoint' ||
+    kind === 'originVertex' ||
+    kind === 'originCenter';
   const mode = kind === 'rotate' ? 'rotate' : 'translate';
   const usages = editableParameterUsages(evaluation.parameters ?? []);
   const matching = occurrences.flatMap(candidate => {
@@ -280,7 +283,10 @@ export function spatialIntent(
           return {
             key: object.key,
             nodeId: object.nodeId,
+            // Hold the gesture-start geometry fixed while showing its candidate origin.
+            // Committing re-expresses it in the result frame through originDelta.
             transform: identityRigidTransform,
+            originDelta: origin,
             spatial: {origin, vector},
           };
         }
@@ -344,8 +350,8 @@ export function isSpatialOperation(
   kind: ModelOperationSnapshot['kind'],
 ): kind is Exclude<ModelSpatialBinding['operation'], 'pivot'> {
   return (
-    kind === 'origin' ||
     kind === 'originOffset' ||
+    kind === 'originPoint' ||
     kind === 'originVertex' ||
     kind === 'originCenter' ||
     kind === 'rotate'

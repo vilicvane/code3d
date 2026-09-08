@@ -29,8 +29,8 @@ test(
       const {browserPackageFiles} =
         await import('/src/project/browser-packages.ts');
       const {ModelViewport} = await import('/src/viewport.ts');
-      const {elementSourceDecoration} =
-        await import('/src/model/element-decorations.ts');
+      const {sourceDecorationProviders} =
+        await import('/src/model/source-decorations.ts');
       const client = new ModelCompilerClient(browserPackageFiles);
       const viewport = new ModelViewport(document.querySelector('main')!, {
         onSelect() {},
@@ -38,7 +38,7 @@ test(
         onNavigateSource() {},
         onPositionTool() {},
         onTopologySelection() {},
-        sourceDecorationProviders: [elementSourceDecoration],
+        sourceDecorationProviders,
       });
       const results = [];
       try {
@@ -112,9 +112,13 @@ test(
                 : undefined,
               overlayCount: selection
                 ? viewport['topologySelectionOverlay']?.children.length
-                : viewport['decorationLayers'].get(
-                    'source-context:named-element',
-                  )?.length,
+                : ['named-element', 'relation-geometry'].reduce(
+                    (count, id) =>
+                      count +
+                      (viewport['decorationLayers'].get(`source-context:${id}`)
+                        ?.length ?? 0),
+                    0,
+                  ),
               toolArgument: evaluation.toolArguments?.[0],
             });
             viewport.endTopologySelection();

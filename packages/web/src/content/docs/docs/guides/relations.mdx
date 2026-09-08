@@ -10,9 +10,12 @@ import {appUrl, sitePath} from '../../../../lib/site';
 import source from '../../../../../../app/examples/combined-constraints.ts?raw';
 
 A relation describes how one part sits against another. It is attached to a
-model value and resolved when the parts are composed.
+model value and resolved when the parts are composed. The part keeps its own
+[local coordinates](../../concepts/local-coordinates/): `originOffset()` changes
+those geometry coordinates, while a relation's `offset()` participates in
+placement. Multiple relations are solved together with their offsets.
 
-<ModelExample id="first-model" />
+<ModelExample id="relation-preview" />
 
 ## Touch a directional bound
 
@@ -103,7 +106,7 @@ from a rigid move, so it uses parameter editing instead.
 
 ```ts
 const placed = part.relate(self =>
-  self.on(base.up).pivot(50, 0, 0).rotate(0, 0, 45),
+  self.on(base.up).pivot([50, 0, 0]).rotate(0, 0, 45),
 );
 ```
 
@@ -135,8 +138,8 @@ Relations that involve neither self nor the original receiver are rejected.
 
 ## Inspect the right scope
 
-The related post on its own still displays in its local frame. Select the
-`group` to see the post positioned against the base, or place the cursor in
+The related part on its own still displays in its local frame. Select the
+`group` to see the part positioned against the base, or place the cursor in
 the relation to inspect both participants. Selecting a named anchor or an
 `edge`, `surface`, or `vertex` call keeps the other participant and downstream
 composition peers visible while highlighting the selected anchor.

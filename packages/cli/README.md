@@ -35,10 +35,10 @@ a mutation ID before sending; query it after uncertain outcomes. A `not_sent`
 delivery state concerns only the current attempt, not that ID's earlier history.
 
 See the complete [website agent guide](https://www.code3d.org/docs/guides/agents/)
-([source](../web/src/content/docs/docs/guides/agents.md)) for setup, file operations,
+([Markdown](https://www.code3d.org/docs/guides/agents.md)) for setup, file operations,
 cursor regex, arguments, rendering, topology, types, and recovery.
 
-Development uses the existing global package link; npm `@code3d/cli@0.0.0` is only
-an empty placeholder, not a functional release. `npx --yes @code3d/cli` resolves the
-linked package during development. The same command will use the public package
-once a real version is published.
+`npx --yes @code3d/cli` downloads the published CLI when needed. Development can
+use the same command with a built, globally linked checkout: run `npm link` in
+`packages/cli`, then verify `npx --yes @code3d/cli --help` resolves that checkout.
+Version `0.0.1-alpha.0` is the first functional release.

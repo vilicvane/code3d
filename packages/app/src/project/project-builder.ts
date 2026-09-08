@@ -5,6 +5,15 @@ import {decodeProjectFile, type ProjectFileReader} from './file-reader';
 import type {ProjectAssets} from './project-assets';
 import {ModelDiagnosticError} from '../model/diagnostic';
 
+// Build-time Node supplies its real builtin catalog, including subpaths.
+const nodeBuiltins = new Set(__CODE3D_NODE_BUILTINS__);
+const nodeBuiltin = (specifier: string) =>
+  specifier.startsWith('node:')
+    ? specifier
+    : nodeBuiltins.has(specifier)
+      ? `node:${specifier}`
+      : undefined;
+
 export type SourceTransform = (path: string, source: string) => string;
 export type ModuleFormats = ReadonlyMap<string, 'esm' | 'cjs'>;
 export type ProjectBundle = Readonly<{
@@ -321,11 +330,12 @@ export class ProjectBuilder {
     visit(parsed);
     for (const node of imports.reverse()) {
       const specifier = (node.arguments[0] as ts.StringLiteralLike).text;
-      if (specifier.startsWith('node:')) {
+      const builtin = nodeBuiltin(specifier);
+      if (builtin) {
         source =
           source.slice(0, node.getStart(parsed)) +
           'Promise.reject(new Error(' +
-          JSON.stringify(nodeBuiltinError(specifier).message) +
+          JSON.stringify(nodeBuiltinError(builtin).message) +
           '))' +
           source.slice(node.getEnd());
         continue;

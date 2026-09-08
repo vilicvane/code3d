@@ -13,6 +13,7 @@ export function originDecoration(
     kind: 'anchor',
     id: `${nodeId}:origin`,
     nodeId,
+    frame: 'operation',
     elementKind: 'point',
     layer: 'foreground',
     transform: {...identityRigidTransform, position, scale: [1, 1, 1]},

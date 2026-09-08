@@ -70,6 +70,7 @@ export async function testEvaluatorClass(server: AppTestServer) {
     ) {
       return super.evaluate(url, source, {
         ...context,
+        process: undefined,
         globalThis: Object.defineProperty(
           Object.create(globalThis),
           'process',

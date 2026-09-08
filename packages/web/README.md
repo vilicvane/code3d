@@ -41,7 +41,10 @@ of changing the prompt's destination silently.
 - Example metadata and source contexts: `../app/render-samples/catalog.ts`.
   `sourceContextSets` supplies the tabs, highlighted source tokens, and image
   names for the homepage and interactive example pages. The final context is
-  selected initially. Each token must identify one occurrence in its source.
+  selected initially. Each context must identify one occurrence in its source,
+  with a unique token inside that context. The renderer selects the same catalog
+  entry by context ID, retaining the full source context even when identical
+  method calls occur elsewhere in the file.
 - Generated model images: `src/assets/models/`. Regenerate after changing
   examples, source contexts, or the renderer; CI regenerates them on every build.
 - Site identity and URL helpers: `src/lib/site.ts`.

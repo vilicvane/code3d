@@ -11,11 +11,15 @@ const unpaintedSurfaceOpacity = 0.68;
 const boundaryColor = '#080a07';
 const boundaryOpacity = 0.72;
 
+export type CameraFraming = Readonly<{
+  focus: THREE.Vector3;
+  distance: number;
+}>;
+
 export class ModelRenderer {
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.PerspectiveCamera(42, 1, 0.1, 2000);
   readonly renderer: THREE.WebGLRenderer;
-  private readonly cameraTarget = new THREE.Vector3(0, 20, 0);
 
   constructor(private readonly container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({
@@ -42,9 +46,7 @@ export class ModelRenderer {
     rim.position.set(-80, 55, -65);
     this.scene.add(rim);
 
-    const grid = new THREE.GridHelper(360, 36, '#4b5046', '#282b26');
-    grid.position.y = -0.08;
-    this.scene.add(grid);
+    this.scene.add(createGrid(this.scene.background));
 
     this.camera.position.set(105, 82, 120);
     this.resize();
@@ -60,21 +62,16 @@ export class ModelRenderer {
     this.camera.updateProjectionMatrix();
   }
 
-  frame(
+  framing(
     target: THREE.Object3D,
-    allowZoomIn: boolean,
-    cameraTarget = this.cameraTarget,
+    currentDistance: number,
     additional?: Readonly<{bounds: THREE.Box3; paddingPixels: number}>,
-  ): void {
+  ): CameraFraming | undefined {
     const box = new THREE.Box3().setFromObject(target);
     if (additional) box.union(additional.bounds);
     if (box.isEmpty()) return;
 
     const sphere = box.getBoundingSphere(new THREE.Sphere());
-    const direction = this.camera.position
-      .clone()
-      .sub(cameraTarget)
-      .normalize();
     const availableFraction = additional
       ? Math.max(
           0.25,
@@ -83,22 +80,34 @@ export class ModelRenderer {
               Math.min(this.container.clientWidth, this.container.clientHeight),
         )
       : 1;
-    const fittedDistance = Math.max(
-      (sphere.radius * 2.8) / availableFraction,
-      24,
+    const verticalHalfFov =
+      THREE.MathUtils.degToRad(this.camera.getEffectiveFOV()) / 2;
+    const halfFov = Math.min(
+      verticalHalfFov,
+      Math.atan(Math.tan(verticalHalfFov) * this.camera.aspect),
     );
-    const currentDistance = this.camera.position.distanceTo(cameraTarget);
-    const distance = allowZoomIn
-      ? fittedDistance
-      : Math.max(fittedDistance, currentDistance);
-    cameraTarget.copy(sphere.center);
-    this.camera.position
-      .copy(sphere.center)
-      .addScaledVector(direction, distance);
-    this.camera.lookAt(cameraTarget);
-    this.camera.near = Math.max(distance / 1000, 0.05);
-    this.camera.far = Math.max(distance * 20, 1000);
-    this.camera.updateProjectionMatrix();
+    return {
+      focus: sphere.center,
+      distance: sphere.radius
+        ? sphere.radius / Math.sin(halfFov) / availableFraction
+        : currentDistance,
+    };
+  }
+
+  updateCameraRange(cameraTarget: THREE.Vector3): void {
+    const distance = this.camera.position.distanceTo(cameraTarget);
+    const near = distance / 1000;
+    const far = Math.max(distance * 20, 1000);
+    if (near !== this.camera.near || far !== this.camera.far) {
+      this.camera.near = near;
+      this.camera.far = far;
+      this.camera.updateProjectionMatrix();
+    }
+    const fog = this.scene.fog;
+    if (fog instanceof THREE.Fog) {
+      fog.near = Math.max(180, distance * 2);
+      fog.far = Math.max(430, distance * 5);
+    }
   }
 
   renderFrame(beforeRender?: () => void): void {
@@ -142,6 +151,23 @@ export class ModelRenderer {
     if (!image) throw new Error('The browser could not encode the PNG image.');
     return image;
   }
+}
+
+function createGrid(background: THREE.Color): THREE.GridHelper {
+  const color = background.clone().convertLinearToSRGB();
+  color.setRGB(1 - color.r, 1 - color.g, 1 - color.b, THREE.SRGBColorSpace);
+
+  const grid = new THREE.GridHelper(360, 36);
+  const positions = grid.geometry.getAttribute('position');
+  const colors = new THREE.Float32BufferAttribute(positions.count * 4, 4);
+  for (let index = 0; index < positions.count; index++) {
+    const center = positions.getX(index) === 0 || positions.getZ(index) === 0;
+    colors.setXYZW(index, color.r, color.g, color.b, center ? 0.2 : 0.08);
+  }
+  grid.geometry.setAttribute('color', colors);
+  grid.material.transparent = true;
+  grid.material.depthWrite = false;
+  return grid;
 }
 
 function configureRenderer(

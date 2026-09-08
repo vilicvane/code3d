@@ -159,16 +159,16 @@ export default assembly;`;
       assert.deepEqual(check.available, check.meshIds);
       assert.deepEqual(check.selectedIds, check.available);
       assert.equal(check.ownerKind, 'group');
-      assert.deepEqual(check.guidePosition, [40, 50, 60]);
+      assert.deepEqual(check.guidePosition, [0, 0, 0]);
       assert.equal(check.picked, check.available[0]);
     }
     assert.equal(result.highlightCount, 4);
     assert.ok(
       result.highlightPositions.every(position =>
-        position.every((value, index) => value === [40, 50, 60][index]),
+        position.every((value, index) => value === [0, 0, 0][index]),
       ),
     );
-    assert.deepEqual(result.center, [35, 50, 60]);
+    assert.deepEqual(result.center, [-5, 0, 0]);
     assert.ok(result.markers > 0);
   },
 );

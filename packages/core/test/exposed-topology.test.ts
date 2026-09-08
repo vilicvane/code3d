@@ -88,7 +88,7 @@ test('geometry models expose queryable topology without model operations', () =>
         'relate',
         'expose',
         'paint',
-        'origin',
+        'originOffset',
         'rotate',
         'scaled',
         'fillet',
@@ -125,14 +125,14 @@ test('nested exposure and chained constraints move the containing assembly', () 
     self.mount.center.on(anchor.up).offset(0, 0, 0),
   );
   try {
-    near(position(outer.mount.center), [35, 50, 60]);
-    near(position(outer.component.body.center), [40, 50, 60]);
+    near(position(outer.mount.center), [-5, 0, 0]);
+    near(position(outer.component.body.center), [0, 0, 0]);
     const edge = outer.mount.edges()[0];
     assert.equal(defined(modelTopologyReference(edge)).model, outer);
     assert.equal(defined(modelTopologyReference(edge)).geometry, body);
     assert.equal(defined(modelElementReference(edge.midpoint)).model, outer);
     const snapshot = createModelSnapshotter()(placed);
-    near(snapshot.compositionTransform.position, [-25, -50, -60]);
+    near(snapshot.compositionTransform.position, [15, 0, 0]);
     assert.equal(snapshot.constraints[0].source.nodeId, snapshot.nodeId);
   } finally {
     disposeModelObjects([body, inner, target, moved, outer, anchor, placed]);
@@ -300,13 +300,13 @@ test('querying before or after a geometry transform preserves the same anchor fr
 });
 
 test('exposing a model uses the same geometric anchor as its topology element', () => {
-  const profile = circle(4).origin(0, 10, 0);
+  const profile = circle(4).originOffset(0, 10, 0);
   const path = bezier([
     [0, 0, 0],
     [12, 4, 0],
     [3, 9, 2],
-  ]).origin(8, 8, 8);
-  const location = point([1, 2, 3]).origin(9, 9, 9);
+  ]).originOffset(8, 8, 8);
+  const location = point([1, 2, 3]).originOffset(9, 9, 9);
   const assembly = group([profile, path, location]).expose({
     profile,
     path,

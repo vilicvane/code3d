@@ -311,14 +311,14 @@ test('an already aligned elliptic cylinder section retains its pose', () => {
   near(pose(placed).quaternion, [0, 0, 0, 1]);
 });
 
-test('changing a point model origin does not move its geometric align reference', () => {
+test('rebasing a point changes its local align reference and compensates its solved placement', () => {
   const placed = point([3, 4, 5])
-    .origin(20, 30, 40)
+    .originOffset(20, 30, 40)
     .relate(self => self.align(point([10, 20, 30])));
-  near(position(placed), [7, 16, 25]);
+  near(position(placed), [27, 46, 65]);
   near(
     snapshot(placed).constraints[0].sourceElement.transform.position,
-    [3, 4, 5],
+    [-17, -26, -35],
   );
 });
 

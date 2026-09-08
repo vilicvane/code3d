@@ -5,11 +5,11 @@ export const renderSamples = [
     id: 'first-model',
     title: 'A place to start',
     description:
-      'A rounded base, a cylindrical post, and one relation that brings them together.',
+      'A rounded base and a cylindrical post, assembled directly at a shared origin on their contact plane.',
     category: 'The essentials',
     file: 'website/first-model.ts',
     focus: {context: 'group([base, post])', token: 'group'},
-    tags: ['box', 'cylinder', 'fillet', 'relate', 'group'],
+    tags: ['box', 'cylinder', 'fillet', 'originOffset', 'group'],
   },
   {
     id: 'fastener',
@@ -42,7 +42,7 @@ export const renderSamples = [
     category: 'Custom primitives',
     file: 'custom-primitives.ts',
     focus: {context: 'group(', token: 'group'},
-    tags: ['definePrimitive', 'replicad', '@code3d.param', 'relate'],
+    tags: ['definePrimitive', 'replicad', '@code3d.param', 'originOffset'],
   },
   {
     id: 'shell',
@@ -66,6 +66,16 @@ export const renderSamples = [
       token: 'paint',
     },
     tags: ['relate', 'on', 'pivot', 'rotate', 'loft'],
+  },
+  {
+    id: 'origin-and-rotation',
+    title: 'Choose where a part turns',
+    description:
+      'Choose a corner as the local origin, offset the pivot, rotate the part, and place a companion against it.',
+    category: 'Local coordinates',
+    file: 'origin-and-rotation.ts',
+    focus: {context: 'group([rotated, companion])', token: 'group'},
+    tags: ['originVertex', 'originOffset', 'rotate', 'relate'],
   },
   {
     id: 'geometric-alignment',
@@ -131,7 +141,7 @@ const firstModelContexts = [
     image: 'first-model',
     label: 'See them together',
     description:
-      'Select the group to see both parts with their relation resolved.',
+      'Select the group to see both parts assembled at their shared origin.',
     focus: {context: 'group([base, post])', token: 'group'},
   },
 ] as const;
@@ -148,6 +158,40 @@ export const sourceContextSets: Readonly<
   Record<string, readonly SourceContext[]>
 > = {
   'first-model': firstModelContexts,
+  'origin-and-rotation': [
+    {
+      id: 'corner',
+      image: 'origin-and-rotation-corner',
+      label: 'Corner origin',
+      description:
+        'At originVertex, the chosen corner becomes local zero. The vertex candidates follow the resulting geometry.',
+      focus: {context: 'blank.originVertex(3)', token: 'originVertex'},
+    },
+    {
+      id: 'offset',
+      image: 'origin-and-rotation-offset',
+      label: 'Origin offset',
+      description:
+        'At originOffset, every point has moved by -2 along local Y. The result’s origin remains at zero.',
+      focus: {context: 'pivoted.originOffset(0, 2, 0)', token: 'originOffset'},
+    },
+    {
+      id: 'rotation',
+      image: 'origin-and-rotation-rotated',
+      label: 'Rotate',
+      description:
+        'At rotate, the geometry turns around its current local zero. Named anchors turn with the shape.',
+      focus: {context: 'offset.rotate(15, 35, 0)', token: 'rotate'},
+    },
+    {
+      id: 'assembly',
+      image: 'origin-and-rotation',
+      label: 'Compose',
+      description:
+        'At group, the companion touches the rotated part’s up bound, measured along that part’s local +Y axis.',
+      focus: {context: 'group([rotated, companion])', token: 'group'},
+    },
+  ],
   'relation-preview': [
     {
       id: 'contact',
