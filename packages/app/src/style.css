@@ -1191,16 +1191,17 @@ kbd {
   max-width: calc(100% - 412px);
 }
 .sketch-toolbar {
+  --sketch-tool-inset: 3px;
   position: absolute;
   top: 10px;
   right: 14px;
   z-index: 1;
   display: flex;
-  align-items: center;
-  gap: 8px;
+  align-items: stretch;
+  gap: 0;
   width: fit-content;
   max-width: calc(100% - 28px);
-  padding: 3px;
+  padding: 0;
   border: 1px solid #353831;
   border-radius: 5px;
   background: #11120feb;
@@ -1208,10 +1209,11 @@ kbd {
 }
 .sketch-tool-group {
   display: flex;
+  align-items: center;
   gap: 2px;
+  padding: var(--sketch-tool-inset);
 }
 .sketch-tool-group + .sketch-tool-group {
-  padding-left: 8px;
   border-left: 1px solid var(--line);
 }
 .sketch-tool-variants {
@@ -1479,7 +1481,7 @@ kbd {
 }
 .sketch-canvas .constraint-badge {
   color: #bac78f;
-  cursor: help;
+  cursor: pointer;
   outline: none;
 }
 .sketch-canvas .constraint-badge rect {
@@ -1501,6 +1503,10 @@ kbd {
 }
 .sketch-canvas .constraint-active rect {
   stroke: #dbe9a0;
+}
+.sketch-canvas .constraint-badge:focus-visible rect {
+  stroke: var(--acid);
+  stroke-width: 2;
 }
 .sketch-canvas .constraint-guides {
   color: #818b64;

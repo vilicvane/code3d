@@ -35,14 +35,21 @@ const trim = (
   })),
 });
 
-function setup(source) {
+function setup(source, before = '') {
   let version = 1;
   const undo = [];
-  const sourceRef = {file: '/model.ts', start: 0, end: source.length};
+  const sourceRef = {
+    file: '/model.ts',
+    start: before.length,
+    end: before.length + source.length,
+  };
   const engine = new ToolEngine({
     sourceVersion: () => version,
-    readSource: () => source,
-    resolveSourceRef: () => ({...sourceRef, end: source.length}),
+    readSource: ref => (before + source).slice(ref.start, ref.end),
+    resolveSourceRef: () => ({
+      ...sourceRef,
+      end: before.length + source.length,
+    }),
     applySourceEdits(base, edits) {
       assert.equal(base, version);
       assert.equal(edits.length, 1);
@@ -71,6 +78,105 @@ function setup(source) {
     },
   };
 }
+
+for (const newline of ['\n', '\r\n']) {
+  for (const indentation of ['', '  ', '    ', '\t']) {
+    const unit = indentation + '  ';
+    const entries = `[
+${unit}  ['point', 1, [width, 0]], // keep expression
+${unit}]`;
+    const constraints = `{
+${unit}  constraints: [
+${unit}    ['x', 1, width], // keep constraint
+${unit}  ],
+${unit}}`;
+    const convert = text => text.replaceAll('\n', newline);
+    const before = convert(
+      `function build() {\n${indentation}const value = base.derive(\n${unit}`,
+    );
+    for (const options of ['', `, ${constraints}`, `, {\n${unit}}`]) {
+      test(`generated geometry and constraints use the enclosing indentation ${JSON.stringify([newline, indentation, options])}`, () => {
+        const host = setup(convert(entries + options), before);
+        assert.equal(
+          host.edit({
+            kind: 'append',
+            entries: [['point', 2, [20, 0]]],
+            constraints: [
+              ['y', address(2), 0],
+              ['fixed', address(2)],
+            ],
+          }).status,
+          'committed',
+        );
+        const result = host.source().split(newline);
+        assert.ok(result.includes(`${unit}  ['point', 2, [20, 0]],`));
+        assert.ok(result.includes(`${unit}    ['y', 2, 0],`));
+        assert.ok(result.includes(`${unit}    ['fixed', 2],`));
+        assert.ok(result.includes(`${unit}  constraints: [`));
+        assert.ok(result.includes(`${unit}  ],`));
+        assert.match(host.source(), /\[width, 0\]/);
+        assert.match(host.source(), /\/\/ keep expression/);
+        assert.equal(host.undo.length, 1);
+        if (newline === '\r\n') assert.doesNotMatch(host.source(), /(?<!\r)\n/);
+      });
+    }
+  }
+}
+
+for (const trivia of ['', '/* empty */', '// empty\n']) {
+  test(`creating the first argument in a nested empty call uses its real line indentation (${JSON.stringify(trivia)})`, () => {
+    const host = setup(trivia, 'function build() {\n  const value = sketch(');
+    assert.equal(
+      host.edit({
+        kind: 'append',
+        entries: [['point', 1, [0, 0]]],
+        constraints: [['fixed', address(1)]],
+      }).status,
+      'committed',
+    );
+    assert.equal(
+      host.source(),
+      `${trivia ? trivia + (trivia.endsWith('\n') ? '' : '\n') + '  ' : ''}[
+    ['point', 1, [0, 0]],
+  ], {
+    constraints: [
+      ['fixed', 1],
+    ],
+  }`,
+    );
+  });
+}
+
+test('trim copies curve and constraint expressions with their containing list indentation', () => {
+  const host = setup(
+    `[
+      ['line', 5, [/* a */ 1, 2]],
+    ], {
+      constraints: [
+        ['angle', 5, direction],
+      ],
+    }`,
+    'function build() {\n  return sketch(\n    ',
+  );
+  assert.equal(
+    host.edit(
+      trim(
+        [
+          ['point', 6, [10, 0]],
+          ['point', 7, [20, 0]],
+          ['line', 8, [address(1), address(6)]],
+          ['line', 9, [address(7), address(2)]],
+        ],
+        [{index: 0, lines: [8, 9]}],
+      ),
+    ).status,
+    'committed',
+  );
+  const result = host.source().split('\n');
+  assert.ok(result.includes("      ['line', 8, [/* a */ 1, 6]],"));
+  assert.ok(result.includes("      ['line', 9, [/* a */ 7, 2]],"));
+  assert.ok(result.includes("        ['angle', 9, direction],"));
+});
 
 test('moving a numeric point preserves expressions, comments and tuple identities', () => {
   const source =
@@ -171,6 +277,46 @@ test('removing constraints retains geometry, expressions and surviving comments 
   assert.match(host.source(), /\[width,0\]/);
   assert.match(host.source(), /\[40,0\]/);
   assert.deepEqual(host.undo, [original]);
+});
+
+test('constraint value editing replaces only its exact literal in place and retains full precision', () => {
+  const source =
+    "[['point',1,[0,0]],['point',2,[20,0]],['line',3,[1,2]]], {constraints: [['length',3,20], /* keep duplicate */ ['length',3, /* value */ +20], ['x',1,width]]}";
+  const host = setup(source);
+  assert.deepEqual(
+    [...analyzeSketchSource(source).constraintValues],
+    [
+      [0, 20],
+      [1, 20],
+    ],
+  );
+  assert.equal(
+    host.edit({kind: 'dimension', index: 1, value: 21.12345678912345}).status,
+    'committed',
+  );
+  assert.equal(host.source(), source.replace('+20', '21.12345678912345'));
+  assert.deepEqual(host.undo, [source]);
+  const before = host.source();
+  assert.equal(
+    host.edit({kind: 'dimension', index: 0, value: 30}, source).status,
+    'conflict',
+  );
+  assert.equal(host.source(), before);
+});
+
+test('constraint value editing rejects expressions, missing indices and nonnumeric relations without rewriting source', () => {
+  const source =
+    "[['point',1,[0,0]]], {constraints: [['x',1,width],['y',1,(20)],['fixed',1]]}";
+  const host = setup(source);
+  assert.equal(analyzeSketchSource(source).constraintValues.size, 0);
+  for (const index of [0, 1, 2, 3]) {
+    assert.equal(
+      host.edit({kind: 'dimension', index, value: 30}).status,
+      'unsupported',
+    );
+    assert.equal(host.source(), source);
+  }
+  assert.deepEqual(host.undo, []);
 });
 
 test('appending uses named upstream references and current local IDs without nextId metadata', () => {

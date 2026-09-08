@@ -131,6 +131,18 @@ test('multiple intervals of one source line constrain it once and selected lines
   });
 });
 
+test('coordinate actions name the constrained axis and midpoint selections retain their center-first relationship', () => {
+  const local = lines();
+  const xy = actions([local], [ref(1)]);
+  assert.equal(xy.find(a => a.kind === 'x').name, 'X coordinate');
+  assert.equal(xy.find(a => a.kind === 'y').dimension.label, 'Y coordinate');
+  const midpoint = ['midpoint', [ref(7), ref(1), ref(2)]];
+  const selected = actions([{...local, constraints: [midpoint]}], midpoint[1]);
+  const action = selected.find(a => a.kind === 'midpoint');
+  assert.equal(action.active, true);
+  assert.deepEqual(action.create().removedConstraints, [0]);
+});
+
 test('removing dimensions preserves current editable geometry, expressions and unrelated constraints', () => {
   const local = snapshot(
     [

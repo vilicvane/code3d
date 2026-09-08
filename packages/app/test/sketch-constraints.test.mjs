@@ -46,8 +46,12 @@ test('every persistent constraint exposes its actual participants and value, wit
   );
   assert.equal(new Set(displays.map(d => d.key)).size, constraints.length);
   assert.deepEqual(
+    displays.map(d => d.index),
+    constraints.map((_, index) => index),
+  );
+  assert.deepEqual(
     displays.map(d => d.label),
-    ['', '', '', '', '', '40', '180°', 'X=-2', 'Y=3.5'],
+    ['', '', '', '', '', '40', '180°', '-2', '3.5'],
   );
   for (const index of [1, 2, 5, 6]) {
     assert.deepEqual(displays[index].curve, ref(4));
@@ -95,6 +99,8 @@ test('derived relations retain ownership and distinct upstream/local addresses w
   assert.equal(displays[0].layer, 'base');
   assert.deepEqual(displays[0].points, [upstream]);
   assert.equal(displays[1].layer, 'local');
+  assert.equal(displays[0].index, 0);
+  assert.equal(displays[1].index, 0);
   assert.deepEqual(displays[1].points, [local, upstream]);
   assert.match(displays[1].title, /point 1 \(upstream\)/);
   assert.deepEqual(displays[2].curve, ref(2));

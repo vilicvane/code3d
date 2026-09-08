@@ -49,7 +49,7 @@ function resolveEdit(
       toolId: 'arc',
       baseVersion: 1,
       resolveSourceRef: ref => ref,
-      readSource: () => args,
+      readSource: ref => args.slice(ref.start, ref.end),
     },
   );
   return result;

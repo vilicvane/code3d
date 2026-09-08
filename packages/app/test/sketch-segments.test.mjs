@@ -110,7 +110,7 @@ test('trimmed crossing geometry and direction constraints survive fresh compiler
           toolId: 'trim',
           baseVersion: 1,
           resolveSourceRef: ref => ref,
-          readSource: () => args,
+          readSource: ref => args.slice(ref.start, ref.end),
         },
       );
       assert.equal(resolved.status, 'ready');
@@ -271,7 +271,7 @@ test('circle-delimited line trim preserves boundary expressions and constraints 
         toolId: 'trim',
         baseVersion: 1,
         resolveSourceRef: ref => ref,
-        readSource: () => args,
+        readSource: ref => args.slice(ref.start, ref.end),
       },
     );
     assert.equal(resolved.status, 'ready');

@@ -947,7 +947,10 @@ const value = sketch([
   );
   const badges = page.locator('.constraint-badge');
   assert.equal(await badges.count(), 8);
-  const fixed = page.getByRole('img', {name: 'Fixed · point 1', exact: true});
+  const fixed = page.getByRole('button', {
+    name: 'Fixed · point 1',
+    exact: true,
+  });
   await fixed.hover();
   assert.equal(
     await page.locator('.sketch-canvas .constraint-related').count(),
@@ -958,7 +961,7 @@ const value = sketch([
     /constraint-related/,
   );
   assert.equal(await fixed.locator('svg').getAttribute('aria-hidden'), 'true');
-  const length = page.getByRole('img', {
+  const length = page.getByRole('button', {
     name: 'Length 40 · line 4 · point 1, point 2',
     exact: true,
   });
@@ -977,11 +980,11 @@ const value = sketch([
   );
   assert.equal(
     await page.locator('.constraint-badge[data-kind="x"] text').textContent(),
-    'X=40',
+    '40',
   );
   assert.equal(
     await page.locator('.constraint-badge[data-kind="y"] text').textContent(),
-    'Y=20',
+    '20',
   );
   const before = await text(page);
   await page.getByRole('button', {name: 'Trim', exact: true}).click();

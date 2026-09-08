@@ -83,7 +83,7 @@ function resolve(
       toolId: 'overlap',
       baseVersion: 1,
       resolveSourceRef: ref => ref,
-      readSource: () => source,
+      readSource: ref => source.slice(ref.start, ref.end),
     },
   );
 }

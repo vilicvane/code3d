@@ -125,8 +125,11 @@ implementation context and historical outcomes, not a competing work queue.
   Nearby parallel lines, crossings and read-only upstream are not grouped.
   The Scissors/Trim tool previews on hover and trims directly on click without
   selection; Esc exits. Select + Delete/Backspace uses the same transaction.
-  Persistent constraints have read-only glyphs and numeric labels, an overall
+  Persistent constraints have selectable glyphs and numeric labels, an overall
   visibility toggle, and hover/focus highlighting of actual participants.
+  Clicking a marker selects its participants; local literal dimensions open a
+  focused input and update only that constraint value in one undo transaction.
+  Expression-driven values and upstream constraints remain read-only.
   Midpoint guides link the center to its two endpoints; upstream markers are
   distinct and drag-only locks are not presented as persistent constraints.
   Circle shares the same drawing, numeric input, snapping and source transaction
@@ -193,7 +196,8 @@ implementation context and historical outcomes, not a competing work queue.
   below the compilation status. Both viewport
   status and error cards are scoped to the defining evaluations of the selected
   sketch and its upstream layers, excluding sibling/downstream and 3D errors.
-  Failed recompilation retains the selected last-successful sketch read-only;
+  Recompilation that cannot evaluate the selected sketch retains its last-successful
+  result read-only; downstream/sibling errors do not reset its active drawing/Trim tool.
   leaving its source selection clears it. Monaco still receives all diagnostics.
   See [research and priorities](plans/sketch-editor.md) and
   [#23](https://github.com/vilicvane/code3d/issues/23); region identity and modeling

@@ -98,15 +98,20 @@ export class SketchEditorController {
       : [];
   }
 
-  /** Keep an explicitly selected last-good view when evaluation cannot reach it. */
+  /** Keep an explicitly selected last-good view only when evaluation cannot reach it.
+   * An error after a successful sketch must not put it through a read-only state:
+   * that would cancel the active tool even though this sketch remains editable.
+   */
   retain(
     diagnostic: ModelDiagnostic | undefined,
     cursor: {file: string; offset: number} | undefined,
+    sketches: ReadonlyMap<string, CompiledSketch>,
   ): boolean {
     const selection =
       this.selectionRef && this.host.resolveSourceRef(this.selectionRef);
     if (
       !this.active ||
+      sketches.has(this.active.id) ||
       !diagnostic ||
       !cursor ||
       !selection ||
@@ -191,9 +196,11 @@ export class SketchEditorController {
       source === undefined ? undefined : analyzeSketchSource(source);
     this.editor.show({
       id: this.active.id,
+      revision: this.revision,
       layers: this.layers,
       data: this.data,
       editable: parsed?.editable ?? new Map(),
+      constraintValues: parsed?.constraintValues ?? new Map(),
       referenceable: new Set(Object.keys(this.active.references)),
       readOnlyReason: this.stale
         ? 'Last successful sketch · Editing unavailable until code compiles'
@@ -267,6 +274,14 @@ export class SketchEditorController {
     const copiedConstraints: SketchConstraint<SketchPointAddress>[] = [];
     const constraints = local.constraints.flatMap(
       (constraint, index): SketchConstraint<SketchPointAddress>[] => {
+        if (change.kind === 'dimension' && change.index === index)
+          return [
+            [
+              constraint[0],
+              constraint[1],
+              change.value,
+            ] as SketchConstraint<SketchPointAddress>,
+          ];
         if (
           ((change.kind === 'delete' || change.kind === 'trim') &&
             change.constraints.includes(index)) ||
