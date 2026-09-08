@@ -59,8 +59,13 @@ implementation context and historical outcomes, not a competing work queue.
   then minimize exterior movement. Later stages retain the earlier chosen target
   parameters for this frame only; hard constraints always hold. Connected external
   geometry no longer disqualifies a center gesture, and no stage locks persist.
-  First solve for the closest feasible mouse target, then preserve that achieved
-  value while optimizing soft references. No reference point is implicitly fixed;
+  Arc endpoint gestures first optimize their incident centers' original positions,
+  then the closest feasible mouse target. Free radii can change; constrained radii
+  keep the endpoint on the feasible circle. This also applies when an endpoint
+  is another curve's center: translation seeds use the same projected endpoint
+  position and followers use its achieved movement. See [#61](https://github.com/vilicvane/code3d/issues/61).
+  Other gestures start with the closest feasible mouse target. Subsequent stages
+  preserve achieved values while optimizing soft references. No reference point is permanently fixed;
   temporary objectives do not enter source or the reported model DOF.
   A drag rule recognizes points on lines, circles and finite directed arcs from displayed
   gesture-start geometry using the same model-space tolerance as trimming.

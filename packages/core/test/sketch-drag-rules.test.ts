@@ -439,6 +439,116 @@ test('dragging an arc endpoint preserves the untouched endpoint angle and uses i
   close(point(moved, 3), [0, 10]);
 });
 
+test('both arc endpoints prefer their center before the mouse when radius is constrained', () => {
+  for (const [id, target, expected] of [
+    [2, [24, -18], [8, -6]],
+    [3, [-18, 24], [-6, 8]],
+  ] as const) {
+    for (const expression of [false, true]) {
+      const before = snapshot(
+        arcEntries,
+        expression ? [] : [['radius', 4, 10]],
+      );
+      const moved = solveSketchSnapshot([before], {
+        id,
+        position: target,
+        reference: before,
+        locks: expression ? [{id: 4, parameter: 0, value: 10}] : [],
+      });
+      close(point(moved, 1), [0, 0]);
+      close(point(moved, id), expected);
+      assert.equal(moved.entities.find(e => e.kind === 'arc')!.radius, 10);
+      assert.deepEqual(moved.constraints, before.constraints);
+      assert.equal(moved.degreesOfFreedom, before.degreesOfFreedom);
+      assert.deepEqual(solveSketchSnapshot([moved]).entities, moved.entities);
+    }
+  }
+});
+
+test('arc endpoint center preference permits free radius changes and reverses within a gesture', () => {
+  for (const id of [2, 3]) {
+    const before = snapshot(arcEntries);
+    let current = before;
+    for (const radius of [15, 25, 10]) {
+      const target = id === 2 ? ([radius, 0] as const) : ([0, radius] as const);
+      current = solveSketchSnapshot([current], {
+        id,
+        position: target,
+        reference: before,
+      });
+      close(point(current, 1), [0, 0]);
+      close(point(current, 2), [radius, 0]);
+      close(point(current, 3), [0, radius]);
+      assert.deepEqual(current.constraints, before.constraints);
+      assert.equal(current.degreesOfFreedom, before.degreesOfFreedom);
+      assert.deepEqual(
+        solveSketchSnapshot([current]).entities,
+        current.entities,
+      );
+    }
+    assert.deepEqual(current.entities, before.entities);
+  }
+});
+
+test('an arc endpoint that is another arc center preserves both roles and reachable translation', () => {
+  const before = snapshot(
+    [
+      ...arcEntries,
+      ['point', 5, [13, 0]],
+      ['point', 6, [10, -3]],
+      ['arc', 7, [2, 3, 5, 6, 'cw']],
+    ],
+    [['radius', 4, 10]],
+  );
+  let current = before;
+  for (const [target, expected] of [
+    [
+      [24, -18],
+      [8, -6],
+    ],
+    [
+      [-30, 0],
+      [-10, 0],
+    ],
+    [
+      [30, 0],
+      [10, 0],
+    ],
+  ] as const) {
+    current = solveSketchSnapshot([current], {
+      id: 2,
+      position: target,
+      reference: before,
+    });
+    close(point(current, 1), [0, 0]);
+    close(point(current, 2), expected);
+    close(point(current, 5), [expected[0] + 3, expected[1]]);
+    close(point(current, 6), [expected[0], expected[1] - 3]);
+    const attached = current.entities.find(e => e.id === 7)!;
+    assert.equal(attached.kind, 'arc');
+    assert.equal(attached.radius, 3);
+    assert.deepEqual(solveSketchSnapshot([current]).entities, current.entities);
+  }
+});
+
+test('arc center preference respects an immovable opposite endpoint and temporary coordinate locks', () => {
+  const before = snapshot(arcEntries, [['fixed', 3]]);
+  const moved = solveSketchSnapshot([before], {
+    id: 2,
+    position: [24, -18],
+    reference: before,
+  });
+  close(point(moved, 1), [0, 0]);
+  close(point(moved, 2), [8, -6]);
+  close(point(moved, 3), [0, 10]);
+  const locked = solveSketchSnapshot([snapshot(arcEntries)], {
+    id: 2,
+    position: [24, -18],
+    locks: [{id: 1, parameter: 0, value: 2}],
+  });
+  close([point(locked, 1)[0]], [2]);
+});
+
 test('an unconstrained sole junction applies both arcs own center references', () => {
   const before = snapshot([
     ...arcEntries,
