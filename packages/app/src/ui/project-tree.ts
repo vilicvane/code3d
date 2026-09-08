@@ -6,6 +6,7 @@ import {
   type TreeInstance,
 } from '@headless-tree/core';
 import {ChevronDown, ChevronRight, File, Folder, FolderOpen} from 'lucide';
+import type {AgentLocation} from '../editor';
 import {createIcon} from './icons';
 
 type ProjectTreeNode = Readonly<{
@@ -39,6 +40,7 @@ export class ProjectTree {
   private nodes = projectTreeNodes([]);
   private activePath = '';
   private renderPending = false;
+  private agentLocations: readonly AgentLocation[] = [];
   private readonly tree: TreeInstance<ProjectTreeNode>;
 
   constructor(
@@ -91,10 +93,31 @@ export class ProjectTree {
     }));
   }
 
+  setAgentLocations(locations: readonly AgentLocation[]): void {
+    this.agentLocations = locations;
+    this.scheduleRender();
+  }
+
   private render(): void {
     this.renderPending = false;
     const restoreTreeFocus = this.container.contains(document.activeElement);
-    const rows = this.tree.getItems().map(item => this.renderItem(item));
+    const items = this.tree.getItems();
+    const visibleIds = new Set(items.map(item => item.getId()));
+    const locationsByItem = new Map<string, AgentLocation[]>();
+    for (const location of this.agentLocations) {
+      if (!this.nodes.has(fileId(location.file))) continue;
+      const id = [
+        fileId(location.file),
+        ...ancestorFolderIds(location.file).reverse(),
+      ].find(id => visibleIds.has(id));
+      if (!id) continue;
+      const locations = locationsByItem.get(id) ?? [];
+      locations.push(location);
+      locationsByItem.set(id, locations);
+    }
+    const rows = items.map(item =>
+      this.renderItem(item, locationsByItem.get(item.getId()) ?? []),
+    );
     this.container.replaceChildren(...rows);
     if (restoreTreeFocus) {
       this.tree.getFocusedItem().getElement()?.focus();
@@ -107,7 +130,10 @@ export class ProjectTree {
     queueMicrotask(() => this.render());
   }
 
-  private renderItem(item: ItemInstance<ProjectTreeNode>): HTMLButtonElement {
+  private renderItem(
+    item: ItemInstance<ProjectTreeNode>,
+    locations: readonly AgentLocation[],
+  ): HTMLButtonElement {
     const node = item.getItemData();
     const props = item.getProps() as TreeItemProps;
     const button = document.createElement('button');
@@ -154,6 +180,31 @@ export class ProjectTree {
     label.className = 'project-tree-label';
     label.textContent = node.name;
     button.append(chevron, icon, label);
+    if (locations.length) {
+      const description = locations
+        .map(location => `${location.name}: ${location.file}`)
+        .join('\n');
+      button.title += `\n${description}`;
+      button.setAttribute('aria-description', description);
+      const agents = document.createElement('span');
+      agents.className = 'project-tree-agents';
+      agents.title = description;
+      for (const location of locations.slice(0, 3)) {
+        const marker = document.createElement('span');
+        marker.className = `project-tree-agent agent-color-${location.color}`;
+        marker.title = `${location.name}: ${location.file}`;
+        marker.setAttribute('role', 'img');
+        marker.setAttribute('aria-label', marker.title);
+        agents.append(marker);
+      }
+      if (locations.length > 3) {
+        const remaining = document.createElement('span');
+        remaining.className = 'project-tree-agent-count';
+        remaining.textContent = `+${locations.length - 3}`;
+        agents.append(remaining);
+      }
+      button.append(agents);
+    }
     props.ref(button);
     return button;
   }

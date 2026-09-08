@@ -31,7 +31,10 @@ import {ModuleEvaluator, type ModuleExports} from './module-evaluator';
 import {code3dAnnotations} from './annotations';
 import {SketchTraceRegistry, type CompiledSketch} from './sketch-trace';
 import {evaluatedConstraint, focusedConstraintSide} from './constraint-context';
-import {designArgumentAnnotationSites} from './design-functions';
+import {
+  designArgumentAnnotationSites,
+  designFunctionsIn,
+} from './design-functions';
 import {
   isToolSelectionParameter,
   resolveProjectTooling,
@@ -183,6 +186,15 @@ export type DesignArgumentContext = Readonly<{
     parametersSource: string;
   }>;
 }>;
+
+/** A GUI preset ID or a source-located invocation with optional temporary arguments. */
+export type DesignContext =
+  string | Readonly<{file: string; offset: number; arguments?: string}>;
+type ActiveDesignContext = Pick<
+  DesignArgumentContext,
+  'id' | 'functionId' | 'label' | 'functionRef'
+> &
+  Readonly<{callRef: SourceRef; binding: string; argumentsSource: string}>;
 
 export type ObjectCatalogOccurrence = Readonly<{
   id: string;
@@ -1173,6 +1185,71 @@ export function createModelCompiler(
     return argumentsExpression;
   }
 
+  function selectDesignContext(
+    project: ModelProject,
+    contexts: readonly ParsedDesignArgumentContext[],
+    requested?: DesignContext,
+  ): ActiveDesignContext | undefined {
+    if (!requested) return undefined;
+    if (typeof requested === 'string') {
+      const context = contexts.find(context => context.id === requested);
+      return context && {...context, callRef: context.annotationRef};
+    }
+    const file = project.files.find(file => file.path === requested.file);
+    if (!file)
+      throw modelFailure('project', 'Design invocation file does not exist.');
+    const parsed = ts.createSourceFile(
+      file.path,
+      file.source,
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    const owner = designFunctionsIn(parsed).find(
+      fn =>
+        fn.node.getFullStart() <= requested.offset &&
+        requested.offset <= fn.node.getEnd(),
+    );
+    if (!owner) {
+      if (requested.arguments !== undefined)
+        throw modelFailure(
+          'syntax',
+          'Temporary arguments require a named module-level function.',
+          sourceRef(file.path, requested.offset, requested.offset),
+        );
+      return undefined;
+    }
+    const functionId = `${file.path}:function:${owner.name}`;
+    if (requested.arguments === undefined) {
+      const preset = contexts.find(
+        context => context.functionId === functionId,
+      );
+      return preset && {...preset, callRef: preset.annotationRef};
+    }
+    const callRef = sourceRef(file.path, requested.offset, requested.offset);
+    const expression = parseDesignArgumentsExpression(
+      requested.arguments,
+      callRef,
+    );
+    validateDesignArgumentCount(
+      expression,
+      owner.signatures.at(-1)!.parameters,
+      callRef,
+    );
+    return {
+      id: `${functionId}:temporary`,
+      functionId,
+      label: 'Temporary arguments',
+      functionRef: sourceRef(
+        file.path,
+        owner.node.getFullStart(),
+        owner.node.getEnd(),
+      ),
+      callRef,
+      binding: owner.name,
+      argumentsSource: requested.arguments,
+    };
+  }
+
   function validateDesignArgumentCount(
     argumentsExpression: ts.ArrayLiteralExpression,
     parameters: readonly ts.ParameterDeclaration[],
@@ -1214,7 +1291,7 @@ export function createModelCompiler(
     importModule: (path: string) => Promise<ModuleExports>,
     language: ProjectLanguage,
     sourceGraph: ProjectBundle,
-    requestedDesignContextId?: string,
+    requestedDesignContext?: DesignContext,
     onEvaluate?: () => void,
     captureGeometry?: (objects: readonly ModelObject[]) => void,
   ): Promise<ModelModule> {
@@ -1225,8 +1302,10 @@ export function createModelCompiler(
       parseDesignArgumentContexts(path, source),
     );
     const tooling = resolveProjectTooling(project, language);
-    const activeDesignContext = designArguments.find(
-      context => context.id === requestedDesignContextId,
+    const activeDesignContext = selectDesignContext(
+      project,
+      designArguments,
+      requestedDesignContext,
     );
     const rootPath = normalizeProjectPath(rootModulePath);
     if (!files.has(rootPath)) {
@@ -1344,6 +1423,7 @@ export function createModelCompiler(
         !fallbackObject &&
         !diagnostic &&
         designArguments.length === 0 &&
+        !activeDesignContext &&
         sketches.size === 0
       ) {
         throw new Error(
@@ -1440,11 +1520,10 @@ export function createModelCompiler(
               ],
             };
           }),
-        sourceTargets: buildSourceTargets(
-          operations,
-          objectSnapshots,
-          designArguments,
-        ),
+        sourceTargets: buildSourceTargets(operations, objectSnapshots, [
+          ...designArguments,
+          ...(activeDesignContext ? [activeDesignContext] : []),
+        ]),
         evaluationContexts: [...evaluationContexts.values()],
         designArguments: designArguments.map(
           ({
@@ -1486,7 +1565,7 @@ export function createModelCompiler(
     source: string,
     toolCalls: ToolCallSchemaMap | undefined,
     parameterDefinitions: ParameterDefinitionMap | undefined,
-    designContext?: ParsedDesignArgumentContext,
+    designContext?: ActiveDesignContext,
   ): string {
     const executableSource = designContext
       ? `${source}\n${designEvaluationSource(designContext)}\n`
@@ -1511,10 +1590,8 @@ export function createModelCompiler(
     }
   }
 
-  function designEvaluationSource(
-    context: ParsedDesignArgumentContext,
-  ): string {
-    return `__code3d.design(${JSON.stringify(context.functionRef.file)}, ${context.functionRef.start}, ${context.functionRef.end}, ${context.annotationRef.start}, ${context.annotationRef.end}, ${JSON.stringify(context.id)}, ${JSON.stringify(context.functionId)}, ${JSON.stringify(context.label)}, () => ${context.binding}(...(${context.argumentsSource})));`;
+  function designEvaluationSource(context: ActiveDesignContext): string {
+    return `__code3d.design(${JSON.stringify(context.functionRef.file)}, ${context.functionRef.start}, ${context.functionRef.end}, ${context.callRef.start}, ${context.callRef.end}, ${JSON.stringify(context.id)}, ${JSON.stringify(context.functionId)}, ${JSON.stringify(context.label)}, () => ${context.binding}(...(${context.argumentsSource})));`;
   }
 
   function collectObjectGraph(roots: Iterable<ModelObject>): ModelObject[] {
@@ -1579,7 +1656,10 @@ export function createModelCompiler(
   function buildSourceTargets(
     operations: ReadonlyMap<string, ModelOperationSnapshot>,
     objects: ReadonlyMap<string, ModelSnapshotObject>,
-    designArguments: readonly ParsedDesignArgumentContext[],
+    designArguments: readonly Pick<
+      DesignArgumentContext,
+      'functionId' | 'functionRef'
+    >[],
   ): SourceTarget[] {
     const operationsByOutputNodeId = new Map(
       [...operations.values()].map(operation => [
@@ -2405,7 +2485,10 @@ export function createModelCompiler(
 
   function designFunctionAt(
     sourceRef: SourceRef,
-    designArguments: readonly ParsedDesignArgumentContext[],
+    designArguments: readonly Pick<
+      DesignArgumentContext,
+      'functionId' | 'functionRef'
+    >[],
   ): string | undefined {
     return designArguments
       .filter(
@@ -3871,8 +3954,12 @@ export function createModelCompiler(
 
   return {
     compileProject,
-    designContextFile(project: ModelProject, id?: string): string | undefined {
+    designContextFile(
+      project: ModelProject,
+      id?: DesignContext,
+    ): string | undefined {
       if (!id) return undefined;
+      if (typeof id !== 'string') return id.file;
       for (const file of project.files) {
         const context = parseDesignArgumentContexts(
           file.path,

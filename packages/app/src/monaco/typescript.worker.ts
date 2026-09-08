@@ -5,6 +5,7 @@ import {
   type TypeScriptSelectionRange,
 } from 'monaco-editor/language/typescript/ts.worker';
 import {AnnotationLanguageService} from './annotation-language-service';
+import {cursorTypeInfo} from './type-info';
 import {
   typeScriptFileName,
   typeScriptWorkerRequests,
@@ -39,6 +40,10 @@ const completionFormatSettings = {
 
 class ProjectTypeScriptWorker extends TypeScriptWorker {
   private readonly annotations = new AnnotationLanguageService(this);
+
+  async getProjectTypeInfo(file: string, start: number, end: number) {
+    return cursorTypeInfo(this.getLanguageService(), file, start, end);
+  }
 
   override async getSemanticDiagnostics(fileName: string) {
     const diagnostics = await super.getSemanticDiagnostics(fileName);

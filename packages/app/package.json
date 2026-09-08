@@ -17,6 +17,7 @@
     "test:types": "node ../../node_modules/typescript/bin/tsc --noEmit -p test/tsconfig.json"
   },
   "dependencies": {
+    "@code3d/agent": "*",
     "@code3d/core": "*",
     "@code3d/screws": "*",
     "@headless-tree/core": "^1.7.0",

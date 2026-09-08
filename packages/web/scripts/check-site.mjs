@@ -10,6 +10,21 @@ const site = new URL(process.env.CODE3D_SITE_URL || 'https://code3d.invalid/');
 const base = site.pathname.replace(/\/$/, '');
 const pages = new Map();
 const issues = [];
+const agentGuide = await readFile(
+  path.join(directory, 'docs/guides/agents.md'),
+  'utf8',
+);
+assert.ok(agentGuide.startsWith('# Work with an agent\n'));
+assert.ok(agentGuide.includes('project.c3d.json serve'));
+assert.ok(agentGuide.includes('project.c3d.json context'));
+for (const [, href] of agentGuide.matchAll(/\]\(([^)]+)\)/g)) {
+  if (href.startsWith('/')) {
+    const local = new URL(href, site).pathname
+      .slice(base.length)
+      .replace(/^\//, '');
+    await stat(path.join(directory, local));
+  }
+}
 
 function walk(node, visit) {
   visit(node);
