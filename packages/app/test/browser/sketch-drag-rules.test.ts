@@ -6,6 +6,76 @@ import {trimmedArcSketchArguments} from '../sketch-fixtures.ts';
 const arc = `['point', 1, [0, 0]], ['point', 2, [10, 0]],
   ['point', 3, [0, 10]], ['arc', 4, [1, 10, 2, 3, 'ccw']]`;
 
+test('the common last stage minimizes an intermediate endpoint movement without pulling the mouse back', async t => {
+  const page = await open(
+    t,
+    `import {sketch} from '@code3d/core';
+const value = sketch([
+  ['point', 1, [0, 0]], ['point', 2, [10, 0]],
+  ['point', 3, [10, 10]], ['point', 4, [20, 10]],
+  ['line', 5, [1, 2]], ['line', 6, [2, 3]], ['line', 7, [3, 4]],
+], {constraints: [['length', 5, 10]]});`,
+  );
+  await page.getByRole('button', {name: 'Snap', exact: true}).click();
+  const original = await text(page);
+  const positions = await Promise.all(
+    [1, 2, 3, 4].map(async id => {
+      const box = (await point(page, id).boundingBox())!;
+      return {x: box.x + box.width / 2, y: box.y + box.height / 2};
+    }),
+  );
+  const [start, endpoint] = positions;
+  const target = {x: start.x, y: start.y - 50};
+  const radius = endpoint.x - start.x;
+  const distance = Math.hypot(endpoint.x - target.x, endpoint.y - target.y);
+  const expected = [
+    target,
+    {
+      x: target.x + ((endpoint.x - target.x) * radius) / distance,
+      y: target.y + ((endpoint.y - target.y) * radius) / distance,
+    },
+    ...positions.slice(2),
+  ];
+  const verify = async (points: typeof positions) => {
+    for (const [index, position] of points.entries())
+      await page.waitForFunction(
+        ({id, position}) => {
+          const box = document
+            .querySelector(`.sketch-canvas circle.local[data-id="${id}"]`)!
+            .getBoundingClientRect();
+          return (
+            Math.hypot(
+              box.x + box.width / 2 - position.x,
+              box.y + box.height / 2 - position.y,
+            ) < 0.2
+          );
+        },
+        {id: index + 1, position},
+      );
+  };
+  for (const cancel of [true, false]) {
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    await page.mouse.move(target.x, target.y, {steps: 5});
+    await verify(expected);
+    assert.equal(await text(page), original);
+    if (cancel) await page.keyboard.press('Escape');
+    await page.mouse.up();
+    if (cancel) {
+      await verify(positions);
+      assert.equal(await text(page), original);
+    }
+  }
+  await waitForSource(page, /'point',\s*1,\s*\[0,\s*(?!0\])/);
+  await page.getByText('Ready', {exact: true}).waitFor();
+  await verify(expected);
+  assert.doesNotMatch(await text(page), /'fixed'/);
+  await page.keyboard.press('Control+z');
+  await waitForSource(page, /'point',\s*1,\s*\[0,\s*0\]/);
+  await verify(positions);
+  assert.equal(await text(page), original);
+});
+
 test('a fixed neighbor does not leave tails after an arc center grid drag, recompile and undo', async t => {
   const page = await open(
     t,

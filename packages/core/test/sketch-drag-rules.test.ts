@@ -12,6 +12,7 @@ import {
 } from '../bld/tooling/index.js';
 import {
   createSketchDragSession,
+  solveSketchDrag,
   solveSketchDragPlan,
 } from '../bld/library/sketch-drag-rules.js';
 import {
@@ -87,6 +88,181 @@ const connectedConstraints: readonly SketchConstraint[] = [
   ['vertical', 9],
   ['horizontal', 14],
 ];
+
+test('every remaining point prefers its gesture-start position after the rule stages', () => {
+  const reference: SketchSolveProblem = {
+    points: [
+      {position: [0, 0], locked: [false, false]},
+      {position: [10, 0], locked: [false, false]},
+      {position: [10, 10], locked: [false, false]},
+      {position: [50, 40], locked: [false, false]},
+      {position: [4, 30], locked: [true, false]},
+      {position: [80, 80], locked: [true, true]},
+    ],
+    lines: [
+      [0, 1],
+      [1, 2],
+    ],
+    circles: [],
+    arcs: [],
+    constraints: [{kind: 'horizontal', points: [0, 1]}],
+  };
+  const original = structuredClone(reference);
+  // A preceding feasible solve is a seed, not the new soft-stay reference.
+  let current: SketchSolveProblem = {
+    ...reference,
+    points: reference.points.map((p, i) => ({
+      ...p,
+      position: (
+        [
+          [3, 6],
+          [17, 6],
+          [10, 10],
+          [55, 43],
+          [4, 38],
+          [80, 80],
+        ] as const
+      )[i],
+    })),
+  };
+  for (const position of [
+    [4, 8],
+    [-3, -5],
+    [0, 0],
+  ] as const) {
+    const result = solveSketchDrag(
+      current,
+      {kind: 'point', point: 0, position},
+      reference,
+    );
+    close(result.positions[0], position);
+    close(result.positions[1], [10, position[1]]);
+    for (const index of [2, 3, 4, 5])
+      close(result.positions[index], reference.points[index].position);
+    current = {
+      ...current,
+      points: current.points.map((p, i) => ({
+        ...p,
+        position: result.positions[i],
+      })),
+    };
+  }
+  assert.deepEqual(reference, original);
+  assert.deepEqual(current.constraints, original.constraints);
+  assert.deepEqual(
+    current.points.map(p => p.locked),
+    original.points.map(p => p.locked),
+  );
+});
+
+test('radius gestures also restore otherwise unaddressed points without overriding radial followers', () => {
+  const reference: SketchSolveProblem = {
+    points: [
+      {position: [0, 0], locked: [false, false]},
+      {position: [10, 0], locked: [false, false]},
+      {position: [0, 10], locked: [false, false]},
+      {position: [30, 40], locked: [false, false]},
+    ],
+    lines: [],
+    circles: [],
+    arcs: [
+      {center: 0, radius: 10, locked: false, points: [1, 2], direction: 'ccw'},
+    ],
+    constraints: [],
+  };
+  const current: SketchSolveProblem = {
+    ...reference,
+    points: reference.points.map((p, i) =>
+      i === 3 ? {...p, position: [35, 45]} : p,
+    ),
+  };
+  const result = solveSketchDrag(
+    current,
+    {kind: 'radius', curve: 'arc', index: 0, value: 15},
+    reference,
+  );
+  close(result.positions[0], [0, 0]);
+  close(result.positions[1], [15, 0]);
+  close(result.positions[2], [0, 15]);
+  close(result.positions[3], [30, 40]);
+  close(result.arcRadii, [15]);
+});
+
+test('the last stage chooses the closest remaining endpoint without persistent locks', () => {
+  const before = snapshot(
+    [
+      ['point', 1, [0, 0]],
+      ['point', 2, [10, 0]],
+      ['point', 3, [10, 10]],
+      ['point', 4, [20, 10]],
+      ['point', 8, 2],
+      ['line', 5, [1, 8]],
+      ['line', 6, [2, 3]],
+      ['line', 7, [3, 4]],
+    ],
+    [['length', 5, 10]],
+  );
+  let current = before;
+  for (const position of [
+    [0, 5],
+    [-5, 3],
+    [0, 0],
+  ] as const) {
+    current = solveSketchSnapshot([current], {
+      id: 1,
+      position,
+      reference: before,
+    });
+    const distance = Math.hypot(10 - position[0], position[1]);
+    close(point(current, 1), position);
+    close(point(current, 2), [
+      position[0] + ((10 - position[0]) * 10) / distance,
+      position[1] - (position[1] * 10) / distance,
+    ]);
+    assert.deepEqual(point(current, 8), point(current, 2));
+    assert.deepEqual(point(current, 3), [10, 10]);
+    assert.deepEqual(point(current, 4), [20, 10]);
+    assert.deepEqual(current.constraints, before.constraints);
+    assert.equal(current.degreesOfFreedom, before.degreesOfFreedom);
+    assert.deepEqual(solveSketchSnapshot([current]).entities, current.entities);
+  }
+  assert.deepEqual(current.entities, before.entities);
+});
+
+test('aliases do not bias the common soft-stay compromise between coupled points', () => {
+  for (const aliases of [0, 1, 5]) {
+    const before = snapshot(
+      [
+        ['point', 1, [0, 0]],
+        ['point', 2, [-10, 0]],
+        ['point', 3, [10, 0]],
+        ['point', 4, [30, 20]],
+        ['point', 5, [40, 20]],
+        ['line', 6, [1, 2]],
+        ['line', 7, [2, 4]],
+        ['line', 8, [4, 5]],
+        ...Array.from({length: aliases}, (_, i): SketchEntry => [
+          'point',
+          10 + i,
+          2,
+        ]),
+      ],
+      [['midpoint', [1, 2, 3]]],
+    );
+    const moved = solveSketchSnapshot([before], {
+      id: 1,
+      position: [0, 5],
+      reference: before,
+    });
+    close(point(moved, 1), [0, 5]);
+    close(point(moved, 2), [-10, 5]);
+    close(point(moved, 3), [10, 5]);
+    close(point(moved, 4), [30, 20]);
+    close(point(moved, 5), [40, 20]);
+    assert.deepEqual(moved.constraints, before.constraints);
+    assert.equal(moved.degreesOfFreedom, before.degreesOfFreedom);
+  }
+});
 
 test('dragging circle and arc centers preserves their radii before following the mouse', () => {
   for (const kind of ['circle', 'arc'] as const) {
@@ -181,29 +357,37 @@ test('ordered stages retain achieved soft compromises and hard locks without mut
     const solved = solveSketchDragPlan({
       problem,
       stages: [
-        () => [{kind: 'point', point: 0, position: [50, y], weight: 1}],
-        () => [],
-        reached => {
-          close(reached.points[0].position, [0, y]);
-          return [
-            {
-              kind: 'point',
-              point: 1,
-              position: [reached.points[0].position[0] + 10, y],
-              weight: 1,
-            },
-            {kind: 'radius', curve: 'circle', index: 0, value: 6, weight: 1},
-            {kind: 'radius', curve: 'circle', index: 0, value: 10, weight: 1},
-          ];
+        {
+          objectives: () => [
+            {kind: 'point', point: 0, position: [50, y], weight: 1},
+          ],
         },
-        reached => {
-          close([reached.circles[0].radius], [8]);
-          return [
-            {kind: 'point', point: 0, position: [99, 99], weight: 1},
-            {kind: 'point', point: 1, position: [99, 99], weight: 1},
-            {kind: 'radius', curve: 'circle', index: 0, value: 99, weight: 1},
-            {kind: 'point', point: 2, position: [4, 6], weight: 1},
-          ];
+        {objectives: () => []},
+        {
+          objectives: reached => {
+            close(reached.points[0].position, [0, y]);
+            return [
+              {
+                kind: 'point',
+                point: 1,
+                position: [reached.points[0].position[0] + 10, y],
+                weight: 1,
+              },
+              {kind: 'radius', curve: 'circle', index: 0, value: 6, weight: 1},
+              {kind: 'radius', curve: 'circle', index: 0, value: 10, weight: 1},
+            ];
+          },
+        },
+        {
+          objectives: reached => {
+            close([reached.circles[0].radius], [8]);
+            return [
+              {kind: 'point', point: 0, position: [99, 99], weight: 1},
+              {kind: 'point', point: 1, position: [99, 99], weight: 1},
+              {kind: 'radius', curve: 'circle', index: 0, value: 99, weight: 1},
+              {kind: 'point', point: 2, position: [4, 6], weight: 1},
+            ];
+          },
         },
       ],
     });
@@ -320,6 +504,101 @@ test('staged compromises clean exact coordinates before retaining them, across s
   }
 });
 
+test('local translation renews its follower seed after the feasible center is known', () => {
+  for (const scale of [1e-8, 1, 1e8]) {
+    const reference: SketchSolveProblem = {
+      points: [
+        [-20, -10],
+        [20, -10],
+        [20, 5],
+        [-20, 5],
+        [0, 5],
+        [-10, 5],
+        [10, 5],
+      ].map(([x, y]) => ({
+        position: [x * scale, y * scale],
+        locked: [false, false],
+      })),
+      lines: [
+        [0, 1],
+        [1, 2],
+        [3, 0],
+        [2, 6],
+        [5, 3],
+      ],
+      circles: [{center: 4, radius: 2.5 * scale, locked: false}],
+      arcs: [
+        {
+          center: 4,
+          radius: 10 * scale,
+          locked: false,
+          points: [5, 6],
+          direction: 'cw',
+        },
+      ],
+      constraints: [
+        {kind: 'horizontal', points: [0, 1]},
+        {kind: 'vertical', points: [1, 2]},
+        {kind: 'horizontal', points: [2, 6]},
+        {kind: 'vertical', points: [3, 0]},
+        {kind: 'horizontal', points: [5, 3]},
+        {kind: 'fixed', point: 2, position: [20 * scale, 5 * scale]},
+      ],
+    };
+    const target = {
+      kind: 'point' as const,
+      point: 4,
+      position: [0, 15 * scale] as const,
+    };
+    const plan = createSketchDragSession({reference, target})(
+      reference,
+      target,
+    );
+    const translation = plan.stages.find(stage => stage.seed)!;
+    // Captured feasible mouse-stage geometry: the right endpoint is tangent to
+    // its fixed-height line, while the left still carries an earlier angle.
+    const reached: SketchSolveProblem = {
+      ...reference,
+      points: reference.points.map((p, i) => ({
+        ...p,
+        position: (
+          [
+            [-20, -10],
+            [20, -10],
+            [20, 5],
+            [-20, 14.9999740124],
+            [0, 15],
+            [-10, 14.9999740124],
+            [4.464e-7, 5],
+          ] as const
+        )[i].map(v => v * scale) as [number, number],
+        locked: i === 4 ? [true, true] : p.locked,
+      })),
+      circles: reference.circles.map(c => ({...c, locked: true})),
+      arcs: reference.arcs.map(a => ({...a, locked: true})),
+    };
+    const original = structuredClone(reached);
+    const objectives = translation.objectives(reached);
+    const seeded = translation.seed!(reached, objectives);
+    assert.deepEqual(seeded.points[4], reached.points[4]);
+    assert.deepEqual(seeded.points[5].position, [-10 * scale, 15 * scale]);
+    assert.deepEqual(seeded.constraints, reached.constraints);
+    assert.deepEqual(seeded.arcs, reached.arcs);
+    assert.deepEqual(seeded.circles, reached.circles);
+    const solved = solveSketchDragPlan({
+      problem: reached,
+      stages: [translation],
+    });
+    assert.equal(solved.positions[5][1], 15 * scale);
+    assert.equal(solved.positions[3][1], 15 * scale);
+    assert.deepEqual(solved.positions[4], target.position);
+    assert.deepEqual(solved.positions[2], [20 * scale, 5 * scale]);
+    assert.equal(solved.positions[6][1], 5 * scale);
+    assert.deepEqual(solved.arcRadii, [10 * scale]);
+    assert.deepEqual(reached, original);
+  }
+});
+
 test('a connected arc center carries an on-arc point before minimizing exterior movement', () => {
   const before = snapshot(
     [
@@ -367,7 +646,7 @@ test('rule dispatch passes the whole untouched context and stops at the first ma
       seen.push(2);
       return (problem, next) => ({
         problem,
-        stages: [() => [{...next, weight: 1}]],
+        stages: [{objectives: () => [{...next, weight: 1}]}],
       });
     },
     () => {
