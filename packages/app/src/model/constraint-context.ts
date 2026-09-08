@@ -16,6 +16,22 @@ export function evaluatedConstraint(
   );
 }
 
+export function evaluatedConstraints(
+  objects: ReadonlyMap<string, ModelSnapshotObject>,
+  evaluation: SourceTargetEvaluation,
+): readonly ConstraintSnapshot[] {
+  if (evaluation.relationContext) {
+    const ids = new Set(evaluation.relationContext.constraintIds);
+    return (
+      objects
+        .get(evaluation.constraintOwnerNodeId ?? '')
+        ?.constraints.filter(constraint => ids.has(constraint.id)) ?? []
+    );
+  }
+  const constraint = evaluatedConstraint(objects, evaluation);
+  return constraint ? [constraint] : [];
+}
+
 export function focusedConstraintSide(
   evaluation: SourceTargetEvaluation,
   constraint: ConstraintSnapshot,

@@ -43,7 +43,7 @@ export function designArgumentAnnotationSites(
   });
 }
 
-function designFunctionsIn(sourceFile: ts.SourceFile): DesignFunction[] {
+export function designFunctionsIn(sourceFile: ts.SourceFile): DesignFunction[] {
   const functions: DesignFunction[] = [];
   const statements = sourceFile.statements;
   for (let index = 0; index < statements.length; index += 1) {

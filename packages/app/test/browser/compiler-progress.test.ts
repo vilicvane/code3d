@@ -127,7 +127,7 @@ test(
 );
 
 test(
-  'ignores cancelled progress while preserving in-flight runtime preparation',
+  'terminates cancelled preparation and loads the latest project in a new worker',
   {timeout: 120_000},
   async t => {
     const page = await fixture(t);
@@ -157,11 +157,7 @@ test(
       'loading-project',
       'loading-runtime',
     ]);
-    assert.deepEqual(result.next, [
-      'loading-project',
-      'compiling-model',
-      'evaluating-model',
-    ]);
+    assert.deepEqual(result.next, ['loading-compiler', ...runtimePhases]);
     assert.equal(result.diagnostic, undefined);
   },
 );
@@ -248,50 +244,50 @@ test('can retry a failed compiler download', {timeout: 120_000}, async t => {
 });
 
 test(
-  'long model execution has no deadline and can be cancelled for a fresh worker',
+  'execution can exceed 15 seconds and a new compile terminates a stuck worker',
   {timeout: 120_000},
   async t => {
     const page = await fixture(t);
     const result = await page.evaluate(async () => {
       const phases: CompilationPhase[] = [];
       const recovered: CompilationPhase[] = [];
-      const deadlines: (number | undefined)[] = [];
-      const setTimeout = window.setTimeout;
-      window.setTimeout = (callback, delay, ...args) => {
-        deadlines.push(delay);
-        return setTimeout(callback, delay, ...args);
-      };
       try {
-        let error;
-        try {
-          await compile(phase => {
-            phases.push(phase);
-            if (phase === 'evaluating-model') {
-              // Cross the old deadline, then explicitly replace the stuck model.
-              setTimeout(() => client.cancel(), 16_000);
-            }
-          }, 'while (true) {}');
-        } catch (failure) {
-          if (!(failure instanceof Error)) throw failure;
-          error = failure.message;
-        }
-        window.setTimeout = setTimeout;
+        let started!: () => void;
+        const evaluating = new Promise<void>(resolve => {
+          started = resolve;
+        });
+        let settled = false;
+        const stuck = compile(phase => {
+          phases.push(phase);
+          if (phase === 'evaluating-model') started();
+        }, 'while (true) {}').then(
+          () => {
+            settled = true;
+            return '';
+          },
+          error => {
+            settled = true;
+            return (error as Error).message;
+          },
+        );
+        await evaluating;
+        await new Promise(resolve => window.setTimeout(resolve, 16_000));
+        const stillRunning = !settled && client.isCompiling();
         const model = await compile(phase => recovered.push(phase));
         return {
           phases,
           recovered,
-          deadlines,
-          error,
+          stillRunning,
+          error: await stuck,
           diagnostic: model.diagnostic,
         };
       } finally {
-        window.setTimeout = setTimeout;
         client.dispose();
       }
     });
     assert.equal(result.phases.at(-1), 'evaluating-model');
-    assert.deepEqual(result.deadlines, [120_000]);
-    assert.match(result.error!, /Compilation superseded/);
+    assert.equal(result.stillRunning, true);
+    assert.match(result.error, /Compilation superseded/);
     assert.deepEqual(result.recovered, ['loading-compiler', ...runtimePhases]);
     assert.equal(result.diagnostic, undefined);
   },

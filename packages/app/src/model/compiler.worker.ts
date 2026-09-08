@@ -44,62 +44,39 @@ const compiler = new ProjectCompiler(
   },
   esbuild,
 );
-let queued: CompileRequest | undefined;
-let currentId: number | undefined;
-let running = false;
 let compileId: number | undefined;
 
-async function drain(): Promise<void> {
-  if (running) return;
-  running = true;
+// The client serializes requests and terminates this Worker when superseding
+// in-flight work. Completed runs retain the initialized kernel for later edits.
+async function compile(request: CompileRequest): Promise<void> {
+  compileId = undefined;
   try {
-    while (queued) {
-      const request = queued;
-      queued = undefined;
-      currentId = request.id;
-      try {
-        if (!engineReady) {
-          send({kind: 'progress', id: request.id, phase: 'loading-compiler'});
-          engineReady = esbuild
-            .initialize({wasmURL: esbuildWasmUrl, worker: false})
-            .catch(error => {
-              engineReady = undefined;
-              throw error;
-            });
-        }
-        await engineReady;
-        if (currentId !== request.id || queued) continue;
-        const module = await compiler.compile(
-          request.project,
-          request.rootPath,
-          request.designContextId,
-          language => send({kind: 'language', id: request.id, language}),
-          phase => {
-            if (
-              phase === 'evaluating-model' &&
-              (currentId !== request.id || queued)
-            )
-              throw new Error('Compilation superseded.');
-            send({kind: 'progress', id: request.id, phase});
-          },
-        );
-        if (currentId === request.id) {
-          compileId = request.id;
-          send({kind: 'result', id: request.id, ok: true, module});
-        }
-      } catch (error) {
-        if (currentId === request.id)
-          send({
-            kind: 'result',
-            id: request.id,
-            ok: false,
-            diagnostic: diagnosticFromError(error, 'project'),
-          });
-      }
+    if (!engineReady) {
+      send({kind: 'progress', id: request.id, phase: 'loading-compiler'});
+      engineReady = esbuild
+        .initialize({wasmURL: esbuildWasmUrl, worker: false})
+        .catch(error => {
+          engineReady = undefined;
+          throw error;
+        });
     }
-  } finally {
-    running = false;
-    currentId = undefined;
+    await engineReady;
+    const module = await compiler.compile(
+      request.project,
+      request.rootPath,
+      request.designContext,
+      language => send({kind: 'language', id: request.id, language}),
+      phase => send({kind: 'progress', id: request.id, phase}),
+    );
+    compileId = request.id;
+    send({kind: 'result', id: request.id, ok: true, module});
+  } catch (error) {
+    send({
+      kind: 'result',
+      id: request.id,
+      ok: false,
+      diagnostic: diagnosticFromError(error, 'project'),
+    });
   }
 }
 
@@ -109,12 +86,8 @@ workerScope.onmessage = ({data}: MessageEvent<CompilerRequest>) => {
     pendingFiles.delete(data.id);
     if (data.error) pending?.reject(new Error(data.error));
     else pending?.resolve(data.value);
-  } else if (data.kind === 'cancel') {
-    if (queued?.id === data.id) queued = undefined;
-    if (currentId === data.id) currentId = undefined;
   } else if (data.kind === 'sketch') {
     try {
-      if (running || queued) throw new Error('Waiting for the updated sketch.');
       send({
         kind: 'sketch',
         id: data.id,
@@ -129,14 +102,19 @@ workerScope.onmessage = ({data}: MessageEvent<CompilerRequest>) => {
         diagnostic: diagnosticFromError(error),
       });
     }
-  } else if (data.kind === 'export') {
+  } else if (data.kind === 'export' || data.kind === 'topology') {
     try {
-      if (running || queued || compileId !== data.compileId)
+      if (compileId !== data.compileId)
         throw new Error(
           'The model has changed. Reopen export after compilation finishes.',
         );
-      const blob = compiler.export(data.instances, data.options);
-      send({kind: 'export', id: data.id, ok: true, blob});
+      if (data.kind === 'export') {
+        const blob = compiler.export(data.instances, data.options);
+        send({kind: 'export', id: data.id, ok: true, blob});
+      } else {
+        const topology = compiler.inspectTopology(data.nodeId, data.options);
+        send({kind: 'topology', id: data.id, ok: true, topology});
+      }
     } catch (error) {
       send({
         kind: 'result',
@@ -146,8 +124,6 @@ workerScope.onmessage = ({data}: MessageEvent<CompilerRequest>) => {
       });
     }
   } else {
-    compileId = undefined;
-    queued = data;
-    void drain();
+    void compile(data);
   }
 };

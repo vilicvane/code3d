@@ -262,3 +262,175 @@ export async function measureRelationFocus() {
     client.dispose();
   }
 }
+
+export async function measureCompletedRelationFocus() {
+  const client = new ModelCompilerClient(browserPackageFiles);
+  const viewport = new ModelViewport(
+    document.querySelector<HTMLElement>('main')!,
+    {
+      onSelect() {},
+      onDrillDown() {},
+      onNavigateSource() {},
+      onPositionTool() {},
+      onTopologySelection() {},
+      sourceDecorationProviders: [
+        elementSourceDecoration,
+        relationSourceDecoration,
+      ],
+    },
+  );
+  const samples: Array<{
+    reverse: boolean;
+    token: string;
+    exported: boolean;
+    selected: string;
+    expectedSelected: string;
+    constraintCount: number;
+    bodies: Array<{
+      nodeId: string;
+      role: string;
+      surface: boolean;
+      opacity: number;
+      color: string;
+    }>;
+    markers: Array<{
+      nodeId: string;
+      primary: boolean;
+      kind: string;
+      opacity: number;
+    }>;
+    participantIds: string[];
+  }> = [];
+  try {
+    for (const reverse of [false, true]) {
+      const source = `import {box,group} from '@code3d/core';
+export const old = box(20,10,20).paint('#ff4d81');
+export const base = box(20,10,20).paint('#ff4d81');
+export const front = box(20,10,20).paint('#ff4d81');
+export const other = box(2,2,2).originOffset(-30,0,0).paint('#ff4d81');
+const original = ${reverse ? 'group([box(2,2,2),box(1,1,1)])' : 'box(2,2,2)'}.paint('#ff4d81')
+  .relate(self => ${reverse ? 'old.on(self.up)' : 'self.on(old.up)'});
+export const part = original.relate( /* whole */ self => [
+  ${reverse ? 'base.on(self.up)' : 'self.on(base.up)'},
+  ${reverse ? 'front.on(self.back)' : 'self.on(front.front)'},
+] /* completed */ );
+export default group([part,base,front,old,other]);`;
+      const module = await client.compile(
+        {files: [{path: '/main.ts', source}]},
+        '/main.ts',
+      );
+      if (module.diagnostic) throw new Error(JSON.stringify(module.diagnostic));
+      viewport.renderModule(module);
+      const id = (name: string) => module.exports.get(name)!;
+      for (const token of [
+        'relate(',
+        '/* whole */',
+        '/* completed */',
+        reverse ? 'base.on(' : 'self.on(base',
+      ]) {
+        viewport.selectBySourceOffset(
+          '/main.ts',
+          source.lastIndexOf(token) + (token === 'self.on(base' ? 6 : 1),
+        );
+        const scope = viewport.sourceEvaluation()!;
+        const whole = !!scope.evaluation.relationContext;
+        const selected = reverse && !whole ? id('base') : id('part');
+        const secondary = new Set(
+          whole
+            ? [id('base'), id('front')]
+            : [reverse ? id('part') : id('base')],
+        );
+        const bodies: (typeof samples)[number]['bodies'] = [];
+        const markers: (typeof samples)[number]['markers'] = [];
+        let exporting = false;
+        for (const root of viewport['root'].children) {
+          const nodeId: string =
+            root.userData.sourceNodeId ??
+            viewport['occurrences'].get(root.userData.selectionKey)?.node
+              .nodeId;
+          const role =
+            nodeId === selected
+              ? 'primary'
+              : secondary.has(nodeId)
+                ? 'secondary'
+                : 'context';
+          root.traverse(object => {
+            if (!(object instanceof THREE.Mesh || object instanceof THREE.Line))
+              return;
+            const material = Array.isArray(object.material)
+              ? object.material[0]
+              : object.material;
+            if (!(
+              material instanceof THREE.MeshStandardMaterial ||
+              material instanceof THREE.LineBasicMaterial
+            ))
+              return;
+            const before = object.onBeforeRender;
+            object.onBeforeRender = (...args) => {
+              before.apply(object, args);
+              if (exporting && args[2] === viewport['camera']) return;
+              bodies.push({
+                nodeId,
+                role,
+                surface: object instanceof THREE.Mesh,
+                opacity: material.opacity,
+                color: material.color.getHexString(),
+              });
+            };
+          });
+        }
+        for (const instance of viewport['decorationLayers'].get(
+          'source-context:relation-geometry',
+        ) ?? []) {
+          const decoration: ViewportDecoration =
+            instance.object.children[0].userData.decoration;
+          instance.object.traverse(object => {
+            if (!(object instanceof THREE.Mesh || object instanceof THREE.Line))
+              return;
+            const material = Array.isArray(object.material)
+              ? object.material[0]
+              : object.material;
+            const before = object.onBeforeRender;
+            object.onBeforeRender = (...args) => {
+              before.apply(object, args);
+              if (exporting && args[2] === viewport['camera']) return;
+              markers.push({
+                nodeId: decoration.nodeId!,
+                primary: decoration.nodeId === selected,
+                kind: decoration.kind,
+                opacity: material.opacity,
+              });
+            };
+          });
+        }
+        const capture = (exported: boolean) =>
+          samples.push({
+            reverse,
+            token,
+            exported,
+            selected: viewport.getSelected()!.node.nodeId,
+            expectedSelected: selected,
+            constraintCount:
+              scope.evaluation.relationContext?.constraintIds.length ?? 1,
+            bodies: [...bodies],
+            markers: [...markers],
+            participantIds: whole
+              ? [id('part'), id('base'), id('front')]
+              : [id('part'), id('base')],
+          });
+        viewport['rendering'].renderFrame();
+        capture(false);
+        if (token === 'relate(') {
+          bodies.length = 0;
+          markers.length = 0;
+          exporting = true;
+          await viewport.captureImage(1200, 800);
+          capture(true);
+        }
+      }
+    }
+    return samples;
+  } finally {
+    client.dispose();
+  }
+}

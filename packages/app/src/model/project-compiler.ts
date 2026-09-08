@@ -1,6 +1,11 @@
 import type * as esbuild from 'esbuild-wasm';
 import ts from '@typescript/typescript6';
-import type {ModelGeometrySnapshot, SketchSnapshot} from '@code3d/core/tooling';
+import type {
+  ModelGeometrySnapshot,
+  SketchSnapshot,
+  TopologyInspection,
+  TopologyInspectionOptions,
+} from '@code3d/core/tooling';
 import {ProjectFileCache} from '../project/file-cache';
 import type {ProjectFileReader} from '../project/file-reader';
 import {ProjectPackages} from '../project/project-packages';
@@ -11,7 +16,11 @@ import {
   type ProjectLanguage,
 } from '../project/project-language';
 import {normalizeProjectPath, type ModelProject} from '../project/project';
-import {createModelCompiler, type ModelModule} from './compiler';
+import {
+  createModelCompiler,
+  type DesignContext,
+  type ModelModule,
+} from './compiler';
 import {ProjectRuntime} from './project-runtime';
 import {
   previewSketchDrag,
@@ -54,7 +63,7 @@ export class ProjectCompiler {
   async compile(
     project: ModelProject,
     rootPath: string,
-    designContextId?: string,
+    designContext?: DesignContext,
     onLanguage?: (language: ProjectLanguage) => void,
     onProgress?: CompilationProgress,
   ): Promise<ModelModule> {
@@ -137,7 +146,7 @@ export class ProjectCompiler {
     const root = normalizeProjectPath(rootPath);
     const contextFile = this.compiler!.designContextFile(
       project,
-      designContextId,
+      designContext,
     );
     const discovery = await this.runtime.loadDependencies(
       builder,
@@ -155,7 +164,7 @@ export class ProjectCompiler {
       this.runtime.importModule,
       language,
       discovery,
-      designContextId,
+      designContext,
       () => onProgress?.('evaluating-model'),
       objects => {
         this.geometry = this.runtime!.tooling.retainModelGeometry(objects);
@@ -190,6 +199,15 @@ export class ProjectCompiler {
   dispose(): void {
     this.disposeRuntime();
     this.evaluator.dispose();
+  }
+
+  inspectTopology(
+    nodeId: string,
+    options: TopologyInspectionOptions,
+  ): TopologyInspection {
+    if (!this.geometry)
+      throw new Error('The model geometry snapshot is unavailable.');
+    return this.geometry.inspect(nodeId, options);
   }
 
   get compiledBytes(): number {

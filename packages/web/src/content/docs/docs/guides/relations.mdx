@@ -15,7 +15,7 @@ model value and resolved when the parts are composed. The part keeps its own
 those geometry coordinates, while a relation's `offset()` participates in
 placement. Multiple relations are solved together with their offsets.
 
-<ModelExample id="first-model" />
+<ModelExample id="relation-preview" />
 
 ## Touch a directional bound
 
@@ -138,8 +138,8 @@ Relations that involve neither self nor the original receiver are rejected.
 
 ## Inspect the right scope
 
-The related post on its own still displays in its local frame. Select the
-`group` to see the post positioned against the base, or place the cursor in
+The related part on its own still displays in its local frame. Select the
+`group` to see the part positioned against the base, or place the cursor in
 the relation to inspect both participants. Selecting a named anchor or an
 `edge`, `surface`, or `vertex` call keeps the other participant and downstream
 composition peers visible while highlighting the selected anchor.
@@ -173,6 +173,14 @@ the other reference in the same constraint, and the remaining related objects.
 The current pair uses the same yellow-green marker color. The selected side
 keeps each marker's normal opacity; the other side uses 70% of that opacity.
 Other related geometry stays dimmed in gray.
+
+On the `relate` method name or the call area outside its callback, the completed
+part is selected. All references used by this `relate` call share the second
+highlight level, including references from multiple returned constraints. Other
+inputs of the downstream composition stay at the third, dimmed level. Earlier
+inherited constraints still affect the solved position, but their references do
+not become second-level highlights unless the current call also uses them.
+Entering an individual constraint returns to its existing step-by-step preview.
 
 On `self.on(...)` or `self.align(...)`, and through the following `offset`,
 `pivot`, `pivotVertex`, `around`, and `rotate` calls, self is selected. Inside

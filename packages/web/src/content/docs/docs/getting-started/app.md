@@ -130,3 +130,10 @@ Right-click the viewport and choose **Export model…** for STEP, STL, or 3MF,
 or **Export image…** for PNG. Model export follows the foreground source
 context you are inspecting. See [exporting models](../../guides/exporting/)
 for format, scale, and orientation settings.
+
+## Work with a local agent
+
+Use **Connect Agent** to name an agent and copy its private connection prompt.
+The agent starts a session-managed local CLI service and operates on the open
+project without restarting its conversation. See the [agent guide](../../guides/agents/)
+for setup, source changes, observations, and connection recovery.

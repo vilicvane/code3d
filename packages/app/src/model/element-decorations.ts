@@ -13,7 +13,10 @@ import type {
   ViewportDecoration,
 } from '../viewport-decoration';
 import type {ModelModule, SourceTargetEvaluation} from './compiler';
-import {evaluatedConstraint, focusedConstraintSide} from './constraint-context';
+import {
+  evaluatedConstraints,
+  focusedConstraintSide,
+} from './constraint-context';
 import {boundAppearance} from '../rendering/bound-appearance';
 
 const elementAppearance = {
@@ -61,7 +64,7 @@ function sourceElementReferences(evaluation: SourceTargetEvaluation) {
 export const elementSourceDecoration = {
   id: 'named-element',
   decorations({module, evaluation}) {
-    if (evaluatedConstraint(module.objects, evaluation)) return [];
+    if (evaluatedConstraints(module.objects, evaluation).length > 0) return [];
     return sourceElementReferences(evaluation).flatMap(reference => {
       const node = module.objects.get(reference.nodeId);
       return node ? namedElementDecorations(node, reference) : [];
@@ -365,44 +368,48 @@ const secondaryRelationMarkerOpacity = 0.7;
 export const relationSourceDecoration: SourceDecorationProvider = {
   id: 'relation-geometry',
   decorations({module, evaluation}) {
-    const constraint = evaluatedConstraint(module.objects, evaluation);
-    if (!constraint) return [];
-    const focus = focusedConstraintSide(evaluation, constraint);
-    return (['source', 'target'] as const).flatMap(side => {
-      const node = module.objects.get(constraint[side].nodeId);
-      if (!node) return [];
-      const element =
-        side === 'source' ? constraint.sourceElement : constraint.targetElement;
-      const decorations: readonly ViewportDecoration[] =
-        constraint.kind === 'align'
-          ? alignedElementDecorations(module, node, element)
-          : [
-              ...(side === 'source'
-                ? [
-                    {
-                      kind: 'bounds' as const,
-                      id: 'bounds',
-                      nodeId: node.nodeId,
-                      ...constraint.sourceBounds,
-                      appearance: boundAppearance,
-                    },
-                  ]
-                : []),
-              ...namedElementDecorations(node, element),
-            ];
-      const opacity = side === focus ? 1 : secondaryRelationMarkerOpacity;
-      return decorations.map(decoration => ({
-        ...decoration,
-        id: `${constraint.id}:${side}:${decoration.id}`,
-        appearance: {
-          ...decoration.appearance,
-          opacity: (decoration.appearance.opacity ?? 1) * opacity,
-          edgeOpacity: decoration.appearance.edgeColor
-            ? (decoration.appearance.edgeOpacity ?? 1) * opacity
-            : undefined,
-        },
-      }));
-    });
+    return evaluatedConstraints(module.objects, evaluation).flatMap(
+      constraint => {
+        const focus = focusedConstraintSide(evaluation, constraint);
+        return (['source', 'target'] as const).flatMap(side => {
+          const node = module.objects.get(constraint[side].nodeId);
+          if (!node) return [];
+          const element =
+            side === 'source'
+              ? constraint.sourceElement
+              : constraint.targetElement;
+          const decorations: readonly ViewportDecoration[] =
+            constraint.kind === 'align'
+              ? alignedElementDecorations(module, node, element)
+              : [
+                  ...(side === 'source'
+                    ? [
+                        {
+                          kind: 'bounds' as const,
+                          id: 'bounds',
+                          nodeId: node.nodeId,
+                          ...constraint.sourceBounds,
+                          appearance: boundAppearance,
+                        },
+                      ]
+                    : []),
+                  ...namedElementDecorations(node, element),
+                ];
+          const opacity = side === focus ? 1 : secondaryRelationMarkerOpacity;
+          return decorations.map(decoration => ({
+            ...decoration,
+            id: `${constraint.id}:${side}:${decoration.id}`,
+            appearance: {
+              ...decoration.appearance,
+              opacity: (decoration.appearance.opacity ?? 1) * opacity,
+              edgeOpacity: decoration.appearance.edgeColor
+                ? (decoration.appearance.edgeOpacity ?? 1) * opacity
+                : undefined,
+            },
+          }));
+        });
+      },
+    );
   },
 };
 

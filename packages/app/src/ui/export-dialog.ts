@@ -16,7 +16,8 @@ export class ExportDialog {
       export(): Promise<{blob: Blob; fileName: string}>;
     },
   ) {
-    this.dialog.className = 'viewport-export-dialog';
+    this.dialog.className = 'app-dialog viewport-export-dialog';
+    this.form.className = 'app-dialog-content';
     this.dialog.setAttribute('aria-label', options.title);
     const heading = document.createElement('header');
     const title = document.createElement('h2');
@@ -27,10 +28,10 @@ export class ExportDialog {
     this.status.hidden = true;
     this.status.setAttribute('role', 'status');
     this.submit.type = 'submit';
-    this.submit.className = 'viewport-export-submit';
+    this.submit.className = 'dialog-button button-primary';
     this.submit.textContent = 'Export';
     this.cancel.type = 'button';
-    this.cancel.className = 'viewport-export-cancel';
+    this.cancel.className = 'dialog-button';
     this.cancel.textContent = 'Cancel';
     const actions = document.createElement('footer');
     actions.append(this.cancel, this.submit);

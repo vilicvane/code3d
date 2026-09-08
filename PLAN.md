@@ -445,6 +445,12 @@ implementation context and historical outcomes, not a competing work queue.
   while final model geometry and exports remain unchanged. An unsolvable prefix
   reports a local preview diagnostic without invalidating a solvable final model.
   See [#44](https://github.com/vilicvane/code3d/issues/44).
+- The completed `relate` call scope focuses its final output and renders all
+  references added by that invocation at secondary emphasis, with downstream
+  composition peers at the third level. Only newly added constraints contribute
+  markers; inherited constraints still affect the solved pose. Callback scopes
+  retain their individual stage previews, and standalone bindings remain local.
+  See [#58](https://github.com/vilicvane/code3d/issues/58).
 - Relation marker focus follows source scopes: on/align methods and later
   chain operations (including their arguments) emphasize self; the target
   argument range, including whitespace and nested expressions, emphasizes the
@@ -627,7 +633,11 @@ Remaining scope and live status: [#2](https://github.com/vilicvane/code3d/issues
   occurrences without inferring them from B-Rep topology.
 - When the caret is on an operation input, render dimmed peer context that can
   be clicked to switch input focus; a declaration or value expression remains
-  isolated.
+  isolated. Origin operations, rotation, and scaling also show peers from the
+  concrete downstream composition while retaining the selected operation's
+  geometry and tools. The current operation and its consumer have separate
+  identities; later values of the focused part are excluded from peer context.
+  Consumer evaluations remain distinct, with the latest shown first. See [#58](https://github.com/vilicvane/code3d/issues/58).
 - Treat ordinary calls and JSDoc design arguments as explicit evaluation
   contexts for source inside model-producing functions.
 - Later add an on-demand Elements panel in the viewport as a supplementary way

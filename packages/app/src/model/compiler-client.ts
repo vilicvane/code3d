@@ -1,5 +1,5 @@
 import CompilerWorker from './compiler.worker?worker';
-import type {ModelModule} from './compiler';
+import type {DesignContext, ModelModule} from './compiler';
 import {ModelDiagnosticError} from './diagnostic';
 import type {ModelProject} from '../project/project';
 import type {ProjectFileReader} from '../project/file-reader';
@@ -7,7 +7,11 @@ import type {ProjectLanguage} from '../project/project-language';
 import {browserPackageFiles} from '../project/browser-packages';
 import type {ModelExportInstance, ModelExportOptions} from './model-export';
 import type {CompilationProgress} from './compilation-progress';
-import type {SketchSnapshot} from '@code3d/core/tooling';
+import type {
+  SketchSnapshot,
+  TopologyInspection,
+  TopologyInspectionOptions,
+} from '@code3d/core/tooling';
 import type {
   CompilerRequest,
   CompilerResponse,
@@ -22,11 +26,11 @@ type PendingRequest = {
 } & (
   | {
       kind: 'compile';
-      evaluating: boolean;
       onProgress?: CompilationProgress;
       resolve(module: ModelModule): void;
     }
   | {kind: 'export'; resolve(blob: Blob): void}
+  | {kind: 'topology'; resolve(topology: TopologyInspection): void}
   | {kind: 'sketch'; resolve(preview: SketchDragPreview): void}
 );
 
@@ -46,7 +50,7 @@ export class ModelCompilerClient {
   compile(
     project: ModelProject,
     rootPath: string,
-    designContextId?: string,
+    designContext?: DesignContext,
     onProgress?: CompilationProgress,
   ): Promise<ModelModule> {
     this.cancel();
@@ -58,11 +62,10 @@ export class ModelCompilerClient {
         id,
         resolve,
         reject,
-        evaluating: false,
         onProgress,
         timeout: this.deadline(id, 120_000),
       };
-      this.send({kind: 'compile', id, project, rootPath, designContextId});
+      this.send({kind: 'compile', id, project, rootPath, designContext});
     });
   }
 
@@ -111,17 +114,13 @@ export class ModelCompilerClient {
           ? 'Compilation superseded.'
           : pending.kind === 'sketch'
             ? 'Sketch preview superseded.'
-            : 'Export cancelled because the model changed.',
+            : 'Model operation cancelled because the project changed.',
       ),
     );
-    // An executing model may contain a synchronous infinite loop. Preparation
-    // can finish asynchronously without throwing away the installed kernel.
-    if (
-      pending.kind === 'export' ||
-      (pending.kind === 'compile' && pending.evaluating)
-    )
-      this.restartWorker();
-    else this.send({kind: 'cancel', id: pending.id});
+    // Restart compilation even before its progress message reaches the UI,
+    // so synchronous work cannot block the next revision. Sketch previews
+    // retain their compiled model; stale replies are ignored by request ID.
+    if (pending.kind !== 'sketch') this.restartWorker();
     return true;
   }
 
@@ -152,6 +151,28 @@ export class ModelCompilerClient {
     }
     this.worker.terminate();
     this.exportable = undefined;
+  }
+
+  inspectTopology(
+    module: ModelModule,
+    nodeId: string,
+    options: TopologyInspectionOptions,
+  ): Promise<TopologyInspection> {
+    if (!this.canExport(module))
+      return Promise.reject(
+        new Error('The model geometry snapshot is unavailable.'),
+      );
+    const compileId = this.exportable!.compileId;
+    const id = this.nextId++;
+    return new Promise((resolve, reject) => {
+      this.pending = {
+        kind: 'topology',
+        id,
+        resolve,
+        reject,
+      };
+      this.send({kind: 'topology', id, compileId, nodeId, options});
+    });
   }
 
   private deadline(id: number, milliseconds: number): number {
@@ -213,7 +234,6 @@ export class ModelCompilerClient {
         if (pending.kind !== 'compile') return;
         if (data.phase === 'evaluating-model') {
           window.clearTimeout(pending.timeout);
-          pending.evaluating = true;
           pending.timeout = undefined;
         }
         pending.onProgress?.(data.phase);
@@ -227,6 +247,8 @@ export class ModelCompilerClient {
         pending.resolve(data.module);
       } else if (pending.kind === 'export' && data.kind === 'export') {
         pending.resolve(data.blob);
+      } else if (pending.kind === 'topology' && data.kind === 'topology') {
+        pending.resolve(data.topology);
       } else if (pending.kind === 'sketch' && data.kind === 'sketch') {
         pending.resolve(data.preview);
       }

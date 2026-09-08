@@ -65,7 +65,7 @@ const decorations: SourceDecorationProvider['decorations'] = ({
   evaluation,
 }) => {
   const input = booleanInputContext(module, target, evaluation);
-  if (!input || !evaluation.operationId) {
+  if (!input || !evaluation.operationInput) {
     return [];
   }
 
@@ -75,7 +75,19 @@ const decorations: SourceDecorationProvider['decorations'] = ({
   const focusedNodeIds = new Set(
     evaluation.operationInput?.nodeIds ?? evaluation.nodeIds,
   );
-  const operation = module.operations.get(evaluation.operationId)!;
+  const operation = module.operations.get(
+    evaluation.operationInput.operationId,
+  )!;
+
+  // A later transform can move the consumed value away from the step being
+  // edited. Its final Boolean regions do not describe the current geometry.
+  if (
+    !evaluation.constraintId &&
+    evaluation.operationInput.nodeIds.some(
+      nodeId => !evaluation.nodeIds.includes(nodeId),
+    )
+  )
+    return [];
 
   return operation.regions
     .filter(
@@ -155,8 +167,8 @@ function booleanInputContext(
   target: SourceTarget,
   evaluation: SourceTargetEvaluation,
 ): BooleanInputContext | undefined {
-  const runtimeOperation = evaluation.operationId
-    ? module.operations.get(evaluation.operationId)
+  const runtimeOperation = evaluation.operationInput
+    ? module.operations.get(evaluation.operationInput.operationId)
     : undefined;
   const operationKind = runtimeOperation?.kind ?? target.operation?.kind;
   const inputRole = evaluation.operationInput?.role ?? target.operation?.role;

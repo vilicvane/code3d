@@ -768,7 +768,8 @@ for (const [kind, sourceAnchor, targetAnchor] of [
           relation.evaluations.find(
             candidate =>
               candidate.contextId === evaluation.contextId &&
-              candidate.operationId === evaluation.operationId,
+              candidate.operationInput?.operationId ===
+                evaluation.operationInput?.operationId,
           );
         assert.ok(constraint);
         assert.deepEqual(evaluation.nodeIds, constraint.nodeIds);
@@ -847,6 +848,94 @@ test('anchor context is limited to the enclosing relation in a constraint array'
   assert.equal(sourceTargetPlacement(alone), 'standalone');
   assert.deepEqual(defined(at('base.edge(2)')).contextTargetIds, []);
 });
+
+for (const composed of [false, true]) {
+  for (const reverse of [false, true]) {
+    test(`completed relate context includes this call's references (composition=${composed}, reverse=${reverse})`, async () => {
+      const source = `import {box, group} from '@code3d/core';
+export const old = box(20, 10, 20);
+export const base = box(20, 10, 20);
+export const front = box(20, 10, 20);
+export const other = box(2, 2, 2);
+const original = box(2, 2, 2).relate(self => ${reverse ? 'old.on(self.up)' : 'self.on(old.up)'});
+export const part = original.relate( /* whole */ self => [
+  ${reverse ? 'base.on(self.up)' : 'self.on(base.up)'},
+  ${reverse ? 'front.on(self.back)' : 'self.on(front.front)'},
+] /* completed */ );
+${composed ? "const derived = part.paint('#ff4d81'); export default group([derived, base, front, old, other]);" : ''}`;
+      const module = await compileProject(
+        {files: [{path: '/model.ts', source}]},
+        '/model.ts',
+      );
+      assert.equal(module.diagnostic, undefined);
+      const id = (name: string) => defined(module.exports.get(name));
+      const part = defined(module.objects.get(id('part')));
+      const at = (offset: number) =>
+        defined(
+          ModelViewport.prototype['sourceTargetAt'].call(
+            {module},
+            '/model.ts',
+            offset,
+          ),
+        );
+      for (const offset of [
+        source.lastIndexOf('.relate(') + 3,
+        source.indexOf('/* whole */') + 3,
+        source.indexOf('/* completed */') + 3,
+      ]) {
+        const target = at(offset);
+        assert.equal(target.kind, 'operation-output');
+        const evaluation = target.evaluations[0];
+        assert.equal(evaluation.operationId, part.operation.id);
+        assert.equal(evaluation.constraintId, undefined);
+        assert.equal(evaluation.constraintPreview, undefined);
+        assert.equal(evaluation.constraintOwnerNodeId, id('part'));
+        assert.deepEqual(evaluation.focusNodeIds, [id('part')]);
+        assert.deepEqual(
+          new Set(evaluation.nodeIds),
+          new Set([id('part'), id('base'), id('front')]),
+        );
+        assert.deepEqual(
+          new Set(defined(evaluation.relationContext).referenceNodeIds),
+          new Set([id('base'), id('front')]),
+        );
+        assert.equal(
+          defined(evaluation.relationContext).constraintIds.length,
+          2,
+        );
+        assert.equal(part.constraints.length, 3);
+        assert.equal(sourceTargetPlacement(evaluation), 'composition');
+        const peers = ModelViewport.prototype['resolveContextNodes'].call(
+          {
+            module,
+            resolveNodes: (nodeIds: readonly string[]) =>
+              nodeIds.map(nodeId => defined(module.objects.get(nodeId))),
+          },
+          target.contextTargetIds,
+          evaluation.operationInput?.operationId,
+          [
+            ...evaluation.nodeIds,
+            ...(evaluation.operationInput?.nodeIds ?? []),
+          ],
+        );
+        assert.deepEqual(
+          new Set(peers.map(peer => peer.node.nodeId)),
+          new Set(composed ? [id('old'), id('other')] : []),
+        );
+      }
+      const stage = at(
+        source.indexOf(reverse ? 'base.on(' : 'self.on(base') + 6,
+      ).evaluations[0];
+      assert.ok(stage.constraintId);
+      assert.equal(stage.relationContext, undefined);
+      assert.equal(stage.nodeIds.length, 2);
+      const binding = at(source.indexOf('part =')).evaluations[0];
+      assert.equal(binding.relationContext, undefined);
+      assert.deepEqual(binding.nodeIds, [id('part')]);
+      assert.equal(sourceTargetPlacement(binding), 'standalone');
+    });
+  }
+}
 
 test('represents an offset call with its constraint target', async () => {
   const source = sharedOffsetSource();
@@ -1300,8 +1389,11 @@ test('compiles the standalone custom primitive example with direct annotations a
   ).source;
 
   for (const [call, arguments_] of [
-    ['twistKnob(10, 3, 14)', ['radius', 'shaftRadius', 'y']],
-    ['twistKnob(10, 3, 8, 30)', ['radius', 'shaftRadius', 'y', 'twist']],
+    ['twistKnob(10, 3, tallHeight)', ['radius', 'shaftRadius', 'y']],
+    [
+      'twistKnob(10, 3, shortHeight, 30)',
+      ['radius', 'shaftRadius', 'y', 'twist'],
+    ],
   ] as const) {
     const start = source.indexOf(call);
     assert.notEqual(start, -1);
@@ -1511,6 +1603,63 @@ test('the documented function offers parameter tools and design-time arguments',
   }
 });
 
+test('source-located temporary arguments use module scope and fall back to JSDoc on the next request', async () => {
+  const source = `import {box} from '@code3d/core';
+const width = 12;
+/** @code3d.arguments [4] */
+function design(size = 2) { return box(size, 3, 5); }
+export default design(7);`;
+  const project = {files: [{path: '/model.ts', source}]};
+  const offset = source.indexOf('box(size');
+  const widths = async (argumentsSource?: string) => {
+    const module = await compileProject(project, '/model.ts', {
+      file: '/model.ts',
+      offset,
+      ...(argumentsSource === undefined ? {} : {arguments: argumentsSource}),
+    });
+    assert.equal(module.diagnostic, undefined);
+    const target = exactTargets(module, source, 'box(size, 3, 5)').find(
+      target => target.tool,
+    );
+    assert.ok(target);
+    const preview = target.evaluations.find(
+      evaluation => evaluation.contextId === module.activeDesignContextId,
+    );
+    assert.ok(preview);
+    const mesh = module.objects.get(preview.nodeIds[0])!.mesh!;
+    const xs = mesh.vertices.filter((_value, index) => index % 3 === 0);
+    return Math.max(...xs) - Math.min(...xs);
+  };
+  assert.equal(await widths('[width]'), 12);
+  assert.equal(await widths(), 4);
+  assert.equal(await widths('[]'), 2);
+  assert.equal(project.files[0].source, source);
+});
+
+test('temporary arguments inspect unannotated functions and can pass imported model objects', async () => {
+  const source = `import {box} from '@code3d/core';
+function design(part) { return part.fillet(0.5); }`;
+  const module = await compileProject(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+    {
+      file: '/model.ts',
+      offset: source.indexOf('part.fillet'),
+      arguments: '[box(10, 6, 8)]',
+    },
+  );
+  assert.equal(module.diagnostic, undefined);
+  assert.ok(module.activeDesignContextId?.endsWith(':temporary'));
+  const target = exactTargets(module, source, 'fillet(0.5)').find(
+    target => target.kind === 'operation-output',
+  );
+  assert.ok(target);
+  assert.equal(target.functionId, '/model.ts:function:design');
+  assert.equal(target.evaluations[0].contextId, module.activeDesignContextId);
+  assert.ok(module.objects.get(target.evaluations[0].nodeIds[0])?.mesh);
+  assert.deepEqual(module.designArguments, []);
+});
+
 test('the npm documentation example compiles with the installed just-range package', async () => {
   const document = await readFile(
     new URL(
@@ -1569,7 +1718,7 @@ test('compiles the core tube example with its own operation and editable dimensi
   const source = defined(
     bundledExamples.files.find(file => file.path === rootPath),
   ).source;
-  const start = source.indexOf('tube(5.5, 4.5, 4)');
+  const start = source.indexOf('tube(5.5, 4.5, collarHeight)');
   assert.notEqual(start, -1);
   const target = module.sourceTargets.find(
     target =>
@@ -1602,6 +1751,158 @@ function sharedOffsetSource() {
     'export const model = group([base, left, right]);',
   ].join('\n');
 }
+
+for (const composition of [
+  'group([peer, final])',
+  'union([peer, final])',
+  'cut(peer, [final])',
+  'intersect([peer, final])',
+  'ops.group(parts)',
+  'ops.union(parts)',
+  'ops.cut(peer, [final])',
+  'ops.intersect(parts)',
+  'ops.combine(peer, final)',
+]) {
+  test(`a transform keeps its editable step and shows peers from ${composition}`, async () => {
+    const source = `import {box, group, union, cut, intersect} from '@code3d/core';
+const peer = box(18, 6, 12);
+const moved = box(8, 10, 8).originOffset(-4, 0, 0);
+const final = moved.rotate(0, 25, 0).paint('#d8ff3e');
+const parts = [peer, final];
+const ops = {group, union, cut, intersect, combine(stock, tool) { return cut(stock, [tool]); }};
+export const model = ${composition};`;
+    const module = await compileProject(
+      {files: [{path: '/model.ts', source}]},
+      '/model.ts',
+    );
+    assert.equal(module.diagnostic, undefined);
+    for (const method of ['originOffset', 'rotate']) {
+      const target = defined(
+        ModelViewport.prototype['sourceTargetAt'].call(
+          {module},
+          '/model.ts',
+          source.indexOf(method + '(') + 2,
+        ),
+      );
+      assert.equal(target.kind, 'operation-output');
+      assert.equal(target.evaluations.length, 1);
+      const evaluation = target.evaluations[0];
+      const operation = defined(
+        module.operations.get(defined(evaluation.operationId)),
+      );
+      assert.equal(operation.kind, method);
+      assert.equal(operation.outputNodeId, evaluation.nodeIds[0]);
+      assert.ok(operation.spatial);
+      assert.equal(sourceTargetPlacement(evaluation), 'composition');
+      assert.notEqual(
+        evaluation.operationId,
+        defined(evaluation.operationInput).operationId,
+      );
+      assert.ok(
+        evaluation.parameters?.some(
+          parameter => parameter.operation === method,
+        ),
+      );
+      const contexts = ModelViewport.prototype['resolveContextNodes'].call(
+        {
+          module,
+          resolveNodes: (ids: readonly string[]) =>
+            ids.map(id => defined(module.objects.get(id))),
+        },
+        target.contextTargetIds,
+        evaluation.operationInput!.operationId,
+        [...evaluation.nodeIds, ...evaluation.operationInput!.nodeIds],
+      );
+      assert.equal(
+        contexts.length,
+        1,
+        'the later transformed value must not appear as a ghost peer',
+      );
+      assert.equal(contexts[0].node.operation.kind, 'box');
+    }
+    const binding = defined(
+      ModelViewport.prototype['sourceTargetAt'].call(
+        {module},
+        '/model.ts',
+        source.indexOf('moved =') + 2,
+      ),
+    );
+    assert.equal(binding.kind, 'value');
+    assert.equal(binding.evaluations[0].operationInput, undefined);
+  });
+}
+
+for (const transform of [
+  'originVertex(1)',
+  'originPoint(peer.center)',
+  'originCenter()',
+  'scaled(0.8)',
+]) {
+  test(`${transform} shares downstream composition context`, async () => {
+    const source = `import {box, group} from '@code3d/core';
+const peer = box(18, 6, 12);
+const part = box(8, 10, 8).${transform};
+export default group([peer, part]);`;
+    const module = await compileProject(
+      {files: [{path: '/model.ts', source}]},
+      '/model.ts',
+    );
+    assert.equal(module.diagnostic, undefined);
+    const target = defined(
+      ModelViewport.prototype['sourceTargetAt'].call(
+        {module},
+        '/model.ts',
+        source.indexOf(transform) + 2,
+      ),
+    );
+    assert.equal(target.evaluations.length, 1);
+    assert.equal(sourceTargetPlacement(target.evaluations[0]), 'composition');
+    assert.equal(
+      defined(
+        module.operations.get(
+          defined(target.evaluations[0].operationInput).operationId,
+        ),
+      ).kind,
+      'group',
+    );
+  });
+}
+
+test('transform contexts distinguish runtime calls and concrete consumers of a nested group', async () => {
+  const source = `import {box, group} from '@code3d/core';
+function make(x) {
+  const local = group([box(8, 6, 4), box(4, 4, 4).originOffset(0, -5, 0)]);
+  const moved = local.originOffset(x, 0, 0);
+  const peer = box(2, 2, 2);
+  const first = group([moved, peer]);
+  const second = group([peer, moved]);
+  return group([first, second]);
+}
+export const first = make(12);
+export const second = make(24);`;
+  const module = await compileProject(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  assert.equal(module.diagnostic, undefined);
+  const target = defined(
+    ModelViewport.prototype['sourceTargetAt'].call(
+      {module},
+      '/model.ts',
+      source.indexOf('originOffset(x') + 2,
+    ),
+  );
+  assert.equal(target.evaluations.length, 4);
+  assert.equal(
+    new Set(target.evaluations.map(e => e.operationInput?.operationId)).size,
+    4,
+  );
+  assert.equal(new Set(target.evaluations.map(e => e.nodeIds[0])).size, 2);
+  assert.deepEqual(
+    target.evaluations.map(e => e.toolArguments?.[0]).sort((a, b) => a! - b!),
+    [12, 12, 24, 24],
+  );
+});
 
 function exactTargets(
   module: Awaited<ReturnType<typeof compileProject>>,

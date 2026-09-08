@@ -1,0 +1,26 @@
+{
+  "name": "@code3d/agent",
+  "version": "0.0.1-alpha.0",
+  "type": "module",
+  "license": "SEE LICENSE IN LICENSE",
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": {
+      "types": "./bld/index.d.ts",
+      "default": "./bld/index.js"
+    }
+  },
+  "files": [
+    "bld",
+    "README.md"
+  ],
+  "scripts": {
+    "prepack": "node ../../scripts/package-license.mjs",
+    "test": "npm run build && npm run test:types && npm run test:run",
+    "build": "node ../../node_modules/typescript/bin/tsc --build",
+    "test:types": "node ../../node_modules/typescript/bin/tsc --noEmit -p test/tsconfig.json",
+    "test:run": "node --test \"test/*.test.ts\""
+  }
+}

@@ -11,12 +11,14 @@ import {
 const accent = '#d8ff3e';
 const neutral = '#30352f';
 
-const stock = box(30, 8, 20).paint(neutral);
+const stockHeight = 8;
+const bossHeight = 6;
+const stock = box(30, stockHeight, 20).paint(neutral);
 const bore = cylinder(3, 12);
 const drilled = cut(stock, [bore]).paint(neutral);
 
-const boss = cylinder(5, 6)
-  .relate(part => part.on(drilled.up).offset(7, 0, 0))
+const boss = cylinder(5, bossHeight)
+  .originOffset(-7, -(stockHeight + bossHeight) / 2, 0)
   .paint(accent);
 const joined = union([drilled, boss]).paint(neutral);
 

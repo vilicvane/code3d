@@ -1,11 +1,15 @@
 import type {ModelProject} from '../project/project';
 import type {ProjectFileInfo} from '../project/file-reader';
 import type {ProjectLanguage} from '../project/project-language';
-import type {ModelModule} from './compiler';
+import type {DesignContext, ModelModule} from './compiler';
 import type {ModelDiagnostic} from './diagnostic';
 import type {ModelExportInstance, ModelExportOptions} from './model-export';
 import type {CompilationPhase} from './compilation-progress';
-import type {SketchSnapshot} from '@code3d/core/tooling';
+import type {
+  SketchSnapshot,
+  TopologyInspection,
+  TopologyInspectionOptions,
+} from '@code3d/core/tooling';
 import type {SketchDrag, SketchDragPreview} from './sketch-drag';
 
 export type CompileRequest = Readonly<{
@@ -13,7 +17,7 @@ export type CompileRequest = Readonly<{
   id: number;
   project: ModelProject;
   rootPath: string;
-  designContextId?: string;
+  designContext?: DesignContext;
 }>;
 
 export type FileRequest = Readonly<{
@@ -27,6 +31,13 @@ export type FileRequest = Readonly<{
 export type CompilerRequest =
   | CompileRequest
   | Readonly<{
+      kind: 'topology';
+      id: number;
+      compileId: number;
+      nodeId: string;
+      options: TopologyInspectionOptions;
+    }>
+  | Readonly<{
       kind: 'sketch';
       id: number;
       layers: readonly SketchSnapshot[];
@@ -39,7 +50,6 @@ export type CompilerRequest =
       instances: readonly ModelExportInstance[];
       options: ModelExportOptions;
     }>
-  | Readonly<{kind: 'cancel'; id: number}>
   | Readonly<{
       kind: 'file-result';
       id: number;
@@ -49,6 +59,12 @@ export type CompilerRequest =
 
 export type CompilerResponse =
   | FileRequest
+  | Readonly<{
+      kind: 'topology';
+      id: number;
+      ok: true;
+      topology: TopologyInspection;
+    }>
   | Readonly<{kind: 'language'; id: number; language: ProjectLanguage}>
   | Readonly<{kind: 'progress'; id: number; phase: CompilationPhase}>
   | Readonly<{kind: 'result'; id: number; ok: true; module: ModelModule}>

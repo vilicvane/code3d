@@ -3,6 +3,7 @@ import {normalizeProjectPath, type ModelProject} from './project';
 export type ProjectFileInfo = Readonly<{
   kind: 'file' | 'directory';
   version: string;
+  size?: number;
 }>;
 
 /** Paths are rooted in the selected project, never in the host filesystem. */
@@ -81,7 +82,11 @@ export class DirectoryFileReader implements ProjectFileReader {
     }
     const file = await this.file(path);
     if (file)
-      return {kind: 'file', version: `${file.lastModified}:${file.size}`};
+      return {
+        kind: 'file',
+        version: `${file.lastModified}:${file.size}`,
+        size: file.size,
+      };
     try {
       await this.directory(path);
       return {kind: 'directory', version: ''};

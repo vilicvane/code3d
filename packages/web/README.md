@@ -18,6 +18,19 @@ The image renderer uses Playwright Chromium. Install it with
 `CODE3D_CHROME_CDP_ENDPOINT=http://localhost:9222` to use an existing debugging
 browser. The renderer closes its own pages and leaves that browser running.
 
+## Local agent guide
+
+The HTML guide is `/docs/guides/agents/`; `/docs/guides/agents.md` serves the same
+source as Markdown with links resolved for that resource. Agent prompts link to
+the Markdown entry to avoid sending page layout HTML to a command-line reader.
+
+For an App development server, set `VITE_CODE3D_DOCS_URL` in the ignored
+`packages/app/.env.development.local`, for example `http://127.0.0.1:4321/docs/`,
+and run the website preview on that reserved port. Production builds default to
+`https://www.code3d.org/docs/`; set the variable at build time for another deployed
+site/base. Website dev and preview ports are strict, so collisions fail instead
+of changing the prompt's destination silently.
+
 ## Content
 
 - User documentation: `src/content/docs/docs/` (the inner directory is the
