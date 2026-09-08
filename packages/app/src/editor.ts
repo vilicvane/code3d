@@ -10,7 +10,11 @@ import * as typeScriptLanguage from 'monaco-editor/languages/features/typescript
 import EditorWorker from 'monaco-editor/editor/editor.worker?worker';
 import ProjectTypeScriptWorker from './monaco/typescript.worker?worker';
 import type {CursorOptions, Options} from 'prettier';
-import {code3dCodeColors, code3dCodeFocusColors} from './code-theme';
+import {
+  code3dCodeColors,
+  code3dCodeFocusColors,
+  code3dEditorWidgetColors,
+} from './code-theme';
 import type {ProjectLanguage} from './project/project-language';
 import {
   observeSuggestionFocus,
@@ -151,6 +155,12 @@ registerProjectTypeScriptCompletions(
 );
 registerProjectTypeScriptSelectionRanges(projectLanguageSelector);
 
+monaco.editor.addKeybindingRule({
+  keybinding: monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyP,
+  command: 'editor.action.quickCommand',
+  when: 'editorFocus',
+});
+
 monaco.languages.registerDocumentFormattingEditProvider('typescript', {
   async provideDocumentFormattingEdits(model) {
     const source = model.getValue();
@@ -170,20 +180,48 @@ monaco.editor.defineTheme('code3d-dark', {
     {token: 'type.identifier', foreground: tokenColor(code3dCodeColors.type)},
   ],
   colors: {
+    foreground: code3dCodeColors.foreground,
+    focusBorder: code3dEditorWidgetColors.accent,
+    'selection.background': code3dEditorWidgetColors.selectionBackground,
+    'textLink.foreground': code3dEditorWidgetColors.accent,
+    'textLink.activeForeground': code3dEditorWidgetColors.accent,
+    'input.background': code3dCodeColors.background,
+    'input.border': code3dEditorWidgetColors.border,
+    'inputOption.activeBorder': code3dEditorWidgetColors.accent,
+    'inputOption.activeBackground': code3dEditorWidgetColors.selectedBackground,
+    'inputOption.activeForeground': code3dEditorWidgetColors.accent,
+    'inputOption.hoverBackground': code3dEditorWidgetColors.hoverBackground,
+    'list.activeSelectionBackground':
+      code3dEditorWidgetColors.selectedBackground,
+    'list.activeSelectionForeground': code3dCodeColors.foreground,
+    'list.focusBackground': code3dEditorWidgetColors.selectedBackground,
+    'list.focusForeground': code3dCodeColors.foreground,
+    'list.inactiveSelectionBackground':
+      code3dEditorWidgetColors.selectedBackground,
+    'list.hoverBackground': code3dEditorWidgetColors.hoverBackground,
+    'list.highlightForeground': code3dEditorWidgetColors.accent,
+    'pickerGroup.foreground': code3dEditorWidgetColors.accent,
+    'pickerGroup.border': code3dEditorWidgetColors.border,
+    'menu.background': code3dEditorWidgetColors.background,
+    'menu.foreground': code3dCodeColors.foreground,
+    'menu.border': code3dEditorWidgetColors.border,
+    'button.background': code3dEditorWidgetColors.accent,
+    'button.foreground': code3dCodeColors.background,
+    'progressBar.background': code3dEditorWidgetColors.accent,
     'editor.background': code3dCodeColors.background,
     'editor.foreground': code3dCodeColors.foreground,
     'editorLineNumber.foreground': '#4e514a',
     'editorLineNumber.activeForeground': '#b9beaf',
     'editorCursor.foreground': code3dCodeFocusColors.cursor,
-    'editor.selectionBackground': '#53651566',
+    'editor.selectionBackground': code3dEditorWidgetColors.selectionBackground,
     'editor.inactiveSelectionBackground': '#53651533',
     'editor.lineHighlightBackground': code3dCodeFocusColors.currentLine,
     'editorIndentGuide.background1': '#272923',
     'editorIndentGuide.activeBackground1': '#555a4e',
-    'editorWidget.background': '#1a1b17',
-    'editorHoverWidget.background': '#1a1b17',
-    'editorSuggestWidget.background': '#1a1b17',
-    'editorSuggestWidget.selectedBackground': '#303527',
+    'editorWidget.background': code3dEditorWidgetColors.background,
+    'editorWidget.foreground': code3dCodeColors.foreground,
+    'editorWidget.border': code3dEditorWidgetColors.border,
+    'editorWidget.resizeBorder': code3dEditorWidgetColors.accent,
   },
 });
 
