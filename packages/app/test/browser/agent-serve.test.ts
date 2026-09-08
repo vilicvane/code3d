@@ -105,7 +105,7 @@ test(
       .fill(String(firstPort.port));
     let alice = await add('Alice');
     await firstPort.release();
-    assert.equal(alice.version, 2);
+    assert.equal('version' in alice, false);
     assert.equal(alice.origin, origin);
     assert.equal(alice.port, firstPort.port);
     const temp = await mkdtemp(join(tmpdir(), 'code3d-app-serve-'));

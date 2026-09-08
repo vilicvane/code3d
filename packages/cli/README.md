@@ -22,7 +22,7 @@ npx --yes @code3d/cli project.c3d.json --request-id edit-001 apply --input chang
 npx --yes @code3d/cli project.c3d.json result edit-001
 ```
 
-The App supplies a private version-2 config with `port`, `origin`, `sessionId`,
+The App supplies a private config with `port`, `origin`, `sessionId`,
 `agentId`, `name`, and `key`. Keep the page open and permit local-network access.
 One process binds each grant's port on 127.0.0.1; multiple agents use separate
 ports. Port conflicts are explicit. Revoke/Revoke all stops App retries and removes
