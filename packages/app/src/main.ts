@@ -483,10 +483,11 @@ new ViewportContextMenu(
 );
 const elementsDecorationOwner = 'elements-panel';
 const elementsPanel = new ElementsPanel(elements, elementsCount, {
-  onPreview: element => {
+  onPreview: preview => {
     viewport.clearDecorations(elementsDecorationOwner);
     const occurrence = viewport.getSelected();
     const sourceElement = viewport.sourceEvaluation()?.evaluation.element;
+    const element = preview?.kind === 'reference' ? preview.element : undefined;
     const previewsSourceElement =
       element !== undefined &&
       occurrence !== undefined &&
@@ -495,12 +496,24 @@ const elementsPanel = new ElementsPanel(elements, elementsCount, {
       sourceElement.kind === element.kind;
     viewport.setSourceDecorationVisible(
       elementSourceDecoration.id,
-      element === undefined || previewsSourceElement,
+      preview === undefined || previewsSourceElement,
     );
-    if (!element || !occurrence || previewsSourceElement) return;
+    if (!preview || !occurrence || previewsSourceElement) return;
     viewport.setDecorations(
       elementsDecorationOwner,
-      namedElementDecorations(occurrence.node, element),
+      preview.kind === 'reference'
+        ? namedElementDecorations(occurrence.node, preview.element)
+        : [
+            {
+              kind: 'topology',
+              id: 'element-topology',
+              nodeId: occurrence.node.nodeId,
+              mesh: occurrence.node.mesh!,
+              topologyKind: preview.topologyKind,
+              ids: [preview.id],
+              appearance: {color: '#63dcff'},
+            },
+          ],
       {occurrenceKeys: [occurrence.key]},
     );
   },

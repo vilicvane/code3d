@@ -8,6 +8,8 @@ import type {
   ElementKind,
   ModelOperationInputRole,
   RenderMesh,
+  TopologyId,
+  TopologyKind,
   Transform,
   Vec3,
 } from '@code3d/core/tooling';
@@ -95,11 +97,21 @@ export type ViewportBoundsDecoration = ViewportDecorationBase &
     appearance: ViewportDecorationAppearance;
   }>;
 
+export type ViewportTopologyDecoration = ViewportDecorationBase &
+  Readonly<{
+    kind: 'topology';
+    mesh: RenderMesh;
+    topologyKind: TopologyKind;
+    ids: readonly TopologyId[];
+    appearance: ViewportDecorationAppearance;
+  }>;
+
 export type ViewportDecoration =
   | ViewportMeshDecoration
   | ViewportEdgeDecoration
   | ViewportSurfaceDecoration
   | ViewportBoundsDecoration
+  | ViewportTopologyDecoration
   | ViewportAnchorDecoration;
 
 export type SourceDecorationContext = Readonly<{
