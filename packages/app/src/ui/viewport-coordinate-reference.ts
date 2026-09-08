@@ -18,7 +18,8 @@ type CoordinateActions = Readonly<{
 }>;
 
 const svgNamespace = 'http://www.w3.org/2000/svg';
-const center = 44;
+// Fit the 38px backplate radius and its 1px stroke without extra SVG padding.
+const center = 38.5;
 const axisLength = 27;
 
 export class ViewportCoordinateReference {
@@ -58,7 +59,7 @@ export class ViewportCoordinateReference {
     });
 
     const svg = document.createElementNS(svgNamespace, 'svg');
-    svg.setAttribute('viewBox', '0 0 88 88');
+    svg.setAttribute('viewBox', '0 0 77 77');
     svg.setAttribute('role', 'group');
 
     const backplate = document.createElementNS(svgNamespace, 'circle');
@@ -149,6 +150,10 @@ export class ViewportCoordinateReference {
     this.root.append(svg);
     container.append(this.root);
     this.updateLabel();
+  }
+
+  setVisible(visible: boolean): void {
+    this.root.hidden = !visible;
   }
 
   setTarget(target?: THREE.Object3D): void {

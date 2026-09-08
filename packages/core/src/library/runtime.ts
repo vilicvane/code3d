@@ -76,6 +76,7 @@ import {
   type KernelValueLifecycle,
 } from './kernel-cache.js';
 import {loftWithTopology} from './loft.js';
+import {estimateRetainedBytes} from './retained-memory.js';
 import {extrudeWithTopology} from './extrude.js';
 import {sketchRegionFace} from './sketch-face.js';
 import type {SketchRegion} from './sketch-regions.js';
@@ -466,11 +467,13 @@ let operationTraces = new WeakMap<StoredOperation, OperationTrace>();
 /**
  * Start a fresh, serial tooling evaluation without invalidating model geometry.
  * Finish in finally after snapshotting to retain this evaluation's kernel work.
+ * An optional cancellation check may throw before any kernel operation starts;
+ * complete results survive cancellation, and cleanup removes the check.
  */
-export function beginModelEvaluation(): () => void {
+export function beginModelEvaluation(checkCancelled?: () => void): () => void {
   valueTraces = new WeakMap();
   operationTraces = new WeakMap();
-  return beginKernelOperationEvaluation();
+  return beginKernelOperationEvaluation(checkCancelled);
 }
 
 function valueTrace(value: object): ValueTrace {
@@ -738,7 +741,10 @@ export interface ModelCapabilities<
    * @code3d.param z {kind: 'angle', label: 'Rotate Z'}
    */
   rotate(x: number, y: number, z: number): ModelForFamily<Elements, Family>;
-  /** Return a recolored value; a group overrides the color of every descendant. */
+  /**
+   * Return a recolored value; a group overrides the color of every descendant.
+   * Accepts CSS names, hex colors (including alpha), and rgb()/rgba().
+   */
   paint(color: string): ModelForFamily<Elements, Family>;
 }
 
@@ -3881,12 +3887,21 @@ function storedOperationId(operation: StoredOperation): string {
 }
 
 const shapeLifecycle: KernelValueLifecycle<AnyShape> = {
+  estimateBytes: () => 64,
   retain: shape => shape.clone(),
   instantiate: shape => shape.clone(),
   release: shape => shape.delete(),
 };
 
 const modelGeometryLifecycle: KernelValueLifecycle<ModelGeometryValue> = {
+  estimateBytes: geometry =>
+    128 +
+    estimateRetainedBytes([
+      geometry.topology,
+      geometry.localBounds,
+      geometry.referenceBasis?.topology,
+      geometry.referenceBasis?.transform,
+    ]),
   retain: cloneModelGeometryValue,
   instantiate: cloneModelGeometryValue,
   release: disposeModelGeometryValue,
@@ -3913,6 +3928,7 @@ function disposeModelGeometryValue(geometry: ModelGeometryValue): void {
 }
 
 const renderMeshLifecycle: KernelValueLifecycle<RenderMesh> = {
+  estimateBytes: estimateRetainedBytes,
   retain: mesh => mesh,
   instantiate: mesh => mesh,
   release: () => undefined,
@@ -4236,6 +4252,7 @@ function constraintReferences(constraint: StoredConstraint): ModelObject[] {
 }
 
 const boundsLifecycle: KernelValueLifecycle<LocalBounds> = {
+  estimateBytes: estimateRetainedBytes,
   retain: bounds => bounds,
   instantiate: bounds => bounds,
   release: () => undefined,

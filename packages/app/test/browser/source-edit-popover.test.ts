@@ -1,3 +1,4 @@
+import {appIsolationHeaders} from '../../build/isolation.ts';
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import type {Page} from 'playwright-core';
@@ -157,6 +158,7 @@ test('multi-file summaries, no-op dismissal, keyboard expansion and auto-dismiss
   await page.route(url, route =>
     route.fulfill({
       contentType: 'text/html',
+      headers: appIsolationHeaders,
       body: '<link rel="stylesheet" href="/src/style.css"><input aria-label="Number"><main></main>',
     }),
   );

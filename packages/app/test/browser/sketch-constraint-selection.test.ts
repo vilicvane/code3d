@@ -32,7 +32,7 @@ const cases = [
   },
   {
     kind: 'angle',
-    name: 'Angle',
+    name: 'Orientation',
     entries: "['point',1,[0,0]],['point',2,[20,0]],['line',3,[1,2]]",
     target: 3,
     value: 0,
@@ -232,7 +232,7 @@ const value=sketch([['point',1,[-10,0]],['circle',2,[1,5]],['point',3,[10,0]],['
   assert.match(await text(page), /\/\* second \*\//);
 });
 
-test('a local coordinate relation on an upstream-only selection has no writable input', async t => {
+test('a local coordinate relation on an upstream-only selection can be removed but has no writable input', async t => {
   const page = await open(
     t,
     `import {sketch} from '@code3d/core';
@@ -254,4 +254,7 @@ const value = base.derive([], {constraints:[['x',base.point(1),0]]});`,
     0,
   );
   assert.equal(await text(page), before);
+  await page.getByRole('button', {name: 'X coordinate', exact: true}).click();
+  await waitForSource(page, /constraints:\s*\[\]/);
+  assert.match(await text(page), /\['point',\s*1,\s*\[0,\s*0\]\]/);
 });

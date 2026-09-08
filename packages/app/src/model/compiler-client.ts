@@ -13,6 +13,7 @@ import type {
   TopologyInspectionOptions,
 } from '@code3d/core/tooling';
 import type {
+  CompileRequest,
   CompilerRequest,
   CompilerResponse,
   FileRequest,
@@ -38,6 +39,11 @@ export class ModelCompilerClient {
   private worker: Worker;
   private nextId = 1;
   private pending: PendingRequest | null = null;
+  private queuedCompile?: CompileRequest;
+  private runningCompile?: {
+    request: CompileRequest;
+    cancellationTimeout?: number;
+  };
   private exportable?: {module: ModelModule; compileId: number};
 
   constructor(
@@ -63,9 +69,18 @@ export class ModelCompilerClient {
         resolve,
         reject,
         onProgress,
-        timeout: this.deadline(id, 120_000),
       };
-      this.send({kind: 'compile', id, project, rootPath, designContext});
+      this.queuedCompile = {
+        kind: 'compile',
+        id,
+        project,
+        rootPath,
+        designContext,
+        cancellation: new Int32Array(
+          new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT),
+        ),
+      };
+      this.startQueuedCompile();
     });
   }
 
@@ -117,10 +132,20 @@ export class ModelCompilerClient {
             : 'Model operation cancelled because the project changed.',
       ),
     );
-    // Restart compilation even before its progress message reaches the UI,
-    // so synchronous work cannot block the next revision. Sketch previews
-    // retain their compiled model; stale replies are ignored by request ID.
-    if (pending.kind !== 'sketch') this.restartWorker();
+    if (pending.kind === 'compile') {
+      this.exportable = undefined;
+      this.queuedCompile = undefined;
+      const running = this.runningCompile;
+      if (running?.request.id === pending.id) {
+        Atomics.store(running.request.cancellation, 0, 1);
+        // Allow a synchronous operation to finish and retain its result. A
+        // stuck native operation or author loop still has a bounded escape.
+        running.cancellationTimeout = window.setTimeout(() => {
+          this.restartWorker();
+          this.startQueuedCompile();
+        }, 5_000);
+      }
+    } else if (pending.kind !== 'sketch') this.restartWorker();
     return true;
   }
 
@@ -149,6 +174,8 @@ export class ModelCompilerClient {
       this.pending.reject(new Error('Project closed.'));
       this.pending = null;
     }
+    this.queuedCompile = undefined;
+    this.finishRunningCompile();
     this.worker.terminate();
     this.exportable = undefined;
   }
@@ -197,6 +224,20 @@ export class ModelCompilerClient {
     worker.postMessage(message);
   }
 
+  private startQueuedCompile(): void {
+    if (this.runningCompile || !this.queuedCompile) return;
+    const request = this.queuedCompile;
+    this.queuedCompile = undefined;
+    this.runningCompile = {request};
+    this.pending!.timeout = this.deadline(request.id, 120_000);
+    this.send(request);
+  }
+
+  private finishRunningCompile(): void {
+    window.clearTimeout(this.runningCompile?.cancellationTimeout);
+    this.runningCompile = undefined;
+  }
+
   private async readFile(worker: Worker, request: FileRequest): Promise<void> {
     try {
       const files =
@@ -220,10 +261,22 @@ export class ModelCompilerClient {
   private createWorker(): Worker {
     const worker = new CompilerWorker();
     worker.onmessage = ({data}: MessageEvent<CompilerResponse>) => {
+      if (worker !== this.worker) return;
       if (data.kind === 'file') {
         void this.readFile(worker, data);
         return;
       }
+      if (
+        (data.kind === 'result' || data.kind === 'cancelled') &&
+        data.id === this.runningCompile?.request.id
+      ) {
+        this.finishRunningCompile();
+        if (this.pending?.id !== data.id) {
+          this.startQueuedCompile();
+          return;
+        }
+      }
+      if (data.kind === 'cancelled') return;
       const pending = this.pending;
       if (!pending || pending.id !== data.id) return;
       if (data.kind === 'language') {
@@ -254,6 +307,12 @@ export class ModelCompilerClient {
       }
     };
     worker.onerror = ({message}) => {
+      if (worker !== this.worker) return;
+      if (this.runningCompile?.cancellationTimeout !== undefined) {
+        this.restartWorker();
+        this.startQueuedCompile();
+        return;
+      }
       const pending = this.pending;
       if (!pending) return;
       window.clearTimeout(pending.timeout);
@@ -265,6 +324,7 @@ export class ModelCompilerClient {
   }
 
   private restartWorker(): void {
+    this.finishRunningCompile();
     this.worker.terminate();
     this.exportable = undefined;
     this.worker = this.createWorker();

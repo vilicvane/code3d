@@ -26,6 +26,8 @@ const result = spawnSync(
     '--env',
     'OCJS_COMPILE_WORKERS=6',
     '--env',
+    'OCJS_MALLOC=mimalloc',
+    '--env',
     'OCJS_OUTPUT_DIR=/src',
     '--env',
     `CODE3D_BUILD_UID=${process.getuid?.() ?? 0}`,

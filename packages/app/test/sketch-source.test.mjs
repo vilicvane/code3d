@@ -31,7 +31,7 @@ const trim = (
   entries,
   constraintReplacements: lineConstraints.map(({index, lines}) => ({
     index,
-    ids: lines,
+    targets: lines,
   })),
 });
 
@@ -78,6 +78,59 @@ function setup(source, before = '') {
     },
   };
 }
+
+test('line relation additions share one source transaction and preserve orientation and angle values separately', () => {
+  const model = setup(
+    "[['point',1,[width,0]]], {constraints: [['angle',3,theta]]}",
+  );
+  assert.equal(
+    model.edit({
+      kind: 'constrain',
+      data: [],
+      constraints: [
+        ['parallel', [3, 4]],
+        ['perpendicular', [4, 5]],
+        ['angle', [3, 5], -60],
+      ],
+    }).status,
+    'committed',
+  );
+  assert.match(model.source(), /\['parallel', \[3, 4\]\]/);
+  assert.match(model.source(), /\['perpendicular', \[4, 5\]\]/);
+  assert.match(model.source(), /\['angle', \[3, 5\], -60\]/);
+  assert.match(model.source(), /\['angle',3,theta\]/);
+  assert.equal(model.undo.length, 1);
+});
+
+test('pair target trim copies preserve target comments and dimension expressions, and reject hidden targets atomically', () => {
+  const original =
+    "[['point',1,[0,0]],['point',2,[40,0]],['point',3,[10,0]],['point',4,[30,0]],['line',5,[1,2]],['line',8,[3,4]]], {constraints:[['angle',[5, /* partner */ 8],theta]]}";
+  const model = setup(original);
+  const change = trim([
+    ['line', 9, [address(1), address(3)]],
+    ['line', 10, [address(4), address(2)]],
+  ]);
+  change.constraintReplacements = [
+    {
+      index: 0,
+      targets: [
+        [9, 8],
+        [10, 8],
+      ],
+    },
+  ];
+  assert.equal(model.edit(change).status, 'committed');
+  assert.match(model.source(), /\['angle',\[9, \/\* partner \*\/ 8\],theta\]/);
+  assert.match(model.source(), /\['angle',\[10, \/\* partner \*\/ 8\],theta\]/);
+  assert.equal(model.undo.length, 1);
+  for (const target of ['pair', '[5, partner]']) {
+    const source = original.replace('[5, /* partner */ 8]', target);
+    const hidden = setup(source);
+    assert.equal(hidden.edit(change).status, 'conflict');
+    assert.equal(hidden.source(), source);
+    assert.equal(hidden.undo.length, 0);
+  }
+});
 
 for (const newline of ['\n', '\r\n']) {
   for (const indentation of ['', '  ', '    ', '\t']) {

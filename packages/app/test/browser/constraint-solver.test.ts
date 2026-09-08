@@ -1,3 +1,4 @@
+import {appIsolationHeaders} from '../../build/isolation.ts';
 import type {Browser} from 'playwright-core';
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
@@ -25,6 +26,7 @@ for (const installed of [false, true] as const) {
       await page.route(url, route =>
         route.fulfill({
           contentType: 'text/html',
+          headers: appIsolationHeaders,
           body: '<main>Constraint solver integration test</main>',
         }),
       );

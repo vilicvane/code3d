@@ -5,6 +5,11 @@ export type CursorWorkerResult =
   | {ok: true; cursor: ResolvedAgentCursor}
   | {ok: false; code: string; message: string};
 
+export type CursorWorkerMessage =
+  {kind: 'ready'} | {kind: 'result'; result: CursorWorkerResult};
+
+const send = (message: CursorWorkerMessage) => self.postMessage(message);
+
 self.onmessage = (
   event: MessageEvent<{source: string; cursor: AgentCursor}>,
 ) => {
@@ -24,5 +29,6 @@ self.onmessage = (
             message: 'Cursor resolution failed.',
           };
   }
-  self.postMessage(result);
+  send({kind: 'result', result});
 };
+send({kind: 'ready'});

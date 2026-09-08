@@ -61,6 +61,12 @@ export interface SketchPoint {
 export type SketchConstraint<P = number | SketchPoint> =
   | readonly [kind: 'fixed', point: P]
   | readonly [kind: 'horizontal' | 'vertical', line: number]
+  | readonly [
+      kind: 'parallel' | 'perpendicular',
+      lines: readonly [number, number],
+    ]
+  /** Signed rotation from the first line's authored direction to the second, in degrees. */
+  | readonly [kind: 'angle', lines: readonly [number, number], value: number]
   | readonly [kind: 'coincident', points: readonly [P, P]]
   | readonly [
       kind: 'midpoint',
@@ -231,6 +237,25 @@ class SketchValue implements Sketch {
         if (kind === 'horizontal' || kind === 'vertical') {
           curveRef(data, 'line');
           return [kind, data];
+        }
+        if (
+          kind === 'parallel' ||
+          kind === 'perpendicular' ||
+          (kind === 'angle' && typeof data !== 'number')
+        ) {
+          if (!Array.isArray(data) || data.length !== 2 || data[0] === data[1])
+            throw new Error(
+              `Sketch ${kind} constraint requires two distinct local lines.`,
+            );
+          data.forEach(id => curveRef(id, 'line'));
+          if (kind === 'angle') {
+            if (!Number.isFinite(value))
+              throw new Error(
+                'Sketch angle constraint requires a finite value.',
+              );
+            return [kind, [data[0], data[1]], value];
+          }
+          return [kind, [data[0], data[1]]];
         }
         if (kind === 'coincident') {
           data.forEach(pointRef);
@@ -585,11 +610,17 @@ function snapshotConstraints(
       case 'horizontal':
       case 'vertical':
         return [kind, data];
+      case 'parallel':
+      case 'perpendicular':
+        return [kind, [data[0], data[1]]];
       case 'length':
-      case 'angle':
       case 'radius':
       case 'sweep':
         return [kind, data, value];
+      case 'angle':
+        return typeof data === 'number'
+          ? [kind, data, value]
+          : [kind, [data[0], data[1]], value];
     }
   });
 }
@@ -717,6 +748,12 @@ export function solveSketchSnapshot(
         case 'horizontal':
         case 'vertical':
           return {kind, points: linePoints(data)};
+        case 'parallel':
+        case 'perpendicular':
+          return {
+            kind,
+            points: [...linePoints(data[0]), ...linePoints(data[1])],
+          };
         case 'coincident':
           return {kind, points: [pointIndex(data[0]), pointIndex(data[1])]};
         case 'midpoint':
@@ -729,8 +766,15 @@ export function solveSketchSnapshot(
             ],
           };
         case 'length':
-        case 'angle':
           return {kind, points: linePoints(data), value};
+        case 'angle':
+          return typeof data === 'number'
+            ? {kind, points: linePoints(data), value}
+            : {
+                kind: 'lineAngle',
+                points: [...linePoints(data[0]), ...linePoints(data[1])],
+                value,
+              };
         case 'radius':
           return arcIndex(data) >= 0
             ? {

@@ -66,7 +66,9 @@ export class ProjectCompiler {
     designContext?: DesignContext,
     onLanguage?: (language: ProjectLanguage) => void,
     onProgress?: CompilationProgress,
+    checkCancelled: () => void = () => {},
   ): Promise<ModelModule> {
+    checkCancelled();
     onProgress?.('loading-project');
     this.disposeGeometry();
     const changed = await this.files.refresh();
@@ -83,6 +85,8 @@ export class ProjectCompiler {
     ) {
       this.disposeRuntime();
     }
+    // Finish applying invalidation before cancellation can consume these changes.
+    checkCancelled();
     const reader = this.packages;
     await Promise.all(
       [
@@ -92,12 +96,14 @@ export class ProjectCompiler {
         '/yarn.lock',
       ].map(path => this.files.stat(path)),
     );
+    checkCancelled();
     const builder = new ProjectBuilder(reader, this.engine, this.assets);
     const language = await loadProjectLanguage(
       reader,
       project,
       reader.packageSpecifiers,
     );
+    checkCancelled();
     onLanguage?.(language);
     if (!this.runtime) {
       this.runtime = await ProjectRuntime.create(
@@ -142,6 +148,7 @@ export class ProjectCompiler {
       });
       this.compiler = createModelCompiler(this.runtime.tooling, this.evaluator);
     }
+    checkCancelled();
     onProgress?.('compiling-model');
     const root = normalizeProjectPath(rootPath);
     const contextFile = this.compiler!.designContextFile(
@@ -155,6 +162,7 @@ export class ProjectCompiler {
           ? `\nimport ${JSON.stringify(contextFile)};`
           : ''),
     );
+    checkCancelled();
     return this.compiler!.compileProject(
       project,
       root,
@@ -167,8 +175,10 @@ export class ProjectCompiler {
       designContext,
       () => onProgress?.('evaluating-model'),
       objects => {
+        checkCancelled();
         this.geometry = this.runtime!.tooling.retainModelGeometry(objects);
       },
+      checkCancelled,
     );
   }
 

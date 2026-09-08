@@ -1,3 +1,4 @@
+import {appIsolationHeaders} from '../../build/isolation.ts';
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {once} from 'node:events';
@@ -49,6 +50,7 @@ for (const storage of ['browser', 'directory'] as const)
         await page.route(setupUrl, route =>
           route.fulfill({
             contentType: 'text/html',
+            headers: appIsolationHeaders,
             body: '<main>Directory setup</main>',
           }),
         );

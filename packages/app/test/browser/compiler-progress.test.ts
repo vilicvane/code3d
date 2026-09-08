@@ -1,3 +1,4 @@
+import {appIsolationHeaders} from '../../build/isolation.ts';
 import type {Browser} from 'playwright-core';
 import type {TestContext} from 'node:test';
 import assert from 'node:assert/strict';
@@ -15,6 +16,21 @@ declare const window: Window & {
   client: typeof client;
   compile: typeof compile;
   packageFiles: typeof packageFiles;
+  Worker: typeof Worker;
+  compilerWorkers: number;
+  workerEvents: {
+    kind: string;
+    label?: string;
+    stats?: {
+      hits: number;
+      misses: number;
+      entries: number;
+      nativeAllocatedBytes: number;
+      estimatedJavaScriptBytes: number;
+      maximumBytes: number;
+    };
+  }[];
+  cancelledCompile: Promise<string>;
 };
 
 let browser: Browser;
@@ -40,11 +56,25 @@ async function fixture(t: TestContext) {
   await page.route(url.href, route =>
     route.fulfill({
       contentType: 'text/html',
+      headers: appIsolationHeaders,
       body: '<main>Compiler progress</main>',
     }),
   );
   await page.goto(url.href);
   await page.evaluate(async () => {
+    window.compilerWorkers = 0;
+    window.workerEvents = [];
+    const NativeWorker = Worker;
+    window.Worker = class extends NativeWorker {
+      constructor(url: string | URL, options?: WorkerOptions) {
+        super(url, options);
+        window.compilerWorkers++;
+        this.addEventListener('message', ({data}) => {
+          if (data.kind === 'cache-probe' || data.kind === 'cancelled')
+            window.workerEvents.push(data);
+        });
+      }
+    };
     const {ModelCompilerClient} = await import('/src/model/compiler-client.ts');
     const {browserPackageFiles} =
       await import('/src/project/browser-packages.ts');
@@ -126,8 +156,108 @@ test(
   },
 );
 
+for (const pause of ['kernel-loop', 'await'] as const) {
+  test(
+    `cancelling a ${pause} preserves the complete prefix and runs only the latest queued revision`,
+    {timeout: 120_000},
+    async t => {
+      const page = await fixture(t);
+      await page.evaluate(async pause => {
+        if (!crossOriginIsolated)
+          throw new Error('The compiler fixture must be isolated.');
+        const read = packageFiles.readFile;
+        packageFiles.readFile = async path => {
+          const bytes = await read(path);
+          if (!bytes || !path.endsWith('/library/kernel-cache.js'))
+            return bytes;
+          return new TextEncoder().encode(
+            new TextDecoder().decode(bytes) +
+              '\nglobalThis.__cacheProbe = kernelOperationCacheStats;',
+          );
+        };
+        const source = [
+          'import {box, group} from "@code3d/core";',
+          'const parts = Array.from({length: 320}, (_, i) => box(i + 1, 2, 3));',
+          'globalThis.postMessage({kind: "cache-probe", label: "prefix", stats: (globalThis as any).__cacheProbe()});',
+          pause === 'kernel-loop'
+            ? 'while (true) box(1, 2, 3);'
+            : 'await new Promise(resolve => setTimeout(resolve, 1_000));',
+          'export default group(parts);',
+        ].join('\n');
+        window.cancelledCompile = compile(undefined, source).then(
+          () => 'unexpected success',
+          error => (error as Error).message,
+        );
+      }, pause);
+      await page.waitForFunction(() =>
+        window.workerEvents.some(event => event.label === 'prefix'),
+      );
+      const result = await page.evaluate(async () => {
+        const phases: CompilationPhase[] = [];
+        try {
+          const skipped = compile(
+            undefined,
+            'throw new Error("Queued revision must not execute");',
+          ).then(
+            () => 'unexpected success',
+            error => (error as Error).message,
+          );
+          const model = await compile(
+            phase => phases.push(phase),
+            [
+              'import {box, group} from "@code3d/core";',
+              'const parts = Array.from({length: 320}, (_, i) => box(i + 1, 2, 3));',
+              'globalThis.postMessage({kind: "cache-probe", label: "reused", stats: (globalThis as any).__cacheProbe()});',
+              'export default group(parts);',
+            ].join('\n'),
+          );
+          // A completed cancellation must also disarm its forced-restart timer.
+          await new Promise(resolve => window.setTimeout(resolve, 5_100));
+          return {
+            error: await window.cancelledCompile,
+            skipped: await skipped,
+            phases,
+            workers: window.compilerWorkers,
+            events: window.workerEvents,
+            diagnostic: model.diagnostic,
+            exportable: client.canExport(model),
+          };
+        } finally {
+          client.dispose();
+        }
+      });
+      assert.match(result.error, /Compilation superseded/);
+      assert.match(result.skipped, /Compilation superseded/);
+      assert.equal(result.diagnostic, undefined);
+      assert.equal(result.exportable, true);
+      assert.equal(result.workers, 1);
+      assert.deepEqual(result.phases, [
+        'loading-project',
+        'compiling-model',
+        'evaluating-model',
+      ]);
+      assert.equal(
+        result.events.filter(event => event.kind === 'cancelled').length,
+        1,
+      );
+      const before = result.events.find(
+        event => event.label === 'prefix',
+      )!.stats!;
+      const after = result.events.find(
+        event => event.label === 'reused',
+      )!.stats!;
+      assert.ok(before.entries > 256);
+      assert.ok(before.nativeAllocatedBytes > 0);
+      assert.ok(before.estimatedJavaScriptBytes > 0);
+      assert.equal(before.maximumBytes, 2 * 1024 ** 3);
+      assert.equal(after.misses, before.misses);
+      assert.ok(after.hits >= before.hits + 320);
+    },
+  );
+}
+
 test(
-  'terminates cancelled preparation and loads the latest project in a new worker',
+  'finishes cancelled preparation and reuses the initialized worker for the latest project',
   {timeout: 120_000},
   async t => {
     const page = await fixture(t);
@@ -146,7 +276,13 @@ test(
           error = failure.message;
         }
         const model = await compile(phase => next.push(phase));
-        return {cancelled, next, error, diagnostic: model.diagnostic};
+        return {
+          cancelled,
+          next,
+          error,
+          diagnostic: model.diagnostic,
+          workers: window.compilerWorkers,
+        };
       } finally {
         client.dispose();
       }
@@ -157,7 +293,12 @@ test(
       'loading-project',
       'loading-runtime',
     ]);
-    assert.deepEqual(result.next, ['loading-compiler', ...runtimePhases]);
+    assert.deepEqual(result.next, [
+      'loading-project',
+      'compiling-model',
+      'evaluating-model',
+    ]);
+    assert.equal(result.workers, 1);
     assert.equal(result.diagnostic, undefined);
   },
 );

@@ -1,5 +1,10 @@
 import type {SketchPosition} from '@code3d/core/tooling';
 import type {SketchConstraintDisplay} from '../tools/sketch-constraints';
+import {
+  layoutSketchConstraintMarkers,
+  sketchConstraintLabelHeight,
+  sketchConstraintLabelBorder,
+} from '../tools/sketch-constraint-layout';
 import {createIcon} from './icons';
 import {sketchConstraintIcons} from './sketch-icons';
 const svg = <K extends keyof SVGElementTagNameMap>(tag: K) =>
@@ -35,7 +40,7 @@ export class SketchConstraints {
     )?.display;
     return (
       !!display &&
-      [...display.points, ...(display.curve ? [display.curve] : [])].some(
+      [...display.points, ...display.curves].some(
         p => p.layer === layer && p.id === id,
       )
     );
@@ -51,7 +56,15 @@ export class SketchConstraints {
       ? ''
       : 'none';
     if (!visible) this.hovered = this.focused = undefined;
-    const used = new Set(displays.map(d => d.key));
+    const markers = displays.flatMap(display =>
+      display.markers.map((marker, index) => ({
+        display,
+        marker,
+        width: display.label ? 28 + display.label.length * 6.5 : 22,
+        key: JSON.stringify([display.key, index]),
+      })),
+    );
+    const used = new Set(markers.map(m => m.key));
     if (!used.has(this.hovered ?? '')) this.hovered = undefined;
     if (!used.has(this.focused ?? '')) this.focused = undefined;
     for (const [key, badge] of this.badges) {
@@ -60,26 +73,32 @@ export class SketchConstraints {
       badge.guides.remove();
       this.badges.delete(key);
     }
-    const occupied: {x: number; y: number; width: number}[] = [];
-    for (const display of displays) {
-      let badge = this.badges.get(display.key);
+    const positions = layoutSketchConstraintMarkers(markers, project);
+    const activeKey = this.badges.get(this.hovered ?? this.focused ?? '')
+      ?.display.key;
+    for (const [index, {display, key, width}] of markers.entries()) {
+      let badge = this.badges.get(key);
       if (!badge) {
         const root = svg('g'),
           background = svg('rect'),
           text = svg('text'),
           title = svg('title');
-        const icon = createIcon(sketchConstraintIcons[display.kind]);
+        const icon = createIcon(sketchConstraintIcons[display.tool]);
         icon.setAttribute('x', '3');
         icon.setAttribute('y', '2');
         background.setAttribute('rx', '3');
-        background.setAttribute('height', '20');
+        background.setAttribute('height', String(sketchConstraintLabelHeight));
+        background.setAttribute(
+          'stroke-width',
+          String(sketchConstraintLabelBorder),
+        );
         text.setAttribute('x', '23');
         text.setAttribute('y', '14');
         root.setAttribute('tabindex', '0');
         root.setAttribute('role', 'button');
         root.append(title, background, icon, text);
         root.addEventListener('pointerenter', () => {
-          this.hovered = display.key;
+          this.hovered = key;
           this.change();
         });
         root.addEventListener('pointerleave', () => {
@@ -87,7 +106,7 @@ export class SketchConstraints {
           this.change();
         });
         root.addEventListener('focus', () => {
-          this.focused = display.key;
+          this.focused = key;
           this.change();
         });
         root.addEventListener('blur', () => {
@@ -104,33 +123,34 @@ export class SketchConstraints {
         root.addEventListener('click', event => {
           if (event.button !== 0) return;
           event.stopPropagation();
-          this.select(this.badges.get(display.key)!.display);
+          this.select(this.badges.get(key)!.display);
         });
         root.addEventListener('keydown', event => {
           if (event.key !== 'Enter' && event.key !== ' ') return;
           event.preventDefault();
           event.stopPropagation();
-          this.select(this.badges.get(display.key)!.display);
+          this.select(this.badges.get(key)!.display);
         });
         const guides = svg('g');
         badge = {root, background, icon, text, title, guides, display};
-        this.badges.set(display.key, badge);
+        this.badges.set(key, badge);
         this.labels.append(root);
         this.guides.append(guides);
       }
-      if (badge.display.kind !== display.kind) {
-        const icon = createIcon(sketchConstraintIcons[display.kind]);
+      if (badge.display.tool !== display.tool) {
+        const icon = createIcon(sketchConstraintIcons[display.tool]);
         icon.setAttribute('x', '3');
         icon.setAttribute('y', '2');
         badge.icon.replaceWith(icon);
         badge.icon = icon;
       }
       badge.display = display;
-      const active = display.key === (this.hovered ?? this.focused);
+      const active = display.key === activeKey;
       const classes = `${display.layer === local ? 'constraint-local' : 'constraint-upstream'}${active ? ' constraint-active' : ''}`;
       badge.root.setAttribute('class', `constraint-badge ${classes}`);
       badge.guides.setAttribute('class', `constraint-guides ${classes}`);
       badge.root.dataset.kind = display.kind;
+      badge.root.dataset.tool = display.tool;
       badge.root.dataset.key = display.key;
       badge.guides.dataset.key = display.key;
       const title = `${display.title}${display.layer !== local ? ' · upstream (locked)' : ''}`;
@@ -138,23 +158,12 @@ export class SketchConstraints {
       if (badge.title.textContent !== title) badge.title.textContent = title;
       if (badge.text.textContent !== display.label)
         badge.text.textContent = display.label;
-      const [anchorX, anchorY] = project(display.anchor);
-      const width = display.label ? 28 + display.label.length * 6.5 : 22;
-      const x = anchorX + 10;
-      let y = anchorY - 28;
-      // Deterministic screen-space stacking; no label coordinates enter the model.
-      while (
-        occupied.some(
-          r =>
-            x < r.x + r.width + 3 &&
-            x + width + 3 > r.x &&
-            y < r.y + 23 &&
-            y + 23 > r.y,
-        )
-      )
-        y += 23;
-      occupied.push({x, y, width});
-      badge.root.setAttribute('transform', `translate(${x}, ${y})`);
+      const {x, y} = positions[index];
+      const border = sketchConstraintLabelBorder / 2;
+      badge.root.setAttribute(
+        'transform',
+        `translate(${x + border}, ${y + border})`,
+      );
       badge.background.setAttribute('width', String(width));
       while (badge.guides.children.length > display.guides.length)
         badge.guides.lastChild!.remove();

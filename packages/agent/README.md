@@ -187,8 +187,9 @@ are accepted, while search and capture-index flags are managed by the App.
 Returned offsets use UTF-16 with exclusive ends, alongside 1-based Monaco
 positions and the selected text.
 
-The resolver runs in a disposable Web Worker with a one-second deadline and
-cancellation. A slow regex fails preflight without blocking the editor. The
+The resolver runs in a disposable Web Worker with a one-second execution deadline
+after it is ready, a separate ten-second loading deadline, and cancellation in
+both phases. A slow regex fails preflight without blocking the editor. The
 caller supplies the proposed source and must reject the file batch if this
 check fails, then recheck versions after asynchronous preflight. The App project
 service provides this validation and a shared queue for user saves and agent

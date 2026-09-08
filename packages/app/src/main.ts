@@ -174,18 +174,24 @@ app.innerHTML = `
           <div class="viewport-feedback-stack" id="viewport-feedback-stack">
             <div class="viewport-diagnostic-stack" id="viewport-diagnostic-stack" role="status" aria-live="polite" aria-atomic="true" hidden></div>
           </div>
-          <div class="viewport-status" id="viewport-status" data-state="busy" role="status" aria-live="polite" aria-busy="true">
-            <span class="viewport-status-indicator" aria-hidden="true">
-              <svg class="viewport-status-ready" viewBox="0 0 16 16">
-                <circle cx="8" cy="8" r="6" />
-                <path d="m5 8 2 2 4-4" />
-              </svg>
-              <svg class="viewport-status-error" viewBox="0 0 16 16">
-                <circle cx="8" cy="8" r="6" />
-                <path d="m6 6 4 4m0-4-4 4" />
-              </svg>
-            </span>
-            <span id="viewport-status-label">Loading editor</span>
+          <div class="viewport-header">
+            <div class="viewport-mode" role="group" aria-label="Viewport mode">
+              <button id="viewport-mode-modeling" type="button" aria-pressed="true" title="Show modeling guides and outlines">Modeling</button>
+              <button id="viewport-mode-render" type="button" aria-pressed="false" title="Show the model without guides or outlines · Also applies to image export">Render</button>
+            </div>
+            <div class="viewport-status" id="viewport-status" data-state="busy" role="status" aria-live="polite" aria-busy="true">
+              <span class="viewport-status-indicator" aria-hidden="true">
+                <svg class="viewport-status-ready" viewBox="0 0 16 16">
+                  <circle cx="8" cy="8" r="6" />
+                  <path d="m5 8 2 2 4-4" />
+                </svg>
+                <svg class="viewport-status-error" viewBox="0 0 16 16">
+                  <circle cx="8" cy="8" r="6" />
+                  <path d="m6 6 4 4m0-4-4 4" />
+                </svg>
+              </span>
+              <span id="viewport-status-label">Loading editor</span>
+            </div>
           </div>
           <div class="viewport-dock-panels">
             <aside class="dock-panel design-arguments-panel" id="design-arguments-panel" aria-label="Design arguments">
@@ -455,6 +461,20 @@ const viewport = new ModelViewport(viewportHost, {
   onTopologySelection: handleTopologySelection,
   sourceDecorationProviders,
 });
+const viewportModes = (['modeling', 'render'] as const).map(mode => ({
+  mode,
+  button: requiredElement<HTMLButtonElement>(`viewport-mode-${mode}`),
+}));
+for (const {mode, button} of viewportModes) {
+  button.addEventListener('click', () => {
+    viewport.setRenderMode(mode);
+    for (const candidate of viewportModes)
+      candidate.button.setAttribute(
+        'aria-pressed',
+        String(candidate.mode === mode),
+      );
+  });
+}
 const imageExportDialog = new ImageExportDialog(viewportHost, {
   capture: (width, height) => viewport.captureImage(width, height),
   fileName: () => viewport.exportName(),

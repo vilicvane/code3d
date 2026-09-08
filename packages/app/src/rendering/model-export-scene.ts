@@ -1,4 +1,4 @@
-import {Color, Quaternion, Vector3} from 'three';
+import {Quaternion, Vector3} from 'three';
 import type {Occurrence} from '../viewport';
 import type {ModelExportInstance} from '../model/model-export';
 import type {ModelModule} from '../model/compiler';
@@ -20,9 +20,7 @@ export function collectExportInstances(
         nodeId: node.nodeId,
         name: node.name,
         kind: node.kind,
-        color: node.color
-          ? `#${new Color(node.color).getHexString()}`
-          : undefined,
+        color: node.color,
         transform: {
           position: position.toArray(),
           quaternion: quaternion.toArray(),

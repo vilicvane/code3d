@@ -202,10 +202,37 @@ implementation context and historical outcomes, not a competing work queue.
   icon toolbar orders selection, drawing, modification and view controls; rectangle
   variants share a remembered entry. Right dragging pans without cancelling a draft;
   the permanent lower-left instructions are gone, while errors/read-only reasons remain.
-  Shift-click multi-selection exposes existing point/line/curve constraint actions;
+  Click and analytic box selection share point/line/curve selection modifiers:
+  left-to-right contains whole intervals, right-to-left intersects finite geometry,
+  plain replaces, Ctrl toggles, and Shift only adds. Ctrl takes precedence when both
+  modifiers are held; every box frame uses the gesture-start set, not the last frame.
+  Escape restores the pre-gesture selection even while Ctrl is held. Existing local relation
+  removal uses the selection's union, including mixed geometry; mixed state removes
+  instead of filling missing constraints. Additions require the complete selection
+  to be applicable, and hovering highlights all affected relation partners.
   dimensions share drawing numeric entry and a batch is one source edit/undo.
-  Selection Delete retains interval trimming and orphan cleanup. New inter-line
-  constraint kinds remain later work. The toolbar has native hover
+  Selection Delete retains interval trimming and orphan cleanup. Parallel accepts
+  two or more local lines as deterministic pairs; perpendicular and relative angle
+  require exactly two. Single-line angle is named Orientation in the UI; pair angle
+  follows authored endpoint directions, signed CCW from first to second (modulo 360).
+  Parallel has a linked badge beside each participating line. Perpendicular and pair
+  angle use a nearby interior-bisector badge when their endpoints share canonical
+  identity, otherwise a badge beside each line. All line badges share an offset
+  and stacking direction with horizontal/vertical/length/orientation, without covering
+  the stroke or pushing another badge across it. Each line's complete marker group
+  is centered along its midpoint, with 8px visible-edge spacing to the line and
+  4px between badges. Corner badges align their near corner (or side midpoint for an
+  axis-aligned bisector) toward the vertex, rather than centering their rectangle
+  on the bisector. Natural widths stay unchanged; axis-aligned right angles keep
+  an equal 8px clearance to both strokes. Acute angles do not force the whole
+  rectangle inside their wedge.
+  There is no overlap detection or automatic avoidance: other markers never
+  displace a group, and users can zoom to separate nearby geometry. Relative-angle
+  and perpendicular markers share the same placement mechanism. Hover/focus highlights all badges of
+  that relation, without connector guides or a separate direction diagram; authored
+  angle values and their direction tooltip stay unchanged. Trim propagates relations to surviving pieces, preserving expressions;
+  deleting a participant drops the relation. Rectangle defaults remain horizontal/vertical.
+  The toolbar has native hover
   labels and one keyboard Tab stop; narrow viewports place the whole toolbar
   below the compilation status. Both viewport
   status and error cards are scoped to the defining evaluations of the selected
@@ -920,13 +947,33 @@ Status: [R-024](requests/closed/R-024-cache-opencascade-operation-results.md)
 is implemented as a content-addressed kernel-operation cache covering
 solid construction and modification, Boolean prefixes and context regions,
 relative transforms, topology sidecars, exact transformed bounds, and render meshes.
-The latest evaluation's full working set is retained, with at most 256 additional
-unused historical entries managed by LRU. The previous and current sets remain
+The latest evaluation's full working set is retained. Unused historical entries
+are managed by LRU against a default 2 GiB memory budget, without a fixed entry
+count. The budget combines allocated native block sizes from the pinned
+mimalloc heap with estimated JavaScript cache storage (including mesh buffers,
+topology paths and cache keys). Native geometry shared across handles is counted
+once by the allocator; JavaScript objects shared across entries may be counted
+more than once. The previous and current sets remain
 protected until evaluation and snapshotting finish, avoiding cache thrashing when
 a model exceeds the historical capacity; see [#52](https://github.com/vilicvane/code3d/issues/52).
+The budget is a trimming target, not a hard limit on the page or the protected
+working set. Released native blocks are reusable even when WASM's capacity does
+not shrink. Compiler code, non-cache JavaScript objects, rendering/GPU resources
+and temporary operation peaks are outside the JavaScript estimate.
 JavaScript and provenance are still evaluated afresh. Cache encoding, capacity, and a
 possible lifetime beyond one compiler worker remain adjustable implementation
 choices rather than product semantics.
+
+Ordinary cancellation retains that Worker: the client sets a shared flag,
+kernel operation boundaries check it before starting work, and evaluation exits
+through its existing `finally` to retain the completed prefix and trim history.
+The latest queued revision starts only after cleanup; intermediate queued edits
+are rejected without evaluation. Preparation applies dependency invalidation
+before checking cancellation. A five-second cancellation grace period bounds
+unresponsive synchronous/native code, after which the Worker and its caches are
+discarded. Project close, preparation/export deadlines and Worker crashes retain
+their hard-stop behavior. App documents and Workers use COOP/COEP headers in dev,
+preview and static hosting to enable the shared flag; see #52.
 
 User-defined Replicad builders execute on every invocation because their
 closures may depend on state beyond their arguments. Core identifies the actual

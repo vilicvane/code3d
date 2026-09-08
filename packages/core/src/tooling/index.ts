@@ -1,5 +1,5 @@
 import {setOC} from 'replicad';
-import type {OpenCascadeInstance} from 'replicad-opencascadejs';
+import type {OpenCascadeInstance} from '@code3d/opencascade';
 import {clearKernelOperationCache} from '../library/kernel-cache.js';
 
 export {

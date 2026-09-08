@@ -53,6 +53,86 @@ const actions = (
     .map(e => ({id: e.id, parameters: e.position})),
 ) => sketchConstraintActions(layers, selected, editable, references, data);
 
+test('line relations check the whole selection, deduplicate intervals, and distinguish orientation from relative angle', () => {
+  const local = lines();
+  const picks = segments([local]);
+  const selected = actions([local], picks);
+  assert.deepEqual(
+    selected.find(a => a.kind === 'parallel').create().constraints,
+    [['parallel', [5, 6]]],
+  );
+  assert.deepEqual(
+    selected.find(a => a.kind === 'perpendicular').create().constraints,
+    [['perpendicular', [5, 6]]],
+  );
+  assert.deepEqual(
+    selected.find(a => a.kind === 'angle').create(-45).constraints,
+    [['angle', [5, 6], -45]],
+  );
+  assert.deepEqual(
+    selected.find(a => a.kind === 'orientation').create(45).constraints,
+    [
+      ['angle', 5, 45],
+      ['angle', 6, 45],
+    ],
+  );
+  const three = {
+    ...local,
+    entities: [
+      ...local.entities,
+      point(8, [0, 20]),
+      point(9, [20, 20]),
+      {kind: 'line', id: 10, points: [ref(8), ref(9)]},
+    ],
+  };
+  const multi = actions([three], segments([three]).reverse());
+  assert.deepEqual(
+    multi.find(a => a.kind === 'parallel').create().constraints,
+    [
+      ['parallel', [5, 6]],
+      ['parallel', [5, 10]],
+    ],
+  );
+  assert.ok(!multi.some(a => a.kind === 'perpendicular' || a.kind === 'angle'));
+  const mixed = actions([three], [...segments([three]), ref(1)]);
+  assert.ok(
+    !mixed.some(
+      a =>
+        a.kind === 'parallel' ||
+        a.kind === 'perpendicular' ||
+        a.kind === 'angle',
+    ),
+  );
+});
+
+test('one selected line removes touching pair constraints separately from orientation and highlights both partners', () => {
+  const local = {
+    ...lines(),
+    constraints: [
+      ['parallel', [6, 5]],
+      ['angle', [5, 6], 0],
+      ['angle', 5, 0],
+    ],
+  };
+  const selected = actions([local], [segments([local])[0]]);
+  for (const [kind, index] of [
+    ['parallel', 0],
+    ['angle', 1],
+    ['orientation', 2],
+  ]) {
+    const action = selected.find(a => a.kind === kind);
+    assert.deepEqual(action.create().removedConstraints, [index]);
+    assert.equal(action.active, true);
+    if (kind !== 'orientation') assert.ok(action.related.some(p => p.id === 6));
+  }
+  assert.equal(selected.find(a => a.kind === 'angle').dimension, undefined);
+  const pair = actions([local], segments([local]));
+  assert.equal(
+    pair.find(a => a.kind === 'angle').dimension.label,
+    'Angle between lines',
+  );
+});
+
 test('point, line, mixed and circular selections expose only applicable existing constraints', () => {
   const local = lines(),
     picks = segments([local]);
@@ -66,7 +146,7 @@ test('point, line, mixed and circular selections expose only applicable existing
   );
   assert.deepEqual(
     actions([local], [picks[0]]).map(a => a.kind),
-    ['horizontal', 'vertical', 'length', 'angle'],
+    ['horizontal', 'vertical', 'length', 'orientation'],
   );
   assert.deepEqual(
     actions([local], [ref(7), picks[0]]).map(a => a.kind),
@@ -107,8 +187,8 @@ test('multiple intervals of one source line constrain it once and selected lines
   assert.deepEqual(
     actions([constrained], picks)
       .find(a => a.kind === 'horizontal')
-      .create().constraints,
-    [['horizontal', 6]],
+      .create().removedConstraints,
+    [0],
   );
   assert.equal(
     actions([constrained], [picks[0]]).find(a => a.kind === 'horizontal')
@@ -237,4 +317,74 @@ test('Fixed cannot silently jump a solved expression coordinate back to its auth
   assert.equal(selected.find(a => a.kind === 'fixed').disabled, true);
   assert.match(selected.find(a => a.kind === 'fixed').title, /use X\/Y/);
   assert.equal(selected.find(a => a.kind === 'x').disabled, false);
+});
+
+test('mixed geometry removes the union of existing kinds without adding to a filtered subset', () => {
+  const local = {
+    ...lines(),
+    constraints: [
+      ['horizontal', 5],
+      ['length', 6, 20],
+      ['fixed', ref(7)],
+      ['midpoint', [ref(7), ref(1), ref(2)]],
+    ],
+  };
+  const selected = actions([local], [ref(7), ...segments([local])]);
+  assert.deepEqual(
+    new Set(selected.map(a => a.kind)),
+    new Set(['horizontal', 'length', 'fixed', 'midpoint']),
+  );
+  for (const [kind, index] of [
+    ['horizontal', 0],
+    ['length', 1],
+    ['fixed', 2],
+    ['midpoint', 3],
+  ]) {
+    const action = selected.find(a => a.kind === kind);
+    assert.equal(action.active, 'mixed');
+    assert.equal(action.disabled, false);
+    assert.deepEqual(action.create().constraints, []);
+    assert.deepEqual(action.create().removedConstraints, [index]);
+    assert.match(action.title, /^Remove/);
+  }
+  const center = actions([local], [ref(7)]).find(a => a.kind === 'midpoint');
+  assert.deepEqual(center.related, [ref(7), ref(1), ref(2)]);
+});
+
+test('unselected relation partners and unrelated selected upstream elements do not prevent local removal', () => {
+  const base = snapshot(
+    [point(1, [0, 0])],
+    [['fixed', ref(1, 'base')]],
+    'base',
+  );
+  const local = snapshot(
+    [point(2, [0, 0]), point(3, [10, 0])],
+    [
+      ['coincident', [ref(2), ref(1, 'base')]],
+      ['x', ref(3), 10],
+    ],
+  );
+  const selected = actions([base, local], [ref(2), ref(3), ref(1, 'base')]);
+  assert.deepEqual(
+    new Set(selected.map(a => a.kind)),
+    new Set(['coincident', 'x']),
+  );
+  assert.deepEqual(
+    selected.find(a => a.kind === 'coincident').create().removedConstraints,
+    [0],
+  );
+  assert.equal(
+    selected.some(a => a.kind === 'fixed'),
+    false,
+  );
+  const named = actions(
+    [base, local],
+    [ref(2), ref(1, 'base')],
+    new Map(),
+    new Set(['base']),
+  );
+  assert.deepEqual(
+    named.map(a => a.kind),
+    ['coincident'],
+  );
 });

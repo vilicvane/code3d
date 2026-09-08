@@ -156,8 +156,14 @@ Geometry tuples hold current data; `constraints` specify what must remain true.
 Constraints use `['kind', target, value?]` and have no persistent IDs. Point coordinates have the same runtime
 meaning whether computed from an expression or written as literals. They may
 move during solving unless constrained. `fixed` locks one point at its supplied
-coordinates; `horizontal` / `vertical` target one local line. `length` / `angle`
-target one local line and take the value in the third field (angles in degrees);
+coordinates; `horizontal` / `vertical` target one local line. `length` targets
+one local line and takes its value in the third field. `['angle', line, degrees]`
+sets its orientation relative to +X, named Orientation in the editor.
+`['angle', [line1, line2], degrees]` sets the signed angle from the first line's
+authored start-to-end direction to the second, positive counterclockwise and
+equivalent modulo 360. `['parallel', [line1, line2]]` and
+`['perpendicular', [line1, line2]]` relate two local lines independently of their
+endpoint order; the finite lines need not intersect. Point constraints
 `x` / `y` likewise target one point with a third-field coordinate value, and
 `coincident` takes `[pointRef, pointRef]`. `midpoint` takes `[midpointRef, startRef, endRef]`
 and places the first point halfway between the other two, with no line entity required.
@@ -169,6 +175,13 @@ located at their source tuples when inline source is available.
 
 In the App, select a sketch expression or variable to open its 2D editor. Draw
 continuous lines, drag literal-coordinate points, and delete local entities.
+In Select, an ordinary click or box selection replaces the selection, Ctrl
+toggles elements, and Shift only adds them. Drag left-to-right to select fully
+enclosed geometry or right-to-left to select intersecting geometry. With multiple
+elements selected, constraint tools can remove any editable local relation on
+the selected elements; adding a constraint requires the entire selection to
+satisfy its prerequisites. Parallel accepts two or more local lines and creates
+pairwise relations; Perpendicular and Angle between lines require exactly two.
 Circle takes a center (with optional X/Y input), followed by a radius or a
 circumference click. Entered Radius creates a persistent radius constraint;
 blank Radius follows the pointer and remains free. Drag a circle edge to change
@@ -354,6 +367,14 @@ every descendant's color, including already-painted parts and nested groups.
 The outermost painted group wins within that composition; shared parts retain
 their own colors when used elsewhere. Painting the same value again uses the
 latest color. Previews and exports use the same effective colors.
+
+Colors accept CSS names, `#RGB`, `#RGBA`, `#RRGGBB`, `#RRGGBBAA`,
+`rgb(...)` and `rgba(...)`. Alpha controls opacity: `0` is fully transparent,
+`1` is opaque. For example, `.paint('#f008')` is equivalent to
+`.paint('#ff000088')`, and `.paint('rgba(255, 0, 0, 0.5)')` is half-opaque red.
+RGB functions also accept percentage channels and space-separated values with
+slash alpha, such as `rgb(100% 0% 0% / 50%)`. Previews, PNG images, STEP and
+3MF exports preserve the specified opacity; STL contains geometry only.
 
 ```ts
 import {box, group} from '@code3d/core';
