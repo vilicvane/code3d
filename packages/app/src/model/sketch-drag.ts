@@ -1,3 +1,4 @@
+import {deletedSketchConstraints} from './sketch-topology';
 import type * as CoreTooling from '@code3d/core/tooling';
 import type {
   SketchPosition,
@@ -23,6 +24,7 @@ export type SketchEditableParameters = ReadonlyMap<number, readonly boolean[]>;
 export type SketchPointMerge = Readonly<{
   id: number;
   target: SketchPointAddress;
+  deleted: Readonly<{ids: readonly number[]; constraints: readonly number[]}>;
 }>;
 
 export type SketchDrag = Readonly<{
@@ -31,7 +33,7 @@ export type SketchDrag = Readonly<{
   editable: SketchEditableParameters;
   data: readonly SketchGeometryData[];
   reference?: SketchSnapshot;
-  /** Only requested on release; intermediate motion never changes identity. */
+  /** A snapped point previews the complete merge; only release persists it. */
   mergeTarget?: SketchPointAddress;
 }>;
 
@@ -41,6 +43,11 @@ export type SketchDragPreview = Readonly<{
   data: readonly SketchGeometryData[];
   reference: SketchSnapshot;
   merge?: SketchPointMerge;
+  /** A topology preview is never the numeric seed for the next pointer position. */
+  continuation?: Readonly<{
+    snapshot: SketchSnapshot;
+    data: readonly SketchGeometryData[];
+  }>;
 }>;
 
 export function previewSketchDrag(
@@ -49,15 +56,157 @@ export function previewSketchDrag(
   drag: SketchDrag,
 ): SketchDragPreview {
   const local = layers.at(-1)!;
-  const before = new Map(
-    local.entities.map(e => [e.id, sketchEntityParameters(e)]),
-  );
   const locks = drag.data.flatMap(entity =>
     entity.parameters.flatMap((value, parameter) =>
       drag.editable.get(entity.id)?.[parameter]
         ? []
         : [{id: entity.id, parameter, value}],
     ),
+  );
+  if (drag.mergeTarget) {
+    const preview = previewPointMerge(runtime, layers, drag, locks);
+    if (preview) return preview;
+  }
+  const data = movedSketchData(runtime, layers, drag, locks);
+  const authored = withSketchData(local, data);
+  const snapshot = runtime.solveSketchSnapshot([
+    ...layers.slice(0, -1),
+    authored,
+  ]);
+  assertSketchDragConnections(
+    [...layers.slice(0, -1), snapshot],
+    drag.reference ?? local,
+  );
+  // This is the same forward solve performed after the data are written to
+  // source. Neither the mouse objective nor gesture-only locks escape here.
+  return {
+    data,
+    reference: drag.reference ?? local,
+    snapshot,
+  };
+}
+
+function previewPointMerge(
+  runtime: Pick<typeof CoreTooling, 'solveSketchSnapshot'>,
+  layers: readonly SketchSnapshot[],
+  drag: SketchDrag,
+  locks: readonly Readonly<{id: number; parameter: number; value: number}>[],
+): SketchDragPreview | undefined {
+  const local = layers.at(-1)!;
+  const resolve = sketchPointResolver(layers);
+  const source = resolve({layer: local.id, id: drag.id});
+  const target = resolve(drag.mergeTarget!);
+  if (source.layer === target.layer && source.id === target.id) return;
+  if (
+    source.layer !== local.id ||
+    !drag.editable.get(source.id)?.every(Boolean)
+  )
+    throw new Error(
+      'Merging a point requires two editable coordinate literals.',
+    );
+  const aliased = {
+    ...local,
+    entities: local.entities.map(e =>
+      e.kind === 'point' && e.id === source.id
+        ? {...e, alias: drag.mergeTarget}
+        : e,
+    ),
+  };
+  const mergedPoint = sketchPointResolver([...layers.slice(0, -1), aliased]);
+  const ids = aliased.entities.flatMap(e => {
+    if (e.kind !== 'line') return [];
+    const [a, b] = e.points.map(mergedPoint);
+    return a.layer === b.layer && a.id === b.id ? [e.id] : [];
+  });
+  const constraints = deletedSketchConstraints(local, ids);
+  const remaining: SketchSnapshot = {
+    ...local,
+    entities: local.entities.filter(e => !ids.includes(e.id)),
+    constraints: local.constraints.filter(
+      (_, index) => !constraints.includes(index),
+    ),
+  };
+  const reference = drag.reference ?? local;
+  // Deleted curves no longer own incidences; both solve and replay use the
+  // surviving gesture-start topology, including attached points on other curves.
+  const remainingReference = {
+    ...reference,
+    entities: reference.entities.filter(e => !ids.includes(e.id)),
+    constraints: reference.constraints.filter(
+      (_, index) => !constraints.includes(index),
+    ),
+  };
+  const data = movedSketchData(
+    runtime,
+    [...layers.slice(0, -1), remaining],
+    {
+      ...drag,
+      data: drag.data.filter(e => !ids.includes(e.id)),
+      reference: remainingReference,
+    },
+    locks,
+  );
+  const authored = withSketchData(remaining, data);
+  const snapshot = runtime.solveSketchSnapshot([
+    ...layers.slice(0, -1),
+    {
+      ...authored,
+      entities: authored.entities.map(e =>
+        e.kind === 'point' && e.id === source.id
+          ? {...e, alias: drag.mergeTarget}
+          : e,
+      ),
+    },
+  ]);
+  assertSketchDragConnections(
+    [...layers.slice(0, -1), snapshot],
+    remainingReference,
+  );
+  // Identity changes must not silently redefine fixed points or consume
+  // expression-driven coordinates. Reject the entire transaction if needed.
+  const positions = new Map(
+    snapshot.entities
+      .filter(e => e.kind === 'point')
+      .map(e => [e.id, e.position]),
+  );
+  for (const lock of locks) {
+    const e = snapshot.entities.find(e => e.id === lock.id)!;
+    if (sketchEntityParameters(e)[lock.parameter] !== lock.value)
+      throw new Error('Point merge conflicts with expression-driven geometry.');
+  }
+  for (const [kind, ref] of local.constraints) {
+    if (kind !== 'fixed' || ref.layer !== local.id) continue;
+    const original = local.entities.find(
+      e => e.kind === 'point' && e.id === ref.id,
+    )!;
+    if (
+      original.kind === 'point' &&
+      !original.position.every((v, i) => v === positions.get(ref.id)![i])
+    )
+      throw new Error('Point merge conflicts with a fixed point.');
+  }
+
+  return {
+    snapshot,
+    data: data.filter(e => e.id !== source.id),
+    reference,
+    merge: {
+      id: source.id,
+      target: drag.mergeTarget!,
+      deleted: {ids, constraints},
+    },
+    continuation: {snapshot: local, data: drag.data},
+  };
+}
+
+function movedSketchData(
+  runtime: Pick<typeof CoreTooling, 'solveSketchSnapshot'>,
+  layers: readonly SketchSnapshot[],
+  drag: SketchDrag,
+  locks: readonly Readonly<{id: number; parameter: number; value: number}>[],
+): readonly SketchGeometryData[] {
+  const before = new Map(
+    layers.at(-1)!.entities.map(e => [e.id, sketchEntityParameters(e)]),
   );
   const moved = runtime.solveSketchSnapshot(layers, {...drag, locks});
   const after = new Map(
@@ -82,10 +231,17 @@ export function previewSketchDrag(
       ),
     };
   });
+  return data;
+}
+
+function withSketchData(
+  local: SketchSnapshot,
+  data: readonly SketchGeometryData[],
+): SketchSnapshot {
   const parameters = new Map(
     data.map(entity => [entity.id, entity.parameters]),
   );
-  let authored: SketchSnapshot = {
+  const authored: SketchSnapshot = {
     ...local,
     entities: local.entities.map(e =>
       parameters.has(e.id)
@@ -93,71 +249,5 @@ export function previewSketchDrag(
         : e,
     ),
   };
-  let merge: SketchPointMerge | undefined;
-  if (drag.mergeTarget) {
-    const resolve = sketchPointResolver(layers);
-    const source = resolve({layer: local.id, id: drag.id});
-    const target = resolve(drag.mergeTarget);
-    if (source.layer !== target.layer || source.id !== target.id) {
-      if (
-        source.layer !== local.id ||
-        !drag.editable.get(source.id)?.every(Boolean)
-      )
-        throw new Error(
-          'Merging a point requires two editable coordinate literals.',
-        );
-      merge = {id: source.id, target: drag.mergeTarget};
-      authored = {
-        ...authored,
-        entities: authored.entities.map(e =>
-          e.kind === 'point' && e.id === source.id
-            ? {...e, alias: drag.mergeTarget}
-            : e,
-        ),
-      };
-    }
-  }
-  const snapshot = runtime.solveSketchSnapshot([
-    ...layers.slice(0, -1),
-    authored,
-  ]);
-  assertSketchDragConnections(
-    [...layers.slice(0, -1), snapshot],
-    drag.reference ?? local,
-  );
-  if (merge) {
-    // Identity changes must not silently redefine fixed points or consume
-    // expression-driven coordinates. Reject the entire transaction if needed.
-    const positions = new Map(
-      snapshot.entities
-        .filter(e => e.kind === 'point')
-        .map(e => [e.id, e.position]),
-    );
-    for (const lock of locks) {
-      const e = snapshot.entities.find(e => e.id === lock.id)!;
-      if (sketchEntityParameters(e)[lock.parameter] !== lock.value)
-        throw new Error(
-          'Point merge conflicts with expression-driven geometry.',
-        );
-    }
-    for (const [kind, ref] of local.constraints) {
-      if (kind !== 'fixed' || ref.layer !== local.id) continue;
-      const original = local.entities.find(
-        e => e.kind === 'point' && e.id === ref.id,
-      )!;
-      if (
-        original.kind === 'point' &&
-        !original.position.every((v, i) => v === positions.get(ref.id)![i])
-      )
-        throw new Error('Point merge conflicts with a fixed point.');
-    }
-  }
-  // This is the same forward solve performed after the data are written to
-  // source. Neither the mouse objective nor gesture-only locks escape here.
-  return {
-    data: data.filter(e => e.id !== merge?.id),
-    merge,
-    reference: drag.reference ?? local,
-    snapshot,
-  };
+  return authored;
 }
