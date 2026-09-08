@@ -15,14 +15,14 @@ const names = (page: Page) =>
     );
 const line = (page: Page, id: number) =>
   page.locator(`.sketch-canvas line.local[data-id="${id}"]`);
-async function click(page: Page, target: Locator, shift = false) {
+async function click(page: Page, target: Locator, ctrl = false) {
   const r = (await target.boundingBox())!;
-  if (shift) await page.keyboard.down('Shift');
+  if (ctrl) await page.keyboard.down('Control');
   await page.mouse.click(r.x + r.width / 2, r.y + r.height / 2);
-  if (shift) await page.keyboard.up('Shift');
+  if (ctrl) await page.keyboard.up('Control');
 }
 
-test('point and line selection expose applicable tools, Shift toggles and blank or Escape clears them', async t => {
+test('point and line selection expose applicable tools, Ctrl toggles and blank or Escape clears them', async t => {
   const page = await open(t, lines);
   const original = await text(page);
   assert.equal(await toolbar(page).isVisible(), false);
@@ -51,7 +51,7 @@ test('point and line selection expose applicable tools, Shift toggles and blank 
     'Horizontal',
     'Vertical',
     'Length',
-    'Angle',
+    'Orientation',
   ]);
   await click(page, line(page, 6), true);
   assert.equal(await page.locator('.sketch-canvas line.selected').count(), 2);
@@ -104,7 +104,7 @@ test('selected lines batch constraints once, toggle them off and undo either edi
   assert.equal(await text(page), original);
 });
 
-test('mixed selections fill missing constraints and then remove the selected group', async t => {
+test('mixed selections remove existing constraints without filling the selected group', async t => {
   const page = await open(
     t,
     lines.replace(']]);', "]], {constraints:[['horizontal',5]]});"),
@@ -117,16 +117,14 @@ test('mixed selections fill missing constraints and then remove the selected gro
   });
   assert.equal(await horizontal.getAttribute('aria-pressed'), 'mixed');
   await horizontal.click();
-  await waitForSource(page, /'horizontal',\s*6/);
-  await page.getByText('Ready', {exact: true}).waitFor();
-  assert.equal((await text(page)).match(/'horizontal'/g)?.length, 2);
-  assert.equal(await horizontal.getAttribute('aria-pressed'), 'true');
-  await horizontal.click();
   await page
     .locator('.constraint-badge[data-kind="horizontal"]')
     .first()
     .waitFor({state: 'detached'});
   assert.doesNotMatch(await text(page), /'horizontal'/);
+  await page.keyboard.press('Control+z');
+  await waitForSource(page, /'horizontal',\s*5/);
+  assert.doesNotMatch(await text(page), /'horizontal',\s*6/);
 });
 
 test('Fixed captures a solved point position instead of returning to its source seed', async t => {

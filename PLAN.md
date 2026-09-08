@@ -202,10 +202,37 @@ implementation context and historical outcomes, not a competing work queue.
   icon toolbar orders selection, drawing, modification and view controls; rectangle
   variants share a remembered entry. Right dragging pans without cancelling a draft;
   the permanent lower-left instructions are gone, while errors/read-only reasons remain.
-  Shift-click multi-selection exposes existing point/line/curve constraint actions;
+  Click and analytic box selection share point/line/curve selection modifiers:
+  left-to-right contains whole intervals, right-to-left intersects finite geometry,
+  plain replaces, Ctrl toggles, and Shift only adds. Ctrl takes precedence when both
+  modifiers are held; every box frame uses the gesture-start set, not the last frame.
+  Escape restores the pre-gesture selection even while Ctrl is held. Existing local relation
+  removal uses the selection's union, including mixed geometry; mixed state removes
+  instead of filling missing constraints. Additions require the complete selection
+  to be applicable, and hovering highlights all affected relation partners.
   dimensions share drawing numeric entry and a batch is one source edit/undo.
-  Selection Delete retains interval trimming and orphan cleanup. New inter-line
-  constraint kinds remain later work. The toolbar has native hover
+  Selection Delete retains interval trimming and orphan cleanup. Parallel accepts
+  two or more local lines as deterministic pairs; perpendicular and relative angle
+  require exactly two. Single-line angle is named Orientation in the UI; pair angle
+  follows authored endpoint directions, signed CCW from first to second (modulo 360).
+  Parallel has a linked badge beside each participating line. Perpendicular and pair
+  angle use a nearby interior-bisector badge when their endpoints share canonical
+  identity, otherwise a badge beside each line. All line badges share an offset
+  and stacking direction with horizontal/vertical/length/orientation, without covering
+  the stroke or pushing another badge across it. Each line's complete marker group
+  is centered along its midpoint, with 8px visible-edge spacing to the line and
+  4px between badges. Corner badges align their near corner (or side midpoint for an
+  axis-aligned bisector) toward the vertex, rather than centering their rectangle
+  on the bisector. Natural widths stay unchanged; axis-aligned right angles keep
+  an equal 8px clearance to both strokes. Acute angles do not force the whole
+  rectangle inside their wedge.
+  There is no overlap detection or automatic avoidance: other markers never
+  displace a group, and users can zoom to separate nearby geometry. Relative-angle
+  and perpendicular markers share the same placement mechanism. Hover/focus highlights all badges of
+  that relation, without connector guides or a separate direction diagram; authored
+  angle values and their direction tooltip stay unchanged. Trim propagates relations to surviving pieces, preserving expressions;
+  deleting a participant drops the relation. Rectangle defaults remain horizontal/vertical.
+  The toolbar has native hover
   labels and one keyboard Tab stop; narrow viewports place the whole toolbar
   below the compilation status. Both viewport
   status and error cards are scoped to the defining evaluations of the selected

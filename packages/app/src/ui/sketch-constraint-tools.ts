@@ -7,6 +7,7 @@ import {
 import {DrawingInputs} from './drawing-inputs';
 import {SketchToolbar} from './sketch-toolbar';
 import {sketchConstraintIcons} from './sketch-icons';
+import type {SketchPointAddress} from '@code3d/core/tooling';
 import {
   sketchConstraintDimensions,
   sketchConstraintNames,
@@ -28,6 +29,7 @@ export class SketchConstraintTools {
   );
   private actions: readonly SketchConstraintAction[] = [];
   private identity = '';
+  private hovered?: SketchConstraintAction['kind'];
   private current?: {
     kind: SketchConstraintAction['kind'];
     field: DrawingDimension;
@@ -39,10 +41,26 @@ export class SketchConstraintTools {
   constructor(
     private readonly commit: (change: SketchChange) => boolean,
     private readonly focusCanvas: () => void,
+    private readonly highlight: () => void,
   ) {
     this.root.className = 'sketch-constraint-tools';
     this.root.hidden = true;
     this.root.append(this.toolbar.root);
+    const hover = (event: Event) => {
+      const target =
+        event.target instanceof Element ? event.target.closest('button') : null;
+      this.hovered = this.actions.find(
+        a => a.name === target?.getAttribute('aria-label'),
+      )?.kind;
+      this.highlight();
+    };
+    this.root.addEventListener('pointerover', hover);
+    this.root.addEventListener('focusin', hover);
+    for (const name of ['pointerleave', 'focusout'])
+      this.root.addEventListener(name, () => {
+        this.hovered = undefined;
+        this.highlight();
+      });
     this.inputs.root.addEventListener('keydown', event => {
       if (event.key === 'Escape') {
         event.preventDefault();
@@ -50,6 +68,16 @@ export class SketchConstraintTools {
         this.cancel();
       }
     });
+  }
+
+  related(layer: string, id: number): boolean {
+    return (
+      this.actions
+        .find(a => a.kind === this.hovered)
+        ?.related.some(
+          (p: SketchPointAddress) => p.layer === layer && p.id === id,
+        ) ?? false
+    );
   }
 
   show(identity: string, actions: readonly SketchConstraintAction[]): void {
@@ -100,7 +128,7 @@ export class SketchConstraintTools {
 
   private activate(kind: SketchConstraintAction['kind']): void {
     const action = this.actions.find(a => a.kind === kind)!;
-    if (!action.dimension || action.active === true) {
+    if (!action.dimension || action.active) {
       this.cancel();
       this.commit(action.create());
       this.focusCanvas();

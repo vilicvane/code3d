@@ -296,14 +296,16 @@ export class SketchEditorController {
         if (!rewrite) return [constraint];
         const [kind, , value] = constraint;
         const replacements: SketchConstraint<SketchPointAddress>[] =
-          kind === 'horizontal' || kind === 'vertical'
-            ? rewrite.ids.map(id => [kind, id])
-            : kind === 'length' ||
-                kind === 'angle' ||
-                kind === 'radius' ||
-                kind === 'sweep'
-              ? rewrite.ids.map(id => [kind, id, value])
-              : [constraint];
+          rewrite.targets.map(
+            target =>
+              (value === undefined
+                ? [kind, target]
+                : [
+                    kind,
+                    target,
+                    value,
+                  ]) as SketchConstraint<SketchPointAddress>,
+          );
         // The source resolver replaces the first target in place and appends
         // copies. Keep the same indices for another edit before compilation.
         copiedConstraints.push(...replacements.slice(1));

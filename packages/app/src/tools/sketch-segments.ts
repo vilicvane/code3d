@@ -396,24 +396,55 @@ export function trimSketchSegment(
       add(endpoints);
     }
   });
-  const constraintReplacements = local.constraints.flatMap(
-    ([kind, data], index) => {
-      const id =
-        kind === 'horizontal' || kind === 'vertical'
-          ? data
-          : kind === 'length' ||
-              kind === 'angle' ||
-              kind === 'radius' ||
-              kind === 'sweep'
-            ? data
-            : undefined;
-      const targets = id === undefined ? undefined : replacements.get(id);
-      if (!targets) return [];
+  const constraintReplacements = local.constraints.flatMap<
+    Extract<SketchChange, {kind: 'trim'}>['constraintReplacements'][number]
+  >(([kind, data], index) => {
+    if (
+      kind === 'parallel' ||
+      kind === 'perpendicular' ||
+      (kind === 'angle' && typeof data !== 'number')
+    ) {
+      const pair = data as readonly [number, number];
+      if (
+        pair.some(id => removed.includes(id)) ||
+        !pair.some(id => replacements.has(id))
+      )
+        return [];
+      const first = replacements.get(pair[0]) ?? [pair[0]];
+      const second = replacements.get(pair[1]) ?? [pair[1]];
+      if (
+        first.length === 1 &&
+        first[0] === pair[0] &&
+        second.length === 1 &&
+        second[0] === pair[1]
+      )
+        return [];
       return [
-        {index, ids: kind === 'length' || kind === 'sweep' ? [] : targets},
+        {index, targets: first.flatMap(a => second.map(b => [a, b] as const))},
       ];
-    },
-  );
+    }
+    const id =
+      kind === 'horizontal' || kind === 'vertical'
+        ? data
+        : kind === 'length' ||
+            kind === 'angle' ||
+            kind === 'radius' ||
+            kind === 'sweep'
+          ? data
+          : undefined;
+    const targets = typeof id !== 'number' ? undefined : replacements.get(id);
+    if (!targets) return [];
+    if (
+      kind !== 'length' &&
+      kind !== 'sweep' &&
+      targets.length === 1 &&
+      targets[0] === id
+    )
+      return [];
+    return [
+      {index, targets: kind === 'length' || kind === 'sweep' ? [] : targets},
+    ];
+  });
   const ids = [...new Set([...removed, ...curves.map(curve => curve.id)])];
   const orphaned = disconnectedPoints(layers, ids, entries);
   return {

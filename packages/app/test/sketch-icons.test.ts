@@ -40,7 +40,7 @@ test('drawing icons show the generated endpoints and centers with a shared point
 
 test('dimensions use measuring tools and direction crosses distinguish solid and dashed axes', () => {
   assert.equal(sketchConstraintIcons.length, Ruler);
-  assert.equal(sketchConstraintIcons.angle, Protractor);
+  assert.equal(sketchConstraintIcons.orientation, Protractor);
   const horizontal = sketchConstraintIcons.horizontal;
   const vertical = sketchConstraintIcons.vertical;
   for (const icon of [horizontal, vertical]) {
