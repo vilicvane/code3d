@@ -523,6 +523,12 @@ are tracked separately in [#84](https://github.com/vilicvane/code3d/issues/84).
   preview stage, preserve scene/camera/selection, and clear on leaving the
   argument. Interactive topology selection owns overlapping highlights.
   Parameter guides are modeling helpers, excluded from Render and CAD geometry.
+- Editor Tab focuses the currently inspected argument's visible, writable
+  contextual input and selects its text (#99). It uses the same argument
+  locator as geometry hints, including tracked source ranges and writable
+  omitted arguments. Completion/snippet navigation, multi-cursor or selection
+  indentation, Shift+Tab and accessibility Tab navigation keep their existing
+  behavior. Missing or unavailable inputs fall through to Monaco's native Tab.
 - Topology and relation guides use fixed screen-space sizes: vertices are
   5px; passive line decorations and source highlights are 1px; interactive
   topology selection guides and highlights are 2px. Direction arrowheads are

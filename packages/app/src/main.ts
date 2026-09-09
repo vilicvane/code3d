@@ -28,6 +28,7 @@ import type {
 import {ModelDiagnosticError, type ModelDiagnostic} from './model/diagnostic';
 import {viewportDiagnostic} from './model/viewport-diagnostic';
 import {originDecoration} from './model/origin-decorations';
+import {sourceParameterAt} from './model/tool-arguments';
 import {spatialIntent} from './tools/model-spatial-tool';
 import {SketchEditorController} from './tools/sketch-editor-controller';
 import {bundledExamples} from './project/bundled-examples';
@@ -633,6 +634,27 @@ const contextualToolPanel = new ContextualToolPanel(viewportHost, {
   onParameterInput: updateContextualToolParameter,
   onParameterCommit: commitContextualToolParameter,
   onAction: runContextualToolAction,
+});
+codeEditor.setParameterFocusHandler(() => {
+  const scope = viewport.sourceEvaluation();
+  const cursor = codeEditor.cursorSource();
+  if (
+    !scope ||
+    !cursor ||
+    contextualTool?.targetId !== scope.target.id ||
+    contextualTool.contextId !== scope.evaluation.contextId
+  )
+    return false;
+  const parameter = sourceParameterAt(
+    scope.target,
+    cursor.file,
+    cursor.offset,
+    ref => codeEditor.resolveSourceRef(ref),
+  );
+  return (
+    parameter !== undefined &&
+    contextualToolPanel.focusParameter(parameter.name)
+  );
 });
 const toolEngine = new ToolEngine({
   sourceVersion: () => codeEditor.sourceVersion(),

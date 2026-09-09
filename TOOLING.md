@@ -84,6 +84,10 @@ selection + gesture
   使用既有 selection 与输入到输出变换。source decoration provider 接收当前参数，
   viewport 选择真实尺寸边并绘制统一提示。box 与 extrude 提供尺寸语义，fillet 和
   originVertex 复用拓扑记录；未声明几何语义的参数不按名称或数值单位猜测。
+- 编辑器 Tab 与高亮共用实参定位，焦点跳转通过当前追踪后的 source ref 解析。
+  App 核对当前工具与执行上下文，面板仅聚焦已渲染、可见、未禁用且非只读的输入框。
+  快捷键限定所属 Monaco 编辑器，单光标空选区时调用焦点处理；没有目标则执行原生
+  tab 命令。补全、snippet、inline suggestion、Tab 移动焦点模式和 Shift+Tab 保留原行为。
 
 ## 核心层次
 
