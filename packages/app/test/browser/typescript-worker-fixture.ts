@@ -2,6 +2,80 @@ import type {ProjectTypeScriptWorker} from '../../src/monaco/typescript-protocol
 import * as monaco from 'monaco-editor/editor';
 import * as language from 'monaco-editor/languages/features/typescript/register';
 
+export function mainEditor() {
+  return monaco.editor
+    .getEditors()
+    .find(editor => editor.getDomNode()?.closest('#editor-host'))!;
+}
+
+export async function inspectIdentifierTokens() {
+  const names = [
+    '宽度',
+    'box宽度2',
+    'const宽度',
+    'Box宽度',
+    '$宽度',
+    '_宽度',
+    'café',
+    'e\u0301',
+    '𠮷野',
+    'a\u200cb',
+    'a\u200db',
+  ];
+  const source = names.map(name => `const ${name} = 1;`).join('\n');
+  const samples = [
+    ...names,
+    '#宽度',
+    'const',
+    'interface',
+    '10.5',
+    '0xff',
+    '// 中文注释',
+    '"中文字符串"',
+    '`尺寸${box宽度2}`',
+    '/宽度+/u',
+    '💥',
+    '\u0301',
+  ];
+  const results = [];
+  for (const languageId of ['typescript', 'javascript']) {
+    await monaco.editor.colorize(source, languageId, {});
+    const model = monaco.editor.createModel(
+      source,
+      languageId,
+      monaco.Uri.file(
+        `/workspace/unicode.${languageId === 'typescript' ? 'ts' : 'js'}`,
+      ),
+    );
+    try {
+      const factory = await (languageId === 'typescript'
+        ? language.getTypeScriptWorker()
+        : language.getJavaScriptWorker());
+      const worker = await factory(model.uri);
+      const uri = model.uri.toString();
+      results.push({
+        languageId,
+        tokens: Object.fromEntries(
+          samples.map(sample => [
+            sample,
+            monaco.editor.tokenize(sample, languageId)[0].map(token => ({
+              offset: token.offset,
+              type: token.type.replace(/\.(ts|js)$/, ''),
+            })),
+          ]),
+        ),
+        diagnostics: [
+          ...(await worker.getSyntacticDiagnostics(uri)),
+          ...(await worker.getSemanticDiagnostics(uri)),
+        ],
+      });
+    } finally {
+      model.dispose();
+    }
+  }
+  return {names, results};
+}
+
 export async function inspectWorkerFiles() {
   const declarationFile =
     'file:///workspace/node_modules/@code3d/core/bld/library/runtime.d.ts';
