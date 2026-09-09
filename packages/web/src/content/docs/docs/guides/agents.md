@@ -78,6 +78,11 @@ keeps their selections and carets attached to the corresponding source.
 
 Click an agent's pill in the top bar to follow its updates; click it again to stop,
 or choose another agent to switch. The mouse-pointer icon marks the followed agent.
+Starting or switching follow immediately moves to that agent's latest selection
+and synchronizes the model or sketch, its arguments and its last explicitly
+requested 3D view. The selection stays attached to the current source after edits
+and formatting. If the agent has no valid selection yet, your view stays put
+until its next update.
 Each accepted source or cursor update moves the editor to that agent's selection
 and updates the model or sketch, using its supplied arguments (or JSDoc defaults)
 and any explicitly requested 3D view. You can keep editing, selecting and navigating

@@ -39,6 +39,7 @@ export class AgentPanel {
   private readonly navigation = document.createElement('div');
   private readonly badges = new Map<string, HTMLButtonElement>();
   private followedAgentId?: string;
+  private readonly followListeners = new Set<(agentId?: string) => void>();
   private readonly dialog = document.createElement('dialog');
   private readonly port = document.createElement('input');
   private readonly name = document.createElement('input');
@@ -201,6 +202,11 @@ export class AgentPanel {
     return this.followedAgentId;
   }
 
+  onFollowChange(listener: (agentId?: string) => void): () => void {
+    this.followListeners.add(listener);
+    return () => this.followListeners.delete(listener);
+  }
+
   refresh(): void {
     this.presenceChanged(
       new Set(
@@ -230,6 +236,8 @@ export class AgentPanel {
         badge.addEventListener('click', () => {
           this.followedAgentId = this.followedAgentId === id ? undefined : id;
           this.refresh();
+          for (const listener of this.followListeners)
+            listener(this.followedAgentId);
         });
         this.badges.set(id, badge);
         this.navigation.append(badge);
@@ -317,6 +325,7 @@ export class AgentPanel {
         this.grants.delete(grant.config.agentId);
         this.renders.remove(grant.config.agentId);
         this.editor.removeAgentCursor(grant.config.agentId);
+        this.project.forgetAgent(grant.config.agentId);
         if (this.displayedAgentId === grant.config.agentId) {
           this.hidePrompt();
           this.message.textContent = 'Agent revoked.';
@@ -677,6 +686,7 @@ export class AgentPanel {
       grant.host?.close();
       grant.endpoint.close();
       this.editor.removeAgentCursor(grant.config.agentId);
+      this.project.forgetAgent(grant.config.agentId);
     }
     this.grants.clear();
     this.renders.clear();

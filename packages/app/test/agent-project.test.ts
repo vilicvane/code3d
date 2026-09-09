@@ -237,6 +237,53 @@ test('follow updates describe accepted edits before observation and exclude read
   assert.equal(updates.length, 1);
 });
 
+test('starting follow uses each agent’s current cursor, arguments and last explicit view', async () => {
+  const f = fixture();
+  assert.equal(f.session.latestAgentUpdate('alice'), undefined);
+  await f.apply({
+    cursor: {file: '/model.ts', regex: 'const (model)', arguments: '[12]'},
+    render: {view: 'top'},
+  });
+  await f.apply({cursor: {file: '/lib.ts', regex: 'const (value)'}}, 'bob');
+  await f.apply({type: true});
+  await f.read('/model.ts');
+  await f.apply({
+    files: [{path: '/model.ts', version: 'wrong', content: ''}],
+    cursor: {file: '/model.ts', regex: '(1)', arguments: '[99]'},
+    render: {view: 'bottom'},
+  });
+  // The editor rebases selections independently of agent requests.
+  const moved = {file: '/renamed.ts', start: 26, end: 31};
+  f.cursors.set('alice', moved);
+  assert.deepEqual(f.session.latestAgentUpdate('alice'), {
+    agentId: 'alice',
+    cursor: moved,
+    arguments: '[12]',
+    view: 'top',
+  });
+  assert.deepEqual(f.session.latestAgentUpdate('bob'), {
+    agentId: 'bob',
+    cursor: {file: '/lib.ts', start: 13, end: 18},
+    arguments: undefined,
+    view: undefined,
+  });
+  const updates: AgentUpdate[] = [];
+  f.session.onAgentUpdate(update => updates.push(update));
+  await f.apply({cursor: {file: '/model.ts', regex: '(1)'}});
+  assert.equal(f.session.latestAgentUpdate('alice')?.arguments, undefined);
+  assert.equal(f.session.latestAgentUpdate('alice')?.view, 'top');
+  // Keeping the view for activation does not force it on subsequent updates.
+  assert.equal(updates.at(-1)?.view, undefined);
+  f.cursors.delete('alice');
+  assert.equal(f.session.latestAgentUpdate('alice'), undefined);
+  f.session.forgetAgent('alice');
+  f.cursors.set('alice', moved);
+  assert.deepEqual(f.session.latestAgentUpdate('alice'), {
+    agentId: 'alice',
+    cursor: moved,
+  });
+});
+
 test('context reads the current user target without adopting it or modifying files', async () => {
   const f = fixture({
     observe: async () => {

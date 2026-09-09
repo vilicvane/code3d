@@ -836,7 +836,7 @@ codeEditor.onActiveFile((path, reason) => {
   requestModelUpdate(0);
 });
 
-agentProject.onAgentUpdate(update => {
+function followAgentUpdate(update: AgentUpdate): void {
   if (agentPanel?.followingAgentId !== update.agentId || !update.cursor) return;
   finishContextualTool();
   activeCompletionFocus = undefined;
@@ -846,9 +846,7 @@ agentProject.onAgentUpdate(update => {
   const invocation = {
     file: update.cursor.file,
     offset: update.cursor.start,
-    ...(update.input.cursor?.arguments === undefined
-      ? {}
-      : {arguments: update.input.cursor.arguments}),
+    ...(update.arguments === undefined ? {} : {arguments: update.arguments}),
   };
   selectedDesignInvocation =
     invocation.arguments === undefined ? undefined : invocation;
@@ -856,6 +854,13 @@ agentProject.onAgentUpdate(update => {
   preferredEvaluationContextId = undefined;
   pendingAgentFollow = update;
   void runModel(invocation);
+}
+
+agentProject.onAgentUpdate(followAgentUpdate);
+agentPanel.onFollowChange(agentId => {
+  pendingAgentFollow = undefined;
+  const update = agentId && agentProject.latestAgentUpdate(agentId);
+  if (update) followAgentUpdate(update);
 });
 
 // A later user gesture takes precedence over a view requested before compilation.
@@ -1326,14 +1331,12 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
     syncContextualTool();
     if (following && pendingAgentFollow === following) {
       pendingAgentFollow = undefined;
-      const render = following.input.render;
       if (
         agentPanel?.followingAgentId === following.agentId &&
         !sketchEditor.hasTarget &&
-        typeof render === 'object' &&
-        render.view
+        following.view
       )
-        viewport.setView(resolveRenderView(render.view));
+        viewport.setView(resolveRenderView(following.view));
     }
     restoreModelStatus();
   } catch (error) {

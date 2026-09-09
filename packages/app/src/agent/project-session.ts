@@ -7,6 +7,7 @@ import {
   type AgentResponse,
   type FileChange,
   type ApplyInput,
+  type RenderView,
 } from '@code3d/agent';
 import type {SourceRef} from '@code3d/core/tooling';
 import type {ProjectEditorChange} from '../editor';
@@ -52,7 +53,8 @@ export type AgentObservation = Readonly<{
 export type AgentUpdate = Readonly<{
   agentId: string;
   cursor?: SourceRef;
-  input: ApplyInput;
+  arguments?: string;
+  view?: RenderView;
 }>;
 type FileState = {
   path: string;
@@ -74,6 +76,10 @@ export class AgentProjectSession {
   private revision = 1;
   private readonly revisionListeners = new Set<() => void>();
   private readonly updateListeners = new Set<(update: AgentUpdate) => void>();
+  private readonly agentViews = new Map<
+    string,
+    Pick<AgentUpdate, 'arguments' | 'view'>
+  >();
   private readonly entryListeners = new Set<
     (reason: 'operation' | 'save') => void
   >();
@@ -167,6 +173,17 @@ export class AgentProjectSession {
   onAgentUpdate(listener: (update: AgentUpdate) => void): () => void {
     this.updateListeners.add(listener);
     return () => this.updateListeners.delete(listener);
+  }
+
+  latestAgentUpdate(agentId: string): AgentUpdate | undefined {
+    // Monaco maintains the live selection through formatting, edits and renames.
+    const cursor = this.editor.agentCursor(agentId).ref;
+    if (!cursor) return undefined;
+    return {agentId, cursor, ...this.agentViews.get(agentId)};
+  }
+
+  forgetAgent(agentId: string): void {
+    this.agentViews.delete(agentId);
   }
 
   private advanceRevision(): void {
@@ -637,13 +654,21 @@ export class AgentProjectSession {
     const project = this.editor.project();
     const revision = this.revision;
     const cursor = this.editor.agentCursor(agentId);
-    if (
-      files.length ||
-      input.cursor ||
-      (typeof input.render === 'object' && input.render.view)
-    )
-      for (const listener of this.updateListeners)
-        listener({agentId, cursor: cursor.ref, input});
+    const view =
+      typeof input.render === 'object' ? input.render.view : undefined;
+    if (files.length || input.cursor || view) {
+      const update = {
+        agentId,
+        cursor: cursor.ref,
+        arguments: input.cursor?.arguments,
+        view,
+      };
+      this.agentViews.set(agentId, {
+        arguments: update.arguments,
+        view: view ?? this.agentViews.get(agentId)?.view,
+      });
+      for (const listener of this.updateListeners) listener(update);
+    }
     await this.save(staged);
     const outcomes = [];
     for (const file of files) {

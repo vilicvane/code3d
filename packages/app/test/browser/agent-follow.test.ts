@@ -127,7 +127,8 @@ test(
     );
     await apply({
       files: [{path: file, version: null, content: source}],
-      cursor,
+      cursor: {...cursor, arguments: '[12]'},
+      render: {view: 'top'},
     });
     assert.equal(
       await page.evaluate(() => window.followApp.codeEditor.currentFile()),
@@ -139,23 +140,25 @@ test(
     const gauss = page
       .locator('.agent-nav .agent-badge')
       .filter({hasText: 'Gauss'});
+    // An agent with no target can be followed without moving the user's view.
+    await gauss.click();
+    assert.equal(
+      await page.evaluate(() => window.followApp.codeEditor.currentFile()),
+      original,
+    );
     await euler.click();
     assert.equal(await euler.getAttribute('aria-pressed'), 'true');
     assert.equal(await dialog.isVisible(), false);
     assert.equal(
       await page.evaluate(() => window.followApp.codeEditor.currentFile()),
-      original,
+      file,
     );
     await clients[0].request({operation: 'context'});
     await apply({type: true});
     assert.equal(
       await page.evaluate(() => window.followApp.codeEditor.currentFile()),
-      original,
+      file,
     );
-    await apply({
-      cursor: {...cursor, arguments: '[12]'},
-      render: {view: 'top'},
-    });
     await ready();
     const followed = await page.evaluate(() => {
       const {codeEditor, viewport, module} = window.followApp;
@@ -209,6 +212,39 @@ test(
     });
     assert.equal(updated.selection?.start, updatedSource.indexOf('box(width'));
     assert.equal(updated.width, 14);
+    // Re-entering follow uses Monaco's rebased selection and restores agent state.
+    await euler.click();
+    await page.evaluate(file => {
+      const editor = window.followApp.codeEditor;
+      editor.applyFiles([
+        {
+          path: file,
+          content: '// User edit\n' + editor.fileState(file)!.content,
+        },
+      ]);
+      editor.switchFile('/model.ts');
+    }, file);
+    await ready();
+    await euler.click();
+    await ready();
+    const resumed = await page.evaluate(() => {
+      const {codeEditor, viewport} = window.followApp;
+      const vertices = [...viewport.getSelected()!.node.mesh!.vertices];
+      const xs = vertices.filter((_, i) => i % 3 === 0);
+      return {
+        selection: codeEditor.selectedSource(),
+        source: codeEditor.fileState(codeEditor.currentFile()!)!.content,
+        width: Math.max(...xs) - Math.min(...xs),
+        direction: viewport['camera'].position
+          .clone()
+          .sub(viewport['controls'].focus)
+          .normalize()
+          .toArray(),
+      };
+    });
+    assert.equal(resumed.selection?.start, resumed.source.indexOf('box(width'));
+    assert.equal(resumed.width, 14);
+    assert.ok(Math.abs(resumed.direction[1] - 1) < 1e-6);
     // User movement does not stop following or trigger another jump.
     await page.evaluate(
       original => window.followApp.codeEditor.switchFile(original),
@@ -227,7 +263,13 @@ test(
       await page.evaluate(() => window.followApp.module?.activeDesignContextId),
       '/follow.ts:function:shape:arguments:0',
     );
+    await apply(
+      {cursor: {file, regex: 'const profile = (sketch\\([\\s\\S]*?\\));'}},
+      1,
+    );
     await gauss.click();
+    await ready();
+    await page.locator('.sketch-editor:not([hidden])').waitFor();
     assert.equal(await euler.getAttribute('aria-pressed'), 'false');
     await page.evaluate(
       original => window.followApp.codeEditor.switchFile(original),
@@ -256,6 +298,7 @@ test(
     );
     // A camera request waiting on compilation cannot overwrite a newer user gesture.
     await euler.click();
+    await ready();
     await page.evaluate(() => {
       const app = window.followApp;
       const compile = app.compiler.compile.bind(app.compiler);
