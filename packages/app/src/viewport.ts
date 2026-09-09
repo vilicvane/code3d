@@ -3,7 +3,8 @@ import {isCompositionInputRole} from './model/operation-context';
 import type {ModelDiagnostic} from './model/diagnostic';
 import * as THREE from 'three';
 import {orientImageCamera, type ImageView} from './rendering/image-camera';
-import {ViewportNavigation} from './ui/viewport-navigation';
+import {ViewportNavigation, type CameraPose} from './ui/viewport-navigation';
+import {ViewportScenes, type ViewportScene} from './model/viewport-scene';
 import {LineMaterial} from 'three/addons/lines/LineMaterial.js';
 import {LineSegments2} from 'three/addons/lines/LineSegments2.js';
 import type {
@@ -96,11 +97,20 @@ type RenderedViewTarget = SelectedViewTarget | Readonly<{kind: 'completion'}>;
 type TransientPreviewRestore = Readonly<{
   module: ModelModule;
   selectedKey: string;
-  cameraPosition: THREE.Vector3;
-  cameraUp: THREE.Vector3;
-  controlsTarget: THREE.Vector3;
-  cameraNear: number;
-  cameraFar: number;
+  pose: CameraPose;
+  mode: ModelRenderMode;
+}>;
+
+type ViewportState = Readonly<{
+  pose: CameraPose;
+  mode: ModelRenderMode;
+  savedAt: number;
+}>;
+
+type SourceViewSelection = Readonly<{
+  file: string;
+  offset: number;
+  contextId?: string;
 }>;
 
 type SelectionGesture = {
@@ -130,6 +140,7 @@ type DecorationInstance = Readonly<{
 
 export type ModelViewportOptions = Readonly<{
   onViewChange?: () => void;
+  onRenderModeChange?: (mode: ModelRenderMode) => void;
   onSourcePreviewDiagnostic?: (diagnostic: ModelDiagnostic | undefined) => void;
   onSelect: (occurrence: Occurrence) => void;
   onDrillDown: (node: ModelSnapshotObject) => void;
@@ -138,6 +149,7 @@ export type ModelViewportOptions = Readonly<{
   onTopologySelection: (event: TopologySelectionEvent) => void;
   sourceDecorationProviders?: readonly SourceDecorationProvider[];
   showCoordinateReference?: boolean;
+  animateViewChanges?: boolean;
 }>;
 
 export type TopologySelectionEvent =
@@ -282,6 +294,7 @@ export class ModelViewport {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly controls: ViewportNavigation;
   private readonly coordinateReference?: ViewportCoordinateReference;
+  private readonly animateViewChanges: boolean;
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointer = new THREE.Vector2();
   private readonly root = new THREE.Group();
@@ -292,6 +305,10 @@ export class ModelViewport {
   private readonly committedParameterPreviews = new Map<string, number>();
   private readonly occurrenceTranslationPreviews = new Map<string, Vec3>();
   private hasFramedView = false;
+  private scenes?: ViewportScenes;
+  private activeScene?: ViewportScene;
+  private readonly viewStates = new Map<string, ViewportState>();
+  private stateRevision = 0;
   private readonly committedOccurrenceTranslationPreviews = new Map<
     string,
     Vec3
@@ -306,6 +323,7 @@ export class ModelViewport {
   private readonly spatialParameterValues = new Map<string, number>();
   private readonly onSelect: ModelViewportOptions['onSelect'];
   private readonly onViewChange: ModelViewportOptions['onViewChange'];
+  private readonly onRenderModeChange: ModelViewportOptions['onRenderModeChange'];
   private readonly onSourcePreviewDiagnostic: ModelViewportOptions['onSourcePreviewDiagnostic'];
   private readonly onDrillDown: ModelViewportOptions['onDrillDown'];
   private readonly onNavigateSource: ModelViewportOptions['onNavigateSource'];
@@ -331,6 +349,7 @@ export class ModelViewport {
     {
       onSelect,
       onViewChange,
+      onRenderModeChange,
       onDrillDown,
       onNavigateSource,
       onPositionTool,
@@ -338,10 +357,13 @@ export class ModelViewport {
       onTopologySelection,
       sourceDecorationProviders = [],
       showCoordinateReference = true,
+      animateViewChanges = true,
     }: ModelViewportOptions,
   ) {
     this.onSelect = onSelect;
+    this.animateViewChanges = animateViewChanges;
     this.onViewChange = onViewChange;
+    this.onRenderModeChange = onRenderModeChange;
     this.onSourcePreviewDiagnostic = onSourcePreviewDiagnostic;
     this.onDrillDown = onDrillDown;
     this.onNavigateSource = onNavigateSource;
@@ -420,23 +442,38 @@ export class ModelViewport {
     this.coordinateReference?.setVisible(mode === 'modeling');
     this.updateTransformGizmo();
     this.rendering.renderFrame();
+    this.onRenderModeChange?.(mode);
   }
 
   renderModule(
     module: ModelModule,
     selectedKey = 'root',
-    fitCamera = true,
-  ): void {
+    source?: SourceViewSelection,
+  ): boolean {
+    this.restoreTransientPreview();
+    this.saveViewportState();
     this.module = module;
+    this.scenes = new ViewportScenes(module);
     this.selectedViewTarget = {kind: 'model'};
-    this.transientPreviewRestore = undefined;
+    this.renderedViewTarget = {kind: 'model'};
+    if (
+      source &&
+      this.selectBySourceOffset(
+        source.file,
+        source.offset,
+        selectedKey,
+        source.contextId,
+      )
+    )
+      return true;
     if (module.fallback) {
-      this.renderModelView(selectedKey, fitCamera);
+      this.renderModelView(selectedKey);
     } else {
-      this.renderedViewTarget = {kind: 'model'};
+      this.activeScene = undefined;
       this.resetRenderedView();
       this.onViewChange?.();
     }
+    return false;
   }
 
   hasRenderableGeometry(): boolean {
@@ -492,12 +529,7 @@ export class ModelViewport {
       this.renderedViewTarget.targetId !== match.id ||
       this.renderedViewTarget.evaluationIndex !== evaluationIndex
     ) {
-      this.renderSourceTarget(
-        match,
-        evaluationIndex,
-        true,
-        preferredOccurrenceKey,
-      );
+      this.renderSourceTarget(match, evaluationIndex, preferredOccurrenceKey);
     } else if (
       preferredOccurrenceKey &&
       this.occurrences.has(preferredOccurrenceKey)
@@ -520,7 +552,7 @@ export class ModelViewport {
       evaluationIndex,
     };
     this.transientPreviewRestore = undefined;
-    this.renderSourceTarget(scope.target, evaluationIndex, false);
+    this.renderSourceTarget(scope.target, evaluationIndex);
     return true;
   }
 
@@ -595,7 +627,6 @@ export class ModelViewport {
       previewTarget,
       previewEvaluation,
       {kind: 'completion'},
-      true,
       undefined,
       [receiver.nodeId],
     );
@@ -621,12 +652,12 @@ export class ModelViewport {
       const evaluation =
         target.evaluations[matchingContext] ?? target.evaluations[0];
       if (evaluation) {
-        this.renderSourceScene(target, evaluation, {kind: 'completion'}, true);
+        this.renderSourceScene(target, evaluation, {kind: 'completion'});
         return true;
       }
     }
     if (!module.fallback) return false;
-    this.renderModelView('root', true, {kind: 'completion'});
+    this.renderModelView('root', {kind: 'completion'});
     return true;
   }
 
@@ -637,9 +668,12 @@ export class ModelViewport {
     }
     this.transientPreviewRestore = undefined;
     this.module = restore.module;
+    this.scenes = new ViewportScenes(restore.module);
+    this.controls.restorePose(restore.pose);
+    this.setRenderMode(restore.mode);
     const target = this.selectedViewTarget;
     if (target.kind === 'model') {
-      this.renderModelView(restore.selectedKey, false);
+      this.renderModelView(restore.selectedKey);
     } else {
       const sourceTarget = this.module.sourceTargets.find(
         candidate => candidate.id === target.targetId,
@@ -648,21 +682,13 @@ export class ModelViewport {
         this.renderSourceTarget(
           sourceTarget,
           target.evaluationIndex,
-          false,
           restore.selectedKey,
         );
       } else {
         this.selectedViewTarget = {kind: 'model'};
-        this.renderModelView('root', false);
+        this.renderModelView('root');
       }
     }
-    this.camera.position.copy(restore.cameraPosition);
-    this.camera.up.copy(restore.cameraUp);
-    this.controls.focus.copy(restore.controlsTarget);
-    this.camera.near = restore.cameraNear;
-    this.camera.far = restore.cameraFar;
-    this.camera.updateProjectionMatrix();
-    this.controls.syncCamera();
   }
 
   getSelected(): Occurrence | undefined {
@@ -1033,6 +1059,73 @@ export class ModelViewport {
     this.hasFramedView = true;
   }
 
+  private saveViewportState(): void {
+    if (!this.activeScene || this.transientPreviewRestore) return;
+    this.viewStates.set(this.activeScene.key, {
+      pose: this.controls.savedPose(),
+      mode: this.rendering.mode,
+      savedAt: ++this.stateRevision,
+    });
+  }
+
+  private activateViewportScene(
+    nodes: readonly ModelSnapshotObject[],
+    placement: ModelPlacement,
+  ): void {
+    if (this.transientPreviewRestore) {
+      this.frameChangedView();
+      return;
+    }
+    if (!this.hasRenderableGeometry()) {
+      this.saveViewportState();
+      this.activeScene = undefined;
+      return;
+    }
+    const scene = this.scenes!.scene(nodes, placement);
+    if (scene?.key === this.activeScene?.key) return;
+    const previousScene = this.activeScene;
+    this.saveViewportState();
+    this.activeScene = scene;
+    if (!scene) return;
+    let state = this.viewStates.get(scene.key);
+    if (!state) {
+      const source = scene.defaults
+        .flatMap(candidate => {
+          const saved = this.viewStates.get(candidate.key);
+          return saved ? [{...candidate, saved}] : [];
+        })
+        .sort((a, b) => b.saved.savedAt - a.saved.savedAt)[0];
+      if (source) {
+        state = {
+          ...source.saved,
+          pose: transformCameraPose(source.saved.pose, source.transform),
+        };
+      }
+    }
+    this.setRenderMode(state?.mode ?? 'modeling');
+    const framing = !state ? this.cameraFraming(this.root) : undefined;
+    const pose = state?.pose ?? (framing && this.controls.defaultPose(framing));
+    if (pose) {
+      const previousFrame = scene.defaults.find(
+        candidate => candidate.key === previousScene?.key,
+      );
+      if (previousFrame) {
+        this.controls.restorePose(
+          transformCameraPose(
+            this.controls.capturePose(),
+            previousFrame.transform,
+          ),
+        );
+      }
+      this.controls.restorePose(
+        pose,
+        this.hasFramedView && this.animateViewChanges,
+      );
+      this.hasFramedView = true;
+    }
+    this.saveViewportState();
+  }
+
   private frame(target: THREE.Object3D, allowZoomIn: boolean): void {
     const framing = this.cameraFraming(target);
     if (framing) this.controls.frame(framing, allowZoomIn);
@@ -1089,7 +1182,6 @@ export class ModelViewport {
   private renderSourceTarget(
     target: SourceTarget,
     evaluationIndex: number,
-    fitCamera = true,
     selectedKey?: string,
   ): void {
     const evaluation = target.evaluations[evaluationIndex];
@@ -1100,7 +1192,6 @@ export class ModelViewport {
       target,
       evaluation,
       {kind: 'source', targetId: target.id, evaluationIndex},
-      fitCamera,
       selectedKey,
     );
   }
@@ -1109,7 +1200,6 @@ export class ModelViewport {
     target: SourceTarget,
     evaluation: SourceTargetEvaluation,
     renderedViewTarget: RenderedViewTarget,
-    fitCamera: boolean,
     selectedKey?: string,
     focusNodeIds = evaluation.focusNodeIds,
   ): void {
@@ -1238,15 +1328,15 @@ export class ModelViewport {
     if (nextKey) {
       this.selectKey(nextKey, false);
     }
-    if (fitCamera) {
-      this.frameChangedView();
-    }
+    this.activateViewportScene(
+      [...focusNodes, ...contextNodes.map(({node}) => node)],
+      placement,
+    );
     this.onViewChange?.();
   }
 
   private renderModelView(
     selectedKey: string,
-    fitCamera: boolean,
     renderedViewTarget: RenderedViewTarget = {kind: 'model'},
   ): void {
     if (!this.module?.fallback) {
@@ -1268,9 +1358,7 @@ export class ModelViewport {
       this.occurrences.has(selectedKey) ? selectedKey : 'root',
       false,
     );
-    if (fitCamera) {
-      this.frameChangedView();
-    }
+    this.activateViewportScene([this.module.fallback], 'standalone');
     this.onViewChange?.();
   }
 
@@ -1380,14 +1468,12 @@ export class ModelViewport {
 
   private captureTransientPreviewRestore(): void {
     if (!this.module) return;
+    this.saveViewportState();
     this.transientPreviewRestore ??= {
       module: this.module,
       selectedKey: this.selectedKey,
-      cameraPosition: this.camera.position.clone(),
-      cameraUp: this.camera.up.clone(),
-      controlsTarget: this.controls.focus.clone(),
-      cameraNear: this.camera.near,
-      cameraFar: this.camera.far,
+      pose: this.controls.capturePose(),
+      mode: this.rendering.mode,
     };
   }
 
@@ -1916,7 +2002,7 @@ export class ModelViewport {
     }
     this.selectedViewTarget = {kind: 'source', targetId, evaluationIndex};
     this.transientPreviewRestore = undefined;
-    this.renderSourceTarget(target, evaluationIndex, false);
+    this.renderSourceTarget(target, evaluationIndex);
     const occurrence = [...this.occurrences.values()].find(
       candidate => candidate.node.nodeId === nodeId,
     );
@@ -2867,6 +2953,19 @@ function containsNode(node: ModelSnapshotObject, nodeId: string): boolean {
     node.nodeId === nodeId ||
     node.children.some(child => containsNode(child, nodeId))
   );
+}
+
+function transformCameraPose(
+  pose: CameraPose,
+  transform: THREE.Matrix4,
+): CameraPose {
+  return {
+    focus: pose.focus.clone().applyMatrix4(transform),
+    distance: pose.distance,
+    orientation: new THREE.Quaternion()
+      .setFromRotationMatrix(transform)
+      .multiply(pose.orientation),
+  };
 }
 
 function uniqueContextNodes(

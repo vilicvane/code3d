@@ -8,7 +8,7 @@ import {
 import type {CameraFraming} from '../rendering/model-renderer';
 import {ArcballControls} from 'three/addons/controls/ArcballControls.js';
 
-type CameraPose = CameraFraming & Readonly<{orientation: Quaternion}>;
+export type CameraPose = CameraFraming & Readonly<{orientation: Quaternion}>;
 const viewTransitionDuration = 300;
 
 /** Arcball navigation with the current focus exposed to framing and previews. */
@@ -48,6 +48,34 @@ export class ViewportNavigation extends ArcballControls {
 
   get focus(): Vector3 {
     return this._gizmos.position;
+  }
+
+  capturePose(): CameraPose {
+    return {
+      focus: this.focus.clone(),
+      distance: this.object.position.distanceTo(this.focus),
+      orientation: this.object.quaternion.clone(),
+    };
+  }
+
+  /** Remember the requested view if a scene switch interrupts its transition. */
+  savedPose(): CameraPose {
+    return this.transition?.to ?? this.capturePose();
+  }
+
+  defaultPose(framing: CameraFraming): CameraPose {
+    return {
+      ...framing,
+      orientation: viewOrientation(this.defaultDirection, this.defaultUp),
+    };
+  }
+
+  restorePose(pose: CameraPose, animate = false): void {
+    if (animate) this.transitionTo(pose);
+    else {
+      this.applyPose(pose);
+      this.syncCamera();
+    }
   }
 
   setViewDirection(direction: Vector3, up: Vector3): void {
@@ -108,18 +136,20 @@ export class ViewportNavigation extends ArcballControls {
 
   private transitionTo(to: CameraPose): void {
     this.syncCamera();
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    const from = this.capturePose();
+    if (
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches ||
+      (from.focus.distanceToSquared(to.focus) < 1e-16 &&
+        Math.abs(Math.log(from.distance / to.distance)) < 1e-10 &&
+        from.orientation.angleTo(to.orientation) < 1e-7)
+    ) {
       this.applyPose(to);
       this.syncCamera();
       return;
     }
     this.transition = {
       startedAt: performance.now(),
-      from: {
-        focus: this.focus.clone(),
-        distance: this.object.position.distanceTo(this.focus),
-        orientation: this.object.quaternion.clone(),
-      },
+      from,
       to,
     };
   }

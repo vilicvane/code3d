@@ -73,7 +73,7 @@ export default group([materialsExample, bitmapPart]);
           '/model.ts',
         );
         if (module.diagnostic) throw new Error(module.diagnostic.summary);
-        viewport.renderModule(module, undefined, true);
+        viewport.renderModule(module);
         const drawn: {
           type: string;
           color?: string;

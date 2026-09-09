@@ -74,6 +74,17 @@ transparency. You can still rotate, pan, and zoom; PNG export follows this
 mode. Switch back to **Modeling** to select geometry and use its tools.
 This switch applies to the 3D viewport; sketch editing keeps its 2D tools.
 
+During the session, each displayed model or collection remembers its view and
+Modeling/Render mode. Returning to it restores your rotation, pan and zoom;
+changing which member is emphasized keeps the collection's view. New models
+are fitted to the viewport, and changes in zoom animate smoothly.
+
+A `group()` result and its input collection keep separate views. On the first
+visit to either one, an existing view of the other supplies its starting view,
+with the focus adjusted for the group's origin. Once both have been viewed,
+each remembers your subsequent changes independently. Ordinary dimension and
+whitespace edits retain the view; reloading the page starts a new session.
+
 ### Inspect inputs and results
 
 ```ts

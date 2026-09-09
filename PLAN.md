@@ -592,6 +592,21 @@ material. All former color-only author calls use this single material API.
   the drag. Framing and previews use Arcball's live focus after pan or cursor
   zoom. Resize updates the control bounds; completion previews restore camera
   up together with position and focus. See [#55](https://github.com/vilicvane/code3d/issues/55).
+- 3D viewport state belongs to the currently displayed root model instance or
+  collection, including contextual peers but excluding decorations. Source
+  operation/catalog identities and placement distinguish scenes across files
+  and retain them through ordinary recompilation; focus/emphasis and collection
+  ordering do not create new states. Each scene remembers camera orientation,
+  focus, distance and Modeling/Render mode during the current App session.
+  Group results and their corresponding input collections provide bidirectional
+  first-visit defaults through a rigid coordinate-frame conversion; their own
+  records take precedence thereafter. Initial views fit geometry. Scene changes
+  interpolate distance geometrically over 300ms along with focus and orientation,
+  reuse the existing interrupted/reduced-motion navigation behavior, and keep
+  temporary completion previews out of view history. Compilation presents the
+  selected source scene directly rather than briefly visiting its fallback
+  export. Automated image/agent rendering applies the destination immediately.
+  See [#82](https://github.com/vilicvane/code3d/issues/82).
 - The upper-right coordinate indicator aligns the view to any of its six axis
   ends in the displayed world or selected occurrence's local frame, preserving
   the current focus and zoom distance. Clicking the facing endpoint again flips
