@@ -143,6 +143,15 @@ test('isolates the built-in dependency closure and gives source, screws and reus
       'export {core as screwCore} from "@code3d/core";',
     '/node_modules/@code3d/screws/index.d.ts':
       'export {core as screwCore} from "@code3d/core";',
+    '/node_modules/@code3d/materials/package.json': {
+      name: '@code3d/materials',
+      type: 'module',
+      exports,
+    },
+    '/node_modules/@code3d/materials/index.js':
+      'export {core as materialCore} from "@code3d/core";',
+    '/node_modules/@code3d/materials/index.d.ts':
+      'export {core as materialCore} from "@code3d/core";',
     '/node_modules/replicad/package.json': {
       name: 'replicad',
       type: 'module',
@@ -197,12 +206,13 @@ test('isolates the built-in dependency closure and gives source, screws and reus
         source: [
           'import {core} from "@code3d/core";',
           'import {screwCore} from "@code3d/screws";',
+          'import {materialCore} from "@code3d/materials";',
           'import {reusableCore} from "reusable";',
           'import {origin} from "replicad";',
           'const builtinOrigin: "builtin" = core.origin;',
           'const projectOrigin: "project" = origin;',
           'const reusableOrigin: "builtin" = reusableCore.origin;',
-          'export {core, screwCore, reusableCore, origin};',
+          'export {core, screwCore, materialCore, reusableCore, origin};',
         ].join('\n'),
       },
     ],
@@ -214,6 +224,7 @@ test('isolates the built-in dependency closure and gives source, screws and reus
   );
   const result = await importTestModule(bundle.source);
   assert.equal(result.core, result.screwCore);
+  assert.equal(result.core, result.materialCore);
   assert.equal(result.core, result.reusableCore);
   assert.equal(result.core.origin, 'builtin');
   assert.equal(result.origin, 'project');
@@ -224,7 +235,13 @@ test('isolates the built-in dependency closure and gives source, screws and reus
   );
   assert.deepEqual(
     new Set(language.packageSpecifiers),
-    new Set(['@code3d/core', '@code3d/screws', 'replicad', 'reusable']),
+    new Set([
+      '@code3d/core',
+      '@code3d/screws',
+      '@code3d/materials',
+      'replicad',
+      'reusable',
+    ]),
   );
   assert.ok(
     language.files.some(
@@ -413,8 +430,9 @@ test('runs a zero-install screw model, retains its runtime on edits, and switche
         source: [
           'import {box, group} from "@code3d/core";',
           'import {ISO4762} from "@code3d/screws";',
+          'import {paint} from "@code3d/materials";',
           'import {MeshPhysicalMaterial, type Material} from "@code3d/core/three";',
-          'const material: Material = new MeshPhysicalMaterial({color: "#ff8800", clearcoat: 1});',
+          'const material: Material = paint({color: "#ff8800", clearcoat: 1});',
           `const plate = box(40, 10, 30).fillet(${radius}).material(material);`,
           'const screw = ISO4762.screw("M6", 18).relate(part => part.center.on(plate.up).offset(30, 0, 0));',
           'export default group([plate, screw]);',
@@ -443,6 +461,13 @@ test('runs a zero-install screw model, retains its runtime on edits, and switche
       ),
     );
     assert.ok(
+      defined(language).files.some(
+        file =>
+          file.path ===
+          '/node_modules/@code3d/materials/bld/library/index.d.ts',
+      ),
+    );
+    assert.ok(
       defined(language).files.some(file =>
         file.path.endsWith(
           '/@types/three/src/materials/MeshPhysicalMaterial.d.ts',
@@ -465,7 +490,7 @@ test('runs a zero-install screw model, retains its runtime on edits, and switche
 
     files.contents.set(
       '/package.json',
-      '{"type":"module","dependencies":{"@code3d/core":"*","@code3d/screws":"*"}}',
+      '{"type":"module","dependencies":{"@code3d/core":"*","@code3d/screws":"*","@code3d/materials":"*"}}',
     );
     await assert.rejects(compile(project(1.1)), /@code3d\/core/);
     assert.equal(compiler['runtime'], undefined);

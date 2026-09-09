@@ -5,7 +5,10 @@ import {
 } from './file-reader';
 import {normalizeProjectPath, type ModelProject} from './project';
 
-export const builtinPackageNames = ['@code3d/core', '@code3d/screws'] as const;
+import {
+  builtinPackageNames,
+  isBuiltinPackageSpecifier,
+} from './builtin-packages';
 const builtinRoots = builtinPackageNames.map(name => '/node_modules/' + name);
 const builtinScope = '/node_modules/@code3d';
 const internalDependencies = builtinScope + '/node_modules';
@@ -67,7 +70,7 @@ export class ProjectPackages implements ProjectFileReader {
   private builtinPath(path: string): string | undefined {
     if (builtinRoots.some(root => within(path, root))) return path;
     // Standard hierarchical node_modules lookup shares this private closure
-    // between core and screws, ahead of any user-installed replicad/kernel.
+    // between built-in packages, ahead of user-installed dependencies.
     if (within(path, internalDependencies)) {
       const original = path.slice(builtinScope.length);
       // Public packages stay at their single root path, never a second copy
@@ -78,9 +81,11 @@ export class ProjectPackages implements ProjectFileReader {
   }
 
   private isShadowed(path: string): boolean {
-    // A reusable project package must not discover a second, nested core or
-    // screws instance while the project is using the built-in runtime.
-    return /\/node_modules\/@code3d\/(?:core|screws)(?:\/|$)/.test(path);
+    // Reusable packages share the same built-in package instances.
+    return path
+      .split('/node_modules/')
+      .slice(1)
+      .some(isBuiltinPackageSpecifier);
   }
 
   async readFile(path: string): Promise<Uint8Array | undefined> {

@@ -19,6 +19,7 @@
   "dependencies": {
     "@code3d/agent": "*",
     "@code3d/core": "*",
+    "@code3d/materials": "*",
     "@code3d/screws": "*",
     "@ctrl/tinycolor": "^4.2.0",
     "@headless-tree/core": "^1.7.0",

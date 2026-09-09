@@ -70,7 +70,7 @@ the final model available for inspection.
 
 **Installed packages must support browsers.** The App resolves packages from
 the project's `node_modules`, but does not provide Node's built-in APIs or
-native addons. Core and screws are built in until the project declares core;
+native addons. Core, screws and materials are built in until the project declares core;
 after that, missing project packages are errors. See
 [modeling packages](../../getting-started/files/#modeling-packages).
 

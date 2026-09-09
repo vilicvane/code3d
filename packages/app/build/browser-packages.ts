@@ -4,6 +4,7 @@ import {readFile, realpath} from 'node:fs/promises';
 import path from 'node:path';
 import {promisify} from 'node:util';
 import type {Plugin, ViteDevServer} from 'vite';
+import {builtinPackageNames} from '../src/project/builtin-packages.ts';
 
 const execute = promisify(execFile);
 const moduleId = 'virtual:code3d-browser-packages';
@@ -59,8 +60,7 @@ export function browserPackages(repository: string) {
       packages.set(disk, {disk, destination, metadata});
       destinations.add(destination);
     }
-    await add('@code3d/core', repository);
-    await add('@code3d/screws', repository);
+    for (const name of builtinPackageNames) await add(name, repository);
     for (const pkg of packages.values()) {
       for (const name of Object.keys(pkg.metadata.dependencies ?? {}))
         await add(name, pkg.disk, pkg.destination);

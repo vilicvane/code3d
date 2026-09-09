@@ -13,7 +13,7 @@
   存储损坏、不可用或配额不足不妨碍建模。实现内容变化隔离命名空间，不迁移旧格式。
 - code3d 模型项目是普通的 Node/TypeScript 项目，自行管理 `package.json`、
   lockfile 和 `node_modules`。App 在项目未声明 `@code3d/core` 时提供完整内置
-  core/screws，支持零安装开始建模；声明 core 后全部由项目自己的依赖接管。
+  core/screws/materials，支持零安装开始建模；声明 core 后全部由项目自己的依赖接管。
 - 同一份项目源码遵循标准 Node ESM/TypeScript 规则，既可由 App 加载，也可
   在受支持的 Node 环境中直接执行。
 - 关注模型对象本身，而不是它的构建过程。
