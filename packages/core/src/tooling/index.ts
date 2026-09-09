@@ -104,6 +104,7 @@ export type {
   SnapshotQueryResult,
   SnapshotQueryBatch,
   ModelSpatialOperation,
+  ModelParameterDimension,
   ModelTopologyReference,
   ParameterKind,
   ParameterTarget,

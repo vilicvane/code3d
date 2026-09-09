@@ -28,6 +28,7 @@ import type {
 import {ModelDiagnosticError, type ModelDiagnostic} from './model/diagnostic';
 import {viewportDiagnostic} from './model/viewport-diagnostic';
 import {originDecoration} from './model/origin-decorations';
+import {sourceParameterAt} from './model/tool-arguments';
 import {spatialIntent} from './tools/model-spatial-tool';
 import {SketchEditorController} from './tools/sketch-editor-controller';
 import {bundledExamples} from './project/bundled-examples';
@@ -161,11 +162,11 @@ if (!app) {
 app.innerHTML = `
   <div class="shell">
     <header class="topbar">
-      <div class="brand">
+      <a class="brand" href="https://www.code3d.org/" target="_blank" rel="noopener noreferrer" aria-label="Code3D home (opens in a new tab)">
         <span class="brand-mark" aria-hidden="true">${brandMark}</span>
         <span>Code3D</span>
         <span class="prototype-tag">prototype 01</span>
-      </div>
+      </a>
       <div class="topbar-actions">
         <button class="quiet-button" id="packages-button" type="button">Packages</button>
         <button class="quiet-button" id="install-packages-button" type="button">Install packages</button>
@@ -529,6 +530,7 @@ let currentModule: ModelModule | null = null;
 let currentModuleSourceVersion: number | undefined;
 let modelStatus: 'ready' | 'error' = 'ready';
 let currentDiagnostic: ModelDiagnostic | undefined;
+let currentWarnings: readonly ModelDiagnostic[] = [];
 let sourcePreviewDiagnostic: ModelDiagnostic | undefined;
 let compileTimer: number | undefined;
 let completionPreviewTimer: number | undefined;
@@ -703,6 +705,11 @@ const elementsPanel = new ElementsPanel(elements, elementsCount, {
               mesh: occurrence.node.mesh!,
               topologyKind: preview.topologyKind,
               ids: [preview.id],
+              transform: {
+                position: [0, 0, 0],
+                quaternion: [0, 0, 0, 1],
+                scale: [1, 1, 1],
+              },
               appearance: {color: '#63dcff'},
             },
           ],
@@ -718,6 +725,27 @@ const contextualToolPanel = new ContextualToolPanel(viewportHost, {
   onParameterInput: updateContextualToolParameter,
   onParameterCommit: commitContextualToolParameter,
   onAction: runContextualToolAction,
+});
+codeEditor.setParameterFocusHandler(() => {
+  const scope = viewport.sourceEvaluation();
+  const cursor = codeEditor.cursorSource();
+  if (
+    !scope ||
+    !cursor ||
+    contextualTool?.targetId !== scope.target.id ||
+    contextualTool.contextId !== scope.evaluation.contextId
+  )
+    return false;
+  const parameter = sourceParameterAt(
+    scope.target,
+    cursor.file,
+    cursor.offset,
+    ref => codeEditor.resolveSourceRef(ref),
+  );
+  return (
+    parameter !== undefined &&
+    contextualToolPanel.focusParameter(parameter.name)
+  );
 });
 const toolEngine = new ToolEngine({
   sourceVersion: () => codeEditor.sourceVersion(),
@@ -1191,9 +1219,10 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
     currentModule = null;
     currentModuleSourceVersion = undefined;
     currentDiagnostic = undefined;
+    currentWarnings = [];
     sourcePreviewDiagnostic = undefined;
     compilingDesignContextId = undefined;
-    codeEditor.setModelDiagnostic();
+    codeEditor.setModelDiagnostics();
     codeEditor.setDesignArguments([]);
     codeEditor.trackSourceRefs([]);
     viewport.renderModule(null);
@@ -1239,6 +1268,7 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
         nextModule.diagnostic,
         revision,
         sourceVersion,
+        nextModule.warnings,
       ))
     ) {
       return;
@@ -1325,7 +1355,8 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
       await presentModelDiagnostic(diagnostic, revision, sourceVersion);
     } else {
       currentDiagnostic = undefined;
-      codeEditor.setModelDiagnostic();
+      currentWarnings = [];
+      codeEditor.setModelDiagnostics();
       refreshViewportFeedback();
       errorBar.textContent =
         error instanceof Error ? error.message : String(error);
@@ -1338,9 +1369,14 @@ async function presentModelDiagnostic(
   diagnostic: ModelDiagnostic | undefined,
   revision: number,
   sourceVersion: number,
+  warnings: readonly ModelDiagnostic[] = [],
 ): Promise<boolean> {
-  codeEditor.setModelDiagnostic(diagnostic);
+  codeEditor.setModelDiagnostics([
+    ...(diagnostic ? [diagnostic] : []),
+    ...warnings,
+  ]);
   currentDiagnostic = diagnostic;
+  currentWarnings = warnings;
   refreshViewportFeedback();
   if (!diagnostic || diagnostic.sourceRef) {
     errorBar.hidden = true;
@@ -1364,13 +1400,23 @@ async function presentModelDiagnostic(
   return true;
 }
 
+function activeViewportDiagnostic(): ModelDiagnostic | undefined {
+  const scope = sketchEditor.diagnosticScope;
+  return (
+    viewportDiagnostic(currentDiagnostic, sourcePreviewDiagnostic, scope) ??
+    [...currentWarnings]
+      .sort(
+        (a, b) =>
+          Number(!!b.relatedSketchIds?.includes(scope?.at(-1)?.id ?? '')) -
+          Number(!!a.relatedSketchIds?.includes(scope?.at(-1)?.id ?? '')),
+      )
+      .find(warning => viewportDiagnostic(warning, undefined, scope))
+  );
+}
+
 function refreshViewportFeedback(): void {
   refreshViewportEmptyState();
-  const diagnostic = viewportDiagnostic(
-    currentDiagnostic,
-    sourcePreviewDiagnostic,
-    sketchEditor.diagnosticScope,
-  );
+  const diagnostic = activeViewportDiagnostic();
   viewportDiagnosticStack.replaceChildren();
   viewportDiagnosticStack.hidden = !diagnostic;
   if (viewportStatus.dataset.state !== 'busy') restoreModelStatus();
@@ -1378,6 +1424,7 @@ function refreshViewportFeedback(): void {
 
   const item = document.createElement('section');
   item.className = 'viewport-diagnostic';
+  item.dataset.severity = diagnostic.severity ?? 'error';
   const summary = document.createElement('strong');
   summary.textContent = diagnostic.summary;
   item.append(summary);
@@ -1385,6 +1432,31 @@ function refreshViewportFeedback(): void {
     const details = document.createElement('p');
     details.textContent = diagnostic.details;
     item.append(details);
+  }
+  for (const action of diagnostic.actions ?? []) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'viewport-diagnostic-action';
+    button.textContent = action.label;
+    const active = sketchEditor.diagnosticScope?.at(-1)?.id;
+    const upstream =
+      !!diagnostic.relatedSketchIds?.length &&
+      (!active || !diagnostic.relatedSketchIds.includes(active));
+    button.disabled =
+      upstream || currentModuleSourceVersion !== codeEditor.sourceVersion();
+    if (upstream) button.title = 'Open the owning sketch to apply this fix.';
+    button.addEventListener('click', () => {
+      if (currentModuleSourceVersion !== codeEditor.sourceVersion()) {
+        refreshViewportFeedback();
+        return;
+      }
+      if (
+        commitToolSession(toolEngine.begin('diagnostic-fix'), action.intent)
+      ) {
+        refreshViewportFeedback();
+      }
+    });
+    item.append(button);
   }
   viewportDiagnosticStack.append(item);
 }
@@ -1511,6 +1583,7 @@ function requestModelUpdate(delay: number): void {
   setViewportStatus('busy', 'Updating model');
   runRevision += 1;
   compiler.cancel();
+  refreshViewportFeedback();
   if (codeEditor.currentFile()) scheduleModelRun(delay);
   else void runModel();
 }
@@ -2877,7 +2950,9 @@ function setViewportStatus(
 
 function refreshViewportEmptyState(): void {
   hasPreviewedTarget ||=
-    viewport.hasRenderableGeometry() || sketchEditor.hasTarget;
+    viewport.hasRenderableGeometry() ||
+    viewport.sourceEvaluation() !== undefined ||
+    sketchEditor.hasTarget;
   const empty = !hasPreviewedTarget;
   viewportHost.dataset.empty = String(empty);
   viewportEmptyState.setVisible(
@@ -2887,8 +2962,9 @@ function refreshViewportEmptyState(): void {
 
 function restoreModelStatus(): void {
   const sketch = sketchEditor.diagnosticScope;
+  const diagnostic = activeViewportDiagnostic();
   const state = sketch
-    ? viewportDiagnostic(currentDiagnostic, sourcePreviewDiagnostic, sketch)
+    ? diagnostic && diagnostic.severity !== 'warning'
       ? 'error'
       : 'ready'
     : modelStatus;

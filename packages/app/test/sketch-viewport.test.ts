@@ -117,7 +117,7 @@ const second = create(${length});`;
 });
 
 test('sketch mode excludes 3D preview, syntax and unowned failures while leaving 3D routing intact', () => {
-  const scope = [{evaluationId: 'current'}];
+  const scope = [{id: 'current-sketch', evaluationId: 'current'}];
   const preview: ModelDiagnostic = {
     kind: 'evaluation',
     summary: '3D preview error',

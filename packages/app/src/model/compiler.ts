@@ -30,6 +30,7 @@ import {ProjectBuilder, type ProjectBundle} from '../project/project-builder';
 import {ModuleEvaluator, type ModuleExports} from './module-evaluator';
 import {code3dAnnotations} from './annotations';
 import {SketchTraceRegistry, type CompiledSketch} from './sketch-trace';
+import {sketchSourceDiagnostics} from '../tools/sketch-diagnostics';
 import {evaluatedConstraint, focusedConstraintSide} from './constraint-context';
 import {isCompositionInputRole} from './operation-context';
 import {
@@ -231,6 +232,7 @@ export type ObjectCatalogEntry = Readonly<{
 
 export type ModelModule = Readonly<{
   sketches: ReadonlyMap<string, CompiledSketch>;
+  warnings: readonly ModelDiagnostic[];
   diagnostic?: ModelDiagnostic;
   fallback?: ModelSnapshotObject;
   objects: ReadonlyMap<string, ModelSnapshotObject>;
@@ -1489,8 +1491,10 @@ export function createModelCompiler(
         ]),
       );
       captureGeometry?.(graphObjects);
+      const sketchSnapshots = sketches.snapshots();
       return {
-        sketches: sketches.snapshots(),
+        sketches: sketchSnapshots,
+        warnings: sketchSourceDiagnostics(sketchSnapshots, files),
         diagnostic,
         fallback: fallbackSnapshot,
         objects: objectSnapshots,

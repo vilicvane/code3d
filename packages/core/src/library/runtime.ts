@@ -279,6 +279,13 @@ export type ModelOperationSnapshot = Readonly<{
   selections: readonly ModelOperationSelectionSnapshot[];
   sourceRef?: SourceRef;
   spatial?: ModelSpatialOperation;
+  /** Authored dimensions in the operation output's local geometry frame. */
+  dimensions?: Readonly<Record<string, ModelParameterDimension>>;
+}>;
+
+export type ModelParameterDimension = Readonly<{
+  origin: Vec3;
+  vector: Vec3;
 }>;
 
 /** Local geometry coordinates; vector is the authored coordinates, offset, or angles. */
@@ -463,6 +470,7 @@ type StoredOperation = {
   regions: StoredOperationRegion[];
   selections: StoredOperationSelection[];
   spatial?: ModelSpatialOperation;
+  dimensions?: Readonly<Record<string, ModelParameterDimension>>;
 };
 
 type ValueTrace = {
@@ -2003,9 +2011,18 @@ export class ModelObject<
       sourceRefs: this.sourceRefs,
       parameters: this.allParameters(),
       meshTolerance: this.meshTolerance,
-      operation: storedOperation('extrude', [
-        {model: this, role: 'receiver', index: 0},
-      ]),
+      operation: storedOperation(
+        'extrude',
+        [{model: this, role: 'receiver', index: 0}],
+        {
+          dimensions: {
+            distance: {
+              origin: this.elements.center.transform.position,
+              vector: direction,
+            },
+          },
+        },
+      ),
     }) as unknown as SolidModel;
   }
 
@@ -3114,6 +3131,7 @@ export class ModelObject<
       })),
       sourceRef,
       spatial: this.operation.spatial,
+      dimensions: this.operation.dimensions,
     };
   }
 
@@ -3153,8 +3171,9 @@ export class ModelObject<
   }
 }
 
-/** @code3d.param radius {kind: 'length', constraints: {exclusiveMin: 0}} */
-export function circle(radius: number): FaceModel {
+/** @code3d.param radius {kind: 'length', default: 5, constraints: {exclusiveMin: 0}} */
+export function circle(radius: number): FaceModel;
+export function circle(radius = 5): FaceModel {
   assertPositive('radius', radius);
   return planarFaceModel('circle', 'Circle', [radius], () =>
     sketchCircle(radius, {plane: 'XZ'}),
@@ -3162,10 +3181,11 @@ export function circle(radius: number): FaceModel {
 }
 
 /**
- * @code3d.param xRadius {kind: 'length', label: 'X radius', constraints: {exclusiveMin: 0}}
- * @code3d.param zRadius {kind: 'length', label: 'Z radius', constraints: {exclusiveMin: 0}}
+ * @code3d.param xRadius {kind: 'length', default: 5, label: 'X radius', constraints: {exclusiveMin: 0}}
+ * @code3d.param zRadius {kind: 'length', default: 3, label: 'Z radius', constraints: {exclusiveMin: 0}}
  */
-export function ellipse(xRadius: number, zRadius: number): FaceModel {
+export function ellipse(xRadius: number, zRadius: number): FaceModel;
+export function ellipse(xRadius = 5, zRadius = 3): FaceModel {
   assertPositive('xRadius', xRadius);
   assertPositive('zRadius', zRadius);
   return planarFaceModel('ellipse', 'Ellipse', [xRadius, zRadius], () =>
@@ -3174,10 +3194,11 @@ export function ellipse(xRadius: number, zRadius: number): FaceModel {
 }
 
 /**
- * @code3d.param x {kind: 'length', constraints: {exclusiveMin: 0}}
- * @code3d.param z {kind: 'length', constraints: {exclusiveMin: 0}}
+ * @code3d.param x {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
+ * @code3d.param z {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
  */
-export function rectangle(x: number, z: number): FaceModel {
+export function rectangle(x: number, z: number): FaceModel;
+export function rectangle(x = 10, z = 10): FaceModel {
   assertPositive('x', x);
   assertPositive('z', z);
   return planarFaceModel('rectangle', 'Rectangle', [x, z], () =>
@@ -3186,15 +3207,16 @@ export function rectangle(x: number, z: number): FaceModel {
 }
 
 /**
- * @code3d.param radius {kind: 'length', constraints: {exclusiveMin: 0}}
- * @code3d.param sides {kind: 'count', constraints: {min: 3}}
- * @code3d.param rotation {kind: 'angle'}
+ * @code3d.param radius {kind: 'length', default: 5, constraints: {exclusiveMin: 0}}
+ * @code3d.param sides {kind: 'count', default: 6, constraints: {min: 3}}
+ * @code3d.param rotation {kind: 'angle', default: 0}
  */
 export function regularPolygon(
   radius: number,
   sides: number,
-  rotation = 0,
-): FaceModel {
+  rotation?: number,
+): FaceModel;
+export function regularPolygon(radius = 5, sides = 6, rotation = 0): FaceModel {
   assertPositive('radius', radius);
   if (!Number.isInteger(sides) || sides < 3) {
     throw new Error('sides must be an integer greater than or equal to 3.');
@@ -3307,11 +3329,12 @@ export function loft(
 }
 
 /**
- * @code3d.param x {kind: 'length', constraints: {exclusiveMin: 0}}
- * @code3d.param y {kind: 'length', constraints: {exclusiveMin: 0}}
- * @code3d.param z {kind: 'length', constraints: {exclusiveMin: 0}}
+ * @code3d.param x {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
+ * @code3d.param y {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
+ * @code3d.param z {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
  */
-export function box(x: number, y: number, z: number): SolidModel {
+export function box(x: number, y: number, z: number): SolidModel;
+export function box(x = 10, y = 10, z = 10): SolidModel {
   assertPositive('x', x);
   assertPositive('y', y);
   assertPositive('z', z);
@@ -3325,15 +3348,22 @@ export function box(x: number, y: number, z: number): SolidModel {
       [0, -y / 2, 0],
       [0, y / 2, 0],
     ]),
-    operation: storedOperation('box'),
+    operation: storedOperation('box', [], {
+      dimensions: {
+        x: {origin: [-x / 2, -y / 2, -z / 2], vector: [x, 0, 0]},
+        y: {origin: [-x / 2, -y / 2, -z / 2], vector: [0, y, 0]},
+        z: {origin: [-x / 2, -y / 2, -z / 2], vector: [0, 0, z]},
+      },
+    }),
   }) as unknown as SolidModel;
 }
 
 /**
- * @code3d.param radius {kind: 'length', constraints: {exclusiveMin: 0}}
- * @code3d.param y {kind: 'length', constraints: {exclusiveMin: 0}}
+ * @code3d.param radius {kind: 'length', default: 5, constraints: {exclusiveMin: 0}}
+ * @code3d.param y {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
  */
-export function cylinder(radius: number, y: number): SolidModel {
+export function cylinder(radius: number, y: number): SolidModel;
+export function cylinder(radius = 5, y = 10): SolidModel {
   assertPositive('radius', radius);
   assertPositive('y', y);
   return ModelObject.create<CanonicalElements, 'solid'>({
@@ -3352,15 +3382,16 @@ export function cylinder(radius: number, y: number): SolidModel {
 
 /**
  * A concentric, constant-section tube, open at both ends and centered on Y.
- * @code3d.param outerRadius {kind: 'length', label: 'Outer radius', constraints: {exclusiveMin: 0}}
- * @code3d.param innerRadius {kind: 'length', label: 'Inner radius', constraints: {exclusiveMin: 0}}
- * @code3d.param y {kind: 'length', constraints: {exclusiveMin: 0}}
+ * @code3d.param outerRadius {kind: 'length', default: 5, label: 'Outer radius', constraints: {exclusiveMin: 0}}
+ * @code3d.param innerRadius {kind: 'length', default: 3, label: 'Inner radius', constraints: {exclusiveMin: 0}}
+ * @code3d.param y {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
  */
 export function tube(
   outerRadius: number,
   innerRadius: number,
   y: number,
-): SolidModel {
+): SolidModel;
+export function tube(outerRadius = 5, innerRadius = 3, y = 10): SolidModel {
   assertPositive('outerRadius', outerRadius);
   assertPositive('innerRadius', innerRadius);
   assertPositive('y', y);
@@ -3410,16 +3441,22 @@ export function tube(
  * coilRadius measures to the wire centerline; pitch is the Y advance per turn.
  * The centerline spans -pitch * turns / 2 to +pitch * turns / 2 on the Y axis.
  * Fractional turns are supported. No spring-specific end treatments are applied.
- * @code3d.param coilRadius {kind: 'length', label: 'Coil radius', constraints: {exclusiveMin: 0}}
- * @code3d.param wireRadius {kind: 'length', label: 'Wire radius', constraints: {exclusiveMin: 0}}
- * @code3d.param pitch {kind: 'length', constraints: {exclusiveMin: 0}}
- * @code3d.param turns {kind: 'scalar', constraints: {exclusiveMin: 0}}
+ * @code3d.param coilRadius {kind: 'length', default: 5, label: 'Coil radius', constraints: {exclusiveMin: 0}}
+ * @code3d.param wireRadius {kind: 'length', default: 1, label: 'Wire radius', constraints: {exclusiveMin: 0}}
+ * @code3d.param pitch {kind: 'length', default: 3, constraints: {exclusiveMin: 0}}
+ * @code3d.param turns {kind: 'scalar', default: 3, constraints: {exclusiveMin: 0}}
  */
 export function coil(
   coilRadius: number,
   wireRadius: number,
   pitch: number,
   turns: number,
+): SolidModel;
+export function coil(
+  coilRadius = 5,
+  wireRadius = 1,
+  pitch = 3,
+  turns = 3,
 ): SolidModel {
   assertPositive('coilRadius', coilRadius);
   assertPositive('wireRadius', wireRadius);
@@ -3507,8 +3544,9 @@ function assertCoilClearance(
   }
 }
 
-/** @code3d.param radius {kind: 'length', constraints: {exclusiveMin: 0}} */
-export function sphere(radius: number): SolidModel {
+/** @code3d.param radius {kind: 'length', default: 5, constraints: {exclusiveMin: 0}} */
+export function sphere(radius: number): SolidModel;
+export function sphere(radius = 5): SolidModel {
   assertPositive('radius', radius);
   return ModelObject.create<CanonicalElements, 'solid'>({
     kind: 'solid',
@@ -3525,15 +3563,16 @@ export function sphere(radius: number): SolidModel {
 }
 
 /**
- * @code3d.param bottomRadius {kind: 'length', label: 'Bottom radius', constraints: {exclusiveMin: 0}}
- * @code3d.param topRadius {kind: 'length', label: 'Top radius', constraints: {exclusiveMin: 0}}
- * @code3d.param y {kind: 'length', constraints: {exclusiveMin: 0}}
+ * @code3d.param bottomRadius {kind: 'length', default: 5, label: 'Bottom radius', constraints: {exclusiveMin: 0}}
+ * @code3d.param topRadius {kind: 'length', default: 3, label: 'Top radius', constraints: {exclusiveMin: 0}}
+ * @code3d.param y {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
  */
 export function frustum(
   bottomRadius: number,
   topRadius: number,
   y: number,
-): SolidModel {
+): SolidModel;
+export function frustum(bottomRadius = 5, topRadius = 3, y = 10): SolidModel {
   assertPositive('bottomRadius', bottomRadius);
   assertPositive('topRadius', topRadius);
   assertPositive('y', y);
@@ -3565,15 +3604,21 @@ export function frustum(
 }
 
 /**
- * @code3d.param radius {kind: 'length', constraints: {exclusiveMin: 0}}
- * @code3d.param y {kind: 'length', constraints: {exclusiveMin: 0}}
- * @code3d.param sides {kind: 'count', constraints: {min: 3}}
- * @code3d.param rotation {kind: 'angle'}
+ * @code3d.param radius {kind: 'length', default: 5, constraints: {exclusiveMin: 0}}
+ * @code3d.param y {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
+ * @code3d.param sides {kind: 'count', default: 6, constraints: {min: 3}}
+ * @code3d.param rotation {kind: 'angle', default: 0}
  */
 export function regularPrism(
   radius: number,
   y: number,
   sides: number,
+  rotation?: number,
+): SolidModel;
+export function regularPrism(
+  radius = 5,
+  y = 10,
+  sides = 6,
   rotation = 0,
 ): SolidModel {
   assertPositive('radius', radius);
@@ -4127,6 +4172,7 @@ function storedOperation(
   options: Readonly<{
     regions?: readonly StoredOperationRegion[];
     selections?: readonly StoredOperationSelection[];
+    dimensions?: Readonly<Record<string, ModelParameterDimension>>;
   }> = {},
 ): StoredOperation {
   return {
@@ -4135,6 +4181,7 @@ function storedOperation(
     inputs: [...inputs],
     regions: [...(options.regions ?? [])],
     selections: [...(options.selections ?? [])],
+    dimensions: options.dimensions,
   };
 }
 

@@ -6,6 +6,9 @@ import {projectTypeScriptWorker} from './monaco/typescript-worker-client';
 import type {CursorTypeInfo} from './monaco/type-info';
 import 'monaco-editor/features/register.all';
 import 'monaco-editor/languages/definitions/typescript/register';
+import {language as typeScriptTokens} from 'monaco-editor/languages/definitions/typescript/typescript';
+import 'monaco-editor/languages/definitions/javascript/register';
+import {language as javaScriptTokens} from 'monaco-editor/languages/definitions/javascript/javascript';
 import 'monaco-editor/languages/definitions/markdown/register';
 import 'monaco-editor/languages/features/json/register';
 import JsonWorker from 'monaco-editor/languages/features/json/json.worker?worker';
@@ -180,6 +183,34 @@ monaco.languages.registerDocumentFormattingEditProvider('typescript', {
   },
 });
 
+// Monaco's built-in identifier rules only cover ASCII. Extend the shared
+// grammar so legal Unicode names stay whole, including inside templates.
+for (const [languageId, definition] of [
+  ['typescript', typeScriptTokens],
+  ['javascript', javaScriptTokens],
+] as const) {
+  monaco.languages.setMonarchTokensProvider(languageId, {
+    ...definition,
+    unicode: true,
+    tokenizer: {
+      ...definition.tokenizer,
+      common: [
+        [
+          /#?[$_\p{ID_Start}][$\u200c\u200d\p{ID_Continue}]*/u,
+          {
+            cases: {
+              '@keywords': 'keyword',
+              '[A-Z].*': 'type.identifier',
+              '@default': 'identifier',
+            },
+          },
+        ],
+        ...definition.tokenizer.common,
+      ],
+    },
+  });
+}
+
 monaco.editor.defineTheme('code3d-dark', {
   base: 'vs-dark',
   inherit: true,
@@ -197,6 +228,7 @@ monaco.editor.defineTheme('code3d-dark', {
     'textLink.foreground': code3dEditorWidgetColors.accent,
     'textLink.activeForeground': code3dEditorWidgetColors.accent,
     'input.background': code3dCodeColors.background,
+    'input.foreground': code3dCodeColors.foreground,
     'input.border': code3dEditorWidgetColors.border,
     'inputOption.activeBorder': code3dEditorWidgetColors.accent,
     'inputOption.activeBackground': code3dEditorWidgetColors.selectedBackground,
@@ -415,6 +447,7 @@ export class CodeEditor {
   private cursorSelectionVersion = 0;
   private pointerActivatingEditor = false;
   private revision = 1;
+  private focusToolParameter?: () => boolean;
   private operationReadOnly = false;
   private suppressCursorEventDepth = 0;
   private queuedChanges?: ProjectEditorChange[];
@@ -470,6 +503,14 @@ export class CodeEditor {
       tabSize: 2,
     });
     this.sourceDecoration = this.editor.createDecorationsCollection();
+    this.editor.addCommand(
+      monaco.KeyCode.Tab,
+      () => {
+        if (!this.focusToolParameter?.())
+          this.editor.trigger('keyboard', 'tab', {});
+      },
+      `editorId == '${this.editor.getId()}' && editorTextFocus && !editorReadonly && !editorHasSelection && !editorHasMultipleSelections && !suggestWidgetVisible && !inSnippetMode && !inlineSuggestionVisible && !editorTabMovesFocus`,
+    );
     this.editor.onDidChangeModel(() => {
       this.editor.updateOptions({readOnly: this.readOnly});
       for (const cursor of this.agentCursors.values()) {
@@ -1041,6 +1082,10 @@ export class CodeEditor {
     return this.container.contains(document.activeElement);
   }
 
+  setParameterFocusHandler(handler: () => boolean): void {
+    this.focusToolParameter = handler;
+  }
+
   runHistoryAction(action: 'undo' | 'redo'): void {
     const model = this.editor.getModel();
     if (!model) return;
@@ -1274,17 +1319,23 @@ export class CodeEditor {
     this.sourceDecoration.clear();
   }
 
-  setModelDiagnostic(diagnostic?: ModelDiagnostic): void {
+  setModelDiagnostics(diagnostics: readonly ModelDiagnostic[] = []): void {
     for (const document of this.documents.values()) {
-      const sourceRef = diagnostic?.sourceRef;
-      const marker =
-        diagnostic && sourceRef?.file === document.path
-          ? modelDiagnosticMarker(document.model, diagnostic, sourceRef)
-          : undefined;
+      const markers = diagnostics.flatMap(diagnostic =>
+        diagnostic.sourceRef?.file === document.path
+          ? [
+              modelDiagnosticMarker(
+                document.model,
+                diagnostic,
+                diagnostic.sourceRef,
+              ),
+            ]
+          : [],
+      );
       monaco.editor.setModelMarkers(
         document.model,
         modelDiagnosticOwner,
-        marker ? [marker] : [],
+        markers,
       );
     }
   }
@@ -1902,7 +1953,10 @@ function modelDiagnosticMarker(
   const start = model.getPositionAt(startOffset);
   const end = model.getPositionAt(endOffset);
   return {
-    severity: monaco.MarkerSeverity.Error,
+    severity:
+      diagnostic.severity === 'warning'
+        ? monaco.MarkerSeverity.Warning
+        : monaco.MarkerSeverity.Error,
     source: 'code3d',
     code: diagnostic.kind,
     message: diagnostic.details

@@ -148,6 +148,120 @@ const value = sketch([['point',1,[0,0]],['point',2,[-10,-5]],['point',3,[10,5]]]
   assert.equal(await text(page), before);
 });
 
+test('point, angle and perpendicular badges at one vertex remain individually clickable through zoom', async t => {
+  const page = await open(
+    t,
+    `import {sketch} from '@code3d/core';
+const value = sketch([
+  ['point', 1, [0, 0]], ['point', 2, [30, 0]],
+  ['point', 3, [0, 30]], ['point', 4, [20, 20]],
+  ['line', 5, [1, 2]], ['line', 6, [1, 3]], ['line', 7, [1, 4]],
+], {constraints: [
+  ['x', 1, 0], ['y', 1, 0],
+  ['perpendicular', [5, 6]], ['angle', [5, 7], 45],
+]});`,
+  );
+  const before = await text(page);
+  const badges = page.locator('.constraint-badge');
+  await badges.nth(3).waitFor();
+  const checkRow = async () => {
+    const bounds = await badges.evaluateAll(nodes =>
+      nodes.map(node => {
+        const rect = node.querySelector('rect')!.getBoundingClientRect();
+        return {x: rect.x, y: rect.y, width: rect.width};
+      }),
+    );
+    assert.equal(bounds.length, 4);
+    for (let i = 1; i < bounds.length; i++) {
+      assert.ok(Math.abs(bounds[i].y - bounds[0].y) < 0.01);
+      // SVG getBoundingClientRect excludes the 1px border shared by both edges.
+      assert.ok(
+        Math.abs(bounds[i].x - bounds[i - 1].x - bounds[i - 1].width - 5) <
+          0.01,
+      );
+    }
+    for (const [kind, name] of [
+      ['x', 'X coordinate'],
+      ['y', 'Y coordinate'],
+      ['perpendicular', undefined],
+      ['angle', 'Angle between lines'],
+    ] as const) {
+      const badge = page.locator(`.constraint-badge[data-kind="${kind}"]`);
+      await badge.hover();
+      assert.match(
+        (await badge.getAttribute('class')) ?? '',
+        /constraint-active/,
+      );
+      await badge.click();
+      if (name) {
+        const input = page.getByRole('textbox', {name, exact: true});
+        assert.equal(
+          await input.evaluate(el => document.activeElement === el),
+          true,
+        );
+        await page.keyboard.press('Escape');
+      } else {
+        assert.equal(
+          await page.locator('.sketch-canvas line.selected').count(),
+          2,
+        );
+      }
+    }
+  };
+  await checkRow();
+  const vertex = await point(page, 1).boundingBox();
+  assert.ok(vertex);
+  await page.mouse.move(
+    vertex.x + vertex.width / 2,
+    vertex.y + vertex.height / 2,
+  );
+  const beforeLine = await point(page, 2).getAttribute('cx');
+  await page.mouse.wheel(0, -180);
+  await page.waitForFunction(
+    before =>
+      document
+        .querySelector('.sketch-canvas circle.local[data-id="2"]')
+        ?.getAttribute('cx') !== before,
+    beforeLine,
+  );
+  await checkRow();
+  assert.equal(await text(page), before);
+});
+
+test('radius and sweep badges sharing a curve position form a clickable row', async t => {
+  const page = await open(
+    t,
+    `import {sketch} from '@code3d/core';
+const value = sketch([
+  ['point', 1, [0, 0]], ['point', 2, [10, 0]], ['point', 3, [0, 10]],
+  ['arc', 4, [1, 10, 2, 3, 'ccw']],
+], {constraints: [['radius', 4, 10], ['sweep', 4, 90]]});`,
+  );
+  const before = await text(page);
+  const radius = page.locator('.constraint-badge[data-kind="radius"]');
+  const sweep = page.locator('.constraint-badge[data-kind="sweep"]');
+  await sweep.waitFor();
+  const a = await radius.locator('rect').boundingBox();
+  const b = await sweep.locator('rect').boundingBox();
+  assert.ok(a && b);
+  assert.ok(Math.abs(a.y - b.y) < 0.01);
+  // Playwright's SVG bounds include the stroke: measure the visible 4px gap.
+  assert.ok(Math.abs(b.x - a.x - a.width - 4) < 0.01);
+  for (const [badge, name] of [
+    [radius, 'Radius'],
+    [sweep, 'Sweep'],
+  ] as const) {
+    await badge.click();
+    const input = page.getByRole('textbox', {name, exact: true});
+    assert.equal(
+      await input.evaluate(el => document.activeElement === el),
+      true,
+    );
+    await page.keyboard.press('Escape');
+  }
+  assert.equal(await text(page), before);
+});
+
 test('keyboard activation, invalid input, cancellation and leaving the sketch never write unfinished values', async t => {
   const page = await open(
     t,
@@ -182,7 +296,7 @@ const value = sketch([['point',1,[0,0]],['circle',2,[1,5]]], {constraints:[['rad
   assert.equal(await text(page), before);
 });
 
-test('expression and upstream values select related elements without exposing a writable dimension', async t => {
+test('local expression values open their exact source while upstream dimensions stay read-only', async t => {
   const page = await open(
     t,
     `import {sketch} from '@code3d/core';
@@ -198,8 +312,15 @@ const value=base.derive([['point',1,[width,0]]],{constraints:[['x',1,width]]});`
   );
   assert.equal(
     await page.getByRole('form', {name: 'Constraint value'}).count(),
-    0,
+    1,
   );
+  assert.equal(
+    await page
+      .getByRole('textbox', {name: 'X coordinate', exact: true})
+      .inputValue(),
+    'width',
+  );
+  await page.keyboard.press('Escape');
   await page.locator('.constraint-badge[data-kind="radius"]').click();
   assert.equal(
     await page.locator('.sketch-canvas circle.upstream.selected').count(),

@@ -6,6 +6,7 @@ import {
 } from './model-test.ts';
 import type {Shape3D, AnyShape} from 'replicad';
 import type {Model} from '@code3d/core';
+import * as primitives from '@code3d/core';
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -16,6 +17,54 @@ import {
   clearKernelOperationCache,
   kernelOperationCacheStats,
 } from '../bld/library/kernel-cache.js';
+
+for (const [name, defaults] of [
+  ['circle', [5]],
+  ['ellipse', [5, 3]],
+  ['rectangle', [10, 10]],
+  ['regularPolygon', [5, 6, 0]],
+  ['box', [10, 10, 10]],
+  ['cylinder', [5, 10]],
+  ['tube', [5, 3, 10]],
+  ['coil', [5, 1, 3, 3]],
+  ['sphere', [5]],
+  ['frustum', [5, 3, 10]],
+  ['regularPrism', [5, 10, 6, 0]],
+] as const) {
+  test(`${name} supplies runtime dimensions without replacing explicit values`, () => {
+    // Exercise incomplete JavaScript calls while public TypeScript signatures
+    // continue to require dimensions (checked in public-api.ts).
+    const create = (args: readonly unknown[]): Model =>
+      Reflect.apply(primitives[name], undefined, args);
+    for (let count = 0; count <= defaults.length; count++) {
+      const args: number[] = defaults.slice(0, count);
+      if (args.length) args[0] *= 2;
+      const actual = create(args);
+      const explicit = create([...args, ...defaults.slice(count)]);
+      try {
+        assert.equal(modelGeometry(actual).id, modelGeometry(explicit).id);
+        assert.ok(
+          defined(createModelSnapshotter()(actual).mesh).triangles.length > 0,
+        );
+      } finally {
+        disposeModelObjects([actual, explicit]);
+      }
+    }
+    const omitted = create([]);
+    const undefinedArgument = create([undefined]);
+    try {
+      assert.equal(
+        modelGeometry(omitted).id,
+        modelGeometry(undefinedArgument).id,
+      );
+    } finally {
+      disposeModelObjects([omitted, undefinedArgument]);
+    }
+    for (const invalid of [null, 0, -1, NaN, Infinity, '5']) {
+      assert.throws(() => create([invalid]), /positive finite number/);
+    }
+  });
+}
 
 test('identical primitive output reuses geometry and meshes without skipping the builder', () => {
   clearKernelOperationCache();

@@ -282,6 +282,36 @@ test('keeps an unannotated resolved overload separate from its annotated peers',
 });
 
 for (const declarationOnly of [false, true] as const) {
+  test(`retains required parameters with display defaults from ${declarationOnly ? 'emitted declarations' : 'source'}`, () => {
+    const library = [
+      '/** @code3d.param radius {kind: "length", default: 5} */',
+      'export function shape(radius: number): number;',
+      'export function shape(radius = 5): number {return radius;}',
+    ].join('\n');
+    const source = 'import {shape} from "./shape.js";\nshape();';
+    const index = resolveProjectTooling({
+      files: [
+        {
+          path: declarationOnly ? '/shape.d.ts' : '/shape.ts',
+          source: declarationOnly ? emitPrimitiveDeclaration(library) : library,
+        },
+        {path: '/model.ts', source},
+      ],
+    });
+    const schema = defined(
+      toolSchemaAt(index.toolCalls.get('/model.ts'), source, 'shape()'),
+    );
+    const radius = schema.parameters[0];
+    assert.equal(radius.optional, false);
+    assert.ok(radius.kind === 'length');
+    assert.equal(radius.default, 5);
+    assert.ok(
+      index.program
+        .getSemanticDiagnostics(index.program.getSourceFile('/model.ts'))
+        .some(diagnostic => diagnostic.code === 2554),
+    );
+  });
+
   test(`reads primitive annotations through imports and aliases from ${declarationOnly ? 'emitted declarations' : 'source'}`, () => {
     const source = [
       'import {sleeve as imported} from "./bridge.ts";',
@@ -423,7 +453,6 @@ function emitPrimitiveDeclaration(source: string) {
     if (path.endsWith('primitive-fixture.d.ts')) declaration = text;
   });
   assert.ok(declaration?.includes('@code3d.param radius'));
-  assert.ok(defined(declaration).includes('default: 4'));
   assert.ok(!defined(declaration).includes('y = 4'));
   return defined(declaration);
 }

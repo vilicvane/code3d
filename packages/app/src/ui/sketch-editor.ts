@@ -82,7 +82,7 @@ export type SketchEditorView = Readonly<{
   layers: readonly SketchSnapshot[];
   data: readonly SketchGeometryData[];
   editable: SketchEditableParameters;
-  constraintValues: ReadonlyMap<number, number>;
+  constraintValues: ReadonlyMap<number, string>;
   referenceable: ReadonlySet<string>;
   readOnlyReason?: string;
 }>;
@@ -805,13 +805,15 @@ export class SketchEditor {
       : [...display.points];
     this.svg.focus();
     this.draw();
-    const value = this.view.constraintValues.get(display.index);
+    const source = this.view.constraintValues.get(display.index);
+    const value = this.view.layers.at(-1)!.constraints[display.index]?.[2];
     if (
       display.layer === this.view.id &&
       !this.view.readOnlyReason &&
+      source !== undefined &&
       value !== undefined
     )
-      this.constraintTools.edit(display.index, display.tool, value);
+      this.constraintTools.edit(display.index, display.tool, source, value);
   }
 
   private pointerMove(event: PointerEvent): void {

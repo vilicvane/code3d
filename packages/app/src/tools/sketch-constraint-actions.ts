@@ -11,7 +11,11 @@ import type {
   SketchEditableParameters,
   SketchGeometryData,
 } from '../model/sketch-drag';
-import type {SketchChange} from './sketch-source';
+import type {
+  SketchChange,
+  SketchDimensionValue,
+  SketchDraftConstraint,
+} from './sketch-source';
 import type {SketchSegment} from './sketch-segments';
 import type {SketchPick} from './sketch-selection';
 import {sameSketchPoint} from './sketch-snap';
@@ -33,7 +37,9 @@ export type SketchConstraintAction = Readonly<{
   dimension?: DrawingDimension;
   value?: number;
   related: readonly SketchPointAddress[];
-  create(value?: number): Extract<SketchChange, {kind: 'constrain'}>;
+  create(
+    value?: SketchDimensionValue,
+  ): Extract<SketchChange, {kind: 'constrain'}>;
 }>;
 
 /** Applicability follows authored entities; a picked trim interval is not a new line ID. */
@@ -164,7 +170,9 @@ export function sketchConstraintActions(
               })),
           };
         }
-        const additions = pending(entered);
+        const additions = pending(
+          typeof entered === 'number' ? entered : value,
+        );
         // Fixed captures the displayed position, not an unsolved source seed.
         // Write only literal axes; expressions and point aliases remain authored.
         const fixedData = additions.flatMap(([kind, ref]) =>
@@ -174,7 +182,19 @@ export function sketchConstraintActions(
             ? [{id: ref.id, parameters: position(ref)}]
             : [],
         );
-        return {kind: 'constrain', constraints: additions, data: fixedData};
+        return {
+          kind: 'constrain',
+          constraints: additions.map(constraint =>
+            constraint.length === 3
+              ? ([
+                  constraint[0],
+                  constraint[1],
+                  entered,
+                ] as SketchDraftConstraint)
+              : constraint,
+          ),
+          data: fixedData,
+        };
       },
     });
   };

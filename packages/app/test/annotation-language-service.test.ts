@@ -333,9 +333,10 @@ test('reports duplicate parameter tags and annotations on unsupported declaratio
   );
 });
 
-test('accepts static defaults for optional numeric parameters', () => {
+test('accepts static defaults independently of numeric parameter optionality', () => {
   for (const [config, parameters, expected] of [
     ["{kind: 'angle', default: 60}", 'width = 75', 60],
+    ["{kind: 'angle', default: 60}", 'width: number', 60],
     ["{kind: 'scalar', default: 0}", 'width?: number', 0],
     ["{kind: 'ratio', default: -0.5}", 'width?: number', -0.5],
     [
@@ -364,7 +365,6 @@ test('accepts static defaults for optional numeric parameters', () => {
 
 test('reports invalid defaults through the shared annotation diagnostics and parser', () => {
   for (const [config, parameters = 'width?: number'] of [
-    ["{kind: 'angle', default: 60}", 'width: number'],
     ["{kind: 'scalar', default: 1}", 'width?: number[]'],
     ["{kind: 'scalar', default: 1}", 'width?: string'],
     ["{kind: 'edge', default: 1}"],

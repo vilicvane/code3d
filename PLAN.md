@@ -219,7 +219,13 @@ implementation context and historical outcomes, not a competing work queue.
   removal uses the selection's union, including mixed geometry; mixed state removes
   instead of filling missing constraints. Additions require the complete selection
   to be applicable, and hovering highlights all affected relation partners.
-  dimensions share drawing numeric entry and a batch is one source edit/undo.
+  Dimensions share the drawing input component and a batch is one source edit/undo.
+  Constraint add/edit forms accept single TypeScript expressions, retain their exact
+  source and defer evaluation to normal compilation in the sketch's lexical scope.
+  Local expression-valued badges open the same editor as literal dimensions;
+  upstream dimensions remain read-only. Input widths measure native text, grow from
+  82px to 320px and shrink to fit narrow viewports without replacing input/history nodes.
+  Drawing coordinates and creation dimensions retain numeric preview inputs.
   Selection Delete retains interval trimming and orphan cleanup. Parallel accepts
   two or more local lines as deterministic pairs; perpendicular and relative angle
   require exactly two. Single-line angle is named Orientation in the UI; pair angle
@@ -235,8 +241,14 @@ implementation context and historical outcomes, not a competing work queue.
   on the bisector. Natural widths stay unchanged; axis-aligned right angles keep
   an equal 8px clearance to both strokes. Acute angles do not force the whole
   rectangle inside their wedge.
-  There is no overlap detection or automatic avoidance: other markers never
-  displace a group, and users can zoom to separate nearby geometry. Relative-angle
+  Point badges at the same canonical point form an outward horizontal row with
+  natural widths and 4px gaps. Overlapping corner badges at that vertex in the same
+  screen quadrant join the row; otherwise their bisector anchors stay unchanged.
+  Plain point rows keep their anchor, or a corner-only row keeps the first authored
+  corner's anchor. Exact axis bisectors form separate groups. Radius/sweep badges
+  sharing a curve anchor likewise form one row, distinct from real point anchors.
+  Different geometric anchors or quadrants never displace each other; there is no
+  global overlap avoidance. Relative-angle
   and perpendicular markers share the same placement mechanism. Hover/focus highlights all badges of
   that relation, without connector guides or a separate direction diagram; authored
   angle values and their direction tooltip stay unchanged. Trim propagates relations to surviving pieces, preserving expressions;
@@ -249,6 +261,15 @@ implementation context and historical outcomes, not a competing work queue.
   Recompilation that cannot evaluate the selected sketch retains its last-successful
   result read-only; downstream/sibling errors do not reset its active drawing/Trim tool.
   leaving its source selection clears it. Monaco still receives all diagnostics.
+  Successful solves also report nonblocking warnings when authored geometry differs
+  beyond local curve tolerance. They retain Ready status and never silently write source.
+  A generic diagnostic action carries a serializable ToolIntent; the right-aligned,
+  underlined Fix text action
+  writes changed literal point/radius data through one version-checked tool transaction.
+  It preserves constraints, expressions and IDs; changes requiring expression replacement
+  or shared-source instance edits warn without a repair. Upstream repairs require opening
+  that sketch. See [#97](https://github.com/vilicvane/code3d/issues/97) and
+  [#98](https://github.com/vilicvane/code3d/issues/98).
   See [research and priorities](plans/sketch-editor.md) and
   [#23](https://github.com/vilicvane/code3d/issues/23); region identity and modeling
   selection APIs remain to be confirmed.
@@ -496,6 +517,24 @@ are tracked separately in [#84](https://github.com/vilicvane/code3d/issues/84).
   collections. Their preview emphasizes the returned vertices, edges, or
   surfaces with the owning geometry dimmed as spatial context; topology
   accessor calls use the same dimmed context while editing the selected IDs.
+- Argument focus connects the current call's exact argument occurrence to
+  geometry (#96), independently of shared-variable editing provenance. Box
+  dimensions and extrusion distances expose local origin/vector metadata;
+  the viewport highlights one complete parallel edge of that length, choosing
+  the closest edge midpoint in the visible occurrence's world frame on focus.
+  The choice stays fixed while orbiting. A finite segment with endpoint marks
+  represents the dimension when no real edge qualifies. Topology parameters
+  reuse their input geometry and input-to-output transform, including consumed
+  fillet edges and rebased origin vertices. Guides follow the existing source
+  preview stage, preserve scene/camera/selection, and clear on leaving the
+  argument. Interactive topology selection owns overlapping highlights.
+  Parameter guides are modeling helpers, excluded from Render and CAD geometry.
+- Editor Tab focuses the currently inspected argument's visible, writable
+  contextual input and selects its text (#99). It uses the same argument
+  locator as geometry hints, including tracked source ranges and writable
+  omitted arguments. Completion/snippet navigation, multi-cursor or selection
+  indentation, Shift+Tab and accessibility Tab navigation keep their existing
+  behavior. Missing or unavailable inputs fall through to Monaco's native Tab.
 - Topology and relation guides use fixed screen-space sizes: vertices are
   5px; passive line decorations and source highlights are 1px; interactive
   topology selection guides and highlights are 2px. Direction arrowheads are
@@ -1120,7 +1159,7 @@ not approval to predeclare additional parameter kinds.
   the fragment, then join annotation and ordinary source parents without
   exposing generated helper code.
 - Use one semantic `kind` discriminator for value and selectable parameters.
-  Function implementations own runtime defaults. Optional numeric parameters
+  Function implementations own runtime defaults. Required and optional numeric parameters
   display defaults for omitted arguments through explicit `@code3d.param`
   `default` metadata, shared by source and emitted declarations
   (see [#29](https://github.com/vilicvane/code3d/issues/29)).
@@ -1129,6 +1168,11 @@ not approval to predeclare additional parameter kinds.
   the implementation. Resolve effective selections, environment-dependent steps,
   display ranges, units, and other presentation policy from the reached tool
   context and current environment.
+  Built-in dimension primitives retain required public signatures while their
+  implementations supply defaults for omitted/undefined arguments; explicit
+  invalid values still fail validation. A focused source evaluation dismisses
+  the initial viewport hint even without geometry, keeping error-recovery tools
+  accessible (see [#92](https://github.com/vilicvane/code3d/issues/92)).
 - Recognize only callable `@code3d.param` and design `@code3d.arguments`
   annotations. Numeric variables carry no annotation metadata: resolve their
   editable source without inheriting labels, units, kinds, bounds, or steps

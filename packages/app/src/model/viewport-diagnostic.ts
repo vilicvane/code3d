@@ -5,14 +5,16 @@ import type {CompiledSketch} from './sketch-trace';
 export function viewportDiagnostic(
   diagnostic: ModelDiagnostic | undefined,
   previewDiagnostic: ModelDiagnostic | undefined,
-  sketchLayers: readonly Pick<CompiledSketch, 'evaluationId'>[] | undefined,
+  sketchLayers:
+    readonly Pick<CompiledSketch, 'id' | 'evaluationId'>[] | undefined,
 ): ModelDiagnostic | undefined {
   if (sketchLayers) {
     return diagnostic?.kind === 'evaluation' &&
       sketchLayers.some(
         layer =>
-          layer.evaluationId &&
-          diagnostic.failedEvaluationIds?.includes(layer.evaluationId),
+          diagnostic.relatedSketchIds?.includes(layer.id) ||
+          (layer.evaluationId &&
+            diagnostic.failedEvaluationIds?.includes(layer.evaluationId)),
       )
       ? diagnostic
       : undefined;
