@@ -365,15 +365,38 @@ test(
       await directory(path).waitFor();
       await page.waitForFunction(path => {
         const tree = window.followApp.projectDirectory['tree'];
+        const row = document
+          .querySelector('#project-tree')!
+          .shadowRoot!.querySelector<HTMLElement>(
+            `[data-item-path="${path.slice(1)}/"]`,
+          );
         return (
           tree.getFocusedPath() === path.slice(1) + '/' &&
-          tree.getItem(path.slice(1) + '/')?.isSelected()
+          tree.getItem(path.slice(1) + '/')?.isSelected() &&
+          row?.matches(':focus') &&
+          row.dataset.itemFocused === 'true'
         );
       }, path);
       assert.equal(await directory(path).getAttribute('aria-expanded'), 'true');
       assert.equal(
         await directory(path).evaluate(element => element.matches(':focus')),
         true,
+      );
+      const visible = await directory(path).evaluate(element => {
+        const row = element.getBoundingClientRect();
+        const scroll = element
+          .closest('[data-file-tree-virtualized-scroll]')!
+          .getBoundingClientRect();
+        return (
+          row.top >= scroll.top &&
+          row.bottom <= scroll.bottom &&
+          getComputedStyle(element, '::before').outlineStyle === 'solid'
+        );
+      });
+      assert.equal(
+        visible,
+        true,
+        `${path} has a visible focus ring in the tree`,
       );
     };
     const notes = '/browse/deep/notes.md';
@@ -383,6 +406,14 @@ test(
       await fs.writeFile('/browse/other.txt', 'Other file\n');
       await fs.writeFile('/slow.md', 'Delayed navigation\n');
       await fs.createDirectory('/empty');
+      for (let index = 0; index < 80; index++)
+        await fs.createDirectory(
+          `/scroll/entry-${String(index).padStart(3, '0')}`,
+        );
+      await fs.writeFile(
+        '/compact/parent/leaf/note.md',
+        '# Compact directory\n',
+      );
     }, notes);
     const modelingCursor = await page.evaluate(
       id => window.followApp.codeEditor.agentCursor(id),
@@ -433,10 +464,69 @@ test(
     );
     await fs('fs.list', '/empty');
     await focusedDirectory('/empty');
+
+    // Scroll from outside the tree to a virtual row that has not been mounted.
+    await fs('fs.list', '/scroll');
+    await focusedDirectory('/scroll');
+    await fs('fs.read', notes);
+    await focusedTab(notes);
+    assert.equal(await directory('/scroll/entry-079').count(), 0);
+    await fs('fs.list', '/scroll/entry-079');
+    await focusedDirectory('/scroll/entry-079');
+    await fs('fs.list', '/scroll/entry-000');
+    await focusedDirectory('/scroll/entry-000');
+
+    // A listed parent can be a segment of a compact directory row.
+    await fs('fs.list', '/compact/parent/leaf');
+    await focusedDirectory('/compact/parent/leaf');
+    await fs('fs.list', '/scroll/entry-079');
+    await focusedDirectory('/scroll/entry-079');
+    await fs('fs.list', '/compact/parent');
+    await focusedDirectory('/compact/parent/leaf');
+    await fs('fs.list', '/compact');
+    await focusedDirectory('/compact/parent/leaf');
+    await fs('fs.list', '/scroll/entry-079');
+    await focusedDirectory('/scroll/entry-079');
     await fs('fs.list', '/');
-    await page.waitForFunction(
-      () => document.activeElement?.id === 'project-tree',
+    await page.waitForFunction(() => {
+      const root = document.querySelector('#project-tree')!.shadowRoot!;
+      return (
+        document.activeElement?.id === 'project-tree' &&
+        root.activeElement === null &&
+        root.querySelector('[data-file-tree-virtualized-scroll]')!.scrollTop ===
+          0
+      );
+    });
+    assert.notEqual(
+      await page
+        .locator('#project-tree [role="tree"]')
+        .evaluate(element => getComputedStyle(element).boxShadow),
+      'none',
     );
+
+    for (const key of ['End', 'ArrowDown']) {
+      const expected = await page.evaluate(last => {
+        const tree = window.followApp.projectDirectory['tree'];
+        const index = last ? tree.getVisibleCount() - 1 : 0;
+        return tree.getVisibleRows(index, index)[0].path;
+      }, key === 'End');
+      await page.locator('#project-tree').press(key);
+      await page.waitForFunction(
+        path =>
+          document
+            .querySelector('#project-tree')!
+            .shadowRoot!.activeElement?.getAttribute('data-item-path') === path,
+        expected,
+      );
+      await fs('fs.list', '/');
+      await page.waitForFunction(
+        () =>
+          document.activeElement?.id === 'project-tree' &&
+          document.querySelector('#project-tree')!.shadowRoot!.activeElement ===
+            null,
+      );
+    }
+    await page.screenshot({path: '/tmp/code3d-agent-follow-root.png'});
 
     // Failed requests, stat and other agents leave the current selection alone.
     await fs('fs.stat', file);

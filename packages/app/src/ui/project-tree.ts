@@ -58,6 +58,7 @@ export class ProjectTree {
     private readonly container: HTMLElement,
     private readonly options: ProjectTreeOptions,
   ) {
+    container.tabIndex = -1;
     this.status.className = 'project-status';
     this.status.hidden = true;
     this.status.setAttribute('role', 'status');
@@ -137,6 +138,9 @@ export class ProjectTree {
         },
       },
       unsafeCSS: `
+        :host(:focus) [role="tree"]:not(:focus-within) {
+          box-shadow: inset 0 0 0 var(--trees-focus-ring-width) var(--trees-focus-ring-color);
+        }
         [data-file-tree-virtualized-scroll] {
           overflow: auto;
           scrollbar-width: thin;
@@ -450,6 +454,7 @@ export class ProjectTree {
     await this.revealDirectory(path, version);
     if (cancelled() || version !== this.refreshVersion) return;
     this.tree.closeSearch();
+    let rowPath: string | undefined;
     this.synchronizing = true;
     try {
       for (const selected of this.tree.getSelectedPaths())
@@ -462,25 +467,49 @@ export class ProjectTree {
         if (isDirectoryItem(item)) item.expand();
       }
       if (path !== '/') {
-        const item = this.tree.getItem(path.slice(1) + '/');
-        if (isDirectoryItem(item)) {
-          item.select();
-          this.tree.scrollToPath(item.getPath(), {focus: true});
-        }
+        const target = path.slice(1) + '/';
+        // A compact directory chain is one row identified by its last segment.
+        rowPath = this.tree
+          .getVisibleRows(0, this.tree.getVisibleCount() - 1)
+          .find(
+            row =>
+              row.path === target ||
+              row.flattenedSegments?.some(segment => segment.path === target),
+          )?.path;
+        if (!rowPath) return;
+        this.tree.getItem(rowPath)!.select();
+        this.tree.scrollToPath(rowPath, {focus: true});
+      } else {
+        const first = this.tree.getVisibleRows(0, 0)[0];
+        if (first)
+          this.tree.scrollToPath(first.path, {focus: false, offset: 'top'});
       }
     } finally {
       this.synchronizing = false;
     }
-    // Pierre's focus option updates its controller, without taking DOM focus
-    // from another control. Render the scrolled row before focusing it directly.
+    await this.focusTreeTarget(
+      rowPath,
+      () => cancelled() || version !== this.refreshVersion,
+    );
+  }
+
+  private async focusTreeTarget(
+    rowPath: string | undefined,
+    cancelled: () => boolean,
+  ): Promise<void> {
+    // Scrolling queues a second render to mount the new virtual rows. Wait for
+    // that render before taking DOM focus, which Pierre leaves with its owner.
     this.tree.render({fileTreeContainer: this.container});
-    const selector =
-      path === '/'
-        ? '[role="tree"]'
-        : `[role="treeitem"][data-item-path="${CSS.escape(path.slice(1) + '/')}"]`;
-    this.container
-      .shadowRoot!.querySelector<HTMLElement>(selector)
-      ?.focus({preventScroll: true});
+    await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+    if (cancelled()) return;
+    // Pierre reserves its inner root for row focus. The host represents the
+    // project root and keeps that focus separate from the last focused row.
+    const target = rowPath
+      ? this.container.shadowRoot!.querySelector<HTMLElement>(
+          `[role="treeitem"][data-item-path="${CSS.escape(rowPath)}"]`,
+        )
+      : this.container;
+    target?.focus({preventScroll: true});
   }
 
   search(): void {
@@ -746,9 +775,33 @@ export class ProjectTree {
       event.stopPropagation();
       return;
     }
+    if (
+      target === this.container &&
+      !command &&
+      !event.altKey &&
+      ['ArrowDown', 'ArrowUp', 'Home', 'End', 'Enter'].includes(event.key)
+    ) {
+      const last = event.key === 'ArrowUp' || event.key === 'End';
+      const index = last ? this.tree.getVisibleCount() - 1 : 0;
+      const row = this.tree.getVisibleRows(index, index)[0];
+      if (row) {
+        this.tree.scrollToPath(row.path, {focus: true});
+        void this.focusTreeTarget(
+          row.path,
+          () =>
+            this.tree.getFocusedPath() !== row.path ||
+            document.activeElement !== this.container ||
+            this.container.shadowRoot!.activeElement !== null,
+        );
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     if (command && key === 'c') this.copy('copy');
     else if (command && key === 'x') this.copy('move');
-    else if (command && key === 'v') void this.paste();
+    else if (command && key === 'v')
+      void this.paste(target === this.container ? '/' : undefined);
     else if (event.key === 'Delete') void this.remove();
     else if (event.key === 'Enter') {
       const path = this.tree.getFocusedPath();

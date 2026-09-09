@@ -89,9 +89,11 @@ and updates the model or sketch, using its supplied arguments (or JSDoc defaults
 and any explicitly requested 3D view. You can keep editing, selecting and navigating
 between updates; following does not lock the UI or stop when you interact.
 Successful `fs read` opens the file and focuses its tab; `fs list` reveals,
-expands and focuses the directory in the file explorer. Listing `/` focuses the
-explorer itself. A hidden explorer opens and search filters clear to reveal the
-directory. These operations leave the agent's modeling cursor unchanged.
+expands and focuses the directory in the file explorer, scrolling it into view
+when necessary. Compact directory chains highlight the row containing the listed
+directory. Listing `/` scrolls to the top and focuses the explorer itself. A hidden
+explorer opens and search filters clear to reveal the directory. These operations
+leave the agent's modeling cursor unchanged.
 `context`, `fs stat`, failed requests and inspections without a source, cursor or
 view change do not move your view. Later user interaction takes precedence over
 pending navigation or a requested camera change. Use the user-with-gear
