@@ -51,6 +51,15 @@ import type {
 } from './viewport-decoration';
 import {editableParameterUsages} from './model/parameter-provenance';
 import {
+  parameterSourceDecoration,
+  sourceParameterAt,
+} from './model/parameter-decorations';
+import type {ToolParameterSchema} from './model/tool-schema';
+import {
+  dimensionEdges,
+  representativeDimensionEdge,
+} from './rendering/parameter-dimension';
+import {
   canPreviewConstraintTransform,
   spatialBindings,
 } from './tools/model-spatial-tool';
@@ -135,7 +144,7 @@ type DecorationInstance = Readonly<{
   anchor?: AnchorDecorationObject;
   corners?: ScreenSpaceCornerLines;
   bounds?: boolean;
-  visibility?: 'without-object-bounds';
+  visibility?: 'without-object-bounds' | 'without-topology-selection';
 }>;
 
 export type ModelViewportOptions = Readonly<{
@@ -302,6 +311,10 @@ export class ModelViewport {
   private readonly occurrences = new Map<string, Occurrence>();
   private readonly contextOccurrences = new Map<string, Occurrence>();
   private readonly parameterPreviews = new Map<string, number>();
+  private sourceParameter?: Readonly<{
+    targetId: string;
+    parameter: ToolParameterSchema;
+  }>;
   private readonly committedParameterPreviews = new Map<string, number>();
   private readonly occurrenceTranslationPreviews = new Map<string, Vec3>();
   private hasFramedView = false;
@@ -453,6 +466,7 @@ export class ModelViewport {
     this.restoreTransientPreview();
     this.saveViewportState();
     this.module = module;
+    this.sourceParameter = undefined;
     this.scenes = module ? new ViewportScenes(module) : undefined;
     this.selectedViewTarget = {kind: 'model'};
     this.renderedViewTarget = {kind: 'model'};
@@ -495,7 +509,15 @@ export class ModelViewport {
     preferredContextId?: string,
   ): boolean {
     const match = this.sourceTargetAt(file, offset);
+    const previousParameter = this.sourceParameter;
+    const parameter = match && sourceParameterAt(match, file, offset);
+    this.sourceParameter = parameter
+      ? {targetId: match!.id, parameter}
+      : undefined;
     if (!match) {
+      this.clearDecorations(
+        sourceDecorationOwner(parameterSourceDecoration.id),
+      );
       return false;
     }
 
@@ -530,11 +552,22 @@ export class ModelViewport {
       this.renderedViewTarget.evaluationIndex !== evaluationIndex
     ) {
       this.renderSourceTarget(match, evaluationIndex, preferredOccurrenceKey);
-    } else if (
-      preferredOccurrenceKey &&
-      this.occurrences.has(preferredOccurrenceKey)
-    ) {
-      this.selectKey(preferredOccurrenceKey, false);
+    } else {
+      if (
+        preferredOccurrenceKey &&
+        this.occurrences.has(preferredOccurrenceKey)
+      ) {
+        this.selectKey(preferredOccurrenceKey, false);
+      }
+      if (previousParameter?.parameter !== parameter) {
+        const scope = this.renderedSourceScope();
+        if (scope)
+          this.renderSourceDecorations(
+            this.module!,
+            scope.target,
+            scope.evaluation,
+          );
+      }
     }
     return true;
   }
@@ -764,6 +797,7 @@ export class ModelViewport {
     this.updateTransformGizmo();
     this.rebuildTopologySelectionOverlay();
     this.refreshTopologyHover();
+    this.updateDecorationVisibilities();
     return availableIds;
   }
 
@@ -771,6 +805,7 @@ export class ModelViewport {
     this.clearTopologySelection();
     this.rebuildSelectionHighlight();
     this.updateTransformGizmo();
+    this.updateDecorationVisibilities();
   }
 
   setSelectedTopologyIds(ids: readonly TopologyId[]): void {
@@ -925,15 +960,14 @@ export class ModelViewport {
                         decoration.operationRole ?? occurrence.operationRole,
                       )
                     : decoration.kind === 'topology'
-                      ? createTopologyHighlight(
-                          decoration.mesh,
-                          decoration.topologyKind,
-                          new TopologyIdSet(decoration.ids),
-                          decoration.appearance.color,
-                          28,
-                          symbolLineWidth,
-                        )!
-                      : new AnchorDecorationObject(decoration);
+                      ? createTopologyDecorationObject(decoration)
+                      : decoration.kind === 'dimension'
+                        ? createDimensionDecorationObject(
+                            decoration,
+                            this.camera,
+                            occurrence.object.matrixWorld,
+                          )
+                        : new AnchorDecorationObject(decoration);
           const object = new THREE.Group();
           object.matrixAutoUpdate = false;
           object.add(decorationObject);
@@ -955,7 +989,9 @@ export class ModelViewport {
                 child instanceof ScreenSpaceCornerLines,
             ),
             visibility:
-              decoration.kind === 'edges' ? decoration.visibility : undefined,
+              decoration.kind === 'edges' || decoration.kind === 'topology'
+                ? decoration.visibility
+                : undefined,
           };
           this.updateDecorationTransform(instance);
           instance.corners?.update(
@@ -1004,6 +1040,7 @@ export class ModelViewport {
         module: this.module,
         target: scope.target,
         evaluation: scope.evaluation,
+        parameter: this.parameterForSource(scope.target),
       }),
     );
   }
@@ -1319,7 +1356,6 @@ export class ModelViewport {
       }
       this.root.add(object);
     });
-    this.renderSourceDecorations(this.module!, target, evaluation);
     this.applyPreviewTransforms();
     const nextKey =
       selectedKey && this.occurrences.has(selectedKey)
@@ -1332,6 +1368,7 @@ export class ModelViewport {
       [...focusNodes, ...contextNodes.map(({node}) => node)],
       placement,
     );
+    this.renderSourceDecorations(this.module!, target, evaluation);
     this.onViewChange?.();
   }
 
@@ -1695,9 +1732,22 @@ export class ModelViewport {
   ): void {
     if (evaluation.constraintPreviewDiagnostic) return;
     for (const provider of this.sourceDecorationProviders) {
-      const decorations = provider.decorations({module, target, evaluation});
+      const decorations = provider.decorations({
+        module,
+        target,
+        evaluation,
+        parameter: this.parameterForSource(target),
+      });
       this.setDecorations(sourceDecorationOwner(provider.id), decorations);
     }
+  }
+
+  private parameterForSource(
+    target: SourceTarget,
+  ): ToolParameterSchema | undefined {
+    return this.sourceParameter?.targetId === target.id
+      ? this.sourceParameter.parameter
+      : undefined;
   }
 
   private beginSelectionGesture(event: PointerEvent): void {
@@ -2156,6 +2206,11 @@ export class ModelViewport {
     instance: DecorationInstance,
     boundsKeys: ReadonlySet<string>,
   ): void {
+    if (instance.visibility === 'without-topology-selection') {
+      instance.object.visible =
+        this.topologySelection?.occurrenceKey !== instance.occurrenceKey;
+      return;
+    }
     if (instance.visibility !== 'without-object-bounds') return;
     const occurrence =
       this.occurrences.get(instance.occurrenceKey) ??
@@ -2566,6 +2621,70 @@ function createEdgeDecorationObject(
   }
 
   applyTransform(container, decoration.transform);
+  return container;
+}
+
+function createTopologyDecorationObject(
+  decoration: Extract<ViewportDecoration, {kind: 'topology'}>,
+): THREE.Object3D {
+  const container = new THREE.Group();
+  container.name = decoration.id;
+  container.userData.decoration = decoration;
+  const highlight = createTopologyHighlight(
+    decoration.mesh,
+    decoration.topologyKind,
+    new TopologyIdSet(decoration.ids),
+    decoration.appearance.color,
+    28,
+    symbolLineWidth,
+  );
+  if (highlight) container.add(highlight);
+  applyTransform(container, decoration.transform);
+  return container;
+}
+
+function createDimensionDecorationObject(
+  decoration: Extract<ViewportDecoration, {kind: 'dimension'}>,
+  camera: THREE.Camera,
+  matrixWorld: THREE.Matrix4,
+): THREE.Object3D {
+  const edge = representativeDimensionEdge(
+    dimensionEdges(decoration.mesh, decoration.dimension),
+    camera,
+    matrixWorld,
+  );
+  const start = edge?.start ?? decoration.dimension.origin;
+  const end =
+    edge?.end ??
+    new THREE.Vector3(...start)
+      .add(new THREE.Vector3(...decoration.dimension.vector))
+      .toArray();
+  const positions = new Float32Array([...start, ...end]);
+  const container = new THREE.Group();
+  container.name = decoration.id;
+  container.userData.decoration = decoration;
+  container.userData.edgeId = edge?.id;
+  container.add(
+    createScreenSpaceEdgeLines(
+      positions,
+      decoration.appearance.color,
+      symbolLineWidth,
+      decoration.appearance.opacity,
+      decoration.appearance.depthTest,
+      28,
+    ),
+  );
+  if (!edge)
+    container.add(
+      createScreenSpacePoints(
+        positions,
+        decoration.appearance.color,
+        topologyPointSize,
+        1,
+        false,
+        28,
+      ),
+    );
   return container;
 }
 
