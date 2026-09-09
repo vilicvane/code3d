@@ -139,11 +139,19 @@ export class ProjectTree {
       unsafeCSS: `
         [data-file-tree-virtualized-scroll] {
           overflow: auto;
+          padding-inline: 0;
+          scrollbar-gutter: auto;
           scrollbar-width: thin;
           scrollbar-color: #41473b transparent;
         }
         [data-file-tree-virtualized-scroll]:hover { scrollbar-color: #59614f transparent; }
         [data-file-tree-virtualized-list] { width: max-content; min-width: 100%; }
+        [data-type="item"] {
+          --trees-border-radius: 0px;
+          padding-inline-start: var(--trees-padding-inline);
+          /* Include the text dot's side bearing in its visual edge spacing. */
+          padding-inline-end: 8.5px;
+        }
         [data-item-section="content"] {
           flex: none;
           max-width: none;
@@ -184,7 +192,9 @@ export class ProjectTree {
         [data-type="item"]:has([data-item-rename-input])::before { outline: none; }
         [data-file-tree-search-input]::selection,
         [data-item-rename-input]::selection { color: #edf0e7; background: #465635; }
-        [data-item-section="decoration"] { font-size: 9px; }
+        [data-item-section="decoration"] { font-size: 12px; }
+        /* Center the visible dot, which sits below the font's line-box center. */
+        [data-item-section="decoration"] > span { transform: translateY(-1px); }
         [data-item-section="icon"] > svg {
           width: var(--trees-icon-width);
           height: var(--trees-icon-width);
