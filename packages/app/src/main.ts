@@ -46,6 +46,7 @@ import {
   openDirectoryProjectFileSystem,
 } from './project/filesystem';
 import {filePathFromRoute, fileRoute} from './project/file-route';
+import {decodeProjectFile} from './project/file-reader';
 import {
   listProjectEntries,
   searchProjectEntries,
@@ -60,9 +61,17 @@ import {
   type ModelProject,
 } from './project/project';
 import {mapProjectIO} from './project/io';
-import {BrowserPackageInstaller} from './project/browser-package-installer';
+import {
+  BrowserPackageInstaller,
+  PackageInstallationError,
+} from './project/browser-package-installer';
 import type {BrowserProjectFileSystem} from './project/filesystem';
-import {findPackageScope} from './project/package-manifest';
+import {
+  findPackageScope,
+  packageInstallDirectory,
+  parsePackageManifest,
+  addPackageDependency,
+} from './project/package-manifest';
 import {ProjectPackages} from './project/project-packages';
 import {browserPackageFiles} from './project/browser-packages';
 import {
@@ -103,7 +112,7 @@ import {ImageExportDialog} from './ui/image-export';
 import {ModelExportDialog} from './ui/model-export';
 import {ViewportContextMenu} from './ui/viewport-context-menu';
 import {ViewportEmptyState} from './ui/viewport-empty-state';
-import {ProjectTree} from './ui/project-tree';
+import {ProjectTree, askInstallPackage} from './ui/project-tree';
 import {EditorSplitLayout} from './ui/editor-split-layout';
 import {createIcon} from './ui/icons';
 import {SourceEditPopover} from './ui/source-edit-popover';
@@ -168,8 +177,6 @@ app.innerHTML = `
         <span class="prototype-tag">prototype 01</span>
       </a>
       <div class="topbar-actions">
-        <button class="quiet-button" id="packages-button" type="button">Packages</button>
-        <button class="quiet-button" id="install-packages-button" type="button">Install packages</button>
         <button class="quiet-button" id="retry-save-button" type="button" hidden>Retry saving</button>
         <span class="project-location" id="project-location"></span>
         <button class="quiet-button" id="open-folder-button" type="button">Open folder</button>
@@ -374,7 +381,7 @@ replaceFileRoute(codeEditor.currentFile());
 const packageInstaller = !directoryWorkspaceId
   ? new BrowserPackageInstaller(
       projectFileSystem as BrowserProjectFileSystem,
-      message => setViewportStatus('busy', message),
+      progress => projectDirectory.setPackageProgress(progress),
       undefined,
       () => {
         void projectDirectory.refresh();
@@ -388,18 +395,32 @@ const navigationPackages = new ProjectPackages(
 );
 codeEditor.fileReader = {
   async readFile(path) {
+    // Editable project files retain their source, not runtime package metadata.
+    if (!path.includes('/node_modules/')) return packageFiles.readFile(path);
+    // Browsing an already installed file does not wait for a replacement download.
+    const installed = await projectFileSystem.readFile(path);
+    if (installed !== undefined) return installed;
     await navigationPackages.update(
       codeEditor.project(),
       codeEditor.currentFile() ?? '/model.ts',
     );
     return navigationPackages.readFile(path);
   },
-  stat: path => navigationPackages.stat(path),
+  async stat(path) {
+    if (!path.includes('/node_modules/')) return projectFileSystem.stat(path);
+    return (
+      (await projectFileSystem.stat(path)) ?? navigationPackages.stat(path)
+    );
+  },
 };
-const preparePackages = async (_project: ModelProject, file: string) => {
+const preparePackages = async (
+  _project: ModelProject,
+  file: string,
+  options?: {update?: boolean},
+) => {
   if (!packageInstaller) return;
   await agentProject.flush();
-  await packageInstaller.prepare(file);
+  await packageInstaller.prepare(file, options);
   const scope = await findPackageScope(projectFileSystem, file);
   await codeEditor.refreshPackageLock(
     normalizeProjectPath(scope.directory + '/code3d-lock.json'),
@@ -448,6 +469,10 @@ const projectDirectory = new ProjectTree(projectTree, {
     searchProjectEntries(projectFileSystem, cancelled, onEntries),
   onOpenFile: (path, takeFocus) => activateProjectFile(path, takeFocus),
   onOperation: operation => agentProject.changeEntries(operation),
+  onInstallPackage: packageInstaller ? installProjectPackage : undefined,
+  onUpdateDependencies: packageInstaller
+    ? updateProjectDependencies
+    : undefined,
   onBusy: busy => {
     if (busy) fileOpenVersion++;
     codeEditor.setReadOnly(busy);
@@ -484,43 +509,70 @@ window.addEventListener('beforeunload', event => {
     event.returnValue = '';
   }
 });
-const packagesButton = requiredElement<HTMLButtonElement>('packages-button');
-const installPackagesButton = requiredElement<HTMLButtonElement>(
-  'install-packages-button',
-);
-packagesButton.hidden = installPackagesButton.hidden = !packageInstaller;
-packagesButton.addEventListener('click', () => {
-  void (async () => {
-    const scope = await findPackageScope(
-      projectFileSystem,
-      codeEditor.currentFile() ?? '/model.ts',
-    );
-    const path = normalizeProjectPath(scope.directory + '/package.json');
-    if (!scope.manifest)
-      codeEditor.createFile(
-        path,
-        JSON.stringify(
-          {private: true, type: 'module', dependencies: {}},
-          null,
-          2,
-        ) + '\n',
-      );
-    else await codeEditor.openFile(path);
-  })().catch(showProjectIssue);
-});
-installPackagesButton.addEventListener('click', () => {
-  void (async () => {
-    installPackagesButton.disabled = true;
-    try {
-      const file = codeEditor.currentFile() ?? '/model.ts';
-      await preparePackages(codeEditor.project(), file);
-      if (codeEditor.isModelFile(file)) await runModel();
-      else setViewportStatus('ready', 'Packages installed');
-    } finally {
-      installPackagesButton.disabled = false;
-    }
-  })().catch(showProjectIssue);
-});
+async function installProjectPackage(selectedDirectory: string): Promise<void> {
+  await agentProject.flush();
+  const directory = await packageInstallDirectory(
+    projectFileSystem,
+    selectedDirectory,
+  );
+  const specifier = await askInstallPackage(directory);
+  if (!specifier) return;
+  const path = normalizeProjectPath(directory + '/package.json');
+  await runPackageOperation(directory, 'Packages installed', async () => {
+    await agentProject.update(async () => {
+      const bytes = await projectFileSystem.readFile(path);
+      const manifest =
+        bytes === undefined
+          ? undefined
+          : parsePackageManifest(decodeProjectFile(bytes), path);
+      const updated = addPackageDependency(manifest, specifier);
+      codeEditor.applyFiles([
+        {path, content: JSON.stringify(updated, null, 2) + '\n'},
+      ]);
+      await codeEditor.openFile(path);
+    });
+    await preparePackages(codeEditor.project(), path);
+  });
+}
+
+async function updateProjectDependencies(directory: string): Promise<void> {
+  await runPackageOperation(directory, 'Dependencies updated', () =>
+    preparePackages(
+      codeEditor.project(),
+      normalizeProjectPath(directory + '/package.json'),
+      {update: true},
+    ),
+  );
+}
+
+async function runPackageOperation(
+  directory: string,
+  successMessage: string,
+  operation: () => Promise<void>,
+): Promise<void> {
+  projectDirectory.setPackageProgress({
+    directory,
+    state: 'busy',
+    message: 'Preparing packages',
+  });
+  try {
+    await operation();
+    projectDirectory.setPackageProgress({
+      directory,
+      state: 'ready',
+      message: successMessage,
+    });
+  } catch (error) {
+    // The installer reports its own failures. Earlier manifest/save failures
+    // also belong to this package operation, never the explorer's file error.
+    if (!(error instanceof PackageInstallationError))
+      projectDirectory.setPackageProgress({
+        directory,
+        state: 'error',
+        message: error instanceof Error ? error.message : String(error),
+      });
+  }
+}
 let currentModule: ModelModule | null = null;
 let currentModuleSourceVersion: number | undefined;
 let modelStatus: 'ready' | 'error' = 'ready';
@@ -1272,7 +1324,7 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
   const designContextId =
     typeof designContext === 'string' ? designContext : undefined;
   compilingDesignContextId = designContextId;
-  setViewportStatus('busy', 'Preparing model');
+  setViewportStatus('busy', 'Updating model');
   if (designContextId) {
     renderCurrentPanels();
   }
@@ -1390,7 +1442,7 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
       refreshViewportFeedback();
       errorBar.textContent =
         error instanceof Error ? error.message : String(error);
-      errorBar.hidden = false;
+      errorBar.hidden = error instanceof PackageInstallationError;
     }
   }
 }

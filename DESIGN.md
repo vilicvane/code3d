@@ -14,6 +14,9 @@
 - code3d 模型项目是普通的 Node/TypeScript 项目，自行管理 `package.json`、
   lockfile 和 `node_modules`。Browser storage 由 App 在浏览器内安装 npm 包，
   每个子目录清单使用平级 `code3d-lock.json` 与 `node_modules`，普通运行保持锁定版本；
+  文件树右键 Install package 在所选目录添加依赖；缺失清单时一并声明 core 为 latest，已有清单
+  保留其他依赖。在 node_modules 内操作时向上查找项目清单，不修改依赖包的文件。
+  项目清单右键 Update dependencies 按现有版本约束忽略旧锁重新解析，成功后更新安装与锁。
   本地文件夹仍由用户自己的包管理器安装。TS、运行时和资源共用安装文件与真实路径，
   包声明及原始源码按需只读打开。见 [#90](https://github.com/vilicvane/code3d/issues/90)。
   App 在模型所在清单及其祖先未声明 `@code3d/core` 时提供完整内置

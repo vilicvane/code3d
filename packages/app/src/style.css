@@ -632,6 +632,19 @@ kbd {
   line-height: 1.5;
 }
 
+.package-status {
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.package-status-directory {
+  color: #e8e9e1;
+}
+
+.package-status [data-state='error'] {
+  color: #d6ad7e;
+}
+
 .app-dialog.project-entry-dialog {
   width: 360px;
   padding: 20px;

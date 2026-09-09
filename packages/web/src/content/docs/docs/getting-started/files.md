@@ -21,10 +21,53 @@ data removes the browser workspace. Keep copies of work you care about.
 
 ## Install packages in browser storage
 
-Choose **Packages** to open the nearest `package.json`, or create one in the
-workspace root. Add browser-compatible npm dependencies, then choose
-**Install packages**. Opening a model also installs changed dependencies or
-restores its existing lock before compilation.
+Right-click a folder or `package.json` in the file explorer and choose
+**Install package**. Enter a browser-compatible npm package name, optionally
+with a version or range, such as `just-range@4.2.0` or `@scope/package@^2`.
+A name without a version uses `latest`; the lock records the resolved version.
+
+If the selected folder has no `package.json`, Code3D creates one in that folder
+with the requested package and `"@code3d/core": "latest"`.
+An existing manifest keeps its other settings and dependencies; installing a
+package updates its existing dependency field or adds it to `dependencies`.
+Ordinary folders create their own scope even when a parent has a manifest.
+Inside `node_modules`, the command searches upward for the owning project
+manifest outside the installed dependencies, leaving package contents read-only.
+The dialog shows the target directory before installation. Right-click empty
+space in the explorer to install in the workspace root.
+
+Right-click a project's `package.json` and choose **Update dependencies** to
+resolve its dependency graph again without using the existing lock. The command
+keeps the manifest's version constraints: `latest` follows that npm tag, ranges
+select compatible versions, and exact versions stay pinned. It updates that
+folder's dependencies and lock without changing other subprojects. Verified
+archive downloads can be reused. If the update fails, the previous installation
+and lock remain available. This action is not shown for read-only manifests
+inside `node_modules`.
+
+Models without a manifest continue using the App's built-in modeling packages,
+with no installation required. Opening a model with a manifest also installs
+changed dependencies or restores its existing lock before compilation.
+Installation continues in the background while you switch files, edit and save.
+The file explorer shows package progress separately from the model preview;
+only a model needing unfinished dependencies waits for them. Source edits reuse
+prepared dependencies. Changing the manifest or lock, or removing an installation,
+causes it to be checked again.
+Deleting `code3d-lock.json` makes the next model run resolve dependencies again,
+so `latest` or version ranges can select newer versions. Existing archive cache
+entries are reused when their integrity matches; installation still unpacks the
+resolved packages and writes a new lock. Opening a manifest, text file or already
+installed package source alone does not trigger installation.
+If a model is active when you delete its lock in the explorer, the resulting
+preview update can start that resolution immediately.
+Package failures appear in that status area with the requested package name.
+Correct or remove the dependency in `package.json` and reopen your model to
+retry; successful preparation clears the earlier error.
+
+Ordinary model edits reuse loaded types and the modeling engine. **Preparing
+project** appears when opening a project for the first time, loading new
+dependencies, or refreshing changed packages, configuration or external files.
+Changing a dimension or expression does not repeat that preparation.
 
 Try `/examples/patterns/post-array/model.ts` in the App's file explorer. This
 bundled example has its own `package.json` and uses `just-range` from npm to

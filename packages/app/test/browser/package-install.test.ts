@@ -4,7 +4,9 @@ import {chromium} from 'playwright-core';
 
 declare const window: Window & {
   packageApp: {
+    runModel(): Promise<void>;
     codeEditor: import('../../src/editor.ts').CodeEditor;
+    compiler: import('../../src/model/compiler-client.ts').ModelCompilerClient;
     projectFileSystem: import('../../src/project/filesystem.ts').BrowserProjectFileSystem;
   };
 };
@@ -21,7 +23,7 @@ async function exposePackageApp(
       response,
       body:
         (await response.text()) +
-        '\nwindow.packageApp = {codeEditor, projectFileSystem};',
+        '\nwindow.packageApp = {codeEditor, compiler, projectFileSystem, runModel};',
     });
   });
 }
@@ -56,6 +58,11 @@ test(
     t.after(() => context.close());
     const page = await context.newPage();
     await exposePackageApp(page);
+    const packageRequests: string[] = [];
+    page.on('request', request => {
+      if (request.url().startsWith('https://registry.npmjs.org/'))
+        packageRequests.push(request.url());
+    });
     const errors: string[] = [];
     page.on('pageerror', error => {
       // Monaco's AbstractTree disposes its pending active-node Delayer when
@@ -83,7 +90,9 @@ test(
         source: new TextDecoder().decode(
           await files.readFile(root + '/model.ts'),
         ),
-        manifest: !!(await files.stat(root + '/package.json')),
+        manifest: new TextDecoder().decode(
+          await files.readFile(root + '/package.json'),
+        ),
         lock: !!(await files.stat(root + '/code3d-lock.json')),
         package: !!(await files.stat(
           root + '/node_modules/just-range/index.mjs',
@@ -91,9 +100,65 @@ test(
       };
     });
     assert.match(installed.source, /import range from 'just-range'/);
-    assert.equal(installed.manifest, true);
+    assert.match(installed.manifest, /\n  "private": true,/);
     assert.equal(installed.lock, true);
     assert.equal(installed.package, true);
+
+    const requestCount = packageRequests.length;
+    const editPhases = await page.evaluate(async () => {
+      const {codeEditor, compiler, runModel} = window.packageApp;
+      const phases: string[] = [];
+      const compile = compiler.compile;
+      compiler.compile = (project, rootPath, designContext, onProgress) =>
+        compile.call(compiler, project, rootPath, designContext, phase => {
+          phases.push(phase);
+          onProgress?.(phase);
+        });
+      try {
+        const model = codeEditor.editor.getModel()!;
+        model.setValue(model.getValue().replace('count = 5', 'count = 6'));
+        await runModel();
+        return phases;
+      } finally {
+        compiler.compile = compile;
+      }
+    });
+    await page.getByText('Ready', {exact: true}).waitFor();
+    assert.equal(
+      packageRequests.length,
+      requestCount,
+      'source edits do not request npm metadata or archives again',
+    );
+    assert.deepEqual(editPhases, ['compiling-model', 'evaluating-model']);
+
+    await page
+      .getByRole('treeitem', {name: 'package.json', exact: true})
+      .click();
+    await page.waitForFunction(() =>
+      window.packageApp.codeEditor
+        .currentFile()
+        ?.endsWith('/post-array/package.json'),
+    );
+    assert.equal(
+      await page.evaluate(() => window.packageApp.codeEditor.editor.getValue()),
+      installed.manifest,
+      'opening package.json in the explorer preserves the stored manifest with its original formatting and field order',
+    );
+    await page.reload();
+    await page.waitForFunction(() =>
+      window.packageApp?.codeEditor.currentFile()?.endsWith('/package.json'),
+    );
+    assert.equal(
+      await page.evaluate(() => window.packageApp.codeEditor.editor.getValue()),
+      installed.manifest,
+      'reloading the manifest preserves the same source text',
+    );
+    await page.evaluate(() =>
+      window.packageApp.codeEditor.openFile(
+        '/examples/patterns/post-array/model.ts',
+      ),
+    );
+    await page.getByText('Ready', {exact: true}).waitFor({timeout: 90_000});
 
     await page.evaluate(() => {
       const {editor} = window.packageApp.codeEditor;
@@ -304,18 +369,24 @@ test(
       ),
     );
     assert.ok(other.packages['https://registry.npmjs.org/d3-delaunay/6.0.3/']);
-    await page.locator('#packages-button').click();
+    await page.locator('[data-item-path="b/package.json"]').click();
     await page.waitForFunction(
       () => window.packageApp.codeEditor.currentFile() === '/b/package.json',
     );
-    await page.evaluate(() => {
-      const {codeEditor} = window.packageApp;
-      const model = codeEditor.editor.getModel()!;
-      const manifest = JSON.parse(model.getValue());
-      manifest.dependencies['d3-delaunay'] = '6.0.4';
-      model.setValue(JSON.stringify(manifest, null, 2));
+    await page
+      .locator('[data-item-path="b/package.json"]')
+      .click({button: 'right'});
+    await page
+      .getByRole('menuitem', {name: 'Install package', exact: true})
+      .click();
+    const dialog = page.getByRole('dialog', {
+      name: 'Install package',
+      exact: true,
     });
-    await page.locator('#install-packages-button').click();
+    await dialog
+      .getByRole('textbox', {name: 'Package', exact: true})
+      .fill('d3-delaunay@6.0.4');
+    await dialog.getByRole('button', {name: 'Install', exact: true}).click();
     await page.getByText('Packages installed', {exact: true}).waitFor();
     assert.ok(
       await page.evaluate(async () => {
@@ -326,8 +397,652 @@ test(
           'https://registry.npmjs.org/d3-delaunay/6.0.4/'
         ];
       }),
-      'reinstall replaces the existing lock after a manifest edit',
+      'contextual installation updates an existing manifest and replaces its lock',
     );
+    assert.deepEqual(errors, []);
+  },
+);
+
+test(
+  'folder installation creates core dependencies and redirects node_modules actions to the owning project',
+  {timeout: 240_000},
+  async t => {
+    assert.ok(process.env.CODE3D_TEST_URL);
+    const browser = await chromium.connectOverCDP(
+      process.env.CODE3D_CDP_URL ?? 'http://localhost:9222',
+    );
+    t.after(() => browser.close());
+    const context = await browser.newContext({
+      viewport: {width: 1440, height: 900},
+    });
+    t.after(() => context.close());
+    const page = await context.newPage();
+    page.setDefaultTimeout(20_000);
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await exposePackageApp(page);
+    await page.route('**/src/project/default-project.ts*', route =>
+      route.fulfill({
+        contentType: 'text/javascript',
+        body:
+          'export const defaultProject = ' +
+          JSON.stringify({
+            files: [
+              {
+                path: '/model.ts',
+                source:
+                  "import {box} from '@code3d/core'; export default box(10, 8, 6);",
+              },
+              {
+                path: '/panel/model.ts',
+                source:
+                  "import {box} from '@code3d/core'; export default box(10, 8, 6);",
+              },
+            ],
+          }),
+      }),
+    );
+    await page.goto(process.env.CODE3D_TEST_URL);
+    await page.getByText('Ready', {exact: true}).waitFor({timeout: 90_000});
+    assert.equal(
+      await page.getByRole('button', {name: 'Packages', exact: true}).count(),
+      0,
+    );
+    assert.equal(
+      await page
+        .getByRole('button', {name: 'Install packages', exact: true})
+        .count(),
+      0,
+    );
+    assert.equal(
+      await page.evaluate(
+        async () =>
+          !!(await window.packageApp.projectFileSystem.stat('/package.json')),
+      ),
+      false,
+      'zero-install model does not create a manifest',
+    );
+    const folder = page.getByRole('treeitem', {name: 'panel', exact: true});
+    await folder.click({button: 'right'});
+    await page
+      .getByRole('menuitem', {name: 'Install package', exact: true})
+      .click();
+    let dialog = page.getByRole('dialog', {
+      name: 'Install package',
+      exact: true,
+    });
+    assert.equal(await dialog.locator('header p').textContent(), 'In /panel');
+    await dialog.getByRole('button', {name: 'Cancel', exact: true}).click();
+    assert.equal(
+      await page.evaluate(
+        async () =>
+          !!(await window.packageApp.projectFileSystem.stat(
+            '/panel/package.json',
+          )),
+      ),
+      false,
+    );
+    await folder.click({button: 'right'});
+    await page
+      .getByRole('menuitem', {name: 'Install package', exact: true})
+      .click();
+    dialog = page.getByRole('dialog', {name: 'Install package', exact: true});
+    await dialog
+      .getByRole('textbox', {name: 'Package', exact: true})
+      .fill('just-range@4.2.0');
+    await dialog.getByRole('button', {name: 'Install', exact: true}).click();
+    await page
+      .getByText('Packages installed', {exact: true})
+      .waitFor({timeout: 150_000});
+    const installed = await page.evaluate(async () => {
+      const files = window.packageApp.projectFileSystem;
+      const source = new TextDecoder().decode(
+        await files.readFile('/panel/package.json'),
+      );
+      return {
+        source,
+        manifest: JSON.parse(source),
+        lock: JSON.parse(
+          new TextDecoder().decode(
+            await files.readFile('/panel/code3d-lock.json'),
+          ),
+        ),
+        root: !!(await files.stat('/package.json')),
+      };
+    });
+    assert.deepEqual(installed.manifest.dependencies, {
+      '@code3d/core': 'latest',
+      'just-range': '4.2.0',
+    });
+    assert.equal(installed.root, false);
+    assert.ok(
+      Object.values(installed.lock.packages).some(
+        (pkg: any) => pkg.name === '@code3d/core',
+      ),
+    );
+    assert.equal(
+      await page.evaluate(() => window.packageApp.codeEditor.editor.getValue()),
+      installed.source,
+    );
+    await page.evaluate(() =>
+      window.packageApp.codeEditor.openFile('/panel/model.ts'),
+    );
+    await page.getByText('Ready', {exact: true}).waitFor({timeout: 90_000});
+    const warmEdit = await page.evaluate(async () => {
+      const {projectFileSystem, codeEditor, runModel} = window.packageApp;
+      const stat = projectFileSystem.stat;
+      const checked: string[] = [];
+      projectFileSystem.stat = async function (path) {
+        if (path.includes('/node_modules/')) checked.push(path);
+        return stat.call(this, path);
+      };
+      const start = performance.now();
+      try {
+        const model = codeEditor.editor.getModel()!;
+        model.setValue(model.getValue().replace('box(10,', 'box(12,'));
+        await runModel();
+        return {checked, milliseconds: performance.now() - start};
+      } finally {
+        projectFileSystem.stat = stat;
+      }
+    });
+    const installedChecks = warmEdit.checked.filter(path =>
+      path.startsWith('/panel/node_modules/'),
+    );
+    assert.ok(
+      installedChecks.length < 20,
+      `warm model edits should check installation markers, not every installed file: ${JSON.stringify(warmEdit.checked)}`,
+    );
+    t.diagnostic(
+      `Installed core warm edit: ${Math.round(warmEdit.milliseconds)} ms; ${installedChecks.length} installed-tree checks; other scopes: ${JSON.stringify(warmEdit.checked.filter(path => !path.startsWith('/panel/node_modules/')))}`,
+    );
+    const definition = await page.evaluate(async () => {
+      const {codeEditor} = window.packageApp;
+      const model = codeEditor.editor.getModel()!;
+      const {projectTypeScriptWorker} =
+        await import('/src/monaco/typescript-worker-client.ts');
+      const worker = await projectTypeScriptWorker('typescript', model.uri);
+      return worker.getDefinitionAtPosition(
+        model.uri.toString(),
+        model.getValue().indexOf('box') + 1,
+      );
+    });
+    assert.ok(definition?.length);
+    const sourcePath = decodeURIComponent(definition[0].fileName).replace(
+      /^file:\/\/\/workspace/,
+      '',
+    );
+    assert.match(sourcePath, /\/panel\/node_modules\/.*core\/src\//);
+    await page.evaluate(
+      path => window.packageApp.codeEditor.openFile(path),
+      sourcePath,
+    );
+    assert.equal(
+      await page.evaluate(
+        () => window.packageApp.codeEditor.editor.getRawOptions().readOnly,
+      ),
+      true,
+    );
+    // Opening the public entry reveals the physical dependency subtree in the explorer.
+    await page.evaluate(() =>
+      window.packageApp.codeEditor.openFile(
+        '/panel/node_modules/just-range/index.mjs',
+      ),
+    );
+    const dependency = page.locator(
+      '[data-item-path="panel/node_modules/just-range/"]',
+    );
+    await dependency.click({button: 'right'});
+    await page
+      .getByRole('menuitem', {name: 'Install package', exact: true})
+      .click();
+    dialog = page.getByRole('dialog', {name: 'Install package', exact: true});
+    assert.equal(await dialog.locator('header p').textContent(), 'In /panel');
+    await dialog
+      .getByRole('textbox', {name: 'Package', exact: true})
+      .fill('just-range@4.2.0');
+    await dialog.getByRole('button', {name: 'Install', exact: true}).click();
+    await page
+      .getByText('Packages installed', {exact: true})
+      .waitFor({timeout: 60_000});
+    assert.equal(
+      await page.evaluate(
+        async () =>
+          JSON.parse(
+            new TextDecoder().decode(
+              await window.packageApp.projectFileSystem.readFile(
+                '/panel/node_modules/just-range/package.json',
+              ),
+            ),
+          ).name,
+      ),
+      'just-range',
+    );
+    await page.reload();
+    await page.waitForFunction(
+      () =>
+        window.packageApp?.codeEditor.currentFile() === '/panel/package.json',
+    );
+    assert.equal(
+      await page.evaluate(() => window.packageApp.codeEditor.editor.getValue()),
+      installed.source,
+    );
+    assert.deepEqual(errors, []);
+  },
+);
+
+test(
+  'package downloads allow file navigation and editing without taking over the active model',
+  {timeout: 120_000},
+  async t => {
+    assert.ok(process.env.CODE3D_TEST_URL);
+    const browser = await chromium.connectOverCDP(
+      process.env.CODE3D_CDP_URL ?? 'http://localhost:9222',
+    );
+    t.after(() => browser.close());
+    const context = await browser.newContext({
+      viewport: {width: 1440, height: 900},
+    });
+    t.after(() => context.close());
+    const page = await context.newPage();
+    await exposePackageApp(page);
+    await page.route('**/src/project/default-project.ts*', route =>
+      route.fulfill({
+        contentType: 'text/javascript',
+        body:
+          'export const defaultProject = ' +
+          JSON.stringify({
+            files: [
+              {
+                path: '/model.ts',
+                source:
+                  "import {box} from '@code3d/core'; export default box(10, 8, 6);",
+              },
+              {path: '/notes.md', source: '# Notes'},
+              {path: '/panel/package.json', source: '{"private":true}'},
+              {
+                path: '/panel/model.ts',
+                source:
+                  "import {box} from '@code3d/core'; import range from 'just-range'; export default box(range(3).length, 8, 6);",
+              },
+            ],
+          }),
+      }),
+    );
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    let downloading!: () => void;
+    const started = new Promise<void>(resolve => {
+      downloading = resolve;
+    });
+    await page.route(
+      'https://registry.npmjs.org/just-range/-/*.tgz',
+      async route => {
+        downloading();
+        await gate;
+        await route.continue();
+      },
+    );
+    try {
+      await page.goto(process.env.CODE3D_TEST_URL);
+      await page.getByText('Ready', {exact: true}).waitFor({timeout: 60_000});
+      await page
+        .getByRole('treeitem', {name: 'panel', exact: true})
+        .click({button: 'right'});
+      await page
+        .getByRole('menuitem', {name: 'Install package', exact: true})
+        .click();
+      const dialog = page.getByRole('dialog', {
+        name: 'Install package',
+        exact: true,
+      });
+      await dialog
+        .getByRole('textbox', {name: 'Package', exact: true})
+        .fill('just-range@4.2.0');
+      await dialog.getByRole('button', {name: 'Install', exact: true}).click();
+      await started;
+      await page
+        .getByRole('treeitem', {name: 'notes.md', exact: true})
+        .click({timeout: 3000});
+      await page.waitForFunction(
+        () => window.packageApp.codeEditor.currentFile() === '/notes.md',
+      );
+      assert.equal(
+        await page.evaluate(
+          () => window.packageApp.codeEditor.editor.getRawOptions().readOnly,
+        ),
+        false,
+      );
+      await page.evaluate(() =>
+        window.packageApp.codeEditor.editor.trigger('test', 'type', {
+          text: 'Editable during installation\n',
+        }),
+      );
+      await page.waitForFunction(async () =>
+        new TextDecoder()
+          .decode(
+            await window.packageApp.projectFileSystem.readFile('/notes.md'),
+          )
+          .includes('Editable during installation'),
+      );
+      await page
+        .locator('[data-item-path="panel/model.ts"]')
+        .click({timeout: 3000});
+      await page.waitForFunction(
+        () => window.packageApp.codeEditor.currentFile() === '/panel/model.ts',
+      );
+      await page.locator('[data-item-path="model.ts"]').click({timeout: 3000});
+      await page.getByText('Ready', {exact: true}).waitFor({timeout: 30_000});
+      release();
+      await page
+        .getByText('Packages installed', {exact: true})
+        .waitFor({timeout: 60_000});
+      assert.equal(
+        await page.evaluate(() => window.packageApp.codeEditor.currentFile()),
+        '/model.ts',
+      );
+      await page.getByText('Ready', {exact: true}).waitFor();
+    } finally {
+      release();
+    }
+  },
+);
+
+test(
+  'package failures appear once and clear after correcting the manifest',
+  {timeout: 120_000},
+  async t => {
+    assert.ok(process.env.CODE3D_TEST_URL);
+    const browser = await chromium.connectOverCDP(
+      process.env.CODE3D_CDP_URL ?? 'http://localhost:9222',
+    );
+    t.after(() => browser.close());
+    const context = await browser.newContext();
+    t.after(() => context.close());
+    const page = await context.newPage();
+    await exposePackageApp(page);
+    await page.route('**/src/project/default-project.ts*', route =>
+      route.fulfill({
+        contentType: 'text/javascript',
+        body:
+          'export const defaultProject = ' +
+          JSON.stringify({
+            files: [
+              {
+                path: '/model.ts',
+                source:
+                  "import {box} from '@code3d/core'; const x = box(3, 2, 2);",
+              },
+              {path: '/package.json', source: '{"private":true}'},
+            ],
+          }),
+      }),
+    );
+    await page.route(
+      'https://registry.npmjs.org/mistyped-code3d-package',
+      route => route.abort('failed'),
+    );
+    await page.goto(process.env.CODE3D_TEST_URL);
+    await page.getByText('Ready', {exact: true}).waitFor({timeout: 60_000});
+    await page
+      .getByRole('treeitem', {name: 'package.json', exact: true})
+      .click({button: 'right'});
+    await page
+      .getByRole('menuitem', {name: 'Install package', exact: true})
+      .click();
+    const dialog = page.getByRole('dialog', {
+      name: 'Install package',
+      exact: true,
+    });
+    await dialog
+      .getByRole('textbox', {name: 'Package', exact: true})
+      .fill('mistyped-code3d-package');
+    await dialog.getByRole('button', {name: 'Install', exact: true}).click();
+    const status = page.getByRole('status', {name: 'Package installation'});
+    await status.locator('[data-state="error"]').waitFor();
+    assert.match(
+      await status.innerText(),
+      /Unable to fetch npm package mistyped-code3d-package/,
+    );
+    assert.equal(
+      await page
+        .getByText(/Unable to fetch npm package mistyped-code3d-package/)
+        .count(),
+      1,
+    );
+    await page.evaluate(async () => {
+      await window.packageApp.codeEditor.openFile('/model.ts');
+      await window.packageApp.runModel();
+    });
+    assert.equal(
+      await page
+        .getByText(/Unable to fetch npm package mistyped-code3d-package/)
+        .filter({visible: true})
+        .count(),
+      1,
+    );
+    await page.evaluate(async () => {
+      const {codeEditor, runModel} = window.packageApp;
+      await codeEditor.openFile('/package.json');
+      codeEditor.editor.getModel()!.setValue('{"private":true}');
+      await codeEditor.openFile('/model.ts');
+      await runModel();
+    });
+    await page.getByText('Ready', {exact: true}).waitFor();
+    await status.locator('[data-state="ready"]').waitFor();
+    assert.equal(
+      await page
+        .getByText(/Failed to fetch|Unable to fetch npm package/)
+        .filter({visible: true})
+        .count(),
+      0,
+    );
+    assert.equal(
+      await page.locator('.project-status:not(.package-status)').isVisible(),
+      false,
+    );
+  },
+);
+
+test(
+  'Update dependencies refreshes the selected manifest lock and keeps navigation available',
+  {timeout: 150_000},
+  async t => {
+    assert.ok(process.env.CODE3D_TEST_URL);
+    const browser = await chromium.connectOverCDP(
+      process.env.CODE3D_CDP_URL ?? 'http://localhost:9222',
+    );
+    t.after(() => browser.close());
+    const context = await browser.newContext({
+      viewport: {width: 1440, height: 900},
+    });
+    t.after(() => context.close());
+    const page = await context.newPage();
+    page.setDefaultTimeout(20_000);
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await exposePackageApp(page);
+    const manifest =
+      JSON.stringify(
+        {
+          private: true,
+          type: 'module',
+          dependencies: {
+            'd3-delaunay': '^6.0.0',
+            '@types/d3-delaunay': '6.0.4',
+          },
+        },
+        null,
+        2,
+      ) + '\n';
+    await page.route('**/src/project/default-project.ts*', route =>
+      route.fulfill({
+        contentType: 'text/javascript',
+        body:
+          'export const defaultProject = ' +
+          JSON.stringify({
+            files: [
+              {
+                path: '/model.ts',
+                source:
+                  "import {box} from '@code3d/core'; export default box(3, 2, 2);",
+              },
+              {path: '/panel/package.json', source: manifest},
+              {path: '/panel/model.ts', source: modelSource},
+            ],
+          }),
+      }),
+    );
+    let offerUpdate = false;
+    await page.route('https://registry.npmjs.org/d3-delaunay', async route => {
+      const response = await route.fetch();
+      const packument = await response.json();
+      const version = offerUpdate ? '6.0.4' : '6.0.3';
+      await route.fulfill({
+        response,
+        json: {
+          ...packument,
+          versions: {[version]: packument.versions[version]},
+          'dist-tags': {latest: version},
+        },
+      });
+    });
+    await page.goto(process.env.CODE3D_TEST_URL + '/#/file/panel/model.ts');
+    await page.getByText('Ready', {exact: true}).waitFor({timeout: 90_000});
+    const readLock = () =>
+      page.evaluate(async () =>
+        new TextDecoder().decode(
+          await window.packageApp.projectFileSystem.readFile(
+            '/panel/code3d-lock.json',
+          ),
+        ),
+      );
+    const oldLock = await readLock();
+    assert.ok(
+      JSON.parse(oldLock).packages[
+        'https://registry.npmjs.org/d3-delaunay/6.0.3/'
+      ],
+    );
+    await page.evaluate(() =>
+      window.packageApp.codeEditor.openFile('/panel/package.json'),
+    );
+    const item = page.locator('[data-item-path="panel/package.json"]');
+    await item.click({button: 'right'});
+    const update = page.getByRole('menuitem', {
+      name: 'Update dependencies',
+      exact: true,
+    });
+    assert.equal(await update.isEnabled(), true);
+    offerUpdate = true;
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    t.after(() => release());
+    let started!: () => void;
+    const downloading = new Promise<void>(resolve => {
+      started = resolve;
+    });
+    await page.route(
+      'https://registry.npmjs.org/d3-delaunay/-/d3-delaunay-6.0.4.tgz',
+      async route => {
+        started();
+        await gate;
+        await route.continue();
+      },
+    );
+    await update.click();
+    await downloading;
+    assert.equal(
+      await readLock(),
+      oldLock,
+      'do not delete the previous lock before the update succeeds',
+    );
+    await item.click({button: 'right'});
+    assert.equal(
+      await update.isEnabled(),
+      false,
+      'manual package actions share their busy state',
+    );
+    assert.equal(
+      await page
+        .getByRole('menuitem', {name: 'Install package', exact: true})
+        .isEnabled(),
+      false,
+    );
+    await page.keyboard.press('Escape');
+    await page.locator('[data-item-path="model.ts"]').click();
+    await page.waitForFunction(
+      () => window.packageApp.codeEditor.currentFile() === '/model.ts',
+    );
+    assert.equal(
+      await page.evaluate(
+        () => window.packageApp.codeEditor.editor.getRawOptions().readOnly,
+      ),
+      false,
+    );
+    await page.evaluate(() => {
+      const editor = window.packageApp.codeEditor.editor;
+      editor.setValue(
+        editor.getValue().replace('box(3, 2, 2)', 'box(4, 2, 2)'),
+      );
+    });
+    await page.waitForFunction(async () =>
+      new TextDecoder()
+        .decode(await window.packageApp.projectFileSystem.readFile('/model.ts'))
+        .includes('box(4, 2, 2)'),
+    );
+    release();
+    await page
+      .getByText('Dependencies updated', {exact: true})
+      .waitFor({timeout: 90_000});
+    assert.equal(
+      await page.evaluate(() => window.packageApp.codeEditor.currentFile()),
+      '/model.ts',
+    );
+    const newLock = JSON.parse(await readLock());
+    assert.ok(
+      newLock.packages['https://registry.npmjs.org/d3-delaunay/6.0.4/'],
+    );
+    assert.equal(
+      newLock.packages['https://registry.npmjs.org/d3-delaunay/6.0.3/'],
+      undefined,
+    );
+    assert.equal(
+      await page.evaluate(async () =>
+        new TextDecoder().decode(
+          await window.packageApp.projectFileSystem.readFile(
+            '/panel/package.json',
+          ),
+        ),
+      ),
+      manifest,
+    );
+    await page.evaluate(() =>
+      window.packageApp.codeEditor.openFile('/panel/code3d-lock.json'),
+    );
+    assert.ok(
+      JSON.parse(
+        await page.evaluate(() =>
+          window.packageApp.codeEditor.editor.getValue(),
+        ),
+      ).packages['https://registry.npmjs.org/d3-delaunay/6.0.4/'],
+    );
+    await page.evaluate(() =>
+      window.packageApp.codeEditor.openFile('/panel/model.ts'),
+    );
+    await page.getByText('Ready', {exact: true}).waitFor({timeout: 90_000});
+    await page
+      .locator('[data-item-path="panel/model.ts"]')
+      .click({button: 'right'});
+    assert.equal(
+      await update.count(),
+      0,
+      'ordinary source files do not offer dependency updates',
+    );
+    await page.keyboard.press('Escape');
     assert.deepEqual(errors, []);
   },
 );

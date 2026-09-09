@@ -103,10 +103,10 @@ export async function createTestProjectCompiler(server: AppTestServer) {
 }
 
 export async function packageTestLanguage(server: AppTestServer) {
-  const {loadProjectLanguage} = await server.ssrLoadModule<
+  const {ProjectLanguageLoader} = await server.ssrLoadModule<
     typeof import('../src/project/project-language.ts')
   >('/src/project/project-language.ts');
-  return loadProjectLanguage(packageTestFiles, {
+  return new ProjectLanguageLoader(packageTestFiles).load({
     files: [
       {
         path: '/model.ts',
