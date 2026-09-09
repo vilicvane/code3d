@@ -1034,6 +1034,34 @@ package privately caches deterministic thread B-Rep data in a bounded LRU, readi
 an independently owned shape in the current kernel for each invocation. This
 avoids caching disposable model objects or retaining native handles across kernels.
 
+### 4c.1. Parallel snapshot queries — implemented
+
+[#80](https://github.com/vilicvane/code3d/issues/80) retains synchronous author
+execution and dynamic relation solving, then collects real bounds/mesh queries
+from completed geometry, topology selections and solved assembly placements.
+A geometry batch restores one binary input and emits each completed query result.
+One coordinator owns the memory LRU and OPFS; cache hits skip dispatch and shared
+artifact keys are deduplicated before scheduling. Auxiliary runtimes own only
+in-flight native geometry, never independent 2 GiB historical caches.
+
+The pool uses up to four compute Workers according to available CPUs. It prioritizes
+estimated expensive batches, refines costs from measured runs and dynamically
+feeds idle workers. Global native allocations, transferred inputs and scheduling
+metadata join the existing soft cache budget, with reduced admission under pressure.
+Cancellation retains completed results, terminates unresponsive compute workers
+after a two-second grace period, and prevents obsolete revisions from committing.
+Worker failure retries only unfinished queries once; runtime invalidation and
+project disposal release the entire pool.
+
+Local and remote mesh generation consume the same binary input because BinTools
+normalization can alter planar Delaunay diagonal ties. Mesh generation therefore
+also leaves original model geometry untouched. Native transforms own and release
+their builders, returned handles and temporary values explicitly; scaled topology
+queries borrow rather than consume their inputs. Analytic bounds keep their existing
+semantics; fresh native measurements retain the documented few-ULP tolerance.
+Current implementation fingerprints invalidate old artifacts without format migrations.
+Full author-operation DAG scheduling and native pthreads are outside this phase.
+
 ### 4d. Annotation-driven contextual tools
 
 Further parameter/provider design: [#7](https://github.com/vilicvane/code3d/issues/7).

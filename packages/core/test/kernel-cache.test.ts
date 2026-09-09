@@ -412,3 +412,22 @@ test('memory pressure during evaluation evicts only unused history', () => {
   });
   assert.equal(cache.kernelOperationCacheStats().entries, 2);
 });
+
+test('auxiliary worker memory trims shared history while preserving both active working sets', () => {
+  evaluate(() => primitive(0));
+  evaluate(() => primitive(1));
+  const end = cache.beginKernelOperationEvaluation();
+  try {
+    primitive(2);
+    cache.setKernelExternalBytes(5000);
+    assert.equal(cache.kernelOperationCacheStats().historicalEntries, 0);
+    assert.equal(cache.kernelOperationCacheStats().externalBytes, 5000);
+    assert.equal(primitive(1).value.instance, 'use');
+    assert.equal(primitive(2).value.instance, 'use');
+  } finally {
+    end();
+  }
+  cache.setKernelExternalBytes(0);
+  assert.equal(cache.kernelOperationCacheStats().externalBytes, 0);
+  assert.equal(cache.kernelOperationCacheStats().maximumBytes, 4096);
+});
