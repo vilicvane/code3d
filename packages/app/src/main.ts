@@ -156,11 +156,11 @@ if (!app) {
 app.innerHTML = `
   <div class="shell">
     <header class="topbar">
-      <div class="brand">
+      <a class="brand" href="https://www.code3d.org/" target="_blank" rel="noopener noreferrer" aria-label="Code3D home (opens in a new tab)">
         <span class="brand-mark" aria-hidden="true">${brandMark}</span>
         <span>Code3D</span>
         <span class="prototype-tag">prototype 01</span>
-      </div>
+      </a>
       <div class="topbar-actions">
         <button class="quiet-button" id="retry-save-button" type="button" hidden>Retry saving</button>
         <span class="project-location" id="project-location"></span>
