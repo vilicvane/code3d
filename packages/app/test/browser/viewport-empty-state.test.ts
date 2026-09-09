@@ -23,6 +23,7 @@ after(async () => browser?.close());
 async function open(
   t: TestContext,
   source = '// Choose a preview',
+  state: 'ready' | 'error' = 'ready',
 ): Promise<Page> {
   const context = await browser.newContext({
     viewport: {width: 1400, height: 900},
@@ -50,7 +51,9 @@ async function open(
     });
   });
   await page.goto(process.env.CODE3D_TEST_URL!);
-  await page.getByText('Ready', {exact: true}).waitFor({timeout: 40_000});
+  await page
+    .locator(`#viewport-status[data-state="${state}"]`)
+    .waitFor({timeout: 40_000});
   return page;
 }
 
@@ -102,6 +105,84 @@ async function expectEmpty(page: Page): Promise<void> {
     undefined,
   );
 }
+
+test('a failed tool call reveals the viewport before any geometry has been rendered', async t => {
+  const page = await open(
+    t,
+    "import {box} from '@code3d/core';\nbox(0);",
+    'error',
+  );
+  await expectEmpty(page);
+  await select(page, 'box(0)');
+  const x = page.locator('[data-parameter=x]');
+  await x.waitFor();
+  assert.equal(await x.inputValue(), '0');
+  assert.equal(await x.isEnabled(), true);
+  assert.equal(await page.locator('#viewport-empty-state').isVisible(), false);
+  assert.equal(await page.locator('.viewport-canvas').isVisible(), true);
+  assert.equal(await page.locator('.viewport-mode').isVisible(), true);
+  assert.equal(
+    await page.evaluate(() =>
+      window.emptyViewportApp.viewport.hasRenderableGeometry(),
+    ),
+    false,
+  );
+  await x.fill('10');
+  await x.press('Enter');
+  await page.locator('#viewport-status[data-state=ready]').waitFor();
+  assert.equal(
+    await page.evaluate(() =>
+      window.emptyViewportApp.viewport.hasRenderableGeometry(),
+    ),
+    true,
+  );
+});
+
+test('a fresh incomplete primitive previews defaults without filling source or relaxing its signature', async t => {
+  const source = "import {box} from '@code3d/core';\nbox();";
+  const page = await open(t, source);
+  await select(page, 'box()');
+  const x = page.locator('[data-parameter=x]');
+  await x.waitFor();
+  assert.equal(await page.locator('#viewport-empty-state').isVisible(), false);
+  assert.equal(
+    await page.evaluate(() =>
+      window.emptyViewportApp.viewport.hasRenderableGeometry(),
+    ),
+    true,
+  );
+  assert.equal(
+    await page.evaluate(() =>
+      window.emptyViewportApp.codeEditor.hasLanguageError(),
+    ),
+    true,
+  );
+  for (const name of ['x', 'y', 'z']) {
+    const input = page.locator(`[data-parameter=${name}]`);
+    assert.equal(await input.inputValue(), '');
+    assert.equal(await input.getAttribute('placeholder'), '10');
+    assert.equal(await input.isEnabled(), name === 'x');
+  }
+  await x.focus();
+  await x.press('Enter');
+  assert.equal(
+    await page.evaluate(() =>
+      window.emptyViewportApp.codeEditor.editor.getValue(),
+    ),
+    source,
+  );
+  await x.fill('10');
+  await x.press('Tab');
+  await page.waitForFunction(
+    () => (document.activeElement as HTMLElement)?.dataset.parameter === 'y',
+  );
+  assert.match(
+    await page.evaluate(() =>
+      window.emptyViewportApp.codeEditor.editor.getValue(),
+    ),
+    /box\(10\)/,
+  );
+});
 
 test('the initial hint disappears after previewing and moving the cursor preserves the last 3D view', async t => {
   const page = await open(t);
@@ -202,8 +283,10 @@ test('creating an empty file after a 3D preview shows the hint and switching fil
     const app = window.emptyViewportApp;
     app.previousModule = app.viewport['module'];
   });
-  page.once('dialog', dialog => dialog.accept('/new.ts'));
   await page.getByRole('button', {name: 'New file', exact: true}).click();
+  const dialog = page.getByRole('dialog', {name: 'New file', exact: true});
+  await dialog.getByRole('textbox', {name: 'Name'}).fill('new.ts');
+  await dialog.getByRole('button', {name: 'Create', exact: true}).click();
   await page.waitForFunction(
     () =>
       window.emptyViewportApp.codeEditor.currentFile() === '/new.ts' &&

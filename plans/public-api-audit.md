@@ -159,10 +159,13 @@ screws 也已有具体用途的公开属性：`ISO4762.specifications` 及其规
   把 Coil 列为实体原语。可由其他原语组合不构成排除依据。
 - `@code3d.param` 直接标注公开函数变量，支持调用点 panel 和包声明文件；
   不为 primitive factory 扩展 `@code3d.arguments`。
-- 可选数值参数的面板默认值由 `@code3d.param` 的 `default` 字段静态描述，
+- 数值参数的面板默认值由 `@code3d.param` 的 `default` 字段静态描述，
   源码与已发布 `.d.ts` 共用解析。省略实参时以 placeholder 展示，主动输入才
   写入显式实参；实际运行默认值由函数实现决定，作者负责保持两者一致。
-  具体规则见 [TOOLING.md](../TOOLING.md)，实现跟踪在 [#29](https://github.com/vilicvane/code3d/issues/29)。
+  必填签名同样可描述默认值；内置标量尺寸图元保留必填公开重载，在运行时为省略或
+  undefined 实参提供默认值，显式非法值仍报错。
+  具体规则见 [TOOLING.md](../TOOLING.md)，实现跟踪在 [#29](https://github.com/vilicvane/code3d/issues/29)
+  和 [#92](https://github.com/vilicvane/code3d/issues/92)。
 - 公共 API 的职责或签名发生设计调整时，先明确说明改动、需求依据和代价。
 
 ## 审阅结论

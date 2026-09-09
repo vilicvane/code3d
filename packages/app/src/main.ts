@@ -2763,7 +2763,9 @@ function setViewportStatus(
 
 function refreshViewportEmptyState(): void {
   hasPreviewedTarget ||=
-    viewport.hasRenderableGeometry() || sketchEditor.hasTarget;
+    viewport.hasRenderableGeometry() ||
+    viewport.sourceEvaluation() !== undefined ||
+    sketchEditor.hasTarget;
   const empty = !hasPreviewedTarget;
   viewportHost.dataset.empty = String(empty);
   viewportEmptyState.setVisible(

@@ -305,14 +305,10 @@ function validateParameterAnnotation(
   }
   const parameter = parameters[index];
   if (value.default !== undefined) {
-    if (
-      isToolSelectionKind(kind) ||
-      !parameter.optional ||
-      !parameter.numeric
-    ) {
+    if (isToolSelectionKind(kind) || !parameter.numeric) {
       throw annotationError(
         annotation,
-        `@code3d.param ${name} default requires an optional numeric parameter.`,
+        `@code3d.param ${name} default requires a numeric parameter.`,
       );
     }
     if (

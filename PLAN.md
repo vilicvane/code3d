@@ -1112,7 +1112,7 @@ not approval to predeclare additional parameter kinds.
   the fragment, then join annotation and ordinary source parents without
   exposing generated helper code.
 - Use one semantic `kind` discriminator for value and selectable parameters.
-  Function implementations own runtime defaults. Optional numeric parameters
+  Function implementations own runtime defaults. Required and optional numeric parameters
   display defaults for omitted arguments through explicit `@code3d.param`
   `default` metadata, shared by source and emitted declarations
   (see [#29](https://github.com/vilicvane/code3d/issues/29)).
@@ -1121,6 +1121,11 @@ not approval to predeclare additional parameter kinds.
   the implementation. Resolve effective selections, environment-dependent steps,
   display ranges, units, and other presentation policy from the reached tool
   context and current environment.
+  Built-in dimension primitives retain required public signatures while their
+  implementations supply defaults for omitted/undefined arguments; explicit
+  invalid values still fail validation. A focused source evaluation dismisses
+  the initial viewport hint even without geometry, keeping error-recovery tools
+  accessible (see [#92](https://github.com/vilicvane/code3d/issues/92)).
 - Recognize only callable `@code3d.param` and design `@code3d.arguments`
   annotations. Numeric variables carry no annotation metadata: resolve their
   editable source without inheriting labels, units, kinds, bounds, or steps

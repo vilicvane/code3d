@@ -78,6 +78,34 @@ export const plate = rectangle(30, 20).extrude(3).fillet(0.5);
 export const pin = extrude(circle(2), -10);
 ```
 
+## Runtime defaults while editing
+
+The dimension-based primitives below keep their required TypeScript parameters,
+but their implementations supply defaults for omitted or `undefined` arguments.
+For example, `box()` previews a 10 × 10 × 10 box, while the editor still reports
+the missing arguments; `box(20)` previews 20 × 10 × 10. Finish the arguments to
+make the source type-correct. These defaults also apply in ordinary JavaScript
+execution and do not depend on the App.
+
+| Function         | Runtime defaults, in parameter order |
+| ---------------- | ------------------------------------ |
+| `box`            | `10, 10, 10`                         |
+| `cylinder`       | `5, 10`                              |
+| `sphere`         | `5`                                  |
+| `frustum`        | `5, 3, 10`                           |
+| `regularPrism`   | `5, 10, 6, 0`                        |
+| `tube`           | `5, 3, 10`                           |
+| `coil`           | `5, 1, 3, 3`                         |
+| `circle`         | `5`                                  |
+| `ellipse`        | `5, 3`                               |
+| `rectangle`      | `10, 10`                             |
+| `regularPolygon` | `5, 6, 0`                            |
+
+Explicit arguments remain subject to their normal validation: `box(0)`, for
+example, still reports an error. The parameter panel shows omitted defaults as
+placeholders and only writes arguments when you edit them. See
+[parameter defaults](../../guides/model-tools/#describe-an-omitted-arguments-default).
+
 ## Editable sketch regions
 
 Select a `sketch([...])` expression or variable in the App to open its 2D editor.

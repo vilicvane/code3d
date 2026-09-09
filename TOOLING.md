@@ -227,11 +227,16 @@ tooling 从公开声明读取注释，并从 TypeScript 实际调用签名解析
 具名函数与方法的重载仍优先使用匹配签名上的注释。primitive factory 不额外提供
 `@code3d.arguments` 入口；独立预览使用普通示例调用。
 
-可选数值参数的 `@code3d.param` 可用 `default: 60` 描述省略实参时的面板
+数值参数的 `@code3d.param` 可用 `default: 60` 描述省略实参时的面板
 placeholder；源码与已发布 `.d.ts` 使用同一静态解析路径。默认值接受有限数值
 字面量，count 必须为整数，且满足参数 constraints；静态校验与面板编辑共用数值
 规则。函数参数初始化器只决定实际运行行为，不读取其默认值，也不把 annotation
 注入非交互运行时；作者负责保持描述与实现一致。
+
+必填与可选参数都可描述默认值；`default` 不改变签名的可选性。内置标量尺寸图元
+用必填公开重载保留 TypeScript 缺参诊断，实现在省略或 undefined 时提供运行时默认值，
+普通运行与 App 预览一致。显式非法值仍按原约束报错。源码已选中的工具调用即使
+没有生成几何也应退出初始空视图，保持参数工具可见。见 [#92](https://github.com/vilicvane/code3d/issues/92)。
 
 默认 placeholder 仅用于源码确实省略的实参。已有实参（包括显式 undefined、
 求值为 undefined 的表达式和求值失败）维持原展示。所有连续省略参数均可展示
