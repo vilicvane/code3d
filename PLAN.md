@@ -293,6 +293,17 @@ implementation context and historical outcomes, not a competing work queue.
   Successful execution without model output is a normal empty preview, including
   blank files, comments, imports and helper declarations. Only actual compilation
   or evaluation failures produce errors. See [#101](https://github.com/vilicvane/code3d/issues/101).
+- Loaded editor documents supply source overrides, not the model's analysis scope.
+  Model execution and tooling inspect the entry file, any explicitly located design
+  invocation, and their actual source dependencies. Opening unrelated files cannot
+  add design contexts or diagnostics; imported files need not have an editor model.
+  The editor retains its incremental language and package caches independently.
+- Preview state owns the active file, source version, request generation and last
+  result. Switching files clears the previous scene immediately, including when
+  the new file fails to compile. Preparation failures within the same file retain
+  the last display with stale editing disabled; a successful empty result clears
+  it. Superseded results and failures cannot update the active preview. Package
+  installation progress and errors remain independent of model diagnostics.
 - Before the first preview, App shows **Select to preview** with an animated
   text selection. Each round starts with `model`, then `sketch`, then an explicit
   list of transformation and composition/Boolean API names in shuffled order.

@@ -1629,11 +1629,10 @@ test('the documented function offers parameter tools and design-time arguments',
     ['10, 5, 6', '14, 7, 8'],
   );
   for (const context of module.designArguments) {
-    const preview = await compileProject(
-      {files: [defined(file)]},
-      rootPath,
-      context.id,
-    );
+    const preview = await compileProject({files: [defined(file)]}, rootPath, {
+      file: context.functionRef.file,
+      id: context.id,
+    });
     assert.equal(preview.diagnostic, undefined);
     assert.equal(preview.activeDesignContextId, context.id);
   }

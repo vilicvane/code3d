@@ -105,10 +105,10 @@ export function resolveProjectTooling(
   language: ProjectLanguage,
 ): ProjectToolingIndex {
   const sources = new Map<string, string>();
-  project.files.forEach(file =>
+  language.files.forEach(file =>
     sources.set(normalizeProjectPath(file.path), file.source),
   );
-  language.files.forEach(file =>
+  project.files.forEach(file =>
     sources.set(normalizeProjectPath(file.path), file.source),
   );
   sources.set('/lib.es5.d.ts', es5Library);
@@ -148,9 +148,7 @@ export function resolveProjectTooling(
       ),
   };
   const program = ts.createProgram({
-    rootNames:
-      language.rootPaths ??
-      project.files.map(file => normalizeProjectPath(file.path)),
+    rootNames: project.files.map(file => normalizeProjectPath(file.path)),
     options: language.compilerOptions,
     host,
   });

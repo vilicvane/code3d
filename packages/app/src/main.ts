@@ -21,11 +21,16 @@ import {compilationPhaseLabels} from './model/compilation-progress';
 import type {
   DesignArgumentContext,
   DesignContext,
+  DesignInvocation,
   EdgeArgumentTarget,
   ModelModule,
   TopologySelectionScope,
 } from './model/compiler';
 import {ModelDiagnosticError, type ModelDiagnostic} from './model/diagnostic';
+import {
+  ModelPreviewState,
+  type ModelPreviewRequest,
+} from './model/preview-state';
 import {viewportDiagnostic} from './model/viewport-diagnostic';
 import {originDecoration} from './model/origin-decorations';
 import {sourceParameterAt} from './model/tool-arguments';
@@ -288,8 +293,7 @@ const viewportHost = requiredElement('viewport-host');
 const viewportEmptyState = new ViewportEmptyState(
   requiredElement('viewport-empty-state'),
 );
-let hasPreviewedTarget = false;
-let previewFile: string | undefined;
+const previewState = new ModelPreviewState();
 const errorBar = requiredElement('error-bar');
 const designArgumentsCount = requiredElement('design-arguments-count');
 const designArgumentsFunction = requiredElement('design-arguments-function');
@@ -573,15 +577,9 @@ async function runPackageOperation(
       });
   }
 }
-let currentModule: ModelModule | null = null;
-let currentModuleSourceVersion: number | undefined;
-let modelStatus: 'ready' | 'error' = 'ready';
-let currentDiagnostic: ModelDiagnostic | undefined;
-let currentWarnings: readonly ModelDiagnostic[] = [];
 let sourcePreviewDiagnostic: ModelDiagnostic | undefined;
 let compileTimer: number | undefined;
 let completionPreviewTimer: number | undefined;
-let runRevision = 0;
 let positionToolSession: ToolSession | undefined;
 let positionToolInterruptedCompile = false;
 let edgeSelectionTool: EdgeSelectionTool | undefined;
@@ -594,7 +592,7 @@ const toolParameterCommitTimers = new Map<string, number>();
 let fileOpenVersion = 0;
 let preferredEvaluationContextId: string | undefined;
 let selectedDesignContextId: string | undefined;
-let selectedDesignInvocation: Exclude<DesignContext, string> | undefined;
+let selectedDesignInvocation: DesignInvocation | undefined;
 let pendingAgentFollow: AgentUpdate | undefined;
 let compilingDesignContextId: string | undefined;
 let activeCompletionFocus: CompletionFocus | undefined;
@@ -703,9 +701,9 @@ const modelExportDialog = new ModelExportDialog(viewportHost, () => {
     export: async options => {
       if (
         !scene ||
-        currentModule !== scene.module ||
+        previewState.module !== scene.module ||
         sourceVersion !== codeEditor.sourceVersion() ||
-        currentModuleSourceVersion !== sourceVersion
+        previewState.sourceVersion !== sourceVersion
       ) {
         throw new Error(
           'The model has changed or is only a preview. Run the model and reopen export.',
@@ -839,11 +837,11 @@ codeEditor.onCursorOffset(({file, offset}) => {
     undefined,
     preferredEvaluationContextId,
   );
-  if (!matched && currentModule) {
-    const designContext = designContextAt(currentModule, file, offset);
+  if (!matched && previewState.module) {
+    const designContext = designContextAt(previewState.module, file, offset);
     if (
       designContext &&
-      currentModule.activeDesignContextId !== designContext.id
+      previewState.module.activeDesignContextId !== designContext.id
     ) {
       activateDesignContext(designContext.id);
       return;
@@ -861,8 +859,8 @@ codeEditor.onCursorOffset(({file, offset}) => {
   const occurrence = viewport.getSelected();
   if (occurrence) {
     selectOccurrence(occurrence, false);
-  } else if (currentModule) {
-    renderDesignArguments(currentModule);
+  } else if (previewState.module) {
+    renderDesignArguments(previewState.module);
   }
   syncContextualTool(matched);
 });
@@ -876,6 +874,7 @@ codeEditor.onEditorActivation(cursor => {
     );
 });
 codeEditor.onActiveFile((path, reason) => {
+  activatePreviewFile(reason === 'reset');
   pendingAgentFollow = undefined;
   selectedDesignInvocation = undefined;
   finishContextualTool();
@@ -1285,44 +1284,31 @@ function showProjectIssue(error: unknown): void {
 function activeDesignContext(
   cursor = codeEditor.cursorSource(),
 ): DesignContext | undefined {
-  return selectedDesignInvocation
-    ? {...selectedDesignInvocation, ...cursor}
-    : selectedDesignContextId;
+  if (selectedDesignInvocation) return {...selectedDesignInvocation, ...cursor};
+  const context = previewState.module?.designArguments.find(
+    context => context.id === selectedDesignContextId,
+  );
+  return context && {file: context.functionRef.file, id: context.id};
 }
 
 async function runModel(designContext = activeDesignContext()): Promise<void> {
   window.clearTimeout(compileTimer);
   compileTimer = undefined;
   viewport.restoreTransientPreview();
-  const revision = ++runRevision;
   const sourceVersion = codeEditor.sourceVersion();
-  const file = codeEditor.currentFile();
-  if (!file || !codeEditor.isModelFile(file)) {
+  activatePreviewFile();
+  const request = previewState.begin(sourceVersion);
+  const file = previewState.file;
+  if (!file) {
     compiler.cancel();
-    currentModule = null;
-    currentModuleSourceVersion = undefined;
-    currentDiagnostic = undefined;
-    currentWarnings = [];
-    sourcePreviewDiagnostic = undefined;
-    compilingDesignContextId = undefined;
-    codeEditor.setModelDiagnostics();
-    codeEditor.setDesignArguments([]);
-    codeEditor.trackSourceRefs([]);
-    viewport.renderModule(null);
-    previewFile = undefined;
-    hasPreviewedTarget = false;
-    renderElementsPanel();
-    renderDesignArguments(null);
-    modelStatus = 'ready';
     errorBar.hidden = true;
-    refreshViewportFeedback();
     restoreModelStatus();
     return;
   }
   const following =
     pendingAgentFollow?.kind === 'apply' ? pendingAgentFollow : undefined;
   const designContextId =
-    typeof designContext === 'string' ? designContext : undefined;
+    designContext && 'id' in designContext ? designContext.id : undefined;
   compilingDesignContextId = designContextId;
   setViewportStatus('busy', 'Updating model');
   if (designContextId) {
@@ -1338,25 +1324,8 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
       designContext,
       phase => setViewportStatus('busy', compilationPhaseLabels[phase]),
     );
-    if (
-      revision !== runRevision ||
-      sourceVersion !== codeEditor.sourceVersion()
-    ) {
-      return;
-    }
-    currentModule = nextModule;
-    currentModuleSourceVersion = sourceVersion;
-    modelStatus = nextModule.diagnostic ? 'error' : 'ready';
-    if (
-      !(await presentModelDiagnostic(
-        nextModule.diagnostic,
-        revision,
-        sourceVersion,
-        nextModule.warnings,
-      ))
-    ) {
-      return;
-    }
+    if (!previewState.isCurrent(request, codeEditor.sourceVersion())) return;
+    previewState.accept(request, nextModule);
     codeEditor.setDesignArguments(nextModule.designArguments);
     sketchEditor.retain(
       nextModule.diagnostic,
@@ -1377,26 +1346,20 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
     }
     const cursor = codeEditor.cursorSource();
     const matched = viewport.renderModule(
-      currentModule,
+      nextModule,
       selectedKey,
       cursor ? {...cursor, contextId: preferredEvaluationContextId} : undefined,
     );
-    if (previewFile !== file) {
-      previewFile = file;
-      // Reset after replacing the scene: callbacks while clearing it still
-      // observe the previous file's geometry and must not dismiss this hint.
-      hasPreviewedTarget = false;
-    }
     if (cursor) {
       if (!matched) {
         const designContext = designContextAt(
-          currentModule,
+          nextModule,
           cursor.file,
           cursor.offset,
         );
         if (
           designContext &&
-          currentModule.activeDesignContextId !== designContext.id
+          nextModule.activeDesignContextId !== designContext.id
         ) {
           activateDesignContext(designContext.id);
           return;
@@ -1410,7 +1373,7 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
       selectOccurrence(selected, false);
     } else {
       renderElementsPanel();
-      renderDesignArguments(currentModule);
+      renderDesignArguments(nextModule);
     }
     syncContextualTool();
     if (following && pendingAgentFollow === following) {
@@ -1422,71 +1385,82 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
       )
         viewport.setView(resolveRenderView(following.view));
     }
+    if (!(await presentModelDiagnostic(request))) return;
     restoreModelStatus();
   } catch (error) {
-    if (revision !== runRevision) {
-      return;
-    }
+    if (!previewState.isCurrent(request, codeEditor.sourceVersion())) return;
     compilingDesignContextId = undefined;
-    renderCurrentPanels();
-    modelStatus = 'error';
-    restoreModelStatus();
     const diagnostic =
       error instanceof ModelDiagnosticError ? error.diagnostic : undefined;
-    if (diagnostic) {
-      await presentModelDiagnostic(diagnostic, revision, sourceVersion);
-    } else {
-      currentDiagnostic = undefined;
-      currentWarnings = [];
-      codeEditor.setModelDiagnostics();
-      refreshViewportFeedback();
+    previewState.fail(diagnostic);
+    finishContextualTool();
+    sketchEditor.invalidate();
+    renderCurrentPanels();
+    if (!(await presentModelDiagnostic(request))) return;
+    if (!diagnostic) {
       errorBar.textContent =
         error instanceof Error ? error.message : String(error);
       errorBar.hidden = error instanceof PackageInstallationError;
     }
+    restoreModelStatus();
   }
 }
 
+function activatePreviewFile(reload = false): void {
+  const file = codeEditor.currentFile();
+  previewState.activate(
+    file && codeEditor.isModelFile(file) ? file : undefined,
+    () => {
+      compiler.cancel();
+      sourcePreviewDiagnostic = undefined;
+      compilingDesignContextId = undefined;
+      codeEditor.setModelDiagnostics();
+      codeEditor.setDesignArguments([]);
+      codeEditor.trackSourceRefs([]);
+      sketchEditor.hide();
+      viewport.renderModule(null);
+      renderElementsPanel();
+      renderDesignArguments(null);
+      errorBar.hidden = true;
+    },
+    reload,
+  );
+}
+
 async function presentModelDiagnostic(
-  diagnostic: ModelDiagnostic | undefined,
-  revision: number,
-  sourceVersion: number,
-  warnings: readonly ModelDiagnostic[] = [],
+  request: ModelPreviewRequest,
 ): Promise<boolean> {
+  const {diagnostic, warnings} = previewState;
   codeEditor.setModelDiagnostics([
     ...(diagnostic ? [diagnostic] : []),
     ...warnings,
   ]);
-  currentDiagnostic = diagnostic;
-  currentWarnings = warnings;
   refreshViewportFeedback();
   if (!diagnostic || diagnostic.sourceRef) {
     errorBar.hidden = true;
     return true;
   }
   const hasLanguageError = await codeEditor.hasLanguageError();
-  if (
-    revision !== runRevision ||
-    sourceVersion !== codeEditor.sourceVersion()
-  ) {
+  if (!previewState.isCurrent(request, codeEditor.sourceVersion()))
     return false;
+  errorBar.hidden = hasLanguageError;
+  if (!hasLanguageError) {
+    errorBar.textContent = [diagnostic.summary, diagnostic.details]
+      .filter(Boolean)
+      .join('\n');
   }
-  if (hasLanguageError) {
-    errorBar.hidden = true;
-    return true;
-  }
-  errorBar.textContent = [diagnostic.summary, diagnostic.details]
-    .filter(Boolean)
-    .join('\n');
-  errorBar.hidden = false;
   return true;
 }
 
 function activeViewportDiagnostic(): ModelDiagnostic | undefined {
   const scope = sketchEditor.diagnosticScope;
   return (
-    viewportDiagnostic(currentDiagnostic, sourcePreviewDiagnostic, scope) ??
-    [...currentWarnings]
+    viewportDiagnostic(
+      previewState.diagnostic,
+      sourcePreviewDiagnostic,
+      scope,
+    ) ??
+    [...previewState.warnings]
       .sort(
         (a, b) =>
           Number(!!b.relatedSketchIds?.includes(scope?.at(-1)?.id ?? '')) -
@@ -1501,7 +1475,7 @@ function refreshViewportFeedback(): void {
   const diagnostic = activeViewportDiagnostic();
   viewportDiagnosticStack.replaceChildren();
   viewportDiagnosticStack.hidden = !diagnostic;
-  if (viewportStatus.dataset.state !== 'busy') restoreModelStatus();
+  if (!previewState.busy) restoreModelStatus();
   if (!diagnostic) return;
 
   const item = document.createElement('section');
@@ -1525,10 +1499,10 @@ function refreshViewportFeedback(): void {
       !!diagnostic.relatedSketchIds?.length &&
       (!active || !diagnostic.relatedSketchIds.includes(active));
     button.disabled =
-      upstream || currentModuleSourceVersion !== codeEditor.sourceVersion();
+      upstream || previewState.sourceVersion !== codeEditor.sourceVersion();
     if (upstream) button.title = 'Open the owning sketch to apply this fix.';
     button.addEventListener('click', () => {
-      if (currentModuleSourceVersion !== codeEditor.sourceVersion()) {
+      if (previewState.sourceVersion !== codeEditor.sourceVersion()) {
         refreshViewportFeedback();
         return;
       }
@@ -1556,8 +1530,8 @@ function handleCompletionFocus(focus: CompletionFocus | undefined): void {
     return;
   }
 
-  if (currentModule) {
-    const match = completionPreviewTarget(currentModule, focus);
+  if (previewState.module) {
+    const match = completionPreviewTarget(previewState.module, focus);
     if (match) {
       if (
         viewport.previewCompletion(
@@ -1576,12 +1550,12 @@ function handleCompletionFocus(focus: CompletionFocus | undefined): void {
     return;
   }
 
-  runRevision += 1;
+  previewState.invalidate();
   compiler.cancel();
   window.clearTimeout(compileTimer);
   compileTimer = undefined;
   setViewportStatus('busy', `Rendering preview · ${focus.memberName}`);
-  const revision = runRevision;
+  const revision = previewState.revision;
   completionPreviewTimer = window.setTimeout(() => {
     completionPreviewTimer = undefined;
     void runCompletionPreview(focus, revision);
@@ -1612,7 +1586,7 @@ async function runCompletionPreview(
         ),
     );
     if (
-      revision !== runRevision ||
+      revision !== previewState.revision ||
       activeCompletionFocus !== focus ||
       preview.sourceVersion !== codeEditor.sourceVersion()
     ) {
@@ -1634,14 +1608,14 @@ async function runCompletionPreview(
     }
     restoreModelStatus();
   } catch {
-    if (revision === runRevision && activeCompletionFocus === focus) {
+    if (revision === previewState.revision && activeCompletionFocus === focus) {
       restoreModelStatus();
     }
   }
 }
 
 function resumeModelAfterCompletion(): void {
-  runRevision += 1;
+  previewState.invalidate();
   compiler.cancel();
   setViewportStatus('busy', 'Updating model');
   scheduleModelRun(180);
@@ -1663,7 +1637,7 @@ function requestModelUpdate(delay: number): void {
   viewport.restoreTransientPreview();
   renderElementsPanel(viewport.getSelected());
   setViewportStatus('busy', 'Updating model');
-  runRevision += 1;
+  previewState.invalidate();
   compiler.cancel();
   refreshViewportFeedback();
   if (codeEditor.currentFile()) scheduleModelRun(delay);
@@ -1688,13 +1662,13 @@ function activateDesignContext(contextId: string): void {
   selectedDesignInvocation = undefined;
   preferredEvaluationContextId = contextId;
   selectedDesignContextId = contextId;
-  void runModel(contextId);
+  void runModel();
 }
 
 function cancelPendingDesignCompile(): void {
   if (!compilingDesignContextId) return;
   compilingDesignContextId = undefined;
-  runRevision += 1;
+  previewState.invalidate();
   compiler.cancel();
   restoreModelStatus();
 }
@@ -1737,7 +1711,7 @@ function containsSourceRef(
 
 function selectOccurrence(occurrence: Occurrence, revealSource: boolean): void {
   renderElementsPanel(occurrence);
-  if (currentModule) renderDesignArguments(currentModule);
+  if (previewState.module) renderDesignArguments(previewState.module);
 
   if (revealSource) {
     const sourceRef = primarySource(occurrence.node);
@@ -1764,8 +1738,8 @@ function renderElementsPanel(occurrence?: Occurrence): void {
 }
 
 function drillToObjectSource(node: ModelSnapshotObject): void {
-  if (!currentModule) return;
-  const compiledSource = preferredObjectSource(currentModule, node);
+  if (!previewState.module) return;
+  const compiledSource = preferredObjectSource(previewState.module, node);
   if (!compiledSource) return;
   const sourceRef =
     codeEditor.resolveSourceRef(compiledSource) ?? compiledSource;
@@ -1873,29 +1847,30 @@ function designArgumentCall(context: DesignArgumentContext): string {
 function renderCurrentPanels(): void {
   const occurrence = viewport.getSelected();
   renderElementsPanel(occurrence);
-  if (!occurrence && currentModule) renderDesignArguments(currentModule);
+  if (!occurrence && previewState.module)
+    renderDesignArguments(previewState.module);
 }
 
 function syncContextualTool(sourceTargetFocused = true): void {
   const scope = viewport.sourceEvaluation();
   if (
     sourceTargetFocused &&
-    currentModule &&
-    currentModuleSourceVersion === codeEditor.sourceVersion() &&
+    previewState.module &&
+    previewState.sourceVersion === codeEditor.sourceVersion() &&
     scope?.evaluation.sketchIds?.[0]
   ) {
     sketchEditor.show(
       scope.evaluation.sketchIds[0],
-      currentModule.sketches,
+      previewState.module.sketches,
       scope.target.sourceRef,
     );
   } else if (
     (!sourceTargetFocused ||
-      currentModuleSourceVersion === codeEditor.sourceVersion()) &&
+      previewState.sourceVersion === codeEditor.sourceVersion()) &&
     !sketchEditor.retain(
-      currentDiagnostic,
+      previewState.diagnostic,
       codeEditor.cursorSource(),
-      currentModule?.sketches ?? new Map(),
+      previewState.module?.sketches ?? new Map(),
     )
   ) {
     sketchEditor.hide();
@@ -1913,7 +1888,7 @@ function syncContextualTool(sourceTargetFocused = true): void {
     previous.callId === scope.target.tool.callId &&
     previous.contextId === scope.evaluation.contextId &&
     previous.signature.id === scope.target.tool.signature.id;
-  if (currentModuleSourceVersion !== codeEditor.sourceVersion()) {
+  if (previewState.sourceVersion !== codeEditor.sourceVersion()) {
     if (previous && !continuesPrevious) finishContextualTool();
     return;
   }
@@ -2052,7 +2027,7 @@ function commitContextualToolParameter(
   if (invalid || !parameter.binding) return false;
   const appliedValue = tool.appliedValues.get(name);
   if (appliedValue !== undefined && Math.abs(value! - appliedValue) < 1e-9) {
-    return currentModuleSourceVersion !== codeEditor.sourceVersion();
+    return previewState.sourceVersion !== codeEditor.sourceVersion();
   }
   const intent = contextualParameterIntent(parameter);
   if (!intent) return false;
@@ -2725,7 +2700,7 @@ function interruptCompileForTool(): boolean {
   const scheduled = compileTimer !== undefined;
   const compiling = compiler.isCompiling();
   if (!scheduled && !compiling) return false;
-  runRevision += 1;
+  previewState.invalidate();
   window.clearTimeout(compileTimer);
   compileTimer = undefined;
   compiler.cancel();
@@ -2743,6 +2718,10 @@ function parameterIntent(target: ParameterTarget, value: number): ToolIntent {
 
 function handlePositionTool(event: TransformGizmoEvent): void {
   if (event.kind === 'begin') {
+    if (previewState.sourceVersion === undefined) {
+      viewport.cancelPositionTool();
+      return;
+    }
     positionToolSession?.cancel();
     positionToolInterruptedCompile = interruptCompileForTool();
     positionToolSession = toolEngine.begin(
@@ -2889,11 +2868,8 @@ function commitToolSession(
   intent: ToolIntent,
   options: ToolCommitOptions = {},
 ): boolean {
-  const compiledSourceVersion = currentModuleSourceVersion;
-  currentModuleSourceVersion = undefined;
-  const result = session.commit(intent, options);
+  const result = previewState.editSource(() => session.commit(intent, options));
   if (result.status !== 'committed') {
-    currentModuleSourceVersion = compiledSourceVersion;
     showToolIssue(result.reason);
     return false;
   }
@@ -3024,6 +3000,7 @@ function setViewportStatus(
   state: 'busy' | 'ready' | 'error',
   label: string,
 ): void {
+  previewState.busy = state === 'busy';
   viewportStatus.dataset.state = state;
   viewportStatusLabel.textContent = label;
   viewportStatus.setAttribute('aria-busy', String(state === 'busy'));
@@ -3031,15 +3008,14 @@ function setViewportStatus(
 }
 
 function refreshViewportEmptyState(): void {
-  hasPreviewedTarget ||=
+  previewState.observeTarget(
     viewport.hasRenderableGeometry() ||
-    viewport.sourceEvaluation() !== undefined ||
-    sketchEditor.hasTarget;
-  const empty = !hasPreviewedTarget;
-  viewportHost.dataset.empty = String(empty);
-  viewportEmptyState.setVisible(
-    empty && viewportStatus.dataset.state !== 'busy',
+      viewport.sourceEvaluation() !== undefined ||
+      sketchEditor.hasTarget,
   );
+  const empty = !previewState.hasPreviewedTarget;
+  viewportHost.dataset.empty = String(empty);
+  viewportEmptyState.setVisible(empty && !previewState.busy);
 }
 
 function restoreModelStatus(): void {
@@ -3049,7 +3025,7 @@ function restoreModelStatus(): void {
     ? diagnostic && diagnostic.severity !== 'warning'
       ? 'error'
       : 'ready'
-    : modelStatus;
+    : previewState.status;
   setViewportStatus(
     state,
     state === 'error'

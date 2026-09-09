@@ -49,7 +49,7 @@ test(
         response,
         body:
           (await response.text()) +
-          '\nwindow.followApp = {codeEditor, viewport, compiler, projectFileSystem, projectDirectory, get module(){return currentModule}};\n',
+          '\nwindow.followApp = {codeEditor, viewport, compiler, projectFileSystem, projectDirectory, get module(){return previewState.module}};\n',
       });
     });
     await page.goto(process.env.CODE3D_TEST_URL);
