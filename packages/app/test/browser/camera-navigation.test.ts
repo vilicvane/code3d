@@ -16,7 +16,7 @@ test(
     const {page, errors} = await openNavigationPage(t);
     await setSource(
       page,
-      "import {box} from '@code3d/core'; export default box(24, 6, 14).paint('#8ed5d1');",
+      "import {box} from '@code3d/core'; export default box(24, 6, 14).material('#8ed5d1');",
     );
     await page.evaluate(() => {
       const viewport = window.navigationApp.viewport;
@@ -113,7 +113,7 @@ test(
 
     await setSource(
       page,
-      "import {box} from '@code3d/core'; export default box(0.02, 0.04, 0.06).paint('#8ed5d1');",
+      "import {box} from '@code3d/core'; export default box(0.02, 0.04, 0.06).material('#8ed5d1');",
     );
     await page.evaluate(() => window.navigationApp.viewport.fit());
     const fitted = await cameraState(page);
@@ -149,7 +149,7 @@ test(
     const {page, errors} = await openNavigationPage(t);
     await setSource(
       page,
-      "import {box} from '@code3d/core'; export default box(24, 6, 14).paint('#8ed5d1');",
+      "import {box} from '@code3d/core'; export default box(24, 6, 14).material('#8ed5d1');",
     );
     await rotate(page);
     const before = await cameraState(page);
@@ -275,7 +275,7 @@ test(
   async t => {
     const {page, errors} = await openNavigationPage(t);
     const source =
-      "import {box} from '@code3d/core'; export default box(24, 6, 14).paint('#8ed5d1');";
+      "import {box} from '@code3d/core'; export default box(24, 6, 14).material('#8ed5d1');";
     await setSource(page, source);
     const initial = await cameraState(page);
     // An occurrence's local frame can differ from world axes inside an assembly.
@@ -405,7 +405,7 @@ test(
     const {page, errors} = await openNavigationPage(t);
     await setSource(
       page,
-      "import {box} from '@code3d/core'; export default box(24, 6, 14).paint('#8ed5d1');",
+      "import {box} from '@code3d/core'; export default box(24, 6, 14).material('#8ed5d1');",
     );
     const sampled = await page.evaluate(async () => {
       const viewport = window.navigationApp.viewport;

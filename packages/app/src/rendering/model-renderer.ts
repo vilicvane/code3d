@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import {parseModelColor} from '../model/model-color';
+import {createModelMaterial, disposeModelMaterial} from './model-material';
 import {orientImageCamera, type ImageView} from './image-camera';
 import type {
   ModelSnapshotObject,
@@ -7,15 +7,13 @@ import type {
   Transform,
 } from '@code3d/core/tooling';
 
-const unpaintedSurfaceColor = '#dde0dc';
-const unpaintedSurfaceOpacity = 0.68;
+const defaultSurfaceOpacity = 0.68;
 const boundaryColor = '#080a07';
 const boundaryOpacity = 0.72;
 
 export type ModelRenderMode = 'modeling' | 'render';
 
-type ModelMaterial =
-  THREE.MeshStandardMaterial | THREE.LineBasicMaterial | THREE.PointsMaterial;
+type ModelMaterial = THREE.Material;
 type ModelPrimitive =
   | THREE.Mesh<THREE.BufferGeometry, ModelMaterial>
   | THREE.Line<THREE.BufferGeometry, ModelMaterial>
@@ -36,11 +34,19 @@ function withRenderMaterial<T extends ModelPrimitive>(
   object: T,
   opacity = object.material.opacity,
 ): T {
-  const material = object.material.clone();
-  material.opacity = opacity;
-  material.transparent = opacity < 1;
-  material.depthWrite = opacity === 1;
-  material.polygonOffset = false;
+  const material = object.material;
+  const preview = material.clone();
+  if (opacity < material.opacity) {
+    preview.opacity = opacity;
+    preview.transparent = true;
+    preview.depthWrite = false;
+  }
+  if (object instanceof THREE.Mesh) {
+    preview.polygonOffset = true;
+    preview.polygonOffsetFactor = 1;
+    preview.polygonOffsetUnits = 1;
+  }
+  object.material = preview;
   renderMaterials.set(object, {object, material});
   return object;
 }
@@ -276,10 +282,8 @@ export function createRenderedModelNode(
     throw new Error(`OpenCascade solid ${node.name} has no renderable mesh.`);
   }
 
-  const paint =
-    node.color === undefined ? undefined : parseModelColor(node.color);
-  const color = paint?.rgb ?? unpaintedSurfaceColor;
-  const alpha = paint?.alpha ?? 1;
+  const material = createModelMaterial(node.material, node.kind);
+  const alpha = material.transparent ? material.opacity : 1;
   const container = new THREE.Group();
   if (node.kind === 'vertex') {
     const pointGeometry = new THREE.BufferGeometry();
@@ -287,55 +291,29 @@ export function createRenderedModelNode(
       'position',
       new THREE.BufferAttribute(node.mesh.topologyVertices, 3),
     );
-    const pointMaterial = new THREE.PointsMaterial({
-      color,
-      opacity: alpha,
-      transparent: alpha < 1,
-      depthWrite: alpha === 1,
-      size: 5,
-      sizeAttenuation: false,
-    });
     container.add(
-      withRenderMaterial(new THREE.Points(pointGeometry, pointMaterial)),
+      withRenderMaterial(new THREE.Points(pointGeometry, material)),
     );
     return container;
   }
   const edgeGeometry = createEdgeGeometry(node.mesh);
   if (node.kind === 'edge') {
     if (edgeGeometry) {
-      const curve = new THREE.LineSegments(
-        edgeGeometry,
-        new THREE.LineBasicMaterial({
-          color,
-          opacity: alpha,
-          transparent: alpha < 1,
-          depthWrite: alpha === 1,
-          toneMapped: false,
-        }),
-      );
+      const curve = new THREE.LineSegments(edgeGeometry, material);
+      if (material instanceof THREE.LineDashedMaterial)
+        curve.computeLineDistances();
       curve.userData.edgeGroups = node.mesh.edgeGroups;
       container.add(withRenderMaterial(curve));
+    } else {
+      disposeModelMaterial(material);
     }
     return container;
   }
 
-  const opacity = paint?.alpha ?? unpaintedSurfaceOpacity;
-  const material = new THREE.MeshStandardMaterial({
-    color,
-    transparent: opacity < 1,
-    opacity,
-    depthWrite: opacity === 1,
-    roughness: 0.52,
-    metalness: 0.12,
-    polygonOffset: true,
-    polygonOffsetFactor: 1,
-    polygonOffsetUnits: 1,
-    side: node.kind === 'face' ? THREE.DoubleSide : THREE.FrontSide,
-  });
   container.add(
     withRenderMaterial(
       new THREE.Mesh(createSurfaceGeometry(node.mesh), material),
-      alpha,
+      node.material === undefined ? defaultSurfaceOpacity : material.opacity,
     ),
   );
 
@@ -366,6 +344,8 @@ export function createSurfaceGeometry(mesh: RenderMesh): THREE.BufferGeometry {
     geometry.computeVertexNormals();
   }
   geometry.setIndex(new THREE.BufferAttribute(mesh.triangles, 1));
+  if (mesh.uvs)
+    geometry.setAttribute('uv', new THREE.BufferAttribute(mesh.uvs, 2));
   geometry.computeBoundingBox();
   geometry.computeBoundingSphere();
   return geometry;
@@ -392,8 +372,9 @@ export function disposeObject(object: THREE.Object3D): void {
       const materials = Array.isArray(child.material)
         ? child.material
         : [child.material];
-      materials.forEach(material => material.dispose());
-      renderMaterials.get(child)?.material.dispose();
+      materials.forEach(disposeModelMaterial);
+      const authored = renderMaterials.get(child)?.material;
+      if (authored) disposeModelMaterial(authored);
     }
   });
 }

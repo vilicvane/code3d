@@ -67,7 +67,7 @@ export async function measureRelationFocus() {
       ],
       [
         'painted bound',
-        "box(8,6,4).paint('#ff4d81')",
+        "box(8,6,4).material('#ff4d81')",
         'self.on( /* target */ base.up )',
         0.85,
       ],
@@ -304,11 +304,11 @@ export async function measureCompletedRelationFocus() {
   try {
     for (const reverse of [false, true]) {
       const source = `import {box,group} from '@code3d/core';
-export const old = box(20,10,20).paint('#ff4d81');
-export const base = box(20,10,20).paint('#ff4d81');
-export const front = box(20,10,20).paint('#ff4d81');
-export const other = box(2,2,2).originOffset(-30,0,0).paint('#ff4d81');
-const original = ${reverse ? 'group([box(2,2,2),box(1,1,1)])' : 'box(2,2,2)'}.paint('#ff4d81')
+export const old = box(20,10,20).material('#ff4d81');
+export const base = box(20,10,20).material('#ff4d81');
+export const front = box(20,10,20).material('#ff4d81');
+export const other = box(2,2,2).originOffset(-30,0,0).material('#ff4d81');
+const original = ${reverse ? 'group([box(2,2,2),box(1,1,1)])' : 'box(2,2,2)'}.material('#ff4d81')
   .relate(self => ${reverse ? 'old.on(self.up)' : 'self.on(old.up)'});
 export const part = original.relate( /* whole */ self => [
   ${reverse ? 'base.on(self.up)' : 'self.on(base.up)'},

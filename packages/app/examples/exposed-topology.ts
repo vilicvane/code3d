@@ -1,6 +1,6 @@
 import {box, cylinder, group} from '@code3d/core';
 
-const plate = box(32, 4, 24).paint('#8ed5d1');
+const plate = box(32, 4, 24).material('#8ed5d1');
 
 // Models become topology references; selected surfaces keep their identity.
 const base = group([plate]).expose({
@@ -18,7 +18,7 @@ const post = cylinder(3, 12).relate(self => self.on(base.body.up));
 const assembly = group([base, post]).expose({plate: base.body, post});
 
 // Chained references constrain the entire assembly.
-const floor = box(50, 2, 40).paint('#777e89');
+const floor = box(50, 2, 40).material('#777e89');
 const placed = assembly.relate(self => self.plate.on(floor.up));
 
 export default group([floor, placed]);

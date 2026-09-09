@@ -1,6 +1,7 @@
 {
   "extends": "../../../../tsconfig.base.json",
   "compilerOptions": {
+    "lib": ["ESNext", "DOM"],
     "composite": true,
     "rootDir": ".",
     "outDir": "../../bld/library",

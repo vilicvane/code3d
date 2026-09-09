@@ -23,15 +23,10 @@ export function applySourceEmphasis(
       ? child.material
       : [child.material];
     for (const material of materials) {
-      const surface = material instanceof THREE.MeshStandardMaterial;
-      if (!(
-        surface ||
-        material instanceof THREE.LineBasicMaterial ||
-        material instanceof THREE.PointsMaterial
-      ))
-        continue;
+      const surface = child instanceof THREE.Mesh;
       if (emphasis === 'context') {
-        material.color.set(surface ? '#788078' : '#a1aa9d');
+        if ('color' in material && material.color instanceof THREE.Color)
+          material.color.set(surface ? '#788078' : '#a1aa9d');
         child.renderOrder = surface ? -2 : -1;
       }
       // Ensure the model is see-through without compounding its own opacity.

@@ -41,7 +41,8 @@ test(
       const {browserPackageFiles} =
         await import('/src/project/browser-packages.ts');
       const {ModelViewport} = await import('/src/viewport.ts');
-      const {parseModelColor} = await import('/src/model/model-color.ts');
+      const {createModelMaterial, disposeModelMaterial} =
+        await import('/src/rendering/model-material.ts');
       const {elementSourceDecoration, relationSourceDecoration} =
         await import('/src/model/element-decorations.ts');
       const client = new ModelCompilerClient(browserPackageFiles);
@@ -57,9 +58,9 @@ test(
         ],
       });
       const source = `import {box, group, rectangle, line, point} from '@code3d/core';
-const base = box(30, 4, 20).paint('#48a');
-const part = box(10, 12, 8).paint('#f008').relate(self => self.on(/* target */ base.up).offset(0, 2, 0));
-const result = group([base, part, rectangle(8, 9), line([0, 0, 0], [30, 20, 0]).paint('#0f08'), point([8, 18, 5]).paint('#f80')]);
+const base = box(30, 4, 20).material('#48a');
+const part = box(10, 12, 8).material('#f008').relate(self => self.on(/* target */ base.up).offset(0, 2, 0));
+const result = group([base, part, rectangle(8, 9), line([0, 0, 0], [30, 20, 0]).material('#0f08'), point([8, 18, 5]).material('#f80')]);
 export default result;`;
       const module = await client.compile(
         {files: [{path: '/model.ts', source}]},
@@ -104,15 +105,16 @@ export default result;`;
           ...viewport['contextOccurrences'].values(),
         ]) {
           if (occurrence.node.kind === 'group') continue;
-          const paint =
-            occurrence.node.color === undefined
-              ? undefined
-              : parseModelColor(occurrence.node.color);
+          const material = createModelMaterial(
+            occurrence.node.material,
+            occurrence.node.kind,
+          ) as import('three').MeshStandardMaterial;
           bodies.set(occurrence.object.children[0].uuid, {
             kind: occurrence.node.kind,
-            color: paint?.rgb.slice(1) ?? 'dde0dc',
-            opacity: paint?.alpha ?? 1,
+            color: material.color.getHexString(),
+            opacity: material.opacity,
           });
+          disposeModelMaterial(material);
         }
         const sample: (typeof samples)[number] = {
           mode,
@@ -277,7 +279,7 @@ test(
     await page.getByText('Ready', {exact: true}).waitFor({timeout: 40_000});
     await setSource(
       page,
-      "import {box} from '@code3d/core';\nconst body = box(24, 30, 20).paint('#49a');\nbody;",
+      "import {box} from '@code3d/core';\nconst body = box(24, 30, 20).material('#49a');\nbody;",
     );
     const modeling = page.getByRole('button', {name: 'Modeling', exact: true});
     const render = page.getByRole('button', {name: 'Render', exact: true});
@@ -318,7 +320,7 @@ test(
     assert.notDeepEqual(after, before);
     await setSource(
       page,
-      "import {box} from '@code3d/core';\nconst changed = box(30, 20, 15).paint('#f008');\nchanged;",
+      "import {box} from '@code3d/core';\nconst changed = box(30, 20, 15).material('#f008');\nchanged;",
     );
     assert.equal(await render.getAttribute('aria-pressed'), 'true');
     assert.equal(

@@ -5,10 +5,10 @@ const baseHeight = 6;
 const lidHeight = 4;
 const base = box(24, baseHeight, 14)
   .originOffset(0, baseHeight / 2, 0)
-  .paint('#8ed5d1');
+  .material('#8ed5d1');
 const lid = box(16, lidHeight, 10)
   .originOffset(0, -lidHeight / 2, 0)
-  .paint('#d9b478');
+  .material('#d9b478');
 export const direct = group([base, lid]).expose({base, lid});
 
 // Select the member's center in assembly coordinates. Drag the origin arrows

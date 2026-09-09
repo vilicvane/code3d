@@ -47,6 +47,8 @@ import {
   type VertexModel,
 } from '@code3d/core';
 import {definePrimitive, replicad, type Shape3D} from '@code3d/core/replicad';
+import {MeshPhysicalMaterial, type Material} from '@code3d/core/three';
+import * as THREE from '@code3d/core/three';
 
 // @ts-expect-error The concrete runtime class is not part of the authoring API.
 import type {ModelObject} from '@code3d/core';
@@ -60,6 +62,14 @@ import type {Shape3D as RootShape3D} from '@code3d/core';
 import type {ModelObject as InternalModelObject} from '@code3d/core/bld/library/runtime.js';
 
 const solid = box(10, 5, 8);
+const material: Material = new MeshPhysicalMaterial({
+  roughness: 0.3,
+  clearcoat: 1,
+});
+solid.material(material);
+solid.material(new THREE.MeshStandardMaterial({color: '#f80'}));
+// @ts-expect-error Material classes belong to the explicit Three.js entry.
+import {MeshPhysicalMaterial as RootMeshPhysicalMaterial} from '@code3d/core';
 const sketchValue = sketch([
   ['point', 1, [0, 0]],
   ['point', 2, [10, 0]],
@@ -191,7 +201,7 @@ replicad.getOC();
 replicad.setOC(undefined);
 
 solid
-  .paint('#fff')
+  .material('#fff')
   .originOffset(1, 2, 3)
   .originOffset(0, 1, 0)
   .originVertex(1)
@@ -239,7 +249,7 @@ vertexModel
   .vertex(1);
 vertexModel.vertices();
 groupModel
-  .paint('#fff')
+  .material('#fff')
   .relate(self => self.on(solid.up))
   .expose({mount: solid.up})
   .relate(self => self.mount.on(solid.down));
@@ -312,7 +322,7 @@ solid.kind;
 // @ts-expect-error Runtime labels are not in the authoring whitelist.
 solid.name;
 // @ts-expect-error Render appearance state is not directly observable by authors.
-solid.color;
+solid.materialSnapshot;
 // @ts-expect-error Composition internals are available only through tooling.
 solid.children;
 // @ts-expect-error Anchor discriminators are not in the authoring whitelist.

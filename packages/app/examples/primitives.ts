@@ -27,33 +27,33 @@ const sphereScale = 0.8;
 const base = box(baseWidth, baseHeight, 34)
   .fillet(1)
   .originOffset(0, baseHeight / 2, 0)
-  .paint(neutral);
+  .material(neutral);
 
 const column = cylinder(4, columnHeight)
   .originOffset(10, -columnHeight / 2, 0)
-  .paint(accent);
+  .material(accent);
 
 const taperedColumn = frustum(5, 3, taperedHeight)
   .originOffset(-10, -taperedHeight / 2, 0)
-  .paint(secondary);
+  .material(secondary);
 
 const prism = regularPrism(4.5, prismHeight, 6, 30)
   .originOffset(0, -(taperedHeight + prismHeight / 2), 0)
-  .paint(accent);
+  .material(accent);
 
 const collar = tube(5.5, 4.5, collarHeight)
   .originOffset(10, -collarHeight / 2, 0)
-  .paint(secondary);
+  .material(secondary);
 
 const scaledSphere = sphere(sphereRadius)
   .scaled(sphereScale)
   .originOffset(0, -sphereRadius * sphereScale, 0)
-  .paint(secondary);
+  .material(secondary);
 
 // Use a relation for contact with the actual swept wire's lower bound.
 const winding = coil(5, 0.75, 4, 2.5)
   .relate(part => part.on(base.up).offset(0, 0, 10))
-  .paint(accent);
+  .material(accent);
 
 export const primitivesExample = group(
   [base, column, collar, taperedColumn, prism, scaledSphere, winding],

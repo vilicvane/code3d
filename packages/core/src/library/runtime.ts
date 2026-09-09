@@ -1,3 +1,5 @@
+import type {Material} from './three.js';
+import {captureModelMaterial, type ModelMaterialSnapshot} from './material.js';
 import {
   inspectShapeTopology,
   type TopologyInspection,
@@ -204,7 +206,7 @@ export type ModelOperationKind =
   | 'sketchFace'
   | 'extrude'
   | 'primitive'
-  | 'paint'
+  | 'material'
   | 'scaled'
   | 'originOffset'
   | 'originVertex'
@@ -298,6 +300,8 @@ export type RenderMesh = Readonly<{
   /** Tessellation vertices used by the triangle mesh. */
   vertices: Float32Array;
   normals: Float32Array;
+  /** Native face UVs normalized to each tessellated face's range. */
+  uvs?: Float32Array;
   triangles: Uint32Array;
   edges: Float32Array;
   /** OpenCascade topology vertices, aligned with vertexIds. */
@@ -319,8 +323,8 @@ export type ModelSnapshotObject = Readonly<{
   nodeId: string;
   kind: ModelKind;
   name: string;
-  /** Effective color, including recursive overrides from enclosing groups. */
-  color?: string;
+  /** Effective material, including recursive overrides from enclosing groups. */
+  material?: ModelMaterialSnapshot;
   children: readonly ModelSnapshotObject[];
   /** Placement used when this snapshot participates in a composition. */
   compositionTransform: Transform;
@@ -497,7 +501,7 @@ type ModelObjectInit<Kind extends ModelKind = ModelKind> = Readonly<{
   geometry?: ModelGeometry;
   geometryAnchor?: StoredElement;
   name?: string;
-  color?: string;
+  material?: ModelMaterialSnapshot;
   children?: readonly ModelObject[];
   assembly?: SolveContext;
   constraints?: readonly StoredConstraint[];
@@ -742,10 +746,10 @@ export interface ModelCapabilities<
    */
   rotate(x: number, y: number, z: number): ModelForFamily<Elements, Family>;
   /**
-   * Return a recolored value; a group overrides the color of every descendant.
-   * Accepts CSS names, hex colors (including alpha), and rgb()/rgba().
+   * Return a value with its entire material replaced, including every group descendant.
+   * Capture a Three.js material at assignment, or use a CSS color for the default material.
    */
-  paint(color: string): ModelForFamily<Elements, Family>;
+  material(material: Material | string): ModelForFamily<Elements, Family>;
 }
 
 export interface GeometryCapabilities<
@@ -1438,7 +1442,7 @@ export class ModelObject<
   /** @internal */
   readonly name: string;
   /** @internal */
-  readonly color?: string;
+  private readonly materialSnapshot?: ModelMaterialSnapshot;
   /** @internal */
   readonly children: readonly ModelObject[];
   /** @internal */
@@ -1480,7 +1484,7 @@ export class ModelObject<
     };
     this.meshTolerance = init.meshTolerance ?? 0.2;
     this.name = init.name ?? defaultModelNames[init.kind];
-    this.color = init.color;
+    this.materialSnapshot = init.material;
     this.children = init.children ?? [];
     this.assembly =
       init.assembly ??
@@ -1765,10 +1769,10 @@ export class ModelObject<
     };
   }
 
-  paint(color: string): RuntimeModel<Elements, Kind> {
+  material(material: Material | string): RuntimeModel<Elements, Kind> {
     return this.copy(
-      {color},
-      storedOperation('paint', [{model: this, role: 'source', index: 0}]),
+      {material: captureModelMaterial(material)},
+      storedOperation('material', [{model: this, role: 'source', index: 0}]),
     );
   }
 
@@ -1983,7 +1987,7 @@ export class ModelObject<
       kind: 'solid',
       name: 'Extrude',
       geometry,
-      color: this.color,
+      material: this.materialSnapshot,
       constraints: this.constraints,
       sourceRefs: this.sourceRefs,
       parameters: this.allParameters(),
@@ -2176,9 +2180,9 @@ export class ModelObject<
     meshCache: Map<AnyShape, RenderMesh>,
     solveContext: SolveContext,
     inComposition = false,
-    overrideColor?: string,
+    overrideMaterial?: ModelMaterialSnapshot,
   ): ModelSnapshotObject {
-    const color = overrideColor ?? this.color;
+    const material = overrideMaterial ?? this.materialSnapshot;
     const pose = this.solvePose(solveContext);
     const constraints = this.constraints.map(constraint =>
       this.constraintSnapshot(constraint, solveContext),
@@ -2193,7 +2197,7 @@ export class ModelObject<
       nodeId: this.nodeId,
       kind: this.kind,
       name: this.name,
-      color,
+      material,
       compositionTransform: toTransform(pose),
       transform: toTransform(inComposition ? pose : identityRigidTransform),
       constraints,
@@ -2219,7 +2223,7 @@ export class ModelObject<
       return {
         ...common,
         children: this.children.map(child =>
-          child.snapshotNode(meshCache, childContext, true, color),
+          child.snapshotNode(meshCache, childContext, true, material),
         ),
       };
     }
@@ -2307,7 +2311,7 @@ export class ModelObject<
       kind: 'solid',
       name: 'Loft',
       geometry,
-      color: this.color,
+      material: this.materialSnapshot,
       constraints: this.constraints,
       sourceRefs: inputs.flatMap(input => input.sourceRefs),
       parameters: uniqueParameters(
@@ -2342,7 +2346,7 @@ export class ModelObject<
         geometryAnchor: this.geometryAnchor,
         geometry: evaluation.geometry,
         name: this.name,
-        color: this.color,
+        material: this.materialSnapshot,
         constraints: this.constraints,
         sourceRefs: [this, ...others].flatMap(model => model.sourceRefs),
         parameters: uniqueParameters(
@@ -3074,7 +3078,7 @@ export class ModelObject<
       geometry: this.geometry,
       geometryAnchor: this.geometryAnchor,
       name: this.name,
-      color: this.color,
+      material: this.materialSnapshot,
       children: this.children,
       assembly: this.assembly,
       constraints: this.constraints,
@@ -4032,6 +4036,7 @@ function renderMesh(
       return {
         vertices: new Float32Array(surface.vertices),
         normals: new Float32Array(surface.normals),
+        uvs: meshUVs(shape, surface.vertices.length / 3),
         triangles: new Uint32Array(surface.triangles),
         edges: new Float32Array(wire.lines),
         topologyVertices: vertexData.positions,
@@ -4051,6 +4056,64 @@ function renderMesh(
   ).value;
   cache.set(shape, mesh);
   return mesh;
+}
+
+function meshUVs(
+  shape: AnyShape,
+  vertexCount: number,
+): Float32Array | undefined {
+  if (!vertexCount) return undefined;
+  const faces = shape.faces;
+  const location = new (getOC().TopLoc_Location)();
+  const uvs = new Float32Array(vertexCount * 2);
+  let offset = 0;
+  try {
+    // Match the native mesh extractor's face/node traversal exactly.
+    for (const face of faces) {
+      const triangulation = getOC().BRep_Tool.Triangulation(
+        face.wrapped,
+        location,
+        0,
+      );
+      try {
+        if (triangulation.isNull()) continue;
+        if (!triangulation.HasUVNodes()) return undefined;
+        const count = triangulation.NbNodes();
+        let minU = Infinity,
+          minV = Infinity,
+          maxU = -Infinity,
+          maxV = -Infinity;
+        for (let index = 0; index < count; index++) {
+          const uv = triangulation.UVNode(index + 1);
+          try {
+            const u = uv.X(),
+              v = uv.Y();
+            uvs[(offset + index) * 2] = u;
+            uvs[(offset + index) * 2 + 1] = v;
+            minU = Math.min(minU, u);
+            maxU = Math.max(maxU, u);
+            minV = Math.min(minV, v);
+            maxV = Math.max(maxV, v);
+          } finally {
+            uv.delete();
+          }
+        }
+        for (let index = 0; index < count; index++) {
+          const base = (offset + index) * 2;
+          uvs[base] = maxU === minU ? 0 : (uvs[base] - minU) / (maxU - minU);
+          uvs[base + 1] =
+            maxV === minV ? 0 : (uvs[base + 1] - minV) / (maxV - minV);
+        }
+        offset += count;
+      } finally {
+        triangulation.delete();
+      }
+    }
+    return uvs;
+  } finally {
+    location.delete();
+    faces.forEach(face => face.delete());
+  }
 }
 
 type PlanarSketch = Readonly<{

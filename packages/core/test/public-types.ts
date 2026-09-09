@@ -48,7 +48,7 @@ export function recolor<
 >(
   model: ModelCapabilities<Elements, Family>,
 ): ModelForFamily<Elements, Family> {
-  return model.paint('#345678');
+  return model.material('#345678');
 }
 
 export function rotate<
@@ -88,7 +88,7 @@ colored.mount.on(solid.up);
 rotated.body.edges();
 rounded.mount.on(solid.down);
 // @ts-expect-error Exposed geometry is a reference, not a model value.
-body.paint('#ffffff');
+body.material('#ffffff');
 
 const elementKinds: Record<ModelKind, ElementKind> = {
   solid: 'frame',

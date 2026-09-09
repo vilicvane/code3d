@@ -8,6 +8,7 @@ import exposedTopologySource from '../../examples/exposed-topology.ts?raw';
 import fastenersSource from '../../examples/fasteners.ts?raw';
 import examplesIndexSource from '../../examples/index.ts?raw';
 import primitivesSource from '../../examples/primitives.ts?raw';
+import materialsSource from '../../examples/materials.ts?raw';
 import topologyPathsSource from '../../examples/topology-paths.ts?raw';
 import shellSource from '../../examples/shell.ts?raw';
 import groupOriginsSource from '../../examples/group-origins.ts?raw';
@@ -26,6 +27,7 @@ const websiteSources = import.meta.glob<string>('../../examples/website/*.ts', {
 const files = [
   {path: '/examples/index.ts', source: examplesIndexSource},
   {path: '/examples/primitives.ts', source: primitivesSource},
+  {path: '/examples/materials.ts', source: materialsSource},
   {path: '/examples/sketches.ts', source: sketchesSource},
   {path: '/examples/sketch-modeling.ts', source: sketchModelingSource},
   {path: '/examples/shell.ts', source: shellSource},

@@ -13,18 +13,18 @@ const neutral = '#30352f';
 
 const stockHeight = 8;
 const bossHeight = 6;
-const stock = box(30, stockHeight, 20).paint(neutral);
+const stock = box(30, stockHeight, 20).material(neutral);
 const bore = cylinder(3, 12);
-const drilled = cut(stock, [bore]).paint(neutral);
+const drilled = cut(stock, [bore]).material(neutral);
 
 const boss = cylinder(5, bossHeight)
   .originOffset(-7, -(stockHeight + bossHeight) / 2, 0)
-  .paint(accent);
-const joined = union([drilled, boss]).paint(neutral);
+  .material(accent);
+const joined = union([drilled, boss]).material(neutral);
 
 const lens = intersect([sphere(8), box(12, 12, 12)])
   .relate(part => part.on(joined.right).offset(0, 8, 0))
-  .paint(accent);
+  .material(accent);
 
 export const booleanOperationsExample = group(
   [joined, lens],

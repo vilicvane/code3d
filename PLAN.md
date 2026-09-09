@@ -290,7 +290,7 @@ implementation context and historical outcomes, not a competing work queue.
   See [#13](https://github.com/vilicvane/code3d/issues/13).
 - Base viewport appearance follows geometry kind: face models keep a filled
   surface visible from either side, while edge models render their authored
-  color (or the neutral unpainted model color) as the curve itself. Solid
+  color (or the neutral default model color) as the curve itself. Solid
   surface and boundary treatment remains independent from profile and curve
   visibility.
 - `model()` is not a required entry wrapper. Any runtime model object can be
@@ -410,9 +410,24 @@ implementation context and historical outcomes, not a competing work queue.
   against it. Commit switches to result coordinates; cancel restores the start.
   Coordinate tuple components retain numeric tools and source provenance.
 
+Material values ([#77](https://github.com/vilicvane/code3d/issues/77)) use
+`model.material(threeMaterial)` as a complete replacement. `@code3d/core/three`
+re-exports Core's native Three.js classes and types for models and reusable
+packages to share one dependency instance, in both App and Node. The built-in
+package closure exposes Core and Screws; Three.js remains a private dependency,
+as Replicad does. Core captures native
+Three.js JSON and loaded texture pixels at assignment; snapshots carry that
+value across the worker boundary. App restores owned materials and textures,
+uses separate copies for modeling emphasis, and draws authored materials in
+Render mode. CSS color strings choose the default material as a whole. Groups
+override the complete subtree atomically. Native face UVs are normalized per
+face for texture mapping. STEP/3MF retain base color/opacity; PNG renders the
+material. All former color-only author calls use this single material API.
+
 ## Invariants
 
-- Public model values do not expose OpenCascade or Three.js details.
+- Public model values do not expose OpenCascade handles or Three.js scene objects.
+  `material()` accepts native Three.js materials as captured values.
 - `@code3d/core/replicad` exposes `definePrimitive(build)`: a synchronous
   builder returns a Replicad solid whose ownership transfers to a normal
   `SolidModel`. Intermediate resources remain the builder's responsibility.
@@ -522,7 +537,7 @@ implementation context and historical outcomes, not a competing work queue.
   its own identity even when both reference the same model node. Main markers
   keep their base opacity; all secondary arrows, rings, bounds, surfaces and
   edges multiply it by 0.7. Model translucency instead ensures visibility
-  through geometry using an opacity cap, never a multiplier on paint:
+  through geometry using an opacity cap, never a multiplier on material opacity:
   `min(materialOpacity, levelLimit)`. Primary surfaces are capped at 0.82;
   secondary surfaces, lines and points at 0.7. Default surfaces already at
   0.68 remain at 0.68 on both sides, with markers expressing focus. These

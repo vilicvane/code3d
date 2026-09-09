@@ -14,12 +14,12 @@ function locatingPin(radius: number, height: number) {
   });
 }
 
-const bracket = box(26, 5, 18).chamfer(1).paint(neutral);
+const bracket = box(26, 5, 18).chamfer(1).material(neutral);
 const pin = locatingPin(3, 12)
-  .paint(accent)
+  .material(accent)
   .relate(part => part.mountingFace.on(bracket.up));
 const cap = cylinder(5, 2)
-  .paint(neutral)
+  .material(neutral)
   .relate(part => part.on(pin.tipFace));
 
 export const relationsAndElementsExample = group(

@@ -71,13 +71,13 @@ const shortHeight = 8;
 // The shared origin is on the base's top plane, between the two knobs.
 const base = box(58, baseHeight, 28)
   .originOffset(0, baseHeight / 2, 0)
-  .paint('#353a33');
+  .material('#353a33');
 const tall = twistKnob(10, 3, tallHeight)
   .originOffset(15, -tallHeight / 2, 0)
-  .paint('#d8ff3e');
+  .material('#d8ff3e');
 const short = twistKnob(10, 3, shortHeight, 30)
   .originOffset(-15, -shortHeight / 2, 0)
-  .paint('#8ed5d1');
+  .material('#8ed5d1');
 
 export const customPrimitivesExample = group(
   [base, tall, short],
