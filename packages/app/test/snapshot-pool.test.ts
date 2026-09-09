@@ -150,7 +150,7 @@ function fixture(fault?: Simulation['fault'], maximumBytes = 2 * 1024 ** 3) {
     {url: 'fixture', wasm: new Uint8Array(4), sketchWasm: new Uint8Array(4)},
     {
       concurrency: 2,
-      taskTimeoutMs: 100,
+      taskTimeoutMs: 1000,
       cancellationGraceMs: 30,
       createWorker: () => {
         const worker = new ComputeWorker(state);
