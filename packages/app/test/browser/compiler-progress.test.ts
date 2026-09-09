@@ -60,6 +60,17 @@ async function fixture(t: TestContext) {
       body: '<main>Compiler progress</main>',
     }),
   );
+  await page.route('**/src/model/compiler-client.ts*', async route => {
+    const response = await route.fetch();
+    await route.fulfill({
+      response,
+      // Bind probes to the reader imported by the compiler itself. Vite HMR
+      // can give that import a different URL and identity than a bare import.
+      body:
+        (await response.text()) +
+        '\nwindow.packageFiles = browserPackageFiles;',
+    });
+  });
   await page.goto(url.href);
   await page.evaluate(async () => {
     window.compilerWorkers = 0;
@@ -76,9 +87,6 @@ async function fixture(t: TestContext) {
       }
     };
     const {ModelCompilerClient} = await import('/src/model/compiler-client.ts');
-    const {browserPackageFiles} =
-      await import('/src/project/browser-packages.ts');
-    window.packageFiles = browserPackageFiles;
     window.client = new ModelCompilerClient({
       async readFile() {
         return undefined;
