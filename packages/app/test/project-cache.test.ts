@@ -86,3 +86,35 @@ test('caches reached bytes and misses, and refreshes additions, replacements and
   assert.equal(await cache.readFile('/value.js'), undefined);
   assert.equal(reads, 3);
 });
+
+test('batch refresh keeps prior versions intact if part of the check fails', async () => {
+  const info = (version: string) => ({kind: 'file' as const, version});
+  let version = 'before';
+  let failed = true;
+  let batches = 0;
+  const cache = new ProjectFileCache({
+    async readFile() {
+      return new TextEncoder().encode(version);
+    },
+    async stat() {
+      return info(version);
+    },
+    async statMany(paths) {
+      batches++;
+      assert.deepEqual(paths, ['/a.ts', '/b.ts']);
+      if (failed) throw new Error('Temporary metadata failure');
+      return paths.map(() => info(version));
+    },
+  });
+  await cache.readFile('/a.ts');
+  await cache.readFile('/b.ts');
+  version = 'after';
+  await assert.rejects(cache.refresh(), /Temporary metadata failure/);
+  failed = false;
+  assert.deepEqual([...(await cache.refresh())], ['/a.ts', '/b.ts']);
+  assert.equal(batches, 2);
+  assert.equal(
+    new TextDecoder().decode(await cache.readFile('/a.ts')),
+    'after',
+  );
+});

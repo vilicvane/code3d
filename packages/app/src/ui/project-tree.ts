@@ -7,7 +7,12 @@ import {
   type FileTreeDirectoryHandle,
 } from '@pierre/trees';
 import type {AgentLocation} from '../editor';
+import {
+  PackageInstallationError,
+  type PackageInstallationProgress,
+} from '../project/browser-package-installer';
 import {mapProjectIO} from '../project/io';
+import {parsePackageSpecifier} from '../project/package-manifest';
 import {
   topLevelProjectPaths,
   isProtectedProjectPath,
@@ -28,6 +33,8 @@ type ProjectTreeOptions = Readonly<{
   ): Promise<void>;
   onOpenFile(path: string, takeFocus: boolean): Promise<void>;
   onOperation(operation: ProjectEntryOperation): Promise<void>;
+  onInstallPackage?(directory: string): Promise<void>;
+  onUpdateDependencies?(directory: string): Promise<void>;
   onBusy(busy: boolean): void;
 }>;
 
@@ -39,6 +46,12 @@ export class ProjectTree {
   private agentLocations: readonly AgentLocation[] = [];
   private synchronizing = false;
   private busy = false;
+  private runningPackageOperation = false;
+  private readonly packageProgress = new Map<
+    string,
+    PackageInstallationProgress
+  >();
+  private readonly packageStatus = document.createElement('div');
   private dragging = false;
   private refreshVersion = 0;
   private refreshRequested = false;
@@ -58,10 +71,15 @@ export class ProjectTree {
     private readonly container: HTMLElement,
     private readonly options: ProjectTreeOptions,
   ) {
+    container.tabIndex = -1;
     this.status.className = 'project-status';
     this.status.hidden = true;
     this.status.setAttribute('role', 'status');
-    container.after(this.status);
+    this.packageStatus.className = 'project-status package-status';
+    this.packageStatus.hidden = true;
+    this.packageStatus.setAttribute('role', 'status');
+    this.packageStatus.setAttribute('aria-label', 'Package installation');
+    container.after(this.packageStatus, this.status);
     this.tree = new FileTree({
       paths: [],
       density: 'compact',
@@ -137,6 +155,9 @@ export class ProjectTree {
         },
       },
       unsafeCSS: `
+        :host(:focus) [role="tree"]:not(:focus-within) {
+          box-shadow: inset 0 0 0 var(--trees-focus-ring-width) var(--trees-focus-ring-color);
+        }
         [data-file-tree-virtualized-scroll] {
           overflow: auto;
           padding-inline: 0;
@@ -453,11 +474,77 @@ export class ProjectTree {
     this.tree.render({fileTreeContainer: this.container});
   }
 
+  async focusDirectory(path: string, cancelled: () => boolean): Promise<void> {
+    await this.refresh();
+    if (cancelled()) return;
+    const version = this.refreshVersion;
+    await this.revealDirectory(path, version);
+    if (cancelled() || version !== this.refreshVersion) return;
+    this.tree.closeSearch();
+    let rowPath: string | undefined;
+    this.synchronizing = true;
+    try {
+      for (const selected of this.tree.getSelectedPaths())
+        this.tree.getItem(selected)?.deselect();
+      const segments = path.split('/').filter(Boolean);
+      for (let depth = 1; depth <= segments.length; depth++) {
+        const item = this.tree.getItem(
+          segments.slice(0, depth).join('/') + '/',
+        );
+        if (isDirectoryItem(item)) item.expand();
+      }
+      if (path !== '/') {
+        const target = path.slice(1) + '/';
+        // A compact directory chain is one row identified by its last segment.
+        rowPath = this.tree
+          .getVisibleRows(0, this.tree.getVisibleCount() - 1)
+          .find(
+            row =>
+              row.path === target ||
+              row.flattenedSegments?.some(segment => segment.path === target),
+          )?.path;
+        if (!rowPath) return;
+        this.tree.getItem(rowPath)!.select();
+        this.tree.scrollToPath(rowPath, {focus: true});
+      } else {
+        const first = this.tree.getVisibleRows(0, 0)[0];
+        if (first)
+          this.tree.scrollToPath(first.path, {focus: false, offset: 'top'});
+      }
+    } finally {
+      this.synchronizing = false;
+    }
+    await this.focusTreeTarget(
+      rowPath,
+      () => cancelled() || version !== this.refreshVersion,
+    );
+  }
+
+  private async focusTreeTarget(
+    rowPath: string | undefined,
+    cancelled: () => boolean,
+  ): Promise<void> {
+    // Scrolling queues a second render to mount the new virtual rows. Wait for
+    // that render before taking DOM focus, which Pierre leaves with its owner.
+    this.tree.render({fileTreeContainer: this.container});
+    await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+    if (cancelled()) return;
+    // Pierre reserves its inner root for row focus. The host represents the
+    // project root and keeps that focus separate from the last focused row.
+    const target = rowPath
+      ? this.container.shadowRoot!.querySelector<HTMLElement>(
+          `[role="treeitem"][data-item-path="${CSS.escape(rowPath)}"]`,
+        )
+      : this.container;
+    target?.focus({preventScroll: true});
+  }
+
   search(): void {
     this.tree.openSearch();
   }
 
   showError(error: unknown): void {
+    if (error instanceof PackageInstallationError) return;
     this.status.textContent =
       error instanceof Error ? error.message : String(error);
     this.status.hidden = false;
@@ -514,6 +601,50 @@ export class ProjectTree {
       this.options.onBusy(false);
     }
     return succeeded;
+  }
+
+  private async runPackageOperation(
+    operation: () => Promise<void>,
+  ): Promise<void> {
+    if (this.runningPackageOperation) return;
+    this.runningPackageOperation = true;
+    this.status.hidden = true;
+    if (!this.packageProgress.size) this.packageStatus.hidden = true;
+    try {
+      await operation();
+    } catch (error) {
+      this.showError(error);
+    } finally {
+      this.runningPackageOperation = false;
+      await this.refresh();
+    }
+  }
+
+  setPackageProgress(progress: PackageInstallationProgress): void {
+    if (progress.state === 'busy')
+      this.packageProgress.set(progress.directory, progress);
+    else this.packageProgress.delete(progress.directory);
+    const visible = this.packageProgress.size
+      ? [...this.packageProgress.values()]
+      : [progress];
+    this.packageStatus.hidden = false;
+    this.packageStatus.setAttribute(
+      'aria-busy',
+      String(this.packageProgress.size > 0),
+    );
+    this.packageStatus.replaceChildren(
+      ...visible.map(item => {
+        const row = document.createElement('div');
+        row.dataset.state = item.state;
+        const directory = document.createElement('div');
+        directory.className = 'package-status-directory';
+        directory.textContent = item.directory;
+        const message = document.createElement('div');
+        message.textContent = item.message;
+        row.append(directory, message);
+        return row;
+      }),
+    );
   }
 
   private targetDirectory(path = this.tree.getFocusedPath() ?? '/'): string {
@@ -640,6 +771,37 @@ export class ProjectTree {
       () => void this.create('directory', directory),
       writableDirectory,
     );
+    if (
+      this.options.onInstallPackage &&
+      (!path ||
+        this.entries.get(path)?.kind === 'directory' ||
+        basename(path) === 'package.json')
+    ) {
+      const project = directory.replace(/\/node_modules(?:\/.*)?$/, '');
+      action(
+        'Install package',
+        () =>
+          void this.runPackageOperation(() =>
+            this.options.onInstallPackage!(directory),
+          ),
+        !isProtectedProjectPath(project) && !this.runningPackageOperation,
+      );
+    }
+    if (
+      this.options.onUpdateDependencies &&
+      path &&
+      this.entries.get(path)?.kind === 'file' &&
+      basename(path) === 'package.json' &&
+      !isProtectedProjectPath(path)
+    )
+      action(
+        'Update dependencies',
+        () =>
+          void this.runPackageOperation(() =>
+            this.options.onUpdateDependencies!(directory),
+          ),
+        !this.runningPackageOperation,
+      );
     separator();
     action(
       'Rename',
@@ -716,9 +878,33 @@ export class ProjectTree {
       event.stopPropagation();
       return;
     }
+    if (
+      target === this.container &&
+      !command &&
+      !event.altKey &&
+      ['ArrowDown', 'ArrowUp', 'Home', 'End', 'Enter'].includes(event.key)
+    ) {
+      const last = event.key === 'ArrowUp' || event.key === 'End';
+      const index = last ? this.tree.getVisibleCount() - 1 : 0;
+      const row = this.tree.getVisibleRows(index, index)[0];
+      if (row) {
+        this.tree.scrollToPath(row.path, {focus: true});
+        void this.focusTreeTarget(
+          row.path,
+          () =>
+            this.tree.getFocusedPath() !== row.path ||
+            document.activeElement !== this.container ||
+            this.container.shadowRoot!.activeElement !== null,
+        );
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     if (command && key === 'c') this.copy('copy');
     else if (command && key === 'x') this.copy('move');
-    else if (command && key === 'v') void this.paste();
+    else if (command && key === 'v')
+      void this.paste(target === this.container ? '/' : undefined);
     else if (event.key === 'Delete') void this.remove();
     else if (event.key === 'Enter') {
       const path = this.tree.getFocusedPath();
@@ -772,74 +958,19 @@ export class ProjectTree {
     kind: ProjectEntry['kind'],
     directory: string,
   ): Promise<string | undefined> {
-    const dialog = document.createElement('dialog');
-    dialog.className = 'app-dialog project-entry-dialog';
-    dialog.setAttribute(
-      'aria-label',
-      kind === 'file' ? 'New file' : 'New folder',
-    );
-    const form = document.createElement('form');
-    form.className = 'app-dialog-content';
-    const heading = document.createElement('h2');
-    heading.textContent = kind === 'file' ? 'New file' : 'New folder';
-    const location = document.createElement('p');
-    location.textContent = `In ${directory}`;
-    const input = document.createElement('input');
-    input.required = true;
-    input.setAttribute('aria-label', 'Name');
-    input.value = kind === 'file' ? 'untitled.ts' : 'new-folder';
-    const header = document.createElement('header');
-    header.append(heading, location);
-    const field = document.createElement('label');
-    const label = document.createElement('span');
-    label.textContent = 'Name';
-    field.append(label, input);
-    const cancel = document.createElement('button');
-    cancel.type = 'button';
-    cancel.className = 'dialog-button';
-    cancel.textContent = 'Cancel';
-    const submit = document.createElement('button');
-    submit.type = 'submit';
-    submit.className = 'dialog-button button-primary';
-    submit.textContent = 'Create';
-    const footer = document.createElement('footer');
-    footer.append(cancel, submit);
-    form.append(header, field, footer);
-    dialog.append(form);
-    document.body.append(dialog);
-    let name: string | undefined;
-    cancel.addEventListener('click', () => dialog.close());
-    form.addEventListener('submit', event => {
-      event.preventDefault();
-      const value = input.value.trim();
-      const invalid =
-        !value || value === '.' || value === '..' || /[\\/\0]/.test(value);
-      input.setCustomValidity(
-        invalid
-          ? 'Enter a file or folder name without slashes.'
-          : this.entries.has(normalizeProjectPath(`${directory}/${value}`))
-            ? 'An entry with this name already exists.'
-            : '',
-      );
-      if (!form.reportValidity()) return;
-      name = value;
-      dialog.close();
+    return askProjectInput({
+      title: kind === 'file' ? 'New file' : 'New folder',
+      directory,
+      label: 'Name',
+      value: kind === 'file' ? 'untitled.ts' : 'new-folder',
+      submit: 'Create',
+      validate: value => {
+        if (!value || value === '.' || value === '..' || /[\\/\0]/.test(value))
+          throw new Error('Enter a file or folder name without slashes.');
+        if (this.entries.has(normalizeProjectPath(`${directory}/${value}`)))
+          throw new Error('An entry with this name already exists.');
+      },
     });
-    input.addEventListener('input', () => input.setCustomValidity(''));
-    dialog.addEventListener('keydown', event => event.stopPropagation());
-    dialog.showModal();
-    input.focus();
-    input.select();
-    return new Promise(resolve =>
-      dialog.addEventListener(
-        'close',
-        () => {
-          dialog.remove();
-          resolve(name);
-        },
-        {once: true},
-      ),
-    );
   }
 }
 
@@ -854,4 +985,93 @@ function isDirectoryItem(
   item: FileTreeItemHandle | null,
 ): item is FileTreeDirectoryHandle {
   return item?.isDirectory() === true;
+}
+
+export function askInstallPackage(
+  directory: string,
+): Promise<string | undefined> {
+  return askProjectInput({
+    title: 'Install package',
+    directory,
+    label: 'Package',
+    placeholder: 'just-range or @scope/package@version',
+    submit: 'Install',
+    validate: value => {
+      parsePackageSpecifier(value);
+    },
+  });
+}
+
+function askProjectInput(options: {
+  title: string;
+  directory: string;
+  label: string;
+  value?: string;
+  placeholder?: string;
+  submit: string;
+  validate(value: string): void;
+}): Promise<string | undefined> {
+  const dialog = document.createElement('dialog');
+  dialog.className = 'app-dialog project-entry-dialog';
+  dialog.setAttribute('aria-label', options.title);
+  const form = document.createElement('form');
+  form.className = 'app-dialog-content';
+  const heading = document.createElement('h2');
+  heading.textContent = options.title;
+  const location = document.createElement('p');
+  location.textContent = `In ${options.directory}`;
+  const input = document.createElement('input');
+  input.required = true;
+  input.setAttribute('aria-label', options.label);
+  input.value = options.value ?? '';
+  input.placeholder = options.placeholder ?? '';
+  const header = document.createElement('header');
+  header.append(heading, location);
+  const field = document.createElement('label');
+  const label = document.createElement('span');
+  label.textContent = options.label;
+  field.append(label, input);
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'dialog-button';
+  cancel.textContent = 'Cancel';
+  const submit = document.createElement('button');
+  submit.type = 'submit';
+  submit.className = 'dialog-button button-primary';
+  submit.textContent = options.submit;
+  const footer = document.createElement('footer');
+  footer.append(cancel, submit);
+  form.append(header, field, footer);
+  dialog.append(form);
+  document.body.append(dialog);
+  let result: string | undefined;
+  cancel.addEventListener('click', () => dialog.close());
+  form.addEventListener('submit', event => {
+    event.preventDefault();
+    const value = input.value.trim();
+    try {
+      options.validate(value);
+      input.setCustomValidity('');
+    } catch (error) {
+      input.setCustomValidity((error as Error).message);
+    }
+    if (!form.reportValidity()) return;
+    result = value;
+    dialog.close();
+  });
+  input.addEventListener('input', () => input.setCustomValidity(''));
+  dialog.addEventListener('keydown', event => event.stopPropagation());
+  dialog.showModal();
+  input.focus();
+  input.select();
+  return new Promise(resolve =>
+    dialog.addEventListener(
+      'close',
+      () => {
+        dialog.remove();
+        resolve(result);
+      },
+      {once: true},
+    ),
+  );
 }

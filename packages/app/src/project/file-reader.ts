@@ -11,6 +11,19 @@ export type ProjectFileInfo = Readonly<{
 export interface ProjectFileReader {
   readFile(path: string): Promise<Uint8Array | undefined>;
   stat(path: string): Promise<ProjectFileInfo | undefined>;
+  statMany?(
+    paths: readonly string[],
+  ): Promise<readonly (ProjectFileInfo | undefined)[]>;
+}
+
+export function statProjectFiles(
+  reader: ProjectFileReader,
+  paths: readonly string[],
+) {
+  return (
+    reader.statMany?.(paths) ??
+    Promise.all(paths.map(path => reader.stat(path)))
+  );
 }
 
 export const decodeProjectFile = (contents: Uint8Array): string =>

@@ -19,7 +19,7 @@ let ProjectPackages: (typeof import('../src/project/project-packages.ts'))['Proj
 let ProjectPackageResolver: (typeof import('../src/project/package-resolver.ts'))['ProjectPackageResolver'];
 let ProjectBuilder: (typeof import('../src/project/project-builder.ts'))['ProjectBuilder'];
 let ProjectCompiler: (typeof import('../src/model/project-compiler.ts'))['ProjectCompiler'];
-let loadProjectLanguage: (typeof import('../src/project/project-language.ts'))['loadProjectLanguage'];
+let ProjectLanguageLoader: (typeof import('../src/project/project-language.ts'))['ProjectLanguageLoader'];
 let Evaluator: Awaited<ReturnType<typeof testEvaluatorClass>>;
 before(async () => {
   server = await createAppTestServer();
@@ -35,7 +35,7 @@ before(async () => {
   ({ProjectCompiler} = await server.ssrLoadModule<
     typeof import('../src/model/project-compiler.ts')
   >('/src/model/project-compiler.ts'));
-  ({loadProjectLanguage} = await server.ssrLoadModule<
+  ({ProjectLanguageLoader} = await server.ssrLoadModule<
     typeof import('../src/project/project-language.ts')
   >('/src/project/project-language.ts'));
   Evaluator = await testEvaluatorClass(server);
@@ -225,8 +225,7 @@ test('isolates the built-in dependency closure and gives source, screws and reus
   assert.equal(result.core, result.reusableCore);
   assert.equal(result.core.origin, 'builtin');
   assert.equal(result.origin, 'project');
-  const language = await loadProjectLanguage(
-    packages,
+  const language = await new ProjectLanguageLoader(packages).load(
     project,
     packages.packageSpecifiers,
   );

@@ -25,11 +25,15 @@ let server: Awaited<ReturnType<typeof createAppTestServer>>;
 let BrowserPackageInstaller: typeof import('../src/project/browser-package-installer.ts').BrowserPackageInstaller;
 let NpmRegistry: typeof import('../src/project/npm-registry.ts').NpmRegistry;
 let extractNpmArchive: typeof import('../src/project/npm-registry.ts').extractNpmArchive;
+let manifests: typeof import('../src/project/package-manifest.ts');
 let ProjectBuilder: typeof import('../src/project/project-builder.ts').ProjectBuilder;
-let loadProjectLanguage: typeof import('../src/project/project-language.ts').loadProjectLanguage;
+let ProjectLanguageLoader: typeof import('../src/project/project-language.ts').ProjectLanguageLoader;
 let copyProjectEntry: typeof import('../src/project/file-operations.ts').copyProjectEntry;
 before(async () => {
   server = await createAppTestServer();
+  manifests = await server.ssrLoadModule<
+    typeof import('../src/project/package-manifest.ts')
+  >('/src/project/package-manifest.ts');
   ({BrowserPackageInstaller} = await server.ssrLoadModule<
     typeof import('../src/project/browser-package-installer.ts')
   >('/src/project/browser-package-installer.ts'));
@@ -39,7 +43,7 @@ before(async () => {
   ({ProjectBuilder} = await server.ssrLoadModule<
     typeof import('../src/project/project-builder.ts')
   >('/src/project/project-builder.ts'));
-  ({loadProjectLanguage} = await server.ssrLoadModule<
+  ({ProjectLanguageLoader} = await server.ssrLoadModule<
     typeof import('../src/project/project-language.ts')
   >('/src/project/project-language.ts'));
   ({copyProjectEntry} = await server.ssrLoadModule<
@@ -286,8 +290,7 @@ test('subprojects install exact versions, all package files, types, sources, ass
       await disk.files.readFile(path.posix.dirname(tool) + '/kernel.wasm'),
       new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]),
     );
-    const language = await loadProjectLanguage(
-      installer,
+    const language = await new ProjectLanguageLoader(installer).load(
       {
         files: [
           {path: '/a/model.ts', source},
@@ -613,4 +616,511 @@ test('archive traversal is rejected before it can escape the package directory',
     /archive path|Unsafe|traversal/i,
   );
   assert.deepEqual(written, []);
+});
+
+test('Install package creates a local scope and escapes nested installed package manifests', async () => {
+  const disk = await diskFiles();
+  try {
+    await disk.files.writeFile('/package.json', '{"private":true}');
+    await disk.files.writeFile(
+      '/models/panel/package.json',
+      '{"name":"panel"}',
+    );
+    await disk.files.writeFile(
+      '/models/panel/node_modules/tool/package.json',
+      '{"name":"tool"}',
+    );
+    await disk.files.writeFile(
+      '/models/panel/node_modules/tool/node_modules/helper/package.json',
+      '{"name":"helper"}',
+    );
+    const target = (directory: string) =>
+      manifests.packageInstallDirectory(disk.files, directory);
+    assert.equal(
+      await target('/models/other'),
+      '/models/other',
+      'ordinary folders create their own manifest even when an ancestor has one',
+    );
+    assert.equal(await target('/models/panel'), '/models/panel');
+    assert.equal(await target('/models/panel/node_modules'), '/models/panel');
+    assert.equal(
+      await target('/models/panel/node_modules/tool/src'),
+      '/models/panel',
+    );
+    assert.equal(
+      await target('/models/panel/node_modules/tool/node_modules/helper'),
+      '/models/panel',
+    );
+    assert.equal(
+      await target(
+        '/models/panel/node_modules/.code3d/@scope+tool@1/node_modules/@scope/tool',
+      ),
+      '/models/panel',
+    );
+    assert.equal(
+      await target('/models/unowned/node_modules/tool'),
+      '/',
+      'continue upward to a project manifest outside node_modules',
+    );
+    assert.equal(
+      await target('/models/node_modules-copy'),
+      '/models/node_modules-copy',
+    );
+  } finally {
+    await disk.dispose();
+  }
+});
+
+test('Install package adds core only to new manifests and preserves existing dependency choices', () => {
+  const created = manifests.addPackageDependency(undefined, 'just-range@4.2.0');
+  assert.deepEqual(created, {
+    private: true,
+    type: 'module',
+    dependencies: {'@code3d/core': 'latest', 'just-range': '4.2.0'},
+  });
+  assert.deepEqual(
+    manifests.addPackageDependency(undefined, '@code3d/core@alpha')
+      .dependencies,
+    {'@code3d/core': 'alpha'},
+  );
+  const original = {
+    name: 'panel',
+    scripts: {build: 'custom'},
+    devDependencies: {tool: '^1'},
+    dependencies: {'@code3d/core': 'custom-version'},
+  };
+  assert.deepEqual(manifests.addPackageDependency(original, 'tool@2'), {
+    ...original,
+    devDependencies: {tool: '2'},
+  });
+  assert.deepEqual(
+    original.devDependencies,
+    {tool: '^1'},
+    'do not mutate the source manifest',
+  );
+  assert.deepEqual(
+    manifests.addPackageDependency({private: true}, '@scope/tool').dependencies,
+    {'@scope/tool': 'latest'},
+  );
+  assert.deepEqual(manifests.parsePackageSpecifier('@scope/tool@^2'), {
+    name: '@scope/tool',
+    range: '^2',
+  });
+  assert.throws(() => manifests.parsePackageSpecifier('tool@'), /version/);
+  assert.throws(
+    () => manifests.parsePackageSpecifier('../tool'),
+    /package name/,
+  );
+});
+
+test('source edits reuse prepared dependencies while manifest changes and removed installations invalidate them', async () => {
+  const disk = await diskFiles();
+  try {
+    const registry = await registryFixture();
+    await registry.add('tool', '1.0.0');
+    await registry.add('tool', '2.0.0');
+    await disk.files.writeFile(
+      '/a/package.json',
+      JSON.stringify({dependencies: {tool: '1.0.0'}}),
+    );
+    let preparations = 0;
+    const installer = new BrowserPackageInstaller(disk.files, undefined, () => {
+      preparations++;
+      return registry.registry();
+    });
+    await installer.prepare('/a/model.ts');
+    const requests = registry.requests.length;
+    await disk.files.writeFile('/a/model.ts', 'export default 2;');
+    await installer.prepare('/a/model.ts');
+    await installer.prepare('/a/another.ts');
+    assert.equal(
+      preparations,
+      1,
+      'ordinary source edits do not re-enter dependency installation',
+    );
+    assert.equal(registry.requests.length, requests);
+    await disk.files.writeFile(
+      '/a/package.json',
+      JSON.stringify({dependencies: {tool: '2.0.0'}}),
+    );
+    await installer.prepare('/a/model.ts');
+    assert.equal(preparations, 2);
+    assert.match(
+      new TextDecoder().decode(
+        await installer.readFile('/a/node_modules/tool/index.js'),
+      ),
+      /2.0.0/,
+    );
+    await disk.files.remove('/a/node_modules');
+    await installer.prepare('/a/model.ts');
+    assert.equal(
+      preparations,
+      3,
+      'missing node_modules still restores the locked installation',
+    );
+    assert.ok(await disk.files.stat('/a/node_modules/tool/index.js'));
+  } finally {
+    await disk.dispose();
+  }
+});
+
+test('concurrent model preparations share one download for each installed version', async () => {
+  const disk = await diskFiles();
+  try {
+    const registry = await registryFixture();
+    await registry.add('tool', '1.0.0');
+    await registry.add('tool', '2.0.0');
+    await disk.files.writeFile(
+      '/package.json',
+      JSON.stringify({dependencies: {tool: '1.0.0'}}),
+    );
+    let preparations = 0;
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    let started!: () => void;
+    const downloading = new Promise<void>(resolve => {
+      started = resolve;
+    });
+    const installer = new BrowserPackageInstaller(disk.files, undefined, () => {
+      preparations++;
+      const client = registry.registry();
+      const archive = client.archive.bind(client);
+      client.archive = async pkg => {
+        started();
+        await gate;
+        return archive(pkg);
+      };
+      return client;
+    });
+    const first = installer.prepare('/model.ts');
+    await downloading;
+    const second = installer.prepare('/another.ts');
+    release();
+    await Promise.all([first, second]);
+    assert.equal(preparations, 1);
+    // Simulate an editor save immediately after the previous swap completed.
+    await disk.files.writeFile(
+      '/package.json',
+      JSON.stringify({dependencies: {tool: '2.0.0'}}),
+    );
+    await Promise.all([
+      installer.prepare('/model.ts'),
+      installer.prepare('/another.ts'),
+    ]);
+    assert.equal(preparations, 2);
+    assert.match(
+      new TextDecoder().decode(
+        await installer.readFile('/node_modules/tool/index.js'),
+      ),
+      /2.0.0/,
+    );
+  } finally {
+    await disk.dispose();
+  }
+});
+
+test('installed file metadata and misses are reused until the installation changes', async t => {
+  const disk = await diskFiles();
+  t.after(() => disk.dispose());
+  const registry = await registryFixture();
+  await registry.add('tool', '1.0.0');
+  await registry.add(
+    'tool',
+    '2.0.0',
+    {},
+    {'added.ts': 'export const added = true;'},
+  );
+  const manifest = (version: string) =>
+    JSON.stringify({dependencies: {tool: version}});
+  await disk.files.writeFile('/a/package.json', manifest('1.0.0'));
+  const installer = new BrowserPackageInstaller(
+    disk.files,
+    undefined,
+    registry.registry,
+  );
+  await installer.prepare('/a/model.ts');
+  const paths = [
+    '/a/node_modules/tool/index.d.ts',
+    '/a/node_modules/tool/added.ts',
+  ];
+  const cold = await installer.statMany(paths);
+  assert.ok(cold[0]);
+  assert.equal(cold[1], undefined);
+  const checked: string[] = [];
+  const stat = disk.files.stat.bind(disk.files);
+  t.mock.method(disk.files, 'stat', async (path: string) => {
+    checked.push(path);
+    return stat(path);
+  });
+  await disk.files.writeFile('/a/model.ts', 'export const size = 5;');
+  await installer.prepare('/a/model.ts');
+  assert.deepEqual(await installer.statMany(paths), cold);
+  assert.ok(
+    !checked.some(path => paths.includes(path)),
+    'warm edits only check installation metadata, including cached misses',
+  );
+  await installer.stat('/a/model.ts');
+  assert.ok(
+    checked.includes('/a/model.ts'),
+    'ordinary source files still read their current version',
+  );
+  const unmanaged = '/a/nested/node_modules/manual/index.ts';
+  await disk.files.writeFile(unmanaged, 'export const value = 1;');
+  const beforeUnmanaged = await installer.stat(unmanaged);
+  await disk.files.writeFile(unmanaged, 'export const value = 12345;');
+  assert.notEqual(
+    (await installer.stat(unmanaged))?.version,
+    beforeUnmanaged?.version,
+    'an ancestor installation must not cache a different, unmanaged node_modules tree',
+  );
+  await disk.files.writeFile('/a/package.json', manifest('2.0.0'));
+  await installer.prepare('/a/model.ts');
+  const updated = await installer.statMany(paths);
+  assert.ok(updated[1], 'a previously missing package file becomes visible');
+  assert.notEqual(updated[0]?.realPath, cold[0]?.realPath);
+  await disk.files.remove('/a/node_modules');
+  await installer.prepare('/a/model.ts');
+  assert.ok(
+    (await installer.statMany(paths))[1],
+    'restoring the locked tree invalidates cached metadata',
+  );
+});
+
+test('failed package preparation reports the package name and recovers when its manifest is removed', async t => {
+  const disk = await diskFiles();
+  t.after(() => disk.dispose());
+  const registry = await registryFixture();
+  await disk.files.writeFile(
+    '/package.json',
+    '{"dependencies":{"wrong-package-name":"*"}}',
+  );
+  const progress: import('../src/project/browser-package-installer.ts').PackageInstallationProgress[] =
+    [];
+  const installer = new BrowserPackageInstaller(
+    disk.files,
+    value => progress.push(value),
+    registry.registry,
+  );
+  await assert.rejects(
+    installer.prepare('/model.ts'),
+    /npm package not found: wrong-package-name/,
+  );
+  assert.equal(progress.at(-1)?.state, 'error');
+  await disk.files.remove('/package.json');
+  await installer.prepare('/model.ts');
+  assert.deepEqual(progress.at(-1), {
+    directory: '/',
+    state: 'ready',
+    message: 'Packages ready',
+  });
+  registry.setOffline(true);
+  await assert.rejects(
+    registry.registry().packument('mistyped-package'),
+    /Unable to fetch npm package mistyped-package.*offline/,
+  );
+});
+
+test('explicit updates resolve direct and transitive ranges without old locks and preserve other scopes', async () => {
+  const disk = await diskFiles();
+  try {
+    const registry = await registryFixture();
+    await registry.add('shared', '1.0.0');
+    await registry.add('tool', '1.0.0', {dependencies: {shared: '^1'}});
+    await registry.add('pinned', '1.0.0');
+    const source =
+      JSON.stringify({dependencies: {tool: '^1', pinned: '1.0.0'}}, null, 2) +
+      '\n';
+    await disk.files.writeFile('/a/package.json', source);
+    await disk.files.writeFile('/b/package.json', source);
+    let installations = 0;
+    const installer = new BrowserPackageInstaller(
+      disk.files,
+      undefined,
+      registry.registry,
+      () => installations++,
+    );
+    await installer.prepare('/a/model.ts');
+    await installer.prepare('/b/model.ts');
+    const oldLock = await disk.files.readFile('/a/code3d-lock.json');
+    const otherLock = await disk.files.readFile('/b/code3d-lock.json');
+    const oldInfo = await installer.stat('/a/node_modules/tool/index.js');
+    await registry.add('shared', '1.2.0');
+    await registry.add('shared', '2.0.0');
+    await registry.add('tool', '1.1.0', {dependencies: {shared: '^1'}});
+    await registry.add('tool', '2.0.0');
+    await registry.add('pinned', '1.1.0');
+    const before = registry.requests.length;
+    await installer.prepare('/a/model.ts');
+    assert.equal(
+      registry.requests.length,
+      before,
+      'ordinary preparation retains the lock',
+    );
+    await installer.prepare('/a/package.json', {update: true});
+    const lockBytes = await disk.files.readFile('/a/code3d-lock.json');
+    assert.notDeepEqual(lockBytes, oldLock);
+    const lock = JSON.parse(new TextDecoder().decode(lockBytes));
+    assert.deepEqual(
+      Object.values(lock.packages)
+        .map((pkg: any) => `${pkg.name}@${pkg.version}`)
+        .sort(),
+      ['pinned@1.0.0', 'shared@1.2.0', 'tool@1.1.0'],
+    );
+    assert.equal(
+      new TextDecoder().decode(await disk.files.readFile('/a/package.json')),
+      source,
+    );
+    assert.deepEqual(
+      await disk.files.readFile('/b/code3d-lock.json'),
+      otherLock,
+    );
+    assert.match(
+      new TextDecoder().decode(
+        await disk.files.readFile('/b/node_modules/tool/index.js'),
+      ),
+      /1.0.0/,
+    );
+    assert.notEqual(
+      (await installer.stat('/a/node_modules/tool/index.js'))?.realPath,
+      oldInfo?.realPath,
+    );
+    assert.match(
+      new TextDecoder().decode(
+        await installer.readFile('/a/node_modules/tool/index.js'),
+      ),
+      /1.1.0/,
+    );
+    const after = registry.requests.length;
+    const installed = installations;
+    await installer.prepare('/a/package.json', {update: true});
+    assert.ok(
+      registry.requests.length > after,
+      'even an unchanged installation explicitly rechecks the registry',
+    );
+    assert.equal(
+      installations,
+      installed,
+      'identical resolutions do not replace installed files',
+    );
+    assert.equal(
+      registry.requests.slice(after).filter(url => url.endsWith('.tgz')).length,
+      0,
+    );
+  } finally {
+    await disk.dispose();
+  }
+});
+
+test('explicit update failures preserve installed files and locks, and updates can replace a malformed lock', async () => {
+  const disk = await diskFiles();
+  try {
+    const registry = await registryFixture();
+    await registry.add('tool', '1.0.0');
+    const source = '{"dependencies":{"tool":"latest"}}';
+    await disk.files.writeFile('/package.json', source);
+    const installer = new BrowserPackageInstaller(
+      disk.files,
+      undefined,
+      registry.registry,
+    );
+    await installer.prepare('/model.ts');
+    const oldLock = await disk.files.readFile('/code3d-lock.json');
+    const oldMarker = await disk.files.readFile(
+      '/node_modules/.code3d-install.json',
+    );
+    await registry.add('tool', '2.0.0');
+    registry.setCorrupt(true);
+    await assert.rejects(
+      installer.prepare('/package.json', {update: true}),
+      /Integrity check failed/,
+    );
+    assert.deepEqual(await disk.files.readFile('/code3d-lock.json'), oldLock);
+    assert.deepEqual(
+      await disk.files.readFile('/node_modules/.code3d-install.json'),
+      oldMarker,
+    );
+    assert.match(
+      new TextDecoder().decode(
+        await disk.files.readFile('/node_modules/tool/index.js'),
+      ),
+      /1.0.0/,
+    );
+    assert.equal(await disk.files.stat('/.code3d/package-install'), undefined);
+    registry.setOffline(true);
+    await installer.prepare('/model.ts');
+    registry.setOffline(false);
+    registry.setCorrupt(false);
+    await disk.files.writeFile('/code3d-lock.json', '{ invalid lock');
+    await installer.prepare('/package.json', {update: true});
+    const lock = JSON.parse(
+      new TextDecoder().decode(await disk.files.readFile('/code3d-lock.json')),
+    );
+    assert.ok(lock.packages['https://registry.npmjs.org/tool/2.0.0/']);
+    assert.match(
+      new TextDecoder().decode(
+        await installer.readFile('/node_modules/tool/index.js'),
+      ),
+      /2.0.0/,
+    );
+    assert.equal(
+      new TextDecoder().decode(await disk.files.readFile('/package.json')),
+      source,
+    );
+  } finally {
+    await disk.dispose();
+  }
+});
+
+test('an explicit update queued behind preparation still resolves fresh versions', async () => {
+  const disk = await diskFiles();
+  try {
+    const registry = await registryFixture();
+    await registry.add('tool', '1.0.0');
+    await disk.files.writeFile(
+      '/package.json',
+      '{"dependencies":{"tool":"latest"}}',
+    );
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    let started!: () => void;
+    const downloading = new Promise<void>(resolve => {
+      started = resolve;
+    });
+    const installer = new BrowserPackageInstaller(disk.files, undefined, () => {
+      const client = registry.registry();
+      const archive = client.archive.bind(client);
+      client.archive = async pkg => {
+        if (pkg.version === '1.0.0') {
+          started();
+          await gate;
+        }
+        return archive(pkg);
+      };
+      return client;
+    });
+    const preparing = installer.prepare('/model.ts');
+    await downloading;
+    await registry.add('tool', '2.0.0');
+    const updating = installer.prepare('/package.json', {update: true});
+    const observing = installer.prepare('/another.ts');
+    release();
+    await Promise.all([preparing, updating, observing]);
+    const lock = JSON.parse(
+      new TextDecoder().decode(await disk.files.readFile('/code3d-lock.json')),
+    );
+    assert.ok(lock.packages['https://registry.npmjs.org/tool/2.0.0/']);
+    assert.deepEqual(
+      registry.requests.filter(url => url.endsWith('.tgz')),
+      [
+        'https://registry.npmjs.org/tool/-/1.0.0.tgz',
+        'https://registry.npmjs.org/tool/-/2.0.0.tgz',
+      ],
+    );
+  } finally {
+    await disk.dispose();
+  }
 });
