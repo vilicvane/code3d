@@ -106,6 +106,31 @@ after(async () => {
   await server?.close();
 });
 
+test('successful programs without model output compile to an empty module', async t => {
+  for (const [name, source] of [
+    ['empty', ''],
+    ['whitespace', ' \n\t\n'],
+    ['comments', '// Start modeling\n/* Nothing yet */'],
+    ['imports', "import {box} from '@code3d/core';"],
+    ['values', 'export const size = 10; export default {size};'],
+    ['helper', 'export function twice(value: number) { return value * 2; }'],
+  ]) {
+    await t.test(name, async () => {
+      const module = await compileProject(
+        {files: [{path: '/model.ts', source}]},
+        '/model.ts',
+      );
+      assert.equal(module.diagnostic, undefined);
+      assert.deepEqual(module.warnings, []);
+      assert.equal(module.fallback, undefined);
+      assert.equal(module.objects.size, 0);
+      assert.equal(module.sketches.size, 0);
+      assert.equal(module.exports.size, 0);
+      assert.deepEqual(module.sourceTargets, []);
+    });
+  }
+});
+
 test('shell tools select input surfaces while displaying the result, including failed offsets', async () => {
   for (const [call, selected, failure] of [
     ['shell(1)', [], false],

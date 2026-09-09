@@ -41,6 +41,13 @@ async function open(
       body: `export const defaultProject = ${JSON.stringify({files: [{path: '/model.ts', source}]})};`,
     }),
   );
+  // Unrelated example design contexts used to mask empty-program failures.
+  await page.route('**/src/project/bundled-examples.ts*', route =>
+    route.fulfill({
+      contentType: 'text/javascript',
+      body: 'export const bundledExamples = {directory: "/examples", revision: "empty", files: []};',
+    }),
+  );
   await page.route('**/src/main.ts*', async route => {
     const response = await route.fetch();
     await route.fulfill({
@@ -105,6 +112,57 @@ async function expectEmpty(page: Page): Promise<void> {
     undefined,
   );
 }
+
+test('an empty file opens ready and recovers from errors without a model', async t => {
+  const page = await open(t, '');
+  await expectEmpty(page);
+  assert.equal(await page.locator('#error-bar').isVisible(), false);
+  for (const source of [
+    'throw new Error("unfinished model");',
+    "import {box} from '@code3d/core'; box(0);",
+  ]) {
+    await setSource(page, source, '', 'error');
+    assert.ok(
+      await page.evaluate(
+        () => window.emptyViewportApp.viewport['module']?.diagnostic,
+      ),
+    );
+    await setSource(page, '', '');
+    await expectEmpty(page);
+    assert.equal(await page.locator('#error-bar').isVisible(), false);
+    assert.equal(
+      await page.locator('#viewport-diagnostic-stack').isVisible(),
+      false,
+    );
+  }
+});
+
+test('clearing a previewed model removes its geometry without reporting an error', async t => {
+  const page = await open(
+    t,
+    "import {box} from '@code3d/core'; box(10, 10, 10);",
+  );
+  assert.equal(
+    await page.evaluate(() =>
+      window.emptyViewportApp.viewport.hasRenderableGeometry(),
+    ),
+    true,
+  );
+  await setSource(page, '', '');
+  assert.equal(await page.locator('#error-bar').isVisible(), false);
+  assert.equal(
+    await page.evaluate(() =>
+      window.emptyViewportApp.viewport.hasRenderableGeometry(),
+    ),
+    false,
+  );
+  assert.equal(
+    await page.evaluate(() => window.emptyViewportApp.viewport.getSelected()),
+    undefined,
+  );
+  // The initial hint stays dismissed until another file is opened.
+  assert.equal(await page.locator('#viewport-empty-state').isVisible(), false);
+});
 
 test('a failed tool call reveals the viewport before any geometry has been rendered', async t => {
   const page = await open(

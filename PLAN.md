@@ -290,6 +290,9 @@ implementation context and historical outcomes, not a competing work queue.
   version or stability guarantee. See [#30](https://github.com/vilicvane/code3d/issues/30).
 - Rendering is driven primarily by source or GUI object selection. Exporting is
   a publishing boundary and only a preview fallback, not a render prerequisite.
+  Successful execution without model output is a normal empty preview, including
+  blank files, comments, imports and helper declarations. Only actual compilation
+  or evaluation failures produce errors. See [#101](https://github.com/vilicvane/code3d/issues/101).
 - Before the first preview, App shows **Select to preview** with an animated
   text selection. Each round starts with `model`, then `sketch`, then an explicit
   list of transformation and composition/Boolean API names in shuffled order.

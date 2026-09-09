@@ -1435,17 +1435,6 @@ export function createModelCompiler(
         modelExports.get('default') ??
         [...modelExports.values()].at(-1) ??
         latestTracedObject;
-      if (
-        !fallbackObject &&
-        !diagnostic &&
-        designArguments.length === 0 &&
-        !activeDesignContext &&
-        sketches.size === 0
-      ) {
-        throw new Error(
-          'The current program did not produce a renderable ModelObject.',
-        );
-      }
       if (diagnostic) {
         diagnostic = relateDiagnostic(diagnostic, fallbackObject);
       }
