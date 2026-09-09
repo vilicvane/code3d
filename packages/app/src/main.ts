@@ -387,13 +387,18 @@ const navigationPackages = new ProjectPackages(
 );
 codeEditor.fileReader = {
   async readFile(path) {
+    // Editable project files retain their source, not runtime package metadata.
+    if (!path.includes('/node_modules/')) return packageFiles.readFile(path);
     await navigationPackages.update(
       codeEditor.project(),
       codeEditor.currentFile() ?? '/model.ts',
     );
     return navigationPackages.readFile(path);
   },
-  stat: path => navigationPackages.stat(path),
+  stat: path =>
+    path.includes('/node_modules/')
+      ? navigationPackages.stat(path)
+      : packageFiles.stat(path),
 };
 const preparePackages = async (_project: ModelProject, file: string) => {
   if (!packageInstaller) return;

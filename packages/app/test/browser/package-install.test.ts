@@ -83,7 +83,9 @@ test(
         source: new TextDecoder().decode(
           await files.readFile(root + '/model.ts'),
         ),
-        manifest: !!(await files.stat(root + '/package.json')),
+        manifest: new TextDecoder().decode(
+          await files.readFile(root + '/package.json'),
+        ),
         lock: !!(await files.stat(root + '/code3d-lock.json')),
         package: !!(await files.stat(
           root + '/node_modules/just-range/index.mjs',
@@ -91,9 +93,36 @@ test(
       };
     });
     assert.match(installed.source, /import range from 'just-range'/);
-    assert.equal(installed.manifest, true);
+    assert.match(installed.manifest, /\n  "private": true,/);
     assert.equal(installed.lock, true);
     assert.equal(installed.package, true);
+
+    await page.locator('#packages-button').click();
+    await page.waitForFunction(() =>
+      window.packageApp.codeEditor
+        .currentFile()
+        ?.endsWith('/post-array/package.json'),
+    );
+    assert.equal(
+      await page.evaluate(() => window.packageApp.codeEditor.editor.getValue()),
+      installed.manifest,
+      'Packages opens the stored manifest with its original formatting and field order',
+    );
+    await page.reload();
+    await page.waitForFunction(() =>
+      window.packageApp?.codeEditor.currentFile()?.endsWith('/package.json'),
+    );
+    assert.equal(
+      await page.evaluate(() => window.packageApp.codeEditor.editor.getValue()),
+      installed.manifest,
+      'reloading the manifest preserves the same source text',
+    );
+    await page.evaluate(() =>
+      window.packageApp.codeEditor.openFile(
+        '/examples/patterns/post-array/model.ts',
+      ),
+    );
+    await page.getByText('Ready', {exact: true}).waitFor({timeout: 90_000});
 
     await page.evaluate(() => {
       const {editor} = window.packageApp.codeEditor;
