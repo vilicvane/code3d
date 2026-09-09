@@ -75,7 +75,7 @@ export default ${geometry}.material(${JSON.stringify(color)});`;
               '/model.ts',
             );
             if (module.diagnostic) throw new Error(module.diagnostic.summary);
-            viewport.renderModule(module, undefined, true);
+            viewport.renderModule(module);
             const drawn: {color: string; opacity: number}[] = [];
             const restore: (() => void)[] = [];
             for (const occurrence of viewport['occurrences'].values()) {

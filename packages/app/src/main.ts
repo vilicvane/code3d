@@ -461,6 +461,13 @@ type ContextualToolState = {
 
 const viewport = new ModelViewport(viewportHost, {
   onViewChange: refreshViewportEmptyState,
+  onRenderModeChange: mode => {
+    for (const candidate of viewportModes)
+      candidate.button.setAttribute(
+        'aria-pressed',
+        String(candidate.mode === mode),
+      );
+  },
   onSourcePreviewDiagnostic: diagnostic => {
     sourcePreviewDiagnostic = diagnostic;
     refreshViewportFeedback();
@@ -490,11 +497,6 @@ const viewportModes = (['modeling', 'render'] as const).map(mode => ({
 for (const {mode, button} of viewportModes) {
   button.addEventListener('click', () => {
     viewport.setRenderMode(mode);
-    for (const candidate of viewportModes)
-      candidate.button.setAttribute(
-        'aria-pressed',
-        String(candidate.mode === mode),
-      );
   });
 }
 const imageExportDialog = new ImageExportDialog(viewportHost, {
@@ -1047,7 +1049,6 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
 
   try {
     const selectedKey = viewport.getSelected()?.key ?? 'root';
-    const firstRun = currentModule === null;
     const nextModule = await compiler.compile(
       codeEditor.project(),
       file,
@@ -1090,21 +1091,19 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
     ) {
       preferredEvaluationContextId = undefined;
     }
-    viewport.renderModule(currentModule, selectedKey, firstRun);
+    const cursor = codeEditor.cursorSource();
+    const matched = viewport.renderModule(
+      currentModule,
+      selectedKey,
+      cursor ? {...cursor, contextId: preferredEvaluationContextId} : undefined,
+    );
     if (previewFile !== file) {
       previewFile = file;
       // Reset after replacing the scene: callbacks while clearing it still
       // observe the previous file's geometry and must not dismiss this hint.
       hasPreviewedTarget = false;
     }
-    const cursor = codeEditor.cursorSource();
     if (cursor) {
-      const matched = viewport.selectBySourceOffset(
-        cursor.file,
-        cursor.offset,
-        selectedKey,
-        preferredEvaluationContextId,
-      );
       if (!matched) {
         const designContext = designContextAt(
           currentModule,

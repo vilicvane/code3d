@@ -320,7 +320,7 @@ test(
     assert.notDeepEqual(after, before);
     await setSource(
       page,
-      "import {box} from '@code3d/core';\nconst changed = box(30, 20, 15).material('#f008');\nchanged;",
+      "import {box} from '@code3d/core';\nconst body = box(30, 20, 15).material('#f008');\nbody;",
     );
     assert.equal(await render.getAttribute('aria-pressed'), 'true');
     assert.equal(

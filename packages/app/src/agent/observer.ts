@@ -477,6 +477,7 @@ export class AgentObserver {
     if (this.viewport) return this.viewport;
     const host = this.createRenderHost();
     this.viewport = new ModelViewport(host, {
+      animateViewChanges: false,
       onSelect() {},
       onDrillDown() {},
       onNavigateSource() {},
