@@ -202,7 +202,7 @@ function gate<T>() {
   return {promise, resolve};
 }
 
-test('follow updates describe accepted edits before observation and exclude reads and rejected changes', async () => {
+test('follow updates describe accepted edits before observation and exclude context, stat and rejected changes', async () => {
   const observed = gate<AgentResponse>();
   const observing = gate<void>();
   const f = fixture({
@@ -213,7 +213,10 @@ test('follow updates describe accepted edits before observation and exclude read
   });
   const updates: AgentUpdate[] = [];
   const unsubscribe = f.session.onAgentUpdate(update => updates.push(update));
-  await f.read('/model.ts');
+  await f.session.handle('alice', 'Alice', {
+    operation: 'fs.stat',
+    path: '/model.ts',
+  });
   await f.session.handle('alice', 'Alice', {operation: 'context'});
   const rejected = await f.apply({
     files: [{path: '/model.ts', version: 'wrong', content: 'const model = 3;'}],
@@ -226,6 +229,7 @@ test('follow updates describe accepted edits before observation and exclude read
   });
   await observing.promise;
   assert.equal(updates.length, 1);
+  assert.ok(updates[0].kind === 'apply');
   assert.deepEqual(updates[0].cursor, {file: '/model.ts', start: 6, end: 11});
   assert.equal(updates[0].agentId, 'alice');
   observed.resolve({ok: true, data: {}});
@@ -246,7 +250,10 @@ test('starting follow uses each agent’s current cursor, arguments and last exp
   });
   await f.apply({cursor: {file: '/lib.ts', regex: 'const (value)'}}, 'bob');
   await f.apply({type: true});
-  await f.read('/model.ts');
+  await f.session.handle('alice', 'Alice', {
+    operation: 'fs.stat',
+    path: '/model.ts',
+  });
   await f.apply({
     files: [{path: '/model.ts', version: 'wrong', content: ''}],
     cursor: {file: '/model.ts', regex: '(1)', arguments: '[99]'},
@@ -257,12 +264,14 @@ test('starting follow uses each agent’s current cursor, arguments and last exp
   f.cursors.set('alice', moved);
   assert.deepEqual(f.session.latestAgentUpdate('alice'), {
     agentId: 'alice',
+    kind: 'apply',
     cursor: moved,
     arguments: '[12]',
     view: 'top',
   });
   assert.deepEqual(f.session.latestAgentUpdate('bob'), {
     agentId: 'bob',
+    kind: 'apply',
     cursor: {file: '/lib.ts', start: 13, end: 18},
     arguments: undefined,
     view: undefined,
@@ -270,18 +279,87 @@ test('starting follow uses each agent’s current cursor, arguments and last exp
   const updates: AgentUpdate[] = [];
   f.session.onAgentUpdate(update => updates.push(update));
   await f.apply({cursor: {file: '/model.ts', regex: '(1)'}});
-  assert.equal(f.session.latestAgentUpdate('alice')?.arguments, undefined);
-  assert.equal(f.session.latestAgentUpdate('alice')?.view, 'top');
+  const latest = f.session.latestAgentUpdate('alice');
+  assert.ok(latest?.kind === 'apply');
+  assert.equal(latest.arguments, undefined);
+  assert.equal(latest.view, 'top');
   // Keeping the view for activation does not force it on subsequent updates.
-  assert.equal(updates.at(-1)?.view, undefined);
+  const updated = updates.at(-1);
+  assert.ok(updated?.kind === 'apply');
+  assert.equal(updated.view, undefined);
   f.cursors.delete('alice');
   assert.equal(f.session.latestAgentUpdate('alice'), undefined);
   f.session.forgetAgent('alice');
   f.cursors.set('alice', moved);
   assert.deepEqual(f.session.latestAgentUpdate('alice'), {
     agentId: 'alice',
+    kind: 'apply',
     cursor: moved,
+    arguments: undefined,
+    view: undefined,
   });
+});
+
+test('successful reads and lists publish independent agent navigation without moving modeling cursors', async () => {
+  const f = fixture();
+  await f.apply({
+    cursor: {file: '/model.ts', regex: '(model)'},
+    render: {view: 'top'},
+  });
+  const cursor = f.cursors.get('alice');
+  const revision = f.session.currentRevision;
+  const updates: AgentUpdate[] = [];
+  const unsubscribe = f.session.onAgentUpdate(update => updates.push(update));
+  await f.read('/lib.ts');
+  await f.session.handle('bob', 'Bob', {operation: 'fs.list', path: '/'});
+  assert.deepEqual(updates, [
+    {agentId: 'alice', kind: 'read', path: '/lib.ts'},
+    {agentId: 'bob', kind: 'list', path: '/'},
+  ]);
+  assert.deepEqual(f.session.latestAgentUpdate('alice'), updates[0]);
+  assert.deepEqual(f.session.latestAgentUpdate('bob'), updates[1]);
+  assert.equal(f.cursors.get('alice'), cursor);
+  assert.equal(f.session.currentRevision, revision);
+  assert.deepEqual(f.writes, []);
+  for (const operation of ['fs.read', 'fs.list'] as const) {
+    const failed = await f.session.handle('alice', 'Alice', {
+      operation,
+      path: '/missing',
+    });
+    assert.equal(failed.ok, false);
+  }
+  assert.equal(updates.length, 2);
+  assert.deepEqual(f.session.latestAgentUpdate('alice'), updates[0]);
+  await f.apply({cursor: {file: '/model.ts', regex: '(1)'}});
+  const applied = f.session.latestAgentUpdate('alice');
+  assert.ok(applied?.kind === 'apply');
+  assert.equal(applied.view, 'top');
+  unsubscribe();
+  await f.read('/lib.ts');
+  assert.equal(updates.length, 3);
+  f.session.forgetAgent('bob');
+  assert.equal(f.session.latestAgentUpdate('bob'), undefined);
+});
+
+test('opening a file after reading preserves its version for the next apply', async () => {
+  const f = fixture();
+  f.documents.delete('/lib.ts');
+  const read = await f.read('/lib.ts');
+  f.documents.set('/lib.ts', {
+    content: read.content,
+    version: 'new-editor-document',
+  });
+  assert.equal((await f.read('/lib.ts')).version, read.version);
+  const result = await f.apply({
+    files: [
+      {
+        path: '/lib.ts',
+        version: read.version,
+        content: 'export const value = 3;',
+      },
+    ],
+  });
+  assert.ok(result.ok, JSON.stringify(result));
 });
 
 test('context reads the current user target without adopting it or modifying files', async () => {
