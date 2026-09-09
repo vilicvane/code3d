@@ -62,6 +62,33 @@ import type {Shape3D as RootShape3D} from '@code3d/core';
 import type {ModelObject as InternalModelObject} from '@code3d/core/bld/library/runtime.js';
 
 const solid = box(10, 5, 8);
+// Runtime defaults do not make authored dimensions optional in TypeScript.
+// @ts-expect-error Box dimensions remain required.
+box();
+// @ts-expect-error Partial box dimensions remain incomplete.
+box(10);
+// @ts-expect-error Explicit undefined remains a type error.
+box(undefined, 10, 10);
+// @ts-expect-error Circle radius remains required.
+circle();
+// @ts-expect-error Ellipse radii remain required.
+ellipse();
+// @ts-expect-error Rectangle dimensions remain required.
+rectangle();
+// @ts-expect-error Polygon radius and sides remain required.
+regularPolygon();
+// @ts-expect-error Cylinder dimensions remain required.
+cylinder();
+// @ts-expect-error Tube dimensions remain required.
+tube();
+// @ts-expect-error Coil dimensions remain required.
+coil();
+// @ts-expect-error Sphere radius remains required.
+sphere();
+// @ts-expect-error Frustum dimensions remain required.
+frustum();
+// @ts-expect-error Prism dimensions remain required.
+regularPrism();
 const material: Material = new MeshPhysicalMaterial({
   roughness: 0.3,
   clearcoat: 1,
@@ -145,7 +172,7 @@ const tubeModel: SolidModel<CanonicalElements> = tube(6, 4, 12);
 const coilModel: SolidModel<CanonicalElements> = coil(5, 0.75, 4, 2.5);
 // @ts-expect-error Coil dimensions are required numeric parameters.
 coil(5, 0.75, 4, '2.5');
-// @ts-expect-error No implicit default turn count.
+// @ts-expect-error The turn count remains required in the public signature.
 coil(5, 0.75, 4);
 // @ts-expect-error Tube dimensions are required, with no option bag or overload.
 tube(6, {wall: 2}, 12);

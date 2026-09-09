@@ -36,6 +36,17 @@ retire ambiguous source paths. Full rules are in the
 `relate()` records placement for composition with other values; inspecting or
 rendering the resulting value by itself uses its own local geometry.
 
+## Runtime defaults
+
+Dimension-based primitives keep required TypeScript signatures while supplying
+runtime defaults for omitted or `undefined` arguments. For example, `box()`
+produces the same geometry as `box(10, 10, 10)`, but TypeScript still requires all
+three dimensions. Explicit invalid values keep their normal errors. These
+defaults work in ordinary JavaScript execution as well as App previews.
+The [Modeling API](../web/src/content/docs/docs/reference/core.md#runtime-defaults-while-editing)
+lists the defaults for all supported primitives. The App displays them as
+placeholders without inserting arguments into source.
+
 ## Face extrusion
 
 `face.extrude(distance)` and `extrude(face, distance)` produce a `SolidModel`

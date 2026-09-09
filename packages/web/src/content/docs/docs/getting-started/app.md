@@ -82,7 +82,11 @@ When you load a file without a preview, the viewport shows **Select to preview**
 Place the cursor in a model or sketch expression to open it. The hint stays
 dismissed after your first preview until you load another file. Moving outside
 an expression keeps the last 3D preview. An empty sketch still opens its drawing
-tools.
+tools. Selecting an editable call that fails also opens the viewport and its
+parameter panel, so you can correct the arguments without first producing a
+valid model. Dimension-based primitives such as `box()` provide
+[runtime defaults](../../reference/core/#runtime-defaults-while-editing) for a
+preview while the editor continues to report missing required arguments.
 
 - Place the editor cursor in an expression to inspect its runtime object.
 - Drag with the left mouse button to rotate freely using Arcball, including
