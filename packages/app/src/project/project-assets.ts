@@ -7,9 +7,28 @@ import {locateModelError} from '../model/diagnostic';
 export class ProjectAssets {
   private readonly urls = new Map<string, {version: string; url: string}>();
 
+  private readonly pending = new Map<string, Promise<string>>();
+  private readonly contents = new Map<string, Uint8Array>();
+
   constructor(private readonly files: ProjectFileReader) {}
 
+  read(url: URL): Uint8Array | undefined {
+    return this.contents.get(url.href);
+  }
+
   async url(path: string): Promise<string> {
+    const existing = this.pending.get(path);
+    if (existing) return existing;
+    const loading = this.loadUrl(path);
+    this.pending.set(path, loading);
+    try {
+      return await loading;
+    } finally {
+      this.pending.delete(path);
+    }
+  }
+
+  private async loadUrl(path: string): Promise<string> {
     const info = await this.files.stat(path);
     if (info?.kind !== 'file')
       throw new Error('Project asset not found: ' + path);
@@ -17,9 +36,13 @@ export class ProjectAssets {
     if (existing?.version === info.version) return existing.url;
     const contents = await this.files.readFile(path);
     if (!contents) throw new Error('Project asset not found: ' + path);
-    if (existing) URL.revokeObjectURL(existing.url);
+    if (existing) {
+      URL.revokeObjectURL(existing.url);
+      this.contents.delete(existing.url);
+    }
     const url = URL.createObjectURL(new Blob([Uint8Array.from(contents)]));
     this.urls.set(path, {version: info.version, url});
+    this.contents.set(url, contents);
     return url;
   }
 
@@ -88,5 +111,6 @@ export class ProjectAssets {
   dispose(): void {
     for (const {url} of this.urls.values()) URL.revokeObjectURL(url);
     this.urls.clear();
+    this.contents.clear();
   }
 }

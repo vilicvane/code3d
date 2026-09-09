@@ -1,3 +1,6 @@
+export {font} from './font.js';
+export type {Font} from './font.js';
+export type {TextOptions} from './text.js';
 export {sketch} from './sketch.js';
 export type {
   Sketch,
@@ -19,6 +22,7 @@ export {
   cylinder,
   ellipse,
   extrude,
+  text,
   frustum,
   group,
   intersect,

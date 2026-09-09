@@ -48,7 +48,11 @@ type ProjectFileOperations = {
     path: string,
     options: {throwIfNoEntry: false},
   ): Promise<unknown | undefined>;
-  writeFile(path: string, source: string, encoding: 'utf8'): Promise<unknown>;
+  writeFile(
+    path: string,
+    source: string | Uint8Array,
+    encoding?: 'utf8',
+  ): Promise<unknown>;
 };
 
 export interface ProjectFileSystem extends ProjectFileReader {
@@ -185,6 +189,18 @@ class ProjectStore implements ProjectFileSystem {
     template: ProjectDirectoryTemplate,
     manifest: ProjectManifest,
   ): Promise<ModelProject> {
+    // Prepare binary assets before replacing the managed directory.
+    const assets = await Promise.all(
+      (template.assets ?? []).map(async asset => {
+        const response = await fetch(asset.url);
+        if (!response.ok)
+          throw new Error('Could not load project asset: ' + asset.path);
+        return {
+          path: asset.path,
+          contents: new Uint8Array(await response.arrayBuffer()),
+        };
+      }),
+    );
     const directory = normalizeProjectPath(template.directory);
     const diskPath = this.toDiskPath(directory);
     if (await this.exists(diskPath)) {
@@ -192,6 +208,11 @@ class ProjectStore implements ProjectFileSystem {
     }
     for (const file of template.files) {
       await this.writeFile(file.path, file.source);
+    }
+    for (const asset of assets) {
+      const path = this.toDiskPath(normalizeProjectPath(asset.path));
+      await this.files.mkdir(projectDirectory(path), {recursive: true});
+      await this.files.writeFile(path, asset.contents);
     }
     await this.writeManifest({
       ...manifest,

@@ -9,6 +9,7 @@ export type ModelProject = Readonly<{
 
 export type ProjectDirectoryTemplate = Readonly<{
   directory: string;
+  assets?: readonly Readonly<{path: string; url: string}>[];
   revision: string;
   files: readonly ProjectSourceFile[];
 }>;

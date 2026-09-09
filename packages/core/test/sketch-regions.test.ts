@@ -272,8 +272,7 @@ test('extrusion cache keys include distance and profile, and inherited topology 
   assert.ok(a.surfaces().some(s => Array.isArray(s.id)));
   assert.throws(() => f.extrude(0), /non-zero/);
   assert.throws(() => f.extrude(Infinity), /finite/);
-  // @ts-expect-error Extrude is deliberately not a collection operation.
-  assert.throws(() => extrude([f], 2), /single face/);
+  assert.equal(extrude([f], 2).map(keep).length, 1);
 });
 
 test('chain cut is one operation with ordinary multiple-tool inputs, matching the free function', () => {

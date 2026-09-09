@@ -1,3 +1,4 @@
+import {readFile} from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {before, after, test, type TestContext} from 'node:test';
@@ -315,3 +316,60 @@ function sameTopology(
       );
   } else assert.equal(actual, expected, path);
 }
+
+test(
+  'font text restores from OPFS in fresh Workers and keeps changed font histories',
+  {timeout: 180_000},
+  async t => {
+    const page = await fixture(t);
+    const latin = new Uint8Array(
+      await readFile(
+        new URL('../../examples/fonts/DejaVuSans.ttf', import.meta.url),
+      ),
+    );
+    const chinese = new Uint8Array(
+      await readFile(
+        new URL(
+          '../../../core/test/fonts/NotoSansCJK-subset.otf',
+          import.meta.url,
+        ),
+      ),
+    );
+    const source = `import {font,text,extrude,group} from '@code3d/core';
+const sans = font(new URL('./font.ttf',import.meta.url));
+export default group(extrude(text('B8i',10,{font:sans}),2));`;
+    const assets = {'/font.ttf': {bytes: latin, version: '1'}};
+    const cold = await compile(page, {
+      source,
+      assets,
+      summary: true,
+      concurrency: 4,
+    });
+    valid(cold);
+    const restored = await compile(
+      page,
+      {source, assets, summary: true, concurrency: 4},
+      'compiler',
+      true,
+    );
+    valid(restored);
+    assert.equal(restored.objects, cold.objects);
+    assert.ok(restored.stats.memory!.persistentHits > 0);
+    assert.equal(restored.stats.memory!.misses, 1); // The parsed font is memory-only.
+    const changed = await compile(page, {
+      source,
+      summary: true,
+      assets: {'/font.ttf': {bytes: chinese, version: '2'}},
+    });
+    valid(changed);
+    assert.notEqual(changed.objects, cold.objects);
+    const undo = await compile(
+      page,
+      {source, assets, summary: true},
+      'compiler',
+      true,
+    );
+    valid(undo);
+    assert.equal(undo.objects, cold.objects);
+  },
+);

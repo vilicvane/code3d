@@ -497,15 +497,23 @@ export function createModelCompiler(
       if (isConstraintExpression(result)) {
         instrumentConstraint(result, location, parameters);
         recordSourceConstraint(id, location, result, context.id, runtime);
-      } else if (isModelObject(result)) {
+      } else if (
+        isModelObject(result) ||
+        (Array.isArray(result) &&
+          result.length > 0 &&
+          result.every(isModelObject))
+      ) {
         const order = ++evaluationOrder;
-        instrumentModelOperation(result, {
-          siteId: id,
-          execution,
-          order,
-          sourceRef: location,
-          parameters,
-        });
+        for (const object of isModelObject(result)
+          ? [result]
+          : (result as ModelObject[]))
+          instrumentModelOperation(object, {
+            siteId: id,
+            execution,
+            order,
+            sourceRef: location,
+            parameters,
+          });
         recordSourceValue(
           id,
           'operation-output',

@@ -155,6 +155,9 @@ export class ProjectCompiler {
         }
         throw new ModelDiagnosticError(diagnostic);
       });
+      this.runtime.tooling.installModelResourceReader(url =>
+        this.assets.read(url),
+      );
       this.compiler = createModelCompiler(this.runtime.tooling, this.evaluator);
       this.snapshotPool = new SnapshotWorkerPool(
         this.runtime.tooling,

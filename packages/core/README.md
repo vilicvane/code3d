@@ -319,16 +319,17 @@ const ring = sketch([
   ['circle', 3, [1, 8]],
 ]);
 const sleeve = ring.face().extrude(20);
-const tools = anotherSketch.faces().map(face => face.extrude(10));
+const tools = extrude(anotherSketch.faces(), 10);
 const result = stock.cut(tools); // equivalent to cut(stock, tools)
 ```
 
 Sketch `[x, y]` maps to model `[x, 0, -y]`, without recentering. Face extrusion
 follows its plane normal (`+Y` before rotation). Distance is signed, finite and
 nonzero; the start cap stays at the original face. `extrude(face, distance)` is
-equivalent to `face.extrude(distance)` and takes one face, never an array. Results
-are normal immutable solid models with caching, rendering, topology and source
-tracing; ordinary `.map()` handles multiple independent outputs.
+equivalent to `face.extrude(distance)`. `extrude(faces, distance)` accepts a readonly
+face array and returns a readonly array of independent solids in the same order;
+an empty array returns an empty array. It preserves placement and does not fuse
+results. Solids retain caching, rendering, topology and source tracing.
 
 `loft(sections, options)` still takes one face per section. Zero holes and one
 corresponding hole per section work with ordinary or spine-guided lofts. Different
@@ -811,3 +812,34 @@ Repeated exports therefore preserve the retained geometry and author models.
 Core owns snapshot creation; the App owns export placement and file generation,
 using Replicad from the same runtime. This division already serves the current
 consumers and changes only when a concrete use case calls for it.
+
+## Text
+
+```ts
+import {font, text, extrude, group} from '@code3d/core';
+
+const sans = font(new URL('./fonts/DejaVuSans.ttf', import.meta.url));
+const profiles = text('B8i', 10, {font: sans});
+export const lettering = group(extrude(profiles, 1));
+```
+
+`font()` synchronously returns an immutable font resource. The App prepares literal
+`new URL('./font.ttf', import.meta.url)` assets before evaluating model code, including
+assets in imported modules. Changing the font file invalidates the resource; equal
+file contents reuse parsed fonts and geometry. Node reads file URLs directly.
+`font()` also accepts `ArrayBuffer` or `Uint8Array` bytes, captured at the call.
+Dynamic network fetching belongs to the host, outside synchronous model evaluation.
+
+TTF and OTF fonts are supported, including Chinese characters when present in the
+font. Font collections (TTC), WOFF2, color glyphs and multiline layout are outside
+this first API. Missing glyphs and crossing/touching contours within a glyph report
+an error. Empty text and spaces create no faces; spaces still advance subsequent
+characters. Layout uses the font's advances, kerning and supported ligatures.
+
+`text(content, size, {font})` returns connected planar regions as ordinary readonly
+`FaceModel[]`: `B` has one face with two holes; `i` has two faces. Size is the font em
+in model units, not the cap height. Coordinates are +X right, -Z up, normal +Y, with
+all faces retaining the same baseline origin. Faces are never individually centered,
+so `group(extrude(...))`, origin operations and boolean tools preserve the layout.
+Use positive/negative extrusion and `union`/`cut` for raised or engraved lettering.
+Text is currently code-defined geometry rather than an editable sketch entity.

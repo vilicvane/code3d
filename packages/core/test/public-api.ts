@@ -154,8 +154,7 @@ tube(6, 4);
 const faceModel: FaceModel<PlanarElements> = circle(4);
 const extrudedFace: SolidModel = faceModel.extrude(3);
 const extrudedProfile: SolidModel = extrude(faceModel.rotate(0, 0, 90), -3);
-// @ts-expect-error Extrusion accepts one face; map multiple faces explicitly.
-extrude([faceModel], 3);
+const extrudedFaces: readonly SolidModel[] = extrude([faceModel], 3);
 // @ts-expect-error A solid is not an extrusion profile.
 extrude(solid, 3);
 // @ts-expect-error Only face models expose extrusion.

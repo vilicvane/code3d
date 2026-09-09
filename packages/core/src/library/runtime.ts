@@ -1,3 +1,5 @@
+import {font} from './font.js';
+import {textGlyphs, textRegionFace, type TextOptions} from './text.js';
 import type {Material} from './three.js';
 import {captureModelMaterial, type ModelMaterialSnapshot} from './material.js';
 import {
@@ -213,6 +215,7 @@ export type ModelOperationKind =
   | 'spline'
   | 'loft'
   | 'sketchFace'
+  | 'text'
   | 'extrude'
   | 'primitive'
   | 'material'
@@ -3735,15 +3738,54 @@ export function union(operands: readonly SolidModel<{}>[]): SolidModel {
 }
 
 /**
- * Extrudes a single face; use faces.map(face => extrude(face, distance)) for multiple regions.
+ * Extrudes each face independently, preserving array order and placement.
  * @code3d.param distance {kind: 'length', label: 'Extrusion distance'}
  */
-export function extrude(face: FaceModel<{}>, distance: number): SolidModel {
-  return requireModelKind(
-    face,
-    'face',
-    'extrude requires a single face model.',
-  ).extrude(distance);
+export function extrude(face: FaceModel<{}>, distance: number): SolidModel;
+/**
+ * Extrudes each face independently.
+ * @code3d.param distance {kind: 'length', label: 'Extrusion distance'}
+ */
+export function extrude(
+  faces: readonly FaceModel<{}>[],
+  distance: number,
+): readonly SolidModel[];
+export function extrude(
+  face: FaceModel<{}> | readonly FaceModel<{}>[],
+  distance: number,
+): SolidModel | readonly SolidModel[] {
+  const faces = (Array.isArray(face) ? face : [face]).map(value =>
+    requireModelKind(
+      value,
+      'face',
+      'extrude requires a face model or an array of face models.',
+    ),
+  );
+  const solids = faces.map(value => value.extrude(distance));
+  return Array.isArray(face) ? solids : solids[0];
+}
+
+/**
+ * Creates connected text faces on the XZ plane: +X right, -Z up, normal +Y.
+ * All faces share the baseline origin. Size is the font em in model units.
+ * @code3d.param size {kind: 'length', label: 'Text size'}
+ */
+export function text(
+  content: string,
+  size: number,
+  options: TextOptions,
+): readonly FaceModel[] {
+  return textGlyphs(content, size, options).flatMap(({regions, x, y}) =>
+    regions.value.map((region, index) => {
+      const geometry = evaluateModelGeometry(
+        'text',
+        [x, y, index],
+        [regions],
+        () => ({shape: textRegionFace(region, x, y)}),
+      );
+      return faceModel('text', 'Text face', geometry);
+    }),
+  );
 }
 
 export function cut(
@@ -4096,6 +4138,8 @@ export function retainModelGeometry(
 }
 
 export const authoringApi = Object.freeze({
+  font,
+  text,
   sketch,
   circle,
   ellipse,
@@ -4391,18 +4435,7 @@ export function sketchFaceModel(region: SketchRegion): FaceModel {
   const geometry = evaluateModelGeometry('sketchFace', curves, [], () => ({
     shape: sketchRegionFace(region),
   }));
-  const plane: StoredElement = {
-    kind: 'face',
-    transform: identityRigidTransform,
-  };
-  return ModelObject.create<PlanarElements, 'face'>({
-    kind: 'face',
-    name: 'Sketch face',
-    geometry,
-    geometryAnchor: plane,
-    elements: {plane},
-    operation: storedOperation('sketchFace'),
-  }) as unknown as FaceModel;
+  return faceModel('sketchFace', 'Sketch face', geometry);
 }
 
 function planarFaceModel(
@@ -4424,6 +4457,14 @@ function planarFaceModel(
       sketch.delete();
     }
   });
+  return faceModel(operation, name, geometry);
+}
+
+function faceModel(
+  operation: ModelOperationKind,
+  name: string,
+  geometry: ModelGeometry,
+): FaceModel {
   const plane: StoredElement = {
     kind: 'face',
     transform: identityRigidTransform,

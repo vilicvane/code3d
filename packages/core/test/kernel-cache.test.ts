@@ -431,3 +431,64 @@ test('auxiliary worker memory trims shared history while preserving both active 
   assert.equal(cache.kernelOperationCacheStats().externalBytes, 0);
   assert.equal(cache.kernelOperationCacheStats().maximumBytes, 4096);
 });
+
+test('memory-only resources share LRU eviction without disabling geometry persistence', () => {
+  const records = new Map<string, Uint8Array>();
+  const reads: string[] = [];
+  cache.setKernelArtifactStore({
+    get(id) {
+      reads.push(id);
+      return records.get(id);
+    },
+    set(id, bytes) {
+      records.set(id, bytes);
+    },
+    touch: id => records.has(id),
+    delete(id) {
+      records.delete(id);
+    },
+    flush() {},
+  });
+  class Parsed {
+    value = 1;
+  }
+  let released = 0;
+  const resourceLifecycle = {
+    persistent: false,
+    estimateBytes: () => 2000,
+    retain: (value: Parsed) => value,
+    instantiate: (value: Parsed) => value,
+    release() {
+      released++;
+    },
+  };
+  const first = cache.evaluateKernelOperation(
+    'resource',
+    [1],
+    [],
+    resourceLifecycle,
+    () => new Parsed(),
+  );
+  cache.evaluateKernelOperation('resource', [1], [], resourceLifecycle, () =>
+    assert.fail('Expected memory reuse'),
+  );
+  cache.evaluateKernelOperation(
+    'resource',
+    [2],
+    [],
+    resourceLifecycle,
+    () => new Parsed(),
+  );
+  assert.ok(released > 0);
+  assert.equal(records.size, 0);
+  assert.equal(reads.length, 0);
+  const geometry = cache.evaluateKernelOperation(
+    'geometry',
+    [],
+    [first],
+    lifecycle,
+    () => ({result: 42, instance: 'computed'}),
+  );
+  assert.ok(records.has(geometry.id));
+  assert.equal(cache.kernelOperationCacheStats().persistenceErrors, 0);
+});

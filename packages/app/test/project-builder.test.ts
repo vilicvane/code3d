@@ -132,3 +132,39 @@ test('directory URL bases are not read as file assets, while static files still 
     assets.dispose();
   }
 });
+
+test('prepared assets deduplicate concurrent reads and release obsolete resource bytes', async () => {
+  const {ProjectAssets} = await server.ssrLoadModule<
+    typeof import('../src/project/project-assets.ts')
+  >('/src/project/project-assets.ts');
+  let version = 1,
+    reads = 0;
+  const assets = new ProjectAssets({
+    async stat() {
+      return {kind: 'file', version: String(version)};
+    },
+    async readFile() {
+      reads++;
+      await new Promise(resolve => setTimeout(resolve, 5));
+      return new Uint8Array([version]);
+    },
+  });
+  try {
+    const [first, duplicate] = await Promise.all([
+      assets.url('/font.ttf'),
+      assets.url('/font.ttf'),
+    ]);
+    assert.equal(first, duplicate);
+    assert.equal(reads, 1);
+    assert.deepEqual(assets.read(new URL(first)), new Uint8Array([1]));
+    version++;
+    const second = await assets.url('/font.ttf');
+    assert.notEqual(first, second);
+    assert.equal(assets.read(new URL(first)), undefined);
+    assert.deepEqual(assets.read(new URL(second)), new Uint8Array([2]));
+    assets.dispose();
+    assert.equal(assets.read(new URL(second)), undefined);
+  } finally {
+    assets.dispose();
+  }
+});

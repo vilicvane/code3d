@@ -1,3 +1,6 @@
+import textSource from '../../examples/text.ts?raw';
+import textFontUrl from '../../examples/fonts/DejaVuSans.ttf?inline';
+import textFontLicense from '../../examples/fonts/LICENSE-DejaVu.txt?raw';
 import booleanOperationsSource from '../../examples/boolean-operations.ts?raw';
 import combinedConstraintsSource from '../../examples/combined-constraints.ts?raw';
 import boundRotationSource from '../../examples/bound-rotation.ts?raw';
@@ -26,6 +29,8 @@ const websiteSources = import.meta.glob<string>('../../examples/website/*.ts', {
 });
 
 const files = [
+  {path: '/examples/text.ts', source: textSource},
+  {path: '/examples/fonts/LICENSE-DejaVu.txt', source: textFontLicense},
   {path: '/examples/index.ts', source: examplesIndexSource},
   {path: '/examples/primitives.ts', source: primitivesSource},
   {path: '/examples/materials.ts', source: materialsSource},
@@ -62,7 +67,11 @@ const files = [
 
 export const bundledExamples = {
   directory: '/examples',
-  revision: sourceRevision(files),
+  revision: sourceRevision([
+    ...files,
+    {path: '/examples/fonts/DejaVuSans.ttf', source: textFontUrl},
+  ]),
+  assets: [{path: '/examples/fonts/DejaVuSans.ttf', url: textFontUrl}],
   files,
 } satisfies ProjectDirectoryTemplate;
 

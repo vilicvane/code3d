@@ -24,6 +24,8 @@ export type KernelArtifact<Value> = Readonly<{
 }>;
 
 export type KernelValueLifecycle<Value> = Readonly<{
+  /** Parsed resources can share the LRU without entering the artifact store. */
+  persistent?: boolean;
   estimateBytes(value: Value): number;
   retain(value: Value): Value;
   instantiate(retained: Value): Value;
@@ -134,7 +136,7 @@ export function createKernelOperationCache({
     currentEvaluation?.checkCancelled?.();
     const {id, signature} = key;
     let cached = entries.get(id) as CacheEntry<Value> | undefined;
-    if (!cached) {
+    if (!cached && lifecycle.persistent !== false) {
       const bytes = accessStore(store => store.get(id));
       if (bytes) {
         let restored: Value;
@@ -159,7 +161,7 @@ export function createKernelOperationCache({
       throw new Error(`Kernel operation cache identity collision: ${id}`);
     hits += 1;
     const value = cached.instantiate(cached.value);
-    persist(key, cached.value);
+    if (lifecycle.persistent !== false) persist(key, cached.value);
     touchEntry(id, cached as CacheEntry<unknown>);
     return {id, value};
   }
@@ -185,7 +187,7 @@ export function createKernelOperationCache({
       throw error;
     }
     const entry = retainEntry(key, lifecycle, retained);
-    persist(key, retained);
+    if (lifecycle.persistent !== false) persist(key, retained);
     touchEntry(key.id, entry as CacheEntry<unknown>);
   }
 
@@ -316,16 +318,17 @@ export function kernelOperationKey(
     arguments_,
     inputs.map(input => input.id),
   ]);
-  return {id: contentId(signature), signature};
+  return {id: kernelContentId(signature), signature};
 }
 
-function contentId(value: string): string {
+export function kernelContentId(value: string | Uint8Array): string {
   let first = 0x811c9dc5;
   let second = 0x9e3779b9;
   let third = 0x85ebca6b;
   let fourth = 0xc2b2ae35;
   for (let index = 0; index < value.length; index += 1) {
-    const code = value.charCodeAt(index);
+    const code =
+      typeof value === 'string' ? value.charCodeAt(index) : value[index];
     first = Math.imul(first ^ code, 0x01000193);
     second = Math.imul(second ^ code, 0x27d4eb2d);
     third = Math.imul(third ^ code, 0x165667b1);

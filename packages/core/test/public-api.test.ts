@@ -19,6 +19,8 @@ const authoringValues = [
   'cylinder',
   'ellipse',
   'extrude',
+  'font',
+  'text',
   'frustum',
   'group',
   'intersect',

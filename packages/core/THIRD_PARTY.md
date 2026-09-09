@@ -26,3 +26,16 @@ rebuilt binary. The archive SHA-1 is
 `@code3d/solver` / OndselSolver remains an independent workspace package.
 Current core/App directional-bound relations solve translations directly and
 do not depend on or initialize that package.
+
+# Fonts and text
+
+Font parsing uses unmodified `opentype.js` 1.3.4 (MIT), pinned directly because
+Code3D owns immutable font values instead of using Replicad's global font registry.
+Its distributed LICENSE and package files accompany the built-in dependency closure.
+Text contours use Replicad/OpenCascade curves. Code3D currently groups nested glyph
+contours explicitly to avoid the multi-hole grouping bug tracked in Replicad PR 278
+and Code3D issue 85; this is not a patched Replicad distribution.
+
+The App example includes unmodified DejaVu Sans with the adjacent Bitstream Vera
+license notice. Tests additionally include a small Noto Sans CJK OTF subset under
+the adjacent SIL Open Font License; see `test/fonts/README.md` for provenance.
