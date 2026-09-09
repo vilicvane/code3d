@@ -1,4 +1,4 @@
-import type {SketchChange} from '../tools/sketch-source';
+import type {SketchChange, SketchDimensionValue} from '../tools/sketch-source';
 import type {SketchConstraintAction} from '../tools/sketch-constraint-actions';
 import {
   DrawingDimensions,
@@ -34,7 +34,7 @@ export class SketchConstraintTools {
     kind: SketchConstraintAction['kind'];
     field: DrawingDimension;
     value: number;
-    create(value: number): SketchChange;
+    create(value: SketchDimensionValue): SketchChange;
     dimensions: DrawingDimensions;
   };
 
@@ -140,6 +140,7 @@ export class SketchConstraintTools {
   edit(
     index: number,
     kind: SketchConstraintAction['kind'],
+    source: string,
     value: number,
   ): void {
     // A local relation may target only read-only upstream points, in which
@@ -149,21 +150,21 @@ export class SketchConstraintTools {
       kind,
       value,
       value => ({kind: 'dimension', index, value}),
-      true,
+      source,
     );
   }
 
   private openValue(
     kind: SketchConstraintAction['kind'],
     value: number,
-    create: (value: number) => SketchChange,
-    editing = false,
+    create: (value: SketchDimensionValue) => SketchChange,
+    source?: string,
   ): void {
     const field = sketchConstraintDimensions[kind]!;
-    const dimensions = new DrawingDimensions([field]);
-    // Editing starts with the complete authored number selected, never the
-    // shortened display label. Adding still accepts an empty displayed default.
-    if (editing) dimensions.set(field.id, String(value));
+    const dimensions = new DrawingDimensions([field], undefined, true);
+    // Edit the complete author expression, never its shortened evaluated label.
+    // Adding still accepts an empty displayed default.
+    if (source !== undefined) dimensions.set(field.id, source);
     this.current = {kind, field, value, create, dimensions};
     this.root.append(this.inputs.root);
     this.inputs.show(sketchConstraintNames[kind], dimensions, {
@@ -182,7 +183,8 @@ export class SketchConstraintTools {
       this.inputs.report(error);
       return;
     }
-    if (this.commit(create(dimensions.value(id) ?? value))) {
+    const text = dimensions.text(id).trim();
+    if (this.commit(create(text ? (dimensions.value(id) ?? text) : value))) {
       this.cancel();
       this.focusCanvas();
     } else this.inputs.report('The sketch changed; select the geometry again.');

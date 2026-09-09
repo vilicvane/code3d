@@ -1914,18 +1914,47 @@ kbd {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+  min-width: 0;
+  max-width: 100%;
 }
 .drawing-input-fields label {
   display: flex;
   align-items: center;
   gap: 5px;
+  min-width: 0;
+  max-width: 100%;
+}
+.drawing-input-fields label > span:first-child {
+  flex-shrink: 0;
+}
+.drawing-input-control {
+  display: inline-grid;
+  position: relative;
+  min-width: 0;
+  max-width: 320px;
+}
+.drawing-input-fields input,
+.drawing-input-measure {
+  grid-area: 1 / 1;
+  box-sizing: border-box;
+  padding: 5px;
+  border: 1px solid var(--line);
+  font: inherit;
+}
+.drawing-input-measure {
+  min-width: 82px;
+  visibility: hidden;
+  white-space: pre;
+  overflow: hidden;
+  pointer-events: none;
 }
 .drawing-input-fields input {
-  width: 82px;
-  padding: 5px;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  min-width: 0;
   color: inherit;
   background: var(--soft);
-  border: 1px solid var(--line);
   border-radius: 3px;
   outline: none;
 }
@@ -2217,6 +2246,41 @@ kbd {
   margin: 5px 0 0;
   color: #d99b8f;
   white-space: pre-wrap;
+}
+
+.viewport-diagnostic[data-severity='warning'] {
+  color: #ddc58e;
+  border-color: #76643e;
+  border-left-color: #d8b561;
+  background: #252014f2;
+}
+
+.viewport-diagnostic[data-severity='warning'] strong,
+.viewport-diagnostic[data-severity='warning'] p {
+  color: inherit;
+}
+
+.viewport-diagnostic-action {
+  display: block;
+  width: fit-content;
+  margin: 8px 0 0 auto;
+  padding: 0;
+  color: inherit;
+  border: 0;
+  background: transparent;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.viewport-diagnostic-action:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+.viewport-diagnostic-action:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .viewport-header {

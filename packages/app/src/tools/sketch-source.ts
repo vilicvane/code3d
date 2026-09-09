@@ -7,7 +7,7 @@ import type {
   SketchEntitySnapshot,
   SourceRef,
 } from '@code3d/core/tooling';
-import {formatSourceNumber} from './source-expression';
+import {formatSourceNumber, sourceExpressionError} from './source-expression';
 import {sameSketchPoint} from './sketch-snap';
 import type {
   SketchEditableParameters,
@@ -61,11 +61,34 @@ export function sketchDraftEntity([
   }
 }
 
+/** Numeric drafts may instead contain unevaluated author source. Runtime stays numeric. */
+export type SketchDimensionValue = number | string;
+type DraftConstraint<C> = C extends readonly [infer K, infer T, number]
+  ? readonly [K, T, SketchDimensionValue]
+  : C;
+export type SketchDraftConstraint = DraftConstraint<
+  SketchConstraint<SketchPointAddress>
+>;
+
+export function isNumericSketchConstraint(
+  constraint: SketchDraftConstraint,
+): constraint is SketchConstraint<SketchPointAddress> {
+  return typeof constraint[2] !== 'string';
+}
+
+function dimensionSource(value: SketchDimensionValue): string {
+  if (typeof value === 'number') return formatSourceNumber(value);
+  const error = sourceExpressionError(value);
+  if (error) throw new Error(error);
+  // The newline keeps a final line comment from swallowing the tuple delimiter.
+  return /\/\//.test(value) ? `(${value}\n)` : value;
+}
+
 export type SketchChange =
-  | Readonly<{kind: 'dimension'; index: number; value: number}>
+  | Readonly<{kind: 'dimension'; index: number; value: SketchDimensionValue}>
   | Readonly<{
       kind: 'constrain';
-      constraints: readonly SketchConstraint<SketchPointAddress>[];
+      constraints: readonly SketchDraftConstraint[];
       removedConstraints?: readonly number[];
       data: readonly SketchGeometryData[];
     }>
@@ -118,6 +141,17 @@ type Entry = {
 );
 const prefix = 'sketch(';
 
+export function sketchNodeSourceRef(
+  definition: SourceRef,
+  node: ts.Node,
+): SourceRef {
+  return {
+    ...definition,
+    start: definition.start + node.getStart() - prefix.length,
+    end: definition.start + node.end - prefix.length,
+  };
+}
+
 /** Analyze only the authored tuple structure; never evaluate coordinate code. */
 export function analyzeSketchSource(source: string): {
   entries: ReadonlyMap<number, Entry>;
@@ -125,7 +159,7 @@ export function analyzeSketchSource(source: string): {
   array?: ts.ArrayLiteralExpression;
   options?: ts.ObjectLiteralExpression;
   constraints?: ts.ArrayLiteralExpression;
-  constraintValues?: ReadonlyMap<number, number>;
+  constraintValues?: ReadonlyMap<number, string>;
   reason?: string;
 } {
   const file = ts.createSourceFile(
@@ -230,8 +264,9 @@ export function analyzeSketchSource(source: string): {
     constraintValues: new Map(
       constraints?.elements.flatMap((node, index) => {
         const value = ts.isArrayLiteralExpression(node) && node.elements[2];
-        const literal = value ? numeric(value) : undefined;
-        return literal === undefined ? [] : [[index, literal] as const];
+        return value && !ts.isSpreadElement(value)
+          ? [[index, value.getText()] as const]
+          : [];
       }),
     ),
   };
@@ -382,12 +417,20 @@ export class SketchEditResolver implements ToolIntentResolver {
       const node = parsed.constraints?.elements[change.index];
       const value =
         node && ts.isArrayLiteralExpression(node) && node.elements[2];
-      if (!value || numeric(value) === undefined)
+      if (!value || ts.isSpreadElement(value))
         return {
           status: 'unsupported',
-          reason: 'Expression-driven constraint values must be edited in code.',
+          reason: 'This constraint has no editable value expression.',
         };
-      if (numeric(value) !== change.value) replace(value, String(change.value));
+      try {
+        const text =
+          typeof change.value === 'number'
+            ? String(change.value)
+            : dimensionSource(change.value);
+        if (text !== value.getText()) replace(value, text);
+      } catch (error) {
+        return {status: 'unsupported', reason: (error as Error).message};
+      }
     }
     const deletion =
       change.kind === 'delete' || change.kind === 'trim'
@@ -638,15 +681,15 @@ export class SketchEditResolver implements ToolIntentResolver {
               break;
             case 'x':
             case 'y':
-              content = `${point(data)}, ${formatSourceNumber(value)}`;
+              content = `${point(data)}, ${dimensionSource(value)}`;
               break;
             case 'length':
             case 'radius':
             case 'sweep':
-              content = `${data}, ${formatSourceNumber(value)}`;
+              content = `${data}, ${dimensionSource(value)}`;
               break;
             case 'angle':
-              content = `${typeof data === 'number' ? data : `[${data.join(', ')}]`}, ${formatSourceNumber(value)}`;
+              content = `${typeof data === 'number' ? data : `[${data.join(', ')}]`}, ${dimensionSource(value)}`;
               break;
           }
           return `['${kind}', ${content}]`;

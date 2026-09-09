@@ -1,6 +1,36 @@
 import ts from '@typescript/typescript6';
 import type {Vec3} from '@code3d/core/tooling';
 
+/** Validate one tuple value, without evaluating code outside its author scope. */
+export function sourceExpressionError(source: string): string | undefined {
+  const parsed = ts.createSourceFile(
+    'expression.ts',
+    `[${source}\n]`,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const diagnostics = (
+    parsed as ts.SourceFile & {
+      parseDiagnostics: readonly ts.Diagnostic[];
+    }
+  ).parseDiagnostics;
+  if (diagnostics.length)
+    return ts.flattenDiagnosticMessageText(diagnostics[0].messageText, ' ');
+  const statement = parsed.statements[0];
+  if (
+    parsed.statements.length !== 1 ||
+    !statement ||
+    !ts.isExpressionStatement(statement) ||
+    !ts.isArrayLiteralExpression(statement.expression) ||
+    statement.expression.elements.length !== 1 ||
+    statement.expression.elements.hasTrailingComma ||
+    ts.isSpreadElement(statement.expression.elements[0])
+  )
+    return 'Enter a single expression';
+  return undefined;
+}
+
 /** Adjust only the outer offset call, preserving author expressions and trivia. */
 export function offsetCallSource(
   source: string,

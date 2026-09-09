@@ -1,3 +1,5 @@
+import {sourceExpressionError} from './source-expression';
+
 export type DrawingDimension = Readonly<{
   id: string;
   label: string;
@@ -13,6 +15,7 @@ export class DrawingDimensions {
   constructor(
     readonly definitions: readonly DrawingDimension[],
     private readonly changed?: (id: string) => void,
+    readonly expressions = false,
   ) {
     this.clear();
   }
@@ -37,7 +40,9 @@ export class DrawingDimensions {
     const draft = this.drafts.get(id)!;
     draft.text = text;
     // Keep the last valid preview while the user enters a sign or exponent.
-    if (!this.error(id)) draft.value = text.trim() ? Number(text) : undefined;
+    if (!this.error(id))
+      draft.value =
+        text.trim() && Number.isFinite(Number(text)) ? Number(text) : undefined;
     this.changed?.(id);
   }
 
@@ -45,6 +50,14 @@ export class DrawingDimensions {
     const field = this.definitions.find(field => field.id === id)!;
     const text = this.text(id).trim();
     if (!text) return undefined;
+    if (this.expressions) {
+      const syntaxError = sourceExpressionError(text);
+      if (syntaxError) return `${field.label}: ${syntaxError}`;
+      // Variables and compound expressions are evaluated by normal compilation
+      // after commit, in the sketch's lexical scope, never by the form.
+      if (!/^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(text))
+        return undefined;
+    }
     if (
       !/^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(text) ||
       !Number.isFinite(Number(text))

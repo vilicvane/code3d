@@ -90,6 +90,41 @@ test('numeric drafts preserve partial text and the last valid preview, while bla
   assert.equal(fields.edited, false);
 });
 
+test('expression drafts validate syntax without evaluating bindings outside their source scope', () => {
+  const fields = new DrawingDimensions(
+    [{id: 'length', label: 'Length', positive: true}],
+    undefined,
+    true,
+  );
+  for (const text of [
+    'width / 2',
+    'Math.max(width, 20)',
+    '(width as number) + 1',
+  ]) {
+    fields.set('length', text);
+    assert.equal(fields.text('length'), text);
+    assert.equal(fields.error('length'), undefined);
+    assert.equal(fields.value('length'), undefined);
+  }
+  for (const text of [
+    'width /',
+    '1, 2',
+    '...values',
+    '1]; other(); [2',
+    '-1',
+    '0',
+    '1e999',
+  ]) {
+    fields.set('length', text);
+    assert.ok(fields.error('length'), text);
+  }
+  fields.set('length', '20');
+  assert.equal(fields.value('length'), 20);
+  fields.set('length', '');
+  assert.equal(fields.error('length'), undefined);
+  assert.equal(fields.value('length'), undefined);
+});
+
 test('snapping prioritizes real point identity, including coincident local/upstream points', () => {
   const local = {layer: 'local', id: 1, position: [10, 10]};
   const upstream = {layer: 'base', id: 1, position: [10, 10]};

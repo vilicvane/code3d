@@ -21,6 +21,7 @@ import type {ModelDiagnostic} from '../model/diagnostic';
 import {SketchEditor} from '../ui/sketch-editor';
 import {
   analyzeSketchSource,
+  isNumericSketchConstraint,
   sketchDraftEntity,
   type SketchChange,
   type SketchEditIntent,
@@ -232,6 +233,22 @@ export class SketchEditorController {
     });
     if (!committed) return false;
     this.revision++;
+    const changedDimension =
+      change.kind === 'dimension' ? change.value : undefined;
+    const addedConstraints =
+      change.kind === 'constrain' || change.kind === 'append'
+        ? (change.constraints ?? [])
+        : [];
+    if (
+      typeof changedDimension === 'string' ||
+      !addedConstraints.every(isNumericSketchConstraint)
+    ) {
+      // Source expressions are evaluated in the real project scope by the next
+      // compile. Do not publish a snapshot with a guessed numeric constraint.
+      this.stale = true;
+      this.render();
+      return true;
+    }
     const removed =
       change.kind === 'delete' || change.kind === 'trim' ? change.ids : [];
     const entries =
@@ -284,7 +301,7 @@ export class SketchEditorController {
             [
               constraint[0],
               constraint[1],
-              change.value,
+              changedDimension!,
             ] as SketchConstraint<SketchPointAddress>,
           ];
         if (
@@ -317,8 +334,7 @@ export class SketchEditorController {
       },
     );
     constraints.push(...copiedConstraints);
-    if (change.kind === 'append' || change.kind === 'constrain')
-      constraints.push(...(change.constraints ?? []));
+    constraints.push(...addedConstraints);
     this.layers = [
       ...this.layers.slice(0, -1),
       preview ?? {...local, entities, constraints},

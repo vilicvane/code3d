@@ -6,6 +6,7 @@ import type {SketchGeometryData} from './sketch-drag';
 export type CompiledSketch = SketchSnapshot &
   Readonly<{
     evaluationId?: string;
+    callRef?: SourceRef;
     definitionRef?: SourceRef;
     references: Readonly<Record<string, string>>;
     data: readonly SketchGeometryData[];
@@ -14,6 +15,7 @@ export type CompiledSketch = SketchSnapshot &
 type SketchTrace = {
   id: string;
   evaluationId?: string;
+  callRef?: SourceRef;
   definitionRef?: SourceRef;
   references: Record<string, string>;
 };
@@ -176,6 +178,7 @@ export class SketchTraceRegistry {
     const trace: SketchTrace = {
       id: `sketch:${id}`,
       evaluationId: id,
+      callRef: location,
       definitionRef: editable
         ? {
             ...nodeRef(call),
@@ -254,6 +257,7 @@ export class SketchTraceRegistry {
           ),
           definitionRef: trace.definitionRef,
           evaluationId: trace.evaluationId,
+          callRef: trace.callRef,
           references: trace.references,
           data: this.runtime
             .sketchDefinition(value)
