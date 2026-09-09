@@ -40,6 +40,11 @@ export type AgentObservation = Readonly<{
   input: ApplyInput;
   revision: number;
 }>;
+export type AgentUpdate = Readonly<{
+  agentId: string;
+  cursor?: SourceRef;
+  input: ApplyInput;
+}>;
 type FileState = {
   path: string;
   kind: 'file';
@@ -59,6 +64,7 @@ export class AgentProjectSession {
   private accepting = false;
   private revision = 1;
   private readonly revisionListeners = new Set<() => void>();
+  private readonly updateListeners = new Set<(update: AgentUpdate) => void>();
 
   constructor(
     readonly fileSystem: ProjectFileSystem,
@@ -81,6 +87,11 @@ export class AgentProjectSession {
   onRevision(listener: () => void): () => void {
     this.revisionListeners.add(listener);
     return () => this.revisionListeners.delete(listener);
+  }
+
+  onAgentUpdate(listener: (update: AgentUpdate) => void): () => void {
+    this.updateListeners.add(listener);
+    return () => this.updateListeners.delete(listener);
   }
 
   private advanceRevision(): void {
@@ -563,6 +574,13 @@ export class AgentProjectSession {
     const project = this.editor.project();
     const revision = this.revision;
     const cursor = this.editor.agentCursor(agentId);
+    if (
+      files.length ||
+      input.cursor ||
+      (typeof input.render === 'object' && input.render.view)
+    )
+      for (const listener of this.updateListeners)
+        listener({agentId, cursor: cursor.ref, input});
     await this.save(staged);
     const outcomes = [];
     for (const file of files) {

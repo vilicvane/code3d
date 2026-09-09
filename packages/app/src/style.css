@@ -154,19 +154,42 @@ input[type='number']::-webkit-outer-spin-button {
   color-scheme: dark;
   display: flex;
   align-items: center;
-  gap: 10px;
-  max-width: 36vw;
+  gap: 8px;
   margin-left: 6px;
+}
+
+.agent-nav-agents {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 36vw;
+  padding: 2px;
   overflow-x: auto;
   white-space: nowrap;
 }
 
-.agent-nav:has(.agent-badge) {
-  padding: 2px;
+.agent-nav-agents[hidden] {
+  display: none;
 }
 
-.agent-nav.button-primary {
+.agent-connect-button.button-primary {
   font-weight: 500;
+}
+
+.agent-connect-button:not(.button-primary) {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 4px;
+  color: #7f8578;
+}
+
+.agent-connect-button:not(.button-primary):hover {
+  background: #1a1d16;
+  color: #bdc4b3;
 }
 
 .agent-badge {
@@ -188,6 +211,29 @@ input[type='number']::-webkit-outer-spin-button {
 
 .agent-nav .agent-badge:hover {
   background: color-mix(in srgb, var(--agent-color) 18%, transparent);
+}
+
+.agent-nav .agent-badge {
+  cursor: pointer;
+}
+
+.agent-nav .agent-badge[aria-pressed='true'] {
+  border-color: color-mix(in srgb, var(--agent-color) 60%, transparent);
+  background: color-mix(in srgb, var(--agent-color) 20%, transparent);
+  color: color-mix(in srgb, var(--agent-color) 35%, #e8e9e1);
+}
+
+.agent-nav .agent-badge:focus-visible,
+.agent-connect-button:focus-visible {
+  outline: 1px solid #bdc4b3;
+  outline-offset: 2px;
+}
+
+.agent-follow-icon {
+  width: 12px;
+  height: 12px;
+  margin-left: 1px;
+  color: var(--agent-color);
 }
 
 .agent-badge-dot {

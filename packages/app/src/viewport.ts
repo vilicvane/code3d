@@ -2,7 +2,7 @@ import {committedSpatialObject} from './tools/spatial-edit';
 import {isCompositionInputRole} from './model/operation-context';
 import type {ModelDiagnostic} from './model/diagnostic';
 import * as THREE from 'three';
-import type {ImageView} from './rendering/image-camera';
+import {orientImageCamera, type ImageView} from './rendering/image-camera';
 import {ViewportNavigation} from './ui/viewport-navigation';
 import {LineMaterial} from 'three/addons/lines/LineMaterial.js';
 import {LineSegments2} from 'three/addons/lines/LineSegments2.js';
@@ -1001,6 +1001,15 @@ export class ModelViewport {
 
   fit(target: THREE.Object3D = this.root): void {
     this.frame(target, true);
+    this.hasFramedView = true;
+  }
+
+  setView(view: ImageView): void {
+    const bounds = new THREE.Box3().setFromObject(this.root);
+    if (bounds.isEmpty()) return;
+    orientImageCamera(this.camera, bounds, view);
+    bounds.getCenter(this.controls.focus);
+    this.controls.syncCamera();
     this.hasFramedView = true;
   }
 

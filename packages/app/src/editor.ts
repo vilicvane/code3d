@@ -1042,7 +1042,11 @@ export class CodeEditor {
     return () => this.completionFocusListeners.delete(listener);
   }
 
-  revealSource(sourceRef: SourceRef, takeFocus = false): void {
+  revealSource(
+    sourceRef: SourceRef,
+    takeFocus = false,
+    cursorAt: 'start' | 'end' = 'end',
+  ): void {
     this.switchFile(sourceRef.file);
     const range = sourceRange(this.activeModel(), sourceRef);
     this.withSuppressedCursorEvents(() => {
@@ -1059,7 +1063,16 @@ export class CodeEditor {
           },
         },
       ]);
-      this.editor.setSelection(range);
+      this.editor.setSelection(
+        cursorAt === 'start'
+          ? new monaco.Selection(
+              range.endLineNumber,
+              range.endColumn,
+              range.startLineNumber,
+              range.startColumn,
+            )
+          : range,
+      );
       this.editor.revealRangeInCenterIfOutsideViewport(range);
       if (takeFocus) this.editor.focus();
     });

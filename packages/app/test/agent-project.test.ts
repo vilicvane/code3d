@@ -3,7 +3,10 @@ import {after, before, test} from 'node:test';
 import type {SourceRef} from '@code3d/core/tooling';
 import type {AgentCursor, AgentResponse, ApplyInput} from '@code3d/agent';
 import type {ProjectFileSystem} from '../src/project/filesystem.ts';
-import type {AgentProjectEditor} from '../src/agent/project-session.ts';
+import type {
+  AgentProjectEditor,
+  AgentUpdate,
+} from '../src/agent/project-session.ts';
 import {createAppTestServer} from './vite-test-server.ts';
 
 let server: Awaited<ReturnType<typeof createAppTestServer>>;
@@ -186,6 +189,41 @@ function gate<T>() {
   });
   return {promise, resolve};
 }
+
+test('follow updates describe accepted edits before observation and exclude reads and rejected changes', async () => {
+  const observed = gate<AgentResponse>();
+  const observing = gate<void>();
+  const f = fixture({
+    observe: () => {
+      observing.resolve();
+      return observed.promise;
+    },
+  });
+  const updates: AgentUpdate[] = [];
+  const unsubscribe = f.session.onAgentUpdate(update => updates.push(update));
+  await f.read('/model.ts');
+  await f.session.handle('alice', 'Alice', {operation: 'context'});
+  const rejected = await f.apply({
+    files: [{path: '/model.ts', version: 'wrong', content: 'const model = 3;'}],
+  });
+  assert.equal(rejected.ok, false);
+  assert.equal(updates.length, 0);
+  const pending = f.apply({
+    cursor: {file: '/model.ts', regex: 'const (model)'},
+    render: {view: 'top'},
+  });
+  await observing.promise;
+  assert.equal(updates.length, 1);
+  assert.deepEqual(updates[0].cursor, {file: '/model.ts', start: 6, end: 11});
+  assert.equal(updates[0].agentId, 'alice');
+  observed.resolve({ok: true, data: {}});
+  await pending;
+  await f.apply({type: true});
+  assert.equal(updates.length, 1);
+  unsubscribe();
+  await f.apply({cursor: {file: '/model.ts', regex: '(1)'}});
+  assert.equal(updates.length, 1);
+});
 
 test('context reads the current user target without adopting it or modifying files', async () => {
   const f = fixture({
