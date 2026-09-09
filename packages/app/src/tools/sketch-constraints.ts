@@ -73,7 +73,16 @@ export const sketchConstraintDimensions: Partial<
 };
 
 export type SketchConstraintMarker =
-  | Readonly<{kind: 'point'; position: SketchPosition}>
+  | Readonly<{
+      kind: 'point';
+      point: SketchPointAddress;
+      position: SketchPosition;
+    }>
+  | Readonly<{
+      kind: 'curve';
+      curve: SketchPointAddress;
+      position: SketchPosition;
+    }>
   | Readonly<{
       kind: 'line';
       curve: SketchPointAddress;
@@ -81,6 +90,7 @@ export type SketchConstraintMarker =
     }>
   | Readonly<{
       kind: 'corner';
+      vertex: SketchPointAddress;
       /** Shared vertex, then the opposite endpoint of each participating line. */
       points: readonly [SketchPosition, SketchPosition, SketchPosition];
     }>;
@@ -145,6 +155,7 @@ export function sketchConstraintDisplays(
           markers = [
             {
               kind: 'corner',
+              vertex: resolve(shared),
               points: [
                 point(shared).position,
                 opposite(lines[0]),
@@ -259,7 +270,13 @@ export function sketchConstraintDisplays(
         label,
         title,
         markers: markers ?? [
-          {kind: 'point', position: curveAnchor ?? related[0].position},
+          curveAnchor
+            ? {kind: 'curve', curve: curve!, position: curveAnchor}
+            : {
+                kind: 'point',
+                point: resolve(related[0]),
+                position: related[0].position,
+              },
         ],
         points: related,
         curves: curve ? [curve] : curves,
