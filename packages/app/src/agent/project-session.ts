@@ -50,12 +50,17 @@ export type AgentObservation = Readonly<{
   input: ApplyInput;
   revision: number;
 }>;
-export type AgentUpdate = Readonly<{
-  agentId: string;
-  cursor?: SourceRef;
-  arguments?: string;
-  view?: RenderView;
-}>;
+type AgentReadTarget = Readonly<{kind: 'read' | 'list'; path: string}>;
+export type AgentUpdate = Readonly<{agentId: string}> &
+  (
+    | Readonly<{
+        kind: 'apply';
+        cursor?: SourceRef;
+        arguments?: string;
+        view?: RenderView;
+      }>
+    | AgentReadTarget
+  );
 type FileState = {
   path: string;
   kind: 'file';
@@ -64,7 +69,7 @@ type FileState = {
   editorVersion?: string;
   saved: boolean;
 };
-type Draft = {content: string | null; version: string; error?: string};
+type Draft = {content: string | null; error?: string};
 const textLimit = 8 * 1024 * 1024;
 const encoder = new TextEncoder();
 
@@ -76,9 +81,13 @@ export class AgentProjectSession {
   private revision = 1;
   private readonly revisionListeners = new Set<() => void>();
   private readonly updateListeners = new Set<(update: AgentUpdate) => void>();
-  private readonly agentViews = new Map<
+  private readonly agentStates = new Map<
     string,
-    Pick<AgentUpdate, 'arguments' | 'view'>
+    {
+      target: {kind: 'apply'} | AgentReadTarget;
+      arguments?: string;
+      view?: RenderView;
+    }
   >();
   private readonly entryListeners = new Set<
     (reason: 'operation' | 'save') => void
@@ -176,14 +185,23 @@ export class AgentProjectSession {
   }
 
   latestAgentUpdate(agentId: string): AgentUpdate | undefined {
+    const state = this.agentStates.get(agentId);
+    if (state && state.target.kind !== 'apply')
+      return {agentId, ...state.target};
     // Monaco maintains the live selection through formatting, edits and renames.
     const cursor = this.editor.agentCursor(agentId).ref;
     if (!cursor) return undefined;
-    return {agentId, cursor, ...this.agentViews.get(agentId)};
+    return {
+      agentId,
+      kind: 'apply',
+      cursor,
+      arguments: state?.arguments,
+      view: state?.view,
+    };
   }
 
   forgetAgent(agentId: string): void {
-    this.agentViews.delete(agentId);
+    this.agentStates.delete(agentId);
   }
 
   private advanceRevision(): void {
@@ -263,9 +281,22 @@ export class AgentProjectSession {
           };
         });
       if (request.operation !== 'apply')
-        return await this.enqueue(() =>
-          this.read(request.operation, request.path),
-        );
+        return await this.enqueue(async () => {
+          const response = await this.read(request.operation, request.path);
+          if (response.ok && request.operation !== 'fs.stat') {
+            const target: AgentReadTarget = {
+              kind: request.operation === 'fs.read' ? 'read' : 'list',
+              path: request.path,
+            };
+            this.agentStates.set(agentId, {
+              ...this.agentStates.get(agentId),
+              target,
+            });
+            for (const listener of this.updateListeners)
+              listener({agentId, ...target});
+          }
+          return response;
+        });
       const accepted = await this.enqueue(() =>
         this.apply(agentId, name, request.input),
       );
@@ -396,11 +427,18 @@ export class AgentProjectSession {
           'This operation requires a UTF-8 text file.',
         );
     } else return undefined;
+    // Opening an unchanged editor document must not invalidate an agent's read.
+    // The editor revision is checked separately during apply preflight.
+    const contentHash = encodeBase64(
+      new Uint8Array(
+        await crypto.subtle.digest('SHA-256', encoder.encode(content)),
+      ),
+    );
     return {
       path,
       kind: 'file',
       content,
-      version: `${document?.version ?? draft?.version ?? 'disk'}:${hash}:${info?.version ?? ''}`,
+      version: `${contentHash}:${hash}:${info?.version ?? ''}`,
       ...(document ? {editorVersion: document.version} : {}),
       saved: !draft,
     };
@@ -657,15 +695,17 @@ export class AgentProjectSession {
     const view =
       typeof input.render === 'object' ? input.render.view : undefined;
     if (files.length || input.cursor || view) {
-      const update = {
+      const update: AgentUpdate = {
         agentId,
+        kind: 'apply',
         cursor: cursor.ref,
         arguments: input.cursor?.arguments,
         view,
       };
-      this.agentViews.set(agentId, {
+      this.agentStates.set(agentId, {
+        target: {kind: 'apply'},
         arguments: update.arguments,
-        view: view ?? this.agentViews.get(agentId)?.view,
+        view: view ?? this.agentStates.get(agentId)?.view,
       });
       for (const listener of this.updateListeners) listener(update);
     }
@@ -752,7 +792,6 @@ export class AgentProjectSession {
     return files.map(file => {
       const draft: Draft = {
         content: file.content,
-        version: crypto.randomUUID(),
       };
       this.drafts.set(file.path, draft);
       return [file.path, draft];

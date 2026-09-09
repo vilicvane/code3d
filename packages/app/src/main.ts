@@ -837,7 +837,29 @@ codeEditor.onActiveFile((path, reason) => {
 });
 
 function followAgentUpdate(update: AgentUpdate): void {
-  if (agentPanel?.followingAgentId !== update.agentId || !update.cursor) return;
+  if (agentPanel?.followingAgentId !== update.agentId) return;
+  pendingAgentFollow = undefined;
+  fileOpenVersion++;
+  if (update.kind !== 'apply') {
+    pendingAgentFollow = update;
+    const cancelled = () =>
+      pendingAgentFollow !== update ||
+      agentPanel?.followingAgentId !== update.agentId;
+    if (update.kind === 'list') setProjectExplorerExpanded(true);
+    const navigation =
+      update.kind === 'read'
+        ? activateProjectFile(update.path, 'tab', false, cancelled)
+        : projectDirectory.focusDirectory(update.path, cancelled);
+    void navigation
+      .catch(error => {
+        if (!cancelled()) projectDirectory.showError(error);
+      })
+      .finally(() => {
+        if (pendingAgentFollow === update) pendingAgentFollow = undefined;
+      });
+    return;
+  }
+  if (!update.cursor) return;
   finishContextualTool();
   activeCompletionFocus = undefined;
   window.clearTimeout(completionPreviewTimer);
@@ -1166,10 +1188,12 @@ function renderProjectNavigation(): void {
 
 async function activateProjectFile(
   path: string | undefined,
-  takeFocus = false,
+  takeFocus: boolean | 'tab' = false,
   fromHistory = false,
+  cancelled: () => boolean = () => false,
 ): Promise<void> {
   const version = ++fileOpenVersion;
+  if (cancelled()) return;
   if (path && !codeEditor.fileState(path)) {
     let source: string;
     try {
@@ -1178,15 +1202,22 @@ async function activateProjectFile(
         path,
       );
     } catch (error) {
-      if (version !== fileOpenVersion) return;
+      if (version !== fileOpenVersion || cancelled()) return;
       throw error;
     }
-    if (version !== fileOpenVersion) return;
+    if (version !== fileOpenVersion || cancelled()) return;
     codeEditor.loadFile(path, source);
   }
   applyingFileRoute = fromHistory;
   try {
-    codeEditor.switchFile(path, takeFocus);
+    codeEditor.switchFile(path, takeFocus === true);
+    if (takeFocus === 'tab') {
+      const tab = editorTabs.querySelector<HTMLButtonElement>(
+        '.editor-tab.active > button',
+      );
+      tab?.scrollIntoView({block: 'nearest', inline: 'nearest'});
+      tab?.focus({preventScroll: true});
+    }
   } finally {
     applyingFileRoute = false;
   }
@@ -1236,7 +1267,8 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
     restoreModelStatus();
     return;
   }
-  const following = pendingAgentFollow;
+  const following =
+    pendingAgentFollow?.kind === 'apply' ? pendingAgentFollow : undefined;
   const designContextId =
     typeof designContext === 'string' ? designContext : undefined;
   compilingDesignContextId = designContextId;

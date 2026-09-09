@@ -78,18 +78,23 @@ keeps their selections and carets attached to the corresponding source.
 
 Click an agent's pill in the top bar to follow its updates; click it again to stop,
 or choose another agent to switch. The mouse-pointer icon marks the followed agent.
-Starting or switching follow immediately moves to that agent's latest selection
-and synchronizes the model or sketch, its arguments and its last explicitly
-requested 3D view. The selection stays attached to the current source after edits
-and formatting. If the agent has no valid selection yet, your view stays put
-until its next update.
+Starting or switching follow immediately restores that agent's latest activity:
+its source selection, the file it read, or the directory it listed. For a source
+selection it also synchronizes the model or sketch, its arguments and its last
+explicitly requested 3D view. The selection stays attached to the current source
+after edits and formatting. If the agent has no target yet, your view stays put
+until its next activity.
 Each accepted source or cursor update moves the editor to that agent's selection
 and updates the model or sketch, using its supplied arguments (or JSDoc defaults)
 and any explicitly requested 3D view. You can keep editing, selecting and navigating
-between updates; following does not lock the UI or stop when you interact. Reads
-and inspections without source changes, a new cursor or an explicit view do not
-move your view. A user gesture while compilation
-is pending takes precedence over its requested camera change. Use the user-with-gear
+between updates; following does not lock the UI or stop when you interact.
+Successful `fs read` opens the file and focuses its tab; `fs list` reveals,
+expands and focuses the directory in the file explorer. Listing `/` focuses the
+explorer itself. A hidden explorer opens and search filters clear to reveal the
+directory. These operations leave the agent's modeling cursor unchanged.
+`context`, `fs stat`, failed requests and inspections without a source, cursor or
+view change do not move your view. Later user interaction takes precedence over
+pending navigation or a requested camera change. Use the user-with-gear
 button beside the pills to open **Connect Agent**; with no agents, the highlighted
 **Connect Agent** button remains available.
 
@@ -112,6 +117,8 @@ when no file is open in the App. It does not run a
 model or move any cursor. Read the returned file and its imports, retaining their
 opaque versions. Paths address the project owned by the App, including browser
 storage and connected directories. Do not edit another local copy of that project.
+Opening a file in the App keeps its read version valid; content or disk changes
+still require rereading before applying edits.
 The private connection file and temporary apply JSON are ordinary local files.
 
 Prefer the public [core modeling API](../../reference/core/). Compose basic

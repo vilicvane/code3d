@@ -443,6 +443,46 @@ export class ProjectTree {
     this.tree.render({fileTreeContainer: this.container});
   }
 
+  async focusDirectory(path: string, cancelled: () => boolean): Promise<void> {
+    await this.refresh();
+    if (cancelled()) return;
+    const version = this.refreshVersion;
+    await this.revealDirectory(path, version);
+    if (cancelled() || version !== this.refreshVersion) return;
+    this.tree.closeSearch();
+    this.synchronizing = true;
+    try {
+      for (const selected of this.tree.getSelectedPaths())
+        this.tree.getItem(selected)?.deselect();
+      const segments = path.split('/').filter(Boolean);
+      for (let depth = 1; depth <= segments.length; depth++) {
+        const item = this.tree.getItem(
+          segments.slice(0, depth).join('/') + '/',
+        );
+        if (isDirectoryItem(item)) item.expand();
+      }
+      if (path !== '/') {
+        const item = this.tree.getItem(path.slice(1) + '/');
+        if (isDirectoryItem(item)) {
+          item.select();
+          this.tree.scrollToPath(item.getPath(), {focus: true});
+        }
+      }
+    } finally {
+      this.synchronizing = false;
+    }
+    // Pierre's focus option updates its controller, without taking DOM focus
+    // from another control. Render the scrolled row before focusing it directly.
+    this.tree.render({fileTreeContainer: this.container});
+    const selector =
+      path === '/'
+        ? '[role="tree"]'
+        : `[role="treeitem"][data-item-path="${CSS.escape(path.slice(1) + '/')}"]`;
+    this.container
+      .shadowRoot!.querySelector<HTMLElement>(selector)
+      ?.focus({preventScroll: true});
+  }
+
   search(): void {
     this.tree.openSearch();
   }
