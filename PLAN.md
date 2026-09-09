@@ -713,6 +713,29 @@ are tracked separately in [#84](https://github.com/vilicvane/code3d/issues/84).
   archives. It persists code3d-lock.json beside node_modules, shares an archive
   cache, stages replacements and restores interrupted installs. Separate child
   manifests own separate installations; they do not imply npm workspaces.
+  Explorer folders, manifests and the workspace root offer Install package.
+  A missing manifest is created in the selected folder with the requested
+  dependency and @code3d/core at latest; existing manifests retain their choices.
+  Commands inside node_modules search upward outside installed dependencies.
+  Editable project manifests also offer Update dependencies: resolve the whole
+  graph without the old lock, respecting current ranges and preserving the
+  manifest. Replace packages and lock only after successful installation;
+  serialize this explicit update with ordinary preparation and manual installs.
+  Manifest-free models retain built-in packages without an installation.
+  Package installation runs independently of file navigation and editing, with
+  progress in the explorer. Source edits reuse preparations keyed by manifest,
+  lock and installation file versions; concurrent consumers share in-flight work.
+  Project language loading also retains parsed dependencies, TypeScript's prior
+  Program and declaration navigation maps across revisions. Ordinary edits
+  update source inputs without preparing packages or rereading their types;
+  preparation progress is reserved for first loading, newly reached dependencies
+  and changed dependencies/configuration or external files. Reached-file version
+  checks, cancellation invalidation and failed-read retries remain active.
+  Worker metadata refresh is batched; browser installer-owned package trees
+  reuse file metadata and misses by installation version instead of querying
+  every package file on each edit. Ordinary/local files still check real versions.
+  Package failures have one explorer status entry, include the requested package
+  name, and clear after successful preparation of a corrected or removed manifest.
   Local-folder installation remains external. Package files open read-only,
   with declaration maps connecting published declarations to original sources.
   See [#90](https://github.com/vilicvane/code3d/issues/90).

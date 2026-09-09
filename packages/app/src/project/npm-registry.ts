@@ -30,6 +30,7 @@ export class NpmRegistry {
     if (!pending) {
       pending = this.json(
         'https://registry.npmjs.org/' + encodeURIComponent(name),
+        name,
       );
       this.requests.set(name, pending);
       pending.catch(() => this.requests.delete(name));
@@ -43,13 +44,21 @@ export class NpmRegistry {
         encodeURIComponent(name) +
         '/' +
         encodeURIComponent(version),
+      `${name}@${version}`,
     );
   }
 
-  private async json(url: string) {
+  private async json(url: string, name: string) {
     const response = await this.request(url, {
       signal: AbortSignal.timeout(30_000),
+    }).catch(error => {
+      throw new Error(
+        `Unable to fetch npm package ${name}. Check the package name and network connection. ${error instanceof Error ? error.message : String(error)}`,
+        {cause: error},
+      );
     });
+    if (response.status === 404)
+      throw new Error(`npm package not found: ${name}`);
     if (!response.ok)
       throw new Error(`npm registry returned ${response.status}: ${url}`);
     return response.json();

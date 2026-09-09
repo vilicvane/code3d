@@ -1,5 +1,9 @@
 import type {BrowserProjectFileSystem} from './filesystem';
-import {decodeProjectFile, type ProjectFileReader} from './file-reader';
+import {
+  decodeProjectFile,
+  type ProjectFileInfo,
+  type ProjectFileReader,
+} from './file-reader';
 import {normalizeProjectPath, projectDirectory} from './project';
 import {
   findPackageScope,
@@ -48,59 +52,179 @@ function relativePath(from: string, to: string): string {
   return [...left.map(() => '..'), ...right].join('/') || '.';
 }
 
+export type PackageInstallationProgress = Readonly<{
+  directory: string;
+  state: 'busy' | 'ready' | 'error';
+  message: string;
+}>;
+
+export class PackageInstallationError extends Error {
+  constructor(
+    readonly directory: string,
+    cause: unknown,
+  ) {
+    super(cause instanceof Error ? cause.message : String(cause), {cause});
+    this.name = 'PackageInstallationError';
+  }
+}
+
+type InstallationState = {key: string; manifest: string; cacheable: boolean};
+
 /** Installs only reached package scopes. All consumers read the resulting files. */
 export class BrowserPackageInstaller implements ProjectFileReader {
-  private readonly prepared = new Map<string, Promise<void>>();
+  private readonly prepared = new Map<string, InstallationState>();
+  private readonly preparing = new Map<string, Promise<void>>();
+  private readonly lookups = new Map<
+    string,
+    Promise<InstallationState | undefined>
+  >();
+  private readonly fileInfo = new Map<
+    string,
+    {key: string; info: Promise<ProjectFileInfo | undefined>}
+  >();
+  private readonly failures = new Set<string>();
   constructor(
     private readonly files: BrowserProjectFileSystem,
-    private readonly progress: (message: string) => void = () => {},
+    private readonly progress: (
+      progress: PackageInstallationProgress,
+    ) => void = () => {},
     private readonly createRegistry = () => new NpmRegistry(),
     private readonly installed: () => void = () => {},
   ) {}
 
-  async prepare(file: string): Promise<void> {
-    this.prepared.clear();
+  async prepare(
+    file: string,
+    {update = false}: {update?: boolean} = {},
+  ): Promise<void> {
+    this.lookups.clear();
     const scope = await findPackageScope(this.files, file);
-    await this.ensure(scope.directory);
+    await this.ensure(scope.directory, update);
   }
 
   private async prepareLookup(path: string) {
     const match = /^(.*?)\/node_modules(?:\/|$)/.exec(path);
     if (!match) return;
-    const scope = await findPackageScope(
-      this.files,
-      pathAt(match[1], '__lookup.ts'),
-    );
-    await this.ensure(scope.directory);
+    let lookup = this.lookups.get(match[1]);
+    if (!lookup) {
+      lookup = findPackageScope(
+        this.files,
+        pathAt(match[1], '__lookup.ts'),
+      ).then(async scope => {
+        await this.ensure(scope.directory);
+        return scope.directory === normalizeProjectPath(match[1])
+          ? this.prepared.get(scope.directory)
+          : undefined;
+      });
+      this.lookups.set(match[1], lookup);
+      lookup.catch(() => {
+        if (this.lookups.get(match[1]) === lookup)
+          this.lookups.delete(match[1]);
+      });
+    }
+    return lookup;
   }
   async readFile(path: string) {
     await this.prepareLookup(path);
     return this.files.readFile(path);
   }
   async stat(path: string) {
-    await this.prepareLookup(path);
-    return this.files.stat(path);
-  }
-
-  private ensure(directory: string): Promise<void> {
-    let pending = this.prepared.get(directory);
-    if (!pending) {
-      const run = () => this.install(directory);
-      // Browser tabs using the same IndexedDB workspace must serialize replacement.
-      pending =
-        typeof navigator !== 'undefined' && navigator.locks
-          ? navigator.locks.request('code3d-npm:' + directory, run)
-          : run();
-      this.prepared.set(directory, pending);
-      pending.catch(() => {
-        if (this.prepared.get(directory) === pending)
-          this.prepared.delete(directory);
+    const installation = await this.prepareLookup(path);
+    // Installed package trees are read-only and replaced together with their marker.
+    // Keep checking ordinary files and trees which are not owned by the installer.
+    if (!installation?.cacheable) return this.files.stat(path);
+    let cached = this.fileInfo.get(path);
+    if (cached?.key !== installation.key) {
+      const info = this.files.stat(path).catch(error => {
+        if (this.fileInfo.get(path)?.info === info) this.fileInfo.delete(path);
+        throw error;
       });
+      cached = {key: installation.key, info};
+      this.fileInfo.set(path, cached);
     }
-    return pending;
+    return cached.info;
   }
 
-  private async install(directory: string): Promise<void> {
+  statMany(paths: readonly string[]) {
+    return Promise.all(paths.map(path => this.stat(path)));
+  }
+
+  private async installationState(
+    directory: string,
+  ): Promise<InstallationState> {
+    const paths = [
+      'package.json',
+      packageLockName,
+      'node_modules',
+      'node_modules/.code3d-install.json',
+    ];
+    const states = await Promise.all(
+      paths.map(path => this.files.stat(pathAt(directory, path))),
+    );
+    return {
+      key: JSON.stringify(states),
+      manifest: JSON.stringify(states[0] ?? null),
+      cacheable: states[2]?.kind === 'directory' && states[3]?.kind === 'file',
+    };
+  }
+
+  private ensure(directory: string, update = false): Promise<void> {
+    const pending = this.preparing.get(directory);
+    if (pending) return pending.then(() => this.ensure(directory, update));
+    const run = async () => {
+      const before = await this.installationState(directory);
+      if (!update && this.prepared.get(directory)?.key === before.key) return;
+      const install = async () => {
+        let reported = false;
+        try {
+          await this.install(
+            directory,
+            message => {
+              reported = true;
+              this.progress({directory, state: 'busy', message});
+            },
+            update,
+          );
+          const after = await this.installationState(directory);
+          // A newer manifest needs its own preparation, even if it was saved just after the swap.
+          if (before.manifest === after.manifest)
+            this.prepared.set(directory, after);
+          if (reported || this.failures.has(directory))
+            this.progress({
+              directory,
+              state: 'ready',
+              message: reported ? 'Packages installed' : 'Packages ready',
+            });
+          this.failures.delete(directory);
+        } catch (error) {
+          this.prepared.delete(directory);
+          this.failures.add(directory);
+          const failure = new PackageInstallationError(directory, error);
+          this.progress({
+            directory,
+            state: 'error',
+            message: failure.message,
+          });
+          throw failure;
+        }
+      };
+      // Browser tabs using the same IndexedDB workspace must serialize replacement.
+      if (typeof navigator !== 'undefined' && navigator.locks)
+        await navigator.locks.request('code3d-npm:' + directory, install);
+      else await install();
+    };
+    const preparation = run().finally(() => {
+      if (this.preparing.get(directory) === preparation)
+        this.preparing.delete(directory);
+    });
+    this.preparing.set(directory, preparation);
+    return preparation;
+  }
+
+  private async install(
+    directory: string,
+    progress: (message: string) => void,
+    update: boolean,
+  ): Promise<void> {
     const manifestPath = pathAt(directory, 'package.json');
     const bytes = await this.files.readFile(manifestPath);
     if (!bytes) return;
@@ -113,10 +237,9 @@ export class BrowserPackageInstaller implements ProjectFileReader {
       ? decodeProjectFile(oldLockBytes)
       : undefined;
     let lock =
-      oldLockSource === undefined
+      update || oldLockSource === undefined
         ? undefined
         : parsePackageLock(oldLockSource, lockPath);
-    const oldMarker = lock && installationMarker(lock);
     const registry = this.createRegistry();
     if (
       !lock ||
@@ -127,7 +250,7 @@ export class BrowserPackageInstaller implements ProjectFileReader {
         ),
       }) !== dependencySignature(manifest)
     )
-      lock = await resolvePackageLock(manifest, registry, lock, this.progress);
+      lock = await resolvePackageLock(manifest, registry, lock, progress);
     const serialized = JSON.stringify(lock, null, 2) + '\n';
     const nextMarker = installationMarker(lock);
     const modules = pathAt(directory, 'node_modules');
@@ -136,7 +259,18 @@ export class BrowserPackageInstaller implements ProjectFileReader {
     const backup = scratch + '/previous';
     let marker = await this.files.readFile(modules + '/.code3d-install.json');
     if (await this.files.stat(backup)) {
-      if (!marker || decodeProjectFile(marker) !== oldMarker) {
+      let committed = false;
+      if (marker && oldLockSource !== undefined) {
+        try {
+          committed =
+            decodeProjectFile(marker) ===
+            installationMarker(parsePackageLock(oldLockSource, lockPath));
+        } catch {
+          // An invalid lock cannot confirm a completed swap. Explicit updates
+          // can still recover the previous installation and replace that lock.
+        }
+      }
+      if (!committed) {
         if (await this.files.stat(modules)) await this.files.remove(modules);
         await this.files.rename(backup, modules);
         marker = await this.files.readFile(modules + '/.code3d-install.json');
@@ -155,7 +289,7 @@ export class BrowserPackageInstaller implements ProjectFileReader {
     let movedNew = false;
     try {
       for (const [url, pkg] of Object.entries(lock.packages)) {
-        this.progress(`Downloading ${pkg.name}@${pkg.version}`);
+        progress(`Downloading ${pkg.name}@${pkg.version}`);
         const archive = await registry.archive(pkg);
         const destination = staged + '/' + packagePath(lock, url);
         const installed = await extractNpmArchive(archive, (path, contents) =>
@@ -210,7 +344,7 @@ export class BrowserPackageInstaller implements ProjectFileReader {
         throw new Error(
           `${manifestPath} or its lock changed during installation. Run again to install the current dependencies.`,
         );
-      this.progress('Saving installed packages');
+      progress('Saving installed packages');
       if (await this.files.stat(modules)) {
         await this.files.rename(modules, backup);
         movedOld = true;

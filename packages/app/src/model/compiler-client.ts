@@ -2,7 +2,7 @@ import CompilerWorker from './compiler.worker?worker';
 import type {DesignContext, ModelModule} from './compiler';
 import {ModelDiagnosticError} from './diagnostic';
 import type {ModelProject} from '../project/project';
-import type {ProjectFileReader} from '../project/file-reader';
+import {statProjectFiles, type ProjectFileReader} from '../project/file-reader';
 import type {ProjectLanguage} from '../project/project-language';
 import {browserPackageFiles} from '../project/browser-packages';
 import type {ModelExportInstance, ModelExportOptions} from './model-export';
@@ -253,7 +253,9 @@ export class ModelCompilerClient {
     try {
       const files =
         request.source === 'builtin' ? browserPackageFiles : this.files;
-      const value = await files[request.operation](request.path);
+      const value = await (request.operation === 'statMany'
+        ? statProjectFiles(files, request.paths)
+        : files[request.operation](request.path));
       if (worker === this.worker)
         this.send({kind: 'file-result', id: request.id, value}, worker);
     } catch (error) {

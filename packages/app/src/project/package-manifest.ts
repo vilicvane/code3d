@@ -101,3 +101,56 @@ export function validateBrowserManifest(manifest: PackageManifest): void {
       'Browser installs use independent package.json files; workspaces and dependency overrides are not supported.',
     );
 }
+
+/** A folder owns a new scope; installed package folders target their owning project. */
+export async function packageInstallDirectory(
+  reader: ProjectFileReader,
+  directory: string,
+): Promise<string> {
+  directory = normalizeProjectPath(directory);
+  const modules = /^(.*?)\/node_modules(?:\/|$)/.exec(directory);
+  if (!modules) return directory;
+  return (
+    await findPackageScope(
+      reader,
+      normalizeProjectPath(modules[1] + '/package.json'),
+    )
+  ).directory;
+}
+
+export function parsePackageSpecifier(specifier: string): {
+  name: string;
+  range: string;
+} {
+  specifier = specifier.trim();
+  const separator = specifier.indexOf('@', 1);
+  const name = separator === -1 ? specifier : specifier.slice(0, separator);
+  const range =
+    separator === -1 ? 'latest' : specifier.slice(separator + 1).trim();
+  assertPackageName(name);
+  if (!range) throw new Error('Enter a version or omit @ to use latest.');
+  return {name, range};
+}
+
+/** Add core only when creating a manifest, preserving an existing project's choices. */
+export function addPackageDependency(
+  manifest: PackageManifest | undefined,
+  specifier: string,
+): PackageManifest {
+  const {name, range} = parsePackageSpecifier(specifier);
+  const result: PackageManifest = manifest
+    ? {...manifest}
+    : {
+        private: true,
+        type: 'module',
+        dependencies: {'@code3d/core': 'latest'},
+      };
+  let replaced = false;
+  for (const field of dependencyFields) {
+    if (!Object.hasOwn(result[field] ?? {}, name)) continue;
+    result[field] = {...result[field], [name]: range};
+    replaced = true;
+  }
+  if (!replaced) result.dependencies = {...result.dependencies, [name]: range};
+  return result;
+}

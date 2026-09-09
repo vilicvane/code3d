@@ -13,7 +13,7 @@ import {isBuiltinPackageSpecifier} from '../project/builtin-packages';
 import {ProjectBuilder} from '../project/project-builder';
 import {ProjectAssets} from '../project/project-assets';
 import {
-  loadProjectLanguage,
+  ProjectLanguageLoader,
   type ProjectLanguage,
 } from '../project/project-language';
 import {normalizeProjectPath, type ModelProject} from '../project/project';
@@ -46,6 +46,7 @@ export class ProjectCompiler {
   private readonly files: ProjectFileCache;
   private readonly packages: ProjectPackages;
   private readonly assets: ProjectAssets;
+  private readonly language: ProjectLanguageLoader;
   private readonly evaluator: ModuleEvaluator;
   private runtime?: ProjectRuntime;
   private compiler?: ReturnType<typeof createModelCompiler>;
@@ -66,6 +67,7 @@ export class ProjectCompiler {
       new ProjectFileCache(builtinFiles),
     );
     this.assets = new ProjectAssets(this.packages);
+    this.language = new ProjectLanguageLoader(this.packages);
     this.evaluator = createEvaluator();
   }
 
@@ -78,7 +80,6 @@ export class ProjectCompiler {
     checkCancelled: () => void = () => {},
   ): Promise<ModelModule> {
     checkCancelled();
-    onProgress?.('loading-project');
     this.disposeGeometry();
     const changed = await this.files.refresh();
     const packageSelectionChanged = await this.packages.update(
@@ -96,7 +97,9 @@ export class ProjectCompiler {
       )
     ) {
       this.disposeRuntime();
+      this.language.reset();
     }
+    this.language.invalidate(changed);
     // Finish applying invalidation before cancellation can consume these changes.
     checkCancelled();
     const reader = this.packages;
@@ -111,11 +114,11 @@ export class ProjectCompiler {
     );
     checkCancelled();
     const builder = new ProjectBuilder(reader, this.engine, this.assets);
-    const language = await loadProjectLanguage(
-      reader,
+    const language = await this.language.load(
       project,
       reader.packageSpecifiers,
       rootPath,
+      () => onProgress?.('preparing-project'),
     );
     checkCancelled();
     onLanguage?.(language);
@@ -249,6 +252,7 @@ export class ProjectCompiler {
 
   dispose(): void {
     this.disposeRuntime();
+    this.language.reset();
     this.evaluator.dispose();
   }
 
