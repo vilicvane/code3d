@@ -3,6 +3,13 @@ import type {OpenCascadeInstance} from '@code3d/opencascade';
 import {clearKernelOperationCache} from '../library/kernel-cache.js';
 
 export {
+  setKernelArtifactStore,
+  kernelOperationCacheStats,
+  clearKernelOperationCache,
+} from '../library/kernel-cache.js';
+export type {KernelArtifactStore} from '../library/kernel-cache.js';
+
+export {
   isSketch,
   sketchDefinition,
   snapshotSketch,

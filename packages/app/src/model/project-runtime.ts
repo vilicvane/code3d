@@ -4,6 +4,7 @@ import type {ProjectFileReader} from '../project/file-reader';
 import {ProjectBuilder, type ProjectBundle} from '../project/project-builder';
 import {ModuleEvaluator, type ModuleExports} from './module-evaluator';
 import type {CompilationProgress} from './compilation-progress';
+import {runtimeArtifactIdentity} from './persistent-artifacts';
 
 const runtimeUrl = 'code3d-project:/runtime.js';
 
@@ -19,6 +20,7 @@ export class ProjectRuntime {
   >();
   private readonly failed = new Map<string, unknown>();
   private constructor(
+    readonly artifactIdentity: string,
     readonly tooling: typeof CoreTooling,
     readonly replicad: typeof Replicad,
     readonly modules: Map<string, ModuleExports>,
@@ -111,7 +113,26 @@ export class ProjectRuntime {
       __code3dKernelBytes: wasm,
       __code3dSketchBytes: sketchWasm,
     });
+    // ProjectAssets rewrites loader URLs to fresh blob: addresses. Hash the
+    // actual input files instead of that ephemeral bundle text. File paths bind
+    // each input to its resolution, and raw bytes include the Core codec itself.
+    const identityPaths = [...bundle.files].sort();
+    const identityFiles = await Promise.all(
+      identityPaths.map(async path => {
+        const bytes = await files.readFile(path);
+        if (!bytes) throw new Error(`Runtime input is missing: ${path}`);
+        return bytes;
+      }),
+    );
     return new ProjectRuntime(
+      await runtimeArtifactIdentity([
+        new TextEncoder().encode(
+          JSON.stringify([runtimeSource, identityPaths]),
+        ),
+        ...identityFiles,
+        wasm,
+        sketchWasm,
+      ]),
       runtime.tooling,
       runtime.modules.get(replicadPath),
       runtime.modules,
@@ -122,6 +143,7 @@ export class ProjectRuntime {
   }
 
   dispose(): void {
+    this.tooling.clearKernelOperationCache();
     this.modules.clear();
     this.formats.clear();
     this.imported.clear();

@@ -4050,7 +4050,13 @@ function renderMesh(
             })),
         edgeGroups: topology
           ? stableEdgeGroups(shape, topology.edges, wire.edgeGroups)
-          : wire.edgeGroups,
+          : wire.edgeGroups.map((group, index) => ({
+              start: group.start,
+              count: group.count,
+              // Context-region edges have their own traversal namespace, just
+              // like the surfaces above. Native handle hashes change on restore.
+              edgeId: index + 1,
+            })),
       };
     },
   ).value;

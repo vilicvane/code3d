@@ -997,9 +997,22 @@ The budget is a trimming target, not a hard limit on the page or the protected
 working set. Released native blocks are reusable even when WASM's capacity does
 not shrink. Compiler code, non-cache JavaScript objects, rendering/GPU resources
 and temporary operation peaks are outside the JavaScript estimate.
-JavaScript and provenance are still evaluated afresh. Cache encoding, capacity, and a
-possible lifetime beyond one compiler worker remain adjustable implementation
-choices rather than product semantics.
+JavaScript and provenance are still evaluated afresh. Browser persistence (#79)
+adds a separate origin-wide disk LRU using binary BREP and exact topology/bounds/
+reference-basis/mesh sidecars. Core exposes a synchronous artifact store boundary;
+App opens OPFS asynchronously around compilation and closes it afterward. Runtime
+identity hashes resolved implementation files and both WASM binaries, excluding
+ephemeral asset URLs. Node authors keep the memory cache; the browser agent/CLI
+compiler shares the persistent path.
+
+The journal uses two append-only generations with checksummed records, lazy
+payload reads, and publication after flushing a complete compaction. Physical
+disk capacity is min(1 GiB, 10% of browser quota), including half for compaction.
+A cancellable Web Lock serializes journal ownership across tabs and Workers.
+Storage failures preserve memory-only evaluation. Saved IDs, transforms and mesh
+bytes restore exactly; fresh native measurements allow the few-ULP direction
+normalization performed by BinTools. Context-region mesh IDs use traversal order,
+never runtime-specific native handle hashes.
 
 Ordinary cancellation retains that Worker: the client sets a shared flag,
 kernel operation boundaries check it before starting work, and evaluation exits
@@ -1007,8 +1020,8 @@ through its existing `finally` to retain the completed prefix and trim history.
 The latest queued revision starts only after cleanup; intermediate queued edits
 are rejected without evaluation. Preparation applies dependency invalidation
 before checking cancellation. A five-second cancellation grace period bounds
-unresponsive synchronous/native code, after which the Worker and its caches are
-discarded. Project close, preparation/export deadlines and Worker crashes retain
+unresponsive synchronous/native code, after which the Worker and its memory cache
+are discarded; previously flushed persistent artifacts remain reusable. Project close, preparation/export deadlines and Worker crashes retain
 their hard-stop behavior. App documents and Workers use COOP/COEP headers in dev,
 preview and static hosting to enable the shared flag; see #52.
 

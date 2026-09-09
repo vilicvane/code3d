@@ -23,6 +23,10 @@ import {
 } from './compiler';
 import {ProjectRuntime} from './project-runtime';
 import {
+  withPersistentArtifacts,
+  type PersistentArtifactStats,
+} from './persistent-artifacts';
+import {
   previewSketchDrag,
   type SketchDrag,
   type SketchDragPreview,
@@ -44,6 +48,7 @@ export class ProjectCompiler {
   private runtime?: ProjectRuntime;
   private compiler?: ReturnType<typeof createModelCompiler>;
   private geometry?: ModelGeometrySnapshot;
+  private persistentStats?: PersistentArtifactStats;
 
   constructor(
     files: ProjectFileReader,
@@ -155,30 +160,46 @@ export class ProjectCompiler {
       project,
       designContext,
     );
-    const discovery = await this.runtime.loadDependencies(
-      builder,
-      `export * from ${JSON.stringify(root)};` +
-        (contextFile && contextFile !== root
-          ? `\nimport ${JSON.stringify(contextFile)};`
-          : ''),
-    );
-    checkCancelled();
-    return this.compiler!.compileProject(
-      project,
-      root,
-      builder,
-      this.runtime.modules,
-      this.runtime.formats,
-      this.runtime.importModule,
-      language,
-      discovery,
-      designContext,
-      () => onProgress?.('evaluating-model'),
-      objects => {
-        checkCancelled();
-        this.geometry = this.runtime!.tooling.retainModelGeometry(objects);
+    const runtime = this.runtime;
+    return withPersistentArtifacts(
+      runtime.artifactIdentity,
+      async store => {
+        runtime.tooling.setKernelArtifactStore(store);
+        try {
+          const discovery = await runtime.loadDependencies(
+            builder,
+            `export * from ${JSON.stringify(root)};` +
+              (contextFile && contextFile !== root
+                ? `\nimport ${JSON.stringify(contextFile)};`
+                : ''),
+          );
+          checkCancelled();
+          return await this.compiler!.compileProject(
+            project,
+            root,
+            builder,
+            runtime.modules,
+            runtime.formats,
+            runtime.importModule,
+            language,
+            discovery,
+            designContext,
+            () => onProgress?.('evaluating-model'),
+            objects => {
+              checkCancelled();
+              this.geometry =
+                this.runtime!.tooling.retainModelGeometry(objects);
+            },
+            checkCancelled,
+          );
+        } finally {
+          runtime.tooling.setKernelArtifactStore(undefined);
+        }
       },
       checkCancelled,
+      stats => {
+        this.persistentStats = stats;
+      },
     );
   }
 
@@ -222,6 +243,13 @@ export class ProjectCompiler {
 
   get compiledBytes(): number {
     return this.evaluator.compiledBytes;
+  }
+
+  get kernelCacheStats() {
+    return {
+      memory: this.runtime?.tooling.kernelOperationCacheStats(),
+      disk: this.persistentStats,
+    };
   }
 
   private disposeRuntime(): void {
