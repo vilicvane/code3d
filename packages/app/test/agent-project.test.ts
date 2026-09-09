@@ -257,6 +257,15 @@ test('context reads the current user target without adopting it or modifying fil
     end: 11,
   });
   assert.deepEqual(f.editor.selectedSource(), selection);
+  f.editor.currentFile = () => undefined;
+  f.editor.selectedSource = () => undefined;
+  assert.deepEqual(
+    await f.session.handle('alice', 'Alice', {operation: 'context'}),
+    {
+      ok: true,
+      data: {file: null, revision: 1, cursor: null},
+    },
+  );
   assert.deepEqual(f.writes, []);
 });
 

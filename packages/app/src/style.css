@@ -592,6 +592,26 @@ kbd {
   min-height: 0;
 }
 
+.editor-document > .editor-host,
+.editor-empty-state {
+  grid-area: 2 / 1;
+}
+
+.editor-empty-state {
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+  background: #11120f;
+}
+
+.editor-empty-state[hidden] {
+  display: none;
+}
+
 .editor-tab-bar {
   display: flex;
   min-width: 0;

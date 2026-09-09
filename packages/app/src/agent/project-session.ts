@@ -22,7 +22,7 @@ import type {ResolvedAgentCursor} from './cursor';
 import {contextCursor} from './context';
 
 export interface AgentProjectEditor {
-  currentFile(): string;
+  currentFile(): string | undefined;
   selectedSource(): SourceRef | undefined;
   project(): ModelProject;
   fileState(path: string): {content: string; version: string} | undefined;
@@ -157,7 +157,7 @@ export class AgentProjectSession {
     try {
       if (request.operation === 'context')
         return await this.enqueue(async () => {
-          const file = this.editor.currentFile();
+          const file = this.editor.currentFile() ?? null;
           const ref = this.editor.selectedSource();
           return {
             ok: true,

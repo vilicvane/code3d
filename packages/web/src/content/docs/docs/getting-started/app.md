@@ -24,7 +24,9 @@ This budget does not cap the total memory used by the browser tab.
 Use **Hide file explorer** beside the open-file tabs to give the editor more
 space; **Show file explorer** brings the project tree back. Click a folder to
 expand or collapse it, then select a file to open it. Open files remain
-available in the tabs while the explorer is hidden.
+available in the tabs while the explorer is hidden. You can close every tab,
+including the last one, to clear the editor and preview. Closing a tab keeps
+the file and its edits in the project; reopen it from the explorer.
 
 Drag the file explorer's right edge to resize the tree, or the divider between
 the editor and viewport to resize the code pane. The App remembers both widths

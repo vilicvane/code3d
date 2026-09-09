@@ -446,14 +446,14 @@ export class ModelViewport {
   }
 
   renderModule(
-    module: ModelModule,
+    module: ModelModule | null,
     selectedKey = 'root',
     source?: SourceViewSelection,
   ): boolean {
     this.restoreTransientPreview();
     this.saveViewportState();
     this.module = module;
-    this.scenes = new ViewportScenes(module);
+    this.scenes = module ? new ViewportScenes(module) : undefined;
     this.selectedViewTarget = {kind: 'model'};
     this.renderedViewTarget = {kind: 'model'};
     if (
@@ -466,7 +466,7 @@ export class ModelViewport {
       )
     )
       return true;
-    if (module.fallback) {
+    if (module?.fallback) {
       this.renderModelView(selectedKey);
     } else {
       this.activeScene = undefined;

@@ -38,7 +38,7 @@ const rootId = 'project-root';
 
 export class ProjectTree {
   private nodes = projectTreeNodes([]);
-  private activePath = '';
+  private activePath: string | undefined;
   private renderPending = false;
   private agentLocations: readonly AgentLocation[] = [];
   private readonly tree: TreeInstance<ProjectTreeNode>;
@@ -71,7 +71,7 @@ export class ProjectTree {
     this.render();
   }
 
-  update(paths: readonly string[], activePath: string): void {
+  update(paths: readonly string[], activePath: string | undefined): void {
     this.nodes = projectTreeNodes(paths);
     this.activePath = activePath;
 
@@ -79,14 +79,16 @@ export class ProjectTree {
     const expandedItems = new Set(
       state.expandedItems.filter(itemId => this.isFolder(itemId)),
     );
-    for (const itemId of ancestorFolderIds(activePath)) {
+    for (const itemId of activePath ? ancestorFolderIds(activePath) : []) {
       expandedItems.add(itemId);
     }
 
     const focusedItem =
       state.focusedItem && this.nodes.has(state.focusedItem)
         ? state.focusedItem
-        : fileId(activePath);
+        : activePath
+          ? fileId(activePath)
+          : this.tree.getItems()[0]?.getId();
     this.tree.setConfig(config => ({
       ...config,
       state: {expandedItems: [...expandedItems], focusedItem},
