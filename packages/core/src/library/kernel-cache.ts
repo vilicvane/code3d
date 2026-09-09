@@ -1,6 +1,19 @@
 import type {OpenCascadeInstance} from '@code3d/opencascade';
 import {getOC} from 'replicad';
 import {estimateRetainedBytes} from './retained-memory.js';
+import {
+  decodeKernelArtifact,
+  encodeKernelArtifact,
+} from './kernel-artifact-codec.js';
+
+/** The host opens storage before synchronous evaluation and owns its lifetime. */
+export interface KernelArtifactStore {
+  get(id: string): Uint8Array | undefined;
+  set(id: string, bytes: Uint8Array): void;
+  touch(id: string): boolean;
+  delete(id: string): void;
+  flush(): void;
+}
 
 export type KernelKeyPart =
   string | number | boolean | null | readonly KernelKeyPart[];
@@ -40,6 +53,30 @@ export function createKernelOperationCache({
   let hits = 0;
   let misses = 0;
   let estimatedJavaScriptBytes = 0;
+  let store: KernelArtifactStore | undefined;
+  let persistentHits = 0;
+  let persistentWrites = 0;
+  let persistenceErrors = 0;
+  const persisted = new Set<string>();
+
+  function setKernelArtifactStore(next: KernelArtifactStore | undefined): void {
+    store = next;
+    persisted.clear();
+  }
+
+  function accessStore<Result>(
+    action: (store: KernelArtifactStore) => Result,
+  ): Result | undefined {
+    if (!store) return undefined;
+    try {
+      return action(store);
+    } catch {
+      // Cache storage is optional. Its failures must not change model execution.
+      persistenceErrors += 1;
+      store = undefined;
+      return undefined;
+    }
+  }
 
   /**
    * Keep a serial evaluation's complete working set, including snapshot queries.
@@ -59,6 +96,7 @@ export function createKernelOperationCache({
       retainedEvaluation = used;
       currentEvaluation = undefined;
       evictHistoricalEntries();
+      accessStore(store => store.flush());
     };
   }
 
@@ -83,40 +121,78 @@ export function createKernelOperationCache({
       inputs.map(input => input.id),
     ]);
     const id = contentId(signature);
-    const cached = entries.get(id) as CacheEntry<Value> | undefined;
+    let cached = entries.get(id) as CacheEntry<Value> | undefined;
+    if (!cached) {
+      const bytes = accessStore(store => store.get(id));
+      if (bytes) {
+        let restored: Value;
+        try {
+          restored = decodeKernelArtifact<Value>(bytes, signature);
+        } catch {
+          persistenceErrors += 1;
+          accessStore(store => store.delete(id));
+          return computeAndRetain();
+        }
+        cached = retainEntry(restored);
+        persistentHits += 1;
+        persisted.add(id);
+      }
+    }
     if (cached) {
       if (cached.signature !== signature) {
         throw new Error(`Kernel operation cache identity collision: ${id}`);
       }
       hits += 1;
       const value = cached.instantiate(cached.value);
+      persist(cached.value);
       touchEntry(id, cached as CacheEntry<unknown>);
       return {id, value};
     }
 
-    misses += 1;
-    const value = compute();
-    let retained: Value;
-    try {
-      retained = lifecycle.retain(value);
-    } catch (error) {
-      lifecycle.release(value);
-      throw error;
+    return computeAndRetain();
+
+    function computeAndRetain(): KernelArtifact<Value> {
+      misses += 1;
+      const value = compute();
+      let retained: Value;
+      try {
+        retained = lifecycle.retain(value);
+      } catch (error) {
+        lifecycle.release(value);
+        throw error;
+      }
+      const entry = retainEntry(retained);
+      persist(retained);
+      touchEntry(id, entry as CacheEntry<unknown>);
+      return {id, value};
     }
-    const entry = {
-      estimatedBytes:
-        256 +
-        estimateRetainedBytes(signature) +
-        lifecycle.estimateBytes(retained),
-      signature,
-      value: retained,
-      instantiate: lifecycle.instantiate,
-      release: lifecycle.release,
-    } as CacheEntry<unknown>;
-    entries.set(id, entry);
-    estimatedJavaScriptBytes += entry.estimatedBytes;
-    touchEntry(id, entry);
-    return {id, value};
+
+    function persist(value: Value): void {
+      if (!store || persisted.has(id)) return;
+      accessStore(store => {
+        if (!store.touch(id)) {
+          store.set(id, encodeKernelArtifact(signature, value));
+          persistentWrites += 1;
+        }
+        persisted.add(id);
+      });
+    }
+
+    function retainEntry(retained: Value): CacheEntry<Value> {
+      const entry: CacheEntry<Value> = {
+        estimatedBytes:
+          256 +
+          estimateRetainedBytes(signature) +
+          lifecycle.estimateBytes(retained),
+        signature,
+        value: retained,
+        instantiate: lifecycle.instantiate,
+        release: lifecycle.release,
+      };
+      entries.set(id, entry as CacheEntry<unknown>);
+      estimatedJavaScriptBytes += entry.estimatedBytes;
+      return entry;
+    }
   }
 
   function touchEntry(id: string, entry: CacheEntry<unknown>): void {
@@ -158,6 +234,10 @@ export function createKernelOperationCache({
     hits = 0;
     misses = 0;
     estimatedJavaScriptBytes = 0;
+    persistentHits = 0;
+    persistentWrites = 0;
+    persistenceErrors = 0;
+    persisted.clear();
   }
 
   function kernelOperationCacheStats() {
@@ -169,6 +249,9 @@ export function createKernelOperationCache({
       estimatedJavaScriptBytes,
       nativeAllocatedBytes: nativeAllocatedBytes(),
       maximumBytes,
+      persistentHits,
+      persistentWrites,
+      persistenceErrors,
     };
   }
 
@@ -190,6 +273,7 @@ export function createKernelOperationCache({
     evaluateKernelOperation,
     clearKernelOperationCache,
     kernelOperationCacheStats,
+    setKernelArtifactStore,
   };
 }
 
@@ -198,6 +282,7 @@ export const {
   evaluateKernelOperation,
   clearKernelOperationCache,
   kernelOperationCacheStats,
+  setKernelArtifactStore,
 } = createKernelOperationCache({
   nativeAllocatedBytes: () =>
     (getOC() as OpenCascadeInstance).Code3dMemory.AllocatedBytes(),
