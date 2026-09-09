@@ -13,8 +13,14 @@ import type {ProjectEditorChange} from '../editor';
 import type {CursorTypeInfo} from '../monaco/type-info';
 import type {ProjectFileSystem} from '../project/filesystem';
 import {
+  checkProjectEntryOperation,
+  copyProjectEntry,
+  type ProjectEntryOperation,
+} from '../project/file-operations';
+import {
   isSourceFile,
   projectDirectory,
+  projectPathIsWithin,
   type ModelProject,
 } from '../project/project';
 import {inspectAgentCursor} from './cursor-resolver';
@@ -27,6 +33,7 @@ export interface AgentProjectEditor {
   project(): ModelProject;
   fileState(path: string): {content: string; version: string} | undefined;
   applyFiles(files: readonly {path: string; content: string | null}[]): void;
+  moveFiles(from: string, to: string): void;
   setAgentCursor(id: string, name: string, ref?: SourceRef): void;
   agentCursor(id: string): {ref?: SourceRef; invalid: boolean};
   inspectType(ref: SourceRef): Promise<CursorTypeInfo | null>;
@@ -65,6 +72,9 @@ export class AgentProjectSession {
   private revision = 1;
   private readonly revisionListeners = new Set<() => void>();
   private readonly updateListeners = new Set<(update: AgentUpdate) => void>();
+  private readonly entryListeners = new Set<
+    (reason: 'operation' | 'save') => void
+  >();
 
   constructor(
     readonly fileSystem: ProjectFileSystem,
@@ -80,6 +90,11 @@ export class AgentProjectSession {
   get hasUnsaved(): boolean {
     return this.drafts.size > 0;
   }
+  unsavedFilePaths(): readonly string[] {
+    return [...this.drafts]
+      .filter(([, draft]) => draft.content !== null)
+      .map(([path]) => path);
+  }
   get currentRevision(): number {
     return this.revision;
   }
@@ -87,6 +102,64 @@ export class AgentProjectSession {
   onRevision(listener: () => void): () => void {
     this.revisionListeners.add(listener);
     return () => this.revisionListeners.delete(listener);
+  }
+
+  onEntriesChange(
+    listener: (reason: 'operation' | 'save') => void,
+  ): () => void {
+    this.entryListeners.add(listener);
+    return () => this.entryListeners.delete(listener);
+  }
+
+  private entriesChanged(reason: 'operation' | 'save'): void {
+    for (const listener of this.entryListeners) listener(reason);
+  }
+
+  private acceptEditorChanges(operation: () => void): void {
+    this.accepting = true;
+    try {
+      operation();
+    } finally {
+      this.accepting = false;
+    }
+  }
+
+  /** Explorer mutations use the same queue as user saves and accepted agent edits. */
+  async changeEntries(operation: ProjectEntryOperation): Promise<void> {
+    await this.update(async () => {
+      await checkProjectEntryOperation(this.fileSystem, operation);
+      try {
+        if (operation.kind === 'create') {
+          const {path, kind} = operation.entry;
+          if (kind === 'directory') await this.fileSystem.createDirectory(path);
+          else await this.fileSystem.writeFile(path, '');
+        } else if (operation.kind === 'remove') {
+          for (const path of operation.paths) {
+            await this.fileSystem.remove(path);
+            const files = this.editor
+              .project()
+              .files.filter(file => projectPathIsWithin(file.path, path));
+            this.acceptEditorChanges(() =>
+              this.editor.applyFiles(
+                files.map(file => ({path: file.path, content: null})),
+              ),
+            );
+          }
+        } else {
+          for (const {from, to} of operation.entries) {
+            if (operation.kind === 'copy')
+              await copyProjectEntry(this.fileSystem, from, to);
+            else {
+              await this.fileSystem.rename(from, to);
+              this.acceptEditorChanges(() => this.editor.moveFiles(from, to));
+            }
+          }
+        }
+      } finally {
+        this.entriesChanged('operation');
+        this.changed();
+      }
+    });
   }
 
   onAgentUpdate(listener: (update: AgentUpdate) => void): () => void {
@@ -476,20 +549,6 @@ export class AgentProjectSession {
           {accepted: false, conflicts},
         ),
       };
-    const remaining = new Set(
-      this.editor.project().files.map(file => file.path),
-    );
-    for (const file of files)
-      if (isSourceFile(file.path)) {
-        if (file.content === null) remaining.delete(file.path);
-        else remaining.add(file.path);
-      }
-    if (!remaining.size)
-      throw new AgentError(
-        'empty_project',
-        'A project needs at least one source file.',
-      );
-
     let resolved: ResolvedAgentCursor | undefined;
     let cursorBase: FileState | undefined;
     if (input.cursor) {
@@ -554,12 +613,13 @@ export class AgentProjectSession {
           ),
         };
     const staged = this.stage(files);
-    this.accepting = true;
-    try {
-      this.editor.applyFiles(files.filter(file => isSourceFile(file.path)));
-    } finally {
-      this.accepting = false;
-    }
+    this.acceptEditorChanges(() =>
+      this.editor.applyFiles(
+        files.filter(
+          file => isSourceFile(file.path) || this.editor.fileState(file.path),
+        ),
+      ),
+    );
     if (resolved)
       this.editor.setAgentCursor(agentId, name, {
         file: resolved.file,
@@ -673,6 +733,7 @@ export class AgentProjectSession {
 
   private async save(drafts: readonly [string, Draft][]): Promise<void> {
     let failed = false;
+    let entriesChanged = false;
     for (const [path, draft] of [...drafts].sort(
       (a, b) => Number(a[1].content === null) - Number(b[1].content === null),
     )) {
@@ -681,10 +742,11 @@ export class AgentProjectSession {
         continue;
       }
       try {
+        const existed = await this.fileSystem.stat(path);
         if (draft.content === null) {
-          if (await this.fileSystem.stat(path))
-            await this.fileSystem.remove(path);
+          if (existed) await this.fileSystem.remove(path);
         } else await this.fileSystem.writeFile(path, draft.content);
+        entriesChanged ||= draft.content === null ? !!existed : !existed;
         if (this.drafts.get(path) === draft) this.drafts.delete(path);
       } catch (error) {
         failed = true;
@@ -695,6 +757,7 @@ export class AgentProjectSession {
         );
       }
     }
+    if (entriesChanged || failed) this.entriesChanged('save');
     this.changed();
   }
 }

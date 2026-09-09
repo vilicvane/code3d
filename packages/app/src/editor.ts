@@ -6,6 +6,12 @@ import {projectTypeScriptWorker} from './monaco/typescript-worker-client';
 import type {CursorTypeInfo} from './monaco/type-info';
 import 'monaco-editor/features/register.all';
 import 'monaco-editor/languages/definitions/typescript/register';
+import 'monaco-editor/languages/definitions/markdown/register';
+import 'monaco-editor/languages/features/json/register';
+import JsonWorker from 'monaco-editor/languages/features/json/json.worker?worker';
+import 'monaco-editor/languages/definitions/css/register';
+import 'monaco-editor/languages/definitions/html/register';
+import 'monaco-editor/languages/definitions/yaml/register';
 import * as typeScriptLanguage from 'monaco-editor/languages/features/typescript/register';
 import EditorWorker from 'monaco-editor/editor/editor.worker?worker';
 import ProjectTypeScriptWorker from './monaco/typescript.worker?worker';
@@ -33,6 +39,7 @@ import type {ModelDiagnostic} from './model/diagnostic';
 import type {SourceRef} from '@code3d/core/tooling';
 import {
   normalizeProjectPath,
+  isSourceFile,
   projectPathIsWithin,
   type ModelProject,
 } from './project/project';
@@ -117,6 +124,7 @@ const modelDiagnosticOwner = 'code3d-model';
 
 (self as MonacoEnvironment).MonacoEnvironment = {
   getWorker(_moduleId, label) {
+    if (label === 'json') return new JsonWorker();
     if (label === 'typescript' || label === 'javascript') {
       return new ProjectTypeScriptWorker();
     }
@@ -474,6 +482,27 @@ export class CodeEditor {
     return [...this.openPaths];
   }
 
+  loadFile(path: string, source: string): void {
+    const normalized = normalizeProjectPath(path);
+    if (this.documents.has(normalized)) return;
+    this.addDocument(normalized, source);
+    this.revision++;
+  }
+
+  setReadOnly(readOnly: boolean): void {
+    this.editor.updateOptions({readOnly});
+  }
+
+  moveFiles(from: string, to: string): void {
+    const source = normalizeProjectPath(from);
+    const target = normalizeProjectPath(to);
+    for (const path of this.filePaths().filter(path =>
+      projectPathIsWithin(path, source),
+    )) {
+      this.renameFile(path, target + path.slice(source.length));
+    }
+  }
+
   switchFile(path: string | undefined, takeFocus = false): void {
     const normalized =
       path === undefined ? undefined : normalizeProjectPath(path);
@@ -528,14 +557,26 @@ export class CodeEditor {
     }
     const source = this.requireDocument(sourcePath).model.getValue();
     const wasActive = sourcePath === this.activePath;
+    const viewState = wasActive
+      ? this.editor.saveViewState()
+      : this.requireDocument(sourcePath).viewState;
+    const agents = [...this.agentCursors].flatMap(([id, cursor]) =>
+      cursor.ref?.file === sourcePath
+        ? [{id, name: cursor.name, ref: {...cursor.ref, file: targetPath}}]
+        : [],
+    );
     const openIndex = this.openPaths.indexOf(sourcePath);
     this.removeDocument(sourcePath);
     this.addDocument(targetPath, source);
+    this.requireDocument(targetPath).viewState = viewState;
     if (openIndex >= 0) this.openPaths.splice(openIndex, 1, targetPath);
     if (wasActive) {
       this.activePath = targetPath;
       this.editor.setModel(this.requireDocument(targetPath).model);
+      if (viewState) this.editor.restoreViewState(viewState);
     }
+    for (const agent of agents)
+      this.setAgentCursor(agent.id, agent.name, agent.ref);
     this.revision += 1;
     this.emitChange({kind: 'rename', from: sourcePath, to: targetPath});
     if (wasActive) this.emitActiveFile('rename');
@@ -543,20 +584,20 @@ export class CodeEditor {
 
   deleteFile(path: string): void {
     const normalized = normalizeProjectPath(path);
-    if (this.documents.size === 1) {
-      throw new Error('A project needs at least one source file.');
-    }
     const wasActive = normalized === this.activePath;
     const openIndex = this.openPaths.indexOf(normalized);
     if (wasActive) {
       const nextPath =
         this.openPaths.find(candidate => candidate !== normalized) ??
-        [...this.documents.keys()].find(candidate => candidate !== normalized)!;
+        [...this.documents.keys()].find(candidate => candidate !== normalized);
       this.activePath = nextPath;
-      if (!this.openPaths.includes(nextPath)) this.openPaths.push(nextPath);
+      if (nextPath && !this.openPaths.includes(nextPath))
+        this.openPaths.push(nextPath);
       this.withSuppressedCursorEvents(() => {
         this.sourceDecoration.clear();
-        this.editor.setModel(this.requireDocument(nextPath).model);
+        this.editor.setModel(
+          nextPath ? this.requireDocument(nextPath).model : null,
+        );
       });
     }
     this.removeDocument(normalized);
@@ -592,12 +633,14 @@ export class CodeEditor {
     if (activeDocumentReplaced && this.activePath) {
       if (!replacementPaths.has(this.activePath)) {
         this.activePath =
-          replacementFiles[0]?.path ?? [...this.documents.keys()][0]!;
+          replacementFiles[0]?.path ?? [...this.documents.keys()][0];
       }
-      if (!this.openPaths.includes(this.activePath)) {
+      if (this.activePath && !this.openPaths.includes(this.activePath)) {
         this.openPaths.push(this.activePath);
       }
-      this.editor.setModel(this.requireDocument(this.activePath).model);
+      this.editor.setModel(
+        this.activePath ? this.requireDocument(this.activePath).model : null,
+      );
     }
     this.revision += 1;
     this.emitActiveFile('reset');
@@ -1990,7 +2033,24 @@ function annotationTokenKind(tokenType: string): string {
 }
 
 function languageForPath(path: string): string {
-  return /\.[cm]?jsx?$/.test(path) ? 'javascript' : 'typescript';
+  if (isSourceFile(path))
+    return /\.[cm]?jsx?$/i.test(path) ? 'javascript' : 'typescript';
+  const filename = path.split('/').at(-1)!.toLowerCase();
+  return (
+    monaco.languages
+      .getLanguages()
+      .find(language =>
+        language.filenames?.some(name => name.toLowerCase() === filename),
+      )?.id ??
+    monaco.languages
+      .getLanguages()
+      .find(language =>
+        language.extensions?.some(extension =>
+          filename.endsWith(extension.toLowerCase()),
+        ),
+      )?.id ??
+    'plaintext'
+  );
 }
 
 function prettierEndOfLine(model: monaco.editor.ITextModel): 'lf' | 'crlf' {

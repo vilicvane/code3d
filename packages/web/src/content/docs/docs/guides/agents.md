@@ -142,7 +142,8 @@ npx --yes @code3d/cli project.c3d.json --request-id model-edit-001 apply --input
 version. `version: null` creates a file that must not already exist;
 `content: null` deletes the specified version. Rename with a delete/create batch.
 Omitted files stay unchanged. A file is limited to 8 MiB; `.git` and `.code3d`
-metadata are reserved, and the project must retain a source file. Binary reads
+metadata are reserved. A project may contain no source files; open text files
+stay synchronized when an agent edits them. Binary reads
 return artifacts.
 
 The App checks paths, every file version, and an explicit cursor against the

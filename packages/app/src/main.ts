@@ -1,5 +1,14 @@
 import './style.css';
-import {File, FilePlus, PanelLeftClose, PanelLeftOpen, X} from 'lucide';
+import {
+  File,
+  FilePlus,
+  FolderPlus,
+  Search,
+  RefreshCw,
+  PanelLeftClose,
+  PanelLeftOpen,
+  X,
+} from 'lucide';
 import brandMark from '../../../assets/brand/mark.svg?raw';
 import {
   CodeEditor,
@@ -36,7 +45,12 @@ import {
   openDirectoryProjectFileSystem,
 } from './project/filesystem';
 import {filePathFromRoute, fileRoute} from './project/file-route';
-import type {ModelProject} from './project/project';
+import {isSourceFile, type ModelProject} from './project/project';
+import {
+  listProjectEntries,
+  readProjectTextFile,
+  type ProjectEntry,
+} from './project/file-operations';
 import {
   compareTopologyIds,
   formatTopologyId,
@@ -117,7 +131,22 @@ const projectFileSystem = directoryConnected
   ? await openDirectoryProjectFileSystem(storedDirectoryHandle)
   : await openBrowserProjectFileSystem();
 await projectFileSystem.initialize(defaultProject);
-const initialProject = await projectFileSystem.syncDirectory(bundledExamples);
+let initialProject = await projectFileSystem.syncDirectory(bundledExamples);
+const requestedFile = filePathFromRoute(window.location.hash);
+let initialFileError: unknown;
+if (
+  requestedFile &&
+  !initialProject.files.some(file => file.path === requestedFile)
+) {
+  try {
+    const source = await readProjectTextFile(projectFileSystem, requestedFile);
+    initialProject = {
+      files: [...initialProject.files, {path: requestedFile, source}],
+    };
+  } catch (error) {
+    initialFileError = error;
+  }
+}
 const app = document.querySelector<HTMLDivElement>('#app');
 
 if (!app) {
@@ -154,15 +183,14 @@ app.innerHTML = `
               <span>PROJECT</span>
               <div class="project-actions">
                 <button id="new-file-button" type="button" title="New file" aria-label="New file"></button>
+                <button id="new-folder-button" type="button" title="New folder" aria-label="New folder"></button>
+                <button id="search-files-button" type="button" title="Search files" aria-label="Search files"></button>
+                <button id="refresh-files-button" type="button" title="Refresh files" aria-label="Refresh files"></button>
               </div>
             </header>
             <nav class="project-tree" id="project-tree"></nav>
           </aside>
           <div class="pane-resizer project-explorer-resizer" id="project-explorer-resizer" role="separator" aria-label="Resize file explorer" aria-orientation="vertical" aria-controls="project-explorer" tabindex="0" title="Drag to resize · Arrow keys to adjust"></div>
-          <div class="project-context-menu" id="project-context-menu" hidden>
-            <button id="context-rename-file" type="button">Rename</button>
-            <button id="context-delete-file" type="button">Delete</button>
-          </div>
           <section class="editor-document" id="editor-document">
             <div class="editor-tab-bar">
               <button class="project-explorer-toggle" id="project-explorer-toggle" type="button" aria-controls="project-explorer"></button>
@@ -284,14 +312,17 @@ const browserStorageButton = requiredElement<HTMLButtonElement>(
 );
 const resetButton = requiredElement<HTMLButtonElement>('reset-button');
 const newFileButton = requiredElement<HTMLButtonElement>('new-file-button');
-const projectContextMenu = requiredElement('project-context-menu');
-const contextRenameFile = requiredElement<HTMLButtonElement>(
-  'context-rename-file',
+const newFolderButton = requiredElement<HTMLButtonElement>('new-folder-button');
+const searchFilesButton = requiredElement<HTMLButtonElement>(
+  'search-files-button',
 );
-const contextDeleteFile = requiredElement<HTMLButtonElement>(
-  'context-delete-file',
+const refreshFilesButton = requiredElement<HTMLButtonElement>(
+  'refresh-files-button',
 );
 newFileButton.append(createIcon(FilePlus));
+newFolderButton.append(createIcon(FolderPlus));
+searchFilesButton.append(createIcon(Search));
+refreshFilesButton.append(createIcon(RefreshCw));
 
 const projectExplorerStorageKey = 'code3d:project-explorer-expanded';
 setProjectExplorerExpanded(
@@ -331,14 +362,6 @@ const codeEditor = new CodeEditor(
   initialProject,
   initialFilePath(initialProject, window.location.hash),
 );
-const projectDirectory = new ProjectTree(projectTree, {
-  onOpenFile: path => codeEditor.switchFile(path, true),
-  onFileContextMenu: (path, event) =>
-    showProjectContextMenu(path, event.clientX, event.clientY),
-});
-codeEditor.onAgentLocations(locations =>
-  projectDirectory.setAgentLocations(locations),
-);
 replaceFileRoute(codeEditor.currentFile());
 const compiler = new ModelCompilerClient(projectFileSystem, language =>
   codeEditor.setProjectLanguage(language),
@@ -361,6 +384,34 @@ const agentProject = new AgentProjectSession(
   },
   error => showProjectIssue(error),
 );
+const projectDirectory = new ProjectTree(projectTree, {
+  async entries() {
+    const entries = new Map(
+      (await listProjectEntries(projectFileSystem)).map(entry => [
+        entry.path,
+        entry,
+      ]),
+    );
+    for (const path of agentProject.unsavedFilePaths())
+      entries.set(path, {path, kind: 'file'} satisfies ProjectEntry);
+    return [...entries.values()];
+  },
+  onOpenFile: (path, takeFocus) => activateProjectFile(path, takeFocus),
+  onOperation: operation => agentProject.changeEntries(operation),
+  onBusy: busy => {
+    if (busy) fileOpenVersion++;
+    codeEditor.setReadOnly(busy);
+    for (const button of [newFileButton, newFolderButton, refreshFilesButton])
+      button.disabled = busy;
+  },
+});
+codeEditor.onAgentLocations(locations =>
+  projectDirectory.setAgentLocations(locations),
+);
+agentProject.onEntriesChange(reason => {
+  void projectDirectory.refresh();
+  if (reason === 'operation') requestModelUpdate(0);
+});
 agentProject.onRevision(() => agentObserver.invalidate());
 agentPanel = new AgentPanel(
   codeEditor,
@@ -400,7 +451,7 @@ let edgeEditSessionCounter = 0;
 let contextualTool: ContextualToolState | undefined;
 let contextualToolCounter = 0;
 const toolParameterCommitTimers = new Map<string, number>();
-let contextFilePath: string | undefined;
+let fileOpenVersion = 0;
 let preferredEvaluationContextId: string | undefined;
 let selectedDesignContextId: string | undefined;
 let selectedDesignInvocation: Exclude<DesignContext, string> | undefined;
@@ -705,30 +756,29 @@ for (const event of ['pointerdown', 'wheel', 'keydown'])
 
 window.addEventListener('popstate', () => {
   const path = filePathFromRoute(window.location.hash);
-  if (
-    window.location.hash !== fileRoute(undefined) &&
-    (!path || !codeEditor.filePaths().includes(path))
-  ) {
+  if (window.location.hash !== fileRoute(undefined) && !path) {
     replaceFileRoute(codeEditor.currentFile());
     return;
   }
-  applyingFileRoute = true;
-  try {
-    codeEditor.switchFile(path);
-  } finally {
-    applyingFileRoute = false;
-  }
+  void activateProjectFile(path, false, true).catch(error => {
+    projectDirectory.showError(error);
+    replaceFileRoute(codeEditor.currentFile());
+  });
 });
 
-newFileButton.addEventListener('click', () => {
-  const path = window.prompt('New file path')?.trim();
-  if (!path) return;
-  try {
-    codeEditor.createFile(path, "import {box} from '@code3d/core';\n\n");
-  } catch (error) {
-    showProjectIssue(error);
-  }
-});
+newFileButton.addEventListener(
+  'click',
+  () => void projectDirectory.create('file'),
+);
+newFolderButton.addEventListener(
+  'click',
+  () => void projectDirectory.create('directory'),
+);
+searchFilesButton.addEventListener('click', () => projectDirectory.search());
+refreshFilesButton.addEventListener(
+  'click',
+  () => void projectDirectory.refresh(),
+);
 openFolderButton.addEventListener('click', () => {
   void openProjectDirectory();
 });
@@ -741,14 +791,6 @@ reloadFolderButton.addEventListener('click', () => {
 browserStorageButton.addEventListener('click', () => {
   void useBrowserStorage();
 });
-contextRenameFile.addEventListener('click', () => renameContextFile());
-contextDeleteFile.addEventListener('click', () => deleteContextFile());
-window.addEventListener('pointerdown', event => {
-  if (!projectContextMenu.contains(event.target as Node)) {
-    hideProjectContextMenu();
-  }
-});
-
 resetButton.addEventListener('click', () => {
   if (
     !window.confirm(
@@ -765,11 +807,6 @@ window.addEventListener('keydown', event => {
     event.preventDefault();
     return;
   }
-  if (event.key === 'Escape' && !projectContextMenu.hidden) {
-    hideProjectContextMenu();
-    event.preventDefault();
-    return;
-  }
   const historyAction = sourceHistoryAction(event);
   if (historyAction && !codeEditor.ownsFocus()) {
     codeEditor.runHistoryAction(historyAction);
@@ -783,6 +820,8 @@ window.addEventListener('keydown', event => {
 
 renderProjectLocation();
 renderProjectNavigation();
+void projectDirectory.refresh();
+if (initialFileError) projectDirectory.showError(initialFileError);
 runModel();
 
 function renderProjectLocation(): void {
@@ -893,6 +932,7 @@ async function resetExamples(): Promise<void> {
     await agentProject.update(async () => {
       const project = await projectFileSystem.resetDirectory(bundledExamples);
       codeEditor.replaceDirectory(project, bundledExamples.directory);
+      await projectDirectory.refresh();
     });
   } catch (error) {
     showProjectIssue(error);
@@ -955,7 +995,7 @@ function setProjectExplorerExpanded(expanded: boolean): void {
 function renderProjectNavigation(): void {
   const active = codeEditor.currentFile();
   requiredElement('editor-empty-state').hidden = active !== undefined;
-  projectDirectory.update(codeEditor.filePaths(), active);
+  projectDirectory.setActiveFile(active);
   editorTabs.replaceChildren(
     ...codeEditor.openedFiles().map(path => {
       const tab = document.createElement('span');
@@ -985,45 +1025,28 @@ function renderProjectNavigation(): void {
   );
 }
 
-function showProjectContextMenu(path: string, x: number, y: number): void {
-  contextFilePath = path;
-  contextDeleteFile.disabled = codeEditor.filePaths().length === 1;
-  projectContextMenu.style.left = `${x}px`;
-  projectContextMenu.style.top = `${y}px`;
-  projectContextMenu.hidden = false;
-}
-
-function hideProjectContextMenu(): void {
-  projectContextMenu.hidden = true;
-  contextFilePath = undefined;
-}
-
-function renameContextFile(): void {
-  const current = contextFilePath;
-  hideProjectContextMenu();
-  if (!current) return;
-  const path = window.prompt('Rename file', current)?.trim();
-  if (!path || path === current) return;
-  try {
-    codeEditor.renameFile(current, path);
-  } catch (error) {
-    showProjectIssue(error);
+async function activateProjectFile(
+  path: string | undefined,
+  takeFocus = false,
+  fromHistory = false,
+): Promise<void> {
+  const version = ++fileOpenVersion;
+  if (path && !codeEditor.fileState(path)) {
+    let source: string;
+    try {
+      source = await readProjectTextFile(projectFileSystem, path);
+    } catch (error) {
+      if (version !== fileOpenVersion) return;
+      throw error;
+    }
+    if (version !== fileOpenVersion) return;
+    codeEditor.loadFile(path, source);
   }
-}
-
-function deleteContextFile(): void {
-  const current = contextFilePath;
-  hideProjectContextMenu();
-  if (
-    !current ||
-    !window.confirm(`Delete ${current}? Import paths will not be rewritten.`)
-  ) {
-    return;
-  }
+  applyingFileRoute = fromHistory;
   try {
-    codeEditor.deleteFile(current);
-  } catch (error) {
-    showProjectIssue(error);
+    codeEditor.switchFile(path, takeFocus);
+  } finally {
+    applyingFileRoute = false;
   }
 }
 
@@ -1049,7 +1072,7 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
   const revision = ++runRevision;
   const sourceVersion = codeEditor.sourceVersion();
   const file = codeEditor.currentFile();
-  if (!file) {
+  if (!file || !isSourceFile(file)) {
     compiler.cancel();
     currentModule = null;
     currentModuleSourceVersion = undefined;
