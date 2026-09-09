@@ -4,7 +4,7 @@ import {chromium} from 'playwright-core';
 import {appIsolationHeaders} from '../../build/isolation.ts';
 
 test(
-  'paint alpha survives browser drawing and PNG export for every geometry kind',
+  'color alpha survives browser drawing and PNG export for every geometry kind',
   {timeout: 120_000},
   async t => {
     const appUrl = process.env.CODE3D_TEST_URL;
@@ -18,7 +18,7 @@ test(
     const page = await context.newPage();
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
-    const url = new URL('/__paint-alpha-test__', appUrl).href;
+    const url = new URL('/__color-alpha-test__', appUrl).href;
     await page.route(url, route =>
       route.fulfill({
         contentType: 'text/html',
@@ -62,14 +62,14 @@ test(
           ['vertex', 'point()'],
         ] as const) {
           let reference: Uint8ClampedArray | undefined;
-          for (const paint of [
+          for (const color of [
             '#f008',
             '#ff000088',
             `rgba(255, 0, 0, ${8 / 15})`,
             '#f000',
           ]) {
             const source = `import {box, rectangle, line, point} from '@code3d/core';
-export default ${geometry}.paint(${JSON.stringify(paint)});`;
+export default ${geometry}.material(${JSON.stringify(color)});`;
             const module = await client.compile(
               {files: [{path: '/model.ts', source}]},
               '/model.ts',
@@ -107,7 +107,7 @@ export default ${geometry}.paint(${JSON.stringify(paint)});`;
               viewport['rendering'].renderFrame();
               const frame = await pixels();
               let matches: boolean;
-              if (paint === '#f000') {
+              if (color === '#f000') {
                 viewport['root'].visible = false;
                 const empty = await pixels();
                 viewport['root'].visible = true;
@@ -118,7 +118,7 @@ export default ${geometry}.paint(${JSON.stringify(paint)});`;
                   (value, index) => value === reference![index],
                 );
               }
-              samples.push({kind, paint, drawn, matches});
+              samples.push({kind, color, drawn, matches});
             } finally {
               restore.forEach(restore => restore());
             }
@@ -133,13 +133,13 @@ export default ${geometry}.paint(${JSON.stringify(paint)});`;
     });
     assert.equal(results.length, 16);
     for (const sample of results) {
-      const label = `${sample.kind} ${sample.paint}`;
+      const label = `${sample.kind} ${sample.color}`;
       assert.ok(sample.drawn.length >= 2, label);
       for (const material of sample.drawn) {
         assert.equal(material.color, 'ff0000', label);
         assert.equal(
           material.opacity,
-          sample.paint === '#f000' ? 0 : 8 / 15,
+          sample.color === '#f000' ? 0 : 8 / 15,
           label,
         );
       }

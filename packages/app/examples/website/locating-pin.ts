@@ -11,7 +11,7 @@ function locatingPin(radius: number, height: number) {
 
 const plate = box(32, 4, 24).fillet(1);
 const pin = locatingPin(3, 16)
-  .paint('#d8ff3e')
+  .material('#d8ff3e')
   .relate(part => part.mountingFace.on(plate.up));
 const cap = cylinder(5, 3).relate(part => part.on(pin.tipFace));
 

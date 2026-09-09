@@ -139,3 +139,8 @@ export {
   topologyIdKey,
   TopologyIdSet,
 } from '../library/topology-id.js';
+
+export {captureModelMaterial, modelMaterialColor} from '../library/material.js';
+export type {ModelMaterialSnapshot} from '../library/material.js';
+export {parseModelColor} from '../library/model-color.js';
+export type {ModelColor} from '../library/model-color.js';

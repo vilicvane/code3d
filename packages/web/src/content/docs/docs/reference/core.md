@@ -173,22 +173,58 @@ shows which operations are supported by the value you hold.
   become openings; omission or `[]` creates an enclosed cavity. See
   [making hollow parts](../../guides/shells/).
 - `.scaled(factor)`: uniformly scale a geometric model about local coordinate zero.
-- `.paint(color)`: return a recolored model; a group recursively overrides
-  every descendant's color, including already-painted parts and nested groups.
+- `.material(value)`: replace the complete material with a native Three.js material
+  or a CSS color shorthand; a group overrides every descendant's material.
 - `.relate(self => constraint)` or `.relate(self => [first, second])`: attach
   one or more relations for placement in a composition.
 - `.expose({name: element})`: publish a typed named-element interface.
 
-The outermost painted group determines the color of its complete subtree.
-Painting again replaces that override. Original models and shared parts used
-elsewhere retain their colors; previews and exports use the same result.
+## Materials
 
-Colors accept CSS names, `#RGB`, `#RGBA`, `#RRGGBB`, `#RRGGBBAA`, `rgb(...)`
-and `rgba(...)`. Alpha controls opacity: `0` is transparent and `1` is opaque.
-For example, `.paint('#f008')` is equivalent to `.paint('#ff000088')`;
-`.paint('rgba(255, 0, 0, 0.5)')` and `.paint('rgb(100% 0% 0% / 50%)')`
-both produce half-opaque red. Previews, PNG images, STEP and 3MF preserve
-the specified opacity; STL contains geometry only.
+```ts
+import {box} from '@code3d/core';
+import {MeshPhysicalMaterial} from '@code3d/core/three';
+
+const part = box(20, 10, 12).material(
+  new MeshPhysicalMaterial({
+    color: '#eb633e',
+    roughness: 0.25,
+    clearcoat: 1,
+  }),
+);
+```
+
+`@code3d/core/three` directly re-exports Core's native Three.js classes and types.
+Use this entry in the model and its reusable packages to share the same instance.
+Named imports and `import * as THREE from "@code3d/core/three"` both work in the
+App and Node. Each `.material(value)` call captures a
+complete material and its loaded texture pixels. It returns a new model;
+subsequent changes to the original Three.js instance do not change that model.
+Calling it again replaces everything, without merging fields. An outer group
+replaces the material throughout its subtree; original parts used elsewhere
+remain unchanged.
+
+Use mesh materials for solids and surfaces, line materials for curves, and
+`PointsMaterial` for vertices. Modeling emphasis uses preview copies; Render
+mode and PNG images use the authored material. Loaded image, canvas, ImageBitmap,
+data and cube textures are supported. Load images with `ImageBitmapLoader` in
+the worker before assignment. Native face UVs are normalized to 0–1 per face;
+texture `repeat`, `offset` and `rotation` control mapping. See
+`/examples/materials.ts` in the App.
+
+The transferable value follows Three.js's `toJSON()` / `MaterialLoader`
+representation. Custom classes, callbacks such as `onBeforeCompile`, live
+video/render-target textures, compressed/layered textures and manual mipmaps
+are rejected. Material-local clipping, shadow-side and precision overrides are
+not serialized by Three.js and are also rejected. Shader uniforms must be supported by Three.js JSON.
+
+A CSS string replaces the whole material with the geometry's default material.
+It accepts names, `#RGB`, `#RGBA`, `#RRGGBB`, `#RRGGBBAA`, `rgb(...)` and
+`rgba(...)`. `.material('#f008')` equals `.material('#ff000088')`;
+`.material('rgba(255, 0, 0, 0.5)')` and `.material('rgb(100% 0% 0% / 50%)')`
+produce half-opaque red. Native materials use Three.js's `opacity` and
+`transparent` settings. STEP and 3MF preserve base color and opacity, while
+shaders and textures are rendered in PNG; STL contains geometry only.
 
 ## Scaling
 

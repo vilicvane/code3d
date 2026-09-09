@@ -20,7 +20,7 @@ export function collectExportInstances(
         nodeId: node.nodeId,
         name: node.name,
         kind: node.kind,
-        color: node.color,
+        material: node.material,
         transform: {
           position: position.toArray(),
           quaternion: quaternion.toArray(),

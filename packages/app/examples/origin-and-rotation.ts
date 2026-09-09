@@ -1,7 +1,7 @@
 import {box, group} from '@code3d/core';
 
 // Place the caret inside originVertex() to pick a corner in the viewport.
-const blank = box(24, 6, 14).paint('#8ed5d1');
+const blank = box(24, 6, 14).material('#8ed5d1');
 const pivoted = blank.originVertex(3);
 
 // Drag in the starting snapshot; commit re-expresses the geometry around local zero.

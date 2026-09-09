@@ -3,6 +3,8 @@ import {readFile} from 'node:fs/promises';
 import {test} from 'node:test';
 import * as authoring from '@code3d/core';
 import * as replicadInterop from '@code3d/core/replicad';
+import * as threeInterop from '@code3d/core/three';
+import * as nativeThree from 'three';
 import {authoringApi} from '@code3d/core/tooling';
 import * as browserAuthoring from '../bld/library/index.js';
 import * as browserReplicadInterop from '../bld/library/replicad.js';
@@ -48,6 +50,18 @@ test('keeps Replicad behind its explicit author interop entry', () => {
   assert.equal(Object.isFrozen(replicadInterop.replicad), true);
 });
 
+test('re-exports native Three.js values with their original class identity', () => {
+  assert.deepEqual(
+    Object.keys(threeInterop).sort(),
+    Object.keys(nativeThree).sort(),
+  );
+  assert.equal(
+    threeInterop.MeshPhysicalMaterial,
+    nativeThree.MeshPhysicalMaterial,
+  );
+  assert.equal(threeInterop.DataTexture, nativeThree.DataTexture);
+});
+
 test('Node initialization preserves the browser authoring and interop exports', () => {
   assert.deepEqual(authoring, browserAuthoring);
   assert.deepEqual(replicadInterop, browserReplicadInterop);
@@ -65,13 +79,14 @@ test('rejects package imports that bypass the public entries', async () => {
   }
 });
 
-test('exposes only the root, Replicad, and tooling package entries', async () => {
+test('exposes only the root, Replicad, Three.js, and tooling package entries', async () => {
   const packageJson = JSON.parse(
     await readFile(new URL('../package.json', import.meta.url), 'utf8'),
   );
   assert.deepEqual(Object.keys(packageJson.exports).sort(), [
     '.',
     './replicad',
+    './three',
     './tooling',
   ]);
 });

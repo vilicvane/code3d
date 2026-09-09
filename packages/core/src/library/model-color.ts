@@ -9,7 +9,7 @@ export type ModelColor = Readonly<{
 /** Resolve authored colors identically for previews and exported materials. */
 export function parseModelColor(input: string): ModelColor {
   const invalid = () =>
-    new Error(`Invalid paint color: ${JSON.stringify(input)}`);
+    new Error(`Invalid material color: ${JSON.stringify(input)}`);
   const rgb = /^rgba?\((.*)\)$/is.exec(input.trim());
   let color: TinyColor;
   if (rgb) {

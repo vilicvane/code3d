@@ -17,7 +17,7 @@ through-section or spine-guided `loft`. Every geometric model is immutable,
 renderable, and relation-aware. Topology capabilities follow dimension:
 vertices provide `.vertex(id)`, edges add `.edge(id)`, and faces and solids
 add `.surface(id)`; only solids provide `fillet`, `chamfer`, and `shell`. Groups retain
-the common relation, expose, and paint capabilities without pretending to
+the common relation, expose, and material capabilities without pretending to
 contain geometry. Stable topology references can be used as geometric relation anchors.
 `Vertex`, `Edge`, and `Surface` references expose readonly `kind` and `id`
 properties. For example, `model.edges().map(edge => edge.id)` collects edge IDs
@@ -365,29 +365,70 @@ Code3d model types come from `@code3d/core`; Replicad builder types such as
 properties or operations. `Quaternion` belongs to the tooling transform API;
 author rotations use `rotate(x, y, z)` in degrees.
 
-## Colors
+## Materials
 
-`paint(color)` returns a new model value. On a group, it recursively overrides
-every descendant's color, including already-painted parts and nested groups.
-The outermost painted group wins within that composition; shared parts retain
-their own colors when used elsewhere. Painting the same value again uses the
-latest color. Previews and exports use the same effective colors.
-
-Colors accept CSS names, `#RGB`, `#RGBA`, `#RRGGBB`, `#RRGGBBAA`,
-`rgb(...)` and `rgba(...)`. Alpha controls opacity: `0` is fully transparent,
-`1` is opaque. For example, `.paint('#f008')` is equivalent to
-`.paint('#ff000088')`, and `.paint('rgba(255, 0, 0, 0.5)')` is half-opaque red.
-RGB functions also accept percentage channels and space-separated values with
-slash alpha, such as `rgb(100% 0% 0% / 50%)`. Previews, PNG images, STEP and
-3MF exports preserve the specified opacity; STL contains geometry only.
+`model.material(value)` returns a new model with a complete replacement material.
+Pass a native [Three.js material](https://threejs.org/docs/pages/Material.html),
+for example `MeshStandardMaterial` or `MeshPhysicalMaterial`, from
+`@code3d/core/three`. This entry directly re-exports the native classes and types
+from Core's Three.js dependency, in both the App and Node. Reusable modeling
+packages use the same entry so their material instances match Core.
 
 ```ts
 import {box, group} from '@code3d/core';
+import {MeshPhysicalMaterial, MeshStandardMaterial} from '@code3d/core/three';
 
-const redPart = box(10, 10, 10).paint('#ff0000');
-const assembly = group([redPart, group([box(4, 4, 4)])]).paint('#345678');
-// Both parts in assembly use #345678; redPart still renders red on its own.
+const lacquer = new MeshPhysicalMaterial({
+  color: '#eb633e',
+  roughness: 0.25,
+  clearcoat: 1,
+});
+const part = box(10, 10, 10).material(lacquer);
+const matte = part.material(new MeshStandardMaterial({color: '#8ed5d1'}));
+// matte uses the complete new material; it does not inherit clearcoat.
+const assembly = group([part, matte]).material(lacquer);
 ```
+
+Assignment captures the material and loaded texture pixels by value. Later
+changes to the Three.js instance do not alter an existing model; call
+`material()` again to capture new values. A group overrides the entire
+material of every descendant, including nested groups. The outermost override
+wins; shared parts retain their materials outside that composition.
+
+Named imports and `import * as THREE from "@code3d/core/three"` are both supported.
+A reusable modeling package shares the host project's Core dependency; its own
+independently bundled Three.js copy does not provide the same class identity.
+
+The renderer restores and owns Three.js instances from the captured JSON.
+Modeling emphasis uses separate preview copies; Render mode and its PNG export
+use the authored material. Use mesh materials for surfaces/solids,
+`LineBasicMaterial` or `LineDashedMaterial` for curves, and `PointsMaterial` for
+vertices. Choose a corresponding class when overriding a group.
+
+Loaded image, canvas, ImageBitmap, data and cube textures are captured with their
+sampling settings. In the modeling worker, use `ImageBitmapLoader` for image
+assets. Assign only after loading completes. Tessellated faces expose their
+native UV coordinates normalized to 0–1 per face; use texture `repeat`, `offset`
+and `rotation` to adjust placement. This is a per-face mapping, not a model-wide
+UV unwrap. See the App's `/examples/materials.ts`.
+
+Materials follow Three.js's `toJSON()` / `MaterialLoader` representation.
+Custom material classes, renderer callbacks such as `onBeforeCompile`, live
+video/render-target textures, compressed/layered textures and manual mipmaps
+cannot cross this boundary and are rejected. Material-local clipping, shadow-side and precision overrides are not serialized
+by Three.js and are also rejected. Shader materials must use uniforms
+supported by Three.js's JSON representation.
+
+For a simple color, `.material('#f80')` replaces the whole material with the
+default material for that geometry kind. Strings accept CSS names, `#RGB`,
+`#RGBA`, `#RRGGBB`, `#RRGGBBAA`, `rgb(...)` and `rgba(...)`, including percentage
+channels and space-separated values with slash alpha. For example,
+`.material('#f008')` equals `.material('#ff000088')`, and
+`.material('rgb(100% 0% 0% / 50%)')` is half-opaque red. Native Three.js instances
+use their own `opacity` and `transparent` settings.
+
+STEP and 3MF preserve the effective base color and opacity; they cannot encode
+Three.js shaders or textures. STL contains geometry only.
 
 ## Bound relations and rotation
 
@@ -534,7 +575,7 @@ side keeps its base opacity and the other uses 70% of that opacity. Remaining
 related objects are dim gray. `on`/`align` and subsequent chain calls focus
 self; their target arguments focus the actual target reference, which is self
 in a reverse-written relation. Model opacity uses role-specific caps rather than
-multiplying existing paint opacity. See the
+multiplying existing material opacity. See the
 [relation guide](../web/src/content/docs/docs/guides/relations.mdx) and
 [visualization conventions](../../.agents/skills/code3d-visualization/SKILL.md).
 
@@ -668,7 +709,7 @@ cross-section. There are no wall-thickness overloads, tapers, or path options.
 ```ts
 import {tube} from '@code3d/core';
 
-export const collar = tube(6, 4, 12).paint('#8ed5d1');
+export const collar = tube(6, 4, 12).material('#8ed5d1');
 ```
 
 ## Coils
@@ -688,7 +729,7 @@ there are no spring end treatments, force parameters, or material assumptions.
 ```ts
 import {coil} from '@code3d/core';
 
-export const winding = coil(5, 0.75, 4, 2.5).paint('#d8ff3e');
+export const winding = coil(5, 0.75, 4, 2.5).material('#d8ff3e');
 ```
 
 See the [primitive showcase](../app/examples/primitives.ts) for a coil composed

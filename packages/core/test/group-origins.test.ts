@@ -116,7 +116,7 @@ test('group rebasing preserves solved internal relations, anchors, bounds and ea
   near(position(assembly.up), [0, 4, 0]);
   const exposedLater = moved.expose({capAgain: cap});
   near(position(exposedLater.capAgain.center), position(moved.cap.center));
-  const restored = moved.originOffset(-3, -5, -7).paint('#abcdef');
+  const restored = moved.originOffset(-3, -5, -7).material('#abcdef');
   near(position(restored.cap.center), position(assembly.cap.center));
   near(
     snapshot(restored).children[0].transform.position,
@@ -142,7 +142,7 @@ test('originPoint resolves a rotated member into the group frame and keeps expli
     self.center.align(point([20, 4, 6])).rotate(0, 0, 90),
   );
   const assembly = group([point(), instance]).expose({body: instance});
-  const selected = assembly.originPoint(instance.vertex(3)).paint('#aabbcc');
+  const selected = assembly.originPoint(instance.vertex(3)).material('#aabbcc');
   near(position(selected.body.vertex(3)), [0, 0, 0]);
   const named = assembly.originPoint(assembly.body.vertex(3));
   near(position(named.body.center), position(selected.body.center));
@@ -292,7 +292,7 @@ test('nested repeated assemblies rotate rigidly in fixed XYZ order without re-so
   const rotated = original
     .rotate(25, 35, 45)
     .rotate(-10, 15, 20)
-    .paint('#abcdef');
+    .material('#abcdef');
   for (const name of ['leftPart', 'rightPart'] as const) {
     const expected = point(position(original[name].cap.vertex(3)))
       .rotate(25, 35, 45)

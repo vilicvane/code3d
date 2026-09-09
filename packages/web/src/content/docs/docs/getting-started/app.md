@@ -69,7 +69,7 @@ relation or operation. The active geometry remains the main context.
 
 Use **Modeling / Render** beside the upper-left status to switch between
 editing guides and a clean model view. **Render** hides helper elements,
-outlines, and modeling panels while keeping model colors and painted
+outlines, and modeling panels while keeping model colors and authored
 transparency. You can still rotate, pan, and zoom; PNG export follows this
 mode. Switch back to **Modeling** to select geometry and use its tools.
 This switch applies to the 3D viewport; sketch editing keeps its 2D tools.

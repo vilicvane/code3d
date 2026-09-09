@@ -12,7 +12,9 @@ export function makeKnob(
   height: number,
   sides: number,
 ): SolidModel {
-  return regularPrism(radius, height, sides, 30).fillet(0.6).paint('#d8ff3e');
+  return regularPrism(radius, height, sides, 30)
+    .fillet(0.6)
+    .material('#d8ff3e');
 }
 
 export const designArgumentsExample = makeKnob(10, 5, 6);

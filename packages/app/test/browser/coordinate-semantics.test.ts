@@ -135,7 +135,7 @@ test(
       '',
       '.originOffset(4, -2, 6).rotate(15, 35, 10).scaled(2)',
     ]) {
-      const source = `import {box} from '@code3d/core';\nexport const part = box(24, 6, 14).paint('#8ed5d1')${prefix}.originVertex(3);`;
+      const source = `import {box} from '@code3d/core';\nexport const part = box(24, 6, 14).material('#8ed5d1')${prefix}.originVertex(3);`;
       await setSource(page, source, 'originVertex');
       await waitVertexSelection(page, 3);
       const before = await vertexState(page);
@@ -225,8 +225,8 @@ test(
   async t => {
     const {page, errors} = await openApp(t);
     const source = `import {box, group} from '@code3d/core';
-const base = box(24, 6, 14).paint('#8ed5d1');
-const cap = box(8, 4, 8).paint('#d9b478').relate(self => self.on(base.up));
+const base = box(24, 6, 14).material('#8ed5d1');
+const cap = box(8, 4, 8).material('#d9b478').relate(self => self.on(base.up));
 export const assembly = group([base, cap]).originPoint(cap.center);`;
     await setSource(page, source, 'originPoint');
     const before = await groupState(page);
@@ -321,8 +321,8 @@ test(
   async t => {
     const {page, errors} = await openApp(t);
     const source = `import {box, group} from '@code3d/core';
-const base = box(24, 6, 14).paint('#8ed5d1');
-const cap = box(8, 4, 8).paint('#d9b478').relate(self => self.on(base.up));
+const base = box(24, 6, 14).material('#8ed5d1');
+const cap = box(8, 4, 8).material('#d9b478').relate(self => self.on(base.up));
 export const assembly = group([base, cap]).originPoint(cap.center).rotate(0, 0, 0);`;
     await setSource(page, source, 'rotate');
     const before = await groupState(page);

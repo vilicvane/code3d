@@ -1,8 +1,10 @@
 import type * as Replicad from 'replicad';
 import type {AnyShape} from 'replicad';
 import {strToU8, zipSync} from 'fflate';
-import {parseModelColor, type ModelColor} from './model-color';
 import {
+  modelMaterialColor,
+  type ModelMaterialSnapshot,
+  type ModelColor,
   quaternionAxisAngle,
   type ModelGeometrySnapshot,
   type ModelKind,
@@ -13,7 +15,7 @@ export type ModelExportFormat = 'step' | 'stl' | '3mf';
 export type ModelExportInstance = Readonly<{
   nodeId: string;
   name: string;
-  color?: string;
+  material?: ModelMaterialSnapshot;
   kind: ModelKind;
   transform: RigidTransform;
 }>;
@@ -86,9 +88,9 @@ export function exportModel(
           shape,
           name: instance.name,
           color:
-            instance.color === undefined || options.format === 'stl'
+            instance.material === undefined || options.format === 'stl'
               ? undefined
-              : parseModelColor(instance.color),
+              : modelMaterialColor(instance.material),
         });
       } catch (error) {
         shape.delete();

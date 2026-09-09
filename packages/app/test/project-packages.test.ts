@@ -275,6 +275,120 @@ test('isolates the built-in dependency closure and gives source, screws and reus
   );
 });
 
+for (const mode of ['builtin', 'project'] as const) {
+  test(`shares core/three materials across packages in ${mode} mode without adopting package-local Three.js`, async () => {
+    const exports = {types: './index.d.ts', default: './index.js'};
+    const files = memoryFiles({
+      '/package.json': {
+        type: 'module',
+        dependencies: {
+          'material-library': '*',
+          ...(mode === 'project' ? {'@code3d/core': '*'} : {}),
+        },
+      },
+      '/node_modules/material-library/package.json': {
+        name: 'material-library',
+        type: 'module',
+        exports,
+        peerDependencies: {'@code3d/core': '*'},
+      },
+      '/node_modules/material-library/index.js': `import {MeshPhysicalMaterial} from '@code3d/core/three';
+export const lacquer = new MeshPhysicalMaterial({color: '#ff8800', roughness: 0.25, clearcoat: 1});
+export {MeshPhysicalMaterial as MaterialClass};`,
+      '/node_modules/material-library/index.d.ts': `import {MeshPhysicalMaterial} from '@code3d/core/three';
+export declare const lacquer: MeshPhysicalMaterial;
+export {MeshPhysicalMaterial as MaterialClass};`,
+      '/node_modules/material-library/node_modules/three/package.json': {
+        name: 'three',
+        type: 'module',
+        exports,
+      },
+      '/node_modules/material-library/node_modules/three/index.js':
+        'throw new Error("The material library must use Core-owned Three.js");',
+      '/node_modules/material-library/node_modules/three/index.d.ts':
+        'export declare const unrelated: unique symbol;',
+      ...(mode === 'builtin'
+        ? {
+            '/node_modules/three/package.json': {
+              name: 'three',
+              type: 'module',
+              exports,
+            },
+            '/node_modules/three/index.js': 'export const owner = "project";',
+            '/node_modules/three/index.d.ts':
+              'export declare const owner: "project";',
+          }
+        : {}),
+    });
+    const reader: ProjectFileReader = {
+      readFile: async path =>
+        (await files.readFile(path)) ??
+        (mode === 'project' ? packageTestFiles.readFile(path) : undefined),
+      stat: async path =>
+        (await files.stat(path)) ??
+        (mode === 'project' ? packageTestFiles.stat(path) : undefined),
+    };
+    const compiler = new ProjectCompiler(
+      reader,
+      packageTestFiles,
+      esbuild,
+      () => new Evaluator(),
+    );
+    let language: ProjectLanguage | undefined;
+    try {
+      const source = `import {box} from '@code3d/core';
+import * as THREE from '@code3d/core/three';
+import {lacquer, MaterialClass} from 'material-library';
+${mode === 'builtin' ? 'import {owner} from "three"; if (owner !== "project") throw new Error("User Three.js was shadowed");' : ''}
+if (THREE.MeshPhysicalMaterial !== MaterialClass) throw new Error('Different material class identities');
+export default box(2, 3, 4).material(lacquer);`;
+      const result = await compiler.compile(
+        {files: [{path: '/model.ts', source}]},
+        '/model.ts',
+        undefined,
+        value => {
+          language = value;
+        },
+      );
+      assert.equal(result.diagnostic, undefined);
+      const material = defined(
+        result.objects.get(defined(result.exports.get('default'))),
+      ).material;
+      assert.ok(material && typeof material !== 'string');
+      assert.equal(material.type, 'MeshPhysicalMaterial');
+      assert.equal(material.color, 0xff8800);
+      assert.equal(material.clearcoat, 1);
+      const modules = [...defined(compiler['runtime']).modules.keys()];
+      assert.ok(
+        !modules.some(path =>
+          path.includes('/material-library/node_modules/three/'),
+        ),
+      );
+      const languageFiles = defined(language).files;
+      assert.ok(
+        languageFiles.some(
+          file => file.path === '/node_modules/material-library/index.d.ts',
+        ),
+      );
+      assert.ok(
+        languageFiles.some(
+          file =>
+            file.path === '/node_modules/@code3d/core/bld/library/three.d.ts',
+        ),
+      );
+      assert.ok(
+        languageFiles.some(file =>
+          file.path.endsWith(
+            '/@types/three/src/materials/MeshPhysicalMaterial.d.ts',
+          ),
+        ),
+      );
+    } finally {
+      compiler.dispose();
+    }
+  });
+}
+
 test('runs a zero-install screw model, retains its runtime on edits, and switches packages after a manifest edit', async () => {
   const files = memoryFiles();
   let installed = false;
@@ -299,7 +413,9 @@ test('runs a zero-install screw model, retains its runtime on edits, and switche
         source: [
           'import {box, group} from "@code3d/core";',
           'import {ISO4762} from "@code3d/screws";',
-          `const plate = box(40, 10, 30).fillet(${radius});`,
+          'import {MeshPhysicalMaterial, type Material} from "@code3d/core/three";',
+          'const material: Material = new MeshPhysicalMaterial({color: "#ff8800", clearcoat: 1});',
+          `const plate = box(40, 10, 30).fillet(${radius}).material(material);`,
           'const screw = ISO4762.screw("M6", 18).relate(part => part.center.on(plate.up).offset(30, 0, 0));',
           'export default group([plate, screw]);',
         ].join('\n'),
@@ -324,6 +440,23 @@ test('runs a zero-install screw model, retains its runtime on edits, and switche
       defined(language).files.some(
         file =>
           file.path === '/node_modules/@code3d/screws/bld/library/index.d.ts',
+      ),
+    );
+    assert.ok(
+      defined(language).files.some(file =>
+        file.path.endsWith(
+          '/@types/three/src/materials/MeshPhysicalMaterial.d.ts',
+        ),
+      ),
+    );
+    assert.ok(
+      defined(language).files.some(file =>
+        file.path.includes('/@types/webxr/'),
+      ),
+    );
+    assert.ok(
+      defined(language).files.every(
+        file => !file.path.startsWith('/node_modules/three/'),
       ),
     );
     assert.equal((await compile(project(1.1))).diagnostic, undefined);
