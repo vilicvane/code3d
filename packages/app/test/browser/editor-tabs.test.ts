@@ -171,6 +171,8 @@ test(
     await page.reload();
     await expectEmpty(page);
     await page.getByRole('treeitem', {name: 'model.ts', exact: true}).click();
+    // Reopening after reload reads the file asynchronously before pushing its route.
+    await page.waitForURL('**/#/file/model.ts');
     await page.goBack();
     await expectEmpty(page);
     await page.goForward();
@@ -278,3 +280,56 @@ test(
     await expectEmpty(page);
   },
 );
+
+for (const outcome of ['success', 'error'] as const) {
+  test(
+    `a delayed ${outcome} from another file cannot replace the active empty preview`,
+    {timeout: 90_000},
+    async t => {
+      const page = await open(t);
+      await page.evaluate(outcome => {
+        const {compiler, runModel} = window.tabsApp;
+        const compile = compiler.compile.bind(compiler);
+        compiler.compile = async (...args) => {
+          // Only delay this run; the next file must compile independently.
+          compiler.compile = compile;
+          const module = await compile(...args);
+          await new Promise<void>(resolve => {
+            window.resumeCompile = resolve;
+          });
+          if (outcome === 'error') throw new Error('Old file failed');
+          return module;
+        };
+        window.pendingCompile = runModel();
+      }, outcome);
+      await page.waitForFunction(() => !!window.resumeCompile);
+      await page.evaluate(() =>
+        window.tabsApp.codeEditor.createFile('/empty.ts', ''),
+      );
+      await page.locator('#viewport-status[data-state=ready]').waitFor();
+      await page.evaluate(async () => {
+        window.resumeCompile!();
+        await window.pendingCompile;
+      });
+      assert.equal(
+        await page.evaluate(() => window.tabsApp.codeEditor.currentFile()),
+        '/empty.ts',
+      );
+      assert.equal(
+        await page.evaluate(() =>
+          window.tabsApp.viewport.hasRenderableGeometry(),
+        ),
+        false,
+      );
+      assert.equal(
+        await page.locator('#viewport-status').getAttribute('data-state'),
+        'ready',
+      );
+      assert.equal(await page.locator('#error-bar').isVisible(), false);
+      assert.equal(
+        await page.locator('#viewport-empty-state').isVisible(),
+        true,
+      );
+    },
+  );
+}

@@ -7,7 +7,10 @@ import type {
   TopologyInspectionOptions,
 } from '@code3d/core/tooling';
 import {ProjectFileCache} from '../project/file-cache';
-import type {ProjectFileReader} from '../project/file-reader';
+import {
+  decodeProjectFile,
+  type ProjectFileReader,
+} from '../project/file-reader';
 import {ProjectPackages} from '../project/project-packages';
 import {isBuiltinPackageSpecifier} from '../project/builtin-packages';
 import {ProjectBuilder} from '../project/project-builder';
@@ -16,7 +19,12 @@ import {
   ProjectLanguageLoader,
   type ProjectLanguage,
 } from '../project/project-language';
-import {normalizeProjectPath, type ModelProject} from '../project/project';
+import {
+  isSourceFile,
+  normalizeProjectPath,
+  type ModelProject,
+  type ProjectSourceFile,
+} from '../project/project';
 import {
   createModelCompiler,
   type DesignContext,
@@ -72,7 +80,7 @@ export class ProjectCompiler {
   }
 
   async compile(
-    project: ModelProject,
+    overrides: ModelProject,
     rootPath: string,
     designContext?: DesignContext,
     onLanguage?: (language: ProjectLanguage) => void,
@@ -83,7 +91,7 @@ export class ProjectCompiler {
     this.disposeGeometry();
     const changed = await this.files.refresh();
     const packageSelectionChanged = await this.packages.update(
-      project,
+      overrides,
       rootPath,
     );
     if (
@@ -114,8 +122,33 @@ export class ProjectCompiler {
     );
     checkCancelled();
     const builder = new ProjectBuilder(reader, this.engine, this.assets);
+    const root = normalizeProjectPath(rootPath);
+    const entryPaths = [
+      ...new Set([
+        root,
+        ...(designContext ? [normalizeProjectPath(designContext.file)] : []),
+      ]),
+    ];
+    const readSource = async (path: string): Promise<ProjectSourceFile> => {
+      const bytes = await reader.readFile(path);
+      if (!bytes)
+        throw new ModelDiagnosticError({
+          kind: 'project',
+          summary: `Project file not found: ${path}`,
+        });
+      return {path, source: decodeProjectFile(bytes)};
+    };
+    // Editor documents are overlays, not the set of files belonging to a run.
+    // Explicit entry files also need language support when they have no editor model.
+    const entries = await Promise.all(entryPaths.map(readSource));
+    const languageProject = {
+      files: [
+        ...overrides.files.filter(file => !entryPaths.includes(file.path)),
+        ...entries,
+      ],
+    };
     const language = await this.language.load(
-      project,
+      languageProject,
       reader.packageSpecifiers,
       rootPath,
       () => onProgress?.('preparing-project'),
@@ -132,7 +165,7 @@ export class ProjectCompiler {
       ).catch(error => {
         const diagnostic = diagnosticFromError(error, 'module');
         if (diagnostic.sourceRef) throw error;
-        for (const file of project.files) {
+        for (const file of entries) {
           const parsed = ts.createSourceFile(
             file.path,
             file.source,
@@ -173,11 +206,6 @@ export class ProjectCompiler {
     }
     checkCancelled();
     onProgress?.('compiling-model');
-    const root = normalizeProjectPath(rootPath);
-    const contextFile = this.compiler!.designContextFile(
-      project,
-      designContext,
-    );
     const runtime = this.runtime;
     return withPersistentArtifacts(
       runtime.artifactIdentity,
@@ -186,11 +214,21 @@ export class ProjectCompiler {
         try {
           const discovery = await runtime.loadDependencies(
             builder,
-            `export * from ${JSON.stringify(root)};` +
-              (contextFile && contextFile !== root
-                ? `\nimport ${JSON.stringify(contextFile)};`
-                : ''),
+            entryPaths
+              .map(path => `import ${JSON.stringify(path)};`)
+              .join('\n'),
           );
+          checkCancelled();
+          const project: ModelProject = {
+            files: await Promise.all(
+              discovery.files
+                .filter(
+                  path =>
+                    !path.includes('/node_modules/') && isSourceFile(path),
+                )
+                .map(readSource),
+            ),
+          };
           checkCancelled();
           return await this.compiler!.compileProject(
             project,
