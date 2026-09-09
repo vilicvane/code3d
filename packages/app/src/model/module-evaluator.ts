@@ -38,45 +38,7 @@ export class ModuleEvaluator {
     source: string,
     context: Readonly<Record<string, unknown>> = {},
   ): Promise<ModuleExports> {
-    const parsed = ts.createSourceFile(
-      label,
-      source,
-      ts.ScriptTarget.ESNext,
-      true,
-      ts.ScriptKind.JS,
-    );
-    const imports: string[] = [];
-    const body: string[] = [];
-    const exports: string[] = [];
-    for (const statement of parsed.statements) {
-      if (ts.isImportDeclaration(statement)) {
-        imports.push(statement.getFullText(parsed));
-      } else if (ts.isExportDeclaration(statement)) {
-        const clause = statement.exportClause;
-        if (statement.moduleSpecifier || !clause || !ts.isNamedExports(clause))
-          throw new Error('Expected a bundled local export list.');
-        for (const element of clause.elements) {
-          exports.push(
-            'get [' +
-              JSON.stringify(element.name.text) +
-              ']() { return ' +
-              (element.propertyName ?? element.name).text +
-              '; }',
-          );
-        }
-      } else {
-        body.push(statement.getFullText(parsed));
-      }
-    }
-    const code =
-      imports.join('\n') +
-      '\nexport default async function(' +
-      Object.keys(context).join(',') +
-      ') {\n' +
-      body.join('\n') +
-      '\nreturn {' +
-      exports.join(',') +
-      '};\n}';
+    const code = executableModuleSource(label, source, Object.keys(context));
     const bytes = new TextEncoder().encode(code);
     const digest = await crypto.subtle.digest('SHA-256', bytes);
     const key = Array.from(new Uint8Array(digest), value =>
@@ -96,4 +58,52 @@ export class ModuleEvaluator {
     // Native module records belong to the project Worker. Only terminating
     // that Worker releases its complete module cache.
   }
+}
+
+export function executableModuleSource(
+  label: string,
+  source: string,
+  contextNames: readonly string[],
+): string {
+  const parsed = ts.createSourceFile(
+    label,
+    source,
+    ts.ScriptTarget.ESNext,
+    true,
+    ts.ScriptKind.JS,
+  );
+  const imports: string[] = [];
+  const body: string[] = [];
+  const exports: string[] = [];
+  for (const statement of parsed.statements) {
+    if (ts.isImportDeclaration(statement)) {
+      imports.push(statement.getFullText(parsed));
+    } else if (ts.isExportDeclaration(statement)) {
+      const clause = statement.exportClause;
+      if (statement.moduleSpecifier || !clause || !ts.isNamedExports(clause))
+        throw new Error('Expected a bundled local export list.');
+      for (const element of clause.elements) {
+        exports.push(
+          'get [' +
+            JSON.stringify(element.name.text) +
+            ']() { return ' +
+            (element.propertyName ?? element.name).text +
+            '; }',
+        );
+      }
+    } else {
+      body.push(statement.getFullText(parsed));
+    }
+  }
+  const code =
+    imports.join('\n') +
+    '\nexport default async function(' +
+    contextNames.join(',') +
+    ') {\n' +
+    body.join('\n') +
+    '\nreturn {' +
+    exports.join(',') +
+    '};\n}';
+
+  return code;
 }

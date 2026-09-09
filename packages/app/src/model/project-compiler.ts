@@ -22,6 +22,7 @@ import {
   type ModelModule,
 } from './compiler';
 import {ProjectRuntime} from './project-runtime';
+import {SnapshotWorkerPool, type SnapshotPoolOptions} from './snapshot-pool';
 import {
   withPersistentArtifacts,
   type PersistentArtifactStats,
@@ -48,6 +49,7 @@ export class ProjectCompiler {
   private runtime?: ProjectRuntime;
   private compiler?: ReturnType<typeof createModelCompiler>;
   private geometry?: ModelGeometrySnapshot;
+  private snapshotPool?: SnapshotWorkerPool;
   private persistentStats?: PersistentArtifactStats;
 
   constructor(
@@ -55,6 +57,7 @@ export class ProjectCompiler {
     builtinFiles: ProjectFileReader,
     private readonly engine: Pick<typeof esbuild, 'build'>,
     createEvaluator = () => new ModuleEvaluator(),
+    private readonly snapshotOptions?: SnapshotPoolOptions,
   ) {
     this.files = new ProjectFileCache(files);
     this.packages = new ProjectPackages(
@@ -152,6 +155,11 @@ export class ProjectCompiler {
         throw new ModelDiagnosticError(diagnostic);
       });
       this.compiler = createModelCompiler(this.runtime.tooling, this.evaluator);
+      this.snapshotPool = new SnapshotWorkerPool(
+        this.runtime.tooling,
+        this.runtime.snapshotRuntime,
+        this.snapshotOptions,
+      );
     }
     checkCancelled();
     onProgress?.('compiling-model');
@@ -191,6 +199,11 @@ export class ProjectCompiler {
                 this.runtime!.tooling.retainModelGeometry(objects);
             },
             checkCancelled,
+            objects =>
+              this.snapshotPool!.compute(
+                runtime.tooling.planModelSnapshotQueries(objects),
+                checkCancelled,
+              ),
           );
         } finally {
           runtime.tooling.setKernelArtifactStore(undefined);
@@ -249,11 +262,14 @@ export class ProjectCompiler {
     return {
       memory: this.runtime?.tooling.kernelOperationCacheStats(),
       disk: this.persistentStats,
+      snapshots: this.snapshotPool?.stats,
     };
   }
 
   private disposeRuntime(): void {
     this.disposeGeometry();
+    this.snapshotPool?.dispose();
+    this.snapshotPool = undefined;
     this.assets.dispose();
     this.runtime?.dispose();
     this.compiler = undefined;

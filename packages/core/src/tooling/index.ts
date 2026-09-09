@@ -4,6 +4,7 @@ import {clearKernelOperationCache} from '../library/kernel-cache.js';
 
 export {
   setKernelArtifactStore,
+  setKernelExternalBytes,
   kernelOperationCacheStats,
   clearKernelOperationCache,
 } from '../library/kernel-cache.js';
@@ -61,6 +62,8 @@ export {
   constraintTraceReference,
   constraintPreview,
   createModelSnapshotter,
+  planModelSnapshotQueries,
+  executeSnapshotQueryBatch,
   disposeModelObjects,
   instrumentConstraint,
   instrumentModelOperation,
@@ -97,6 +100,9 @@ export type {
   ModelObject,
   ModelObjectRuntimeInfo,
   ModelSnapshotObject,
+  SnapshotQuery,
+  SnapshotQueryResult,
+  SnapshotQueryBatch,
   ModelSpatialOperation,
   ModelTopologyReference,
   ParameterKind,

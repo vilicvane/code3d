@@ -1303,6 +1303,7 @@ export function createModelCompiler(
     onEvaluate?: () => void,
     captureGeometry?: (objects: readonly ModelObject[]) => void,
     checkCancelled: () => void = () => {},
+    prepareSnapshots?: (objects: readonly ModelObject[]) => Promise<void>,
   ): Promise<ModelModule> {
     checkCancelled();
     const files = new Map(
@@ -1447,6 +1448,14 @@ export function createModelCompiler(
         diagnostic = relateDiagnostic(diagnostic, fallbackObject);
       }
 
+      const graphObjects = collectObjectGraph(tracedObjects);
+      graphObjects.forEach(object => tracedObjects.add(object));
+      await prepareSnapshots?.(
+        fallbackObject && !graphObjects.includes(fallbackObject)
+          ? [fallbackObject, ...graphObjects]
+          : graphObjects,
+      );
+      checkCancelled();
       const snapshotModel = createModelSnapshotter();
       const snapshots = new Map<ModelObject, ModelSnapshotObject>();
       const snapshotOf = (object: ModelObject): ModelSnapshotObject => {
@@ -1467,8 +1476,6 @@ export function createModelCompiler(
       const fallbackSnapshot = fallbackObject
         ? snapshotOf(fallbackObject)
         : undefined;
-      const graphObjects = collectObjectGraph(tracedObjects);
-      graphObjects.forEach(object => tracedObjects.add(object));
       const objectSnapshots = new Map(
         graphObjects.map(object => [
           modelObjectNodeId(object),

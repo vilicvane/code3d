@@ -58,6 +58,13 @@ export function createKernelOperationCache({
   let persistentWrites = 0;
   let persistenceErrors = 0;
   const persisted = new Set<string>();
+  let externalBytes = 0;
+
+  /** The host accounts for in-flight inputs and all auxiliary native heaps. */
+  function setKernelExternalBytes(bytes: number): void {
+    externalBytes = bytes;
+    evictHistoricalEntries();
+  }
 
   function setKernelArtifactStore(next: KernelArtifactStore | undefined): void {
     store = next;
@@ -112,15 +119,20 @@ export function createKernelOperationCache({
     lifecycle: KernelValueLifecycle<Value>,
     compute: () => Value,
   ): KernelArtifact<Value> {
-    // Interrupt only between complete operations. A result computed while a
-    // cancellation arrives is still retained before the next check can throw.
+    const key = kernelOperationKey(operation, arguments_, inputs);
+    const cached = findKernelOperation(key, lifecycle);
+    if (cached) return cached;
+    const value = compute();
+    acceptKernelOperation(key, lifecycle, value);
+    return {id: key.id, value};
+  }
+
+  function findKernelOperation<Value>(
+    key: KernelOperationKey,
+    lifecycle: KernelValueLifecycle<Value>,
+  ): KernelArtifact<Value> | undefined {
     currentEvaluation?.checkCancelled?.();
-    const signature = JSON.stringify([
-      operation,
-      arguments_,
-      inputs.map(input => input.id),
-    ]);
-    const id = contentId(signature);
+    const {id, signature} = key;
     let cached = entries.get(id) as CacheEntry<Value> | undefined;
     if (!cached) {
       const bytes = accessStore(store => store.get(id));
@@ -131,68 +143,81 @@ export function createKernelOperationCache({
         } catch {
           persistenceErrors += 1;
           accessStore(store => store.delete(id));
-          return computeAndRetain();
+          misses += 1;
+          return undefined;
         }
-        cached = retainEntry(restored);
+        cached = retainEntry(key, lifecycle, restored);
         persistentHits += 1;
         persisted.add(id);
       }
     }
-    if (cached) {
-      if (cached.signature !== signature) {
-        throw new Error(`Kernel operation cache identity collision: ${id}`);
-      }
-      hits += 1;
-      const value = cached.instantiate(cached.value);
-      persist(cached.value);
-      touchEntry(id, cached as CacheEntry<unknown>);
-      return {id, value};
-    }
-
-    return computeAndRetain();
-
-    function computeAndRetain(): KernelArtifact<Value> {
+    if (!cached) {
       misses += 1;
-      const value = compute();
-      let retained: Value;
-      try {
-        retained = lifecycle.retain(value);
-      } catch (error) {
-        lifecycle.release(value);
-        throw error;
+      return undefined;
+    }
+    if (cached.signature !== signature)
+      throw new Error(`Kernel operation cache identity collision: ${id}`);
+    hits += 1;
+    const value = cached.instantiate(cached.value);
+    persist(key, cached.value);
+    touchEntry(id, cached as CacheEntry<unknown>);
+    return {id, value};
+  }
+
+  /** Accept completed work even when cancellation arrived during computation. */
+  function acceptKernelOperation<Value>(
+    key: KernelOperationKey,
+    lifecycle: KernelValueLifecycle<Value>,
+    value: Value,
+  ): void {
+    const existing = entries.get(key.id);
+    if (existing) {
+      if (existing.signature !== key.signature)
+        throw new Error(`Kernel operation cache identity collision: ${key.id}`);
+      touchEntry(key.id, existing);
+      return;
+    }
+    let retained: Value;
+    try {
+      retained = lifecycle.retain(value);
+    } catch (error) {
+      lifecycle.release(value);
+      throw error;
+    }
+    const entry = retainEntry(key, lifecycle, retained);
+    persist(key, retained);
+    touchEntry(key.id, entry as CacheEntry<unknown>);
+  }
+
+  function persist(key: KernelOperationKey, value: unknown): void {
+    if (!store || persisted.has(key.id)) return;
+    accessStore(store => {
+      if (!store.touch(key.id)) {
+        store.set(key.id, encodeKernelArtifact(key.signature, value));
+        persistentWrites += 1;
       }
-      const entry = retainEntry(retained);
-      persist(retained);
-      touchEntry(id, entry as CacheEntry<unknown>);
-      return {id, value};
-    }
+      persisted.add(key.id);
+    });
+  }
 
-    function persist(value: Value): void {
-      if (!store || persisted.has(id)) return;
-      accessStore(store => {
-        if (!store.touch(id)) {
-          store.set(id, encodeKernelArtifact(signature, value));
-          persistentWrites += 1;
-        }
-        persisted.add(id);
-      });
-    }
-
-    function retainEntry(retained: Value): CacheEntry<Value> {
-      const entry: CacheEntry<Value> = {
-        estimatedBytes:
-          256 +
-          estimateRetainedBytes(signature) +
-          lifecycle.estimateBytes(retained),
-        signature,
-        value: retained,
-        instantiate: lifecycle.instantiate,
-        release: lifecycle.release,
-      };
-      entries.set(id, entry as CacheEntry<unknown>);
-      estimatedJavaScriptBytes += entry.estimatedBytes;
-      return entry;
-    }
+  function retainEntry<Value>(
+    key: KernelOperationKey,
+    lifecycle: KernelValueLifecycle<Value>,
+    retained: Value,
+  ): CacheEntry<Value> {
+    const entry: CacheEntry<Value> = {
+      estimatedBytes:
+        256 +
+        estimateRetainedBytes(key.signature) +
+        lifecycle.estimateBytes(retained),
+      signature: key.signature,
+      value: retained,
+      instantiate: lifecycle.instantiate,
+      release: lifecycle.release,
+    };
+    entries.set(key.id, entry as CacheEntry<unknown>);
+    estimatedJavaScriptBytes += entry.estimatedBytes;
+    return entry;
   }
 
   function touchEntry(id: string, entry: CacheEntry<unknown>): void {
@@ -204,23 +229,6 @@ export function createKernelOperationCache({
       historicalEntries.set(id, entry);
     }
     evictHistoricalEntries();
-  }
-
-  function contentId(value: string): string {
-    let first = 0x811c9dc5;
-    let second = 0x9e3779b9;
-    let third = 0x85ebca6b;
-    let fourth = 0xc2b2ae35;
-    for (let index = 0; index < value.length; index += 1) {
-      const code = value.charCodeAt(index);
-      first = Math.imul(first ^ code, 0x01000193);
-      second = Math.imul(second ^ code, 0x27d4eb2d);
-      third = Math.imul(third ^ code, 0x165667b1);
-      fourth = Math.imul(fourth ^ code, 0x85ebca77);
-    }
-    return [first, second, third, fourth]
-      .map(part => (part >>> 0).toString(16).padStart(8, '0'))
-      .join('');
   }
 
   function clearKernelOperationCache(): void {
@@ -249,6 +257,7 @@ export function createKernelOperationCache({
       estimatedJavaScriptBytes,
       nativeAllocatedBytes: nativeAllocatedBytes(),
       maximumBytes,
+      externalBytes,
       persistentHits,
       persistentWrites,
       persistenceErrors,
@@ -258,7 +267,8 @@ export function createKernelOperationCache({
   function evictHistoricalEntries(): void {
     while (
       historicalEntries.size &&
-      nativeAllocatedBytes() + estimatedJavaScriptBytes > maximumBytes
+      nativeAllocatedBytes() + estimatedJavaScriptBytes + externalBytes >
+        maximumBytes
     ) {
       const [id, entry] = historicalEntries.entries().next().value!;
       historicalEntries.delete(id);
@@ -274,6 +284,9 @@ export function createKernelOperationCache({
     clearKernelOperationCache,
     kernelOperationCacheStats,
     setKernelArtifactStore,
+    findKernelOperation,
+    acceptKernelOperation,
+    setKernelExternalBytes,
   };
 }
 
@@ -283,7 +296,42 @@ export const {
   clearKernelOperationCache,
   kernelOperationCacheStats,
   setKernelArtifactStore,
+  findKernelOperation,
+  acceptKernelOperation,
+  setKernelExternalBytes,
 } = createKernelOperationCache({
   nativeAllocatedBytes: () =>
     (getOC() as OpenCascadeInstance).Code3dMemory.AllocatedBytes(),
 });
+
+export type KernelOperationKey = Readonly<{id: string; signature: string}>;
+
+export function kernelOperationKey(
+  operation: string,
+  arguments_: readonly KernelKeyPart[],
+  inputs: readonly Pick<KernelArtifact<unknown>, 'id'>[],
+): KernelOperationKey {
+  const signature = JSON.stringify([
+    operation,
+    arguments_,
+    inputs.map(input => input.id),
+  ]);
+  return {id: contentId(signature), signature};
+}
+
+function contentId(value: string): string {
+  let first = 0x811c9dc5;
+  let second = 0x9e3779b9;
+  let third = 0x85ebca6b;
+  let fourth = 0xc2b2ae35;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    first = Math.imul(first ^ code, 0x01000193);
+    second = Math.imul(second ^ code, 0x27d4eb2d);
+    third = Math.imul(third ^ code, 0x165667b1);
+    fourth = Math.imul(fourth ^ code, 0x85ebca77);
+  }
+  return [first, second, third, fourth]
+    .map(part => (part >>> 0).toString(16).padStart(8, '0'))
+    .join('');
+}

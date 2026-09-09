@@ -2,7 +2,11 @@ import type * as CoreTooling from '@code3d/core/tooling';
 import type * as Replicad from 'replicad';
 import type {ProjectFileReader} from '../project/file-reader';
 import {ProjectBuilder, type ProjectBundle} from '../project/project-builder';
-import {ModuleEvaluator, type ModuleExports} from './module-evaluator';
+import {
+  ModuleEvaluator,
+  executableModuleSource,
+  type ModuleExports,
+} from './module-evaluator';
 import type {CompilationProgress} from './compilation-progress';
 import {runtimeArtifactIdentity} from './persistent-artifacts';
 
@@ -21,6 +25,11 @@ export class ProjectRuntime {
   private readonly failed = new Map<string, unknown>();
   private constructor(
     readonly artifactIdentity: string,
+    readonly snapshotRuntime: {
+      url: string;
+      wasm: Uint8Array;
+      sketchWasm: Uint8Array;
+    },
     readonly tooling: typeof CoreTooling,
     readonly replicad: typeof Replicad,
     readonly modules: Map<string, ModuleExports>,
@@ -133,6 +142,21 @@ export class ProjectRuntime {
         wasm,
         sketchWasm,
       ]),
+      {
+        url: URL.createObjectURL(
+          new Blob(
+            [
+              executableModuleSource(runtimeUrl, bundle.source, [
+                '__code3dKernelBytes',
+                '__code3dSketchBytes',
+              ]),
+            ],
+            {type: 'text/javascript'},
+          ),
+        ),
+        wasm,
+        sketchWasm,
+      },
       runtime.tooling,
       runtime.modules.get(replicadPath),
       runtime.modules,
@@ -143,6 +167,7 @@ export class ProjectRuntime {
   }
 
   dispose(): void {
+    URL.revokeObjectURL(this.snapshotRuntime.url);
     this.tooling.clearKernelOperationCache();
     this.modules.clear();
     this.formats.clear();

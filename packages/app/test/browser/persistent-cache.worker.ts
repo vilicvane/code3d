@@ -7,6 +7,9 @@ import type {ModelSnapshotObject} from '@code3d/core/tooling';
 
 export type CacheRequest = {
   source: string;
+  concurrency?: number;
+  terminateChild?: boolean;
+  trackSnapshots?: boolean;
   revision?: number;
   disabled?: boolean;
   cancellation?: Int32Array;
@@ -35,6 +38,7 @@ scope.onmessage = async ({data}: MessageEvent<CacheRequest>) => {
       },
     });
   if (!compiler) {
+    let terminatedChild = false;
     compiler = new ProjectCompiler(
       {
         async readFile() {
@@ -61,6 +65,33 @@ scope.onmessage = async ({data}: MessageEvent<CacheRequest>) => {
         },
       },
       esbuild,
+      undefined,
+      {
+        concurrency: data.concurrency,
+        taskTimeoutMs: data.terminateChild ? 5000 : undefined,
+        createWorker:
+          data.terminateChild || data.trackSnapshots
+            ? () => {
+                const worker = new Worker(
+                  new URL(
+                    '../../src/model/snapshot.worker.ts',
+                    import.meta.url,
+                  ),
+                  {type: 'module'},
+                );
+                worker.addEventListener('message', ({data: response}) => {
+                  if (response.kind !== 'result') return;
+                  if (data.trackSnapshots)
+                    scope.postMessage({phase: 'snapshot-query'});
+                  if (data.terminateChild && !terminatedChild) {
+                    terminatedChild = true;
+                    worker.terminate();
+                  }
+                });
+                return worker;
+              }
+            : undefined,
+      },
     );
   }
   const start = performance.now();

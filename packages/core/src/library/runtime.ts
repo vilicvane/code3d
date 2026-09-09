@@ -38,6 +38,7 @@ import {
   castOwnedShape3D,
   centeredBoxShape,
   shapeSubshapes,
+  transformShape,
 } from './kernel-shapes.js';
 import {
   addVectors,
@@ -73,6 +74,10 @@ import {shellWithTopology} from './shell.js';
 import {
   beginKernelOperationEvaluation,
   evaluateKernelOperation,
+  kernelOperationKey,
+  findKernelOperation,
+  acceptKernelOperation,
+  type KernelOperationKey,
   type KernelArtifact,
   type KernelKeyPart,
   type KernelValueLifecycle,
@@ -108,6 +113,10 @@ import {
 } from './topology.js';
 
 import {sketch} from './sketch.js';
+import {
+  encodeKernelArtifact,
+  decodeKernelArtifact,
+} from './kernel-artifact-codec.js';
 
 export type {Quaternion, Vec3} from './spatial.js';
 export type {EdgeId, SurfaceId, TopologyKind, VertexId} from './topology.js';
@@ -1424,6 +1433,8 @@ export class ConstraintAroundChain extends ConstraintExpression {
 
 const modelGeometry = Symbol('modelGeometry');
 const referenceBounds = Symbol('referenceBounds');
+const referenceBoundsParts = Symbol('referenceBoundsParts');
+const modelSnapshotQueries = Symbol('modelSnapshotQueries');
 const relationPreview = Symbol('relationPreview');
 
 export class ModelObject<
@@ -1929,7 +1940,7 @@ export class ModelObject<
     assertPositive('scale', factor);
     const source = this.requireGeometry();
     const geometry = evaluateModelGeometry('scaled', [factor], [source], () => {
-      const shape = source.value.shape.clone().scale(factor, toPoint(origin));
+      const shape = shapeWithScale(source.value.shape, factor);
       try {
         return {
           shape,
@@ -2504,53 +2515,101 @@ export class ModelObject<
   }
 
   /** Bounds of the selected finite geometry after a rigid transform. */
-  [referenceBounds](
+  private [referenceBoundsParts](
     reference: StoredAnchor,
     transform: RigidTransform,
-  ): LocalBounds {
+  ): ({bounds: LocalBounds} | SnapshotQueryInput)[] {
     if (reference.bound) {
       const frame = composeTransforms(transform, reference.transform);
       const [x, z] = reference.bound.size;
-      return pointBounds(
-        [-1, 1].flatMap(a =>
-          [-1, 1].map(
-            b =>
-              composeTransforms(
-                frame,
-                translation([(a * x) / 2, 0, (b * z) / 2]),
-              ).position,
+      return [
+        {
+          bounds: pointBounds(
+            [-1, 1].flatMap(a =>
+              [-1, 1].map(
+                b =>
+                  composeTransforms(
+                    frame,
+                    translation([(a * x) / 2, 0, (b * z) / 2]),
+                  ).position,
+              ),
+            ),
           ),
-        ),
-      );
+        },
+      ];
     }
     if (reference.whole) {
-      if (this.geometry) return transformedBounds(this.geometry, transform);
+      if (this.geometry) return [boundsQuery(this.geometry, transform)];
       const context = this.assembly!;
-      return combineBounds(
-        this.children.map(child =>
-          child[referenceBounds](
-            child.relationAnchorReference(),
-            composeTransforms(transform, child.solvePose(context)),
-          ),
+      return this.children.flatMap(child =>
+        child[referenceBoundsParts](
+          child.relationAnchorReference(),
+          composeTransforms(transform, child.solvePose(context)),
         ),
       );
     }
     if (reference.topology) {
       const topology = reference.topology;
-      return transformedBounds(
-        topology.source.requireGeometry(),
-        composeTransforms(transform, topology.transform),
-        topology.selection,
-        topology.scale,
-      );
+      return [
+        boundsQuery(
+          topology.source.requireGeometry(),
+          composeTransforms(transform, topology.transform),
+          topology.selection,
+          topology.scale,
+        ),
+      ];
     }
     if (reference.kind === 'point') {
       const point = composeTransforms(transform, reference.transform).position;
-      return [point, point];
+      return [{bounds: [point, point]}];
     }
     throw new Error(
       `The reference ${reference.name} has no finite geometry. Select a model, vertex, edge, or surface for on().`,
     );
+  }
+
+  /** Bounds of the selected finite geometry after a rigid transform. */
+  [referenceBounds](
+    reference: StoredAnchor,
+    transform: RigidTransform,
+  ): LocalBounds {
+    const bounds = this[referenceBoundsParts](reference, transform).map(part =>
+      'bounds' in part
+        ? part.bounds
+        : (evaluateSnapshotQuery(part) as LocalBounds),
+    );
+    return bounds.length === 1 ? bounds[0] : combineBounds(bounds);
+  }
+
+  /** Pure query collection: it never substitutes geometry or runs author code. */
+  [modelSnapshotQueries](): SnapshotQueryInput[] {
+    const result: SnapshotQueryInput[] = [];
+    if (this.geometry || this.children.length) {
+      for (const direction of Object.values(boundDirections)) {
+        const transform = invertTransform(
+          rotation(frameFromYAxis(origin, direction).quaternion),
+        );
+        for (const part of this[referenceBoundsParts](
+          this.relationAnchorReference(),
+          transform,
+        ))
+          if (!('bounds' in part)) result.push(part);
+      }
+    }
+    if (this.geometry)
+      result.push(
+        meshQuery(
+          this.geometry,
+          this.geometry.value.shape,
+          this.meshTolerance,
+          this.geometry.value.topology,
+        ),
+      );
+    for (const region of this.operation.regions)
+      result.push(
+        meshQuery(region.artifact, region.artifact.value, this.meshTolerance),
+      );
+    return result;
   }
 
   private alignmentGeometry(reference: StoredAnchor): AlignmentGeometry {
@@ -2577,7 +2636,9 @@ export class ModelObject<
         topology.selection,
         shape => {
           const scaled =
-            topology.scale === 1 ? shape : shape.scale(topology.scale);
+            topology.scale === 1
+              ? shape
+              : shapeWithScale(shape, topology.scale);
           try {
             return transformGeometry(read(scaled), topology.transform);
           } finally {
@@ -3773,6 +3834,200 @@ export function relatedModelObjects(
   return object.relatedObjects();
 }
 
+export type SnapshotQuery = Readonly<{key: KernelOperationKey}> &
+  (
+    | Readonly<{
+        kind: 'bounds';
+        transform: RigidTransform;
+        selection: TopologySelection;
+        scale: number;
+      }>
+    | Readonly<{kind: 'mesh'; tolerance: number; topology: boolean}>
+  );
+export type SnapshotQueryResult = LocalBounds | RenderMesh;
+type SnapshotQueryInput = {
+  inputId: string;
+  geometry: {shape: AnyShape; topology?: ShapeTopology};
+  query: SnapshotQuery;
+};
+
+function boundsQuery(
+  geometry: ModelGeometry,
+  transform: RigidTransform,
+  selection: TopologySelection = {kind: 'solid'},
+  scale = 1,
+): SnapshotQueryInput {
+  return {
+    inputId: geometry.id,
+    geometry: {shape: geometry.value.shape, topology: geometry.value.topology},
+    query: {
+      kind: 'bounds',
+      transform,
+      selection,
+      scale,
+      key: kernelOperationKey(
+        'transformed-bounds',
+        [
+          transform.position,
+          transform.quaternion,
+          selection.kind,
+          selection.kind === 'solid' ? null : selection.id,
+          scale,
+        ],
+        [geometry],
+      ),
+    },
+  };
+}
+
+function meshQuery(
+  artifact: KernelArtifact<unknown>,
+  shape: AnyShape,
+  tolerance: number,
+  topology?: ShapeTopology,
+): SnapshotQueryInput {
+  return {
+    inputId: artifact.id,
+    geometry: {shape, topology},
+    query: {
+      kind: 'mesh',
+      tolerance,
+      topology: topology !== undefined,
+      key: kernelOperationKey(
+        'render-mesh',
+        [tolerance, 0.2, topology !== undefined],
+        [artifact],
+      ),
+    },
+  };
+}
+
+const queryLifecycle: KernelValueLifecycle<SnapshotQueryResult> = {
+  estimateBytes: estimateRetainedBytes,
+  retain: value => value,
+  instantiate: value => value,
+  release: () => {},
+};
+
+function computeSnapshotQuery(
+  geometry: SnapshotQueryInput['geometry'],
+  query: SnapshotQuery,
+): SnapshotQueryResult {
+  return query.kind === 'bounds'
+    ? computeTransformedBounds(geometry, query)
+    : computeRenderMesh(
+        geometry.shape,
+        query.tolerance,
+        query.topology ? geometry.topology : undefined,
+      );
+}
+
+function evaluateSnapshotQuery(input: SnapshotQueryInput): SnapshotQueryResult {
+  const cached = findKernelOperation(input.query.key, queryLifecycle);
+  if (cached) return cached.value;
+  let value: SnapshotQueryResult;
+  if (input.query.kind === 'mesh') {
+    // Mesh from the serialized input in every execution mode. BinTools can
+    // renormalize a plane axis by a few ULPs, changing Delaunay diagonal ties.
+    // A local query and a remote query must therefore consume the same BREP.
+    executeSnapshotQueryBatch(
+      input.inputId,
+      encodeKernelArtifact(input.inputId, input.geometry),
+      [input.query],
+      () => {},
+      (_, result) => {
+        value = result;
+      },
+    );
+  } else value = computeSnapshotQuery(input.geometry, input.query);
+  acceptKernelOperation(input.query.key, queryLifecycle, value!);
+  return value!;
+}
+
+/** Host-owned native input and result admission. Only encode() bytes cross runtimes. */
+export type SnapshotQueryBatch = Readonly<{
+  id: string;
+  queries: readonly SnapshotQuery[];
+  weight: number;
+  sourceRef?: SourceRef;
+  encode(): Uint8Array;
+  accept(query: SnapshotQuery, value: SnapshotQueryResult): void;
+}>;
+
+export function planModelSnapshotQueries(
+  objects: readonly ModelObject[],
+): SnapshotQueryBatch[] {
+  const visited = new Set<ModelObject>();
+  const keys = new Map<string, string>();
+  const batches = new Map<
+    string,
+    {input: SnapshotQueryInput; queries: SnapshotQuery[]; sourceRef?: SourceRef}
+  >();
+  function collect(object: ModelObject): void {
+    if (visited.has(object)) return;
+    visited.add(object);
+    for (const input of object[modelSnapshotQueries]()) {
+      const {query, inputId} = input;
+      const signature = keys.get(query.key.id);
+      if (signature) {
+        if (signature !== query.key.signature)
+          throw new Error(
+            `Kernel operation cache identity collision: ${query.key.id}`,
+          );
+        continue;
+      }
+      keys.set(query.key.id, query.key.signature);
+      if (findKernelOperation(query.key, queryLifecycle)) continue;
+      let batch = batches.get(inputId);
+      if (!batch) {
+        batch = {input, queries: [], sourceRef: object.sourceRefs.at(-1)};
+        batches.set(inputId, batch);
+      }
+      batch.queries.push(query);
+    }
+    object.children.forEach(collect);
+  }
+  objects.forEach(collect);
+  return [...batches].map(([id, {input, queries, sourceRef}]) => ({
+    id,
+    queries,
+    sourceRef,
+    weight:
+      (1 +
+        (input.geometry.topology?.edges.ids.length ?? 0) +
+        (input.geometry.topology?.surfaces.ids.length ?? 0)) *
+      queries.length,
+    encode: () => encodeKernelArtifact(id, input.geometry),
+    accept: (query, value) =>
+      acceptKernelOperation(query.key, queryLifecycle, value),
+  }));
+}
+
+/** Each batch owns its restored shape; completed results leave before cancellation checks. */
+export function executeSnapshotQueryBatch(
+  id: string,
+  bytes: Uint8Array,
+  queries: readonly SnapshotQuery[],
+  checkCancelled: () => void,
+  onResult: (query: SnapshotQuery, value: SnapshotQueryResult) => void,
+  onRestore?: (milliseconds: number) => void,
+): void {
+  const started = performance.now();
+  const geometry = decodeKernelArtifact<SnapshotQueryInput['geometry']>(
+    bytes,
+    id,
+  );
+  try {
+    onRestore?.(performance.now() - started);
+    for (const query of queries) {
+      checkCancelled();
+      onResult(query, computeSnapshotQuery(geometry, query));
+    }
+  } finally {
+    geometry.shape.delete();
+  }
+}
+
 export function createModelSnapshotter(): (
   object: ModelObject,
 ) => ModelSnapshotObject {
@@ -3931,13 +4186,6 @@ function disposeModelGeometryValue(geometry: ModelGeometryValue): void {
   geometry.referenceBasis?.shape.delete();
 }
 
-const renderMeshLifecycle: KernelValueLifecycle<RenderMesh> = {
-  estimateBytes: estimateRetainedBytes,
-  retain: mesh => mesh,
-  instantiate: mesh => mesh,
-  release: () => undefined,
-};
-
 function evaluateKernelShape<Shape extends AnyShape>(
   operation: string,
   arguments_: readonly KernelKeyPart[],
@@ -4022,46 +4270,48 @@ function renderMesh(
   if (cached) {
     return cached;
   }
-  const mesh = evaluateKernelOperation(
-    'render-mesh',
-    [tolerance, 0.2, topology !== undefined],
-    [artifact],
-    renderMeshLifecycle,
-    () => {
-      const surface = shape.mesh({tolerance, angularTolerance: 0.2});
-      const wire = shape.meshEdges({tolerance, angularTolerance: 0.2});
-      const vertexData = topology
-        ? stableVertexData(shape, topology.vertices)
-        : {positions: new Float32Array(), ids: []};
-      return {
-        vertices: new Float32Array(surface.vertices),
-        normals: new Float32Array(surface.normals),
-        uvs: meshUVs(shape, surface.vertices.length / 3),
-        triangles: new Uint32Array(surface.triangles),
-        edges: new Float32Array(wire.lines),
-        topologyVertices: vertexData.positions,
-        vertexIds: vertexData.ids,
-        surfaceGroups: topology
-          ? stableSurfaceGroups(shape, topology.surfaces, surface.faceGroups)
-          : surface.faceGroups.map((group, index) => ({
-              start: group.start,
-              count: group.count,
-              surfaceId: index + 1,
-            })),
-        edgeGroups: topology
-          ? stableEdgeGroups(shape, topology.edges, wire.edgeGroups)
-          : wire.edgeGroups.map((group, index) => ({
-              start: group.start,
-              count: group.count,
-              // Context-region edges have their own traversal namespace, just
-              // like the surfaces above. Native handle hashes change on restore.
-              edgeId: index + 1,
-            })),
-      };
-    },
-  ).value;
+  const mesh = evaluateSnapshotQuery(
+    meshQuery(artifact, shape, tolerance, topology),
+  ) as RenderMesh;
   cache.set(shape, mesh);
   return mesh;
+}
+
+function computeRenderMesh(
+  shape: AnyShape,
+  tolerance: number,
+  topology?: ShapeTopology,
+): RenderMesh {
+  const surface = shape.mesh({tolerance, angularTolerance: 0.2});
+  const wire = shape.meshEdges({tolerance, angularTolerance: 0.2});
+  const vertexData = topology
+    ? stableVertexData(shape, topology.vertices)
+    : {positions: new Float32Array(), ids: []};
+  return {
+    vertices: new Float32Array(surface.vertices),
+    normals: new Float32Array(surface.normals),
+    uvs: meshUVs(shape, surface.vertices.length / 3),
+    triangles: new Uint32Array(surface.triangles),
+    edges: new Float32Array(wire.lines),
+    topologyVertices: vertexData.positions,
+    vertexIds: vertexData.ids,
+    surfaceGroups: topology
+      ? stableSurfaceGroups(shape, topology.surfaces, surface.faceGroups)
+      : surface.faceGroups.map((group, index) => ({
+          start: group.start,
+          count: group.count,
+          surfaceId: index + 1,
+        })),
+    edgeGroups: topology
+      ? stableEdgeGroups(shape, topology.edges, wire.edgeGroups)
+      : wire.edgeGroups.map((group, index) => ({
+          start: group.start,
+          count: group.count,
+          // Context-region edges have their own traversal namespace, just
+          // like the surfaces above. Native handle hashes change on restore.
+          edgeId: index + 1,
+        })),
+  };
 }
 
 function meshUVs(
@@ -4320,50 +4570,29 @@ function constraintReferences(constraint: StoredConstraint): ModelObject[] {
   ].filter((model): model is ModelObject => !!model);
 }
 
-const boundsLifecycle: KernelValueLifecycle<LocalBounds> = {
-  estimateBytes: estimateRetainedBytes,
-  retain: bounds => bounds,
-  instantiate: bounds => bounds,
-  release: () => undefined,
-};
-
-function transformedBounds(
-  geometry: ModelGeometry,
-  transform: RigidTransform,
-  selection: TopologySelection = {kind: 'solid'},
-  scale = 1,
+function computeTransformedBounds(
+  geometry: SnapshotQueryInput['geometry'],
+  query: Extract<SnapshotQuery, {kind: 'bounds'}>,
 ): LocalBounds {
-  return evaluateKernelOperation(
-    'transformed-bounds',
-    [
-      transform.position,
-      transform.quaternion,
-      selection.kind,
-      selection.kind === 'solid' ? null : selection.id,
-      scale,
-    ],
-    [geometry],
-    boundsLifecycle,
-    () =>
-      withTopologyShape(
-        geometry.value.shape,
-        geometry.value.topology,
-        selection,
-        shape => {
-          const scaled = scale === 1 ? shape : shape.scale(scale);
-          try {
-            const moved = shapeWithTransform(scaled, transform);
-            try {
-              return shapeBounds(moved);
-            } finally {
-              moved.delete();
-            }
-          } finally {
-            if (scaled !== shape) scaled.delete();
-          }
-        },
-      ),
-  ).value;
+  const {transform, selection, scale} = query;
+  return withTopologyShape(
+    geometry.shape,
+    geometry.topology!,
+    selection,
+    shape => {
+      const scaled = scale === 1 ? shape : shapeWithScale(shape, scale);
+      try {
+        const moved = shapeWithTransform(scaled, transform);
+        try {
+          return shapeBounds(moved);
+        } finally {
+          moved.delete();
+        }
+      } finally {
+        if (scaled !== shape) scaled.delete();
+      }
+    },
+  );
 }
 
 function pointBounds(points: readonly Vec3[]): LocalBounds {
@@ -4709,13 +4938,51 @@ function shapeWithTransform<Shape extends AnyShape>(
   source: Shape,
   transform: RigidTransform,
 ): Shape {
-  let shape = source.clone();
+  const oc = getOC();
+  let shape = source.clone() as Shape;
   const {axis, angleDegrees} = quaternionAxisAngle(transform.quaternion);
-  if (Math.abs(angleDegrees) > 1e-9) {
-    shape = shape.rotate(angleDegrees, toPoint(origin), toPoint(axis));
+  try {
+    if (Math.abs(angleDegrees) > 1e-9) {
+      const rotated = transformShape(shape, value => {
+        const point = new oc.gp_Pnt(0, 0, 0);
+        const direction = new oc.gp_Dir(...axis);
+        const rotationAxis = new oc.gp_Ax1(point, direction);
+        try {
+          value.SetRotation(rotationAxis, angleDegrees * (Math.PI / 180));
+        } finally {
+          rotationAxis.delete();
+          direction.delete();
+          point.delete();
+        }
+      });
+      shape.delete();
+      shape = rotated;
+    }
+    return transformShape(shape, value => {
+      const vector = new oc.gp_Vec(...transform.position);
+      try {
+        value.SetTranslation(vector);
+      } finally {
+        vector.delete();
+      }
+    });
+  } finally {
+    shape.delete();
   }
-  shape = shape.translate(toPoint(transform.position));
-  return shape as unknown as Shape;
+}
+
+function shapeWithScale<Shape extends AnyShape>(
+  source: Shape,
+  scale: number,
+): Shape {
+  return transformShape(source, value => {
+    const point = new (getOC().gp_Pnt)(0, 0, 0);
+    try {
+      value.SetScale(point, scale);
+    } finally {
+      point.delete();
+    }
+  });
 }
 
 function requireModelObject(value: unknown, message: string): ModelObject {
