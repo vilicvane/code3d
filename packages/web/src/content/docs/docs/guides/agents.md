@@ -76,6 +76,18 @@ file or collapsed parent folder in the file tree. Cursor labels show the agent's
 last activity as a relative time; hover the time for the exact date. Formatting
 keeps their selections and carets attached to the corresponding source.
 
+Click an agent's pill in the top bar to follow its updates; click it again to stop,
+or choose another agent to switch. The mouse-pointer icon marks the followed agent.
+Each accepted source or cursor update moves the editor to that agent's selection
+and updates the model or sketch, using its supplied arguments (or JSDoc defaults)
+and any explicitly requested 3D view. You can keep editing, selecting and navigating
+between updates; following does not lock the UI or stop when you interact. Reads
+and inspections without source changes, a new cursor or an explicit view do not
+move your view. A user gesture while compilation
+is pending takes precedence over its requested camera change. Use the user-with-gear
+button beside the pills to open **Connect Agent**; with no agents, the highlighted
+**Connect Agent** button remains available.
+
 `npx --yes @code3d/cli` downloads the published CLI when needed; version
 `0.0.1-alpha.0` is the first functional release. Development uses the same prompt
 with a built, globally linked checkout. Run `npm link` in `packages/cli`, then

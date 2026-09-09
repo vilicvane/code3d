@@ -11,6 +11,7 @@ import {ModelCompilerClient} from './model/compiler-client';
 import {compilationPhaseLabels} from './model/compilation-progress';
 import type {
   DesignArgumentContext,
+  DesignContext,
   EdgeArgumentTarget,
   ModelModule,
   TopologySelectionScope,
@@ -89,7 +90,8 @@ import type {
   ToolSignatureSchema,
 } from './model/tool-schema';
 import {isToolSelectionParameter} from './model/tool-schema';
-import {AgentProjectSession} from './agent/project-session';
+import {AgentProjectSession, type AgentUpdate} from './agent/project-session';
+import {resolveRenderView} from '@code3d/agent';
 import {AgentObserver} from './agent/observer';
 import {AgentPanel} from './agent/panel';
 import {AgentRenderHistory} from './agent/render-history';
@@ -138,7 +140,9 @@ app.innerHTML = `
         <button class="quiet-button" id="reload-folder-button" type="button" hidden>Reload folder</button>
         <button class="quiet-button" id="browser-storage-button" type="button" hidden>Use browser storage</button>
         <button class="quiet-button" id="reset-button" type="button">Reset examples</button>
-        <button class="quiet-button button-primary agent-nav" id="agents-button" type="button">Connect Agent</button>
+        <div class="agent-nav">
+          <button class="quiet-button button-primary agent-connect-button" id="agents-button" type="button">Connect Agent</button>
+        </div>
       </div>
     </header>
 
@@ -398,6 +402,8 @@ const toolParameterCommitTimers = new Map<string, number>();
 let contextFilePath: string | undefined;
 let preferredEvaluationContextId: string | undefined;
 let selectedDesignContextId: string | undefined;
+let selectedDesignInvocation: Exclude<DesignContext, string> | undefined;
+let pendingAgentFollow: AgentUpdate | undefined;
 let compilingDesignContextId: string | undefined;
 let activeCompletionFocus: CompletionFocus | undefined;
 let applyingFileRoute = false;
@@ -606,6 +612,7 @@ codeEditor.onChange(change => {
 });
 
 codeEditor.onCursorOffset(({file, offset}) => {
+  pendingAgentFollow = undefined;
   const matched = viewport.selectBySourceOffset(
     file,
     offset,
@@ -624,6 +631,13 @@ codeEditor.onCursorOffset(({file, offset}) => {
   }
   preferredEvaluationContextId =
     viewport.sourceEvaluation()?.evaluation.contextId;
+  if (
+    selectedDesignInvocation &&
+    preferredEvaluationContextId !== selectedDesignContextId
+  ) {
+    selectedDesignInvocation = undefined;
+    selectedDesignContextId = undefined;
+  }
   const occurrence = viewport.getSelected();
   if (occurrence) {
     selectOccurrence(occurrence, false);
@@ -642,6 +656,8 @@ codeEditor.onEditorActivation(cursor => {
     );
 });
 codeEditor.onActiveFile((path, reason) => {
+  pendingAgentFollow = undefined;
+  selectedDesignInvocation = undefined;
   finishContextualTool();
   sketchEditor.hide();
   refreshViewportFeedback();
@@ -651,6 +667,38 @@ codeEditor.onActiveFile((path, reason) => {
   selectedDesignContextId = undefined;
   requestModelUpdate(0);
 });
+
+agentProject.onAgentUpdate(update => {
+  if (agentPanel?.followingAgentId !== update.agentId || !update.cursor) return;
+  finishContextualTool();
+  activeCompletionFocus = undefined;
+  window.clearTimeout(completionPreviewTimer);
+  completionPreviewTimer = undefined;
+  codeEditor.revealSource(update.cursor, false, 'start');
+  const invocation = {
+    file: update.cursor.file,
+    offset: update.cursor.start,
+    ...(update.input.cursor?.arguments === undefined
+      ? {}
+      : {arguments: update.input.cursor.arguments}),
+  };
+  selectedDesignInvocation =
+    invocation.arguments === undefined ? undefined : invocation;
+  selectedDesignContextId = undefined;
+  preferredEvaluationContextId = undefined;
+  pendingAgentFollow = update;
+  void runModel(invocation);
+});
+
+// A later user gesture takes precedence over a view requested before compilation.
+for (const event of ['pointerdown', 'wheel', 'keydown'])
+  document.addEventListener(
+    event,
+    () => {
+      pendingAgentFollow = undefined;
+    },
+    {capture: true, passive: true},
+  );
 
 window.addEventListener('popstate', () => {
   const path = filePathFromRoute(window.location.hash);
@@ -972,15 +1020,24 @@ function showProjectIssue(error: unknown): void {
   errorBar.hidden = false;
 }
 
-async function runModel(
-  designContextId = selectedDesignContextId,
-): Promise<void> {
+function activeDesignContext(
+  cursor = codeEditor.cursorSource(),
+): DesignContext | undefined {
+  return selectedDesignInvocation
+    ? {...selectedDesignInvocation, ...cursor}
+    : selectedDesignContextId;
+}
+
+async function runModel(designContext = activeDesignContext()): Promise<void> {
   window.clearTimeout(compileTimer);
   compileTimer = undefined;
   viewport.restoreTransientPreview();
   const revision = ++runRevision;
   const sourceVersion = codeEditor.sourceVersion();
   const file = codeEditor.currentFile();
+  const following = pendingAgentFollow;
+  const designContextId =
+    typeof designContext === 'string' ? designContext : undefined;
   compilingDesignContextId = designContextId;
   setViewportStatus('busy', 'Preparing model');
   if (designContextId) {
@@ -994,7 +1051,7 @@ async function runModel(
     const nextModule = await compiler.compile(
       codeEditor.project(),
       file,
-      designContextId,
+      designContext,
       phase => setViewportStatus('busy', compilationPhaseLabels[phase]),
     );
     if (
@@ -1073,6 +1130,17 @@ async function runModel(
       renderDesignArguments(currentModule);
     }
     syncContextualTool();
+    if (following && pendingAgentFollow === following) {
+      pendingAgentFollow = undefined;
+      const render = following.input.render;
+      if (
+        agentPanel?.followingAgentId === following.agentId &&
+        !sketchEditor.hasTarget &&
+        typeof render === 'object' &&
+        render.view
+      )
+        viewport.setView(resolveRenderView(render.view));
+    }
     restoreModelStatus();
   } catch (error) {
     if (revision !== runRevision) {
@@ -1213,7 +1281,7 @@ async function runCompletionPreview(
     const module = await compiler.compile(
       preview.project,
       preview.cursor.file,
-      selectedDesignContextId,
+      activeDesignContext(preview.cursor),
       phase =>
         setViewportStatus(
           'busy',
@@ -1265,6 +1333,7 @@ function scheduleModelRun(delay: number): void {
 }
 
 function requestModelUpdate(delay: number): void {
+  pendingAgentFollow = undefined;
   activeCompletionFocus = undefined;
   window.clearTimeout(completionPreviewTimer);
   completionPreviewTimer = undefined;
@@ -1281,6 +1350,7 @@ function selectCompiledEvaluationContext(
   design: boolean,
 ): boolean {
   if (!viewport.selectEvaluationContext(contextId)) return false;
+  selectedDesignInvocation = undefined;
   cancelPendingDesignCompile();
   preferredEvaluationContextId = contextId;
   selectedDesignContextId = design ? contextId : undefined;
@@ -1290,6 +1360,7 @@ function selectCompiledEvaluationContext(
 }
 
 function activateDesignContext(contextId: string): void {
+  selectedDesignInvocation = undefined;
   preferredEvaluationContextId = contextId;
   selectedDesignContextId = contextId;
   void runModel(contextId);

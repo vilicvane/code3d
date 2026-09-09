@@ -15,6 +15,8 @@ import {AgentPersistence} from './persistence';
 import {randomAgentColor} from './colors';
 import {randomAgentName} from './names';
 import type {AgentRenderHistory} from './render-history';
+import {MousePointer2, UserRoundCog} from 'lucide';
+import {createIcon} from '../ui/icons';
 
 type Grant = {
   config: AgentConfig;
@@ -34,6 +36,9 @@ type AgentRow = {
 };
 
 export class AgentPanel {
+  private readonly navigation = document.createElement('div');
+  private readonly badges = new Map<string, HTMLButtonElement>();
+  private followedAgentId?: string;
   private readonly dialog = document.createElement('dialog');
   private readonly port = document.createElement('input');
   private readonly name = document.createElement('input');
@@ -84,6 +89,10 @@ export class AgentPanel {
       activeAgents: ReadonlySet<string>,
     ) => void,
   ) {
+    this.navigation.className = 'agent-nav-agents';
+    open.before(this.navigation);
+    open.setAttribute('aria-label', 'Connect Agent');
+    open.title = 'Connect Agent';
     this.dialog.className = 'app-dialog agent-dialog';
     this.dialog.setAttribute('aria-label', 'Connect Agent');
     const content = document.createElement('div');
@@ -188,6 +197,10 @@ export class AgentPanel {
     this.refresh();
   }
 
+  get followingAgentId(): string | undefined {
+    return this.followedAgentId;
+  }
+
   refresh(): void {
     this.presenceChanged(
       new Set(
@@ -199,8 +212,43 @@ export class AgentPanel {
     this.open.replaceChildren();
     this.open.classList.toggle('button-primary', !this.grants.size);
     if (!this.grants.size) this.open.textContent = 'Connect Agent';
-    for (const grant of this.grants.values())
-      this.open.append(agentBadge(grant));
+    else this.open.append(createIcon(UserRoundCog));
+    this.navigation.hidden = !this.grants.size;
+    if (this.followedAgentId && !this.grants.has(this.followedAgentId))
+      this.followedAgentId = undefined;
+    for (const [id, badge] of this.badges) {
+      if (this.grants.has(id)) continue;
+      badge.remove();
+      this.badges.delete(id);
+    }
+    for (const grant of this.grants.values()) {
+      const id = grant.config.agentId;
+      let badge = this.badges.get(id);
+      if (!badge) {
+        badge = document.createElement('button');
+        badge.type = 'button';
+        badge.addEventListener('click', () => {
+          this.followedAgentId = this.followedAgentId === id ? undefined : id;
+          this.refresh();
+        });
+        this.badges.set(id, badge);
+        this.navigation.append(badge);
+      }
+      const identity = agentBadge(grant);
+      const following = this.followedAgentId === id;
+      badge.className = identity.className;
+      badge.dataset.active = identity.dataset.active;
+      badge.dataset.agentId = id;
+      badge.setAttribute('aria-pressed', String(following));
+      badge.setAttribute(
+        'aria-label',
+        `${following ? 'Stop following' : 'Follow'} ${grant.config.name}`,
+      );
+      badge.title = `${badge.getAttribute('aria-label')} · ${grant.state === 'online' ? 'Connected' : 'Disconnected'}`;
+      badge.replaceChildren(...identity.childNodes);
+      if (following)
+        badge.append(createIcon(MousePointer2, 'agent-follow-icon'));
+    }
     this.addButton.disabled = !this.available || this.adding;
     this.retry.hidden = !this.project.hasUnsaved;
     const online = [...this.grants.values()].filter(

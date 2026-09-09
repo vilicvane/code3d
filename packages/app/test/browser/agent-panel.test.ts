@@ -31,16 +31,17 @@ test(
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(process.env.CODE3D_TEST_URL);
-    const nav = page.locator('#agents-button');
+    const nav = page.locator('.agent-nav');
+    const connect = page.locator('#agents-button');
     await nav.waitFor();
-    assert.equal(await nav.textContent(), 'Connect Agent');
+    assert.equal(await connect.textContent(), 'Connect Agent');
     assert.equal(
       await nav.evaluate(
         element => element === element.parentElement!.lastElementChild,
       ),
       true,
     );
-    await nav.click();
+    await connect.click();
     const dialog = page.getByRole('dialog', {
       name: 'Connect Agent',
       exact: true,
@@ -180,7 +181,7 @@ test(
         ),
       colors,
     );
-    await nav.click();
+    await connect.click();
     assert.equal(await prompt.count(), 0);
     assert.equal(
       await row('Euler').locator('.agent-row-status').isVisible(),
@@ -252,7 +253,7 @@ test(
         .click();
       await dialog.getByRole('button', {name: 'Close', exact: true}).click();
       await page.evaluate(() => window.settleAgentCopy());
-      await nav.click();
+      await connect.click();
       assert.equal(
         await dialog.locator('.agent-prompt-message').textContent(),
         '',
@@ -330,14 +331,14 @@ test(
         .click();
       assert.equal(await exporting.isVisible(), false);
     }
-    await nav.click();
+    await connect.click();
     await connection.click();
     await end.click();
     await dialog.locator('.agent-row').waitFor({state: 'detached'});
-    assert.equal(await nav.textContent(), 'Connect Agent');
+    assert.equal(await connect.textContent(), 'Connect Agent');
     await page.reload();
     await nav.waitFor();
-    assert.equal(await nav.textContent(), 'Connect Agent');
+    assert.equal(await connect.textContent(), 'Connect Agent');
     await assert.rejects(() => client.request({operation: 'context'}), {
       code: 'app_disconnected',
     });

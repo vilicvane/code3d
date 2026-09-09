@@ -199,7 +199,7 @@ test(
     // A real service disconnect dims every live identity indicator, even for
     // a pinned historical image. Reconnection must not alter that image.
     const badge = page
-      .locator('#agents-button .agent-badge')
+      .locator('.agent-nav .agent-badge')
       .filter({hasText: 'Euler'});
     const dotOpacity = (label: Locator, pseudo = false) =>
       label.evaluate(
@@ -217,7 +217,7 @@ test(
       .evaluate(element => element.scrollLeft);
     await servers[0].stop();
     await page.waitForFunction(() =>
-      [...document.querySelectorAll('#agents-button .agent-badge')].some(
+      [...document.querySelectorAll('.agent-nav .agent-badge')].some(
         element =>
           element.textContent === 'Euler' &&
           (element as HTMLElement).dataset.active === 'false',
@@ -241,7 +241,7 @@ test(
     await page.getByRole('button', {name: 'Close', exact: true}).click();
     servers[0] = await startServe(t, configs[0]);
     await page.waitForFunction(() =>
-      [...document.querySelectorAll('#agents-button .agent-badge')].some(
+      [...document.querySelectorAll('.agent-nav .agent-badge')].some(
         element =>
           element.textContent === 'Euler' &&
           (element as HTMLElement).dataset.active === 'true',
