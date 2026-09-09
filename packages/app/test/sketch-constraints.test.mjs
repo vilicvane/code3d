@@ -103,7 +103,7 @@ test('angle and perpendicular markers use the shared endpoint regardless of auth
       );
       for (const display of displays) {
         assert.deepEqual(display.markers, [
-          {kind: 'corner', points: points.map(p => p.position)},
+          {kind: 'corner', vertex: ref(1), points: points.map(p => p.position)},
         ]);
         assert.deepEqual(display.guides, []);
       }
@@ -140,6 +140,7 @@ test('shared vertices resolve aliases but not coincident coordinates, crossings 
     [
       {
         kind: 'corner',
+        vertex: ref(1),
         points: [
           [0, 0],
           [10, 0],
@@ -213,6 +214,7 @@ test('line marker groups are centered with 4px between badges and 8px to the lin
 test('the near corner, not the badge center, follows the bisector through zoom and acute angles', () => {
   const marker = {
     kind: 'corner',
+    vertex: ref(1),
     points: [
       [2, 3],
       [12, 3],
@@ -244,6 +246,7 @@ test('the near corner, not the badge center, follows the bisector through zoom a
         {
           marker: {
             kind: 'corner',
+            vertex: ref(1),
             points: [
               [0, 0],
               [10, 0],
@@ -269,7 +272,11 @@ test('the near corner, not the badge center, follows the bisector through zoom a
     const bounds = layoutSketchConstraintMarkers(
       [
         {
-          marker: {kind: 'corner', points: [[0, 0], [10, 0], endpoint]},
+          marker: {
+            kind: 'corner',
+            vertex: ref(1),
+            points: [[0, 0], [10, 0], endpoint],
+          },
           width: 22,
         },
       ],
@@ -288,6 +295,7 @@ test('right-angle markers keep their natural width and equal edge clearance in e
             {
               marker: {
                 kind: 'corner',
+                vertex: ref(1),
                 points: [
                   [0, 0],
                   [10 * x, 0],
@@ -308,7 +316,7 @@ test('right-angle markers keep their natural width and equal edge clearance in e
       }
 });
 
-test('overlapping line, corner and point markers retain their own layout regardless of other groups or order', () => {
+test('different geometry anchors retain their own layout despite overlap, zoom or group order', () => {
   const groups = [1, 2].map(id =>
     [22, 54].map(width => ({
       width,
@@ -324,6 +332,7 @@ test('overlapping line, corner and point markers retain their own layout regardl
   );
   const corner = {
     kind: 'corner',
+    vertex: ref(1),
     points: [
       [0, 0],
       [20, 0],
@@ -332,9 +341,9 @@ test('overlapping line, corner and point markers retain their own layout regardl
   };
   groups.push(
     [{marker: corner, width: 22}],
-    [{marker: corner, width: 54}],
-    [{marker: {kind: 'point', position: [90, 0]}, width: 22}],
-    [{marker: {kind: 'point', position: [90, 0]}, width: 54}],
+    [{marker: {...corner, vertex: ref(1, 'base')}, width: 54}],
+    [{marker: {kind: 'point', point: ref(2), position: [90, 0]}, width: 22}],
+    [{marker: {kind: 'point', point: ref(3), position: [90, 0]}, width: 54}],
   );
   for (const scale of [1, 3, 10]) {
     const project = ([x, y]) => [x * scale, y * scale];
@@ -344,6 +353,159 @@ test('overlapping line, corner and point markers retain their own layout regardl
         order.flatMap(group => layoutSketchConstraintMarkers(group, project)),
       );
   }
+});
+
+test('point labels form one natural-width row with fixed screen gaps through zoom', () => {
+  const labels = [22, 54, 67].map(width => ({
+    width,
+    marker: {kind: 'point', point: ref(1), position: [2, 3]},
+  }));
+  for (const scale of [1, 10, 100]) {
+    const project = ([x, y]) => [50 + x * scale, 70 - y * scale];
+    const bounds = layoutSketchConstraintMarkers(labels, project);
+    const [x, y] = project([2, 3]);
+    assert.equal(bounds[0].x - x, 8);
+    bounds.forEach((b, i) => {
+      assert.equal(b.width, labels[i].width + 1);
+      assert.equal(b.y + b.height - y, -8);
+      if (i) assert.equal(b.x - bounds[i - 1].x - bounds[i - 1].width, 4);
+    });
+  }
+});
+
+test('overlapping corners share their quadrant row, including point labels, regardless of constraint order', () => {
+  for (const dx of [-1, 1])
+    for (const dy of [-1, 1]) {
+      const corner = {
+        kind: 'corner',
+        vertex: ref(1),
+        points: [
+          [0, 0],
+          [dx * 20, 0],
+          [0, dy * 20],
+        ],
+      };
+      const labels = [22, 54].map(width => ({width, marker: corner}));
+      if (dx === 1 && dy === -1)
+        labels.push({
+          width: 70,
+          marker: {kind: 'point', point: ref(1), position: [0, 0]},
+        });
+      for (const ordered of [labels, [...labels].reverse()]) {
+        const bounds = layoutSketchConstraintMarkers(ordered, p => p);
+        const gap = labels.length === 3 ? 8 : 9;
+        assert.ok(
+          Math.abs(
+            (dx > 0 ? bounds[0].x : -bounds[0].x - bounds[0].width) - gap,
+          ) < 1e-10,
+        );
+        bounds.forEach((b, i) => {
+          assert.equal(b.width, ordered[i].width + 1);
+          assert.ok(Math.abs((dy > 0 ? b.y : -b.y - b.height) - gap) < 1e-10);
+          if (i) {
+            const previous = bounds[i - 1];
+            assert.ok(
+              Math.abs(
+                (dx > 0
+                  ? b.x - previous.x - previous.width
+                  : previous.x - b.x - b.width) - 4,
+              ) < 1e-10,
+            );
+          }
+        });
+      }
+    }
+});
+
+test('different quadrants and exact axis bisectors at one vertex remain independent', () => {
+  const groups = [-1, 1].flatMap(dx =>
+    [-1, 1].map(dy => [
+      {
+        width: 54,
+        marker: {
+          kind: 'corner',
+          vertex: ref(1),
+          points: [
+            [0, 0],
+            [dx * 20, 0],
+            [0, dy * 20],
+          ],
+        },
+      },
+    ]),
+  );
+  for (const dx of [-1, 1])
+    groups.push([
+      {
+        width: 54,
+        marker: {
+          kind: 'corner',
+          vertex: ref(1),
+          points: [
+            [0, 0],
+            [dx * 20, 20],
+            [dx * 20, -20],
+          ],
+        },
+      },
+    ]);
+  assert.deepEqual(
+    layoutSketchConstraintMarkers(groups.flat(), p => p),
+    groups.flatMap(g => layoutSketchConstraintMarkers(g, p => p)),
+  );
+});
+
+test('point aliases and corner vertices share canonical anchors across layers, not equal numeric IDs', () => {
+  const basePoints = [point(1, [0, 0], 'base'), point(2, [20, 0], 'base')];
+  const localPoints = [point(1, [0, 0]), point(2, [0, 20])];
+  const layers = [
+    layer(
+      'base',
+      basePoints.map(p => ({kind: 'point', ...p})),
+      [['x', ref(1, 'base'), 0]],
+    ),
+    layer(
+      'local',
+      [
+        {...localPoints[0], kind: 'point', alias: ref(1, 'base')},
+        {...localPoints[1], kind: 'point'},
+        line(3, ref(1), ref(2, 'base')),
+        line(4, ref(1, 'base'), ref(2)),
+      ],
+      [
+        ['y', ref(1), 0],
+        ['perpendicular', [3, 4]],
+      ],
+    ),
+  ];
+  const displays = sketchConstraintDisplays(layers, [
+    ...basePoints,
+    ...localPoints,
+  ]);
+  assert.deepEqual(displays[0].markers[0].point, ref(1, 'base'));
+  assert.deepEqual(displays[1].markers[0].point, ref(1, 'base'));
+  assert.deepEqual(displays[2].markers[0].vertex, ref(1, 'base'));
+  const bounds = layoutSketchConstraintMarkers(
+    displays.map(d => ({width: 22, marker: d.markers[0]})),
+    ([x, y]) => [x, -y],
+  );
+  for (let i = 1; i < bounds.length; i++)
+    assert.equal(bounds[i].x - bounds[i - 1].x - bounds[i - 1].width, 4);
+});
+
+test('curve-position labels share only their curve anchor, not the center point or vertex', () => {
+  const curve = {kind: 'curve', curve: ref(4), position: [0, 0]};
+  const labels = [
+    {width: 54, marker: curve},
+    {width: 22, marker: {kind: 'point', point: ref(4), position: [0, 0]}},
+    {width: 60, marker: curve},
+  ];
+  const bounds = layoutSketchConstraintMarkers(labels, p => p);
+  assert.equal(bounds[2].x - bounds[0].x - bounds[0].width, 4);
+  assert.deepEqual(
+    bounds[1],
+    layoutSketchConstraintMarkers([labels[1]], p => p)[0],
+  );
 });
 
 test('every persistent constraint exposes its actual participants and value, without changing snapshots', () => {
@@ -359,7 +521,13 @@ test('every persistent constraint exposes its actual participants and value, wit
     ['x', ref(1), -2],
     ['y', ref(2), 3.5],
   ];
-  const layers = [layer('local', [line(4, ref(1), ref(2))], constraints)];
+  const layers = [
+    layer(
+      'local',
+      [...points.map(p => ({kind: 'point', ...p})), line(4, ref(1), ref(2))],
+      constraints,
+    ),
+  ];
   const before = structuredClone({layers, points});
   const displays = sketchConstraintDisplays(layers, points);
   assert.deepEqual(
@@ -415,10 +583,14 @@ test('derived relations retain ownership and distinct upstream/local addresses w
   const local = point(1, [30, 40]);
   const displays = sketchConstraintDisplays(
     [
-      layer('base', [], [['fixed', ref(1, 'base')]]),
+      layer(
+        'base',
+        [{kind: 'point', ...upstream}],
+        [['fixed', ref(1, 'base')]],
+      ),
       layer(
         'local',
-        [line(2, ref(1, 'base'), ref(1))],
+        [{kind: 'point', ...local}, line(2, ref(1, 'base'), ref(1))],
         [
           ['coincident', [ref(1), ref(1, 'base')]],
           ['length', 2, 20],
@@ -439,7 +611,13 @@ test('derived relations retain ownership and distinct upstream/local addresses w
 });
 
 test('preview positions move glyphs and midpoint guides without inventing drag locks or extra rectangle relations', () => {
-  const layers = [layer('local', [], [['midpoint', [ref(1), ref(2), ref(3)]]])];
+  const layers = [
+    layer(
+      'local',
+      [1, 2, 3].map(id => ({kind: 'point', id, position: [0, 0]})),
+      [['midpoint', [ref(1), ref(2), ref(3)]]],
+    ),
+  ];
   const start = sketchConstraintDisplays(layers, [
     point(1, [0, 0]),
     point(2, [-10, -10]),
@@ -452,7 +630,9 @@ test('preview positions move glyphs and midpoint guides without inventing drag l
   ]);
   assert.equal(next.length, 1);
   assert.equal(next[0].key, start[0].key);
-  assert.deepEqual(next[0].markers, [{kind: 'point', position: [5, 5]}]);
+  assert.deepEqual(next[0].markers, [
+    {kind: 'point', point: ref(1), position: [5, 5]},
+  ]);
   assert.deepEqual(next[0].guides, [
     [
       [5, 5],

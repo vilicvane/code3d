@@ -241,8 +241,14 @@ implementation context and historical outcomes, not a competing work queue.
   on the bisector. Natural widths stay unchanged; axis-aligned right angles keep
   an equal 8px clearance to both strokes. Acute angles do not force the whole
   rectangle inside their wedge.
-  There is no overlap detection or automatic avoidance: other markers never
-  displace a group, and users can zoom to separate nearby geometry. Relative-angle
+  Point badges at the same canonical point form an outward horizontal row with
+  natural widths and 4px gaps. Overlapping corner badges at that vertex in the same
+  screen quadrant join the row; otherwise their bisector anchors stay unchanged.
+  Plain point rows keep their anchor, or a corner-only row keeps the first authored
+  corner's anchor. Exact axis bisectors form separate groups. Radius/sweep badges
+  sharing a curve anchor likewise form one row, distinct from real point anchors.
+  Different geometric anchors or quadrants never displace each other; there is no
+  global overlap avoidance. Relative-angle
   and perpendicular markers share the same placement mechanism. Hover/focus highlights all badges of
   that relation, without connector guides or a separate direction diagram; authored
   angle values and their direction tooltip stay unchanged. Trim propagates relations to surviving pieces, preserving expressions;
