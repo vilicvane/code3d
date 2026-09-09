@@ -166,6 +166,17 @@ handles require an operation with supported positioning or rotation semantics.
 
 ## Use a contextual tool
 
+Place the cursor inside a `box(x, y, z)` argument to highlight one edge along
+that dimension. An extrusion distance highlights an edge along the extrusion,
+or a finite distance guide when there is no matching edge. Edge arguments to
+`fillet` identify the original edges being rounded, and `originVertex`
+identifies the chosen vertex in the model's adjusted coordinates.
+
+The highlight follows the argument position: in `box(size, size, size)`, each
+use of `size` refers to a different dimension. Moving between dimensions
+preserves the view, and orbiting keeps the chosen edge stable. These guides
+appear in **Modeling** mode and disappear in **Render** mode.
+
 Tools depend on the call or value under the editor cursor. A primitive can
 offer dimension inputs; a fillet or chamfer can offer edge selection;
 an offset can offer a position tool. Origin operations offer a pivot marker

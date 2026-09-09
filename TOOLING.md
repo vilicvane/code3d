@@ -79,6 +79,11 @@ selection + gesture
   occurrence 只细化 runtime instance，不改变源码 context；点击 dim 的
   operation peer 则导航到该输入的 source target，并将它切换为 focus。
   decoration 不参与拾取。
+- 实参聚焦通过当前 tool 的 argument source ref 定位，不按上游变量 ID 扩散高亮。
+  操作快照的 dimensions 以参数名保存结果局部坐标中的 origin/vector；拓扑实参
+  使用既有 selection 与输入到输出变换。source decoration provider 接收当前参数，
+  viewport 选择真实尺寸边并绘制统一提示。box 与 extrude 提供尺寸语义，fillet 和
+  originVertex 复用拓扑记录；未声明几何语义的参数不按名称或数值单位猜测。
 
 ## 核心层次
 

@@ -3,10 +3,12 @@ import type {
   SourceTarget,
   SourceTargetEvaluation,
 } from './model/compiler';
+import type {ToolParameterSchema} from './model/tool-schema';
 import type {
   EdgeId,
   ElementKind,
   ModelOperationInputRole,
+  ModelParameterDimension,
   RenderMesh,
   TopologyId,
   TopologyKind,
@@ -100,9 +102,19 @@ export type ViewportBoundsDecoration = ViewportDecorationBase &
 export type ViewportTopologyDecoration = ViewportDecorationBase &
   Readonly<{
     kind: 'topology';
+    visibility?: 'without-topology-selection';
     mesh: RenderMesh;
     topologyKind: TopologyKind;
     ids: readonly TopologyId[];
+    transform: Transform;
+    appearance: ViewportDecorationAppearance;
+  }>;
+
+export type ViewportDimensionDecoration = ViewportDecorationBase &
+  Readonly<{
+    kind: 'dimension';
+    mesh: RenderMesh;
+    dimension: ModelParameterDimension;
     appearance: ViewportDecorationAppearance;
   }>;
 
@@ -112,12 +124,14 @@ export type ViewportDecoration =
   | ViewportSurfaceDecoration
   | ViewportBoundsDecoration
   | ViewportTopologyDecoration
+  | ViewportDimensionDecoration
   | ViewportAnchorDecoration;
 
 export type SourceDecorationContext = Readonly<{
   module: ModelModule;
   target: SourceTarget;
   evaluation: SourceTargetEvaluation;
+  parameter?: ToolParameterSchema;
 }>;
 
 export type SourceDecorationProvider = Readonly<{

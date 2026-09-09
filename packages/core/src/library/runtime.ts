@@ -279,6 +279,13 @@ export type ModelOperationSnapshot = Readonly<{
   selections: readonly ModelOperationSelectionSnapshot[];
   sourceRef?: SourceRef;
   spatial?: ModelSpatialOperation;
+  /** Authored dimensions in the operation output's local geometry frame. */
+  dimensions?: Readonly<Record<string, ModelParameterDimension>>;
+}>;
+
+export type ModelParameterDimension = Readonly<{
+  origin: Vec3;
+  vector: Vec3;
 }>;
 
 /** Local geometry coordinates; vector is the authored coordinates, offset, or angles. */
@@ -463,6 +470,7 @@ type StoredOperation = {
   regions: StoredOperationRegion[];
   selections: StoredOperationSelection[];
   spatial?: ModelSpatialOperation;
+  dimensions?: Readonly<Record<string, ModelParameterDimension>>;
 };
 
 type ValueTrace = {
@@ -2003,9 +2011,18 @@ export class ModelObject<
       sourceRefs: this.sourceRefs,
       parameters: this.allParameters(),
       meshTolerance: this.meshTolerance,
-      operation: storedOperation('extrude', [
-        {model: this, role: 'receiver', index: 0},
-      ]),
+      operation: storedOperation(
+        'extrude',
+        [{model: this, role: 'receiver', index: 0}],
+        {
+          dimensions: {
+            distance: {
+              origin: this.elements.center.transform.position,
+              vector: direction,
+            },
+          },
+        },
+      ),
     }) as unknown as SolidModel;
   }
 
@@ -3114,6 +3131,7 @@ export class ModelObject<
       })),
       sourceRef,
       spatial: this.operation.spatial,
+      dimensions: this.operation.dimensions,
     };
   }
 
@@ -3330,7 +3348,13 @@ export function box(x = 10, y = 10, z = 10): SolidModel {
       [0, -y / 2, 0],
       [0, y / 2, 0],
     ]),
-    operation: storedOperation('box'),
+    operation: storedOperation('box', [], {
+      dimensions: {
+        x: {origin: [-x / 2, -y / 2, -z / 2], vector: [x, 0, 0]},
+        y: {origin: [-x / 2, -y / 2, -z / 2], vector: [0, y, 0]},
+        z: {origin: [-x / 2, -y / 2, -z / 2], vector: [0, 0, z]},
+      },
+    }),
   }) as unknown as SolidModel;
 }
 
@@ -4148,6 +4172,7 @@ function storedOperation(
   options: Readonly<{
     regions?: readonly StoredOperationRegion[];
     selections?: readonly StoredOperationSelection[];
+    dimensions?: Readonly<Record<string, ModelParameterDimension>>;
   }> = {},
 ): StoredOperation {
   return {
@@ -4156,6 +4181,7 @@ function storedOperation(
     inputs: [...inputs],
     regions: [...(options.regions ?? [])],
     selections: [...(options.selections ?? [])],
+    dimensions: options.dimensions,
   };
 }
 

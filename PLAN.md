@@ -496,6 +496,18 @@ are tracked separately in [#84](https://github.com/vilicvane/code3d/issues/84).
   collections. Their preview emphasizes the returned vertices, edges, or
   surfaces with the owning geometry dimmed as spatial context; topology
   accessor calls use the same dimmed context while editing the selected IDs.
+- Argument focus connects the current call's exact argument occurrence to
+  geometry (#96), independently of shared-variable editing provenance. Box
+  dimensions and extrusion distances expose local origin/vector metadata;
+  the viewport highlights one complete parallel edge of that length, choosing
+  the closest edge midpoint in the visible occurrence's world frame on focus.
+  The choice stays fixed while orbiting. A finite segment with endpoint marks
+  represents the dimension when no real edge qualifies. Topology parameters
+  reuse their input geometry and input-to-output transform, including consumed
+  fillet edges and rebased origin vertices. Guides follow the existing source
+  preview stage, preserve scene/camera/selection, and clear on leaving the
+  argument. Interactive topology selection owns overlapping highlights.
+  Parameter guides are modeling helpers, excluded from Render and CAD geometry.
 - Topology and relation guides use fixed screen-space sizes: vertices are
   5px; passive line decorations and source highlights are 1px; interactive
   topology selection guides and highlights are 2px. Direction arrowheads are

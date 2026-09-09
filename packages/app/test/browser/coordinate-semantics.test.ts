@@ -534,6 +534,7 @@ async function waitVertexSelection(page: Page, id: number) {
 }
 
 async function vertexState(page: Page) {
+  await cameraIdle(page);
   return page.evaluate(() => {
     const {viewport, codeEditor} = window.coordinateApp;
     const selection = viewport['topologySelection']!;
@@ -606,6 +607,9 @@ async function setSource(page: Page, source: string, method: string) {
     return (target?.tool?.signature.name ?? target?.operation?.kind) === method;
   }, method);
   await page.getByText('Ready', {exact: true}).waitFor();
+  // Scene memory intentionally retains zoom across geometry edits. These
+  // picking tests need every corner inside the canvas, including scaled inputs.
+  await page.evaluate(() => window.coordinateApp.viewport.fit());
 }
 
 async function state(page: Page) {
@@ -663,7 +667,15 @@ async function assertOriginForeground(page: Page) {
   );
 }
 
+async function cameraIdle(page: Page) {
+  await page.waitForFunction(() => {
+    const controls = window.coordinateApp.viewport['controls'];
+    return !controls['transition'] && controls['_animationId'] === -1;
+  });
+}
+
 async function xHandle(page: Page) {
+  await cameraIdle(page);
   return page.evaluate(() => {
     const viewport = window.coordinateApp.viewport;
     const gizmo = viewport['transformGizmo'];
