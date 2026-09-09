@@ -48,6 +48,7 @@ test('watches before the first package snapshot and invalidates newly created pu
     for (const [name, disk] of [
       ['core', core],
       ['screws', screws],
+      ['materials', path.join(root, 'node_modules/@code3d/materials')],
     ] as const) {
       await mkdir(disk, {recursive: true});
       await writeFile(

@@ -1,5 +1,6 @@
 export {primitivesExample} from './primitives.ts';
 export {materialsExample} from './materials.ts';
+export {materialPresets} from './material-presets.ts';
 export {customPrimitivesExample, twistKnob} from './custom-primitives.ts';
 export {booleanOperationsExample} from './boolean-operations.ts';
 export {relationsAndElementsExample} from './relations-and-elements.ts';

@@ -40,13 +40,14 @@ context. Browser storage remains available when folder access is unsupported.
 
 You can start without installing packages. When the root `package.json` does
 not declare `@code3d/core` (or there is no `package.json`), the App provides
-built-in `@code3d/core` and `@code3d/screws`, with matching editor types.
+built-in `@code3d/core`, `@code3d/screws` and `@code3d/materials`, with matching
+editor types.
 This does not install packages or write dependency metadata into your folder.
 
 Declaring `@code3d/core` in `dependencies`, `devDependencies`, `peerDependencies`
 or `optionalDependencies` switches the complete modeling runtime to your
-project's installed packages. Install `@code3d/screws` too if your model imports
-it. Missing declared packages produce an error; the App does not silently use
+project's installed packages. Install `@code3d/screws` or
+`@code3d/materials` too if your model imports them. Missing declared packages produce an error; the App does not silently use
 its built-in copies. Choose **Reload folder** after external dependency changes.
 
 Other browser-compatible npm packages resolve from the project's `node_modules`

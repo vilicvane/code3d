@@ -258,7 +258,7 @@ implementation context and historical outcomes, not a competing work queue.
   `package.json`, lockfile, and installed dependencies, including
   `@code3d/core`. The same source should run in a supported Node runtime without
   a code3d-only module syntax or hidden host dependency.
-- App provides built-in core/screws when the root package metadata does not
+- App provides built-in core/screws/materials when the root package metadata does not
   declare `@code3d/core`. Declaring core in dependencies, devDependencies,
   peerDependencies or optionalDependencies transfers the entire runtime to the
   project's packages; missing installations are errors. Built-in packages use
@@ -414,8 +414,8 @@ Material values ([#77](https://github.com/vilicvane/code3d/issues/77)) use
 `model.material(threeMaterial)` as a complete replacement. `@code3d/core/three`
 re-exports Core's native Three.js classes and types for models and reusable
 packages to share one dependency instance, in both App and Node. The built-in
-package closure exposes Core and Screws; Three.js remains a private dependency,
-as Replicad does. Core captures native
+package closure exposes Core, Screws and Materials; Three.js remains a private
+dependency, as Replicad does. Core captures native
 Three.js JSON and loaded texture pixels at assignment; snapshots carry that
 value across the worker boundary. App restores owned materials and textures,
 uses separate copies for modeling emphasis, and draws authored materials in
@@ -423,6 +423,19 @@ Render mode. CSS color strings choose the default material as a whole. Groups
 override the complete subtree atomically. Native face UVs are normalized per
 face for texture mapping. STEP/3MF retain base color/opacity; PNG renders the
 material. All former color-only author calls use this single material API.
+
+`@code3d/materials` supplies ten native material factories: plastic, rubber,
+aluminum, steel, brass, copper, glass, acrylic, ceramic and paint. Each accepts
+defaults, a native Three.js color, or a typed options object; finish presets
+provide roughness defaults, explicit values take precedence, and opacity below
+one enables blending. Glass and acrylic expose transmission and model-unit
+thickness. Factories create independent native materials from the shared
+Core/Three instance, with no renderer, texture loading or new material protocol.
+The package joins Core and Screws in
+the App's built-in package view and editor declarations; one shared package list
+drives artifact collection, resolution and diagnostic source mapping. See
+[#83](https://github.com/vilicvane/code3d/issues/83). Default environment reflections
+are tracked separately in [#84](https://github.com/vilicvane/code3d/issues/84).
 
 ## Invariants
 
@@ -658,7 +671,7 @@ material. All former color-only author calls use this single material API.
   and previewed directly.
 - App diagnostics, completion and model evaluation use one selected package
   filesystem: project-owned packages when core is declared, otherwise the
-  built-in core/screws plus ordinary project dependencies. Declarations and
+  built-in core/screws/materials plus ordinary project dependencies. Declarations and
   implementations remain separate consumers of real package artifacts, not a
   hand-authored declaration shim. Changing this selection invalidates the runtime.
 
@@ -975,7 +988,7 @@ and [#12](https://github.com/vilicvane/code3d/issues/12).
   evaluations without coupling the host to its concrete runtime classes.
 
 The repository uses `@code3d/app`, `@code3d/core`, `@code3d/solver`,
-`@code3d/opencascade`, and `@code3d/screws`. Core emits a shared public type surface plus Node and tooling
+`@code3d/opencascade`, `@code3d/screws`, and `@code3d/materials`. Core emits a shared public type surface plus Node and tooling
 entries. App reads the selected project's package implementations and
 metadata lazily, evaluates native ESM in a persistent project Worker, and
 loads the same packages' declarations into Monaco. The detailed design is

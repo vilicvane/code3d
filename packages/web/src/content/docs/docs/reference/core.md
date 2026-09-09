@@ -181,6 +181,10 @@ shows which operations are supported by the value you hold.
 
 ## Materials
 
+Use [`@code3d/materials`](../materials/) for common plastic, metal, glass,
+ceramic and paint presets, such as `.material(aluminum({finish: 'polished'}))`.
+Each preset returns a native Three.js material and follows the same rules below.
+
 ```ts
 import {box} from '@code3d/core';
 import {MeshPhysicalMaterial} from '@code3d/core/three';

@@ -9,6 +9,7 @@ import fastenersSource from '../../examples/fasteners.ts?raw';
 import examplesIndexSource from '../../examples/index.ts?raw';
 import primitivesSource from '../../examples/primitives.ts?raw';
 import materialsSource from '../../examples/materials.ts?raw';
+import materialPresetsSource from '../../examples/material-presets.ts?raw';
 import topologyPathsSource from '../../examples/topology-paths.ts?raw';
 import shellSource from '../../examples/shell.ts?raw';
 import groupOriginsSource from '../../examples/group-origins.ts?raw';
@@ -28,6 +29,7 @@ const files = [
   {path: '/examples/index.ts', source: examplesIndexSource},
   {path: '/examples/primitives.ts', source: primitivesSource},
   {path: '/examples/materials.ts', source: materialsSource},
+  {path: '/examples/material-presets.ts', source: materialPresetsSource},
   {path: '/examples/sketches.ts', source: sketchesSource},
   {path: '/examples/sketch-modeling.ts', source: sketchModelingSource},
   {path: '/examples/shell.ts', source: shellSource},

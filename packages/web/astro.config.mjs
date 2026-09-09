@@ -102,6 +102,7 @@ export default defineConfig({
           items: [
             {slug: 'docs/reference/core'},
             {slug: 'docs/reference/screws'},
+            {slug: 'docs/reference/materials'},
             {slug: 'docs/reference/limitations'},
           ],
         },

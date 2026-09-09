@@ -9,6 +9,7 @@ import type {
 import {ProjectFileCache} from '../project/file-cache';
 import type {ProjectFileReader} from '../project/file-reader';
 import {ProjectPackages} from '../project/project-packages';
+import {isBuiltinPackageSpecifier} from '../project/builtin-packages';
 import {ProjectBuilder} from '../project/project-builder';
 import {ProjectAssets} from '../project/project-assets';
 import {
@@ -139,7 +140,7 @@ export class ProjectCompiler {
             if (
               !specifier ||
               !ts.isStringLiteralLike(specifier) ||
-              !/^@code3d\/(?:core|screws)(?:\/|$)/.test(specifier.text)
+              !isBuiltinPackageSpecifier(specifier.text)
             )
               continue;
             throw new ModelDiagnosticError({
