@@ -878,6 +878,11 @@ kbd {
   border-bottom: 1px solid #d8ff3e88;
 }
 
+/* Monaco themes the rename container; native inputs need explicit inheritance. */
+.monaco-editor .rename-box .rename-input {
+  color: inherit;
+}
+
 .monaco-editor .code3d-annotation {
   color: #aebcff !important;
   font-weight: 600;

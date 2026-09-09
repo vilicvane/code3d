@@ -6,6 +6,9 @@ import {projectTypeScriptWorker} from './monaco/typescript-worker-client';
 import type {CursorTypeInfo} from './monaco/type-info';
 import 'monaco-editor/features/register.all';
 import 'monaco-editor/languages/definitions/typescript/register';
+import {language as typeScriptTokens} from 'monaco-editor/languages/definitions/typescript/typescript';
+import 'monaco-editor/languages/definitions/javascript/register';
+import {language as javaScriptTokens} from 'monaco-editor/languages/definitions/javascript/javascript';
 import 'monaco-editor/languages/definitions/markdown/register';
 import 'monaco-editor/languages/features/json/register';
 import JsonWorker from 'monaco-editor/languages/features/json/json.worker?worker';
@@ -177,6 +180,34 @@ monaco.languages.registerDocumentFormattingEditProvider('typescript', {
   },
 });
 
+// Monaco's built-in identifier rules only cover ASCII. Extend the shared
+// grammar so legal Unicode names stay whole, including inside templates.
+for (const [languageId, definition] of [
+  ['typescript', typeScriptTokens],
+  ['javascript', javaScriptTokens],
+] as const) {
+  monaco.languages.setMonarchTokensProvider(languageId, {
+    ...definition,
+    unicode: true,
+    tokenizer: {
+      ...definition.tokenizer,
+      common: [
+        [
+          /#?[$_\p{ID_Start}][$\u200c\u200d\p{ID_Continue}]*/u,
+          {
+            cases: {
+              '@keywords': 'keyword',
+              '[A-Z].*': 'type.identifier',
+              '@default': 'identifier',
+            },
+          },
+        ],
+        ...definition.tokenizer.common,
+      ],
+    },
+  });
+}
+
 monaco.editor.defineTheme('code3d-dark', {
   base: 'vs-dark',
   inherit: true,
@@ -194,6 +225,7 @@ monaco.editor.defineTheme('code3d-dark', {
     'textLink.foreground': code3dEditorWidgetColors.accent,
     'textLink.activeForeground': code3dEditorWidgetColors.accent,
     'input.background': code3dCodeColors.background,
+    'input.foreground': code3dCodeColors.foreground,
     'input.border': code3dEditorWidgetColors.border,
     'inputOption.activeBorder': code3dEditorWidgetColors.accent,
     'inputOption.activeBackground': code3dEditorWidgetColors.selectedBackground,
