@@ -169,6 +169,7 @@ app.innerHTML = `
               <nav class="editor-tabs" id="editor-tabs" aria-label="Open files"></nav>
             </div>
             <div class="editor-host" id="editor-host"></div>
+            <div class="editor-empty-state" id="editor-empty-state" hidden>Open a file from the explorer</div>
           </section>
         </div>
         <div class="error-bar" id="error-bar" hidden></div>
@@ -704,7 +705,10 @@ for (const event of ['pointerdown', 'wheel', 'keydown'])
 
 window.addEventListener('popstate', () => {
   const path = filePathFromRoute(window.location.hash);
-  if (!path || !codeEditor.filePaths().includes(path)) {
+  if (
+    window.location.hash !== fileRoute(undefined) &&
+    (!path || !codeEditor.filePaths().includes(path))
+  ) {
     replaceFileRoute(codeEditor.currentFile());
     return;
   }
@@ -895,7 +899,11 @@ async function resetExamples(): Promise<void> {
   }
 }
 
-function initialFilePath(project: ModelProject, hash: string): string {
+function initialFilePath(
+  project: ModelProject,
+  hash: string,
+): string | undefined {
+  if (hash === fileRoute(undefined)) return undefined;
   const routed = filePathFromRoute(hash);
   if (routed && project.files.some(file => file.path === routed)) return routed;
   const paths = project.files.map(file => file.path);
@@ -906,7 +914,10 @@ function initialFilePath(project: ModelProject, hash: string): string {
   );
 }
 
-function updateFileRoute(path: string, reason: ActiveFileChangeReason): void {
+function updateFileRoute(
+  path: string | undefined,
+  reason: ActiveFileChangeReason,
+): void {
   if (reason === 'switch') {
     pushFileRoute(path);
   } else {
@@ -914,7 +925,7 @@ function updateFileRoute(path: string, reason: ActiveFileChangeReason): void {
   }
 }
 
-function pushFileRoute(path: string): void {
+function pushFileRoute(path: string | undefined): void {
   const route = fileRoute(path);
   if (window.location.hash === route) return;
   const url = new URL(window.location.href);
@@ -922,7 +933,7 @@ function pushFileRoute(path: string): void {
   window.history.pushState(null, '', url);
 }
 
-function replaceFileRoute(path: string): void {
+function replaceFileRoute(path: string | undefined): void {
   const route = fileRoute(path);
   if (window.location.hash === route) return;
   const url = new URL(window.location.href);
@@ -943,6 +954,7 @@ function setProjectExplorerExpanded(expanded: boolean): void {
 
 function renderProjectNavigation(): void {
   const active = codeEditor.currentFile();
+  requiredElement('editor-empty-state').hidden = active !== undefined;
   projectDirectory.update(codeEditor.filePaths(), active);
   editorTabs.replaceChildren(
     ...codeEditor.openedFiles().map(path => {
@@ -1037,6 +1049,27 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
   const revision = ++runRevision;
   const sourceVersion = codeEditor.sourceVersion();
   const file = codeEditor.currentFile();
+  if (!file) {
+    compiler.cancel();
+    currentModule = null;
+    currentModuleSourceVersion = undefined;
+    currentDiagnostic = undefined;
+    sourcePreviewDiagnostic = undefined;
+    compilingDesignContextId = undefined;
+    codeEditor.setModelDiagnostic();
+    codeEditor.setDesignArguments([]);
+    codeEditor.trackSourceRefs([]);
+    viewport.renderModule(null);
+    previewFile = undefined;
+    hasPreviewedTarget = false;
+    renderElementsPanel();
+    renderDesignArguments(null);
+    modelStatus = 'ready';
+    errorBar.hidden = true;
+    refreshViewportFeedback();
+    restoreModelStatus();
+    return;
+  }
   const following = pendingAgentFollow;
   const designContextId =
     typeof designContext === 'string' ? designContext : undefined;
@@ -1341,7 +1374,8 @@ function requestModelUpdate(delay: number): void {
   setViewportStatus('busy', 'Updating model');
   runRevision += 1;
   compiler.cancel();
-  scheduleModelRun(delay);
+  if (codeEditor.currentFile()) scheduleModelRun(delay);
+  else void runModel();
 }
 
 function selectCompiledEvaluationContext(
@@ -1484,11 +1518,12 @@ function preferredObjectSource(
   );
 }
 
-function renderDesignArguments(module: ModelModule): void {
-  const functionId = inspectedFunctionId(module);
-  const contexts = module.designArguments.filter(
-    context => context.functionId === functionId,
-  );
+function renderDesignArguments(module: ModelModule | null): void {
+  const functionId = module ? inspectedFunctionId(module) : undefined;
+  const contexts =
+    module?.designArguments.filter(
+      context => context.functionId === functionId,
+    ) ?? [];
   designArgumentsCount.textContent = String(contexts.length);
   designArgumentsFunction.textContent =
     contexts[0]?.functionName ?? 'No function context';

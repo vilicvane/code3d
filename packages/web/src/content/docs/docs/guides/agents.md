@@ -102,7 +102,8 @@ npx --yes @code3d/cli project.c3d.json fs read /model.ts
 npx --yes @code3d/cli project.c3d.json fs stat /model.ts
 ```
 
-`context` returns `data.file` and `data.cursor` (or `null`). It does not run a
+`context` returns `data.file` and `data.cursor` (or `null`). Both are `null`
+when no file is open in the App. It does not run a
 model or move any cursor. Read the returned file and its imports, retaining their
 opaque versions. Paths address the project owned by the App, including browser
 storage and connected directories. Do not edit another local copy of that project.

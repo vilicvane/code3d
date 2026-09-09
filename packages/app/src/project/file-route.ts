@@ -15,7 +15,8 @@ export function filePathFromRoute(hash: string): string | undefined {
   }
 }
 
-export function fileRoute(path: string): string {
+export function fileRoute(path: string | undefined): string {
+  if (path === undefined) return '#/';
   const encodedPath = normalizeProjectPath(path)
     .slice(1)
     .split('/')

@@ -287,7 +287,7 @@ export class CodeEditor {
     (locations: readonly AgentLocation[]) => void
   >();
   private readonly activeFileListeners = new Set<
-    (path: string, reason: ActiveFileChangeReason) => void
+    (path: string | undefined, reason: ActiveFileChangeReason) => void
   >();
   private readonly editorActivationListeners = new Set<
     (cursor: EditorCursor | undefined) => void
@@ -300,7 +300,7 @@ export class CodeEditor {
   private contentChangeOrigin: 'user' | 'tool' | 'agent' = 'user';
   private readonly sourceEditUndoGroups = new Map<string, string>();
   private readonly sourceDecoration: monaco.editor.IEditorDecorationsCollection;
-  private activePath: string;
+  private activePath: string | undefined;
   private cursorSelectionVersion = 0;
   private pointerActivatingEditor = false;
   private revision = 1;
@@ -324,16 +324,19 @@ export class CodeEditor {
   constructor(
     private readonly container: HTMLElement,
     project: ModelProject,
-    initialPath: string,
+    initialPath: string | undefined,
   ) {
-    this.activePath = normalizeProjectPath(initialPath);
+    this.activePath =
+      initialPath === undefined ? undefined : normalizeProjectPath(initialPath);
     for (const file of project.files) {
       this.addDocument(file.path, file.source);
     }
-    const active = this.requireDocument(this.activePath);
-    this.openPaths.push(this.activePath);
+    const active = this.activePath
+      ? this.requireDocument(this.activePath)
+      : undefined;
+    if (this.activePath) this.openPaths.push(this.activePath);
     this.editor = monaco.editor.create(container, {
-      model: active.model,
+      model: active?.model ?? null,
       theme: 'code3d-dark',
       automaticLayout: true,
       fontFamily: "'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace",
@@ -457,7 +460,7 @@ export class CodeEditor {
     };
   }
 
-  currentFile(): string {
+  currentFile(): string | undefined {
     return this.activePath;
   }
 
@@ -471,21 +474,26 @@ export class CodeEditor {
     return [...this.openPaths];
   }
 
-  switchFile(path: string, takeFocus = false): void {
-    const normalized = normalizeProjectPath(path);
+  switchFile(path: string | undefined, takeFocus = false): void {
+    const normalized =
+      path === undefined ? undefined : normalizeProjectPath(path);
     if (normalized === this.activePath) {
       if (takeFocus) this.editor.focus();
       return;
     }
-    const next = this.requireDocument(normalized);
-    const current = this.requireDocument(this.activePath);
-    current.viewState = this.editor.saveViewState();
+    const next = normalized ? this.requireDocument(normalized) : undefined;
+    if (this.activePath) {
+      this.requireDocument(this.activePath).viewState =
+        this.editor.saveViewState();
+    }
     this.activePath = normalized;
-    if (!this.openPaths.includes(normalized)) this.openPaths.push(normalized);
+    if (!normalized) this.openPaths.length = 0;
+    if (normalized && !this.openPaths.includes(normalized))
+      this.openPaths.push(normalized);
     this.withSuppressedCursorEvents(() => {
       this.sourceDecoration.clear();
-      this.editor.setModel(next.model);
-      if (next.viewState) this.editor.restoreViewState(next.viewState);
+      this.editor.setModel(next?.model ?? null);
+      if (next?.viewState) this.editor.restoreViewState(next.viewState);
       if (takeFocus) this.editor.focus();
     });
     this.emitActiveFile('switch');
@@ -494,7 +502,7 @@ export class CodeEditor {
   closeFile(path: string): void {
     const normalized = normalizeProjectPath(path);
     const index = this.openPaths.indexOf(normalized);
-    if (index === -1 || this.openPaths.length === 1) return;
+    if (index === -1) return;
     this.openPaths.splice(index, 1);
     if (normalized === this.activePath) {
       this.switchFile(this.openPaths[Math.max(0, index - 1)]);
@@ -545,6 +553,7 @@ export class CodeEditor {
         this.openPaths.find(candidate => candidate !== normalized) ??
         [...this.documents.keys()].find(candidate => candidate !== normalized)!;
       this.activePath = nextPath;
+      if (!this.openPaths.includes(nextPath)) this.openPaths.push(nextPath);
       this.withSuppressedCursorEvents(() => {
         this.sourceDecoration.clear();
         this.editor.setModel(this.requireDocument(nextPath).model);
@@ -563,10 +572,9 @@ export class CodeEditor {
       projectPathIsWithin(file.path, normalizedDirectory),
     );
     const replacementPaths = new Set(replacementFiles.map(file => file.path));
-    const activeDocumentReplaced = projectPathIsWithin(
-      this.activePath,
-      normalizedDirectory,
-    );
+    const activeDocumentReplaced =
+      this.activePath !== undefined &&
+      projectPathIsWithin(this.activePath, normalizedDirectory);
 
     this.sourceDecoration.clear();
     this.trackedSourceRefs.clear();
@@ -581,7 +589,7 @@ export class CodeEditor {
         replacementPaths.has(path),
     );
     this.openPaths.splice(0, this.openPaths.length, ...retainedOpenPaths);
-    if (activeDocumentReplaced) {
+    if (activeDocumentReplaced && this.activePath) {
       if (!replacementPaths.has(this.activePath)) {
         this.activePath =
           replacementFiles[0]?.path ?? [...this.documents.keys()][0]!;
@@ -864,7 +872,8 @@ export class CodeEditor {
   }
 
   runHistoryAction(action: 'undo' | 'redo'): void {
-    const model = this.activeModel();
+    const model = this.editor.getModel();
+    if (!model) return;
     if (action === 'undo') {
       if (model.canUndo()) void model.undo();
     } else if (model.canRedo()) {
@@ -874,10 +883,17 @@ export class CodeEditor {
 
   cursorSource(): EditorCursor | undefined {
     const position = this.editor.getPosition();
-    return position
+    return this.cursorAt(position);
+  }
+
+  private cursorAt(
+    position: monaco.IPosition | null | undefined,
+  ): EditorCursor | undefined {
+    const model = this.editor.getModel();
+    return position && model && this.activePath
       ? {
           file: this.activePath,
-          offset: this.activeModel().getOffsetAt(position),
+          offset: model.getOffsetAt(position),
         }
       : undefined;
   }
@@ -885,7 +901,7 @@ export class CodeEditor {
   selectedSource(): SourceRef | undefined {
     const selection = this.editor.getSelection();
     const model = this.editor.getModel();
-    if (!selection || !model) return undefined;
+    if (!selection || !model || !this.activePath) return undefined;
     return {
       file: this.activePath,
       start: model.getOffsetAt(selection.getStartPosition()),
@@ -1022,7 +1038,10 @@ export class CodeEditor {
   }
 
   onActiveFile(
-    listener: (path: string, reason: ActiveFileChangeReason) => void,
+    listener: (
+      path: string | undefined,
+      reason: ActiveFileChangeReason,
+    ) => void,
   ): () => void {
     this.activeFileListeners.add(listener);
     return () => this.activeFileListeners.delete(listener);
@@ -1048,7 +1067,10 @@ export class CodeEditor {
     cursorAt: 'start' | 'end' = 'end',
   ): void {
     this.switchFile(sourceRef.file);
-    const range = sourceRange(this.activeModel(), sourceRef);
+    const range = sourceRange(
+      this.requireDocument(sourceRef.file).model,
+      sourceRef,
+    );
     this.withSuppressedCursorEvents(() => {
       this.sourceDecoration.set([
         {
@@ -1403,10 +1425,6 @@ export class CodeEditor {
     );
   }
 
-  private activeModel(): monaco.editor.ITextModel {
-    return this.requireDocument(this.activePath).model;
-  }
-
   private requireDocument(path: string): ProjectDocument {
     const normalized = normalizeProjectPath(path);
     const document = this.documents.get(normalized);
@@ -1433,12 +1451,7 @@ export class CodeEditor {
   }
 
   private emitEditorActivation(position = this.editor.getPosition()): void {
-    const cursor = position
-      ? {
-          file: this.activePath,
-          offset: this.activeModel().getOffsetAt(position),
-        }
-      : undefined;
+    const cursor = this.cursorAt(position);
     this.editorActivationListeners.forEach(listener => listener(cursor));
   }
 
@@ -1472,10 +1485,8 @@ export class CodeEditor {
   }
 
   private emitCursorPosition(position: monaco.IPosition): void {
-    const offset = this.activeModel().getOffsetAt(position);
-    this.cursorListeners.forEach(listener =>
-      listener({file: this.activePath, offset}),
-    );
+    const cursor = this.cursorAt(position);
+    if (cursor) this.cursorListeners.forEach(listener => listener(cursor));
   }
 
   private async formatFile(
