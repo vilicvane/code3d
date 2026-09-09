@@ -46,12 +46,25 @@ import {
   openDirectoryProjectFileSystem,
 } from './project/filesystem';
 import {filePathFromRoute, fileRoute} from './project/file-route';
-import {isSourceFile, type ModelProject} from './project/project';
 import {
   listProjectEntries,
+  searchProjectEntries,
+  copyProjectWorkspace,
   readProjectTextFile,
   type ProjectEntry,
 } from './project/file-operations';
+import {
+  normalizeProjectPath,
+  isSourceFile,
+  projectDirectory as parentProjectDirectory,
+  type ModelProject,
+} from './project/project';
+import {mapProjectIO} from './project/io';
+import {BrowserPackageInstaller} from './project/browser-package-installer';
+import type {BrowserProjectFileSystem} from './project/filesystem';
+import {findPackageScope} from './project/package-manifest';
+import {ProjectPackages} from './project/project-packages';
+import {browserPackageFiles} from './project/browser-packages';
 import {
   compareTopologyIds,
   formatTopologyId,
@@ -131,23 +144,15 @@ const directoryConnected =
 const projectFileSystem = directoryConnected
   ? await openDirectoryProjectFileSystem(storedDirectoryHandle)
   : await openBrowserProjectFileSystem();
-await projectFileSystem.initialize(defaultProject);
-let initialProject = await projectFileSystem.syncDirectory(bundledExamples);
+await projectFileSystem.initialize(async () => {
+  await mapProjectIO(defaultProject.files, file =>
+    projectFileSystem.writeFile(file.path, file.source),
+  );
+});
+await projectFileSystem.syncDirectory(bundledExamples);
 const requestedFile = filePathFromRoute(window.location.hash);
 let initialFileError: unknown;
-if (
-  requestedFile &&
-  !initialProject.files.some(file => file.path === requestedFile)
-) {
-  try {
-    const source = await readProjectTextFile(projectFileSystem, requestedFile);
-    initialProject = {
-      files: [...initialProject.files, {path: requestedFile, source}],
-    };
-  } catch (error) {
-    initialFileError = error;
-  }
-}
+const initialProject: ModelProject = await loadInitialProject();
 const app = document.querySelector<HTMLDivElement>('#app');
 
 if (!app) {
@@ -163,6 +168,8 @@ app.innerHTML = `
         <span class="prototype-tag">prototype 01</span>
       </a>
       <div class="topbar-actions">
+        <button class="quiet-button" id="packages-button" type="button">Packages</button>
+        <button class="quiet-button" id="install-packages-button" type="button">Install packages</button>
         <button class="quiet-button" id="retry-save-button" type="button" hidden>Retry saving</button>
         <span class="project-location" id="project-location"></span>
         <button class="quiet-button" id="open-folder-button" type="button">Open folder</button>
@@ -361,16 +368,54 @@ dockPanels.register({
 const codeEditor = new CodeEditor(
   editorHost,
   initialProject,
-  initialFilePath(initialProject, window.location.hash),
+  initialProject.files[0]?.path,
 );
 replaceFileRoute(codeEditor.currentFile());
-const compiler = new ModelCompilerClient(projectFileSystem, language =>
-  codeEditor.setProjectLanguage(language),
+const packageInstaller = !directoryWorkspaceId
+  ? new BrowserPackageInstaller(
+      projectFileSystem as BrowserProjectFileSystem,
+      message => setViewportStatus('busy', message),
+      undefined,
+      () => {
+        void projectDirectory.refresh();
+      },
+    )
+  : undefined;
+const packageFiles = packageInstaller ?? projectFileSystem;
+const navigationPackages = new ProjectPackages(
+  packageFiles,
+  browserPackageFiles,
+);
+codeEditor.fileReader = {
+  async readFile(path) {
+    await navigationPackages.update(
+      codeEditor.project(),
+      codeEditor.currentFile() ?? '/model.ts',
+    );
+    return navigationPackages.readFile(path);
+  },
+  stat: path => navigationPackages.stat(path),
+};
+const preparePackages = async (_project: ModelProject, file: string) => {
+  if (!packageInstaller) return;
+  await agentProject.flush();
+  await packageInstaller.prepare(file);
+  const scope = await findPackageScope(projectFileSystem, file);
+  await codeEditor.refreshPackageLock(
+    normalizeProjectPath(scope.directory + '/code3d-lock.json'),
+  );
+  renderProjectNavigation();
+};
+const compiler = new ModelCompilerClient(
+  packageFiles,
+  language => codeEditor.setProjectLanguage(language),
+  preparePackages,
 );
 const retrySaveButton = requiredElement<HTMLButtonElement>('retry-save-button');
 const agentObserver = new AgentObserver(
-  projectFileSystem,
+  packageFiles,
   () => agentProject.currentRevision,
+  preparePackages,
 );
 const agentRenders = new AgentRenderHistory();
 const agentRenderView = new AgentRenderView(viewportHost, agentRenders);
@@ -386,17 +431,21 @@ const agentProject = new AgentProjectSession(
   error => showProjectIssue(error),
 );
 const projectDirectory = new ProjectTree(projectTree, {
-  async entries() {
+  async entries(directory) {
     const entries = new Map(
-      (await listProjectEntries(projectFileSystem)).map(entry => [
+      (await listProjectEntries(projectFileSystem, directory)).map(entry => [
         entry.path,
         entry,
       ]),
     );
-    for (const path of agentProject.unsavedFilePaths())
-      entries.set(path, {path, kind: 'file'} satisfies ProjectEntry);
+    for (const path of agentProject.unsavedFilePaths()) {
+      if (parentProjectDirectory(path) === directory)
+        entries.set(path, {path, kind: 'file'} satisfies ProjectEntry);
+    }
     return [...entries.values()];
   },
+  searchEntries: (cancelled, onEntries) =>
+    searchProjectEntries(projectFileSystem, cancelled, onEntries),
   onOpenFile: (path, takeFocus) => activateProjectFile(path, takeFocus),
   onOperation: operation => agentProject.changeEntries(operation),
   onBusy: busy => {
@@ -434,6 +483,43 @@ window.addEventListener('beforeunload', event => {
     event.preventDefault();
     event.returnValue = '';
   }
+});
+const packagesButton = requiredElement<HTMLButtonElement>('packages-button');
+const installPackagesButton = requiredElement<HTMLButtonElement>(
+  'install-packages-button',
+);
+packagesButton.hidden = installPackagesButton.hidden = !packageInstaller;
+packagesButton.addEventListener('click', () => {
+  void (async () => {
+    const scope = await findPackageScope(
+      projectFileSystem,
+      codeEditor.currentFile() ?? '/model.ts',
+    );
+    const path = normalizeProjectPath(scope.directory + '/package.json');
+    if (!scope.manifest)
+      codeEditor.createFile(
+        path,
+        JSON.stringify(
+          {private: true, type: 'module', dependencies: {}},
+          null,
+          2,
+        ) + '\n',
+      );
+    else await codeEditor.openFile(path);
+  })().catch(showProjectIssue);
+});
+installPackagesButton.addEventListener('click', () => {
+  void (async () => {
+    installPackagesButton.disabled = true;
+    try {
+      const file = codeEditor.currentFile() ?? '/model.ts';
+      await preparePackages(codeEditor.project(), file);
+      if (codeEditor.isModelFile(file)) await runModel();
+      else setViewportStatus('ready', 'Packages installed');
+    } finally {
+      installPackagesButton.disabled = false;
+    }
+  })().catch(showProjectIssue);
 });
 let currentModule: ModelModule | null = null;
 let currentModuleSourceVersion: number | undefined;
@@ -884,7 +970,9 @@ async function openProjectDirectory(): Promise<void> {
     const handle = await pickProjectDirectory();
     if (!handle) return;
     const target = await openDirectoryProjectFileSystem(handle);
-    await target.initialize(codeEditor.project());
+    await target.initialize(() =>
+      copyProjectWorkspace(projectFileSystem, target),
+    );
     await target.syncDirectory(bundledExamples);
     const workspaceId = await rememberProjectDirectory(handle);
     openDirectoryWorkspace(workspaceId);
@@ -958,8 +1046,11 @@ async function resetExamples(): Promise<void> {
   try {
     await agentProject.flush();
     await agentProject.update(async () => {
-      const project = await projectFileSystem.resetDirectory(bundledExamples);
-      codeEditor.replaceDirectory(project, bundledExamples.directory);
+      await projectFileSystem.resetDirectory(bundledExamples);
+      codeEditor.replaceDirectory(
+        {files: bundledExamples.files},
+        bundledExamples.directory,
+      );
       await projectDirectory.refresh();
     });
   } catch (error) {
@@ -967,19 +1058,34 @@ async function resetExamples(): Promise<void> {
   }
 }
 
-function initialFilePath(
-  project: ModelProject,
-  hash: string,
-): string | undefined {
-  if (hash === fileRoute(undefined)) return undefined;
-  const routed = filePathFromRoute(hash);
-  if (routed && project.files.some(file => file.path === routed)) return routed;
-  const paths = project.files.map(file => file.path);
-  return (
+async function loadInitialProject(): Promise<ModelProject> {
+  if (window.location.hash === fileRoute(undefined)) return {files: []};
+  if (requestedFile) {
+    try {
+      return {
+        files: [
+          {
+            path: requestedFile,
+            source: await readProjectTextFile(projectFileSystem, requestedFile),
+          },
+        ],
+      };
+    } catch (error) {
+      initialFileError = error;
+    }
+  }
+  const entries = await listProjectEntries(projectFileSystem, '/');
+  const paths = entries
+    .filter(entry => entry.kind === 'file' && isSourceFile(entry.path))
+    .map(entry => entry.path);
+  const path =
     ['/model.ts', '/index.ts'].find(path => paths.includes(path)) ??
-    paths.find(path => !path.endsWith('.d.ts')) ??
-    paths[0]!
-  );
+    paths.find(path => !/\.d\.[cm]?ts$/.test(path));
+  return {
+    files: path
+      ? [{path, source: await readProjectTextFile(projectFileSystem, path)}]
+      : [],
+  };
 }
 
 function updateFileRoute(
@@ -1062,7 +1168,10 @@ async function activateProjectFile(
   if (path && !codeEditor.fileState(path)) {
     let source: string;
     try {
-      source = await readProjectTextFile(projectFileSystem, path);
+      source = await readProjectTextFile(
+        codeEditor.fileReader ?? projectFileSystem,
+        path,
+      );
     } catch (error) {
       if (version !== fileOpenVersion) return;
       throw error;
@@ -1100,7 +1209,7 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
   const revision = ++runRevision;
   const sourceVersion = codeEditor.sourceVersion();
   const file = codeEditor.currentFile();
-  if (!file || !isSourceFile(file)) {
+  if (!file || !codeEditor.isModelFile(file)) {
     compiler.cancel();
     currentModule = null;
     currentModuleSourceVersion = undefined;

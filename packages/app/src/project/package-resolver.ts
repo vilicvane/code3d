@@ -19,7 +19,7 @@ export class ProjectPackageResolver {
   private readonly importResolver;
   private readonly requireResolver;
 
-  constructor(reader: ProjectFileReader) {
+  constructor(private readonly reader: ProjectFileReader) {
     const missing = (path: string) =>
       Object.assign(new Error(`Project file not found: ${path}`), {
         code: 'ENOENT',
@@ -93,8 +93,12 @@ export class ProjectPackageResolver {
                 : error,
             );
           else if (result === false) resolve(false);
-          else if (result) resolve(normalizeProjectPath(result));
-          else
+          else if (result) {
+            const path = normalizeProjectPath(result);
+            this.reader
+              .stat(path)
+              .then(info => resolve(info?.realPath ?? path), reject);
+          } else
             reject(
               new Error(`Could not resolve ${specifier} from ${importer}`),
             );

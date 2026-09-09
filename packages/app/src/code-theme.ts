@@ -11,16 +11,20 @@ export const code3dCodeColors = {
 export const code3dCodeFocusColors = {
   cursor: code3dCodeColors.keyword,
   currentLine: '#1a1b17',
-  relatedSymbol: '#264f78',
-  currentSymbol: '#34362f',
-  bracketMatch: '#9b7ad9',
+  relatedSymbol: '#d8ff3e1a',
+  currentSymbol: '#d8ff3e33',
+  bracketMatch: '#7f9239',
+  overviewMarker: '#d8ff3e80',
 } as const;
 
 export const code3dEditorWidgetColors = {
   accent: code3dCodeColors.keyword,
+  accentBorder: code3dCodeFocusColors.bracketMatch,
   background: '#1a1b17',
+  mutedForeground: '#a0a694',
   border: '#34362f',
   hoverBackground: '#272923',
   selectedBackground: '#303527',
-  selectionBackground: '#53651566',
+  selectionBackground: code3dCodeFocusColors.currentSymbol,
+  inactiveSelectionBackground: '#d8ff3e14',
 } as const;

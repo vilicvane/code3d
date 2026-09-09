@@ -19,6 +19,7 @@ import {
 } from '../project/file-operations';
 import {
   isSourceFile,
+  isProjectTextFile,
   projectDirectory,
   projectPathIsWithin,
   type ModelProject,
@@ -31,6 +32,7 @@ export interface AgentProjectEditor {
   currentFile(): string | undefined;
   selectedSource(): SourceRef | undefined;
   project(): ModelProject;
+  filePaths(): readonly string[];
   fileState(path: string): {content: string; version: string} | undefined;
   applyFiles(files: readonly {path: string; content: string | null}[]): void;
   moveFiles(from: string, to: string): void;
@@ -137,11 +139,11 @@ export class AgentProjectSession {
           for (const path of operation.paths) {
             await this.fileSystem.remove(path);
             const files = this.editor
-              .project()
-              .files.filter(file => projectPathIsWithin(file.path, path));
+              .filePaths()
+              .filter(file => projectPathIsWithin(file, path));
             this.acceptEditorChanges(() =>
               this.editor.applyFiles(
-                files.map(file => ({path: file.path, content: null})),
+                files.map(path => ({path, content: null})),
               ),
             );
           }
@@ -616,7 +618,8 @@ export class AgentProjectSession {
     this.acceptEditorChanges(() =>
       this.editor.applyFiles(
         files.filter(
-          file => isSourceFile(file.path) || this.editor.fileState(file.path),
+          file =>
+            isProjectTextFile(file.path) || this.editor.fileState(file.path),
         ),
       ),
     );

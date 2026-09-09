@@ -117,6 +117,8 @@ export function resolveProjectTooling(
   const host: ts.CompilerHost = {
     fileExists: fileName => sources.has(virtualFilePath(fileName)),
     readFile: fileName => sources.get(virtualFilePath(fileName)),
+    realpath: fileName =>
+      language.realPaths?.[virtualFilePath(fileName)] ?? fileName,
     getSourceFile(fileName, languageVersion) {
       const path = virtualFilePath(fileName);
       const source = sources.get(path);
@@ -146,7 +148,9 @@ export function resolveProjectTooling(
       ),
   };
   const program = ts.createProgram({
-    rootNames: project.files.map(file => normalizeProjectPath(file.path)),
+    rootNames:
+      language.rootPaths ??
+      project.files.map(file => normalizeProjectPath(file.path)),
     options: language.compilerOptions,
     host,
   });

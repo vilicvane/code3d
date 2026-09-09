@@ -116,10 +116,7 @@ test('does not treat malformed project metadata as permission to use built-ins',
     memoryFiles({'/package.json': '{broken'}),
     unavailableBuiltins,
   );
-  await assert.rejects(
-    packages.update(emptyProject),
-    /Invalid project package.json/,
-  );
+  await assert.rejects(packages.update(emptyProject), /Invalid \/package.json/);
 });
 
 test('isolates the built-in dependency closure and gives source, screws and reusable packages one core identity and type graph', async () => {

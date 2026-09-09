@@ -23,7 +23,7 @@ TypeScript, so the model never splits into code and hidden UI state.
 - Select topology, position parts, and adjust parameters directly in the
   viewport.
 - Keep every durable change in source, ready to read, diff, test, and reuse.
-- Work in your own project folder with browser-compatible npm packages.
+- Install browser-compatible npm packages in browser storage, or work in your own local project folder.
 - Export the model you are inspecting as STEP, STL, or 3MF.
 
 Code3D evaluates precise B-Rep geometry with OpenCascade and exposes typed

@@ -5,6 +5,7 @@
     "composite": true,
     "rootDir": ".",
     "outDir": "../../bld/library",
-    "tsBuildInfoFile": "../../.cache/library.tsbuildinfo"
+    "tsBuildInfoFile": "../../.cache/library.tsbuildinfo",
+    "declarationMap": true
   }
 }

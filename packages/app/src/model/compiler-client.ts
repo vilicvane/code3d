@@ -38,6 +38,7 @@ type PendingRequest = {
 export class ModelCompilerClient {
   private worker: Worker;
   private nextId = 1;
+  private preparationRevision = 0;
   private pending: PendingRequest | null = null;
   private queuedCompile?: CompileRequest;
   private runningCompile?: {
@@ -49,17 +50,25 @@ export class ModelCompilerClient {
   constructor(
     private readonly files: ProjectFileReader,
     private readonly onLanguage?: (language: ProjectLanguage) => void,
+    private readonly prepareProject?: (
+      project: ModelProject,
+      rootPath: string,
+    ) => Promise<void>,
   ) {
     this.worker = this.createWorker();
   }
 
-  compile(
+  async compile(
     project: ModelProject,
     rootPath: string,
     designContext?: DesignContext,
     onProgress?: CompilationProgress,
   ): Promise<ModelModule> {
     this.cancel();
+    const preparation = this.preparationRevision;
+    await this.prepareProject?.(project, rootPath);
+    if (preparation !== this.preparationRevision)
+      throw new Error('Compilation superseded.');
     this.exportable = undefined;
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
@@ -119,6 +128,7 @@ export class ModelCompilerClient {
   }
 
   cancel(): boolean {
+    this.preparationRevision++;
     const pending = this.pending;
     if (!pending) return false;
     this.pending = null;
@@ -169,6 +179,7 @@ export class ModelCompilerClient {
   }
 
   dispose(): void {
+    this.preparationRevision++;
     if (this.pending) {
       window.clearTimeout(this.pending.timeout);
       this.pending.reject(new Error('Project closed.'));

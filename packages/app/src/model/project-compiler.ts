@@ -81,13 +81,16 @@ export class ProjectCompiler {
     onProgress?.('loading-project');
     this.disposeGeometry();
     const changed = await this.files.refresh();
-    const packageSelectionChanged = await this.packages.update(project);
+    const packageSelectionChanged = await this.packages.update(
+      project,
+      rootPath,
+    );
     if (
       packageSelectionChanged ||
       [...changed].some(
         path =>
           path.includes('/node_modules/') ||
-          /(?:^|\/)(?:package(?:-lock)?\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|tsconfig\.json)$/.test(
+          /(?:^|\/)(?:package(?:-lock)?\.json|code3d-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|tsconfig\.json)$/.test(
             path,
           ),
       )
@@ -99,6 +102,7 @@ export class ProjectCompiler {
     const reader = this.packages;
     await Promise.all(
       [
+        normalizeProjectPath(this.packages.directory + '/code3d-lock.json'),
         '/package-lock.json',
         '/npm-shrinkwrap.json',
         '/pnpm-lock.yaml',
@@ -111,6 +115,7 @@ export class ProjectCompiler {
       reader,
       project,
       reader.packageSpecifiers,
+      rootPath,
     );
     checkCancelled();
     onLanguage?.(language);
@@ -120,6 +125,7 @@ export class ProjectCompiler {
         builder,
         this.evaluator,
         onProgress,
+        rootPath,
       ).catch(error => {
         const diagnostic = diagnosticFromError(error, 'module');
         if (diagnostic.sourceRef) throw error;

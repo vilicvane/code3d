@@ -29,10 +29,7 @@
   --agent-color-5: #d6d983;
 }
 
-* {
-  box-sizing: border-box;
-}
-
+/* Monaco widgets manage their own box sizing and scrollbars. */
 :where(
   :not(
     .monaco-editor,
@@ -43,6 +40,7 @@
     .monaco-component *
   )
 ) {
+  box-sizing: border-box;
   scrollbar-width: thin;
   scrollbar-color: #41473b transparent;
 
@@ -51,8 +49,9 @@
   }
 }
 
-/* Stop the inherited color at Monaco roots, including detached widgets. */
+/* Match VS Code's UI font baseline and keep App scrollbar colors out of Monaco. */
 :where(.monaco-editor, .monaco-diff-editor, .monaco-component) {
+  font-size: 13px;
   scrollbar-color: auto;
 }
 

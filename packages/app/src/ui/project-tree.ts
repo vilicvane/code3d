@@ -7,8 +7,10 @@ import {
   type FileTreeDirectoryHandle,
 } from '@pierre/trees';
 import type {AgentLocation} from '../editor';
+import {mapProjectIO} from '../project/io';
 import {
   topLevelProjectPaths,
+  isProtectedProjectPath,
   type ProjectEntry,
   type ProjectEntryOperation,
 } from '../project/file-operations';
@@ -19,7 +21,11 @@ import {
 } from '../project/project';
 
 type ProjectTreeOptions = Readonly<{
-  entries(): Promise<readonly ProjectEntry[]>;
+  entries(directory: string): Promise<readonly ProjectEntry[]>;
+  searchEntries(
+    cancelled: () => boolean,
+    onEntries: (entries: ProjectEntry[]) => void,
+  ): Promise<void>;
   onOpenFile(path: string, takeFocus: boolean): Promise<void>;
   onOperation(operation: ProjectEntryOperation): Promise<void>;
   onBusy(busy: boolean): void;
@@ -35,6 +41,15 @@ export class ProjectTree {
   private busy = false;
   private dragging = false;
   private refreshVersion = 0;
+  private refreshRequested = false;
+  private refreshing?: Promise<void>;
+  private readonly loadedDirectories = new Set<string>();
+  private readonly loadingDirectories = new Map<string, Promise<void>>();
+  private readonly failedDirectories = new Set<string>();
+  private expandedCheckQueued = false;
+  private searchVersion = 0;
+  private indexing = false;
+  private indexed = false;
   private clipboard?: {kind: 'copy' | 'move'; paths: readonly string[]};
   private readonly status = document.createElement('div');
   private rootMenu?: HTMLElement;
@@ -64,9 +79,20 @@ export class ProjectTree {
           return;
         const path = normalizeProjectPath(paths[0]);
         if (this.entries.get(path)?.kind === 'file') this.openFile(path, false);
+        else {
+          this.failedDirectories.delete(path);
+          void this.loadDirectory(path).catch(error => this.showError(error));
+        }
+      },
+      onSearchChange: value => {
+        if (this.synchronizing) return;
+        if (value === null || value === '') {
+          this.searchVersion++;
+          this.indexing = false;
+        } else void this.indexEntries();
       },
       renaming: {
-        canRename: () => !this.busy,
+        canRename: item => !this.busy && !isProtectedProjectPath(item.path),
         onError: message => this.showError(new Error(message)),
         onRename: ({sourcePath, destinationPath}) => {
           // Pierre moves its model synchronously after this callback returns.
@@ -85,8 +111,11 @@ export class ProjectTree {
         },
       },
       dragAndDrop: {
-        canDrag: () => !this.busy,
-        canDrop: () => !this.busy,
+        canDrag: paths =>
+          !this.busy && paths.every(path => !isProtectedProjectPath(path)),
+        canDrop: context =>
+          !this.busy &&
+          !isProtectedProjectPath(context.target.directoryPath ?? '/'),
         onDropError: message => this.showError(new Error(message)),
         onDropComplete: ({draggedPaths, target}) => {
           const directory = normalizeProjectPath(target.directoryPath ?? '/');
@@ -108,8 +137,22 @@ export class ProjectTree {
         },
       },
       unsafeCSS: `
-        [data-file-tree-virtualized-scroll] { scrollbar-width: thin; scrollbar-color: #41473b transparent; }
+        [data-file-tree-virtualized-scroll] {
+          overflow: auto;
+          scrollbar-width: thin;
+          scrollbar-color: #41473b transparent;
+        }
         [data-file-tree-virtualized-scroll]:hover { scrollbar-color: #59614f transparent; }
+        [data-file-tree-virtualized-list] { width: max-content; min-width: 100%; }
+        [data-item-section="content"] {
+          flex: none;
+          max-width: none;
+          overflow: visible;
+          text-overflow: clip;
+        }
+        /* Give every path segment its full width, including middle-truncated file names. */
+        [data-item-section="content"] [data-truncate-container] { min-width: max-content; }
+        [data-item-section="content"] [data-truncate-marker-cell] { visibility: hidden; }
         [data-file-tree-search-container] {
           padding: 8px var(--trees-padding-inline) 6px;
           margin: 0;
@@ -149,6 +192,25 @@ export class ProjectTree {
       `,
     });
     this.tree.render({fileTreeContainer: container});
+    this.tree.subscribe(() => {
+      if (this.synchronizing || this.expandedCheckQueued) return;
+      this.expandedCheckQueued = true;
+      queueMicrotask(() => {
+        this.expandedCheckQueued = false;
+        if (this.tree.getSearchValue()) return;
+        const expanded = [...this.entries.values()].filter(entry => {
+          const item = this.tree.getItem(treePath(entry));
+          return (
+            isDirectoryItem(item) &&
+            item.isExpanded() &&
+            !this.failedDirectories.has(entry.path)
+          );
+        });
+        void mapProjectIO(expanded, entry =>
+          this.loadDirectory(entry.path),
+        ).catch(error => this.showError(error));
+      });
+    });
     container.addEventListener(
       'dragstart',
       () => {
@@ -193,37 +255,150 @@ export class ProjectTree {
     });
   }
 
-  async refresh(): Promise<void> {
+  refresh(): Promise<void> {
+    this.refreshRequested = true;
+    return (this.refreshing ??= this.refreshLoop().finally(() => {
+      this.refreshing = undefined;
+    }));
+  }
+
+  private async refreshLoop(): Promise<void> {
+    while (this.refreshRequested) {
+      this.refreshRequested = false;
+      await this.refreshEntries();
+    }
+  }
+
+  private async refreshEntries(): Promise<void> {
+    const expanded = [...this.entries.values()]
+      .filter(entry => {
+        const item = this.tree.getItem(treePath(entry));
+        return isDirectoryItem(item) && item.isExpanded();
+      })
+      .map(entry => entry.path);
     const version = ++this.refreshVersion;
+    this.searchVersion++;
+    this.indexing = false;
+    this.indexed = false;
+    this.loadedDirectories.clear();
+    this.loadingDirectories.clear();
+    this.failedDirectories.clear();
+    this.entries.clear();
     try {
-      const entries = await this.options.entries();
-      if (version !== this.refreshVersion) return;
-      const expanded = entries
-        .filter(entry => {
-          const item = this.tree.getItem(treePath(entry));
-          return isDirectoryItem(item) && item.isExpanded();
-        })
-        .map(treePath);
-      const nextPaths = new Set(entries.map(treePath));
-      const selected = this.tree
-        .getSelectedPaths()
-        .filter(path => nextPaths.has(path));
-      this.entries = new Map(entries.map(entry => [entry.path, entry]));
-      this.synchronizing = true;
-      try {
-        this.tree.resetPaths(entries.map(treePath), {
-          initialExpandedPaths: expanded,
-        });
-        if (selected.length) {
-          for (const path of this.tree.getSelectedPaths())
-            this.tree.getItem(path)?.deselect();
-          for (const path of selected) this.tree.getItem(path)?.select();
-        } else this.syncActiveFile();
-      } finally {
-        this.synchronizing = false;
-      }
+      await this.loadDirectory('/', version);
+      await mapProjectIO(expanded, async path => {
+        await this.revealDirectory(path, version);
+        if (version !== this.refreshVersion) return;
+        const item = this.tree.getItem(path.slice(1) + '/');
+        if (isDirectoryItem(item)) item.expand();
+      });
+      await this.revealActiveFile(version);
+      if (this.tree.getSearchValue()) await this.indexEntries();
     } catch (error) {
-      this.showError(error);
+      if (version === this.refreshVersion) this.showError(error);
+    }
+  }
+
+  private loadDirectory(
+    path: string,
+    version = this.refreshVersion,
+  ): Promise<void> {
+    if (version !== this.refreshVersion || this.loadedDirectories.has(path))
+      return Promise.resolve();
+    const pending = this.loadingDirectories.get(path);
+    if (pending) return pending;
+    const loading = this.options
+      .entries(path)
+      .then(entries => {
+        if (version !== this.refreshVersion) return;
+        for (const entry of entries) this.entries.set(entry.path, entry);
+        this.loadedDirectories.add(path);
+        this.renderEntries();
+      })
+      .catch(error => {
+        if (version === this.refreshVersion) this.failedDirectories.add(path);
+        throw error;
+      })
+      .finally(() => {
+        if (this.loadingDirectories.get(path) === loading)
+          this.loadingDirectories.delete(path);
+      });
+    this.loadingDirectories.set(path, loading);
+    return loading;
+  }
+
+  private async revealDirectory(
+    path: string,
+    version = this.refreshVersion,
+  ): Promise<void> {
+    await this.loadDirectory('/', version);
+    const segments = path.split('/').filter(Boolean);
+    for (let depth = 1; depth <= segments.length; depth++) {
+      if (version !== this.refreshVersion) return;
+      const directory = '/' + segments.slice(0, depth).join('/');
+      if (this.entries.get(directory)?.kind !== 'directory') return;
+      await this.loadDirectory(directory, version);
+    }
+  }
+
+  private renderEntries(): void {
+    const entries = [...this.entries.values()];
+    const expanded = entries
+      .filter(entry => {
+        const item = this.tree.getItem(treePath(entry));
+        return isDirectoryItem(item) && item.isExpanded();
+      })
+      .map(treePath);
+    const nextPaths = new Set(entries.map(treePath));
+    const selected = this.tree
+      .getSelectedPaths()
+      .filter(path => nextPaths.has(path));
+    this.synchronizing = true;
+    try {
+      const search = this.tree.getSearchValue();
+      this.tree.resetPaths(entries.map(treePath), {
+        initialExpandedPaths: expanded,
+      });
+      // Pierre preserves the query on reset but needs it reapplied to index new paths.
+      if (search) {
+        this.tree.setSearch('');
+        this.tree.setSearch(search);
+      }
+      if (selected.length) {
+        for (const path of this.tree.getSelectedPaths())
+          this.tree.getItem(path)?.deselect();
+        for (const path of selected) this.tree.getItem(path)?.select();
+      } else this.syncActiveFile();
+    } finally {
+      this.synchronizing = false;
+    }
+  }
+
+  private async indexEntries(): Promise<void> {
+    if (this.indexing || this.indexed) return;
+    this.indexing = true;
+    const version = ++this.searchVersion;
+    const cancelled = () => version !== this.searchVersion;
+    try {
+      await this.options.searchEntries(cancelled, entries => {
+        const added = entries.filter(entry => !this.entries.has(entry.path));
+        for (const entry of entries) this.entries.set(entry.path, entry);
+        if (!added.length) return;
+        this.synchronizing = true;
+        try {
+          // Mutations update Pierre's active search index; resetPaths does not.
+          this.tree.batch(
+            added.map(entry => ({type: 'add', path: treePath(entry)})),
+          );
+        } finally {
+          this.synchronizing = false;
+        }
+      });
+      if (!cancelled()) this.indexed = true;
+    } catch (error) {
+      if (!cancelled()) this.showError(error);
+    } finally {
+      if (!cancelled()) this.indexing = false;
     }
   }
 
@@ -231,12 +406,13 @@ export class ProjectTree {
     if (path === this.activePath) return;
     this.activePath = path;
     if (this.busy) return;
-    if (
-      path &&
-      this.tree.getSelectedPaths().length === 1 &&
-      this.tree.getSelectedPaths()[0] === path.slice(1)
-    )
-      return;
+    void this.revealActiveFile().catch(error => this.showError(error));
+  }
+
+  private async revealActiveFile(version = this.refreshVersion): Promise<void> {
+    const path = this.activePath;
+    if (path) await this.revealDirectory(projectDirectory(path), version);
+    if (version !== this.refreshVersion || path !== this.activePath) return;
     this.synchronizing = true;
     try {
       this.syncActiveFile();
@@ -281,7 +457,8 @@ export class ProjectTree {
     kind: ProjectEntry['kind'],
     directory = this.targetDirectory(),
   ): Promise<void> {
-    if (this.busy) return;
+    if (this.busy || isProtectedProjectPath(directory)) return;
+    await this.loadDirectory(directory);
     const name = await this.askName(kind, directory);
     if (name === undefined) return;
     const path = normalizeProjectPath(`${directory}/${name}`);
@@ -345,14 +522,15 @@ export class ProjectTree {
   }
 
   private copy(kind: 'copy' | 'move', paths = this.selectedPaths()): void {
-    if (!paths.length) return;
+    if (!paths.length || paths.some(isProtectedProjectPath)) return;
     this.clipboard = {kind, paths};
     this.tree.render({fileTreeContainer: this.container});
   }
 
   private async paste(directory = this.targetDirectory()): Promise<void> {
     const clipboard = this.clipboard;
-    if (!clipboard || this.busy) return;
+    if (!clipboard || this.busy || isProtectedProjectPath(directory)) return;
+    await this.loadDirectory(directory);
     const reserved = new Set(this.entries.keys());
     const entries = clipboard.paths
       .map(from => {
@@ -385,7 +563,8 @@ export class ProjectTree {
   }
 
   private async remove(paths = this.selectedPaths()): Promise<void> {
-    if (!paths.length || this.busy) return;
+    if (!paths.length || this.busy || paths.some(isProtectedProjectPath))
+      return;
     if (
       !window.confirm(
         `Delete ${paths.map(basename).join(', ')}? Directories include all their contents. This cannot be undone.`,
@@ -438,38 +617,39 @@ export class ProjectTree {
       rule.setAttribute('role', 'separator');
       menu.append(rule);
     };
-    action('New file', () => void this.create('file', directory));
-    action('New folder', () => void this.create('directory', directory));
+    const mutable =
+      paths.length > 0 && paths.every(path => !isProtectedProjectPath(path));
+    const writableDirectory = !isProtectedProjectPath(directory);
+    action(
+      'New file',
+      () => void this.create('file', directory),
+      writableDirectory,
+    );
+    action(
+      'New folder',
+      () => void this.create('directory', directory),
+      writableDirectory,
+    );
     separator();
     action(
       'Rename',
       () => this.tree.startRenaming(item!.path),
-      paths.length === 1,
+      mutable && paths.length === 1,
       'F2',
     );
-    action(
-      'Cut',
-      () => this.copy('move', paths),
-      !!paths.length,
-      commandKey + 'X',
-    );
-    action(
-      'Copy',
-      () => this.copy('copy', paths),
-      !!paths.length,
-      commandKey + 'C',
-    );
+    action('Cut', () => this.copy('move', paths), mutable, commandKey + 'X');
+    action('Copy', () => this.copy('copy', paths), mutable, commandKey + 'C');
     action(
       'Paste',
       () => void this.paste(directory),
-      !!this.clipboard,
+      !!this.clipboard && writableDirectory,
       commandKey + 'V',
     );
     separator();
     action(
       'Delete',
       () => void this.remove(paths),
-      !!paths.length,
+      mutable,
       'Del',
     ).dataset.danger = '';
     menu.addEventListener('keydown', event => {

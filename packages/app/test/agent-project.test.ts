@@ -95,19 +95,14 @@ function fixture(
       disk.set(to, disk.get(from)!);
       disk.delete(from);
     },
-    async initialize() {
-      return editor.project();
-    },
-    async syncDirectory() {
-      return editor.project();
-    },
-    async resetDirectory() {
-      return editor.project();
-    },
+    async initialize() {},
+    async syncDirectory() {},
+    async resetDirectory() {},
     async createDirectory() {},
   };
   const editor: AgentProjectEditor = {
     currentFile: () => '/model.ts',
+    filePaths: () => [...documents.keys()],
     selectedSource: () => undefined,
     project: () => ({
       files: [...documents].map(([path, value]) => ({
@@ -441,7 +436,7 @@ test('create, move and delete validate targets and retain an editable project', 
   );
 });
 
-test('non-source text files can be read, versioned and updated without entering the source project', async () => {
+test('JSON files share the editor revision and agent save path', async () => {
   const f = fixture();
   assert.ok(
     (
@@ -461,7 +456,7 @@ test('non-source text files can be read, versioned and updated without entering 
       })
     ).ok,
   );
-  assert.ok(!f.documents.has('/data.json'));
+  assert.equal(f.documents.get('/data.json')?.content, '{"size":20}');
 });
 
 test('model observation failures preserve the successful file acceptance result', async () => {

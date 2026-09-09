@@ -43,6 +43,7 @@ export class ProjectRuntime {
     builder: ProjectBuilder,
     evaluator: ModuleEvaluator,
     onProgress?: CompilationProgress,
+    rootPath = '/model.ts',
   ): Promise<ProjectRuntime> {
     onProgress?.('loading-runtime');
     const resolve = async (specifier: string, importer?: string) => {
@@ -51,9 +52,9 @@ export class ProjectRuntime {
         throw new Error(`Required runtime entry is disabled: ${specifier}`);
       return path;
     };
-    const toolingPath = await resolve('@code3d/core/tooling');
-    const corePath = await resolve('@code3d/core');
-    const interopPath = await resolve('@code3d/core/replicad');
+    const toolingPath = await resolve('@code3d/core/tooling', rootPath);
+    const corePath = await resolve('@code3d/core', rootPath);
+    const interopPath = await resolve('@code3d/core/replicad', rootPath);
     const replicadPath = await resolve('replicad', toolingPath);
     const loaderPath = await resolve('@code3d/opencascade', toolingPath);
     const wasmPath = await resolve('@code3d/opencascade/wasm', toolingPath);

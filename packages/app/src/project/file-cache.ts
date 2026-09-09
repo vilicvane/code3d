@@ -54,7 +54,8 @@ export class ProjectFileCache implements ProjectFileReader {
         ]);
         if (
           previous?.kind !== next?.kind ||
-          previous?.version !== next?.version
+          previous?.version !== next?.version ||
+          previous?.realPath !== next?.realPath
         ) {
           changed.add(path);
           this.entries.set(path, {info: Promise.resolve(next)});
