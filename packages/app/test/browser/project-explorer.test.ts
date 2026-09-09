@@ -3,6 +3,7 @@ import {after, before, test, type TestContext} from 'node:test';
 import {chromium, type Browser, type Page} from 'playwright-core';
 
 declare const window: Window & {
+  explorerAccess: {lists: string[]; reads: string[]};
   explorerApp: {
     codeEditor: import('../../src/editor.ts').CodeEditor;
     projectFileSystem: import('../../src/project/filesystem.ts').ProjectFileSystem;
@@ -211,6 +212,92 @@ test(
 );
 
 test(
+  'horizontal scrolling leaves the final virtual row fully visible',
+  {timeout: 90_000},
+  async t => {
+    const page = await open(t);
+    const names = Array.from(
+      {length: 80},
+      (_, index) =>
+        `z-${String(index).padStart(3, '0')}-a-long-file-name-that-needs-horizontal-scrolling.json`,
+    );
+    await page.evaluate(async names => {
+      const {projectFileSystem, projectDirectory} = window.explorerApp;
+      await Promise.all(
+        names.map(name => projectFileSystem.writeFile('/' + name, '{}')),
+      );
+      await projectDirectory.refresh();
+    }, names);
+    await page.evaluate(() => document.fonts.ready);
+    const scroll = page.locator('[data-file-tree-virtualized-scroll]');
+    const lastName = names.at(-1)!;
+    const assertLastRowVisible = async () => {
+      await row(page, lastName).waitFor();
+      // Let Pierre process the scroll event and clamp its virtual window first.
+      await page.evaluate(
+        () =>
+          new Promise<void>(resolve =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          ),
+      );
+      const bounds = await scroll.evaluate((element, lastName) => {
+        const lastRow = element.querySelector<HTMLElement>(
+          `[data-item-path="${lastName}"]`,
+        )!;
+        const rect = element.getBoundingClientRect();
+        const rowRect = lastRow.getBoundingClientRect();
+        return {
+          top: rowRect.top,
+          bottom: rowRect.bottom,
+          visibleTop: rect.top + element.clientTop,
+          visibleBottom: rect.top + element.clientTop + element.clientHeight,
+        };
+      }, lastName);
+      assert.ok(bounds.top >= bounds.visibleTop - 1, JSON.stringify(bounds));
+      assert.ok(
+        bounds.bottom <= bounds.visibleBottom + 1,
+        JSON.stringify(bounds),
+      );
+    };
+    assert.ok(
+      await scroll.evaluate(
+        element => element.scrollWidth > element.clientWidth,
+      ),
+    );
+    await scroll.evaluate(element => {
+      element.scrollLeft = element.scrollWidth;
+      element.scrollTop = element.scrollHeight;
+    });
+    await assertLastRowVisible();
+    await row(page, lastName).click();
+    await page.keyboard.press('Home');
+    await page.keyboard.press('End');
+    await assertLastRowVisible();
+    await row(page, lastName).click();
+    await active(page, '/' + lastName);
+    const search = page.locator('[data-file-tree-search-input]');
+    await search.fill('README.md');
+    await row(page, 'README.md').waitFor();
+    assert.equal(
+      await scroll.evaluate(
+        element => element.scrollWidth > element.clientWidth,
+      ),
+      false,
+    );
+    await search.fill('');
+    await scroll.evaluate(element => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await assertLastRowVisible();
+    await page.setViewportSize({width: 780, height: 700});
+    await scroll.evaluate(element => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await assertLastRowVisible();
+  },
+);
+
+test(
   'folder rename, cut and drag keep open documents, tabs and agent locations aligned',
   {timeout: 90_000},
   async t => {
@@ -334,7 +421,7 @@ test(
       const fs = await openDirectoryProjectFileSystem(
         await navigator.storage.getDirectory(),
       );
-      await fs.initialize({files: []});
+      await fs.initialize(async () => {});
       await fs.createDirectory('/assets/empty');
       await fs.writeFile('/assets/data.bin', new Uint8Array([0, 255, 128, 42]));
       await fs.rename('/assets', '/renamed');
@@ -452,5 +539,196 @@ test(
       }),
       ['# Project\n', '{"size": 3}\n'],
     );
+  },
+);
+
+test(
+  'directory names load on expansion and search finds files in unopened folders',
+  {timeout: 90_000},
+  async t => {
+    const page = await open(t);
+    await page.evaluate(async () => {
+      const {projectFileSystem: fs, projectDirectory} = window.explorerApp;
+      await fs.writeFile(
+        '/unopened/deep/needle.ts',
+        'export const needle = 1;',
+      );
+      await fs.writeFile('/unrelated/deep/other.ts', 'export const other = 2;');
+      const access = (window.explorerAccess = {
+        lists: [] as string[],
+        reads: [] as string[],
+      });
+      const list = fs.list.bind(fs),
+        read = fs.readFile.bind(fs);
+      fs.list = path => {
+        access.lists.push(path);
+        return list(path);
+      };
+      fs.readFile = path => {
+        access.reads.push(path);
+        return read(path);
+      };
+      await projectDirectory.refresh();
+    });
+    assert.deepEqual(await page.evaluate(() => window.explorerAccess.lists), [
+      '/',
+    ]);
+    assert.deepEqual(
+      await page.evaluate(() =>
+        window.explorerApp.codeEditor.project().files.map(file => file.path),
+      ),
+      ['/model.ts'],
+    );
+    await row(page, 'unopened').click();
+    // Compact chains can include already expanded ancestors in one row.
+    await page.getByRole('treeitem', {name: /deep/}).waitFor();
+    assert.equal(
+      await page.evaluate(() =>
+        window.explorerAccess.lists.some(path => path.startsWith('/unrelated')),
+      ),
+      false,
+    );
+    assert.equal(
+      await page.evaluate(() =>
+        window.explorerAccess.reads.some(path => path.startsWith('/unopened')),
+      ),
+      false,
+    );
+    await page.getByRole('button', {name: 'Search files', exact: true}).click();
+    await page.locator('[data-file-tree-search-input]').fill('other.ts');
+    await row(page, 'other.ts').waitFor();
+    assert.equal(
+      await page.evaluate(() =>
+        window.explorerAccess.reads.includes('/unrelated/deep/other.ts'),
+      ),
+      false,
+    );
+    await row(page, 'other.ts').click();
+    await active(page, '/unrelated/deep/other.ts');
+  },
+);
+
+test(
+  'VS Code default excludes keep npm sources and workspace metadata visible and read-only',
+  {timeout: 90_000},
+  async t => {
+    const page = await open(t);
+    await page.evaluate(async () => {
+      const {projectFileSystem: fs, projectDirectory} = window.explorerApp;
+      for (const name of ['.git', '.svn', '.hg'])
+        await fs.createDirectory('/' + name);
+      for (const name of ['.DS_Store', 'Thumbs.db', 'model.ts.crswap'])
+        await fs.writeFile('/' + name, 'hidden');
+      await fs.writeFile('/.vscode/settings.json', '{}');
+      await fs.writeFile('/.code3d/state.json', '{}');
+      await fs.writeFile(
+        '/node_modules/demo/index.ts',
+        'export const answer = 42;',
+      );
+      await fs.writeFile('/node_modules/demo/.DS_Store', 'hidden');
+      await fs.writeFile('/.gitignore', 'node_modules\n.vscode\n');
+      await projectDirectory.refresh();
+    });
+    for (const name of [
+      '.git',
+      '.svn',
+      '.hg',
+      '.DS_Store',
+      'Thumbs.db',
+      'model.ts.crswap',
+    ]) {
+      assert.equal(await row(page, name).count(), 0, name);
+    }
+    await row(page, '.gitignore').waitFor();
+    await row(page, '.vscode').waitFor();
+    await row(page, 'node_modules').click();
+    await page.getByRole('treeitem', {name: /demo/}).click();
+    await row(page, 'index.ts').click();
+    await active(page, '/node_modules/demo/index.ts');
+    assert.equal(await row(page, '.DS_Store').count(), 0);
+    assert.equal(
+      await page.evaluate(
+        () => window.explorerApp.codeEditor.editor.getRawOptions().readOnly,
+      ),
+      true,
+    );
+    await row(page, 'index.ts').click({button: 'right'});
+    assert.equal(
+      await page
+        .getByRole('menuitem', {name: 'Delete', exact: true})
+        .isDisabled(),
+      true,
+    );
+    await page.keyboard.press('Escape');
+    await row(page, '.code3d').click();
+    await row(page, 'state.json').click();
+    await active(page, '/.code3d/state.json');
+    assert.equal(
+      await page.evaluate(
+        () => window.explorerApp.codeEditor.editor.getRawOptions().readOnly,
+      ),
+      true,
+    );
+  },
+);
+
+test(
+  'compiled dependencies stay unopened until a source interaction needs their document',
+  {timeout: 90_000},
+  async t => {
+    const page = await open(t);
+    await page.evaluate(async () => {
+      const {codeEditor, agentProject} = window.explorerApp;
+      codeEditor.applyFiles([
+        {
+          path: '/model.ts',
+          content:
+            "import {box} from '@code3d/core';\nimport {size} from './src/part.ts';\nexport default box(size, 2, 3);\n",
+        },
+      ]);
+      await agentProject.flush();
+    });
+    await page.waitForFunction(() =>
+      window.explorerApp.codeEditor
+        .readSource({file: '/model.ts', start: 0, end: 1000})
+        .includes('./src/part.ts'),
+    );
+    await page.getByText('Ready', {exact: true}).waitFor();
+    await page.waitForFunction(() => {
+      const editor = window.explorerApp.codeEditor;
+      return (
+        editor.editor.getValue().includes('./src/part.ts') &&
+        document
+          .querySelector('#viewport-status')
+          ?.getAttribute('data-state') === 'ready'
+      );
+    });
+    assert.equal(
+      await page.evaluate(() =>
+        window.explorerApp.codeEditor.fileState('/src/part.ts'),
+      ),
+      undefined,
+    );
+    const result = await page.evaluate(async () => {
+      const {codeEditor, agentProject} = window.explorerApp;
+      const ref = {file: '/src/part.ts', start: 20, end: 21};
+      const before = codeEditor.readSource(ref);
+      const edited = codeEditor.applySourceEdits(codeEditor.sourceVersion(), [
+        {sourceRef: ref, expectedText: '3', text: '6'},
+      ]);
+      codeEditor.revealSource(ref);
+      await agentProject.flush();
+      return {
+        before,
+        edited,
+        contents: codeEditor.fileState(ref.file)?.content,
+      };
+    });
+    assert.deepEqual(result, {
+      before: '3',
+      edited: true,
+      contents: 'export const size = 6;\n',
+    });
+    await active(page, '/src/part.ts');
   },
 );

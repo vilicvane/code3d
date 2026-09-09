@@ -43,10 +43,19 @@ for the minimum and maximum widths. Press `Esc` during a drag to cancel it.
 
 ## Manage project files
 
-The explorer shows files of every type and empty directories. It skips
-`.code3d`, `.git`, and `node_modules` directories at every depth; other dotfiles
-remain visible. It does not apply `.gitignore`. Single-child directory chains
-share a compact row, and large directories use a scrolling window of rows.
+The explorer shows files of every type and empty directories. Its default
+excludes match VS Code in the browser: `.git`, `.svn`, `.hg`, `.DS_Store`,
+`Thumbs.db`, and names ending in `.crswap` at every depth. `node_modules`,
+`.code3d`, `.vscode`, and other dotfiles remain visible. It does not apply
+`.gitignore` or workspace `files.exclude` settings. Installed package files and
+Code3D workspace metadata open read-only.
+
+Folder contents load when you expand them; opening a workspace does not walk
+its entire directory tree. Search discovers names in unopened folders without
+reading their contents. Single-child directory chains share a compact row once
+loaded, and large directories use a scrolling window of rows. Folder paths and
+file names remain complete; scroll horizontally to read names wider than the
+sidebar. The search box and explorer toolbar stay in place.
 
 Use **New file** or **New folder** in the explorer header or right-click menu.
 New entries go in the focused folder, or beside the focused file. Right-click

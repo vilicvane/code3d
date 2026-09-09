@@ -1,4 +1,5 @@
 import type {ProjectFileSystem} from './filesystem';
+import {mapProjectIO} from './io';
 import type {ProjectFileReader} from './file-reader';
 import {
   normalizeProjectPath,
@@ -15,32 +16,101 @@ export type ProjectEntryOperation =
     }>
   | Readonly<{kind: 'remove'; paths: readonly string[]}>;
 
-export const hiddenProjectDirectories = new Set([
-  '.code3d',
+// VS Code files.exclude defaults, including the browser-only swap file rule.
+const excludedEntryNames = new Set([
   '.git',
-  'node_modules',
+  '.svn',
+  '.hg',
+  '.DS_Store',
+  'Thumbs.db',
 ]);
+const generatedDirectories = new Set(['.code3d', '.git', 'node_modules']);
 export const projectTextLimit = 8 * 1024 * 1024;
 
-/** Enumerate names and explicit directories without reading file contents. */
+export function isExcludedProjectEntry(name: string): boolean {
+  return excludedEntryNames.has(name) || name.endsWith('.crswap');
+}
+
+export function isProtectedProjectPath(path: string): boolean {
+  return path.split('/').some(part => generatedDirectories.has(part));
+}
+
+/** List immediate visible children without reading contents or descending. */
 export async function listProjectEntries(
   fileSystem: ProjectFileSystem,
+  directory: string,
 ): Promise<ProjectEntry[]> {
-  const entries: ProjectEntry[] = [];
-  const visit = async (directory: string): Promise<void> => {
-    for (const entry of await fileSystem.list(directory)) {
-      if (
-        entry.kind === 'directory' &&
-        hiddenProjectDirectories.has(entry.name)
-      )
-        continue;
-      const path = normalizeProjectPath(`${directory}/${entry.name}`);
-      entries.push({path, kind: entry.kind});
-      if (entry.kind === 'directory') await visit(path);
-    }
-  };
-  await visit('/');
-  return entries;
+  return (await fileSystem.list(directory))
+    .filter(entry => !isExcludedProjectEntry(entry.name))
+    .map(entry => ({
+      path: normalizeProjectPath(`${directory}/${entry.name}`),
+      kind: entry.kind,
+    }));
+}
+
+/** Search indexes names on demand. Canonical directory identities break npm link cycles. */
+export async function searchProjectEntries(
+  fileSystem: ProjectFileSystem,
+  cancelled: () => boolean,
+  onEntries: (entries: ProjectEntry[]) => void,
+): Promise<void> {
+  const visited = new Set<string>();
+  let pending = ['/'];
+  while (pending.length && !cancelled()) {
+    const children = await mapProjectIO(pending, async directory => {
+      if (cancelled()) return [];
+      const info = await fileSystem.stat(directory);
+      if (!info || info.kind !== 'directory') return [];
+      const identity = info.realPath ?? directory;
+      if (visited.has(identity)) return [];
+      visited.add(identity);
+      return listProjectEntries(fileSystem, directory);
+    });
+    if (cancelled()) return;
+    const entries = children.flat();
+    onEntries(entries);
+    pending = entries
+      .filter(entry => entry.kind === 'directory')
+      .map(entry => entry.path);
+  }
+}
+
+/** Copy all user files, including unopened and binary files, into an empty workspace. */
+export async function copyProjectWorkspace(
+  source: ProjectFileSystem,
+  target: ProjectFileSystem,
+): Promise<void> {
+  await copyProjectFiles(source, target, '/', '/');
+}
+
+async function copyProjectFiles(
+  source: ProjectFileSystem,
+  target: ProjectFileSystem,
+  from: string,
+  to: string,
+): Promise<void> {
+  let pending = [{from, to}];
+  while (pending.length) {
+    pending = (
+      await mapProjectIO(pending, async ({from, to}) => {
+        const info = await source.stat(from);
+        if (!info) throw new Error(`Project entry not found: ${from}`);
+        if (info.kind === 'file') {
+          const bytes = await source.readFile(from);
+          if (!bytes) throw new Error(`Project entry not found: ${from}`);
+          await target.writeFile(to, bytes);
+          return [];
+        }
+        await target.createDirectory(to);
+        return (await source.list(from))
+          .filter(entry => !generatedDirectories.has(entry.name))
+          .map(entry => ({
+            from: normalizeProjectPath(`${from}/${entry.name}`),
+            to: normalizeProjectPath(`${to}/${entry.name}`),
+          }));
+      })
+    ).flat();
+  }
 }
 
 export async function readProjectTextFile(
@@ -82,10 +152,7 @@ export function topLevelProjectPaths(paths: readonly string[]): string[] {
 }
 
 function assertMutablePath(path: string): void {
-  if (
-    path === '/' ||
-    path.split('/').some(part => hiddenProjectDirectories.has(part))
-  ) {
+  if (path === '/' || isProtectedProjectPath(path)) {
     throw new Error(`Protected project path: ${path}`);
   }
 }
@@ -132,33 +199,14 @@ export async function checkProjectEntryOperation(
   }
 }
 
-/** Copy project entries, leaving hidden state and installed packages to be restored. */
+/** Copy project entries, leaving generated state and installed packages to be restored. */
 export async function copyProjectEntry(
   fileSystem: ProjectFileSystem,
   from: string,
   to: string,
 ): Promise<void> {
-  const copy = async (source: string, target: string): Promise<void> => {
-    const info = await fileSystem.stat(source);
-    if (!info) throw new Error(`Project entry not found: ${source}`);
-    if (info.kind === 'directory') {
-      await fileSystem.createDirectory(target);
-      for (const entry of await fileSystem.list(source)) {
-        if (
-          entry.kind === 'directory' &&
-          hiddenProjectDirectories.has(entry.name)
-        )
-          continue;
-        await copy(`${source}/${entry.name}`, `${target}/${entry.name}`);
-      }
-    } else {
-      const bytes = await fileSystem.readFile(source);
-      if (!bytes) throw new Error(`Project entry not found: ${source}`);
-      await fileSystem.writeFile(target, bytes);
-    }
-  };
   try {
-    await copy(from, to);
+    await copyProjectFiles(fileSystem, fileSystem, from, to);
   } catch (error) {
     // Only this operation's new destination may be removed; the source stays untouched.
     try {

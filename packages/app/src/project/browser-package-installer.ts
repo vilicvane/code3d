@@ -21,11 +21,23 @@ const packagePath = (lock: BrowserPackageLock, url: string) => {
   const pkg = lock.packages[url];
   return (
     '.code3d/' +
-    encodeURIComponent(pkg.name + '@' + pkg.version) +
+    pkg.name.replace('/', '+') +
+    '@' +
+    pkg.version +
     '/node_modules/' +
     pkg.name
   );
 };
+/** The installation cache depends on both the lock and its filesystem layout. */
+function installationMarker(lock: BrowserPackageLock): string {
+  return (
+    JSON.stringify({
+      lock,
+      paths: Object.keys(lock.packages).map(url => packagePath(lock, url)),
+    }) + '\n'
+  );
+}
+
 function relativePath(from: string, to: string): string {
   const left = normalizeProjectPath(from).split('/').filter(Boolean);
   const right = normalizeProjectPath(to).split('/').filter(Boolean);
@@ -43,6 +55,7 @@ export class BrowserPackageInstaller implements ProjectFileReader {
     private readonly files: BrowserProjectFileSystem,
     private readonly progress: (message: string) => void = () => {},
     private readonly createRegistry = () => new NpmRegistry(),
+    private readonly installed: () => void = () => {},
   ) {}
 
   async prepare(file: string): Promise<void> {
@@ -103,6 +116,7 @@ export class BrowserPackageInstaller implements ProjectFileReader {
       oldLockSource === undefined
         ? undefined
         : parsePackageLock(oldLockSource, lockPath);
+    const oldMarker = lock && installationMarker(lock);
     const registry = this.createRegistry();
     if (
       !lock ||
@@ -115,13 +129,14 @@ export class BrowserPackageInstaller implements ProjectFileReader {
     )
       lock = await resolvePackageLock(manifest, registry, lock, this.progress);
     const serialized = JSON.stringify(lock, null, 2) + '\n';
+    const nextMarker = installationMarker(lock);
     const modules = pathAt(directory, 'node_modules');
     const scratch = pathAt(directory, '.code3d/package-install');
     const staged = scratch + '/node_modules';
     const backup = scratch + '/previous';
     let marker = await this.files.readFile(modules + '/.code3d-install.json');
     if (await this.files.stat(backup)) {
-      if (!marker || decodeProjectFile(marker) !== oldLockSource) {
+      if (!marker || decodeProjectFile(marker) !== oldMarker) {
         if (await this.files.stat(modules)) await this.files.remove(modules);
         await this.files.rename(backup, modules);
         marker = await this.files.readFile(modules + '/.code3d-install.json');
@@ -129,7 +144,7 @@ export class BrowserPackageInstaller implements ProjectFileReader {
     }
     if (
       marker &&
-      decodeProjectFile(marker) === serialized &&
+      decodeProjectFile(marker) === nextMarker &&
       oldLockSource === serialized
     )
       return;
@@ -183,7 +198,7 @@ export class BrowserPackageInstaller implements ProjectFileReader {
           );
         }
       }
-      await this.files.writeFile(staged + '/.code3d-install.json', serialized);
+      await this.files.writeFile(staged + '/.code3d-install.json', nextMarker);
       await this.files.writeFile(scratch + '/lock.json', serialized);
       if (
         decodeProjectFile(
@@ -210,5 +225,6 @@ export class BrowserPackageInstaller implements ProjectFileReader {
     } finally {
       if (await this.files.stat(scratch)) await this.files.remove(scratch);
     }
+    this.installed();
   }
 }

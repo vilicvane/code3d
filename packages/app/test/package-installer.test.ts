@@ -110,15 +110,9 @@ async function diskFiles() {
       await mkdir(path.dirname(disk(file)), {recursive: true});
       await symlink(target, disk(file));
     },
-    async initialize(seed) {
-      return seed;
-    },
-    async syncDirectory(template) {
-      return {files: template.files};
-    },
-    async resetDirectory(template) {
-      return {files: template.files};
-    },
+    async initialize() {},
+    async syncDirectory() {},
+    async resetDirectory() {},
   };
   return {files, dispose: () => rm(directory, {recursive: true, force: true})};
 }
@@ -535,6 +529,75 @@ test('an interrupted swap restores the prior directory before reuse', async () =
       registry.registry,
     ).prepare('/model.ts');
     assert.ok(await disk.files.readFile('/node_modules/shared/index.js'));
+  } finally {
+    await disk.dispose();
+  }
+});
+
+test('readable scoped package paths replace an outdated installation without changing the lock', async () => {
+  const disk = await diskFiles();
+  try {
+    const registry = await registryFixture();
+    await registry.add('@demo/tool', '1.0.0');
+    await disk.files.writeFile(
+      '/package.json',
+      JSON.stringify({dependencies: {'@demo/tool': '1'}}),
+    );
+    const installer = new BrowserPackageInstaller(
+      disk.files,
+      () => {},
+      registry.registry,
+    );
+    await installer.prepare('/model.ts');
+    const readable = '/node_modules/.code3d/@demo+tool@1.0.0';
+    const encoded = '/node_modules/.code3d/%40demo%2Ftool%401.0.0';
+    const entry = '/node_modules/@demo/tool/index.js';
+    assert.equal(
+      (await disk.files.stat(entry))?.realPath,
+      readable + '/node_modules/@demo/tool/index.js',
+    );
+    const lock = await disk.files.readFile('/code3d-lock.json');
+    assert.ok(lock);
+    // Reproduce a persisted installation created before readable filesystem names.
+    await disk.files.rename(readable, encoded);
+    await disk.files.remove('/node_modules/@demo/tool');
+    await disk.files.symlink(
+      '../.code3d/%40demo%2Ftool%401.0.0/node_modules/@demo/tool',
+      '/node_modules/@demo/tool',
+    );
+    await disk.files.writeFile('/node_modules/.code3d-install.json', lock);
+    assert.ok(await disk.files.readFile(entry));
+    const requests = registry.requests.length;
+    registry.setCorrupt(true);
+    await assert.rejects(
+      installer.prepare('/model.ts'),
+      /Integrity check failed/,
+    );
+    assert.ok(
+      await disk.files.readFile(entry),
+      'failed reconstruction leaves the old installation usable',
+    );
+    assert.deepEqual(await disk.files.readFile('/code3d-lock.json'), lock);
+    registry.setCorrupt(false);
+    await installer.prepare('/model.ts');
+    assert.equal(await disk.files.stat(encoded), undefined);
+    assert.equal(
+      (await disk.files.stat(entry))?.realPath,
+      readable + '/node_modules/@demo/tool/index.js',
+    );
+    assert.deepEqual(await disk.files.readFile('/code3d-lock.json'), lock);
+    assert.ok(
+      registry.requests.slice(requests).every(url => url.endsWith('.tgz')),
+      'reconstruction uses locked archives without resolving versions again',
+    );
+    registry.setOffline(true);
+    const after = registry.requests.length;
+    await installer.prepare('/model.ts');
+    assert.equal(
+      registry.requests.length,
+      after,
+      'the current layout reopens without downloads',
+    );
   } finally {
     await disk.dispose();
   }

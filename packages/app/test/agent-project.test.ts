@@ -95,19 +95,14 @@ function fixture(
       disk.set(to, disk.get(from)!);
       disk.delete(from);
     },
-    async initialize() {
-      return editor.project();
-    },
-    async syncDirectory() {
-      return editor.project();
-    },
-    async resetDirectory() {
-      return editor.project();
-    },
+    async initialize() {},
+    async syncDirectory() {},
+    async resetDirectory() {},
     async createDirectory() {},
   };
   const editor: AgentProjectEditor = {
     currentFile: () => '/model.ts',
+    filePaths: () => [...documents.keys()],
     selectedSource: () => undefined,
     project: () => ({
       files: [...documents].map(([path, value]) => ({

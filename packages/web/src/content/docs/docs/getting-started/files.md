@@ -64,6 +64,12 @@ versions. Cached, verified archives can restore a missing installation without
 resolving versions again. A failed download or installation preserves the
 previous installation and lock.
 
+Packages are linked from `node_modules/<package>` to a version-specific directory
+such as `node_modules/.code3d/just-range@4.2.0/node_modules/just-range`.
+Scoped packages use readable names such as `@scope+name@1.0.0` in this store.
+The explorer and editor show filesystem names; URL escaping such as `%40` for
+`@` is only used when representing a path in a URL.
+
 Copying a project directory in the explorer preserves its `package.json` and
 lock, and skips `node_modules`, `.code3d` and `.git` directories. Opening the
 copied model restores its locked packages. Moving a directory keeps all its
@@ -89,8 +95,15 @@ project files and do not run as models.
 ## Local folder
 
 Choose **Open folder** to connect the App to a real directory. An empty
-directory receives the current workspace. An existing TypeScript project is
-opened as it is, along with Code3D's managed examples.
+directory receives the current workspace, including unopened files and binary
+assets. An existing directory keeps its files and gains Code3D's managed examples.
+
+Opening a folder reads only workspace metadata and the initial file. Imports,
+assets, type definitions, and other files load when needed; independent filesystem
+requests run in parallel. The App restores the file in the URL, or opens a root
+`model.ts`, `index.ts`, or another root source file. If there is no root source,
+select a file from the explorer. Unopened directories are listed when expanded,
+and filename search discovers additional directory names on demand.
 
 Edits in the App write directly to that directory. If you change a file in
 another editor, choose **Reload folder** to read the changes. Automatic

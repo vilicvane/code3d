@@ -26,10 +26,14 @@ test('serialized package and project URIs share the literal TypeScript identity'
     ['file:///workspace/%E5%B0%BA%E5%AF%B8%20box.ts', '/workspace/尺寸 box.ts'],
     ['file:///workspace/hash%23query%3F.ts', '/workspace/hash#query?.ts'],
     [
-      'file:///workspace/node_modules/.code3d/just-range%25404.2.0/index.d.ts',
-      '/workspace/node_modules/.code3d/just-range%404.2.0/index.d.ts',
+      'file:///workspace/examples/percent%2540/index.d.ts',
+      '/workspace/examples/percent%40/index.d.ts',
     ],
     ['file:///workspace/literal%2523%253F.ts', '/workspace/literal%23%3F.ts'],
+    [
+      'file:///workspace/node_modules/.code3d/just-range%404.2.0/index.d.ts',
+      '/workspace/node_modules/.code3d/just-range@4.2.0/index.d.ts',
+    ],
     ['/lib.es5.d.ts', '/lib.es5.d.ts'],
   ] as const) {
     assert.equal(typeScriptFileName(serialized), literal);
@@ -92,7 +96,7 @@ test('document highlights normalize every searched URI without mutating the requ
 });
 
 test('definition and reference results serialize literal paths without decoding percent names', async () => {
-  const path = '/workspace/node_modules/.code3d/just-range%404.2.0/index.d.ts';
+  const path = '/workspace/examples/percent%40/index.d.ts';
   const entry = {fileName: path, textSpan: {start: 17, length: 5}};
   const requests = typeScriptWorkerRequests({
     async getDefinitionAtPosition() {
@@ -111,7 +115,7 @@ test('definition and reference results serialize literal paths without decoding 
   ]) {
     assert.equal(
       result[0].fileName,
-      'file:///workspace/node_modules/.code3d/just-range%25404.2.0/index.d.ts',
+      'file:///workspace/examples/percent%2540/index.d.ts',
     );
     assert.equal(typeScriptFileName(result[0].fileName), path);
   }

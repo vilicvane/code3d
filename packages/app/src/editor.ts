@@ -42,7 +42,7 @@ import type {SourceRef} from '@code3d/core/tooling';
 import {
   normalizeProjectPath,
   isSourceFile,
-  isReadonlyPackageFile,
+  isReadonlyProjectFile,
   projectPathIsWithin,
   type ModelProject,
 } from './project/project';
@@ -306,7 +306,7 @@ export class CodeEditor {
     return (
       isSourceFile(path) &&
       !/\.d\.[cm]?ts$/.test(path) &&
-      !isReadonlyPackageFile(path)
+      !isReadonlyProjectFile(path)
     );
   }
 
@@ -569,7 +569,7 @@ export class CodeEditor {
   project(): ModelProject {
     return {
       files: [...this.documents.values()]
-        .filter(document => !isReadonlyPackageFile(document.path))
+        .filter(document => !isReadonlyProjectFile(document.path))
         .map(({path, model}) => ({path, source: model.getValue()}))
         .sort((left, right) => left.path.localeCompare(right.path)),
     };
@@ -580,9 +580,9 @@ export class CodeEditor {
   }
 
   filePaths(): readonly string[] {
-    return [...this.documents.keys()]
-      .filter(path => !path.includes('/node_modules/'))
-      .sort((left, right) => left.localeCompare(right));
+    return [...this.documents.keys()].sort((left, right) =>
+      left.localeCompare(right),
+    );
   }
 
   openedFiles(): readonly string[] {
@@ -604,7 +604,7 @@ export class CodeEditor {
   private get readOnly(): boolean {
     return (
       this.operationReadOnly ||
-      (!!this.activePath && isReadonlyPackageFile(this.activePath))
+      (!!this.activePath && isReadonlyProjectFile(this.activePath))
     );
   }
 
@@ -728,6 +728,7 @@ export class CodeEditor {
       projectPathIsWithin(file.path, normalizedDirectory),
     );
     const replacementPaths = new Set(replacementFiles.map(file => file.path));
+    const loadedPaths = new Set(this.documents.keys());
     const activeDocumentReplaced =
       this.activePath !== undefined &&
       projectPathIsWithin(this.activePath, normalizedDirectory);
@@ -737,7 +738,14 @@ export class CodeEditor {
     [...this.documents.keys()]
       .filter(path => projectPathIsWithin(path, normalizedDirectory))
       .forEach(path => this.removeDocument(path));
-    replacementFiles.forEach(file => this.addDocument(file.path, file.source));
+    for (const path of this.navigationFiles.keys()) {
+      if (projectPathIsWithin(path, normalizedDirectory))
+        this.navigationFiles.delete(path);
+    }
+    for (const file of replacementFiles) {
+      this.navigationFiles.set(file.path, file.source);
+      if (loadedPaths.has(file.path)) this.addDocument(file.path, file.source);
+    }
 
     const retainedOpenPaths = this.openPaths.filter(
       path =>
@@ -947,6 +955,10 @@ export class CodeEditor {
   }
 
   async inspectType(ref: SourceRef): Promise<CursorTypeInfo | null> {
+    if (!this.sourceDocument(ref.file)) {
+      const bytes = await this.fileReader?.readFile(ref.file);
+      if (bytes) this.addDocument(ref.file, decodeProjectFile(bytes));
+    }
     const model = this.requireDocument(ref.file).model;
     const version = this.revision;
     const worker = await projectTypeScriptWorker(
@@ -1095,7 +1107,7 @@ export class CodeEditor {
     if (this.revision !== baseVersion || edits.length === 0) return false;
     const grouped = groupEditsByFile(edits);
     for (const [path, fileEdits] of grouped) {
-      const model = this.documents.get(path)?.model;
+      const model = this.sourceDocument(path)?.model;
       if (!model || !validEdits(model, fileEdits)) return false;
     }
     this.withSuppressedCursorEvents(() =>
@@ -1458,7 +1470,7 @@ export class CodeEditor {
       path: normalized,
       model,
       subscription: model.onDidChangeContent(event => {
-        if (isReadonlyPackageFile(normalized)) return;
+        if (isReadonlyProjectFile(normalized)) return;
         const origin: ContentChangeOrigin = event.isUndoing
           ? 'undo'
           : event.isRedoing
@@ -1486,6 +1498,7 @@ export class CodeEditor {
   }
 
   private removeDocument(path: string): void {
+    this.navigationFiles.delete(path);
     const document = this.requireDocument(path);
     this.pendingToolFormats.delete(path);
     this.sourceEditUndoGroups.delete(path);
@@ -1583,10 +1596,20 @@ export class CodeEditor {
     );
   }
 
-  private requireDocument(path: string): ProjectDocument {
+  /** Promote an already compiled source only when an interaction needs a document. */
+  private sourceDocument(path: string): ProjectDocument | undefined {
     const normalized = normalizeProjectPath(path);
-    const document = this.documents.get(normalized);
-    if (!document) throw new Error(`Project file not found: ${normalized}`);
+    if (!this.documents.has(normalized)) {
+      const source = this.navigationFiles.get(normalized);
+      if (source !== undefined) this.addDocument(normalized, source);
+    }
+    return this.documents.get(normalized);
+  }
+
+  private requireDocument(path: string): ProjectDocument {
+    const document = this.sourceDocument(path);
+    if (!document)
+      throw new Error(`Project file not found: ${normalizeProjectPath(path)}`);
     return document;
   }
 
@@ -1739,8 +1762,8 @@ export class CodeEditor {
     edits: readonly monaco.editor.IIdentifiedSingleEditOperation[],
     undoGroup?: string,
   ): void {
-    if (isReadonlyPackageFile(path))
-      throw new Error('Installed package files are read-only.');
+    if (isReadonlyProjectFile(path))
+      throw new Error('This project file is read-only.');
     const model = this.requireDocument(path).model;
     if (
       undoGroup &&

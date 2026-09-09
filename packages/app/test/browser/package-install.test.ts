@@ -119,8 +119,9 @@ test(
       window.packageApp.codeEditor.currentFile()!,
     );
     assert.ok(
-      definitionPath.includes('just-range%404.2.0'),
-      'the filesystem percent escape stays literal',
+      definitionPath.includes('just-range@4.2.0') &&
+        !definitionPath.includes('%'),
+      'package directory names retain readable @ characters',
     );
     await page.reload();
     await page.waitForFunction(
@@ -251,7 +252,7 @@ test(
     );
 
     await page.evaluate(() =>
-      window.packageApp.codeEditor.switchFile('/a/model.ts'),
+      window.packageApp.codeEditor.openFile('/a/model.ts'),
     );
     await ready();
     const before = requests.length;
@@ -284,7 +285,7 @@ test(
     );
     await page.unroute('https://registry.npmjs.org/**');
     await page.evaluate(() =>
-      window.packageApp.codeEditor.switchFile('/b/model.ts'),
+      window.packageApp.codeEditor.openFile('/b/model.ts'),
     );
     await page.waitForFunction(
       async () =>
