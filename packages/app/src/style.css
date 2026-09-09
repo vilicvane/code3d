@@ -126,9 +126,17 @@ input[type='number']::-webkit-outer-spin-button {
 }
 
 .brand {
+  justify-self: start;
   gap: 10px;
+  color: inherit;
   font-weight: 600;
   letter-spacing: -0.02em;
+  text-decoration: none;
+}
+
+.brand:focus-visible {
+  outline: 1px solid var(--acid);
+  outline-offset: 4px;
 }
 
 .brand-mark {
