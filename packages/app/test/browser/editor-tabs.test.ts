@@ -193,11 +193,15 @@ test(
     await page
       .getByRole('button', {name: 'New file', exact: true})
       .click({trial: true});
-    page.once('dialog', dialog => void dialog.accept('/new.ts'));
     await page.getByRole('button', {name: 'New file', exact: true}).click();
-    assert.equal(
-      await page.evaluate(() => window.tabsApp.codeEditor.currentFile()),
-      '/new.ts',
+    const dialog = page.getByRole('dialog', {name: 'New file', exact: true});
+    const directory = (await dialog.locator('p').textContent())!.slice(3);
+    const newPath = directory === '/' ? '/new.ts' : directory + '/new.ts';
+    await dialog.getByRole('textbox', {name: 'Name'}).fill('new.ts');
+    await dialog.getByRole('button', {name: 'Create', exact: true}).click();
+    await page.waitForFunction(
+      path => window.tabsApp.codeEditor.currentFile() === path,
+      newPath,
     );
     assert.equal(await page.locator('#editor-empty-state').isVisible(), false);
   },

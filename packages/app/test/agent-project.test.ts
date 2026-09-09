@@ -79,7 +79,12 @@ function fixture(
     async writeFile(path, content) {
       if (failing.has(path)) throw new Error('Disk denied write.');
       writes.push(path);
-      disk.set(path, content);
+      disk.set(
+        path,
+        typeof content === 'string'
+          ? content
+          : new TextDecoder().decode(content),
+      );
     },
     async remove(path) {
       if (failing.has(path)) throw new Error('Disk denied removal.');
@@ -111,6 +116,18 @@ function fixture(
       })),
     }),
     fileState: path => documents.get(path),
+    moveFiles(from, to) {
+      for (const [path, document] of [...documents])
+        if (path === from || path.startsWith(from + '/')) {
+          documents.delete(path);
+          documents.set(to + path.slice(from.length), document);
+          session.recordEditorChange({
+            kind: 'rename',
+            from: path,
+            to: to + path.slice(from.length),
+          });
+        }
+    },
     applyFiles(files) {
       for (const file of files) {
         if (file.content === null) {
@@ -358,6 +375,8 @@ test('ambiguous post-change cursor rejects file writes, while a new-file cursor 
 
 test('partial persistence preserves pending contents and explicit retry saves them', async () => {
   const f = fixture();
+  const entryUpdates: string[] = [];
+  f.session.onEntriesChange(reason => entryUpdates.push(reason));
   const model = await f.read('/model.ts');
   const lib = await f.read('/lib.ts');
   f.failing.add('/lib.ts');
@@ -376,11 +395,14 @@ test('partial persistence preserves pending contents and explicit retry saves th
   assert.equal((await f.read('/lib.ts')).content, 'export const value = 6;');
   assert.equal((await f.read('/lib.ts')).saved, false);
   assert.equal(f.disk.get('/model.ts'), 'const model = 5;');
+  assert.deepEqual(f.session.unsavedFilePaths(), ['/lib.ts']);
+  assert.deepEqual(entryUpdates, ['save']);
   await assert.rejects(f.session.flush());
   f.failing.clear();
   await f.session.retrySaves();
   assert.equal(f.disk.get('/lib.ts'), 'export const value = 6;');
   assert.equal(f.session.hasUnsaved, false);
+  assert.deepEqual(f.session.unsavedFilePaths(), []);
 });
 
 test('external disk changes are detected even when timestamp and byte length agree', async () => {
@@ -464,4 +486,108 @@ test('model observation failures preserve the successful file acceptance result'
   assert.ok(!result.ok && result.error.code === 'model_failed');
   assert.equal((result.error.details as {saved: boolean}).saved, true);
   assert.equal(f.disk.get('/model.ts'), 'const model = 0;');
+});
+
+test('explorer moves wait for queued saves and do not enqueue duplicate editor writes', async () => {
+  const f = fixture();
+  let entriesChanged = 0;
+  f.session.onEntriesChange(() => entriesChanged++);
+  f.edit('/model.ts', 'const model = 42;');
+  await f.session.changeEntries({
+    kind: 'move',
+    entries: [{from: '/model.ts', to: '/renamed.ts'}],
+  });
+  await f.session.flush();
+  assert.equal(f.disk.get('/renamed.ts'), 'const model = 42;');
+  assert.equal(f.documents.get('/renamed.ts')?.content, 'const model = 42;');
+  assert.equal(f.disk.has('/model.ts'), false);
+  assert.equal(f.documents.has('/model.ts'), false);
+  assert.deepEqual(f.writes, ['/model.ts']);
+  assert.equal(entriesChanged, 1);
+});
+
+test('explorer preflight rejects an entire batch before overwriting a destination', async () => {
+  const f = fixture();
+  await assert.rejects(
+    f.session.changeEntries({
+      kind: 'move',
+      entries: [
+        {from: '/model.ts', to: '/new.ts'},
+        {from: '/lib.ts', to: '/model.ts'},
+      ],
+    }),
+    /already exists/,
+  );
+  assert.deepEqual([...f.disk.keys()], ['/model.ts', '/lib.ts']);
+  assert.deepEqual([...f.documents.keys()], ['/model.ts', '/lib.ts']);
+});
+
+test('a partial filesystem failure keeps completed moves aligned and remaining sources intact', async () => {
+  const f = fixture();
+  const rename = f.session.fileSystem.rename.bind(f.session.fileSystem);
+  f.session.fileSystem.rename = (from, to) => {
+    if (from === '/lib.ts') return Promise.reject(new Error('Move denied'));
+    return rename(from, to);
+  };
+  let entriesChanged = 0;
+  f.session.onEntriesChange(() => entriesChanged++);
+  await assert.rejects(
+    f.session.changeEntries({
+      kind: 'move',
+      entries: [
+        {from: '/model.ts', to: '/moved.ts'},
+        {from: '/lib.ts', to: '/library.ts'},
+      ],
+    }),
+    /Move denied/,
+  );
+  assert.equal(f.disk.has('/model.ts'), false);
+  assert.equal(f.documents.has('/model.ts'), false);
+  assert.equal(f.disk.get('/moved.ts'), f.documents.get('/moved.ts')?.content);
+  assert.equal(f.disk.get('/lib.ts'), f.documents.get('/lib.ts')?.content);
+  assert.equal(f.disk.has('/library.ts'), false);
+  assert.equal(entriesChanged, 1);
+  await f.session.flush();
+});
+
+test('unsaved edits block explorer deletion until saving succeeds', async () => {
+  const f = fixture();
+  f.failing.add('/model.ts');
+  f.edit('/model.ts', 'const model = 99;');
+  await assert.rejects(f.session.flush(), /unsaved/);
+  await assert.rejects(
+    f.session.changeEntries({kind: 'remove', paths: ['/model.ts']}),
+    /Save pending/,
+  );
+  assert.equal(f.documents.get('/model.ts')?.content, 'const model = 99;');
+  assert.equal(f.disk.get('/model.ts'), 'const model = 1;');
+  f.failing.clear();
+  await f.session.retrySaves();
+  await f.session.changeEntries({
+    kind: 'remove',
+    paths: ['/model.ts', '/lib.ts'],
+  });
+  assert.equal(f.disk.size, 0);
+  assert.equal(f.documents.size, 0);
+});
+
+test('agent changes update open non-source documents and allow removing the last source', async () => {
+  const f = fixture();
+  f.disk.set('/README.md', '# Before');
+  f.documents.set('/README.md', {content: '# Before', version: '1'});
+  const version = (await f.read('/README.md')).version;
+  const changed = await f.apply({
+    files: [{path: '/README.md', version, content: '# After'}],
+  });
+  assert.equal(changed.ok, true);
+  assert.equal(f.documents.get('/README.md')?.content, '# After');
+  const files = await Promise.all(
+    ['/model.ts', '/lib.ts'].map(async path => ({
+      path,
+      version: (await f.read(path)).version,
+      content: null,
+    })),
+  );
+  assert.equal((await f.apply({files})).ok, true);
+  assert.deepEqual([...f.disk.keys()], ['/README.md']);
 });

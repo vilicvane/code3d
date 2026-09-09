@@ -5,6 +5,8 @@ import {after, before, test} from 'node:test';
 import {chromium} from 'playwright-core';
 declare const window: Window & {
   layoutEditor: import('../../src/editor.ts').CodeEditor;
+  layoutFiles: import('../../src/project/filesystem.ts').ProjectFileSystem;
+  layoutTree: import('../../src/ui/project-tree.ts').ProjectTree;
   pendingLayoutObservers: (() => void)[];
   pauseLayoutObserver: boolean;
   ResizeObserver: typeof ResizeObserver;
@@ -67,7 +69,9 @@ async function fixture(t: TestContext, {controlledResize = false} = {}) {
     const response = await route.fetch();
     await route.fulfill({
       response,
-      body: (await response.text()) + '\nwindow.layoutEditor = codeEditor;\n',
+      body:
+        (await response.text()) +
+        '\nwindow.layoutEditor = codeEditor; window.layoutFiles = projectFileSystem; window.layoutTree = projectDirectory;\n',
     });
   });
   await page.goto(process.env.CODE3D_TEST_URL!);
@@ -127,23 +131,32 @@ test(
     await waitWidth(page, 284, explorer);
     await waitWidth(page, codeWidth);
     // The divider must leave the file tree's adjacent native scrollbar usable.
-    await page.evaluate(() => {
-      const tree = document.querySelector('#project-tree')!;
-      for (let index = 0; index < 65; index++) {
-        const row = document.createElement('div');
-        row.className = 'project-tree-item';
-        row.textContent = `file-${index}.ts`;
-        tree.append(row);
-      }
+    await page.evaluate(async () => {
+      for (let index = 0; index < 65; index++)
+        await window.layoutFiles.writeFile(
+          `/file-${index}.ts`,
+          '// layout fixture',
+        );
+      await window.layoutTree.refresh();
     });
-    const treeRect = (await page.locator('#project-tree').boundingBox())!;
+    const scroll = page.locator(
+      '#project-tree [data-file-tree-virtualized-scroll]',
+    );
+    await scroll.evaluate(node => {
+      node.scrollTop = 0;
+    });
+    const treeRect = (await scroll.boundingBox())!;
     const scrollX = treeRect.x + treeRect.width - 6;
     await page.mouse.move(scrollX, treeRect.y + 40);
     await page.mouse.down();
     await page.mouse.move(scrollX, treeRect.y + 160, {steps: 5});
     await page.mouse.up();
     await page.waitForFunction(
-      () => document.querySelector('#project-tree')!.scrollTop > 0,
+      () =>
+        document
+          .querySelector('#project-tree')!
+          .shadowRoot!.querySelector('[data-file-tree-virtualized-scroll]')!
+          .scrollTop > 0,
     );
     await waitWidth(page, 284, explorer);
     assert.equal(

@@ -3,9 +3,10 @@ title: Using the App
 description: Navigate between source expressions, model objects, and visual tools.
 ---
 
-The App places the project files, TypeScript editor, and viewport beside one
-another. The active file is the execution root. Open any source file to preview
-the models it produces.
+The App places the project files, text editor, and viewport beside one
+another. An active TypeScript or JavaScript file is the execution root. Open a
+source file to preview the models it produces; other text files open without
+running a model.
 
 You can keep editing while a model is building. The App cancels the older
 revision and builds the latest one, reusing completed geometry calculations.
@@ -38,6 +39,42 @@ narrow screens.
 You can also focus **Resize file explorer** or **Resize code editor** with
 `Tab` and use `←` or `→`; hold `Shift` for larger steps, or use `Home` and `End`
 for the minimum and maximum widths. Press `Esc` during a drag to cancel it.
+
+## Manage project files
+
+The explorer shows files of every type and empty directories. It skips
+`.code3d`, `.git`, and `node_modules` directories at every depth; other dotfiles
+remain visible. It does not apply `.gitignore`. Single-child directory chains
+share a compact row, and large directories use a scrolling window of rows.
+
+Use **New file** or **New folder** in the explorer header or right-click menu.
+New entries go in the focused folder, or beside the focused file. Right-click
+an entry for **Rename**, **Cut**, **Copy**, **Paste**, and **Delete**. Drag selected
+entries onto a folder to move them. `Ctrl/Cmd` selects additional entries;
+`Shift` selects a range. With the explorer focused, use `F2` to rename,
+`Delete` to delete, and `Ctrl/Cmd+C`, `X`, or `V` for the project file clipboard.
+Use **Search files** or `Ctrl/Cmd+F` to find paths; `Esc` leaves search or cancels
+an inline rename. Arrow keys navigate the tree, and `Enter` or a double-click
+puts the selected text file's editor in focus.
+
+UTF-8 text files up to 8 MiB open in the editor. Markdown, JSON, CSS, HTML and
+YAML have language highlighting; unknown text formats use plain text. Binary
+files can be moved, copied and deleted, but do not open as text. Copies preserve
+file bytes and empty folders. Pasting a copy beside an existing name generates
+a name such as `part copy.ts`; moves reject occupied destinations.
+
+Changes save to the project's current storage. Renaming or moving a folder
+updates its open tabs and agent locations, but does not rewrite import paths.
+If an operation fails, the explorer shows the error and reloads the actual
+directory state. A batch may have completed some entries before a storage
+failure. Unsaved text must be saved successfully before moving or deleting
+entries. Use **Refresh files** to reread directory names after external changes;
+open documents keep their current text. Unsaved new files remain visible in the
+tree. **Reload folder** also reloads file contents after saving pending edits.
+
+Deleting every file leaves an empty project. You can create a new file there;
+refreshing does not restore files you deleted. Closing every tab also leaves
+the editor empty, while preserving the project's files.
 
 ## Move through a model
 

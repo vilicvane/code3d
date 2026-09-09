@@ -52,6 +52,7 @@ export function projectPathIsWithin(path: string, directory: string): boolean {
   const normalizedPath = normalizeProjectPath(path);
   const normalizedDirectory = normalizeProjectPath(directory);
   return (
+    normalizedDirectory === '/' ||
     normalizedPath === normalizedDirectory ||
     normalizedPath.startsWith(`${normalizedDirectory}/`)
   );

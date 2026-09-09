@@ -1,5 +1,6 @@
 import {configureSingle, fs} from '@zenfs/core';
 import {IndexedDB} from '@zenfs/dom';
+import {hiddenProjectDirectories} from './file-operations';
 import {
   DirectoryFileReader,
   decodeProjectFile,
@@ -19,7 +20,6 @@ const browserManifestPath = '/code3d-project.json';
 const browserStoreName = 'code3d-project-v1';
 const directoryProjectRoot = '/';
 const directoryManifestPath = '/.code3d/project.json';
-const ignoredDirectoryNames = new Set(['.code3d', '.git', 'node_modules']);
 
 type ProjectManifest = Readonly<{
   version: 2;
@@ -48,7 +48,11 @@ type ProjectFileOperations = {
     path: string,
     options: {throwIfNoEntry: false},
   ): Promise<unknown | undefined>;
-  writeFile(path: string, source: string, encoding: 'utf8'): Promise<unknown>;
+  writeFile(
+    path: string,
+    source: string | Uint8Array,
+    encoding: 'utf8',
+  ): Promise<unknown>;
 };
 
 export interface ProjectFileSystem extends ProjectFileReader {
@@ -58,7 +62,7 @@ export interface ProjectFileSystem extends ProjectFileReader {
   initialize(seed: ModelProject): Promise<ModelProject>;
   syncDirectory(template: ProjectDirectoryTemplate): Promise<ModelProject>;
   resetDirectory(template: ProjectDirectoryTemplate): Promise<ModelProject>;
-  writeFile(path: string, source: string): Promise<void>;
+  writeFile(path: string, source: string | Uint8Array): Promise<void>;
   createDirectory(path: string): Promise<void>;
   rename(from: string, to: string): Promise<void>;
   remove(path: string): Promise<void>;
@@ -151,7 +155,7 @@ class ProjectStore implements ProjectFileSystem {
     await this.files.mkdir(this.projectRoot, {recursive: true});
     const sourceFiles = await this.readSourceTree(this.projectRoot);
     const manifest = await this.readManifest();
-    if (sourceFiles.length === 0) {
+    if (!manifest && sourceFiles.length === 0) {
       for (const file of seed.files) {
         await this.writeFile(file.path, file.source);
       }
@@ -203,7 +207,7 @@ class ProjectStore implements ProjectFileSystem {
     return this.load();
   }
 
-  async writeFile(path: string, source: string): Promise<void> {
+  async writeFile(path: string, source: string | Uint8Array): Promise<void> {
     const diskPath = this.toDiskPath(normalizeProjectPath(path));
     await this.files.mkdir(projectDirectory(diskPath), {recursive: true});
     await this.files.writeFile(diskPath, source, 'utf8');
@@ -217,6 +221,8 @@ class ProjectStore implements ProjectFileSystem {
 
   async rename(from: string, to: string): Promise<void> {
     const destination = this.toDiskPath(normalizeProjectPath(to));
+    if (await this.exists(destination))
+      throw new Error(`Project destination already exists: ${to}`);
     await this.files.mkdir(projectDirectory(destination), {recursive: true});
     await this.files.rename(
       this.toDiskPath(normalizeProjectPath(from)),
@@ -277,7 +283,7 @@ class ProjectStore implements ProjectFileSystem {
     const entries = await this.files.readdir(directory, {withFileTypes: true});
     const sourceFiles: ProjectSourceFile[] = [];
     for (const entry of entries) {
-      if (entry.isDirectory() && ignoredDirectoryNames.has(entry.name)) {
+      if (entry.isDirectory() && hiddenProjectDirectories.has(entry.name)) {
         continue;
       }
       const diskPath = joinPath(directory, entry.name);
@@ -404,7 +410,22 @@ function directoryOperations(
     async rename(from, to) {
       if (await reader.stat(to))
         throw new Error(`Project destination already exists: ${to}`);
-      await copy(from, to);
+      try {
+        await copy(from, to);
+      } catch (error) {
+        try {
+          if (await reader.stat(to)) {
+            const {directory, name} = await parent(to);
+            await directory.removeEntry(name, {recursive: true});
+          }
+        } catch (cleanupError) {
+          throw new AggregateError(
+            [error, cleanupError],
+            `Move failed. An incomplete copy remains at ${to}.`,
+          );
+        }
+        throw error;
+      }
       const {directory, name} = await parent(from);
       await directory.removeEntry(name, {recursive: true});
     },
