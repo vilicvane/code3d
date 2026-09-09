@@ -12,7 +12,11 @@
   项目后按需复用。源码与追踪每次重新求值；内存和磁盘历史分别执行 LRU。
   存储损坏、不可用或配额不足不妨碍建模。实现内容变化隔离命名空间，不迁移旧格式。
 - code3d 模型项目是普通的 Node/TypeScript 项目，自行管理 `package.json`、
-  lockfile 和 `node_modules`。App 在项目未声明 `@code3d/core` 时提供完整内置
+  lockfile 和 `node_modules`。Browser storage 由 App 在浏览器内安装 npm 包，
+  每个子目录清单使用平级 `code3d-lock.json` 与 `node_modules`，普通运行保持锁定版本；
+  本地文件夹仍由用户自己的包管理器安装。TS、运行时和资源共用安装文件与真实路径，
+  包声明及原始源码按需只读打开。见 [#90](https://github.com/vilicvane/code3d/issues/90)。
+  App 在模型所在清单及其祖先未声明 `@code3d/core` 时提供完整内置
   core/screws/materials，支持零安装开始建模；声明 core 后全部由项目自己的依赖接管。
 - 同一份项目源码遵循标准 Node ESM/TypeScript 规则，既可由 App 加载，也可
   在受支持的 Node 环境中直接执行。

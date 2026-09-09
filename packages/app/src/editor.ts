@@ -12,6 +12,8 @@ import JsonWorker from 'monaco-editor/languages/features/json/json.worker?worker
 import 'monaco-editor/languages/definitions/css/register';
 import 'monaco-editor/languages/definitions/html/register';
 import 'monaco-editor/languages/definitions/yaml/register';
+import type {ProjectFileReader} from './project/file-reader';
+import {decodeProjectFile} from './project/file-reader';
 import * as typeScriptLanguage from 'monaco-editor/languages/features/typescript/register';
 import EditorWorker from 'monaco-editor/editor/editor.worker?worker';
 import ProjectTypeScriptWorker from './monaco/typescript.worker?worker';
@@ -40,6 +42,7 @@ import type {SourceRef} from '@code3d/core/tooling';
 import {
   normalizeProjectPath,
   isSourceFile,
+  isReadonlyPackageFile,
   projectPathIsWithin,
   type ModelProject,
 } from './project/project';
@@ -206,13 +209,18 @@ monaco.editor.defineTheme('code3d-dark', {
     'list.focusForeground': code3dCodeColors.foreground,
     'list.inactiveSelectionBackground':
       code3dEditorWidgetColors.selectedBackground,
+    'list.inactiveSelectionForeground': code3dCodeColors.foreground,
+    'list.inactiveFocusBackground': code3dEditorWidgetColors.hoverBackground,
     'list.hoverBackground': code3dEditorWidgetColors.hoverBackground,
     'list.highlightForeground': code3dEditorWidgetColors.accent,
+    'list.focusHighlightForeground': code3dEditorWidgetColors.accent,
     'pickerGroup.foreground': code3dEditorWidgetColors.accent,
     'pickerGroup.border': code3dEditorWidgetColors.border,
     'menu.background': code3dEditorWidgetColors.background,
     'menu.foreground': code3dCodeColors.foreground,
     'menu.border': code3dEditorWidgetColors.border,
+    'menu.selectionBackground': code3dEditorWidgetColors.selectedBackground,
+    'menu.selectionForeground': code3dCodeColors.foreground,
     'button.background': code3dEditorWidgetColors.accent,
     'button.foreground': code3dCodeColors.background,
     'progressBar.background': code3dEditorWidgetColors.accent,
@@ -222,7 +230,31 @@ monaco.editor.defineTheme('code3d-dark', {
     'editorLineNumber.activeForeground': '#b9beaf',
     'editorCursor.foreground': code3dCodeFocusColors.cursor,
     'editor.selectionBackground': code3dEditorWidgetColors.selectionBackground,
-    'editor.inactiveSelectionBackground': '#53651533',
+    'editor.inactiveSelectionBackground':
+      code3dEditorWidgetColors.inactiveSelectionBackground,
+    'editor.selectionHighlightBackground': code3dCodeFocusColors.relatedSymbol,
+    'editor.wordHighlightBackground': code3dCodeFocusColors.relatedSymbol,
+    'editor.wordHighlightStrongBackground': code3dCodeFocusColors.currentSymbol,
+    'editor.wordHighlightTextBackground': code3dCodeFocusColors.relatedSymbol,
+    'editor.findMatchBackground': code3dCodeFocusColors.currentSymbol,
+    'editor.findMatchBorder': code3dEditorWidgetColors.accentBorder,
+    'editor.findMatchHighlightBackground': code3dCodeFocusColors.relatedSymbol,
+    'editor.findRangeHighlightBackground': code3dCodeFocusColors.relatedSymbol,
+    'editor.hoverHighlightBackground': code3dCodeFocusColors.relatedSymbol,
+    'editor.rangeHighlightBackground': code3dCodeFocusColors.relatedSymbol,
+    'editorLink.activeForeground': code3dEditorWidgetColors.accent,
+    'editorBracketMatch.background': code3dCodeFocusColors.relatedSymbol,
+    'editorBracketMatch.border': code3dCodeFocusColors.bracketMatch,
+    'editorOverviewRuler.selectionHighlightForeground':
+      code3dCodeFocusColors.overviewMarker,
+    'editorOverviewRuler.wordHighlightForeground':
+      code3dCodeFocusColors.overviewMarker,
+    'editorOverviewRuler.wordHighlightStrongForeground':
+      code3dCodeFocusColors.overviewMarker,
+    'editorOverviewRuler.wordHighlightTextForeground':
+      code3dCodeFocusColors.overviewMarker,
+    'editorOverviewRuler.findMatchForeground':
+      code3dCodeFocusColors.overviewMarker,
     'editor.lineHighlightBackground': code3dCodeFocusColors.currentLine,
     'editorIndentGuide.background1': '#272923',
     'editorIndentGuide.activeBackground1': '#555a4e',
@@ -230,6 +262,29 @@ monaco.editor.defineTheme('code3d-dark', {
     'editorWidget.foreground': code3dCodeColors.foreground,
     'editorWidget.border': code3dEditorWidgetColors.border,
     'editorWidget.resizeBorder': code3dEditorWidgetColors.accent,
+    'editorHoverWidget.statusBarBackground':
+      code3dEditorWidgetColors.hoverBackground,
+    'peekView.border': code3dEditorWidgetColors.accentBorder,
+    'peekViewTitle.background': code3dEditorWidgetColors.background,
+    'peekViewTitleLabel.foreground': code3dCodeColors.foreground,
+    'peekViewTitleDescription.foreground':
+      code3dEditorWidgetColors.mutedForeground,
+    'peekViewResult.background': code3dEditorWidgetColors.background,
+    'peekViewResult.lineForeground': code3dCodeColors.foreground,
+    'peekViewResult.fileForeground': code3dCodeColors.foreground,
+    'peekViewResult.selectionBackground':
+      code3dEditorWidgetColors.selectedBackground,
+    'peekViewResult.selectionForeground': code3dCodeColors.foreground,
+    'peekViewResult.matchHighlightBackground':
+      code3dCodeFocusColors.currentSymbol,
+    'peekViewEditor.background': code3dCodeColors.background,
+    'peekViewEditorGutter.background': code3dCodeColors.background,
+    'peekViewEditorStickyScroll.background': code3dCodeColors.background,
+    'peekViewEditorStickyScrollGutter.background': code3dCodeColors.background,
+    'peekViewEditor.matchHighlightBackground':
+      code3dCodeFocusColors.currentSymbol,
+    'peekViewEditor.matchHighlightBorder':
+      code3dEditorWidgetColors.accentBorder,
   },
 });
 
@@ -244,12 +299,60 @@ const typeScriptTokenizationReady = monaco.editor.colorize(
 );
 
 export class CodeEditor {
+  fileReader?: ProjectFileReader;
+  private navigationFiles = new Map<string, string>();
+
+  isModelFile(path: string): boolean {
+    return (
+      isSourceFile(path) &&
+      !/\.d\.[cm]?ts$/.test(path) &&
+      !isReadonlyPackageFile(path)
+    );
+  }
+
+  async openFile(path: string, takeFocus = true): Promise<void> {
+    if (!this.documents.has(path)) {
+      const bytes = await this.fileReader?.readFile(path);
+      const source =
+        bytes === undefined
+          ? this.navigationFiles.get(path)
+          : decodeProjectFile(bytes);
+      if (source === undefined) throw new Error(`File not found: ${path}`);
+      this.addDocument(path, source);
+    }
+    this.switchFile(path, takeFocus);
+  }
+
+  async refreshPackageLock(path: string): Promise<void> {
+    const bytes = await this.fileReader?.readFile(path);
+    if (!bytes) return;
+    const source = decodeProjectFile(bytes);
+    const document = this.documents.get(path);
+    if (!document) this.addDocument(path, source);
+    else if (document.model.getValue() !== source)
+      document.model.setValue(source);
+  }
+
   setProjectLanguage(language: ProjectLanguage): void {
     projectPackageSpecifiers = language.packageSpecifiers;
+    this.navigationFiles = new Map(
+      language.files.map(file => [file.path, file.source]),
+    );
     const extraLibs = language.files.map(file => ({
-      filePath: monaco.Uri.file('/workspace' + file.path).toString(true),
+      filePath: monaco.Uri.file('/workspace' + file.path).toString(),
       content: file.source,
     }));
+    extraLibs.push({
+      filePath: 'file:///workspace/.__code3d-realpaths.json',
+      content: JSON.stringify(
+        Object.fromEntries(
+          Object.entries(language.realPaths ?? {}).map(([from, to]) => [
+            '/workspace' + from,
+            '/workspace' + to,
+          ]),
+        ),
+      ),
+    });
     // Monaco forwards these options to the project's TypeScript worker.
     const options = {
       ...languageCompilerOptions,
@@ -312,6 +415,7 @@ export class CodeEditor {
   private cursorSelectionVersion = 0;
   private pointerActivatingEditor = false;
   private revision = 1;
+  private operationReadOnly = false;
   private suppressCursorEventDepth = 0;
   private queuedChanges?: ProjectEditorChange[];
   private readonly agentCursors = new Map<
@@ -345,6 +449,7 @@ export class CodeEditor {
     if (this.activePath) this.openPaths.push(this.activePath);
     this.editor = monaco.editor.create(container, {
       model: active?.model ?? null,
+      readOnly: this.readOnly,
       theme: 'code3d-dark',
       automaticLayout: true,
       fontFamily: "'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace",
@@ -366,6 +471,7 @@ export class CodeEditor {
     });
     this.sourceDecoration = this.editor.createDecorationsCollection();
     this.editor.onDidChangeModel(() => {
+      this.editor.updateOptions({readOnly: this.readOnly});
       for (const cursor of this.agentCursors.values()) {
         this.editor.layoutContentWidget(cursor.widget);
       }
@@ -463,6 +569,7 @@ export class CodeEditor {
   project(): ModelProject {
     return {
       files: [...this.documents.values()]
+        .filter(document => !isReadonlyPackageFile(document.path))
         .map(({path, model}) => ({path, source: model.getValue()}))
         .sort((left, right) => left.path.localeCompare(right.path)),
     };
@@ -473,9 +580,9 @@ export class CodeEditor {
   }
 
   filePaths(): readonly string[] {
-    return [...this.documents.keys()].sort((left, right) =>
-      left.localeCompare(right),
-    );
+    return [...this.documents.keys()]
+      .filter(path => !path.includes('/node_modules/'))
+      .sort((left, right) => left.localeCompare(right));
   }
 
   openedFiles(): readonly string[] {
@@ -490,7 +597,15 @@ export class CodeEditor {
   }
 
   setReadOnly(readOnly: boolean): void {
-    this.editor.updateOptions({readOnly});
+    this.operationReadOnly = readOnly;
+    this.editor.updateOptions({readOnly: this.readOnly});
+  }
+
+  private get readOnly(): boolean {
+    return (
+      this.operationReadOnly ||
+      (!!this.activePath && isReadonlyPackageFile(this.activePath))
+    );
   }
 
   moveFiles(from: string, to: string): void {
@@ -1333,17 +1448,17 @@ export class CodeEditor {
 
   private addDocument(path: string, source: string): void {
     const normalized = normalizeProjectPath(path);
-    const model = monaco.editor.createModel(
-      source,
-      languageForPath(normalized),
-      monaco.Uri.file('/workspace' + normalized),
-    );
+    const uri = monaco.Uri.file('/workspace' + normalized);
+    const model =
+      monaco.editor.getModel(uri) ??
+      monaco.editor.createModel(source, languageForPath(normalized), uri);
     this.refreshAnnotationDecorations(normalized, model);
     let previousSource = model.getValue();
     const document: ProjectDocument = {
       path: normalized,
       model,
       subscription: model.onDidChangeContent(event => {
+        if (isReadonlyPackageFile(normalized)) return;
         const origin: ContentChangeOrigin = event.isUndoing
           ? 'undo'
           : event.isRedoing
@@ -1498,13 +1613,26 @@ export class CodeEditor {
     this.editorActivationListeners.forEach(listener => listener(cursor));
   }
 
-  private openProjectResource(
+  private async openProjectResource(
     resource: monaco.Uri,
     selectionOrPosition?: monaco.IRange | monaco.IPosition,
-  ): boolean {
-    const target = [...this.documents.values()].find(
+  ): Promise<boolean> {
+    let target = [...this.documents.values()].find(
       document => document.model.uri.toString() === resource.toString(),
     );
+    if (
+      !target &&
+      resource.scheme === 'file' &&
+      resource.path.startsWith('/workspace/')
+    ) {
+      const path = resource.path.slice('/workspace'.length);
+      try {
+        await this.openFile(path, false);
+      } catch {
+        return false;
+      }
+      target = this.documents.get(path);
+    }
     if (!target) return false;
 
     this.switchFile(target.path);
@@ -1536,6 +1664,7 @@ export class CodeEditor {
     path: string,
     options: FormatOptions = {},
   ): Promise<boolean> {
+    if (!this.isModelFile(path)) return false;
     const document = this.requireDocument(path);
     const {model} = document;
     const source = model.getValue();
@@ -1610,6 +1739,8 @@ export class CodeEditor {
     edits: readonly monaco.editor.IIdentifiedSingleEditOperation[],
     undoGroup?: string,
   ): void {
+    if (isReadonlyPackageFile(path))
+      throw new Error('Installed package files are read-only.');
     const model = this.requireDocument(path).model;
     if (
       undoGroup &&
@@ -2033,6 +2164,7 @@ function annotationTokenKind(tokenType: string): string {
 }
 
 function languageForPath(path: string): string {
+  if (/\.map$/i.test(path)) return 'json';
   if (isSourceFile(path))
     return /\.[cm]?jsx?$/i.test(path) ? 'javascript' : 'typescript';
   const filename = path.split('/').at(-1)!.toLowerCase();

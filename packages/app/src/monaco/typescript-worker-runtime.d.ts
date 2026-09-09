@@ -31,6 +31,16 @@ declare module 'monaco-editor/language/typescript/ts.worker' {
     getExtraLibs(): TypeScriptWorkerExtraLibs;
     getLanguageService(): TypeScriptLanguageService;
     getScriptFileNames(): string[];
+    readFile(fileName: string): string | undefined;
+    fileExists(fileName: string): boolean;
+    getScriptSnapshot(fileName: string): typeScript.IScriptSnapshot | undefined;
+    getScriptVersion(fileName: string): string;
+    getDefinitionAtPosition(
+      fileName: string,
+      position: number,
+    ): ReturnType<
+      typeScriptLanguage.TypeScriptWorker['getDefinitionAtPosition']
+    >;
     getSemanticDiagnostics(
       fileName: string,
     ): ReturnType<

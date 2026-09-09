@@ -45,12 +45,17 @@ import {
   openDirectoryProjectFileSystem,
 } from './project/filesystem';
 import {filePathFromRoute, fileRoute} from './project/file-route';
-import {isSourceFile, type ModelProject} from './project/project';
 import {
   listProjectEntries,
   readProjectTextFile,
   type ProjectEntry,
 } from './project/file-operations';
+import {normalizeProjectPath, type ModelProject} from './project/project';
+import {BrowserPackageInstaller} from './project/browser-package-installer';
+import type {BrowserProjectFileSystem} from './project/filesystem';
+import {findPackageScope} from './project/package-manifest';
+import {ProjectPackages} from './project/project-packages';
+import {browserPackageFiles} from './project/browser-packages';
 import {
   compareTopologyIds,
   formatTopologyId,
@@ -162,6 +167,8 @@ app.innerHTML = `
         <span class="prototype-tag">prototype 01</span>
       </div>
       <div class="topbar-actions">
+        <button class="quiet-button" id="packages-button" type="button">Packages</button>
+        <button class="quiet-button" id="install-packages-button" type="button">Install packages</button>
         <button class="quiet-button" id="retry-save-button" type="button" hidden>Retry saving</button>
         <span class="project-location" id="project-location"></span>
         <button class="quiet-button" id="open-folder-button" type="button">Open folder</button>
@@ -363,13 +370,47 @@ const codeEditor = new CodeEditor(
   initialFilePath(initialProject, window.location.hash),
 );
 replaceFileRoute(codeEditor.currentFile());
-const compiler = new ModelCompilerClient(projectFileSystem, language =>
-  codeEditor.setProjectLanguage(language),
+const packageInstaller = !directoryWorkspaceId
+  ? new BrowserPackageInstaller(
+      projectFileSystem as BrowserProjectFileSystem,
+      message => setViewportStatus('busy', message),
+    )
+  : undefined;
+const packageFiles = packageInstaller ?? projectFileSystem;
+const navigationPackages = new ProjectPackages(
+  packageFiles,
+  browserPackageFiles,
+);
+codeEditor.fileReader = {
+  async readFile(path) {
+    await navigationPackages.update(
+      codeEditor.project(),
+      codeEditor.currentFile() ?? '/model.ts',
+    );
+    return navigationPackages.readFile(path);
+  },
+  stat: path => navigationPackages.stat(path),
+};
+const preparePackages = async (_project: ModelProject, file: string) => {
+  if (!packageInstaller) return;
+  await agentProject.flush();
+  await packageInstaller.prepare(file);
+  const scope = await findPackageScope(projectFileSystem, file);
+  await codeEditor.refreshPackageLock(
+    normalizeProjectPath(scope.directory + '/code3d-lock.json'),
+  );
+  renderProjectNavigation();
+};
+const compiler = new ModelCompilerClient(
+  packageFiles,
+  language => codeEditor.setProjectLanguage(language),
+  preparePackages,
 );
 const retrySaveButton = requiredElement<HTMLButtonElement>('retry-save-button');
 const agentObserver = new AgentObserver(
-  projectFileSystem,
+  packageFiles,
   () => agentProject.currentRevision,
+  preparePackages,
 );
 const agentRenders = new AgentRenderHistory();
 const agentRenderView = new AgentRenderView(viewportHost, agentRenders);
@@ -433,6 +474,43 @@ window.addEventListener('beforeunload', event => {
     event.preventDefault();
     event.returnValue = '';
   }
+});
+const packagesButton = requiredElement<HTMLButtonElement>('packages-button');
+const installPackagesButton = requiredElement<HTMLButtonElement>(
+  'install-packages-button',
+);
+packagesButton.hidden = installPackagesButton.hidden = !packageInstaller;
+packagesButton.addEventListener('click', () => {
+  void (async () => {
+    const scope = await findPackageScope(
+      projectFileSystem,
+      codeEditor.currentFile() ?? '/model.ts',
+    );
+    const path = normalizeProjectPath(scope.directory + '/package.json');
+    if (!scope.manifest)
+      codeEditor.createFile(
+        path,
+        JSON.stringify(
+          {private: true, type: 'module', dependencies: {}},
+          null,
+          2,
+        ) + '\n',
+      );
+    else await codeEditor.openFile(path);
+  })().catch(showProjectIssue);
+});
+installPackagesButton.addEventListener('click', () => {
+  void (async () => {
+    installPackagesButton.disabled = true;
+    try {
+      const file = codeEditor.currentFile() ?? '/model.ts';
+      await preparePackages(codeEditor.project(), file);
+      if (codeEditor.isModelFile(file)) await runModel();
+      else setViewportStatus('ready', 'Packages installed');
+    } finally {
+      installPackagesButton.disabled = false;
+    }
+  })().catch(showProjectIssue);
 });
 let currentModule: ModelModule | null = null;
 let currentModuleSourceVersion: number | undefined;
@@ -1034,7 +1112,10 @@ async function activateProjectFile(
   if (path && !codeEditor.fileState(path)) {
     let source: string;
     try {
-      source = await readProjectTextFile(projectFileSystem, path);
+      source = await readProjectTextFile(
+        codeEditor.fileReader ?? projectFileSystem,
+        path,
+      );
     } catch (error) {
       if (version !== fileOpenVersion) return;
       throw error;
@@ -1072,7 +1153,7 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
   const revision = ++runRevision;
   const sourceVersion = codeEditor.sourceVersion();
   const file = codeEditor.currentFile();
-  if (!file || !isSourceFile(file)) {
+  if (!file || !codeEditor.isModelFile(file)) {
     compiler.cancel();
     currentModule = null;
     currentModuleSourceVersion = undefined;

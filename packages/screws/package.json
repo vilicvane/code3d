@@ -21,7 +21,8 @@
   },
   "files": [
     "bld",
-    "README.md"
+    "README.md",
+    "src"
   ],
   "peerDependencies": {
     "@code3d/core": "^0.0.1-alpha.0"

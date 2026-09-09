@@ -258,7 +258,7 @@ implementation context and historical outcomes, not a competing work queue.
   `package.json`, lockfile, and installed dependencies, including
   `@code3d/core`. The same source should run in a supported Node runtime without
   a code3d-only module syntax or hidden host dependency.
-- App provides built-in core/screws/materials when the root package metadata does not
+- App provides built-in core/screws/materials when the model package scope and its ancestors do not
   declare `@code3d/core`. Declaring core in dependencies, devDependencies,
   peerDependencies or optionalDependencies transfers the entire runtime to the
   project's packages; missing installations are errors. Built-in packages use
@@ -669,6 +669,14 @@ are tracked separately in [#84](https://github.com/vilicvane/code3d/issues/84).
 - A project has no privileged persistent entry file. The active editor file is
   the root module for the current compile, so every source file can be opened
   and previewed directly.
+- Browser storage installs dependencies from the nearest package.json, using
+  JSPM's package resolver over the manifest dependency graph and verified npm
+  archives. It persists code3d-lock.json beside node_modules, shares an archive
+  cache, stages replacements and restores interrupted installs. Separate child
+  manifests own separate installations; they do not imply npm workspaces.
+  Local-folder installation remains external. Package files open read-only,
+  with declaration maps connecting published declarations to original sources.
+  See [#90](https://github.com/vilicvane/code3d/issues/90).
 - App diagnostics, completion and model evaluation use one selected package
   filesystem: project-owned packages when core is declared, otherwise the
   built-in core/screws/materials plus ordinary project dependencies. Declarations and

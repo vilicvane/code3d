@@ -29,6 +29,7 @@ available in the tabs while the explorer is hidden. You can close every tab,
 including the last one, to clear the editor and preview. Closing a tab keeps
 the file and its edits in the project; reopen it from the explorer.
 
+The file explorer starts at 256px unless you have already saved a custom width.
 Drag the file explorer's right edge to resize the tree, or the divider between
 the editor and viewport to resize the code pane. The App remembers both widths
 in this browser and fits them to the available window space. Resizing the tree

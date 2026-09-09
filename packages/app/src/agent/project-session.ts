@@ -19,6 +19,7 @@ import {
 } from '../project/file-operations';
 import {
   isSourceFile,
+  isProjectTextFile,
   projectDirectory,
   projectPathIsWithin,
   type ModelProject,
@@ -616,7 +617,8 @@ export class AgentProjectSession {
     this.acceptEditorChanges(() =>
       this.editor.applyFiles(
         files.filter(
-          file => isSourceFile(file.path) || this.editor.fileState(file.path),
+          file =>
+            isProjectTextFile(file.path) || this.editor.fileState(file.path),
         ),
       ),
     );

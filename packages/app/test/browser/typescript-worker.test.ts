@@ -40,10 +40,17 @@ test(
         result.completions!.entries.some(entry => entry.name === 'length'),
       );
       assert.equal(result.highlights![0].highlightSpans.length, 2);
+      assert.equal(result.highlights![0].fileName, result.modelUri);
       assert.ok(
         result.definition!.some(
-          entry => entry.fileName === result.declarationFile,
+          entry =>
+            entry.fileName ===
+            'file:///workspace/node_modules/%40code3d/core/src/library/runtime.ts',
         ),
+      );
+      assert.equal(
+        result.dependencyDefinition![0].fileName,
+        result.dependencyUri,
       );
       assert.deepEqual(errors, []);
     } finally {

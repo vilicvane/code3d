@@ -71,3 +71,11 @@ export function resolveProjectImport(
 export function isSourceFile(path: string): boolean {
   return /\.(?:[cm]?[jt]sx?)$/i.test(path);
 }
+
+export function isProjectTextFile(path: string): boolean {
+  return isSourceFile(path) || /\.json$/i.test(path);
+}
+
+export function isReadonlyPackageFile(path: string): boolean {
+  return path.includes('/node_modules/') || path.endsWith('/code3d-lock.json');
+}

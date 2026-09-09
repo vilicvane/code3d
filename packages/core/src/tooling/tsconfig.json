@@ -4,7 +4,12 @@
     "composite": true,
     "rootDir": ".",
     "outDir": "../../bld/tooling",
-    "tsBuildInfoFile": "../../.cache/tooling.tsbuildinfo"
+    "tsBuildInfoFile": "../../.cache/tooling.tsbuildinfo",
+    "declarationMap": true
   },
-  "references": [{"path": "../library"}]
+  "references": [
+    {
+      "path": "../library"
+    }
+  ]
 }

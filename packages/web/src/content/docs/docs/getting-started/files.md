@@ -6,7 +6,7 @@ description: Use browser storage or connect the App to a local project folder.
 ## Browser workspace
 
 The default workspace is stored in your browser. You can create multiple
-TypeScript files and import between them using ordinary relative imports:
+TypeScript and JSON files and import between them using ordinary relative imports:
 
 ```ts
 import {makeBracket} from './bracket.ts';
@@ -18,6 +18,73 @@ model.
 
 Browser data belongs to that browser profile and site origin. Clearing site
 data removes the browser workspace. Keep copies of work you care about.
+
+## Install packages in browser storage
+
+Choose **Packages** to open the nearest `package.json`, or create one in the
+workspace root. Add browser-compatible npm dependencies, then choose
+**Install packages**. Opening a model also installs changed dependencies or
+restores its existing lock before compilation.
+
+Try `/examples/patterns/post-array/model.ts` in the App's file explorer. This
+bundled example has its own `package.json` and uses `just-range` from npm to
+place a row of posts. Select the `postArray()` call to edit the count, spacing
+and height in the parameter panel. The example is included in every browser
+workspace; it does not depend on files from another browser profile.
+
+```json
+{
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "d3-delaunay": "6.0.4",
+    "@types/d3-delaunay": "6.0.4"
+  }
+}
+```
+
+For example, this model uses the installed algorithm package:
+
+```ts
+import {box} from '@code3d/core';
+import {Delaunay} from 'd3-delaunay';
+
+const mesh = Delaunay.from([
+  [0, 0],
+  [20, 0],
+  [0, 20],
+]);
+export default box(mesh.points.length, 10, 5);
+```
+
+`code3d-lock.json` and `node_modules` sit beside the manifest. The lock records
+exact package versions and archive integrity; it is a Code3D file, not an npm
+`package-lock.json`. Reopening or running an unchanged project keeps the locked
+versions. Cached, verified archives can restore a missing installation without
+resolving versions again. A failed download or installation preserves the
+previous installation and lock.
+
+Copying a project directory in the explorer preserves its `package.json` and
+lock, and skips `node_modules`, `.code3d` and `.git` directories. Opening the
+copied model restores its locked packages. Moving a directory keeps all its
+contents, including installed packages.
+
+A subdirectory can have its own `package.json` and lock. For example,
+`/examples/panel/package.json` controls `/examples/panel/model.ts`; another
+example can install a different version of the same library. Scopes install
+when reached. Ordinary ancestor `node_modules` lookup still applies. Browser
+installs support npm versions, ranges and aliases, with dependencies and root
+dev dependencies. npm workspaces, dependency overrides, local/Git dependencies,
+private registry authentication and install scripts are not supported.
+
+The editor, model compiler and assets read the same installed package files.
+Use **Go to Definition** (F12 or Ctrl/Cmd+Click) to open package declarations.
+When several definitions appear in Peek, double-click a result to open its
+file in a tab. Package file links can also be reopened or refreshed directly.
+Packages that publish declaration maps and their original TypeScript sources
+can take you directly to those sources. Installed files and generated locks
+open read-only; they are not executable model files. JSON files remain editable
+project files and do not run as models.
 
 ## Local folder
 
@@ -38,11 +105,13 @@ context. Browser storage remains available when folder access is unsupported.
 
 ## Modeling packages
 
-You can start without installing packages. When the root `package.json` does
+You can start without installing packages. When the model’s package scope and its ancestors do
 not declare `@code3d/core` (or there is no `package.json`), the App provides
 built-in `@code3d/core`, `@code3d/screws` and `@code3d/materials`, with matching
 editor types.
-This does not install packages or write dependency metadata into your folder.
+The built-in modeling packages remain available without declaring them.
+Declaring your own modeling runtime requires those packages to be available in
+the npm registry (browser storage) or already installed (local folders).
 
 Declaring `@code3d/core` in `dependencies`, `devDependencies`, `peerDependencies`
 or `optionalDependencies` switches the complete modeling runtime to your
@@ -78,7 +147,8 @@ group([base, ...posts]);
 ```
 
 The App reads installed package code and declarations for execution and editor
-types. It does not run `npm install` for you. A package working in Node alone
+types. Local folders use your own package manager; the App does not run `npm install`
+in a local folder. A package working in Node alone
 does not make it browser-compatible; Node built-ins and native addons are not
 available. Use ordinary npm installations; pnpm and workspace symbolic-link
 layouts have not been validated for browser directory handles.

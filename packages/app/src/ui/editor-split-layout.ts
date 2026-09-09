@@ -34,7 +34,7 @@ export class EditorSplitLayout {
   ) {
     this.panes = [
       resizablePane(separator, 'code3d:editor-width', 520),
-      resizablePane(explorerSeparator, 'code3d:project-explorer-width', 184),
+      resizablePane(explorerSeparator, 'code3d:project-explorer-width', 256),
     ];
     for (const pane of this.panes) {
       pane.separator.addEventListener('pointerdown', this.onPointerDown);

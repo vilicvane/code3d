@@ -125,10 +125,10 @@ test(
     const explorer = '#project-explorer';
     const separator = '#project-explorer-resizer';
     const codeWidth = await width(page);
-    assert.equal(await width(page, explorer), 184);
+    assert.equal(await width(page, explorer), 256);
     await startDrag(page, 100, separator);
     await page.mouse.up();
-    await waitWidth(page, 284, explorer);
+    await waitWidth(page, 356, explorer);
     await waitWidth(page, codeWidth);
     // The divider must leave the file tree's adjacent native scrollbar usable.
     await page.evaluate(async () => {
@@ -158,23 +158,23 @@ test(
           .shadowRoot!.querySelector('[data-file-tree-virtualized-scroll]')!
           .scrollTop > 0,
     );
-    await waitWidth(page, 284, explorer);
+    await waitWidth(page, 356, explorer);
     assert.equal(
       await page.evaluate(() =>
         localStorage.getItem('code3d:project-explorer-width'),
       ),
-      '284',
+      '356',
     );
 
     await page.locator('#project-explorer-toggle').click();
     assert.equal(await page.locator(separator).isVisible(), false);
     await waitWidth(page, codeWidth);
     await page.locator('#project-explorer-toggle').click();
-    await waitWidth(page, 284, explorer);
+    await waitWidth(page, 356, explorer);
     await waitWidth(page, codeWidth);
     await page.reload();
     await page.getByText('Ready', {exact: true}).waitFor({timeout: 60_000});
-    await waitWidth(page, 284, explorer);
+    await waitWidth(page, 356, explorer);
     await waitWidth(page, codeWidth);
 
     for (const windowWidth of [900, 851]) {
@@ -190,23 +190,23 @@ test(
         await page.evaluate(() =>
           localStorage.getItem('code3d:project-explorer-width'),
         ),
-        '284',
+        '356',
       );
     }
 
     await page.setViewportSize({width: 680, height: 800});
-    await waitWidth(page, 284, explorer);
+    await waitWidth(page, 356, explorer);
     assert.equal(await page.locator(separator).isVisible(), true);
     await startDrag(page, 32, separator);
     await page.mouse.up();
-    await waitWidth(page, 316, explorer);
+    await waitWidth(page, 388, explorer);
     await page.setViewportSize({width: 1440, height: 900});
-    await waitWidth(page, 316, explorer);
+    await waitWidth(page, 388, explorer);
     await waitWidth(page, codeWidth);
     await startDrag(page, 64);
     await page.mouse.up();
     await waitWidth(page, codeWidth + 64);
-    await waitWidth(page, 316, explorer);
+    await waitWidth(page, 388, explorer);
   },
 );
 
@@ -223,9 +223,9 @@ test(
     });
     await separator.focus();
     await page.keyboard.press('ArrowRight');
-    await waitWidth(page, 200, explorer);
+    await waitWidth(page, 272, explorer);
     await page.keyboard.press('Shift+ArrowRight');
-    await waitWidth(page, 264, explorer);
+    await waitWidth(page, 336, explorer);
     await page.keyboard.press('Home');
     await waitWidth(page, 140, explorer);
     await page.keyboard.press('End');

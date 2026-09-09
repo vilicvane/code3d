@@ -4,6 +4,7 @@ export type ProjectFileInfo = Readonly<{
   kind: 'file' | 'directory';
   version: string;
   size?: number;
+  realPath?: string;
 }>;
 
 /** Paths are rooted in the selected project, never in the host filesystem. */

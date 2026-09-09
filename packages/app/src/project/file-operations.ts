@@ -1,4 +1,5 @@
 import type {ProjectFileSystem} from './filesystem';
+import type {ProjectFileReader} from './file-reader';
 import {
   normalizeProjectPath,
   projectDirectory,
@@ -43,7 +44,7 @@ export async function listProjectEntries(
 }
 
 export async function readProjectTextFile(
-  fileSystem: ProjectFileSystem,
+  fileSystem: ProjectFileReader,
   path: string,
 ): Promise<string> {
   const info = await fileSystem.stat(path);
@@ -131,7 +132,7 @@ export async function checkProjectEntryOperation(
   }
 }
 
-/** Copy bytes and empty directories. A failed copy keeps its source intact. */
+/** Copy project entries, leaving hidden state and installed packages to be restored. */
 export async function copyProjectEntry(
   fileSystem: ProjectFileSystem,
   from: string,
@@ -142,8 +143,14 @@ export async function copyProjectEntry(
     if (!info) throw new Error(`Project entry not found: ${source}`);
     if (info.kind === 'directory') {
       await fileSystem.createDirectory(target);
-      for (const entry of await fileSystem.list(source))
+      for (const entry of await fileSystem.list(source)) {
+        if (
+          entry.kind === 'directory' &&
+          hiddenProjectDirectories.has(entry.name)
+        )
+          continue;
         await copy(`${source}/${entry.name}`, `${target}/${entry.name}`);
+      }
     } else {
       const bytes = await fileSystem.readFile(source);
       if (!bytes) throw new Error(`Project entry not found: ${source}`);

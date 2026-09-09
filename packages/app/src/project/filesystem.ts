@@ -7,7 +7,7 @@ import {
   type ProjectFileReader,
 } from './file-reader';
 import {
-  isSourceFile,
+  isProjectTextFile,
   normalizeProjectPath,
   projectDirectory,
   type ModelProject,
@@ -70,9 +70,15 @@ export interface ProjectFileSystem extends ProjectFileReader {
 
 let configureBrowserPromise: Promise<void> | undefined;
 
-export async function openBrowserProjectFileSystem(): Promise<ProjectFileSystem> {
+export interface BrowserProjectFileSystem extends ProjectFileSystem {
+  /** Atomically replace an installer-owned file; explorer renames never overwrite. */
+  replaceFile(from: string, to: string): Promise<void>;
+  symlink(target: string, path: string): Promise<void>;
+}
+
+export async function openBrowserProjectFileSystem(): Promise<BrowserProjectFileSystem> {
   await configureBrowserFileSystem();
-  return new ProjectStore(
+  const store = new ProjectStore(
     fs.promises,
     browserProjectRoot,
     browserManifestPath,
@@ -92,11 +98,31 @@ export async function openBrowserProjectFileSystem(): Promise<ProjectFileSystem>
               kind: info.isDirectory() ? 'directory' : 'file',
               version: `${info.mtimeMs}:${info.size}`,
               size: info.size,
+              realPath: normalizeProjectPath(
+                (await fs.promises.realpath(path)).slice(
+                  browserProjectRoot.length,
+                ),
+              ),
             }
           : undefined;
       },
     },
   );
+  return Object.assign(store, {
+    async replaceFile(from: string, to: string) {
+      await fs.promises.rename(
+        browserProjectRoot + normalizeProjectPath(from),
+        browserProjectRoot + normalizeProjectPath(to),
+      );
+    },
+    async symlink(target: string, path: string) {
+      await store.createDirectory(projectDirectory(path));
+      await fs.promises.symlink(
+        target,
+        browserProjectRoot + normalizeProjectPath(path),
+      );
+    },
+  });
 }
 
 export async function openDirectoryProjectFileSystem(
@@ -142,13 +168,16 @@ class ProjectStore implements ProjectFileSystem {
       this.toDiskPath(normalizeProjectPath(path)),
       {withFileTypes: true},
     );
-    return entries
-      .filter(entry => entry.isFile() || entry.isDirectory())
-      .map(entry => ({
-        name: entry.name,
-        kind: entry.isDirectory() ? ('directory' as const) : ('file' as const),
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+    const result: {name: string; kind: 'file' | 'directory'}[] = [];
+    for (const entry of entries) {
+      const kind = entry.isDirectory()
+        ? 'directory'
+        : entry.isFile()
+          ? 'file'
+          : (await this.stat(joinPath(path, entry.name)))?.kind;
+      if (kind) result.push({name: entry.name, kind});
+    }
+    return result.sort((a, b) => a.name.localeCompare(b.name));
   }
 
   async initialize(seed: ModelProject): Promise<ModelProject> {
@@ -289,7 +318,7 @@ class ProjectStore implements ProjectFileSystem {
       const diskPath = joinPath(directory, entry.name);
       if (entry.isDirectory()) {
         sourceFiles.push(...(await this.readSourceTree(diskPath)));
-      } else if (entry.isFile() && isSourceFile(entry.name)) {
+      } else if (entry.isFile() && isProjectTextFile(entry.name)) {
         sourceFiles.push({
           path: this.fromDiskPath(diskPath),
           source: await this.files.readFile(diskPath, 'utf8'),
