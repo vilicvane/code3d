@@ -50,10 +50,8 @@ import type {
   ViewportDecoration,
 } from './viewport-decoration';
 import {editableParameterUsages} from './model/parameter-provenance';
-import {
-  parameterSourceDecoration,
-  sourceParameterAt,
-} from './model/parameter-decorations';
+import {parameterSourceDecoration} from './model/parameter-decorations';
+import {sourceParameterAt} from './model/tool-arguments';
 import type {ToolParameterSchema} from './model/tool-schema';
 import {
   dimensionEdges,

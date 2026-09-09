@@ -8,12 +8,14 @@ import type {SourceTarget} from '../src/model/compiler.ts';
 let server: Awaited<ReturnType<typeof createAppTestServer>>;
 let compiler: Awaited<ReturnType<typeof createTestProjectCompiler>>;
 let decorations: typeof import('../src/model/parameter-decorations.ts');
+let arguments_: typeof import('../src/model/tool-arguments.ts');
 let dimensions: typeof import('../src/rendering/parameter-dimension.ts');
 let Viewport: typeof import('../src/viewport.ts').ModelViewport;
 
 before(async () => {
   server = await createAppTestServer();
   compiler = await createTestProjectCompiler(server);
+  arguments_ = await server.ssrLoadModule('/src/model/tool-arguments.ts');
   decorations = await server.ssrLoadModule(
     '/src/model/parameter-decorations.ts',
   );
@@ -43,7 +45,7 @@ async function focus(source: string, token: string, displacement = 0) {
     offset,
   ) as SourceTarget;
   assert.ok(target);
-  const parameter = decorations.sourceParameterAt(target, '/model.ts', offset);
+  const parameter = arguments_.sourceParameterAt(target, '/model.ts', offset);
   const evaluation = target.evaluations[0];
   return {
     module,

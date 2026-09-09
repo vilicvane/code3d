@@ -126,6 +126,14 @@ export class ContextualToolPanel {
     this.activeViewId = undefined;
   }
 
+  focusParameter(name: string): boolean {
+    const input = this.controls.get(name)?.input;
+    if (!input || input.disabled || input.readOnly || !input.checkVisibility())
+      return false;
+    input.focus();
+    return document.activeElement === input;
+  }
+
   setInvalid(name: string, invalid: boolean): void {
     this.controls
       .get(name)

@@ -1,27 +1,5 @@
 import {identityRigidTransform} from '@code3d/core/tooling';
-import type {SourceTarget} from './compiler';
-import type {ToolParameterSchema} from './tool-schema';
 import type {SourceDecorationProvider} from '../viewport-decoration';
-
-/** Resolve this argument occurrence, independently of its editable variable. */
-export function sourceParameterAt(
-  target: SourceTarget,
-  file: string,
-  offset: number,
-): ToolParameterSchema | undefined {
-  const argument = target.tool?.arguments.find(
-    ({target: source}) =>
-      source?.kind === 'present' &&
-      source.sourceRef.file === file &&
-      source.sourceRef.start <= offset &&
-      offset <= source.sourceRef.end,
-  );
-  return argument
-    ? target.tool!.signature.parameters.find(
-        parameter => parameter.index === argument.index,
-      )
-    : undefined;
-}
 
 export const parameterSourceDecoration = {
   id: 'parameter-geometry',

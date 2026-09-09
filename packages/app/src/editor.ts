@@ -344,6 +344,7 @@ export class CodeEditor {
   private cursorSelectionVersion = 0;
   private pointerActivatingEditor = false;
   private revision = 1;
+  private focusToolParameter?: () => boolean;
   private suppressCursorEventDepth = 0;
   private queuedChanges?: ProjectEditorChange[];
   private readonly agentCursors = new Map<
@@ -397,6 +398,14 @@ export class CodeEditor {
       tabSize: 2,
     });
     this.sourceDecoration = this.editor.createDecorationsCollection();
+    this.editor.addCommand(
+      monaco.KeyCode.Tab,
+      () => {
+        if (!this.focusToolParameter?.())
+          this.editor.trigger('keyboard', 'tab', {});
+      },
+      `editorId == '${this.editor.getId()}' && editorTextFocus && !editorReadonly && !editorHasSelection && !editorHasMultipleSelections && !suggestWidgetVisible && !inSnippetMode && !inlineSuggestionVisible && !editorTabMovesFocus`,
+    );
     this.editor.onDidChangeModel(() => {
       for (const cursor of this.agentCursors.values()) {
         this.editor.layoutContentWidget(cursor.widget);
@@ -944,6 +953,10 @@ export class CodeEditor {
 
   ownsFocus(): boolean {
     return this.container.contains(document.activeElement);
+  }
+
+  setParameterFocusHandler(handler: () => boolean): void {
+    this.focusToolParameter = handler;
   }
 
   runHistoryAction(action: 'undo' | 'redo'): void {

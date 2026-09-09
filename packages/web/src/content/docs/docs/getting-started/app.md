@@ -191,6 +191,11 @@ This does not attempt to invert the expression or change its inputs.
 
 Inputs select their contents on focus and apply valid changes after a short
 typing pause. `Enter`, `Tab`, or leaving the input also commits the value.
+With the editor cursor inside a parameter, press `Tab` to focus its visible,
+writable tool input and select its contents. This also works at the next
+available argument in an incomplete call. Completion lists and snippet tab
+stops keep their usual `Tab` behavior; selections and multiple cursors keep
+editor indentation. If there is no writable input, `Tab` behaves normally.
 You can fill an incomplete call such as `box()` in order with `Tab`; the next
 argument becomes available as each earlier one is added.
 
