@@ -2,7 +2,7 @@ import {Check, X} from 'lucide';
 import type {DrawingDimensions} from '../tools/drawing-dimensions';
 import {createIcon} from './icons';
 
-/** Reusable numeric entry for an active drawing command, not a second model. */
+/** Shared dimension entry for drawing and constraints, not a second model. */
 export class DrawingInputs {
   readonly root = document.createElement('form');
   private readonly title = document.createElement('span');
@@ -69,11 +69,19 @@ export class DrawingInputs {
         name.textContent = field.label;
         const input = document.createElement('input');
         input.type = 'text';
-        input.inputMode = 'decimal';
+        input.inputMode = dimensions.expressions ? 'text' : 'decimal';
         input.autocomplete = 'off';
         input.spellcheck = false;
         input.setAttribute('aria-label', field.label);
         input.dataset.dimension = field.id;
+        const control = document.createElement('span');
+        control.className = 'drawing-input-control';
+        const measure = document.createElement('span');
+        measure.className = 'drawing-input-measure';
+        measure.setAttribute('aria-hidden', 'true');
+        const measuredText = document.createTextNode('');
+        measure.append(measuredText);
+        control.append(input, measure);
         input.addEventListener('keydown', event => {
           // Keep native text history; the App's global shortcut otherwise
           // interprets input undo as a source-model undo.
@@ -85,10 +93,14 @@ export class DrawingInputs {
         });
         input.addEventListener('input', () => {
           dimensions.set(field.id, input.value);
+          // Replacing the measuring node splits Chrome's native typing undo.
+          // Keep its text node identity, just as we do for visible placeholders.
+          measuredText.data = (input.value || input.placeholder) + ' ';
+          input.dataset.entered = String(input.value.trim() !== '');
           this.clearError();
           this.changed();
         });
-        label.append(name, input);
+        label.append(name, control);
         if (field.unit) label.append(field.unit);
         this.fields.append(label);
         return input;
@@ -106,6 +118,9 @@ export class DrawingInputs {
       if (input.value !== dimensions.text(id))
         input.value = dimensions.text(id);
       input.dataset.entered = String(dimensions.text(id).trim() !== '');
+      const measure = input.nextElementSibling!.firstChild as Text;
+      const measured = (input.value || input.placeholder) + ' ';
+      if (measure.data !== measured) measure.data = measured;
     }
   }
 

@@ -219,7 +219,13 @@ implementation context and historical outcomes, not a competing work queue.
   removal uses the selection's union, including mixed geometry; mixed state removes
   instead of filling missing constraints. Additions require the complete selection
   to be applicable, and hovering highlights all affected relation partners.
-  dimensions share drawing numeric entry and a batch is one source edit/undo.
+  Dimensions share the drawing input component and a batch is one source edit/undo.
+  Constraint add/edit forms accept single TypeScript expressions, retain their exact
+  source and defer evaluation to normal compilation in the sketch's lexical scope.
+  Local expression-valued badges open the same editor as literal dimensions;
+  upstream dimensions remain read-only. Input widths measure native text, grow from
+  82px to 320px and shrink to fit narrow viewports without replacing input/history nodes.
+  Drawing coordinates and creation dimensions retain numeric preview inputs.
   Selection Delete retains interval trimming and orphan cleanup. Parallel accepts
   two or more local lines as deterministic pairs; perpendicular and relative angle
   require exactly two. Single-line angle is named Orientation in the UI; pair angle
@@ -249,6 +255,15 @@ implementation context and historical outcomes, not a competing work queue.
   Recompilation that cannot evaluate the selected sketch retains its last-successful
   result read-only; downstream/sibling errors do not reset its active drawing/Trim tool.
   leaving its source selection clears it. Monaco still receives all diagnostics.
+  Successful solves also report nonblocking warnings when authored geometry differs
+  beyond local curve tolerance. They retain Ready status and never silently write source.
+  A generic diagnostic action carries a serializable ToolIntent; the right-aligned,
+  underlined Fix text action
+  writes changed literal point/radius data through one version-checked tool transaction.
+  It preserves constraints, expressions and IDs; changes requiring expression replacement
+  or shared-source instance edits warn without a repair. Upstream repairs require opening
+  that sketch. See [#97](https://github.com/vilicvane/code3d/issues/97) and
+  [#98](https://github.com/vilicvane/code3d/issues/98).
   See [research and priorities](plans/sketch-editor.md) and
   [#23](https://github.com/vilicvane/code3d/issues/23); region identity and modeling
   selection APIs remain to be confirmed.

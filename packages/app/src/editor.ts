@@ -1179,17 +1179,23 @@ export class CodeEditor {
     this.sourceDecoration.clear();
   }
 
-  setModelDiagnostic(diagnostic?: ModelDiagnostic): void {
+  setModelDiagnostics(diagnostics: readonly ModelDiagnostic[] = []): void {
     for (const document of this.documents.values()) {
-      const sourceRef = diagnostic?.sourceRef;
-      const marker =
-        diagnostic && sourceRef?.file === document.path
-          ? modelDiagnosticMarker(document.model, diagnostic, sourceRef)
-          : undefined;
+      const markers = diagnostics.flatMap(diagnostic =>
+        diagnostic.sourceRef?.file === document.path
+          ? [
+              modelDiagnosticMarker(
+                document.model,
+                diagnostic,
+                diagnostic.sourceRef,
+              ),
+            ]
+          : [],
+      );
       monaco.editor.setModelMarkers(
         document.model,
         modelDiagnosticOwner,
-        marker ? [marker] : [],
+        markers,
       );
     }
   }
@@ -1780,7 +1786,10 @@ function modelDiagnosticMarker(
   const start = model.getPositionAt(startOffset);
   const end = model.getPositionAt(endOffset);
   return {
-    severity: monaco.MarkerSeverity.Error,
+    severity:
+      diagnostic.severity === 'warning'
+        ? monaco.MarkerSeverity.Warning
+        : monaco.MarkerSeverity.Error,
     source: 'code3d',
     code: diagnostic.kind,
     message: diagnostic.details

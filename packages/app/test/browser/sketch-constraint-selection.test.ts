@@ -182,7 +182,7 @@ const value = sketch([['point',1,[0,0]],['circle',2,[1,5]]], {constraints:[['rad
   assert.equal(await text(page), before);
 });
 
-test('expression and upstream values select related elements without exposing a writable dimension', async t => {
+test('local expression values open their exact source while upstream dimensions stay read-only', async t => {
   const page = await open(
     t,
     `import {sketch} from '@code3d/core';
@@ -198,8 +198,15 @@ const value=base.derive([['point',1,[width,0]]],{constraints:[['x',1,width]]});`
   );
   assert.equal(
     await page.getByRole('form', {name: 'Constraint value'}).count(),
-    0,
+    1,
   );
+  assert.equal(
+    await page
+      .getByRole('textbox', {name: 'X coordinate', exact: true})
+      .inputValue(),
+    'width',
+  );
+  await page.keyboard.press('Escape');
   await page.locator('.constraint-badge[data-kind="radius"]').click();
   assert.equal(
     await page.locator('.sketch-canvas circle.upstream.selected').count(),
