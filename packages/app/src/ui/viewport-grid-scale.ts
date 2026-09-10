@@ -1,11 +1,13 @@
 import {formatGridStep} from '../grid-scale';
+import {reaction, type IReactionDisposer} from 'mobx';
 
 /** A schematic minor/major grid legend, not a screen-distance ruler. */
 export class ViewportGridScale {
   private readonly root = document.createElement('div');
   private readonly value = document.createElement('span');
+  private readonly stopRendering: IReactionDisposer;
 
-  constructor(container: HTMLElement) {
+  constructor(container: HTMLElement, readStep: () => number | undefined) {
     this.root.className = 'viewport-grid-scale';
     this.root.setAttribute('role', 'img');
     this.value.className = 'viewport-grid-scale-value';
@@ -29,9 +31,14 @@ export class ViewportGridScale {
     }
     this.root.append(bar, this.value);
     container.append(this.root);
+    this.stopRendering = reaction(readStep, step => this.render(step), {
+      fireImmediately: true,
+    });
   }
 
-  update(step: number): void {
+  private render(step: number | undefined): void {
+    this.root.hidden = step === undefined;
+    if (step === undefined) return;
     const text = `${formatGridStep(step)} unit`;
     if (this.value.textContent === text) return;
     this.value.textContent = text;
@@ -40,7 +47,8 @@ export class ViewportGridScale {
     this.root.setAttribute('aria-label', description);
   }
 
-  setVisible(visible: boolean): void {
-    this.root.hidden = !visible;
+  dispose(): void {
+    this.stopRendering();
+    this.root.remove();
   }
 }

@@ -1,4 +1,5 @@
 import {AdaptiveGrid} from './adaptive-grid';
+import {action, computed, makeObservable, observableRef} from 'mobx';
 import * as THREE from 'three';
 import {createModelMaterial, disposeModelMaterial} from './model-material';
 import {orientImageCamera, type ImageView} from './image-camera';
@@ -60,7 +61,7 @@ function withRenderMaterial<T extends ModelPrimitive>(
 }
 
 export class ModelRenderer {
-  mode: ModelRenderMode = 'modeling';
+  private renderMode: ModelRenderMode = 'modeling';
   readonly scene = new THREE.Scene();
   camera: ViewCamera = createViewCamera('perspective', 1);
   readonly renderer: THREE.WebGLRenderer;
@@ -68,6 +69,11 @@ export class ModelRenderer {
   private readonly renderSize = new THREE.Vector2();
 
   constructor(private readonly container: HTMLElement) {
+    makeObservable<this, 'renderMode'>(this, {
+      renderMode: observableRef,
+      mode: computed,
+      setMode: action,
+    });
     this.renderer = new THREE.WebGLRenderer({
       antialias: true,
       alpha: false,
@@ -97,6 +103,14 @@ export class ModelRenderer {
 
     this.camera.position.set(105, 82, 120);
     this.resize();
+  }
+
+  get mode(): ModelRenderMode {
+    return this.renderMode;
+  }
+
+  setMode(mode: ModelRenderMode): void {
+    this.renderMode = mode;
   }
 
   resize(): void {

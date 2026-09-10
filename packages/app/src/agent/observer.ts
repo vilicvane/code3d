@@ -453,6 +453,7 @@ export class AgentObserver {
     );
     try {
       editor.show({
+        key: model.layer.id,
         id: model.layer.id,
         revision,
         layers: model.layers,

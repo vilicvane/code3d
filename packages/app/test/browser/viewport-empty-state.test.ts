@@ -166,22 +166,23 @@ test('clearing a previewed model removes its geometry without reporting an error
   assert.equal(await page.locator('#viewport-empty-state').isVisible(), false);
 });
 
-test('switching to a syntactically broken file immediately clears the previous file preview', async t => {
+test('switching to a syntactically broken file clears the previous preview when the error arrives', async t => {
   const page = await open(
     t,
     "import {box} from '@code3d/core'; box(10, 6, 8);",
   );
   await select(page, 'box(10');
   await page.locator('[data-parameter=x]').waitFor();
-  const cleared = await page.evaluate(() => {
+  const retained = await page.evaluate(() => {
     const {codeEditor, viewport} = window.emptyViewportApp;
+    const previous = viewport['module'];
     codeEditor.createFile('/broken.ts', 'const unfinished = ;');
     return {
       geometry: viewport.hasRenderableGeometry(),
-      module: viewport['module'],
+      sameModule: viewport['module'] === previous,
     };
   });
-  assert.deepEqual(cleared, {geometry: false, module: null});
+  assert.deepEqual(retained, {geometry: true, sameModule: true});
   await page.locator('#viewport-status[data-state=error]').waitFor();
   await expectEmpty(page);
   assert.equal(await page.locator('[data-parameter=x]').isVisible(), false);

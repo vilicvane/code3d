@@ -2,6 +2,13 @@ import {committedSpatialObject} from './tools/spatial-edit';
 import {isCompositionInputRole} from './model/operation-context';
 import type {ModelDiagnostic} from './model/diagnostic';
 import * as THREE from 'three';
+import {
+  action,
+  computed,
+  makeObservable,
+  observableRef,
+  runInAction,
+} from 'mobx';
 import {orientImageCamera, type ImageView} from './rendering/image-camera';
 import {ViewportNavigation, type CameraPose} from './ui/viewport-navigation';
 import type {ViewCamera} from './rendering/view-camera';
@@ -148,8 +155,6 @@ type DecorationInstance = Readonly<{
 
 export type ModelViewportOptions = Readonly<{
   onViewChange?: () => void;
-  onRenderModeChange?: (mode: ModelRenderMode) => void;
-  onGridStepChange?: (step: number) => void;
   onSourcePreviewDiagnostic?: (diagnostic: ModelDiagnostic | undefined) => void;
   onSelect: (occurrence: Occurrence) => void;
   onDrillDown: (node: ModelSnapshotObject) => void;
@@ -159,6 +164,7 @@ export type ModelViewportOptions = Readonly<{
   sourceDecorationProviders?: readonly SourceDecorationProvider[];
   showCoordinateReference?: boolean;
   animateViewChanges?: boolean;
+  isViewVisible?: () => boolean;
 }>;
 
 export type TopologySelectionEvent =
@@ -305,8 +311,9 @@ export class ModelViewport {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly controls: ViewportNavigation;
   private readonly coordinateReference?: ViewportCoordinateReference;
-  private gridStep?: number;
+  private liveGridStep = 1;
   private readonly animateViewChanges: boolean;
+  private readonly isViewVisible: () => boolean;
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointer = new THREE.Vector2();
   private readonly root = new THREE.Group();
@@ -339,8 +346,6 @@ export class ModelViewport {
   private readonly spatialParameterValues = new Map<string, number>();
   private readonly onSelect: ModelViewportOptions['onSelect'];
   private readonly onViewChange: ModelViewportOptions['onViewChange'];
-  private readonly onRenderModeChange: ModelViewportOptions['onRenderModeChange'];
-  private readonly onGridStepChange: ModelViewportOptions['onGridStepChange'];
   private readonly onSourcePreviewDiagnostic: ModelViewportOptions['onSourcePreviewDiagnostic'];
   private readonly onDrillDown: ModelViewportOptions['onDrillDown'];
   private readonly onNavigateSource: ModelViewportOptions['onNavigateSource'];
@@ -366,8 +371,6 @@ export class ModelViewport {
     {
       onSelect,
       onViewChange,
-      onRenderModeChange,
-      onGridStepChange,
       onDrillDown,
       onNavigateSource,
       onPositionTool,
@@ -376,19 +379,25 @@ export class ModelViewport {
       sourceDecorationProviders = [],
       showCoordinateReference = true,
       animateViewChanges = true,
+      isViewVisible = () => true,
     }: ModelViewportOptions,
   ) {
     this.onSelect = onSelect;
     this.animateViewChanges = animateViewChanges;
+    this.isViewVisible = isViewVisible;
     this.onViewChange = onViewChange;
-    this.onRenderModeChange = onRenderModeChange;
-    this.onGridStepChange = onGridStepChange;
     this.onSourcePreviewDiagnostic = onSourcePreviewDiagnostic;
     this.onDrillDown = onDrillDown;
     this.onNavigateSource = onNavigateSource;
     this.onTopologySelection = onTopologySelection;
     this.sourceDecorationProviders = sourceDecorationProviders;
     this.rendering = new ModelRenderer(this.container);
+    makeObservable<this, 'liveGridStep'>(this, {
+      liveGridStep: observableRef,
+      gridStep: computed,
+      renderMode: computed,
+      setRenderMode: action,
+    });
     this.scene = this.rendering.scene;
     this.renderer = this.rendering.renderer;
     this.scene.add(this.root, this.decorationRoot);
@@ -458,9 +467,18 @@ export class ModelViewport {
     this.animate();
   }
 
+  get renderMode(): ModelRenderMode {
+    return this.rendering.mode;
+  }
+
+  /** The last live frame, unaffected by temporary image-export grid settings. */
+  get gridStep(): number | undefined {
+    return this.renderMode === 'modeling' ? this.liveGridStep : undefined;
+  }
+
   setRenderMode(mode: ModelRenderMode): void {
     if (this.rendering.mode === mode) return;
-    this.rendering.mode = mode;
+    this.rendering.setMode(mode);
     this.container.dataset.renderMode = mode;
     this.selectionGesture = undefined;
     this.selectionClick = undefined;
@@ -469,7 +487,6 @@ export class ModelViewport {
     this.coordinateReference?.setVisible(mode === 'modeling');
     this.updateTransformGizmo();
     this.rendering.renderFrame();
-    this.onRenderModeChange?.(mode);
   }
 
   renderModule(
@@ -1133,7 +1150,11 @@ export class ModelViewport {
       return;
     }
     const scene = this.scenes!.scene(nodes, placement);
-    if (scene?.key === this.activeScene?.key) return;
+    if (scene?.key === this.activeScene?.key) {
+      if (!this.isViewVisible())
+        this.controls.restorePose(this.controls.savedPose());
+      return;
+    }
     const previousScene = this.activeScene;
     this.saveViewportState();
     this.activeScene = scene;
@@ -1170,7 +1191,9 @@ export class ModelViewport {
       }
       this.controls.restorePose(
         pose,
-        this.hasFramedView && this.animateViewChanges,
+        previousScene !== undefined &&
+          this.animateViewChanges &&
+          this.isViewVisible(),
       );
       this.hasFramedView = true;
     }
@@ -2107,10 +2130,9 @@ export class ModelViewport {
       );
     });
     const step = this.rendering.grid.step;
-    if (step !== this.gridStep) {
-      this.gridStep = step;
-      this.onGridStepChange?.(step);
-    }
+    runInAction(() => {
+      this.liveGridStep = step;
+    });
   };
 
   private rebuildImpactHighlights(): void {

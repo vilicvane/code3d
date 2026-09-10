@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
+import {reaction} from 'mobx';
 import type {ModelModule} from '../src/model/compiler.ts';
 import {ModelPreviewState} from '../src/model/preview-state.ts';
 
@@ -18,24 +19,24 @@ const emptyModule: ModelModule = {
 
 test('requests expire on source changes, superseding runs, and switching away and back', () => {
   const state = new ModelPreviewState();
-  state.activate('/model.ts', () => {});
+  state.activate('/model.ts');
   const first = state.begin(1);
   assert.equal(state.isCurrent(first, 1), true);
   assert.equal(state.isCurrent(first, 2), false);
   const second = state.begin(1);
   assert.equal(state.isCurrent(first, 1), false);
   assert.equal(state.isCurrent(second, 1), true);
-  state.activate('/other.ts', () => {});
-  state.activate('/model.ts', () => {});
+  state.activate('/other.ts');
+  state.activate('/model.ts');
   assert.equal(state.isCurrent(second, 1), false);
   const reloaded = state.begin(1);
-  state.activate('/model.ts', () => {}, true);
+  state.activate('/model.ts', true);
   assert.equal(state.isCurrent(reloaded, 1), false);
 });
 
 test('same-file failure retains the display while empty success replaces it', () => {
   const state = new ModelPreviewState();
-  state.activate('/model.ts', () => {});
+  state.activate('/model.ts');
   const warning = {
     kind: 'evaluation',
     summary: 'Warning',
@@ -59,29 +60,74 @@ test('same-file failure retains the display while empty success replaces it', ()
   assert.equal(state.hasPreviewedTarget, true);
 });
 
-test('a new file clears old results and ignores targets reported while disposing the old view', () => {
+test('file handovers retain presentation without exposing another file as an editable result', () => {
   const state = new ModelPreviewState();
-  state.activate('/model.ts', () => {});
+  const displays: boolean[] = [];
+  const stop = reaction(
+    () => state.empty,
+    value => displays.push(value),
+    {fireImmediately: true},
+  );
+  state.activate('/model.ts');
   state.accept(state.begin(1), emptyModule);
   state.observeTarget(true);
-  state.activate('/broken.ts', () => {
-    assert.equal(state.module, null);
-    state.observeTarget(true);
-  });
-  state.begin(1);
-  state.fail({kind: 'syntax', summary: 'Incomplete statement'});
+  state.presented(false);
+  state.activate('/next/other.ts');
   assert.equal(state.module, null);
-  assert.equal(state.hasPreviewedTarget, false);
-  state.activate(undefined, () => state.observeTarget(true));
+  assert.equal(state.sourceVersion, undefined);
+  assert.equal(state.retainingView, true);
   state.observeTarget(true);
-  assert.equal(state.status, 'ready');
-  assert.equal(state.diagnostic, undefined);
-  assert.equal(state.hasPreviewedTarget, false);
+  assert.equal(
+    state.hasPreviewedTarget,
+    false,
+    'the old view does not dismiss the new file hint',
+  );
+  state.activate('/next/third.ts');
+  assert.equal(
+    state.retainingView,
+    true,
+    'rapid switches retain the original view',
+  );
+  state.accept(state.begin(1), emptyModule);
+  assert.equal(
+    state.retainingView,
+    true,
+    'presentation remains until the replacement is rendered',
+  );
+  state.presented(false);
+  assert.equal(
+    state.empty,
+    true,
+    'an empty result releases the old presentation',
+  );
+  assert.deepEqual(displays, [true, false, true]);
+  state.showStatus('ready', 'Ready');
+  assert.equal(state.showHint, true);
+  stop();
+});
+
+test('file failure, closing the last file and project reset discard retained presentation', () => {
+  const state = new ModelPreviewState();
+  for (const end of ['failure', 'close', 'reset']) {
+    state.activate('/model.ts');
+    state.accept(state.begin(1), emptyModule);
+    state.observeTarget(true);
+    state.presented(false);
+    state.activate('/broken.ts');
+    assert.equal(state.retainingView, true);
+    if (end === 'failure')
+      state.fail({kind: 'syntax', summary: 'Incomplete statement'});
+    else if (end === 'close') state.activate(undefined);
+    else state.activate('/broken.ts', true);
+    assert.equal(state.module, null);
+    assert.equal(state.retainingView, false);
+    assert.equal(state.hasPreviewedTarget, false);
+  }
 });
 
 test('an evaluated tool failure remains editable and source transactions suspend its version', () => {
   const state = new ModelPreviewState();
-  state.activate('/model.ts', () => {});
+  state.activate('/model.ts');
   state.accept(state.begin(1), {
     ...emptyModule,
     diagnostic: {kind: 'evaluation', summary: 'Invalid parameter'},
