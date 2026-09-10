@@ -108,7 +108,7 @@ test(
         (_, i) => i % 4 === 0,
       );
       const colored = (values: number[]) => values.filter(v => v > 26).length;
-      r.mode = 'render';
+      r.setMode('render');
       r.renderFrame();
       const rendered = read(r.renderer.domElement);
       const exportedRender = await r.captureImage(640, 480);
@@ -117,7 +117,7 @@ test(
       ctx.drawImage(renderBitmap, 0, 0);
       renderBitmap.close();
       const renderPixel = [...ctx.getImageData(320, 240, 1, 1).data];
-      r.mode = 'modeling';
+      r.setMode('modeling');
       r.renderFrame();
       const resumed = read(r.renderer.domElement);
       pose(60);

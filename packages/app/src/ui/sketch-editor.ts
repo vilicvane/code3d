@@ -1,4 +1,12 @@
 import {gridStep} from '../grid-scale';
+import {
+  action,
+  makeObservable,
+  observableRef,
+  reaction,
+  type IReactionDisposer,
+} from 'mobx';
+import {SketchNavigation, type SketchPose} from './sketch-navigation';
 import type {
   SketchPointAddress,
   SketchPosition,
@@ -78,6 +86,7 @@ const drawingTools = [
 ] as const;
 
 export type SketchEditorView = Readonly<{
+  key: string;
   id: string;
   revision: number;
   layers: readonly SketchSnapshot[];
@@ -160,19 +169,25 @@ export class SketchEditor {
   );
   private readonly abort = new AbortController();
   private readonly resize: ResizeObserver;
+  private readonly stopDrawing: IReactionDisposer;
+  readonly navigation = new SketchNavigation();
   private view?: SketchEditorView;
   private tool: 'Select' | 'Trim' | SketchDrawing = 'Select';
   private trimPointer?: SketchPosition;
   private snapping = true;
   private showConstraints = true;
   private bypassSnap = false;
-  private center: SketchPosition = [0, 0];
-  private scale = 6;
-  private gridStep?: number;
   private selection: SketchPick[] = [];
   private editError?: string;
   private gesture?: Gesture;
   private space = false;
+
+  private get center(): SketchPosition {
+    return this.navigation.pose.center;
+  }
+  private get scale(): number {
+    return this.navigation.pose.scale;
+  }
 
   private get mode() {
     return typeof this.tool === 'string' ? this.tool : this.tool.name;
@@ -193,8 +208,12 @@ export class SketchEditor {
       previous?: SketchDragPreview,
       mergeTarget?: SketchPointAddress,
     ) => Promise<SketchDragPreview>,
-    private readonly onGridStepChange?: (step: number | undefined) => void,
   ) {
+    makeObservable<this, 'view'>(this, {
+      view: observableRef,
+      show: action,
+      hide: action,
+    });
     this.root.className = 'sketch-editor';
     this.root.setAttribute('aria-label', 'Sketch editor');
     this.root.hidden = true;
@@ -222,14 +241,10 @@ export class SketchEditor {
       event => {
         event.preventDefault();
         if (this.gesture?.kind === 'box') return;
-        const before = this.coordinates(event);
-        this.scale *= Math.exp(-event.deltaY * 0.001);
-        const after = this.coordinates(event);
-        this.center = [
-          this.center[0] + before[0] - after[0],
-          this.center[1] + before[1] - after[1],
-        ];
-        this.draw();
+        this.navigation.zoom(
+          Math.exp(-event.deltaY * 0.001),
+          this.coordinates(event),
+        );
       },
       {passive: false},
     );
@@ -294,10 +309,14 @@ export class SketchEditor {
     container.append(this.root);
     this.resize = new ResizeObserver(() => this.draw());
     this.resize.observe(this.svg);
+    this.stopDrawing = reaction(
+      () => [this.view, this.navigation.pose],
+      () => this.draw(),
+    );
   }
 
   show(view: SketchEditorView): void {
-    const changed = this.view?.id !== view.id;
+    const changed = this.view?.key !== view.key;
     if (changed) {
       this.cancel();
       this.selection = [];
@@ -327,8 +346,7 @@ export class SketchEditor {
       else this.drawing!.reset();
     }
     this.root.hidden = false;
-    if (changed) this.fit();
-    else this.draw();
+    if (changed) this.navigation.activate(view.key, this.fittedPose());
   }
 
   hide(): void {
@@ -336,10 +354,7 @@ export class SketchEditor {
     this.cancel();
     this.view = undefined;
     this.root.hidden = true;
-    if (this.gridStep !== undefined) {
-      this.gridStep = undefined;
-      this.onGridStepChange?.(undefined);
-    }
+    this.navigation.hide();
   }
 
   /** Export the same solved SVG scene, including grid and constraint labels. */
@@ -414,6 +429,8 @@ export class SketchEditor {
   }
 
   dispose(): void {
+    this.stopDrawing();
+    this.navigation.reset();
     this.abort.abort();
     this.resize.disconnect();
     this.root.remove();
@@ -719,6 +736,7 @@ export class SketchEditor {
 
   private pointerDown(event: PointerEvent): void {
     if (!this.view || ![0, 1, 2].includes(event.button) || this.gesture) return;
+    this.navigation.interrupt();
     event.preventDefault();
     this.svg.focus();
     this.editError = undefined;
@@ -844,12 +862,13 @@ export class SketchEditor {
         );
       }
     } else if (this.gesture?.kind === 'pan') {
-      this.center = [
+      this.navigation.pan([
         this.gesture.center[0] -
           (event.clientX - this.gesture.start[0]) / this.scale,
         this.gesture.center[1] +
           (event.clientY - this.gesture.start[1]) / this.scale,
-      ];
+      ]);
+      return;
     } else {
       const pointer = this.coordinates(event);
       this.trimPointer = this.mode === 'Trim' ? pointer : undefined;
@@ -1013,6 +1032,10 @@ export class SketchEditor {
   }
 
   private fit(): void {
+    this.navigation.fit(this.fittedPose());
+  }
+
+  private fittedPose(): SketchPose {
     const positions = [
       ...this.points().map(p => p.position),
       ...this.circularCurves().flatMap(c => sketchCurveBounds(c.geometry)),
@@ -1025,17 +1048,17 @@ export class SketchEditor {
         maxX = Math.max(...xs),
         minY = Math.min(...ys),
         maxY = Math.max(...ys);
-      this.center = [(minX + maxX) / 2, (minY + maxY) / 2];
-      this.scale = Math.min(
-        20,
-        Math.max(1, this.svg.clientWidth - 100) / Math.max(1, maxX - minX),
-        Math.max(1, this.svg.clientHeight - 100) / Math.max(1, maxY - minY),
-      );
+      return {
+        center: [(minX + maxX) / 2, (minY + maxY) / 2],
+        scale: Math.min(
+          20,
+          Math.max(1, this.svg.clientWidth - 100) / Math.max(1, maxX - minX),
+          Math.max(1, this.svg.clientHeight - 100) / Math.max(1, maxY - minY),
+        ),
+      };
     } else {
-      this.center = [0, 0];
-      this.scale = 6;
+      return {center: [0, 0], scale: 6};
     }
-    this.draw();
   }
 
   private draw(): void {
@@ -1084,10 +1107,6 @@ export class SketchEditor {
     const width = this.svg.clientWidth,
       height = this.svg.clientHeight;
     const step = gridStep(this.scale);
-    if (step !== this.gridStep) {
-      this.gridStep = step;
-      this.onGridStepChange?.(step);
-    }
     const [originX, originY] = this.screen([0, 0]);
     const spacing = step * this.scale;
     for (

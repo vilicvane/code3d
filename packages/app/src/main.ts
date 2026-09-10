@@ -569,6 +569,10 @@ window.addEventListener(
     stopAgentFollow();
     stopAgentUpdates();
     agentConnections.dispose();
+    stopViewportModes();
+    stopPreviewPresentation();
+    viewportGridScale.dispose();
+    sketchEditor.dispose();
   },
   {once: true},
 );
@@ -686,32 +690,10 @@ type ContextualToolState = {
   historyState: 'applied' | 'undone';
 };
 
-const viewportGridScale = new ViewportGridScale(viewportFeedbackStack);
-let modelGridStep: number | undefined;
-let sketchGridStep: number | undefined;
-let showModelGrid = true;
-function refreshViewportGridScale(): void {
-  const step = sketchGridStep ?? modelGridStep;
-  if (step !== undefined) viewportGridScale.update(step);
-  viewportGridScale.setVisible(
-    step !== undefined && (sketchGridStep !== undefined || showModelGrid),
-  );
-}
 const viewport = new ModelViewport(viewportHost, {
-  onViewChange: refreshViewportEmptyState,
-  onGridStepChange: step => {
-    modelGridStep = step;
-    refreshViewportGridScale();
-  },
-  onRenderModeChange: mode => {
-    showModelGrid = mode === 'modeling';
-    refreshViewportGridScale();
-    for (const candidate of viewportModes)
-      candidate.button.setAttribute(
-        'aria-pressed',
-        String(candidate.mode === mode),
-      );
-  },
+  onViewChange: observeViewportTarget,
+  isViewVisible: () =>
+    sketchEditor.navigation.gridStep === undefined && !previewState.empty,
   onSourcePreviewDiagnostic: diagnostic => {
     sourcePreviewDiagnostic = diagnostic;
     refreshViewportFeedback();
@@ -857,10 +839,6 @@ const toolEngine = new ToolEngine({
   clearPreview: (preview, reason) => clearToolPreview(preview, reason),
 });
 const sketchEditor = new SketchEditorController(viewportHost, {
-  onGridStepChange: step => {
-    sketchGridStep = step;
-    refreshViewportGridScale();
-  },
   solve: (layers, drag) => compiler.previewSketchDrag(layers, drag),
   resolveSourceRef: ref => codeEditor.resolveSourceRef(ref),
   readSource: ref => {
@@ -870,6 +848,42 @@ const sketchEditor = new SketchEditorController(viewportHost, {
   commit: intent =>
     commitToolSession(toolEngine.begin(`sketch:${intent.layer}`), intent),
 });
+
+const viewportGridScale = new ViewportGridScale(
+  viewportFeedbackStack,
+  () => sketchEditor.navigation.gridStep ?? viewport.gridStep,
+);
+const stopViewportModes = reaction(
+  () => viewport.renderMode,
+  mode => {
+    for (const candidate of viewportModes)
+      candidate.button.setAttribute(
+        'aria-pressed',
+        String(candidate.mode === mode),
+      );
+  },
+  {fireImmediately: true},
+);
+const stopPreviewPresentation = reaction(
+  () => ({
+    status: previewState.presentation,
+    empty: previewState.empty,
+    hint: previewState.showHint,
+    retaining: previewState.retainingView,
+  }),
+  ({status, empty, hint, retaining}) => {
+    viewportStatus.dataset.state = status.state;
+    viewportStatusLabel.textContent = status.label;
+    viewportStatus.setAttribute('aria-busy', String(status.state === 'busy'));
+    viewportHost.dataset.empty = String(empty);
+    viewportEmptyState.setVisible(hint);
+    for (const element of viewportHost.querySelectorAll<HTMLElement>(
+      '.viewport-canvas, .sketch-editor, .viewport-mode, .viewport-dock-panels, .viewport-coordinate-reference',
+    ))
+      element.inert = retaining;
+  },
+  {fireImmediately: true},
+);
 
 codeEditor.onChange(change => {
   const toolChange = change.kind === 'content' && change.origin === 'tool';
@@ -889,6 +903,7 @@ codeEditor.onChange(change => {
 
 codeEditor.onCursorOffset(({file, offset}) => {
   pendingAgentFollow = undefined;
+  if (previewState.pendingFile) return;
   const matched = viewport.selectBySourceOffset(
     file,
     offset,
@@ -932,11 +947,11 @@ codeEditor.onEditorActivation(cursor => {
     );
 });
 codeEditor.onActiveFile((path, reason) => {
+  if (reason === 'reset') sketchEditor.navigation.reset();
   activatePreviewFile(reason === 'reset');
   pendingAgentFollow = undefined;
   selectedDesignInvocation = undefined;
   finishContextualTool();
-  sketchEditor.hide();
   refreshViewportFeedback();
   renderProjectNavigation();
   if (!applyingFileRoute) updateFileRoute(path, reason);
@@ -1369,7 +1384,7 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
   const designContextId =
     designContext && 'id' in designContext ? designContext.id : undefined;
   compilingDesignContextId = designContextId;
-  setViewportStatus('busy', 'Updating model');
+  previewState.showStatus('busy', 'Updating model');
   if (designContextId) {
     renderCurrentPanels();
   }
@@ -1381,9 +1396,31 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
       codeEditor.project(),
       file,
       designContext,
-      phase => setViewportStatus('busy', compilationPhaseLabels[phase]),
+      phase => {
+        if (previewState.isCurrent(request, codeEditor.sourceVersion()))
+          previewState.showStatus('busy', compilationPhaseLabels[phase]);
+      },
     );
     if (!previewState.isCurrent(request, codeEditor.sourceVersion())) return;
+    const cursor = codeEditor.cursorSource();
+    if (
+      cursor &&
+      !nextModule.sourceTargets.some(
+        ({sourceRef}) =>
+          sourceRef.file === cursor.file &&
+          sourceRef.start <= cursor.offset &&
+          cursor.offset <= sourceRef.end,
+      )
+    ) {
+      const context = designContextAt(nextModule, cursor.file, cursor.offset);
+      if (context && nextModule.activeDesignContextId !== context.id) {
+        preferredEvaluationContextId = context.id;
+        selectedDesignContextId = context.id;
+        selectedDesignInvocation = undefined;
+        void runModel({file: context.functionRef.file, id: context.id});
+        return;
+      }
+    }
     previewState.accept(request, nextModule);
     codeEditor.setDesignArguments(nextModule.designArguments);
     sketchEditor.retain(
@@ -1403,28 +1440,11 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
     ) {
       preferredEvaluationContextId = undefined;
     }
-    const cursor = codeEditor.cursorSource();
-    const matched = viewport.renderModule(
+    viewport.renderModule(
       nextModule,
       selectedKey,
       cursor ? {...cursor, contextId: preferredEvaluationContextId} : undefined,
     );
-    if (cursor) {
-      if (!matched) {
-        const designContext = designContextAt(
-          nextModule,
-          cursor.file,
-          cursor.offset,
-        );
-        if (
-          designContext &&
-          nextModule.activeDesignContextId !== designContext.id
-        ) {
-          activateDesignContext(designContext.id);
-          return;
-        }
-      }
-    }
     preferredEvaluationContextId =
       viewport.sourceEvaluation()?.evaluation.contextId;
     const selected = viewport.getSelected();
@@ -1435,6 +1455,7 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
       renderDesignArguments(nextModule);
     }
     syncContextualTool();
+    previewState.presented(hasViewportTarget());
     if (following && pendingAgentFollow === following) {
       pendingAgentFollow = undefined;
       if (
@@ -1452,6 +1473,8 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
     compilingDesignContextId = undefined;
     const diagnostic =
       error instanceof ModelDiagnosticError ? error.diagnostic : undefined;
+    if (previewState.pendingFile || previewState.retainingView)
+      clearPresentedView();
     previewState.fail(diagnostic);
     finishContextualTool();
     sketchEditor.invalidate();
@@ -1468,23 +1491,29 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
 
 function activatePreviewFile(reload = false): void {
   const file = codeEditor.currentFile();
-  previewState.activate(
-    file && codeEditor.isModelFile(file) ? file : undefined,
-    () => {
-      compiler.cancel();
-      sourcePreviewDiagnostic = undefined;
-      compilingDesignContextId = undefined;
-      codeEditor.setModelDiagnostics();
-      codeEditor.setDesignArguments([]);
-      codeEditor.trackSourceRefs([]);
-      sketchEditor.hide();
-      viewport.renderModule(null);
-      renderElementsPanel();
-      renderDesignArguments(null);
-      errorBar.hidden = true;
-    },
-    reload,
-  );
+  if (
+    !previewState.activate(
+      file && codeEditor.isModelFile(file) ? file : undefined,
+      reload,
+    )
+  )
+    return;
+  compiler.cancel();
+  sourcePreviewDiagnostic = undefined;
+  compilingDesignContextId = undefined;
+  codeEditor.setModelDiagnostics();
+  codeEditor.setDesignArguments([]);
+  codeEditor.trackSourceRefs([]);
+  if (previewState.retainingView) sketchEditor.invalidate();
+  else clearPresentedView();
+  renderElementsPanel();
+  renderDesignArguments(null);
+  errorBar.hidden = true;
+}
+
+function clearPresentedView(): void {
+  sketchEditor.hide();
+  viewport.renderModule(null);
 }
 
 async function presentModelDiagnostic(
@@ -1531,7 +1560,7 @@ function activeViewportDiagnostic(): ModelDiagnostic | undefined {
 }
 
 function refreshViewportFeedback(): void {
-  refreshViewportEmptyState();
+  observeViewportTarget();
   const diagnostic = activeViewportDiagnostic();
   viewportDiagnosticStack.replaceChildren();
   viewportDiagnosticStack.hidden = !diagnostic;
@@ -1578,6 +1607,7 @@ function refreshViewportFeedback(): void {
 }
 
 function handleCompletionFocus(focus: CompletionFocus | undefined): void {
+  if (previewState.pendingFile) return;
   const previous = activeCompletionFocus;
   activeCompletionFocus = focus;
   window.clearTimeout(completionPreviewTimer);
@@ -1614,7 +1644,7 @@ function handleCompletionFocus(focus: CompletionFocus | undefined): void {
   compiler.cancel();
   window.clearTimeout(compileTimer);
   compileTimer = undefined;
-  setViewportStatus('busy', `Rendering preview · ${focus.memberName}`);
+  previewState.showStatus('busy', `Rendering preview · ${focus.memberName}`);
   const revision = previewState.revision;
   completionPreviewTimer = window.setTimeout(() => {
     completionPreviewTimer = undefined;
@@ -1639,11 +1669,17 @@ async function runCompletionPreview(
       preview.project,
       preview.cursor.file,
       activeDesignContext(preview.cursor),
-      phase =>
-        setViewportStatus(
-          'busy',
-          `${compilationPhaseLabels[phase]} · ${focus.memberName}`,
-        ),
+      phase => {
+        if (
+          revision === previewState.revision &&
+          activeCompletionFocus === focus &&
+          preview.sourceVersion === codeEditor.sourceVersion()
+        )
+          previewState.showStatus(
+            'busy',
+            `${compilationPhaseLabels[phase]} · ${focus.memberName}`,
+          );
+      },
     );
     if (
       revision !== previewState.revision ||
@@ -1677,7 +1713,7 @@ async function runCompletionPreview(
 function resumeModelAfterCompletion(): void {
   previewState.invalidate();
   compiler.cancel();
-  setViewportStatus('busy', 'Updating model');
+  previewState.showStatus('busy', 'Updating model');
   scheduleModelRun(180);
 }
 
@@ -1696,7 +1732,7 @@ function requestModelUpdate(delay: number): void {
   completionPreviewTimer = undefined;
   viewport.restoreTransientPreview();
   renderElementsPanel(viewport.getSelected());
-  setViewportStatus('busy', 'Updating model');
+  previewState.showStatus('busy', 'Updating model');
   previewState.invalidate();
   compiler.cancel();
   refreshViewportFeedback();
@@ -1784,6 +1820,7 @@ function selectOccurrence(occurrence: Occurrence, revealSource: boolean): void {
 }
 
 function renderElementsPanel(occurrence?: Occurrence): void {
+  if (previewState.pendingFile) occurrence = undefined;
   if (!occurrence) {
     elementsPanel.render();
     return;
@@ -1923,6 +1960,10 @@ function syncContextualTool(sourceTargetFocused = true): void {
       scope.evaluation.sketchIds[0],
       previewState.module.sketches,
       scope.target.sourceRef,
+      JSON.stringify([
+        codeEditor.currentFile(),
+        previewState.module.activeDesignContextId ?? null,
+      ]),
       previewState.module.objects,
     );
   } else if (
@@ -3064,26 +3105,16 @@ function sourceHistoryAction(
   return undefined;
 }
 
-function setViewportStatus(
-  state: 'busy' | 'ready' | 'error',
-  label: string,
-): void {
-  previewState.busy = state === 'busy';
-  viewportStatus.dataset.state = state;
-  viewportStatusLabel.textContent = label;
-  viewportStatus.setAttribute('aria-busy', String(state === 'busy'));
-  refreshViewportEmptyState();
+function observeViewportTarget(): void {
+  previewState.observeTarget(hasViewportTarget());
 }
 
-function refreshViewportEmptyState(): void {
-  previewState.observeTarget(
+function hasViewportTarget(): boolean {
+  return (
     viewport.hasRenderableGeometry() ||
-      viewport.sourceEvaluation() !== undefined ||
-      sketchEditor.hasTarget,
+    viewport.sourceEvaluation() !== undefined ||
+    sketchEditor.hasTarget
   );
-  const empty = !previewState.hasPreviewedTarget;
-  viewportHost.dataset.empty = String(empty);
-  viewportEmptyState.setVisible(empty && !previewState.busy);
 }
 
 function restoreModelStatus(): void {
@@ -3094,7 +3125,7 @@ function restoreModelStatus(): void {
       ? 'error'
       : 'ready'
     : previewState.status;
-  setViewportStatus(
+  previewState.showStatus(
     state,
     state === 'error'
       ? 'Model error'

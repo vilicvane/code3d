@@ -230,6 +230,16 @@ The grid legend at the bottom left shows the length of one small grid cell in
 the current 3D or sketch view. It updates as you zoom; source updates and
 diagnostics stack above it. Sketch wheel zoom has no fixed minimum or maximum.
 
+Each sketch remembers its own pan and zoom while the project is open. Switching
+between visible sketches smoothly restores their views; scrolling, panning or
+interacting with geometry takes over immediately. Entering a sketch from a 3D or
+empty view shows it immediately, as does returning to 3D. Reduced-motion settings
+disable the transitions.
+
+When you switch model files, the current preview stays visible while the next
+file compiles. Its controls pause until the new result replaces it. An empty
+result or a compilation failure clears the previous file’s preview.
+
 Modeling failures appear with an error message and, where source information
 is available, an underline at the responsible call. Previously evaluated
 contexts may remain usable, so you can inspect and correct the input that led

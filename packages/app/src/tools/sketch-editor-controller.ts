@@ -43,11 +43,11 @@ export class SketchEditorController {
   private stale = false;
   private revision = 0;
   private context: readonly SketchContextOutline[] = [];
+  private viewScope = '';
 
   constructor(
     container: HTMLElement,
     private readonly host: {
-      onGridStepChange?(step: number | undefined): void;
       readSource(ref: SourceRef): string | undefined;
       resolveSourceRef(ref: SourceRef): SourceRef | undefined;
       commit(intent: SketchEditIntent): boolean;
@@ -62,7 +62,6 @@ export class SketchEditorController {
       (change, preview) => this.commit(change, preview),
       (id, position, previous, mergeTarget) =>
         this.preview(id, position, previous, mergeTarget),
-      host.onGridStepChange,
     );
   }
 
@@ -70,9 +69,11 @@ export class SketchEditorController {
     id: string | undefined,
     sketches: ReadonlyMap<string, CompiledSketch>,
     selectionRef: SourceRef | undefined,
+    viewScope: string,
     objects: ReadonlyMap<string, ModelSnapshotObject> = new Map(),
   ): void {
     this.revision++;
+    this.viewScope = viewScope;
     this.active = id ? sketches.get(id) : undefined;
     this.context = this.active
       ? sketchContextOutlines(this.active, objects)
@@ -94,6 +95,15 @@ export class SketchEditorController {
 
   get diagnosticScope(): readonly CompiledSketch[] | undefined {
     return this.active ? this.sourceLayers : undefined;
+  }
+
+  get navigation() {
+    return this.editor.navigation;
+  }
+
+  dispose(): void {
+    this.revision++;
+    this.editor.dispose();
   }
 
   get hasTarget(): boolean {
@@ -213,6 +223,7 @@ export class SketchEditorController {
     const parsed =
       source === undefined ? undefined : analyzeSketchSource(source);
     this.editor.show({
+      key: JSON.stringify([this.viewScope, this.active.id]),
       id: this.active.id,
       revision: this.revision,
       layers: this.layers,
