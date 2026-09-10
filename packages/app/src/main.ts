@@ -1,5 +1,14 @@
 import './style.css';
-import {File, FilePlus, PanelLeftClose, PanelLeftOpen, X} from 'lucide';
+import {
+  File,
+  FilePlus,
+  FolderPlus,
+  Search,
+  RefreshCw,
+  PanelLeftClose,
+  PanelLeftOpen,
+  X,
+} from 'lucide';
 import brandMark from '../../../assets/brand/mark.svg?raw';
 import {
   CodeEditor,
@@ -12,13 +21,19 @@ import {compilationPhaseLabels} from './model/compilation-progress';
 import type {
   DesignArgumentContext,
   DesignContext,
+  DesignInvocation,
   EdgeArgumentTarget,
   ModelModule,
   TopologySelectionScope,
 } from './model/compiler';
 import {ModelDiagnosticError, type ModelDiagnostic} from './model/diagnostic';
+import {
+  ModelPreviewState,
+  type ModelPreviewRequest,
+} from './model/preview-state';
 import {viewportDiagnostic} from './model/viewport-diagnostic';
 import {originDecoration} from './model/origin-decorations';
+import {sourceParameterAt} from './model/tool-arguments';
 import {spatialIntent} from './tools/model-spatial-tool';
 import {SketchEditorController} from './tools/sketch-editor-controller';
 import {bundledExamples} from './project/bundled-examples';
@@ -36,7 +51,34 @@ import {
   openDirectoryProjectFileSystem,
 } from './project/filesystem';
 import {filePathFromRoute, fileRoute} from './project/file-route';
-import type {ModelProject} from './project/project';
+import {decodeProjectFile} from './project/file-reader';
+import {
+  listProjectEntries,
+  searchProjectEntries,
+  copyProjectWorkspace,
+  readProjectTextFile,
+  type ProjectEntry,
+} from './project/file-operations';
+import {
+  normalizeProjectPath,
+  isSourceFile,
+  projectDirectory as parentProjectDirectory,
+  type ModelProject,
+} from './project/project';
+import {mapProjectIO} from './project/io';
+import {
+  BrowserPackageInstaller,
+  PackageInstallationError,
+} from './project/browser-package-installer';
+import type {BrowserProjectFileSystem} from './project/filesystem';
+import {
+  findPackageScope,
+  packageInstallDirectory,
+  parsePackageManifest,
+  addPackageDependency,
+} from './project/package-manifest';
+import {ProjectPackages} from './project/project-packages';
+import {browserPackageFiles} from './project/browser-packages';
 import {
   compareTopologyIds,
   formatTopologyId,
@@ -75,7 +117,7 @@ import {ImageExportDialog} from './ui/image-export';
 import {ModelExportDialog} from './ui/model-export';
 import {ViewportContextMenu} from './ui/viewport-context-menu';
 import {ViewportEmptyState} from './ui/viewport-empty-state';
-import {ProjectTree} from './ui/project-tree';
+import {ProjectTree, askInstallPackage} from './ui/project-tree';
 import {EditorSplitLayout} from './ui/editor-split-layout';
 import {createIcon} from './ui/icons';
 import {SourceEditPopover} from './ui/source-edit-popover';
@@ -116,8 +158,15 @@ const directoryConnected =
 const projectFileSystem = directoryConnected
   ? await openDirectoryProjectFileSystem(storedDirectoryHandle)
   : await openBrowserProjectFileSystem();
-await projectFileSystem.initialize(defaultProject);
-const initialProject = await projectFileSystem.syncDirectory(bundledExamples);
+await projectFileSystem.initialize(async () => {
+  await mapProjectIO(defaultProject.files, file =>
+    projectFileSystem.writeFile(file.path, file.source),
+  );
+});
+await projectFileSystem.syncDirectory(bundledExamples);
+const requestedFile = filePathFromRoute(window.location.hash);
+let initialFileError: unknown;
+const initialProject: ModelProject = await loadInitialProject();
 const app = document.querySelector<HTMLDivElement>('#app');
 
 if (!app) {
@@ -127,11 +176,11 @@ if (!app) {
 app.innerHTML = `
   <div class="shell">
     <header class="topbar">
-      <div class="brand">
+      <a class="brand" href="https://www.code3d.org/" target="_blank" rel="noopener noreferrer" aria-label="Code3D home (opens in a new tab)">
         <span class="brand-mark" aria-hidden="true">${brandMark}</span>
         <span>Code3D</span>
         <span class="prototype-tag">prototype 01</span>
-      </div>
+      </a>
       <div class="topbar-actions">
         <button class="quiet-button" id="retry-save-button" type="button" hidden>Retry saving</button>
         <span class="project-location" id="project-location"></span>
@@ -154,21 +203,21 @@ app.innerHTML = `
               <span>PROJECT</span>
               <div class="project-actions">
                 <button id="new-file-button" type="button" title="New file" aria-label="New file"></button>
+                <button id="new-folder-button" type="button" title="New folder" aria-label="New folder"></button>
+                <button id="search-files-button" type="button" title="Search files" aria-label="Search files"></button>
+                <button id="refresh-files-button" type="button" title="Refresh files" aria-label="Refresh files"></button>
               </div>
             </header>
             <nav class="project-tree" id="project-tree"></nav>
           </aside>
           <div class="pane-resizer project-explorer-resizer" id="project-explorer-resizer" role="separator" aria-label="Resize file explorer" aria-orientation="vertical" aria-controls="project-explorer" tabindex="0" title="Drag to resize · Arrow keys to adjust"></div>
-          <div class="project-context-menu" id="project-context-menu" hidden>
-            <button id="context-rename-file" type="button">Rename</button>
-            <button id="context-delete-file" type="button">Delete</button>
-          </div>
           <section class="editor-document" id="editor-document">
             <div class="editor-tab-bar">
               <button class="project-explorer-toggle" id="project-explorer-toggle" type="button" aria-controls="project-explorer"></button>
               <nav class="editor-tabs" id="editor-tabs" aria-label="Open files"></nav>
             </div>
             <div class="editor-host" id="editor-host"></div>
+            <div class="editor-empty-state" id="editor-empty-state" hidden>Open a file from the explorer</div>
           </section>
         </div>
         <div class="error-bar" id="error-bar" hidden></div>
@@ -244,8 +293,7 @@ const viewportHost = requiredElement('viewport-host');
 const viewportEmptyState = new ViewportEmptyState(
   requiredElement('viewport-empty-state'),
 );
-let hasPreviewedTarget = false;
-let previewFile: string | undefined;
+const previewState = new ModelPreviewState();
 const errorBar = requiredElement('error-bar');
 const designArgumentsCount = requiredElement('design-arguments-count');
 const designArgumentsFunction = requiredElement('design-arguments-function');
@@ -283,14 +331,17 @@ const browserStorageButton = requiredElement<HTMLButtonElement>(
 );
 const resetButton = requiredElement<HTMLButtonElement>('reset-button');
 const newFileButton = requiredElement<HTMLButtonElement>('new-file-button');
-const projectContextMenu = requiredElement('project-context-menu');
-const contextRenameFile = requiredElement<HTMLButtonElement>(
-  'context-rename-file',
+const newFolderButton = requiredElement<HTMLButtonElement>('new-folder-button');
+const searchFilesButton = requiredElement<HTMLButtonElement>(
+  'search-files-button',
 );
-const contextDeleteFile = requiredElement<HTMLButtonElement>(
-  'context-delete-file',
+const refreshFilesButton = requiredElement<HTMLButtonElement>(
+  'refresh-files-button',
 );
 newFileButton.append(createIcon(FilePlus));
+newFolderButton.append(createIcon(FolderPlus));
+searchFilesButton.append(createIcon(Search));
+refreshFilesButton.append(createIcon(RefreshCw));
 
 const projectExplorerStorageKey = 'code3d:project-explorer-expanded';
 setProjectExplorerExpanded(
@@ -328,24 +379,68 @@ dockPanels.register({
 const codeEditor = new CodeEditor(
   editorHost,
   initialProject,
-  initialFilePath(initialProject, window.location.hash),
-);
-const projectDirectory = new ProjectTree(projectTree, {
-  onOpenFile: path => codeEditor.switchFile(path, true),
-  onFileContextMenu: (path, event) =>
-    showProjectContextMenu(path, event.clientX, event.clientY),
-});
-codeEditor.onAgentLocations(locations =>
-  projectDirectory.setAgentLocations(locations),
+  initialProject.files[0]?.path,
 );
 replaceFileRoute(codeEditor.currentFile());
-const compiler = new ModelCompilerClient(projectFileSystem, language =>
-  codeEditor.setProjectLanguage(language),
+const packageInstaller = !directoryWorkspaceId
+  ? new BrowserPackageInstaller(
+      projectFileSystem as BrowserProjectFileSystem,
+      progress => projectDirectory.setPackageProgress(progress),
+      undefined,
+      () => {
+        void projectDirectory.refresh();
+      },
+    )
+  : undefined;
+const packageFiles = packageInstaller ?? projectFileSystem;
+const navigationPackages = new ProjectPackages(
+  packageFiles,
+  browserPackageFiles,
+);
+codeEditor.fileReader = {
+  async readFile(path) {
+    // Editable project files retain their source, not runtime package metadata.
+    if (!path.includes('/node_modules/')) return packageFiles.readFile(path);
+    // Browsing an already installed file does not wait for a replacement download.
+    const installed = await projectFileSystem.readFile(path);
+    if (installed !== undefined) return installed;
+    await navigationPackages.update(
+      codeEditor.project(),
+      codeEditor.currentFile() ?? '/model.ts',
+    );
+    return navigationPackages.readFile(path);
+  },
+  async stat(path) {
+    if (!path.includes('/node_modules/')) return projectFileSystem.stat(path);
+    return (
+      (await projectFileSystem.stat(path)) ?? navigationPackages.stat(path)
+    );
+  },
+};
+const preparePackages = async (
+  _project: ModelProject,
+  file: string,
+  options?: {update?: boolean},
+) => {
+  if (!packageInstaller) return;
+  await agentProject.flush();
+  await packageInstaller.prepare(file, options);
+  const scope = await findPackageScope(projectFileSystem, file);
+  await codeEditor.refreshPackageLock(
+    normalizeProjectPath(scope.directory + '/code3d-lock.json'),
+  );
+  renderProjectNavigation();
+};
+const compiler = new ModelCompilerClient(
+  packageFiles,
+  language => codeEditor.setProjectLanguage(language),
+  preparePackages,
 );
 const retrySaveButton = requiredElement<HTMLButtonElement>('retry-save-button');
 const agentObserver = new AgentObserver(
-  projectFileSystem,
+  packageFiles,
   () => agentProject.currentRevision,
+  preparePackages,
 );
 const agentRenders = new AgentRenderHistory();
 const agentRenderView = new AgentRenderView(viewportHost, agentRenders);
@@ -360,6 +455,42 @@ const agentProject = new AgentProjectSession(
   },
   error => showProjectIssue(error),
 );
+const projectDirectory = new ProjectTree(projectTree, {
+  async entries(directory) {
+    const entries = new Map(
+      (await listProjectEntries(projectFileSystem, directory)).map(entry => [
+        entry.path,
+        entry,
+      ]),
+    );
+    for (const path of agentProject.unsavedFilePaths()) {
+      if (parentProjectDirectory(path) === directory)
+        entries.set(path, {path, kind: 'file'} satisfies ProjectEntry);
+    }
+    return [...entries.values()];
+  },
+  searchEntries: (cancelled, onEntries) =>
+    searchProjectEntries(projectFileSystem, cancelled, onEntries),
+  onOpenFile: (path, takeFocus) => activateProjectFile(path, takeFocus),
+  onOperation: operation => agentProject.changeEntries(operation),
+  onInstallPackage: packageInstaller ? installProjectPackage : undefined,
+  onUpdateDependencies: packageInstaller
+    ? updateProjectDependencies
+    : undefined,
+  onBusy: busy => {
+    if (busy) fileOpenVersion++;
+    codeEditor.setReadOnly(busy);
+    for (const button of [newFileButton, newFolderButton, refreshFilesButton])
+      button.disabled = busy;
+  },
+});
+codeEditor.onAgentLocations(locations =>
+  projectDirectory.setAgentLocations(locations),
+);
+agentProject.onEntriesChange(reason => {
+  void projectDirectory.refresh();
+  if (reason === 'operation') requestModelUpdate(0);
+});
 agentProject.onRevision(() => agentObserver.invalidate());
 agentPanel = new AgentPanel(
   codeEditor,
@@ -382,14 +513,73 @@ window.addEventListener('beforeunload', event => {
     event.returnValue = '';
   }
 });
-let currentModule: ModelModule | null = null;
-let currentModuleSourceVersion: number | undefined;
-let modelStatus: 'ready' | 'error' = 'ready';
-let currentDiagnostic: ModelDiagnostic | undefined;
+async function installProjectPackage(selectedDirectory: string): Promise<void> {
+  await agentProject.flush();
+  const directory = await packageInstallDirectory(
+    projectFileSystem,
+    selectedDirectory,
+  );
+  const specifier = await askInstallPackage(directory);
+  if (!specifier) return;
+  const path = normalizeProjectPath(directory + '/package.json');
+  await runPackageOperation(directory, 'Packages installed', async () => {
+    await agentProject.update(async () => {
+      const bytes = await projectFileSystem.readFile(path);
+      const manifest =
+        bytes === undefined
+          ? undefined
+          : parsePackageManifest(decodeProjectFile(bytes), path);
+      const updated = addPackageDependency(manifest, specifier);
+      codeEditor.applyFiles([
+        {path, content: JSON.stringify(updated, null, 2) + '\n'},
+      ]);
+      await codeEditor.openFile(path);
+    });
+    await preparePackages(codeEditor.project(), path);
+  });
+}
+
+async function updateProjectDependencies(directory: string): Promise<void> {
+  await runPackageOperation(directory, 'Dependencies updated', () =>
+    preparePackages(
+      codeEditor.project(),
+      normalizeProjectPath(directory + '/package.json'),
+      {update: true},
+    ),
+  );
+}
+
+async function runPackageOperation(
+  directory: string,
+  successMessage: string,
+  operation: () => Promise<void>,
+): Promise<void> {
+  projectDirectory.setPackageProgress({
+    directory,
+    state: 'busy',
+    message: 'Preparing packages',
+  });
+  try {
+    await operation();
+    projectDirectory.setPackageProgress({
+      directory,
+      state: 'ready',
+      message: successMessage,
+    });
+  } catch (error) {
+    // The installer reports its own failures. Earlier manifest/save failures
+    // also belong to this package operation, never the explorer's file error.
+    if (!(error instanceof PackageInstallationError))
+      projectDirectory.setPackageProgress({
+        directory,
+        state: 'error',
+        message: error instanceof Error ? error.message : String(error),
+      });
+  }
+}
 let sourcePreviewDiagnostic: ModelDiagnostic | undefined;
 let compileTimer: number | undefined;
 let completionPreviewTimer: number | undefined;
-let runRevision = 0;
 let positionToolSession: ToolSession | undefined;
 let positionToolInterruptedCompile = false;
 let edgeSelectionTool: EdgeSelectionTool | undefined;
@@ -399,10 +589,10 @@ let edgeEditSessionCounter = 0;
 let contextualTool: ContextualToolState | undefined;
 let contextualToolCounter = 0;
 const toolParameterCommitTimers = new Map<string, number>();
-let contextFilePath: string | undefined;
+let fileOpenVersion = 0;
 let preferredEvaluationContextId: string | undefined;
 let selectedDesignContextId: string | undefined;
-let selectedDesignInvocation: Exclude<DesignContext, string> | undefined;
+let selectedDesignInvocation: DesignInvocation | undefined;
 let pendingAgentFollow: AgentUpdate | undefined;
 let compilingDesignContextId: string | undefined;
 let activeCompletionFocus: CompletionFocus | undefined;
@@ -511,9 +701,9 @@ const modelExportDialog = new ModelExportDialog(viewportHost, () => {
     export: async options => {
       if (
         !scene ||
-        currentModule !== scene.module ||
+        previewState.module !== scene.module ||
         sourceVersion !== codeEditor.sourceVersion() ||
-        currentModuleSourceVersion !== sourceVersion
+        previewState.sourceVersion !== sourceVersion
       ) {
         throw new Error(
           'The model has changed or is only a preview. Run the model and reopen export.',
@@ -560,6 +750,11 @@ const elementsPanel = new ElementsPanel(elements, elementsCount, {
               mesh: occurrence.node.mesh!,
               topologyKind: preview.topologyKind,
               ids: [preview.id],
+              transform: {
+                position: [0, 0, 0],
+                quaternion: [0, 0, 0, 1],
+                scale: [1, 1, 1],
+              },
               appearance: {color: '#63dcff'},
             },
           ],
@@ -575,6 +770,27 @@ const contextualToolPanel = new ContextualToolPanel(viewportHost, {
   onParameterInput: updateContextualToolParameter,
   onParameterCommit: commitContextualToolParameter,
   onAction: runContextualToolAction,
+});
+codeEditor.setParameterFocusHandler(() => {
+  const scope = viewport.sourceEvaluation();
+  const cursor = codeEditor.cursorSource();
+  if (
+    !scope ||
+    !cursor ||
+    contextualTool?.targetId !== scope.target.id ||
+    contextualTool.contextId !== scope.evaluation.contextId
+  )
+    return false;
+  const parameter = sourceParameterAt(
+    scope.target,
+    cursor.file,
+    cursor.offset,
+    ref => codeEditor.resolveSourceRef(ref),
+  );
+  return (
+    parameter !== undefined &&
+    contextualToolPanel.focusParameter(parameter.name)
+  );
 });
 const toolEngine = new ToolEngine({
   sourceVersion: () => codeEditor.sourceVersion(),
@@ -621,11 +837,11 @@ codeEditor.onCursorOffset(({file, offset}) => {
     undefined,
     preferredEvaluationContextId,
   );
-  if (!matched && currentModule) {
-    const designContext = designContextAt(currentModule, file, offset);
+  if (!matched && previewState.module) {
+    const designContext = designContextAt(previewState.module, file, offset);
     if (
       designContext &&
-      currentModule.activeDesignContextId !== designContext.id
+      previewState.module.activeDesignContextId !== designContext.id
     ) {
       activateDesignContext(designContext.id);
       return;
@@ -643,8 +859,8 @@ codeEditor.onCursorOffset(({file, offset}) => {
   const occurrence = viewport.getSelected();
   if (occurrence) {
     selectOccurrence(occurrence, false);
-  } else if (currentModule) {
-    renderDesignArguments(currentModule);
+  } else if (previewState.module) {
+    renderDesignArguments(previewState.module);
   }
   syncContextualTool(matched);
 });
@@ -658,6 +874,7 @@ codeEditor.onEditorActivation(cursor => {
     );
 });
 codeEditor.onActiveFile((path, reason) => {
+  activatePreviewFile(reason === 'reset');
   pendingAgentFollow = undefined;
   selectedDesignInvocation = undefined;
   finishContextualTool();
@@ -670,8 +887,30 @@ codeEditor.onActiveFile((path, reason) => {
   requestModelUpdate(0);
 });
 
-agentProject.onAgentUpdate(update => {
-  if (agentPanel?.followingAgentId !== update.agentId || !update.cursor) return;
+function followAgentUpdate(update: AgentUpdate): void {
+  if (agentPanel?.followingAgentId !== update.agentId) return;
+  pendingAgentFollow = undefined;
+  fileOpenVersion++;
+  if (update.kind !== 'apply') {
+    pendingAgentFollow = update;
+    const cancelled = () =>
+      pendingAgentFollow !== update ||
+      agentPanel?.followingAgentId !== update.agentId;
+    if (update.kind === 'list') setProjectExplorerExpanded(true);
+    const navigation =
+      update.kind === 'read'
+        ? activateProjectFile(update.path, 'tab', false, cancelled)
+        : projectDirectory.focusDirectory(update.path, cancelled);
+    void navigation
+      .catch(error => {
+        if (!cancelled()) projectDirectory.showError(error);
+      })
+      .finally(() => {
+        if (pendingAgentFollow === update) pendingAgentFollow = undefined;
+      });
+    return;
+  }
+  if (!update.cursor) return;
   finishContextualTool();
   activeCompletionFocus = undefined;
   window.clearTimeout(completionPreviewTimer);
@@ -680,9 +919,7 @@ agentProject.onAgentUpdate(update => {
   const invocation = {
     file: update.cursor.file,
     offset: update.cursor.start,
-    ...(update.input.cursor?.arguments === undefined
-      ? {}
-      : {arguments: update.input.cursor.arguments}),
+    ...(update.arguments === undefined ? {} : {arguments: update.arguments}),
   };
   selectedDesignInvocation =
     invocation.arguments === undefined ? undefined : invocation;
@@ -690,6 +927,13 @@ agentProject.onAgentUpdate(update => {
   preferredEvaluationContextId = undefined;
   pendingAgentFollow = update;
   void runModel(invocation);
+}
+
+agentProject.onAgentUpdate(followAgentUpdate);
+agentPanel.onFollowChange(agentId => {
+  pendingAgentFollow = undefined;
+  const update = agentId && agentProject.latestAgentUpdate(agentId);
+  if (update) followAgentUpdate(update);
 });
 
 // A later user gesture takes precedence over a view requested before compilation.
@@ -704,27 +948,29 @@ for (const event of ['pointerdown', 'wheel', 'keydown'])
 
 window.addEventListener('popstate', () => {
   const path = filePathFromRoute(window.location.hash);
-  if (!path || !codeEditor.filePaths().includes(path)) {
+  if (window.location.hash !== fileRoute(undefined) && !path) {
     replaceFileRoute(codeEditor.currentFile());
     return;
   }
-  applyingFileRoute = true;
-  try {
-    codeEditor.switchFile(path);
-  } finally {
-    applyingFileRoute = false;
-  }
+  void activateProjectFile(path, false, true).catch(error => {
+    projectDirectory.showError(error);
+    replaceFileRoute(codeEditor.currentFile());
+  });
 });
 
-newFileButton.addEventListener('click', () => {
-  const path = window.prompt('New file path')?.trim();
-  if (!path) return;
-  try {
-    codeEditor.createFile(path, "import {box} from '@code3d/core';\n\n");
-  } catch (error) {
-    showProjectIssue(error);
-  }
-});
+newFileButton.addEventListener(
+  'click',
+  () => void projectDirectory.create('file'),
+);
+newFolderButton.addEventListener(
+  'click',
+  () => void projectDirectory.create('directory'),
+);
+searchFilesButton.addEventListener('click', () => projectDirectory.search());
+refreshFilesButton.addEventListener(
+  'click',
+  () => void projectDirectory.refresh(),
+);
 openFolderButton.addEventListener('click', () => {
   void openProjectDirectory();
 });
@@ -737,14 +983,6 @@ reloadFolderButton.addEventListener('click', () => {
 browserStorageButton.addEventListener('click', () => {
   void useBrowserStorage();
 });
-contextRenameFile.addEventListener('click', () => renameContextFile());
-contextDeleteFile.addEventListener('click', () => deleteContextFile());
-window.addEventListener('pointerdown', event => {
-  if (!projectContextMenu.contains(event.target as Node)) {
-    hideProjectContextMenu();
-  }
-});
-
 resetButton.addEventListener('click', () => {
   if (
     !window.confirm(
@@ -761,11 +999,6 @@ window.addEventListener('keydown', event => {
     event.preventDefault();
     return;
   }
-  if (event.key === 'Escape' && !projectContextMenu.hidden) {
-    hideProjectContextMenu();
-    event.preventDefault();
-    return;
-  }
   const historyAction = sourceHistoryAction(event);
   if (historyAction && !codeEditor.ownsFocus()) {
     codeEditor.runHistoryAction(historyAction);
@@ -779,6 +1012,8 @@ window.addEventListener('keydown', event => {
 
 renderProjectLocation();
 renderProjectNavigation();
+void projectDirectory.refresh();
+if (initialFileError) projectDirectory.showError(initialFileError);
 runModel();
 
 function renderProjectLocation(): void {
@@ -813,7 +1048,9 @@ async function openProjectDirectory(): Promise<void> {
     const handle = await pickProjectDirectory();
     if (!handle) return;
     const target = await openDirectoryProjectFileSystem(handle);
-    await target.initialize(codeEditor.project());
+    await target.initialize(() =>
+      copyProjectWorkspace(projectFileSystem, target),
+    );
     await target.syncDirectory(bundledExamples);
     const workspaceId = await rememberProjectDirectory(handle);
     openDirectoryWorkspace(workspaceId);
@@ -887,26 +1124,52 @@ async function resetExamples(): Promise<void> {
   try {
     await agentProject.flush();
     await agentProject.update(async () => {
-      const project = await projectFileSystem.resetDirectory(bundledExamples);
-      codeEditor.replaceDirectory(project, bundledExamples.directory);
+      await projectFileSystem.resetDirectory(bundledExamples);
+      codeEditor.replaceDirectory(
+        {files: bundledExamples.files},
+        bundledExamples.directory,
+      );
+      await projectDirectory.refresh();
     });
   } catch (error) {
     showProjectIssue(error);
   }
 }
 
-function initialFilePath(project: ModelProject, hash: string): string {
-  const routed = filePathFromRoute(hash);
-  if (routed && project.files.some(file => file.path === routed)) return routed;
-  const paths = project.files.map(file => file.path);
-  return (
+async function loadInitialProject(): Promise<ModelProject> {
+  if (window.location.hash === fileRoute(undefined)) return {files: []};
+  if (requestedFile) {
+    try {
+      return {
+        files: [
+          {
+            path: requestedFile,
+            source: await readProjectTextFile(projectFileSystem, requestedFile),
+          },
+        ],
+      };
+    } catch (error) {
+      initialFileError = error;
+    }
+  }
+  const entries = await listProjectEntries(projectFileSystem, '/');
+  const paths = entries
+    .filter(entry => entry.kind === 'file' && isSourceFile(entry.path))
+    .map(entry => entry.path);
+  const path =
     ['/model.ts', '/index.ts'].find(path => paths.includes(path)) ??
-    paths.find(path => !path.endsWith('.d.ts')) ??
-    paths[0]!
-  );
+    paths.find(path => !/\.d\.[cm]?ts$/.test(path));
+  return {
+    files: path
+      ? [{path, source: await readProjectTextFile(projectFileSystem, path)}]
+      : [],
+  };
 }
 
-function updateFileRoute(path: string, reason: ActiveFileChangeReason): void {
+function updateFileRoute(
+  path: string | undefined,
+  reason: ActiveFileChangeReason,
+): void {
   if (reason === 'switch') {
     pushFileRoute(path);
   } else {
@@ -914,7 +1177,7 @@ function updateFileRoute(path: string, reason: ActiveFileChangeReason): void {
   }
 }
 
-function pushFileRoute(path: string): void {
+function pushFileRoute(path: string | undefined): void {
   const route = fileRoute(path);
   if (window.location.hash === route) return;
   const url = new URL(window.location.href);
@@ -922,7 +1185,7 @@ function pushFileRoute(path: string): void {
   window.history.pushState(null, '', url);
 }
 
-function replaceFileRoute(path: string): void {
+function replaceFileRoute(path: string | undefined): void {
   const route = fileRoute(path);
   if (window.location.hash === route) return;
   const url = new URL(window.location.href);
@@ -943,7 +1206,8 @@ function setProjectExplorerExpanded(expanded: boolean): void {
 
 function renderProjectNavigation(): void {
   const active = codeEditor.currentFile();
-  projectDirectory.update(codeEditor.filePaths(), active);
+  requiredElement('editor-empty-state').hidden = active !== undefined;
+  projectDirectory.setActiveFile(active);
   editorTabs.replaceChildren(
     ...codeEditor.openedFiles().map(path => {
       const tab = document.createElement('span');
@@ -973,45 +1237,40 @@ function renderProjectNavigation(): void {
   );
 }
 
-function showProjectContextMenu(path: string, x: number, y: number): void {
-  contextFilePath = path;
-  contextDeleteFile.disabled = codeEditor.filePaths().length === 1;
-  projectContextMenu.style.left = `${x}px`;
-  projectContextMenu.style.top = `${y}px`;
-  projectContextMenu.hidden = false;
-}
-
-function hideProjectContextMenu(): void {
-  projectContextMenu.hidden = true;
-  contextFilePath = undefined;
-}
-
-function renameContextFile(): void {
-  const current = contextFilePath;
-  hideProjectContextMenu();
-  if (!current) return;
-  const path = window.prompt('Rename file', current)?.trim();
-  if (!path || path === current) return;
-  try {
-    codeEditor.renameFile(current, path);
-  } catch (error) {
-    showProjectIssue(error);
+async function activateProjectFile(
+  path: string | undefined,
+  takeFocus: boolean | 'tab' = false,
+  fromHistory = false,
+  cancelled: () => boolean = () => false,
+): Promise<void> {
+  const version = ++fileOpenVersion;
+  if (cancelled()) return;
+  if (path && !codeEditor.fileState(path)) {
+    let source: string;
+    try {
+      source = await readProjectTextFile(
+        codeEditor.fileReader ?? projectFileSystem,
+        path,
+      );
+    } catch (error) {
+      if (version !== fileOpenVersion || cancelled()) return;
+      throw error;
+    }
+    if (version !== fileOpenVersion || cancelled()) return;
+    codeEditor.loadFile(path, source);
   }
-}
-
-function deleteContextFile(): void {
-  const current = contextFilePath;
-  hideProjectContextMenu();
-  if (
-    !current ||
-    !window.confirm(`Delete ${current}? Import paths will not be rewritten.`)
-  ) {
-    return;
-  }
+  applyingFileRoute = fromHistory;
   try {
-    codeEditor.deleteFile(current);
-  } catch (error) {
-    showProjectIssue(error);
+    codeEditor.switchFile(path, takeFocus === true);
+    if (takeFocus === 'tab') {
+      const tab = editorTabs.querySelector<HTMLButtonElement>(
+        '.editor-tab.active > button',
+      );
+      tab?.scrollIntoView({block: 'nearest', inline: 'nearest'});
+      tab?.focus({preventScroll: true});
+    }
+  } finally {
+    applyingFileRoute = false;
   }
 }
 
@@ -1025,23 +1284,33 @@ function showProjectIssue(error: unknown): void {
 function activeDesignContext(
   cursor = codeEditor.cursorSource(),
 ): DesignContext | undefined {
-  return selectedDesignInvocation
-    ? {...selectedDesignInvocation, ...cursor}
-    : selectedDesignContextId;
+  if (selectedDesignInvocation) return {...selectedDesignInvocation, ...cursor};
+  const context = previewState.module?.designArguments.find(
+    context => context.id === selectedDesignContextId,
+  );
+  return context && {file: context.functionRef.file, id: context.id};
 }
 
 async function runModel(designContext = activeDesignContext()): Promise<void> {
   window.clearTimeout(compileTimer);
   compileTimer = undefined;
   viewport.restoreTransientPreview();
-  const revision = ++runRevision;
   const sourceVersion = codeEditor.sourceVersion();
-  const file = codeEditor.currentFile();
-  const following = pendingAgentFollow;
+  activatePreviewFile();
+  const request = previewState.begin(sourceVersion);
+  const file = previewState.file;
+  if (!file) {
+    compiler.cancel();
+    errorBar.hidden = true;
+    restoreModelStatus();
+    return;
+  }
+  const following =
+    pendingAgentFollow?.kind === 'apply' ? pendingAgentFollow : undefined;
   const designContextId =
-    typeof designContext === 'string' ? designContext : undefined;
+    designContext && 'id' in designContext ? designContext.id : undefined;
   compilingDesignContextId = designContextId;
-  setViewportStatus('busy', 'Preparing model');
+  setViewportStatus('busy', 'Updating model');
   if (designContextId) {
     renderCurrentPanels();
   }
@@ -1055,24 +1324,8 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
       designContext,
       phase => setViewportStatus('busy', compilationPhaseLabels[phase]),
     );
-    if (
-      revision !== runRevision ||
-      sourceVersion !== codeEditor.sourceVersion()
-    ) {
-      return;
-    }
-    currentModule = nextModule;
-    currentModuleSourceVersion = sourceVersion;
-    modelStatus = nextModule.diagnostic ? 'error' : 'ready';
-    if (
-      !(await presentModelDiagnostic(
-        nextModule.diagnostic,
-        revision,
-        sourceVersion,
-      ))
-    ) {
-      return;
-    }
+    if (!previewState.isCurrent(request, codeEditor.sourceVersion())) return;
+    previewState.accept(request, nextModule);
     codeEditor.setDesignArguments(nextModule.designArguments);
     sketchEditor.retain(
       nextModule.diagnostic,
@@ -1093,26 +1346,20 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
     }
     const cursor = codeEditor.cursorSource();
     const matched = viewport.renderModule(
-      currentModule,
+      nextModule,
       selectedKey,
       cursor ? {...cursor, contextId: preferredEvaluationContextId} : undefined,
     );
-    if (previewFile !== file) {
-      previewFile = file;
-      // Reset after replacing the scene: callbacks while clearing it still
-      // observe the previous file's geometry and must not dismiss this hint.
-      hasPreviewedTarget = false;
-    }
     if (cursor) {
       if (!matched) {
         const designContext = designContextAt(
-          currentModule,
+          nextModule,
           cursor.file,
           cursor.offset,
         );
         if (
           designContext &&
-          currentModule.activeDesignContextId !== designContext.id
+          nextModule.activeDesignContextId !== designContext.id
         ) {
           activateDesignContext(designContext.id);
           return;
@@ -1126,88 +1373,114 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
       selectOccurrence(selected, false);
     } else {
       renderElementsPanel();
-      renderDesignArguments(currentModule);
+      renderDesignArguments(nextModule);
     }
     syncContextualTool();
     if (following && pendingAgentFollow === following) {
       pendingAgentFollow = undefined;
-      const render = following.input.render;
       if (
         agentPanel?.followingAgentId === following.agentId &&
         !sketchEditor.hasTarget &&
-        typeof render === 'object' &&
-        render.view
+        following.view
       )
-        viewport.setView(resolveRenderView(render.view));
+        viewport.setView(resolveRenderView(following.view));
     }
+    if (!(await presentModelDiagnostic(request))) return;
     restoreModelStatus();
   } catch (error) {
-    if (revision !== runRevision) {
-      return;
-    }
+    if (!previewState.isCurrent(request, codeEditor.sourceVersion())) return;
     compilingDesignContextId = undefined;
-    renderCurrentPanels();
-    modelStatus = 'error';
-    restoreModelStatus();
     const diagnostic =
       error instanceof ModelDiagnosticError ? error.diagnostic : undefined;
-    if (diagnostic) {
-      await presentModelDiagnostic(diagnostic, revision, sourceVersion);
-    } else {
-      currentDiagnostic = undefined;
-      codeEditor.setModelDiagnostic();
-      refreshViewportFeedback();
+    previewState.fail(diagnostic);
+    finishContextualTool();
+    sketchEditor.invalidate();
+    renderCurrentPanels();
+    if (!(await presentModelDiagnostic(request))) return;
+    if (!diagnostic) {
       errorBar.textContent =
         error instanceof Error ? error.message : String(error);
-      errorBar.hidden = false;
+      errorBar.hidden = error instanceof PackageInstallationError;
     }
+    restoreModelStatus();
   }
 }
 
+function activatePreviewFile(reload = false): void {
+  const file = codeEditor.currentFile();
+  previewState.activate(
+    file && codeEditor.isModelFile(file) ? file : undefined,
+    () => {
+      compiler.cancel();
+      sourcePreviewDiagnostic = undefined;
+      compilingDesignContextId = undefined;
+      codeEditor.setModelDiagnostics();
+      codeEditor.setDesignArguments([]);
+      codeEditor.trackSourceRefs([]);
+      sketchEditor.hide();
+      viewport.renderModule(null);
+      renderElementsPanel();
+      renderDesignArguments(null);
+      errorBar.hidden = true;
+    },
+    reload,
+  );
+}
+
 async function presentModelDiagnostic(
-  diagnostic: ModelDiagnostic | undefined,
-  revision: number,
-  sourceVersion: number,
+  request: ModelPreviewRequest,
 ): Promise<boolean> {
-  codeEditor.setModelDiagnostic(diagnostic);
-  currentDiagnostic = diagnostic;
+  const {diagnostic, warnings} = previewState;
+  codeEditor.setModelDiagnostics([
+    ...(diagnostic ? [diagnostic] : []),
+    ...warnings,
+  ]);
   refreshViewportFeedback();
   if (!diagnostic || diagnostic.sourceRef) {
     errorBar.hidden = true;
     return true;
   }
   const hasLanguageError = await codeEditor.hasLanguageError();
-  if (
-    revision !== runRevision ||
-    sourceVersion !== codeEditor.sourceVersion()
-  ) {
+  if (!previewState.isCurrent(request, codeEditor.sourceVersion()))
     return false;
+  errorBar.hidden = hasLanguageError;
+  if (!hasLanguageError) {
+    errorBar.textContent = [diagnostic.summary, diagnostic.details]
+      .filter(Boolean)
+      .join('\n');
   }
-  if (hasLanguageError) {
-    errorBar.hidden = true;
-    return true;
-  }
-  errorBar.textContent = [diagnostic.summary, diagnostic.details]
-    .filter(Boolean)
-    .join('\n');
-  errorBar.hidden = false;
   return true;
+}
+
+function activeViewportDiagnostic(): ModelDiagnostic | undefined {
+  const scope = sketchEditor.diagnosticScope;
+  return (
+    viewportDiagnostic(
+      previewState.diagnostic,
+      sourcePreviewDiagnostic,
+      scope,
+    ) ??
+    [...previewState.warnings]
+      .sort(
+        (a, b) =>
+          Number(!!b.relatedSketchIds?.includes(scope?.at(-1)?.id ?? '')) -
+          Number(!!a.relatedSketchIds?.includes(scope?.at(-1)?.id ?? '')),
+      )
+      .find(warning => viewportDiagnostic(warning, undefined, scope))
+  );
 }
 
 function refreshViewportFeedback(): void {
   refreshViewportEmptyState();
-  const diagnostic = viewportDiagnostic(
-    currentDiagnostic,
-    sourcePreviewDiagnostic,
-    sketchEditor.diagnosticScope,
-  );
+  const diagnostic = activeViewportDiagnostic();
   viewportDiagnosticStack.replaceChildren();
   viewportDiagnosticStack.hidden = !diagnostic;
-  if (viewportStatus.dataset.state !== 'busy') restoreModelStatus();
+  if (!previewState.busy) restoreModelStatus();
   if (!diagnostic) return;
 
   const item = document.createElement('section');
   item.className = 'viewport-diagnostic';
+  item.dataset.severity = diagnostic.severity ?? 'error';
   const summary = document.createElement('strong');
   summary.textContent = diagnostic.summary;
   item.append(summary);
@@ -1215,6 +1488,31 @@ function refreshViewportFeedback(): void {
     const details = document.createElement('p');
     details.textContent = diagnostic.details;
     item.append(details);
+  }
+  for (const action of diagnostic.actions ?? []) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'viewport-diagnostic-action';
+    button.textContent = action.label;
+    const active = sketchEditor.diagnosticScope?.at(-1)?.id;
+    const upstream =
+      !!diagnostic.relatedSketchIds?.length &&
+      (!active || !diagnostic.relatedSketchIds.includes(active));
+    button.disabled =
+      upstream || previewState.sourceVersion !== codeEditor.sourceVersion();
+    if (upstream) button.title = 'Open the owning sketch to apply this fix.';
+    button.addEventListener('click', () => {
+      if (previewState.sourceVersion !== codeEditor.sourceVersion()) {
+        refreshViewportFeedback();
+        return;
+      }
+      if (
+        commitToolSession(toolEngine.begin('diagnostic-fix'), action.intent)
+      ) {
+        refreshViewportFeedback();
+      }
+    });
+    item.append(button);
   }
   viewportDiagnosticStack.append(item);
 }
@@ -1232,8 +1530,8 @@ function handleCompletionFocus(focus: CompletionFocus | undefined): void {
     return;
   }
 
-  if (currentModule) {
-    const match = completionPreviewTarget(currentModule, focus);
+  if (previewState.module) {
+    const match = completionPreviewTarget(previewState.module, focus);
     if (match) {
       if (
         viewport.previewCompletion(
@@ -1252,12 +1550,12 @@ function handleCompletionFocus(focus: CompletionFocus | undefined): void {
     return;
   }
 
-  runRevision += 1;
+  previewState.invalidate();
   compiler.cancel();
   window.clearTimeout(compileTimer);
   compileTimer = undefined;
   setViewportStatus('busy', `Rendering preview · ${focus.memberName}`);
-  const revision = runRevision;
+  const revision = previewState.revision;
   completionPreviewTimer = window.setTimeout(() => {
     completionPreviewTimer = undefined;
     void runCompletionPreview(focus, revision);
@@ -1288,7 +1586,7 @@ async function runCompletionPreview(
         ),
     );
     if (
-      revision !== runRevision ||
+      revision !== previewState.revision ||
       activeCompletionFocus !== focus ||
       preview.sourceVersion !== codeEditor.sourceVersion()
     ) {
@@ -1310,14 +1608,14 @@ async function runCompletionPreview(
     }
     restoreModelStatus();
   } catch {
-    if (revision === runRevision && activeCompletionFocus === focus) {
+    if (revision === previewState.revision && activeCompletionFocus === focus) {
       restoreModelStatus();
     }
   }
 }
 
 function resumeModelAfterCompletion(): void {
-  runRevision += 1;
+  previewState.invalidate();
   compiler.cancel();
   setViewportStatus('busy', 'Updating model');
   scheduleModelRun(180);
@@ -1339,9 +1637,11 @@ function requestModelUpdate(delay: number): void {
   viewport.restoreTransientPreview();
   renderElementsPanel(viewport.getSelected());
   setViewportStatus('busy', 'Updating model');
-  runRevision += 1;
+  previewState.invalidate();
   compiler.cancel();
-  scheduleModelRun(delay);
+  refreshViewportFeedback();
+  if (codeEditor.currentFile()) scheduleModelRun(delay);
+  else void runModel();
 }
 
 function selectCompiledEvaluationContext(
@@ -1362,13 +1662,13 @@ function activateDesignContext(contextId: string): void {
   selectedDesignInvocation = undefined;
   preferredEvaluationContextId = contextId;
   selectedDesignContextId = contextId;
-  void runModel(contextId);
+  void runModel();
 }
 
 function cancelPendingDesignCompile(): void {
   if (!compilingDesignContextId) return;
   compilingDesignContextId = undefined;
-  runRevision += 1;
+  previewState.invalidate();
   compiler.cancel();
   restoreModelStatus();
 }
@@ -1411,7 +1711,7 @@ function containsSourceRef(
 
 function selectOccurrence(occurrence: Occurrence, revealSource: boolean): void {
   renderElementsPanel(occurrence);
-  if (currentModule) renderDesignArguments(currentModule);
+  if (previewState.module) renderDesignArguments(previewState.module);
 
   if (revealSource) {
     const sourceRef = primarySource(occurrence.node);
@@ -1438,8 +1738,8 @@ function renderElementsPanel(occurrence?: Occurrence): void {
 }
 
 function drillToObjectSource(node: ModelSnapshotObject): void {
-  if (!currentModule) return;
-  const compiledSource = preferredObjectSource(currentModule, node);
+  if (!previewState.module) return;
+  const compiledSource = preferredObjectSource(previewState.module, node);
   if (!compiledSource) return;
   const sourceRef =
     codeEditor.resolveSourceRef(compiledSource) ?? compiledSource;
@@ -1484,11 +1784,12 @@ function preferredObjectSource(
   );
 }
 
-function renderDesignArguments(module: ModelModule): void {
-  const functionId = inspectedFunctionId(module);
-  const contexts = module.designArguments.filter(
-    context => context.functionId === functionId,
-  );
+function renderDesignArguments(module: ModelModule | null): void {
+  const functionId = module ? inspectedFunctionId(module) : undefined;
+  const contexts =
+    module?.designArguments.filter(
+      context => context.functionId === functionId,
+    ) ?? [];
   designArgumentsCount.textContent = String(contexts.length);
   designArgumentsFunction.textContent =
     contexts[0]?.functionName ?? 'No function context';
@@ -1546,29 +1847,30 @@ function designArgumentCall(context: DesignArgumentContext): string {
 function renderCurrentPanels(): void {
   const occurrence = viewport.getSelected();
   renderElementsPanel(occurrence);
-  if (!occurrence && currentModule) renderDesignArguments(currentModule);
+  if (!occurrence && previewState.module)
+    renderDesignArguments(previewState.module);
 }
 
 function syncContextualTool(sourceTargetFocused = true): void {
   const scope = viewport.sourceEvaluation();
   if (
     sourceTargetFocused &&
-    currentModule &&
-    currentModuleSourceVersion === codeEditor.sourceVersion() &&
+    previewState.module &&
+    previewState.sourceVersion === codeEditor.sourceVersion() &&
     scope?.evaluation.sketchIds?.[0]
   ) {
     sketchEditor.show(
       scope.evaluation.sketchIds[0],
-      currentModule.sketches,
+      previewState.module.sketches,
       scope.target.sourceRef,
     );
   } else if (
     (!sourceTargetFocused ||
-      currentModuleSourceVersion === codeEditor.sourceVersion()) &&
+      previewState.sourceVersion === codeEditor.sourceVersion()) &&
     !sketchEditor.retain(
-      currentDiagnostic,
+      previewState.diagnostic,
       codeEditor.cursorSource(),
-      currentModule?.sketches ?? new Map(),
+      previewState.module?.sketches ?? new Map(),
     )
   ) {
     sketchEditor.hide();
@@ -1586,7 +1888,7 @@ function syncContextualTool(sourceTargetFocused = true): void {
     previous.callId === scope.target.tool.callId &&
     previous.contextId === scope.evaluation.contextId &&
     previous.signature.id === scope.target.tool.signature.id;
-  if (currentModuleSourceVersion !== codeEditor.sourceVersion()) {
+  if (previewState.sourceVersion !== codeEditor.sourceVersion()) {
     if (previous && !continuesPrevious) finishContextualTool();
     return;
   }
@@ -1725,7 +2027,7 @@ function commitContextualToolParameter(
   if (invalid || !parameter.binding) return false;
   const appliedValue = tool.appliedValues.get(name);
   if (appliedValue !== undefined && Math.abs(value! - appliedValue) < 1e-9) {
-    return currentModuleSourceVersion !== codeEditor.sourceVersion();
+    return previewState.sourceVersion !== codeEditor.sourceVersion();
   }
   const intent = contextualParameterIntent(parameter);
   if (!intent) return false;
@@ -2398,7 +2700,7 @@ function interruptCompileForTool(): boolean {
   const scheduled = compileTimer !== undefined;
   const compiling = compiler.isCompiling();
   if (!scheduled && !compiling) return false;
-  runRevision += 1;
+  previewState.invalidate();
   window.clearTimeout(compileTimer);
   compileTimer = undefined;
   compiler.cancel();
@@ -2416,6 +2718,10 @@ function parameterIntent(target: ParameterTarget, value: number): ToolIntent {
 
 function handlePositionTool(event: TransformGizmoEvent): void {
   if (event.kind === 'begin') {
+    if (previewState.sourceVersion === undefined) {
+      viewport.cancelPositionTool();
+      return;
+    }
     positionToolSession?.cancel();
     positionToolInterruptedCompile = interruptCompileForTool();
     positionToolSession = toolEngine.begin(
@@ -2562,11 +2868,8 @@ function commitToolSession(
   intent: ToolIntent,
   options: ToolCommitOptions = {},
 ): boolean {
-  const compiledSourceVersion = currentModuleSourceVersion;
-  currentModuleSourceVersion = undefined;
-  const result = session.commit(intent, options);
+  const result = previewState.editSource(() => session.commit(intent, options));
   if (result.status !== 'committed') {
-    currentModuleSourceVersion = compiledSourceVersion;
     showToolIssue(result.reason);
     return false;
   }
@@ -2697,6 +3000,7 @@ function setViewportStatus(
   state: 'busy' | 'ready' | 'error',
   label: string,
 ): void {
+  previewState.busy = state === 'busy';
   viewportStatus.dataset.state = state;
   viewportStatusLabel.textContent = label;
   viewportStatus.setAttribute('aria-busy', String(state === 'busy'));
@@ -2704,22 +3008,24 @@ function setViewportStatus(
 }
 
 function refreshViewportEmptyState(): void {
-  hasPreviewedTarget ||=
-    viewport.hasRenderableGeometry() || sketchEditor.hasTarget;
-  const empty = !hasPreviewedTarget;
-  viewportHost.dataset.empty = String(empty);
-  viewportEmptyState.setVisible(
-    empty && viewportStatus.dataset.state !== 'busy',
+  previewState.observeTarget(
+    viewport.hasRenderableGeometry() ||
+      viewport.sourceEvaluation() !== undefined ||
+      sketchEditor.hasTarget,
   );
+  const empty = !previewState.hasPreviewedTarget;
+  viewportHost.dataset.empty = String(empty);
+  viewportEmptyState.setVisible(empty && !previewState.busy);
 }
 
 function restoreModelStatus(): void {
   const sketch = sketchEditor.diagnosticScope;
+  const diagnostic = activeViewportDiagnostic();
   const state = sketch
-    ? viewportDiagnostic(currentDiagnostic, sourcePreviewDiagnostic, sketch)
+    ? diagnostic && diagnostic.severity !== 'warning'
       ? 'error'
       : 'ready'
-    : modelStatus;
+    : previewState.status;
   setViewportStatus(
     state,
     state === 'error'

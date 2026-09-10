@@ -3,9 +3,10 @@ title: Using the App
 description: Navigate between source expressions, model objects, and visual tools.
 ---
 
-The App places the project files, TypeScript editor, and viewport beside one
-another. The active file is the execution root. Open any source file to preview
-the models it produces.
+The App places the project files, text editor, and viewport beside one
+another. An active TypeScript or JavaScript file is the execution root. Open a
+source file to preview the models it produces; other text files open without
+running a model.
 
 You can keep editing while a model is building. The App cancels the older
 revision and builds the latest one, reusing completed geometry calculations.
@@ -24,8 +25,11 @@ This budget does not cap the total memory used by the browser tab.
 Use **Hide file explorer** beside the open-file tabs to give the editor more
 space; **Show file explorer** brings the project tree back. Click a folder to
 expand or collapse it, then select a file to open it. Open files remain
-available in the tabs while the explorer is hidden.
+available in the tabs while the explorer is hidden. You can close every tab,
+including the last one, to clear the editor and preview. Closing a tab keeps
+the file and its edits in the project; reopen it from the explorer.
 
+The file explorer starts at 256px unless you have already saved a custom width.
 Drag the file explorer's right edge to resize the tree, or the divider between
 the editor and viewport to resize the code pane. The App remembers both widths
 in this browser and fits them to the available window space. Resizing the tree
@@ -37,13 +41,62 @@ You can also focus **Resize file explorer** or **Resize code editor** with
 `Tab` and use `←` or `→`; hold `Shift` for larger steps, or use `Home` and `End`
 for the minimum and maximum widths. Press `Esc` during a drag to cancel it.
 
+## Manage project files
+
+The explorer shows files of every type and empty directories. Its default
+excludes match VS Code in the browser: `.git`, `.svn`, `.hg`, `.DS_Store`,
+`Thumbs.db`, and names ending in `.crswap` at every depth. `node_modules`,
+`.code3d`, `.vscode`, and other dotfiles remain visible. It does not apply
+`.gitignore` or workspace `files.exclude` settings. Installed package files and
+Code3D workspace metadata open read-only.
+
+Folder contents load when you expand them; opening a workspace does not walk
+its entire directory tree. Search discovers names in unopened folders without
+reading their contents. Single-child directory chains share a compact row once
+loaded, and large directories use a scrolling window of rows. Folder paths and
+file names remain complete; scroll horizontally to read names wider than the
+sidebar. The search box and explorer toolbar stay in place.
+
+Use **New file** or **New folder** in the explorer header or right-click menu.
+New entries go in the focused folder, or beside the focused file. Right-click
+an entry for **Rename**, **Cut**, **Copy**, **Paste**, and **Delete**. Drag selected
+entries onto a folder to move them. `Ctrl/Cmd` selects additional entries;
+`Shift` selects a range. With the explorer focused, use `F2` to rename,
+`Delete` to delete, and `Ctrl/Cmd+C`, `X`, or `V` for the project file clipboard.
+Use **Search files** or `Ctrl/Cmd+F` to find paths; `Esc` leaves search or cancels
+an inline rename. Arrow keys navigate the tree, and `Enter` or a double-click
+puts the selected text file's editor in focus.
+
+UTF-8 text files up to 8 MiB open in the editor. Markdown, JSON, CSS, HTML and
+YAML have language highlighting; unknown text formats use plain text. Binary
+files can be moved, copied and deleted, but do not open as text. Copies preserve
+file bytes and empty folders. Pasting a copy beside an existing name generates
+a name such as `part copy.ts`; moves reject occupied destinations.
+
+Changes save to the project's current storage. Renaming or moving a folder
+updates its open tabs and agent locations, but does not rewrite import paths.
+If an operation fails, the explorer shows the error and reloads the actual
+directory state. A batch may have completed some entries before a storage
+failure. Unsaved text must be saved successfully before moving or deleting
+entries. Use **Refresh files** to reread directory names after external changes;
+open documents keep their current text. Unsaved new files remain visible in the
+tree. **Reload folder** also reloads file contents after saving pending edits.
+
+Deleting every file leaves an empty project. You can create a new file there;
+refreshing does not restore files you deleted. Closing every tab also leaves
+the editor empty, while preserving the project's files.
+
 ## Move through a model
 
 When you load a file without a preview, the viewport shows **Select to preview**.
 Place the cursor in a model or sketch expression to open it. The hint stays
 dismissed after your first preview until you load another file. Moving outside
 an expression keeps the last 3D preview. An empty sketch still opens its drawing
-tools.
+tools. Selecting an editable call that fails also opens the viewport and its
+parameter panel, so you can correct the arguments without first producing a
+valid model. Dimension-based primitives such as `box()` provide
+[runtime defaults](../../reference/core/#runtime-defaults-while-editing) for a
+preview while the editor continues to report missing required arguments.
 
 - Place the editor cursor in an expression to inspect its runtime object.
 - Drag with the left mouse button to rotate freely using Arcball, including
@@ -123,6 +176,17 @@ handles require an operation with supported positioning or rotation semantics.
 
 ## Use a contextual tool
 
+Place the cursor inside a `box(x, y, z)` argument to highlight one edge along
+that dimension. An extrusion distance highlights an edge along the extrusion,
+or a finite distance guide when there is no matching edge. Edge arguments to
+`fillet` identify the original edges being rounded, and `originVertex`
+identifies the chosen vertex in the model's adjusted coordinates.
+
+The highlight follows the argument position: in `box(size, size, size)`, each
+use of `size` refers to a different dimension. Moving between dimensions
+preserves the view, and orbiting keeps the chosen edge stable. These guides
+appear in **Modeling** mode and disappear in **Render** mode.
+
 Tools depend on the call or value under the editor cursor. A primitive can
 offer dimension inputs; a fillet or chamfer can offer edge selection;
 an offset can offer a position tool. Origin operations offer a pivot marker
@@ -137,6 +201,11 @@ This does not attempt to invert the expression or change its inputs.
 
 Inputs select their contents on focus and apply valid changes after a short
 typing pause. `Enter`, `Tab`, or leaving the input also commits the value.
+With the editor cursor inside a parameter, press `Tab` to focus its visible,
+writable tool input and select its contents. This also works at the next
+available argument in an incomplete call. Completion lists and snippet tab
+stops keep their usual `Tab` behavior; selections and multiple cursors keep
+editor indentation. If there is no writable input, `Tab` behaves normally.
 You can fill an incomplete call such as `box()` in order with `Tab`; the next
 argument becomes available as each earlier one is added.
 

@@ -53,6 +53,136 @@ function projectFiles(
   };
 }
 
+test('model analysis follows imports independently of which editor documents are loaded', async () => {
+  const root = {
+    path: '/model.ts',
+    source: 'import {make} from "./helper.ts"; make(10);',
+  };
+  const helper = {
+    path: '/helper.ts',
+    source:
+      'import {box} from "@code3d/core";\n/** @code3d.arguments [4] */\nexport function make(size: number) { return box(size, 6, 8); }',
+  };
+  const unrelated = {
+    path: '/unrelated.ts',
+    source:
+      '/** @code3d.arguments nope */\nexport function unrelated() { return 1; }',
+  };
+  const files = projectFiles({
+    [root.path]: root.source,
+    [helper.path]: helper.source,
+  });
+  const compiler = new ProjectCompiler(
+    files,
+    packageTestFiles,
+    esbuild,
+    () => new Evaluator(),
+  );
+  try {
+    // No editor model is required for the entry or its dependencies.
+    const first = await compiler.compile({files: []}, root.path);
+    assert.equal(first.diagnostic, undefined);
+    assert.deepEqual(
+      first.designArguments.map(context => context.functionRef.file),
+      [helper.path],
+    );
+    assert.ok(
+      first.sourceTargets.some(
+        target => target.sourceRef.file === helper.path && target.tool,
+      ),
+    );
+    const opened = await compiler.compile(
+      {files: [root, helper, unrelated]},
+      root.path,
+    );
+    assert.equal(opened.diagnostic, undefined);
+    assert.deepEqual(opened.designArguments, first.designArguments);
+    assert.deepEqual(
+      defined(opened.fallback).mesh,
+      defined(first.fallback).mesh,
+    );
+
+    const edited = {...helper, source: helper.source.replace('6, 8', '20, 8')};
+    const changed = await compiler.compile(
+      {files: [root, edited, unrelated]},
+      root.path,
+    );
+    assert.equal(changed.diagnostic, undefined);
+    assert.notDeepEqual(
+      defined(changed.fallback).mesh,
+      defined(first.fallback).mesh,
+    );
+    const removed = await compiler.compile(
+      {files: [{...root, source: ''}, edited, unrelated]},
+      root.path,
+    );
+    assert.equal(removed.diagnostic, undefined);
+    assert.deepEqual(removed.designArguments, []);
+    assert.deepEqual(removed.sourceTargets, []);
+    assert.equal(removed.objects.size, 0);
+
+    await assert.rejects(
+      compiler.compile(
+        {files: [unrelated, {...root, source: 'import "./unrelated.ts";'}]},
+        root.path,
+      ),
+      error => {
+        assertModelDiagnosticError(error);
+        assert.match(error.diagnostic.summary, /array expression/);
+        assert.equal(error.diagnostic.sourceRef?.file, unrelated.path);
+        return true;
+      },
+    );
+  } finally {
+    compiler.dispose();
+  }
+});
+
+test('explicit design calls load their file and dependencies without opening editor documents', async () => {
+  const source =
+    'import {box} from "@code3d/core";\nimport {height} from "./dimensions.ts";\n/** @code3d.arguments [4] */\nexport function design(size: number) { return box(size, height, 8); }';
+  const files = projectFiles({
+    '/model.ts': '',
+    '/design.ts': source,
+    '/dimensions.ts': 'export const height = 6;',
+  });
+  const compiler = new ProjectCompiler(
+    files,
+    packageTestFiles,
+    esbuild,
+    () => new Evaluator(),
+  );
+  try {
+    const preset = await compiler.compile({files: []}, '/model.ts', {
+      file: '/design.ts',
+      offset: source.indexOf('box(size'),
+    });
+    assert.equal(preset.diagnostic, undefined);
+    const context = defined(preset.designArguments[0]);
+    assert.equal(preset.activeDesignContextId, context.id);
+    assert.ok(preset.objects.size > 0);
+    const selected = await compiler.compile({files: []}, '/model.ts', {
+      file: context.functionRef.file,
+      id: context.id,
+    });
+    assert.equal(selected.diagnostic, undefined);
+    assert.equal(selected.activeDesignContextId, context.id);
+    const temporary = await compiler.compile({files: []}, '/model.ts', {
+      file: '/design.ts',
+      offset: source.indexOf('box(size'),
+      arguments: '[12]',
+    });
+    assert.equal(temporary.diagnostic, undefined);
+    assert.ok(temporary.activeDesignContextId?.endsWith(':temporary'));
+    assert.ok(temporary.objects.size > 0);
+    const rootOnly = await compiler.compile({files: []}, '/model.ts');
+    assert.equal(rootOnly.objects.size, 0);
+    assert.deepEqual(rootOnly.designArguments, []);
+  } finally {
+    compiler.dispose();
+  }
+});
+
 test('shares a dependency across concurrent imports and a nested top-level dynamic import', async () => {
   const files = projectFiles({
     '/node_modules/shared/package.json': '{"type":"module","main":"index.js"}',

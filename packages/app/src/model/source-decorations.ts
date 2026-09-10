@@ -3,6 +3,7 @@ import {
   relationSourceDecoration,
 } from './element-decorations';
 import {originSourceDecoration} from './origin-decorations';
+import {parameterSourceDecoration} from './parameter-decorations';
 import {
   booleanOperationSourceDecoration,
   edgeModificationSourceDecoration,
@@ -14,4 +15,5 @@ export const sourceDecorationProviders = [
   elementSourceDecoration,
   relationSourceDecoration,
   originSourceDecoration,
+  parameterSourceDecoration,
 ];

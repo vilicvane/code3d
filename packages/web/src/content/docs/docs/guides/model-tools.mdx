@@ -32,7 +32,7 @@ Each `@code3d.param` names a parameter in the function's signature:
 - `kind: 'scalar'` describes a general numeric value without a more specific kind.
 - `label` can give the input a readable name.
 - `constraints` can supply `min`, `max`, `exclusiveMin`, and `exclusiveMax`.
-- `default` describes the value to display when an optional numeric argument
+- `default` describes the value to display when a numeric argument
   is omitted.
 
 For example:
@@ -66,9 +66,27 @@ same annotation from source and published `.d.ts` declarations, without
 extracting initializer values or applying annotations during ordinary execution.
 
 `default` accepts a finite numeric literal, including zero and negative values,
-on an optional numeric parameter. A `count` default must be an integer, and
+on a required or optional numeric parameter. A `count` default must be an integer, and
 every default must satisfy its parameter's constraints. Expressions such as
 `Math.PI` and variable references are not accepted in this static metadata.
+
+A runtime default can preserve a required public signature. Put the annotation
+on the overload and the default in its implementation:
+
+```ts
+import {circle} from '@code3d/core';
+
+/** @code3d.param radius {kind: 'length', default: 5} */
+function makeDisc(radius: number): ReturnType<typeof circle>;
+function makeDisc(radius = 5): ReturnType<typeof circle> {
+  return circle(radius);
+}
+```
+
+An incomplete `makeDisc()` call can preview using `5`, while TypeScript still
+asks for a radius. Built-in
+[dimension-based primitives](../../reference/core/#runtime-defaults-while-editing)
+use this behavior too.
 
 An explicit argument keeps its usual display and editing behavior, including
 `undefined` or an expression that produces no numeric result; it never falls
@@ -129,7 +147,8 @@ between position arrays and scalar dimensions, offsets, and angles.
 
 ### Missing and spread arguments
 
-An incomplete call can still show a panel. Omitted optional parameters show
+An incomplete or failed call can still show a panel, even before a file has
+produced any geometry. Omitted parameters with `default` show
 their annotated defaults; other missing arguments remain blank. Only the next
 argument that can be appended is editable, even when later parameters have
 default placeholders. Editing never fills intermediate positions with

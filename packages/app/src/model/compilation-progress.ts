@@ -1,6 +1,6 @@
 export const compilationPhaseLabels = {
   'loading-compiler': 'Loading compiler',
-  'loading-project': 'Loading project dependencies',
+  'preparing-project': 'Preparing project',
   'loading-runtime': 'Loading modeling engine',
   'initializing-runtime': 'Initializing modeling engine',
   'compiling-model': 'Compiling model',

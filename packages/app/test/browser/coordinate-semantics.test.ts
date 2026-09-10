@@ -10,6 +10,51 @@ declare const window: Window & {
 };
 
 test(
+  'a failed compilation retains geometry but prevents dragging stale spatial bindings',
+  {timeout: 90_000},
+  async t => {
+    const {page, errors} = await openApp(t);
+    const source =
+      "import {box} from '@code3d/core';\nexport const part = box(24, 6, 14).originOffset(2, 3, 4);";
+    await setSource(page, source, 'originOffset');
+    const before = await state(page);
+    const broken = source + '\nconst incomplete = ;';
+    await page.evaluate(source => {
+      const editor = window.coordinateApp.codeEditor.editor;
+      editor.getModel()!.setValue(source);
+      editor.setPosition(
+        editor.getModel()!.getPositionAt(source.indexOf('originOffset') + 1),
+      );
+    }, broken);
+    await page.locator('#viewport-status[data-state=error]').waitFor();
+    const handle = await xHandle(page);
+    await page.mouse.move(handle.x, handle.y);
+    await page.mouse.down();
+    const pressed = await state(page);
+    await page.mouse.move(
+      handle.x + handle.dx * 30,
+      handle.y + handle.dy * 30,
+      {steps: 4},
+    );
+    await page.mouse.up();
+    assert.equal(pressed.active, false);
+    const after = await state(page);
+    assert.equal(after.source, broken);
+    assert.equal(after.preview, undefined);
+    assert.deepEqual(after.geometry, before.geometry);
+    await setSource(page, source, 'originOffset');
+    const recovered = await xHandle(page);
+    await page.mouse.move(recovered.x, recovered.y);
+    await page.mouse.down();
+    assert.equal((await state(page)).active, true);
+    await page.keyboard.press('Escape');
+    await page.mouse.up();
+    assert.equal((await state(page)).source, source);
+    assert.deepEqual(errors, []);
+  },
+);
+
+test(
   'origin drags freeze their input frame, commit coordinates and support cancellation and undo',
   {timeout: 120_000},
   async t => {
@@ -534,6 +579,7 @@ async function waitVertexSelection(page: Page, id: number) {
 }
 
 async function vertexState(page: Page) {
+  await cameraIdle(page);
   return page.evaluate(() => {
     const {viewport, codeEditor} = window.coordinateApp;
     const selection = viewport['topologySelection']!;
@@ -606,6 +652,9 @@ async function setSource(page: Page, source: string, method: string) {
     return (target?.tool?.signature.name ?? target?.operation?.kind) === method;
   }, method);
   await page.getByText('Ready', {exact: true}).waitFor();
+  // Scene memory intentionally retains zoom across geometry edits. These
+  // picking tests need every corner inside the canvas, including scaled inputs.
+  await page.evaluate(() => window.coordinateApp.viewport.fit());
 }
 
 async function state(page: Page) {
@@ -663,7 +712,15 @@ async function assertOriginForeground(page: Page) {
   );
 }
 
+async function cameraIdle(page: Page) {
+  await page.waitForFunction(() => {
+    const controls = window.coordinateApp.viewport['controls'];
+    return !controls['transition'] && controls['_animationId'] === -1;
+  });
+}
+
 async function xHandle(page: Page) {
+  await cameraIdle(page);
   return page.evaluate(() => {
     const viewport = window.coordinateApp.viewport;
     const gizmo = viewport['transformGizmo'];

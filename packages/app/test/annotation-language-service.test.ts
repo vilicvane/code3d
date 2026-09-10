@@ -58,7 +58,7 @@ before(async () => {
   >('/src/monaco/embedded-code.ts'));
   const language = await packageTestLanguage(server);
   files = new Map(
-    language.files.map(file => [`file:///workspace${file.path}`, file.source]),
+    language.files.map(file => [`/workspace${file.path}`, file.source]),
   );
   const readFile = (name: string) => files.get(name) ?? ts.sys.readFile(name);
   const host: ts.LanguageServiceHost = {
@@ -91,7 +91,7 @@ after(async () => {
 
 function sourceFile(source: string) {
   return ts.createSourceFile(
-    'file:///workspace/model.ts',
+    '/workspace/model.ts',
     source,
     ts.ScriptTarget.Latest,
     true,
@@ -129,9 +129,9 @@ function markedSource(marked: string) {
   const position = marked.indexOf('|');
   assert.notEqual(position, -1);
   const source = marked.replace('|', '');
-  files.set('file:///workspace/model.ts', source);
+  files.set('/workspace/model.ts', source);
   version += 1;
-  const file = languageService.sourceFile('file:///workspace/model.ts');
+  const file = languageService.sourceFile('/workspace/model.ts');
   return {
     source,
     position,
@@ -333,9 +333,10 @@ test('reports duplicate parameter tags and annotations on unsupported declaratio
   );
 });
 
-test('accepts static defaults for optional numeric parameters', () => {
+test('accepts static defaults independently of numeric parameter optionality', () => {
   for (const [config, parameters, expected] of [
     ["{kind: 'angle', default: 60}", 'width = 75', 60],
+    ["{kind: 'angle', default: 60}", 'width: number', 60],
     ["{kind: 'scalar', default: 0}", 'width?: number', 0],
     ["{kind: 'ratio', default: -0.5}", 'width?: number', -0.5],
     [
@@ -364,7 +365,6 @@ test('accepts static defaults for optional numeric parameters', () => {
 
 test('reports invalid defaults through the shared annotation diagnostics and parser', () => {
   for (const [config, parameters = 'width?: number'] of [
-    ["{kind: 'angle', default: 60}", 'width: number'],
     ["{kind: 'scalar', default: 1}", 'width?: number[]'],
     ["{kind: 'scalar', default: 1}", 'width?: string'],
     ["{kind: 'edge', default: 1}"],
@@ -621,7 +621,7 @@ test('matches native TypeScript object selections for both annotation kinds', ()
   const marked = "{constraints: {min: 1|0, max: 100}, label: 'Width'}";
   const text = marked.replace('|', '');
   const prefix = 'const value = (';
-  const reference = 'file:///workspace/reference.ts';
+  const reference = '/workspace/reference.ts';
   files.set(reference, prefix + text + ');');
   version += 1;
   const native = nativeLanguageService.getSmartSelectionRange(

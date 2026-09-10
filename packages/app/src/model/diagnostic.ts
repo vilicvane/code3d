@@ -1,10 +1,17 @@
 import type {SourceRef} from '@code3d/core/tooling';
+import type {ToolIntent} from '../tools/tool-system';
+
+export type ModelDiagnosticAction = Readonly<{
+  label: string;
+  intent: ToolIntent;
+}>;
 
 export type ModelDiagnosticKind =
   'syntax' | 'module' | 'evaluation' | 'project';
 
 export type ModelDiagnostic = Readonly<{
   kind: ModelDiagnosticKind;
+  severity?: 'error' | 'warning';
   summary: string;
   details?: string;
   sourceRef?: SourceRef;
@@ -12,6 +19,9 @@ export type ModelDiagnostic = Readonly<{
   relatedModelNodeIds?: readonly string[];
   /** Failed call executions, including calls that did not produce a new value. */
   failedEvaluationIds?: readonly string[];
+  /** Successful sketch evaluations with source-data warnings. */
+  relatedSketchIds?: readonly string[];
+  actions?: readonly ModelDiagnosticAction[];
 }>;
 
 export class ModelDiagnosticError extends Error {

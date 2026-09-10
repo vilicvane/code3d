@@ -1,17 +1,16 @@
 import {configureSingle, fs} from '@zenfs/core';
 import {IndexedDB} from '@zenfs/dom';
+import {isExcludedProjectEntry} from './file-operations';
+import {mapProjectIO} from './io';
 import {
   DirectoryFileReader,
   decodeProjectFile,
   type ProjectFileReader,
 } from './file-reader';
 import {
-  isSourceFile,
   normalizeProjectPath,
   projectDirectory,
-  type ModelProject,
   type ProjectDirectoryTemplate,
-  type ProjectSourceFile,
 } from './project';
 
 const browserProjectRoot = '/workspace';
@@ -19,7 +18,6 @@ const browserManifestPath = '/code3d-project.json';
 const browserStoreName = 'code3d-project-v1';
 const directoryProjectRoot = '/';
 const directoryManifestPath = '/.code3d/project.json';
-const ignoredDirectoryNames = new Set(['.code3d', '.git', 'node_modules']);
 
 type ProjectManifest = Readonly<{
   version: 2;
@@ -59,10 +57,10 @@ export interface ProjectFileSystem extends ProjectFileReader {
   list(
     path: string,
   ): Promise<readonly {name: string; kind: 'file' | 'directory'}[]>;
-  initialize(seed: ModelProject): Promise<ModelProject>;
-  syncDirectory(template: ProjectDirectoryTemplate): Promise<ModelProject>;
-  resetDirectory(template: ProjectDirectoryTemplate): Promise<ModelProject>;
-  writeFile(path: string, source: string): Promise<void>;
+  initialize(seed: () => Promise<void>): Promise<void>;
+  syncDirectory(template: ProjectDirectoryTemplate): Promise<void>;
+  resetDirectory(template: ProjectDirectoryTemplate): Promise<void>;
+  writeFile(path: string, source: string | Uint8Array): Promise<void>;
   createDirectory(path: string): Promise<void>;
   rename(from: string, to: string): Promise<void>;
   remove(path: string): Promise<void>;
@@ -70,9 +68,15 @@ export interface ProjectFileSystem extends ProjectFileReader {
 
 let configureBrowserPromise: Promise<void> | undefined;
 
-export async function openBrowserProjectFileSystem(): Promise<ProjectFileSystem> {
+export interface BrowserProjectFileSystem extends ProjectFileSystem {
+  /** Atomically replace an installer-owned file; explorer renames never overwrite. */
+  replaceFile(from: string, to: string): Promise<void>;
+  symlink(target: string, path: string): Promise<void>;
+}
+
+export async function openBrowserProjectFileSystem(): Promise<BrowserProjectFileSystem> {
   await configureBrowserFileSystem();
-  return new ProjectStore(
+  const store = new ProjectStore(
     fs.promises,
     browserProjectRoot,
     browserManifestPath,
@@ -92,11 +96,31 @@ export async function openBrowserProjectFileSystem(): Promise<ProjectFileSystem>
               kind: info.isDirectory() ? 'directory' : 'file',
               version: `${info.mtimeMs}:${info.size}`,
               size: info.size,
+              realPath: normalizeProjectPath(
+                (await fs.promises.realpath(path)).slice(
+                  browserProjectRoot.length,
+                ),
+              ),
             }
           : undefined;
       },
     },
   );
+  return Object.assign(store, {
+    async replaceFile(from: string, to: string) {
+      await fs.promises.rename(
+        browserProjectRoot + normalizeProjectPath(from),
+        browserProjectRoot + normalizeProjectPath(to),
+      );
+    },
+    async symlink(target: string, path: string) {
+      await store.createDirectory(projectDirectory(path));
+      await fs.promises.symlink(
+        target,
+        browserProjectRoot + normalizeProjectPath(path),
+      );
+    },
+  });
 }
 
 export async function openDirectoryProjectFileSystem(
@@ -142,53 +166,52 @@ class ProjectStore implements ProjectFileSystem {
       this.toDiskPath(normalizeProjectPath(path)),
       {withFileTypes: true},
     );
-    return entries
-      .filter(entry => entry.isFile() || entry.isDirectory())
-      .map(entry => ({
-        name: entry.name,
-        kind: entry.isDirectory() ? ('directory' as const) : ('file' as const),
-      }))
+    const result = await mapProjectIO(entries, async entry => {
+      const kind = entry.isDirectory()
+        ? 'directory'
+        : entry.isFile()
+          ? 'file'
+          : (await this.stat(joinPath(path, entry.name)))?.kind;
+      return kind ? {name: entry.name, kind} : undefined;
+    });
+    return result
+      .filter(entry => entry !== undefined)
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  async initialize(seed: ModelProject): Promise<ModelProject> {
+  /** Seed only empty workspaces; initialization never reads project contents. */
+  async initialize(seed: () => Promise<void>): Promise<void> {
     await this.files.mkdir(this.projectRoot, {recursive: true});
-    const sourceFiles = await this.readSourceTree(this.projectRoot);
-    const manifest = await this.readManifest();
-    if (sourceFiles.length === 0) {
-      for (const file of seed.files) {
-        await this.writeFile(file.path, file.source);
-      }
-      await this.writeManifest(manifest ?? newManifest());
-      return this.load();
+    if (await this.readManifest()) return;
+    const entries = await this.list('/');
+    if (
+      !entries.some(
+        entry =>
+          entry.name !== '.code3d' && !isExcludedProjectEntry(entry.name),
+      )
+    ) {
+      await seed();
     }
-
-    if (manifest) return projectFrom(sourceFiles);
     await this.writeManifest(newManifest());
-    return this.load();
   }
 
-  async syncDirectory(
-    template: ProjectDirectoryTemplate,
-  ): Promise<ModelProject> {
+  async syncDirectory(template: ProjectDirectoryTemplate): Promise<void> {
     const manifest = await this.requireManifest();
     const directory = normalizeProjectPath(template.directory);
     if (manifest.managedDirectories[directory] === template.revision) {
-      return this.load();
+      return;
     }
     return this.replaceDirectory(template, manifest);
   }
 
-  async resetDirectory(
-    template: ProjectDirectoryTemplate,
-  ): Promise<ModelProject> {
+  async resetDirectory(template: ProjectDirectoryTemplate): Promise<void> {
     return this.replaceDirectory(template, await this.requireManifest());
   }
 
   private async replaceDirectory(
     template: ProjectDirectoryTemplate,
     manifest: ProjectManifest,
-  ): Promise<ModelProject> {
+  ): Promise<void> {
     // Prepare binary assets before replacing the managed directory.
     const assets = await Promise.all(
       (template.assets ?? []).map(async asset => {
@@ -206,9 +229,9 @@ class ProjectStore implements ProjectFileSystem {
     if (await this.exists(diskPath)) {
       await this.files.rm(diskPath, {recursive: true, force: true});
     }
-    for (const file of template.files) {
-      await this.writeFile(file.path, file.source);
-    }
+    await mapProjectIO(template.files, file =>
+      this.writeFile(file.path, file.source),
+    );
     for (const asset of assets) {
       const path = this.toDiskPath(normalizeProjectPath(asset.path));
       await this.files.mkdir(projectDirectory(path), {recursive: true});
@@ -221,10 +244,9 @@ class ProjectStore implements ProjectFileSystem {
         [directory]: template.revision,
       },
     });
-    return this.load();
   }
 
-  async writeFile(path: string, source: string): Promise<void> {
+  async writeFile(path: string, source: string | Uint8Array): Promise<void> {
     const diskPath = this.toDiskPath(normalizeProjectPath(path));
     await this.files.mkdir(projectDirectory(diskPath), {recursive: true});
     await this.files.writeFile(diskPath, source, 'utf8');
@@ -238,6 +260,8 @@ class ProjectStore implements ProjectFileSystem {
 
   async rename(from: string, to: string): Promise<void> {
     const destination = this.toDiskPath(normalizeProjectPath(to));
+    if (await this.exists(destination))
+      throw new Error(`Project destination already exists: ${to}`);
     await this.files.mkdir(projectDirectory(destination), {recursive: true});
     await this.files.rename(
       this.toDiskPath(normalizeProjectPath(from)),
@@ -250,11 +274,6 @@ class ProjectStore implements ProjectFileSystem {
       recursive: true,
       force: false,
     });
-  }
-
-  private async load(): Promise<ModelProject> {
-    await this.requireManifest();
-    return projectFrom(await this.readSourceTree(this.projectRoot));
   }
 
   private async requireManifest(): Promise<ProjectManifest> {
@@ -292,30 +311,6 @@ class ProjectStore implements ProjectFileSystem {
     );
   }
 
-  private async readSourceTree(
-    directory: string,
-  ): Promise<ProjectSourceFile[]> {
-    const entries = await this.files.readdir(directory, {withFileTypes: true});
-    const sourceFiles: ProjectSourceFile[] = [];
-    for (const entry of entries) {
-      if (entry.isDirectory() && ignoredDirectoryNames.has(entry.name)) {
-        continue;
-      }
-      const diskPath = joinPath(directory, entry.name);
-      if (entry.isDirectory()) {
-        sourceFiles.push(...(await this.readSourceTree(diskPath)));
-      } else if (entry.isFile() && isSourceFile(entry.name)) {
-        sourceFiles.push({
-          path: this.fromDiskPath(diskPath),
-          source: await this.files.readFile(diskPath, 'utf8'),
-        });
-      }
-    }
-    return sourceFiles.sort((left, right) =>
-      left.path.localeCompare(right.path),
-    );
-  }
-
   private async exists(path: string): Promise<boolean> {
     return (await this.files.stat(path, {throwIfNoEntry: false})) !== undefined;
   }
@@ -327,16 +322,6 @@ class ProjectStore implements ProjectFileSystem {
         ? this.projectRoot
         : `${this.projectRoot}${path}`;
   }
-
-  private fromDiskPath(path: string): string {
-    return this.projectRoot === '/'
-      ? normalizeProjectPath(path)
-      : normalizeProjectPath(path.slice(this.projectRoot.length));
-  }
-}
-
-function projectFrom(files: readonly ProjectSourceFile[]): ModelProject {
-  return {files};
 }
 
 function newManifest(): ProjectManifest {
@@ -425,7 +410,22 @@ function directoryOperations(
     async rename(from, to) {
       if (await reader.stat(to))
         throw new Error(`Project destination already exists: ${to}`);
-      await copy(from, to);
+      try {
+        await copy(from, to);
+      } catch (error) {
+        try {
+          if (await reader.stat(to)) {
+            const {directory, name} = await parent(to);
+            await directory.removeEntry(name, {recursive: true});
+          }
+        } catch (cleanupError) {
+          throw new AggregateError(
+            [error, cleanupError],
+            `Move failed. An incomplete copy remains at ${to}.`,
+          );
+        }
+        throw error;
+      }
       const {directory, name} = await parent(from);
       await directory.removeEntry(name, {recursive: true});
     },

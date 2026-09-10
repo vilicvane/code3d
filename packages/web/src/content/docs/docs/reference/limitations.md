@@ -25,7 +25,8 @@ Code3D is Prototype 01. APIs and project behavior are still evolving.
 - Browser-persistent projects and direct local-folder editing in supported
   browsers.
 - Typed named elements and reusable metric fasteners.
-- Browser-compatible npm packages from the project's installed dependencies.
+- Browser-compatible npm packages installed in browser storage or in a local
+  project’s `node_modules`.
 - Custom solid primitives with parameter tools, built through Replicad.
 - STEP, STL, and 3MF model export, plus PNG viewport images.
 
@@ -72,7 +73,10 @@ the final model available for inspection.
 the project's `node_modules`, but does not provide Node's built-in APIs or
 native addons. Core, screws and materials are built in until the project declares core;
 after that, missing project packages are errors. See
-[modeling packages](../../getting-started/files/#modeling-packages).
+[modeling packages](../../getting-started/files/#modeling-packages). Browser
+installation uses `code3d-lock.json`; npm workspaces, dependency overrides,
+local/Git dependencies, private registry authentication and lifecycle scripts
+are not supported. Local folders continue to use your own package manager.
 
 **Local-folder access depends on the browser.** File System Access and a secure
 context are required. External edits need an explicit Reload folder.

@@ -11,8 +11,8 @@ import {
   parameterAnnotationDiagnostics,
 } from '../model/tool-parameter-annotations';
 
-const schemaFile = 'file:///workspace/.__code3d-param-schema.ts';
-const valueFile = 'file:///workspace/.__code3d-annotation-value.ts';
+const schemaFile = '/workspace/.__code3d-param-schema.ts';
+const valueFile = '/workspace/.__code3d-annotation-value.ts';
 const valuePrefix =
   "import type {ToolParameterConfig} from './.__code3d-param-schema.js';\nconst config: ToolParameterConfig = (";
 

@@ -7,14 +7,22 @@ import {
   type AgentResponse,
   type FileChange,
   type ApplyInput,
+  type RenderView,
 } from '@code3d/agent';
 import type {SourceRef} from '@code3d/core/tooling';
 import type {ProjectEditorChange} from '../editor';
 import type {CursorTypeInfo} from '../monaco/type-info';
 import type {ProjectFileSystem} from '../project/filesystem';
 import {
+  checkProjectEntryOperation,
+  copyProjectEntry,
+  type ProjectEntryOperation,
+} from '../project/file-operations';
+import {
   isSourceFile,
+  isProjectTextFile,
   projectDirectory,
+  projectPathIsWithin,
   type ModelProject,
 } from '../project/project';
 import {inspectAgentCursor} from './cursor-resolver';
@@ -22,11 +30,13 @@ import type {ResolvedAgentCursor} from './cursor';
 import {contextCursor} from './context';
 
 export interface AgentProjectEditor {
-  currentFile(): string;
+  currentFile(): string | undefined;
   selectedSource(): SourceRef | undefined;
   project(): ModelProject;
+  filePaths(): readonly string[];
   fileState(path: string): {content: string; version: string} | undefined;
   applyFiles(files: readonly {path: string; content: string | null}[]): void;
+  moveFiles(from: string, to: string): void;
   setAgentCursor(id: string, name: string, ref?: SourceRef): void;
   agentCursor(id: string): {ref?: SourceRef; invalid: boolean};
   inspectType(ref: SourceRef): Promise<CursorTypeInfo | null>;
@@ -40,11 +50,17 @@ export type AgentObservation = Readonly<{
   input: ApplyInput;
   revision: number;
 }>;
-export type AgentUpdate = Readonly<{
-  agentId: string;
-  cursor?: SourceRef;
-  input: ApplyInput;
-}>;
+type AgentReadTarget = Readonly<{kind: 'read' | 'list'; path: string}>;
+export type AgentUpdate = Readonly<{agentId: string}> &
+  (
+    | Readonly<{
+        kind: 'apply';
+        cursor?: SourceRef;
+        arguments?: string;
+        view?: RenderView;
+      }>
+    | AgentReadTarget
+  );
 type FileState = {
   path: string;
   kind: 'file';
@@ -53,7 +69,7 @@ type FileState = {
   editorVersion?: string;
   saved: boolean;
 };
-type Draft = {content: string | null; version: string; error?: string};
+type Draft = {content: string | null; error?: string};
 const textLimit = 8 * 1024 * 1024;
 const encoder = new TextEncoder();
 
@@ -65,6 +81,17 @@ export class AgentProjectSession {
   private revision = 1;
   private readonly revisionListeners = new Set<() => void>();
   private readonly updateListeners = new Set<(update: AgentUpdate) => void>();
+  private readonly agentStates = new Map<
+    string,
+    {
+      target: {kind: 'apply'} | AgentReadTarget;
+      arguments?: string;
+      view?: RenderView;
+    }
+  >();
+  private readonly entryListeners = new Set<
+    (reason: 'operation' | 'save') => void
+  >();
 
   constructor(
     readonly fileSystem: ProjectFileSystem,
@@ -80,6 +107,11 @@ export class AgentProjectSession {
   get hasUnsaved(): boolean {
     return this.drafts.size > 0;
   }
+  unsavedFilePaths(): readonly string[] {
+    return [...this.drafts]
+      .filter(([, draft]) => draft.content !== null)
+      .map(([path]) => path);
+  }
   get currentRevision(): number {
     return this.revision;
   }
@@ -89,9 +121,87 @@ export class AgentProjectSession {
     return () => this.revisionListeners.delete(listener);
   }
 
+  onEntriesChange(
+    listener: (reason: 'operation' | 'save') => void,
+  ): () => void {
+    this.entryListeners.add(listener);
+    return () => this.entryListeners.delete(listener);
+  }
+
+  private entriesChanged(reason: 'operation' | 'save'): void {
+    for (const listener of this.entryListeners) listener(reason);
+  }
+
+  private acceptEditorChanges(operation: () => void): void {
+    this.accepting = true;
+    try {
+      operation();
+    } finally {
+      this.accepting = false;
+    }
+  }
+
+  /** Explorer mutations use the same queue as user saves and accepted agent edits. */
+  async changeEntries(operation: ProjectEntryOperation): Promise<void> {
+    await this.update(async () => {
+      await checkProjectEntryOperation(this.fileSystem, operation);
+      try {
+        if (operation.kind === 'create') {
+          const {path, kind} = operation.entry;
+          if (kind === 'directory') await this.fileSystem.createDirectory(path);
+          else await this.fileSystem.writeFile(path, '');
+        } else if (operation.kind === 'remove') {
+          for (const path of operation.paths) {
+            await this.fileSystem.remove(path);
+            const files = this.editor
+              .filePaths()
+              .filter(file => projectPathIsWithin(file, path));
+            this.acceptEditorChanges(() =>
+              this.editor.applyFiles(
+                files.map(path => ({path, content: null})),
+              ),
+            );
+          }
+        } else {
+          for (const {from, to} of operation.entries) {
+            if (operation.kind === 'copy')
+              await copyProjectEntry(this.fileSystem, from, to);
+            else {
+              await this.fileSystem.rename(from, to);
+              this.acceptEditorChanges(() => this.editor.moveFiles(from, to));
+            }
+          }
+        }
+      } finally {
+        this.entriesChanged('operation');
+        this.changed();
+      }
+    });
+  }
+
   onAgentUpdate(listener: (update: AgentUpdate) => void): () => void {
     this.updateListeners.add(listener);
     return () => this.updateListeners.delete(listener);
+  }
+
+  latestAgentUpdate(agentId: string): AgentUpdate | undefined {
+    const state = this.agentStates.get(agentId);
+    if (state && state.target.kind !== 'apply')
+      return {agentId, ...state.target};
+    // Monaco maintains the live selection through formatting, edits and renames.
+    const cursor = this.editor.agentCursor(agentId).ref;
+    if (!cursor) return undefined;
+    return {
+      agentId,
+      kind: 'apply',
+      cursor,
+      arguments: state?.arguments,
+      view: state?.view,
+    };
+  }
+
+  forgetAgent(agentId: string): void {
+    this.agentStates.delete(agentId);
   }
 
   private advanceRevision(): void {
@@ -157,7 +267,7 @@ export class AgentProjectSession {
     try {
       if (request.operation === 'context')
         return await this.enqueue(async () => {
-          const file = this.editor.currentFile();
+          const file = this.editor.currentFile() ?? null;
           const ref = this.editor.selectedSource();
           return {
             ok: true,
@@ -171,9 +281,22 @@ export class AgentProjectSession {
           };
         });
       if (request.operation !== 'apply')
-        return await this.enqueue(() =>
-          this.read(request.operation, request.path),
-        );
+        return await this.enqueue(async () => {
+          const response = await this.read(request.operation, request.path);
+          if (response.ok && request.operation !== 'fs.stat') {
+            const target: AgentReadTarget = {
+              kind: request.operation === 'fs.read' ? 'read' : 'list',
+              path: request.path,
+            };
+            this.agentStates.set(agentId, {
+              ...this.agentStates.get(agentId),
+              target,
+            });
+            for (const listener of this.updateListeners)
+              listener({agentId, ...target});
+          }
+          return response;
+        });
       const accepted = await this.enqueue(() =>
         this.apply(agentId, name, request.input),
       );
@@ -304,11 +427,18 @@ export class AgentProjectSession {
           'This operation requires a UTF-8 text file.',
         );
     } else return undefined;
+    // Opening an unchanged editor document must not invalidate an agent's read.
+    // The editor revision is checked separately during apply preflight.
+    const contentHash = encodeBase64(
+      new Uint8Array(
+        await crypto.subtle.digest('SHA-256', encoder.encode(content)),
+      ),
+    );
     return {
       path,
       kind: 'file',
       content,
-      version: `${document?.version ?? draft?.version ?? 'disk'}:${hash}:${info?.version ?? ''}`,
+      version: `${contentHash}:${hash}:${info?.version ?? ''}`,
       ...(document ? {editorVersion: document.version} : {}),
       saved: !draft,
     };
@@ -476,20 +606,6 @@ export class AgentProjectSession {
           {accepted: false, conflicts},
         ),
       };
-    const remaining = new Set(
-      this.editor.project().files.map(file => file.path),
-    );
-    for (const file of files)
-      if (isSourceFile(file.path)) {
-        if (file.content === null) remaining.delete(file.path);
-        else remaining.add(file.path);
-      }
-    if (!remaining.size)
-      throw new AgentError(
-        'empty_project',
-        'A project needs at least one source file.',
-      );
-
     let resolved: ResolvedAgentCursor | undefined;
     let cursorBase: FileState | undefined;
     if (input.cursor) {
@@ -554,12 +670,14 @@ export class AgentProjectSession {
           ),
         };
     const staged = this.stage(files);
-    this.accepting = true;
-    try {
-      this.editor.applyFiles(files.filter(file => isSourceFile(file.path)));
-    } finally {
-      this.accepting = false;
-    }
+    this.acceptEditorChanges(() =>
+      this.editor.applyFiles(
+        files.filter(
+          file =>
+            isProjectTextFile(file.path) || this.editor.fileState(file.path),
+        ),
+      ),
+    );
     if (resolved)
       this.editor.setAgentCursor(agentId, name, {
         file: resolved.file,
@@ -574,13 +692,23 @@ export class AgentProjectSession {
     const project = this.editor.project();
     const revision = this.revision;
     const cursor = this.editor.agentCursor(agentId);
-    if (
-      files.length ||
-      input.cursor ||
-      (typeof input.render === 'object' && input.render.view)
-    )
-      for (const listener of this.updateListeners)
-        listener({agentId, cursor: cursor.ref, input});
+    const view =
+      typeof input.render === 'object' ? input.render.view : undefined;
+    if (files.length || input.cursor || view) {
+      const update: AgentUpdate = {
+        agentId,
+        kind: 'apply',
+        cursor: cursor.ref,
+        arguments: input.cursor?.arguments,
+        view,
+      };
+      this.agentStates.set(agentId, {
+        target: {kind: 'apply'},
+        arguments: update.arguments,
+        view: view ?? this.agentStates.get(agentId)?.view,
+      });
+      for (const listener of this.updateListeners) listener(update);
+    }
     await this.save(staged);
     const outcomes = [];
     for (const file of files) {
@@ -664,7 +792,6 @@ export class AgentProjectSession {
     return files.map(file => {
       const draft: Draft = {
         content: file.content,
-        version: crypto.randomUUID(),
       };
       this.drafts.set(file.path, draft);
       return [file.path, draft];
@@ -673,6 +800,7 @@ export class AgentProjectSession {
 
   private async save(drafts: readonly [string, Draft][]): Promise<void> {
     let failed = false;
+    let entriesChanged = false;
     for (const [path, draft] of [...drafts].sort(
       (a, b) => Number(a[1].content === null) - Number(b[1].content === null),
     )) {
@@ -681,10 +809,11 @@ export class AgentProjectSession {
         continue;
       }
       try {
+        const existed = await this.fileSystem.stat(path);
         if (draft.content === null) {
-          if (await this.fileSystem.stat(path))
-            await this.fileSystem.remove(path);
+          if (existed) await this.fileSystem.remove(path);
         } else await this.fileSystem.writeFile(path, draft.content);
+        entriesChanged ||= draft.content === null ? !!existed : !existed;
         if (this.drafts.get(path) === draft) this.drafts.delete(path);
       } catch (error) {
         failed = true;
@@ -695,6 +824,7 @@ export class AgentProjectSession {
         );
       }
     }
+    if (entriesChanged || failed) this.entriesChanged('save');
     this.changed();
   }
 }

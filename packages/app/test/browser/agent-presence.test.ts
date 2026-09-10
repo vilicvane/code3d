@@ -99,16 +99,17 @@ test(
 
     const row = (name: string) =>
       page.getByRole('treeitem', {name, exact: true});
-    const marker = (name: string) =>
-      page.getByRole('img', {name: new RegExp(`^${name}:`)});
+    const marker = (name: string) => page.getByTitle(new RegExp(`${name}:`));
     await marker('Alice').waitFor();
     assert.equal(
-      await row('body.ts').locator('.project-tree-agent').count(),
+      await row('body.ts')
+        .locator('[data-item-section="decoration"] [title] > span')
+        .count(),
       1,
     );
     assert.equal(
       await marker('Alice').evaluate(
-        node => getComputedStyle(node).backgroundColor,
+        node => getComputedStyle(node.firstElementChild!).color,
       ),
       await alice.evaluate(node => getComputedStyle(node).backgroundColor),
     );
@@ -120,26 +121,47 @@ test(
     await label.waitFor({state: 'hidden'});
     await row('parts').click();
     await row('housing').waitFor({state: 'detached'});
-    assert.equal(await row('parts').locator('.project-tree-agent').count(), 2);
-    assert.equal(await page.locator('.project-tree-agent').count(), 2);
+    assert.equal(
+      await row('parts')
+        .locator('[data-item-section="decoration"] [title] > span')
+        .count(),
+      2,
+    );
+    assert.equal(
+      await page
+        .locator('[data-item-section="decoration"] [title] > span')
+        .count(),
+      2,
+    );
     await page.screenshot({path: '/tmp/code3d-agent-presence-collapsed.png'});
     await row('parts').click();
     await row('housing').waitFor();
     await row('housing').click();
     await row('body.ts').waitFor({state: 'detached'});
     assert.equal(
-      await row('housing').locator('.project-tree-agent').count(),
+      await row('housing')
+        .locator('[data-item-section="decoration"] [title] > span')
+        .count(),
       1,
     );
-    assert.equal(await row('rib.ts').locator('.project-tree-agent').count(), 1);
+    assert.equal(
+      await row('rib.ts')
+        .locator('[data-item-section="decoration"] [title] > span')
+        .count(),
+      1,
+    );
     await row('housing').click();
     await row('body.ts').waitFor();
     assert.equal(
-      await row('housing').locator('.project-tree-agent').count(),
+      await row('housing')
+        .locator('[data-item-section="decoration"] [title] > span')
+        .count(),
       0,
     );
     assert.equal(
-      await row('body.ts').locator('.project-tree-agent').count(),
+      await row('body.ts')
+        .locator('[data-item-section="decoration"] [title] > span')
+        .count(),
       1,
     );
 
@@ -159,15 +181,30 @@ test(
       originalFile,
     );
     await row('parts').click();
-    assert.equal(await row('rib.ts').locator('.project-tree-agent').count(), 2);
+    assert.equal(
+      await row('rib.ts')
+        .locator('[data-item-section="decoration"] [title] > span')
+        .count(),
+      2,
+    );
     await page.evaluate(() => window.presenceEditor.removeAgentCursor('bob'));
     await marker('Bob').waitFor({state: 'detached'});
-    assert.equal(await row('rib.ts').locator('.project-tree-agent').count(), 1);
+    assert.equal(
+      await row('rib.ts')
+        .locator('[data-item-section="decoration"] [title] > span')
+        .count(),
+      1,
+    );
     await page.evaluate(() =>
       window.presenceEditor.deleteFile('/parts/rib.ts'),
     );
     await marker('Alice renamed').waitFor({state: 'detached'});
-    assert.equal(await page.locator('.project-tree-agent').count(), 0);
+    assert.equal(
+      await page
+        .locator('[data-item-section="decoration"] [title] > span')
+        .count(),
+      0,
+    );
     assert.deepEqual(errors, []);
   },
 );

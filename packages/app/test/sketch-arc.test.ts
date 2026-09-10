@@ -202,7 +202,8 @@ test('sweep badges expose center and both endpoints, and deletion removes the ex
     ],
   ]);
   const marker = display.markers[0];
-  assert.equal(marker.kind, 'point');
+  assert.equal(marker.kind, 'curve');
+  assert.deepEqual(marker.curve, ref(4));
   assert.ok(marker.position[0] < 0 && marker.position[1] < 0);
   const args =
     "[['point', 1, [0, 0]], ['point', 2, [10, 0]], ['point', 3, [0, 10]], ['arc', 4, [1, 10, 2, 3, 'cw']]], {constraints: [['sweep', 4, angle /* keep expression */]]}";
@@ -531,7 +532,8 @@ test('arc radius badges follow the directed arc midpoint and deletion cleans onl
   assert.equal(display.label, 'R10');
   assert.deepEqual(display.curves, [ref(4)]);
   const marker = display.markers[0];
-  assert.equal(marker.kind, 'point');
+  assert.equal(marker.kind, 'curve');
+  assert.deepEqual(marker.curve, ref(4));
   assert.ok(marker.position[0] < 0 && marker.position[1] < 0);
   assert.deepEqual(segments.deleteSketchEntity([local], 4), {
     kind: 'delete',

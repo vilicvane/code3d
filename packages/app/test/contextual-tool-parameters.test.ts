@@ -97,7 +97,7 @@ test('literal arguments remain values and a unique upstream parameter retains in
   }
 });
 
-test('omitted arguments have no placeholder and only the next argument is writable', async () => {
+test('omitted required dimensions show runtime defaults and only the next argument is writable', async () => {
   const {parameters} = await parametersFor('Math.PI', true);
   assert.equal(
     contextualParameterView(defined(parameters.get('x'))).placeholder,
@@ -107,10 +107,9 @@ test('omitted arguments have no placeholder and only the next argument is writab
   const z = parameters.get('z');
   for (const parameter of [y, z] as const) {
     assert.equal(contextualParameterView(defined(parameter)).value, undefined);
-    assert.equal(
-      contextualParameterView(defined(parameter)).placeholder,
-      undefined,
-    );
+    assert.equal(contextualParameterView(defined(parameter)).placeholder, '10');
+    assert.equal(defined(parameter).schema.optional, false);
+    assert.equal(contextualParameterIntent(defined(parameter)), undefined);
   }
   assert.equal(contextualParameterView(defined(y)).disabled, false);
   assert.equal(contextualParameterView(defined(z)).disabled, true);

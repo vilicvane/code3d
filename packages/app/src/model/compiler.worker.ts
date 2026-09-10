@@ -11,6 +11,7 @@ import type {
   CompilerRequest,
   CompilerResponse,
   FileRequest,
+  FileQuery,
 } from './compiler-protocol';
 
 const workerScope = self as DedicatedWorkerGlobalScope;
@@ -24,24 +25,44 @@ const pendingFiles = new Map<
 
 function requestFile<T>(
   source: FileRequest['source'],
-  operation: FileRequest['operation'],
-  path: string,
-): Promise<T | undefined> {
+  query: FileQuery,
+): Promise<T> {
   const id = nextFileId++;
   return new Promise((resolve, reject) => {
     pendingFiles.set(id, {resolve: value => resolve(value as T), reject});
-    send({kind: 'file', id, operation, path, source});
+    send({kind: 'file', id, source, ...query});
   });
 }
 
 const compiler = new ProjectCompiler(
   {
-    readFile: path => requestFile<Uint8Array>('project', 'readFile', path),
-    stat: path => requestFile<ProjectFileInfo>('project', 'stat', path),
+    readFile: path =>
+      requestFile<Uint8Array | undefined>('project', {
+        operation: 'readFile',
+        path,
+      }),
+    stat: path =>
+      requestFile<ProjectFileInfo | undefined>('project', {
+        operation: 'stat',
+        path,
+      }),
+    statMany: paths =>
+      requestFile<readonly (ProjectFileInfo | undefined)[]>('project', {
+        operation: 'statMany',
+        paths,
+      }),
   },
   {
-    readFile: path => requestFile<Uint8Array>('builtin', 'readFile', path),
-    stat: path => requestFile<ProjectFileInfo>('builtin', 'stat', path),
+    readFile: path =>
+      requestFile<Uint8Array | undefined>('builtin', {
+        operation: 'readFile',
+        path,
+      }),
+    stat: path =>
+      requestFile<ProjectFileInfo | undefined>('builtin', {
+        operation: 'stat',
+        path,
+      }),
   },
   esbuild,
 );

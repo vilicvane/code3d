@@ -106,6 +106,31 @@ after(async () => {
   await server?.close();
 });
 
+test('successful programs without model output compile to an empty module', async t => {
+  for (const [name, source] of [
+    ['empty', ''],
+    ['whitespace', ' \n\t\n'],
+    ['comments', '// Start modeling\n/* Nothing yet */'],
+    ['imports', "import {box} from '@code3d/core';"],
+    ['values', 'export const size = 10; export default {size};'],
+    ['helper', 'export function twice(value: number) { return value * 2; }'],
+  ]) {
+    await t.test(name, async () => {
+      const module = await compileProject(
+        {files: [{path: '/model.ts', source}]},
+        '/model.ts',
+      );
+      assert.equal(module.diagnostic, undefined);
+      assert.deepEqual(module.warnings, []);
+      assert.equal(module.fallback, undefined);
+      assert.equal(module.objects.size, 0);
+      assert.equal(module.sketches.size, 0);
+      assert.equal(module.exports.size, 0);
+      assert.deepEqual(module.sourceTargets, []);
+    });
+  }
+});
+
 test('shell tools select input surfaces while displaying the result, including failed offsets', async () => {
   for (const [call, selected, failure] of [
     ['shell(1)', [], false],
@@ -1604,11 +1629,10 @@ test('the documented function offers parameter tools and design-time arguments',
     ['10, 5, 6', '14, 7, 8'],
   );
   for (const context of module.designArguments) {
-    const preview = await compileProject(
-      {files: [defined(file)]},
-      rootPath,
-      context.id,
-    );
+    const preview = await compileProject({files: [defined(file)]}, rootPath, {
+      file: context.functionRef.file,
+      id: context.id,
+    });
     assert.equal(preview.diagnostic, undefined);
     assert.equal(preview.activeDesignContextId, context.id);
   }

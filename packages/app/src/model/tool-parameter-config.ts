@@ -25,7 +25,7 @@ export type ToolParameterConfig = ToolParameterConfigBase &
     | Readonly<{
         kind: ParameterKind;
         constraints?: ToolParameterConstraints;
-        /** Displayed for an omitted optional argument; never applied at runtime. */
+        /** Displayed for an omitted argument; never applied at runtime. */
         default?: number;
       }>
     | Readonly<{kind: TopologyKind}>

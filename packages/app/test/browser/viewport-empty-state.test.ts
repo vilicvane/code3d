@@ -7,6 +7,8 @@ declare const window: Window & {
   emptyViewportApp: {
     viewport: import('../../src/viewport.ts').ModelViewport;
     codeEditor: import('../../src/editor.ts').CodeEditor;
+    compiler: import('../../src/model/compiler-client.ts').ModelCompilerClient;
+    runModel: () => Promise<void>;
     previousModule?: import('../../src/model/compiler.ts').ModelModule | null;
   };
 };
@@ -23,6 +25,7 @@ after(async () => browser?.close());
 async function open(
   t: TestContext,
   source = '// Choose a preview',
+  state: 'ready' | 'error' = 'ready',
 ): Promise<Page> {
   const context = await browser.newContext({
     viewport: {width: 1400, height: 900},
@@ -40,17 +43,26 @@ async function open(
       body: `export const defaultProject = ${JSON.stringify({files: [{path: '/model.ts', source}]})};`,
     }),
   );
+  // Unrelated example design contexts used to mask empty-program failures.
+  await page.route('**/src/project/bundled-examples.ts*', route =>
+    route.fulfill({
+      contentType: 'text/javascript',
+      body: 'export const bundledExamples = {directory: "/examples", revision: "empty", files: []};',
+    }),
+  );
   await page.route('**/src/main.ts*', async route => {
     const response = await route.fetch();
     await route.fulfill({
       response,
       body:
         (await response.text()) +
-        '\nwindow.emptyViewportApp = {codeEditor, viewport};\n',
+        '\nwindow.emptyViewportApp = {codeEditor, viewport, compiler, runModel};\n',
     });
   });
   await page.goto(process.env.CODE3D_TEST_URL!);
-  await page.getByText('Ready', {exact: true}).waitFor({timeout: 40_000});
+  await page
+    .locator(`#viewport-status[data-state="${state}"]`)
+    .waitFor({timeout: 40_000});
   return page;
 }
 
@@ -102,6 +114,243 @@ async function expectEmpty(page: Page): Promise<void> {
     undefined,
   );
 }
+
+test('an empty file opens ready and recovers from errors without a model', async t => {
+  const page = await open(t, '');
+  await expectEmpty(page);
+  assert.equal(await page.locator('#error-bar').isVisible(), false);
+  for (const source of [
+    'throw new Error("unfinished model");',
+    "import {box} from '@code3d/core'; box(0);",
+  ]) {
+    await setSource(page, source, '', 'error');
+    assert.ok(
+      await page.evaluate(
+        () => window.emptyViewportApp.viewport['module']?.diagnostic,
+      ),
+    );
+    await setSource(page, '', '');
+    await expectEmpty(page);
+    assert.equal(await page.locator('#error-bar').isVisible(), false);
+    assert.equal(
+      await page.locator('#viewport-diagnostic-stack').isVisible(),
+      false,
+    );
+  }
+});
+
+test('clearing a previewed model removes its geometry without reporting an error', async t => {
+  const page = await open(
+    t,
+    "import {box} from '@code3d/core'; box(10, 10, 10);",
+  );
+  assert.equal(
+    await page.evaluate(() =>
+      window.emptyViewportApp.viewport.hasRenderableGeometry(),
+    ),
+    true,
+  );
+  await setSource(page, '', '');
+  assert.equal(await page.locator('#error-bar').isVisible(), false);
+  assert.equal(
+    await page.evaluate(() =>
+      window.emptyViewportApp.viewport.hasRenderableGeometry(),
+    ),
+    false,
+  );
+  assert.equal(
+    await page.evaluate(() => window.emptyViewportApp.viewport.getSelected()),
+    undefined,
+  );
+  // The initial hint stays dismissed until another file is opened.
+  assert.equal(await page.locator('#viewport-empty-state').isVisible(), false);
+});
+
+test('switching to a syntactically broken file immediately clears the previous file preview', async t => {
+  const page = await open(
+    t,
+    "import {box} from '@code3d/core'; box(10, 6, 8);",
+  );
+  await select(page, 'box(10');
+  await page.locator('[data-parameter=x]').waitFor();
+  const cleared = await page.evaluate(() => {
+    const {codeEditor, viewport} = window.emptyViewportApp;
+    codeEditor.createFile('/broken.ts', 'const unfinished = ;');
+    return {
+      geometry: viewport.hasRenderableGeometry(),
+      module: viewport['module'],
+    };
+  });
+  assert.deepEqual(cleared, {geometry: false, module: null});
+  await page.locator('#viewport-status[data-state=error]').waitFor();
+  await expectEmpty(page);
+  assert.equal(await page.locator('[data-parameter=x]').isVisible(), false);
+  await page.evaluate(() =>
+    window.emptyViewportApp.codeEditor.switchFile('/model.ts'),
+  );
+  await page.locator('#viewport-status[data-state=ready]').waitFor();
+  assert.equal(
+    await page.evaluate(() =>
+      window.emptyViewportApp.viewport.hasRenderableGeometry(),
+    ),
+    true,
+  );
+});
+
+test('a same-file syntax error retains the last display until a successful empty result clears it', async t => {
+  const source = "import {box} from '@code3d/core'; box(10, 6, 8);";
+  const page = await open(t, source);
+  await select(page, 'box(10');
+  await page.locator('[data-parameter=x]').waitFor();
+  await page.evaluate(source => {
+    const app = window.emptyViewportApp;
+    app.previousModule = app.viewport['module'];
+    app.codeEditor.editor
+      .getModel()!
+      .setValue(source + '\nconst unfinished = ;');
+  }, source);
+  await page.locator('#viewport-status[data-state=error]').waitFor();
+  assert.equal(
+    await page.evaluate(() => {
+      const app = window.emptyViewportApp;
+      return (
+        app.viewport['module'] === app.previousModule &&
+        app.viewport.hasRenderableGeometry()
+      );
+    }),
+    true,
+  );
+  assert.equal(await page.locator('[data-parameter=x]').isVisible(), false);
+  await setSource(page, '', '');
+  assert.equal(
+    await page.evaluate(() =>
+      window.emptyViewportApp.viewport.hasRenderableGeometry(),
+    ),
+    false,
+  );
+  assert.equal(await page.locator('#error-bar').isVisible(), false);
+});
+
+test('preparation failure without source edits closes stale tools, and replacing the file clears its snapshot', async t => {
+  const page = await open(
+    t,
+    "import {box} from '@code3d/core'; box(10, 6, 8);",
+  );
+  await select(page, 'box(10');
+  await page.locator('[data-parameter=x]').waitFor();
+  await page.evaluate(async () => {
+    const {compiler, runModel} = window.emptyViewportApp;
+    const compile = compiler.compile.bind(compiler);
+    compiler.compile = async () => {
+      throw new Error('Project preparation failed');
+    };
+    try {
+      await runModel();
+    } finally {
+      compiler.compile = compile;
+    }
+  });
+  assert.equal(await page.locator('[data-parameter=x]').isVisible(), false);
+  assert.equal(
+    await page.evaluate(() =>
+      window.emptyViewportApp.viewport.hasRenderableGeometry(),
+    ),
+    true,
+  );
+  assert.equal(
+    await page.locator('#viewport-status').getAttribute('data-state'),
+    'error',
+  );
+  const cleared = await page.evaluate(() => {
+    const {codeEditor, viewport} = window.emptyViewportApp;
+    codeEditor.replaceDirectory(
+      {files: [{path: '/model.ts', source: 'const incomplete = ;'}]},
+      '/',
+    );
+    return viewport.hasRenderableGeometry();
+  });
+  assert.equal(cleared, false);
+  await page.locator('#viewport-status[data-state=error]').waitFor();
+  await expectEmpty(page);
+});
+
+test('a failed tool call reveals the viewport before any geometry has been rendered', async t => {
+  const page = await open(
+    t,
+    "import {box} from '@code3d/core';\nbox(0);",
+    'error',
+  );
+  await expectEmpty(page);
+  await select(page, 'box(0)');
+  const x = page.locator('[data-parameter=x]');
+  await x.waitFor();
+  assert.equal(await x.inputValue(), '0');
+  assert.equal(await x.isEnabled(), true);
+  assert.equal(await page.locator('#viewport-empty-state').isVisible(), false);
+  assert.equal(await page.locator('.viewport-canvas').isVisible(), true);
+  assert.equal(await page.locator('.viewport-mode').isVisible(), true);
+  assert.equal(
+    await page.evaluate(() =>
+      window.emptyViewportApp.viewport.hasRenderableGeometry(),
+    ),
+    false,
+  );
+  await x.fill('10');
+  await x.press('Enter');
+  await page.locator('#viewport-status[data-state=ready]').waitFor();
+  assert.equal(
+    await page.evaluate(() =>
+      window.emptyViewportApp.viewport.hasRenderableGeometry(),
+    ),
+    true,
+  );
+});
+
+test('a fresh incomplete primitive previews defaults without filling source or relaxing its signature', async t => {
+  const source = "import {box} from '@code3d/core';\nbox();";
+  const page = await open(t, source);
+  await select(page, 'box()');
+  const x = page.locator('[data-parameter=x]');
+  await x.waitFor();
+  assert.equal(await page.locator('#viewport-empty-state').isVisible(), false);
+  assert.equal(
+    await page.evaluate(() =>
+      window.emptyViewportApp.viewport.hasRenderableGeometry(),
+    ),
+    true,
+  );
+  assert.equal(
+    await page.evaluate(() =>
+      window.emptyViewportApp.codeEditor.hasLanguageError(),
+    ),
+    true,
+  );
+  for (const name of ['x', 'y', 'z']) {
+    const input = page.locator(`[data-parameter=${name}]`);
+    assert.equal(await input.inputValue(), '');
+    assert.equal(await input.getAttribute('placeholder'), '10');
+    assert.equal(await input.isEnabled(), name === 'x');
+  }
+  await x.focus();
+  await x.press('Enter');
+  assert.equal(
+    await page.evaluate(() =>
+      window.emptyViewportApp.codeEditor.editor.getValue(),
+    ),
+    source,
+  );
+  await x.fill('10');
+  await x.press('Tab');
+  await page.waitForFunction(
+    () => (document.activeElement as HTMLElement)?.dataset.parameter === 'y',
+  );
+  assert.match(
+    await page.evaluate(() =>
+      window.emptyViewportApp.codeEditor.editor.getValue(),
+    ),
+    /box\(10\)/,
+  );
+});
 
 test('the initial hint disappears after previewing and moving the cursor preserves the last 3D view', async t => {
   const page = await open(t);
@@ -202,8 +451,10 @@ test('creating an empty file after a 3D preview shows the hint and switching fil
     const app = window.emptyViewportApp;
     app.previousModule = app.viewport['module'];
   });
-  page.once('dialog', dialog => dialog.accept('/new.ts'));
   await page.getByRole('button', {name: 'New file', exact: true}).click();
+  const dialog = page.getByRole('dialog', {name: 'New file', exact: true});
+  await dialog.getByRole('textbox', {name: 'Name'}).fill('new.ts');
+  await dialog.getByRole('button', {name: 'Create', exact: true}).click();
   await page.waitForFunction(
     () =>
       window.emptyViewportApp.codeEditor.currentFile() === '/new.ts' &&

@@ -30,6 +30,7 @@ import {ProjectBuilder, type ProjectBundle} from '../project/project-builder';
 import {ModuleEvaluator, type ModuleExports} from './module-evaluator';
 import {code3dAnnotations} from './annotations';
 import {SketchTraceRegistry, type CompiledSketch} from './sketch-trace';
+import {sketchSourceDiagnostics} from '../tools/sketch-diagnostics';
 import {evaluatedConstraint, focusedConstraintSide} from './constraint-context';
 import {isCompositionInputRole} from './operation-context';
 import {
@@ -195,9 +196,14 @@ export type DesignArgumentContext = Readonly<{
   }>;
 }>;
 
-/** A GUI preset ID or a source-located invocation with optional temporary arguments. */
+export type DesignInvocation = Readonly<{
+  file: string;
+  offset: number;
+  arguments?: string;
+}>;
+/** Every explicit design request identifies its source, including GUI presets. */
 export type DesignContext =
-  string | Readonly<{file: string; offset: number; arguments?: string}>;
+  Readonly<{file: string; id: string}> | DesignInvocation;
 type ActiveDesignContext = Pick<
   DesignArgumentContext,
   'id' | 'functionId' | 'label' | 'functionRef'
@@ -231,6 +237,7 @@ export type ObjectCatalogEntry = Readonly<{
 
 export type ModelModule = Readonly<{
   sketches: ReadonlyMap<string, CompiledSketch>;
+  warnings: readonly ModelDiagnostic[];
   diagnostic?: ModelDiagnostic;
   fallback?: ModelSnapshotObject;
   objects: ReadonlyMap<string, ModelSnapshotObject>;
@@ -1207,8 +1214,12 @@ export function createModelCompiler(
     requested?: DesignContext,
   ): ActiveDesignContext | undefined {
     if (!requested) return undefined;
-    if (typeof requested === 'string') {
-      const context = contexts.find(context => context.id === requested);
+    if ('id' in requested) {
+      const context = contexts.find(
+        context =>
+          context.id === requested.id &&
+          context.functionRef.file === requested.file,
+      );
       return context && {...context, callRef: context.annotationRef};
     }
     const file = project.files.find(file => file.path === requested.file);
@@ -1441,17 +1452,6 @@ export function createModelCompiler(
         modelExports.get('default') ??
         [...modelExports.values()].at(-1) ??
         latestTracedObject;
-      if (
-        !fallbackObject &&
-        !diagnostic &&
-        designArguments.length === 0 &&
-        !activeDesignContext &&
-        sketches.size === 0
-      ) {
-        throw new Error(
-          'The current program did not produce a renderable ModelObject.',
-        );
-      }
       if (diagnostic) {
         diagnostic = relateDiagnostic(diagnostic, fallbackObject);
       }
@@ -1497,8 +1497,10 @@ export function createModelCompiler(
         ]),
       );
       captureGeometry?.(graphObjects);
+      const sketchSnapshots = sketches.snapshots();
       return {
-        sketches: sketches.snapshots(),
+        sketches: sketchSnapshots,
+        warnings: sketchSourceDiagnostics(sketchSnapshots, files),
         diagnostic,
         fallback: fallbackSnapshot,
         objects: objectSnapshots,
@@ -4062,22 +4064,5 @@ export function createModelCompiler(
     );
   }
 
-  return {
-    compileProject,
-    designContextFile(
-      project: ModelProject,
-      id?: DesignContext,
-    ): string | undefined {
-      if (!id) return undefined;
-      if (typeof id !== 'string') return id.file;
-      for (const file of project.files) {
-        const context = parseDesignArgumentContexts(
-          file.path,
-          file.source,
-        ).find(context => context.id === id);
-        if (context) return context.functionRef.file;
-      }
-      return undefined;
-    },
-  };
+  return {compileProject};
 }

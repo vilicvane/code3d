@@ -5,6 +5,7 @@
   "author": "vilicvane",
   "type": "module",
   "scripts": {
+    "postinstall": "patch-package --error-on-fail",
     "3": "npm install && npm dedupe && npm install",
     "clean": "rimraf dist --glob packages/*/{.cache,bld,dist}",
     "build:packages": "node node_modules/typescript/bin/tsc --build",
@@ -37,6 +38,7 @@
   ],
   "devDependencies": {
     "@types/node": "^24.10.1",
+    "patch-package": "8.0.1",
     "prettier": "^3.9.6",
     "rimraf": "^6.1.2",
     "typescript": "^7.0.2",

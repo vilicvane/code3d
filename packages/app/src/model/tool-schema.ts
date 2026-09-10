@@ -105,10 +105,10 @@ export function resolveProjectTooling(
   language: ProjectLanguage,
 ): ProjectToolingIndex {
   const sources = new Map<string, string>();
-  project.files.forEach(file =>
+  language.files.forEach(file =>
     sources.set(normalizeProjectPath(file.path), file.source),
   );
-  language.files.forEach(file =>
+  project.files.forEach(file =>
     sources.set(normalizeProjectPath(file.path), file.source),
   );
   sources.set('/lib.es5.d.ts', es5Library);
@@ -117,6 +117,8 @@ export function resolveProjectTooling(
   const host: ts.CompilerHost = {
     fileExists: fileName => sources.has(virtualFilePath(fileName)),
     readFile: fileName => sources.get(virtualFilePath(fileName)),
+    realpath: fileName =>
+      language.realPaths?.[virtualFilePath(fileName)] ?? fileName,
     getSourceFile(fileName, languageVersion) {
       const path = virtualFilePath(fileName);
       const source = sources.get(path);

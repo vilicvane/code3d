@@ -38,7 +38,8 @@
   "files": [
     "bld",
     "THIRD_PARTY.md",
-    "README.md"
+    "README.md",
+    "src"
   ],
   "dependencies": {
     "@code3d/opencascade": "0.0.1-alpha.0",
