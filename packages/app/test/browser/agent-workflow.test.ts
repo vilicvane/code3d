@@ -94,13 +94,17 @@ for (const storage of ['browser', 'directory'] as const)
         const prompt = await page
           .getByLabel('Agent prompt', {exact: true})
           .inputValue();
-        assert.ok(prompt.includes('/docs/agents.md'));
+        const guideUrl = prompt.match(/https?:\/\/\S+\/agents\.md/)![0];
+        const guideResponse = await page.request.get(guideUrl);
+        assert.equal(guideResponse.status(), 200);
+        assert.match(guideResponse.headers()['content-type'], /text\/markdown/);
+        const guide = await guideResponse.text();
+        assert.ok(guide.includes('project.c3d.json serve'));
         assert.ok(
-          prompt.includes(
+          guide.includes(
             'echo \'{"operation":"context"}\' | npx --yes @code3d/cli',
           ),
         );
-        assert.ok(!prompt.includes('Pinned observation'));
         configs.push(
           JSON.parse(
             prompt.match(/```json\n([\s\S]*?)\n```/)![1],
@@ -120,12 +124,8 @@ for (const storage of ['browser', 'directory'] as const)
       const update = await page
         .getByLabel('Agent prompt', {exact: true})
         .inputValue();
+      assert.ok(update.startsWith('Continue working on'));
       assert.ok(update.includes('/docs/agents.md'));
-      assert.ok(
-        update.includes(
-          'echo \'{"operation":"context"}\' | npx --yes @code3d/cli',
-        ),
-      );
       assert.ok(update.includes(configs[0].key));
       await page.getByRole('button', {name: 'Close', exact: true}).click();
       const directory = await mkdtemp(join(tmpdir(), 'c3d-browser-'));

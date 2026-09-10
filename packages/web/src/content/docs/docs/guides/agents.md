@@ -17,8 +17,9 @@ Their observations use the same modeling engine as your view.
 3. Keep this Code3D page open. Allow its local-network connection when your
    browser asks.
 
-The prompt gives the agent its private configuration, a command to start the
-local connection service, and the [Markdown instructions](../../agents.md).
+The prompt gives the agent its private configuration and the required
+[Markdown instructions](../../agents.md). Those instructions explain how to start
+the local service, get live project context, and work in Code3D.
 The agent can connect without restarting its conversation. Its host keeps the
 service running for that conversation and closes it when the session ends.
 

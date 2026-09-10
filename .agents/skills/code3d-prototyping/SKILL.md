@@ -53,7 +53,7 @@ code3d 的项目代码始终保持在当前认知下可达到的最佳抽象和�
 - 网站 packages 文档只发布少数主推建模包，当前为 Core、Materials、Screws，由发布器的 `featuredPackages` 显式选择。底层包让 agent 沿 `package.json` 依赖在 GitHub 或已安装的 `node_modules` 中查阅 README，不自动镜像或加入入口目录。
 - 所有自维护包（含 private App/Web）仍提供人和 agent 共用的 README：说明职责、适用入口、最小示例或启动方式，并链接公共类型、源码、测试和完整示例。深入细节引导到对应专题和代码；不另建一套 agent 专用包 README。
 - 修改 agent 操作、连接、配置或公开建模 API 时，在同一任务更新受影响专题、示例、包 README 与入口目录。只有必读规则或首次可执行流程改变时才增加入口内容；高级细节保留在专题。文档描述唯一现行语义，不保留旧命令或兼容路线。
-- App 复制的初始和更新 prompt 都指向 Markdown 入口，提供配置和获取实时上下文的演示；用文档承载详细指引，不把现场上下文固化进 prompt。
+- App 复制的初始和更新 prompt 只提供任务/身份、私有配置和必读 Markdown 入口。默认 agent 先读文档，服务启动、获取实时上下文的演示及操作规则统一放在入口和专题中，不在 prompt 重复，也不把现场上下文固化进 prompt。
 - 验证 prompt → 入口 → 专题 → README → 源码/示例整条链路。文档发布改动须运行网站构建的 Markdown/HTML 链接与锚点检查；涉及 prompt 时验证实际复制出来的 URL，并在本地启动其指向的网站。开发 URL 与可选部署 base 路径遵循 [Web README](../../../packages/web/README.md#agent-documentation-and-local-prompts)。
 
 ## Handoff
