@@ -10,6 +10,7 @@ import GithubSlugger from 'github-slugger';
 import {renderSamples} from '../../app/render-samples/catalog.ts';
 
 export const repository = fileURLToPath(new URL('../../../', import.meta.url));
+export const featuredPackages = ['core', 'materials', 'screws'];
 const contentRoot = 'packages/web/src/content/docs/docs/';
 const origin = 'https://code3d.invalid';
 
@@ -23,7 +24,11 @@ export async function markdownDocuments(
 ) {
   const documents = [];
   for await (const source of glob(
-    ['docs/**/*.md', 'packages/*/README.md', `${contentRoot}**/*.{md,mdx}`],
+    [
+      'docs/**/*.md',
+      ...featuredPackages.map(name => `packages/${name}/README.md`),
+      `${contentRoot}**/*.{md,mdx}`,
+    ],
     {cwd: root},
   )) {
     let route;

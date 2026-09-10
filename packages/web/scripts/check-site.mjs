@@ -4,6 +4,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {parse} from 'parse5';
 import {
+  featuredPackages,
   markdownDocuments,
   markdownHeadings,
   markdownReferences,
@@ -47,13 +48,18 @@ for (const document of documents.filter(item =>
     `Agent entry is missing topic ${document.source}`,
   );
 }
-for await (const file of glob('packages/*/package.json', {cwd: repository})) {
-  const name = file.split('/')[1];
+for (const name of featuredPackages) {
   assert.ok(
     entryTargets.has(`/docs/packages/${name}.md`),
-    `Agent entry is missing package ${name}`,
+    `Agent entry is missing featured package ${name}`,
   );
-  await stat(path.join(repository, `packages/${name}/README.md`));
+  assert.ok(
+    pages.has(`/docs/packages/${name}.md`),
+    `Missing featured README ${name}`,
+  );
+}
+for await (const file of glob('packages/*/package.json', {cwd: repository})) {
+  await stat(path.join(repository, path.dirname(file), 'README.md'));
 }
 const agentGuide = await readFile(
   path.join(directory, 'docs/agents.md'),

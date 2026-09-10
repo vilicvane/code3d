@@ -24,17 +24,25 @@ browser. The renderer closes its own pages and leaves that browser running.
 collaboration features at `/docs/guides/agents/`. Agent prompts instead open
 [the required Markdown entry](../../docs/agents.md) at `/docs/agents.md`.
 [Detailed topics](../../docs/agents/) cover operations, modeling and recovery;
-[package READMEs](../../docs/agents.md#package-documentation) are shared by human and
-agent readers.
+[useful modeling packages](../../docs/agents.md#useful-modeling-packages) introduce
+the main authoring libraries. All packages maintain READMEs for human and agent
+readers, but the website publishes only the selected modeling packages.
 
 The [Markdown publisher](scripts/markdown-documents.mjs) serves these existing
 sources through [one static endpoint](src/pages/docs/[...document].md.ts):
 
-| Repository source                       | Published Markdown                        |
-| --------------------------------------- | ----------------------------------------- |
-| `docs/agents.md` and `docs/agents/*.md` | `/docs/agents.md` and `/docs/agents/*.md` |
-| `packages/*/README.md`                  | `/docs/packages/<package>.md`             |
-| `src/content/docs/docs/**/*.{md,mdx}`   | `/docs/<topic>.md`                        |
+| Repository source                            | Published Markdown                        |
+| -------------------------------------------- | ----------------------------------------- |
+| `docs/agents.md` and `docs/agents/*.md`      | `/docs/agents.md` and `/docs/agents/*.md` |
+| `packages/{core,materials,screws}/README.md` | `/docs/packages/<package>.md`             |
+| `src/content/docs/docs/**/*.{md,mdx}`        | `/docs/<topic>.md`                        |
+
+The publisher's `featuredPackages` list selects Core, Materials and Screws.
+Additional packages are selected for their value to model authors; adding a
+workspace package does not automatically add a website page or an entry in the
+agent guide. Lower-level dependency READMEs stay in their packages, discoverable
+through GitHub or an installed `node_modules` tree. Links to an unpublished README
+resolve to its repository source rather than creating a website mirror.
 
 Keep links relative to real repository files in agent docs and READMEs. The
 publisher maps documentation links to relative Markdown URLs and source links

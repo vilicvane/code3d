@@ -16,17 +16,30 @@ test('repository links become readable Markdown under root or nested deployments
   t.after(() => rm(root, {recursive: true, force: true}));
   const files = {
     'docs/agents.md':
-      '# Agent\n\n[Package](../packages/demo/README.md#use)\n\n[![Preview](../packages/demo/image.png)](../packages/demo/README.md)\n\n[Source][implementation]\n\n[implementation]: ../packages/demo/index.ts\n\n`[literal](missing.md)`\n\n```ts\n// [example](missing.md)\n```\n',
-    'packages/demo/README.md':
-      '# Demo\n\n## Use\n\n[Entry](../../docs/agents.md)\n',
-    'packages/demo/index.ts': 'export const value = 1;\n',
-    'packages/demo/image.png': '',
+      '# Agent\n\n[Package](../packages/core/README.md#use)\n\n[![Preview](../packages/core/image.png)](../packages/core/README.md)\n\n[Source][implementation]\n\n[implementation]: ../packages/core/index.ts\n\n`[literal](missing.md)`\n\n```ts\n// [example](missing.md)\n```\n',
+    'packages/core/README.md':
+      '# Core\n\n## Use\n\n[Entry](../../docs/agents.md)\n\n[Dependency](../agent/README.md)\n',
+    'packages/agent/README.md': '# Internal transport\n',
+    'packages/core/index.ts': 'export const value = 1;\n',
+    'packages/core/image.png': '',
   };
   for (const [file, text] of Object.entries(files)) {
     await mkdir(path.dirname(path.join(root, file)), {recursive: true});
     await writeFile(path.join(root, file), text);
   }
   const documents = await markdownDocuments(root, 'test-commit');
+  assert.ok(
+    !documents.some(document => document.route === '/docs/packages/agent.md'),
+  );
+  const dependencyReadme = await renderMarkdown(
+    documents.find(document => document.route === '/docs/packages/core.md'),
+    documents,
+  );
+  assert.ok(
+    markdownReferences(dependencyReadme).includes(
+      'https://raw.githubusercontent.com/vilicvane/code3d/test-commit/packages/agent/README.md',
+    ),
+  );
   const markdown = await renderMarkdown(
     documents.find(d => d.route === '/docs/agents.md'),
     documents,
@@ -38,17 +51,17 @@ test('repository links become readable Markdown under root or nested deployments
   ]) {
     assert.equal(
       new URL(references[0], base + 'docs/agents.md').href,
-      base + 'docs/packages/demo.md#use',
+      base + 'docs/packages/core.md#use',
     );
   }
   assert.ok(
     references.includes(
-      'https://raw.githubusercontent.com/vilicvane/code3d/test-commit/packages/demo/index.ts',
+      'https://raw.githubusercontent.com/vilicvane/code3d/test-commit/packages/core/index.ts',
     ),
   );
   assert.ok(
     references.includes(
-      'https://raw.githubusercontent.com/vilicvane/code3d/test-commit/packages/demo/image.png',
+      'https://raw.githubusercontent.com/vilicvane/code3d/test-commit/packages/core/image.png',
     ),
   );
   assert.ok(markdown.includes('`[literal](missing.md)`'));

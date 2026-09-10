@@ -36,10 +36,20 @@ task benefits from several forms of evidence.
 | Reuse a parametric design or expose editing controls               | [Reusable models](../../packages/web/src/content/docs/docs/guides/reusable-models.mdx) and [model tools](../../packages/web/src/content/docs/docs/guides/model-tools.mdx)                       |
 | Extend the modeling runtime                                        | [Custom primitives](../../packages/web/src/content/docs/docs/guides/custom-primitives.mdx)                                                                                                      |
 
-Package READMEs link to the public type exports, implementations and focused
-tests. Inspect those when an overload, return type or exact behavior is unclear.
 Check the [current limitations](../../packages/web/src/content/docs/docs/reference/limitations.md)
 before promising a feature.
+
+## Explore dependencies
+
+Start with the public modeling packages above. When you need another package or
+its underlying implementation, follow the project's imports and the package's
+`package.json` dependencies. Read its README on GitHub or in the relevant
+installed `node_modules` package, then follow links to public types, source and
+tests. Use the installed package's version when checking exact behavior.
+
+A Browser storage project or an App built-in package may have no local
+`node_modules` directory. Read App project files through the CLI and use the
+package's repository for further documentation in that case.
 
 ## Verify the intended result
 

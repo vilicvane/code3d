@@ -111,19 +111,17 @@ files and prepare a new edit against their current versions.
 | Edit sketches and interpret solved geometry, layers and constraints   | [Sketch modeling and observation](agents/sketches.md)       |
 | Interpret failures, recover an unknown outcome or retry safely        | [Results and recovery](agents/recovery.md)                  |
 
-## Package documentation
+## Useful modeling packages
 
-These READMEs serve both people and agents. Each introduces its package and links
-to types, implementation and examples for deeper reading.
+- [@code3d/core](../packages/core/README.md) is the main modeling API. Build
+  solids and profiles, combine them with Boolean operations and relations, and
+  turn editable sketches into geometry.
+- [@code3d/materials](../packages/materials/README.md) supplies reusable
+  material presets such as aluminum, plastic and glass for model appearance.
+- [@code3d/screws](../packages/screws/README.md) provides standard screw models
+  and matching clearance/counterbore tools when an assembly needs fasteners.
 
-| Package                                          | Purpose                                        |
-| ------------------------------------------------ | ---------------------------------------------- |
-| [Core](../packages/core/README.md)               | Modeling API, geometry, relations and sketches |
-| [Materials](../packages/materials/README.md)     | Reusable Three.js material presets             |
-| [Screws](../packages/screws/README.md)           | Standard fasteners and matching hole tools     |
-| [CLI](../packages/cli/README.md)                 | Command-line JSON transport and local service  |
-| [Agent](../packages/agent/README.md)             | Shared client, encryption and App endpoint     |
-| [App](../packages/app/README.md)                 | Editor, project storage and visualization      |
-| [OpenCascade](../packages/opencascade/README.md) | Native geometry runtime and bindings           |
-| [Solver](../packages/solver/README.md)           | Independent rigid-body constraint solver       |
-| [Website](../packages/web/README.md)             | Website, documentation and publication         |
+These packages are available in projects using the App's built-in Core. For a
+project with its own dependencies, see [package installation](agents/files.md#install-project-dependencies).
+Explore other packages when the model needs them; [the modeling workflow](agents/modeling.md#explore-dependencies)
+explains where to find their documentation.
