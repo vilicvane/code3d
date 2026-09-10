@@ -11,7 +11,7 @@
     "build": "astro sync && node scripts/check.mjs && astro build && node scripts/check-site.mjs",
     "preview": "astro preview",
     "render-images": "node scripts/render-images.mjs",
-    "test:run": "node --test scripts/*.test.mjs"
+    "test:run": "node --test scripts/*.test.ts"
   },
   "dependencies": {
     "@astrojs/starlight": "^0.42.0",

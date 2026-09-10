@@ -6,7 +6,9 @@ private package builds the App served at the website's `/app/` path.
 
 For using the product, start with [working in the App](../web/src/content/docs/docs/getting-started/app.md)
 or [collaborating with agents](../web/src/content/docs/docs/guides/agents.md).
-Agents performing project work should read the [Markdown entry](../../docs/agents.md).
+Agents editing a model through the App should read the [Markdown entry](../../docs/agents.md).
+To develop Code3D itself, use the [development guide](../../.agents/docs/development.md)
+and [architecture overview](../../.agents/docs/architecture/overview.md).
 
 ## Run locally
 
@@ -28,7 +30,18 @@ and agent edits. Model preparation resolves project dependencies before compilin
 source. The [file guide](../web/src/content/docs/docs/getting-started/files.md)
 explains the storage and package rules.
 
+In Vite development, `latest` requests for publishable `@code3d/*` packages use
+this checkout's package builds. Rebuild packages after changing their source.
+Explicit versions keep normal resolution; production uses published packages.
+See [package environment and resolution](../../.agents/docs/architecture/runtime.md#包环境与模块解析)
+for the shared Browser storage and local-folder rules.
+
 ## Source map
+
+Read [project and runtime](../../.agents/docs/architecture/runtime.md),
+[source and interaction tools](../../.agents/docs/architecture/tooling.md), or
+[sketch architecture](../../.agents/docs/architecture/sketch.md) for the relevant
+contracts before following the implementation links below.
 
 | Responsibility                                        | Start here                                                          |
 | ----------------------------------------------------- | ------------------------------------------------------------------- |
@@ -55,11 +68,10 @@ npm test --workspace @code3d/app
 npm run build --workspace @code3d/app
 ```
 
-[Browser tests](test/browser/) use an existing development server and Chrome CDP;
-set `CODE3D_TEST_URL` and optionally `CODE3D_CDP_URL` before running a relevant
-file with Node's test runner. They cover real editor, storage, agent CLI and
-viewport interactions. [Unit tests](test/) cover independent project and model
-logic. Use checks appropriate to the changed behavior.
+[Browser tests](test/browser/) cover real editor, storage, agent CLI and viewport
+interactions; [unit tests](test/) cover independent project and model logic.
+Follow the shared [test conventions and Chrome setup](../../.agents/docs/development.md#测试与格式)
+and choose checks appropriate to the changed behavior.
 
 Build App before [the website](../web/README.md), which copies `dist/` into its
 combined static output. To test copied agent prompts locally, set

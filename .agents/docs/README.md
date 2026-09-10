@@ -18,8 +18,10 @@
 
 - `.agents/skills/` 规定如何开展工作，包括隔离开发、设计变更、验证和交付。
   本目录解释系统本身；文档不会扩大提交、合并或发布授权。
-- `docs/` 用于对外文档，尤其是使用 Code3D 建模的 agent 指南；官网用户指南由
-  [Web 包](../../packages/web/README.md)发布。各包 README 提供共享的介绍与入口。
+- `docs/` 用于对外文档；使用 Code3D 建模的 agent 从[必读入口](../../docs/agents.md)
+  进入具体操作专题。人的[协作指南](../../packages/web/src/content/docs/docs/guides/agents.md)
+  介绍产品概念，[Web 包](../../packages/web/README.md)维护发布链路。
+  各包 README 提供共享介绍，并将开发者引向本目录的相关架构专题和源码。
   对外操作说明与内部实现专题按各自读者维护，通过链接衔接。
 - [GitHub Issues](https://github.com/vilicvane/code3d/issues)记录需求、讨论、方案、
   验收和进度。未合并的工作在其 issue 中说明，不写成当前主分支的能力。

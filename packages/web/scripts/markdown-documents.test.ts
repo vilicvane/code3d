@@ -18,8 +18,9 @@ test('repository links become readable Markdown under root or nested deployments
     'docs/agents.md':
       '# Agent\n\n[Package](../packages/core/README.md#use)\n\n[![Preview](../packages/core/image.png)](../packages/core/README.md)\n\n[Source][implementation]\n\n[implementation]: ../packages/core/index.ts\n\n`[literal](missing.md)`\n\n```ts\n// [example](missing.md)\n```\n',
     'packages/core/README.md':
-      '# Core\n\n## Use\n\n[Entry](../../docs/agents.md)\n\n[Dependency](../agent/README.md)\n',
+      '# Core\n\n## Use\n\n[Entry](../../docs/agents.md)\n\n[Dependency](../agent/README.md)\n\n[Architecture](../../.agents/docs/architecture/modeling.md)\n',
     'packages/agent/README.md': '# Internal transport\n',
+    '.agents/docs/architecture/modeling.md': '# Modeling architecture\n',
     'packages/core/index.ts': 'export const value = 1;\n',
     'packages/core/image.png': '',
   };
@@ -31,19 +32,27 @@ test('repository links become readable Markdown under root or nested deployments
   assert.ok(
     !documents.some(document => document.route === '/docs/packages/agent.md'),
   );
-  const dependencyReadme = await renderMarkdown(
-    documents.find(document => document.route === '/docs/packages/core.md'),
-    documents,
+  assert.ok(
+    !documents.some(document => document.source.startsWith('.agents/')),
   );
+  const core = documents.find(
+    document => document.route === '/docs/packages/core.md',
+  );
+  assert.ok(core);
+  const dependencyReadme = await renderMarkdown(core, documents);
   assert.ok(
     markdownReferences(dependencyReadme).includes(
       'https://raw.githubusercontent.com/vilicvane/code3d/test-commit/packages/agent/README.md',
     ),
   );
-  const markdown = await renderMarkdown(
-    documents.find(d => d.route === '/docs/agents.md'),
-    documents,
+  assert.ok(
+    markdownReferences(dependencyReadme).includes(
+      'https://raw.githubusercontent.com/vilicvane/code3d/test-commit/.agents/docs/architecture/modeling.md',
+    ),
   );
+  const entry = documents.find(d => d.route === '/docs/agents.md');
+  assert.ok(entry);
+  const markdown = await renderMarkdown(entry, documents);
   const references = markdownReferences(markdown);
   for (const base of [
     'https://example.test/',
@@ -70,10 +79,9 @@ test('repository links become readable Markdown under root or nested deployments
 
 test('MDX guides expose complete executable examples without UI components', async () => {
   const documents = await markdownDocuments();
-  const guide = await renderMarkdown(
-    documents.find(d => d.route === '/docs/guides/relations.md'),
-    documents,
-  );
+  const document = documents.find(d => d.route === '/docs/guides/relations.md');
+  assert.ok(document);
+  const guide = await renderMarkdown(document, documents);
   const source = await readFile(
     path.join(repository, 'packages/app/examples/combined-constraints.ts'),
     'utf8',

@@ -3,6 +3,10 @@
 Astro serves the custom homepage and examples. Starlight serves `/docs/`.
 App is built separately by Vite and copied into `dist/www/app/`.
 
+This README covers website content and publication. Repository-wide setup and
+test conventions live in the [development guide](../../.agents/docs/development.md);
+system responsibilities are indexed in the [internal documentation](../../.agents/docs/README.md).
+
 From the repository root:
 
 ```bash
@@ -43,6 +47,10 @@ workspace package does not automatically add a website page or an entry in the
 agent guide. Lower-level dependency READMEs stay in their packages, discoverable
 through GitHub or an installed `node_modules` tree. Links to an unpublished README
 resolve to its repository source rather than creating a website mirror.
+Internal development docs under `.agents/docs/` and research under
+`.agents/research/` remain repository resources too. A package README can link
+to them for contributors without adding them to the modeling agent's required
+workflow or website catalog.
 
 Keep links relative to real repository files in agent docs and READMEs. The
 publisher maps documentation links to relative Markdown URLs and source links

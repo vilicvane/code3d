@@ -24,8 +24,8 @@ loads the modeling kernel through the package's Node entry automatically; normal
 model authors do not initialize it or manage evaluation caches themselves.
 
 The App includes Core, [Materials](../materials/README.md), and
-[Screws](../screws/README.md) for zero-install projects. When the root
-`package.json` declares `@code3d/core`, the App uses that project's installed
+[Screws](../screws/README.md) for zero-install projects. When the active model's
+package scope or an ancestor `package.json` declares `@code3d/core`, the App uses that project's installed
 packages and declarations exclusively. Missing dependencies are errors. See
 [project package installation](../web/src/content/docs/docs/getting-started/files.md#install-packages-in-browser-storage)
 and the [agent file workflow](../../docs/agents/files.md).
@@ -130,6 +130,10 @@ Tooling integrations own evaluation lifetimes and disposal. Follow the existing
 model files should stay on the authoring API.
 
 ## Source and development
+
+For changes to Core itself, start with the [modeling architecture](../../.agents/docs/architecture/modeling.md)
+and shared [development guide](../../.agents/docs/development.md), then follow
+the implementation and tests below.
 
 - [Public exports](src/library/index.ts), [model runtime](src/library/runtime.ts),
   and [public type tests](test/public-types.ts).
