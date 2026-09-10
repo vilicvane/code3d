@@ -1,20 +1,24 @@
-import type {ModelProject} from '../project/project';
-import type {ProjectFileInfo} from '../project/file-reader';
-import type {ProjectLanguage} from '../project/project-language';
-import type {DesignContext, ModelModule} from './compiler';
-import type {ModelDiagnostic} from './diagnostic';
-import type {ModelExportInstance, ModelExportOptions} from './model-export';
-import type {CompilationPhase} from './compilation-progress';
 import type {
   SketchSnapshot,
   TopologyInspection,
   TopologyInspectionOptions,
 } from '@code3d/core/tooling';
-import type {SketchDrag, SketchDragPreview} from './sketch-drag';
+import type {ProjectFileInfo} from '../project/file-reader';
+import type {ModelProject} from '../project/project';
+import type {ProjectLanguage} from '../project/project-language';
 import type {CompilationCancellation} from './compilation-cancellation';
+import type {CompilationPhase} from './compilation-progress';
+import type {DesignContext, ModelModule} from './compiler';
+import type {DependencyArtifact} from './dependency-builder';
+import type {ModelDiagnostic} from './diagnostic';
+import type {ModelExportInstance, ModelExportOptions} from './model-export';
+import type {ProjectExecutionArtifact} from './project-compiler';
+import type {SketchDrag, SketchDragPreview} from './sketch-drag';
 
 export type CompileRequest = Readonly<{
   kind: 'compile';
+  projectIdentity?: string;
+  stamp: number;
   id: number;
   cancellation: CompilationCancellation;
   project: ModelProject;
@@ -33,8 +37,32 @@ export type FileRequest = FileQuery &
     source: 'project' | 'builtin';
   }>;
 
-export type CompilerRequest =
+type WorkerRequest =
   | CompileRequest
+  | Readonly<{kind: 'cancel-compile'; id: number}>
+  | Readonly<{kind: 'refresh-dependencies'}>
+  | Readonly<{
+      kind: 'execution-succeeded';
+      projectIdentity: string;
+      rootPath: string;
+      designContext?: DesignContext;
+      artifact: string;
+      stamp: number;
+    }>
+  | Readonly<{
+      kind: 'restore';
+      id: number;
+      projectIdentity: string;
+      rootPath: string;
+      designContext?: DesignContext;
+    }>
+  | Readonly<
+      {
+        kind: 'execute';
+        id: number;
+        cancellation: CompilationCancellation;
+      } & ArtifactMessage
+    >
   | Readonly<{
       kind: 'topology';
       id: number;
@@ -63,8 +91,10 @@ export type CompilerRequest =
       error?: string;
     }>;
 
-export type CompilerResponse =
+type WorkerResponse =
   | FileRequest
+  | Readonly<{kind: 'cached'; id: number} & ArtifactMessage>
+  | Readonly<{kind: 'compiled'; id: number} & ArtifactMessage>
   | Readonly<{kind: 'cancelled'; id: number}>
   | Readonly<{
       kind: 'topology';
@@ -83,3 +113,59 @@ export type CompilerResponse =
       ok: false;
       diagnostic: ModelDiagnostic;
     }>;
+
+export type ExecutorRequest = Extract<
+  WorkerRequest,
+  {kind: 'execute' | 'export' | 'topology' | 'sketch'}
+>;
+export type CompilerRequest = Exclude<WorkerRequest, ExecutorRequest>;
+export type ExecutorResponse = Extract<
+  WorkerResponse,
+  {kind: 'result' | 'export' | 'topology' | 'sketch' | 'progress' | 'cancelled'}
+>;
+export type CompilerResponse = Exclude<
+  WorkerResponse,
+  {kind: 'export' | 'topology' | 'sketch'} | {kind: 'result'; ok: true}
+>;
+
+export type ArtifactMessage = Readonly<{
+  artifact: Omit<ProjectExecutionArtifact, 'dependencies'> & {
+    dependencies: string;
+  };
+  dependency?: DependencyArtifact;
+}>;
+
+/** One ordered Worker stream sends an immutable dependency only when its identity changes. */
+export class ArtifactChannel {
+  private dependency?: DependencyArtifact;
+
+  encode(
+    artifact: ProjectExecutionArtifact & {language?: ProjectLanguage},
+  ): ArtifactMessage {
+    const {language: _language, dependencies, resources, ...model} = artifact;
+    const dependency =
+      this.dependency?.id === dependencies.id ? undefined : dependencies;
+    this.dependency = dependencies;
+    return {
+      artifact: {
+        ...model,
+        dependencies: dependencies.id,
+        resources: new Map(
+          [...resources].filter(
+            ([path, bytes]) => dependencies.resources.get(path) !== bytes,
+          ),
+        ),
+      },
+      dependency,
+    };
+  }
+
+  decode(message: ArtifactMessage): ProjectExecutionArtifact {
+    this.dependency = message.dependency ?? this.dependency;
+    return {...message.artifact, dependencies: this.dependency!};
+  }
+
+  reset(): void {
+    this.dependency = undefined;
+  }
+}

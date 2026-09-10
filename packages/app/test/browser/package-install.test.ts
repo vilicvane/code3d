@@ -7,6 +7,7 @@ declare const window: Window & {
     runModel(): Promise<void>;
     codeEditor: import('../../src/editor.ts').CodeEditor;
     compiler: import('../../src/model/compiler-client.ts').ModelCompilerClient;
+    previewState: import('../../src/model/preview-state.ts').ModelPreviewState;
     projectFileSystem: import('../../src/project/filesystem.ts').BrowserProjectFileSystem;
   };
 };
@@ -23,7 +24,7 @@ async function exposePackageApp(
       response,
       body:
         (await response.text()) +
-        '\nwindow.packageApp = {codeEditor, compiler, projectFileSystem, runModel};',
+        '\nwindow.packageApp = {codeEditor, compiler, projectFileSystem, runModel, previewState};',
     });
   });
 }
@@ -1166,7 +1167,20 @@ test(
       } else await route.continue();
     });
     await page.goto(process.env.CODE3D_TEST_URL);
-    await page.getByText('Ready', {exact: true}).waitFor({timeout: 120_000});
+    await page.waitForFunction(
+      () => {
+        if (window.packageApp.previewState.diagnostic)
+          throw new Error(
+            JSON.stringify(window.packageApp.previewState.diagnostic),
+          );
+        return (
+          document.querySelector('#viewport-status')?.textContent?.trim() ===
+          'Ready'
+        );
+      },
+      undefined,
+      {timeout: 120_000},
+    );
     const installed = await page.evaluate(async () => {
       const {developmentWorkspaces} =
         await import('/src/project/browser-packages.ts');

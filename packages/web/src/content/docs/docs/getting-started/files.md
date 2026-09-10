@@ -240,8 +240,30 @@ source diagnostic.
 
 Source edits reuse the current project's modeling kernel and dependency caches.
 Each distinct compiled source version remains in the browser's module cache
-until its project Worker ends. Reloading or closing the project releases that
-Worker; ordinary edits preserve its expensive geometry caches.
+until its execution Worker ends. Reloading or closing the project releases that
+Worker; ordinary edits preserve its expensive geometry caches. Persistent build
+outputs can be reused by the next Worker.
+
+## Cached previews
+
+Each source file you open has its own cached build, including files without a
+renderable model. When you return to a file or reload the App, its last successful
+cached preview can appear while current files are checked in the background.
+Files using the same dependency environment share the cached package build.
+The modeling engine still needs to initialize and execute the restored code.
+
+A current error does not discard an existing successful preview. The error is
+shown for the current source; editing tools and export wait for a matching
+current result. Cancelling a stuck model preserves the compiler's reusable work.
+Completed cached records survive cancellation, and older builds can be reused
+when you undo edits. Cache entries may be evicted to stay within the storage
+budget, and clearing site data removes them.
+
+Package upgrades and development workspace rebuilds invalidate affected builds.
+If you manually change files inside an installed npm package without changing
+its version, click **Refresh files and dependencies** in the explorer header.
+This refreshes the build inputs; use **Update dependencies** on `package.json`
+to ask the package manager to resolve package versions again.
 
 ## The examples directory
 

@@ -95,13 +95,15 @@ export class ArtifactJournal implements KernelArtifactStore {
       this.scan();
     }
     // The active generation is durable before reclaiming an interrupted copy.
-    files[1 - this.active].truncate(0);
-    files[1 - this.active].flush();
+    if (files[1 - this.active].getSize()) {
+      files[1 - this.active].truncate(0);
+      files[1 - this.active].flush();
+    }
     if (this.end > this.capacity) this.compact(0);
     this.durableOrder = [...this.entries.keys()];
   }
 
-  get(id: string): Uint8Array | undefined {
+  get(id: string, touch = true): Uint8Array | undefined {
     const entry = this.entries.get(id);
     if (!entry) return undefined;
     const bytes = this.readValue(entry);
@@ -109,8 +111,15 @@ export class ArtifactJournal implements KernelArtifactStore {
       this.delete(id);
       return undefined;
     }
-    this.touch(id);
+    if (touch) this.touch(id);
     return bytes;
+  }
+
+  getMany(
+    ids: readonly string[],
+    touch = true,
+  ): readonly (Uint8Array | undefined)[] {
+    return ids.map(id => this.get(id, touch));
   }
 
   set(id: string, bytes: Uint8Array): void {
@@ -141,6 +150,10 @@ export class ArtifactJournal implements KernelArtifactStore {
     this.touched.add(id);
     this.flushPeriodically();
     return true;
+  }
+
+  touchMany(ids: readonly string[]): readonly boolean[] {
+    return ids.map(id => this.touch(id));
   }
 
   delete(id: string): void {
@@ -176,6 +189,7 @@ export class ArtifactJournal implements KernelArtifactStore {
       this.append({id, kind: 'touch'}, new Uint8Array());
     }
     this.touched.clear();
+    if (!this.unflushedBytes) return;
     this.flushData();
     this.files[this.active].flush();
     this.durableOrder = [...this.entries.keys()];

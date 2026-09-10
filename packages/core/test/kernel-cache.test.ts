@@ -1,7 +1,13 @@
-import {kernelOperationKey} from '../bld/library/kernel-cache.js';
 import assert from 'node:assert/strict';
 import {afterEach, beforeEach, test} from 'node:test';
-import {createComputationCache} from '../bld/library/kernel-cache.js';
+import {cached} from '../bld/library/cached.js';
+import {googleFontSources} from '../bld/library/google-font.js';
+import {
+  clearKernelOperationCache,
+  createComputationCache,
+  kernelOperationCacheStats,
+  kernelOperationKey,
+} from '../bld/library/kernel-cache.js';
 
 let cache: ReturnType<typeof createComputationCache>;
 beforeEach(() => {
@@ -24,6 +30,30 @@ const lifecycle: import('../bld/library/kernel-cache.js').KernelValueLifecycle<V
 afterEach(() => {
   cache.clearKernelOperationCache();
   released.length = 0;
+});
+
+test('pure computation and Google Font CSS caches work without an installed kernel', () => {
+  let computes = 0;
+  const twice = cached((value: number) => {
+    computes++;
+    return value * 2;
+  });
+  const css = new TextEncoder().encode(
+    '@font-face {src: url(https://fonts.gstatic.com/example.ttf); unicode-range: U+0000-00FF;}',
+  );
+  try {
+    assert.equal(twice(4), 8);
+    assert.equal(twice(4), 8);
+    assert.equal(computes, 1);
+    const sources = googleFontSources(css);
+    assert.deepEqual(sources, [
+      {url: 'https://fonts.gstatic.com/example.ttf', ranges: [[0, 255]]},
+    ]);
+    assert.equal(googleFontSources(css), sources);
+    assert.equal(kernelOperationCacheStats().nativeAllocatedBytes, 0);
+  } finally {
+    clearKernelOperationCache();
+  }
 });
 
 test('reuses a complete operation through an independent value', () => {
@@ -441,6 +471,10 @@ test('memory-only resources share LRU eviction without disabling geometry persis
       records.set(id, bytes);
     },
     touch: id => records.has(id),
+    getMany(ids: readonly string[]) {
+      return ids.map(id => this.get(id));
+    },
+    touchMany: (ids: readonly string[]) => ids.map(id => records.has(id)),
     delete(id) {
       records.delete(id);
     },
@@ -486,4 +520,125 @@ test('memory-only resources share LRU eviction without disabling geometry persis
   );
   assert.ok(records.has(geometry.id));
   assert.equal(cache.kernelOperationCacheStats().persistenceErrors, 0);
+});
+
+test('warm evaluations batch only used disk entries and repair peer eviction on cancellation', () => {
+  const records = new Map<string, Uint8Array>();
+  const touches: string[][] = [];
+  let writes = 0;
+  const store = {
+    get: (id: string) => records.get(id),
+    set: (id: string, bytes: Uint8Array) => {
+      records.set(id, bytes);
+      writes++;
+    },
+    touch: (id: string) => {
+      touches.push([id]);
+      return records.has(id);
+    },
+    getMany(ids: readonly string[]) {
+      return ids.map(id => this.get(id));
+    },
+    touchMany: (ids: readonly string[]) => {
+      touches.push([...ids]);
+      return ids.map(id => records.has(id));
+    },
+    delete: (id: string) => {
+      records.delete(id);
+    },
+    flush() {},
+  };
+  const keys = [1, 2, 3].map(id => kernelOperationKey('warm', [id], []));
+  const run = (index: number) =>
+    cache.evaluateCachedArtifact(keys[index], lifecycle, () => ({
+      result: index,
+      instance: 'computed',
+    }));
+  cache.setKernelArtifactStore(store);
+  const cold = cache.beginKernelOperationEvaluation();
+  keys.forEach((_, index) => run(index));
+  cold();
+  assert.equal(writes, 3);
+  touches.length = 0;
+  cache.setKernelArtifactStore(store);
+  let cancelled = false;
+  const warm = cache.beginKernelOperationEvaluation(() => {
+    if (cancelled) throw new Error('Cancelled');
+  });
+  try {
+    run(2);
+    run(0);
+    run(2);
+    assert.equal(touches.length, 0);
+    // A peer can evict a durable record while the native value stays in memory.
+    records.delete(keys[0].id);
+    cancelled = true;
+    assert.throws(() => run(1), /Cancelled/);
+  } finally {
+    warm();
+  }
+  assert.deepEqual(touches, [[keys[2].id, keys[0].id]]);
+  assert.equal(writes, 4);
+  assert.equal(records.size, 3);
+  assert.equal(cache.kernelOperationCacheStats().misses, 3);
+  assert.equal(cache.kernelOperationCacheStats().persistenceErrors, 0);
+});
+
+test('batch restoration reads only missing values and preserves misses, ownership and corrupt-record recovery', () => {
+  const records = new Map<string, Uint8Array>();
+  const batches: string[][] = [];
+  const store = {
+    get: (id: string) => records.get(id),
+    getMany(ids: readonly string[]) {
+      batches.push([...ids]);
+      return ids.map(id => records.get(id));
+    },
+    set(id: string, bytes: Uint8Array) {
+      records.set(id, bytes);
+    },
+    touch: (id: string) => records.has(id),
+    touchMany: (ids: readonly string[]) => ids.map(id => records.has(id)),
+    delete(id: string) {
+      records.delete(id);
+    },
+    flush() {},
+  };
+  cache.setKernelArtifactStore(store);
+  const keys = [0, 1, 2, 3].map(index =>
+    kernelOperationKey('batch', [index], []),
+  );
+  keys.forEach((key, index) =>
+    cache.evaluateCachedArtifact(key, lifecycle, () => ({
+      result: index,
+      instance: 'computed',
+    })),
+  );
+  cache.clearKernelOperationCache();
+  const finish = cache.beginKernelOperationEvaluation();
+  try {
+    cache.findKernelOperation(keys[0], lifecycle);
+    records.delete(keys[2].id);
+    records.set(keys[3].id, new Uint8Array([1, 2, 3]));
+    const result = cache.findKernelOperations(keys, lifecycle);
+    assert.deepEqual(batches, [[keys[1].id, keys[2].id, keys[3].id]]);
+    assert.deepEqual(
+      result.map(value => value?.value),
+      [
+        {result: 0, instance: 'use'},
+        {result: 1, instance: 'use'},
+        undefined,
+        undefined,
+      ],
+    );
+    assert.equal(records.has(keys[3].id), false);
+    assert.equal(cache.kernelOperationCacheStats().persistentHits, 2);
+    assert.equal(cache.kernelOperationCacheStats().persistenceErrors, 1);
+    cache.evaluateCachedArtifact(keys[3], lifecycle, () => ({
+      result: 3,
+      instance: 'repaired',
+    }));
+    assert.ok(records.has(keys[3].id));
+  } finally {
+    finish();
+  }
 });

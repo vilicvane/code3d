@@ -1,10 +1,10 @@
-import type {ModuleExports} from '../src/model/module-evaluator.ts';
-import type {ProjectFileReader} from '../src/project/file-reader.ts';
+import * as esbuild from 'esbuild';
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
-import * as esbuild from 'esbuild';
+import type {ModuleExports} from '../src/model/module-evaluator.ts';
+import type {ProjectFileReader} from '../src/project/file-reader.ts';
+import {evaluateTestBundle, importTestModule} from './project-test-files.ts';
 import {createAppTestServer} from './vite-test-server.ts';
-import {importTestModule} from './project-test-files.ts';
 
 let server: Awaited<ReturnType<typeof createAppTestServer>>;
 let ProjectBuilder: (typeof import('../src/project/project-builder.ts'))['ProjectBuilder'];
@@ -67,7 +67,11 @@ for (const extension of ['js', 'mjs', 'mts'] as const) {
     const initial = await builder.build('export * as entry from "range";');
     const evaluator = new ModuleEvaluator(importTestModule);
     try {
-      const {entry} = await evaluator.evaluate('dependency.js', initial.source);
+      const {entry} = await evaluateTestBundle(
+        server,
+        evaluator,
+        initial.source,
+      );
       const modules = new Map([[packagePath, entry]]);
       const bundle = await builder.build(
         `export * from ${JSON.stringify(sourcePath)};`,
@@ -76,9 +80,14 @@ for (const extension of ['js', 'mjs', 'mts'] as const) {
       assert.deepEqual(bundle.staticPackages, [packagePath]);
       let previous: ModuleExports | undefined;
       for (let revision = 0; revision < 2; revision++) {
-        const result = await evaluator.evaluate('model.js', bundle.source, {
-          __code3dModules: modules,
-        });
+        const result = await evaluateTestBundle(
+          server,
+          evaluator,
+          bundle.source,
+          {
+            __code3dModules: modules,
+          },
+        );
         assert.deepEqual(result.result, [
           [0, 1, 2],
           revision,
@@ -119,13 +128,22 @@ for (const source of [
     const initial = await builder.build('export * as entry from "exports";');
     const evaluator = new ModuleEvaluator(importTestModule);
     try {
-      const {entry} = await evaluator.evaluate('initial.js', initial.source);
+      const {entry} = await evaluateTestBundle(
+        server,
+        evaluator,
+        initial.source,
+      );
       const bundle = await builder.build('export * from "/model.mjs";', {
         runtimeFiles: initial.formats,
       });
-      const cached = await evaluator.evaluate('cached.js', bundle.source, {
-        __code3dModules: new Map([[packagePath, entry]]),
-      });
+      const cached = await evaluateTestBundle(
+        server,
+        evaluator,
+        bundle.source,
+        {
+          __code3dModules: new Map([[packagePath, entry]]),
+        },
+      );
       assert.deepEqual(
         Object.keys(cached.entry).sort(),
         Object.keys(entry).sort(),
@@ -153,17 +171,21 @@ test('retains Node-style CommonJS default imports for .mjs consumers', async () 
     const captured = await builder.build('import "cjs";', {
       captureModules: initial.formats,
     });
-    await evaluator.evaluate('initial.js', captured.source, {
+    await evaluateTestBundle(server, evaluator, captured.source, {
       __code3dModules: modules,
       __code3dRecordModule: (path: string, namespace: ModuleExports) =>
         modules.set(path, namespace),
     });
     const original = await builder.build('export * from "/model.mjs";');
-    const expected = await evaluator.evaluate('original.js', original.source);
+    const expected = await evaluateTestBundle(
+      server,
+      evaluator,
+      original.source,
+    );
     const bundle = await builder.build('export * from "/model.mjs";', {
       runtimeFiles: initial.formats,
     });
-    const actual = await evaluator.evaluate('cached.js', bundle.source, {
+    const actual = await evaluateTestBundle(server, evaluator, bundle.source, {
       __code3dModules: modules,
     });
     assert.deepEqual(actual.value, expected.value);

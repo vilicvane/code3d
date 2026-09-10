@@ -128,15 +128,27 @@ Core，冲突明确报错，不能隐式安装第二份公共 Core。
 环境；项目明确导入的依赖按真实声明解析。原生 TypeScript 的可擦除语法、NodeNext
 模块解析及显式源码扩展名共同约束直接 Node 执行与 App 的一致性。
 跨编译保留未变文件、SourceFile、Program 和导航映射；普通编辑增量更新输入。
+工具参数、字体与草图源码分析共用语言加载器拥有的 Program，不重新解析整套声明。
 新增导入扩展闭包，移除导入时撤下仅由它触达的语言库，再次导入可复用已读内容。
 
 `Preparing project` 对应实际的初次或依赖准备，不是每次编辑必经的可见步骤。
+
+模型编译在项目与内置包的原始文件 reader 上统一应用仓库已有的
+`squares-rng@2.0.4` Worker 补丁，再进入文件缓存和包解析。因此 npm 下载、
+本地安装与内置包使用相同有效字节，打包和 kernel identity 保持一致；已经应用
+补丁的内容直接保留，其他版本不变，也不修改用户的安装目录。补丁内容参与
+compiler recipe，更新补丁后不会复用旧编译产物。
 Worker 批量检查已经触达的路径，整批成功后再应用失效；取消前仍完成失效收尾，
 读取失败不缓存成“文件不存在”。Browser storage 安装树使用清单、锁和安装标记
-版本复用未变的只读元数据；普通文件和本地目录仍检查真实变化。
+版本复用未变的只读元数据。普通项目文件检查真实变化；普通 npm 实现按安装元数据
+复用，同版本手工修改通过文件树的 Refresh files and dependencies 生效。开发映射与
+内置包目录携带已发布文件的内容 revision，因此工作区重建会自动失效。
 
 [ProjectBuilder](../../../packages/app/src/project/project-builder.ts)使用 esbuild-wasm
-链接模块，源码分析和仪器化是独立的前置变换。只追踪项目中的模型相关源码，
+链接模块。编译 Worker 为源码发现、依赖整体和当前入口保留各自的
+`context/rebuild`；切换入口复用这些槽位，不为未打开的文件预先构建。源码分析和
+仪器化是独立的前置变换。工具元数据直接复用语言服务持有的 TypeScript Program，
+不再建立第二份解析树。只追踪项目中的模型相关源码，
 不把全部第三方依赖当作者模型代码改写。TypeScript、CommonJS interop 和循环模块
 由构建层处理。静态字符串 dynamic import 保持按需执行；计算出的 specifier 明确
 诊断。资源使用静态 `new URL(literal, import.meta.url)`。
@@ -146,20 +158,63 @@ Worker 批量检查已经触达的路径，整批成功后再应用失效；取�
 [project-builder](../../../packages/app/test/project-builder.test.ts)、
 [project-diagnostics](../../../packages/app/test/project-diagnostics.test.ts)。
 
+## 构建产物与恢复
+
+[ProjectCompiler](../../../packages/app/src/model/project-compiler.ts)只负责语言、
+源码变换和构建产物，不初始化建模内核。[DependencyBuilder](../../../packages/app/src/model/dependency-builder.ts)
+让 esbuild 处理完整依赖图，各个源码入口引用同一份匹配的依赖产物。解析元数据包含
+实际模块路径、包清单及缺失清单、安装锁和目录 revision；因此嵌套安装和传递依赖
+变化会失效。恢复先校验这些元数据，未变时直接复用依赖输出，不重读整棵实现源码。
+依赖入口按已浏览源码真正导入的模块累计，包内部模块仍由 esbuild 链接，不把每个
+内部实现文件分别注册成公开入口。Core 发现与第一次依赖输出共用一次构建；首次
+引入新的外部模块才扩展整体产物。恢复旧入口时，若当前产物
+仍包含它的模块且内核身份、解析元数据一致，复用当前合集，避免执行 Worker 来回重启。
+
+[BuildArtifactCache](../../../packages/app/src/model/build-artifact-cache.ts)以项目身份、
+规范化入口路径和构建上下文查找 `latest`。每个被浏览的源码文件独立保存，即使它
+没有模型或已被另一个入口导入。完整快照包含依赖身份、JS、声明、源码/追踪信息及
+资源；二进制按内容共享，JSON 清单压缩保存。依赖另有按项目、包来源及依赖目录
+索引的最新产物，独立于模型入口记录；新打开的文件也能直接恢复同作用域的整包
+产物。模型历史淘汰不要求一起删除仍可复用的依赖，手动刷新跳过旧依赖恢复。无语义的 Map、声明文件读取顺序不
+参与身份。构建实现身份由构建插件从代码和工具锁生成，不设置手工格式版本。
+
+会话保留 256 MiB 构建产物 LRU；磁盘与几何、HTTP 资源共用日志及预算。完整内容
+先写入，再以短事务检查引用并发布时间单调的指针；缺失任意引用时视为未命中。
+取消保留已经写完的历史内容，不发布该次构建。`successful` 单独记录最近成功执行
+的产物，不由执行失败覆盖。新 Worker 先执行可用的历史产物，后台同步工作区并
+构建当前版本；相同产物无需重复执行。恢复展示尚未校验当前源码时，源码工具和
+导出不对该旧结果启用。当前执行失败保留已有成功视图并报告当前错误。
+
+恢复的是输出，不是 esbuild AST；编译 Worker 按需重建 context。跨 Worker 只传普通
+数据，不传 TS Program、函数、模块 namespace 或原生 Shape。每条有序 Worker 通道
+只在依赖身份变化时发送完整依赖；执行侧只接收当前入口数据和自身资源，不接收
+类型声明，也不重复复制运行时已有的资源。重建 Worker 后重新发送完整依赖。回归入口为
+[build-artifact-cache](../../../packages/app/test/build-artifact-cache.test.ts)、
+[build-artifacts 浏览器回归](../../../packages/app/test/browser/build-artifacts.test.ts)与
+[compiler-progress](../../../packages/app/test/browser/compiler-progress.test.ts)。
+
 ## 执行与生命周期
 
-[ProjectRuntime](../../../packages/app/src/model/project-runtime.ts)从有效包环境创建
-项目运行时，并通过所选 Core 的 tooling 安装 OpenCascade、PlaneGCS 和字体引擎。
-Node 的 Core 入口自行完成对应初始化。项目清单或依赖变化使运行时失效；普通
-源码版本使用新的求值上下文，继续复用依赖实例和内核。
+[ProjectExecutor](../../../packages/app/src/model/project-executor.ts)在独立执行 Worker
+中接收产物，[ProjectRuntime](../../../packages/app/src/model/project-runtime.ts)加载其
+依赖代码，通过所选 Core 的 tooling 安装 OpenCascade、PlaneGCS 和字体引擎。
+Node 的 Core 入口自行完成对应初始化。依赖产物变化会替换整个执行 Worker；普通
+源码版本使用新的求值上下文，继续复用依赖实例和内核。可执行函数包装和 sketch
+源码诊断所需的静态分析在编译侧完成并随产物保存；执行 Worker 不加载 TypeScript。
+
+[共享内核安装入口](../../../packages/core/src/library/open-cascade.ts)供 Node 与 tooling
+共同使用，安装时清理旧缓存并绑定该内核的原生内存计数。通用计算缓存不负责安装
+内核，未安装时原生用量为零，因此编译 Worker 中的 Google Fonts CSS 解析等纯计算
+可以使用同一缓存，无需加载几何 WASM。
 
 [ModuleEvaluator](../../../packages/app/src/model/module-evaluator.ts)执行原生 ESM
 生成的函数。依赖模块 namespace 与源码执行范围分离，避免旧模块 exports 持有
 每次求值的模型。缓存的依赖通过 ESM facade 保留 default export 和 live binding；
 内部载体使用正确扩展名，不能把 CommonJS 放在原来的 `.mjs` 路径下。
 
-依赖图准备只在预留待执行模块时串行，模块执行在锁外进行；每个完成的 namespace
-立即发布给等待它的导入。这样保留并发 dynamic import 和顶层 await 的共享身份。
+依赖的模块链接、循环和初始化顺序由 esbuild 的整体输出负责；运行时按需调用其
+入口，并为同一路径合并初始化 Promise、发布 namespace。这样保留并发 dynamic
+import 和顶层 await 的共享身份。
 失败图释放等待者，运行时记住对应错误，其他独立导入仍可继续。
 
 每次求值用 `beginModelEvaluation` 建立上下文，在快照之后通过 `finally` 收尾。
@@ -191,18 +246,27 @@ Core 自身沿用整体运行时身份，不重复分析其所有缓存定义。
 和 [cached](../../../packages/core/test/cached.test.ts)。
 
 [kernel-cache](../../../packages/core/src/library/kernel-cache.ts)以完整计算及真实几何
-内容为边界，查询 bounds 和 mesh 也可复用。当前工作集完整保留，历史按内存 LRU
+内容为边界，查询 bounds 和 mesh 也可复用。几何值已保存紧致局部包围盒；方向
+查询只交换或反转坐标轴时直接推导，不再为六个方向各建查询记录。任意角度旋转
+及有限拓扑仍查询真实几何，不能以旋转原包围盒代替。已知的快照查询通过 `getMany`
+批量恢复，只有未命中部分进入计算。当前工作集完整保留，历史按内存 LRU
 预算淘汰，默认 2 GiB 软预算；预算包括已分配原生块与估算 JS 数据，不是 WASM buffer 大小或进程总
 内存硬上限。正常完成、抛错和合作取消采用同一收尾边界。
 
 [persistent-artifacts](../../../packages/app/src/model/persistent-artifacts.ts)与
 [artifact-journal](../../../packages/app/src/model/artifact-journal.ts)把可持久化计算结果
-保存到 OPFS。几何与 HTTP 资源共享 min(1 GiB, origin 配额的 10%) 磁盘预算，含整理空间。命名空间来自实际运行时代码和 WASM 的内容身份，不使用临时 Blob URL。
+保存到 OPFS。构建产物、几何与 HTTP 资源共享 min(1 GiB, origin 配额的 10%) 磁盘预算，含整理空间。命名空间来自实际运行时代码和 WASM 的内容身份，不使用临时 Blob URL。
 日志带签名及校验，整理副本在完整写入后发布；损坏、配额不足或存储不可用时继续
 内存模式。索引按需读取记录，不预载全部历史几何。
 
-同源 Web Lock 覆盖持久日志打开、编译和关闭；等待可取消，空闲 Worker 不持锁。
-当前不同编译 Worker 对同一持久日志串行取得所有权，一次编译内部可并行查询。
+[ArtifactStoreConnection](../../../packages/app/src/model/artifact-store.ts)通过专用 I/O
+Worker 复用同步 `KernelArtifactStore`。内存命中的访问记录先在本次求值中汇总，
+磁盘读取也只读取主体并在连接内收集访问顺序；下次写入、结束或取消的 flush 通过
+`touchMany` 在一个短事务中维护 LRU，避免每读一条缓存就写一次日志。淘汰导致缺失的记录从仍保留
+的内存值补写。访问记录独立于数据主体，更新顺序无需重写 BREP；新计算的主体及时保存。MessagePort 投递请求，SharedArrayBuffer
+分块传回字节；先连接端口再进行同步等待，避免嵌套 Worker 的消息投递依赖被阻塞
+的创建者。同源 Web Lock 只覆盖日志打开、单次读写/发布和关闭，模型编译、执行和
+等待其他 Worker 都不持有存储锁。大记录分块发送时也已释放锁。
 
 [snapshot-pool](../../../packages/app/src/model/snapshot-pool.ts)按几何 artifact
 归并 bounds/mesh，先查缓存，再分配未命中批次。主 Worker 拥有去重、预算和缓存；
@@ -235,7 +299,9 @@ Core 自身沿用整体运行时身份，不重复分析其所有缓存定义。
 [compiler-client](../../../packages/app/src/model/compiler-client.ts)立即拒绝已取消
 请求，只保留最新排队版本，并等待旧请求收尾后派发。同步 JS/WASM 通过共享取消
 标志在完整操作边界观察取消；已完成产物先保留，取消结果不发布快照。
-持续编辑不延长当前请求的强制终止期限，无法合作退出时终止并重建 Worker。
+编译取消调用 esbuild context 的 cancel，保留 context 后处理最新版本。持续编辑
+不延长执行请求的强制终止期限；无法合作退出时只重建执行 Worker，编译侧的文件、
+语言及 esbuild context 保留。编译故障独立重建编译 Worker。
 项目关闭释放整个运行时；Worker 实例与请求 ID 共同限制消息及文件响应归属。
 
 共享取消标志要求安全上下文和跨源隔离。开发、预览和生产 App 资源配置相应

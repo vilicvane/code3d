@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
-import {test, before, after} from 'node:test';
+import {after, before, test} from 'node:test';
 import type {ArtifactFile} from '../src/model/artifact-journal.ts';
+import {
+  packArtifactValues,
+  unpackArtifactValues,
+} from '../src/model/artifact-store-protocol.ts';
 import {createAppTestServer} from './vite-test-server.ts';
 let server: Awaited<ReturnType<typeof createAppTestServer>>;
 let ArtifactJournal: typeof import('../src/model/artifact-journal.ts').ArtifactJournal;
@@ -219,4 +223,25 @@ test('quota failure preserves the previous file and permits retry after space is
   journal.set('new', value(2));
   journal.flush();
   assert.deepEqual(new ArtifactJournal(disk, 8192).get('new'), value(2));
+});
+
+test('batched journal replies preserve order, missing entries and empty or multi-mailbox records', () => {
+  const disk = files();
+  const journal = new ArtifactJournal(disk, 16 * 1024 ** 2);
+  const large = value(173, 3 * 1024 ** 2);
+  journal.set('empty', new Uint8Array());
+  journal.set('large', large);
+  journal.flush();
+  const result = journal.getMany(['missing', 'empty', 'large', 'empty']);
+  const packed = packArtifactValues(result);
+  assert.deepEqual(unpackArtifactValues(packed), [
+    undefined,
+    new Uint8Array(),
+    large,
+    new Uint8Array(),
+  ]);
+  assert.deepEqual(unpackArtifactValues(packArtifactValues([])), []);
+  journal.flush();
+  const restored = new ArtifactJournal(disk, 16 * 1024 ** 2);
+  assert.deepEqual(restored.getMany(['large', 'missing']), [large, undefined]);
 });

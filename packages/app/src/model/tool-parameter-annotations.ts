@@ -1,7 +1,7 @@
 import ts from '@typescript/typescript6';
-import type {TopologyKind} from '@code3d/core/tooling';
 import {code3dAnnotations, type Code3dAnnotation} from './annotations';
 import {
+  isToolSelectionKind,
   validToolParameterValue,
   type ToolParameterAction,
   type ToolParameterConfig,
@@ -43,10 +43,6 @@ const toolParameterKinds = new Set<ToolParameterKind>([
   'edge',
   'surface',
 ]);
-
-export function isToolSelectionKind(kind: unknown): kind is TopologyKind {
-  return kind === 'vertex' || kind === 'edge' || kind === 'surface';
-}
 
 export type SignatureParameter = Readonly<{
   path?: readonly number[];

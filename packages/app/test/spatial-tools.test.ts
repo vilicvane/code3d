@@ -1,21 +1,21 @@
-import {Matrix4, Object3D, Quaternion, Vector3} from 'three';
-import type {ViewportDecoration} from '../src/viewport-decoration.ts';
-import type {ToolHost} from '../src/tools/tool-system.ts';
-import {defined} from '../../../test/assert.ts';
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
+import {Matrix4, Object3D, Quaternion, Vector3} from 'three';
+import {defined} from '../../../test/assert.ts';
+import type {ToolHost} from '../src/tools/tool-system.ts';
+import type {ViewportDecoration} from '../src/viewport-decoration.ts';
+import {createTestModelPipeline} from './project-test-files.ts';
 import {createAppTestServer} from './vite-test-server.ts';
-import {createTestProjectCompiler} from './project-test-files.ts';
 
 let server: Awaited<ReturnType<typeof createAppTestServer>>,
-  compiler: Awaited<ReturnType<typeof createTestProjectCompiler>>,
+  compiler: Awaited<ReturnType<typeof createTestModelPipeline>>,
   spatialBindings: (typeof import('../src/tools/model-spatial-tool.ts'))['spatialBindings'],
   spatialIntent: (typeof import('../src/tools/model-spatial-tool.ts'))['spatialIntent'],
   ToolEngine: (typeof import('../src/tools/tool-system.ts'))['ToolEngine'],
   offsetExpression: (typeof import('../src/tools/source-expression.ts'))['offsetExpression'];
 before(async () => {
   server = await createAppTestServer();
-  compiler = await createTestProjectCompiler(server);
+  compiler = await createTestModelPipeline(server);
   ({spatialBindings, spatialIntent} = await server.ssrLoadModule<
     typeof import('../src/tools/model-spatial-tool.ts')
   >('/src/tools/model-spatial-tool.ts'));

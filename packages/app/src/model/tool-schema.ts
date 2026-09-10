@@ -1,11 +1,9 @@
-import ts from '@typescript/typescript6';
-import es5Library from '@typescript/old/lib/lib.es5.d.ts?raw';
 import type {
   ParameterKind,
   SourceRef,
   TopologyKind,
 } from '@code3d/core/tooling';
-import type {ProjectLanguage} from '../project/project-language';
+import ts from '@typescript/typescript6';
 import {normalizeProjectPath, type ModelProject} from '../project/project';
 import {
   indexParameterDefinitions,
@@ -13,11 +11,11 @@ import {
   type ParameterDefinitionMap,
   type SourceParameterTarget,
 } from './parameter-definitions';
+import {isToolSelectionKind} from './tool-parameter-config';
 
 import {
-  isToolSelectionKind,
-  readToolParameterAnnotations,
   parameterAnnotations,
+  readToolParameterAnnotations,
   signatureParameters,
   type SignatureParameter,
 } from './tool-parameter-annotations';
@@ -26,13 +24,13 @@ import type {
   ToolParameterConstraints,
 } from './tool-parameter-config';
 
-export {sourceNodeKey};
-export type {ParameterDefinitionMap, SourceParameterTarget};
 export type {
   ToolParameterAction,
   ToolParameterConstraints,
   ToolParameterKind,
 } from './tool-parameter-config';
+export {sourceNodeKey};
+export type {ParameterDefinitionMap, SourceParameterTarget};
 
 type ToolParameterSchemaBase = Readonly<{
   index: number;
@@ -96,64 +94,10 @@ export type ProjectToolingIndex = Readonly<{
   parameterDefinitions: ReadonlyMap<string, ParameterDefinitionMap>;
 }>;
 
-export function isToolSelectionParameter(
-  parameter: ToolParameterSchema,
-): parameter is ToolSelectionParameterSchema {
-  return isToolSelectionKind(parameter.kind);
-}
-
 export function resolveProjectTooling(
   project: ModelProject,
-  language: ProjectLanguage,
+  program: ts.Program,
 ): ProjectToolingIndex {
-  const sources = new Map<string, string>();
-  language.files.forEach(file =>
-    sources.set(normalizeProjectPath(file.path), file.source),
-  );
-  project.files.forEach(file =>
-    sources.set(normalizeProjectPath(file.path), file.source),
-  );
-  sources.set('/lib.es5.d.ts', es5Library);
-
-  const sourceFiles = new Map<string, ts.SourceFile>();
-  const host: ts.CompilerHost = {
-    fileExists: fileName => sources.has(virtualFilePath(fileName)),
-    readFile: fileName => sources.get(virtualFilePath(fileName)),
-    realpath: fileName =>
-      language.realPaths?.[virtualFilePath(fileName)] ?? fileName,
-    getSourceFile(fileName, languageVersion) {
-      const path = virtualFilePath(fileName);
-      const source = sources.get(path);
-      if (source === undefined) return undefined;
-      const existing = sourceFiles.get(path);
-      if (existing) return existing;
-      const sourceFile = ts.createSourceFile(
-        path,
-        source,
-        languageVersion,
-        true,
-        scriptKind(path),
-      );
-      sourceFiles.set(path, sourceFile);
-      return sourceFile;
-    },
-    getDefaultLibFileName: () => '/lib.es5.d.ts',
-    writeFile: () => {},
-    getCurrentDirectory: () => '/',
-    getDirectories: () => [],
-    getCanonicalFileName: fileName => virtualFilePath(fileName),
-    useCaseSensitiveFileNames: () => true,
-    getNewLine: () => '\n',
-    directoryExists: path =>
-      [...sources.keys()].some(file =>
-        file.startsWith(path === '/' ? '/' : path + '/'),
-      ),
-  };
-  const program = ts.createProgram({
-    rootNames: project.files.map(file => normalizeProjectPath(file.path)),
-    options: language.compilerOptions,
-    host,
-  });
   const checker = program.getTypeChecker();
   const declarationSchemas = new Map<
     ts.Signature,
@@ -386,21 +330,6 @@ function toolSchemaError(declaration: ts.Node, message: string): Error {
   return new Error(
     `${sourceFile.fileName}:${position.line + 1}:${position.character + 1}: ${message}`,
   );
-}
-
-function scriptKind(path: string): ts.ScriptKind {
-  if (path.endsWith('.tsx')) return ts.ScriptKind.TSX;
-  if (path.endsWith('.js') || path.endsWith('.mjs') || path.endsWith('.cjs')) {
-    return ts.ScriptKind.JS;
-  }
-  if (path.endsWith('.jsx')) return ts.ScriptKind.JSX;
-  return ts.ScriptKind.TS;
-}
-
-function virtualFilePath(path: string): string {
-  return path.startsWith('file://')
-    ? normalizeProjectPath(new URL(path).pathname)
-    : normalizeProjectPath(path);
 }
 
 function humanizeIdentifier(value: string): string {

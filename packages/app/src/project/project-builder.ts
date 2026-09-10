@@ -1,14 +1,18 @@
+import ts from '@typescript/typescript6';
+import type * as esbuild from 'esbuild-wasm';
+import {ModelDiagnosticError} from '../model/diagnostic';
 import {
   CachedDefinitionCompiler,
   transformCachedDefinitions,
   type CachedDefinitions,
 } from './cached-definitions';
-import type * as esbuild from 'esbuild-wasm';
-import ts from '@typescript/typescript6';
+import {
+  decodeProjectFile,
+  type ProjectFileInfo,
+  type ProjectFileReader,
+} from './file-reader';
 import {ProjectPackageResolver, nodeBuiltinError} from './package-resolver';
-import {decodeProjectFile, type ProjectFileReader} from './file-reader';
 import type {ProjectAssets} from './project-assets';
-import {ModelDiagnosticError} from '../model/diagnostic';
 
 // Build-time Node supplies its real builtin catalog, including subpaths.
 const nodeBuiltins = new Set(__CODE3D_NODE_BUILTINS__);
@@ -30,47 +34,112 @@ export type ProjectBundle = Readonly<{
   files: readonly string[];
   formats: ModuleFormats;
   staticPackages: readonly string[];
+  packageEntries: readonly string[];
   resources: readonly string[];
   sourcePackages: ReadonlyMap<string, readonly string[]>;
+}>;
+
+export type ProjectBuildOptions = Readonly<{
+  runtimeFiles?: ModuleFormats;
+  transform?: SourceTransform;
+  captureModules?: ModuleFormats;
+  lazyPackages?: ReadonlyMap<string, readonly string[]>;
+  instrumentCaches?: boolean;
+  cacheIdentityFiles?: ReadonlySet<string>;
+  /** Retain esbuild's context for this logical output until the builder is disposed. */
+  slot?: string;
+  /** Dependency bundles leave their entire graph, including dynamic imports, to esbuild. */
+  bundlePackages?: boolean;
 }>;
 
 /** Native and browser esbuild share this project-filesystem plugin. */
 export class ProjectBuilder {
   private readonly resolver: ProjectPackageResolver;
+  readonly dependencyMetadata = new Map<string, ProjectFileInfo | null>();
 
   constructor(
     private readonly files: ProjectFileReader,
-    private readonly engine: Pick<typeof esbuild, 'build'>,
+    private readonly engine: Pick<typeof esbuild, 'build' | 'context'>,
     private readonly assets?: ProjectAssets,
   ) {
-    this.resolver = new ProjectPackageResolver(files);
+    this.resolver = new ProjectPackageResolver({
+      readFile: async path => {
+        const bytes = await files.readFile(path);
+        if (path.endsWith('/package.json'))
+          await this.watchDependencyMetadata([path]);
+        return bytes;
+      },
+      stat: async path => {
+        const info = await files.stat(path);
+        if (
+          path.endsWith('/package.json') ||
+          (path.includes('/node_modules') && info?.kind === 'directory')
+        )
+          this.dependencyMetadata.set(path, dependencyFileIdentity(info));
+        return info;
+      },
+    });
+  }
+
+  async watchDependencyMetadata(paths: readonly string[]): Promise<void> {
+    await Promise.all(
+      paths.map(async path => {
+        this.dependencyMetadata.set(
+          path,
+          dependencyFileIdentity(await this.files.stat(path)),
+        );
+      }),
+    );
   }
 
   resolve(specifier: string, importer = '/model.ts'): Promise<string | false> {
     return this.resolver.resolve(specifier, importer);
   }
 
-  async build(
-    entrySource: string,
-    {
-      runtimeFiles = new Map<string, 'esm' | 'cjs'>(),
-      transform,
-      captureModules,
-      lazyPackages,
-      instrumentCaches = true,
-    }: Readonly<{
-      runtimeFiles?: ModuleFormats;
-      transform?: SourceTransform;
-      captureModules?: ModuleFormats;
-      lazyPackages?: ReadonlyMap<string, readonly string[]>;
-      /** Core initialization already has a complete runtime implementation identity. */
-      instrumentCaches?: boolean;
-    }> = {},
-  ): Promise<ProjectBundle> {
-    const cachedDefinitions = new CachedDefinitionCompiler(
-      this.files,
-      (specifier, importer) => this.resolve(specifier, importer),
+  private readonly sessions = new Map<
+    string,
+    ReturnType<ProjectBuilder['createSession']>
+  >();
+
+  async dispose(): Promise<void> {
+    const sessions = [...this.sessions.values()];
+    this.sessions.clear();
+    await Promise.all(sessions.map(session => session.dispose()));
+    this.dependencyMetadata.clear();
+  }
+
+  async cancel(): Promise<void> {
+    await Promise.all(
+      [...this.sessions.values()].map(session => session.cancel()),
     );
+  }
+
+  build(
+    entrySource: string,
+    options: ProjectBuildOptions = {},
+  ): Promise<ProjectBundle> {
+    if (!options.slot)
+      return this.createSession(false).run(entrySource, options);
+    let session = this.sessions.get(options.slot);
+    if (!session) {
+      session = this.createSession(true);
+      this.sessions.set(options.slot, session);
+    }
+    return session.run(entrySource, options);
+  }
+
+  private createSession(incremental: boolean) {
+    let entrySource: string;
+    let runtimeFiles: ModuleFormats;
+    let transform: SourceTransform | undefined;
+    let captureModules: ModuleFormats | undefined;
+    let lazyPackages: ReadonlyMap<string, readonly string[]> | undefined;
+    let instrumentCaches: boolean;
+    let cacheIdentityFiles: ReadonlySet<string> | undefined;
+    let bundlePackages: boolean;
+    let cachedDefinitions: CachedDefinitionCompiler;
+    let context: esbuild.BuildContext | undefined;
+    let queue = Promise.resolve();
     const resources = new Set<string>();
     const runtimePaths = new Map<string, string>();
     const runtimeModule = (
@@ -83,13 +152,28 @@ export class ProjectBuilder {
       runtimePaths.set(namespace + ':' + generated, path);
       return {path: generated, namespace, pluginData: path};
     };
-    const result = await this.engine
-      .build({
-        stdin: {
-          contents: entrySource,
-          sourcefile: '/.__code3d-entry.js',
-          resolveDir: '/',
-        },
+    const run = async (
+      nextSource: string,
+      options: ProjectBuildOptions,
+    ): Promise<ProjectBundle> => {
+      entrySource = nextSource;
+      ({
+        runtimeFiles = new Map(),
+        transform,
+        captureModules,
+        lazyPackages,
+        instrumentCaches = true,
+        cacheIdentityFiles,
+        bundlePackages = false,
+      } = options);
+      cachedDefinitions = new CachedDefinitionCompiler(
+        this.files,
+        (specifier, importer) => this.resolve(specifier, importer),
+      );
+      resources.clear();
+      runtimePaths.clear();
+      const buildOptions: esbuild.BuildOptions = {
+        entryPoints: ['code3d:entry'],
         bundle: true,
         format: 'esm',
         platform: 'browser',
@@ -103,6 +187,8 @@ export class ProjectBuilder {
             name: 'code3d-project-files',
             setup: build => {
               build.onResolve({filter: /.*/}, async args => {
+                if (args.kind === 'entry-point' && args.path === 'code3d:entry')
+                  return {path: '/.__code3d-entry.js', namespace: 'entry'};
                 try {
                   if (
                     args.namespace === 'runtime' &&
@@ -142,6 +228,11 @@ export class ProjectBuilder {
                   };
                 }
               });
+              build.onLoad({filter: /.*/, namespace: 'entry'}, () => ({
+                contents: entrySource,
+                loader: 'js',
+                resolveDir: '/',
+              }));
               build.onLoad({filter: /.*/, namespace: 'empty'}, () => ({
                 contents: '',
                 loader: 'js',
@@ -187,7 +278,9 @@ export class ProjectBuilder {
                   return {contents: bytes, loader: 'binary'};
                 let source = decodeProjectFile(bytes);
                 const definitions =
-                  !instrumentCaches || args.path.endsWith('.json')
+                  !instrumentCaches ||
+                  cacheIdentityFiles?.has(args.path) ||
+                  args.path.endsWith('.json')
                     ? new Map<number, string>()
                     : await cachedDefinitions.definitions(args.path, source);
                 if (
@@ -211,6 +304,7 @@ export class ProjectBuilder {
                     args.path,
                     source,
                     lazyPackages,
+                    bundlePackages,
                   );
                 const captureFormat = captureModules?.get(args.path);
                 if (captureFormat) {
@@ -252,8 +346,12 @@ export class ProjectBuilder {
             },
           },
         ],
-      })
-      .catch(async (error: esbuild.BuildFailure) => {
+      };
+      const result = await (
+        incremental
+          ? (context ??= await this.engine.context(buildOptions)).rebuild()
+          : this.engine.build(buildOptions)
+      ).catch(async (error: esbuild.BuildFailure) => {
         if (!error.errors?.length) throw error;
         const message = error.errors[0];
         if (message.detail instanceof ModelDiagnosticError)
@@ -289,35 +387,61 @@ export class ProjectBuilder {
           ...(sourceRef ? {sourceRef} : {}),
         });
       });
+      return {
+        source: result.outputFiles![0].text,
+        resources: [...resources],
+        files: Object.keys(result.metafile!.inputs)
+          .filter(path => path.startsWith('project:'))
+          .map(path => path.slice('project:'.length)),
+        formats: new Map(
+          Object.entries(result.metafile!.inputs)
+            .filter(([path]) => path.startsWith('project:'))
+            .map(([path, input]) => [
+              path.slice('project:'.length),
+              input.format === 'cjs' || path.endsWith('.json') ? 'cjs' : 'esm',
+            ]),
+        ),
+        staticPackages: staticPackageEntries(
+          result.metafile!.inputs,
+          runtimePaths,
+        ),
+        packageEntries: staticPackageEntries(
+          result.metafile!.inputs,
+          runtimePaths,
+          undefined,
+          true,
+        ),
+        sourcePackages: new Map(
+          Object.keys(result.metafile!.inputs)
+            .filter(
+              path =>
+                path.startsWith('project:') && !path.includes('/node_modules/'),
+            )
+            .map(path => [
+              path.slice('project:'.length),
+              staticPackageEntries(result.metafile!.inputs, runtimePaths, [
+                path,
+              ]),
+            ]),
+        ),
+      };
+    };
     return {
-      source: result.outputFiles![0].text,
-      resources: [...resources],
-      files: Object.keys(result.metafile!.inputs)
-        .filter(path => path.startsWith('project:'))
-        .map(path => path.slice('project:'.length)),
-      formats: new Map(
-        Object.entries(result.metafile!.inputs)
-          .filter(([path]) => path.startsWith('project:'))
-          .map(([path, input]) => [
-            path.slice('project:'.length),
-            input.format === 'cjs' || path.endsWith('.json') ? 'cjs' : 'esm',
-          ]),
-      ),
-      staticPackages: staticPackageEntries(
-        result.metafile!.inputs,
-        runtimePaths,
-      ),
-      sourcePackages: new Map(
-        Object.keys(result.metafile!.inputs)
-          .filter(
-            path =>
-              path.startsWith('project:') && !path.includes('/node_modules/'),
-          )
-          .map(path => [
-            path.slice('project:'.length),
-            staticPackageEntries(result.metafile!.inputs, runtimePaths, [path]),
-          ]),
-      ),
+      cancel: async () => {
+        await context?.cancel();
+      },
+      run: (source: string, options: ProjectBuildOptions) => {
+        const pending = queue.then(() => run(source, options));
+        queue = pending.then(
+          () => {},
+          () => {},
+        );
+        return pending;
+      },
+      dispose: async () => {
+        await queue;
+        await context?.dispose();
+      },
     };
   }
 
@@ -325,6 +449,7 @@ export class ProjectBuilder {
     path: string,
     source: string,
     lazyPackages?: ReadonlyMap<string, readonly string[]>,
+    bundlePackages = false,
   ): Promise<string> {
     if (!/\bimport\s*\(/.test(source)) return source;
     const parsed = ts.createSourceFile(
@@ -384,7 +509,7 @@ export class ProjectBuilder {
           },
         });
       }
-      if (resolved && resolved.includes('/node_modules/')) {
+      if (!bundlePackages && resolved && resolved.includes('/node_modules/')) {
         source =
           source.slice(0, node.getStart(parsed)) +
           '__code3dImport(' +
@@ -408,12 +533,25 @@ export class ProjectBuilder {
   }
 }
 
+export function dependencyFileIdentity(
+  info: ProjectFileInfo | undefined,
+): ProjectFileInfo | null {
+  return info
+    ? {
+        kind: info.kind,
+        version: info.version,
+        ...(info.realPath ? {realPath: info.realPath} : {}),
+      }
+    : null;
+}
+
 function staticPackageEntries(
   inputs: esbuild.Metafile['inputs'],
   runtimePaths: ReadonlyMap<string, string>,
   roots = Object.keys(inputs).filter(
     path => !path.startsWith('project:') && !runtimePaths.has(path),
   ),
+  includeDynamic = false,
 ): string[] {
   const visited = new Set<string>();
   const entries = new Set<string>();
@@ -428,7 +566,10 @@ function staticPackageEntries(
       return;
     }
     for (const dependency of inputs[path]?.imports ?? []) {
-      if (!dependency.external && dependency.kind !== 'dynamic-import')
+      if (
+        !dependency.external &&
+        (includeDynamic || dependency.kind !== 'dynamic-import')
+      )
         visit(dependency.path);
     }
   };

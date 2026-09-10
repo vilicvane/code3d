@@ -1,14 +1,13 @@
-import assert from 'node:assert/strict';
-import {after, before, test} from 'node:test';
 import {
   sketchCurveGeometry,
-  sketchCurvePosition,
-  type SketchSnapshot,
   type SketchPosition,
+  type SketchSnapshot,
 } from '@code3d/core/tooling';
+import assert from 'node:assert/strict';
+import {after, before, test} from 'node:test';
 import type {SketchChange} from '../src/tools/sketch-source.ts';
+import {createTestModelPipeline} from './project-test-files.ts';
 import {createAppTestServer} from './vite-test-server.ts';
-import {createTestProjectCompiler} from './project-test-files.ts';
 
 let server: Awaited<ReturnType<typeof createAppTestServer>>;
 let geometry: typeof import('../src/tools/sketch-segments.ts');
@@ -89,7 +88,7 @@ function edit(...args: Parameters<typeof resolve>) {
   return result.plan.edits[0].text;
 }
 async function compile(args: string, declarations = '') {
-  const compiler = await createTestProjectCompiler(server);
+  const compiler = await createTestModelPipeline(server);
   try {
     const result = await compiler.compile(
       {
@@ -105,7 +104,7 @@ async function compile(args: string, declarations = '') {
     assert.equal(result.diagnostic, undefined);
     return [...result.sketches.values()].at(-1)!;
   } finally {
-    compiler.dispose();
+    await compiler.dispose();
   }
 }
 

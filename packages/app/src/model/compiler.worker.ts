@@ -2,17 +2,25 @@
 
 import * as esbuild from 'esbuild-wasm';
 import esbuildWasmUrl from 'esbuild-wasm/esbuild.wasm?url';
-import {ProjectCompiler} from './project-compiler';
-import {diagnosticFromError} from './diagnostic';
-import {checkCompilationCancellation} from './compilation-cancellation';
+import compilerRecipe from 'virtual:code3d-compiler-recipe';
 import type {ProjectFileInfo} from '../project/file-reader';
-import type {
-  CompileRequest,
-  CompilerRequest,
-  CompilerResponse,
-  FileRequest,
-  FileQuery,
+import {ArtifactStoreConnection} from './artifact-store';
+import {
+  BuildArtifactCache,
+  buildEntryKey,
+  projectArtifactIdentity,
+} from './build-artifact-cache';
+import {checkCompilationCancellation} from './compilation-cancellation';
+import {
+  ArtifactChannel,
+  type CompileRequest,
+  type CompilerRequest,
+  type CompilerResponse,
+  type FileQuery,
+  type FileRequest,
 } from './compiler-protocol';
+import {diagnosticFromError} from './diagnostic';
+import {ProjectCompiler} from './project-compiler';
 
 const workerScope = self as DedicatedWorkerGlobalScope;
 const send = (message: CompilerResponse) => workerScope.postMessage(message);
@@ -34,6 +42,14 @@ function requestFile<T>(
   });
 }
 
+const storage = new ArtifactStoreConnection();
+const artifactChannel = new ArtifactChannel();
+const buildNamespace = 'build:' + compilerRecipe;
+const cache = new BuildArtifactCache(
+  storage.scope(buildNamespace),
+  (key, value, required) =>
+    storage.publish(buildNamespace, key, value, required),
+);
 const compiler = new ProjectCompiler(
   {
     readFile: path =>
@@ -65,16 +81,19 @@ const compiler = new ProjectCompiler(
       }),
   },
   esbuild,
+  storage.scope('resources'),
 );
-let compileId: number | undefined;
 
-// The client waits for a cancelled compile's cleanup before sending its successor.
-// Keep the runtime and completed kernel operations across ordinary cancellation.
+let activeRequest: number | undefined;
+
+// The client coalesces pending revisions while esbuild cancels its current work.
+// Cancellation retains the compiler's contexts for the next revision.
 async function compile(request: CompileRequest): Promise<void> {
+  activeRequest = request.id;
   const checkCancelled = () =>
     checkCompilationCancellation(request.cancellation);
-  compileId = undefined;
   try {
+    await storage.ready;
     checkCancelled();
     if (!engineReady) {
       send({kind: 'progress', id: request.id, phase: 'loading-compiler'});
@@ -87,17 +106,45 @@ async function compile(request: CompileRequest): Promise<void> {
     }
     await engineReady;
     checkCancelled();
-    const module = await compiler.compile(
+    const artifact = await compiler.compile(
       request.project,
       request.rootPath,
       request.designContext,
       language => send({kind: 'language', id: request.id, language}),
       phase => send({kind: 'progress', id: request.id, phase}),
       checkCancelled,
+      request.projectIdentity
+        ? async scope =>
+            cache.restoreDependencies(
+              await buildEntryKey(request.projectIdentity!, scope),
+            )
+        : undefined,
     );
     checkCancelled();
-    compileId = request.id;
-    send({kind: 'result', id: request.id, ok: true, module});
+    if (request.projectIdentity) {
+      const key = await buildEntryKey(
+        request.projectIdentity,
+        request.rootPath,
+        request.designContext,
+      );
+      const dependencyKey = await buildEntryKey(
+        request.projectIdentity,
+        compiler.dependencyScope,
+      );
+      await cache.save(
+        key,
+        artifact,
+        request.stamp,
+        checkCancelled,
+        'latest',
+        dependencyKey,
+      );
+    }
+    send({
+      kind: 'compiled',
+      id: request.id,
+      ...artifactChannel.encode(artifact),
+    });
   } catch (error) {
     if (Atomics.load(request.cancellation, 0)) {
       send({kind: 'cancelled', id: request.id});
@@ -109,6 +156,8 @@ async function compile(request: CompileRequest): Promise<void> {
       ok: false,
       diagnostic: diagnosticFromError(error, 'project'),
     });
+  } finally {
+    if (activeRequest === request.id) activeRequest = undefined;
   }
 }
 
@@ -118,44 +167,49 @@ workerScope.onmessage = ({data}: MessageEvent<CompilerRequest>) => {
     pendingFiles.delete(data.id);
     if (data.error) pending?.reject(new Error(data.error));
     else pending?.resolve(data.value);
-  } else if (data.kind === 'sketch') {
-    try {
-      send({
-        kind: 'sketch',
-        id: data.id,
-        ok: true,
-        preview: compiler.previewSketchDrag(data.layers, data.drag),
-      });
-    } catch (error) {
-      send({
-        kind: 'result',
-        id: data.id,
-        ok: false,
-        diagnostic: diagnosticFromError(error),
-      });
-    }
-  } else if (data.kind === 'export' || data.kind === 'topology') {
-    try {
-      if (compileId !== data.compileId)
-        throw new Error(
-          'The model has changed. Reopen export after compilation finishes.',
+  } else if (data.kind === 'restore') {
+    void buildEntryKey(
+      data.projectIdentity,
+      data.rootPath,
+      data.designContext,
+    ).then(async key => {
+      await storage.ready;
+      const artifact = cache.restore(key, 'successful') ?? cache.restore(key);
+      if (artifact) {
+        const dependencies = compiler.restoreDependencies(
+          artifact.dependencies,
         );
-      if (data.kind === 'export') {
-        const blob = compiler.export(data.instances, data.options);
-        send({kind: 'export', id: data.id, ok: true, blob});
-      } else {
-        const topology = compiler.inspectTopology(data.nodeId, data.options);
-        send({kind: 'topology', id: data.id, ok: true, topology});
+        let restored =
+          dependencies === artifact.dependencies
+            ? artifact
+            : {
+                ...artifact,
+                dependencies,
+                resources: new Map([
+                  ...dependencies.resources,
+                  ...artifact.resources,
+                ]),
+              };
+        if (restored !== artifact)
+          restored = {...restored, id: await projectArtifactIdentity(restored)};
+        send({
+          kind: 'cached',
+          id: data.id,
+          ...artifactChannel.encode(restored),
+        });
       }
-    } catch (error) {
-      send({
-        kind: 'result',
-        id: data.id,
-        ok: false,
-        diagnostic: diagnosticFromError(error),
-      });
-    }
-  } else {
+    });
+  } else if (data.kind === 'compile') {
     void compile(data);
+  } else if (data.kind === 'cancel-compile' && activeRequest === data.id) {
+    void compiler.cancel();
+  } else if (data.kind === 'refresh-dependencies') {
+    compiler.refreshDependencies();
+  } else if (data.kind === 'execution-succeeded') {
+    void buildEntryKey(
+      data.projectIdentity,
+      data.rootPath,
+      data.designContext,
+    ).then(key => cache.succeeded(key, data.artifact, data.stamp));
   }
 };

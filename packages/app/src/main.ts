@@ -1,24 +1,37 @@
-import {reaction} from 'mobx';
-import {AgentConnections} from './agent/connections';
-import './style.css';
+import {resolveRenderView} from '@code3d/agent';
+import {
+  compareTopologyIds,
+  formatTopologyId,
+  type EdgeId,
+  type ModelSnapshotObject,
+  type ParameterTarget,
+  type SourceRef,
+  type TopologyId,
+  type TopologyKind,
+} from '@code3d/core/tooling';
 import {
   File,
   FilePlus,
   FolderOpen,
   FolderPlus,
-  RefreshCw,
   PanelLeftClose,
   PanelLeftOpen,
+  RefreshCw,
   X,
 } from 'lucide';
+import {reaction} from 'mobx';
 import brandMark from '../../../assets/brand/mark.svg?raw';
+import {AgentConnections} from './agent/connections';
+import {AgentObserver} from './agent/observer';
+import {AgentPanel} from './agent/panel';
+import {AgentProjectSession, type AgentUpdate} from './agent/project-session';
+import {AgentRenderHistory} from './agent/render-history';
 import {
   CodeEditor,
   type ActiveFileChangeReason,
   type CompletionFocus,
   type ProjectEditorChange,
 } from './editor';
-import {ModelCompilerClient} from './model/compiler-client';
 import {compilationPhaseLabels} from './model/compilation-progress';
 import type {
   DesignArgumentContext,
@@ -28,81 +41,82 @@ import type {
   ModelModule,
   TopologySelectionScope,
 } from './model/compiler';
+import {ModelCompilerClient} from './model/compiler-client';
 import {ModelDiagnosticError, type ModelDiagnostic} from './model/diagnostic';
+import {
+  elementSourceDecoration,
+  namedElementDecorations,
+} from './model/element-decorations';
+import {originDecoration} from './model/origin-decorations';
 import {
   ModelPreviewState,
   type ModelPreviewRequest,
 } from './model/preview-state';
-import {viewportDiagnostic} from './model/viewport-diagnostic';
-import {originDecoration} from './model/origin-decorations';
+import {sourceDecorationProviders} from './model/source-decorations';
 import {sourceParameterAt} from './model/tool-arguments';
-import {spatialIntent} from './tools/model-spatial-tool';
-import {SketchEditorController} from './tools/sketch-editor-controller';
+import {isToolSelectionParameter} from './model/tool-parameter-config';
+import type {
+  ToolArgumentEditTarget,
+  ToolArgumentSource,
+  ToolSelectionParameterSchema,
+  ToolSignatureSchema,
+} from './model/tool-schema';
+import {viewportDiagnostic} from './model/viewport-diagnostic';
+import {
+  BrowserPackageManager,
+  PackageInstallationError,
+} from './project/browser-package-manager';
+import {
+  browserPackageFiles,
+  developmentWorkspaces,
+} from './project/browser-packages';
 import {bundledExamples} from './project/bundled-examples';
 import {defaultProject} from './project/default-project';
 import {
   pickProjectDirectory,
   projectDirectoryPermission,
+  rememberProjectDirectory,
   requestProjectDirectoryPermission,
   storedProjectDirectory,
-  rememberProjectDirectory,
   supportsProjectDirectories,
 } from './project/directory-access';
+import {
+  listProjectEntries,
+  readProjectTextFile,
+  searchProjectEntries,
+  type ProjectEntry,
+} from './project/file-operations';
+import {decodeProjectFile} from './project/file-reader';
+import {filePathFromRoute, fileRoute} from './project/file-route';
+import type {BrowserProjectFileSystem} from './project/filesystem';
 import {
   openBrowserProjectFileSystem,
   openDirectoryProjectFileSystem,
 } from './project/filesystem';
-import {filePathFromRoute, fileRoute} from './project/file-route';
-import {decodeProjectFile} from './project/file-reader';
+import {mapProjectIO} from './project/io';
 import {
-  listProjectEntries,
-  searchProjectEntries,
-  readProjectTextFile,
-  type ProjectEntry,
-} from './project/file-operations';
+  addPackageDependency,
+  packageInstallDirectory,
+  parsePackageManifest,
+} from './project/package-manifest';
 import {
-  normalizeProjectPath,
   isSourceFile,
+  normalizeProjectPath,
   projectDirectory as parentProjectDirectory,
   type ModelProject,
 } from './project/project';
-import {mapProjectIO} from './project/io';
-import {
-  BrowserPackageManager,
-  PackageInstallationError,
-} from './project/browser-package-manager';
-import type {BrowserProjectFileSystem} from './project/filesystem';
-import {
-  packageInstallDirectory,
-  parsePackageManifest,
-  addPackageDependency,
-} from './project/package-manifest';
 import {ProjectPackages} from './project/project-packages';
-import {
-  browserPackageFiles,
-  developmentWorkspaces,
-} from './project/browser-packages';
 import {WorkspaceFileReader} from './project/workspace-packages';
+import './style.css';
 import {
-  compareTopologyIds,
-  formatTopologyId,
-  type TopologyId,
-  type EdgeId,
-  type ModelSnapshotObject,
-  type ParameterTarget,
-  type SourceRef,
-  type TopologyKind,
-} from '@code3d/core/tooling';
-import {topologyIdExpression} from './tools/topology-expression';
-import {sourceDecorationProviders} from './model/source-decorations';
-import {
-  elementSourceDecoration,
-  namedElementDecorations,
-} from './model/element-decorations';
-import type {
-  TransformGizmoBinding,
-  TransformGizmoEvent,
-} from './tools/transform-gizmo';
+  contextualParameterIntent,
+  contextualParameterView,
+  contextualToolParameters,
+  validContextualParameter,
+  type ContextualToolParameterState,
+} from './tools/contextual-tool-parameters';
+import {spatialIntent} from './tools/model-spatial-tool';
+import {SketchEditorController} from './tools/sketch-editor-controller';
 import {
   ToolEngine,
   type ToolCommitOptions,
@@ -110,46 +124,32 @@ import {
   type ToolPreview,
   type ToolSession,
 } from './tools/tool-system';
+import {topologyIdExpression} from './tools/topology-expression';
+import type {
+  TransformGizmoBinding,
+  TransformGizmoEvent,
+} from './tools/transform-gizmo';
+import {AgentRenderView} from './ui/agent-renders';
+import {
+  ContextualToolPanel,
+  type ContextualToolPanelView,
+} from './ui/contextual-tool-panel';
+import {DockPanelCoordinator} from './ui/dock-panels';
+import {EditorSplitLayout} from './ui/editor-split-layout';
+import {ElementsPanel} from './ui/elements-panel';
+import {createIcon} from './ui/icons';
+import {ImageExportDialog} from './ui/image-export';
+import {ModelExportDialog} from './ui/model-export';
+import {ProjectTree, askInstallPackage} from './ui/project-tree';
+import {SourceEditPopover} from './ui/source-edit-popover';
+import {ViewportContextMenu} from './ui/viewport-context-menu';
+import {ViewportEmptyState} from './ui/viewport-empty-state';
+import {ViewportGridScale} from './ui/viewport-grid-scale';
 import {
   ModelViewport,
   type Occurrence,
   type TopologySelectionEvent,
 } from './viewport';
-import {DockPanelCoordinator} from './ui/dock-panels';
-import {ElementsPanel} from './ui/elements-panel';
-import {ImageExportDialog} from './ui/image-export';
-import {ModelExportDialog} from './ui/model-export';
-import {ViewportContextMenu} from './ui/viewport-context-menu';
-import {ViewportEmptyState} from './ui/viewport-empty-state';
-import {ViewportGridScale} from './ui/viewport-grid-scale';
-import {ProjectTree, askInstallPackage} from './ui/project-tree';
-import {EditorSplitLayout} from './ui/editor-split-layout';
-import {createIcon} from './ui/icons';
-import {SourceEditPopover} from './ui/source-edit-popover';
-import {
-  ContextualToolPanel,
-  type ContextualToolPanelView,
-} from './ui/contextual-tool-panel';
-import type {
-  ToolArgumentSource,
-  ToolArgumentEditTarget,
-  ToolSelectionParameterSchema,
-  ToolSignatureSchema,
-} from './model/tool-schema';
-import {isToolSelectionParameter} from './model/tool-schema';
-import {AgentProjectSession, type AgentUpdate} from './agent/project-session';
-import {resolveRenderView} from '@code3d/agent';
-import {AgentObserver} from './agent/observer';
-import {AgentPanel} from './agent/panel';
-import {AgentRenderHistory} from './agent/render-history';
-import {AgentRenderView} from './ui/agent-renders';
-import {
-  contextualToolParameters,
-  contextualParameterIntent,
-  contextualParameterView,
-  validContextualParameter,
-  type ContextualToolParameterState,
-} from './tools/contextual-tool-parameters';
 
 const directoryWorkspaceId = new URL(window.location.href).searchParams.get(
   'workspace',
@@ -233,7 +233,7 @@ app.innerHTML = `
                 <button id="open-folder-button" type="button" title="Open folder" aria-label="Open folder"></button>
                 <button id="new-file-button" type="button" title="New file" aria-label="New file"></button>
                 <button id="new-folder-button" type="button" title="New folder" aria-label="New folder"></button>
-                <button id="refresh-files-button" type="button" title="Refresh files" aria-label="Refresh files"></button>
+                <button id="refresh-files-button" type="button" title="Refresh files and dependencies" aria-label="Refresh files and dependencies"></button>
               </div>
             </header>
             <nav class="project-tree" id="project-tree"></nav>
@@ -481,6 +481,7 @@ const compiler = new ModelCompilerClient(
   packageFiles,
   language => codeEditor.setProjectLanguage(language),
   preparePackages,
+  directoryWorkspaceId ? `directory:${directoryWorkspaceId}` : 'browser',
 );
 const retrySaveButton = requiredElement<HTMLButtonElement>('retry-save-button');
 const agentObserver = new AgentObserver(
@@ -1042,10 +1043,11 @@ newFolderButton.addEventListener(
   'click',
   () => void projectDirectory.create('directory'),
 );
-refreshFilesButton.addEventListener(
-  'click',
-  () => void projectDirectory.refresh(),
-);
+refreshFilesButton.addEventListener('click', () => {
+  compiler.refreshDependencies();
+  void projectDirectory.refresh();
+  void runModel();
+});
 openFolderButton.addEventListener('click', () => {
   void openProjectDirectory();
 });
@@ -1390,18 +1392,51 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
   }
   errorBar.hidden = true;
 
+  const stopProgress = reaction(
+    () => compiler.phase,
+    phase => {
+      if (phase && previewState.isCurrent(request, codeEditor.sourceVersion()))
+        previewState.showStatus('busy', compilationPhaseLabels[phase]);
+    },
+  );
+  const stopRestore = reaction(
+    () => compiler.restored,
+    restored => {
+      if (
+        !restored ||
+        restored.rootPath !== file ||
+        !previewState.isCurrent(request, codeEditor.sourceVersion()) ||
+        previewState.module
+      )
+        return;
+      previewState.restore(request, restored.module);
+      viewport.renderModule(restored.module, 'root');
+      previewState.presented(hasViewportTarget());
+      syncContextualTool();
+    },
+  );
+
   try {
     const selectedKey = viewport.getSelected()?.key ?? 'root';
     const nextModule = await compiler.compile(
       codeEditor.project(),
       file,
       designContext,
-      phase => {
-        if (previewState.isCurrent(request, codeEditor.sourceVersion()))
-          previewState.showStatus('busy', compilationPhaseLabels[phase]);
-      },
     );
     if (!previewState.isCurrent(request, codeEditor.sourceVersion())) return;
+    if (
+      nextModule.diagnostic &&
+      previewState.module &&
+      !previewState.module.diagnostic
+    ) {
+      previewState.fail(nextModule.diagnostic);
+      compilingDesignContextId = undefined;
+      finishContextualTool();
+      sketchEditor.invalidate();
+      renderCurrentPanels();
+      if (await presentModelDiagnostic(request)) restoreModelStatus();
+      return;
+    }
     const cursor = codeEditor.cursorSource();
     if (
       cursor &&
@@ -1486,6 +1521,9 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
       errorBar.hidden = error instanceof PackageInstallationError;
     }
     restoreModelStatus();
+  } finally {
+    stopProgress();
+    stopRestore();
   }
 }
 
@@ -1664,22 +1702,28 @@ async function runCompletionPreview(
   ) {
     return;
   }
+  const stopProgress = reaction(
+    () => compiler.phase,
+    phase => {
+      if (
+        phase &&
+        revision === previewState.revision &&
+        activeCompletionFocus === focus &&
+        preview.sourceVersion === codeEditor.sourceVersion()
+      )
+        previewState.showStatus(
+          'busy',
+          `${compilationPhaseLabels[phase]} · ${focus.memberName}`,
+        );
+    },
+  );
   try {
     const module = await compiler.compile(
       preview.project,
       preview.cursor.file,
       activeDesignContext(preview.cursor),
-      phase => {
-        if (
-          revision === previewState.revision &&
-          activeCompletionFocus === focus &&
-          preview.sourceVersion === codeEditor.sourceVersion()
-        )
-          previewState.showStatus(
-            'busy',
-            `${compilationPhaseLabels[phase]} · ${focus.memberName}`,
-          );
-      },
+      undefined,
+      false,
     );
     if (
       revision !== previewState.revision ||
@@ -1707,6 +1751,8 @@ async function runCompletionPreview(
     if (revision === previewState.revision && activeCompletionFocus === focus) {
       restoreModelStatus();
     }
+  } finally {
+    stopProgress();
   }
 }
 

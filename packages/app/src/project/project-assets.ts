@@ -1,10 +1,10 @@
-import ts from '@typescript/typescript6';
 import type {KernelArtifactStore} from '@code3d/core/tooling';
-import {ResourceCache} from './resource-cache';
-import {fontResourceRequests} from './font-resources';
-import type {ProjectFileReader} from './file-reader';
-import {normalizeProjectPath, projectDirectory} from './project';
+import ts from '@typescript/typescript6';
 import {locateModelError} from '../model/diagnostic';
+import type {ProjectFileReader} from './file-reader';
+import {fontResourceRequests} from './font-resources';
+import {normalizeProjectPath, projectDirectory} from './project';
+import {ResourceCache} from './resource-cache';
 
 /** Prepares static project and HTTP(S) assets before synchronous model execution. */
 export class ProjectAssets {
@@ -40,9 +40,14 @@ export class ProjectAssets {
     this.cancellationPoll = undefined;
     this.googlePending.clear();
     this.downloads = new AbortController();
-    for (const url of this.remote.keys()) this.contents.delete(url);
+    this.contents.clear();
+    this.urls.clear();
     this.remote.clear();
     this.checkCancelled = checkCancelled;
+  }
+
+  snapshot(): ReadonlyMap<string, Uint8Array> {
+    return new Map(this.contents);
   }
 
   read(url: URL): Uint8Array | undefined {
@@ -69,17 +74,7 @@ export class ProjectAssets {
     if (existing?.version === info.version) return existing.url;
     const contents = await this.files.readFile(path);
     if (!contents) throw new Error('Project asset not found: ' + path);
-    if (existing) {
-      URL.revokeObjectURL(existing.url);
-      this.contents.delete(existing.url);
-    }
-    const url = URL.createObjectURL(
-      new Blob([Uint8Array.from(contents)], {
-        type: path.endsWith('.wasm')
-          ? 'application/wasm'
-          : 'application/octet-stream',
-      }),
-    );
+    const url = path;
     this.urls.set(path, {version: info.version, url});
     this.contents.set(url, contents);
     return url;
@@ -269,7 +264,7 @@ export class ProjectAssets {
             (await this.files.stat(site.path))?.kind === 'directory'
           )
             return;
-          if (!site.remote) onResource?.(site.path);
+          onResource?.(site.path);
           const url = site.remote
             ? await this.remoteUrl(new URL(site.path).href)
             : await this.url(site.path);
@@ -289,7 +284,9 @@ export class ProjectAssets {
       source =
         source.slice(0, site.start) +
         'new URL(' +
-        JSON.stringify(site.url) +
+        (site.remote
+          ? JSON.stringify(site.url)
+          : `__code3dAssetUrl(${JSON.stringify(site.url)})`) +
         ')' +
         source.slice(site.end);
     }
@@ -298,7 +295,6 @@ export class ProjectAssets {
 
   dispose(): void {
     this.beginCompilation();
-    for (const {url} of this.urls.values()) URL.revokeObjectURL(url);
     this.urls.clear();
     this.contents.clear();
     this.cache.clear();

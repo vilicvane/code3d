@@ -1,7 +1,5 @@
-import {kernelOperationKey} from '../bld/library/kernel-cache.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import '../bld/node/index.js';
 import {makeBox, makeCylinder} from 'replicad';
 import {
   decodeKernelArtifact,
@@ -9,8 +7,10 @@ import {
 } from '../bld/library/kernel-artifact-codec.js';
 import {
   createComputationCache,
+  kernelOperationKey,
   type KernelArtifactStore,
 } from '../bld/library/kernel-cache.js';
+import '../bld/node/index.js';
 
 test('binary artifacts preserve geometry, metadata, scalar precision and independent mesh buffers', () => {
   const blank = makeBox([0, 0, 0], [10, 20, 30]);
@@ -70,6 +70,10 @@ test('completed artifacts survive error/cancellation cleanup and storage failure
       records.set(id, bytes);
     },
     touch: id => records.has(id),
+    getMany(ids: readonly string[]) {
+      return ids.map(id => this.get(id));
+    },
+    touchMany: (ids: readonly string[]) => ids.map(id => records.has(id)),
     delete: id => {
       records.delete(id);
     },

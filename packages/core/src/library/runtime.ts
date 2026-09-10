@@ -1,21 +1,11 @@
-import {cached, cachedArtifact} from './cached.js';
-import {font, googleFont, type Font} from './font.js';
-import {textGlyphs, textRegionFace, type TextOptions} from './text.js';
-import type {Material} from './three.js';
-import {captureModelMaterial, type ModelMaterialSnapshot} from './material.js';
-import {
-  inspectShapeTopology,
-  type TopologyInspection,
-  type TopologyInspectionOptions,
-} from './topology-inspection.js';
 import {
   assembleWire,
   basicFaceExtrusion,
   BoundingBox,
   genericSweep,
   getOC,
-  makeBSplineApproximation,
   makeBezierCurve,
+  makeBSplineApproximation,
   makeCircle,
   makeCylinder,
   makeFace,
@@ -33,9 +23,26 @@ import {
   type Edge as ReplicadEdge,
   type Face as ReplicadFace,
   type Vertex as ReplicadVertex,
-  type Shape3D,
   type Wire as ReplicadWire,
+  type Shape3D,
 } from 'replicad';
+import {
+  edgeGeometry,
+  faceGeometry,
+  transformGeometry,
+  type AlignmentGeometry,
+} from './alignment-geometry.js';
+import {cached, cachedArtifact} from './cached.js';
+import {extrudeWithTopology} from './extrude.js';
+import {font, googleFont, type Font} from './font.js';
+import {
+  beginKernelOperationEvaluation,
+  kernelOperationKey,
+  type KernelArtifact,
+  type KernelKeyPart,
+  type KernelOperationKey,
+  type KernelValueLifecycle,
+} from './kernel-cache.js';
 import {
   castOwnedShape,
   castOwnedShape3D,
@@ -43,17 +50,29 @@ import {
   shapeSubshapes,
   transformShape,
 } from './kernel-shapes.js';
+import {loftWithTopology} from './loft.js';
+import {captureModelMaterial, type ModelMaterialSnapshot} from './material.js';
+import {
+  axisRotation,
+  solveBodies,
+  type Body,
+  type BodyRotation,
+} from './relation-solver.js';
+import {estimateRetainedBytes} from './retained-memory.js';
+import {shellWithTopology} from './shell.js';
+import {sketchRegionFace} from './sketch-face.js';
+import type {SketchRegion} from './sketch-regions.js';
 import {
   addVectors,
   composeTransforms,
   frameFromYAxis,
   identityRigidTransform,
   invertTransform,
-  rotateVector,
-  origin,
   negateVector,
+  origin,
   quaternionAxisAngle,
   relativeTransform,
+  rotateVector,
   rotation,
   rotationAround,
   translation,
@@ -61,33 +80,14 @@ import {
   type RigidTransform,
   type Vec3,
 } from './spatial.js';
-import {
-  axisRotation,
-  solveBodies,
-  type Body,
-  type BodyRotation,
-} from './relation-solver.js';
-import {
-  edgeGeometry,
-  faceGeometry,
-  transformGeometry,
-  type AlignmentGeometry,
-} from './alignment-geometry.js';
-import {shellWithTopology} from './shell.js';
-import {
-  beginKernelOperationEvaluation,
-  kernelOperationKey,
-  type KernelOperationKey,
-  type KernelArtifact,
-  type KernelKeyPart,
-  type KernelValueLifecycle,
-} from './kernel-cache.js';
-import {loftWithTopology} from './loft.js';
-import {estimateRetainedBytes} from './retained-memory.js';
-import {extrudeWithTopology} from './extrude.js';
-import {sketchRegionFace} from './sketch-face.js';
-import type {SketchRegion} from './sketch-regions.js';
+import {textGlyphs, textRegionFace, type TextOptions} from './text.js';
+import type {Material} from './three.js';
 import {formatTopologyId, type TopologyId} from './topology-id.js';
+import {
+  inspectShapeTopology,
+  type TopologyInspection,
+  type TopologyInspectionOptions,
+} from './topology-inspection.js';
 import {
   booleanWithTopology,
   chamferEdges,
@@ -99,10 +99,10 @@ import {
   stableEdgeGroups,
   stableSurfaceGroups,
   stableVertexData,
+  topologyChildren,
   topologyEdgeDirections,
   topologySurfaceDirections,
   topologyVertexPoints,
-  topologyChildren,
   withTopologyShape,
   type EdgeId,
   type ShapeTopology,
@@ -112,11 +112,11 @@ import {
   type VertexId,
 } from './topology.js';
 
-import {sketch} from './sketch.js';
 import {
-  encodeKernelArtifact,
   decodeKernelArtifact,
+  encodeKernelArtifact,
 } from './kernel-artifact-codec.js';
+import {sketch} from './sketch.js';
 
 export type {Quaternion, Vec3} from './spatial.js';
 export type {EdgeId, SurfaceId, TopologyKind, VertexId} from './topology.js';
@@ -3154,7 +3154,13 @@ export class ModelObject<
     if (reference.bound)
       return [{bounds: super[referenceBounds](reference, transform)}];
     if (reference.whole) {
-      if (this.geometry) return [boundsQuery(this.geometry, transform)];
+      if (this.geometry) {
+        const bounds = axisAlignedBounds(
+          this.geometry.value.localBounds,
+          transform,
+        );
+        return [bounds ? {bounds} : boundsQuery(this.geometry, transform)];
+      }
       const context = this.assembly!;
       return this.children.flatMap(child =>
         child[referenceBoundsParts](
@@ -4252,7 +4258,10 @@ export function planModelSnapshotQueries(
   objects: readonly RelationObject[],
 ): SnapshotQueryBatch[] {
   const visited = new Set<ModelObject>();
-  const keys = new Map<string, string>();
+  const inputs = new Map<
+    string,
+    {input: SnapshotQueryInput; sourceRef?: SourceRef}
+  >();
   const batches = new Map<
     string,
     {input: SnapshotQueryInput; queries: SnapshotQuery[]; sourceRef?: SourceRef}
@@ -4261,27 +4270,33 @@ export function planModelSnapshotQueries(
     if (visited.has(object)) return;
     visited.add(object);
     for (const input of object[modelSnapshotQueries]()) {
-      const {query, inputId} = input;
-      const signature = keys.get(query.key.id);
-      if (signature) {
-        if (signature !== query.key.signature)
+      const {query} = input;
+      const existing = inputs.get(query.key.id);
+      if (existing) {
+        if (existing.input.query.key.signature !== query.key.signature)
           throw new Error(
             `Kernel operation cache identity collision: ${query.key.id}`,
           );
         continue;
       }
-      keys.set(query.key.id, query.key.signature);
-      if (snapshotQuery.find(query.key)) continue;
-      let batch = batches.get(inputId);
-      if (!batch) {
-        batch = {input, queries: [], sourceRef: object.sourceRefs.at(-1)};
-        batches.set(inputId, batch);
-      }
-      batch.queries.push(query);
+      inputs.set(query.key.id, {input, sourceRef: object.sourceRefs.at(-1)});
     }
     object.children.forEach(collect);
   }
   objects.filter(isModelObject).forEach(collect);
+  const pending = [...inputs.values()];
+  const hits = snapshotQuery.findMany(
+    pending.map(({input}) => input.query.key),
+  );
+  pending.forEach(({input, sourceRef}, index) => {
+    if (hits[index]) return;
+    let batch = batches.get(input.inputId);
+    if (!batch) {
+      batch = {input, queries: [], sourceRef};
+      batches.set(input.inputId, batch);
+    }
+    batch.queries.push(input.query);
+  });
   return [...batches].map(([id, {input, queries, sourceRef}]) => ({
     id,
     queries,
@@ -4889,6 +4904,39 @@ function constraintReferences(constraint: StoredConstraint): RelationObject[] {
       action.pivot.kind === 'around' ? action.pivot.axis.model : undefined,
     ),
   ].filter((model): model is RelationObject => !!model);
+}
+
+/** Signed axis permutations preserve tight bounds; arbitrary rotations do not. */
+function axisAlignedBounds(
+  bounds: LocalBounds,
+  transform: RigidTransform,
+): LocalBounds | undefined {
+  const axes = (
+    [
+      [1, 0, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+    ] as const
+  ).map(axis => rotateVector(axis, transform.quaternion));
+  // Account only for floating-point roundoff in quarter-turn quaternion products.
+  if (
+    axes.some(axis =>
+      axis.some(
+        value => Math.abs(value - Math.round(value)) > 8 * Number.EPSILON,
+      ),
+    )
+  )
+    return;
+  return [0, 1].map(side =>
+    axes[0].map((_, output) => {
+      const input = axes.findIndex(axis => Math.abs(axis[output]) > 0.5);
+      const sign = Math.round(axes[input][output]);
+      return (
+        transform.position[output] +
+        sign * bounds[sign > 0 ? side : 1 - side][input]
+      );
+    }),
+  ) as unknown as LocalBounds;
 }
 
 function computeTransformedBounds(

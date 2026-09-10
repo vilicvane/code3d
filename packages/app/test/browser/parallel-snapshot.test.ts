@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-import {before, after, test, type TestContext} from 'node:test';
+import {after, before, test, type TestContext} from 'node:test';
 import {chromium, type Browser, type Page} from 'playwright-core';
 import {appIsolationHeaders} from '../../build/isolation.ts';
+import {normalizedModelSnapshot} from '../model-snapshot.ts';
 import type {CacheRequest, CacheResult} from './persistent-cache.worker.ts';
 
 let browser: Browser;
@@ -91,19 +92,9 @@ function valid(result: CacheResult) {
 }
 
 function snapshotDigest(value: string): string {
-  // Runtime model instance IDs advance on each evaluation. Remap the entire
-  // graph consistently; operation identities and native topology IDs stay exact.
-  const ids = new Map<string, string>();
-  const normalized = JSON.stringify(JSON.parse(value), (_, item) => {
-    if (typeof item !== 'string' || !/^node-\d+$/.test(item)) return item;
-    let id = ids.get(item);
-    if (!id) {
-      id = `instance-${ids.size}`;
-      ids.set(item, id);
-    }
-    return id;
-  });
-  return createHash('sha256').update(normalized).digest('hex');
+  return createHash('sha256')
+    .update(normalizedModelSnapshot(value))
+    .digest('hex');
 }
 
 test(

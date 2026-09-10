@@ -2,28 +2,28 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {afterEach, test} from 'node:test';
 import {
-  font,
-  text,
-  extrude,
-  group,
+  clearKernelOperationCache,
+  kernelOperationCacheStats,
+  setKernelArtifactStore,
+} from '../bld/library/kernel-cache.js';
+import type {PathCommand} from '../bld/library/text.js';
+import {groupTextContours, textRegionFace} from '../bld/library/text.js';
+import {
   box,
   cut,
+  extrude,
+  font,
+  group,
+  text,
   union,
   type Model,
 } from '../bld/node/index.js';
 import {replicad} from '../bld/node/replicad.js';
 import {
-  clearKernelOperationCache,
-  kernelOperationCacheStats,
-  setKernelArtifactStore,
-} from '../bld/library/kernel-cache.js';
-import {groupTextContours, textRegionFace} from '../bld/library/text.js';
-import {
   createModelSnapshotter,
   disposeModelObjects,
   modelGeometry,
 } from './model-test.ts';
-import type {PathCommand} from '../bld/library/text.js';
 
 const latinUrl = new URL(
   '../../app/examples/fonts/DejaVuSans.ttf',
@@ -244,6 +244,10 @@ test('content identities reuse fonts and restore text geometry from persistent a
       entries.set(id, bytes);
     },
     touch: id => entries.has(id),
+    getMany(ids: readonly string[]) {
+      return ids.map(id => this.get(id));
+    },
+    touchMany: (ids: readonly string[]) => ids.map(id => entries.has(id)),
     delete: id => {
       entries.delete(id);
     },

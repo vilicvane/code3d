@@ -1,16 +1,17 @@
-import type {OpenCascadeInstance} from '@code3d/opencascade';
-import {getOC} from 'replicad';
-import {estimateRetainedBytes} from './retained-memory.js';
 import {
   decodeKernelArtifact,
   encodeKernelArtifact,
 } from './kernel-artifact-codec.js';
+import {estimateRetainedBytes} from './retained-memory.js';
 
 /** The host opens storage before synchronous evaluation and owns its lifetime. */
 export interface KernelArtifactStore {
   get(id: string): Uint8Array | undefined;
+  getMany(ids: readonly string[]): readonly (Uint8Array | undefined)[];
   set(id: string, bytes: Uint8Array): void;
   touch(id: string): boolean;
+  /** Update access order together, returning existence in the same order. */
+  touchMany(ids: readonly string[]): readonly boolean[];
   delete(id: string): void;
   flush(): void;
 }
@@ -63,6 +64,7 @@ export function createComputationCache({
   let persistentWrites = 0;
   let persistenceErrors = 0;
   const persisted = new Set<string>();
+  const pendingPersistence = new Map<string, () => Uint8Array>();
   let externalBytes = 0;
 
   /** The host accounts for in-flight inputs and all auxiliary native heaps. */
@@ -74,6 +76,7 @@ export function createComputationCache({
   function setKernelArtifactStore(next: KernelArtifactStore | undefined): void {
     store = next;
     persisted.clear();
+    pendingPersistence.clear();
   }
 
   function accessStore<Result>(
@@ -102,6 +105,7 @@ export function createComputationCache({
     const used = new Set<string>();
     currentEvaluation = {used, checkCancelled};
     return () => {
+      flushPendingPersistence();
       for (const id of retainedEvaluation) {
         if (!used.has(id)) historicalEntries.set(id, entries.get(id)!);
       }
@@ -130,11 +134,41 @@ export function createComputationCache({
     lifecycle: KernelValueLifecycle<Value>,
     codec?: CacheCodec<Value> | false,
   ): KernelArtifact<Value> | undefined {
+    return lookup(key, lifecycle, codec, () =>
+      accessStore(store => store.get(key.id)),
+    );
+  }
+
+  function findKernelOperations<Value>(
+    keys: readonly KernelOperationKey[],
+    lifecycle: KernelValueLifecycle<Value>,
+    codec?: CacheCodec<Value> | false,
+  ): readonly (KernelArtifact<Value> | undefined)[] {
+    currentEvaluation?.checkCancelled?.();
+    const missing =
+      codec === false ? [] : keys.filter(key => !entries.has(key.id));
+    const bytes = missing.length
+      ? accessStore(store => store.getMany(missing.map(key => key.id)))
+      : undefined;
+    const restored = new Map(
+      missing.map((key, index) => [key.id, bytes?.[index]]),
+    );
+    return keys.map(key =>
+      lookup(key, lifecycle, codec, () => restored.get(key.id)),
+    );
+  }
+
+  function lookup<Value>(
+    key: KernelOperationKey,
+    lifecycle: KernelValueLifecycle<Value>,
+    codec: CacheCodec<Value> | false | undefined,
+    read: () => Uint8Array | undefined,
+  ): KernelArtifact<Value> | undefined {
     currentEvaluation?.checkCancelled?.();
     const {id, signature} = key;
     let cached = entries.get(id) as CacheEntry<Value> | undefined;
     if (!cached && codec !== false) {
-      const bytes = accessStore(store => store.get(id));
+      const bytes = read();
       if (bytes) {
         let restored: Value;
         try {
@@ -160,7 +194,7 @@ export function createComputationCache({
       throw new Error(`Kernel operation cache identity collision: ${id}`);
     hits += 1;
     const value = cached.instantiate(cached.value);
-    if (codec !== false) persist(key, cached.value, codec);
+    if (codec !== false) persist(key, cached.value, codec, true);
     touchEntry(id, cached as CacheEntry<unknown>);
     return {id, value};
   }
@@ -195,21 +229,43 @@ export function createComputationCache({
     key: KernelOperationKey,
     value: Value,
     codec?: CacheCodec<Value>,
+    defer = false,
   ): void {
     if (!store || persisted.has(key.id)) return;
+    const encode = () =>
+      encodeKernelArtifact(
+        key.signature,
+        codec ? Uint8Array.from(codec.encoder(value)) : value,
+      );
+    if (defer && currentEvaluation) {
+      pendingPersistence.set(key.id, encode);
+      return;
+    }
     accessStore(store => {
-      if (!store.touch(key.id)) {
-        store.set(
-          key.id,
-          encodeKernelArtifact(
-            key.signature,
-            codec ? Uint8Array.from(codec.encoder(value)) : value,
-          ),
-        );
+      // A completed computation follows a miss; write it without another lookup.
+      if (!defer || !store.touch(key.id)) {
+        store.set(key.id, encode());
         persistentWrites += 1;
       }
       persisted.add(key.id);
     });
+  }
+
+  /** Memory hits need one transaction, while newly computed work is saved immediately. */
+  function flushPendingPersistence(): void {
+    if (!pendingPersistence.size) return;
+    accessStore(store => {
+      const ids = [...pendingPersistence.keys()];
+      const present = store.touchMany(ids);
+      ids.forEach((id, index) => {
+        if (!present[index]) {
+          store.set(id, pendingPersistence.get(id)!());
+          persistentWrites += 1;
+        }
+        persisted.add(id);
+      });
+    });
+    pendingPersistence.clear();
   }
 
   function retainEntry<Value>(
@@ -258,6 +314,7 @@ export function createComputationCache({
     persistentWrites = 0;
     persistenceErrors = 0;
     persisted.clear();
+    pendingPersistence.clear();
   }
 
   function kernelOperationCacheStats() {
@@ -297,9 +354,17 @@ export function createComputationCache({
     kernelOperationCacheStats,
     setKernelArtifactStore,
     findKernelOperation,
+    findKernelOperations,
     acceptKernelOperation,
     setKernelExternalBytes,
   };
+}
+
+let nativeMemoryCounter = () => 0;
+
+/** The installed backend supplies native accounting; pure caches need no kernel. */
+export function setKernelNativeMemoryCounter(read: () => number): void {
+  nativeMemoryCounter = read;
 }
 
 export const {
@@ -309,13 +374,11 @@ export const {
   kernelOperationCacheStats,
   setKernelArtifactStore,
   findKernelOperation,
+  findKernelOperations,
   acceptKernelOperation,
   setKernelExternalBytes,
 } = createComputationCache({
-  nativeAllocatedBytes: () =>
-    (
-      getOC() as OpenCascadeInstance | undefined
-    )?.Code3dMemory.AllocatedBytes() ?? 0,
+  nativeAllocatedBytes: () => nativeMemoryCounter(),
 });
 
 export type KernelOperationKey = Readonly<{id: string; signature: string}>;

@@ -1,10 +1,14 @@
-import assert from 'node:assert/strict';
-import {test, before, after} from 'node:test';
 import type * as CoreTooling from '@code3d/core/tooling';
 import type {
   SnapshotQueryBatch,
   SnapshotQueryResult,
 } from '@code3d/core/tooling';
+import assert from 'node:assert/strict';
+import {after, before, test} from 'node:test';
+import type {
+  SnapshotWorkerRequest,
+  SnapshotWorkerResponse,
+} from '../src/model/snapshot-protocol.ts';
 import {createAppTestServer} from './vite-test-server.ts';
 let server: Awaited<ReturnType<typeof createAppTestServer>>;
 let SnapshotWorkerPool: (typeof import('../src/model/snapshot-pool.ts'))['SnapshotWorkerPool'];
@@ -15,10 +19,6 @@ before(async () => {
   >('/src/model/snapshot-pool.ts'));
 });
 after(async () => server?.close());
-import type {
-  SnapshotWorkerRequest,
-  SnapshotWorkerResponse,
-} from '../src/model/snapshot-protocol.ts';
 
 type Simulation = {
   created: number;
@@ -147,7 +147,12 @@ function fixture(fault?: Simulation['fault'], maximumBytes = 2 * 1024 ** 3) {
   const workers: ComputeWorker[] = [];
   const pool = new SnapshotWorkerPool(
     tooling,
-    {url: 'fixture', wasm: new Uint8Array(4), sketchWasm: new Uint8Array(4)},
+    {
+      url: 'fixture',
+      wasm: new Uint8Array(4),
+      sketchWasm: new Uint8Array(4),
+      resources: [],
+    },
     {
       concurrency: 2,
       taskTimeoutMs: 1000,

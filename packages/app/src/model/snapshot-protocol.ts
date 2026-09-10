@@ -1,7 +1,13 @@
 import type {SnapshotQuery, SnapshotQueryResult} from '@code3d/core/tooling';
 
 export type SnapshotWorkerRequest =
-  | {kind: 'initialize'; url: string; wasm: Uint8Array; sketchWasm: Uint8Array}
+  | {
+      kind: 'initialize';
+      url: string;
+      wasm: Uint8Array;
+      sketchWasm: Uint8Array;
+      resources: readonly (readonly [string, string])[];
+    }
   | {
       kind: 'compute';
       id: string;
