@@ -418,6 +418,18 @@ test(
     t.after(() => context.close());
     const page = await context.newPage();
     page.setDefaultTimeout(20_000);
+    const activeDownloads = new Set<import('playwright-core').Request>();
+    let peakDownloads = 0;
+    page.on('request', request => {
+      if (request.url().endsWith('.tgz')) {
+        activeDownloads.add(request);
+        peakDownloads = Math.max(peakDownloads, activeDownloads.size);
+      }
+    });
+    const downloadFinished = (request: import('playwright-core').Request) =>
+      activeDownloads.delete(request);
+    page.on('requestfinished', downloadFinished);
+    page.on('requestfailed', downloadFinished);
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
     await exposePackageApp(page);
@@ -490,10 +502,18 @@ test(
     await dialog
       .getByRole('textbox', {name: 'Package', exact: true})
       .fill('just-range@4.2.0');
+    const installationStart = Date.now();
     await dialog.getByRole('button', {name: 'Install', exact: true}).click();
     await page
       .getByText('Packages installed', {exact: true})
       .waitFor({timeout: 150_000});
+    assert.ok(
+      peakDownloads > 1 && peakDownloads <= 15,
+      `npm archives download concurrently within the limit: observed ${peakDownloads}`,
+    );
+    t.diagnostic(
+      `Cold npm installation: ${Date.now() - installationStart} ms; peak ${peakDownloads} concurrent archive requests`,
+    );
     const installed = await page.evaluate(async () => {
       const files = window.packageApp.projectFileSystem;
       const source = new TextDecoder().decode(
@@ -744,6 +764,9 @@ test(
         '/model.ts',
       );
       await page.getByText('Ready', {exact: true}).waitFor();
+      await page
+        .getByRole('status', {name: 'Package installation'})
+        .waitFor({state: 'hidden'});
     } finally {
       release();
     }

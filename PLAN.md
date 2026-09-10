@@ -727,6 +727,12 @@ are tracked separately in [#84](https://github.com/vilicvane/code3d/issues/84).
   archives. It persists code3d-lock.json beside node_modules, shares an archive
   cache, stages replacements and restores interrupted installs. Separate child
   manifests own separate installations; they do not imply npm workspaces.
+  Archive downloads and verification use up to 15 concurrent jobs; extraction
+  and writes run one package at a time alongside downloads, with each job
+  retaining its slot until extraction finishes to bound queued archives.
+  The download limit is based on npm's default maxsockets value. A failure stops new jobs and
+  settles active writes before staging cleanup; links and replacement wait for
+  the complete package set.
   Explorer folders, manifests and the workspace root offer Install package.
   A missing manifest is created in the selected folder with the requested
   dependency and @code3d/core at latest; existing manifests retain their choices.

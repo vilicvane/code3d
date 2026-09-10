@@ -14,6 +14,7 @@ import {
 } from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
+import {setImmediate as nextTurn} from 'node:timers/promises';
 import {packTar} from 'modern-tar';
 import * as esbuild from 'esbuild';
 import type {BrowserProjectFileSystem} from '../src/project/filesystem.ts';
@@ -432,6 +433,224 @@ test('manifest edits retain unchanged locked versions, remove old dependencies a
     await disk.dispose();
   }
 });
+
+function signal() {
+  let resolve!: () => void;
+  const promise = new Promise<void>(done => {
+    resolve = done;
+  });
+  return {promise, resolve};
+}
+
+test(
+  'downloads overlap with a 15-job limit while extraction writes one package at a time',
+  {timeout: 20_000},
+  async t => {
+    const disk = await diskFiles();
+    const fixture = await registryFixture();
+    const names = Array.from({length: 20}, (_, index) => `parallel-${index}`);
+    for (const name of names) await fixture.add(name, '1.0.0');
+    await disk.files.writeFile(
+      '/package.json',
+      JSON.stringify({
+        dependencies: Object.fromEntries(names.map(name => [name, '1'])),
+      }),
+    );
+    const downloads = signal();
+    const full = signal();
+    const writing = signal();
+    const writes = signal();
+    let install: Promise<void> | undefined;
+    t.after(async () => {
+      downloads.resolve();
+      writes.resolve();
+      await install?.catch(() => {});
+      await disk.dispose();
+    });
+    let started = 0;
+    let active = 0;
+    let peak = 0;
+    let activeWrites = 0;
+    let peakWrites = 0;
+    const client = fixture.registry();
+    const archive = client.archive.bind(client);
+    t.mock.method(
+      client,
+      'archive',
+      async (pkg: Parameters<typeof archive>[0]) => {
+        started++;
+        peak = Math.max(peak, ++active);
+        if (active === 15) full.resolve();
+        try {
+          await downloads.promise;
+          return await archive(pkg);
+        } finally {
+          active--;
+        }
+      },
+    );
+    const write = disk.files.writeFile.bind(disk.files);
+    t.mock.method(
+      disk.files,
+      'writeFile',
+      async (...args: Parameters<typeof write>) => {
+        peakWrites = Math.max(peakWrites, ++activeWrites);
+        writing.resolve();
+        try {
+          await writes.promise;
+          return await write(...args);
+        } finally {
+          activeWrites--;
+        }
+      },
+    );
+    const installer = new BrowserPackageInstaller(
+      disk.files,
+      undefined,
+      () => client,
+    );
+    install = installer.prepare('/model.ts');
+    await full.promise;
+    assert.equal(started, 15, 'the initial download batch fills all 15 slots');
+    downloads.resolve();
+    await writing.promise;
+    await nextTurn();
+    assert.equal(
+      started,
+      15,
+      'slow extraction bounds queued archives instead of downloading the whole graph',
+    );
+    assert.equal(
+      peakWrites,
+      1,
+      'extraction does not write multiple packages at once',
+    );
+    writes.resolve();
+    await install;
+    assert.equal(started, 20);
+    assert.equal(peak, 15);
+    assert.equal(peakWrites, 1);
+    for (const name of names)
+      assert.ok(await disk.files.readFile(`/node_modules/${name}/index.js`));
+  },
+);
+
+for (const failure of ['download', 'extraction'])
+  test(
+    `a concurrent ${failure} failure settles active work before cleanup and preserves the previous install`,
+    {timeout: 20_000},
+    async t => {
+      const disk = await diskFiles();
+      const fixture = await registryFixture();
+      await fixture.add('stable', '1.0.0');
+      const client = fixture.registry();
+      const installer = new BrowserPackageInstaller(
+        disk.files,
+        undefined,
+        () => client,
+      );
+      await disk.files.writeFile(
+        '/package.json',
+        JSON.stringify({dependencies: {stable: '1'}}),
+      );
+      await installer.prepare('/model.ts');
+      const oldLock = await disk.files.readFile('/code3d-lock.json');
+      const oldMarker = await disk.files.readFile(
+        '/node_modules/.code3d-install.json',
+      );
+      const names = Array.from({length: 20}, (_, index) => `failing-${index}`);
+      for (const name of names) await fixture.add(name, '1.0.0');
+      await disk.files.writeFile(
+        '/package.json',
+        JSON.stringify({
+          dependencies: Object.fromEntries(names.map(name => [name, '1'])),
+        }),
+      );
+      const writing = signal();
+      const writes = signal();
+      const failed = signal();
+      let install: Promise<void> | undefined;
+      t.after(async () => {
+        writes.resolve();
+        await install?.catch(() => {});
+        await disk.dispose();
+      });
+      let started = 0;
+      let writeAfterCleanup = false;
+      let cleaned = false;
+      const archive = client.archive.bind(client);
+      const archiveMock = t.mock.method(
+        client,
+        'archive',
+        async (pkg: Parameters<typeof archive>[0]) => {
+          started++;
+          // Fail a download only after another package is actively writing.
+          if (failure === 'download' && started === 2) {
+            await writing.promise;
+            failed.resolve();
+            throw new Error('simulated installation failure');
+          }
+          return archive(pkg);
+        },
+      );
+      const write = disk.files.writeFile.bind(disk.files);
+      const writeMock = t.mock.method(
+        disk.files,
+        'writeFile',
+        async (...args: Parameters<typeof write>) => {
+          writing.resolve();
+          await writes.promise;
+          writeAfterCleanup ||= cleaned;
+          if (failure === 'extraction')
+            throw new Error('simulated installation failure');
+          return write(...args);
+        },
+      );
+      const remove = disk.files.remove.bind(disk.files);
+      const removeMock = t.mock.method(
+        disk.files,
+        'remove',
+        async (file: string) => {
+          if (file === '/.code3d/package-install') cleaned = true;
+          return remove(file);
+        },
+      );
+      install = installer.prepare('/model.ts');
+      const rejected = assert.rejects(
+        install,
+        /simulated installation failure/,
+      );
+      await writing.promise;
+      if (failure === 'download') await failed.promise;
+      await nextTurn();
+      assert.equal(started, 15, 'extraction bounds outstanding downloads');
+      assert.equal(cleaned, false, 'cleanup waits for active writes');
+      writes.resolve();
+      await rejected;
+      assert.equal(
+        started,
+        15,
+        'queued downloads are not started after failure',
+      );
+      assert.equal(writeAfterCleanup, false);
+      assert.equal(
+        await disk.files.stat('/.code3d/package-install'),
+        undefined,
+      );
+      assert.deepEqual(await disk.files.readFile('/code3d-lock.json'), oldLock);
+      assert.deepEqual(
+        await disk.files.readFile('/node_modules/.code3d-install.json'),
+        oldMarker,
+      );
+      assert.ok(await disk.files.readFile('/node_modules/stable/index.js'));
+      archiveMock.mock.restore();
+      writeMock.mock.restore();
+      removeMock.mock.restore();
+      await installer.prepare('/model.ts');
+      for (const name of names)
+        assert.ok(await disk.files.readFile(`/node_modules/${name}/index.js`));
+    },
+  );
 
 test('new transitive versions do not upgrade locked root dependencies outside their ranges', async () => {
   const disk = await diskFiles();

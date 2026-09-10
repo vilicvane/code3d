@@ -49,8 +49,13 @@ Models without a manifest continue using the App's built-in modeling packages,
 with no installation required. Opening a model with a manifest also installs
 changed dependencies or restores its existing lock before compilation.
 Installation continues in the background while you switch files, edit and save.
-The file explorer shows package progress separately from the model preview;
-only a model needing unfinished dependencies waits for them. Source edits reuse
+Up to 15 packages download concurrently per installation; unpacking runs one
+package at a time alongside downloads. Verified cached archives are reused.
+The file explorer shows package progress separately from the model preview.
+Success messages disappear after three seconds, including when you have switched
+to another file. Ongoing downloads and errors remain visible; each folder's
+status clears independently.
+Only a model needing unfinished dependencies waits for them. Source edits reuse
 prepared dependencies. Changing the manifest or lock, or removing an installation,
 causes it to be checked again.
 Deleting `code3d-lock.json` makes the next model run resolve dependencies again,

@@ -18,6 +18,7 @@ import {
   type BrowserPackageLock,
 } from './package-lock';
 import {extractNpmArchive, NpmRegistry} from './npm-registry';
+import {mapProjectIO} from './io';
 
 const pathAt = (directory: string, path: string) =>
   normalizeProjectPath(directory + '/' + path);
@@ -288,18 +289,36 @@ export class BrowserPackageInstaller implements ProjectFileReader {
     let movedOld = false;
     let movedNew = false;
     try {
-      for (const [url, pkg] of Object.entries(lock.packages)) {
-        progress(`Downloading ${pkg.name}@${pkg.version}`);
-        const archive = await registry.archive(pkg);
-        const destination = staged + '/' + packagePath(lock, url);
-        const installed = await extractNpmArchive(archive, (path, contents) =>
-          this.files.writeFile(destination + '/' + path, contents),
-        );
-        if (installed.name !== pkg.name || installed.version !== pkg.version)
-          throw new Error(
-            `Downloaded package does not match ${pkg.name}@${pkg.version}.`,
-          );
-      }
+      let extracting = Promise.resolve();
+      await mapProjectIO(
+        Object.entries(lock.packages),
+        async ([url, pkg]) => {
+          progress(`Downloading ${pkg.name}@${pkg.version}`);
+          const archive = await registry.archive(pkg);
+          // Overlap downloads with one extractor, bounding queued archives to
+          // the download budget instead of retaining every package in memory.
+          await (extracting = extracting.then(async () => {
+            progress(`Unpacking ${pkg.name}@${pkg.version}`);
+            const destination = staged + '/' + packagePath(lock!, url);
+            const installed = await extractNpmArchive(
+              archive,
+              (path, contents) =>
+                this.files.writeFile(destination + '/' + path, contents),
+            );
+            if (
+              installed.name !== pkg.name ||
+              installed.version !== pkg.version
+            )
+              throw new Error(
+                `Downloaded package does not match ${pkg.name}@${pkg.version}.`,
+              );
+          }));
+        },
+        {
+          // Reference npm's default maxsockets; browsers manage actual connections.
+          concurrency: 15,
+        },
+      );
       const link = async (name: string, url: string, parent: string) => {
         const location = parent + '/' + name;
         await this.files.symlink(
