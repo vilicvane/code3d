@@ -1,11 +1,11 @@
+import * as esbuild from 'esbuild';
 import assert from 'node:assert/strict';
-import type {ModelDiagnosticError} from '../src/model/diagnostic.ts';
-import type {AppTestServer} from './vite-test-server.ts';
-import type {ProjectFileReader} from '../src/project/file-reader.ts';
-import type {ModuleExports} from '../src/model/module-evaluator.ts';
 import {readFile, stat} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
-import * as esbuild from 'esbuild';
+import type {ModelDiagnosticError} from '../src/model/diagnostic.ts';
+import type {ModuleExports} from '../src/model/module-evaluator.ts';
+import type {ProjectFileReader} from '../src/project/file-reader.ts';
+import type {AppTestServer} from './vite-test-server.ts';
 
 const root = fileURLToPath(new URL('../../..', import.meta.url));
 
@@ -61,24 +61,11 @@ export async function testEvaluatorClass(server: AppTestServer) {
   >('/src/model/module-evaluator.ts');
   class BrowserEvaluator extends ModuleEvaluator {
     constructor() {
-      super(importTestModule);
-    }
-    override evaluate(
-      url: string,
-      source: string,
-      context: Readonly<Record<string, unknown>> = {},
-    ) {
-      return super.evaluate(url, source, {
-        ...context,
-        process: undefined,
-        globalThis: Object.defineProperty(
-          Object.create(globalThis),
-          'process',
-          {
-            value: undefined,
-          },
-        ),
-      });
+      super(source =>
+        importTestModule(`const process = undefined;
+const globalThis = Object.defineProperty(Object.create(global), 'process', {value: undefined});
+${source}`),
+      );
     }
   }
   return BrowserEvaluator;
@@ -89,15 +76,15 @@ export async function createTestEvaluator(server: AppTestServer) {
   return new Evaluator();
 }
 
-export async function createTestProjectCompiler(
+export async function createTestModelPipeline(
   server: AppTestServer,
   files: ProjectFileReader = packageTestFiles,
 ) {
-  const {ProjectCompiler} = await server.ssrLoadModule<
-    typeof import('../src/model/project-compiler.ts')
-  >('/src/model/project-compiler.ts');
+  const {TestModelPipeline} = await server.ssrLoadModule<
+    typeof import('./model-pipeline.ts')
+  >('/test/model-pipeline.ts');
   const Evaluator = await testEvaluatorClass(server);
-  return new ProjectCompiler(
+  return new TestModelPipeline(
     files,
     packageTestFiles,
     esbuild,
@@ -126,4 +113,39 @@ export function assertModelDiagnosticError(
   assert.ok(error instanceof Error);
   assert.equal(error.name, 'ModelDiagnosticError');
   assert.ok('diagnostic' in error);
+}
+
+export async function buildTestDependencies(
+  server: AppTestServer,
+  files: ProjectFileReader,
+  builder: import('../src/project/project-builder.ts').ProjectBuilder,
+  assets: import('../src/project/project-assets.ts').ProjectAssets,
+  source: string,
+) {
+  const {DependencyBuilder} = await server.ssrLoadModule<
+    typeof import('../src/model/dependency-builder.ts')
+  >('/src/model/dependency-builder.ts');
+  const dependencies = new DependencyBuilder(files, builder, assets);
+  await dependencies.prepare('/model.ts');
+  const discovery = await builder.build(source, {
+    runtimeFiles: dependencies.formats,
+    bundlePackages: true,
+  });
+  return dependencies.build(discovery);
+}
+
+/** Execute a raw esbuild test bundle through the same compiler-side scope transform. */
+export async function evaluateTestBundle(
+  server: AppTestServer,
+  evaluator: import('../src/model/module-evaluator.ts').ModuleEvaluator,
+  source: string,
+  context: Readonly<Record<string, unknown>> = {},
+) {
+  const {executableModuleSource} = await server.ssrLoadModule<
+    typeof import('../src/model/executable-module.ts')
+  >('/src/model/executable-module.ts');
+  return evaluator.evaluate(
+    executableModuleSource('test.js', source, Object.keys(context)),
+    context,
+  );
 }

@@ -1,10 +1,10 @@
 import type * as CoreTooling from '@code3d/core/tooling';
-import type {SnapshotQueryBatch, SnapshotQuery} from '@code3d/core/tooling';
+import type {SnapshotQuery, SnapshotQueryBatch} from '@code3d/core/tooling';
+import {locateModelError} from './diagnostic';
 import type {
   SnapshotWorkerRequest,
   SnapshotWorkerResponse,
 } from './snapshot-protocol';
-import {locateModelError} from './diagnostic';
 
 export type SnapshotPoolOptions = {
   concurrency?: number;
@@ -55,6 +55,7 @@ export class SnapshotWorkerPool {
       url: string;
       wasm: Uint8Array;
       sketchWasm: Uint8Array;
+      resources: readonly (readonly [string, string])[];
     },
     private readonly options: SnapshotPoolOptions = {},
   ) {

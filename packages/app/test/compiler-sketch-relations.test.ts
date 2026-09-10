@@ -1,17 +1,17 @@
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
-import {createAppTestServer} from './vite-test-server.ts';
-import {createTestProjectCompiler} from './project-test-files.ts';
+import {defined} from '../../../test/assert.ts';
 import type {ModelModule} from '../src/model/compiler';
 import type {sketchContextOutlines as Outlines} from '../src/tools/sketch-context';
-import {defined} from '../../../test/assert.ts';
+import {createTestModelPipeline} from './project-test-files.ts';
+import {createAppTestServer} from './vite-test-server.ts';
 
 let server: Awaited<ReturnType<typeof createAppTestServer>>;
-let compiler: Awaited<ReturnType<typeof createTestProjectCompiler>>;
+let compiler: Awaited<ReturnType<typeof createTestModelPipeline>>;
 let outlines: typeof Outlines;
 before(async () => {
   server = await createAppTestServer();
-  compiler = await createTestProjectCompiler(server);
+  compiler = await createTestModelPipeline(server);
   ({sketchContextOutlines: outlines} = await server.ssrLoadModule<
     typeof import('../src/tools/sketch-context')
   >('/src/tools/sketch-context.ts'));

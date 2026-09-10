@@ -1,4 +1,8 @@
 import type {ParameterKind, TopologyKind} from '@code3d/core/tooling';
+import type {
+  ToolParameterSchema,
+  ToolSelectionParameterSchema,
+} from './tool-schema';
 
 export type ToolParameterKind = ParameterKind | TopologyKind;
 
@@ -50,4 +54,14 @@ export function validToolParameterValue(
     (constraints?.exclusiveMax !== undefined &&
       value >= constraints.exclusiveMax)
   );
+}
+
+export function isToolSelectionKind(kind: unknown): kind is TopologyKind {
+  return kind === 'vertex' || kind === 'edge' || kind === 'surface';
+}
+
+export function isToolSelectionParameter(
+  parameter: ToolParameterSchema,
+): parameter is ToolSelectionParameterSchema {
+  return isToolSelectionKind(parameter.kind);
 }

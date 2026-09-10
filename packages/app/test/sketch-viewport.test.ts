@@ -1,17 +1,17 @@
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
-import {createAppTestServer, type AppTestServer} from './vite-test-server.ts';
-import {createTestProjectCompiler} from './project-test-files.ts';
-import type {ProjectCompiler} from '../src/model/project-compiler.ts';
-import type {CompiledSketch} from '../src/model/sketch-trace.ts';
 import type {ModelDiagnostic} from '../src/model/diagnostic.ts';
+import type {CompiledSketch} from '../src/model/sketch-trace.ts';
+import type {TestModelPipeline} from './model-pipeline.ts';
+import {createTestModelPipeline} from './project-test-files.ts';
+import {createAppTestServer, type AppTestServer} from './vite-test-server.ts';
 
 let server: AppTestServer;
-let compiler: ProjectCompiler;
+let compiler: TestModelPipeline;
 let viewportDiagnostic: (typeof import('../src/model/viewport-diagnostic.ts'))['viewportDiagnostic'];
 before(async () => {
   server = await createAppTestServer();
-  compiler = await createTestProjectCompiler(server);
+  compiler = await createTestModelPipeline(server);
   ({viewportDiagnostic} = await server.ssrLoadModule<
     typeof import('../src/model/viewport-diagnostic.ts')
   >('/src/model/viewport-diagnostic.ts'));

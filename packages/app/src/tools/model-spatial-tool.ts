@@ -2,8 +2,8 @@ import {
   composeTransforms,
   identityRigidTransform,
   invertTransform,
-  rotationAround,
   rotateVector,
+  rotationAround,
   xyzRotation,
   type ModelOperationSnapshot,
   type ModelSnapshotObject,
@@ -21,17 +21,15 @@ import type {
   SourceTargetEvaluation,
 } from '../model/compiler';
 import {editableParameterUsages} from '../model/parameter-provenance';
-import type {TransformGizmoBinding, TransformAxis} from './transform-gizmo';
-import type {ToolIntent} from './tool-system';
-import type {SpatialObjectPreview} from './spatial-edit';
-import {
-  isToolSelectionParameter,
-  type ToolArgumentEditTarget,
-} from '../model/tool-schema';
+import {isToolSelectionParameter} from '../model/tool-parameter-config';
+import {type ToolArgumentEditTarget} from '../model/tool-schema';
 import {
   replaceNumericArgument,
   type NumericArgumentValue,
 } from './source-expression';
+import type {SpatialObjectPreview} from './spatial-edit';
+import type {ToolIntent} from './tool-system';
+import type {TransformAxis, TransformGizmoBinding} from './transform-gizmo';
 
 type SpatialToolOccurrence = Readonly<{
   key: string;

@@ -1,26 +1,26 @@
-import {defined} from '../../../test/assert.ts';
-import {
-  modelObject,
-  createModelSnapshotter,
-  disposeModelObjects,
-} from '../../core/test/model-test.ts';
-import assert from 'node:assert/strict';
-import {after, before, test} from 'node:test';
+import type {Model} from '@code3d/core';
 import {box, circle, cylinder, group, line, sphere} from '@code3d/core';
 import {
   retainModelGeometry as retainGeometry,
   type ModelSnapshotObject,
 } from '@code3d/core/tooling';
-import type {Model} from '@code3d/core';
-import type {Occurrence} from '../src/viewport.ts';
-import type {ModelExportOptions} from '../src/model/model-export.ts';
+import {strFromU8, unzipSync} from 'fflate';
+import assert from 'node:assert/strict';
+import {after, before, test} from 'node:test';
 import * as replicad from 'replicad';
 import {importSTEP} from 'replicad';
-import {strFromU8, unzipSync} from 'fflate';
 import {Group, Object3D} from 'three';
 import {STLLoader} from 'three/addons/loaders/STLLoader.js';
+import {defined} from '../../../test/assert.ts';
+import {
+  createModelSnapshotter,
+  disposeModelObjects,
+  modelObject,
+} from '../../core/test/model-test.ts';
+import type {ModelExportOptions} from '../src/model/model-export.ts';
+import type {Occurrence} from '../src/viewport.ts';
+import {createTestModelPipeline} from './project-test-files.ts';
 import {createAppTestServer} from './vite-test-server.ts';
-import {createTestProjectCompiler} from './project-test-files.ts';
 
 let server: Awaited<ReturnType<typeof createAppTestServer>>,
   exportModel: (
@@ -32,7 +32,7 @@ let server: Awaited<ReturnType<typeof createAppTestServer>>,
   ) => Blob,
   collectExportInstances: (typeof import('../src/rendering/model-export-scene.ts'))['collectExportInstances'],
   renderedModelName: (typeof import('../src/rendering/model-export-scene.ts'))['renderedModelName'],
-  compileProject: import('../src/model/project-compiler.ts').ProjectCompiler['compile'],
+  compileProject: import('./model-pipeline.ts').TestModelPipeline['compile'],
   applyNodeTransform: (typeof import('../src/rendering/model-renderer.ts'))['applyNodeTransform'];
 before(async () => {
   server = await createAppTestServer();
@@ -47,11 +47,11 @@ before(async () => {
     typeof import('../src/rendering/model-renderer.ts')
   >('/src/rendering/model-renderer.ts'));
   compileProject = async (...args) => {
-    const compiler = await createTestProjectCompiler(server);
+    const compiler = await createTestModelPipeline(server);
     try {
       return await compiler.compile(...args);
     } finally {
-      compiler.dispose();
+      await compiler.dispose();
     }
   };
 });
@@ -149,7 +149,7 @@ function closedMesh(mesh: ReturnType<typeof read3mf>['meshes'][number]) {
 }
 
 test('project runtime retains export geometry and preserves STEP placements, names and colors', async () => {
-  const compiler = await createTestProjectCompiler(server);
+  const compiler = await createTestModelPipeline(server);
   const source = `import {box, group} from '@code3d/core';
 const base = box(10, 20, 30).material('#123456');
 const top = box(2, 4, 6).relate(self => self.down.on(base.up));
@@ -187,12 +187,12 @@ export default group([base, top], 'Assembly');`;
       /END-ISO-10303-21/,
     );
   } finally {
-    compiler.dispose();
+    await compiler.dispose();
   }
 });
 
 test('project compilation carries native group materials into exported materials', async () => {
-  const compiler = await createTestProjectCompiler(server);
+  const compiler = await createTestModelPipeline(server);
   const source = `import {box, group} from '@code3d/core';
 import {MeshPhysicalMaterial} from '@code3d/core/three';
 const base = box(10, 4, 10).material('#ff0000');
@@ -230,7 +230,7 @@ export default group([base, group([top]).material('#00ff00')]).material(new Mesh
       ) < 1e-7,
     );
   } finally {
-    compiler.dispose();
+    await compiler.dispose();
   }
 });
 
@@ -285,7 +285,7 @@ test('STEP and 3MF preserve the RGB and alpha of authored color formats', async 
 
 for (const mode of ['builtin', 'installed'] as const) {
   test(`exports with the ${mode} project kernel across cached npm model edits and releases old geometry`, async () => {
-    const compiler = await createTestProjectCompiler(server);
+    const compiler = await createTestModelPipeline(server);
     let retained;
     let runtime;
     try {
@@ -312,9 +312,12 @@ for (const mode of ['builtin', 'installed'] as const) {
         );
         assert.equal(module.diagnostic, undefined);
         if (retained) assert.equal(retained.shapes.size, 0);
-        retained = compiler['geometry'];
+        retained = compiler.executor['geometry'];
         runtime ??= compiler['runtime'];
-        assert.equal(compiler['runtime'], runtime);
+        assert.ok(
+          compiler.runtime === runtime,
+          'the executor retains its initialized runtime',
+        );
         assert.notEqual(
           defined(runtime).replicad.exportSTEP,
           replicad.exportSTEP,
@@ -353,10 +356,14 @@ for (const mode of ['builtin', 'installed'] as const) {
         ),
         /missing-package/,
       );
+      // Compilation failure does not destroy the previous execution's geometry.
+      // The client controls whether that version is currently exportable.
+      assert.ok(defined(retained).shapes.size > 0);
+      compiler.executor.dispose();
       assert.equal(defined(retained).shapes.size, 0);
       assert.throws(() => compiler.export([], defaults), /model has changed/);
     } finally {
-      compiler.dispose();
+      await compiler.dispose();
     }
   });
 }

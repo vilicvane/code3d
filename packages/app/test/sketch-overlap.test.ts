@@ -1,14 +1,14 @@
-import assert from 'node:assert/strict';
-import {after, before, test} from 'node:test';
 import type {
   SketchPointAddress,
   SketchPosition,
   SketchSnapshot,
 } from '@code3d/core/tooling';
+import assert from 'node:assert/strict';
+import {after, before, test} from 'node:test';
 import type {SketchChange} from '../src/tools/sketch-source.ts';
-import type {ProjectCompiler} from '../src/model/project-compiler.ts';
+import type {TestModelPipeline} from './model-pipeline.ts';
+import {createTestModelPipeline} from './project-test-files.ts';
 import {createAppTestServer} from './vite-test-server.ts';
-import {createTestProjectCompiler} from './project-test-files.ts';
 
 let server: Awaited<ReturnType<typeof createAppTestServer>>;
 let geometry: typeof import('../src/tools/sketch-segments.ts');
@@ -321,7 +321,7 @@ test('all overlapping lines are rewritten in one edit and survive fresh compiler
     ].map(([x, y], i) => ['point', i + 1, rotate(x, y)]);
     const args = `${JSON.stringify([...data, ['line', 9, [1, 2]], ['line', 10, [4, 3]], ['line', 11, [5, 6]], ['line', 12, [7, 8]]])}, {constraints: [['angle',10, theta + 180 /* reversed */], ['length',9,40], ['angle',9,theta], ['length',10,40]]}`;
     const compile = async (args: string) => {
-      const compiler: ProjectCompiler = await createTestProjectCompiler(server);
+      const compiler: TestModelPipeline = await createTestModelPipeline(server);
       try {
         const module = await compiler.compile(
           {
@@ -337,7 +337,7 @@ test('all overlapping lines are rewritten in one edit and survive fresh compiler
         assert.equal(module.diagnostic, undefined);
         return [...module.sketches.values()][0];
       } finally {
-        compiler.dispose();
+        await compiler.dispose();
       }
     };
     const original = await compile(args);

@@ -3,6 +3,35 @@ import {ArtifactJournal} from './artifact-journal';
 
 const storageName = 'code3d-kernel-artifacts';
 let retainedIndex: ReturnType<ArtifactJournal['index']> | undefined;
+let storageFiles:
+  | {
+      handles: readonly FileSystemFileHandle[];
+      maximumBytes: number;
+      checkedAt: number;
+    }
+  | undefined;
+
+async function journalFiles() {
+  if (storageFiles && performance.now() - storageFiles.checkedAt < 60_000)
+    return storageFiles;
+  const root = await navigator.storage.getDirectory();
+  const directory = await root.getDirectoryHandle(storageName, {create: true});
+  const [handles, estimate] = await Promise.all([
+    Promise.all(
+      ['a', 'b'].map(name => directory.getFileHandle(name, {create: true})),
+    ),
+    navigator.storage.estimate(),
+  ]);
+  // File handles are capabilities, not exclusive sync access handles. Keeping
+  // them does not hold the journal lock between individual transactions.
+  return (storageFiles = {
+    handles,
+    maximumBytes: Math.floor(
+      Math.min(1024 ** 3, (estimate.quota ?? 10 * 1024 ** 3) / 10),
+    ),
+    checkedAt: performance.now(),
+  });
+}
 
 /** Content, including resolved Core/Replicad/codec input files and actual WASM bytes. */
 export async function runtimeArtifactIdentity(
@@ -34,19 +63,18 @@ export type PersistentArtifactStats = ReturnType<ArtifactJournal['stats']> & {
   errors: number;
 };
 
+type PersistentArtifactStore = KernelArtifactStore & {clear(): void};
+
 /**
  * One origin-wide journal and budget, shared by projects, App and agent workers.
- * Web Locks cover the complete open/evaluate/close transaction. Waiting remains
- * asynchronous and cancellable; no sync handle is kept by an idle compiler.
+ * Web Locks cover only an I/O worker's open/read-or-write/close transaction.
+ * No model compilation, execution, or response transfer runs under this lock.
  */
 export async function withPersistentArtifacts<Result>(
   namespace: string,
-  action: (
-    store: KernelArtifactStore | undefined,
-    resources?: KernelArtifactStore,
-  ) => Promise<Result>,
-  checkCancelled: () => void,
+  action: (store: PersistentArtifactStore | undefined) => Promise<Result>,
   onStats: (stats: PersistentArtifactStats | undefined) => void,
+  {touchReads = true}: {touchReads?: boolean} = {},
 ): Promise<Result> {
   if (
     typeof navigator === 'undefined' ||
@@ -56,95 +84,75 @@ export async function withPersistentArtifacts<Result>(
     onStats(undefined);
     return action(undefined);
   }
-  const controller = new AbortController();
   let entered = false;
-  const timer = setInterval(() => {
-    try {
-      checkCancelled();
-    } catch (error) {
-      controller.abort(error);
-    }
-  }, 50);
   try {
-    return await navigator.locks.request(
-      storageName,
-      {signal: controller.signal},
-      async () => {
-        entered = true;
-        checkCancelled();
-        const handles: FileSystemSyncAccessHandle[] = [];
-        let journal: ArtifactJournal;
-        let errors = 0;
+    return await navigator.locks.request(storageName, async () => {
+      entered = true;
+      const handles: FileSystemSyncAccessHandle[] = [];
+      let journal: ArtifactJournal;
+      let errors = 0;
+      try {
+        const {handles: files, maximumBytes} = await journalFiles();
+        for (const file of files) {
+          handles.push(await file.createSyncAccessHandle());
+        }
+        journal = new ArtifactJournal(
+          handles as [FileSystemSyncAccessHandle, FileSystemSyncAccessHandle],
+          maximumBytes,
+          retainedIndex,
+        );
+        retainedIndex = undefined;
+      } catch {
+        storageFiles = undefined;
+        for (const handle of handles) {
+          try {
+            handle.close();
+          } catch {}
+        }
+        onStats(undefined);
+        return action(undefined);
+      }
+      const scopedStore = (prefix: string): PersistentArtifactStore => ({
+        get: id => journal.get(`${prefix}:${id}`, touchReads),
+        getMany: ids =>
+          journal.getMany(
+            ids.map(id => `${prefix}:${id}`),
+            touchReads,
+          ),
+        set: (id, bytes) => journal.set(`${prefix}:${id}`, bytes),
+        touch: id => journal.touch(`${prefix}:${id}`),
+        touchMany: ids => journal.touchMany(ids.map(id => `${prefix}:${id}`)),
+        delete: id => journal.delete(`${prefix}:${id}`),
+        clear: () => journal.deletePrefix(`${prefix}:`),
+        flush: () => journal.flush(),
+      });
+      try {
+        return await action(scopedStore(namespace));
+      } finally {
         try {
-          const root = await navigator.storage.getDirectory();
-          const directory = await root.getDirectoryHandle(storageName, {
-            create: true,
-          });
-          for (const name of ['a', 'b']) {
-            const file = await directory.getFileHandle(name, {create: true});
-            handles.push(await file.createSyncAccessHandle());
-          }
-          const estimate = await navigator.storage.estimate();
-          // Reserve compaction space within the budget, without preallocation.
-          // Quota exhaustion still goes through the memory-only storage boundary.
-          const maximumBytes = Math.floor(
-            Math.min(1024 ** 3, (estimate.quota ?? 10 * 1024 ** 3) / 10),
-          );
-          journal = new ArtifactJournal(
-            handles as [FileSystemSyncAccessHandle, FileSystemSyncAccessHandle],
-            maximumBytes,
-            retainedIndex,
-          );
-          retainedIndex = undefined;
+          journal.flush();
+          retainedIndex = journal.index();
         } catch {
-          for (const handle of handles) {
-            try {
-              handle.close();
-            } catch {}
-          }
-          onStats(undefined);
-          checkCancelled();
-          return action(undefined);
+          errors++;
+          retainedIndex = undefined;
         }
-        const scopedStore = (prefix: string): KernelArtifactStore => ({
-          get: id => journal.get(`${prefix}:${id}`),
-          set: (id, bytes) => journal.set(`${prefix}:${id}`, bytes),
-          touch: id => journal.touch(`${prefix}:${id}`),
-          delete: id => journal.delete(`${prefix}:${id}`),
-          flush: () => journal.flush(),
-        });
         try {
-          checkCancelled();
-          return await action(scopedStore(namespace), scopedStore('resources'));
-        } finally {
-          try {
-            journal.flush();
-            retainedIndex = journal.index();
-          } catch {
-            errors++;
-            retainedIndex = undefined;
-          }
-          try {
-            onStats({...journal.stats(), errors});
-          } catch {
-            onStats(undefined);
-          }
-          for (const handle of handles) {
-            try {
-              handle.close();
-            } catch {}
-          }
+          onStats({...journal.stats(), errors});
+        } catch {
+          onStats(undefined);
         }
-      },
-    );
+        for (const handle of handles) {
+          try {
+            handle.close();
+          } catch {}
+        }
+      }
+    });
   } catch (error) {
     // Lock access itself can be denied by the browser, before storage is opened.
-    // Never retry the model action after it has begun or swallow cancellation.
-    if (entered || controller.signal.aborted) throw error;
+    // Never retry an I/O operation after it has begun.
+    if (entered) throw error;
     onStats(undefined);
-    checkCancelled();
     return action(undefined);
-  } finally {
-    clearInterval(timer);
   }
 }

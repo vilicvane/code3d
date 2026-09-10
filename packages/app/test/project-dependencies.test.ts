@@ -1,23 +1,23 @@
-import {assertModelDiagnosticError} from './project-test-files.ts';
-import type {ProjectLanguage} from '../src/project/project-language.ts';
-import type {ModelProject} from '../src/project/project.ts';
-import {defined} from '../../../test/assert.ts';
-import type {ProjectFileReader} from '../src/project/file-reader.ts';
+import * as esbuild from 'esbuild';
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
-import * as esbuild from 'esbuild';
-import {createAppTestServer} from './vite-test-server.ts';
+import {defined} from '../../../test/assert.ts';
+import type {ProjectFileReader} from '../src/project/file-reader.ts';
+import type {ProjectLanguage} from '../src/project/project-language.ts';
 import {
-  createTestEvaluator,
-  testEvaluatorClass,
+  assertModelDiagnosticError,
+  buildTestDependencies,
+  evaluateTestBundle,
   packageTestFiles,
+  testEvaluatorClass,
 } from './project-test-files.ts';
+import {createAppTestServer} from './vite-test-server.ts';
 
 let server: Awaited<ReturnType<typeof createAppTestServer>>;
 let ProjectAssets: (typeof import('../src/project/project-assets.ts'))['ProjectAssets'];
 let ProjectBuilder: (typeof import('../src/project/project-builder.ts'))['ProjectBuilder'];
 let ProjectRuntime: (typeof import('../src/model/project-runtime.ts'))['ProjectRuntime'];
-let ProjectCompiler: (typeof import('../src/model/project-compiler.ts'))['ProjectCompiler'];
+let TestModelPipeline: (typeof import('./model-pipeline.ts'))['TestModelPipeline'];
 let Evaluator: Awaited<ReturnType<typeof testEvaluatorClass>>;
 before(async () => {
   server = await createAppTestServer();
@@ -30,12 +30,52 @@ before(async () => {
   ({ProjectRuntime} = await server.ssrLoadModule<
     typeof import('../src/model/project-runtime.ts')
   >('/src/model/project-runtime.ts'));
-  ({ProjectCompiler} = await server.ssrLoadModule<
-    typeof import('../src/model/project-compiler.ts')
-  >('/src/model/project-compiler.ts'));
+  ({TestModelPipeline} = await server.ssrLoadModule<
+    typeof import('./model-pipeline.ts')
+  >('/test/model-pipeline.ts'));
   Evaluator = await testEvaluatorClass(server);
 });
 after(async () => server?.close());
+
+test('cancellation after Core preparation retains the resources needed by the next execution', async () => {
+  const pipeline = new TestModelPipeline(
+    packageTestFiles,
+    packageTestFiles,
+    esbuild,
+    () => new Evaluator(),
+  );
+  const project = {
+    files: [
+      {
+        path: '/model.ts',
+        source:
+          'import {box} from "@code3d/core"; export default box(3, 5, 7);',
+      },
+    ],
+  };
+  const cancelled = new Error('Cancelled after Core preparation');
+  try {
+    await assert.rejects(
+      pipeline.compile(
+        project,
+        '/model.ts',
+        undefined,
+        undefined,
+        undefined,
+        () => {
+          if (pipeline.compiler['dependencies'].prepared) throw cancelled;
+        },
+      ),
+      error => error === cancelled,
+    );
+    assert.equal(pipeline.compiler['dependencies'].ready, false);
+    const module = await pipeline.compile(project, '/model.ts');
+    assert.equal(module.diagnostic, undefined);
+    assert.ok(defined(defined(module.fallback).mesh).vertices.length > 0);
+  } finally {
+    await pipeline.dispose();
+  }
+});
 
 function projectFiles(
   entries: Record<string, string>,
@@ -76,7 +116,7 @@ test('model analysis follows imports independently of which editor documents are
     [root.path]: root.source,
     [helper.path]: helper.source,
   });
-  const compiler = new ProjectCompiler(
+  const compiler = new TestModelPipeline(
     files,
     packageTestFiles,
     esbuild,
@@ -138,7 +178,7 @@ test('model analysis follows imports independently of which editor documents are
       },
     );
   } finally {
-    compiler.dispose();
+    await compiler.dispose();
   }
 });
 
@@ -150,7 +190,7 @@ test('explicit design calls load their file and dependencies without opening edi
     '/design.ts': source,
     '/dimensions.ts': 'export const height = 6;',
   });
-  const compiler = new ProjectCompiler(
+  const compiler = new TestModelPipeline(
     files,
     packageTestFiles,
     esbuild,
@@ -183,7 +223,7 @@ test('explicit design calls load their file and dependencies without opening edi
     assert.equal(rootOnly.objects.size, 0);
     assert.deepEqual(rootOnly.designArguments, []);
   } finally {
-    compiler.dispose();
+    await compiler.dispose();
   }
 });
 
@@ -201,7 +241,14 @@ test('shares a dependency across concurrent imports and a nested top-level dynam
   });
   const assets = new ProjectAssets(files);
   const builder = new ProjectBuilder(files, esbuild, assets);
-  const runtime = await ProjectRuntime.create(files, builder, new Evaluator());
+  const artifact = await buildTestDependencies(
+    server,
+    files,
+    builder,
+    assets,
+    'void import("first"); void import("second"); void import("shared");',
+  );
+  const runtime = await ProjectRuntime.create(artifact, new Evaluator());
   try {
     const [first, second, shared] = await Promise.all([
       runtime.importModule('/node_modules/first/index.js'),
@@ -221,6 +268,7 @@ test('shares a dependency across concurrent imports and a nested top-level dynam
   } finally {
     runtime.dispose();
     assets.dispose();
+    await builder.dispose();
   }
 });
 
@@ -235,23 +283,31 @@ test('retains callable CommonJS exports and JSON values when a later dependency 
   });
   const assets = new ProjectAssets(files);
   const builder = new ProjectBuilder(files, esbuild, assets);
-  const runtime = await ProjectRuntime.create(files, builder, new Evaluator());
+  const artifact = await buildTestDependencies(
+    server,
+    files,
+    builder,
+    assets,
+    'void import("clamp"); void import("clamp/data.json"); void import("consumer");',
+  );
+  const runtime = await ProjectRuntime.create(artifact, new Evaluator());
   const evaluator = new Evaluator();
   try {
-    await runtime.loadDependencies(
-      builder,
-      'import clamp from "clamp"; import data from "clamp/data.json"; export const first = clamp(data.value);',
-    );
+    await runtime.importModule('/node_modules/clamp/index.cjs');
+    await runtime.importModule('/node_modules/clamp/data.json');
     const source = 'import answer from "consumer"; export {answer};';
-    await runtime.loadDependencies(builder, source);
-    const bundle = await builder.build(source, {runtimeFiles: runtime.formats});
-    const value = await evaluator.evaluate('model.js', bundle.source, {
+    await runtime.importModule('/node_modules/consumer/index.cjs');
+    const bundle = await builder.build(source, {
+      runtimeFiles: artifact.formats,
+    });
+    const value = await evaluateTestBundle(server, evaluator, bundle.source, {
       __code3dModules: runtime.modules,
     });
     assert.equal(value.answer, 41);
   } finally {
     runtime.dispose();
     assets.dispose();
+    await builder.dispose();
     evaluator.dispose();
   }
 });
@@ -265,7 +321,7 @@ test('reads installed declarations, reruns changed source, and preserves invalid
     '/node_modules/custom-size/index.js': 'export const width = 13;',
     '/node_modules/custom-size/index.d.ts': 'export declare const width: 13;',
   });
-  const compiler = new ProjectCompiler(
+  const compiler = new TestModelPipeline(
     files,
     packageTestFiles,
     esbuild,
@@ -293,7 +349,7 @@ test('reads installed declarations, reruns changed source, and preserves invalid
     const runtime = compiler['runtime'];
     const second = await compiler.compile(project(5), '/model.ts');
     assert.equal(second.diagnostic, undefined);
-    assert.equal(compiler['runtime'], runtime);
+    assert.ok(compiler.runtime === runtime, 'source edits retain the runtime');
     assert.notDeepEqual(
       defined(defined(second.fallback).mesh).vertices,
       defined(defined(first.fallback).mesh).vertices,
@@ -314,11 +370,19 @@ test('reads installed declarations, reruns changed source, and preserves invalid
       '/node_modules/custom-size/index.js',
       'export const width = 20;',
     );
+    const packagePath = '/node_modules/custom-size/package.json';
+    files.files.set(
+      packagePath,
+      JSON.stringify({
+        ...JSON.parse(files.files.get(packagePath)!),
+        version: '2.0.0',
+      }),
+    );
     let cancelled = false;
     const stat = files.stat;
     files.stat = async path => {
       const value = await stat(path);
-      if (path === '/node_modules/custom-size/index.js') cancelled = true;
+      if (path === packagePath) cancelled = true;
       return value;
     };
     const stopped = new Error('Cancelled after detecting a dependency change');
@@ -336,16 +400,25 @@ test('reads installed declarations, reruns changed source, and preserves invalid
       error => error === stopped,
     );
     files.stat = stat;
-    assert.equal(compiler['runtime'], undefined);
+    // Cancelling compilation leaves the displayed execution intact until a
+    // complete replacement artifact is available. Compare identities without
+    // expanding the runtime's WASM memory in an assertion failure.
+    assert.ok(
+      compiler.runtime === runtime,
+      'cancelled compilation retains the previous runtime',
+    );
     const third = await compiler.compile(project(5), '/model.ts');
     assert.equal(third.diagnostic, undefined);
-    assert.notEqual(compiler['runtime'], runtime);
+    assert.ok(
+      compiler.runtime !== runtime,
+      'a completed dependency update replaces the runtime',
+    );
     assert.notDeepEqual(
       defined(defined(third.fallback).mesh).vertices,
       defined(defined(second.fallback).mesh).vertices,
     );
   } finally {
-    compiler.dispose();
+    await compiler.dispose();
   }
 });
 
@@ -353,7 +426,7 @@ test('uses installed just-range ESM and types with builtin core across cached mo
   const files = projectFiles({
     '/package.json': '{"dependencies":{"just-range":"4.2.0"}}',
   });
-  const compiler = new ProjectCompiler(
+  const compiler = new TestModelPipeline(
     files,
     packageTestFiles,
     esbuild,
@@ -392,7 +465,10 @@ test('uses installed just-range ESM and types with builtin core across cached mo
       assert.equal(module.diagnostic, undefined);
       assert.equal(defined(module.fallback).children.length, count + 1);
       runtime ??= compiler['runtime'];
-      assert.equal(compiler['runtime'], runtime);
+      assert.ok(
+        compiler.runtime === runtime,
+        'the executor retains its initialized runtime',
+      );
       const cachedRange: (count: number) => number[] = defined(
         defined(runtime).modules.get('/node_modules/just-range/index.mjs'),
       ).default;
@@ -406,7 +482,7 @@ test('uses installed just-range ESM and types with builtin core across cached mo
       ),
     );
   } finally {
-    compiler.dispose();
+    await compiler.dispose();
   }
 });
 
@@ -419,7 +495,7 @@ test('does not substitute App packages when a project declares but has not insta
       return undefined;
     },
   };
-  const compiler = new ProjectCompiler(
+  const compiler = new TestModelPipeline(
     files,
     packageTestFiles,
     esbuild,
@@ -454,12 +530,12 @@ test('does not substitute App packages when a project declares but has not insta
       },
     );
   } finally {
-    compiler.dispose();
+    await compiler.dispose();
   }
 });
 
 test('preserves top-level await, destructuring, cyclic source imports and literal dynamic imports during tracing', async () => {
-  const compiler = new ProjectCompiler(
+  const compiler = new TestModelPipeline(
     packageTestFiles,
     packageTestFiles,
     esbuild,
@@ -497,13 +573,13 @@ test('preserves top-level await, destructuring, cyclic source imports and litera
     assert.equal(module.diagnostic, undefined);
     assert.ok(module.exports.has('default'));
   } finally {
-    compiler.dispose();
+    await compiler.dispose();
   }
 });
 
 test('loads a static asset URL from the project and observes changed asset bytes', async () => {
   const files = projectFiles({'/size.json': '{"width":17}'});
-  const compiler = new ProjectCompiler(
+  const compiler = new TestModelPipeline(
     files,
     packageTestFiles,
     esbuild,
@@ -532,7 +608,7 @@ test('loads a static asset URL from the project and observes changed asset bytes
       defined(defined(second.fallback).mesh).vertices,
     );
   } finally {
-    compiler.dispose();
+    await compiler.dispose();
   }
 });
 
@@ -543,7 +619,7 @@ test('keeps a model retained privately by an installed package valid across sour
     '/node_modules/template/index.js':
       'import {box} from "@code3d/core"; const cached = box(12, 4, 8); export function template() { return cached; }',
   });
-  const compiler = new ProjectCompiler(
+  const compiler = new TestModelPipeline(
     files,
     packageTestFiles,
     esbuild,
@@ -562,12 +638,12 @@ test('keeps a model retained privately by an installed package valid across sour
       assert.equal(module.diagnostic, undefined);
     }
   } finally {
-    compiler.dispose();
+    await compiler.dispose();
   }
 });
 
 test('does not execute a dynamically imported source module before its branch is reached', async () => {
-  const compiler = new ProjectCompiler(
+  const compiler = new TestModelPipeline(
     packageTestFiles,
     packageTestFiles,
     esbuild,
@@ -593,7 +669,7 @@ test('does not execute a dynamically imported source module before its branch is
     const second = await compiler.compile(project(true), '/model.ts');
     assert.equal(defined(second.diagnostic).summary, 'lazy module executed');
   } finally {
-    compiler.dispose();
+    await compiler.dispose();
   }
 });
 
@@ -604,7 +680,7 @@ test('does not inherit old source offsets when an installed package returns the 
     '/node_modules/template/index.js':
       'import {box} from "@code3d/core"; const cached = box(12, 4, 8); export function template() { return cached; }',
   });
-  const compiler = new ProjectCompiler(
+  const compiler = new TestModelPipeline(
     files,
     packageTestFiles,
     esbuild,
@@ -633,7 +709,7 @@ test('does not inherit old source offsets when an installed package returns the 
       );
     }
   } finally {
-    compiler.dispose();
+    await compiler.dispose();
   }
 });
 
@@ -645,7 +721,7 @@ for (const throughSource of [false, true] as const) {
       '/node_modules/template/index.js':
         'import {box} from "@code3d/core"; export default box(12, 4, 8);',
     });
-    const compiler = new ProjectCompiler(
+    const compiler = new TestModelPipeline(
       files,
       packageTestFiles,
       esbuild,
@@ -685,7 +761,7 @@ for (const throughSource of [false, true] as const) {
       assert.equal(third.diagnostic, undefined);
       assert.equal(third.exports.get('default'), second.exports.get('default'));
     } finally {
-      compiler.dispose();
+      await compiler.dispose();
     }
   });
 }
@@ -704,7 +780,14 @@ test('releases concurrent waiters on failed dependency evaluation and can load u
   });
   const assets = new ProjectAssets(files);
   const builder = new ProjectBuilder(files, esbuild, assets);
-  const runtime = await ProjectRuntime.create(files, builder, new Evaluator());
+  const artifact = await buildTestDependencies(
+    server,
+    files,
+    builder,
+    assets,
+    'void import("failure"); void import("consumer"); void import("ok");',
+  );
+  const runtime = await ProjectRuntime.create(artifact, new Evaluator());
   try {
     const failures = await Promise.allSettled([
       runtime.importModule('/node_modules/failure/index.js'),
@@ -729,6 +812,7 @@ test('releases concurrent waiters on failed dependency evaluation and can load u
   } finally {
     runtime.dispose();
     assets.dispose();
+    await builder.dispose();
   }
 });
 
@@ -738,7 +822,7 @@ test('locates installed tooling initialization failures at the author import', a
     '/node_modules/@code3d/core/bld/tooling/index.js':
       'throw new Error("broken installed core");',
   });
-  const compiler = new ProjectCompiler(
+  const compiler = new TestModelPipeline(
     files,
     packageTestFiles,
     esbuild,
@@ -760,12 +844,12 @@ test('locates installed tooling initialization failures at the author import', a
       },
     );
   } finally {
-    compiler.dispose();
+    await compiler.dispose();
   }
 });
 
 test('locates a missing relative asset in the original author source', async () => {
-  const compiler = new ProjectCompiler(
+  const compiler = new TestModelPipeline(
     packageTestFiles,
     packageTestFiles,
     esbuild,
@@ -791,7 +875,7 @@ test('locates a missing relative asset in the original author source', async () 
       },
     );
   } finally {
-    compiler.dispose();
+    await compiler.dispose();
   }
 });
 
@@ -807,7 +891,7 @@ test('synchronous font assets invalidate on file edits and batch text operations
         : packageTestFiles.stat(file);
     },
   };
-  const compiler = new ProjectCompiler(
+  const compiler = new TestModelPipeline(
     files,
     packageTestFiles,
     esbuild,
@@ -886,6 +970,6 @@ test('synchronous font assets invalidate on file edits and batch text operations
         .map(solid => solid.mesh),
     );
   } finally {
-    compiler.dispose();
+    await compiler.dispose();
   }
 });

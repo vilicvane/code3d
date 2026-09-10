@@ -95,13 +95,15 @@ export class ArtifactJournal implements KernelArtifactStore {
       this.scan();
     }
     // The active generation is durable before reclaiming an interrupted copy.
-    files[1 - this.active].truncate(0);
-    files[1 - this.active].flush();
+    if (files[1 - this.active].getSize()) {
+      files[1 - this.active].truncate(0);
+      files[1 - this.active].flush();
+    }
     if (this.end > this.capacity) this.compact(0);
     this.durableOrder = [...this.entries.keys()];
   }
 
-  get(id: string): Uint8Array | undefined {
+  get(id: string, touch = true): Uint8Array | undefined {
     const entry = this.entries.get(id);
     if (!entry) return undefined;
     const bytes = this.readValue(entry);
@@ -109,8 +111,15 @@ export class ArtifactJournal implements KernelArtifactStore {
       this.delete(id);
       return undefined;
     }
-    this.touch(id);
+    if (touch) this.touch(id);
     return bytes;
+  }
+
+  getMany(
+    ids: readonly string[],
+    touch = true,
+  ): readonly (Uint8Array | undefined)[] {
+    return ids.map(id => this.get(id, touch));
   }
 
   set(id: string, bytes: Uint8Array): void {
@@ -143,6 +152,10 @@ export class ArtifactJournal implements KernelArtifactStore {
     return true;
   }
 
+  touchMany(ids: readonly string[]): readonly boolean[] {
+    return ids.map(id => this.touch(id));
+  }
+
   delete(id: string): void {
     const entry = this.entries.get(id);
     if (!entry) return;
@@ -151,6 +164,11 @@ export class ArtifactJournal implements KernelArtifactStore {
     this.liveBytes -= entry.recordBytes;
     if (this.end + 1024 > this.capacity) this.compact(0);
     else this.append({id, kind: 'delete'}, new Uint8Array());
+  }
+
+  deletePrefix(prefix: string): void {
+    if ([...this.entries.keys()].some(id => id.startsWith(prefix)))
+      this.compact(0, prefix);
   }
 
   flush(): void {
@@ -176,6 +194,7 @@ export class ArtifactJournal implements KernelArtifactStore {
       this.append({id, kind: 'touch'}, new Uint8Array());
     }
     this.touched.clear();
+    if (!this.unflushedBytes) return;
     this.flushData();
     this.files[this.active].flush();
     this.durableOrder = [...this.entries.keys()];
@@ -360,15 +379,25 @@ export class ArtifactJournal implements KernelArtifactStore {
     return {offset, length: bytes.length, checksum: crc, recordBytes};
   }
 
-  private compact(incomingBytes: number): void {
+  private compact(incomingBytes: number, removedPrefix?: string): void {
     this.flushData();
     this.files[this.active].flush();
     const target = this.files[1 - this.active];
     const keep = new Map(this.entries);
     let live = this.liveBytes;
+    if (removedPrefix !== undefined) {
+      for (const [id, entry] of keep) {
+        if (!id.startsWith(removedPrefix)) continue;
+        keep.delete(id);
+        live -= entry.recordBytes;
+      }
+    }
     const targetBytes = Math.max(
       0,
-      Math.floor((this.capacity - fileHeaderSize - incomingBytes) * 0.8),
+      Math.floor(
+        (this.capacity - fileHeaderSize - incomingBytes) *
+          (removedPrefix === undefined ? 0.8 : 1),
+      ),
     );
     for (const [id, entry] of keep) {
       if (live <= targetBytes) break;

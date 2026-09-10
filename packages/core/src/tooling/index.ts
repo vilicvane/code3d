@@ -1,78 +1,76 @@
 export {identifyCachedFunction} from '../library/cached.js';
 export {
-  installModelResourceReader,
   installFontEngine,
+  installModelResourceReader,
 } from '../library/font.js';
-export {googleFontUrl, googleFontSources} from '../library/google-font.js';
-import {setOC} from 'replicad';
-import type {OpenCascadeInstance} from '@code3d/opencascade';
-import {clearKernelOperationCache} from '../library/kernel-cache.js';
+export {googleFontSources, googleFontUrl} from '../library/google-font.js';
+export {installOpenCascade} from '../library/open-cascade.js';
 
 export {
+  clearKernelOperationCache,
+  kernelOperationCacheStats,
   setKernelArtifactStore,
   setKernelExternalBytes,
-  kernelOperationCacheStats,
-  clearKernelOperationCache,
 } from '../library/kernel-cache.js';
 export type {KernelArtifactStore} from '../library/kernel-cache.js';
 
 export {
+  SketchConstraintError,
+  installSketchSolver,
+} from '../library/sketch-solver.js';
+export {
+  assertSketchDragConnections,
   isSketch,
   sketchDefinition,
-  sketchSource,
+  sketchDragRequiresSolver,
+  sketchEntityParameters,
   sketchFrame,
+  sketchPointResolver,
+  sketchSource,
   snapshotSketch,
   solveSketchSnapshot,
-  sketchDragRequiresSolver,
-  assertSketchDragConnections,
-  sketchPointResolver,
-  sketchEntityParameters,
   withSketchEntityParameters,
 } from '../library/sketch.js';
-export {
-  installSketchSolver,
-  SketchConstraintError,
-} from '../library/sketch-solver.js';
 export type {
   Sketch,
-  SketchEntry,
+  SketchArcDirection,
+  SketchArcSnapshot,
+  SketchCircleSnapshot,
   SketchConstraint,
+  SketchEntitySnapshot,
+  SketchEntry,
+  SketchLineSnapshot,
   SketchOptions,
-  SketchPosition,
   SketchPointAddress,
   SketchPointSnapshot,
-  SketchLineSnapshot,
-  SketchCircleSnapshot,
-  SketchArcSnapshot,
-  SketchArcDirection,
-  SketchEntitySnapshot,
+  SketchPosition,
   SketchSnapshot,
 } from '../library/sketch.js';
 
+export {sketchCurveIntersections} from '../library/sketch-curve-intersections.js';
+export type {SketchCurveIntersection} from '../library/sketch-curve-intersections.js';
 export {
   sketchArcGeometry,
+  sketchCurveBounds,
+  sketchCurveClosestParameter,
   sketchCurveGeometry,
   sketchCurvePosition,
-  sketchCurveClosestParameter,
-  sketchCurveBounds,
   sketchCurveTolerance,
   sketchPositiveAngle,
 } from '../library/sketch-curves.js';
 export type {SketchCurve} from '../library/sketch-curves.js';
 export {sketchRegions} from '../library/sketch-regions.js';
 export type {SketchRegion} from '../library/sketch-regions.js';
-export {sketchCurveIntersections} from '../library/sketch-curve-intersections.js';
-export type {SketchCurveIntersection} from '../library/sketch-curve-intersections.js';
 
+export {describeOpenCascadeException} from '../library/open-cascade-error.js';
 export {
   authoringApi,
   beginModelEvaluation,
-  constraintTraceReference,
   constraintPreview,
+  constraintTraceReference,
   createModelSnapshotter,
-  planModelSnapshotQueries,
-  executeSnapshotQueryBatch,
   disposeModelObjects,
+  executeSnapshotQueryBatch,
   instrumentConstraint,
   instrumentModelOperation,
   isConstraint,
@@ -80,18 +78,19 @@ export {
   isModelObject,
   modelElementReference,
   modelObjectRuntimeInfo,
-  modelTopologyReference,
   modelTopologyIds,
+  modelTopologyReference,
+  planModelSnapshotQueries,
   relatedModelObjects,
   retainModelGeometry,
 } from '../library/runtime.js';
 export type {
   Constraint,
-  ConstraintExpression,
-  ConstraintSpatialReference,
-  ConstraintPreview,
   ConstraintAnchorSnapshot,
+  ConstraintExpression,
+  ConstraintPreview,
   ConstraintSnapshot,
+  ConstraintSpatialReference,
   ConstraintTraceReference,
   ElementKind,
   ElementSnapshot,
@@ -99,26 +98,26 @@ export type {
   ModelGeometryKind,
   ModelGeometrySnapshot,
   ModelKind,
+  ModelObject,
+  ModelObjectRuntimeInfo,
   ModelOperationInputRole,
   ModelOperationInstrumentation,
   ModelOperationKind,
   ModelOperationRegionSnapshot,
   ModelOperationSelectionSnapshot,
   ModelOperationSnapshot,
-  ModelObject,
-  RelationObject,
-  ModelObjectRuntimeInfo,
-  ModelSnapshotObject,
-  SnapshotQuery,
-  SnapshotQueryResult,
-  SnapshotQueryBatch,
-  ModelSpatialOperation,
   ModelParameterDimension,
+  ModelSnapshotObject,
+  ModelSpatialOperation,
   ModelTopologyReference,
   ParameterKind,
   ParameterTarget,
   ParameterUsage,
+  RelationObject,
   RenderMesh,
+  SnapshotQuery,
+  SnapshotQueryBatch,
+  SnapshotQueryResult,
   SourceRef,
   Transform,
 } from '../library/runtime.js';
@@ -130,15 +129,15 @@ export {
   relativeTransform,
   rotateVector,
   rotationAround,
-  xyzRotation,
   transformsAreEquivalent,
+  xyzRotation,
 } from '../library/spatial.js';
 export type {Quaternion, RigidTransform, Vec3} from '../library/spatial.js';
 export type {
-  TopologyInspectionOptions,
+  TopologyGeometry,
   TopologyInspection,
   TopologyInspectionItem,
-  TopologyGeometry,
+  TopologyInspectionOptions,
 } from '../library/topology-inspection.js';
 export type {
   EdgeId,
@@ -147,20 +146,14 @@ export type {
   TopologyKind,
   VertexId,
 } from '../library/topology.js';
-export {describeOpenCascadeException} from '../library/open-cascade-error.js';
-
-export function installOpenCascade(openCascade: OpenCascadeInstance): void {
-  clearKernelOperationCache();
-  setOC(openCascade);
-}
 
 export {
+  TopologyIdSet,
   compareTopologyIds,
   formatTopologyId,
   isTopologyId,
   sameTopologyId,
   topologyIdKey,
-  TopologyIdSet,
 } from '../library/topology-id.js';
 
 export {captureModelMaterial, modelMaterialColor} from '../library/material.js';

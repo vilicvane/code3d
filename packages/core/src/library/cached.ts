@@ -1,7 +1,9 @@
+import {encodeKernelArtifact} from './kernel-artifact-codec.js';
 import {
   acceptKernelOperation,
   evaluateCachedArtifact,
   findKernelOperation,
+  findKernelOperations,
   kernelContentId,
   kernelOperationKey,
   type CacheCodec,
@@ -9,7 +11,6 @@ import {
   type KernelOperationKey,
   type KernelValueLifecycle,
 } from './kernel-cache.js';
-import {encodeKernelArtifact} from './kernel-artifact-codec.js';
 import {estimateRetainedBytes} from './retained-memory.js';
 
 export type CachedOptions<Value> = CacheCodec<Value>;
@@ -113,6 +114,8 @@ export function cachedArtifact<Args extends unknown[], Value>(
       ));
   const find = (key: KernelOperationKey) =>
     findKernelOperation(key, lifecycle, persistence);
+  const findMany = (keys: readonly KernelOperationKey[]) =>
+    findKernelOperations(keys, lifecycle, persistence);
   const accept = (key: KernelOperationKey, value: Value) =>
     acceptKernelOperation(key, lifecycle, value, persistence);
   return Object.assign(
@@ -124,6 +127,6 @@ export function cachedArtifact<Args extends unknown[], Value>(
         persistence,
       );
     },
-    {key: operationKey, find, accept},
+    {key: operationKey, find, findMany, accept},
   );
 }

@@ -36,6 +36,15 @@ Explicit versions keep normal resolution; production uses published packages.
 See [package environment and resolution](../../.agents/docs/architecture/runtime.md#包环境与模块解析)
 for the shared Browser storage and local-folder rules.
 
+Each opened source file has its own cached build. The App can show its last
+successful cached preview while checking current files in the background.
+Compilation and model execution use separate Workers, so terminating a stuck
+model preserves compiler state. Use **Refresh files and dependencies** in the
+explorer to pick up manual edits inside an unchanged installed package.
+Right-click empty space in the explorer and choose **Clear build cache** to
+discard this workspace's in-memory and saved builds and rebuild the active file.
+Geometry, downloaded resources, and other workspaces' build caches are retained.
+
 ## Source map
 
 Read [project and runtime](../../.agents/docs/architecture/runtime.md),

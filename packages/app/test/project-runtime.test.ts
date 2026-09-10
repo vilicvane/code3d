@@ -1,9 +1,14 @@
-import {modelGeometry} from '../../core/test/model-test.ts';
+import * as esbuild from 'esbuild';
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
-import * as esbuild from 'esbuild';
+import {modelGeometry} from '../../core/test/model-test.ts';
+import {
+  buildTestDependencies,
+  createTestEvaluator,
+  evaluateTestBundle,
+  packageTestFiles,
+} from './project-test-files.ts';
 import {createAppTestServer} from './vite-test-server.ts';
-import {createTestEvaluator, packageTestFiles} from './project-test-files.ts';
 
 let server: Awaited<ReturnType<typeof createAppTestServer>>;
 let ProjectAssets: (typeof import('../src/project/project-assets.ts'))['ProjectAssets'];
@@ -26,22 +31,31 @@ after(async () => server?.close());
 test('runs installed package artifacts in their own kernel and retains screw caches between source evaluations', async () => {
   const assets = new ProjectAssets(packageTestFiles);
   const builder = new ProjectBuilder(packageTestFiles, esbuild, assets);
-  const runtime = await ProjectRuntime.create(
+  const artifact = await buildTestDependencies(
+    server,
     packageTestFiles,
     builder,
+    assets,
+    'void import("@code3d/screws");',
+  );
+  const runtime = await ProjectRuntime.create(
+    artifact,
     await createTestEvaluator(server),
   );
   const evaluator = await createTestEvaluator(server);
   const source =
     'import {ISO4762} from "@code3d/screws"; export const screw = ISO4762.screw("M6", 18);';
   try {
-    await runtime.loadDependencies(builder, source);
+    const path = await builder.resolve('@code3d/screws');
+    assert.ok(path);
+    await runtime.importModule(path);
     const bundle = await builder.build(source, {
-      runtimeFiles: runtime.formats,
+      runtimeFiles: artifact.formats,
     });
     const contexts = {__code3dModules: runtime.modules};
-    const first = await evaluator.evaluate(
-      'code3d-project:/model.ts',
+    const first = await evaluateTestBundle(
+      server,
+      evaluator,
       bundle.source,
       contexts,
     );
@@ -49,8 +63,9 @@ test('runs installed package artifacts in their own kernel and retains screw cac
     const identity = modelGeometry(first.screw).id;
     const mesh = runtime.tooling.createModelSnapshotter()(first.screw).mesh;
     runtime.tooling.disposeModelObjects([first.screw]);
-    const second = await evaluator.evaluate(
-      'code3d-project:/model.ts',
+    const second = await evaluateTestBundle(
+      server,
+      evaluator,
       bundle.source,
       contexts,
     );
@@ -64,6 +79,7 @@ test('runs installed package artifacts in their own kernel and retains screw cac
     evaluator.dispose();
     runtime.dispose();
     assets.dispose();
+    await builder.dispose();
   }
   assert.equal(typeof globalThis.process?.platform, 'string');
 });

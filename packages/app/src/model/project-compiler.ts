@@ -1,82 +1,86 @@
-import type * as esbuild from 'esbuild-wasm';
+import type {SourceRef} from '@code3d/core/tooling';
 import ts from '@typescript/typescript6';
-import type {
-  ModelGeometrySnapshot,
-  SketchSnapshot,
-  TopologyInspection,
-  TopologyInspectionOptions,
-} from '@code3d/core/tooling';
+import type * as esbuild from 'esbuild-wasm';
+import {isBuiltinPackageSpecifier} from '../project/builtin-packages';
 import {ProjectFileCache} from '../project/file-cache';
 import {
   decodeProjectFile,
   type ProjectFileReader,
 } from '../project/file-reader';
-import {ProjectPackages} from '../project/project-packages';
-import {isBuiltinPackageSpecifier} from '../project/builtin-packages';
-import {ProjectBuilder} from '../project/project-builder';
-import {ProjectAssets} from '../project/project-assets';
-import {
-  ProjectLanguageLoader,
-  type ProjectLanguage,
-} from '../project/project-language';
+import {patchModelPackages} from '../project/model-package-patches';
 import {
   isSourceFile,
   normalizeProjectPath,
   type ModelProject,
   type ProjectSourceFile,
 } from '../project/project';
+import {ProjectAssets} from '../project/project-assets';
+import {ProjectBuilder} from '../project/project-builder';
 import {
-  createModelCompiler,
-  type DesignContext,
-  type ModelModule,
-} from './compiler';
-import {ProjectRuntime} from './project-runtime';
-import {SnapshotWorkerPool, type SnapshotPoolOptions} from './snapshot-pool';
-import {
-  withPersistentArtifacts,
-  type PersistentArtifactStats,
-} from './persistent-artifacts';
-import {
-  previewSketchDrag,
-  type SketchDrag,
-  type SketchDragPreview,
-} from './sketch-drag';
-import {ModuleEvaluator} from './module-evaluator';
+  ProjectLanguageLoader,
+  type ProjectLanguage,
+} from '../project/project-language';
+import {ProjectPackages} from '../project/project-packages';
 import type {CompilationProgress} from './compilation-progress';
+import {createModelCompiler, type DesignContext} from './compiler';
 import {ModelDiagnosticError, diagnosticFromError} from './diagnostic';
-import {
-  exportModel,
-  type ModelExportInstance,
-  type ModelExportOptions,
-} from './model-export';
 
+import {
+  googleFontSources,
+  googleFontUrl,
+  type KernelArtifactStore,
+} from '@code3d/core/tooling';
+import {projectArtifactIdentity} from './build-artifact-cache';
+import type {CompiledModelSource} from './compiler';
+import {DependencyBuilder, type DependencyArtifact} from './dependency-builder';
+
+export type ProjectBuildArtifact = Readonly<{
+  id: string;
+  model: CompiledModelSource;
+  dependencies: DependencyArtifact;
+  staticPackages: readonly string[];
+  resources: ReadonlyMap<string, Uint8Array>;
+  resourceStats: ProjectAssets['cacheStats'];
+  runtimeSourceRef?: SourceRef;
+}>;
+
+/** Compilation owns source files and esbuild contexts; it never initializes a kernel. */
 export class ProjectCompiler {
   private readonly files: ProjectFileCache;
+  private readonly builtinFiles: ProjectFileCache;
   private readonly packages: ProjectPackages;
   private readonly assets: ProjectAssets;
   private readonly language: ProjectLanguageLoader;
-  private readonly evaluator: ModuleEvaluator;
-  private runtime?: ProjectRuntime;
-  private compiler?: ReturnType<typeof createModelCompiler>;
-  private geometry?: ModelGeometrySnapshot;
-  private snapshotPool?: SnapshotWorkerPool;
-  private persistentStats?: PersistentArtifactStats;
+  private readonly compiler = createModelCompiler();
+  private readonly builder: ProjectBuilder;
+  private dependencies: DependencyBuilder;
+  private restoredDependencies?: DependencyArtifact;
+  private dependenciesRefreshRequested = false;
 
   constructor(
     files: ProjectFileReader,
     builtinFiles: ProjectFileReader,
-    private readonly engine: Pick<typeof esbuild, 'build'>,
-    createEvaluator = () => new ModuleEvaluator(),
-    private readonly snapshotOptions?: SnapshotPoolOptions,
+    engine: Pick<typeof esbuild, 'build' | 'context'>,
+    private readonly resourceStore?: KernelArtifactStore,
   ) {
-    this.files = new ProjectFileCache(files);
-    this.packages = new ProjectPackages(
-      this.files,
-      new ProjectFileCache(builtinFiles),
-    );
+    this.files = new ProjectFileCache(patchModelPackages(files));
+    this.builtinFiles = new ProjectFileCache(patchModelPackages(builtinFiles));
+    this.packages = new ProjectPackages(this.files, this.builtinFiles);
     this.assets = new ProjectAssets(this.packages);
     this.language = new ProjectLanguageLoader(this.packages);
-    this.evaluator = createEvaluator();
+    this.builder = new ProjectBuilder(this.packages, engine, this.assets);
+    this.dependencies = new DependencyBuilder(
+      this.packages,
+      this.builder,
+      this.assets,
+    );
+  }
+
+  get dependencyScope(): string {
+    return JSON.stringify([
+      this.packages.source,
+      normalizeProjectPath(this.packages.directory + '/node_modules'),
+    ]);
   }
 
   async compile(
@@ -86,15 +90,37 @@ export class ProjectCompiler {
     onLanguage?: (language: ProjectLanguage) => void,
     onProgress?: CompilationProgress,
     checkCancelled: () => void = () => {},
-  ): Promise<ModelModule> {
+    restoreDependencies?: (
+      scope: string,
+    ) => Promise<DependencyArtifact | undefined>,
+  ): Promise<ProjectBuildArtifact> {
     checkCancelled();
-    this.disposeGeometry();
-    const changed = await this.files.refresh();
+    const refresh = this.dependenciesRefreshRequested;
+    const select = (
+      path: string,
+      info: import('../project/file-reader').ProjectFileInfo | undefined,
+    ) =>
+      !path.includes('/node_modules/') ||
+      path.endsWith('/package.json') ||
+      info?.kind === 'directory';
+    const [changed, builtinChanged] = await Promise.all([
+      this.files.refresh(select),
+      this.builtinFiles.refresh(select),
+    ]);
+    const dependenciesChanged =
+      refresh ||
+      builtinChanged.size > 0 ||
+      [...changed].some(path => path.includes('/node_modules/'));
+    if (dependenciesChanged) {
+      this.files.clear(path => path.includes('/node_modules/'));
+      this.builtinFiles.clear();
+    }
     const packageSelectionChanged = await this.packages.update(
       overrides,
       rootPath,
     );
     if (
+      dependenciesChanged ||
       packageSelectionChanged ||
       [...changed].some(
         path =>
@@ -104,25 +130,29 @@ export class ProjectCompiler {
           ),
       )
     ) {
-      this.disposeRuntime();
+      await this.builder.dispose();
+      this.dependencies = new DependencyBuilder(
+        this.packages,
+        this.builder,
+        this.assets,
+      );
       this.language.reset();
     }
+    if (refresh) this.restoredDependencies = undefined;
+    this.dependenciesRefreshRequested = false;
     this.language.invalidate(changed);
-    this.assets.beginCompilation(checkCancelled);
     // Finish applying invalidation before cancellation can consume these changes.
     checkCancelled();
     const reader = this.packages;
-    await Promise.all(
-      [
-        normalizeProjectPath(this.packages.directory + '/code3d-lock.json'),
-        '/package-lock.json',
-        '/npm-shrinkwrap.json',
-        '/pnpm-lock.yaml',
-        '/yarn.lock',
-      ].map(path => this.files.stat(path)),
-    );
+    await this.builder.watchDependencyMetadata([
+      normalizeProjectPath(this.packages.directory + '/code3d-lock.json'),
+      '/package-lock.json',
+      '/npm-shrinkwrap.json',
+      '/pnpm-lock.yaml',
+      '/yarn.lock',
+    ]);
     checkCancelled();
-    const builder = new ProjectBuilder(reader, this.engine, this.assets);
+    const builder = this.builder;
     const root = normalizeProjectPath(rootPath);
     const entryPaths = [
       ...new Set([
@@ -142,6 +172,33 @@ export class ProjectCompiler {
     // Editor documents are overlays, not the set of files belonging to a run.
     // Explicit entry files also need language support when they have no editor model.
     const entries = await Promise.all(entryPaths.map(readSource));
+    const runtimeSourceRef = entries.flatMap(file => {
+      const source = ts.createSourceFile(
+        file.path,
+        file.source,
+        ts.ScriptTarget.Latest,
+        true,
+      );
+      return source.statements.flatMap(statement => {
+        if (
+          !ts.isImportDeclaration(statement) &&
+          !ts.isExportDeclaration(statement)
+        )
+          return [];
+        const specifier = statement.moduleSpecifier;
+        return specifier &&
+          ts.isStringLiteralLike(specifier) &&
+          isBuiltinPackageSpecifier(specifier.text)
+          ? [
+              {
+                file: file.path,
+                start: specifier.getStart(source),
+                end: specifier.end,
+              },
+            ]
+          : [];
+      });
+    })[0];
     const languageProject = {
       files: [
         ...overrides.files.filter(file => !entryPaths.includes(file.path)),
@@ -156,188 +213,106 @@ export class ProjectCompiler {
     );
     checkCancelled();
     onLanguage?.(language);
-    if (!this.runtime) {
-      this.runtime = await ProjectRuntime.create(
-        reader,
-        builder,
-        this.evaluator,
-        onProgress,
-        rootPath,
-      ).catch(error => {
-        const diagnostic = diagnosticFromError(error, 'module');
-        if (diagnostic.sourceRef) throw error;
-        for (const file of entries) {
-          const parsed = ts.createSourceFile(
-            file.path,
-            file.source,
-            ts.ScriptTarget.Latest,
-            true,
-          );
-          for (const statement of parsed.statements) {
-            if (
-              !ts.isImportDeclaration(statement) &&
-              !ts.isExportDeclaration(statement)
-            )
-              continue;
-            const specifier = statement.moduleSpecifier;
-            if (
-              !specifier ||
-              !ts.isStringLiteralLike(specifier) ||
-              !isBuiltinPackageSpecifier(specifier.text)
-            )
-              continue;
-            throw new ModelDiagnosticError({
-              ...diagnostic,
-              sourceRef: {
-                file: file.path,
-                start: specifier.getStart(parsed),
-                end: specifier.getEnd(),
-              },
-            });
-          }
-        }
-        throw new ModelDiagnosticError(diagnostic);
+
+    try {
+      this.assets.beginCompilation(checkCancelled);
+      this.assets.setStore(this.resourceStore);
+      this.assets.setGoogleContext(this.language.typeScriptProgram, {
+        googleFontUrl,
+        googleFontSources,
       });
-      this.runtime.tooling.installModelResourceReader(url =>
-        this.assets.read(url),
+      if (!this.dependencies.prepared) {
+        const restored = refresh
+          ? undefined
+          : ((await restoreDependencies?.(this.dependencyScope)) ??
+            this.restoredDependencies);
+        if (restored) await this.dependencies.adopt(restored);
+        this.restoredDependencies = undefined;
+      }
+      let loading = false;
+      const loadingRuntime = () => {
+        if (!loading) onProgress?.('loading-runtime');
+        loading = true;
+      };
+      if (!this.dependencies.ready) loadingRuntime();
+      await this.dependencies.prepare(rootPath);
+      checkCancelled();
+      const discovery = await builder.build(
+        entryPaths.map(path => `import ${JSON.stringify(path)};`).join('\n'),
+        {
+          slot: 'source-discovery',
+          runtimeFiles: this.dependencies.formats,
+          bundlePackages: true,
+        },
       );
-      this.compiler = createModelCompiler(this.runtime.tooling, this.evaluator);
-      this.snapshotPool = new SnapshotWorkerPool(
-        this.runtime.tooling,
-        this.runtime.snapshotRuntime,
-        this.snapshotOptions,
+      const dependencies = await this.dependencies.build(
+        discovery,
+        loadingRuntime,
       );
+      checkCancelled();
+      const project: ModelProject = {
+        files: await Promise.all(
+          discovery.files
+            .filter(
+              path => !path.includes('/node_modules/') && isSourceFile(path),
+            )
+            .map(readSource),
+        ),
+      };
+      onProgress?.('compiling-model');
+      const model = await this.compiler.compileProject(
+        project,
+        root,
+        builder,
+        dependencies.formats,
+        this.language.typeScriptProgram,
+        discovery,
+        designContext,
+        checkCancelled,
+      );
+      const resources = new Map([
+        ...dependencies.resources,
+        ...this.assets.snapshot(),
+      ]);
+      const artifact = {
+        model,
+        dependencies,
+        staticPackages: discovery.staticPackages,
+        resources,
+        runtimeSourceRef,
+      };
+      return {
+        ...artifact,
+        id: await projectArtifactIdentity(artifact),
+        resourceStats: this.assets.cacheStats,
+      };
+    } catch (error) {
+      checkCancelled();
+      const diagnostic = diagnosticFromError(error, 'module');
+      throw new ModelDiagnosticError({
+        ...diagnostic,
+        sourceRef: diagnostic.sourceRef ?? runtimeSourceRef,
+      });
+    } finally {
+      await this.assets.finishCompilation();
     }
-    checkCancelled();
-    onProgress?.('compiling-model');
-    const runtime = this.runtime;
-    this.assets.setGoogleContext(
-      this.language.typeScriptProgram,
-      runtime.tooling,
-    );
-    return withPersistentArtifacts(
-      runtime.artifactIdentity,
-      async (store, resources) => {
-        runtime.tooling.setKernelArtifactStore(store);
-        this.assets.setStore(resources);
-        try {
-          const discovery = await runtime.loadDependencies(
-            builder,
-            entryPaths
-              .map(path => `import ${JSON.stringify(path)};`)
-              .join('\n'),
-          );
-          checkCancelled();
-          const project: ModelProject = {
-            files: await Promise.all(
-              discovery.files
-                .filter(
-                  path =>
-                    !path.includes('/node_modules/') && isSourceFile(path),
-                )
-                .map(readSource),
-            ),
-          };
-          checkCancelled();
-          return await this.compiler!.compileProject(
-            project,
-            root,
-            builder,
-            runtime.modules,
-            runtime.formats,
-            runtime.importModule,
-            language,
-            discovery,
-            designContext,
-            () => onProgress?.('evaluating-model'),
-            objects => {
-              checkCancelled();
-              this.geometry =
-                this.runtime!.tooling.retainModelGeometry(objects);
-            },
-            checkCancelled,
-            objects =>
-              this.snapshotPool!.compute(
-                runtime.tooling.planModelSnapshotQueries(objects),
-                checkCancelled,
-              ),
-          );
-        } finally {
-          await this.assets.finishCompilation();
-          runtime.tooling.setKernelArtifactStore(undefined);
-        }
-      },
-      checkCancelled,
-      stats => {
-        this.persistentStats = stats;
-      },
-    );
   }
 
-  export(
-    instances: readonly ModelExportInstance[],
-    options: ModelExportOptions,
-  ): Blob {
-    if (!this.geometry || !this.runtime)
-      throw new Error(
-        'The model has changed. Reopen export after compilation finishes.',
-      );
-    return exportModel(
-      this.geometry,
-      instances,
-      options,
-      this.runtime.replicad,
-    );
-  }
-
-  previewSketchDrag(
-    layers: readonly SketchSnapshot[],
-    drag: SketchDrag,
-  ): SketchDragPreview {
-    if (!this.runtime) throw new Error('The sketch runtime is not ready.');
-    return previewSketchDrag(this.runtime.tooling, layers, drag);
-  }
-
-  dispose(): void {
-    this.disposeRuntime();
-    this.language.reset();
-    this.evaluator.dispose();
-  }
-
-  inspectTopology(
-    nodeId: string,
-    options: TopologyInspectionOptions,
-  ): TopologyInspection {
-    if (!this.geometry)
-      throw new Error('The model geometry snapshot is unavailable.');
-    return this.geometry.inspect(nodeId, options);
-  }
-
-  get compiledBytes(): number {
-    return this.evaluator.compiledBytes;
-  }
-
-  get kernelCacheStats() {
-    return {
-      memory: this.runtime?.tooling.kernelOperationCacheStats(),
-      disk: this.persistentStats,
-      snapshots: this.snapshotPool?.stats,
-      resources: this.assets.cacheStats,
-    };
-  }
-
-  private disposeRuntime(): void {
-    this.disposeGeometry();
-    this.snapshotPool?.dispose();
-    this.snapshotPool = undefined;
+  async dispose(): Promise<void> {
+    await this.builder.dispose();
     this.assets.dispose();
-    this.runtime?.dispose();
-    this.compiler = undefined;
-    this.runtime = undefined;
+    this.language.reset();
   }
 
-  private disposeGeometry(): void {
-    this.geometry?.dispose();
-    this.geometry = undefined;
+  cancel(): Promise<void> {
+    return this.builder.cancel();
+  }
+
+  restoreDependencies(artifact: DependencyArtifact): DependencyArtifact {
+    return (this.restoredDependencies = this.dependencies.reuse(artifact));
+  }
+
+  refreshDependencies(): void {
+    this.dependenciesRefreshRequested = true;
   }
 }

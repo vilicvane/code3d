@@ -1,24 +1,23 @@
-import type {ProjectLanguage} from '../src/project/project-language.ts';
-import type {ModelProject} from '../src/project/project.ts';
-import {defined} from '../../../test/assert.ts';
-import type {ProjectFileReader} from '../src/project/file-reader.ts';
+import ts from '@typescript/typescript6';
+import * as esbuild from 'esbuild';
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
-import * as esbuild from 'esbuild';
-import ts from '@typescript/typescript6';
-import {createAppTestServer} from './vite-test-server.ts';
+import {defined} from '../../../test/assert.ts';
+import type {ProjectFileReader} from '../src/project/file-reader.ts';
+import type {ProjectLanguage} from '../src/project/project-language.ts';
+import type {ModelProject} from '../src/project/project.ts';
 import {
-  createTestEvaluator,
-  testEvaluatorClass,
   importTestModule,
   packageTestFiles,
+  testEvaluatorClass,
 } from './project-test-files.ts';
+import {createAppTestServer} from './vite-test-server.ts';
 
 let server: Awaited<ReturnType<typeof createAppTestServer>>;
 let ProjectPackages: (typeof import('../src/project/project-packages.ts'))['ProjectPackages'];
 let ProjectPackageResolver: (typeof import('../src/project/package-resolver.ts'))['ProjectPackageResolver'];
 let ProjectBuilder: (typeof import('../src/project/project-builder.ts'))['ProjectBuilder'];
-let ProjectCompiler: (typeof import('../src/model/project-compiler.ts'))['ProjectCompiler'];
+let TestModelPipeline: (typeof import('./model-pipeline.ts'))['TestModelPipeline'];
 let ProjectLanguageLoader: (typeof import('../src/project/project-language.ts'))['ProjectLanguageLoader'];
 let Evaluator: Awaited<ReturnType<typeof testEvaluatorClass>>;
 before(async () => {
@@ -32,9 +31,9 @@ before(async () => {
   ({ProjectBuilder} = await server.ssrLoadModule<
     typeof import('../src/project/project-builder.ts')
   >('/src/project/project-builder.ts'));
-  ({ProjectCompiler} = await server.ssrLoadModule<
-    typeof import('../src/model/project-compiler.ts')
-  >('/src/model/project-compiler.ts'));
+  ({TestModelPipeline} = await server.ssrLoadModule<
+    typeof import('./model-pipeline.ts')
+  >('/test/model-pipeline.ts'));
   ({ProjectLanguageLoader} = await server.ssrLoadModule<
     typeof import('../src/project/project-language.ts')
   >('/src/project/project-language.ts'));
@@ -341,7 +340,7 @@ export {MeshPhysicalMaterial as MaterialClass};`,
         (await files.stat(path)) ??
         (mode === 'project' ? packageTestFiles.stat(path) : undefined),
     };
-    const compiler = new ProjectCompiler(
+    const compiler = new TestModelPipeline(
       reader,
       packageTestFiles,
       esbuild,
@@ -397,7 +396,7 @@ export default box(2, 3, 4).material(lacquer);`;
         ),
       );
     } finally {
-      compiler.dispose();
+      await compiler.dispose();
     }
   });
 }
@@ -413,7 +412,7 @@ test('runs a zero-install screw model, retains its runtime on edits, and switche
       (await files.stat(path)) ??
       (installed ? packageTestFiles.stat(path) : undefined),
   };
-  const compiler = new ProjectCompiler(
+  const compiler = new TestModelPipeline(
     projectFiles,
     packageTestFiles,
     esbuild,
@@ -481,7 +480,7 @@ test('runs a zero-install screw model, retains its runtime on edits, and switche
       ),
     );
     assert.equal((await compile(project(1.1))).diagnostic, undefined);
-    assert.equal(compiler['runtime'], builtinRuntime);
+    assert.ok(compiler.runtime === builtinRuntime);
     assert.equal(files.contents.size, 0);
 
     files.contents.set(
@@ -489,7 +488,10 @@ test('runs a zero-install screw model, retains its runtime on edits, and switche
       '{"type":"module","dependencies":{"@code3d/core":"*","@code3d/screws":"*","@code3d/materials":"*"}}',
     );
     await assert.rejects(compile(project(1.1)), /@code3d\/core/);
-    assert.equal(compiler['runtime'], undefined);
+    assert.ok(
+      compiler.runtime === builtinRuntime,
+      'a failed compile retains the previous executor',
+    );
     assert.ok(
       !defined(language).files.some(file =>
         file.path.includes('/node_modules/@code3d/core/'),
@@ -500,7 +502,7 @@ test('runs a zero-install screw model, retains its runtime on edits, and switche
     assert.equal((await compile(project(1.1))).diagnostic, undefined);
     const runtime = () => compiler['runtime'];
     const projectRuntime = runtime();
-    assert.notEqual(projectRuntime, builtinRuntime);
+    assert.ok(projectRuntime !== builtinRuntime);
     assert.ok(
       [...defined(projectRuntime).modules.keys()].some(path =>
         path.startsWith('/node_modules/replicad/'),
@@ -515,7 +517,7 @@ test('runs a zero-install screw model, retains its runtime on edits, and switche
     const unsaved = project(1.2);
     unsaved.files.push({path: '/package.json', source: '{"type":"module"}'});
     assert.equal((await compile(unsaved)).diagnostic, undefined);
-    assert.notEqual(compiler['runtime'], projectRuntime);
+    assert.ok(compiler.runtime !== projectRuntime);
     assert.ok(
       [...defined(runtime()).modules.keys()].some(path =>
         path.startsWith('/node_modules/@code3d/node_modules/replicad/'),
@@ -523,7 +525,7 @@ test('runs a zero-install screw model, retains its runtime on edits, and switche
     );
     assert.equal(files.contents.size, 1);
   } finally {
-    compiler.dispose();
+    await compiler.dispose();
   }
 });
 

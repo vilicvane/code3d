@@ -1,16 +1,16 @@
-import type {ToolIntent, ToolHost} from '../src/tools/tool-system.ts';
-import {defined} from '../../../test/assert.ts';
+import {transform} from 'esbuild';
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
-import {createAppTestServer} from './vite-test-server.ts';
+import {defined} from '../../../test/assert.ts';
+import type {ToolIntent} from '../src/tools/tool-system.ts';
 import {
-  createTestProjectCompiler,
+  createTestModelPipeline,
   importTestModule,
 } from './project-test-files.ts';
-import {transform} from 'esbuild';
+import {createAppTestServer} from './vite-test-server.ts';
 
 let server: Awaited<ReturnType<typeof createAppTestServer>>;
-let compiler: Awaited<ReturnType<typeof createTestProjectCompiler>>;
+let compiler: Awaited<ReturnType<typeof createTestModelPipeline>>;
 let contextualToolParameters: (typeof import('../src/tools/contextual-tool-parameters.ts'))['contextualToolParameters'];
 let contextualParameterView: (typeof import('../src/tools/contextual-tool-parameters.ts'))['contextualParameterView'];
 let contextualParameterIntent: (typeof import('../src/tools/contextual-tool-parameters.ts'))['contextualParameterIntent'];
@@ -18,7 +18,7 @@ let ToolEngine: (typeof import('../src/tools/tool-system.ts'))['ToolEngine'];
 
 before(async () => {
   server = await createAppTestServer();
-  compiler = await createTestProjectCompiler(server);
+  compiler = await createTestModelPipeline(server);
   ({
     contextualToolParameters,
     contextualParameterView,

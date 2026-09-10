@@ -1,4 +1,3 @@
-import ts from '@typescript/typescript6';
 import type * as CoreTooling from '@code3d/core/tooling';
 import type {
   Sketch,
@@ -7,6 +6,7 @@ import type {
   Transform,
 } from '@code3d/core/tooling';
 import type {SketchGeometryData} from './sketch-drag';
+import type {SketchSourceSites} from './sketch-source';
 
 export type CompiledSketch = SketchSnapshot &
   Readonly<{
@@ -35,78 +35,20 @@ export class SketchTraceRegistry {
   private readonly values = new Map<Sketch, SketchTrace>();
   private readonly completedCalls = new Set<Sketch>();
   private readonly bindings = new Map<string, Set<Sketch>>();
-  private readonly calls = new Map<string, ts.CallExpression>();
-  private readonly writtenSymbols = new Set<ts.Symbol>();
-  private readonly constructors = new Set<ts.Signature['declaration']>();
-  private checker!: ts.TypeChecker;
+  private calls: SketchSourceSites = new Map();
 
   constructor(private readonly runtime: typeof CoreTooling) {}
 
-  begin(program: ts.Program): void {
+  begin(calls: SketchSourceSites): void {
     this.clear();
-    this.checker = program.getTypeChecker();
-    for (const file of program.getSourceFiles()) {
-      if (file.isDeclarationFile) continue;
-      const visit = (node: ts.Node): void => {
-        if (
-          ts.isImportDeclaration(node) &&
-          ts.isStringLiteral(node.moduleSpecifier) &&
-          node.moduleSpecifier.text === '@code3d/core'
-        )
-          this.collectConstructors(node.moduleSpecifier);
-        if (ts.isCallExpression(node)) this.calls.set(nodeKey(node), node);
-        const written =
-          ts.isBinaryExpression(node) &&
-          node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
-          node.operatorToken.kind <= ts.SyntaxKind.LastAssignment
-            ? node.left
-            : (ts.isPrefixUnaryExpression(node) ||
-                  ts.isPostfixUnaryExpression(node)) &&
-                (node.operator === ts.SyntaxKind.PlusPlusToken ||
-                  node.operator === ts.SyntaxKind.MinusMinusToken)
-              ? node.operand
-              : undefined;
-        if (written) {
-          const collect = (part: ts.Node): void => {
-            if (ts.isIdentifier(part)) {
-              const symbol = this.checker.getSymbolAtLocation(part);
-              if (symbol) this.writtenSymbols.add(symbol);
-            }
-            ts.forEachChild(part, collect);
-          };
-          collect(written);
-        }
-        ts.forEachChild(node, visit);
-      };
-      visit(file);
-    }
+    this.calls = calls;
   }
 
   clear(): void {
     this.values.clear();
     this.completedCalls.clear();
     this.bindings.clear();
-    this.calls.clear();
-    this.writtenSymbols.clear();
-    this.constructors.clear();
-  }
-
-  private collectConstructors(module: ts.StringLiteral): void {
-    const symbol = this.checker.getSymbolAtLocation(module);
-    const exported =
-      symbol &&
-      this.checker.getExportsOfModule(symbol).find(s => s.name === 'sketch');
-    if (!exported) return;
-    const factory = this.checker.getTypeOfSymbolAtLocation(exported, module);
-    for (const signature of factory.getCallSignatures()) {
-      if (signature.declaration) this.constructors.add(signature.declaration);
-      const derive = signature.getReturnType().getProperty('derive');
-      if (!derive) continue;
-      for (const method of this.checker
-        .getTypeOfSymbolAtLocation(derive, module)
-        .getCallSignatures())
-        if (method.declaration) this.constructors.add(method.declaration);
-    }
+    this.calls = new Map();
   }
 
   get size(): number {
@@ -124,31 +66,18 @@ export class SketchTraceRegistry {
     location: SourceRef,
   ): SourceRef | undefined {
     if (!(error instanceof this.runtime.SketchConstraintError)) return;
-    const options = this.calls.get(sourceKey(location))?.arguments[1];
-    if (!options || !ts.isObjectLiteralExpression(options)) return;
-    const property = options.properties.find(
-      p =>
-        ts.isPropertyAssignment(p) &&
-        (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name)) &&
-        p.name.text === 'constraints',
+    const constraints = this.calls.get(sourceKey(location))?.constraints;
+    if (!constraints) return;
+    const refs = error.constraints.flatMap(index =>
+      constraints.elements[index] ? [constraints.elements[index]] : [],
     );
-    if (
-      !property ||
-      !ts.isPropertyAssignment(property) ||
-      !ts.isArrayLiteralExpression(property.initializer)
-    )
-      return;
-    const array = property.initializer;
-    const nodes = error.constraints.flatMap(i =>
-      array.elements[i] ? [array.elements[i]] : [],
-    );
-    return nodes.length
+    return refs.length
       ? {
-          ...nodeRef(nodes[0]),
-          start: Math.min(...nodes.map(n => n.getStart())),
-          end: Math.max(...nodes.map(n => n.end)),
+          ...refs[0],
+          start: Math.min(...refs.map(ref => ref.start)),
+          end: Math.max(...refs.map(ref => ref.end)),
         }
-      : nodeRef(property.initializer);
+      : constraints.sourceRef;
   }
 
   identity(value: Sketch): string {
@@ -202,25 +131,12 @@ export class SketchTraceRegistry {
     const editable =
       call &&
       definition.input === argument &&
-      definition.inputOptions === options &&
-      (call.arguments.length
-        ? ts.isArrayLiteralExpression(call.arguments[0])
-        : // With no argument identity to compare, require a public constructor
-          // signature, not an arbitrary uninstrumented zero-argument factory.
-          this.constructors.has(
-            this.checker.getResolvedSignature(call)?.declaration,
-          ));
+      definition.inputOptions === options;
     const trace: SketchTrace = {
       id: `sketch:${id}`,
       evaluationId: id,
       callRef: location,
-      definitionRef: editable
-        ? {
-            ...nodeRef(call),
-            start: call.arguments[0]?.getStart() ?? call.arguments.pos,
-            end: call.arguments.at(-1)?.end ?? call.end - 1,
-          }
-        : undefined,
+      definitionRef: editable ? call.definitionRef : undefined,
       references: new Map(),
     };
     this.values.set(value, trace);
@@ -235,30 +151,8 @@ export class SketchTraceRegistry {
     }
     if (!call) return;
     // Only use stable lexical bindings whose observed value is unambiguous.
-    for (const visible of this.checker.getSymbolsInScope(
-      call,
-      ts.SymbolFlags.Value,
-    )) {
-      const symbol =
-        visible.flags & ts.SymbolFlags.Alias
-          ? this.checker.getAliasedSymbol(visible)
-          : visible;
-      if (this.writtenSymbols.has(symbol)) continue;
-      const declaration = symbol.valueDeclaration;
-      if (
-        !declaration ||
-        !ts.isVariableDeclaration(declaration) ||
-        !ts.isIdentifier(declaration.name) ||
-        !declaration.initializer
-      )
-        continue;
-      const values = this.bindings.get(
-        sourceKey({
-          file: declaration.getSourceFile().fileName,
-          start: declaration.name.getStart(),
-          end: declaration.initializer.end,
-        }),
-      );
+    for (const {name, binding} of call.bindings) {
+      const values = this.bindings.get(binding);
       if (values?.size !== 1) continue;
       const upstream = [...values][0];
       const ancestor = [...ancestors].find(
@@ -266,22 +160,13 @@ export class SketchTraceRegistry {
           this.runtime.sketchDefinition(base) ===
           this.runtime.sketchDefinition(upstream),
       );
-      if (ancestor) trace.references.set(ancestor, visible.name);
+      if (ancestor) trace.references.set(ancestor, name);
     }
     // The evaluated receiver proves a stable name denotes the actual base,
     // including function parameters and repeated factory executions. A written
     // binding is not safe: argument evaluation itself can reassign it.
-    if (
-      definition.base === receiver &&
-      ts.isPropertyAccessExpression(call.expression) &&
-      ts.isIdentifier(call.expression.expression)
-    ) {
-      const symbol = this.checker.getSymbolAtLocation(
-        call.expression.expression,
-      );
-      if (symbol && !this.writtenSymbols.has(symbol)) {
-        trace.references.set(definition.base!, call.expression.expression.text);
-      }
+    if (definition.base === receiver && call.receiver) {
+      trace.references.set(definition.base!, call.receiver);
     }
   }
 
@@ -322,16 +207,4 @@ export class SketchTraceRegistry {
 
 function sourceKey(ref: SourceRef): string {
   return `${ref.file}:${ref.start}:${ref.end}`;
-}
-
-function nodeRef(node: ts.Node): SourceRef {
-  return {
-    file: node.getSourceFile().fileName,
-    start: node.getStart(),
-    end: node.end,
-  };
-}
-
-function nodeKey(node: ts.Node): string {
-  return sourceKey(nodeRef(node));
 }

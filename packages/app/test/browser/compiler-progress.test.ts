@@ -1,9 +1,9 @@
-import {appIsolationHeaders} from '../../build/isolation.ts';
-import type {Browser} from 'playwright-core';
-import type {TestContext} from 'node:test';
 import assert from 'node:assert/strict';
+import type {TestContext} from 'node:test';
 import {after, before, test} from 'node:test';
+import type {Browser} from 'playwright-core';
 import {chromium} from 'playwright-core';
+import {appIsolationHeaders} from '../../build/isolation.ts';
 type CompilationPhase =
   import('../../src/model/compilation-progress.ts').CompilationPhase;
 declare const packageFiles: typeof import('../../src/project/browser-packages.ts').browserPackageFiles;
@@ -18,6 +18,8 @@ declare const window: Window & {
   packageFiles: typeof packageFiles;
   Worker: typeof Worker;
   compilerWorkers: number;
+  executorWorkers: number;
+  executorWorker: Worker;
   workerEvents: {
     kind: string;
     label?: string;
@@ -74,12 +76,17 @@ async function fixture(t: TestContext) {
   await page.goto(url.href);
   await page.evaluate(async () => {
     window.compilerWorkers = 0;
+    window.executorWorkers = 0;
     window.workerEvents = [];
     const NativeWorker = Worker;
     window.Worker = class extends NativeWorker {
       constructor(url: string | URL, options?: WorkerOptions) {
         super(url, options);
-        window.compilerWorkers++;
+        if (String(url).includes('/compiler.worker')) window.compilerWorkers++;
+        if (String(url).includes('/executor.worker')) {
+          window.executorWorkers++;
+          window.executorWorker = this;
+        }
         this.addEventListener('message', ({data}) => {
           if (data.kind === 'cache-probe' || data.kind === 'cancelled')
             window.workerEvents.push(data);
@@ -112,8 +119,8 @@ async function fixture(t: TestContext) {
 const runtimePhases = [
   'preparing-project',
   'loading-runtime',
-  'initializing-runtime',
   'compiling-model',
+  'initializing-runtime',
   'evaluating-model',
 ];
 
@@ -154,7 +161,8 @@ test(
     });
     assert.deepEqual(result.cold, ['loading-compiler', ...runtimePhases]);
     assert.deepEqual(result.warm, ['compiling-model', 'evaluating-model']);
-    assert.equal(result.readsAfterFirst, 2);
+    assert.equal(result.readsAfterFirst, 3);
+    assert.equal(new Set(result.wasmReads.map(read => read.path)).size, 3);
     assert.equal(result.wasmReads.length, result.readsAfterFirst);
     assert.ok(result.wasmReads.every(read => read.phase === 'loading-runtime'));
     assert.equal(result.diagnostic, undefined);
@@ -348,7 +356,12 @@ test(
       'preparing-project',
       'loading-runtime',
     ]);
-    assert.deepEqual(result.next, ['compiling-model', 'evaluating-model']);
+    assert.deepEqual(result.next, [
+      'loading-runtime',
+      'compiling-model',
+      'initializing-runtime',
+      'evaluating-model',
+    ]);
     assert.equal(result.workers, 1);
     assert.equal(result.diagnostic, undefined);
   },
@@ -478,6 +491,8 @@ test(
           stillRunning,
           error: await stuck,
           diagnostic: model.diagnostic,
+          compilerWorkers: window.compilerWorkers,
+          executorWorkers: window.executorWorkers,
         };
       } finally {
         client.dispose();
@@ -486,7 +501,57 @@ test(
     assert.equal(result.phases.at(-1), 'evaluating-model');
     assert.equal(result.stillRunning, true);
     assert.match(result.error, /Compilation superseded/);
-    assert.deepEqual(result.recovered, ['loading-compiler', ...runtimePhases]);
+    assert.deepEqual(result.recovered, [
+      'preparing-project',
+      'compiling-model',
+      'initializing-runtime',
+      'evaluating-model',
+    ]);
+    assert.equal(result.compilerWorkers, 1);
+    assert.equal(result.executorWorkers, 2);
     assert.equal(result.diagnostic, undefined);
+  },
+);
+
+test(
+  'executor errors reject pending topology inspection and allow rebuilding',
+  {timeout: 120_000},
+  async t => {
+    const page = await fixture(t);
+    const result = await page.evaluate(async () => {
+      try {
+        const model = await compile();
+        window.executorWorker.postMessage = () => {
+          queueMicrotask(() =>
+            window.executorWorker.dispatchEvent(
+              new ErrorEvent('error', {message: 'Simulated executor failure'}),
+            ),
+          );
+        };
+        const error = await client
+          .inspectTopology(
+            model,
+            model.objects.values().next().value!.nodeId,
+            {},
+          )
+          .then(
+            () => 'unexpected success',
+            error => (error as Error).message,
+          );
+        const rebuilt = await compile();
+        return {
+          error,
+          diagnostic: rebuilt.diagnostic,
+          exportable: client.canExport(rebuilt),
+          workers: window.executorWorkers,
+        };
+      } finally {
+        client.dispose();
+      }
+    });
+    assert.match(result.error, /Simulated executor failure/);
+    assert.equal(result.diagnostic, undefined);
+    assert.equal(result.exportable, true);
+    assert.equal(result.workers, 2);
   },
 );

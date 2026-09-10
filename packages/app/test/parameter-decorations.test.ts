@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
 import * as THREE from 'three';
-import {createAppTestServer} from './vite-test-server.ts';
-import {createTestProjectCompiler} from './project-test-files.ts';
 import type {SourceTarget} from '../src/model/compiler.ts';
+import {createTestModelPipeline} from './project-test-files.ts';
+import {createAppTestServer} from './vite-test-server.ts';
 
 let server: Awaited<ReturnType<typeof createAppTestServer>>;
-let compiler: Awaited<ReturnType<typeof createTestProjectCompiler>>;
+let compiler: Awaited<ReturnType<typeof createTestModelPipeline>>;
 let decorations: typeof import('../src/model/parameter-decorations.ts');
 let arguments_: typeof import('../src/model/tool-arguments.ts');
 let dimensions: typeof import('../src/rendering/parameter-dimension.ts');
@@ -14,7 +14,7 @@ let Viewport: typeof import('../src/viewport.ts').ModelViewport;
 
 before(async () => {
   server = await createAppTestServer();
-  compiler = await createTestProjectCompiler(server);
+  compiler = await createTestModelPipeline(server);
   arguments_ = await server.ssrLoadModule('/src/model/tool-arguments.ts');
   decorations = await server.ssrLoadModule(
     '/src/model/parameter-decorations.ts',

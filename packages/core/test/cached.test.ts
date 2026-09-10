@@ -1,14 +1,14 @@
-import assert from 'node:assert/strict';
-import {afterEach, test} from 'node:test';
 import {cached} from '@code3d/core';
 import {definePrimitive, replicad} from '@code3d/core/replicad';
 import {
-  identifyCachedFunction,
-  clearKernelOperationCache,
-  setKernelArtifactStore,
-  kernelOperationCacheStats,
   beginModelEvaluation,
+  clearKernelOperationCache,
+  identifyCachedFunction,
+  kernelOperationCacheStats,
+  setKernelArtifactStore,
 } from '@code3d/core/tooling';
+import assert from 'node:assert/strict';
+import {afterEach, test} from 'node:test';
 import {
   createModelSnapshotter,
   disposeModelObjects,
@@ -22,6 +22,10 @@ const store = {
     records.set(id, bytes);
   },
   touch: (id: string) => records.has(id),
+  getMany(ids: readonly string[]) {
+    return ids.map(id => this.get(id));
+  },
+  touchMany: (ids: readonly string[]) => ids.map(id => records.has(id)),
   delete(id: string) {
     records.delete(id);
   },

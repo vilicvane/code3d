@@ -6,15 +6,21 @@ import {
   type SketchPointAddress,
   type SketchPosition,
 } from '@code3d/core/tooling';
-import type {CompiledSketch} from '../model/sketch-trace';
 import type {ModelDiagnostic} from '../model/diagnostic';
-import {analyzeSketchSource, sketchNodeSourceRef} from './sketch-source';
+import type {SketchSourceSites} from '../model/sketch-source';
+import type {CompiledSketch} from '../model/sketch-trace';
 
 /** Report successful solves whose displayed geometry is not yet authored data. */
 export function sketchSourceDiagnostics(
   sketches: ReadonlyMap<string, CompiledSketch>,
-  files: ReadonlyMap<string, string>,
+  sites: SketchSourceSites,
 ): ModelDiagnostic[] {
+  const sources = new Map(
+    [...sites.values()].map(({diagnostics}) => {
+      const ref = diagnostics.sourceRef;
+      return [`${ref.file}:${ref.start}:${ref.end}`, diagnostics] as const;
+    }),
+  );
   const groups = new Map<string, CompiledSketch[]>();
   for (const sketch of sketches.values()) {
     const ref = sketch.definitionRef ?? sketch.callRef;
@@ -28,10 +34,11 @@ export function sketchSourceDiagnostics(
   for (const group of groups.values()) {
     const owner = group[0];
     const sourceRef = (owner.definitionRef ?? owner.callRef)!;
-    const source = files
-      .get(sourceRef.file)!
-      .slice(sourceRef.start, sourceRef.end);
-    const parsed = analyzeSketchSource(source);
+    const parsed = sources.get(
+      `${sourceRef.file}:${sourceRef.start}:${sourceRef.end}`,
+    )!;
+    const source = parsed.source;
+    const editable = new Map(parsed.editable);
     const differences = group.flatMap(sketch => {
       const layers = [sketch];
       for (let base = sketch.base; base; base = sketches.get(base)!.base)
@@ -92,7 +99,7 @@ export function sketchSourceDiagnostics(
       !parsed.reason &&
       differences.some(d =>
         d.changed.some(change =>
-          change.axes.some(axis => !parsed.editable.get(change.id)?.[axis]),
+          change.axes.some(axis => !editable.get(change.id)?.[axis]),
         ),
       );
     const canFix = !shared && !expressionDriven && !parsed.reason;
@@ -109,9 +116,7 @@ export function sketchSourceDiagnostics(
               ? ' Some changed coordinates or radii are expressions; update them in code.'
               : ''
       }`,
-      sourceRef: parsed.constraints
-        ? sketchNodeSourceRef(sourceRef, parsed.constraints)
-        : sourceRef,
+      sourceRef: parsed.constraints ?? sourceRef,
       relatedSketchIds: differences.map(d => d.sketch.id),
       actions: canFix
         ? [
@@ -128,7 +133,7 @@ export function sketchSourceDiagnostics(
                   data: changes.map(change => ({
                     id: change.id,
                     parameters: change.values.map((value, axis) =>
-                      parsed.editable.get(change.id)?.[axis]
+                      editable.get(change.id)?.[axis]
                         ? value
                         : change.authored[axis],
                     ),

@@ -48,9 +48,21 @@ export class ProjectFileCache implements ProjectFileReader {
     return entry.contents;
   }
 
-  async refresh(): Promise<ReadonlySet<string>> {
+  clear(select: (path: string) => boolean = () => true): void {
+    for (const path of this.entries.keys())
+      if (select(path)) this.entries.delete(path);
+  }
+
+  async refresh(
+    select: (path: string, info: ProjectFileInfo | undefined) => boolean = () =>
+      true,
+  ): Promise<ReadonlySet<string>> {
     const changed = new Set<string>();
-    const entries = [...this.entries];
+    const retained = [...this.entries];
+    const infos = await Promise.all(retained.map(([, entry]) => entry.info));
+    const entries = retained.filter(([path], index) =>
+      select(path, infos[index]),
+    );
     const [previousFiles, nextFiles] = await Promise.all([
       Promise.all(entries.map(([, entry]) => entry.info)),
       statProjectFiles(

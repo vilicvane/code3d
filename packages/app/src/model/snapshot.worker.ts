@@ -1,10 +1,10 @@
 /// <reference lib="webworker" />
 import type * as CoreTooling from '@code3d/core/tooling';
+import {checkCompilationCancellation} from './compilation-cancellation';
 import type {
   SnapshotWorkerRequest,
   SnapshotWorkerResponse,
 } from './snapshot-protocol';
-import {checkCompilationCancellation} from './compilation-cancellation';
 
 const scope = self as DedicatedWorkerGlobalScope;
 let tooling: typeof CoreTooling | undefined;
@@ -17,7 +17,13 @@ scope.onmessage = async ({data}: MessageEvent<SnapshotWorkerRequest>) => {
   try {
     if (data.kind === 'initialize') {
       const entry = await import(/* @vite-ignore */ data.url);
-      tooling = (await entry.default(data.wasm, data.sketchWasm)).tooling;
+      const resources = new Map(data.resources);
+      const runtime = await entry.default({
+        __code3dKernelBytes: data.wasm,
+        __code3dSketchBytes: data.sketchWasm,
+        __code3dAssetUrl: (path: string) => resources.get(path),
+      });
+      tooling = (await runtime.initialize()).tooling;
       send({kind: 'ready', nativeBytes: nativeBytes()});
       return;
     }

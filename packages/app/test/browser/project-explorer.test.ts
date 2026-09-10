@@ -3,12 +3,14 @@ import {after, before, test, type TestContext} from 'node:test';
 import {chromium, type Browser, type Page} from 'playwright-core';
 
 declare const window: Window & {
+  clearCachePhases: string[];
   explorerAccess: {lists: string[]; reads: string[]};
   explorerApp: {
     codeEditor: import('../../src/editor.ts').CodeEditor;
     projectFileSystem: import('../../src/project/filesystem.ts').ProjectFileSystem;
     agentProject: import('../../src/agent/project-session.ts').AgentProjectSession;
     projectDirectory: import('../../src/ui/project-tree.ts').ProjectTree;
+    compiler: import('../../src/model/compiler-client.ts').ModelCompilerClient;
     activateProjectFile(path: string): Promise<void>;
   };
 };
@@ -63,7 +65,7 @@ async function open(
       response,
       body:
         (await response.text()) +
-        '\nwindow.explorerApp = {codeEditor, projectFileSystem, agentProject, projectDirectory, activateProjectFile};\n',
+        '\nwindow.explorerApp = {codeEditor, projectFileSystem, agentProject, projectDirectory, compiler, activateProjectFile};\n',
     });
   });
   await page.goto(process.env.CODE3D_TEST_URL!);
@@ -74,6 +76,60 @@ async function open(
 
 const row = (page: Page, name: string) =>
   page.getByRole('treeitem', {name, exact: true});
+
+test(
+  'the workspace root menu clears build caches and rebuilds the active model',
+  {timeout: 90_000},
+  async t => {
+    const page = await open(t);
+    await row(page, 'src').click({button: 'right'});
+    assert.equal(
+      await page
+        .getByRole('menuitem', {name: 'Clear build cache', exact: true})
+        .count(),
+      0,
+    );
+    await page.keyboard.press('Escape');
+    await page.evaluate(async () => {
+      const {compiler} = window.explorerApp;
+      const mobxUrl = '/node_modules/.vite/deps/mobx.js';
+      const {reaction}: typeof import('mobx') = await import(mobxUrl);
+      const phases: string[] = [];
+      window.clearCachePhases = phases;
+      reaction(
+        () => compiler.phase,
+        phase => {
+          if (phase) phases.push(phase);
+        },
+      );
+    });
+    await page
+      .locator('#project-tree')
+      .dispatchEvent('contextmenu', {clientX: 50, clientY: 240, button: 2});
+    await page
+      .getByRole('menuitem', {name: 'Clear build cache', exact: true})
+      .click();
+    await page.waitForFunction(() =>
+      window.clearCachePhases.includes('evaluating-model'),
+    );
+    await page.getByText('Ready', {exact: true}).waitFor();
+    const result = await page.evaluate(async () => ({
+      phases: window.clearCachePhases,
+      file: window.explorerApp.codeEditor.currentFile(),
+      source: new TextDecoder().decode(
+        await window.explorerApp.projectFileSystem.readFile('/model.ts'),
+      ),
+    }));
+    assert.ok(result.phases.includes('loading-compiler'));
+    assert.ok(result.phases.includes('loading-runtime'));
+    assert.ok(
+      !result.phases.includes('initializing-runtime'),
+      'unchanged geometry runtime stays alive',
+    );
+    assert.equal(result.file, '/model.ts');
+    assert.match(result.source!, /box\(10, 6, 8\)/);
+  },
+);
 async function active(page: Page, path: string | undefined): Promise<void> {
   await page.waitForFunction(
     path =>

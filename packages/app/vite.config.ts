@@ -1,10 +1,11 @@
-import {fileURLToPath} from 'node:url';
-import {readFile} from 'node:fs/promises';
 import {statSync} from 'node:fs';
-import path from 'node:path';
+import {readFile} from 'node:fs/promises';
 import {builtinModules} from 'node:module';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {defineConfig} from 'vite';
 import {browserPackages} from './build/browser-packages.ts';
+import {compilerRecipe} from './build/compiler-recipe.ts';
 import {appIsolationHeaders, appIsolationRules} from './build/isolation.ts';
 
 const packageDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -20,7 +21,11 @@ export default defineConfig({
     headers: appIsolationHeaders,
   },
   preview: {headers: appIsolationHeaders},
+  worker: {
+    plugins: () => [compilerRecipe(path.resolve(packageDirectory, '../..'))],
+  },
   plugins: [
+    compilerRecipe(path.resolve(packageDirectory, '../..')),
     {
       name: 'code3d-app-isolation',
       generateBundle() {

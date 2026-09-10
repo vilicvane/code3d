@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
+import {defined} from '../../../test/assert.ts';
 import type {ProjectFileReader} from '../src/project/file-reader.ts';
-import {createAppTestServer} from './vite-test-server.ts';
 import {
-  createTestProjectCompiler,
+  createTestModelPipeline,
   packageTestFiles,
 } from './project-test-files.ts';
-import {defined} from '../../../test/assert.ts';
+import {createAppTestServer} from './vite-test-server.ts';
 
 let server: Awaited<ReturnType<typeof createAppTestServer>>;
 let CachedDefinitionCompiler: (typeof import('../src/project/cached-definitions.ts'))['CachedDefinitionCompiler'];
@@ -199,7 +199,7 @@ const fn = cached(build, {encoder: encode, decoder: decode});`;
 });
 
 test('compiled cached/primitive definitions reuse across edits and restore from persistent artifacts', async () => {
-  const compiler = await createTestProjectCompiler(server);
+  const compiler = await createTestModelPipeline(server);
   const base = `import {cached} from '@code3d/core';
 import {definePrimitive, replicad} from '@code3d/core/replicad';
 const factor = 2;
@@ -244,6 +244,10 @@ const unrelated = 1;`;
         records.set(id, bytes);
       },
       touch: id => records.has(id),
+      getMany(ids: readonly string[]) {
+        return ids.map(id => this.get(id));
+      },
+      touchMany: (ids: readonly string[]) => ids.map(id => records.has(id)),
       delete(id) {
         records.delete(id);
       },
@@ -264,7 +268,7 @@ const unrelated = 1;`;
       first.fallback?.mesh?.vertices,
     );
   } finally {
-    compiler.dispose();
+    await compiler.dispose();
   }
 });
 
@@ -296,7 +300,7 @@ const factor = require('./factor.json'); exports.radius = cached((x) => x * fact
       return packageTestFiles.stat(path);
     },
   };
-  const compiler = await createTestProjectCompiler(server, reader);
+  const compiler = await createTestModelPipeline(server, reader);
   const source = `import {box} from '@code3d/core'; import {radius} from 'radii'; export default box(radius(2), 3, 4);`;
   const records = new Map<string, Uint8Array>();
   const store: import('@code3d/core/tooling').KernelArtifactStore = {
@@ -305,6 +309,10 @@ const factor = require('./factor.json'); exports.radius = cached((x) => x * fact
       records.set(id, bytes);
     },
     touch: id => records.has(id),
+    getMany(ids: readonly string[]) {
+      return ids.map(id => this.get(id));
+    },
+    touchMany: (ids: readonly string[]) => ids.map(id => records.has(id)),
     delete(id) {
       records.delete(id);
     },
@@ -325,12 +333,22 @@ const factor = require('./factor.json'); exports.radius = cached((x) => x * fact
     const first = await compile();
     assert.equal(first.diagnostic, undefined);
     const runtime = defined(compiler['runtime']);
-    assert.equal(runtime.formats.get('/node_modules/radii/index.cjs'), 'cjs');
+    assert.equal(
+      compiler.artifact!.dependencies.formats.get(
+        '/node_modules/radii/index.cjs',
+      ),
+      'cjs',
+    );
     const misses = runtime.tooling.kernelOperationCacheStats().misses;
     assert.equal((await compile()).diagnostic, undefined);
     assert.equal(runtime.tooling.kernelOperationCacheStats().misses, misses);
     assert.ok(records.size > 0);
     files.set('/node_modules/radii/factor.json', '3');
+    assert.deepEqual(
+      (await compile()).fallback?.mesh?.vertices,
+      first.fallback?.mesh?.vertices,
+    );
+    compiler.compiler.refreshDependencies();
     const changed = await compile();
     assert.equal(changed.diagnostic, undefined);
     assert.notDeepEqual(
@@ -338,6 +356,6 @@ const factor = require('./factor.json'); exports.radius = cached((x) => x * fact
       changed.fallback?.mesh?.vertices,
     );
   } finally {
-    compiler.dispose();
+    await compiler.dispose();
   }
 });

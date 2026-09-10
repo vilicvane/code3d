@@ -1,16 +1,22 @@
-import type {ModelProject, ProjectSourceFile} from '../src/project/project.ts';
-import type {
-  ProjectToolingIndex,
-  ParameterDefinitionMap,
-  ToolCallSchemaMap,
-} from '../src/model/tool-schema.ts';
-import {defined} from '../../../test/assert.ts';
+import ts from '@typescript/typescript6';
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import {after, before, test} from 'node:test';
 import {fileURLToPath} from 'node:url';
-import ts from '@typescript/typescript6';
-import {createAppTestServer} from './vite-test-server.ts';
+import {defined} from '../../../test/assert.ts';
+import type {
+  ParameterDefinitionMap,
+  ProjectToolingIndex,
+  ToolCallSchemaMap,
+} from '../src/model/tool-schema.ts';
+import type {ProjectLanguage} from '../src/project/project-language.ts';
+import {
+  normalizeProjectPath,
+  type ModelProject,
+  type ProjectSourceFile,
+} from '../src/project/project.ts';
 import {packageTestLanguage} from './project-test-files.ts';
+import {createAppTestServer} from './vite-test-server.ts';
 
 let server: Awaited<ReturnType<typeof createAppTestServer>>;
 let resolveProjectTooling: (project: ModelProject) => ProjectToolingIndex;
@@ -24,7 +30,7 @@ before(async () => {
   const language = await packageTestLanguage(server);
   sourceNodeKey = tooling.sourceNodeKey;
   resolveProjectTooling = project =>
-    tooling.resolveProjectTooling(project, language);
+    tooling.resolveProjectTooling(project, toolingProgram(project, language));
 });
 
 after(async () => {
@@ -557,4 +563,77 @@ function assertTarget(
     targetSource.slice(target.sourceRef.start, target.sourceRef.end),
     expected,
   );
+}
+
+const es5Library = readFileSync(
+  fileURLToPath(import.meta.resolve('@typescript/old/lib/lib.es5.d.ts')),
+  'utf8',
+);
+function toolingProgram(
+  project: ModelProject,
+  language: ProjectLanguage,
+): ts.Program {
+  const sources = new Map<string, string>();
+  language.files.forEach(file =>
+    sources.set(normalizeProjectPath(file.path), file.source),
+  );
+  project.files.forEach(file =>
+    sources.set(normalizeProjectPath(file.path), file.source),
+  );
+  sources.set('/lib.es5.d.ts', es5Library);
+
+  const sourceFiles = new Map<string, ts.SourceFile>();
+  const host: ts.CompilerHost = {
+    fileExists: fileName => sources.has(virtualFilePath(fileName)),
+    readFile: fileName => sources.get(virtualFilePath(fileName)),
+    realpath: fileName =>
+      language.realPaths?.[virtualFilePath(fileName)] ?? fileName,
+    getSourceFile(fileName, languageVersion) {
+      const path = virtualFilePath(fileName);
+      const source = sources.get(path);
+      if (source === undefined) return undefined;
+      const existing = sourceFiles.get(path);
+      if (existing) return existing;
+      const sourceFile = ts.createSourceFile(
+        path,
+        source,
+        languageVersion,
+        true,
+        scriptKind(path),
+      );
+      sourceFiles.set(path, sourceFile);
+      return sourceFile;
+    },
+    getDefaultLibFileName: () => '/lib.es5.d.ts',
+    writeFile: () => {},
+    getCurrentDirectory: () => '/',
+    getDirectories: () => [],
+    getCanonicalFileName: fileName => virtualFilePath(fileName),
+    useCaseSensitiveFileNames: () => true,
+    getNewLine: () => '\n',
+    directoryExists: path =>
+      [...sources.keys()].some(file =>
+        file.startsWith(path === '/' ? '/' : path + '/'),
+      ),
+  };
+  const program = ts.createProgram({
+    rootNames: project.files.map(file => normalizeProjectPath(file.path)),
+    options: language.compilerOptions,
+    host,
+  });
+  return program;
+}
+function scriptKind(path: string): ts.ScriptKind {
+  if (path.endsWith('.tsx')) return ts.ScriptKind.TSX;
+  if (path.endsWith('.js') || path.endsWith('.mjs') || path.endsWith('.cjs')) {
+    return ts.ScriptKind.JS;
+  }
+  if (path.endsWith('.jsx')) return ts.ScriptKind.JSX;
+  return ts.ScriptKind.TS;
+}
+
+function virtualFilePath(path: string): string {
+  return path.startsWith('file://')
+    ? normalizeProjectPath(new URL(path).pathname)
+    : normalizeProjectPath(path);
 }

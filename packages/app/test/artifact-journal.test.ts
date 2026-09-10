@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
-import {test, before, after} from 'node:test';
+import {after, before, test} from 'node:test';
 import type {ArtifactFile} from '../src/model/artifact-journal.ts';
+import {
+  packArtifactValues,
+  unpackArtifactValues,
+} from '../src/model/artifact-store-protocol.ts';
 import {createAppTestServer} from './vite-test-server.ts';
 let server: Awaited<ReturnType<typeof createAppTestServer>>;
 let ArtifactJournal: typeof import('../src/model/artifact-journal.ts').ArtifactJournal;
@@ -55,6 +59,49 @@ const files = (): [MemoryFile, MemoryFile] => [
   new MemoryFile(),
 ];
 const value = (number: number, size = 500) => new Uint8Array(size).fill(number);
+
+test('clearing a project reclaims all its recipes without evicting other namespaces', () => {
+  const disk = files();
+  let journal = new ArtifactJournal(disk, 8192);
+  const retained = [
+    'build:project-extra:recipe:binary',
+    'geometry:shape',
+    'resources:font',
+  ];
+  for (const [index, id] of retained.entries())
+    journal.set(id, value(index, 1000));
+  journal.set('build:project:old:binary', value(4, 100));
+  journal.set('build:project:new:latest', value(5, 100));
+  journal.flush();
+  const before = journal.stats().diskBytes;
+  journal.deletePrefix('build:project:');
+  assert.ok(journal.stats().diskBytes < before);
+  disk.forEach(file => file.crash());
+  journal = new ArtifactJournal(disk, 8192);
+  assert.equal(journal.get('build:project:old:binary'), undefined);
+  assert.equal(journal.get('build:project:new:latest'), undefined);
+  for (const [index, id] of retained.entries())
+    assert.deepEqual(journal.get(id), value(index, 1000));
+  const unchanged = journal.stats().diskBytes;
+  journal.deletePrefix('build:project:');
+  assert.equal(journal.stats().diskBytes, unchanged);
+});
+
+test('interrupted project clearing leaves the previous durable generation readable', () => {
+  const disk = files();
+  let journal = new ArtifactJournal(disk, 8192);
+  journal.set('build:project:recipe:model', value(1));
+  journal.set('geometry:shape', value(2));
+  journal.flush();
+  disk[1].fault = () => {
+    throw new Error('Disk full');
+  };
+  assert.throws(() => journal.deletePrefix('build:project:'), /Disk full/);
+  disk.forEach(file => file.crash());
+  journal = new ArtifactJournal(disk, 8192);
+  assert.deepEqual(journal.get('build:project:recipe:model'), value(1));
+  assert.deepEqual(journal.get('geometry:shape'), value(2));
+});
 
 test('scans bounded header windows and lazily restores exact artifact bytes', () => {
   const disk = files();
@@ -219,4 +266,25 @@ test('quota failure preserves the previous file and permits retry after space is
   journal.set('new', value(2));
   journal.flush();
   assert.deepEqual(new ArtifactJournal(disk, 8192).get('new'), value(2));
+});
+
+test('batched journal replies preserve order, missing entries and empty or multi-mailbox records', () => {
+  const disk = files();
+  const journal = new ArtifactJournal(disk, 16 * 1024 ** 2);
+  const large = value(173, 3 * 1024 ** 2);
+  journal.set('empty', new Uint8Array());
+  journal.set('large', large);
+  journal.flush();
+  const result = journal.getMany(['missing', 'empty', 'large', 'empty']);
+  const packed = packArtifactValues(result);
+  assert.deepEqual(unpackArtifactValues(packed), [
+    undefined,
+    new Uint8Array(),
+    large,
+    new Uint8Array(),
+  ]);
+  assert.deepEqual(unpackArtifactValues(packArtifactValues([])), []);
+  journal.flush();
+  const restored = new ArtifactJournal(disk, 16 * 1024 ** 2);
+  assert.deepEqual(restored.getMany(['large', 'missing']), [large, undefined]);
 });

@@ -1,12 +1,12 @@
-import assert from 'node:assert/strict';
-import {after, before, test} from 'node:test';
 import {
   sketchEntityParameters,
   type SketchSnapshot,
 } from '@code3d/core/tooling';
+import assert from 'node:assert/strict';
+import {after, before, test} from 'node:test';
 import type {SketchChange} from '../src/tools/sketch-source.ts';
+import {createTestModelPipeline} from './project-test-files.ts';
 import {createAppTestServer} from './vite-test-server.ts';
-import {createTestProjectCompiler} from './project-test-files.ts';
 
 let server: Awaited<ReturnType<typeof createAppTestServer>>;
 let source: typeof import('../src/tools/sketch-source.ts');
@@ -214,7 +214,7 @@ test('sweep badges expose center and both endpoints, and deletion removes the ex
 });
 
 test('sweep and radius drag previews replay through rounded AST edits and fresh compilation without losing expressions', async () => {
-  const compiler = await createTestProjectCompiler(server);
+  const compiler = await createTestModelPipeline(server);
   try {
     const compile = async (args: string) => {
       const module = await compiler.compile(
@@ -261,7 +261,7 @@ test('sweep and radius drag previews replay through rounded AST edits and fresh 
       }
     }
   } finally {
-    compiler.dispose();
+    await compiler.dispose();
   }
 });
 
@@ -365,7 +365,7 @@ test('arc source serialization retains named upstream points and only rewrites l
 });
 
 test('arc endpoint preview, rounded source transactions and fresh compiler evaluations agree across angular branches', async () => {
-  const compiler = await createTestProjectCompiler(server);
+  const compiler = await createTestModelPipeline(server);
   try {
     const compile = async (args: string) => {
       const module = await compiler.compile(
@@ -413,7 +413,7 @@ test('arc endpoint preview, rounded source transactions and fresh compiler evalu
       }
     }
   } finally {
-    compiler.dispose();
+    await compiler.dispose();
   }
 });
 
@@ -433,7 +433,7 @@ test('literal arc radius is editable data while radius expressions are retained 
 });
 
 test('arc radius initial data, expression locks, rounding and fresh compilation share one geometry', async () => {
-  const compiler = await createTestProjectCompiler(server);
+  const compiler = await createTestModelPipeline(server);
   const compile = async (args: string) => {
     const module = await compiler.compile(
       {
@@ -496,7 +496,7 @@ test('arc radius initial data, expression locks, rounding and fresh compilation 
       }
     }
   } finally {
-    compiler.dispose();
+    await compiler.dispose();
   }
 });
 

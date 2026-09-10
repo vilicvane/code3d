@@ -1,12 +1,13 @@
-import type {ProjectFileReader} from '../src/project/file-reader.ts';
+import * as esbuild from 'esbuild';
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
-import * as esbuild from 'esbuild';
-import {createAppTestServer} from './vite-test-server.ts';
+import type {ProjectFileReader} from '../src/project/file-reader.ts';
 import {
-  importTestModule,
   assertModelDiagnosticError,
+  evaluateTestBundle,
+  importTestModule,
 } from './project-test-files.ts';
+import {createAppTestServer} from './vite-test-server.ts';
 
 let server: Awaited<ReturnType<typeof createAppTestServer>>;
 let ProjectBuilder: (typeof import('../src/project/project-builder.ts'))['ProjectBuilder'];
@@ -63,8 +64,7 @@ test('builds and executes a reached ESM/CommonJS/JSON dependency graph', async (
   const evaluator = new ModuleEvaluator(importTestModule);
   try {
     assert.equal(
-      (await evaluator.evaluate('code3d-project:/model.ts', bundle.source))
-        .result,
+      (await evaluateTestBundle(server, evaluator, bundle.source)).result,
       42,
     );
     assert.ok(bundle.files.includes('/node_modules/value/data.json'));
@@ -93,10 +93,7 @@ test('conditional bare Node builtins remain conditional instead of resolving as 
   );
   const evaluator = new ModuleEvaluator(importTestModule);
   try {
-    const result = await evaluator.evaluate(
-      'code3d-project:/model.ts',
-      bundle.source,
-    );
+    const result = await evaluateTestBundle(server, evaluator, bundle.source);
     assert.equal(await result.browser(), 42);
     await assert.rejects(
       result.browser(true),
@@ -130,13 +127,17 @@ test('directory URL bases are not read as file assets, while static files still 
       'const base = new URL("./", import.meta.url); const wasm = new URL("solver.wasm", import.meta.url);',
     );
     assert.match(result, /new URL\("\.\/", import.meta.url\)/);
-    assert.match(result, /new URL\("blob:/);
+    assert.match(result, /new URL\(__code3dAssetUrl\("\/pkg\/solver.wasm"\)\)/);
+    assert.deepEqual(
+      assets.snapshot().get('/pkg/solver.wasm'),
+      new Uint8Array([0]),
+    );
   } finally {
     assets.dispose();
   }
 });
 
-test('prepared assets deduplicate concurrent reads and release obsolete resource bytes', async () => {
+test('prepared assets deduplicate concurrent reads and preserve immutable resource snapshots', async () => {
   const {ProjectAssets} = await server.ssrLoadModule<
     typeof import('../src/project/project-assets.ts')
   >('/src/project/project-assets.ts');
@@ -159,14 +160,15 @@ test('prepared assets deduplicate concurrent reads and release obsolete resource
     ]);
     assert.equal(first, duplicate);
     assert.equal(reads, 1);
-    assert.deepEqual(assets.read(new URL(first)), new Uint8Array([1]));
+    const previous = assets.snapshot();
+    assert.deepEqual(previous.get(first), new Uint8Array([1]));
     version++;
     const second = await assets.url('/font.ttf');
-    assert.notEqual(first, second);
-    assert.equal(assets.read(new URL(first)), undefined);
-    assert.deepEqual(assets.read(new URL(second)), new Uint8Array([2]));
+    assert.equal(first, second);
+    assert.deepEqual(previous.get(first), new Uint8Array([1]));
+    assert.deepEqual(assets.snapshot().get(second), new Uint8Array([2]));
     assets.dispose();
-    assert.equal(assets.read(new URL(second)), undefined);
+    assert.equal(assets.snapshot().size, 0);
   } finally {
     assets.dispose();
   }

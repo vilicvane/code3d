@@ -1,9 +1,12 @@
-import {assertModelDiagnosticError} from './project-test-files.ts';
+import * as esbuild from 'esbuild';
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
-import * as esbuild from 'esbuild';
+import {
+  assertModelDiagnosticError,
+  evaluateTestBundle,
+  importTestModule,
+} from './project-test-files.ts';
 import {createAppTestServer} from './vite-test-server.ts';
-import {importTestModule} from './project-test-files.ts';
 
 let server: Awaited<ReturnType<typeof createAppTestServer>>,
   ProjectBuilder: (typeof import('../src/project/project-builder.ts'))['ProjectBuilder'],
@@ -134,7 +137,7 @@ test('keeps Node dynamic branches conditional and rejects reached branches expli
     const bundle = await builder(
       'export const value=1; if(globalThis.__notEnabled) await import("node:fs"); export function load(){return import("node:fs")}',
     ).build('export * from "/src/child.ts";');
-    const module = await evaluator.evaluate('test.js', bundle.source);
+    const module = await evaluateTestBundle(server, evaluator, bundle.source);
     assert.equal(module.value, 1);
     await assert.rejects(module.load(), /Node built-in node:fs.*browser/);
   } finally {

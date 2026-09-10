@@ -1,20 +1,20 @@
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {afterEach, test} from 'node:test';
-import {googleFont, text, type Model} from '../bld/node/index.js';
-import {googleFontUrl, googleFontSources} from '../bld/library/google-font.js';
 import {installModelResourceReader} from '../bld/library/font.js';
+import {googleFontSources, googleFontUrl} from '../bld/library/google-font.js';
 import {
   clearKernelOperationCache,
-  setKernelArtifactStore,
   kernelOperationCacheStats,
+  setKernelArtifactStore,
 } from '../bld/library/kernel-cache.js';
+import {googleFont, text, type Model} from '../bld/node/index.js';
+import {replicad} from '../bld/node/replicad.js';
 import {
   createModelSnapshotter,
   disposeModelObjects,
   modelGeometry,
 } from './model-test.ts';
-import {replicad} from '../bld/node/replicad.js';
 
 const encoder = new TextEncoder();
 const models: Model[] = [];
@@ -130,6 +130,10 @@ test('variable weights change contours and advances and restore independently fr
       disk.set(key, value);
     },
     touch: key => disk.has(key),
+    getMany(ids: readonly string[]) {
+      return ids.map(id => this.get(id));
+    },
+    touchMany: (ids: readonly string[]) => ids.map(id => disk.has(id)),
     delete: key => {
       disk.delete(key);
     },

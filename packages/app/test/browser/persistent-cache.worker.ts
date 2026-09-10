@@ -1,9 +1,10 @@
 /// <reference lib="webworker" />
+import type {ModelSnapshotObject} from '@code3d/core/tooling';
 import * as esbuild from 'esbuild-wasm';
 import esbuildWasmUrl from 'esbuild-wasm/esbuild.wasm?url';
-import {ProjectCompiler} from '../../src/model/project-compiler';
+import {ArtifactStoreConnection} from '../../src/model/artifact-store';
 import {browserPackageFiles} from '../../src/project/browser-packages';
-import type {ModelSnapshotObject} from '@code3d/core/tooling';
+import {TestModelPipeline} from '../model-pipeline';
 
 export type CacheRequest = {
   source: string;
@@ -20,7 +21,7 @@ export type CacheRequest = {
 export type CacheResult = {
   probe?: {computes: number; encodes: number; decodes: number; builds: number};
   milliseconds: number;
-  stats: ProjectCompiler['kernelCacheStats'];
+  stats: TestModelPipeline['kernelCacheStats'];
   objects?: string;
   topology?: string;
   stepBytes?: number;
@@ -30,7 +31,7 @@ export type CacheResult = {
 };
 const scope = self as DedicatedWorkerGlobalScope;
 const ready = esbuild.initialize({wasmURL: esbuildWasmUrl, worker: false});
-let compiler: ProjectCompiler | undefined;
+let compiler: TestModelPipeline | undefined;
 let assets: NonNullable<CacheRequest['assets']> = {};
 scope.onmessage = async ({data}: MessageEvent<CacheRequest>) => {
   await ready;
@@ -43,7 +44,7 @@ scope.onmessage = async ({data}: MessageEvent<CacheRequest>) => {
     });
   if (!compiler) {
     let terminatedChild = false;
-    compiler = new ProjectCompiler(
+    compiler = new TestModelPipeline(
       {
         async readFile(path) {
           return assets[path]?.bytes;
@@ -97,6 +98,7 @@ scope.onmessage = async ({data}: MessageEvent<CacheRequest>) => {
               }
             : undefined,
       },
+      data.disabled ? undefined : new ArtifactStoreConnection(),
     );
   }
   const start = performance.now();

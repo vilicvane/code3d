@@ -1,6 +1,6 @@
+import {action, computed, makeObservable, observableRef} from 'mobx';
 import type {ModelModule} from './compiler';
 import type {ModelDiagnostic} from './diagnostic';
-import {action, computed, makeObservable, observableRef} from 'mobx';
 
 export type ModelPreviewRequest = Readonly<{
   revision: number;
@@ -57,6 +57,7 @@ export class ModelPreviewState {
       activate: action,
       begin: action,
       accept: action,
+      restore: action,
       presented: action,
       fail: action,
       observeTarget: action,
@@ -147,6 +148,15 @@ export class ModelPreviewState {
     this.status = module.diagnostic ? 'error' : 'ready';
     this.diagnostic = module.diagnostic;
     this.warnings = module.warnings;
+  }
+
+  /** Cached geometry is displayable while its source snapshot is being checked. */
+  restore(request: ModelPreviewRequest, module: ModelModule): void {
+    this.awaitingFile = false;
+    this.snapshot = {module, sourceVersion: request.sourceVersion};
+    this.resultCurrent = false;
+    this.diagnostic = undefined;
+    this.warnings = [];
   }
 
   /** Release the previous view after its replacement has been rendered. */

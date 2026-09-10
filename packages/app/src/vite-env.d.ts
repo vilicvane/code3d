@@ -13,3 +13,8 @@ declare module 'virtual:code3d-browser-packages' {
   export const files: Readonly<Record<string, {version: string; url: string}>>;
   export const workspaces: import('./project/workspace-packages').WorkspacePackages;
 }
+
+declare module 'virtual:code3d-compiler-recipe' {
+  const recipe: string;
+  export default recipe;
+}

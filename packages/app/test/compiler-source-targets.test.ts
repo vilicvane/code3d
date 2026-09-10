@@ -1,18 +1,18 @@
+import {TopologyIdSet} from '@code3d/core/tooling';
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {after, before, test} from 'node:test';
+import * as THREE from 'three';
+import {defined} from '../../../test/assert.ts';
+import {renderSamples, sourceContextSets} from '../render-samples/catalog.ts';
+import {sourceTokenOffset} from '../render-samples/source-focus.ts';
 import type {
   SourceTarget,
   SourceTargetEvaluation,
 } from '../src/model/compiler.ts';
 import type {ToolParameterSchema} from '../src/model/tool-schema.ts';
-import {defined} from '../../../test/assert.ts';
-import {TopologyIdSet} from '@code3d/core/tooling';
-import assert from 'node:assert/strict';
-import {after, before, test} from 'node:test';
-import {readFile} from 'node:fs/promises';
-import {renderSamples, sourceContextSets} from '../render-samples/catalog.ts';
-import {sourceTokenOffset} from '../render-samples/source-focus.ts';
+import {createTestModelPipeline} from './project-test-files.ts';
 import {createAppTestServer} from './vite-test-server.ts';
-import {createTestProjectCompiler} from './project-test-files.ts';
-import * as THREE from 'three';
 
 test('a conflicting intermediate constraint stage does not invalidate its completed model', async () => {
   const source = `import {box, group} from '@code3d/core';
@@ -51,13 +51,10 @@ test('a conflicting intermediate constraint stage does not invalidate its comple
   assert.equal(defined(module.fallback).children.length, 3);
 });
 
-let compileProject: import('../src/model/project-compiler.ts').ProjectCompiler['compile'];
+let compileProject: import('./model-pipeline.ts').TestModelPipeline['compile'];
 let bundledExamples: (typeof import('../src/project/bundled-examples.ts'))['bundledExamples'];
 let server: Awaited<ReturnType<typeof createAppTestServer>>;
-let compiler: Awaited<ReturnType<typeof createTestProjectCompiler>>;
-let replicad: typeof import('replicad');
-let clearKernelOperationCache: (typeof import('../../core/bld/library/kernel-cache.js'))['clearKernelOperationCache'];
-let kernelOperationCacheStats: (typeof import('../../core/bld/library/kernel-cache.js'))['kernelOperationCacheStats'];
+let compiler: Awaited<ReturnType<typeof createTestModelPipeline>>;
 let ModelViewport: (typeof import('../src/viewport.ts'))['ModelViewport'];
 let sourceTargetPlacement: (typeof import('../src/viewport.ts'))['sourceTargetPlacement'];
 let positionBindings: (typeof import('../src/viewport.ts'))['positionBindings'];
@@ -72,30 +69,8 @@ before(async () => {
   ({applyNodeTransform} = await server.ssrLoadModule<
     typeof import('../src/rendering/model-renderer.ts')
   >('/src/rendering/model-renderer.ts'));
-  compiler = await createTestProjectCompiler(server);
+  compiler = await createTestModelPipeline(server);
   compileProject = compiler.compile.bind(compiler);
-  await compileProject(
-    {
-      files: [
-        {
-          path: '/model.ts',
-          source: 'import {box} from "@code3d/core"; box(1, 1, 1);',
-        },
-      ],
-    },
-    '/model.ts',
-  );
-  // Observe the project's instance, never a second host core/kernel.
-  const replicadModules = [...defined(compiler['runtime']).modules].filter(
-    ([path]) => path.endsWith('/replicad/dist/replicad.js'),
-  );
-  assert.equal(replicadModules.length, 1);
-  replicad = replicadModules[0][1] as typeof replicad;
-  ({clearKernelOperationCache, kernelOperationCacheStats} = defined(
-    compiler['runtime'],
-  ).modules.get(
-    '/node_modules/@code3d/core/bld/library/kernel-cache.js',
-  ) as typeof import('../../core/bld/library/kernel-cache.js'));
   ({bundledExamples} = await server.ssrLoadModule<
     typeof import('../src/project/bundled-examples.ts')
   >('/src/project/bundled-examples.ts'));
@@ -435,6 +410,15 @@ test('position bindings preserve inline expressions and prioritize safe upstream
 });
 
 test('export-only edits reuse a large model including exact directional bounds', async t => {
+  await compileProject(
+    {files: [{path: '/model.ts', source: 'import "@code3d/core";'}]},
+    '/model.ts',
+  );
+  // Observe the runtime selected for this dependency bundle, never an older instance.
+  const {
+    replicad,
+    tooling: {clearKernelOperationCache, kernelOperationCacheStats},
+  } = defined(compiler['runtime']);
   clearKernelOperationCache();
   const bounding = replicad.getOC().BRepBndLib;
   const addOptimal = bounding.AddOptimal;
@@ -516,6 +500,22 @@ test('export-only edits reuse a large model including exact directional bounds',
 });
 
 test('editing a plate fillet does not rebuild an unchanged screw across compiles', async t => {
+  await compileProject(
+    {
+      files: [
+        {
+          path: '/model.ts',
+          source: 'import "@code3d/core"; import "@code3d/screws";',
+        },
+      ],
+    },
+    '/model.ts',
+  );
+  // Observe the runtime selected for this dependency bundle, never an older instance.
+  const {
+    replicad,
+    tooling: {clearKernelOperationCache, kernelOperationCacheStats},
+  } = defined(compiler['runtime']);
   clearKernelOperationCache();
   const loftWith = replicad.Sketch.prototype.loftWith;
   const lofts = t.mock.method(

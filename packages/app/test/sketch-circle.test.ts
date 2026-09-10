@@ -1,9 +1,9 @@
+import type {SketchPosition, SketchSnapshot} from '@code3d/core/tooling';
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
-import type {SketchPosition, SketchSnapshot} from '@code3d/core/tooling';
 import type {SketchChange} from '../src/tools/sketch-source.ts';
+import {createTestModelPipeline} from './project-test-files.ts';
 import {createAppTestServer} from './vite-test-server.ts';
-import {createTestProjectCompiler} from './project-test-files.ts';
 
 let server: Awaited<ReturnType<typeof createAppTestServer>>;
 let drawing: typeof import('../src/tools/sketch-circle-drawing.ts');
@@ -172,7 +172,7 @@ test('circle centers reuse upstream identity while radius source edits preserve 
 });
 
 test('circle radius and center previews replay the exact rounded author data with hard and expression locks', async () => {
-  const compiler = await createTestProjectCompiler(server);
+  const compiler = await createTestModelPipeline(server);
   try {
     const compile = async (args: string) => {
       const module = await compiler.compile(
@@ -257,7 +257,7 @@ test('circle radius and center previews replay the exact rounded author data wit
         }
       }
   } finally {
-    compiler.dispose();
+    await compiler.dispose();
   }
 });
 

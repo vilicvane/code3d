@@ -1,15 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {box, cylinder, cut, group, rectangle} from '../bld/node/index.js';
+import {box, cut, cylinder, group, rectangle} from '../bld/node/index.js';
 import {
   beginModelEvaluation,
-  createModelSnapshotter,
   clearKernelOperationCache,
-  planModelSnapshotQueries,
-  executeSnapshotQueryBatch,
-  kernelOperationCacheStats,
+  createModelSnapshotter,
   disposeModelObjects,
+  executeSnapshotQueryBatch,
   isModelObject,
+  kernelOperationCacheStats,
+  planModelSnapshotQueries,
 } from '../bld/tooling/index.js';
 
 function models() {
@@ -104,7 +104,7 @@ test('snapshot batches preserve nested origins, transforms and mesh ownership ac
 test('a cancelled batch retains completed queries and schedules only its unfinished suffix', () => {
   clearKernelOperationCache();
   const finish = beginModelEvaluation();
-  const object = runtime(box(13, 17, 23));
+  const object = runtime(group([box(13, 17, 23)]).rotate(10, 20, 30));
   const [batch] = planModelSnapshotQueries([object]);
   let completed = 0;
   try {
@@ -149,7 +149,11 @@ test('releasing restored inputs also releases transformed reference geometry wit
   clearKernelOperationCache();
   const finish = beginModelEvaluation();
   const object = runtime(
-    box(9, 11, 13).rotate(10, 20, 30).originOffset(4, 5, 6),
+    group([box(9, 11, 13).rotate(10, 20, 30).originOffset(4, 5, 6)]).rotate(
+      0,
+      17,
+      0,
+    ),
   );
   const [batch] = planModelSnapshotQueries([object]);
   const bytes = batch.encode();
@@ -197,4 +201,39 @@ test('scaled topology bounds preserve their borrowed source shape', () => {
     createModelSnapshotter()(runtime(scaled.fillet(0.1))).mesh!.vertices
       .length > 0,
   );
+});
+
+test('directional bounds reuse geometry bounds for axis permutations and remain tight at arbitrary angles', () => {
+  clearKernelOperationCache();
+  const finish = beginModelEvaluation();
+  const body = cylinder(7, 13).originOffset(3, 4, 5);
+  const quarter = group([body]).rotate(90, 0, 0);
+  const diagonal = group([body]).rotate(0, 45, 0);
+  const objects = [body, quarter, diagonal].map(runtime);
+  try {
+    const cardinal = planModelSnapshotQueries(objects.slice(0, 2));
+    assert.ok(cardinal.length > 0);
+    assert.ok(
+      cardinal.every(batch =>
+        batch.queries.every(query => query.kind === 'mesh'),
+      ),
+    );
+    const rotated = planModelSnapshotQueries([objects[2]]);
+    assert.ok(
+      rotated.some(batch =>
+        batch.queries.some(query => query.kind === 'bounds'),
+      ),
+    );
+    const front = createModelSnapshotter()(objects[2]).elements.find(
+      element => element.name === 'front',
+    )!;
+    // Rotating a cylinder about its own axis preserves its diameter; rotating
+    // its old AABB would incorrectly report 14 * sqrt(2).
+    assert.ok(Math.abs(front.bound!.size[0] - 14) < 1e-6);
+    assert.ok(Math.abs(front.bound!.size[1] - 13) < 1e-6);
+  } finally {
+    finish();
+    disposeModelObjects(objects);
+    clearKernelOperationCache();
+  }
 });

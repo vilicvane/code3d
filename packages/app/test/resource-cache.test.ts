@@ -1,8 +1,8 @@
-import assert from 'node:assert/strict';
-import {after, before, test} from 'node:test';
 import type {KernelArtifactStore} from '@code3d/core/tooling';
 import ts from '@typescript/typescript6';
+import assert from 'node:assert/strict';
 import {posix} from 'node:path';
+import {after, before, test} from 'node:test';
 import {createAppTestServer} from './vite-test-server.ts';
 let server: Awaited<ReturnType<typeof createAppTestServer>>;
 let ResourceCache: (typeof import('../src/project/resource-cache.ts'))['ResourceCache'];
@@ -27,6 +27,10 @@ function disk(): KernelArtifactStore & {entries: Map<string, Uint8Array>} {
       entries.set(key, bytes.slice());
     },
     touch: key => entries.has(key),
+    getMany(ids: readonly string[]) {
+      return ids.map(id => this.get(id));
+    },
+    touchMany: (ids: readonly string[]) => ids.map(id => entries.has(id)),
     delete: key => {
       entries.delete(key);
     },

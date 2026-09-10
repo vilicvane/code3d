@@ -45,6 +45,30 @@ Node.js 24 直接执行可擦除的 TypeScript；测试间导入使用显式 `.t
 `public-api.ts` 等纯类型 fixture 只检查类型，不作为运行时测试执行。
 App 中依赖 Vite 变换的模块使用既有 Vite 测试入口。
 
+所有本地测试与验证默认限制整组进程最多 3 GiB 内存、swap 为 0；用户可为当前任务
+明确指定其他内存预算，swap 仍为 0。范围包含类型检查和
+浏览器测试驱动。每次运行一组测试，文件并发从 1 开始；不通过并行启动多个受限
+分组绕过总预算。V8 的 `--max-old-space-size` 只限制 JS 堆，不能代替进程组预算。
+WSL/Linux 启用 systemd 时，可从任务 worktree 根目录运行：
+
+```bash
+systemd-run --user --wait --pipe --working-directory="$PWD" \
+  -p MemoryMax=3G -p MemorySwapMax=0 -p OOMPolicy=kill \
+  -p RuntimeMaxSec=120 -p TimeoutStopSec=2 \
+  node --max-old-space-size=1536 --test --test-concurrency=1 \
+  packages/app/test/project-dependencies.test.ts
+```
+
+上限针对整组进程，包括原生 esbuild 子进程；超时后先终止，再强制收齐剩余进程。
+其他环境使用等价的进程组限制；仅设置 `timeout` 的 SIGTERM 不能保证及时退出。
+超限时先缩小复现范围并测量分配来源，不能直接提高预算重跑。
+已运行的 Windows 主机 Chrome 不在 WSL 测试驱动的进程组内，不能宣称受该限制
+覆盖；保留用户页面，只管理测试自己的资源。
+
+内核、运行时及包含大型二进制缓冲区的对象，引用比较使用
+`assert.ok(actual === expected, '说明预期的生命周期')`，不把整个对象交给断言生成
+差异报告。Node 的失败报告会深度展开对象及数组，报告本身可能耗尽内存。
+
 浏览器测试连接已经运行的开发服务器和主机 Chrome：
 
 ```bash

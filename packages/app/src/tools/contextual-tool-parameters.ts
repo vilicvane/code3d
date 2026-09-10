@@ -1,17 +1,19 @@
-import type {SourceTargetEvaluation} from '../model/compiler';
 import type {ParameterUsage, SourceRef} from '@code3d/core/tooling';
+import type {SourceTargetEvaluation} from '../model/compiler';
 import {editableParameterUsages} from '../model/parameter-provenance';
-import {validToolParameterValue} from '../model/tool-parameter-config';
 import {
   isToolSelectionParameter,
+  validToolParameterValue,
+} from '../model/tool-parameter-config';
+import {
   type ToolArgumentEditTarget,
   type ToolArgumentSource,
   type ToolSignatureSchema,
   type ToolValueParameterSchema,
 } from '../model/tool-schema';
 import type {ContextualToolParameterView} from '../ui/contextual-tool-panel';
-import type {ToolIntent} from './tool-system';
 import {formatDisplayNumber} from './parameter-policy';
+import type {ToolIntent} from './tool-system';
 
 export type ContextualToolParameterState = {
   schema: ToolValueParameterSchema;
