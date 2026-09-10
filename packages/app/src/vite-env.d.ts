@@ -11,4 +11,5 @@ declare module 'monaco-editor/languages/definitions/javascript/javascript' {
 
 declare module 'virtual:code3d-browser-packages' {
   export const files: Readonly<Record<string, {version: string; url: string}>>;
+  export const workspaces: import('./project/workspace-packages').WorkspacePackages;
 }

@@ -1821,3 +1821,287 @@ test('registry coalesces exact metadata reads and reuses packuments within one r
     'packument versions supply exact metadata without a second fetch',
   );
 });
+
+async function workspaceFixture(
+  name: string,
+  value: string,
+  config: PackageManifest = {},
+) {
+  const manifest = {
+    name,
+    version: '1.0.0',
+    type: 'module',
+    main: './index.js',
+    types: './index.d.ts',
+    ...config,
+  };
+  const contents = {
+    'package.json': JSON.stringify(manifest),
+    'index.js': `export const value = ${JSON.stringify(value)};`,
+    'index.d.ts': `export declare const value: ${JSON.stringify(value)};`,
+  };
+  const revision = Buffer.from(
+    await crypto.subtle.digest(
+      'SHA-256',
+      new TextEncoder().encode(JSON.stringify(contents)),
+    ),
+  ).toString('hex');
+  return {
+    manifest,
+    revision,
+    files: Object.fromEntries(
+      Object.entries(contents).map(([path, text]) => [
+        path,
+        {
+          version: revision,
+          url:
+            'data:application/octet-stream;base64,' +
+            Buffer.from(text).toString('base64'),
+        },
+      ]),
+    ),
+  };
+}
+
+test('workspace latest resolves direct, transitive and alias requests while retaining pinned npm packages and shared peers', async () => {
+  const disk = await diskFiles();
+  try {
+    const fixture = await registryFixture();
+    await fixture.add('@code3d/core', '1.0.0');
+    await fixture.add('@code3d/remote', '1.0.0');
+    await fixture.add(
+      'wrapper',
+      '1.0.0',
+      {dependencies: {'@code3d/core': 'latest'}},
+      {'index.js': `export {value} from '@code3d/core';`},
+    );
+    const workspaces = {
+      '@code3d/core': await workspaceFixture('@code3d/core', 'development'),
+      '@code3d/screws': await workspaceFixture('@code3d/screws', 'screws', {
+        peerDependencies: {'@code3d/core': '^1'},
+      }),
+    };
+    await disk.files.writeFile(
+      '/package.json',
+      JSON.stringify({
+        type: 'module',
+        dependencies: {
+          '@code3d/core': 'latest',
+          '@code3d/screws': 'latest',
+          '@code3d/remote': 'latest',
+          wrapper: 'latest',
+          alias: 'npm:@code3d/core@latest',
+          pinned: 'npm:@code3d/core@1.0.0',
+        },
+      }),
+    );
+    const manager = new BrowserPackageManager(
+      disk.files,
+      undefined,
+      fixture.registry,
+      undefined,
+      workspaces,
+    );
+    await manager.prepare('/model.ts');
+    const lock = JSON.parse(
+      new TextDecoder().decode(await disk.files.readFile('/code3d-lock.json')),
+    );
+    const core = lock.resolutions.primary['@code3d/core'].installUrl;
+    assert.match(core, /code3d.invalid\/workspace/);
+    assert.equal(lock.resolutions.primary.alias.installUrl, core);
+    assert.equal(
+      lock.resolutions.secondary[lock.resolutions.primary.wrapper.installUrl][
+        '@code3d/core'
+      ].installUrl,
+      core,
+    );
+    assert.equal(
+      lock.resolutions.secondary[
+        lock.resolutions.primary['@code3d/screws'].installUrl
+      ]['@code3d/core'].installUrl,
+      core,
+    );
+    assert.match(
+      lock.resolutions.primary.pinned.installUrl,
+      /registry.npmjs.org/,
+    );
+    assert.match(
+      lock.resolutions.primary['@code3d/remote'].installUrl,
+      /registry.npmjs.org/,
+    );
+    assert.equal(
+      fixture.requests.some(url =>
+        url.includes(encodeURIComponent('@code3d/screws')),
+      ),
+      false,
+    );
+    const bundle = await new ProjectBuilder(
+      manager.dependencies,
+      esbuild,
+    ).build(
+      `import {value as core} from '@code3d/core'; import {value as transitive} from 'wrapper'; import {value as pinned} from 'pinned'; export {core, transitive, pinned};`,
+    );
+    const result = await import(
+      'data:text/javascript;base64,' +
+        Buffer.from(bundle.source).toString('base64')
+    );
+    assert.equal(result.core, 'development');
+    assert.equal(result.transitive, 'development');
+    assert.equal(result.pinned, '1.0.0');
+    assert.match(
+      new TextDecoder().decode(
+        await manager.files.readFile('/node_modules/@code3d/core/index.d.ts'),
+      ),
+      /development/,
+    );
+  } finally {
+    await disk.dispose();
+  }
+});
+
+test('existing npm locks switch to workspace bytes and refresh unchanged versions; production restores registry selection', async () => {
+  const disk = await diskFiles();
+  try {
+    const fixture = await registryFixture();
+    await fixture.add('@code3d/core', '1.0.0');
+    await disk.files.writeFile(
+      '/package.json',
+      JSON.stringify({dependencies: {'@code3d/core': 'latest'}}),
+    );
+    await new BrowserPackageManager(
+      disk.files,
+      undefined,
+      fixture.registry,
+    ).prepare('/model.ts');
+    fixture.setOffline(true);
+    for (const value of ['first', 'rebuilt']) {
+      const workspaces = {
+        '@code3d/core': await workspaceFixture('@code3d/core', value),
+      };
+      const manager = new BrowserPackageManager(
+        disk.files,
+        undefined,
+        fixture.registry,
+        undefined,
+        workspaces,
+      );
+      await manager.prepare('/model.ts');
+      assert.match(
+        new TextDecoder().decode(
+          await manager.files.readFile('/node_modules/@code3d/core/index.js'),
+        ),
+        new RegExp(value),
+      );
+      const lock = new TextDecoder().decode(
+        await disk.files.readFile('/code3d-lock.json'),
+      );
+      await new BrowserPackageManager(
+        disk.files,
+        undefined,
+        fixture.registry,
+        undefined,
+        workspaces,
+      ).prepare('/model.ts');
+      assert.equal(
+        new TextDecoder().decode(
+          await disk.files.readFile('/code3d-lock.json'),
+        ),
+        lock,
+      );
+    }
+    fixture.setOffline(false);
+    const production = new BrowserPackageManager(
+      disk.files,
+      undefined,
+      fixture.registry,
+    );
+    await production.prepare('/model.ts');
+    assert.match(
+      new TextDecoder().decode(
+        await production.files.readFile('/node_modules/@code3d/core/index.js'),
+      ),
+      /1.0.0/,
+    );
+    assert.doesNotMatch(
+      new TextDecoder().decode(await disk.files.readFile('/code3d-lock.json')),
+      /workspace/,
+    );
+  } finally {
+    await disk.dispose();
+  }
+});
+
+test('failed workspace downloads preserve the previous installation and incompatible peers are rejected', async () => {
+  const disk = await diskFiles();
+  try {
+    const fixture = await registryFixture();
+    await fixture.add('@code3d/core', '1.0.0');
+    await disk.files.writeFile(
+      '/package.json',
+      JSON.stringify({dependencies: {'@code3d/core': 'latest'}}),
+    );
+    await new BrowserPackageManager(
+      disk.files,
+      undefined,
+      fixture.registry,
+    ).prepare('/model.ts');
+    const original = new TextDecoder().decode(
+      await disk.files.readFile('/code3d-lock.json'),
+    );
+    const local = await workspaceFixture('@code3d/core', 'development');
+    const broken = {
+      ...local,
+      files: {
+        ...local.files,
+        'index.js': {version: local.revision, url: 'data:invalid'},
+      },
+    };
+    await assert.rejects(
+      new BrowserPackageManager(
+        disk.files,
+        undefined,
+        fixture.registry,
+        undefined,
+        {'@code3d/core': broken},
+      ).prepare('/model.ts'),
+    );
+    assert.equal(
+      new TextDecoder().decode(await disk.files.readFile('/code3d-lock.json')),
+      original,
+    );
+    assert.match(
+      new TextDecoder().decode(
+        await disk.files.readFile('/node_modules/@code3d/core/index.js'),
+      ),
+      /1.0.0/,
+    );
+    await disk.files.writeFile(
+      '/package.json',
+      JSON.stringify({
+        dependencies: {'@code3d/core': 'latest', '@code3d/screws': 'latest'},
+      }),
+    );
+    const workspaces = {
+      '@code3d/core': local,
+      '@code3d/screws': await workspaceFixture('@code3d/screws', 'screws', {
+        peerDependencies: {'@code3d/core': '^2'},
+      }),
+    };
+    await assert.rejects(
+      new BrowserPackageManager(
+        disk.files,
+        undefined,
+        fixture.registry,
+        undefined,
+        workspaces,
+      ).prepare('/model.ts'),
+      /requires peer.*conflicts/,
+    );
+    assert.equal(
+      new TextDecoder().decode(await disk.files.readFile('/code3d-lock.json')),
+      original,
+    );
+  } finally {
+    await disk.dispose();
+  }
+});

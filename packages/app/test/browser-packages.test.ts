@@ -20,6 +20,9 @@ test('watches published package bytes without linking them into the App module g
       /\/node_modules\/@code3d\/core\/bld\/tooling\/index\.js/,
     );
     assert.match(defined(result).code, /\/__code3d-packages\/[a-f0-9]+\.js/);
+    assert.match(defined(result).code, /export const workspaces/);
+    assert.match(defined(result).code, /"@code3d\/solver":/);
+    assert.doesNotMatch(defined(result).code, /"@code3d\/app":/);
     const module = client.moduleGraph.getModuleById(
       '\0virtual:code3d-browser-packages',
     );
@@ -44,6 +47,10 @@ test('watches before the first package snapshot and invalidates newly created pu
       typeof import('../build/browser-packages.ts')
     >('/build/browser-packages.ts');
     const core = path.join(root, 'node_modules/@code3d/core');
+    await writeFile(
+      path.join(root, 'package.json'),
+      JSON.stringify({workspaces: ['node_modules/@code3d/*']}),
+    );
     const screws = path.join(root, 'node_modules/@code3d/screws');
     for (const [name, disk] of [
       ['core', core],
@@ -85,8 +92,8 @@ test('watches before the first package snapshot and invalidates newly created pu
       >[0]);
     plugin.configureServer.call(context, {
       watcher: {
-        add() {
-          if (changed) return;
+        add(directory: string) {
+          if (changed || directory !== core) return;
           changed = true;
           // Change the first package exactly as its watcher is being registered.
           // Registering only after collection would cache its earlier bytes.
@@ -108,6 +115,7 @@ test('watches before the first package snapshot and invalidates newly created pu
       first.includes(hash(await readFile(path.join(core, 'index.js')))),
     );
     assert.ok(reloads > 0);
+    assert.match(first, /export const workspaces = \{"@code3d\//);
     const extra = path.join(core, 'extra.js');
     await writeFile(extra, 'export const extra = true;');
     const before = reloads;
@@ -126,6 +134,20 @@ test('watches before the first package snapshot and invalidates newly created pu
       ),
       /extra\.js/,
     );
+    const production = browserPackages(root);
+    production.configResolved.call(context, {command: 'build'} as Parameters<
+      typeof production.configResolved
+    >[0]);
+    const output = await production.load.call(
+      {
+        addWatchFile() {},
+        emitFile() {
+          return 'asset';
+        },
+      } as unknown as typeof context,
+      '\0virtual:code3d-browser-packages',
+    );
+    assert.match(defined(output), /export const workspaces = \{\};/);
   } finally {
     await server.close();
     await rm(root, {recursive: true, force: true});

@@ -74,6 +74,9 @@ npm run dev
 
 Open [localhost:3133](http://localhost:3133) in your browser.
 
+For repository development, see the [development guide](./.agents/docs/development.md)
+and [architecture documentation](./.agents/docs/README.md).
+
 ## Project status
 
 Code3D is currently Prototype 01. APIs and project behavior are still evolving.
