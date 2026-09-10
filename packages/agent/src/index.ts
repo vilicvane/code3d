@@ -52,6 +52,7 @@ export {
   resolveRenderView,
   type RenderView,
   type RenderViewName,
+  type RenderMode,
   type RenderOutputOptions,
 } from './render-options.js';
 export {

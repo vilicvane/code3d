@@ -80,18 +80,18 @@ or choose another agent to switch. The mouse-pointer icon marks the followed age
 Starting or switching follow immediately restores that agent's latest activity:
 its source selection, the file it read, or the directory it listed. For a source
 selection it also synchronizes the model or sketch, its arguments and its last
-explicitly requested 3D view. The selection stays attached to the current source
-after edits and formatting. If the agent has no target yet, your view stays put
-until its next activity.
+explicitly requested 3D view and Modeling/Render mode. The selection stays attached
+to the current source after edits and formatting. If the agent has no target yet,
+your view stays put until its next activity.
 Each accepted source or cursor update moves the editor to that agent's selection
 and updates the model or sketch, using its supplied arguments (or JSDoc defaults)
-and any explicitly requested 3D view. You can keep editing, selecting and navigating
-between updates; following does not lock the UI or stop when you interact.
-An `apply` with file changes or an explicit render view can trigger following even
-when `cursor` is omitted: it uses the agent's retained, valid cursor. It does not
-choose a new cursor from the changed file paths. Without a valid cursor there is
-no follow jump. A request that only observes the retained cursor, with no file
-changes or explicit view, does not trigger following.
+and any explicitly requested 3D view and mode. You can keep editing, selecting and
+navigating between updates; following does not lock the UI or stop when you interact.
+An `apply` with file changes or an explicit render view or mode can trigger
+following even when `cursor` is omitted: it uses the agent's retained, valid cursor.
+It does not choose a new cursor from the changed file paths. Without a valid cursor
+there is no follow jump. A request that only observes the retained cursor, with no
+file changes or explicit view/mode, does not trigger following.
 Successful `fs.read` opens the file and focuses its tab; `fs.list` reveals,
 expands and focuses the directory in the file explorer, scrolling it into view
 when necessary. Compact directory chains highlight the row containing the listed
@@ -317,14 +317,34 @@ then ordinary execution. Omission does not reuse previous custom arguments;
 npx --yes @code3d/cli project.c3d.json --request-id inspect-001 < /tmp/inspect.json
 ```
 
-`"render": true` requests a 960×720 PNG with the default isometric view. Use
-`"render": {"view": "front"}` for a named view: `isometric`, `front`, `back`, `left`,
+`"render": true` requests a 960×720 PNG in Modeling mode with the default isometric
+view. `mode` and `view` are independently optional:
+
+```json
+{
+  "operation": "apply",
+  "input": {
+    "render": {"mode": "render", "view": "front"}
+  }
+}
+```
+
+`mode` accepts `"modeling"` or `"render"`. Modeling shows the same selection
+emphasis and helpers as the App's Modeling mode. Render uses authored materials
+without modeling helpers, just like the App's Render mode. Omitting `mode`
+defaults to Modeling **for each request**, including retained snapshots; it does
+not inherit a previous request's mode. `observation.render.mode` reports the
+actual mode. The example uses the agent's retained cursor; add `cursor` to select
+a different model, and combine it with file changes or other outputs as needed.
+
+Use `"render": {"view": "front"}` for a named view: `isometric`, `front`, `back`, `left`,
 `right`, `top`, or `bottom`. A custom view uses
 `"render": {"view": {"direction": [1, 1, 1], "up": [0, 1, 0]}}`. Direction points
 from scene center toward the camera: +X right, +Y up, +Z front. The up vector must
 not be parallel to direction. The scene is fitted with perspective projection.
-When following that agent, an explicit view also updates the user's viewport;
-otherwise it only affects the returned image.
+When following that agent, explicitly supplied `view` and `mode` also update the
+user's viewport. An omitted field does not force its screenshot default onto the
+user's view. Without follow, both options only affect the returned image.
 
 `"type": true` returns the selected expression's static TypeScript type, signatures,
 documentation, and up to 100 members with `membersTotal`. It can run without
@@ -448,7 +468,9 @@ Selecting a sketch returns the same solved 2D scene as the sketch editor: the
 selected layer and its upstream layers, with grid, curves, region fills and
 constraint labels. The image is a 960×720 PNG in orthographic local XY; sketch
 `[x, y]` maps to model `[x, 0, -y]`. Omit `render.view` for a sketch;
-3D view options return `sketch_view_unsupported`. Select a `.face()`, extrusion,
+3D view options return `sketch_view_unsupported`. Sketch captures report
+`mode: "modeling"`; an explicit `mode: "render"` returns
+`sketch_render_mode_unsupported`. Select a `.face()`, extrusion,
 or other model expression to inspect its 3D rendering and B-rep instead. Function
 arguments and JSDoc fallback work for sketch observations too.
 

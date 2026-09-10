@@ -170,11 +170,15 @@ export class AgentObserver {
         'topology_model_missing',
         'The requested model is absent from this observation snapshot.',
       );
-    if (
-      model.kind === 'sketch' &&
-      typeof request.input.render === 'object' &&
-      request.input.render.view
-    )
+    const renderOptions =
+      typeof request.input.render === 'object' ? request.input.render : {};
+    const mode = renderOptions.mode ?? 'modeling';
+    if (model.kind === 'sketch' && mode === 'render')
+      throw new AgentError(
+        'sketch_render_mode_unsupported',
+        'Sketch renders use the 2D sketch editor. Omit render.mode or use modeling, or select a face/solid to use render mode.',
+      );
+    if (model.kind === 'sketch' && renderOptions.view)
       throw new AgentError(
         'sketch_view_unsupported',
         'Sketch renders use an orthographic local XY view. Omit render.view, or select a face/solid to use a 3D view.',
@@ -208,13 +212,12 @@ export class AgentObserver {
     const view =
       model.kind === 'sketch'
         ? undefined
-        : resolveRenderView(
-            typeof request.input.render === 'object'
-              ? request.input.render.view
-              : undefined,
-          );
+        : resolveRenderView(renderOptions.view);
     let artifacts: Artifact[] | undefined;
     if (request.input.render) {
+      // Scene restoration and earlier requests can leave another mode active.
+      // Every capture, including retained snapshots, selects its own mode.
+      if (model.kind !== 'sketch') this.getViewport().setRenderMode(mode);
       const blob =
         model.kind === 'sketch'
           ? await this.captureSketch(model, snapshot.request.revision)
@@ -257,6 +260,7 @@ export class AgentObserver {
                 width: 960,
                 height: 720,
                 mimeType: 'image/png',
+                mode,
                 ...(model.kind === 'sketch'
                   ? {
                       model: model.key,

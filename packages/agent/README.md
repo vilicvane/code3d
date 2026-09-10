@@ -147,7 +147,12 @@ against the post-change source. Arguments are a TypeScript array expression, not
 JSON values; omission falls back to JSDoc arguments and then ordinary execution
 context.
 
-`render` accepts a boolean or `{view}`. Views are `isometric` (default), `front`,
+`render` accepts a boolean or `{mode?, view?}`. `mode` is `"modeling"` (default
+for each request) or `"render"`. Modeling includes the App's selection emphasis
+and helpers; Render uses authored materials without modeling helpers, just like
+the App's Render mode. Omission never inherits another request's mode.
+`render: true` uses Modeling and the default view. The response reports the actual
+mode in `observation.render.mode`. Views are `isometric` (default), `front`,
 `back`, `left`, `right`, `top`, `bottom`, or `{direction: [x, y, z], up?: [x, y, z]}`.
 Direction points from the observed scene center toward the camera; front is +Z,
 right is +X and top is +Y. Custom vectors must be finite and nonzero; an explicit
@@ -155,8 +160,10 @@ up vector cannot be parallel to the direction. Default up is +Y, or -Z/+Z for
 top/bottom directions. Perspective capture automatically fits the scene bounds
 for the output aspect ratio and does not change the user's camera. The response
 reports normalized direction/up and `coordinates: "observation-scene"`.
-Each requested view gets its own image, including renders of retained topology
-snapshots; images from a different view are never reused.
+Each requested view and mode gets its own image, including renders of retained
+topology snapshots; images from a different view or mode are never reused.
+Sketches keep their 2D Modeling display; explicit `mode: "render"` returns
+`sketch_render_mode_unsupported`.
 
 `type: true` returns `observation.type` without requiring model execution.
 It describes the smallest syntax node covering the captured selection, or the
@@ -267,11 +274,13 @@ an installation receipt; preparation or model errors retain accepted file change
 Local-folder dependencies are installed externally. See the [dependency guide](../web/src/content/docs/docs/guides/agents.md#install-project-dependencies)
 for examples, lock reuse and explicit updates.
 
-File changes, an explicit cursor or a render view emit an agent update. Omitting
+File changes, an explicit cursor, render view or mode emit an agent update. Omitting
 the cursor reuses its tracked selection; App following only navigates when that
 selection remains valid. Changed file paths do not establish a new selection.
-An observation with no file changes, explicit cursor or view emits no follow
-update. Successful file reads and directory lists have their own follow targets
+An observation with no file changes, explicit cursor, view or mode emits no follow
+update. Only explicitly supplied view/mode fields synchronize the user's viewport;
+starting follow restores the last explicit view and mode for a source selection.
+Successful file reads and directory lists have their own follow targets
 and do not replace the modeling cursor.
 
 `AgentObserver` serializes offscreen requests through the existing model compiler,

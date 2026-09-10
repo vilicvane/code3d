@@ -241,12 +241,12 @@ test('follow updates describe accepted edits before observation and exclude cont
   assert.equal(updates.length, 1);
 });
 
-test('starting follow uses each agent’s current cursor, arguments and last explicit view', async () => {
+test('starting follow uses each agent’s current cursor, arguments and last explicit view and mode', async () => {
   const f = fixture();
   assert.equal(f.session.latestAgentUpdate('alice'), undefined);
   await f.apply({
     cursor: {file: '/model.ts', regex: 'const (model)', arguments: '[12]'},
-    render: {view: 'top'},
+    render: {view: 'top', mode: 'render'},
   });
   await f.apply({cursor: {file: '/lib.ts', regex: 'const (value)'}}, 'bob');
   await f.apply({type: true});
@@ -257,7 +257,7 @@ test('starting follow uses each agent’s current cursor, arguments and last exp
   await f.apply({
     files: [{path: '/model.ts', version: 'wrong', content: ''}],
     cursor: {file: '/model.ts', regex: '(1)', arguments: '[99]'},
-    render: {view: 'bottom'},
+    render: {view: 'bottom', mode: 'modeling'},
   });
   // The editor rebases selections independently of agent requests.
   const moved = {file: '/renamed.ts', start: 26, end: 31};
@@ -268,6 +268,7 @@ test('starting follow uses each agent’s current cursor, arguments and last exp
     cursor: moved,
     arguments: '[12]',
     view: 'top',
+    mode: 'render',
   });
   assert.deepEqual(f.session.latestAgentUpdate('bob'), {
     agentId: 'bob',
@@ -275,6 +276,7 @@ test('starting follow uses each agent’s current cursor, arguments and last exp
     cursor: {file: '/lib.ts', start: 13, end: 18},
     arguments: undefined,
     view: undefined,
+    mode: undefined,
   });
   const updates: AgentUpdate[] = [];
   f.session.onAgentUpdate(update => updates.push(update));
@@ -283,10 +285,12 @@ test('starting follow uses each agent’s current cursor, arguments and last exp
   assert.ok(latest?.kind === 'apply');
   assert.equal(latest.arguments, undefined);
   assert.equal(latest.view, 'top');
-  // Keeping the view for activation does not force it on subsequent updates.
+  assert.equal(latest.mode, 'render');
+  // Remembered view and mode only apply when starting follow again.
   const updated = updates.at(-1);
   assert.ok(updated?.kind === 'apply');
   assert.equal(updated.view, undefined);
+  assert.equal(updated.mode, undefined);
   f.cursors.delete('alice');
   assert.equal(f.session.latestAgentUpdate('alice'), undefined);
   f.session.forgetAgent('alice');
@@ -297,7 +301,32 @@ test('starting follow uses each agent’s current cursor, arguments and last exp
     cursor: moved,
     arguments: undefined,
     view: undefined,
+    mode: undefined,
   });
+});
+
+test('mode-only renders trigger follow without giving implicit modes a follow target', async () => {
+  const f = fixture();
+  await f.apply({cursor: {file: '/model.ts', regex: '(model)'}});
+  const updates: AgentUpdate[] = [];
+  f.session.onAgentUpdate(update => updates.push(update));
+  for (const render of [true, {}, false]) await f.apply({render});
+  assert.equal(updates.length, 0);
+  for (const mode of ['render', 'modeling'] as const) {
+    assert.equal((await f.apply({render: {mode}})).ok, true);
+    const update = updates.at(-1);
+    assert.ok(update?.kind === 'apply');
+    assert.equal(update.mode, mode);
+    assert.equal(update.view, undefined);
+    assert.deepEqual(update.cursor, f.cursors.get('alice'));
+    assert.deepEqual(f.session.latestAgentUpdate('alice'), update);
+    assert.equal(f.session.latestAgentUpdate('bob'), undefined);
+  }
+  assert.equal(updates.length, 2);
+  await assert.rejects(f.apply({render: {mode: 'invalid'} as never}), {
+    code: 'invalid_input',
+  });
+  assert.equal(updates.length, 2);
 });
 
 test('successful reads and lists publish independent agent navigation without moving modeling cursors', async () => {

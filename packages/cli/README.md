@@ -81,9 +81,9 @@ install/update command. See [installing project dependencies](https://www.code3d
 for the payload, version checks, lock behavior and failure handling.
 
 When the user is following an agent, `apply` with file changes or an explicit view
-uses its retained cursor if none is supplied. It does not choose a position from
-the changed files; no valid cursor means no follow jump. Pure observation without
-file changes, a new cursor or an explicit view does not trigger following.
+or mode uses its retained cursor if none is supplied. It does not choose a position
+from the changed files; no valid cursor means no follow jump. Pure observation
+without file changes, a new cursor or an explicit view/mode does not trigger following.
 
 `npx --yes @code3d/cli` downloads the published CLI when needed. Development can
 use the same command with a built, globally linked checkout: run `npm link` in

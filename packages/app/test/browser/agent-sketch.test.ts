@@ -106,6 +106,7 @@ export default design();
     assert.ok(observation.type.type.includes('Sketch'));
     assert.equal(observation.render.projection, 'orthographic');
     assert.equal(observation.render.coordinates, 'sketch-local');
+    assert.equal(observation.render.mode, 'modeling');
     const png = await readFile(first.artifacts[0].path);
     assert.equal(png.subarray(1, 4).toString(), 'PNG');
     assert.equal(png.readUInt32BE(16), 960);
@@ -133,6 +134,17 @@ export default design();
         .code,
       'sketch_view_unsupported',
     );
+    assert.equal(
+      (await apply({topology: {snapshotId}, render: {mode: 'render'}}, 1)).error
+        .code,
+      'sketch_render_mode_unsupported',
+    );
+    const modeling = await apply({
+      topology: {snapshotId},
+      render: {mode: 'modeling'},
+    });
+    assert.equal(modeling.data.observation.render.mode, 'modeling');
+    assert.deepEqual(await readFile(modeling.artifacts[0].path), png);
     const fallback = await apply({
       cursor: {file, regex: 'const (profile) ='},
       topology: true,
@@ -154,10 +166,11 @@ export default design();
     const three = await apply({
       files: [{path: file, version: read.data.version, content: solid}],
       cursor: {file, regex: '(extrude\\()'},
-      render: {view: 'top'},
+      render: {view: 'top', mode: 'render'},
       topology: true,
     });
     assert.equal(three.data.observation.render.projection, 'perspective');
+    assert.equal(three.data.observation.render.mode, 'render');
     assert.ok(three.data.observation.topology.counts.surface > 0);
     assert.equal(
       (await apply({topology: {snapshotId}}, 1)).error.code,
