@@ -1,42 +1,28 @@
-import {
-  AgentEndpoint,
-  AgentError,
-  LocalHost,
-  createAgentConfig,
-  parsePort,
-  randomAgentPort,
-  type AgentConfig,
-  type HostState,
-} from '@code3d/agent';
-import type {CodeEditor} from '../editor';
+import {randomAgentPort} from '@code3d/agent';
+import {autorun, makeObservable, observable, reaction, runInAction} from 'mobx';
 import type {AgentProjectSession} from './project-session';
+import {AgentConnections, type AgentGrant} from './connections';
 import {agentPrompt} from './prompt';
-import {AgentPersistence} from './persistence';
-import {randomAgentColor} from './colors';
-import {randomAgentName} from './names';
-
-type Grant = {
-  config: AgentConfig;
-  color: number;
-  interacted: boolean;
-  endpoint: AgentEndpoint;
-  lastSeen?: string;
-  busy: number;
-  host?: LocalHost;
-  state: HostState;
-};
+import {findAgentName, randomAgentName} from './names';
+import {MousePointer2, UserRoundCog} from 'lucide';
+import {createIcon} from '../ui/icons';
 
 type AgentRow = {
   element: HTMLDivElement;
   identity: HTMLDivElement;
   activity: HTMLSpanElement;
-  location: HTMLSpanElement;
+  stopPort: () => void;
 };
 
 export class AgentPanel {
+  private readonly navigation = document.createElement('div');
+  private readonly badges = new Map<string, HTMLButtonElement>();
   private readonly dialog = document.createElement('dialog');
+  private readonly createForm = document.createElement('div');
+  private readonly createFields = document.createElement('fieldset');
   private readonly port = document.createElement('input');
   private readonly name = document.createElement('input');
+  private readonly nameWho = document.createElement('a');
   private readonly prompt = document.createElement('textarea');
   private readonly promptSection = document.createElement('section');
   private readonly promptMessage = document.createElement('p');
@@ -60,26 +46,25 @@ export class AgentPanel {
       this.message.textContent = 'Project saved.';
     }),
   );
-  private readonly grants = new Map<string, Grant>();
   private readonly rows = new Map<string, AgentRow>();
-  private sessionId?: string;
-  private adding = false;
-  private generation = 0;
-  private displayedAgentId?: string;
+  private displayedAgentId: string | undefined = undefined;
   private copyFeedbackTimer?: number;
   private promptGeneration = 0;
-  private storage?: AgentPersistence;
-  private readonly initialization: Promise<void>;
-  private readonly inFlight = new Set<Promise<unknown>>();
-  private available = false;
-  private operations = Promise.resolve();
+  private readonly stopRendering: () => void;
+  private readonly listeners = new AbortController();
 
   constructor(
-    private readonly editor: CodeEditor,
+    private readonly connections: AgentConnections,
     private readonly project: AgentProjectSession,
     private readonly open: HTMLButtonElement,
-    private readonly workspace: string | undefined,
   ) {
+    makeObservable<this, 'displayedAgentId'>(this, {
+      displayedAgentId: observable,
+    });
+    this.navigation.className = 'agent-nav-agents';
+    open.before(this.navigation);
+    open.setAttribute('aria-label', 'Connect Agent');
+    open.title = 'Connect Agent';
     this.dialog.className = 'app-dialog agent-dialog';
     this.dialog.setAttribute('aria-label', 'Connect Agent');
     const content = document.createElement('div');
@@ -97,6 +82,10 @@ export class AgentPanel {
     this.port.value = String(randomAgentPort());
     this.name.value = this.suggestName();
     this.name.maxLength = 64;
+    this.name.addEventListener('input', () => this.refreshNameLink());
+    this.nameWho.className = 'agent-name-who';
+    this.nameWho.target = '_blank';
+    this.nameWho.rel = 'noopener noreferrer';
     this.prompt.rows = 12;
     this.prompt.readOnly = true;
     this.prompt.setAttribute('aria-label', 'Agent prompt');
@@ -139,11 +128,10 @@ export class AgentPanel {
       'Copy a prompt to your local agent to start its CLI service. Allow this site to connect to your local network when asked. This page keeps reconnecting until you revoke access. Keep it open while agents work.';
     titleLine.append(title, this.connection);
     heading.append(titleLine, note);
-    const fields = document.createElement('fieldset');
-    fields.append(
-      field('Agent name', this.name),
-      field('Local port', this.port),
-    );
+    const nameField = document.createElement('div');
+    nameField.className = 'agent-name-field';
+    nameField.append(field('Agent name', this.name), this.nameWho);
+    this.createFields.append(nameField, field('Local port', this.port));
     const promptActions = document.createElement('div');
     promptActions.className = 'agent-prompt-actions';
     this.promptMessage.className = 'agent-prompt-message';
@@ -151,13 +139,21 @@ export class AgentPanel {
     promptActions.append(this.promptMessage, copy);
     this.promptSection.className = 'agent-prompt';
     this.promptSection.append(this.prompt, promptActions);
-    content.append(heading, this.list, fields, feedback, footer);
+    this.createForm.className = 'agent-create-form';
+    const createContent = document.createElement('div');
+    createContent.className = 'agent-create-content';
+    createContent.append(this.createFields, feedback, footer);
+    this.createForm.append(createContent);
+    content.append(heading, this.list, this.createForm);
     this.dialog.append(content);
     document.body.append(this.dialog);
-    open.addEventListener('click', () => {
-      this.refresh();
-      this.dialog.showModal();
-    });
+    open.addEventListener(
+      'click',
+      () => {
+        this.dialog.showModal();
+      },
+      {signal: this.listeners.signal},
+    );
     this.dialog.addEventListener('click', event => {
       if (event.target === this.dialog) this.dialog.close();
     });
@@ -170,48 +166,98 @@ export class AgentPanel {
     this.dialog.addEventListener('close', () => {
       this.connection.open = false;
       this.clearPromptMessage();
+      this.finishCreateAnimation();
     });
-    document.addEventListener('pointerdown', event => {
-      if (!this.connection.contains(event.target as Node))
-        this.connection.open = false;
+    document.addEventListener(
+      'pointerdown',
+      event => {
+        if (!this.connection.contains(event.target as Node))
+          this.connection.open = false;
+      },
+      {signal: this.listeners.signal},
+    );
+    this.stopRendering = autorun(() => this.render(), {
+      name: 'AgentPanel.render',
     });
-    window.addEventListener('pagehide', () => this.suspend());
-    window.addEventListener('pageshow', event => {
-      if (event.persisted) window.location.reload();
+    window.addEventListener('pagehide', () => this.dispose(), {
+      once: true,
+      signal: this.listeners.signal,
     });
-    this.initialization = this.restore();
-    this.run(() => this.initialization);
-    this.refresh();
+    const suggestedName = this.name.value;
+    this.run(async () => {
+      await connections.ready;
+      if (this.listeners.signal.aborted) return;
+      if (this.name.value === suggestedName)
+        this.name.value = this.suggestName();
+      this.port.value = String(
+        randomAgentPort(connections.grants.map(grant => grant.config.port)),
+      );
+      this.refreshNameLink();
+    });
+    this.refreshNameLink();
   }
 
-  refresh(): void {
+  private render(): void {
+    const grants = this.connections.grants;
     this.open.replaceChildren();
-    this.open.classList.toggle('button-primary', !this.grants.size);
-    if (!this.grants.size) this.open.textContent = 'Connect Agent';
-    for (const grant of this.grants.values())
-      this.open.append(agentBadge(grant));
-    this.addButton.disabled = !this.available || this.adding;
+    this.open.classList.toggle('button-primary', !grants.length);
+    if (!grants.length) this.open.textContent = 'Connect Agent';
+    else this.open.append(createIcon(UserRoundCog));
+    this.navigation.hidden = !grants.length;
+    for (const [id, badge] of this.badges) {
+      if (grants.some(grant => grant.config.agentId === id)) continue;
+      badge.remove();
+      this.badges.delete(id);
+    }
+    for (const grant of grants) {
+      const id = grant.config.agentId;
+      let badge = this.badges.get(id);
+      if (!badge) {
+        badge = document.createElement('button');
+        badge.type = 'button';
+        badge.addEventListener('click', () => {
+          this.connections.toggleFollow(id);
+        });
+        this.badges.set(id, badge);
+        this.navigation.append(badge);
+      }
+      const identity = agentBadge(grant);
+      const following = this.connections.followingAgentId === id;
+      badge.className = identity.className;
+      badge.dataset.active = identity.dataset.active;
+      badge.dataset.agentId = id;
+      badge.setAttribute('aria-pressed', String(following));
+      badge.setAttribute(
+        'aria-label',
+        `${following ? 'Stop following' : 'Follow'} ${grant.config.name}`,
+      );
+      badge.title = `${badge.getAttribute('aria-label')} · ${grant.state === 'online' ? 'Connected' : 'Disconnected'}`;
+      badge.replaceChildren(...identity.childNodes);
+      if (following)
+        badge.append(createIcon(MousePointer2, 'agent-follow-icon'));
+    }
+    this.addButton.disabled =
+      !this.connections.available || this.connections.adding;
     this.retry.hidden = !this.project.hasUnsaved;
-    const online = [...this.grants.values()].filter(
-      grant => grant.state === 'online',
-    ).length;
-    this.status.dataset.state = !this.grants.size
+    const online = this.connections.onlineCount;
+    this.status.dataset.state = !grants.length
       ? 'closed'
-      : online === this.grants.size
+      : online === grants.length
         ? 'online'
         : 'connecting';
-    this.status.title = `${!this.grants.size ? 'No active agents' : `${online} of ${this.grants.size} local agents connected${online < this.grants.size ? ' · retrying disconnected agents' : ''}`}${this.project.hasUnsaved ? ' · Changes waiting to be saved' : ''}`;
+    this.status.title = `${!grants.length ? 'No active agents' : `${online} of ${grants.length} local agents connected${online < grants.length ? ' · retrying disconnected agents' : ''}`}${this.project.hasUnsaved ? ' · Changes waiting to be saved' : ''}`;
     this.status.setAttribute('aria-label', this.status.title);
     this.connectionToggle.title = this.status.title;
     this.connectionStatus.textContent = this.status.title;
     this.connectionUrl.textContent = '127.0.0.1 · one local port per agent';
-    this.revokeAll.disabled = !this.grants.size;
+    this.revokeAll.disabled = !grants.length;
     for (const [agentId, row] of this.rows) {
-      if (this.grants.has(agentId)) continue;
+      if (grants.some(grant => grant.config.agentId === agentId)) continue;
+      row.stopPort();
       row.element.remove();
       this.rows.delete(agentId);
     }
-    for (const grant of this.grants.values()) {
+    for (const grant of grants) {
       const agentId = grant.config.agentId;
       let row = this.rows.get(agentId);
       if (!row) {
@@ -226,15 +272,10 @@ export class AgentPanel {
       row.activity.textContent = grant.busy
         ? 'Working'
         : grant.lastSeen
-          ? 'Last active ' + new Date(grant.lastSeen).toLocaleTimeString()
+          ? ''
           : 'Never connected';
+      row.activity.hidden = !row.activity.textContent;
       row.identity.replaceChildren(agentBadge(grant), row.activity);
-      const cursor = this.editor.agentCursor(agentId);
-      row.location.hidden = !cursor.invalid && !cursor.ref;
-      row.location.textContent = cursor.invalid
-        ? 'Cursor lost'
-        : (cursor.ref?.file ?? '');
-      row.location.title = row.location.textContent;
       if (
         this.displayedAgentId === agentId &&
         this.promptSection.parentElement !== row.element
@@ -243,7 +284,7 @@ export class AgentPanel {
     }
   }
 
-  private createRow(grant: Grant): AgentRow {
+  private createRow(grant: AgentGrant): AgentRow {
     const row = document.createElement('div');
     row.className = 'agent-row';
     const summary = document.createElement('div');
@@ -252,23 +293,16 @@ export class AgentPanel {
     activity.className = 'agent-row-status';
     const identity = document.createElement('div');
     identity.className = 'agent-row-identity';
-    const location = document.createElement('span');
-    location.className = 'agent-row-location';
-    summary.append(identity, location);
+    summary.append(identity);
     const actions = document.createElement('div');
     actions.className = 'agent-row-actions';
     const revoke = button('Revoke', () =>
       this.run(async () => {
-        await this.persist(grant.config.agentId);
-        grant.host?.close();
-        grant.endpoint.close();
-        this.grants.delete(grant.config.agentId);
-        this.editor.removeAgentCursor(grant.config.agentId);
+        await this.connections.revoke(grant.config.agentId);
         if (this.displayedAgentId === grant.config.agentId) {
           this.hidePrompt();
           this.message.textContent = 'Agent revoked.';
         }
-        this.refresh();
       }),
     );
     revoke.classList.add('button-danger');
@@ -282,7 +316,13 @@ export class AgentPanel {
     port.min = '1024';
     port.max = '65535';
     port.step = '1';
-    port.value = String(grant.config.port);
+    const stopPort = reaction(
+      () => grant.config.port,
+      value => {
+        port.value = String(value);
+      },
+      {fireImmediately: true},
+    );
     port.className = 'agent-port-input';
     port.setAttribute('aria-label', `${grant.config.name} port`);
     port.addEventListener('change', () =>
@@ -295,122 +335,72 @@ export class AgentPanel {
     local.append(portLabel, port);
     actions.prepend(local);
     row.append(summary, actions);
-    return {element: row, identity, activity, location};
+    return {element: row, identity, activity, stopPort};
   }
 
   private add(): void {
-    if (this.adding) return;
     const name = this.name.value.trim() || this.suggestName();
-    this.adding = true;
-    this.refresh();
-    const generation = this.generation;
-    this.run(
-      async () => {
-        await this.initialization;
-        if (!this.available || generation !== this.generation) return;
-        if (this.grants.size >= 16)
-          throw new Error(
-            'This page supports up to 16 agent grants. Revoke an unused grant first.',
-          );
-        const port = this.availablePort(Number(this.port.value));
-        this.sessionId ??= crypto.randomUUID();
-        const config = createAgentConfig({
-          port,
-          origin: location.origin,
-          sessionId: this.sessionId,
-          name,
-        });
-        const endpoint = await this.createEndpoint(config);
-        if (generation !== this.generation) {
-          endpoint.close();
-          return;
-        }
-        const grant: Grant = {
-          config,
-          color: randomAgentColor(),
-          endpoint,
-          busy: 0,
-          interacted: false,
-          state: 'closed',
-        };
-        this.grants.set(config.agentId, grant);
-        try {
-          await this.persist();
-        } catch (error) {
-          this.grants.delete(config.agentId);
-          endpoint.close();
-          if (!this.grants.size) this.sessionId = undefined;
-          throw error;
-        }
-        if (generation !== this.generation) return;
-        this.editor.setAgentCursor(
-          config.agentId,
-          config.name,
-          undefined,
-          grant.color,
-        );
-        this.connect(grant);
-        this.port.value = String(
-          randomAgentPort(
-            [...this.grants.values()].map(grant => grant.config.port),
-          ),
-        );
-        this.name.value = this.suggestName();
-        await this.copy(config.agentId, agentPrompt(config, true));
-      },
-      () => {
-        this.adding = false;
-      },
-    );
-  }
-
-  private async handle(agentId: string, envelope: unknown): Promise<unknown> {
-    const grant = this.grants.get(agentId);
-    if (!grant)
-      throw new AgentError(
-        'unknown_agent',
-        'This agent grant is absent or revoked.',
+    const port = Number(this.port.value);
+    this.run(async () => {
+      const grant = await this.connections.add(name, port);
+      if (!grant || this.listeners.signal.aborted) return;
+      this.revealCreateForm();
+      this.port.value = String(
+        randomAgentPort(
+          this.connections.grants.map(grant => grant.config.port),
+        ),
       );
-    grant.busy++;
-    this.refresh();
-    try {
-      const result = await grant.endpoint.handle(envelope);
-      return result;
-    } finally {
-      grant.busy--;
-      this.refresh();
-    }
+      this.name.value = this.suggestName();
+      this.refreshNameLink();
+      await this.copy(grant.config.agentId, agentPrompt(grant.config, true));
+    });
   }
 
-  private createEndpoint(config: AgentConfig): Promise<AgentEndpoint> {
-    return AgentEndpoint.create(
-      config,
-      request => this.project.handle(config.agentId, config.name, request),
+  private revealCreateForm(): void {
+    this.finishCreateAnimation();
+    if (
+      !this.dialog.open ||
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    )
+      return;
+    this.createForm.inert = true;
+    this.createFields.disabled = true;
+    this.createForm.classList.add('agent-create-revealing');
+    const animation = this.createForm.animate(
+      {gridTemplateRows: ['0fr', '1fr'], opacity: [0, 1]},
       {
-        journal: this.storage!.journal(config),
-        onRequest: async () => {
-          const grant = this.grants.get(config.agentId)!;
-          grant.interacted = true;
-          grant.lastSeen = new Date().toISOString();
-          this.refresh();
-          await this.storage!.recordActivity(config, grant.lastSeen);
-        },
+        delay: 80,
+        duration: 360,
+        easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
+        fill: 'backwards',
       },
     );
+    animation.onfinish = () => this.finishCreateAnimation();
   }
 
-  private copyGrant(grant: Grant, initial: boolean): void {
+  private finishCreateAnimation(): void {
+    for (const animation of this.createForm.getAnimations()) animation.cancel();
+    this.createForm.classList.remove('agent-create-revealing');
+    this.createForm.inert = false;
+    this.createFields.disabled = false;
+  }
+
+  private copyGrant(grant: AgentGrant, initial: boolean): void {
     const value = agentPrompt(grant.config, initial);
     this.run(() => this.copy(grant.config.agentId, value));
   }
 
   private async copy(agentId: string, value: string): Promise<void> {
-    if (!this.grants.has(agentId)) return;
-    this.displayedAgentId = agentId;
+    if (
+      !this.connections.grants.some(grant => grant.config.agentId === agentId)
+    )
+      return;
+    runInAction(() => {
+      this.displayedAgentId = agentId;
+    });
     this.prompt.value = value;
     this.clearPromptMessage();
     const generation = this.promptGeneration;
-    this.refresh();
     this.rows.get(agentId)!.element.scrollIntoView({block: 'nearest'});
     try {
       await navigator.clipboard.writeText(value);
@@ -431,7 +421,9 @@ export class AgentPanel {
   }
 
   private hidePrompt(): void {
-    this.displayedAgentId = undefined;
+    runInAction(() => {
+      this.displayedAgentId = undefined;
+    });
     this.prompt.value = '';
     this.clearPromptMessage();
     this.promptSection.remove();
@@ -446,185 +438,82 @@ export class AgentPanel {
       animation.cancel();
   }
 
-  private async restore(): Promise<void> {
-    if (!this.workspace)
-      throw new Error('Reconnect the project folder to activate its agents.');
-    const generation = this.generation;
-    const suggestedName = this.name.value;
-    const storage = await AgentPersistence.open(this.workspace);
-    if (generation !== this.generation) {
-      await storage.close();
-      return;
+  private refreshNameLink(): void {
+    const person = findAgentName(this.name.value);
+    this.nameWho.hidden = !person;
+    this.nameWho.textContent = person ? `${person.name} who?` : '';
+    this.name.style.paddingRight = person
+      ? `calc(${person.name.length + 5}ch + 18px)`
+      : '';
+    if (person) {
+      this.nameWho.href = `https://en.wikipedia.org/wiki/${encodeURIComponent(person.article)}`;
+      this.nameWho.title = `Read about ${person.name} on Wikipedia (opens in a new tab)`;
+    } else {
+      this.nameWho.removeAttribute('href');
+      this.nameWho.removeAttribute('title');
     }
-    this.storage = storage;
-    const saved = await storage.load();
-    if (generation !== this.generation) return;
-    if (saved) {
-      const restored = await Promise.all(
-        saved.grants.map(async ({config, color, lastSeen}) => {
-          const endpoint = await this.createEndpoint(config);
-          return {
-            config,
-            color,
-            endpoint,
-            lastSeen,
-            busy: 0,
-            interacted: false,
-            state: 'closed' as const,
-          };
-        }),
-      );
-      if (generation !== this.generation) {
-        for (const grant of restored) grant.endpoint.close();
-        return;
-      }
-      this.sessionId = saved.sessionId;
-      for (const grant of restored) {
-        this.grants.set(grant.config.agentId, grant);
-        this.editor.setAgentCursor(
-          grant.config.agentId,
-          grant.config.name,
-          undefined,
-          grant.color,
-        );
-      }
-      if (this.name.value === suggestedName)
-        this.name.value = this.suggestName();
-      for (const grant of this.grants.values()) this.connect(grant);
-      this.port.value = String(
-        randomAgentPort(
-          [...this.grants.values()].map(grant => grant.config.port),
-        ),
-      );
-    }
-    this.available = true;
   }
 
   private suggestName(): string {
     return randomAgentName(
-      [...this.grants.values()].map(grant => grant.config.name),
+      this.connections.grants.map(grant => grant.config.name),
     );
   }
 
-  private availablePort(value: number, agentId?: string): number {
-    const port = parsePort(value);
-    if (
-      [...this.grants.values()].some(
-        grant => grant.config.agentId !== agentId && grant.config.port === port,
-      )
-    )
-      throw new Error(
-        'Another agent in this project uses that port. Choose a different port.',
-      );
-    return port;
-  }
-
   private async updatePort(
-    grant: Grant,
+    grant: AgentGrant,
     input: HTMLInputElement,
   ): Promise<void> {
-    if (!this.available) return;
-    const generation = this.generation;
-    const previous = grant.config;
+    if (Number(input.value) === grant.config.port) return;
     try {
-      const port = this.availablePort(Number(input.value), previous.agentId);
-      if (port === previous.port) return;
-      grant.config = {...previous, port};
-      await this.persist();
+      await this.connections.updatePort(
+        grant.config.agentId,
+        Number(input.value),
+      );
     } catch (error) {
-      grant.config = previous;
-      input.value = String(previous.port);
+      input.value = String(grant.config.port);
       throw error;
     }
-    if (generation !== this.generation) return;
-    grant.host?.close();
-    this.connect(grant);
+    if (this.listeners.signal.aborted) return;
     await this.copy(grant.config.agentId, agentPrompt(grant.config, true));
     this.message.textContent =
       'Port saved. Give the updated prompt to your agent to restart its CLI service.';
   }
 
-  private connect(grant: Grant): void {
-    grant.host = new LocalHost({
-      config: grant.config,
-      stateChanged: state => {
-        grant.state = state;
-        this.refresh();
-      },
-      handle: envelope => {
-        const pending = this.handle(grant.config.agentId, envelope);
-        this.inFlight.add(pending);
-        void pending
-          .finally(() => this.inFlight.delete(pending))
-          .catch(() => {});
-        return pending;
-      },
-    });
-  }
-
-  private persist(excludeAgentId?: string): Promise<void> {
-    return this.storage!.save(
-      this.sessionId
-        ? {
-            sessionId: this.sessionId,
-            grants: [...this.grants.values()]
-              .filter(grant => grant.config.agentId !== excludeAgentId)
-              .map(({config, color, lastSeen}) => ({config, color, lastSeen})),
-          }
-        : undefined,
-    );
-  }
-
-  private suspend(): void {
-    this.clearPromptMessage();
-    this.generation++;
-    this.available = false;
-    for (const grant of this.grants.values()) {
-      grant.host?.close();
-      grant.endpoint.close();
-    }
-    void Promise.allSettled([...this.inFlight]).then(() =>
-      this.storage?.close(),
-    );
-  }
-
   private async end(): Promise<void> {
-    await this.initialization;
-    await this.storage!.save();
-    this.generation++;
-    this.sessionId = undefined;
-    for (const grant of this.grants.values()) {
-      grant.host?.close();
-      grant.endpoint.close();
-      this.editor.removeAgentCursor(grant.config.agentId);
-    }
-    this.grants.clear();
+    await this.connections.end();
+    this.finishCreateAnimation();
     this.hidePrompt();
     this.message.textContent = 'All agent access revoked.';
-    this.refresh();
   }
 
-  private run(operation: () => Promise<void>, finallyRun?: () => void): void {
-    this.operations = this.operations
-      .then(operation)
-      .catch(error => {
+  dispose(): void {
+    this.stopRendering();
+    for (const row of this.rows.values()) row.stopPort();
+    this.listeners.abort();
+    this.clearPromptMessage();
+    this.finishCreateAnimation();
+    this.dialog.close();
+    this.dialog.remove();
+    this.navigation.remove();
+  }
+
+  private run(operation: () => Promise<void>): void {
+    void operation().catch(error => {
+      if (!this.listeners.signal.aborted)
         this.message.textContent =
           error instanceof Error ? error.message : 'Agent session failed.';
-      })
-      .finally(() => {
-        finallyRun?.();
-        this.refresh();
-      });
+    });
   }
 }
 
-function agentBadge(grant: Grant): HTMLSpanElement {
+function agentBadge(grant: AgentGrant): HTMLSpanElement {
   const badge = document.createElement('span');
   badge.className = `agent-badge agent-color-${grant.color}`;
-  badge.title = `${grant.config.name} · ${grant.interacted ? 'Has interacted in this page' : 'No interaction since this page opened'}`;
+  badge.dataset.active = String(grant.active);
+  badge.title = `${grant.config.name} · ${grant.state === 'online' ? 'Connected' : 'Disconnected'} · ${grant.interacted ? 'Has interacted in this page' : 'No interaction since this page opened'}`;
   const dot = document.createElement('span');
   dot.className = 'agent-badge-dot';
-  dot.classList.toggle('interacted', grant.interacted);
   dot.setAttribute('aria-hidden', 'true');
   const name = document.createElement('span');
   name.className = 'agent-badge-name';

@@ -2,8 +2,13 @@ import type * as CoreTooling from '@code3d/core/tooling';
 import type * as Replicad from 'replicad';
 import type {ProjectFileReader} from '../project/file-reader';
 import {ProjectBuilder, type ProjectBundle} from '../project/project-builder';
-import {ModuleEvaluator, type ModuleExports} from './module-evaluator';
+import {
+  ModuleEvaluator,
+  executableModuleSource,
+  type ModuleExports,
+} from './module-evaluator';
 import type {CompilationProgress} from './compilation-progress';
+import {runtimeArtifactIdentity} from './persistent-artifacts';
 
 const runtimeUrl = 'code3d-project:/runtime.js';
 
@@ -19,6 +24,12 @@ export class ProjectRuntime {
   >();
   private readonly failed = new Map<string, unknown>();
   private constructor(
+    readonly artifactIdentity: string,
+    readonly snapshotRuntime: {
+      url: string;
+      wasm: Uint8Array;
+      sketchWasm: Uint8Array;
+    },
     readonly tooling: typeof CoreTooling,
     readonly replicad: typeof Replicad,
     readonly modules: Map<string, ModuleExports>,
@@ -32,6 +43,7 @@ export class ProjectRuntime {
     builder: ProjectBuilder,
     evaluator: ModuleEvaluator,
     onProgress?: CompilationProgress,
+    rootPath = '/model.ts',
   ): Promise<ProjectRuntime> {
     onProgress?.('loading-runtime');
     const resolve = async (specifier: string, importer?: string) => {
@@ -40,9 +52,9 @@ export class ProjectRuntime {
         throw new Error(`Required runtime entry is disabled: ${specifier}`);
       return path;
     };
-    const toolingPath = await resolve('@code3d/core/tooling');
-    const corePath = await resolve('@code3d/core');
-    const interopPath = await resolve('@code3d/core/replicad');
+    const toolingPath = await resolve('@code3d/core/tooling', rootPath);
+    const corePath = await resolve('@code3d/core', rootPath);
+    const interopPath = await resolve('@code3d/core/replicad', rootPath);
     const replicadPath = await resolve('replicad', toolingPath);
     const loaderPath = await resolve('@code3d/opencascade', toolingPath);
     const wasmPath = await resolve('@code3d/opencascade/wasm', toolingPath);
@@ -54,6 +66,7 @@ export class ProjectRuntime {
       '@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm',
       toolingPath,
     );
+    const fontEnginePath = await resolve('harfbuzzjs', toolingPath);
     const entry = [
       toolingPath,
       corePath,
@@ -61,13 +74,14 @@ export class ProjectRuntime {
       loaderPath,
       replicadPath,
       sketchLoaderPath,
+      fontEnginePath,
     ]
       .map(
         (path, index) =>
           `export * as entry${index} from ${JSON.stringify(path)};`,
       )
       .join('\n');
-    const discovery = await builder.build(entry);
+    const discovery = await builder.build(entry, {instrumentCaches: false});
     const paths = discovery.files;
     const runtimeSource =
       paths
@@ -81,6 +95,7 @@ export class ProjectRuntime {
         .map((path, index) => `[${JSON.stringify(path)}, module${index}]`)
         .join(',')}]);
       export const tooling = modules.get(${JSON.stringify(toolingPath)});
+      tooling.installFontEngine(modules.get(${JSON.stringify(fontEnginePath)}));
       const initialize = modules.get(${JSON.stringify(loaderPath)}).default;
       const kernel = await initialize({
         wasmBinary: __code3dKernelBytes,
@@ -96,7 +111,7 @@ export class ProjectRuntime {
       }));
     `;
     const [bundle, wasm, sketchWasm] = await Promise.all([
-      builder.build(runtimeSource),
+      builder.build(runtimeSource, {instrumentCaches: false}),
       files.readFile(wasmPath),
       files.readFile(sketchWasmPath),
     ]);
@@ -111,7 +126,43 @@ export class ProjectRuntime {
       __code3dKernelBytes: wasm,
       __code3dSketchBytes: sketchWasm,
     });
+    // ProjectAssets rewrites loader URLs to fresh blob: addresses. Hash the
+    // actual input files instead of that ephemeral bundle text. File paths bind
+    // each input to its resolution, and raw bytes include the Core codec itself.
+    const identityPaths = [
+      ...new Set([...bundle.files, ...bundle.resources]),
+    ].sort();
+    const identityFiles = await Promise.all(
+      identityPaths.map(async path => {
+        const bytes = await files.readFile(path);
+        if (!bytes) throw new Error(`Runtime input is missing: ${path}`);
+        return bytes;
+      }),
+    );
     return new ProjectRuntime(
+      await runtimeArtifactIdentity([
+        new TextEncoder().encode(
+          JSON.stringify([runtimeSource, identityPaths]),
+        ),
+        ...identityFiles,
+        wasm,
+        sketchWasm,
+      ]),
+      {
+        url: URL.createObjectURL(
+          new Blob(
+            [
+              executableModuleSource(runtimeUrl, bundle.source, [
+                '__code3dKernelBytes',
+                '__code3dSketchBytes',
+              ]),
+            ],
+            {type: 'text/javascript'},
+          ),
+        ),
+        wasm,
+        sketchWasm,
+      },
       runtime.tooling,
       runtime.modules.get(replicadPath),
       runtime.modules,
@@ -122,6 +173,8 @@ export class ProjectRuntime {
   }
 
   dispose(): void {
+    URL.revokeObjectURL(this.snapshotRuntime.url);
+    this.tooling.clearKernelOperationCache();
     this.modules.clear();
     this.formats.clear();
     this.imported.clear();
@@ -207,6 +260,7 @@ export class ProjectRuntime {
               bundle.source,
               {
                 __code3dModules: this.modules,
+                __code3dCachedFunction: this.tooling.identifyCachedFunction,
                 __code3dImport: this.importModule,
                 __code3dRecordModule: (
                   file: string,

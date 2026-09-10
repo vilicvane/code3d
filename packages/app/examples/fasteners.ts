@@ -10,10 +10,10 @@ const hole = ISO4762.clearanceHole('M6', {
   fit: 'normal',
   counterbore: true,
 }).relate(tool => tool.shaftBottom.on(plate.down.flip()));
-const preparedPlate = cut(plate, [hole]).paint(dark);
+const preparedPlate = cut(plate, [hole]).material(dark);
 
 const screw = ISO4762.screw('M6', 18)
-  .paint(accent)
+  .material(accent)
   .relate(part =>
     part.headBottom.on(hole.counterboreBottom.flip()).offset(0, -1, 0),
   );

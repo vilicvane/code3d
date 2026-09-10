@@ -11,22 +11,27 @@ import type {
   TopologyInspectionOptions,
 } from '@code3d/core/tooling';
 import type {SketchDrag, SketchDragPreview} from './sketch-drag';
+import type {CompilationCancellation} from './compilation-cancellation';
 
 export type CompileRequest = Readonly<{
   kind: 'compile';
   id: number;
+  cancellation: CompilationCancellation;
   project: ModelProject;
   rootPath: string;
   designContext?: DesignContext;
 }>;
 
-export type FileRequest = Readonly<{
-  kind: 'file';
-  id: number;
-  operation: 'readFile' | 'stat';
-  source: 'project' | 'builtin';
-  path: string;
-}>;
+export type FileQuery =
+  | Readonly<{operation: 'readFile' | 'stat'; path: string}>
+  | Readonly<{operation: 'statMany'; paths: readonly string[]}>;
+
+export type FileRequest = FileQuery &
+  Readonly<{
+    kind: 'file';
+    id: number;
+    source: 'project' | 'builtin';
+  }>;
 
 export type CompilerRequest =
   | CompileRequest
@@ -53,12 +58,14 @@ export type CompilerRequest =
   | Readonly<{
       kind: 'file-result';
       id: number;
-      value?: Uint8Array | ProjectFileInfo;
+      value?:
+        Uint8Array | ProjectFileInfo | readonly (ProjectFileInfo | undefined)[];
       error?: string;
     }>;
 
 export type CompilerResponse =
   | FileRequest
+  | Readonly<{kind: 'cancelled'; id: number}>
   | Readonly<{
       kind: 'topology';
       id: number;

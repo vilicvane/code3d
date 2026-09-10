@@ -198,8 +198,8 @@ test('whole overlap removal cleans all newly orphaned endpoints and their constr
   assert.deepEqual(change.entries, []);
   assert.deepEqual(change.constraints, [0, 3, 4]);
   assert.deepEqual(change.constraintReplacements, [
-    {index: 1, ids: []},
-    {index: 2, ids: []},
+    {index: 1, targets: []},
+    {index: 2, targets: []},
   ]);
 });
 
@@ -272,10 +272,10 @@ test('computed cut points are shared by all overlapping survivors and direction 
     ],
   );
   assert.deepEqual(change.constraintReplacements, [
-    {index: 0, ids: [17, 18]},
-    {index: 1, ids: []},
-    {index: 2, ids: [14, 16]},
-    {index: 3, ids: []},
+    {index: 0, targets: [17, 18]},
+    {index: 1, targets: []},
+    {index: 2, targets: [14, 16]},
+    {index: 3, targets: []},
   ]);
 });
 

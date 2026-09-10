@@ -1,4 +1,4 @@
-import type {SketchChange} from '../tools/sketch-source';
+import type {SketchChange, SketchDimensionValue} from '../tools/sketch-source';
 import type {SketchConstraintAction} from '../tools/sketch-constraint-actions';
 import {
   DrawingDimensions,
@@ -7,6 +7,7 @@ import {
 import {DrawingInputs} from './drawing-inputs';
 import {SketchToolbar} from './sketch-toolbar';
 import {sketchConstraintIcons} from './sketch-icons';
+import type {SketchPointAddress} from '@code3d/core/tooling';
 import {
   sketchConstraintDimensions,
   sketchConstraintNames,
@@ -28,21 +29,38 @@ export class SketchConstraintTools {
   );
   private actions: readonly SketchConstraintAction[] = [];
   private identity = '';
+  private hovered?: SketchConstraintAction['kind'];
   private current?: {
     kind: SketchConstraintAction['kind'];
     field: DrawingDimension;
     value: number;
-    create(value: number): SketchChange;
+    create(value: SketchDimensionValue): SketchChange;
     dimensions: DrawingDimensions;
   };
 
   constructor(
     private readonly commit: (change: SketchChange) => boolean,
     private readonly focusCanvas: () => void,
+    private readonly highlight: () => void,
   ) {
     this.root.className = 'sketch-constraint-tools';
     this.root.hidden = true;
     this.root.append(this.toolbar.root);
+    const hover = (event: Event) => {
+      const target =
+        event.target instanceof Element ? event.target.closest('button') : null;
+      this.hovered = this.actions.find(
+        a => a.name === target?.getAttribute('aria-label'),
+      )?.kind;
+      this.highlight();
+    };
+    this.root.addEventListener('pointerover', hover);
+    this.root.addEventListener('focusin', hover);
+    for (const name of ['pointerleave', 'focusout'])
+      this.root.addEventListener(name, () => {
+        this.hovered = undefined;
+        this.highlight();
+      });
     this.inputs.root.addEventListener('keydown', event => {
       if (event.key === 'Escape') {
         event.preventDefault();
@@ -50,6 +68,16 @@ export class SketchConstraintTools {
         this.cancel();
       }
     });
+  }
+
+  related(layer: string, id: number): boolean {
+    return (
+      this.actions
+        .find(a => a.kind === this.hovered)
+        ?.related.some(
+          (p: SketchPointAddress) => p.layer === layer && p.id === id,
+        ) ?? false
+    );
   }
 
   show(identity: string, actions: readonly SketchConstraintAction[]): void {
@@ -100,7 +128,7 @@ export class SketchConstraintTools {
 
   private activate(kind: SketchConstraintAction['kind']): void {
     const action = this.actions.find(a => a.kind === kind)!;
-    if (!action.dimension || action.active === true) {
+    if (!action.dimension || action.active) {
       this.cancel();
       this.commit(action.create());
       this.focusCanvas();
@@ -112,6 +140,7 @@ export class SketchConstraintTools {
   edit(
     index: number,
     kind: SketchConstraintAction['kind'],
+    source: string,
     value: number,
   ): void {
     // A local relation may target only read-only upstream points, in which
@@ -121,21 +150,21 @@ export class SketchConstraintTools {
       kind,
       value,
       value => ({kind: 'dimension', index, value}),
-      true,
+      source,
     );
   }
 
   private openValue(
     kind: SketchConstraintAction['kind'],
     value: number,
-    create: (value: number) => SketchChange,
-    editing = false,
+    create: (value: SketchDimensionValue) => SketchChange,
+    source?: string,
   ): void {
     const field = sketchConstraintDimensions[kind]!;
-    const dimensions = new DrawingDimensions([field]);
-    // Editing starts with the complete authored number selected, never the
-    // shortened display label. Adding still accepts an empty displayed default.
-    if (editing) dimensions.set(field.id, String(value));
+    const dimensions = new DrawingDimensions([field], undefined, true);
+    // Edit the complete author expression, never its shortened evaluated label.
+    // Adding still accepts an empty displayed default.
+    if (source !== undefined) dimensions.set(field.id, source);
     this.current = {kind, field, value, create, dimensions};
     this.root.append(this.inputs.root);
     this.inputs.show(sketchConstraintNames[kind], dimensions, {
@@ -154,7 +183,8 @@ export class SketchConstraintTools {
       this.inputs.report(error);
       return;
     }
-    if (this.commit(create(dimensions.value(id) ?? value))) {
+    const text = dimensions.text(id).trim();
+    if (this.commit(create(text ? (dimensions.value(id) ?? text) : value))) {
       this.cancel();
       this.focusCanvas();
     } else this.inputs.report('The sketch changed; select the geometry again.');

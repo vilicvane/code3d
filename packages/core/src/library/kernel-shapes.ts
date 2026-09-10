@@ -11,6 +11,7 @@ import {
 import type {
   NCollection_List_TopoDS_Shape,
   TopoDS_Shape,
+  gp_Trsf,
 } from 'replicad-opencascadejs';
 
 export function centeredBoxShape(x: number, y: number, z: number): Shape3D {
@@ -105,5 +106,30 @@ export function consumeShapeList(
     throw error;
   } finally {
     list.delete();
+  }
+}
+
+/** Borrows the input and owns every builder/returned native handle. */
+export function transformShape<Shape extends AnyShape>(
+  source: Shape,
+  configure: (transform: gp_Trsf) => void,
+): Shape {
+  const oc = getOC();
+  const transform = new oc.gp_Trsf();
+  try {
+    configure(transform);
+    const builder = new oc.BRepBuilderAPI_Transform(
+      source.wrapped,
+      transform,
+      true,
+      false,
+    );
+    try {
+      return castOwnedShape(builder.ModifiedShape(source.wrapped)) as Shape;
+    } finally {
+      builder.delete();
+    }
+  } finally {
+    transform.delete();
   }
 }

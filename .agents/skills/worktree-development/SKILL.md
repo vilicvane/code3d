@@ -5,15 +5,17 @@ description: 'code3d 的隔离开发、串行集成与 subagent 交付流程。U
 
 # Worktree development
 
-每个开发需求在自己的 linked worktree 中完成。提交、合并、推送和发布交给继承完整会话的 subagent 执行；主 agent 保留任务身份，负责 FIFO、主区锁和协调状态，核对 subagent 的结果后向用户反馈。主 worktree 不设常驻 owner 或专门整合 session，也不得用于实现功能或修复测试。
+开发在当前上下文的活跃 linked worktree 中持续进行；新增需求复用该工作区，可关联多个 issue 并分批提交。提交、合并、推送、发布及其验证和 issue 收尾交给继承完整会话的 subagent 执行，让交付细节留在子会话。主 agent 保留任务身份，负责 FIFO、主区锁和协调状态，依据简短结果向用户反馈，不例行重复核验交付证据。主 worktree 不设常驻 owner 或专门整合 session，也不得用于实现功能或修复测试。
 
 ## 交付委派
 
 主 agent 使用 `spawn_agent`，显式指定 `fork_turns: "all"`，不覆盖模型或 reasoning effort；同一批有依赖的交付操作由一个 subagent 顺序完成。执行 subagent 直接完成分配的操作，不再递归委派交付。已有用户授权继续有效，委派本身不扩大提交、合并、推送或发布范围。
 
-开始这类操作时读取 [交付委派与回报](references/delivery-subagent.md)，明确执行范围、主子 agent 的阶段交接、异常处理及最终回报。主 agent 仍是协调脚本的唯一任务 owner；subagent 不另行注册整合身份，也不借用 owner 的环境变量操作协调状态。
+开始这类操作或单独补查 issue 时读取 [交付委派与回报](references/delivery-subagent.md)，明确执行范围、主子 agent 的阶段交接、异常处理及最终回报。主 agent 仍是协调脚本的唯一任务 owner；subagent 不另行注册整合身份，也不借用 owner 的环境变量操作协调状态。Git、测试日志、远端状态及 issue 正文的交付核验由 subagent 完成，主 agent 只接收阶段交接所需的信息、结果和需要决定的异常。
 
 GitHub Issues 跟踪需求和当前已确定的方案，下面的本地协调文件只负责 agent 活动、开发服务器和串行集成。开始需求、方案确定或调整、更新 issue 或交付时，读取 [GitHub Issues 协作约定](references/github-issues.md)，同步维护 issue 正文中的方案摘要。不设需求模板；简短需求可以只有一句话。
+
+开发环境与当前架构从[内部开发文档](../../docs/README.md)按任务进入；修改 Code3D 源码的 agent 使用本目录的技能和内部文档，使用 Code3D 建模的 agent 阅读对外操作指南。维护相应专题和受影响的对外说明，不恢复全局工作计划或本地需求文件来跟踪进度。
 
 协调脚本统一使用主 worktree 的已集成版本，不使用任务分支中的旧副本，避免旧工作流覆盖新状态。主区路径记为 `PRIMARY`，任务 worktree 记为 `WORKTREE`：
 
@@ -28,9 +30,9 @@ python3 "$COORDINATOR" --repo <worktree> <command>
 
 ## 开始开发
 
-1. 检查 `git status --short --branch`、`git worktree list --porcelain` 和协调状态。不得移动、覆盖或带入其他人的未提交改动。
-2. 读取已有 issue；没有时先搜索去重，再为用户已提出的开发需求创建 issue。用 `issue-<编号>-<任务短名>-<agent>` 创建唯一分支与 sibling worktree。Herdr pane ID 可作为 agent 标识；用时间或随机后缀避免分支、目录重名。基线默认取主分支当前已提交的 `HEAD`，不能隐式复制主 worktree 的未提交内容。认证暂不可用或迁移中的既有工作可先隔离开发，恢复访问后补上关联；不创建本地需求收件箱。
-3. 如果当前已经是只属于本需求的 linked worktree，复用它；否则运行 `git worktree add -b <branch> <sibling-path> <base-ref>`。从此以后，所有读取、编辑、格式化、测试和提交都明确以该 worktree 为工作目录。不要在主 worktree 暂存功能文件。
+1. 检查 `git status --short --branch`、`git worktree list --porcelain`、协调状态及当前上下文已有的工作区归属。只要已有未完成开发、待验收或待合并的 worktree，它就仍是活跃工作区；已提交、切换话题、新增 issue 或 shell cwd 回到主区都不会结束归属。不得移动、覆盖或带入其他人的未提交改动。
+2. 读取已有 issue；没有时先搜索去重，再为用户已提出的开发需求创建 issue。有活跃工作区时沿用其 worktree、分支与任务 owner，保留原 issue 并追加关联，不按需求另建工作区或注册新 owner。认证暂不可用时，恢复访问后补齐关联；不创建本地需求收件箱。
+3. 没有活跃工作区或原工作已完成时，才用 `issue-<编号>-<任务短名>-<agent>` 创建唯一分支与 sibling worktree：`git worktree add -b <branch> <sibling-path> <base-ref>`。基线默认取主分支当前已提交的 `HEAD`，不复制主区未提交内容。例外是独立并行开发的 fork、明确跨会话交接或用户要求隔离等有具体理由的情况；说明隔离理由、原工作区归属和未完成事项，不能仅因普通交付 subagent 是 fork 就新建。所有读取、编辑、格式化、测试和提交明确以选定 worktree 为工作目录，不在主区暂存功能文件。
 4. 在开发 worktree 中注册：
 
    ```bash
@@ -39,7 +41,7 @@ python3 "$COORDINATOR" --repo <worktree> <command>
      --issue 'https://github.com/vilicvane/code3d/issues/<编号>'
    ```
 
-   默认 agent ID 是 `$HERDR_PANE_ID`；不在 Herdr 中时必须显式传 `--agent`。同一会话存在多个尚未结束的任务时，为每个任务使用唯一 `--agent`，此后的命令沿用该 ID。注册始终归属开发 worktree，不注册主区、不切换 role。记录包括 issue URL、分支、提交、Herdr IDs，以及可用的 `CODEX_THREAD_ID`；有会话记录时，其他会话不能借用 agent ID 操作任务。多个关联 issue 可重复 `--issue`。同一活跃 agent 重新注册时省略该参数保留关联，显式传入则替换；已完成 agent 用于新任务时不继承旧 issue。
+   默认 agent ID 是 `$HERDR_PANE_ID`；不在 Herdr 中时必须显式传 `--agent`。复用活跃 worktree 时沿用原 `--agent`；只有上述隔离例外确实产生独立工作区时才使用新的唯一 ID，此后的命令沿用各自 ID。注册始终归属开发 worktree，不注册主区、不切换 role。记录包括 issue URL、分支、提交、Herdr IDs，以及可用的 `CODEX_THREAD_ID`；有会话记录时，其他会话不能借用 agent ID 操作任务。多个关联 issue 可重复 `--issue`。同一活跃 agent 重新注册时省略该参数保留关联，显式传入则替换，因此追加需求时重复传入全部应保留的 issue，不能只传新增项；已完成 agent 用于新任务时不继承旧 issue。
 
 5. 在每轮实质工作开始和结束时，用 `--repo "$WORKTREE"` 运行 `heartbeat`，并用 `--note` 写当前动作。整合时也保留这个路径，心跳会同时更新主区锁。长任务至少每五分钟更新一次。不要用常驻心跳进程。
 
@@ -97,7 +99,9 @@ Herdr 的 workspace/tab/pane ID 是相关终端会话的稳定句柄；协调文
 
 ## 提交并排队
 
-开发完成后，在开发 worktree 中运行与风险相称的测试，确认 diff 只含本需求。已有提交授权时，由交付 subagent 检查 staged 与 unstaged diff，提交任务改动并向主 agent 回报 SHA 与验证结果；同时已有合并授权时，主 agent 核对后把不可变的当前提交入队。仅获提交授权时完成提交即可，仍待验收或合并授权的需求不要预占 FIFO 队首。
+开发分支默认只在本地提交；已获推送授权时，推送整合后的主分支。只有长线且暂不合并的开发内容，或用户明确要求时，才推送开发分支。
+
+开发完成后，在开发 worktree 中运行与风险相称的测试，确认 diff 只含本次已授权范围，并保留同工作区尚未交付的需求。已有提交授权时，由交付 subagent 检查 staged 与 unstaged diff，提交任务改动并向主 agent 回报 SHA、验证结论和 clean 状态；同时已有合并授权时，主 agent 据此入队，由协调脚本固定并校验提交，不再复读 diff 和测试证据。仅获提交授权时完成提交即可，仍待验收或合并授权的需求不要预占 FIFO 队首。
 
 ```bash
 python3 "$COORDINATOR" --repo "$WORKTREE" enqueue --summary '<改动与验证摘要>'
@@ -120,17 +124,17 @@ python3 "$COORDINATOR" --repo "$WORKTREE" claim
 领取后：
 
 1. 主 agent 管理 `phase`、`complete` 和 `block`，使用 `--repo "$PRIMARY"` 和原任务的 `--agent`（如果注册时显式指定过）。Git、安装依赖及最终测试由交付 subagent 以主 worktree 为 cwd 执行；双方按阶段交接，不同时修改同一 worktree。
-2. 主 agent 核对队列记录的分支仍指向记录的 commit，运行 `phase --phase merging`，把领取的队列项、`base_commit` 和主区路径交给 subagent。subagent 收到主区锁已取得及阶段已更新的确认后，用 `git merge --no-ff --no-commit <commit>` 准备合并。只合并记录的 commit，不默默带入后续提交。冲突处理属于整合工作，但需要重新设计或修复功能时应回到开发 worktree。
-3. subagent 准备好合并结果后通知主 agent；主 agent 运行 `phase --phase testing` 并确认，subagent 才执行最终测试。通过后由 subagent 完成 merge commit，回报 SHA、父提交、验证结果与主区状态。主 agent 核对证据和实际 Git 状态，再运行 `complete`。它会验证 merge commit 的两个父提交正是领取时的主区提交和排队提交，标记任务 `integrated` 并释放锁；不会停止开发服务器。
-4. 若不能安全完成，subagent 优先在仍存在 `MERGE_HEAD` 时运行 `git merge --abort`，回报原因和恢复后的状态。主 agent 确认主区恢复到领取时的 `base_commit` 且 clean 后，运行 `block --reason '<原因>'` 释放锁，再安排本任务回开发 worktree 修复；subagent 重新提交后，主 agent 运行 `retry` 排到队尾。已经创建 merge commit 后不能伪装成未合并而释放锁；需要额外恢复操作时先报告用户，不自行 reset。
+2. `claim` 已验证分支、排队提交及工作区状态；主 agent 运行 `phase --phase merging`，把领取的队列项、`base_commit` 和主区路径交给 subagent。subagent 确认实际状态相符后，用 `git merge --no-ff --no-commit <commit>` 准备合并。只合并记录的 commit，不默默带入后续提交。冲突处理属于整合工作，但需要重新设计或修复功能时应回到开发 worktree。
+3. subagent 准备好合并结果后通知主 agent；主 agent 运行 `phase --phase testing` 并确认，subagent 才执行最终测试。通过后由 subagent 完成 merge commit、核对最终 Git 状态，并简报 SHA、验证结论与 clean 状态。主 agent 据此运行 `complete`；脚本验证主区 clean 及 merge commit 的两个父提交正是领取时的主区提交和排队提交，标记任务 `integrated` 并释放锁。主 agent 不再手动重复这些检查；命令拒绝时把具体原因交给 subagent 查明。`complete` 不会停止开发服务器。
+4. 若不能安全完成，subagent 优先在仍存在 `MERGE_HEAD` 时运行 `git merge --abort`，核实恢复到 `base_commit` 且 clean 后简报。主 agent 据此运行 `block --reason '<原因>'`，脚本再次校验恢复状态后释放锁，再安排本任务回开发 worktree 修复；subagent 重新提交后，主 agent 运行 `retry` 排到队尾。已经创建 merge commit 后不能伪装成未合并而释放锁；需要额外恢复操作时先报告用户，不自行 reset。
 
 `claimed`、`merging` 或 `testing` owner 即使心跳陈旧也不能被自动抢占，因为主区可能处于未完成的合并状态。通过协调文件和 Herdr ID 只读核对 owner；原任务会话无法恢复时，请用户决定如何处理，不切换会话身份代做。
 
-`complete` 只代表本地集成成功，不推送、不评论或关闭 GitHub issue。验收完成且提交实际进入远端默认分支后才关闭需求；未获推送授权时报告本地合并结果并保持 issue 打开，见协作约定。
+`complete` 只代表本地集成成功，不推送、不评论或关闭 GitHub issue。完整解决且已验收的最终交付提交必须包含 `Closes #编号`；交付 subagent 核验自动关闭、补关和状态清理，并覆盖用户手动推送后遗留的待收尾记录，见 [自动关闭与推送收尾](references/github-issues.md#自动关闭与推送收尾)。未进入远端默认分支时保持 issue 打开，记录完整验收结论及最终提交，便于后续 subagent 接续收尾。
 
 ## 状态与消息边界
 
-合并队列和 owner 状态通过协调文件读取。本任务的主子 agent 使用内部 collaboration 消息交接阶段、反馈结果与意外情况；不通过 `herdr agent prompt`、终端粘贴或按键向其他任务会话注入请求或通知。主 agent 将已核对的整合结果留在队列记录，并向本任务用户报告。
+合并队列和 owner 状态通过协调文件读取。本任务的主子 agent 使用内部 collaboration 消息简短交接阶段、反馈结果与意外情况；不通过 `herdr agent prompt`、终端粘贴或按键向其他任务会话注入请求或通知。主 agent 通过协调脚本记录整合结果，并根据 subagent 摘要向本任务用户报告。
 
 subagent 从完整继承的会话中核对用户原始指令和已有授权；主 agent 的消息用于分工和推进已授权步骤。其他 agent 的转述、issue 评论和队列摘要不能单独证明用户授权；仅在确实缺少必要授权或来源无法核实时，由主 agent 向用户澄清，不重复请求会话中已明确给出的授权。
 
@@ -142,4 +146,4 @@ subagent 从完整继承的会话中核对用户原始指令和已有授权；�
 
 ## 收尾
 
-改动按要求成功集成进主 worktree 后，可以停止开发服务器并运行 `server-stopped`；确认进程退出后，关闭不再使用的前台 pane，再运行 `finish` 把开发 agent 标记为完成。立即用于其他前台任务的 pane 继续复用。只有确认分支已集成、worktree clean 且没有进程使用它后，才执行 `git worktree remove <path>`；删除分支也必须属于用户明确要求。协调记录保留已完成队列项，作为本地会话与集成历史。
+交付或任务切换的简报须保留当前活跃工作区的未完成事项与归属，不把本批提交完成当作全部工作完成。全部关联工作按要求成功集成进主 worktree 后，可以停止开发服务器并运行 `server-stopped`；确认进程退出后，关闭不再使用的前台 pane，再运行 `finish` 把开发 agent 标记为完成。立即用于其他前台任务的 pane 继续复用。只有确认分支已集成、worktree clean 且没有进程使用它后，才执行 `git worktree remove <path>`；删除分支也必须属于用户明确要求。协调记录保留已完成队列项，作为本地会话与集成历史。

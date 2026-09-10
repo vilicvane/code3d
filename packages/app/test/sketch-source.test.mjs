@@ -31,7 +31,7 @@ const trim = (
   entries,
   constraintReplacements: lineConstraints.map(({index, lines}) => ({
     index,
-    ids: lines,
+    targets: lines,
   })),
 });
 
@@ -78,6 +78,59 @@ function setup(source, before = '') {
     },
   };
 }
+
+test('line relation additions share one source transaction and preserve orientation and angle values separately', () => {
+  const model = setup(
+    "[['point',1,[width,0]]], {constraints: [['angle',3,theta]]}",
+  );
+  assert.equal(
+    model.edit({
+      kind: 'constrain',
+      data: [],
+      constraints: [
+        ['parallel', [3, 4]],
+        ['perpendicular', [4, 5]],
+        ['angle', [3, 5], -60],
+      ],
+    }).status,
+    'committed',
+  );
+  assert.match(model.source(), /\['parallel', \[3, 4\]\]/);
+  assert.match(model.source(), /\['perpendicular', \[4, 5\]\]/);
+  assert.match(model.source(), /\['angle', \[3, 5\], -60\]/);
+  assert.match(model.source(), /\['angle',3,theta\]/);
+  assert.equal(model.undo.length, 1);
+});
+
+test('pair target trim copies preserve target comments and dimension expressions, and reject hidden targets atomically', () => {
+  const original =
+    "[['point',1,[0,0]],['point',2,[40,0]],['point',3,[10,0]],['point',4,[30,0]],['line',5,[1,2]],['line',8,[3,4]]], {constraints:[['angle',[5, /* partner */ 8],theta]]}";
+  const model = setup(original);
+  const change = trim([
+    ['line', 9, [address(1), address(3)]],
+    ['line', 10, [address(4), address(2)]],
+  ]);
+  change.constraintReplacements = [
+    {
+      index: 0,
+      targets: [
+        [9, 8],
+        [10, 8],
+      ],
+    },
+  ];
+  assert.equal(model.edit(change).status, 'committed');
+  assert.match(model.source(), /\['angle',\[9, \/\* partner \*\/ 8\],theta\]/);
+  assert.match(model.source(), /\['angle',\[10, \/\* partner \*\/ 8\],theta\]/);
+  assert.equal(model.undo.length, 1);
+  for (const target of ['pair', '[5, partner]']) {
+    const source = original.replace('[5, /* partner */ 8]', target);
+    const hidden = setup(source);
+    assert.equal(hidden.edit(change).status, 'conflict');
+    assert.equal(hidden.source(), source);
+    assert.equal(hidden.undo.length, 0);
+  }
+});
 
 for (const newline of ['\n', '\r\n']) {
   for (const indentation of ['', '  ', '    ', '\t']) {
@@ -286,8 +339,9 @@ test('constraint value editing replaces only its exact literal in place and reta
   assert.deepEqual(
     [...analyzeSketchSource(source).constraintValues],
     [
-      [0, 20],
-      [1, 20],
+      [0, '20'],
+      [1, '+20'],
+      [2, 'width'],
     ],
   );
   assert.equal(
@@ -304,12 +358,18 @@ test('constraint value editing replaces only its exact literal in place and reta
   assert.equal(host.source(), before);
 });
 
-test('constraint value editing rejects expressions, missing indices and nonnumeric relations without rewriting source', () => {
+test('constraint value editing exposes author expressions but rejects missing values without rewriting source', () => {
   const source =
     "[['point',1,[0,0]]], {constraints: [['x',1,width],['y',1,(20)],['fixed',1]]}";
   const host = setup(source);
-  assert.equal(analyzeSketchSource(source).constraintValues.size, 0);
-  for (const index of [0, 1, 2, 3]) {
+  assert.deepEqual(
+    [...analyzeSketchSource(source).constraintValues],
+    [
+      [0, 'width'],
+      [1, '(20)'],
+    ],
+  );
+  for (const index of [2, 3]) {
     assert.equal(
       host.edit({kind: 'dimension', index, value: 30}).status,
       'unsupported',
@@ -317,6 +377,79 @@ test('constraint value editing rejects expressions, missing indices and nonnumer
     assert.equal(host.source(), source);
   }
   assert.deepEqual(host.undo, []);
+});
+
+test('dimension expressions replace only the selected source and retain exact author syntax', () => {
+  const original =
+    "[['point',1,[width,0]]], {constraints: [['x',1, /* value */ width],['y',1,0]]}";
+  for (const value of [
+    'width / 2',
+    'Math.max(width, 30)',
+    '(width as number) + 2',
+    'width /* scale */ / 2',
+  ]) {
+    const host = setup(original);
+    assert.equal(
+      host.edit({kind: 'dimension', index: 0, value}).status,
+      'committed',
+    );
+    assert.equal(
+      host.source(),
+      original.replace('/* value */ width', '/* value */ ' + value),
+    );
+    assert.deepEqual(host.undo, [original]);
+  }
+});
+
+test('constraint expression insertion rejects tuple escapes and supports comments atomically', () => {
+  const original = "[['point',1,[0,0]]], {constraints: [['x',1,0]]}";
+  for (const value of [
+    '',
+    'width /',
+    '10, 20',
+    '...values',
+    '1]; other(); [2',
+    'width,',
+  ]) {
+    const host = setup(original);
+    assert.equal(
+      host.edit({kind: 'dimension', index: 0, value}).status,
+      'unsupported',
+      value,
+    );
+    assert.equal(host.source(), original);
+    const added = host.edit({
+      kind: 'constrain',
+      data: [],
+      constraints: [['length', 3, value]],
+    });
+    assert.notEqual(added.status, 'committed', value);
+    assert.equal(host.source(), original);
+    assert.deepEqual(host.undo, []);
+  }
+  const host = setup(original);
+  assert.equal(
+    host.edit({
+      kind: 'constrain',
+      data: [],
+      constraints: [
+        ['length', 3, 'width / 2'],
+        ['length', 4, 'width // keep'],
+      ],
+    }).status,
+    'committed',
+  );
+  assert.equal(analyzeSketchSource(host.source()).reason, undefined);
+  assert.deepEqual(
+    Function('const width = 40; return [' + host.source() + ']')()[1]
+      .constraints,
+    [
+      ['x', 1, 0],
+      ['length', 3, 20],
+      ['length', 4, 40],
+    ],
+  );
+  assert.deepEqual(host.undo, [original]);
 });
 
 test('appending uses named upstream references and current local IDs without nextId metadata', () => {

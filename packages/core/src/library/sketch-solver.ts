@@ -7,6 +7,19 @@ import {SketchPrecision} from './sketch-precision.js';
 /** Evaluation-local numeric indices, never author entity or constraint IDs. */
 export type SketchSolveConstraint =
   | Readonly<{
+      kind: 'parallel';
+      points: readonly [number, number, number, number];
+    }>
+  | Readonly<{
+      kind: 'perpendicular';
+      points: readonly [number, number, number, number];
+    }>
+  | Readonly<{
+      kind: 'lineAngle';
+      points: readonly [number, number, number, number];
+      value: number;
+    }>
+  | Readonly<{
       kind: 'pointOnCircle';
       points: readonly [point: number, center: number];
       curve: 'circle' | 'arc';
@@ -430,6 +443,48 @@ export function solveSketchProblem(
             1,
           );
         }
+      } else if (
+        constraint.kind === 'parallel' ||
+        constraint.kind === 'perpendicular' ||
+        constraint.kind === 'lineAngle'
+      ) {
+        if (constraint.points.every(i => knownPosition(i))) {
+          checkConstant(
+            residual(
+              constraint,
+              points.map((p, i) => knownPosition(i) ?? p.position),
+              [],
+              [],
+              [],
+              scale,
+            ),
+            0,
+            tag,
+            1,
+          );
+          return;
+        }
+        const [a, b, c, d] = constraint.points.map(i => nativePoints[i]);
+        if (constraint.kind === 'parallel') {
+          const [ia, ib, ic, id] = constraint.points.map(i => indices[i]);
+          const first = gcs.make_line(ia[0], ia[1], ib[0], ib[1]);
+          const second = gcs.make_line(ic[0], ic[1], id[0], id[1]);
+          geometries.push(first, second);
+          gcs.add_constraint_parallel(first, second, tag, true, 1);
+        } else if (constraint.kind === 'perpendicular') {
+          gcs.add_constraint_perpendicular_pppp(a, b, c, d, tag, true, 1);
+        } else {
+          gcs.add_constraint_l2l_angle_pppp(
+            a,
+            b,
+            c,
+            d,
+            constant((constraint.value * Math.PI) / 180),
+            tag,
+            true,
+            1,
+          );
+        }
       } else if ('points' in constraint) {
         const [a, b] = constraint.points.map(i => nativePoints[i]);
         switch (constraint.kind) {
@@ -799,6 +854,23 @@ function residual(
   scale: number,
 ): number {
   switch (c.kind) {
+    case 'parallel':
+    case 'perpendicular':
+    case 'lineAngle': {
+      const [a, b, d, e] = c.points.map(i => positions[i]);
+      const x1 = b[0] - a[0],
+        y1 = b[1] - a[1];
+      const x2 = e[0] - d[0],
+        y2 = e[1] - d[1];
+      const length = Math.hypot(x1, y1) * Math.hypot(x2, y2);
+      if (!length) return Infinity;
+      if (c.kind === 'parallel') return Math.abs(x1 * y2 - y1 * x2) / length;
+      if (c.kind === 'perpendicular')
+        return Math.abs(x1 * x2 + y1 * y2) / length;
+      const difference =
+        Math.atan2(y2, x2) - Math.atan2(y1, x1) - (c.value * Math.PI) / 180;
+      return Math.abs(Math.atan2(Math.sin(difference), Math.cos(difference)));
+    }
     case 'pointOnCircle': {
       const [p, center] = c.points.map(i => positions[i]);
       const radius = (c.curve === 'circle' ? radii : arcRadii)[c.index];

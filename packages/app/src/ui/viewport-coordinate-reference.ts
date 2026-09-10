@@ -8,6 +8,7 @@ type AxisEndView = Readonly<{
   group: SVGGElement;
   line?: SVGLineElement;
   marker: SVGCircleElement;
+  outline: SVGCircleElement;
   hitArea: SVGCircleElement;
   label?: SVGTextElement;
 }>;
@@ -18,7 +19,8 @@ type CoordinateActions = Readonly<{
 }>;
 
 const svgNamespace = 'http://www.w3.org/2000/svg';
-const center = 44;
+// Fit the 38px backplate radius and its 1px stroke without extra SVG padding.
+const center = 38.5;
 const axisLength = 27;
 
 export class ViewportCoordinateReference {
@@ -34,7 +36,7 @@ export class ViewportCoordinateReference {
 
   constructor(
     container: HTMLElement,
-    private readonly camera: THREE.Camera,
+    private camera: THREE.Camera,
     private readonly actions: CoordinateActions,
   ) {
     this.root.className = 'viewport-coordinate-reference';
@@ -58,7 +60,7 @@ export class ViewportCoordinateReference {
     });
 
     const svg = document.createElementNS(svgNamespace, 'svg');
-    svg.setAttribute('viewBox', '0 0 88 88');
+    svg.setAttribute('viewBox', '0 0 77 77');
     svg.setAttribute('role', 'group');
 
     const backplate = document.createElementNS(svgNamespace, 'circle');
@@ -106,10 +108,15 @@ export class ViewportCoordinateReference {
           line.setAttribute('y1', String(center));
           group.append(line);
         }
+        const markerRadius = kind === 'positive' ? 7 : 5.5;
         const marker = document.createElementNS(svgNamespace, 'circle');
         marker.classList.add('viewport-coordinate-marker');
-        marker.setAttribute('r', kind === 'positive' ? '7' : '5.5');
-        group.append(marker);
+        marker.setAttribute('r', String(markerRadius));
+        const outline = document.createElementNS(svgNamespace, 'circle');
+        outline.classList.add('viewport-coordinate-outline');
+        // Place the 2px interaction ring directly outside the marker's 1px border.
+        outline.setAttribute('r', String(markerRadius + 1.5));
+        group.append(outline, marker);
         let label: SVGTextElement | undefined;
         if (kind === 'positive') {
           label = document.createElementNS(svgNamespace, 'text');
@@ -128,6 +135,7 @@ export class ViewportCoordinateReference {
           group,
           line,
           marker,
+          outline,
           hitArea,
           label,
         };
@@ -149,6 +157,10 @@ export class ViewportCoordinateReference {
     this.root.append(svg);
     container.append(this.root);
     this.updateLabel();
+  }
+
+  setVisible(visible: boolean): void {
+    this.root.hidden = !visible;
   }
 
   setTarget(target?: THREE.Object3D): void {
@@ -186,7 +198,11 @@ export class ViewportCoordinateReference {
         const y = center - this.viewDirection.y * axisLength;
         axisEnd.line?.setAttribute('x2', x.toFixed(2));
         axisEnd.line?.setAttribute('y2', y.toFixed(2));
-        for (const circle of [axisEnd.marker, axisEnd.hitArea]) {
+        for (const circle of [
+          axisEnd.marker,
+          axisEnd.outline,
+          axisEnd.hitArea,
+        ]) {
           circle.setAttribute('cx', x.toFixed(2));
           circle.setAttribute('cy', y.toFixed(2));
         }
@@ -196,13 +212,13 @@ export class ViewportCoordinateReference {
           'aria-pressed',
           String(this.viewDirection.z > 1 - 1e-6),
         );
-        const opacity = String(
+        const intensity = String(
           axisEnd.kind === 'positive'
             ? 0.58 + (this.viewDirection.z + 1) * 0.21
             : 0.42 + (this.viewDirection.z + 1) * 0.1,
         );
-        axisEnd.marker.style.opacity = opacity;
-        if (axisEnd.line) axisEnd.line.style.opacity = opacity;
+        // Dim distant ends without making the markers reveal the axes behind them.
+        axisEnd.group.style.setProperty('--axis-intensity', intensity);
         return {axisEnd, depth: this.viewDirection.z};
       })
       .sort((left, right) => left.depth - right.depth);
@@ -213,6 +229,12 @@ export class ViewportCoordinateReference {
     );
     if (focused instanceof SVGElement && this.root.contains(focused))
       focused.focus({preventScroll: true});
+  }
+
+  setCamera(camera: THREE.Camera): void {
+    this.camera = camera;
+    this.hasProjection = false;
+    this.update();
   }
 
   private selectAxis(axisEnd: AxisEndView): void {

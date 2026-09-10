@@ -14,7 +14,13 @@ import {
   type SpatialSourceChange,
   type SpatialPreview,
 } from './spatial-edit';
-import {formatSourceNumber, offsetCallSource} from './source-expression';
+import {
+  argumentInsertionSource,
+  completeCallArgumentsSource,
+  type CallArgumentDefaults,
+  formatSourceNumber,
+  offsetCallSource,
+} from './source-expression';
 import {SketchEditResolver, type SketchEditIntent} from './sketch-source';
 
 export type ExpressionDraft =
@@ -47,7 +53,10 @@ export type SourceAnchor = Readonly<{
   sourceRef: SourceRef;
 }>;
 
-export type ToolIntent =
+export type ToolIntent = ToolAction &
+  Readonly<{completeArguments?: CallArgumentDefaults}>;
+
+type ToolAction =
   | SketchEditIntent
   | Readonly<{
       kind: 'model.spatial';
@@ -216,17 +225,72 @@ export class ToolEngine {
         reason: `No resolver is registered for ${intent.kind}.`,
       };
     }
-    return resolver.resolve(intent, {
+    const context: ResolveContext = {
       toolId,
       baseVersion: this.host.sourceVersion(),
       resolveSourceRef: sourceRef => this.host.resolveSourceRef(sourceRef),
       readSource: sourceRef => this.host.readSource(sourceRef),
-    });
+    };
+    const resolution = resolver.resolve(intent, context);
+    if (
+      resolution.status !== 'ready' ||
+      !intent.completeArguments ||
+      !resolution.plan.edits.some(edit => edit.text !== edit.expectedText)
+    )
+      return resolution;
+    return completeArgumentEdits(
+      resolution.plan,
+      intent.completeArguments,
+      context,
+    );
   }
 
   private register(resolver: ToolIntentResolver): void {
     this.resolvers.set(resolver.kind, resolver);
   }
+}
+
+function completeArgumentEdits(
+  plan: ToolEditPlan,
+  defaults: CallArgumentDefaults,
+  context: ResolveContext,
+): ToolResolution {
+  const sourceRef = context.resolveSourceRef(defaults.sourceRef);
+  if (!sourceRef)
+    return {
+      status: 'conflict',
+      reason: 'The operation no longer maps to the source.',
+    };
+  const expectedText = context.readSource(sourceRef);
+  const inside = (edit: SourceTextEdit) =>
+    edit.sourceRef.file === sourceRef.file &&
+    edit.sourceRef.start >= sourceRef.start &&
+    edit.sourceRef.end <= sourceRef.end;
+  let edited = expectedText;
+  for (const edit of plan.edits
+    .filter(inside)
+    .sort((a, b) => b.sourceRef.start - a.sourceRef.start))
+    edited =
+      edited.slice(0, edit.sourceRef.start - sourceRef.start) +
+      edit.text +
+      edited.slice(edit.sourceRef.end - sourceRef.start);
+  const text = completeCallArgumentsSource(edited, defaults.values);
+  if (text === edited) return {status: 'ready', plan};
+  const edits = [
+    ...plan.edits.filter(edit => !inside(edit)),
+    {sourceRef, expectedText, text},
+  ];
+  return {
+    status: 'ready',
+    plan: {
+      ...plan,
+      edits,
+      preview:
+        plan.preview.kind === 'source-edits'
+          ? {kind: 'source-edits', edits}
+          : plan.preview,
+    },
+  };
 }
 
 export class ToolSession {
@@ -462,8 +526,8 @@ class SetArgumentResolver implements ToolIntentResolver {
     }
     const expectedText = context.readSource(sourceRef);
     const text =
-      intent.target.kind === 'omitted' && intent.target.needsComma
-        ? `, ${expression}`
+      intent.target.kind === 'omitted'
+        ? argumentInsertionSource(expression, intent.target)
         : expression;
     const edits: readonly SourceTextEdit[] = [{sourceRef, expectedText, text}];
     return {

@@ -1,3 +1,4 @@
+import {appIsolationHeaders} from '../../build/isolation.ts';
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {chromium} from 'playwright-core';
@@ -21,6 +22,7 @@ test(
     await page.route(url, route =>
       route.fulfill({
         contentType: 'text/html',
+        headers: appIsolationHeaders,
         body: '<main style="width:900px;height:700px"></main>',
       }),
     );

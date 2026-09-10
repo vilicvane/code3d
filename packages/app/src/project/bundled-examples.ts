@@ -1,64 +1,31 @@
-import booleanOperationsSource from '../../examples/boolean-operations.ts?raw';
-import combinedConstraintsSource from '../../examples/combined-constraints.ts?raw';
-import boundRotationSource from '../../examples/bound-rotation.ts?raw';
-import geometricAlignmentSource from '../../examples/geometric-alignment.ts?raw';
-import customPrimitivesSource from '../../examples/custom-primitives.ts?raw';
-import designArgumentsSource from '../../examples/design-arguments.ts?raw';
-import exposedTopologySource from '../../examples/exposed-topology.ts?raw';
-import fastenersSource from '../../examples/fasteners.ts?raw';
-import examplesIndexSource from '../../examples/index.ts?raw';
-import primitivesSource from '../../examples/primitives.ts?raw';
-import topologyPathsSource from '../../examples/topology-paths.ts?raw';
-import shellSource from '../../examples/shell.ts?raw';
-import groupOriginsSource from '../../examples/group-origins.ts?raw';
-import originAndRotationSource from '../../examples/origin-and-rotation.ts?raw';
-import relationsAndElementsSource from '../../examples/relations-and-elements.ts?raw';
-import sketchesSource from '../../examples/sketches.ts?raw';
-import sketchModelingSource from '../../examples/sketch-modeling.ts?raw';
+import textFontUrl from '../../examples/fonts/DejaVuSans.ttf?inline';
 import type {ProjectDirectoryTemplate, ProjectSourceFile} from './project';
 
-const websiteSources = import.meta.glob<string>('../../examples/website/*.ts', {
-  query: '?raw',
-  import: 'default',
-  eager: true,
-});
+const sources = import.meta.glob<string>(
+  [
+    '../../examples/**/*.{ts,js,json,txt}',
+    '!../../examples/**/node_modules/**',
+    '!../../examples/**/.code3d/**',
+  ],
+  {query: '?raw', import: 'default', eager: true},
+);
 
-const files = [
-  {path: '/examples/index.ts', source: examplesIndexSource},
-  {path: '/examples/primitives.ts', source: primitivesSource},
-  {path: '/examples/sketches.ts', source: sketchesSource},
-  {path: '/examples/sketch-modeling.ts', source: sketchModelingSource},
-  {path: '/examples/shell.ts', source: shellSource},
-  {path: '/examples/bound-rotation.ts', source: boundRotationSource},
-  {path: '/examples/geometric-alignment.ts', source: geometricAlignmentSource},
-  {path: '/examples/topology-paths.ts', source: topologyPathsSource},
-  {path: '/examples/group-origins.ts', source: groupOriginsSource},
-  {path: '/examples/origin-and-rotation.ts', source: originAndRotationSource},
-  {path: '/examples/exposed-topology.ts', source: exposedTopologySource},
-  {path: '/examples/custom-primitives.ts', source: customPrimitivesSource},
-  {
-    path: '/examples/combined-constraints.ts',
-    source: combinedConstraintsSource,
-  },
-  {
-    path: '/examples/boolean-operations.ts',
-    source: booleanOperationsSource,
-  },
-  {
-    path: '/examples/relations-and-elements.ts',
-    source: relationsAndElementsSource,
-  },
-  {path: '/examples/design-arguments.ts', source: designArgumentsSource},
-  {path: '/examples/fasteners.ts', source: fastenersSource},
-  ...Object.entries(websiteSources).map(([path, source]) => ({
-    path: '/examples/website/' + path.split('/').at(-1)!,
+const files = Object.entries(sources)
+  .map(([path, source]) => ({
+    path: path.slice('../..'.length),
     source,
-  })),
-] satisfies readonly ProjectSourceFile[];
+  }))
+  .sort((left, right) =>
+    left.path.localeCompare(right.path),
+  ) satisfies ProjectSourceFile[];
 
 export const bundledExamples = {
   directory: '/examples',
-  revision: sourceRevision(files),
+  revision: sourceRevision([
+    ...files,
+    {path: '/examples/fonts/DejaVuSans.ttf', source: textFontUrl},
+  ]),
+  assets: [{path: '/examples/fonts/DejaVuSans.ttf', url: textFontUrl}],
   files,
 } satisfies ProjectDirectoryTemplate;
 

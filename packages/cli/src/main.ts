@@ -3,7 +3,7 @@ import {randomUUID} from 'node:crypto';
 import {mkdir, mkdtemp, open, readFile, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
-import {Command, CommanderError, InvalidArgumentError, Option} from 'commander';
+import {Command, CommanderError, InvalidArgumentError} from 'commander';
 import {runServe} from './serve.js';
 import {
   AgentClient,
@@ -12,11 +12,6 @@ import {
   decodeBase64,
   maxMessageBytes,
   parseAgentConfig,
-  parseApplyInput,
-  parseRequest,
-  renderViewNames,
-  type RenderViewName,
-  type AgentRequest,
   type AgentResponse,
 } from '@code3d/agent';
 
@@ -31,8 +26,8 @@ let recoveryRequestId: string | undefined;
 
 program
   .name('c3d')
-  .description('Read and modify a Code3D project through its App session.')
-  .usage('<config-file> [options] <command>')
+  .description('Send one JSON request from stdin to the open Code3D App.')
+  .usage('<config-file> [options] [serve]')
   .version(
     JSON.parse(
       await readFile(new URL('../package.json', import.meta.url), 'utf8'),
@@ -64,105 +59,17 @@ program
     await runServe(await configuration());
   });
 
-program
-  .command('context')
-  .description(
-    'Read the App current file and user selection without moving cursors',
-  )
-  .action(async () => {
-    await invoke({operation: 'context'});
-  });
-
-const fs = program
-  .command('fs')
-  .description('Read the project filesystem owned by the App');
-fs.command('list')
-  .argument('[path]', 'Absolute project directory', '/')
-  .action(async (path: string) => {
-    await invoke({operation: 'fs.list', path});
-  });
-fs.command('read')
-  .argument('<path>', 'Absolute project file')
-  .action(async (path: string) => {
-    await invoke({operation: 'fs.read', path});
-  });
-fs.command('stat')
-  .argument('<path>', 'Absolute project path')
-  .action(async (path: string) => {
-    await invoke({operation: 'fs.stat', path});
-  });
-
-program
-  .command('apply')
-  .description(
-    'Apply full file contents, a cursor, and optional observation outputs',
-  )
-  .option('--input <file>', 'Apply JSON file, or - to read stdin')
-  .option('--render', 'Return a rendered image for the applied context')
-  .addOption(
-    new Option(
-      '--view <direction>',
-      'Render from a named view (implies --render)',
-    ).choices([...renderViewNames]),
-  )
-  .option(
-    '--type',
-    'Return static type information at the agent cursor without evaluating the model',
-  )
-  .option('--topology', 'Return topology for the applied context')
-  .action(
-    async (options: {
-      input?: string;
-      render?: boolean;
-      view?: RenderViewName;
-      topology?: boolean;
-      type?: boolean;
-    }) => {
-      const input = parseApplyInput(
-        options.input === undefined
-          ? {}
-          : await readJson(options.input, maxMessageBytes),
-      );
-      await invoke({
-        operation: 'apply',
-        input: {
-          ...input,
-          ...(options.view
-            ? {render: {view: options.view}}
-            : options.render === undefined
-              ? {}
-              : {
-                  render:
-                    typeof input.render === 'object'
-                      ? input.render
-                      : options.render,
-                }),
-          ...(options.type === undefined ? {} : {type: options.type}),
-          ...(options.topology === undefined
-            ? {}
-            : {
-                topology:
-                  typeof input.topology === 'object'
-                    ? input.topology
-                    : options.topology,
-              }),
-        },
-      });
-    },
-  );
-
-program
-  .command('result')
-  .description(
-    'Recover the outcome of an earlier request without executing it again',
-  )
-  .argument('<request-id>', 'ID of the original request')
-  .action(async (requestId: string) => {
-    await invoke({operation: 'result', requestId});
-  });
+program.action(async () => {
+  if (process.stdin.isTTY)
+    throw new AgentError(
+      'input_required',
+      'Pipe one JSON request to c3d, or redirect a request file into stdin. Use serve to start the local service.',
+    );
+  await invoke(await readJson('-', maxMessageBytes));
+});
 
 try {
-  if (!argv.length) program.help();
+  if (!configFile && !argv.length) program.help();
   await program.parseAsync(argv, {from: 'user'});
 } catch (error) {
   if (error instanceof CommanderError && error.exitCode === 0) {
@@ -200,14 +107,20 @@ try {
   }
 }
 
-async function invoke(request: AgentRequest): Promise<void> {
-  request = parseRequest(request);
+async function invoke(request: unknown): Promise<void> {
   const config = await configuration();
   const options = program.opts<Options>();
   const client = await AgentClient.create(config);
   activeRequestId = options.requestId ?? randomUUID();
+  // Receipt lookup is the stable recovery contract. Application payloads remain
+  // untouched, including operations and fields introduced by a newer App.
+  const lookup = request as {operation?: unknown; requestId?: unknown} | null;
   recoveryRequestId =
-    request.operation === 'result' ? request.requestId : activeRequestId;
+    lookup?.operation === 'result' &&
+    typeof lookup.requestId === 'string' &&
+    /^[a-zA-Z0-9_-]{1,128}$/.test(lookup.requestId)
+      ? lookup.requestId
+      : activeRequestId;
   process.stderr.write(
     JSON.stringify({requestId: activeRequestId, phase: 'request'}) + '\n',
   );
@@ -223,7 +136,9 @@ async function invoke(request: AgentRequest): Promise<void> {
 function recovery(error: AgentTransportError) {
   const command = `npx --yes @code3d/cli ${shellArgument(resolve(configFile!))}`;
   const start = `${command} serve`;
-  const query = `${command} result ${shellArgument(recoveryRequestId!)}`;
+  const queryStdin =
+    JSON.stringify({operation: 'result', requestId: recoveryRequestId}) + '\n';
+  const query = `printf '%s\\n' ${shellArgument(queryStdin.trimEnd())} | ${command}`;
   const action =
     error.code === 'service_unavailable'
       ? 'start_service'
@@ -244,14 +159,8 @@ function recovery(error: AgentTransportError) {
     recoveryRequestId !== activeRequestId
       ? {
           queryCommand: query,
-          queryArgv: [
-            'npx',
-            '--yes',
-            '@code3d/cli',
-            resolve(configFile!),
-            'result',
-            recoveryRequestId!,
-          ],
+          queryStdin,
+          queryArgv: ['npx', '--yes', '@code3d/cli', resolve(configFile!)],
         }
       : {}),
     message:

@@ -5,6 +5,15 @@ binding ABI and corrects native object destruction in the binding generator.
 The dependency on `replicad-opencascadejs` supplies the matching declarations
 used by Replicad and core. This package exports its own generated loader and WASM.
 
+`Code3dMemory.AllocatedBytes()` reports the native allocator's current occupancy
+by summing allocated block sizes in the pinned mimalloc's heap areas, including
+geometry shared between shape handles. The build explicitly selects mimalloc.
+The binding parser receives the allocator's include directory from the same
+pinned toolchain; it otherwise uses host Clang's system include paths.
+Core combines this with estimated JavaScript cache storage for its memory budget.
+The WASM buffer capacity is a growth high-water mark and is not used to decide
+whether releasing cached geometry has reduced memory usage.
+
 The upstream generator treats any two-argument `operator delete` as evidence
 that a class cannot be destroyed. OCCT's allocation macros provide both ordinary
 and placement delete, so this incorrectly emits empty destructors for shapes,
@@ -30,3 +39,24 @@ Upstream sources:
   built against OCCT 8.0.1.
 
 See `LICENSE.LGPL-2.1` for the runtime license.
+
+## Use and explore
+
+Normal model authors use [Core](../core/README.md), whose Node entry initializes
+this runtime. Direct kernel integrations can initialize the loader themselves:
+
+```ts
+import initialize from '@code3d/opencascade';
+
+const kernel = await initialize();
+console.log(kernel.Code3dMemory.AllocatedBytes());
+```
+
+For a bundled browser integration, pass `wasmBinary` or `locateFile` to resolve the
+WASM asset. Owned Embind handles must be released with `.delete()` when no longer
+needed. Follow the existing [native lifetime tests](test/native-lifecycle.test.ts)
+and [Core integration](../core/src/node/index.ts) for ownership and initialization.
+
+- [Public loader declarations](index.d.ts) and [generated runtime](wasm/).
+- [Native binding inputs](native/) and [build entry](scripts/build.mjs).
+- [Binding generator patch](scripts/patch-generator.py).

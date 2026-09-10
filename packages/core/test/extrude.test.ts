@@ -88,7 +88,7 @@ test('extrusion follows the rotated plane normal and retains offset and scaled c
 
 test('extrusions retain source placement and color while exposing ordinary solid operations', () => {
   const stock = keep(box(20, 10, 20));
-  const source = keep(keep(rectangle(8, 6)).paint('#336699'));
+  const source = keep(keep(rectangle(8, 6)).material('#336699'));
   const profile = keep(source.relate(self => self.down.on(stock.up)));
   const result = keep(profile.extrude(3));
   const snapshot = createModelSnapshotter();
@@ -102,7 +102,7 @@ test('extrusions retain source placement and color while exposing ordinary solid
       source: {...constraint.source, nodeId: output.nodeId},
     })),
   );
-  assert.equal(output.color, input.color);
+  assert.equal(output.material, input.material);
   assert.deepEqual(output.transform.position, [0, 0, 0]);
   near(output.compositionTransform.position[1], 5);
   bounds(result, [-4, 0, -3, 4, 3, 3]);
@@ -166,10 +166,10 @@ test('extrusion rejects invalid distances and non-face inputs before evaluating 
   for (const distance of [0, -0, NaN, Infinity, -Infinity]) {
     assert.throws(() => profile.extrude(distance), /finite and non-zero/);
   }
-  for (const input of [keep(box(1, 1, 1)), [profile], undefined]) {
+  for (const input of [keep(box(1, 1, 1)), [profile, undefined], undefined]) {
     assert.throws(
       () => extrude(input as unknown as FaceModel, 3),
-      /single face model/,
+      /face model/,
     );
   }
   bounds(profile, [-2, 0, -3, 2, 0, 3]);

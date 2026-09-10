@@ -44,3 +44,21 @@ Named mounting references such as `headBottom`, `shaftBottom`, and
 `tool.shaftBottom.on(plate.down.flip())` aligns the shaft's lower boundary with
 the plate's lower boundary without rotating the hole tool. `flip()` reverses
 facing while preserving the offset coordinate frame.
+
+## Install and explore
+
+The App includes Screws when using its built-in Core. In Node or a project with
+its own Core installation, install both packages:
+
+```sh
+npm install @code3d/core @code3d/screws
+```
+
+- [Public exports](src/library/index.ts), [ISO 4762 definitions and builders](src/library/iso-4762.ts),
+  and [thread geometry](src/library/thread.ts).
+- [Complete mounting example](../app/examples/website/fastener.ts) and [behavior tests](test/iso-4762.test.ts).
+- [Core relations and topology](../core/README.md), [modeling reference](../web/src/content/docs/docs/reference/screws.mdx),
+  and [agent modeling workflow](../../docs/agents/modeling.md).
+
+From the repository root, run `npm run build:packages` and
+`npm test --workspace @code3d/screws`.

@@ -1,27 +1,79 @@
+import {AdaptiveGrid} from './adaptive-grid';
+import {action, computed, makeObservable, observableRef} from 'mobx';
 import * as THREE from 'three';
+import {createModelMaterial, disposeModelMaterial} from './model-material';
 import {orientImageCamera, type ImageView} from './image-camera';
+import {
+  createViewCamera,
+  frameCameraBounds,
+  resizeViewCamera,
+  type CameraFraming,
+  type ViewCamera,
+} from './view-camera';
 import type {
   ModelSnapshotObject,
   RenderMesh,
   Transform,
 } from '@code3d/core/tooling';
 
-const unpaintedSurfaceColor = '#dde0dc';
-const unpaintedSurfaceOpacity = 0.68;
+const defaultSurfaceOpacity = 0.68;
 const boundaryColor = '#080a07';
 const boundaryOpacity = 0.72;
 
-export type CameraFraming = Readonly<{
-  focus: THREE.Vector3;
-  distance: number;
-}>;
+export type ModelRenderMode = 'modeling' | 'render';
+
+type ModelMaterial = THREE.Material;
+type ModelPrimitive =
+  | THREE.Mesh<THREE.BufferGeometry, ModelMaterial>
+  | THREE.Line<THREE.BufferGeometry, ModelMaterial>
+  | THREE.Points<THREE.BufferGeometry, ModelMaterial>;
+
+const modelingHelpers = new WeakSet<THREE.Object3D>();
+const renderMaterials = new WeakMap<
+  THREE.Object3D,
+  Readonly<{object: ModelPrimitive; material: ModelMaterial}>
+>();
+
+export function modelingHelper<T extends THREE.Object3D>(object: T): T {
+  modelingHelpers.add(object);
+  return object;
+}
+
+function withRenderMaterial<T extends ModelPrimitive>(
+  object: T,
+  opacity = object.material.opacity,
+): T {
+  const material = object.material;
+  const preview = material.clone();
+  if (opacity < material.opacity) {
+    preview.opacity = opacity;
+    preview.transparent = true;
+    preview.depthWrite = false;
+  }
+  if (object instanceof THREE.Mesh) {
+    preview.polygonOffset = true;
+    preview.polygonOffsetFactor = 1;
+    preview.polygonOffsetUnits = 1;
+  }
+  object.material = preview;
+  renderMaterials.set(object, {object, material});
+  return object;
+}
 
 export class ModelRenderer {
+  private renderMode: ModelRenderMode = 'modeling';
   readonly scene = new THREE.Scene();
-  readonly camera = new THREE.PerspectiveCamera(42, 1, 0.1, 2000);
+  camera: ViewCamera = createViewCamera('perspective', 1);
   readonly renderer: THREE.WebGLRenderer;
+  readonly grid: AdaptiveGrid;
+  private readonly renderSize = new THREE.Vector2();
 
   constructor(private readonly container: HTMLElement) {
+    makeObservable<this, 'renderMode'>(this, {
+      renderMode: observableRef,
+      mode: computed,
+      setMode: action,
+    });
     this.renderer = new THREE.WebGLRenderer({
       antialias: true,
       alpha: false,
@@ -46,10 +98,19 @@ export class ModelRenderer {
     rim.position.set(-80, 55, -65);
     this.scene.add(rim);
 
-    this.scene.add(createGrid(this.scene.background));
+    this.grid = modelingHelper(new AdaptiveGrid(this.scene.background));
+    this.scene.add(this.grid);
 
     this.camera.position.set(105, 82, 120);
     this.resize();
+  }
+
+  get mode(): ModelRenderMode {
+    return this.renderMode;
+  }
+
+  setMode(mode: ModelRenderMode): void {
+    this.renderMode = mode;
   }
 
   resize(): void {
@@ -58,20 +119,18 @@ export class ModelRenderer {
     if (width === 0 || height === 0) return;
 
     this.renderer.setSize(width, height, false);
-    this.camera.aspect = width / height;
-    this.camera.updateProjectionMatrix();
+    resizeViewCamera(this.camera, width / height);
   }
 
   framing(
     target: THREE.Object3D,
-    currentDistance: number,
+    camera: ViewCamera,
     additional?: Readonly<{bounds: THREE.Box3; paddingPixels: number}>,
   ): CameraFraming | undefined {
     const box = new THREE.Box3().setFromObject(target);
     if (additional) box.union(additional.bounds);
     if (box.isEmpty()) return;
 
-    const sphere = box.getBoundingSphere(new THREE.Sphere());
     const availableFraction = additional
       ? Math.max(
           0.25,
@@ -80,24 +139,15 @@ export class ModelRenderer {
               Math.min(this.container.clientWidth, this.container.clientHeight),
         )
       : 1;
-    const verticalHalfFov =
-      THREE.MathUtils.degToRad(this.camera.getEffectiveFOV()) / 2;
-    const halfFov = Math.min(
-      verticalHalfFov,
-      Math.atan(Math.tan(verticalHalfFov) * this.camera.aspect),
-    );
-    return {
-      focus: sphere.center,
-      distance: sphere.radius
-        ? sphere.radius / Math.sin(halfFov) / availableFraction
-        : currentDistance,
-    };
+    return frameCameraBounds(camera, box, availableFraction);
   }
 
-  updateCameraRange(cameraTarget: THREE.Vector3): void {
+  updateCameraRange(cameraTarget: THREE.Vector3, viewDistance: number): void {
+    this.grid.focus.copy(cameraTarget);
     const distance = this.camera.position.distanceTo(cameraTarget);
-    const near = distance / 1000;
-    const far = Math.max(distance * 20, 1000);
+    const shift = distance - viewDistance;
+    const near = Math.max(Number.EPSILON, shift + viewDistance / 1000);
+    const far = shift + Math.max(viewDistance * 20, 1000);
     if (near !== this.camera.near || far !== this.camera.far) {
       this.camera.near = near;
       this.camera.far = far;
@@ -105,14 +155,65 @@ export class ModelRenderer {
     }
     const fog = this.scene.fog;
     if (fog instanceof THREE.Fog) {
-      fog.near = Math.max(180, distance * 2);
-      fog.far = Math.max(430, distance * 5);
+      fog.near = shift + Math.max(180, viewDistance * 2);
+      fog.far = shift + Math.max(430, viewDistance * 5);
     }
   }
 
   renderFrame(beforeRender?: () => void): void {
     beforeRender?.();
-    this.renderer.render(this.scene, this.camera);
+    this.renderScene(this.renderer, this.camera);
+  }
+
+  private renderScene(
+    renderer: THREE.WebGLRenderer,
+    camera: ViewCamera,
+    focus = this.grid.focus,
+  ): void {
+    renderer.getSize(this.renderSize);
+    this.grid.update(
+      camera,
+      this.renderSize.y,
+      renderer.getPixelRatio(),
+      focus,
+    );
+    if (this.mode === 'modeling') {
+      renderer.render(this.scene, camera);
+      return;
+    }
+    const hidden: THREE.Object3D[] = [];
+    const restored: {
+      object: ModelPrimitive;
+      material: ModelMaterial;
+      renderOrder: number;
+    }[] = [];
+    // Keep modeling state intact, including source emphasis and active previews.
+    // Screen frames and image exports use the same authored material pass.
+    try {
+      this.scene.traverseVisible(child => {
+        if (modelingHelpers.has(child)) {
+          hidden.push(child);
+          child.visible = false;
+        }
+        const appearance = renderMaterials.get(child);
+        if (!appearance) return;
+        const {object, material} = appearance;
+        restored.push({
+          object,
+          material: object.material,
+          renderOrder: object.renderOrder,
+        });
+        object.material = material;
+        object.renderOrder = 0;
+      });
+      renderer.render(this.scene, camera);
+    } finally {
+      for (const object of hidden) object.visible = true;
+      for (const {object, material, renderOrder} of restored) {
+        object.material = material;
+        object.renderOrder = renderOrder;
+      }
+    }
   }
 
   async captureImage(
@@ -137,11 +238,24 @@ export class ModelRenderer {
     renderer.setSize(width, height, false);
 
     const camera = this.camera.clone();
-    camera.aspect = width / height;
+    resizeViewCamera(camera, width / height);
     if (framing) orientImageCamera(camera, framing.bounds, framing.view);
     camera.updateProjectionMatrix();
     beforeRender?.(camera, width, height);
-    renderer.render(this.scene, camera);
+    try {
+      this.renderScene(
+        renderer,
+        camera,
+        framing?.bounds.getCenter(new THREE.Vector3()),
+      );
+    } finally {
+      this.renderer.getSize(this.renderSize);
+      this.grid.update(
+        this.camera,
+        this.renderSize.y,
+        this.renderer.getPixelRatio(),
+      );
+    }
 
     const image = await new Promise<Blob | null>(resolve =>
       canvas.toBlob(resolve, 'image/png'),
@@ -151,23 +265,6 @@ export class ModelRenderer {
     if (!image) throw new Error('The browser could not encode the PNG image.');
     return image;
   }
-}
-
-function createGrid(background: THREE.Color): THREE.GridHelper {
-  const color = background.clone().convertLinearToSRGB();
-  color.setRGB(1 - color.r, 1 - color.g, 1 - color.b, THREE.SRGBColorSpace);
-
-  const grid = new THREE.GridHelper(360, 36);
-  const positions = grid.geometry.getAttribute('position');
-  const colors = new THREE.Float32BufferAttribute(positions.count * 4, 4);
-  for (let index = 0; index < positions.count; index++) {
-    const center = positions.getX(index) === 0 || positions.getZ(index) === 0;
-    colors.setXYZW(index, color.r, color.g, color.b, center ? 0.2 : 0.08);
-  }
-  grid.geometry.setAttribute('color', colors);
-  grid.material.transparent = true;
-  grid.material.depthWrite = false;
-  return grid;
 }
 
 function configureRenderer(
@@ -193,11 +290,14 @@ export type ModelPlacement = 'standalone' | 'composition';
 export function createRenderedModelNode(
   node: ModelSnapshotObject,
 ): THREE.Object3D {
-  if (node.kind === 'group') return new THREE.Group();
+  if (node.kind === 'group' || node.kind === 'reference')
+    return new THREE.Group();
   if (!node.mesh) {
     throw new Error(`OpenCascade solid ${node.name} has no renderable mesh.`);
   }
 
+  const material = createModelMaterial(node.material, node.kind);
+  const alpha = material.transparent ? material.opacity : 1;
   const container = new THREE.Group();
   if (node.kind === 'vertex') {
     const pointGeometry = new THREE.BufferGeometry();
@@ -205,54 +305,42 @@ export function createRenderedModelNode(
       'position',
       new THREE.BufferAttribute(node.mesh.topologyVertices, 3),
     );
-    const pointMaterial = new THREE.PointsMaterial({
-      color: node.color ?? unpaintedSurfaceColor,
-      size: 5,
-      sizeAttenuation: false,
-    });
-    container.add(new THREE.Points(pointGeometry, pointMaterial));
+    container.add(
+      withRenderMaterial(new THREE.Points(pointGeometry, material)),
+    );
     return container;
   }
   const edgeGeometry = createEdgeGeometry(node.mesh);
   if (node.kind === 'edge') {
     if (edgeGeometry) {
-      const curve = new THREE.LineSegments(
-        edgeGeometry,
-        new THREE.LineBasicMaterial({
-          color: node.color ?? unpaintedSurfaceColor,
-          toneMapped: false,
-        }),
-      );
+      const curve = new THREE.LineSegments(edgeGeometry, material);
+      if (material instanceof THREE.LineDashedMaterial)
+        curve.computeLineDistances();
       curve.userData.edgeGroups = node.mesh.edgeGroups;
-      container.add(curve);
+      container.add(withRenderMaterial(curve));
+    } else {
+      disposeModelMaterial(material);
     }
     return container;
   }
 
-  const isUnpainted = node.color === undefined;
-  const material = new THREE.MeshStandardMaterial({
-    color: node.color ?? unpaintedSurfaceColor,
-    transparent: isUnpainted,
-    opacity: isUnpainted ? unpaintedSurfaceOpacity : 1,
-    depthWrite: !isUnpainted,
-    roughness: 0.52,
-    metalness: 0.12,
-    polygonOffset: true,
-    polygonOffsetFactor: 1,
-    polygonOffsetUnits: 1,
-    side: node.kind === 'face' ? THREE.DoubleSide : THREE.FrontSide,
-  });
-  container.add(new THREE.Mesh(createSurfaceGeometry(node.mesh), material));
+  container.add(
+    withRenderMaterial(
+      new THREE.Mesh(createSurfaceGeometry(node.mesh), material),
+      node.material === undefined ? defaultSurfaceOpacity : material.opacity,
+    ),
+  );
 
   if (edgeGeometry) {
     const edgeMaterial = new THREE.LineBasicMaterial({
       color: boundaryColor,
       transparent: true,
-      opacity: boundaryOpacity,
+      opacity: boundaryOpacity * alpha,
+      depthWrite: alpha === 1,
     });
     const edges = new THREE.LineSegments(edgeGeometry, edgeMaterial);
     edges.userData.edgeGroups = node.mesh.edgeGroups;
-    container.add(edges);
+    container.add(modelingHelper(edges));
   }
 
   return container;
@@ -270,6 +358,8 @@ export function createSurfaceGeometry(mesh: RenderMesh): THREE.BufferGeometry {
     geometry.computeVertexNormals();
   }
   geometry.setIndex(new THREE.BufferAttribute(mesh.triangles, 1));
+  if (mesh.uvs)
+    geometry.setAttribute('uv', new THREE.BufferAttribute(mesh.uvs, 2));
   geometry.computeBoundingBox();
   geometry.computeBoundingSphere();
   return geometry;
@@ -296,7 +386,9 @@ export function disposeObject(object: THREE.Object3D): void {
       const materials = Array.isArray(child.material)
         ? child.material
         : [child.material];
-      materials.forEach(material => material.dispose());
+      materials.forEach(disposeModelMaterial);
+      const authored = renderMaterials.get(child)?.material;
+      if (authored) disposeModelMaterial(authored);
     }
   });
 }

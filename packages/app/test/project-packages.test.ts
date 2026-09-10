@@ -19,7 +19,7 @@ let ProjectPackages: (typeof import('../src/project/project-packages.ts'))['Proj
 let ProjectPackageResolver: (typeof import('../src/project/package-resolver.ts'))['ProjectPackageResolver'];
 let ProjectBuilder: (typeof import('../src/project/project-builder.ts'))['ProjectBuilder'];
 let ProjectCompiler: (typeof import('../src/model/project-compiler.ts'))['ProjectCompiler'];
-let loadProjectLanguage: (typeof import('../src/project/project-language.ts'))['loadProjectLanguage'];
+let ProjectLanguageLoader: (typeof import('../src/project/project-language.ts'))['ProjectLanguageLoader'];
 let Evaluator: Awaited<ReturnType<typeof testEvaluatorClass>>;
 before(async () => {
   server = await createAppTestServer();
@@ -35,7 +35,7 @@ before(async () => {
   ({ProjectCompiler} = await server.ssrLoadModule<
     typeof import('../src/model/project-compiler.ts')
   >('/src/model/project-compiler.ts'));
-  ({loadProjectLanguage} = await server.ssrLoadModule<
+  ({ProjectLanguageLoader} = await server.ssrLoadModule<
     typeof import('../src/project/project-language.ts')
   >('/src/project/project-language.ts'));
   Evaluator = await testEvaluatorClass(server);
@@ -116,10 +116,7 @@ test('does not treat malformed project metadata as permission to use built-ins',
     memoryFiles({'/package.json': '{broken'}),
     unavailableBuiltins,
   );
-  await assert.rejects(
-    packages.update(emptyProject),
-    /Invalid project package.json/,
-  );
+  await assert.rejects(packages.update(emptyProject), /Invalid \/package.json/);
 });
 
 test('isolates the built-in dependency closure and gives source, screws and reusable packages one core identity and type graph', async () => {
@@ -143,6 +140,15 @@ test('isolates the built-in dependency closure and gives source, screws and reus
       'export {core as screwCore} from "@code3d/core";',
     '/node_modules/@code3d/screws/index.d.ts':
       'export {core as screwCore} from "@code3d/core";',
+    '/node_modules/@code3d/materials/package.json': {
+      name: '@code3d/materials',
+      type: 'module',
+      exports,
+    },
+    '/node_modules/@code3d/materials/index.js':
+      'export {core as materialCore} from "@code3d/core";',
+    '/node_modules/@code3d/materials/index.d.ts':
+      'export {core as materialCore} from "@code3d/core";',
     '/node_modules/replicad/package.json': {
       name: 'replicad',
       type: 'module',
@@ -197,12 +203,13 @@ test('isolates the built-in dependency closure and gives source, screws and reus
         source: [
           'import {core} from "@code3d/core";',
           'import {screwCore} from "@code3d/screws";',
+          'import {materialCore} from "@code3d/materials";',
           'import {reusableCore} from "reusable";',
           'import {origin} from "replicad";',
           'const builtinOrigin: "builtin" = core.origin;',
           'const projectOrigin: "project" = origin;',
           'const reusableOrigin: "builtin" = reusableCore.origin;',
-          'export {core, screwCore, reusableCore, origin};',
+          'export {core, screwCore, materialCore, reusableCore, origin};',
         ].join('\n'),
       },
     ],
@@ -214,17 +221,23 @@ test('isolates the built-in dependency closure and gives source, screws and reus
   );
   const result = await importTestModule(bundle.source);
   assert.equal(result.core, result.screwCore);
+  assert.equal(result.core, result.materialCore);
   assert.equal(result.core, result.reusableCore);
   assert.equal(result.core.origin, 'builtin');
   assert.equal(result.origin, 'project');
-  const language = await loadProjectLanguage(
-    packages,
+  const language = await new ProjectLanguageLoader(packages).load(
     project,
     packages.packageSpecifiers,
   );
   assert.deepEqual(
     new Set(language.packageSpecifiers),
-    new Set(['@code3d/core', '@code3d/screws', 'replicad', 'reusable']),
+    new Set([
+      '@code3d/core',
+      '@code3d/screws',
+      '@code3d/materials',
+      'replicad',
+      'reusable',
+    ]),
   );
   assert.ok(
     language.files.some(
@@ -275,6 +288,120 @@ test('isolates the built-in dependency closure and gives source, screws and reus
   );
 });
 
+for (const mode of ['builtin', 'project'] as const) {
+  test(`shares core/three materials across packages in ${mode} mode without adopting package-local Three.js`, async () => {
+    const exports = {types: './index.d.ts', default: './index.js'};
+    const files = memoryFiles({
+      '/package.json': {
+        type: 'module',
+        dependencies: {
+          'material-library': '*',
+          ...(mode === 'project' ? {'@code3d/core': '*'} : {}),
+        },
+      },
+      '/node_modules/material-library/package.json': {
+        name: 'material-library',
+        type: 'module',
+        exports,
+        peerDependencies: {'@code3d/core': '*'},
+      },
+      '/node_modules/material-library/index.js': `import {MeshPhysicalMaterial} from '@code3d/core/three';
+export const lacquer = new MeshPhysicalMaterial({color: '#ff8800', roughness: 0.25, clearcoat: 1});
+export {MeshPhysicalMaterial as MaterialClass};`,
+      '/node_modules/material-library/index.d.ts': `import {MeshPhysicalMaterial} from '@code3d/core/three';
+export declare const lacquer: MeshPhysicalMaterial;
+export {MeshPhysicalMaterial as MaterialClass};`,
+      '/node_modules/material-library/node_modules/three/package.json': {
+        name: 'three',
+        type: 'module',
+        exports,
+      },
+      '/node_modules/material-library/node_modules/three/index.js':
+        'throw new Error("The material library must use Core-owned Three.js");',
+      '/node_modules/material-library/node_modules/three/index.d.ts':
+        'export declare const unrelated: unique symbol;',
+      ...(mode === 'builtin'
+        ? {
+            '/node_modules/three/package.json': {
+              name: 'three',
+              type: 'module',
+              exports,
+            },
+            '/node_modules/three/index.js': 'export const owner = "project";',
+            '/node_modules/three/index.d.ts':
+              'export declare const owner: "project";',
+          }
+        : {}),
+    });
+    const reader: ProjectFileReader = {
+      readFile: async path =>
+        (await files.readFile(path)) ??
+        (mode === 'project' ? packageTestFiles.readFile(path) : undefined),
+      stat: async path =>
+        (await files.stat(path)) ??
+        (mode === 'project' ? packageTestFiles.stat(path) : undefined),
+    };
+    const compiler = new ProjectCompiler(
+      reader,
+      packageTestFiles,
+      esbuild,
+      () => new Evaluator(),
+    );
+    let language: ProjectLanguage | undefined;
+    try {
+      const source = `import {box} from '@code3d/core';
+import * as THREE from '@code3d/core/three';
+import {lacquer, MaterialClass} from 'material-library';
+${mode === 'builtin' ? 'import {owner} from "three"; if (owner !== "project") throw new Error("User Three.js was shadowed");' : ''}
+if (THREE.MeshPhysicalMaterial !== MaterialClass) throw new Error('Different material class identities');
+export default box(2, 3, 4).material(lacquer);`;
+      const result = await compiler.compile(
+        {files: [{path: '/model.ts', source}]},
+        '/model.ts',
+        undefined,
+        value => {
+          language = value;
+        },
+      );
+      assert.equal(result.diagnostic, undefined);
+      const material = defined(
+        result.objects.get(defined(result.exports.get('default'))),
+      ).material;
+      assert.ok(material && typeof material !== 'string');
+      assert.equal(material.type, 'MeshPhysicalMaterial');
+      assert.equal(material.color, 0xff8800);
+      assert.equal(material.clearcoat, 1);
+      const modules = [...defined(compiler['runtime']).modules.keys()];
+      assert.ok(
+        !modules.some(path =>
+          path.includes('/material-library/node_modules/three/'),
+        ),
+      );
+      const languageFiles = defined(language).files;
+      assert.ok(
+        languageFiles.some(
+          file => file.path === '/node_modules/material-library/index.d.ts',
+        ),
+      );
+      assert.ok(
+        languageFiles.some(
+          file =>
+            file.path === '/node_modules/@code3d/core/bld/library/three.d.ts',
+        ),
+      );
+      assert.ok(
+        languageFiles.some(file =>
+          file.path.endsWith(
+            '/@types/three/src/materials/MeshPhysicalMaterial.d.ts',
+          ),
+        ),
+      );
+    } finally {
+      compiler.dispose();
+    }
+  });
+}
+
 test('runs a zero-install screw model, retains its runtime on edits, and switches packages after a manifest edit', async () => {
   const files = memoryFiles();
   let installed = false;
@@ -299,7 +426,10 @@ test('runs a zero-install screw model, retains its runtime on edits, and switche
         source: [
           'import {box, group} from "@code3d/core";',
           'import {ISO4762} from "@code3d/screws";',
-          `const plate = box(40, 10, 30).fillet(${radius});`,
+          'import {paint} from "@code3d/materials";',
+          'import {MeshPhysicalMaterial, type Material} from "@code3d/core/three";',
+          'const material: Material = paint({color: "#ff8800", clearcoat: 1});',
+          `const plate = box(40, 10, 30).fillet(${radius}).material(material);`,
           'const screw = ISO4762.screw("M6", 18).relate(part => part.center.on(plate.up).offset(30, 0, 0));',
           'export default group([plate, screw]);',
         ].join('\n'),
@@ -326,13 +456,37 @@ test('runs a zero-install screw model, retains its runtime on edits, and switche
           file.path === '/node_modules/@code3d/screws/bld/library/index.d.ts',
       ),
     );
+    assert.ok(
+      defined(language).files.some(
+        file =>
+          file.path ===
+          '/node_modules/@code3d/materials/bld/library/index.d.ts',
+      ),
+    );
+    assert.ok(
+      defined(language).files.some(file =>
+        file.path.endsWith(
+          '/@types/three/src/materials/MeshPhysicalMaterial.d.ts',
+        ),
+      ),
+    );
+    assert.ok(
+      defined(language).files.some(file =>
+        file.path.includes('/@types/webxr/'),
+      ),
+    );
+    assert.ok(
+      defined(language).files.every(
+        file => !file.path.startsWith('/node_modules/three/'),
+      ),
+    );
     assert.equal((await compile(project(1.1))).diagnostic, undefined);
     assert.equal(compiler['runtime'], builtinRuntime);
     assert.equal(files.contents.size, 0);
 
     files.contents.set(
       '/package.json',
-      '{"type":"module","dependencies":{"@code3d/core":"*","@code3d/screws":"*"}}',
+      '{"type":"module","dependencies":{"@code3d/core":"*","@code3d/screws":"*","@code3d/materials":"*"}}',
     );
     await assert.rejects(compile(project(1.1)), /@code3d\/core/);
     assert.equal(compiler['runtime'], undefined);
@@ -371,4 +525,142 @@ test('runs a zero-install screw model, retains its runtime on edits, and switche
   } finally {
     compiler.dispose();
   }
+});
+
+test('local folders resolve latest workspace imports and their closure without altering installed files', async () => {
+  const {WorkspaceFileReader} = await server.ssrLoadModule<
+    typeof import('../src/project/workspace-packages.ts')
+  >('/src/project/workspace-packages.ts');
+  const manifest = {
+    name: '@code3d/core',
+    version: '1.0.0',
+    type: 'module',
+    main: './index.js',
+    types: './index.d.ts',
+  };
+  const project = memoryFiles({
+    '/package.json': {
+      type: 'module',
+      dependencies: {
+        '@code3d/core': 'latest',
+        wrapper: 'latest',
+        alias: 'npm:@code3d/core@latest',
+        '@aliases/local': 'npm:@code3d/core@latest',
+      },
+    },
+    '/node_modules/@code3d/core/package.json': manifest,
+    '/node_modules/@code3d/core/index.js': `export const value = 'published';`,
+    '/node_modules/wrapper/package.json': {
+      type: 'module',
+      main: './index.js',
+      dependencies: {'@code3d/core': 'latest'},
+    },
+    '/node_modules/wrapper/index.js': `export {value} from '@code3d/core';`,
+    '/node_modules/@code3d/remote/package.json': {
+      type: 'module',
+      main: './index.js',
+    },
+    '/node_modules/@code3d/remote/index.js': `export const remote = 'registry';`,
+    '/pinned/package.json': {dependencies: {'@code3d/core': '^1'}},
+    '/pinned/node_modules/@code3d/core/package.json': manifest,
+    '/pinned/node_modules/@code3d/core/index.js': `export const value = 'pinned';`,
+  });
+  const artifacts = memoryFiles({
+    '/node_modules/@code3d/core/package.json': {
+      ...manifest,
+      dependencies: {helper: '1'},
+    },
+    '/node_modules/@code3d/core/index.js': `export {value} from 'helper';`,
+    '/node_modules/@code3d/core/index.d.ts': `export declare const value: 'development';`,
+    '/node_modules/helper/package.json': {type: 'module', main: './index.js'},
+    '/node_modules/helper/index.js': `export const value = 'development';`,
+  });
+  const workspaces = {
+    '@code3d/core': {manifest, revision: 'a'.repeat(64), files: {}},
+  };
+  const reader = new WorkspaceFileReader(project, artifacts, workspaces);
+  const resolver = new ProjectPackageResolver(reader);
+  const canonical = await resolver.resolve('@code3d/core', '/model.ts');
+  assert.match(canonical as string, /\.code3d-workspace/);
+  assert.equal(
+    await resolver.resolve('@code3d/core', '/node_modules/wrapper/index.js'),
+    canonical,
+  );
+  assert.equal(await resolver.resolve('alias', '/model.ts'), canonical);
+  assert.equal(
+    await resolver.resolve('@aliases/local', '/model.ts'),
+    canonical,
+  );
+  assert.equal(
+    await resolver.resolve('@code3d/core', '/pinned/model.ts'),
+    '/pinned/node_modules/@code3d/core/index.js',
+  );
+  assert.equal(
+    await resolver.resolve('@code3d/remote', '/model.ts'),
+    '/node_modules/@code3d/remote/index.js',
+  );
+  const source = `import {value} from '@code3d/core'; import {value as transitive} from 'wrapper'; export {value, transitive};`;
+  const bundle = await new ProjectBuilder(reader, esbuild).build(source);
+  const result = await importTestModule(bundle.source);
+  assert.equal(result.value, 'development');
+  assert.equal(result.transitive, 'development');
+  const language = await new ProjectLanguageLoader(reader).load({
+    files: [
+      {
+        path: '/model.ts',
+        source: `import {value} from '@code3d/core'; import {value as alias} from '@aliases/local'; const literal: 'development' = alias; const direct: 'development' = value;`,
+      },
+    ],
+  });
+  const sources = new Map(language.files.map(file => [file.path, file.source]));
+  sources.set(
+    '/model.ts',
+    `import {value} from '@code3d/core'; import {value as alias} from '@aliases/local'; const literal: 'development' = alias; const direct: 'development' = value;`,
+  );
+  const program = ts.createProgram({
+    rootNames: ['/model.ts'],
+    options: {...language.compilerOptions, noLib: true},
+    host: {
+      fileExists: path => sources.has(path),
+      readFile: path => sources.get(path),
+      getSourceFile: (path, target) =>
+        sources.has(path)
+          ? ts.createSourceFile(path, sources.get(path)!, target, true)
+          : undefined,
+      directoryExists: () => true,
+      getDirectories: () => [],
+      getDefaultLibFileName: () => '',
+      getCurrentDirectory: () => '/',
+      getCanonicalFileName: path => path,
+      useCaseSensitiveFileNames: () => true,
+      getNewLine: () => '\n',
+      writeFile() {},
+      realpath: path => language.realPaths?.[path] ?? path,
+    },
+  });
+  assert.deepEqual(
+    program
+      .getSemanticDiagnostics(program.getSourceFile('/model.ts'))
+      .map(d => ts.flattenDiagnosticMessageText(d.messageText, '\n')),
+    [],
+  );
+  assert.match(
+    project.contents.get('/node_modules/@code3d/core/index.js')!,
+    /published/,
+  );
+  const production = new ProjectPackageResolver(
+    new WorkspaceFileReader(project, artifacts, {}),
+  );
+  assert.equal(
+    await production.resolve('@code3d/core', '/model.ts'),
+    '/node_modules/@code3d/core/index.js',
+  );
+  project.contents.set(
+    '/package.json',
+    JSON.stringify({dependencies: {'@code3d/core': '1.0.0'}}),
+  );
+  assert.equal(
+    await resolver.resolve('@code3d/core', '/model.ts'),
+    '/node_modules/@code3d/core/index.js',
+  );
 });

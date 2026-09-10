@@ -2,11 +2,7 @@ import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
 import {createAppTestServer} from './vite-test-server.ts';
 
-let server,
-  DrawingDimensions,
-  SketchLineDrawing,
-  snapSketchPointer,
-  sketchGridStep;
+let server, DrawingDimensions, SketchLineDrawing, snapSketchPointer;
 before(async () => {
   server = await createAppTestServer();
   ({DrawingDimensions} = await server.ssrLoadModule(
@@ -15,7 +11,7 @@ before(async () => {
   ({SketchLineDrawing} = await server.ssrLoadModule(
     '/src/tools/sketch-drawing.ts',
   ));
-  ({snapSketchPointer, sketchGridStep} = await server.ssrLoadModule(
+  ({snapSketchPointer} = await server.ssrLoadModule(
     '/src/tools/sketch-snap.ts',
   ));
 });
@@ -32,17 +28,6 @@ const near = (actual, expected) =>
       `${actual} != ${expected}`,
     ),
   );
-
-test('the grid uses dense 1/2/5 subdivisions at every zoom level', () => {
-  for (let scale = 0.05; scale <= 1000; scale *= 1.03) {
-    const step = sketchGridStep(scale);
-    assert.ok(step * scale >= 8 - 1e-9 && step * scale <= 20 + 1e-9);
-    const normalized = step / 10 ** Math.floor(Math.log10(step));
-    assert.ok([1, 2, 5].some(value => Math.abs(value - normalized) < 1e-9));
-  }
-  assert.equal(sketchGridStep(6), 2);
-  assert.equal(sketchGridStep(20), 0.5);
-});
 
 test('direction snapping also aligns the free axis to the grid', () => {
   const result = snapSketchPointer(
@@ -88,6 +73,41 @@ test('numeric drafts preserve partial text and the last valid preview, while bla
   assert.equal(fields.value('length'), undefined);
   assert.equal(fields.error('length'), undefined);
   assert.equal(fields.edited, false);
+});
+
+test('expression drafts validate syntax without evaluating bindings outside their source scope', () => {
+  const fields = new DrawingDimensions(
+    [{id: 'length', label: 'Length', positive: true}],
+    undefined,
+    true,
+  );
+  for (const text of [
+    'width / 2',
+    'Math.max(width, 20)',
+    '(width as number) + 1',
+  ]) {
+    fields.set('length', text);
+    assert.equal(fields.text('length'), text);
+    assert.equal(fields.error('length'), undefined);
+    assert.equal(fields.value('length'), undefined);
+  }
+  for (const text of [
+    'width /',
+    '1, 2',
+    '...values',
+    '1]; other(); [2',
+    '-1',
+    '0',
+    '1e999',
+  ]) {
+    fields.set('length', text);
+    assert.ok(fields.error('length'), text);
+  }
+  fields.set('length', '20');
+  assert.equal(fields.value('length'), 20);
+  fields.set('length', '');
+  assert.equal(fields.error('length'), undefined);
+  assert.equal(fields.value('length'), undefined);
 });
 
 test('snapping prioritizes real point identity, including coincident local/upstream points', () => {

@@ -1,3 +1,8 @@
+import {cached, cachedArtifact} from './cached.js';
+import {font, googleFont, type Font} from './font.js';
+import {textGlyphs, textRegionFace, type TextOptions} from './text.js';
+import type {Material} from './three.js';
+import {captureModelMaterial, type ModelMaterialSnapshot} from './material.js';
 import {
   inspectShapeTopology,
   type TopologyInspection,
@@ -36,6 +41,7 @@ import {
   castOwnedShape3D,
   centeredBoxShape,
   shapeSubshapes,
+  transformShape,
 } from './kernel-shapes.js';
 import {
   addVectors,
@@ -70,12 +76,14 @@ import {
 import {shellWithTopology} from './shell.js';
 import {
   beginKernelOperationEvaluation,
-  evaluateKernelOperation,
+  kernelOperationKey,
+  type KernelOperationKey,
   type KernelArtifact,
   type KernelKeyPart,
   type KernelValueLifecycle,
 } from './kernel-cache.js';
 import {loftWithTopology} from './loft.js';
+import {estimateRetainedBytes} from './retained-memory.js';
 import {extrudeWithTopology} from './extrude.js';
 import {sketchRegionFace} from './sketch-face.js';
 import type {SketchRegion} from './sketch-regions.js';
@@ -105,6 +113,10 @@ import {
 } from './topology.js';
 
 import {sketch} from './sketch.js';
+import {
+  encodeKernelArtifact,
+  decodeKernelArtifact,
+} from './kernel-artifact-codec.js';
 
 export type {Quaternion, Vec3} from './spatial.js';
 export type {EdgeId, SurfaceId, TopologyKind, VertexId} from './topology.js';
@@ -183,6 +195,7 @@ export type ConstraintSnapshot = Readonly<{
   );
 
 export type ModelOperationKind =
+  | 'sketch'
   | 'box'
   | 'cylinder'
   | 'tube'
@@ -201,9 +214,10 @@ export type ModelOperationKind =
   | 'spline'
   | 'loft'
   | 'sketchFace'
+  | 'text'
   | 'extrude'
   | 'primitive'
-  | 'paint'
+  | 'material'
   | 'scaled'
   | 'originOffset'
   | 'originVertex'
@@ -267,6 +281,13 @@ export type ModelOperationSnapshot = Readonly<{
   selections: readonly ModelOperationSelectionSnapshot[];
   sourceRef?: SourceRef;
   spatial?: ModelSpatialOperation;
+  /** Authored dimensions in the operation output's local geometry frame. */
+  dimensions?: Readonly<Record<string, ModelParameterDimension>>;
+}>;
+
+export type ModelParameterDimension = Readonly<{
+  origin: Vec3;
+  vector: Vec3;
 }>;
 
 /** Local geometry coordinates; vector is the authored coordinates, offset, or angles. */
@@ -297,6 +318,8 @@ export type RenderMesh = Readonly<{
   /** Tessellation vertices used by the triangle mesh. */
   vertices: Float32Array;
   normals: Float32Array;
+  /** Native face UVs normalized to each tessellated face's range. */
+  uvs?: Float32Array;
   triangles: Uint32Array;
   edges: Float32Array;
   /** OpenCascade topology vertices, aligned with vertexIds. */
@@ -316,10 +339,9 @@ export type RenderMesh = Readonly<{
 
 export type ModelSnapshotObject = Readonly<{
   nodeId: string;
-  kind: ModelKind;
   name: string;
-  /** Effective color, including recursive overrides from enclosing groups. */
-  color?: string;
+  /** Effective material, including recursive overrides from enclosing groups. */
+  material?: ModelMaterialSnapshot;
   children: readonly ModelSnapshotObject[];
   /** Placement used when this snapshot participates in a composition. */
   compositionTransform: Transform;
@@ -331,8 +353,11 @@ export type ModelSnapshotObject = Readonly<{
   sourceRefs: readonly SourceRef[];
   parameters: readonly ParameterUsage[];
   operation: ModelOperationSnapshot;
-  mesh?: RenderMesh;
-}>;
+}> &
+  (
+    | Readonly<{kind: ModelKind; mesh?: RenderMesh}>
+    | Readonly<{kind: 'reference'; mesh?: never}>
+  );
 
 type StoredElement = Readonly<{
   kind: ElementKind;
@@ -356,10 +381,10 @@ type StoredElements = Readonly<Record<string, StoredElement>>;
 
 type StoredAnchor = StoredElement & Readonly<{name: string}>;
 
-type AnchorReference = StoredAnchor & Readonly<{model: ModelObject}>;
+type AnchorReference = StoredAnchor & Readonly<{model: RelationObject}>;
 
 export type ModelElementReference = Readonly<{
-  model: ModelObject;
+  model: RelationObject;
   name: string;
   kind: ElementKind;
   transform: Transform;
@@ -369,7 +394,7 @@ export type ModelElementReference = Readonly<{
 }>;
 
 export type ModelTopologyReference = Readonly<{
-  model: ModelObject;
+  model: RelationObject;
   geometry: ModelObject;
   transform: Transform;
 }> &
@@ -377,9 +402,9 @@ export type ModelTopologyReference = Readonly<{
 
 export type ConstraintTraceReference = Readonly<{
   constraintId: string;
-  source: ModelObject;
-  target: ModelObject;
-  self?: ModelObject;
+  source: RelationObject;
+  target: RelationObject;
+  self?: RelationObject;
 }>;
 
 export type ModelOperationInstrumentation = Readonly<{
@@ -406,7 +431,7 @@ type StoredConstraint = Readonly<{
 }>;
 
 // An omitted model refers to relate's self, including after immutable copies.
-type RelationReference = StoredAnchor & Readonly<{model?: ModelObject}>;
+type RelationReference = StoredAnchor & Readonly<{model?: RelationObject}>;
 type PivotSelection =
   | Readonly<{kind: 'pivot'; point: Vec3}>
   | Readonly<{kind: 'pivotVertex'; id: VertexId}>
@@ -419,11 +444,11 @@ type ConstraintSpatialSelection = Readonly<{
   kind: ConstraintSpatialReference['kind'];
   pivot: PivotSelection;
 }>;
-type RelateContext = Readonly<{self: ModelObject; original: ModelObject}>;
+type RelateContext = Readonly<{self: RelationObject; original: RelationObject}>;
 let activeRelate: RelateContext | undefined;
 
 type StoredOperationInput = Readonly<{
-  model: ModelObject;
+  model: RelationObject;
   role: ModelOperationInputRole;
   index: number;
 }>;
@@ -449,6 +474,7 @@ type StoredOperation = {
   regions: StoredOperationRegion[];
   selections: StoredOperationSelection[];
   spatial?: ModelSpatialOperation;
+  dimensions?: Readonly<Record<string, ModelParameterDimension>>;
 };
 
 type ValueTrace = {
@@ -466,11 +492,13 @@ let operationTraces = new WeakMap<StoredOperation, OperationTrace>();
 /**
  * Start a fresh, serial tooling evaluation without invalidating model geometry.
  * Finish in finally after snapshotting to retain this evaluation's kernel work.
+ * An optional cancellation check may throw before any kernel operation starts;
+ * complete results survive cancellation, and cleanup removes the check.
  */
-export function beginModelEvaluation(): () => void {
+export function beginModelEvaluation(checkCancelled?: () => void): () => void {
   valueTraces = new WeakMap();
   operationTraces = new WeakMap();
-  return beginKernelOperationEvaluation();
+  return beginKernelOperationEvaluation(checkCancelled);
 }
 
 function valueTrace(value: object): ValueTrace {
@@ -494,7 +522,7 @@ type ModelObjectInit<Kind extends ModelKind = ModelKind> = Readonly<{
   geometry?: ModelGeometry;
   geometryAnchor?: StoredElement;
   name?: string;
-  color?: string;
+  material?: ModelMaterialSnapshot;
   children?: readonly ModelObject[];
   assembly?: SolveContext;
   constraints?: readonly StoredConstraint[];
@@ -527,7 +555,7 @@ type SolidGeometry = KernelArtifact<
 >;
 
 type SolveContext = {
-  poses: ReadonlyMap<ModelObject, RigidTransform>;
+  poses: ReadonlyMap<RelationObject, RigidTransform>;
 };
 
 function transformSolveContext(
@@ -720,9 +748,9 @@ export interface ModelCapabilities<
   ): ModelForFamily<MergedElements<Elements, ExposedElements<Sources>>, Family>;
   /**
    * Shift the origin by this displacement: every local point becomes p - d.
-   * @code3d.param dx {kind: 'length', label: 'Origin ΔX'}
-   * @code3d.param dy {kind: 'length', label: 'Origin ΔY'}
-   * @code3d.param dz {kind: 'length', label: 'Origin ΔZ'}
+   * @code3d.param dx {kind: 'length', default: 0, label: 'Origin ΔX'}
+   * @code3d.param dy {kind: 'length', default: 0, label: 'Origin ΔY'}
+   * @code3d.param dz {kind: 'length', default: 0, label: 'Origin ΔZ'}
    */
   originOffset(
     dx: number,
@@ -733,13 +761,16 @@ export interface ModelCapabilities<
   originPoint(point: PointAnchor): ModelForFamily<Elements, Family>;
   /**
    * Rotate about the current origin, in degrees, about fixed local X, Y, then Z axes.
-   * @code3d.param x {kind: 'angle', label: 'Rotate X'}
-   * @code3d.param y {kind: 'angle', label: 'Rotate Y'}
-   * @code3d.param z {kind: 'angle', label: 'Rotate Z'}
+   * @code3d.param x {kind: 'angle', default: 0, label: 'Rotate X'}
+   * @code3d.param y {kind: 'angle', default: 0, label: 'Rotate Y'}
+   * @code3d.param z {kind: 'angle', default: 0, label: 'Rotate Z'}
    */
   rotate(x: number, y: number, z: number): ModelForFamily<Elements, Family>;
-  /** Return a recolored value; a group overrides the color of every descendant. */
-  paint(color: string): ModelForFamily<Elements, Family>;
+  /**
+   * Return a value with its entire material replaced, including every group descendant.
+   * Capture a Three.js material at assignment, or use a CSS color for the default material.
+   */
+  material(material: Material | string): ModelForFamily<Elements, Family>;
 }
 
 export interface GeometryCapabilities<
@@ -753,7 +784,7 @@ export interface GeometryCapabilities<
    * @code3d.param id {kind: 'vertex', label: 'Origin vertex'}
    */
   originVertex(id: VertexId): ModelForFamily<Elements, Family>;
-  /** @code3d.param factor {kind: 'ratio', label: 'Scale'} */
+  /** @code3d.param factor {kind: 'ratio', default: 1, label: 'Scale'} */
   scaled(factor: number): ModelForFamily<Elements, Family>;
 }
 
@@ -782,12 +813,12 @@ export interface SolidModificationCapabilities<Elements extends NamedElements> {
   /** Subtracts all tools in one boolean operation, equivalent to cut(stock, tools). */
   cut(tools: readonly SolidModel<{}>[]): SolidModel;
   /**
-   * @code3d.param radius {kind: 'length', label: 'Fillet radius', constraints: {exclusiveMin: 0}}
+   * @code3d.param radius {kind: 'length', default: 1, label: 'Fillet radius', constraints: {exclusiveMin: 0}}
    * @code3d.param edgeIds {kind: 'edge', actions: [{label: 'Use all', action: 'remove-argument'}]}
    */
   fillet(radius: number, edgeIds?: readonly EdgeId[]): SolidModel<Elements>;
   /**
-   * @code3d.param distance {kind: 'length', label: 'Chamfer distance', constraints: {exclusiveMin: 0}}
+   * @code3d.param distance {kind: 'length', default: 1, label: 'Chamfer distance', constraints: {exclusiveMin: 0}}
    * @code3d.param edgeIds {kind: 'edge', actions: [{label: 'Use all', action: 'remove-argument'}]}
    */
   chamfer(distance: number, edgeIds?: readonly EdgeId[]): SolidModel<Elements>;
@@ -795,7 +826,7 @@ export interface SolidModificationCapabilities<Elements extends NamedElements> {
    * Hollow a solid with uniform walls. Positive thickness offsets inward;
    * negative thickness offsets outward. Selected surfaces become openings.
    * Omit the selection, or use [], for a fully enclosed cavity.
-   * @code3d.param thickness {kind: 'length', label: 'Wall thickness'}
+   * @code3d.param thickness {kind: 'length', default: 1, label: 'Wall thickness'}
    * @code3d.param removedSurfaceIds {kind: 'surface', label: 'Openings', actions: [{label: 'Close all openings', action: 'remove-argument'}]}
    */
   shell(
@@ -834,7 +865,7 @@ export type FaceModel<Elements extends NamedElements = PlanarElements> =
       flip(): Surface;
       /**
        * Extrudes along the face's local plane normal. Signed distance; no recentering.
-       * @code3d.param distance {kind: 'length', label: 'Extrusion distance'}
+       * @code3d.param distance {kind: 'length', default: 10, label: 'Extrusion distance'}
        */
       extrude(distance: number): SolidModel;
     } & Elements;
@@ -1100,7 +1131,9 @@ export function modelTopologyIds(
     : value instanceof ConstraintExpression
       ? value.self()
       : topology?.source;
-  const geometry = source?.[modelGeometry]()?.value;
+  const geometry = isModelObject(source)
+    ? source[modelGeometry]()?.value
+    : undefined;
   if (!geometry) return undefined;
   return topologyChildren(
     geometry.shape,
@@ -1152,12 +1185,12 @@ export abstract class ConstraintExpression {
     appendUniqueParameters(this.parameters, parameters);
   }
   /** @internal */
-  self(): ModelObject | undefined {
+  self(): RelationObject | undefined {
     return this.context?.self;
   }
   /** @internal */
   traceReference(): ConstraintTraceReference {
-    const rebind = (model: ModelObject) =>
+    const rebind = (model: RelationObject) =>
       model === this.context?.original ? this.context.self : model;
     return {
       constraintId: this.constraintId,
@@ -1167,8 +1200,8 @@ export abstract class ConstraintExpression {
     };
   }
   /** @internal */
-  storeFor(model: ModelObject, original: ModelObject): StoredConstraint {
-    const isSelf = (candidate: ModelObject | undefined) =>
+  storeFor(model: RelationObject, original: RelationObject): StoredConstraint {
+    const isSelf = (candidate: RelationObject | undefined) =>
       candidate === model || candidate === original;
     if (!isSelf(this.source.model) && !isSelf(this.target.model))
       throw new Error(
@@ -1269,11 +1302,12 @@ export class Constraint extends ConstraintExpression {
    * In the target reference axes, on() pins matching bound centers; align()
    * translates self after alignment, retaining the relation's free modes.
    * Explicit zero pins tangential coordinates for on() only.
-   * @code3d.param x {kind: 'length', label: 'ΔX'}
-   * @code3d.param y {kind: 'length', label: 'ΔY'}
-   * @code3d.param z {kind: 'length', label: 'ΔZ'}
+   * @code3d.param x {kind: 'length', default: 0, label: 'ΔX'}
+   * @code3d.param y {kind: 'length', default: 0, label: 'ΔY'}
+   * @code3d.param z {kind: 'length', default: 0, label: 'ΔZ'}
    */
-  offset(x: number, y: number, z: number): Constraint {
+  offset(x: number, y: number, z: number): Constraint;
+  offset(x = 0, y = 0, z = 0): Constraint {
     assertFiniteVector('offset', [x, y, z]);
     return new Constraint(
       this.kind,
@@ -1288,11 +1322,12 @@ export class Constraint extends ConstraintExpression {
   }
   /**
    * Select this rotation's pivot in self's local coordinates.
-   * @code3d.param x {kind: 'length', label: 'Pivot X'}
-   * @code3d.param y {kind: 'length', label: 'Pivot Y'}
-   * @code3d.param z {kind: 'length', label: 'Pivot Z'}
+   * @code3d.param x {kind: 'length', default: 0, label: 'Pivot X'}
+   * @code3d.param y {kind: 'length', default: 0, label: 'Pivot Y'}
+   * @code3d.param z {kind: 'length', default: 0, label: 'Pivot Z'}
    */
-  pivot([x, y, z]: Vec3): ConstraintPivotChain {
+  pivot([x, y, z]: Vec3): ConstraintPivotChain;
+  pivot([x = 0, y = 0, z = 0]: Vec3 = [0, 0, 0]): ConstraintPivotChain {
     assertFiniteVector('pivot', [x, y, z]);
     return new ConstraintPivotChain(this, {kind: 'pivot', point: [x, y, z]});
   }
@@ -1307,7 +1342,9 @@ export class Constraint extends ConstraintExpression {
       throw new Error('around() requires an axis or straight edge.');
     const geometry =
       reference.topology?.source[modelGeometry]()?.value ??
-      (reference.whole ? reference.model[modelGeometry]()?.value : undefined);
+      (reference.whole && isModelObject(reference.model)
+        ? reference.model[modelGeometry]()?.value
+        : undefined);
     if (geometry) {
       const straight = reference.topology
         ? withTopologyShape(
@@ -1326,11 +1363,12 @@ export class Constraint extends ConstraintExpression {
   }
   /**
    * Rotate about self's origin and local X, Y, then Z axes, in degrees.
-   * @code3d.param x {kind: 'angle', label: 'Rotate X'}
-   * @code3d.param y {kind: 'angle', label: 'Rotate Y'}
-   * @code3d.param z {kind: 'angle', label: 'Rotate Z'}
+   * @code3d.param x {kind: 'angle', default: 0, label: 'Rotate X'}
+   * @code3d.param y {kind: 'angle', default: 0, label: 'Rotate Y'}
+   * @code3d.param z {kind: 'angle', default: 0, label: 'Rotate Z'}
    */
-  rotate(x: number, y: number, z: number): Constraint {
+  rotate(x: number, y: number, z: number): Constraint;
+  rotate(x = 0, y = 0, z = 0): Constraint {
     return this.withRotation({kind: 'pivot', point: origin}, [x, y, z], this);
   }
   /** @internal */
@@ -1389,11 +1427,12 @@ export class ConstraintPivotChain extends ConstraintExpression {
     this.spatialOperation = {kind: selection.kind, pivot: selection};
   }
   /**
-   * @code3d.param x {kind: 'angle', label: 'Rotate X'}
-   * @code3d.param y {kind: 'angle', label: 'Rotate Y'}
-   * @code3d.param z {kind: 'angle', label: 'Rotate Z'}
+   * @code3d.param x {kind: 'angle', default: 0, label: 'Rotate X'}
+   * @code3d.param y {kind: 'angle', default: 0, label: 'Rotate Y'}
+   * @code3d.param z {kind: 'angle', default: 0, label: 'Rotate Z'}
    */
-  rotate(x: number, y: number, z: number): Constraint {
+  rotate(x: number, y: number, z: number): Constraint;
+  rotate(x = 0, y = 0, z = 0): Constraint {
     return this.constraint.withRotation(this.selection, [x, y, z], this);
   }
 }
@@ -1406,49 +1445,681 @@ export class ConstraintAroundChain extends ConstraintExpression {
     super(...constraint.chainArguments());
     this.spatialOperation = {kind: selection.kind, pivot: selection};
   }
-  /** @code3d.param angle {kind: 'angle', label: 'Rotate'} */
-  rotate(angle: number): Constraint {
+  /** @code3d.param angle {kind: 'angle', default: 0, label: 'Rotate'} */
+  rotate(angle: number): Constraint;
+  rotate(angle = 0): Constraint {
     return this.constraint.withRotation(this.selection, angle, this);
   }
 }
 
 const modelGeometry = Symbol('modelGeometry');
 const referenceBounds = Symbol('referenceBounds');
+const referenceBoundsParts = Symbol('referenceBoundsParts');
+const modelSnapshotQueries = Symbol('modelSnapshotQueries');
 const relationPreview = Symbol('relationPreview');
+
+type RelationObjectInit = Readonly<{
+  nodeId?: string;
+  constraints?: readonly StoredConstraint[];
+  sourceRefs?: readonly SourceRef[];
+  parameters?: readonly ParameterUsage[];
+}>;
+
+/** A local reference frame and its relations, independent of finite geometry. */
+export abstract class RelationObject {
+  readonly nodeId: string;
+  abstract readonly name: string;
+  protected constraints: StoredConstraint[];
+
+  protected constructor(init: RelationObjectInit = {}) {
+    this.nodeId = init.nodeId ?? `node-${nextNodeId++}`;
+    this.constraints = [...(init.constraints ?? [])];
+    valueTraces.set(this, {
+      sourceRefs: [...(init.sourceRefs ?? [])],
+      parameters: [...(init.parameters ?? [])],
+    });
+  }
+
+  get sourceRefs(): SourceRef[] {
+    return valueTrace(this).sourceRefs;
+  }
+
+  get parameters(): ParameterUsage[] {
+    return valueTrace(this).parameters;
+  }
+
+  protected abstract copyRelations(init: RelationObjectInit): RelationObject;
+
+  protected vertexPosition(_id: VertexId): Vec3 {
+    throw new Error(
+      'pivotVertex() requires model topology, not a sketch reference frame. Use pivot([x, y, z]) instead.',
+    );
+  }
+
+  abstract relatedObjects(): readonly RelationObject[];
+  abstract toSnapshot(
+    meshCache?: Map<AnyShape, RenderMesh>,
+  ): ModelSnapshotObject;
+  abstract attachOperationTrace(
+    siteId: string,
+    execution: number,
+    order: number,
+    sourceRef: SourceRef,
+  ): void;
+
+  /** Store relations only after the complete callback has returned. */
+  protected addRelations(
+    original: RelationObject,
+    build: () => Constraint | readonly Constraint[],
+  ): readonly RelationObject[] {
+    const previous = activeRelate;
+    activeRelate = {self: this, original};
+    let built: Constraint | readonly Constraint[];
+    try {
+      built = build();
+    } finally {
+      activeRelate = previous;
+    }
+    const constraints: readonly Constraint[] = Array.isArray(built)
+      ? built
+      : [built as Constraint];
+    const stored = constraints.map(constraint => {
+      if (!(constraint instanceof Constraint))
+        throw new Error(
+          'relate() requires a completed Constraint; finish pivot/around with rotate().',
+        );
+      return constraint.storeFor(this, original);
+    });
+    this.constraints.push(...stored);
+    return uniqueModels(stored.flatMap(constraintReferences));
+  }
+
+  [referenceBounds](
+    reference: StoredAnchor,
+    transform: RigidTransform,
+  ): LocalBounds {
+    if (reference.bound) {
+      const frame = composeTransforms(transform, reference.transform);
+      const [x, z] = reference.bound.size;
+      return pointBounds(
+        [-1, 1].flatMap(a =>
+          [-1, 1].map(
+            b =>
+              composeTransforms(
+                frame,
+                translation([(a * x) / 2, 0, (b * z) / 2]),
+              ).position,
+          ),
+        ),
+      );
+    }
+    if (reference.kind === 'point') {
+      const point = composeTransforms(transform, reference.transform).position;
+      return [point, point];
+    }
+    throw new Error(
+      `The reference ${reference.name} has no finite geometry. Select a model, vertex, edge, or surface for on().`,
+    );
+  }
+
+  protected alignmentGeometry(reference: StoredAnchor): AlignmentGeometry {
+    if (reference.kind === 'point')
+      return {kind: 'point', point: reference.transform.position};
+    const direction = rotateVector(
+      [
+        0,
+        reference.kind === 'line'
+          ? (reference.direction ?? 1)
+          : (reference.facing ?? reference.bound?.facing ?? 1),
+        0,
+      ],
+      reference.transform.quaternion,
+    );
+    return reference.kind === 'line'
+      ? {kind: 'line', point: reference.transform.position, direction}
+      : {kind: 'plane', point: reference.transform.position, normal: direction};
+  }
+
+  /** @internal */
+  attachSource(sourceRef: SourceRef): void {
+    const previous = this.sourceRefs.at(-1);
+    if (
+      previous?.file !== sourceRef.file ||
+      previous.start !== sourceRef.start ||
+      previous.end !== sourceRef.end
+    ) {
+      this.sourceRefs.push(sourceRef);
+    }
+  }
+
+  /** @internal */
+  attachParameters(parameters: readonly ParameterUsage[]): void {
+    appendUniqueParameters(this.parameters, parameters);
+  }
+
+  solvePose(context: SolveContext): RigidTransform {
+    return context.poses.get(this)!;
+  }
+
+  protected relationElement(reference: StoredAnchor): ElementSnapshot {
+    const element = reference;
+    const topology = element.topology;
+    let arrow: RigidTransform | undefined;
+    if (reference.kind === 'line' && topology) {
+      const geometry = topology.source[modelGeometry]()!.value;
+      arrow = withTopologyShape(
+        geometry.shape,
+        geometry.topology,
+        topology.selection,
+        shape => {
+          const edge = shape as ReplicadEdge;
+          const position = (reference.direction ?? 1) === 1 ? 1 : 0;
+          const point = edge.pointAt(position),
+            tangent = edge.tangentAt(position);
+          try {
+            return topologyTransform(
+              topology,
+              frameFromYAxis(
+                point.toTuple(),
+                tangent
+                  .toTuple()
+                  .map(v => v * (reference.direction ?? 1)) as unknown as Vec3,
+              ),
+            );
+          } finally {
+            point.delete();
+            tangent.delete();
+          }
+        },
+      );
+    }
+    return {
+      ...snapshotElements({[reference.name]: element})[0],
+      arrow,
+    };
+  }
+
+  private bodyRotations(
+    constraint: StoredConstraint,
+    indices: Map<RelationObject, number>,
+  ): BodyRotation[] {
+    return constraint.rotations.map(({pivot, angles}) => {
+      if (pivot.kind === 'around') {
+        return pivot.axis.model
+          ? {
+              body: indices.get(pivot.axis.model)!,
+              axis: pivot.axis.transform,
+              angle: (angles as number) * (pivot.axis.direction ?? 1),
+            }
+          : {
+              local: axisRotation(
+                pivot.axis.transform,
+                (angles as number) * (pivot.axis.direction ?? 1),
+              ),
+            };
+      }
+      const frame = translation(
+        pivot.kind === 'pivot' ? pivot.point : this.vertexPosition(pivot.id),
+      );
+      return {
+        local: composeTransforms(
+          composeTransforms(frame, rotationAround(origin, angles as Vec3)),
+          invertTransform(frame),
+        ),
+      };
+    });
+  }
+
+  /** @internal */
+  [relationPreview](
+    nodeId: string,
+    constraint: StoredConstraint,
+    selection: ConstraintSpatialSelection | undefined,
+  ): ConstraintPreview {
+    // This expression starts from the relate receiver, before sibling constraints
+    // are returned and committed to self. Geometry and node identity stay shared.
+    const owner = this.copyRelations({
+      nodeId,
+      constraints: [...this.constraints, constraint],
+    });
+    const context = RelationObject.createSolveContext([
+      owner,
+      ...(selection?.pivot.kind === 'around' && selection.pivot.axis.model
+        ? [selection.pivot.axis.model]
+        : []),
+    ]);
+    return {
+      object: {
+        nodeId,
+        compositionTransform: toTransform(owner.solvePose(context)),
+        constraints: owner.constraints.map(value =>
+          owner.constraintSnapshot(value, context),
+        ),
+      },
+      spatial: selection
+        ? owner.constraintSpatial(constraint, selection, context)
+        : undefined,
+    };
+  }
+
+  private constraintSpatial(
+    constraint: StoredConstraint,
+    selection: ConstraintSpatialSelection,
+    context: SolveContext,
+  ): ConstraintSpatialReference {
+    const models = [...context.poses.keys()];
+    const actions = this.bodyRotations(
+      constraint,
+      new Map(models.map((model, i) => [model, i])),
+    );
+    const stage = actions.length - (selection.kind === 'rotate' ? 1 : 0);
+    const finalPose = this.solvePose(context);
+    let before = finalPose;
+    for (let i = actions.length - 1; i >= stage; i--) {
+      const action = actions[i];
+      before =
+        'local' in action
+          ? composeTransforms(before, invertTransform(action.local))
+          : composeTransforms(
+              axisRotation(
+                composeTransforms(
+                  models[action.body].solvePose(context),
+                  action.axis,
+                ),
+                -action.angle,
+              ),
+              before,
+            );
+    }
+    const pivot = selection.pivot;
+    let frame: RigidTransform;
+    if (pivot.kind === 'around') {
+      frame = composeTransforms(
+        pivot.axis.model ? pivot.axis.model.solvePose(context) : before,
+        (pivot.axis.direction ?? 1) === 1
+          ? pivot.axis.transform
+          : composeTransforms(pivot.axis.transform, rotation([1, 0, 0, 0])),
+      );
+    } else {
+      const local = translation(
+        pivot.kind === 'pivot' ? pivot.point : this.vertexPosition(pivot.id),
+      );
+      frame = composeTransforms(before, local);
+    }
+    const angles = constraint.rotations[stage]?.angles ?? origin;
+    const rotationVector: Vec3 =
+      typeof angles === 'number' ? [0, angles, 0] : angles;
+    const localFrame = relativeTransform(frame, finalPose);
+    return {
+      nodeId: this.nodeId,
+      kind: selection.kind,
+      spatial: {
+        origin: localFrame.position,
+        vector:
+          selection.kind === 'rotate'
+            ? rotationVector
+            : pivot.kind === 'pivot'
+              ? pivot.point
+              : origin,
+        frame: localFrame,
+        rotation: rotationVector,
+        axisOnly: pivot.kind === 'around',
+      },
+    };
+  }
+
+  static createSolveContext(roots: readonly RelationObject[]): SolveContext {
+    const models: RelationObject[] = [];
+    const indices = new Map<RelationObject, number>();
+    const collect = (model: RelationObject): void => {
+      if (indices.has(model)) return;
+      indices.set(model, models.length);
+      models.push(model);
+      model.constraints.flatMap(constraintReferences).forEach(collect);
+    };
+    roots.forEach(collect);
+    const poses = solveBodies(
+      models.map((model): Body => ({
+        name: model.name,
+        relations: model.constraints.map(constraint =>
+          constraint.kind === 'align'
+            ? {
+                kind: 'align',
+                id: constraint.id,
+                source: {
+                  body: indices.get(constraint.source.model ?? model)!,
+                  geometry: (
+                    constraint.source.model ?? model
+                  ).alignmentGeometry(constraint.source),
+                  transform: constraint.source.transform,
+                },
+                target: {
+                  body: indices.get(constraint.target.model ?? model)!,
+                  geometry: (
+                    constraint.target.model ?? model
+                  ).alignmentGeometry(constraint.target),
+                  transform: constraint.target.transform,
+                },
+                offset: constraint.offset,
+                rotations: model.bodyRotations(constraint, indices),
+              }
+            : {
+                kind: 'on',
+                id: constraint.id,
+                source: {
+                  body: indices.get(constraint.source.model ?? model)!,
+                  key: constraint.source.name,
+                  bounds: (orientation: Quaternion) =>
+                    (constraint.source.model ?? model)[referenceBounds](
+                      constraint.source,
+                      rotation(orientation),
+                    ),
+                },
+                target: {
+                  body: indices.get(constraint.target.model ?? model)!,
+                  transform: constraint.target.transform,
+                  facing: constraint.target.bound!.facing,
+                },
+                offset: constraint.offset,
+                rotations: model.bodyRotations(constraint, indices),
+              },
+        ),
+      })),
+    );
+    return {
+      poses: new Map(models.map((model, index) => [model, poses[index]])),
+    };
+  }
+
+  protected constraintSnapshot(
+    constraint: StoredConstraint,
+    context: SolveContext,
+  ): ConstraintSnapshot {
+    const source = constraint.source.model ?? this;
+    const target = constraint.target.model ?? this;
+    const models = [...context.poses.keys()];
+    const actions = this.bodyRotations(
+      constraint,
+      new Map(models.map((model, i) => [model, i])),
+    );
+    let before = this.solvePose(context);
+    for (const action of [...actions].reverse()) {
+      before =
+        'local' in action
+          ? composeTransforms(before, invertTransform(action.local))
+          : composeTransforms(
+              axisRotation(
+                composeTransforms(
+                  models[action.body].solvePose(context),
+                  action.axis,
+                ),
+                -action.angle,
+              ),
+              before,
+            );
+    }
+    const sourcePose = source === this ? before : source.solvePose(context);
+    const targetPose = target === this ? before : target.solvePose(context);
+    let offsetFrame = composeTransforms(
+      targetPose,
+      constraint.target.transform,
+    );
+    if (constraint.kind === 'align') {
+      for (const action of actions)
+        if ('body' in action)
+          offsetFrame = composeTransforms(
+            axisRotation(
+              composeTransforms(
+                models[action.body].solvePose(context),
+                action.axis,
+              ),
+              action.angle,
+            ),
+            offsetFrame,
+          );
+      return {
+        id: constraint.id,
+        kind: 'align',
+        source: anchorSnapshot(source, constraint.source),
+        target: anchorSnapshot(target, constraint.target),
+        sourceElement: source.relationElement(constraint.source),
+        targetElement: target.relationElement(constraint.target),
+        offsetDirection: 1,
+        offset: constraint.offset ?? origin,
+        offsetFrame: toTransform(offsetFrame),
+        sourceRefs: [...valueTrace(constraint).sourceRefs],
+        parameters: [...valueTrace(constraint).parameters],
+      };
+    }
+    const orientation = composeTransforms(
+      invertTransform(rotation(offsetFrame.quaternion)),
+      rotation(sourcePose.quaternion),
+    ).quaternion;
+    const bounds = source[referenceBounds](
+      constraint.source,
+      rotation(orientation),
+    );
+    const center: Vec3 = [
+      (bounds[0][0] + bounds[1][0]) / 2,
+      bounds[constraint.target.bound!.facing === 1 ? 0 : 1][1],
+      (bounds[0][2] + bounds[1][2]) / 2,
+    ];
+    const sourceFrame = relativeTransform(
+      {
+        position: addVectors(
+          sourcePose.position,
+          rotateVector(center, offsetFrame.quaternion),
+        ),
+        quaternion: offsetFrame.quaternion,
+      },
+      sourcePose,
+    );
+    const sourceSize: Vec3 = [
+      bounds[1][0] - bounds[0][0],
+      bounds[1][1] - bounds[0][1],
+      bounds[1][2] - bounds[0][2],
+    ];
+    for (const action of actions) {
+      if ('body' in action)
+        offsetFrame = composeTransforms(
+          axisRotation(
+            composeTransforms(
+              models[action.body].solvePose(context),
+              action.axis,
+            ),
+            action.angle,
+          ),
+          offsetFrame,
+        );
+    }
+    return {
+      id: constraint.id,
+      kind: constraint.kind,
+      source: anchorSnapshot(source, constraint.source),
+      target: anchorSnapshot(target, constraint.target),
+      sourceBounds: {
+        size: sourceSize,
+        transform: toTransform(
+          composeTransforms(sourceFrame, {
+            position: [
+              0,
+              (constraint.target.bound!.facing * sourceSize[1]) / 2,
+              0,
+            ],
+            quaternion: [0, 0, 0, 1],
+          }),
+        ),
+      },
+      sourceElement: {
+        name: `${constraint.source.name}:bound`,
+        kind: 'face',
+        transform: toTransform(sourceFrame),
+        bound: {
+          size: [sourceSize[0], sourceSize[2]],
+          facing: constraint.target.bound!.facing === 1 ? -1 : 1,
+        },
+      },
+      targetElement: {
+        name: constraint.target.name,
+        kind: 'face',
+        transform: toTransform(constraint.target.transform),
+        bound: constraint.target.bound,
+      },
+      offsetDirection: source === this ? 1 : -1,
+      offset: constraint.offset ?? origin,
+      offsetFrame: toTransform(offsetFrame),
+      sourceRefs: [...valueTrace(constraint).sourceRefs],
+      parameters: [...valueTrace(constraint).parameters],
+    };
+  }
+}
+
+/** Plane-only spatial value used by sketches before a B-Rep face exists. */
+export class SketchFrame extends RelationObject {
+  readonly name = 'Sketch';
+  readonly plane: FaceAnchor;
+  private readonly source?: SketchFrame;
+  private readonly operation = storedOperation('sketch');
+
+  constructor(source?: SketchFrame, init: RelationObjectInit = {}) {
+    super({
+      constraints: source?.constraints,
+      sourceRefs: source?.sourceRefs,
+      parameters: source?.parameters,
+      ...init,
+    });
+    this.source = source;
+    this.plane = modelAnchor(this, 'plane', {
+      kind: 'face',
+      transform: identityRigidTransform,
+    }) as FaceAnchor;
+  }
+
+  protected copyRelations(init: RelationObjectInit): SketchFrame {
+    return new SketchFrame(this, init);
+  }
+
+  relatedObjects(): readonly RelationObject[] {
+    return [
+      ...(this.source ? [this.source] : []),
+      ...this.constraints.flatMap(constraintReferences),
+    ];
+  }
+
+  attachOperationTrace(
+    siteId: string,
+    execution: number,
+    order: number,
+    sourceRef: SourceRef,
+  ): void {
+    if (!operationTraces.has(this.operation))
+      operationTraces.set(this.operation, {
+        siteId,
+        execution,
+        order,
+        sourceRef,
+      });
+  }
+
+  toSnapshot(): ModelSnapshotObject {
+    const {siteId, execution, order, sourceRef} =
+      operationTraces.get(this.operation) ?? {};
+    return {
+      ...this.snapshot(),
+      kind: 'reference',
+      name: this.name,
+      children: [],
+      transform: toTransform(identityRigidTransform),
+      elements: snapshotElements({
+        plane: {kind: 'face', transform: identityRigidTransform},
+      }),
+      origin,
+      sourceRefs: [...this.sourceRefs],
+      parameters: [...this.parameters],
+      operation: {
+        id: storedOperationId(this.operation),
+        siteId,
+        execution,
+        order,
+        sourceRef,
+        kind: 'sketch',
+        outputNodeId: this.nodeId,
+        inputs: this.relatedObjects().map((model, index) => ({
+          nodeId: model.nodeId,
+          role: 'reference',
+          index,
+        })),
+        regions: [],
+        selections: [],
+      },
+    };
+  }
+
+  relate(
+    build: (frame: SketchFrame) => Constraint | readonly Constraint[],
+  ): SketchFrame {
+    const related = new SketchFrame(this);
+    related.addRelations(this, () => build(related));
+    return related;
+  }
+
+  face(region: SketchRegion): FaceModel {
+    return sketchFaceModel(region, this.constraints, this);
+  }
+
+  snapshot(): ConstraintPreview['object'] {
+    const context = RelationObject.createSolveContext([this]);
+    return {
+      nodeId: this.nodeId,
+      compositionTransform: toTransform(this.solvePose(context)),
+      constraints: this.constraints.map(constraint =>
+        this.constraintSnapshot(constraint, context),
+      ),
+    };
+  }
+
+  /** Related finite models, expressed in this sketch's local editing plane. */
+  context(): readonly Readonly<{nodeId: string; transform: Transform}>[] {
+    const context = RelationObject.createSolveContext([this]);
+    const frame = this.solvePose(context);
+    return [...context.poses].flatMap(([object, pose]) =>
+      object instanceof ModelObject
+        ? [
+            {
+              nodeId: object.nodeId,
+              transform: toTransform(relativeTransform(pose, frame)),
+            },
+          ]
+        : [],
+    );
+  }
+}
 
 export class ModelObject<
   Elements extends NamedElements = {},
   Kind extends ModelKind = ModelKind,
-> implements Anchor<ModelElementKind<Kind>> {
+>
+  extends RelationObject
+  implements Anchor<ModelElementKind<Kind>>
+{
   declare readonly [anchorKind]: ModelElementKind<Kind>;
   declare readonly [modelFamily]: Kind;
   declare readonly [modelNamedElements]: Elements;
   /** @internal */
   readonly elementKind: ModelElementKind<Kind>;
   /** @internal */
-  readonly nodeId: string;
-  /** @internal */
   readonly kind: Kind;
   /** @internal */
   readonly name: string;
   /** @internal */
-  readonly color?: string;
+  private readonly materialSnapshot?: ModelMaterialSnapshot;
   /** @internal */
   readonly children: readonly ModelObject[];
-  /** @internal */
-  get sourceRefs(): SourceRef[] {
-    return valueTrace(this).sourceRefs;
-  }
-  /** @internal */
-  get parameters(): ParameterUsage[] {
-    return valueTrace(this).parameters;
-  }
   private readonly geometry?: ModelGeometry;
   private readonly assembly?: SolveContext;
   private readonly meshTolerance: number;
   private readonly geometryAnchor: StoredElement;
   private readonly elements: StoredElements;
-  private constraints: StoredConstraint[];
   private readonly operation: StoredOperation;
 
   /** @internal */
@@ -1457,12 +2128,12 @@ export class ModelObject<
   }
 
   private constructor(init: ModelObjectInit<Kind>) {
+    super(init);
     if (init.kind !== 'group' && !init.geometry) {
       throw new Error(
         'A geometric model object must contain an OpenCascade shape.',
       );
     }
-    this.nodeId = init.nodeId ?? `node-${nextNodeId++}`;
     this.kind = init.kind;
     this.elementKind = modelElementKinds[
       init.kind
@@ -1474,18 +2145,13 @@ export class ModelObject<
     };
     this.meshTolerance = init.meshTolerance ?? 0.2;
     this.name = init.name ?? defaultModelNames[init.kind];
-    this.color = init.color;
+    this.materialSnapshot = init.material;
     this.children = init.children ?? [];
     this.assembly =
       init.assembly ??
       (this.kind === 'group'
         ? ModelObject.createAssembly(this.children)
         : undefined);
-    this.constraints = [...(init.constraints ?? [])];
-    valueTraces.set(this, {
-      sourceRefs: [...(init.sourceRefs ?? [])],
-      parameters: [...(init.parameters ?? [])],
-    });
     this.operation = init.operation;
     const elements =
       init.elements ??
@@ -1578,33 +2244,13 @@ export class ModelObject<
       {model: this, role: 'source', index: 0},
     ]);
     const related = this.copy({}, operation);
-    const previous = activeRelate;
-    activeRelate = {self: related, original: this};
-    let built: Constraint | readonly Constraint[];
-    try {
-      built = build(related);
-    } finally {
-      activeRelate = previous;
-    }
-    const constraints: readonly Constraint[] = Array.isArray(built)
-      ? built
-      : [built as Constraint];
-    const stored = constraints.map(constraint => {
-      if (!(constraint instanceof Constraint))
-        throw new Error(
-          'relate() requires a completed Constraint; finish pivot/around with rotate().',
-        );
-      return constraint.storeFor(related, this);
-    });
-    related.constraints.push(...stored);
+    const references = related.addRelations(this, () => build(related));
     operation.inputs.push(
-      ...uniqueModels(stored.flatMap(constraintReferences)).map(
-        (model, index) => ({
-          model,
-          role: 'reference' as const,
-          index,
-        }),
-      ),
+      ...references.map((model, index) => ({
+        model,
+        role: 'reference' as const,
+        index,
+      })),
     );
     return related;
   }
@@ -1759,10 +2405,10 @@ export class ModelObject<
     };
   }
 
-  paint(color: string): RuntimeModel<Elements, Kind> {
+  material(material: Material | string): RuntimeModel<Elements, Kind> {
     return this.copy(
-      {color},
-      storedOperation('paint', [{model: this, role: 'source', index: 0}]),
+      {material: captureModelMaterial(material)},
+      storedOperation('material', [{model: this, role: 'source', index: 0}]),
     );
   }
 
@@ -1770,7 +2416,8 @@ export class ModelObject<
     dx: number,
     dy: number,
     dz: number,
-  ): RuntimeModel<Elements, Kind> {
+  ): RuntimeModel<Elements, Kind>;
+  originOffset(dx = 0, dy = 0, dz = 0): RuntimeModel<Elements, Kind> {
     const offset: Vec3 = [dx, dy, dz];
     assertFiniteVector('originOffset', offset);
     return this.withOrigin(offset, {kind: 'originOffset'});
@@ -1808,7 +2455,7 @@ export class ModelObject<
     selection:
       | {kind: 'originOffset' | 'originCenter'}
       | {kind: 'originVertex'; id: VertexId}
-      | {kind: 'originPoint'; model: ModelObject},
+      | {kind: 'originPoint'; model: RelationObject},
   ): RuntimeModel<Elements, Kind> {
     const transform = translation(negateVector(offset));
     const operation = storedOperation(selection.kind, [
@@ -1832,7 +2479,8 @@ export class ModelObject<
     return this.transformed(transform, operation);
   }
 
-  rotate(x: number, y: number, z: number): RuntimeModel<Elements, Kind> {
+  rotate(x: number, y: number, z: number): RuntimeModel<Elements, Kind>;
+  rotate(x = 0, y = 0, z = 0): RuntimeModel<Elements, Kind> {
     const angles: Vec3 = [x, y, z];
     assertFiniteVector('rotate', angles);
     const operation = storedOperation('rotate', [
@@ -1915,11 +2563,12 @@ export class ModelObject<
     });
   }
 
-  scaled(factor: number): RuntimeModel<Elements, Kind> {
+  scaled(factor: number): RuntimeModel<Elements, Kind>;
+  scaled(factor = 1): RuntimeModel<Elements, Kind> {
     assertPositive('scale', factor);
     const source = this.requireGeometry();
     const geometry = evaluateModelGeometry('scaled', [factor], [source], () => {
-      const shape = source.value.shape.clone().scale(factor, toPoint(origin));
+      const shape = shapeWithScale(source.value.shape, factor);
       try {
         return {
           shape,
@@ -1949,7 +2598,8 @@ export class ModelObject<
     );
   }
 
-  extrude(this: ModelObject<Elements, 'face'>, distance: number): SolidModel {
+  extrude(this: ModelObject<Elements, 'face'>, distance: number): SolidModel;
+  extrude(this: ModelObject<Elements, 'face'>, distance = 10): SolidModel {
     if (this.kind !== 'face')
       throw new Error('extrude requires a single face model.');
     if (!Number.isFinite(distance) || distance === 0)
@@ -1977,14 +2627,23 @@ export class ModelObject<
       kind: 'solid',
       name: 'Extrude',
       geometry,
-      color: this.color,
+      material: this.materialSnapshot,
       constraints: this.constraints,
       sourceRefs: this.sourceRefs,
       parameters: this.allParameters(),
       meshTolerance: this.meshTolerance,
-      operation: storedOperation('extrude', [
-        {model: this, role: 'receiver', index: 0},
-      ]),
+      operation: storedOperation(
+        'extrude',
+        [{model: this, role: 'receiver', index: 0}],
+        {
+          dimensions: {
+            distance: {
+              origin: this.elements.center.transform.position,
+              vector: direction,
+            },
+          },
+        },
+      ),
     }) as unknown as SolidModel;
   }
 
@@ -1998,6 +2657,11 @@ export class ModelObject<
   fillet(
     this: ModelObject<Elements, 'solid'>,
     radius: number,
+    edgeIds?: readonly EdgeId[],
+  ): SolidModel<Elements>;
+  fillet(
+    this: ModelObject<Elements, 'solid'>,
+    radius = 1,
     edgeIds?: readonly EdgeId[],
   ): SolidModel<Elements> {
     assertPositive('radius', radius);
@@ -2040,6 +2704,11 @@ export class ModelObject<
     this: ModelObject<Elements, 'solid'>,
     distance: number,
     edgeIds?: readonly EdgeId[],
+  ): SolidModel<Elements>;
+  chamfer(
+    this: ModelObject<Elements, 'solid'>,
+    distance = 1,
+    edgeIds?: readonly EdgeId[],
   ): SolidModel<Elements> {
     assertPositive('distance', distance);
     const source = this.requireSolidGeometry();
@@ -2080,6 +2749,11 @@ export class ModelObject<
   shell(
     this: ModelObject<Elements, 'solid'>,
     thickness: number,
+    removedSurfaceIds?: readonly SurfaceId[],
+  ): SolidModel<Elements>;
+  shell(
+    this: ModelObject<Elements, 'solid'>,
+    thickness = 1,
     removedSurfaceIds: readonly SurfaceId[] = [],
   ): SolidModel<Elements> {
     if (!Number.isFinite(thickness) || thickness === 0) {
@@ -2120,23 +2794,6 @@ export class ModelObject<
   }
 
   /** @internal */
-  attachSource(sourceRef: SourceRef): void {
-    const previous = this.sourceRefs.at(-1);
-    if (
-      previous?.file !== sourceRef.file ||
-      previous.start !== sourceRef.start ||
-      previous.end !== sourceRef.end
-    ) {
-      this.sourceRefs.push(sourceRef);
-    }
-  }
-
-  /** @internal */
-  attachParameters(parameters: readonly ParameterUsage[]): void {
-    appendUniqueParameters(this.parameters, parameters);
-  }
-
-  /** @internal */
   attachOperationTrace(
     siteId: string,
     execution: number,
@@ -2150,7 +2807,7 @@ export class ModelObject<
   }
 
   /** @internal */
-  relatedObjects(): readonly ModelObject[] {
+  relatedObjects(): readonly RelationObject[] {
     return [
       ...this.children,
       ...this.operation.inputs.map(input => input.model),
@@ -2170,9 +2827,9 @@ export class ModelObject<
     meshCache: Map<AnyShape, RenderMesh>,
     solveContext: SolveContext,
     inComposition = false,
-    overrideColor?: string,
+    overrideMaterial?: ModelMaterialSnapshot,
   ): ModelSnapshotObject {
-    const color = overrideColor ?? this.color;
+    const material = overrideMaterial ?? this.materialSnapshot;
     const pose = this.solvePose(solveContext);
     const constraints = this.constraints.map(constraint =>
       this.constraintSnapshot(constraint, solveContext),
@@ -2187,7 +2844,7 @@ export class ModelObject<
       nodeId: this.nodeId,
       kind: this.kind,
       name: this.name,
-      color,
+      material,
       compositionTransform: toTransform(pose),
       transform: toTransform(inComposition ? pose : identityRigidTransform),
       constraints,
@@ -2213,7 +2870,7 @@ export class ModelObject<
       return {
         ...common,
         children: this.children.map(child =>
-          child.snapshotNode(meshCache, childContext, true, color),
+          child.snapshotNode(meshCache, childContext, true, material),
         ),
       };
     }
@@ -2301,7 +2958,7 @@ export class ModelObject<
       kind: 'solid',
       name: 'Loft',
       geometry,
-      color: this.color,
+      material: this.materialSnapshot,
       constraints: this.constraints,
       sourceRefs: inputs.flatMap(input => input.sourceRefs),
       parameters: uniqueParameters(
@@ -2336,7 +2993,7 @@ export class ModelObject<
         geometryAnchor: this.geometryAnchor,
         geometry: evaluation.geometry,
         name: this.name,
-        color: this.color,
+        material: this.materialSnapshot,
         constraints: this.constraints,
         sourceRefs: [this, ...others].flatMap(model => model.sourceRefs),
         parameters: uniqueParameters(
@@ -2468,12 +3125,8 @@ export class ModelObject<
     ]);
   }
 
-  private solvePose(context: SolveContext): RigidTransform {
-    return context.poses.get(this)!;
-  }
-
-  private memberPoses(): Map<ModelObject, RigidTransform | null> {
-    const members = new Map<ModelObject, RigidTransform | null>([
+  private memberPoses(): Map<RelationObject, RigidTransform | null> {
+    const members = new Map<RelationObject, RigidTransform | null>([
       [this, identityRigidTransform],
     ]);
     if (this.children.length) {
@@ -2494,56 +3147,83 @@ export class ModelObject<
   }
 
   /** Bounds of the selected finite geometry after a rigid transform. */
-  [referenceBounds](
+  private [referenceBoundsParts](
     reference: StoredAnchor,
     transform: RigidTransform,
-  ): LocalBounds {
-    if (reference.bound) {
-      const frame = composeTransforms(transform, reference.transform);
-      const [x, z] = reference.bound.size;
-      return pointBounds(
-        [-1, 1].flatMap(a =>
-          [-1, 1].map(
-            b =>
-              composeTransforms(
-                frame,
-                translation([(a * x) / 2, 0, (b * z) / 2]),
-              ).position,
-          ),
-        ),
-      );
-    }
+  ): ({bounds: LocalBounds} | SnapshotQueryInput)[] {
+    if (reference.bound)
+      return [{bounds: super[referenceBounds](reference, transform)}];
     if (reference.whole) {
-      if (this.geometry) return transformedBounds(this.geometry, transform);
+      if (this.geometry) return [boundsQuery(this.geometry, transform)];
       const context = this.assembly!;
-      return combineBounds(
-        this.children.map(child =>
-          child[referenceBounds](
-            child.relationAnchorReference(),
-            composeTransforms(transform, child.solvePose(context)),
-          ),
+      return this.children.flatMap(child =>
+        child[referenceBoundsParts](
+          child.relationAnchorReference(),
+          composeTransforms(transform, child.solvePose(context)),
         ),
       );
     }
     if (reference.topology) {
       const topology = reference.topology;
-      return transformedBounds(
-        topology.source.requireGeometry(),
-        composeTransforms(transform, topology.transform),
-        topology.selection,
-        topology.scale,
-      );
+      return [
+        boundsQuery(
+          topology.source.requireGeometry(),
+          composeTransforms(transform, topology.transform),
+          topology.selection,
+          topology.scale,
+        ),
+      ];
     }
-    if (reference.kind === 'point') {
-      const point = composeTransforms(transform, reference.transform).position;
-      return [point, point];
-    }
-    throw new Error(
-      `The reference ${reference.name} has no finite geometry. Select a model, vertex, edge, or surface for on().`,
-    );
+    return [{bounds: super[referenceBounds](reference, transform)}];
   }
 
-  private alignmentGeometry(reference: StoredAnchor): AlignmentGeometry {
+  /** Bounds of the selected finite geometry after a rigid transform. */
+  override [referenceBounds](
+    reference: StoredAnchor,
+    transform: RigidTransform,
+  ): LocalBounds {
+    const bounds = this[referenceBoundsParts](reference, transform).map(part =>
+      'bounds' in part
+        ? part.bounds
+        : (evaluateSnapshotQuery(part) as LocalBounds),
+    );
+    return bounds.length === 1 ? bounds[0] : combineBounds(bounds);
+  }
+
+  /** Pure query collection: it never substitutes geometry or runs author code. */
+  [modelSnapshotQueries](): SnapshotQueryInput[] {
+    const result: SnapshotQueryInput[] = [];
+    if (this.geometry || this.children.length) {
+      for (const direction of Object.values(boundDirections)) {
+        const transform = invertTransform(
+          rotation(frameFromYAxis(origin, direction).quaternion),
+        );
+        for (const part of this[referenceBoundsParts](
+          this.relationAnchorReference(),
+          transform,
+        ))
+          if (!('bounds' in part)) result.push(part);
+      }
+    }
+    if (this.geometry)
+      result.push(
+        meshQuery(
+          this.geometry,
+          this.geometry.value.shape,
+          this.meshTolerance,
+          this.geometry.value.topology,
+        ),
+      );
+    for (const region of this.operation.regions)
+      result.push(
+        meshQuery(region.artifact, region.artifact.value, this.meshTolerance),
+      );
+    return result;
+  }
+
+  protected override alignmentGeometry(
+    reference: StoredAnchor,
+  ): AlignmentGeometry {
     if (reference.kind === 'point')
       return {
         kind: 'point',
@@ -2567,7 +3247,9 @@ export class ModelObject<
         topology.selection,
         shape => {
           const scaled =
-            topology.scale === 1 ? shape : shape.scale(topology.scale);
+            topology.scale === 1
+              ? shape
+              : shapeWithScale(shape, topology.scale);
           try {
             return transformGeometry(read(scaled), topology.transform);
           } finally {
@@ -2577,197 +3259,28 @@ export class ModelObject<
       );
     }
     if (reference.whole) return read(this.requireGeometry().value.shape);
-    const direction = rotateVector(
-      [
-        0,
-        reference.kind === 'line'
-          ? (reference.direction ?? 1)
-          : (reference.facing ?? reference.bound?.facing ?? 1),
-        0,
-      ],
-      reference.transform.quaternion,
-    );
-    return reference.kind === 'line'
-      ? {kind: 'line', point: reference.transform.position, direction}
-      : {kind: 'plane', point: reference.transform.position, normal: direction};
+    return super.alignmentGeometry(reference);
   }
 
-  private relationElement(reference: StoredAnchor): ElementSnapshot {
-    const element = reference.whole
-      ? {
-          ...this.exposedElement(),
-          name: reference.name,
-          direction: reference.direction,
-          facing: reference.facing,
-        }
-      : reference;
-    const topology = element.topology;
-    let arrow: RigidTransform | undefined;
-    if (reference.kind === 'line' && topology) {
-      const geometry = topology.source.requireGeometry().value;
-      arrow = withTopologyShape(
-        geometry.shape,
-        geometry.topology,
-        topology.selection,
-        shape => {
-          const edge = shape as ReplicadEdge;
-          const position = (reference.direction ?? 1) === 1 ? 1 : 0;
-          const point = edge.pointAt(position),
-            tangent = edge.tangentAt(position);
-          try {
-            return topologyTransform(
-              topology,
-              frameFromYAxis(
-                point.toTuple(),
-                tangent
-                  .toTuple()
-                  .map(v => v * (reference.direction ?? 1)) as unknown as Vec3,
-              ),
-            );
-          } finally {
-            point.delete();
-            tangent.delete();
+  protected override relationElement(reference: StoredAnchor): ElementSnapshot {
+    return super.relationElement(
+      reference.whole
+        ? {
+            ...this.exposedElement(),
+            name: reference.name,
+            direction: reference.direction,
+            facing: reference.facing,
           }
-        },
-      );
-    }
-    return {
-      ...snapshotElements({[reference.name]: element})[0],
-      arrow,
-    };
-  }
-
-  private bodyRotations(
-    constraint: StoredConstraint,
-    indices: Map<ModelObject, number>,
-  ): BodyRotation[] {
-    return constraint.rotations.map(({pivot, angles}) => {
-      if (pivot.kind === 'around') {
-        return pivot.axis.model
-          ? {
-              body: indices.get(pivot.axis.model)!,
-              axis: pivot.axis.transform,
-              angle: (angles as number) * (pivot.axis.direction ?? 1),
-            }
-          : {
-              local: axisRotation(
-                pivot.axis.transform,
-                (angles as number) * (pivot.axis.direction ?? 1),
-              ),
-            };
-      }
-      const frame = translation(
-        pivot.kind === 'pivot'
-          ? pivot.point
-          : anchorReference(this.vertex(pivot.id)).transform.position,
-      );
-      return {
-        local: composeTransforms(
-          composeTransforms(frame, rotationAround(origin, angles as Vec3)),
-          invertTransform(frame),
-        ),
-      };
-    });
-  }
-
-  /** @internal */
-  [relationPreview](
-    nodeId: string,
-    constraint: StoredConstraint,
-    selection: ConstraintSpatialSelection | undefined,
-  ): ConstraintPreview {
-    // This expression starts from the relate receiver, before sibling constraints
-    // are returned and committed to self. Geometry and node identity stay shared.
-    const owner = this.copy(
-      {nodeId, constraints: [...this.constraints, constraint]},
-      this.operation,
+        : reference,
     );
-    const context = ModelObject.createSolveContext([
-      owner,
-      ...(selection?.pivot.kind === 'around' && selection.pivot.axis.model
-        ? [selection.pivot.axis.model]
-        : []),
-    ]);
-    return {
-      object: {
-        nodeId,
-        compositionTransform: toTransform(owner.solvePose(context)),
-        constraints: owner.constraints.map(value =>
-          owner.constraintSnapshot(value, context),
-        ),
-      },
-      spatial: selection
-        ? owner.constraintSpatial(constraint, selection, context)
-        : undefined,
-    };
   }
 
-  private constraintSpatial(
-    constraint: StoredConstraint,
-    selection: ConstraintSpatialSelection,
-    context: SolveContext,
-  ): ConstraintSpatialReference {
-    const models = [...context.poses.keys()];
-    const actions = this.bodyRotations(
-      constraint,
-      new Map(models.map((model, i) => [model, i])),
-    );
-    const stage = actions.length - (selection.kind === 'rotate' ? 1 : 0);
-    const finalPose = this.solvePose(context);
-    let before = finalPose;
-    for (let i = actions.length - 1; i >= stage; i--) {
-      const action = actions[i];
-      before =
-        'local' in action
-          ? composeTransforms(before, invertTransform(action.local))
-          : composeTransforms(
-              axisRotation(
-                composeTransforms(
-                  models[action.body].solvePose(context),
-                  action.axis,
-                ),
-                -action.angle,
-              ),
-              before,
-            );
-    }
-    const pivot = selection.pivot;
-    let frame: RigidTransform;
-    if (pivot.kind === 'around') {
-      frame = composeTransforms(
-        pivot.axis.model ? pivot.axis.model.solvePose(context) : before,
-        (pivot.axis.direction ?? 1) === 1
-          ? pivot.axis.transform
-          : composeTransforms(pivot.axis.transform, rotation([1, 0, 0, 0])),
-      );
-    } else {
-      const local = translation(
-        pivot.kind === 'pivot'
-          ? pivot.point
-          : anchorReference(this.vertex(pivot.id)).transform.position,
-      );
-      frame = composeTransforms(before, local);
-    }
-    const angles = constraint.rotations[stage]?.angles ?? origin;
-    const rotationVector: Vec3 =
-      typeof angles === 'number' ? [0, angles, 0] : angles;
-    const localFrame = relativeTransform(frame, finalPose);
-    return {
-      nodeId: this.nodeId,
-      kind: selection.kind,
-      spatial: {
-        origin: localFrame.position,
-        vector:
-          selection.kind === 'rotate'
-            ? rotationVector
-            : pivot.kind === 'pivot'
-              ? pivot.point
-              : origin,
-        frame: localFrame,
-        rotation: rotationVector,
-        axisOnly: pivot.kind === 'around',
-      },
-    };
+  protected override vertexPosition(id: VertexId): Vec3 {
+    return anchorReference(this.vertex(id)).transform.position;
+  }
+
+  protected copyRelations(init: RelationObjectInit): ModelObject {
+    return this.copy(init, this.operation);
   }
 
   /** Fix the assembly frame once, using only its direct member origins. */
@@ -2781,213 +3294,6 @@ export class ModelObject<
         )
       : origin;
     return transformSolveContext(context, translation(negateVector(center)));
-  }
-
-  private static createSolveContext(
-    roots: readonly ModelObject[],
-  ): SolveContext {
-    const models: ModelObject[] = [];
-    const indices = new Map<ModelObject, number>();
-    const collect = (model: ModelObject): void => {
-      if (indices.has(model)) return;
-      indices.set(model, models.length);
-      models.push(model);
-      model.constraints.flatMap(constraintReferences).forEach(collect);
-    };
-    roots.forEach(collect);
-    const poses = solveBodies(
-      models.map((model): Body => ({
-        name: model.name,
-        relations: model.constraints.map(constraint =>
-          constraint.kind === 'align'
-            ? {
-                kind: 'align',
-                id: constraint.id,
-                source: {
-                  body: indices.get(constraint.source.model ?? model)!,
-                  geometry: (
-                    constraint.source.model ?? model
-                  ).alignmentGeometry(constraint.source),
-                  transform: constraint.source.transform,
-                },
-                target: {
-                  body: indices.get(constraint.target.model ?? model)!,
-                  geometry: (
-                    constraint.target.model ?? model
-                  ).alignmentGeometry(constraint.target),
-                  transform: constraint.target.transform,
-                },
-                offset: constraint.offset,
-                rotations: model.bodyRotations(constraint, indices),
-              }
-            : {
-                kind: 'on',
-                id: constraint.id,
-                source: {
-                  body: indices.get(constraint.source.model ?? model)!,
-                  key: constraint.source.name,
-                  bounds: (orientation: Quaternion) =>
-                    (constraint.source.model ?? model)[referenceBounds](
-                      constraint.source,
-                      rotation(orientation),
-                    ),
-                },
-                target: {
-                  body: indices.get(constraint.target.model ?? model)!,
-                  transform: constraint.target.transform,
-                  facing: constraint.target.bound!.facing,
-                },
-                offset: constraint.offset,
-                rotations: model.bodyRotations(constraint, indices),
-              },
-        ),
-      })),
-    );
-    return {
-      poses: new Map(models.map((model, index) => [model, poses[index]])),
-    };
-  }
-
-  private constraintSnapshot(
-    constraint: StoredConstraint,
-    context: SolveContext,
-  ): ConstraintSnapshot {
-    const source = constraint.source.model ?? this;
-    const target = constraint.target.model ?? this;
-    const models = [...context.poses.keys()];
-    const actions = this.bodyRotations(
-      constraint,
-      new Map(models.map((model, i) => [model, i])),
-    );
-    let before = this.solvePose(context);
-    for (const action of [...actions].reverse()) {
-      before =
-        'local' in action
-          ? composeTransforms(before, invertTransform(action.local))
-          : composeTransforms(
-              axisRotation(
-                composeTransforms(
-                  models[action.body].solvePose(context),
-                  action.axis,
-                ),
-                -action.angle,
-              ),
-              before,
-            );
-    }
-    const sourcePose = source === this ? before : source.solvePose(context);
-    const targetPose = target === this ? before : target.solvePose(context);
-    let offsetFrame = composeTransforms(
-      targetPose,
-      constraint.target.transform,
-    );
-    if (constraint.kind === 'align') {
-      for (const action of actions)
-        if ('body' in action)
-          offsetFrame = composeTransforms(
-            axisRotation(
-              composeTransforms(
-                models[action.body].solvePose(context),
-                action.axis,
-              ),
-              action.angle,
-            ),
-            offsetFrame,
-          );
-      return {
-        id: constraint.id,
-        kind: 'align',
-        source: anchorSnapshot(source, constraint.source),
-        target: anchorSnapshot(target, constraint.target),
-        sourceElement: source.relationElement(constraint.source),
-        targetElement: target.relationElement(constraint.target),
-        offsetDirection: 1,
-        offset: constraint.offset ?? origin,
-        offsetFrame: toTransform(offsetFrame),
-        sourceRefs: [...valueTrace(constraint).sourceRefs],
-        parameters: [...valueTrace(constraint).parameters],
-      };
-    }
-    const orientation = composeTransforms(
-      invertTransform(rotation(offsetFrame.quaternion)),
-      rotation(sourcePose.quaternion),
-    ).quaternion;
-    const bounds = source[referenceBounds](
-      constraint.source,
-      rotation(orientation),
-    );
-    const center: Vec3 = [
-      (bounds[0][0] + bounds[1][0]) / 2,
-      bounds[constraint.target.bound!.facing === 1 ? 0 : 1][1],
-      (bounds[0][2] + bounds[1][2]) / 2,
-    ];
-    const sourceFrame = relativeTransform(
-      {
-        position: addVectors(
-          sourcePose.position,
-          rotateVector(center, offsetFrame.quaternion),
-        ),
-        quaternion: offsetFrame.quaternion,
-      },
-      sourcePose,
-    );
-    const sourceSize: Vec3 = [
-      bounds[1][0] - bounds[0][0],
-      bounds[1][1] - bounds[0][1],
-      bounds[1][2] - bounds[0][2],
-    ];
-    for (const action of actions) {
-      if ('body' in action)
-        offsetFrame = composeTransforms(
-          axisRotation(
-            composeTransforms(
-              models[action.body].solvePose(context),
-              action.axis,
-            ),
-            action.angle,
-          ),
-          offsetFrame,
-        );
-    }
-    return {
-      id: constraint.id,
-      kind: constraint.kind,
-      source: anchorSnapshot(source, constraint.source),
-      target: anchorSnapshot(target, constraint.target),
-      sourceBounds: {
-        size: sourceSize,
-        transform: toTransform(
-          composeTransforms(sourceFrame, {
-            position: [
-              0,
-              (constraint.target.bound!.facing * sourceSize[1]) / 2,
-              0,
-            ],
-            quaternion: [0, 0, 0, 1],
-          }),
-        ),
-      },
-      sourceElement: {
-        name: `${constraint.source.name}:bound`,
-        kind: 'face',
-        transform: toTransform(sourceFrame),
-        bound: {
-          size: [sourceSize[0], sourceSize[2]],
-          facing: constraint.target.bound!.facing === 1 ? -1 : 1,
-        },
-      },
-      targetElement: {
-        name: constraint.target.name,
-        kind: 'face',
-        transform: toTransform(constraint.target.transform),
-        bound: constraint.target.bound,
-      },
-      offsetDirection: source === this ? 1 : -1,
-      offset: constraint.offset ?? origin,
-      offsetFrame: toTransform(offsetFrame),
-      sourceRefs: [...valueTrace(constraint).sourceRefs],
-      parameters: [...valueTrace(constraint).parameters],
-    };
   }
 
   private requireGeometry(): ModelGeometry {
@@ -3043,6 +3349,7 @@ export class ModelObject<
       })),
       sourceRef,
       spatial: this.operation.spatial,
+      dimensions: this.operation.dimensions,
     };
   }
 
@@ -3068,7 +3375,7 @@ export class ModelObject<
       geometry: this.geometry,
       geometryAnchor: this.geometryAnchor,
       name: this.name,
-      color: this.color,
+      material: this.materialSnapshot,
       children: this.children,
       assembly: this.assembly,
       constraints: this.constraints,
@@ -3082,8 +3389,9 @@ export class ModelObject<
   }
 }
 
-/** @code3d.param radius {kind: 'length', constraints: {exclusiveMin: 0}} */
-export function circle(radius: number): FaceModel {
+/** @code3d.param radius {kind: 'length', default: 5, constraints: {exclusiveMin: 0}} */
+export function circle(radius: number): FaceModel;
+export function circle(radius = 5): FaceModel {
   assertPositive('radius', radius);
   return planarFaceModel('circle', 'Circle', [radius], () =>
     sketchCircle(radius, {plane: 'XZ'}),
@@ -3091,10 +3399,11 @@ export function circle(radius: number): FaceModel {
 }
 
 /**
- * @code3d.param xRadius {kind: 'length', label: 'X radius', constraints: {exclusiveMin: 0}}
- * @code3d.param zRadius {kind: 'length', label: 'Z radius', constraints: {exclusiveMin: 0}}
+ * @code3d.param xRadius {kind: 'length', default: 5, label: 'X radius', constraints: {exclusiveMin: 0}}
+ * @code3d.param zRadius {kind: 'length', default: 3, label: 'Z radius', constraints: {exclusiveMin: 0}}
  */
-export function ellipse(xRadius: number, zRadius: number): FaceModel {
+export function ellipse(xRadius: number, zRadius: number): FaceModel;
+export function ellipse(xRadius = 5, zRadius = 3): FaceModel {
   assertPositive('xRadius', xRadius);
   assertPositive('zRadius', zRadius);
   return planarFaceModel('ellipse', 'Ellipse', [xRadius, zRadius], () =>
@@ -3103,10 +3412,11 @@ export function ellipse(xRadius: number, zRadius: number): FaceModel {
 }
 
 /**
- * @code3d.param x {kind: 'length', constraints: {exclusiveMin: 0}}
- * @code3d.param z {kind: 'length', constraints: {exclusiveMin: 0}}
+ * @code3d.param x {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
+ * @code3d.param z {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
  */
-export function rectangle(x: number, z: number): FaceModel {
+export function rectangle(x: number, z: number): FaceModel;
+export function rectangle(x = 10, z = 10): FaceModel {
   assertPositive('x', x);
   assertPositive('z', z);
   return planarFaceModel('rectangle', 'Rectangle', [x, z], () =>
@@ -3115,15 +3425,16 @@ export function rectangle(x: number, z: number): FaceModel {
 }
 
 /**
- * @code3d.param radius {kind: 'length', constraints: {exclusiveMin: 0}}
- * @code3d.param sides {kind: 'count', constraints: {min: 3}}
- * @code3d.param rotation {kind: 'angle'}
+ * @code3d.param radius {kind: 'length', default: 5, constraints: {exclusiveMin: 0}}
+ * @code3d.param sides {kind: 'count', default: 6, constraints: {min: 3}}
+ * @code3d.param rotation {kind: 'angle', default: 0}
  */
 export function regularPolygon(
   radius: number,
   sides: number,
-  rotation = 0,
-): FaceModel {
+  rotation?: number,
+): FaceModel;
+export function regularPolygon(radius = 5, sides = 6, rotation = 0): FaceModel {
   assertPositive('radius', radius);
   if (!Number.isInteger(sides) || sides < 3) {
     throw new Error('sides must be an integer greater than or equal to 3.');
@@ -3236,11 +3547,12 @@ export function loft(
 }
 
 /**
- * @code3d.param x {kind: 'length', constraints: {exclusiveMin: 0}}
- * @code3d.param y {kind: 'length', constraints: {exclusiveMin: 0}}
- * @code3d.param z {kind: 'length', constraints: {exclusiveMin: 0}}
+ * @code3d.param x {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
+ * @code3d.param y {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
+ * @code3d.param z {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
  */
-export function box(x: number, y: number, z: number): SolidModel {
+export function box(x: number, y: number, z: number): SolidModel;
+export function box(x = 10, y = 10, z = 10): SolidModel {
   assertPositive('x', x);
   assertPositive('y', y);
   assertPositive('z', z);
@@ -3254,15 +3566,22 @@ export function box(x: number, y: number, z: number): SolidModel {
       [0, -y / 2, 0],
       [0, y / 2, 0],
     ]),
-    operation: storedOperation('box'),
+    operation: storedOperation('box', [], {
+      dimensions: {
+        x: {origin: [-x / 2, -y / 2, -z / 2], vector: [x, 0, 0]},
+        y: {origin: [-x / 2, -y / 2, -z / 2], vector: [0, y, 0]},
+        z: {origin: [-x / 2, -y / 2, -z / 2], vector: [0, 0, z]},
+      },
+    }),
   }) as unknown as SolidModel;
 }
 
 /**
- * @code3d.param radius {kind: 'length', constraints: {exclusiveMin: 0}}
- * @code3d.param y {kind: 'length', constraints: {exclusiveMin: 0}}
+ * @code3d.param radius {kind: 'length', default: 5, constraints: {exclusiveMin: 0}}
+ * @code3d.param y {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
  */
-export function cylinder(radius: number, y: number): SolidModel {
+export function cylinder(radius: number, y: number): SolidModel;
+export function cylinder(radius = 5, y = 10): SolidModel {
   assertPositive('radius', radius);
   assertPositive('y', y);
   return ModelObject.create<CanonicalElements, 'solid'>({
@@ -3281,15 +3600,16 @@ export function cylinder(radius: number, y: number): SolidModel {
 
 /**
  * A concentric, constant-section tube, open at both ends and centered on Y.
- * @code3d.param outerRadius {kind: 'length', label: 'Outer radius', constraints: {exclusiveMin: 0}}
- * @code3d.param innerRadius {kind: 'length', label: 'Inner radius', constraints: {exclusiveMin: 0}}
- * @code3d.param y {kind: 'length', constraints: {exclusiveMin: 0}}
+ * @code3d.param outerRadius {kind: 'length', default: 5, label: 'Outer radius', constraints: {exclusiveMin: 0}}
+ * @code3d.param innerRadius {kind: 'length', default: 3, label: 'Inner radius', constraints: {exclusiveMin: 0}}
+ * @code3d.param y {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
  */
 export function tube(
   outerRadius: number,
   innerRadius: number,
   y: number,
-): SolidModel {
+): SolidModel;
+export function tube(outerRadius = 5, innerRadius = 3, y = 10): SolidModel {
   assertPositive('outerRadius', outerRadius);
   assertPositive('innerRadius', innerRadius);
   assertPositive('y', y);
@@ -3339,16 +3659,22 @@ export function tube(
  * coilRadius measures to the wire centerline; pitch is the Y advance per turn.
  * The centerline spans -pitch * turns / 2 to +pitch * turns / 2 on the Y axis.
  * Fractional turns are supported. No spring-specific end treatments are applied.
- * @code3d.param coilRadius {kind: 'length', label: 'Coil radius', constraints: {exclusiveMin: 0}}
- * @code3d.param wireRadius {kind: 'length', label: 'Wire radius', constraints: {exclusiveMin: 0}}
- * @code3d.param pitch {kind: 'length', constraints: {exclusiveMin: 0}}
- * @code3d.param turns {kind: 'scalar', constraints: {exclusiveMin: 0}}
+ * @code3d.param coilRadius {kind: 'length', default: 5, label: 'Coil radius', constraints: {exclusiveMin: 0}}
+ * @code3d.param wireRadius {kind: 'length', default: 1, label: 'Wire radius', constraints: {exclusiveMin: 0}}
+ * @code3d.param pitch {kind: 'length', default: 3, constraints: {exclusiveMin: 0}}
+ * @code3d.param turns {kind: 'scalar', default: 3, constraints: {exclusiveMin: 0}}
  */
 export function coil(
   coilRadius: number,
   wireRadius: number,
   pitch: number,
   turns: number,
+): SolidModel;
+export function coil(
+  coilRadius = 5,
+  wireRadius = 1,
+  pitch = 3,
+  turns = 3,
 ): SolidModel {
   assertPositive('coilRadius', coilRadius);
   assertPositive('wireRadius', wireRadius);
@@ -3436,8 +3762,9 @@ function assertCoilClearance(
   }
 }
 
-/** @code3d.param radius {kind: 'length', constraints: {exclusiveMin: 0}} */
-export function sphere(radius: number): SolidModel {
+/** @code3d.param radius {kind: 'length', default: 5, constraints: {exclusiveMin: 0}} */
+export function sphere(radius: number): SolidModel;
+export function sphere(radius = 5): SolidModel {
   assertPositive('radius', radius);
   return ModelObject.create<CanonicalElements, 'solid'>({
     kind: 'solid',
@@ -3454,15 +3781,16 @@ export function sphere(radius: number): SolidModel {
 }
 
 /**
- * @code3d.param bottomRadius {kind: 'length', label: 'Bottom radius', constraints: {exclusiveMin: 0}}
- * @code3d.param topRadius {kind: 'length', label: 'Top radius', constraints: {exclusiveMin: 0}}
- * @code3d.param y {kind: 'length', constraints: {exclusiveMin: 0}}
+ * @code3d.param bottomRadius {kind: 'length', default: 5, label: 'Bottom radius', constraints: {exclusiveMin: 0}}
+ * @code3d.param topRadius {kind: 'length', default: 3, label: 'Top radius', constraints: {exclusiveMin: 0}}
+ * @code3d.param y {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
  */
 export function frustum(
   bottomRadius: number,
   topRadius: number,
   y: number,
-): SolidModel {
+): SolidModel;
+export function frustum(bottomRadius = 5, topRadius = 3, y = 10): SolidModel {
   assertPositive('bottomRadius', bottomRadius);
   assertPositive('topRadius', topRadius);
   assertPositive('y', y);
@@ -3494,15 +3822,21 @@ export function frustum(
 }
 
 /**
- * @code3d.param radius {kind: 'length', constraints: {exclusiveMin: 0}}
- * @code3d.param y {kind: 'length', constraints: {exclusiveMin: 0}}
- * @code3d.param sides {kind: 'count', constraints: {min: 3}}
- * @code3d.param rotation {kind: 'angle'}
+ * @code3d.param radius {kind: 'length', default: 5, constraints: {exclusiveMin: 0}}
+ * @code3d.param y {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
+ * @code3d.param sides {kind: 'count', default: 6, constraints: {min: 3}}
+ * @code3d.param rotation {kind: 'angle', default: 0}
  */
 export function regularPrism(
   radius: number,
   y: number,
   sides: number,
+  rotation?: number,
+): SolidModel;
+export function regularPrism(
+  radius = 5,
+  y = 10,
+  sides = 6,
   rotation = 0,
 ): SolidModel {
   assertPositive('radius', radius);
@@ -3543,39 +3877,34 @@ export function regularPrism(
 }
 
 /** @internal */
-export function modelFromReplicadSolid(shape: Shape3D): SolidModel {
-  let solid: Shape3D;
-  try {
-    solid = normalizeReplicadSolid(shape);
-  } catch (error) {
-    shape.delete();
-    throw error;
-  }
-  // The builder still executes on every call. Cache its actual output, not its
-  // arguments: captured state may change the geometry between invocations.
-  let adopted = false;
-  let geometry: SolidGeometry;
-  try {
-    geometry = evaluateSolidGeometry(
-      'replicad-solid',
-      [solid.serialize()],
-      [],
-      () => {
-        adopted = true;
-        return {shape: solid};
-      },
-    );
-  } finally {
-    // A hit returns an independently owned cached copy; discard this output.
-    // A miss transfers ownership to evaluateSolidGeometry, including on error.
-    if (!adopted) solid.delete();
-  }
-  return ModelObject.create<CanonicalElements, 'solid'>({
-    kind: 'solid',
-    name: 'Custom primitive',
-    geometry,
-    operation: storedOperation('primitive'),
-  }) as unknown as SolidModel;
+export function primitiveConstructor<Args extends unknown[]>(
+  build: (...args: Args) => Shape3D,
+): (...args: Args) => SolidModel {
+  const geometry = cachedArtifact(
+    (...args: Args) => {
+      const shape = build(...args);
+      let solid: Shape3D;
+      try {
+        solid = normalizeReplicadSolid(shape);
+      } catch (error) {
+        shape.delete();
+        throw error;
+      }
+      return createModelGeometryValue(solid);
+    },
+    {
+      identity: build,
+      namespace: 'primitive',
+      lifecycle: modelGeometryLifecycle,
+    },
+  );
+  return (...args) =>
+    ModelObject.create<CanonicalElements, 'solid'>({
+      kind: 'solid',
+      name: 'Custom primitive',
+      geometry: geometry(...args) as SolidGeometry,
+      operation: storedOperation('primitive'),
+    }) as unknown as SolidModel;
 }
 
 function normalizeReplicadSolid(shape: Shape3D): Shape3D {
@@ -3664,15 +3993,55 @@ export function union(operands: readonly SolidModel<{}>[]): SolidModel {
 }
 
 /**
- * Extrudes a single face; use faces.map(face => extrude(face, distance)) for multiple regions.
- * @code3d.param distance {kind: 'length', label: 'Extrusion distance'}
+ * Extrudes each face independently, preserving array order and placement.
+ * @code3d.param distance {kind: 'length', default: 10, label: 'Extrusion distance'}
  */
-export function extrude(face: FaceModel<{}>, distance: number): SolidModel {
-  return requireModelKind(
-    face,
-    'face',
-    'extrude requires a single face model.',
-  ).extrude(distance);
+export function extrude(face: FaceModel<{}>, distance: number): SolidModel;
+/**
+ * Extrudes each face independently.
+ * @code3d.param distance {kind: 'length', default: 10, label: 'Extrusion distance'}
+ */
+export function extrude(
+  faces: readonly FaceModel<{}>[],
+  distance: number,
+): readonly SolidModel[];
+export function extrude(
+  face: FaceModel<{}> | readonly FaceModel<{}>[],
+  distance = 10,
+): SolidModel | readonly SolidModel[] {
+  const faces = (Array.isArray(face) ? face : [face]).map(value =>
+    requireModelKind(
+      value,
+      'face',
+      'extrude requires a face model or an array of face models.',
+    ),
+  );
+  const solids = faces.map(value => value.extrude(distance));
+  return Array.isArray(face) ? solids : solids[0];
+}
+
+/**
+ * Creates connected text faces on the XZ plane: +X right, -Z up, normal +Y.
+ * All faces share the baseline origin. Size is the font em in model units.
+ * @code3d.param size {kind: 'length', label: 'Text size'}
+ */
+export function text(
+  content: string,
+  font: Font,
+  size: number,
+  options?: TextOptions,
+): readonly FaceModel[] {
+  return textGlyphs(content, font, size, options).flatMap(({regions, x, y}) =>
+    regions.value.map((region, index) => {
+      const geometry = evaluateModelGeometry(
+        'text',
+        [x, y, index],
+        [regions],
+        () => ({shape: textRegionFace(region, x, y)}),
+      );
+      return faceModel('text', 'Text face', geometry);
+    }),
+  );
 }
 
 export function cut(
@@ -3728,7 +4097,7 @@ export function instrumentConstraint(
 }
 
 export function instrumentModelOperation(
-  object: ModelObject,
+  object: RelationObject,
   instrumentation: ModelOperationInstrumentation,
 ): void {
   object.attachSource(instrumentation.sourceRef);
@@ -3748,7 +4117,7 @@ export function constraintTraceReference(
 }
 
 export function modelObjectRuntimeInfo(
-  object: ModelObject,
+  object: RelationObject,
 ): ModelObjectRuntimeInfo {
   return {
     nodeId: object.nodeId,
@@ -3758,22 +4127,211 @@ export function modelObjectRuntimeInfo(
 }
 
 export function relatedModelObjects(
-  object: ModelObject,
-): readonly ModelObject[] {
+  object: RelationObject,
+): readonly RelationObject[] {
   return object.relatedObjects();
 }
 
+export type SnapshotQuery = Readonly<{key: KernelOperationKey}> &
+  (
+    | Readonly<{
+        kind: 'bounds';
+        transform: RigidTransform;
+        selection: TopologySelection;
+        scale: number;
+      }>
+    | Readonly<{kind: 'mesh'; tolerance: number; topology: boolean}>
+  );
+export type SnapshotQueryResult = LocalBounds | RenderMesh;
+type SnapshotQueryInput = {
+  inputId: string;
+  geometry: {shape: AnyShape; topology?: ShapeTopology};
+  query: SnapshotQuery;
+};
+
+function boundsQuery(
+  geometry: ModelGeometry,
+  transform: RigidTransform,
+  selection: TopologySelection = {kind: 'solid'},
+  scale = 1,
+): SnapshotQueryInput {
+  return {
+    inputId: geometry.id,
+    geometry: {shape: geometry.value.shape, topology: geometry.value.topology},
+    query: {
+      kind: 'bounds',
+      transform,
+      selection,
+      scale,
+      key: kernelOperationKey(
+        'transformed-bounds',
+        [
+          transform.position,
+          transform.quaternion,
+          selection.kind,
+          selection.kind === 'solid' ? null : selection.id,
+          scale,
+        ],
+        [geometry],
+      ),
+    },
+  };
+}
+
+function meshQuery(
+  artifact: KernelArtifact<unknown>,
+  shape: AnyShape,
+  tolerance: number,
+  topology?: ShapeTopology,
+): SnapshotQueryInput {
+  return {
+    inputId: artifact.id,
+    geometry: {shape, topology},
+    query: {
+      kind: 'mesh',
+      tolerance,
+      topology: topology !== undefined,
+      key: kernelOperationKey(
+        'render-mesh',
+        [tolerance, 0.2, topology !== undefined],
+        [artifact],
+      ),
+    },
+  };
+}
+
+function computeSnapshotQuery(
+  geometry: SnapshotQueryInput['geometry'],
+  query: SnapshotQuery,
+): SnapshotQueryResult {
+  return query.kind === 'bounds'
+    ? computeTransformedBounds(geometry, query)
+    : computeRenderMesh(
+        geometry.shape,
+        query.tolerance,
+        query.topology ? geometry.topology : undefined,
+      );
+}
+
+const snapshotQuery = cachedArtifact(
+  (input: SnapshotQueryInput): SnapshotQueryResult => {
+    if (input.query.kind !== 'mesh')
+      return computeSnapshotQuery(input.geometry, input.query);
+    // Local and remote meshes consume the same binary input: BinTools can
+    // renormalize plane axes by a few ULPs and change Delaunay diagonal ties.
+    let value!: SnapshotQueryResult;
+    executeSnapshotQueryBatch(
+      input.inputId,
+      encodeKernelArtifact(input.inputId, input.geometry),
+      [input.query],
+      () => {},
+      (_, result) => {
+        value = result;
+      },
+    );
+    return value;
+  },
+  {key: input => input.query.key},
+);
+
+function evaluateSnapshotQuery(input: SnapshotQueryInput): SnapshotQueryResult {
+  return snapshotQuery(input).value;
+}
+
+/** Host-owned native input and result admission. Only encode() bytes cross runtimes. */
+export type SnapshotQueryBatch = Readonly<{
+  id: string;
+  queries: readonly SnapshotQuery[];
+  weight: number;
+  sourceRef?: SourceRef;
+  encode(): Uint8Array;
+  accept(query: SnapshotQuery, value: SnapshotQueryResult): void;
+}>;
+
+export function planModelSnapshotQueries(
+  objects: readonly RelationObject[],
+): SnapshotQueryBatch[] {
+  const visited = new Set<ModelObject>();
+  const keys = new Map<string, string>();
+  const batches = new Map<
+    string,
+    {input: SnapshotQueryInput; queries: SnapshotQuery[]; sourceRef?: SourceRef}
+  >();
+  function collect(object: ModelObject): void {
+    if (visited.has(object)) return;
+    visited.add(object);
+    for (const input of object[modelSnapshotQueries]()) {
+      const {query, inputId} = input;
+      const signature = keys.get(query.key.id);
+      if (signature) {
+        if (signature !== query.key.signature)
+          throw new Error(
+            `Kernel operation cache identity collision: ${query.key.id}`,
+          );
+        continue;
+      }
+      keys.set(query.key.id, query.key.signature);
+      if (snapshotQuery.find(query.key)) continue;
+      let batch = batches.get(inputId);
+      if (!batch) {
+        batch = {input, queries: [], sourceRef: object.sourceRefs.at(-1)};
+        batches.set(inputId, batch);
+      }
+      batch.queries.push(query);
+    }
+    object.children.forEach(collect);
+  }
+  objects.filter(isModelObject).forEach(collect);
+  return [...batches].map(([id, {input, queries, sourceRef}]) => ({
+    id,
+    queries,
+    sourceRef,
+    weight:
+      (1 +
+        (input.geometry.topology?.edges.ids.length ?? 0) +
+        (input.geometry.topology?.surfaces.ids.length ?? 0)) *
+      queries.length,
+    encode: () => encodeKernelArtifact(id, input.geometry),
+    accept: (query, value) => snapshotQuery.accept(query.key, value),
+  }));
+}
+
+/** Each batch owns its restored shape; completed results leave before cancellation checks. */
+export function executeSnapshotQueryBatch(
+  id: string,
+  bytes: Uint8Array,
+  queries: readonly SnapshotQuery[],
+  checkCancelled: () => void,
+  onResult: (query: SnapshotQuery, value: SnapshotQueryResult) => void,
+  onRestore?: (milliseconds: number) => void,
+): void {
+  const started = performance.now();
+  const geometry = decodeKernelArtifact<SnapshotQueryInput['geometry']>(
+    bytes,
+    id,
+  );
+  try {
+    onRestore?.(performance.now() - started);
+    for (const query of queries) {
+      checkCancelled();
+      onResult(query, computeSnapshotQuery(geometry, query));
+    }
+  } finally {
+    geometry.shape.delete();
+  }
+}
+
 export function createModelSnapshotter(): (
-  object: ModelObject,
+  object: RelationObject,
 ) => ModelSnapshotObject {
   const meshCache = new Map<AnyShape, RenderMesh>();
   return object => object.toSnapshot(meshCache);
 }
 
-export function disposeModelObjects(objects: Iterable<ModelObject>): void {
+export function disposeModelObjects(objects: Iterable<RelationObject>): void {
   const disposed = new Set<AnyShape>();
   for (const object of objects) {
-    object.disposeShape(disposed);
+    if (isModelObject(object)) object.disposeShape(disposed);
   }
 }
 
@@ -3789,7 +4347,7 @@ export type ModelGeometrySnapshot = Readonly<{
 }>;
 
 export function retainModelGeometry(
-  objects: Iterable<ModelObject>,
+  objects: Iterable<RelationObject>,
 ): ModelGeometrySnapshot {
   const retained = new Map<AnyShape, AnyShape>();
   const shapes = new Map<string, AnyShape>();
@@ -3802,6 +4360,7 @@ export function retainModelGeometry(
   };
   try {
     for (const object of objects) {
+      if (!isModelObject(object)) continue;
       const geometry = object[modelGeometry]()?.value;
       const original = geometry?.shape;
       if (!original) continue;
@@ -3831,6 +4390,10 @@ export function retainModelGeometry(
 }
 
 export const authoringApi = Object.freeze({
+  cached,
+  font,
+  googleFont,
+  text,
   sketch,
   circle,
   ellipse,
@@ -3862,6 +4425,7 @@ function storedOperation(
   options: Readonly<{
     regions?: readonly StoredOperationRegion[];
     selections?: readonly StoredOperationSelection[];
+    dimensions?: Readonly<Record<string, ModelParameterDimension>>;
   }> = {},
 ): StoredOperation {
   return {
@@ -3870,6 +4434,7 @@ function storedOperation(
     inputs: [...inputs],
     regions: [...(options.regions ?? [])],
     selections: [...(options.selections ?? [])],
+    dimensions: options.dimensions,
   };
 }
 
@@ -3881,12 +4446,21 @@ function storedOperationId(operation: StoredOperation): string {
 }
 
 const shapeLifecycle: KernelValueLifecycle<AnyShape> = {
+  estimateBytes: () => 64,
   retain: shape => shape.clone(),
   instantiate: shape => shape.clone(),
   release: shape => shape.delete(),
 };
 
 const modelGeometryLifecycle: KernelValueLifecycle<ModelGeometryValue> = {
+  estimateBytes: geometry =>
+    128 +
+    estimateRetainedBytes([
+      geometry.topology,
+      geometry.localBounds,
+      geometry.referenceBasis?.topology,
+      geometry.referenceBasis?.transform,
+    ]),
   retain: cloneModelGeometryValue,
   instantiate: cloneModelGeometryValue,
   release: disposeModelGeometryValue,
@@ -3912,11 +4486,15 @@ function disposeModelGeometryValue(geometry: ModelGeometryValue): void {
   geometry.referenceBasis?.shape.delete();
 }
 
-const renderMeshLifecycle: KernelValueLifecycle<RenderMesh> = {
-  retain: mesh => mesh,
-  instantiate: mesh => mesh,
-  release: () => undefined,
-};
+const kernelShape = cachedArtifact(
+  (
+    _operation: string,
+    _arguments: readonly KernelKeyPart[],
+    _inputs: readonly KernelArtifact<unknown>[],
+    compute: () => AnyShape,
+  ) => compute(),
+  {key: kernelOperationKey, lifecycle: shapeLifecycle},
+);
 
 function evaluateKernelShape<Shape extends AnyShape>(
   operation: string,
@@ -3924,39 +4502,33 @@ function evaluateKernelShape<Shape extends AnyShape>(
   inputs: readonly KernelArtifact<unknown>[],
   compute: () => Shape,
 ): KernelArtifact<Shape> {
-  return evaluateKernelOperation(
+  return kernelShape(
     operation,
     arguments_,
     inputs,
-    shapeLifecycle as KernelValueLifecycle<Shape>,
     compute,
-  );
+  ) as KernelArtifact<Shape>;
 }
 
-function evaluateModelGeometry(
-  operation: string,
-  arguments_: readonly KernelKeyPart[],
-  inputs: readonly KernelArtifact<unknown>[],
-  compute: () => Readonly<{
-    shape: AnyShape;
-    topology?: ShapeTopology;
-    referenceBasis?: ModelGeometryValue['referenceBasis'];
-  }>,
-): ModelGeometry {
-  return evaluateKernelOperation(
-    operation,
-    arguments_,
-    inputs,
-    modelGeometryLifecycle,
-    () => {
-      const result = compute();
-      return {
-        ...createModelGeometryValue(result.shape, result.topology),
-        referenceBasis: result.referenceBasis,
-      };
-    },
-  );
-}
+const evaluateModelGeometry = cachedArtifact(
+  (
+    _operation: string,
+    _arguments: readonly KernelKeyPart[],
+    _inputs: readonly KernelArtifact<unknown>[],
+    compute: () => Readonly<{
+      shape: AnyShape;
+      topology?: ShapeTopology;
+      referenceBasis?: ModelGeometryValue['referenceBasis'];
+    }>,
+  ): ModelGeometryValue => {
+    const result = compute();
+    return {
+      ...createModelGeometryValue(result.shape, result.topology),
+      referenceBasis: result.referenceBasis,
+    };
+  },
+  {key: kernelOperationKey, lifecycle: modelGeometryLifecycle},
+);
 
 function createModelGeometryValue(
   shape: AnyShape,
@@ -4002,39 +4574,108 @@ function renderMesh(
   if (cached) {
     return cached;
   }
-  const mesh = evaluateKernelOperation(
-    'render-mesh',
-    [tolerance, 0.2, topology !== undefined],
-    [artifact],
-    renderMeshLifecycle,
-    () => {
-      const surface = shape.mesh({tolerance, angularTolerance: 0.2});
-      const wire = shape.meshEdges({tolerance, angularTolerance: 0.2});
-      const vertexData = topology
-        ? stableVertexData(shape, topology.vertices)
-        : {positions: new Float32Array(), ids: []};
-      return {
-        vertices: new Float32Array(surface.vertices),
-        normals: new Float32Array(surface.normals),
-        triangles: new Uint32Array(surface.triangles),
-        edges: new Float32Array(wire.lines),
-        topologyVertices: vertexData.positions,
-        vertexIds: vertexData.ids,
-        surfaceGroups: topology
-          ? stableSurfaceGroups(shape, topology.surfaces, surface.faceGroups)
-          : surface.faceGroups.map((group, index) => ({
-              start: group.start,
-              count: group.count,
-              surfaceId: index + 1,
-            })),
-        edgeGroups: topology
-          ? stableEdgeGroups(shape, topology.edges, wire.edgeGroups)
-          : wire.edgeGroups,
-      };
-    },
-  ).value;
+  const mesh = evaluateSnapshotQuery(
+    meshQuery(artifact, shape, tolerance, topology),
+  ) as RenderMesh;
   cache.set(shape, mesh);
   return mesh;
+}
+
+function computeRenderMesh(
+  shape: AnyShape,
+  tolerance: number,
+  topology?: ShapeTopology,
+): RenderMesh {
+  const surface = shape.mesh({tolerance, angularTolerance: 0.2});
+  const wire = shape.meshEdges({tolerance, angularTolerance: 0.2});
+  const vertexData = topology
+    ? stableVertexData(shape, topology.vertices)
+    : {positions: new Float32Array(), ids: []};
+  return {
+    vertices: new Float32Array(surface.vertices),
+    normals: new Float32Array(surface.normals),
+    uvs: meshUVs(shape, surface.vertices.length / 3),
+    triangles: new Uint32Array(surface.triangles),
+    edges: new Float32Array(wire.lines),
+    topologyVertices: vertexData.positions,
+    vertexIds: vertexData.ids,
+    surfaceGroups: topology
+      ? stableSurfaceGroups(shape, topology.surfaces, surface.faceGroups)
+      : surface.faceGroups.map((group, index) => ({
+          start: group.start,
+          count: group.count,
+          surfaceId: index + 1,
+        })),
+    edgeGroups: topology
+      ? stableEdgeGroups(shape, topology.edges, wire.edgeGroups)
+      : wire.edgeGroups.map((group, index) => ({
+          start: group.start,
+          count: group.count,
+          // Context-region edges have their own traversal namespace, just
+          // like the surfaces above. Native handle hashes change on restore.
+          edgeId: index + 1,
+        })),
+  };
+}
+
+function meshUVs(
+  shape: AnyShape,
+  vertexCount: number,
+): Float32Array | undefined {
+  if (!vertexCount) return undefined;
+  const faces = shape.faces;
+  const location = new (getOC().TopLoc_Location)();
+  const uvs = new Float32Array(vertexCount * 2);
+  let offset = 0;
+  try {
+    // Match the native mesh extractor's face/node traversal exactly.
+    for (const face of faces) {
+      const triangulation = getOC().BRep_Tool.Triangulation(
+        face.wrapped,
+        location,
+        0,
+      );
+      // Native meshing can omit a face below its geometric tolerance.
+      if (!triangulation) continue;
+      try {
+        if (triangulation.isNull()) continue;
+        if (!triangulation.HasUVNodes()) return undefined;
+        const count = triangulation.NbNodes();
+        let minU = Infinity,
+          minV = Infinity,
+          maxU = -Infinity,
+          maxV = -Infinity;
+        for (let index = 0; index < count; index++) {
+          const uv = triangulation.UVNode(index + 1);
+          try {
+            const u = uv.X(),
+              v = uv.Y();
+            uvs[(offset + index) * 2] = u;
+            uvs[(offset + index) * 2 + 1] = v;
+            minU = Math.min(minU, u);
+            maxU = Math.max(maxU, u);
+            minV = Math.min(minV, v);
+            maxV = Math.max(maxV, v);
+          } finally {
+            uv.delete();
+          }
+        }
+        for (let index = 0; index < count; index++) {
+          const base = (offset + index) * 2;
+          uvs[base] = maxU === minU ? 0 : (uvs[base] - minU) / (maxU - minU);
+          uvs[base + 1] =
+            maxV === minV ? 0 : (uvs[base + 1] - minV) / (maxV - minV);
+        }
+        offset += count;
+      } finally {
+        triangulation.delete();
+      }
+    }
+    return uvs;
+  } finally {
+    location.delete();
+    faces.forEach(face => face.delete());
+  }
 }
 
 type PlanarSketch = Readonly<{
@@ -4043,7 +4684,11 @@ type PlanarSketch = Readonly<{
 }>;
 
 /** Internal bridge from the kernel-independent sketch definition to model geometry. */
-export function sketchFaceModel(region: SketchRegion): FaceModel {
+function sketchFaceModel(
+  region: SketchRegion,
+  constraints: readonly StoredConstraint[],
+  source: SketchFrame,
+): FaceModel {
   const curves = [region.outer, ...region.holes].map(loop =>
     loop.map(curve =>
       curve.kind === 'line'
@@ -4063,10 +4708,13 @@ export function sketchFaceModel(region: SketchRegion): FaceModel {
   return ModelObject.create<PlanarElements, 'face'>({
     kind: 'face',
     name: 'Sketch face',
+    constraints,
     geometry,
     geometryAnchor: plane,
     elements: {plane},
-    operation: storedOperation('sketchFace'),
+    operation: storedOperation('sketchFace', [
+      {model: source, role: 'source', index: 0},
+    ]),
   }) as unknown as FaceModel;
 }
 
@@ -4089,6 +4737,14 @@ function planarFaceModel(
       sketch.delete();
     }
   });
+  return faceModel(operation, name, geometry);
+}
+
+function faceModel(
+  operation: ModelOperationKind,
+  name: string,
+  geometry: ModelGeometry,
+): FaceModel {
   const plane: StoredElement = {
     kind: 'face',
     transform: identityRigidTransform,
@@ -4225,59 +4881,39 @@ function solidElements(bounds: LocalBounds): StoredElements {
   return {axis: {kind: 'line', transform: translation(boundsCenter(bounds))}};
 }
 
-function constraintReferences(constraint: StoredConstraint): ModelObject[] {
+function constraintReferences(constraint: StoredConstraint): RelationObject[] {
   return [
     constraint.source.model,
     constraint.target.model,
     ...constraint.rotations.map(action =>
       action.pivot.kind === 'around' ? action.pivot.axis.model : undefined,
     ),
-  ].filter((model): model is ModelObject => !!model);
+  ].filter((model): model is RelationObject => !!model);
 }
 
-const boundsLifecycle: KernelValueLifecycle<LocalBounds> = {
-  retain: bounds => bounds,
-  instantiate: bounds => bounds,
-  release: () => undefined,
-};
-
-function transformedBounds(
-  geometry: ModelGeometry,
-  transform: RigidTransform,
-  selection: TopologySelection = {kind: 'solid'},
-  scale = 1,
+function computeTransformedBounds(
+  geometry: SnapshotQueryInput['geometry'],
+  query: Extract<SnapshotQuery, {kind: 'bounds'}>,
 ): LocalBounds {
-  return evaluateKernelOperation(
-    'transformed-bounds',
-    [
-      transform.position,
-      transform.quaternion,
-      selection.kind,
-      selection.kind === 'solid' ? null : selection.id,
-      scale,
-    ],
-    [geometry],
-    boundsLifecycle,
-    () =>
-      withTopologyShape(
-        geometry.value.shape,
-        geometry.value.topology,
-        selection,
-        shape => {
-          const scaled = scale === 1 ? shape : shape.scale(scale);
-          try {
-            const moved = shapeWithTransform(scaled, transform);
-            try {
-              return shapeBounds(moved);
-            } finally {
-              moved.delete();
-            }
-          } finally {
-            if (scaled !== shape) scaled.delete();
-          }
-        },
-      ),
-  ).value;
+  const {transform, selection, scale} = query;
+  return withTopologyShape(
+    geometry.shape,
+    geometry.topology!,
+    selection,
+    shape => {
+      const scaled = scale === 1 ? shape : shapeWithScale(shape, scale);
+      try {
+        const moved = shapeWithTransform(scaled, transform);
+        try {
+          return shapeBounds(moved);
+        } finally {
+          moved.delete();
+        }
+      } finally {
+        if (scaled !== shape) scaled.delete();
+      }
+    },
+  );
 }
 
 function pointBounds(points: readonly Vec3[]): LocalBounds {
@@ -4337,7 +4973,7 @@ function directionalBound(
 }
 
 function modelAnchor<Kind extends ElementKind>(
-  model: ModelObject,
+  model: RelationObject,
   name: string,
   element: StoredElement & Readonly<{kind: Kind}>,
 ): Anchor<Kind> {
@@ -4513,7 +5149,7 @@ function topologyName(selection: TopologySelection): string {
 }
 
 function topologyReferences(
-  model: ModelObject,
+  model: RelationObject,
   prefix: string,
   context: Omit<StoredTopology, 'selection'>,
   kind: TopologyKind,
@@ -4595,14 +5231,14 @@ function anchorReference(anchor: Anchor): AnchorReference {
 
 function anchorSnapshot(reference: AnchorReference): ConstraintAnchorSnapshot;
 function anchorSnapshot(
-  model: ModelObject,
+  model: RelationObject,
   anchor: StoredAnchor,
 ): ConstraintAnchorSnapshot;
 function anchorSnapshot(
-  modelOrReference: ModelObject | AnchorReference,
+  modelOrReference: RelationObject | AnchorReference,
   stored?: StoredAnchor,
 ): ConstraintAnchorSnapshot {
-  const model = stored ? (modelOrReference as ModelObject) : undefined;
+  const model = stored ? (modelOrReference as RelationObject) : undefined;
   const reference = stored ?? (modelOrReference as AnchorReference);
   return {
     nodeId: (model ?? (modelOrReference as AnchorReference).model).nodeId,
@@ -4611,7 +5247,7 @@ function anchorSnapshot(
   };
 }
 
-function uniqueModels(models: readonly ModelObject[]): ModelObject[] {
+function uniqueModels<T extends RelationObject>(models: readonly T[]): T[] {
   return [...new Set(models)];
 }
 
@@ -4623,13 +5259,51 @@ function shapeWithTransform<Shape extends AnyShape>(
   source: Shape,
   transform: RigidTransform,
 ): Shape {
-  let shape = source.clone();
+  const oc = getOC();
+  let shape = source.clone() as Shape;
   const {axis, angleDegrees} = quaternionAxisAngle(transform.quaternion);
-  if (Math.abs(angleDegrees) > 1e-9) {
-    shape = shape.rotate(angleDegrees, toPoint(origin), toPoint(axis));
+  try {
+    if (Math.abs(angleDegrees) > 1e-9) {
+      const rotated = transformShape(shape, value => {
+        const point = new oc.gp_Pnt(0, 0, 0);
+        const direction = new oc.gp_Dir(...axis);
+        const rotationAxis = new oc.gp_Ax1(point, direction);
+        try {
+          value.SetRotation(rotationAxis, angleDegrees * (Math.PI / 180));
+        } finally {
+          rotationAxis.delete();
+          direction.delete();
+          point.delete();
+        }
+      });
+      shape.delete();
+      shape = rotated;
+    }
+    return transformShape(shape, value => {
+      const vector = new oc.gp_Vec(...transform.position);
+      try {
+        value.SetTranslation(vector);
+      } finally {
+        vector.delete();
+      }
+    });
+  } finally {
+    shape.delete();
   }
-  shape = shape.translate(toPoint(transform.position));
-  return shape as unknown as Shape;
+}
+
+function shapeWithScale<Shape extends AnyShape>(
+  source: Shape,
+  scale: number,
+): Shape {
+  return transformShape(source, value => {
+    const point = new (getOC().gp_Pnt)(0, 0, 0);
+    try {
+      value.SetScale(point, scale);
+    } finally {
+      point.delete();
+    }
+  });
 }
 
 function requireModelObject(value: unknown, message: string): ModelObject {

@@ -68,3 +68,10 @@ which exports CAD geometry rather than the viewport's display mesh.
 Choose **Export image…** from the same menu to save a PNG of the current
 viewport. Set its width and height in pixels; image export is separate from
 model export and does not produce CAD geometry.
+
+For a finished image, choose **Render** to the left of the viewport status.
+It hides the grid, reference elements, selection highlights, controls, and
+surface outlines. Model colors and authored transparency remain; default
+surfaces become opaque. Authored points and curves remain visible.
+The PNG follows the current mode and camera. Choose **Modeling** to restore
+the guides and source emphasis without changing your view or selection.

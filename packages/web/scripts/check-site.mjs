@@ -3,6 +3,14 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {parse} from 'parse5';
+import {
+  featuredPackages,
+  markdownDocuments,
+  markdownHeadings,
+  markdownReferences,
+  renderMarkdown,
+  repository,
+} from './markdown-documents.mjs';
 
 const directory = fileURLToPath(new URL('../dist/www/', import.meta.url));
 const appDirectory = fileURLToPath(new URL('../../app/', import.meta.url));
@@ -10,21 +18,57 @@ const site = new URL(process.env.CODE3D_SITE_URL || 'https://code3d.invalid/');
 const base = site.pathname.replace(/\/$/, '');
 const pages = new Map();
 const issues = [];
+const documents = await markdownDocuments();
+for (const document of documents) {
+  const file = document.route.slice(1);
+  const markdown = await readFile(path.join(directory, file), 'utf8');
+  assert.equal(
+    markdown,
+    await renderMarkdown(document, documents),
+    `${file}: stale Markdown output`,
+  );
+  assert.ok(markdown.startsWith('# '), `${file}: missing plain Markdown title`);
+  pages.set(document.route, {
+    file,
+    ids: markdownHeadings(markdown),
+    references: markdownReferences(markdown),
+  });
+}
+const entry = pages.get('/docs/agents.md');
+const entryTargets = new Set(
+  entry.references.map(
+    href => new URL(href, site.origin + '/docs/agents.md').pathname,
+  ),
+);
+for (const document of documents.filter(item =>
+  item.source.startsWith('docs/agents/'),
+)) {
+  assert.ok(
+    entryTargets.has(document.route),
+    `Agent entry is missing topic ${document.source}`,
+  );
+}
+for (const name of featuredPackages) {
+  assert.ok(
+    entryTargets.has(`/docs/packages/${name}.md`),
+    `Agent entry is missing featured package ${name}`,
+  );
+  assert.ok(
+    pages.has(`/docs/packages/${name}.md`),
+    `Missing featured README ${name}`,
+  );
+}
+for await (const file of glob('packages/*/package.json', {cwd: repository})) {
+  await stat(path.join(repository, path.dirname(file), 'README.md'));
+}
 const agentGuide = await readFile(
-  path.join(directory, 'docs/guides/agents.md'),
+  path.join(directory, 'docs/agents.md'),
   'utf8',
 );
-assert.ok(agentGuide.startsWith('# Work with an agent\n'));
 assert.ok(agentGuide.includes('project.c3d.json serve'));
-assert.ok(agentGuide.includes('project.c3d.json context'));
-for (const [, href] of agentGuide.matchAll(/\]\(([^)]+)\)/g)) {
-  if (href.startsWith('/')) {
-    const local = new URL(href, site).pathname
-      .slice(base.length)
-      .replace(/^\//, '');
-    await stat(path.join(directory, local));
-  }
-}
+assert.ok(
+  agentGuide.includes(`echo '{"operation":"context"}' | npx --yes @code3d/cli`),
+);
 
 function walk(node, visit) {
   visit(node);
@@ -200,5 +244,5 @@ for (const file of ['license.txt', 'app/LICENSE']) {
 }
 if (issues.length) throw new Error(issues.join('\n'));
 console.log(
-  `Validated links, icons, anchors, and assets on ${pages.size} pages; search and App present.`,
+  `Validated links, icons, anchors, and assets on ${pages.size} HTML/Markdown pages; search and App present.`,
 );

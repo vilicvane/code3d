@@ -1,4 +1,4 @@
-import {Color, Quaternion, Vector3} from 'three';
+import {Quaternion, Vector3} from 'three';
 import type {Occurrence} from '../viewport';
 import type {ModelExportInstance} from '../model/model-export';
 import type {ModelModule} from '../model/compiler';
@@ -8,27 +8,26 @@ import type {SourceRef} from '@code3d/core/tooling';
 export function collectExportInstances(
   occurrences: Iterable<Occurrence>,
 ): ModelExportInstance[] {
-  return [...occurrences]
-    .filter(({node}) => node.kind !== 'group')
-    .map(({node, object}) => {
-      object.updateWorldMatrix(true, false);
-      const position = new Vector3();
-      const quaternion = new Quaternion();
-      const scale = new Vector3();
-      object.matrixWorld.decompose(position, quaternion, scale);
-      return {
+  return [...occurrences].flatMap(({node, object}) => {
+    if (node.kind === 'group' || node.kind === 'reference') return [];
+    object.updateWorldMatrix(true, false);
+    const position = new Vector3();
+    const quaternion = new Quaternion();
+    const scale = new Vector3();
+    object.matrixWorld.decompose(position, quaternion, scale);
+    return [
+      {
         nodeId: node.nodeId,
         name: node.name,
         kind: node.kind,
-        color: node.color
-          ? `#${new Color(node.color).getHexString()}`
-          : undefined,
+        material: node.material,
         transform: {
           position: position.toArray(),
           quaternion: quaternion.toArray(),
         },
-      };
-    });
+      },
+    ];
+  });
 }
 
 export function renderedModelName(

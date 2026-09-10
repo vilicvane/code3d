@@ -151,7 +151,7 @@ function closedMesh(mesh: ReturnType<typeof read3mf>['meshes'][number]) {
 test('project runtime retains export geometry and preserves STEP placements, names and colors', async () => {
   const compiler = await createTestProjectCompiler(server);
   const source = `import {box, group} from '@code3d/core';
-const base = box(10, 20, 30).paint('#123456');
+const base = box(10, 20, 30).material('#123456');
 const top = box(2, 4, 6).relate(self => self.down.on(base.up));
 export default group([base, top], 'Assembly');`;
   try {
@@ -191,12 +191,13 @@ export default group([base, top], 'Assembly');`;
   }
 });
 
-test('project compilation carries recursive group colors into exported materials', async () => {
+test('project compilation carries native group materials into exported materials', async () => {
   const compiler = await createTestProjectCompiler(server);
   const source = `import {box, group} from '@code3d/core';
-const base = box(10, 4, 10).paint('#ff0000');
+import {MeshPhysicalMaterial} from '@code3d/core/three';
+const base = box(10, 4, 10).material('#ff0000');
 const top = box(2, 2, 2).relate(self => self.down.on(base.up));
-export default group([base, group([top]).paint('#00ff00')]).paint('#345678');`;
+export default group([base, group([top]).material('#00ff00')]).material(new MeshPhysicalMaterial({color: '#345678', opacity: 0.4, transparent: true}));`;
   try {
     const module = await compiler.compile(
       {files: [{path: '/model.ts', source}]},
@@ -206,8 +207,12 @@ export default group([base, group([top]).paint('#00ff00')]).paint('#345678');`;
     const snapshot = module.objects.get(defined(module.exports.get('default')));
     const instances = collectExportInstances(scene(defined(snapshot)));
     assert.deepEqual(
-      instances.map(instance => instance.color),
-      ['#345678', '#345678'],
+      instances.map(instance =>
+        typeof instance.material === 'object'
+          ? instance.material.type
+          : instance.material,
+      ),
+      ['MeshPhysicalMaterial', 'MeshPhysicalMaterial'],
     );
     const blob = compiler.export(instances, {...defaults, format: '3mf'});
     const {model, meshes} = read3mf(await blob.arrayBuffer());
@@ -216,9 +221,65 @@ export default group([base, group([top]).paint('#00ff00')]).paint('#345678');`;
       match => match[1],
     );
     assert.ok(colors.length > 0);
-    assert.ok(colors.every(color => color === '#345678'));
+    assert.ok(colors.every(color => color === '#34567866'));
+    const step = await compiler.export(instances, defaults).text();
+    assert.match(step, /COLOUR_RGB/);
+    assert.ok(
+      Math.abs(
+        Number(step.match(/SURFACE_STYLE_TRANSPARENT\(([^)]+)\)/)?.[1]) - 0.6,
+      ) < 1e-7,
+    );
   } finally {
     compiler.dispose();
+  }
+});
+
+test('STEP and 3MF preserve the RGB and alpha of authored color formats', async () => {
+  for (const [color, hex, alpha] of [
+    ['#1a28', '#11aa2288', 8 / 15],
+    ['#11223344', '#11223344', 68 / 255],
+    ['rgb(100%, 50%, 0%)', '#ff8000', 1],
+    ['rgba(17, 170, 34, 0.25)', '#11aa2240', 0.25],
+    ['rgb(17 170 34 / 25%)', '#11aa2240', 0.25],
+    ['#12345600', '#12345600', 0],
+    ['rebeccapurple', '#663399', 1],
+  ] as const) {
+    const model = box(2, 4, 6).material(color);
+    const geometry = retainModelGeometry([model]);
+    try {
+      const instances = collectExportInstances(
+        scene(createModelSnapshotter()(model)),
+      );
+      const {model: xml} = read3mf(
+        await exportModel(geometry, instances, {
+          ...defaults,
+          format: '3mf',
+        }).arrayBuffer(),
+      );
+      assert.ok(xml.includes(`displaycolor="${hex}"`), color);
+      const step = await exportModel(geometry, instances, defaults).text();
+      const reference = await exportModel(
+        geometry,
+        instances.map(instance => ({...instance, material: hex.slice(0, 7)})),
+        defaults,
+      ).text();
+      const colorPattern =
+        /(?:COLOUR_RGB|DRAUGHTING_PRE_DEFINED_COLOUR)\([^)]*\)/g;
+      assert.ok(step.match(colorPattern)?.length, color);
+      assert.deepEqual(
+        step.match(colorPattern),
+        reference.match(colorPattern),
+        color,
+      );
+      const transparency = step.match(/SURFACE_STYLE_TRANSPARENT\(([^)]+)\)/);
+      assert.ok(
+        Math.abs(Number(transparency?.[1] ?? 0) - (1 - alpha)) < 1e-7,
+        color,
+      );
+    } finally {
+      geometry.dispose();
+      disposeModelObjects([model]);
+    }
   }
 });
 
@@ -368,9 +429,9 @@ test('STEP also supports profile and curve geometry', async () => {
 
 test('retained geometry shares one owned clone and can be released without consuming live models', () => {
   const model = box(2, 4, 6);
-  const painted = model.paint('#f00');
-  const snapshot = createModelSnapshotter()(group([model, painted]));
-  const geometry = retainModelGeometry([model, painted]);
+  const colored = model.material('#f00');
+  const snapshot = createModelSnapshotter()(group([model, colored]));
+  const geometry = retainModelGeometry([model, colored]);
   const retained = snapshot.children.map(node =>
     geometry.shapes.get(node.nodeId),
   );
@@ -379,11 +440,11 @@ test('retained geometry shares one owned clone and can be released without consu
   assert.equal(geometry.shapes.size, 0);
   assert.throws(() => defined(retained[0]).wrapped, /deleted/);
   assert.ok(defined(createModelSnapshotter()(model).mesh).vertices.length > 0);
-  disposeModelObjects([model, painted]);
+  disposeModelObjects([model, colored]);
 });
 
 test('3MF packages closed welded meshes, escaped names, materials and a fixed assembly', async () => {
-  const models = [box(2, 4, 6).paint('#f00'), cylinder(2, 8)];
+  const models = [box(2, 4, 6).material('#f00'), cylinder(2, 8)];
   const assembly = group(models, 'Assembly');
   const occurrences = scene(createModelSnapshotter()(assembly));
   const instances = collectExportInstances(occurrences).map((instance, i) => ({

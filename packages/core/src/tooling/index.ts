@@ -1,10 +1,26 @@
+export {identifyCachedFunction} from '../library/cached.js';
+export {
+  installModelResourceReader,
+  installFontEngine,
+} from '../library/font.js';
+export {googleFontUrl, googleFontSources} from '../library/google-font.js';
 import {setOC} from 'replicad';
-import type {OpenCascadeInstance} from 'replicad-opencascadejs';
+import type {OpenCascadeInstance} from '@code3d/opencascade';
 import {clearKernelOperationCache} from '../library/kernel-cache.js';
+
+export {
+  setKernelArtifactStore,
+  setKernelExternalBytes,
+  kernelOperationCacheStats,
+  clearKernelOperationCache,
+} from '../library/kernel-cache.js';
+export type {KernelArtifactStore} from '../library/kernel-cache.js';
 
 export {
   isSketch,
   sketchDefinition,
+  sketchSource,
+  sketchFrame,
   snapshotSketch,
   solveSketchSnapshot,
   sketchDragRequiresSolver,
@@ -54,6 +70,8 @@ export {
   constraintTraceReference,
   constraintPreview,
   createModelSnapshotter,
+  planModelSnapshotQueries,
+  executeSnapshotQueryBatch,
   disposeModelObjects,
   instrumentConstraint,
   instrumentModelOperation,
@@ -88,9 +106,14 @@ export type {
   ModelOperationSelectionSnapshot,
   ModelOperationSnapshot,
   ModelObject,
+  RelationObject,
   ModelObjectRuntimeInfo,
   ModelSnapshotObject,
+  SnapshotQuery,
+  SnapshotQueryResult,
+  SnapshotQueryBatch,
   ModelSpatialOperation,
+  ModelParameterDimension,
   ModelTopologyReference,
   ParameterKind,
   ParameterTarget,
@@ -139,3 +162,8 @@ export {
   topologyIdKey,
   TopologyIdSet,
 } from '../library/topology-id.js';
+
+export {captureModelMaterial, modelMaterialColor} from '../library/material.js';
+export type {ModelMaterialSnapshot} from '../library/material.js';
+export {parseModelColor} from '../library/model-color.js';
+export type {ModelColor} from '../library/model-color.js';

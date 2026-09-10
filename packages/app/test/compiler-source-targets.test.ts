@@ -106,6 +106,31 @@ after(async () => {
   await server?.close();
 });
 
+test('successful programs without model output compile to an empty module', async t => {
+  for (const [name, source] of [
+    ['empty', ''],
+    ['whitespace', ' \n\t\n'],
+    ['comments', '// Start modeling\n/* Nothing yet */'],
+    ['imports', "import {box} from '@code3d/core';"],
+    ['values', 'export const size = 10; export default {size};'],
+    ['helper', 'export function twice(value: number) { return value * 2; }'],
+  ]) {
+    await t.test(name, async () => {
+      const module = await compileProject(
+        {files: [{path: '/model.ts', source}]},
+        '/model.ts',
+      );
+      assert.equal(module.diagnostic, undefined);
+      assert.deepEqual(module.warnings, []);
+      assert.equal(module.fallback, undefined);
+      assert.equal(module.objects.size, 0);
+      assert.equal(module.sketches.size, 0);
+      assert.equal(module.exports.size, 0);
+      assert.deepEqual(module.sourceTargets, []);
+    });
+  }
+});
+
 test('shell tools select input surfaces while displaying the result, including failed offsets', async () => {
   for (const [call, selected, failure] of [
     ['shell(1)', [], false],
@@ -463,7 +488,8 @@ test('export-only edits reuse a large model including exact directional bounds',
         );
       }
     }
-    // A diagnosed source failure also finishes the evaluation and trims history.
+    // A source failure closes the scope while retaining history within budget.
+    const beforeFailure = kernelOperationCacheStats();
     const failed = await compileProject(
       {
         files: [
@@ -473,7 +499,17 @@ test('export-only edits reuse a large model including exact directional bounds',
       '/model.ts',
     );
     assert.match(defined(failed.diagnostic).summary, /failed model/);
-    assert.ok(kernelOperationCacheStats().entries <= 256);
+    assert.equal(kernelOperationCacheStats().entries, beforeFailure.entries);
+    assert.equal(
+      kernelOperationCacheStats().historicalEntries,
+      beforeFailure.entries,
+    );
+    const restored = await compileProject(
+      {files: [{path: '/model.ts', source}]},
+      '/model.ts',
+    );
+    assert.equal(restored.diagnostic, undefined);
+    assert.equal(kernelOperationCacheStats().misses, beforeFailure.misses);
   } finally {
     clearKernelOperationCache();
   }
@@ -498,8 +534,8 @@ test('editing a plate fillet does not rebuild an unchanged screw across compiles
       'import {ISO4762} from "@code3d/screws";',
       `let plate = box(40, 10, 40).fillet(${radius}, [2, 3, 4, 6, 7, 8, 11, 12]).chamfer(1.2, [[1, 10]]);`,
       'const hole = ISO4762.clearanceHole("M6", 10).relate(tool => tool.shaftBottom.on(plate.down.flip()));',
-      'plate = cut(plate, [hole]).paint("#666");',
-      'const screw = ISO4762.screw("M6", 18).paint("#999").relate(part => part.headBottom.on(hole.counterboreBottom.flip()).offset(0, -0.5, 0));',
+      'plate = cut(plate, [hole]).material("#666");',
+      'const screw = ISO4762.screw("M6", 18).material("#999").relate(part => part.headBottom.on(hole.counterboreBottom.flip()).offset(0, -0.5, 0));',
       'export default group([plate, screw], "M6 fastener demo");',
     ].join('\n');
   let buildCount;
@@ -862,7 +898,7 @@ export const part = original.relate( /* whole */ self => [
   ${reverse ? 'base.on(self.up)' : 'self.on(base.up)'},
   ${reverse ? 'front.on(self.back)' : 'self.on(front.front)'},
 ] /* completed */ );
-${composed ? "const derived = part.paint('#ff4d81'); export default group([derived, base, front, old, other]);" : ''}`;
+${composed ? "const derived = part.material('#ff4d81'); export default group([derived, base, front, old, other]);" : ''}`;
       const module = await compileProject(
         {files: [{path: '/model.ts', source}]},
         '/model.ts',
@@ -1593,11 +1629,10 @@ test('the documented function offers parameter tools and design-time arguments',
     ['10, 5, 6', '14, 7, 8'],
   );
   for (const context of module.designArguments) {
-    const preview = await compileProject(
-      {files: [defined(file)]},
-      rootPath,
-      context.id,
-    );
+    const preview = await compileProject({files: [defined(file)]}, rootPath, {
+      file: context.functionRef.file,
+      id: context.id,
+    });
     assert.equal(preview.diagnostic, undefined);
     assert.equal(preview.activeDesignContextId, context.id);
   }
@@ -1767,7 +1802,7 @@ for (const composition of [
     const source = `import {box, group, union, cut, intersect} from '@code3d/core';
 const peer = box(18, 6, 12);
 const moved = box(8, 10, 8).originOffset(-4, 0, 0);
-const final = moved.rotate(0, 25, 0).paint('#d8ff3e');
+const final = moved.rotate(0, 25, 0).material('#d8ff3e');
 const parts = [peer, final];
 const ops = {group, union, cut, intersect, combine(stock, tool) { return cut(stock, [tool]); }};
 export const model = ${composition};`;

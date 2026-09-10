@@ -15,3 +15,12 @@ test('agent name suggestions exhaust people before using the first free numbered
   used.push('AGENT 1', 'Agent 3');
   assert.equal(randomAgentName(used), 'Agent 2');
 });
+
+test('agent names reuse a released person before suggesting numbered names', () => {
+  const used = new Set<string>();
+  for (let i = 0; i < 12; i++) used.add(randomAgentName(used));
+  const released = [...used][4]!;
+  used.delete(released);
+  used.add('Agent 1');
+  assert.equal(randomAgentName(used.values()), released);
+});

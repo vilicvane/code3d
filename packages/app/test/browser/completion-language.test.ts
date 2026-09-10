@@ -1,3 +1,4 @@
+import {appIsolationHeaders} from '../../build/isolation.ts';
 import type {ProjectTypeScriptWorker} from '../../src/monaco/typescript-protocol.ts';
 import type {TestContext} from 'node:test';
 import assert from 'node:assert/strict';
@@ -38,6 +39,7 @@ async function createEditor(t: TestContext) {
   await page.route(url, route =>
     route.fulfill({
       contentType: 'text/html',
+      headers: appIsolationHeaders,
       body: '<main style="height:600px"></main>',
     }),
   );

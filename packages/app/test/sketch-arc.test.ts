@@ -186,7 +186,7 @@ test('sweep badges expose center and both endpoints, and deletion removes the ex
   const display = constraints.sketchConstraintDisplays([local], points)[0];
   assert.equal(display.label, '270°');
   assert.match(display.title, /Sweep 270° · CW · arc 4/);
-  assert.deepEqual(display.curve, ref(4));
+  assert.deepEqual(display.curves, [ref(4)]);
   assert.deepEqual(
     display.points.map(p => p.id),
     [1, 2, 3],
@@ -201,7 +201,10 @@ test('sweep badges expose center and both endpoints, and deletion removes the ex
       [0, 10],
     ],
   ]);
-  assert.ok(display.anchor[0] < 0 && display.anchor[1] < 0);
+  const marker = display.markers[0];
+  assert.equal(marker.kind, 'curve');
+  assert.deepEqual(marker.curve, ref(4));
+  assert.ok(marker.position[0] < 0 && marker.position[1] < 0);
   const args =
     "[['point', 1, [0, 0]], ['point', 2, [10, 0]], ['point', 3, [0, 10]], ['arc', 4, [1, 10, 2, 3, 'cw']]], {constraints: [['sweep', 4, angle /* keep expression */]]}";
   const moved = edit(args, {kind: 'move', data: [{id: 2, parameters: [9, 1]}]});
@@ -527,8 +530,11 @@ test('arc radius badges follow the directed arc midpoint and deletion cleans onl
     .map(e => ({...e, layer: local.id}));
   const display = constraints.sketchConstraintDisplays([local], points)[0];
   assert.equal(display.label, 'R10');
-  assert.deepEqual(display.curve, ref(4));
-  assert.ok(display.anchor[0] < 0 && display.anchor[1] < 0);
+  assert.deepEqual(display.curves, [ref(4)]);
+  const marker = display.markers[0];
+  assert.equal(marker.kind, 'curve');
+  assert.deepEqual(marker.curve, ref(4));
+  assert.ok(marker.position[0] < 0 && marker.position[1] < 0);
   assert.deepEqual(segments.deleteSketchEntity([local], 4), {
     kind: 'delete',
     ids: [4, 2, 3],

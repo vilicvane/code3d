@@ -115,6 +115,157 @@ function hostFor(source: string) {
   return {host, source: () => source};
 }
 
+for (const [call, operation, expected, value, axis = 'z'] of [
+  ['rotate()', 'rotate', 'rotate(0, 0, 15)', 15],
+  ['rotate()', 'rotate', 'rotate(15, 0, 0)', 15, 'x'],
+  ['rotate()', 'rotate', 'rotate(0, 15, 0)', 15, 'y'],
+  ['rotate(12, /* rest */)', 'rotate', 'rotate(15, /* rest */0, 0)', 15, 'x'],
+  ['originOffset()', 'originOffset', 'originOffset(5, 0, 0)', 5, 'x'],
+  ['rotate(12, /* next */)', 'rotate', 'rotate(12, /* next */0, 15)', 15],
+  ['rotate(...angles)', 'rotate', 'rotate(20, 30, 15)', 15],
+  ['rotate(20, 30, undefined)', 'rotate', 'rotate(20, 30, 15)', 15],
+  ['originOffset()', 'originOffset', 'originOffset(0, 0, 5)', 5],
+] as const) {
+  test(`${call} exposes every axis and completes defaults on ${axis} commit`, async () => {
+    const source = `import {box} from '@code3d/core'; const angles = [20, 30, 40] as const; box(8, 6, 4).${call};`;
+    const {node, bindings} = await build(source, operation);
+    assert.equal(bindings.length, 3);
+    const binding = defined(bindings.find(binding => binding.axis === axis));
+    const host = hostFor(source);
+    const engine = new ToolEngine(host.host);
+    const intent = spatialIntent(binding, value);
+    const session = engine.begin('default-axis');
+    assert.equal(session.preview(intent).status, 'ready');
+    assert.equal(host.source(), source);
+    session.cancel();
+    assert.equal(host.source(), source);
+    const unchanged = engine.resolve(
+      'unchanged',
+      spatialIntent(binding, binding.value),
+    );
+    assert.equal(unchanged.status, 'ready');
+    if (unchanged.status === 'ready')
+      assert.ok(
+        unchanged.plan.edits.every(edit => edit.text === edit.expectedText),
+      );
+    assert.equal(
+      engine.begin('default-axis').commit(intent).status,
+      'committed',
+    );
+    assert.equal(host.source(), source.replace(call, expected));
+    const {node: next} = await build(host.source(), operation);
+    const {committedSpatialObject} = await server.ssrLoadModule<
+      typeof import('../src/tools/spatial-edit.ts')
+    >('/src/tools/spatial-edit.ts');
+    const preview = committedSpatialObject(intent.preview.objects[0]);
+    const transform = new Matrix4().compose(
+      new Vector3(...preview.transform.position),
+      new Quaternion(...preview.transform.quaternion),
+      new Vector3(1, 1, 1),
+    );
+    const before = defined(node.mesh).topologyVertices;
+    const after = defined(next.mesh).topologyVertices;
+    for (let i = 0; i < before.length; i += 3)
+      near(
+        new Vector3().fromArray(before, i).applyMatrix4(transform).toArray(),
+        [...after.slice(i, i + 3)],
+      );
+  });
+}
+
+for (const call of ['rotate()', 'originOffset()']) {
+  test(`group ${call} exposes all default axes`, async () => {
+    const {bindings} = await build(
+      `import {box, group} from '@code3d/core'; group([box(8,6,4)]).${call};`,
+      call.split('(')[0],
+    );
+    assert.equal(bindings.length, 3);
+    assert.deepEqual(
+      bindings.map(binding => binding.value),
+      [0, 0, 0],
+    );
+  });
+}
+
+for (const operation of ['rotate', 'originOffset'] as const) {
+  test(`materializing ${operation} inputs previews every execution of the call`, async () => {
+    const source = `import {box, group} from '@code3d/core'; function part(i: number) {const coords = [i * 2, i * 3, i * 4] as const; return box(8, 6, 4).${operation}(...coords);} group([part(1), part(2)]);`;
+    const result = await build(source, operation);
+    const occurrences = result.target.evaluations.map((evaluation, index) => ({
+      key: `part/${index}`,
+      node: defined(result.module.objects.get(evaluation.nodeIds[0])),
+      placement: 'standalone' as const,
+    }));
+    assert.equal(occurrences.length, 2);
+    const bindings = spatialBindings(
+      result.module,
+      result,
+      occurrences[0],
+      occurrences,
+      new Map(),
+      new Map(),
+    );
+    const binding = defined(bindings.find(binding => binding.axis === 'z'));
+    const unchanged = spatialIntent(binding, binding.value);
+    for (const preview of unchanged.preview.objects) {
+      near(preview.transform.position, [0, 0, 0]);
+      near(preview.transform.quaternion, [0, 0, 0, 1]);
+    }
+    const intent = spatialIntent(binding, 9);
+    assert.equal(intent.preview.objects.length, 2);
+    const host = hostFor(source);
+    assert.equal(
+      new ToolEngine(host.host).begin('shared-call').commit(intent).status,
+      'committed',
+    );
+    const next = await build(host.source(), operation);
+    const {committedSpatialObject} = await server.ssrLoadModule<
+      typeof import('../src/tools/spatial-edit.ts')
+    >('/src/tools/spatial-edit.ts');
+    for (const [index, occurrence] of occurrences.entries()) {
+      const preview = committedSpatialObject(intent.preview.objects[index]);
+      const transform = new Matrix4().compose(
+        new Vector3(...preview.transform.position),
+        new Quaternion(...preview.transform.quaternion),
+        new Vector3(1, 1, 1),
+      );
+      const before = defined(occurrence.node.mesh).topologyVertices;
+      const after = defined(
+        defined(
+          next.module.objects.get(next.target.evaluations[index].nodeIds[0]),
+        ).mesh,
+      ).topologyVertices;
+      for (let i = 0; i < before.length; i += 3)
+        near(
+          new Vector3().fromArray(before, i).applyMatrix4(transform).toArray(),
+          [...after.slice(i, i + 3)],
+        );
+    }
+  });
+}
+
+test('incomplete relation offsets fill their existing call and preserve expressions', async () => {
+  const {offsetCallSource} = await server.ssrLoadModule<
+    typeof import('../src/tools/source-expression.ts')
+  >('/src/tools/source-expression.ts');
+  assert.equal(
+    offsetCallSource('self.on(base.up).offset()', 'offset', [0, 0, 5]),
+    'self.on(base.up).offset(0, 0, 5)',
+  );
+  assert.equal(
+    offsetCallSource(
+      'self.on(base.up).offset(size, /* next */)',
+      'offset',
+      [0, 2, 0],
+    ),
+    'self.on(base.up).offset(size, /* next */2, 0)',
+  );
+  assert.equal(
+    offsetCallSource('self.on(base.up).offset()', 'offset', [0, 0, 0]),
+    'self.on(base.up).offset()',
+  );
+});
+
 test('originCenter without parameters displays its center and drags by appending an offset', async () => {
   const source =
     'import {box} from "@code3d/core"; const part = box(8, 6, 4).originVertex(3).rotate(0, 0, 90).originCenter();';
@@ -226,33 +377,42 @@ test('originVertex candidates map from input topology to the displayed result af
   }
 });
 
-test('rotation edits an upstream angle and preview matches recomputed B-Rep vertices', async () => {
-  const source =
-    'import {box} from "@code3d/core"; const angle = 25; const part = box(8, 6, 4).originOffset(1, 2, 3).rotate(angle, 35, 10);';
-  const {node, bindings} = await build(source, 'rotate');
-  const binding = bindings.find(binding => binding.axis === 'x');
-  assert.ok(defined(binding).spatial.source.kind === 'parameter');
-  const intent = spatialIntent(defined(binding), 55);
-  const host = hostFor(source);
-  const engine = new ToolEngine(host.host);
-  const session = engine.begin('rotation-test');
-  assert.ok(session.preview(intent).status === 'ready');
-  assert.equal(host.source(), source);
-  assert.ok(session.commit(intent).status === 'committed');
-  assert.match(host.source(), /const angle = 55/);
-  const {node: next} = await build(host.source(), 'rotate');
-  const {rotateVector} = await import('../../core/bld/tooling/index.js');
-  const transform = intent.preview.objects[0].transform;
-  const before = defined(defined(node).mesh).topologyVertices;
-  const after = defined(defined(next).mesh).topologyVertices;
-  for (let i = 0; i < before.length; i += 3) {
-    const rotated = rotateVector(
-      [before[i], before[i + 1], before[i + 2]],
-      transform.quaternion,
-    ).map((x, axis) => x + transform.position[axis]);
-    near(rotated, [...after.slice(i, i + 3)]);
-  }
-});
+for (const call of ['rotate(angle, 35, 10)', 'rotate(angle /* angle */)']) {
+  test(`${call} edits the upstream angle, completes defaults and matches recomputed B-Rep vertices`, async () => {
+    const source = `import {box} from "@code3d/core"; const angle = 25; const part = box(8, 6, 4).originOffset(1, 2, 3).${call};`;
+    const {node, bindings} = await build(source, 'rotate');
+    const binding = bindings.find(binding => binding.axis === 'x');
+    assert.ok(defined(binding).spatial.source.kind === 'parameter');
+    const intent = spatialIntent(defined(binding), 55);
+    const host = hostFor(source);
+    const engine = new ToolEngine(host.host);
+    const session = engine.begin('rotation-test');
+    assert.ok(session.preview(intent).status === 'ready');
+    assert.equal(host.source(), source);
+    assert.ok(session.commit(intent).status === 'committed');
+    assert.equal(
+      host.source(),
+      source
+        .replace('const angle = 25', 'const angle = 55')
+        .replace(
+          'rotate(angle /* angle */)',
+          'rotate(angle /* angle */, 0, 0)',
+        ),
+    );
+    const {node: next} = await build(host.source(), 'rotate');
+    const {rotateVector} = await import('../../core/bld/tooling/index.js');
+    const transform = intent.preview.objects[0].transform;
+    const before = defined(defined(node).mesh).topologyVertices;
+    const after = defined(defined(next).mesh).topologyVertices;
+    for (let i = 0; i < before.length; i += 3) {
+      const rotated = rotateVector(
+        [before[i], before[i + 1], before[i + 2]],
+        transform.quaternion,
+      ).map((x, axis) => x + transform.position[axis]);
+      near(rotated, [...after.slice(i, i + 3)]);
+    }
+  });
+}
 
 test('shared size and angle parameters keep the size expression while editing this angle', async () => {
   const source =
@@ -373,6 +533,86 @@ async function relationTool(source: string, name: string) {
     new Map(),
   );
   return {module, target, evaluation, node, bindings};
+}
+
+for (const [chain, name, expected, axis = 'z'] of [
+  [
+    'pivot().rotate(25, 35, 10)',
+    'pivot',
+    'pivot([0, 0, 7]).rotate(25, 35, 10)',
+  ],
+  [
+    'pivot([2]).rotate(25, 35, 10)',
+    'pivot',
+    'pivot([2, 0, 7]).rotate(25, 35, 10)',
+  ],
+  [
+    'pivot(coords).rotate(25, 35, 10)',
+    'pivot',
+    'pivot([2, 3, 7]).rotate(25, 35, 10)',
+  ],
+  [
+    'pivot([...coords]).rotate(25, 35, 10)',
+    'pivot',
+    'pivot([2, 3, 7]).rotate(25, 35, 10)',
+  ],
+  [
+    'pivot(undefined).rotate(25, 35, 10)',
+    'pivot',
+    'pivot([0, 0, 7]).rotate(25, 35, 10)',
+  ],
+  [
+    'pivot().rotate(25, 35, 10)',
+    'pivot',
+    'pivot([7, 0, 0]).rotate(25, 35, 10)',
+    'x',
+  ],
+  [
+    'pivot([2, /* rest */]).rotate(25, 35, 10)',
+    'pivot',
+    'pivot([7, /* rest */0, 0]).rotate(25, 35, 10)',
+    'x',
+  ],
+  [
+    'pivot([, 2]).rotate(25, 35, 10)',
+    'pivot',
+    'pivot([0, 7, 0]).rotate(25, 35, 10)',
+    'y',
+  ],
+  ['rotate()', 'rotate', 'rotate(7, 0, 0)', 'x'],
+  ['rotate()', 'rotate', 'rotate(0, 0, 7)'],
+  ['around(base.axis).rotate()', 'rotate', 'around(base.axis).rotate(7)'],
+] as const) {
+  test(`relation ${chain} provides ${axis} tools from its rendered pose`, async () => {
+    const source = `import {box} from '@code3d/core'; const coords = [2, 3, 4] as const; const base = box(20, 10, 30); box(8, 6, 4).relate(self => self.on(base.up).${chain});`;
+    const {node, bindings} = await relationTool(source, name);
+    assert.equal(bindings.length, chain.startsWith('around') ? 1 : 3);
+    const binding = defined(
+      bindings.find(
+        binding => binding.axis === (chain.startsWith('around') ? 'y' : axis),
+      ),
+    );
+    const intent = spatialIntent(binding, 7);
+    const host = hostFor(source);
+    const engine = new ToolEngine(host.host);
+    const session = engine.begin('rendered-pivot');
+    assert.equal(session.preview(intent).status, 'ready');
+    session.cancel();
+    assert.equal(host.source(), source);
+    assert.equal(
+      engine.begin('rendered-pivot').commit(intent).status,
+      'committed',
+    );
+    assert.equal(host.source(), source.replace(chain, expected));
+    const {node: next} = await relationTool(host.source(), name);
+    const {composeTransforms} = await import('../../core/bld/tooling/index.js');
+    const preview = composeTransforms(
+      node.compositionTransform,
+      intent.preview.objects[0].transform,
+    );
+    near(preview.position, next.compositionTransform.position);
+    near(preview.quaternion, next.compositionTransform.quaternion);
+  });
 }
 
 for (const reverse of [false, true] as const) {
@@ -627,6 +867,57 @@ for (const [call, kind] of [
     assert.equal(markers[0].nodeId, evaluation.constraintOwnerNodeId);
   });
 }
+
+test('completing an upstream offset preserves preceding displacements', async () => {
+  const source = `import {box} from '@code3d/core';
+const amount = 2;
+const base = box(20, 10, 30);
+box(8, 6, 4).relate(self => self.on(base.up).offset(0, 3, 4).offset(amount /* x */));`;
+  const compile = (source: string) =>
+    compiler.compile({files: [{path: '/model.ts', source}]}, '/model.ts');
+  const module = await compile(source);
+  assert.equal(module.diagnostic, undefined);
+  const node = defined(module.fallback);
+  const occurrence = {
+    object: new Object3D(),
+    depth: 0,
+    view: 'source' as const,
+    node,
+    key: 'part',
+    placement: 'composition' as const,
+  };
+  const {positionBindings} =
+    await server.ssrLoadModule<typeof import('../src/viewport.ts')>(
+      '/src/viewport.ts',
+    );
+  const binding = defined(
+    positionBindings(occurrence, [occurrence], null).find(
+      binding => binding.axis === 'x',
+    ),
+  );
+  assert.equal(binding.kind, 'parameter');
+  if (binding.kind !== 'parameter') return;
+  const host = hostFor(source);
+  const result = new ToolEngine(host.host).begin('offset').commit({
+    kind: 'parameter.set',
+    target: binding.target,
+    value: 7,
+    completeArguments: binding.completeArguments,
+  });
+  assert.equal(result.status, 'committed');
+  assert.equal(
+    host.source(),
+    source
+      .replace('const amount = 2', 'const amount = 7')
+      .replace('offset(amount /* x */)', 'offset(amount /* x */, 0, 0)'),
+  );
+  const next = await compile(host.source());
+  assert.equal(next.diagnostic, undefined);
+  assert.deepEqual(
+    defined(next.fallback).constraints.at(-1)?.offset,
+    [7, 3, 4],
+  );
+});
 
 test('a constraint expression previews its own chain before sibling constraints are committed', async () => {
   const source = `import {box} from '@code3d/core'; const base=box(20,10,20); const part=box(2,2,2).relate(self=>[self.axis.align(base.axis).rotate(0,25,0),self.on(base.up)]);`;

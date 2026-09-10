@@ -1,3 +1,4 @@
+import {appIsolationHeaders} from '../../build/isolation.ts';
 import assert from 'node:assert/strict';
 import {test, type TestContext} from 'node:test';
 import {chromium} from 'playwright-core';
@@ -362,6 +363,7 @@ async function openViewport(t: TestContext) {
   await page.route(url, route =>
     route.fulfill({
       contentType: 'text/html',
+      headers: appIsolationHeaders,
       body: '<main style="width:980px;height:780px"></main>',
     }),
   );

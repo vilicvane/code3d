@@ -1,3 +1,4 @@
+import {appIsolationHeaders} from '../../build/isolation.ts';
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {chromium} from 'playwright-core';
@@ -17,7 +18,11 @@ test(
     const url = new URL('/__screen-arrow-test__', process.env.CODE3D_TEST_URL)
       .href;
     await page.route(url, route =>
-      route.fulfill({contentType: 'text/html', body: '<main></main>'}),
+      route.fulfill({
+        contentType: 'text/html',
+        headers: appIsolationHeaders,
+        body: '<main></main>',
+      }),
     );
     await page.goto(url);
     const {samples, corners} = await page.evaluate(async () => {

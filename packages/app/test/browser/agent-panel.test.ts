@@ -5,7 +5,10 @@ import {AgentClient, type AgentConfig} from '@code3d/agent';
 import {createLocalBridge} from '../../../cli/bld/bridge.js';
 import {reserveLocalPort} from './local-port.ts';
 
-declare const window: Window & {settleAgentCopy(): void};
+declare const window: Window & {
+  settleAgentCopy(): void;
+  agentTestConnections: import('../../src/agent/connections.ts').AgentConnections;
+};
 
 test(
   'agent controls preserve identity, prompt interaction and connection history',
@@ -30,17 +33,21 @@ test(
     page.setDefaultTimeout(10_000);
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => {
+      if (/\[MobX\]|\[mobx\]/.test(message.text())) errors.push(message.text());
+    });
     await page.goto(process.env.CODE3D_TEST_URL);
-    const nav = page.locator('#agents-button');
+    const nav = page.locator('.agent-nav');
+    const connect = page.locator('#agents-button');
     await nav.waitFor();
-    assert.equal(await nav.textContent(), 'Connect Agent');
+    assert.equal(await connect.textContent(), 'Connect Agent');
     assert.equal(
       await nav.evaluate(
         element => element === element.parentElement!.lastElementChild,
       ),
       true,
     );
-    await nav.click();
+    await connect.click();
     const dialog = page.getByRole('dialog', {
       name: 'Connect Agent',
       exact: true,
@@ -101,7 +108,10 @@ test(
       await dialog.locator('.agent-row-status').allTextContents(),
       ['Never connected', 'Never connected'],
     );
-    assert.equal(await nav.locator('.agent-badge-dot.interacted').count(), 0);
+    assert.equal(
+      await nav.locator('.agent-badge[data-active="true"]').count(),
+      0,
+    );
     const colors = await nav
       .locator('.agent-badge')
       .evaluateAll(elements =>
@@ -153,14 +163,20 @@ test(
       ),
       true,
     );
-    assert.equal(await nav.locator('.agent-badge-dot.interacted').count(), 1);
+    assert.equal(
+      await nav.locator('.agent-badge[data-active="true"]').count(),
+      1,
+    );
     await page.reload();
     await page.waitForFunction(
       () =>
         document.querySelector('.agent-status')?.getAttribute('data-state') ===
         'online',
     );
-    assert.equal(await nav.locator('.agent-badge-dot.interacted').count(), 0);
+    assert.equal(
+      await nav.locator('.agent-badge[data-active="true"]').count(),
+      0,
+    );
     assert.deepEqual(
       await nav
         .locator('.agent-badge')
@@ -171,12 +187,13 @@ test(
         ),
       colors,
     );
-    await nav.click();
+    await connect.click();
     assert.equal(await prompt.count(), 0);
-    assert.match(
-      (await row('Euler').locator('.agent-row-status').textContent())!,
-      /^Last active /,
+    assert.equal(
+      await row('Euler').locator('.agent-row-status').isVisible(),
+      false,
     );
+    assert.equal(await dialog.locator('.agent-row-location').count(), 0);
     assert.equal(
       await row('Gauss').locator('.agent-row-status').textContent(),
       'Never connected',
@@ -242,7 +259,7 @@ test(
         .click();
       await dialog.getByRole('button', {name: 'Close', exact: true}).click();
       await page.evaluate(() => window.settleAgentCopy());
-      await nav.click();
+      await connect.click();
       assert.equal(
         await dialog.locator('.agent-prompt-message').textContent(),
         '',
@@ -320,17 +337,147 @@ test(
         .click();
       assert.equal(await exporting.isVisible(), false);
     }
-    await nav.click();
+    await connect.click();
     await connection.click();
     await end.click();
     await dialog.locator('.agent-row').waitFor({state: 'detached'});
-    assert.equal(await nav.textContent(), 'Connect Agent');
+    assert.equal(await connect.textContent(), 'Connect Agent');
     await page.reload();
     await nav.waitFor();
-    assert.equal(await nav.textContent(), 'Connect Agent');
+    assert.equal(await connect.textContent(), 'Connect Agent');
     await assert.rejects(() => client.request({operation: 'context'}), {
       code: 'app_disconnected',
     });
+    assert.deepEqual(errors, []);
+  },
+);
+
+test(
+  'grant consumers see only persisted changes and disposal prevents late publication',
+  {timeout: 30_000},
+  async t => {
+    assert.ok(process.env.CODE3D_TEST_URL);
+    const browser = await chromium.connectOverCDP(
+      process.env.CODE3D_CDP_URL ?? 'http://localhost:9222',
+    );
+    t.after(() => browser.close());
+    const context = await browser.newContext();
+    t.after(() => context.close());
+    const page = await context.newPage();
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => {
+      if (/\[MobX\]|\[mobx\]/.test(message.text())) errors.push(message.text());
+    });
+    await page.route('**/src/main.ts*', async route => {
+      const response = await route.fetch();
+      await route.fulfill({
+        response,
+        body:
+          (await response.text()) +
+          '\nwindow.agentTestConnections = agentConnections;\n',
+      });
+    });
+    const first = await reserveLocalPort(t);
+    const second = await reserveLocalPort(t);
+    await page.goto(process.env.CODE3D_TEST_URL);
+    await page.waitForFunction(() => window.agentTestConnections?.available);
+    const result = await page.evaluate(
+      async ([firstPort, secondPort]) => {
+        const {AgentPersistence} = await import('/src/agent/persistence.ts');
+        const connections = window.agentTestConnections;
+        const snapshot = () => ({
+          ports: connections.grants.map(grant => grant.config.port),
+          inputs: [
+            ...document.querySelectorAll<HTMLInputElement>('.agent-port-input'),
+          ].map(input => Number(input.value)),
+          badges: document.querySelectorAll('.agent-nav-agents .agent-badge')
+            .length,
+        });
+        const holdSave = () => {
+          let entered!: () => void;
+          let release!: (success: boolean) => void;
+          const started = new Promise<void>(resolve => {
+            entered = resolve;
+          });
+          const gate = new Promise<boolean>(resolve => {
+            release = resolve;
+          });
+          const save = AgentPersistence.prototype.save;
+          AgentPersistence.prototype.save = async function (session) {
+            AgentPersistence.prototype.save = save;
+            entered();
+            if (!(await gate)) throw new Error('Storage unavailable');
+            await save.call(this, session);
+          };
+          return {started, release};
+        };
+        const fail = async (command: () => Promise<unknown>) => {
+          const gate = holdSave();
+          const pending = command().then(
+            () => undefined,
+            error => error.message,
+          );
+          await gate.started;
+          const during = snapshot();
+          gate.release(false);
+          return {during, error: await pending, after: snapshot()};
+        };
+        const add = await fail(() => connections.add('Euler', firstPort));
+        const grant = (await connections.add('Euler', firstPort))!;
+        const input =
+          document.querySelector<HTMLInputElement>('.agent-port-input')!;
+        input.value = '12345';
+        connections.toggleFollow(grant.config.agentId);
+        const draftInput = input.value;
+        input.value = String(firstPort);
+        const port = await fail(() =>
+          connections.updatePort(grant.config.agentId, secondPort),
+        );
+        await connections.updatePort(grant.config.agentId, secondPort);
+        const updated = snapshot();
+        const revoke = await fail(() =>
+          connections.revoke(grant.config.agentId),
+        );
+        const following = connections.followingAgentId === grant.config.agentId;
+        const gate = holdSave();
+        const pending = connections.add('Gauss', firstPort);
+        await gate.started;
+        connections.dispose();
+        gate.release(true);
+        await pending;
+        return {
+          add,
+          port,
+          updated,
+          revoke,
+          following,
+          draftInput,
+          disposed: snapshot(),
+          available: connections.available,
+        };
+      },
+      [first.port, second.port],
+    );
+    const empty = {ports: [], inputs: [], badges: 0};
+    const initial = {ports: [first.port], inputs: [first.port], badges: 1};
+    const updated = {ports: [second.port], inputs: [second.port], badges: 1};
+    for (const [actual, expected] of [
+      [result.add, empty],
+      [result.port, initial],
+      [result.revoke, updated],
+    ] as const) {
+      assert.deepEqual(actual, {
+        during: expected,
+        error: 'Storage unavailable',
+        after: expected,
+      });
+    }
+    assert.deepEqual(result.updated, updated);
+    assert.equal(result.following, true);
+    assert.equal(result.draftInput, '12345');
+    assert.deepEqual(result.disposed, empty);
+    assert.equal(result.available, false);
     assert.deepEqual(errors, []);
   },
 );

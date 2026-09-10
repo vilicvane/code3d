@@ -5,7 +5,12 @@
     "types": ["node"],
     "rootDir": ".",
     "outDir": "../../bld/node",
-    "tsBuildInfoFile": "../../.cache/node.tsbuildinfo"
+    "tsBuildInfoFile": "../../.cache/node.tsbuildinfo",
+    "declarationMap": true
   },
-  "references": [{"path": "../library"}]
+  "references": [
+    {
+      "path": "../library"
+    }
+  ]
 }

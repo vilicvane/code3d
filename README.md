@@ -3,7 +3,7 @@
 The expressive power of code, with the immediacy of direct manipulation.
 
 [Open App](https://www.code3d.org/app/) · [Website](https://www.code3d.org/) ·
-[Documentation](https://www.code3d.org/docs/)
+[Documentation](https://www.code3d.org/docs/) · [Modeling agent instructions](docs/agents.md)
 
 Code3D is a solid modeler where TypeScript and the viewport form one continuous
 interface. Use code to define precise, reusable models, and interact directly
@@ -13,6 +13,8 @@ The viewport is more than a preview: it understands source expressions,
 runtime objects, and model topology. Interactive changes return as readable
 TypeScript, so the model never splits into code and hidden UI state.
 
+![Code3D App showing TypeScript source alongside an iPhone model and an agent render preview](./assets/readme/iphone-modeling.png)
+
 ## Code and geometry, connected
 
 - Build with ordinary TypeScript: parameters, functions, control flow, and
@@ -21,7 +23,7 @@ TypeScript, so the model never splits into code and hidden UI state.
 - Select topology, position parts, and adjust parameters directly in the
   viewport.
 - Keep every durable change in source, ready to read, diff, test, and reuse.
-- Work in your own project folder with browser-compatible npm packages.
+- Install browser-compatible npm packages in browser storage, or work in your own local project folder.
 - Export the model you are inspecting as STEP, STL, or 3MF.
 
 Code3D evaluates precise B-Rep geometry with OpenCascade and exposes typed
@@ -71,6 +73,9 @@ npm run dev
 ```
 
 Open [localhost:3133](http://localhost:3133) in your browser.
+
+For repository development, see the [development guide](./.agents/docs/development.md)
+and [architecture documentation](./.agents/docs/README.md).
 
 ## Project status
 

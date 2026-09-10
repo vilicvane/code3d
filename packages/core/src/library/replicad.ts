@@ -1,5 +1,5 @@
 import * as replicadModule from 'replicad';
-import {modelFromReplicadSolid} from './runtime.js';
+import {primitiveConstructor} from './runtime.js';
 import {castOwnedShape} from './kernel-shapes.js';
 import type {SolidModel} from './index.js';
 import type {Shape3D} from 'replicad';
@@ -29,12 +29,12 @@ export const replicad: Replicad = Object.freeze({
 
 /**
  * Defines a synchronous model constructor with the builder's parameters.
- * The builder runs on every call and transfers ownership of its returned solid
- * to code3d. Intermediate shapes remain the builder's responsibility.
+ * Reuses deterministic geometry by arguments; pass changing captured state as
+ * explicit parameters. Each invocation creates a fresh model. The builder
+ * transfers its returned solid to code3d and owns its intermediate shapes.
  */
 export function definePrimitive<
   Builder extends (...arguments_: never[]) => Shape3D,
 >(build: Builder): (...arguments_: Parameters<Builder>) => SolidModel {
-  return (...arguments_: Parameters<Builder>) =>
-    modelFromReplicadSolid(build(...arguments_));
+  return primitiveConstructor(build);
 }

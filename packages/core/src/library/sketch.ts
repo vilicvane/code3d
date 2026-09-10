@@ -6,9 +6,11 @@ import {
 import {solveSketchDrag} from './sketch-drag-rules.js';
 import {sketchRegions} from './sketch-regions.js';
 import {
-  sketchFaceModel,
+  SketchFrame,
   disposeModelObjects,
   isModelObject,
+  type Constraint,
+  type FaceAnchor,
   type FaceModel,
 } from './runtime.js';
 import {
@@ -61,6 +63,12 @@ export interface SketchPoint {
 export type SketchConstraint<P = number | SketchPoint> =
   | readonly [kind: 'fixed', point: P]
   | readonly [kind: 'horizontal' | 'vertical', line: number]
+  | readonly [
+      kind: 'parallel' | 'perpendicular',
+      lines: readonly [number, number],
+    ]
+  /** Signed rotation from the first line's authored direction to the second, in degrees. */
+  | readonly [kind: 'angle', lines: readonly [number, number], value: number]
   | readonly [kind: 'coincident', points: readonly [P, P]]
   | readonly [
       kind: 'midpoint',
@@ -79,6 +87,10 @@ export type SketchOptions = Readonly<{
 
 /** An immutable sketch definition, independent of B-Rep construction. */
 export interface Sketch {
+  /** The unbounded local XZ plane (+Y normal), independent of closed regions. */
+  readonly plane: FaceAnchor;
+  /** Relates this immutable sketch's frame without changing its two-dimensional data. */
+  relate(build: (self: Sketch) => Constraint | readonly Constraint[]): Sketch;
   /** References a point defined in this layer. */
   point(id: number): SketchPoint;
   /** Adds a local layer while retaining the upstream sketch as read-only input. */
@@ -106,11 +118,26 @@ const definitions = new WeakMap<Sketch, Definition>();
 const references = new WeakSet<SketchPoint>();
 
 class SketchValue implements Sketch {
+  readonly frame: SketchFrame;
+  readonly source?: Sketch;
+
   constructor(
-    entries?: readonly SketchEntry[],
-    options?: SketchOptions,
-    base?: Sketch,
+    input:
+      | {
+          entries?: readonly SketchEntry[];
+          options?: SketchOptions;
+          base?: Sketch;
+        }
+      | {source: Sketch; frame: SketchFrame},
   ) {
+    if ('source' in input) {
+      this.frame = input.frame;
+      this.source = input.source;
+      definitions.set(this, definitions.get(input.source)!);
+      return;
+    }
+    const {entries, options, base} = input;
+    this.frame = new SketchFrame(base && (base as SketchValue).frame);
     const ids = new Set<number>();
     const points = new Map<number, SketchPosition>();
     const copied = (entries ?? []).map<SketchEntry>(entry => {
@@ -158,6 +185,10 @@ class SketchValue implements Sketch {
       ancestor = definitions.get(ancestor)?.base
     )
       ancestors.add(ancestor);
+    const ancestorFor = (value: Sketch) =>
+      [...ancestors].find(
+        ancestor => definitions.get(ancestor) === definitions.get(value),
+      );
     for (const [kind, id, data] of copied) {
       if (kind === 'point' && Array.isArray(data)) continue;
       const refs =
@@ -174,7 +205,7 @@ class SketchValue implements Sketch {
             throw new Error(
               `Sketch ${kind} ${id} references missing local point ${ref}.`,
             );
-        } else if (!references.has(ref) || !ancestors.has(ref.sketch)) {
+        } else if (!references.has(ref) || !ancestorFor(ref.sketch)) {
           throw new Error(
             `Sketch ${kind} ${id} must reference a local or upstream point.`,
           );
@@ -203,7 +234,7 @@ class SketchValue implements Sketch {
       if (
         typeof ref === 'number'
           ? !points.has(ref)
-          : !references.has(ref) || !ancestors.has(ref.sketch)
+          : !references.has(ref) || !ancestorFor(ref.sketch)
       )
         throw new Error(
           'Sketch constraints must reference a local or upstream point.',
@@ -231,6 +262,25 @@ class SketchValue implements Sketch {
         if (kind === 'horizontal' || kind === 'vertical') {
           curveRef(data, 'line');
           return [kind, data];
+        }
+        if (
+          kind === 'parallel' ||
+          kind === 'perpendicular' ||
+          (kind === 'angle' && typeof data !== 'number')
+        ) {
+          if (!Array.isArray(data) || data.length !== 2 || data[0] === data[1])
+            throw new Error(
+              `Sketch ${kind} constraint requires two distinct local lines.`,
+            );
+          data.forEach(id => curveRef(id, 'line'));
+          if (kind === 'angle') {
+            if (!Number.isFinite(value))
+              throw new Error(
+                'Sketch angle constraint requires a finite value.',
+              );
+            return [kind, [data[0], data[1]], value];
+          }
+          return [kind, [data[0], data[1]]];
         }
         if (kind === 'coincident') {
           data.forEach(pointRef);
@@ -279,6 +329,7 @@ class SketchValue implements Sketch {
     const local = 'local';
     const layers = new Map<Sketch, string>();
     const identity = (value: Sketch) => {
+      value = ancestorFor(value) ?? value;
       let id = layers.get(value);
       if (!id) layers.set(value, (id = `upstream:${layers.size}`));
       return id;
@@ -320,8 +371,21 @@ class SketchValue implements Sketch {
     return ref;
   }
 
+  get plane(): FaceAnchor {
+    return this.frame.plane;
+  }
+
+  relate(build: (self: Sketch) => Constraint | readonly Constraint[]): Sketch {
+    let related!: SketchValue;
+    this.frame.relate(frame => {
+      related = new SketchValue({source: this, frame});
+      return build(related);
+    });
+    return related;
+  }
+
   derive(entries?: readonly SketchEntry[], options?: SketchOptions): Sketch {
-    return new SketchValue(entries, options, this);
+    return new SketchValue({entries, options, base: this});
   }
 
   face(): FaceModel {
@@ -330,14 +394,14 @@ class SketchValue implements Sketch {
       throw new Error(
         `sketch.face() requires exactly one closed region; found ${regions.length}. Use faces() for multiple regions.`,
       );
-    return sketchFaceModel(regions[0]);
+    return this.frame.face(regions[0]);
   }
 
   faces(): readonly FaceModel[] {
     const faces: FaceModel[] = [];
     try {
       for (const region of sketchRegions(this.layers()))
-        faces.push(sketchFaceModel(region));
+        faces.push(this.frame.face(region));
       return faces;
     } catch (error) {
       disposeModelObjects(
@@ -356,7 +420,13 @@ class SketchValue implements Sketch {
     )
       values.unshift(value);
     return values.map(value =>
-      snapshotSketch(value, s => String(values.indexOf(s))),
+      snapshotSketch(value, s =>
+        String(
+          values.findIndex(
+            value => definitions.get(value) === definitions.get(s),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -366,7 +436,7 @@ export function sketch(
   entries?: readonly SketchEntry[],
   options?: SketchOptions,
 ): Sketch {
-  return new SketchValue(entries, options);
+  return new SketchValue({entries, options});
 }
 
 export function isSketch(value: unknown): value is Sketch {
@@ -375,6 +445,16 @@ export function isSketch(value: unknown): value is Sketch {
 
 export function sketchDefinition(value: Sketch): Definition {
   return definitions.get(value)!;
+}
+
+/** The preceding spatial value; it shares a geometry definition, not a derived layer. */
+export function sketchSource(value: Sketch): Sketch | undefined {
+  return (value as SketchValue).source;
+}
+
+/** The relation frame used by this sketch and inherited by its generated faces. */
+export function sketchFrame(value: Sketch): SketchFrame {
+  return (value as SketchValue).frame;
 }
 
 export type SketchPointSnapshot = Readonly<{
@@ -472,17 +552,30 @@ export function snapshotSketch(
     redundant,
   } = sketchDefinition(value);
   const id = identity(value);
+  const ancestors: Sketch[] = [];
+  for (
+    let ancestor = base;
+    ancestor;
+    ancestor = sketchDefinition(ancestor).base
+  )
+    ancestors.push(ancestor);
+  const pointIdentity = (reference: Sketch) =>
+    identity(
+      ancestors.find(
+        ancestor => definitions.get(ancestor) === definitions.get(reference),
+      ) ?? reference,
+    );
   return {
     id,
     base: base && identity(base),
-    entities: snapshotEntries(entries, id, identity, points).map(e =>
+    entities: snapshotEntries(entries, id, pointIdentity, points).map(e =>
       e.kind === 'point'
         ? {...e, position: points.get(e.id)!}
         : e.kind === 'circle' || e.kind === 'arc'
           ? {...e, radius: radii.get(e.id)!}
           : e,
     ),
-    constraints: snapshotConstraints(constraints, id, identity),
+    constraints: snapshotConstraints(constraints, id, pointIdentity),
     degreesOfFreedom,
     redundant,
   };
@@ -585,11 +678,17 @@ function snapshotConstraints(
       case 'horizontal':
       case 'vertical':
         return [kind, data];
+      case 'parallel':
+      case 'perpendicular':
+        return [kind, [data[0], data[1]]];
       case 'length':
-      case 'angle':
       case 'radius':
       case 'sweep':
         return [kind, data, value];
+      case 'angle':
+        return typeof data === 'number'
+          ? [kind, data, value]
+          : [kind, [data[0], data[1]], value];
     }
   });
 }
@@ -717,6 +816,12 @@ export function solveSketchSnapshot(
         case 'horizontal':
         case 'vertical':
           return {kind, points: linePoints(data)};
+        case 'parallel':
+        case 'perpendicular':
+          return {
+            kind,
+            points: [...linePoints(data[0]), ...linePoints(data[1])],
+          };
         case 'coincident':
           return {kind, points: [pointIndex(data[0]), pointIndex(data[1])]};
         case 'midpoint':
@@ -729,8 +834,15 @@ export function solveSketchSnapshot(
             ],
           };
         case 'length':
-        case 'angle':
           return {kind, points: linePoints(data), value};
+        case 'angle':
+          return typeof data === 'number'
+            ? {kind, points: linePoints(data), value}
+            : {
+                kind: 'lineAngle',
+                points: [...linePoints(data[0]), ...linePoints(data[1])],
+                value,
+              };
         case 'radius':
           return arcIndex(data) >= 0
             ? {

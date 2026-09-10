@@ -1,15 +1,31 @@
 import * as monaco from 'monaco-editor/editor';
 import {AgentError} from '@code3d/agent';
+import {diffChars} from 'diff';
 import {randomAgentColor} from './agent/colors';
 import {projectTypeScriptWorker} from './monaco/typescript-worker-client';
 import type {CursorTypeInfo} from './monaco/type-info';
 import 'monaco-editor/features/register.all';
 import 'monaco-editor/languages/definitions/typescript/register';
+import {language as typeScriptTokens} from 'monaco-editor/languages/definitions/typescript/typescript';
+import 'monaco-editor/languages/definitions/javascript/register';
+import {language as javaScriptTokens} from 'monaco-editor/languages/definitions/javascript/javascript';
+import 'monaco-editor/languages/definitions/markdown/register';
+import 'monaco-editor/languages/features/json/register';
+import JsonWorker from 'monaco-editor/languages/features/json/json.worker?worker';
+import 'monaco-editor/languages/definitions/css/register';
+import 'monaco-editor/languages/definitions/html/register';
+import 'monaco-editor/languages/definitions/yaml/register';
+import type {ProjectFileReader} from './project/file-reader';
+import {decodeProjectFile} from './project/file-reader';
 import * as typeScriptLanguage from 'monaco-editor/languages/features/typescript/register';
 import EditorWorker from 'monaco-editor/editor/editor.worker?worker';
 import ProjectTypeScriptWorker from './monaco/typescript.worker?worker';
 import type {CursorOptions, Options} from 'prettier';
-import {code3dCodeColors, code3dCodeFocusColors} from './code-theme';
+import {
+  code3dCodeColors,
+  code3dCodeFocusColors,
+  code3dEditorWidgetColors,
+} from './code-theme';
 import type {ProjectLanguage} from './project/project-language';
 import {
   observeSuggestionFocus,
@@ -28,6 +44,8 @@ import type {ModelDiagnostic} from './model/diagnostic';
 import type {SourceRef} from '@code3d/core/tooling';
 import {
   normalizeProjectPath,
+  isSourceFile,
+  isReadonlyProjectFile,
   projectPathIsWithin,
   type ModelProject,
 } from './project/project';
@@ -112,6 +130,7 @@ const modelDiagnosticOwner = 'code3d-model';
 
 (self as MonacoEnvironment).MonacoEnvironment = {
   getWorker(_moduleId, label) {
+    if (label === 'json') return new JsonWorker();
     if (label === 'typescript' || label === 'javascript') {
       return new ProjectTypeScriptWorker();
     }
@@ -150,13 +169,47 @@ registerProjectTypeScriptCompletions(
 );
 registerProjectTypeScriptSelectionRanges(projectLanguageSelector);
 
+monaco.editor.addKeybindingRule({
+  keybinding: monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyP,
+  command: 'editor.action.quickCommand',
+  when: 'editorFocus',
+});
+
 monaco.languages.registerDocumentFormattingEditProvider('typescript', {
   async provideDocumentFormattingEdits(model) {
     const source = model.getValue();
     const text = await formatTypeScript(source, prettierEndOfLine(model));
-    return text === source ? [] : [{range: model.getFullModelRange(), text}];
+    return formattingEdits(model, source, text);
   },
 });
+
+// Monaco's built-in identifier rules only cover ASCII. Extend the shared
+// grammar so legal Unicode names stay whole, including inside templates.
+for (const [languageId, definition] of [
+  ['typescript', typeScriptTokens],
+  ['javascript', javaScriptTokens],
+] as const) {
+  monaco.languages.setMonarchTokensProvider(languageId, {
+    ...definition,
+    unicode: true,
+    tokenizer: {
+      ...definition.tokenizer,
+      common: [
+        [
+          /#?[$_\p{ID_Start}][$\u200c\u200d\p{ID_Continue}]*/u,
+          {
+            cases: {
+              '@keywords': 'keyword',
+              '[A-Z].*': 'type.identifier',
+              '@default': 'identifier',
+            },
+          },
+        ],
+        ...definition.tokenizer.common,
+      ],
+    },
+  });
+}
 
 monaco.editor.defineTheme('code3d-dark', {
   base: 'vs-dark',
@@ -169,20 +222,101 @@ monaco.editor.defineTheme('code3d-dark', {
     {token: 'type.identifier', foreground: tokenColor(code3dCodeColors.type)},
   ],
   colors: {
+    foreground: code3dCodeColors.foreground,
+    focusBorder: code3dEditorWidgetColors.accent,
+    'selection.background': code3dEditorWidgetColors.selectionBackground,
+    'textLink.foreground': code3dEditorWidgetColors.accent,
+    'textLink.activeForeground': code3dEditorWidgetColors.accent,
+    'input.background': code3dCodeColors.background,
+    'input.foreground': code3dCodeColors.foreground,
+    'input.border': code3dEditorWidgetColors.border,
+    'inputOption.activeBorder': code3dEditorWidgetColors.accent,
+    'inputOption.activeBackground': code3dEditorWidgetColors.selectedBackground,
+    'inputOption.activeForeground': code3dEditorWidgetColors.accent,
+    'inputOption.hoverBackground': code3dEditorWidgetColors.hoverBackground,
+    'list.activeSelectionBackground':
+      code3dEditorWidgetColors.selectedBackground,
+    'list.activeSelectionForeground': code3dCodeColors.foreground,
+    'list.focusBackground': code3dEditorWidgetColors.selectedBackground,
+    'list.focusForeground': code3dCodeColors.foreground,
+    'list.inactiveSelectionBackground':
+      code3dEditorWidgetColors.selectedBackground,
+    'list.inactiveSelectionForeground': code3dCodeColors.foreground,
+    'list.inactiveFocusBackground': code3dEditorWidgetColors.hoverBackground,
+    'list.hoverBackground': code3dEditorWidgetColors.hoverBackground,
+    'list.highlightForeground': code3dEditorWidgetColors.accent,
+    'list.focusHighlightForeground': code3dEditorWidgetColors.accent,
+    'pickerGroup.foreground': code3dEditorWidgetColors.accent,
+    'pickerGroup.border': code3dEditorWidgetColors.border,
+    'menu.background': code3dEditorWidgetColors.background,
+    'menu.foreground': code3dCodeColors.foreground,
+    'menu.border': code3dEditorWidgetColors.border,
+    'menu.selectionBackground': code3dEditorWidgetColors.selectedBackground,
+    'menu.selectionForeground': code3dCodeColors.foreground,
+    'button.background': code3dEditorWidgetColors.accent,
+    'button.foreground': code3dCodeColors.background,
+    'progressBar.background': code3dEditorWidgetColors.accent,
     'editor.background': code3dCodeColors.background,
     'editor.foreground': code3dCodeColors.foreground,
     'editorLineNumber.foreground': '#4e514a',
     'editorLineNumber.activeForeground': '#b9beaf',
     'editorCursor.foreground': code3dCodeFocusColors.cursor,
-    'editor.selectionBackground': '#53651566',
-    'editor.inactiveSelectionBackground': '#53651533',
+    'editor.selectionBackground': code3dEditorWidgetColors.selectionBackground,
+    'editor.inactiveSelectionBackground':
+      code3dEditorWidgetColors.inactiveSelectionBackground,
+    'editor.selectionHighlightBackground': code3dCodeFocusColors.relatedSymbol,
+    'editor.wordHighlightBackground': code3dCodeFocusColors.relatedSymbol,
+    'editor.wordHighlightStrongBackground': code3dCodeFocusColors.currentSymbol,
+    'editor.wordHighlightTextBackground': code3dCodeFocusColors.relatedSymbol,
+    'editor.findMatchBackground': code3dCodeFocusColors.currentSymbol,
+    'editor.findMatchBorder': code3dEditorWidgetColors.accentBorder,
+    'editor.findMatchHighlightBackground': code3dCodeFocusColors.relatedSymbol,
+    'editor.findRangeHighlightBackground': code3dCodeFocusColors.relatedSymbol,
+    'editor.hoverHighlightBackground': code3dCodeFocusColors.relatedSymbol,
+    'editor.rangeHighlightBackground': code3dCodeFocusColors.relatedSymbol,
+    'editorLink.activeForeground': code3dEditorWidgetColors.accent,
+    'editorBracketMatch.background': code3dCodeFocusColors.relatedSymbol,
+    'editorBracketMatch.border': code3dCodeFocusColors.bracketMatch,
+    'editorOverviewRuler.selectionHighlightForeground':
+      code3dCodeFocusColors.overviewMarker,
+    'editorOverviewRuler.wordHighlightForeground':
+      code3dCodeFocusColors.overviewMarker,
+    'editorOverviewRuler.wordHighlightStrongForeground':
+      code3dCodeFocusColors.overviewMarker,
+    'editorOverviewRuler.wordHighlightTextForeground':
+      code3dCodeFocusColors.overviewMarker,
+    'editorOverviewRuler.findMatchForeground':
+      code3dCodeFocusColors.overviewMarker,
     'editor.lineHighlightBackground': code3dCodeFocusColors.currentLine,
     'editorIndentGuide.background1': '#272923',
     'editorIndentGuide.activeBackground1': '#555a4e',
-    'editorWidget.background': '#1a1b17',
-    'editorHoverWidget.background': '#1a1b17',
-    'editorSuggestWidget.background': '#1a1b17',
-    'editorSuggestWidget.selectedBackground': '#303527',
+    'editorWidget.background': code3dEditorWidgetColors.background,
+    'editorWidget.foreground': code3dCodeColors.foreground,
+    'editorWidget.border': code3dEditorWidgetColors.border,
+    'editorWidget.resizeBorder': code3dEditorWidgetColors.accent,
+    'editorHoverWidget.statusBarBackground':
+      code3dEditorWidgetColors.hoverBackground,
+    'peekView.border': code3dEditorWidgetColors.accentBorder,
+    'peekViewTitle.background': code3dEditorWidgetColors.background,
+    'peekViewTitleLabel.foreground': code3dCodeColors.foreground,
+    'peekViewTitleDescription.foreground':
+      code3dEditorWidgetColors.mutedForeground,
+    'peekViewResult.background': code3dEditorWidgetColors.background,
+    'peekViewResult.lineForeground': code3dCodeColors.foreground,
+    'peekViewResult.fileForeground': code3dCodeColors.foreground,
+    'peekViewResult.selectionBackground':
+      code3dEditorWidgetColors.selectedBackground,
+    'peekViewResult.selectionForeground': code3dCodeColors.foreground,
+    'peekViewResult.matchHighlightBackground':
+      code3dCodeFocusColors.currentSymbol,
+    'peekViewEditor.background': code3dCodeColors.background,
+    'peekViewEditorGutter.background': code3dCodeColors.background,
+    'peekViewEditorStickyScroll.background': code3dCodeColors.background,
+    'peekViewEditorStickyScrollGutter.background': code3dCodeColors.background,
+    'peekViewEditor.matchHighlightBackground':
+      code3dCodeFocusColors.currentSymbol,
+    'peekViewEditor.matchHighlightBorder':
+      code3dEditorWidgetColors.accentBorder,
   },
 });
 
@@ -197,12 +331,100 @@ const typeScriptTokenizationReady = monaco.editor.colorize(
 );
 
 export class CodeEditor {
+  fileReader?: ProjectFileReader;
+  private projectLanguage?: ProjectLanguage;
+  private navigationFiles = new Map<string, string>();
+
+  isModelFile(path: string): boolean {
+    return (
+      isSourceFile(path) &&
+      !/\.d\.[cm]?ts$/.test(path) &&
+      !isReadonlyProjectFile(path)
+    );
+  }
+
+  async openFile(path: string, takeFocus = true): Promise<void> {
+    if (!this.documents.has(path)) {
+      const bytes = await this.fileReader?.readFile(path);
+      const source =
+        bytes === undefined
+          ? this.navigationFiles.get(path)
+          : decodeProjectFile(bytes);
+      if (source === undefined) throw new Error(`File not found: ${path}`);
+      this.addDocument(path, source);
+    }
+    this.switchFile(path, takeFocus);
+  }
+
+  async refreshPackageInstallation(
+    directory: string,
+    files: ProjectFileReader,
+  ): Promise<void> {
+    const modules = normalizeProjectPath(directory + '/node_modules');
+    const lock = normalizeProjectPath(directory + '/code3d-lock.json');
+    const affected = (path: string) =>
+      path === lock || projectPathIsWithin(path, modules);
+    const updates = await Promise.all(
+      [...this.documents.values()]
+        .filter(document => affected(document.path))
+        .map(async document => ({
+          document,
+          bytes: await files.readFile(document.path),
+        })),
+    );
+    // Remove stale fallback sources and TypeScript extra libraries, including
+    // paths that were only opened by Peek. The next compile supplies new types.
+    if (this.projectLanguage)
+      this.setProjectLanguage({
+        ...this.projectLanguage,
+        files: this.projectLanguage.files.filter(file => !affected(file.path)),
+        realPaths: Object.fromEntries(
+          Object.entries(this.projectLanguage.realPaths ?? {}).filter(
+            ([from, to]) => !affected(from) && !affected(to),
+          ),
+        ),
+      });
+    for (const path of this.navigationFiles.keys())
+      if (affected(path)) this.navigationFiles.delete(path);
+    for (const {document, bytes} of updates) {
+      if (this.documents.get(document.path) !== document) continue;
+      if (bytes === undefined) {
+        this.closeFile(document.path);
+        this.removeDocument(document.path);
+        continue;
+      }
+      const source = decodeProjectFile(bytes);
+      if (document.model.getValue() === source) continue;
+      const active = document.path === this.activePath;
+      const view = active ? this.editor.saveViewState() : undefined;
+      this.withSuppressedCursorEvents(() => {
+        document.model.setValue(source);
+        if (view) this.editor.restoreViewState(view);
+      });
+    }
+  }
+
   setProjectLanguage(language: ProjectLanguage): void {
+    this.projectLanguage = language;
     projectPackageSpecifiers = language.packageSpecifiers;
+    this.navigationFiles = new Map(
+      language.files.map(file => [file.path, file.source]),
+    );
     const extraLibs = language.files.map(file => ({
-      filePath: monaco.Uri.file('/workspace' + file.path).toString(true),
+      filePath: monaco.Uri.file('/workspace' + file.path).toString(),
       content: file.source,
     }));
+    extraLibs.push({
+      filePath: 'file:///workspace/.__code3d-realpaths.json',
+      content: JSON.stringify(
+        Object.fromEntries(
+          Object.entries(language.realPaths ?? {}).map(([from, to]) => [
+            '/workspace' + from,
+            '/workspace' + to,
+          ]),
+        ),
+      ),
+    });
     // Monaco forwards these options to the project's TypeScript worker.
     const options = {
       ...languageCompilerOptions,
@@ -248,7 +470,7 @@ export class CodeEditor {
     (locations: readonly AgentLocation[]) => void
   >();
   private readonly activeFileListeners = new Set<
-    (path: string, reason: ActiveFileChangeReason) => void
+    (path: string | undefined, reason: ActiveFileChangeReason) => void
   >();
   private readonly editorActivationListeners = new Set<
     (cursor: EditorCursor | undefined) => void
@@ -261,10 +483,12 @@ export class CodeEditor {
   private contentChangeOrigin: 'user' | 'tool' | 'agent' = 'user';
   private readonly sourceEditUndoGroups = new Map<string, string>();
   private readonly sourceDecoration: monaco.editor.IEditorDecorationsCollection;
-  private activePath: string;
+  private activePath: string | undefined;
   private cursorSelectionVersion = 0;
   private pointerActivatingEditor = false;
   private revision = 1;
+  private focusToolParameter?: () => boolean;
+  private operationReadOnly = false;
   private suppressCursorEventDepth = 0;
   private queuedChanges?: ProjectEditorChange[];
   private readonly agentCursors = new Map<
@@ -273,6 +497,7 @@ export class CodeEditor {
       name: string;
       color: number;
       label: HTMLElement;
+      activity: HTMLTimeElement;
       widget: monaco.editor.IContentWidget;
       ref?: SourceRef;
       invalid: boolean;
@@ -284,16 +509,20 @@ export class CodeEditor {
   constructor(
     private readonly container: HTMLElement,
     project: ModelProject,
-    initialPath: string,
+    initialPath: string | undefined,
   ) {
-    this.activePath = normalizeProjectPath(initialPath);
+    this.activePath =
+      initialPath === undefined ? undefined : normalizeProjectPath(initialPath);
     for (const file of project.files) {
       this.addDocument(file.path, file.source);
     }
-    const active = this.requireDocument(this.activePath);
-    this.openPaths.push(this.activePath);
+    const active = this.activePath
+      ? this.requireDocument(this.activePath)
+      : undefined;
+    if (this.activePath) this.openPaths.push(this.activePath);
     this.editor = monaco.editor.create(container, {
-      model: active.model,
+      model: active?.model ?? null,
+      readOnly: this.readOnly,
       theme: 'code3d-dark',
       automaticLayout: true,
       fontFamily: "'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace",
@@ -314,7 +543,16 @@ export class CodeEditor {
       tabSize: 2,
     });
     this.sourceDecoration = this.editor.createDecorationsCollection();
+    this.editor.addCommand(
+      monaco.KeyCode.Tab,
+      () => {
+        if (!this.focusToolParameter?.())
+          this.editor.trigger('keyboard', 'tab', {});
+      },
+      `editorId == '${this.editor.getId()}' && editorTextFocus && !editorReadonly && !editorHasSelection && !editorHasMultipleSelections && !suggestWidgetVisible && !inSnippetMode && !inlineSuggestionVisible && !editorTabMovesFocus`,
+    );
     this.editor.onDidChangeModel(() => {
+      this.editor.updateOptions({readOnly: this.readOnly});
       for (const cursor of this.agentCursors.values()) {
         this.editor.layoutContentWidget(cursor.widget);
       }
@@ -398,17 +636,27 @@ export class CodeEditor {
         this.refreshAnnotationDecorations(document.path, document.model);
       }
     });
+    const activityTimer = window.setInterval(
+      () => this.refreshAgentActivity(),
+      10_000,
+    );
+    window.addEventListener(
+      'pagehide',
+      () => window.clearInterval(activityTimer),
+      {once: true},
+    );
   }
 
   project(): ModelProject {
     return {
       files: [...this.documents.values()]
+        .filter(document => !isReadonlyProjectFile(document.path))
         .map(({path, model}) => ({path, source: model.getValue()}))
         .sort((left, right) => left.path.localeCompare(right.path)),
     };
   }
 
-  currentFile(): string {
+  currentFile(): string | undefined {
     return this.activePath;
   }
 
@@ -422,21 +670,55 @@ export class CodeEditor {
     return [...this.openPaths];
   }
 
-  switchFile(path: string, takeFocus = false): void {
+  loadFile(path: string, source: string): void {
     const normalized = normalizeProjectPath(path);
+    if (this.documents.has(normalized)) return;
+    this.addDocument(normalized, source);
+    this.revision++;
+  }
+
+  setReadOnly(readOnly: boolean): void {
+    this.operationReadOnly = readOnly;
+    this.editor.updateOptions({readOnly: this.readOnly});
+  }
+
+  private get readOnly(): boolean {
+    return (
+      this.operationReadOnly ||
+      (!!this.activePath && isReadonlyProjectFile(this.activePath))
+    );
+  }
+
+  moveFiles(from: string, to: string): void {
+    const source = normalizeProjectPath(from);
+    const target = normalizeProjectPath(to);
+    for (const path of this.filePaths().filter(path =>
+      projectPathIsWithin(path, source),
+    )) {
+      this.renameFile(path, target + path.slice(source.length));
+    }
+  }
+
+  switchFile(path: string | undefined, takeFocus = false): void {
+    const normalized =
+      path === undefined ? undefined : normalizeProjectPath(path);
     if (normalized === this.activePath) {
       if (takeFocus) this.editor.focus();
       return;
     }
-    const next = this.requireDocument(normalized);
-    const current = this.requireDocument(this.activePath);
-    current.viewState = this.editor.saveViewState();
+    const next = normalized ? this.requireDocument(normalized) : undefined;
+    if (this.activePath) {
+      this.requireDocument(this.activePath).viewState =
+        this.editor.saveViewState();
+    }
     this.activePath = normalized;
-    if (!this.openPaths.includes(normalized)) this.openPaths.push(normalized);
+    if (!normalized) this.openPaths.length = 0;
+    if (normalized && !this.openPaths.includes(normalized))
+      this.openPaths.push(normalized);
     this.withSuppressedCursorEvents(() => {
       this.sourceDecoration.clear();
-      this.editor.setModel(next.model);
-      if (next.viewState) this.editor.restoreViewState(next.viewState);
+      this.editor.setModel(next?.model ?? null);
+      if (next?.viewState) this.editor.restoreViewState(next.viewState);
       if (takeFocus) this.editor.focus();
     });
     this.emitActiveFile('switch');
@@ -445,7 +727,7 @@ export class CodeEditor {
   closeFile(path: string): void {
     const normalized = normalizeProjectPath(path);
     const index = this.openPaths.indexOf(normalized);
-    if (index === -1 || this.openPaths.length === 1) return;
+    if (index === -1) return;
     this.openPaths.splice(index, 1);
     if (normalized === this.activePath) {
       this.switchFile(this.openPaths[Math.max(0, index - 1)]);
@@ -471,14 +753,26 @@ export class CodeEditor {
     }
     const source = this.requireDocument(sourcePath).model.getValue();
     const wasActive = sourcePath === this.activePath;
+    const viewState = wasActive
+      ? this.editor.saveViewState()
+      : this.requireDocument(sourcePath).viewState;
+    const agents = [...this.agentCursors].flatMap(([id, cursor]) =>
+      cursor.ref?.file === sourcePath
+        ? [{id, name: cursor.name, ref: {...cursor.ref, file: targetPath}}]
+        : [],
+    );
     const openIndex = this.openPaths.indexOf(sourcePath);
     this.removeDocument(sourcePath);
     this.addDocument(targetPath, source);
+    this.requireDocument(targetPath).viewState = viewState;
     if (openIndex >= 0) this.openPaths.splice(openIndex, 1, targetPath);
     if (wasActive) {
       this.activePath = targetPath;
       this.editor.setModel(this.requireDocument(targetPath).model);
+      if (viewState) this.editor.restoreViewState(viewState);
     }
+    for (const agent of agents)
+      this.setAgentCursor(agent.id, agent.name, agent.ref);
     this.revision += 1;
     this.emitChange({kind: 'rename', from: sourcePath, to: targetPath});
     if (wasActive) this.emitActiveFile('rename');
@@ -486,19 +780,20 @@ export class CodeEditor {
 
   deleteFile(path: string): void {
     const normalized = normalizeProjectPath(path);
-    if (this.documents.size === 1) {
-      throw new Error('A project needs at least one source file.');
-    }
     const wasActive = normalized === this.activePath;
     const openIndex = this.openPaths.indexOf(normalized);
     if (wasActive) {
       const nextPath =
         this.openPaths.find(candidate => candidate !== normalized) ??
-        [...this.documents.keys()].find(candidate => candidate !== normalized)!;
+        [...this.documents.keys()].find(candidate => candidate !== normalized);
       this.activePath = nextPath;
+      if (nextPath && !this.openPaths.includes(nextPath))
+        this.openPaths.push(nextPath);
       this.withSuppressedCursorEvents(() => {
         this.sourceDecoration.clear();
-        this.editor.setModel(this.requireDocument(nextPath).model);
+        this.editor.setModel(
+          nextPath ? this.requireDocument(nextPath).model : null,
+        );
       });
     }
     this.removeDocument(normalized);
@@ -514,17 +809,24 @@ export class CodeEditor {
       projectPathIsWithin(file.path, normalizedDirectory),
     );
     const replacementPaths = new Set(replacementFiles.map(file => file.path));
-    const activeDocumentReplaced = projectPathIsWithin(
-      this.activePath,
-      normalizedDirectory,
-    );
+    const loadedPaths = new Set(this.documents.keys());
+    const activeDocumentReplaced =
+      this.activePath !== undefined &&
+      projectPathIsWithin(this.activePath, normalizedDirectory);
 
     this.sourceDecoration.clear();
     this.trackedSourceRefs.clear();
     [...this.documents.keys()]
       .filter(path => projectPathIsWithin(path, normalizedDirectory))
       .forEach(path => this.removeDocument(path));
-    replacementFiles.forEach(file => this.addDocument(file.path, file.source));
+    for (const path of this.navigationFiles.keys()) {
+      if (projectPathIsWithin(path, normalizedDirectory))
+        this.navigationFiles.delete(path);
+    }
+    for (const file of replacementFiles) {
+      this.navigationFiles.set(file.path, file.source);
+      if (loadedPaths.has(file.path)) this.addDocument(file.path, file.source);
+    }
 
     const retainedOpenPaths = this.openPaths.filter(
       path =>
@@ -532,15 +834,17 @@ export class CodeEditor {
         replacementPaths.has(path),
     );
     this.openPaths.splice(0, this.openPaths.length, ...retainedOpenPaths);
-    if (activeDocumentReplaced) {
+    if (activeDocumentReplaced && this.activePath) {
       if (!replacementPaths.has(this.activePath)) {
         this.activePath =
-          replacementFiles[0]?.path ?? [...this.documents.keys()][0]!;
+          replacementFiles[0]?.path ?? [...this.documents.keys()][0];
       }
-      if (!this.openPaths.includes(this.activePath)) {
+      if (this.activePath && !this.openPaths.includes(this.activePath)) {
         this.openPaths.push(this.activePath);
       }
-      this.editor.setModel(this.requireDocument(this.activePath).model);
+      this.editor.setModel(
+        this.activePath ? this.requireDocument(this.activePath).model : null,
+      );
     }
     this.revision += 1;
     this.emitActiveFile('reset');
@@ -630,11 +934,17 @@ export class CodeEditor {
   ): void {
     let cursor = this.agentCursors.get(id);
     if (!cursor) {
-      color ??= randomAgentColor();
+      color ??= randomAgentColor(
+        [...this.agentCursors.values()].map(cursor => cursor.color),
+      );
       const caret = document.createElement('div');
       caret.className = `agent-caret agent-color-${color}`;
       const label = document.createElement('div');
       label.className = 'agent-cursor-label';
+      const nameLabel = document.createElement('span');
+      const activity = document.createElement('time');
+      activity.hidden = true;
+      label.append(nameLabel, activity);
       caret.append(label);
       const widget: monaco.editor.IContentWidget = {
         getId: () => `agent-cursor-${id}`,
@@ -675,7 +985,15 @@ export class CodeEditor {
         },
         suppressMouseDown: true,
       };
-      cursor = {name, color, label, widget, invalid: false, decorations: []};
+      cursor = {
+        name,
+        color,
+        label: nameLabel,
+        activity,
+        widget,
+        invalid: false,
+        decorations: [],
+      };
       this.agentCursors.set(id, cursor);
       this.editor.addContentWidget(widget);
     }
@@ -686,12 +1004,44 @@ export class CodeEditor {
     this.refreshAgentCursor(id);
   }
 
+  setAgentActivity(id: string, at: string): void {
+    const activity = this.agentCursors.get(id)!.activity;
+    activity.dateTime = at;
+    activity.title = 'Last active ' + new Date(at).toLocaleString();
+    activity.hidden = false;
+    this.refreshAgentActivity();
+  }
+
+  private refreshAgentActivity(): void {
+    for (const {activity} of this.agentCursors.values()) {
+      if (activity.hidden) continue;
+      const seconds = Math.max(
+        0,
+        Math.floor((Date.now() - Date.parse(activity.dateTime)) / 1000),
+      );
+      activity.textContent =
+        seconds < 10
+          ? 'just now'
+          : seconds < 60
+            ? `${seconds}s ago`
+            : seconds < 3600
+              ? `${Math.floor(seconds / 60)}m ago`
+              : seconds < 86400
+                ? `${Math.floor(seconds / 3600)}h ago`
+                : `${Math.floor(seconds / 86400)}d ago`;
+    }
+  }
+
   agentCursor(id: string): {ref?: SourceRef; invalid: boolean} {
     const cursor = this.agentCursors.get(id);
     return {ref: cursor?.ref, invalid: cursor?.invalid ?? false};
   }
 
   async inspectType(ref: SourceRef): Promise<CursorTypeInfo | null> {
+    if (!this.sourceDocument(ref.file)) {
+      const bytes = await this.fileReader?.readFile(ref.file);
+      if (bytes) this.addDocument(ref.file, decodeProjectFile(bytes));
+    }
     const model = this.requireDocument(ref.file).model;
     const version = this.revision;
     const worker = await projectTypeScriptWorker(
@@ -774,8 +1124,13 @@ export class CodeEditor {
     return this.container.contains(document.activeElement);
   }
 
+  setParameterFocusHandler(handler: () => boolean): void {
+    this.focusToolParameter = handler;
+  }
+
   runHistoryAction(action: 'undo' | 'redo'): void {
-    const model = this.activeModel();
+    const model = this.editor.getModel();
+    if (!model) return;
     if (action === 'undo') {
       if (model.canUndo()) void model.undo();
     } else if (model.canRedo()) {
@@ -785,10 +1140,17 @@ export class CodeEditor {
 
   cursorSource(): EditorCursor | undefined {
     const position = this.editor.getPosition();
-    return position
+    return this.cursorAt(position);
+  }
+
+  private cursorAt(
+    position: monaco.IPosition | null | undefined,
+  ): EditorCursor | undefined {
+    const model = this.editor.getModel();
+    return position && model && this.activePath
       ? {
           file: this.activePath,
-          offset: this.activeModel().getOffsetAt(position),
+          offset: model.getOffsetAt(position),
         }
       : undefined;
   }
@@ -796,7 +1158,7 @@ export class CodeEditor {
   selectedSource(): SourceRef | undefined {
     const selection = this.editor.getSelection();
     const model = this.editor.getModel();
-    if (!selection || !model) return undefined;
+    if (!selection || !model || !this.activePath) return undefined;
     return {
       file: this.activePath,
       start: model.getOffsetAt(selection.getStartPosition()),
@@ -832,7 +1194,7 @@ export class CodeEditor {
     if (this.revision !== baseVersion || edits.length === 0) return false;
     const grouped = groupEditsByFile(edits);
     for (const [path, fileEdits] of grouped) {
-      const model = this.documents.get(path)?.model;
+      const model = this.sourceDocument(path)?.model;
       if (!model || !validEdits(model, fileEdits)) return false;
     }
     this.withSuppressedCursorEvents(() =>
@@ -933,7 +1295,10 @@ export class CodeEditor {
   }
 
   onActiveFile(
-    listener: (path: string, reason: ActiveFileChangeReason) => void,
+    listener: (
+      path: string | undefined,
+      reason: ActiveFileChangeReason,
+    ) => void,
   ): () => void {
     this.activeFileListeners.add(listener);
     return () => this.activeFileListeners.delete(listener);
@@ -953,9 +1318,16 @@ export class CodeEditor {
     return () => this.completionFocusListeners.delete(listener);
   }
 
-  revealSource(sourceRef: SourceRef, takeFocus = false): void {
+  revealSource(
+    sourceRef: SourceRef,
+    takeFocus = false,
+    cursorAt: 'start' | 'end' = 'end',
+  ): void {
     this.switchFile(sourceRef.file);
-    const range = sourceRange(this.activeModel(), sourceRef);
+    const range = sourceRange(
+      this.requireDocument(sourceRef.file).model,
+      sourceRef,
+    );
     this.withSuppressedCursorEvents(() => {
       this.sourceDecoration.set([
         {
@@ -970,7 +1342,16 @@ export class CodeEditor {
           },
         },
       ]);
-      this.editor.setSelection(range);
+      this.editor.setSelection(
+        cursorAt === 'start'
+          ? new monaco.Selection(
+              range.endLineNumber,
+              range.endColumn,
+              range.startLineNumber,
+              range.startColumn,
+            )
+          : range,
+      );
       this.editor.revealRangeInCenterIfOutsideViewport(range);
       if (takeFocus) this.editor.focus();
     });
@@ -980,17 +1361,23 @@ export class CodeEditor {
     this.sourceDecoration.clear();
   }
 
-  setModelDiagnostic(diagnostic?: ModelDiagnostic): void {
+  setModelDiagnostics(diagnostics: readonly ModelDiagnostic[] = []): void {
     for (const document of this.documents.values()) {
-      const sourceRef = diagnostic?.sourceRef;
-      const marker =
-        diagnostic && sourceRef?.file === document.path
-          ? modelDiagnosticMarker(document.model, diagnostic, sourceRef)
-          : undefined;
+      const markers = diagnostics.flatMap(diagnostic =>
+        diagnostic.sourceRef?.file === document.path
+          ? [
+              modelDiagnosticMarker(
+                document.model,
+                diagnostic,
+                diagnostic.sourceRef,
+              ),
+            ]
+          : [],
+      );
       monaco.editor.setModelMarkers(
         document.model,
         modelDiagnosticOwner,
-        marker ? [marker] : [],
+        markers,
       );
     }
   }
@@ -1166,23 +1553,30 @@ export class CodeEditor {
 
   private addDocument(path: string, source: string): void {
     const normalized = normalizeProjectPath(path);
-    const model = monaco.editor.createModel(
-      source,
-      languageForPath(normalized),
-      monaco.Uri.file('/workspace' + normalized),
-    );
+    const uri = monaco.Uri.file('/workspace' + normalized);
+    const model =
+      monaco.editor.getModel(uri) ??
+      monaco.editor.createModel(source, languageForPath(normalized), uri);
     this.refreshAnnotationDecorations(normalized, model);
+    let previousSource = model.getValue();
     const document: ProjectDocument = {
       path: normalized,
       model,
       subscription: model.onDidChangeContent(event => {
+        if (isReadonlyProjectFile(normalized)) return;
         const origin: ContentChangeOrigin = event.isUndoing
           ? 'undo'
           : event.isRedoing
             ? 'redo'
             : this.contentChangeOrigin;
         if (origin !== 'tool') this.sourceEditUndoGroups.delete(normalized);
-        this.rebaseTrackedSourceRefs(normalized, event.changes, origin);
+        this.rebaseTrackedSourceRefs(
+          normalized,
+          event.changes,
+          origin,
+          previousSource,
+        );
+        previousSource = model.getValue();
         this.refreshAnnotationDecorations(normalized, model);
         this.revision += 1;
         this.emitChange({
@@ -1197,6 +1591,7 @@ export class CodeEditor {
   }
 
   private removeDocument(path: string): void {
+    this.navigationFiles.delete(path);
     const document = this.requireDocument(path);
     this.pendingToolFormats.delete(path);
     this.sourceEditUndoGroups.delete(path);
@@ -1222,10 +1617,42 @@ export class CodeEditor {
     path: string,
     changes: readonly monaco.editor.IModelContentChange[],
     origin: ContentChangeOrigin,
+    previousSource: string,
   ): void {
+    // Monaco coalesces adjacent edits in undo/redo. Recover their local differences
+    // so replacing a quote beside whitespace does not swallow a cursor boundary.
+    const agentChanges = changes.flatMap(change =>
+      minimalTextChanges(
+        previousSource.slice(
+          change.rangeOffset,
+          change.rangeOffset + change.rangeLength,
+        ),
+        change.text,
+      ).map(edit => ({
+        ...edit,
+        rangeOffset: edit.rangeOffset + change.rangeOffset,
+      })),
+    );
     for (const [id, cursor] of this.agentCursors) {
       if (cursor.ref?.file !== path) continue;
-      const deleted = changes.some(
+      if (cursor.ref.start === cursor.ref.end) {
+        // A collaboration caret stays empty. Insertions move it forward; a
+        // replacement keeps its start boundary or collapses an interior caret.
+        let offset = cursor.ref.start;
+        for (const change of [...agentChanges].sort(
+          (a, b) => b.rangeOffset - a.rangeOffset,
+        )) {
+          if (change.rangeOffset > offset) continue;
+          if (change.rangeOffset === offset && change.rangeLength > 0) continue;
+          offset =
+            Math.max(change.rangeOffset, offset - change.rangeLength) +
+            change.text.length;
+        }
+        cursor.ref = {...cursor.ref, start: offset, end: offset};
+        this.refreshAgentCursor(id);
+        continue;
+      }
+      const deleted = agentChanges.some(
         change =>
           change.rangeLength > 0 &&
           !change.text &&
@@ -1234,7 +1661,7 @@ export class CodeEditor {
       );
       cursor.ref = deleted
         ? undefined
-        : rebaseSourceRef(cursor.ref, changes, false);
+        : rebaseSourceRef(cursor.ref, agentChanges, false);
       cursor.invalid = !cursor.ref;
       this.refreshAgentCursor(id);
     }
@@ -1262,14 +1689,20 @@ export class CodeEditor {
     );
   }
 
-  private activeModel(): monaco.editor.ITextModel {
-    return this.requireDocument(this.activePath).model;
+  /** Promote an already compiled source only when an interaction needs a document. */
+  private sourceDocument(path: string): ProjectDocument | undefined {
+    const normalized = normalizeProjectPath(path);
+    if (!this.documents.has(normalized)) {
+      const source = this.navigationFiles.get(normalized);
+      if (source !== undefined) this.addDocument(normalized, source);
+    }
+    return this.documents.get(normalized);
   }
 
   private requireDocument(path: string): ProjectDocument {
-    const normalized = normalizeProjectPath(path);
-    const document = this.documents.get(normalized);
-    if (!document) throw new Error(`Project file not found: ${normalized}`);
+    const document = this.sourceDocument(path);
+    if (!document)
+      throw new Error(`Project file not found: ${normalizeProjectPath(path)}`);
     return document;
   }
 
@@ -1292,22 +1725,30 @@ export class CodeEditor {
   }
 
   private emitEditorActivation(position = this.editor.getPosition()): void {
-    const cursor = position
-      ? {
-          file: this.activePath,
-          offset: this.activeModel().getOffsetAt(position),
-        }
-      : undefined;
+    const cursor = this.cursorAt(position);
     this.editorActivationListeners.forEach(listener => listener(cursor));
   }
 
-  private openProjectResource(
+  private async openProjectResource(
     resource: monaco.Uri,
     selectionOrPosition?: monaco.IRange | monaco.IPosition,
-  ): boolean {
-    const target = [...this.documents.values()].find(
+  ): Promise<boolean> {
+    let target = [...this.documents.values()].find(
       document => document.model.uri.toString() === resource.toString(),
     );
+    if (
+      !target &&
+      resource.scheme === 'file' &&
+      resource.path.startsWith('/workspace/')
+    ) {
+      const path = resource.path.slice('/workspace'.length);
+      try {
+        await this.openFile(path, false);
+      } catch {
+        return false;
+      }
+      target = this.documents.get(path);
+    }
     if (!target) return false;
 
     this.switchFile(target.path);
@@ -1331,16 +1772,15 @@ export class CodeEditor {
   }
 
   private emitCursorPosition(position: monaco.IPosition): void {
-    const offset = this.activeModel().getOffsetAt(position);
-    this.cursorListeners.forEach(listener =>
-      listener({file: this.activePath, offset}),
-    );
+    const cursor = this.cursorAt(position);
+    if (cursor) this.cursorListeners.forEach(listener => listener(cursor));
   }
 
   private async formatFile(
     path: string,
     options: FormatOptions = {},
   ): Promise<boolean> {
+    if (!this.isModelFile(path)) return false;
     const document = this.requireDocument(path);
     const {model} = document;
     const source = model.getValue();
@@ -1376,13 +1816,7 @@ export class CodeEditor {
         this.withSuppressedCursorEvents(() => {
           this.pushSourceEdits(
             path,
-            [
-              {
-                range: model.getFullModelRange(),
-                text: result.formatted,
-                forceMoveMarkers: true,
-              },
-            ],
+            formattingEdits(model, source, result.formatted),
             options.undoGroup,
           );
           if (cursorOffset !== undefined && this.editor.getModel() === model) {
@@ -1421,6 +1855,8 @@ export class CodeEditor {
     edits: readonly monaco.editor.IIdentifiedSingleEditOperation[],
     undoGroup?: string,
   ): void {
+    if (isReadonlyProjectFile(path))
+      throw new Error('This project file is read-only.');
     const model = this.requireDocument(path).model;
     if (
       undoGroup &&
@@ -1448,6 +1884,87 @@ export class CodeEditor {
       this.suppressCursorEventDepth -= 1;
     }
   }
+}
+
+/** Preserve tracked ranges and undo positions by editing only formatting differences. */
+function formattingEdits(
+  model: monaco.editor.ITextModel,
+  source: string,
+  formatted: string,
+): (monaco.editor.IIdentifiedSingleEditOperation & {text: string})[] {
+  return minimalTextChanges(source, formatted).map(change => ({
+    range: monaco.Range.fromPositions(
+      model.getPositionAt(change.rangeOffset),
+      model.getPositionAt(change.rangeOffset + change.rangeLength),
+    ),
+    text: change.text,
+    forceMoveMarkers: true,
+  }));
+}
+
+function minimalTextChanges(
+  source: string,
+  target: string,
+): {
+  rangeOffset: number;
+  rangeLength: number;
+  text: string;
+}[] {
+  const changes: {rangeOffset: number; rangeLength: number; text: string}[] =
+    [];
+  let offset = 0;
+  let pending: {start: number; end: number; text: string} | undefined;
+  const flush = () => {
+    if (!pending) return;
+    const removed = source.slice(pending.start, pending.end);
+    // Separate surrounding whitespace from token replacements in both directions,
+    // e.g. ="value" <-> = 'value', keeping selected quotes inside their range.
+    if (removed.trim() && pending.text.trim()) {
+      const leading = /^\s*/.exec(removed)![0].length;
+      const insertedLeading = /^\s*/.exec(pending.text)![0];
+      if (leading || insertedLeading) {
+        changes.push({
+          rangeOffset: pending.start,
+          rangeLength: leading,
+          text: insertedLeading,
+        });
+        pending.start += leading;
+        pending.text = pending.text.slice(insertedLeading.length);
+      }
+      const trailing = /\s*$/.exec(removed)![0].length;
+      const insertedTrailing = /\s*$/.exec(pending.text)![0];
+      if (trailing || insertedTrailing) {
+        changes.push({
+          rangeOffset: pending.end - trailing,
+          rangeLength: trailing,
+          text: insertedTrailing,
+        });
+        pending.end -= trailing;
+        pending.text = pending.text.slice(
+          0,
+          pending.text.length - insertedTrailing.length,
+        );
+      }
+    }
+    changes.push({
+      rangeOffset: pending.start,
+      rangeLength: pending.end - pending.start,
+      text: pending.text,
+    });
+    pending = undefined;
+  };
+  for (const change of diffChars(source, target)) {
+    if (change.added || change.removed) {
+      pending ??= {start: offset, end: offset, text: ''};
+      if (change.added) pending.text += change.value;
+      else pending.end = offset += change.value.length;
+    } else {
+      flush();
+      offset += change.value.length;
+    }
+  }
+  flush();
+  return changes;
 }
 
 function sourceRange(
@@ -1478,7 +1995,10 @@ function modelDiagnosticMarker(
   const start = model.getPositionAt(startOffset);
   const end = model.getPositionAt(endOffset);
   return {
-    severity: monaco.MarkerSeverity.Error,
+    severity:
+      diagnostic.severity === 'warning'
+        ? monaco.MarkerSeverity.Warning
+        : monaco.MarkerSeverity.Error,
     source: 'code3d',
     code: diagnostic.kind,
     message: diagnostic.details
@@ -1763,7 +2283,25 @@ function annotationTokenKind(tokenType: string): string {
 }
 
 function languageForPath(path: string): string {
-  return /\.[cm]?jsx?$/.test(path) ? 'javascript' : 'typescript';
+  if (/\.map$/i.test(path)) return 'json';
+  if (isSourceFile(path))
+    return /\.[cm]?jsx?$/i.test(path) ? 'javascript' : 'typescript';
+  const filename = path.split('/').at(-1)!.toLowerCase();
+  return (
+    monaco.languages
+      .getLanguages()
+      .find(language =>
+        language.filenames?.some(name => name.toLowerCase() === filename),
+      )?.id ??
+    monaco.languages
+      .getLanguages()
+      .find(language =>
+        language.extensions?.some(extension =>
+          filename.endsWith(extension.toLowerCase()),
+        ),
+      )?.id ??
+    'plaintext'
+  );
 }
 
 function prettierEndOfLine(model: monaco.editor.ITextModel): 'lf' | 'crlf' {

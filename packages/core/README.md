@@ -1,740 +1,241 @@
-# `@code3d/core`
+# @code3d/core
 
-The code3d authoring runtime. Model projects install this package directly and
-may execute the same ESM TypeScript source in code3d or a supported Node.js
-runtime.
+The TypeScript modeling runtime used by Code3D. Compose solids, profiles, curves,
+points, and editable sketches; inspect their geometry and reuse the same models
+in the App or a supported Node.js runtime.
 
-The App also offers zero-install authoring with built-in core and screws. When
-the project's root `package.json` declares `@code3d/core`, the App uses the
-project's installed packages exclusively, including their declarations; missing
-dependencies are errors rather than a reason to substitute built-in packages.
-Direct Node execution requires installing the project dependencies.
+## Start with a model
 
-The public API includes solid primitives and Boolean operations, first-class
-planar face models (`circle`, `ellipse`, `rectangle`, `regularPolygon`), 3D
-curve models (`line`, `arc`, `bezier`, `spline`), point models, face extrusion, and
-through-section or spine-guided `loft`. Every geometric model is immutable,
-renderable, and relation-aware. Topology capabilities follow dimension:
-vertices provide `.vertex(id)`, edges add `.edge(id)`, and faces and solids
-add `.surface(id)`; only solids provide `fillet`, `chamfer`, and `shell`. Groups retain
-the common relation, expose, and paint capabilities without pretending to
-contain geometry. Stable topology references can be used as geometric relation anchors.
-`Vertex`, `Edge`, and `Surface` references expose readonly `kind` and `id`
-properties. For example, `model.edges().map(edge => edge.id)` collects edge IDs
-for a later operation on that model. Their `kind` values are `vertex`, `edge`,
-and `surface`; IDs belong to that model and topology kind. Plain named anchors
-such as `model.up` do not expose these topology properties.
-`TopologyId` is a number or a flat numeric path. Topology-changing operations
-prefix one-to-one descendants with their one-based input index, so an input's
-`E3` becomes `[1, 3]`, or `[2, 3]` for the second input. New/ambiguous elements
-start at numeric `1` in each result. Fillet/chamfer/shell also add input index `1`;
-transforms preserve complete paths. Select a path with `.edge([1, 3])`, or a
-mixed collection with `.edges([1, [1, 3], [2, 3]])`. Loft caps use their endpoint
-section paths; Boolean operations inherit from all inputs. Splits and merges
-retire ambiguous source paths. Full rules are in the
-[topology guide](../web/src/content/docs/docs/guides/topology.md).
-`relate()` records placement for composition with other values; inspecting or
-rendering the resulting value by itself uses its own local geometry.
-
-## Face extrusion
-
-`face.extrude(distance)` and `extrude(face, distance)` produce a `SolidModel`
-from one planar face model. The finite, non-zero signed distance follows the
-face's local normal, including any prior rotation. The starting face stays in
-place: an unrotated profile extruded by `3` spans Y = 0 to 3; `-3` spans -3 to 0.
-Origin offsets and input geometry are preserved, and the result supports ordinary
-solid operations. To extrude multiple faces, map them explicitly.
+```sh
+npm install @code3d/core
+```
 
 ```ts
-import {circle, extrude, rectangle} from '@code3d/core';
+import {box, cylinder, group} from '@code3d/core';
 
-export const plate = rectangle(30, 20).extrude(3).fillet(0.5);
-export const pin = extrude(circle(2), -10);
+const base = box(40, 4, 24).fillet(1);
+const post = cylinder(3, 18).relate(self => self.on(base.up));
+
+export default group([base, post]);
 ```
+
+Open this source in Code3D and select an expression to inspect its value. Node
+loads the modeling kernel through the package's Node entry automatically; normal
+model authors do not initialize it or manage evaluation caches themselves.
+
+The App includes Core, [Materials](../materials/README.md), and
+[Screws](../screws/README.md) for zero-install projects. When the active model's
+package scope or an ancestor `package.json` declares `@code3d/core`, the App uses that project's installed
+packages and declarations exclusively. Missing dependencies are errors. See
+[project package installation](../web/src/content/docs/docs/getting-started/files.md#install-packages-in-browser-storage)
+and the [agent file workflow](../../docs/agents/files.md).
+
+## Model values and coordinates
+
+Operations produce new model values. Building another result must not change an
+already-observable model's geometry, material, topology, or relations.
+
+A model's local geometry and its placement in a composition are separate.
+`relate()` records how a part is placed when composed with other parts; observing
+that part alone shows its local geometry. `originOffset()` changes geometry
+coordinates without changing the shape. Position arrays use `[x, y, z]`; scalar
+angles use degrees. Read [local coordinates](../web/src/content/docs/docs/concepts/local-coordinates.md)
+and [relations](../web/src/content/docs/docs/guides/relations.mdx) before mixing
+origin changes, alignment, and rotation.
+
+Build readable models from named intermediate values and public operations. A
+profile followed by extrusion, or solids combined with Boolean operations,
+keeps the construction understandable and editable by both people and agents.
+
+## Find the modeling API
+
+| Task                                                                            | Start here                                                                           |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Solids, planar profiles, curves, points, Boolean operations, extrusion and loft | [Modeling reference](../web/src/content/docs/docs/reference/core.md)                 |
+| Place parts with bounds or align underlying geometry                            | [Relations](../web/src/content/docs/docs/guides/relations.mdx)                       |
+| Change origins and rotate parts                                                 | [Origins and rotation](../web/src/content/docs/docs/guides/origins-and-rotation.mdx) |
+| Hollow a solid or choose openings                                               | [Shells](../web/src/content/docs/docs/guides/shells.mdx)                             |
+| Select vertices, edges and surfaces, or expose named elements                   | [Topology](../web/src/content/docs/docs/guides/topology.md)                          |
+| Build reusable model functions                                                  | [Reusable models](../web/src/content/docs/docs/guides/reusable-models.mdx)           |
+| Give functions editing tools and example arguments                              | [Model tools](../web/src/content/docs/docs/guides/model-tools.mdx)                   |
+| Extend the runtime with Replicad geometry                                       | [Custom primitives](../web/src/content/docs/docs/guides/custom-primitives.mdx)       |
+| Known boundaries                                                                | [Current limitations](../web/src/content/docs/docs/reference/limitations.md)         |
+
+Dimension-based primitives and numeric modeling methods retain required TypeScript
+signatures while providing runtime defaults for omitted or `undefined` values.
+Rotations and displacements default to zero, scaling to one, extrusion distance
+to ten, and fillet radius, chamfer distance and shell thickness to one. Relation
+rotation chains use the same angle defaults; `pivot()` defaults to local zero.
+Explicit invalid values retain their normal errors. These defaults work in
+ordinary JavaScript execution as well as App previews.
+
+The App displays defaults as placeholders without inserting source arguments.
+Committing a spatial drag fills all remaining omitted defaults in that operation;
+for example, dragging the X ring of `rotate()` writes `rotate(angle, 0, 0)`. The
+edit and completion share one undo step. Use explicit dimensions in finished
+models; the [reference](../web/src/content/docs/docs/reference/core.md#runtime-defaults-while-editing)
+lists the actual defaults.
+
+Topology capabilities follow dimension: vertices expose vertex selection, edges
+add edge selection, and faces and solids add surface selection. Only solids
+provide `fillet`, `chamfer`, and `shell`. Groups compose values and support
+relations, exposed elements, and materials without pretending to be geometry.
+
+A topology ID belongs to its owning model and element kind. It is a number or a
+flat numeric path, such as `.edge([1, 3])`. Operations track unambiguous ancestry;
+transforms preserve complete paths. Inspect the result after topology changes
+instead of assuming IDs from a different model still apply.
 
 ## Editable sketches
 
-Sketches are immutable 2D definitions, separate from geometric models and B-Reps:
-
-Start with `sketch()` for an empty sketch, or `base.derive()` for an empty local
-layer over an existing sketch. Omitting entries is equivalent to passing `[]`.
-The editor inserts the array only when the first drawing is completed; cancelling
-leaves the call unchanged, and undo restores the original call and its comments.
+Sketches are immutable 2D definitions, separate from B-Rep model values. Entries
+carry positive IDs within a layer; constraints express what should stay true.
+A derived layer can reference its upstream geometry.
 
 ```ts
 import {sketch} from '@code3d/core';
 
-const sketch1 = sketch(
+const profile = sketch(
   [
     ['point', 1, [0, 0]],
-    ['point', 2, [30, 0]],
-    ['line', 3, [1, 2]],
+    ['circle', 2, [1, 8]],
   ],
   {
     constraints: [
       ['fixed', 1],
-      ['horizontal', 3],
-      ['length', 3, 30],
+      ['radius', 2, 8],
     ],
   },
 );
-const sketch2 = sketch1.derive([
-  ['point', 1, [10, 20]],
-  ['line', 2, [sketch1.point(2), 1]],
-]);
+
+export const part = profile.face().extrude(3);
 ```
 
-Each tuple is `[kind, ID, data]`. Numeric curve point references name local points;
-`sketch1.point(id)` names a point owned by an upstream layer. Each layer has an
-independent positive-integer ID space shared by its geometry entities. Definitions
-may be empty, open, or contain crossing lines; crossings do not automatically
-split entities. Missing point references are errors.
+Closed regions bridge sketches to ordinary face and solid modeling. Read the
+[sketch reference](../web/src/content/docs/docs/reference/core.md#editable-sketch-regions)
+and [agent sketch workflow](../../docs/agents/sketches.md) for constraints,
+derived layers, observations, and failure diagnostics. Exact tuple types and
+solver behavior live in [sketch.ts](src/library/sketch.ts) and
+[sketch-solver.ts](src/library/sketch-solver.ts).
 
-Circles use a center point reference and a current radius, not polygon segments:
+### Relating a sketch to a model plane
 
-```ts
-const circles = sketch(
-  [
-    ['point', 1, [0, 0]],
-    ['circle', 2, [1, 15]],
-    ['circle', 3, [1, 8]],
-  ],
-  {constraints: [['radius', 3, 8]]},
-);
-```
-
-`radius` uses `['radius', circleOrArcId, value]`. Both current radii and radius constraints
-must be positive and finite. The outer circle above remains free; the inner
-circle's independent constraint preserves its radius. A circle center may also
-use a named upstream point. Circle and point parameters have the same numeric
-runtime semantics, whether computed from expressions or written as literals.
-
-Arcs store a current radius, reference a center, start and end point, and explicitly select the direction:
+`s.relate(self => self.plane.align(target))` returns a new sketch with spatial
+relations, leaving its shared 2D definition and the original sketch unchanged.
+It works before a face exists, including `sketch()` and open contours.
 
 ```ts
-const rounded = sketch(
-  [
-    ['point', 1, [0, 0]],
-    ['point', 2, [10, 0]],
-    ['point', 3, [0, 10]],
-    ['arc', 4, [1, 10, 2, 3, 'ccw']],
-  ],
-  {
-    constraints: [
-      ['radius', 4, 10],
-      ['sweep', 4, 90],
-    ],
-  },
-);
-```
+import {box, sketch} from '@code3d/core';
 
-`ccw` selects the counterclockwise arc in sketch coordinates; `cw` selects the
-clockwise arc, including major arcs. Native arc equations keep both endpoints
-on the circle; point coordinates and radius may move to satisfy them.
-The radius is ordinary current data, not an implicit radius constraint.
-To initialize inconsistent data, endpoints are projected along their supplied
-directions to the supplied radius, or to an explicit radius dimension when one
-already exists. This avoids projecting satisfied endpoints outward and then
-allowing an underconstrained solve to translate the arc while shrinking it back.
-Shared endpoints average simultaneous
-proposals, without giving one arc ownership; locked/upstream, fixed and explicitly
-positioned axes are not overwritten. The resulting seed is then solved against
-all structural equations and explicit constraints. Thus an isolated arc with
-radius 15 and endpoints initially at distances 10 starts at radius 15; if the
-center and endpoints are explicitly fixed at radius 10, its radius solves to 10.
-No extra lock, soft objective or degree of freedom is introduced.
-Center and endpoints
-can each reference a named upstream point. Zero-radius and coincident-endpoint arcs
-are errors; use `circle` for a full circle.
-The independent `sweep` constraint uses `['sweep', arcId, degrees]`, strictly greater than
-0 and less than 360. Its positive magnitude follows the tuple's `cw`/`ccw`
-direction, so 270 means a major arc in either direction. It does not fix the arc's
-orientation: with a fixed center and radius, dragging an endpoint can rotate both
-endpoints while preserving the sweep.
-
-Geometry tuples hold current data; `constraints` specify what must remain true.
-Constraints use `['kind', target, value?]` and have no persistent IDs. Point coordinates have the same runtime
-meaning whether computed from an expression or written as literals. They may
-move during solving unless constrained. `fixed` locks one point at its supplied
-coordinates; `horizontal` / `vertical` target one local line. `length` / `angle`
-target one local line and take the value in the third field (angles in degrees);
-`x` / `y` likewise target one point with a third-field coordinate value, and
-`coincident` takes `[pointRef, pointRef]`. `midpoint` takes `[midpointRef, startRef, endRef]`
-and places the first point halfway between the other two, with no line entity required.
-A point reference may name locked upstream
-geometry. Lines must have nonzero length; length constraints must be positive.
-PlaneGCS solves each layer without modifying upstream values. The snapshot
-reports degrees of freedom and redundant constraint indices. Conflicts are
-located at their source tuples when inline source is available.
-
-In the App, select a sketch expression or variable to open its 2D editor. Draw
-continuous lines, drag literal-coordinate points, and delete local entities.
-Circle takes a center (with optional X/Y input), followed by a radius or a
-circumference click. Entered Radius creates a persistent radius constraint;
-blank Radius follows the pointer and remains free. Drag a circle edge to change
-its radius, or its center to move it. Expression radii remain source-edited;
-gesture locks, numeric writeback and rounded-source replay use the same pipeline
-as point coordinates. Circle creation, deletion and associated constraint changes
-are single undo steps; deleting a circle retains shared and upstream centers,
-and removes only newly disconnected local points.
-Arc takes a center (optional X/Y), a start point (optional Radius), and an end
-point projected to that radius. New drawings default to clockwise (CW); press R to
-reverse the preview. Completing or canceling restores CW for the next drawing;
-existing arcs keep their explicit direction.
-Entered Radius and end-point Sweep become independent persistent
-constraints; blank fields remain free. R preserves the entered sweep magnitude.
-All points, the arc and
-constraints are one source transaction/undo. Drag its edge to edit a literal
-radius, or drag its ordinary center or endpoints;
-or select an interval and Delete to trim it. Radius and sweep labels lie on the
-directed arc; sweep guides connect its center and endpoints. Arc radius expressions
-use the same source protection and gesture-only locks as circle radii.
-Deletion also recognizes ordinary points lying on finite curves, not just explicit
-references, and preserves points still connected to other curves.
-Circles and finite arcs can delimit line trims, including upstream curves; the
-cutting curves and their expressions/constraints stay unchanged. Tangencies
-provide one boundary and arc gaps provide none. Circles and arcs use the same
-interval selection and Trim tool. Circles have cyclic intervals without an
-artificial zero-angle seam; zero or one boundary means whole-circle deletion.
-Trimming a circle leaves a CW arc with the same ID. End trims retain an arc ID;
-interior trims retire it and allocate two fresh IDs, preserving direction.
-Center/radius expressions and radius constraints follow surviving arcs; original
-whole-arc sweep constraints are removed. Coincident intervals are trimmed
-together, sharing cut points and one undo transaction.
-Endpoints are created or reused by Line; there is no standalone Point tool.
-Type X/Y for the start, then length/angle for each segment. Tab switches fields
-and Enter accepts the next endpoint. Each segment is one undo step and reuses
-its endpoint for the next segment. Escape ends the chain without removing
-completed segments; press it again to exit the tool. Blank fields follow the
-pointer. Snap uses points, the origin, a dense adaptive grid and horizontal/vertical
-directions; hold Alt to bypass it.
-After choosing the start point, press X for a horizontal axis lock or Y for
-vertical; press the same key again to unlock. This also works in numeric fields.
-The pointer chooses either direction along the locked axis; Length still applies.
-Entering Angle replaces the axis lock and locking an axis clears Angle.
-Snap/Alt do not override the lock; finishing or canceling a segment clears it.
-Entered coordinates, length and angle, and the final active X/Y lock generate
-explicit constraints in the same source transaction as the new segment. Turning
-the lock off before committing creates no direction constraint; resetting the
-next segment does not remove existing constraints. Ordinary automatic snapping
-does not create constraints. Numeric fields keep native text undo/redo, whose
-grouping belongs to the browser; canvas undo edits source.
-Rectangle uses two opposite corners. Enter Width/Height or let the pointer set
-them; positive dimensions retain their magnitude while the pointer chooses the
-quadrant. It creates ordinary points and lines with horizontal/vertical constraints,
-so later edits preserve right angles. Entered sizes constrain adjacent sides.
-Snapped corners reuse existing point references, including named upstream points.
-The entire rectangle is one source transaction and undo step. Escape cancels its
-draft; a successful rectangle starts a new draft. No rectangle entity is added
-to the author format. Center rectangle chooses a center and corner instead;
-Width/Height are still full side lengths. It retains an ordinary referenceable
-center point, allocated before new corners, and adds one midpoint constraint
-between it and opposite corners. A derived sketch can reference that center
-with `base.point(id)`. Both rectangle modes share inputs, snapping and undo.
-Dragging previews a soft solver target and writes every changed editable point
-in one transaction. Hard constraints remain satisfied. Rules receive the whole
-gesture context, without framework-level point classification or partitioning.
-They recognize centers for preferred local translation, prefer related
-centers or far connected points as soft references, and handle an unconstrained
-sole junction per branch. Radius gestures prefer the curve center.
-Ordered soft stages first reach the closest feasible mouse position, then prefer
-local translation, then minimize exterior movement. Connected lines do not disable
-center translation: their constraints determine how exterior points follow.
-Each stage respects all hard constraints; later stages retain earlier achieved
-target parameter values for this frame, not every equivalent optimum. No original
-reference position is made an unconditional anchor, and no stage lock survives
-the frame, adds source constraints or reduces the reported model DOF. An unrestricted center
-rectangle translates when its center moves, without hidden editor metadata.
-Points already on lines, circles or directed arcs at gesture start retain that relation:
-they can slide along the curve, and follow changes to endpoints, centers and radii. The editor
-uses model-space geometric tolerance, not pointer hit areas; lines crossed during
-a gesture do not become sticky. Curves keep their IDs and types, without
-splitting or adding author constraints. Lines and arcs retain their finite bounds;
-CW/CCW arcs never include their missing circular portion. Center moves prefer
-translating their followers, while radius gestures prefer their existing polar
-directions. Read-only upstream curves can guide local
-points. Source replay checks that these gesture-only connections remain satisfied.
-This does not create intersection points or persist curve parameters.
-Movement without authored or inferred equations needs no native kernel;
-point-on-curve dragging uses the Worker solver. During a drag, the editor uses the AST to lock each expression
-coordinate to its evaluated author value: `[width, 0]` locks X but allows Y to move.
-These numeric locks apply to all local points, not just the dragged point, and do
-not become permanent constraints or change normal evaluation. If imposing these
-locks changes the displayed geometry, the solver satisfies them before preparing
-the rule context. Initially unsatisfied author data can therefore adjust on
-the first drag. Editable axes alone are written back; expressions never gain
-offsets. Frames retain a gesture-start reference alongside the preceding solution.
-Previews forward-solve the exact, losslessly serialized data that recompilation uses.
-Deleting a point also deletes connected local lines and affected constraints. Upstream geometry stays
-locked but can supply endpoints for new lines. Coordinates using expressions
-remain editable in code, not by dragging; literal axes on the same point remain
-draggable. The editor preserves existing IDs and
-allocates new IDs from the current local maximum, without `nextId` metadata.
-Deleted IDs may therefore be reused; downstream references are not automatically
-rewritten.
-
-### Closed regions and modeling
-
-`s.face()` requires exactly one closed region, including its holes. `s.faces()`
-returns all regions as an ordinary readonly array; a sketch without curves returns
-`[]`. Neither query assigns persistent region IDs. Future ID-based selection will
-retain the no-argument meanings; array positions are not stable identifiers.
-
-Straight lines, circles and finite CW/CCW arcs form exact B-Rep boundaries.
-Upstream geometry is included. Disconnected contours produce separate faces;
-nested contours alternate material, holes and islands. Standalone points do not
-form boundaries. Open, crossing, touching, overlapping or branched contours report
-an error instead of implicitly trimming, closing, discarding or rewriting entities.
-The editor previews valid regions with a subtle fill and leaves unfinished sketches
-editable; construction diagnostics belong to the `.face()` / `.faces()` call.
-
-```ts
-const ring = sketch([
+const host = box(40, 20, 30).rotate(0, 0, 25);
+const profile = sketch([
   ['point', 1, [0, 0]],
-  ['circle', 2, [1, 12]],
-  ['circle', 3, [1, 8]],
+  ['circle', 2, [1, 4]],
 ]);
-const sleeve = ring.face().extrude(20);
-const tools = anotherSketch.faces().map(face => face.extrude(10));
-const result = stock.cut(tools); // equivalent to cut(stock, tools)
+const opening = profile.relate(s => s.plane.align(host.surface(4)));
+const result = host.cut([opening.face().extrude(-20)]);
+const draft = sketch().relate(s => s.plane.align(host.surface(2)));
 ```
 
-Sketch `[x, y]` maps to model `[x, 0, -y]`, without recentering. Face extrusion
-follows its plane normal (`+Y` before rotation). Distance is signed, finite and
-nonzero; the start cap stays at the original face. `extrude(face, distance)` is
-equivalent to `face.extrude(distance)` and takes one face, never an array. Results
-are normal immutable solid models with caching, rendering, topology and source
-tracing; ordinary `.map()` handles multiple independent outputs.
+The target may be a named plane or a planar `host.surface(id)`. The sketch plane
+normal is local `+Y`; alignment uses the same directed-plane, target-frame offset
+and rotation semantics as model relations. It does not implicitly center the
+sketch on a trimmed surface. An unbounded sketch plane cannot use `on()` to place
+finite geometry against a bound; use `align()`. Topology-only pivots such as
+`pivotVertex()` require a geometric model, not an empty sketch frame.
 
-`loft(sections, options)` still takes one face per section. Zero holes and one
-corresponding hole per section work with ordinary or spine-guided lofts. Different
-hole counts and multiple unpaired holes produce explicit errors; holes are never
-silently filled. Arrays in `cut` and `loft` describe one operation's inputs, not
-automatic mapping. General hole correspondence and region ID selectors remain
-future API work.
+`derive()`, `face()` / `faces()` and extrusion inherit the relations. Boolean
+operations and loft resolve their inputs in the shared composition context;
+placement is not baked into tuple coordinates. A spatial copy shares point
+identities with its original, so a derived layer can still use `profile.point(id)`.
+References target the actual immutable model value: creating a later rotated or
+repositioned model does not redirect existing sketch relations.
 
-See the [modeling example](../app/examples/sketch-modeling.ts),
-the [sketch example](../app/examples/sketches.ts) and
-[third-party solver sources](THIRD_PARTY.md).
+In the App, select the related value (`opening`) to edit against read-only model
+outlines projected into the sketch's local plane. Select `profile` for its original
+local view. Both edit the same source array, with ordinary undo; separate placements
+of that geometry are not separate authoring definitions. Context outlines are
+visual references only, not snapping targets or imported geometry constraints.
+The select-surface-and-create UI is tracked separately within
+[#114](https://github.com/vilicvane/code3d/issues/114).
+Try [sketch-on-surface.ts](../app/examples/sketch-on-surface.ts).
 
-## Type imports
+## Cached computations and custom primitives
 
-Types used by public signatures, generic constraints, and return values are
-exported alongside the authoring API, including their named type dependencies.
-This includes `ElementKind`, `ModelKind`, `ModelGeometryKind`, `TopologyKind`,
-the named-element and expose result types, and the model capability interfaces.
+`cached(fn, options?)` memoizes synchronous, deterministic data computations.
+Pass changing captured state as arguments and treat returned data as immutable.
+Memory hits reuse the retained result; optional `encoder` / `decoder` pairs only
+run when saving to disk or restoring it. The App fingerprints static definitions
+and their dependencies for persistent reuse; dynamic closures and ordinary Node
+calls use function identity for memory reuse. No author cache IDs are needed.
+
+`definePrimitive(builder)` from `@code3d/core/replicad` also caches construction,
+normalization and geometry analysis. Each call still creates fresh model metadata
+and independently owned geometry handles. The builder transfers its returned
+solid to Core and owns its intermediate resources. Screws uses this shared cache.
+Read [cached computations](../web/src/content/docs/docs/reference/core.md#cached-computations)
+and [custom primitives](../web/src/content/docs/docs/guides/custom-primitives.mdx)
+for supported data, resource ownership and examples.
+
+## Text and fonts
 
 ```ts
-import type {
-  Anchor,
-  ElementKind,
-  NamedElements,
-  SolidModel,
-} from '@code3d/core';
+import {googleFont, text, extrude, group} from '@code3d/core';
 
-type Mount<Kind extends ElementKind> = Anchor<Kind>;
-type Part<Elements extends NamedElements> = SolidModel<Elements>;
+const face = googleFont('Play');
+export default group(extrude(text('Hello', face, 10), 1));
 ```
 
-Code3d model types come from `@code3d/core`; Replicad builder types such as
-`Shape3D` come from `@code3d/core/replicad`. Type exports do not add runtime
-properties or operations. `Quaternion` belongs to the tooling transform API;
-author rotations use `rotate(x, y, z)` in degrees.
+In the App, `googleFont()` uses a static family name and optional weight/italic
+settings; `font()` accepts a static font-file URL or TTF/OTF bytes. The engine
+prepares remote resources before synchronous model execution. Text returns
+ordinary planar faces with a common baseline; `extrude(faces, distance)` preserves
+their order and placement. Node can read local file URLs or use downloaded,
+decoded font bytes. See the [text reference](../web/src/content/docs/docs/reference/core.md#text),
+[runnable example](../app/examples/text.ts) and [font notices](THIRD_PARTY.md).
 
-## Colors
+## Materials and entry points
 
-`paint(color)` returns a new model value. On a group, it recursively overrides
-every descendant's color, including already-painted parts and nested groups.
-The outermost painted group wins within that composition; shared parts retain
-their own colors when used elsewhere. Painting the same value again uses the
-latest color. Previews and exports use the same effective colors.
+`.material()` accepts a color or a native Three.js material. Use
+`@code3d/core/three` when constructing native materials, and
+[@code3d/materials](../materials/README.md) for common presets. A model captures
+its material value; changing the original Three.js object later does not change
+that model. The renderer supplies lighting and environment reflections.
 
-```ts
-import {box, group} from '@code3d/core';
+| Import                  | Responsibility                                                           |
+| ----------------------- | ------------------------------------------------------------------------ |
+| `@code3d/core`          | Public model authoring API; Node entry initializes the kernel            |
+| `@code3d/core/three`    | Shared Three.js exports for material and geometry integration            |
+| `@code3d/core/replicad` | Replicad access for custom primitive builders                            |
+| `@code3d/core/tooling`  | Evaluation, inspection and resource lifetime integration used by the App |
 
-const redPart = box(10, 10, 10).paint('#ff0000');
-const assembly = group([redPart, group([box(4, 4, 4)])]).paint('#345678');
-// Both parts in assembly use #345678; redPart still renders red on its own.
+Tooling integrations own evaluation lifetimes and disposal. Follow the existing
+[tooling entry](src/tooling/index.ts), [evaluation tests](test/model-test.ts), and
+[App compiler](../app/src/model/compiler.ts) when embedding the runtime. Ordinary
+model files should stay on the authoring API.
+
+## Source and development
+
+For changes to Core itself, start with the [modeling architecture](../../.agents/docs/architecture/modeling.md)
+and shared [development guide](../../.agents/docs/development.md), then follow
+the implementation and tests below.
+
+- [Public exports](src/library/index.ts), [model runtime](src/library/runtime.ts),
+  and [public type tests](test/public-types.ts).
+- [Spatial values](src/library/spatial.ts), [relation solving](src/library/relation-solver.ts),
+  and [topology](src/library/topology.ts).
+- [Cached computations](src/library/cached.ts), [fonts](src/library/font.ts),
+  [text geometry](src/library/text.ts) and their [tests](test/).
+- [Material values](src/library/material.ts), [kernel cache](src/library/kernel-cache.ts),
+  and [Node entry](src/node/index.ts).
+- [Executable App examples](../app/examples/) and [runtime tests](test/).
+
+From the repository root:
+
+```sh
+npm run build:packages
+npm test --workspace @code3d/core
 ```
 
-## Bound relations and rotation
-
-`geometry.on(target.up)` translates the source's matching bounding boundary
-onto a directional `Bound`. Targets are `up` (+Y), `down` (−Y), `right` (+X),
-`left` (−X), `front` (+Z), and `back` (−Z), in the target model's local frame.
-Bounds describe the current finite geometry, including solved children of a
-group. They are references owned by the model, not topology surfaces or extra
-box models. Their calculation uses analytic geometry independently of meshing.
-
-The source can be a model, vertex, edge, surface, or finite point anchor.
-Only the selected geometry contributes its extent. Its support boundary is
-computed in the target's direction, even when the geometry is tilted. `on`
-never rotates or centers a model. A single contact preserves tangential
-position; multiple contacts solve their translation conditions together and
-report conflicting positions. Mathematical lines and planes without finite
-geometry cannot be sources. Arbitrary models, points, lines, and surfaces
-cannot be targets.
-
-```ts
-import {box, group} from '@code3d/core';
-const base = box(10, 10, 10);
-const part = box(20, 20, 20).relate(self => [
-  self.on(base.right),
-  self.on(base.down),
-]);
-export default group([base, part]); // part at [15, -15, 0]
-```
-
-An explicit `.offset(x, y, z)` pins the matching bound centers in all three
-coordinates of the target reference frame, including an all-zero offset.
-Repeated offsets add. `bound.flip()` reverses facing and therefore the side
-from which the source touches it, while leaving the reference frame unchanged.
-Surface `flip()` likewise reverses facing metadata; neither operation mirrors
-or rotates geometry. Two flips restore the original facing.
-
-`relate` always owns the placement. These forms are legal:
-
-```ts
-part.relate(self => self.on(base.up));
-part.relate(() => part.on(base.up));
-part.relate(self => base.on(self.up)); // moves part below base
-```
-
-References to the original receiver are rebound to the new self. Every
-returned relation must involve self or the original receiver. Old model values
-and old references keep their meaning.
-
-Explicit rotation belongs to a particular contact chain:
-
-```ts
-self.on(base.up).rotate(0, 30, 0);
-self.on(base.up).pivot([50, 0, 0]).rotate(0, 0, 45);
-self.on(base.up).pivotVertex(3).rotate(0, 0, 45);
-self.on(base.up).around(base.axis).rotate(30);
-```
-
-`pivot` coordinates, `pivotVertex` IDs, and XYZ axes use relate's **self**,
-regardless of which side of `on` contains self. Direct rotation uses self's
-origin. Angles are degrees, applied X, then Y, then Z. Each pivot or axis
-selection lasts for its next rotation; intermediate chains only complete with
-`rotate`. An axis reference includes position and direction; external axes use
-their resolved composition pose. Rotations compose in call order, following
-that chain's contact placement. Other contacts constrain the final pose.
-Explicit orientations on one self must agree. Remaining translations minimize
-changes at the authored contact stages; duplicate stages do not add bias.
-
-Related objects are solved at composition, Boolean, and loft boundaries.
-Standalone views keep the object's own geometry. A group moves its assembled
-children rigidly. `expose()` carries finite references into the group frame.
-Core and App share the same solvers. Pure bound assemblies use exact linear
-translation equations; geometric align relations add joint rigid-pose solving
-without another WASM initialization.
-
-In the App, selecting a directional property fills its bound face with the
-same translucent yellow-green as its bounding box, adding corner brackets
-only when that box is absent. The source of `on` shows the complete measured
-bounding box; a topology source limits it to the selected geometry.
-`pivot` has translation handles, `pivotVertex` uses
-self's vertex picker, `around` shows the referenced axis, and `rotate` has
-three angle rings or one axis ring. Source edits retain parameter provenance,
-preview/cancel behavior, and undo. See the
-[bent loft example](../app/examples/bound-rotation.ts).
-
-## Geometric alignment
-
-`source.align(target)` relates points, curves, and surfaces and can determine
-both position and orientation. Select a solid's `center`, `axis`, `vertex`,
-`edge`, or `surface`; a solid or group itself is not an align reference.
-
-| Pair            | Meaning                                                      |
-| --------------- | ------------------------------------------------------------ |
-| point–point     | Coincident points                                            |
-| point–curve     | Point lies on the underlying curve                           |
-| point–surface   | Point lies on the underlying surface                         |
-| curve–curve     | Complete underlying curves coincide, with the same direction |
-| curve–surface   | The whole underlying curve lies on the surface               |
-| surface–surface | Underlying surfaces coincide, with matching normal sense     |
-
-The first implementation supports points, straight lines, circles, ellipses,
-planes, cylinders, and spheres. Edge trims, arc ranges, face boundaries, and
-holes do not limit the supporting geometry. Equal-radius arcs may coincide
-without matching endpoints; straight lines retain axial sliding and twisting.
-Use a curve's `start`, `midpoint`, `end`, or a selected vertex for more specific
-positioning. Unsupported geometry reports an error. Different radii and other
-proven impossibilities report geometric incompatibility; numerical
-nonconvergence does not prove that no solution exists.
-
-```ts
-const placed = cylinder(5, 20).relate(self => [
-  self.axis.align(base.axis),
-  self.on(base.up),
-]);
-const backwards = line([0, 0, 0], [0, 10, 0]).relate(self =>
-  self.align(base.axis.reverse()),
-);
-```
-
-`reverse()` changes a line reference's positive direction. `flip()` changes a
-surface's normal sense. Both preserve geometry and reference axes. Point
-membership ignores direction, and curve-to-surface membership adds no arbitrary
-heading within the surface. `around(axis.reverse())` reverses the signed
-rotation direction; curved edges still do not define a single rotation axis.
-
-`align(...).offset(x, y, z)` translates **self** in the target reference axes
-after alignment, then applies the authored `rotate`/`pivot`/`around` chain.
-Repeated offsets add; zero adds no positioning condition. Unlike `on.offset`,
-it does not pin trim centers or parameter origins. This holds when self is the
-written target too. Multiple relations are solved jointly. An already satisfied
-relation preserves its pose; remaining freedom is selected deterministically
-by geometric seeds and local numerical solving, without a uniqueness guarantee.
-
-In relation context, axes have one positive arrow and edges retain their actual
-curved highlight as the shaft, with only a tangent arrowhead at the directed
-endpoint (a stable seam for a closed edge). Source and target arrowheads share
-a fixed 10-by-6 CSS-pixel size. Passive axes have arrows at both ends. Passive line
-decorations use 1px; interactive topology selection uses 2px. Surface normals
-retain their facing arrows.
-See [the alignment example](../app/examples/geometric-alignment.ts).
-
-Source inspection previews each relation call through that stage, before later
-offsets or rotations. The current pair shares one marker color: the inspected
-side keeps its base opacity and the other uses 70% of that opacity. Remaining
-related objects are dim gray. `on`/`align` and subsequent chain calls focus
-self; their target arguments focus the actual target reference, which is self
-in a reverse-written relation. Model opacity uses role-specific caps rather than
-multiplying existing paint opacity. See the
-[relation guide](../web/src/content/docs/docs/guides/relations.mdx) and
-[visualization conventions](../../.agents/skills/code3d-visualization/SKILL.md).
-
-When several relations include align on one model, use the numeric parameter
-panel or source to edit offsets and rotations. Each edit resolves the coupled
-equations. Spatial drags are available for a single align relation; combined
-geometric relations do not show a misleading rigid-transform preview.
-
-## Exposed geometry and topology
-
-`expose()` preserves geometry as a reference in the returned model's frame.
-A solid, face, edge, or vertex model becomes a `Solid`, `Surface`, `Edge`, or
-`Vertex` reference. Existing topology references retain their identity; pure
-point, line, plane, and frame anchors retain their reference-geometry meaning.
-Named members remain available, including on an exposed group frame.
-Selected topology contributes its own finite extent to bound positioning; a
-custom model origin does not change that extent.
-
-```ts
-const plate = box(32, 4, 24);
-const assembly = group([plate]).expose({body: plate, mount: plate.surface(1)});
-const boundary = assembly.mount.edges();
-const corners = boundary[0].vertices();
-const center = assembly.mount.center;
-```
-
-References support geometric queries and `on()`. They do not have model
-operations such as `rotate`, `scaled`, `fillet`, or `relate`. A relation authored
-through `self.mount.center` acts on `self`, including when `self` is an assembly.
-Every chained result carries that assembly context while its geometry and IDs
-continue to refer to the original immutable source. Exposing an upstream value
-captures that source; later modeling operations do not reinterpret its IDs in
-a different geometry. To expose result topology, select it from that result.
-
-Subtopology access follows dimension: a surface can query its edges and
-vertices, and an edge its vertices. Singular queries validate membership;
-plural queries retain authored order and allow `[]`. IDs always use the source
-geometry's namespace, so a shared edge has the same ID through either face.
-An edge's vertices are its actual topological vertices; a closed edge can have
-one vertex. A source used in multiple occurrences must be exposed through the
-intended child's reference, such as `left.body`, to select its placement.
-
-Every geometric reference has a local bounding-box `center` point, carried
-through rotation and scaling. `Edge.start`, `.midpoint`, and `.end` sample curve
-parameters 0, 0.5, and 1; the midpoint need not be the bounding-box center or the
-half-length point. These calculated points are anchors, not topology vertices.
-`edge.on()` and `surface.on()` use finite geometry extents rather than their
-sampled tangent or normal; `.center.on()` uses only the calculated point.
-
-## Origins and rotation
-
-All models, including groups, support immutable origin editing and rotation:
-
-```ts
-const part = box(24, 6, 14)
-  .originVertex(3)
-  .originOffset(0, 2, 0)
-  .rotate(15, 35, 0);
-```
-
-- `originPoint(pointRef)` makes a center, named point, or topology vertex local zero.
-- `originVertex(id)` selects a geometric model’s own input vertex; it is equivalent
-  to `model.originPoint(model.vertex(id))`.
-- `originCenter()` makes the model's `center` anchor local zero.
-- `originOffset(dx, dy, dz)` re-expresses every local point as `p - [dx, dy, dz]`.
-- `rotate(x, y, z)` rotates about local zero in degrees, applying fixed local
-  X, then Y, then Z rotations. Repeated calls compose in source order.
-
-The model origin is always zero in its own coordinates. Origin offsets compose
-and cancel; geometry, centers, named references and topology positions all use
-the resulting coordinates. Directions and topology IDs are preserved. Old model
-values and captured references keep their original meaning. `center` begins at
-the body's local bounding-box center and follows transforms; rotating does not
-recalculate it from the new axis-aligned bounds. `scaled()` scales about current
-local zero. Later origin edits preserve the already-rotated shape.
-
-Dimensions use scalar arguments; positions use arrays. `point()` is local zero;
-`point([x, y, z])` equals `point().originOffset(-x, -y, -z)`. `line([x, y, z])`
-starts at zero; `line(start, end)` accepts two position arrays. Their input
-coordinates remain local geometry coordinates. For example, `line([10, 0, 0])`
-has center `[5, 0, 0]`, and `.rotate(0, 90, 0)` takes its end to `[0, 0, -10]`.
-A curve's tangent reference frame does not redefine model XYZ. Directional
-bounds use the model axes, including after geometric rotation.
-
-Groups provide `originPoint()`, `originOffset()` and `rotate()`. Their default origin is
-chosen when constructed: solve the direct members' placement, then take the
-axis-aligned bounding-box center of their **origins**, retaining the assembly
-axes. Geometry size does not affect this choice. A nested group contributes
-only its own origin; an empty group defaults to zero. Explicit origin edits
-re-express the assembled result together, preserving internal constraints and
-member spacing. The default is not recalculated on later operations.
-`rotate(x, y, z)` turns the solved assembly together about its current origin,
-including nested instances, without re-solving internal relations. Named
-references and topology follow the members; directional bounds use group axes.
-
-```ts
-const base = box(20, 4, 10).originOffset(0, 2, 0);
-const lid = box(20, 2, 10).originOffset(0, -1, 0);
-const assembly = group([base, lid]); // Common origins at their contact plane.
-const mounted = assembly.originPoint(lid.center);
-const tilted = mounted.rotate(0, 0, 30); // Rotate the whole assembly about the lid center.
-```
-
-`originPoint()` converts references to the receiver's local frame, including
-solved member placements. With repeated geometry, select a specific instance's
-named point, for example `assembly.originPoint(rightPart.body.center)`; an
-ambiguous shared source is rejected. Groups have no aggregate vertex IDs or
-geometric `center` or scaling methods. The
-[group origins example](../app/examples/group-origins.ts) shows direct assembly
-and selection in repeated instances.
-
-In the App, origin offsets have translation arrows; `originVertex`
-uses vertex picking and an origin marker. Dragging an `originPoint()`, `originCenter()` or
-`originVertex()` marker adds or edits an `originOffset()` call. Rotation rings edit the corresponding
-angle about its effective axis, including when other angles are nonzero. Dragging
-uses the gesture-start snapshot: the candidate origin moves against fixed
-geometry. Release writes source and switches to result coordinates, with origin
-zero and geometry shifted by the negative displacement; Escape restores the
-start state. The
-[origin and rotation example](../app/examples/origin-and-rotation.ts) demonstrates
-these scopes.
-
-## Tubes
-
-`tube(outerRadius, innerRadius, y)` creates a concentric, constant-section
-straight tube with a through bore. Like `cylinder(radius, y)`, it is centered
-at the origin and extends along Y. All dimensions must be positive and finite,
-and `innerRadius` must be smaller than `outerRadius`; use `cylinder` for a solid
-cross-section. There are no wall-thickness overloads, tapers, or path options.
-
-```ts
-import {tube} from '@code3d/core';
-
-export const collar = tube(6, 4, 12).paint('#8ed5d1');
-```
-
-## Coils
-
-`coil(coilRadius, wireRadius, pitch, turns)` creates a right-handed coil with a
-circular wire section and plain ends. `coilRadius` measures from the Y axis to
-the wire centerline, `pitch` is the Y advance per turn, and `turns` can be any
-positive finite number, including a fraction. The centerline's Y interval is
-centered at the origin; the end sections extend slightly beyond that interval.
-The named axis stays on Y even for a partial turn.
-
-All dimensions must be positive and finite. The wire radius must be smaller
-than the coil radius, the pitch must exceed the wire diameter, and neighboring
-turns must remain separated. This is geometry, not a spring specification:
-there are no spring end treatments, force parameters, or material assumptions.
-
-```ts
-import {coil} from '@code3d/core';
-
-export const winding = coil(5, 0.75, 4, 2.5).paint('#d8ff3e');
-```
-
-See the [primitive showcase](../app/examples/primitives.ts) for a coil composed
-with the other built-in primitives.
-
-## Custom primitives
-
-`definePrimitive` turns a synchronous Replicad builder into a normal code3d
-solid model. Replicad stays behind an explicit author-interoperability entry so
-raw shapes do not become part of the root model API. Import `definePrimitive`
-and `replicad` from `@code3d/core/replicad`.
-
-The runnable [custom primitive example](../app/examples/custom-primitives.ts)
-builds a twisted knob with a D-shaped shaft bore, then composes two instances.
-It demonstrates direct parameter annotations, a default argument, Replicad
-extrusion and booleans, and intermediate resource cleanup. The screws package's
-private [thread builder](../screws/src/library/thread.ts) is another consumer.
-Built-in tubes and coils should be imported directly from core, not reimplemented
-in author examples.
-
-The builder's argument types, names, and optional parameters are preserved.
-Write validation inside the builder. It executes on every call, including when
-the same arguments are reused, so changes to captured state remain observable.
-Core caches the actual returned B-Rep, so identical output can reuse downstream
-operations and meshes across evaluations without skipping the builder. Each
-model owns its disposable geometry and uses the standard mesh tolerance.
-
-Returning a shape transfers its ownership to code3d; do not mutate, delete, or
-return it again. Intermediate resources remain the builder's responsibility,
-following Replicad's ownership rules. A single-solid aggregate produced by
-Replicad booleans is normalized; shells, multiple-solid aggregates, and stray
-lower-dimensional geometry are rejected, and rejected returned shapes are
-released. Kernel installation and replacement remain owned by code3d.
-
-Place `@code3d.param` annotations directly on the exported function variable to
-enable its call-site tool panel, including when consumed through emitted
-declarations. No wrapper or definition options are needed. For a standalone
-preview, export an ordinary example invocation; `@code3d.arguments`
-is not expanded to recognize primitive factory definitions.
-
-## Tooling evaluation lifetime
-
-The App uses the selected runtime's `@code3d/core/tooling` entry, from the project
-when core is declared or from the built-in package otherwise. This internal
-integration surface evolves with the App during prototyping and does not promise
-API stability. It includes topology source identities, assembly transforms, and
-calculated-anchor frames alongside origin, spatial-operation, and sketch layer
-snapshots. It requires installing OpenCascade and the sketch constraint solver
-from that same package dependency graph.
-Call `beginModelEvaluation(): () => void` before each serial source
-evaluation to reset source locations, parameter provenance, and operation
-traces. Call the returned function in `finally`, after creating snapshots.
-Geometry, model identity, and relations remain unchanged; already-created
-snapshots keep their previous evaluation's metadata.
-
-The kernel cache retains the complete working set of the latest evaluation,
-including exact transformed-bound queries and render meshes. During evaluation,
-both the previous and current working sets are protected from eviction. Finishing
-keeps the current set and at most 256 unused historical entries, releasing older
-native values. This scales retention with the current model without accumulating
-every edited revision. Calls outside an evaluation use the bounded history.
-
-Packages may retain model values privately. The App therefore drops its own
-references after creating snapshots instead of forcibly disposing every model
-it encounters. Unreachable Replicad wrappers release their native resources
-through their finalizers; explicit disposal is appropriate only when the caller
-owns the complete model lifetime. This boundary is tooling-only: ordinary
-model authors do not initialize an evaluation session.
-
-Rendering snapshots contain serializable meshes and model metadata, without
-native shapes. File export uses a separate `ModelGeometrySnapshot` retained
-by the compiler Worker. Core clones each distinct source shape once; the
-compiler releases these copies before the next compilation, when replacing
-the runtime, or when it is disposed. The snapshot's shapes are borrowed by
-consumers: each export clones them before transformations or consuming kernel
-operations and releases its temporary geometry on both success and failure.
-Repeated exports therefore preserve the retained geometry and author models.
-
-Core owns snapshot creation; the App owns export placement and file generation,
-using Replicad from the same runtime. This division already serves the current
-consumers and changes only when a concrete use case calls for it.
+Use the [agent entry](../../docs/agents.md) to work on a project through the CLI,
+or the [App README](../app/README.md) to develop the editor and visualization.

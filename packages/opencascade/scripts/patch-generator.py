@@ -1,4 +1,4 @@
-"""Restore owned destruction when a class also declares placement delete."""
+"""Configure owned destruction and allocator headers in the pinned generator."""
 
 from pathlib import Path
 
@@ -26,6 +26,16 @@ replacement = (
 if source.count(original) != 1:
     raise RuntimeError('The pinned binding generator no longer matches the patch')
 generator.write_text(source.replace(original, replacement))
+
+# The binding parser uses host Clang include paths while defining __EMSCRIPTEN__.
+# Give it the pinned allocator's header, also present in the WASM compiler sysroot.
+parser = Path('/opencascade.js/src/ocjs_bindgen/ast/parse.py')
+source = parser.read_text()
+original = '            "-D__EMSCRIPTEN__",'
+replacement = original + '\n            "-I/emsdk/upstream/emscripten/system/lib/mimalloc/include",'
+if source.count(original) != 3:
+    raise RuntimeError('The pinned binding parser no longer matches the patch')
+parser.write_text(source.replace(original, replacement))
 
 driver = Path('/opencascade.js/build-wasm.sh')
 source = driver.read_text()

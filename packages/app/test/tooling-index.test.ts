@@ -193,6 +193,7 @@ test('resolves tool schemas from layered model capabilities', () => {
         label: 'Fillet radius',
         actions: [],
         kind: 'length',
+        default: 1,
         constraints: {exclusiveMin: 0},
       },
       {
@@ -235,6 +236,7 @@ test('resolves tool schemas from layered model capabilities', () => {
         label: 'Wall thickness',
         actions: [],
         kind: 'length',
+        default: 1,
         constraints: undefined,
       },
       {
@@ -261,6 +263,60 @@ const primitiveSource = [
   ');',
 ].join('\n');
 
+test('published method defaults retain required numeric parameters across model and constraint receivers', () => {
+  const cases = [
+    ['body.rotate()', [0, 0, 0]],
+    ['body.originOffset()', [0, 0, 0]],
+    ['assembly.rotate()', [0, 0, 0]],
+    ['assembly.originOffset()', [0, 0, 0]],
+    ['body.scaled()', [1]],
+    ['face.extrude()', [10]],
+    ['extrude(face)', [10]],
+    ['body.fillet()', [1]],
+    ['body.chamfer()', [1]],
+    ['body.shell()', [1]],
+    ['body.on(target.up).offset()', [0, 0, 0]],
+    ['body.on(target.up).rotate()', [0, 0, 0]],
+    ['body.on(target.up).pivot()', [0, 0, 0]],
+    ['body.on(target.up).pivot([1, 2, 3]).rotate()', [0, 0, 0]],
+    ['body.on(target.up).pivotVertex(1).rotate()', [0, 0, 0]],
+    ['body.on(target.up).around(target.axis).rotate()', [0]],
+  ] as const;
+  const source = [
+    'import {box, group, rectangle, extrude} from "@code3d/core";',
+    'const body = box(20, 30, 40), target = box(40, 20, 30);',
+    'const assembly = group([body]), face = rectangle(20, 30);',
+    ...cases.map(([call]) => `${call};`),
+  ].join('\n');
+  const index = resolveProjectTooling({files: [{path: '/model.ts', source}]});
+  for (const [call, defaults] of cases) {
+    const schema = defined(
+      toolSchemaAt(index.toolCalls.get('/model.ts'), source, call),
+    );
+    const numbers = schema.parameters.filter(parameter =>
+      ['length', 'angle', 'ratio'].includes(parameter.kind),
+    );
+    assert.deepEqual(
+      numbers.map(parameter =>
+        'default' in parameter ? parameter.default : undefined,
+      ),
+      defaults,
+      call,
+    );
+    assert.ok(
+      numbers.every(parameter => !parameter.optional),
+      call,
+    );
+  }
+  const diagnostics = index.program.getSemanticDiagnostics(
+    index.program.getSourceFile('/model.ts'),
+  );
+  assert.equal(
+    diagnostics.filter(diagnostic => diagnostic.code === 2554).length,
+    cases.length,
+  );
+});
+
 test('keeps an unannotated resolved overload separate from its annotated peers', () => {
   const source = [
     'import {ISO4762} from "@code3d/screws";',
@@ -282,6 +338,36 @@ test('keeps an unannotated resolved overload separate from its annotated peers',
 });
 
 for (const declarationOnly of [false, true] as const) {
+  test(`retains required parameters with display defaults from ${declarationOnly ? 'emitted declarations' : 'source'}`, () => {
+    const library = [
+      '/** @code3d.param radius {kind: "length", default: 5} */',
+      'export function shape(radius: number): number;',
+      'export function shape(radius = 5): number {return radius;}',
+    ].join('\n');
+    const source = 'import {shape} from "./shape.js";\nshape();';
+    const index = resolveProjectTooling({
+      files: [
+        {
+          path: declarationOnly ? '/shape.d.ts' : '/shape.ts',
+          source: declarationOnly ? emitPrimitiveDeclaration(library) : library,
+        },
+        {path: '/model.ts', source},
+      ],
+    });
+    const schema = defined(
+      toolSchemaAt(index.toolCalls.get('/model.ts'), source, 'shape()'),
+    );
+    const radius = schema.parameters[0];
+    assert.equal(radius.optional, false);
+    assert.ok(radius.kind === 'length');
+    assert.equal(radius.default, 5);
+    assert.ok(
+      index.program
+        .getSemanticDiagnostics(index.program.getSourceFile('/model.ts'))
+        .some(diagnostic => diagnostic.code === 2554),
+    );
+  });
+
   test(`reads primitive annotations through imports and aliases from ${declarationOnly ? 'emitted declarations' : 'source'}`, () => {
     const source = [
       'import {sleeve as imported} from "./bridge.ts";',
@@ -423,7 +509,6 @@ function emitPrimitiveDeclaration(source: string) {
     if (path.endsWith('primitive-fixture.d.ts')) declaration = text;
   });
   assert.ok(declaration?.includes('@code3d.param radius'));
-  assert.ok(defined(declaration).includes('default: 4'));
   assert.ok(!defined(declaration).includes('y = 4'));
   return defined(declaration);
 }

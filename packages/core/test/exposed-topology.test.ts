@@ -87,7 +87,7 @@ test('geometry models expose queryable topology without model operations', () =>
       for (const method of [
         'relate',
         'expose',
-        'paint',
+        'material',
         'originOffset',
         'rotate',
         'scaled',

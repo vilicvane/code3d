@@ -1,4 +1,8 @@
-import type {ProjectFileInfo, ProjectFileReader} from './file-reader';
+import {
+  statProjectFiles,
+  type ProjectFileInfo,
+  type ProjectFileReader,
+} from './file-reader';
 import {normalizeProjectPath} from './project';
 
 type CachedFile = {
@@ -46,21 +50,26 @@ export class ProjectFileCache implements ProjectFileReader {
 
   async refresh(): Promise<ReadonlySet<string>> {
     const changed = new Set<string>();
-    await Promise.all(
-      [...this.entries].map(async ([path, entry]) => {
-        const [previous, next] = await Promise.all([
-          entry.info,
-          this.reader.stat(path),
-        ]);
-        if (
-          previous?.kind !== next?.kind ||
-          previous?.version !== next?.version
-        ) {
-          changed.add(path);
-          this.entries.set(path, {info: Promise.resolve(next)});
-        }
-      }),
-    );
+    const entries = [...this.entries];
+    const [previousFiles, nextFiles] = await Promise.all([
+      Promise.all(entries.map(([, entry]) => entry.info)),
+      statProjectFiles(
+        this.reader,
+        entries.map(([path]) => path),
+      ),
+    ]);
+    for (const [index, [path]] of entries.entries()) {
+      const previous = previousFiles[index];
+      const next = nextFiles[index];
+      if (
+        previous?.kind !== next?.kind ||
+        previous?.version !== next?.version ||
+        previous?.realPath !== next?.realPath
+      ) {
+        changed.add(path);
+        this.entries.set(path, {info: Promise.resolve(next)});
+      }
+    }
     return changed;
   }
 }

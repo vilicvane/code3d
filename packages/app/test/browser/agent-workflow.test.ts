@@ -1,3 +1,4 @@
+import {appIsolationHeaders} from '../../build/isolation.ts';
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {once} from 'node:events';
@@ -7,7 +8,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {chromium} from 'playwright-core';
-import {AgentClient, type AgentConfig} from '@code3d/agent';
+import {AgentClient, type AgentConfig, type AgentRequest} from '@code3d/agent';
 import {createLocalBridge} from '../../../cli/bld/bridge.js';
 import {reserveLocalPort} from './local-port.ts';
 
@@ -49,6 +50,7 @@ for (const storage of ['browser', 'directory'] as const)
         await page.route(setupUrl, route =>
           route.fulfill({
             contentType: 'text/html',
+            headers: appIsolationHeaders,
             body: '<main>Directory setup</main>',
           }),
         );
@@ -92,9 +94,17 @@ for (const storage of ['browser', 'directory'] as const)
         const prompt = await page
           .getByLabel('Agent prompt', {exact: true})
           .inputValue();
-        assert.ok(prompt.includes('/docs/guides/agents.md'));
-        assert.ok(prompt.includes('project.c3d.json context'));
-        assert.ok(!prompt.includes('Pinned observation'));
+        const guideUrl = prompt.match(/https?:\/\/\S+\/agents\.md/)![0];
+        const guideResponse = await page.request.get(guideUrl);
+        assert.equal(guideResponse.status(), 200);
+        assert.match(guideResponse.headers()['content-type'], /text\/markdown/);
+        const guide = await guideResponse.text();
+        assert.ok(guide.includes('project.c3d.json serve'));
+        assert.ok(
+          guide.includes(
+            'echo \'{"operation":"context"}\' | npx --yes @code3d/cli',
+          ),
+        );
         configs.push(
           JSON.parse(
             prompt.match(/```json\n([\s\S]*?)\n```/)![1],
@@ -114,8 +124,8 @@ for (const storage of ['browser', 'directory'] as const)
       const update = await page
         .getByLabel('Agent prompt', {exact: true})
         .inputValue();
-      assert.ok(update.includes('/docs/guides/agents.md'));
-      assert.ok(update.includes('project.c3d.json context'));
+      assert.ok(update.startsWith('Continue working on'));
+      assert.ok(update.includes('/docs/agents.md'));
       assert.ok(update.includes(configs[0].key));
       await page.getByRole('button', {name: 'Close', exact: true}).click();
       const directory = await mkdtemp(join(tmpdir(), 'c3d-browser-'));
@@ -126,7 +136,11 @@ for (const storage of ['browser', 'directory'] as const)
           JSON.stringify(config),
           {mode: 0o600},
         );
-      async function cli(agent: number, args: string[], input?: object) {
+      async function cli(
+        agent: number,
+        request: AgentRequest,
+        requestId?: string,
+      ) {
         const child = spawn(
           process.execPath,
           [
@@ -134,9 +148,9 @@ for (const storage of ['browser', 'directory'] as const)
             join(directory, `${agent}.json`),
             '--output-dir',
             directory,
-            ...args,
+            ...(requestId ? ['--request-id', requestId] : []),
           ],
-          {stdio: ['pipe', 'pipe', 'pipe']},
+          {stdio: ['pipe', 'pipe', 'pipe'], timeout: 130_000},
         );
         let stdout = '',
           stderr = '';
@@ -146,30 +160,31 @@ for (const storage of ['browser', 'directory'] as const)
         child.stderr.on('data', chunk => {
           stderr += String(chunk);
         });
-        child.stdin.end(
-          input === undefined ? undefined : JSON.stringify(input),
-        );
+        child.stdin.end(JSON.stringify(request));
         const [code] = await once(child, 'close');
         const result = JSON.parse(stdout);
         assert.ok(!stderr.includes(configs[agent].key));
         return {code, result};
       }
-      const listed = await cli(0, ['fs', 'list', '/']);
+      const listed = await cli(0, {operation: 'fs.list', path: '/'});
       assert.equal(listed.code, 0);
       const path = '/agent-model.ts';
       const source =
         "import {box} from '@code3d/core';\nconst width = 10;\n/** @code3d.arguments [6] */\nfunction design(size = 4) { return box(size, 6, 8).fillet(0.5, [1]); }\nexport default design(10);\n";
       const first = await cli(
         0,
-        ['--request-id', 'create-model', 'apply', '--input', '-'],
         {
-          files: [{path, version: null, content: source}],
-          cursor: {
-            file: path,
-            regex: '(fillet\\(0.5, \\[1\\]\\))',
-            arguments: '[width]',
+          operation: 'apply',
+          input: {
+            files: [{path, version: null, content: source}],
+            cursor: {
+              file: path,
+              regex: '(fillet\\(0.5, \\[1\\]\\))',
+              arguments: '[width]',
+            },
           },
         },
+        'create-model',
       );
       assert.equal(first.code, 0, JSON.stringify(first.result));
       await page.evaluate(path => {
@@ -189,23 +204,25 @@ for (const storage of ['browser', 'directory'] as const)
       const userCursor = await page.evaluate(() =>
         window.agentTestEditor.cursorSource(),
       );
-      const liveContext = await cli(0, ['context']);
+      const liveContext = await cli(0, {operation: 'context'});
       assert.equal(liveContext.code, 0, JSON.stringify(liveContext.result));
       assert.equal(liveContext.result.data.file, path);
       assert.ok(liveContext.result.data.cursor);
-      const read = await cli(0, ['fs', 'read', path]);
+      const read = await cli(0, {operation: 'fs.read', path: path});
       assert.equal(read.result.data.content, source);
       const version = read.result.data.version;
-      const inspect = await cli(
-        0,
-        ['apply', '--input', '-', '--render', '--topology', '--type'],
-        {
+      const inspect = await cli(0, {
+        operation: 'apply',
+        input: {
           cursor: {
             ...liveContext.result.data.cursor,
             arguments: '[width]',
           },
+          render: true,
+          topology: true,
+          type: true,
         },
-      );
+      });
       assert.equal(inspect.code, 0, JSON.stringify(inspect.result));
       assert.ok(
         inspect.result.data.observation.type.members.some(
@@ -238,10 +255,10 @@ for (const storage of ['browser', 'directory'] as const)
       assert.ok(await page.locator('.agent-caret').count());
       const aliceLabel = page
         .locator('.agent-cursor-label')
-        .filter({hasText: /^Alice$/});
+        .filter({has: page.locator('span', {hasText: /^Alice$/})});
       const bobLabel = page
         .locator('.agent-cursor-label')
-        .filter({hasText: /^Bob$/});
+        .filter({has: page.locator('span', {hasText: /^Bob$/})});
       await aliceLabel.waitFor();
       const image = await readFile(inspect.result.artifacts[0].path);
       assert.equal(image.subarray(1, 4).toString(), 'PNG');
@@ -253,12 +270,19 @@ for (const storage of ['browser', 'directory'] as const)
         position: window.agentTestCamera.position.toArray(),
         quaternion: window.agentTestCamera.quaternion.toArray(),
       }));
-      const front = await cli(0, ['apply', '--input', '-', '--view', 'front'], {
-        topology: {snapshotId, model: 'm0', kind: 'edge', limit: 1},
+      const front = await cli(0, {
+        operation: 'apply',
+        input: {
+          topology: {snapshotId, model: 'm0', kind: 'edge', limit: 1},
+          render: {view: 'front'},
+        },
       });
-      const top = await cli(0, ['apply', '--input', '-', '--render'], {
-        render: {view: {direction: [0, 2, 0], up: [0, 0, -1]}},
-        topology: {snapshotId, model: 'm0', kind: 'edge', limit: 1},
+      const top = await cli(0, {
+        operation: 'apply',
+        input: {
+          render: {view: {direction: [0, 2, 0], up: [0, 0, -1]}},
+          topology: {snapshotId, model: 'm0', kind: 'edge', limit: 1},
+        },
       });
       assert.equal(front.code, 0, JSON.stringify(front.result));
       assert.equal(top.code, 0, JSON.stringify(top.result));
@@ -282,21 +306,35 @@ for (const storage of ['browser', 'directory'] as const)
         })),
         cameraBefore,
       );
-      const pageResult = await cli(0, ['apply', '--input', '-', '--topology'], {
-        topology: {snapshotId, model: 'm0', kind: 'edge', offset: 3, limit: 2},
+      const pageResult = await cli(0, {
+        operation: 'apply',
+        input: {
+          topology: {
+            snapshotId,
+            model: 'm0',
+            kind: 'edge',
+            offset: 3,
+            limit: 2,
+          },
+        },
       });
       assert.equal(pageResult.code, 0, JSON.stringify(pageResult.result));
       assert.equal(pageResult.result.data.observation.topology.items.length, 2);
-      const fallback = await cli(0, ['apply', '--input', '-', '--topology'], {
-        cursor: {file: path, regex: '(fillet\\(0.5, \\[1\\]\\))'},
+      const fallback = await cli(0, {
+        operation: 'apply',
+        input: {
+          cursor: {file: path, regex: '(fillet\\(0.5, \\[1\\]\\))'},
+          topology: true,
+        },
       });
       assert.equal(fallback.code, 0, JSON.stringify(fallback.result));
       assert.ok(
         Math.abs(fallback.result.data.observation.topology.bounds.size[0] - 6) <
           1e-5,
       );
-      const bob = await cli(1, ['apply', '--input', '-'], {
-        cursor: {file: path, regex: '(box\\(size, 6, 8\\))'},
+      const bob = await cli(1, {
+        operation: 'apply',
+        input: {cursor: {file: path, regex: '(box\\(size, 6, 8\\))'}},
       });
       assert.equal(bob.code, 0);
       await bobLabel.waitFor();
@@ -328,14 +366,17 @@ for (const storage of ['browser', 'directory'] as const)
         '// Revised by Alice\n' + source.replace('width = 10', 'width = 12');
       const changed = await cli(
         0,
-        ['--request-id', 'edit-model', 'apply', '--input', '-'],
-        {files: [{path, version, content: modified}]},
+        {
+          operation: 'apply',
+          input: {files: [{path, version, content: modified}]},
+        },
+        'edit-model',
       );
       assert.equal(changed.code, 0, JSON.stringify(changed.result));
       await page.waitForFunction(top => {
         const label = [
           ...document.querySelectorAll('.agent-cursor-label'),
-        ].find(node => node.textContent === 'Alice');
+        ].find(node => node.querySelector('span')?.textContent === 'Alice');
         return (
           label && Math.abs(label.getBoundingClientRect().y - top - 22) < 1
         );
@@ -352,29 +393,38 @@ for (const storage of ['browser', 'directory'] as const)
           }),
           modified,
         );
-      const conflict = await cli(1, ['apply', '--input', '-'], {
-        files: [{path, version, content: source}],
+      const conflict = await cli(1, {
+        operation: 'apply',
+        input: {files: [{path, version, content: source}]},
       });
       assert.equal(conflict.code, 1);
       assert.equal(conflict.result.error.code, 'version_conflict');
-      const receipt = await cli(0, ['result', 'edit-model']);
+      const receipt = await cli(0, {
+        operation: 'result',
+        requestId: 'edit-model',
+      });
       assert.deepEqual(receipt.result.data, changed.result.data);
-      const expired = await cli(0, ['apply', '--input', '-'], {
-        topology: {snapshotId, model: 'm0'},
+      const expired = await cli(0, {
+        operation: 'apply',
+        input: {topology: {snapshotId, model: 'm0'}},
       });
       assert.equal(expired.code, 1);
       assert.equal(expired.result.error.code, 'snapshot_expired');
-      const current = await cli(0, ['fs', 'read', path]);
-      const shell = await cli(0, ['apply', '--input', '-', '--topology'], {
-        files: [
-          {
-            path: '/agent-shell.ts',
-            version: null,
-            content:
-              "import {box} from '@code3d/core';\nexport default box(20, 12, 16).shell(1, [4]);\n",
-          },
-        ],
-        cursor: {file: '/agent-shell.ts', regex: '(shell\\(1, \\[4\\]\\))'},
+      const current = await cli(0, {operation: 'fs.read', path: path});
+      const shell = await cli(0, {
+        operation: 'apply',
+        input: {
+          files: [
+            {
+              path: '/agent-shell.ts',
+              version: null,
+              content:
+                "import {box} from '@code3d/core';\nexport default box(20, 12, 16).shell(1, [4]);\n",
+            },
+          ],
+          cursor: {file: '/agent-shell.ts', regex: '(shell\\(1, \\[4\\]\\))'},
+          topology: true,
+        },
       });
       assert.equal(shell.code, 0, JSON.stringify(shell.result));
       assert.equal(
@@ -388,11 +438,15 @@ for (const storage of ['browser', 'directory'] as const)
             item.id === 4 && item.selectable,
         ),
       );
-      const syntax = await cli(0, ['apply', '--input', '-', '--topology'], {
-        cursor: {
-          file: path,
-          regex: '(box\\(size, 6, 8\\))',
-          arguments: '[',
+      const syntax = await cli(0, {
+        operation: 'apply',
+        input: {
+          cursor: {
+            file: path,
+            regex: '(box\\(size, 6, 8\\))',
+            arguments: '[',
+          },
+          topology: true,
         },
       });
       assert.equal(syntax.code, 1);
@@ -408,15 +462,19 @@ for (const storage of ['browser', 'directory'] as const)
         syntax.result.error.details.observation.summary,
         syntax.result.error.message,
       );
-      const bad = await cli(0, ['apply', '--input', '-', '--render'], {
-        files: [
-          {
-            path,
-            version: current.result.data.version,
-            content: modified.replace('box(size, 6, 8)', 'box(-1, 6, 8)'),
-          },
-        ],
-        cursor: {file: path, regex: '(box\\(-1, 6, 8\\))'},
+      const bad = await cli(0, {
+        operation: 'apply',
+        input: {
+          files: [
+            {
+              path,
+              version: current.result.data.version,
+              content: modified.replace('box(size, 6, 8)', 'box(-1, 6, 8)'),
+            },
+          ],
+          cursor: {file: path, regex: '(box\\(-1, 6, 8\\))'},
+          render: true,
+        },
       });
       assert.equal(bad.code, 1);
       assert.equal(bad.result.error.code, 'model_failed');
@@ -425,15 +483,17 @@ for (const storage of ['browser', 'directory'] as const)
       assert.equal(bad.result.error.details.observation.kind, 'evaluation');
       assert.equal(bad.result.error.details.observation.sourceRef.file, path);
       // Static types remain available when the model fails at runtime.
-      const staticType = await cli(0, ['apply', '--input', '-', '--type'], {
-        cursor: {file: path, regex: 'const (width) ='},
+      const staticType = await cli(0, {
+        operation: 'apply',
+        input: {cursor: {file: path, regex: 'const (width) ='}, type: true},
       });
       assert.equal(staticType.code, 0, JSON.stringify(staticType.result));
       assert.equal(staticType.result.data.observation.type.type, '12');
       assert.equal(staticType.result.data.observation.models, undefined);
       // Restore Alice's label to the model expression for the remaining UI checks.
-      await cli(0, ['apply', '--input', '-'], {
-        cursor: {file: path, regex: '(box\\(-1, 6, 8\\))'},
+      await cli(0, {
+        operation: 'apply',
+        input: {cursor: {file: path, regex: '(box\\(-1, 6, 8\\))'}},
       });
       await page.locator('#agents-button').click();
       await page
@@ -465,24 +525,30 @@ for (const storage of ['browser', 'directory'] as const)
           .evaluate(dialog => dialog.hasAttribute('open')),
         false,
       );
-      const recovered = await cli(0, ['result', 'create-model']);
+      const recovered = await cli(0, {
+        operation: 'result',
+        requestId: 'create-model',
+      });
       assert.equal(recovered.code, 0);
       assert.deepEqual(recovered.result.data, first.result.data);
       const duplicate = await cli(
         0,
-        ['--request-id', 'create-model', 'apply', '--input', '-'],
         {
-          files: [{path, version: null, content: source}],
-          cursor: {
-            file: path,
-            regex: '(fillet\\(0.5, \\[1\\]\\))',
-            arguments: '[width]',
+          operation: 'apply',
+          input: {
+            files: [{path, version: null, content: source}],
+            cursor: {
+              file: path,
+              regex: '(fillet\\(0.5, \\[1\\]\\))',
+              arguments: '[width]',
+            },
           },
         },
+        'create-model',
       );
       assert.deepEqual(duplicate.result, first.result);
       assert.equal(
-        (await cli(0, ['fs', 'read', path])).result.data.content,
+        (await cli(0, {operation: 'fs.read', path: path})).result.data.content,
         modified.replace('box(size, 6, 8)', 'box(-1, 6, 8)'),
       );
       await assert.rejects(
@@ -501,7 +567,7 @@ for (const storage of ['browser', 'directory'] as const)
           {exact: true},
         )
         .waitFor();
-      assert.equal((await cli(0, ['fs', 'list', '/'])).code, 0);
+      assert.equal((await cli(0, {operation: 'fs.list', path: '/'})).code, 0);
       await otherTab.close();
       await page.locator('#agents-button').click();
       assert.equal(await page.locator('.agent-row').count(), 1);

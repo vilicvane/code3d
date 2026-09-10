@@ -3,6 +3,10 @@
 Astro serves the custom homepage and examples. Starlight serves `/docs/`.
 App is built separately by Vite and copied into `dist/www/app/`.
 
+This README covers website content and publication. Repository-wide setup and
+test conventions live in the [development guide](../../.agents/docs/development.md);
+system responsibilities are indexed in the [internal documentation](../../.agents/docs/README.md).
+
 From the repository root:
 
 ```bash
@@ -18,18 +22,56 @@ The image renderer uses Playwright Chromium. Install it with
 `CODE3D_CHROME_CDP_ENDPOINT=http://localhost:9222` to use an existing debugging
 browser. The renderer closes its own pages and leaves that browser running.
 
-## Local agent guide
+## Agent documentation and local prompts
 
-The HTML guide is `/docs/guides/agents/`; `/docs/guides/agents.md` serves the same
-source as Markdown with links resolved for that resource. Agent prompts link to
-the Markdown entry to avoid sending page layout HTML to a command-line reader.
+[The human introduction](src/content/docs/docs/guides/agents.md) explains
+collaboration features at `/docs/guides/agents/`. Agent prompts instead open
+[the required Markdown entry](../../docs/agents.md) at `/docs/agents.md`.
+[Detailed topics](../../docs/agents/) cover operations, modeling and recovery;
+[useful modeling packages](../../docs/agents.md#useful-modeling-packages) introduce
+the main authoring libraries. All packages maintain READMEs for human and agent
+readers, but the website publishes only the selected modeling packages.
+
+The [Markdown publisher](scripts/markdown-documents.mjs) serves these existing
+sources through [one static endpoint](src/pages/docs/[...document].md.ts):
+
+| Repository source                            | Published Markdown                        |
+| -------------------------------------------- | ----------------------------------------- |
+| `docs/agents.md` and `docs/agents/*.md`      | `/docs/agents.md` and `/docs/agents/*.md` |
+| `packages/{core,materials,screws}/README.md` | `/docs/packages/<package>.md`             |
+| `src/content/docs/docs/**/*.{md,mdx}`        | `/docs/<topic>.md`                        |
+
+The publisher's `featuredPackages` list selects Core, Materials and Screws.
+Additional packages are selected for their value to model authors; adding a
+workspace package does not automatically add a website page or an entry in the
+agent guide. Lower-level dependency READMEs stay in their packages, discoverable
+through GitHub or an installed `node_modules` tree. Links to an unpublished README
+resolve to its repository source rather than creating a website mirror.
+Internal development docs under `.agents/docs/` and research under
+`.agents/research/` remain repository resources too. A package README can link
+to them for contributors without adding them to the modeling agent's required
+workflow or website catalog.
+
+Keep links relative to real repository files in agent docs and READMEs. The
+publisher maps documentation links to relative Markdown URLs and source links
+to readable repository files at the checkout’s current commit. Build deployment
+artifacts after committing; push that commit so the source links are reachable. Website pages retain their HTML-relative links;
+the publisher resolves these for Markdown too. Starlight frontmatter becomes an
+ordinary heading. MDX model examples expand to actual source and App links.
+Unknown MDX components fail publication until given a Markdown representation.
+No second copy of technical examples or API prose is maintained.
 
 For an App development server, set `VITE_CODE3D_DOCS_URL` in the ignored
 `packages/app/.env.development.local`, for example `http://127.0.0.1:4321/docs/`,
-and run the website preview on that reserved port. Production builds default to
+and run the website on that reserved port. Production builds default to
 `https://www.code3d.org/docs/`; set the variable at build time for another deployed
 site/base. Website dev and preview ports are strict, so collisions fail instead
 of changing the prompt's destination silently.
+
+After changing the prompt, a topic or a public package, follow the full chain:
+copied prompt → entry → topic → package README → source or complete example.
+The website build checks published Markdown alongside HTML links and anchors.
+See the [project documentation maintenance rules](../../.agents/skills/code3d-prototyping/SKILL.md#documentation).
 
 ## Content
 

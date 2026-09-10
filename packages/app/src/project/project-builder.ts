@@ -1,3 +1,8 @@
+import {
+  CachedDefinitionCompiler,
+  transformCachedDefinitions,
+  type CachedDefinitions,
+} from './cached-definitions';
 import type * as esbuild from 'esbuild-wasm';
 import ts from '@typescript/typescript6';
 import {ProjectPackageResolver, nodeBuiltinError} from './package-resolver';
@@ -14,13 +19,18 @@ const nodeBuiltin = (specifier: string) =>
       ? `node:${specifier}`
       : undefined;
 
-export type SourceTransform = (path: string, source: string) => string;
+export type SourceTransform = (
+  path: string,
+  source: string,
+  cached: CachedDefinitions,
+) => string;
 export type ModuleFormats = ReadonlyMap<string, 'esm' | 'cjs'>;
 export type ProjectBundle = Readonly<{
   source: string;
   files: readonly string[];
   formats: ModuleFormats;
   staticPackages: readonly string[];
+  resources: readonly string[];
   sourcePackages: ReadonlyMap<string, readonly string[]>;
 }>;
 
@@ -47,13 +57,21 @@ export class ProjectBuilder {
       transform,
       captureModules,
       lazyPackages,
+      instrumentCaches = true,
     }: Readonly<{
       runtimeFiles?: ModuleFormats;
       transform?: SourceTransform;
       captureModules?: ModuleFormats;
       lazyPackages?: ReadonlyMap<string, readonly string[]>;
+      /** Core initialization already has a complete runtime implementation identity. */
+      instrumentCaches?: boolean;
     }> = {},
   ): Promise<ProjectBundle> {
+    const cachedDefinitions = new CachedDefinitionCompiler(
+      this.files,
+      (specifier, importer) => this.resolve(specifier, importer),
+    );
+    const resources = new Set<string>();
     const runtimePaths = new Map<string, string>();
     const runtimeModule = (
       path: string,
@@ -168,15 +186,26 @@ export class ProjectBuilder {
                 if (args.path.endsWith('.wasm'))
                   return {contents: bytes, loader: 'binary'};
                 let source = decodeProjectFile(bytes);
+                const definitions =
+                  !instrumentCaches || args.path.endsWith('.json')
+                    ? new Map<number, string>()
+                    : await cachedDefinitions.definitions(args.path, source);
                 if (
                   transform &&
                   !args.path.includes('/node_modules/') &&
                   !args.path.endsWith('.json')
                 ) {
-                  source = transform(args.path, source);
-                }
+                  source = transform(args.path, source, definitions);
+                } else if (definitions.size)
+                  source = transformCachedDefinitions(
+                    args.path,
+                    source,
+                    definitions,
+                  );
                 if (this.assets && !args.path.endsWith('.json'))
-                  source = await this.assets.rewrite(args.path, source);
+                  source = await this.assets.rewrite(args.path, source, path =>
+                    resources.add(path),
+                  );
                 if (!args.path.endsWith('.json'))
                   source = await this.rewriteDynamicImports(
                     args.path,
@@ -262,6 +291,7 @@ export class ProjectBuilder {
       });
     return {
       source: result.outputFiles![0].text,
+      resources: [...resources],
       files: Object.keys(result.metafile!.inputs)
         .filter(path => path.startsWith('project:'))
         .map(path => path.slice('project:'.length)),

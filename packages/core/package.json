@@ -29,17 +29,27 @@
     "./tooling": {
       "types": "./bld/tooling/index.d.ts",
       "default": "./bld/tooling/index.js"
+    },
+    "./three": {
+      "types": "./bld/library/three.d.ts",
+      "default": "./bld/library/three.js"
     }
   },
   "files": [
     "bld",
     "THIRD_PARTY.md",
-    "README.md"
+    "README.md",
+    "src"
   ],
   "dependencies": {
     "@code3d/opencascade": "0.0.1-alpha.0",
+    "@ctrl/tinycolor": "^4.2.0",
     "@salusoft89/planegcs": "1.2.0",
+    "@types/three": "^0.185.4",
+    "flo-boolean": "5.0.8",
+    "harfbuzzjs": "1.6.1",
     "replicad": "^1.0.1",
-    "replicad-opencascadejs": "1.0.0"
+    "replicad-opencascadejs": "1.0.0",
+    "three": "^0.185.1"
   }
 }

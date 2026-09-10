@@ -9,6 +9,7 @@ import {runCli, startServe} from '../../../cli/test/process.ts';
 import {type AgentConfig} from '@code3d/agent';
 import {createLocalBridge} from '../../../cli/bld/bridge.js';
 import {reserveLocalPort} from './local-port.ts';
+import {appIsolationHeaders} from '../../build/isolation.ts';
 
 test(
   'HTTPS App prompt starts a real CLI service, permits local access, renders models and persists editable agent ports',
@@ -46,6 +47,7 @@ test(
         '.svg': 'image/svg+xml',
       };
       await route.fulfill({
+        headers: appIsolationHeaders,
         body: await readFile(join(directory, path)),
         contentType: types[extname(path)] ?? 'application/octet-stream',
       });
@@ -70,6 +72,7 @@ test(
     };
     await permission('denied');
     await page.goto(origin + prefix);
+    assert.equal(await page.evaluate(() => crossOriginIsolated), true);
     await page.locator('#agents-button').click();
     const dialog = page.getByRole('dialog', {
       name: 'Connect Agent',
@@ -102,7 +105,7 @@ test(
       .fill(String(firstPort.port));
     let alice = await add('Alice');
     await firstPort.release();
-    assert.equal(alice.version, 2);
+    assert.equal('version' in alice, false);
     assert.equal(alice.origin, origin);
     assert.equal(alice.port, firstPort.port);
     const temp = await mkdtemp(join(tmpdir(), 'code3d-app-serve-'));
@@ -112,10 +115,15 @@ test(
       await writeFile(configFile, JSON.stringify(alice), {mode: 0o600});
       return startServe(t, configFile);
     };
-    const call = async (args: string[], input?: unknown) => {
+    const call = async (request: unknown, requestId?: string) => {
       const result = await runCli(
-        [configFile, '--output-dir', temp, ...args],
-        input === undefined ? '' : JSON.stringify(input),
+        [
+          configFile,
+          '--output-dir',
+          temp,
+          ...(requestId ? ['--request-id', requestId] : []),
+        ],
+        JSON.stringify(request),
       );
       const value = JSON.parse(result.stdout);
       assert.equal(result.code, 0, result.stdout + result.stderr);
@@ -140,9 +148,9 @@ test(
       await row('Alice').locator('.agent-row-status').textContent(),
       'Never connected',
     );
-    const current = await call(['context']);
+    const current = await call({operation: 'context'});
     const file = current.data.file as string;
-    const read = await call(['fs', 'read', file]);
+    const read = await call({operation: 'fs.read', path: file});
     const source =
       "import {box} from '@code3d/core';\nexport default box(10, 6, 8);\n";
     const request = {
@@ -154,10 +162,7 @@ test(
       type: true,
     };
     const {requestId, ...input} = request;
-    const data = await call(
-      ['--request-id', requestId, 'apply', '--input', '-'],
-      input,
-    );
+    const data = await call({operation: 'apply', input}, requestId);
     assert.equal(data.ok, true, JSON.stringify(data));
     assert.equal(data.data.accepted, true);
     assert.equal(data.data.saved, true);
@@ -177,10 +182,37 @@ test(
       [137, 80, 78, 71, 13, 10, 26, 10],
     );
     assert.ok(png.length > 1000);
+    // The production bundle must also export the SVG sketch scene under HTTPS.
+    const sketch = await call({
+      operation: 'apply',
+      input: {
+        files: [
+          {
+            path: '/agent-sketch.ts',
+            version: null,
+            content:
+              "import {sketch} from '@code3d/core'; const profile = sketch([['point', 1, [0, 0]], ['circle', 2, [1, 3]]], {constraints: [['radius', 2, 8]]}); export default profile;",
+          },
+        ],
+        cursor: {file: '/agent-sketch.ts', regex: 'const (profile) ='},
+        topology: true,
+        render: true,
+      },
+    });
+    assert.equal(sketch.data.observation.topology.kind, 'sketch');
+    assert.equal(sketch.data.observation.render.projection, 'orthographic');
+    assert.equal(sketch.data.observation.topology.items[1].radius, 8);
+    const sketchPng = await readFile(sketch.artifacts[0].path);
+    assert.equal(sketchPng.readUInt32BE(16), 960);
+    assert.equal(sketchPng.readUInt32BE(20), 720);
+    assert.ok(sketchPng.length > 1000);
     await page.reload();
     await page.locator('#agents-button').click();
     await dialog.locator('.agent-status[data-state="online"]').waitFor();
-    assert.equal((await call(['result', request.requestId])).ok, true);
+    assert.equal(
+      (await call({operation: 'result', requestId: request.requestId})).ok,
+      true,
+    );
     const old = alice;
     const nextPort = await reserveLocalPort(t);
     const newPort = nextPort.port;
@@ -208,7 +240,10 @@ test(
     await nextPort.release();
     service = await launch();
     await dialog.locator('.agent-status[data-state="online"]').waitFor();
-    assert.equal((await call(['result', request.requestId])).ok, true);
+    assert.equal(
+      (await call({operation: 'result', requestId: request.requestId})).ok,
+      true,
+    );
     const bobPort = await reserveLocalPort(t);
     await dialog
       .getByLabel('Local port', {exact: true})

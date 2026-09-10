@@ -14,12 +14,16 @@ import {
 } from './project-test-files.ts';
 
 let server: Awaited<ReturnType<typeof createAppTestServer>>;
+let ProjectAssets: (typeof import('../src/project/project-assets.ts'))['ProjectAssets'];
 let ProjectBuilder: (typeof import('../src/project/project-builder.ts'))['ProjectBuilder'];
 let ProjectRuntime: (typeof import('../src/model/project-runtime.ts'))['ProjectRuntime'];
 let ProjectCompiler: (typeof import('../src/model/project-compiler.ts'))['ProjectCompiler'];
 let Evaluator: Awaited<ReturnType<typeof testEvaluatorClass>>;
 before(async () => {
   server = await createAppTestServer();
+  ({ProjectAssets} = await server.ssrLoadModule<
+    typeof import('../src/project/project-assets.ts')
+  >('/src/project/project-assets.ts'));
   ({ProjectBuilder} = await server.ssrLoadModule<
     typeof import('../src/project/project-builder.ts')
   >('/src/project/project-builder.ts'));
@@ -53,6 +57,136 @@ function projectFiles(
   };
 }
 
+test('model analysis follows imports independently of which editor documents are loaded', async () => {
+  const root = {
+    path: '/model.ts',
+    source: 'import {make} from "./helper.ts"; make(10);',
+  };
+  const helper = {
+    path: '/helper.ts',
+    source:
+      'import {box} from "@code3d/core";\n/** @code3d.arguments [4] */\nexport function make(size: number) { return box(size, 6, 8); }',
+  };
+  const unrelated = {
+    path: '/unrelated.ts',
+    source:
+      '/** @code3d.arguments nope */\nexport function unrelated() { return 1; }',
+  };
+  const files = projectFiles({
+    [root.path]: root.source,
+    [helper.path]: helper.source,
+  });
+  const compiler = new ProjectCompiler(
+    files,
+    packageTestFiles,
+    esbuild,
+    () => new Evaluator(),
+  );
+  try {
+    // No editor model is required for the entry or its dependencies.
+    const first = await compiler.compile({files: []}, root.path);
+    assert.equal(first.diagnostic, undefined);
+    assert.deepEqual(
+      first.designArguments.map(context => context.functionRef.file),
+      [helper.path],
+    );
+    assert.ok(
+      first.sourceTargets.some(
+        target => target.sourceRef.file === helper.path && target.tool,
+      ),
+    );
+    const opened = await compiler.compile(
+      {files: [root, helper, unrelated]},
+      root.path,
+    );
+    assert.equal(opened.diagnostic, undefined);
+    assert.deepEqual(opened.designArguments, first.designArguments);
+    assert.deepEqual(
+      defined(opened.fallback).mesh,
+      defined(first.fallback).mesh,
+    );
+
+    const edited = {...helper, source: helper.source.replace('6, 8', '20, 8')};
+    const changed = await compiler.compile(
+      {files: [root, edited, unrelated]},
+      root.path,
+    );
+    assert.equal(changed.diagnostic, undefined);
+    assert.notDeepEqual(
+      defined(changed.fallback).mesh,
+      defined(first.fallback).mesh,
+    );
+    const removed = await compiler.compile(
+      {files: [{...root, source: ''}, edited, unrelated]},
+      root.path,
+    );
+    assert.equal(removed.diagnostic, undefined);
+    assert.deepEqual(removed.designArguments, []);
+    assert.deepEqual(removed.sourceTargets, []);
+    assert.equal(removed.objects.size, 0);
+
+    await assert.rejects(
+      compiler.compile(
+        {files: [unrelated, {...root, source: 'import "./unrelated.ts";'}]},
+        root.path,
+      ),
+      error => {
+        assertModelDiagnosticError(error);
+        assert.match(error.diagnostic.summary, /array expression/);
+        assert.equal(error.diagnostic.sourceRef?.file, unrelated.path);
+        return true;
+      },
+    );
+  } finally {
+    compiler.dispose();
+  }
+});
+
+test('explicit design calls load their file and dependencies without opening editor documents', async () => {
+  const source =
+    'import {box} from "@code3d/core";\nimport {height} from "./dimensions.ts";\n/** @code3d.arguments [4] */\nexport function design(size: number) { return box(size, height, 8); }';
+  const files = projectFiles({
+    '/model.ts': '',
+    '/design.ts': source,
+    '/dimensions.ts': 'export const height = 6;',
+  });
+  const compiler = new ProjectCompiler(
+    files,
+    packageTestFiles,
+    esbuild,
+    () => new Evaluator(),
+  );
+  try {
+    const preset = await compiler.compile({files: []}, '/model.ts', {
+      file: '/design.ts',
+      offset: source.indexOf('box(size'),
+    });
+    assert.equal(preset.diagnostic, undefined);
+    const context = defined(preset.designArguments[0]);
+    assert.equal(preset.activeDesignContextId, context.id);
+    assert.ok(preset.objects.size > 0);
+    const selected = await compiler.compile({files: []}, '/model.ts', {
+      file: context.functionRef.file,
+      id: context.id,
+    });
+    assert.equal(selected.diagnostic, undefined);
+    assert.equal(selected.activeDesignContextId, context.id);
+    const temporary = await compiler.compile({files: []}, '/model.ts', {
+      file: '/design.ts',
+      offset: source.indexOf('box(size'),
+      arguments: '[12]',
+    });
+    assert.equal(temporary.diagnostic, undefined);
+    assert.ok(temporary.activeDesignContextId?.endsWith(':temporary'));
+    assert.ok(temporary.objects.size > 0);
+    const rootOnly = await compiler.compile({files: []}, '/model.ts');
+    assert.equal(rootOnly.objects.size, 0);
+    assert.deepEqual(rootOnly.designArguments, []);
+  } finally {
+    compiler.dispose();
+  }
+});
+
 test('shares a dependency across concurrent imports and a nested top-level dynamic import', async () => {
   const files = projectFiles({
     '/node_modules/shared/package.json': '{"type":"module","main":"index.js"}',
@@ -65,7 +199,8 @@ test('shares a dependency across concurrent imports and a nested top-level dynam
     '/node_modules/second/index.js':
       'export {identity, count, increment} from "shared";',
   });
-  const builder = new ProjectBuilder(files, esbuild);
+  const assets = new ProjectAssets(files);
+  const builder = new ProjectBuilder(files, esbuild, assets);
   const runtime = await ProjectRuntime.create(files, builder, new Evaluator());
   try {
     const [first, second, shared] = await Promise.all([
@@ -85,6 +220,7 @@ test('shares a dependency across concurrent imports and a nested top-level dynam
     );
   } finally {
     runtime.dispose();
+    assets.dispose();
   }
 });
 
@@ -97,7 +233,8 @@ test('retains callable CommonJS exports and JSON values when a later dependency 
     '/node_modules/consumer/index.cjs':
       'module.exports = require("clamp")(require("clamp/data.json").value);',
   });
-  const builder = new ProjectBuilder(files, esbuild);
+  const assets = new ProjectAssets(files);
+  const builder = new ProjectBuilder(files, esbuild, assets);
   const runtime = await ProjectRuntime.create(files, builder, new Evaluator());
   const evaluator = new Evaluator();
   try {
@@ -114,11 +251,12 @@ test('retains callable CommonJS exports and JSON values when a later dependency 
     assert.equal(value.answer, 41);
   } finally {
     runtime.dispose();
+    assets.dispose();
     evaluator.dispose();
   }
 });
 
-test('reads installed declarations, reruns changed child source, and invalidates changed package implementations', async () => {
+test('reads installed declarations, reruns changed source, and preserves invalidation across cancelled preparation', async () => {
   const files = projectFiles({
     '/package.json':
       '{"type":"module","dependencies":{"@code3d/core":"*","custom-size":"1.0.0"}}',
@@ -176,6 +314,29 @@ test('reads installed declarations, reruns changed child source, and invalidates
       '/node_modules/custom-size/index.js',
       'export const width = 20;',
     );
+    let cancelled = false;
+    const stat = files.stat;
+    files.stat = async path => {
+      const value = await stat(path);
+      if (path === '/node_modules/custom-size/index.js') cancelled = true;
+      return value;
+    };
+    const stopped = new Error('Cancelled after detecting a dependency change');
+    await assert.rejects(
+      compiler.compile(
+        project(5),
+        '/model.ts',
+        undefined,
+        undefined,
+        undefined,
+        () => {
+          if (cancelled) throw stopped;
+        },
+      ),
+      error => error === stopped,
+    );
+    files.stat = stat;
+    assert.equal(compiler['runtime'], undefined);
     const third = await compiler.compile(project(5), '/model.ts');
     assert.equal(third.diagnostic, undefined);
     assert.notEqual(compiler['runtime'], runtime);
@@ -541,7 +702,8 @@ test('releases concurrent waiters on failed dependency evaluation and can load u
     '/node_modules/ok/package.json': '{"type":"module","main":"index.js"}',
     '/node_modules/ok/index.js': 'export const value=42;',
   });
-  const builder = new ProjectBuilder(files, esbuild);
+  const assets = new ProjectAssets(files);
+  const builder = new ProjectBuilder(files, esbuild, assets);
   const runtime = await ProjectRuntime.create(files, builder, new Evaluator());
   try {
     const failures = await Promise.allSettled([
@@ -566,6 +728,7 @@ test('releases concurrent waiters on failed dependency evaluation and can load u
     );
   } finally {
     runtime.dispose();
+    assets.dispose();
   }
 });
 
@@ -626,6 +789,101 @@ test('locates a missing relative asset in the original author source', async () 
         });
         return true;
       },
+    );
+  } finally {
+    compiler.dispose();
+  }
+});
+
+test('synchronous font assets invalidate on file edits and batch text operations retain source tools', async () => {
+  let path = '/packages/app/examples/fonts/DejaVuSans.ttf';
+  let revision = 1;
+  const files: ProjectFileReader = {
+    readFile: file =>
+      packageTestFiles.readFile(file === '/font.ttf' ? path : file),
+    async stat(file) {
+      return file === '/font.ttf'
+        ? {kind: 'file', version: String(revision)}
+        : packageTestFiles.stat(file);
+    },
+  };
+  const compiler = new ProjectCompiler(
+    files,
+    packageTestFiles,
+    esbuild,
+    () => new Evaluator(),
+  );
+  const project = {
+    files: [
+      {
+        path: '/font.ts',
+        source:
+          'import {font} from "@code3d/core"; export const sans = font(new URL("./font.ttf", import.meta.url));',
+      },
+      {
+        path: '/model.ts',
+        source:
+          'import {text, extrude, group} from "@code3d/core"; import {sans} from "./font.ts"; const profiles = text("B8i", sans, 10); export const lettering = group(extrude(profiles, 2));',
+      },
+    ],
+  };
+  try {
+    const first = await compiler.compile(project, '/model.ts');
+    assert.equal(first.diagnostic, undefined);
+    const solids = [...first.objects.values()].filter(
+      object => object.operation.kind === 'extrude',
+    );
+    assert.equal(solids.length, 4);
+    const output = defined(
+      first.sourceTargets.find(
+        target =>
+          target.kind === 'operation-output' &&
+          target.sourceRef.file === '/model.ts' &&
+          project.files[1].source.slice(
+            target.sourceRef.start,
+            target.sourceRef.end,
+          ) === 'extrude(profiles, 2)',
+      ),
+    );
+    assert.equal(output.evaluations[0].nodeIds.length, 4);
+    assert.equal(
+      defined(output.tool).signature.parameters.find(
+        parameter => parameter.name === 'distance',
+      )?.kind,
+      'length',
+    );
+    assert.equal(
+      defined(output.evaluations[0].parameters).find(
+        parameter => parameter.argument === 'distance',
+      )?.value,
+      2,
+    );
+    const before = compiler.kernelCacheStats;
+    const second = await compiler.compile(project, '/model.ts');
+    assert.equal(second.diagnostic, undefined);
+    assert.ok(
+      defined(compiler.kernelCacheStats.memory).hits >
+        defined(before.memory).hits,
+    );
+    path = '/packages/core/test/fonts/NotoSansCJK-subset.otf';
+    revision++;
+    const changed = await compiler.compile(project, '/model.ts');
+    assert.equal(changed.diagnostic, undefined);
+    assert.notDeepEqual(
+      solids.map(solid => solid.mesh),
+      [...changed.objects.values()]
+        .filter(object => object.operation.kind === 'extrude')
+        .map(solid => solid.mesh),
+    );
+    path = '/packages/app/examples/fonts/DejaVuSans.ttf';
+    revision++;
+    const restored = await compiler.compile(project, '/model.ts');
+    assert.equal(restored.diagnostic, undefined);
+    assert.deepEqual(
+      solids.map(solid => solid.mesh),
+      [...restored.objects.values()]
+        .filter(object => object.operation.kind === 'extrude')
+        .map(solid => solid.mesh),
     );
   } finally {
     compiler.dispose();

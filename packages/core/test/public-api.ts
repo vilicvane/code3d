@@ -8,6 +8,9 @@ import {
   cylinder,
   ellipse,
   extrude,
+  font,
+  googleFont,
+  cached,
   frustum,
   group,
   intersect,
@@ -20,6 +23,7 @@ import {
   sketch,
   spline,
   sphere,
+  text,
   tube,
   union,
   type Anchor,
@@ -31,6 +35,7 @@ import {
   type EdgeModel,
   type FaceAnchor,
   type FaceModel,
+  type Font,
   type GroupModel,
   type LineAnchor,
   type LoftOptions,
@@ -40,6 +45,7 @@ import {
   type SolidModel,
   type Surface,
   type SurfaceId,
+  type TextOptions,
   type TopologyId,
   type Vec3,
   type Vertex,
@@ -47,6 +53,8 @@ import {
   type VertexModel,
 } from '@code3d/core';
 import {definePrimitive, replicad, type Shape3D} from '@code3d/core/replicad';
+import {MeshPhysicalMaterial, type Material} from '@code3d/core/three';
+import * as THREE from '@code3d/core/three';
 
 // @ts-expect-error The concrete runtime class is not part of the authoring API.
 import type {ModelObject} from '@code3d/core';
@@ -60,6 +68,64 @@ import type {Shape3D as RootShape3D} from '@code3d/core';
 import type {ModelObject as InternalModelObject} from '@code3d/core/bld/library/runtime.js';
 
 const solid = box(10, 5, 8);
+// Runtime defaults do not make authored dimensions optional in TypeScript.
+// @ts-expect-error Box dimensions remain required.
+box();
+// @ts-expect-error Partial box dimensions remain incomplete.
+box(10);
+// @ts-expect-error Explicit undefined remains a type error.
+box(undefined, 10, 10);
+// @ts-expect-error Circle radius remains required.
+circle();
+// @ts-expect-error Ellipse radii remain required.
+ellipse();
+// @ts-expect-error Rectangle dimensions remain required.
+rectangle();
+// @ts-expect-error Polygon radius and sides remain required.
+regularPolygon();
+// @ts-expect-error Cylinder dimensions remain required.
+cylinder();
+// @ts-expect-error Tube dimensions remain required.
+tube();
+// @ts-expect-error Coil dimensions remain required.
+coil();
+// @ts-expect-error Sphere radius remains required.
+sphere();
+// @ts-expect-error Frustum dimensions remain required.
+frustum();
+// @ts-expect-error Prism dimensions remain required.
+regularPrism();
+const sans: Font = font(new URL('./font.ttf', import.meta.url));
+const play: Font = googleFont('Play');
+const playBold: Font = googleFont('Play', {weight: 700, italic: false});
+// @ts-expect-error Google Fonts weights are numeric.
+googleFont('Play', {weight: 'bold'});
+const textFaces: readonly FaceModel[] = text('B8i', sans, 10);
+const textOptions: TextOptions = {letterSpacing: 0.5, kerning: false};
+text('AV', sans, 10, textOptions);
+text('AV', sans, 10, {});
+// @ts-expect-error Kerning is a boolean switch.
+text('AV', sans, 10, {kerning: 1});
+// @ts-expect-error Letter spacing uses numeric model units.
+text('AV', sans, 10, {letterSpacing: '1px'});
+const textSolids: readonly SolidModel[] = extrude(textFaces, 2);
+group(textSolids);
+// @ts-expect-error Text requires an explicit font and size.
+text('B8i');
+// @ts-expect-error Text size remains required.
+text('B8i', sans);
+// @ts-expect-error The font is a required value, not an optional setting.
+text('B8i', undefined, 10);
+// @ts-expect-error Text accepts content, font, size in that order.
+text('B8i', 10, sans);
+const material: Material = new MeshPhysicalMaterial({
+  roughness: 0.3,
+  clearcoat: 1,
+});
+solid.material(material);
+solid.material(new THREE.MeshStandardMaterial({color: '#f80'}));
+// @ts-expect-error Material classes belong to the explicit Three.js entry.
+import {MeshPhysicalMaterial as RootMeshPhysicalMaterial} from '@code3d/core';
 const sketchValue = sketch([
   ['point', 1, [0, 0]],
   ['point', 2, [10, 0]],
@@ -135,7 +201,7 @@ const tubeModel: SolidModel<CanonicalElements> = tube(6, 4, 12);
 const coilModel: SolidModel<CanonicalElements> = coil(5, 0.75, 4, 2.5);
 // @ts-expect-error Coil dimensions are required numeric parameters.
 coil(5, 0.75, 4, '2.5');
-// @ts-expect-error No implicit default turn count.
+// @ts-expect-error The turn count remains required in the public signature.
 coil(5, 0.75, 4);
 // @ts-expect-error Tube dimensions are required, with no option bag or overload.
 tube(6, {wall: 2}, 12);
@@ -144,8 +210,7 @@ tube(6, 4);
 const faceModel: FaceModel<PlanarElements> = circle(4);
 const extrudedFace: SolidModel = faceModel.extrude(3);
 const extrudedProfile: SolidModel = extrude(faceModel.rotate(0, 0, 90), -3);
-// @ts-expect-error Extrusion accepts one face; map multiple faces explicitly.
-extrude([faceModel], 3);
+const extrudedFaces: readonly SolidModel[] = extrude([faceModel], 3);
 // @ts-expect-error A solid is not an extrusion profile.
 extrude(solid, 3);
 // @ts-expect-error Only face models expose extrusion.
@@ -191,7 +256,7 @@ replicad.getOC();
 replicad.setOC(undefined);
 
 solid
-  .paint('#fff')
+  .material('#fff')
   .originOffset(1, 2, 3)
   .originOffset(0, 1, 0)
   .originVertex(1)
@@ -239,7 +304,7 @@ vertexModel
   .vertex(1);
 vertexModel.vertices();
 groupModel
-  .paint('#fff')
+  .material('#fff')
   .relate(self => self.on(solid.up))
   .expose({mount: solid.up})
   .relate(self => self.mount.on(solid.down));
@@ -254,6 +319,35 @@ constraint.pivotVertex(1).rotate(0, 0, 90);
 constraint.pivotVertex([1, 3]).rotate(0, 0, 90);
 constraint.around(solid.axis).rotate(45);
 constraint.rotate(0, 45, 90);
+// Runtime editing defaults do not relax required public method arguments.
+// @ts-expect-error Rotation still requires three angles.
+solid.rotate();
+// @ts-expect-error Partial rotation remains incomplete.
+solid.rotate(30);
+// @ts-expect-error Explicit undefined is still not a numeric angle.
+solid.rotate(undefined, 0, 0);
+// @ts-expect-error Origin offsets still require three displacements.
+solid.originOffset();
+// @ts-expect-error Scaling still requires a factor.
+solid.scaled();
+// @ts-expect-error Fillets still require a radius.
+solid.fillet();
+// @ts-expect-error Chamfers still require a distance.
+solid.chamfer();
+// @ts-expect-error Shells still require a thickness.
+solid.shell();
+// @ts-expect-error Relation offsets still require three displacements.
+constraint.offset();
+// @ts-expect-error Relation rotations still require three angles.
+constraint.rotate();
+// @ts-expect-error Pivot coordinates remain required.
+constraint.pivot();
+// @ts-expect-error Pivot-chain rotations still require three angles.
+constraint.pivot([0, 0, 0]).rotate();
+// @ts-expect-error Vertex-pivot rotations still require three angles.
+constraint.pivotVertex(1).rotate();
+// @ts-expect-error Axis rotations still require one angle.
+constraint.around(solid.axis).rotate();
 // @ts-expect-error on only accepts directional bounds.
 solid.on(solid.center);
 // @ts-expect-error on does not accept a whole target model.
@@ -312,7 +406,7 @@ solid.kind;
 // @ts-expect-error Runtime labels are not in the authoring whitelist.
 solid.name;
 // @ts-expect-error Render appearance state is not directly observable by authors.
-solid.color;
+solid.materialSnapshot;
 // @ts-expect-error Composition internals are available only through tooling.
 solid.children;
 // @ts-expect-error Anchor discriminators are not in the authoring whitelist.
@@ -473,3 +567,18 @@ box(1, 2, 3).relate(self =>
     .pivot(1, 2, 3)
     .rotate(0, 0, 90),
 );
+
+const double = cached((value: number) => value * 2);
+const doubled: number = double(2);
+const encoded = cached((value: number) => ({value}), {
+  encoder: value => new Uint8Array([value.value]),
+  decoder: bytes => ({value: bytes[0]}),
+});
+const decodedValue: number = encoded(2).value;
+// @ts-expect-error Both codec functions are required.
+cached((value: number) => value, {encoder: value => new Uint8Array([value])});
+// @ts-expect-error The computation must be synchronous.
+cached(async (value: number) => value);
+// @ts-expect-error Argument types are preserved.
+double('2');
+void [doubled, decodedValue];

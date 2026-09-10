@@ -2,8 +2,17 @@ import {committedSpatialObject} from './tools/spatial-edit';
 import {isCompositionInputRole} from './model/operation-context';
 import type {ModelDiagnostic} from './model/diagnostic';
 import * as THREE from 'three';
-import type {ImageView} from './rendering/image-camera';
-import {ViewportNavigation} from './ui/viewport-navigation';
+import {
+  action,
+  computed,
+  makeObservable,
+  observableRef,
+  runInAction,
+} from 'mobx';
+import {orientImageCamera, type ImageView} from './rendering/image-camera';
+import {ViewportNavigation, type CameraPose} from './ui/viewport-navigation';
+import type {ViewCamera} from './rendering/view-camera';
+import {ViewportScenes, type ViewportScene} from './model/viewport-scene';
 import {LineMaterial} from 'three/addons/lines/LineMaterial.js';
 import {LineSegments2} from 'three/addons/lines/LineSegments2.js';
 import type {
@@ -34,7 +43,9 @@ import {
   createRenderedModelNode,
   createSurfaceGeometry,
   disposeObject,
+  modelingHelper,
   type ModelPlacement,
+  type ModelRenderMode,
 } from './rendering/model-renderer';
 import {
   TransformGizmo,
@@ -47,6 +58,13 @@ import type {
   ViewportDecoration,
 } from './viewport-decoration';
 import {editableParameterUsages} from './model/parameter-provenance';
+import {parameterSourceDecoration} from './model/parameter-decorations';
+import {sourceParameterAt} from './model/tool-arguments';
+import type {ToolParameterSchema} from './model/tool-schema';
+import {
+  dimensionEdges,
+  representativeDimensionEdge,
+} from './rendering/parameter-dimension';
 import {
   canPreviewConstraintTransform,
   spatialBindings,
@@ -94,11 +112,20 @@ type RenderedViewTarget = SelectedViewTarget | Readonly<{kind: 'completion'}>;
 type TransientPreviewRestore = Readonly<{
   module: ModelModule;
   selectedKey: string;
-  cameraPosition: THREE.Vector3;
-  cameraUp: THREE.Vector3;
-  controlsTarget: THREE.Vector3;
-  cameraNear: number;
-  cameraFar: number;
+  pose: CameraPose;
+  mode: ModelRenderMode;
+}>;
+
+type ViewportState = Readonly<{
+  pose: CameraPose;
+  mode: ModelRenderMode;
+  savedAt: number;
+}>;
+
+type SourceViewSelection = Readonly<{
+  file: string;
+  offset: number;
+  contextId?: string;
 }>;
 
 type SelectionGesture = {
@@ -123,10 +150,11 @@ type DecorationInstance = Readonly<{
   anchor?: AnchorDecorationObject;
   corners?: ScreenSpaceCornerLines;
   bounds?: boolean;
-  visibility?: 'without-object-bounds';
+  visibility?: 'without-object-bounds' | 'without-topology-selection';
 }>;
 
 export type ModelViewportOptions = Readonly<{
+  onViewChange?: () => void;
   onSourcePreviewDiagnostic?: (diagnostic: ModelDiagnostic | undefined) => void;
   onSelect: (occurrence: Occurrence) => void;
   onDrillDown: (node: ModelSnapshotObject) => void;
@@ -135,6 +163,8 @@ export type ModelViewportOptions = Readonly<{
   onTopologySelection: (event: TopologySelectionEvent) => void;
   sourceDecorationProviders?: readonly SourceDecorationProvider[];
   showCoordinateReference?: boolean;
+  animateViewChanges?: boolean;
+  isViewVisible?: () => boolean;
 }>;
 
 export type TopologySelectionEvent =
@@ -275,20 +305,33 @@ export class ModelViewport {
   private topologyPointer?: Readonly<{clientX: number; clientY: number}>;
   private readonly rendering: ModelRenderer;
   private readonly scene: THREE.Scene;
-  private readonly camera: THREE.PerspectiveCamera;
+  private get camera(): ViewCamera {
+    return this.rendering.camera;
+  }
   private readonly renderer: THREE.WebGLRenderer;
   private readonly controls: ViewportNavigation;
   private readonly coordinateReference?: ViewportCoordinateReference;
+  private liveGridStep = 1;
+  private readonly animateViewChanges: boolean;
+  private readonly isViewVisible: () => boolean;
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointer = new THREE.Vector2();
   private readonly root = new THREE.Group();
-  private readonly decorationRoot = new THREE.Group();
+  private readonly decorationRoot = modelingHelper(new THREE.Group());
   private readonly occurrences = new Map<string, Occurrence>();
   private readonly contextOccurrences = new Map<string, Occurrence>();
   private readonly parameterPreviews = new Map<string, number>();
+  private sourceParameter?: Readonly<{
+    targetId: string;
+    parameter: ToolParameterSchema;
+  }>;
   private readonly committedParameterPreviews = new Map<string, number>();
   private readonly occurrenceTranslationPreviews = new Map<string, Vec3>();
   private hasFramedView = false;
+  private scenes?: ViewportScenes;
+  private activeScene?: ViewportScene;
+  private readonly viewStates = new Map<string, ViewportState>();
+  private stateRevision = 0;
   private readonly committedOccurrenceTranslationPreviews = new Map<
     string,
     Vec3
@@ -302,6 +345,7 @@ export class ModelViewport {
   >();
   private readonly spatialParameterValues = new Map<string, number>();
   private readonly onSelect: ModelViewportOptions['onSelect'];
+  private readonly onViewChange: ModelViewportOptions['onViewChange'];
   private readonly onSourcePreviewDiagnostic: ModelViewportOptions['onSourcePreviewDiagnostic'];
   private readonly onDrillDown: ModelViewportOptions['onDrillDown'];
   private readonly onNavigateSource: ModelViewportOptions['onNavigateSource'];
@@ -326,6 +370,7 @@ export class ModelViewport {
     private readonly container: HTMLElement,
     {
       onSelect,
+      onViewChange,
       onDrillDown,
       onNavigateSource,
       onPositionTool,
@@ -333,25 +378,43 @@ export class ModelViewport {
       onTopologySelection,
       sourceDecorationProviders = [],
       showCoordinateReference = true,
+      animateViewChanges = true,
+      isViewVisible = () => true,
     }: ModelViewportOptions,
   ) {
     this.onSelect = onSelect;
+    this.animateViewChanges = animateViewChanges;
+    this.isViewVisible = isViewVisible;
+    this.onViewChange = onViewChange;
     this.onSourcePreviewDiagnostic = onSourcePreviewDiagnostic;
     this.onDrillDown = onDrillDown;
     this.onNavigateSource = onNavigateSource;
     this.onTopologySelection = onTopologySelection;
     this.sourceDecorationProviders = sourceDecorationProviders;
     this.rendering = new ModelRenderer(this.container);
+    makeObservable<this, 'liveGridStep'>(this, {
+      liveGridStep: observableRef,
+      gridStep: computed,
+      renderMode: computed,
+      setRenderMode: action,
+    });
     this.scene = this.rendering.scene;
-    this.camera = this.rendering.camera;
     this.renderer = this.rendering.renderer;
     this.scene.add(this.root, this.decorationRoot);
     this.controls = new ViewportNavigation(
       this.camera,
       this.renderer.domElement,
+      camera => {
+        this.rendering.camera = camera;
+        this.coordinateReference?.setCamera(camera);
+        this.transformGizmo.setCamera(camera);
+      },
     );
     this.controls.addEventListener('change', () => {
-      this.rendering.updateCameraRange(this.controls.focus);
+      this.rendering.updateCameraRange(
+        this.controls.focus,
+        this.controls.object.position.distanceTo(this.controls.focus),
+      );
       this.refreshTopologyHover();
     });
     if (showCoordinateReference) {
@@ -378,6 +441,7 @@ export class ModelViewport {
       enabled => {
         this.controls.setNavigationEnabled(enabled);
       },
+      this.rendering.grid,
       onPositionTool,
     );
 
@@ -403,20 +467,70 @@ export class ModelViewport {
     this.animate();
   }
 
+  get renderMode(): ModelRenderMode {
+    return this.rendering.mode;
+  }
+
+  /** The last live frame, unaffected by temporary image-export grid settings. */
+  get gridStep(): number | undefined {
+    return this.renderMode === 'modeling' ? this.liveGridStep : undefined;
+  }
+
+  setRenderMode(mode: ModelRenderMode): void {
+    if (this.rendering.mode === mode) return;
+    this.rendering.setMode(mode);
+    this.container.dataset.renderMode = mode;
+    this.selectionGesture = undefined;
+    this.selectionClick = undefined;
+    this.topologyPointer = undefined;
+    this.updateTopologyHover(undefined);
+    this.coordinateReference?.setVisible(mode === 'modeling');
+    this.updateTransformGizmo();
+    this.rendering.renderFrame();
+  }
+
   renderModule(
-    module: ModelModule,
+    module: ModelModule | null,
     selectedKey = 'root',
-    fitCamera = true,
-  ): void {
+    source?: SourceViewSelection,
+  ): boolean {
+    this.restoreTransientPreview();
+    this.saveViewportState();
     this.module = module;
+    this.sourceParameter = undefined;
+    this.scenes = module ? new ViewportScenes(module) : undefined;
     this.selectedViewTarget = {kind: 'model'};
-    this.transientPreviewRestore = undefined;
-    if (module.fallback) {
-      this.renderModelView(selectedKey, fitCamera);
+    this.renderedViewTarget = {kind: 'model'};
+    if (
+      source &&
+      this.selectBySourceOffset(
+        source.file,
+        source.offset,
+        selectedKey,
+        source.contextId,
+      )
+    )
+      return true;
+    if (module?.fallback) {
+      this.renderModelView(selectedKey);
     } else {
-      this.renderedViewTarget = {kind: 'model'};
+      this.activeScene = undefined;
       this.resetRenderedView();
+      this.onViewChange?.();
     }
+    return false;
+  }
+
+  hasRenderableGeometry(): boolean {
+    return this.renderedOccurrences().some(({node}) => {
+      const mesh = node.mesh;
+      return (
+        mesh !== undefined &&
+        (mesh.triangles.length > 0 ||
+          mesh.edges.length > 0 ||
+          mesh.topologyVertices.length > 0)
+      );
+    });
   }
 
   selectBySourceOffset(
@@ -426,7 +540,15 @@ export class ModelViewport {
     preferredContextId?: string,
   ): boolean {
     const match = this.sourceTargetAt(file, offset);
+    const previousParameter = this.sourceParameter;
+    const parameter = match && sourceParameterAt(match, file, offset);
+    this.sourceParameter = parameter
+      ? {targetId: match!.id, parameter}
+      : undefined;
     if (!match) {
+      this.clearDecorations(
+        sourceDecorationOwner(parameterSourceDecoration.id),
+      );
       return false;
     }
 
@@ -460,17 +582,23 @@ export class ModelViewport {
       this.renderedViewTarget.targetId !== match.id ||
       this.renderedViewTarget.evaluationIndex !== evaluationIndex
     ) {
-      this.renderSourceTarget(
-        match,
-        evaluationIndex,
-        true,
-        preferredOccurrenceKey,
-      );
-    } else if (
-      preferredOccurrenceKey &&
-      this.occurrences.has(preferredOccurrenceKey)
-    ) {
-      this.selectKey(preferredOccurrenceKey, false);
+      this.renderSourceTarget(match, evaluationIndex, preferredOccurrenceKey);
+    } else {
+      if (
+        preferredOccurrenceKey &&
+        this.occurrences.has(preferredOccurrenceKey)
+      ) {
+        this.selectKey(preferredOccurrenceKey, false);
+      }
+      if (previousParameter?.parameter !== parameter) {
+        const scope = this.renderedSourceScope();
+        if (scope)
+          this.renderSourceDecorations(
+            this.module!,
+            scope.target,
+            scope.evaluation,
+          );
+      }
     }
     return true;
   }
@@ -488,7 +616,7 @@ export class ModelViewport {
       evaluationIndex,
     };
     this.transientPreviewRestore = undefined;
-    this.renderSourceTarget(scope.target, evaluationIndex, false);
+    this.renderSourceTarget(scope.target, evaluationIndex);
     return true;
   }
 
@@ -563,7 +691,6 @@ export class ModelViewport {
       previewTarget,
       previewEvaluation,
       {kind: 'completion'},
-      true,
       undefined,
       [receiver.nodeId],
     );
@@ -589,12 +716,12 @@ export class ModelViewport {
       const evaluation =
         target.evaluations[matchingContext] ?? target.evaluations[0];
       if (evaluation) {
-        this.renderSourceScene(target, evaluation, {kind: 'completion'}, true);
+        this.renderSourceScene(target, evaluation, {kind: 'completion'});
         return true;
       }
     }
     if (!module.fallback) return false;
-    this.renderModelView('root', true, {kind: 'completion'});
+    this.renderModelView('root', {kind: 'completion'});
     return true;
   }
 
@@ -605,9 +732,12 @@ export class ModelViewport {
     }
     this.transientPreviewRestore = undefined;
     this.module = restore.module;
+    this.scenes = new ViewportScenes(restore.module);
+    this.controls.restorePose(restore.pose);
+    this.setRenderMode(restore.mode);
     const target = this.selectedViewTarget;
     if (target.kind === 'model') {
-      this.renderModelView(restore.selectedKey, false);
+      this.renderModelView(restore.selectedKey);
     } else {
       const sourceTarget = this.module.sourceTargets.find(
         candidate => candidate.id === target.targetId,
@@ -616,21 +746,13 @@ export class ModelViewport {
         this.renderSourceTarget(
           sourceTarget,
           target.evaluationIndex,
-          false,
           restore.selectedKey,
         );
       } else {
         this.selectedViewTarget = {kind: 'model'};
-        this.renderModelView('root', false);
+        this.renderModelView('root');
       }
     }
-    this.camera.position.copy(restore.cameraPosition);
-    this.camera.up.copy(restore.cameraUp);
-    this.controls.focus.copy(restore.controlsTarget);
-    this.camera.near = restore.cameraNear;
-    this.camera.far = restore.cameraFar;
-    this.camera.updateProjectionMatrix();
-    this.controls.syncCamera();
   }
 
   getSelected(): Occurrence | undefined {
@@ -706,6 +828,7 @@ export class ModelViewport {
     this.updateTransformGizmo();
     this.rebuildTopologySelectionOverlay();
     this.refreshTopologyHover();
+    this.updateDecorationVisibilities();
     return availableIds;
   }
 
@@ -713,6 +836,7 @@ export class ModelViewport {
     this.clearTopologySelection();
     this.rebuildSelectionHighlight();
     this.updateTransformGizmo();
+    this.updateDecorationVisibilities();
   }
 
   setSelectedTopologyIds(ids: readonly TopologyId[]): void {
@@ -866,7 +990,15 @@ export class ModelViewport {
                         decoration,
                         decoration.operationRole ?? occurrence.operationRole,
                       )
-                    : new AnchorDecorationObject(decoration);
+                    : decoration.kind === 'topology'
+                      ? createTopologyDecorationObject(decoration)
+                      : decoration.kind === 'dimension'
+                        ? createDimensionDecorationObject(
+                            decoration,
+                            this.camera,
+                            occurrence.object.matrixWorld,
+                          )
+                        : new AnchorDecorationObject(decoration);
           const object = new THREE.Group();
           object.matrixAutoUpdate = false;
           object.add(decorationObject);
@@ -888,7 +1020,9 @@ export class ModelViewport {
                 child instanceof ScreenSpaceCornerLines,
             ),
             visibility:
-              decoration.kind === 'edges' ? decoration.visibility : undefined,
+              decoration.kind === 'edges' || decoration.kind === 'topology'
+                ? decoration.visibility
+                : undefined,
           };
           this.updateDecorationTransform(instance);
           instance.corners?.update(
@@ -937,6 +1071,7 @@ export class ModelViewport {
         module: this.module,
         target: scope.target,
         evaluation: scope.evaluation,
+        parameter: this.parameterForSource(scope.target),
       }),
     );
   }
@@ -963,6 +1098,15 @@ export class ModelViewport {
     this.hasFramedView = true;
   }
 
+  setView(view: ImageView): void {
+    const bounds = new THREE.Box3().setFromObject(this.root);
+    if (bounds.isEmpty()) return;
+    orientImageCamera(this.controls.object, bounds, view);
+    bounds.getCenter(this.controls.focus);
+    this.controls.syncCamera();
+    this.hasFramedView = true;
+  }
+
   captureImage(width: number, height: number, view?: ImageView): Promise<Blob> {
     this.selectionHighlight?.update();
     this.impactHighlights.forEach(highlight => highlight.update());
@@ -983,6 +1127,79 @@ export class ModelViewport {
     this.hasFramedView = true;
   }
 
+  private saveViewportState(): void {
+    if (!this.activeScene || this.transientPreviewRestore) return;
+    this.viewStates.set(this.activeScene.key, {
+      pose: this.controls.savedPose(),
+      mode: this.rendering.mode,
+      savedAt: ++this.stateRevision,
+    });
+  }
+
+  private activateViewportScene(
+    nodes: readonly ModelSnapshotObject[],
+    placement: ModelPlacement,
+  ): void {
+    if (this.transientPreviewRestore) {
+      this.frameChangedView();
+      return;
+    }
+    if (!this.hasRenderableGeometry()) {
+      this.saveViewportState();
+      this.activeScene = undefined;
+      return;
+    }
+    const scene = this.scenes!.scene(nodes, placement);
+    if (scene?.key === this.activeScene?.key) {
+      if (!this.isViewVisible())
+        this.controls.restorePose(this.controls.savedPose());
+      return;
+    }
+    const previousScene = this.activeScene;
+    this.saveViewportState();
+    this.activeScene = scene;
+    if (!scene) return;
+    let state = this.viewStates.get(scene.key);
+    if (!state) {
+      const source = scene.defaults
+        .flatMap(candidate => {
+          const saved = this.viewStates.get(candidate.key);
+          return saved ? [{...candidate, saved}] : [];
+        })
+        .sort((a, b) => b.saved.savedAt - a.saved.savedAt)[0];
+      if (source) {
+        state = {
+          ...source.saved,
+          pose: transformCameraPose(source.saved.pose, source.transform),
+        };
+      }
+    }
+    this.setRenderMode(state?.mode ?? 'modeling');
+    const framing = !state ? this.cameraFraming(this.root) : undefined;
+    const pose = state?.pose ?? (framing && this.controls.defaultPose(framing));
+    if (pose) {
+      const previousFrame = scene.defaults.find(
+        candidate => candidate.key === previousScene?.key,
+      );
+      if (previousFrame) {
+        this.controls.restorePose(
+          transformCameraPose(
+            this.controls.capturePose(),
+            previousFrame.transform,
+          ),
+        );
+      }
+      this.controls.restorePose(
+        pose,
+        previousScene !== undefined &&
+          this.animateViewChanges &&
+          this.isViewVisible(),
+      );
+      this.hasFramedView = true;
+    }
+    this.saveViewportState();
+  }
+
   private frame(target: THREE.Object3D, allowZoomIn: boolean): void {
     const framing = this.cameraFraming(target);
     if (framing) this.controls.frame(framing, allowZoomIn);
@@ -991,7 +1208,7 @@ export class ModelViewport {
   private cameraFraming(target: THREE.Object3D) {
     return this.rendering.framing(
       target,
-      this.camera.position.distanceTo(this.controls.focus),
+      this.controls.object,
       this.transformGizmo.framing(),
     );
   }
@@ -1039,7 +1256,6 @@ export class ModelViewport {
   private renderSourceTarget(
     target: SourceTarget,
     evaluationIndex: number,
-    fitCamera = true,
     selectedKey?: string,
   ): void {
     const evaluation = target.evaluations[evaluationIndex];
@@ -1050,7 +1266,6 @@ export class ModelViewport {
       target,
       evaluation,
       {kind: 'source', targetId: target.id, evaluationIndex},
-      fitCamera,
       selectedKey,
     );
   }
@@ -1059,7 +1274,6 @@ export class ModelViewport {
     target: SourceTarget,
     evaluation: SourceTargetEvaluation,
     renderedViewTarget: RenderedViewTarget,
-    fitCamera: boolean,
     selectedKey?: string,
     focusNodeIds = evaluation.focusNodeIds,
   ): void {
@@ -1174,12 +1388,11 @@ export class ModelViewport {
         if (highlight) {
           highlight.raycast = () => undefined;
           applyTransform(highlight, reference.transform);
-          object.add(highlight);
+          object.add(modelingHelper(highlight));
         }
       }
       this.root.add(object);
     });
-    this.renderSourceDecorations(this.module!, target, evaluation);
     this.applyPreviewTransforms();
     const nextKey =
       selectedKey && this.occurrences.has(selectedKey)
@@ -1188,14 +1401,16 @@ export class ModelViewport {
     if (nextKey) {
       this.selectKey(nextKey, false);
     }
-    if (fitCamera) {
-      this.frameChangedView();
-    }
+    this.activateViewportScene(
+      [...focusNodes, ...contextNodes.map(({node}) => node)],
+      placement,
+    );
+    this.renderSourceDecorations(this.module!, target, evaluation);
+    this.onViewChange?.();
   }
 
   private renderModelView(
     selectedKey: string,
-    fitCamera: boolean,
     renderedViewTarget: RenderedViewTarget = {kind: 'model'},
   ): void {
     if (!this.module?.fallback) {
@@ -1217,9 +1432,8 @@ export class ModelViewport {
       this.occurrences.has(selectedKey) ? selectedKey : 'root',
       false,
     );
-    if (fitCamera) {
-      this.frameChangedView();
-    }
+    this.activateViewportScene([this.module.fallback], 'standalone');
+    this.onViewChange?.();
   }
 
   private sourceTargetAt(
@@ -1328,14 +1542,12 @@ export class ModelViewport {
 
   private captureTransientPreviewRestore(): void {
     if (!this.module) return;
+    this.saveViewportState();
     this.transientPreviewRestore ??= {
       module: this.module,
       selectedKey: this.selectedKey,
-      cameraPosition: this.camera.position.clone(),
-      cameraUp: this.camera.up.clone(),
-      controlsTarget: this.controls.focus.clone(),
-      cameraNear: this.camera.near,
-      cameraFar: this.camera.far,
+      pose: this.controls.capturePose(),
+      mode: this.rendering.mode,
     };
   }
 
@@ -1347,6 +1559,7 @@ export class ModelViewport {
     }
     this.transformGizmo.detach();
     this.coordinateReference?.setTarget(undefined);
+    this.rendering.grid.target = undefined;
     this.clearImpactHighlights();
     this.clearAllDecorations();
     this.disposeRoot();
@@ -1374,6 +1587,7 @@ export class ModelViewport {
     }
     this.selectedKey = key;
     this.coordinateReference?.setTarget(occurrence.object);
+    this.rendering.grid.target = occurrence.object;
     this.rebuildSelectionHighlight();
     this.rebuildImpactHighlights();
     this.updateDecorationVisibilities();
@@ -1414,10 +1628,14 @@ export class ModelViewport {
         renderOrder: 20,
       },
     );
-    this.scene.add(this.selectionHighlight);
+    this.scene.add(modelingHelper(this.selectionHighlight));
   }
 
   private updateTransformGizmo(): void {
+    if (this.rendering.mode === 'render') {
+      this.transformGizmo.detach();
+      return;
+    }
     const occurrence = this.getSelected();
     const scope = this.renderedSourceScope();
     if (occurrence && scope && this.module) {
@@ -1553,13 +1771,30 @@ export class ModelViewport {
   ): void {
     if (evaluation.constraintPreviewDiagnostic) return;
     for (const provider of this.sourceDecorationProviders) {
-      const decorations = provider.decorations({module, target, evaluation});
+      const decorations = provider.decorations({
+        module,
+        target,
+        evaluation,
+        parameter: this.parameterForSource(target),
+      });
       this.setDecorations(sourceDecorationOwner(provider.id), decorations);
     }
   }
 
+  private parameterForSource(
+    target: SourceTarget,
+  ): ToolParameterSchema | undefined {
+    return this.sourceParameter?.targetId === target.id
+      ? this.sourceParameter.parameter
+      : undefined;
+  }
+
   private beginSelectionGesture(event: PointerEvent): void {
-    if (!event.isPrimary || event.button !== 0) {
+    if (
+      this.rendering.mode === 'render' ||
+      !event.isPrimary ||
+      event.button !== 0
+    ) {
       this.selectionGesture = undefined;
       this.selectionClick = undefined;
       return;
@@ -1754,6 +1989,7 @@ export class ModelViewport {
   private pickTopology(
     event: Readonly<{clientX: number; clientY: number}>,
   ): TopologyId | undefined {
+    if (this.rendering.mode === 'render') return undefined;
     const selection = this.topologySelection;
     if (!selection) return undefined;
     selection.guide.updateWorldMatrix(true, false);
@@ -1855,7 +2091,7 @@ export class ModelViewport {
     }
     this.selectedViewTarget = {kind: 'source', targetId, evaluationIndex};
     this.transientPreviewRestore = undefined;
-    this.renderSourceTarget(target, evaluationIndex, false);
+    this.renderSourceTarget(target, evaluationIndex);
     const occurrence = [...this.occurrences.values()].find(
       candidate => candidate.node.nodeId === nodeId,
     );
@@ -1878,7 +2114,10 @@ export class ModelViewport {
   private animate = (): void => {
     requestAnimationFrame(this.animate);
     this.controls.updateTransition(performance.now());
-    this.rendering.updateCameraRange(this.controls.focus);
+    this.rendering.updateCameraRange(
+      this.controls.focus,
+      this.controls.object.position.distanceTo(this.controls.focus),
+    );
     this.coordinateReference?.update();
     this.rendering.renderFrame(() => {
       this.selectionHighlight?.update();
@@ -1889,6 +2128,10 @@ export class ModelViewport {
         this.renderer.domElement.clientWidth,
         this.renderer.domElement.clientHeight,
       );
+    });
+    const step = this.rendering.grid.step;
+    runInAction(() => {
+      this.liveGridStep = step;
     });
   };
 
@@ -1924,7 +2167,7 @@ export class ModelViewport {
         },
       );
       this.impactHighlights.push(highlight);
-      this.scene.add(highlight);
+      this.scene.add(modelingHelper(highlight));
     }
   }
 
@@ -2009,6 +2252,11 @@ export class ModelViewport {
     instance: DecorationInstance,
     boundsKeys: ReadonlySet<string>,
   ): void {
+    if (instance.visibility === 'without-topology-selection') {
+      instance.object.visible =
+        this.topologySelection?.occurrenceKey !== instance.occurrenceKey;
+      return;
+    }
     if (instance.visibility !== 'without-object-bounds') return;
     const occurrence =
       this.occurrences.get(instance.occurrenceKey) ??
@@ -2123,6 +2371,11 @@ export function positionBindings(
       sensitivity: sensitivity * constraint.offsetDirection,
       parameterKind: target.kind,
       frame: constraint.offsetFrame,
+      // Earlier offset calls already contribute to the solved displacement.
+      // Missing arguments belong to this call and each default to zero.
+      completeArguments: receiver
+        ? {sourceRef: receiver, values: [0, 0, 0]}
+        : undefined,
     };
     const axisCandidates = candidates.get(axis) ?? [];
     axisCandidates.push(binding);
@@ -2156,7 +2409,6 @@ export function positionBindings(
         value: 0,
         sensitivity: constraint.offsetDirection,
         parameterKind: 'length',
-        step: 0.5,
         frame: constraint.offsetFrame,
         receiver: {sourceRef: receiver},
         occurrenceKeys,
@@ -2419,6 +2671,70 @@ function createEdgeDecorationObject(
   }
 
   applyTransform(container, decoration.transform);
+  return container;
+}
+
+function createTopologyDecorationObject(
+  decoration: Extract<ViewportDecoration, {kind: 'topology'}>,
+): THREE.Object3D {
+  const container = new THREE.Group();
+  container.name = decoration.id;
+  container.userData.decoration = decoration;
+  const highlight = createTopologyHighlight(
+    decoration.mesh,
+    decoration.topologyKind,
+    new TopologyIdSet(decoration.ids),
+    decoration.appearance.color,
+    28,
+    symbolLineWidth,
+  );
+  if (highlight) container.add(highlight);
+  applyTransform(container, decoration.transform);
+  return container;
+}
+
+function createDimensionDecorationObject(
+  decoration: Extract<ViewportDecoration, {kind: 'dimension'}>,
+  camera: THREE.Camera,
+  matrixWorld: THREE.Matrix4,
+): THREE.Object3D {
+  const edge = representativeDimensionEdge(
+    dimensionEdges(decoration.mesh, decoration.dimension),
+    camera,
+    matrixWorld,
+  );
+  const start = edge?.start ?? decoration.dimension.origin;
+  const end =
+    edge?.end ??
+    new THREE.Vector3(...start)
+      .add(new THREE.Vector3(...decoration.dimension.vector))
+      .toArray();
+  const positions = new Float32Array([...start, ...end]);
+  const container = new THREE.Group();
+  container.name = decoration.id;
+  container.userData.decoration = decoration;
+  container.userData.edgeId = edge?.id;
+  container.add(
+    createScreenSpaceEdgeLines(
+      positions,
+      decoration.appearance.color,
+      symbolLineWidth,
+      decoration.appearance.opacity,
+      decoration.appearance.depthTest,
+      28,
+    ),
+  );
+  if (!edge)
+    container.add(
+      createScreenSpacePoints(
+        positions,
+        decoration.appearance.color,
+        topologyPointSize,
+        1,
+        false,
+        28,
+      ),
+    );
   return container;
 }
 
@@ -2806,6 +3122,19 @@ function containsNode(node: ModelSnapshotObject, nodeId: string): boolean {
     node.nodeId === nodeId ||
     node.children.some(child => containsNode(child, nodeId))
   );
+}
+
+function transformCameraPose(
+  pose: CameraPose,
+  transform: THREE.Matrix4,
+): CameraPose {
+  return {
+    ...pose,
+    focus: pose.focus.clone().applyMatrix4(transform),
+    orientation: new THREE.Quaternion()
+      .setFromRotationMatrix(transform)
+      .multiply(pose.orientation),
+  };
 }
 
 function uniqueContextNodes(

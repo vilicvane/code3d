@@ -9,6 +9,7 @@ export type ModelProject = Readonly<{
 
 export type ProjectDirectoryTemplate = Readonly<{
   directory: string;
+  assets?: readonly Readonly<{path: string; url: string}>[];
   revision: string;
   files: readonly ProjectSourceFile[];
 }>;
@@ -52,6 +53,7 @@ export function projectPathIsWithin(path: string, directory: string): boolean {
   const normalizedPath = normalizeProjectPath(path);
   const normalizedDirectory = normalizeProjectPath(directory);
   return (
+    normalizedDirectory === '/' ||
     normalizedPath === normalizedDirectory ||
     normalizedPath.startsWith(`${normalizedDirectory}/`)
   );
@@ -69,4 +71,17 @@ export function resolveProjectImport(
 
 export function isSourceFile(path: string): boolean {
   return /\.(?:[cm]?[jt]sx?)$/i.test(path);
+}
+
+export function isProjectTextFile(path: string): boolean {
+  return isSourceFile(path) || /\.json$/i.test(path);
+}
+
+export function isReadonlyProjectFile(path: string): boolean {
+  return (
+    path.includes('/node_modules/') ||
+    path.includes('/.code3d/') ||
+    path.includes('/.git/') ||
+    path.endsWith('/code3d-lock.json')
+  );
 }

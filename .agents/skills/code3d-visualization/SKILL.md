@@ -49,7 +49,7 @@ description: 'code3d App 的既定三维可视化约定。USE FOR: 修改 viewpo
 - 曲线自身就是箭杆，只在有向端点放切向箭头头部，不另画短直线。反向曲线使用另一端及反向切线；闭合曲线使用稳定接缝点。
 - relate 的主次由当前源码关注侧决定：on/align 方法名及后续 offset/pivot/around/rotate 等链操作（包含其参数）强调 self；on/align 目标括号内的空白、注释及子表达式强调目标元素。显式左侧元素引用强调 source。反向写法 `base.on(self.up).offset(...)` 的链操作与目标括号内均强调 self。
 - relate 使用三级层次：当前 constraint 的关注侧、同一 constraint 的另一侧、其余相关上下文。主侧标记保留基础不透明度；次侧整组乘 0.7。这里的 100% / 70% 是基础不透明度的倍率。箭头、圆环、角线、包围盒、真实几何边界及面填充一起变化，例如 bound 角线 85% / 59.5%、填充 18% / 12.6%。不能固定 source 强、target 弱，也不能只改箭头。两侧同属一个 node 时仍分别处理。
-- 模型透明度用于保证能看穿，采用 `max(材质透明度, 预览透明度)`，即 `opacity = min(材质 opacity, 层级上限)`，不与 paint 相乘。主侧模型面上限 0.82，次侧模型面/线/点上限 0.7；默认模型的 opacity 0.68 在两侧均保留，主次由标记表达。当前两侧保留模型颜色，外围使用淡灰上下文，面上限 0.18、线与点上限 0.28；不能把本来更透明的材质变实。点、曲线、实体和组合体子对象都遵循此规则，切换 constraint 后重新判定。模型阈值与标记倍率各自定义。
+- 模型透明度用于保证能看穿，采用 `max(材质透明度, 预览透明度)`，即 `opacity = min(材质 opacity, 层级上限)`，不与材质 opacity 相乘。主侧模型面上限 0.82，次侧模型面/线/点上限 0.7；默认模型的 opacity 0.68 在两侧均保留，主次由标记表达。当前两侧保留模型颜色，外围使用淡灰上下文，面上限 0.18、线与点上限 0.28；不能把本来更透明的材质变实。点、曲线、实体和组合体子对象都遵循此规则，切换 constraint 后重新判定。模型阈值与标记倍率各自定义。
 - source 与 target 的头部尺寸、形状一致；不以空心、放大或颜色变化表示主次。关系标记统一从当前关系快照生成，命名元素及普通拓扑引用路径不再叠加一套。
 - 标记关注侧与引用值的归属分别保留；例如在 `around(axis.axis)` 内强调 self 时，成员补全仍作用于 axis。未编译的成员候选预览不能混用旧关系快照；编译完成后恢复完整关系预览。
 - 面箭头沿面法向；方向元数据与 offset/旋转参考坐标架保持各自含义。
@@ -57,7 +57,7 @@ description: 'code3d App 的既定三维可视化约定。USE FOR: 修改 viewpo
 
 ## 颜色、层级与交互
 
-- 背景网格使用背景色的 RGB 反色，普通线与中心线通过不透明度区分强弱，不另指定灰色。
+- 背景网格普通线使用背景色的 RGB 反色，主次格线通过不透明度区分强弱，不另指定灰色；穿过原点的中心线使用对应的 XYZ 轴色，颜色按线延伸的实际轴向归属。
 - 选择对象本身不改其材质；源码上下文的明暗对比表达焦点，组合体可用被动包围盒标记。参数预览对其他受影响对象使用独立的次级颜色。
 - 拓扑可选项为暗灰，预览/选中为黄绿色，悬停未选中为青色，悬停已选中为橙色。悬停只改颜色，不改变尺寸，也不叠加面的填充透明度。
 - 参考轴使用橙色，真实面使用青色；空间操作 XYZ 轴沿用现有轴色定义。颜色服务于既有语义，不为新增入口自创近似色。
@@ -71,6 +71,6 @@ description: 'code3d App 的既定三维可视化约定。USE FOR: 修改 viewpo
 - [元素/关系装饰](../../../packages/app/src/model/element-decorations.ts)、[空间控件](../../../packages/app/src/tools/transform-gizmo.ts)、[viewport](../../../packages/app/src/viewport.ts)。
 - `.on` 的完整源包围盒来自 [运行时](../../../packages/core/src/library/runtime.ts) 的 `ConstraintSnapshot.sourceBounds`；[浏览器回归](../../../packages/app/test/browser/on-source-bounds.test.ts) 检查实际绘制与选择框恢复。
 - 主次规则见 [#46](https://github.com/vilicvane/code3d/issues/46)；[关系上下文](../../../packages/app/src/model/constraint-context.ts) 解析关注侧，[源码预览样式](../../../packages/app/src/rendering/source-appearance.ts) 定义模型各层级的不透明度上限，[焦点测试](../../../packages/app/test/relation-focus.test.ts) 覆盖源码边界与补全归属，[绘制测试](../../../packages/app/test/browser/relation-focus.test.ts) 核对多对象三级显示、材质透明度阈值、切换关系、整组标记不透明度和导出。
-- 边界与选择的完整上下文见 [PLAN.md](../../../PLAN.md)，已确认需求见 [#40](https://github.com/vilicvane/code3d/issues/40)、[#43](https://github.com/vilicvane/code3d/issues/43)、[#44](https://github.com/vilicvane/code3d/issues/44)。
+- 边界与选择的完整上下文见[建模内核](../../docs/architecture/modeling.md)和[源码与交互工具](../../docs/architecture/tooling.md)，已确认需求见 [#40](https://github.com/vilicvane/code3d/issues/40)、[#43](https://github.com/vilicvane/code3d/issues/43)、[#44](https://github.com/vilicvane/code3d/issues/44)。
 - 改尺寸时验证缩放、大小模型、组合体、实例缩放、视口调整与 DPR；改 bound 时验证有/无包围盒、重复实例和切换选择；改关系时验证曲线端点、反向与阶段姿态。验证实际绘制和至少一组视觉结果，不只检查装饰数据。
 - 使用现有 [尺寸测试](../../../packages/app/test/anchor-decoration.test.ts)、[角线测试](../../../packages/app/test/screen-space-lines.test.ts) 和 [浏览器回归](../../../packages/app/test/browser/screen-space-arrow-head.test.ts)；涉及拖拽时同时验证拾取、取消与写回，涉及截图时验证导出尺寸。

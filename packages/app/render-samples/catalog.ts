@@ -51,7 +51,7 @@ export const renderSamples = [
       'Hollow a box with uniform walls, then pick the faces to leave open.',
     category: 'Shells and openings',
     file: 'shell.ts',
-    focus: {context: "enclosure.paint('#d8ff3e')", token: 'paint'},
+    focus: {context: "enclosure.material('#d8ff3e')", token: 'material'},
     tags: ['box', 'shell', 'surface selection'],
   },
   {
@@ -62,8 +62,8 @@ export const renderSamples = [
     category: 'Placement and rotation',
     file: 'bound-rotation.ts',
     focus: {
-      context: "loft([start, via, end]).paint('#d8ff3e')",
-      token: 'paint',
+      context: "loft([start, via, end]).material('#d8ff3e')",
+      token: 'material',
     },
     tags: ['relate', 'on', 'pivot', 'rotate', 'loft'],
   },

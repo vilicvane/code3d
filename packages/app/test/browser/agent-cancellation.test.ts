@@ -53,7 +53,7 @@ test(
     for (const origin of ['user', 'agent']) {
       await page.evaluate(async () => {
         const session = window.cancellationSession;
-        const file = window.cancellationEditor.currentFile();
+        const file = window.cancellationEditor.currentFile()!;
         const read = await session.handle('test', 'Test', {
           operation: 'fs.read',
           path: file,
@@ -88,7 +88,7 @@ test(
           input: {
             type: true,
             cursor: {
-              file: window.cancellationEditor.currentFile(),
+              file: window.cancellationEditor.currentFile()!,
               regex: 'const (value) =',
             },
           },
@@ -113,7 +113,7 @@ test(
           ]);
         } else {
           const session = window.cancellationSession;
-          const file = editor.currentFile();
+          const file = editor.currentFile()!;
           const read = await session.handle('test', 'Test', {
             operation: 'fs.read',
             path: file,
@@ -149,7 +149,7 @@ test(
           input: {
             topology: true,
             cursor: {
-              file: window.cancellationEditor.currentFile(),
+              file: window.cancellationEditor.currentFile()!,
               regex: '(box\\(2, 3, 4\\))',
             },
           },

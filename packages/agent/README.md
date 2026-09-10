@@ -13,7 +13,6 @@ and hands the complete private configuration to it through a copied prompt:
 
 ```json
 {
-  "version": 2,
   "port": 54321,
   "origin": "https://www.code3d.org",
   "sessionId": "stable-project-session-id",
@@ -32,11 +31,9 @@ the identity and journal, closes the old socket/retry, and generates an updated
 prompt. Revoke deletes that grant/journal and stops retries; Revoke all does
 so for every agent in the current project. Accepted changes continue saving.
 
-IndexedDB version 3 migrates existing remote grants once: it retains session ID,
-agent ID, key, names, colors, lastSeen and receipt keys, assigns local ports and
-records the current App origin. Obsolete host tokens/relay addresses are removed.
-Agents need to copy the updated configuration and start a local CLI service; no
-remote fallback remains. Never reopen an existing grant with an empty journal.
+Configuration and storage have one current format, with no configuration version
+or migration path. The App stores grants and receipts in `code3d-agents`.
+Never reopen an existing grant with an empty journal.
 
 ## Local authentication and lifecycle
 
@@ -85,127 +82,36 @@ Multiple endpoints share the App's project service; that service
 owns version checks, batch preflight, serialization and persistence. The endpoint
 alone does not supply transactional file writes or model observation semantics.
 
-Supported requests:
+The CLI accepts one JSON request from stdin. `AgentClient.request(value)` encrypts
+and sends that JSON value without interpreting operation names or fields. The
+bridge likewise forwards authenticated content without an operation schema.
+Validation and normalization run in the App's `AgentEndpoint`, so application
+operations can evolve without requiring a new CLI build. Configuration,
+encryption, receipt recovery and the generic response/artifact envelope are the
+stable transport contract. Current App operations still accept one request at a
+time; this does not introduce batch execution or JSON Lines.
 
-| Operation | Fields      | Purpose                                           |
-| --------- | ----------- | ------------------------------------------------- |
-| `context` | none        | Read the current App file and user selection      |
-| `fs.list` | `path`      | List a project directory                          |
-| `fs.read` | `path`      | Read file content and its version                 |
-| `fs.stat` | `path`      | Inspect a project path                            |
-| `apply`   | `input`     | Submit a file batch, cursor and requested outputs |
-| `result`  | `requestId` | Query the original result without executing again |
+## Use the client
 
-`context` returns `{file, revision, cursor}` for the current user editor state.
-The cursor is a one-capture regex and line range suitable for `apply`, or null
-when the editor has no selection. Reading context neither moves the user/agent
-cursor nor evaluates the model. Use `fs.read` on the returned file to obtain its
-source and modification version; supply the returned cursor explicitly to
-`apply` when adopting the user's target. Each new context invocation reads live
-state; retrying an old request ID still returns its original receipt.
+Install `@code3d/agent` to use the same authenticated client as the CLI. Configuration comes from the App's copied prompt:
 
-Copied initial and update prompts demonstrate this flow instead of embedding a
-source selection. Both link to the [website agent guide](https://www.code3d.org/docs/guides/agents/)
-for the command contract and public modeling APIs.
+```ts
+import {readFile} from 'node:fs/promises';
+import {AgentClient, parseAgentConfig} from '@code3d/agent';
 
-Project paths are absolute within the App project, such as `/model.ts`, and never
-refer to the CLI machine's project files. `apply.input` accepts:
-
-```json
-{
-  "files": [
-    {
-      "path": "/model.ts",
-      "version": "opaque-current-version",
-      "content": "complete replacement source"
-    }
-  ],
-  "cursor": {
-    "file": "/model.ts",
-    "regex": "return ([^;]+);",
-    "lines": [20, 40],
-    "arguments": "[10, 5, 6]"
-  },
-  "render": {"view": "front"},
-  "topology": true,
-  "type": true
-}
+const config = parseAgentConfig(
+  JSON.parse(await readFile('project.c3d.json', 'utf8')),
+);
+const client = await AgentClient.create(config);
+const response = await client.request({operation: 'context'});
+console.log(response);
 ```
 
-All top-level input fields are optional. A file's `version: null` requires absence
-and creates it; `content: null` deletes an existing version. Rename is represented
-as a delete/create batch with joint preflight; persistence failures must still
-report any partial disk changes. No partial text patches or silent overwrites
-are implied. The protocol checks the cursor payload shape; the App resolves it
-against the post-change source. Arguments are a TypeScript array expression, not
-JSON values; omission falls back to JSDoc arguments and then ordinary execution
-context.
-
-`render` accepts a boolean or `{view}`. Views are `isometric` (default), `front`,
-`back`, `left`, `right`, `top`, `bottom`, or `{direction: [x, y, z], up?: [x, y, z]}`.
-Direction points from the observed scene center toward the camera; front is +Z,
-right is +X and top is +Y. Custom vectors must be finite and nonzero; an explicit
-up vector cannot be parallel to the direction. Default up is +Y, or -Z/+Z for
-top/bottom directions. Perspective capture automatically fits the scene bounds
-for the output aspect ratio and does not change the user's camera. The response
-reports normalized direction/up and `coordinates: "observation-scene"`.
-Each requested view gets its own image, including renders of retained topology
-snapshots; images from a different view are never reused.
-
-`type: true` returns `observation.type` without requiring model execution.
-It describes the smallest syntax node covering the captured selection, or the
-node at an empty capture: sourceRef, static type, syntax kind, documentation,
-call/construct signatures and up to 100 members (name, type, optional). The
-`membersTotal` field makes truncation explicit. A cursor without type-bearing
-syntax returns null. Selecting a call returns its result type; selecting the
-function name returns its callable type. Temporary arguments do not alter
-static source types. Combined geometry/type output, including snapshot pages,
-uses the same source selection; runtime failures can still include static types.
-
-Model execution and topology inspection have no 15-second deadline. Every
-accepted project revision invalidates the old observation and terminates its
-Worker, releasing the observation queue. User edits immediately cancel the
-App's old compilation and schedule the latest source. Terminating the Worker
-also interrupts synchronous loops during preparation or execution; completed
-compilations retain the kernel cache for later edits. Superseded observations
-preserve their accepted/saved file outcomes. Project preparation (120 seconds),
-CAD export (30 seconds) and transport deadlines remain separate.
-
-### App cursor preflight
-
-The App's `inspectAgentCursor(source, cursor, signal?)` resolves exactly one
-capturing group in exactly one full regex match. Empty captures are carets;
-captures that did not participate in the match are errors. Noncapturing groups,
-named captures and lookarounds use JavaScript regex semantics. Overlapping full
-matches count toward ambiguity as well.
-
-`lines: [first, last]` uses 1-based inclusive line numbers, excluding the final
-line's terminator. The full match and captured selection must lie in that range.
-The range filters positions in the original source, so anchors and lookarounds
-retain full-file context. Flags default to `u`; optional `i`, `m`, `s`, `u` or `v`
-are accepted, while search and capture-index flags are managed by the App.
-Returned offsets use UTF-16 with exclusive ends, alongside 1-based Monaco
-positions and the selected text.
-
-The resolver runs in a disposable Web Worker with a one-second deadline and
-cancellation. A slow regex fails preflight without blocking the editor. The
-caller supplies the proposed source and must reject the file batch if this
-check fails, then recheck versions after asynchronous preflight. The App project
-service provides this validation and a shared queue for user saves and agent
-batches, retaining accepted content when persistence fails.
-
-Responses are `{ok: true, data, artifacts?}` or
-`{ok: false, error: {code, message, details?}}`. Artifact fields are `name`,
-`mimeType`, and `base64` (unpadded base64url). App responses must distinguish a
-saved change from a later evaluation failure; transport success cannot do this.
-
-A local transport failure after authenticating the request uses an encrypted
-`{transportError: {code, message, delivery}}` response instead of an App result.
-`delivery: "not_sent"` proves only that this attempt was not forwarded; it does
-not describe earlier attempts with the same ID. Disconnection after forwarding
-and exchange timeout use `"unknown"`. Unauthenticated HTTP failures or incomplete
-responses cannot establish non-execution. The client exposes `AgentTransportError`
-and the CLI adds recovery commands for its configuration file.
+The [local CLI service](../cli/README.md) must be running and connected to the
+open App. For project work, follow the [agent Markdown entry](../../docs/agents.md):
+[file operations](../../docs/agents/files.md), [cursor selection](../../docs/agents/cursor.md),
+[observations](../../docs/agents/observation.md), and [recovery](../../docs/agents/recovery.md)
+define the App's behavior. They are maintained separately from this transport SDK.
 
 ## Retries and uncertain outcomes
 
@@ -240,21 +146,20 @@ exercise real session-managed CLI, WebSockets, restart/reconnect and App-side re
 tests run the real CLI against both storage backends, render PNGs, page topology,
 verify temporary/JSDoc arguments and check independent cursors.
 
-## App integration
+## Source and integration
 
-The App's Agents panel issues, copies and revokes persistent grants. Closing or
-switching away from a project disconnects its transport; reopening restores its
-identity and journals without opening the panel. A Web Lock allows one tab per
-project to serve agents; another tab reports that ownership instead of taking
-over the connection. A directory without restored permission cannot expose the
-browser fallback project under that directory's credentials. Cursor positions
-and model snapshots are transient; select a new cursor after reopening. A failed save retains accepted drafts
-and exposes Retry saving. Protected `.git` and `.code3d` paths cannot be modified.
-Text apply/read is bounded at 8 MiB per file; binary files can be read as artifacts.
+| Area                                              | Implementation                                                               |
+| ------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Public API and configuration                      | [Exports](src/index.ts), [grant configuration](src/config.ts)                |
+| Encryption and authenticated envelopes            | [Cipher](src/crypto.ts), [validation](src/validation.ts)                     |
+| Node/browser HTTP client                          | [AgentClient](src/client.ts)                                                 |
+| Reconnecting browser transport                    | [LocalHost](src/local-host.ts)                                               |
+| App request validation and response types         | [Protocol](src/protocol.ts), [render options](src/render-options.ts)         |
+| Request deduplication and receipt persistence     | [AgentEndpoint](src/endpoint.ts)                                             |
+| Local service adapter                             | [CLI bridge](../cli/src/bridge.ts), [service lifecycle](../cli/src/serve.ts) |
+| Project files, observations and persistent grants | [App agent integration](../app/src/agent/), [App README](../app/README.md)   |
 
-`AgentObserver` serializes offscreen requests through the existing model compiler,
-viewport source selection and screenshot exporter. It does not change the user's
-viewport or cursor. Collaborator selections are Monaco decorations with matching name labels anchored by content widgets. Screenshot
-corner views and history remain deferred while viewport work proceeds separately.
-See the [agent guide](../web/src/content/docs/docs/guides/agents.md#render-types-and-topology) for topology
-paging, identity scope, geometry coordinates and snapshot expiration.
+Use the [tests](test/) for complete endpoint/journal integration examples,
+including lost replies and reconnects. Keep the browser transport free of project
+storage responsibilities: the App project service owns write preflight, saving,
+compilation, and follow behavior.

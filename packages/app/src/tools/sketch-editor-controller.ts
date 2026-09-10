@@ -4,6 +4,7 @@ import type {
   SketchConstraint,
   SketchPointAddress,
   SourceRef,
+  ModelSnapshotObject,
 } from '@code3d/core/tooling';
 import {
   solveSketchSnapshot,
@@ -20,7 +21,12 @@ import type {CompiledSketch} from '../model/sketch-trace';
 import type {ModelDiagnostic} from '../model/diagnostic';
 import {SketchEditor} from '../ui/sketch-editor';
 import {
+  sketchContextOutlines,
+  type SketchContextOutline,
+} from './sketch-context';
+import {
   analyzeSketchSource,
+  isNumericSketchConstraint,
   sketchDraftEntity,
   type SketchChange,
   type SketchEditIntent,
@@ -36,6 +42,8 @@ export class SketchEditorController {
   private data: readonly SketchGeometryData[] = [];
   private stale = false;
   private revision = 0;
+  private context: readonly SketchContextOutline[] = [];
+  private viewScope = '';
 
   constructor(
     container: HTMLElement,
@@ -61,9 +69,15 @@ export class SketchEditorController {
     id: string | undefined,
     sketches: ReadonlyMap<string, CompiledSketch>,
     selectionRef: SourceRef | undefined,
+    viewScope: string,
+    objects: ReadonlyMap<string, ModelSnapshotObject> = new Map(),
   ): void {
     this.revision++;
+    this.viewScope = viewScope;
     this.active = id ? sketches.get(id) : undefined;
+    this.context = this.active
+      ? sketchContextOutlines(this.active, objects)
+      : [];
     this.data = this.active?.data ?? [];
     this.stale = false;
     this.selectionRef = selectionRef;
@@ -81,6 +95,19 @@ export class SketchEditorController {
 
   get diagnosticScope(): readonly CompiledSketch[] | undefined {
     return this.active ? this.sourceLayers : undefined;
+  }
+
+  get navigation() {
+    return this.editor.navigation;
+  }
+
+  dispose(): void {
+    this.revision++;
+    this.editor.dispose();
+  }
+
+  get hasTarget(): boolean {
+    return this.active !== undefined;
   }
 
   get isStale(): boolean {
@@ -196,10 +223,12 @@ export class SketchEditorController {
     const parsed =
       source === undefined ? undefined : analyzeSketchSource(source);
     this.editor.show({
+      key: JSON.stringify([this.viewScope, this.active.id]),
       id: this.active.id,
       revision: this.revision,
       layers: this.layers,
       data: this.data,
+      context: this.context,
       editable: parsed?.editable ?? new Map(),
       constraintValues: parsed?.constraintValues ?? new Map(),
       referenceable: new Set(Object.keys(this.active.references)),
@@ -228,6 +257,22 @@ export class SketchEditorController {
     });
     if (!committed) return false;
     this.revision++;
+    const changedDimension =
+      change.kind === 'dimension' ? change.value : undefined;
+    const addedConstraints =
+      change.kind === 'constrain' || change.kind === 'append'
+        ? (change.constraints ?? [])
+        : [];
+    if (
+      typeof changedDimension === 'string' ||
+      !addedConstraints.every(isNumericSketchConstraint)
+    ) {
+      // Source expressions are evaluated in the real project scope by the next
+      // compile. Do not publish a snapshot with a guessed numeric constraint.
+      this.stale = true;
+      this.render();
+      return true;
+    }
     const removed =
       change.kind === 'delete' || change.kind === 'trim' ? change.ids : [];
     const entries =
@@ -280,7 +325,7 @@ export class SketchEditorController {
             [
               constraint[0],
               constraint[1],
-              change.value,
+              changedDimension!,
             ] as SketchConstraint<SketchPointAddress>,
           ];
         if (
@@ -296,14 +341,16 @@ export class SketchEditorController {
         if (!rewrite) return [constraint];
         const [kind, , value] = constraint;
         const replacements: SketchConstraint<SketchPointAddress>[] =
-          kind === 'horizontal' || kind === 'vertical'
-            ? rewrite.ids.map(id => [kind, id])
-            : kind === 'length' ||
-                kind === 'angle' ||
-                kind === 'radius' ||
-                kind === 'sweep'
-              ? rewrite.ids.map(id => [kind, id, value])
-              : [constraint];
+          rewrite.targets.map(
+            target =>
+              (value === undefined
+                ? [kind, target]
+                : [
+                    kind,
+                    target,
+                    value,
+                  ]) as SketchConstraint<SketchPointAddress>,
+          );
         // The source resolver replaces the first target in place and appends
         // copies. Keep the same indices for another edit before compilation.
         copiedConstraints.push(...replacements.slice(1));
@@ -311,8 +358,7 @@ export class SketchEditorController {
       },
     );
     constraints.push(...copiedConstraints);
-    if (change.kind === 'append' || change.kind === 'constrain')
-      constraints.push(...(change.constraints ?? []));
+    constraints.push(...addedConstraints);
     this.layers = [
       ...this.layers.slice(0, -1),
       preview ?? {...local, entities, constraints},

@@ -1,4 +1,6 @@
 export {primitivesExample} from './primitives.ts';
+export {materialsExample} from './materials.ts';
+export {materialPresets} from './material-presets.ts';
 export {customPrimitivesExample, twistKnob} from './custom-primitives.ts';
 export {booleanOperationsExample} from './boolean-operations.ts';
 export {relationsAndElementsExample} from './relations-and-elements.ts';
@@ -10,4 +12,7 @@ export {designArgumentsExample, makeKnob} from './design-arguments.ts';
 export {fastenerExample} from './fasteners.ts';
 export {default as shellExample} from './shell.ts';
 export {default as sketchModelingExample} from './sketch-modeling.ts';
+export {default as sketchOnSurfaceExample} from './sketch-on-surface.ts';
 export {default as topologyPathsExample} from './topology-paths.ts';
+
+export * as textModeling from './text.ts';

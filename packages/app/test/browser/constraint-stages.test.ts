@@ -1,6 +1,8 @@
+import {appIsolationHeaders} from '../../build/isolation.ts';
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {chromium} from 'playwright-core';
+import {composeTransforms, invertTransform} from '@code3d/core/tooling';
 
 test(
   'caret stages render their own pose, reference geometry and tools',
@@ -19,6 +21,7 @@ test(
     await page.route(url, route =>
       route.fulfill({
         contentType: 'text/html',
+        headers: appIsolationHeaders,
         body: '<main style="width:900px;height:700px"></main>',
       }),
     );
@@ -94,7 +97,12 @@ test(
           .around(base.axis).rotate(30).offset(7, 0, 0));
         export default group([base, part]);`;
         const module = await compile(source);
-        const finalPose = module.fallback!.children[1].compositionTransform;
+        // group() recenters its origin; compare in the original base's frame.
+        const [base, part] = module.fallback!.children;
+        const finalPose = {
+          base: base.compositionTransform,
+          part: part.compositionTransform,
+        };
         const stages = [
           'on(base.up)',
           'offset(10',
@@ -174,7 +182,13 @@ test(
       stages[4].node!.pose.quaternion,
       stages[5].node!.pose.quaternion,
     );
-    assert.deepEqual(stages[6].node!.pose, result.finalPose);
+    const finalPose = composeTransforms(
+      invertTransform(result.finalPose.base),
+      result.finalPose.part,
+    );
+    near(stages[6].node!.pose.position, finalPose.position);
+    near(stages[6].node!.pose.quaternion, finalPose.quaternion);
+    assert.deepEqual(stages[6].node!.pose.scale, result.finalPose.part.scale);
     assert.deepEqual(result.contextStagePose, stages[0].node!.pose);
     assert.equal(stages[3].bindings.length, 3);
     assert.equal(stages[5].bindings.length, 1);

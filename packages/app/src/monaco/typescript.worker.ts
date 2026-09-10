@@ -1,3 +1,4 @@
+import {TraceMap, originalPositionFor} from '@jridgewell/trace-mapping';
 import type * as typeScript from '@typescript/typescript6';
 import {
   initialize,
@@ -7,6 +8,7 @@ import {
 import {AnnotationLanguageService} from './annotation-language-service';
 import {cursorTypeInfo} from './type-info';
 import {
+  monacoFileName,
   typeScriptFileName,
   typeScriptWorkerRequests,
 } from './typescript-file-names';
@@ -41,6 +43,86 @@ const completionFormatSettings = {
 class ProjectTypeScriptWorker extends TypeScriptWorker {
   private readonly annotations = new AnnotationLanguageService(this);
 
+  override readFile(file: string): string | undefined {
+    return super.readFile(monacoFileName(file));
+  }
+
+  override fileExists(file: string): boolean {
+    return this.readFile(file) !== undefined;
+  }
+
+  override getScriptSnapshot(file: string) {
+    return super.getScriptSnapshot(monacoFileName(file));
+  }
+
+  override getScriptVersion(file: string): string {
+    return super.getScriptVersion(monacoFileName(file));
+  }
+
+  override realpath(file: string): string {
+    const snapshot = this.getScriptSnapshot(
+      '/workspace/.__code3d-realpaths.json',
+    );
+    if (!snapshot) return file;
+    const paths = JSON.parse(
+      snapshot.getText(0, snapshot.getLength()),
+    ) as Record<string, string>;
+    return paths[file] ?? file;
+  }
+
+  override async getDefinitionAtPosition(file: string, position: number) {
+    const definitions = await super.getDefinitionAtPosition(file, position);
+    return definitions?.map(definition => this.sourceDefinition(definition));
+  }
+
+  private sourceDefinition(
+    definition: typeScript.DefinitionInfo,
+  ): typeScript.DefinitionInfo {
+    if (!/\.d\.[cm]?ts$/.test(definition.fileName)) return definition;
+    const declaration = this.readFile(definition.fileName);
+    const mapping =
+      declaration &&
+      /\/\/# sourceMappingURL=(.+)/.exec(declaration)?.[1].trim();
+    if (!mapping) return definition;
+    const mapPath = typeScriptFileName(
+      new URL(mapping, monacoFileName(definition.fileName)).href,
+    );
+    const mapSource = this.readFile(mapPath);
+    if (!mapSource) return definition;
+    const map = new TraceMap(mapSource, monacoFileName(mapPath));
+    const locate = (offset: number) => {
+      const prefix = declaration!.slice(0, offset);
+      return originalPositionFor(map, {
+        line: prefix.split('\n').length,
+        column: offset - prefix.lastIndexOf('\n') - 1,
+      });
+    };
+    const start = locate(definition.textSpan.start);
+    if (!start.source || start.line === null || start.column === null)
+      return definition;
+    const sourceFile = typeScriptFileName(start.source);
+    const source = this.readFile(sourceFile);
+    if (source === undefined) return definition;
+    const offsetAt = (line: number, column: number) => {
+      let offset = 0;
+      for (let current = 1; current < line; current++)
+        offset = source.indexOf('\n', offset) + 1;
+      return offset + column;
+    };
+    const offset = offsetAt(start.line, start.column);
+    const end = locate(definition.textSpan.start + definition.textSpan.length);
+    const length =
+      end.source === start.source && end.line !== null && end.column !== null
+        ? Math.max(0, offsetAt(end.line, end.column) - offset)
+        : 0;
+    return {
+      ...definition,
+      fileName: sourceFile,
+      textSpan: {start: offset, length},
+      contextSpan: undefined,
+    };
+  }
+
   async getProjectTypeInfo(file: string, start: number, end: number) {
     return cursorTypeInfo(this.getLanguageService(), file, start, end);
   }
@@ -60,7 +142,9 @@ class ProjectTypeScriptWorker extends TypeScriptWorker {
   override getScriptFileNames(): string[] {
     return [
       ...new Set(super.getScriptFileNames().map(typeScriptFileName)),
-    ].filter(fileName => !fileName.endsWith('/package.json'));
+    ].filter(
+      fileName => !fileName.endsWith('.json') && !fileName.endsWith('.map'),
+    );
   }
 
   async getProjectCompletions(

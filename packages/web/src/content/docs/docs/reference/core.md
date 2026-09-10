@@ -50,7 +50,7 @@ Planar profiles lie in the local XZ plane with a +Y normal.
 | `bezier(points)`                           | Bézier curve                                 |
 | `spline(points)`                           | Interpolating spline                         |
 | `loft(sections, options?)`                 | Solid through sections; optional curve spine |
-| `extrude(face, distance)`                  | Solid extruded along one face's local normal |
+| `extrude(faceOrFaces, distance)`           | Solid extruded along one face's local normal |
 
 See [local coordinates and placement](../../concepts/local-coordinates/) for
 the coordinate frame of a model, reference, or composition.
@@ -68,8 +68,11 @@ non-zero signed distance and preserve the starting face's coordinates. For an
 unrotated profile, positive distance extends along +Y; negative distance extends
 along −Y. Rotating the face rotates its extrusion direction; changing its origin
 does not recenter the result. The returned solid supports Boolean operations,
-fillets, chamfers, and shells. Use `faces.map(face => face.extrude(3))` for a list
-of profiles.
+fillets, chamfers, and shells. `extrude(faces, distance)` accepts a readonly array
+of profiles and returns a readonly array of solids in the same order, preserving
+each face's placement. An empty input returns `[]`; a single face still returns
+a single solid. Both overloads retain required TypeScript distances and use the
+same runtime default of 10 while editing.
 
 ```ts
 import {circle, extrude, rectangle} from '@code3d/core';
@@ -77,6 +80,63 @@ import {circle, extrude, rectangle} from '@code3d/core';
 export const plate = rectangle(30, 20).extrude(3).fillet(0.5);
 export const pin = extrude(circle(2), -10);
 ```
+
+## Runtime defaults while editing
+
+The dimension-based primitives and numeric methods below keep their required TypeScript parameters,
+but their implementations supply defaults for omitted or `undefined` arguments.
+For example, `box()` previews a 10 × 10 × 10 box, while the editor still reports
+the missing arguments; `box(20)` previews 20 × 10 × 10. Finish the arguments to
+make the source type-correct. These defaults also apply in ordinary JavaScript
+execution and do not depend on the App.
+
+| Function         | Runtime defaults, in parameter order |
+| ---------------- | ------------------------------------ |
+| `box`            | `10, 10, 10`                         |
+| `cylinder`       | `5, 10`                              |
+| `sphere`         | `5`                                  |
+| `frustum`        | `5, 3, 10`                           |
+| `regularPrism`   | `5, 10, 6, 0`                        |
+| `tube`           | `5, 3, 10`                           |
+| `coil`           | `5, 1, 3, 3`                         |
+| `circle`         | `5`                                  |
+| `ellipse`        | `5, 3`                               |
+| `rectangle`      | `10, 10`                             |
+| `regularPolygon` | `5, 6, 0`                            |
+
+| Method or utility parameter                            | Runtime defaults |
+| ------------------------------------------------------ | ---------------- |
+| Model/group `rotate` and relation/pivot-chain `rotate` | `0, 0, 0`        |
+| Model/group `originOffset` and relation `offset`       | `0, 0, 0`        |
+| Relation `pivot`                                       | `[0, 0, 0]`      |
+| `around(axis).rotate`                                  | `0`              |
+| Geometric model `scaled`                               | `1`              |
+| Face `extrude` and the `extrude` utility's distance    | `10`             |
+| Solid `fillet`, `chamfer` and `shell`                  | `1`              |
+
+For example, `box(20, 30, 40).rotate()` previews the unchanged body, and
+`.rotate(30)` previews a 30-degree X rotation. Their missing-angle diagnostics
+remain until all three arguments are supplied. Relation `offset()` behaves like
+explicit `offset(0, 0, 0)`, including the existing tangential placement rules;
+`pivot()` selects self's local origin. Geometry IDs, reference axes and input
+models still need explicit values.
+
+Explicit arguments remain subject to their normal validation: `box(0)`, for
+example, still reports an error. The parameter panel shows omitted defaults as
+placeholders and only writes arguments when you edit them. See
+[parameter defaults](../../guides/model-tools/#describe-an-omitted-arguments-default).
+
+Spatial controls use the rendered operation's position and frame, so omitted
+arguments do not hide its translation arrows or rotation rings. Committing a
+drag fills all remaining omitted defaults in that call: dragging the X ring of
+`rotate()` writes `rotate(angle, 0, 0)`, and dragging `pivot()` writes all three
+coordinates. This also applies when editing an existing or upstream parameter.
+The parameter change and default completion form one undo step. Merely selecting a
+tool, cancelling a drag or returning to its starting value leaves the source
+unchanged. Existing editable expressions retain their normal editing behavior;
+opaque inputs such as `pivot(coords)` or `rotate(...angles)` are replaced with
+the current evaluated coordinates or angles when you commit the drag. Undo
+restores the original expression.
 
 ## Editable sketch regions
 
@@ -97,6 +157,40 @@ const sleeve = profile.face().extrude(20);
 const parts = profile.faces().map(face => face.extrude(10));
 ```
 
+Geometry tuples store current data; the second argument's `constraints` array
+specifies relations that must remain true. Constraints have no IDs and use
+`['kind', target, value?]`. For local lines:
+
+- `['horizontal', line]` and `['vertical', line]` set an axis direction;
+  `['length', line, distance]` sets a positive length.
+- `['angle', line, degrees]` sets Orientation relative to +X.
+- `['parallel', [line1, line2]]` and `['perpendicular', [line1, line2]]`
+  relate two lines without requiring their finite segments to intersect.
+- `['angle', [line1, line2], degrees]` sets Angle between lines: the signed
+  rotation from the first line's authored start-to-end direction to the second,
+  positive counterclockwise and equivalent modulo 360.
+
+In Select, an ordinary click or box selection replaces the selection, Ctrl
+toggles elements, and Shift only adds them. Drag a box left-to-right for fully
+enclosed geometry or right-to-left for intersecting geometry. A multi-selection
+can remove any editable local constraint on its elements, while adding one
+requires the entire selection to satisfy the tool's prerequisites. Parallel
+accepts two or more local lines and creates pairwise relations; Perpendicular
+and Angle between lines require exactly two. Rectangle tools still create
+horizontal and vertical constraints by default.
+
+Drag an arc endpoint to reshape it while preferring to keep its center in place.
+Drag a circle or arc center to move it while preferring to keep its radius
+unchanged. Hard constraints, expression-controlled values and read-only upstream
+geometry take precedence; these preferences can keep the dragged point from
+reaching the pointer. They apply only during the gesture and do not add persistent
+fixed or radius constraints. To change an editable radius, drag the curve itself
+or edit its source or dimension.
+After the gesture-specific preferences, all other points prefer staying near
+their gesture-start positions. This lowest-priority step only resolves remaining
+freedom: it does not pull back a translated shape, weaken hard constraints or
+add fixed-point constraints to the source.
+
 Derived sketches include their read-only upstream boundaries. Separate contours
 produce separate faces; nested contours alternate material, holes and islands.
 Open, crossing, touching, overlapping and branched boundaries must be trimmed into
@@ -113,6 +207,35 @@ or without a spine. Different hole counts or multiple unpaired holes report an
 error rather than silently filling holes. Persistent region IDs and general
 multi-hole correspondence are not available yet. Try `examples/sketch-modeling.ts`
 in the App for a plate, multiple cutting tools and a hollow loft.
+
+### Sketch placement and model context
+
+`sketch.relate(self => self.plane.align(target))` creates an immutable spatial
+copy of the same local 2D definition. Empty and open sketches can relate before
+`face()` is available. Targets include named model planes and planar
+`model.surface(id)` references.
+
+```ts
+const host = box(40, 20, 30).rotate(0, 0, 25);
+const profile = sketch([
+  ['point', 1, [0, 0]],
+  ['circle', 2, [1, 4]],
+]);
+const opening = profile.relate(s => s.plane.align(host.surface(4)));
+const result = host.cut([opening.face().extrude(-20)]);
+```
+
+Derived layers, faces and extrusion inherit these relations. Plane alignment does
+not center on a trimmed face or rewrite sketch coordinates. The relation binds
+the referenced immutable host value; later creating another transformed host does
+not redirect it. Use `align()`, not finite-bound `on()`, for the sketch's unbounded
+reference plane.
+
+Select `opening` in the App to edit with read-only model outlines in the sketch's
+local plane, or `profile` for the original local view. Both write the same geometry
+array. The outlines do not become snapping targets or external geometry constraints.
+See `examples/sketch-on-surface.ts`; the surface-selection creation entry is still
+being implemented under [#114](https://github.com/vilicvane/code3d/issues/114).
 
 ## Composition and boolean operations
 
@@ -139,15 +262,62 @@ shows which operations are supported by the value you hold.
   become openings; omission or `[]` creates an enclosed cavity. See
   [making hollow parts](../../guides/shells/).
 - `.scaled(factor)`: uniformly scale a geometric model about local coordinate zero.
-- `.paint(color)`: return a recolored model; a group recursively overrides
-  every descendant's color, including already-painted parts and nested groups.
+- `.material(value)`: replace the complete material with a native Three.js material
+  or a CSS color shorthand; a group overrides every descendant's material.
 - `.relate(self => constraint)` or `.relate(self => [first, second])`: attach
   one or more relations for placement in a composition.
 - `.expose({name: element})`: publish a typed named-element interface.
 
-The outermost painted group determines the color of its complete subtree.
-Painting again replaces that override. Original models and shared parts used
-elsewhere retain their colors; previews and exports use the same result.
+## Materials
+
+Use [`@code3d/materials`](../materials/) for common plastic, metal, glass,
+ceramic and paint presets, such as `.material(aluminum({finish: 'polished'}))`.
+Each preset returns a native Three.js material and follows the same rules below.
+
+```ts
+import {box} from '@code3d/core';
+import {MeshPhysicalMaterial} from '@code3d/core/three';
+
+const part = box(20, 10, 12).material(
+  new MeshPhysicalMaterial({
+    color: '#eb633e',
+    roughness: 0.25,
+    clearcoat: 1,
+  }),
+);
+```
+
+`@code3d/core/three` directly re-exports Core's native Three.js classes and types.
+Use this entry in the model and its reusable packages to share the same instance.
+Named imports and `import * as THREE from "@code3d/core/three"` both work in the
+App and Node. Each `.material(value)` call captures a
+complete material and its loaded texture pixels. It returns a new model;
+subsequent changes to the original Three.js instance do not change that model.
+Calling it again replaces everything, without merging fields. An outer group
+replaces the material throughout its subtree; original parts used elsewhere
+remain unchanged.
+
+Use mesh materials for solids and surfaces, line materials for curves, and
+`PointsMaterial` for vertices. Modeling emphasis uses preview copies; Render
+mode and PNG images use the authored material. Loaded image, canvas, ImageBitmap,
+data and cube textures are supported. Load images with `ImageBitmapLoader` in
+the worker before assignment. Native face UVs are normalized to 0–1 per face;
+texture `repeat`, `offset` and `rotation` control mapping. See
+`/examples/materials.ts` in the App.
+
+The transferable value follows Three.js's `toJSON()` / `MaterialLoader`
+representation. Custom classes, callbacks such as `onBeforeCompile`, live
+video/render-target textures, compressed/layered textures and manual mipmaps
+are rejected. Material-local clipping, shadow-side and precision overrides are
+not serialized by Three.js and are also rejected. Shader uniforms must be supported by Three.js JSON.
+
+A CSS string replaces the whole material with the geometry's default material.
+It accepts names, `#RGB`, `#RGBA`, `#RRGGBB`, `#RRGGBBAA`, `rgb(...)` and
+`rgba(...)`. `.material('#f008')` equals `.material('#ff000088')`;
+`.material('rgba(255, 0, 0, 0.5)')` and `.material('rgb(100% 0% 0% / 50%)')`
+produce half-opaque red. Native materials use Three.js's `opacity` and
+`transparent` settings. STEP and 3MF preserve base color and opacity, while
+shaders and textures are rendered in PNG; STL contains geometry only.
 
 ## Scaling
 
@@ -273,3 +443,145 @@ Model dimensions use a consistent coordinate scale. When
 [exporting](../../guides/exporting/#scale-and-orientation), choose how many
 millimeters each model unit represents. This scales the output without changing
 the source model.
+
+## Cached computations
+
+```ts
+import {cached} from '@code3d/core';
+
+const profile = cached((radius: number, sides: number) =>
+  Array.from({length: sides}, (_, index) => {
+    const angle = (index * 2 * Math.PI) / sides;
+    return [radius * Math.cos(angle), radius * Math.sin(angle)];
+  }),
+);
+```
+
+`cached(fn, options?)` preserves synchronous parameter/result types. It caches
+ordinary data; use `definePrimitive()` for Replicad geometry so Core also owns
+native resources and creates fresh model metadata. Treat cached results as
+immutable. A memory hit returns the retained computed or decoded value directly,
+without decoding, copying or freezing it.
+
+The default persistent codec supports plain objects, arrays, scalar values
+(including `undefined`, nonfinite numbers and bigint), Date, Map, Set, ArrayBuffer,
+standard TypedArrays and DataView. Shared references, cycles, sparse arrays and
+shared buffer views survive restoration. Arguments use the same data encoding;
+changing dynamic state must be supplied as arguments. Functions, native handles
+and application class instances are not ordinary data arguments.
+
+For custom result types, supply both functions as
+`cached(fn, {encoder: value => bytes, decoder: bytes => value})`.
+The encoder runs when saving to disk; the decoder runs once when restoring an
+entry into memory. A subsequent memory hit never calls either codec. Async
+computations are excluded: incomplete work is not admitted to the cache.
+
+The model engine fingerprints static function definitions, their referenced
+local declarations, imported implementation graphs and codec definitions. Aliases
+and re-exports of Core cache factories are supported. Editing an unrelated local
+binding, moving a definition or adding/removing `export` preserves its identity;
+changing a referenced helper or dependency invalidates it. Functions supplied as parameters, dynamic factory results and closures capturing
+enclosing function/loop bindings use memory-only object identity.
+Outside the model engine, ordinary Node calls also use function object identity
+and share the process-wide memory LRU. Authors do not provide cache IDs or versions.
+
+Public cached computations, primitives, Core geometry, font parsing, glyph contours
+and snapshot queries share one cache. The memory budget remains 2 GiB; browser
+persistence shares the existing OPFS disk budget, min(1 GiB, 10% of origin quota).
+Cancellation and exceptions retain completed entries and editing history.
+
+## Text
+
+```ts
+import {font, text, extrude, group} from '@code3d/core';
+
+const sans = font(new URL('./fonts/DejaVuSans.ttf', import.meta.url));
+const profiles = text('B8i', sans, 10);
+export const lettering = group(extrude(profiles, 1));
+```
+
+`font()` synchronously returns an immutable font resource. The App prepares literal
+`new URL('./font.ttf', import.meta.url)` assets before evaluating model code, including
+assets in imported modules. Changing the font file invalidates the resource; equal
+file contents reuse parsed fonts and geometry. Node reads file URLs directly.
+`font()` also accepts `ArrayBuffer` or `Uint8Array` bytes, captured at the call.
+The engine also prepares static HTTP(S) font URLs before model execution:
+
+```ts
+const remote = font(new URL('https://example.com/fonts/SomeFont.ttf'));
+const label = text('AV', remote, 10, {letterSpacing: 0.5, kerning: true});
+```
+
+Use a direct font-file URL whose server permits CORS access from the App. The URL
+must be a literal in `new URL(...)`, including when declared in an imported module;
+no `await` is needed in model code. The engine decodes remote WOFF2 files to SFNT
+before synchronous font parsing.
+
+Google Fonts can instead be selected by name:
+
+```ts
+import {googleFont, text, extrude, group} from '@code3d/core';
+
+const play = googleFont('Play');
+const medium = googleFont('Roboto', {weight: 450, italic: true});
+export default group(extrude(text('Hello', play, 10), 1));
+```
+
+`googleFont(family, options?)` synchronously returns a `Font`. Both `weight` and
+`italic` are optional. Omitted axes are omitted from the Google request, leaving
+the defaults to Google; explicit weights apply to variable fonts as well as static
+faces. The App prepares the CSS and all of its Unicode subsets before execution,
+then selects the appropriate subset for each character. No stylesheet is installed.
+The family and options must be literals or static `const` values, including imports,
+aliases, object properties and spreads. Computed calls are reported at their source.
+Large families such as Chinese fonts require downloading all returned subsets on
+the first use; changing the text subsequently reuses those font resources.
+
+Network resources use an engine-owned 64 MiB memory LRU and the shared OPFS disk
+journal, then the network. CSS, compressed font bytes and content-addressed decoded
+bytes are retained. The disk budget is the smaller of 1 GiB and 10% of the browser's
+origin quota, including compaction space, shared with geometry. Fresh resources
+need no request across edits or Worker/page restarts. Expired resources revalidate
+through the browser HTTP cache; `no-store` resources are not retained. Concurrent
+requests share one download. Failed or cancelled builds preserve completed resources;
+partial downloads are discarded and can retry. Without OPFS, memory caching remains.
+The active build's resource references are outside the historical memory limit.
+
+Parsed fonts are memory-only entries in the existing 2 GiB kernel cache budget.
+CSS interpretation, normalized glyph contours, B-Rep, bounds and meshes reuse the
+existing memory/disk artifact cache. Font contents and requested variations identify
+these artifacts; changing text position or spacing can reuse unchanged glyphs.
+HTTP resource records remain reusable when the geometry runtime changes.
+
+For computed URLs or Node execution outside the App engine, download TTF/OTF bytes
+first (decode WOFF2 before passing its bytes):
+
+```ts
+const response = await fetch(fontUrl);
+if (!response.ok) throw new Error(`Font download failed: ${response.status}`);
+const remote = font(await response.arrayBuffer());
+```
+
+TTF and OTF fonts are supported, including variable fonts and Chinese characters
+when present in the font. HarfBuzz supplies glyph outlines, advances, kerning and
+ligatures. Quadratic/cubic curves are preserved, and overlapping contours within
+a glyph use the non-zero fill rule. Font collections (TTC), color glyph rendering,
+full bidirectional/multiscript paragraph layout and multiline text are outside this
+API. Missing glyphs report an error. Empty text and spaces create no faces; spaces
+still advance subsequent characters.
+
+`text(content, font, size, options?)` requires the first three arguments and returns connected planar
+regions as ordinary readonly `FaceModel[]`: `B` has one face with two holes; `i` has
+two faces. Size is the font em in model units, not the cap height. Coordinates are
++X right, -Z up, normal +Y, with all faces retaining the same baseline origin.
+Faces are never individually centered,
+so `group(extrude(...))`, origin operations and boolean tools preserve the layout.
+Use positive/negative extrusion and `union`/`cut` for raised or engraved lettering.
+Text is currently code-defined geometry rather than an editable sketch entity.
+
+`options.letterSpacing` defaults to `0` and adds a finite distance in model units
+between laid-out glyphs, including spaces. Negative values tighten the text. The
+distance stays constant when size changes, and disconnected parts of one glyph move
+together. `options.kerning` defaults to `true`; set it to `false` to disable the
+font's pair adjustments. Extra letter spacing is added after kerning. Supported
+ligatures remain single glyphs for spacing purposes.

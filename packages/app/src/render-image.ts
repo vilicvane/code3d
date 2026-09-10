@@ -80,6 +80,7 @@ async function renderModel(): Promise<void> {
     throw new ModelDiagnosticError(module.diagnostic);
   }
   const viewport = new ModelViewport(root, {
+    animateViewChanges: false,
     onSelect: () => undefined,
     onDrillDown: () => undefined,
     onNavigateSource: () => undefined,

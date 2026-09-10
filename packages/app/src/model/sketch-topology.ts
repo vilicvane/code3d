@@ -25,10 +25,19 @@ export function deletedSketchConstraints(
         deleted = pointDeleted(data);
         break;
       case 'length':
-      case 'angle':
       case 'radius':
       case 'sweep':
         deleted = ids.includes(data);
+        break;
+      case 'parallel':
+      case 'perpendicular':
+        deleted = data.some(id => ids.includes(id));
+        break;
+      case 'angle':
+        deleted =
+          typeof data === 'number'
+            ? ids.includes(data)
+            : data.some(id => ids.includes(id));
         break;
     }
     return deleted ? [index] : [];
