@@ -747,9 +747,9 @@ export interface ModelCapabilities<
   ): ModelForFamily<MergedElements<Elements, ExposedElements<Sources>>, Family>;
   /**
    * Shift the origin by this displacement: every local point becomes p - d.
-   * @code3d.param dx {kind: 'length', label: 'Origin ΔX'}
-   * @code3d.param dy {kind: 'length', label: 'Origin ΔY'}
-   * @code3d.param dz {kind: 'length', label: 'Origin ΔZ'}
+   * @code3d.param dx {kind: 'length', default: 0, label: 'Origin ΔX'}
+   * @code3d.param dy {kind: 'length', default: 0, label: 'Origin ΔY'}
+   * @code3d.param dz {kind: 'length', default: 0, label: 'Origin ΔZ'}
    */
   originOffset(
     dx: number,
@@ -760,9 +760,9 @@ export interface ModelCapabilities<
   originPoint(point: PointAnchor): ModelForFamily<Elements, Family>;
   /**
    * Rotate about the current origin, in degrees, about fixed local X, Y, then Z axes.
-   * @code3d.param x {kind: 'angle', label: 'Rotate X'}
-   * @code3d.param y {kind: 'angle', label: 'Rotate Y'}
-   * @code3d.param z {kind: 'angle', label: 'Rotate Z'}
+   * @code3d.param x {kind: 'angle', default: 0, label: 'Rotate X'}
+   * @code3d.param y {kind: 'angle', default: 0, label: 'Rotate Y'}
+   * @code3d.param z {kind: 'angle', default: 0, label: 'Rotate Z'}
    */
   rotate(x: number, y: number, z: number): ModelForFamily<Elements, Family>;
   /**
@@ -783,7 +783,7 @@ export interface GeometryCapabilities<
    * @code3d.param id {kind: 'vertex', label: 'Origin vertex'}
    */
   originVertex(id: VertexId): ModelForFamily<Elements, Family>;
-  /** @code3d.param factor {kind: 'ratio', label: 'Scale'} */
+  /** @code3d.param factor {kind: 'ratio', default: 1, label: 'Scale'} */
   scaled(factor: number): ModelForFamily<Elements, Family>;
 }
 
@@ -812,12 +812,12 @@ export interface SolidModificationCapabilities<Elements extends NamedElements> {
   /** Subtracts all tools in one boolean operation, equivalent to cut(stock, tools). */
   cut(tools: readonly SolidModel<{}>[]): SolidModel;
   /**
-   * @code3d.param radius {kind: 'length', label: 'Fillet radius', constraints: {exclusiveMin: 0}}
+   * @code3d.param radius {kind: 'length', default: 1, label: 'Fillet radius', constraints: {exclusiveMin: 0}}
    * @code3d.param edgeIds {kind: 'edge', actions: [{label: 'Use all', action: 'remove-argument'}]}
    */
   fillet(radius: number, edgeIds?: readonly EdgeId[]): SolidModel<Elements>;
   /**
-   * @code3d.param distance {kind: 'length', label: 'Chamfer distance', constraints: {exclusiveMin: 0}}
+   * @code3d.param distance {kind: 'length', default: 1, label: 'Chamfer distance', constraints: {exclusiveMin: 0}}
    * @code3d.param edgeIds {kind: 'edge', actions: [{label: 'Use all', action: 'remove-argument'}]}
    */
   chamfer(distance: number, edgeIds?: readonly EdgeId[]): SolidModel<Elements>;
@@ -825,7 +825,7 @@ export interface SolidModificationCapabilities<Elements extends NamedElements> {
    * Hollow a solid with uniform walls. Positive thickness offsets inward;
    * negative thickness offsets outward. Selected surfaces become openings.
    * Omit the selection, or use [], for a fully enclosed cavity.
-   * @code3d.param thickness {kind: 'length', label: 'Wall thickness'}
+   * @code3d.param thickness {kind: 'length', default: 1, label: 'Wall thickness'}
    * @code3d.param removedSurfaceIds {kind: 'surface', label: 'Openings', actions: [{label: 'Close all openings', action: 'remove-argument'}]}
    */
   shell(
@@ -864,7 +864,7 @@ export type FaceModel<Elements extends NamedElements = PlanarElements> =
       flip(): Surface;
       /**
        * Extrudes along the face's local plane normal. Signed distance; no recentering.
-       * @code3d.param distance {kind: 'length', label: 'Extrusion distance'}
+       * @code3d.param distance {kind: 'length', default: 10, label: 'Extrusion distance'}
        */
       extrude(distance: number): SolidModel;
     } & Elements;
@@ -1301,11 +1301,12 @@ export class Constraint extends ConstraintExpression {
    * In the target reference axes, on() pins matching bound centers; align()
    * translates self after alignment, retaining the relation's free modes.
    * Explicit zero pins tangential coordinates for on() only.
-   * @code3d.param x {kind: 'length', label: 'ΔX'}
-   * @code3d.param y {kind: 'length', label: 'ΔY'}
-   * @code3d.param z {kind: 'length', label: 'ΔZ'}
+   * @code3d.param x {kind: 'length', default: 0, label: 'ΔX'}
+   * @code3d.param y {kind: 'length', default: 0, label: 'ΔY'}
+   * @code3d.param z {kind: 'length', default: 0, label: 'ΔZ'}
    */
-  offset(x: number, y: number, z: number): Constraint {
+  offset(x: number, y: number, z: number): Constraint;
+  offset(x = 0, y = 0, z = 0): Constraint {
     assertFiniteVector('offset', [x, y, z]);
     return new Constraint(
       this.kind,
@@ -1320,11 +1321,12 @@ export class Constraint extends ConstraintExpression {
   }
   /**
    * Select this rotation's pivot in self's local coordinates.
-   * @code3d.param x {kind: 'length', label: 'Pivot X'}
-   * @code3d.param y {kind: 'length', label: 'Pivot Y'}
-   * @code3d.param z {kind: 'length', label: 'Pivot Z'}
+   * @code3d.param x {kind: 'length', default: 0, label: 'Pivot X'}
+   * @code3d.param y {kind: 'length', default: 0, label: 'Pivot Y'}
+   * @code3d.param z {kind: 'length', default: 0, label: 'Pivot Z'}
    */
-  pivot([x, y, z]: Vec3): ConstraintPivotChain {
+  pivot([x, y, z]: Vec3): ConstraintPivotChain;
+  pivot([x = 0, y = 0, z = 0]: Vec3 = [0, 0, 0]): ConstraintPivotChain {
     assertFiniteVector('pivot', [x, y, z]);
     return new ConstraintPivotChain(this, {kind: 'pivot', point: [x, y, z]});
   }
@@ -1360,11 +1362,12 @@ export class Constraint extends ConstraintExpression {
   }
   /**
    * Rotate about self's origin and local X, Y, then Z axes, in degrees.
-   * @code3d.param x {kind: 'angle', label: 'Rotate X'}
-   * @code3d.param y {kind: 'angle', label: 'Rotate Y'}
-   * @code3d.param z {kind: 'angle', label: 'Rotate Z'}
+   * @code3d.param x {kind: 'angle', default: 0, label: 'Rotate X'}
+   * @code3d.param y {kind: 'angle', default: 0, label: 'Rotate Y'}
+   * @code3d.param z {kind: 'angle', default: 0, label: 'Rotate Z'}
    */
-  rotate(x: number, y: number, z: number): Constraint {
+  rotate(x: number, y: number, z: number): Constraint;
+  rotate(x = 0, y = 0, z = 0): Constraint {
     return this.withRotation({kind: 'pivot', point: origin}, [x, y, z], this);
   }
   /** @internal */
@@ -1423,11 +1426,12 @@ export class ConstraintPivotChain extends ConstraintExpression {
     this.spatialOperation = {kind: selection.kind, pivot: selection};
   }
   /**
-   * @code3d.param x {kind: 'angle', label: 'Rotate X'}
-   * @code3d.param y {kind: 'angle', label: 'Rotate Y'}
-   * @code3d.param z {kind: 'angle', label: 'Rotate Z'}
+   * @code3d.param x {kind: 'angle', default: 0, label: 'Rotate X'}
+   * @code3d.param y {kind: 'angle', default: 0, label: 'Rotate Y'}
+   * @code3d.param z {kind: 'angle', default: 0, label: 'Rotate Z'}
    */
-  rotate(x: number, y: number, z: number): Constraint {
+  rotate(x: number, y: number, z: number): Constraint;
+  rotate(x = 0, y = 0, z = 0): Constraint {
     return this.constraint.withRotation(this.selection, [x, y, z], this);
   }
 }
@@ -1440,8 +1444,9 @@ export class ConstraintAroundChain extends ConstraintExpression {
     super(...constraint.chainArguments());
     this.spatialOperation = {kind: selection.kind, pivot: selection};
   }
-  /** @code3d.param angle {kind: 'angle', label: 'Rotate'} */
-  rotate(angle: number): Constraint {
+  /** @code3d.param angle {kind: 'angle', default: 0, label: 'Rotate'} */
+  rotate(angle: number): Constraint;
+  rotate(angle = 0): Constraint {
     return this.constraint.withRotation(this.selection, angle, this);
   }
 }
@@ -2410,7 +2415,8 @@ export class ModelObject<
     dx: number,
     dy: number,
     dz: number,
-  ): RuntimeModel<Elements, Kind> {
+  ): RuntimeModel<Elements, Kind>;
+  originOffset(dx = 0, dy = 0, dz = 0): RuntimeModel<Elements, Kind> {
     const offset: Vec3 = [dx, dy, dz];
     assertFiniteVector('originOffset', offset);
     return this.withOrigin(offset, {kind: 'originOffset'});
@@ -2472,7 +2478,8 @@ export class ModelObject<
     return this.transformed(transform, operation);
   }
 
-  rotate(x: number, y: number, z: number): RuntimeModel<Elements, Kind> {
+  rotate(x: number, y: number, z: number): RuntimeModel<Elements, Kind>;
+  rotate(x = 0, y = 0, z = 0): RuntimeModel<Elements, Kind> {
     const angles: Vec3 = [x, y, z];
     assertFiniteVector('rotate', angles);
     const operation = storedOperation('rotate', [
@@ -2555,7 +2562,8 @@ export class ModelObject<
     });
   }
 
-  scaled(factor: number): RuntimeModel<Elements, Kind> {
+  scaled(factor: number): RuntimeModel<Elements, Kind>;
+  scaled(factor = 1): RuntimeModel<Elements, Kind> {
     assertPositive('scale', factor);
     const source = this.requireGeometry();
     const geometry = evaluateModelGeometry('scaled', [factor], [source], () => {
@@ -2589,7 +2597,8 @@ export class ModelObject<
     );
   }
 
-  extrude(this: ModelObject<Elements, 'face'>, distance: number): SolidModel {
+  extrude(this: ModelObject<Elements, 'face'>, distance: number): SolidModel;
+  extrude(this: ModelObject<Elements, 'face'>, distance = 10): SolidModel {
     if (this.kind !== 'face')
       throw new Error('extrude requires a single face model.');
     if (!Number.isFinite(distance) || distance === 0)
@@ -2648,6 +2657,11 @@ export class ModelObject<
     this: ModelObject<Elements, 'solid'>,
     radius: number,
     edgeIds?: readonly EdgeId[],
+  ): SolidModel<Elements>;
+  fillet(
+    this: ModelObject<Elements, 'solid'>,
+    radius = 1,
+    edgeIds?: readonly EdgeId[],
   ): SolidModel<Elements> {
     assertPositive('radius', radius);
     const source = this.requireSolidGeometry();
@@ -2689,6 +2703,11 @@ export class ModelObject<
     this: ModelObject<Elements, 'solid'>,
     distance: number,
     edgeIds?: readonly EdgeId[],
+  ): SolidModel<Elements>;
+  chamfer(
+    this: ModelObject<Elements, 'solid'>,
+    distance = 1,
+    edgeIds?: readonly EdgeId[],
   ): SolidModel<Elements> {
     assertPositive('distance', distance);
     const source = this.requireSolidGeometry();
@@ -2729,6 +2748,11 @@ export class ModelObject<
   shell(
     this: ModelObject<Elements, 'solid'>,
     thickness: number,
+    removedSurfaceIds?: readonly SurfaceId[],
+  ): SolidModel<Elements>;
+  shell(
+    this: ModelObject<Elements, 'solid'>,
+    thickness = 1,
     removedSurfaceIds: readonly SurfaceId[] = [],
   ): SolidModel<Elements> {
     if (!Number.isFinite(thickness) || thickness === 0) {
@@ -3974,9 +3998,10 @@ export function union(operands: readonly SolidModel<{}>[]): SolidModel {
 
 /**
  * Extrudes a single face; use faces.map(face => extrude(face, distance)) for multiple regions.
- * @code3d.param distance {kind: 'length', label: 'Extrusion distance'}
+ * @code3d.param distance {kind: 'length', default: 10, label: 'Extrusion distance'}
  */
-export function extrude(face: FaceModel<{}>, distance: number): SolidModel {
+export function extrude(face: FaceModel<{}>, distance: number): SolidModel;
+export function extrude(face: FaceModel<{}>, distance = 10): SolidModel {
   return requireModelKind(
     face,
     'face',

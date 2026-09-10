@@ -291,6 +291,35 @@ constraint.pivotVertex(1).rotate(0, 0, 90);
 constraint.pivotVertex([1, 3]).rotate(0, 0, 90);
 constraint.around(solid.axis).rotate(45);
 constraint.rotate(0, 45, 90);
+// Runtime editing defaults do not relax required public method arguments.
+// @ts-expect-error Rotation still requires three angles.
+solid.rotate();
+// @ts-expect-error Partial rotation remains incomplete.
+solid.rotate(30);
+// @ts-expect-error Explicit undefined is still not a numeric angle.
+solid.rotate(undefined, 0, 0);
+// @ts-expect-error Origin offsets still require three displacements.
+solid.originOffset();
+// @ts-expect-error Scaling still requires a factor.
+solid.scaled();
+// @ts-expect-error Fillets still require a radius.
+solid.fillet();
+// @ts-expect-error Chamfers still require a distance.
+solid.chamfer();
+// @ts-expect-error Shells still require a thickness.
+solid.shell();
+// @ts-expect-error Relation offsets still require three displacements.
+constraint.offset();
+// @ts-expect-error Relation rotations still require three angles.
+constraint.rotate();
+// @ts-expect-error Pivot coordinates remain required.
+constraint.pivot();
+// @ts-expect-error Pivot-chain rotations still require three angles.
+constraint.pivot([0, 0, 0]).rotate();
+// @ts-expect-error Vertex-pivot rotations still require three angles.
+constraint.pivotVertex(1).rotate();
+// @ts-expect-error Axis rotations still require one angle.
+constraint.around(solid.axis).rotate();
 // @ts-expect-error on only accepts directional bounds.
 solid.on(solid.center);
 // @ts-expect-error on does not accept a whole target model.

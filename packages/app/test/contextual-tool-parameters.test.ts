@@ -279,6 +279,105 @@ test('annotations describe display defaults without changing interactive or ordi
   );
 });
 
+test('omitted coordinate arrays expose defaults and insert only the next component', async () => {
+  for (const [call, name, replacement] of [
+    ['pivot()', 'x', 'pivot([5])'],
+    ['pivot([])', 'x', 'pivot([5])'],
+    ['pivot([2])', 'y', 'pivot([2, 5])'],
+    ['pivot([2, /* next */])', 'y', 'pivot([2, /* next */5])'],
+    ['pivot([, 2, 3])', 'x', 'pivot([5, 2, 3])'],
+  ] as const) {
+    const source = `import {box} from '@code3d/core';
+const base = box(20, 30, 40);
+box(4, 6, 8).relate(self => self.on(base.up).${call}.rotate(0, 0, 25));`;
+    const result = await compileParameters(source, 'pivot');
+    assert.equal(result.module.diagnostic, undefined);
+    const parameter = defined(result.parameters.get(name));
+    const view = contextualParameterView(parameter);
+    assert.equal(view.placeholder, '0', call);
+    assert.equal(view.disabled, false, call);
+    assert.equal(contextualParameterIntent(parameter), undefined);
+    if (call === 'pivot()' || call === 'pivot([])') {
+      assert.equal(
+        contextualParameterView(defined(result.parameters.get('y')))
+          .placeholder,
+        '0',
+      );
+      assert.equal(
+        contextualParameterView(defined(result.parameters.get('y'))).disabled,
+        true,
+      );
+    }
+    parameter.value = 5;
+    const edited = replaceWithIntent(
+      source,
+      defined(contextualParameterIntent(parameter)),
+    );
+    assert.equal(edited, source.replace(call, replacement));
+    const next = await compileParameters(edited, 'pivot');
+    assert.equal(next.module.diagnostic, undefined);
+  }
+});
+
+test('coordinate defaults do not overwrite explicit undefined, opaque arrays or spreads', async () => {
+  for (const call of [
+    'pivot(undefined)',
+    'pivot(coords)',
+    'pivot([...coords])',
+    'pivot([1, ...coords])',
+  ]) {
+    const source = `import {box} from '@code3d/core';
+const coords = [1, 2, 3] as const;
+const base = box(20, 30, 40);
+box(4, 6, 8).relate(self => self.on(base.up).${call}.rotate(0, 0, 25));`;
+    const {parameters} = await compileParameters(source, 'pivot');
+    for (const name of call === 'pivot([1, ...coords])'
+      ? ['y', 'z']
+      : ['x', 'y', 'z']) {
+      const view = contextualParameterView(defined(parameters.get(name)));
+      assert.equal(view.placeholder, undefined, `${call} ${name}`);
+      assert.equal(view.disabled, true, `${call} ${name}`);
+    }
+  }
+});
+
+test('coordinate defaults insert an array after an existing argument', async () => {
+  for (const [call, replacement] of [
+    ['translated(10)', 'translated(10, [5])'],
+    ['translated(10, /* next */)', 'translated(10, /* next */[5])'],
+  ] as const) {
+    const source = `import {box} from '@code3d/core';
+/**
+ * @code3d.param x {kind: 'length', default: 0}
+ * @code3d.param y {kind: 'length', default: 0}
+ */
+function translated(size: number, [x = 0, y = 0] = [0, 0]) {
+  return box(size, size, size).originOffset(x, y, 0);
+}
+${call};`;
+    const {parameters} = await compileParameters(source, 'translated');
+    const x = defined(parameters.get('x'));
+    assert.equal(contextualParameterView(x).placeholder, '0');
+    assert.equal(contextualParameterView(x).disabled, false);
+    assert.equal(
+      contextualParameterView(defined(parameters.get('y'))).disabled,
+      true,
+    );
+    x.value = 5;
+    const edited = replaceWithIntent(
+      source,
+      defined(contextualParameterIntent(x)),
+    );
+    assert.equal(edited, source.replace(call, replacement));
+    const next = await compileParameters(edited, 'translated');
+    assert.equal(next.module.diagnostic, undefined);
+    assert.equal(
+      contextualParameterView(defined(next.parameters.get('y'))).disabled,
+      false,
+    );
+  }
+});
+
 async function parametersFor(expression: string, omit = false) {
   const source = [
     "import {box} from '@code3d/core';",

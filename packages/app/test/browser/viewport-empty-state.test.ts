@@ -352,6 +352,167 @@ test('a fresh incomplete primitive previews defaults without filling source or r
   );
 });
 
+async function expectDefaults(
+  page: Page,
+  defaults: Readonly<Record<string, number>>,
+) {
+  const names = Object.keys(defaults);
+  await page.locator(`[data-parameter=${names[0]}]`).waitFor();
+  for (const [index, name] of names.entries()) {
+    const input = page.locator(`[data-parameter=${name}]`);
+    assert.equal(await input.inputValue(), '', name);
+    assert.equal(
+      await input.getAttribute('placeholder'),
+      String(defaults[name]),
+      name,
+    );
+    assert.equal(await input.isEnabled(), index === 0, name);
+  }
+  assert.equal(
+    await page.evaluate(() =>
+      window.emptyViewportApp.viewport.hasRenderableGeometry(),
+    ),
+    true,
+  );
+}
+
+test('incomplete object rotation previews defaults and only writes explicitly entered angles', async t => {
+  const source = "import {box} from '@code3d/core';\nbox(20, 30, 40).rotate();";
+  const page = await open(t, source);
+  await select(page, 'rotate()');
+  await expectDefaults(page, {x: 0, y: 0, z: 0});
+  assert.equal(
+    await page.evaluate(() =>
+      window.emptyViewportApp.codeEditor.hasLanguageError(),
+    ),
+    true,
+  );
+  const x = page.locator('[data-parameter=x]');
+  await x.focus();
+  await x.press('Enter');
+  assert.equal(
+    await page.evaluate(() =>
+      window.emptyViewportApp.codeEditor.editor.getValue(),
+    ),
+    source,
+  );
+  await x.fill('0');
+  await x.press('Tab');
+  await page.waitForFunction(
+    () => (document.activeElement as HTMLElement)?.dataset.parameter === 'y',
+  );
+  const y = page.locator('[data-parameter=y]');
+  await y.fill('30');
+  await y.press('Enter');
+  await page.waitForFunction(() =>
+    /\.rotate\(0,\s*30\)/.test(
+      window.emptyViewportApp.codeEditor.editor.getValue(),
+    ),
+  );
+  await page.keyboard.press('Control+z');
+  await page.waitForFunction(
+    source => window.emptyViewportApp.codeEditor.editor.getValue() === source,
+    source,
+  );
+  await page.waitForFunction(
+    () =>
+      document.querySelector<HTMLInputElement>('[data-parameter=x]')
+        ?.disabled === false,
+  );
+  await expectDefaults(page, {x: 0, y: 0, z: 0});
+});
+
+test('model method defaults appear for groups and geometry operations without rewriting source', async t => {
+  const page = await open(t);
+  for (const [expression, selection, defaults] of [
+    ['group([box(20, 30, 40)]).rotate()', 'rotate()', {x: 0, y: 0, z: 0}],
+    [
+      'group([box(20, 30, 40)]).originOffset()',
+      'originOffset()',
+      {dx: 0, dy: 0, dz: 0},
+    ],
+    ['box(20, 30, 40).scaled()', 'scaled()', {factor: 1}],
+    ['rectangle(20, 30).extrude()', 'extrude()', {distance: 10}],
+    ['extrude(rectangle(20, 30))', 'extrude(rectangle', {distance: 10}],
+    ['box(20, 30, 40).fillet()', 'fillet()', {radius: 1}],
+    ['box(20, 30, 40).chamfer()', 'chamfer()', {distance: 1}],
+    ['box(20, 30, 40).shell()', 'shell()', {thickness: 1}],
+  ] as const) {
+    const source = `import {box, group, rectangle, extrude} from '@code3d/core';\n${expression};`;
+    await setSource(page, source, selection);
+    await expectDefaults(page, defaults);
+    const input = page.locator(`[data-parameter=${Object.keys(defaults)[0]}]`);
+    await input.focus();
+    await input.press('Enter');
+    assert.equal(
+      await page.evaluate(() =>
+        window.emptyViewportApp.codeEditor.editor.getValue(),
+      ),
+      source,
+    );
+  }
+});
+
+test('constraint method defaults are available on offset, pivot and rotation chains', async t => {
+  const page = await open(t);
+  for (const [chain, selection, defaults] of [
+    ['offset()', 'offset()', {x: 0, y: 0, z: 0}],
+    ['rotate()', 'rotate()', {x: 0, y: 0, z: 0}],
+    ['pivot().rotate(0, 0, 25)', 'pivot()', {x: 0, y: 0, z: 0}],
+    ['pivot([1, 2, 3]).rotate()', 'rotate()', {x: 0, y: 0, z: 0}],
+    ['pivotVertex(1).rotate()', 'rotate()', {x: 0, y: 0, z: 0}],
+    ['around(base.axis).rotate()', 'rotate()', {angle: 0}],
+  ] as const) {
+    const source = `import {box, group} from '@code3d/core';\nconst base = box(20, 30, 40);\nconst part = box(4, 6, 8).relate(self => self.on(base.up).${chain});\ngroup([base, part]);`;
+    await setSource(page, source, selection);
+    await expectDefaults(page, defaults);
+    const input = page.locator(`[data-parameter=${Object.keys(defaults)[0]}]`);
+    await input.focus();
+    await input.press('Enter');
+    assert.equal(
+      await page.evaluate(() =>
+        window.emptyViewportApp.codeEditor.editor.getValue(),
+      ),
+      source,
+    );
+    if (chain === 'pivot().rotate(0, 0, 25)') {
+      await input.fill('2');
+      await input.press('Tab');
+      await page.waitForFunction(
+        () =>
+          (document.activeElement as HTMLElement)?.dataset.parameter === 'y',
+      );
+      const y = page.locator('[data-parameter=y]');
+      await y.fill('0');
+      await y.press('Tab');
+      await page.waitForFunction(
+        () =>
+          (document.activeElement as HTMLElement)?.dataset.parameter === 'z',
+      );
+      const z = page.locator('[data-parameter=z]');
+      await z.fill('5');
+      await z.press('Enter');
+      await page.waitForFunction(() =>
+        /\.pivot\(\[2,\s*0,\s*5\]\)/.test(
+          window.emptyViewportApp.codeEditor.editor.getValue(),
+        ),
+      );
+      await page.keyboard.press('Control+z');
+      await page.waitForFunction(
+        source =>
+          window.emptyViewportApp.codeEditor.editor.getValue() === source,
+        source,
+      );
+      await page.waitForFunction(
+        () =>
+          document.querySelector<HTMLInputElement>('[data-parameter=x]')
+            ?.disabled === false,
+      );
+      await expectDefaults(page, defaults);
+    }
+  }
+});
+
 test('the initial hint disappears after previewing and moving the cursor preserves the last 3D view', async t => {
   const page = await open(t);
   await expectEmpty(page);

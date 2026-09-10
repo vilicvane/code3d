@@ -2805,7 +2805,10 @@ function positionIntent(
 ): ToolIntent {
   if (binding.kind === 'spatial') return spatialIntent(binding, value);
   if (binding.kind === 'parameter') {
-    return parameterIntent(binding.target, value);
+    return {
+      ...parameterIntent(binding.target, value),
+      completeArguments: binding.completeArguments,
+    };
   }
   const delta: [number, number, number] = [0, 0, 0];
   delta[positionAxisIndex(binding.axis)] = value;
@@ -2829,7 +2832,11 @@ function positionBindingId(binding: TransformGizmoBinding): string {
   if (binding.kind === 'spatial') {
     const source = binding.spatial.source;
     if (source.kind === 'parameter') return source.target.id;
-    return `spatial:${source.sourceRef.file}:${source.sourceRef.start}:${source.sourceRef.end}`;
+    const sourceRef =
+      source.kind === 'omitted-argument'
+        ? source.target.sourceRef
+        : source.sourceRef;
+    return `spatial:${sourceRef.file}:${sourceRef.start}:${sourceRef.end}`;
   }
   if (binding.kind === 'parameter') {
     return binding.target.id;

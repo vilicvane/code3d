@@ -61,10 +61,19 @@ keeps the construction understandable and editable by both people and agents.
 | Extend the runtime with Replicad geometry                                       | [Custom primitives](../web/src/content/docs/docs/guides/custom-primitives.mdx)       |
 | Known boundaries                                                                | [Current limitations](../web/src/content/docs/docs/reference/limitations.md)         |
 
-Dimension-based primitives retain required TypeScript signatures while providing
-runtime defaults for omitted or `undefined` values. The App displays these as
-placeholders without inserting source arguments. Use explicit dimensions in
-finished models; the [reference](../web/src/content/docs/docs/reference/core.md#runtime-defaults-while-editing)
+Dimension-based primitives and numeric modeling methods retain required TypeScript
+signatures while providing runtime defaults for omitted or `undefined` values.
+Rotations and displacements default to zero, scaling to one, extrusion distance
+to ten, and fillet radius, chamfer distance and shell thickness to one. Relation
+rotation chains use the same angle defaults; `pivot()` defaults to local zero.
+Explicit invalid values retain their normal errors. These defaults work in
+ordinary JavaScript execution as well as App previews.
+
+The App displays defaults as placeholders without inserting source arguments.
+Committing a spatial drag fills all remaining omitted defaults in that operation;
+for example, dragging the X ring of `rotate()` writes `rotate(angle, 0, 0)`. The
+edit and completion share one undo step. Use explicit dimensions in finished
+models; the [reference](../web/src/content/docs/docs/reference/core.md#runtime-defaults-while-editing)
 lists the actual defaults.
 
 Topology capabilities follow dimension: vertices expose vertex selection, edges

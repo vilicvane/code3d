@@ -75,6 +75,8 @@ export type ToolArgumentEditTarget = Readonly<
       kind: 'omitted';
       sourceRef: SourceRef;
       needsComma: boolean;
+      /** Defaults preceding the value at each missing container, outermost first. */
+      prefixes?: readonly (readonly number[])[];
     }
 >;
 

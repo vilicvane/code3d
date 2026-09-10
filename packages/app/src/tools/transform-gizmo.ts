@@ -12,6 +12,7 @@ import {spatialAxisColors} from '../spatial-axis-colors';
 import {snapNumericValue} from './parameter-policy';
 import type {SourceAnchor} from './tool-system';
 import type {ModelSpatialBinding} from './model-spatial-tool';
+import type {CallArgumentDefaults} from './source-expression';
 import {worldUnitsPerPixel} from '../rendering/screen-space';
 
 const handleLengthPixels = 100;
@@ -34,6 +35,7 @@ type TransformBindingBase = Readonly<{
   parameterKind?: ParameterKind;
   step?: number;
   frame: Transform;
+  completeArguments?: CallArgumentDefaults;
 }>;
 
 export type TransformGizmoBinding = TransformBindingBase &

@@ -80,7 +80,7 @@ export const pin = extrude(circle(2), -10);
 
 ## Runtime defaults while editing
 
-The dimension-based primitives below keep their required TypeScript parameters,
+The dimension-based primitives and numeric methods below keep their required TypeScript parameters,
 but their implementations supply defaults for omitted or `undefined` arguments.
 For example, `box()` previews a 10 × 10 × 10 box, while the editor still reports
 the missing arguments; `box(20)` previews 20 × 10 × 10. Finish the arguments to
@@ -101,10 +101,39 @@ execution and do not depend on the App.
 | `rectangle`      | `10, 10`                             |
 | `regularPolygon` | `5, 6, 0`                            |
 
+| Method or utility parameter                            | Runtime defaults |
+| ------------------------------------------------------ | ---------------- |
+| Model/group `rotate` and relation/pivot-chain `rotate` | `0, 0, 0`        |
+| Model/group `originOffset` and relation `offset`       | `0, 0, 0`        |
+| Relation `pivot`                                       | `[0, 0, 0]`      |
+| `around(axis).rotate`                                  | `0`              |
+| Geometric model `scaled`                               | `1`              |
+| Face `extrude` and the `extrude` utility's distance    | `10`             |
+| Solid `fillet`, `chamfer` and `shell`                  | `1`              |
+
+For example, `box(20, 30, 40).rotate()` previews the unchanged body, and
+`.rotate(30)` previews a 30-degree X rotation. Their missing-angle diagnostics
+remain until all three arguments are supplied. Relation `offset()` behaves like
+explicit `offset(0, 0, 0)`, including the existing tangential placement rules;
+`pivot()` selects self's local origin. Geometry IDs, reference axes and input
+models still need explicit values.
+
 Explicit arguments remain subject to their normal validation: `box(0)`, for
 example, still reports an error. The parameter panel shows omitted defaults as
 placeholders and only writes arguments when you edit them. See
 [parameter defaults](../../guides/model-tools/#describe-an-omitted-arguments-default).
+
+Spatial controls use the rendered operation's position and frame, so omitted
+arguments do not hide its translation arrows or rotation rings. Committing a
+drag fills all remaining omitted defaults in that call: dragging the X ring of
+`rotate()` writes `rotate(angle, 0, 0)`, and dragging `pivot()` writes all three
+coordinates. This also applies when editing an existing or upstream parameter.
+The parameter change and default completion form one undo step. Merely selecting a
+tool, cancelling a drag or returning to its starting value leaves the source
+unchanged. Existing editable expressions retain their normal editing behavior;
+opaque inputs such as `pivot(coords)` or `rotate(...angles)` are replaced with
+the current evaluated coordinates or angles when you commit the drag. Undo
+restores the original expression.
 
 ## Editable sketch regions
 

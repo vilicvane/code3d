@@ -1,4 +1,4 @@
-import {argumentExpression} from './argument-path';
+import {argumentExpression, unwrapArgument} from './argument-path';
 import ts from '@typescript/typescript6';
 import {normalizeProjectPath, type ModelProject} from '../project/project';
 import {
@@ -3889,51 +3889,82 @@ export function createModelCompiler(
     sourceFile: ts.SourceFile,
   ): ToolCallSite {
     const sourceStart = callSourceStart(node, sourceFile);
-    const spreadIndex = node.arguments.findIndex(ts.isSpreadElement);
     return {
       siteId,
       sourceRef: sourceRef(sourceFile.fileName, sourceStart, node.getEnd()),
       signature,
       arguments: signature.parameters.map(parameter => {
         const path = parameter.path ?? [parameter.index];
-        const unknown =
-          (spreadIndex >= 0 && path[0] >= spreadIndex) ||
-          (path.length > 1 && !argumentExpression(node.arguments, path));
         return {
           name: parameter.name,
           index: parameter.index,
-          presence: unknown
-            ? 'unknown'
-            : path[0] < node.arguments.length
-              ? 'present'
-              : 'omitted',
-          target: unknown
-            ? undefined
-            : toolArgumentSource(node, path, sourceFile),
+          ...toolArgumentLocation(node, path, signature, sourceFile),
         };
       }),
     };
   }
 
-  function toolArgumentSource(
+  function toolArgumentLocation(
     call: ts.CallExpression,
     path: readonly number[],
+    signature: ToolSignatureSchema,
     sourceFile: ts.SourceFile,
-  ): ToolArgumentSource['target'] | undefined {
-    const index = path[0];
-    const argument = argumentExpression(call.arguments, path);
-    if (path.length > 1) {
-      if (!argument) return undefined;
-      const location = sourceRef(
-        sourceFile.fileName,
-        argument.getStart(sourceFile),
-        argument.getEnd(),
-      );
-      return {kind: 'present', sourceRef: location, removalSourceRef: location};
-    }
-    if (argument) {
-      const previous = call.arguments[index - 1];
-      const next = call.arguments[index + 1];
+  ): Pick<ToolArgumentSource, 'presence' | 'target'> {
+    let container: ts.CallExpression | ts.ArrayLiteralExpression = call;
+    let arguments_: ts.NodeArray<ts.Expression> = call.arguments;
+    for (const [depth, index] of path.entries()) {
+      if (arguments_.slice(0, index + 1).some(ts.isSpreadElement))
+        return {presence: 'unknown'};
+      const argument = arguments_[index];
+      if (!argument || ts.isOmittedExpression(argument)) {
+        const prefixes: number[][] = [];
+        for (let level = depth; level < path.length; level++) {
+          const values: number[] = [];
+          const start = level === depth ? arguments_.length : 0;
+          for (let sibling = start; sibling < path[level]; sibling++) {
+            const siblingPath = [...path.slice(0, level), sibling];
+            const parameter = signature.parameters.find(parameter => {
+              const candidate = parameter.path ?? [parameter.index];
+              return (
+                candidate.length === siblingPath.length &&
+                candidate.every((value, index) => value === siblingPath[index])
+              );
+            });
+            if (
+              !parameter ||
+              isToolSelectionParameter(parameter) ||
+              parameter.default === undefined
+            )
+              return {presence: 'omitted'};
+            values.push(parameter.default);
+          }
+          prefixes.push(values);
+        }
+        const position =
+          argument?.getStart(sourceFile) ?? container.getEnd() - 1;
+        return {
+          presence: 'omitted',
+          target: {
+            kind: 'omitted',
+            sourceRef: sourceRef(sourceFile.fileName, position, position),
+            needsComma:
+              !argument &&
+              arguments_.length > 0 &&
+              !arguments_.hasTrailingComma,
+            ...(prefixes.length > 1 || prefixes[0].length ? {prefixes} : {}),
+          },
+        };
+      }
+      if (depth < path.length - 1) {
+        const expression = unwrapArgument(argument);
+        if (!ts.isArrayLiteralExpression(expression))
+          return {presence: 'unknown'};
+        container = expression;
+        arguments_ = expression.elements;
+        continue;
+      }
+      const previous = arguments_[index - 1];
+      const next = arguments_[index + 1];
       const removalStart = previous
         ? previous.getEnd()
         : argument.getStart(sourceFile);
@@ -3942,27 +3973,24 @@ export function createModelCompiler(
         : next
           ? next.getStart(sourceFile)
           : argument.getEnd();
+      const location = sourceRef(
+        sourceFile.fileName,
+        argument.getStart(sourceFile),
+        argument.getEnd(),
+      );
       return {
-        kind: 'present',
-        sourceRef: sourceRef(
-          sourceFile.fileName,
-          argument.getStart(sourceFile),
-          argument.getEnd(),
-        ),
-        removalSourceRef: sourceRef(
-          sourceFile.fileName,
-          removalStart,
-          removalEnd,
-        ),
+        presence: 'present',
+        target: {
+          kind: 'present',
+          sourceRef: location,
+          removalSourceRef:
+            depth > 0
+              ? location
+              : sourceRef(sourceFile.fileName, removalStart, removalEnd),
+        },
       };
     }
-    if (index !== call.arguments.length) return undefined;
-    const closeParen = call.getEnd() - 1;
-    return {
-      kind: 'omitted',
-      sourceRef: sourceRef(sourceFile.fileName, closeParen, closeParen),
-      needsComma: call.arguments.length > 0 && !call.arguments.hasTrailingComma,
-    };
+    return {presence: 'unknown'};
   }
 
   function parameterSignatureFor(
