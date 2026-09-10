@@ -41,6 +41,7 @@ type WorkerRequest =
   | CompileRequest
   | Readonly<{kind: 'cancel-compile'; id: number}>
   | Readonly<{kind: 'refresh-dependencies'}>
+  | Readonly<{kind: 'clear-build-cache'; projectIdentity: string}>
   | Readonly<{
       kind: 'execution-succeeded';
       projectIdentity: string;
@@ -93,6 +94,7 @@ type WorkerRequest =
 
 type WorkerResponse =
   | FileRequest
+  | Readonly<{kind: 'build-cache-cleared'; error?: string}>
   | Readonly<{kind: 'cached'; id: number} & ArtifactMessage>
   | Readonly<{kind: 'compiled'; id: number} & ArtifactMessage>
   | Readonly<{kind: 'cancelled'; id: number}>

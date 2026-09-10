@@ -141,6 +141,11 @@ export function buildEntryKey(
   ]);
 }
 
+/** Escaping the project identity gives every compiler recipe a shared clearing boundary. */
+export function buildProjectNamespace(project: string): string {
+  return 'build:' + encodeURIComponent(project);
+}
+
 /** Complete immutable manifests reference shared dependency and binary records. */
 export class BuildArtifactCache {
   private readonly memory = new Map<

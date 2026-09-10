@@ -47,6 +47,9 @@ async function respond(request: ArtifactStoreRequest): Promise<void> {
           case 'delete':
             store.delete(operation.id);
             return true;
+          case 'clear':
+            store.clear();
+            return true;
           case 'flush':
             store.flush();
             return true;

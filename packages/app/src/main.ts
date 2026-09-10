@@ -517,6 +517,10 @@ const projectDirectory = new ProjectTree(projectTree, {
   examples: {directory: bundledExamples.directory, reset: resetExamples},
   onInstallPackage: packageManager ? installProjectPackage : undefined,
   onUpdateDependencies: packageManager ? updateProjectDependencies : undefined,
+  async onClearBuildCache() {
+    await compiler.clearBuildCache();
+    await runModel();
+  },
   onBusy: busy => {
     if (busy) fileOpenVersion++;
     codeEditor.setReadOnly(busy);

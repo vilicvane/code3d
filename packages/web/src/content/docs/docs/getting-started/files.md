@@ -265,6 +265,12 @@ its version, click **Refresh files and dependencies** in the explorer header.
 This refreshes the build inputs; use **Update dependencies** on `package.json`
 to ask the package manager to resolve package versions again.
 
+To rebuild from scratch, right-click empty space in the explorer (the workspace
+root) and choose **Clear build cache**. This clears the current workspace's saved
+source and dependency builds, resets the compiler, and rebuilds the active file.
+Your files, installed packages, geometry cache, and downloaded fonts are kept.
+Build caches belonging to other workspaces are also kept.
+
 ## The examples directory
 
 The bundled `/examples` folder is managed by Code3D. Right-click that folder and choose

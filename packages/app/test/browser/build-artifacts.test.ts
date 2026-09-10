@@ -14,6 +14,171 @@ before(async () => {
 after(async () => browser?.close());
 
 test(
+  'clearing build caches removes all project entries and preserves another workspace',
+  {timeout: 120_000},
+  async t => {
+    const context = await browser.newContext();
+    t.after(() => context.close());
+    const page = await context.newPage();
+    const url = new URL(
+      '/__build-artifacts-test__',
+      process.env.CODE3D_TEST_URL,
+    );
+    await context.route(url.href, route =>
+      route.fulfill({
+        contentType: 'text/html',
+        headers: appIsolationHeaders,
+        body: '<main>Clear build cache</main>',
+      }),
+    );
+    await page.goto(url.href);
+    const results = await page.evaluate(async () => {
+      const {ModelCompilerClient} =
+        await import('/src/model/compiler-client.ts');
+      const files = {
+        readFile: async () => undefined,
+        stat: async () => undefined,
+      };
+      const create = (identity: string) =>
+        new ModelCompilerClient(files, undefined, undefined, identity);
+      const source =
+        'import {box} from "@code3d/core"; export default box(3, 4, 5);';
+      const project = {
+        files: [
+          {path: '/a.ts', source},
+          {path: '/nested/b.ts', source},
+          {path: '/nested/package.json', source: '{"type":"module"}'},
+        ],
+      };
+      const a = create('clear-project');
+      const b = create('clear-project-extra');
+      try {
+        await a.compile(project, '/a.ts');
+        await a.compile(project, '/nested/b.ts');
+        await b.compile(project, '/a.ts');
+        await a.clearBuildCache();
+        // A new compiler request can arrive before the asynchronous disk reset completes.
+        const clearing = a.clearBuildCache();
+        const phases: string[] = [];
+        const rebuilding = a.compile(project, '/a.ts', undefined, phase =>
+          phases.push(phase),
+        );
+        const [, rebuilt] = await Promise.all([clearing, rebuilding]);
+        if (rebuilt.diagnostic) throw new Error(rebuilt.diagnostic.summary);
+        await a.clearBuildCache();
+        return {phases};
+      } finally {
+        a.dispose();
+        b.dispose();
+      }
+    });
+    assert.ok(
+      results.phases.includes('loading-runtime'),
+      'cleared dependency builds are rebuilt',
+    );
+    await page.reload();
+    const restored = await page.evaluate(async () => {
+      const {ModelCompilerClient} =
+        await import('/src/model/compiler-client.ts');
+      const results = [];
+      for (const [identity, path] of [
+        ['clear-project', '/a.ts'],
+        ['clear-project', '/nested/b.ts'],
+        ['clear-project-extra', '/a.ts'],
+      ]) {
+        const client = new ModelCompilerClient(
+          {readFile: async () => undefined, stat: async () => undefined},
+          undefined,
+          undefined,
+          identity,
+        );
+        try {
+          await client
+            .compile({files: [{path, source: 'export const broken = ;'}]}, path)
+            .catch(() => {});
+          results.push({identity, path, restored: !!client.restored});
+        } finally {
+          client.dispose();
+        }
+      }
+      return results;
+    });
+    assert.deepEqual(
+      restored.map(result => result.restored),
+      [false, false, true],
+    );
+  },
+);
+
+test(
+  'clearing during compilation cancels old work and allows the next build',
+  {timeout: 90_000},
+  async t => {
+    const context = await browser.newContext();
+    t.after(() => context.close());
+    const page = await context.newPage();
+    const url = new URL(
+      '/__build-artifacts-test__',
+      process.env.CODE3D_TEST_URL,
+    );
+    await context.route(url.href, route =>
+      route.fulfill({
+        contentType: 'text/html',
+        headers: appIsolationHeaders,
+        body: '<main>Clear while compiling</main>',
+      }),
+    );
+    await page.goto(url.href);
+    const result = await page.evaluate(async () => {
+      const {ModelCompilerClient} =
+        await import('/src/model/compiler-client.ts');
+      const client = new ModelCompilerClient(
+        {readFile: async () => undefined, stat: async () => undefined},
+        undefined,
+        undefined,
+        'clear-running',
+      );
+      let started!: () => void;
+      const preparing = new Promise<void>(resolve => {
+        started = resolve;
+      });
+      const project = {
+        files: [
+          {
+            path: '/model.ts',
+            source:
+              'import {box} from "@code3d/core"; export default box(2, 3, 4);',
+          },
+        ],
+      };
+      try {
+        const first = client
+          .compile(project, '/model.ts', undefined, phase => {
+            if (phase === 'loading-runtime') started();
+          })
+          .then(
+            () => false,
+            () => true,
+          );
+        await preparing;
+        await client.clearBuildCache();
+        const module = await client.compile(project, '/model.ts');
+        return {
+          cancelled: await first,
+          objects: module.objects.size,
+          diagnostic: module.diagnostic,
+        };
+      } finally {
+        client.dispose();
+      }
+    });
+    assert.equal(result.cancelled, true);
+    assert.equal(result.diagnostic, undefined);
+    assert.ok(result.objects > 0);
+  },
+);
+
+test(
   'each entry restores its successful artifact after reload, even when the new source fails',
   {timeout: 120_000},
   async t => {

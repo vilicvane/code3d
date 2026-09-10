@@ -63,6 +63,8 @@ export type PersistentArtifactStats = ReturnType<ArtifactJournal['stats']> & {
   errors: number;
 };
 
+type PersistentArtifactStore = KernelArtifactStore & {clear(): void};
+
 /**
  * One origin-wide journal and budget, shared by projects, App and agent workers.
  * Web Locks cover only an I/O worker's open/read-or-write/close transaction.
@@ -70,7 +72,7 @@ export type PersistentArtifactStats = ReturnType<ArtifactJournal['stats']> & {
  */
 export async function withPersistentArtifacts<Result>(
   namespace: string,
-  action: (store: KernelArtifactStore | undefined) => Promise<Result>,
+  action: (store: PersistentArtifactStore | undefined) => Promise<Result>,
   onStats: (stats: PersistentArtifactStats | undefined) => void,
   {touchReads = true}: {touchReads?: boolean} = {},
 ): Promise<Result> {
@@ -110,7 +112,7 @@ export async function withPersistentArtifacts<Result>(
         onStats(undefined);
         return action(undefined);
       }
-      const scopedStore = (prefix: string): KernelArtifactStore => ({
+      const scopedStore = (prefix: string): PersistentArtifactStore => ({
         get: id => journal.get(`${prefix}:${id}`, touchReads),
         getMany: ids =>
           journal.getMany(
@@ -121,6 +123,7 @@ export async function withPersistentArtifacts<Result>(
         touch: id => journal.touch(`${prefix}:${id}`),
         touchMany: ids => journal.touchMany(ids.map(id => `${prefix}:${id}`)),
         delete: id => journal.delete(`${prefix}:${id}`),
+        clear: () => journal.deletePrefix(`${prefix}:`),
         flush: () => journal.flush(),
       });
       try {

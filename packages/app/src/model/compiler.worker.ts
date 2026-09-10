@@ -8,6 +8,7 @@ import {ArtifactStoreConnection} from './artifact-store';
 import {
   BuildArtifactCache,
   buildEntryKey,
+  buildProjectNamespace,
   projectArtifactIdentity,
 } from './build-artifact-cache';
 import {checkCompilationCancellation} from './compilation-cancellation';
@@ -44,12 +45,22 @@ function requestFile<T>(
 
 const storage = new ArtifactStoreConnection();
 const artifactChannel = new ArtifactChannel();
-const buildNamespace = 'build:' + compilerRecipe;
-const cache = new BuildArtifactCache(
-  storage.scope(buildNamespace),
-  (key, value, required) =>
-    storage.publish(buildNamespace, key, value, required),
-);
+let cachedProject: {identity: string; cache: BuildArtifactCache} | undefined;
+function cacheFor(identity: string): BuildArtifactCache {
+  if (cachedProject?.identity !== identity) {
+    const namespace = `${buildProjectNamespace(identity)}:${compilerRecipe}`;
+    cachedProject = {
+      identity,
+      cache: new BuildArtifactCache(
+        storage.scope(namespace),
+        (key, value, required) =>
+          storage.publish(namespace, key, value, required),
+      ),
+    };
+  }
+  return cachedProject.cache;
+}
+let clearing = Promise.resolve();
 const compiler = new ProjectCompiler(
   {
     readFile: path =>
@@ -93,6 +104,7 @@ async function compile(request: CompileRequest): Promise<void> {
   const checkCancelled = () =>
     checkCompilationCancellation(request.cancellation);
   try {
+    await clearing;
     await storage.ready;
     checkCancelled();
     if (!engineReady) {
@@ -115,7 +127,7 @@ async function compile(request: CompileRequest): Promise<void> {
       checkCancelled,
       request.projectIdentity
         ? async scope =>
-            cache.restoreDependencies(
+            cacheFor(request.projectIdentity!).restoreDependencies(
               await buildEntryKey(request.projectIdentity!, scope),
             )
         : undefined,
@@ -131,7 +143,7 @@ async function compile(request: CompileRequest): Promise<void> {
         request.projectIdentity,
         compiler.dependencyScope,
       );
-      await cache.save(
+      await cacheFor(request.projectIdentity).save(
         key,
         artifact,
         request.stamp,
@@ -168,12 +180,15 @@ workerScope.onmessage = ({data}: MessageEvent<CompilerRequest>) => {
     if (data.error) pending?.reject(new Error(data.error));
     else pending?.resolve(data.value);
   } else if (data.kind === 'restore') {
-    void buildEntryKey(
-      data.projectIdentity,
-      data.rootPath,
-      data.designContext,
-    ).then(async key => {
+    void (async () => {
+      await clearing;
       await storage.ready;
+      const key = await buildEntryKey(
+        data.projectIdentity,
+        data.rootPath,
+        data.designContext,
+      );
+      const cache = cacheFor(data.projectIdentity);
       const artifact = cache.restore(key, 'successful') ?? cache.restore(key);
       if (artifact) {
         const dependencies = compiler.restoreDependencies(
@@ -198,18 +213,31 @@ workerScope.onmessage = ({data}: MessageEvent<CompilerRequest>) => {
           ...artifactChannel.encode(restored),
         });
       }
-    });
+    })().catch(() => {});
   } else if (data.kind === 'compile') {
     void compile(data);
   } else if (data.kind === 'cancel-compile' && activeRequest === data.id) {
     void compiler.cancel();
   } else if (data.kind === 'refresh-dependencies') {
     compiler.refreshDependencies();
+  } else if (data.kind === 'clear-build-cache') {
+    // The client starts this command in a fresh compiler Worker. Any new source
+    // or restore request waits until the old project's disk records are gone.
+    clearing = storage.ready.then(() => {
+      storage.clear(buildProjectNamespace(data.projectIdentity));
+      cachedProject = undefined;
+    });
+    void clearing.then(
+      () => send({kind: 'build-cache-cleared'}),
+      error => send({kind: 'build-cache-cleared', error: String(error)}),
+    );
   } else if (data.kind === 'execution-succeeded') {
     void buildEntryKey(
       data.projectIdentity,
       data.rootPath,
       data.designContext,
-    ).then(key => cache.succeeded(key, data.artifact, data.stamp));
+    ).then(key =>
+      cacheFor(data.projectIdentity).succeeded(key, data.artifact, data.stamp),
+    );
   }
 };

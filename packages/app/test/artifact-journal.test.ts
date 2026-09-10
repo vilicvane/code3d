@@ -60,6 +60,49 @@ const files = (): [MemoryFile, MemoryFile] => [
 ];
 const value = (number: number, size = 500) => new Uint8Array(size).fill(number);
 
+test('clearing a project reclaims all its recipes without evicting other namespaces', () => {
+  const disk = files();
+  let journal = new ArtifactJournal(disk, 8192);
+  const retained = [
+    'build:project-extra:recipe:binary',
+    'geometry:shape',
+    'resources:font',
+  ];
+  for (const [index, id] of retained.entries())
+    journal.set(id, value(index, 1000));
+  journal.set('build:project:old:binary', value(4, 100));
+  journal.set('build:project:new:latest', value(5, 100));
+  journal.flush();
+  const before = journal.stats().diskBytes;
+  journal.deletePrefix('build:project:');
+  assert.ok(journal.stats().diskBytes < before);
+  disk.forEach(file => file.crash());
+  journal = new ArtifactJournal(disk, 8192);
+  assert.equal(journal.get('build:project:old:binary'), undefined);
+  assert.equal(journal.get('build:project:new:latest'), undefined);
+  for (const [index, id] of retained.entries())
+    assert.deepEqual(journal.get(id), value(index, 1000));
+  const unchanged = journal.stats().diskBytes;
+  journal.deletePrefix('build:project:');
+  assert.equal(journal.stats().diskBytes, unchanged);
+});
+
+test('interrupted project clearing leaves the previous durable generation readable', () => {
+  const disk = files();
+  let journal = new ArtifactJournal(disk, 8192);
+  journal.set('build:project:recipe:model', value(1));
+  journal.set('geometry:shape', value(2));
+  journal.flush();
+  disk[1].fault = () => {
+    throw new Error('Disk full');
+  };
+  assert.throws(() => journal.deletePrefix('build:project:'), /Disk full/);
+  disk.forEach(file => file.crash());
+  journal = new ArtifactJournal(disk, 8192);
+  assert.deepEqual(journal.get('build:project:recipe:model'), value(1));
+  assert.deepEqual(journal.get('geometry:shape'), value(2));
+});
+
 test('scans bounded header windows and lazily restores exact artifact bytes', () => {
   const disk = files();
   let journal = new ArtifactJournal(disk, 16 * 1024 * 1024);

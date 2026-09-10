@@ -74,6 +74,11 @@ export class ModelCompilerClient {
   private lastEntry?: string;
   private compiledArtifact?: string;
   private executorDependency?: string;
+  private cacheReset?: {
+    promise: Promise<void>;
+    finish(error?: Error): void;
+    timeout: number;
+  };
   private publication?: {
     rootPath: string;
     designContext?: DesignContext;
@@ -103,6 +108,7 @@ export class ModelCompilerClient {
       cancel: action,
       dispose: action,
       refreshDependencies: action,
+      clearBuildCache: action,
       export: action,
       previewSketchDrag: action,
       inspectTopology: action,
@@ -180,6 +186,50 @@ export class ModelCompilerClient {
   refreshDependencies(): void {
     this.cancel();
     this.compiler.postMessage({kind: 'refresh-dependencies'});
+  }
+
+  clearBuildCache(): Promise<void> {
+    if (this.cacheReset) return this.cacheReset.promise;
+    this.cancel();
+    this.restartCompiler();
+    this.restored = undefined;
+    this.cachedResult = undefined;
+    this.compiledArtifact = undefined;
+    this.publication = undefined;
+    this.exportable = undefined;
+    if (!this.projectIdentity) return Promise.resolve();
+    let finish!: (error?: Error) => void;
+    const promise = new Promise<void>((resolve, reject) => {
+      finish = error => (error ? reject(error) : resolve());
+    });
+    this.cacheReset = {
+      promise,
+      finish,
+      timeout: window.setTimeout(
+        () =>
+          runInAction(() => {
+            this.finishCacheReset(
+              new Error('Clearing the build cache timed out.'),
+            );
+            this.cancel();
+            this.restartCompiler();
+          }),
+        30_000,
+      ),
+    };
+    this.compiler.postMessage({
+      kind: 'clear-build-cache',
+      projectIdentity: this.projectIdentity,
+    });
+    return promise;
+  }
+
+  private finishCacheReset(error?: Error): void {
+    const pending = this.cacheReset;
+    if (!pending) return;
+    this.cacheReset = undefined;
+    window.clearTimeout(pending.timeout);
+    pending.finish(error);
   }
   canExport(module: ModelModule): boolean {
     return !this.pending && this.exportable?.module === module;
@@ -275,6 +325,7 @@ export class ModelCompilerClient {
 
   dispose(): void {
     this.cancel();
+    this.finishCacheReset(new Error('The project was closed.'));
     this.finishExecution();
     this.compiler.terminate();
     this.executor.terminate();
@@ -389,6 +440,12 @@ export class ModelCompilerClient {
     worker.onmessage = ({data: message}: MessageEvent<CompilerResponse>) =>
       runInAction(() => {
         if (worker !== this.compiler) return;
+        if (message.kind === 'build-cache-cleared') {
+          this.finishCacheReset(
+            message.error ? new Error(message.error) : undefined,
+          );
+          return;
+        }
         const data =
           message.kind === 'compiled' || message.kind === 'cached'
             ? {...message, artifact: this.compiledArtifacts.decode(message)}
@@ -591,6 +648,7 @@ export class ModelCompilerClient {
     pending.reject(error);
   }
   private restartCompiler(): void {
+    this.finishCacheReset(new Error('The compiler worker was restarted.'));
     this.runningCompile = undefined;
     this.compiler.terminate();
     this.compiledArtifacts.reset();

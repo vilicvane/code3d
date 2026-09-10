@@ -1,7 +1,7 @@
 export type ArtifactOperation =
   | Readonly<{kind: 'get' | 'touch' | 'delete'; id: string}>
   | Readonly<{kind: 'set'; id: string; bytes: Uint8Array}>
-  | Readonly<{kind: 'flush' | 'stats'}>
+  | Readonly<{kind: 'flush' | 'stats' | 'clear'}>
   | Readonly<{kind: 'get-many' | 'touch-many'; ids: readonly string[]}>
   | Readonly<{
       kind: 'publish';

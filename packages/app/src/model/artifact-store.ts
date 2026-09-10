@@ -107,6 +107,11 @@ export class ArtifactStoreConnection {
     );
   }
 
+  clear(namespace: string): void {
+    if (this.request(namespace, {kind: 'clear'}) !== true)
+      throw new Error('Could not clear the persistent build cache.');
+  }
+
   get stats(): PersistentArtifactStats | undefined {
     const bytes = this.request('', {kind: 'stats'});
     return bytes instanceof Uint8Array

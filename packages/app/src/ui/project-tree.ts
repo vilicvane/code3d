@@ -2,23 +2,23 @@ import {
   FileTree,
   type ContextMenuItem,
   type ContextMenuOpenContext,
-  type FileTreeRowDecoration,
-  type FileTreeItemHandle,
   type FileTreeDirectoryHandle,
+  type FileTreeItemHandle,
+  type FileTreeRowDecoration,
 } from '@pierre/trees';
 import type {AgentLocation} from '../editor';
 import {
   PackageInstallationError,
   type PackageInstallationProgress,
 } from '../project/browser-package-manager';
-import {mapProjectIO} from '../project/io';
-import {parsePackageSpecifier} from '../project/package-manifest';
 import {
-  topLevelProjectPaths,
   isProtectedProjectPath,
+  topLevelProjectPaths,
   type ProjectEntry,
   type ProjectEntryOperation,
 } from '../project/file-operations';
+import {mapProjectIO} from '../project/io';
+import {parsePackageSpecifier} from '../project/package-manifest';
 import {
   normalizeProjectPath,
   projectDirectory,
@@ -36,6 +36,7 @@ type ProjectTreeOptions = Readonly<{
   examples?: Readonly<{directory: string; reset(): Promise<void>}>;
   onInstallPackage?(directory: string): Promise<void>;
   onUpdateDependencies?(directory: string): Promise<void>;
+  onClearBuildCache?(): Promise<void>;
   onBusy(busy: boolean): void;
 }>;
 
@@ -836,6 +837,15 @@ export class ProjectTree {
           ),
         !this.runningPackageOperation,
       );
+    if (!path && this.options.onClearBuildCache) {
+      separator();
+      action('Clear build cache', () => {
+        this.status.hidden = true;
+        void this.options.onClearBuildCache!().catch(error =>
+          this.showError(error),
+        );
+      });
+    }
     const examples = this.options.examples;
     if (
       examples &&

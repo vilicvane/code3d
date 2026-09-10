@@ -166,6 +166,11 @@ export class ArtifactJournal implements KernelArtifactStore {
     else this.append({id, kind: 'delete'}, new Uint8Array());
   }
 
+  deletePrefix(prefix: string): void {
+    if ([...this.entries.keys()].some(id => id.startsWith(prefix)))
+      this.compact(0, prefix);
+  }
+
   flush(): void {
     if (
       this.recordCount + this.touched.size >
@@ -374,15 +379,25 @@ export class ArtifactJournal implements KernelArtifactStore {
     return {offset, length: bytes.length, checksum: crc, recordBytes};
   }
 
-  private compact(incomingBytes: number): void {
+  private compact(incomingBytes: number, removedPrefix?: string): void {
     this.flushData();
     this.files[this.active].flush();
     const target = this.files[1 - this.active];
     const keep = new Map(this.entries);
     let live = this.liveBytes;
+    if (removedPrefix !== undefined) {
+      for (const [id, entry] of keep) {
+        if (!id.startsWith(removedPrefix)) continue;
+        keep.delete(id);
+        live -= entry.recordBytes;
+      }
+    }
     const targetBytes = Math.max(
       0,
-      Math.floor((this.capacity - fileHeaderSize - incomingBytes) * 0.8),
+      Math.floor(
+        (this.capacity - fileHeaderSize - incomingBytes) *
+          (removedPrefix === undefined ? 0.8 : 1),
+      ),
     );
     for (const [id, entry] of keep) {
       if (live <= targetBytes) break;

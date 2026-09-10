@@ -41,6 +41,9 @@ successful cached preview while checking current files in the background.
 Compilation and model execution use separate Workers, so terminating a stuck
 model preserves compiler state. Use **Refresh files and dependencies** in the
 explorer to pick up manual edits inside an unchanged installed package.
+Right-click empty space in the explorer and choose **Clear build cache** to
+discard this workspace's in-memory and saved builds and rebuild the active file.
+Geometry, downloaded resources, and other workspaces' build caches are retained.
 
 ## Source map
 
