@@ -2946,6 +2946,21 @@ kbd {
   width: 680px;
 }
 
+.agent-create-form {
+  display: grid;
+  grid-template-rows: 1fr;
+}
+
+.agent-create-content {
+  display: grid;
+  min-height: 0;
+  gap: 20px;
+}
+
+.agent-create-revealing > .agent-create-content {
+  overflow: clip;
+}
+
 .agent-header-title {
   display: flex;
   align-items: center;

@@ -41,6 +41,8 @@ export class AgentPanel {
   private followedAgentId?: string;
   private readonly followListeners = new Set<(agentId?: string) => void>();
   private readonly dialog = document.createElement('dialog');
+  private readonly createForm = document.createElement('div');
+  private readonly createFields = document.createElement('fieldset');
   private readonly port = document.createElement('input');
   private readonly name = document.createElement('input');
   private readonly prompt = document.createElement('textarea');
@@ -153,8 +155,7 @@ export class AgentPanel {
       'Copy a prompt to your local agent to start its CLI service. Allow this site to connect to your local network when asked. This page keeps reconnecting until you revoke access. Keep it open while agents work.';
     titleLine.append(title, this.connection);
     heading.append(titleLine, note);
-    const fields = document.createElement('fieldset');
-    fields.append(
+    this.createFields.append(
       field('Agent name', this.name),
       field('Local port', this.port),
     );
@@ -165,7 +166,12 @@ export class AgentPanel {
     promptActions.append(this.promptMessage, copy);
     this.promptSection.className = 'agent-prompt';
     this.promptSection.append(this.prompt, promptActions);
-    content.append(heading, this.list, fields, feedback, footer);
+    this.createForm.className = 'agent-create-form';
+    const createContent = document.createElement('div');
+    createContent.className = 'agent-create-content';
+    createContent.append(this.createFields, feedback, footer);
+    this.createForm.append(createContent);
+    content.append(heading, this.list, this.createForm);
     this.dialog.append(content);
     document.body.append(this.dialog);
     open.addEventListener('click', () => {
@@ -184,6 +190,7 @@ export class AgentPanel {
     this.dialog.addEventListener('close', () => {
       this.connection.open = false;
       this.clearPromptMessage();
+      this.finishCreateAnimation();
     });
     document.addEventListener('pointerdown', event => {
       if (!this.connection.contains(event.target as Node))
@@ -412,6 +419,7 @@ export class AgentPanel {
           undefined,
           grant.color,
         );
+        this.revealCreateForm();
         this.connect(grant);
         this.port.value = String(
           randomAgentPort(
@@ -425,6 +433,35 @@ export class AgentPanel {
         this.adding = false;
       },
     );
+  }
+
+  private revealCreateForm(): void {
+    this.finishCreateAnimation();
+    if (
+      !this.dialog.open ||
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    )
+      return;
+    this.createForm.inert = true;
+    this.createFields.disabled = true;
+    this.createForm.classList.add('agent-create-revealing');
+    const animation = this.createForm.animate(
+      {gridTemplateRows: ['0fr', '1fr'], opacity: [0, 1]},
+      {
+        delay: 80,
+        duration: 360,
+        easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
+        fill: 'backwards',
+      },
+    );
+    animation.onfinish = () => this.finishCreateAnimation();
+  }
+
+  private finishCreateAnimation(): void {
+    for (const animation of this.createForm.getAnimations()) animation.cancel();
+    this.createForm.classList.remove('agent-create-revealing');
+    this.createForm.inert = false;
+    this.createFields.disabled = false;
   }
 
   private async handle(agentId: string, envelope: unknown): Promise<unknown> {
@@ -665,6 +702,7 @@ export class AgentPanel {
 
   private suspend(): void {
     this.clearPromptMessage();
+    this.finishCreateAnimation();
     this.generation++;
     this.available = false;
     this.renders.clear();
@@ -680,6 +718,7 @@ export class AgentPanel {
   private async end(): Promise<void> {
     await this.initialization;
     await this.storage!.save();
+    this.finishCreateAnimation();
     this.generation++;
     this.sessionId = undefined;
     for (const grant of this.grants.values()) {
