@@ -15,6 +15,8 @@ description: 'code3d 的隔离开发、串行集成与 subagent 交付流程。U
 
 GitHub Issues 跟踪需求和当前已确定的方案，下面的本地协调文件只负责 agent 活动、开发服务器和串行集成。开始需求、方案确定或调整、更新 issue 或交付时，读取 [GitHub Issues 协作约定](references/github-issues.md)，同步维护 issue 正文中的方案摘要。不设需求模板；简短需求可以只有一句话。
 
+开发环境与当前架构从[内部开发文档](../../docs/README.md)按任务进入；修改 Code3D 源码的 agent 使用本目录的技能和内部文档，使用 Code3D 建模的 agent 阅读对外操作指南。维护相应专题和受影响的对外说明，不恢复全局工作计划或本地需求文件来跟踪进度。
+
 协调脚本统一使用主 worktree 的已集成版本，不使用任务分支中的旧副本，避免旧工作流覆盖新状态。主区路径记为 `PRIMARY`，任务 worktree 记为 `WORKTREE`：
 
 ```bash
