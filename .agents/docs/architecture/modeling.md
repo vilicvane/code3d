@@ -10,6 +10,12 @@
 `ModelObject` 实现不决定所有作者类型都具有相同能力：group、点、边、面、实体
 按实际能力公开方法，具名成员通过类型组合保留。
 
+通用 `Model` 的 kind 是实际 `ModelKind` 的集合，所有具体模型（包括没有 expose
+成员的 group）都可直接作为 `Model` 使用。能力接口和 `ModelForKind` 按具体 kind
+保留链式返回类型，不引入与真实种类互斥的通用分类。嵌套 group 保留原有层级，
+不要求作者用 expose 或类型断言来组合。公开类型同时由 CLI 和 App 的实际 Monaco
+语言服务验证；两者可能使用不同的 TypeScript 版本。
+
 作者 root 不暴露 runtime identity、trace、snapshot 或资源释放方法。拓扑引用的
 `kind`、`id` 等是正式公开的几何信息，不能与内部模型字段混为一类。
 TypeScript 隐藏声明不等于 JavaScript 对象上的字段不可读；这是 API 边界，

@@ -1,6 +1,25 @@
 import type {ProjectTypeScriptWorker} from '../../src/monaco/typescript-protocol.ts';
 import * as monaco from 'monaco-editor/editor';
 import * as language from 'monaco-editor/languages/features/typescript/register';
+import publicModels from '../../../core/test/public-models.ts?raw';
+
+export async function inspectPublicModels() {
+  const model = monaco.editor.createModel(
+    publicModels,
+    'typescript',
+    monaco.Uri.file('/workspace/public-models.ts'),
+  );
+  try {
+    const worker = await (await language.getTypeScriptWorker())(model.uri);
+    const uri = model.uri.toString();
+    return [
+      ...(await worker.getSyntacticDiagnostics(uri)),
+      ...(await worker.getSemanticDiagnostics(uri)),
+    ];
+  } finally {
+    model.dispose();
+  }
+}
 
 export function mainEditor() {
   return monaco.editor

@@ -597,7 +597,7 @@ const defaultModelNames = {
 
 const anchorKind = Symbol('anchorKind');
 const anchorReferenceValue = Symbol('anchorReference');
-const modelFamily = Symbol('modelFamily');
+const modelKind = Symbol('modelKind');
 const modelNamedElements = Symbol('modelNamedElements');
 
 export interface Anchor<Kind extends ElementKind = ElementKind> {
@@ -675,18 +675,18 @@ export type ElementSources = Readonly<Record<string, Anchor>>;
 export type NamedElements = Readonly<Record<string, Anchor>>;
 
 export type ExposedValue<Value> = Value extends {
-  readonly [modelFamily]: infer Family;
+  readonly [modelKind]: infer Kind;
   readonly [modelNamedElements]: infer Elements;
 }
-  ? (Family extends 'solid'
+  ? (Kind extends 'solid'
       ? Solid
-      : Family extends 'face'
+      : Kind extends 'face'
         ? Surface
-        : Family extends 'edge'
+        : Kind extends 'edge'
           ? Edge
-          : Family extends 'vertex'
+          : Kind extends 'vertex'
             ? Vertex
-            : Family extends 'group'
+            : Kind extends 'group'
               ? Anchor<'frame'>
               : Anchor) &
       Elements
@@ -711,41 +711,36 @@ export type ModelElementKind<Kind extends ModelKind> = Kind extends 'face'
       ? 'point'
       : 'frame';
 
-export type ModelFamily = ModelKind | 'model';
-
-export type ModelFamilyElementKind<Family extends ModelFamily> =
-  Family extends ModelKind ? ModelElementKind<Family> : ElementKind;
-
-export type ModelForFamily<
+export type ModelForKind<
   Elements extends NamedElements,
-  Family extends ModelFamily,
-> = Family extends 'solid'
+  Kind extends ModelKind,
+> = Kind extends 'solid'
   ? SolidModel<Elements>
-  : Family extends 'face'
+  : Kind extends 'face'
     ? FaceModel<Elements>
-    : Family extends 'edge'
+    : Kind extends 'edge'
       ? EdgeModel<Elements>
-      : Family extends 'vertex'
+      : Kind extends 'vertex'
         ? VertexModel<Elements>
-        : Family extends 'group'
+        : Kind extends 'group'
           ? GroupModel<Elements>
-          : Model<Elements>;
+          : never;
 
 export interface ModelCapabilities<
   Elements extends NamedElements,
-  Family extends ModelFamily,
+  Kind extends ModelKind,
 >
-  extends Anchor<ModelFamilyElementKind<Family>>, DirectionalBounds {
-  readonly [modelFamily]: Family extends ModelKind ? Family : ModelKind;
+  extends Anchor<ModelElementKind<Kind>>, DirectionalBounds {
+  readonly [modelKind]: Kind;
   readonly [modelNamedElements]: Elements;
   relate(
     build: (
-      self: ModelForFamily<Elements, Family>,
+      self: ModelForKind<Elements, Kind>,
     ) => Constraint | readonly Constraint[],
-  ): ModelForFamily<Elements, Family>;
+  ): ModelForKind<Elements, Kind>;
   expose<const Sources extends ElementSources>(
     sources: Sources,
-  ): ModelForFamily<MergedElements<Elements, ExposedElements<Sources>>, Family>;
+  ): ModelForKind<MergedElements<Elements, ExposedElements<Sources>>, Kind>;
   /**
    * Shift the origin by this displacement: every local point becomes p - d.
    * @code3d.param dx {kind: 'length', default: 0, label: 'Origin ΔX'}
@@ -756,36 +751,36 @@ export interface ModelCapabilities<
     dx: number,
     dy: number,
     dz: number,
-  ): ModelForFamily<Elements, Family>;
+  ): ModelForKind<Elements, Kind>;
   /** Re-express the model with this point reference at local zero. */
-  originPoint(point: PointAnchor): ModelForFamily<Elements, Family>;
+  originPoint(point: PointAnchor): ModelForKind<Elements, Kind>;
   /**
    * Rotate about the current origin, in degrees, about fixed local X, Y, then Z axes.
    * @code3d.param x {kind: 'angle', default: 0, label: 'Rotate X'}
    * @code3d.param y {kind: 'angle', default: 0, label: 'Rotate Y'}
    * @code3d.param z {kind: 'angle', default: 0, label: 'Rotate Z'}
    */
-  rotate(x: number, y: number, z: number): ModelForFamily<Elements, Family>;
+  rotate(x: number, y: number, z: number): ModelForKind<Elements, Kind>;
   /**
    * Return a value with its entire material replaced, including every group descendant.
    * Capture a Three.js material at assignment, or use a CSS color for the default material.
    */
-  material(material: Material | string): ModelForFamily<Elements, Family>;
+  material(material: Material | string): ModelForKind<Elements, Kind>;
 }
 
 export interface GeometryCapabilities<
   Elements extends NamedElements,
-  Family extends ModelGeometryKind,
+  Kind extends ModelGeometryKind,
 > extends GeometryQueryCapabilities {
   /** Re-express the model with its geometric center at local zero. */
-  originCenter(): ModelForFamily<Elements, Family>;
+  originCenter(): ModelForKind<Elements, Kind>;
   /**
    * Re-express the model with the selected vertex at local zero.
    * @code3d.param id {kind: 'vertex', label: 'Origin vertex'}
    */
-  originVertex(id: VertexId): ModelForFamily<Elements, Family>;
+  originVertex(id: VertexId): ModelForKind<Elements, Kind>;
   /** @code3d.param factor {kind: 'ratio', default: 1, label: 'Scale'} */
-  scaled(factor: number): ModelForFamily<Elements, Family>;
+  scaled(factor: number): ModelForKind<Elements, Kind>;
 }
 
 export interface VertexTopologyCapabilities {
@@ -837,7 +832,7 @@ export interface SolidModificationCapabilities<Elements extends NamedElements> {
 
 export type Model<Elements extends NamedElements = {}> = ModelCapabilities<
   Elements,
-  'model'
+  ModelKind
 > &
   Elements;
 
@@ -2103,7 +2098,7 @@ export class ModelObject<
   implements Anchor<ModelElementKind<Kind>>
 {
   declare readonly [anchorKind]: ModelElementKind<Kind>;
-  declare readonly [modelFamily]: Kind;
+  declare readonly [modelKind]: Kind;
   declare readonly [modelNamedElements]: Elements;
   /** @internal */
   readonly elementKind: ModelElementKind<Kind>;

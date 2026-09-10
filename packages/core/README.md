@@ -81,6 +81,10 @@ add edge selection, and faces and solids add surface selection. Only solids
 provide `fillet`, `chamfer`, and `shell`. Groups compose values and support
 relations, exposed elements, and materials without pretending to be geometry.
 
+Groups are model values and can be nested directly with `group([inner, other])`,
+including in mixed `Model[]` collections. Nesting preserves each group's hierarchy;
+`expose()` adds named references when callers need to address members.
+
 A topology ID belongs to its owning model and element kind. It is a number or a
 flat numeric path, such as `.edge([1, 3])`. Operations track unambiguous ancestry;
 transforms preserve complete paths. Inspect the result after topology changes
