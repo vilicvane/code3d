@@ -277,7 +277,8 @@ export type ModelPlacement = 'standalone' | 'composition';
 export function createRenderedModelNode(
   node: ModelSnapshotObject,
 ): THREE.Object3D {
-  if (node.kind === 'group') return new THREE.Group();
+  if (node.kind === 'group' || node.kind === 'reference')
+    return new THREE.Group();
   if (!node.mesh) {
     throw new Error(`OpenCascade solid ${node.name} has no renderable mesh.`);
   }

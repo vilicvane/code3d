@@ -87,7 +87,7 @@ export function sketchSourceDiagnostics(
     });
     if (!differences.length) continue;
     const changes = differences[0].changed;
-    const shared = group.length > 1;
+    const shared = new Set(group.map(sketch => sketch.geometryId)).size > 1;
     const expressionDriven =
       !parsed.reason &&
       differences.some(d =>

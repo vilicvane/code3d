@@ -1835,6 +1835,7 @@ function syncContextualTool(sourceTargetFocused = true): void {
       scope.evaluation.sketchIds[0],
       previewState.module.sketches,
       scope.target.sourceRef,
+      previewState.module.objects,
     );
   } else if (
     (!sourceTargetFocused ||

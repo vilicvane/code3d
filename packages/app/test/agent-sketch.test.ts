@@ -12,6 +12,9 @@ test('sketch observations keep layer addresses, solved geometry, authored inputs
     );
   const base: CompiledSketch = {
     id: 'base',
+    geometryId: 'base',
+    frameNodeId: 'base-frame',
+    context: [],
     entities: [
       {kind: 'point', id: 1, position: [0, 0]},
       {kind: 'circle', id: 2, center: {layer: 'base', id: 1}, radius: 20},
@@ -24,6 +27,9 @@ test('sketch observations keep layer addresses, solved geometry, authored inputs
   };
   const child: CompiledSketch = {
     id: 'child',
+    geometryId: 'child',
+    frameNodeId: 'child-frame',
+    context: [],
     base: 'base',
     entities: [
       {kind: 'point', id: 1, position: [0, 0], alias: {layer: 'base', id: 1}},
@@ -93,6 +99,9 @@ test('empty and open sketches remain observable, with finite analytic arcs and e
   >('/src/agent/sketch.ts');
   const empty: CompiledSketch = {
     id: 'empty',
+    geometryId: 'empty',
+    frameNodeId: 'empty-frame',
+    context: [],
     entities: [],
     constraints: [],
     degreesOfFreedom: 0,
