@@ -1,12 +1,7 @@
 import type {BrowserProjectFileSystem} from './filesystem';
-import {
-  decodeProjectFile,
-  type ProjectFileInfo,
-  type ProjectFileReader,
-} from './file-reader';
+import {decodeProjectFile} from './file-reader';
 import {normalizeProjectPath, projectDirectory} from './project';
 import {
-  findPackageScope,
   parsePackageManifest,
   validateBrowserManifest,
 } from './package-manifest';
@@ -54,185 +49,18 @@ function relativePath(from: string, to: string): string {
   return [...left.map(() => '..'), ...right].join('/') || '.';
 }
 
-export type PackageInstallationProgress = Readonly<{
-  directory: string;
-  state: 'busy' | 'ready' | 'error';
-  message: string;
-}>;
-
-export class PackageInstallationError extends Error {
-  constructor(
-    readonly directory: string,
-    cause: unknown,
-  ) {
-    super(cause instanceof Error ? cause.message : String(cause), {cause});
-    this.name = 'PackageInstallationError';
-  }
-}
-
-type InstallationState = {key: string; manifest: string; cacheable: boolean};
-
-/** Installs only reached package scopes. All consumers read the resulting files. */
-export class BrowserPackageInstaller implements ProjectFileReader {
-  private readonly prepared = new Map<string, InstallationState>();
-  private readonly preparing = new Map<string, Promise<void>>();
-  private readonly lookups = new Map<
-    string,
-    Promise<InstallationState | undefined>
-  >();
-  private readonly fileInfo = new Map<
-    string,
-    {key: string; info: Promise<ProjectFileInfo | undefined>}
-  >();
-  private readonly failures = new Set<string>();
-  private readonly pendingCleanup = new Set<string>();
+/** Resolve and materialize one package scope; scheduling and presentation belong to its manager. */
+export class BrowserPackageInstaller {
   constructor(
     private readonly files: BrowserProjectFileSystem,
-    private readonly progress: (
-      progress: PackageInstallationProgress,
-    ) => void = () => {},
     private readonly createRegistry = () => new NpmRegistry(),
-    private readonly installed: () => void = () => {},
   ) {}
 
-  async prepare(
-    file: string,
-    {update = false}: {update?: boolean} = {},
-  ): Promise<void> {
-    this.lookups.clear();
-    const scope = await findPackageScope(this.files, file);
-    await this.ensure(scope.directory, update);
-  }
-
-  private async prepareLookup(path: string) {
-    const match = /^(.*?)\/node_modules(?:\/|$)/.exec(path);
-    if (!match) return;
-    let lookup = this.lookups.get(match[1]);
-    if (!lookup) {
-      lookup = findPackageScope(
-        this.files,
-        pathAt(match[1], '__lookup.ts'),
-      ).then(async scope => {
-        await this.ensure(scope.directory);
-        return scope.directory === normalizeProjectPath(match[1])
-          ? this.prepared.get(scope.directory)
-          : undefined;
-      });
-      this.lookups.set(match[1], lookup);
-      lookup.catch(() => {
-        if (this.lookups.get(match[1]) === lookup)
-          this.lookups.delete(match[1]);
-      });
-    }
-    return lookup;
-  }
-  async readFile(path: string) {
-    await this.prepareLookup(path);
-    return this.files.readFile(path);
-  }
-  async stat(path: string) {
-    const installation = await this.prepareLookup(path);
-    // Installed package trees are read-only and replaced together with their marker.
-    // Keep checking ordinary files and trees which are not owned by the installer.
-    if (!installation?.cacheable) return this.files.stat(path);
-    let cached = this.fileInfo.get(path);
-    if (cached?.key !== installation.key) {
-      const info = this.files.stat(path).catch(error => {
-        if (this.fileInfo.get(path)?.info === info) this.fileInfo.delete(path);
-        throw error;
-      });
-      cached = {key: installation.key, info};
-      this.fileInfo.set(path, cached);
-    }
-    return cached.info;
-  }
-
-  statMany(paths: readonly string[]) {
-    return Promise.all(paths.map(path => this.stat(path)));
-  }
-
-  private async installationState(
-    directory: string,
-  ): Promise<InstallationState> {
-    const paths = [
-      'package.json',
-      packageLockName,
-      'node_modules',
-      'node_modules/.code3d-install.json',
-    ];
-    const states = await Promise.all(
-      paths.map(path => this.files.stat(pathAt(directory, path))),
-    );
-    return {
-      key: JSON.stringify(states),
-      manifest: JSON.stringify(states[0] ?? null),
-      cacheable: states[2]?.kind === 'directory' && states[3]?.kind === 'file',
-    };
-  }
-
-  private ensure(directory: string, update = false): Promise<void> {
-    const pending = this.preparing.get(directory);
-    if (pending) return pending.then(() => this.ensure(directory, update));
-    const run = async () => {
-      const before = await this.installationState(directory);
-      if (
-        !update &&
-        !this.pendingCleanup.has(directory) &&
-        this.prepared.get(directory)?.key === before.key
-      )
-        return;
-      const install = async () => {
-        let reported = false;
-        try {
-          await this.install(
-            directory,
-            message => {
-              reported = true;
-              this.progress({directory, state: 'busy', message});
-            },
-            update,
-          );
-          const after = await this.installationState(directory);
-          // A newer manifest needs its own preparation, even if it was saved just after the swap.
-          if (before.manifest === after.manifest)
-            this.prepared.set(directory, after);
-          if (reported || this.failures.has(directory))
-            this.progress({
-              directory,
-              state: 'ready',
-              message: reported ? 'Packages installed' : 'Packages ready',
-            });
-          this.failures.delete(directory);
-        } catch (error) {
-          this.prepared.delete(directory);
-          this.failures.add(directory);
-          const failure = new PackageInstallationError(directory, error);
-          this.progress({
-            directory,
-            state: 'error',
-            message: failure.message,
-          });
-          throw failure;
-        }
-      };
-      // Browser tabs using the same IndexedDB workspace must serialize replacement.
-      if (typeof navigator !== 'undefined' && navigator.locks)
-        await navigator.locks.request('code3d-npm:' + directory, install);
-      else await install();
-    };
-    const preparation = run().finally(() => {
-      if (this.preparing.get(directory) === preparation)
-        this.preparing.delete(directory);
-    });
-    this.preparing.set(directory, preparation);
-    return preparation;
-  }
-
-  private async install(
+  async install(
     directory: string,
     progress: (message: string) => void,
     update: boolean,
-  ): Promise<void> {
+  ): Promise<{changed: boolean; cleanupPending: boolean}> {
     const transaction = new PackageInstallationTransaction(
       this.files,
       directory,
@@ -255,11 +83,10 @@ export class BrowserPackageInstaller implements ProjectFileReader {
         return false;
       }
     });
-    if (collected) this.pendingCleanup.delete(directory);
-    else this.pendingCleanup.add(directory);
+
     const manifestPath = pathAt(directory, 'package.json');
     const bytes = await this.files.readFile(manifestPath);
-    if (!bytes) return;
+    if (!bytes) return {changed: false, cleanupPending: !collected};
     const source = decodeProjectFile(bytes);
     const manifest = parsePackageManifest(source, manifestPath);
     validateBrowserManifest(manifest);
@@ -292,7 +119,7 @@ export class BrowserPackageInstaller implements ProjectFileReader {
       decodeProjectFile(marker) === nextMarker &&
       oldLockSource === serialized
     )
-      return;
+      return {changed: false, cleanupPending: !collected};
 
     const cleaned = await transaction.replace(
       async (staged, stagedLock) => {
@@ -382,8 +209,6 @@ export class BrowserPackageInstaller implements ProjectFileReader {
         progress('Saving installed packages');
       },
     );
-    if (cleaned) this.pendingCleanup.delete(directory);
-    else this.pendingCleanup.add(directory);
-    this.installed();
+    return {changed: true, cleanupPending: !cleaned};
   }
 }

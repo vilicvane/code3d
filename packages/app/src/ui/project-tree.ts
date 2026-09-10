@@ -10,7 +10,7 @@ import type {AgentLocation} from '../editor';
 import {
   PackageInstallationError,
   type PackageInstallationProgress,
-} from '../project/browser-package-installer';
+} from '../project/browser-package-manager';
 import {mapProjectIO} from '../project/io';
 import {parsePackageSpecifier} from '../project/package-manifest';
 import {

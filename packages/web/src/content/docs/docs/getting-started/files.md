@@ -51,6 +51,8 @@ changed dependencies or restores its existing lock before compilation.
 Installation continues in the background while you switch files, edit and save.
 Up to 15 packages download concurrently per installation; unpacking runs one
 package at a time alongside downloads. Verified cached archives are reused.
+Requests for the same folder run in order. A failed request does not discard
+an update queued for a corrected manifest.
 An interrupted installation is recovered before the next attempt. Once packages
 and their lock are replaced successfully, retrying backup cleanup does not
 repeat the installation.

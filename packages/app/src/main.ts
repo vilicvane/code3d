@@ -67,12 +67,11 @@ import {
 } from './project/project';
 import {mapProjectIO} from './project/io';
 import {
-  BrowserPackageInstaller,
+  BrowserPackageManager,
   PackageInstallationError,
-} from './project/browser-package-installer';
+} from './project/browser-package-manager';
 import type {BrowserProjectFileSystem} from './project/filesystem';
 import {
-  findPackageScope,
   packageInstallDirectory,
   parsePackageManifest,
   addPackageDependency,
@@ -382,25 +381,30 @@ const codeEditor = new CodeEditor(
   initialProject.files[0]?.path,
 );
 replaceFileRoute(codeEditor.currentFile());
-const packageInstaller = !directoryWorkspaceId
-  ? new BrowserPackageInstaller(
+const packageManager = !directoryWorkspaceId
+  ? new BrowserPackageManager(
       projectFileSystem as BrowserProjectFileSystem,
       progress => projectDirectory.setPackageProgress(progress),
       undefined,
-      () => {
-        void projectDirectory.refresh();
+      async directory => {
+        await codeEditor.refreshPackageLock(
+          normalizeProjectPath(directory + '/code3d-lock.json'),
+        );
+        await projectDirectory.refresh();
+        renderProjectNavigation();
       },
     )
   : undefined;
-const packageFiles = packageInstaller ?? projectFileSystem;
+const packageFiles = packageManager?.dependencies ?? projectFileSystem;
 const navigationPackages = new ProjectPackages(
-  packageFiles,
+  projectFileSystem,
   browserPackageFiles,
 );
 codeEditor.fileReader = {
   async readFile(path) {
     // Editable project files retain their source, not runtime package metadata.
-    if (!path.includes('/node_modules/')) return packageFiles.readFile(path);
+    if (!path.includes('/node_modules/'))
+      return projectFileSystem.readFile(path);
     // Browsing an already installed file does not wait for a replacement download.
     const installed = await projectFileSystem.readFile(path);
     if (installed !== undefined) return installed;
@@ -417,19 +421,10 @@ codeEditor.fileReader = {
     );
   },
 };
-const preparePackages = async (
-  _project: ModelProject,
-  file: string,
-  options?: {update?: boolean},
-) => {
-  if (!packageInstaller) return;
+const preparePackages = async (_project: ModelProject, file: string) => {
+  if (!packageManager) return;
   await agentProject.flush();
-  await packageInstaller.prepare(file, options);
-  const scope = await findPackageScope(projectFileSystem, file);
-  await codeEditor.refreshPackageLock(
-    normalizeProjectPath(scope.directory + '/code3d-lock.json'),
-  );
-  renderProjectNavigation();
+  await packageManager.prepare(file);
 };
 const compiler = new ModelCompilerClient(
   packageFiles,
@@ -473,10 +468,8 @@ const projectDirectory = new ProjectTree(projectTree, {
     searchProjectEntries(projectFileSystem, cancelled, onEntries),
   onOpenFile: (path, takeFocus) => activateProjectFile(path, takeFocus),
   onOperation: operation => agentProject.changeEntries(operation),
-  onInstallPackage: packageInstaller ? installProjectPackage : undefined,
-  onUpdateDependencies: packageInstaller
-    ? updateProjectDependencies
-    : undefined,
+  onInstallPackage: packageManager ? installProjectPackage : undefined,
+  onUpdateDependencies: packageManager ? updateProjectDependencies : undefined,
   onBusy: busy => {
     if (busy) fileOpenVersion++;
     codeEditor.setReadOnly(busy);
@@ -522,7 +515,7 @@ async function installProjectPackage(selectedDirectory: string): Promise<void> {
   const specifier = await askInstallPackage(directory);
   if (!specifier) return;
   const path = normalizeProjectPath(directory + '/package.json');
-  await runPackageOperation(directory, 'Packages installed', async () => {
+  await packageManager!.install(directory, async () => {
     await agentProject.update(async () => {
       const bytes = await projectFileSystem.readFile(path);
       const manifest =
@@ -535,48 +528,14 @@ async function installProjectPackage(selectedDirectory: string): Promise<void> {
       ]);
       await codeEditor.openFile(path);
     });
-    await preparePackages(codeEditor.project(), path);
+    await agentProject.flush();
   });
 }
 
 async function updateProjectDependencies(directory: string): Promise<void> {
-  await runPackageOperation(directory, 'Dependencies updated', () =>
-    preparePackages(
-      codeEditor.project(),
-      normalizeProjectPath(directory + '/package.json'),
-      {update: true},
-    ),
-  );
+  await packageManager!.update(directory, () => agentProject.flush());
 }
 
-async function runPackageOperation(
-  directory: string,
-  successMessage: string,
-  operation: () => Promise<void>,
-): Promise<void> {
-  projectDirectory.setPackageProgress({
-    directory,
-    state: 'busy',
-    message: 'Preparing packages',
-  });
-  try {
-    await operation();
-    projectDirectory.setPackageProgress({
-      directory,
-      state: 'ready',
-      message: successMessage,
-    });
-  } catch (error) {
-    // The installer reports its own failures. Earlier manifest/save failures
-    // also belong to this package operation, never the explorer's file error.
-    if (!(error instanceof PackageInstallationError))
-      projectDirectory.setPackageProgress({
-        directory,
-        state: 'error',
-        message: error instanceof Error ? error.message : String(error),
-      });
-  }
-}
 let sourcePreviewDiagnostic: ModelDiagnostic | undefined;
 let compileTimer: number | undefined;
 let completionPreviewTimer: number | undefined;
