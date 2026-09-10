@@ -212,6 +212,65 @@ test(
 );
 
 test(
+  'file and root menus stay inside the viewport, including after resizing',
+  {timeout: 90_000},
+  async t => {
+    const page = await open(t);
+    await page.setViewportSize({width: 1000, height: 360});
+    await row(page, 'settings.json').click({button: 'right'});
+    const popup = page.getByRole('menu');
+    assert.equal(
+      await page
+        .getByRole('menuitem', {name: 'Rename', exact: true})
+        .isEnabled(),
+      true,
+    );
+    const assertMenuVisible = async () => {
+      const bounds = await popup.boundingBox();
+      assert.ok(bounds);
+      const viewport = page.viewportSize()!;
+      assert.ok(bounds.x >= 0 && bounds.y >= 0, JSON.stringify(bounds));
+      assert.ok(
+        bounds.x + bounds.width <= viewport.width,
+        JSON.stringify(bounds),
+      );
+      assert.ok(
+        bounds.y + bounds.height <= viewport.height,
+        JSON.stringify(bounds),
+      );
+    };
+    await assertMenuVisible();
+    await page.setViewportSize({width: 1000, height: 200});
+    await page.evaluate(() => new Promise(requestAnimationFrame));
+    await assertMenuVisible();
+    await page.keyboard.press('End');
+    await page.getByRole('menuitem', {name: 'Delete', exact: true}).waitFor();
+    assert.ok(await popup.evaluate(element => element.scrollTop > 0));
+    await page.keyboard.press('Escape');
+    await popup.waitFor({state: 'hidden'});
+
+    const scroll = page.locator('[data-file-tree-virtualized-scroll]');
+    await scroll.evaluate(element => {
+      element.scrollTop = element.scrollHeight;
+    });
+    const bounds = await scroll.boundingBox();
+    assert.ok(bounds);
+    await page.mouse.click(bounds.x + 20, bounds.y + bounds.height - 12, {
+      button: 'right',
+    });
+    await assertMenuVisible();
+    assert.equal(
+      await page
+        .getByRole('menuitem', {name: 'Rename', exact: true})
+        .isDisabled(),
+      true,
+    );
+    await page.mouse.click(990, 90);
+    await popup.waitFor({state: 'hidden'});
+  },
+);
+
+test(
   'horizontal scrolling leaves the final virtual row fully visible',
   {timeout: 90_000},
   async t => {
@@ -294,6 +353,54 @@ test(
       element.scrollTop = element.scrollHeight;
     });
     await assertLastRowVisible();
+    await search.press('Escape');
+    await scroll.evaluate(element => {
+      element.scrollTop = 0;
+    });
+    await row(page, 'src').click();
+    await row(page, 'part.ts').click();
+    await active(page, '/src/part.ts');
+    await scroll.evaluate(element => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await assertLastRowVisible();
+    const blank = await scroll.evaluate((element, lastName) => {
+      const lastRow = element.querySelector<HTMLElement>(
+        `[data-item-path="${lastName}"]`,
+      )!;
+      const rect = element.getBoundingClientRect();
+      const rowRect = lastRow.getBoundingClientRect();
+      return {
+        height:
+          rect.top + element.clientTop + element.clientHeight - rowRect.bottom,
+        rowHeight: rowRect.height,
+        x: rect.left + 20,
+        y: rowRect.bottom + rowRect.height / 2,
+      };
+    }, lastName);
+    assert.ok(
+      Math.abs(blank.height - blank.rowHeight) <= 1,
+      JSON.stringify(blank),
+    );
+    await page.mouse.click(blank.x, blank.y, {button: 'right'});
+    assert.equal(
+      await page
+        .getByRole('menuitem', {name: 'Rename', exact: true})
+        .isDisabled(),
+      true,
+    );
+    await page.getByRole('menuitem', {name: 'New file', exact: true}).click();
+    const dialog = page.getByRole('dialog', {name: 'New file', exact: true});
+    await dialog.getByRole('textbox', {name: 'Name'}).fill('root-note.txt');
+    await dialog.getByRole('button', {name: 'Create', exact: true}).click();
+    await active(page, '/root-note.txt');
+    assert.equal(
+      await page.evaluate(
+        async () =>
+          await window.explorerApp.projectFileSystem.stat('/src/root-note.txt'),
+      ),
+      undefined,
+    );
   },
 );
 

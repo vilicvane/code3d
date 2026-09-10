@@ -512,9 +512,12 @@ kbd {
 }
 
 .project-context-menu {
-  z-index: 30;
-  min-width: 204px;
+  position: fixed;
+  z-index: 100;
+  min-width: min(204px, calc(100vw - 16px));
   max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 16px);
+  overflow: auto;
   padding: 4px;
   color: #c9cdc2;
   border: 1px solid #363c2f;
@@ -576,11 +579,6 @@ kbd {
 .project-context-menu button:disabled kbd {
   color: #626b58;
   cursor: default;
-}
-
-.project-root-menu {
-  position: fixed;
-  z-index: 100;
 }
 
 .project-tree {

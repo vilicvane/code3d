@@ -65,7 +65,8 @@ export class ProjectTree {
   private indexed = false;
   private clipboard?: {kind: 'copy' | 'move'; paths: readonly string[]};
   private readonly status = document.createElement('div');
-  private rootMenu?: HTMLElement;
+  private removeMenu?: () => void;
+  private closeMenu?: ContextMenuOpenContext['close'];
 
   constructor(
     private readonly container: HTMLElement,
@@ -151,7 +152,8 @@ export class ProjectTree {
         contextMenu: {
           enabled: true,
           triggerMode: 'right-click',
-          render: (item, context) => this.menu(item, context),
+          onOpen: (item, context) => this.showMenu(item, context),
+          onClose: () => this.removeMenu?.(),
         },
       },
       unsafeCSS: `
@@ -161,6 +163,7 @@ export class ProjectTree {
         [data-file-tree-virtualized-scroll] {
           overflow: auto;
           padding-inline: 0;
+          padding-block-end: var(--trees-item-height);
           scrollbar-gutter: auto;
           scrollbar-width: thin;
           scrollbar-color: #41473b transparent;
@@ -261,28 +264,22 @@ export class ProjectTree {
     container.addEventListener('contextmenu', event => {
       if (event.defaultPrevented || this.busy) return;
       event.preventDefault();
-      this.closeRootMenu();
-      const menu = this.menu(undefined, {
-        close: () => this.closeRootMenu(),
+      this.closeMenu?.({restoreFocus: false});
+      this.showMenu(undefined, {
+        close: options => {
+          this.removeMenu?.();
+          if (options?.restoreFocus !== false) this.tree.focusFirstItem();
+        },
         restoreFocus: () => this.tree.focusFirstItem(),
         anchorElement: container,
-        anchorRect: container.getBoundingClientRect(),
+        anchorRect: new DOMRect(event.clientX, event.clientY, 0, 0),
       });
-      menu.classList.add('project-root-menu');
-      menu.style.left = `${event.clientX}px`;
-      menu.style.top = `${event.clientY}px`;
-      document.body.append(menu);
-      this.rootMenu = menu;
-      const rect = menu.getBoundingClientRect();
-      menu.style.left = `${Math.max(0, Math.min(event.clientX, innerWidth - rect.width))}px`;
-      menu.style.top = `${Math.max(0, Math.min(event.clientY, innerHeight - rect.height))}px`;
-    });
-    document.addEventListener('pointerdown', event => {
-      if (this.rootMenu && !this.rootMenu.contains(event.target as Node))
-        this.closeRootMenu();
     });
     window.addEventListener('pagehide', event => {
-      if (!event.persisted) this.tree.cleanUp();
+      if (!event.persisted) {
+        this.closeMenu?.({restoreFocus: false});
+        this.tree.cleanUp();
+      }
     });
   }
 
@@ -867,9 +864,35 @@ export class ProjectTree {
     return menu;
   }
 
-  private closeRootMenu(): void {
-    this.rootMenu?.remove();
-    this.rootMenu = undefined;
+  private showMenu(
+    item: ContextMenuItem | undefined,
+    context: ContextMenuOpenContext,
+  ): void {
+    this.removeMenu?.();
+    const menu = this.menu(item, context);
+    // Pierre recognizes this marker when menu content is rendered in a portal.
+    menu.dataset.fileTreeContextMenuRoot = 'true';
+    document.body.append(menu);
+    const position = () => {
+      const rect = menu.getBoundingClientRect();
+      menu.style.left = `${Math.max(8, Math.min(context.anchorRect.left, innerWidth - rect.width - 8))}px`;
+      menu.style.top = `${Math.max(8, Math.min(context.anchorRect.bottom, innerHeight - rect.height - 8))}px`;
+    };
+    const dismiss = (event: PointerEvent) => {
+      if (!event.composedPath().includes(menu))
+        context.close({restoreFocus: false});
+    };
+    position();
+    window.addEventListener('resize', position);
+    document.addEventListener('pointerdown', dismiss);
+    this.closeMenu = context.close;
+    this.removeMenu = () => {
+      window.removeEventListener('resize', position);
+      document.removeEventListener('pointerdown', dismiss);
+      menu.remove();
+      this.closeMenu = undefined;
+      this.removeMenu = undefined;
+    };
   }
 
   private onKeyDown(event: KeyboardEvent): void {
