@@ -8,7 +8,7 @@ provide exact overloads and inferred model interfaces.
 
 Types used by the authoring API are also exported, including generic constraints,
 named-element result types, and capability interfaces. Use `import type` from
-`@code3d/core` for types such as `ElementKind`, `ModelKind`, `TopologyKind`,
+`@code3d/core` for types such as `ElementKind`, `ModelKind`, `ModelForKind`, `TopologyKind`,
 `NamedElements`, `ExposedElements`, `Bound`, and `TopologyId`. Replicad builder types such as `Shape3D`
 are available from `@code3d/core/replicad` alongside `definePrimitive`.
 
@@ -245,6 +245,13 @@ being implemented under [#114](https://github.com/vilicvane/code3d/issues/114).
 | `union(solids)`        | Fused solid                                   |
 | `cut(stock, tools)`    | Stock with the tool volumes removed           |
 | `intersect(solids)`    | Shared solid volume                           |
+
+`group()` accepts a `readonly Model[]`, including ordinary groups, empty groups,
+and any depth of nested groups mixed with solids, faces, curves, or points. Each
+nested group keeps its hierarchy. No type assertion or `expose()` call is needed
+to compose it; use `expose()` when callers need named member references. Generic
+helpers can use `ModelCapabilities<Elements, Kind>` and `ModelForKind<Elements, Kind>`
+to preserve the concrete model kind and exposed members through chained calls.
 
 Relations are resolved at composition and geometry evaluation boundaries.
 `stock.cut(tools)` is equivalent to `cut(stock, tools)`. Arrays in booleans and

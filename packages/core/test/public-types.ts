@@ -13,9 +13,7 @@ import {
   type MergedElements,
   type ModelCapabilities,
   type ModelElementKind,
-  type ModelFamily,
-  type ModelFamilyElementKind,
-  type ModelForFamily,
+  type ModelForKind,
   type ModelGeometryKind,
   type ModelKind,
   type NamedElements,
@@ -42,12 +40,9 @@ export function exposeElements<
   return model.expose(sources);
 }
 
-export function recolor<
-  Elements extends NamedElements,
-  Family extends ModelFamily,
->(
-  model: ModelCapabilities<Elements, Family>,
-): ModelForFamily<Elements, Family> {
+export function recolor<Elements extends NamedElements, Kind extends ModelKind>(
+  model: ModelCapabilities<Elements, Kind>,
+): ModelForKind<Elements, Kind> {
   return model.material('#345678');
 }
 
@@ -57,7 +52,7 @@ export function rotate<
 >(
   model: GeometryCapabilities<Elements, Kind> &
     ModelCapabilities<Elements, Kind>,
-): ModelForFamily<Elements, Kind> {
+): ModelForKind<Elements, Kind> {
   return model.rotate(0, 90, 0);
 }
 
@@ -98,7 +93,7 @@ const elementKinds: Record<ModelKind, ElementKind> = {
   group: 'frame',
 };
 const solidKind: ModelElementKind<'solid'> = 'frame';
-const groupKind: ModelFamilyElementKind<'group'> = 'frame';
+const groupKind: ModelElementKind<'group'> = 'frame';
 
 const kernel: Replicad = replicad;
 const builder = (size: number): Shape3D =>

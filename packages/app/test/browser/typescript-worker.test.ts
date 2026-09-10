@@ -3,6 +3,35 @@ import {test} from 'node:test';
 import {chromium} from 'playwright-core';
 
 test(
+  'public model types support plain nested groups in the Monaco language service',
+  {timeout: 60_000},
+  async () => {
+    assert.ok(process.env.CODE3D_TEST_URL);
+    const browser = await chromium.connectOverCDP(
+      process.env.CODE3D_CDP_URL ?? 'http://localhost:9222',
+    );
+    const context = await browser.newContext();
+    try {
+      const page = await context.newPage();
+      const errors: string[] = [];
+      page.on('pageerror', error => errors.push(error.message));
+      await page.goto(process.env.CODE3D_TEST_URL);
+      await page.getByText('Ready', {exact: true}).waitFor({timeout: 30_000});
+      const diagnostics = await page.evaluate(async () => {
+        const {inspectPublicModels} =
+          await import('/test/browser/typescript-worker-fixture.ts');
+        return inspectPublicModels();
+      });
+      assert.deepEqual(diagnostics, []);
+      assert.deepEqual(errors, []);
+    } finally {
+      await context.close();
+      await browser.close();
+    }
+  },
+);
+
+test(
   'Unicode identifiers retain complete tokens and valid TypeScript and JavaScript syntax',
   {timeout: 60_000},
   async () => {
