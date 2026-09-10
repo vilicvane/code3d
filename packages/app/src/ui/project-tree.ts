@@ -548,24 +548,47 @@ export class ProjectTree {
     this.status.hidden = false;
   }
 
-  async create(
-    kind: ProjectEntry['kind'],
-    directory = this.targetDirectory(),
-  ): Promise<void> {
-    if (this.busy || isProtectedProjectPath(directory)) return;
-    await this.loadDirectory(directory);
+  async create(kind: ProjectEntry['kind'], directory?: string): Promise<void> {
+    if (this.busy) return;
+    if (directory === undefined) {
+      directory = this.targetDirectory();
+      // Header actions remain useful while inspecting generated/package files.
+      while (isProtectedProjectPath(directory))
+        directory = projectDirectory(directory);
+    }
+    if (isProtectedProjectPath(directory)) {
+      this.showError(new Error(`Protected project path: ${directory}`));
+      return;
+    }
+    try {
+      await this.loadDirectory(directory);
+    } catch (error) {
+      this.showError(error);
+      return;
+    }
     const name = await this.askName(kind, directory);
     if (name === undefined) return;
     const path = normalizeProjectPath(`${directory}/${name}`);
     if (await this.perform({kind: 'create', entry: {path, kind}})) {
       if (kind === 'file') this.openFile(path, true);
       else {
+        await this.revealDirectory(projectDirectory(path));
         this.synchronizing = true;
-        for (const selected of this.tree.getSelectedPaths())
-          this.tree.getItem(selected)?.deselect();
-        this.tree.getItem(path.slice(1) + '/')?.select();
-        this.synchronizing = false;
-        this.tree.scrollToPath(path.slice(1) + '/', {focus: true});
+        try {
+          for (const selected of this.tree.getSelectedPaths())
+            this.tree.getItem(selected)?.deselect();
+          const segments = path.slice(1).split('/');
+          for (let depth = 1; depth < segments.length; depth++) {
+            const parent = this.tree.getItem(
+              segments.slice(0, depth).join('/') + '/',
+            );
+            if (isDirectoryItem(parent)) parent.expand();
+          }
+          this.tree.getItem(path.slice(1) + '/')?.select();
+          this.tree.scrollToPath(path.slice(1) + '/', {focus: true});
+        } finally {
+          this.synchronizing = false;
+        }
       }
     }
   }
@@ -1013,10 +1036,21 @@ export class ProjectTree {
       label: 'Name',
       value: kind === 'file' ? 'untitled.ts' : 'new-folder',
       submit: 'Create',
+      placeholder: kind === 'file' ? 'src/model.ts' : 'src/components',
       validate: value => {
-        if (!value || value === '.' || value === '..' || /[\\/\0]/.test(value))
-          throw new Error('Enter a file or folder name without slashes.');
-        if (this.entries.has(normalizeProjectPath(`${directory}/${value}`)))
+        if (
+          /[\\\0]/.test(value) ||
+          value
+            .split('/')
+            .some(part => !part.trim() || part === '.' || part === '..')
+        )
+          throw new Error(
+            'Enter a relative path with names separated by /, without . or .. segments.',
+          );
+        const path = normalizeProjectPath(`${directory}/${value}`);
+        if (isProtectedProjectPath(path))
+          throw new Error(`Protected project path: ${path}`);
+        if (this.entries.has(path))
           throw new Error('An entry with this name already exists.');
       },
     });

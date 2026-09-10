@@ -58,7 +58,11 @@ file names remain complete; scroll horizontally to read names wider than the
 sidebar. The search box and explorer toolbar stay in place.
 
 Use **New file** or **New folder** in the explorer header or right-click menu.
-New entries go in the focused folder, or beside the focused file. Right-click
+New entries go in the focused folder, or beside the focused file. Header actions
+use the nearest writable parent when focus is inside `node_modules` or another
+read-only directory; the dialog shows the destination. Enter a relative path
+such as `src/utils/model.ts` or `assets/icons` to create missing parent folders
+automatically. Existing files and folders are never overwritten. Right-click
 an entry for **Rename**, **Cut**, **Copy**, **Paste**, and **Delete**. Drag selected
 entries onto a folder to move them. `Ctrl/Cmd` selects additional entries;
 `Shift` selects a range. With the explorer focused, use `F2` to rename,

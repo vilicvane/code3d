@@ -72,6 +72,44 @@ function workspace(): {
   return {fs, files, directories};
 }
 
+test('new entry checks allow missing ancestors but reject collisions and protected paths', async () => {
+  const {fs} = workspace();
+  await fs.writeFile('/src/existing.ts', 'keep');
+  for (const kind of ['file', 'directory'] as const) {
+    await operations.checkProjectEntryOperation(fs, {
+      kind: 'create',
+      entry: {kind, path: '/src/new/deep/entry'},
+    });
+    for (const path of [
+      '/src/existing.ts',
+      '/src/existing.ts/child',
+      '/node_modules/new/entry',
+    ]) {
+      await assert.rejects(
+        operations.checkProjectEntryOperation(fs, {
+          kind: 'create',
+          entry: {kind, path},
+        }),
+        /already exists|Not a directory|Protected project path/,
+      );
+    }
+  }
+  for (const kind of ['move', 'copy'] as const) {
+    await assert.rejects(
+      operations.checkProjectEntryOperation(fs, {
+        kind,
+        entries: [{from: '/src/existing.ts', to: '/missing/entry.ts'}],
+      }),
+      /Destination directory not found/,
+    );
+  }
+  assert.equal(await fs.stat('/src/new'), undefined);
+  assert.equal(
+    new TextDecoder().decode(await fs.readFile('/src/existing.ts')),
+    'keep',
+  );
+});
+
 test('explicit folder copies include unopened and binary files with bounded parallel reads', async () => {
   const {fs, files, directories} = workspace();
   for (let index = 0; index < 48; index++)
