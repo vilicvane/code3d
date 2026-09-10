@@ -1,3 +1,5 @@
+import {reaction} from 'mobx';
+import {AgentConnections} from './agent/connections';
 import './style.css';
 import {
   File,
@@ -487,16 +489,10 @@ const agentObserver = new AgentObserver(
   preparePackages,
 );
 const agentRenders = new AgentRenderHistory();
-const agentRenderView = new AgentRenderView(viewportHost, agentRenders);
-let agentPanel: AgentPanel | undefined;
 const agentProject = new AgentProjectSession(
   projectFileSystem,
   codeEditor,
   request => agentObserver.observe(request),
-  () => {
-    retrySaveButton.hidden = !agentProject.hasUnsaved;
-    agentPanel?.refresh();
-  },
   error => showProjectIssue(error),
 );
 const projectDirectory = new ProjectTree(projectTree, {
@@ -534,19 +530,51 @@ agentProject.onEntriesChange(reason => {
   void projectDirectory.refresh();
   if (reason === 'operation') requestModelUpdate(0);
 });
-agentProject.onRevision(() => agentObserver.invalidate());
-agentPanel = new AgentPanel(
+const agentConnections = new AgentConnections(
   codeEditor,
   agentProject,
-  requiredElement<HTMLButtonElement>('agents-button'),
+  agentRenders,
   directoryWorkspaceId
     ? directoryConnected
       ? `directory:${directoryWorkspaceId}`
       : undefined
     : 'browser',
-  agentRenders,
-  activeAgents => agentRenderView.setActiveAgents(activeAgents),
 );
+const agentRenderView = new AgentRenderView(
+  viewportHost,
+  agentRenders,
+  agentConnections,
+);
+const agentPanel = new AgentPanel(
+  agentConnections,
+  agentProject,
+  requiredElement<HTMLButtonElement>('agents-button'),
+);
+const stopAgentRevision = reaction(
+  () => agentProject.currentRevision,
+  () => agentObserver.invalidate(),
+);
+const stopSaveStatus = reaction(
+  () => agentProject.hasUnsaved,
+  unsaved => {
+    retrySaveButton.hidden = !unsaved;
+  },
+  {fireImmediately: true},
+);
+window.addEventListener(
+  'pagehide',
+  () => {
+    stopAgentRevision();
+    stopSaveStatus();
+    stopAgentFollow();
+    stopAgentUpdates();
+    agentConnections.dispose();
+  },
+  {once: true},
+);
+window.addEventListener('pageshow', event => {
+  if (event.persisted) window.location.reload();
+});
 retrySaveButton.addEventListener('click', () => {
   void agentProject.retrySaves().catch(showProjectIssue);
 });
@@ -918,14 +946,14 @@ codeEditor.onActiveFile((path, reason) => {
 });
 
 function followAgentUpdate(update: AgentUpdate): void {
-  if (agentPanel?.followingAgentId !== update.agentId) return;
+  if (agentConnections.followingAgentId !== update.agentId) return;
   pendingAgentFollow = undefined;
   fileOpenVersion++;
   if (update.kind !== 'apply') {
     pendingAgentFollow = update;
     const cancelled = () =>
       pendingAgentFollow !== update ||
-      agentPanel?.followingAgentId !== update.agentId;
+      agentConnections.followingAgentId !== update.agentId;
     if (update.kind === 'list') setProjectExplorerExpanded(true);
     const navigation =
       update.kind === 'read'
@@ -959,12 +987,15 @@ function followAgentUpdate(update: AgentUpdate): void {
   void runModel(invocation);
 }
 
-agentProject.onAgentUpdate(followAgentUpdate);
-agentPanel.onFollowChange(agentId => {
-  pendingAgentFollow = undefined;
-  const update = agentId && agentProject.latestAgentUpdate(agentId);
-  if (update) followAgentUpdate(update);
-});
+const stopAgentUpdates = agentProject.onAgentUpdate(followAgentUpdate);
+const stopAgentFollow = reaction(
+  () => agentConnections.followingAgentId,
+  agentId => {
+    pendingAgentFollow = undefined;
+    const update = agentId && agentProject.latestAgentUpdate(agentId);
+    if (update) followAgentUpdate(update);
+  },
+);
 
 // A later user gesture takes precedence over a view requested before compilation.
 for (const event of ['pointerdown', 'wheel', 'keydown'])
@@ -1407,7 +1438,7 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
     if (following && pendingAgentFollow === following) {
       pendingAgentFollow = undefined;
       if (
-        agentPanel?.followingAgentId === following.agentId &&
+        agentConnections.followingAgentId === following.agentId &&
         !sketchEditor.hasTarget
       ) {
         if (following.mode) viewport.setRenderMode(following.mode);

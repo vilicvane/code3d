@@ -100,7 +100,9 @@ test(
     const row = (name: string) =>
       page.getByRole('treeitem', {name, exact: true});
     const marker = (name: string) => page.getByTitle(new RegExp(`${name}:`));
-    await marker('Alice').waitFor();
+    await row('body.ts')
+      .getByTitle(/Alice:/)
+      .waitFor();
     assert.equal(
       await row('body.ts')
         .locator('[data-item-section="decoration"] [title] > span')

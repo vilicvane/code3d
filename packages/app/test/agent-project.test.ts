@@ -1,3 +1,4 @@
+import {reaction} from 'mobx';
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
 import type {SourceRef} from '@code3d/core/tooling';
@@ -153,7 +154,6 @@ function fixture(
     fileSystem,
     editor,
     options.observe ?? (async () => ({ok: true, data: {model: 'observed'}})),
-    () => {},
     error => errors.push(error.message),
     options.resolve ??
       (async (source, cursor) => resolveAgentCursor(source, cursor)),
@@ -522,9 +522,24 @@ test('ambiguous post-change cursor rejects file writes, while a new-file cursor 
   });
 });
 
-test('partial persistence preserves pending contents and explicit retry saves them', async () => {
+test('partial persistence preserves pending contents and explicit retry saves them', async t => {
   const f = fixture();
   const entryUpdates: string[] = [];
+  const pendingStates: boolean[] = [];
+  const revisions: number[] = [];
+  t.after(
+    reaction(
+      () => f.session.hasUnsaved,
+      value => pendingStates.push(value),
+      {fireImmediately: true},
+    ),
+  );
+  t.after(
+    reaction(
+      () => f.session.currentRevision,
+      value => revisions.push(value),
+    ),
+  );
   f.session.onEntriesChange(reason => entryUpdates.push(reason));
   const model = await f.read('/model.ts');
   const lib = await f.read('/lib.ts');
@@ -546,12 +561,16 @@ test('partial persistence preserves pending contents and explicit retry saves th
   assert.equal(f.disk.get('/model.ts'), 'const model = 5;');
   assert.deepEqual(f.session.unsavedFilePaths(), ['/lib.ts']);
   assert.deepEqual(entryUpdates, ['save']);
+  assert.deepEqual(pendingStates, [false, true]);
+  assert.equal(revisions.length, 1);
   await assert.rejects(f.session.flush());
   f.failing.clear();
   await f.session.retrySaves();
   assert.equal(f.disk.get('/lib.ts'), 'export const value = 6;');
   assert.equal(f.session.hasUnsaved, false);
   assert.deepEqual(f.session.unsavedFilePaths(), []);
+  assert.deepEqual(pendingStates, [false, true, false]);
+  assert.equal(revisions.length, 1);
 });
 
 test('external disk changes are detected even when timestamp and byte length agree', async () => {
