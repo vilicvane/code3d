@@ -1,3 +1,4 @@
+import {cached, cachedArtifact} from './cached.js';
 import {font, googleFont, type Font} from './font.js';
 import {textGlyphs, textRegionFace, type TextOptions} from './text.js';
 import type {Material} from './three.js';
@@ -75,10 +76,7 @@ import {
 import {shellWithTopology} from './shell.js';
 import {
   beginKernelOperationEvaluation,
-  evaluateKernelOperation,
   kernelOperationKey,
-  findKernelOperation,
-  acceptKernelOperation,
   type KernelOperationKey,
   type KernelArtifact,
   type KernelKeyPart,
@@ -3662,39 +3660,34 @@ export function regularPrism(
 }
 
 /** @internal */
-export function modelFromReplicadSolid(shape: Shape3D): SolidModel {
-  let solid: Shape3D;
-  try {
-    solid = normalizeReplicadSolid(shape);
-  } catch (error) {
-    shape.delete();
-    throw error;
-  }
-  // The builder still executes on every call. Cache its actual output, not its
-  // arguments: captured state may change the geometry between invocations.
-  let adopted = false;
-  let geometry: SolidGeometry;
-  try {
-    geometry = evaluateSolidGeometry(
-      'replicad-solid',
-      [solid.serialize()],
-      [],
-      () => {
-        adopted = true;
-        return {shape: solid};
-      },
-    );
-  } finally {
-    // A hit returns an independently owned cached copy; discard this output.
-    // A miss transfers ownership to evaluateSolidGeometry, including on error.
-    if (!adopted) solid.delete();
-  }
-  return ModelObject.create<CanonicalElements, 'solid'>({
-    kind: 'solid',
-    name: 'Custom primitive',
-    geometry,
-    operation: storedOperation('primitive'),
-  }) as unknown as SolidModel;
+export function primitiveConstructor<Args extends unknown[]>(
+  build: (...args: Args) => Shape3D,
+): (...args: Args) => SolidModel {
+  const geometry = cachedArtifact(
+    (...args: Args) => {
+      const shape = build(...args);
+      let solid: Shape3D;
+      try {
+        solid = normalizeReplicadSolid(shape);
+      } catch (error) {
+        shape.delete();
+        throw error;
+      }
+      return createModelGeometryValue(solid);
+    },
+    {
+      identity: build,
+      namespace: 'primitive',
+      lifecycle: modelGeometryLifecycle,
+    },
+  );
+  return (...args) =>
+    ModelObject.create<CanonicalElements, 'solid'>({
+      kind: 'solid',
+      name: 'Custom primitive',
+      geometry: geometry(...args) as SolidGeometry,
+      operation: storedOperation('primitive'),
+    }) as unknown as SolidModel;
 }
 
 function normalizeReplicadSolid(shape: Shape3D): Shape3D {
@@ -3990,13 +3983,6 @@ function meshQuery(
   };
 }
 
-const queryLifecycle: KernelValueLifecycle<SnapshotQueryResult> = {
-  estimateBytes: estimateRetainedBytes,
-  retain: value => value,
-  instantiate: value => value,
-  release: () => {},
-};
-
 function computeSnapshotQuery(
   geometry: SnapshotQueryInput['geometry'],
   query: SnapshotQuery,
@@ -4010,14 +3996,13 @@ function computeSnapshotQuery(
       );
 }
 
-function evaluateSnapshotQuery(input: SnapshotQueryInput): SnapshotQueryResult {
-  const cached = findKernelOperation(input.query.key, queryLifecycle);
-  if (cached) return cached.value;
-  let value: SnapshotQueryResult;
-  if (input.query.kind === 'mesh') {
-    // Mesh from the serialized input in every execution mode. BinTools can
-    // renormalize a plane axis by a few ULPs, changing Delaunay diagonal ties.
-    // A local query and a remote query must therefore consume the same BREP.
+const snapshotQuery = cachedArtifact(
+  (input: SnapshotQueryInput): SnapshotQueryResult => {
+    if (input.query.kind !== 'mesh')
+      return computeSnapshotQuery(input.geometry, input.query);
+    // Local and remote meshes consume the same binary input: BinTools can
+    // renormalize plane axes by a few ULPs and change Delaunay diagonal ties.
+    let value!: SnapshotQueryResult;
     executeSnapshotQueryBatch(
       input.inputId,
       encodeKernelArtifact(input.inputId, input.geometry),
@@ -4027,9 +4012,13 @@ function evaluateSnapshotQuery(input: SnapshotQueryInput): SnapshotQueryResult {
         value = result;
       },
     );
-  } else value = computeSnapshotQuery(input.geometry, input.query);
-  acceptKernelOperation(input.query.key, queryLifecycle, value!);
-  return value!;
+    return value;
+  },
+  {key: input => input.query.key},
+);
+
+function evaluateSnapshotQuery(input: SnapshotQueryInput): SnapshotQueryResult {
+  return snapshotQuery(input).value;
 }
 
 /** Host-owned native input and result admission. Only encode() bytes cross runtimes. */
@@ -4065,7 +4054,7 @@ export function planModelSnapshotQueries(
         continue;
       }
       keys.set(query.key.id, query.key.signature);
-      if (findKernelOperation(query.key, queryLifecycle)) continue;
+      if (snapshotQuery.find(query.key)) continue;
       let batch = batches.get(inputId);
       if (!batch) {
         batch = {input, queries: [], sourceRef: object.sourceRefs.at(-1)};
@@ -4086,8 +4075,7 @@ export function planModelSnapshotQueries(
         (input.geometry.topology?.surfaces.ids.length ?? 0)) *
       queries.length,
     encode: () => encodeKernelArtifact(id, input.geometry),
-    accept: (query, value) =>
-      acceptKernelOperation(query.key, queryLifecycle, value),
+    accept: (query, value) => snapshotQuery.accept(query.key, value),
   }));
 }
 
@@ -4184,6 +4172,7 @@ export function retainModelGeometry(
 }
 
 export const authoringApi = Object.freeze({
+  cached,
   font,
   googleFont,
   text,
@@ -4279,45 +4268,49 @@ function disposeModelGeometryValue(geometry: ModelGeometryValue): void {
   geometry.referenceBasis?.shape.delete();
 }
 
+const kernelShape = cachedArtifact(
+  (
+    _operation: string,
+    _arguments: readonly KernelKeyPart[],
+    _inputs: readonly KernelArtifact<unknown>[],
+    compute: () => AnyShape,
+  ) => compute(),
+  {key: kernelOperationKey, lifecycle: shapeLifecycle},
+);
+
 function evaluateKernelShape<Shape extends AnyShape>(
   operation: string,
   arguments_: readonly KernelKeyPart[],
   inputs: readonly KernelArtifact<unknown>[],
   compute: () => Shape,
 ): KernelArtifact<Shape> {
-  return evaluateKernelOperation(
+  return kernelShape(
     operation,
     arguments_,
     inputs,
-    shapeLifecycle as KernelValueLifecycle<Shape>,
     compute,
-  );
+  ) as KernelArtifact<Shape>;
 }
 
-function evaluateModelGeometry(
-  operation: string,
-  arguments_: readonly KernelKeyPart[],
-  inputs: readonly KernelArtifact<unknown>[],
-  compute: () => Readonly<{
-    shape: AnyShape;
-    topology?: ShapeTopology;
-    referenceBasis?: ModelGeometryValue['referenceBasis'];
-  }>,
-): ModelGeometry {
-  return evaluateKernelOperation(
-    operation,
-    arguments_,
-    inputs,
-    modelGeometryLifecycle,
-    () => {
-      const result = compute();
-      return {
-        ...createModelGeometryValue(result.shape, result.topology),
-        referenceBasis: result.referenceBasis,
-      };
-    },
-  );
-}
+const evaluateModelGeometry = cachedArtifact(
+  (
+    _operation: string,
+    _arguments: readonly KernelKeyPart[],
+    _inputs: readonly KernelArtifact<unknown>[],
+    compute: () => Readonly<{
+      shape: AnyShape;
+      topology?: ShapeTopology;
+      referenceBasis?: ModelGeometryValue['referenceBasis'];
+    }>,
+  ): ModelGeometryValue => {
+    const result = compute();
+    return {
+      ...createModelGeometryValue(result.shape, result.topology),
+      referenceBasis: result.referenceBasis,
+    };
+  },
+  {key: kernelOperationKey, lifecycle: modelGeometryLifecycle},
+);
 
 function createModelGeometryValue(
   shape: AnyShape,

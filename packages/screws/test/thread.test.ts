@@ -9,7 +9,7 @@ import {replicad} from '@code3d/core/replicad';
 import {helicalThread} from '../bld/library/thread.js';
 import {clearKernelOperationCache} from '../../core/bld/library/kernel-cache.js';
 
-test('the private thread cache keys every normalized geometric input', () => {
+test('the shared primitive cache keys every thread input', () => {
   const options = {
     pitch: 1,
     y: 1.5,
@@ -19,7 +19,7 @@ test('the private thread cache keys every normalized geometric input', () => {
     crestWidth: 0.125,
   };
   const first = helicalThread(options);
-  const repeat = helicalThread({...options, leftHanded: false});
+  const repeat = helicalThread({...options});
   const variants = [
     {pitch: 1.1},
     {y: 1.6},

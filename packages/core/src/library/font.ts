@@ -1,3 +1,4 @@
+import {cachedArtifact} from './cached.js';
 import type * as HarfBuzz from 'harfbuzzjs';
 import {
   googleFontSources,
@@ -5,7 +6,7 @@ import {
   type GoogleFontOptions,
 } from './google-font.js';
 import {
-  evaluateKernelOperation,
+  kernelOperationKey,
   kernelContentId,
   type KernelArtifact,
 } from './kernel-cache.js';
@@ -21,6 +22,7 @@ export type ParsedFont = Readonly<{
   face: HarfBuzz.Face;
   font: HarfBuzz.Font;
   numGlyphs: number;
+  sourceBytes: number;
 }>;
 let fontEngine: typeof HarfBuzz;
 let shapingBuffer: HarfBuzz.Buffer;
@@ -99,59 +101,68 @@ function parseFont(
       'font() requires font bytes or a URL prepared by the model engine. Use a static new URL("./font.ttf", import.meta.url) or new URL("https://…/font.ttf"); outside the engine, fetch the font first and pass its bytes.',
     );
   }
-  const id = kernelContentId(bytes);
-  const artifact = evaluateKernelOperation(
-    'font',
-    [id, bytes.byteLength, options.weight ?? null, options.italic ?? null],
-    [],
-    {
-      persistent: false,
-      // Font parsers decode tables and lazily expand glyph commands. Reserve room
-      // for that growth as well as the retained source buffer in the shared LRU.
-      estimateBytes: value => bytes.byteLength * 8 + value.numGlyphs * 1024,
+  return parsedFont(bytes, options);
+}
+
+const parsedFont = cachedArtifact(
+  (bytes: Uint8Array, options: GoogleFontOptions): ParsedFont => {
+    try {
+      const signature = new DataView(
+        bytes.buffer,
+        bytes.byteOffset,
+        bytes.byteLength,
+      ).getUint32(0);
+      if (signature !== 0x00010000 && signature !== 0x4f54544f)
+        throw new Error('Expected an SFNT font.');
+      const face = new fontEngine.Face(new fontEngine.Blob(bytes));
+      const maxp = face.referenceTable('maxp');
+      if (!maxp || maxp.byteLength < 6 || !face.referenceTable('cmap'))
+        throw new Error('Missing font tables.');
+      const numGlyphs = new DataView(
+        maxp.buffer,
+        maxp.byteOffset,
+        maxp.byteLength,
+      ).getUint16(4);
+      if (!numGlyphs) throw new Error('Font has no glyphs.');
+      const font = new fontEngine.Font(face);
+      const variations: HarfBuzz.Variation[] = [];
+      if (options.weight !== undefined)
+        variations.push(new fontEngine.Variation('wght', options.weight));
+      if (options.italic !== undefined)
+        variations.push(
+          new fontEngine.Variation('ital', Number(options.italic)),
+        );
+      font.setVariations(variations);
+      return {face, font, numGlyphs, sourceBytes: bytes.byteLength};
+    } catch (error) {
+      throw new Error(
+        'Cannot parse font. Expected a TTF or OTF font (font collections and WOFF2 are not supported).',
+        {cause: error},
+      );
+    }
+  },
+  {
+    key: (bytes, options) =>
+      kernelOperationKey(
+        'font',
+        [
+          kernelContentId(bytes),
+          bytes.byteLength,
+          options.weight ?? null,
+          options.italic ?? null,
+        ],
+        [],
+      ),
+    codec: false,
+    lifecycle: {
+      // Account for parser tables and lazy glyph expansion in the shared budget.
+      estimateBytes: value => value.sourceBytes * 8 + value.numGlyphs * 1024,
       retain: value => value,
       instantiate: value => value,
       release() {},
     },
-    () => {
-      try {
-        const signature = new DataView(
-          bytes.buffer,
-          bytes.byteOffset,
-          bytes.byteLength,
-        ).getUint32(0);
-        if (signature !== 0x00010000 && signature !== 0x4f54544f)
-          throw new Error('Expected an SFNT font.');
-        const face = new fontEngine.Face(new fontEngine.Blob(bytes));
-        const maxp = face.referenceTable('maxp');
-        if (!maxp || maxp.byteLength < 6 || !face.referenceTable('cmap'))
-          throw new Error('Missing font tables.');
-        const numGlyphs = new DataView(
-          maxp.buffer,
-          maxp.byteOffset,
-          maxp.byteLength,
-        ).getUint16(4);
-        if (!numGlyphs) throw new Error('Font has no glyphs.');
-        const font = new fontEngine.Font(face);
-        const variations: HarfBuzz.Variation[] = [];
-        if (options.weight !== undefined)
-          variations.push(new fontEngine.Variation('wght', options.weight));
-        if (options.italic !== undefined)
-          variations.push(
-            new fontEngine.Variation('ital', Number(options.italic)),
-          );
-        font.setVariations(variations);
-        return {face, font, numGlyphs};
-      } catch (error) {
-        throw new Error(
-          'Cannot parse font. Expected a TTF or OTF font (font collections and WOFF2 are not supported).',
-          {cause: error},
-        );
-      }
-    },
-  );
-  return artifact;
-}
+  },
+);
 
 function fontValue(parts: readonly FontPart[]): Font {
   const parsed = parts[0].artifact.value;

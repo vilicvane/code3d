@@ -1,3 +1,7 @@
+import {
+  identifyCachedCall,
+  type CachedDefinitions,
+} from '../project/cached-definitions';
 import {argumentExpression} from './argument-path';
 import ts from '@typescript/typescript6';
 import {normalizeProjectPath, type ModelProject} from '../project/project';
@@ -1395,12 +1399,13 @@ export function createModelCompiler(
           ]),
           captureModules: sourceGraph.formats,
           lazyPackages: sourceGraph.sourcePackages,
-          transform: (path, source) =>
+          transform: (path, source, cached) =>
             transformSource(
               path,
               source,
               tooling.toolCalls.get(path),
               tooling.parameterDefinitions.get(path),
+              cached,
               activeDesignContext?.functionRef.file === path
                 ? activeDesignContext
                 : undefined,
@@ -1414,6 +1419,7 @@ export function createModelCompiler(
           bundle.source,
           {
             __code3d: traceRuntime,
+            __code3dCachedFunction: runtime.identifyCachedFunction,
             __code3dModules: runtimeModules,
             __code3dImport: importModule,
             __code3dImportDependencies: async (paths: string[]) => {
@@ -1596,6 +1602,7 @@ export function createModelCompiler(
     source: string,
     toolCalls: ToolCallSchemaMap | undefined,
     parameterDefinitions: ParameterDefinitionMap | undefined,
+    cached: CachedDefinitions,
     designContext?: ActiveDesignContext,
   ): string {
     const executableSource = designContext
@@ -1612,6 +1619,7 @@ export function createModelCompiler(
         source.length,
         toolCalls,
         parameterDefinitions ?? new Map(),
+        cached,
       ),
     ]);
     try {
@@ -2647,6 +2655,7 @@ export function createModelCompiler(
     authorSourceLength: number,
     toolCalls: ToolCallSchemaMap | undefined,
     parameterDefinitions: ParameterDefinitionMap,
+    cached: CachedDefinitions,
   ): ts.TransformerFactory<ts.SourceFile> {
     return context => {
       const {factory} = context;
@@ -2659,7 +2668,12 @@ export function createModelCompiler(
           ) {
             return node;
           }
-          const visited = ts.visitEachChild(node, visit, context);
+          const visited = identifyCachedCall(
+            node,
+            ts.visitEachChild(node, visit, context),
+            cached,
+            factory,
+          );
           if (
             ts.isFunctionLike(node) &&
             ts.isFunctionLike(visited) &&

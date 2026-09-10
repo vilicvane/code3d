@@ -81,7 +81,7 @@ export class ProjectRuntime {
           `export * as entry${index} from ${JSON.stringify(path)};`,
       )
       .join('\n');
-    const discovery = await builder.build(entry);
+    const discovery = await builder.build(entry, {instrumentCaches: false});
     const paths = discovery.files;
     const runtimeSource =
       paths
@@ -111,7 +111,7 @@ export class ProjectRuntime {
       }));
     `;
     const [bundle, wasm, sketchWasm] = await Promise.all([
-      builder.build(runtimeSource),
+      builder.build(runtimeSource, {instrumentCaches: false}),
       files.readFile(wasmPath),
       files.readFile(sketchWasmPath),
     ]);
@@ -260,6 +260,7 @@ export class ProjectRuntime {
               bundle.source,
               {
                 __code3dModules: this.modules,
+                __code3dCachedFunction: this.tooling.identifyCachedFunction,
                 __code3dImport: this.importModule,
                 __code3dRecordModule: (
                   file: string,

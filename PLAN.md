@@ -1137,14 +1137,23 @@ are discarded; previously flushed persistent artifacts remain reusable. Project 
 their hard-stop behavior. App documents and Workers use COOP/COEP headers in dev,
 preview and static hosting to enable the shared flag; see #52.
 
-User-defined Replicad builders execute on every invocation because their
-closures may depend on state beyond their arguments. Core identifies the actual
-returned solid by its B-Rep representation so identical output can reuse geometry,
-downstream operations, and meshes across evaluations. Model values and tracing
-remain fresh; custom primitives use the standard mesh tolerance. The screws
-package privately caches deterministic thread B-Rep data in a bounded LRU, reading
-an independently owned shape in the current kernel for each invocation. This
-avoids caching disposable model objects or retaining native handles across kernels.
+[#106](https://github.com/vilicvane/code3d/issues/106) unifies the call layer with
+public `cached(fn, {encoder, decoder}?)` and internal `cachedArtifact()`. Memory
+holds computed/decoded values; codecs run only for persistent writes/restores.
+The internal artifact form owns geometry retain/instantiate/release and exposes
+key lookup/admission for parallel snapshot queries. Geometry, bounds, meshes,
+font parsing and glyph contours use this shared abstraction and LRU. The default
+codec preserves plain data graphs, exact scalars and shared binary views.
+
+`definePrimitive()` caches the builder, solid normalization and geometry analysis;
+each call still creates a fresh model and source metadata. Inputs must describe
+all changing state. The engine fingerprints static definitions, referenced local
+helpers, imported module graphs and codecs before tracing/transpilation, keeping
+unrelated source edits out of the key. Dynamic function factories and uninstrumented
+Node functions use process-local function identity and memory-only reuse. Hosts
+can supply verified identities through tooling; author APIs require no IDs or
+versions. The screws thread builder uses this mechanism and no longer retains a
+separate B-Rep string LRU or performs serialization on every invocation.
 
 ### 4c.1. Parallel snapshot queries — implemented
 

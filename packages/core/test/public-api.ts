@@ -10,6 +10,7 @@ import {
   extrude,
   font,
   googleFont,
+  cached,
   frustum,
   group,
   intersect,
@@ -537,3 +538,18 @@ box(1, 2, 3).relate(self =>
     .pivot(1, 2, 3)
     .rotate(0, 0, 90),
 );
+
+const double = cached((value: number) => value * 2);
+const doubled: number = double(2);
+const encoded = cached((value: number) => ({value}), {
+  encoder: value => new Uint8Array([value.value]),
+  decoder: bytes => ({value: bytes[0]}),
+});
+const decodedValue: number = encoded(2).value;
+// @ts-expect-error Both codec functions are required.
+cached((value: number) => value, {encoder: value => new Uint8Array([value])});
+// @ts-expect-error The computation must be synchronous.
+cached(async (value: number) => value);
+// @ts-expect-error Argument types are preserved.
+double('2');
+void [doubled, decodedValue];

@@ -763,11 +763,12 @@ Built-in tubes and coils should be imported directly from core, not reimplemente
 in author examples.
 
 The builder's argument types, names, and optional parameters are preserved.
-Write validation inside the builder. It executes on every call, including when
-the same arguments are reused, so changes to captured state remain observable.
-Core caches the actual returned B-Rep, so identical output can reuse downstream
-operations and meshes across evaluations without skipping the builder. Each
-model owns its disposable geometry and uses the standard mesh tolerance.
+`definePrimitive()` caches deterministic construction by definition and arguments,
+including validation, solid normalization, topology and bounds. A hit skips the
+builder and creates a fresh model with its own geometry handles and source tracing.
+Write validation inside the builder and pass changing captured state as explicit
+arguments. Custom primitives use the standard mesh tolerance. The screws thread
+builder uses this same cache; it has no private B-Rep Map or memory budget.
 
 Returning a shape transfers its ownership to code3d; do not mutate, delete, or
 return it again. Intermediate resources remain the builder's responsibility,
@@ -781,6 +782,52 @@ enable its call-site tool panel, including when consumed through emitted
 declarations. No wrapper or definition options are needed. For a standalone
 preview, export an ordinary example invocation; `@code3d.arguments`
 is not expanded to recognize primitive factory definitions.
+
+## Cached computations
+
+```ts
+import {cached} from '@code3d/core';
+
+const profile = cached((radius: number, sides: number) =>
+  Array.from({length: sides}, (_, index) => {
+    const angle = (index * 2 * Math.PI) / sides;
+    return [radius * Math.cos(angle), radius * Math.sin(angle)];
+  }),
+);
+```
+
+`cached(fn, options?)` preserves synchronous parameter/result types. It caches
+ordinary data; use `definePrimitive()` for Replicad geometry so Core also owns
+native resources and creates fresh model metadata. Treat cached results as
+immutable. A memory hit returns the retained computed or decoded value directly,
+without decoding, copying or freezing it.
+
+The default persistent codec supports plain objects, arrays, scalar values
+(including `undefined`, nonfinite numbers and bigint), Date, Map, Set, ArrayBuffer,
+standard TypedArrays and DataView. Shared references, cycles, sparse arrays and
+shared buffer views survive restoration. Arguments use the same data encoding;
+changing dynamic state must be supplied as arguments. Functions, native handles
+and application class instances are not ordinary data arguments.
+
+For custom result types, supply both functions as
+`cached(fn, {encoder: value => bytes, decoder: bytes => value})`.
+The encoder runs when saving to disk; the decoder runs once when restoring an
+entry into memory. A subsequent memory hit never calls either codec. Async
+computations are excluded: incomplete work is not admitted to the cache.
+
+The model engine fingerprints static function definitions, their referenced
+local declarations, imported implementation graphs and codec definitions. Aliases
+and re-exports of Core cache factories are supported. Editing an unrelated local
+binding, moving a definition or adding/removing `export` preserves its identity;
+changing a referenced helper or dependency invalidates it. Functions supplied as parameters, dynamic factory results and closures capturing
+enclosing function/loop bindings use memory-only object identity.
+Outside the model engine, ordinary Node calls also use function object identity
+and share the process-wide memory LRU. Authors do not provide cache IDs or versions.
+
+Public cached computations, primitives, Core geometry, font parsing, glyph contours
+and snapshot queries share one cache. The memory budget remains 2 GiB; browser
+persistence shares the existing OPFS disk budget, min(1 GiB, 10% of origin quota).
+Cancellation and exceptions retain completed entries and editing history.
 
 ## Tooling evaluation lifetime
 
@@ -797,13 +844,18 @@ traces. Call the returned function in `finally`, after creating snapshots.
 Geometry, model identity, and relations remain unchanged; already-created
 snapshots keep their previous evaluation's metadata.
 
-The kernel cache retains the complete working set of the latest evaluation,
+The shared computation cache retains the complete working set of the latest evaluation,
 including exact transformed-bound queries and render meshes. During evaluation,
 both the previous and current working sets are protected from eviction. Finishing
 keeps the current set and retains unused history within a 2 GiB soft memory budget,
 measured from the kernel's live allocations plus estimated retained JavaScript
 storage. Older historical values are evicted by LRU. The active model can exceed
 this budget; calls outside an evaluation use the same bounded history.
+`KernelArtifactStore` remains the synchronous host storage boundary in tooling;
+`identifyCachedFunction(fn, fingerprint)` lets a host compiler attach a verified
+static definition/dependency identity before calling an author cache factory.
+Core's internal `cachedArtifact()` adds content IDs, resource lifecycles and remote
+query admission to the same mechanism used by public `cached()`.
 
 Packages may retain model values privately. The App therefore drops its own
 references after creating snapshots instead of forcibly disposing every model

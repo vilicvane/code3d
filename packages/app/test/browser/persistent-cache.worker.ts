@@ -18,6 +18,7 @@ export type CacheRequest = {
   summary?: boolean;
 };
 export type CacheResult = {
+  probe?: {computes: number; encodes: number; decodes: number; builds: number};
   milliseconds: number;
   stats: ProjectCompiler['kernelCacheStats'];
   objects?: string;

@@ -64,9 +64,11 @@ async function compile(
         await import('/test/browser/persistent-cache.worker.ts?worker');
       const worker = (host.workers[workerName] ??= new CacheWorker());
       return new Promise<CacheResult>((resolve, reject) => {
+        let probe: CacheResult['probe'];
         worker.onerror = error => reject(new Error(error.message));
         worker.onmessage = ({data}) => {
-          if (!data.phase) resolve(data);
+          if (data.phase === 'cached-probe') probe = data.counts;
+          if (!data.phase) resolve({...data, probe});
         };
         worker.postMessage(request);
       });
@@ -128,6 +130,99 @@ test(
         coldMs: cold.milliseconds,
         restoredMs: restored.milliseconds,
         disk: redo.stats.disk,
+        memory: restored.stats.memory,
+      }),
+    );
+  },
+);
+
+test(
+  'public cached and primitive constructors skip computation on memory and OPFS hits',
+  {timeout: 180_000},
+  async t => {
+    const page = await fixture(t);
+    const source = `import {cached} from '@code3d/core';
+import {definePrimitive, replicad} from '@code3d/core/replicad';
+const counts = {computes: 0, encodes: 0, decodes: 0, builds: 0};
+const data = cached((radius: number) => {counts.computes++; return {radius};}, {
+  encoder: value => {counts.encodes++; return new Uint8Array([value.radius]);},
+  decoder: bytes => {counts.decodes++; return {radius: bytes[0]};},
+});
+const primitive = definePrimitive((radius: number) => {counts.builds++; return replicad.makeCylinder(radius, 4);});
+export const part = primitive(data(2).radius);
+globalThis.postMessage({phase: 'cached-probe', counts});`;
+    const cold = await compile(page, {source});
+    valid(cold);
+    assert.deepEqual(cold.probe, {
+      computes: 1,
+      encodes: 1,
+      decodes: 0,
+      builds: 1,
+    });
+    const hot = await compile(page, {
+      source:
+        '// move definition\n' +
+        source.replace('export const part', 'const part'),
+    });
+    valid(hot);
+    assert.equal(hot.stats.memory!.misses, cold.stats.memory!.misses);
+    assert.deepEqual(hot.probe, {
+      computes: 0,
+      encodes: 0,
+      decodes: 0,
+      builds: 0,
+    });
+    const restored = await compile(page, {source}, 'compiler', true);
+    valid(restored);
+    assert.equal(restored.stats.memory!.misses, 0);
+    assert.deepEqual(restored.probe, {
+      computes: 0,
+      encodes: 0,
+      decodes: 1,
+      builds: 0,
+    });
+    // Skipping the builder's traced calls changes execution order, while model
+    // geometry, source locations and operation identities remain fresh and equal.
+    const withoutOrder = (value: string) =>
+      JSON.parse(value).map((object: {operation: {order: number}}) => ({
+        ...object,
+        operation: {...object.operation, order: undefined},
+      }));
+    assert.deepEqual(
+      withoutOrder(restored.objects!),
+      withoutOrder(cold.objects!),
+    );
+    t.diagnostic(
+      JSON.stringify({
+        coldMs: cold.milliseconds,
+        restoredMs: restored.milliseconds,
+        memory: restored.stats.memory,
+      }),
+    );
+  },
+);
+
+test(
+  'screws thread construction restores from the shared OPFS cache in a fresh Worker',
+  {timeout: 180_000},
+  async t => {
+    const page = await fixture(t);
+    const source = `import {ISO4762} from '@code3d/screws'; export default ISO4762.screw('M6', 18);`;
+    const cold = await compile(page, {source, summary: true});
+    valid(cold);
+    const restored = await compile(
+      page,
+      {source, summary: true},
+      'compiler',
+      true,
+    );
+    valid(restored);
+    assert.equal(restored.stats.memory!.misses, 0);
+    assert.equal(restored.objects, cold.objects);
+    t.diagnostic(
+      JSON.stringify({
+        coldMs: cold.milliseconds,
+        restoredMs: restored.milliseconds,
         memory: restored.stats.memory,
       }),
     );

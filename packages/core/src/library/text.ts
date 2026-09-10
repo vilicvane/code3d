@@ -10,8 +10,8 @@ import {castOwnedShape} from './kernel-shapes.js';
 import type * as hb from 'harfbuzzjs';
 import {boolean as combinePaths} from 'flo-boolean';
 import {fontParts, shapeFontText, type Font, type FontPart} from './font.js';
-import {evaluateKernelOperation, type KernelArtifact} from './kernel-cache.js';
-import {estimateRetainedBytes} from './retained-memory.js';
+import {cachedArtifact} from './cached.js';
+import {kernelOperationKey, type KernelArtifact} from './kernel-cache.js';
 
 export type TextOptions = Readonly<{
   /** Extra model-unit spacing between glyphs, including spaces. Defaults to 0; may be negative. */
@@ -93,25 +93,7 @@ export function textGlyphs(
     );
     infos.forEach((info, index) => {
       const position = positions[index];
-      const regions = evaluateKernelOperation<readonly Region[]>(
-        'textGlyph',
-        [info.codepoint, size],
-        [resource],
-        {
-          estimateBytes: estimateRetainedBytes,
-          retain: value => value,
-          instantiate: value => value,
-          release() {},
-        },
-        () =>
-          groupTextContours(
-            splitContours(
-              parsed.font
-                .glyphToJson(info.codepoint)
-                .map(command => scaledCommand(command, scale)),
-            ),
-          ),
-      );
+      const regions = textGlyph(resource, info.codepoint, size);
       glyphs.push({
         regions,
         x: advanceX + position.xOffset * scale + glyphs.length * letterSpacing,
@@ -123,6 +105,27 @@ export function textGlyphs(
   }
   return glyphs;
 }
+
+const textGlyph = cachedArtifact(
+  (
+    resource: FontPart['artifact'],
+    codepoint: number,
+    size: number,
+  ): readonly Region[] =>
+    groupTextContours(
+      splitContours(
+        resource.value.font
+          .glyphToJson(codepoint)
+          .map(command =>
+            scaledCommand(command, size / resource.value.face.upem),
+          ),
+      ),
+    ),
+  {
+    key: (resource, codepoint, size) =>
+      kernelOperationKey('textGlyph', [codepoint, size], [resource]),
+  },
+);
 
 function scaledCommand(
   {type, values}: hb.SvgPathCommand,

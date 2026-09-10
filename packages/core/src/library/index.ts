@@ -1,3 +1,5 @@
+export {cached} from './cached.js';
+export type {CachedOptions} from './cached.js';
 export {font, googleFont} from './font.js';
 export type {Font} from './font.js';
 export type {GoogleFontOptions} from './google-font.js';

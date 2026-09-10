@@ -1,3 +1,4 @@
+export {identifyCachedFunction} from '../library/cached.js';
 export {
   installModelResourceReader,
   installFontEngine,

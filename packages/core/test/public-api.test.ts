@@ -13,6 +13,7 @@ const authoringValues = [
   'arc',
   'bezier',
   'box',
+  'cached',
   'circle',
   'coil',
   'cut',
