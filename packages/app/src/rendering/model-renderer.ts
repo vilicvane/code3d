@@ -1,6 +1,13 @@
 import * as THREE from 'three';
 import {createModelMaterial, disposeModelMaterial} from './model-material';
 import {orientImageCamera, type ImageView} from './image-camera';
+import {
+  createViewCamera,
+  frameCameraBounds,
+  resizeViewCamera,
+  type CameraFraming,
+  type ViewCamera,
+} from './view-camera';
 import type {
   ModelSnapshotObject,
   RenderMesh,
@@ -51,15 +58,10 @@ function withRenderMaterial<T extends ModelPrimitive>(
   return object;
 }
 
-export type CameraFraming = Readonly<{
-  focus: THREE.Vector3;
-  distance: number;
-}>;
-
 export class ModelRenderer {
   mode: ModelRenderMode = 'modeling';
   readonly scene = new THREE.Scene();
-  readonly camera = new THREE.PerspectiveCamera(42, 1, 0.1, 2000);
+  camera: ViewCamera = createViewCamera('perspective', 1);
   readonly renderer: THREE.WebGLRenderer;
 
   constructor(private readonly container: HTMLElement) {
@@ -99,20 +101,18 @@ export class ModelRenderer {
     if (width === 0 || height === 0) return;
 
     this.renderer.setSize(width, height, false);
-    this.camera.aspect = width / height;
-    this.camera.updateProjectionMatrix();
+    resizeViewCamera(this.camera, width / height);
   }
 
   framing(
     target: THREE.Object3D,
-    currentDistance: number,
+    camera: ViewCamera,
     additional?: Readonly<{bounds: THREE.Box3; paddingPixels: number}>,
   ): CameraFraming | undefined {
     const box = new THREE.Box3().setFromObject(target);
     if (additional) box.union(additional.bounds);
     if (box.isEmpty()) return;
 
-    const sphere = box.getBoundingSphere(new THREE.Sphere());
     const availableFraction = additional
       ? Math.max(
           0.25,
@@ -121,24 +121,14 @@ export class ModelRenderer {
               Math.min(this.container.clientWidth, this.container.clientHeight),
         )
       : 1;
-    const verticalHalfFov =
-      THREE.MathUtils.degToRad(this.camera.getEffectiveFOV()) / 2;
-    const halfFov = Math.min(
-      verticalHalfFov,
-      Math.atan(Math.tan(verticalHalfFov) * this.camera.aspect),
-    );
-    return {
-      focus: sphere.center,
-      distance: sphere.radius
-        ? sphere.radius / Math.sin(halfFov) / availableFraction
-        : currentDistance,
-    };
+    return frameCameraBounds(camera, box, availableFraction);
   }
 
-  updateCameraRange(cameraTarget: THREE.Vector3): void {
+  updateCameraRange(cameraTarget: THREE.Vector3, viewDistance: number): void {
     const distance = this.camera.position.distanceTo(cameraTarget);
-    const near = distance / 1000;
-    const far = Math.max(distance * 20, 1000);
+    const shift = distance - viewDistance;
+    const near = Math.max(Number.EPSILON, shift + viewDistance / 1000);
+    const far = shift + Math.max(viewDistance * 20, 1000);
     if (near !== this.camera.near || far !== this.camera.far) {
       this.camera.near = near;
       this.camera.far = far;
@@ -146,8 +136,8 @@ export class ModelRenderer {
     }
     const fog = this.scene.fog;
     if (fog instanceof THREE.Fog) {
-      fog.near = Math.max(180, distance * 2);
-      fog.far = Math.max(430, distance * 5);
+      fog.near = shift + Math.max(180, viewDistance * 2);
+      fog.far = shift + Math.max(430, viewDistance * 5);
     }
   }
 
@@ -221,7 +211,7 @@ export class ModelRenderer {
     renderer.setSize(width, height, false);
 
     const camera = this.camera.clone();
-    camera.aspect = width / height;
+    resizeViewCamera(camera, width / height);
     if (framing) orientImageCamera(camera, framing.bounds, framing.view);
     camera.updateProjectionMatrix();
     beforeRender?.(camera, width, height);

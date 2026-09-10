@@ -293,33 +293,47 @@ function pointerFixture(t: TestContext) {
 }
 
 test('translation and rotation controls keep their pixel scale through zoom and resize', t => {
-  const {gizmo, camera} = pointerFixture(t);
+  const {gizmo, camera: perspective} = pointerFixture(t);
   const control = gizmo['axes'][0];
-  for (const mode of ['translate', 'rotate'] as const) {
-    control.controls.setMode(mode);
-    for (const height of [240, 960])
-      for (const distance of [10, 100])
-        for (const zoom of [0.5, 2]) {
-          camera.position.set(0, 0, distance);
-          camera.lookAt(0, 0, 0);
-          camera.zoom = zoom;
-          camera.updateProjectionMatrix();
-          gizmo.updateScreenSize(height);
-          control.proxy.parent!.updateMatrixWorld(true);
-          const handle = defined(
-            control.gizmo.gizmo[mode].children.find(
-              object => object.name === 'X',
-            ),
-          );
-          const origin = handle.getWorldPosition(new THREE.Vector3());
-          const scale = handle.getWorldScale(new THREE.Vector3());
-          const end = origin
-            .clone()
-            .add(new THREE.Vector3(scale.x, 0, 0))
-            .project(camera);
-          origin.project(camera);
-          const pixels = ((end.x - origin.x) * height * camera.aspect) / 2;
-          assert.ok(Math.abs(pixels - 100) < 1e-5, `${mode}: ${pixels}`);
-        }
+  for (const camera of [
+    perspective,
+    new THREE.OrthographicCamera(-40 / 3, 40 / 3, 10, -10, 0.1, 1000),
+  ]) {
+    gizmo.setCamera(camera);
+    for (const axis of gizmo['axes'])
+      assert.equal(axis.controls.camera, camera);
+    for (const mode of ['translate', 'rotate'] as const) {
+      control.controls.setMode(mode);
+      for (const height of [240, 960])
+        for (const distance of [10, 100])
+          for (const zoom of [0.5, 2]) {
+            camera.position.set(0, 0, distance);
+            camera.lookAt(0, 0, 0);
+            camera.zoom = zoom;
+            camera.updateProjectionMatrix();
+            gizmo.updateScreenSize(height);
+            control.proxy.parent!.updateMatrixWorld(true);
+            const handle = defined(
+              control.gizmo.gizmo[mode].children.find(
+                object => object.name === 'X',
+              ),
+            );
+            const origin = handle.getWorldPosition(new THREE.Vector3());
+            const scale = handle.getWorldScale(new THREE.Vector3());
+            const end = origin
+              .clone()
+              .add(new THREE.Vector3(scale.x, 0, 0))
+              .project(camera);
+            origin.project(camera);
+            const aspect =
+              camera.projectionMatrix.elements[5] /
+              camera.projectionMatrix.elements[0];
+            const pixels = ((end.x - origin.x) * height * aspect) / 2;
+            assert.ok(
+              Math.abs(pixels - 100) < 1e-5,
+              `${camera.type} ${mode}: ${pixels}`,
+            );
+          }
+    }
   }
 });

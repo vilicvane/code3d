@@ -83,7 +83,7 @@ export class TransformGizmo {
 
   constructor(
     scene: THREE.Scene,
-    private readonly camera: THREE.Camera,
+    private camera: THREE.Camera,
     private readonly domElement: HTMLElement,
     private readonly setNavigationEnabled: (enabled: boolean) => void,
     private readonly onEvent: (event: TransformGizmoEvent) => void,
@@ -154,6 +154,11 @@ export class TransformGizmo {
       control.controls.attach(control.proxy);
     }
     this.updateAnchor();
+  }
+
+  setCamera(camera: THREE.Camera): void {
+    this.camera = camera;
+    for (const {controls} of this.axes) controls.camera = camera;
   }
 
   detach(): void {

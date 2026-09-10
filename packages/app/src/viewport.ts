@@ -4,6 +4,7 @@ import type {ModelDiagnostic} from './model/diagnostic';
 import * as THREE from 'three';
 import {orientImageCamera, type ImageView} from './rendering/image-camera';
 import {ViewportNavigation, type CameraPose} from './ui/viewport-navigation';
+import type {ViewCamera} from './rendering/view-camera';
 import {ViewportScenes, type ViewportScene} from './model/viewport-scene';
 import {LineMaterial} from 'three/addons/lines/LineMaterial.js';
 import {LineSegments2} from 'three/addons/lines/LineSegments2.js';
@@ -297,7 +298,9 @@ export class ModelViewport {
   private topologyPointer?: Readonly<{clientX: number; clientY: number}>;
   private readonly rendering: ModelRenderer;
   private readonly scene: THREE.Scene;
-  private readonly camera: THREE.PerspectiveCamera;
+  private get camera(): ViewCamera {
+    return this.rendering.camera;
+  }
   private readonly renderer: THREE.WebGLRenderer;
   private readonly controls: ViewportNavigation;
   private readonly coordinateReference?: ViewportCoordinateReference;
@@ -382,15 +385,22 @@ export class ModelViewport {
     this.sourceDecorationProviders = sourceDecorationProviders;
     this.rendering = new ModelRenderer(this.container);
     this.scene = this.rendering.scene;
-    this.camera = this.rendering.camera;
     this.renderer = this.rendering.renderer;
     this.scene.add(this.root, this.decorationRoot);
     this.controls = new ViewportNavigation(
       this.camera,
       this.renderer.domElement,
+      camera => {
+        this.rendering.camera = camera;
+        this.coordinateReference?.setCamera(camera);
+        this.transformGizmo.setCamera(camera);
+      },
     );
     this.controls.addEventListener('change', () => {
-      this.rendering.updateCameraRange(this.controls.focus);
+      this.rendering.updateCameraRange(
+        this.controls.focus,
+        this.controls.object.position.distanceTo(this.controls.focus),
+      );
       this.refreshTopologyHover();
     });
     if (showCoordinateReference) {
@@ -1068,7 +1078,7 @@ export class ModelViewport {
   setView(view: ImageView): void {
     const bounds = new THREE.Box3().setFromObject(this.root);
     if (bounds.isEmpty()) return;
-    orientImageCamera(this.camera, bounds, view);
+    orientImageCamera(this.controls.object, bounds, view);
     bounds.getCenter(this.controls.focus);
     this.controls.syncCamera();
     this.hasFramedView = true;
@@ -1169,7 +1179,7 @@ export class ModelViewport {
   private cameraFraming(target: THREE.Object3D) {
     return this.rendering.framing(
       target,
-      this.camera.position.distanceTo(this.controls.focus),
+      this.controls.object,
       this.transformGizmo.framing(),
     );
   }
@@ -2073,7 +2083,10 @@ export class ModelViewport {
   private animate = (): void => {
     requestAnimationFrame(this.animate);
     this.controls.updateTransition(performance.now());
-    this.rendering.updateCameraRange(this.controls.focus);
+    this.rendering.updateCameraRange(
+      this.controls.focus,
+      this.controls.object.position.distanceTo(this.controls.focus),
+    );
     this.coordinateReference?.update();
     this.rendering.renderFrame(() => {
       this.selectionHighlight?.update();
@@ -3077,8 +3090,8 @@ function transformCameraPose(
   transform: THREE.Matrix4,
 ): CameraPose {
   return {
+    ...pose,
     focus: pose.focus.clone().applyMatrix4(transform),
-    distance: pose.distance,
     orientation: new THREE.Quaternion()
       .setFromRotationMatrix(transform)
       .multiply(pose.orientation),

@@ -1303,12 +1303,12 @@ kbd {
   letter-spacing: 0.01em;
 }
 
-.viewport-host[data-empty='true'] .viewport-canvas,
-.viewport-host[data-empty='true'] .viewport-coordinate-reference {
+.viewport-host[data-empty='true'] .viewport-canvas {
   visibility: hidden;
 }
 
 .viewport-host[data-empty='true'] .viewport-mode,
+.viewport-host[data-empty='true'] .viewport-coordinate-reference,
 .viewport-host[data-empty='true'] .viewport-dock-panels,
 .viewport-host[data-empty='true'] .contextual-tool-panel {
   display: none;

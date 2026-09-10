@@ -36,7 +36,7 @@ export class ViewportCoordinateReference {
 
   constructor(
     container: HTMLElement,
-    private readonly camera: THREE.Camera,
+    private camera: THREE.Camera,
     private readonly actions: CoordinateActions,
   ) {
     this.root.className = 'viewport-coordinate-reference';
@@ -229,6 +229,12 @@ export class ViewportCoordinateReference {
     );
     if (focused instanceof SVGElement && this.root.contains(focused))
       focused.focus({preventScroll: true});
+  }
+
+  setCamera(camera: THREE.Camera): void {
+    this.camera = camera;
+    this.hasProjection = false;
+    this.update();
   }
 
   private selectAxis(axisEnd: AxisEndView): void {

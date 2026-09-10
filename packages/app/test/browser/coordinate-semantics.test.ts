@@ -360,105 +360,127 @@ function near(actual: readonly number[], expected: readonly number[]) {
   );
 }
 
-test(
-  'group rotation rings turn the assembly about its selected origin and support cancel, commit and undo',
-  {timeout: 120_000},
-  async t => {
-    const {page, errors} = await openApp(t);
-    const source = `import {box, group} from '@code3d/core';
+for (const projection of ['perspective', 'orthographic'] as const)
+  test(
+    `group rotation rings support cancel, commit and undo in ${projection}`,
+    {timeout: 120_000},
+    async t => {
+      const {page, errors} = await openApp(t);
+      const source = `import {box, group} from '@code3d/core';
 const base = box(24, 6, 14).material('#8ed5d1');
 const cap = box(8, 4, 8).material('#d9b478').relate(self => self.on(base.up));
 export const assembly = group([base, cap]).originPoint(cap.center).rotate(0, 0, 0);`;
-    await setSource(page, source, 'rotate');
-    const before = await groupState(page);
-    assert.equal(before.bindings, 3);
-    assert.equal(before.geometry.length, 16);
-    const drag = async () => {
-      const handle = await rotationHandle(page);
-      await page.mouse.move(handle.x, handle.y);
-      await page.mouse.down();
-      await page.mouse.move(
-        handle.x + handle.dx * 40,
-        handle.y + handle.dy * 40,
-        {steps: 5},
-      );
-      const preview = await groupState(page);
-      assert.ok(preview.active);
-      assert.equal(preview.source, source);
-      assert.ok(
-        preview.geometry.some((point, i) =>
-          point.some((v, axis) => Math.abs(v - before.geometry[i][axis]) > 0.1),
-        ),
-      );
-      // All corners, including corners from different members, keep their spacing.
-      for (let i = 0; i < before.geometry.length; i++)
-        for (let j = i + 1; j < before.geometry.length; j++)
-          near(
-            [
-              Math.hypot(
-                ...preview.geometry[i].map(
-                  (v, axis) => v - preview.geometry[j][axis],
+      await setSource(page, source, 'rotate');
+      if (projection === 'orthographic') {
+        await page
+          .getByRole('button', {name: 'View from +Z', exact: true})
+          .press('Enter');
+        await page.waitForFunction(
+          () => !window.coordinateApp.viewport['controls']['transition'],
+        );
+      }
+      const before = await groupState(page);
+      assert.equal(before.bindings, 3);
+      assert.equal(before.geometry.length, 16);
+      const drag = async () => {
+        const handle = await rotationHandle(page);
+        await page.mouse.move(handle.x, handle.y);
+        await page.mouse.down();
+        await page.mouse.move(
+          handle.x + handle.dx * 40,
+          handle.y + handle.dy * 40,
+          {steps: 5},
+        );
+        const preview = await groupState(page);
+        assert.ok(preview.active);
+        assert.equal(
+          await page.evaluate(
+            () =>
+              window.coordinateApp.viewport['controls'].capturePose()
+                .projection,
+          ),
+          projection,
+          'Model rotation must not change camera projection',
+        );
+        assert.equal(preview.source, source);
+        assert.ok(
+          preview.geometry.some((point, i) =>
+            point.some(
+              (v, axis) => Math.abs(v - before.geometry[i][axis]) > 0.1,
+            ),
+          ),
+        );
+        // All corners, including corners from different members, keep their spacing.
+        for (let i = 0; i < before.geometry.length; i++)
+          for (let j = i + 1; j < before.geometry.length; j++)
+            near(
+              [
+                Math.hypot(
+                  ...preview.geometry[i].map(
+                    (v, axis) => v - preview.geometry[j][axis],
+                  ),
                 ),
-              ),
-            ],
-            [
-              Math.hypot(
-                ...before.geometry[i].map(
-                  (v, axis) => v - before.geometry[j][axis],
+              ],
+              [
+                Math.hypot(
+                  ...before.geometry[i].map(
+                    (v, axis) => v - before.geometry[j][axis],
+                  ),
                 ),
-              ),
-            ],
-          );
-      return preview;
-    };
-    await drag();
-    await page.keyboard.press('Escape');
-    await page.mouse.up();
-    const cancelled = await groupState(page);
-    assert.equal(cancelled.source, source);
-    assert.deepEqual(cancelled.geometry, before.geometry);
-    assert.equal(cancelled.active, false);
-    const preview = await drag();
-    await page.mouse.up();
-    await page.waitForFunction(
-      original =>
-        window.coordinateApp.codeEditor.editor.getValue() !== original,
-      source,
-    );
-    await page.waitForFunction(
-      () =>
-        Math.abs(
-          window.coordinateApp.viewport.getSelected()?.node.children[0]
-            .transform.position[0] ?? 0,
-        ) > 0.1,
-    );
-    await page.getByText('Ready', {exact: true}).waitFor();
-    const committed = await groupState(page);
-    committed.geometry.forEach((point, i) => near(point, preview.geometry[i]));
-    near(committed.origin, [0, 0, 0]);
-    near(committed.origins[1], [0, 0, 0]);
-    if (process.env.CODE3D_GROUP_ROTATION_SCREENSHOT)
-      await page.screenshot({
-        path: process.env.CODE3D_GROUP_ROTATION_SCREENSHOT,
-      });
-    await page.evaluate(() => window.coordinateApp.codeEditor.editor.focus());
-    await page.keyboard.press('Control+z');
-    await page.waitForFunction(
-      original =>
-        window.coordinateApp.codeEditor.editor.getValue() === original,
-      source,
-    );
-    await page.waitForFunction(
-      () =>
-        Math.abs(
-          window.coordinateApp.viewport.getSelected()?.node.children[0]
-            .transform.position[0] ?? Infinity,
-        ) < 1e-5,
-    );
-    assert.deepEqual((await groupState(page)).geometry, before.geometry);
-    assert.deepEqual(errors, []);
-  },
-);
+              ],
+            );
+        return preview;
+      };
+      await drag();
+      await page.keyboard.press('Escape');
+      await page.mouse.up();
+      const cancelled = await groupState(page);
+      assert.equal(cancelled.source, source);
+      assert.deepEqual(cancelled.geometry, before.geometry);
+      assert.equal(cancelled.active, false);
+      const preview = await drag();
+      await page.mouse.up();
+      await page.waitForFunction(
+        original =>
+          window.coordinateApp.codeEditor.editor.getValue() !== original,
+        source,
+      );
+      await page.waitForFunction(
+        () =>
+          Math.abs(
+            window.coordinateApp.viewport.getSelected()?.node.children[0]
+              .transform.position[0] ?? 0,
+          ) > 0.1,
+      );
+      await page.getByText('Ready', {exact: true}).waitFor();
+      const committed = await groupState(page);
+      committed.geometry.forEach((point, i) =>
+        near(point, preview.geometry[i]),
+      );
+      near(committed.origin, [0, 0, 0]);
+      near(committed.origins[1], [0, 0, 0]);
+      if (process.env.CODE3D_GROUP_ROTATION_SCREENSHOT)
+        await page.screenshot({
+          path: process.env.CODE3D_GROUP_ROTATION_SCREENSHOT,
+        });
+      await page.evaluate(() => window.coordinateApp.codeEditor.editor.focus());
+      await page.keyboard.press('Control+z');
+      await page.waitForFunction(
+        original =>
+          window.coordinateApp.codeEditor.editor.getValue() === original,
+        source,
+      );
+      await page.waitForFunction(
+        () =>
+          Math.abs(
+            window.coordinateApp.viewport.getSelected()?.node.children[0]
+              .transform.position[0] ?? Infinity,
+          ) < 1e-5,
+      );
+      assert.deepEqual((await groupState(page)).geometry, before.geometry);
+      assert.deepEqual(errors, []);
+    },
+  );
 
 async function rotationHandle(page: Page) {
   return page.evaluate(() => {

@@ -1,4 +1,9 @@
-import {Box3, PerspectiveCamera, Sphere, Vector3} from 'three';
+import {Box3, Vector3} from 'three';
+import {
+  frameCameraBounds,
+  setCameraViewHeight,
+  type ViewCamera,
+} from './view-camera.ts';
 
 export type ImageView = Readonly<{
   direction: readonly [number, number, number];
@@ -7,23 +12,22 @@ export type ImageView = Readonly<{
 
 /** Fit the observation bounds for the image aspect ratio, without moving a live camera. */
 export function orientImageCamera(
-  camera: PerspectiveCamera,
+  camera: ViewCamera,
   bounds: Box3,
   view: ImageView,
 ): void {
-  const sphere = bounds.getBoundingSphere(new Sphere());
-  const halfVertical = (camera.getEffectiveFOV() * Math.PI) / 360;
-  const halfHorizontal = Math.atan(Math.tan(halfVertical) * camera.aspect);
-  const radius = Math.max(sphere.radius, 0.5);
-  const distance =
-    (radius * 1.15) / Math.sin(Math.min(halfVertical, halfHorizontal));
+  const {focus, distance, viewHeight} = frameCameraBounds(
+    camera,
+    bounds,
+    1 / 1.15,
+  );
   camera.position
-    .copy(sphere.center)
+    .copy(focus)
     .addScaledVector(new Vector3(...view.direction).normalize(), distance);
   camera.up.set(...view.up);
-  camera.lookAt(sphere.center);
+  camera.lookAt(focus);
   camera.near = Math.max(distance / 1000, Number.EPSILON);
-  camera.far = distance + radius * 4;
-  camera.updateProjectionMatrix();
+  camera.far = distance + bounds.getSize(new Vector3()).length() * 2 + 1;
+  setCameraViewHeight(camera, viewHeight, distance);
   camera.updateMatrixWorld(true);
 }

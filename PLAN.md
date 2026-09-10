@@ -663,11 +663,12 @@ are tracked separately in [#84](https://github.com/vilicvane/code3d/issues/84).
   operation/catalog identities and placement distinguish scenes across files
   and retain them through ordinary recompilation; focus/emphasis and collection
   ordering do not create new states. Each scene remembers camera orientation,
-  focus, distance and Modeling/Render mode during the current App session.
+  focus, distance, projection, orthographic view height and Modeling/Render mode
+  during the current App session.
   Group results and their corresponding input collections provide bidirectional
   first-visit defaults through a rigid coordinate-frame conversion; their own
   records take precedence thereafter. Initial views fit geometry. Scene changes
-  interpolate distance geometrically over 300ms along with focus and orientation,
+  interpolate distance and view height geometrically over 300ms along with focus and orientation,
   reuse the existing interrupted/reduced-motion navigation behavior, and keep
   temporary completion previews out of view history. Compilation presents the
   selected source scene directly rather than briefly visiting its fallback
@@ -675,17 +676,28 @@ are tracked separately in [#84](https://github.com/vilicvane/code3d/issues/84).
   See [#82](https://github.com/vilicvane/code3d/issues/82).
 - The upper-right coordinate indicator aligns the view to any of its six axis
   ends in the displayed world or selected occurrence's local frame, preserving
-  the current focus and zoom distance. Clicking the facing endpoint again flips
+  the current focus and focus-plane scale while entering orthographic projection.
+  Actual camera rotation restores perspective; clicking, panning, zooming and
+  spatial tool drags retain orthographic projection. Clicking the facing endpoint again flips
   to its opposite side. Double-clicking the indicator restores the default
-  oblique orientation in that frame and fits the model. Positive endpoints have
+  oblique perspective orientation in that frame and fits the model. Positive endpoints have
   white axis labels; negative endpoints are unlabeled dots. Both actions use a
   300ms eased rotation, with focus and distance included when resetting.
+  Axis selection also eases projection over 300ms: a native perspective camera's dolly
+  distance and field of view change together to preserve focus-plane scale,
+  ending on a native orthographic camera. Navigation owns both the interaction
+  camera and the displayed camera; returning to perspective animates only the
+  displayed lens over 100ms so an ongoing drag keeps control of orientation. Clipping and
+  fog ranges translate with the virtual eye to preserve depth precision and
+  appearance. Interrupted views retain their displayed projection strength.
   New view requests continue from the displayed pose; direct navigation and
   spatial tools interrupt transitions. Reduced-motion preferences skip them.
   Framing uses the limiting horizontal/vertical field of view so narrow
   viewports still contain the fitted geometry. Axis buttons support
   Enter/Space; Enter/Space on the indicator itself resets the view. Camera
   changes stop navigation inertia without changing model selection or source.
+  Picking, fixed-pixel decorations, transform controls, resize and image export
+  use the active native Three.js camera. See [#103](https://github.com/vilicvane/code3d/issues/103).
 - Viewport occurrence selection leaves the focused geometry's materials
   unchanged; source context dimming carries the primary focus contrast. A
   passive one-pixel screen-space corner bound marks only groups and other
