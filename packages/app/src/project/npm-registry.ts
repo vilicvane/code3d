@@ -1,3 +1,4 @@
+import {mapProjectIO} from './io';
 import {createTarDecoder} from 'modern-tar';
 import {decodeProjectFile} from './file-reader';
 import {parsePackageManifest, type PackageManifest} from './package-manifest';
@@ -18,34 +19,59 @@ export type NpmPackument = {
   'dist-tags': Record<string, string>;
 };
 
+export const npmPackageUrl = (
+  pkg: Pick<NpmPackage, 'name' | 'version'>,
+): `${string}/` =>
+  `https://registry.npmjs.org/${encodeURIComponent(pkg.name)}/${pkg.version}/`;
+
 /** Registry metadata and verified archives; the cache is shared by all subprojects. */
 export class NpmRegistry {
-  private readonly requests = new Map<string, Promise<NpmPackument>>();
+  private readonly packuments = new Map<string, Promise<NpmPackument>>();
+  private readonly metadataRequests = new Map<string, Promise<NpmMetadata>>();
   constructor(
     private readonly request: typeof fetch = (...args) => fetch(...args),
   ) {}
 
   packument(name: string): Promise<NpmPackument> {
-    let pending = this.requests.get(name);
+    let pending = this.packuments.get(name);
     if (!pending) {
       pending = this.json(
         'https://registry.npmjs.org/' + encodeURIComponent(name),
         name,
       );
-      this.requests.set(name, pending);
-      pending.catch(() => this.requests.delete(name));
+      this.packuments.set(name, pending);
     }
     return pending;
   }
 
-  async metadata(name: string, version: string): Promise<NpmMetadata> {
-    return this.json(
-      'https://registry.npmjs.org/' +
-        encodeURIComponent(name) +
-        '/' +
-        encodeURIComponent(version),
-      `${name}@${version}`,
+  /** One registry instance belongs to one resolution; explicit updates start fresh. */
+  async prefetch(names: readonly string[]): Promise<void> {
+    await mapProjectIO(
+      [...new Set(names)],
+      async name => {
+        // Consumers report errors with their dependency scope and optionality.
+        // Keep rejected requests deduplicated within this resolution as well.
+        await this.packument(name).catch(() => {});
+      },
+      {concurrency: 15},
     );
+  }
+
+  metadata(name: string, version: string): Promise<NpmMetadata> {
+    const url = npmPackageUrl({name, version}).slice(0, -1);
+    let pending = this.metadataRequests.get(url);
+    if (!pending) {
+      pending = (async () => {
+        const packument = await this.packuments
+          .get(name)
+          ?.catch(() => undefined);
+        return (
+          packument?.versions[version] ?? this.json(url, `${name}@${version}`)
+        );
+      })();
+      this.metadataRequests.set(url, pending);
+    }
+    return pending;
   }
 
   private async json(url: string, name: string) {

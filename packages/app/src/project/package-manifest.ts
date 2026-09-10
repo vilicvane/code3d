@@ -72,6 +72,25 @@ export function manifestDependencies(
   };
 }
 
+/** Locate scope ownership without parsing a manifest that may need recovery or error reporting. */
+export async function findPackageDirectory(
+  reader: ProjectFileReader,
+  file: string,
+): Promise<string> {
+  for (
+    let directory = projectDirectory(file);
+    ;
+    directory = projectDirectory(directory)
+  ) {
+    if (
+      (await reader.stat(normalizeProjectPath(directory + '/package.json')))
+        ?.kind === 'file'
+    )
+      return directory;
+    if (directory === '/') return directory;
+  }
+}
+
 export async function findPackageScope(
   reader: ProjectFileReader,
   file: string,

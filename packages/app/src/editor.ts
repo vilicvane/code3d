@@ -332,6 +332,7 @@ const typeScriptTokenizationReady = monaco.editor.colorize(
 
 export class CodeEditor {
   fileReader?: ProjectFileReader;
+  private projectLanguage?: ProjectLanguage;
   private navigationFiles = new Map<string, string>();
 
   isModelFile(path: string): boolean {
@@ -355,17 +356,56 @@ export class CodeEditor {
     this.switchFile(path, takeFocus);
   }
 
-  async refreshPackageLock(path: string): Promise<void> {
-    const bytes = await this.fileReader?.readFile(path);
-    if (!bytes) return;
-    const source = decodeProjectFile(bytes);
-    const document = this.documents.get(path);
-    if (!document) this.addDocument(path, source);
-    else if (document.model.getValue() !== source)
-      document.model.setValue(source);
+  async refreshPackageInstallation(
+    directory: string,
+    files: ProjectFileReader,
+  ): Promise<void> {
+    const modules = normalizeProjectPath(directory + '/node_modules');
+    const lock = normalizeProjectPath(directory + '/code3d-lock.json');
+    const affected = (path: string) =>
+      path === lock || projectPathIsWithin(path, modules);
+    const updates = await Promise.all(
+      [...this.documents.values()]
+        .filter(document => affected(document.path))
+        .map(async document => ({
+          document,
+          bytes: await files.readFile(document.path),
+        })),
+    );
+    // Remove stale fallback sources and TypeScript extra libraries, including
+    // paths that were only opened by Peek. The next compile supplies new types.
+    if (this.projectLanguage)
+      this.setProjectLanguage({
+        ...this.projectLanguage,
+        files: this.projectLanguage.files.filter(file => !affected(file.path)),
+        realPaths: Object.fromEntries(
+          Object.entries(this.projectLanguage.realPaths ?? {}).filter(
+            ([from, to]) => !affected(from) && !affected(to),
+          ),
+        ),
+      });
+    for (const path of this.navigationFiles.keys())
+      if (affected(path)) this.navigationFiles.delete(path);
+    for (const {document, bytes} of updates) {
+      if (this.documents.get(document.path) !== document) continue;
+      if (bytes === undefined) {
+        this.closeFile(document.path);
+        this.removeDocument(document.path);
+        continue;
+      }
+      const source = decodeProjectFile(bytes);
+      if (document.model.getValue() === source) continue;
+      const active = document.path === this.activePath;
+      const view = active ? this.editor.saveViewState() : undefined;
+      this.withSuppressedCursorEvents(() => {
+        document.model.setValue(source);
+        if (view) this.editor.restoreViewState(view);
+      });
+    }
   }
 
   setProjectLanguage(language: ProjectLanguage): void {
+    this.projectLanguage = language;
     projectPackageSpecifiers = language.packageSpecifiers;
     this.navigationFiles = new Map(
       language.files.map(file => [file.path, file.source]),

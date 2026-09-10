@@ -10,7 +10,7 @@ import type {AgentLocation} from '../editor';
 import {
   PackageInstallationError,
   type PackageInstallationProgress,
-} from '../project/browser-package-installer';
+} from '../project/browser-package-manager';
 import {mapProjectIO} from '../project/io';
 import {parsePackageSpecifier} from '../project/package-manifest';
 import {
@@ -49,7 +49,7 @@ export class ProjectTree {
   private runningPackageOperation = false;
   private readonly packageProgress = new Map<
     string,
-    PackageInstallationProgress
+    {progress: PackageInstallationProgress; hideTimer?: number}
   >();
   private readonly packageStatus = document.createElement('div');
   private dragging = false;
@@ -621,16 +621,28 @@ export class ProjectTree {
   }
 
   setPackageProgress(progress: PackageInstallationProgress): void {
-    if (progress.state === 'busy')
-      this.packageProgress.set(progress.directory, progress);
-    else this.packageProgress.delete(progress.directory);
-    const visible = this.packageProgress.size
-      ? [...this.packageProgress.values()]
-      : [progress];
-    this.packageStatus.hidden = false;
+    window.clearTimeout(
+      this.packageProgress.get(progress.directory)?.hideTimer,
+    );
+    const hideTimer =
+      progress.state === 'ready'
+        ? window.setTimeout(() => {
+            this.packageProgress.delete(progress.directory);
+            this.renderPackageProgress();
+          }, 3000)
+        : undefined;
+    this.packageProgress.set(progress.directory, {progress, hideTimer});
+    this.renderPackageProgress();
+  }
+
+  private renderPackageProgress(): void {
+    const visible = [...this.packageProgress.values()].map(
+      entry => entry.progress,
+    );
+    this.packageStatus.hidden = visible.length === 0;
     this.packageStatus.setAttribute(
       'aria-busy',
-      String(this.packageProgress.size > 0),
+      String(visible.some(progress => progress.state === 'busy')),
     );
     this.packageStatus.replaceChildren(
       ...visible.map(item => {

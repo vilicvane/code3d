@@ -732,3 +732,71 @@ test(
     await active(page, '/src/part.ts');
   },
 );
+
+test(
+  'package success notices expire independently without hiding newer work or other errors',
+  {timeout: 60_000},
+  async t => {
+    const page = await open(t);
+    const time = new Date('2026-01-01T00:00:00Z');
+    await page.clock.install({time});
+    await page.clock.pauseAt(time.getTime() + 60_000);
+    const status = page.getByRole('status', {name: 'Package installation'});
+    await page.evaluate(() =>
+      window.explorerApp.projectDirectory.setPackageProgress({
+        directory: '/a',
+        state: 'ready',
+        message: 'Packages installed',
+      }),
+    );
+    assert.equal(await status.isVisible(), true);
+    await page.clock.runFor(2000);
+    await page.evaluate(() => {
+      const tree = window.explorerApp.projectDirectory;
+      tree.setPackageProgress({
+        directory: '/a',
+        state: 'busy',
+        message: 'Downloading newer package',
+      });
+      tree.setPackageProgress({
+        directory: '/b',
+        state: 'error',
+        message: 'Package not found',
+      });
+      tree.setPackageProgress({
+        directory: '/c',
+        state: 'ready',
+        message: 'Dependencies updated',
+      });
+    });
+    await page.clock.runFor(2000);
+    assert.match(await status.innerText(), /Downloading newer package/);
+    assert.match(await status.innerText(), /Package not found/);
+    assert.match(await status.innerText(), /Dependencies updated/);
+    assert.equal(await status.getAttribute('aria-busy'), 'true');
+    await page.clock.runFor(1100);
+    assert.doesNotMatch(await status.innerText(), /Dependencies updated/);
+    assert.match(await status.innerText(), /Downloading newer package/);
+    assert.match(await status.innerText(), /Package not found/);
+    await page.evaluate(() =>
+      window.explorerApp.projectDirectory.setPackageProgress({
+        directory: '/a',
+        state: 'ready',
+        message: 'Packages installed',
+      }),
+    );
+    await page.clock.runFor(3100);
+    assert.equal(await status.getAttribute('aria-busy'), 'false');
+    assert.match(await status.innerText(), /Package not found/);
+    assert.doesNotMatch(await status.innerText(), /Packages installed/);
+    await page.evaluate(() =>
+      window.explorerApp.projectDirectory.setPackageProgress({
+        directory: '/b',
+        state: 'ready',
+        message: 'Packages ready',
+      }),
+    );
+    await page.clock.runFor(3100);
+    assert.equal(await status.isVisible(), false);
+  },
+);
