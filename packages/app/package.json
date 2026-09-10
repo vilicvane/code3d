@@ -33,6 +33,7 @@
     "esbuild-wasm": "^0.28.2",
     "fflate": "^0.8.2",
     "lucide": "^1.41.0",
+    "mobx": "^7.0.3",
     "modern-tar": "0.8.5",
     "monaco-editor": "^0.56.0",
     "prettier": "^3.9.6",

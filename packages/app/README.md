@@ -58,7 +58,9 @@ contracts before following the implementation links below.
 Public model authoring belongs to [Core](../core/README.md). Shared connection,
 encryption, and request receipts belong to [Agent](../agent/README.md); the local
 Node process belongs to [CLI](../cli/README.md). App owns operation validation and
-execution against its current project.
+execution against its current project. Its [Agent connections](src/agent/connections.ts)
+own grants, connection lifetimes and reactive presence/follow state; native UI
+components consume that state through MobX and dispose their own subscriptions.
 
 ## Verify and build
 

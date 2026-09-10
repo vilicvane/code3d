@@ -44,6 +44,9 @@ test(
     page.setDefaultTimeout(15_000);
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => {
+      if (/\[MobX\]|\[mobx\]/.test(message.text())) errors.push(message.text());
+    });
     await page.route('**/src/main.ts*', async route => {
       const response = await route.fetch();
       await route.fulfill({

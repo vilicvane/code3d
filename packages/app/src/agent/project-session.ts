@@ -1,3 +1,4 @@
+import {action, computed, makeObservable, observable, runInAction} from 'mobx';
 import {
   AgentError,
   encodeBase64,
@@ -78,10 +79,9 @@ const encoder = new TextEncoder();
 /** One per App project: every user save and agent acceptance uses the same queue. */
 export class AgentProjectSession {
   private queue: Promise<unknown> = Promise.resolve();
-  private readonly drafts = new Map<string, Draft>();
+  private readonly drafts = observable.map<string, Draft>([], {deep: false});
   private accepting = false;
   private revision = 1;
-  private readonly revisionListeners = new Set<() => void>();
   private readonly updateListeners = new Set<(update: AgentUpdate) => void>();
   private readonly agentStates = new Map<
     string,
@@ -102,10 +102,18 @@ export class AgentProjectSession {
     private readonly observe: (
       request: AgentObservation,
     ) => Promise<AgentResponse>,
-    private readonly changed: () => void,
     private readonly reportSaveError: (error: Error) => void,
     private readonly resolveCursor = inspectAgentCursor,
-  ) {}
+  ) {
+    makeObservable<this, 'revision' | 'advanceRevision' | 'stage'>(this, {
+      revision: observable,
+      hasUnsaved: computed,
+      currentRevision: computed,
+      advanceRevision: action,
+      recordEditorChange: action,
+      stage: action,
+    });
+  }
 
   get hasUnsaved(): boolean {
     return this.drafts.size > 0;
@@ -117,11 +125,6 @@ export class AgentProjectSession {
   }
   get currentRevision(): number {
     return this.revision;
-  }
-
-  onRevision(listener: () => void): () => void {
-    this.revisionListeners.add(listener);
-    return () => this.revisionListeners.delete(listener);
   }
 
   onEntriesChange(
@@ -177,7 +180,6 @@ export class AgentProjectSession {
         }
       } finally {
         this.entriesChanged('operation');
-        this.changed();
       }
     });
   }
@@ -210,7 +212,6 @@ export class AgentProjectSession {
 
   private advanceRevision(): void {
     this.revision++;
-    for (const listener of this.revisionListeners) listener();
   }
 
   recordEditorChange(change: ProjectEditorChange): void {
@@ -689,7 +690,6 @@ export class AgentProjectSession {
         end: resolved.end,
       });
     if (files.length) this.advanceRevision();
-    this.changed();
     const acceptedVersions = new Map(
       files.map(file => [file.path, this.editor.fileState(file.path)?.version]),
     );
@@ -822,7 +822,9 @@ export class AgentProjectSession {
           if (existed) await this.fileSystem.remove(path);
         } else await this.fileSystem.writeFile(path, draft.content);
         entriesChanged ||= draft.content === null ? !!existed : !existed;
-        if (this.drafts.get(path) === draft) this.drafts.delete(path);
+        runInAction(() => {
+          if (this.drafts.get(path) === draft) this.drafts.delete(path);
+        });
       } catch (error) {
         failed = true;
         draft.error =
@@ -833,6 +835,5 @@ export class AgentProjectSession {
       }
     }
     if (entriesChanged || failed) this.entriesChanged('save');
-    this.changed();
   }
 }

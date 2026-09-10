@@ -1,3 +1,4 @@
+import {reaction} from 'mobx';
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import type {StoredReceipt} from '@code3d/agent';
@@ -85,10 +86,14 @@ test('restore sorts capture times and retains the latest 100 images across agent
   assert.equal(history.items.length, 0);
 });
 
-test('receipt notifications run outside writes and coalesce restore and revoke batches', async () => {
+test('presentation reactions run outside writes and coalesce restore and revoke batches', async () => {
   const history = new AgentRenderHistory();
   const sizes: number[] = [];
-  const unsubscribe = history.subscribe(() => sizes.push(history.items.length));
+  const unsubscribe = reaction(
+    () => history.items,
+    items => sizes.push(items.length),
+    {scheduler: queueMicrotask},
+  );
   history.record(euler, receipt(1));
   history.record(noether, receipt(2));
   assert.deepEqual(sizes, []);

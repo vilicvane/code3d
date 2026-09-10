@@ -1,3 +1,12 @@
+import {
+  action,
+  computed,
+  makeObservable,
+  observable,
+  observableRef,
+  reaction,
+} from 'mobx';
+import type {AgentConnections} from '../agent/connections';
 import {decodeBase64} from '@code3d/agent';
 import {ChevronLeft, ChevronRight, Expand, X} from 'lucide';
 import type {AgentRenderHistory, AgentRender} from '../agent/render-history';
@@ -23,10 +32,9 @@ export class AgentRenderView {
   private readonly dismissButton = control(
     'Dismiss snapshot preview',
     X,
-    () => {
+    action(() => {
       this.dismissedFrames = new Set(this.history.items.map(item => item.id));
-      this.refreshPreviewVisibility();
-    },
+    }),
   );
   private readonly previous = control('Previous snapshot', ChevronLeft, () =>
     this.move(-1),
@@ -38,17 +46,49 @@ export class AgentRenderView {
   private readonly urls = new Map<string, string>();
   private readonly thumbnails = new Map<string, HTMLButtonElement>();
   private readonly inactive = new Map<HTMLElement, boolean>();
-  private readonly unsubscribe: () => void;
-  private selected?: string;
-  private dismissedFrames?: ReadonlySet<string>;
+  private readonly stopRendering: () => void;
+  private readonly stopPresence: () => void;
+  private readonly stopHistory: () => void;
+  private readonly listeners = new AbortController();
+  private selected: string | undefined = undefined;
+  private dismissedFrames: ReadonlySet<string> | undefined = undefined;
+  private opened = false;
   private following = true;
   private agent = '';
-  private activeAgents: ReadonlySet<string> = new Set();
 
   constructor(
     private readonly host: HTMLElement,
     private readonly history: AgentRenderHistory,
+    private readonly connections: Pick<AgentConnections, 'activeAgentIds'>,
   ) {
+    makeObservable<
+      this,
+      | 'selected'
+      | 'dismissedFrames'
+      | 'opened'
+      | 'following'
+      | 'agent'
+      | 'items'
+      | 'selectedItem'
+      | 'previewHidden'
+      | 'open'
+      | 'close'
+      | 'select'
+      | 'reconcileHistory'
+    >(this, {
+      selected: observable,
+      dismissedFrames: observableRef,
+      opened: observable,
+      following: observable,
+      agent: observable,
+      items: computed,
+      selectedItem: computed,
+      previewHidden: computed,
+      open: action,
+      close: action,
+      select: action,
+      reconcileHistory: action,
+    });
     this.root.className = 'agent-renders';
     this.root.setAttribute('aria-label', 'Agent snapshots');
     this.root.hidden = true;
@@ -76,11 +116,13 @@ export class AgentRenderView {
     const title = document.createElement('strong');
     title.textContent = 'Agent snapshots';
     this.filter.setAttribute('aria-label', 'Filter snapshots by agent');
-    this.filter.addEventListener('change', () => {
-      this.agent = this.filter.value;
-      this.following = true;
-      this.refresh(true);
-    });
+    this.filter.addEventListener(
+      'change',
+      action(() => {
+        this.agent = this.filter.value;
+        this.following = true;
+      }),
+    );
     header.append(title, this.filter, this.closeButton);
     const figure = document.createElement('figure');
     const imageHost = document.createElement('div');
@@ -98,18 +140,20 @@ export class AgentRenderView {
     this.latest.className = 'quiet-button';
     this.latest.textContent = 'Latest';
     this.latest.setAttribute('aria-label', 'Show latest snapshot');
-    this.latest.addEventListener('click', () => {
-      this.following = true;
-      this.refresh(true);
-    });
+    this.latest.addEventListener(
+      'click',
+      action(() => {
+        this.following = true;
+      }),
+    );
     navigation.append(this.previous, this.latest, this.next);
     this.timeline.className = 'agent-render-timeline';
     this.timeline.setAttribute('role', 'listbox');
     this.timeline.setAttribute('aria-label', 'Render timeline');
     this.timeline.setAttribute('aria-orientation', 'horizontal');
     this.timeline.addEventListener('keydown', event => {
-      const items = this.items();
-      const index = items.findIndex(item => item.id === this.selected);
+      const items = this.items;
+      const index = items.findIndex(item => item.id === this.selectedItem?.id);
       const target =
         event.key === 'Home'
           ? 0
@@ -123,7 +167,11 @@ export class AgentRenderView {
       if (target === undefined) return;
       event.preventDefault();
       this.select(items[Math.max(0, Math.min(items.length - 1, target))].id);
-      this.thumbnails.get(this.selected!)!.focus({preventScroll: true});
+      queueMicrotask(() => {
+        const selected = this.selectedItem;
+        if (selected && !this.listeners.signal.aborted)
+          this.thumbnails.get(selected.id)?.focus({preventScroll: true});
+      });
     });
     footer.append(navigation, this.timeline);
     this.viewer.append(header, figure, footer);
@@ -132,7 +180,7 @@ export class AgentRenderView {
     this.host.append(this.root);
     this.root.addEventListener('keydown', event => {
       event.stopPropagation();
-      if (event.key === 'Escape' && !this.viewer.hidden) {
+      if (event.key === 'Escape' && this.opened) {
         event.preventDefault();
         this.close();
       }
@@ -147,71 +195,120 @@ export class AgentRenderView {
       'contextmenu',
     ])
       this.root.addEventListener(event, event => event.stopPropagation());
-    this.unsubscribe = history.subscribe(() => this.refresh());
-    window.addEventListener('pagehide', () => this.dispose(), {once: true});
-    this.refresh();
+    this.stopHistory = reaction(
+      () => history.items,
+      items => this.reconcileHistory(items),
+      {
+        name: 'AgentRenderView.historySession',
+      },
+    );
+    this.stopRendering = reaction(
+      () => [
+        history.items,
+        this.items,
+        this.selectedItem,
+        this.opened,
+        this.previewHidden,
+        this.following,
+      ],
+      () => this.render(),
+      {
+        name: 'AgentRenderView.render',
+        fireImmediately: true,
+        scheduler: queueMicrotask,
+      },
+    );
+    // Presence changes only affect labels, not frame selection or timeline scroll.
+    this.stopPresence = reaction(
+      () => connections.activeAgentIds,
+      agents => {
+        for (const label of [this.previewName, this.name])
+          label.dataset.active = String(
+            agents.has(label.dataset.agentId ?? ''),
+          );
+      },
+      {name: 'AgentRenderView.presence', fireImmediately: true},
+    );
+    window.addEventListener('pagehide', () => this.dispose(), {
+      once: true,
+      signal: this.listeners.signal,
+    });
   }
 
-  setActiveAgents(agents: ReadonlySet<string>): void {
-    this.activeAgents = agents;
-    // Presence updates must not move the selected frame or the timeline scroll.
-    for (const label of [this.previewName, this.name])
-      label.dataset.active = String(agents.has(label.dataset.agentId ?? ''));
-  }
-
-  private refreshPreviewVisibility(): void {
-    const dismissed = this.dismissedFrames;
-    if (dismissed && this.history.items.some(item => !dismissed.has(item.id)))
+  // Expire browsing intentions when their targets disappear. New receipts end a
+  // dismissal permanently, even if that new receipt is subsequently revoked.
+  private reconcileHistory(items: readonly AgentRender[]): void {
+    if (!items.length) {
+      this.close();
+      this.selected = undefined;
+    }
+    if (!items.some(item => item.agent.id === this.agent)) this.agent = '';
+    if (!this.items.some(item => item.id === this.selected))
+      this.following = true;
+    if (
+      this.dismissedFrames &&
+      items.some(item => !this.dismissedFrames!.has(item.id))
+    )
       this.dismissedFrames = undefined;
-    const hidden = !this.viewer.hidden || !!this.dismissedFrames;
-    this.preview.hidden = this.dismissButton.hidden = hidden;
+  }
+
+  private get previewHidden(): boolean {
+    return (
+      this.opened ||
+      (!!this.dismissedFrames &&
+        this.history.items.every(item => this.dismissedFrames!.has(item.id)))
+    );
+  }
+
+  private get selectedItem(): AgentRender | undefined {
+    return (
+      (!this.following && this.items.find(item => item.id === this.selected)) ||
+      this.items.at(-1)
+    );
   }
 
   private open(): void {
     this.agent = '';
     this.following = true;
-    this.viewer.hidden = false;
-    this.refreshPreviewVisibility();
-    this.preview.setAttribute('aria-expanded', 'true');
+    this.opened = true;
     for (const child of this.host.children) {
       if (!(child instanceof HTMLElement) || child === this.root) continue;
       this.inactive.set(child, child.inert);
       child.inert = true;
     }
-    this.refresh(true);
-    this.closeButton.focus({preventScroll: true});
   }
 
   private close(): void {
-    this.viewer.hidden = true;
-    this.refreshPreviewVisibility();
-    this.preview.setAttribute('aria-expanded', 'false');
+    this.opened = false;
     for (const [child, inert] of this.inactive) child.inert = inert;
     this.inactive.clear();
-    if (!this.root.hidden && !this.preview.hidden)
-      this.preview.focus({preventScroll: true});
   }
 
-  private items(): readonly AgentRender[] {
-    return this.history.items.filter(
-      item => !this.agent || item.agent.id === this.agent,
+  private get items(): readonly AgentRender[] {
+    const filtered = this.history.items.filter(
+      item => item.agent.id === this.agent,
     );
+    return filtered.length ? filtered : this.history.items;
   }
 
   private select(id: string): void {
     this.selected = id;
-    this.following = id === this.items().at(-1)?.id;
-    this.refresh(true);
+    this.following = id === this.items.at(-1)?.id;
   }
 
   private move(delta: number): void {
-    const items = this.items();
+    const items = this.items;
     const item =
-      items[items.findIndex(item => item.id === this.selected) + delta];
+      items[items.findIndex(item => item.id === this.selectedItem?.id) + delta];
     if (item) this.select(item.id);
   }
 
-  private refresh(reveal = false): void {
+  private render(): void {
+    const wasOpen = !this.viewer.hidden;
+    const reveal = !wasOpen && this.opened;
+    this.viewer.hidden = !this.opened;
+    this.preview.hidden = this.dismissButton.hidden = this.previewHidden;
+    this.preview.setAttribute('aria-expanded', String(this.opened));
     const all = this.history.items;
     const present = new Set(all.map(item => item.id));
     for (const [id, url] of this.urls) {
@@ -226,21 +323,20 @@ export class AgentRenderView {
     }
     const latest = all.at(-1);
     this.root.hidden = !latest;
-    this.refreshPreviewVisibility();
     if (!latest) {
-      this.close();
+      for (const [child, inert] of this.inactive) child.inert = inert;
+      this.inactive.clear();
       this.image.removeAttribute('src');
       this.previewImage.removeAttribute('src');
       this.timeline.replaceChildren();
       this.thumbnails.clear();
-      this.selected = undefined;
       return;
     }
     this.previewImage.src = this.url(latest);
     this.previewName.textContent = latest.agent.name;
     this.previewName.dataset.agentId = latest.agent.id;
     this.previewName.dataset.active = String(
-      this.activeAgents.has(latest.agent.id),
+      this.connections.activeAgentIds.has(latest.agent.id),
     );
     this.preview.className = `agent-render-preview agent-color-${latest.agent.color}`;
     this.dismissButton.className = `quiet-button agent-render-control agent-render-dismiss agent-color-${latest.agent.color}`;
@@ -249,10 +345,13 @@ export class AgentRenderView {
       'aria-label',
       `View agent snapshots · ${latest.agent.name}`,
     );
-    if (this.viewer.hidden) return;
+    if (this.viewer.hidden) {
+      if (wasOpen && !this.previewHidden)
+        this.preview.focus({preventScroll: true});
+      return;
+    }
 
     const agents = new Map(all.map(item => [item.agent.id, item.agent]));
-    if (!agents.has(this.agent)) this.agent = '';
     const options = [
       ['', 'All agents'],
       ...[...agents.values()].map(agent => [agent.id, agent.name]),
@@ -268,11 +367,9 @@ export class AgentRenderView {
       this.filter.replaceChildren(
         ...options.map(([id, name]) => new Option(name, id)),
       );
-    this.filter.value = this.agent;
-    const items = this.items();
-    if (!items.some(item => item.id === this.selected)) this.following = true;
-    if (this.following) this.selected = items.at(-1)!.id;
-    const index = items.findIndex(item => item.id === this.selected);
+    this.filter.value = agents.has(this.agent) ? this.agent : '';
+    const items = this.items;
+    const index = items.findIndex(item => item.id === this.selectedItem?.id);
     const selected = items[index];
     const url = this.url(selected);
     const changed = this.image.src !== url;
@@ -281,7 +378,9 @@ export class AgentRenderView {
     this.name.className = `agent-render-agent agent-color-${selected.agent.color}`;
     this.name.textContent = selected.agent.name;
     this.name.dataset.agentId = selected.agent.id;
-    this.name.dataset.active = String(this.activeAgents.has(selected.agent.id));
+    this.name.dataset.active = String(
+      this.connections.activeAgentIds.has(selected.agent.id),
+    );
     stamp(this.time, selected.capturedAt);
     this.count.textContent = `${index + 1} / ${items.length}`;
     this.previous.disabled = index === 0;
@@ -312,21 +411,25 @@ export class AgentRenderView {
         button.addEventListener('click', () => this.select(item.id));
         this.thumbnails.set(item.id, button);
       }
-      button.setAttribute('aria-selected', String(item.id === this.selected));
+      button.setAttribute(
+        'aria-selected',
+        String(item.id === this.selectedItem?.id),
+      );
       button.setAttribute(
         'aria-label',
         `${item.agent.name} · ${new Date(item.capturedAt).toLocaleString()}`,
       );
-      button.tabIndex = item.id === this.selected ? 0 : -1;
+      button.tabIndex = item.id === this.selectedItem?.id ? 0 : -1;
       if (this.timeline.children[index] !== button)
         this.timeline.insertBefore(
           button,
           this.timeline.children[index] ?? null,
         );
     }
+    if (reveal) this.closeButton.focus({preventScroll: true});
     if (reveal || changed)
       this.thumbnails
-        .get(this.selected!)!
+        .get(this.selectedItem!.id)!
         .scrollIntoView({block: 'nearest', inline: 'nearest'});
   }
 
@@ -343,8 +446,11 @@ export class AgentRenderView {
     return url;
   }
 
-  private dispose(): void {
-    this.unsubscribe();
+  dispose(): void {
+    this.stopRendering();
+    this.stopPresence();
+    this.stopHistory();
+    this.listeners.abort();
     this.close();
     for (const url of this.urls.values()) URL.revokeObjectURL(url);
     this.urls.clear();

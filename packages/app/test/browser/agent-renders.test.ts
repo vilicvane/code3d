@@ -11,6 +11,7 @@ import {reserveLocalPort} from './local-port.ts';
 declare const window: Window & {
   agentTestEditor: import('../../src/editor.ts').CodeEditor;
   agentTestCamera: import('three').PerspectiveCamera;
+  agentTestView: import('../../src/ui/agent-renders.ts').AgentRenderView;
   agentTestHistory: import('../../src/agent/render-history.ts').AgentRenderHistory;
 };
 
@@ -36,6 +37,9 @@ test(
     page.setDefaultTimeout(15_000);
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => {
+      if (/\[MobX\]|\[mobx\]/.test(message.text())) errors.push(message.text());
+    });
     await page.route('**/src/main.ts*', async route => {
       const response = await route.fetch();
       await route.fulfill({
@@ -563,6 +567,9 @@ test(
     page.setDefaultTimeout(10_000);
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => {
+      if (/\[MobX\]|\[mobx\]/.test(message.text())) errors.push(message.text());
+    });
     t.after(() => assert.deepEqual(errors, []));
     const url = new URL(
       '/__agent-render-gallery__',
@@ -580,9 +587,10 @@ test(
       const {AgentRenderHistory} = await import('/src/agent/render-history.ts');
       const {AgentRenderView} = await import('/src/ui/agent-renders.ts');
       window.agentTestHistory = new AgentRenderHistory();
-      new AgentRenderView(
+      window.agentTestView = new AgentRenderView(
         document.querySelector<HTMLElement>('main')!,
         window.agentTestHistory,
+        {activeAgentIds: new Set<string>()},
       );
     });
     const add = (start: number, end: number, agent = 'Euler') =>
@@ -627,6 +635,12 @@ test(
     await add(1, 2);
     await add(3, 3, 'Noether');
     await page.locator('.agent-render-preview').click();
+    assert.equal(
+      await page
+        .getByRole('button', {name: 'Back to live view', exact: true})
+        .evaluate(element => element === document.activeElement),
+      true,
+    );
     await page
       .getByRole('button', {name: 'Previous snapshot', exact: true})
       .click();
@@ -685,7 +699,21 @@ test(
       await page.locator('.agent-render-preview').isVisible(),
       false,
     );
-    await add(1, 1);
+    await add(1, 1, 'Gauss');
     assert.equal(await page.locator('.agent-render-preview').isVisible(), true);
+    // Once a new receipt ended dismissal, removing it must not restore that old intention.
+    await page.evaluate(() => window.agentTestHistory.remove('Gauss'));
+    assert.equal(await page.locator('.agent-render-preview').isVisible(), true);
+    // Dispose while a history render is queued; later receipts must not recreate DOM.
+    await page.locator('.agent-render-preview').click();
+    await page.evaluate(() => {
+      document
+        .querySelector('.agent-render-timeline')!
+        .dispatchEvent(new KeyboardEvent('keydown', {key: 'Home'}));
+      window.agentTestHistory.clear();
+      window.agentTestView.dispose();
+    });
+    await add(5, 5);
+    assert.equal(await page.locator('.agent-renders').count(), 0);
   },
 );

@@ -1,3 +1,4 @@
+import {action, computed, makeObservable, observableRef} from 'mobx';
 import type {Artifact, StoredReceipt} from '@code3d/agent';
 
 export type RenderAgent = Readonly<{id: string; name: string; color: number}>;
@@ -11,16 +12,18 @@ export type AgentRender = Readonly<{
 /** A bounded projection of durable receipts; source and topology never enter the UI history. */
 export class AgentRenderHistory {
   private frames: readonly AgentRender[] = [];
-  private readonly listeners = new Set<() => void>();
-  private notifying = false;
+  constructor() {
+    makeObservable<this, 'frames'>(this, {
+      frames: observableRef,
+      items: computed,
+      record: action,
+      remove: action,
+      clear: action,
+    });
+  }
 
   get items(): readonly AgentRender[] {
     return this.frames;
-  }
-
-  subscribe(listener: () => void): () => void {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
   }
 
   record(agent: RenderAgent, receipt: StoredReceipt): void {
@@ -51,26 +54,13 @@ export class AgentRenderHistory {
           a.id.localeCompare(b.id),
       )
       .slice(-100);
-    this.changed();
   }
 
   remove(agentId: string): void {
     this.frames = this.frames.filter(frame => frame.agent.id !== agentId);
-    this.changed();
   }
 
   clear(): void {
     this.frames = [];
-    this.changed();
-  }
-
-  private changed(): void {
-    if (this.notifying) return;
-    this.notifying = true;
-    // Presentation runs outside the receipt write, and restored batches render once.
-    queueMicrotask(() => {
-      this.notifying = false;
-      for (const listener of this.listeners) listener();
-    });
   }
 }
