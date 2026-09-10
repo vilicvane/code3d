@@ -40,12 +40,9 @@ export type ProjectBuildArtifact = Readonly<{
   dependencies: DependencyArtifact;
   staticPackages: readonly string[];
   resources: ReadonlyMap<string, Uint8Array>;
-  language: ProjectLanguage;
   resourceStats: ProjectAssets['cacheStats'];
   runtimeSourceRef?: SourceRef;
 }>;
-
-export type ProjectExecutionArtifact = Omit<ProjectBuildArtifact, 'language'>;
 
 /** Compilation owns source files and esbuild contexts; it never initializes a kernel. */
 export class ProjectCompiler {
@@ -282,7 +279,6 @@ export class ProjectCompiler {
         dependencies,
         staticPackages: discovery.staticPackages,
         resources,
-        language,
         runtimeSourceRef,
       };
       return {

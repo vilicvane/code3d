@@ -21,13 +21,16 @@ export type SketchSourceSite = Readonly<{
 export type SketchSourceSites = ReadonlyMap<string, SketchSourceSite>;
 
 /** Only source facts cross into the executor; TypeScript objects stay here. */
-export function sketchSourceSites(program: ts.Program): SketchSourceSites {
+export function sketchSourceSites(
+  program: ts.Program,
+  files: ReadonlyMap<string, string>,
+): SketchSourceSites {
   const checker = program.getTypeChecker();
   const calls: ts.CallExpression[] = [];
   const written = new Set<ts.Symbol>();
   const constructors = new Set<ts.Signature['declaration']>();
   for (const file of program.getSourceFiles()) {
-    if (file.isDeclarationFile) continue;
+    if (file.isDeclarationFile || !files.has(file.fileName)) continue;
     const visit = (node: ts.Node): void => {
       if (
         ts.isImportDeclaration(node) &&

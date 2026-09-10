@@ -25,7 +25,7 @@ import CompilerWorker from './compiler.worker?worker';
 import {ModelDiagnosticError} from './diagnostic';
 import ExecutorWorker from './executor.worker?worker';
 import type {ModelExportInstance, ModelExportOptions} from './model-export';
-import type {ProjectExecutionArtifact} from './project-compiler';
+import type {ProjectBuildArtifact} from './project-compiler';
 import type {SketchDrag, SketchDragPreview} from './sketch-drag';
 
 type PendingRequest = {
@@ -46,7 +46,7 @@ type PendingRequest = {
 type ExecuteRequest = Omit<
   Extract<ExecutorRequest, {kind: 'execute'}>,
   'artifact' | 'dependency'
-> & {artifact: ProjectExecutionArtifact};
+> & {artifact: ProjectBuildArtifact};
 type Execution = {
   request: ExecuteRequest;
   compileId: number;

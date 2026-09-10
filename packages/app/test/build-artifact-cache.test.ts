@@ -185,19 +185,35 @@ test('restored dependency output is validated with metadata and avoids reading t
   };
   const first = new ProjectCompiler(files, files, esbuild);
   const second = new ProjectCompiler(files, files, esbuild);
+  let originalLanguage!: import('../src/project/project-language.ts').ProjectLanguage;
+  let restoredLanguage!: typeof originalLanguage;
   try {
-    const artifact = await first.compile(project, '/a.ts');
+    const artifact = await first.compile(
+      project,
+      '/a.ts',
+      undefined,
+      language => {
+        originalLanguage = language;
+      },
+    );
     const coldReads = reads.filter(path => /\.[cm]?js$/.test(path)).length;
     reads.length = 0;
     second.restoreDependencies(structuredClone(artifact.dependencies));
-    const rebuilt = await second.compile(project, '/a.ts');
+    const rebuilt = await second.compile(
+      project,
+      '/a.ts',
+      undefined,
+      language => {
+        restoredLanguage = language;
+      },
+    );
     assert.equal(rebuilt.dependencies.id, artifact.dependencies.id);
-    assert.equal(rebuilt.language.files.length, artifact.language.files.length);
+    assert.equal(restoredLanguage.files.length, originalLanguage.files.length);
     const declarations = new Map(
-      artifact.language.files.map(file => [file.path, file.source]),
+      originalLanguage.files.map(file => [file.path, file.source]),
     );
     assert.ok(
-      rebuilt.language.files.every(
+      restoredLanguage.files.every(
         file => declarations.get(file.path) === file.source,
       ),
       'declaration contents are unchanged',
@@ -302,5 +318,42 @@ test('a new entry restores the whole dependency scope independently of older mod
   } finally {
     await first.dispose();
     await second.dispose();
+  }
+});
+
+test('opening an unrelated document updates language without changing the executable artifact', async () => {
+  const compiler = new ProjectCompiler(
+    packageTestFiles,
+    packageTestFiles,
+    esbuild,
+  );
+  const languages: import('../src/project/project-language.ts').ProjectLanguage[] =
+    [];
+  try {
+    const first = await compiler.compile(
+      project,
+      '/a.ts',
+      undefined,
+      language => languages.push(language),
+    );
+    const second = await compiler.compile(
+      {
+        files: [
+          ...project.files,
+          {
+            path: '/unrelated.ts',
+            source:
+              "import {box} from '@code3d/core'; export default box(3, 4, 5);",
+          },
+        ],
+      },
+      '/a.ts',
+      undefined,
+      language => languages.push(language),
+    );
+    assert.ok(languages[1].rootPaths?.includes('/unrelated.ts'));
+    assert.equal(second.id, first.id);
+  } finally {
+    await compiler.dispose();
   }
 });

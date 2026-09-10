@@ -12,7 +12,7 @@ import type {DesignContext, ModelModule} from './compiler';
 import type {DependencyArtifact} from './dependency-builder';
 import type {ModelDiagnostic} from './diagnostic';
 import type {ModelExportInstance, ModelExportOptions} from './model-export';
-import type {ProjectExecutionArtifact} from './project-compiler';
+import type {ProjectBuildArtifact} from './project-compiler';
 import type {SketchDrag, SketchDragPreview} from './sketch-drag';
 
 export type CompileRequest = Readonly<{
@@ -129,7 +129,7 @@ export type CompilerResponse = Exclude<
 >;
 
 export type ArtifactMessage = Readonly<{
-  artifact: Omit<ProjectExecutionArtifact, 'dependencies'> & {
+  artifact: Omit<ProjectBuildArtifact, 'dependencies'> & {
     dependencies: string;
   };
   dependency?: DependencyArtifact;
@@ -139,10 +139,8 @@ export type ArtifactMessage = Readonly<{
 export class ArtifactChannel {
   private dependency?: DependencyArtifact;
 
-  encode(
-    artifact: ProjectExecutionArtifact & {language?: ProjectLanguage},
-  ): ArtifactMessage {
-    const {language: _language, dependencies, resources, ...model} = artifact;
+  encode(artifact: ProjectBuildArtifact): ArtifactMessage {
+    const {dependencies, resources, ...model} = artifact;
     const dependency =
       this.dependency?.id === dependencies.id ? undefined : dependencies;
     this.dependency = dependencies;
@@ -160,7 +158,7 @@ export class ArtifactChannel {
     };
   }
 
-  decode(message: ArtifactMessage): ProjectExecutionArtifact {
+  decode(message: ArtifactMessage): ProjectBuildArtifact {
     this.dependency = message.dependency ?? this.dependency;
     return {...message.artifact, dependencies: this.dependency!};
   }

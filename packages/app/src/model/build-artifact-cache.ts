@@ -76,6 +76,17 @@ const encode = (value: unknown) =>
 const decode = <T>(bytes: Uint8Array): T =>
   JSON.parse(strFromU8(unzlibSync(bytes))) as T;
 
+// Artifact bytes are immutable; compilation and persistence share their content IDs.
+const binaryIds = new WeakMap<Uint8Array, Promise<string>>();
+function binaryArtifactIdentity(bytes: Uint8Array): Promise<string> {
+  let pending = binaryIds.get(bytes);
+  if (!pending) {
+    pending = runtimeArtifactIdentity([bytes]);
+    binaryIds.set(bytes, pending);
+  }
+  return pending;
+}
+
 function storedModel(model: CompiledModelSource): StoredModel {
   return {
     ...model,
@@ -94,11 +105,16 @@ function storedModel(model: CompiledModelSource): StoredModel {
 }
 
 /** Source tools and diagnostics are part of the executable snapshot's identity. */
-export function projectArtifactIdentity(
+export async function projectArtifactIdentity(
   artifact: Omit<ProjectBuildArtifact, 'id' | 'resourceStats'>,
 ): Promise<string> {
-  const resources = [...artifact.resources].sort(([a], [b]) =>
-    a.localeCompare(b),
+  const resources = await Promise.all(
+    [...artifact.resources]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(async ([path, bytes]) => [
+        path,
+        await binaryArtifactIdentity(bytes),
+      ]),
   );
   return runtimeArtifactIdentity([
     strToU8(
@@ -106,18 +122,10 @@ export function projectArtifactIdentity(
         staticPackages: artifact.staticPackages,
         runtimeSourceRef: artifact.runtimeSourceRef,
         model: storedModel(artifact.model),
-        language: {
-          ...artifact.language,
-          // Independent declaration reads can finish in a different order.
-          files: [...artifact.language.files].sort((a, b) =>
-            a.path.localeCompare(b.path),
-          ),
-        },
         dependencies: artifact.dependencies.id,
-        resources: resources.map(([path]) => path),
+        resources,
       }),
     ),
-    ...resources.map(([, bytes]) => bytes),
   ]);
 }
 
@@ -140,7 +148,6 @@ export class BuildArtifactCache {
     {artifact: ProjectBuildArtifact; bytes: number}
   >();
   private readonly latest = new Map<string, LatestBuild>();
-  private readonly binaryIds = new WeakMap<Uint8Array, Promise<string>>();
   private readonly requiredRecords = new WeakMap<
     ProjectBuildArtifact,
     readonly string[]
@@ -208,7 +215,7 @@ export class BuildArtifactCache {
       const bytes = this.store?.get('binary:' + id);
       if (!bytes) throw new Error('Incomplete build artifact');
       binaries.set(id, bytes);
-      this.binaryIds.set(bytes, Promise.resolve(id));
+      binaryIds.set(bytes, Promise.resolve(id));
       return bytes;
     };
   }
@@ -289,17 +296,10 @@ export class BuildArtifactCache {
     dependencyKey?: string,
   ): Promise<void> {
     this.retain(artifact);
-    const required = new Set<string>();
+    const records = new Map<string, () => Uint8Array>();
     const binary = async (bytes: Uint8Array): Promise<string> => {
-      let pending = this.binaryIds.get(bytes);
-      if (!pending) {
-        pending = runtimeArtifactIdentity([bytes]);
-        this.binaryIds.set(bytes, pending);
-      }
-      const id = await pending;
-      required.add('binary:' + id);
-      if (!this.store?.touch('binary:' + id))
-        this.store?.set('binary:' + id, bytes);
+      const id = await binaryArtifactIdentity(bytes);
+      records.set('binary:' + id, () => bytes);
       return id;
     };
     const resources = (files: ReadonlyMap<string, Uint8Array>) =>
@@ -316,27 +316,28 @@ export class BuildArtifactCache {
       sketchWasm: await binary(dependency.sketchWasm),
       resources: await resources(dependency.resources),
     };
-    required.add('dependency:' + dependency.id);
-    if (!this.store?.touch('dependency:' + dependency.id)) {
+    records.set('dependency:' + dependency.id, () => {
       let bytes = this.encodedDependencies.get(dependency);
       if (!bytes) {
         bytes = encode(dependencyValue);
         this.encodedDependencies.set(dependency, bytes);
       }
-      this.store?.set('dependency:' + dependency.id, bytes);
-    }
-    const dependencyRecords = [...required];
-    const model = artifact.model;
+      return bytes;
+    });
+    const dependencyRecords = [...records.keys()];
     const value: StoredArtifact = {
       ...artifact,
       dependencies: dependency.id,
       resources: await resources(artifact.resources),
-      model: storedModel(model),
+      model: storedModel(artifact.model),
     };
-    if (!this.store?.touch('model:' + artifact.id))
-      this.store?.set('model:' + artifact.id, encode(value));
-    required.add('model:' + artifact.id);
-    this.requiredRecords.set(artifact, [...required]);
+    records.set('model:' + artifact.id, () => encode(value));
+    const required = [...records.keys()];
+    const present = this.store?.touchMany(required);
+    [...records].forEach(([id, bytes], index) => {
+      if (!present?.[index]) this.store?.set(id, bytes());
+    });
+    this.requiredRecords.set(artifact, required);
     // Cancellation preserves completed content-addressed records, never advances latest.
     checkCancelled();
     if (dependencyKey)
@@ -346,8 +347,7 @@ export class BuildArtifactCache {
         stamp,
         dependencyRecords,
       );
-    const index = kind + ':' + key;
-    this.publishPointer(index, artifact.id, stamp, [...required]);
+    this.publishPointer(kind + ':' + key, artifact.id, stamp, required);
   }
 
   private publishPointer(
@@ -379,8 +379,8 @@ export class BuildArtifactCache {
       2 *
         (artifact.model.source.length +
           artifact.dependencies.source.length +
-          artifact.language.files.reduce(
-            (size, file) => size + file.source.length,
+          [...artifact.model.files.values()].reduce(
+            (size, source) => size + source.length,
             0,
           )) +
       artifact.dependencies.wasm.byteLength +

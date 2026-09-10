@@ -15,7 +15,7 @@ import {
   type ModelExportOptions,
 } from './model-export';
 import {ModuleEvaluator} from './module-evaluator';
-import type {ProjectExecutionArtifact} from './project-compiler';
+import type {ProjectBuildArtifact} from './project-compiler';
 import {ProjectRuntime} from './project-runtime';
 import {
   previewSketchDrag,
@@ -31,7 +31,7 @@ export class ProjectExecutor {
   private executor?: ReturnType<typeof createModelExecutor>;
   private geometry?: ModelGeometrySnapshot;
   private snapshotPool?: SnapshotWorkerPool;
-  private resourceStats?: ProjectExecutionArtifact['resourceStats'];
+  private resourceStats?: ProjectBuildArtifact['resourceStats'];
   constructor(
     private readonly evaluator = new ModuleEvaluator(),
     private readonly snapshotOptions?: SnapshotPoolOptions,
@@ -39,7 +39,7 @@ export class ProjectExecutor {
   ) {}
 
   async execute(
-    artifact: ProjectExecutionArtifact,
+    artifact: ProjectBuildArtifact,
     onProgress?: CompilationProgress,
     checkCancelled: () => void = () => {},
   ): Promise<ModelModule> {

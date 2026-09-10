@@ -394,7 +394,7 @@ export function createModelCompiler() {
       edgeSelectionSites: new Map(edgeSelectionSites),
       toolCallSites: new Map(toolCallSites),
       relationCallSites: new Map(relationCallSites),
-      sketches: sketchSourceSites(tooling.program),
+      sketches: sketchSourceSites(tooling.program, files),
     };
   }
   function parseDesignArgumentContexts(
