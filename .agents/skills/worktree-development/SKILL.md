@@ -61,15 +61,26 @@ worktree 使用 `3133`；协调脚本即使收到包含 `3133` 的自定义范�
 PORT="$(python3 "$COORDINATOR" --repo "$WORKTREE" reserve-port)"
 ```
 
-在 Herdr 中先确认 `HERDR_ENV=1`，再用 `herdr pane current --current` 取得当前 IDs。为服务器在当前 pane 下方创建一个约占 15% 高度、cwd 指向开发 worktree 的 pane，保留用户焦点，并强制使用预留端口：
+在 Herdr 中先确认 `HERDR_ENV=1`，再用 `herdr pane current --current` 取得当前 workspace、tab 和 pane IDs。当前 tab 的全部 pane 归当前 session 管理，包括此前创建的 pane；这个范围不扩展到其他 tab。
+
+启动任何前台任务前，用 `herdr pane list --workspace <workspace-id>` 查看并筛选当前 tab 的已有 pane，按需用 `herdr pane process-info --pane <pane-id>` 确认进程。优先复用已有前台 pane；不再使用的进程可以直接结束或替换，不因它不是本轮创建的就保留。正在承载本会话的 agent pane、仍在使用的任务和供验收的开发服务器继续保留。
+
+只有没有可复用的 pane 时，才在当前 pane 下方新建一个约占 15% 高度、cwd 指向开发 worktree 的 pane，并保留用户焦点：
 
 ```bash
 herdr pane split --current --direction down --ratio 0.85 --cwd "$WORKTREE" --no-focus
-herdr pane run <pane-id> "npm run dev --workspace @code3d/app -- --host 127.0.0.1 --port $PORT --strictPort"
+```
+
+`--ratio 0.85` 为原 pane 保留约 85% 高度，新的下方 pane 使用余下空间。从查询或创建结果读取实际 pane ID，不能猜测。无论复用还是新建，都显式切到开发 worktree，并强制使用预留端口：
+
+```bash
+herdr pane run <pane-id> "cd \"$WORKTREE\" && npm run dev --workspace @code3d/app -- --host 127.0.0.1 --port $PORT --strictPort"
 herdr pane wait-output <pane-id> --match "Local:" --timeout 120000
 ```
 
-`--ratio 0.85` 为原 pane 保留约 85% 高度，新的下方 pane 使用余下空间。从 JSON 响应读取 pane ID，不能猜测。确认 Vite 已监听后运行 `server-started --port "$PORT" --pane-id <pane-id> --command '<command>'`。启动失败或服务器自行停止后运行 `server-stopped`。
+确认 Vite 已监听后运行 `server-started --port "$PORT" --pane-id <pane-id> --command '<command>'`。停止或替换已登记的服务器时，确认旧进程结束后运行 `server-stopped`，再登记新的服务；启动失败或服务器自行停止后同样更新状态。
+
+前台任务结束且不再需要该 pane 时，确认进程已退出，再用 `herdr pane close <pane-id>` 关闭它；不要留下已停止任务的空 pane。立即在同一 pane 运行替代任务时直接复用，不必先关闭再新建。开发服务器仍遵循下面的验收保留规则。
 
 实现完成、测试通过、提交、排队和等待用户验收都不是主动停止开发服务器或关闭其 pane 的理由。除非用户明确要求停止，否则必须保留开发服务器及其 pane，直到改动已按要求成功合并进主 worktree；合并前不得发送中断、关闭 pane 或调用 `server-stopped`。如果不在 Herdr 中，不伪造 Herdr ID；可启动受控后台进程并记录 PID，同样遵循这项生命周期约束。
 
@@ -131,4 +142,4 @@ subagent 从完整继承的会话中核对用户原始指令和已有授权；�
 
 ## 收尾
 
-改动按要求成功集成进主 worktree 后，可以停止开发服务器并运行 `server-stopped`，再运行 `finish` 把开发 agent 标记为完成。只有确认分支已集成、worktree clean 且没有进程使用它后，才执行 `git worktree remove <path>`；删除分支也必须属于用户明确要求。协调记录保留已完成队列项，作为本地会话与集成历史。
+改动按要求成功集成进主 worktree 后，可以停止开发服务器并运行 `server-stopped`；确认进程退出后，关闭不再使用的前台 pane，再运行 `finish` 把开发 agent 标记为完成。立即用于其他前台任务的 pane 继续复用。只有确认分支已集成、worktree clean 且没有进程使用它后，才执行 `git worktree remove <path>`；删除分支也必须属于用户明确要求。协调记录保留已完成队列项，作为本地会话与集成历史。
