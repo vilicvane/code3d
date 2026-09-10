@@ -698,6 +698,27 @@ are tracked separately in [#84](https://github.com/vilicvane/code3d/issues/84).
   changes stop navigation inertia without changing model selection or source.
   Picking, fixed-pixel decorations, transform controls, resize and image export
   use the active native Three.js camera. See [#103](https://github.com/vilicvane/code3d/issues/103).
+- The 3D work-plane grid shares the sketch's 1/2/5 subdivision calculation,
+  with minor cells spanning 8–20 CSS pixels at the observation center. Only the
+  current subdivision is drawn, with every fifth line emphasized; subdivision
+  changes replace the grid without mixing incompatible spacings. The displayed
+  spacing matches the cells. Projected lines fade before becoming too dense.
+  Perspective uses XZ; orthographic views use the best-facing principal plane
+  (±X → YZ, ±Y → XZ, ±Z → XY). Its origin and orientation follow the same world
+  or selected occurrence frame as the coordinate indicator, without instance scale.
+  Center lines use the colors of the physical axes they run along. A subtle,
+  unboxed bottom-left legend highlights the first minor cell within a muted
+  five-cell major interval, followed by the highlighted cell's distance in
+  `unit`. Its length is fixed:
+  it explains grid subdivisions rather than implying a uniform perspective
+  screen scale. Zoom changes its value with the grid step. It shares the viewport
+  inset and leaves the coordinate indicator and agent preview in their existing
+  layout; empty, sketch and Render views hide it. A procedural
+  plane removes fixed bounds, preserves depth occlusion, and reduces periodic
+  coordinates before GPU upload to retain precision after large pans. Image
+  capture uses its own camera and resolution and restores the live grid afterward;
+  Render mode hides it. Tool snapping is a separate follow-up.
+  See [#109](https://github.com/vilicvane/code3d/issues/109).
 - Viewport occurrence selection leaves the focused geometry's materials
   unchanged; source context dimming carries the primary focus contrast. A
   passive one-pixel screen-space corner bound marks only groups and other

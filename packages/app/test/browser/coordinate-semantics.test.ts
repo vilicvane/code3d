@@ -612,13 +612,11 @@ async function vertexState(page: Page) {
     selection.guide.updateWorldMatrix(true, true);
     camera.updateWorldMatrix(true, false);
     const output = occurrence.node.mesh!;
-    const grid = viewport['scene'].children.find(
-      child => child.type === 'GridHelper',
-    )!;
+    const grid = viewport['rendering'].grid;
     return {
       source: codeEditor.editor.getValue(),
       origin: occurrence.node.origin,
-      gridOrigin: grid.getWorldPosition(grid.position.clone()).toArray(),
+      gridOrigin: grid['origin'].toArray(),
       vertices: selection.mesh.vertexIds.map((id, i) => {
         const candidate = selection.guide.position
           .clone()

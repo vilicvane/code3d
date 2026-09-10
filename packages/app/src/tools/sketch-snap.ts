@@ -38,14 +38,6 @@ export function sketchDistance(a: SketchPosition, b: SketchPosition): number {
   return Math.hypot(a[0] - b[0], a[1] - b[1]);
 }
 
-export function sketchGridStep(scale: number): number {
-  // 1/2/5 subdivisions keep minor grid lines 8–20 screen pixels apart at every
-  // zoom level, without the large jumps caused by rounding to whole decades.
-  const minimum = 8 / scale;
-  const decade = 10 ** Math.floor(Math.log10(minimum));
-  return [1, 2, 5, 10].find(value => value * decade >= minimum)! * decade;
-}
-
 function polarPoint(
   origin: SketchPosition,
   length: number,

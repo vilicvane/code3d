@@ -1,3 +1,4 @@
+import {AdaptiveGrid} from './adaptive-grid';
 import * as THREE from 'three';
 import {createModelMaterial, disposeModelMaterial} from './model-material';
 import {orientImageCamera, type ImageView} from './image-camera';
@@ -63,6 +64,8 @@ export class ModelRenderer {
   readonly scene = new THREE.Scene();
   camera: ViewCamera = createViewCamera('perspective', 1);
   readonly renderer: THREE.WebGLRenderer;
+  readonly grid: AdaptiveGrid;
+  private readonly renderSize = new THREE.Vector2();
 
   constructor(private readonly container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({
@@ -89,7 +92,8 @@ export class ModelRenderer {
     rim.position.set(-80, 55, -65);
     this.scene.add(rim);
 
-    this.scene.add(modelingHelper(createGrid(this.scene.background)));
+    this.grid = modelingHelper(new AdaptiveGrid(this.scene.background));
+    this.scene.add(this.grid);
 
     this.camera.position.set(105, 82, 120);
     this.resize();
@@ -125,6 +129,7 @@ export class ModelRenderer {
   }
 
   updateCameraRange(cameraTarget: THREE.Vector3, viewDistance: number): void {
+    this.grid.focus.copy(cameraTarget);
     const distance = this.camera.position.distanceTo(cameraTarget);
     const shift = distance - viewDistance;
     const near = Math.max(Number.EPSILON, shift + viewDistance / 1000);
@@ -148,8 +153,16 @@ export class ModelRenderer {
 
   private renderScene(
     renderer: THREE.WebGLRenderer,
-    camera: THREE.Camera,
+    camera: ViewCamera,
+    focus = this.grid.focus,
   ): void {
+    renderer.getSize(this.renderSize);
+    this.grid.update(
+      camera,
+      this.renderSize.y,
+      renderer.getPixelRatio(),
+      focus,
+    );
     if (this.mode === 'modeling') {
       renderer.render(this.scene, camera);
       return;
@@ -215,7 +228,20 @@ export class ModelRenderer {
     if (framing) orientImageCamera(camera, framing.bounds, framing.view);
     camera.updateProjectionMatrix();
     beforeRender?.(camera, width, height);
-    this.renderScene(renderer, camera);
+    try {
+      this.renderScene(
+        renderer,
+        camera,
+        framing?.bounds.getCenter(new THREE.Vector3()),
+      );
+    } finally {
+      this.renderer.getSize(this.renderSize);
+      this.grid.update(
+        this.camera,
+        this.renderSize.y,
+        this.renderer.getPixelRatio(),
+      );
+    }
 
     const image = await new Promise<Blob | null>(resolve =>
       canvas.toBlob(resolve, 'image/png'),
@@ -225,23 +251,6 @@ export class ModelRenderer {
     if (!image) throw new Error('The browser could not encode the PNG image.');
     return image;
   }
-}
-
-function createGrid(background: THREE.Color): THREE.GridHelper {
-  const color = background.clone().convertLinearToSRGB();
-  color.setRGB(1 - color.r, 1 - color.g, 1 - color.b, THREE.SRGBColorSpace);
-
-  const grid = new THREE.GridHelper(360, 36);
-  const positions = grid.geometry.getAttribute('position');
-  const colors = new THREE.Float32BufferAttribute(positions.count * 4, 4);
-  for (let index = 0; index < positions.count; index++) {
-    const center = positions.getX(index) === 0 || positions.getZ(index) === 0;
-    colors.setXYZW(index, color.r, color.g, color.b, center ? 0.2 : 0.08);
-  }
-  grid.geometry.setAttribute('color', colors);
-  grid.material.transparent = true;
-  grid.material.depthWrite = false;
-  return grid;
 }
 
 function configureRenderer(

@@ -3,7 +3,7 @@ import {test} from 'node:test';
 import type {Page} from 'playwright-core';
 import {open, point, text, waitForSource} from './sketch-test.ts';
 import {trimmedArcSketchArguments} from '../sketch-fixtures.ts';
-import {sketchGridStep} from '../../src/tools/sketch-snap.ts';
+import {gridStep} from '../../src/grid-scale.ts';
 
 const center = async (page: Page, id: number, layer = 'local') => {
   const box = (await point(page, id, layer).boundingBox())!;
@@ -48,7 +48,7 @@ test('returning a trimmed arc endpoint writes exact opposite coordinates and und
   const start = await center(page, 15),
     origin = await center(page, 10);
   const unit = (start.x - origin.x) / 7.5;
-  assert.equal(sketchGridStep(unit), 0.5);
+  assert.equal(gridStep(unit), 0.5);
   for (const x of [10, 7.5]) {
     const current = await center(page, 15);
     await page.mouse.move(current.x, current.y);

@@ -1028,3 +1028,110 @@ async function zoomUntil(
 function near(actual: number, expected: number) {
   assert.ok(Math.abs(actual - expected) < 1e-6, `${actual} != ${expected}`);
 }
+
+test(
+  'adaptive work-plane grids follow all six local axis views, scale, pan and render mode',
+  {timeout: 120_000},
+  async t => {
+    const {page, errors} = await openNavigationPage(t);
+    await setSource(
+      page,
+      "import {box} from '@code3d/core'; export default box(24, 6, 14);",
+    );
+    const state = () =>
+      page.evaluate(() => {
+        const viewport = window.navigationApp.viewport;
+        const grid = viewport['rendering'].grid;
+        return {
+          plane: grid.plane,
+          step: grid.step,
+        };
+      });
+    // The same selected occurrence drives both the indicator and grid, including
+    // instance placement and live transform previews.
+    await page.evaluate(() => {
+      const viewport = window.navigationApp.viewport;
+      const target = viewport['occurrences'].get(
+        viewport['selectedKey'],
+      )!.object;
+      target.position.set(12, -4, 7);
+      target.quaternion.setFromAxisAngle(
+        target.position.clone().set(0, 1, 0),
+        Math.PI / 5,
+      );
+      viewport['coordinateReference']!.update();
+    });
+    for (const [axis, plane] of [
+      ['x', 'YZ'],
+      ['y', 'XZ'],
+      ['z', 'XY'],
+    ] as const) {
+      for (const sign of ['positive', 'negative']) {
+        await page
+          .locator(
+            `.viewport-coordinate-axis[data-axis="${axis}"][data-direction="${sign}"]`,
+          )
+          .dispatchEvent('click', {detail: 1});
+        await page.waitForFunction(
+          () => !window.navigationApp.viewport['controls']['transition'],
+        );
+        assert.equal((await state()).plane, plane);
+      }
+    }
+    for (const span of [0.002, 0.2, 20, 2000, 2e6]) {
+      const result = await page.evaluate(async span => {
+        const viewport = window.navigationApp.viewport;
+        const controls = viewport['controls'];
+        const pose = controls.capturePose();
+        controls.restorePose({
+          ...pose,
+          distance: span * 2,
+          viewHeight: span,
+          focus: pose.focus.set(1000, 2000, 3000),
+        });
+        await new Promise<void>(resolve =>
+          requestAnimationFrame(() => resolve()),
+        );
+        const grid = viewport['rendering'].grid;
+        const canvas = viewport['renderer'].domElement;
+        const label = document.querySelector(
+          '.viewport-grid-scale-value',
+        )!.textContent!;
+        const distance = Number(label.split(' ')[0]);
+        return {
+          label,
+          distance,
+          barWidth: document
+            .querySelector('.viewport-grid-scale-bar')!
+            .getBoundingClientRect().width,
+          step: grid.step,
+          scale: canvas.clientHeight / span,
+          focus: grid.focus.toArray(),
+        };
+      }, span);
+      assert.ok(
+        result.step * result.scale >= 8 - 1e-8 &&
+          result.step * result.scale <= 20 + 1e-8,
+      );
+      assert.deepEqual(result.focus, [1000, 2000, 3000]);
+      assert.ok(result.label.endsWith(' unit'));
+      assert.ok(Math.abs(result.distance / result.step - 1) < 1e-8);
+      assert.equal(result.barWidth, 60);
+    }
+    await rotate(page);
+    assert.equal((await state()).plane, 'XZ');
+    await page.evaluate(() =>
+      window.navigationApp.viewport.setRenderMode('render'),
+    );
+    assert.equal(
+      await page.locator('.viewport-coordinate-reference').isVisible(),
+      false,
+    );
+    assert.equal(await page.locator('.viewport-grid-scale').isVisible(), false);
+    await page.evaluate(() =>
+      window.navigationApp.viewport.setRenderMode('modeling'),
+    );
+    assert.equal(await page.locator('.viewport-grid-scale').isVisible(), true);
+    assert.deepEqual(errors, []);
+  },
+);

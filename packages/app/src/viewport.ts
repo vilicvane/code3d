@@ -64,6 +64,7 @@ import {
 } from './tools/model-spatial-tool';
 import type {SpatialObjectPreview} from './tools/spatial-edit';
 import {ViewportCoordinateReference} from './ui/viewport-coordinate-reference';
+import {ViewportGridScale} from './ui/viewport-grid-scale';
 import {pickScreenTopology} from './rendering/topology-picking';
 import {boundAppearance} from './rendering/bound-appearance';
 import {
@@ -304,6 +305,7 @@ export class ModelViewport {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly controls: ViewportNavigation;
   private readonly coordinateReference?: ViewportCoordinateReference;
+  private readonly gridScale: ViewportGridScale;
   private readonly animateViewChanges: boolean;
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointer = new THREE.Vector2();
@@ -384,6 +386,7 @@ export class ModelViewport {
     this.onTopologySelection = onTopologySelection;
     this.sourceDecorationProviders = sourceDecorationProviders;
     this.rendering = new ModelRenderer(this.container);
+    this.gridScale = new ViewportGridScale(this.container);
     this.scene = this.rendering.scene;
     this.renderer = this.rendering.renderer;
     this.scene.add(this.root, this.decorationRoot);
@@ -461,6 +464,7 @@ export class ModelViewport {
     this.topologyPointer = undefined;
     this.updateTopologyHover(undefined);
     this.coordinateReference?.setVisible(mode === 'modeling');
+    this.gridScale.setVisible(mode === 'modeling');
     this.updateTransformGizmo();
     this.rendering.renderFrame();
     this.onRenderModeChange?.(mode);
@@ -1530,6 +1534,7 @@ export class ModelViewport {
     }
     this.transformGizmo.detach();
     this.coordinateReference?.setTarget(undefined);
+    this.rendering.grid.target = undefined;
     this.clearImpactHighlights();
     this.clearAllDecorations();
     this.disposeRoot();
@@ -1557,6 +1562,7 @@ export class ModelViewport {
     }
     this.selectedKey = key;
     this.coordinateReference?.setTarget(occurrence.object);
+    this.rendering.grid.target = occurrence.object;
     this.rebuildSelectionHighlight();
     this.rebuildImpactHighlights();
     this.updateDecorationVisibilities();
@@ -2098,6 +2104,7 @@ export class ModelViewport {
         this.renderer.domElement.clientHeight,
       );
     });
+    this.gridScale.update(this.rendering.grid.step);
   };
 
   private rebuildImpactHighlights(): void {

@@ -1,3 +1,4 @@
+import {gridStep} from '../grid-scale';
 import type {
   SketchPointAddress,
   SketchPosition,
@@ -36,7 +37,6 @@ import {
   endpointPosition,
   sameSketchPoint as same,
   sketchDistance as distance,
-  sketchGridStep,
   snapSketchPointer,
   type SketchPoint as Point,
 } from '../tools/sketch-snap';
@@ -510,7 +510,7 @@ export class SketchEditor {
     return {
       points: this.points().reverse(),
       scale: this.scale,
-      gridStep: sketchGridStep(this.scale),
+      gridStep: gridStep(this.scale),
       enabled: this.snapping && !this.bypassSnap,
     };
   }
@@ -1067,7 +1067,7 @@ export class SketchEditor {
     }
     const width = this.svg.clientWidth,
       height = this.svg.clientHeight;
-    const step = sketchGridStep(this.scale);
+    const step = gridStep(this.scale);
     const [originX, originY] = this.screen([0, 0]);
     const spacing = step * this.scale;
     for (
