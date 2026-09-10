@@ -1,12 +1,18 @@
 # OndselSolver WASM 验证
 
+> 固定研究记录：实验及追加调查发生于 2026-09-05 至 2026-09-08，原文来自
+> [整理前的已推送提交](https://github.com/vilicvane/code3d/blob/933c3b5ec745e68dada4db42ecab8b6a0482ea2a/plans/constraint-solver-wasm-evaluation.md)。
+> 下文“当前”“后续”“接入建议”均指记录时的状态，不作为现行开发契约；
+> 当前实现参见[草图架构](../docs/architecture/sketch.md)和[建模内核](../docs/architecture/modeling.md)。
+> 保留原环境、数据及失败原因，不随产品版本更新历史测量。
+
 实验日期：2026-09-05，来自 [#9](https://github.com/vilicvane/code3d/issues/9)
 的部分约束讨论。本文保留接入前的实验环境、结果与建议。
 
 后续 [#21](https://github.com/vilicvane/code3d/issues/21) 已完成正式接入，随
 `fd78d09` 合并并推送。当前实现与构建方式见
-[`@code3d/solver`](../packages/solver/README.md)，作者语义见
-[Core 的几何关系说明](../packages/core/README.md#geometric-relations)。
+[`@code3d/solver`](../../packages/solver/README.md)，作者语义见
+[Core 的几何关系说明](../docs/architecture/modeling.md#坐标组合与关系)。
 下文“没有替换求解器”“接入建议”等表述只描述当时的独立实验。
 
 ## 结论与范围

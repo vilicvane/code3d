@@ -1,5 +1,11 @@
 # 二维草图求解器技术验证
 
+> 固定研究记录：实验及追加调查发生于 2026-09-05 至 2026-09-08，原文来自
+> [整理前的已推送提交](https://github.com/vilicvane/code3d/blob/933c3b5ec745e68dada4db42ecab8b6a0482ea2a/plans/sketch-solver-evaluation.md)。
+> 下文“当前”“后续”“接入建议”均指记录时的状态，不作为现行开发契约；
+> 当前实现参见[草图架构](../docs/architecture/sketch.md)和[建模内核](../docs/architecture/modeling.md)。
+> 保留原环境、数据及失败原因，不随产品版本更新历史测量。
+
 日期：2026-09-06；关联 [#23](https://github.com/vilicvane/code3d/issues/23)。
 用户批准先验证约束矩形、圆、拖动、尺寸和冲突，再讨论公开表示。
 本文前半部分保留当时独立实验的结论与边界；后续产品接入见末节。
@@ -113,7 +119,7 @@ Chrome 中这批 40 步小矩形拖动的中位数约为 Ondsel 2.6 ms、PlaneGC
 用户确认几何当前数据与独立约束后，正式采用固定版本
 `@salusoft89/planegcs@1.2.0` 的未修改 JS/WASM 产物，直接使用 `GcsSystem`，
 不采用第三方 JSON 模型或 `GcsWrapper`。来源与许可原文位置见
-[core 第三方说明](../packages/core/THIRD_PARTY.md)；未声称已完成自行重建产物。
+[core 第三方说明](../../packages/core/THIRD_PARTY.md)；未声称已完成自行重建产物。
 
 - App 的项目包运行时和 Node 入口加载同一草图求解器。
 - 作者格式为 `sketch(entries, {constraints})` / `base.derive(entries, {constraints})`，

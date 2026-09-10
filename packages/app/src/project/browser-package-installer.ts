@@ -16,6 +16,7 @@ import {extractNpmArchive, NpmRegistry} from './npm-registry';
 import {resolveBrowserPackages} from './jspm-package-resolver';
 import {mapProjectIO} from './io';
 import {PackageInstallationTransaction} from './package-installation-transaction';
+import {workspaceSignature, type WorkspacePackages} from './workspace-packages';
 
 const pathAt = (directory: string, path: string) =>
   normalizeProjectPath(directory + '/' + path);
@@ -26,6 +27,7 @@ const packagePath = (lock: BrowserPackageLock, url: string) => {
     pkg.name.replace('/', '+') +
     '@' +
     pkg.version +
+    ('workspace' in pkg ? '+workspace.' + pkg.workspace : '') +
     '/node_modules/' +
     pkg.name
   );
@@ -55,6 +57,7 @@ export class BrowserPackageInstaller {
   constructor(
     private readonly files: BrowserProjectFileSystem,
     private readonly createRegistry = () => new NpmRegistry(),
+    private readonly workspaces: WorkspacePackages = {},
   ) {}
 
   async install(
@@ -102,6 +105,13 @@ export class BrowserPackageInstaller {
     const registry = this.createRegistry();
     if (
       !lock ||
+      (lock.workspace ?? '[]') !== workspaceSignature(this.workspaces) ||
+      Object.values(lock.packages).some(
+        pkg =>
+          'workspace' in pkg &&
+          (this.workspaces[pkg.name]?.revision !== pkg.workspace ||
+            this.workspaces[pkg.name]?.manifest.version !== pkg.version),
+      ) ||
       dependencySignature({
         dependencies: lock.dependencies,
         optionalDependencies: Object.fromEntries(
@@ -109,7 +119,13 @@ export class BrowserPackageInstaller {
         ),
       }) !== dependencySignature(manifest)
     )
-      lock = await resolveBrowserPackages(manifest, registry, lock, progress);
+      lock = await resolveBrowserPackages(
+        manifest,
+        registry,
+        lock,
+        progress,
+        this.workspaces,
+      );
     const serialized = JSON.stringify(lock, null, 2) + '\n';
     const nextMarker = installationMarker(lock);
     const marker = await this.files.readFile(
@@ -128,6 +144,31 @@ export class BrowserPackageInstaller {
         await mapProjectIO(
           Object.entries(lock.packages),
           async ([url, pkg]) => {
+            if ('workspace' in pkg) {
+              progress(`Loading workspace ${pkg.name}@${pkg.version}`);
+              const local = this.workspaces[pkg.name];
+              const destination = staged + '/' + packagePath(lock!, url);
+              await (extracting = extracting.then(async () => {
+                await mapProjectIO(
+                  Object.entries(local.files),
+                  async ([path, asset]) => {
+                    const response = await fetch(asset.url, {
+                      signal: AbortSignal.timeout(30_000),
+                    });
+                    if (!response.ok)
+                      throw new Error(
+                        `Unable to load workspace file: ${pkg.name}/${path}`,
+                      );
+                    await this.files.writeFile(
+                      destination + '/' + path,
+                      new Uint8Array(await response.arrayBuffer()),
+                    );
+                  },
+                  {concurrency: 15},
+                );
+              }));
+              return;
+            }
             progress(`Downloading ${pkg.name}@${pkg.version}`);
             const archive = await registry.archive(pkg);
             // Overlap downloads with one extractor, bounding queued archives to
