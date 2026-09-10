@@ -251,6 +251,7 @@ input[type='number']::-webkit-outer-spin-button {
   height: 12px;
   margin-left: 1px;
   color: var(--agent-color);
+  fill: currentColor;
 }
 
 .agent-badge-dot {
@@ -278,13 +279,38 @@ input[type='number']::-webkit-outer-spin-button {
 }
 
 .project-location {
-  max-width: 180px;
+  min-width: 0;
+  padding: 3px 0;
   overflow: hidden;
-  color: #72786d;
+  color: #969e8d;
+  border: 0;
+  background: transparent;
   font-family: 'IBM Plex Mono', monospace;
   font-size: 9px;
+  text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: pointer;
+}
+
+.project-location:enabled:hover {
+  color: #dfe2d8;
+}
+
+.project-location:focus-visible {
+  outline: 1px solid var(--editor-focus);
+  outline-offset: 2px;
+}
+
+.project-location:enabled::after {
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  margin: 0 2px 2px 7px;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  transform: rotate(45deg);
+  content: '';
 }
 
 .project-location::before {
@@ -300,6 +326,10 @@ input[type='number']::-webkit-outer-spin-button {
 
 .project-location[data-kind='browser']::before {
   background: #666b62;
+}
+
+.project-location:disabled {
+  cursor: default;
 }
 
 .quiet-button {
@@ -424,6 +454,7 @@ kbd {
   display: grid;
   grid-column: 1;
   grid-row: 1;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: 30px minmax(0, 1fr) auto;
   width: var(--project-explorer-width);
   min-width: 0;
@@ -500,21 +531,19 @@ kbd {
 }
 
 @container (max-width: 170px) {
-  .project-explorer > header > span {
-    display: none;
-  }
-}
-
-@container (max-width: 126px) {
-  #search-files-button {
-    display: none;
+  .project-explorer > header {
+    gap: 2px;
+    padding-inline: 4px;
   }
 }
 
 .project-context-menu {
-  z-index: 30;
-  min-width: 204px;
+  position: fixed;
+  z-index: 100;
+  min-width: min(204px, calc(100vw - 16px));
   max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 16px);
+  overflow: auto;
   padding: 4px;
   color: #c9cdc2;
   border: 1px solid #363c2f;
@@ -578,9 +607,14 @@ kbd {
   cursor: default;
 }
 
-.project-root-menu {
-  position: fixed;
-  z-index: 100;
+.project-storage-menu {
+  inset: auto;
+  margin: 0;
+  letter-spacing: normal;
+}
+
+.project-storage-menu [hidden] {
+  display: none;
 }
 
 .project-tree {
@@ -633,8 +667,15 @@ kbd {
 }
 
 .package-status {
+  min-width: 0;
   color: var(--muted);
   flex-shrink: 0;
+}
+
+.package-status > div {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .package-status-directory {
@@ -1305,12 +1346,13 @@ kbd {
   letter-spacing: 0.01em;
 }
 
-.viewport-host[data-empty='true'] .viewport-canvas,
-.viewport-host[data-empty='true'] .viewport-coordinate-reference {
+.viewport-host[data-empty='true'] .viewport-canvas {
   visibility: hidden;
 }
 
 .viewport-host[data-empty='true'] .viewport-mode,
+.viewport-host[data-empty='true'] .viewport-coordinate-reference,
+.viewport-host[data-empty='true'] .viewport-grid-scale,
 .viewport-host[data-empty='true'] .viewport-dock-panels,
 .viewport-host[data-empty='true'] .contextual-tool-panel {
   display: none;
@@ -1339,6 +1381,42 @@ kbd {
   height: var(--viewport-coordinate-size);
   overflow: visible;
   filter: drop-shadow(0 4px 12px #0008);
+}
+
+.viewport-grid-scale {
+  order: -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #f1f8e1;
+  font:
+    400 11px/1.4 'IBM Plex Mono',
+    monospace;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  user-select: none;
+  pointer-events: none;
+}
+
+.viewport-grid-scale[hidden] {
+  display: none;
+}
+
+.viewport-grid-scale-bar {
+  display: block;
+  overflow: visible;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1px;
+}
+
+.viewport-grid-scale-cell,
+.viewport-grid-scale-value {
+  opacity: 0.5;
+}
+
+.viewport-grid-scale-remainder {
+  opacity: 0.25;
 }
 
 .viewport-coordinate-backplate {
@@ -1680,6 +1758,12 @@ kbd {
 
 .sketch-editor[hidden] {
   display: none;
+}
+.sketch-context-edge {
+  stroke: #a1aa9d;
+  stroke-opacity: 0.28;
+  stroke-width: 1px;
+  pointer-events: none;
 }
 #viewport-host:has(.sketch-editor:not([hidden]))
   .viewport-coordinate-reference {
@@ -2219,6 +2303,10 @@ kbd {
 
 .viewport-feedback-stack > * {
   pointer-events: auto;
+}
+
+.viewport-feedback-stack > .viewport-grid-scale {
+  pointer-events: none;
 }
 
 .viewport-diagnostic-stack {
@@ -2945,6 +3033,49 @@ kbd {
 
 .agent-dialog {
   width: 680px;
+}
+
+.agent-create-form {
+  display: grid;
+  grid-template-rows: 1fr;
+}
+
+.agent-create-content {
+  display: grid;
+  min-height: 0;
+  gap: 20px;
+}
+
+.agent-create-revealing > .agent-create-content {
+  overflow: clip;
+}
+
+.agent-name-field {
+  position: relative;
+  min-width: 0;
+}
+
+.agent-name-who {
+  position: absolute;
+  right: 9px;
+  bottom: 8px;
+  color: #858d77;
+  border-radius: 2px;
+  text-decoration: none;
+  font:
+    500 10px/1.4 'IBM Plex Mono',
+    monospace;
+}
+
+.agent-name-who:hover {
+  color: #dfe5ca;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.agent-name-who:focus-visible {
+  outline: 1px solid currentColor;
+  outline-offset: 3px;
 }
 
 .agent-header-title {

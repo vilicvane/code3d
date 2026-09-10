@@ -1,6 +1,14 @@
+import {AdaptiveGrid} from './adaptive-grid';
 import * as THREE from 'three';
 import {createModelMaterial, disposeModelMaterial} from './model-material';
 import {orientImageCamera, type ImageView} from './image-camera';
+import {
+  createViewCamera,
+  frameCameraBounds,
+  resizeViewCamera,
+  type CameraFraming,
+  type ViewCamera,
+} from './view-camera';
 import type {
   ModelSnapshotObject,
   RenderMesh,
@@ -51,16 +59,13 @@ function withRenderMaterial<T extends ModelPrimitive>(
   return object;
 }
 
-export type CameraFraming = Readonly<{
-  focus: THREE.Vector3;
-  distance: number;
-}>;
-
 export class ModelRenderer {
   mode: ModelRenderMode = 'modeling';
   readonly scene = new THREE.Scene();
-  readonly camera = new THREE.PerspectiveCamera(42, 1, 0.1, 2000);
+  camera: ViewCamera = createViewCamera('perspective', 1);
   readonly renderer: THREE.WebGLRenderer;
+  readonly grid: AdaptiveGrid;
+  private readonly renderSize = new THREE.Vector2();
 
   constructor(private readonly container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({
@@ -87,7 +92,8 @@ export class ModelRenderer {
     rim.position.set(-80, 55, -65);
     this.scene.add(rim);
 
-    this.scene.add(modelingHelper(createGrid(this.scene.background)));
+    this.grid = modelingHelper(new AdaptiveGrid(this.scene.background));
+    this.scene.add(this.grid);
 
     this.camera.position.set(105, 82, 120);
     this.resize();
@@ -99,20 +105,18 @@ export class ModelRenderer {
     if (width === 0 || height === 0) return;
 
     this.renderer.setSize(width, height, false);
-    this.camera.aspect = width / height;
-    this.camera.updateProjectionMatrix();
+    resizeViewCamera(this.camera, width / height);
   }
 
   framing(
     target: THREE.Object3D,
-    currentDistance: number,
+    camera: ViewCamera,
     additional?: Readonly<{bounds: THREE.Box3; paddingPixels: number}>,
   ): CameraFraming | undefined {
     const box = new THREE.Box3().setFromObject(target);
     if (additional) box.union(additional.bounds);
     if (box.isEmpty()) return;
 
-    const sphere = box.getBoundingSphere(new THREE.Sphere());
     const availableFraction = additional
       ? Math.max(
           0.25,
@@ -121,24 +125,15 @@ export class ModelRenderer {
               Math.min(this.container.clientWidth, this.container.clientHeight),
         )
       : 1;
-    const verticalHalfFov =
-      THREE.MathUtils.degToRad(this.camera.getEffectiveFOV()) / 2;
-    const halfFov = Math.min(
-      verticalHalfFov,
-      Math.atan(Math.tan(verticalHalfFov) * this.camera.aspect),
-    );
-    return {
-      focus: sphere.center,
-      distance: sphere.radius
-        ? sphere.radius / Math.sin(halfFov) / availableFraction
-        : currentDistance,
-    };
+    return frameCameraBounds(camera, box, availableFraction);
   }
 
-  updateCameraRange(cameraTarget: THREE.Vector3): void {
+  updateCameraRange(cameraTarget: THREE.Vector3, viewDistance: number): void {
+    this.grid.focus.copy(cameraTarget);
     const distance = this.camera.position.distanceTo(cameraTarget);
-    const near = distance / 1000;
-    const far = Math.max(distance * 20, 1000);
+    const shift = distance - viewDistance;
+    const near = Math.max(Number.EPSILON, shift + viewDistance / 1000);
+    const far = shift + Math.max(viewDistance * 20, 1000);
     if (near !== this.camera.near || far !== this.camera.far) {
       this.camera.near = near;
       this.camera.far = far;
@@ -146,8 +141,8 @@ export class ModelRenderer {
     }
     const fog = this.scene.fog;
     if (fog instanceof THREE.Fog) {
-      fog.near = Math.max(180, distance * 2);
-      fog.far = Math.max(430, distance * 5);
+      fog.near = shift + Math.max(180, viewDistance * 2);
+      fog.far = shift + Math.max(430, viewDistance * 5);
     }
   }
 
@@ -158,8 +153,16 @@ export class ModelRenderer {
 
   private renderScene(
     renderer: THREE.WebGLRenderer,
-    camera: THREE.Camera,
+    camera: ViewCamera,
+    focus = this.grid.focus,
   ): void {
+    renderer.getSize(this.renderSize);
+    this.grid.update(
+      camera,
+      this.renderSize.y,
+      renderer.getPixelRatio(),
+      focus,
+    );
     if (this.mode === 'modeling') {
       renderer.render(this.scene, camera);
       return;
@@ -221,11 +224,24 @@ export class ModelRenderer {
     renderer.setSize(width, height, false);
 
     const camera = this.camera.clone();
-    camera.aspect = width / height;
+    resizeViewCamera(camera, width / height);
     if (framing) orientImageCamera(camera, framing.bounds, framing.view);
     camera.updateProjectionMatrix();
     beforeRender?.(camera, width, height);
-    this.renderScene(renderer, camera);
+    try {
+      this.renderScene(
+        renderer,
+        camera,
+        framing?.bounds.getCenter(new THREE.Vector3()),
+      );
+    } finally {
+      this.renderer.getSize(this.renderSize);
+      this.grid.update(
+        this.camera,
+        this.renderSize.y,
+        this.renderer.getPixelRatio(),
+      );
+    }
 
     const image = await new Promise<Blob | null>(resolve =>
       canvas.toBlob(resolve, 'image/png'),
@@ -235,23 +251,6 @@ export class ModelRenderer {
     if (!image) throw new Error('The browser could not encode the PNG image.');
     return image;
   }
-}
-
-function createGrid(background: THREE.Color): THREE.GridHelper {
-  const color = background.clone().convertLinearToSRGB();
-  color.setRGB(1 - color.r, 1 - color.g, 1 - color.b, THREE.SRGBColorSpace);
-
-  const grid = new THREE.GridHelper(360, 36);
-  const positions = grid.geometry.getAttribute('position');
-  const colors = new THREE.Float32BufferAttribute(positions.count * 4, 4);
-  for (let index = 0; index < positions.count; index++) {
-    const center = positions.getX(index) === 0 || positions.getZ(index) === 0;
-    colors.setXYZW(index, color.r, color.g, color.b, center ? 0.2 : 0.08);
-  }
-  grid.geometry.setAttribute('color', colors);
-  grid.material.transparent = true;
-  grid.material.depthWrite = false;
-  return grid;
 }
 
 function configureRenderer(
@@ -277,7 +276,8 @@ export type ModelPlacement = 'standalone' | 'composition';
 export function createRenderedModelNode(
   node: ModelSnapshotObject,
 ): THREE.Object3D {
-  if (node.kind === 'group') return new THREE.Group();
+  if (node.kind === 'group' || node.kind === 'reference')
+    return new THREE.Group();
   if (!node.mesh) {
     throw new Error(`OpenCascade solid ${node.name} has no renderable mesh.`);
   }

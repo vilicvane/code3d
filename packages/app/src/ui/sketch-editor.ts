@@ -1,3 +1,4 @@
+import {gridStep} from '../grid-scale';
 import type {
   SketchPointAddress,
   SketchPosition,
@@ -36,7 +37,6 @@ import {
   endpointPosition,
   sameSketchPoint as same,
   sketchDistance as distance,
-  sketchGridStep,
   snapSketchPointer,
   type SketchPoint as Point,
 } from '../tools/sketch-snap';
@@ -63,6 +63,7 @@ import {
   type SketchPick,
 } from '../tools/sketch-selection';
 import {SketchConstraintTools} from './sketch-constraint-tools';
+import type {SketchContextOutline} from '../tools/sketch-context';
 
 const drawingTools = [
   ['Line', LineSegment, () => new SketchLineDrawing()],
@@ -85,6 +86,7 @@ export type SketchEditorView = Readonly<{
   constraintValues: ReadonlyMap<number, string>;
   referenceable: ReadonlySet<string>;
   readOnlyReason?: string;
+  context?: readonly SketchContextOutline[];
 }>;
 
 type Gesture =
@@ -118,6 +120,7 @@ export class SketchEditor {
   private readonly status = document.createElement('output');
   private readonly statusText = document.createTextNode('');
   private readonly grid = svgElement('g');
+  private readonly context = svgElement('g');
   private readonly regions = svgElement('g');
   private readonly lines = svgElement('g');
   private readonly vertices = svgElement('g');
@@ -165,6 +168,7 @@ export class SketchEditor {
   private bypassSnap = false;
   private center: SketchPosition = [0, 0];
   private scale = 6;
+  private gridStep?: number;
   private selection: SketchPick[] = [];
   private editError?: string;
   private gesture?: Gesture;
@@ -189,6 +193,7 @@ export class SketchEditor {
       previous?: SketchDragPreview,
       mergeTarget?: SketchPointAddress,
     ) => Promise<SketchDragPreview>,
+    private readonly onGridStepChange?: (step: number | undefined) => void,
   ) {
     this.root.className = 'sketch-editor';
     this.root.setAttribute('aria-label', 'Sketch editor');
@@ -218,10 +223,7 @@ export class SketchEditor {
         event.preventDefault();
         if (this.gesture?.kind === 'box') return;
         const before = this.coordinates(event);
-        this.scale = Math.min(
-          1000,
-          Math.max(0.05, this.scale * Math.exp(-event.deltaY * 0.001)),
-        );
+        this.scale *= Math.exp(-event.deltaY * 0.001);
         const after = this.coordinates(event);
         this.center = [
           this.center[0] + before[0] - after[0],
@@ -272,6 +274,7 @@ export class SketchEditor {
     this.snapLabel.append(this.snapText);
     this.overlay.append(this.draftMarker, this.snapLabel);
     this.svg.append(
+      this.context,
       this.grid,
       this.regions,
       this.constraints.guides,
@@ -333,6 +336,10 @@ export class SketchEditor {
     this.cancel();
     this.view = undefined;
     this.root.hidden = true;
+    if (this.gridStep !== undefined) {
+      this.gridStep = undefined;
+      this.onGridStepChange?.(undefined);
+    }
   }
 
   /** Export the same solved SVG scene, including grid and constraint labels. */
@@ -510,7 +517,7 @@ export class SketchEditor {
     return {
       points: this.points().reverse(),
       scale: this.scale,
-      gridStep: sketchGridStep(this.scale),
+      gridStep: gridStep(this.scale),
       enabled: this.snapping && !this.bypassSnap,
     };
   }
@@ -1009,6 +1016,7 @@ export class SketchEditor {
     const positions = [
       ...this.points().map(p => p.position),
       ...this.circularCurves().flatMap(c => sketchCurveBounds(c.geometry)),
+      ...(this.view?.context ?? []).flatMap(outline => outline.segments.flat()),
     ];
     if (positions.length) {
       const xs = positions.map(p => p[0]),
@@ -1018,13 +1026,10 @@ export class SketchEditor {
         minY = Math.min(...ys),
         maxY = Math.max(...ys);
       this.center = [(minX + maxX) / 2, (minY + maxY) / 2];
-      this.scale = Math.max(
-        0.05,
-        Math.min(
-          20,
-          (this.svg.clientWidth - 100) / Math.max(1, maxX - minX),
-          (this.svg.clientHeight - 100) / Math.max(1, maxY - minY),
-        ),
+      this.scale = Math.min(
+        20,
+        Math.max(1, this.svg.clientWidth - 100) / Math.max(1, maxX - minX),
+        Math.max(1, this.svg.clientHeight - 100) / Math.max(1, maxY - minY),
       );
     } else {
       this.center = [0, 0];
@@ -1045,6 +1050,17 @@ export class SketchEditor {
       String(this.gesture?.kind === 'move' && !!this.gesture.pending),
     );
     this.usedShapes.clear();
+    (this.view.context ?? []).forEach((outline, occurrence) =>
+      outline.segments.forEach(([a, b], index) =>
+        this.line(
+          this.screen(a),
+          this.screen(b),
+          'sketch-context-edge',
+          `context:${occurrence}:${outline.nodeId}:${index}`,
+          this.context,
+        ),
+      ),
+    );
     const box =
       this.gesture?.kind === 'box' && this.gesture.dragging
         ? this.gesture
@@ -1067,7 +1083,11 @@ export class SketchEditor {
     }
     const width = this.svg.clientWidth,
       height = this.svg.clientHeight;
-    const step = sketchGridStep(this.scale);
+    const step = gridStep(this.scale);
+    if (step !== this.gridStep) {
+      this.gridStep = step;
+      this.onGridStepChange?.(step);
+    }
     const [originX, originY] = this.screen([0, 0]);
     const spacing = step * this.scale;
     for (

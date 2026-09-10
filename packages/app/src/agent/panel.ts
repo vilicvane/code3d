@@ -13,7 +13,7 @@ import type {AgentProjectSession} from './project-session';
 import {agentPrompt} from './prompt';
 import {AgentPersistence} from './persistence';
 import {randomAgentColor} from './colors';
-import {randomAgentName} from './names';
+import {findAgentName, randomAgentName} from './names';
 import type {AgentRenderHistory} from './render-history';
 import {MousePointer2, UserRoundCog} from 'lucide';
 import {createIcon} from '../ui/icons';
@@ -41,8 +41,11 @@ export class AgentPanel {
   private followedAgentId?: string;
   private readonly followListeners = new Set<(agentId?: string) => void>();
   private readonly dialog = document.createElement('dialog');
+  private readonly createForm = document.createElement('div');
+  private readonly createFields = document.createElement('fieldset');
   private readonly port = document.createElement('input');
   private readonly name = document.createElement('input');
+  private readonly nameWho = document.createElement('a');
   private readonly prompt = document.createElement('textarea');
   private readonly promptSection = document.createElement('section');
   private readonly promptMessage = document.createElement('p');
@@ -111,6 +114,10 @@ export class AgentPanel {
     this.port.value = String(randomAgentPort());
     this.name.value = this.suggestName();
     this.name.maxLength = 64;
+    this.name.addEventListener('input', () => this.refreshNameLink());
+    this.nameWho.className = 'agent-name-who';
+    this.nameWho.target = '_blank';
+    this.nameWho.rel = 'noopener noreferrer';
     this.prompt.rows = 12;
     this.prompt.readOnly = true;
     this.prompt.setAttribute('aria-label', 'Agent prompt');
@@ -153,11 +160,10 @@ export class AgentPanel {
       'Copy a prompt to your local agent to start its CLI service. Allow this site to connect to your local network when asked. This page keeps reconnecting until you revoke access. Keep it open while agents work.';
     titleLine.append(title, this.connection);
     heading.append(titleLine, note);
-    const fields = document.createElement('fieldset');
-    fields.append(
-      field('Agent name', this.name),
-      field('Local port', this.port),
-    );
+    const nameField = document.createElement('div');
+    nameField.className = 'agent-name-field';
+    nameField.append(field('Agent name', this.name), this.nameWho);
+    this.createFields.append(nameField, field('Local port', this.port));
     const promptActions = document.createElement('div');
     promptActions.className = 'agent-prompt-actions';
     this.promptMessage.className = 'agent-prompt-message';
@@ -165,7 +171,12 @@ export class AgentPanel {
     promptActions.append(this.promptMessage, copy);
     this.promptSection.className = 'agent-prompt';
     this.promptSection.append(this.prompt, promptActions);
-    content.append(heading, this.list, fields, feedback, footer);
+    this.createForm.className = 'agent-create-form';
+    const createContent = document.createElement('div');
+    createContent.className = 'agent-create-content';
+    createContent.append(this.createFields, feedback, footer);
+    this.createForm.append(createContent);
+    content.append(heading, this.list, this.createForm);
     this.dialog.append(content);
     document.body.append(this.dialog);
     open.addEventListener('click', () => {
@@ -184,6 +195,7 @@ export class AgentPanel {
     this.dialog.addEventListener('close', () => {
       this.connection.open = false;
       this.clearPromptMessage();
+      this.finishCreateAnimation();
     });
     document.addEventListener('pointerdown', event => {
       if (!this.connection.contains(event.target as Node))
@@ -208,6 +220,7 @@ export class AgentPanel {
   }
 
   refresh(): void {
+    this.refreshNameLink();
     this.presenceChanged(
       new Set(
         [...this.grants.values()]
@@ -382,7 +395,9 @@ export class AgentPanel {
           sessionId: this.sessionId,
           name,
         });
-        const color = randomAgentColor();
+        const color = randomAgentColor(
+          [...this.grants.values()].map(grant => grant.color),
+        );
         const endpoint = await this.createEndpoint(config, color);
         if (generation !== this.generation) {
           endpoint.close();
@@ -412,6 +427,7 @@ export class AgentPanel {
           undefined,
           grant.color,
         );
+        this.revealCreateForm();
         this.connect(grant);
         this.port.value = String(
           randomAgentPort(
@@ -425,6 +441,35 @@ export class AgentPanel {
         this.adding = false;
       },
     );
+  }
+
+  private revealCreateForm(): void {
+    this.finishCreateAnimation();
+    if (
+      !this.dialog.open ||
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    )
+      return;
+    this.createForm.inert = true;
+    this.createFields.disabled = true;
+    this.createForm.classList.add('agent-create-revealing');
+    const animation = this.createForm.animate(
+      {gridTemplateRows: ['0fr', '1fr'], opacity: [0, 1]},
+      {
+        delay: 80,
+        duration: 360,
+        easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
+        fill: 'backwards',
+      },
+    );
+    animation.onfinish = () => this.finishCreateAnimation();
+  }
+
+  private finishCreateAnimation(): void {
+    for (const animation of this.createForm.getAnimations()) animation.cancel();
+    this.createForm.classList.remove('agent-create-revealing');
+    this.createForm.inert = false;
+    this.createFields.disabled = false;
   }
 
   private async handle(agentId: string, envelope: unknown): Promise<unknown> {
@@ -588,6 +633,22 @@ export class AgentPanel {
     this.available = true;
   }
 
+  private refreshNameLink(): void {
+    const person = findAgentName(this.name.value);
+    this.nameWho.hidden = !person;
+    this.nameWho.textContent = person ? `${person.name} who?` : '';
+    this.name.style.paddingRight = person
+      ? `calc(${person.name.length + 5}ch + 18px)`
+      : '';
+    if (person) {
+      this.nameWho.href = `https://en.wikipedia.org/wiki/${encodeURIComponent(person.article)}`;
+      this.nameWho.title = `Read about ${person.name} on Wikipedia (opens in a new tab)`;
+    } else {
+      this.nameWho.removeAttribute('href');
+      this.nameWho.removeAttribute('title');
+    }
+  }
+
   private suggestName(): string {
     return randomAgentName(
       [...this.grants.values()].map(grant => grant.config.name),
@@ -665,6 +726,7 @@ export class AgentPanel {
 
   private suspend(): void {
     this.clearPromptMessage();
+    this.finishCreateAnimation();
     this.generation++;
     this.available = false;
     this.renders.clear();
@@ -680,6 +742,7 @@ export class AgentPanel {
   private async end(): Promise<void> {
     await this.initialization;
     await this.storage!.save();
+    this.finishCreateAnimation();
     this.generation++;
     this.sessionId = undefined;
     for (const grant of this.grants.values()) {

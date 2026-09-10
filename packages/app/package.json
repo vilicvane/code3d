@@ -37,6 +37,7 @@
     "monaco-editor": "^0.56.0",
     "prettier": "^3.9.6",
     "replicad": "^1.0.1",
+    "sver": "2.0.1",
     "three": "^0.185.1",
     "woff2-encoder": "2.0.0"
   },

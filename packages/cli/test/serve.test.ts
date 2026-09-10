@@ -86,7 +86,10 @@ test(
   async t => {
     const config = await configuration();
     const f = await fixture(t, config);
-    const missing = await f.call(['--request-id', 'absent-service', 'apply']);
+    const missing = await f.call(
+      ['--request-id', 'absent-service'],
+      JSON.stringify({operation: 'apply', input: {}}),
+    );
     assert.equal(missing.code, 3);
     assert.equal(missing.value.error.code, 'service_unavailable');
     assert.equal(missing.value.error.details.delivery, 'not_sent');
@@ -106,7 +109,7 @@ test(
       missing.value.recovery.command.includes("project'\\''s config.json"),
     );
     let service = await startServe(t, f.file);
-    const offline = await f.call(['context']);
+    const offline = await f.call([], JSON.stringify({operation: 'context'}));
     assert.equal(offline.code, 3);
     assert.equal(offline.value.error.code, 'app_disconnected');
     assert.equal(offline.value.error.details.delivery, 'not_sent');
@@ -158,19 +161,31 @@ test(
     });
     t.after(() => host.close());
     await until(() => host.status === 'online');
-    assert.equal((await f.call(['context'])).value.data.file, '/model.ts');
     assert.equal(
-      (await f.call(['fs', 'read', '/large.ts'])).value.data.content.length,
+      (await f.call([], JSON.stringify({operation: 'context'}))).value.data
+        .file,
+      '/model.ts',
+    );
+    assert.equal(
+      (
+        await f.call(
+          [],
+          JSON.stringify({operation: 'fs.read', path: '/large.ts'}),
+        )
+      ).value.data.content.length,
       8 * 1024 * 1024,
     );
     const input = JSON.stringify({
-      files: [{path: '/model.ts', version: 'v1', content: 'new source'}],
-      cursor: {file: '/model.ts', regex: '(new source)'},
-      render: {view: 'top'},
-      type: true,
-      topology: true,
+      operation: 'apply',
+      input: {
+        files: [{path: '/model.ts', version: 'v1', content: 'new source'}],
+        cursor: {file: '/model.ts', regex: '(new source)'},
+        render: {view: 'top'},
+        type: true,
+        topology: true,
+      },
     });
-    const args = ['--request-id', 'edit-1', 'apply', '--input', '-'];
+    const args = ['--request-id', 'edit-1'];
     const result = await f.call(args, input);
     assert.equal(result.code, 0, result.stdout);
     assert.equal(result.value.requestId, 'edit-1');
@@ -182,17 +197,29 @@ test(
     await f.call(args, input);
     assert.equal(executions, 3);
     assert.equal(
-      (await f.call(args, '{}')).value.error.code,
+      (await f.call(args, JSON.stringify({operation: 'apply', input: {}})))
+        .value.error.code,
       'request_conflict',
     );
     assert.ok(!service.stdout().includes(config.key));
     await service.stop();
     await until(() => host.status !== 'online');
-    const stopped = await f.call(['result', 'edit-1']);
+    const stopped = await f.call(
+      [],
+      JSON.stringify({operation: 'result', requestId: 'edit-1'}),
+    );
     assert.equal(stopped.value.recovery.requestId, 'edit-1');
     service = await startServe(t, f.file);
     await until(() => host.status === 'online');
-    assert.equal((await f.call(['result', 'edit-1'])).value.ok, true);
+    assert.equal(
+      (
+        await f.call(
+          [],
+          JSON.stringify({operation: 'result', requestId: 'edit-1'}),
+        )
+      ).value.ok,
+      true,
+    );
     await f.call(args, input);
     assert.equal(executions, 3);
   },
@@ -395,21 +422,34 @@ test(
     });
     t.after(() => host.close());
     await until(() => host.status === 'online');
-    const pending = f.call([
-      '--request-id',
-      'timed-edit',
-      '--timeout',
-      '300',
-      'apply',
-    ]);
+    const pending = f.call(
+      ['--request-id', 'timed-edit', '--timeout', '300'],
+      JSON.stringify({operation: 'apply', input: {}}),
+    );
     await started;
     const timed = await pending;
     assert.equal(timed.code, 3);
     assert.equal(timed.value.error.details.delivery, 'unknown');
-    assert.match(timed.value.recovery.queryCommand, /result 'timed-edit'$/);
+    assert.deepEqual(JSON.parse(timed.value.recovery.queryStdin), {
+      operation: 'result',
+      requestId: 'timed-edit',
+    });
+    assert.deepEqual(timed.value.recovery.queryArgv, [
+      'npx',
+      '--yes',
+      '@code3d/cli',
+      f.file,
+    ]);
     finish();
-    assert.equal((await f.call(['result', 'timed-edit'])).value.ok, true);
-    await f.call(['--request-id', 'timed-edit', 'apply']);
+    const recovered = await runCli(
+      timed.value.recovery.queryArgv.slice(3),
+      timed.value.recovery.queryStdin,
+    );
+    assert.equal(JSON.parse(recovered.stdout).ok, true, recovered.stdout);
+    await f.call(
+      ['--request-id', 'timed-edit'],
+      JSON.stringify({operation: 'apply', input: {}}),
+    );
     assert.equal(calls, 1);
     started = new Promise<void>(resolve => {
       start = resolve;
@@ -417,16 +457,19 @@ test(
     finished = new Promise<void>(resolve => {
       finish = resolve;
     });
-    const disconnected = f.call(['--request-id', 'disconnected-edit', 'apply']);
+    const disconnected = f.call(
+      ['--request-id', 'disconnected-edit'],
+      JSON.stringify({operation: 'apply', input: {}}),
+    );
     await started;
     host.close();
     const lost = await disconnected;
     assert.equal(lost.value.error.code, 'app_disconnected');
     assert.equal(lost.value.error.details.delivery, 'unknown');
-    assert.match(
-      lost.value.recovery.queryCommand,
-      /result 'disconnected-edit'$/,
-    );
+    assert.deepEqual(JSON.parse(lost.value.recovery.queryStdin), {
+      operation: 'result',
+      requestId: 'disconnected-edit',
+    });
     finish();
     host = new LocalHost({
       config,
@@ -434,7 +477,12 @@ test(
     });
     await until(() => host.status === 'online');
     assert.equal(
-      (await f.call(['result', 'disconnected-edit'])).value.ok,
+      (
+        await f.call(
+          [],
+          JSON.stringify({operation: 'result', requestId: 'disconnected-edit'}),
+        )
+      ).value.ok,
       true,
     );
     assert.equal(calls, 2);
@@ -531,5 +579,48 @@ test(
     assert.equal(last.reason, 'stdin_closed');
     const replacement = await createLocalBridge(config);
     await replacement.close();
+  },
+);
+
+test(
+  'the same CLI and bridge deliver future App operations, fields and JSON shapes unchanged',
+  {timeout: 20_000},
+  async t => {
+    const config = await configuration();
+    const f = await fixture(t, config);
+    await startServe(t, f.file);
+    const cipher = await AgentCipher.create(config);
+    const received: unknown[] = [];
+    // Model a newer App: its operation schema is deliberately absent from this CLI build.
+    const host = new LocalHost({
+      config,
+      handle: async envelope => {
+        const opened = await cipher.open('request', envelope);
+        received.push(opened.value);
+        return cipher.seal('response', opened.requestId, {
+          ok: true,
+          data: {received: opened.value},
+        });
+      },
+    });
+    t.after(() => host.close());
+    await until(() => host.status === 'online');
+    for (const request of [
+      {
+        operation: 'future.operation',
+        options: {count: 3, enabled: false, label: '模型', absent: null},
+      },
+      {
+        operation: 'apply',
+        input: {render: {futureMode: 'test'}, futureField: [1, 'two', null]},
+      },
+      [{operation: 'context'}, {operation: 'future.operation', input: {}}],
+      null,
+    ]) {
+      const result = await f.call([], JSON.stringify(request, null, 2));
+      assert.equal(result.code, 0, result.stdout + result.stderr);
+      assert.deepEqual(received.at(-1), request);
+      assert.deepEqual(result.value.data.received, request);
+    }
   },
 );

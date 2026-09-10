@@ -8,15 +8,15 @@ import type {SourceRef} from '@code3d/core/tooling';
 export function collectExportInstances(
   occurrences: Iterable<Occurrence>,
 ): ModelExportInstance[] {
-  return [...occurrences]
-    .filter(({node}) => node.kind !== 'group')
-    .map(({node, object}) => {
-      object.updateWorldMatrix(true, false);
-      const position = new Vector3();
-      const quaternion = new Quaternion();
-      const scale = new Vector3();
-      object.matrixWorld.decompose(position, quaternion, scale);
-      return {
+  return [...occurrences].flatMap(({node, object}) => {
+    if (node.kind === 'group' || node.kind === 'reference') return [];
+    object.updateWorldMatrix(true, false);
+    const position = new Vector3();
+    const quaternion = new Quaternion();
+    const scale = new Vector3();
+    object.matrixWorld.decompose(position, quaternion, scale);
+    return [
+      {
         nodeId: node.nodeId,
         name: node.name,
         kind: node.kind,
@@ -25,8 +25,9 @@ export function collectExportInstances(
           position: position.toArray(),
           quaternion: quaternion.toArray(),
         },
-      };
-    });
+      },
+    ];
+  });
 }
 
 export function renderedModelName(

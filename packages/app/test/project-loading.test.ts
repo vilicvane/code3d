@@ -22,7 +22,7 @@ function workspace(): {
   const directories = new Set(['/']);
   const fs: ProjectFileSystem = {
     async initialize(seed) {
-      await seed();
+      await seed?.();
     },
     async syncDirectory() {},
     async resetDirectory() {},
@@ -72,24 +72,61 @@ function workspace(): {
   return {fs, files, directories};
 }
 
-test('copying into an empty local workspace includes unopened and binary files with bounded parallel reads', async () => {
-  const source = workspace(),
-    target = workspace();
+test('new entry checks allow missing ancestors but reject collisions and protected paths', async () => {
+  const {fs} = workspace();
+  await fs.writeFile('/src/existing.ts', 'keep');
+  for (const kind of ['file', 'directory'] as const) {
+    await operations.checkProjectEntryOperation(fs, {
+      kind: 'create',
+      entry: {kind, path: '/src/new/deep/entry'},
+    });
+    for (const path of [
+      '/src/existing.ts',
+      '/src/existing.ts/child',
+      '/node_modules/new/entry',
+    ]) {
+      await assert.rejects(
+        operations.checkProjectEntryOperation(fs, {
+          kind: 'create',
+          entry: {kind, path},
+        }),
+        /already exists|Not a directory|Protected project path/,
+      );
+    }
+  }
+  for (const kind of ['move', 'copy'] as const) {
+    await assert.rejects(
+      operations.checkProjectEntryOperation(fs, {
+        kind,
+        entries: [{from: '/src/existing.ts', to: '/missing/entry.ts'}],
+      }),
+      /Destination directory not found/,
+    );
+  }
+  assert.equal(await fs.stat('/src/new'), undefined);
+  assert.equal(
+    new TextDecoder().decode(await fs.readFile('/src/existing.ts')),
+    'keep',
+  );
+});
+
+test('explicit folder copies include unopened and binary files with bounded parallel reads', async () => {
+  const {fs, files, directories} = workspace();
   for (let index = 0; index < 48; index++)
-    await source.fs.writeFile(
-      `/unopened/${index}.ts`,
+    await fs.writeFile(
+      `/source/unopened/${index}.ts`,
       `export const value = ${index};`,
     );
-  await source.fs.writeFile('/assets/data.bin', new Uint8Array([0, 255, 128]));
-  await source.fs.createDirectory('/assets/empty');
-  await source.fs.writeFile('/package.json', '{}');
-  await source.fs.writeFile('/code3d-lock.json', '{}');
+  await fs.writeFile('/source/assets/data.bin', new Uint8Array([0, 255, 128]));
+  await fs.createDirectory('/source/assets/empty');
+  await fs.writeFile('/source/package.json', '{}');
+  await fs.writeFile('/source/code3d-lock.json', '{}');
   for (const directory of ['node_modules', '.code3d', '.git'])
-    await source.fs.writeFile(`/${directory}/generated`, 'do not copy');
+    await fs.writeFile(`/source/${directory}/generated`, 'do not copy');
   let active = 0,
     peak = 0;
-  const read = source.fs.readFile;
-  source.fs.readFile = async path => {
+  const read = fs.readFile;
+  fs.readFile = async path => {
     peak = Math.max(peak, ++active);
     try {
       await setImmediate();
@@ -98,16 +135,19 @@ test('copying into an empty local workspace includes unopened and binary files w
       active--;
     }
   };
-  await operations.copyProjectWorkspace(source.fs, target.fs);
+  await operations.copyProjectEntry(fs, '/source', '/target');
   assert.ok(peak > 1 && peak <= 16, `parallel reads: ${peak}`);
-  assert.equal(target.files.size, 51);
+  assert.equal(
+    [...files.keys()].filter(path => path.startsWith('/target/')).length,
+    51,
+  );
   assert.deepEqual(
-    target.files.get('/assets/data.bin'),
+    files.get('/target/assets/data.bin'),
     new Uint8Array([0, 255, 128]),
   );
-  assert.ok(target.directories.has('/assets/empty'));
+  assert.ok(directories.has('/target/assets/empty'));
   for (const directory of ['node_modules', '.code3d', '.git'])
-    assert.ok(!target.directories.has('/' + directory));
+    assert.ok(!directories.has('/target/' + directory));
 });
 
 test('name search follows npm aliases without looping through cyclic dependencies or reading contents', async () => {

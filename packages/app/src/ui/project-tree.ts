@@ -10,7 +10,7 @@ import type {AgentLocation} from '../editor';
 import {
   PackageInstallationError,
   type PackageInstallationProgress,
-} from '../project/browser-package-installer';
+} from '../project/browser-package-manager';
 import {mapProjectIO} from '../project/io';
 import {parsePackageSpecifier} from '../project/package-manifest';
 import {
@@ -33,6 +33,7 @@ type ProjectTreeOptions = Readonly<{
   ): Promise<void>;
   onOpenFile(path: string, takeFocus: boolean): Promise<void>;
   onOperation(operation: ProjectEntryOperation): Promise<void>;
+  examples?: Readonly<{directory: string; reset(): Promise<void>}>;
   onInstallPackage?(directory: string): Promise<void>;
   onUpdateDependencies?(directory: string): Promise<void>;
   onBusy(busy: boolean): void;
@@ -49,7 +50,7 @@ export class ProjectTree {
   private runningPackageOperation = false;
   private readonly packageProgress = new Map<
     string,
-    PackageInstallationProgress
+    {progress: PackageInstallationProgress; hideTimer?: number}
   >();
   private readonly packageStatus = document.createElement('div');
   private dragging = false;
@@ -65,7 +66,8 @@ export class ProjectTree {
   private indexed = false;
   private clipboard?: {kind: 'copy' | 'move'; paths: readonly string[]};
   private readonly status = document.createElement('div');
-  private rootMenu?: HTMLElement;
+  private removeMenu?: () => void;
+  private closeMenu?: ContextMenuOpenContext['close'];
 
   constructor(
     private readonly container: HTMLElement,
@@ -151,7 +153,8 @@ export class ProjectTree {
         contextMenu: {
           enabled: true,
           triggerMode: 'right-click',
-          render: (item, context) => this.menu(item, context),
+          onOpen: (item, context) => this.showMenu(item, context),
+          onClose: () => this.removeMenu?.(),
         },
       },
       unsafeCSS: `
@@ -161,6 +164,7 @@ export class ProjectTree {
         [data-file-tree-virtualized-scroll] {
           overflow: auto;
           padding-inline: 0;
+          padding-block-end: var(--trees-item-height);
           scrollbar-gutter: auto;
           scrollbar-width: thin;
           scrollbar-color: #41473b transparent;
@@ -261,28 +265,22 @@ export class ProjectTree {
     container.addEventListener('contextmenu', event => {
       if (event.defaultPrevented || this.busy) return;
       event.preventDefault();
-      this.closeRootMenu();
-      const menu = this.menu(undefined, {
-        close: () => this.closeRootMenu(),
+      this.closeMenu?.({restoreFocus: false});
+      this.showMenu(undefined, {
+        close: options => {
+          this.removeMenu?.();
+          if (options?.restoreFocus !== false) this.tree.focusFirstItem();
+        },
         restoreFocus: () => this.tree.focusFirstItem(),
         anchorElement: container,
-        anchorRect: container.getBoundingClientRect(),
+        anchorRect: new DOMRect(event.clientX, event.clientY, 0, 0),
       });
-      menu.classList.add('project-root-menu');
-      menu.style.left = `${event.clientX}px`;
-      menu.style.top = `${event.clientY}px`;
-      document.body.append(menu);
-      this.rootMenu = menu;
-      const rect = menu.getBoundingClientRect();
-      menu.style.left = `${Math.max(0, Math.min(event.clientX, innerWidth - rect.width))}px`;
-      menu.style.top = `${Math.max(0, Math.min(event.clientY, innerHeight - rect.height))}px`;
-    });
-    document.addEventListener('pointerdown', event => {
-      if (this.rootMenu && !this.rootMenu.contains(event.target as Node))
-        this.closeRootMenu();
     });
     window.addEventListener('pagehide', event => {
-      if (!event.persisted) this.tree.cleanUp();
+      if (!event.persisted) {
+        this.closeMenu?.({restoreFocus: false});
+        this.tree.cleanUp();
+      }
     });
   }
 
@@ -550,24 +548,47 @@ export class ProjectTree {
     this.status.hidden = false;
   }
 
-  async create(
-    kind: ProjectEntry['kind'],
-    directory = this.targetDirectory(),
-  ): Promise<void> {
-    if (this.busy || isProtectedProjectPath(directory)) return;
-    await this.loadDirectory(directory);
+  async create(kind: ProjectEntry['kind'], directory?: string): Promise<void> {
+    if (this.busy) return;
+    if (directory === undefined) {
+      directory = this.targetDirectory();
+      // Header actions remain useful while inspecting generated/package files.
+      while (isProtectedProjectPath(directory))
+        directory = projectDirectory(directory);
+    }
+    if (isProtectedProjectPath(directory)) {
+      this.showError(new Error(`Protected project path: ${directory}`));
+      return;
+    }
+    try {
+      await this.loadDirectory(directory);
+    } catch (error) {
+      this.showError(error);
+      return;
+    }
     const name = await this.askName(kind, directory);
     if (name === undefined) return;
     const path = normalizeProjectPath(`${directory}/${name}`);
     if (await this.perform({kind: 'create', entry: {path, kind}})) {
       if (kind === 'file') this.openFile(path, true);
       else {
+        await this.revealDirectory(projectDirectory(path));
         this.synchronizing = true;
-        for (const selected of this.tree.getSelectedPaths())
-          this.tree.getItem(selected)?.deselect();
-        this.tree.getItem(path.slice(1) + '/')?.select();
-        this.synchronizing = false;
-        this.tree.scrollToPath(path.slice(1) + '/', {focus: true});
+        try {
+          for (const selected of this.tree.getSelectedPaths())
+            this.tree.getItem(selected)?.deselect();
+          const segments = path.slice(1).split('/');
+          for (let depth = 1; depth < segments.length; depth++) {
+            const parent = this.tree.getItem(
+              segments.slice(0, depth).join('/') + '/',
+            );
+            if (isDirectoryItem(parent)) parent.expand();
+          }
+          this.tree.getItem(path.slice(1) + '/')?.select();
+          this.tree.scrollToPath(path.slice(1) + '/', {focus: true});
+        } finally {
+          this.synchronizing = false;
+        }
       }
     }
   }
@@ -621,27 +642,40 @@ export class ProjectTree {
   }
 
   setPackageProgress(progress: PackageInstallationProgress): void {
-    if (progress.state === 'busy')
-      this.packageProgress.set(progress.directory, progress);
-    else this.packageProgress.delete(progress.directory);
-    const visible = this.packageProgress.size
-      ? [...this.packageProgress.values()]
-      : [progress];
-    this.packageStatus.hidden = false;
+    window.clearTimeout(
+      this.packageProgress.get(progress.directory)?.hideTimer,
+    );
+    const hideTimer =
+      progress.state === 'ready'
+        ? window.setTimeout(() => {
+            this.packageProgress.delete(progress.directory);
+            this.renderPackageProgress();
+          }, 3000)
+        : undefined;
+    this.packageProgress.set(progress.directory, {progress, hideTimer});
+    this.renderPackageProgress();
+  }
+
+  private renderPackageProgress(): void {
+    const visible = [...this.packageProgress.values()].map(
+      entry => entry.progress,
+    );
+    this.packageStatus.hidden = visible.length === 0;
     this.packageStatus.setAttribute(
       'aria-busy',
-      String(this.packageProgress.size > 0),
+      String(visible.some(progress => progress.state === 'busy')),
     );
     this.packageStatus.replaceChildren(
       ...visible.map(item => {
         const row = document.createElement('div');
         row.dataset.state = item.state;
-        const directory = document.createElement('div');
+        row.title = `${item.directory}: ${item.message}`;
+        const directory = document.createElement('span');
         directory.className = 'package-status-directory';
         directory.textContent = item.directory;
-        const message = document.createElement('div');
+        const message = document.createElement('span');
         message.textContent = item.message;
-        row.append(directory, message);
+        row.append(directory, ': ', message);
         return row;
       }),
     );
@@ -802,6 +836,18 @@ export class ProjectTree {
           ),
         !this.runningPackageOperation,
       );
+    const examples = this.options.examples;
+    if (
+      examples &&
+      path === examples.directory &&
+      this.entries.get(path)?.kind === 'directory'
+    ) {
+      separator();
+      action('Reset examples', () => void examples.reset());
+    } else if (examples && !path && !this.entries.has(examples.directory)) {
+      separator();
+      action('Create examples', () => void examples.reset());
+    }
     separator();
     action(
       'Rename',
@@ -855,9 +901,35 @@ export class ProjectTree {
     return menu;
   }
 
-  private closeRootMenu(): void {
-    this.rootMenu?.remove();
-    this.rootMenu = undefined;
+  private showMenu(
+    item: ContextMenuItem | undefined,
+    context: ContextMenuOpenContext,
+  ): void {
+    this.removeMenu?.();
+    const menu = this.menu(item, context);
+    // Pierre recognizes this marker when menu content is rendered in a portal.
+    menu.dataset.fileTreeContextMenuRoot = 'true';
+    document.body.append(menu);
+    const position = () => {
+      const rect = menu.getBoundingClientRect();
+      menu.style.left = `${Math.max(8, Math.min(context.anchorRect.left, innerWidth - rect.width - 8))}px`;
+      menu.style.top = `${Math.max(8, Math.min(context.anchorRect.bottom, innerHeight - rect.height - 8))}px`;
+    };
+    const dismiss = (event: PointerEvent) => {
+      if (!event.composedPath().includes(menu))
+        context.close({restoreFocus: false});
+    };
+    position();
+    window.addEventListener('resize', position);
+    document.addEventListener('pointerdown', dismiss);
+    this.closeMenu = context.close;
+    this.removeMenu = () => {
+      window.removeEventListener('resize', position);
+      document.removeEventListener('pointerdown', dismiss);
+      menu.remove();
+      this.closeMenu = undefined;
+      this.removeMenu = undefined;
+    };
   }
 
   private onKeyDown(event: KeyboardEvent): void {
@@ -964,10 +1036,21 @@ export class ProjectTree {
       label: 'Name',
       value: kind === 'file' ? 'untitled.ts' : 'new-folder',
       submit: 'Create',
+      placeholder: kind === 'file' ? 'src/model.ts' : 'src/components',
       validate: value => {
-        if (!value || value === '.' || value === '..' || /[\\/\0]/.test(value))
-          throw new Error('Enter a file or folder name without slashes.');
-        if (this.entries.has(normalizeProjectPath(`${directory}/${value}`)))
+        if (
+          /[\\\0]/.test(value) ||
+          value
+            .split('/')
+            .some(part => !part.trim() || part === '.' || part === '..')
+        )
+          throw new Error(
+            'Enter a relative path with names separated by /, without . or .. segments.',
+          );
+        const path = normalizeProjectPath(`${directory}/${value}`);
+        if (isProtectedProjectPath(path))
+          throw new Error(`Protected project path: ${path}`);
+        if (this.entries.has(path))
           throw new Error('An entry with this name already exists.');
       },
     });

@@ -53,3 +53,30 @@ Results distinguish `solved`, `unsatisfied` residuals, and `failed` numerical
 iteration. This is a local nonlinear solver: failure does not prove the
 geometric system has no solution. Each call owns and releases its complete C++
 system; JavaScript receives ordinary value objects and no native handles.
+
+## Use and explore
+
+```sh
+npm install @code3d/solver
+```
+
+```ts
+import initialize from '@code3d/solver';
+
+const solver = await initialize();
+const result = solver.solve({
+  bodies: [{position: [0, 0, 0], quaternion: [0, 0, 0, 1], fixed: true}],
+  relations: [],
+});
+console.log(result.status, result.poses);
+```
+
+For bundled browser use, supply the WASM location or bytes through the loader
+options. This small example initializes the boundary with one fixed body;
+[solver tests](test/solver.test.ts) show actual marker equations and constrained
+assemblies. Read the [public types](index.d.ts) and [native implementation](native/solver.cpp)
+for the exact problem and result contract.
+
+Build inputs live in [CMakeLists.txt](native/CMakeLists.txt) and
+[the build script](scripts/build.mjs). The [Core README](../core/README.md) describes
+the separate author-facing modeling and relation APIs.

@@ -24,6 +24,14 @@ import {editableParameterUsages} from '../model/parameter-provenance';
 import type {TransformGizmoBinding, TransformAxis} from './transform-gizmo';
 import type {ToolIntent} from './tool-system';
 import type {SpatialObjectPreview} from './spatial-edit';
+import {
+  isToolSelectionParameter,
+  type ToolArgumentEditTarget,
+} from '../model/tool-schema';
+import {
+  replaceNumericArgument,
+  type NumericArgumentValue,
+} from './source-expression';
 
 type SpatialToolOccurrence = Readonly<{
   key: string;
@@ -33,7 +41,22 @@ type SpatialToolOccurrence = Readonly<{
 
 export type SpatialBindingSource =
   | Readonly<{kind: 'parameter'; target: ParameterTarget}>
-  | Readonly<{kind: 'argument' | 'origin-offset'; sourceRef: SourceRef}>;
+  | Readonly<{
+      kind: 'omitted-argument';
+      target: Extract<ToolArgumentEditTarget, {kind: 'omitted'}>;
+    }>
+  | Readonly<{
+      kind: 'call-argument';
+      sourceRef: SourceRef;
+      path: readonly number[];
+      values: readonly NumericArgumentValue[];
+    }>
+  | Readonly<{
+      kind: 'argument';
+      sourceRef: SourceRef;
+      mode: 'offset' | 'replace';
+    }>
+  | Readonly<{kind: 'origin-offset'; sourceRef: SourceRef}>;
 
 export type SpatialBindingObject = Readonly<{
   key: string;
@@ -130,9 +153,13 @@ export function spatialBindings(
   return axes.flatMap(axis => {
     const index = axisIndex(axis);
     const argumentIndex = spatial.axisOnly ? 0 : index;
-    const argument = target.tool?.arguments.find(
+    const argumentSource = target.tool?.arguments.find(
       argument => argument.index === argumentIndex,
-    )?.target;
+    );
+    const argument = argumentSource?.target;
+    const schema = target.tool?.signature.parameters.find(
+      parameter => parameter.index === argumentIndex,
+    );
     const parameterName = spatial.axisOnly
       ? 'angle'
       : kind === 'originOffset'
@@ -152,8 +179,33 @@ export function spatialBindings(
       source = {kind: 'origin-offset', sourceRef: target.sourceRef};
     else if (parameter) source = {kind: 'parameter', target: parameter.target};
     else if (argument?.kind === 'present')
-      source = {kind: 'argument', sourceRef: argument.sourceRef};
-    else return [];
+      source = {
+        kind: 'argument',
+        sourceRef: argument.sourceRef,
+        mode:
+          evaluation.toolArguments?.[argumentIndex] === undefined
+            ? 'replace'
+            : 'offset',
+      };
+    else if (
+      argument?.kind === 'omitted' &&
+      schema &&
+      !isToolSelectionParameter(schema) &&
+      schema.default !== undefined
+    )
+      source = {kind: 'omitted-argument', target: argument};
+    else
+      source = {
+        kind: 'call-argument',
+        sourceRef: target.sourceRef,
+        path: schema?.path ?? (kind === 'pivot' ? [0, index] : [argumentIndex]),
+        values:
+          kind === 'pivot'
+            ? [spatial.vector]
+            : spatial.axisOnly
+              ? [spatial.vector[index]]
+              : spatial.vector,
+      };
     const frame: Transform = {
       position: spatial.origin,
       quaternion:
@@ -185,6 +237,17 @@ export function spatialBindings(
           kind === 'rotate' ? ('angle' as const) : ('length' as const),
         frame,
         anchor: 'frame' as const,
+        completeArguments: offsetOrigin
+          ? undefined
+          : {
+              sourceRef: target.sourceRef,
+              values:
+                kind === 'pivot'
+                  ? [spatial.vector]
+                  : spatial.axisOnly
+                    ? [spatial.vector[index]]
+                    : spatial.vector,
+            },
         spatial: {
           operation: kind,
           source,
@@ -219,18 +282,44 @@ export function spatialIntent(
   const source = binding.spatial.source;
   const vector: [number, number, number] = [0, 0, 0];
   vector[index] = delta;
+  const callValues =
+    source.kind === 'call-argument'
+      ? replaceNumericArgument(source.values, source.path, value)
+      : undefined;
   const change =
     source.kind === 'parameter'
       ? {kind: 'parameter' as const, target: source.target, value}
       : source.kind === 'argument'
-        ? {kind: 'argument' as const, sourceRef: source.sourceRef, delta}
-        : {
-            kind: 'origin-offset' as const,
+        ? {
+            kind: 'argument' as const,
             sourceRef: source.sourceRef,
-            delta: vector,
-          };
+            delta,
+            value,
+            mode: source.mode,
+          }
+        : source.kind === 'omitted-argument'
+          ? {
+              kind: 'omitted-argument' as const,
+              target: source.target,
+              value,
+              initialValue: binding.value,
+            }
+          : source.kind === 'call-argument'
+            ? {
+                kind: 'call-argument' as const,
+                sourceRef: source.sourceRef,
+                values: callValues!,
+                value,
+                initialValue: binding.value,
+              }
+            : {
+                kind: 'origin-offset' as const,
+                sourceRef: source.sourceRef,
+                delta: vector,
+              };
   return {
     kind: 'model.spatial',
+    completeArguments: binding.completeArguments,
     operation: binding.spatial.operation,
     change,
     preview: {
@@ -238,11 +327,24 @@ export function spatialIntent(
       parameter:
         source.kind === 'parameter' ? {id: source.target.id, value} : undefined,
       objects: binding.spatial.objects.map(object => {
-        const offset = delta * object.sensitivity;
         const spatial = object.spatial;
+        const materialized =
+          delta !== 0 &&
+          callValues &&
+          (binding.spatial.operation === 'pivot'
+            ? (callValues[0] as Vec3)
+            : spatial.axisOnly
+              ? ([0, callValues[0] as number, 0] as Vec3)
+              : (callValues as Vec3));
+        const changes = spatial.vector.map((current, axis) =>
+          materialized
+            ? materialized[axis] - current
+            : axis === index
+              ? delta * object.sensitivity
+              : 0,
+        ) as unknown as Vec3;
         if (binding.spatial.operation === 'pivot') {
-          const delta: [number, number, number] = [0, 0, 0];
-          delta[index] = offset;
+          const delta = changes;
           const rotated = rotateVector(
             delta,
             xyzRotation(spatial.rotation ?? [0, 0, 0]),
@@ -276,10 +378,12 @@ export function spatialIntent(
           };
         }
         if (binding.spatial.operation !== 'rotate') {
-          const origin: [number, number, number] = [...spatial.origin];
-          origin[index] += offset;
-          const vector: [number, number, number] = [...spatial.vector];
-          vector[index] += offset;
+          const origin = spatial.origin.map(
+            (value, axis) => value + changes[axis],
+          ) as unknown as Vec3;
+          const vector = spatial.vector.map(
+            (value, axis) => value + changes[axis],
+          ) as unknown as Vec3;
           return {
             key: object.key,
             nodeId: object.nodeId,
@@ -290,8 +394,9 @@ export function spatialIntent(
             spatial: {origin, vector},
           };
         }
-        const angles: [number, number, number] = [...spatial.vector];
-        angles[index] += offset;
+        const angles = spatial.vector.map(
+          (value, axis) => value + changes[axis],
+        ) as unknown as Vec3;
         return {
           key: object.key,
           nodeId: object.nodeId,

@@ -39,9 +39,17 @@ Validate dimensions inside the builder. A single-solid aggregate from a
 Replicad boolean can be normalized, but multiple solids, shells, or aggregates
 with stray lower-dimensional geometry are rejected.
 
-The builder executes on each call, including calls with unchanged arguments.
-Code3D can reuse identical returned geometry without hiding changes to values
-captured by the builder.
+`definePrimitive()` caches deterministic construction by definition and arguments,
+including validation, normalization, topology and bounds. A hit skips the builder
+and creates a fresh model with its own shape handles and source tracing. Pass all
+changing captured state as explicit arguments. The App fingerprints static
+builders and their dependencies for persistent reuse; dynamic closures and
+ordinary Node calls use function object identity for memory reuse.
+
+Primitives share the same memory and disk budgets as Core computations and
+Screws. Use [`cached()`](../../reference/core/#cached-computations) for ordinary
+data computations; geometry needs `definePrimitive()` so Core manages its native
+resources.
 
 Your function stays ordinary TypeScript and can be exported for other modules.
 See [adding tools to model functions](../model-tools/) for annotation rules and

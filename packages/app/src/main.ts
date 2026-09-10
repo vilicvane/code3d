@@ -2,8 +2,8 @@ import './style.css';
 import {
   File,
   FilePlus,
+  FolderOpen,
   FolderPlus,
-  Search,
   RefreshCw,
   PanelLeftClose,
   PanelLeftOpen,
@@ -55,7 +55,6 @@ import {decodeProjectFile} from './project/file-reader';
 import {
   listProjectEntries,
   searchProjectEntries,
-  copyProjectWorkspace,
   readProjectTextFile,
   type ProjectEntry,
 } from './project/file-operations';
@@ -67,18 +66,21 @@ import {
 } from './project/project';
 import {mapProjectIO} from './project/io';
 import {
-  BrowserPackageInstaller,
+  BrowserPackageManager,
   PackageInstallationError,
-} from './project/browser-package-installer';
+} from './project/browser-package-manager';
 import type {BrowserProjectFileSystem} from './project/filesystem';
 import {
-  findPackageScope,
   packageInstallDirectory,
   parsePackageManifest,
   addPackageDependency,
 } from './project/package-manifest';
 import {ProjectPackages} from './project/project-packages';
-import {browserPackageFiles} from './project/browser-packages';
+import {
+  browserPackageFiles,
+  developmentWorkspaces,
+} from './project/browser-packages';
+import {WorkspaceFileReader} from './project/workspace-packages';
 import {
   compareTopologyIds,
   formatTopologyId,
@@ -117,6 +119,7 @@ import {ImageExportDialog} from './ui/image-export';
 import {ModelExportDialog} from './ui/model-export';
 import {ViewportContextMenu} from './ui/viewport-context-menu';
 import {ViewportEmptyState} from './ui/viewport-empty-state';
+import {ViewportGridScale} from './ui/viewport-grid-scale';
 import {ProjectTree, askInstallPackage} from './ui/project-tree';
 import {EditorSplitLayout} from './ui/editor-split-layout';
 import {createIcon} from './ui/icons';
@@ -158,12 +161,36 @@ const directoryConnected =
 const projectFileSystem = directoryConnected
   ? await openDirectoryProjectFileSystem(storedDirectoryHandle)
   : await openBrowserProjectFileSystem();
-await projectFileSystem.initialize(async () => {
-  await mapProjectIO(defaultProject.files, file =>
-    projectFileSystem.writeFile(file.path, file.source),
-  );
-});
-await projectFileSystem.syncDirectory(bundledExamples);
+await projectFileSystem.initialize(
+  directoryConnected
+    ? undefined
+    : async () => {
+        await mapProjectIO(defaultProject.files, file =>
+          projectFileSystem.writeFile(file.path, file.source),
+        );
+      },
+);
+await projectFileSystem.syncDirectory(
+  bundledExamples,
+  directoryConnected
+    ? async () => {
+        const entries = await projectFileSystem.list('/');
+        return (
+          entries.every(entry => entry.name === '.code3d') &&
+          window.confirm(
+            'This folder is empty. Create bundled examples in /examples?',
+          )
+        );
+      }
+    : undefined,
+);
+const localPackageFiles = directoryWorkspaceId
+  ? new WorkspaceFileReader(
+      projectFileSystem,
+      browserPackageFiles,
+      developmentWorkspaces,
+    )
+  : projectFileSystem;
 const requestedFile = filePathFromRoute(window.location.hash);
 let initialFileError: unknown;
 const initialProject: ModelProject = await loadInitialProject();
@@ -183,12 +210,6 @@ app.innerHTML = `
       </a>
       <div class="topbar-actions">
         <button class="quiet-button" id="retry-save-button" type="button" hidden>Retry saving</button>
-        <span class="project-location" id="project-location"></span>
-        <button class="quiet-button" id="open-folder-button" type="button">Open folder</button>
-        <button class="quiet-button" id="reconnect-folder-button" type="button" hidden>Reconnect folder</button>
-        <button class="quiet-button" id="reload-folder-button" type="button" hidden>Reload folder</button>
-        <button class="quiet-button" id="browser-storage-button" type="button" hidden>Use browser storage</button>
-        <button class="quiet-button" id="reset-button" type="button">Reset examples</button>
         <div class="agent-nav">
           <button class="quiet-button button-primary agent-connect-button" id="agents-button" type="button">Connect Agent</button>
         </div>
@@ -200,11 +221,16 @@ app.innerHTML = `
         <div class="editor-workspace">
           <aside class="project-explorer" id="project-explorer" aria-label="Project files">
             <header>
-              <span>PROJECT</span>
+              <button class="project-location" id="project-location" type="button" aria-expanded="false" aria-controls="project-storage-menu"></button>
+              <div class="project-context-menu project-storage-menu" id="project-storage-menu" popover="auto" role="group" aria-label="Project storage">
+                <button id="reconnect-folder-button" type="button" hidden>Reconnect folder</button>
+                <button id="reload-folder-button" type="button" hidden>Reload folder</button>
+                <button id="browser-storage-button" type="button" hidden>Use browser storage</button>
+              </div>
               <div class="project-actions">
+                <button id="open-folder-button" type="button" title="Open folder" aria-label="Open folder"></button>
                 <button id="new-file-button" type="button" title="New file" aria-label="New file"></button>
                 <button id="new-folder-button" type="button" title="New folder" aria-label="New folder"></button>
-                <button id="search-files-button" type="button" title="Search files" aria-label="Search files"></button>
                 <button id="refresh-files-button" type="button" title="Refresh files" aria-label="Refresh files"></button>
               </div>
             </header>
@@ -317,7 +343,8 @@ const projectExplorerToggle = requiredElement<HTMLButtonElement>(
   'project-explorer-toggle',
 );
 const editorTabs = requiredElement('editor-tabs');
-const projectLocation = requiredElement('project-location');
+const projectLocation = requiredElement<HTMLButtonElement>('project-location');
+const projectStorageMenu = requiredElement('project-storage-menu');
 const openFolderButton =
   requiredElement<HTMLButtonElement>('open-folder-button');
 const reconnectFolderButton = requiredElement<HTMLButtonElement>(
@@ -329,19 +356,38 @@ const reloadFolderButton = requiredElement<HTMLButtonElement>(
 const browserStorageButton = requiredElement<HTMLButtonElement>(
   'browser-storage-button',
 );
-const resetButton = requiredElement<HTMLButtonElement>('reset-button');
 const newFileButton = requiredElement<HTMLButtonElement>('new-file-button');
 const newFolderButton = requiredElement<HTMLButtonElement>('new-folder-button');
-const searchFilesButton = requiredElement<HTMLButtonElement>(
-  'search-files-button',
-);
 const refreshFilesButton = requiredElement<HTMLButtonElement>(
   'refresh-files-button',
 );
+openFolderButton.append(createIcon(FolderOpen));
 newFileButton.append(createIcon(FilePlus));
 newFolderButton.append(createIcon(FolderPlus));
-searchFilesButton.append(createIcon(Search));
 refreshFilesButton.append(createIcon(RefreshCw));
+
+projectLocation.addEventListener('click', () => {
+  if (projectStorageMenu.matches(':popover-open')) {
+    projectStorageMenu.hidePopover();
+    return;
+  }
+  projectStorageMenu.showPopover();
+  const anchor = projectLocation.getBoundingClientRect();
+  const menu = projectStorageMenu.getBoundingClientRect();
+  projectStorageMenu.style.left = `${Math.max(8, Math.min(anchor.left, innerWidth - menu.width - 8))}px`;
+  projectStorageMenu.style.top = `${Math.max(8, Math.min(anchor.bottom + 6, innerHeight - menu.height - 8))}px`;
+});
+projectStorageMenu.addEventListener('toggle', () => {
+  projectLocation.setAttribute(
+    'aria-expanded',
+    String(projectStorageMenu.matches(':popover-open')),
+  );
+});
+projectStorageMenu.addEventListener('click', event => {
+  if ((event.target as Element).closest('button'))
+    projectStorageMenu.hidePopover();
+});
+window.addEventListener('resize', () => projectStorageMenu.hidePopover());
 
 const projectExplorerStorageKey = 'code3d:project-explorer-expanded';
 setProjectExplorerExpanded(
@@ -382,27 +428,34 @@ const codeEditor = new CodeEditor(
   initialProject.files[0]?.path,
 );
 replaceFileRoute(codeEditor.currentFile());
-const packageInstaller = !directoryWorkspaceId
-  ? new BrowserPackageInstaller(
+const packageManager = !directoryWorkspaceId
+  ? new BrowserPackageManager(
       projectFileSystem as BrowserProjectFileSystem,
       progress => projectDirectory.setPackageProgress(progress),
       undefined,
-      () => {
-        void projectDirectory.refresh();
+      async ({directory}) => {
+        await codeEditor.refreshPackageInstallation(
+          directory,
+          projectFileSystem,
+        );
+        await projectDirectory.refresh();
+        renderProjectNavigation();
       },
+      developmentWorkspaces,
     )
   : undefined;
-const packageFiles = packageInstaller ?? projectFileSystem;
+const packageFiles = packageManager?.dependencies ?? localPackageFiles;
 const navigationPackages = new ProjectPackages(
-  packageFiles,
+  localPackageFiles,
   browserPackageFiles,
 );
 codeEditor.fileReader = {
   async readFile(path) {
     // Editable project files retain their source, not runtime package metadata.
-    if (!path.includes('/node_modules/')) return packageFiles.readFile(path);
+    if (!path.includes('/node_modules/'))
+      return projectFileSystem.readFile(path);
     // Browsing an already installed file does not wait for a replacement download.
-    const installed = await projectFileSystem.readFile(path);
+    const installed = await localPackageFiles.readFile(path);
     if (installed !== undefined) return installed;
     await navigationPackages.update(
       codeEditor.project(),
@@ -413,23 +466,14 @@ codeEditor.fileReader = {
   async stat(path) {
     if (!path.includes('/node_modules/')) return projectFileSystem.stat(path);
     return (
-      (await projectFileSystem.stat(path)) ?? navigationPackages.stat(path)
+      (await localPackageFiles.stat(path)) ?? navigationPackages.stat(path)
     );
   },
 };
-const preparePackages = async (
-  _project: ModelProject,
-  file: string,
-  options?: {update?: boolean},
-) => {
-  if (!packageInstaller) return;
+const preparePackages = async (_project: ModelProject, file: string) => {
+  if (!packageManager) return;
   await agentProject.flush();
-  await packageInstaller.prepare(file, options);
-  const scope = await findPackageScope(projectFileSystem, file);
-  await codeEditor.refreshPackageLock(
-    normalizeProjectPath(scope.directory + '/code3d-lock.json'),
-  );
-  renderProjectNavigation();
+  await packageManager.prepare(file);
 };
 const compiler = new ModelCompilerClient(
   packageFiles,
@@ -473,10 +517,9 @@ const projectDirectory = new ProjectTree(projectTree, {
     searchProjectEntries(projectFileSystem, cancelled, onEntries),
   onOpenFile: (path, takeFocus) => activateProjectFile(path, takeFocus),
   onOperation: operation => agentProject.changeEntries(operation),
-  onInstallPackage: packageInstaller ? installProjectPackage : undefined,
-  onUpdateDependencies: packageInstaller
-    ? updateProjectDependencies
-    : undefined,
+  examples: {directory: bundledExamples.directory, reset: resetExamples},
+  onInstallPackage: packageManager ? installProjectPackage : undefined,
+  onUpdateDependencies: packageManager ? updateProjectDependencies : undefined,
   onBusy: busy => {
     if (busy) fileOpenVersion++;
     codeEditor.setReadOnly(busy);
@@ -522,7 +565,7 @@ async function installProjectPackage(selectedDirectory: string): Promise<void> {
   const specifier = await askInstallPackage(directory);
   if (!specifier) return;
   const path = normalizeProjectPath(directory + '/package.json');
-  await runPackageOperation(directory, 'Packages installed', async () => {
+  await packageManager!.install(directory, async () => {
     await agentProject.update(async () => {
       const bytes = await projectFileSystem.readFile(path);
       const manifest =
@@ -535,48 +578,14 @@ async function installProjectPackage(selectedDirectory: string): Promise<void> {
       ]);
       await codeEditor.openFile(path);
     });
-    await preparePackages(codeEditor.project(), path);
+    await agentProject.flush();
   });
 }
 
 async function updateProjectDependencies(directory: string): Promise<void> {
-  await runPackageOperation(directory, 'Dependencies updated', () =>
-    preparePackages(
-      codeEditor.project(),
-      normalizeProjectPath(directory + '/package.json'),
-      {update: true},
-    ),
-  );
+  await packageManager!.update(directory, () => agentProject.flush());
 }
 
-async function runPackageOperation(
-  directory: string,
-  successMessage: string,
-  operation: () => Promise<void>,
-): Promise<void> {
-  projectDirectory.setPackageProgress({
-    directory,
-    state: 'busy',
-    message: 'Preparing packages',
-  });
-  try {
-    await operation();
-    projectDirectory.setPackageProgress({
-      directory,
-      state: 'ready',
-      message: successMessage,
-    });
-  } catch (error) {
-    // The installer reports its own failures. Earlier manifest/save failures
-    // also belong to this package operation, never the explorer's file error.
-    if (!(error instanceof PackageInstallationError))
-      projectDirectory.setPackageProgress({
-        directory,
-        state: 'error',
-        message: error instanceof Error ? error.message : String(error),
-      });
-  }
-}
 let sourcePreviewDiagnostic: ModelDiagnostic | undefined;
 let compileTimer: number | undefined;
 let completionPreviewTimer: number | undefined;
@@ -649,9 +658,26 @@ type ContextualToolState = {
   historyState: 'applied' | 'undone';
 };
 
+const viewportGridScale = new ViewportGridScale(viewportFeedbackStack);
+let modelGridStep: number | undefined;
+let sketchGridStep: number | undefined;
+let showModelGrid = true;
+function refreshViewportGridScale(): void {
+  const step = sketchGridStep ?? modelGridStep;
+  if (step !== undefined) viewportGridScale.update(step);
+  viewportGridScale.setVisible(
+    step !== undefined && (sketchGridStep !== undefined || showModelGrid),
+  );
+}
 const viewport = new ModelViewport(viewportHost, {
   onViewChange: refreshViewportEmptyState,
+  onGridStepChange: step => {
+    modelGridStep = step;
+    refreshViewportGridScale();
+  },
   onRenderModeChange: mode => {
+    showModelGrid = mode === 'modeling';
+    refreshViewportGridScale();
     for (const candidate of viewportModes)
       candidate.button.setAttribute(
         'aria-pressed',
@@ -803,6 +829,10 @@ const toolEngine = new ToolEngine({
   clearPreview: (preview, reason) => clearToolPreview(preview, reason),
 });
 const sketchEditor = new SketchEditorController(viewportHost, {
+  onGridStepChange: step => {
+    sketchGridStep = step;
+    refreshViewportGridScale();
+  },
   solve: (layers, drag) => compiler.previewSketchDrag(layers, drag),
   resolveSourceRef: ref => codeEditor.resolveSourceRef(ref),
   readSource: ref => {
@@ -966,7 +996,6 @@ newFolderButton.addEventListener(
   'click',
   () => void projectDirectory.create('directory'),
 );
-searchFilesButton.addEventListener('click', () => projectDirectory.search());
 refreshFilesButton.addEventListener(
   'click',
   () => void projectDirectory.refresh(),
@@ -982,16 +1011,6 @@ reloadFolderButton.addEventListener('click', () => {
 });
 browserStorageButton.addEventListener('click', () => {
   void useBrowserStorage();
-});
-resetButton.addEventListener('click', () => {
-  if (
-    !window.confirm(
-      'Reset bundled examples? Files under /examples will be replaced. Other project files will not change.',
-    )
-  ) {
-    return;
-  }
-  void resetExamples();
 });
 
 window.addEventListener('keydown', event => {
@@ -1018,10 +1037,11 @@ runModel();
 
 function renderProjectLocation(): void {
   if (directoryConnected) {
-    projectLocation.textContent = `Local · ${storedDirectoryHandle.name}`;
+    projectLocation.textContent = storedDirectoryHandle.name;
     projectLocation.dataset.kind = 'local';
     projectLocation.title = `Files are stored directly in ${storedDirectoryHandle.name}`;
-    openFolderButton.textContent = 'Change folder';
+    openFolderButton.title = 'Change folder';
+    openFolderButton.setAttribute('aria-label', 'Change folder');
     reconnectFolderButton.hidden = true;
     reloadFolderButton.hidden = false;
     browserStorageButton.hidden = false;
@@ -1031,7 +1051,9 @@ function renderProjectLocation(): void {
   projectLocation.textContent = 'Browser storage';
   projectLocation.dataset.kind = 'browser';
   projectLocation.title = 'Files are stored in this browser';
-  openFolderButton.textContent = 'Open folder';
+  projectLocation.disabled = storedDirectoryHandle === undefined;
+  openFolderButton.title = 'Open folder';
+  openFolderButton.setAttribute('aria-label', 'Open folder');
   openFolderButton.disabled = !supportsProjectDirectories();
   reconnectFolderButton.hidden = storedDirectoryHandle === undefined;
   reconnectFolderButton.textContent = storedDirectoryHandle
@@ -1047,11 +1069,6 @@ async function openProjectDirectory(): Promise<void> {
     await agentProject.flush();
     const handle = await pickProjectDirectory();
     if (!handle) return;
-    const target = await openDirectoryProjectFileSystem(handle);
-    await target.initialize(() =>
-      copyProjectWorkspace(projectFileSystem, target),
-    );
-    await target.syncDirectory(bundledExamples);
     const workspaceId = await rememberProjectDirectory(handle);
     openDirectoryWorkspace(workspaceId);
   } catch (error) {
@@ -1104,12 +1121,14 @@ async function useBrowserStorage(): Promise<void> {
 function openDirectoryWorkspace(workspaceId: string): void {
   const url = new URL(window.location.href);
   url.searchParams.set('workspace', workspaceId);
+  url.hash = '';
   window.location.replace(url);
 }
 
 function openBrowserWorkspace(): void {
   const url = new URL(window.location.href);
   url.searchParams.delete('workspace');
+  url.hash = '';
   window.location.replace(url);
 }
 
@@ -1122,6 +1141,15 @@ function setProjectLocationBusy(busy: boolean): void {
 
 async function resetExamples(): Promise<void> {
   try {
+    const existing = await projectFileSystem.stat(bundledExamples.directory);
+    if (
+      !window.confirm(
+        existing
+          ? 'Reset bundled examples? Files under /examples will be replaced. Other project files will not change.'
+          : 'Create bundled examples in /examples?',
+      )
+    )
+      return;
     await agentProject.flush();
     await agentProject.update(async () => {
       await projectFileSystem.resetDirectory(bundledExamples);
@@ -1144,7 +1172,7 @@ async function loadInitialProject(): Promise<ModelProject> {
         files: [
           {
             path: requestedFile,
-            source: await readProjectTextFile(projectFileSystem, requestedFile),
+            source: await readProjectTextFile(localPackageFiles, requestedFile),
           },
         ],
       };
@@ -1380,10 +1408,11 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
       pendingAgentFollow = undefined;
       if (
         agentPanel?.followingAgentId === following.agentId &&
-        !sketchEditor.hasTarget &&
-        following.view
-      )
-        viewport.setView(resolveRenderView(following.view));
+        !sketchEditor.hasTarget
+      ) {
+        if (following.mode) viewport.setRenderMode(following.mode);
+        if (following.view) viewport.setView(resolveRenderView(following.view));
+      }
     }
     if (!(await presentModelDiagnostic(request))) return;
     restoreModelStatus();
@@ -1863,6 +1892,7 @@ function syncContextualTool(sourceTargetFocused = true): void {
       scope.evaluation.sketchIds[0],
       previewState.module.sketches,
       scope.target.sourceRef,
+      previewState.module.objects,
     );
   } else if (
     (!sourceTargetFocused ||
@@ -2775,7 +2805,10 @@ function positionIntent(
 ): ToolIntent {
   if (binding.kind === 'spatial') return spatialIntent(binding, value);
   if (binding.kind === 'parameter') {
-    return parameterIntent(binding.target, value);
+    return {
+      ...parameterIntent(binding.target, value),
+      completeArguments: binding.completeArguments,
+    };
   }
   const delta: [number, number, number] = [0, 0, 0];
   delta[positionAxisIndex(binding.axis)] = value;
@@ -2799,7 +2832,11 @@ function positionBindingId(binding: TransformGizmoBinding): string {
   if (binding.kind === 'spatial') {
     const source = binding.spatial.source;
     if (source.kind === 'parameter') return source.target.id;
-    return `spatial:${source.sourceRef.file}:${source.sourceRef.start}:${source.sourceRef.end}`;
+    const sourceRef =
+      source.kind === 'omitted-argument'
+        ? source.target.sourceRef
+        : source.sourceRef;
+    return `spatial:${sourceRef.file}:${sourceRef.start}:${sourceRef.end}`;
   }
   if (binding.kind === 'parameter') {
     return binding.target.id;

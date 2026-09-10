@@ -39,7 +39,13 @@ export function contextualToolParameters(
         const source = arguments_.find(
           candidate => candidate.index === schema.index,
         );
-        const argument = source?.target;
+        const candidate = source?.target;
+        // The panel fills sequentially; a gizmo may explicitly choose a later axis.
+        const argument =
+          candidate?.kind === 'omitted' &&
+          candidate.prefixes?.some(values => values.length > 0)
+            ? undefined
+            : candidate;
         const matches = editableParameterUsages(
           usages.filter(
             usage =>

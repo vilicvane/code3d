@@ -2,7 +2,7 @@ import {
   identifyCachedCall,
   type CachedDefinitions,
 } from '../project/cached-definitions';
-import {argumentExpression} from './argument-path';
+import {argumentExpression, unwrapArgument} from './argument-path';
 import ts from '@typescript/typescript6';
 import {normalizeProjectPath, type ModelProject} from '../project/project';
 import {
@@ -21,6 +21,8 @@ import {
   type ModelOperationSnapshot,
   type ModelSnapshotObject,
   type ModelObject,
+  type RelationObject,
+  type Sketch,
   type ParameterKind,
   type ParameterTarget,
   type ParameterUsage,
@@ -287,11 +289,11 @@ type CatalogTrace = {
   category: ObjectCatalogEntry['category'];
   scope: ObjectCatalogEntry['scope'];
   sourceRef: SourceRef;
-  objects: Set<ModelObject>;
+  objects: Set<RelationObject>;
   runs: Array<
     Readonly<{
       order: number;
-      objects: readonly ModelObject[];
+      objects: readonly RelationObject[];
     }>
   >;
 };
@@ -304,9 +306,9 @@ type SourceValueTrace = {
   scopeRef?: SourceRef;
   evaluations: Array<
     Readonly<{
-      objects: readonly ModelObject[];
+      objects: readonly RelationObject[];
       isCollection: boolean;
-      sketchIds: readonly string[];
+      sketches: readonly Sketch[];
       topologyReferences: readonly TopologyValueReference[];
       anchorReferences: readonly AnchorValueReference[];
       contextId: string;
@@ -321,7 +323,7 @@ type SourceInputTrace = Readonly<{
   execution: number;
   sourceRef: SourceRef;
   isCollection: boolean;
-  objects: readonly ModelObject[];
+  objects: readonly RelationObject[];
   contextId: string;
   runtime: RuntimeReach;
 }>;
@@ -332,9 +334,9 @@ type SourceConstraintTrace = {
   evaluations: Array<
     Readonly<{
       constraintId: string;
-      source: ModelObject;
-      target: ModelObject;
-      self?: ModelObject;
+      source: RelationObject;
+      target: RelationObject;
+      self?: RelationObject;
       expression: ConstraintExpression;
       contextId: string;
       runtime: RuntimeReach;
@@ -348,7 +350,7 @@ type SourceElementTrace = {
   receiverRef: SourceRef;
   evaluations: Array<
     Readonly<{
-      model: ModelObject;
+      model: RelationObject;
       name: string;
       kind: ElementKind;
       transform: Transform;
@@ -407,6 +409,8 @@ export function createModelCompiler(
     instrumentModelOperation,
     isConstraintExpression,
     isModelObject,
+    isSketch,
+    sketchFrame,
     modelElementReference,
     modelObjectRuntimeInfo,
     modelTopologyReference,
@@ -422,7 +426,7 @@ export function createModelCompiler(
       'evaluation',
       runtime.describeOpenCascadeException,
     );
-  const tracedObjects = new Set<ModelObject>();
+  const tracedObjects = new Set<RelationObject>();
   const sketches = new SketchTraceRegistry(runtime);
   const sourceValueTraces = new Map<string, SourceValueTrace>();
   const sourceConstraintTraces = new Map<string, SourceConstraintTrace>();
@@ -551,6 +555,14 @@ export function createModelCompiler(
         recordSourceValue(id, 'value', location, result, context.id, runtime);
       }
       const order = ++evaluationOrder;
+      if (isSketch(result))
+        instrumentModelOperation(sketchFrame(result), {
+          siteId: id,
+          execution,
+          order,
+          sourceRef: location,
+          parameters,
+        });
       if (context.kind === 'call') {
         recordCatalogValue(
           {
@@ -690,6 +702,17 @@ export function createModelCompiler(
     ): T {
       const executionTrace = traceFrames.at(-1)?.trace;
       if (executionTrace?.siteId !== siteId) {
+        return value;
+      }
+      if (isSketch(value)) {
+        recordSourceValue(
+          id,
+          'value',
+          sourceRef(file, start, end),
+          value,
+          executionTrace.contextId,
+          completedRuntimeReach(),
+        );
         return value;
       }
       if (isConstraintExpression(value)) {
@@ -897,8 +920,8 @@ export function createModelCompiler(
       topologyReferences,
       anchorReferences,
     );
-    const sketchIds = runtimeSketchIds(value);
-    if (objects.length === 0 && sketchIds.length === 0) {
+    const sketchValues = runtimeSketchValues(value);
+    if (objects.length === 0 && sketchValues.length === 0) {
       return;
     }
     const key = `${kind}:${id}:${sourceRef.file}:${sourceRef.start}:${sourceRef.end}`;
@@ -911,10 +934,10 @@ export function createModelCompiler(
     };
     sourceTrace.evaluations.push({
       objects,
-      sketchIds,
+      sketches: sketchValues,
       isCollection:
         !isModelObject(value) &&
-        sketchIds.length === 0 &&
+        sketchValues.length === 0 &&
         !modelElementReference(value),
       topologyReferences,
       anchorReferences,
@@ -923,15 +946,21 @@ export function createModelCompiler(
     });
     objects.forEach(object => {
       tracedObjects.add(object);
-      if (evaluationContexts.get(contextId)?.kind === 'call') {
+      if (
+        isModelObject(object) &&
+        evaluationContexts.get(contextId)?.kind === 'call'
+      ) {
         latestTracedObject = object;
       }
     });
     sourceValueTraces.set(key, sourceTrace);
   }
 
-  function runtimeSketchIds(value: unknown): string[] {
-    if (runtime.isSketch(value)) return [sketches.identity(value)];
+  function runtimeSketchValues(value: unknown): Sketch[] {
+    if (runtime.isSketch(value)) {
+      sketches.identity(value);
+      return [value];
+    }
     return [];
   }
 
@@ -973,7 +1002,7 @@ export function createModelCompiler(
     }
     const trace = catalogTraces.get(metadata.id) ?? {
       ...metadata,
-      objects: new Set<ModelObject>(),
+      objects: new Set<RelationObject>(),
       runs: [],
     };
     objects.forEach(object => trace.objects.add(object));
@@ -1003,7 +1032,7 @@ export function createModelCompiler(
     seen = new Set<unknown>(),
     topologyReferences?: TopologyValueReference[],
     anchorReferences?: AnchorValueReference[],
-  ): ModelObject[] {
+  ): RelationObject[] {
     if (isModelObject(value)) {
       return [value];
     }
@@ -1324,9 +1353,9 @@ export function createModelCompiler(
     sourceGraph: ProjectBundle,
     requestedDesignContext?: DesignContext,
     onEvaluate?: () => void,
-    captureGeometry?: (objects: readonly ModelObject[]) => void,
+    captureGeometry?: (objects: readonly RelationObject[]) => void,
     checkCancelled: () => void = () => {},
-    prepareSnapshots?: (objects: readonly ModelObject[]) => Promise<void>,
+    prepareSnapshots?: (objects: readonly RelationObject[]) => Promise<void>,
   ): Promise<ModelModule> {
     checkCancelled();
     const files = new Map(
@@ -1437,8 +1466,8 @@ export function createModelCompiler(
       }
 
       checkCancelled();
-      const modelExports = new Map<string, ModelObject>();
-      const exportNamesByObject = new Map<ModelObject, Set<string>>();
+      const modelExports = new Map<string, RelationObject>();
+      const exportNamesByObject = new Map<RelationObject, Set<string>>();
       for (const [modulePath, module] of modules) {
         for (const [name, value] of Object.entries(module)) {
           const exportLabel =
@@ -1462,7 +1491,10 @@ export function createModelCompiler(
         diagnostic = relateDiagnostic(diagnostic, fallbackObject);
       }
 
-      const graphObjects = collectObjectGraph(tracedObjects);
+      const graphObjects = collectObjectGraph([
+        ...tracedObjects,
+        ...sketches.frames(),
+      ]);
       graphObjects.forEach(object => tracedObjects.add(object));
       await prepareSnapshots?.(
         fallbackObject && !graphObjects.includes(fallbackObject)
@@ -1471,8 +1503,8 @@ export function createModelCompiler(
       );
       checkCancelled();
       const snapshotModel = createModelSnapshotter();
-      const snapshots = new Map<ModelObject, ModelSnapshotObject>();
-      const snapshotOf = (object: ModelObject): ModelSnapshotObject => {
+      const snapshots = new Map<RelationObject, ModelSnapshotObject>();
+      const snapshotOf = (object: RelationObject): ModelSnapshotObject => {
         checkCancelled();
         const existing = snapshots.get(object);
         if (existing) return existing;
@@ -1633,9 +1665,11 @@ export function createModelCompiler(
     return `__code3d.design(${JSON.stringify(context.functionRef.file)}, ${context.functionRef.start}, ${context.functionRef.end}, ${context.callRef.start}, ${context.callRef.end}, ${JSON.stringify(context.id)}, ${JSON.stringify(context.functionId)}, ${JSON.stringify(context.label)}, () => ${context.binding}(...(${context.argumentsSource})));`;
   }
 
-  function collectObjectGraph(roots: Iterable<ModelObject>): ModelObject[] {
-    const found = new Set<ModelObject>();
-    const visit = (object: ModelObject): void => {
+  function collectObjectGraph(
+    roots: Iterable<RelationObject>,
+  ): RelationObject[] {
+    const found = new Set<RelationObject>();
+    const visit = (object: RelationObject): void => {
       if (found.has(object)) {
         return;
       }
@@ -1648,21 +1682,21 @@ export function createModelCompiler(
     return [...found];
   }
 
-  function modelObjectNodeId(object: ModelObject): string {
+  function modelObjectNodeId(object: RelationObject): string {
     return modelObjectRuntimeInfo(object).nodeId;
   }
 
-  function modelObjectName(object: ModelObject): string {
+  function modelObjectName(object: RelationObject): string {
     return modelObjectRuntimeInfo(object).name;
   }
 
-  function modelObjectSourceRefs(object: ModelObject): readonly SourceRef[] {
+  function modelObjectSourceRefs(object: RelationObject): readonly SourceRef[] {
     return modelObjectRuntimeInfo(object).sourceRefs;
   }
 
   function relateDiagnostic(
     diagnostic: ModelDiagnostic,
-    fallback: ModelObject | undefined,
+    fallback: RelationObject | undefined,
   ): ModelDiagnostic {
     if (diagnostic.kind !== 'evaluation') return diagnostic;
     const failures = [...sourceExecutionTraces.values()].filter(
@@ -1722,7 +1756,7 @@ export function createModelCompiler(
         ({
           objects,
           isCollection,
-          sketchIds,
+          sketches: sketchValues,
           topologyReferences,
           anchorReferences,
           contextId,
@@ -1738,7 +1772,7 @@ export function createModelCompiler(
             isCollection,
             runtime,
             nodeIds,
-            sketchIds,
+            sketchIds: sketchValues.map(value => sketches.identity(value)),
             topologyReferences,
             anchorReferences,
             focusNodeIds:
@@ -2591,7 +2625,7 @@ export function createModelCompiler(
     return nodeIds;
   }
 
-  function uniqueNodeIds(...models: readonly ModelObject[]): string[] {
+  function uniqueNodeIds(...models: readonly RelationObject[]): string[] {
     return [...new Set(models.map(modelObjectNodeId))];
   }
 
@@ -2607,7 +2641,7 @@ export function createModelCompiler(
         operationId?: string;
         role?: ModelOperationInputRole;
         isCollection?: boolean;
-        objects: readonly ModelObject[];
+        objects: readonly RelationObject[];
         contextId: string;
         runtime: RuntimeReach;
       }>
@@ -2674,6 +2708,31 @@ export function createModelCompiler(
             cached,
             factory,
           );
+          // A standalone value expression is a concrete use site, including a
+          // sketch reference. Calls already record their returned value. Keep
+          // directive prologues and control-flow-sensitive expressions intact.
+          if (
+            ts.isExpressionStatement(node) &&
+            ts.isExpressionStatement(visited) &&
+            !ts.isCallExpression(node.expression) &&
+            !ts.isStringLiteral(node.expression) &&
+            isTraceableExpression(node.expression, sourceFile)
+          ) {
+            return factory.updateExpressionStatement(
+              visited,
+              bindExpression(
+                visited.expression,
+                node.expression.getStart(sourceFile),
+                node.expression.getEnd(),
+                sourceFile.fileName,
+                stableSourceId('value', node.expression, sourceFile),
+                node.expression.getText(sourceFile),
+                'expression',
+                ts.isSourceFile(node.parent) ? 'module' : 'local',
+                factory,
+              ),
+            );
+          }
           if (
             ts.isFunctionLike(node) &&
             ts.isFunctionLike(visited) &&
@@ -3852,51 +3911,82 @@ export function createModelCompiler(
     sourceFile: ts.SourceFile,
   ): ToolCallSite {
     const sourceStart = callSourceStart(node, sourceFile);
-    const spreadIndex = node.arguments.findIndex(ts.isSpreadElement);
     return {
       siteId,
       sourceRef: sourceRef(sourceFile.fileName, sourceStart, node.getEnd()),
       signature,
       arguments: signature.parameters.map(parameter => {
         const path = parameter.path ?? [parameter.index];
-        const unknown =
-          (spreadIndex >= 0 && path[0] >= spreadIndex) ||
-          (path.length > 1 && !argumentExpression(node.arguments, path));
         return {
           name: parameter.name,
           index: parameter.index,
-          presence: unknown
-            ? 'unknown'
-            : path[0] < node.arguments.length
-              ? 'present'
-              : 'omitted',
-          target: unknown
-            ? undefined
-            : toolArgumentSource(node, path, sourceFile),
+          ...toolArgumentLocation(node, path, signature, sourceFile),
         };
       }),
     };
   }
 
-  function toolArgumentSource(
+  function toolArgumentLocation(
     call: ts.CallExpression,
     path: readonly number[],
+    signature: ToolSignatureSchema,
     sourceFile: ts.SourceFile,
-  ): ToolArgumentSource['target'] | undefined {
-    const index = path[0];
-    const argument = argumentExpression(call.arguments, path);
-    if (path.length > 1) {
-      if (!argument) return undefined;
-      const location = sourceRef(
-        sourceFile.fileName,
-        argument.getStart(sourceFile),
-        argument.getEnd(),
-      );
-      return {kind: 'present', sourceRef: location, removalSourceRef: location};
-    }
-    if (argument) {
-      const previous = call.arguments[index - 1];
-      const next = call.arguments[index + 1];
+  ): Pick<ToolArgumentSource, 'presence' | 'target'> {
+    let container: ts.CallExpression | ts.ArrayLiteralExpression = call;
+    let arguments_: ts.NodeArray<ts.Expression> = call.arguments;
+    for (const [depth, index] of path.entries()) {
+      if (arguments_.slice(0, index + 1).some(ts.isSpreadElement))
+        return {presence: 'unknown'};
+      const argument = arguments_[index];
+      if (!argument || ts.isOmittedExpression(argument)) {
+        const prefixes: number[][] = [];
+        for (let level = depth; level < path.length; level++) {
+          const values: number[] = [];
+          const start = level === depth ? arguments_.length : 0;
+          for (let sibling = start; sibling < path[level]; sibling++) {
+            const siblingPath = [...path.slice(0, level), sibling];
+            const parameter = signature.parameters.find(parameter => {
+              const candidate = parameter.path ?? [parameter.index];
+              return (
+                candidate.length === siblingPath.length &&
+                candidate.every((value, index) => value === siblingPath[index])
+              );
+            });
+            if (
+              !parameter ||
+              isToolSelectionParameter(parameter) ||
+              parameter.default === undefined
+            )
+              return {presence: 'omitted'};
+            values.push(parameter.default);
+          }
+          prefixes.push(values);
+        }
+        const position =
+          argument?.getStart(sourceFile) ?? container.getEnd() - 1;
+        return {
+          presence: 'omitted',
+          target: {
+            kind: 'omitted',
+            sourceRef: sourceRef(sourceFile.fileName, position, position),
+            needsComma:
+              !argument &&
+              arguments_.length > 0 &&
+              !arguments_.hasTrailingComma,
+            ...(prefixes.length > 1 || prefixes[0].length ? {prefixes} : {}),
+          },
+        };
+      }
+      if (depth < path.length - 1) {
+        const expression = unwrapArgument(argument);
+        if (!ts.isArrayLiteralExpression(expression))
+          return {presence: 'unknown'};
+        container = expression;
+        arguments_ = expression.elements;
+        continue;
+      }
+      const previous = arguments_[index - 1];
+      const next = arguments_[index + 1];
       const removalStart = previous
         ? previous.getEnd()
         : argument.getStart(sourceFile);
@@ -3905,27 +3995,24 @@ export function createModelCompiler(
         : next
           ? next.getStart(sourceFile)
           : argument.getEnd();
+      const location = sourceRef(
+        sourceFile.fileName,
+        argument.getStart(sourceFile),
+        argument.getEnd(),
+      );
       return {
-        kind: 'present',
-        sourceRef: sourceRef(
-          sourceFile.fileName,
-          argument.getStart(sourceFile),
-          argument.getEnd(),
-        ),
-        removalSourceRef: sourceRef(
-          sourceFile.fileName,
-          removalStart,
-          removalEnd,
-        ),
+        presence: 'present',
+        target: {
+          kind: 'present',
+          sourceRef: location,
+          removalSourceRef:
+            depth > 0
+              ? location
+              : sourceRef(sourceFile.fileName, removalStart, removalEnd),
+        },
       };
     }
-    if (index !== call.arguments.length) return undefined;
-    const closeParen = call.getEnd() - 1;
-    return {
-      kind: 'omitted',
-      sourceRef: sourceRef(sourceFile.fileName, closeParen, closeParen),
-      needsComma: call.arguments.length > 0 && !call.arguments.hasTrailingComma,
-    };
+    return {presence: 'unknown'};
   }
 
   function parameterSignatureFor(

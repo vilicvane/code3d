@@ -14,6 +14,7 @@ import {
 } from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
+import {setImmediate as nextTurn} from 'node:timers/promises';
 import {packTar} from 'modern-tar';
 import * as esbuild from 'esbuild';
 import type {BrowserProjectFileSystem} from '../src/project/filesystem.ts';
@@ -22,7 +23,7 @@ import type {PackageManifest} from '../src/project/package-manifest.ts';
 import {createAppTestServer} from './vite-test-server.ts';
 
 let server: Awaited<ReturnType<typeof createAppTestServer>>;
-let BrowserPackageInstaller: typeof import('../src/project/browser-package-installer.ts').BrowserPackageInstaller;
+let BrowserPackageManager: typeof import('../src/project/browser-package-manager.ts').BrowserPackageManager;
 let NpmRegistry: typeof import('../src/project/npm-registry.ts').NpmRegistry;
 let extractNpmArchive: typeof import('../src/project/npm-registry.ts').extractNpmArchive;
 let manifests: typeof import('../src/project/package-manifest.ts');
@@ -34,9 +35,9 @@ before(async () => {
   manifests = await server.ssrLoadModule<
     typeof import('../src/project/package-manifest.ts')
   >('/src/project/package-manifest.ts');
-  ({BrowserPackageInstaller} = await server.ssrLoadModule<
-    typeof import('../src/project/browser-package-installer.ts')
-  >('/src/project/browser-package-installer.ts'));
+  ({BrowserPackageManager} = await server.ssrLoadModule<
+    typeof import('../src/project/browser-package-manager.ts')
+  >('/src/project/browser-package-manager.ts'));
   ({NpmRegistry, extractNpmArchive} = await server.ssrLoadModule<
     typeof import('../src/project/npm-registry.ts')
   >('/src/project/npm-registry.ts'));
@@ -201,6 +202,7 @@ async function registryFixture() {
   };
   return {
     add,
+    request,
     requests,
     registry: () => new NpmRegistry(request),
     setOffline: (value: boolean) => (offline = value),
@@ -256,7 +258,7 @@ test('subprojects install exact versions, all package files, types, sources, ass
       '/b/model.ts',
       "import {value} from 'shared'; export default value;",
     );
-    const installer = new BrowserPackageInstaller(
+    const installer = new BrowserPackageManager(
       disk.files,
       () => {},
       registry.registry,
@@ -267,7 +269,7 @@ test('subprojects install exact versions, all package files, types, sources, ass
       undefined,
       'unreached subproject stays uninstalled',
     );
-    const builder = new ProjectBuilder(installer, esbuild);
+    const builder = new ProjectBuilder(installer.dependencies, esbuild);
     const tool = await builder.resolve('tool', '/a/model.ts');
     assert.ok(tool);
     assert.ok(tool.includes('/a/node_modules/.code3d/'));
@@ -290,7 +292,9 @@ test('subprojects install exact versions, all package files, types, sources, ass
       await disk.files.readFile(path.posix.dirname(tool) + '/kernel.wasm'),
       new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]),
     );
-    const language = await new ProjectLanguageLoader(installer).load(
+    const language = await new ProjectLanguageLoader(
+      installer.dependencies,
+    ).load(
       {
         files: [
           {path: '/a/model.ts', source},
@@ -311,10 +315,10 @@ test('subprojects install exact versions, all package files, types, sources, ass
       !language.files.some(file => file.path.startsWith('/b/node_modules')),
     );
     await installer.prepare('/b/model.ts');
-    const bShared = await new ProjectBuilder(installer, esbuild).resolve(
-      'shared',
-      '/b/model.ts',
-    );
+    const bShared = await new ProjectBuilder(
+      installer.dependencies,
+      esbuild,
+    ).resolve('shared', '/b/model.ts');
     assert.ok(bShared);
     assert.match(
       new TextDecoder().decode(await disk.files.readFile(bShared)),
@@ -322,7 +326,7 @@ test('subprojects install exact versions, all package files, types, sources, ass
     );
     const calls = registry.requests.length;
     registry.setOffline(true);
-    await new BrowserPackageInstaller(
+    await new BrowserPackageManager(
       disk.files,
       () => {},
       registry.registry,
@@ -348,7 +352,7 @@ test('copying an installed project restores its lock without traversing cyclic p
       JSON.stringify({dependencies: {'cycle-a': '1'}}),
     );
     await disk.files.writeFile('/source/model.ts', "import 'cycle-a';");
-    const installer = new BrowserPackageInstaller(
+    const installer = new BrowserPackageManager(
       disk.files,
       () => {},
       registry.registry,
@@ -365,7 +369,7 @@ test('copying an installed project restores its lock without traversing cyclic p
     }
     await installer.prepare('/copy/model.ts');
     assert.deepEqual(await disk.files.readFile('/copy/code3d-lock.json'), lock);
-    const builder = new ProjectBuilder(installer, esbuild);
+    const builder = new ProjectBuilder(installer.dependencies, esbuild);
     const copied = await builder.resolve('cycle-a', '/copy/model.ts');
     assert.ok(copied);
     assert.ok(copied.startsWith('/copy/node_modules/'));
@@ -377,7 +381,7 @@ test('copying an installed project restores its lock without traversing cyclic p
       lock,
     );
     registry.setOffline(true);
-    await new BrowserPackageInstaller(
+    await new BrowserPackageManager(
       disk.files,
       () => {},
       registry.registry,
@@ -399,7 +403,7 @@ test('manifest edits retain unchanged locked versions, remove old dependencies a
         '/package.json',
         JSON.stringify({type: 'module', dependencies}),
       );
-    const installer = new BrowserPackageInstaller(
+    const installer = new BrowserPackageManager(
       disk.files,
       () => {},
       registry.registry,
@@ -433,6 +437,224 @@ test('manifest edits retain unchanged locked versions, remove old dependencies a
   }
 });
 
+function signal() {
+  let resolve!: () => void;
+  const promise = new Promise<void>(done => {
+    resolve = done;
+  });
+  return {promise, resolve};
+}
+
+test(
+  'downloads overlap with a 15-job limit while extraction writes one package at a time',
+  {timeout: 20_000},
+  async t => {
+    const disk = await diskFiles();
+    const fixture = await registryFixture();
+    const names = Array.from({length: 20}, (_, index) => `parallel-${index}`);
+    for (const name of names) await fixture.add(name, '1.0.0');
+    await disk.files.writeFile(
+      '/package.json',
+      JSON.stringify({
+        dependencies: Object.fromEntries(names.map(name => [name, '1'])),
+      }),
+    );
+    const downloads = signal();
+    const full = signal();
+    const writing = signal();
+    const writes = signal();
+    let install: Promise<void> | undefined;
+    t.after(async () => {
+      downloads.resolve();
+      writes.resolve();
+      await install?.catch(() => {});
+      await disk.dispose();
+    });
+    let started = 0;
+    let active = 0;
+    let peak = 0;
+    let activeWrites = 0;
+    let peakWrites = 0;
+    const client = fixture.registry();
+    const archive = client.archive.bind(client);
+    t.mock.method(
+      client,
+      'archive',
+      async (pkg: Parameters<typeof archive>[0]) => {
+        started++;
+        peak = Math.max(peak, ++active);
+        if (active === 15) full.resolve();
+        try {
+          await downloads.promise;
+          return await archive(pkg);
+        } finally {
+          active--;
+        }
+      },
+    );
+    const write = disk.files.writeFile.bind(disk.files);
+    t.mock.method(
+      disk.files,
+      'writeFile',
+      async (...args: Parameters<typeof write>) => {
+        peakWrites = Math.max(peakWrites, ++activeWrites);
+        writing.resolve();
+        try {
+          await writes.promise;
+          return await write(...args);
+        } finally {
+          activeWrites--;
+        }
+      },
+    );
+    const installer = new BrowserPackageManager(
+      disk.files,
+      undefined,
+      () => client,
+    );
+    install = installer.prepare('/model.ts');
+    await full.promise;
+    assert.equal(started, 15, 'the initial download batch fills all 15 slots');
+    downloads.resolve();
+    await writing.promise;
+    await nextTurn();
+    assert.equal(
+      started,
+      15,
+      'slow extraction bounds queued archives instead of downloading the whole graph',
+    );
+    assert.equal(
+      peakWrites,
+      1,
+      'extraction does not write multiple packages at once',
+    );
+    writes.resolve();
+    await install;
+    assert.equal(started, 20);
+    assert.equal(peak, 15);
+    assert.equal(peakWrites, 1);
+    for (const name of names)
+      assert.ok(await disk.files.readFile(`/node_modules/${name}/index.js`));
+  },
+);
+
+for (const failure of ['download', 'extraction'])
+  test(
+    `a concurrent ${failure} failure settles active work before cleanup and preserves the previous install`,
+    {timeout: 20_000},
+    async t => {
+      const disk = await diskFiles();
+      const fixture = await registryFixture();
+      await fixture.add('stable', '1.0.0');
+      const client = fixture.registry();
+      const installer = new BrowserPackageManager(
+        disk.files,
+        undefined,
+        () => client,
+      );
+      await disk.files.writeFile(
+        '/package.json',
+        JSON.stringify({dependencies: {stable: '1'}}),
+      );
+      await installer.prepare('/model.ts');
+      const oldLock = await disk.files.readFile('/code3d-lock.json');
+      const oldMarker = await disk.files.readFile(
+        '/node_modules/.code3d-install.json',
+      );
+      const names = Array.from({length: 20}, (_, index) => `failing-${index}`);
+      for (const name of names) await fixture.add(name, '1.0.0');
+      await disk.files.writeFile(
+        '/package.json',
+        JSON.stringify({
+          dependencies: Object.fromEntries(names.map(name => [name, '1'])),
+        }),
+      );
+      const writing = signal();
+      const writes = signal();
+      const failed = signal();
+      let install: Promise<void> | undefined;
+      t.after(async () => {
+        writes.resolve();
+        await install?.catch(() => {});
+        await disk.dispose();
+      });
+      let started = 0;
+      let writeAfterCleanup = false;
+      let cleaned = false;
+      const archive = client.archive.bind(client);
+      const archiveMock = t.mock.method(
+        client,
+        'archive',
+        async (pkg: Parameters<typeof archive>[0]) => {
+          started++;
+          // Fail a download only after another package is actively writing.
+          if (failure === 'download' && started === 2) {
+            await writing.promise;
+            failed.resolve();
+            throw new Error('simulated installation failure');
+          }
+          return archive(pkg);
+        },
+      );
+      const write = disk.files.writeFile.bind(disk.files);
+      const writeMock = t.mock.method(
+        disk.files,
+        'writeFile',
+        async (...args: Parameters<typeof write>) => {
+          writing.resolve();
+          await writes.promise;
+          writeAfterCleanup ||= cleaned;
+          if (failure === 'extraction')
+            throw new Error('simulated installation failure');
+          return write(...args);
+        },
+      );
+      const remove = disk.files.remove.bind(disk.files);
+      const removeMock = t.mock.method(
+        disk.files,
+        'remove',
+        async (file: string) => {
+          if (file === '/.code3d/package-install') cleaned = true;
+          return remove(file);
+        },
+      );
+      install = installer.prepare('/model.ts');
+      const rejected = assert.rejects(
+        install,
+        /simulated installation failure/,
+      );
+      await writing.promise;
+      if (failure === 'download') await failed.promise;
+      await nextTurn();
+      assert.equal(started, 15, 'extraction bounds outstanding downloads');
+      assert.equal(cleaned, false, 'cleanup waits for active writes');
+      writes.resolve();
+      await rejected;
+      assert.equal(
+        started,
+        15,
+        'queued downloads are not started after failure',
+      );
+      assert.equal(writeAfterCleanup, false);
+      assert.equal(
+        await disk.files.stat('/.code3d/package-install'),
+        undefined,
+      );
+      assert.deepEqual(await disk.files.readFile('/code3d-lock.json'), oldLock);
+      assert.deepEqual(
+        await disk.files.readFile('/node_modules/.code3d-install.json'),
+        oldMarker,
+      );
+      assert.ok(await disk.files.readFile('/node_modules/stable/index.js'));
+      archiveMock.mock.restore();
+      writeMock.mock.restore();
+      removeMock.mock.restore();
+      await installer.prepare('/model.ts');
+      for (const name of names)
+        assert.ok(await disk.files.readFile(`/node_modules/${name}/index.js`));
+    },
+  );
+
 test('new transitive versions do not upgrade locked root dependencies outside their ranges', async () => {
   const disk = await diskFiles();
   try {
@@ -440,7 +662,7 @@ test('new transitive versions do not upgrade locked root dependencies outside th
     await registry.add('shared', '1.0.0');
     await registry.add('shared', '2.0.0');
     await registry.add('tool', '1.0.0', {dependencies: {shared: '^2'}});
-    const installer = new BrowserPackageInstaller(
+    const installer = new BrowserPackageManager(
       disk.files,
       () => {},
       registry.registry,
@@ -461,7 +683,7 @@ test('new transitive versions do not upgrade locked root dependencies outside th
       ),
       /1.0.0/,
     );
-    const builder = new ProjectBuilder(installer, esbuild);
+    const builder = new ProjectBuilder(installer.dependencies, esbuild);
     const tool = await builder.resolve('tool', '/model.ts');
     assert.ok(tool);
     const shared = await builder.resolve('shared', tool);
@@ -485,13 +707,13 @@ test('a dependency on an older version of the same package resolves separately',
       '/package.json',
       JSON.stringify({dependencies: {shared: '^2'}}),
     );
-    const installer = new BrowserPackageInstaller(
+    const installer = new BrowserPackageManager(
       disk.files,
       () => {},
       registry.registry,
     );
     await installer.prepare('/model.ts');
-    const builder = new ProjectBuilder(installer, esbuild);
+    const builder = new ProjectBuilder(installer.dependencies, esbuild);
     const entry = await builder.resolve('shared', '/model.ts');
     assert.ok(entry);
     const older = await builder.resolve('shared', entry);
@@ -506,6 +728,146 @@ test('a dependency on an older version of the same package resolves separately',
   }
 });
 
+test('committed installs survive cleanup errors and the next preparation collects their backups', async t => {
+  const disk = await diskFiles();
+  t.after(disk.dispose);
+  const fixture = await registryFixture();
+  await fixture.add('tool', '1.0.0');
+  await disk.files.writeFile(
+    '/package.json',
+    JSON.stringify({dependencies: {tool: 'latest'}}),
+  );
+  const states: string[] = [];
+  let installed = 0;
+  const installer = new BrowserPackageManager(
+    disk.files,
+    progress => states.push(progress.state),
+    fixture.registry,
+    () => installed++,
+  );
+  await installer.prepare('/model.ts');
+  await fixture.add('tool', '2.0.0');
+  const remove = disk.files.remove.bind(disk.files);
+  let failed = false;
+  const removeMock = t.mock.method(
+    disk.files,
+    'remove',
+    async (file: string) => {
+      if (file === '/.code3d/package-install' && !failed) {
+        failed = true;
+        throw new Error('temporary cleanup failure');
+      }
+      return remove(file);
+    },
+  );
+  await installer.update('/');
+  assert.equal(states.at(-1), 'ready');
+  assert.equal(
+    installed,
+    2,
+    'a committed installation publishes completion despite cleanup failure',
+  );
+  assert.match(
+    new TextDecoder().decode(
+      await disk.files.readFile('/node_modules/tool/index.js'),
+    ),
+    /2.0.0/,
+  );
+  assert.ok(await disk.files.stat('/.code3d/package-install/previous'));
+  removeMock.mock.restore();
+  fixture.setOffline(true);
+  const requests = fixture.requests.length;
+  await installer.prepare('/model.ts');
+  assert.equal(await disk.files.stat('/.code3d/package-install'), undefined);
+  assert.equal(
+    fixture.requests.length,
+    requests,
+    'cleanup retries do not reinstall or resolve dependencies',
+  );
+  assert.equal(installed, 2);
+});
+
+test('failed rollback preserves recovery files until a later preparation restores the old installation', async t => {
+  const disk = await diskFiles();
+  t.after(disk.dispose);
+  const fixture = await registryFixture();
+  await fixture.add('tool', '1.0.0');
+  await disk.files.writeFile(
+    '/package.json',
+    JSON.stringify({dependencies: {tool: 'latest'}}),
+  );
+  const installer = new BrowserPackageManager(
+    disk.files,
+    undefined,
+    fixture.registry,
+  );
+  await installer.prepare('/model.ts');
+  const lock = await disk.files.readFile('/code3d-lock.json');
+  await fixture.add('tool', '2.0.0');
+  const replaceMock = t.mock.method(disk.files, 'replaceFile', async () => {
+    throw new Error('lock commit failed');
+  });
+  const remove = disk.files.remove.bind(disk.files);
+  const removeMock = t.mock.method(
+    disk.files,
+    'remove',
+    async (file: string) => {
+      if (file === '/node_modules') throw new Error('rollback failed');
+      return remove(file);
+    },
+  );
+  await assert.rejects(installer.update('/'), /Recovery files were preserved/);
+  assert.ok(
+    await disk.files.readFile(
+      '/.code3d/package-install/previous/tool/index.js',
+    ),
+  );
+  assert.deepEqual(await disk.files.readFile('/code3d-lock.json'), lock);
+  replaceMock.mock.restore();
+  removeMock.mock.restore();
+  fixture.setOffline(true);
+  await installer.prepare('/model.ts');
+  assert.match(
+    new TextDecoder().decode(
+      await disk.files.readFile('/node_modules/tool/index.js'),
+    ),
+    /1.0.0/,
+  );
+  assert.equal(await disk.files.stat('/.code3d/package-install'), undefined);
+});
+
+test('an interrupted first installation is rolled back before attempting new resolution', async t => {
+  const disk = await diskFiles();
+  t.after(disk.dispose);
+  const fixture = await registryFixture();
+  await fixture.add('tool', '1.0.0');
+  await disk.files.writeFile(
+    '/package.json',
+    JSON.stringify({dependencies: {tool: '1'}}),
+  );
+  await new BrowserPackageManager(
+    disk.files,
+    undefined,
+    fixture.registry,
+  ).prepare('/model.ts');
+  await disk.files.createDirectory('/.code3d/package-install');
+  // Recreate the point after renaming the first package tree but before committing its lock.
+  await disk.files.rename(
+    '/code3d-lock.json',
+    '/.code3d/package-install/lock.json',
+  );
+  fixture.setOffline(true);
+  await assert.rejects(
+    new BrowserPackageManager(disk.files, undefined, fixture.registry).prepare(
+      '/model.ts',
+    ),
+    /offline/,
+  );
+  assert.equal(await disk.files.stat('/node_modules'), undefined);
+  assert.equal(await disk.files.stat('/code3d-lock.json'), undefined);
+  assert.equal(await disk.files.stat('/.code3d/package-install'), undefined);
+});
+
 test('an interrupted swap restores the prior directory before reuse', async () => {
   const disk = await diskFiles();
   try {
@@ -515,7 +877,7 @@ test('an interrupted swap restores the prior directory before reuse', async () =
       '/package.json',
       JSON.stringify({dependencies: {shared: '1'}}),
     );
-    await new BrowserPackageInstaller(
+    await new BrowserPackageManager(
       disk.files,
       () => {},
       registry.registry,
@@ -526,7 +888,7 @@ test('an interrupted swap restores the prior directory before reuse', async () =
       '/.code3d/package-install/previous',
     );
     registry.setOffline(true);
-    await new BrowserPackageInstaller(
+    await new BrowserPackageManager(
       disk.files,
       () => {},
       registry.registry,
@@ -546,7 +908,7 @@ test('readable scoped package paths replace an outdated installation without cha
       '/package.json',
       JSON.stringify({dependencies: {'@demo/tool': '1'}}),
     );
-    const installer = new BrowserPackageInstaller(
+    const installer = new BrowserPackageManager(
       disk.files,
       () => {},
       registry.registry,
@@ -724,7 +1086,7 @@ test('source edits reuse prepared dependencies while manifest changes and remove
       JSON.stringify({dependencies: {tool: '1.0.0'}}),
     );
     let preparations = 0;
-    const installer = new BrowserPackageInstaller(disk.files, undefined, () => {
+    const installer = new BrowserPackageManager(disk.files, undefined, () => {
       preparations++;
       return registry.registry();
     });
@@ -747,7 +1109,7 @@ test('source edits reuse prepared dependencies while manifest changes and remove
     assert.equal(preparations, 2);
     assert.match(
       new TextDecoder().decode(
-        await installer.readFile('/a/node_modules/tool/index.js'),
+        await installer.dependencies.readFile('/a/node_modules/tool/index.js'),
       ),
       /2.0.0/,
     );
@@ -783,7 +1145,7 @@ test('concurrent model preparations share one download for each installed versio
     const downloading = new Promise<void>(resolve => {
       started = resolve;
     });
-    const installer = new BrowserPackageInstaller(disk.files, undefined, () => {
+    const installer = new BrowserPackageManager(disk.files, undefined, () => {
       preparations++;
       const client = registry.registry();
       const archive = client.archive.bind(client);
@@ -812,7 +1174,7 @@ test('concurrent model preparations share one download for each installed versio
     assert.equal(preparations, 2);
     assert.match(
       new TextDecoder().decode(
-        await installer.readFile('/node_modules/tool/index.js'),
+        await installer.dependencies.readFile('/node_modules/tool/index.js'),
       ),
       /2.0.0/,
     );
@@ -835,7 +1197,7 @@ test('installed file metadata and misses are reused until the installation chang
   const manifest = (version: string) =>
     JSON.stringify({dependencies: {tool: version}});
   await disk.files.writeFile('/a/package.json', manifest('1.0.0'));
-  const installer = new BrowserPackageInstaller(
+  const installer = new BrowserPackageManager(
     disk.files,
     undefined,
     registry.registry,
@@ -845,7 +1207,7 @@ test('installed file metadata and misses are reused until the installation chang
     '/a/node_modules/tool/index.d.ts',
     '/a/node_modules/tool/added.ts',
   ];
-  const cold = await installer.statMany(paths);
+  const cold = await installer.dependencies.statMany!(paths);
   assert.ok(cold[0]);
   assert.equal(cold[1], undefined);
   const checked: string[] = [];
@@ -856,34 +1218,34 @@ test('installed file metadata and misses are reused until the installation chang
   });
   await disk.files.writeFile('/a/model.ts', 'export const size = 5;');
   await installer.prepare('/a/model.ts');
-  assert.deepEqual(await installer.statMany(paths), cold);
+  assert.deepEqual(await installer.dependencies.statMany!(paths), cold);
   assert.ok(
     !checked.some(path => paths.includes(path)),
     'warm edits only check installation metadata, including cached misses',
   );
-  await installer.stat('/a/model.ts');
+  await installer.dependencies.stat('/a/model.ts');
   assert.ok(
     checked.includes('/a/model.ts'),
     'ordinary source files still read their current version',
   );
   const unmanaged = '/a/nested/node_modules/manual/index.ts';
   await disk.files.writeFile(unmanaged, 'export const value = 1;');
-  const beforeUnmanaged = await installer.stat(unmanaged);
+  const beforeUnmanaged = await installer.dependencies.stat(unmanaged);
   await disk.files.writeFile(unmanaged, 'export const value = 12345;');
   assert.notEqual(
-    (await installer.stat(unmanaged))?.version,
+    (await installer.dependencies.stat(unmanaged))?.version,
     beforeUnmanaged?.version,
     'an ancestor installation must not cache a different, unmanaged node_modules tree',
   );
   await disk.files.writeFile('/a/package.json', manifest('2.0.0'));
   await installer.prepare('/a/model.ts');
-  const updated = await installer.statMany(paths);
+  const updated = await installer.dependencies.statMany!(paths);
   assert.ok(updated[1], 'a previously missing package file becomes visible');
   assert.notEqual(updated[0]?.realPath, cold[0]?.realPath);
   await disk.files.remove('/a/node_modules');
   await installer.prepare('/a/model.ts');
   assert.ok(
-    (await installer.statMany(paths))[1],
+    (await installer.dependencies.statMany!(paths))[1],
     'restoring the locked tree invalidates cached metadata',
   );
 });
@@ -896,9 +1258,9 @@ test('failed package preparation reports the package name and recovers when its 
     '/package.json',
     '{"dependencies":{"wrong-package-name":"*"}}',
   );
-  const progress: import('../src/project/browser-package-installer.ts').PackageInstallationProgress[] =
+  const progress: import('../src/project/browser-package-manager.ts').PackageInstallationProgress[] =
     [];
-  const installer = new BrowserPackageInstaller(
+  const installer = new BrowserPackageManager(
     disk.files,
     value => progress.push(value),
     registry.registry,
@@ -935,7 +1297,7 @@ test('explicit updates resolve direct and transitive ranges without old locks an
     await disk.files.writeFile('/a/package.json', source);
     await disk.files.writeFile('/b/package.json', source);
     let installations = 0;
-    const installer = new BrowserPackageInstaller(
+    const installer = new BrowserPackageManager(
       disk.files,
       undefined,
       registry.registry,
@@ -945,7 +1307,9 @@ test('explicit updates resolve direct and transitive ranges without old locks an
     await installer.prepare('/b/model.ts');
     const oldLock = await disk.files.readFile('/a/code3d-lock.json');
     const otherLock = await disk.files.readFile('/b/code3d-lock.json');
-    const oldInfo = await installer.stat('/a/node_modules/tool/index.js');
+    const oldInfo = await installer.dependencies.stat(
+      '/a/node_modules/tool/index.js',
+    );
     await registry.add('shared', '1.2.0');
     await registry.add('shared', '2.0.0');
     await registry.add('tool', '1.1.0', {dependencies: {shared: '^1'}});
@@ -958,7 +1322,7 @@ test('explicit updates resolve direct and transitive ranges without old locks an
       before,
       'ordinary preparation retains the lock',
     );
-    await installer.prepare('/a/package.json', {update: true});
+    await installer.update('/a');
     const lockBytes = await disk.files.readFile('/a/code3d-lock.json');
     assert.notDeepEqual(lockBytes, oldLock);
     const lock = JSON.parse(new TextDecoder().decode(lockBytes));
@@ -983,18 +1347,19 @@ test('explicit updates resolve direct and transitive ranges without old locks an
       /1.0.0/,
     );
     assert.notEqual(
-      (await installer.stat('/a/node_modules/tool/index.js'))?.realPath,
+      (await installer.dependencies.stat('/a/node_modules/tool/index.js'))
+        ?.realPath,
       oldInfo?.realPath,
     );
     assert.match(
       new TextDecoder().decode(
-        await installer.readFile('/a/node_modules/tool/index.js'),
+        await installer.dependencies.readFile('/a/node_modules/tool/index.js'),
       ),
       /1.1.0/,
     );
     const after = registry.requests.length;
     const installed = installations;
-    await installer.prepare('/a/package.json', {update: true});
+    await installer.update('/a');
     assert.ok(
       registry.requests.length > after,
       'even an unchanged installation explicitly rechecks the registry',
@@ -1020,7 +1385,7 @@ test('explicit update failures preserve installed files and locks, and updates c
     await registry.add('tool', '1.0.0');
     const source = '{"dependencies":{"tool":"latest"}}';
     await disk.files.writeFile('/package.json', source);
-    const installer = new BrowserPackageInstaller(
+    const installer = new BrowserPackageManager(
       disk.files,
       undefined,
       registry.registry,
@@ -1032,10 +1397,7 @@ test('explicit update failures preserve installed files and locks, and updates c
     );
     await registry.add('tool', '2.0.0');
     registry.setCorrupt(true);
-    await assert.rejects(
-      installer.prepare('/package.json', {update: true}),
-      /Integrity check failed/,
-    );
+    await assert.rejects(installer.update('/'), /Integrity check failed/);
     assert.deepEqual(await disk.files.readFile('/code3d-lock.json'), oldLock);
     assert.deepEqual(
       await disk.files.readFile('/node_modules/.code3d-install.json'),
@@ -1053,14 +1415,14 @@ test('explicit update failures preserve installed files and locks, and updates c
     registry.setOffline(false);
     registry.setCorrupt(false);
     await disk.files.writeFile('/code3d-lock.json', '{ invalid lock');
-    await installer.prepare('/package.json', {update: true});
+    await installer.update('/');
     const lock = JSON.parse(
       new TextDecoder().decode(await disk.files.readFile('/code3d-lock.json')),
     );
     assert.ok(lock.packages['https://registry.npmjs.org/tool/2.0.0/']);
     assert.match(
       new TextDecoder().decode(
-        await installer.readFile('/node_modules/tool/index.js'),
+        await installer.dependencies.readFile('/node_modules/tool/index.js'),
       ),
       /2.0.0/,
     );
@@ -1090,7 +1452,7 @@ test('an explicit update queued behind preparation still resolves fresh versions
     const downloading = new Promise<void>(resolve => {
       started = resolve;
     });
-    const installer = new BrowserPackageInstaller(disk.files, undefined, () => {
+    const installer = new BrowserPackageManager(disk.files, undefined, () => {
       const client = registry.registry();
       const archive = client.archive.bind(client);
       client.archive = async pkg => {
@@ -1105,7 +1467,7 @@ test('an explicit update queued behind preparation still resolves fresh versions
     const preparing = installer.prepare('/model.ts');
     await downloading;
     await registry.add('tool', '2.0.0');
-    const updating = installer.prepare('/package.json', {update: true});
+    const updating = installer.update('/');
     const observing = installer.prepare('/another.ts');
     release();
     await Promise.all([preparing, updating, observing]);
@@ -1119,6 +1481,625 @@ test('an explicit update queued behind preparation still resolves fresh versions
         'https://registry.npmjs.org/tool/-/1.0.0.tgz',
         'https://registry.npmjs.org/tool/-/2.0.0.tgz',
       ],
+    );
+  } finally {
+    await disk.dispose();
+  }
+});
+
+for (const next of ['prepare', 'update'] as const)
+  test(
+    `a failed download does not discard a queued ${next} for the corrected manifest`,
+    {timeout: 20_000},
+    async t => {
+      const disk = await diskFiles();
+      const fixture = await registryFixture();
+      await fixture.add('tool', '1.0.0');
+      await fixture.add('tool', '2.0.0');
+      await disk.files.writeFile(
+        '/package.json',
+        JSON.stringify({dependencies: {tool: '1.0.0'}}),
+      );
+      const started = signal();
+      const release = signal();
+      let requests = 0;
+      const client = fixture.registry();
+      const archive = client.archive.bind(client);
+      t.mock.method(
+        client,
+        'archive',
+        async (pkg: Parameters<typeof archive>[0]) => {
+          if (++requests === 1) {
+            started.resolve();
+            await release.promise;
+            throw new Error('old download failed');
+          }
+          return archive(pkg);
+        },
+      );
+      const states: string[] = [];
+      const manager = new BrowserPackageManager(
+        disk.files,
+        progress => states.push(progress.state),
+        () => client,
+      );
+      const first = assert.rejects(
+        manager.prepare('/model.ts'),
+        /old download failed/,
+      );
+      let queued: Promise<void> | undefined;
+      t.after(async () => {
+        release.resolve();
+        await Promise.allSettled([first, queued]);
+        await disk.dispose();
+      });
+      await started.promise;
+      await disk.files.writeFile(
+        '/package.json',
+        JSON.stringify({dependencies: {tool: '2.0.0'}}),
+      );
+      queued =
+        next === 'update' ? manager.update('/') : manager.prepare('/model.ts');
+      await nextTurn();
+      release.resolve();
+      await first;
+      await queued;
+      assert.equal(requests, 2);
+      assert.equal(states.filter(state => state === 'error').length, 1);
+      assert.equal(states.at(-1), 'ready');
+      assert.match(
+        new TextDecoder().decode(
+          await manager.files.readFile('/node_modules/tool/index.js'),
+        ),
+        /2.0.0/,
+      );
+    },
+  );
+
+test('ordinary package reads never install while dependency reads lazily prepare the reached scope', async t => {
+  const disk = await diskFiles();
+  t.after(disk.dispose);
+  const fixture = await registryFixture();
+  await fixture.add('tool', '1.0.0');
+  await disk.files.writeFile(
+    '/nested/package.json',
+    JSON.stringify({dependencies: {tool: '1'}}),
+  );
+  const manager = new BrowserPackageManager(
+    disk.files,
+    undefined,
+    fixture.registry,
+  );
+  const file = '/nested/node_modules/tool/index.js';
+  assert.equal(await manager.files.readFile(file), undefined);
+  assert.equal(await manager.files.stat(file), undefined);
+  assert.equal(fixture.requests.length, 0);
+  assert.ok(await manager.dependencies.readFile(file));
+  assert.ok(await disk.files.stat('/nested/code3d-lock.json'));
+  assert.equal(await disk.files.stat('/node_modules'), undefined);
+});
+
+test('malformed manifests report one package failure and recover after correction', async t => {
+  const disk = await diskFiles();
+  t.after(disk.dispose);
+  await disk.files.writeFile('/nested/package.json', '{ malformed');
+  const states: import('../src/project/browser-package-manager.ts').PackageInstallationProgress[] =
+    [];
+  const manager = new BrowserPackageManager(disk.files, progress =>
+    states.push(progress),
+  );
+  await assert.rejects(manager.prepare('/nested/model.ts'), {
+    name: 'PackageInstallationError',
+  });
+  assert.equal(states.length, 1);
+  assert.equal(states[0].directory, '/nested');
+  assert.equal(states[0].state, 'error');
+  await disk.files.writeFile('/nested/package.json', '{}');
+  await manager.prepare('/nested/model.ts');
+  assert.equal(states.at(-1)?.state, 'ready');
+});
+
+test('package refresh failures retain committed state and retry notification without reinstalling', async t => {
+  const disk = await diskFiles();
+  t.after(disk.dispose);
+  const fixture = await registryFixture();
+  await fixture.add('tool', '1.0.0');
+  await disk.files.writeFile(
+    '/package.json',
+    JSON.stringify({dependencies: {tool: '1'}}),
+  );
+  const states: string[] = [];
+  const changes: import('../src/project/browser-package-manager.ts').PackageInstallationChange[] =
+    [];
+  let failRefresh = true;
+  const manager = new BrowserPackageManager(
+    disk.files,
+    progress => states.push(progress.state),
+    fixture.registry,
+    async change => {
+      changes.push(change);
+      assert.ok(await manager.files.stat('/node_modules/tool/index.js'));
+      if (failRefresh) throw new Error('editor refresh unavailable');
+    },
+  );
+  await assert.rejects(manager.prepare('/model.ts'), {
+    name: 'Error',
+    message: 'Unable to refresh changed package files.',
+  });
+  assert.equal(states.at(-1), 'ready');
+  assert.ok(!states.includes('error'));
+  assert.ok(await disk.files.stat('/code3d-lock.json'));
+  const requests = fixture.requests.length;
+  failRefresh = false;
+  await manager.prepare('/model.ts');
+  assert.equal(fixture.requests.length, requests);
+  assert.deepEqual(changes[1], changes[0]);
+  await manager.prepare('/model.ts');
+  assert.equal(
+    changes.length,
+    2,
+    'ordinary edits do not publish unchanged installations',
+  );
+});
+
+test('recovery publishes restored files even when resolving the corrected installation fails', async t => {
+  const disk = await diskFiles();
+  t.after(disk.dispose);
+  const fixture = await registryFixture();
+  await fixture.add('tool', '1.0.0');
+  await disk.files.writeFile(
+    '/package.json',
+    JSON.stringify({dependencies: {tool: '1'}}),
+  );
+  const changes: string[] = [];
+  const manager = new BrowserPackageManager(
+    disk.files,
+    undefined,
+    fixture.registry,
+    change => {
+      changes.push(change.generation);
+    },
+  );
+  await manager.prepare('/model.ts');
+  const scratch = '/.code3d/package-install';
+  await disk.files.createDirectory(scratch);
+  await disk.files.rename('/node_modules', scratch + '/previous');
+  await disk.files.createDirectory('/node_modules');
+  await disk.files.writeFile(
+    '/node_modules/.code3d-install.json',
+    'uncommitted',
+  );
+  await disk.files.writeFile(
+    '/package.json',
+    JSON.stringify({dependencies: {tool: '2'}}),
+  );
+  // First observe the interrupted files as a new manager (as after a reload).
+  const restored: string[] = [];
+  const reloaded = new BrowserPackageManager(
+    disk.files,
+    undefined,
+    fixture.registry,
+    change => {
+      restored.push(change.generation);
+    },
+  );
+  fixture.setOffline(true);
+  await assert.rejects(reloaded.prepare('/model.ts'), /offline/);
+  assert.equal(restored.length, 1);
+  assert.match(
+    new TextDecoder().decode(
+      await reloaded.files.readFile('/node_modules/tool/index.js'),
+    ),
+    /1.0.0/,
+  );
+});
+
+test('resolver metadata prefetch is bounded, deduplicated and deterministic for ranges, aliases and locked versions', async t => {
+  const {resolveBrowserPackages} = await server.ssrLoadModule<
+    typeof import('../src/project/jspm-package-resolver.ts')
+  >('/src/project/jspm-package-resolver.ts');
+  const fixture = await registryFixture();
+  await fixture.add('shared', '1.0.0');
+  const names = [
+    '@scope/tool',
+    ...Array.from({length: 19}, (_, index) => `tool-${index}`),
+  ];
+  for (const name of names)
+    await fixture.add(name, '1.0.0', {dependencies: {shared: '^1'}});
+  const manifest: PackageManifest = {
+    dependencies: {
+      ...Object.fromEntries(names.map(name => [name, '^1'])),
+      alias: 'npm:@scope/tool@^1',
+    },
+    optionalDependencies: {missing: '1'},
+  };
+  const resolve = async (
+    manifest: PackageManifest,
+    previous?: import('../src/project/package-lock.ts').BrowserPackageLock,
+    reverse = false,
+  ) => {
+    const counts = new Map<string, number>();
+    let reported = false;
+    let active = 0,
+      peak = 0;
+    const registry = new NpmRegistry(async input => {
+      const url = String(input);
+      assert.ok(
+        reported,
+        'normal preparation reports progress before metadata downloads',
+      );
+      counts.set(url, (counts.get(url) ?? 0) + 1);
+      active++;
+      peak = Math.max(peak, active);
+      try {
+        // Complete responses in different orders without using wall-clock delays.
+        const order =
+          [...url].reduce(
+            (sum, character) => sum + character.charCodeAt(0),
+            0,
+          ) % 3;
+        for (let i = 0; i <= (reverse ? 2 - order : order); i++)
+          await nextTurn();
+        return await fixture.request(input);
+      } finally {
+        active--;
+      }
+    });
+    const lock = await resolveBrowserPackages(
+      manifest,
+      registry,
+      previous,
+      () => {
+        reported = true;
+      },
+    );
+    assert.equal(peak, 15);
+    assert.equal(active, 0);
+    assert.ok(
+      [...counts.values()].every(count => count === 1),
+      JSON.stringify([...counts]),
+    );
+    return {lock, counts};
+  };
+  const first = await resolve(manifest);
+  const second = await resolve(manifest, undefined, true);
+  assert.equal(
+    JSON.stringify(first.lock),
+    JSON.stringify(second.lock),
+    'network completion order must not change the lock',
+  );
+  assert.equal(
+    first.counts.get('https://registry.npmjs.org/%40scope%2Ftool'),
+    1,
+  );
+  assert.equal(first.counts.get('https://registry.npmjs.org/shared'), 1);
+  assert.equal(first.counts.get('https://registry.npmjs.org/missing'), 1);
+  assert.equal(first.counts.has('https://registry.npmjs.org/alias'), false);
+  assert.equal(
+    first.lock.resolutions.primary.alias.installUrl,
+    first.lock.resolutions.primary['@scope/tool'].installUrl,
+  );
+  assert.match(first.lock.omitted.missing, /not found/);
+  await fixture.add('added', '1.0.0');
+  await fixture.add('@scope/tool', '1.1.0');
+  const updated = await resolve(
+    {...manifest, dependencies: {...manifest.dependencies, added: '1'}},
+    first.lock,
+  );
+  assert.equal(
+    updated.lock.resolutions.primary['@scope/tool'].installUrl,
+    first.lock.resolutions.primary['@scope/tool'].installUrl,
+  );
+  assert.equal(
+    updated.counts.has('https://registry.npmjs.org/%40scope%2Ftool'),
+    false,
+    'locked packages use exact metadata, not current version ranges',
+  );
+  assert.equal(
+    updated.counts.get('https://registry.npmjs.org/%40scope%2Ftool/1.0.0'),
+    1,
+  );
+});
+
+test('registry coalesces exact metadata reads and reuses packuments within one resolution', async () => {
+  const fixture = await registryFixture();
+  await fixture.add('@scope/tool', '1.0.0');
+  let registry = fixture.registry();
+  await Promise.all(
+    Array.from({length: 12}, () => registry.metadata('@scope/tool', '1.0.0')),
+  );
+  assert.equal(fixture.requests.length, 1);
+  registry = fixture.registry();
+  await registry.prefetch(['@scope/tool', '@scope/tool']);
+  const count = fixture.requests.length;
+  await Promise.all(
+    Array.from({length: 12}, () => registry.metadata('@scope/tool', '1.0.0')),
+  );
+  assert.equal(
+    fixture.requests.length,
+    count,
+    'packument versions supply exact metadata without a second fetch',
+  );
+});
+
+async function workspaceFixture(
+  name: string,
+  value: string,
+  config: PackageManifest = {},
+) {
+  const manifest = {
+    name,
+    version: '1.0.0',
+    type: 'module',
+    main: './index.js',
+    types: './index.d.ts',
+    ...config,
+  };
+  const contents = {
+    'package.json': JSON.stringify(manifest),
+    'index.js': `export const value = ${JSON.stringify(value)};`,
+    'index.d.ts': `export declare const value: ${JSON.stringify(value)};`,
+  };
+  const revision = Buffer.from(
+    await crypto.subtle.digest(
+      'SHA-256',
+      new TextEncoder().encode(JSON.stringify(contents)),
+    ),
+  ).toString('hex');
+  return {
+    manifest,
+    revision,
+    files: Object.fromEntries(
+      Object.entries(contents).map(([path, text]) => [
+        path,
+        {
+          version: revision,
+          url:
+            'data:application/octet-stream;base64,' +
+            Buffer.from(text).toString('base64'),
+        },
+      ]),
+    ),
+  };
+}
+
+test('workspace latest resolves direct, transitive and alias requests while retaining pinned npm packages and shared peers', async () => {
+  const disk = await diskFiles();
+  try {
+    const fixture = await registryFixture();
+    await fixture.add('@code3d/core', '1.0.0');
+    await fixture.add('@code3d/remote', '1.0.0');
+    await fixture.add(
+      'wrapper',
+      '1.0.0',
+      {dependencies: {'@code3d/core': 'latest'}},
+      {'index.js': `export {value} from '@code3d/core';`},
+    );
+    const workspaces = {
+      '@code3d/core': await workspaceFixture('@code3d/core', 'development'),
+      '@code3d/screws': await workspaceFixture('@code3d/screws', 'screws', {
+        peerDependencies: {'@code3d/core': '^1'},
+      }),
+    };
+    await disk.files.writeFile(
+      '/package.json',
+      JSON.stringify({
+        type: 'module',
+        dependencies: {
+          '@code3d/core': 'latest',
+          '@code3d/screws': 'latest',
+          '@code3d/remote': 'latest',
+          wrapper: 'latest',
+          alias: 'npm:@code3d/core@latest',
+          pinned: 'npm:@code3d/core@1.0.0',
+        },
+      }),
+    );
+    const manager = new BrowserPackageManager(
+      disk.files,
+      undefined,
+      fixture.registry,
+      undefined,
+      workspaces,
+    );
+    await manager.prepare('/model.ts');
+    const lock = JSON.parse(
+      new TextDecoder().decode(await disk.files.readFile('/code3d-lock.json')),
+    );
+    const core = lock.resolutions.primary['@code3d/core'].installUrl;
+    assert.match(core, /code3d.invalid\/workspace/);
+    assert.equal(lock.resolutions.primary.alias.installUrl, core);
+    assert.equal(
+      lock.resolutions.secondary[lock.resolutions.primary.wrapper.installUrl][
+        '@code3d/core'
+      ].installUrl,
+      core,
+    );
+    assert.equal(
+      lock.resolutions.secondary[
+        lock.resolutions.primary['@code3d/screws'].installUrl
+      ]['@code3d/core'].installUrl,
+      core,
+    );
+    assert.match(
+      lock.resolutions.primary.pinned.installUrl,
+      /registry.npmjs.org/,
+    );
+    assert.match(
+      lock.resolutions.primary['@code3d/remote'].installUrl,
+      /registry.npmjs.org/,
+    );
+    assert.equal(
+      fixture.requests.some(url =>
+        url.includes(encodeURIComponent('@code3d/screws')),
+      ),
+      false,
+    );
+    const bundle = await new ProjectBuilder(
+      manager.dependencies,
+      esbuild,
+    ).build(
+      `import {value as core} from '@code3d/core'; import {value as transitive} from 'wrapper'; import {value as pinned} from 'pinned'; export {core, transitive, pinned};`,
+    );
+    const result = await import(
+      'data:text/javascript;base64,' +
+        Buffer.from(bundle.source).toString('base64')
+    );
+    assert.equal(result.core, 'development');
+    assert.equal(result.transitive, 'development');
+    assert.equal(result.pinned, '1.0.0');
+    assert.match(
+      new TextDecoder().decode(
+        await manager.files.readFile('/node_modules/@code3d/core/index.d.ts'),
+      ),
+      /development/,
+    );
+  } finally {
+    await disk.dispose();
+  }
+});
+
+test('existing npm locks switch to workspace bytes and refresh unchanged versions; production restores registry selection', async () => {
+  const disk = await diskFiles();
+  try {
+    const fixture = await registryFixture();
+    await fixture.add('@code3d/core', '1.0.0');
+    await disk.files.writeFile(
+      '/package.json',
+      JSON.stringify({dependencies: {'@code3d/core': 'latest'}}),
+    );
+    await new BrowserPackageManager(
+      disk.files,
+      undefined,
+      fixture.registry,
+    ).prepare('/model.ts');
+    fixture.setOffline(true);
+    for (const value of ['first', 'rebuilt']) {
+      const workspaces = {
+        '@code3d/core': await workspaceFixture('@code3d/core', value),
+      };
+      const manager = new BrowserPackageManager(
+        disk.files,
+        undefined,
+        fixture.registry,
+        undefined,
+        workspaces,
+      );
+      await manager.prepare('/model.ts');
+      assert.match(
+        new TextDecoder().decode(
+          await manager.files.readFile('/node_modules/@code3d/core/index.js'),
+        ),
+        new RegExp(value),
+      );
+      const lock = new TextDecoder().decode(
+        await disk.files.readFile('/code3d-lock.json'),
+      );
+      await new BrowserPackageManager(
+        disk.files,
+        undefined,
+        fixture.registry,
+        undefined,
+        workspaces,
+      ).prepare('/model.ts');
+      assert.equal(
+        new TextDecoder().decode(
+          await disk.files.readFile('/code3d-lock.json'),
+        ),
+        lock,
+      );
+    }
+    fixture.setOffline(false);
+    const production = new BrowserPackageManager(
+      disk.files,
+      undefined,
+      fixture.registry,
+    );
+    await production.prepare('/model.ts');
+    assert.match(
+      new TextDecoder().decode(
+        await production.files.readFile('/node_modules/@code3d/core/index.js'),
+      ),
+      /1.0.0/,
+    );
+    assert.doesNotMatch(
+      new TextDecoder().decode(await disk.files.readFile('/code3d-lock.json')),
+      /workspace/,
+    );
+  } finally {
+    await disk.dispose();
+  }
+});
+
+test('failed workspace downloads preserve the previous installation and incompatible peers are rejected', async () => {
+  const disk = await diskFiles();
+  try {
+    const fixture = await registryFixture();
+    await fixture.add('@code3d/core', '1.0.0');
+    await disk.files.writeFile(
+      '/package.json',
+      JSON.stringify({dependencies: {'@code3d/core': 'latest'}}),
+    );
+    await new BrowserPackageManager(
+      disk.files,
+      undefined,
+      fixture.registry,
+    ).prepare('/model.ts');
+    const original = new TextDecoder().decode(
+      await disk.files.readFile('/code3d-lock.json'),
+    );
+    const local = await workspaceFixture('@code3d/core', 'development');
+    const broken = {
+      ...local,
+      files: {
+        ...local.files,
+        'index.js': {version: local.revision, url: 'data:invalid'},
+      },
+    };
+    await assert.rejects(
+      new BrowserPackageManager(
+        disk.files,
+        undefined,
+        fixture.registry,
+        undefined,
+        {'@code3d/core': broken},
+      ).prepare('/model.ts'),
+    );
+    assert.equal(
+      new TextDecoder().decode(await disk.files.readFile('/code3d-lock.json')),
+      original,
+    );
+    assert.match(
+      new TextDecoder().decode(
+        await disk.files.readFile('/node_modules/@code3d/core/index.js'),
+      ),
+      /1.0.0/,
+    );
+    await disk.files.writeFile(
+      '/package.json',
+      JSON.stringify({
+        dependencies: {'@code3d/core': 'latest', '@code3d/screws': 'latest'},
+      }),
+    );
+    const workspaces = {
+      '@code3d/core': local,
+      '@code3d/screws': await workspaceFixture('@code3d/screws', 'screws', {
+        peerDependencies: {'@code3d/core': '^2'},
+      }),
+    };
+    await assert.rejects(
+      new BrowserPackageManager(
+        disk.files,
+        undefined,
+        fixture.registry,
+        undefined,
+        workspaces,
+      ).prepare('/model.ts'),
+      /requires peer.*conflicts/,
+    );
+    assert.equal(
+      new TextDecoder().decode(await disk.files.readFile('/code3d-lock.json')),
+      original,
     );
   } finally {
     await disk.dispose();

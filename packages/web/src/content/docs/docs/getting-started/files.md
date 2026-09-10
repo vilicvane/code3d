@@ -48,9 +48,25 @@ inside `node_modules`.
 Models without a manifest continue using the App's built-in modeling packages,
 with no installation required. Opening a model with a manifest also installs
 changed dependencies or restores its existing lock before compilation.
+Package metadata is prefetched concurrently and shared across dependencies during
+each resolution. Locked packages keep their selected versions; **Update dependencies**
+checks the registry again using the ranges in your manifest.
+
 Installation continues in the background while you switch files, edit and save.
-The file explorer shows package progress separately from the model preview;
-only a model needing unfinished dependencies waits for them. Source edits reuse
+After installation, open package files and locks refresh automatically. Tabs for
+removed package versions close; your editable files and other folders stay intact.
+Up to 15 packages download concurrently per installation; unpacking runs one
+package at a time alongside downloads. Verified cached archives are reused.
+Requests for the same folder run in order. A failed request does not discard
+an update queued for a corrected manifest.
+An interrupted installation is recovered before the next attempt. Once packages
+and their lock are replaced successfully, retrying backup cleanup does not
+repeat the installation.
+The file explorer shows package progress separately from the model preview.
+Success messages disappear after three seconds, including when you have switched
+to another file. Ongoing downloads and errors remain visible; each folder's
+status clears independently.
+Only a model needing unfinished dependencies waits for them. Source edits reuse
 prepared dependencies. Changing the manifest or lock, or removing an installation,
 causes it to be checked again.
 Deleting `code3d-lock.json` makes the next model run resolve dependencies again,
@@ -74,6 +90,8 @@ bundled example has its own `package.json` and uses `just-range` from npm to
 place a row of posts. Select the `postArray()` call to edit the count, spacing
 and height in the parameter panel. The example is included in every browser
 workspace; it does not depend on files from another browser profile.
+In a local project, run `npm install` inside `examples/patterns/post-array`,
+then choose **Reload folder** before running this example.
 
 ```json
 {
@@ -137,9 +155,14 @@ project files and do not run as models.
 
 ## Local folder
 
-Choose **Open folder** to connect the App to a real directory. An empty
-directory receives the current workspace, including unopened files and binary
-assets. An existing directory keeps its files and gains Code3D's managed examples.
+Choose **Open folder** in the explorer header to connect the App to a real directory.
+The selected directory keeps its own files. When opening an empty directory,
+the App asks whether to create the bundled `/examples` folder. Declining is remembered
+for that project, so reloading does not ask again or create examples later.
+Nonempty directories open without this prompt and do not receive examples automatically.
+Opening a folder never copies files from the previous project or browser storage.
+Only the App's own `.code3d` metadata is ignored when checking whether a directory is empty.
+Create your own files in the explorer.
 
 Opening a folder reads only workspace metadata and the initial file. Imports,
 assets, type definitions, and other files load when needed; independent filesystem
@@ -152,9 +175,10 @@ Edits in the App write directly to that directory. If you change a file in
 another editor, choose **Reload folder** to read the changes. Automatic
 external-file watching is not currently available.
 
-Each connected directory gets its own workspace URL. Use **Reconnect folder**
-when the browser requires fresh permission, or **Use browser storage** to
-return the current tab to browser persistence.
+Each connected directory gets its own workspace URL. Click the storage location
+in the explorer header to access **Reload folder**, **Reconnect folder** when the
+browser requires fresh permission, or **Use browser storage** to return the current
+tab to browser persistence. Switching workspaces clears the previous file selection.
 
 Local folders require a browser with File System Access support and a secure
 context. Browser storage remains available when folder access is unsupported.
@@ -221,8 +245,11 @@ Worker; ordinary edits preserve its expensive geometry caches.
 
 ## The examples directory
 
-`/examples` is managed by Code3D. **Reset examples** restores it, and a
-new bundled example revision refreshes it automatically. Keep your own work
+The bundled `/examples` folder is managed by Code3D. Right-click that folder and choose
+**Reset examples** to restore it. A new bundled revision refreshes managed examples
+automatically; existing user-owned examples are left alone unless explicitly reset.
+If there is no `/examples` folder, right-click the empty space in the explorer and choose
+**Create examples** to add it later. Keep your own work
 in `/model.ts` or another directory outside `/examples`.
 
 ## Run Code3D locally

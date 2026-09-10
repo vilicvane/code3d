@@ -19,6 +19,8 @@ export type {KernelArtifactStore} from '../library/kernel-cache.js';
 export {
   isSketch,
   sketchDefinition,
+  sketchSource,
+  sketchFrame,
   snapshotSketch,
   solveSketchSnapshot,
   sketchDragRequiresSolver,
@@ -104,6 +106,7 @@ export type {
   ModelOperationSelectionSnapshot,
   ModelOperationSnapshot,
   ModelObject,
+  RelationObject,
   ModelObjectRuntimeInfo,
   ModelSnapshotObject,
   SnapshotQuery,

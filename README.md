@@ -3,7 +3,7 @@
 The expressive power of code, with the immediacy of direct manipulation.
 
 [Open App](https://www.code3d.org/app/) · [Website](https://www.code3d.org/) ·
-[Documentation](https://www.code3d.org/docs/)
+[Documentation](https://www.code3d.org/docs/) · [Modeling agent instructions](docs/agents.md)
 
 Code3D is a solid modeler where TypeScript and the viewport form one continuous
 interface. Use code to define precise, reusable models, and interact directly
@@ -73,6 +73,9 @@ npm run dev
 ```
 
 Open [localhost:3133](http://localhost:3133) in your browser.
+
+For repository development, see the [development guide](./.agents/docs/development.md)
+and [architecture documentation](./.agents/docs/README.md).
 
 ## Project status
 

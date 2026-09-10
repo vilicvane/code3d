@@ -65,7 +65,7 @@ export function cached<Args extends unknown[], Value>(
   compute: (
     ...args: Args
   ) => Value & (Value extends PromiseLike<unknown> ? never : unknown),
-  options?: CachedOptions<Value>,
+  options?: CachedOptions<NoInfer<Value>>,
 ): (...args: Args) => Value {
   const operation = cachedArtifact(
     (...args: Args): Value => {

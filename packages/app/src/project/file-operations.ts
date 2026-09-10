@@ -75,17 +75,8 @@ export async function searchProjectEntries(
   }
 }
 
-/** Copy all user files, including unopened and binary files, into an empty workspace. */
-export async function copyProjectWorkspace(
-  source: ProjectFileSystem,
-  target: ProjectFileSystem,
-): Promise<void> {
-  await copyProjectFiles(source, target, '/', '/');
-}
-
 async function copyProjectFiles(
-  source: ProjectFileSystem,
-  target: ProjectFileSystem,
+  fileSystem: ProjectFileSystem,
   from: string,
   to: string,
 ): Promise<void> {
@@ -93,16 +84,16 @@ async function copyProjectFiles(
   while (pending.length) {
     pending = (
       await mapProjectIO(pending, async ({from, to}) => {
-        const info = await source.stat(from);
+        const info = await fileSystem.stat(from);
         if (!info) throw new Error(`Project entry not found: ${from}`);
         if (info.kind === 'file') {
-          const bytes = await source.readFile(from);
+          const bytes = await fileSystem.readFile(from);
           if (!bytes) throw new Error(`Project entry not found: ${from}`);
-          await target.writeFile(to, bytes);
+          await fileSystem.writeFile(to, bytes);
           return [];
         }
-        await target.createDirectory(to);
-        return (await source.list(from))
+        await fileSystem.createDirectory(to);
+        return (await fileSystem.list(from))
           .filter(entry => !generatedDirectories.has(entry.name))
           .map(entry => ({
             from: normalizeProjectPath(`${from}/${entry.name}`),
@@ -192,10 +183,18 @@ export async function checkProjectEntryOperation(
   for (const target of targets) {
     if (await fileSystem.stat(target))
       throw new Error(`Destination already exists: ${target}`);
-    if ((await fileSystem.stat(projectDirectory(target)))?.kind !== 'directory')
-      throw new Error(
-        `Destination directory not found: ${projectDirectory(target)}`,
-      );
+    for (
+      let directory = projectDirectory(target);
+      ;
+      directory = projectDirectory(directory)
+    ) {
+      const info = await fileSystem.stat(directory);
+      if (info?.kind === 'directory') break;
+      if (info) throw new Error(`Not a directory: ${directory}`);
+      if (operation.kind !== 'create' || directory === '/')
+        throw new Error(`Destination directory not found: ${directory}`);
+      // FileSystem creates missing ancestors recursively for new entries.
+    }
   }
 }
 
@@ -206,7 +205,7 @@ export async function copyProjectEntry(
   to: string,
 ): Promise<void> {
   try {
-    await copyProjectFiles(fileSystem, fileSystem, from, to);
+    await copyProjectFiles(fileSystem, from, to);
   } catch (error) {
     // Only this operation's new destination may be removed; the source stays untouched.
     try {

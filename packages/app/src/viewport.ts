@@ -4,6 +4,7 @@ import type {ModelDiagnostic} from './model/diagnostic';
 import * as THREE from 'three';
 import {orientImageCamera, type ImageView} from './rendering/image-camera';
 import {ViewportNavigation, type CameraPose} from './ui/viewport-navigation';
+import type {ViewCamera} from './rendering/view-camera';
 import {ViewportScenes, type ViewportScene} from './model/viewport-scene';
 import {LineMaterial} from 'three/addons/lines/LineMaterial.js';
 import {LineSegments2} from 'three/addons/lines/LineSegments2.js';
@@ -148,6 +149,7 @@ type DecorationInstance = Readonly<{
 export type ModelViewportOptions = Readonly<{
   onViewChange?: () => void;
   onRenderModeChange?: (mode: ModelRenderMode) => void;
+  onGridStepChange?: (step: number) => void;
   onSourcePreviewDiagnostic?: (diagnostic: ModelDiagnostic | undefined) => void;
   onSelect: (occurrence: Occurrence) => void;
   onDrillDown: (node: ModelSnapshotObject) => void;
@@ -297,10 +299,13 @@ export class ModelViewport {
   private topologyPointer?: Readonly<{clientX: number; clientY: number}>;
   private readonly rendering: ModelRenderer;
   private readonly scene: THREE.Scene;
-  private readonly camera: THREE.PerspectiveCamera;
+  private get camera(): ViewCamera {
+    return this.rendering.camera;
+  }
   private readonly renderer: THREE.WebGLRenderer;
   private readonly controls: ViewportNavigation;
   private readonly coordinateReference?: ViewportCoordinateReference;
+  private gridStep?: number;
   private readonly animateViewChanges: boolean;
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointer = new THREE.Vector2();
@@ -335,6 +340,7 @@ export class ModelViewport {
   private readonly onSelect: ModelViewportOptions['onSelect'];
   private readonly onViewChange: ModelViewportOptions['onViewChange'];
   private readonly onRenderModeChange: ModelViewportOptions['onRenderModeChange'];
+  private readonly onGridStepChange: ModelViewportOptions['onGridStepChange'];
   private readonly onSourcePreviewDiagnostic: ModelViewportOptions['onSourcePreviewDiagnostic'];
   private readonly onDrillDown: ModelViewportOptions['onDrillDown'];
   private readonly onNavigateSource: ModelViewportOptions['onNavigateSource'];
@@ -361,6 +367,7 @@ export class ModelViewport {
       onSelect,
       onViewChange,
       onRenderModeChange,
+      onGridStepChange,
       onDrillDown,
       onNavigateSource,
       onPositionTool,
@@ -375,6 +382,7 @@ export class ModelViewport {
     this.animateViewChanges = animateViewChanges;
     this.onViewChange = onViewChange;
     this.onRenderModeChange = onRenderModeChange;
+    this.onGridStepChange = onGridStepChange;
     this.onSourcePreviewDiagnostic = onSourcePreviewDiagnostic;
     this.onDrillDown = onDrillDown;
     this.onNavigateSource = onNavigateSource;
@@ -382,15 +390,22 @@ export class ModelViewport {
     this.sourceDecorationProviders = sourceDecorationProviders;
     this.rendering = new ModelRenderer(this.container);
     this.scene = this.rendering.scene;
-    this.camera = this.rendering.camera;
     this.renderer = this.rendering.renderer;
     this.scene.add(this.root, this.decorationRoot);
     this.controls = new ViewportNavigation(
       this.camera,
       this.renderer.domElement,
+      camera => {
+        this.rendering.camera = camera;
+        this.coordinateReference?.setCamera(camera);
+        this.transformGizmo.setCamera(camera);
+      },
     );
     this.controls.addEventListener('change', () => {
-      this.rendering.updateCameraRange(this.controls.focus);
+      this.rendering.updateCameraRange(
+        this.controls.focus,
+        this.controls.object.position.distanceTo(this.controls.focus),
+      );
       this.refreshTopologyHover();
     });
     if (showCoordinateReference) {
@@ -417,6 +432,7 @@ export class ModelViewport {
       enabled => {
         this.controls.setNavigationEnabled(enabled);
       },
+      this.rendering.grid,
       onPositionTool,
     );
 
@@ -1068,7 +1084,7 @@ export class ModelViewport {
   setView(view: ImageView): void {
     const bounds = new THREE.Box3().setFromObject(this.root);
     if (bounds.isEmpty()) return;
-    orientImageCamera(this.camera, bounds, view);
+    orientImageCamera(this.controls.object, bounds, view);
     bounds.getCenter(this.controls.focus);
     this.controls.syncCamera();
     this.hasFramedView = true;
@@ -1169,7 +1185,7 @@ export class ModelViewport {
   private cameraFraming(target: THREE.Object3D) {
     return this.rendering.framing(
       target,
-      this.camera.position.distanceTo(this.controls.focus),
+      this.controls.object,
       this.transformGizmo.framing(),
     );
   }
@@ -1520,6 +1536,7 @@ export class ModelViewport {
     }
     this.transformGizmo.detach();
     this.coordinateReference?.setTarget(undefined);
+    this.rendering.grid.target = undefined;
     this.clearImpactHighlights();
     this.clearAllDecorations();
     this.disposeRoot();
@@ -1547,6 +1564,7 @@ export class ModelViewport {
     }
     this.selectedKey = key;
     this.coordinateReference?.setTarget(occurrence.object);
+    this.rendering.grid.target = occurrence.object;
     this.rebuildSelectionHighlight();
     this.rebuildImpactHighlights();
     this.updateDecorationVisibilities();
@@ -2073,7 +2091,10 @@ export class ModelViewport {
   private animate = (): void => {
     requestAnimationFrame(this.animate);
     this.controls.updateTransition(performance.now());
-    this.rendering.updateCameraRange(this.controls.focus);
+    this.rendering.updateCameraRange(
+      this.controls.focus,
+      this.controls.object.position.distanceTo(this.controls.focus),
+    );
     this.coordinateReference?.update();
     this.rendering.renderFrame(() => {
       this.selectionHighlight?.update();
@@ -2085,6 +2106,11 @@ export class ModelViewport {
         this.renderer.domElement.clientHeight,
       );
     });
+    const step = this.rendering.grid.step;
+    if (step !== this.gridStep) {
+      this.gridStep = step;
+      this.onGridStepChange?.(step);
+    }
   };
 
   private rebuildImpactHighlights(): void {
@@ -2323,6 +2349,11 @@ export function positionBindings(
       sensitivity: sensitivity * constraint.offsetDirection,
       parameterKind: target.kind,
       frame: constraint.offsetFrame,
+      // Earlier offset calls already contribute to the solved displacement.
+      // Missing arguments belong to this call and each default to zero.
+      completeArguments: receiver
+        ? {sourceRef: receiver, values: [0, 0, 0]}
+        : undefined,
     };
     const axisCandidates = candidates.get(axis) ?? [];
     axisCandidates.push(binding);
@@ -2356,7 +2387,6 @@ export function positionBindings(
         value: 0,
         sensitivity: constraint.offsetDirection,
         parameterKind: 'length',
-        step: 0.5,
         frame: constraint.offsetFrame,
         receiver: {sourceRef: receiver},
         occurrenceKeys,
@@ -3077,8 +3107,8 @@ function transformCameraPose(
   transform: THREE.Matrix4,
 ): CameraPose {
   return {
+    ...pose,
     focus: pose.focus.clone().applyMatrix4(transform),
-    distance: pose.distance,
     orientation: new THREE.Quaternion()
       .setFromRotationMatrix(transform)
       .multiply(pose.orientation),

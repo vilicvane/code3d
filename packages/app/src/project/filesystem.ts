@@ -21,7 +21,7 @@ const directoryManifestPath = '/.code3d/project.json';
 
 type ProjectManifest = Readonly<{
   version: 2;
-  managedDirectories: Readonly<Record<string, string>>;
+  managedDirectories: Readonly<Record<string, string | null>>;
 }>;
 
 type ProjectFileOperations = {
@@ -57,8 +57,11 @@ export interface ProjectFileSystem extends ProjectFileReader {
   list(
     path: string,
   ): Promise<readonly {name: string; kind: 'file' | 'directory'}[]>;
-  initialize(seed: () => Promise<void>): Promise<void>;
-  syncDirectory(template: ProjectDirectoryTemplate): Promise<void>;
+  initialize(seed?: () => Promise<void>): Promise<void>;
+  syncDirectory(
+    template: ProjectDirectoryTemplate,
+    approveCreation?: () => Promise<boolean>,
+  ): Promise<void>;
   resetDirectory(template: ProjectDirectoryTemplate): Promise<void>;
   writeFile(path: string, source: string | Uint8Array): Promise<void>;
   createDirectory(path: string): Promise<void>;
@@ -180,25 +183,40 @@ class ProjectStore implements ProjectFileSystem {
   }
 
   /** Seed only empty workspaces; initialization never reads project contents. */
-  async initialize(seed: () => Promise<void>): Promise<void> {
+  async initialize(seed?: () => Promise<void>): Promise<void> {
     await this.files.mkdir(this.projectRoot, {recursive: true});
     if (await this.readManifest()) return;
-    const entries = await this.list('/');
-    if (
-      !entries.some(
-        entry =>
-          entry.name !== '.code3d' && !isExcludedProjectEntry(entry.name),
+    if (seed) {
+      const entries = await this.list('/');
+      if (
+        !entries.some(
+          entry =>
+            entry.name !== '.code3d' && !isExcludedProjectEntry(entry.name),
+        )
       )
-    ) {
-      await seed();
+        await seed();
     }
     await this.writeManifest(newManifest());
   }
 
-  async syncDirectory(template: ProjectDirectoryTemplate): Promise<void> {
+  async syncDirectory(
+    template: ProjectDirectoryTemplate,
+    approveCreation?: () => Promise<boolean>,
+  ): Promise<void> {
     const manifest = await this.requireManifest();
     const directory = normalizeProjectPath(template.directory);
-    if (manifest.managedDirectories[directory] === template.revision) {
+    const revision = manifest.managedDirectories[directory];
+    if (revision === null || revision === template.revision) return;
+    // Ask only before first creation; null persists the decision to leave it alone.
+    if (
+      revision === undefined &&
+      approveCreation &&
+      !(await approveCreation())
+    ) {
+      await this.writeManifest({
+        ...manifest,
+        managedDirectories: {...manifest.managedDirectories, [directory]: null},
+      });
       return;
     }
     return this.replaceDirectory(template, manifest);
@@ -294,7 +312,8 @@ class ProjectStore implements ProjectFileSystem {
       version: 2,
       managedDirectories: Object.fromEntries(
         Object.entries(value.managedDirectories ?? {}).filter(
-          (entry): entry is [string, string] => typeof entry[1] === 'string',
+          (entry): entry is [string, string | null] =>
+            entry[1] === null || typeof entry[1] === 'string',
         ),
       ),
     };
