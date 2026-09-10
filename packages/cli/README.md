@@ -68,24 +68,27 @@ To execute a recovery lookup without a shell, use `recovery.queryArgv` together
 with `recovery.queryStdin`, closing stdin after writing it; `queryCommand` includes
 the equivalent POSIX-shell JSON pipe.
 
-See the complete [website agent guide](https://www.code3d.org/docs/guides/agents/)
-([Markdown](https://www.code3d.org/docs/guides/agents.md)) for setup, file operations,
-cursor regex, arguments, rendering, topology, types, and recovery.
+See the [agent Markdown entry](../../docs/agents.md) for the required workflow and
+complete topic directory. Detailed pages cover [connection](../../docs/agents/connection.md),
+[files and npm dependencies](../../docs/agents/files.md), [cursor and arguments](../../docs/agents/cursor.md),
+[rendering and topology](../../docs/agents/observation.md), and [recovery](../../docs/agents/recovery.md).
+The [website introduction](../web/src/content/docs/docs/guides/agents.md) explains
+collaboration features for App users.
 
-For Browser storage projects, edit the project's `package.json` through `apply`
-and request `"render": true` or `"topology": true` with a model cursor in that package scope.
-The App installs dependencies during model preparation; an ordinary file-save
-response does not confirm installation. Local-folder dependencies are installed
-externally with that project's package manager. There is no standalone CLI
-install/update command. See [installing project dependencies](https://www.code3d.org/docs/guides/agents/#install-project-dependencies)
-for the payload, version checks, lock behavior and failure handling.
+## Development
 
-When the user is following an agent, `apply` with file changes or an explicit view
-or mode uses its retained cursor if none is supplied. It does not choose a position
-from the changed files; no valid cursor means no follow jump. Pure observation
-without file changes, a new cursor or an explicit view/mode does not trigger following.
+From the repository root:
 
-`npx --yes @code3d/cli` downloads the published CLI when needed. Development can
-use the same command with a built, globally linked checkout: run `npm link` in
-`packages/cli`, then verify `npx --yes @code3d/cli --help` resolves that checkout.
-Version `0.0.1-alpha.0` is the first functional release.
+```sh
+npm run build:packages
+npm test --workspace @code3d/cli
+```
+
+Development can use the same `npx --yes @code3d/cli` command as an installed
+release. Run `npm link` from this package after building, then verify that
+`npx --yes @code3d/cli --help` resolves this checkout.
+
+- [CLI entry](src/main.ts): stdin JSON, execution options, artifacts and recovery output.
+- [Service lifecycle](src/serve.ts): session-managed stdin/PTY and shutdown.
+- [Local bridge](src/bridge.ts): authenticated loopback HTTP/WebSocket exchanges.
+- [Shared transport SDK](../agent/README.md) and [CLI process tests](test/).

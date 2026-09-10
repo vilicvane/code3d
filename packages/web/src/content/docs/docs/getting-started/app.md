@@ -249,4 +249,4 @@ for format, scale, and orientation settings.
 Use **Connect Agent** to name an agent and copy its private connection prompt.
 The agent starts a session-managed local CLI service and operates on the open
 project without restarting its conversation. See the [agent guide](../../guides/agents/)
-for setup, source changes, observations, and connection recovery.
+for connection, following an agent, image history, and access management.

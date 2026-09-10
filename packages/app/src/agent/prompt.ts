@@ -4,7 +4,7 @@ const docsUrl =
   import.meta.env.VITE_CODE3D_DOCS_URL || 'https://www.code3d.org/docs/';
 
 export function agentPrompt(config: AgentConfig, initial: boolean): string {
-  return `${initial ? 'Work on' : 'Continue working on'} the open Code3D project as ${config.name}. Read the agent guide first: ${new URL('guides/agents.md', docsUrl.endsWith('/') ? docsUrl : docsUrl + '/')}
+  return `${initial ? 'Work on' : 'Continue working on'} the open Code3D project as ${config.name}. Read the agent guide first: ${new URL('agents.md', docsUrl.endsWith('/') ? docsUrl : docsUrl + '/')}
 
 Save this private JSON to a file you choose (replace the existing config for this agent, if any):
 

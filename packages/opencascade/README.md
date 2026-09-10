@@ -39,3 +39,24 @@ Upstream sources:
   built against OCCT 8.0.1.
 
 See `LICENSE.LGPL-2.1` for the runtime license.
+
+## Use and explore
+
+Normal model authors use [Core](../core/README.md), whose Node entry initializes
+this runtime. Direct kernel integrations can initialize the loader themselves:
+
+```ts
+import initialize from '@code3d/opencascade';
+
+const kernel = await initialize();
+console.log(kernel.Code3dMemory.AllocatedBytes());
+```
+
+For a bundled browser integration, pass `wasmBinary` or `locateFile` to resolve the
+WASM asset. Owned Embind handles must be released with `.delete()` when no longer
+needed. Follow the existing [native lifetime tests](test/native-lifecycle.test.ts)
+and [Core integration](../core/src/node/index.ts) for ownership and initialization.
+
+- [Public loader declarations](index.d.ts) and [generated runtime](wasm/).
+- [Native binding inputs](native/) and [build entry](scripts/build.mjs).
+- [Binding generator patch](scripts/patch-generator.py).

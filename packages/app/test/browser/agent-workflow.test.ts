@@ -94,7 +94,7 @@ for (const storage of ['browser', 'directory'] as const)
         const prompt = await page
           .getByLabel('Agent prompt', {exact: true})
           .inputValue();
-        assert.ok(prompt.includes('/docs/guides/agents.md'));
+        assert.ok(prompt.includes('/docs/agents.md'));
         assert.ok(
           prompt.includes(
             'echo \'{"operation":"context"}\' | npx --yes @code3d/cli',
@@ -120,7 +120,7 @@ for (const storage of ['browser', 'directory'] as const)
       const update = await page
         .getByLabel('Agent prompt', {exact: true})
         .inputValue();
-      assert.ok(update.includes('/docs/guides/agents.md'));
+      assert.ok(update.includes('/docs/agents.md'));
       assert.ok(
         update.includes(
           'echo \'{"operation":"context"}\' | npx --yes @code3d/cli',

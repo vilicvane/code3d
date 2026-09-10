@@ -71,13 +71,18 @@ test(
       const prompt = await page
         .getByLabel('Agent prompt', {exact: true})
         .inputValue();
-      const guide = await page.request.get(
-        prompt.match(/https?:\/\/\S+\/guides\/agents\.md/)![0],
-      );
+      const guideUrl = prompt.match(/https?:\/\/\S+\/agents\.md/)![0];
+      const guide = await page.request.get(guideUrl);
       assert.equal(guide.status(), 200);
-      assert.ok(
-        (await guide.text()).includes('View agent snapshots in the App'),
+      const markdown = await guide.text();
+      assert.ok(markdown.startsWith('# Work in Code3D\n'));
+      const observationUrl = new URL(
+        markdown.match(/\]\(([^)]*agents\/observation\.md)\)/)![1],
+        guideUrl,
       );
+      const observation = await page.request.get(observationUrl.href);
+      assert.equal(observation.status(), 200);
+      assert.ok((await observation.text()).includes('"mode": "render"'));
       const config = JSON.parse(prompt.match(/```json\n([\s\S]*?)\n```/)![1]);
       const file = join(temp, `${name}.json`);
       await writeFile(file, JSON.stringify(config), {mode: 0o600});
