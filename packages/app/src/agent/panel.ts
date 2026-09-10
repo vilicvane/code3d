@@ -389,7 +389,9 @@ export class AgentPanel {
           sessionId: this.sessionId,
           name,
         });
-        const color = randomAgentColor();
+        const color = randomAgentColor(
+          [...this.grants.values()].map(grant => grant.color),
+        );
         const endpoint = await this.createEndpoint(config, color);
         if (generation !== this.generation) {
           endpoint.close();

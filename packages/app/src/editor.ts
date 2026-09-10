@@ -934,7 +934,9 @@ export class CodeEditor {
   ): void {
     let cursor = this.agentCursors.get(id);
     if (!cursor) {
-      color ??= randomAgentColor();
+      color ??= randomAgentColor(
+        [...this.agentCursors.values()].map(cursor => cursor.color),
+      );
       const caret = document.createElement('div');
       caret.className = `agent-caret agent-color-${color}`;
       const label = document.createElement('div');
