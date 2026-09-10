@@ -17,6 +17,8 @@ import {
   type ModelOperationSnapshot,
   type ModelSnapshotObject,
   type ModelObject,
+  type RelationObject,
+  type Sketch,
   type ParameterKind,
   type ParameterTarget,
   type ParameterUsage,
@@ -283,11 +285,11 @@ type CatalogTrace = {
   category: ObjectCatalogEntry['category'];
   scope: ObjectCatalogEntry['scope'];
   sourceRef: SourceRef;
-  objects: Set<ModelObject>;
+  objects: Set<RelationObject>;
   runs: Array<
     Readonly<{
       order: number;
-      objects: readonly ModelObject[];
+      objects: readonly RelationObject[];
     }>
   >;
 };
@@ -300,9 +302,9 @@ type SourceValueTrace = {
   scopeRef?: SourceRef;
   evaluations: Array<
     Readonly<{
-      objects: readonly ModelObject[];
+      objects: readonly RelationObject[];
       isCollection: boolean;
-      sketchIds: readonly string[];
+      sketches: readonly Sketch[];
       topologyReferences: readonly TopologyValueReference[];
       anchorReferences: readonly AnchorValueReference[];
       contextId: string;
@@ -317,7 +319,7 @@ type SourceInputTrace = Readonly<{
   execution: number;
   sourceRef: SourceRef;
   isCollection: boolean;
-  objects: readonly ModelObject[];
+  objects: readonly RelationObject[];
   contextId: string;
   runtime: RuntimeReach;
 }>;
@@ -328,9 +330,9 @@ type SourceConstraintTrace = {
   evaluations: Array<
     Readonly<{
       constraintId: string;
-      source: ModelObject;
-      target: ModelObject;
-      self?: ModelObject;
+      source: RelationObject;
+      target: RelationObject;
+      self?: RelationObject;
       expression: ConstraintExpression;
       contextId: string;
       runtime: RuntimeReach;
@@ -344,7 +346,7 @@ type SourceElementTrace = {
   receiverRef: SourceRef;
   evaluations: Array<
     Readonly<{
-      model: ModelObject;
+      model: RelationObject;
       name: string;
       kind: ElementKind;
       transform: Transform;
@@ -403,6 +405,8 @@ export function createModelCompiler(
     instrumentModelOperation,
     isConstraintExpression,
     isModelObject,
+    isSketch,
+    sketchFrame,
     modelElementReference,
     modelObjectRuntimeInfo,
     modelTopologyReference,
@@ -418,7 +422,7 @@ export function createModelCompiler(
       'evaluation',
       runtime.describeOpenCascadeException,
     );
-  const tracedObjects = new Set<ModelObject>();
+  const tracedObjects = new Set<RelationObject>();
   const sketches = new SketchTraceRegistry(runtime);
   const sourceValueTraces = new Map<string, SourceValueTrace>();
   const sourceConstraintTraces = new Map<string, SourceConstraintTrace>();
@@ -539,6 +543,14 @@ export function createModelCompiler(
         recordSourceValue(id, 'value', location, result, context.id, runtime);
       }
       const order = ++evaluationOrder;
+      if (isSketch(result))
+        instrumentModelOperation(sketchFrame(result), {
+          siteId: id,
+          execution,
+          order,
+          sourceRef: location,
+          parameters,
+        });
       if (context.kind === 'call') {
         recordCatalogValue(
           {
@@ -678,6 +690,17 @@ export function createModelCompiler(
     ): T {
       const executionTrace = traceFrames.at(-1)?.trace;
       if (executionTrace?.siteId !== siteId) {
+        return value;
+      }
+      if (isSketch(value)) {
+        recordSourceValue(
+          id,
+          'value',
+          sourceRef(file, start, end),
+          value,
+          executionTrace.contextId,
+          completedRuntimeReach(),
+        );
         return value;
       }
       if (isConstraintExpression(value)) {
@@ -885,8 +908,8 @@ export function createModelCompiler(
       topologyReferences,
       anchorReferences,
     );
-    const sketchIds = runtimeSketchIds(value);
-    if (objects.length === 0 && sketchIds.length === 0) {
+    const sketchValues = runtimeSketchValues(value);
+    if (objects.length === 0 && sketchValues.length === 0) {
       return;
     }
     const key = `${kind}:${id}:${sourceRef.file}:${sourceRef.start}:${sourceRef.end}`;
@@ -899,10 +922,10 @@ export function createModelCompiler(
     };
     sourceTrace.evaluations.push({
       objects,
-      sketchIds,
+      sketches: sketchValues,
       isCollection:
         !isModelObject(value) &&
-        sketchIds.length === 0 &&
+        sketchValues.length === 0 &&
         !modelElementReference(value),
       topologyReferences,
       anchorReferences,
@@ -911,15 +934,21 @@ export function createModelCompiler(
     });
     objects.forEach(object => {
       tracedObjects.add(object);
-      if (evaluationContexts.get(contextId)?.kind === 'call') {
+      if (
+        isModelObject(object) &&
+        evaluationContexts.get(contextId)?.kind === 'call'
+      ) {
         latestTracedObject = object;
       }
     });
     sourceValueTraces.set(key, sourceTrace);
   }
 
-  function runtimeSketchIds(value: unknown): string[] {
-    if (runtime.isSketch(value)) return [sketches.identity(value)];
+  function runtimeSketchValues(value: unknown): Sketch[] {
+    if (runtime.isSketch(value)) {
+      sketches.identity(value);
+      return [value];
+    }
     return [];
   }
 
@@ -961,7 +990,7 @@ export function createModelCompiler(
     }
     const trace = catalogTraces.get(metadata.id) ?? {
       ...metadata,
-      objects: new Set<ModelObject>(),
+      objects: new Set<RelationObject>(),
       runs: [],
     };
     objects.forEach(object => trace.objects.add(object));
@@ -991,7 +1020,7 @@ export function createModelCompiler(
     seen = new Set<unknown>(),
     topologyReferences?: TopologyValueReference[],
     anchorReferences?: AnchorValueReference[],
-  ): ModelObject[] {
+  ): RelationObject[] {
     if (isModelObject(value)) {
       return [value];
     }
@@ -1312,9 +1341,9 @@ export function createModelCompiler(
     sourceGraph: ProjectBundle,
     requestedDesignContext?: DesignContext,
     onEvaluate?: () => void,
-    captureGeometry?: (objects: readonly ModelObject[]) => void,
+    captureGeometry?: (objects: readonly RelationObject[]) => void,
     checkCancelled: () => void = () => {},
-    prepareSnapshots?: (objects: readonly ModelObject[]) => Promise<void>,
+    prepareSnapshots?: (objects: readonly RelationObject[]) => Promise<void>,
   ): Promise<ModelModule> {
     checkCancelled();
     const files = new Map(
@@ -1423,8 +1452,8 @@ export function createModelCompiler(
       }
 
       checkCancelled();
-      const modelExports = new Map<string, ModelObject>();
-      const exportNamesByObject = new Map<ModelObject, Set<string>>();
+      const modelExports = new Map<string, RelationObject>();
+      const exportNamesByObject = new Map<RelationObject, Set<string>>();
       for (const [modulePath, module] of modules) {
         for (const [name, value] of Object.entries(module)) {
           const exportLabel =
@@ -1448,7 +1477,10 @@ export function createModelCompiler(
         diagnostic = relateDiagnostic(diagnostic, fallbackObject);
       }
 
-      const graphObjects = collectObjectGraph(tracedObjects);
+      const graphObjects = collectObjectGraph([
+        ...tracedObjects,
+        ...sketches.frames(),
+      ]);
       graphObjects.forEach(object => tracedObjects.add(object));
       await prepareSnapshots?.(
         fallbackObject && !graphObjects.includes(fallbackObject)
@@ -1457,8 +1489,8 @@ export function createModelCompiler(
       );
       checkCancelled();
       const snapshotModel = createModelSnapshotter();
-      const snapshots = new Map<ModelObject, ModelSnapshotObject>();
-      const snapshotOf = (object: ModelObject): ModelSnapshotObject => {
+      const snapshots = new Map<RelationObject, ModelSnapshotObject>();
+      const snapshotOf = (object: RelationObject): ModelSnapshotObject => {
         checkCancelled();
         const existing = snapshots.get(object);
         if (existing) return existing;
@@ -1617,9 +1649,11 @@ export function createModelCompiler(
     return `__code3d.design(${JSON.stringify(context.functionRef.file)}, ${context.functionRef.start}, ${context.functionRef.end}, ${context.callRef.start}, ${context.callRef.end}, ${JSON.stringify(context.id)}, ${JSON.stringify(context.functionId)}, ${JSON.stringify(context.label)}, () => ${context.binding}(...(${context.argumentsSource})));`;
   }
 
-  function collectObjectGraph(roots: Iterable<ModelObject>): ModelObject[] {
-    const found = new Set<ModelObject>();
-    const visit = (object: ModelObject): void => {
+  function collectObjectGraph(
+    roots: Iterable<RelationObject>,
+  ): RelationObject[] {
+    const found = new Set<RelationObject>();
+    const visit = (object: RelationObject): void => {
       if (found.has(object)) {
         return;
       }
@@ -1632,21 +1666,21 @@ export function createModelCompiler(
     return [...found];
   }
 
-  function modelObjectNodeId(object: ModelObject): string {
+  function modelObjectNodeId(object: RelationObject): string {
     return modelObjectRuntimeInfo(object).nodeId;
   }
 
-  function modelObjectName(object: ModelObject): string {
+  function modelObjectName(object: RelationObject): string {
     return modelObjectRuntimeInfo(object).name;
   }
 
-  function modelObjectSourceRefs(object: ModelObject): readonly SourceRef[] {
+  function modelObjectSourceRefs(object: RelationObject): readonly SourceRef[] {
     return modelObjectRuntimeInfo(object).sourceRefs;
   }
 
   function relateDiagnostic(
     diagnostic: ModelDiagnostic,
-    fallback: ModelObject | undefined,
+    fallback: RelationObject | undefined,
   ): ModelDiagnostic {
     if (diagnostic.kind !== 'evaluation') return diagnostic;
     const failures = [...sourceExecutionTraces.values()].filter(
@@ -1706,7 +1740,7 @@ export function createModelCompiler(
         ({
           objects,
           isCollection,
-          sketchIds,
+          sketches: sketchValues,
           topologyReferences,
           anchorReferences,
           contextId,
@@ -1722,7 +1756,7 @@ export function createModelCompiler(
             isCollection,
             runtime,
             nodeIds,
-            sketchIds,
+            sketchIds: sketchValues.map(value => sketches.identity(value)),
             topologyReferences,
             anchorReferences,
             focusNodeIds:
@@ -2575,7 +2609,7 @@ export function createModelCompiler(
     return nodeIds;
   }
 
-  function uniqueNodeIds(...models: readonly ModelObject[]): string[] {
+  function uniqueNodeIds(...models: readonly RelationObject[]): string[] {
     return [...new Set(models.map(modelObjectNodeId))];
   }
 
@@ -2591,7 +2625,7 @@ export function createModelCompiler(
         operationId?: string;
         role?: ModelOperationInputRole;
         isCollection?: boolean;
-        objects: readonly ModelObject[];
+        objects: readonly RelationObject[];
         contextId: string;
         runtime: RuntimeReach;
       }>
@@ -2652,6 +2686,31 @@ export function createModelCompiler(
             return node;
           }
           const visited = ts.visitEachChild(node, visit, context);
+          // A standalone value expression is a concrete use site, including a
+          // sketch reference. Calls already record their returned value. Keep
+          // directive prologues and control-flow-sensitive expressions intact.
+          if (
+            ts.isExpressionStatement(node) &&
+            ts.isExpressionStatement(visited) &&
+            !ts.isCallExpression(node.expression) &&
+            !ts.isStringLiteral(node.expression) &&
+            isTraceableExpression(node.expression, sourceFile)
+          ) {
+            return factory.updateExpressionStatement(
+              visited,
+              bindExpression(
+                visited.expression,
+                node.expression.getStart(sourceFile),
+                node.expression.getEnd(),
+                sourceFile.fileName,
+                stableSourceId('value', node.expression, sourceFile),
+                node.expression.getText(sourceFile),
+                'expression',
+                ts.isSourceFile(node.parent) ? 'module' : 'local',
+                factory,
+              ),
+            );
+          }
           if (
             ts.isFunctionLike(node) &&
             ts.isFunctionLike(visited) &&

@@ -176,6 +176,35 @@ error rather than silently filling holes. Persistent region IDs and general
 multi-hole correspondence are not available yet. Try `examples/sketch-modeling.ts`
 in the App for a plate, multiple cutting tools and a hollow loft.
 
+### Sketch placement and model context
+
+`sketch.relate(self => self.plane.align(target))` creates an immutable spatial
+copy of the same local 2D definition. Empty and open sketches can relate before
+`face()` is available. Targets include named model planes and planar
+`model.surface(id)` references.
+
+```ts
+const host = box(40, 20, 30).rotate(0, 0, 25);
+const profile = sketch([
+  ['point', 1, [0, 0]],
+  ['circle', 2, [1, 4]],
+]);
+const opening = profile.relate(s => s.plane.align(host.surface(4)));
+const result = host.cut([opening.face().extrude(-20)]);
+```
+
+Derived layers, faces and extrusion inherit these relations. Plane alignment does
+not center on a trimmed face or rewrite sketch coordinates. The relation binds
+the referenced immutable host value; later creating another transformed host does
+not redirect it. Use `align()`, not finite-bound `on()`, for the sketch's unbounded
+reference plane.
+
+Select `opening` in the App to edit with read-only model outlines in the sketch's
+local plane, or `profile` for the original local view. Both write the same geometry
+array. The outlines do not become snapping targets or external geometry constraints.
+See `examples/sketch-on-surface.ts`; the surface-selection creation entry is still
+being implemented under [#114](https://github.com/vilicvane/code3d/issues/114).
+
 ## Composition and boolean operations
 
 | Function               | Result                                        |

@@ -63,6 +63,7 @@ import {
   type SketchPick,
 } from '../tools/sketch-selection';
 import {SketchConstraintTools} from './sketch-constraint-tools';
+import type {SketchContextOutline} from '../tools/sketch-context';
 
 const drawingTools = [
   ['Line', LineSegment, () => new SketchLineDrawing()],
@@ -85,6 +86,7 @@ export type SketchEditorView = Readonly<{
   constraintValues: ReadonlyMap<number, string>;
   referenceable: ReadonlySet<string>;
   readOnlyReason?: string;
+  context?: readonly SketchContextOutline[];
 }>;
 
 type Gesture =
@@ -118,6 +120,7 @@ export class SketchEditor {
   private readonly status = document.createElement('output');
   private readonly statusText = document.createTextNode('');
   private readonly grid = svgElement('g');
+  private readonly context = svgElement('g');
   private readonly regions = svgElement('g');
   private readonly lines = svgElement('g');
   private readonly vertices = svgElement('g');
@@ -272,6 +275,7 @@ export class SketchEditor {
     this.snapLabel.append(this.snapText);
     this.overlay.append(this.draftMarker, this.snapLabel);
     this.svg.append(
+      this.context,
       this.grid,
       this.regions,
       this.constraints.guides,
@@ -1009,6 +1013,7 @@ export class SketchEditor {
     const positions = [
       ...this.points().map(p => p.position),
       ...this.circularCurves().flatMap(c => sketchCurveBounds(c.geometry)),
+      ...(this.view?.context ?? []).flatMap(outline => outline.segments.flat()),
     ];
     if (positions.length) {
       const xs = positions.map(p => p[0]),
@@ -1045,6 +1050,17 @@ export class SketchEditor {
       String(this.gesture?.kind === 'move' && !!this.gesture.pending),
     );
     this.usedShapes.clear();
+    (this.view.context ?? []).forEach((outline, occurrence) =>
+      outline.segments.forEach(([a, b], index) =>
+        this.line(
+          this.screen(a),
+          this.screen(b),
+          'sketch-context-edge',
+          `context:${occurrence}:${outline.nodeId}:${index}`,
+          this.context,
+        ),
+      ),
+    );
     const box =
       this.gesture?.kind === 'box' && this.gesture.dragging
         ? this.gesture

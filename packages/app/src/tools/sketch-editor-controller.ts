@@ -4,6 +4,7 @@ import type {
   SketchConstraint,
   SketchPointAddress,
   SourceRef,
+  ModelSnapshotObject,
 } from '@code3d/core/tooling';
 import {
   solveSketchSnapshot,
@@ -19,6 +20,10 @@ import {
 import type {CompiledSketch} from '../model/sketch-trace';
 import type {ModelDiagnostic} from '../model/diagnostic';
 import {SketchEditor} from '../ui/sketch-editor';
+import {
+  sketchContextOutlines,
+  type SketchContextOutline,
+} from './sketch-context';
 import {
   analyzeSketchSource,
   isNumericSketchConstraint,
@@ -37,6 +42,7 @@ export class SketchEditorController {
   private data: readonly SketchGeometryData[] = [];
   private stale = false;
   private revision = 0;
+  private context: readonly SketchContextOutline[] = [];
 
   constructor(
     container: HTMLElement,
@@ -62,9 +68,13 @@ export class SketchEditorController {
     id: string | undefined,
     sketches: ReadonlyMap<string, CompiledSketch>,
     selectionRef: SourceRef | undefined,
+    objects: ReadonlyMap<string, ModelSnapshotObject> = new Map(),
   ): void {
     this.revision++;
     this.active = id ? sketches.get(id) : undefined;
+    this.context = this.active
+      ? sketchContextOutlines(this.active, objects)
+      : [];
     this.data = this.active?.data ?? [];
     this.stale = false;
     this.selectionRef = selectionRef;
@@ -205,6 +215,7 @@ export class SketchEditorController {
       revision: this.revision,
       layers: this.layers,
       data: this.data,
+      context: this.context,
       editable: parsed?.editable ?? new Map(),
       constraintValues: parsed?.constraintValues ?? new Map(),
       referenceable: new Set(Object.keys(this.active.references)),

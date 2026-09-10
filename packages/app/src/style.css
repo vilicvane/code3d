@@ -1679,6 +1679,12 @@ kbd {
 .sketch-editor[hidden] {
   display: none;
 }
+.sketch-context-edge {
+  stroke: #a1aa9d;
+  stroke-opacity: 0.28;
+  stroke-width: 1px;
+  pointer-events: none;
+}
 #viewport-host:has(.sketch-editor:not([hidden]))
   .viewport-coordinate-reference {
   display: none;

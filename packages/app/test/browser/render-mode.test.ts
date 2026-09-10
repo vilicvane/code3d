@@ -104,7 +104,11 @@ export default result;`;
           ...viewport['occurrences'].values(),
           ...viewport['contextOccurrences'].values(),
         ]) {
-          if (occurrence.node.kind === 'group') continue;
+          if (
+            occurrence.node.kind === 'group' ||
+            occurrence.node.kind === 'reference'
+          )
+            continue;
           const material = createModelMaterial(
             occurrence.node.material,
             occurrence.node.kind,

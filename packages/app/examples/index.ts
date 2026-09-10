@@ -12,4 +12,5 @@ export {designArgumentsExample, makeKnob} from './design-arguments.ts';
 export {fastenerExample} from './fasteners.ts';
 export {default as shellExample} from './shell.ts';
 export {default as sketchModelingExample} from './sketch-modeling.ts';
+export {default as sketchOnSurfaceExample} from './sketch-on-surface.ts';
 export {default as topologyPathsExample} from './topology-paths.ts';
