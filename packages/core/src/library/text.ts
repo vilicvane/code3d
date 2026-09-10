@@ -7,12 +7,18 @@ import {
   type Point2D,
 } from 'replicad';
 import {castOwnedShape} from './kernel-shapes.js';
-import type {PathCommand} from 'opentype.js';
+import type {Font as OpenTypeFont, PathCommand} from 'opentype.js';
 import {fontArtifact, type Font} from './font.js';
 import {evaluateKernelOperation, type KernelArtifact} from './kernel-cache.js';
 import {estimateRetainedBytes} from './retained-memory.js';
 
-export type TextOptions = Readonly<{font: Font}>;
+export type TextOptions = Readonly<{
+  /** Extra model-unit spacing between glyphs, including spaces. Defaults to 0; may be negative. */
+  letterSpacing?: number;
+  /** Apply the font's kerning pairs. Defaults to true. */
+  kerning?: boolean;
+}>;
+
 type Contour = readonly PathCommand[];
 type Region = readonly Contour[];
 type Glyph = Readonly<{
@@ -24,44 +30,76 @@ type Glyph = Readonly<{
 /** Layout shares a baseline at (0, 0, 0); spaces advance without creating faces. */
 export function textGlyphs(
   content: string,
+  font: Font,
   size: number,
-  options: TextOptions,
+  options: TextOptions = {},
 ): readonly Glyph[] {
   if (!Number.isFinite(size) || size <= 0)
     throw new Error('Text size must be finite and greater than zero.');
   if (typeof content !== 'string')
     throw new Error('Text content must be a string.');
+  const letterSpacing = options.letterSpacing ?? 0;
+  if (!Number.isFinite(letterSpacing))
+    throw new Error('Text letter spacing must be finite.');
   if (/[\r\n\t]/u.test(content))
     throw new Error(
       'text() supports one line; position separate text() calls for multiple lines.',
     );
-  const resource = fontArtifact(options?.font);
-  const font = resource.value;
+  const resource = fontArtifact(font);
+  const parsedFont = resource.value;
   for (const character of content) {
-    if (!font.charToGlyphIndex(character)) {
+    if (!parsedFont.charToGlyphIndex(character)) {
       throw new Error(
-        `Font ${font.names.fontFamily?.en ?? ''} has no glyph for ${JSON.stringify(character)} (U+${character.codePointAt(0)!.toString(16).toUpperCase()}).`,
+        `Font ${parsedFont.names.fontFamily?.en ?? ''} has no glyph for ${JSON.stringify(character)} (U+${character.codePointAt(0)!.toString(16).toUpperCase()}).`,
       );
     }
   }
   const glyphs: Glyph[] = [];
-  font.forEachGlyph(content, 0, 0, size, undefined, (glyph, x, y) => {
-    const regions = evaluateKernelOperation<readonly Region[]>(
-      'textGlyph',
-      [glyph.index, size],
-      [resource],
-      {
-        estimateBytes: estimateRetainedBytes,
-        retain: value => value,
-        instantiate: value => value,
-        release() {},
-      },
-      () =>
-        groupTextContours(splitContours(glyph.getPath(0, 0, size).commands)),
-    );
-    glyphs.push({regions, x, y});
-  });
+  parsedFont.forEachGlyph(
+    content,
+    0,
+    0,
+    size,
+    {
+      kerning: options.kerning ?? true,
+      script: kerningScript(parsedFont, content),
+    },
+    (glyph, x, y) => {
+      const regions = evaluateKernelOperation<readonly Region[]>(
+        'textGlyph',
+        [glyph.index, size],
+        [resource],
+        {
+          estimateBytes: estimateRetainedBytes,
+          retain: value => value,
+          instantiate: value => value,
+          release() {},
+        },
+        () =>
+          groupTextContours(splitContours(glyph.getPath(0, 0, size).commands)),
+      );
+      glyphs.push({regions, x: x + glyphs.length * letterSpacing, y});
+    },
+  );
   return glyphs;
+}
+
+function kerningScript(
+  font: OpenTypeFont,
+  content: string,
+): string | undefined {
+  // OpenType.js exposes position publicly, but its declarations omit it.
+  const {position} = font as OpenTypeFont & {
+    position: {
+      getKerningTables(script?: string): readonly unknown[] | undefined;
+    };
+  };
+  // Fonts such as DejaVu Sans put Latin pairs in latn; DFLT can have other
+  // kerning tables while omitting those pairs. Select Latin for Latin text.
+  return /\p{Script=Latin}/u.test(content) &&
+    position.getKerningTables('latn')?.length
+    ? 'latn'
+    : undefined;
 }
 
 function splitContours(commands: readonly PathCommand[]): readonly Contour[] {

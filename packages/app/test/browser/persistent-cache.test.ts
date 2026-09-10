@@ -1,4 +1,5 @@
 import {readFile} from 'node:fs/promises';
+import {once} from 'node:events';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {before, after, test, type TestContext} from 'node:test';
@@ -337,7 +338,7 @@ test(
     );
     const source = `import {font,text,extrude,group} from '@code3d/core';
 const sans = font(new URL('./font.ttf',import.meta.url));
-export default group(extrude(text('B8i',10,{font:sans}),2));`;
+export default group(extrude(text('B8i', sans, 10),2));`;
     const assets = {'/font.ttf': {bytes: latin, version: '1'}};
     const cold = await compile(page, {
       source,
@@ -371,5 +372,115 @@ export default group(extrude(text('B8i',10,{font:sans}),2));`;
     );
     valid(undo);
     assert.equal(undo.objects, cold.objects);
+  },
+);
+
+test(
+  'engine prepares cross-origin font URLs, refreshes content and recovers from denied CORS',
+  {timeout: 180_000},
+  async t => {
+    const {createServer} = await import('node:http');
+    const latin = await readFile(
+      new URL('../../examples/fonts/DejaVuSans.ttf', import.meta.url),
+    );
+    const chinese = await readFile(
+      new URL(
+        '../../../core/test/fonts/NotoSansCJK-subset.otf',
+        import.meta.url,
+      ),
+    );
+    let bytes = latin,
+      allow = true,
+      downloads = 0,
+      cacheControl = 'no-store';
+    const fontServer = createServer((request, response) => {
+      response.setHeader('Cache-Control', cacheControl);
+      if (allow) response.setHeader('Access-Control-Allow-Origin', '*');
+      if (request.url === '/redirect.ttf') {
+        response.writeHead(302, {Location: '/font.ttf'}).end();
+        return;
+      }
+      downloads++;
+      response.writeHead(200, {'Content-Type': 'font/ttf'}).end(bytes);
+    });
+    fontServer.listen(0, '127.0.0.1');
+    await once(fontServer, 'listening');
+    t.after(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          fontServer.close(error => (error ? reject(error) : resolve()));
+          fontServer.closeAllConnections();
+        }),
+    );
+    const address = fontServer.address();
+    assert.ok(address && typeof address !== 'string');
+    const fontUrl = `http://127.0.0.1:${address.port}/redirect.ttf`;
+    const page = await fixture(t);
+    // Playwright routing disables HTTP caching. The initial fixture document
+    // is loaded; remove its route before testing real browser cache behavior.
+    await page.context().unroute(page.url());
+    assert.notEqual(new URL(page.url()).origin, new URL(fontUrl).origin);
+    const source = `import {font, text, extrude, group} from '@code3d/core';
+import {sans} from './font.ts';
+const second = font(new URL('${fontUrl}'));
+export default group([...extrude(text('B', sans, 10, {letterSpacing: 0.5, kerning: false}), 2), ...extrude(text('8i', second, 10), 2)]);`;
+    const assets = {
+      '/font.ts': {
+        version: '1',
+        bytes: new TextEncoder().encode(
+          `import {font} from '@code3d/core'; export const sans = font(new URL('${fontUrl}', import.meta.url));`,
+        ),
+      },
+    };
+    const geometry = (result: CacheResult) =>
+      createHash('sha256')
+        .update(
+          JSON.stringify(
+            JSON.parse(result.objects!)
+              .filter((object: {mesh?: unknown}) => object.mesh)
+              .map((object: {mesh: unknown; transform: unknown}) => [
+                object.mesh,
+                object.transform,
+              ]),
+          ),
+        )
+        .digest('hex');
+    const first = await compile(page, {source, assets});
+    valid(first);
+    assert.equal(
+      downloads,
+      1,
+      'discovery, model compilation and both modules share one download',
+    );
+    bytes = chinese;
+    const changed = await compile(page, {source});
+    valid(changed);
+    assert.equal(downloads, 2);
+    assert.notEqual(geometry(changed), geometry(first));
+    bytes = latin;
+    const restored = await compile(page, {source});
+    valid(restored);
+    assert.equal(downloads, 3);
+    assert.equal(geometry(restored), geometry(first));
+    allow = false;
+    const denied = await compile(page, {source});
+    assert.match(
+      JSON.stringify(denied.diagnostic ?? denied.error),
+      /Cannot load network asset.*CORS/,
+    );
+    allow = true;
+    cacheControl = 'public, max-age=3600';
+    const recovered = await compile(page, {source});
+    valid(recovered);
+    assert.equal(geometry(recovered), geometry(first));
+    const before = downloads;
+    const cached = await compile(page, {source});
+    valid(cached);
+    assert.equal(
+      downloads,
+      before,
+      'fresh HTTP cache avoids another font download',
+    );
+    assert.equal(geometry(cached), geometry(first));
   },
 );

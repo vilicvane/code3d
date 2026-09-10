@@ -10,7 +10,7 @@ declare const window: Window & {
 };
 
 test(
-  'bundled font text supports batch extrusion editing and undo in the App',
+  'bundled font text supports size and batch extrusion editing with undo in the App',
   {timeout: 120_000},
   async t => {
     assert.ok(process.env.CODE3D_TEST_URL);
@@ -41,12 +41,30 @@ test(
     await page.getByText('Ready', {exact: true}).waitFor({timeout: 60_000});
     const source = `import {font, text, extrude, group} from '@code3d/core';
 const sans = font(new URL('./examples/fonts/DejaVuSans.ttf', import.meta.url));
-const profiles = text('B8i', 20, {font: sans});
+const profiles = text('B8i', sans, 20);
 export const lettering = group(extrude(profiles, 3));`;
     await page.evaluate(() => window.textApp.codeEditor.editor.focus());
     await page.keyboard.press('Control+a');
     await page.keyboard.insertText(source);
     await waitText(page, 3);
+    await page.evaluate(() => {
+      const editor = window.textApp.codeEditor.editor;
+      editor.setPosition(
+        editor.getModel()!.getPositionAt(editor.getValue().lastIndexOf('20')),
+      );
+    });
+    const size = page.locator('[data-parameter=size]');
+    await size.waitFor();
+    assert.equal(await size.inputValue(), '20');
+    await size.fill('24');
+    await page.keyboard.press('Enter');
+    await waitSize(page, 24);
+    assert.match(
+      await page.evaluate(() => window.textApp.codeEditor.editor.getValue()),
+      /text\('B8i', sans, 24\)/,
+    );
+    await page.keyboard.press('Control+z');
+    await waitSize(page, 20);
     await page.evaluate(() => {
       const editor = window.textApp.codeEditor.editor;
       editor.setPosition(
@@ -70,6 +88,29 @@ export const lettering = group(extrude(profiles, 3));`;
     await page.screenshot({path: '/tmp/code3d-text-browser.png'});
   },
 );
+
+async function waitSize(page: Page, size: number) {
+  await page.waitForFunction(
+    size => {
+      const module = window.textApp.viewport['module'];
+      if (!module || module.diagnostic) return false;
+      const faces = [...module.objects.values()].filter(
+        object => object.operation.kind === 'text',
+      );
+      return (
+        faces.length === 4 &&
+        faces.every(face =>
+          face.parameters.some(
+            parameter =>
+              parameter.argument === 'size' && parameter.value === size,
+          ),
+        )
+      );
+    },
+    size,
+    {timeout: 60_000},
+  );
+}
 
 async function waitText(page: Page, distance: number) {
   await page.waitForFunction(

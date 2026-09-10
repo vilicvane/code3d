@@ -108,6 +108,7 @@ export class ProjectCompiler {
       this.language.reset();
     }
     this.language.invalidate(changed);
+    this.assets.beginCompilation(checkCancelled);
     // Finish applying invalidation before cancellation can consume these changes.
     checkCancelled();
     const reader = this.packages;

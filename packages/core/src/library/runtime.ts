@@ -1,4 +1,4 @@
-import {font} from './font.js';
+import {font, type Font} from './font.js';
 import {textGlyphs, textRegionFace, type TextOptions} from './text.js';
 import type {Material} from './three.js';
 import {captureModelMaterial, type ModelMaterialSnapshot} from './material.js';
@@ -3817,10 +3817,11 @@ export function extrude(
  */
 export function text(
   content: string,
+  font: Font,
   size: number,
-  options: TextOptions,
+  options?: TextOptions,
 ): readonly FaceModel[] {
-  return textGlyphs(content, size, options).flatMap(({regions, x, y}) =>
+  return textGlyphs(content, font, size, options).flatMap(({regions, x, y}) =>
     regions.value.map((region, index) => {
       const geometry = evaluateModelGeometry(
         'text',

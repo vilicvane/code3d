@@ -830,7 +830,7 @@ consumers and changes only when a concrete use case calls for it.
 import {font, text, extrude, group} from '@code3d/core';
 
 const sans = font(new URL('./fonts/DejaVuSans.ttf', import.meta.url));
-const profiles = text('B8i', 10, {font: sans});
+const profiles = text('B8i', sans, 10);
 export const lettering = group(extrude(profiles, 1));
 ```
 
@@ -839,7 +839,31 @@ export const lettering = group(extrude(profiles, 1));
 assets in imported modules. Changing the font file invalidates the resource; equal
 file contents reuse parsed fonts and geometry. Node reads file URLs directly.
 `font()` also accepts `ArrayBuffer` or `Uint8Array` bytes, captured at the call.
-Dynamic network fetching belongs to the host, outside synchronous model evaluation.
+The engine also prepares static HTTP(S) font URLs before model execution:
+
+```ts
+const remote = font(new URL('https://example.com/fonts/SomeFont.ttf'));
+const label = text('AV', remote, 10, {letterSpacing: 0.5, kerning: true});
+```
+
+Use a direct font-file URL whose server permits CORS access from the App. The URL
+must be a literal in `new URL(...)`, including when declared in an imported module;
+no `await` is needed in model code. Requests for the same URL share a download in
+each compilation. Subsequent compilations use the browser's HTTP cache and the
+server's freshness rules; changed bytes invalidate font geometry. Failed downloads
+can be retried, and cancelling a build aborts pending downloads.
+
+For computed URLs or Node execution outside the App engine, download bytes first:
+
+```ts
+const response = await fetch(fontUrl);
+if (!response.ok) throw new Error(`Font download failed: ${response.status}`);
+const remote = font(await response.arrayBuffer());
+```
+
+Google Fonts CSS URLs describe font files and are not themselves fonts. Supply the
+underlying supported font-file URL. CSS resolution and WOFF2 decoding are not
+supported by this API.
 
 TTF and OTF fonts are supported, including Chinese characters when present in the
 font. Font collections (TTC), WOFF2, color glyphs and multiline layout are outside
@@ -847,10 +871,18 @@ this first API. Missing glyphs and crossing/touching contours within a glyph rep
 an error. Empty text and spaces create no faces; spaces still advance subsequent
 characters. Layout uses the font's advances, kerning and supported ligatures.
 
-`text(content, size, {font})` returns connected planar regions as ordinary readonly
-`FaceModel[]`: `B` has one face with two holes; `i` has two faces. Size is the font em
-in model units, not the cap height. Coordinates are +X right, -Z up, normal +Y, with
-all faces retaining the same baseline origin. Faces are never individually centered,
+`text(content, font, size, options?)` requires the first three arguments and returns connected planar
+regions as ordinary readonly `FaceModel[]`: `B` has one face with two holes; `i` has
+two faces. Size is the font em in model units, not the cap height. Coordinates are
++X right, -Z up, normal +Y, with all faces retaining the same baseline origin.
+Faces are never individually centered,
 so `group(extrude(...))`, origin operations and boolean tools preserve the layout.
 Use positive/negative extrusion and `union`/`cut` for raised or engraved lettering.
 Text is currently code-defined geometry rather than an editable sketch entity.
+
+`options.letterSpacing` defaults to `0` and adds a finite distance in model units
+between laid-out glyphs, including spaces. Negative values tighten the text. The
+distance stays constant when size changes, and disconnected parts of one glyph move
+together. `options.kerning` defaults to `true`; set it to `false` to disable the
+font's pair adjustments. Extra letter spacing is added after kerning. Supported
+ligatures remain single glyphs for spacing purposes.

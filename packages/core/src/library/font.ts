@@ -20,7 +20,7 @@ export function installModelResourceReader(reader: typeof readResource): void {
   readResource = reader;
 }
 
-/** Reads a prepared TTF/OTF resource; Node also accepts file URLs directly. */
+/** Reads font bytes or a prepared project/HTTP(S) URL; Node also reads file URLs. */
 export function font(source: URL | ArrayBuffer | Uint8Array): Font {
   const bytes =
     source instanceof URL
@@ -30,7 +30,7 @@ export function font(source: URL | ArrayBuffer | Uint8Array): Font {
         : source;
   if (!(bytes instanceof Uint8Array)) {
     throw new Error(
-      'font() requires font bytes or a resource prepared by the model engine. Use new URL("./font.ttf", import.meta.url).',
+      'font() requires font bytes or a URL prepared by the model engine. Use a static new URL("./font.ttf", import.meta.url) or new URL("https://…/font.ttf"); outside the engine, fetch the font first and pass its bytes.',
     );
   }
   const id = kernelContentId(bytes);

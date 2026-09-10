@@ -8,6 +8,7 @@ import {
   cylinder,
   ellipse,
   extrude,
+  font,
   frustum,
   group,
   intersect,
@@ -20,6 +21,7 @@ import {
   sketch,
   spline,
   sphere,
+  text,
   tube,
   union,
   type Anchor,
@@ -31,6 +33,7 @@ import {
   type EdgeModel,
   type FaceAnchor,
   type FaceModel,
+  type Font,
   type GroupModel,
   type LineAnchor,
   type LoftOptions,
@@ -40,6 +43,7 @@ import {
   type SolidModel,
   type Surface,
   type SurfaceId,
+  type TextOptions,
   type TopologyId,
   type Vec3,
   type Vertex,
@@ -89,6 +93,25 @@ sphere();
 frustum();
 // @ts-expect-error Prism dimensions remain required.
 regularPrism();
+const sans: Font = font(new URL('./font.ttf', import.meta.url));
+const textFaces: readonly FaceModel[] = text('B8i', sans, 10);
+const textOptions: TextOptions = {letterSpacing: 0.5, kerning: false};
+text('AV', sans, 10, textOptions);
+text('AV', sans, 10, {});
+// @ts-expect-error Kerning is a boolean switch.
+text('AV', sans, 10, {kerning: 1});
+// @ts-expect-error Letter spacing uses numeric model units.
+text('AV', sans, 10, {letterSpacing: '1px'});
+const textSolids: readonly SolidModel[] = extrude(textFaces, 2);
+group(textSolids);
+// @ts-expect-error Text requires an explicit font and size.
+text('B8i');
+// @ts-expect-error Text size remains required.
+text('B8i', sans);
+// @ts-expect-error The font is a required value, not an optional setting.
+text('B8i', undefined, 10);
+// @ts-expect-error Text accepts content, font, size in that order.
+text('B8i', 10, sans);
 const material: Material = new MeshPhysicalMaterial({
   roughness: 0.3,
   clearcoat: 1,

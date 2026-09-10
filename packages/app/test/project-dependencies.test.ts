@@ -813,7 +813,7 @@ test('synchronous font assets invalidate on file edits and batch text operations
       {
         path: '/model.ts',
         source:
-          'import {text, extrude, group} from "@code3d/core"; import {sans} from "./font.ts"; const profiles = text("B8i", 10, {font:sans}); export const lettering = group(extrude(profiles, 2));',
+          'import {text, extrude, group} from "@code3d/core"; import {sans} from "./font.ts"; const profiles = text("B8i", sans, 10); export const lettering = group(extrude(profiles, 2));',
       },
     ],
   };

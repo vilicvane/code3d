@@ -1,7 +1,7 @@
 import {box, cut, extrude, font, group, text, union} from '@code3d/core';
 
 const sans = font(new URL('./fonts/DejaVuSans.ttf', import.meta.url));
-const profiles = text('B8i', 10, {font: sans});
+const profiles = text('B8i', sans, 10, {letterSpacing: 0.3, kerning: true});
 
 export const lettering = group(extrude(profiles, 2)).material('#e8b45d');
 

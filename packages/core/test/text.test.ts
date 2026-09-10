@@ -48,7 +48,7 @@ afterEach(() => {
 
 test('real TTF text keeps holes, independent regions, baseline and signed extrusion', () => {
   const sans = font(latinUrl);
-  const faces = keepAll(text('B8i', 10, {font: sans}));
+  const faces = keepAll(text('B8i', sans, 10));
   assert.equal(faces.length, 4);
   const snapshot = createModelSnapshotter();
   for (const face of faces) {
@@ -91,7 +91,7 @@ test('real TTF text keeps holes, independent regions, baseline and signed extrus
 test('real OTF/CFF Chinese and Latin glyphs produce valid extrudable faces', () => {
   const chinese = font(chineseUrl);
   for (const content of ['B8i', '中文文字测试']) {
-    const faces = keepAll(text(content, 10, {font: chinese}));
+    const faces = keepAll(text(content, chinese, 10));
     assert.ok(faces.length >= content.length);
     for (const solid of keepAll(extrude(faces, 1)))
       assert.ok(volume(solid) > 0);
@@ -102,11 +102,11 @@ test('font metrics retain spaces, scaling and immutable bytes; invalid input is 
   const bytes = new Uint8Array(readFileSync(latinUrl));
   const sans = font(bytes);
   bytes.fill(0);
-  assert.equal(text('', 10, {font: sans}).length, 0);
-  assert.equal(text('   ', 10, {font: sans}).length, 0);
-  const normal = keepAll(text('B', 10, {font: sans}));
-  const spaced = keepAll(text(' B', 10, {font: sans}));
-  const scaled = keepAll(text('B', 20, {font: sans}));
+  assert.equal(text('', sans, 10).length, 0);
+  assert.equal(text('   ', sans, 10).length, 0);
+  const normal = keepAll(text('B', sans, 10));
+  const spaced = keepAll(text(' B', sans, 10));
+  const scaled = keepAll(text('B', sans, 20));
   assert.ok(
     modelGeometry(spaced[0]).value.localBounds[0][0] >
       modelGeometry(normal[0]).value.localBounds[0][0] + 3,
@@ -114,10 +114,10 @@ test('font metrics retain spaces, scaling and immutable bytes; invalid input is 
   const a = volume(keep(normal[0].extrude(1))),
     b = volume(keep(scaled[0].extrude(1)));
   near(b, a * 4);
-  assert.throws(() => text('中', 10, {font: sans}), /U\+4E2D/);
-  assert.throws(() => text('B\n8', 10, {font: sans}), /one line/);
+  assert.throws(() => text('中', sans, 10), /U\+4E2D/);
+  assert.throws(() => text('B\n8', sans, 10), /one line/);
   for (const size of [0, -1, NaN, Infinity])
-    assert.throws(() => text('B', size, {font: sans}), /greater than zero/);
+    assert.throws(() => text('B', sans, size), /greater than zero/);
   assert.throws(() => font(bytes), /Cannot parse font/);
   assert.throws(
     () => font(new URL('https://example.com/font.ttf')),
@@ -144,6 +144,43 @@ function permutations<T>(values: T[]): T[][] {
       )
     : [[]];
 }
+test('text options apply font kerning and model-unit spacing to whole glyphs', () => {
+  const sans = font(latinUrl);
+  const left = (model: Model) => modelGeometry(model).value.localBounds[0][0];
+  const kerned = keepAll(text('AV', sans, 10));
+  const unkerned = keepAll(text('AV', sans, 10, {kerning: false}));
+  const explicit = keepAll(text('AV', sans, 10, {kerning: true}));
+  const defaults = keepAll(text('AV', sans, 10, {}));
+  near(left(kerned[0]), left(unkerned[0]));
+  // DejaVu Sans's Latin GPOS AV pair advances by -131 / 2048 em.
+  near(left(unkerned[1]) - left(kerned[1]), (131 / 2048) * 10);
+  kerned.forEach((face, index) => {
+    near(left(face), left(explicit[index]));
+    near(left(face), left(defaults[index]));
+  });
+  for (const size of [10, 20]) {
+    const normal = keepAll(text('Ai i', sans, size));
+    assert.equal(normal.length, 5);
+    for (const letterSpacing of [-0.5, 2]) {
+      const spaced = keepAll(text('Ai i', sans, size, {letterSpacing}));
+      spaced.forEach((face, index) => {
+        // Both disconnected parts of i move together; the space also advances.
+        near(
+          left(face) - left(normal[index]),
+          [0, 1, 1, 3, 3][index] * letterSpacing,
+        );
+      });
+    }
+  }
+  const spacedPair = keepAll(text('AV', sans, 10, {letterSpacing: 2}));
+  near(left(spacedPair[1]) - left(kerned[1]), 2);
+  for (const letterSpacing of [NaN, Infinity, -Infinity])
+    assert.throws(
+      () => text('A', sans, 10, {letterSpacing}),
+      /letter spacing must be finite/,
+    );
+});
+
 test('multi-hole workaround handles every contour order and nested islands', () => {
   for (const contours of permutations([
     square(0, 0, 10),
@@ -171,7 +208,7 @@ test('multi-hole workaround handles every contour order and nested islands', () 
 });
 
 test('text solids work as embossing and engraving boolean operands', () => {
-  const profiles = keepAll(text('B8i', 10, {font: font(latinUrl)}));
+  const profiles = keepAll(text('B8i', font(latinUrl), 10));
   const stock = keep(keep(box(30, 2, 16)).originOffset(-12, 1, 4));
   const raisedTools = keepAll(extrude(profiles, 1));
   const raised = keep(union([stock, ...raisedTools]));
@@ -202,7 +239,7 @@ test('content identities reuse fonts and restore text geometry from persistent a
     flush() {},
   });
   const build = () =>
-    keepAll(extrude(keepAll(text('B8i', 10, {font: font(latinUrl)})), 1));
+    keepAll(extrude(keepAll(text('B8i', font(latinUrl), 10)), 1));
   const first = build();
   const ids = first.map(model => modelGeometry(model).id);
   const before = kernelOperationCacheStats();
@@ -230,7 +267,7 @@ test('repeated text construction releases native temporaries after cache disposa
   const sans = font(latinUrl);
   const batch = () => {
     for (let i = 0; i < 10; i++) {
-      const faces = text('B8i', 10, {font: sans});
+      const faces = text('B8i', sans, 10);
       disposeModelObjects(faces);
       clearKernelOperationCache();
     }
