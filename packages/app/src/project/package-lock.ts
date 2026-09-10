@@ -3,7 +3,8 @@ import {
   manifestDependencies,
   type PackageManifest,
 } from './package-manifest';
-import {npmPackageUrl, type NpmPackage} from './npm-registry';
+import {npmPackageUrl} from './npm-registry';
+import {workspacePackageUrl, type PackageArtifact} from './workspace-packages';
 
 export const packageLockName = 'code3d-lock.json';
 type PackageResolution = {installUrl: `${string}/`};
@@ -13,7 +14,8 @@ export type BrowserPackageLock = {
     primary: Record<string, PackageResolution>;
     secondary: Record<`${string}/`, Record<string, PackageResolution>>;
   };
-  packages: Record<string, NpmPackage>;
+  packages: Record<string, PackageArtifact>;
+  workspace?: string;
   omitted: Record<string, string>;
   optional: string[];
 };
@@ -77,6 +79,15 @@ export function parsePackageLock(
       if (!Object.hasOwn(lock.dependencies, name)) throw new Error();
     for (const [url, pkg] of Object.entries(lock.packages)) {
       assertPackageName(pkg.name);
+      if ('workspace' in pkg) {
+        if (
+          typeof pkg.version !== 'string' ||
+          !/^[a-f0-9]{64}$/.test(pkg.workspace) ||
+          url !== workspacePackageUrl(pkg)
+        )
+          throw new Error();
+        continue;
+      }
       if (
         url !== npmPackageUrl(pkg) ||
         typeof pkg.version !== 'string' ||
@@ -85,6 +96,8 @@ export function parsePackageLock(
       )
         throw new Error();
     }
+    if (lock.workspace !== undefined && typeof lock.workspace !== 'string')
+      throw new Error();
     for (const [url, scope] of [
       [null, lock.resolutions.primary],
       ...Object.entries(lock.resolutions.secondary),

@@ -526,3 +526,141 @@ test('runs a zero-install screw model, retains its runtime on edits, and switche
     compiler.dispose();
   }
 });
+
+test('local folders resolve latest workspace imports and their closure without altering installed files', async () => {
+  const {WorkspaceFileReader} = await server.ssrLoadModule<
+    typeof import('../src/project/workspace-packages.ts')
+  >('/src/project/workspace-packages.ts');
+  const manifest = {
+    name: '@code3d/core',
+    version: '1.0.0',
+    type: 'module',
+    main: './index.js',
+    types: './index.d.ts',
+  };
+  const project = memoryFiles({
+    '/package.json': {
+      type: 'module',
+      dependencies: {
+        '@code3d/core': 'latest',
+        wrapper: 'latest',
+        alias: 'npm:@code3d/core@latest',
+        '@aliases/local': 'npm:@code3d/core@latest',
+      },
+    },
+    '/node_modules/@code3d/core/package.json': manifest,
+    '/node_modules/@code3d/core/index.js': `export const value = 'published';`,
+    '/node_modules/wrapper/package.json': {
+      type: 'module',
+      main: './index.js',
+      dependencies: {'@code3d/core': 'latest'},
+    },
+    '/node_modules/wrapper/index.js': `export {value} from '@code3d/core';`,
+    '/node_modules/@code3d/remote/package.json': {
+      type: 'module',
+      main: './index.js',
+    },
+    '/node_modules/@code3d/remote/index.js': `export const remote = 'registry';`,
+    '/pinned/package.json': {dependencies: {'@code3d/core': '^1'}},
+    '/pinned/node_modules/@code3d/core/package.json': manifest,
+    '/pinned/node_modules/@code3d/core/index.js': `export const value = 'pinned';`,
+  });
+  const artifacts = memoryFiles({
+    '/node_modules/@code3d/core/package.json': {
+      ...manifest,
+      dependencies: {helper: '1'},
+    },
+    '/node_modules/@code3d/core/index.js': `export {value} from 'helper';`,
+    '/node_modules/@code3d/core/index.d.ts': `export declare const value: 'development';`,
+    '/node_modules/helper/package.json': {type: 'module', main: './index.js'},
+    '/node_modules/helper/index.js': `export const value = 'development';`,
+  });
+  const workspaces = {
+    '@code3d/core': {manifest, revision: 'a'.repeat(64), files: {}},
+  };
+  const reader = new WorkspaceFileReader(project, artifacts, workspaces);
+  const resolver = new ProjectPackageResolver(reader);
+  const canonical = await resolver.resolve('@code3d/core', '/model.ts');
+  assert.match(canonical as string, /\.code3d-workspace/);
+  assert.equal(
+    await resolver.resolve('@code3d/core', '/node_modules/wrapper/index.js'),
+    canonical,
+  );
+  assert.equal(await resolver.resolve('alias', '/model.ts'), canonical);
+  assert.equal(
+    await resolver.resolve('@aliases/local', '/model.ts'),
+    canonical,
+  );
+  assert.equal(
+    await resolver.resolve('@code3d/core', '/pinned/model.ts'),
+    '/pinned/node_modules/@code3d/core/index.js',
+  );
+  assert.equal(
+    await resolver.resolve('@code3d/remote', '/model.ts'),
+    '/node_modules/@code3d/remote/index.js',
+  );
+  const source = `import {value} from '@code3d/core'; import {value as transitive} from 'wrapper'; export {value, transitive};`;
+  const bundle = await new ProjectBuilder(reader, esbuild).build(source);
+  const result = await importTestModule(bundle.source);
+  assert.equal(result.value, 'development');
+  assert.equal(result.transitive, 'development');
+  const language = await new ProjectLanguageLoader(reader).load({
+    files: [
+      {
+        path: '/model.ts',
+        source: `import {value} from '@code3d/core'; import {value as alias} from '@aliases/local'; const literal: 'development' = alias; const direct: 'development' = value;`,
+      },
+    ],
+  });
+  const sources = new Map(language.files.map(file => [file.path, file.source]));
+  sources.set(
+    '/model.ts',
+    `import {value} from '@code3d/core'; import {value as alias} from '@aliases/local'; const literal: 'development' = alias; const direct: 'development' = value;`,
+  );
+  const program = ts.createProgram({
+    rootNames: ['/model.ts'],
+    options: {...language.compilerOptions, noLib: true},
+    host: {
+      fileExists: path => sources.has(path),
+      readFile: path => sources.get(path),
+      getSourceFile: (path, target) =>
+        sources.has(path)
+          ? ts.createSourceFile(path, sources.get(path)!, target, true)
+          : undefined,
+      directoryExists: () => true,
+      getDirectories: () => [],
+      getDefaultLibFileName: () => '',
+      getCurrentDirectory: () => '/',
+      getCanonicalFileName: path => path,
+      useCaseSensitiveFileNames: () => true,
+      getNewLine: () => '\n',
+      writeFile() {},
+      realpath: path => language.realPaths?.[path] ?? path,
+    },
+  });
+  assert.deepEqual(
+    program
+      .getSemanticDiagnostics(program.getSourceFile('/model.ts'))
+      .map(d => ts.flattenDiagnosticMessageText(d.messageText, '\n')),
+    [],
+  );
+  assert.match(
+    project.contents.get('/node_modules/@code3d/core/index.js')!,
+    /published/,
+  );
+  const production = new ProjectPackageResolver(
+    new WorkspaceFileReader(project, artifacts, {}),
+  );
+  assert.equal(
+    await production.resolve('@code3d/core', '/model.ts'),
+    '/node_modules/@code3d/core/index.js',
+  );
+  project.contents.set(
+    '/package.json',
+    JSON.stringify({dependencies: {'@code3d/core': '1.0.0'}}),
+  );
+  assert.equal(
+    await resolver.resolve('@code3d/core', '/model.ts'),
+    '/node_modules/@code3d/core/index.js',
+  );
+});

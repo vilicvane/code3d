@@ -1113,3 +1113,234 @@ test(
     assert.deepEqual(errors, []);
   },
 );
+
+test(
+  'development latest installs current workspace Core and Screws and restores them without registry requests',
+  {timeout: 180_000},
+  async t => {
+    assert.ok(process.env.CODE3D_TEST_URL);
+    const browser = await chromium.connectOverCDP(
+      process.env.CODE3D_CDP_URL ?? 'http://localhost:9222',
+    );
+    t.after(() => browser.close());
+    const context = await browser.newContext();
+    t.after(() => context.close());
+    const page = await context.newPage();
+    await exposePackageApp(page);
+    const source = `import {box} from '@code3d/core'; import {ISO4762} from '@code3d/screws'; export default box(10, 10, 5).cut([ISO4762.clearanceHole('M3', 5)]);`;
+    await page.route('**/src/project/default-project.ts*', route =>
+      route.fulfill({
+        contentType: 'text/javascript',
+        body:
+          'export const defaultProject = ' +
+          JSON.stringify({
+            files: [
+              {
+                path: '/package.json',
+                source: JSON.stringify({
+                  type: 'module',
+                  dependencies: {
+                    '@code3d/core': 'latest',
+                    '@code3d/screws': 'latest',
+                  },
+                }),
+              },
+              {path: '/model.ts', source},
+            ],
+          }) +
+          ';',
+      }),
+    );
+    const requests: string[] = [];
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.route('https://registry.npmjs.org/**', async route => {
+      const url = route.request().url();
+      requests.push(url);
+      if (
+        /\/@code3d\/(?:core|screws)(?:\/|$)/.test(
+          decodeURIComponent(new URL(url).pathname),
+        )
+      ) {
+        await route.abort();
+      } else await route.continue();
+    });
+    await page.goto(process.env.CODE3D_TEST_URL);
+    await page.getByText('Ready', {exact: true}).waitFor({timeout: 120_000});
+    const installed = await page.evaluate(async () => {
+      const {developmentWorkspaces} =
+        await import('/src/project/browser-packages.ts');
+      const files = window.packageApp.projectFileSystem;
+      const lock = JSON.parse(
+        new TextDecoder().decode(await files.readFile('/code3d-lock.json')),
+      );
+      return {
+        core: lock.packages[
+          lock.resolutions.primary['@code3d/core'].installUrl
+        ],
+        screws:
+          lock.packages[lock.resolutions.primary['@code3d/screws'].installUrl],
+        expected: developmentWorkspaces['@code3d/core'].revision,
+        peer:
+          lock.resolutions.secondary[
+            lock.resolutions.primary['@code3d/screws'].installUrl
+          ]['@code3d/core'].installUrl ===
+          lock.resolutions.primary['@code3d/core'].installUrl,
+        declaration: new TextDecoder().decode(
+          await files.readFile(
+            '/node_modules/@code3d/core/bld/library/index.d.ts',
+          ),
+        ),
+      };
+    });
+    assert.equal(installed.core.workspace, installed.expected);
+    assert.ok(installed.screws.workspace);
+    assert.equal(installed.peer, true);
+    assert.match(installed.declaration, /box/);
+    assert.equal(
+      requests.some(url =>
+        /\/@code3d\/(?:core|screws)(?:\/|$)/.test(
+          decodeURIComponent(new URL(url).pathname),
+        ),
+      ),
+      false,
+    );
+    await page.evaluate(() =>
+      window.packageApp.codeEditor.openFile(
+        '/node_modules/@code3d/core/bld/library/index.d.ts',
+      ),
+    );
+    await page.waitForFunction(() =>
+      window.packageApp.codeEditor
+        .currentFile()
+        ?.endsWith('/core/bld/library/index.d.ts'),
+    );
+    assert.equal(
+      await page.evaluate(() => window.packageApp.codeEditor.editor.getValue()),
+      installed.declaration,
+    );
+    await page.evaluate(() =>
+      window.packageApp.codeEditor.openFile('/model.ts'),
+    );
+    await page.getByText('Ready', {exact: true}).waitFor();
+    const count = requests.length;
+    await page.reload();
+    await page.getByText('Ready', {exact: true}).waitFor({timeout: 90_000});
+    assert.equal(requests.length, count);
+    assert.deepEqual(errors, []);
+  },
+);
+
+test(
+  'directory projects use latest development packages without installation and reload virtual source pages',
+  {timeout: 150_000},
+  async t => {
+    assert.ok(process.env.CODE3D_TEST_URL);
+    const browser = await chromium.connectOverCDP(
+      process.env.CODE3D_CDP_URL ?? 'http://localhost:9222',
+    );
+    t.after(() => browser.close());
+    const context = await browser.newContext();
+    t.after(() => context.close());
+    const page = await context.newPage();
+    await exposePackageApp(page);
+    // Chromium 153 exits when an OPFS directory handle is deserialized from
+    // IndexedDB after navigation. This fixture supplies a fresh OPFS handle per
+    // document; native folder permission/persistence is outside this package test.
+    await page.route('**/src/project/directory-access.ts*', async route => {
+      const response = await route.fetch();
+      await route.fulfill({
+        response,
+        body:
+          (await response.text()) +
+          `\nstoredProjectDirectory = async () => (await navigator.storage.getDirectory()).getDirectoryHandle('local-project-test', {create: true});`,
+      });
+    });
+    await page.goto(process.env.CODE3D_TEST_URL + '/#/file/');
+    await page.waitForFunction(() => !!window.packageApp);
+    const workspace = await page.evaluate(async () => {
+      const {openDirectoryProjectFileSystem} =
+        await import('/src/project/filesystem.ts');
+      const handle = await (
+        await navigator.storage.getDirectory()
+      ).getDirectoryHandle('local-project-test', {create: true});
+      const fs = await openDirectoryProjectFileSystem(handle);
+      await fs.initialize(async () => {});
+      await fs.writeFile(
+        '/package.json',
+        JSON.stringify({
+          type: 'module',
+          dependencies: {'@code3d/core': 'latest'},
+        }),
+      );
+      await fs.writeFile(
+        '/model.ts',
+        `import {box} from '@code3d/core'; export default box(10, 8, 6);`,
+      );
+      return 'workspace-development-test';
+    });
+    const url = new URL(process.env.CODE3D_TEST_URL);
+    url.searchParams.set('workspace', workspace);
+    url.hash = '/file/model.ts';
+    await page.goto(url.href);
+    await page.getByText('Ready', {exact: true}).waitFor({timeout: 90_000});
+    assert.equal(
+      await page.evaluate(
+        async () =>
+          !!(await window.packageApp.projectFileSystem.stat('/node_modules')),
+      ),
+      false,
+    );
+    const declaration =
+      '/node_modules/.code3d-workspace/node_modules/@code3d/core/bld/library/index.d.ts';
+    await page.evaluate(
+      path => window.packageApp.codeEditor.openFile(path),
+      declaration,
+    );
+    await page.waitForFunction(
+      path => window.packageApp.codeEditor.currentFile() === path,
+      declaration,
+    );
+    const source = await page.evaluate(() =>
+      window.packageApp.codeEditor.editor.getValue(),
+    );
+    assert.match(source, /box/);
+    await page.reload();
+    await page.waitForFunction(
+      path => window.packageApp?.codeEditor.currentFile() === path,
+      declaration,
+    );
+    assert.equal(
+      await page.evaluate(() => window.packageApp.codeEditor.editor.getValue()),
+      source,
+    );
+    assert.equal(
+      await page.evaluate(
+        () => window.packageApp.codeEditor.editor.getRawOptions().readOnly,
+      ),
+      true,
+    );
+    assert.equal(
+      await page.evaluate(
+        async () =>
+          !!(await window.packageApp.projectFileSystem.stat('/node_modules')),
+      ),
+      false,
+    );
+    await page.evaluate(async () => {
+      const {projectFileSystem, codeEditor} = window.packageApp;
+      await projectFileSystem.writeFile('/package.json', '{"type":"module"}');
+      await codeEditor.openFile('/model.ts');
+    });
+    await page.getByText('Ready', {exact: true}).waitFor({timeout: 60_000});
+    await page.evaluate(() =>
+      window.packageApp.codeEditor.openFile(
+        '/node_modules/@code3d/core/bld/library/index.d.ts',
+      ),
+    );
+    assert.equal(
+      await page.evaluate(() => window.packageApp.codeEditor.editor.getValue()),
+      source,
+    );
+  },
+);

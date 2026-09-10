@@ -39,6 +39,18 @@ Browser storage 以当前页面的项目连接为单位；目录权限失效需�
 零安装入口。内置闭包经普通分层路径隔离，不能出现第二份公共 Core 实例。
 已声明的包缺失、exports 禁止或内容不兼容时明确报错。
 
+Vite 开发模式将 `latest` 的 `@code3d/*` 请求优先解析到仓库中存在的可发布
+workspace，直接依赖、传递依赖和 npm alias 使用同一规则。明确版本、其他范围或
+标签以及不存在的 workspace 保持正常解析，生产构建不提供 workspace 覆盖。
+[包产物插件](../../../packages/app/build/browser-packages.ts)枚举根 workspace
+清单，按实际 npm pack 文件列表提供 JS、声明、源码和二进制，以全部产物内容生成
+指纹；私有 App 和网站不作为 npm 包提供。
+
+本地文件夹的 [WorkspaceFileReader](../../../packages/app/src/project/workspace-packages.ts)
+将 latest 引用映射到统一开发产物路径及仓库自身依赖闭包。编译、类型、源码导航
+和源码页刷新使用相同实际路径，不改写磁盘清单或 `node_modules`。Browser storage
+则通过下述安装事务物化所选包。
+
 普通文件编辑读取真实文件内容。运行时为无显式 `type` 的项目合成 ESM 元数据视图，
 不能把这个 JSON 视图写入编辑器，改变用户清单的缩进、字段顺序或语义。
 
@@ -74,6 +86,11 @@ Browser storage 以当前页面的项目连接为单位；目录权限失效需�
 缺失清单时创建它并加入指定包与 `@code3d/core: latest`；已有清单保留其他字段。
 在 `node_modules` 内发起操作时，向上定位依赖目录之外的项目清单。
 本地目录依赖由外部包管理器安装。
+
+开发 workspace 与 npm 归档共用包图解析，锁记录本地产物的内容指纹。既有 npm
+锁、本地同版本重建和切回生产会在准备时重新选择，再通过原有事务提交；本地包与
+同版本 npm 包使用独立物化路径，保留固定版本选择。满足范围的 peer 共享项目所选
+Core，冲突明确报错，不能隐式安装第二份公共 Core。
 
 只有依赖消费者显式使用 manager 的 `dependencies` reader 来启用懒准备。
 普通文件和已安装源码浏览不等待后台安装。新增依赖作用域、清单或锁变化可能在

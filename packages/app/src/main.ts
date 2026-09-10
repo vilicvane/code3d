@@ -77,7 +77,11 @@ import {
   addPackageDependency,
 } from './project/package-manifest';
 import {ProjectPackages} from './project/project-packages';
-import {browserPackageFiles} from './project/browser-packages';
+import {
+  browserPackageFiles,
+  developmentWorkspaces,
+} from './project/browser-packages';
+import {WorkspaceFileReader} from './project/workspace-packages';
 import {
   compareTopologyIds,
   formatTopologyId,
@@ -163,6 +167,13 @@ await projectFileSystem.initialize(async () => {
   );
 });
 await projectFileSystem.syncDirectory(bundledExamples);
+const localPackageFiles = directoryWorkspaceId
+  ? new WorkspaceFileReader(
+      projectFileSystem,
+      browserPackageFiles,
+      developmentWorkspaces,
+    )
+  : projectFileSystem;
 const requestedFile = filePathFromRoute(window.location.hash);
 let initialFileError: unknown;
 const initialProject: ModelProject = await loadInitialProject();
@@ -394,11 +405,12 @@ const packageManager = !directoryWorkspaceId
         await projectDirectory.refresh();
         renderProjectNavigation();
       },
+      developmentWorkspaces,
     )
   : undefined;
-const packageFiles = packageManager?.dependencies ?? projectFileSystem;
+const packageFiles = packageManager?.dependencies ?? localPackageFiles;
 const navigationPackages = new ProjectPackages(
-  projectFileSystem,
+  localPackageFiles,
   browserPackageFiles,
 );
 codeEditor.fileReader = {
@@ -407,7 +419,7 @@ codeEditor.fileReader = {
     if (!path.includes('/node_modules/'))
       return projectFileSystem.readFile(path);
     // Browsing an already installed file does not wait for a replacement download.
-    const installed = await projectFileSystem.readFile(path);
+    const installed = await localPackageFiles.readFile(path);
     if (installed !== undefined) return installed;
     await navigationPackages.update(
       codeEditor.project(),
@@ -418,7 +430,7 @@ codeEditor.fileReader = {
   async stat(path) {
     if (!path.includes('/node_modules/')) return projectFileSystem.stat(path);
     return (
-      (await projectFileSystem.stat(path)) ?? navigationPackages.stat(path)
+      (await localPackageFiles.stat(path)) ?? navigationPackages.stat(path)
     );
   },
 };
@@ -1104,7 +1116,7 @@ async function loadInitialProject(): Promise<ModelProject> {
         files: [
           {
             path: requestedFile,
-            source: await readProjectTextFile(projectFileSystem, requestedFile),
+            source: await readProjectTextFile(localPackageFiles, requestedFile),
           },
         ],
       };
