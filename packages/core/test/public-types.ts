@@ -115,7 +115,6 @@ sketchFaces.map(face => extrude(face, 10));
 sketchBase.face().extrude(10).cut([solid]);
 // @ts-expect-error A face array is ordinary data, not a geometry operation receiver.
 sketchFaces.extrude(10);
-// @ts-expect-error Extrusion takes one face. Use map for a collection.
 extrude(sketchFaces, 10);
 // @ts-expect-error Extrusion is a face operation, not a solid modification.
 solid.extrude(10);

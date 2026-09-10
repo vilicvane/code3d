@@ -149,7 +149,7 @@ Worker 批量检查已经触达的路径，整批成功后再应用失效；取�
 ## 执行与生命周期
 
 [ProjectRuntime](../../../packages/app/src/model/project-runtime.ts)从有效包环境创建
-项目运行时，并通过所选 Core 的 tooling 安装 OpenCascade 与 PlaneGCS。
+项目运行时，并通过所选 Core 的 tooling 安装 OpenCascade、PlaneGCS 和字体引擎。
 Node 的 Core 入口自行完成对应初始化。项目清单或依赖变化使运行时失效；普通
 源码版本使用新的求值上下文，继续复用依赖实例和内核。
 
@@ -173,16 +173,31 @@ URL 不等于卸载模块。不能承诺无限多不同源码版本下 JavaScrip
 [cached-module-exports](../../../packages/app/test/cached-module-exports.test.ts)和
 [module-evaluator](../../../packages/app/test/module-evaluator.test.ts)。
 
-## 几何缓存、持久化与并行快照
+## 计算缓存、持久化与并行快照
+
+[CachedDefinitionCompiler](../../../packages/app/src/project/cached-definitions.ts)
+在追踪与转译前为静态函数、其引用的本地声明、导入实现图和 codec 生成内容指纹，
+支持 alias、namespace、re-export 和 CommonJS require。无关本地变量、源码位置
+及 export 变更不失效，引用的 helper/依赖变更失效。函数身份通过求值上下文注册，
+不改变原模块格式，每次定义绑定独立 callable，避免同一作者函数的不同 codec 串用。
+Core 自身沿用整体运行时身份，不重复分析其所有缓存定义。
+
+动态工厂结果、函数参数和捕获外层函数/循环绑定的闭包使用函数对象身份，仅在内存
+复用；普通 Node 调用亦如此。作者无需 id/version，动态状态必须显式传参。默认
+数据 codec 保留精确标量、循环/共享数据图、稀疏数组和共享二进制视图；自定义结果
+类型成对提供 encoder/decoder。缓存同步完成值，异步计算不能进入。内存命中直接
+复用保留值，不重新解码；资源所有权见[建模内核](modeling.md#互操作与资源所有权)。
+回归见 [cached-definitions](../../../packages/app/test/cached-definitions.test.ts)
+和 [cached](../../../packages/core/test/cached.test.ts)。
 
 [kernel-cache](../../../packages/core/src/library/kernel-cache.ts)以完整计算及真实几何
 内容为边界，查询 bounds 和 mesh 也可复用。当前工作集完整保留，历史按内存 LRU
-预算淘汰；预算包括已分配原生块与估算 JS 数据，不是 WASM buffer 大小或进程总
+预算淘汰，默认 2 GiB 软预算；预算包括已分配原生块与估算 JS 数据，不是 WASM buffer 大小或进程总
 内存硬上限。正常完成、抛错和合作取消采用同一收尾边界。
 
 [persistent-artifacts](../../../packages/app/src/model/persistent-artifacts.ts)与
-[artifact-journal](../../../packages/app/src/model/artifact-journal.ts)把纯几何结果
-保存到 OPFS。命名空间来自实际运行时代码和 WASM 的内容身份，不使用临时 Blob URL。
+[artifact-journal](../../../packages/app/src/model/artifact-journal.ts)把可持久化计算结果
+保存到 OPFS。几何与 HTTP 资源共享 min(1 GiB, origin 配额的 10%) 磁盘预算，含整理空间。命名空间来自实际运行时代码和 WASM 的内容身份，不使用临时 Blob URL。
 日志带签名及校验，整理副本在完整写入后发布；损坏、配额不足或存储不可用时继续
 内存模式。索引按需读取记录，不预载全部历史几何。
 
@@ -199,6 +214,21 @@ URL 不等于卸载模块。不能承诺无限多不同源码版本下 JavaScrip
 预算和超时常量以实现为准。验证见 [kernel-cache-memory](../../../packages/core/test/kernel-cache-memory.test.ts)、
 [persistent-cache](../../../packages/app/test/browser/persistent-cache.test.ts)、
 [snapshot-pool](../../../packages/app/test/snapshot-pool.test.ts)。
+
+## 网络与字体资源
+
+[ProjectAssets](../../../packages/app/src/project/project-assets.ts) 准备静态 URL，
+并按真实声明的 `@modelResource google-font` 标记解析 Google 字体请求，支持别名、
+重导出及导入静态常量；动态参数在源码处诊断。Google CSS 的全部 Unicode 子集
+按至多 8 路并发准备，WOFF2 解码为 SFNT 后供同步字体 API 使用，不安装网页 CSS。
+
+[ResourceCache](../../../packages/app/src/project/resource-cache.ts) 用独立 64 MiB
+历史内存 LRU 管理 HTTP 资源及内容寻址的解码结果，随后查询共享 OPFS，最后网络。
+活跃构建引用不受历史上限限制；请求合并并遵守显式新鲜度、Age、no-cache/no-store，
+过期通过浏览器 HTTP 缓存重验证。取消或抛错保留完整产物，丢弃未完成响应。磁盘
+不可用时继续内存缓存，恢复后补写。HTTP 身份独立于几何运行时，内核升级不用重下字体。
+回归见 [resource-cache](../../../packages/app/test/resource-cache.test.ts) 和
+[真实缓存测试](../../../packages/app/test/browser/persistent-cache.test.ts)。
 
 ## 取消与请求隔离
 

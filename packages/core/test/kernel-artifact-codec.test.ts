@@ -1,3 +1,4 @@
+import {kernelOperationKey} from '../bld/library/kernel-cache.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import '../bld/node/index.js';
@@ -7,7 +8,7 @@ import {
   encodeKernelArtifact,
 } from '../bld/library/kernel-artifact-codec.js';
 import {
-  createKernelOperationCache,
+  createComputationCache,
   type KernelArtifactStore,
 } from '../bld/library/kernel-cache.js';
 
@@ -82,14 +83,18 @@ test('completed artifacts survive error/cancellation cleanup and storage failure
     instantiate: (value: number) => value,
     release: () => {},
   };
-  let cache = createKernelOperationCache({nativeAllocatedBytes: () => 0});
+  let cache = createComputationCache({nativeAllocatedBytes: () => 0});
   cache.setKernelArtifactStore(store);
   let cancelled = false;
   const end = cache.beginKernelOperationEvaluation(() => {
     if (cancelled) throw new Error('Cancelled');
   });
   const run = (id: number, compute = () => id) =>
-    cache.evaluateKernelOperation('number', [id], [], lifecycle, compute);
+    cache.evaluateCachedArtifact(
+      kernelOperationKey('number', [id], []),
+      lifecycle,
+      compute,
+    );
   try {
     run(1);
     cancelled = true;
@@ -99,7 +104,7 @@ test('completed artifacts survive error/cancellation cleanup and storage failure
   }
   assert.equal(flushes, 1);
   cache.clearKernelOperationCache();
-  cache = createKernelOperationCache({nativeAllocatedBytes: () => 0});
+  cache = createComputationCache({nativeAllocatedBytes: () => 0});
   cache.setKernelArtifactStore(store);
   assert.equal(run(1, () => assert.fail('must restore')).value, 1);
   assert.equal(cache.kernelOperationCacheStats().persistentHits, 1);

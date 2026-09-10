@@ -1,3 +1,7 @@
+import {
+  identifyCachedCall,
+  type CachedDefinitions,
+} from '../project/cached-definitions';
 import {argumentExpression, unwrapArgument} from './argument-path';
 import ts from '@typescript/typescript6';
 import {normalizeProjectPath, type ModelProject} from '../project/project';
@@ -508,15 +512,23 @@ export function createModelCompiler(
       if (isConstraintExpression(result)) {
         instrumentConstraint(result, location, parameters);
         recordSourceConstraint(id, location, result, context.id, runtime);
-      } else if (isModelObject(result)) {
+      } else if (
+        isModelObject(result) ||
+        (Array.isArray(result) &&
+          result.length > 0 &&
+          result.every(isModelObject))
+      ) {
         const order = ++evaluationOrder;
-        instrumentModelOperation(result, {
-          siteId: id,
-          execution,
-          order,
-          sourceRef: location,
-          parameters,
-        });
+        for (const object of isModelObject(result)
+          ? [result]
+          : (result as ModelObject[]))
+          instrumentModelOperation(object, {
+            siteId: id,
+            execution,
+            order,
+            sourceRef: location,
+            parameters,
+          });
         recordSourceValue(
           id,
           'operation-output',
@@ -1416,12 +1428,13 @@ export function createModelCompiler(
           ]),
           captureModules: sourceGraph.formats,
           lazyPackages: sourceGraph.sourcePackages,
-          transform: (path, source) =>
+          transform: (path, source, cached) =>
             transformSource(
               path,
               source,
               tooling.toolCalls.get(path),
               tooling.parameterDefinitions.get(path),
+              cached,
               activeDesignContext?.functionRef.file === path
                 ? activeDesignContext
                 : undefined,
@@ -1435,6 +1448,7 @@ export function createModelCompiler(
           bundle.source,
           {
             __code3d: traceRuntime,
+            __code3dCachedFunction: runtime.identifyCachedFunction,
             __code3dModules: runtimeModules,
             __code3dImport: importModule,
             __code3dImportDependencies: async (paths: string[]) => {
@@ -1620,6 +1634,7 @@ export function createModelCompiler(
     source: string,
     toolCalls: ToolCallSchemaMap | undefined,
     parameterDefinitions: ParameterDefinitionMap | undefined,
+    cached: CachedDefinitions,
     designContext?: ActiveDesignContext,
   ): string {
     const executableSource = designContext
@@ -1636,6 +1651,7 @@ export function createModelCompiler(
         source.length,
         toolCalls,
         parameterDefinitions ?? new Map(),
+        cached,
       ),
     ]);
     try {
@@ -2673,6 +2689,7 @@ export function createModelCompiler(
     authorSourceLength: number,
     toolCalls: ToolCallSchemaMap | undefined,
     parameterDefinitions: ParameterDefinitionMap,
+    cached: CachedDefinitions,
   ): ts.TransformerFactory<ts.SourceFile> {
     return context => {
       const {factory} = context;
@@ -2685,7 +2702,12 @@ export function createModelCompiler(
           ) {
             return node;
           }
-          const visited = ts.visitEachChild(node, visit, context);
+          const visited = identifyCachedCall(
+            node,
+            ts.visitEachChild(node, visit, context),
+            cached,
+            factory,
+          );
           // A standalone value expression is a concrete use site, including a
           // sketch reference. Calls already record their returned value. Keep
           // directive prologues and control-flow-sensitive expressions intact.

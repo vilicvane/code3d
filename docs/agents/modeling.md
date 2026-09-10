@@ -39,6 +39,15 @@ task benefits from several forms of evidence.
 Check the [current limitations](../../packages/web/src/content/docs/docs/reference/limitations.md)
 before promising a feature.
 
+## Reuse expensive computations
+
+Use `cached()` for deterministic synchronous data and `definePrimitive()` for
+custom Replicad solids. Both reuse repeated calls, so pass changing captured state
+as arguments; treat cached data as immutable and keep native shapes behind the
+primitive builder. Read the [cache contract](../../packages/web/src/content/docs/docs/reference/core.md#cached-computations)
+when introducing either API. For lettering, the [text reference](../../packages/web/src/content/docs/docs/reference/core.md#text)
+covers synchronous font resources, Google Fonts and batch extrusion.
+
 ## Explore dependencies
 
 Start with the public modeling packages above. When you need another package or

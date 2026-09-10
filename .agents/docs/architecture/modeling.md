@@ -68,9 +68,16 @@ TypeScript 隐藏声明不等于 JavaScript 对象上的字段不可读；这是
 ## 互操作与资源所有权
 
 `@code3d/core/replicad` 提供绑定当前内核的 Replicad 接口及 `definePrimitive`。
-当前 builder 同步执行每次调用，将返回的单个实体所有权转移给 Core；作者负责
-释放中间形状，不能再复用或删除已转移的返回形状。操作缓存识别真实 B-Rep 内容，
-不据此把任意 builder 的闭包和参数当作纯函数缓存。
+`definePrimitive(builder)` 默认按确定性定义和参数缓存 builder、实体规范化及几何
+分析，命中仍产生独立模型元数据、shape handle 和本次追踪。影响结果的动态闭包
+状态须显式传参。builder 返回的单个实体所有权转移给 Core；作者负责释放中间形状，
+不能再复用或删除已转移的返回形状。screws 螺纹复用同一机制，不再维护私有 B-Rep LRU。
+
+公开 `cached(fn, options?)` 处理同步数据，内部 `cachedArtifact()` 为相同缓存机制
+增加内容身份、retain/instantiate/release 和远端查询接纳。内存直接保留计算/解码
+结果，encoder/decoder 只在磁盘写入/恢复时运行。几何、bounds、mesh、字体解析、
+CSS 解析和字形轮廓共用预算；解析后的字体对象只驻内存。定义身份与持久化边界见
+[运行时专题](runtime.md#计算缓存持久化与并行快照)。
 
 原生句柄释放依据所有权处理：借用不销毁，独立包装取得的句柄和临时原生值及时
 释放；重复拓扑遍历结果也须逐个释放。缓存包可能持有模型，不能在一次源码求值
@@ -98,3 +105,19 @@ CAD 导出使用当前选定运行时中对应 revision 的完成快照，保留
 [model-export](../../../packages/app/src/model/model-export.ts)；验证见
 [材质测试](../../../packages/core/test/material.test.ts)和
 [导出测试](../../../packages/app/test/model-export.test.ts)。
+
+## 字体与文字
+
+`font()` 和 `googleFont()` 同步提供不可变资源，异步下载及 WOFF2 解码由 App
+资源准备负责；Node 入口初始化 HarfBuzz，普通 Node 调用使用本地文件或已解码字节。
+字体初始化在运行时就绪阶段完成，不以顶层 await 阻塞编辑器或 Worker 消息入口。
+
+HarfBuzz 排版提供真实二次/三次曲线，non-zero winding 布尔合并处理可变字体的
+重叠笔画，包含层级保留孔与岛。`text()` 返回普通 FaceModel 数组，使用共同基线
+原点，+X 向右、−Z 向上、+Y 法向；不逐字形居中。`extrude()` 的单面/面数组重载
+保留输入顺序和位姿，运行时距离默认 10，TypeScript 签名仍要求距离。
+
+作者参数、支持范围和示例以[文字参考](../../../packages/web/src/content/docs/docs/reference/core.md#text)
+为准。实现与回归见 [font](../../../packages/core/src/library/font.ts)、
+[text](../../../packages/core/src/library/text.ts)、[text tests](../../../packages/core/test/text.test.ts)
+和 [third-party notices](../../../packages/core/THIRD_PARTY.md)。

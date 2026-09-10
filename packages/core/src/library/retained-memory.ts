@@ -12,7 +12,12 @@ export function estimateRetainedBytes(value: unknown): number {
     seen.add(value);
     if (ArrayBuffer.isView(value)) return 64 + visit(value.buffer);
     if (value instanceof ArrayBuffer) return 32 + value.byteLength;
-    const values = Object.values(value);
+    const values =
+      value instanceof Map
+        ? [...value].flat()
+        : value instanceof Set
+          ? [...value]
+          : Object.values(value);
     return (
       32 +
       values.length * 8 +

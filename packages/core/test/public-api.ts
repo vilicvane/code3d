@@ -8,6 +8,9 @@ import {
   cylinder,
   ellipse,
   extrude,
+  font,
+  googleFont,
+  cached,
   frustum,
   group,
   intersect,
@@ -20,6 +23,7 @@ import {
   sketch,
   spline,
   sphere,
+  text,
   tube,
   union,
   type Anchor,
@@ -31,6 +35,7 @@ import {
   type EdgeModel,
   type FaceAnchor,
   type FaceModel,
+  type Font,
   type GroupModel,
   type LineAnchor,
   type LoftOptions,
@@ -40,6 +45,7 @@ import {
   type SolidModel,
   type Surface,
   type SurfaceId,
+  type TextOptions,
   type TopologyId,
   type Vec3,
   type Vertex,
@@ -89,6 +95,29 @@ sphere();
 frustum();
 // @ts-expect-error Prism dimensions remain required.
 regularPrism();
+const sans: Font = font(new URL('./font.ttf', import.meta.url));
+const play: Font = googleFont('Play');
+const playBold: Font = googleFont('Play', {weight: 700, italic: false});
+// @ts-expect-error Google Fonts weights are numeric.
+googleFont('Play', {weight: 'bold'});
+const textFaces: readonly FaceModel[] = text('B8i', sans, 10);
+const textOptions: TextOptions = {letterSpacing: 0.5, kerning: false};
+text('AV', sans, 10, textOptions);
+text('AV', sans, 10, {});
+// @ts-expect-error Kerning is a boolean switch.
+text('AV', sans, 10, {kerning: 1});
+// @ts-expect-error Letter spacing uses numeric model units.
+text('AV', sans, 10, {letterSpacing: '1px'});
+const textSolids: readonly SolidModel[] = extrude(textFaces, 2);
+group(textSolids);
+// @ts-expect-error Text requires an explicit font and size.
+text('B8i');
+// @ts-expect-error Text size remains required.
+text('B8i', sans);
+// @ts-expect-error The font is a required value, not an optional setting.
+text('B8i', undefined, 10);
+// @ts-expect-error Text accepts content, font, size in that order.
+text('B8i', 10, sans);
 const material: Material = new MeshPhysicalMaterial({
   roughness: 0.3,
   clearcoat: 1,
@@ -181,8 +210,7 @@ tube(6, 4);
 const faceModel: FaceModel<PlanarElements> = circle(4);
 const extrudedFace: SolidModel = faceModel.extrude(3);
 const extrudedProfile: SolidModel = extrude(faceModel.rotate(0, 0, 90), -3);
-// @ts-expect-error Extrusion accepts one face; map multiple faces explicitly.
-extrude([faceModel], 3);
+const extrudedFaces: readonly SolidModel[] = extrude([faceModel], 3);
 // @ts-expect-error A solid is not an extrusion profile.
 extrude(solid, 3);
 // @ts-expect-error Only face models expose extrusion.
@@ -539,3 +567,18 @@ box(1, 2, 3).relate(self =>
     .pivot(1, 2, 3)
     .rotate(0, 0, 90),
 );
+
+const double = cached((value: number) => value * 2);
+const doubled: number = double(2);
+const encoded = cached((value: number) => ({value}), {
+  encoder: value => new Uint8Array([value.value]),
+  decoder: bytes => ({value: bytes[0]}),
+});
+const decodedValue: number = encoded(2).value;
+// @ts-expect-error Both codec functions are required.
+cached((value: number) => value, {encoder: value => new Uint8Array([value])});
+// @ts-expect-error The computation must be synchronous.
+cached(async (value: number) => value);
+// @ts-expect-error Argument types are preserved.
+double('2');
+void [doubled, decodedValue];

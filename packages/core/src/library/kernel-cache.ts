@@ -23,6 +23,11 @@ export type KernelArtifact<Value> = Readonly<{
   value: Value;
 }>;
 
+export type CacheCodec<Value> = Readonly<{
+  encoder(value: Value): Uint8Array;
+  decoder(bytes: Uint8Array): Value;
+}>;
+
 export type KernelValueLifecycle<Value> = Readonly<{
   estimateBytes(value: Value): number;
   retain(value: Value): Value;
@@ -38,7 +43,7 @@ type CacheEntry<Value> = Readonly<{
   release(value: Value): void;
 }>;
 
-export function createKernelOperationCache({
+export function createComputationCache({
   maximumBytes = 2 * 1024 ** 3,
   nativeAllocatedBytes,
 }: {
@@ -107,39 +112,35 @@ export function createKernelOperationCache({
     };
   }
 
-  /**
-   * Reuses one complete, deterministic kernel operation. Arguments describe
-   * scalar semantics; inputs carry the content identities of prior operations.
-   * The lifecycle keeps the retained value independent from each disposable use.
-   */
-  function evaluateKernelOperation<Value>(
-    operation: string,
-    arguments_: readonly KernelKeyPart[],
-    inputs: readonly KernelArtifact<unknown>[],
+  function evaluateCachedArtifact<Value>(
+    key: KernelOperationKey,
     lifecycle: KernelValueLifecycle<Value>,
     compute: () => Value,
+    codec?: CacheCodec<Value> | false,
   ): KernelArtifact<Value> {
-    const key = kernelOperationKey(operation, arguments_, inputs);
-    const cached = findKernelOperation(key, lifecycle);
-    if (cached) return cached;
+    const hit = findKernelOperation(key, lifecycle, codec);
+    if (hit) return hit;
     const value = compute();
-    acceptKernelOperation(key, lifecycle, value);
+    acceptKernelOperation(key, lifecycle, value, codec);
     return {id: key.id, value};
   }
 
   function findKernelOperation<Value>(
     key: KernelOperationKey,
     lifecycle: KernelValueLifecycle<Value>,
+    codec?: CacheCodec<Value> | false,
   ): KernelArtifact<Value> | undefined {
     currentEvaluation?.checkCancelled?.();
     const {id, signature} = key;
     let cached = entries.get(id) as CacheEntry<Value> | undefined;
-    if (!cached) {
+    if (!cached && codec !== false) {
       const bytes = accessStore(store => store.get(id));
       if (bytes) {
         let restored: Value;
         try {
-          restored = decodeKernelArtifact<Value>(bytes, signature);
+          restored = codec
+            ? codec.decoder(decodeKernelArtifact<Uint8Array>(bytes, signature))
+            : decodeKernelArtifact<Value>(bytes, signature);
         } catch {
           persistenceErrors += 1;
           accessStore(store => store.delete(id));
@@ -159,7 +160,7 @@ export function createKernelOperationCache({
       throw new Error(`Kernel operation cache identity collision: ${id}`);
     hits += 1;
     const value = cached.instantiate(cached.value);
-    persist(key, cached.value);
+    if (codec !== false) persist(key, cached.value, codec);
     touchEntry(id, cached as CacheEntry<unknown>);
     return {id, value};
   }
@@ -169,6 +170,7 @@ export function createKernelOperationCache({
     key: KernelOperationKey,
     lifecycle: KernelValueLifecycle<Value>,
     value: Value,
+    codec?: CacheCodec<Value> | false,
   ): void {
     const existing = entries.get(key.id);
     if (existing) {
@@ -185,15 +187,25 @@ export function createKernelOperationCache({
       throw error;
     }
     const entry = retainEntry(key, lifecycle, retained);
-    persist(key, retained);
+    if (codec !== false) persist(key, retained, codec);
     touchEntry(key.id, entry as CacheEntry<unknown>);
   }
 
-  function persist(key: KernelOperationKey, value: unknown): void {
+  function persist<Value>(
+    key: KernelOperationKey,
+    value: Value,
+    codec?: CacheCodec<Value>,
+  ): void {
     if (!store || persisted.has(key.id)) return;
     accessStore(store => {
       if (!store.touch(key.id)) {
-        store.set(key.id, encodeKernelArtifact(key.signature, value));
+        store.set(
+          key.id,
+          encodeKernelArtifact(
+            key.signature,
+            codec ? Uint8Array.from(codec.encoder(value)) : value,
+          ),
+        );
         persistentWrites += 1;
       }
       persisted.add(key.id);
@@ -279,8 +291,8 @@ export function createKernelOperationCache({
   }
 
   return {
+    evaluateCachedArtifact,
     beginKernelOperationEvaluation,
-    evaluateKernelOperation,
     clearKernelOperationCache,
     kernelOperationCacheStats,
     setKernelArtifactStore,
@@ -291,17 +303,19 @@ export function createKernelOperationCache({
 }
 
 export const {
+  evaluateCachedArtifact,
   beginKernelOperationEvaluation,
-  evaluateKernelOperation,
   clearKernelOperationCache,
   kernelOperationCacheStats,
   setKernelArtifactStore,
   findKernelOperation,
   acceptKernelOperation,
   setKernelExternalBytes,
-} = createKernelOperationCache({
+} = createComputationCache({
   nativeAllocatedBytes: () =>
-    (getOC() as OpenCascadeInstance).Code3dMemory.AllocatedBytes(),
+    (
+      getOC() as OpenCascadeInstance | undefined
+    )?.Code3dMemory.AllocatedBytes() ?? 0,
 });
 
 export type KernelOperationKey = Readonly<{id: string; signature: string}>;
@@ -316,16 +330,17 @@ export function kernelOperationKey(
     arguments_,
     inputs.map(input => input.id),
   ]);
-  return {id: contentId(signature), signature};
+  return {id: kernelContentId(signature), signature};
 }
 
-function contentId(value: string): string {
+export function kernelContentId(value: string | Uint8Array): string {
   let first = 0x811c9dc5;
   let second = 0x9e3779b9;
   let third = 0x85ebca6b;
   let fourth = 0xc2b2ae35;
   for (let index = 0; index < value.length; index += 1) {
-    const code = value.charCodeAt(index);
+    const code =
+      typeof value === 'string' ? value.charCodeAt(index) : value[index];
     first = Math.imul(first ^ code, 0x01000193);
     second = Math.imul(second ^ code, 0x27d4eb2d);
     third = Math.imul(third ^ code, 0x165667b1);

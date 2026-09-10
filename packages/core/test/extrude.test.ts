@@ -166,10 +166,10 @@ test('extrusion rejects invalid distances and non-face inputs before evaluating 
   for (const distance of [0, -0, NaN, Infinity, -Infinity]) {
     assert.throws(() => profile.extrude(distance), /finite and non-zero/);
   }
-  for (const input of [keep(box(1, 1, 1)), [profile], undefined]) {
+  for (const input of [keep(box(1, 1, 1)), [profile, undefined], undefined]) {
     assert.throws(
       () => extrude(input as unknown as FaceModel, 3),
-      /single face model/,
+      /face model/,
     );
   }
   bounds(profile, [-2, 0, -3, 2, 0, 3]);

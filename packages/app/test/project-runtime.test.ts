@@ -6,10 +6,14 @@ import {createAppTestServer} from './vite-test-server.ts';
 import {createTestEvaluator, packageTestFiles} from './project-test-files.ts';
 
 let server: Awaited<ReturnType<typeof createAppTestServer>>;
+let ProjectAssets: (typeof import('../src/project/project-assets.ts'))['ProjectAssets'];
 let ProjectBuilder: (typeof import('../src/project/project-builder.ts'))['ProjectBuilder'];
 let ProjectRuntime: (typeof import('../src/model/project-runtime.ts'))['ProjectRuntime'];
 before(async () => {
   server = await createAppTestServer();
+  ({ProjectAssets} = await server.ssrLoadModule<
+    typeof import('../src/project/project-assets.ts')
+  >('/src/project/project-assets.ts'));
   ({ProjectBuilder} = await server.ssrLoadModule<
     typeof import('../src/project/project-builder.ts')
   >('/src/project/project-builder.ts'));
@@ -20,7 +24,8 @@ before(async () => {
 after(async () => server?.close());
 
 test('runs installed package artifacts in their own kernel and retains screw caches between source evaluations', async () => {
-  const builder = new ProjectBuilder(packageTestFiles, esbuild);
+  const assets = new ProjectAssets(packageTestFiles);
+  const builder = new ProjectBuilder(packageTestFiles, esbuild, assets);
   const runtime = await ProjectRuntime.create(
     packageTestFiles,
     builder,
@@ -58,6 +63,7 @@ test('runs installed package artifacts in their own kernel and retains screw cac
   } finally {
     evaluator.dispose();
     runtime.dispose();
+    assets.dispose();
   }
   assert.equal(typeof globalThis.process?.platform, 'string');
 });

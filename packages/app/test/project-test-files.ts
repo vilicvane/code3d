@@ -89,13 +89,16 @@ export async function createTestEvaluator(server: AppTestServer) {
   return new Evaluator();
 }
 
-export async function createTestProjectCompiler(server: AppTestServer) {
+export async function createTestProjectCompiler(
+  server: AppTestServer,
+  files: ProjectFileReader = packageTestFiles,
+) {
   const {ProjectCompiler} = await server.ssrLoadModule<
     typeof import('../src/model/project-compiler.ts')
   >('/src/model/project-compiler.ts');
   const Evaluator = await testEvaluatorClass(server);
   return new ProjectCompiler(
-    packageTestFiles,
+    files,
     packageTestFiles,
     esbuild,
     () => new Evaluator(),

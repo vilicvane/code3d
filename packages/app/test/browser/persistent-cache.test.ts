@@ -1,3 +1,5 @@
+import {readFile} from 'node:fs/promises';
+import {once} from 'node:events';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {before, after, test, type TestContext} from 'node:test';
@@ -62,9 +64,11 @@ async function compile(
         await import('/test/browser/persistent-cache.worker.ts?worker');
       const worker = (host.workers[workerName] ??= new CacheWorker());
       return new Promise<CacheResult>((resolve, reject) => {
+        let probe: CacheResult['probe'];
         worker.onerror = error => reject(new Error(error.message));
         worker.onmessage = ({data}) => {
-          if (!data.phase) resolve(data);
+          if (data.phase === 'cached-probe') probe = data.counts;
+          if (!data.phase) resolve({...data, probe});
         };
         worker.postMessage(request);
       });
@@ -126,6 +130,99 @@ test(
         coldMs: cold.milliseconds,
         restoredMs: restored.milliseconds,
         disk: redo.stats.disk,
+        memory: restored.stats.memory,
+      }),
+    );
+  },
+);
+
+test(
+  'public cached and primitive constructors skip computation on memory and OPFS hits',
+  {timeout: 180_000},
+  async t => {
+    const page = await fixture(t);
+    const source = `import {cached} from '@code3d/core';
+import {definePrimitive, replicad} from '@code3d/core/replicad';
+const counts = {computes: 0, encodes: 0, decodes: 0, builds: 0};
+const data = cached((radius: number) => {counts.computes++; return {radius};}, {
+  encoder: value => {counts.encodes++; return new Uint8Array([value.radius]);},
+  decoder: bytes => {counts.decodes++; return {radius: bytes[0]};},
+});
+const primitive = definePrimitive((radius: number) => {counts.builds++; return replicad.makeCylinder(radius, 4);});
+export const part = primitive(data(2).radius);
+globalThis.postMessage({phase: 'cached-probe', counts});`;
+    const cold = await compile(page, {source});
+    valid(cold);
+    assert.deepEqual(cold.probe, {
+      computes: 1,
+      encodes: 1,
+      decodes: 0,
+      builds: 1,
+    });
+    const hot = await compile(page, {
+      source:
+        '// move definition\n' +
+        source.replace('export const part', 'const part'),
+    });
+    valid(hot);
+    assert.equal(hot.stats.memory!.misses, cold.stats.memory!.misses);
+    assert.deepEqual(hot.probe, {
+      computes: 0,
+      encodes: 0,
+      decodes: 0,
+      builds: 0,
+    });
+    const restored = await compile(page, {source}, 'compiler', true);
+    valid(restored);
+    assert.equal(restored.stats.memory!.misses, 0);
+    assert.deepEqual(restored.probe, {
+      computes: 0,
+      encodes: 0,
+      decodes: 1,
+      builds: 0,
+    });
+    // Skipping the builder's traced calls changes execution order, while model
+    // geometry, source locations and operation identities remain fresh and equal.
+    const withoutOrder = (value: string) =>
+      JSON.parse(value).map((object: {operation: {order: number}}) => ({
+        ...object,
+        operation: {...object.operation, order: undefined},
+      }));
+    assert.deepEqual(
+      withoutOrder(restored.objects!),
+      withoutOrder(cold.objects!),
+    );
+    t.diagnostic(
+      JSON.stringify({
+        coldMs: cold.milliseconds,
+        restoredMs: restored.milliseconds,
+        memory: restored.stats.memory,
+      }),
+    );
+  },
+);
+
+test(
+  'screws thread construction restores from the shared OPFS cache in a fresh Worker',
+  {timeout: 180_000},
+  async t => {
+    const page = await fixture(t);
+    const source = `import {ISO4762} from '@code3d/screws'; export default ISO4762.screw('M6', 18);`;
+    const cold = await compile(page, {source, summary: true});
+    valid(cold);
+    const restored = await compile(
+      page,
+      {source, summary: true},
+      'compiler',
+      true,
+    );
+    valid(restored);
+    assert.equal(restored.stats.memory!.misses, 0);
+    assert.equal(restored.objects, cold.objects);
+    t.diagnostic(
+      JSON.stringify({
+        coldMs: cold.milliseconds,
+        restoredMs: restored.milliseconds,
         memory: restored.stats.memory,
       }),
     );
@@ -315,3 +412,287 @@ function sameTopology(
       );
   } else assert.equal(actual, expected, path);
 }
+
+test(
+  'font text restores from OPFS in fresh Workers and keeps changed font histories',
+  {timeout: 180_000},
+  async t => {
+    const page = await fixture(t);
+    const latin = new Uint8Array(
+      await readFile(
+        new URL('../../examples/fonts/DejaVuSans.ttf', import.meta.url),
+      ),
+    );
+    const chinese = new Uint8Array(
+      await readFile(
+        new URL(
+          '../../../core/test/fonts/NotoSansCJK-subset.otf',
+          import.meta.url,
+        ),
+      ),
+    );
+    const source = `import {font,text,extrude,group} from '@code3d/core';
+const sans = font(new URL('./font.ttf',import.meta.url));
+export default group(extrude(text('B8i', sans, 10),2));`;
+    const assets = {'/font.ttf': {bytes: latin, version: '1'}};
+    const cold = await compile(page, {
+      source,
+      assets,
+      summary: true,
+      concurrency: 4,
+    });
+    valid(cold);
+    const restored = await compile(
+      page,
+      {source, assets, summary: true, concurrency: 4},
+      'compiler',
+      true,
+    );
+    valid(restored);
+    assert.equal(restored.objects, cold.objects);
+    assert.ok(restored.stats.memory!.persistentHits > 0);
+    assert.equal(restored.stats.memory!.misses, 1); // The parsed font is memory-only.
+    const changed = await compile(page, {
+      source,
+      summary: true,
+      assets: {'/font.ttf': {bytes: chinese, version: '2'}},
+    });
+    valid(changed);
+    assert.notEqual(changed.objects, cold.objects);
+    const undo = await compile(
+      page,
+      {source, assets, summary: true},
+      'compiler',
+      true,
+    );
+    valid(undo);
+    assert.equal(undo.objects, cold.objects);
+  },
+);
+
+test(
+  'engine prepares cross-origin font URLs, refreshes content and recovers from denied CORS',
+  {timeout: 180_000},
+  async t => {
+    const {createServer} = await import('node:http');
+    const latin = await readFile(
+      new URL('../../examples/fonts/DejaVuSans.ttf', import.meta.url),
+    );
+    const chinese = await readFile(
+      new URL(
+        '../../../core/test/fonts/NotoSansCJK-subset.otf',
+        import.meta.url,
+      ),
+    );
+    let bytes = latin,
+      allow = true,
+      downloads = 0,
+      cacheControl = 'no-store';
+    const fontServer = createServer((request, response) => {
+      response.setHeader('Cache-Control', cacheControl);
+      if (allow) response.setHeader('Access-Control-Allow-Origin', '*');
+      if (request.url === '/redirect.ttf') {
+        response.writeHead(302, {Location: '/font.ttf'}).end();
+        return;
+      }
+      downloads++;
+      response.writeHead(200, {'Content-Type': 'font/ttf'}).end(bytes);
+    });
+    fontServer.listen(0, '127.0.0.1');
+    await once(fontServer, 'listening');
+    t.after(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          fontServer.close(error => (error ? reject(error) : resolve()));
+          fontServer.closeAllConnections();
+        }),
+    );
+    const address = fontServer.address();
+    assert.ok(address && typeof address !== 'string');
+    const fontUrl = `http://127.0.0.1:${address.port}/redirect.ttf`;
+    const page = await fixture(t);
+    // Playwright routing disables HTTP caching. The initial fixture document
+    // is loaded; remove its route before testing real browser cache behavior.
+    await page.context().unroute(page.url());
+    assert.notEqual(new URL(page.url()).origin, new URL(fontUrl).origin);
+    const source = `import {font, text, extrude, group} from '@code3d/core';
+import {sans} from './font.ts';
+const second = font(new URL('${fontUrl}'));
+export default group([...extrude(text('B', sans, 10, {letterSpacing: 0.5, kerning: false}), 2), ...extrude(text('8i', second, 10), 2)]);`;
+    const assets = {
+      '/font.ts': {
+        version: '1',
+        bytes: new TextEncoder().encode(
+          `import {font} from '@code3d/core'; export const sans = font(new URL('${fontUrl}', import.meta.url));`,
+        ),
+      },
+    };
+    const geometry = (result: CacheResult) =>
+      createHash('sha256')
+        .update(
+          JSON.stringify(
+            JSON.parse(result.objects!)
+              .filter((object: {mesh?: unknown}) => object.mesh)
+              .map((object: {mesh: unknown; transform: unknown}) => [
+                object.mesh,
+                object.transform,
+              ]),
+          ),
+        )
+        .digest('hex');
+    const first = await compile(page, {source, assets});
+    valid(first);
+    assert.equal(
+      downloads,
+      1,
+      'discovery, model compilation and both modules share one download',
+    );
+    bytes = chinese;
+    const changed = await compile(page, {source});
+    valid(changed);
+    assert.equal(downloads, 2);
+    assert.notEqual(geometry(changed), geometry(first));
+    bytes = latin;
+    const restored = await compile(page, {source});
+    valid(restored);
+    assert.equal(downloads, 3);
+    assert.equal(geometry(restored), geometry(first));
+    allow = false;
+    const denied = await compile(page, {source});
+    assert.match(
+      JSON.stringify(denied.diagnostic ?? denied.error),
+      /Cannot load network asset.*CORS/,
+    );
+    allow = true;
+    cacheControl = 'public, max-age=3600';
+    const recovered = await compile(page, {source});
+    valid(recovered);
+    assert.equal(geometry(recovered), geometry(first));
+    const before = downloads;
+    const cached = await compile(page, {source});
+    valid(cached);
+    assert.equal(
+      downloads,
+      before,
+      'fresh HTTP cache avoids another font download',
+    );
+    assert.equal(geometry(cached), geometry(first));
+  },
+);
+
+test(
+  'Google fonts cache CSS, WOFF2 and decoded bytes across edits, refresh, failures and runtime changes',
+  {timeout: 180_000},
+  async t => {
+    const {compress} = await import('woff2-encoder');
+    const bytes = await compress(
+      await readFile(
+        new URL(
+          '../../../core/test/fonts/Roboto-variable-subset.ttf',
+          import.meta.url,
+        ),
+      ),
+    );
+    const page = await fixture(t);
+    let cssRequests = 0,
+      fontRequests = 0;
+    const headers = {
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'public, max-age=3600',
+    };
+    const fontUrl = 'https://fonts.gstatic.com/code3d-test/roboto.woff2';
+    await page.context().route('https://fonts.googleapis.com/css2?*', route => {
+      const family = new URL(route.request().url()).searchParams.get('family');
+      assert.ok(family === 'Roboto' || family === 'Roboto:wght@450');
+      cssRequests++;
+      return route.fulfill({
+        contentType: 'text/css',
+        headers,
+        body: `@font-face { font-family: 'Roboto'; src: url(${fontUrl}) format('woff2'); unicode-range: U+0000-00FF; }`,
+      });
+    });
+    await page.context().route(fontUrl, route => {
+      fontRequests++;
+      return route.fulfill({
+        contentType: 'font/woff2',
+        headers,
+        body: Buffer.from(bytes),
+      });
+    });
+    // Routes disable the browser HTTP cache: reuse must come from the engine.
+    const source = `import {googleFont, text, extrude, group} from '@code3d/core';
+const sans = googleFont('Roboto');
+export default group(extrude(text('B8i', sans, 10), 1));`;
+    const geometry = (result: CacheResult) =>
+      createHash('sha256')
+        .update(
+          JSON.stringify(
+            JSON.parse(result.objects!)
+              .filter((object: {mesh?: unknown}) => object.mesh)
+              .map((object: {mesh: unknown; transform: unknown}) => [
+                object.mesh,
+                object.transform,
+              ]),
+          ),
+        )
+        .digest('hex');
+    const cold = await compile(page, {source});
+    valid(cold);
+    assert.equal(cssRequests, 1);
+    assert.equal(fontRequests, 1);
+    const edit = await compile(page, {source: source + '\n// edit'});
+    valid(edit);
+    assert.equal(geometry(edit), geometry(cold));
+    assert.ok(edit.stats.resources.memoryHits > 0);
+    assert.equal(cssRequests, 1);
+    assert.equal(fontRequests, 1);
+    await page.reload();
+    const restored = await compile(page, {source, revision: 1});
+    valid(restored);
+    assert.equal(geometry(restored), geometry(cold));
+    assert.ok(
+      restored.stats.resources.diskHits >= 3,
+      'CSS, WOFF2 and decoded SFNT survive runtime identity changes',
+    );
+    assert.equal(cssRequests, 1);
+    assert.equal(fontRequests, 1);
+    const changedSource = source.replace(
+      "googleFont('Roboto')",
+      "googleFont('Roboto', {weight: 450})",
+    );
+    const failed = await compile(page, {
+      source: changedSource + '\nthrow new Error("after font loaded");',
+    });
+    assert.ok(failed.diagnostic);
+    assert.equal(cssRequests, 2);
+    assert.equal(
+      fontRequests,
+      1,
+      'different styles sharing a font URL reuse the binary',
+    );
+    const recovered = await compile(
+      page,
+      {source: changedSource},
+      'compiler',
+      true,
+    );
+    valid(recovered);
+    assert.notEqual(geometry(recovered), geometry(cold));
+    assert.ok(recovered.stats.resources.diskHits >= 3);
+    assert.equal(cssRequests, 2);
+    assert.equal(fontRequests, 1);
+    const undo = await compile(page, {source});
+    valid(undo);
+    assert.equal(geometry(undo), geometry(cold));
+    assert.equal(cssRequests, 2);
+    assert.equal(fontRequests, 1);
+    t.diagnostic(
+      JSON.stringify({
+        coldMs: cold.milliseconds,
+        editMs: edit.milliseconds,
+        restoredMs: restored.milliseconds,
+        resources: recovered.stats.resources,
+      }),
+    );
+  },
+);

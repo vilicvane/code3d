@@ -50,7 +50,7 @@ Planar profiles lie in the local XZ plane with a +Y normal.
 | `bezier(points)`                           | Bézier curve                                 |
 | `spline(points)`                           | Interpolating spline                         |
 | `loft(sections, options?)`                 | Solid through sections; optional curve spine |
-| `extrude(face, distance)`                  | Solid extruded along one face's local normal |
+| `extrude(faceOrFaces, distance)`           | Solid extruded along one face's local normal |
 
 See [local coordinates and placement](../../concepts/local-coordinates/) for
 the coordinate frame of a model, reference, or composition.
@@ -68,8 +68,11 @@ non-zero signed distance and preserve the starting face's coordinates. For an
 unrotated profile, positive distance extends along +Y; negative distance extends
 along −Y. Rotating the face rotates its extrusion direction; changing its origin
 does not recenter the result. The returned solid supports Boolean operations,
-fillets, chamfers, and shells. Use `faces.map(face => face.extrude(3))` for a list
-of profiles.
+fillets, chamfers, and shells. `extrude(faces, distance)` accepts a readonly array
+of profiles and returns a readonly array of solids in the same order, preserving
+each face's placement. An empty input returns `[]`; a single face still returns
+a single solid. Both overloads retain required TypeScript distances and use the
+same runtime default of 10 while editing.
 
 ```ts
 import {circle, extrude, rectangle} from '@code3d/core';
@@ -440,3 +443,145 @@ Model dimensions use a consistent coordinate scale. When
 [exporting](../../guides/exporting/#scale-and-orientation), choose how many
 millimeters each model unit represents. This scales the output without changing
 the source model.
+
+## Cached computations
+
+```ts
+import {cached} from '@code3d/core';
+
+const profile = cached((radius: number, sides: number) =>
+  Array.from({length: sides}, (_, index) => {
+    const angle = (index * 2 * Math.PI) / sides;
+    return [radius * Math.cos(angle), radius * Math.sin(angle)];
+  }),
+);
+```
+
+`cached(fn, options?)` preserves synchronous parameter/result types. It caches
+ordinary data; use `definePrimitive()` for Replicad geometry so Core also owns
+native resources and creates fresh model metadata. Treat cached results as
+immutable. A memory hit returns the retained computed or decoded value directly,
+without decoding, copying or freezing it.
+
+The default persistent codec supports plain objects, arrays, scalar values
+(including `undefined`, nonfinite numbers and bigint), Date, Map, Set, ArrayBuffer,
+standard TypedArrays and DataView. Shared references, cycles, sparse arrays and
+shared buffer views survive restoration. Arguments use the same data encoding;
+changing dynamic state must be supplied as arguments. Functions, native handles
+and application class instances are not ordinary data arguments.
+
+For custom result types, supply both functions as
+`cached(fn, {encoder: value => bytes, decoder: bytes => value})`.
+The encoder runs when saving to disk; the decoder runs once when restoring an
+entry into memory. A subsequent memory hit never calls either codec. Async
+computations are excluded: incomplete work is not admitted to the cache.
+
+The model engine fingerprints static function definitions, their referenced
+local declarations, imported implementation graphs and codec definitions. Aliases
+and re-exports of Core cache factories are supported. Editing an unrelated local
+binding, moving a definition or adding/removing `export` preserves its identity;
+changing a referenced helper or dependency invalidates it. Functions supplied as parameters, dynamic factory results and closures capturing
+enclosing function/loop bindings use memory-only object identity.
+Outside the model engine, ordinary Node calls also use function object identity
+and share the process-wide memory LRU. Authors do not provide cache IDs or versions.
+
+Public cached computations, primitives, Core geometry, font parsing, glyph contours
+and snapshot queries share one cache. The memory budget remains 2 GiB; browser
+persistence shares the existing OPFS disk budget, min(1 GiB, 10% of origin quota).
+Cancellation and exceptions retain completed entries and editing history.
+
+## Text
+
+```ts
+import {font, text, extrude, group} from '@code3d/core';
+
+const sans = font(new URL('./fonts/DejaVuSans.ttf', import.meta.url));
+const profiles = text('B8i', sans, 10);
+export const lettering = group(extrude(profiles, 1));
+```
+
+`font()` synchronously returns an immutable font resource. The App prepares literal
+`new URL('./font.ttf', import.meta.url)` assets before evaluating model code, including
+assets in imported modules. Changing the font file invalidates the resource; equal
+file contents reuse parsed fonts and geometry. Node reads file URLs directly.
+`font()` also accepts `ArrayBuffer` or `Uint8Array` bytes, captured at the call.
+The engine also prepares static HTTP(S) font URLs before model execution:
+
+```ts
+const remote = font(new URL('https://example.com/fonts/SomeFont.ttf'));
+const label = text('AV', remote, 10, {letterSpacing: 0.5, kerning: true});
+```
+
+Use a direct font-file URL whose server permits CORS access from the App. The URL
+must be a literal in `new URL(...)`, including when declared in an imported module;
+no `await` is needed in model code. The engine decodes remote WOFF2 files to SFNT
+before synchronous font parsing.
+
+Google Fonts can instead be selected by name:
+
+```ts
+import {googleFont, text, extrude, group} from '@code3d/core';
+
+const play = googleFont('Play');
+const medium = googleFont('Roboto', {weight: 450, italic: true});
+export default group(extrude(text('Hello', play, 10), 1));
+```
+
+`googleFont(family, options?)` synchronously returns a `Font`. Both `weight` and
+`italic` are optional. Omitted axes are omitted from the Google request, leaving
+the defaults to Google; explicit weights apply to variable fonts as well as static
+faces. The App prepares the CSS and all of its Unicode subsets before execution,
+then selects the appropriate subset for each character. No stylesheet is installed.
+The family and options must be literals or static `const` values, including imports,
+aliases, object properties and spreads. Computed calls are reported at their source.
+Large families such as Chinese fonts require downloading all returned subsets on
+the first use; changing the text subsequently reuses those font resources.
+
+Network resources use an engine-owned 64 MiB memory LRU and the shared OPFS disk
+journal, then the network. CSS, compressed font bytes and content-addressed decoded
+bytes are retained. The disk budget is the smaller of 1 GiB and 10% of the browser's
+origin quota, including compaction space, shared with geometry. Fresh resources
+need no request across edits or Worker/page restarts. Expired resources revalidate
+through the browser HTTP cache; `no-store` resources are not retained. Concurrent
+requests share one download. Failed or cancelled builds preserve completed resources;
+partial downloads are discarded and can retry. Without OPFS, memory caching remains.
+The active build's resource references are outside the historical memory limit.
+
+Parsed fonts are memory-only entries in the existing 2 GiB kernel cache budget.
+CSS interpretation, normalized glyph contours, B-Rep, bounds and meshes reuse the
+existing memory/disk artifact cache. Font contents and requested variations identify
+these artifacts; changing text position or spacing can reuse unchanged glyphs.
+HTTP resource records remain reusable when the geometry runtime changes.
+
+For computed URLs or Node execution outside the App engine, download TTF/OTF bytes
+first (decode WOFF2 before passing its bytes):
+
+```ts
+const response = await fetch(fontUrl);
+if (!response.ok) throw new Error(`Font download failed: ${response.status}`);
+const remote = font(await response.arrayBuffer());
+```
+
+TTF and OTF fonts are supported, including variable fonts and Chinese characters
+when present in the font. HarfBuzz supplies glyph outlines, advances, kerning and
+ligatures. Quadratic/cubic curves are preserved, and overlapping contours within
+a glyph use the non-zero fill rule. Font collections (TTC), color glyph rendering,
+full bidirectional/multiscript paragraph layout and multiline text are outside this
+API. Missing glyphs report an error. Empty text and spaces create no faces; spaces
+still advance subsequent characters.
+
+`text(content, font, size, options?)` requires the first three arguments and returns connected planar
+regions as ordinary readonly `FaceModel[]`: `B` has one face with two holes; `i` has
+two faces. Size is the font em in model units, not the cap height. Coordinates are
++X right, -Z up, normal +Y, with all faces retaining the same baseline origin.
+Faces are never individually centered,
+so `group(extrude(...))`, origin operations and boolean tools preserve the layout.
+Use positive/negative extrusion and `union`/`cut` for raised or engraved lettering.
+Text is currently code-defined geometry rather than an editable sketch entity.
+
+`options.letterSpacing` defaults to `0` and adds a finite distance in model units
+between laid-out glyphs, including spaces. Negative values tighten the text. The
+distance stays constant when size changes, and disconnected parts of one glyph move
+together. `options.kerning` defaults to `true`; set it to `false` to disable the
+font's pair adjustments. Extra letter spacing is added after kerning. Supported
+ligatures remain single glyphs for spacing purposes.

@@ -165,8 +165,8 @@ Fixed 不能把表达式初值与求解结果间的差异隐藏为一次意外�
 
 `face()` 要求唯一有效区域，`faces()` 返回普通只读数组；数组位置不是稳定区域 ID。
 草图 `[x,y]` 映射到模型 `[x,0,-y]`，不自动居中，拉伸沿面法向解释有符号距离。
-当前批量处理使用普通数组映射，建模 API 以 Core 入口为准；loft 的截面数组是
-单次运算输入，孔的对应不能按遍历序号猜测。
+`extrude(faces, distance)` 按数组顺序独立拉伸并保留每个面的摆放，返回普通只读
+实体数组；loft 的截面数组是单次运算输入，孔的对应不能按遍历序号猜测。
 
 验证见 [sketch-circular-trim](../../../packages/app/test/sketch-circular-trim.test.ts)、
 [sketch-overlap](../../../packages/app/test/sketch-overlap.test.ts)、

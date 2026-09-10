@@ -160,6 +160,40 @@ The select-surface-and-create UI is tracked separately within
 [#114](https://github.com/vilicvane/code3d/issues/114).
 Try [sketch-on-surface.ts](../app/examples/sketch-on-surface.ts).
 
+## Cached computations and custom primitives
+
+`cached(fn, options?)` memoizes synchronous, deterministic data computations.
+Pass changing captured state as arguments and treat returned data as immutable.
+Memory hits reuse the retained result; optional `encoder` / `decoder` pairs only
+run when saving to disk or restoring it. The App fingerprints static definitions
+and their dependencies for persistent reuse; dynamic closures and ordinary Node
+calls use function identity for memory reuse. No author cache IDs are needed.
+
+`definePrimitive(builder)` from `@code3d/core/replicad` also caches construction,
+normalization and geometry analysis. Each call still creates fresh model metadata
+and independently owned geometry handles. The builder transfers its returned
+solid to Core and owns its intermediate resources. Screws uses this shared cache.
+Read [cached computations](../web/src/content/docs/docs/reference/core.md#cached-computations)
+and [custom primitives](../web/src/content/docs/docs/guides/custom-primitives.mdx)
+for supported data, resource ownership and examples.
+
+## Text and fonts
+
+```ts
+import {googleFont, text, extrude, group} from '@code3d/core';
+
+const face = googleFont('Play');
+export default group(extrude(text('Hello', face, 10), 1));
+```
+
+In the App, `googleFont()` uses a static family name and optional weight/italic
+settings; `font()` accepts a static font-file URL or TTF/OTF bytes. The engine
+prepares remote resources before synchronous model execution. Text returns
+ordinary planar faces with a common baseline; `extrude(faces, distance)` preserves
+their order and placement. Node can read local file URLs or use downloaded,
+decoded font bytes. See the [text reference](../web/src/content/docs/docs/reference/core.md#text),
+[runnable example](../app/examples/text.ts) and [font notices](THIRD_PARTY.md).
+
 ## Materials and entry points
 
 `.material()` accepts a color or a native Three.js material. Use
@@ -190,6 +224,8 @@ the implementation and tests below.
   and [public type tests](test/public-types.ts).
 - [Spatial values](src/library/spatial.ts), [relation solving](src/library/relation-solver.ts),
   and [topology](src/library/topology.ts).
+- [Cached computations](src/library/cached.ts), [fonts](src/library/font.ts),
+  [text geometry](src/library/text.ts) and their [tests](test/).
 - [Material values](src/library/material.ts), [kernel cache](src/library/kernel-cache.ts),
   and [Node entry](src/node/index.ts).
 - [Executable App examples](../app/examples/) and [runtime tests](test/).

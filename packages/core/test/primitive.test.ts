@@ -66,7 +66,7 @@ for (const [name, defaults] of [
   });
 }
 
-test('identical primitive output reuses geometry and meshes without skipping the builder', () => {
+test('repeated primitive arguments skip the builder and reuse geometry and meshes', () => {
   clearKernelOperationCache();
   const outputs: Shape3D[] = [];
   const cylinder = definePrimitive(() => {
@@ -81,12 +81,12 @@ test('identical primitive output reuses geometry and meshes without skipping the
   const before = kernelOperationCacheStats();
   const repeat = cylinder();
   try {
-    assert.equal(outputs.length, 2);
+    assert.equal(outputs.length, 1);
     assert.equal(modelGeometry(repeat).id, firstId);
     assert.deepEqual(createModelSnapshotter()(repeat).mesh, firstMesh);
     assert.equal(kernelOperationCacheStats().misses, before.misses);
     assert.ok(kernelOperationCacheStats().hits > before.hits);
-    // Both the disposed first output and the redundant hit output are released.
+    // The disposed first output is released; the cache owns its own handle.
     for (const shape of outputs) assert.throws(() => shape.clone(), /deleted/i);
   } finally {
     disposeModelObjects([repeat]);
@@ -110,19 +110,6 @@ test('clearing output caches does not dispose a live primitive', () => {
   }
 });
 
-test('an output that fails serialization is released', () => {
-  let shape: Shape3D;
-  const cylinder = definePrimitive(() => {
-    shape = replicad.makeCylinder(2, 4);
-    shape.serialize = () => {
-      throw new Error('Cannot serialize this output.');
-    };
-    return shape;
-  });
-  assert.throws(() => cylinder(), /Cannot serialize this output/);
-  assert.throws(() => shape.clone(), /deleted/i);
-});
-
 test('a primitive owns its returned solid and supplies normal model capabilities', () => {
   let shape: Shape3D;
   const cylinder = definePrimitive((radius: number, height = 4) => {
@@ -144,18 +131,16 @@ test('a primitive owns its returned solid and supplies normal model capabilities
   assert.throws(() => shape.clone(), /deleted/i);
 });
 
-test('repeated arguments still observe closure changes and keep prior models independent', () => {
-  let height = 4;
+test('explicit changing parameters invalidate geometry and keep prior models independent', () => {
   let calls = 0;
-  const cylinder = definePrimitive((radius: number) => {
+  const cylinder = definePrimitive((radius: number, height: number) => {
     calls += 1;
     if (height <= 0) throw new Error('Height must be positive.');
     return replicad.makeCylinder(radius, height);
   });
-  const first = cylinder(2);
+  const first = cylinder(2, 4);
   const firstScaled = first.scaled(2);
-  height = 8;
-  const second = cylinder(2);
+  const second = cylinder(2, 8);
   const secondScaled = second.scaled(2);
   try {
     const snapshot = createModelSnapshotter();
@@ -171,8 +156,7 @@ test('repeated arguments still observe closure changes and keep prior models ind
     assert.equal(maximumZ(second), 8);
     assert.equal(maximumZ(firstScaled), 8);
     assert.equal(maximumZ(secondScaled), 16);
-    height = -1;
-    assert.throws(() => cylinder(2), /Height must be positive/);
+    assert.throws(() => cylinder(2, -1), /Height must be positive/);
     assert.equal(calls, 3);
   } finally {
     disposeModelObjects([first, firstScaled, second, secondScaled]);

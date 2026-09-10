@@ -41,7 +41,10 @@ export type PersistentArtifactStats = ReturnType<ArtifactJournal['stats']> & {
  */
 export async function withPersistentArtifacts<Result>(
   namespace: string,
-  action: (store: KernelArtifactStore | undefined) => Promise<Result>,
+  action: (
+    store: KernelArtifactStore | undefined,
+    resources?: KernelArtifactStore,
+  ) => Promise<Result>,
   checkCancelled: () => void,
   onStats: (stats: PersistentArtifactStats | undefined) => void,
 ): Promise<Result> {
@@ -103,17 +106,16 @@ export async function withPersistentArtifacts<Result>(
           checkCancelled();
           return action(undefined);
         }
-        const key = (id: string) => `${namespace}:${id}`;
-        const store: KernelArtifactStore = {
-          get: id => journal.get(key(id)),
-          set: (id, bytes) => journal.set(key(id), bytes),
-          touch: id => journal.touch(key(id)),
-          delete: id => journal.delete(key(id)),
+        const scopedStore = (prefix: string): KernelArtifactStore => ({
+          get: id => journal.get(`${prefix}:${id}`),
+          set: (id, bytes) => journal.set(`${prefix}:${id}`, bytes),
+          touch: id => journal.touch(`${prefix}:${id}`),
+          delete: id => journal.delete(`${prefix}:${id}`),
           flush: () => journal.flush(),
-        };
+        });
         try {
           checkCancelled();
-          return await action(store);
+          return await action(scopedStore(namespace), scopedStore('resources'));
         } finally {
           try {
             journal.flush();

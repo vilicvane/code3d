@@ -14,12 +14,16 @@ import {
 } from './project-test-files.ts';
 
 let server: Awaited<ReturnType<typeof createAppTestServer>>;
+let ProjectAssets: (typeof import('../src/project/project-assets.ts'))['ProjectAssets'];
 let ProjectBuilder: (typeof import('../src/project/project-builder.ts'))['ProjectBuilder'];
 let ProjectRuntime: (typeof import('../src/model/project-runtime.ts'))['ProjectRuntime'];
 let ProjectCompiler: (typeof import('../src/model/project-compiler.ts'))['ProjectCompiler'];
 let Evaluator: Awaited<ReturnType<typeof testEvaluatorClass>>;
 before(async () => {
   server = await createAppTestServer();
+  ({ProjectAssets} = await server.ssrLoadModule<
+    typeof import('../src/project/project-assets.ts')
+  >('/src/project/project-assets.ts'));
   ({ProjectBuilder} = await server.ssrLoadModule<
     typeof import('../src/project/project-builder.ts')
   >('/src/project/project-builder.ts'));
@@ -195,7 +199,8 @@ test('shares a dependency across concurrent imports and a nested top-level dynam
     '/node_modules/second/index.js':
       'export {identity, count, increment} from "shared";',
   });
-  const builder = new ProjectBuilder(files, esbuild);
+  const assets = new ProjectAssets(files);
+  const builder = new ProjectBuilder(files, esbuild, assets);
   const runtime = await ProjectRuntime.create(files, builder, new Evaluator());
   try {
     const [first, second, shared] = await Promise.all([
@@ -215,6 +220,7 @@ test('shares a dependency across concurrent imports and a nested top-level dynam
     );
   } finally {
     runtime.dispose();
+    assets.dispose();
   }
 });
 
@@ -227,7 +233,8 @@ test('retains callable CommonJS exports and JSON values when a later dependency 
     '/node_modules/consumer/index.cjs':
       'module.exports = require("clamp")(require("clamp/data.json").value);',
   });
-  const builder = new ProjectBuilder(files, esbuild);
+  const assets = new ProjectAssets(files);
+  const builder = new ProjectBuilder(files, esbuild, assets);
   const runtime = await ProjectRuntime.create(files, builder, new Evaluator());
   const evaluator = new Evaluator();
   try {
@@ -244,6 +251,7 @@ test('retains callable CommonJS exports and JSON values when a later dependency 
     assert.equal(value.answer, 41);
   } finally {
     runtime.dispose();
+    assets.dispose();
     evaluator.dispose();
   }
 });
@@ -694,7 +702,8 @@ test('releases concurrent waiters on failed dependency evaluation and can load u
     '/node_modules/ok/package.json': '{"type":"module","main":"index.js"}',
     '/node_modules/ok/index.js': 'export const value=42;',
   });
-  const builder = new ProjectBuilder(files, esbuild);
+  const assets = new ProjectAssets(files);
+  const builder = new ProjectBuilder(files, esbuild, assets);
   const runtime = await ProjectRuntime.create(files, builder, new Evaluator());
   try {
     const failures = await Promise.allSettled([
@@ -719,6 +728,7 @@ test('releases concurrent waiters on failed dependency evaluation and can load u
     );
   } finally {
     runtime.dispose();
+    assets.dispose();
   }
 });
 
@@ -779,6 +789,101 @@ test('locates a missing relative asset in the original author source', async () 
         });
         return true;
       },
+    );
+  } finally {
+    compiler.dispose();
+  }
+});
+
+test('synchronous font assets invalidate on file edits and batch text operations retain source tools', async () => {
+  let path = '/packages/app/examples/fonts/DejaVuSans.ttf';
+  let revision = 1;
+  const files: ProjectFileReader = {
+    readFile: file =>
+      packageTestFiles.readFile(file === '/font.ttf' ? path : file),
+    async stat(file) {
+      return file === '/font.ttf'
+        ? {kind: 'file', version: String(revision)}
+        : packageTestFiles.stat(file);
+    },
+  };
+  const compiler = new ProjectCompiler(
+    files,
+    packageTestFiles,
+    esbuild,
+    () => new Evaluator(),
+  );
+  const project = {
+    files: [
+      {
+        path: '/font.ts',
+        source:
+          'import {font} from "@code3d/core"; export const sans = font(new URL("./font.ttf", import.meta.url));',
+      },
+      {
+        path: '/model.ts',
+        source:
+          'import {text, extrude, group} from "@code3d/core"; import {sans} from "./font.ts"; const profiles = text("B8i", sans, 10); export const lettering = group(extrude(profiles, 2));',
+      },
+    ],
+  };
+  try {
+    const first = await compiler.compile(project, '/model.ts');
+    assert.equal(first.diagnostic, undefined);
+    const solids = [...first.objects.values()].filter(
+      object => object.operation.kind === 'extrude',
+    );
+    assert.equal(solids.length, 4);
+    const output = defined(
+      first.sourceTargets.find(
+        target =>
+          target.kind === 'operation-output' &&
+          target.sourceRef.file === '/model.ts' &&
+          project.files[1].source.slice(
+            target.sourceRef.start,
+            target.sourceRef.end,
+          ) === 'extrude(profiles, 2)',
+      ),
+    );
+    assert.equal(output.evaluations[0].nodeIds.length, 4);
+    assert.equal(
+      defined(output.tool).signature.parameters.find(
+        parameter => parameter.name === 'distance',
+      )?.kind,
+      'length',
+    );
+    assert.equal(
+      defined(output.evaluations[0].parameters).find(
+        parameter => parameter.argument === 'distance',
+      )?.value,
+      2,
+    );
+    const before = compiler.kernelCacheStats;
+    const second = await compiler.compile(project, '/model.ts');
+    assert.equal(second.diagnostic, undefined);
+    assert.ok(
+      defined(compiler.kernelCacheStats.memory).hits >
+        defined(before.memory).hits,
+    );
+    path = '/packages/core/test/fonts/NotoSansCJK-subset.otf';
+    revision++;
+    const changed = await compiler.compile(project, '/model.ts');
+    assert.equal(changed.diagnostic, undefined);
+    assert.notDeepEqual(
+      solids.map(solid => solid.mesh),
+      [...changed.objects.values()]
+        .filter(object => object.operation.kind === 'extrude')
+        .map(solid => solid.mesh),
+    );
+    path = '/packages/app/examples/fonts/DejaVuSans.ttf';
+    revision++;
+    const restored = await compiler.compile(project, '/model.ts');
+    assert.equal(restored.diagnostic, undefined);
+    assert.deepEqual(
+      solids.map(solid => solid.mesh),
+      [...restored.objects.values()]
+        .filter(object => object.operation.kind === 'extrude')
+        .map(solid => solid.mesh),
     );
   } finally {
     compiler.dispose();

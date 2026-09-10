@@ -66,6 +66,7 @@ export class ProjectRuntime {
       '@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm',
       toolingPath,
     );
+    const fontEnginePath = await resolve('harfbuzzjs', toolingPath);
     const entry = [
       toolingPath,
       corePath,
@@ -73,13 +74,14 @@ export class ProjectRuntime {
       loaderPath,
       replicadPath,
       sketchLoaderPath,
+      fontEnginePath,
     ]
       .map(
         (path, index) =>
           `export * as entry${index} from ${JSON.stringify(path)};`,
       )
       .join('\n');
-    const discovery = await builder.build(entry);
+    const discovery = await builder.build(entry, {instrumentCaches: false});
     const paths = discovery.files;
     const runtimeSource =
       paths
@@ -93,6 +95,7 @@ export class ProjectRuntime {
         .map((path, index) => `[${JSON.stringify(path)}, module${index}]`)
         .join(',')}]);
       export const tooling = modules.get(${JSON.stringify(toolingPath)});
+      tooling.installFontEngine(modules.get(${JSON.stringify(fontEnginePath)}));
       const initialize = modules.get(${JSON.stringify(loaderPath)}).default;
       const kernel = await initialize({
         wasmBinary: __code3dKernelBytes,
@@ -108,7 +111,7 @@ export class ProjectRuntime {
       }));
     `;
     const [bundle, wasm, sketchWasm] = await Promise.all([
-      builder.build(runtimeSource),
+      builder.build(runtimeSource, {instrumentCaches: false}),
       files.readFile(wasmPath),
       files.readFile(sketchWasmPath),
     ]);
@@ -126,7 +129,9 @@ export class ProjectRuntime {
     // ProjectAssets rewrites loader URLs to fresh blob: addresses. Hash the
     // actual input files instead of that ephemeral bundle text. File paths bind
     // each input to its resolution, and raw bytes include the Core codec itself.
-    const identityPaths = [...bundle.files].sort();
+    const identityPaths = [
+      ...new Set([...bundle.files, ...bundle.resources]),
+    ].sort();
     const identityFiles = await Promise.all(
       identityPaths.map(async path => {
         const bytes = await files.readFile(path);
@@ -255,6 +260,7 @@ export class ProjectRuntime {
               bundle.source,
               {
                 __code3dModules: this.modules,
+                __code3dCachedFunction: this.tooling.identifyCachedFunction,
                 __code3dImport: this.importModule,
                 __code3dRecordModule: (
                   file: string,

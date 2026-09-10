@@ -108,6 +108,7 @@ export class ProjectCompiler {
       this.language.reset();
     }
     this.language.invalidate(changed);
+    this.assets.beginCompilation(checkCancelled);
     // Finish applying invalidation before cancellation can consume these changes.
     checkCancelled();
     const reader = this.packages;
@@ -197,6 +198,9 @@ export class ProjectCompiler {
         }
         throw new ModelDiagnosticError(diagnostic);
       });
+      this.runtime.tooling.installModelResourceReader(url =>
+        this.assets.read(url),
+      );
       this.compiler = createModelCompiler(this.runtime.tooling, this.evaluator);
       this.snapshotPool = new SnapshotWorkerPool(
         this.runtime.tooling,
@@ -207,10 +211,15 @@ export class ProjectCompiler {
     checkCancelled();
     onProgress?.('compiling-model');
     const runtime = this.runtime;
+    this.assets.setGoogleContext(
+      this.language.typeScriptProgram,
+      runtime.tooling,
+    );
     return withPersistentArtifacts(
       runtime.artifactIdentity,
-      async store => {
+      async (store, resources) => {
         runtime.tooling.setKernelArtifactStore(store);
+        this.assets.setStore(resources);
         try {
           const discovery = await runtime.loadDependencies(
             builder,
@@ -254,6 +263,7 @@ export class ProjectCompiler {
               ),
           );
         } finally {
+          await this.assets.finishCompilation();
           runtime.tooling.setKernelArtifactStore(undefined);
         }
       },
@@ -312,6 +322,7 @@ export class ProjectCompiler {
       memory: this.runtime?.tooling.kernelOperationCacheStats(),
       disk: this.persistentStats,
       snapshots: this.snapshotPool?.stats,
+      resources: this.assets.cacheStats,
     };
   }
 

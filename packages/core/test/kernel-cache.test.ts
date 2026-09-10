@@ -1,10 +1,11 @@
+import {kernelOperationKey} from '../bld/library/kernel-cache.js';
 import assert from 'node:assert/strict';
 import {afterEach, beforeEach, test} from 'node:test';
-import {createKernelOperationCache} from '../bld/library/kernel-cache.js';
+import {createComputationCache} from '../bld/library/kernel-cache.js';
 
-let cache: ReturnType<typeof createKernelOperationCache>;
+let cache: ReturnType<typeof createComputationCache>;
 beforeEach(() => {
-  cache = createKernelOperationCache({
+  cache = createComputationCache({
     maximumBytes: 4096,
     nativeAllocatedBytes: () => 0,
   });
@@ -29,17 +30,13 @@ test('reuses a complete operation through an independent value', () => {
   let computations = 0;
   const compute = () => ({result: ++computations, instance: 'computed'});
 
-  const first = cache.evaluateKernelOperation(
-    'box',
-    [10, 20, 30],
-    [],
+  const first = cache.evaluateCachedArtifact(
+    kernelOperationKey('box', [10, 20, 30], []),
     lifecycle,
     compute,
   );
-  const second = cache.evaluateKernelOperation(
-    'box',
-    [10, 20, 30],
-    [],
+  const second = cache.evaluateCachedArtifact(
+    kernelOperationKey('box', [10, 20, 30], []),
     lifecycle,
     compute,
   );
@@ -56,31 +53,23 @@ test('reuses a complete operation through an independent value', () => {
 });
 
 test('keeps an unchanged prefix when a downstream argument changes', () => {
-  const prefix = cache.evaluateKernelOperation(
-    'box',
-    [10, 20, 30],
-    [],
+  const prefix = cache.evaluateCachedArtifact(
+    kernelOperationKey('box', [10, 20, 30], []),
     lifecycle,
     () => ({result: 'prefix', instance: 'computed'}),
   );
-  const first = cache.evaluateKernelOperation(
-    'fillet',
-    [1],
-    [prefix],
+  const first = cache.evaluateCachedArtifact(
+    kernelOperationKey('fillet', [1], [prefix]),
     lifecycle,
     () => ({result: 'first', instance: 'computed'}),
   );
-  const repeatedPrefix = cache.evaluateKernelOperation(
-    'box',
-    [10, 20, 30],
-    [],
+  const repeatedPrefix = cache.evaluateCachedArtifact(
+    kernelOperationKey('box', [10, 20, 30], []),
     lifecycle,
     () => assert.fail('the prefix should be cached'),
   );
-  const changed = cache.evaluateKernelOperation(
-    'fillet',
-    [2],
-    [repeatedPrefix],
+  const changed = cache.evaluateCachedArtifact(
+    kernelOperationKey('fillet', [2], [repeatedPrefix]),
     lifecycle,
     () => ({result: 'changed', instance: 'computed'}),
   );
@@ -96,10 +85,14 @@ test('keeps an unchanged prefix when a downstream argument changes', () => {
 
 test('bounds retained values and releases them on eviction and clear', () => {
   for (let index = 0; index < 300; index += 1) {
-    cache.evaluateKernelOperation('primitive', [index], [], lifecycle, () => ({
-      result: index,
-      instance: 'computed',
-    }));
+    cache.evaluateCachedArtifact(
+      kernelOperationKey('primitive', [index], []),
+      lifecycle,
+      () => ({
+        result: index,
+        instance: 'computed',
+      }),
+    );
   }
 
   const retained = cache.kernelOperationCacheStats().entries;
@@ -116,10 +109,8 @@ test('bounds retained values and releases them on eviction and clear', () => {
 });
 
 function primitive(index: number) {
-  return cache.evaluateKernelOperation(
-    'primitive',
-    [index],
-    [],
+  return cache.evaluateCachedArtifact(
+    kernelOperationKey('primitive', [index], []),
     lifecycle,
     () => ({
       result: index,
@@ -227,10 +218,14 @@ test('cancellation retains completed operations and releases the check before th
   });
   try {
     for (let index = 0; index < 400; index++) primitive(index);
-    cache.evaluateKernelOperation('last complete', [], [], lifecycle, () => {
-      cancelled = true;
-      return {result: 'completed during cancellation', instance: 'computed'};
-    });
+    cache.evaluateCachedArtifact(
+      kernelOperationKey('last complete', [], []),
+      lifecycle,
+      () => {
+        cancelled = true;
+        return {result: 'completed during cancellation', instance: 'computed'};
+      },
+    );
     assert.throws(
       () => primitive(400),
       error => error === stopped,
@@ -249,8 +244,10 @@ test('cancellation retains completed operations and releases the check before th
   }
   evaluate(() => {
     for (let index = 0; index < 400; index++) primitive(index);
-    cache.evaluateKernelOperation('last complete', [], [], lifecycle, () =>
-      assert.fail('completed result must survive'),
+    cache.evaluateCachedArtifact(
+      kernelOperationKey('last complete', [], []),
+      lifecycle,
+      () => assert.fail('completed result must survive'),
     );
   });
   assert.partialDeepStrictEqual(cache.kernelOperationCacheStats(), {
@@ -280,7 +277,7 @@ test('clearing a cache also clears its active and previous working sets', () => 
 });
 
 test('the default budget retains thousands of small historical results for edits and undo', () => {
-  cache = createKernelOperationCache({nativeAllocatedBytes: () => 0});
+  cache = createComputationCache({nativeAllocatedBytes: () => 0});
   evaluate(() => {
     for (let index = 0; index < 3000; index++) primitive(index);
   });
@@ -297,7 +294,7 @@ test('the default budget retains thousands of small historical results for edits
 
 test('LRU evicts the least recently used history according to native memory pressure', () => {
   let nativeBytes = 0;
-  cache = createKernelOperationCache({
+  cache = createComputationCache({
     maximumBytes: 10_000,
     nativeAllocatedBytes: () => nativeBytes,
   });
@@ -309,10 +306,8 @@ test('LRU evicts the least recently used history according to native memory pres
     },
   };
   const operation = (index: number) =>
-    cache.evaluateKernelOperation(
-      'native',
-      [index],
-      [],
+    cache.evaluateCachedArtifact(
+      kernelOperationKey('native', [index], []),
       nativeLifecycle,
       () => {
         nativeBytes += 2000;
@@ -338,7 +333,7 @@ test('LRU evicts the least recently used history according to native memory pres
 test('a cache hit acquires its disposable value before memory pressure evicts the retained handle', () => {
   let nativeBytes = 0;
   let disposed = false;
-  cache = createKernelOperationCache({
+  cache = createComputationCache({
     maximumBytes: 4096,
     nativeAllocatedBytes: () => nativeBytes,
   });
@@ -354,10 +349,14 @@ test('a cache hit acquires its disposable value before memory pressure evicts th
     },
   };
   const operation = () =>
-    cache.evaluateKernelOperation('handle', [], [], handles, () => ({
-      result: 1,
-      instance: 'computed',
-    }));
+    cache.evaluateCachedArtifact(
+      kernelOperationKey('handle', [], []),
+      handles,
+      () => ({
+        result: 1,
+        instance: 'computed',
+      }),
+    );
   operation();
   nativeBytes = 5000;
   assert.equal(operation().value.instance, 'use');
@@ -373,10 +372,8 @@ test('a large mesh consumes the byte budget even with very few cache entries', (
     release: () => {},
   };
   const mesh = (index: number) =>
-    cache.evaluateKernelOperation(
-      'mesh',
-      [index],
-      [],
+    cache.evaluateCachedArtifact(
+      kernelOperationKey('mesh', [index], []),
       meshLifecycle,
       () => new Float32Array(800),
     );
@@ -392,7 +389,7 @@ test('a large mesh consumes the byte budget even with very few cache entries', (
 
 test('memory pressure during evaluation evicts only unused history', () => {
   let nativeBytes = 0;
-  cache = createKernelOperationCache({
+  cache = createComputationCache({
     maximumBytes: 4096,
     nativeAllocatedBytes: () => nativeBytes,
   });
@@ -430,4 +427,63 @@ test('auxiliary worker memory trims shared history while preserving both active 
   cache.setKernelExternalBytes(0);
   assert.equal(cache.kernelOperationCacheStats().externalBytes, 0);
   assert.equal(cache.kernelOperationCacheStats().maximumBytes, 4096);
+});
+
+test('memory-only resources share LRU eviction without disabling geometry persistence', () => {
+  const records = new Map<string, Uint8Array>();
+  const reads: string[] = [];
+  cache.setKernelArtifactStore({
+    get(id) {
+      reads.push(id);
+      return records.get(id);
+    },
+    set(id, bytes) {
+      records.set(id, bytes);
+    },
+    touch: id => records.has(id),
+    delete(id) {
+      records.delete(id);
+    },
+    flush() {},
+  });
+  class Parsed {
+    value = 1;
+  }
+  let released = 0;
+  const resourceLifecycle = {
+    estimateBytes: () => 2000,
+    retain: (value: Parsed) => value,
+    instantiate: (value: Parsed) => value,
+    release() {
+      released++;
+    },
+  };
+  const first = cache.evaluateCachedArtifact(
+    kernelOperationKey('resource', [1], []),
+    resourceLifecycle,
+    () => new Parsed(),
+    false,
+  );
+  cache.evaluateCachedArtifact(
+    kernelOperationKey('resource', [1], []),
+    resourceLifecycle,
+    () => assert.fail('Expected memory reuse'),
+    false,
+  );
+  cache.evaluateCachedArtifact(
+    kernelOperationKey('resource', [2], []),
+    resourceLifecycle,
+    () => new Parsed(),
+    false,
+  );
+  assert.ok(released > 0);
+  assert.equal(records.size, 0);
+  assert.equal(reads.length, 0);
+  const geometry = cache.evaluateCachedArtifact(
+    kernelOperationKey('geometry', [], [first]),
+    lifecycle,
+    () => ({result: 42, instance: 'computed'}),
+  );
+  assert.ok(records.has(geometry.id));
+  assert.equal(cache.kernelOperationCacheStats().persistenceErrors, 0);
 });

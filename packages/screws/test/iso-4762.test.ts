@@ -72,8 +72,9 @@ test('identical screw dimensions reuse thread construction, booleans, and meshes
     clearKernelOperationCache();
   }
 
-  // The package cache retains B-Rep data, not handles owned by core's cache.
+  // Clearing the shared cache also releases the thread cache; rebuilding is real.
   const afterClear = ISO4762.screw('M6', 21);
+  assert.ok(lofts.mock.callCount() > buildCount);
   try {
     assert.equal(modelGeometry(afterClear).id, id);
     assert.deepEqual(createModelSnapshotter()(afterClear).mesh, mesh);

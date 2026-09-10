@@ -7,6 +7,7 @@ import type {ModelSnapshotObject} from '@code3d/core/tooling';
 
 export type CacheRequest = {
   source: string;
+  assets?: Record<string, {bytes: Uint8Array; version: string}>;
   concurrency?: number;
   terminateChild?: boolean;
   trackSnapshots?: boolean;
@@ -17,6 +18,7 @@ export type CacheRequest = {
   summary?: boolean;
 };
 export type CacheResult = {
+  probe?: {computes: number; encodes: number; decodes: number; builds: number};
   milliseconds: number;
   stats: ProjectCompiler['kernelCacheStats'];
   objects?: string;
@@ -29,8 +31,10 @@ export type CacheResult = {
 const scope = self as DedicatedWorkerGlobalScope;
 const ready = esbuild.initialize({wasmURL: esbuildWasmUrl, worker: false});
 let compiler: ProjectCompiler | undefined;
+let assets: NonNullable<CacheRequest['assets']> = {};
 scope.onmessage = async ({data}: MessageEvent<CacheRequest>) => {
   await ready;
+  if (data.assets) assets = data.assets;
   if (data.disabled)
     Object.defineProperty(navigator.storage, 'getDirectory', {
       value: async () => {
@@ -41,11 +45,12 @@ scope.onmessage = async ({data}: MessageEvent<CacheRequest>) => {
     let terminatedChild = false;
     compiler = new ProjectCompiler(
       {
-        async readFile() {
-          return undefined;
+        async readFile(path) {
+          return assets[path]?.bytes;
         },
-        async stat() {
-          return undefined;
+        async stat(path) {
+          const asset = assets[path];
+          return asset ? {kind: 'file', version: asset.version} : undefined;
         },
       },
       {

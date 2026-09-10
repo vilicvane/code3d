@@ -149,6 +149,11 @@ test('extrude utility and selected topology methods share their numeric defaults
   const pairs: readonly [Model, Model][] = [
     [Reflect.apply(extrude, undefined, [face]), face.extrude(10)],
     [Reflect.apply(extrude, undefined, [face, undefined]), face.extrude(10)],
+    [Reflect.apply(extrude, undefined, [[face]])[0], face.extrude(10)],
+    [
+      Reflect.apply(extrude, undefined, [[face], undefined])[0],
+      face.extrude(10),
+    ],
     [
       Reflect.apply(solid.fillet, solid, [undefined, [1]]),
       solid.fillet(1, [1]),
