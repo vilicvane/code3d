@@ -22,6 +22,40 @@ ID，但共享 canonical 求解点；缺失、循环及非法跨层引用明确�
 验证见 [sketch-alias](../../../packages/core/test/sketch-alias.test.ts)、
 [sketch-source](../../../packages/app/test/sketch-source.test.mjs)。
 
+## 空间参考架与模型上下文
+
+`Sketch.plane` 是法向为局部 `+Y` 的无界参考平面；草图 `[x,y]` 映射到参考架
+`[x,0,-y]`。`relate(self => self.plane.align(target))` 返回新的空间值，共享原始
+二维定义和点身份，不增加派生层、不重求二维约束或将摆放烘焙到 tuple 坐标。
+空草图和开放轮廓同样可关联，不为它们伪造 B-Rep 面或 group。
+
+[runtime](../../../packages/core/src/library/runtime.ts)中的 `SketchFrame` 与模型
+共用 `RelationObject` 的关系存储、位姿求解和阶段预览。`align` 使用相同的有向
+平面及目标参考架 offset/rotation 语义，不按裁剪面边界自动居中或额外锁定切向
+自由度。无界平面不支持依赖有限几何的 `on`；`pivotVertex` 仍要求模型拓扑。
+引用绑定实际的不可变目标值，不会因作者之后创建另一个旋转模型而自动转向新值。
+
+`derive`、`face` / `faces` 和拉伸继承空间关系；布尔和 loft 在已有组合上下文中
+求解输入，不提前改变局部几何。派生层可引用原始草图或其空间副本的同一上游点，
+校验和求解按共享二维定义归一到实际上游层，而不是误判为非法跨层引用。
+
+[sketch-trace](../../../packages/app/src/model/sketch-trace.ts)分别追踪空间值身份、
+几何求值身份和源码定义。同一几何的不同摆放保留各自的使用位置与参考架，但
+回写同一份数组；检查原始值不带入某个下游摆放。回调 self 的临时追踪身份须在
+完整求值后解析，不能固化成与最终空间值不一致的来源。
+
+关联编辑背景来自同一关系闭包中有限模型相对于草图参考架的位姿，经
+[sketch-context](../../../packages/app/src/tools/sketch-context.ts)投影到局部二维
+编辑平面；嵌套组合保留各 occurrence 的变换。背景仅供观察，不参与拾取、吸附
+或外部几何约束。拖动、绘制、源码事务和撤销继续使用原有二维编辑路径。
+跨 Worker 的参考架快照为无 mesh 的 `reference`，不进入几何查询、模型导出或
+最后一个几何结果 fallback。选面后自动创建草图的 GUI 入口仍由
+[#114](https://github.com/vilicvane/code3d/issues/114)跟踪，不属于已完成能力。
+
+验证见 [Core 关系回归](../../../packages/core/test/sketch-relations.test.ts)、
+[编译与上下文](../../../packages/app/test/compiler-sketch-relations.test.ts)和
+[浏览器关联编辑](../../../packages/app/test/browser/sketch-relations.test.ts)。
+
 ## 求解与精度
 
 [sketch-solver](../../../packages/core/src/library/sketch-solver.ts)适配 PlaneGCS。
@@ -142,8 +176,9 @@ Fixed 不能把表达式初值与求解结果间的差异隐藏为一次意外�
 成功求解但几何初值与显示结果超出局部精度时，产生非阻塞 warning，状态仍为
 Ready。通用 diagnostic actions 携带标签和 ToolIntent，UI 不实现修复算法。
 显式 Fix 只同步本层可写的字面量坐标和半径，保留表达式、实体 ID 与约束。
-动态数组、存在多个运行实例或必须覆盖表达式的修复不能伪装成安全操作；上游
-需打开所属草图再处理。提交使用编译 revision、expected text 和一次源码撤销。
+动态数组、同一源码存在多个独立几何求值或必须覆盖表达式的修复不能伪装成安全
+操作；共享 geometry identity 的空间副本不算独立几何求值，不因此禁用 Fix。
+上游需打开所属草图再处理。提交使用编译 revision、expected text 和一次源码撤销。
 
 实现与验证：[sketch-diagnostics](../../../packages/app/src/tools/sketch-diagnostics.ts)、
 [compiler-sketch-diagnostics](../../../packages/app/test/compiler-sketch-diagnostics.test.mjs)、
