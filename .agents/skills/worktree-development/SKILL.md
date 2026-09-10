@@ -115,7 +115,7 @@ python3 "$COORDINATOR" --repo "$WORKTREE" claim
 
 `claimed`、`merging` 或 `testing` owner 即使心跳陈旧也不能被自动抢占，因为主区可能处于未完成的合并状态。通过协调文件和 Herdr ID 只读核对 owner；原任务会话无法恢复时，请用户决定如何处理，不切换会话身份代做。
 
-`complete` 只代表本地集成成功，不推送、不评论或关闭 GitHub issue。验收完成且提交实际进入远端默认分支后才关闭需求；未获推送授权时报告本地合并结果并保持 issue 打开，见协作约定。
+`complete` 只代表本地集成成功，不推送、不评论或关闭 GitHub issue。完整解决且已验收的最终交付提交必须包含 `Closes #编号`；推送后由主 agent 核对整批新增提交关联的 issue，确认自动关闭或补关并回报结果，见 [自动关闭与推送收尾](references/github-issues.md#自动关闭与推送收尾)。未获推送授权时报告本地合并结果并保持 issue 打开。
 
 ## 状态与消息边界
 
