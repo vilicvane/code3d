@@ -90,6 +90,8 @@ bundled example has its own `package.json` and uses `just-range` from npm to
 place a row of posts. Select the `postArray()` call to edit the count, spacing
 and height in the parameter panel. The example is included in every browser
 workspace; it does not depend on files from another browser profile.
+In a local project, run `npm install` inside `examples/patterns/post-array`,
+then choose **Reload folder** before running this example.
 
 ```json
 {
@@ -153,9 +155,14 @@ project files and do not run as models.
 
 ## Local folder
 
-Choose **Open folder** to connect the App to a real directory. An empty
-directory receives the current workspace, including unopened files and binary
-assets. An existing directory keeps its files and gains Code3D's managed examples.
+Choose **Open folder** in the explorer header to connect the App to a real directory.
+The selected directory keeps its own files. When opening an empty directory,
+the App asks whether to create the bundled `/examples` folder. Declining is remembered
+for that project, so reloading does not ask again or create examples later.
+Nonempty directories open without this prompt and do not receive examples automatically.
+Opening a folder never copies files from the previous project or browser storage.
+Only the App's own `.code3d` metadata is ignored when checking whether a directory is empty.
+Create your own files in the explorer.
 
 Opening a folder reads only workspace metadata and the initial file. Imports,
 assets, type definitions, and other files load when needed; independent filesystem
@@ -168,9 +175,10 @@ Edits in the App write directly to that directory. If you change a file in
 another editor, choose **Reload folder** to read the changes. Automatic
 external-file watching is not currently available.
 
-Each connected directory gets its own workspace URL. Use **Reconnect folder**
-when the browser requires fresh permission, or **Use browser storage** to
-return the current tab to browser persistence.
+Each connected directory gets its own workspace URL. Click the storage location
+in the explorer header to access **Reload folder**, **Reconnect folder** when the
+browser requires fresh permission, or **Use browser storage** to return the current
+tab to browser persistence. Switching workspaces clears the previous file selection.
 
 Local folders require a browser with File System Access support and a secure
 context. Browser storage remains available when folder access is unsupported.
@@ -237,8 +245,11 @@ Worker; ordinary edits preserve its expensive geometry caches.
 
 ## The examples directory
 
-`/examples` is managed by Code3D. **Reset examples** restores it, and a
-new bundled example revision refreshes it automatically. Keep your own work
+The bundled `/examples` folder is managed by Code3D. Right-click that folder and choose
+**Reset examples** to restore it. A new bundled revision refreshes managed examples
+automatically; existing user-owned examples are left alone unless explicitly reset.
+If there is no `/examples` folder, right-click the empty space in the explorer and choose
+**Create examples** to add it later. Keep your own work
 in `/model.ts` or another directory outside `/examples`.
 
 ## Run Code3D locally

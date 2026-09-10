@@ -74,6 +74,11 @@ function directory(
           yield {name, kind: value instanceof File ? 'file' : 'directory'};
       }
     },
+    async removeEntry(name: string) {
+      if (!entries[name])
+        throw new DOMException('Missing entry', 'NotFoundError');
+      delete entries[name];
+    },
   } as unknown as FileSystemDirectoryHandle;
 }
 
@@ -191,6 +196,91 @@ test('initialization and unchanged examples never enumerate or read project sour
     'export default 1',
   );
   assert.deepEqual(calls, [['file', '/model.ts']]);
+});
+
+test('an unseeded local directory gains only metadata without enumerating user files', async () => {
+  const entries: DirectoryEntries = {};
+  const calls: AccessCall[] = [];
+  const fs = await openDirectoryProjectFileSystem(directory(entries, calls));
+  await fs.initialize();
+  assert.deepEqual(Object.keys(entries), ['.code3d']);
+  assert.ok(
+    calls.every(call => call[0] !== 'list' && call[1].startsWith('/.code3d')),
+  );
+});
+
+test('declining examples survives reopening and new revisions until an explicit reset', async () => {
+  const entries: DirectoryEntries = {};
+  const handle = directory(entries);
+  let fs = await openDirectoryProjectFileSystem(handle);
+  const template = {
+    directory: '/examples',
+    revision: 'first',
+    files: [{path: '/examples/demo.ts', source: 'first'}],
+  };
+  await fs.initialize();
+  let approvals = 0;
+  await fs.syncDirectory(template, async () => {
+    approvals++;
+    return false;
+  });
+  fs = await openDirectoryProjectFileSystem(handle);
+  await fs.initialize();
+  const next = {
+    ...template,
+    revision: 'second',
+    files: [{path: '/examples/demo.ts', source: 'second'}],
+  };
+  await fs.syncDirectory(next, async () => {
+    throw new Error('A skipped directory must not ask again');
+  });
+  assert.equal(approvals, 1);
+  assert.equal(await fs.stat('/examples'), undefined);
+  await fs.writeFile('/keep.txt', 'user');
+  await fs.resetDirectory(template);
+  await fs.syncDirectory(next, async () => {
+    throw new Error('A managed directory must not ask again');
+  });
+  assert.equal(
+    new TextDecoder().decode(await fs.readFile('/examples/demo.ts')),
+    'second',
+  );
+  assert.equal(
+    new TextDecoder().decode(await fs.readFile('/keep.txt')),
+    'user',
+  );
+});
+
+test('accepting examples creates them once and keeps subsequent updates managed', async () => {
+  const entries: DirectoryEntries = {};
+  const handle = directory(entries);
+  const fs = await openDirectoryProjectFileSystem(handle);
+  const template = {
+    directory: '/examples',
+    revision: 'first',
+    files: [{path: '/examples/demo.ts', source: 'first'}],
+  };
+  await fs.initialize();
+  await fs.syncDirectory(template, async () => true);
+  assert.equal(
+    new TextDecoder().decode(await fs.readFile('/examples/demo.ts')),
+    'first',
+  );
+  const reopened = await openDirectoryProjectFileSystem(handle);
+  await reopened.syncDirectory(
+    {
+      ...template,
+      revision: 'second',
+      files: [{path: '/examples/demo.ts', source: 'second'}],
+    },
+    async () => {
+      throw new Error('Existing managed examples must not prompt');
+    },
+  );
+  assert.equal(
+    new TextDecoder().decode(await reopened.readFile('/examples/demo.ts')),
+    'second',
+  );
 });
 
 test('a non-source file prevents seeding an existing directory', async () => {

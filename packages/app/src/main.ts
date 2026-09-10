@@ -2,8 +2,8 @@ import './style.css';
 import {
   File,
   FilePlus,
+  FolderOpen,
   FolderPlus,
-  Search,
   RefreshCw,
   PanelLeftClose,
   PanelLeftOpen,
@@ -55,7 +55,6 @@ import {decodeProjectFile} from './project/file-reader';
 import {
   listProjectEntries,
   searchProjectEntries,
-  copyProjectWorkspace,
   readProjectTextFile,
   type ProjectEntry,
 } from './project/file-operations';
@@ -161,12 +160,29 @@ const directoryConnected =
 const projectFileSystem = directoryConnected
   ? await openDirectoryProjectFileSystem(storedDirectoryHandle)
   : await openBrowserProjectFileSystem();
-await projectFileSystem.initialize(async () => {
-  await mapProjectIO(defaultProject.files, file =>
-    projectFileSystem.writeFile(file.path, file.source),
-  );
-});
-await projectFileSystem.syncDirectory(bundledExamples);
+await projectFileSystem.initialize(
+  directoryConnected
+    ? undefined
+    : async () => {
+        await mapProjectIO(defaultProject.files, file =>
+          projectFileSystem.writeFile(file.path, file.source),
+        );
+      },
+);
+await projectFileSystem.syncDirectory(
+  bundledExamples,
+  directoryConnected
+    ? async () => {
+        const entries = await projectFileSystem.list('/');
+        return (
+          entries.every(entry => entry.name === '.code3d') &&
+          window.confirm(
+            'This folder is empty. Create bundled examples in /examples?',
+          )
+        );
+      }
+    : undefined,
+);
 const localPackageFiles = directoryWorkspaceId
   ? new WorkspaceFileReader(
       projectFileSystem,
@@ -193,12 +209,6 @@ app.innerHTML = `
       </a>
       <div class="topbar-actions">
         <button class="quiet-button" id="retry-save-button" type="button" hidden>Retry saving</button>
-        <span class="project-location" id="project-location"></span>
-        <button class="quiet-button" id="open-folder-button" type="button">Open folder</button>
-        <button class="quiet-button" id="reconnect-folder-button" type="button" hidden>Reconnect folder</button>
-        <button class="quiet-button" id="reload-folder-button" type="button" hidden>Reload folder</button>
-        <button class="quiet-button" id="browser-storage-button" type="button" hidden>Use browser storage</button>
-        <button class="quiet-button" id="reset-button" type="button">Reset examples</button>
         <div class="agent-nav">
           <button class="quiet-button button-primary agent-connect-button" id="agents-button" type="button">Connect Agent</button>
         </div>
@@ -210,11 +220,16 @@ app.innerHTML = `
         <div class="editor-workspace">
           <aside class="project-explorer" id="project-explorer" aria-label="Project files">
             <header>
-              <span>PROJECT</span>
+              <button class="project-location" id="project-location" type="button" aria-expanded="false" aria-controls="project-storage-menu"></button>
+              <div class="project-context-menu project-storage-menu" id="project-storage-menu" popover="auto" role="group" aria-label="Project storage">
+                <button id="reconnect-folder-button" type="button" hidden>Reconnect folder</button>
+                <button id="reload-folder-button" type="button" hidden>Reload folder</button>
+                <button id="browser-storage-button" type="button" hidden>Use browser storage</button>
+              </div>
               <div class="project-actions">
+                <button id="open-folder-button" type="button" title="Open folder" aria-label="Open folder"></button>
                 <button id="new-file-button" type="button" title="New file" aria-label="New file"></button>
                 <button id="new-folder-button" type="button" title="New folder" aria-label="New folder"></button>
-                <button id="search-files-button" type="button" title="Search files" aria-label="Search files"></button>
                 <button id="refresh-files-button" type="button" title="Refresh files" aria-label="Refresh files"></button>
               </div>
             </header>
@@ -327,7 +342,8 @@ const projectExplorerToggle = requiredElement<HTMLButtonElement>(
   'project-explorer-toggle',
 );
 const editorTabs = requiredElement('editor-tabs');
-const projectLocation = requiredElement('project-location');
+const projectLocation = requiredElement<HTMLButtonElement>('project-location');
+const projectStorageMenu = requiredElement('project-storage-menu');
 const openFolderButton =
   requiredElement<HTMLButtonElement>('open-folder-button');
 const reconnectFolderButton = requiredElement<HTMLButtonElement>(
@@ -339,19 +355,38 @@ const reloadFolderButton = requiredElement<HTMLButtonElement>(
 const browserStorageButton = requiredElement<HTMLButtonElement>(
   'browser-storage-button',
 );
-const resetButton = requiredElement<HTMLButtonElement>('reset-button');
 const newFileButton = requiredElement<HTMLButtonElement>('new-file-button');
 const newFolderButton = requiredElement<HTMLButtonElement>('new-folder-button');
-const searchFilesButton = requiredElement<HTMLButtonElement>(
-  'search-files-button',
-);
 const refreshFilesButton = requiredElement<HTMLButtonElement>(
   'refresh-files-button',
 );
+openFolderButton.append(createIcon(FolderOpen));
 newFileButton.append(createIcon(FilePlus));
 newFolderButton.append(createIcon(FolderPlus));
-searchFilesButton.append(createIcon(Search));
 refreshFilesButton.append(createIcon(RefreshCw));
+
+projectLocation.addEventListener('click', () => {
+  if (projectStorageMenu.matches(':popover-open')) {
+    projectStorageMenu.hidePopover();
+    return;
+  }
+  projectStorageMenu.showPopover();
+  const anchor = projectLocation.getBoundingClientRect();
+  const menu = projectStorageMenu.getBoundingClientRect();
+  projectStorageMenu.style.left = `${Math.max(8, Math.min(anchor.left, innerWidth - menu.width - 8))}px`;
+  projectStorageMenu.style.top = `${Math.max(8, Math.min(anchor.bottom + 6, innerHeight - menu.height - 8))}px`;
+});
+projectStorageMenu.addEventListener('toggle', () => {
+  projectLocation.setAttribute(
+    'aria-expanded',
+    String(projectStorageMenu.matches(':popover-open')),
+  );
+});
+projectStorageMenu.addEventListener('click', event => {
+  if ((event.target as Element).closest('button'))
+    projectStorageMenu.hidePopover();
+});
+window.addEventListener('resize', () => projectStorageMenu.hidePopover());
 
 const projectExplorerStorageKey = 'code3d:project-explorer-expanded';
 setProjectExplorerExpanded(
@@ -481,6 +516,7 @@ const projectDirectory = new ProjectTree(projectTree, {
     searchProjectEntries(projectFileSystem, cancelled, onEntries),
   onOpenFile: (path, takeFocus) => activateProjectFile(path, takeFocus),
   onOperation: operation => agentProject.changeEntries(operation),
+  examples: {directory: bundledExamples.directory, reset: resetExamples},
   onInstallPackage: packageManager ? installProjectPackage : undefined,
   onUpdateDependencies: packageManager ? updateProjectDependencies : undefined,
   onBusy: busy => {
@@ -938,7 +974,6 @@ newFolderButton.addEventListener(
   'click',
   () => void projectDirectory.create('directory'),
 );
-searchFilesButton.addEventListener('click', () => projectDirectory.search());
 refreshFilesButton.addEventListener(
   'click',
   () => void projectDirectory.refresh(),
@@ -954,16 +989,6 @@ reloadFolderButton.addEventListener('click', () => {
 });
 browserStorageButton.addEventListener('click', () => {
   void useBrowserStorage();
-});
-resetButton.addEventListener('click', () => {
-  if (
-    !window.confirm(
-      'Reset bundled examples? Files under /examples will be replaced. Other project files will not change.',
-    )
-  ) {
-    return;
-  }
-  void resetExamples();
 });
 
 window.addEventListener('keydown', event => {
@@ -990,10 +1015,11 @@ runModel();
 
 function renderProjectLocation(): void {
   if (directoryConnected) {
-    projectLocation.textContent = `Local · ${storedDirectoryHandle.name}`;
+    projectLocation.textContent = storedDirectoryHandle.name;
     projectLocation.dataset.kind = 'local';
     projectLocation.title = `Files are stored directly in ${storedDirectoryHandle.name}`;
-    openFolderButton.textContent = 'Change folder';
+    openFolderButton.title = 'Change folder';
+    openFolderButton.setAttribute('aria-label', 'Change folder');
     reconnectFolderButton.hidden = true;
     reloadFolderButton.hidden = false;
     browserStorageButton.hidden = false;
@@ -1003,7 +1029,9 @@ function renderProjectLocation(): void {
   projectLocation.textContent = 'Browser storage';
   projectLocation.dataset.kind = 'browser';
   projectLocation.title = 'Files are stored in this browser';
-  openFolderButton.textContent = 'Open folder';
+  projectLocation.disabled = storedDirectoryHandle === undefined;
+  openFolderButton.title = 'Open folder';
+  openFolderButton.setAttribute('aria-label', 'Open folder');
   openFolderButton.disabled = !supportsProjectDirectories();
   reconnectFolderButton.hidden = storedDirectoryHandle === undefined;
   reconnectFolderButton.textContent = storedDirectoryHandle
@@ -1019,11 +1047,6 @@ async function openProjectDirectory(): Promise<void> {
     await agentProject.flush();
     const handle = await pickProjectDirectory();
     if (!handle) return;
-    const target = await openDirectoryProjectFileSystem(handle);
-    await target.initialize(() =>
-      copyProjectWorkspace(projectFileSystem, target),
-    );
-    await target.syncDirectory(bundledExamples);
     const workspaceId = await rememberProjectDirectory(handle);
     openDirectoryWorkspace(workspaceId);
   } catch (error) {
@@ -1076,12 +1099,14 @@ async function useBrowserStorage(): Promise<void> {
 function openDirectoryWorkspace(workspaceId: string): void {
   const url = new URL(window.location.href);
   url.searchParams.set('workspace', workspaceId);
+  url.hash = '';
   window.location.replace(url);
 }
 
 function openBrowserWorkspace(): void {
   const url = new URL(window.location.href);
   url.searchParams.delete('workspace');
+  url.hash = '';
   window.location.replace(url);
 }
 
@@ -1094,6 +1119,15 @@ function setProjectLocationBusy(busy: boolean): void {
 
 async function resetExamples(): Promise<void> {
   try {
+    const existing = await projectFileSystem.stat(bundledExamples.directory);
+    if (
+      !window.confirm(
+        existing
+          ? 'Reset bundled examples? Files under /examples will be replaced. Other project files will not change.'
+          : 'Create bundled examples in /examples?',
+      )
+    )
+      return;
     await agentProject.flush();
     await agentProject.update(async () => {
       await projectFileSystem.resetDirectory(bundledExamples);
