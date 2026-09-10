@@ -2,6 +2,8 @@ import {box, group} from '@code3d/core';
 import range from 'just-range';
 
 // Browser storage installs just-range from this folder's package.json.
+// In a local project, run `npm install` in examples/patterns/post-array,
+// then choose Reload folder in the App before running this example.
 // Select the postArray call to change its parameters; F12 opens package sources.
 /**
  * @code3d.param count {kind: 'count', constraints: {min: 1, max: 9}}

@@ -63,7 +63,7 @@ an entry for **Rename**, **Cut**, **Copy**, **Paste**, and **Delete**. Drag sele
 entries onto a folder to move them. `Ctrl/Cmd` selects additional entries;
 `Shift` selects a range. With the explorer focused, use `F2` to rename,
 `Delete` to delete, and `Ctrl/Cmd+C`, `X`, or `V` for the project file clipboard.
-Use **Search files** or `Ctrl/Cmd+F` to find paths; `Esc` leaves search or cancels
+Use the explorer's search box or `Ctrl/Cmd+F` to find paths; `Esc` leaves search or cancels
 an inline rename. Arrow keys navigate the tree, and `Enter` or a double-click
 puts the selected text file's editor in focus.
 

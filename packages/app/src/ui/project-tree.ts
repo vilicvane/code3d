@@ -33,6 +33,7 @@ type ProjectTreeOptions = Readonly<{
   ): Promise<void>;
   onOpenFile(path: string, takeFocus: boolean): Promise<void>;
   onOperation(operation: ProjectEntryOperation): Promise<void>;
+  examples?: Readonly<{directory: string; reset(): Promise<void>}>;
   onInstallPackage?(directory: string): Promise<void>;
   onUpdateDependencies?(directory: string): Promise<void>;
   onBusy(busy: boolean): void;
@@ -645,12 +646,13 @@ export class ProjectTree {
       ...visible.map(item => {
         const row = document.createElement('div');
         row.dataset.state = item.state;
-        const directory = document.createElement('div');
+        row.title = `${item.directory}: ${item.message}`;
+        const directory = document.createElement('span');
         directory.className = 'package-status-directory';
         directory.textContent = item.directory;
-        const message = document.createElement('div');
+        const message = document.createElement('span');
         message.textContent = item.message;
-        row.append(directory, message);
+        row.append(directory, ': ', message);
         return row;
       }),
     );
@@ -811,6 +813,18 @@ export class ProjectTree {
           ),
         !this.runningPackageOperation,
       );
+    const examples = this.options.examples;
+    if (
+      examples &&
+      path === examples.directory &&
+      this.entries.get(path)?.kind === 'directory'
+    ) {
+      separator();
+      action('Reset examples', () => void examples.reset());
+    } else if (examples && !path && !this.entries.has(examples.directory)) {
+      separator();
+      action('Create examples', () => void examples.reset());
+    }
     separator();
     action(
       'Rename',

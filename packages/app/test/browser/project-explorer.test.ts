@@ -22,7 +22,10 @@ before(async () => {
 });
 after(async () => browser?.close());
 
-async function open(t: TestContext): Promise<Page> {
+async function open(
+  t: TestContext,
+  examples: {path: string; source: string}[] = [],
+): Promise<Page> {
   const context = await browser.newContext({
     viewport: {width: 1440, height: 900},
   });
@@ -51,7 +54,7 @@ async function open(t: TestContext): Promise<Page> {
   await page.route('**/src/project/bundled-examples.ts*', route =>
     route.fulfill({
       contentType: 'text/javascript',
-      body: 'export const bundledExamples = {directory:"/examples", revision:"explorer-test", files:[]};',
+      body: `export const bundledExamples = ${JSON.stringify({directory: '/examples', revision: 'explorer-test', files: examples})};`,
     }),
   );
   await page.route('**/src/main.ts*', async route => {
@@ -94,6 +97,406 @@ async function menu(page: Page, name: string, command: string): Promise<void> {
   await row(page, name).click({button: 'right'});
   await page.getByRole('menuitem', {name: command, exact: true}).click();
 }
+
+// Keep real OPFS reads/writes, but supply live handles: this Chrome build can
+// crash when deserializing OPFS handles from IndexedDB in temporary contexts.
+async function mockLocalDirectories(page: Page): Promise<void> {
+  await page.route('**/src/project/directory-access.ts*', route => {
+    if (
+      new URL(route.request().url()).searchParams.has('local-fixture-original')
+    )
+      return route.continue();
+    return route.fulfill({
+      contentType: 'text/javascript',
+      body: `
+        export * from '/src/project/directory-access.ts?local-fixture-original';
+        export async function storedProjectDirectory(workspaceId) {
+          return (await navigator.storage.getDirectory()).getDirectoryHandle(workspaceId, {create: true});
+        }
+        export async function rememberProjectDirectory(handle) { return handle.name; }
+      `,
+    });
+  });
+  const picker = () => {
+    Object.defineProperty(window, 'showDirectoryPicker', {
+      configurable: true,
+      value: async () =>
+        (await navigator.storage.getDirectory()).getDirectoryHandle(
+          sessionStorage.getItem('nextFolder')!,
+          {create: true},
+        ),
+    });
+  };
+  await page.addInitScript(picker);
+  await page.evaluate(picker);
+}
+
+test(
+  'project storage controls stay in the explorer and preserve folder switching',
+  {timeout: 90_000},
+  async t => {
+    const page = await open(t);
+    const explorer = page.getByRole('complementary', {name: 'Project files'});
+    const location = explorer.locator('#project-location');
+    const actions = page.getByRole('group', {name: 'Project storage'});
+    assert.equal(await location.innerText(), 'Browser storage');
+    assert.equal(
+      await page
+        .getByRole('button', {name: 'Search files', exact: true})
+        .count(),
+      0,
+    );
+    assert.equal(
+      await page
+        .locator('.topbar #open-folder-button, .topbar #project-location')
+        .count(),
+      0,
+    );
+    await page.evaluate(() => {
+      Object.defineProperty(window, 'showDirectoryPicker', {
+        configurable: true,
+        value: async () => {
+          document.body.dataset.folderPickerCalled = 'true';
+          throw new DOMException('Cancelled', 'AbortError');
+        },
+      });
+    });
+    await explorer
+      .getByRole('button', {name: 'Open folder', exact: true})
+      .click();
+    await page.waitForFunction(
+      () => document.body.dataset.folderPickerCalled === 'true',
+    );
+    const separator = page.getByRole('separator', {
+      name: 'Resize file explorer',
+    });
+    await separator.press('Home');
+    await page.waitForFunction(
+      () =>
+        Math.abs(
+          document.getElementById('project-explorer')!.getBoundingClientRect()
+            .width -
+            Number(
+              document
+                .getElementById('project-explorer-resizer')!
+                .getAttribute('aria-valuenow'),
+            ),
+        ) < 0.5,
+    );
+    const bounds = (await explorer.boundingBox())!;
+    for (const name of [
+      'Open folder',
+      'New file',
+      'New folder',
+      'Refresh files',
+    ]) {
+      const button = (await explorer
+        .getByRole('button', {name, exact: true})
+        .boundingBox())!;
+      assert.ok(
+        button.x >= bounds.x &&
+          button.x + button.width <= bounds.x + bounds.width,
+      );
+    }
+    assert.ok(await location.isDisabled());
+    await separator.press('End');
+    await mockLocalDirectories(page);
+    const localURL = new URL(process.env.CODE3D_TEST_URL!);
+    localURL.searchParams.set('workspace', 'explorer-folder');
+    await page.goto(localURL.href);
+    await active(page, undefined);
+    assert.equal(await location.innerText(), 'explorer-folder');
+    await explorer
+      .getByRole('button', {name: 'Change folder', exact: true})
+      .waitFor();
+    assert.equal(await explorer.locator('#open-folder-button svg').count(), 1);
+    await location.click();
+    await actions
+      .getByRole('button', {name: 'Reload folder', exact: true})
+      .waitFor();
+    assert.equal(
+      await actions
+        .getByRole('button', {name: 'Reset examples', exact: true})
+        .count(),
+      0,
+    );
+    await page.keyboard.press('Escape');
+    await actions.waitFor({state: 'hidden'});
+    await location.click();
+    await actions
+      .getByRole('button', {name: 'Use browser storage', exact: true})
+      .click();
+    await page.waitForURL(url => !url.searchParams.has('workspace'));
+    await explorer
+      .getByRole('button', {name: 'Open folder', exact: true})
+      .waitFor();
+    assert.equal(await location.innerText(), 'Browser storage');
+  },
+);
+
+test(
+  'opening empty and existing local folders keeps each workspace separate',
+  {timeout: 120_000},
+  async t => {
+    const example = {
+      path: '/examples/demo.ts',
+      source: 'export const size = 5;\n',
+    };
+    const page = await open(t, [example]);
+    await mockLocalDirectories(page);
+    // Reload once so the currently running App also uses the handle fixture.
+    await page.reload();
+    await active(page, '/model.ts');
+    await page.evaluate(async () => {
+      await window.explorerApp.projectFileSystem.writeFile(
+        '/browser-only.txt',
+        'browser',
+      );
+    });
+    const selectFolder = async (name: string, createExamples = false) => {
+      await page.evaluate(
+        name => sessionStorage.setItem('nextFolder', name),
+        name,
+      );
+      if (createExamples) page.once('dialog', dialog => dialog.accept());
+      await page.locator('#open-folder-button').click();
+      await page.waitForURL(url => url.searchParams.get('workspace') === name);
+      await page.waitForFunction(() => !!window.explorerApp);
+      assert.equal(await page.locator('#project-location').innerText(), name);
+      assert.equal(await page.locator('.project-status:visible').count(), 0);
+    };
+    await selectFolder('explorer-first', true);
+    await active(page, undefined);
+    assert.deepEqual(
+      await page.evaluate(async () =>
+        (await window.explorerApp.projectFileSystem.list('/'))
+          .map(entry => entry.name)
+          .sort(),
+      ),
+      ['.code3d', 'examples'],
+    );
+    await page.evaluate(async () => {
+      const fs = window.explorerApp.projectFileSystem;
+      await fs.writeFile('/first.ts', 'export const first = 1;');
+      await fs.writeFile('/unopened/data.bin', new Uint8Array([0, 255, 128]));
+      await window.explorerApp.activateProjectFile('/first.ts');
+    });
+    await active(page, '/first.ts');
+    await selectFolder('explorer-second', true);
+    await active(page, undefined);
+    assert.deepEqual(
+      await page.evaluate(async () =>
+        (await window.explorerApp.projectFileSystem.list('/'))
+          .map(entry => entry.name)
+          .sort(),
+      ),
+      ['.code3d', 'examples'],
+    );
+    await page.evaluate(async () => {
+      await window.explorerApp.projectFileSystem.writeFile(
+        '/second.ts',
+        'export const second = 2;',
+      );
+      await window.explorerApp.activateProjectFile('/second.ts');
+    });
+    await selectFolder('explorer-first');
+    await active(page, '/first.ts');
+    assert.deepEqual(
+      await page.evaluate(async () => {
+        const fs = window.explorerApp.projectFileSystem;
+        return {
+          binary: [...(await fs.readFile('/unopened/data.bin'))!],
+          names: (await fs.list('/')).map(entry => entry.name).sort(),
+        };
+      }),
+      {
+        binary: [0, 255, 128],
+        names: ['.code3d', 'examples', 'first.ts', 'unopened'],
+      },
+    );
+    await page.locator('#project-location').click();
+    await page
+      .getByRole('button', {name: 'Use browser storage', exact: true})
+      .click();
+    await page.waitForURL(url => !url.searchParams.has('workspace'));
+    await active(page, '/model.ts');
+    assert.equal(
+      await page.evaluate(async () =>
+        new TextDecoder().decode(
+          await window.explorerApp.projectFileSystem.readFile(
+            '/browser-only.txt',
+          ),
+        ),
+      ),
+      'browser',
+    );
+    assert.equal(
+      await page.evaluate(() =>
+        window.explorerApp.projectFileSystem.stat('/first.ts'),
+      ),
+      undefined,
+    );
+  },
+);
+
+test(
+  'only empty local folders ask to create examples and skipping preserves user files',
+  {timeout: 150_000},
+  async t => {
+    const example = {
+      path: '/examples/demo.ts',
+      source: 'export const size = 5;\n',
+    };
+    const page = await open(t, [example]);
+    await mockLocalDirectories(page);
+    const prompts: string[] = [];
+    let accept = false;
+    page.on('dialog', async dialog => {
+      prompts.push(dialog.message());
+      await (accept ? dialog.accept() : dialog.dismiss());
+    });
+    const visit = async (name: string) => {
+      const url = new URL(process.env.CODE3D_TEST_URL!);
+      url.searchParams.set('workspace', name);
+      await page.goto(url.href);
+      await active(page, undefined);
+    };
+    await visit('examples-skipped');
+    assert.deepEqual(prompts, [
+      'This folder is empty. Create bundled examples in /examples?',
+    ]);
+    assert.deepEqual(
+      await page.evaluate(async () =>
+        (await window.explorerApp.projectFileSystem.list('/')).map(
+          entry => entry.name,
+        ),
+      ),
+      ['.code3d'],
+    );
+    await page.reload();
+    await active(page, undefined);
+    assert.equal(prompts.length, 1);
+    assert.equal(await row(page, 'examples').count(), 0);
+
+    // A skipped project can opt in explicitly from the root context menu.
+    const scroll = page.locator('[data-file-tree-virtualized-scroll]');
+    const bounds = (await scroll.boundingBox())!;
+    await page.mouse.click(bounds.x + 20, bounds.y + bounds.height - 12, {
+      button: 'right',
+    });
+    accept = true;
+    await page
+      .getByRole('menuitem', {name: 'Create examples', exact: true})
+      .click();
+    await row(page, 'examples').waitFor();
+    assert.equal(prompts.length, 2);
+    await page.reload();
+    await active(page, undefined);
+    await row(page, 'examples').waitFor();
+    assert.equal(prompts.length, 2);
+
+    // Nonempty roots and existing user examples are never implicitly seeded.
+    await page.evaluate(async () => {
+      const {openDirectoryProjectFileSystem} =
+        await import('/src/project/filesystem.ts');
+      const root = await navigator.storage.getDirectory();
+      for (const name of [
+        'existing-readme',
+        'existing-examples',
+        'existing-hidden',
+      ]) {
+        const fs = await openDirectoryProjectFileSystem(
+          await root.getDirectoryHandle(name, {create: true}),
+        );
+        if (name === 'existing-hidden') await fs.createDirectory('/.git');
+        else await fs.writeFile('/README.md', 'user project');
+        if (name === 'existing-examples')
+          await fs.writeFile('/examples/keep.txt', 'user example');
+      }
+    });
+    for (const name of [
+      'existing-readme',
+      'existing-examples',
+      'existing-hidden',
+    ]) {
+      await visit(name);
+      assert.equal(prompts.length, 2, name);
+      assert.equal(
+        await page.evaluate(() =>
+          window.explorerApp.projectFileSystem.stat('/examples/demo.ts'),
+        ),
+        undefined,
+      );
+      if (name === 'existing-examples') {
+        assert.equal(
+          await page.evaluate(async () =>
+            new TextDecoder().decode(
+              await window.explorerApp.projectFileSystem.readFile(
+                '/examples/keep.txt',
+              ),
+            ),
+          ),
+          'user example',
+        );
+      }
+    }
+  },
+);
+
+test(
+  'Reset examples is scoped to the examples folder and confirms before replacing it',
+  {timeout: 90_000},
+  async t => {
+    const example = {
+      path: '/examples/demo.ts',
+      source: 'export const size = 5;\n',
+    };
+    const page = await open(t, [example]);
+    await page.evaluate(async () => {
+      const fs = window.explorerApp.projectFileSystem;
+      await fs.writeFile('/examples/demo.ts', 'export const edited = true;');
+      await fs.writeFile('/examples/custom.txt', 'remove me');
+      await fs.writeFile('/keep.txt', 'keep me');
+      await window.explorerApp.projectDirectory.refresh();
+    });
+    await row(page, 'src').click({button: 'right'});
+    assert.equal(
+      await page
+        .getByRole('menuitem', {name: 'Reset examples', exact: true})
+        .count(),
+      0,
+    );
+    await page.keyboard.press('Escape');
+    await page.evaluate(() =>
+      window.explorerApp.activateProjectFile('/examples/demo.ts'),
+    );
+    await active(page, '/examples/demo.ts');
+    page.once('dialog', dialog => dialog.dismiss());
+    await menu(page, 'examples', 'Reset examples');
+    assert.equal(
+      await page.evaluate(() =>
+        window.explorerApp.codeEditor.editor.getValue(),
+      ),
+      'export const edited = true;',
+    );
+    page.once('dialog', dialog => dialog.accept());
+    await menu(page, 'examples', 'Reset examples');
+    await page.waitForFunction(
+      source => window.explorerApp.codeEditor.editor.getValue() === source,
+      example.source,
+    );
+    assert.deepEqual(
+      await page.evaluate(async () => {
+        const fs = window.explorerApp.projectFileSystem;
+        return {
+          examples: (await fs.list('/examples')).map(entry => entry.name),
+          kept: new TextDecoder().decode(await fs.readFile('/keep.txt')),
+        };
+      }),
+      {examples: ['demo.ts'], kept: 'keep me'},
+    );
+  },
+);
 
 test(
   'text files open with their language, save, and survive a routed reload and empty tabs',
@@ -528,7 +931,7 @@ test(
       const fs = await openDirectoryProjectFileSystem(
         await navigator.storage.getDirectory(),
       );
-      await fs.initialize(async () => {});
+      await fs.initialize();
       await fs.createDirectory('/assets/empty');
       await fs.writeFile('/assets/data.bin', new Uint8Array([0, 255, 128, 42]));
       await fs.rename('/assets', '/renamed');
@@ -701,7 +1104,6 @@ test(
       ),
       false,
     );
-    await page.getByRole('button', {name: 'Search files', exact: true}).click();
     await page.locator('[data-file-tree-search-input]').fill('other.ts');
     await row(page, 'other.ts').waitFor();
     assert.equal(
