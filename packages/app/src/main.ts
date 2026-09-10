@@ -1408,10 +1408,11 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
       pendingAgentFollow = undefined;
       if (
         agentPanel?.followingAgentId === following.agentId &&
-        !sketchEditor.hasTarget &&
-        following.view
-      )
-        viewport.setView(resolveRenderView(following.view));
+        !sketchEditor.hasTarget
+      ) {
+        if (following.mode) viewport.setRenderMode(following.mode);
+        if (following.view) viewport.setView(resolveRenderView(following.view));
+      }
     }
     if (!(await presentModelDiagnostic(request))) return;
     restoreModelStatus();

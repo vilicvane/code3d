@@ -32,6 +32,7 @@ test(
     t.after(() => browser.close());
     const context = await browser.newContext({
       viewport: {width: 1440, height: 900},
+      reducedMotion: 'reduce',
     });
     t.after(() => context.close());
     await context.addInitScript(() =>
@@ -123,6 +124,17 @@ test(
             .querySelector('#viewport-status')
             ?.getAttribute('data-state') === 'ready',
       );
+    const mode = () =>
+      page.locator('#viewport-host').getAttribute('data-render-mode');
+    const direction = () =>
+      page.evaluate(() => {
+        const {viewport} = window.followApp;
+        return viewport['camera'].position
+          .clone()
+          .sub(viewport['controls'].focus)
+          .normalize()
+          .toArray();
+      });
     const file = '/follow.ts';
     const source =
       "import {box, sketch} from '@code3d/core';\n/** @code3d.arguments [4] */\nexport function shape(width: number) {\n  return box(width, 6, 8);\n}\nconst profile = sketch([['point', 1, [0, 0]], ['circle', 2, [1, 5]]]);\nexport default box(2, 3, 4);\n";
@@ -133,7 +145,7 @@ test(
     await apply({
       files: [{path: file, version: null, content: source}],
       cursor: {...cursor, arguments: '[12]'},
-      render: {view: 'top'},
+      render: {view: 'top', mode: 'render'},
     });
     assert.equal(
       await page.evaluate(() => window.followApp.codeEditor.currentFile()),
@@ -189,6 +201,8 @@ test(
     assert.equal(Math.max(...xs) - Math.min(...xs), 12);
     assert.ok(Math.abs(followed.position[1] - 1) < 1e-6);
     assert.ok(Math.abs(followed.up[2] + 1) < 1e-6);
+    assert.equal(await mode(), 'render');
+    await page.locator('#viewport-mode-modeling').click();
     const {response: read} = await clients[0].request({
       operation: 'fs.read',
       path: file,
@@ -217,6 +231,7 @@ test(
     });
     assert.equal(updated.selection?.start, updatedSource.indexOf('box(width'));
     assert.equal(updated.width, 14);
+    assert.equal(await mode(), 'modeling');
     // Re-entering follow uses Monaco's rebased selection and restores agent state.
     await euler.click();
     await page.evaluate(file => {
@@ -250,6 +265,16 @@ test(
     assert.equal(resumed.selection?.start, resumed.source.indexOf('box(width'));
     assert.equal(resumed.width, 14);
     assert.ok(Math.abs(resumed.direction[1] - 1) < 1e-6);
+    assert.equal(await mode(), 'render');
+    // An implicit screenshot default must not switch the followed user's mode.
+    const implicit = await apply({render: true});
+    assert.ok(implicit.ok);
+    assert.equal(
+      (implicit.data as {observation: {render: {mode: string}}}).observation
+        .render.mode,
+      'modeling',
+    );
+    assert.equal(await mode(), 'render');
     // User movement does not stop following or trigger another jump.
     await page.evaluate(
       original => window.followApp.codeEditor.switchFile(original),
@@ -268,6 +293,15 @@ test(
       await page.evaluate(() => window.followApp.module?.activeDesignContextId),
       '/follow.ts:function:shape:arguments:0',
     );
+    // A mode-only request reuses the cursor and keeps the user's current view.
+    const directionBeforeMode = await direction();
+    await apply({render: {mode: 'modeling'}});
+    await ready();
+    assert.equal(await mode(), 'modeling');
+    (await direction()).forEach((value, i) =>
+      assert.ok(Math.abs(value - directionBeforeMode[i]) < 1e-12),
+    );
+
     await apply(
       {cursor: {file, regex: 'const profile = (sketch\\([\\s\\S]*?\\));'}},
       1,
@@ -317,7 +351,7 @@ test(
         return module;
       };
     });
-    const pending = apply({cursor, render: {view: 'left'}});
+    const pending = apply({cursor, render: {view: 'left', mode: 'render'}});
     await page.waitForFunction(() => window.followApp.compilationHeld);
     await page.locator('#viewport-mode-modeling').click();
     const rotation = await page.evaluate(() => {
@@ -340,6 +374,7 @@ test(
     finalRotation.forEach((value, i) =>
       assert.ok(Math.abs(value - rotation[i]) < 1e-12),
     );
+    assert.equal(await mode(), 'modeling');
     assert.equal(await euler.getAttribute('aria-pressed'), 'true');
     await page.screenshot({path: '/tmp/code3d-agent-follow-app.png'});
 

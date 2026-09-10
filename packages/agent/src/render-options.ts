@@ -13,7 +13,11 @@ export type RenderViewName = (typeof renderViewNames)[number];
 type Vector = readonly [number, number, number];
 export type RenderView =
   RenderViewName | Readonly<{direction: Vector; up?: Vector}>;
-export type RenderOutputOptions = Readonly<{view?: RenderView}>;
+export type RenderMode = 'modeling' | 'render';
+export type RenderOutputOptions = Readonly<{
+  mode?: RenderMode;
+  view?: RenderView;
+}>;
 
 function unitVector(value: unknown, label: string): Vector {
   if (
@@ -36,15 +40,27 @@ export function parseRenderOptions(
   value: unknown,
 ): boolean | RenderOutputOptions {
   if (typeof value === 'boolean') return value;
-  const data = object(value, ['view'], 'Render output');
-  if (data.view === undefined) return {};
+  const data = object(value, ['mode', 'view'], 'Render output');
+  if (
+    data.mode !== undefined &&
+    data.mode !== 'modeling' &&
+    data.mode !== 'render'
+  )
+    throw new AgentError(
+      'invalid_input',
+      'Render mode must be modeling or render.',
+    );
+  const mode = (
+    data.mode === undefined ? {} : {mode: data.mode}
+  ) satisfies RenderOutputOptions;
+  if (data.view === undefined) return mode;
   if (typeof data.view === 'string') {
     if (!renderViewNames.includes(data.view as RenderViewName))
       throw new AgentError(
         'invalid_input',
         `Render view must be ${renderViewNames.join(', ')} or {direction, up?}.`,
       );
-    return {view: data.view as RenderViewName};
+    return {...mode, view: data.view as RenderViewName};
   }
   const view = object(data.view, ['direction', 'up'], 'Render view');
   const direction = unitVector(view.direction, 'View direction');
@@ -64,6 +80,7 @@ export function parseRenderOptions(
   // Preserve submitted vectors so parsing a request again cannot change its
   // fingerprint through repeated floating-point normalization.
   return {
+    ...mode,
     view: {
       direction: view.direction as Vector,
       ...(up ? {up: view.up as Vector} : {}),

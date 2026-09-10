@@ -48,16 +48,16 @@ test(
     await startServe(t, configFile);
     await page.locator('.agent-status[data-state="online"]').waitFor();
     await page.getByRole('button', {name: 'Close', exact: true}).click();
-    const cli = async (args: string[], input?: object, code = 0) => {
+    const cli = async (request: unknown, code = 0) => {
       const result = await runCli(
-        [configFile, '--output-dir', temp, ...args],
-        input ? JSON.stringify(input) : '',
+        [configFile, '--output-dir', temp],
+        JSON.stringify(request),
       );
       assert.equal(result.code, code, result.stdout + result.stderr);
       return JSON.parse(result.stdout);
     };
     const apply = (input: object, code = 0) =>
-      cli(['apply', '--input', '-'], input, code);
+      cli({operation: 'apply', input}, code);
     const file = '/agent-sketch.ts';
     const source = `import {sketch, extrude} from '@code3d/core';
 const base = sketch([['point', 1, [0, 0]], ['circle', 2, [1, 20]]]);
@@ -106,6 +106,7 @@ export default design();
     assert.ok(observation.type.type.includes('Sketch'));
     assert.equal(observation.render.projection, 'orthographic');
     assert.equal(observation.render.coordinates, 'sketch-local');
+    assert.equal(observation.render.mode, 'modeling');
     const png = await readFile(first.artifacts[0].path);
     assert.equal(png.subarray(1, 4).toString(), 'PNG');
     assert.equal(png.readUInt32BE(16), 960);
@@ -133,6 +134,17 @@ export default design();
         .code,
       'sketch_view_unsupported',
     );
+    assert.equal(
+      (await apply({topology: {snapshotId}, render: {mode: 'render'}}, 1)).error
+        .code,
+      'sketch_render_mode_unsupported',
+    );
+    const modeling = await apply({
+      topology: {snapshotId},
+      render: {mode: 'modeling'},
+    });
+    assert.equal(modeling.data.observation.render.mode, 'modeling');
+    assert.deepEqual(await readFile(modeling.artifacts[0].path), png);
     const fallback = await apply({
       cursor: {file, regex: 'const (profile) ='},
       topology: true,
@@ -146,7 +158,7 @@ export default design();
       Math.abs(fallback.data.observation.topology.items[1].radius - 8) < 1e-6,
     );
 
-    const read = await cli(['fs', 'read', file]);
+    const read = await cli({operation: 'fs.read', path: file});
     const solid = source.replace(
       'export default design();',
       'export default extrude(design().face(), 5);',
@@ -154,10 +166,11 @@ export default design();
     const three = await apply({
       files: [{path: file, version: read.data.version, content: solid}],
       cursor: {file, regex: '(extrude\\()'},
-      render: {view: 'top'},
+      render: {view: 'top', mode: 'render'},
       topology: true,
     });
     assert.equal(three.data.observation.render.projection, 'perspective');
+    assert.equal(three.data.observation.render.mode, 'render');
     assert.ok(three.data.observation.topology.counts.surface > 0);
     assert.equal(
       (await apply({topology: {snapshotId}}, 1)).error.code,
@@ -174,7 +187,7 @@ export default design();
     );
 
     // A failed downstream 3D operation must not block observation of its valid sketch.
-    const next = await cli(['fs', 'read', file]);
+    const next = await cli({operation: 'fs.read', path: file});
     const broken = solid.replace(
       'extrude(design().face(), 5)',
       'extrude(design().face(), 0)',
@@ -191,7 +204,7 @@ export default design();
       1,
     );
     assert.equal(failed3d.error.code, 'model_failed');
-    const latest = await cli(['fs', 'read', file]);
+    const latest = await cli({operation: 'fs.read', path: file});
     const failed = await apply(
       {
         files: [
@@ -233,7 +246,7 @@ export default design();
     );
     assert.ok(Math.abs(arc.geometry.sweep - Math.PI / 2) < 1e-6);
     assert.equal(open.data.observation.topology.counts.region, 1);
-    const openRead = await cli(['fs', 'read', openFile]);
+    const openRead = await cli({operation: 'fs.read', path: openFile});
     const unfinished = await apply({
       files: [
         {

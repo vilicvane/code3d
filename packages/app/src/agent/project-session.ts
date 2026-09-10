@@ -8,6 +8,7 @@ import {
   type FileChange,
   type ApplyInput,
   type RenderView,
+  type RenderMode,
 } from '@code3d/agent';
 import type {SourceRef} from '@code3d/core/tooling';
 import type {ProjectEditorChange} from '../editor';
@@ -58,6 +59,7 @@ export type AgentUpdate = Readonly<{agentId: string}> &
         cursor?: SourceRef;
         arguments?: string;
         view?: RenderView;
+        mode?: RenderMode;
       }>
     | AgentReadTarget
   );
@@ -87,6 +89,7 @@ export class AgentProjectSession {
       target: {kind: 'apply'} | AgentReadTarget;
       arguments?: string;
       view?: RenderView;
+      mode?: RenderMode;
     }
   >();
   private readonly entryListeners = new Set<
@@ -197,6 +200,7 @@ export class AgentProjectSession {
       cursor,
       arguments: state?.arguments,
       view: state?.view,
+      mode: state?.mode,
     };
   }
 
@@ -694,18 +698,22 @@ export class AgentProjectSession {
     const cursor = this.editor.agentCursor(agentId);
     const view =
       typeof input.render === 'object' ? input.render.view : undefined;
-    if (files.length || input.cursor || view) {
+    const mode =
+      typeof input.render === 'object' ? input.render.mode : undefined;
+    if (files.length || input.cursor || view || mode) {
       const update: AgentUpdate = {
         agentId,
         kind: 'apply',
         cursor: cursor.ref,
         arguments: input.cursor?.arguments,
         view,
+        mode,
       };
       this.agentStates.set(agentId, {
         target: {kind: 'apply'},
         arguments: update.arguments,
         view: view ?? this.agentStates.get(agentId)?.view,
+        mode: mode ?? this.agentStates.get(agentId)?.mode,
       });
       for (const listener of this.updateListeners) listener(update);
     }

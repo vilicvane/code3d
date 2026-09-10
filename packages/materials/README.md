@@ -72,4 +72,15 @@ materials.
 The App includes this package for projects using its built-in Core. For Node or
 a project with its own Core installation, install `@code3d/core` and
 `@code3d/materials` together. The peer dependency keeps a shared Three.js instance.
-See `/examples/material-presets.ts` in the App for all ten presets.
+Use the complete example linked below to explore all ten presets.
+
+## Source and development
+
+- [Preset factories and public types](src/library/index.ts).
+- [Material behavior tests](test/materials.test.ts) and [type examples](test/public-api.types.ts).
+- [All ten presets in a complete model](../app/examples/material-presets.ts).
+- [Core material integration](../core/README.md#materials-and-entry-points) and
+  [agent render options](../../docs/agents/observation.md).
+
+From the repository root, run `npm run build:packages` and
+`npm test --workspace @code3d/materials`.

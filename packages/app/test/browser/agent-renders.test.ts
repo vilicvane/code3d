@@ -71,13 +71,18 @@ test(
       const prompt = await page
         .getByLabel('Agent prompt', {exact: true})
         .inputValue();
-      const guide = await page.request.get(
-        prompt.match(/https?:\/\/\S+\/guides\/agents\.md/)![0],
-      );
+      const guideUrl = prompt.match(/https?:\/\/\S+\/agents\.md/)![0];
+      const guide = await page.request.get(guideUrl);
       assert.equal(guide.status(), 200);
-      assert.ok(
-        (await guide.text()).includes('View agent snapshots in the App'),
+      const markdown = await guide.text();
+      assert.ok(markdown.startsWith('# Work in Code3D\n'));
+      const observationUrl = new URL(
+        markdown.match(/\]\(([^)]*agents\/observation\.md)\)/)![1],
+        guideUrl,
       );
+      const observation = await page.request.get(observationUrl.href);
+      assert.equal(observation.status(), 200);
+      assert.ok((await observation.text()).includes('"mode": "render"'));
       const config = JSON.parse(prompt.match(/```json\n([\s\S]*?)\n```/)![1]);
       const file = join(temp, `${name}.json`);
       await writeFile(file, JSON.stringify(config), {mode: 0o600});
@@ -92,19 +97,24 @@ test(
     await page.getByRole('button', {name: 'Close', exact: true}).click();
     const cli = async (
       agent: number,
-      args: string[],
-      input?: object,
+      request: unknown,
       code = 0,
+      requestId?: string,
     ) => {
       const result = await runCli(
-        [configs[agent], '--output-dir', temp, ...args],
-        input ? JSON.stringify(input) : '',
+        [
+          configs[agent],
+          '--output-dir',
+          temp,
+          ...(requestId ? ['--request-id', requestId] : []),
+        ],
+        JSON.stringify(request),
       );
       assert.equal(result.code, code, result.stdout + result.stderr);
       return JSON.parse(result.stdout);
     };
     const apply = (agent: number, id: string, input: object, code = 0) =>
-      cli(agent, ['--request-id', id, 'apply', '--input', '-'], input, code);
+      cli(agent, {operation: 'apply', input}, code, id);
     const preview = page.locator('.agent-render-preview');
     const viewportInset = await page
       .locator('#viewport-host')
@@ -306,7 +316,7 @@ test(
       await preview.locator('.agent-render-agent').textContent(),
       'Noether',
     );
-    await cli(0, ['result', 'front']);
+    await cli(0, {operation: 'result', requestId: 'front'});
     await apply(0, 'front', render);
     assert.equal(await count.textContent(), '1 / 3');
     const failed = await apply(
@@ -459,7 +469,7 @@ test(
     await page
       .locator('.agent-status[data-state="online"]')
       .waitFor({state: 'attached'});
-    await cli(1, ['context']);
+    await cli(1, {operation: 'context'});
     assert.equal(await dotOpacity(previewLabel, true), '1');
     await preview.click();
     await waitCount('4 / 4');
@@ -508,8 +518,8 @@ test(
     await dismiss.click();
     assert.equal(await preview.isVisible(), false);
     assert.equal(await dismiss.isVisible(), false);
-    await cli(0, ['context']);
-    await cli(0, ['result', 'front']);
+    await cli(0, {operation: 'context'});
+    await cli(0, {operation: 'result', requestId: 'front'});
     assert.equal(await preview.isVisible(), false);
     await apply(0, 'after-revoke', {cursor, render: true});
     await preview.waitFor();
@@ -522,7 +532,7 @@ test(
     await page
       .locator('.agent-status[data-state="online"]')
       .waitFor({state: 'attached'});
-    await cli(0, ['context']);
+    await cli(0, {operation: 'context'});
     assert.equal(await dotOpacity(previewLabel, true), '1');
     await preview.click();
     await waitCount('3 / 3');
