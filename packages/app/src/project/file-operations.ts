@@ -183,10 +183,18 @@ export async function checkProjectEntryOperation(
   for (const target of targets) {
     if (await fileSystem.stat(target))
       throw new Error(`Destination already exists: ${target}`);
-    if ((await fileSystem.stat(projectDirectory(target)))?.kind !== 'directory')
-      throw new Error(
-        `Destination directory not found: ${projectDirectory(target)}`,
-      );
+    for (
+      let directory = projectDirectory(target);
+      ;
+      directory = projectDirectory(directory)
+    ) {
+      const info = await fileSystem.stat(directory);
+      if (info?.kind === 'directory') break;
+      if (info) throw new Error(`Not a directory: ${directory}`);
+      if (operation.kind !== 'create' || directory === '/')
+        throw new Error(`Destination directory not found: ${directory}`);
+      // FileSystem creates missing ancestors recursively for new entries.
+    }
   }
 }
 

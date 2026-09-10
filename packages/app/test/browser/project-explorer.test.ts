@@ -132,6 +132,148 @@ async function mockLocalDirectories(page: Page): Promise<void> {
 }
 
 test(
+  'header creation escapes read-only directories and creates nested paths',
+  {timeout: 90_000},
+  async t => {
+    const page = await open(t);
+    await page.evaluate(async () => {
+      const {projectFileSystem: fs, projectDirectory} = window.explorerApp;
+      await fs.writeFile('/node_modules/demo/index.ts', 'export {};');
+      await fs.writeFile('/src/.code3d/state.json', '{}');
+      await projectDirectory.refresh();
+    });
+    await row(page, 'node_modules').click();
+    await page.getByRole('button', {name: 'New file', exact: true}).click();
+    let dialog = page.getByRole('dialog', {name: 'New file', exact: true});
+    assert.equal(await dialog.locator('header p').innerText(), 'In /');
+    await dialog
+      .getByRole('textbox', {name: 'Name'})
+      .fill('lib/utils/新文件.ts');
+    await dialog.getByRole('button', {name: 'Create', exact: true}).click();
+    await active(page, '/lib/utils/新文件.ts');
+    await row(page, '新文件.ts').waitFor();
+
+    await row(page, 'src').click();
+    await page
+      .locator('[role="treeitem"][data-item-path="src/.code3d/"]')
+      .click();
+    await page.getByRole('button', {name: 'New folder', exact: true}).click();
+    dialog = page.getByRole('dialog', {name: 'New folder', exact: true});
+    assert.equal(await dialog.locator('header p').innerText(), 'In /src');
+    await dialog.getByRole('textbox', {name: 'Name'}).fill('nested/empty');
+    await dialog.getByRole('button', {name: 'Create', exact: true}).click();
+    await page
+      .locator('[role="treeitem"][data-item-path="src/nested/empty/"]')
+      .waitFor();
+    assert.deepEqual(
+      await page.evaluate(async () => {
+        const fs = window.explorerApp.projectFileSystem;
+        return [
+          (await fs.stat('/lib/utils/新文件.ts'))?.kind,
+          (await fs.stat('/src/nested/empty'))?.kind,
+          await fs.list('/src/nested/empty'),
+        ];
+      }),
+      ['file', 'directory', []],
+    );
+  },
+);
+
+test(
+  'nested creation validates paths and preserves existing files in a local folder',
+  {timeout: 90_000},
+  async t => {
+    const page = await open(t);
+    await mockLocalDirectories(page);
+    await page.reload();
+    await active(page, '/model.ts');
+    await page.evaluate(async () => {
+      const root = await navigator.storage.getDirectory();
+      await root.getDirectoryHandle('create-local', {create: true});
+      sessionStorage.setItem('nextFolder', 'create-local');
+    });
+    page.once('dialog', dialog => dialog.dismiss());
+    await page.getByRole('button', {name: 'Open folder', exact: true}).click();
+    await page.waitForFunction(
+      () =>
+        document.querySelector('#project-location')?.textContent ===
+        'create-local',
+    );
+    await page.getByRole('button', {name: 'New file', exact: true}).click();
+    const dialog = page.getByRole('dialog', {name: 'New file', exact: true});
+    const name = dialog.getByRole('textbox', {name: 'Name'});
+    for (const invalid of [
+      '../escape.ts',
+      '/absolute.ts',
+      'a//b.ts',
+      'a/./b.ts',
+      'a/../b.ts',
+      'node_modules/entry.ts',
+    ]) {
+      await name.fill(invalid);
+      await dialog.getByRole('button', {name: 'Create', exact: true}).click();
+      assert.ok(await dialog.isVisible(), invalid);
+      assert.equal(
+        await name.evaluate((input: HTMLInputElement) => input.validity.valid),
+        false,
+        invalid,
+      );
+    }
+    await name.fill('src/utils/model.ts');
+    await dialog.getByRole('button', {name: 'Create', exact: true}).click();
+    await active(page, '/src/utils/model.ts');
+    await page.evaluate(async () => {
+      const {agentProject, projectFileSystem: fs} = window.explorerApp;
+      await fs.writeFile('/unopened/keep.ts', '// keep existing file');
+      await agentProject.changeEntries({
+        kind: 'create',
+        entry: {kind: 'directory', path: '/assets/icons/empty'},
+      });
+    });
+    // The target is absent from the lazy tree index, so disk preflight must reject it.
+    await page.evaluate(() => {
+      void window.explorerApp.projectDirectory.create('file', '/');
+    });
+    await name.fill('unopened/keep.ts');
+    await dialog.getByRole('button', {name: 'Create', exact: true}).click();
+    await page
+      .getByText('Destination already exists: /unopened/keep.ts', {exact: true})
+      .waitFor();
+    await page.evaluate(() => {
+      void window.explorerApp.projectDirectory.create('file', '/');
+    });
+    await name.fill('unopened/keep.ts/child.ts');
+    await dialog.getByRole('button', {name: 'Create', exact: true}).click();
+    await page
+      .locator('.project-status:not(.package-status)')
+      .filter({visible: true})
+      .waitFor();
+    assert.deepEqual(
+      await page.evaluate(async () => {
+        const root = await (
+          await navigator.storage.getDirectory()
+        ).getDirectoryHandle('create-local');
+        const utils = await (
+          await root.getDirectoryHandle('src')
+        ).getDirectoryHandle('utils');
+        const unopened = await root.getDirectoryHandle('unopened');
+        const icons = await (
+          await root.getDirectoryHandle('assets')
+        ).getDirectoryHandle('icons');
+        return [
+          (await utils.getFileHandle('model.ts')).kind,
+          await (
+            await (await unopened.getFileHandle('keep.ts')).getFile()
+          ).text(),
+          (await icons.getDirectoryHandle('empty')).kind,
+        ];
+      }),
+      ['file', '// keep existing file', 'directory'],
+    );
+  },
+);
+
+test(
   'project storage controls stay in the explorer and preserve folder switching',
   {timeout: 90_000},
   async t => {
