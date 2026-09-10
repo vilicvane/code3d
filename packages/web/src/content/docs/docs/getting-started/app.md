@@ -222,6 +222,10 @@ Your own functions can offer the same dimension inputs. See
 Compilation progress appears near the viewport. Source changes from tools
 appear in a temporary code excerpt, making the resulting edit visible.
 
+The grid legend at the bottom left shows the length of one small grid cell in
+the current 3D or sketch view. It updates as you zoom; source updates and
+diagnostics stack above it. Sketch wheel zoom has no fixed minimum or maximum.
+
 Modeling failures appear with an error message and, where source information
 is available, an underline at the responsible call. Previously evaluated
 contexts may remain usable, so you can inspect and correct the input that led
@@ -239,6 +243,12 @@ During a viewport drag, `Esc` cancels the temporary preview without changing
 source. It does not close the contextual tool panel or end topology selection.
 The panel follows the editor cursor and closes when you leave its call.
 Changes already committed to source stay in place; use Undo to revert them.
+
+Position handles, including origin and relationship offsets, move in increments
+of the current minor grid spacing. Each drag keeps its starting grid and reference
+frame. Hold `Alt` to move freely and release it to resume snapping, even without
+moving the pointer. This affects viewport position drags only: numeric inputs keep
+their own adjustment steps, and rotation handles keep their angle steps.
 
 See [selecting topology](../../guides/topology/) for a complete tool workflow.
 

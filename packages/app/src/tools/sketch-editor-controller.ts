@@ -41,6 +41,7 @@ export class SketchEditorController {
   constructor(
     container: HTMLElement,
     private readonly host: {
+      onGridStepChange?(step: number | undefined): void;
       readSource(ref: SourceRef): string | undefined;
       resolveSourceRef(ref: SourceRef): SourceRef | undefined;
       commit(intent: SketchEditIntent): boolean;
@@ -55,6 +56,7 @@ export class SketchEditorController {
       (change, preview) => this.commit(change, preview),
       (id, position, previous, mergeTarget) =>
         this.preview(id, position, previous, mergeTarget),
+      host.onGridStepChange,
     );
   }
 

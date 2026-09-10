@@ -116,6 +116,7 @@ import {ImageExportDialog} from './ui/image-export';
 import {ModelExportDialog} from './ui/model-export';
 import {ViewportContextMenu} from './ui/viewport-context-menu';
 import {ViewportEmptyState} from './ui/viewport-empty-state';
+import {ViewportGridScale} from './ui/viewport-grid-scale';
 import {ProjectTree, askInstallPackage} from './ui/project-tree';
 import {EditorSplitLayout} from './ui/editor-split-layout';
 import {createIcon} from './ui/icons';
@@ -609,9 +610,26 @@ type ContextualToolState = {
   historyState: 'applied' | 'undone';
 };
 
+const viewportGridScale = new ViewportGridScale(viewportFeedbackStack);
+let modelGridStep: number | undefined;
+let sketchGridStep: number | undefined;
+let showModelGrid = true;
+function refreshViewportGridScale(): void {
+  const step = sketchGridStep ?? modelGridStep;
+  if (step !== undefined) viewportGridScale.update(step);
+  viewportGridScale.setVisible(
+    step !== undefined && (sketchGridStep !== undefined || showModelGrid),
+  );
+}
 const viewport = new ModelViewport(viewportHost, {
   onViewChange: refreshViewportEmptyState,
+  onGridStepChange: step => {
+    modelGridStep = step;
+    refreshViewportGridScale();
+  },
   onRenderModeChange: mode => {
+    showModelGrid = mode === 'modeling';
+    refreshViewportGridScale();
     for (const candidate of viewportModes)
       candidate.button.setAttribute(
         'aria-pressed',
@@ -763,6 +781,10 @@ const toolEngine = new ToolEngine({
   clearPreview: (preview, reason) => clearToolPreview(preview, reason),
 });
 const sketchEditor = new SketchEditorController(viewportHost, {
+  onGridStepChange: step => {
+    sketchGridStep = step;
+    refreshViewportGridScale();
+  },
   solve: (layers, drag) => compiler.previewSketchDrag(layers, drag),
   resolveSourceRef: ref => codeEditor.resolveSourceRef(ref),
   readSource: ref => {

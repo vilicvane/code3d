@@ -27,6 +27,7 @@ export class AdaptiveGrid extends THREE.Mesh<
   target?: THREE.Object3D;
   plane: GridPlane = 'XZ';
   step = 1;
+  private locked = false;
   private readonly origin = new THREE.Vector3();
   private readonly frame = new THREE.Quaternion();
   private readonly inverseFrame = new THREE.Quaternion();
@@ -121,32 +122,46 @@ export class AdaptiveGrid extends THREE.Mesh<
     this.raycast = () => undefined;
   }
 
+  /** Keep the visible grid stable for a position drag, including image capture. */
+  lock(): number {
+    this.locked = true;
+    return this.step;
+  }
+
+  unlock(): void {
+    this.locked = false;
+  }
+
   update(
     camera: ViewCamera,
     height: number,
     pixelRatio: number,
     focus = this.focus,
   ): void {
-    if (this.target) {
-      this.target.updateWorldMatrix(true, false);
-      this.target.getWorldPosition(this.origin);
-      this.target.getWorldQuaternion(this.frame);
-    } else {
-      this.origin.set(0, 0, 0);
-      this.frame.identity();
-    }
-    this.inverseFrame.copy(this.frame).invert();
     camera.updateMatrixWorld();
-    camera.getWorldDirection(this.direction).applyQuaternion(this.inverseFrame);
-    this.plane =
-      camera instanceof THREE.OrthographicCamera
-        ? Math.abs(this.direction.x) > Math.abs(this.direction.y) &&
-          Math.abs(this.direction.x) > Math.abs(this.direction.z)
-          ? 'YZ'
-          : Math.abs(this.direction.z) > Math.abs(this.direction.y)
-            ? 'XY'
-            : 'XZ'
-        : 'XZ';
+    if (!this.locked) {
+      if (this.target) {
+        this.target.updateWorldMatrix(true, false);
+        this.target.getWorldPosition(this.origin);
+        this.target.getWorldQuaternion(this.frame);
+      } else {
+        this.origin.set(0, 0, 0);
+        this.frame.identity();
+      }
+      this.inverseFrame.copy(this.frame).invert();
+      camera
+        .getWorldDirection(this.direction)
+        .applyQuaternion(this.inverseFrame);
+      this.plane =
+        camera instanceof THREE.OrthographicCamera
+          ? Math.abs(this.direction.x) > Math.abs(this.direction.y) &&
+            Math.abs(this.direction.x) > Math.abs(this.direction.z)
+            ? 'YZ'
+            : Math.abs(this.direction.z) > Math.abs(this.direction.y)
+              ? 'XY'
+              : 'XZ'
+          : 'XZ';
+    }
     // Map grid XY into the chosen plane in the reference frame (no instance scale).
     this.inverseFrame
       .copy(this.frame)
@@ -154,7 +169,7 @@ export class AdaptiveGrid extends THREE.Mesh<
       .invert();
     const distance = camera.position.distanceTo(focus);
     const span = cameraViewHeight(camera, distance);
-    this.step = gridStep(height / span);
+    if (!this.locked) this.step = gridStep(height / span);
     const uniforms = this.material.uniforms;
     // YZ's rotated grid basis is (-Z, +Y); color follows the physical axis.
     uniforms.axisUColor.value.set(

@@ -10,6 +10,190 @@ declare const window: Window & {
 };
 
 test(
+  'position grid snapping freezes the drag frame; Alt bypass leaves numeric input steps alone',
+  {timeout: 120_000},
+  async t => {
+    const {page, errors} = await openApp(t);
+    const source =
+      "import {box} from '@code3d/core';\nconst shift = 0.3;\nexport const part = box(24, 6, 14).rotate(17, 23, 11).originOffset(shift * -2, 0, 0);";
+    await setSource(page, source, 'originOffset');
+    const input = page.locator('input[data-parameter="dx"]');
+    await input.waitFor();
+    const inputStep = await input.getAttribute('step');
+    const inspect = () =>
+      page.evaluate(() => {
+        const {viewport, codeEditor} = window.coordinateApp;
+        const grid = viewport['rendering'].grid;
+        const active = viewport['transformGizmo']['active'];
+        viewport['rendering'].renderFrame();
+        return {
+          source: codeEditor.editor.getValue(),
+          frame: {
+            step: grid.step,
+            plane: grid.plane,
+            origin: grid['origin'].toArray(),
+            quaternion: grid['frame'].toArray(),
+          },
+          locked: grid['locked'],
+          active: active && {
+            value: active.value,
+            initial: active.binding.value,
+            sensitivity: active.binding.sensitivity,
+            delta: active.delta,
+          },
+        };
+      });
+    const handle = await xHandle(page);
+    const before = await inspect();
+    await page.mouse.move(handle.x, handle.y);
+    await page.mouse.down();
+    await page.mouse.move(
+      handle.x + handle.dx * 57,
+      handle.y + handle.dy * 57,
+      {steps: 4},
+    );
+    const snapped = await inspect();
+    assert.ok(snapped.locked && snapped.active);
+    assert.equal(snapped.active.sensitivity, -2);
+    const displacement =
+      (snapped.active.value - snapped.active.initial) *
+      snapped.active.sensitivity;
+    assert.ok(Math.abs(displacement) > 0);
+    assert.ok(
+      Math.abs(
+        displacement / before.frame.step -
+          Math.round(displacement / before.frame.step),
+      ) < 1e-9,
+    );
+    assert.deepEqual(snapped.frame, before.frame);
+    assert.equal(snapped.source, source);
+    await page.keyboard.down('Alt');
+    const free = await inspect();
+    assert.ok(free.active);
+    assert.notEqual(free.active.value, snapped.active.value);
+    assert.ok(
+      Math.abs(
+        (free.active.value - free.active.initial) * free.active.sensitivity -
+          free.active.delta,
+      ) < 1e-9,
+    );
+    assert.equal(await input.getAttribute('step'), inputStep);
+    await page.keyboard.up('Alt');
+    assert.equal((await inspect()).active?.value, snapped.active.value);
+    const bytes = await page.evaluate(async () => {
+      const viewport = window.coordinateApp.viewport;
+      return (await viewport.captureImage(1200, 800)).size;
+    });
+    assert.ok(bytes > 1000);
+    assert.deepEqual((await inspect()).frame, before.frame);
+    if (process.env.CODE3D_GRID_SNAP_SCREENSHOT)
+      await page.screenshot({path: process.env.CODE3D_GRID_SNAP_SCREENSHOT});
+    await page.mouse.up();
+    await page.waitForFunction(
+      original =>
+        window.coordinateApp.codeEditor.editor.getValue() !== original,
+      source,
+    );
+    await page.getByText('Ready', {exact: true}).waitFor();
+    assert.equal((await inspect()).locked, false);
+    assert.match((await inspect()).source, /originOffset\(shift \* -2, 0, 0\)/);
+    await page.evaluate(() => window.coordinateApp.codeEditor.editor.focus());
+    await page.keyboard.press('Control+z');
+    await page.waitForFunction(
+      original =>
+        window.coordinateApp.codeEditor.editor.getValue() === original,
+      source,
+    );
+    await page.getByText('Ready', {exact: true}).waitFor();
+
+    await input.focus();
+    const oldValue = Number(await input.inputValue());
+    await page.keyboard.down('Alt');
+    await page.keyboard.press('ArrowUp');
+    await page.keyboard.up('Alt');
+    const incremented = Number(await input.inputValue());
+    assert.ok(Math.abs(incremented - oldValue - Number(inputStep)) < 1e-10);
+    assert.equal(await input.getAttribute('step'), inputStep);
+    await page.keyboard.press('ArrowUp');
+    assert.ok(
+      Math.abs(
+        Number(await input.inputValue()) - incremented - Number(inputStep),
+      ) < 1e-10,
+    );
+    assert.equal((await inspect()).locked, false);
+    assert.deepEqual(errors, []);
+  },
+);
+
+test(
+  'relationship offset dragging keeps its grid still while the selected occurrence moves',
+  {timeout: 120_000},
+  async t => {
+    const {page, errors} = await openApp(t);
+    const source = `import {box, group} from '@code3d/core';
+const base = box(24, 6, 14);
+const part = box(6, 8, 4).rotate(0, 27, 0).relate(s => s.on(base.up).offset(1.3, 0, 0));
+export const assembly = group([base, part]);`;
+    await setSource(page, source, 'offset');
+    const inspect = () =>
+      page.evaluate(() => {
+        const {viewport, codeEditor} = window.coordinateApp;
+        const selected = viewport.getSelected()!.object;
+        viewport['rendering'].renderFrame();
+        const grid = viewport['rendering'].grid;
+        return {
+          source: codeEditor.editor.getValue(),
+          selected: selected
+            .getWorldPosition(selected.position.clone())
+            .toArray(),
+          grid: {
+            origin: grid['origin'].toArray(),
+            frame: grid['frame'].toArray(),
+            step: grid.step,
+          },
+          locked: grid['locked'],
+        };
+      });
+    const handle = await xHandle(page);
+    const before = await inspect();
+    await page.mouse.move(handle.x, handle.y);
+    await page.mouse.down();
+    await page.mouse.move(
+      handle.x + handle.dx * 57,
+      handle.y + handle.dy * 57,
+      {steps: 4},
+    );
+    const moved = await inspect();
+    assert.ok(moved.locked);
+    const displacement = Math.hypot(
+      ...moved.selected.map((value, i) => value - before.selected[i]),
+    );
+    assert.ok(displacement > 0);
+    assert.ok(
+      Math.abs(
+        displacement / before.grid.step -
+          Math.round(displacement / before.grid.step),
+      ) < 1e-8,
+    );
+    assert.deepEqual(moved.grid, before.grid);
+    assert.equal(moved.source, before.source);
+    await page.keyboard.down('Alt');
+    const free = await inspect();
+    assert.notDeepEqual(free.selected, moved.selected);
+    assert.deepEqual(free.grid, before.grid);
+    await page.keyboard.up('Alt');
+    near((await inspect()).selected, moved.selected);
+    await page.keyboard.press('Escape');
+    await page.mouse.up();
+    const cancelled = await inspect();
+    assert.equal(cancelled.locked, false);
+    near(cancelled.selected, before.selected);
+    assert.equal(cancelled.source, before.source);
+    assert.deepEqual(errors, []);
+  },
+);
+
+test(
   'a failed compilation retains geometry but prevents dragging stale spatial bindings',
   {timeout: 90_000},
   async t => {

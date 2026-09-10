@@ -1341,10 +1341,7 @@ kbd {
 }
 
 .viewport-grid-scale {
-  position: absolute;
-  left: var(--viewport-inset);
-  bottom: var(--viewport-inset);
-  z-index: 2;
+  order: -1;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1719,8 +1716,8 @@ kbd {
 .sketch-editor[hidden] {
   display: none;
 }
-#viewport-host:has(.sketch-editor:not([hidden])) .viewport-coordinate-reference,
-#viewport-host:has(.sketch-editor:not([hidden])) .viewport-grid-scale {
+#viewport-host:has(.sketch-editor:not([hidden]))
+  .viewport-coordinate-reference {
   display: none;
 }
 #viewport-host:has(.sketch-editor:not([hidden])) .viewport-canvas {
@@ -2257,6 +2254,10 @@ kbd {
 
 .viewport-feedback-stack > * {
   pointer-events: auto;
+}
+
+.viewport-feedback-stack > .viewport-grid-scale {
+  pointer-events: none;
 }
 
 .viewport-diagnostic-stack {

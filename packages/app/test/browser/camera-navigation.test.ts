@@ -1135,3 +1135,113 @@ test(
     assert.deepEqual(errors, []);
   },
 );
+
+test('the shared grid legend follows sketch zoom and restores the 3D display on exit', async t => {
+  const {page, errors} = await openNavigationPage(t);
+  await page.evaluate(() => {
+    const editor = window.navigationApp.codeEditor.editor;
+    const source = [
+      "import {box, sketch} from '@code3d/core';",
+      'export const solid = box(24, 6, 14);',
+      "export const outline = sketch([['point', 1, [0, 0]], ['point', 2, [20, 0]], ['line', 3, [1, 2]]]);",
+    ].join('\n');
+    editor.getModel()!.setValue(source);
+    editor.setPosition(
+      editor.getModel()!.getPositionAt(source.indexOf('box(24') + 2),
+    );
+  });
+  await page.waitForFunction(
+    () => window.navigationApp.viewport['module']?.sketches.size === 1,
+  );
+  await page.evaluate(() => {
+    window.navigationApp.viewport.setRenderMode('render');
+    const editor = window.navigationApp.codeEditor.editor;
+    editor.setPosition(
+      editor
+        .getModel()!
+        .getPositionAt(editor.getValue().indexOf('sketch([') + 2),
+    );
+  });
+  await page.locator('.sketch-editor:not([hidden])').waitFor();
+  await page.evaluate(() =>
+    window.navigationApp.viewport.setRenderMode('render'),
+  );
+  const legend = page.locator('.viewport-grid-scale');
+  assert.equal(await legend.count(), 1);
+  assert.equal(
+    await legend.isVisible(),
+    true,
+    'sketch has its own grid even in 3D Render mode',
+  );
+  const canvas = await page.locator('.sketch-canvas').boundingBox();
+  assert.ok(canvas);
+  await page.mouse.move(
+    canvas.x + canvas.width / 2,
+    canvas.y + canvas.height / 2,
+  );
+  const scales: number[] = [];
+  for (const delta of [0, -900, 1800, -2400, -4000, 14000, -10000]) {
+    if (delta) {
+      const before = await legend.innerText();
+      await page.mouse.wheel(0, delta);
+      await page.waitForFunction(
+        before =>
+          document.querySelector('.viewport-grid-scale')!.textContent !==
+          before,
+        before,
+      );
+    }
+    const measured = await page.evaluate(() => {
+      const svg = document.querySelector('.sketch-canvas')!;
+      const x = (id: number) =>
+        Number(
+          svg
+            .querySelector(`circle.local[data-id="${id}"]`)!
+            .getAttribute('cx'),
+        );
+      const scale = (x(2) - x(1)) / 20;
+      const vertical = [...svg.querySelectorAll('line.grid')]
+        .filter(line => line.getAttribute('x1') === line.getAttribute('x2'))
+        .map(line => Number(line.getAttribute('x1')))
+        .sort((a, b) => a - b);
+      return {
+        scale,
+        cellLength: (vertical[1]! - vertical[0]!) / scale,
+        label: Number(
+          document
+            .querySelector('.viewport-grid-scale-value')!
+            .textContent!.split(' ')[0],
+        ),
+      };
+    });
+    assert.ok(Math.abs(measured.label / measured.cellLength - 1) < 1e-7);
+    scales.push(measured.scale);
+  }
+  assert.ok(Math.min(...scales) < 0.05, 'zoom out beyond the former minimum');
+  assert.ok(Math.max(...scales) > 1000, 'zoom in beyond the former maximum');
+  await page.evaluate(() => {
+    const editor = window.navigationApp.codeEditor.editor;
+    editor.setPosition(
+      editor.getModel()!.getPositionAt(editor.getValue().indexOf('box(24') + 2),
+    );
+  });
+  await page.locator('.sketch-editor:not([hidden])').waitFor({state: 'hidden'});
+  assert.equal(
+    await legend.isVisible(),
+    false,
+    'returning to 3D restores Render mode',
+  );
+  await page.evaluate(() =>
+    window.navigationApp.viewport.setRenderMode('modeling'),
+  );
+  assert.equal(await legend.isVisible(), true);
+  await page.waitForFunction(
+    () =>
+      Number(
+        document
+          .querySelector('.viewport-grid-scale-value')!
+          .textContent!.split(' ')[0],
+      ) === window.navigationApp.viewport['rendering'].grid.step,
+  );
+  assert.deepEqual(errors, []);
+});

@@ -64,7 +64,6 @@ import {
 } from './tools/model-spatial-tool';
 import type {SpatialObjectPreview} from './tools/spatial-edit';
 import {ViewportCoordinateReference} from './ui/viewport-coordinate-reference';
-import {ViewportGridScale} from './ui/viewport-grid-scale';
 import {pickScreenTopology} from './rendering/topology-picking';
 import {boundAppearance} from './rendering/bound-appearance';
 import {
@@ -150,6 +149,7 @@ type DecorationInstance = Readonly<{
 export type ModelViewportOptions = Readonly<{
   onViewChange?: () => void;
   onRenderModeChange?: (mode: ModelRenderMode) => void;
+  onGridStepChange?: (step: number) => void;
   onSourcePreviewDiagnostic?: (diagnostic: ModelDiagnostic | undefined) => void;
   onSelect: (occurrence: Occurrence) => void;
   onDrillDown: (node: ModelSnapshotObject) => void;
@@ -305,7 +305,7 @@ export class ModelViewport {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly controls: ViewportNavigation;
   private readonly coordinateReference?: ViewportCoordinateReference;
-  private readonly gridScale: ViewportGridScale;
+  private gridStep?: number;
   private readonly animateViewChanges: boolean;
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointer = new THREE.Vector2();
@@ -340,6 +340,7 @@ export class ModelViewport {
   private readonly onSelect: ModelViewportOptions['onSelect'];
   private readonly onViewChange: ModelViewportOptions['onViewChange'];
   private readonly onRenderModeChange: ModelViewportOptions['onRenderModeChange'];
+  private readonly onGridStepChange: ModelViewportOptions['onGridStepChange'];
   private readonly onSourcePreviewDiagnostic: ModelViewportOptions['onSourcePreviewDiagnostic'];
   private readonly onDrillDown: ModelViewportOptions['onDrillDown'];
   private readonly onNavigateSource: ModelViewportOptions['onNavigateSource'];
@@ -366,6 +367,7 @@ export class ModelViewport {
       onSelect,
       onViewChange,
       onRenderModeChange,
+      onGridStepChange,
       onDrillDown,
       onNavigateSource,
       onPositionTool,
@@ -380,13 +382,13 @@ export class ModelViewport {
     this.animateViewChanges = animateViewChanges;
     this.onViewChange = onViewChange;
     this.onRenderModeChange = onRenderModeChange;
+    this.onGridStepChange = onGridStepChange;
     this.onSourcePreviewDiagnostic = onSourcePreviewDiagnostic;
     this.onDrillDown = onDrillDown;
     this.onNavigateSource = onNavigateSource;
     this.onTopologySelection = onTopologySelection;
     this.sourceDecorationProviders = sourceDecorationProviders;
     this.rendering = new ModelRenderer(this.container);
-    this.gridScale = new ViewportGridScale(this.container);
     this.scene = this.rendering.scene;
     this.renderer = this.rendering.renderer;
     this.scene.add(this.root, this.decorationRoot);
@@ -430,6 +432,7 @@ export class ModelViewport {
       enabled => {
         this.controls.setNavigationEnabled(enabled);
       },
+      this.rendering.grid,
       onPositionTool,
     );
 
@@ -464,7 +467,6 @@ export class ModelViewport {
     this.topologyPointer = undefined;
     this.updateTopologyHover(undefined);
     this.coordinateReference?.setVisible(mode === 'modeling');
-    this.gridScale.setVisible(mode === 'modeling');
     this.updateTransformGizmo();
     this.rendering.renderFrame();
     this.onRenderModeChange?.(mode);
@@ -2104,7 +2106,11 @@ export class ModelViewport {
         this.renderer.domElement.clientHeight,
       );
     });
-    this.gridScale.update(this.rendering.grid.step);
+    const step = this.rendering.grid.step;
+    if (step !== this.gridStep) {
+      this.gridStep = step;
+      this.onGridStepChange?.(step);
+    }
   };
 
   private rebuildImpactHighlights(): void {
@@ -2376,7 +2382,6 @@ export function positionBindings(
         value: 0,
         sensitivity: constraint.offsetDirection,
         parameterKind: 'length',
-        step: 0.5,
         frame: constraint.offsetFrame,
         receiver: {sourceRef: receiver},
         occurrenceKeys,
