@@ -9,6 +9,111 @@ declare const window: Window & {
   };
 };
 
+for (const [label, expression, method, expected] of [
+  [
+    'omitted origin',
+    'box(24, 16, 14).originOffset()',
+    'originOffset',
+    /originOffset\(-?[\d.]+, 0, 0\)/,
+  ],
+  [
+    'omitted rotation',
+    'box(24, 16, 14).rotate()',
+    'rotate',
+    /rotate\(-?[\d.]+, 0, 0\)/,
+  ],
+  [
+    'omitted pivot',
+    'box(24, 16, 14).relate(self => self.on(base.up).pivot().rotate(0, 0, 25))',
+    'pivot',
+    /pivot\(\[-?[\d.]+, 0, 0\]\)/,
+  ],
+  [
+    'opaque pivot',
+    'box(24, 16, 14).relate(self => self.on(base.up).pivot(coords).rotate(0, 0, 25))',
+    'pivot',
+    /pivot\(\[-?[\d.]+, 2, 3\]\)/,
+  ],
+  [
+    'omitted offset',
+    'box(24, 16, 14).relate(self => self.on(base.up).offset())',
+    'offset',
+    /\.offset\(-?[\d.]+, 0, 0\)/,
+  ],
+  [
+    'partial upstream offset',
+    'box(24, 16, 14).relate(self => self.on(base.up).offset(amount /* x */))',
+    'offset',
+    /\.offset\(amount \/\* x \*\/, 0, 0\)/,
+  ],
+] as const) {
+  test(
+    `rendered ${label} gizmos support pointer preview, cancel, commit and undo`,
+    {timeout: 90_000},
+    async t => {
+      const {page, errors} = await openApp(t);
+      const source = `import {box, group} from '@code3d/core';
+const coords = [1, 2, 3] as const;
+const amount = 2;
+const base = box(40, 10, 30);
+const part = ${expression};
+group([base, part]);`;
+      await setSource(page, source, method);
+      await cameraIdle(page);
+      const before = await state(page);
+      assert.equal(before.bindings.length, 3);
+      assert.equal(before.source, source);
+      const handle =
+        method === 'rotate'
+          ? await rotationHandle(page, 0)
+          : await xHandle(page);
+      const drag = async () => {
+        await page.mouse.move(handle.x, handle.y);
+        await page.mouse.down();
+        await page.mouse.move(
+          handle.x + handle.dx * 40,
+          handle.y + handle.dy * 40,
+          {steps: 5},
+        );
+        const preview = await state(page);
+        assert.equal(preview.active, true);
+        assert.equal(preview.source, source);
+      };
+      await drag();
+      await page.keyboard.press('Escape');
+      await page.mouse.up();
+      assert.equal((await state(page)).source, source);
+      assert.equal((await state(page)).active, false);
+      await drag();
+      await page.mouse.up();
+      await page.waitForFunction(
+        source => window.coordinateApp.codeEditor.editor.getValue() !== source,
+        source,
+      );
+      await page.getByText('Ready', {exact: true}).waitFor();
+      const committed = (await state(page)).source;
+      assert.match(committed, expected);
+      if (label === 'partial upstream offset') {
+        assert.doesNotMatch(committed, /const amount = 2;/);
+        assert.match(committed, /const amount = -?[\d.]+;/);
+      }
+      if (process.env.CODE3D_DEFAULT_GIZMO_SCREENSHOT && method === 'rotate')
+        await page.screenshot({
+          path: process.env.CODE3D_DEFAULT_GIZMO_SCREENSHOT,
+        });
+      await page.evaluate(() => window.coordinateApp.codeEditor.editor.focus());
+      await page.keyboard.press('Control+z');
+      await page.waitForFunction(
+        source => window.coordinateApp.codeEditor.editor.getValue() === source,
+        source,
+      );
+      await page.getByText('Ready', {exact: true}).waitFor();
+      assert.equal((await state(page)).bindings.length, 3);
+      assert.deepEqual(errors, []);
+    },
+  );
+}
+
 test(
   'a failed compilation retains geometry but prevents dragging stale spatial bindings',
   {timeout: 90_000},
@@ -460,18 +565,19 @@ export const assembly = group([base, cap]).originPoint(cap.center).rotate(0, 0, 
   },
 );
 
-async function rotationHandle(page: Page) {
-  return page.evaluate(() => {
+async function rotationHandle(page: Page, axisIndex = 2) {
+  return page.evaluate(axisIndex => {
     const viewport = window.coordinateApp.viewport;
     const gizmo = viewport['transformGizmo'];
-    const control = gizmo['axes'][2];
+    const control = gizmo['axes'][axisIndex];
     const camera = viewport['camera'];
     const rect = viewport['renderer'].domElement.getBoundingClientRect();
     control.controls.getHelper().updateMatrixWorld(true);
     camera.updateMatrixWorld(true);
     const center = control.proxy.position.clone().project(camera);
     for (const object of control.gizmo.gizmo.rotate.children) {
-      if (!object.visible || object.name !== 'Z') continue;
+      if (!object.visible || object.name !== ['X', 'Y', 'Z'][axisIndex])
+        continue;
       const positions = (object as import('three').Mesh).geometry.getAttribute(
         'position',
       );
@@ -493,7 +599,8 @@ async function rotationHandle(page: Page) {
         // A screen-space tangent at its silhouette can instead snap to zero.
         const direction = control.proxy.position
           .clone()
-          .set(0, 0, 1)
+          .set(0, 0, 0)
+          .setComponent(axisIndex, 1)
           .applyQuaternion(control.proxy.quaternion)
           .cross(
             camera.position.clone().sub(control.proxy.position).normalize(),
@@ -508,8 +615,8 @@ async function rotationHandle(page: Page) {
         if (length > 0) return {x, y, dx: dx / length, dy: dy / length};
       }
     }
-    throw new Error('No visible Z rotation ring pick point');
-  });
+    throw new Error('No visible rotation ring pick point');
+  }, axisIndex);
 }
 
 async function groupState(page: Page) {

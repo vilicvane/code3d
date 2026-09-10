@@ -38,14 +38,20 @@ rendering the resulting value by itself uses its own local geometry.
 
 ## Runtime defaults
 
-Dimension-based primitives keep required TypeScript signatures while supplying
+Dimension-based primitives and numeric modeling methods keep required TypeScript signatures while supplying
 runtime defaults for omitted or `undefined` arguments. For example, `box()`
 produces the same geometry as `box(10, 10, 10)`, but TypeScript still requires all
 three dimensions. Explicit invalid values keep their normal errors. These
 defaults work in ordinary JavaScript execution as well as App previews.
+Rotations and displacements default to zero, scaling to one, extrusion distance
+to ten, and fillet radius, chamfer distance and shell thickness to one. Relation
+rotation chains use the same angle defaults; `pivot()` defaults to local zero.
 The [Modeling API](../web/src/content/docs/docs/reference/core.md#runtime-defaults-while-editing)
-lists the defaults for all supported primitives. The App displays them as
-placeholders without inserting arguments into source.
+lists the defaults for supported primitives and methods. The App displays them as
+placeholders without inserting arguments into source. Committing a spatial drag
+fills all remaining omitted defaults in that operation; for example, dragging
+the X ring of `rotate()` writes `rotate(angle, 0, 0)`. The edit and completion
+share one undo step.
 
 ## Face extrusion
 

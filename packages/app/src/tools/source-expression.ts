@@ -1,5 +1,121 @@
 import ts from '@typescript/typescript6';
-import type {Vec3} from '@code3d/core/tooling';
+import type {SourceRef, Vec3} from '@code3d/core/tooling';
+import type {ToolArgumentEditTarget} from '../model/tool-schema';
+import {unwrapArgument} from '../model/argument-path';
+
+export type NumericArgumentValue = number | readonly NumericArgumentValue[];
+
+export type CallArgumentDefaults = Readonly<{
+  sourceRef: SourceRef;
+  values: readonly NumericArgumentValue[];
+}>;
+
+/** Fill omitted values while retaining explicitly authored expressions and trivia. */
+export function completeCallArgumentsSource(
+  source: string,
+  defaults: readonly NumericArgumentValue[],
+): string {
+  const {expression, prefixLength} = parseExpression(source);
+  const edits: {start: number; end: number; text: string}[] = [];
+  const visit = (
+    container: ts.CallExpression | ts.ArrayLiteralExpression,
+    values: readonly NumericArgumentValue[],
+  ) => {
+    const elements = ts.isCallExpression(container)
+      ? container.arguments
+      : container.elements;
+    for (
+      let index = 0;
+      index < Math.min(elements.length, values.length);
+      index++
+    ) {
+      const element = elements[index];
+      if (ts.isSpreadElement(element)) return;
+      if (ts.isOmittedExpression(element)) {
+        const position = element.getStart() - prefixLength;
+        edits.push({
+          start: position,
+          end: position,
+          text: numericArgumentSource(values[index]),
+        });
+      } else if (typeof values[index] !== 'number') {
+        const nested = unwrapArgument(element);
+        if (ts.isArrayLiteralExpression(nested))
+          visit(nested, values[index] as readonly NumericArgumentValue[]);
+      }
+    }
+    if (elements.length < values.length) {
+      const position = container.getEnd() - prefixLength - 1;
+      const prefix = elements.length && !elements.hasTrailingComma ? ', ' : '';
+      edits.push({
+        start: position,
+        end: position,
+        text:
+          prefix +
+          values.slice(elements.length).map(numericArgumentSource).join(', '),
+      });
+    }
+  };
+  visit(unwrapArgument(expression) as ts.CallExpression, defaults);
+  for (const edit of edits.sort((a, b) => b.start - a.start))
+    source = source.slice(0, edit.start) + edit.text + source.slice(edit.end);
+  return source;
+}
+
+/** Replace the current operation's opaque inputs after an explicit spatial edit. */
+export function setCallArgumentsSource(
+  source: string,
+  values: readonly NumericArgumentValue[],
+): string {
+  const {expression, prefixLength} = parseExpression(source);
+  const call = unwrapArgument(expression) as ts.CallExpression;
+  const start = call.arguments.pos - prefixLength;
+  const end = call.getEnd() - prefixLength - 1;
+  return (
+    source.slice(0, start) +
+    values.map(numericArgumentSource).join(', ') +
+    source.slice(end)
+  );
+}
+
+export function replaceNumericArgument(
+  values: readonly NumericArgumentValue[],
+  path: readonly number[],
+  value: number,
+): readonly NumericArgumentValue[] {
+  return values.map((current, index) =>
+    index !== path[0]
+      ? current
+      : path.length === 1
+        ? value
+        : replaceNumericArgument(
+            current as readonly NumericArgumentValue[],
+            path.slice(1),
+            value,
+          ),
+  );
+}
+
+function numericArgumentSource(value: NumericArgumentValue): string {
+  return typeof value === 'number'
+    ? formatSourceNumber(value)
+    : `[${value.map(numericArgumentSource).join(', ')}]`;
+}
+
+/** Materialize only the containers and preceding defaults needed by this edit. */
+export function argumentInsertionSource(
+  expression: string,
+  target: Extract<ToolArgumentEditTarget, {kind: 'omitted'}>,
+): string {
+  const value = (target.prefixes ?? [[]]).reduceRight(
+    (value, prefix, index) => {
+      const contents = [...prefix.map(formatSourceNumber), value].join(', ');
+      return index === 0 ? contents : `[${contents}]`;
+    },
+    expression,
+  );
+  return target.needsComma ? `, ${value}` : value;
+}
 
 /** Validate one tuple value, without evaluating code outside its author scope. */
 export function sourceExpressionError(source: string): string | undefined {
@@ -46,11 +162,22 @@ export function offsetCallSource(
     ts.isCallExpression(receiver) &&
     ts.isPropertyAccessExpression(receiver.expression) &&
     receiver.expression.name.text === method &&
-    receiver.arguments.length === 3 &&
+    receiver.arguments.length <= 3 &&
     receiver.arguments.every(argument => !ts.isSpreadElement(argument))
   ) {
     let result = source;
-    for (let index = 2; index >= 0; index--) {
+    if (receiver.arguments.length < delta.length) {
+      const position = receiver.getEnd() - prefixLength - 1;
+      const missing = delta.slice(receiver.arguments.length);
+      const needsComma =
+        receiver.arguments.length > 0 && !receiver.arguments.hasTrailingComma;
+      result =
+        result.slice(0, position) +
+        (needsComma ? ', ' : '') +
+        missing.map(formatSourceNumber).join(', ') +
+        result.slice(position);
+    }
+    for (let index = receiver.arguments.length - 1; index >= 0; index--) {
       if (delta[index] !== 0) {
         const argument = receiver.arguments[index];
         result = replaceNode(

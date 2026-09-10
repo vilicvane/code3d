@@ -2,7 +2,11 @@ import {
   offsetExpression,
   offsetCallSource,
   formatSourceNumber,
+  argumentInsertionSource,
+  setCallArgumentsSource,
+  type NumericArgumentValue,
 } from './source-expression';
+import type {ToolArgumentEditTarget} from '../model/tool-schema';
 import {identityRigidTransform} from '@code3d/core/tooling';
 import type {
   ModelSpatialOperation,
@@ -20,7 +24,26 @@ import type {
 
 export type SpatialSourceChange =
   | Readonly<{kind: 'parameter'; target: ParameterTarget; value: number}>
-  | Readonly<{kind: 'argument'; sourceRef: SourceRef; delta: number}>
+  | Readonly<{
+      kind: 'omitted-argument';
+      target: Extract<ToolArgumentEditTarget, {kind: 'omitted'}>;
+      value: number;
+      initialValue: number;
+    }>
+  | Readonly<{
+      kind: 'call-argument';
+      sourceRef: SourceRef;
+      values: readonly NumericArgumentValue[];
+      value: number;
+      initialValue: number;
+    }>
+  | Readonly<{
+      kind: 'argument';
+      sourceRef: SourceRef;
+      delta: number;
+      value: number;
+      mode: 'offset' | 'replace';
+    }>
   | Readonly<{kind: 'origin-offset'; sourceRef: SourceRef; delta: Vec3}>;
 
 export type SpatialObjectPreview = Readonly<{
@@ -61,7 +84,9 @@ export class SpatialTransformResolver implements ToolIntentResolver {
     if (intent.kind !== this.kind) throw new Error('Expected a spatial edit.');
     const change = intent.change;
     const sourceRef = context.resolveSourceRef(
-      change.kind === 'parameter' ? change.target.sourceRef : change.sourceRef,
+      change.kind === 'parameter' || change.kind === 'omitted-argument'
+        ? change.target.sourceRef
+        : change.sourceRef,
     );
     if (!sourceRef)
       return {
@@ -73,8 +98,17 @@ export class SpatialTransformResolver implements ToolIntentResolver {
       change.kind === 'parameter'
         ? formatSourceNumber(change.value)
         : change.kind === 'argument'
-          ? offsetExpression(expectedText, change.delta)
-          : offsetCallSource(expectedText, 'originOffset', change.delta);
+          ? change.mode === 'replace'
+            ? formatSourceNumber(change.value)
+            : offsetExpression(expectedText, change.delta)
+          : change.kind === 'omitted-argument'
+            ? argumentInsertionSource(
+                formatSourceNumber(change.value),
+                change.target,
+              )
+            : change.kind === 'call-argument'
+              ? setCallArgumentsSource(expectedText, change.values)
+              : offsetCallSource(expectedText, 'originOffset', change.delta);
     return {
       status: 'ready',
       plan: {
@@ -83,7 +117,13 @@ export class SpatialTransformResolver implements ToolIntentResolver {
         summary:
           intent.operation === 'rotate' ? 'Rotate model' : 'Move model origin',
         intent,
-        edits: [{sourceRef, expectedText, text}],
+        edits:
+          ((change.kind === 'omitted-argument' ||
+            change.kind === 'call-argument') &&
+            change.value === change.initialValue) ||
+          (change.kind === 'argument' && change.delta === 0)
+            ? []
+            : [{sourceRef, expectedText, text}],
         preview: intent.preview,
       },
     };

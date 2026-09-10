@@ -2323,6 +2323,11 @@ export function positionBindings(
       sensitivity: sensitivity * constraint.offsetDirection,
       parameterKind: target.kind,
       frame: constraint.offsetFrame,
+      // Earlier offset calls already contribute to the solved displacement.
+      // Missing arguments belong to this call and each default to zero.
+      completeArguments: receiver
+        ? {sourceRef: receiver, values: [0, 0, 0]}
+        : undefined,
     };
     const axisCandidates = candidates.get(axis) ?? [];
     axisCandidates.push(binding);
