@@ -1,5 +1,9 @@
 import {readFileSync} from 'node:fs';
-import {installModelResourceReader} from '../library/font.js';
+import {
+  installModelResourceReader,
+  installFontEngine,
+} from '../library/font.js';
+import * as fontEngine from 'harfbuzzjs';
 import {fileURLToPath} from 'node:url';
 import initOpenCascade from '@code3d/opencascade';
 import {setOC} from 'replicad';
@@ -9,6 +13,7 @@ import {installSketchSolver} from '../library/sketch-solver.js';
 installModelResourceReader(url =>
   url.protocol === 'file:' ? readFileSync(url) : undefined,
 );
+installFontEngine(fontEngine);
 
 const wasmPath = fileURLToPath(import.meta.resolve('@code3d/opencascade/wasm'));
 const openCascade = await initOpenCascade({locateFile: () => wasmPath});

@@ -20,6 +20,7 @@ const authoringValues = [
   'ellipse',
   'extrude',
   'font',
+  'googleFont',
   'text',
   'frustum',
   'group',

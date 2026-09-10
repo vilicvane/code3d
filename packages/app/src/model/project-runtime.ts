@@ -66,6 +66,7 @@ export class ProjectRuntime {
       '@salusoft89/planegcs/dist/planegcs_dist/planegcs.wasm',
       toolingPath,
     );
+    const fontEnginePath = await resolve('harfbuzzjs', toolingPath);
     const entry = [
       toolingPath,
       corePath,
@@ -73,6 +74,7 @@ export class ProjectRuntime {
       loaderPath,
       replicadPath,
       sketchLoaderPath,
+      fontEnginePath,
     ]
       .map(
         (path, index) =>
@@ -93,6 +95,7 @@ export class ProjectRuntime {
         .map((path, index) => `[${JSON.stringify(path)}, module${index}]`)
         .join(',')}]);
       export const tooling = modules.get(${JSON.stringify(toolingPath)});
+      tooling.installFontEngine(modules.get(${JSON.stringify(fontEnginePath)}));
       const initialize = modules.get(${JSON.stringify(loaderPath)}).default;
       const kernel = await initialize({
         wasmBinary: __code3dKernelBytes,
@@ -126,7 +129,9 @@ export class ProjectRuntime {
     // ProjectAssets rewrites loader URLs to fresh blob: addresses. Hash the
     // actual input files instead of that ephemeral bundle text. File paths bind
     // each input to its resolution, and raw bytes include the Core codec itself.
-    const identityPaths = [...bundle.files].sort();
+    const identityPaths = [
+      ...new Set([...bundle.files, ...bundle.resources]),
+    ].sort();
     const identityFiles = await Promise.all(
       identityPaths.map(async path => {
         const bytes = await files.readFile(path);

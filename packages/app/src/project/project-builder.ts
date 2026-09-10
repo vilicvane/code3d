@@ -21,6 +21,7 @@ export type ProjectBundle = Readonly<{
   files: readonly string[];
   formats: ModuleFormats;
   staticPackages: readonly string[];
+  resources: readonly string[];
   sourcePackages: ReadonlyMap<string, readonly string[]>;
 }>;
 
@@ -54,6 +55,7 @@ export class ProjectBuilder {
       lazyPackages?: ReadonlyMap<string, readonly string[]>;
     }> = {},
   ): Promise<ProjectBundle> {
+    const resources = new Set<string>();
     const runtimePaths = new Map<string, string>();
     const runtimeModule = (
       path: string,
@@ -176,7 +178,9 @@ export class ProjectBuilder {
                   source = transform(args.path, source);
                 }
                 if (this.assets && !args.path.endsWith('.json'))
-                  source = await this.assets.rewrite(args.path, source);
+                  source = await this.assets.rewrite(args.path, source, path =>
+                    resources.add(path),
+                  );
                 if (!args.path.endsWith('.json'))
                   source = await this.rewriteDynamicImports(
                     args.path,
@@ -262,6 +266,7 @@ export class ProjectBuilder {
       });
     return {
       source: result.outputFiles![0].text,
+      resources: [...resources],
       files: Object.keys(result.metafile!.inputs)
         .filter(path => path.startsWith('project:'))
         .map(path => path.slice('project:'.length)),

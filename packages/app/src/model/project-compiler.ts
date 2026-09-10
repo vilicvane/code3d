@@ -211,10 +211,15 @@ export class ProjectCompiler {
     checkCancelled();
     onProgress?.('compiling-model');
     const runtime = this.runtime;
+    this.assets.setGoogleContext(
+      this.language.typeScriptProgram,
+      runtime.tooling,
+    );
     return withPersistentArtifacts(
       runtime.artifactIdentity,
-      async store => {
+      async (store, resources) => {
         runtime.tooling.setKernelArtifactStore(store);
+        this.assets.setStore(resources);
         try {
           const discovery = await runtime.loadDependencies(
             builder,
@@ -258,6 +263,7 @@ export class ProjectCompiler {
               ),
           );
         } finally {
+          await this.assets.finishCompilation();
           runtime.tooling.setKernelArtifactStore(undefined);
         }
       },
@@ -316,6 +322,7 @@ export class ProjectCompiler {
       memory: this.runtime?.tooling.kernelOperationCacheStats(),
       disk: this.persistentStats,
       snapshots: this.snapshotPool?.stats,
+      resources: this.assets.cacheStats,
     };
   }
 

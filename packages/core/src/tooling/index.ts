@@ -1,4 +1,8 @@
-export {installModelResourceReader} from '../library/font.js';
+export {
+  installModelResourceReader,
+  installFontEngine,
+} from '../library/font.js';
+export {googleFontUrl, googleFontSources} from '../library/google-font.js';
 import {setOC} from 'replicad';
 import type {OpenCascadeInstance} from '@code3d/opencascade';
 import {clearKernelOperationCache} from '../library/kernel-cache.js';

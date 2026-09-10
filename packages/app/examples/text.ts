@@ -1,5 +1,8 @@
 import {box, cut, extrude, font, group, text, union} from '@code3d/core';
 
+// To use Google Fonts, import googleFont and replace the next line with:
+// const sans = googleFont('Play');
+// const sans = googleFont('Roboto', {weight: 450, italic: true});
 const sans = font(new URL('./fonts/DejaVuSans.ttf', import.meta.url));
 const profiles = text('B8i', sans, 10, {letterSpacing: 0.3, kerning: true});
 

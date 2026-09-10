@@ -484,3 +484,120 @@ export default group([...extrude(text('B', sans, 10, {letterSpacing: 0.5, kernin
     assert.equal(geometry(cached), geometry(first));
   },
 );
+
+test(
+  'Google fonts cache CSS, WOFF2 and decoded bytes across edits, refresh, failures and runtime changes',
+  {timeout: 180_000},
+  async t => {
+    const {compress} = await import('woff2-encoder');
+    const bytes = await compress(
+      await readFile(
+        new URL(
+          '../../../core/test/fonts/Roboto-variable-subset.ttf',
+          import.meta.url,
+        ),
+      ),
+    );
+    const page = await fixture(t);
+    let cssRequests = 0,
+      fontRequests = 0;
+    const headers = {
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'public, max-age=3600',
+    };
+    const fontUrl = 'https://fonts.gstatic.com/code3d-test/roboto.woff2';
+    await page.context().route('https://fonts.googleapis.com/css2?*', route => {
+      const family = new URL(route.request().url()).searchParams.get('family');
+      assert.ok(family === 'Roboto' || family === 'Roboto:wght@450');
+      cssRequests++;
+      return route.fulfill({
+        contentType: 'text/css',
+        headers,
+        body: `@font-face { font-family: 'Roboto'; src: url(${fontUrl}) format('woff2'); unicode-range: U+0000-00FF; }`,
+      });
+    });
+    await page.context().route(fontUrl, route => {
+      fontRequests++;
+      return route.fulfill({
+        contentType: 'font/woff2',
+        headers,
+        body: Buffer.from(bytes),
+      });
+    });
+    // Routes disable the browser HTTP cache: reuse must come from the engine.
+    const source = `import {googleFont, text, extrude, group} from '@code3d/core';
+const sans = googleFont('Roboto');
+export default group(extrude(text('B8i', sans, 10), 1));`;
+    const geometry = (result: CacheResult) =>
+      createHash('sha256')
+        .update(
+          JSON.stringify(
+            JSON.parse(result.objects!)
+              .filter((object: {mesh?: unknown}) => object.mesh)
+              .map((object: {mesh: unknown; transform: unknown}) => [
+                object.mesh,
+                object.transform,
+              ]),
+          ),
+        )
+        .digest('hex');
+    const cold = await compile(page, {source});
+    valid(cold);
+    assert.equal(cssRequests, 1);
+    assert.equal(fontRequests, 1);
+    const edit = await compile(page, {source: source + '\n// edit'});
+    valid(edit);
+    assert.equal(geometry(edit), geometry(cold));
+    assert.ok(edit.stats.resources.memoryHits > 0);
+    assert.equal(cssRequests, 1);
+    assert.equal(fontRequests, 1);
+    await page.reload();
+    const restored = await compile(page, {source, revision: 1});
+    valid(restored);
+    assert.equal(geometry(restored), geometry(cold));
+    assert.ok(
+      restored.stats.resources.diskHits >= 3,
+      'CSS, WOFF2 and decoded SFNT survive runtime identity changes',
+    );
+    assert.equal(cssRequests, 1);
+    assert.equal(fontRequests, 1);
+    const changedSource = source.replace(
+      "googleFont('Roboto')",
+      "googleFont('Roboto', {weight: 450})",
+    );
+    const failed = await compile(page, {
+      source: changedSource + '\nthrow new Error("after font loaded");',
+    });
+    assert.ok(failed.diagnostic);
+    assert.equal(cssRequests, 2);
+    assert.equal(
+      fontRequests,
+      1,
+      'different styles sharing a font URL reuse the binary',
+    );
+    const recovered = await compile(
+      page,
+      {source: changedSource},
+      'compiler',
+      true,
+    );
+    valid(recovered);
+    assert.notEqual(geometry(recovered), geometry(cold));
+    assert.ok(recovered.stats.resources.diskHits >= 3);
+    assert.equal(cssRequests, 2);
+    assert.equal(fontRequests, 1);
+    const undo = await compile(page, {source});
+    valid(undo);
+    assert.equal(geometry(undo), geometry(cold));
+    assert.equal(cssRequests, 2);
+    assert.equal(fontRequests, 1);
+    t.diagnostic(
+      JSON.stringify({
+        coldMs: cold.milliseconds,
+        editMs: edit.milliseconds,
+        restoredMs: restored.milliseconds,
+        resources: recovered.stats.resources,
+      }),
+    );
+  },
+);

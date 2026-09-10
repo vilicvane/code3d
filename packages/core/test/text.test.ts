@@ -23,7 +23,7 @@ import {
   disposeModelObjects,
   modelGeometry,
 } from './model-test.ts';
-import type {PathCommand} from 'opentype.js';
+import type {PathCommand} from '../bld/library/text.js';
 
 const latinUrl = new URL(
   '../../app/examples/fonts/DejaVuSans.ttf',
@@ -201,10 +201,21 @@ test('multi-hole workaround handles every contour order and nested islands', () 
     }
     near(area, 93);
   }
-  assert.throws(
-    () => groupTextContours([square(0, 0, 3), square(2, 2, 3)]),
-    /crossing or touching/,
-  );
+  for (const [contours, expected] of [
+    [[square(0, 0, 3), square(2, 2, 3)], 17],
+    [[square(0, 0, 3), square(3, 0, 3)], 18],
+  ] as const) {
+    let area = 0;
+    for (const region of groupTextContours(contours)) {
+      const face = textRegionFace(region, 0, 0);
+      try {
+        area += replicad.measureArea(face);
+      } finally {
+        face.delete();
+      }
+    }
+    near(area, expected);
+  }
 });
 
 test('text solids work as embossing and engraving boolean operands', () => {

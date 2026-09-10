@@ -53,6 +53,10 @@ export class ProjectLanguageLoader {
 
   constructor(private readonly reader: ProjectFileReader) {}
 
+  get typeScriptProgram(): ts.Program {
+    return this.program!;
+  }
+
   reset(): void {
     this.sources.clear();
     this.realPaths.clear();

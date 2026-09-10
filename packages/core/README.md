@@ -800,9 +800,10 @@ snapshots keep their previous evaluation's metadata.
 The kernel cache retains the complete working set of the latest evaluation,
 including exact transformed-bound queries and render meshes. During evaluation,
 both the previous and current working sets are protected from eviction. Finishing
-keeps the current set and at most 256 unused historical entries, releasing older
-native values. This scales retention with the current model without accumulating
-every edited revision. Calls outside an evaluation use the bounded history.
+keeps the current set and retains unused history within a 2 GiB soft memory budget,
+measured from the kernel's live allocations plus estimated retained JavaScript
+storage. Older historical values are evicted by LRU. The active model can exceed
+this budget; calls outside an evaluation use the same bounded history.
 
 Packages may retain model values privately. The App therefore drops its own
 references after creating snapshots instead of forcibly disposing every model
@@ -848,12 +849,47 @@ const label = text('AV', remote, 10, {letterSpacing: 0.5, kerning: true});
 
 Use a direct font-file URL whose server permits CORS access from the App. The URL
 must be a literal in `new URL(...)`, including when declared in an imported module;
-no `await` is needed in model code. Requests for the same URL share a download in
-each compilation. Subsequent compilations use the browser's HTTP cache and the
-server's freshness rules; changed bytes invalidate font geometry. Failed downloads
-can be retried, and cancelling a build aborts pending downloads.
+no `await` is needed in model code. The engine decodes remote WOFF2 files to SFNT
+before synchronous font parsing.
 
-For computed URLs or Node execution outside the App engine, download bytes first:
+Google Fonts can instead be selected by name:
+
+```ts
+import {googleFont, text, extrude, group} from '@code3d/core';
+
+const play = googleFont('Play');
+const medium = googleFont('Roboto', {weight: 450, italic: true});
+export default group(extrude(text('Hello', play, 10), 1));
+```
+
+`googleFont(family, options?)` synchronously returns a `Font`. Both `weight` and
+`italic` are optional. Omitted axes are omitted from the Google request, leaving
+the defaults to Google; explicit weights apply to variable fonts as well as static
+faces. The App prepares the CSS and all of its Unicode subsets before execution,
+then selects the appropriate subset for each character. No stylesheet is installed.
+The family and options must be literals or static `const` values, including imports,
+aliases, object properties and spreads. Computed calls are reported at their source.
+Large families such as Chinese fonts require downloading all returned subsets on
+the first use; changing the text subsequently reuses those font resources.
+
+Network resources use an engine-owned 64 MiB memory LRU and the shared OPFS disk
+journal, then the network. CSS, compressed font bytes and content-addressed decoded
+bytes are retained. The disk budget is the smaller of 1 GiB and 10% of the browser's
+origin quota, including compaction space, shared with geometry. Fresh resources
+need no request across edits or Worker/page restarts. Expired resources revalidate
+through the browser HTTP cache; `no-store` resources are not retained. Concurrent
+requests share one download. Failed or cancelled builds preserve completed resources;
+partial downloads are discarded and can retry. Without OPFS, memory caching remains.
+The active build's resource references are outside the historical memory limit.
+
+Parsed fonts are memory-only entries in the existing 2 GiB kernel cache budget.
+CSS interpretation, normalized glyph contours, B-Rep, bounds and meshes reuse the
+existing memory/disk artifact cache. Font contents and requested variations identify
+these artifacts; changing text position or spacing can reuse unchanged glyphs.
+HTTP resource records remain reusable when the geometry runtime changes.
+
+For computed URLs or Node execution outside the App engine, download TTF/OTF bytes
+first (decode WOFF2 before passing its bytes):
 
 ```ts
 const response = await fetch(fontUrl);
@@ -861,15 +897,13 @@ if (!response.ok) throw new Error(`Font download failed: ${response.status}`);
 const remote = font(await response.arrayBuffer());
 ```
 
-Google Fonts CSS URLs describe font files and are not themselves fonts. Supply the
-underlying supported font-file URL. CSS resolution and WOFF2 decoding are not
-supported by this API.
-
-TTF and OTF fonts are supported, including Chinese characters when present in the
-font. Font collections (TTC), WOFF2, color glyphs and multiline layout are outside
-this first API. Missing glyphs and crossing/touching contours within a glyph report
-an error. Empty text and spaces create no faces; spaces still advance subsequent
-characters. Layout uses the font's advances, kerning and supported ligatures.
+TTF and OTF fonts are supported, including variable fonts and Chinese characters
+when present in the font. HarfBuzz supplies glyph outlines, advances, kerning and
+ligatures. Quadratic/cubic curves are preserved, and overlapping contours within
+a glyph use the non-zero fill rule. Font collections (TTC), color glyph rendering,
+full bidirectional/multiscript paragraph layout and multiline text are outside this
+API. Missing glyphs report an error. Empty text and spaces create no faces; spaces
+still advance subsequent characters.
 
 `text(content, font, size, options?)` requires the first three arguments and returns connected planar
 regions as ordinary readonly `FaceModel[]`: `B` has one face with two holes; `i` has

@@ -14,12 +14,16 @@ import {
 } from './project-test-files.ts';
 
 let server: Awaited<ReturnType<typeof createAppTestServer>>;
+let ProjectAssets: (typeof import('../src/project/project-assets.ts'))['ProjectAssets'];
 let ProjectBuilder: (typeof import('../src/project/project-builder.ts'))['ProjectBuilder'];
 let ProjectRuntime: (typeof import('../src/model/project-runtime.ts'))['ProjectRuntime'];
 let ProjectCompiler: (typeof import('../src/model/project-compiler.ts'))['ProjectCompiler'];
 let Evaluator: Awaited<ReturnType<typeof testEvaluatorClass>>;
 before(async () => {
   server = await createAppTestServer();
+  ({ProjectAssets} = await server.ssrLoadModule<
+    typeof import('../src/project/project-assets.ts')
+  >('/src/project/project-assets.ts'));
   ({ProjectBuilder} = await server.ssrLoadModule<
     typeof import('../src/project/project-builder.ts')
   >('/src/project/project-builder.ts'));
@@ -195,7 +199,8 @@ test('shares a dependency across concurrent imports and a nested top-level dynam
     '/node_modules/second/index.js':
       'export {identity, count, increment} from "shared";',
   });
-  const builder = new ProjectBuilder(files, esbuild);
+  const assets = new ProjectAssets(files);
+  const builder = new ProjectBuilder(files, esbuild, assets);
   const runtime = await ProjectRuntime.create(files, builder, new Evaluator());
   try {
     const [first, second, shared] = await Promise.all([
@@ -215,6 +220,7 @@ test('shares a dependency across concurrent imports and a nested top-level dynam
     );
   } finally {
     runtime.dispose();
+    assets.dispose();
   }
 });
 
@@ -227,7 +233,8 @@ test('retains callable CommonJS exports and JSON values when a later dependency 
     '/node_modules/consumer/index.cjs':
       'module.exports = require("clamp")(require("clamp/data.json").value);',
   });
-  const builder = new ProjectBuilder(files, esbuild);
+  const assets = new ProjectAssets(files);
+  const builder = new ProjectBuilder(files, esbuild, assets);
   const runtime = await ProjectRuntime.create(files, builder, new Evaluator());
   const evaluator = new Evaluator();
   try {
@@ -244,6 +251,7 @@ test('retains callable CommonJS exports and JSON values when a later dependency 
     assert.equal(value.answer, 41);
   } finally {
     runtime.dispose();
+    assets.dispose();
     evaluator.dispose();
   }
 });
@@ -694,7 +702,8 @@ test('releases concurrent waiters on failed dependency evaluation and can load u
     '/node_modules/ok/package.json': '{"type":"module","main":"index.js"}',
     '/node_modules/ok/index.js': 'export const value=42;',
   });
-  const builder = new ProjectBuilder(files, esbuild);
+  const assets = new ProjectAssets(files);
+  const builder = new ProjectBuilder(files, esbuild, assets);
   const runtime = await ProjectRuntime.create(files, builder, new Evaluator());
   try {
     const failures = await Promise.allSettled([
@@ -719,6 +728,7 @@ test('releases concurrent waiters on failed dependency evaluation and can load u
     );
   } finally {
     runtime.dispose();
+    assets.dispose();
   }
 });
 

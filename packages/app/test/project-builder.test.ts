@@ -269,7 +269,12 @@ test('HTTP asset failures are located and retryable; cancellation aborts the dow
     assets.dispose();
   }
 
+  let downloadStarted!: () => void;
+  const started = new Promise<void>(resolve => {
+    downloadStarted = resolve;
+  });
   const pending = new ProjectAssets(files, async (_input, options) => {
+    downloadStarted();
     if (!hold) return new Response(new Uint8Array([2]));
     return new Promise<Response>((_resolve, reject) => {
       options!.signal!.addEventListener(
@@ -287,6 +292,7 @@ test('HTTP asset failures are located and retryable; cancellation aborts the dow
   });
   try {
     const loading = pending.rewrite('/model.ts', source);
+    await started;
     cancelled = true;
     await assert.rejects(loading, /Cancelled/);
     assert.equal(aborted, true);

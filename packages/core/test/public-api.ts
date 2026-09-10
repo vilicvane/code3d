@@ -9,6 +9,7 @@ import {
   ellipse,
   extrude,
   font,
+  googleFont,
   frustum,
   group,
   intersect,
@@ -94,6 +95,10 @@ frustum();
 // @ts-expect-error Prism dimensions remain required.
 regularPrism();
 const sans: Font = font(new URL('./font.ttf', import.meta.url));
+const play: Font = googleFont('Play');
+const playBold: Font = googleFont('Play', {weight: 700, italic: false});
+// @ts-expect-error Google Fonts weights are numeric.
+googleFont('Play', {weight: 'bold'});
 const textFaces: readonly FaceModel[] = text('B8i', sans, 10);
 const textOptions: TextOptions = {letterSpacing: 0.5, kerning: false};
 text('AV', sans, 10, textOptions);

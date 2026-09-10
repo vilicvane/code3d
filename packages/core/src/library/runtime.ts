@@ -1,4 +1,4 @@
-import {font, type Font} from './font.js';
+import {font, googleFont, type Font} from './font.js';
 import {textGlyphs, textRegionFace, type TextOptions} from './text.js';
 import type {Material} from './three.js';
 import {captureModelMaterial, type ModelMaterialSnapshot} from './material.js';
@@ -4185,6 +4185,7 @@ export function retainModelGeometry(
 
 export const authoringApi = Object.freeze({
   font,
+  googleFont,
   text,
   sketch,
   circle,
@@ -4423,6 +4424,8 @@ function meshUVs(
         location,
         0,
       );
+      // Native meshing can omit a face below its geometric tolerance.
+      if (!triangulation) continue;
       try {
         if (triangulation.isNull()) continue;
         if (!triangulation.HasUVNodes()) return undefined;

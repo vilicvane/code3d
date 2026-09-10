@@ -7,8 +7,9 @@ import {
   type Point2D,
 } from 'replicad';
 import {castOwnedShape} from './kernel-shapes.js';
-import type {Font as OpenTypeFont, PathCommand} from 'opentype.js';
-import {fontArtifact, type Font} from './font.js';
+import type * as hb from 'harfbuzzjs';
+import {boolean as combinePaths} from 'flo-boolean';
+import {fontParts, shapeFontText, type Font, type FontPart} from './font.js';
 import {evaluateKernelOperation, type KernelArtifact} from './kernel-cache.js';
 import {estimateRetainedBytes} from './retained-memory.js';
 
@@ -19,6 +20,20 @@ export type TextOptions = Readonly<{
   kerning?: boolean;
 }>;
 
+export type PathCommand =
+  | {type: 'M'; x: number; y: number}
+  | {type: 'L'; x: number; y: number}
+  | {type: 'Q'; x1: number; y1: number; x: number; y: number}
+  | {
+      type: 'C';
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+      x: number;
+      y: number;
+    }
+  | {type: 'Z'};
 type Contour = readonly PathCommand[];
 type Region = readonly Contour[];
 type Glyph = Readonly<{
@@ -45,29 +60,42 @@ export function textGlyphs(
     throw new Error(
       'text() supports one line; position separate text() calls for multiple lines.',
     );
-  const resource = fontArtifact(font);
-  const parsedFont = resource.value;
+  const parts = fontParts(font);
+  const runs: {part: FontPart; content: string}[] = [];
   for (const character of content) {
-    if (!parsedFont.charToGlyphIndex(character)) {
+    const code = character.codePointAt(0)!;
+    const part = parts.find(
+      ({artifact, ranges}) =>
+        (!ranges.length ||
+          ranges.some(([start, end]) => code >= start && code <= end)) &&
+        artifact.value.font.nominalGlyph(code),
+    );
+    if (!part) {
       throw new Error(
-        `Font ${parsedFont.names.fontFamily?.en ?? ''} has no glyph for ${JSON.stringify(character)} (U+${character.codePointAt(0)!.toString(16).toUpperCase()}).`,
+        `Font ${font.family} has no glyph for ${JSON.stringify(character)} (U+${code.toString(16).toUpperCase()}).`,
       );
     }
+    const previous = runs.at(-1);
+    if (previous?.part === part) previous.content += character;
+    else runs.push({part, content: character});
   }
   const glyphs: Glyph[] = [];
-  parsedFont.forEachGlyph(
-    content,
-    0,
-    0,
-    size,
-    {
-      kerning: options.kerning ?? true,
-      script: kerningScript(parsedFont, content),
-    },
-    (glyph, x, y) => {
+  let advanceX = 0;
+  let advanceY = 0;
+  for (const {part, content: run} of runs) {
+    const resource = part.artifact;
+    const parsed = resource.value;
+    const scale = size / parsed.face.upem;
+    const {infos, positions} = shapeFontText(
+      parsed.font,
+      run,
+      options.kerning ?? true,
+    );
+    infos.forEach((info, index) => {
+      const position = positions[index];
       const regions = evaluateKernelOperation<readonly Region[]>(
         'textGlyph',
-        [glyph.index, size],
+        [info.codepoint, size],
         [resource],
         {
           estimateBytes: estimateRetainedBytes,
@@ -76,30 +104,46 @@ export function textGlyphs(
           release() {},
         },
         () =>
-          groupTextContours(splitContours(glyph.getPath(0, 0, size).commands)),
+          groupTextContours(
+            splitContours(
+              parsed.font
+                .glyphToJson(info.codepoint)
+                .map(command => scaledCommand(command, scale)),
+            ),
+          ),
       );
-      glyphs.push({regions, x: x + glyphs.length * letterSpacing, y});
-    },
-  );
+      glyphs.push({
+        regions,
+        x: advanceX + position.xOffset * scale + glyphs.length * letterSpacing,
+        y: -advanceY - position.yOffset * scale,
+      });
+      advanceX += position.xAdvance * scale;
+      advanceY += position.yAdvance * scale;
+    });
+  }
   return glyphs;
 }
 
-function kerningScript(
-  font: OpenTypeFont,
-  content: string,
-): string | undefined {
-  // OpenType.js exposes position publicly, but its declarations omit it.
-  const {position} = font as OpenTypeFont & {
-    position: {
-      getKerningTables(script?: string): readonly unknown[] | undefined;
-    };
-  };
-  // Fonts such as DejaVu Sans put Latin pairs in latn; DFLT can have other
-  // kerning tables while omitting those pairs. Select Latin for Latin text.
-  return /\p{Script=Latin}/u.test(content) &&
-    position.getKerningTables('latn')?.length
-    ? 'latn'
-    : undefined;
+function scaledCommand(
+  {type, values}: hb.SvgPathCommand,
+  scale: number,
+): PathCommand {
+  const [x1, y1, x2, y2, x, y] = values.map(
+    (value, index) => value * scale * (index % 2 ? -1 : 1),
+  );
+  switch (type) {
+    case 'M':
+    case 'L':
+      return {type, x: x1, y: y1};
+    case 'Q':
+      return {type, x1, y1, x: x2, y: y2};
+    case 'C':
+      return {type, x1, y1, x2, y2, x, y};
+    case 'Z':
+      return {type};
+    default:
+      throw new Error(`Unsupported glyph path command: ${type}`);
+  }
 }
 
 function splitContours(commands: readonly PathCommand[]): readonly Contour[] {
@@ -155,7 +199,7 @@ function blueprint(contour: Contour, x = 0, y = 0): Blueprint {
 /**
  * Work around Replicad #278 without relying on contour order. Every boundary
  * belongs to its nearest containing boundary; even depths are filled islands.
- * Crossing/touching outlines are rejected instead of silently filling holes.
+ * Overlapping outlines are first combined with the font non-zero fill rule.
  */
 export function groupTextContours(
   contours: readonly Contour[],
@@ -163,15 +207,20 @@ export function groupTextContours(
   const blueprints: Blueprint[] = [];
   try {
     for (const contour of contours) blueprints.push(blueprint(contour));
+    if (
+      blueprints.some((a, i) =>
+        blueprints.slice(i + 1).some(b => contoursIntersect(a, b)),
+      )
+    ) {
+      blueprints.splice(0).forEach(deleteBlueprint);
+      contours = combineContours(contours);
+      for (const contour of contours) blueprints.push(blueprint(contour));
+    }
     const contains = blueprints.map(() => new Set<number>());
     for (let i = 0; i < blueprints.length; i++) {
       for (let j = i + 1; j < blueprints.length; j++) {
         const a = blueprints[i],
           b = blueprints[j];
-        if (contoursIntersect(a, b))
-          throw new Error(
-            'The font has crossing or touching contours within a glyph.',
-          );
         if (containsPoint(a, b.firstPoint)) contains[j].add(i);
         if (containsPoint(b, a.firstPoint)) contains[i].add(j);
       }
@@ -188,6 +237,63 @@ export function groupTextContours(
   } finally {
     blueprints.forEach(deleteBlueprint);
   }
+}
+
+/** Keep quadratic/cubic Beziers; no polygon flattening or SVG rounding. */
+function combineContours(contours: readonly Contour[]): readonly Contour[] {
+  const paths = contours.map(contour => {
+    const curves: number[][][] = [];
+    let start: number[] = [];
+    let previous: number[] = [];
+    for (const command of contour) {
+      if (command.type === 'M') {
+        start = previous = [command.x, command.y];
+        continue;
+      }
+      if (command.type === 'Z') {
+        if (previous[0] !== start[0] || previous[1] !== start[1])
+          curves.push([previous, start]);
+        continue;
+      }
+      const end = [command.x, command.y];
+      if (command.type === 'L') curves.push([previous, end]);
+      else if (command.type === 'Q')
+        curves.push([previous, [command.x1, command.y1], end]);
+      else
+        curves.push([
+          previous,
+          [command.x1, command.y1],
+          [command.x2, command.y2],
+          end,
+        ]);
+      previous = end;
+    }
+    return curves;
+  });
+  return combinePaths('OR', paths, {minLoopArea: 0})
+    .filter(loop => loop.length)
+    .map(loop => {
+      const [x, y] = loop[0][0];
+      const commands: PathCommand[] = [{type: 'M', x, y}];
+      for (const curve of loop) {
+        const [x, y] = curve.at(-1)!;
+        if (curve.length === 2) commands.push({type: 'L', x, y});
+        else if (curve.length === 3)
+          commands.push({type: 'Q', x1: curve[1][0], y1: curve[1][1], x, y});
+        else
+          commands.push({
+            type: 'C',
+            x1: curve[1][0],
+            y1: curve[1][1],
+            x2: curve[2][0],
+            y2: curve[2][1],
+            x,
+            y,
+          });
+      }
+      commands.push({type: 'Z'});
+      return commands;
+    });
 }
 
 /** Blueprint.delete() does not release cached per-curve bounds. */

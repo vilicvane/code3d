@@ -1,4 +1,7 @@
 import ts from '@typescript/typescript6';
+import type {KernelArtifactStore} from '@code3d/core/tooling';
+import {ResourceCache} from './resource-cache';
+import {fontResourceRequests} from './font-resources';
 import type {ProjectFileReader} from './file-reader';
 import {normalizeProjectPath, projectDirectory} from './project';
 import {locateModelError} from '../model/diagnostic';
@@ -11,16 +14,31 @@ export class ProjectAssets {
   private readonly contents = new Map<string, Uint8Array>();
   private readonly remote = new Map<string, Promise<string>>();
   private downloads = new AbortController();
+  private readonly cache: ResourceCache;
+  private readonly googlePending = new Map<string, Promise<void>>();
+  private googleContext?: {
+    program: ts.Program;
+    tooling: Pick<
+      typeof import('@code3d/core/tooling'),
+      'googleFontUrl' | 'googleFontSources'
+    >;
+  };
+  private cancellationPoll?: ReturnType<typeof setInterval>;
   private checkCancelled = () => {};
 
   constructor(
     private readonly files: ProjectFileReader,
-    private readonly request: typeof fetch = (...args) => fetch(...args),
-  ) {}
+    request: typeof fetch = (...args) => fetch(...args),
+  ) {
+    this.cache = new ResourceCache(request);
+  }
 
   /** Recheck remote resources once per compilation, respecting HTTP freshness. */
   beginCompilation(checkCancelled: () => void = () => {}): void {
     this.downloads.abort();
+    clearInterval(this.cancellationPoll);
+    this.cancellationPoll = undefined;
+    this.googlePending.clear();
     this.downloads = new AbortController();
     for (const url of this.remote.keys()) this.contents.delete(url);
     this.remote.clear();
@@ -55,7 +73,13 @@ export class ProjectAssets {
       URL.revokeObjectURL(existing.url);
       this.contents.delete(existing.url);
     }
-    const url = URL.createObjectURL(new Blob([Uint8Array.from(contents)]));
+    const url = URL.createObjectURL(
+      new Blob([Uint8Array.from(contents)], {
+        type: path.endsWith('.wasm')
+          ? 'application/wasm'
+          : 'application/octet-stream',
+      }),
+    );
     this.urls.set(path, {version: info.version, url});
     this.contents.set(url, contents);
     return url;
@@ -72,31 +96,70 @@ export class ProjectAssets {
     return loading;
   }
 
+  setStore(store: KernelArtifactStore | undefined): void {
+    this.cache.setStore(store);
+  }
+  setGoogleContext(
+    program: ts.Program,
+    tooling: NonNullable<ProjectAssets['googleContext']>['tooling'],
+  ): void {
+    this.googleContext = {program, tooling};
+  }
+  get cacheStats() {
+    return this.cache.stats;
+  }
+
+  async finishCompilation(): Promise<void> {
+    this.downloads.abort();
+    await Promise.allSettled([
+      ...this.remote.values(),
+      ...this.googlePending.values(),
+    ]);
+    await this.cache.settle();
+    clearInterval(this.cancellationPoll);
+    this.cancellationPoll = undefined;
+    this.cache.setStore(undefined);
+  }
+
+  private watchCancellation(): void {
+    if (this.cancellationPoll) return;
+    const controller = this.downloads;
+    const check = this.checkCancelled;
+    this.cancellationPoll = setInterval(() => {
+      try {
+        check();
+      } catch (error) {
+        controller.abort(error);
+      }
+    }, 50);
+  }
+
   private async loadRemoteUrl(url: string): Promise<string> {
     const downloads = this.downloads;
     const checkCancelled = this.checkCancelled;
     checkCancelled();
-    const poll = setInterval(() => {
-      try {
-        checkCancelled();
-      } catch (error) {
-        downloads.abort(error);
-      }
-    }, 50);
+    this.watchCancellation();
     try {
-      const response = await this.request(url, {
-        mode: 'cors',
-        credentials: 'omit',
-        signal: AbortSignal.any([
-          downloads.signal,
-          AbortSignal.timeout(30_000),
-        ]),
-      });
-      if (!response.ok) {
-        await response.body?.cancel();
-        throw new Error(`HTTP ${response.status} ${response.statusText}`);
+      const resource = await this.cache.load(url, downloads.signal);
+      let bytes = resource.bytes;
+      if (
+        bytes.length >= 4 &&
+        new DataView(
+          bytes.buffer,
+          bytes.byteOffset,
+          bytes.byteLength,
+        ).getUint32(0) === 0x774f4632
+      ) {
+        bytes = await this.cache.decoded(
+          resource,
+          'woff2-encoder@2.0.0',
+          async bytes => {
+            const {default: decompress} =
+              await import('woff2-encoder/decompress');
+            return decompress(bytes);
+          },
+        );
       }
-      const bytes = new Uint8Array(await response.arrayBuffer());
       checkCancelled();
       downloads.signal.throwIfAborted();
       this.contents.set(url, bytes);
@@ -107,12 +170,48 @@ export class ProjectAssets {
         `Cannot load network asset ${url}. Check the URL, network connection and the server's CORS permission. ${error instanceof Error ? error.message : String(error)}`,
         {cause: error},
       );
-    } finally {
-      clearInterval(poll);
     }
   }
 
-  async rewrite(path: string, source: string): Promise<string> {
+  private prepareGoogleFonts(path: string): Promise<void> {
+    const context = this.googleContext;
+    if (!context) return Promise.resolve();
+    const existing = this.googlePending.get(path);
+    if (existing) return existing;
+    const loading = (async () => {
+      const requests = fontResourceRequests(context.program, path);
+      await Promise.all(
+        requests.map(async ({family, options, sourceRef}) => {
+          try {
+            const url = context.tooling.googleFontUrl(family, options);
+            await this.remoteUrl(url.href);
+            const sources = context.tooling.googleFontSources(this.read(url)!);
+            const urls = [...new Set(sources.map(source => source.url))];
+            let next = 0;
+            await Promise.all(
+              Array.from({length: Math.min(8, urls.length)}, async () => {
+                while (next < urls.length) {
+                  this.checkCancelled();
+                  await this.remoteUrl(urls[next++]);
+                }
+              }),
+            );
+          } catch (error) {
+            throw locateModelError(error, sourceRef, 'module');
+          }
+        }),
+      );
+    })();
+    this.googlePending.set(path, loading);
+    return loading;
+  }
+
+  async rewrite(
+    path: string,
+    source: string,
+    onResource?: (path: string) => void,
+  ): Promise<string> {
+    await this.prepareGoogleFonts(path);
     if (!source.includes('URL')) return source;
     const parsed = ts.createSourceFile(
       path,
@@ -170,6 +269,7 @@ export class ProjectAssets {
             (await this.files.stat(site.path))?.kind === 'directory'
           )
             return;
+          if (!site.remote) onResource?.(site.path);
           const url = site.remote
             ? await this.remoteUrl(new URL(site.path).href)
             : await this.url(site.path);
@@ -201,5 +301,7 @@ export class ProjectAssets {
     for (const {url} of this.urls.values()) URL.revokeObjectURL(url);
     this.urls.clear();
     this.contents.clear();
+    this.cache.clear();
+    this.googleContext = undefined;
   }
 }
