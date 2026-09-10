@@ -386,9 +386,10 @@ const packageManager = !directoryWorkspaceId
       projectFileSystem as BrowserProjectFileSystem,
       progress => projectDirectory.setPackageProgress(progress),
       undefined,
-      async directory => {
-        await codeEditor.refreshPackageLock(
-          normalizeProjectPath(directory + '/code3d-lock.json'),
+      async ({directory}) => {
+        await codeEditor.refreshPackageInstallation(
+          directory,
+          projectFileSystem,
         );
         await projectDirectory.refresh();
         renderProjectNavigation();

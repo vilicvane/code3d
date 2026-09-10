@@ -26,6 +26,11 @@ export class PackageInstallationError extends Error {
   }
 }
 
+export type PackageInstallationChange = Readonly<{
+  directory: string;
+  generation: string;
+}>;
+
 type PackageOperation = 'prepare' | 'install' | 'update';
 
 /** One owner for directory tasks and their progress, shared by GUI and agent compilation. */
@@ -37,6 +42,7 @@ export class BrowserPackageManager {
   private readonly tasks = new Map<string, Promise<void>>();
   private readonly lookups = new Map<string, Promise<void>>();
   private readonly failures = new Set<string>();
+  private readonly published = new Map<string, string>();
   private readonly pendingCleanup = new Set<string>();
 
   constructor(
@@ -45,7 +51,9 @@ export class BrowserPackageManager {
       progress: PackageInstallationProgress,
     ) => void = () => {},
     createRegistry = () => new NpmRegistry(),
-    private readonly installed: (directory: string) => void = () => {},
+    private readonly installed: (
+      change: PackageInstallationChange,
+    ) => void = () => {},
   ) {
     this.installer = new BrowserPackageInstaller(projectFiles, createRegistry);
     this.files = new InstalledPackageReader(projectFiles);
@@ -109,28 +117,32 @@ export class BrowserPackageManager {
         reported = true;
         this.progress({directory, state: 'busy', message});
       };
+      let failure: PackageInstallationError | undefined;
+      let after: InstallationState | undefined;
       try {
         if (kind !== 'prepare') report('Preparing packages');
         await beforeInstall?.();
         const before = await this.files.installationState(directory);
+        if (!this.published.has(directory))
+          this.published.set(directory, before.generation);
         if (
           kind === 'prepare' &&
           !this.pendingCleanup.has(directory) &&
           this.prepared.get(directory)?.key === before.key
-        )
-          return;
-        const result = await this.installer.install(
-          directory,
-          report,
-          kind === 'update',
-        );
-        if (result.cleanupPending) this.pendingCleanup.add(directory);
-        else this.pendingCleanup.delete(directory);
-        this.files.refresh();
-        const after = await this.files.installationState(directory);
-        if (before.manifest === after.manifest)
-          this.prepared.set(directory, after);
-        if (result.changed) await this.installed(directory);
+        ) {
+          after = before;
+        } else {
+          const result = await this.installer.install(
+            directory,
+            report,
+            kind === 'update',
+          );
+          if (result.cleanupPending) this.pendingCleanup.add(directory);
+          else this.pendingCleanup.delete(directory);
+          after = await this.files.installationState(directory);
+          if (before.manifest === after.manifest)
+            this.prepared.set(directory, after);
+        }
         if (reported || this.failures.has(directory)) {
           this.progress({
             directory,
@@ -147,10 +159,29 @@ export class BrowserPackageManager {
       } catch (error) {
         this.prepared.delete(directory);
         this.failures.add(directory);
-        const failure = new PackageInstallationError(directory, error);
+        failure = new PackageInstallationError(directory, error);
         this.progress({directory, state: 'error', message: failure.message});
-        throw failure;
       }
+      try {
+        // Recovery can change the active files even when subsequent resolution
+        // fails. Publish filesystem generations, independently of task success.
+        after ??= await this.files.installationState(directory);
+        if (this.published.get(directory) !== after.generation) {
+          this.files.invalidate(directory);
+          await this.installed({directory, generation: after.generation});
+          this.published.set(directory, after.generation);
+        }
+      } catch (error) {
+        // UI refresh failures never turn a committed installation into a failed
+        // transaction. Leave the generation unpublished so preparation retries it.
+        const refresh = new Error('Unable to refresh changed package files.', {
+          cause: error,
+        });
+        if (failure)
+          throw new AggregateError([failure, refresh], failure.message);
+        throw refresh;
+      }
+      if (failure) throw failure;
     };
     const exclusive = () =>
       typeof navigator !== 'undefined' && navigator.locks

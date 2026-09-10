@@ -948,6 +948,18 @@ test(
         'https://registry.npmjs.org/d3-delaunay/6.0.3/'
       ],
     );
+    const alias = '/panel/node_modules/d3-delaunay/package.json';
+    const previousSource =
+      '/panel/node_modules/.code3d/d3-delaunay@6.0.3/node_modules/d3-delaunay/package.json';
+    await page.evaluate(
+      async ({alias, previousSource}) => {
+        const editor = window.packageApp.codeEditor;
+        await editor.openFile(alias);
+        await editor.openFile(previousSource);
+        await editor.openFile('/panel/code3d-lock.json');
+      },
+      {alias, previousSource},
+    );
     await page.evaluate(() =>
       window.packageApp.codeEditor.openFile('/panel/package.json'),
     );
@@ -1024,6 +1036,38 @@ test(
     assert.equal(
       await page.evaluate(() => window.packageApp.codeEditor.currentFile()),
       '/model.ts',
+    );
+    await page.waitForFunction(
+      previousSource =>
+        !window.packageApp.codeEditor.filePaths().includes(previousSource),
+      previousSource,
+    );
+    assert.equal(
+      await page.evaluate(
+        previousSource =>
+          window.packageApp.codeEditor.openedFiles().includes(previousSource),
+        previousSource,
+      ),
+      false,
+    );
+    await page.evaluate(
+      alias => window.packageApp.codeEditor.openFile(alias),
+      alias,
+    );
+    assert.equal(
+      JSON.parse(
+        await page.evaluate(() =>
+          window.packageApp.codeEditor.editor.getValue(),
+        ),
+      ).version,
+      '6.0.4',
+      'an already opened package alias refreshes after installation',
+    );
+    assert.equal(
+      await page.evaluate(
+        () => window.packageApp.codeEditor.editor.getRawOptions().readOnly,
+      ),
+      true,
     );
     const newLock = JSON.parse(await readLock());
     assert.ok(

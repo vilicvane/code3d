@@ -1597,3 +1597,98 @@ test('malformed manifests report one package failure and recover after correctio
   await manager.prepare('/nested/model.ts');
   assert.equal(states.at(-1)?.state, 'ready');
 });
+
+test('package refresh failures retain committed state and retry notification without reinstalling', async t => {
+  const disk = await diskFiles();
+  t.after(disk.dispose);
+  const fixture = await registryFixture();
+  await fixture.add('tool', '1.0.0');
+  await disk.files.writeFile(
+    '/package.json',
+    JSON.stringify({dependencies: {tool: '1'}}),
+  );
+  const states: string[] = [];
+  const changes: import('../src/project/browser-package-manager.ts').PackageInstallationChange[] =
+    [];
+  let failRefresh = true;
+  const manager = new BrowserPackageManager(
+    disk.files,
+    progress => states.push(progress.state),
+    fixture.registry,
+    async change => {
+      changes.push(change);
+      assert.ok(await manager.files.stat('/node_modules/tool/index.js'));
+      if (failRefresh) throw new Error('editor refresh unavailable');
+    },
+  );
+  await assert.rejects(manager.prepare('/model.ts'), {
+    name: 'Error',
+    message: 'Unable to refresh changed package files.',
+  });
+  assert.equal(states.at(-1), 'ready');
+  assert.ok(!states.includes('error'));
+  assert.ok(await disk.files.stat('/code3d-lock.json'));
+  const requests = fixture.requests.length;
+  failRefresh = false;
+  await manager.prepare('/model.ts');
+  assert.equal(fixture.requests.length, requests);
+  assert.deepEqual(changes[1], changes[0]);
+  await manager.prepare('/model.ts');
+  assert.equal(
+    changes.length,
+    2,
+    'ordinary edits do not publish unchanged installations',
+  );
+});
+
+test('recovery publishes restored files even when resolving the corrected installation fails', async t => {
+  const disk = await diskFiles();
+  t.after(disk.dispose);
+  const fixture = await registryFixture();
+  await fixture.add('tool', '1.0.0');
+  await disk.files.writeFile(
+    '/package.json',
+    JSON.stringify({dependencies: {tool: '1'}}),
+  );
+  const changes: string[] = [];
+  const manager = new BrowserPackageManager(
+    disk.files,
+    undefined,
+    fixture.registry,
+    change => {
+      changes.push(change.generation);
+    },
+  );
+  await manager.prepare('/model.ts');
+  const scratch = '/.code3d/package-install';
+  await disk.files.createDirectory(scratch);
+  await disk.files.rename('/node_modules', scratch + '/previous');
+  await disk.files.createDirectory('/node_modules');
+  await disk.files.writeFile(
+    '/node_modules/.code3d-install.json',
+    'uncommitted',
+  );
+  await disk.files.writeFile(
+    '/package.json',
+    JSON.stringify({dependencies: {tool: '2'}}),
+  );
+  // First observe the interrupted files as a new manager (as after a reload).
+  const restored: string[] = [];
+  const reloaded = new BrowserPackageManager(
+    disk.files,
+    undefined,
+    fixture.registry,
+    change => {
+      restored.push(change.generation);
+    },
+  );
+  fixture.setOffline(true);
+  await assert.rejects(reloaded.prepare('/model.ts'), /offline/);
+  assert.equal(restored.length, 1);
+  assert.match(
+    new TextDecoder().decode(
+      await reloaded.files.readFile('/node_modules/tool/index.js'),
+    ),
+    /1.0.0/,
+  );
+});

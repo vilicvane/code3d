@@ -60,7 +60,7 @@ export class BrowserPackageInstaller {
     directory: string,
     progress: (message: string) => void,
     update: boolean,
-  ): Promise<{changed: boolean; cleanupPending: boolean}> {
+  ): Promise<{cleanupPending: boolean}> {
     const transaction = new PackageInstallationTransaction(
       this.files,
       directory,
@@ -86,7 +86,7 @@ export class BrowserPackageInstaller {
 
     const manifestPath = pathAt(directory, 'package.json');
     const bytes = await this.files.readFile(manifestPath);
-    if (!bytes) return {changed: false, cleanupPending: !collected};
+    if (!bytes) return {cleanupPending: !collected};
     const source = decodeProjectFile(bytes);
     const manifest = parsePackageManifest(source, manifestPath);
     validateBrowserManifest(manifest);
@@ -119,7 +119,7 @@ export class BrowserPackageInstaller {
       decodeProjectFile(marker) === nextMarker &&
       oldLockSource === serialized
     )
-      return {changed: false, cleanupPending: !collected};
+      return {cleanupPending: !collected};
 
     const cleaned = await transaction.replace(
       async (staged, stagedLock) => {
@@ -209,6 +209,6 @@ export class BrowserPackageInstaller {
         progress('Saving installed packages');
       },
     );
-    return {changed: true, cleanupPending: !cleaned};
+    return {cleanupPending: !cleaned};
   }
 }

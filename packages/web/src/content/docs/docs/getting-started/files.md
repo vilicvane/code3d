@@ -49,6 +49,8 @@ Models without a manifest continue using the App's built-in modeling packages,
 with no installation required. Opening a model with a manifest also installs
 changed dependencies or restores its existing lock before compilation.
 Installation continues in the background while you switch files, edit and save.
+After installation, open package files and locks refresh automatically. Tabs for
+removed package versions close; your editable files and other folders stay intact.
 Up to 15 packages download concurrently per installation; unpacking runs one
 package at a time alongside downloads. Verified cached archives are reused.
 Requests for the same folder run in order. A failed request does not discard

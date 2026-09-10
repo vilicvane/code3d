@@ -5,6 +5,7 @@ import {normalizeProjectPath} from './project';
 export type InstallationState = {
   key: string;
   manifest: string;
+  generation: string;
   cacheable: boolean;
 };
 
@@ -27,6 +28,13 @@ export class InstalledPackageReader implements ProjectFileReader {
     this.scopes.clear();
   }
 
+  invalidate(directory: string): void {
+    this.scopes.delete(directory);
+    for (const path of this.entries.keys())
+      if (installedPackageDirectory(path) === directory)
+        this.entries.delete(path);
+  }
+
   async installationState(directory: string): Promise<InstallationState> {
     const states = await Promise.all(
       [
@@ -41,6 +49,7 @@ export class InstalledPackageReader implements ProjectFileReader {
     return {
       key: JSON.stringify(states),
       manifest: JSON.stringify(states[0] ?? null),
+      generation: JSON.stringify(states.slice(1)),
       cacheable: states[2]?.kind === 'directory' && states[3]?.kind === 'file',
     };
   }
