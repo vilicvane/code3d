@@ -9,6 +9,7 @@ import {
   type InstallationState,
 } from './installed-package-reader';
 import {NpmRegistry} from './npm-registry';
+import type {WorkspacePackages} from './workspace-packages';
 
 export type PackageInstallationProgress = Readonly<{
   directory: string;
@@ -54,8 +55,13 @@ export class BrowserPackageManager {
     private readonly installed: (
       change: PackageInstallationChange,
     ) => void = () => {},
+    workspaces: WorkspacePackages = {},
   ) {
-    this.installer = new BrowserPackageInstaller(projectFiles, createRegistry);
+    this.installer = new BrowserPackageInstaller(
+      projectFiles,
+      createRegistry,
+      workspaces,
+    );
     this.files = new InstalledPackageReader(projectFiles);
     // Only dependency consumers opt into lazy scope preparation. Ordinary
     // navigation reads files directly and remains available during installation.

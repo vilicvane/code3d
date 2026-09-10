@@ -285,6 +285,12 @@ implementation context and historical outcomes, not a competing work queue.
   project's packages; missing installations are errors. Built-in packages use
   real published artifacts, one shared core instance and an isolated internal
   dependency closure. Other npm packages still resolve from the project.
+- During Vite development, `latest` requests for publishable `@code3d/*` workspaces
+  use current emitted package bytes, including transitive and npm alias requests.
+  Browser installations record a content fingerprint and replace stale npm/local
+  selections transactionally; local folders read a shared development package
+  closure without rewriting disk files. Explicit ranges and production retain
+  normal package resolution. Compatible peers share the project-selected Core.
 - App and core evolve together during prototyping. `@code3d/core/tooling`
   remains their internal integration boundary without a separate compatibility
   version or stability guarantee. See [#30](https://github.com/vilicvane/code3d/issues/30).

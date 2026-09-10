@@ -21,6 +21,8 @@
   包声明及原始源码按需只读打开。见 [#90](https://github.com/vilicvane/code3d/issues/90)。
   App 在模型所在清单及其祖先未声明 `@code3d/core` 时提供完整内置
   core/screws/materials，支持零安装开始建模；声明 core 后全部由项目自己的依赖接管。
+  Vite 开发模式将 `latest` 的 `@code3d/*` 请求（含传递依赖和 npm alias）优先解析到仓库中可发布的 workspace 产物。
+  明确版本、其他范围及不存在的 workspace 保持正常解析；生产构建不启用此规则。
 - 同一份项目源码遵循标准 Node ESM/TypeScript 规则，既可由 App 加载，也可
   在受支持的 Node 环境中直接执行。
 - 关注模型对象本身，而不是它的构建过程。

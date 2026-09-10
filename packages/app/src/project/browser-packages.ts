@@ -1,4 +1,5 @@
 import {files} from 'virtual:code3d-browser-packages';
+export {workspaces as developmentWorkspaces} from 'virtual:code3d-browser-packages';
 import type {ProjectFileReader} from './file-reader';
 import {normalizeProjectPath, projectDirectory} from './project';
 
