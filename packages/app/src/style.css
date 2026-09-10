@@ -251,6 +251,7 @@ input[type='number']::-webkit-outer-spin-button {
   height: 12px;
   margin-left: 1px;
   color: var(--agent-color);
+  fill: currentColor;
 }
 
 .agent-badge-dot {
