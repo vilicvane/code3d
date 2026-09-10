@@ -672,7 +672,12 @@ kbd {
   flex-shrink: 0;
 }
 
-.package-status > div {
+.package-status > div + div {
+  margin-top: 6px;
+}
+
+.package-status > div > span {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
