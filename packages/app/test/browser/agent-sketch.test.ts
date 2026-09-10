@@ -48,16 +48,16 @@ test(
     await startServe(t, configFile);
     await page.locator('.agent-status[data-state="online"]').waitFor();
     await page.getByRole('button', {name: 'Close', exact: true}).click();
-    const cli = async (args: string[], input?: object, code = 0) => {
+    const cli = async (request: unknown, code = 0) => {
       const result = await runCli(
-        [configFile, '--output-dir', temp, ...args],
-        input ? JSON.stringify(input) : '',
+        [configFile, '--output-dir', temp],
+        JSON.stringify(request),
       );
       assert.equal(result.code, code, result.stdout + result.stderr);
       return JSON.parse(result.stdout);
     };
     const apply = (input: object, code = 0) =>
-      cli(['apply', '--input', '-'], input, code);
+      cli({operation: 'apply', input}, code);
     const file = '/agent-sketch.ts';
     const source = `import {sketch, extrude} from '@code3d/core';
 const base = sketch([['point', 1, [0, 0]], ['circle', 2, [1, 20]]]);
@@ -146,7 +146,7 @@ export default design();
       Math.abs(fallback.data.observation.topology.items[1].radius - 8) < 1e-6,
     );
 
-    const read = await cli(['fs', 'read', file]);
+    const read = await cli({operation: 'fs.read', path: file});
     const solid = source.replace(
       'export default design();',
       'export default extrude(design().face(), 5);',
@@ -174,7 +174,7 @@ export default design();
     );
 
     // A failed downstream 3D operation must not block observation of its valid sketch.
-    const next = await cli(['fs', 'read', file]);
+    const next = await cli({operation: 'fs.read', path: file});
     const broken = solid.replace(
       'extrude(design().face(), 5)',
       'extrude(design().face(), 0)',
@@ -191,7 +191,7 @@ export default design();
       1,
     );
     assert.equal(failed3d.error.code, 'model_failed');
-    const latest = await cli(['fs', 'read', file]);
+    const latest = await cli({operation: 'fs.read', path: file});
     const failed = await apply(
       {
         files: [
@@ -233,7 +233,7 @@ export default design();
     );
     assert.ok(Math.abs(arc.geometry.sweep - Math.PI / 2) < 1e-6);
     assert.equal(open.data.observation.topology.counts.region, 1);
-    const openRead = await cli(['fs', 'read', openFile]);
+    const openRead = await cli({operation: 'fs.read', path: openFile});
     const unfinished = await apply({
       files: [
         {

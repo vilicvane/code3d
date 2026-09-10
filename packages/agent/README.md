@@ -82,7 +82,16 @@ Multiple endpoints share the App's project service; that service
 owns version checks, batch preflight, serialization and persistence. The endpoint
 alone does not supply transactional file writes or model observation semantics.
 
-Supported requests:
+The CLI accepts one JSON request from stdin. `AgentClient.request(value)` encrypts
+and sends that JSON value without interpreting operation names or fields. The
+bridge likewise forwards authenticated content without an operation schema.
+Validation and normalization run in the App's `AgentEndpoint`, so application
+operations can evolve without requiring a new CLI build. Configuration,
+encryption, receipt recovery and the generic response/artifact envelope are the
+stable transport contract. Current App operations still accept one request at a
+time; this does not introduce batch execution or JSON Lines.
+
+Supported App requests:
 
 | Operation | Fields      | Purpose                                           |
 | --------- | ----------- | ------------------------------------------------- |

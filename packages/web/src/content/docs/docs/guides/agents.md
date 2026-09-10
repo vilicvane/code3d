@@ -1,11 +1,11 @@
 ---
 title: Work with an agent
-description: Connect a local agent to the open project through session-managed CLI commands.
+description: Connect a local agent and send JSON requests to the open project through a session-managed CLI service.
 ---
 
 Code3D lets an agent inspect and edit the same project you see. The App owns the
 files, version checks, saving, execution, and feedback. The agent uses independent
-CLI commands; a small local service keeps the browser connection open.
+CLI invocations with JSON requests; a small local service keeps the browser connection open.
 
 [Read this guide as Markdown](../agents.md).
 
@@ -26,7 +26,7 @@ CLI commands; a small local service keeps the browser connection open.
 4. In another command invocation, obtain live context:
 
    ```sh
-   npx --yes @code3d/cli /absolute/path/to/project.c3d.json context
+   echo '{"operation":"context"}' | npx --yes @code3d/cli /absolute/path/to/project.c3d.json
    ```
 
 The initial and update prompts both contain the complete current configuration.
@@ -56,8 +56,7 @@ updated file. The current agent conversation continues.
 
 The JSON contains `port`, `origin`, `sessionId`, `agentId`, `name`, and
 `key`. Keep it private and outside committed source; use a file readable only by
-your account. Neither source code nor secrets belong in process command-line
-arguments. The service binds only to `127.0.0.1`, checks the App's exact Origin,
+your account. Keep source code and secrets in private files or stdin rather than external process arguments. The service binds only to `127.0.0.1`, checks the App's exact Origin,
 and authenticates and encrypts traffic using the per-agent key.
 
 The App suggests a port from 49152–65535; it is not reserved until `serve` starts.
@@ -93,13 +92,13 @@ when `cursor` is omitted: it uses the agent's retained, valid cursor. It does no
 choose a new cursor from the changed file paths. Without a valid cursor there is
 no follow jump. A request that only observes the retained cursor, with no file
 changes or explicit view, does not trigger following.
-Successful `fs read` opens the file and focuses its tab; `fs list` reveals,
+Successful `fs.read` opens the file and focuses its tab; `fs.list` reveals,
 expands and focuses the directory in the file explorer, scrolling it into view
 when necessary. Compact directory chains highlight the row containing the listed
 directory. Listing `/` scrolls to the top and focuses the explorer itself. A hidden
 explorer opens and search filters clear to reveal the directory. These operations
 leave the agent's modeling cursor unchanged.
-`context`, `fs stat`, failed requests and inspections without a source, cursor or
+`context`, `fs.stat`, failed requests and inspections without a source, cursor or
 view change do not move your view. Later user interaction takes precedence over
 pending navigation or a requested camera change. Use the user-with-gear
 button beside the pills to open **Connect Agent**; with no agents, the highlighted
@@ -110,13 +109,34 @@ button beside the pills to open **Connect Agent**; with no agents, the highlight
 with a built, globally linked checkout. Run `npm link` in `packages/cli`, then
 verify `npx --yes @code3d/cli --help` resolves that checkout.
 
+## Send JSON requests
+
+Invoke `c3d <config-file>` with one complete JSON document on stdin. The CLI reads
+until EOF, sends that value unchanged to the App, writes one JSON result and exits.
+Multi-line JSON is supported. The App defines and validates operations and their
+fields; additions to that schema do not require a CLI update while the transport
+and response envelope remain unchanged. The current App accepts one operation per
+request; arrays, batches and JSON Lines are not currently supported.
+
+Use a pipe for a small request, or redirect a local request file for source changes:
+
+```sh
+npx --yes @code3d/cli project.c3d.json --request-id edit-001 < /tmp/request.json
+```
+
+The JSON contains the operation and all its parameters. The CLI's execution
+options are `--request-id`, `--timeout` and `--output-dir`; `serve` manages the local
+connection. Operation names and observation settings are JSON fields, not CLI
+subcommands or flags. Running without redirected stdin in a terminal reports how
+to supply a request instead of entering an interactive session.
+
 ## Read context and project files
 
 ```sh
-npx --yes @code3d/cli project.c3d.json context
-npx --yes @code3d/cli project.c3d.json fs list /
-npx --yes @code3d/cli project.c3d.json fs read /model.ts
-npx --yes @code3d/cli project.c3d.json fs stat /model.ts
+echo '{"operation":"context"}' | npx --yes @code3d/cli project.c3d.json
+echo '{"operation":"fs.list","path":"/"}' | npx --yes @code3d/cli project.c3d.json
+echo '{"operation":"fs.read","path":"/model.ts"}' | npx --yes @code3d/cli project.c3d.json
+echo '{"operation":"fs.stat","path":"/model.ts"}' | npx --yes @code3d/cli project.c3d.json
 ```
 
 `context` returns `data.file` and `data.cursor` (or `null`). Both are `null`
@@ -140,24 +160,30 @@ Write the payload to a local JSON file:
 
 ```json
 {
-  "files": [
-    {
-      "path": "/model.ts",
-      "version": "<version from fs read>",
-      "content": "import {box} from '@code3d/core';\nexport default box(10, 6, 8);\n"
+  "operation": "apply",
+  "input": {
+    "files": [
+      {
+        "path": "/model.ts",
+        "version": "<version from fs.read>",
+        "content": "import {box} from '@code3d/core';\nexport default box(10, 6, 8);\n"
+      }
+    ],
+    "cursor": {
+      "file": "/model.ts",
+      "regex": "(box\\(10, 6, 8\\))"
     }
-  ],
-  "cursor": {"file": "/model.ts", "regex": "(box\\(10, 6, 8\\))"}
+  }
 }
 ```
 
 Choose and retain a unique request ID **before** submitting a change:
 
 ```sh
-npx --yes @code3d/cli project.c3d.json --request-id model-edit-001 apply --input /tmp/change.json
+npx --yes @code3d/cli project.c3d.json --request-id model-edit-001 < /tmp/change.json
 ```
 
-`--input -` reads JSON from stdin. Each file uses full UTF-8 content and its current
+Each file uses full UTF-8 content and its current
 version. `version: null` creates a file that must not already exist;
 `content: null` deletes the specified version. Rename with a delete/create batch.
 Omitted files stay unchanged. A file is limited to 8 MiB; `.git` and `.code3d`
@@ -173,17 +199,17 @@ changes participate in the same checks. Saving may fail after acceptance: inspec
 pending writes. A model error does not undo accepted source changes.
 
 Default `apply` confirms acceptance and saving without observing the model.
-It also supports cursor-only input, or no input to observe a retained cursor.
+It also supports cursor-only input, or observation fields without a cursor to observe the retained cursor. Use `"input": {}` for an apply with no changes or outputs.
 
 ## Install project dependencies
 
 For a **Browser storage** project, use `apply` to edit the relevant `package.json`,
-then request `--render` or `--topology` for a model in that package scope. The App
+then request `"render": true` or `"topology": true` for a model in that package scope. The App
 prepares and installs the dependencies before evaluating the model. The CLI has
 no separate install or update command.
 
-Read the model and locate its nearest ancestor `package.json` with `fs list`,
-`fs stat` and `fs read`. Preserve the existing manifest fields and dependencies,
+Read the model and locate its nearest ancestor `package.json` with `fs.list`,
+`fs.stat` and `fs.read`. Preserve the existing manifest fields and dependencies,
 and use its current file version in `apply`. If there is no manifest, create one
 beside the model using `version: null`; a child manifest defines a separate package
 scope. These paths belong to the App project, independently of where the local
@@ -194,29 +220,36 @@ example above, save this payload as `/tmp/add-dependency.json`:
 
 ```json
 {
-  "files": [
-    {
-      "path": "/package.json",
-      "version": null,
-      "content": "{\n  \"private\": true,\n  \"type\": \"module\",\n  \"dependencies\": {\n    \"just-range\": \"4.2.0\"\n  }\n}\n"
-    }
-  ],
-  "cursor": {"file": "/model.ts", "regex": "(box\\(10, 6, 8\\))"}
+  "operation": "apply",
+  "input": {
+    "files": [
+      {
+        "path": "/package.json",
+        "version": null,
+        "content": "{\n  \"private\": true,\n  \"type\": \"module\",\n  \"dependencies\": {\n    \"just-range\": \"4.2.0\"\n  }\n}\n"
+      }
+    ],
+    "cursor": {
+      "file": "/model.ts",
+      "regex": "(box\\(10, 6, 8\\))"
+    },
+    "render": true
+  }
 }
 ```
 
 ```sh
-npx --yes @code3d/cli project.c3d.json --request-id dependency-edit-001 apply --input /tmp/add-dependency.json --render
+npx --yes @code3d/cli project.c3d.json --request-id dependency-edit-001 < /tmp/add-dependency.json
 ```
 
 If the manifest already exists, merge the dependency into its full contents and
 replace `null` with its read version. Adapt the cursor to an observable expression
 in your actual model. An explicit cursor ensures preparation uses the intended
 package scope; omitting it retains the agent's previous modeling cursor, even if
-the most recent `fs read` or `fs list` visited another scope.
+the most recent `fs.read` or `fs.list` visited another scope.
 
 A plain `apply` response confirms file acceptance and saving, **not installation
-completion**. The App may compile in the background, but `--render` or `--topology`
+completion**. The App may compile in the background, but `"render": true` or `"topology": true`
 lets the requesting agent wait for preparation and model feedback. Check the
 complete result: successful observation confirms preparation and evaluation;
 errors describe installation or subsequent model failures. An observation error
@@ -241,15 +274,20 @@ in which an agent can run `npm install`.
 
 ```json
 {
-  "cursor": {
-    "file": "/model.ts",
-    "regex": "return ([^;]+);",
-    "lines": [20, 40],
-    "arguments": "[10, 5, 6]"
-  },
-  "render": true,
-  "topology": true,
-  "type": true
+  "operation": "apply",
+  "input": {
+    "cursor": {
+      "file": "/model.ts",
+      "regex": "return ([^;]+);",
+      "lines": [20, 40],
+      "arguments": "[10, 5, 6]"
+    },
+    "render": {
+      "view": "front"
+    },
+    "topology": true,
+    "type": true
+  }
 }
 ```
 
@@ -276,22 +314,24 @@ then ordinary execution. Omission does not reuse previous custom arguments;
 ## Render, types, and topology
 
 ```sh
-npx --yes @code3d/cli project.c3d.json --request-id inspect-001 apply --input /tmp/inspect.json --view front --topology --type
+npx --yes @code3d/cli project.c3d.json --request-id inspect-001 < /tmp/inspect.json
 ```
 
-`--render` requests a 960×720 PNG. `--view` implies render and accepts `isometric`,
-`front`, `back`, `left`, `right`, `top`, or `bottom`. JSON also supports
+`"render": true` requests a 960×720 PNG with the default isometric view. Use
+`"render": {"view": "front"}` for a named view: `isometric`, `front`, `back`, `left`,
+`right`, `top`, or `bottom`. A custom view uses
 `"render": {"view": {"direction": [1, 1, 1], "up": [0, 1, 0]}}`. Direction points
 from scene center toward the camera: +X right, +Y up, +Z front. The up vector must
-not be parallel to direction. The scene is fitted with perspective projection;
-only the agent's returned image changes, leaving the user's viewport in place.
+not be parallel to direction. The scene is fitted with perspective projection.
+When following that agent, an explicit view also updates the user's viewport;
+otherwise it only affects the returned image.
 
-`--type` returns the selected expression's static TypeScript type, signatures,
+`"type": true` returns the selected expression's static TypeScript type, signatures,
 documentation, and up to 100 members with `membersTotal`. It can run without
 model evaluation and combine with other outputs. `observation.type` is `null`
 when no suitable syntax is selected.
 
-`--topology` returns model summaries and B-rep geometry from the same engine and
+`"topology": true` returns model summaries and B-rep geometry from the same engine and
 observation as the rendering. Input and result geometry have different ID
 namespaces. Use returned model bindings and `.edge(id)`, `.surface(id)`, or
 `.vertex(id)` suffixes in their real source scope; do not invent bindings, reuse
@@ -309,12 +349,15 @@ For additional entries, submit a separate apply payload:
 
 ```json
 {
-  "topology": {
-    "snapshotId": "<returned snapshot>",
-    "model": "m0",
-    "kind": "edge",
-    "offset": 48,
-    "limit": 100
+  "operation": "apply",
+  "input": {
+    "topology": {
+      "snapshotId": "<returned snapshot>",
+      "model": "m0",
+      "kind": "edge",
+      "offset": 48,
+      "limit": 100
+    }
   }
 }
 ```
@@ -359,7 +402,7 @@ the live model or camera. Agent cursor decorations continue to show current work
 
 Use the same full-source `apply` workflow for sketch entries and constraints. Read
 the [sketch API](../../reference/core/#editable-sketch-regions) and inspect the
-expression with `--type` before choosing operations. Keep useful intermediate
+expression with `"type": true` before choosing operations. Keep useful intermediate
 profiles named, use constraints to express design intent, and build faces or solids
 from those profiles with the core API.
 
@@ -388,17 +431,23 @@ For a source binding named `profile`, a cursor-only observation can be:
 
 ```json
 {
-  "cursor": {"file": "/model.ts", "regex": "const (profile) ="},
-  "render": true,
-  "topology": true,
-  "type": true
+  "operation": "apply",
+  "input": {
+    "cursor": {
+      "file": "/model.ts",
+      "regex": "const (profile) ="
+    },
+    "render": true,
+    "topology": true,
+    "type": true
+  }
 }
 ```
 
 Selecting a sketch returns the same solved 2D scene as the sketch editor: the
 selected layer and its upstream layers, with grid, curves, region fills and
 constraint labels. The image is a 960×720 PNG in orthographic local XY; sketch
-`[x, y]` maps to model `[x, 0, -y]`. Omit `--view` / `render.view` for a sketch;
+`[x, y]` maps to model `[x, 0, -y]`. Omit `render.view` for a sketch;
 3D view options return `sketch_view_unsupported`. Select a `.face()`, extrusion,
 or other model expression to inspect its 3D rendering and B-rep instead. Function
 arguments and JSDoc fallback work for sketch observations too.
@@ -446,7 +495,7 @@ image. Source acceptance and saving remain separate from evaluation success.
 
 ## Results and recovery
 
-Single commands emit one JSON result on stdout. The request ID is also written to
+Each request emits one JSON result on stdout. The request ID is also written to
 stderr before sending. Images and binary artifacts are written to new local files;
 JSON returns their `path`, `name`, and `mimeType`. Open the image using the agent's
 image-viewing tool. `--output-dir <directory>` chooses the parent artifact folder.
@@ -465,11 +514,14 @@ and 3 for transport errors or output failure after an invocation.
 connected/forwarded, while `unknown` means execution cannot be ruled out. Neither
 value declares the historical state of an ID reused from an earlier attempt.
 Transport errors include a structured recovery action and instructions. Prefer
-`recovery.argv` / `queryArgv` when a process tool accepts argument arrays; displayed
-`command` / `queryCommand` strings use POSIX-shell quoting.
+`recovery.argv` when starting the service with a process tool. For receipt lookup,
+pass `queryArgv` as the arguments and `queryStdin` as stdin, then close stdin.
+Displayed `command` / `queryCommand` strings use POSIX-shell quoting; the latter
+includes the JSON pipe. Recovery for a failed result lookup retains the ID being
+looked up, rather than asking for a receipt of the lookup itself.
 
 ```sh
-npx --yes @code3d/cli project.c3d.json result model-edit-001
+echo '{"operation":"result","requestId":"model-edit-001"}' | npx --yes @code3d/cli project.c3d.json
 ```
 
 `result` queries the original request without rerunning it. Repeating identical

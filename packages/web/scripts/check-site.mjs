@@ -16,7 +16,11 @@ const agentGuide = await readFile(
 );
 assert.ok(agentGuide.startsWith('# Work with an agent\n'));
 assert.ok(agentGuide.includes('project.c3d.json serve'));
-assert.ok(agentGuide.includes('project.c3d.json context'));
+assert.ok(
+  agentGuide.includes(
+    'echo \'{"operation":"context"}\' | npx --yes @code3d/cli',
+  ),
+);
 for (const [, href] of agentGuide.matchAll(/\]\(([^)]+)\)/g)) {
   if (href.startsWith('/')) {
     const local = new URL(href, site).pathname

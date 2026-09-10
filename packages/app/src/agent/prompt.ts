@@ -23,7 +23,7 @@ Use your saved file's path. Reuse a running service with this configuration; res
 Get live context with a separate command:
 
 \`\`\`sh
-npx --yes @code3d/cli /absolute/path/to/project.c3d.json context
+echo '{"operation":"context"}' | npx --yes @code3d/cli /absolute/path/to/project.c3d.json
 \`\`\`
 
 Read and modify the App project only through this CLI. Follow the guide for file versions, apply, readable core API modeling, rendering and recovery after an uncertain result.`;

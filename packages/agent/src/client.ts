@@ -1,11 +1,6 @@
 import {type AgentConfig, requestUrl} from './config.js';
 import {AgentCipher, maxEnvelopeBytes} from './crypto.js';
-import {
-  type AgentRequest,
-  type AgentResponse,
-  parseRequest,
-  parseResponse,
-} from './protocol.js';
+import {type AgentResponse, parseResponse} from './protocol.js';
 import {AgentError} from './validation.js';
 import {
   parseTransportFailure,
@@ -28,16 +23,13 @@ export class AgentClient {
     return new AgentClient(config, await AgentCipher.create(config));
   }
 
+  /** Operation schemas belong to the App; send the JSON value without normalization. */
   async request(
-    request: AgentRequest,
+    request: unknown,
     options: RequestOptions = {},
   ): Promise<{requestId: string; response: AgentResponse}> {
     const requestId = options.requestId ?? crypto.randomUUID();
-    const body = await this.cipher.seal(
-      'request',
-      requestId,
-      parseRequest(request),
-    );
+    const body = await this.cipher.seal('request', requestId, request);
     const timeout = AbortSignal.timeout(options.timeoutMs ?? 120_000);
     const signal = options.signal
       ? AbortSignal.any([timeout, options.signal])
