@@ -1,8 +1,9 @@
 # GitHub Issues 协作约定
 
-仓库：`vilicvane/code3d`。GitHub Issues 是需求状态的唯一来源；`DESIGN.md`、
-`TOOLING.md`、`PLAN.md` 和 `plans/` 保留已确认设计、实施方案及历史，关联 issue
-但不维护另一份活跃 backlog。`requests/` 是只读历史归档。
+仓库：`vilicvane/code3d`。GitHub Issues 是需求状态的唯一来源。
+[内部开发文档](../../../docs/README.md)按主题维护当前设计、架构和开发说明；
+[研究记录](../../../research/README.md)保留有长期复查价值的实验依据。初期计划与
+本地需求从开发文档索引中的固定历史链接查阅，不恢复本地 backlog 或已完成需求目录。
 
 ## 轻量记录
 
