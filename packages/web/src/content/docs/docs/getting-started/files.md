@@ -51,6 +51,9 @@ changed dependencies or restores its existing lock before compilation.
 Installation continues in the background while you switch files, edit and save.
 Up to 15 packages download concurrently per installation; unpacking runs one
 package at a time alongside downloads. Verified cached archives are reused.
+An interrupted installation is recovered before the next attempt. Once packages
+and their lock are replaced successfully, retrying backup cleanup does not
+repeat the installation.
 The file explorer shows package progress separately from the model preview.
 Success messages disappear after three seconds, including when you have switched
 to another file. Ongoing downloads and errors remain visible; each folder's

@@ -725,6 +725,151 @@ test('a dependency on an older version of the same package resolves separately',
   }
 });
 
+test('committed installs survive cleanup errors and the next preparation collects their backups', async t => {
+  const disk = await diskFiles();
+  t.after(disk.dispose);
+  const fixture = await registryFixture();
+  await fixture.add('tool', '1.0.0');
+  await disk.files.writeFile(
+    '/package.json',
+    JSON.stringify({dependencies: {tool: 'latest'}}),
+  );
+  const states: string[] = [];
+  let installed = 0;
+  const installer = new BrowserPackageInstaller(
+    disk.files,
+    progress => states.push(progress.state),
+    fixture.registry,
+    () => installed++,
+  );
+  await installer.prepare('/model.ts');
+  await fixture.add('tool', '2.0.0');
+  const remove = disk.files.remove.bind(disk.files);
+  let failed = false;
+  const removeMock = t.mock.method(
+    disk.files,
+    'remove',
+    async (file: string) => {
+      if (file === '/.code3d/package-install' && !failed) {
+        failed = true;
+        throw new Error('temporary cleanup failure');
+      }
+      return remove(file);
+    },
+  );
+  await installer.prepare('/package.json', {update: true});
+  assert.equal(states.at(-1), 'ready');
+  assert.equal(
+    installed,
+    2,
+    'a committed installation publishes completion despite cleanup failure',
+  );
+  assert.match(
+    new TextDecoder().decode(
+      await disk.files.readFile('/node_modules/tool/index.js'),
+    ),
+    /2.0.0/,
+  );
+  assert.ok(await disk.files.stat('/.code3d/package-install/previous'));
+  removeMock.mock.restore();
+  fixture.setOffline(true);
+  const requests = fixture.requests.length;
+  await installer.prepare('/model.ts');
+  assert.equal(await disk.files.stat('/.code3d/package-install'), undefined);
+  assert.equal(
+    fixture.requests.length,
+    requests,
+    'cleanup retries do not reinstall or resolve dependencies',
+  );
+  assert.equal(installed, 2);
+});
+
+test('failed rollback preserves recovery files until a later preparation restores the old installation', async t => {
+  const disk = await diskFiles();
+  t.after(disk.dispose);
+  const fixture = await registryFixture();
+  await fixture.add('tool', '1.0.0');
+  await disk.files.writeFile(
+    '/package.json',
+    JSON.stringify({dependencies: {tool: 'latest'}}),
+  );
+  const installer = new BrowserPackageInstaller(
+    disk.files,
+    undefined,
+    fixture.registry,
+  );
+  await installer.prepare('/model.ts');
+  const lock = await disk.files.readFile('/code3d-lock.json');
+  await fixture.add('tool', '2.0.0');
+  const replaceMock = t.mock.method(disk.files, 'replaceFile', async () => {
+    throw new Error('lock commit failed');
+  });
+  const remove = disk.files.remove.bind(disk.files);
+  const removeMock = t.mock.method(
+    disk.files,
+    'remove',
+    async (file: string) => {
+      if (file === '/node_modules') throw new Error('rollback failed');
+      return remove(file);
+    },
+  );
+  await assert.rejects(
+    installer.prepare('/package.json', {update: true}),
+    /Recovery files were preserved/,
+  );
+  assert.ok(
+    await disk.files.readFile(
+      '/.code3d/package-install/previous/tool/index.js',
+    ),
+  );
+  assert.deepEqual(await disk.files.readFile('/code3d-lock.json'), lock);
+  replaceMock.mock.restore();
+  removeMock.mock.restore();
+  fixture.setOffline(true);
+  await installer.prepare('/model.ts');
+  assert.match(
+    new TextDecoder().decode(
+      await disk.files.readFile('/node_modules/tool/index.js'),
+    ),
+    /1.0.0/,
+  );
+  assert.equal(await disk.files.stat('/.code3d/package-install'), undefined);
+});
+
+test('an interrupted first installation is rolled back before attempting new resolution', async t => {
+  const disk = await diskFiles();
+  t.after(disk.dispose);
+  const fixture = await registryFixture();
+  await fixture.add('tool', '1.0.0');
+  await disk.files.writeFile(
+    '/package.json',
+    JSON.stringify({dependencies: {tool: '1'}}),
+  );
+  await new BrowserPackageInstaller(
+    disk.files,
+    undefined,
+    fixture.registry,
+  ).prepare('/model.ts');
+  await disk.files.createDirectory('/.code3d/package-install');
+  // Recreate the point after renaming the first package tree but before committing its lock.
+  await disk.files.rename(
+    '/code3d-lock.json',
+    '/.code3d/package-install/lock.json',
+  );
+  fixture.setOffline(true);
+  await assert.rejects(
+    new BrowserPackageInstaller(
+      disk.files,
+      undefined,
+      fixture.registry,
+    ).prepare('/model.ts'),
+    /offline/,
+  );
+  assert.equal(await disk.files.stat('/node_modules'), undefined);
+  assert.equal(await disk.files.stat('/code3d-lock.json'), undefined);
+  assert.equal(await disk.files.stat('/.code3d/package-install'), undefined);
+});
+
 test('an interrupted swap restores the prior directory before reuse', async () => {
   const disk = await diskFiles();
   try {
