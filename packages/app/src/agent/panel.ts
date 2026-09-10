@@ -13,7 +13,7 @@ import type {AgentProjectSession} from './project-session';
 import {agentPrompt} from './prompt';
 import {AgentPersistence} from './persistence';
 import {randomAgentColor} from './colors';
-import {randomAgentName} from './names';
+import {findAgentName, randomAgentName} from './names';
 import type {AgentRenderHistory} from './render-history';
 import {MousePointer2, UserRoundCog} from 'lucide';
 import {createIcon} from '../ui/icons';
@@ -45,6 +45,7 @@ export class AgentPanel {
   private readonly createFields = document.createElement('fieldset');
   private readonly port = document.createElement('input');
   private readonly name = document.createElement('input');
+  private readonly nameWho = document.createElement('a');
   private readonly prompt = document.createElement('textarea');
   private readonly promptSection = document.createElement('section');
   private readonly promptMessage = document.createElement('p');
@@ -113,6 +114,10 @@ export class AgentPanel {
     this.port.value = String(randomAgentPort());
     this.name.value = this.suggestName();
     this.name.maxLength = 64;
+    this.name.addEventListener('input', () => this.refreshNameLink());
+    this.nameWho.className = 'agent-name-who';
+    this.nameWho.target = '_blank';
+    this.nameWho.rel = 'noopener noreferrer';
     this.prompt.rows = 12;
     this.prompt.readOnly = true;
     this.prompt.setAttribute('aria-label', 'Agent prompt');
@@ -155,10 +160,10 @@ export class AgentPanel {
       'Copy a prompt to your local agent to start its CLI service. Allow this site to connect to your local network when asked. This page keeps reconnecting until you revoke access. Keep it open while agents work.';
     titleLine.append(title, this.connection);
     heading.append(titleLine, note);
-    this.createFields.append(
-      field('Agent name', this.name),
-      field('Local port', this.port),
-    );
+    const nameField = document.createElement('div');
+    nameField.className = 'agent-name-field';
+    nameField.append(field('Agent name', this.name), this.nameWho);
+    this.createFields.append(nameField, field('Local port', this.port));
     const promptActions = document.createElement('div');
     promptActions.className = 'agent-prompt-actions';
     this.promptMessage.className = 'agent-prompt-message';
@@ -215,6 +220,7 @@ export class AgentPanel {
   }
 
   refresh(): void {
+    this.refreshNameLink();
     this.presenceChanged(
       new Set(
         [...this.grants.values()]
@@ -625,6 +631,22 @@ export class AgentPanel {
       );
     }
     this.available = true;
+  }
+
+  private refreshNameLink(): void {
+    const person = findAgentName(this.name.value);
+    this.nameWho.hidden = !person;
+    this.nameWho.textContent = person ? `${person.name} who?` : '';
+    this.name.style.paddingRight = person
+      ? `calc(${person.name.length + 5}ch + 18px)`
+      : '';
+    if (person) {
+      this.nameWho.href = `https://en.wikipedia.org/wiki/${encodeURIComponent(person.article)}`;
+      this.nameWho.title = `Read about ${person.name} on Wikipedia (opens in a new tab)`;
+    } else {
+      this.nameWho.removeAttribute('href');
+      this.nameWho.removeAttribute('title');
+    }
   }
 
   private suggestName(): string {

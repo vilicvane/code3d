@@ -2961,6 +2961,34 @@ kbd {
   overflow: clip;
 }
 
+.agent-name-field {
+  position: relative;
+  min-width: 0;
+}
+
+.agent-name-who {
+  position: absolute;
+  right: 9px;
+  bottom: 8px;
+  color: #858d77;
+  border-radius: 2px;
+  text-decoration: none;
+  font:
+    500 10px/1.4 'IBM Plex Mono',
+    monospace;
+}
+
+.agent-name-who:hover {
+  color: #dfe5ca;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.agent-name-who:focus-visible {
+  outline: 1px solid currentColor;
+  outline-offset: 3px;
+}
+
 .agent-header-title {
   display: flex;
   align-items: center;
