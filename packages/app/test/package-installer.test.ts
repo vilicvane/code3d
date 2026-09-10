@@ -202,6 +202,7 @@ async function registryFixture() {
   };
   return {
     add,
+    request,
     requests,
     registry: () => new NpmRegistry(request),
     setOffline: (value: boolean) => (offline = value),
@@ -1690,5 +1691,133 @@ test('recovery publishes restored files even when resolving the corrected instal
       await reloaded.files.readFile('/node_modules/tool/index.js'),
     ),
     /1.0.0/,
+  );
+});
+
+test('resolver metadata prefetch is bounded, deduplicated and deterministic for ranges, aliases and locked versions', async t => {
+  const {resolveBrowserPackages} = await server.ssrLoadModule<
+    typeof import('../src/project/jspm-package-resolver.ts')
+  >('/src/project/jspm-package-resolver.ts');
+  const fixture = await registryFixture();
+  await fixture.add('shared', '1.0.0');
+  const names = [
+    '@scope/tool',
+    ...Array.from({length: 19}, (_, index) => `tool-${index}`),
+  ];
+  for (const name of names)
+    await fixture.add(name, '1.0.0', {dependencies: {shared: '^1'}});
+  const manifest: PackageManifest = {
+    dependencies: {
+      ...Object.fromEntries(names.map(name => [name, '^1'])),
+      alias: 'npm:@scope/tool@^1',
+    },
+    optionalDependencies: {missing: '1'},
+  };
+  const resolve = async (
+    manifest: PackageManifest,
+    previous?: import('../src/project/package-lock.ts').BrowserPackageLock,
+    reverse = false,
+  ) => {
+    const counts = new Map<string, number>();
+    let reported = false;
+    let active = 0,
+      peak = 0;
+    const registry = new NpmRegistry(async input => {
+      const url = String(input);
+      assert.ok(
+        reported,
+        'normal preparation reports progress before metadata downloads',
+      );
+      counts.set(url, (counts.get(url) ?? 0) + 1);
+      active++;
+      peak = Math.max(peak, active);
+      try {
+        // Complete responses in different orders without using wall-clock delays.
+        const order =
+          [...url].reduce(
+            (sum, character) => sum + character.charCodeAt(0),
+            0,
+          ) % 3;
+        for (let i = 0; i <= (reverse ? 2 - order : order); i++)
+          await nextTurn();
+        return await fixture.request(input);
+      } finally {
+        active--;
+      }
+    });
+    const lock = await resolveBrowserPackages(
+      manifest,
+      registry,
+      previous,
+      () => {
+        reported = true;
+      },
+    );
+    assert.equal(peak, 15);
+    assert.equal(active, 0);
+    assert.ok(
+      [...counts.values()].every(count => count === 1),
+      JSON.stringify([...counts]),
+    );
+    return {lock, counts};
+  };
+  const first = await resolve(manifest);
+  const second = await resolve(manifest, undefined, true);
+  assert.equal(
+    JSON.stringify(first.lock),
+    JSON.stringify(second.lock),
+    'network completion order must not change the lock',
+  );
+  assert.equal(
+    first.counts.get('https://registry.npmjs.org/%40scope%2Ftool'),
+    1,
+  );
+  assert.equal(first.counts.get('https://registry.npmjs.org/shared'), 1);
+  assert.equal(first.counts.get('https://registry.npmjs.org/missing'), 1);
+  assert.equal(first.counts.has('https://registry.npmjs.org/alias'), false);
+  assert.equal(
+    first.lock.resolutions.primary.alias.installUrl,
+    first.lock.resolutions.primary['@scope/tool'].installUrl,
+  );
+  assert.match(first.lock.omitted.missing, /not found/);
+  await fixture.add('added', '1.0.0');
+  await fixture.add('@scope/tool', '1.1.0');
+  const updated = await resolve(
+    {...manifest, dependencies: {...manifest.dependencies, added: '1'}},
+    first.lock,
+  );
+  assert.equal(
+    updated.lock.resolutions.primary['@scope/tool'].installUrl,
+    first.lock.resolutions.primary['@scope/tool'].installUrl,
+  );
+  assert.equal(
+    updated.counts.has('https://registry.npmjs.org/%40scope%2Ftool'),
+    false,
+    'locked packages use exact metadata, not current version ranges',
+  );
+  assert.equal(
+    updated.counts.get('https://registry.npmjs.org/%40scope%2Ftool/1.0.0'),
+    1,
+  );
+});
+
+test('registry coalesces exact metadata reads and reuses packuments within one resolution', async () => {
+  const fixture = await registryFixture();
+  await fixture.add('@scope/tool', '1.0.0');
+  let registry = fixture.registry();
+  await Promise.all(
+    Array.from({length: 12}, () => registry.metadata('@scope/tool', '1.0.0')),
+  );
+  assert.equal(fixture.requests.length, 1);
+  registry = fixture.registry();
+  await registry.prefetch(['@scope/tool', '@scope/tool']);
+  const count = fixture.requests.length;
+  await Promise.all(
+    Array.from({length: 12}, () => registry.metadata('@scope/tool', '1.0.0')),
+  );
+  assert.equal(
+    fixture.requests.length,
+    count,
+    'packument versions supply exact metadata without a second fetch',
   );
 });

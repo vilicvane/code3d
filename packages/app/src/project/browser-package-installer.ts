@@ -9,10 +9,11 @@ import {
   dependencySignature,
   packageLockName,
   parsePackageLock,
-  resolvePackageLock,
+  packageDependencyEdges,
   type BrowserPackageLock,
 } from './package-lock';
 import {extractNpmArchive, NpmRegistry} from './npm-registry';
+import {resolveBrowserPackages} from './jspm-package-resolver';
 import {mapProjectIO} from './io';
 import {PackageInstallationTransaction} from './package-installation-transaction';
 
@@ -108,7 +109,7 @@ export class BrowserPackageInstaller {
         ),
       }) !== dependencySignature(manifest)
     )
-      lock = await resolvePackageLock(manifest, registry, lock, progress);
+      lock = await resolveBrowserPackages(manifest, registry, lock, progress);
     const serialized = JSON.stringify(lock, null, 2) + '\n';
     const nextMarker = installationMarker(lock);
     const marker = await this.files.readFile(
@@ -163,31 +164,28 @@ export class BrowserPackageInstaller {
             location,
           );
         };
-        for (const [name, resolution] of Object.entries(
-          lock.resolutions.primary,
-        ))
-          await link(name, resolution.installUrl, staged);
-        for (const [url, dependencies] of Object.entries(
-          lock.resolutions.secondary,
+        for (const {parent: owner, name, target} of packageDependencyEdges(
+          lock,
         )) {
-          const pkg = lock.packages[url];
-          // Dependencies sit beside the package, so cycles and peers share exact instances.
+          if (!owner) {
+            await link(name, target, staged);
+            continue;
+          }
+          const pkg = lock.packages[owner];
+          if (name === pkg.name && target === owner) continue;
+          // Cycles and peers share instances beside the owning package. An older
+          // version of itself needs a nested node_modules because its name is occupied.
           const parent =
             staged +
             '/' +
-            packagePath(lock, url).slice(0, -pkg.name.length - 1);
-          for (const [name, resolution] of Object.entries(dependencies)) {
-            if (name === pkg.name && resolution.installUrl === url) continue;
-            // A package may depend on an older version of itself. Its name is
-            // occupied beside it, so that dependency needs a nested node_modules.
-            await link(
-              name,
-              resolution.installUrl,
-              name === pkg.name
-                ? parent + '/' + pkg.name + '/node_modules'
-                : parent,
-            );
-          }
+            packagePath(lock, owner).slice(0, -pkg.name.length - 1);
+          await link(
+            name,
+            target,
+            name === pkg.name
+              ? parent + '/' + pkg.name + '/node_modules'
+              : parent,
+          );
         }
         await this.files.writeFile(
           staged + '/.code3d-install.json',

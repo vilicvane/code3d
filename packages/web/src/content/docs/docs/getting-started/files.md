@@ -48,6 +48,10 @@ inside `node_modules`.
 Models without a manifest continue using the App's built-in modeling packages,
 with no installation required. Opening a model with a manifest also installs
 changed dependencies or restores its existing lock before compilation.
+Package metadata is prefetched concurrently and shared across dependencies during
+each resolution. Locked packages keep their selected versions; **Update dependencies**
+checks the registry again using the ranges in your manifest.
+
 Installation continues in the background while you switch files, edit and save.
 After installation, open package files and locks refresh automatically. Tabs for
 removed package versions close; your editable files and other folders stay intact.
