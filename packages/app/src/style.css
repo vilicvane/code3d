@@ -1345,12 +1345,13 @@ kbd {
   letter-spacing: 0.01em;
 }
 
-.viewport-host[data-empty='true'] .viewport-canvas,
-.viewport-host[data-empty='true'] .viewport-coordinate-reference {
+.viewport-host[data-empty='true'] .viewport-canvas {
   visibility: hidden;
 }
 
 .viewport-host[data-empty='true'] .viewport-mode,
+.viewport-host[data-empty='true'] .viewport-coordinate-reference,
+.viewport-host[data-empty='true'] .viewport-grid-scale,
 .viewport-host[data-empty='true'] .viewport-dock-panels,
 .viewport-host[data-empty='true'] .contextual-tool-panel {
   display: none;
@@ -1379,6 +1380,42 @@ kbd {
   height: var(--viewport-coordinate-size);
   overflow: visible;
   filter: drop-shadow(0 4px 12px #0008);
+}
+
+.viewport-grid-scale {
+  order: -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #f1f8e1;
+  font:
+    400 11px/1.4 'IBM Plex Mono',
+    monospace;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  user-select: none;
+  pointer-events: none;
+}
+
+.viewport-grid-scale[hidden] {
+  display: none;
+}
+
+.viewport-grid-scale-bar {
+  display: block;
+  overflow: visible;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1px;
+}
+
+.viewport-grid-scale-cell,
+.viewport-grid-scale-value {
+  opacity: 0.5;
+}
+
+.viewport-grid-scale-remainder {
+  opacity: 0.25;
 }
 
 .viewport-coordinate-backplate {
@@ -2265,6 +2302,10 @@ kbd {
 
 .viewport-feedback-stack > * {
   pointer-events: auto;
+}
+
+.viewport-feedback-stack > .viewport-grid-scale {
+  pointer-events: none;
 }
 
 .viewport-diagnostic-stack {

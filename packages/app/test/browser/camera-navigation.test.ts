@@ -96,7 +96,9 @@ test(
       const canvas = viewport['renderer'].domElement;
       return (
         Math.abs(
-          viewport['camera'].aspect - canvas.clientWidth / canvas.clientHeight,
+          viewport['camera'].projectionMatrix.elements[5] /
+            viewport['camera'].projectionMatrix.elements[0] -
+            canvas.clientWidth / canvas.clientHeight,
         ) < 1e-6
       );
     });
@@ -307,6 +309,8 @@ test(
         await hit.click();
         await assertLocalView(page, axis, sign, frame);
         const aligned = await cameraState(page);
+        assert.equal(aligned.projection, 'orthographic');
+        near(aligned.viewHeight, framed.viewHeight);
         near(aligned.distance, framed.distance);
         aligned.target.forEach((v, i) => near(v, framed.target[i]));
         // The projected front/back endpoints coincide: clicking the front flips.
@@ -331,6 +335,7 @@ test(
     await page.mouse.dblclick(rect.x + 44, rect.y + 44);
     await waitForViewTransition(page);
     const reset = await cameraState(page);
+    assert.equal(reset.projection, 'perspective');
     const expectedDirection = await page.evaluate(
       ({initial, frame}) => {
         const camera = window.navigationApp.viewport['camera'];
@@ -425,9 +430,10 @@ test(
         .dispatchEvent(new MouseEvent('click', {bubbles: true}));
       await new Promise<void>(resolve => {
         const sample = () => {
+          const camera = viewport['camera'];
           samples.push({
             angle: camera.quaternion.angleTo(before),
-            distance: camera.position.distanceTo(controls.focus),
+            distance: controls.capturePose().distance,
             x: camera.position.clone().sub(controls.focus).normalize().x,
             focus: controls.focus.toArray(),
           });
@@ -472,13 +478,10 @@ test(
     await yButton.press('Enter');
     const beforeWheel = await cameraState(page);
     await page.mouse.wheel(0, -125);
-    await page.waitForFunction(distance => {
+    await page.waitForFunction(viewHeight => {
       const viewport = window.navigationApp.viewport;
-      return (
-        viewport['camera'].position.distanceTo(viewport['controls'].focus) <
-        distance * 0.99
-      );
-    }, beforeWheel.distance);
+      return viewport['controls'].capturePose().viewHeight < viewHeight * 0.99;
+    }, beforeWheel.viewHeight);
     const wheeled = await cameraState(page);
     await settleAnimation(page, 400);
     assert.deepEqual(
@@ -543,6 +546,355 @@ test(
     );
     if (process.env.CODE3D_INDICATOR_SCREENSHOT)
       await page.screenshot({path: process.env.CODE3D_INDICATOR_SCREENSHOT});
+    assert.deepEqual(errors, []);
+  },
+);
+
+test(
+  'orthographic views keep zoom, pan, picking and export until the user orbits',
+  {timeout: 120_000},
+  async t => {
+    const {page, errors} = await openNavigationPage(t);
+    const source =
+      "import {box} from '@code3d/core'; export default box(24, 6, 14).material('#8ed5d1');";
+    await setSource(page, source);
+    await page
+      .getByRole('button', {name: 'View from +Z', exact: true})
+      .press('Enter');
+    await waitForViewTransition(page);
+    const aligned = await cameraState(page);
+    assert.equal(aligned.projection, 'orthographic');
+    const rect = await canvasRect(page);
+    const cursor = {
+      x: Math.round(rect.x + rect.width * 0.75),
+      y: Math.round(rect.y + rect.height * 0.65),
+    };
+    // The same world point must remain under the cursor through orthographic zoom.
+    const anchor = await page.evaluate(({x, y}) => {
+      const viewport = window.navigationApp.viewport;
+      const camera = viewport['camera'];
+      const rect = viewport['renderer'].domElement.getBoundingClientRect();
+      const ndc = viewport['pointer'].set(
+        ((x - rect.x) / rect.width) * 2 - 1,
+        1 - ((y - rect.y) / rect.height) * 2,
+      );
+      viewport['raycaster'].setFromCamera(ndc, camera);
+      const ray = viewport['raycaster'].ray;
+      const normal = camera.getWorldDirection(camera.position.clone());
+      const distance =
+        viewport['controls'].focus.clone().sub(ray.origin).dot(normal) /
+        ray.direction.dot(normal);
+      return ray.at(distance, camera.position.clone()).toArray();
+    }, cursor);
+    await page.mouse.move(cursor.x, cursor.y);
+    await page.mouse.wheel(0, -250);
+    await page.waitForFunction(
+      height =>
+        window.navigationApp.viewport['controls'].capturePose().viewHeight <
+        height * 0.9,
+      aligned.viewHeight,
+    );
+    assert.equal((await cameraState(page)).projection, 'orthographic');
+    const projected = await page.evaluate(anchor => {
+      const viewport = window.navigationApp.viewport;
+      const point = viewport['camera'].position
+        .clone()
+        .fromArray(anchor)
+        .project(viewport['camera']);
+      const rect = viewport['renderer'].domElement.getBoundingClientRect();
+      return {
+        x: rect.x + ((point.x + 1) / 2) * rect.width,
+        y: rect.y + ((1 - point.y) / 2) * rect.height,
+      };
+    }, anchor);
+    near(projected.x, cursor.x);
+    near(projected.y, cursor.y);
+    await page.mouse.down({button: 'right'});
+    await page.mouse.move(cursor.x - 40, cursor.y + 30, {steps: 5});
+    await page.mouse.up({button: 'right'});
+    const panned = await cameraState(page);
+    assert.equal(panned.projection, 'orthographic');
+    assert.notDeepEqual(panned.target, aligned.target);
+    await page.setViewportSize({width: 1250, height: 850});
+    await page.waitForFunction(() => {
+      const viewport = window.navigationApp.viewport;
+      const p = viewport['camera'].projectionMatrix.elements;
+      const canvas = viewport['renderer'].domElement;
+      return (
+        Math.abs(p[5] / p[0] - canvas.clientWidth / canvas.clientHeight) < 1e-6
+      );
+    });
+    near((await cameraState(page)).viewHeight, panned.viewHeight);
+    await page.evaluate(() => window.navigationApp.viewport.fit());
+    const fitted = await cameraState(page);
+    assert.equal(fitted.projection, 'orthographic');
+    // Click a visible face; picking must use the active orthographic camera.
+    const face = await page.evaluate(() => {
+      const viewport = window.navigationApp.viewport;
+      const point = viewport['camera'].position
+        .clone()
+        .set(0, 0, 7)
+        .project(viewport['camera']);
+      const rect = viewport['renderer'].domElement.getBoundingClientRect();
+      return {
+        x: rect.x + ((point.x + 1) / 2) * rect.width,
+        y: rect.y + ((1 - point.y) / 2) * rect.height,
+      };
+    });
+    await page.mouse.click(face.x, face.y);
+    assert.equal((await cameraState(page)).projection, 'orthographic');
+    const image = await page.evaluate(async () => {
+      const viewport = window.navigationApp.viewport;
+      const live = viewport['camera'];
+      let exported: {type: string; scale: number; aspect: number} | undefined;
+      const mesh = viewport['root'].getObjectsByProperty('type', 'Mesh')[0];
+      const before = mesh.onBeforeRender;
+      mesh.onBeforeRender = function (
+        renderer,
+        scene,
+        camera,
+        geometry,
+        material,
+        group,
+      ) {
+        if (camera !== live)
+          exported = {
+            type: camera.type,
+            scale: camera.projectionMatrix.elements[5],
+            aspect:
+              camera.projectionMatrix.elements[5] /
+              camera.projectionMatrix.elements[0],
+          };
+        before.call(this, renderer, scene, camera, geometry, material, group);
+      };
+      const png = await viewport.captureImage(720, 480);
+      mesh.onBeforeRender = before;
+      return {
+        exported,
+        bytes: png.size,
+        liveScale: live.projectionMatrix.elements[5],
+      };
+    });
+    assert.ok(image.bytes > 1000);
+    assert.equal(image.exported?.type, 'OrthographicCamera');
+    near(image.exported!.scale, image.liveScale);
+    near(image.exported!.aspect, 1.5);
+    if (process.env.CODE3D_PROJECTION_SCREENSHOT)
+      await page.screenshot({path: process.env.CODE3D_PROJECTION_SCREENSHOT});
+    const beforeOrbit = await cameraState(page);
+    const canvas = await canvasRect(page);
+    await page.mouse.move(
+      canvas.x + canvas.width * 0.8,
+      canvas.y + canvas.height * 0.8,
+    );
+    await page.mouse.down();
+    assert.equal(
+      (await cameraState(page)).projection,
+      'orthographic',
+      'Pointer down alone does not change projection',
+    );
+    await page.mouse.move(
+      canvas.x + canvas.width * 0.8 + 20,
+      canvas.y + canvas.height * 0.8 - 15,
+    );
+    const orbiting = await cameraState(page);
+    assert.equal(orbiting.projection, 'perspective');
+    near(orbiting.viewHeight, beforeOrbit.viewHeight);
+    orbiting.target.forEach((value, index) =>
+      near(value, beforeOrbit.target[index]),
+    );
+    await page.mouse.up();
+    await settleAnimation(page);
+    assert.notDeepEqual(
+      (await cameraState(page)).quaternion,
+      beforeOrbit.quaternion,
+    );
+    assert.deepEqual(errors, []);
+  },
+);
+
+test(
+  'touch pan and pinch retain orthographic projection; orbit and twist restore perspective',
+  {timeout: 120_000},
+  async t => {
+    const {page, errors} = await openNavigationPage(t);
+    await page.emulateMedia({reducedMotion: 'reduce'});
+    await setSource(
+      page,
+      "import {box} from '@code3d/core'; export default box(24, 6, 14);",
+    );
+    const cdp = await page.context().newCDPSession(page);
+    const rect = await canvasRect(page);
+    const x = Math.round(rect.x + rect.width * 0.65);
+    const y = Math.round(rect.y + rect.height * 0.65);
+    const touch = async (
+      type: 'touchStart' | 'touchMove' | 'touchEnd',
+      points: number[][],
+    ) => {
+      await cdp.send('Input.dispatchTouchEvent', {
+        type,
+        touchPoints: points.map(([x, y], id) => ({id, x, y})),
+      });
+    };
+    for (const gesture of ['pan', 'pinch', 'twist', 'orbit']) {
+      await page
+        .getByRole('button', {name: 'View from +Z', exact: true})
+        .press('Enter');
+      const before = await cameraState(page);
+      assert.equal(before.projection, 'orthographic');
+      await touch(
+        'touchStart',
+        gesture === 'orbit'
+          ? [[x, y]]
+          : [
+              [x - 50, y],
+              [x + 50, y],
+            ],
+      );
+      for (let step = 1; step <= 10; step++) {
+        const delta = step * 3;
+        const points =
+          gesture === 'pan'
+            ? [
+                [x - 50 + delta, y + delta],
+                [x + 50 + delta, y + delta],
+              ]
+            : gesture === 'pinch'
+              ? [
+                  [x - 50 - delta, y],
+                  [x + 50 + delta, y],
+                ]
+              : gesture === 'twist'
+                ? [
+                    [x - 50, y - delta],
+                    [x + 50, y + delta],
+                  ]
+                : [[x + delta, y - delta]];
+        await touch('touchMove', points);
+        if (gesture === 'pan' || gesture === 'pinch')
+          assert.equal(
+            (await cameraState(page)).projection,
+            'orthographic',
+            gesture,
+          );
+      }
+      await touch('touchEnd', []);
+      const after = await cameraState(page);
+      if (gesture === 'pan') assert.notDeepEqual(after.target, before.target);
+      else if (gesture === 'pinch')
+        assert.ok(after.viewHeight < before.viewHeight);
+      else assert.equal(after.projection, 'perspective', gesture);
+    }
+    await cdp.detach();
+    assert.deepEqual(errors, []);
+  },
+);
+
+test(
+  'projection transitions flatten depth continuously and let an ongoing orbit control orientation',
+  {timeout: 120_000},
+  async t => {
+    const {page, errors} = await openNavigationPage(t);
+    await setSource(
+      page,
+      "import {box} from '@code3d/core'; export default box(24, 6, 14);",
+    );
+    await page.emulateMedia({reducedMotion: 'no-preference'});
+    const samples = await page.evaluate(async () => {
+      const viewport = window.navigationApp.viewport;
+      const controls = viewport['controls'];
+      controls.object.position.set(0, 0, 60);
+      controls.focus.set(0, 0, 0);
+      controls.object.up.set(0, 1, 0);
+      controls.syncCamera();
+      const sample = () => {
+        const camera = viewport['camera'];
+        const front = camera.position.clone().set(10, 0, 7).project(camera);
+        const back = camera.position.clone().set(10, 0, -7).project(camera);
+        return {
+          depthRatio: front.x / back.x,
+          viewHeight: controls.capturePose().viewHeight,
+          distance: camera.position.distanceTo(controls.focus),
+          type: camera.type,
+        };
+      };
+      const samples = [sample()];
+      controls.setViewDirection(
+        controls.focus.clone().set(0, 0, 1),
+        controls.object.up,
+      );
+      await new Promise<void>(resolve => {
+        const frame = () => {
+          samples.push(sample());
+          if (controls['transition']) requestAnimationFrame(frame);
+          else resolve();
+        };
+        requestAnimationFrame(frame);
+      });
+      return samples;
+    });
+    assert.ok(samples.length >= 4);
+    assert.equal(samples[0].type, 'PerspectiveCamera');
+    assert.equal(samples.at(-1)!.type, 'OrthographicCamera');
+    assert.ok(
+      samples.some(
+        s => s.depthRatio < samples[0].depthRatio - 0.02 && s.depthRatio > 1.02,
+      ),
+      'Depth must change before the final camera handoff',
+    );
+    for (let i = 1; i < samples.length; i++) {
+      assert.ok(samples[i].depthRatio <= samples[i - 1].depthRatio + 1e-8);
+      near(samples[i].viewHeight, samples[0].viewHeight);
+    }
+    near(samples.at(-1)!.depthRatio, 1);
+    assert.ok(
+      Math.max(...samples.map(s => s.distance)) > samples[0].distance * 3,
+      'Dolly and lens changes happen together',
+    );
+    const rect = await canvasRect(page);
+    const x = rect.x + rect.width * 0.8;
+    const y = rect.y + rect.height * 0.75;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + 15, y - 15);
+    const started = await page.evaluate(() => {
+      const pose = window.navigationApp.viewport['controls'].capturePose();
+      return {
+        projection: pose.projection,
+        projectionMix: pose.projectionMix,
+        orientation: pose.orientation.toArray(),
+      };
+    });
+    assert.equal(started.projection, 'perspective');
+    assert.ok(
+      started.projectionMix < 1,
+      'Orbit starts a lens transition instead of jumping straight to perspective',
+    );
+    await page.mouse.move(x + 55, y - 45, {steps: 8});
+    const moved = await cameraState(page);
+    assert.notDeepEqual(moved.quaternion, started.orientation);
+    const saved = await page.evaluate(() => {
+      const controls = window.navigationApp.viewport['controls'];
+      return {
+        current: controls.capturePose().orientation.toArray(),
+        saved: controls.savedPose().orientation.toArray(),
+      };
+    });
+    assert.deepEqual(
+      saved.saved,
+      saved.current,
+      'Scene memory must retain the live orbit while its lens is transitioning',
+    );
+    await page.mouse.up();
+    await waitForViewTransition(page);
+    assert.equal(
+      await page.evaluate(
+        () =>
+          window.navigationApp.viewport['controls'].capturePose().projectionMix,
+      ),
+      1,
+    );
+    assert.equal((await cameraState(page)).projection, 'perspective');
     assert.deepEqual(errors, []);
   },
 );
@@ -612,6 +964,8 @@ async function cameraState(page: Page) {
       quaternion: camera.quaternion.toArray(),
       target: target.toArray(),
       distance: camera.position.distanceTo(target),
+      projection: viewport['controls'].capturePose().projection,
+      viewHeight: viewport['controls'].capturePose().viewHeight,
       near: camera.near,
       far: camera.far,
       fogNear: fog.near,
@@ -674,3 +1028,220 @@ async function zoomUntil(
 function near(actual: number, expected: number) {
   assert.ok(Math.abs(actual - expected) < 1e-6, `${actual} != ${expected}`);
 }
+
+test(
+  'adaptive work-plane grids follow all six local axis views, scale, pan and render mode',
+  {timeout: 120_000},
+  async t => {
+    const {page, errors} = await openNavigationPage(t);
+    await setSource(
+      page,
+      "import {box} from '@code3d/core'; export default box(24, 6, 14);",
+    );
+    const state = () =>
+      page.evaluate(() => {
+        const viewport = window.navigationApp.viewport;
+        const grid = viewport['rendering'].grid;
+        return {
+          plane: grid.plane,
+          step: grid.step,
+        };
+      });
+    // The same selected occurrence drives both the indicator and grid, including
+    // instance placement and live transform previews.
+    await page.evaluate(() => {
+      const viewport = window.navigationApp.viewport;
+      const target = viewport['occurrences'].get(
+        viewport['selectedKey'],
+      )!.object;
+      target.position.set(12, -4, 7);
+      target.quaternion.setFromAxisAngle(
+        target.position.clone().set(0, 1, 0),
+        Math.PI / 5,
+      );
+      viewport['coordinateReference']!.update();
+    });
+    for (const [axis, plane] of [
+      ['x', 'YZ'],
+      ['y', 'XZ'],
+      ['z', 'XY'],
+    ] as const) {
+      for (const sign of ['positive', 'negative']) {
+        await page
+          .locator(
+            `.viewport-coordinate-axis[data-axis="${axis}"][data-direction="${sign}"]`,
+          )
+          .dispatchEvent('click', {detail: 1});
+        await page.waitForFunction(
+          () => !window.navigationApp.viewport['controls']['transition'],
+        );
+        assert.equal((await state()).plane, plane);
+      }
+    }
+    for (const span of [0.002, 0.2, 20, 2000, 2e6]) {
+      const result = await page.evaluate(async span => {
+        const viewport = window.navigationApp.viewport;
+        const controls = viewport['controls'];
+        const pose = controls.capturePose();
+        controls.restorePose({
+          ...pose,
+          distance: span * 2,
+          viewHeight: span,
+          focus: pose.focus.set(1000, 2000, 3000),
+        });
+        await new Promise<void>(resolve =>
+          requestAnimationFrame(() => resolve()),
+        );
+        const grid = viewport['rendering'].grid;
+        const canvas = viewport['renderer'].domElement;
+        const label = document.querySelector(
+          '.viewport-grid-scale-value',
+        )!.textContent!;
+        const distance = Number(label.split(' ')[0]);
+        return {
+          label,
+          distance,
+          barWidth: document
+            .querySelector('.viewport-grid-scale-bar')!
+            .getBoundingClientRect().width,
+          step: grid.step,
+          scale: canvas.clientHeight / span,
+          focus: grid.focus.toArray(),
+        };
+      }, span);
+      assert.ok(
+        result.step * result.scale >= 8 - 1e-8 &&
+          result.step * result.scale <= 20 + 1e-8,
+      );
+      assert.deepEqual(result.focus, [1000, 2000, 3000]);
+      assert.ok(result.label.endsWith(' unit'));
+      assert.ok(Math.abs(result.distance / result.step - 1) < 1e-8);
+      assert.equal(result.barWidth, 60);
+    }
+    await rotate(page);
+    assert.equal((await state()).plane, 'XZ');
+    await page.evaluate(() =>
+      window.navigationApp.viewport.setRenderMode('render'),
+    );
+    assert.equal(
+      await page.locator('.viewport-coordinate-reference').isVisible(),
+      false,
+    );
+    assert.equal(await page.locator('.viewport-grid-scale').isVisible(), false);
+    await page.evaluate(() =>
+      window.navigationApp.viewport.setRenderMode('modeling'),
+    );
+    assert.equal(await page.locator('.viewport-grid-scale').isVisible(), true);
+    assert.deepEqual(errors, []);
+  },
+);
+
+test('the shared grid legend follows sketch zoom and restores the 3D display on exit', async t => {
+  const {page, errors} = await openNavigationPage(t);
+  await page.evaluate(() => {
+    const editor = window.navigationApp.codeEditor.editor;
+    const source = [
+      "import {box, sketch} from '@code3d/core';",
+      'export const solid = box(24, 6, 14);',
+      "export const outline = sketch([['point', 1, [0, 0]], ['point', 2, [20, 0]], ['line', 3, [1, 2]]]);",
+    ].join('\n');
+    editor.getModel()!.setValue(source);
+    editor.setPosition(
+      editor.getModel()!.getPositionAt(source.indexOf('box(24') + 2),
+    );
+  });
+  await page.waitForFunction(
+    () => window.navigationApp.viewport['module']?.sketches.size === 1,
+  );
+  await page.evaluate(() => {
+    window.navigationApp.viewport.setRenderMode('render');
+    const editor = window.navigationApp.codeEditor.editor;
+    editor.setPosition(
+      editor
+        .getModel()!
+        .getPositionAt(editor.getValue().indexOf('sketch([') + 2),
+    );
+  });
+  await page.locator('.sketch-editor:not([hidden])').waitFor();
+  await page.evaluate(() =>
+    window.navigationApp.viewport.setRenderMode('render'),
+  );
+  const legend = page.locator('.viewport-grid-scale');
+  assert.equal(await legend.count(), 1);
+  assert.equal(
+    await legend.isVisible(),
+    true,
+    'sketch has its own grid even in 3D Render mode',
+  );
+  const canvas = await page.locator('.sketch-canvas').boundingBox();
+  assert.ok(canvas);
+  await page.mouse.move(
+    canvas.x + canvas.width / 2,
+    canvas.y + canvas.height / 2,
+  );
+  const scales: number[] = [];
+  for (const delta of [0, -900, 1800, -2400, -4000, 14000, -10000]) {
+    if (delta) {
+      const before = await legend.innerText();
+      await page.mouse.wheel(0, delta);
+      await page.waitForFunction(
+        before =>
+          document.querySelector('.viewport-grid-scale')!.textContent !==
+          before,
+        before,
+      );
+    }
+    const measured = await page.evaluate(() => {
+      const svg = document.querySelector('.sketch-canvas')!;
+      const x = (id: number) =>
+        Number(
+          svg
+            .querySelector(`circle.local[data-id="${id}"]`)!
+            .getAttribute('cx'),
+        );
+      const scale = (x(2) - x(1)) / 20;
+      const vertical = [...svg.querySelectorAll('line.grid')]
+        .filter(line => line.getAttribute('x1') === line.getAttribute('x2'))
+        .map(line => Number(line.getAttribute('x1')))
+        .sort((a, b) => a - b);
+      return {
+        scale,
+        cellLength: (vertical[1]! - vertical[0]!) / scale,
+        label: Number(
+          document
+            .querySelector('.viewport-grid-scale-value')!
+            .textContent!.split(' ')[0],
+        ),
+      };
+    });
+    assert.ok(Math.abs(measured.label / measured.cellLength - 1) < 1e-7);
+    scales.push(measured.scale);
+  }
+  assert.ok(Math.min(...scales) < 0.05, 'zoom out beyond the former minimum');
+  assert.ok(Math.max(...scales) > 1000, 'zoom in beyond the former maximum');
+  await page.evaluate(() => {
+    const editor = window.navigationApp.codeEditor.editor;
+    editor.setPosition(
+      editor.getModel()!.getPositionAt(editor.getValue().indexOf('box(24') + 2),
+    );
+  });
+  await page.locator('.sketch-editor:not([hidden])').waitFor({state: 'hidden'});
+  assert.equal(
+    await legend.isVisible(),
+    false,
+    'returning to 3D restores Render mode',
+  );
+  await page.evaluate(() =>
+    window.navigationApp.viewport.setRenderMode('modeling'),
+  );
+  assert.equal(await legend.isVisible(), true);
+  await page.waitForFunction(
+    () =>
+      Number(
+        document
+          .querySelector('.viewport-grid-scale-value')!
+          .textContent!.split(' ')[0],
+      ) === window.navigationApp.viewport['rendering'].grid.step,
+  );
+  assert.deepEqual(errors, []);
+});

@@ -57,6 +57,11 @@ ToolEditPlan、ToolSession 和 host 边界。参数、表达式、实参、拓�
 原生编辑行为。验证见 [source-edit-diff](../../../packages/app/test/source-edit-diff.test.ts)、
 [source-edit-popover](../../../packages/app/test/browser/source-edit-popover.test.ts)。
 
+页面 UI 将网格图例、源码更新提示和诊断放入 viewport 左下角的同一个 stack，
+图例位于最下方，提示随内容高度向上排列。3D viewport 与 sketch 只通知格距变化，
+共用图例显示当前视图的小格长度；图例在空预览和 3D 渲染模式下隐藏。空预览的
+坐标指示器退出布局，使 agent 渲染小窗自动使用共享的顶部边距。
+
 ## 参数与注释
 
 `@code3d.param` 从实际调用签名读取参数 kind、约束和默认显示值，可用于函数、
@@ -95,6 +100,15 @@ TypeScript 必填性、不读取函数初始化器，也不注入运行时默认
 原点拖动固定手势开始的 snapshot，旋转使用新旧完整旋转的差。
 坐标细节见[坐标技能](../../skills/code3d-coordinate-semantics/SKILL.md)。
 
+位置拖动按手势开始时的网格小格长度量化沿操作轴的实际位移，再按 sensitivity
+反推参数值；以手势开始值为基准，已有非整格数值不会在抓取时跳变。格距、平面和
+occurrence 参考架保持到提交或取消，导出也使用同一冻结网格。
+Alt 临时取消位置拖动的网格吸附，按下/松开时用原始位移立即更新预览，不需要
+额外移动鼠标。文本框继续按自己的 step 调整，显式数字输入保持精确值；旋转
+保持已有角度步长，参数合法性仍由工具计划校验。验证见
+[网格冻结](../../../packages/app/test/adaptive-grid.test.ts)与
+[空间交互回归](../../../packages/app/test/browser/coordinate-semantics.test.ts)。
+
 拓扑 selector 的单选/多选来自参数类型。fillet/chamfer 的显式过滤数组非空，
 取消最后一个选择删除过滤实参并恢复全部边语义；全部边模式不伪装为显式全选。
 无效的旧输入 ID 不进入可选集合。同一轮交互合并撤销；离开源码调用结束面板，
@@ -122,6 +136,16 @@ Tab 跳转沿同一 source ref 聚焦有效参数输入，保留补全、snippet
 模型和拓扑引用的绘制使用可见 occurrence 的正确变换。具体颜色、屏幕尺寸、
 关系层级和 CAD/PNG 显示边界由[可视化技能](../../skills/code3d-visualization/SKILL.md)维护。
 
+[自适应网格](../../../packages/app/src/rendering/adaptive-grid.ts)与 sketch 共用
+[格距计算](../../../packages/app/src/grid-scale.ts)，只绘制当前档位的小格与主间隔，
+不混合不同格距。透视使用 XZ 工作平面；正交使用当前参考架中最朝向相机的主平面。
+网格跟随坐标指示器的世界或 occurrence 原点和朝向，不继承实例缩放，中心线使用
+实际轴向颜色。程序化平面保留真实深度遮挡，上传 GPU 前约减周期坐标以支持大幅
+平移；图片导出更新自己的相机和尺寸，结束后恢复实时网格。
+图例强调主间隔中的第一个小格，数字为该小格的模型长度；固定图示解释细分关系，
+不暗示透视下屏幕各处具有相同比例。验证见
+[网格绘制](../../../packages/app/test/browser/adaptive-grid.test.ts)。
+
 ## 编辑器状态与诊断
 
 文件树选择、活动标签、源码光标、临时预览和最后成功模型分别维护。关闭最后一个
@@ -142,6 +166,16 @@ tab 后允许无活动文档，保留文档内容、撤销和视图状态以便�
 才按对应规则恢复或初始化。相机与导航细节由
 [viewport-navigation](../../../packages/app/src/ui/viewport-navigation.ts)及
 [viewport-memory 回归](../../../packages/app/test/browser/viewport-memory.test.ts)维护。
+
+点击坐标轴端点进入原生正交投影；实际旋转视图才恢复透视，平移、缩放和空间工具
+拖动保留投影。导航分别管理操作相机与显示相机，投影过渡联动距离和 FOV，保持
+焦平面比例；恢复透视期间操作相机继续响应拖动。轴选择沿用视角切换过渡，拖动
+引起的镜头恢复使用更短过渡；中断从当前显示状态继续，减少动态效果偏好跳过动画。
+裁剪和雾范围随虚拟视点平移；拾取、坐标指示器、TransformControls、固定像素
+标记与截图使用显示相机，工具不得缓存已替换的相机。视图记录包含投影模式、
+过渡中的透视强度及焦平面可见高度，缩放动画和临时预览恢复沿用同一份状态。
+验证见 [相机导航](../../../packages/app/test/browser/camera-navigation.test.ts)与
+[相机计算](../../../packages/app/test/view-camera.test.ts)。
 
 诊断从最内层求值边界附上原 SourceRef，外层不覆盖已有精确位置。源码诊断进入
 Monaco marker，无法归属源码的项目/Worker 错误才使用全局入口；安装失败由包

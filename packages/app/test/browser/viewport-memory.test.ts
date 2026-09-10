@@ -138,15 +138,16 @@ async function uiState(page: Page) {
       focus: viewport['controls'].focus.toArray(),
       orientation: viewport['camera'].quaternion.toArray(),
       mode: viewport['rendering'].mode,
+      projection: viewport['controls'].capturePose().projection,
+      viewHeight: viewport['controls'].capturePose().viewHeight,
     };
   });
 }
 
 async function switchFile(page: Page, file: string): Promise<void> {
-  await page.evaluate(
-    file => window.viewportMemoryUi.codeEditor.switchFile(file),
-    file,
-  );
+  await page
+    .getByRole('treeitem', {name: file.split('/').at(-1)!, exact: true})
+    .click();
   await page.waitForFunction(file => {
     const {viewport, codeEditor} = window.viewportMemoryUi;
     return (
@@ -157,7 +158,8 @@ async function switchFile(page: Page, file: string): Promise<void> {
             entry => entry.sourceRef.file === file,
           )) &&
       document.querySelector('#viewport-status')?.getAttribute('data-state') !==
-        'busy'
+        'busy' &&
+      !viewport['controls']['transition']
     );
   }, file);
 }
@@ -175,7 +177,7 @@ test(
   async t => {
     const page = await open(t);
     await load(page, assembly, 'a =');
-    await pose(page, 90, [3, 4, 5], 'render');
+    await pose(page, 90, [3, 4, 5], 'render', 'orthographic');
     const a = await state(page);
     await select(page, 'b =');
     assert.equal((await state(page)).mode, 'modeling');
@@ -219,12 +221,14 @@ for (const first of ['group', 'collection'] as const) {
       const source =
         first === 'group' ? assembly.replace('[a, b]', '[a, b, a]') : assembly;
       await load(page, source, firstSelection);
-      await pose(page, 175, [2, 3, 4], 'render');
+      await pose(page, 175, [2, 3, 4], 'render', 'orthographic');
       const original = await state(page);
       const before = await projectedVertex(page);
       await select(page, secondSelection);
       const seeded = await state(page);
       assert.equal(seeded.mode, 'render');
+      assert.equal(seeded.projection, 'orthographic');
+      near(seeded.viewHeight, original.viewHeight);
       near(seeded.distance, original.distance);
       const after = await projectedVertex(page);
       after.forEach((value, index) => near(value, before[index]));
@@ -253,7 +257,7 @@ const copies = [10, 50].map(size => box(size, size, size));
 export const first = copies[0];
 export const second = copies[1];`;
     await load(page, source, 'first =');
-    await pose(page, 95, [1, 2, 3], 'render');
+    await pose(page, 95, [1, 2, 3], 'render', 'orthographic');
     const first = await state(page);
     await select(page, 'second =');
     await pose(page, 450, [9, 8, 7]);
@@ -274,7 +278,7 @@ export const second = copies[1];`;
   },
 );
 
-async function open(t: TestContext): Promise<Page> {
+async function open(t: TestContext, animateViewChanges = false): Promise<Page> {
   assert.ok(process.env.CODE3D_TEST_URL);
   const browser = await chromium.connectOverCDP(
     process.env.CODE3D_CDP_URL ?? 'http://localhost:9222',
@@ -298,7 +302,7 @@ async function open(t: TestContext): Promise<Page> {
     }),
   );
   await page.goto(url);
-  await page.evaluate(async () => {
+  await page.evaluate(async animateViewChanges => {
     const {ModelCompilerClient} = await import('/src/model/compiler-client.ts');
     const {browserPackageFiles} =
       await import('/src/project/browser-packages.ts');
@@ -310,6 +314,8 @@ async function open(t: TestContext): Promise<Page> {
       onNavigateSource() {},
       onPositionTool() {},
       onTopologySelection() {},
+      // State restoration is tested independently of animated navigation.
+      animateViewChanges,
     });
     window.viewportMemory = {
       client,
@@ -318,7 +324,7 @@ async function open(t: TestContext): Promise<Page> {
       file: '',
       module: undefined!,
     };
-  });
+  }, animateViewChanges);
   return page;
 }
 
@@ -326,7 +332,7 @@ test(
   'scope changes animate scale, retarget from the displayed pose and yield to navigation',
   {timeout: 120_000},
   async t => {
-    const page = await open(t);
+    const page = await open(t, true);
     await page.emulateMedia({reducedMotion: 'no-preference'});
     const source = `import {box} from '@code3d/core';
 export const small = box(2, 2, 2);
@@ -470,9 +476,10 @@ async function pose(
   distance: number,
   focus: number[],
   mode: 'modeling' | 'render' = 'modeling',
+  projection: 'perspective' | 'orthographic' = 'perspective',
 ): Promise<void> {
   await page.evaluate(
-    ({distance, focus, mode}) => {
+    ({distance, focus, mode, projection}) => {
       const {viewport} = window.viewportMemory;
       const controls = viewport['controls'];
       const camera = viewport['camera'];
@@ -480,9 +487,15 @@ async function pose(
       camera.position.set(focus[0], focus[1], focus[2] + distance);
       camera.up.set(0, 1, 0);
       controls.syncCamera();
+      controls.restorePose({
+        ...controls.capturePose(),
+        projection,
+        projectionMix: projection === 'orthographic' ? 0 : 1,
+        viewHeight: distance / 2,
+      });
       viewport.setRenderMode(mode);
     },
-    {distance, focus, mode},
+    {distance, focus, mode, projection},
   );
 }
 
@@ -495,6 +508,8 @@ async function state(page: Page) {
       focus: controls.focus.toArray(),
       orientation: viewport['camera'].quaternion.toArray(),
       mode: viewport['rendering'].mode,
+      projection: controls.capturePose().projection,
+      viewHeight: controls.capturePose().viewHeight,
     };
   });
 }
@@ -534,4 +549,6 @@ function nearState(
     near(value, expected.orientation[index]),
   );
   assert.equal(actual.mode, expected.mode);
+  assert.equal(actual.projection, expected.projection);
+  near(actual.viewHeight, expected.viewHeight);
 }

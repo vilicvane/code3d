@@ -18,6 +18,12 @@ const handleLengthPixels = 100;
 
 export type TransformAxis = 'x' | 'y' | 'z';
 
+/** A drag owns a fixed grid interval; numeric input policies remain independent. */
+export type TranslationGrid = {
+  lock(): number;
+  unlock(): void;
+};
+
 type TransformBindingBase = Readonly<{
   axis: TransformAxis;
   mode: 'translate' | 'rotate';
@@ -68,6 +74,8 @@ type ActiveDrag = {
   position: THREE.Vector3;
   quaternion: THREE.Quaternion;
   value: number;
+  delta: number;
+  gridStep?: number;
 };
 
 /** One control per axis also represents the non-orthogonal axes of Euler editing. */
@@ -80,12 +88,14 @@ export class TransformGizmo {
   private hovered?: AxisControl;
   private pointerId?: number;
   private cancelling = false;
+  private bypassSnap = false;
 
   constructor(
     scene: THREE.Scene,
-    private readonly camera: THREE.Camera,
+    private camera: THREE.Camera,
     private readonly domElement: HTMLElement,
     private readonly setNavigationEnabled: (enabled: boolean) => void,
+    private readonly translationGrid: TranslationGrid,
     private readonly onEvent: (event: TransformGizmoEvent) => void,
   ) {
     this.previousTouchAction = domElement.style.touchAction;
@@ -136,6 +146,12 @@ export class TransformGizmo {
       this.onPointerCancel,
       options,
     );
+    domElement.ownerDocument.addEventListener(
+      'keydown',
+      this.onSnapKey,
+      options,
+    );
+    domElement.ownerDocument.addEventListener('keyup', this.onSnapKey, options);
   }
 
   attach(
@@ -154,6 +170,11 @@ export class TransformGizmo {
       control.controls.attach(control.proxy);
     }
     this.updateAnchor();
+  }
+
+  setCamera(camera: THREE.Camera): void {
+    this.camera = camera;
+    for (const {controls} of this.axes) controls.camera = camera;
   }
 
   detach(): void {
@@ -271,6 +292,7 @@ export class TransformGizmo {
     this.cancelling = false;
     active.control.controls.dragging = false;
     this.active = undefined;
+    this.endTranslation(active);
     this.setHovered(undefined);
     this.releasePointer();
     this.setNavigationEnabled(true);
@@ -286,6 +308,11 @@ export class TransformGizmo {
       position: control.proxy.position.clone(),
       quaternion: control.proxy.quaternion.clone(),
       value: control.binding.value,
+      delta: 0,
+      gridStep:
+        control.binding.mode === 'translate'
+          ? this.translationGrid.lock()
+          : undefined,
     };
     this.setHovered(control);
     this.setNavigationEnabled(false);
@@ -301,17 +328,42 @@ export class TransformGizmo {
       binding.axis === 'y' ? 1 : 0,
       binding.axis === 'z' ? 1 : 0,
     );
-    const delta =
+    active.delta =
       binding.mode === 'rotate'
         ? (control.angle * 180) / Math.PI
         : control.proxy.position
             .clone()
             .sub(position)
             .dot(direction.clone().applyQuaternion(quaternion));
-    const value = snapNumericValue(
-      {value: binding.value, kind: binding.parameterKind, step: binding.step},
-      binding.value + delta / binding.sensitivity,
+    this.applyDrag();
+  }
+
+  private applyDrag(): void {
+    const active = this.active!;
+    const {binding, position, quaternion, control} = active;
+    const direction = new THREE.Vector3(
+      binding.axis === 'x' ? 1 : 0,
+      binding.axis === 'y' ? 1 : 0,
+      binding.axis === 'z' ? 1 : 0,
     );
+    // Quantize spatial distance before reversing the source parameter mapping.
+    // Keep the gesture's starting value, so off-grid inputs do not jump on grab.
+    const delta =
+      active.gridStep === undefined || this.bypassSnap
+        ? active.delta
+        : Math.round(active.delta / active.gridStep) * active.gridStep;
+    const candidate = binding.value + delta / binding.sensitivity;
+    const value =
+      binding.mode === 'rotate'
+        ? snapNumericValue(
+            {
+              value: binding.value,
+              kind: binding.parameterKind,
+              step: binding.step,
+            },
+            candidate,
+          )
+        : Number(candidate.toPrecision(12));
     const displacement = (value - binding.value) * binding.sensitivity;
     if (binding.mode === 'rotate') {
       control.proxy.quaternion
@@ -344,6 +396,7 @@ export class TransformGizmo {
     const active = this.active;
     if (!active || active.control !== control) return;
     this.active = undefined;
+    this.endTranslation(active);
     this.setHovered(undefined);
     this.releasePointer();
     this.setNavigationEnabled(true);
@@ -363,6 +416,20 @@ export class TransformGizmo {
           : null;
     }
   }
+
+  private endTranslation(active: ActiveDrag): void {
+    if (active.gridStep !== undefined) this.translationGrid.unlock();
+    this.bypassSnap = false;
+  }
+
+  private onSnapKey = (event: KeyboardEvent): void => {
+    if (event.key !== 'Alt' || this.active?.gridStep === undefined) return;
+    const bypass = event.type === 'keydown';
+    if (bypass === this.bypassSnap) return;
+    this.bypassSnap = bypass;
+    event.preventDefault();
+    this.applyDrag();
+  };
 
   private prepareRay(event: PointerEvent): THREE.Raycaster {
     const rect = this.domElement.getBoundingClientRect();
@@ -414,6 +481,7 @@ export class TransformGizmo {
     if (!control) return;
     this.pointerId = event.pointerId;
     this.domElement.setPointerCapture(event.pointerId);
+    this.bypassSnap = event.altKey;
     control.controls.getHelper().updateMatrixWorld(true);
     control.controls.pointerDown(null);
   };
@@ -421,6 +489,7 @@ export class TransformGizmo {
   private onPointerMove = (event: PointerEvent): void => {
     if (this.active) {
       if (event.pointerId !== this.pointerId) return;
+      this.bypassSnap = event.altKey;
       this.prepareRay(event);
       this.active.control.controls.pointerMove(null);
     } else if (event.pointerType === 'mouse' || event.pointerType === 'pen') {

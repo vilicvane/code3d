@@ -2,11 +2,7 @@ import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
 import {createAppTestServer} from './vite-test-server.ts';
 
-let server,
-  DrawingDimensions,
-  SketchLineDrawing,
-  snapSketchPointer,
-  sketchGridStep;
+let server, DrawingDimensions, SketchLineDrawing, snapSketchPointer;
 before(async () => {
   server = await createAppTestServer();
   ({DrawingDimensions} = await server.ssrLoadModule(
@@ -15,7 +11,7 @@ before(async () => {
   ({SketchLineDrawing} = await server.ssrLoadModule(
     '/src/tools/sketch-drawing.ts',
   ));
-  ({snapSketchPointer, sketchGridStep} = await server.ssrLoadModule(
+  ({snapSketchPointer} = await server.ssrLoadModule(
     '/src/tools/sketch-snap.ts',
   ));
 });
@@ -32,17 +28,6 @@ const near = (actual, expected) =>
       `${actual} != ${expected}`,
     ),
   );
-
-test('the grid uses dense 1/2/5 subdivisions at every zoom level', () => {
-  for (let scale = 0.05; scale <= 1000; scale *= 1.03) {
-    const step = sketchGridStep(scale);
-    assert.ok(step * scale >= 8 - 1e-9 && step * scale <= 20 + 1e-9);
-    const normalized = step / 10 ** Math.floor(Math.log10(step));
-    assert.ok([1, 2, 5].some(value => Math.abs(value - normalized) < 1e-9));
-  }
-  assert.equal(sketchGridStep(6), 2);
-  assert.equal(sketchGridStep(20), 0.5);
-});
 
 test('direction snapping also aligns the free axis to the grid', () => {
   const result = snapSketchPointer(

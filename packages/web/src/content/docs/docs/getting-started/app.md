@@ -110,12 +110,16 @@ preview while the editor continues to report missing required arguments.
   Zoom has no fixed distance limits.
 - Click an axis endpoint in the upper-right coordinate indicator to view from
   +X, −X, +Y, −Y, +Z, or −Z. It uses the selected object's local frame, or the
-  world frame when nothing is selected, and keeps your zoom distance. Click
+  world frame when nothing is selected, and enters orthographic projection while
+  keeping the scale at the center of the view. Rotating the camera restores
+  perspective; panning, zooming and using modeling tools keep the orthographic
+  view. Click
   the facing endpoint again to flip to the other side. Positive directions
   have white X/Y/Z labels; negative directions are plain dots. Double-click
-  anywhere on the indicator to restore the default angled view and fit the
-  model. View changes animate smoothly; dragging or scrolling immediately
-  takes over. The system's reduced-motion preference skips these animations.
+  anywhere on the indicator to restore the default angled perspective view and fit the
+  model. Rotation, zoom and the change between perspective and orthographic
+  projection animate smoothly; dragging or scrolling immediately takes over.
+  When rotation restores perspective, the lens transition continues while you drag. The system's reduced-motion preference skips these animations.
   You can also focus an axis with Tab and press Enter or Space to select it;
   pressing Enter or Space on the indicator itself resets the view.
 - Click geometry to select an occurrence or an available source context.
@@ -132,7 +136,8 @@ mode. Switch back to **Modeling** to select geometry and use its tools.
 This switch applies to the 3D viewport; sketch editing keeps its 2D tools.
 
 During the session, each displayed model or collection remembers its view and
-Modeling/Render mode. Returning to it restores your rotation, pan and zoom;
+Modeling/Render mode. Returning to it restores your rotation, pan, zoom and
+perspective or orthographic projection;
 changing which member is emphasized keeps the collection's view. New models
 are fitted to the viewport, and changes in zoom animate smoothly.
 
@@ -221,6 +226,10 @@ Your own functions can offer the same dimension inputs. See
 Compilation progress appears near the viewport. Source changes from tools
 appear in a temporary code excerpt, making the resulting edit visible.
 
+The grid legend at the bottom left shows the length of one small grid cell in
+the current 3D or sketch view. It updates as you zoom; source updates and
+diagnostics stack above it. Sketch wheel zoom has no fixed minimum or maximum.
+
 Modeling failures appear with an error message and, where source information
 is available, an underline at the responsible call. Previously evaluated
 contexts may remain usable, so you can inspect and correct the input that led
@@ -238,6 +247,12 @@ During a viewport drag, `Esc` cancels the temporary preview without changing
 source. It does not close the contextual tool panel or end topology selection.
 The panel follows the editor cursor and closes when you leave its call.
 Changes already committed to source stay in place; use Undo to revert them.
+
+Position handles, including origin and relationship offsets, move in increments
+of the current minor grid spacing. Each drag keeps its starting grid and reference
+frame. Hold `Alt` to move freely and release it to resume snapping, even without
+moving the pointer. This affects viewport position drags only: numeric inputs keep
+their own adjustment steps, and rotation handles keep their angle steps.
 
 See [selecting topology](../../guides/topology/) for a complete tool workflow.
 

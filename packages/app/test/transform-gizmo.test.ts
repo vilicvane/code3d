@@ -24,6 +24,7 @@ for (const end of ['commit', 'cancel'] as const) {
     const element = Object.assign(new EventTarget(), {
       style: {},
       clientHeight: 600,
+      ownerDocument: new EventTarget(),
     }) as HTMLElement;
     const events: TransformGizmoEvent[] = [];
     const navigation: boolean[] = [];
@@ -32,6 +33,7 @@ for (const end of ['commit', 'cancel'] as const) {
       new THREE.PerspectiveCamera(),
       element,
       enabled => navigation.push(enabled),
+      {lock: () => 1, unlock: () => {}},
       event => {
         events.push(event);
         if (event.kind === 'preview') gizmo.updateAnchor();
@@ -245,6 +247,7 @@ function pointerFixture(t: TestContext) {
   const element = Object.assign(new EventTarget(), {
     style: {touchAction: 'pan-y'},
     clientHeight: 600,
+    ownerDocument: new EventTarget(),
     getBoundingClientRect: () => ({left: 0, top: 0, width: 800, height: 600}),
     setPointerCapture: (id: number) => captured.add(id),
     hasPointerCapture: (id: number) => captured.has(id),
@@ -261,15 +264,28 @@ function pointerFixture(t: TestContext) {
         button: 0,
         clientX: 400,
         clientY: 300,
+        altKey: false,
         ...overrides,
       }),
     );
   const events: TransformGizmoEvent[] = [];
+  const grid = {
+    step: 1,
+    locked: false,
+    lock() {
+      this.locked = true;
+      return this.step;
+    },
+    unlock() {
+      this.locked = false;
+    },
+  };
   const gizmo = new TransformGizmo(
     scene,
     camera,
     element,
     () => {},
+    grid,
     event => events.push(event),
   );
   t.after(() => gizmo.dispose());
@@ -289,37 +305,139 @@ function pointerFixture(t: TestContext) {
     })),
   );
   scene.updateMatrixWorld(true);
-  return {gizmo, camera, element, send, events, captured};
+  return {gizmo, camera, element, send, events, captured, grid};
 }
 
-test('translation and rotation controls keep their pixel scale through zoom and resize', t => {
-  const {gizmo, camera} = pointerFixture(t);
+test('Alt bypasses spatial snapping immediately without changing numeric steps', t => {
+  const {gizmo, element, send, grid, events} = pointerFixture(t);
+  grid.step = 2;
+  for (const control of gizmo['axes']) {
+    control.binding = {
+      ...control.binding!,
+      value: 0.35,
+      sensitivity: -2,
+      step: 0.1,
+    };
+  }
+  const alt = (type: 'keydown' | 'keyup') => {
+    const event = Object.assign(new Event(type, {cancelable: true}), {
+      key: 'Alt',
+    });
+    element.ownerDocument.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+  assert.equal(
+    alt('keydown'),
+    false,
+    'Idle tools do not consume input shortcuts',
+  );
+  send('pointerdown');
+  assert.equal(grid.locked, true);
+  grid.step = 10;
+  send('pointermove', {clientX: 459});
+  const active = gizmo['active']!;
+  const distance = active.control.proxy.position.distanceTo(active.position);
+  assert.ok(distance > 0);
+  assert.ok(Math.abs(distance / 2 - Math.round(distance / 2)) < 1e-10);
+  const snapped = active.value;
+  assert.equal(alt('keydown'), true);
+  assert.notEqual(active.value, snapped);
+  assert.ok(Math.abs((active.value - 0.35) * -2 - active.delta) < 1e-10);
+  assert.equal(alt('keyup'), true);
+  assert.equal(
+    active.value,
+    snapped,
+    'Releasing Alt restores the same snap without mouse motion',
+  );
+  assert.ok(gizmo['axes'].every(control => control.binding!.step === 0.1));
+  send('pointerup');
+  assert.equal(grid.locked, false);
+  assert.equal(defined(events.at(-1)).kind, 'commit');
+  assert.equal(alt('keydown'), false);
+});
+
+test('starting a drag with Alt bypasses snapping and cancellation releases the grid', t => {
+  const {gizmo, send, grid} = pointerFixture(t);
+  grid.step = 10;
+  send('pointerdown', {altKey: true});
+  send('pointermove', {clientX: 459, altKey: true});
+  const active = gizmo['active']!;
+  assert.ok(active.control.proxy.position.distanceTo(active.position) > 0);
+  assert.ok(Math.abs(active.value - active.delta) < 1e-10);
+  send('pointercancel');
+  assert.equal(grid.locked, false);
+  send('pointerdown');
+  send('pointermove', {clientX: 459});
+  assert.ok(
+    Math.abs(
+      gizmo['active']!.value / 10 - Math.round(gizmo['active']!.value / 10),
+    ) < 1e-10,
+  );
+});
+
+test('rotation retains its numeric step and does not lock the translation grid', t => {
+  const {gizmo, grid, element} = pointerFixture(t);
   const control = gizmo['axes'][0];
-  for (const mode of ['translate', 'rotate'] as const) {
-    control.controls.setMode(mode);
-    for (const height of [240, 960])
-      for (const distance of [10, 100])
-        for (const zoom of [0.5, 2]) {
-          camera.position.set(0, 0, distance);
-          camera.lookAt(0, 0, 0);
-          camera.zoom = zoom;
-          camera.updateProjectionMatrix();
-          gizmo.updateScreenSize(height);
-          control.proxy.parent!.updateMatrixWorld(true);
-          const handle = defined(
-            control.gizmo.gizmo[mode].children.find(
-              object => object.name === 'X',
-            ),
-          );
-          const origin = handle.getWorldPosition(new THREE.Vector3());
-          const scale = handle.getWorldScale(new THREE.Vector3());
-          const end = origin
-            .clone()
-            .add(new THREE.Vector3(scale.x, 0, 0))
-            .project(camera);
-          origin.project(camera);
-          const pixels = ((end.x - origin.x) * height * camera.aspect) / 2;
-          assert.ok(Math.abs(pixels - 100) < 1e-5, `${mode}: ${pixels}`);
-        }
+  control.binding = {
+    ...control.binding!,
+    mode: 'rotate',
+    parameterKind: 'angle',
+    step: 5,
+  };
+  control.controls.setMode('rotate');
+  control.controls.dispatchEvent({type: 'mouseDown', mode: 'rotate'});
+  control.angle = (12 * Math.PI) / 180;
+  control.controls.dispatchEvent({type: 'objectChange'});
+  assert.equal(gizmo['active']!.value, 10);
+  assert.equal(grid.locked, false);
+  element.ownerDocument.dispatchEvent(
+    Object.assign(new Event('keydown'), {key: 'Alt'}),
+  );
+  assert.equal(gizmo['active']!.value, 10);
+});
+
+test('translation and rotation controls keep their pixel scale through zoom and resize', t => {
+  const {gizmo, camera: perspective} = pointerFixture(t);
+  const control = gizmo['axes'][0];
+  for (const camera of [
+    perspective,
+    new THREE.OrthographicCamera(-40 / 3, 40 / 3, 10, -10, 0.1, 1000),
+  ]) {
+    gizmo.setCamera(camera);
+    for (const axis of gizmo['axes'])
+      assert.equal(axis.controls.camera, camera);
+    for (const mode of ['translate', 'rotate'] as const) {
+      control.controls.setMode(mode);
+      for (const height of [240, 960])
+        for (const distance of [10, 100])
+          for (const zoom of [0.5, 2]) {
+            camera.position.set(0, 0, distance);
+            camera.lookAt(0, 0, 0);
+            camera.zoom = zoom;
+            camera.updateProjectionMatrix();
+            gizmo.updateScreenSize(height);
+            control.proxy.parent!.updateMatrixWorld(true);
+            const handle = defined(
+              control.gizmo.gizmo[mode].children.find(
+                object => object.name === 'X',
+              ),
+            );
+            const origin = handle.getWorldPosition(new THREE.Vector3());
+            const scale = handle.getWorldScale(new THREE.Vector3());
+            const end = origin
+              .clone()
+              .add(new THREE.Vector3(scale.x, 0, 0))
+              .project(camera);
+            origin.project(camera);
+            const aspect =
+              camera.projectionMatrix.elements[5] /
+              camera.projectionMatrix.elements[0];
+            const pixels = ((end.x - origin.x) * height * aspect) / 2;
+            assert.ok(
+              Math.abs(pixels - 100) < 1e-5,
+              `${camera.type} ${mode}: ${pixels}`,
+            );
+          }
+    }
   }
 });

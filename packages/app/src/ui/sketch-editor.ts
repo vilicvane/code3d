@@ -1,3 +1,4 @@
+import {gridStep} from '../grid-scale';
 import type {
   SketchPointAddress,
   SketchPosition,
@@ -36,7 +37,6 @@ import {
   endpointPosition,
   sameSketchPoint as same,
   sketchDistance as distance,
-  sketchGridStep,
   snapSketchPointer,
   type SketchPoint as Point,
 } from '../tools/sketch-snap';
@@ -168,6 +168,7 @@ export class SketchEditor {
   private bypassSnap = false;
   private center: SketchPosition = [0, 0];
   private scale = 6;
+  private gridStep?: number;
   private selection: SketchPick[] = [];
   private editError?: string;
   private gesture?: Gesture;
@@ -192,6 +193,7 @@ export class SketchEditor {
       previous?: SketchDragPreview,
       mergeTarget?: SketchPointAddress,
     ) => Promise<SketchDragPreview>,
+    private readonly onGridStepChange?: (step: number | undefined) => void,
   ) {
     this.root.className = 'sketch-editor';
     this.root.setAttribute('aria-label', 'Sketch editor');
@@ -221,10 +223,7 @@ export class SketchEditor {
         event.preventDefault();
         if (this.gesture?.kind === 'box') return;
         const before = this.coordinates(event);
-        this.scale = Math.min(
-          1000,
-          Math.max(0.05, this.scale * Math.exp(-event.deltaY * 0.001)),
-        );
+        this.scale *= Math.exp(-event.deltaY * 0.001);
         const after = this.coordinates(event);
         this.center = [
           this.center[0] + before[0] - after[0],
@@ -337,6 +336,10 @@ export class SketchEditor {
     this.cancel();
     this.view = undefined;
     this.root.hidden = true;
+    if (this.gridStep !== undefined) {
+      this.gridStep = undefined;
+      this.onGridStepChange?.(undefined);
+    }
   }
 
   /** Export the same solved SVG scene, including grid and constraint labels. */
@@ -514,7 +517,7 @@ export class SketchEditor {
     return {
       points: this.points().reverse(),
       scale: this.scale,
-      gridStep: sketchGridStep(this.scale),
+      gridStep: gridStep(this.scale),
       enabled: this.snapping && !this.bypassSnap,
     };
   }
@@ -1023,13 +1026,10 @@ export class SketchEditor {
         minY = Math.min(...ys),
         maxY = Math.max(...ys);
       this.center = [(minX + maxX) / 2, (minY + maxY) / 2];
-      this.scale = Math.max(
-        0.05,
-        Math.min(
-          20,
-          (this.svg.clientWidth - 100) / Math.max(1, maxX - minX),
-          (this.svg.clientHeight - 100) / Math.max(1, maxY - minY),
-        ),
+      this.scale = Math.min(
+        20,
+        Math.max(1, this.svg.clientWidth - 100) / Math.max(1, maxX - minX),
+        Math.max(1, this.svg.clientHeight - 100) / Math.max(1, maxY - minY),
       );
     } else {
       this.center = [0, 0];
@@ -1083,7 +1083,11 @@ export class SketchEditor {
     }
     const width = this.svg.clientWidth,
       height = this.svg.clientHeight;
-    const step = sketchGridStep(this.scale);
+    const step = gridStep(this.scale);
+    if (step !== this.gridStep) {
+      this.gridStep = step;
+      this.onGridStepChange?.(step);
+    }
     const [originX, originY] = this.screen([0, 0]);
     const spacing = step * this.scale;
     for (
