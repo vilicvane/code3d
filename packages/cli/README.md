@@ -38,6 +38,19 @@ See the complete [website agent guide](https://www.code3d.org/docs/guides/agents
 ([Markdown](https://www.code3d.org/docs/guides/agents.md)) for setup, file operations,
 cursor regex, arguments, rendering, topology, types, and recovery.
 
+For Browser storage projects, edit the project's `package.json` through `apply`
+and request `--render` or `--topology` with a model cursor in that package scope.
+The App installs dependencies during model preparation; an ordinary file-save
+response does not confirm installation. Local-folder dependencies are installed
+externally with that project's package manager. There is no standalone CLI
+install/update command. See [installing project dependencies](https://www.code3d.org/docs/guides/agents/#install-project-dependencies)
+for the payload, version checks, lock behavior and failure handling.
+
+When the user is following an agent, `apply` with file changes or an explicit view
+uses its retained cursor if none is supplied. It does not choose a position from
+the changed files; no valid cursor means no follow jump. Pure observation without
+file changes, a new cursor or an explicit view does not trigger following.
+
 `npx --yes @code3d/cli` downloads the published CLI when needed. Development can
 use the same command with a built, globally linked checkout: run `npm link` in
 `packages/cli`, then verify `npx --yes @code3d/cli --help` resolves that checkout.

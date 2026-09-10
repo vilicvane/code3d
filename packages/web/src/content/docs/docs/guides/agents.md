@@ -88,6 +88,11 @@ Each accepted source or cursor update moves the editor to that agent's selection
 and updates the model or sketch, using its supplied arguments (or JSDoc defaults)
 and any explicitly requested 3D view. You can keep editing, selecting and navigating
 between updates; following does not lock the UI or stop when you interact.
+An `apply` with file changes or an explicit render view can trigger following even
+when `cursor` is omitted: it uses the agent's retained, valid cursor. It does not
+choose a new cursor from the changed file paths. Without a valid cursor there is
+no follow jump. A request that only observes the retained cursor, with no file
+changes or explicit view, does not trigger following.
 Successful `fs read` opens the file and focuses its tab; `fs list` reveals,
 expands and focuses the directory in the file explorer, scrolling it into view
 when necessary. Compact directory chains highlight the row containing the listed
@@ -169,6 +174,68 @@ pending writes. A model error does not undo accepted source changes.
 
 Default `apply` confirms acceptance and saving without observing the model.
 It also supports cursor-only input, or no input to observe a retained cursor.
+
+## Install project dependencies
+
+For a **Browser storage** project, use `apply` to edit the relevant `package.json`,
+then request `--render` or `--topology` for a model in that package scope. The App
+prepares and installs the dependencies before evaluating the model. The CLI has
+no separate install or update command.
+
+Read the model and locate its nearest ancestor `package.json` with `fs list`,
+`fs stat` and `fs read`. Preserve the existing manifest fields and dependencies,
+and use its current file version in `apply`. If there is no manifest, create one
+beside the model using `version: null`; a child manifest defines a separate package
+scope. These paths belong to the App project, independently of where the local
+CLI configuration and input JSON are saved.
+
+For example, to create `/package.json` beside the `/model.ts` from the source-change
+example above, save this payload as `/tmp/add-dependency.json`:
+
+```json
+{
+  "files": [
+    {
+      "path": "/package.json",
+      "version": null,
+      "content": "{\n  \"private\": true,\n  \"type\": \"module\",\n  \"dependencies\": {\n    \"just-range\": \"4.2.0\"\n  }\n}\n"
+    }
+  ],
+  "cursor": {"file": "/model.ts", "regex": "(box\\(10, 6, 8\\))"}
+}
+```
+
+```sh
+npx --yes @code3d/cli project.c3d.json --request-id dependency-edit-001 apply --input /tmp/add-dependency.json --render
+```
+
+If the manifest already exists, merge the dependency into its full contents and
+replace `null` with its read version. Adapt the cursor to an observable expression
+in your actual model. An explicit cursor ensures preparation uses the intended
+package scope; omitting it retains the agent's previous modeling cursor, even if
+the most recent `fs read` or `fs list` visited another scope.
+
+A plain `apply` response confirms file acceptance and saving, **not installation
+completion**. The App may compile in the background, but `--render` or `--topology`
+lets the requesting agent wait for preparation and model feedback. Check the
+complete result: successful observation confirms preparation and evaluation;
+errors describe installation or subsequent model failures. An observation error
+can still include `error.details.accepted: true` and `saved: true`; those file
+changes remain accepted. Inspect the error before deciding whether to fix the
+manifest or the model. After a transport timeout, query the original request ID
+with `result` before sending another change.
+
+The App maintains `code3d-lock.json` and `node_modules` beside each browser
+manifest. Ordinary preparation reuses locked versions. To refresh versions within
+unchanged dependency ranges, use **Update dependencies** on the manifest in the
+App; there is no agent command for that action yet. Choose browser-compatible
+packages; see [package installation and modeling package rules](../../getting-started/files/#install-packages-in-browser-storage).
+
+For an **Open folder** project, installation remains external, managed by the
+project's own package manager in the connected local directory. Changing its
+manifest through `apply` does not make the App install packages, and the CLI
+cannot perform that installation. Browser storage has no local project directory
+in which an agent can run `npm install`.
 
 ## Select an expression and inspect a function
 

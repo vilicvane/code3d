@@ -250,9 +250,25 @@ and model snapshots are transient; select a new cursor after reopening. A failed
 and exposes Retry saving. Protected `.git` and `.code3d` paths cannot be modified.
 Text apply/read is bounded at 8 MiB per file; binary files can be read as artifacts.
 
+Package installation is an App preparation step, with no dedicated wire operation.
+In Browser storage, apply a version-checked `package.json` change and request
+render/topology observation with a model cursor in that scope. The shared package
+manager installs dependencies before compilation. Acceptance/saving alone is not
+an installation receipt; preparation or model errors retain accepted file changes.
+Local-folder dependencies are installed externally. See the [dependency guide](../web/src/content/docs/docs/guides/agents.md#install-project-dependencies)
+for examples, lock reuse and explicit updates.
+
+File changes, an explicit cursor or a render view emit an agent update. Omitting
+the cursor reuses its tracked selection; App following only navigates when that
+selection remains valid. Changed file paths do not establish a new selection.
+An observation with no file changes, explicit cursor or view emits no follow
+update. Successful file reads and directory lists have their own follow targets
+and do not replace the modeling cursor.
+
 `AgentObserver` serializes offscreen requests through the existing model compiler,
-viewport source selection and screenshot exporter. It does not change the user's
-viewport or cursor. Collaborator selections are Monaco decorations with matching name labels anchored by content widgets. Screenshot
-corner views and history remain deferred while viewport work proceeds separately.
+viewport source selection and screenshot exporter. Following is applied separately
+to the user's view. Collaborator selections are Monaco decorations with matching
+name labels anchored by content widgets. The App displays returned screenshots in
+an agent preview and history timeline.
 See the [agent guide](../web/src/content/docs/docs/guides/agents.md#render-types-and-topology) for topology
 paging, identity scope, geometry coordinates and snapshot expiration.
