@@ -159,7 +159,7 @@ test('initialization and unchanged examples never enumerate or read project sour
       'project.json': new File(
         [
           JSON.stringify({
-            version: 2,
+            version: 1,
             managedDirectories: {'/examples': 'current'},
           }),
         ],
@@ -204,8 +204,61 @@ test('an unseeded local directory gains only metadata without enumerating user f
   const fs = await openDirectoryProjectFileSystem(directory(entries, calls));
   await fs.initialize();
   assert.deepEqual(Object.keys(entries), ['.code3d']);
+  assert.deepEqual(
+    JSON.parse(
+      new TextDecoder().decode(await fs.readFile('/.code3d/project.json')),
+    ),
+    {version: 1, managedDirectories: {}},
+  );
   assert.ok(
     calls.every(call => call[0] !== 'list' && call[1].startsWith('/.code3d')),
+  );
+});
+
+test('initialization writes the current manifest without discarding directory decisions based on a version marker', async () => {
+  const managedDirectories = {'/examples': null, '/samples': 'current'};
+  const entries: DirectoryEntries = {
+    '.code3d': {
+      'project.json': new File(
+        [JSON.stringify({version: 2, managedDirectories})],
+        'project.json',
+      ),
+    },
+    'model.ts': new File(['user source'], 'model.ts'),
+    examples: {'mine.ts': new File(['user example'], 'mine.ts')},
+  };
+  const calls: AccessCall[] = [];
+  const fs = await openDirectoryProjectFileSystem(directory(entries, calls));
+  await fs.initialize(async () => {
+    throw new Error('Existing project must not be seeded');
+  });
+  await fs.syncDirectory(
+    {directory: '/examples', revision: 'new', files: []},
+    async () => {
+      throw new Error('A skipped directory must remain skipped');
+    },
+  );
+  await fs.syncDirectory({
+    directory: '/samples',
+    revision: 'current',
+    files: [],
+  });
+  assert.ok(
+    calls.every(call => call[0] !== 'list' && call[1].startsWith('/.code3d')),
+  );
+  assert.deepEqual(
+    JSON.parse(
+      new TextDecoder().decode(await fs.readFile('/.code3d/project.json')),
+    ),
+    {version: 1, managedDirectories},
+  );
+  assert.equal(
+    new TextDecoder().decode(await fs.readFile('/model.ts')),
+    'user source',
+  );
+  assert.equal(
+    new TextDecoder().decode(await fs.readFile('/examples/mine.ts')),
+    'user example',
   );
 });
 
@@ -248,6 +301,12 @@ test('declining examples survives reopening and new revisions until an explicit 
   assert.equal(
     new TextDecoder().decode(await fs.readFile('/keep.txt')),
     'user',
+  );
+  assert.deepEqual(
+    JSON.parse(
+      new TextDecoder().decode(await fs.readFile('/.code3d/project.json')),
+    ),
+    {version: 1, managedDirectories: {'/examples': 'second'}},
   );
 });
 
