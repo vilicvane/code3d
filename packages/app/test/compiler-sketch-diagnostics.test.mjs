@@ -126,8 +126,8 @@ const first = make(20); const second = make(30);`;
   assert.equal(warning.actions, undefined);
   assert.match(warning.details, /more than once/);
   assert.deepEqual(warning.relatedSketchIds, [second.id]);
-  assert.equal(viewportDiagnostic(warning, undefined, [first]), undefined);
-  assert.equal(viewportDiagnostic(warning, undefined, [second]), warning);
+  assert.equal(viewportDiagnostic(warning, [first]), undefined);
+  assert.equal(viewportDiagnostic(warning, [second]), warning);
 });
 
 test('warnings follow owning sketches and upstreams, never siblings or the 3D viewport', async () => {
@@ -138,10 +138,10 @@ const child = base.derive([]); const sibling = sketch([]);`;
   const result = await compile(source);
   const [base, child, sibling] = result.sketches.values();
   const [warning] = result.warnings;
-  assert.equal(viewportDiagnostic(warning, undefined, [base]), warning);
-  assert.equal(viewportDiagnostic(warning, undefined, [base, child]), warning);
-  assert.equal(viewportDiagnostic(warning, undefined, [sibling]), undefined);
-  assert.equal(viewportDiagnostic(warning, undefined, undefined), undefined);
+  assert.equal(viewportDiagnostic(warning, [base]), warning);
+  assert.equal(viewportDiagnostic(warning, [base, child]), warning);
+  assert.equal(viewportDiagnostic(warning, [sibling]), undefined);
+  assert.equal(viewportDiagnostic(warning, undefined), undefined);
   const edited = fix(source, warning.actions[0]);
   assert.ok(
     edited.endsWith(

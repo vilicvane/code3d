@@ -292,8 +292,10 @@ When you switch model files, the current preview stays visible while the next
 file compiles. Its controls pause until the new result replaces it. An empty
 result or a compilation failure clears the previous file’s preview.
 
-Modeling failures appear with an error message and, where source information
-is available, an underline at the responsible call. If the object or sketch
+Modeling failures appear in the top status and, where source information
+is available, as an editor diagnostic at the responsible call. The viewport
+diagnostic card is reserved for sketch source data that differs from its
+constraint solution, with a **Fix** action when safe synchronization is available. If the object or sketch
 you are editing evaluated successfully, its preview and tools stay current even
 when a later operation fails. For example, you can keep moving a loft section
 after the loft fails, then drag it back to a position that produces a valid result.

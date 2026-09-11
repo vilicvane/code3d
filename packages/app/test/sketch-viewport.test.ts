@@ -59,13 +59,13 @@ const child = base.derive(${entries}, ${options(length)});`;
   assert.ok(diagnostic);
   assert.equal(diagnostic.kind, 'evaluation');
   assert.ok(diagnostic.failedEvaluationIds?.includes(child.evaluationId!));
-  assert.equal(viewportDiagnostic(diagnostic, undefined, [base]), undefined);
-  assert.equal(viewportDiagnostic(diagnostic, undefined, [sibling]), undefined);
+  assert.equal(viewportDiagnostic(diagnostic, [base]), undefined);
+  assert.equal(viewportDiagnostic(diagnostic, [sibling]), undefined);
   assert.equal(
-    viewportDiagnostic(diagnostic, undefined, layers(good.sketches, child)),
-    diagnostic,
+    viewportDiagnostic(diagnostic, layers(good.sketches, child)),
+    undefined,
   );
-  assert.equal(viewportDiagnostic(diagnostic, undefined, undefined), undefined);
+  assert.equal(viewportDiagnostic(diagnostic, undefined), undefined);
 });
 
 test('a retained derived sketch includes a failed upstream definition but not unrelated model errors', async () => {
@@ -79,19 +79,13 @@ const solid = box(10, 10, 10);
   const scope = layers(good.sketches, child);
   const bad = await compile(source(50));
   assert.ok(bad.diagnostic);
-  assert.equal(
-    viewportDiagnostic(bad.diagnostic, undefined, scope),
-    bad.diagnostic,
-  );
+  assert.equal(viewportDiagnostic(bad.diagnostic, scope), undefined);
   const modelFailure = await compile(source() + 'solid.fillet(2, [999]);');
   assert.ok(modelFailure.diagnostic?.relatedModelNodeIds?.length);
+  assert.equal(viewportDiagnostic(modelFailure.diagnostic, scope), undefined);
   assert.equal(
-    viewportDiagnostic(modelFailure.diagnostic, undefined, scope),
+    viewportDiagnostic(modelFailure.diagnostic, undefined),
     undefined,
-  );
-  assert.equal(
-    viewportDiagnostic(modelFailure.diagnostic, undefined, undefined),
-    modelFailure.diagnostic,
   );
 });
 
@@ -106,17 +100,11 @@ const second = create(${length});`;
   assert.deepEqual(first.definitionRef, second.definitionRef);
   const bad = await compile(source(50));
   assert.ok(bad.diagnostic);
-  assert.equal(
-    viewportDiagnostic(bad.diagnostic, undefined, [first]),
-    undefined,
-  );
-  assert.equal(
-    viewportDiagnostic(bad.diagnostic, undefined, [second]),
-    bad.diagnostic,
-  );
+  assert.equal(viewportDiagnostic(bad.diagnostic, [first]), undefined);
+  assert.equal(viewportDiagnostic(bad.diagnostic, [second]), undefined);
 });
 
-test('sketch mode excludes 3D preview, syntax and unowned failures while leaving 3D routing intact', () => {
+test('viewport excludes ordinary preview, syntax and evaluation failures', () => {
   const scope = [{id: 'current-sketch', evaluationId: 'current'}];
   const preview: ModelDiagnostic = {
     kind: 'evaluation',
@@ -128,8 +116,20 @@ test('sketch mode excludes 3D preview, syntax and unowned failures while leaving
     summary: 'Syntax error',
     sourceRef: {file: '/model.ts', start: 0, end: 10},
   };
-  for (const diagnostic of [unowned, syntax, undefined]) {
-    assert.equal(viewportDiagnostic(diagnostic, preview, scope), undefined);
-    assert.equal(viewportDiagnostic(diagnostic, preview, undefined), preview);
+  for (const diagnostic of [preview, unowned, syntax, undefined]) {
+    assert.equal(viewportDiagnostic(diagnostic, scope), undefined);
+    assert.equal(viewportDiagnostic(diagnostic, undefined), undefined);
   }
+});
+
+test('model-linked JavaScript failures do not opt into viewport cards', () => {
+  const diagnostic: ModelDiagnostic = {
+    kind: 'evaluation',
+    summary: '__code3d.receiver(...).cut is not a function',
+    relatedModelNodeIds: ['body'],
+    relatedSketchIds: ['sketch'],
+    failedEvaluationIds: ['call'],
+  };
+  assert.equal(viewportDiagnostic(diagnostic, undefined), undefined);
+  assert.equal(viewportDiagnostic(diagnostic, [{id: 'sketch'}]), undefined);
 });

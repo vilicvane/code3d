@@ -21,7 +21,7 @@ import {sourceDecorationProviders} from '../model/source-decorations';
 import type {ProjectFileReader} from '../project/file-reader';
 import {ModelViewport} from '../viewport';
 import {SketchEditor} from '../ui/sketch-editor';
-import {viewportDiagnostic} from '../model/viewport-diagnostic';
+import {sketchDiagnostic} from '../model/viewport-diagnostic';
 import {
   describeSketch,
   inspectSketch,
@@ -140,7 +140,7 @@ export class AgentObserver {
         : undefined;
       const sketches = sketchId ? observeSketch(sketchId, module.sketches) : [];
       const diagnostic = sketches.length
-        ? viewportDiagnostic(module.diagnostic, undefined, sketches[0].layers)
+        ? sketchDiagnostic(module.diagnostic, sketches[0].layers)
         : module.diagnostic;
       if (diagnostic)
         return failure('model_failed', diagnostic.summary, diagnostic);

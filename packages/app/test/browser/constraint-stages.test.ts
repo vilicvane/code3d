@@ -37,17 +37,12 @@ test(
       const {originSourceDecoration} =
         await import('/src/model/origin-decorations.ts');
       const client = new ModelCompilerClient(browserPackageFiles);
-      let diagnostic:
-        import('../../src/model/diagnostic.ts').ModelDiagnostic | undefined;
       const viewport = new ModelViewport(document.querySelector('main')!, {
         onSelect() {},
         onDrillDown() {},
         onNavigateSource() {},
         onPositionTool() {},
         onTopologySelection() {},
-        onSourcePreviewDiagnostic(value) {
-          diagnostic = value;
-        },
         sourceDecorationProviders: [
           elementSourceDecoration,
           relationSourceDecoration,
@@ -86,7 +81,7 @@ test(
               ? [{mode: axis.binding.mode, value: axis.binding.value}]
               : [],
           ),
-          diagnostic,
+          diagnostic: scope.evaluation.constraintPreviewDiagnostic,
         };
       };
       try {

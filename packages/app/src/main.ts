@@ -61,7 +61,10 @@ import type {
   ToolSelectionParameterSchema,
   ToolSignatureSchema,
 } from './model/tool-schema';
-import {viewportDiagnostic} from './model/viewport-diagnostic';
+import {
+  sketchDiagnostic,
+  viewportDiagnostic,
+} from './model/viewport-diagnostic';
 import {ViewportToolFeedback} from './ui/viewport-tool-feedback';
 import {
   BrowserPackageManager,
@@ -626,7 +629,6 @@ async function updateProjectDependencies(directory: string): Promise<void> {
   await packageManager!.update(directory, () => agentProject.flush());
 }
 
-let sourcePreviewDiagnostic: ModelDiagnostic | undefined;
 let compileTimer: number | undefined;
 let completionPreviewTimer: number | undefined;
 let positionToolSession: ToolSession | undefined;
@@ -702,10 +704,6 @@ const viewport = new ModelViewport(viewportHost, {
   onViewChange: observeViewportTarget,
   isViewVisible: () =>
     sketchEditor.navigation.gridStep === undefined && !previewState.empty,
-  onSourcePreviewDiagnostic: diagnostic => {
-    sourcePreviewDiagnostic = diagnostic;
-    refreshViewportFeedback();
-  },
   onSelect: occurrence => {
     if (occurrence.view === 'model') {
       preferredEvaluationContextId = undefined;
@@ -1565,7 +1563,6 @@ function activatePreviewFile(reload = false): void {
   )
     return;
   compiler.cancel();
-  sourcePreviewDiagnostic = undefined;
   compilingDesignContextId = undefined;
   codeEditor.setModelDiagnostics();
   codeEditor.setDesignArguments([]);
@@ -1610,18 +1607,14 @@ async function presentModelDiagnostic(
 function activeViewportDiagnostic(): ModelDiagnostic | undefined {
   const scope = sketchEditor.diagnosticScope;
   return (
-    viewportDiagnostic(
-      previewState.diagnostic,
-      sourcePreviewDiagnostic,
-      scope,
-    ) ??
+    viewportDiagnostic(previewState.diagnostic, scope) ??
     [...previewState.warnings]
       .sort(
         (a, b) =>
           Number(!!b.relatedSketchIds?.includes(scope?.at(-1)?.id ?? '')) -
           Number(!!a.relatedSketchIds?.includes(scope?.at(-1)?.id ?? '')),
       )
-      .find(warning => viewportDiagnostic(warning, undefined, scope))
+      .find(warning => viewportDiagnostic(warning, scope))
   );
 }
 
@@ -3191,7 +3184,9 @@ function hasViewportTarget(): boolean {
 
 function restoreModelStatus(): void {
   const sketch = sketchEditor.diagnosticScope;
-  const diagnostic = activeViewportDiagnostic();
+  const diagnostic = sketch
+    ? sketchDiagnostic(previewState.diagnostic, sketch)
+    : undefined;
   const state = sketch
     ? diagnostic && diagnostic.severity !== 'warning'
       ? 'error'

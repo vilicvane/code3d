@@ -68,6 +68,10 @@ for (const [name, failure] of [
     "const child = value.derive([['line', 1, [9, 10]]]);",
   ],
   ['a 3D model', 'const solid = box(10, 10, 10);\nsolid.fillet(2, [999]);'],
+  [
+    'a JavaScript call',
+    'const solid = box(10, 10, 10);\nsolid.cut(box(1, 1, 1));',
+  ],
 ] as const) {
   test(`a selected sketch excludes Model error and error cards from ${name}`, async t => {
     const page = await open(
@@ -83,13 +87,13 @@ for (const [name, failure] of [
     assert.equal(await page.getByText('Model error', {exact: true}).count(), 0);
     assert.ok(await page.locator('.monaco-editor .squiggly-error').count());
     assert.equal(await point(page, 1).count(), 1);
-    if (name === 'a 3D model') {
+    if (name === 'a 3D model' || name === 'a JavaScript call') {
       await cursor(page, 3, 8);
       await page.getByText('Model error', {exact: true}).waitFor();
       assert.equal(await page.locator('.sketch-editor').isVisible(), false);
       assert.equal(
         await page.locator('#viewport-diagnostic-stack').isVisible(),
-        true,
+        false,
       );
       await cursor(page, 2, 8);
       await page.getByText('Ready', {exact: true}).waitFor();
@@ -126,9 +130,9 @@ const value = sketch([
     true,
   );
   assert.equal(await page.locator('.sketch-editor output').count(), 0);
-  assert.match(
-    await page.locator('#viewport-diagnostic-stack').innerText(),
-    /sketch constraints/i,
+  assert.equal(
+    await page.locator('#viewport-diagnostic-stack').isVisible(),
+    false,
   );
   await page.keyboard.press('Control+z');
   await page.getByText('Ready', {exact: true}).waitFor();

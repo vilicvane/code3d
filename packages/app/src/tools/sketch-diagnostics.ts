@@ -103,6 +103,7 @@ export function sketchSourceDiagnostics(
       !!owner.definitionRef && !shared && !expressionDriven && !parsed.reason;
     diagnostics.push({
       kind: 'evaluation',
+      viewport: 'sketch-source-sync',
       severity: 'warning',
       summary: 'Sketch source data differs from the constraint solution.',
       details: `The solved geometry is displayed, but the source geometry has not been synchronized.${
