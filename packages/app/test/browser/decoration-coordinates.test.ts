@@ -103,6 +103,87 @@ export default ${kind === 'cut' ? 'cut(base, [cutter])' : 'union([base, cutter])
 );
 
 test(
+  'loft argument results follow the first section frame and hide during input previews',
+  {timeout: 120_000},
+  async t => {
+    const page = await openViewport(t);
+    const results = await page.evaluate(async () => {
+      const {viewport, compiler} = window.decorationTest;
+      const source = `import {circle, loft, point, rectangle} from '@code3d/core';
+const start = circle(12).relate(s => s.on(point([17, 8, -13]).up).rotate(0, 0, 25));
+const end = rectangle(18, 18).relate(s => s.on(start.up).offset(0, 30, 0));
+export default loft([start, end]);`;
+      const module = await compiler.compile(
+        {files: [{path: '/main.ts', source}]},
+        '/main.ts',
+      );
+      if (module.diagnostic) throw new Error(module.diagnostic.summary);
+      viewport.renderModule(module);
+      const operation = [...module.operations.values()].find(
+        op => op.kind === 'loft',
+      )!;
+      const results = [];
+      for (const word of ['start', 'end']) {
+        viewport.selectBySourceOffset('/main.ts', source.lastIndexOf(word) + 1);
+        const occurrences = [
+          ...viewport['occurrences'].values(),
+          ...viewport['contextOccurrences'].values(),
+        ];
+        const receiver = occurrences.find(
+          o => o.node.nodeId === operation.inputs[0].nodeId,
+        )!;
+        receiver.object.updateWorldMatrix(true, true);
+        const layers = viewport['decorationLayers'].get(
+          'source-context:loft-result',
+        )!;
+        const distances = layers.map(({object}) => {
+          let mesh: import('three').Mesh | undefined;
+          object.traverse(child => {
+            if ((child as import('three').Mesh).isMesh && !mesh)
+              mesh = child as import('three').Mesh;
+          });
+          mesh!.updateWorldMatrix(true, false);
+          const point = mesh!.position
+            .clone()
+            .fromBufferAttribute(mesh!.geometry.getAttribute('position'), 0);
+          return point
+            .clone()
+            .applyMatrix4(mesh!.matrixWorld)
+            .distanceTo(point.applyMatrix4(receiver.object.matrixWorld));
+        });
+        viewport.hideSourceDecorationsDuringPreview();
+        const hidden = !viewport['decorationLayers'].has(
+          'source-context:loft-result',
+        );
+        viewport.restoreSourceDecorations();
+        results.push({
+          word,
+          distances,
+          count: occurrences.length,
+          hidden,
+          restored: viewport['decorationLayers'].get(
+            'source-context:loft-result',
+          )?.length,
+          receiverPosition: receiver.object.position.toArray(),
+        });
+      }
+      return results;
+    });
+    for (const result of results) {
+      assert.equal(result.count, 2);
+      assert.equal(result.distances.length, 1);
+      assert.ok(result.distances[0] < 1e-6, JSON.stringify(result));
+      assert.ok(
+        result.receiverPosition.some(value => Math.abs(value) > 1),
+        'Fixture must have a nonzero first section pose',
+      );
+      assert.equal(result.hidden, true);
+      assert.equal(result.restored, 1);
+    }
+  },
+);
+
+test(
   'origin markers stay at local zero between commit and recompilation and during a second drag',
   {timeout: 120_000},
   async t => {

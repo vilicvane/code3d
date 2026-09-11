@@ -2,10 +2,20 @@ import * as THREE from 'three';
 
 export type SourceEmphasis = 'primary' | 'secondary' | 'context';
 
+export const sourceContextAppearance = {
+  color: '#788078',
+  opacity: 0.18,
+  edgeColor: '#a1aa9d',
+  edgeOpacity: 0.28,
+} as const;
+
 const opacityLimits = {
   primary: {surface: 0.82, line: 1},
   secondary: {surface: 0.7, line: 0.7},
-  context: {surface: 0.18, line: 0.28},
+  context: {
+    surface: sourceContextAppearance.opacity,
+    line: sourceContextAppearance.edgeOpacity,
+  },
 } as const;
 
 export function applySourceEmphasis(
@@ -26,7 +36,11 @@ export function applySourceEmphasis(
       const surface = child instanceof THREE.Mesh;
       if (emphasis === 'context') {
         if ('color' in material && material.color instanceof THREE.Color)
-          material.color.set(surface ? '#788078' : '#a1aa9d');
+          material.color.set(
+            surface
+              ? sourceContextAppearance.color
+              : sourceContextAppearance.edgeColor,
+          );
         child.renderOrder = surface ? -2 : -1;
       }
       // Ensure the model is see-through without compounding its own opacity.

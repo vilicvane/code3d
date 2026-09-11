@@ -109,6 +109,9 @@ TypeScript 必填性、不读取函数初始化器，也不注入运行时默认
 则替换该分量。跨实例预览要反映整组参数具体化的实际影响，不能只预测一个轴。
 仅查看、零位移或取消不写源码。关系 offset 优先补写已有不完整调用，避免重复
 追加；需要新偏移时只追加一次可复用的 offset。预览、写回和正常重新求值使用相同坐标。
+后续操作失败不使已完成的当前源码目标失效：按实际 source target 与 evaluation context
+判断是否接受新快照，使上游截面等仍可通过 gizmo 修正。当前目标自身失败或没有可用
+结果时保留旧预览，ModelPreviewState 撤销其可编辑版本；不能继续使用旧参数写回。
 原点拖动固定手势开始的 snapshot，旋转使用新旧完整旋转的差。
 坐标细节见[坐标技能](../../skills/code3d-coordinate-semantics/SKILL.md)。
 
@@ -143,6 +146,14 @@ Tab 跳转沿同一 source ref 聚焦有效参数输入，保留补全、snippet
 运行时操作元数据，按源码范围产生装饰；精确 Boolean region 由内核计算，provider
 决定显示方式。交互期间需要隐藏旧 region 的 provider 声明对应策略，取消恢复，
 提交后等待新编译。App 和网站图片渲染共用同一路径。
+
+loft 参数预览突出当前截面，其他截面和完成形体作为淡灰上下文显示。完成形体的
+几何属于第一截面的局部坐标，装饰锚定该输入 occurrence；拖动时隐藏旧结果。
+多模型调用失败时，executor 按实际调用及执行次数收集已经求值的输入，以
+`nodeIds` 保留集合、`focusNodeIds` 保留当前参数，使用公共组合坐标；不依赖不存在的
+结果操作快照，也不按函数名称推测身份。验证覆盖别名、数组与重复调用，以及
+[loft 参数绘制](../../../packages/app/test/browser/decoration-coordinates.test.ts)和
+[成功/失败切换](../../../packages/app/test/browser/coordinate-semantics.test.ts)。
 
 几何归属、操作输入角色与当前关注侧分别保留，不能借用输出位姿显示输入几何。
 模型和拓扑引用的绘制使用可见 occurrence 的正确变换。具体颜色、屏幕尺寸、

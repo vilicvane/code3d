@@ -5,6 +5,7 @@ import type {
 } from './compiler';
 import type {SourceDecorationProvider} from '../viewport-decoration';
 import {identityRigidTransform} from '@code3d/core/tooling';
+import {sourceContextAppearance} from '../rendering/source-appearance';
 
 type BooleanInputContext = Readonly<{
   operation: Readonly<{
@@ -115,6 +116,34 @@ export const booleanOperationSourceDecoration = {
   id: 'boolean-operation-regions',
   previewBehavior: 'hide',
   decorations,
+} satisfies SourceDecorationProvider;
+
+export const loftResultSourceDecoration = {
+  id: 'loft-result',
+  previewBehavior: 'hide',
+  decorations({module, target, evaluation}) {
+    if (target.kind !== 'operation-input' || !evaluation.operationInput)
+      return [];
+    const operation = module.operations.get(
+      evaluation.operationInput.operationId,
+    );
+    if (operation?.kind !== 'loft') return [];
+    const result = module.objects.get(operation.outputNodeId);
+    const receiver = operation.inputs.find(input => input.role === 'receiver');
+    if (!result?.mesh || !receiver) return [];
+    // Loft geometry belongs to the first section's local frame. Anchoring to
+    // that visible input also keeps the result correct for a related section.
+    return [
+      {
+        kind: 'mesh',
+        id: `${operation.id}:result`,
+        nodeId: receiver.nodeId,
+        mesh: result.mesh,
+        transform: {...identityRigidTransform, scale: [1, 1, 1]},
+        appearance: sourceContextAppearance,
+      },
+    ];
+  },
 } satisfies SourceDecorationProvider;
 
 export const edgeModificationSourceDecoration = {

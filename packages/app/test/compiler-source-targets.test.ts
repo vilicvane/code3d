@@ -1236,6 +1236,96 @@ test('derives composition roles for imported aliases, namespace calls, and neste
   }
 });
 
+test('failed loft calls retain their complete input collection and focused section across aliases and containers', async () => {
+  for (const [call, focus, focusCount] of [
+    ['loft([start, via, end])', 'via', 1],
+    ['skin([...[start], via, end])', 'via', 1],
+    ['core.loft(sections)', 'sections', 3],
+  ] as const) {
+    const source = `import * as core from '@code3d/core';
+import {circle, loft, loft as skin, rectangle, regularPolygon} from '@code3d/core';
+const start = circle(20);
+const via = regularPolygon(20, 8).relate(self => self.on(start.up).pivot([50, 0, 0]).rotate(0, 0, 45).offset(-18, 0, 0));
+const end = rectangle(40, 40).relate(self => self.on(start.up).pivot([50, 0, 0]).rotate(0, 0, 90));
+const sections = [start, via, end];
+export default ${call};`;
+    const module = await compileProject(
+      {files: [{path: '/model.ts', source}]},
+      '/model.ts',
+    );
+    assert.match(
+      defined(module.diagnostic).summary,
+      /Could not construct a solid loft/,
+    );
+    const target = defined(
+      ModelViewport.prototype['sourceTargetAt'].call(
+        {module},
+        '/model.ts',
+        source.lastIndexOf(focus) + 1,
+      ),
+    );
+    const evaluation = target.evaluations[0];
+    assert.equal(evaluation.runtime.outcome, 'completed', call);
+    assert.equal(evaluation.nodeIds.length, 3, call);
+    assert.equal(new Set(evaluation.nodeIds).size, 3, call);
+    assert.equal(defined(evaluation.focusNodeIds).length, focusCount, call);
+    assert.equal(evaluation.isCollection, true, call);
+    assert.equal(sourceTargetPlacement(evaluation), 'composition', call);
+    assert.ok(
+      evaluation.nodeIds.every(id => module.objects.has(id)),
+      call,
+    );
+    if (focusCount === 1) {
+      const section = defined(
+        module.objects.get(defined(evaluation.focusNodeIds)[0]),
+      );
+      assert.equal(section.constraints[0].offset[0], -18, call);
+    }
+  }
+});
+
+test('failed loft collections stay within their own invocation', async () => {
+  const source = `import {circle, loft, rectangle, regularPolygon} from '@code3d/core';
+function body(offset: number) {
+  const start = circle(20);
+  const via = regularPolygon(20, 8).relate(self => self.on(start.up).pivot([50, 0, 0]).rotate(0, 0, 45).offset(offset, 0, 0));
+  const end = rectangle(40, 40).relate(self => self.on(start.up).pivot([50, 0, 0]).rotate(0, 0, 90));
+  return loft([start, via, end]);
+}
+export const good = body(0);
+export default body(-18);`;
+  const module = await compileProject(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  assert.ok(module.diagnostic);
+  const target = defined(
+    ModelViewport.prototype['sourceTargetAt'].call(
+      {module},
+      '/model.ts',
+      source.indexOf('via, end') + 1,
+    ),
+  );
+  assert.equal(target.evaluations.length, 2);
+  const failed = defined(target.evaluations.find(e => e.isCollection));
+  const successful = defined(target.evaluations.find(e => e.operationId));
+  assert.equal(failed.nodeIds.length, 3);
+  assert.equal(defined(failed.focusNodeIds).length, 1);
+  assert.equal(
+    defined(module.objects.get(defined(failed.focusNodeIds)[0])).constraints[0]
+      .offset[0],
+    -18,
+  );
+  const operation = defined(
+    module.operations.get(defined(successful.operationId)),
+  );
+  assert.ok(
+    failed.nodeIds.every(
+      id => !operation.inputs.some(input => input.nodeId === id),
+    ),
+  );
+});
+
 test('keeps repeated and failed receiver evaluations separate', async () => {
   const source = [
     'import {box} from "@code3d/core";',

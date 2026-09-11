@@ -299,6 +299,184 @@ export const assembly = group([base, part]);`;
 );
 
 test(
+  'a downstream loft failure keeps the current section editable through drag, cancel and undo',
+  {timeout: 120_000},
+  async t => {
+    const {page, errors} = await openApp(t);
+    page.on('console', message => {
+      if (/\[mobx\]/i.test(message.text())) errors.push(message.text());
+    });
+    const source = `import {circle, group, loft, rectangle, regularPolygon} from '@code3d/core';
+const start = circle(20);
+const via = regularPolygon(20, 8).relate(self => self.on(start.up).pivot([50, 0, 0]).rotate(0, 0, 45).offset(0, 0, 0));
+const end = rectangle(40, 40).relate(self => self.on(start.up).pivot([50, 0, 0]).rotate(0, 0, 90));
+export const sections = group([start, via, end], 'Loft sections');
+export default loft([start, via, end]).material('#d8ff3e');`;
+    await setSource(page, source, 'offset');
+    const inspect = () =>
+      page.evaluate(() => {
+        const {viewport, codeEditor} = window.coordinateApp;
+        const selected = viewport.getSelected()!;
+        return {
+          source: codeEditor.editor.getValue(),
+          position: selected.object
+            .getWorldPosition(selected.object.position.clone())
+            .toArray(),
+          offset: selected.node.constraints[0].offset,
+          active: !!viewport['transformGizmo']['active'],
+        };
+      });
+    const before = await inspect();
+    const drag = async (value: number) => {
+      const handle = await xHandle(page);
+      await page.mouse.move(handle.x, handle.y);
+      await page.mouse.down();
+      assert.equal((await inspect()).active, true);
+      const destination = await page.evaluate(value => {
+        const viewport = window.coordinateApp.viewport;
+        const axis = viewport['transformGizmo']['axes'][0];
+        const controls = axis.controls as typeof axis.controls & {
+          pointStart: import('three').Vector3;
+          worldPositionStart: import('three').Vector3;
+        };
+        const point = controls.pointStart
+          .clone()
+          .add(controls.worldPositionStart)
+          .add(
+            axis.proxy.position
+              .clone()
+              .set(value - axis.binding!.value, 0, 0)
+              .applyQuaternion(axis.proxy.quaternion),
+          )
+          .project(viewport['camera']);
+        const rect = viewport['renderer'].domElement.getBoundingClientRect();
+        return {
+          x: rect.left + ((point.x + 1) * rect.width) / 2,
+          y: rect.top + ((1 - point.y) * rect.height) / 2,
+        };
+      }, value);
+      await page.mouse.move(destination.x, destination.y, {steps: 5});
+      const preview = await inspect();
+      near(preview.position, [
+        before.position[0] + value,
+        ...before.position.slice(1),
+      ]);
+      return preview;
+    };
+    const waitOffset = (value: number) =>
+      page.waitForFunction(
+        value =>
+          window.coordinateApp.viewport.getSelected()?.node.constraints[0]
+            ?.offset[0] === value,
+        value,
+      );
+
+    const invalid = await drag(-18);
+    assert.equal(invalid.source, before.source);
+    await page.mouse.up();
+    await page.locator('#viewport-status[data-state=error]').waitFor();
+    await waitOffset(-18);
+    near((await inspect()).position, invalid.position);
+    assert.match((await inspect()).source, /offset\(-18, 0, 0\)/);
+    assert.match(
+      await page.evaluate(
+        () => window.coordinateApp.viewport['module']!.diagnostic!.summary,
+      ),
+      /Could not construct a solid loft/,
+    );
+    const broken = await inspect();
+    await drag(-8);
+    await page.keyboard.press('Escape');
+    await page.mouse.up();
+    assert.deepEqual(await inspect(), broken);
+
+    const valid = await drag(-8);
+    await page.mouse.up();
+    await waitOffset(-8);
+    await page.getByText('Ready', {exact: true}).waitFor();
+    near((await inspect()).position, valid.position);
+    assert.match((await inspect()).source, /offset\(-8, 0, 0\)/);
+    await page.evaluate(() => window.coordinateApp.codeEditor.editor.focus());
+    await page.keyboard.press('Control+z');
+    await waitOffset(-18);
+    await page.locator('#viewport-status[data-state=error]').waitFor();
+    near((await inspect()).position, invalid.position);
+    await page.keyboard.press('Control+Shift+z');
+    await waitOffset(-8);
+    await page.getByText('Ready', {exact: true}).waitFor();
+    near((await inspect()).position, valid.position);
+    if (process.env.CODE3D_LOFT_RECOVERY_SCREENSHOT)
+      await page.screenshot({
+        path: process.env.CODE3D_LOFT_RECOVERY_SCREENSHOT,
+      });
+    assert.deepEqual(errors, []);
+  },
+);
+
+test(
+  'loft arguments show the result on success and all editable sections after failure',
+  {timeout: 120_000},
+  async t => {
+    const {page, errors} = await openApp(t);
+    for (const offset of [0, -18, -8]) {
+      const source = `import {circle, loft, rectangle, regularPolygon} from '@code3d/core';
+const start = circle(20);
+const via = regularPolygon(20, 8).relate(self => self.on(start.up).pivot([50, 0, 0]).rotate(0, 0, 45).offset(${offset}, 0, 0));
+const end = rectangle(40, 40).relate(self => self.on(start.up).pivot([50, 0, 0]).rotate(0, 0, 90));
+export default loft([start, via, end]).material('#d8ff3e');`;
+      await page.evaluate(source => {
+        const editor = window.coordinateApp.codeEditor.editor;
+        editor.getModel()!.setValue(source);
+        editor.setPosition(
+          editor.getModel()!.getPositionAt(source.lastIndexOf('via') + 1),
+        );
+      }, source);
+      await page.waitForFunction(offset => {
+        const viewport = window.coordinateApp.viewport;
+        return (
+          viewport.getSelected()?.node.constraints[0]?.offset[0] === offset &&
+          Boolean(viewport['module']?.diagnostic) === (offset === -18)
+        );
+      }, offset);
+      const displayed = await page.evaluate(() => {
+        const viewport = window.coordinateApp.viewport;
+        viewport.fit();
+        return {
+          count:
+            viewport['occurrences'].size + viewport['contextOccurrences'].size,
+          result:
+            viewport['decorationLayers'].get('source-context:loft-result')
+              ?.length ?? 0,
+          relative: viewport.hasRelativePositionContext(),
+          bindings: viewport['transformGizmo']['axes'].filter(
+            axis => axis.binding,
+          ).length,
+          positions: [
+            ...viewport['occurrences'].values(),
+            ...viewport['contextOccurrences'].values(),
+          ].map(o => ({
+            actual: o.object.position.toArray(),
+            expected: o.node.compositionTransform.position,
+          })),
+        };
+      });
+      assert.equal(displayed.count, 3);
+      assert.equal(displayed.result, offset === -18 ? 0 : 1);
+      assert.equal(displayed.relative, true);
+      assert.equal(displayed.bindings, 3);
+      for (const position of displayed.positions)
+        near(position.actual, position.expected);
+      await cameraIdle(page);
+      if (process.env.CODE3D_LOFT_ARGUMENT_SCREENSHOT)
+        await page.screenshot({
+          path: `${process.env.CODE3D_LOFT_ARGUMENT_SCREENSHOT}-${offset}.png`,
+        });
+    }
+    assert.deepEqual(errors, []);
+  },
+);
+
+test(
   'a failed compilation retains geometry but prevents dragging stale spatial bindings',
   {timeout: 90_000},
   async t => {

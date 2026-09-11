@@ -177,6 +177,30 @@ test('lofts planar sections without a spine', () => {
   }
 });
 
+test('reports an unsuccessful loft without losing its editable sections', () => {
+  const snapshotModel = createModelSnapshotter();
+  const start = circle(20);
+  const via = regularPolygon(20, 8).relate(self =>
+    self.on(start.up).pivot([50, 0, 0]).rotate(0, 0, 45).offset(-18, 0, 0),
+  );
+  const end = rectangle(40, 40).relate(self =>
+    self.on(start.up).pivot([50, 0, 0]).rotate(0, 0, 90),
+  );
+  const sections = group([start, via, end]);
+  try {
+    assert.throws(
+      () => loft([start, via, end]),
+      /Could not construct a solid loft through these sections/,
+    );
+    const snapshot = snapshotModel(sections);
+    assert.equal(snapshot.children.length, 3);
+    assert.deepEqual(snapshot.children[1].constraints[0].offset, [-18, 0, 0]);
+    assert.ok(defined(snapshot.children[1].mesh).triangles.length > 0);
+  } finally {
+    disposeModelObjects([start, via, end, sections]);
+  }
+});
+
 function assertVectorNear(
   actual: readonly number[],
   expected: readonly number[],
