@@ -812,31 +812,35 @@ const sourceEditPopover = new SourceEditPopover(
   sourceRef => codeEditor.revealSource(sourceRef, true),
 );
 const contextualToolPanel = new ContextualToolPanel(viewportHost, {
+  sourceParameter: () => {
+    const scope = viewport.sourceEvaluation();
+    const cursor = codeEditor.parameterCursor;
+    if (
+      !scope ||
+      !cursor ||
+      contextualTool?.targetId !== scope.target.id ||
+      contextualTool.contextId !== scope.evaluation.contextId
+    )
+      return undefined;
+    const parameter = sourceParameterAt(
+      scope.target,
+      cursor.file,
+      cursor.offset,
+      ref => codeEditor.resolveSourceRef(ref),
+    );
+    return parameter?.name;
+  },
   onParameterInput: updateContextualToolParameter,
   onParameterCommit: commitContextualToolParameter,
   onAction: runContextualToolAction,
 });
-codeEditor.setParameterFocusHandler(() => {
-  const scope = viewport.sourceEvaluation();
-  const cursor = codeEditor.cursorSource();
-  if (
-    !scope ||
-    !cursor ||
-    contextualTool?.targetId !== scope.target.id ||
-    contextualTool.contextId !== scope.evaluation.contextId
-  )
-    return false;
-  const parameter = sourceParameterAt(
-    scope.target,
-    cursor.file,
-    cursor.offset,
-    ref => codeEditor.resolveSourceRef(ref),
-  );
-  return (
-    parameter !== undefined &&
-    contextualToolPanel.focusParameter(parameter.name)
-  );
+codeEditor.setParameterFocusHandler(() =>
+  contextualToolPanel.focusSourceParameter(),
+);
+window.addEventListener('pagehide', () => contextualToolPanel.dispose(), {
+  once: true,
 });
+
 const toolEngine = new ToolEngine({
   sourceVersion: () => codeEditor.sourceVersion(),
   resolveSourceRef: sourceRef => codeEditor.resolveSourceRef(sourceRef),
@@ -2340,6 +2344,7 @@ function renderContextualToolPanel(forceParameterValues = false): void {
     parameters,
     selection: topology
       ? {
+          name: topology.parameter.name,
           label: topology.parameter.label.toUpperCase(),
           summary:
             topology.parameter.multiple &&
@@ -2353,6 +2358,9 @@ function renderContextualToolPanel(forceParameterValues = false): void {
         }
       : edge
         ? {
+            name: tool.signature.parameters.find(
+              parameter => parameter.kind === 'edge',
+            )!.name,
             label: 'SELECTED EDGES',
             summary: edge.hasExplicitEdgeSelection
               ? formatEdgeIds(edge.selectedEdgeIds)

@@ -245,8 +245,13 @@ This does not attempt to invert the expression or change its inputs.
 
 Inputs select their contents on focus and apply valid changes after a short
 typing pause. `Enter`, `Tab`, or leaving the input also commits the value.
-With the editor cursor inside a parameter, press `Tab` to focus its visible,
-writable tool input and select its contents. This also works at the next
+With the editor cursor inside a parameter, its tool control is highlighted.
+This includes topology selection summaries such as edges, vertices, surfaces,
+and the selection parameters of fillet, chamfer, and shell.
+A writable text input also shows a small highlighted `Tab` hint inside its
+right border. Press `Tab` to focus it and
+select its contents. The highlight does not move focus or change your code;
+it clears when the editor loses focus or you select text or use multiple cursors. This also works at the next
 available argument in an incomplete call. Completion lists and snippet tab
 stops keep their usual `Tab` behavior; selections and multiple cursors keep
 editor indentation. If there is no writable input, `Tab` behaves normally.

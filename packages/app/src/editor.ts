@@ -1,6 +1,7 @@
 import * as monaco from 'monaco-editor/editor';
 import {AgentError} from '@code3d/agent';
 import {diffChars} from 'diff';
+import {action, makeObservable, observableRef} from 'mobx';
 import {randomAgentColor} from './agent/colors';
 import {projectTypeScriptWorker} from './monaco/typescript-worker-client';
 import type {CursorTypeInfo} from './monaco/type-info';
@@ -490,6 +491,7 @@ export class CodeEditor {
   private pointerActivatingEditor = false;
   private revision = 1;
   private focusToolParameter?: () => boolean;
+  private parameterCursorValue?: EditorCursor;
   private operationReadOnly = false;
   private suppressCursorEventDepth = 0;
   private queuedChanges?: ProjectEditorChange[];
@@ -544,6 +546,15 @@ export class CodeEditor {
       quickSuggestions: {other: true, comments: true, strings: false},
       tabSize: 2,
     });
+    makeObservable<this, 'parameterCursorValue' | 'refreshParameterCursor'>(
+      this,
+      {
+        parameterCursorValue: observableRef,
+        refreshParameterCursor: action,
+      },
+    );
+    this.editor.onDidChangeModelContent(() => this.refreshParameterCursor());
+    this.editor.onDidBlurEditorText(() => this.refreshParameterCursor());
     this.sourceDecoration = this.editor.createDecorationsCollection();
     this.editor.addCommand(
       monaco.KeyCode.Tab,
@@ -554,12 +565,14 @@ export class CodeEditor {
       `editorId == '${this.editor.getId()}' && editorTextFocus && !editorReadonly && !editorHasSelection && !editorHasMultipleSelections && !suggestWidgetVisible && !inSnippetMode && !inlineSuggestionVisible && !editorTabMovesFocus`,
     );
     this.editor.onDidChangeModel(() => {
+      this.refreshParameterCursor();
       this.editor.updateOptions({readOnly: this.readOnly});
       for (const cursor of this.agentCursors.values()) {
         this.editor.layoutContentWidget(cursor.widget);
       }
     });
     this.editor.onDidChangeConfiguration(event => {
+      this.refreshParameterCursor();
       if (
         event.hasChanged(monaco.editor.EditorOption.lineHeight) ||
         event.hasChanged(monaco.editor.EditorOption.cursorWidth) ||
@@ -571,6 +584,7 @@ export class CodeEditor {
       }
     });
     this.editor.onDidChangeCursorSelection(({selection, reason}) => {
+      this.refreshParameterCursor();
       this.cursorSelectionVersion += 1;
       // History and marker recovery move Monaco's cursor without the user
       // leaving the source target currently being edited by a viewport tool.
@@ -613,6 +627,7 @@ export class CodeEditor {
       {capture: true},
     );
     this.editor.onDidFocusEditorText(() => {
+      this.refreshParameterCursor();
       if (!this.pointerActivatingEditor) this.emitEditorActivation();
     });
     monaco.editor.registerEditorOpener({
@@ -1124,6 +1139,22 @@ export class CodeEditor {
 
   ownsFocus(): boolean {
     return this.container.contains(document.activeElement);
+  }
+
+  /** Native editor selection/focus projected for parameter UI consumers. */
+  get parameterCursor(): EditorCursor | undefined {
+    return this.parameterCursorValue;
+  }
+
+  private refreshParameterCursor(): void {
+    const selections = this.editor.getSelections();
+    this.parameterCursorValue =
+      this.editor.hasTextFocus() &&
+      !this.editor.getOption(monaco.editor.EditorOption.readOnly) &&
+      selections?.length === 1 &&
+      selections[0].isEmpty()
+        ? this.cursorSource()
+        : undefined;
   }
 
   setParameterFocusHandler(handler: () => boolean): void {

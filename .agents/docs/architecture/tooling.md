@@ -153,8 +153,12 @@ Esc 优先取消尚未提交的拖动，不撤销已提交的选择。
 
 参数高亮按当前调用实参定位，不能按上游变量把所有用途高亮。尺寸语义由操作
 快照声明，viewport 从真实几何中选取提示；未声明语义的参数不按名称猜测。
-Tab 跳转沿同一 source ref 聚焦有效参数输入，保留补全、snippet 和原生编辑器
-快捷键的优先级。验证见 [spatial-tools](../../../packages/app/test/spatial-tools.test.ts)、
+编辑器将原生单光标、选区及文本焦点投影为 observable 参数定位输入；面板从当前
+view 与 sourceParameterAt 派生对应的参数。数值输入和拓扑选择摘要均声明参数名并消费同一高亮目标；
+数值输入与选择摘要均使用亮色边框；可 Tab 的当前文本框右侧在边框内显示亮色圆角 Tab 提示，
+真实输入焦点接替后隐藏提示。Tab 复用定位结果，只聚焦可写文本输入，选择摘要不改变编辑器 Tab 行为。
+高亮仅更新样式，不重建输入节点或覆盖草稿。失焦、非空选区、多光标和没有对应控件的参数
+取消提示，面板销毁时释放订阅。Tab 保留补全、snippet 和原生编辑器快捷键的优先级。验证见 [spatial-tools](../../../packages/app/test/spatial-tools.test.ts)、
 [parameter-highlight](../../../packages/app/test/browser/parameter-highlight.test.ts)、
 [parameter-tab](../../../packages/app/test/browser/parameter-tab.test.ts)。
 

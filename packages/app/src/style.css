@@ -2193,9 +2193,12 @@ kbd {
 }
 
 .contextual-tool-parameter-control {
+  --tab-hint-inset: 8.5px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  padding: 0 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 6px;
+  padding: 0 var(--tab-hint-inset) 0 8px;
   border: 1px solid #34382e;
   border-radius: 3px;
   background: #11130f;
@@ -2214,6 +2217,29 @@ kbd {
     monospace;
 }
 
+.contextual-tool-tab-hint {
+  display: none;
+  align-self: stretch;
+  margin: var(--tab-hint-inset) 0;
+  padding: 1px 4px;
+  border: 0;
+  border-radius: 2px;
+  background: var(--acid);
+  color: #11130f;
+  box-shadow: none;
+  font:
+    9px/12px 'IBM Plex Mono',
+    monospace;
+  pointer-events: none;
+}
+
+.contextual-tool-parameter-control:has(
+    input.source-active:not(:disabled):not([readonly])
+  )
+  .contextual-tool-tab-hint {
+  display: block;
+}
+
 .contextual-tool-parameter-control input::selection {
   color: #11120f;
   background: var(--acid);
@@ -2224,6 +2250,9 @@ kbd {
   opacity: 1;
 }
 
+.contextual-tool-parameter-control:has(
+  input.source-active:not(:disabled):not([readonly])
+),
 .contextual-tool-parameter-control:focus-within {
   border-color: var(--acid);
 }
@@ -2246,6 +2275,10 @@ kbd {
   font-size: 9px;
   line-height: 1.5;
   overflow-wrap: anywhere;
+}
+
+.contextual-tool-field output.source-active {
+  border-color: var(--acid);
 }
 
 .contextual-tool-actions {

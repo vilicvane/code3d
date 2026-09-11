@@ -30,6 +30,15 @@ async function openApp(t: TestContext) {
   t.after(() => context.close());
   const page = await context.newPage();
   page.setDefaultTimeout(25_000);
+  const reactiveErrors: string[] = [];
+  page.on('console', message => {
+    if (
+      /mobx|reaction/i.test(message.text()) &&
+      ['error', 'warning'].includes(message.type())
+    )
+      reactiveErrors.push(message.text());
+  });
+  t.after(() => assert.deepEqual(reactiveErrors, []));
   await page.route('**/src/main.ts*', async route => {
     const response = await route.fetch();
     await route.fulfill({
@@ -108,11 +117,74 @@ test(
       ['fillet(2', 7, 'radius'],
     ] as const) {
       await focus(page, token, delta);
+      await page.waitForFunction(
+        parameter =>
+          document
+            .querySelector('input.source-active')
+            ?.getAttribute('data-parameter') === parameter,
+        parameter,
+      );
+      assert.ok(
+        await page.evaluate(() =>
+          window.parameterTabApp.codeEditor.editor.hasTextFocus(),
+        ),
+      );
+      const hint = page.locator(
+        `input[data-parameter="${parameter}"] + .contextual-tool-tab-hint`,
+      );
+      assert.equal(await hint.isVisible(), true);
+      const placement = await hint.evaluate(hint => {
+        const badge = hint.getBoundingClientRect();
+        const field = hint.parentElement!.getBoundingClientRect();
+        return {
+          inside:
+            badge.right < field.right &&
+            badge.left > field.left &&
+            badge.top > field.top &&
+            badge.bottom < field.bottom,
+          color: getComputedStyle(hint).backgroundColor,
+        };
+      });
+      const insets = await hint.evaluate(hint => {
+        const badge = hint.getBoundingClientRect();
+        const field = hint.parentElement!.getBoundingClientRect();
+        const style = getComputedStyle(hint.parentElement!);
+        return [
+          badge.top - field.top - parseFloat(style.borderTopWidth),
+          field.bottom - badge.bottom - parseFloat(style.borderBottomWidth),
+          field.right - badge.right - parseFloat(style.borderRightWidth),
+        ];
+      });
+      assert.ok(
+        insets.every(inset => Math.abs(inset - 8.5) < 0.1),
+        JSON.stringify(insets),
+      );
+      assert.deepEqual(placement, {inside: true, color: 'rgb(216, 255, 62)'});
       const before = await sourceValue(page);
       await page.keyboard.press('Tab');
       assert.equal(await focusedInput(page), parameter);
+      assert.equal(await hint.isVisible(), false);
+      assert.equal(await page.locator('input.source-active').count(), 0);
       assert.equal(await sourceValue(page), before);
     }
+    await focus(page, 'size,', 1);
+    await page.waitForFunction(
+      () =>
+        document
+          .querySelector('input.source-active')
+          ?.getAttribute('data-parameter') === 'x',
+    );
+    await page.evaluate(() => {
+      const editor = window.parameterTabApp.codeEditor.editor;
+      const start = editor.getPosition()!;
+      editor.setSelection({
+        startLineNumber: start.lineNumber,
+        startColumn: start.column,
+        endLineNumber: start.lineNumber,
+        endColumn: start.column + 2,
+      });
+    });
+    assert.equal(await page.locator('input.source-active').count(), 0);
     await focus(page, '30)', 1);
     await page.keyboard.press('Tab');
     await page.keyboard.insertText('42');
@@ -159,6 +231,13 @@ test(
 
     await setSource(page);
     await focus(page, '[1]);', 2);
+    await page.waitForFunction(
+      () =>
+        document
+          .querySelector('output.source-active')
+          ?.getAttribute('data-parameter') === 'edgeIds',
+    );
+    assert.equal(await page.locator('input.source-active').count(), 0);
     await page.keyboard.press('Tab');
     assert.equal(
       await focusedInput(page),
@@ -203,6 +282,7 @@ test(
         }),
       );
     });
+    assert.equal(await page.locator('input.source-active').count(), 0);
     const beforeMultiple = await sourceValue(page);
     await page.keyboard.press('Tab');
     assert.equal(await focusedInput(page), undefined);
@@ -258,6 +338,12 @@ test(
       "import {box} from '@code3d/core';\nconst body = box();",
       ');',
     );
+    await page.waitForFunction(
+      () =>
+        document
+          .querySelector('input.source-active')
+          ?.getAttribute('data-parameter') === 'x',
+    );
     await page.keyboard.press('Tab');
     assert.equal(await focusedInput(page), 'x');
     await page.keyboard.insertText('12');
@@ -294,5 +380,92 @@ test(
         window.parameterTabApp.codeEditor.editor.hasTextFocus(),
       ),
     );
+  },
+);
+
+test(
+  'source highlighting includes single, multiple and operation topology selectors',
+  {timeout: 120_000},
+  async t => {
+    const page = await openApp(t);
+    await setSource(page);
+    const calls = [
+      ['vertex(1)', 'id'],
+      ['edge(1)', 'id'],
+      ['surface(1)', 'id'],
+      ['originVertex(1)', 'id'],
+      ['vertices([1])', 'ids'],
+      ['edges([1])', 'ids'],
+      ['surfaces([1])', 'ids'],
+      ['fillet(1, [1])', 'edgeIds'],
+      ['chamfer(1, [1])', 'edgeIds'],
+      ['shell(1, [1])', 'removedSurfaceIds'],
+      [
+        'relate(self => self.on(point([0,0,0]).up).pivotVertex(1).rotate(0,0,20))',
+        'id',
+      ],
+      ['edge()', 'id'],
+    ];
+    for (const [call, parameter] of calls) {
+      await page.evaluate(call => {
+        const editor = window.parameterTabApp.codeEditor.editor;
+        const source = `import {box, point} from '@code3d/core';\nconst body = box(20, 20, 20);\nbody.${call};`;
+        editor.getModel()!.setValue(source);
+        const offset = call.includes('pivotVertex')
+          ? source.indexOf('pivotVertex(1)') + 'pivotVertex('.length
+          : source.lastIndexOf(')');
+        editor.setPosition(editor.getModel()!.getPositionAt(offset));
+        editor.focus();
+      }, call);
+      await page.waitForFunction(
+        ({call, parameter}) => {
+          const {viewport} = window.parameterTabApp;
+          const scope = viewport.sourceEvaluation();
+          return (
+            scope?.target.tool?.signature.name ===
+              (call.includes('pivotVertex')
+                ? 'pivotVertex'
+                : call.split('(')[0]) &&
+            document
+              .querySelector('output.source-active')
+              ?.getAttribute('data-parameter') === parameter
+          );
+        },
+        {call, parameter},
+      );
+      const borders = await page.evaluate(() => {
+        const panel = getComputedStyle(
+          document.querySelector('.contextual-tool-panel')!,
+        );
+        const selection = getComputedStyle(
+          document.querySelector('output.source-active')!,
+        );
+        return {
+          panel: panel.borderTopColor,
+          width: panel.borderTopWidth,
+          selection: selection.borderTopColor,
+        };
+      });
+      assert.deepEqual(
+        borders,
+        {
+          panel: 'rgb(102, 117, 44)',
+          width: '1px',
+          selection: 'rgb(216, 255, 62)',
+        },
+        call,
+      );
+      assert.equal(await page.locator('input.source-active').count(), 0, call);
+      assert.equal(await focusedInput(page), undefined, call);
+      await page.evaluate(() =>
+        window.parameterTabApp.codeEditor.editor.setPosition({
+          lineNumber: 1,
+          column: 1,
+        }),
+      );
+      await page.waitForFunction(
+        () => !document.querySelector('.source-active'),
+      );
+    }
   },
 );
