@@ -1,3 +1,4 @@
+import {action, autorun, computed, makeObservable, observableRef} from 'mobx';
 import * as THREE from 'three';
 import {
   TransformControls,
@@ -83,6 +84,7 @@ type ActiveDrag = {
 /** One control per axis also represents the non-orthogonal axes of Euler editing. */
 export class TransformGizmo {
   private readonly axes: AxisControl[];
+  private readonly createAxis: (axis: TransformAxis) => AxisControl;
   private readonly pointerListeners = new AbortController();
   private readonly previousTouchAction: string;
   private attachedObject?: THREE.Object3D;
@@ -91,6 +93,19 @@ export class TransformGizmo {
   private pointerId?: number;
   private cancelling = false;
   private bypassSnap = false;
+  private altHeld = false;
+  private bindings: readonly TransformGizmoBinding[] = [];
+  private readonly disposeMode: () => void;
+
+  private get displayedMode(): TransformGizmoBinding['mode'] | undefined {
+    if (this.active) return this.active.binding.mode;
+    const modes = new Set(this.bindings.map(binding => binding.mode));
+    return modes.size > 1
+      ? this.altHeld
+        ? 'rotate'
+        : 'translate'
+      : this.bindings[0]?.mode;
+  }
 
   constructor(
     scene: THREE.Scene,
@@ -100,11 +115,32 @@ export class TransformGizmo {
     private readonly translationGrid: TranslationGrid,
     private readonly onEvent: (event: TransformGizmoEvent) => void,
   ) {
+    makeObservable<
+      this,
+      | 'altHeld'
+      | 'bindings'
+      | 'active'
+      | 'displayedMode'
+      | 'setAltHeld'
+      | 'beginDrag'
+      | 'finishDrag'
+    >(this, {
+      altHeld: observableRef,
+      bindings: observableRef,
+      active: observableRef,
+      displayedMode: computed,
+      setAltHeld: action,
+      beginDrag: action,
+      finishDrag: action,
+      attach: action,
+      detach: action,
+      cancel: action,
+    });
     this.previousTouchAction = domElement.style.touchAction;
-    this.axes = (['x', 'y', 'z'] as const).map(axis => {
+    this.createAxis = axis => {
       const proxy = new THREE.Object3D();
       scene.add(proxy);
-      const controls = new TransformControls(camera, domElement);
+      const controls = new TransformControls(this.camera, domElement);
       // Axis helpers share one pointer owner instead of competing DOM listeners.
       controls.disconnect();
       controls.setSpace('local');
@@ -135,6 +171,17 @@ export class TransformGizmo {
       controls.addEventListener('objectChange', () => this.updateDrag(control));
       controls.addEventListener('mouseUp', () => this.finishDrag(control));
       return control;
+    };
+    this.axes = [];
+    this.disposeMode = autorun(() => {
+      const mode = this.displayedMode;
+      this.bindings;
+      for (const control of this.axes) {
+        const visible = !!control.binding && control.binding.mode === mode;
+        control.controls.getHelper().visible = visible;
+        control.controls.enabled = visible;
+        if (!visible && this.hovered === control) this.setHovered(undefined);
+      }
     });
     domElement.style.touchAction = 'none';
     const options = {signal: this.pointerListeners.signal};
@@ -154,6 +201,11 @@ export class TransformGizmo {
       options,
     );
     domElement.ownerDocument.addEventListener('keyup', this.onSnapKey, options);
+    domElement.ownerDocument.defaultView?.addEventListener(
+      'blur',
+      this.onBlur,
+      options,
+    );
   }
 
   attach(
@@ -162,15 +214,25 @@ export class TransformGizmo {
   ): void {
     this.detach();
     this.attachedObject = object;
-    for (const [index, axis] of (['x', 'y', 'z'] as const).entries()) {
-      const control = this.axes[index];
-      const binding = bindings.find(binding => binding.axis === axis);
+    while (this.axes.length > bindings.length) {
+      const control = this.axes.pop()!;
+      control.controls.getHelper().removeFromParent();
+      control.proxy.removeFromParent();
+      control.controls.dispose();
+    }
+    for (const [index, binding] of bindings.entries()) {
+      const control = this.axes[index] ?? this.createAxis(binding.axis);
+      this.axes[index] = control;
+      control.controls.showX = binding.axis === 'x';
+      control.controls.showY = binding.axis === 'y';
+      control.controls.showZ = binding.axis === 'z';
       control.binding = binding;
       if (!binding) continue;
       control.controls.setMode(binding.mode);
       control.controls.setSize(binding.mode === 'rotate' ? 0.95 : 0.72);
       control.controls.attach(control.proxy);
     }
+    this.bindings = bindings;
     this.updateAnchor();
   }
 
@@ -187,10 +249,12 @@ export class TransformGizmo {
       control.binding = undefined;
     }
     this.attachedObject = undefined;
+    this.bindings = [];
   }
 
   dispose(): void {
     this.detach();
+    this.disposeMode();
     this.pointerListeners.abort();
     for (const {controls, proxy} of this.axes) {
       controls.getHelper().removeFromParent();
@@ -424,8 +488,21 @@ export class TransformGizmo {
     this.bypassSnap = false;
   }
 
+  private setAltHeld(value: boolean): void {
+    this.altHeld = value;
+  }
+
+  private onBlur = (): void => {
+    this.setAltHeld(false);
+    this.cancel();
+  };
+
   private onSnapKey = (event: KeyboardEvent): void => {
-    if (event.key !== 'Alt' || this.active?.gridStep === undefined) return;
+    if (event.key !== 'Alt') return;
+    this.setAltHeld(event.type === 'keydown');
+    if (new Set(this.bindings.map(binding => binding.mode)).size > 1)
+      event.preventDefault();
+    if (this.active?.gridStep === undefined) return;
     const bypass = event.type === 'keydown';
     if (bypass === this.bypassSnap) return;
     this.bypassSnap = bypass;
@@ -446,10 +523,12 @@ export class TransformGizmo {
   }
 
   private pickAxis(event: PointerEvent): AxisControl | undefined {
+    if (this.axes.length === 0) return undefined;
     const raycaster = this.prepareRay(event);
     let nearest: {control: AxisControl; distance: number} | undefined;
     for (const control of this.axes) {
-      if (!control.binding) continue;
+      if (!control.binding || control.binding.mode !== this.displayedMode)
+        continue;
       control.controls.getHelper().updateMatrixWorld(true);
       const hit = raycaster
         .intersectObject(control.gizmo.picker[control.controls.mode], true)
@@ -478,6 +557,7 @@ export class TransformGizmo {
 
   private onPointerDown = (event: PointerEvent): void => {
     if (this.active || event.button !== 0) return;
+    this.setAltHeld(event.altKey);
     const control = this.pickAxis(event);
     this.setHovered(control);
     if (!control) return;
@@ -489,6 +569,7 @@ export class TransformGizmo {
   };
 
   private onPointerMove = (event: PointerEvent): void => {
+    this.setAltHeld(event.altKey);
     if (this.active) {
       if (event.pointerId !== this.pointerId) return;
       this.bypassSnap = event.altKey;

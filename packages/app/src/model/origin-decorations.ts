@@ -39,11 +39,12 @@ export const originSourceDecoration: SourceDecorationProvider = {
           })
         : [];
     }
-    return evaluation.nodeIds.flatMap(nodeId => {
+    return (evaluation.focusNodeIds ?? evaluation.nodeIds).flatMap(nodeId => {
       const node = module.objects.get(nodeId);
-      return node?.operation.spatial
-        ? [originDecoration(nodeId, node.origin)]
-        : [];
+      if (node?.operation.spatial)
+        return [originDecoration(nodeId, node.origin)];
+      const rotation = node?.constraints.at(-1)?.rotation;
+      return rotation ? [originDecoration(nodeId, rotation.origin)] : [];
     });
   },
 };

@@ -57,15 +57,18 @@ let server: Awaited<ReturnType<typeof createAppTestServer>>;
 let compiler: Awaited<ReturnType<typeof createTestModelPipeline>>;
 let ModelViewport: (typeof import('../src/viewport.ts'))['ModelViewport'];
 let sourceTargetPlacement: (typeof import('../src/viewport.ts'))['sourceTargetPlacement'];
-let positionBindings: (typeof import('../src/viewport.ts'))['positionBindings'];
+let positionBindings: (typeof import('../src/tools/model-spatial-tool.ts'))['positionBindings'];
 let applyNodeTransform: (typeof import('../src/rendering/model-renderer.ts'))['applyNodeTransform'];
 
 before(async () => {
   server = await createAppTestServer();
-  ({ModelViewport, sourceTargetPlacement, positionBindings} =
+  ({ModelViewport, sourceTargetPlacement} =
     await server.ssrLoadModule<typeof import('../src/viewport.ts')>(
       '/src/viewport.ts',
     ));
+  ({positionBindings} = await server.ssrLoadModule<
+    typeof import('../src/tools/model-spatial-tool.ts')
+  >('/src/tools/model-spatial-tool.ts'));
   ({applyNodeTransform} = await server.ssrLoadModule<
     typeof import('../src/rendering/model-renderer.ts')
   >('/src/rendering/model-renderer.ts'));

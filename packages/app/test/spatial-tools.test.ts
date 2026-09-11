@@ -886,10 +886,9 @@ box(8, 6, 4).relate(self => self.on(base.up).offset(0, 3, 4).offset(amount /* x 
     key: 'part',
     placement: 'composition' as const,
   };
-  const {positionBindings} =
-    await server.ssrLoadModule<typeof import('../src/viewport.ts')>(
-      '/src/viewport.ts',
-    );
+  const {positionBindings} = await server.ssrLoadModule<
+    typeof import('../src/tools/model-spatial-tool.ts')
+  >('/src/tools/model-spatial-tool.ts');
   const binding = defined(
     positionBindings(occurrence, [occurrence], null).find(
       binding => binding.axis === 'x',
@@ -924,10 +923,9 @@ test('a constraint expression previews its own chain before sibling constraints 
   const {bindings, target} = await relationTool(source, 'rotate');
   assert.equal(bindings.length, 3);
   assert.equal(defined(target.tool).signature.name, 'rotate');
-  const {positionBindings} =
-    await server.ssrLoadModule<typeof import('../src/viewport.ts')>(
-      '/src/viewport.ts',
-    );
+  const {positionBindings} = await server.ssrLoadModule<
+    typeof import('../src/tools/model-spatial-tool.ts')
+  >('/src/tools/model-spatial-tool.ts');
   const {module, node, evaluation} = await relationTool(source, 'rotate');
   const occurrence = {
     object: new Object3D(),
@@ -1036,5 +1034,177 @@ export default ${expression};`;
         ),
       );
     }
+  }
+});
+
+test('default relation rotations append a local rotation and match the committed pose', async () => {
+  const {relationRotationBindings} = await server.ssrLoadModule<
+    typeof import('../src/tools/model-spatial-tool.ts')
+  >('/src/tools/model-spatial-tool.ts');
+  for (const chain of [
+    'self.on(base.up)',
+    'base.on(self.up)',
+    'self.on(base.up).rotate(0, 25, 0).offset(3, 2, 1)',
+  ]) {
+    const source = `import {box} from '@code3d/core'; const base=box(20,10,20); export default box(8,6,4).relate(self=>${chain});`;
+    const module = await compiler.compile(
+      {files: [{path: '/model.ts', source}]},
+      '/model.ts',
+    );
+    const node = defined(module.fallback);
+    const occurrence = {key: 'part', node, placement: 'composition' as const};
+    const ref = defined(node.constraints.at(-1)?.sourceRefs.at(-1));
+    const bindings = relationRotationBindings(occurrence, [occurrence], ref);
+    assert.equal(bindings.length, 3);
+    const intent = spatialIntent(bindings[2], 30);
+    const host = hostFor(source);
+    const session = new ToolEngine(host.host).begin('relation-rotate');
+    assert.equal(session.preview(intent).status, 'ready');
+    session.cancel();
+    assert.equal(host.source(), source);
+    assert.equal(
+      new ToolEngine(host.host).begin('relation-rotate').commit(intent).status,
+      'committed',
+    );
+    assert.ok(host.source().includes(`${chain}.rotate(0, 0, 30)`));
+    const next = await compiler.compile(
+      {files: [{path: '/model.ts', source: host.source()}]},
+      '/model.ts',
+    );
+    assert.equal(next.diagnostic, undefined);
+    const matrix = (
+      t:
+        | typeof node.compositionTransform
+        | (typeof intent.preview.objects)[0]['transform'],
+    ) =>
+      new Matrix4().compose(
+        new Vector3(...t.position),
+        new Quaternion(...t.quaternion),
+        new Vector3(1, 1, 1),
+      );
+    near(
+      matrix(node.compositionTransform).multiply(
+        matrix(intent.preview.objects[0].transform),
+      ).elements,
+      matrix(defined(next.fallback).compositionTransform).elements,
+    );
+  }
+});
+
+test('composition rotation edits reuse the authored call across offsets and preserve the full-result preview', async () => {
+  const {relationToolTarget, existingRelationRotationBindings} =
+    await server.ssrLoadModule<
+      typeof import('../src/tools/model-spatial-tool.ts')
+    >('/src/tools/model-spatial-tool.ts');
+  for (const chain of [
+    'self.on(base.up).rotate(10,20,30).offset(3,4,5)',
+    'base.on(self.up).offset(3,4,5).rotate(10,20,30)',
+    'self.on(base.up).pivot([5,0,0]).rotate(10,20,30).offset(3,4,5)',
+    'self.on(base.up).around(base.axis).rotate(20).offset(3,4,5)',
+  ]) {
+    const source = `import {box} from '@code3d/core'; const base=box(20,10,20); export default box(8,6,4).relate(self=>${chain}).material('#d8ff3e');`;
+    const module = await compiler.compile(
+      {files: [{path: '/model.ts', source}]},
+      '/model.ts',
+    );
+    const node = defined(module.fallback);
+    const occurrence = {key: 'part', node, placement: 'composition' as const};
+    const resolved = relationToolTarget(
+      module,
+      defined(node.constraints.at(-1)),
+      'rotate',
+    );
+    assert.ok(
+      resolved,
+      JSON.stringify({
+        refs: node.constraints.at(-1)?.sourceRefs,
+        targets: module.sourceTargets
+          .filter(t => t.tool?.signature.name === 'rotate')
+          .map(t => ({
+            kind: t.kind,
+            ref: t.sourceRef,
+            tool: t.tool?.signature.name,
+          })),
+      }),
+    );
+    const target = resolved;
+    const bindings = existingRelationRotationBindings(
+      module,
+      target,
+      occurrence,
+      [occurrence],
+      new Map(),
+      new Map(),
+    );
+    assert.equal(bindings.length, chain.includes('around') ? 1 : 3);
+    const intent = spatialIntent(bindings[0], 40);
+    const host = hostFor(source);
+    assert.equal(
+      new ToolEngine(host.host).begin('rotate').commit(intent).status,
+      'committed',
+    );
+    assert.equal((host.source().match(/\.rotate\(/g) ?? []).length, 1);
+    assert.ok(
+      host
+        .source()
+        .includes(
+          chain.includes('around') ? '.rotate(40)' : '.rotate(40,20,30)',
+        ),
+    );
+    const next = await compiler.compile(
+      {files: [{path: '/model.ts', source: host.source()}]},
+      '/model.ts',
+    );
+    const matrix = (t: (typeof intent.preview.objects)[0]['transform']) =>
+      new Matrix4().compose(
+        new Vector3(...t.position),
+        new Quaternion(...t.quaternion),
+        new Vector3(1, 1, 1),
+      );
+    near(
+      matrix(node.compositionTransform).multiply(
+        matrix(intent.preview.objects[0].transform),
+      ).elements,
+      matrix(defined(next.fallback).compositionTransform).elements,
+    );
+  }
+});
+
+test('default relation tools share current material-derived instances and exclude unrelated members', async () => {
+  const {relationBindings} = await server.ssrLoadModule<
+    typeof import('../src/tools/model-spatial-tool.ts')
+  >('/src/tools/model-spatial-tool.ts');
+  const source = `import {box} from '@code3d/core';
+const base = box(20,10,20);
+export default box(8,6,4).relate(self => self.on(base.up).pivot([5,0,0]).rotate(10,20,30)).material('#d8ff3e');`;
+  const module = await compiler.compile(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  const node = defined(module.fallback);
+  const first = {key: 'first', node, placement: 'composition' as const};
+  const second = {...first, key: 'second'};
+  const unrelated = {
+    ...first,
+    key: 'unrelated',
+    node: {...node, constraints: []},
+  };
+  const bindings = relationBindings(
+    module,
+    first,
+    [first, second, unrelated],
+    null,
+    new Map(),
+    new Map(),
+  );
+  assert.equal(bindings.length, 6);
+  for (const binding of bindings) {
+    const keys =
+      binding.kind === 'expression'
+        ? binding.occurrenceKeys
+        : binding.kind === 'spatial'
+          ? binding.spatial.objects.map(object => object.key)
+          : [];
+    assert.deepEqual(keys, ['first', 'second']);
   }
 });

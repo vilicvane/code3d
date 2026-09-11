@@ -206,6 +206,20 @@ offer dimension inputs; a fillet or chamfer can offer edge selection;
 an offset can offer a position tool. Origin operations offer a pivot marker
 and arrows, while `rotate` offers angle inputs and rotation rings. Try the
 [origin and rotation guide](../../guides/origins-and-rotation/).
+In a composition preview, selecting a member or subgroup positioned with
+`relate()` shows translation arrows by default. Hold `Alt` to show rotation rings
+when both tools are available, and release it to restore translation. The tool
+stays fixed during a drag; `Alt` during a translation drag still temporarily
+disables grid snapping. Dragging a ring
+edits the latest `.rotate(...)` in its relation, preserving its pivot or axis.
+A point marker shows that rotation’s pivot when the member is selected and
+remains visible while dragging.
+If none exists, it adds a rotation about that member's origin and local axes.
+Translation likewise reuses the latest `.offset(...)`, so alternating between
+the tools does not keep appending calls. These tools remain available when
+`.material(...)` follows `relate(...)`. Press `Escape` to cancel or use Undo after committing.
+Coupled constraints that cannot be previewed accurately keep their existing
+editing restrictions.
 
 When a parameter has a unique editable source, the panel follows TypeScript
 definitions to update it. Otherwise, an evaluated expression appears as

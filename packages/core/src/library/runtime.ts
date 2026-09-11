@@ -182,6 +182,8 @@ export type ConstraintSnapshot = Readonly<{
   offsetDirection: 1 | -1;
   offset: Vec3;
   offsetFrame: Transform;
+  /** Latest authored rotation, expressed in the fully solved self frame. */
+  rotation?: ModelSpatialOperation;
   sourceRefs: readonly SourceRef[];
   parameters: readonly ParameterUsage[];
 }> &
@@ -1837,6 +1839,14 @@ export abstract class RelationObject {
     constraint: StoredConstraint,
     context: SolveContext,
   ): ConstraintSnapshot {
+    const lastRotation = constraint.rotations.at(-1);
+    const rotationSpatial = lastRotation
+      ? this.constraintSpatial(
+          constraint,
+          {kind: 'rotate', pivot: lastRotation.pivot},
+          context,
+        ).spatial
+      : undefined;
     const source = constraint.source.model ?? this;
     const target = constraint.target.model ?? this;
     const models = [...context.poses.keys()];
@@ -1889,6 +1899,7 @@ export abstract class RelationObject {
         offsetDirection: 1,
         offset: constraint.offset ?? origin,
         offsetFrame: toTransform(offsetFrame),
+        rotation: rotationSpatial,
         sourceRefs: [...valueTrace(constraint).sourceRefs],
         parameters: [...valueTrace(constraint).parameters],
       };
@@ -1970,6 +1981,7 @@ export abstract class RelationObject {
       offsetDirection: source === this ? 1 : -1,
       offset: constraint.offset ?? origin,
       offsetFrame: toTransform(offsetFrame),
+      rotation: rotationSpatial,
       sourceRefs: [...valueTrace(constraint).sourceRefs],
       parameters: [...valueTrace(constraint).parameters],
     };

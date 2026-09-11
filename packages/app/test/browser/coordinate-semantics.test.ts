@@ -1193,11 +1193,256 @@ export const assembly = group([base, cap]).originPoint(cap.center).rotate(0, 0, 
     },
   );
 
+for (const grouped of [false, true])
+  test(
+    `default relate tools expose translation and rotation on a selected ${grouped ? 'group' : 'solid'}`,
+    {timeout: 90_000},
+    async t => {
+      const {page, errors} = await openApp(t);
+      const source = `import {box, group} from '@code3d/core'; const base=box(30,8,25); const part=${grouped ? 'group([box(12,10,8)])' : 'box(12,10,8)'}.relate(self=>self.on(base.up)); export default group([base,part]);`;
+      await page.evaluate(source => {
+        const {codeEditor} = window.coordinateApp;
+        const e = codeEditor.editor;
+        e.getModel()!.setValue(source);
+        e.setPosition(
+          e.getModel()!.getPositionAt(source.lastIndexOf('part])') + 1),
+        );
+      }, source);
+      await page.waitForFunction(
+        () =>
+          window.coordinateApp.viewport['transformGizmo']['axes'].filter(
+            control => control.binding,
+          ).length === 6,
+      );
+      await page.evaluate(() => window.coordinateApp.viewport.fit());
+      await cameraIdle(page);
+      assert.deepEqual(
+        await page.evaluate(() =>
+          window.coordinateApp.viewport['transformGizmo']['axes'].map(
+            control => control.binding?.mode,
+          ),
+        ),
+        ['translate', 'translate', 'translate', 'rotate', 'rotate', 'rotate'],
+      );
+      const visibleModes = () =>
+        page.evaluate(() =>
+          window.coordinateApp.viewport['transformGizmo']['axes']
+            .filter(control => control.controls.getHelper().visible)
+            .map(control => control.binding?.mode),
+        );
+      assert.deepEqual(await visibleModes(), [
+        'translate',
+        'translate',
+        'translate',
+      ]);
+      await page.keyboard.down('Alt');
+      assert.deepEqual(await visibleModes(), ['rotate', 'rotate', 'rotate']);
+      await page.keyboard.up('Alt');
+      assert.deepEqual(await visibleModes(), [
+        'translate',
+        'translate',
+        'translate',
+      ]);
+      const drag = async () => {
+        await page.keyboard.down('Alt');
+        const handle = await rotationHandle(page, 2);
+        await page.mouse.move(handle.x, handle.y);
+        await page.mouse.down();
+        await page.keyboard.up('Alt');
+        assert.deepEqual(await visibleModes(), ['rotate', 'rotate', 'rotate']);
+        await page.mouse.move(
+          handle.x + handle.dx * 35,
+          handle.y + handle.dy * 35,
+          {steps: 5},
+        );
+      };
+      await drag();
+      await page.keyboard.press('Escape');
+      await page.mouse.up();
+      assert.deepEqual(await visibleModes(), [
+        'translate',
+        'translate',
+        'translate',
+      ]);
+      assert.equal(
+        await page.evaluate(() =>
+          window.coordinateApp.codeEditor.editor.getValue(),
+        ),
+        source,
+      );
+      await drag();
+      await page.mouse.up();
+      await page.waitForFunction(() =>
+        window.coordinateApp.codeEditor.editor.getValue().includes('.rotate('),
+      );
+      await page.getByText('Ready', {exact: true}).waitFor();
+      assert.match(
+        await page.evaluate(() =>
+          window.coordinateApp.codeEditor.editor.getValue(),
+        ),
+        /self\.on\(base\.up\)\.rotate\(0, 0, -?[\d.]+\)/,
+      );
+      for (const mode of ['translate', 'rotate', 'translate']) {
+        const before = await page.evaluate(() =>
+          window.coordinateApp.codeEditor.editor.getValue(),
+        );
+        if (mode === 'rotate') await drag();
+        else {
+          const handle = await xHandle(page);
+          await page.mouse.move(handle.x, handle.y);
+          await page.mouse.down();
+          await page.mouse.move(
+            handle.x + handle.dx * 30,
+            handle.y + handle.dy * 30,
+            {steps: 5},
+          );
+        }
+        await page.mouse.up();
+        await page.waitForFunction(
+          before =>
+            window.coordinateApp.codeEditor.editor.getValue() !== before,
+          before,
+        );
+        await page.getByText('Ready', {exact: true}).waitFor();
+        const current = await page.evaluate(() =>
+          window.coordinateApp.codeEditor.editor.getValue(),
+        );
+        assert.equal((current.match(/\.rotate\(/g) ?? []).length, 1);
+        assert.equal((current.match(/\.offset\(/g) ?? []).length, 1);
+      }
+      if (process.env.CODE3D_RELATE_ROTATE_SCREENSHOT)
+        await page.screenshot({
+          path: process.env.CODE3D_RELATE_ROTATE_SCREENSHOT,
+        });
+      await page.evaluate(() => {
+        const e = window.coordinateApp.codeEditor.editor;
+        e.focus();
+        for (let i = 0; i < 4; i++) e.trigger('test', 'undo', null);
+      });
+      await page.waitForFunction(
+        source => window.coordinateApp.codeEditor.editor.getValue() === source,
+        source,
+      );
+      assert.deepEqual(errors, []);
+    },
+  );
+
+test(
+  'pivot rotations survive material derivation and edit the selected Boolean composition member',
+  {timeout: 90_000},
+  async t => {
+    const {page, errors} = await openApp(t);
+    const source = `import {box, cut, cylinder, group, intersect, sphere, union} from '@code3d/core';
+const accent = '#d8ff3e';
+const neutral = '#30352f';
+const stockHeight = 8;
+const bossHeight = 6;
+const stock = box(30, stockHeight, 20).material(neutral);
+const bore = cylinder(3, 12);
+const drilled = cut(stock, [bore]).material(neutral);
+const boss = cylinder(5, bossHeight)
+  .originOffset(-7, -(stockHeight + bossHeight) / 2, 0)
+  .material(accent);
+const joined = union([drilled, boss]).material(neutral);
+const lens = intersect([sphere(8), box(12, 12, 12)])
+  .relate(part => part.on(joined.right).offset(0, 1, 3).pivot([-10, 0, 0]).rotate(0, 0, -31))
+  .material(accent);
+export const booleanOperationsExample = group([joined, lens], 'Boolean operations');`;
+    await page.evaluate(source => {
+      const e = window.coordinateApp.codeEditor.editor;
+      e.getModel()!.setValue(source);
+      e.setPosition(
+        e.getModel()!.getPositionAt(source.lastIndexOf('lens]') + 1),
+      );
+    }, source);
+    await page.waitForFunction(
+      () =>
+        window.coordinateApp.viewport['transformGizmo']['axes'].filter(
+          c => c.binding,
+        ).length === 6,
+    );
+    await page.evaluate(() => window.coordinateApp.viewport.fit());
+    await cameraIdle(page);
+    await page.keyboard.down('Alt');
+    assert.deepEqual(
+      await page.evaluate(() =>
+        window.coordinateApp.viewport['transformGizmo']['axes']
+          .filter(c => c.controls.getHelper().visible)
+          .map(c => c.binding?.mode),
+      ),
+      ['rotate', 'rotate', 'rotate'],
+    );
+    const pivot = await page.evaluate(() => {
+      const viewport = window.coordinateApp.viewport;
+      const selected = viewport.getSelected()!;
+      const marker = viewport['decorationLayers']
+        .get('source-context:model-origin')
+        ?.find(instance => instance.occurrenceKey === selected.key)?.anchor;
+      const control = viewport['transformGizmo']['axes'].find(
+        c => c.binding?.mode === 'rotate',
+      )!;
+      if (!marker) return undefined;
+      marker.updateWorldMatrix(true, false);
+      return {
+        visible: marker.visible && marker.parent!.visible,
+        distance: marker
+          .getWorldPosition(control.proxy.position.clone())
+          .distanceTo(control.proxy.position),
+      };
+    });
+    assert.ok(pivot, 'Selected composition member displays its pivot');
+    assert.equal(pivot.visible, true);
+    assert.ok(pivot.distance < 1e-6, JSON.stringify(pivot));
+    if (process.env.CODE3D_RELATE_ROTATE_SCREENSHOT) {
+      await page.screenshot({
+        path: process.env.CODE3D_RELATE_ROTATE_SCREENSHOT,
+      });
+    }
+    const handle = await rotationHandle(page, 2);
+    await page.mouse.move(handle.x, handle.y);
+    await page.mouse.down();
+    await page.mouse.move(
+      handle.x + handle.dx * 35,
+      handle.y + handle.dy * 35,
+      {steps: 5},
+    );
+    await page.mouse.up();
+    await page.waitForFunction(
+      source => window.coordinateApp.codeEditor.editor.getValue() !== source,
+      source,
+    );
+    await page.getByText('Ready', {exact: true}).waitFor();
+    const changed = await page.evaluate(() =>
+      window.coordinateApp.codeEditor.editor.getValue(),
+    );
+    assert.equal((changed.match(/\.rotate\(/g) ?? []).length, 1);
+    assert.ok(changed.includes('.pivot([-10, 0, 0])'));
+    assert.ok(changed.includes('.material(accent)'));
+    await page.keyboard.up('Alt');
+    await page.evaluate(() => {
+      const e = window.coordinateApp.codeEditor.editor;
+      e.setPosition(
+        e.getModel()!.getPositionAt(e.getValue().indexOf('.rotate(') + 2),
+      );
+    });
+    await page.waitForFunction(() =>
+      window.coordinateApp.viewport['transformGizmo']['axes']
+        .filter(c => c.binding)
+        .every(c => c.binding?.mode === 'rotate'),
+    );
+    await cameraIdle(page);
+    await rotationHandle(page, 2);
+    assert.deepEqual(errors, []);
+  },
+);
+
 async function rotationHandle(page: Page, axisIndex = 2) {
   return page.evaluate(axisIndex => {
     const viewport = window.coordinateApp.viewport;
     const gizmo = viewport['transformGizmo'];
-    const control = gizmo['axes'][axisIndex];
+    const control = gizmo['axes'].filter(
+      control => control.binding?.mode === 'rotate',
+    )[axisIndex];
     const camera = viewport['camera'];
     const rect = viewport['renderer'].domElement.getBoundingClientRect();
     control.controls.getHelper().updateMatrixWorld(true);
