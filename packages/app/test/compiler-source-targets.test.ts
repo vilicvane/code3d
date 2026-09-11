@@ -2445,3 +2445,49 @@ export const ray = line([10, 0, 0]);`;
     assert.equal(distance.argument, name === 'point' ? 'x' : 'endX');
   }
 });
+
+test('empty topology calls retain an editable selection target', async () => {
+  for (const method of [
+    'vertex',
+    'edge',
+    'surface',
+    'originVertex',
+    'vertices',
+    'edges',
+    'surfaces',
+    'pivotVertex',
+    'fillet',
+    'chamfer',
+    'shell',
+  ]) {
+    const expression =
+      method === 'pivotVertex'
+        ? 'part.relate(self => self.on(base.up).pivotVertex().rotate(0,0,20))'
+        : `part.${method}()`;
+    const source = `import {box} from '@code3d/core'; const base=box(20,2,20); const part=box(4,4,4); export default ${expression};`;
+    const module = await compileProject(
+      {files: [{path: '/model.ts', source}]},
+      '/model.ts',
+    );
+    const target = module.sourceTargets.find(
+      target =>
+        target.tool &&
+        target.evaluations.some(evaluation => evaluation.selection) &&
+        source.slice(target.sourceRef.start, target.sourceRef.end) ===
+          `${method}()`,
+    );
+    assert.ok(
+      target,
+      `${method}: ${JSON.stringify(module.sourceTargets.map(t => ({kind: t.kind, source: source.slice(t.sourceRef.start, t.sourceRef.end), tool: t.tool?.signature})))}`,
+    );
+    const parameter = defined(target.tool).signature.parameters.find(
+      parameter => ['vertex', 'edge', 'surface'].includes(parameter.kind),
+    );
+    const argument = defined(target.tool).arguments.find(
+      argument => argument.index === defined(parameter).index,
+    );
+    assert.equal(argument?.presence, 'omitted', method);
+    assert.equal(argument?.target?.kind, 'omitted', method);
+    assert.ok(target.evaluations[0]?.selection, method);
+  }
+});

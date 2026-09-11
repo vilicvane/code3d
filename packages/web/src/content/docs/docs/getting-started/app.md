@@ -214,7 +214,12 @@ write failures use the same error bar; a successful retry clears it.
 
 Tools depend on the call or value under the editor cursor. A primitive can
 offer dimension inputs; a fillet or chamfer can offer edge selection;
-an offset can offer a position tool. Origin operations offer a pivot marker
+an offset can offer a position tool. Empty topology calls such as `vertex()`,
+`edge()`, `surface()`, `originVertex()`, and `pivotVertex()` still show their
+selection controls when the input model is available. Pick a candidate to fill
+the missing argument; simply opening the tool leaves the source unchanged.
+The missing-argument diagnostic remains until the call is corrected.
+Origin operations offer a pivot marker
 and arrows, while `rotate` offers angle inputs and rotation rings. Try the
 [origin and rotation guide](../../guides/origins-and-rotation/).
 In a composition preview, selecting a member or subgroup positioned with
@@ -240,8 +245,13 @@ This does not attempt to invert the expression or change its inputs.
 
 Inputs select their contents on focus and apply valid changes after a short
 typing pause. `Enter`, `Tab`, or leaving the input also commits the value.
-With the editor cursor inside a parameter, press `Tab` to focus its visible,
-writable tool input and select its contents. This also works at the next
+With the editor cursor inside a parameter, its tool control is highlighted.
+This includes topology selection summaries such as edges, vertices, surfaces,
+and the selection parameters of fillet, chamfer, and shell.
+A writable text input also shows a small highlighted `Tab` hint inside its
+right border. Press `Tab` to focus it and
+select its contents. The highlight does not move focus or change your code;
+it clears when the editor loses focus or you select text or use multiple cursors. This also works at the next
 available argument in an incomplete call. Completion lists and snippet tab
 stops keep their usual `Tab` behavior; selections and multiple cursors keep
 editor indentation. If there is no writable input, `Tab` behaves normally.
@@ -282,8 +292,10 @@ When you switch model files, the current preview stays visible while the next
 file compiles. Its controls pause until the new result replaces it. An empty
 result or a compilation failure clears the previous file’s preview.
 
-Modeling failures appear with an error message and, where source information
-is available, an underline at the responsible call. If the object or sketch
+Modeling failures appear in the top status and, where source information
+is available, as an editor diagnostic at the responsible call. The viewport
+diagnostic card is reserved for sketch source data that differs from its
+constraint solution, with a **Fix** action when safe synchronization is available. If the object or sketch
 you are editing evaluated successfully, its preview and tools stay current even
 when a later operation fails. For example, you can keep moving a loft section
 after the loft fails, then drag it back to a position that produces a valid result.

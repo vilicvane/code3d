@@ -1,3 +1,4 @@
+import {action, computed, makeObservable, observableRef, reaction} from 'mobx';
 import {formatDisplayNumber} from '../tools/parameter-policy';
 
 export type ContextualToolParameterView = Readonly<{
@@ -24,6 +25,7 @@ export type ContextualToolPanelView = Readonly<{
   meta?: string;
   parameters: readonly ContextualToolParameterView[];
   selection?: Readonly<{
+    name: string;
     label: string;
     summary: string;
   }>;
@@ -31,6 +33,7 @@ export type ContextualToolPanelView = Readonly<{
 }>;
 
 type ContextualToolPanelOptions = Readonly<{
+  sourceParameter?(): string | undefined;
   onParameterInput(name: string, value: number | undefined): void;
   /** Whether the commit is awaiting refreshed parameter availability. */
   onParameterCommit(name: string, value: number | undefined): boolean;
@@ -53,7 +56,8 @@ export class ContextualToolPanel {
   private readonly selectionSummary: HTMLOutputElement;
   private readonly actions: HTMLElement;
   private readonly controls = new Map<string, ParameterControl>();
-  private activeViewId?: string;
+  private view?: ContextualToolPanelView;
+  private readonly stopSourceHighlight: () => void;
   private pendingNavigation?: Readonly<{
     from: HTMLInputElement;
     to: HTMLInputElement;
@@ -93,13 +97,31 @@ export class ContextualToolPanel {
       this.actions,
     );
     container.append(this.root);
+    makeObservable<this, 'view'>(this, {
+      view: observableRef,
+      sourceParameter: computed,
+      show: action,
+      hide: action,
+    });
+    this.stopSourceHighlight = reaction(
+      () => ({name: this.sourceParameter, view: this.view}),
+      ({name}) => {
+        for (const [parameter, {input}] of this.controls)
+          input.classList.toggle('source-active', parameter === name);
+        this.selectionSummary.classList.toggle(
+          'source-active',
+          name !== undefined && this.view?.selection?.name === name,
+        );
+      },
+      {fireImmediately: true},
+    );
   }
 
   show(view: ContextualToolPanelView, forceParameterValues = false): void {
     const structureChanged =
-      this.activeViewId !== view.id ||
+      this.view?.id !== view.id ||
       !sameNames([...this.controls.keys()], view.parameters);
-    this.activeViewId = view.id;
+    this.view = view;
     this.title.textContent = view.title;
     this.meta.textContent = view.meta ?? '';
     this.meta.hidden = !view.meta;
@@ -112,6 +134,7 @@ export class ContextualToolPanel {
     );
     this.selectionField.hidden = !view.selection;
     if (view.selection) {
+      this.selectionSummary.dataset.parameter = view.selection.name;
       this.selectionLabel.textContent = view.selection.label;
       this.selectionSummary.textContent = view.selection.summary;
     }
@@ -123,7 +146,27 @@ export class ContextualToolPanel {
   hide(): void {
     this.cancelPendingNavigation();
     this.root.hidden = true;
-    this.activeViewId = undefined;
+    this.view = undefined;
+  }
+
+  get sourceParameter(): string | undefined {
+    if (!this.view) return undefined;
+    const name = this.options.sourceParameter?.();
+    return this.view.selection?.name === name ||
+      this.view.parameters.some(parameter => parameter.name === name)
+      ? name
+      : undefined;
+  }
+
+  focusSourceParameter(): boolean {
+    const name = this.sourceParameter;
+    return name !== undefined && this.focusParameter(name);
+  }
+
+  dispose(): void {
+    this.stopSourceHighlight();
+    this.cancelPendingNavigation();
+    this.root.remove();
   }
 
   focusParameter(name: string): boolean {
@@ -155,7 +198,11 @@ export class ContextualToolPanel {
       input.type = 'number';
       input.inputMode = 'decimal';
       input.dataset.parameter = parameter.name;
-      control.append(input);
+      const tabHint = document.createElement('kbd');
+      tabHint.className = 'contextual-tool-tab-hint';
+      tabHint.textContent = 'Tab';
+      tabHint.setAttribute('aria-hidden', 'true');
+      control.append(input, tabHint);
       field.append(label, control);
       this.parameterFields.append(field);
       this.controls.set(parameter.name, {field, label, input});

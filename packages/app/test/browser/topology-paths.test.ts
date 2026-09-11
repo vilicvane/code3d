@@ -28,7 +28,7 @@ const top = rectangle(18, 12).relate(p => p.on(point([0, 32, 0]).up));
 const body = loft([base, top]);
 ${expression};`;
 
-async function openApp(t: TestContext, expression: string) {
+async function openApp(t: TestContext, expression: string, focus?: string) {
   const context = await browser.newContext({
     viewport: {width: 1400, height: 950},
   });
@@ -49,13 +49,22 @@ async function openApp(t: TestContext, expression: string) {
   });
   await page.goto(appUrl!);
   await page.getByText('Ready', {exact: true}).waitFor({timeout: 40_000});
-  await page.evaluate(source => {
-    const {editor} = window.topologyTestApp.codeEditor;
-    const model = editor.getModel();
-    model!.setValue(source);
-    editor.setPosition(model!.getPositionAt(source.length - 2));
-    editor.focus();
-  }, sourceFor(expression));
+  await page.evaluate(
+    ({source, focus}) => {
+      const {editor} = window.topologyTestApp.codeEditor;
+      const model = editor.getModel();
+      model!.setValue(source);
+      editor.setPosition(
+        model!.getPositionAt(
+          focus
+            ? source.lastIndexOf(focus) + focus.length - 1
+            : source.length - 2,
+        ),
+      );
+      editor.focus();
+    },
+    {source: sourceFor(expression), focus},
+  );
   await page.waitForFunction(() =>
     Boolean(window.topologyTestApp.viewport['topologySelection']),
   );
@@ -66,6 +75,9 @@ async function clickId(
   page: Page,
   id: import('@code3d/core/tooling').TopologyId,
 ) {
+  await page.waitForFunction(
+    () => !window.topologyTestApp.viewport['controls']['transition'],
+  );
   const position = await page.evaluate(id => {
     const {viewport} = window.topologyTestApp;
     const selection = viewport['topologySelection']!;
@@ -240,3 +252,66 @@ test(
     assert.deepEqual(errors, []);
   },
 );
+
+for (const method of [
+  'vertex',
+  'edge',
+  'surface',
+  'originVertex',
+  'pivotVertex',
+]) {
+  test(
+    `empty ${method} activates candidates and writes the selected input`,
+    {timeout: 60000},
+    async t => {
+      const expression =
+        method === 'pivotVertex'
+          ? 'body.relate(self => self.on(point([0,0,0]).up).pivotVertex().rotate(0,0,20))'
+          : `body.${method}()`;
+      const {page, errors} = await openApp(t, expression, `${method}()`);
+      assert.equal(
+        await page.locator('.contextual-tool-panel').isVisible(),
+        true,
+      );
+      assert.equal(
+        await page.evaluate(
+          () =>
+            window.topologyTestApp.viewport['topologySelection']!.selectedIds
+              .size,
+        ),
+        0,
+      );
+      const before = await page.evaluate(() =>
+        window.topologyTestApp.codeEditor.editor.getValue(),
+      );
+      assert.ok(before.includes(`${method}()`));
+      await clickId(page, [2, 1]);
+      await expectExpression(page, `${method}([2, 1])`);
+      await page.evaluate(() =>
+        window.topologyTestApp.codeEditor.editor.focus(),
+      );
+      await page.keyboard.press('Control+z');
+      await page.waitForFunction(
+        method =>
+          window.topologyTestApp.codeEditor.editor
+            .getValue()
+            .includes(`${method}()`),
+        method,
+      );
+      await page.waitForFunction(
+        () =>
+          window.topologyTestApp.viewport['topologySelection']?.selectedIds
+            .size === 0,
+      );
+      await page.keyboard.press('Escape');
+      assert.ok(
+        (
+          await page.evaluate(() =>
+            window.topologyTestApp.codeEditor.editor.getValue(),
+          )
+        ).includes(`${method}()`),
+      );
+      assert.deepEqual(errors, []);
+    },
+  );
+}

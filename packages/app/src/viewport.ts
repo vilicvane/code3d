@@ -3,7 +3,6 @@ import {
   isCompositionInputRole,
   sameOperationCall,
 } from './model/operation-context';
-import type {ModelDiagnostic} from './model/diagnostic';
 import * as THREE from 'three';
 import {
   action,
@@ -152,7 +151,6 @@ type DecorationInstance = Readonly<{
 
 export type ModelViewportOptions = Readonly<{
   onViewChange?: () => void;
-  onSourcePreviewDiagnostic?: (diagnostic: ModelDiagnostic | undefined) => void;
   onSelect: (occurrence: Occurrence) => void;
   onDrillDown: (node: ModelSnapshotObject) => void;
   onNavigateSource: (sourceRef: SourceRef) => void;
@@ -343,7 +341,6 @@ export class ModelViewport {
   private readonly spatialParameterValues = new Map<string, number>();
   private readonly onSelect: ModelViewportOptions['onSelect'];
   private readonly onViewChange: ModelViewportOptions['onViewChange'];
-  private readonly onSourcePreviewDiagnostic: ModelViewportOptions['onSourcePreviewDiagnostic'];
   private readonly onDrillDown: ModelViewportOptions['onDrillDown'];
   private readonly onNavigateSource: ModelViewportOptions['onNavigateSource'];
   private readonly onTopologySelection: ModelViewportOptions['onTopologySelection'];
@@ -371,7 +368,6 @@ export class ModelViewport {
       onDrillDown,
       onNavigateSource,
       onPositionTool,
-      onSourcePreviewDiagnostic,
       onTopologySelection,
       sourceDecorationProviders = [],
       showCoordinateReference = true,
@@ -383,7 +379,6 @@ export class ModelViewport {
     this.animateViewChanges = animateViewChanges;
     this.isViewVisible = isViewVisible;
     this.onViewChange = onViewChange;
-    this.onSourcePreviewDiagnostic = onSourcePreviewDiagnostic;
     this.onDrillDown = onDrillDown;
     this.onNavigateSource = onNavigateSource;
     this.onTopologySelection = onTopologySelection;
@@ -1336,7 +1331,6 @@ export class ModelViewport {
       focusNodeIds !== undefined || target.kind !== 'constraint';
     this.renderedViewTarget = renderedViewTarget;
     this.resetRenderedView();
-    this.onSourcePreviewDiagnostic?.(evaluation.constraintPreviewDiagnostic);
     const constraints = evaluatedConstraints(this.module!.objects, evaluation);
     const relationContext =
       evaluation.relationContext !== undefined || constraints.length > 0;
@@ -1578,7 +1572,6 @@ export class ModelViewport {
   }
 
   private resetRenderedView(): void {
-    this.onSourcePreviewDiagnostic?.(undefined);
     if (this.topologySelection) {
       this.clearTopologySelection();
       this.onTopologySelection({kind: 'cancel'});

@@ -7,6 +7,7 @@ declare const window: Window & {
   emptyViewportApp: {
     viewport: import('../../src/viewport.ts').ModelViewport;
     codeEditor: import('../../src/editor.ts').CodeEditor;
+    previewState: import('../../src/model/preview-state.ts').ModelPreviewState;
     compiler: import('../../src/model/compiler-client.ts').ModelCompilerClient;
     runModel: () => Promise<void>;
     previousModule?: import('../../src/model/compiler.ts').ModelModule | null;
@@ -56,7 +57,7 @@ async function open(
       response,
       body:
         (await response.text()) +
-        '\nwindow.emptyViewportApp = {codeEditor, viewport, compiler, runModel};\n',
+        '\nwindow.emptyViewportApp = {codeEditor, viewport, compiler, runModel, previewState};\n',
     });
   });
   await page.goto(process.env.CODE3D_TEST_URL!);
@@ -91,8 +92,10 @@ async function setSource(
   await select(page, selection);
   await page.waitForFunction(
     state =>
-      window.emptyViewportApp.viewport['module'] !==
-        window.emptyViewportApp.previousModule &&
+      (state === 'error'
+        ? !!window.emptyViewportApp.previewState.diagnostic
+        : window.emptyViewportApp.viewport['module'] !==
+          window.emptyViewportApp.previousModule) &&
       document.querySelector('#viewport-status')?.getAttribute('data-state') ===
         state,
     state,
@@ -126,7 +129,7 @@ test('an empty file opens ready and recovers from errors without a model', async
     await setSource(page, source, '', 'error');
     assert.ok(
       await page.evaluate(
-        () => window.emptyViewportApp.viewport['module']?.diagnostic,
+        () => window.emptyViewportApp.previewState.diagnostic,
       ),
     );
     await setSource(page, '', '');

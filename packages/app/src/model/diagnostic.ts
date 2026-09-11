@@ -11,6 +11,8 @@ export type ModelDiagnosticKind =
 
 export type ModelDiagnostic = Readonly<{
   kind: ModelDiagnosticKind;
+  /** Explicit opt-in for a supported viewport diagnostic presentation. */
+  viewport?: 'sketch-source-sync';
   severity?: 'error' | 'warning';
   summary: string;
   details?: string;

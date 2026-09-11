@@ -117,8 +117,9 @@ TypeScript 必填性、不读取函数初始化器，也不注入运行时默认
 仅查看、零位移或取消不写源码。关系 offset 优先补写已有不完整调用，避免重复
 追加；需要新偏移时只追加一次可复用的 offset。预览、写回和正常重新求值使用相同坐标。
 后续操作失败不使已完成的当前源码目标失效：按实际 source target 与 evaluation context
-判断是否接受新快照，使上游截面等仍可通过 gizmo 修正。当前目标自身失败或没有可用
-结果时保留旧预览，ModelPreviewState 撤销其可编辑版本；不能继续使用旧参数写回。
+判断是否接受新快照，使上游截面等仍可通过 gizmo 修正。当前目标自身失败但仍有
+可写工具参数与可渲染输入时，也接受该快照供工具修正，保留真实失败诊断。
+没有可用结果或修正入口时保留旧预览，ModelPreviewState 撤销其可编辑版本；不能继续使用旧参数写回。
 原点拖动固定手势开始的 snapshot，旋转使用新旧完整旋转的差。
 组合输入上下文中选中带关系的成员（含子组合体）时，默认显示平移箭头，按住 Alt 切换旋转环，松开恢复；仅两种工具同时可用时切换。
 手势开始后固定模式，平移中 Alt 继续取消吸附，窗口失焦清除按键并取消手势。
@@ -142,15 +143,22 @@ Alt 临时取消位置拖动的网格吸附，按下/松开时用原始位移立
 [网格冻结](../../../packages/app/test/adaptive-grid.test.ts)与
 [空间交互回归](../../../packages/app/test/browser/coordinate-semantics.test.ts)。
 
-拓扑 selector 的单选/多选来自参数类型。fillet/chamfer 的显式过滤数组非空，
+拓扑 selector 的单选/多选来自参数类型。空调用复用省略实参的写入目标，展示
+接收模型的候选，选中后补写 ID；不为必填拓扑参数指定任意默认 ID，也不放宽签名。
+`pivotVertex` 在创建关系链前校验 ID 形状，使缺参错误保留在可追踪的调用阶段，
+不延迟到快照求解时破坏可编辑输入。fillet/chamfer 的显式过滤数组非空，
 取消最后一个选择删除过滤实参并恢复全部边语义；全部边模式不伪装为显式全选。
 无效的旧输入 ID 不进入可选集合。同一轮交互合并撤销；离开源码调用结束面板，
 Esc 优先取消尚未提交的拖动，不撤销已提交的选择。
 
 参数高亮按当前调用实参定位，不能按上游变量把所有用途高亮。尺寸语义由操作
 快照声明，viewport 从真实几何中选取提示；未声明语义的参数不按名称猜测。
-Tab 跳转沿同一 source ref 聚焦有效参数输入，保留补全、snippet 和原生编辑器
-快捷键的优先级。验证见 [spatial-tools](../../../packages/app/test/spatial-tools.test.ts)、
+编辑器将原生单光标、选区及文本焦点投影为 observable 参数定位输入；面板从当前
+view 与 sourceParameterAt 派生对应的参数。数值输入和拓扑选择摘要均声明参数名并消费同一高亮目标；
+数值输入与选择摘要均使用亮色边框；可 Tab 的当前文本框右侧在边框内显示亮色圆角 Tab 提示，
+真实输入焦点接替后隐藏提示。Tab 复用定位结果，只聚焦可写文本输入，选择摘要不改变编辑器 Tab 行为。
+高亮仅更新样式，不重建输入节点或覆盖草稿。失焦、非空选区、多光标和没有对应控件的参数
+取消提示，面板销毁时释放订阅。Tab 保留补全、snippet 和原生编辑器快捷键的优先级。验证见 [spatial-tools](../../../packages/app/test/spatial-tools.test.ts)、
 [parameter-highlight](../../../packages/app/test/browser/parameter-highlight.test.ts)、
 [parameter-tab](../../../packages/app/test/browser/parameter-tab.test.ts)。
 
@@ -262,5 +270,7 @@ tab 后允许无活动文档，保留文档内容、撤销和视图状态以便�
 
 诊断从最内层求值边界附上原 SourceRef，外层不覆盖已有精确位置。源码诊断进入
 Monaco marker，无法归属源码的项目/Worker 错误才使用全局入口；安装失败由包
-状态处理。成功求解的草图 warning 及修复 actions 使用同一诊断与事务接口，
+状态处理。viewport 诊断卡片仅接受显式 `viewport: 'sketch-source-sync'` 的草图同步提示，
+不再因模型关联或阶段预览失败而展示普通异常。顶部状态独立按求值归属判断错误，
+不依赖卡片白名单；交互提交错误仍使用单独的工具反馈条。成功求解的草图 warning 及修复 actions 使用同一诊断与事务接口，
 具体作用域和安全写回见[草图](sketch.md#诊断与源码同步)。
