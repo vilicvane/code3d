@@ -51,6 +51,7 @@ export class SketchEditorController {
       readSource(ref: SourceRef): string | undefined;
       resolveSourceRef(ref: SourceRef): SourceRef | undefined;
       commit(intent: SketchEditIntent): boolean;
+      reportResult(operation: SketchChange['kind'], error?: string): void;
       solve(
         layers: readonly SketchSnapshot[],
         drag: SketchDrag,
@@ -62,6 +63,7 @@ export class SketchEditorController {
       (change, preview) => this.commit(change, preview),
       (id, position, previous, mergeTarget) =>
         this.preview(id, position, previous, mergeTarget),
+      error => this.host.reportResult('move', error),
     );
   }
 
@@ -244,8 +246,13 @@ export class SketchEditorController {
     const active = this.active;
     const expectedText =
       active?.definitionRef && this.host.readSource(active.definitionRef);
-    if (!active?.definitionRef || expectedText === undefined || this.stale)
+    if (!active?.definitionRef || expectedText === undefined || this.stale) {
+      this.host.reportResult(
+        change.kind,
+        'The sketch source is no longer editable. Select the geometry again.',
+      );
       return false;
+    }
     const local = this.layers.at(-1)!;
     const committed = this.host.commit({
       kind: 'sketch.edit',

@@ -1777,7 +1777,7 @@ kbd {
 #viewport-host:has(.sketch-editor:not([hidden])) .viewport-canvas {
   visibility: hidden;
 }
-#viewport-host:has(.sketch-editor:not([hidden])) .viewport-dock-panels,
+#viewport-host:has(.sketch-editor:not([hidden])) .elements-panel,
 #viewport-host:has(.sketch-editor:not([hidden])) .contextual-tool-panel {
   display: none;
 }
@@ -1932,22 +1932,6 @@ kbd {
 .sketch-editor button:disabled {
   opacity: 0.4;
   cursor: default;
-}
-.sketch-editor output {
-  position: absolute;
-  left: var(--viewport-inset);
-  bottom: var(--viewport-inset);
-  z-index: 1;
-  max-width: calc(100% - 2 * var(--viewport-inset));
-  padding: 6px 8px;
-  color: var(--muted);
-  font-size: 10px;
-  border-radius: 3px;
-  background: #11120feb;
-  pointer-events: none;
-}
-.sketch-editor output[hidden] {
-  display: none;
 }
 .sketch-canvas {
   width: 100%;
@@ -2443,7 +2427,10 @@ kbd {
   outline-offset: -1px;
 }
 
-.viewport-host[data-render-mode='render'] .viewport-dock-panels,
+.viewport-host[data-render-mode='render']:not(
+    :has(.sketch-editor:not([hidden]))
+  )
+  .viewport-dock-panels,
 .viewport-host[data-render-mode='render'] .contextual-tool-panel {
   display: none;
 }
@@ -2611,7 +2598,7 @@ kbd {
   position: absolute;
   right: var(--viewport-inset);
   bottom: var(--viewport-inset);
-  z-index: 3;
+  z-index: 6;
   display: flex;
   align-items: flex-end;
   justify-content: flex-end;
@@ -3616,4 +3603,34 @@ kbd {
   opacity: 0.65;
   font-size: 9px;
   pointer-events: auto;
+}
+
+.viewport-tool-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: min(390px, 100%);
+  max-height: 180px;
+  overflow: auto;
+}
+.viewport-tool-error[hidden] {
+  display: none;
+}
+.viewport-tool-error > span {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.viewport-tool-error > button {
+  flex: none;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: none;
+  cursor: pointer;
+}
+.viewport-tool-error > button svg {
+  width: 14px;
+  height: 14px;
 }

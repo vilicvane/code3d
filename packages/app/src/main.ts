@@ -62,6 +62,7 @@ import type {
   ToolSignatureSchema,
 } from './model/tool-schema';
 import {viewportDiagnostic} from './model/viewport-diagnostic';
+import {ViewportToolFeedback} from './ui/viewport-tool-feedback';
 import {
   BrowserPackageManager,
   PackageInstallationError,
@@ -577,6 +578,7 @@ window.addEventListener(
     stopViewportModes();
     stopPreviewPresentation();
     viewportGridScale.dispose();
+    toolFeedback.dispose();
     sketchEditor.dispose();
   },
   {once: true},
@@ -803,6 +805,7 @@ const elementsPanel = new ElementsPanel(elements, elementsCount, {
     );
   },
 });
+const toolFeedback = new ViewportToolFeedback(viewportFeedbackStack);
 const sourceEditPopover = new SourceEditPopover(
   viewportFeedbackStack,
   sourceRef => codeEditor.revealSource(sourceRef, true),
@@ -844,6 +847,8 @@ const toolEngine = new ToolEngine({
   clearPreview: (preview, reason) => clearToolPreview(preview, reason),
 });
 const sketchEditor = new SketchEditorController(viewportHost, {
+  reportResult: (operation, error) =>
+    toolFeedback.report(`sketch:${operation}`, error),
   solve: (layers, drag) => compiler.previewSketchDrag(layers, drag),
   resolveSourceRef: ref => codeEditor.resolveSourceRef(ref),
   readSource: ref => {
@@ -952,6 +957,7 @@ codeEditor.onEditorActivation(cursor => {
     );
 });
 codeEditor.onActiveFile((path, reason) => {
+  toolFeedback.dismiss();
   if (reason === 'reset') sketchEditor.navigation.reset();
   activatePreviewFile(reason === 'reset');
   pendingAgentFollow = undefined;
@@ -1809,6 +1815,8 @@ function selectCompiledEvaluationContext(
   selectedDesignContextId = design ? contextId : undefined;
   const occurrence = viewport.getSelected();
   if (occurrence) selectOccurrence(occurrence, false);
+  else renderDesignArguments(previewState.module);
+  syncContextualTool();
   return true;
 }
 
@@ -2901,22 +2909,19 @@ function handlePositionTool(event: TransformGizmoEvent): void {
 
   const session = positionToolSession;
   if (!session) {
+    if (event.kind === 'preview') return;
     showToolIssue('The position tool session expired. Start the drag again.');
     return;
   }
 
   if (event.kind === 'preview') {
-    const resolution = session.preview(
-      positionIntent(event.binding, event.value),
-    );
-    if (resolution.status !== 'ready') {
-      showToolIssue(resolution.reason);
-    }
+    session.preview(positionIntent(event.binding, event.value));
     return;
   }
 
   if (Math.abs(event.value - event.binding.value) < 1e-9) {
     session.cancel();
+    toolFeedback.report('model');
     resumeCompileAfterTool(positionToolInterruptedCompile);
   } else {
     const committed = commitToolSession(
@@ -3036,10 +3041,11 @@ function commitToolSession(
   options: ToolCommitOptions = {},
 ): boolean {
   const result = previewState.editSource(() => session.commit(intent, options));
-  if (result.status !== 'committed') {
-    showToolIssue(result.reason);
-    return false;
-  }
+  toolFeedback.report(
+    intent.kind === 'sketch.edit' ? `sketch:${intent.change.kind}` : 'model',
+    result.status === 'committed' ? undefined : result.reason,
+  );
+  if (result.status !== 'committed') return false;
   sourceEditPopover.show(codeEditor.sourceEditDiffs(result.plan.edits));
   return true;
 }
@@ -3150,8 +3156,7 @@ function sourceRefSpan(sourceRef: SourceRef): number {
 }
 
 function showToolIssue(message: string): void {
-  errorBar.textContent = message;
-  errorBar.hidden = false;
+  toolFeedback.report('model', message);
 }
 
 function sourceHistoryAction(

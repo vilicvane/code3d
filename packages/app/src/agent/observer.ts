@@ -450,6 +450,7 @@ export class AgentObserver {
       async () => {
         throw new Error('An observation cannot edit the sketch.');
       },
+      () => {},
     );
     try {
       editor.show({

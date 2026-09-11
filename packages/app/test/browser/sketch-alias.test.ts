@@ -196,11 +196,8 @@ const s = sketch([
       assert.equal(await text(page), before);
       near(await center(page, 2), await center(page, 1));
       assert.equal(
-        await page
-          .getByRole('region', {name: 'Sketch editor'})
-          .locator(':scope > output')
-          .innerText(),
-        '',
+        await page.locator('.viewport-tool-error').isVisible(),
+        false,
       );
       // Another pointer event over the candidate must keep the same target.
       await page.mouse.move(target.x + 1, target.y);
