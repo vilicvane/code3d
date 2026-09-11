@@ -1,5 +1,8 @@
 import {committedSpatialObject} from './tools/spatial-edit';
-import {isCompositionInputRole} from './model/operation-context';
+import {
+  isCompositionInputRole,
+  sameOperationCall,
+} from './model/operation-context';
 import type {ModelDiagnostic} from './model/diagnostic';
 import * as THREE from 'three';
 import {
@@ -1550,8 +1553,11 @@ export class ModelViewport {
       if (!target) {
         return [];
       }
-      const evaluation = target.evaluations.find(
-        candidate => candidate.operationId === operationId,
+      const evaluation = target.evaluations.find(candidate =>
+        sameOperationCall(
+          this.module?.operations.get(candidate.operationId ?? ''),
+          this.module?.operations.get(operationId ?? ''),
+        ),
       );
       if (!evaluation) {
         return [];

@@ -275,12 +275,14 @@ export function createModelExecutor(
           result.every(isModelObject))
       ) {
         const order = ++evaluationOrder;
-        for (const object of isModelObject(result)
+        for (const [outputIndex, object] of (isModelObject(result)
           ? [result]
-          : (result as ModelObject[]))
+          : (result as ModelObject[])
+        ).entries())
           instrumentModelOperation(object, {
             siteId: id,
             execution,
+            outputIndex,
             order,
             sourceRef: location,
             parameters,
@@ -1148,6 +1150,15 @@ export function createModelExecutor(
       'functionId' | 'functionRef'
     >[],
   ): SourceTarget[] {
+    const operationsByCall = new Map<string, ModelOperationSnapshot[]>();
+    for (const operation of operations.values()) {
+      if (operation.siteId === undefined || operation.execution === undefined)
+        continue;
+      const key = traceExecutionKey(operation.siteId, operation.execution);
+      const siblings = operationsByCall.get(key) ?? [];
+      siblings.push(operation);
+      operationsByCall.set(key, siblings);
+    }
     const operationsByOutputNodeId = new Map(
       [...operations.values()].map(operation => [
         operation.outputNodeId,
@@ -1240,11 +1251,16 @@ export function createModelExecutor(
       }),
     );
     for (const trace of sourceInputTraces) {
-      const operationId = traceExecutionKey(trace.siteId, trace.execution);
-      const operation = operations.get(operationId);
+      const callId = traceExecutionKey(trace.siteId, trace.execution);
+      const callOperations = operationsByCall.get(callId) ?? [];
       const nodeIds = trace.objects.map(modelObjectNodeId);
-      const inputs =
-        operation?.inputs.filter(input => nodeIds.includes(input.nodeId)) ?? [];
+      const matchingOperations = callOperations.filter(operation =>
+        operation.inputs.some(input => nodeIds.includes(input.nodeId)),
+      );
+      const operation = matchingOperations[0];
+      const inputs = matchingOperations.flatMap(operation =>
+        operation.inputs.filter(input => nodeIds.includes(input.nodeId)),
+      );
       const key = trace.id;
       const target: MutableSourceInputTarget = inputTargets.get(key) ?? {
         id: `source:operation-input:${key}`,
@@ -1260,8 +1276,22 @@ export function createModelExecutor(
             ? inputs[0].role
             : 'collection';
       if (operation && role) target.operation = {kind: operation.kind, role};
+      if (
+        (isCompositionInputRole(role) || failedInputCollections.has(callId)) &&
+        !valueTargets.some(
+          value =>
+            value.tool &&
+            value.sourceRef.file === trace.sourceRef.file &&
+            value.sourceRef.start === trace.sourceRef.start &&
+            value.sourceRef.end === trace.sourceRef.end,
+        )
+      )
+        target.tool = sourceTool(toolCallSites.get(trace.siteId));
       target.evaluations.push({
-        collection: failedInputCollections.get(operationId),
+        callId,
+        collection: failedInputCollections.get(callId),
+        parameters: sourceExecutionTraces.get(callId)?.parameters,
+        toolExecutionOrder: sourceExecutionTraces.get(callId)?.order,
         operationId: role ? operation?.id : undefined,
         role,
         objects: role
@@ -1278,46 +1308,75 @@ export function createModelExecutor(
 
     const operationInputTargets = [...inputTargets.values()];
 
-    function compositionConsumers(nodeIds: readonly string[]) {
-      return operationInputTargets.flatMap(target =>
-        target.evaluations.flatMap(input => {
-          if (!input.role || !isCompositionInputRole(input.role)) return [];
-          const consumedNodeIds = input.objects
-            .map(modelObjectNodeId)
-            .filter(nodeId =>
-              nodeIds.some(sourceNodeId =>
-                sourceLineageContains(
-                  operationsByOutputNodeId,
-                  nodeId,
-                  sourceNodeId,
+    function compositionConsumers(
+      nodeIds: readonly string[],
+      inlineSource?: SourceRef,
+    ) {
+      return operationInputTargets
+        .filter(
+          target =>
+            !inlineSource ||
+            (target.sourceRef.file === inlineSource.file &&
+              target.sourceRef.start <= inlineSource.start &&
+              target.sourceRef.end >= inlineSource.end),
+        )
+        .flatMap(target =>
+          target.evaluations.flatMap(input => {
+            if (
+              !(input.role && isCompositionInputRole(input.role)) &&
+              !(inlineSource && input.collection)
+            )
+              return [];
+            const consumedNodeIds = input.objects
+              .map(modelObjectNodeId)
+              .filter(nodeId =>
+                nodeIds.some(sourceNodeId =>
+                  inlineSource
+                    ? nodeId === sourceNodeId
+                    : sourceLineageContains(
+                        operationsByOutputNodeId,
+                        nodeId,
+                        sourceNodeId,
+                      ),
                 ),
-              ),
-            );
-          return consumedNodeIds.length > 0
-            ? [
-                {
-                  runtime: input.runtime,
-                  operationInput: {
-                    operationId: input.operationId!,
-                    role: input.role,
-                    nodeIds: consumedNodeIds,
+              );
+            return consumedNodeIds.length > 0
+              ? [
+                  {
+                    runtime: input.runtime,
+                    collectionNodeIds: input.collection?.map(modelObjectNodeId),
+                    operationInput: input.role
+                      ? {
+                          operationId: input.operationId!,
+                          role: input.role,
+                          nodeIds: consumedNodeIds,
+                        }
+                      : undefined,
                   },
-                },
-              ]
-            : [];
-        }),
-      );
+                ]
+              : [];
+          }),
+        );
     }
 
     function compositionContextTargets(
       evaluations: readonly SourceTargetEvaluation[],
     ) {
       const operationIds = new Set(
-        evaluations.flatMap(evaluation =>
-          evaluation.operationInput
-            ? [evaluation.operationInput.operationId]
-            : [],
-        ),
+        evaluations.flatMap(evaluation => {
+          if (!evaluation.operationInput) return [];
+          const operation = operations.get(
+            evaluation.operationInput.operationId,
+          )!;
+          return operation.siteId !== undefined &&
+            operation.execution !== undefined
+            ? (
+                operationsByCall.get(
+                  traceExecutionKey(operation.siteId, operation.execution),
+                ) ?? []
+              ).map(operation => operation.id)
+            : [operation.id];
+        }),
       );
       return operationInputTargets
         .filter(target =>
@@ -1340,13 +1399,16 @@ export function createModelExecutor(
         if (evaluation.constraintId || !evaluation.operationId)
           return [evaluation];
         const operation = operations.get(evaluation.operationId)!;
-        if (
-          !operation.spatial &&
-          operation.kind !== 'scaled' &&
-          operation.kind !== 'relate'
-        )
-          return [evaluation];
-        const consumers = compositionConsumers(evaluation.nodeIds);
+        const spatial =
+          operation.spatial ||
+          operation.kind === 'scaled' ||
+          operation.kind === 'relate';
+        // Inline constructors keep their numeric tools while inheriting the
+        // surrounding call's composition. Separate definitions stay standalone.
+        const consumers = compositionConsumers(
+          evaluation.nodeIds,
+          spatial ? undefined : target.sourceRef,
+        );
         if (operation.kind === 'relate') {
           const owner = objects.get(operation.outputNodeId)!;
           const source = operation.inputs.find(
@@ -1382,6 +1444,10 @@ export function createModelExecutor(
               toolExecutionOrder:
                 evaluation.toolExecutionOrder ?? evaluation.runtime.order,
               operationInput: consumer.operationInput,
+              nodeIds: consumer.collectionNodeIds ?? evaluation.nodeIds,
+              isCollection: consumer.collectionNodeIds
+                ? true
+                : evaluation.isCollection,
               focusNodeIds: evaluation.focusNodeIds ?? evaluation.nodeIds,
             }))
           : [evaluation];
@@ -1407,9 +1473,9 @@ export function createModelExecutor(
           }
           const sourceObject = execution.receiver;
           if (!isModelObject(sourceObject)) return [];
-          const operation = operations.get(
+          const operation = operationsByCall.get(
             traceExecutionKey(execution.siteId, execution.execution),
-          );
+          )?.[0];
           const selection = operation?.selections.find(
             candidate =>
               candidate.kind === 'edge' &&
@@ -1504,9 +1570,9 @@ export function createModelExecutor(
             if (!owner) return [];
             const availableIds = modelTopologyIds(receiver, parameter.kind);
             if (!availableIds) return [];
-            const operation = operations.get(
+            const operation = operationsByCall.get(
               traceExecutionKey(execution.siteId, execution.execution),
-            );
+            )?.[0];
             const attemptedIds = attemptedTopologyIds(
               execution.arguments.get(parameter.index),
               parameter.multiple,
@@ -1835,8 +1901,11 @@ export function createModelExecutor(
             kind: target.operation ? 'operation-input' : 'value',
             sourceRef: target.sourceRef,
             functionId: designFunctionAt(target.sourceRef, designArguments),
+            tool: target.tool,
             evaluations: target.evaluations.map(evaluation => ({
               runtime: evaluation.runtime,
+              toolExecutionOrder: evaluation.toolExecutionOrder,
+              parameters: evaluation.parameters,
               nodeIds: (evaluation.collection ?? evaluation.objects).map(
                 modelObjectNodeId,
               ),
@@ -2074,9 +2143,13 @@ export function createModelExecutor(
   type MutableSourceInputTarget = {
     id: string;
     sourceRef: SourceRef;
+    tool?: SourceTarget['tool'];
     evaluations: Array<
       Readonly<{
         operationId?: string;
+        callId: string;
+        parameters?: readonly ParameterUsage[];
+        toolExecutionOrder?: number;
         role?: ModelOperationInputRole;
         isCollection?: boolean;
         objects: readonly RelationObject[];
@@ -2115,12 +2188,11 @@ export function createModelExecutor(
     right: MutableSourceInputTarget,
   ) {
     const rightIds = new Set(
-      right.evaluations.map(evaluation => evaluation.operationId),
+      right.evaluations.map(evaluation => evaluation.callId),
     );
     return left.evaluations.some(
       evaluation =>
-        evaluation.operationId !== undefined &&
-        rightIds.has(evaluation.operationId),
+        evaluation.operationId !== undefined && rightIds.has(evaluation.callId),
     );
   }
 

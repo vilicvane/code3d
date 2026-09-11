@@ -410,6 +410,8 @@ export type ConstraintTraceReference = Readonly<{
 export type ModelOperationInstrumentation = Readonly<{
   siteId: string;
   execution: number;
+  /** Distinguishes operation results produced by the same call execution. */
+  outputIndex?: number;
   order: number;
   sourceRef: SourceRef;
   parameters: readonly ParameterUsage[];
@@ -1504,6 +1506,7 @@ export abstract class RelationObject {
     execution: number,
     order: number,
     sourceRef: SourceRef,
+    outputIndex?: number,
   ): void;
 
   /** Store relations only after the complete callback has returned. */
@@ -2010,6 +2013,7 @@ export class SketchFrame extends RelationObject {
     execution: number,
     order: number,
     sourceRef: SourceRef,
+    outputIndex = 0,
   ): void {
     if (!operationTraces.has(this.operation))
       operationTraces.set(this.operation, {
@@ -2017,6 +2021,7 @@ export class SketchFrame extends RelationObject {
         execution,
         order,
         sourceRef,
+        outputIndex,
       });
   }
 
@@ -2798,11 +2803,18 @@ export class ModelObject<
     execution: number,
     order: number,
     sourceRef: SourceRef,
+    outputIndex = 0,
   ): void {
     if (operationTraces.has(this.operation)) {
       return;
     }
-    operationTraces.set(this.operation, {siteId, execution, order, sourceRef});
+    operationTraces.set(this.operation, {
+      siteId,
+      execution,
+      order,
+      sourceRef,
+      outputIndex,
+    });
   }
 
   /** @internal */
@@ -4112,6 +4124,7 @@ export function instrumentModelOperation(
     instrumentation.execution,
     instrumentation.order,
     instrumentation.sourceRef,
+    instrumentation.outputIndex,
   );
 }
 
@@ -4455,7 +4468,7 @@ function storedOperation(
 function storedOperationId(operation: StoredOperation): string {
   const trace = operationTraces.get(operation);
   return trace
-    ? `${trace.siteId}:execution:${trace.execution}`
+    ? `${trace.siteId}:execution:${trace.execution}:output:${trace.outputIndex ?? 0}`
     : operation.runtimeId;
 }
 

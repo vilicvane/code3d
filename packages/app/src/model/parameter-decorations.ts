@@ -1,5 +1,6 @@
 import {identityRigidTransform} from '@code3d/core/tooling';
 import type {SourceDecorationProvider} from '../viewport-decoration';
+import {sameOperationCall} from './operation-context';
 
 export const parameterSourceDecoration = {
   id: 'parameter-geometry',
@@ -9,20 +10,26 @@ export const parameterSourceDecoration = {
     const operation = evaluation.operationId
       ? module.operations.get(evaluation.operationId)
       : undefined;
-    const dimension = operation?.dimensions?.[parameter.name];
-    const output = operation && module.objects.get(operation.outputNodeId);
-    if (dimension && output?.mesh) {
-      return [
-        {
-          kind: 'dimension',
-          id: `${operation!.id}:parameter:${parameter.name}`,
-          nodeId: output.nodeId,
-          dimension,
-          mesh: output.mesh,
-          appearance: {color: '#d8ff3e', depthTest: false},
-        },
-      ];
-    }
+    const dimensions = evaluation.nodeIds.flatMap(nodeId => {
+      const output = module.objects.get(nodeId);
+      const candidate = output?.operation;
+      const dimension = candidate?.dimensions?.[parameter.name];
+      return dimension &&
+        output?.mesh &&
+        sameOperationCall(candidate, operation)
+        ? [
+            {
+              kind: 'dimension' as const,
+              id: `${candidate!.id}:parameter:${parameter.name}`,
+              nodeId: output.nodeId,
+              dimension,
+              mesh: output.mesh,
+              appearance: {color: '#d8ff3e', depthTest: false},
+            },
+          ]
+        : [];
+    });
+    if (dimensions.length) return dimensions;
     const selection = evaluation.selection;
     if (!selection) return [];
     const kind = selection.kind === 'edges' ? 'edge' : selection.kind;

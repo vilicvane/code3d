@@ -1236,6 +1236,172 @@ test('derives composition roles for imported aliases, namespace calls, and neste
   }
 });
 
+test('batch extrusions retain every operation and map each input to its result and peers', async () => {
+  for (const argument of ['[a, b]', 'faces']) {
+    const source = `import {circle, rectangle, extrude as grow} from '@code3d/core';
+const a = circle(10);
+const b = rectangle(12, 12).relate(s => s.on(a.up).offset(30, 0, 0).rotate(0, 0, 30));
+const faces = [a, b];
+export default grow(${argument}, 20);`;
+    const module = await compileProject(
+      {files: [{path: '/model.ts', source}]},
+      '/model.ts',
+    );
+    assert.equal(module.diagnostic, undefined);
+    const operations = [...module.operations.values()].filter(
+      operation => operation.kind === 'extrude',
+    );
+    assert.equal(operations.length, 2);
+    assert.equal(new Set(operations.map(operation => operation.id)).size, 2);
+    assert.equal(
+      new Set(operations.map(operation => operation.outputNodeId)).size,
+      2,
+    );
+    for (const word of argument === 'faces' ? ['faces'] : ['a', 'b']) {
+      const offset =
+        source.indexOf('export default') +
+        source
+          .slice(source.indexOf('export default'))
+          .indexOf(
+            word === 'faces' ? 'faces' : `${word}${word === 'a' ? ',' : ']'}`,
+          );
+      const target = defined(
+        ModelViewport.prototype['sourceTargetAt'].call(
+          {module},
+          '/model.ts',
+          offset,
+        ),
+      );
+      assert.equal(defined(target.tool).signature.name, 'extrude');
+      const evaluation = target.evaluations[0];
+      assert.equal(sourceTargetPlacement(evaluation), 'composition');
+      assert.equal(evaluation.nodeIds.length, word === 'faces' ? 2 : 1);
+      const focused = operations.filter(operation =>
+        operation.inputs.some(input =>
+          evaluation.nodeIds.includes(input.nodeId),
+        ),
+      );
+      assert.equal(focused.length, word === 'faces' ? 2 : 1);
+      assert.ok(
+        focused.some(
+          operation => operation.id === evaluation.operationInput?.operationId,
+        ),
+      );
+      if (word !== 'faces') assert.equal(target.contextTargetIds.length, 1);
+    }
+    const distance = defined(
+      ModelViewport.prototype['sourceTargetAt'].call(
+        {module},
+        '/model.ts',
+        source.lastIndexOf('20'),
+      ),
+    );
+    assert.equal(distance.evaluations[0].nodeIds.length, 2);
+    const {parameterSourceDecoration} = await server.ssrLoadModule<
+      typeof import('../src/model/parameter-decorations.ts')
+    >('/src/model/parameter-decorations.ts');
+    const decorations = parameterSourceDecoration.decorations({
+      module,
+      target: distance,
+      evaluation: distance.evaluations[0],
+      parameter: defined(
+        defined(distance.tool).signature.parameters.find(
+          parameter => parameter.name === 'distance',
+        ),
+      ),
+    });
+    assert.equal(decorations.length, 2);
+    assert.equal(
+      new Set(decorations.map(decoration => decoration.nodeId)).size,
+      2,
+    );
+  }
+});
+
+test('batch extrusion operation identities are stable and separate repeated invocations', async () => {
+  const source = `import {circle, extrude} from '@code3d/core';
+const faces = [circle(2), circle(3)];
+export const results = [5, 10].map(distance => extrude(faces, distance));`;
+  const compile = () =>
+    compileProject({files: [{path: '/model.ts', source}]}, '/model.ts');
+  const first = await compile();
+  const second = await compile();
+  assert.equal(first.diagnostic, undefined);
+  assert.equal(second.diagnostic, undefined);
+  const operations = [...first.operations.values()].filter(
+    operation => operation.kind === 'extrude',
+  );
+  assert.equal(operations.length, 4);
+  assert.equal(new Set(operations.map(operation => operation.id)).size, 4);
+  assert.deepEqual(
+    operations.map(operation => operation.id).sort(),
+    [...second.operations.values()]
+      .filter(operation => operation.kind === 'extrude')
+      .map(operation => operation.id)
+      .sort(),
+  );
+});
+
+test('inline Boolean constructors preserve numeric tools and composition context', async () => {
+  const source = await readFile(
+    new URL('../examples/boolean-operations.ts', import.meta.url),
+    'utf8',
+  );
+  const module = await compileProject(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  assert.equal(module.diagnostic, undefined);
+  for (const call of ['sphere(8)', 'box(12, 12, 12)']) {
+    const target = defined(
+      ModelViewport.prototype['sourceTargetAt'].call(
+        {module},
+        '/model.ts',
+        source.indexOf(call) + call.indexOf('(') + 1,
+      ),
+    );
+    assert.ok(target.tool, call);
+    const evaluation = target.evaluations[0];
+    assert.equal(
+      defined(
+        module.operations.get(defined(evaluation.operationInput).operationId),
+      ).kind,
+      'intersect',
+    );
+    assert.equal(sourceTargetPlacement(evaluation), 'composition');
+    assert.equal(evaluation.nodeIds.length, 1);
+    assert.ok(target.contextTargetIds.length >= 2);
+  }
+});
+
+test('inline constructors retain failed consumer inputs without changing separate definitions', async () => {
+  const source = `import {sphere, box, intersect} from '@code3d/core';
+const separate = sphere(5);
+export default intersect([sphere(1), box(2, 2, 2).originOffset(-20, 0, 0)]);`;
+  const module = await compileProject(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  assert.ok(module.diagnostic);
+  const at = (call: string) =>
+    defined(
+      ModelViewport.prototype['sourceTargetAt'].call(
+        {module},
+        '/model.ts',
+        source.indexOf(call) + call.indexOf('(') + 1,
+      ),
+    );
+  const inline = at('sphere(1)');
+  assert.ok(inline.tool);
+  assert.equal(inline.evaluations[0].nodeIds.length, 2);
+  assert.equal(defined(inline.evaluations[0].focusNodeIds).length, 1);
+  assert.equal(sourceTargetPlacement(inline.evaluations[0]), 'composition');
+  assert.equal(
+    sourceTargetPlacement(at('sphere(5)').evaluations[0]),
+    'standalone',
+  );
+});
+
 test('failed loft calls retain their complete input collection and focused section across aliases and containers', async () => {
   for (const [call, focus, focusCount] of [
     ['loft([start, via, end])', 'via', 1],

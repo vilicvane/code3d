@@ -256,6 +256,8 @@ to preserve the concrete model kind and exposed members through chained calls.
 Relations are resolved at composition and geometry evaluation boundaries.
 `stock.cut(tools)` is equivalent to `cut(stock, tools)`. Arrays in booleans and
 loft describe the inputs of one operation; they do not automatically map it.
+`intersect()` requires a common solid volume across all inputs. Disjoint inputs
+or inputs that only touch produce a diagnostic rather than an empty solid.
 
 ## Model operations
 

@@ -18,11 +18,11 @@ test(
     const results = await page.evaluate(async () => {
       const {viewport, compiler} = window.decorationTest;
       const results = [];
-      for (const kind of ['cut', 'union'] as const) {
-        const source = `import {box, point, cut, union} from '@code3d/core';
-const base = box(20, 20, 20).relate(self => self.on(point().up));
-const cutter = box(30, 10, 30).originOffset(0, ${kind === 'cut' ? '-5' : '0'}, 0);
-export default ${kind === 'cut' ? 'cut(base, [cutter])' : 'union([base, cutter])'};`;
+      for (const kind of ['cut', 'union', 'intersect'] as const) {
+        const source = `import {box, point, cut, union, intersect} from '@code3d/core';
+const base = box(20, 20, 20).relate(self => self.on(point().up)${kind === 'intersect' ? '.rotate(0, 0, 25)' : ''});
+const cutter = box(30, 10, 30).originOffset(0, ${kind === 'cut' ? '-5' : kind === 'intersect' ? '-20' : '0'}, 0);
+export default ${kind === 'cut' ? 'cut(base, [cutter])' : `${kind}([base, cutter])`};`;
         const module = await compiler.compile(
           {files: [{path: '/main.ts', source}]},
           '/main.ts',
@@ -78,18 +78,18 @@ export default ${kind === 'cut' ? 'cut(base, [cutter])' : 'union([base, cutter])
             kind,
             role,
             distances,
-            receiverY: receiver.compositionTransform.position[1],
-            outputY: output.compositionTransform.position[1],
+            receiverPose: receiver.compositionTransform,
+            outputPose: output.compositionTransform,
           });
         }
       }
       return results;
     });
     for (const result of results) {
-      assert.notEqual(
-        result.receiverY,
-        result.outputY,
-        'The fixture must distinguish the two frames',
+      assert.notDeepEqual(
+        result.receiverPose,
+        result.outputPose,
+        `The fixture must distinguish the two frames: ${JSON.stringify(result)}`,
       );
       assert.ok(result.distances.length > 0);
       assert.ok(

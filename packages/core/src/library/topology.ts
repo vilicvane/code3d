@@ -254,7 +254,31 @@ export function booleanWithTopology(
   let result: Shape3D | undefined;
   try {
     builder.Build();
+    if (!builder.IsDone())
+      throw new Error(
+        `Could not complete the ${operation === 'fuse' ? 'union' : operation} operation.`,
+      );
     builder.SimplifyResult(true, true, 0.001);
+    if (operation === 'intersect') {
+      const shape = builder.Shape();
+      try {
+        const solids = new oc.TopExp_Explorer(
+          shape,
+          oc.TopAbs_ShapeEnum.TopAbs_SOLID,
+          oc.TopAbs_ShapeEnum.TopAbs_SHAPE,
+        );
+        try {
+          if (!solids.More())
+            throw new Error(
+              'The inputs have no common solid volume. Adjust their positions or dimensions so they overlap.',
+            );
+        } finally {
+          solids.delete();
+        }
+      } finally {
+        shape.delete();
+      }
+    }
     result = castOwnedShape3D(builder.Shape());
     return {
       shape: result,
