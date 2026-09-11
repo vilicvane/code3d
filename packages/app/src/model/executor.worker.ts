@@ -21,6 +21,7 @@ async function execute(
   const checkCancelled = () =>
     checkCompilationCancellation(request.cancellation);
   compileId = undefined;
+  storage.readCancellation = request.cancellation;
   try {
     const module = await executor.execute(
       artifactChannel.decode(request),
@@ -40,6 +41,8 @@ async function execute(
         ok: false,
         diagnostic: diagnosticFromError(error),
       });
+  } finally {
+    storage.readCancellation = undefined;
   }
 }
 

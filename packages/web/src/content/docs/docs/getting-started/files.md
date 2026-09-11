@@ -255,6 +255,8 @@ The modeling engine still needs to initialize and execute the restored code.
 A current error does not discard an existing successful preview. The error is
 shown for the current source; editing tools and export wait for a matching
 current result. Cancelling a stuck model preserves the compiler's reusable work.
+Cancelling also interrupts a cache read waiting for another tab to release storage.
+A later build may still need to wait for that tab if it needs disk records.
 Completed cache records are saved in the background, including after a model is
 cancelled, so older builds can be reused when you undo edits. Closing a project
 finishes its queued cache writes. Reloading or closing the entire page can lose

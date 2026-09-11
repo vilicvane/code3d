@@ -54,6 +54,7 @@ type WorkerRequest =
   | Readonly<{
       kind: 'restore';
       id: number;
+      cancellation: CompilationCancellation;
       projectIdentity: string;
       rootPath: string;
       designContext?: DesignContext;

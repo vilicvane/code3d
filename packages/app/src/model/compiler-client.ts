@@ -67,6 +67,7 @@ export class ModelCompilerClient {
   private pending: PendingRequest | null = null;
   private queuedCompile?: CompileRequest;
   private runningCompile?: CompileRequest;
+  private restoreCancellation?: Int32Array<SharedArrayBuffer>;
   private queuedExecution?: Execution;
   private runningExecution?: Execution;
   private exportable?: {module: ModelModule; compileId: number};
@@ -146,6 +147,7 @@ export class ModelCompilerClient {
           this.compiler.postMessage({
             kind: 'restore',
             id,
+            cancellation: (this.restoreCancellation = cancellation()),
             projectIdentity: this.projectIdentity,
             rootPath,
             designContext,
@@ -247,6 +249,8 @@ export class ModelCompilerClient {
   }
 
   cancel(): boolean {
+    if (this.restoreCancellation) Atomics.store(this.restoreCancellation, 0, 1);
+    this.restoreCancellation = undefined;
     this.preparationRevision++;
     const pending = this.pending;
     this.pending = null;
@@ -259,6 +263,7 @@ export class ModelCompilerClient {
         id: this.runningCompile.id,
       });
     }
+    this.storage.cancelReads(this.compiler);
     this.cancelExecution();
     if (!pending) return false;
     this.exportable = undefined;
@@ -281,6 +286,7 @@ export class ModelCompilerClient {
     const running = this.runningExecution;
     if (!running || running.cancellationTimeout !== undefined) return;
     Atomics.store(running.request.cancellation, 0, 1);
+    this.storage.cancelReads(this.executor);
     running.cancellationTimeout = window.setTimeout(
       () =>
         runInAction(() => {

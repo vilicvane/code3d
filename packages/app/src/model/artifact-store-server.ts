@@ -66,11 +66,13 @@ export class ArtifactStoreServer {
   async request(
     namespace: string,
     operation: ArtifactOperation,
+    signal?: AbortSignal,
   ): Promise<Result> {
+    signal?.throwIfAborted();
     if (operation.kind === 'stats')
       return new TextEncoder().encode(JSON.stringify(this.stats));
     if (operation.kind === 'drain' || operation.kind === 'clear') {
-      await this.drain();
+      await waitForRead(this.drain(), signal);
       if (operation.kind === 'drain') return true;
       return this.transaction(
         async scope => {
@@ -82,7 +84,7 @@ export class ArtifactStoreServer {
         stats => {
           this.disk = stats;
         },
-        {touchReads: false},
+        {touchReads: false, signal},
       );
     }
     if (
@@ -101,17 +103,19 @@ export class ArtifactStoreServer {
           this.pending.get(namespace)?.get(id)?.operation.kind === 'publish',
       )
     )
-      await this.drain();
+      await waitForRead(this.drain(), signal);
     const touching =
       operation.kind === 'touch' || operation.kind === 'touch-many';
     const overlay = ids.map(id => this.pending.get(namespace)?.get(id));
-    const read = (store?: PersistentArtifactStore) =>
-      ids.map((id, index) => {
+    const read = (store?: PersistentArtifactStore) => {
+      signal?.throwIfAborted();
+      return ids.map((id, index) => {
         const pending = overlay[index]?.operation;
         if (pending?.kind === 'delete') return undefined;
         if (pending?.kind === 'set') return touching ? true : pending.bytes;
         return touching ? store?.has(id) : store?.get(id);
       });
+    };
     const values = overlay.every(Boolean)
       ? read()
       : await this.transaction(
@@ -119,7 +123,7 @@ export class ArtifactStoreServer {
           stats => {
             this.disk = stats;
           },
-          {touchReads: false},
+          {touchReads: false, signal},
         );
     if (touching) {
       const present = values.map(Boolean);
@@ -249,4 +253,17 @@ export class ArtifactStoreServer {
         throw new Error('Expected an artifact mutation.');
     }
   }
+}
+
+// Cancellation releases the reader while accepted mutations continue draining.
+function waitForRead<T>(pending: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return pending;
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener('abort', abort, {once: true});
+    if (signal.aborted) abort();
+    pending
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener('abort', abort));
+  });
 }

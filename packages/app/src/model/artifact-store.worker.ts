@@ -7,6 +7,7 @@ import {
   artifactOperationBytes,
   artifactReply,
   artifactRequestTimeout,
+  artifactReadControl,
   type ArtifactStoreEndpoint,
   type ArtifactStoreRequest,
 } from './artifact-store-protocol';
@@ -14,7 +15,13 @@ import {ArtifactStoreServer} from './artifact-store-server';
 
 const scope = self as DedicatedWorkerGlobalScope;
 const server = new ArtifactStoreServer();
-type Client = ArtifactStoreEndpoint & {received: number};
+type Client = ArtifactStoreEndpoint & {
+  received: number;
+  reads: Map<
+    number,
+    {generation: number | undefined; controller: AbortController}
+  >;
+};
 const clients = new Set<Client>();
 let disposing = false;
 let finishing = false;
@@ -30,6 +37,7 @@ function closeIdleClients(): void {
       client.received >=
         Number(Atomics.load(accounting, artifactAccounting.posted))
     ) {
+      for (const read of client.reads.values()) read.controller.abort();
       client.port.close();
       clients.delete(client);
     }
@@ -60,13 +68,28 @@ scope.onmessage = ({
 }: MessageEvent<
   | {kind: 'connect'; endpoint: ArtifactStoreEndpoint}
   | {kind: 'disconnect' | 'dispose'}
+  | {kind: 'cancel-reads'; id: number}
 >) => {
+  if (data.kind === 'cancel-reads') {
+    const client = [...clients].find(client => client.id === data.id);
+    if (client) {
+      const generation = Atomics.load(
+        new Int32Array(client.control),
+        artifactReadControl.generation,
+      );
+      for (const read of client.reads.values()) {
+        if (read.generation !== undefined && read.generation !== generation)
+          read.controller.abort();
+      }
+    }
+    return;
+  }
   if (data.kind !== 'connect') {
     if (data.kind === 'dispose') disposing = true;
     closeIdleClients();
     return;
   }
-  const client: Client = {...data.endpoint, received: 0};
+  const client: Client = {...data.endpoint, received: 0, reads: new Map()};
   const accounting = new BigInt64Array(client.accounting);
   clients.add(client);
   client.port.onmessage = ({data}: MessageEvent<ArtifactStoreRequest>) => {
@@ -89,13 +112,37 @@ scope.onmessage = ({
 };
 
 async function respond(
-  client: ArtifactStoreEndpoint,
-  request: ArtifactStoreRequest,
+  client: Client,
+  request: Extract<ArtifactStoreRequest, {reply: true}>,
 ): Promise<void> {
-  const state = new Int32Array(client.mailbox, 0, 4);
+  const state = new Int32Array(request.mailbox, 0, 4);
+  const control = new Int32Array(client.control);
+  if (
+    request.generation !== undefined &&
+    request.generation !== Atomics.load(control, artifactReadControl.generation)
+  )
+    return;
+  const controller = new AbortController();
+  const signal = controller.signal;
+  client.reads.set(request.id, {generation: request.generation, controller});
+  const wake = () => {
+    Atomics.add(control, artifactReadControl.wake, 1);
+    Atomics.notify(control, artifactReadControl.wake);
+  };
+  const abort = () => {
+    Atomics.store(state, 0, artifactReply.failed);
+    Atomics.notify(state, 0);
+    wake();
+  };
+  signal.addEventListener('abort', abort, {once: true});
   const accounting = new BigInt64Array(client.accounting);
-  const closed = () => !!Atomics.load(accounting, artifactAccounting.closed);
-  const buffer = new Uint8Array(client.mailbox, artifactMailboxHeaderBytes);
+  const closed = () =>
+    signal.aborted ||
+    !!Atomics.load(accounting, artifactAccounting.closed) ||
+    (request.generation !== undefined &&
+      request.generation !==
+        Atomics.load(control, artifactReadControl.generation));
+  const buffer = new Uint8Array(request.mailbox, artifactMailboxHeaderBytes);
   try {
     if (request.operation.kind === 'clear') {
       // A restarted compiler may request a clear before the dead compiler's
@@ -110,7 +157,11 @@ async function respond(
         await new Promise<void>(resolve => setTimeout(resolve, 0));
       }
     }
-    const result = await server.request(request.namespace, request.operation);
+    const result = await server.request(
+      request.namespace,
+      request.operation,
+      signal,
+    );
     if (closed()) return;
     const bytes = result instanceof Uint8Array ? result : undefined;
     Atomics.store(state, 2, bytes?.byteLength ?? 0);
@@ -126,7 +177,7 @@ async function respond(
         buffer.set(chunk);
         Atomics.store(state, 1, chunk.byteLength);
         Atomics.store(state, 0, artifactReply.chunk);
-        Atomics.notify(state, 0);
+        wake();
         const wait = Atomics.waitAsync(
           state,
           0,
@@ -141,6 +192,9 @@ async function respond(
   } catch {
     if (closed()) return;
     Atomics.store(state, 0, artifactReply.failed);
+  } finally {
+    signal.removeEventListener('abort', abort);
+    client.reads.delete(request.id);
   }
-  Atomics.notify(state, 0);
+  wake();
 }

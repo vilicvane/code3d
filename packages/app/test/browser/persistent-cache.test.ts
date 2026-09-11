@@ -340,7 +340,7 @@ test(
   {timeout: 60_000},
   async t => {
     const page = await fixture(t);
-    const error = await page.evaluate(
+    const result = await page.evaluate(
       async ({source}) => {
         let release!: () => void;
         let acquired!: () => void;
@@ -362,16 +362,26 @@ test(
         const worker = new CacheWorker();
         const cancellation = new Int32Array(new SharedArrayBuffer(4));
         try {
-          return await new Promise<string>((resolve, reject) => {
-            worker.onerror = event => reject(new Error(event.message));
-            worker.onmessage = ({data}) => {
-              if (data.phase === 'compiling-model')
-                setTimeout(() => Atomics.store(cancellation, 0, 1), 100);
-              else if (!data.phase)
-                resolve(data.error ?? 'Unexpected completed model');
-            };
-            worker.postMessage({source, cancellation});
-          });
+          return await new Promise<{error: string; milliseconds: number}>(
+            (resolve, reject) => {
+              let cancelledAt = 0;
+              worker.onerror = event => reject(new Error(event.message));
+              worker.onmessage = ({data}) => {
+                if (data.phase === 'compiling-model')
+                  setTimeout(() => {
+                    cancelledAt = performance.now();
+                    Atomics.store(cancellation, 0, 1);
+                    worker.cancelReads();
+                  }, 100);
+                else if (!data.phase)
+                  resolve({
+                    error: data.error ?? 'Unexpected completed model',
+                    milliseconds: performance.now() - cancelledAt,
+                  });
+              };
+              worker.postMessage({source, cancellation});
+            },
+          );
         } finally {
           worker.terminate();
           release();
@@ -380,7 +390,9 @@ test(
       },
       {source},
     );
-    assert.match(error, /Cancelled/);
+    assert.match(result.error, /Cancelled/);
+    assert.ok(result.milliseconds < 1000, JSON.stringify(result));
+    t.diagnostic(JSON.stringify(result));
     valid(await compile(page, {source}));
   },
 );

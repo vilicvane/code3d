@@ -78,7 +78,10 @@ export async function withPersistentArtifacts<Result>(
     scope: (namespace: string) => PersistentArtifactStore | undefined,
   ) => Promise<Result>,
   onStats: (stats: PersistentArtifactStats | undefined) => void,
-  {touchReads = true}: {touchReads?: boolean} = {},
+  {
+    touchReads = true,
+    signal,
+  }: {touchReads?: boolean; signal?: AbortSignal} = {},
 ): Promise<Result> {
   if (
     typeof navigator === 'undefined' ||
@@ -90,7 +93,8 @@ export async function withPersistentArtifacts<Result>(
   }
   let entered = false;
   try {
-    return await navigator.locks.request(storageName, async () => {
+    return await navigator.locks.request(storageName, {signal}, async () => {
+      signal?.throwIfAborted();
       entered = true;
       const handles: FileSystemSyncAccessHandle[] = [];
       let journal: ArtifactJournal;
@@ -154,6 +158,7 @@ export async function withPersistentArtifacts<Result>(
       }
     });
   } catch (error) {
+    signal?.throwIfAborted();
     // Lock access itself can be denied by the browser, before storage is opened.
     // Never retry an I/O operation after it has begun.
     if (entered) throw error;
