@@ -1436,19 +1436,24 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
     );
     if (!previewState.isCurrent(request, codeEditor.sourceVersion())) return;
     const cursor = codeEditor.cursorSource();
-    const focusedEvaluation =
+    const focusedScope =
       cursor &&
       viewport.sourceEvaluationAt(
         nextModule,
         cursor.file,
         cursor.offset,
         preferredEvaluationContextId,
-      )?.evaluation;
-    const completedPreview =
-      focusedEvaluation?.runtime.outcome === 'completed' &&
+      );
+    const focusedEvaluation = focusedScope?.evaluation;
+    const availablePreview =
+      focusedEvaluation &&
+      (focusedEvaluation.runtime.outcome === 'completed' ||
+        focusedScope?.target.tool?.arguments.some(
+          argument => argument.target,
+        )) &&
       (focusedEvaluation.nodeIds.some(id => nextModule.objects.has(id)) ||
         focusedEvaluation.sketchIds?.some(id => nextModule.sketches.has(id)));
-    if (nextModule.diagnostic && previewState.module && !completedPreview) {
+    if (nextModule.diagnostic && previewState.module && !availablePreview) {
       previewState.fail(nextModule.diagnostic);
       compilingDesignContextId = undefined;
       finishContextualTool();

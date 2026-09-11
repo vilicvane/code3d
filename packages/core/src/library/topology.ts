@@ -594,7 +594,7 @@ function resolveTopologyIndex(
   return index;
 }
 
-function assertTopologyId(kind: TopologyKind, id: TopologyId): void {
+export function assertTopologyId(kind: TopologyKind, id: TopologyId): void {
   if (!isTopologyId(id)) {
     throw new Error(
       `${kind[0].toUpperCase()}${kind.slice(1)} IDs must be positive integers or paths of at least two positive integers; received ${JSON.stringify(id)}.`,

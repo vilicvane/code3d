@@ -89,6 +89,7 @@ import {
   type TopologyInspectionOptions,
 } from './topology-inspection.js';
 import {
+  assertTopologyId,
   booleanWithTopology,
   chamferEdges,
   filletEdges,
@@ -1332,6 +1333,7 @@ export class Constraint extends ConstraintExpression {
   }
   /** @code3d.param id {kind: 'vertex', label: 'Pivot vertex'} */
   pivotVertex(id: VertexId): ConstraintPivotChain {
+    assertTopologyId('vertex', id);
     return new ConstraintPivotChain(this, {kind: 'pivotVertex', id});
   }
   /** Select a positioned axis in the composition. */

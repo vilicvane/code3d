@@ -214,7 +214,12 @@ write failures use the same error bar; a successful retry clears it.
 
 Tools depend on the call or value under the editor cursor. A primitive can
 offer dimension inputs; a fillet or chamfer can offer edge selection;
-an offset can offer a position tool. Origin operations offer a pivot marker
+an offset can offer a position tool. Empty topology calls such as `vertex()`,
+`edge()`, `surface()`, `originVertex()`, and `pivotVertex()` still show their
+selection controls when the input model is available. Pick a candidate to fill
+the missing argument; simply opening the tool leaves the source unchanged.
+The missing-argument diagnostic remains until the call is corrected.
+Origin operations offer a pivot marker
 and arrows, while `rotate` offers angle inputs and rotation rings. Try the
 [origin and rotation guide](../../guides/origins-and-rotation/).
 In a composition preview, selecting a member or subgroup positioned with
