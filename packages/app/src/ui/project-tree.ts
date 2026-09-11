@@ -675,7 +675,7 @@ export class ProjectTree {
         directory.textContent = item.directory;
         const message = document.createElement('span');
         message.textContent = item.message;
-        row.append(directory, ': ', message);
+        row.append(directory, message);
         return row;
       }),
     );

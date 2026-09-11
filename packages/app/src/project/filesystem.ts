@@ -20,7 +20,7 @@ const directoryProjectRoot = '/';
 const directoryManifestPath = '/.code3d/project.json';
 
 type ProjectManifest = Readonly<{
-  version: 2;
+  version: 1;
   managedDirectories: Readonly<Record<string, string | null>>;
 }>;
 
@@ -185,8 +185,8 @@ class ProjectStore implements ProjectFileSystem {
   /** Seed only empty workspaces; initialization never reads project contents. */
   async initialize(seed?: () => Promise<void>): Promise<void> {
     await this.files.mkdir(this.projectRoot, {recursive: true});
-    if (await this.readManifest()) return;
-    if (seed) {
+    const manifest = await this.readManifest();
+    if (!manifest && seed) {
       const entries = await this.list('/');
       if (
         !entries.some(
@@ -196,7 +196,7 @@ class ProjectStore implements ProjectFileSystem {
       )
         await seed();
     }
-    await this.writeManifest(newManifest());
+    await this.writeManifest(manifest ?? newManifest());
   }
 
   async syncDirectory(
@@ -305,11 +305,9 @@ class ProjectStore implements ProjectFileSystem {
     const value = JSON.parse(
       await this.files.readFile(this.manifestPath, 'utf8'),
     ) as Partial<ProjectManifest>;
-    if (value.version !== 2) {
-      return undefined;
-    }
+    // Prototype metadata has one current shape; its marker never selects a format.
     return {
-      version: 2,
+      version: 1,
       managedDirectories: Object.fromEntries(
         Object.entries(value.managedDirectories ?? {}).filter(
           (entry): entry is [string, string | null] =>
@@ -345,7 +343,7 @@ class ProjectStore implements ProjectFileSystem {
 
 function newManifest(): ProjectManifest {
   return {
-    version: 2,
+    version: 1,
     managedDirectories: {},
   };
 }
