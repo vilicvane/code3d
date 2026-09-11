@@ -57,11 +57,18 @@ ToolEditPlan、ToolSession 和 host 边界。参数、表达式、实参、拓�
 原生编辑行为。验证见 [source-edit-diff](../../../packages/app/test/source-edit-diff.test.ts)、
 [source-edit-popover](../../../packages/app/test/browser/source-edit-popover.test.ts)。
 
-页面 UI 将网格图例、源码更新提示和诊断放入 viewport 左下角的同一个 stack，
+页面 UI 将网格图例、源码更新提示、工具操作错误和诊断放入 viewport 左下角的同一个 stack，
 图例位于最下方，提示随内容高度向上排列。图例直接观察 sketch 导航派生的格距或
 3D viewport 最后实时帧的格距及渲染模式，显示当前视图的小格长度；不保留转发回调
 或页面中的镜像读数。图例在空预览和 3D 渲染模式下隐藏。空预览的
 坐标指示器退出布局，使 agent 渲染小窗自动使用共享的顶部边距。
+工具错误由 ViewportToolFeedback 单独拥有 observable 状态和 DOM 订阅，保留最近一次失败，
+可关闭、同类操作成功后清除，切换文件时清除；不再写入编辑器 errorBar 或 sketch output。
+拖动预览错误属于手势，释放时确认失败才报告；恢复或取消不弹错。工具不可用只影响可操作性。
+sketch 和 3D 的 Arguments 在当前候选参数组列表非空时显示，沿用既有函数上下文和标注解析，
+不单独维护第二套显示资格判断；隐藏 dock 不响应快捷键。
+sketch 复用 Arguments dock、Alt+1 和设计上下文选择；切换已编译求值也更新 sketch 与面板，
+面板层级高于 sketch 画布，3D Render 状态不隐藏 sketch Arguments。
 
 ## 参数与注释
 

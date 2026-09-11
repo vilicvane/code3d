@@ -49,7 +49,7 @@ ${failure}`,
       assert.equal(await trim.getAttribute('aria-pressed'), 'true');
       assert.equal(await trim.isEnabled(), true);
       assert.equal(
-        await page.locator('.sketch-editor output').isVisible(),
+        await page.locator('.viewport-tool-error').isVisible(),
         false,
       );
     }
@@ -125,10 +125,7 @@ const value = sketch([
     await page.getByRole('button', {name: 'Trim', exact: true}).isDisabled(),
     true,
   );
-  assert.match(
-    await page.locator('.sketch-editor output').innerText(),
-    /Last successful sketch/,
-  );
+  assert.equal(await page.locator('.sketch-editor output').count(), 0);
   assert.match(
     await page.locator('#viewport-diagnostic-stack').innerText(),
     /sketch constraints/i,
@@ -211,10 +208,7 @@ test('the sketch canvas fills the viewport with floating controls at wide and na
     assert.equal(await input.isVisible(), true);
     const inputs = await page.locator('.drawing-inputs').boundingBox();
     assert.ok(inputs && inputs.y + inputs.height < canvas.y + canvas.height);
-    assert.equal(
-      await page.locator('.sketch-editor output').isVisible(),
-      false,
-    );
+    assert.equal(await page.locator('.viewport-tool-error').isVisible(), false);
     await page.keyboard.press('Escape');
     await page.keyboard.press('Escape');
   }
@@ -471,7 +465,7 @@ test('right drag pans over geometry and constraint glyphs without editing or can
     'true',
   );
   assert.equal(await text(page), original);
-  assert.equal(await page.locator('.sketch-editor output').isVisible(), false);
+  assert.equal(await page.locator('.viewport-tool-error').isVisible(), false);
   await page.keyboard.press('Escape');
   assert.equal(await text(page), original);
 });

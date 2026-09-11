@@ -24,7 +24,7 @@ async function preview(
     await page.locator('.sketch-canvas line.trim-preview').count(),
     count,
   );
-  assert.equal(await page.locator('.sketch-editor output').isVisible(), false);
+  assert.equal(await page.locator('.viewport-tool-error').isVisible(), false);
 }
 
 test('Trim and Select + Delete remove reversed duplicates and their orphan points in one undo step', async t => {
@@ -51,7 +51,7 @@ const value = sketch([
         2,
       );
       assert.equal(
-        await page.locator('.sketch-editor output').isVisible(),
+        await page.locator('.viewport-tool-error').isVisible(),
         false,
       );
       assert.equal(await text(page), before);
@@ -178,8 +178,8 @@ const value = sketch([
   await preview(page, middle, 2);
   await clickSegment(page, middle);
   assert.match(
-    await page.locator('.sketch-editor output').innerText(),
-    /could not be deleted; its source or references are not editable/,
+    await page.locator('.viewport-tool-error').innerText(),
+    /constraint|expression|source|reference/i,
   );
   assert.equal(await text(page), before);
   assert.equal(await page.locator('.sketch-canvas line.local').count(), 6);

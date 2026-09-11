@@ -201,6 +201,17 @@ use of `size` refers to a different dimension. Moving between dimensions
 preserves the view, and orbiting keeps the chosen edge stable. These guides
 appear in **Modeling** mode and disappear in **Render** mode.
 
+Sketch and 3D views share the **Arguments** selector in the lower-right corner.
+Use **Alt+1** to open it and switch the evaluated argument set of a function
+with `@code3d.arguments`. The selector is hidden when the current context
+has no candidate argument sets.
+
+Unavailable tools are hidden or disabled without a separate status banner.
+If a drag still fails when you release it, the preview is restored and a
+dismissible error appears above the scale legend. Cancelling with **Escape**
+does not report the drag error. Constraint editing, deletion, and source
+write failures use the same error bar; a successful retry clears it.
+
 Tools depend on the call or value under the editor cursor. A primitive can
 offer dimension inputs; a fillet or chamfer can offer edge selection;
 an offset can offer a position tool. Origin operations offer a pivot marker

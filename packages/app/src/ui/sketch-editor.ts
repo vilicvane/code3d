@@ -126,8 +126,6 @@ type Gesture =
 export class SketchEditor {
   readonly root = document.createElement('section');
   private readonly svg = svgElement('svg');
-  private readonly status = document.createElement('output');
-  private readonly statusText = document.createTextNode('');
   private readonly grid = svgElement('g');
   private readonly context = svgElement('g');
   private readonly regions = svgElement('g');
@@ -145,11 +143,7 @@ export class SketchEditor {
   private readonly toolbar = new SketchToolbar();
   private readonly constraintTools = new SketchConstraintTools(
     change => {
-      this.editError = undefined;
       const committed = this.commit(change);
-      if (!committed)
-        this.editError =
-          'The sketch constraints could not be edited; select the geometry again.';
       this.draw();
       return committed;
     },
@@ -178,7 +172,6 @@ export class SketchEditor {
   private showConstraints = true;
   private bypassSnap = false;
   private selection: SketchPick[] = [];
-  private editError?: string;
   private gesture?: Gesture;
   private space = false;
 
@@ -208,6 +201,7 @@ export class SketchEditor {
       previous?: SketchDragPreview,
       mergeTarget?: SketchPointAddress,
     ) => Promise<SketchDragPreview>,
+    private readonly reportMove: (error?: string) => void,
   ) {
     makeObservable<this, 'view'>(this, {
       view: observableRef,
@@ -299,13 +293,7 @@ export class SketchEditor {
       this.overlay,
       this.selectionBox,
     );
-    this.status.append(this.statusText);
-    this.root.append(
-      this.toolbar.root,
-      this.constraintTools.root,
-      stage,
-      this.status,
-    );
+    this.root.append(this.toolbar.root, this.constraintTools.root, stage);
     container.append(this.root);
     this.resize = new ResizeObserver(() => this.draw());
     this.resize.observe(this.svg);
@@ -323,7 +311,6 @@ export class SketchEditor {
       this.tool = 'Select';
     }
     this.view = view;
-    this.editError = undefined;
     const segments = this.segments();
     // Retain the source interval identity, but replace its old coordinates.
     // Constraint solving can move it without changing the selected entity.
@@ -739,7 +726,6 @@ export class SketchEditor {
     this.navigation.interrupt();
     event.preventDefault();
     this.svg.focus();
-    this.editError = undefined;
     const position = this.coordinates(event);
     this.bypassSnap = event.altKey;
     if (event.button === 1 || event.button === 2 || this.space) {
@@ -947,7 +933,7 @@ export class SketchEditor {
       await gesture.pending;
       if (this.gesture !== gesture) return;
       this.gesture = undefined;
-      this.editError = gesture.error;
+      this.reportMove(gesture.error);
       if (gesture.preview && !gesture.error) {
         const data = gesture.preview.data.flatMap(e => {
           if (!this.view!.editable.get(e.id)?.some(Boolean)) return [];
@@ -995,9 +981,6 @@ export class SketchEditor {
       const change = trimSketchSegment(this.view.layers, segment);
       this.cancel();
       if (this.commit(change)) this.selection = [];
-      else
-        this.editError =
-          'The segment could not be deleted; its source or references are not editable.';
       this.draw();
       return;
     }
@@ -1025,9 +1008,6 @@ export class SketchEditor {
       : removal;
     this.cancel();
     if (this.commit(change)) this.selection = [];
-    else
-      this.editError =
-        'The selection could not be deleted; its source or references are not editable.';
     this.draw();
   }
 
@@ -1265,13 +1245,6 @@ export class SketchEditor {
           )
         : [],
     );
-    const status =
-      (this.gesture?.kind === 'move' ? this.gesture.error : undefined) ??
-      this.editError ??
-      this.view.readOnlyReason ??
-      '';
-    this.status.hidden = !status;
-    if (this.statusText.data !== status) this.statusText.data = status;
   }
 
   private drawRegions(): void {

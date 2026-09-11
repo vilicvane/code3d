@@ -36,7 +36,7 @@ export class DockPanelCoordinator {
       return true;
     }
     const panel = this.panels.get(shortcutIdentity(event));
-    if (!panel || event.repeat) {
+    if (!panel || !panel.visible || event.repeat) {
       return false;
     }
     panel.togglePinned();
@@ -91,6 +91,10 @@ export class DockPanelController {
     window.addEventListener('pointerup', this.onPointerEnd, true);
     window.addEventListener('pointercancel', this.onPointerEnd, true);
     this.render();
+  }
+
+  get visible(): boolean {
+    return this.config.root.getClientRects().length > 0;
   }
 
   togglePinned = (): void => {
