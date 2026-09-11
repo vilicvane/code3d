@@ -77,6 +77,11 @@ files can be moved, copied and deleted, but do not open as text. Copies preserve
 file bytes and empty folders. Pasting a copy beside an existing name generates
 a name such as `part copy.ts`; moves reject occupied destinations.
 
+TypeScript and JavaScript highlight keywords, strings and numbers when a file
+opens, including in pinned scope headers while scrolling. Unicode identifiers,
+including Chinese variable names, use the normal identifier color. Unused
+variables appear dimmed, and matching bracket pairs use distinct colors.
+
 Changes save to the project's current storage. Renaming or moving a folder
 updates its open tabs and agent locations, but does not rewrite import paths.
 If an operation fails, the explorer shows the error and reloads the actual
