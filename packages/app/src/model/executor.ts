@@ -1223,6 +1223,22 @@ export function createModelExecutor(
     });
 
     const inputTargets = new Map<string, MutableSourceInputTarget>();
+    const failedInputCollections = new Map(
+      [...sourceExecutionTraces.values()].flatMap(execution => {
+        if (execution.outcome !== 'failed') return [];
+        const inputs = [
+          ...new Set(execution.inputs.flatMap(input => input.objects)),
+        ];
+        return inputs.length > 1
+          ? [
+              [
+                traceExecutionKey(execution.siteId, execution.execution),
+                inputs,
+              ] as const,
+            ]
+          : [];
+      }),
+    );
     for (const trace of sourceInputTraces) {
       const operationId = traceExecutionKey(trace.siteId, trace.execution);
       const operation = operations.get(operationId);
@@ -1245,6 +1261,7 @@ export function createModelExecutor(
             : 'collection';
       if (operation && role) target.operation = {kind: operation.kind, role};
       target.evaluations.push({
+        collection: failedInputCollections.get(operationId),
         operationId: role ? operation?.id : undefined,
         role,
         objects: role
@@ -1820,7 +1837,12 @@ export function createModelExecutor(
             functionId: designFunctionAt(target.sourceRef, designArguments),
             evaluations: target.evaluations.map(evaluation => ({
               runtime: evaluation.runtime,
-              nodeIds: evaluation.objects.map(modelObjectNodeId),
+              nodeIds: (evaluation.collection ?? evaluation.objects).map(
+                modelObjectNodeId,
+              ),
+              focusNodeIds: evaluation.collection
+                ? evaluation.objects.map(modelObjectNodeId)
+                : undefined,
               operationId: evaluation.operationId,
               operationInput: evaluation.role
                 ? {
@@ -1829,7 +1851,9 @@ export function createModelExecutor(
                     nodeIds: evaluation.objects.map(modelObjectNodeId),
                   }
                 : undefined,
-              isCollection: evaluation.isCollection,
+              isCollection: evaluation.collection
+                ? true
+                : evaluation.isCollection,
               contextId: evaluation.contextId,
             })),
             contextTargetIds: operationInputTargets
@@ -2056,6 +2080,7 @@ export function createModelExecutor(
         role?: ModelOperationInputRole;
         isCollection?: boolean;
         objects: readonly RelationObject[];
+        collection?: readonly RelationObject[];
         contextId: string;
         runtime: RuntimeReach;
       }>

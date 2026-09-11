@@ -539,50 +539,38 @@ export class ModelViewport {
     preferredOccurrenceKey?: string,
     preferredContextId?: string,
   ): boolean {
-    const match = this.sourceTargetAt(file, offset);
+    const scope = this.sourceEvaluationAt(
+      this.module,
+      file,
+      offset,
+      preferredContextId,
+    );
+    const match = scope?.target;
     const previousParameter = this.sourceParameter;
     const parameter = match && sourceParameterAt(match, file, offset);
     this.sourceParameter = parameter
       ? {targetId: match!.id, parameter}
       : undefined;
-    if (!match) {
+    if (!scope) {
       this.clearDecorations(
         sourceDecorationOwner(parameterSourceDecoration.id),
       );
       return false;
     }
 
-    const matchingContextIndex = preferredContextId
-      ? match.evaluations.findIndex(
-          evaluation => evaluation.contextId === preferredContextId,
-        )
-      : -1;
-    const retainedEvaluationIndex =
-      this.renderedViewTarget.kind === 'source' &&
-      this.renderedViewTarget.targetId === match.id
-        ? this.renderedViewTarget.evaluationIndex
-        : -1;
-    const preferredEvaluationIndex =
-      matchingContextIndex >= 0
-        ? matchingContextIndex
-        : retainedEvaluationIndex >= 0
-          ? retainedEvaluationIndex
-          : 0;
-    const evaluationIndex = match.evaluations[preferredEvaluationIndex]
-      ? preferredEvaluationIndex
-      : 0;
+    const {target, evaluationIndex} = scope;
     this.selectedViewTarget = {
       kind: 'source',
-      targetId: match.id,
+      targetId: target.id,
       evaluationIndex,
     };
     this.transientPreviewRestore = undefined;
     if (
       this.renderedViewTarget.kind !== 'source' ||
-      this.renderedViewTarget.targetId !== match.id ||
+      this.renderedViewTarget.targetId !== target.id ||
       this.renderedViewTarget.evaluationIndex !== evaluationIndex
     ) {
-      this.renderSourceTarget(match, evaluationIndex, preferredOccurrenceKey);
+      this.renderSourceTarget(target, evaluationIndex, preferredOccurrenceKey);
     } else {
       if (
         preferredOccurrenceKey &&
@@ -634,6 +622,39 @@ export class ModelViewport {
           evaluationIndex: this.renderedViewTarget.evaluationIndex,
         }
       : undefined;
+  }
+
+  /** Resolve a replacement snapshot with the same context choice as rendering. */
+  sourceEvaluationAt(
+    module: ModelModule | null,
+    file: string,
+    offset: number,
+    preferredContextId?: string,
+  ): ReturnType<ModelViewport['sourceEvaluation']> {
+    const target = this.sourceTargetAt(file, offset, module);
+    if (!target) return;
+    const matchingContextIndex = preferredContextId
+      ? target.evaluations.findIndex(
+          evaluation => evaluation.contextId === preferredContextId,
+        )
+      : -1;
+    const retainedEvaluationIndex =
+      module === this.module &&
+      this.renderedViewTarget.kind === 'source' &&
+      this.renderedViewTarget.targetId === target.id
+        ? this.renderedViewTarget.evaluationIndex
+        : -1;
+    const preferredEvaluationIndex =
+      matchingContextIndex >= 0
+        ? matchingContextIndex
+        : retainedEvaluationIndex >= 0
+          ? retainedEvaluationIndex
+          : 0;
+    const evaluationIndex = target.evaluations[preferredEvaluationIndex]
+      ? preferredEvaluationIndex
+      : 0;
+    const evaluation = target.evaluations[evaluationIndex];
+    return evaluation && {target, evaluation, evaluationIndex};
   }
 
   previewCompletion(
@@ -847,7 +868,11 @@ export class ModelViewport {
   }
 
   hasRelativePositionContext(): boolean {
-    return isRelativePositionContext(this.renderedSourceScope()?.target);
+    const scope = this.renderedSourceScope();
+    return (
+      isRelativePositionContext(scope?.target) ||
+      !!(scope?.evaluation.isCollection && scope.evaluation.focusNodeIds)
+    );
   }
 
   setParameterPreview(targetId: string, value: number): void {
@@ -1439,8 +1464,9 @@ export class ModelViewport {
   private sourceTargetAt(
     file: string,
     offset: number,
+    module: ModelModule | null = this.module,
   ): SourceTarget | undefined {
-    return this.module?.sourceTargets
+    return module?.sourceTargets
       .filter(
         ({sourceRef}) =>
           sourceRef.file === file &&
@@ -2053,8 +2079,9 @@ export class ModelViewport {
   private hasCompositionSourceContext(): boolean {
     const scope = this.renderedSourceScope();
     return Boolean(
-      scope?.evaluation.operationInput &&
-      scope.target.contextTargetIds.length > 0,
+      (scope?.evaluation.operationInput &&
+        scope.target.contextTargetIds.length > 0) ||
+      (scope?.evaluation.isCollection && scope.evaluation.focusNodeIds),
     );
   }
 

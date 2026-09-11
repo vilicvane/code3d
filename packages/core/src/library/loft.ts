@@ -104,6 +104,10 @@ function loftContoursWithTopology(
       builder.SetMutableInput(false);
       for (const wire of wires) builder.AddWire(wire.wrapped);
       builder.Build();
+      if (!builder.IsDone())
+        throw new Error(
+          'Could not construct a solid loft through these sections. Adjust their positions, orientations, or profiles.',
+        );
     }
     result = castOwnedShape3D(builder.Shape());
     caps[0] = castOwnedShape(builder.FirstShape()) as Face;

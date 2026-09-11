@@ -1428,11 +1428,20 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
       designContext,
     );
     if (!previewState.isCurrent(request, codeEditor.sourceVersion())) return;
-    if (
-      nextModule.diagnostic &&
-      previewState.module &&
-      !previewState.module.diagnostic
-    ) {
+    const cursor = codeEditor.cursorSource();
+    const focusedEvaluation =
+      cursor &&
+      viewport.sourceEvaluationAt(
+        nextModule,
+        cursor.file,
+        cursor.offset,
+        preferredEvaluationContextId,
+      )?.evaluation;
+    const completedPreview =
+      focusedEvaluation?.runtime.outcome === 'completed' &&
+      (focusedEvaluation.nodeIds.some(id => nextModule.objects.has(id)) ||
+        focusedEvaluation.sketchIds?.some(id => nextModule.sketches.has(id)));
+    if (nextModule.diagnostic && previewState.module && !completedPreview) {
       previewState.fail(nextModule.diagnostic);
       compilingDesignContextId = undefined;
       finishContextualTool();
@@ -1441,7 +1450,6 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
       if (await presentModelDiagnostic(request)) restoreModelStatus();
       return;
     }
-    const cursor = codeEditor.cursorSource();
     if (
       cursor &&
       !nextModule.sourceTargets.some(

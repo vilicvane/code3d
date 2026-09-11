@@ -253,9 +253,16 @@ file compiles. Its controls pause until the new result replaces it. An empty
 result or a compilation failure clears the previous file’s preview.
 
 Modeling failures appear with an error message and, where source information
-is available, an underline at the responsible call. Previously evaluated
-contexts may remain usable, so you can inspect and correct the input that led
-to a failed operation.
+is available, an underline at the responsible call. If the object or sketch
+you are editing evaluated successfully, its preview and tools stay current even
+when a later operation fails. For example, you can keep moving a loft section
+after the loft fails, then drag it back to a position that produces a valid result.
+Selecting a section inside a `loft` call shows all sections in their composition
+positions, with the current section emphasized. A successful loft also shows its
+completed shape as translucent context. If the loft fails, the sections remain
+visible and editable so you can adjust its inputs.
+If the current target itself fails or the file cannot be evaluated, its previous
+preview remains visible and its stale tools pause until a new result is available.
 
 ## Undo and formatting
 
