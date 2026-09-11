@@ -1,0 +1,138 @@
+diff --git a/node_modules/monaco-editor/esm/vs/editor/browser/view.js b/node_modules/monaco-editor/esm/vs/editor/browser/view.js
+index 43a9b45..e0e67f8 100644
+--- a/node_modules/monaco-editor/esm/vs/editor/browser/view.js
++++ b/node_modules/monaco-editor/esm/vs/editor/browser/view.js
+@@ -473,6 +473,8 @@ let View = class View extends ViewEventHandler {
+                     // Nothing to render
+                     return null;
+                 }
++                // Prioritize the visible lines, including the first render of a newly attached model.
++                this._context.viewModel.visibleLinesStabilized();
+                 const partialViewportData = this._context.viewLayout.getLinesViewportData();
+                 this._context.viewModel.setViewport(partialViewportData.startLineNumber, partialViewportData.endLineNumber, partialViewportData.centeredLineNumber);
+                 const viewportData = new ViewportData(this._selections, partialViewportData, this._context.viewLayout.getWhitespaceViewportData(), this._context.viewModel);
+diff --git a/node_modules/monaco-editor/esm/vs/editor/common/model/textModelTokens.js b/node_modules/monaco-editor/esm/vs/editor/common/model/textModelTokens.js
+index 63abcce..efd9f68 100644
+--- a/node_modules/monaco-editor/esm/vs/editor/common/model/textModelTokens.js
++++ b/node_modules/monaco-editor/esm/vs/editor/common/model/textModelTokens.js
+@@ -102,7 +102,7 @@ class TokenizerWithStateStoreAndTextModel extends TokenizerWithStateStore {
+      * The result is not cached.
+      */
+     tokenizeHeuristically(builder, startLineNumber, endLineNumber) {
+-        if (endLineNumber <= this.store.getFirstInvalidEndStateLineNumberOrMax()) {
++        if (endLineNumber < this.store.getFirstInvalidEndStateLineNumberOrMax()) {
+             // nothing to do
+             return { heuristicTokens: false };
+         }
+diff --git a/node_modules/monaco-editor/esm/vs/editor/common/model/tokens/abstractSyntaxTokenBackend.js b/node_modules/monaco-editor/esm/vs/editor/common/model/tokens/abstractSyntaxTokenBackend.js
+index 6a2537f..25d3acf 100644
+--- a/node_modules/monaco-editor/esm/vs/editor/common/model/tokens/abstractSyntaxTokenBackend.js
++++ b/node_modules/monaco-editor/esm/vs/editor/common/model/tokens/abstractSyntaxTokenBackend.js
+@@ -91,6 +91,9 @@ class AttachedViewHandler extends Disposable {
+         this._computedLineRanges = [];
+         this._lineRanges = [];
+     }
++    invalidate() {
++        this._computedLineRanges = [];
++    }
+     update() {
+         if (equals(this._computedLineRanges, this._lineRanges, (a, b) => a.equals(b))) {
+             return;
+diff --git a/node_modules/monaco-editor/esm/vs/editor/common/model/tokens/tokenizationTextModelPart.js b/node_modules/monaco-editor/esm/vs/editor/common/model/tokens/tokenizationTextModelPart.js
+index b368c13..f16abd5 100644
+--- a/node_modules/monaco-editor/esm/vs/editor/common/model/tokens/tokenizationTextModelPart.js
++++ b/node_modules/monaco-editor/esm/vs/editor/common/model/tokens/tokenizationTextModelPart.js
+@@ -107,6 +107,13 @@ let TokenizationTextModelPart = TokenizationTextModelPart_1 = class Tokenization
+     handleDidChangeAttached() {
+         this.tokens.get().handleDidChangeAttached();
+     }
++    createAttachedView() {
++        const view = this._attachedViews.attachView();
++        return {
++            setVisibleLines: (ranges, stabilized) => view.setVisibleLines(ranges, stabilized),
++            dispose: () => this._attachedViews.detachView(view),
++        };
++    }
+     /**
+      * Includes grammar and semantic tokens.
+      */
+diff --git a/node_modules/monaco-editor/esm/vs/editor/common/model/tokens/tokenizerSyntaxTokenBackend.js b/node_modules/monaco-editor/esm/vs/editor/common/model/tokens/tokenizerSyntaxTokenBackend.js
+index 5e090dc..2d21e20 100644
+--- a/node_modules/monaco-editor/esm/vs/editor/common/model/tokens/tokenizerSyntaxTokenBackend.js
++++ b/node_modules/monaco-editor/esm/vs/editor/common/model/tokens/tokenizerSyntaxTokenBackend.js
+@@ -161,6 +161,12 @@ class TokenizerSyntaxTokenBackend extends AbstractSyntaxTokenBackend {
+         this._defaultBackgroundTokenizer?.handleChanges();
+     }
+     handleDidChangeContent(e) {
++        // The same viewport must be refreshed after its source tokens are invalidated.
++        if (!e.isEolChange) {
++            for (const [, view] of this._attachedViewStates) {
++                view.invalidate();
++            }
++        }
+         if (e.isFlush) {
+             // Don't fire the event, as the view might not have got the text change event yet
+             this.todo_resetTokenization(false);
+diff --git a/node_modules/monaco-editor/esm/vs/editor/contrib/stickyScroll/browser/stickyScrollController.js b/node_modules/monaco-editor/esm/vs/editor/contrib/stickyScroll/browser/stickyScrollController.js
+index f836c9c..53daae8 100644
+--- a/node_modules/monaco-editor/esm/vs/editor/contrib/stickyScroll/browser/stickyScrollController.js
++++ b/node_modules/monaco-editor/esm/vs/editor/contrib/stickyScroll/browser/stickyScrollController.js
+@@ -404,6 +404,8 @@ let StickyScrollController = class StickyScrollController extends Disposable {
+             }));
+             this._sessionStore.add(this._editor.onDidLayoutChange(() => this._onDidResize()));
+             this._sessionStore.add(this._editor.onDidChangeModelTokens((e) => this._onTokensChange(e)));
++            // A text edit can leave the same sticky range with stale rendered content.
++            this._sessionStore.add(this._editor.onDidChangeModelContent(() => this._renderStickyScroll(0)));
+             this._sessionStore.add(this._stickyLineCandidateProvider.onDidChangeStickyScroll(() => {
+                 this._showEndForLine = undefined;
+                 this._renderStickyScroll();
+diff --git a/node_modules/monaco-editor/esm/vs/editor/contrib/stickyScroll/browser/stickyScrollWidget.js b/node_modules/monaco-editor/esm/vs/editor/contrib/stickyScroll/browser/stickyScrollWidget.js
+index 0ae0bad..c61a08b 100644
+--- a/node_modules/monaco-editor/esm/vs/editor/contrib/stickyScroll/browser/stickyScrollWidget.js
++++ b/node_modules/monaco-editor/esm/vs/editor/contrib/stickyScroll/browser/stickyScrollWidget.js
+@@ -1,7 +1,7 @@
+ import { addDisposableListener, EventType } from '../../../../base/browser/dom.js';
+ import { createTrustedTypesPolicy } from '../../../../base/browser/trustedTypes.js';
+ import { equals } from '../../../../base/common/arrays.js';
+-import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
++import { Disposable, DisposableStore, MutableDisposable } from '../../../../base/common/lifecycle.js';
+ import { ThemeIcon } from '../../../../base/common/themables.js';
+ import './stickyScroll.css';
+ import { getColumnOfNodeOffset } from '../../../browser/viewParts/viewLines/viewLine.js';
+@@ -45,6 +45,7 @@ class StickyScrollWidget extends Disposable {
+     constructor(editor) {
+         super();
+         this._foldingIconStore = this._register(new DisposableStore());
++        this._tokenizationView = this._register(new MutableDisposable());
+         this._rootDomNode = document.createElement('div');
+         this._lineNumbersDomNode = document.createElement('div');
+         this._linesDomNodeScrollable = document.createElement('div');
+@@ -86,6 +87,7 @@ class StickyScrollWidget extends Disposable {
+             }
+         }));
+         this._register(this._editor.onDidChangeModel(() => {
++            this._tokenizationView.clear();
+             updateScrollLeftPosition();
+             this._updateWidgetWidth();
+         }));
+@@ -177,6 +179,12 @@ class StickyScrollWidget extends Disposable {
+             this._clearWidget();
+             return;
+         }
++        // Pinned lines are visible too, even when they are outside the main viewport.
++        this._tokenizationView.value ??= viewModel.model.tokenization.createAttachedView();
++        this._tokenizationView.value.setVisibleLines(lineNumbers.map(lineNumber => ({
++            startLineNumber: lineNumber,
++            endLineNumber: lineNumber,
++        })), true);
+         const renderedStickyLines = [];
+         const lastLineNumber = lineNumbers[lineNumbers.length - 1];
+         let top = 0;
+@@ -210,6 +218,7 @@ class StickyScrollWidget extends Disposable {
+         this._editor.layoutOverlayWidget(this);
+     }
+     _clearWidget() {
++        this._tokenizationView.clear();
+         for (let i = 0; i < this._renderedStickyLines.length; i++) {
+             const stickyLine = this._renderedStickyLines[i];
+             stickyLine.lineNumberDomNode.remove();
