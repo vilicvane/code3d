@@ -1,7 +1,7 @@
 export type ArtifactOperation =
   | Readonly<{kind: 'get' | 'touch' | 'delete'; id: string}>
   | Readonly<{kind: 'set'; id: string; bytes: Uint8Array}>
-  | Readonly<{kind: 'flush' | 'stats' | 'clear'}>
+  | Readonly<{kind: 'flush' | 'stats' | 'clear' | 'drain'}>
   | Readonly<{kind: 'get-many' | 'touch-many'; ids: readonly string[]}>
   | Readonly<{
       kind: 'publish';
@@ -14,8 +14,32 @@ export type ArtifactOperation =
 export type ArtifactStoreRequest = Readonly<{
   namespace: string;
   operation: ArtifactOperation;
+}> &
+  ({reply: true} | {reply: false; sequence: number});
+
+export type ArtifactStoreEndpoint = Readonly<{
+  port: MessagePort;
   mailbox: SharedArrayBuffer;
+  accounting: SharedArrayBuffer;
 }>;
+
+export type ArtifactStoreInitialization = Readonly<{
+  kind: 'artifact-store';
+  endpoint?: ArtifactStoreEndpoint;
+}>;
+
+// Atomics keep accounting accurate while the model Worker is running synchronous JS/WASM.
+export const artifactAccounting = {
+  bytes: 0,
+  operations: 1,
+  closed: 2,
+  posted: 3,
+} as const;
+export const artifactAccountingBytes = 4 * BigInt64Array.BYTES_PER_ELEMENT;
+
+export function artifactOperationBytes(operation: ArtifactOperation): number {
+  return 'bytes' in operation ? operation.bytes.byteLength : 0;
+}
 
 // Each client has one bounded mailbox. Large records stream through it.
 export const artifactMailboxBytes = 1024 * 1024;

@@ -6,6 +6,8 @@ import {estimateRetainedBytes} from './retained-memory.js';
 
 /** The host opens storage before synchronous evaluation and owns its lifetime. */
 export interface KernelArtifactStore {
+  /** Encoded writes retained by the host for the current working version. */
+  readonly pendingWriteBytes?: number;
   get(id: string): Uint8Array | undefined;
   getMany(ids: readonly string[]): readonly (Uint8Array | undefined)[];
   set(id: string, bytes: Uint8Array): void;
@@ -13,6 +15,7 @@ export interface KernelArtifactStore {
   /** Update access order together, returning existence in the same order. */
   touchMany(ids: readonly string[]): readonly boolean[];
   delete(id: string): void;
+  /** Schedule persistence; hosts may complete disk I/O in the background. */
   flush(): void;
 }
 
@@ -62,6 +65,7 @@ export function createComputationCache({
   let store: KernelArtifactStore | undefined;
   let persistentHits = 0;
   let persistentWrites = 0;
+  let persistenceEncodeMilliseconds = 0;
   let persistenceErrors = 0;
   const persisted = new Set<string>();
   const pendingPersistence = new Map<string, () => Uint8Array>();
@@ -232,11 +236,17 @@ export function createComputationCache({
     defer = false,
   ): void {
     if (!store || persisted.has(key.id)) return;
-    const encode = () =>
-      encodeKernelArtifact(
-        key.signature,
-        codec ? Uint8Array.from(codec.encoder(value)) : value,
-      );
+    const encode = () => {
+      const started = performance.now();
+      try {
+        return encodeKernelArtifact(
+          key.signature,
+          codec ? Uint8Array.from(codec.encoder(value)) : value,
+        );
+      } finally {
+        persistenceEncodeMilliseconds += performance.now() - started;
+      }
+    };
     if (defer && currentEvaluation) {
       pendingPersistence.set(key.id, encode);
       return;
@@ -312,6 +322,7 @@ export function createComputationCache({
     estimatedJavaScriptBytes = 0;
     persistentHits = 0;
     persistentWrites = 0;
+    persistenceEncodeMilliseconds = 0;
     persistenceErrors = 0;
     persisted.clear();
     pendingPersistence.clear();
@@ -327,8 +338,10 @@ export function createComputationCache({
       nativeAllocatedBytes: nativeAllocatedBytes(),
       maximumBytes,
       externalBytes,
+      pendingPersistenceBytes: store?.pendingWriteBytes ?? 0,
       persistentHits,
       persistentWrites,
+      persistenceEncodeMilliseconds,
       persistenceErrors,
     };
   }
@@ -336,7 +349,10 @@ export function createComputationCache({
   function evictHistoricalEntries(): void {
     while (
       historicalEntries.size &&
-      nativeAllocatedBytes() + estimatedJavaScriptBytes + externalBytes >
+      nativeAllocatedBytes() +
+        estimatedJavaScriptBytes +
+        externalBytes +
+        (store?.pendingWriteBytes ?? 0) >
         maximumBytes
     ) {
       const [id, entry] = historicalEntries.entries().next().value!;

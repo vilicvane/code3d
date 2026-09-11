@@ -190,7 +190,7 @@ Worker 批量检查已经触达的路径，整批成功后再应用失效；取�
 会话保留 256 MiB 构建产物 LRU；磁盘与几何、HTTP 资源共用日志及预算。完整内容
 按整份清单批量检查并更新访问时间，只序列化和写入缺失内容，再以短事务
 检查引用并发布时间单调的指针；缺失任意引用时视为未命中。
-取消保留已经写完的历史内容，不发布该次构建。`successful` 单独记录最近成功执行
+取消保留已经入队的完整历史内容，后台继续落盘，不发布该次构建。`successful` 单独记录最近成功执行
 的产物，不由执行失败覆盖。新 Worker 先执行可用的历史产物，后台同步工作区并
 构建当前版本；相同产物无需重复执行。恢复展示尚未校验当前源码时，源码工具和
 导出不对该旧结果启用。当前执行失败保留已有成功视图并报告当前错误。
@@ -274,14 +274,34 @@ Core 自身沿用整体运行时身份，不重复分析其所有缓存定义。
 日志带签名及校验，整理副本在完整写入后发布；损坏、配额不足或存储不可用时继续
 内存模式。索引按需读取记录，不预载全部历史几何。
 
-[ArtifactStoreConnection](../../../packages/app/src/model/artifact-store.ts)通过专用 I/O
-Worker 复用同步 `KernelArtifactStore`。内存命中的访问记录先在本次求值中汇总，
-磁盘读取也只读取主体并在连接内收集访问顺序；下次写入、结束或取消的 flush 通过
-`touchMany` 在一个短事务中维护 LRU，避免每读一条缓存就写一次日志。淘汰导致缺失的记录从仍保留
-的内存值补写。访问记录独立于数据主体，更新顺序无需重写 BREP；新计算的主体及时保存。MessagePort 投递请求，SharedArrayBuffer
-分块传回字节；先连接端口再进行同步等待，避免嵌套 Worker 的消息投递依赖被阻塞
-的创建者。同源 Web Lock 只覆盖日志打开、单次读写/发布和关闭，模型编译、执行和
-等待其他 Worker 都不持有存储锁。大记录分块发送时也已释放锁。
+[ArtifactStoreHost](../../../packages/app/src/model/artifact-store-host.ts)由项目的
+`ModelCompilerClient` 持有，为编译和执行 Worker 分配独立连接。替换或强制终止计算
+Worker 不终止 I/O Worker；已入队的主体、访问记录和发布操作继续落盘。关闭项目时
+停止生产者，再排空 I/O 队列并关闭存储。直接刷新或关闭整个网页仍可能丢失尚未落盘
+的缓存，这不影响项目源文件的保存。
+
+[ArtifactStoreConnection](../../../packages/app/src/model/artifact-store.ts)为 Core 提供
+同步 `KernelArtifactStore` 查询；`set`、`delete` 和 `flush` 只提交后台操作，`flush`
+表示请求处理待写数据，不是磁盘耐久性屏障。显式清理和存储关闭使用单独的排空边界。
+BREP/数据编码仍在计算侧同步完成，传输使用独立字节副本，避免 detach 模型仍使用的
+资源。共享原子计数记录在途及待写字节，即使计算 Worker 正在同步求值也无需等待
+消息回执；这些字节归当前工作版本，不设独立容量上限、不因队列字节数反压构建。
+它们计入历史 LRU 的内存压力，当前与上一工作集仍受保护；写完或存储失败后释放
+临时字节。统计分别提供编码、传输、同步查询及后台写事务耗时，写事务耗时包含锁等待。
+
+[ArtifactStoreServer](../../../packages/app/src/model/artifact-store-server.ts)按收到的操作
+顺序，在短事务中批量落盘。未落盘主体保留在 I/O Worker，`get/getMany/touchMany`
+可以直接使用；缺失数据才读磁盘，不把每次读取变成整个写队列的屏障。发布指针必须
+在事务中检查完整引用与单调时间戳，不能把未经验证的 `publish` 当普通待写 `set`
+暴露。清理等待被替换生产者的在途写入与旧队列完成，再删除对应命名空间。
+
+内存命中的访问记录在一次求值中汇总；磁盘命中在连接中汇总，通过后台 `touchMany`
+维护 LRU。访问记录独立于数据主体，不重写 BREP；淘汰或写入失败的内容从仍保留的
+内存值补写。MessagePort 投递请求，SharedArrayBuffer 分块传回同步查询结果。同源
+Web Lock 只覆盖日志打开、批量读写/发布及关闭，编译、执行、等待客户端接收大记录
+都不持有锁。事务按工作量分批释放锁，不限制队列的累计容量。
+回归见 [队列一致性](../../../packages/app/test/artifact-store-server.test.ts)与
+[真实 I/O Worker](../../../packages/app/test/browser/artifact-store.test.ts)。
 
 [snapshot-pool](../../../packages/app/src/model/snapshot-pool.ts)按几何 artifact
 归并 bounds/mesh，先查缓存，再分配未命中批次。主 Worker 拥有去重、预算和缓存；

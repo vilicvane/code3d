@@ -22,6 +22,7 @@ import {
   type FileRequest,
 } from './compiler-protocol';
 import CompilerWorker from './compiler.worker?worker';
+import {ArtifactStoreHost} from './artifact-store-host';
 import {ModelDiagnosticError} from './diagnostic';
 import ExecutorWorker from './executor.worker?worker';
 import type {ModelExportInstance, ModelExportOptions} from './model-export';
@@ -56,6 +57,7 @@ type Execution = {
 
 /** Independent compiler and executor lifetimes, coordinated by the newest requested source. */
 export class ModelCompilerClient {
+  private readonly storage = new ArtifactStoreHost();
   private compiler: Worker;
   private executor: Worker;
   private nextId = 1;
@@ -311,7 +313,10 @@ export class ModelCompilerClient {
     this.finishCacheReset(new Error('The project was closed.'));
     this.finishExecution();
     this.compiler.terminate();
+    this.storage.disconnect(this.compiler);
     this.executor.terminate();
+    this.storage.disconnect(this.executor);
+    this.storage.dispose();
     this.compiledArtifacts.reset();
     this.executionArtifacts.reset();
     this.runningCompile = undefined;
@@ -394,6 +399,7 @@ export class ModelCompilerClient {
   }
   private createCompiler(): Worker {
     const worker = new CompilerWorker();
+    this.storage.connect(worker);
     worker.onmessage = ({data: message}: MessageEvent<CompilerResponse>) =>
       runInAction(() => {
         if (worker !== this.compiler) return;
@@ -501,6 +507,7 @@ export class ModelCompilerClient {
   }
   private createExecutor(): Worker {
     const worker = new ExecutorWorker();
+    this.storage.connect(worker);
     worker.onmessage = ({data}: MessageEvent<ExecutorResponse>) =>
       runInAction(() => {
         if (worker !== this.executor) return;
@@ -604,6 +611,7 @@ export class ModelCompilerClient {
     this.finishCacheReset(new Error('The compiler worker was restarted.'));
     this.runningCompile = undefined;
     this.compiler.terminate();
+    this.storage.disconnect(this.compiler);
     this.compiledArtifacts.reset();
     this.compiler = this.createCompiler();
     this.lastEntry = undefined;
@@ -611,6 +619,7 @@ export class ModelCompilerClient {
   private restartExecutor(): void {
     this.finishExecution();
     this.executor.terminate();
+    this.storage.disconnect(this.executor);
     this.exportable = undefined;
     this.executorDependency = undefined;
     this.executionArtifacts.reset();

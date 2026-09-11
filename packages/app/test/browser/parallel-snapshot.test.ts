@@ -57,7 +57,7 @@ async function compile(
         host.compiler = undefined;
       }
       const {default: CacheWorker} =
-        await import('/test/browser/persistent-cache.worker.ts?worker');
+        await import('/test/browser/persistent-cache-host.ts');
       const worker = (host.compiler ??= new CacheWorker());
       const cancellation = new Int32Array(new SharedArrayBuffer(4));
       let cancelledAt: number | undefined;
@@ -116,7 +116,11 @@ test(
         result.stats.snapshots?.workers,
         concurrency === 1 ? 0 : concurrency,
       );
-      assert.ok(result.stats.snapshots!.completed > 80);
+      assert.ok(result.stats.snapshots!.queries > 0);
+      assert.equal(
+        result.stats.snapshots!.completed,
+        result.stats.snapshots!.queries,
+      );
       assert.ok(result.stepBytes! > 1000);
       const warm = await compile(page, {
         source: source + '\nexport {profile as selected};',

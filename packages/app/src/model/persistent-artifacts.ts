@@ -63,7 +63,10 @@ export type PersistentArtifactStats = ReturnType<ArtifactJournal['stats']> & {
   errors: number;
 };
 
-type PersistentArtifactStore = KernelArtifactStore & {clear(): void};
+export type PersistentArtifactStore = KernelArtifactStore & {
+  has(id: string): boolean;
+  clear(): void;
+};
 
 /**
  * One origin-wide journal and budget, shared by projects, App and agent workers.
@@ -71,8 +74,9 @@ type PersistentArtifactStore = KernelArtifactStore & {clear(): void};
  * No model compilation, execution, or response transfer runs under this lock.
  */
 export async function withPersistentArtifacts<Result>(
-  namespace: string,
-  action: (store: PersistentArtifactStore | undefined) => Promise<Result>,
+  action: (
+    scope: (namespace: string) => PersistentArtifactStore | undefined,
+  ) => Promise<Result>,
   onStats: (stats: PersistentArtifactStats | undefined) => void,
   {touchReads = true}: {touchReads?: boolean} = {},
 ): Promise<Result> {
@@ -82,7 +86,7 @@ export async function withPersistentArtifacts<Result>(
     !navigator.locks
   ) {
     onStats(undefined);
-    return action(undefined);
+    return action(() => undefined);
   }
   let entered = false;
   try {
@@ -110,9 +114,10 @@ export async function withPersistentArtifacts<Result>(
           } catch {}
         }
         onStats(undefined);
-        return action(undefined);
+        return action(() => undefined);
       }
       const scopedStore = (prefix: string): PersistentArtifactStore => ({
+        has: id => journal.has(`${prefix}:${id}`),
         get: id => journal.get(`${prefix}:${id}`, touchReads),
         getMany: ids =>
           journal.getMany(
@@ -127,7 +132,7 @@ export async function withPersistentArtifacts<Result>(
         flush: () => journal.flush(),
       });
       try {
-        return await action(scopedStore(namespace));
+        return await action(scopedStore);
       } finally {
         try {
           journal.flush();
@@ -153,6 +158,6 @@ export async function withPersistentArtifacts<Result>(
     // Never retry an I/O operation after it has begun.
     if (entered) throw error;
     onStats(undefined);
-    return action(undefined);
+    return action(() => undefined);
   }
 }

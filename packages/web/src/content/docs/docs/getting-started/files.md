@@ -255,9 +255,12 @@ The modeling engine still needs to initialize and execute the restored code.
 A current error does not discard an existing successful preview. The error is
 shown for the current source; editing tools and export wait for a matching
 current result. Cancelling a stuck model preserves the compiler's reusable work.
-Completed cached records survive cancellation, and older builds can be reused
-when you undo edits. Cache entries may be evicted to stay within the storage
-budget, and clearing site data removes them.
+Completed cache records are saved in the background, including after a model is
+cancelled, so older builds can be reused when you undo edits. Closing a project
+finishes its queued cache writes. Reloading or closing the entire page can lose
+cache entries that have not been saved yet; project source files use their own
+save process. Cache entries may be evicted to stay within the storage budget,
+and clearing site data removes them.
 
 Package upgrades and development workspace rebuilds invalidate affected builds.
 If you manually change files inside an installed npm package without changing

@@ -62,7 +62,7 @@ async function compile(
         delete host.workers[workerName];
       }
       const {default: CacheWorker} =
-        await import('/test/browser/persistent-cache.worker.ts?worker');
+        await import('/test/browser/persistent-cache-host.ts');
       const worker = (host.workers[workerName] ??= new CacheWorker());
       return new Promise<CacheResult>((resolve, reject) => {
         let probe: CacheResult['probe'];
@@ -294,7 +294,7 @@ for (const mode of ['cancel', 'terminate'] as const) {
       const interrupted = await page.evaluate(
         async ({source, mode}) => {
           const {default: CacheWorker} =
-            await import('/test/browser/persistent-cache.worker.ts?worker');
+            await import('/test/browser/persistent-cache-host.ts');
           const worker = new CacheWorker();
           const cancellation = new Int32Array(new SharedArrayBuffer(4));
           const extra =
@@ -358,7 +358,7 @@ test(
         );
         await ready;
         const {default: CacheWorker} =
-          await import('/test/browser/persistent-cache.worker.ts?worker');
+          await import('/test/browser/persistent-cache-host.ts');
         const worker = new CacheWorker();
         const cancellation = new Int32Array(new SharedArrayBuffer(4));
         try {
