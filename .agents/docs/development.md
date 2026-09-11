@@ -89,17 +89,21 @@ Build 保留分支 push、pull request 与手工触发，版本 tag 只触发 Pu
    提交、合并与推送，在已验证的发布提交上创建并推送 `v<版本号>` tag。
    CI 以 tag 对应的提交执行构建与发布。
 
-逐项检查公开包 `dependencies` 与 `peerDependencies` 中的内部包引用，按实际使用的
-API 确定兼容范围和最低支持版本。同批包的版本号相同，不代表所有内部依赖都必须改成
-这个版本：依赖未改动、未参与本批发布的包时，继续引用它已公开的原版本。
-例如 alpha.2 的 CLI 依赖 Agent alpha.2，Materials/Screws 的 Core peer 为
-`^0.0.1-alpha.2`，而 Core 继续依赖未变化的 OpenCascade alpha.0。
-公开包中内部 `devDependencies` 的 `*` 用于本地 workspace 开发，不替代消费者所需的
-dependencies/peerDependencies 声明；私有 App 的 workspace 引用也不属于公开包版本同步。
+公开包发布按 `dependencies`、`peerDependencies` 与 `optionalDependencies` 的反向依赖闭包联动。
+Core 发布新版本时，依赖它的 Materials、Screws 同步更新版本和 Core 最低版本并纳入本批；
+传递消费者继续递归纳入。`peerDependenciesMeta` 的可选 peer 只表示可以不安装该依赖，
+不能取消安装后需要使用当前版本的关系。private App/Web 和 `devDependencies` 不触发公开包联动。
 
-同步后核对根 lockfile 的 workspace 元数据与各 `package.json` 一致。最终以 CI 实际
-上传的 tarball 内 `package.json` 为发布依据，逐包核对版本、内部依赖与 peer 范围，
-并核对 tarball 完整性及 npm 暂存记录；不能仅凭工作区清单或 registry 中的上一版判断。
+内部公开依赖统一使用当前依赖版本的精确值，或以它为最低版本的 `^` / `~` 范围；
+不使用通配符、tag 或仍允许旧最低版本的范围。无变化且未进入反向闭包的依赖保留已发布版本，
+例如 Core alpha.3 继续依赖 OpenCascade alpha.0，Materials/Screws 的 Core peer 更新为
+`^0.0.1-alpha.3`。公开包内部 `devDependencies` 的 `*` 只用于本地 workspace 开发。
+
+[发布脚本](../../scripts/publish-packages.mjs)的 `--plan` 在安装与上传前校验最低版本、
+遗漏的直接/传递消费者和依赖顺序；`npm run test:release` 覆盖这些约束。
+[安装产物检查](../../scripts/test-packages.mjs)从真实 tarball 的 package.json 再执行同一校验，
+并安装本批 tarball、从 npm 获取其余依赖，不能用工作区软链接掩盖发布关系。
+同步根 lockfile 的 workspace 元数据，并核对 CI 实际上传的已验证 tarball 完整性。
 
 ### CI 发包
 
@@ -112,43 +116,38 @@ CI 只选择 `package.json.version` 与 tag 完全一致的公开包，
 按本批包的 dependencies/peerDependencies 顺序执行；没有匹配包时失败，不自动 bump。
 
 每个 npm 包配置 GitHub Actions trusted publisher：用户 `vilicvane`，仓库 `code3d`，
-文件名 `publish.yml`，Environment 留空，允许 `npm stage publish`。
+文件名 `publish.yml`，Environment 留空，允许直接 `npm publish`。
 Workflow 使用 GitHub hosted runner、Node.js 24 与 npm 11.19.1，给予 OIDC
 `id-token: write` 权限，不设置 npm token。包内 repository 元数据对应当前仓库。
 配置规则见 [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/)。
 
 CI 先完成构建、单元测试和真实安装验证，并额外仅安装 tag 选中的 tarball，
 从 npm 获取未参与发布的依赖，检查新包没有误用工作区中未发布的依赖实现。
-随后上传同一份已校验完整性的 tarball，
-不会在上传阶段重新打包。`npm stage publish` 仅暂存，维护者还需要在 npm 上批准才公开；
-批准属于 npm 的交互流程，OIDC 不提供批准权限。已公开版本会跳过；已暂存但尚未批准的
-同版本不能重复上传，需先批准或拒绝对应暂存记录再重跑。默认 dist-tag 为 `latest`，
-包的 `publishConfig.tag` 可覆盖。新包必须先在 npm 完成首次创建并配置 trusted publisher；
-CI 会在上传本批任何包之前检查这一前提。
-详见 [npm stage](https://docs.npmjs.com/cli/v11/commands/npm-stage/)。
+随后直接发布同一份已校验完整性的 tarball，不在上传阶段重新打包或执行 lifecycle scripts。
+已公开版本跳过；默认 dist-tag 为 `latest`，包的 `publishConfig.tag` 可覆盖。
+新包必须先在 npm 完成首次创建并配置 trusted publisher；CI 会在上传本批任何包前检查这一前提。
+Trusted Publisher 必须允许 direct publishing；只允许 staged publishing 的配置不能运行本流程。
+使用 `npm trust list <package> --json` 读取已有 claims，保留仓库、workflow、environment，
+通过 `npm trust github <package> --repo vilicvane/code3d --file publish.yml --allow-publish --yes`
+配置直接发布。已有配置需替换时，仅撤销匹配本仓库 workflow 的旧记录并复核新配置，
+不扩展到其他账号或 workflow，不使用长期 npm token。
 
 本地可在 `npm run test:packages` 后用
-`CODE3D_RELEASE_TAG=v0.0.1-alpha.2 node scripts/publish-packages.mjs --dry-run`
-查看选择及 registry 状态；不带 `--stage` 不会上传。CI workflow 的代码验证与真正
-OIDC 暂存成功是不同验收项，后者需合并 workflow、配置 publisher 并推送版本 tag 后验证。
+`CODE3D_RELEASE_TAG=v0.0.1-alpha.3 node scripts/publish-packages.mjs --dry-run`
+查看选择及 registry 状态；只有 `--publish` 才上传。CI 使用 OIDC 执行直接发布，
+不再使用 `npm stage publish` 或逐包人工批准。
 
 ### 完成发布
 
-CI 成功暂存后，在 npm 批准本批包，再核对所选包的公开版本、目标 dist-tag 和安装结果。
-交付回报记录版本 tag、提交、包列表与验证结果；仍在等待 npm 批准时标明“已暂存，待批准”。
-同批部分成功时逐包记录状态，重试沿用同一个版本 tag；需要修改源码时使用新的版本与 tag。
-
-需要维护者本人认证时，主动通知用户，不能只写进行中的 commentary 后继续等待短效链接
-过期。在 Herdr 中先检查本机 CLI 支持与通知 gate，再用
-`herdr notification show 'Code3D：npm 发布待批准' --body '说明包版本与稳定批准入口' --sound request`
-发送原生请求通知；其他客户端使用其实际支持的提醒方式，并核对用户是否实际收到。
-CLI 的 `shown: true` 仅表示客户端已接收，不代表系统弹窗成功；系统权限拒绝等情况下，
-应检查通知日志并改用已经验证能到达用户的方式，不能把未经确认的备用方案当作可靠提醒。
-优先提供 [npm](https://www.npmjs.com/) 账户菜单中的 **Staged Packages** 入口和本批
-精确 stage ID，让用户在准备好时 review/Approve。必须使用 CLI 认证时，先等用户准备好，
-再生成单次认证链接并保持会话；会话失效时及时说明，不反复生成链接或重复通知。
-参考 [npm 暂存批准说明](https://docs.npmjs.com/staged-publishing/)。
+核对本批包的公开版本、目标 dist-tag、实际 tarball 的依赖/peer 最低版本和安装结果，
+不能只根据 workflow 成功判断 registry 已可用。交付回报记录版本 tag、提交、包列表及验证结果。
+部分成功时逐包记录状态，重试沿用同一个版本 tag；需要修改源码时使用新的版本与 tag。
 App/网站的部署结果按其 workflow 单独记录。
+
+若 npm trust 需要认证，由 agent 发起 CLI 网页授权，给用户可在自己浏览器打开的 URL，
+用户仅负责登录/2FA 授权；agent 继续完成配置与核验，不要求用户逐包编辑设置。
+授权会话保持运行，及时处理结果，不反复生成链接。权限变更沿用用户的明确授权。
+机制见 [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/)。
 
 ## 测试与格式
 

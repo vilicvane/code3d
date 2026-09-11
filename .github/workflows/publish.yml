@@ -38,7 +38,7 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
 
-      - name: Install npm with staged trusted publishing support
+      - name: Install npm with trusted publishing support
         run: npm install --global npm@11.19.1
 
       - name: Validate the tag and select package versions
@@ -60,5 +60,5 @@ jobs:
           path: dist/packages
           if-no-files-found: error
 
-      - name: Stage matching package versions on npm
-        run: node scripts/publish-packages.mjs --stage
+      - name: Publish matching package versions on npm
+        run: node scripts/publish-packages.mjs --publish
