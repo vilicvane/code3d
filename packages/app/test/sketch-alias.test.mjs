@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {before, after, test} from 'node:test';
 import {createAppTestServer} from './vite-test-server.ts';
-import {createTestProjectCompiler} from './project-test-files.ts';
+import {createTestModelPipeline} from './project-test-files.ts';
 
 let server,
   compiler,
@@ -10,7 +10,7 @@ let server,
   deleteSketchEntity;
 before(async () => {
   server = await createAppTestServer();
-  compiler = await createTestProjectCompiler(server);
+  compiler = await createTestModelPipeline(server);
   ({analyzeSketchSource, SketchEditResolver} = await server.ssrLoadModule(
     '/src/tools/sketch-source.ts',
   ));
@@ -89,7 +89,7 @@ test('drag merge preserves the old ID and replays exactly through a fresh compil
   assert.match(source, /\['point', 11, 1\]/);
   assert.match(source, /\['line', 3, \[11, 2\]\]/);
   assert.equal(analyzeSketchSource(source).reason, undefined);
-  const fresh = await createTestProjectCompiler(server);
+  const fresh = await createTestModelPipeline(server);
   try {
     const [replay] = await compile('const s = sketch(' + source + ');', fresh);
     assert.deepEqual(replay.entities, preview.snapshot.entities);

@@ -13,6 +13,9 @@ description: 'code3d 的隔离开发、串行集成与 subagent 交付流程。U
 
 开始这类操作或单独补查 issue 时读取 [交付委派与回报](references/delivery-subagent.md)，明确执行范围、主子 agent 的阶段交接、异常处理及最终回报。主 agent 仍是协调脚本的唯一任务 owner；subagent 不另行注册整合身份，也不借用 owner 的环境变量操作协调状态。Git、测试日志、远端状态及 issue 正文的交付核验由 subagent 完成，主 agent 只接收阶段交接所需的信息、结果和需要决定的异常。
 
+执行版本发布前读取[版本发布流程](../../docs/development.md#版本发布)，按该流程准备版本、
+核验发布包范围并完成 CI 发包及结果确认；具体版本与 npm 操作规则以该文档为唯一出处。
+
 GitHub Issues 跟踪需求和当前已确定的方案，下面的本地协调文件只负责 agent 活动、开发服务器和串行集成。开始需求、方案确定或调整、更新 issue 或交付时，读取 [GitHub Issues 协作约定](references/github-issues.md)，同步维护 issue 正文中的方案摘要。不设需求模板；简短需求可以只有一句话。
 
 开发环境与当前架构从[内部开发文档](../../docs/README.md)按任务进入；修改 Code3D 源码的 agent 使用本目录的技能和内部文档，使用 Code3D 建模的 agent 阅读对外操作指南。维护相应专题和受影响的对外说明，不恢复全局工作计划或本地需求文件来跟踪进度。

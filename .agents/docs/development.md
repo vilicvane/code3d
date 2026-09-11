@@ -26,6 +26,105 @@ npm run build:packages
 [OpenCascade README](../../packages/opencascade/README.md)；常规 TypeScript
 构建不等于重新编译 WASM。命令的唯一实现入口为各包和根目录的 `package.json`。
 
+## 公开包产物
+
+`npm run build:packages` 使用 [统一构建脚本](../../scripts/build-packages.mjs)：
+TypeScript 项目图负责类型检查、声明和声明映射，esbuild 负责公开入口的 ESM。
+仓库基线使用 `module: ESNext`、`moduleResolution: Bundler` 和
+`skipLibCheck: false`，公开包开发、声明生成和发布前的安装产物验证均检查库声明。
+App 自身与浏览器中的模型语言服务启用 `skipLibCheck`；Web 沿用 Astro 的同项设置。
+这些应用仍检查源码如何使用类型，但不检查依赖声明内部，避免 DOM/Worker 标准库
+及应用依赖的声明冲突影响编辑和构建。应用层配置不传给公开包构建或发布验证。
+各包的 `build` 与 `prepack` 也调用它，发布前不会复用过期的逐文件 JS。
+构建先清理目标包的 `bld`，保留原有 exports 路径，并生成共享 chunk、源码映射和
+第三方许可说明。Core 的 Node、browser、tooling 与 interop 入口共用内核及缓存状态。
+
+Core 内联 `flo-boolean` 的计算依赖与 `@ctrl/tinycolor`，CLI 内联 `commander`；
+这些依赖声明为开发依赖。Replicad、Three.js、HarfBuzz、内核和求解器保持运行时依赖，
+跨包引用 Core 仍走公开入口。OpenCascade 与 Solver 保留已检入的原生/WASM 构建产物，
+常规构建和 prepack 校验入口、资源与许可证，不启动原生重编译。
+
+源码与 `.d.ts.map` 一并发布，保留语言服务的参数注释和导航。App 内置包与开发模式
+`latest @code3d/*` 读取同一份实际 package 文件清单；共享 chunk 的变化也进入内容版本，
+无需改 npm 版本即可使本地构建缓存失效。构建分析信息保留在各包
+`.cache/bundle-metafile.json`，不随 npm 包发布。
+
+`npm run test:packages` 在已经构建后生成 `dist/packages` 中的真实 tarball，将全部公开包
+安装到独立临时项目，验证公开入口、声明导航、内核/缓存身份、文字、Screws、WASM 和 CLI。
+声明检查使用 ESNext/DOM 标准库与 Bundler 解析且不跳过库检查；Core 显式携带 HarfBuzz 声明所需的
+Emscripten 全局类型和 Replicad 声明所需的 Manifold 类型依赖；后者不进入运行时 JS
+bundle。内部抽象成员与实现使用相同的声明裁剪规则。
+检查覆盖所有公开类型入口；Node 支持通过真实安装产物的执行验证。
+`manifold-3d@3.0.1` 声明的相对导入缺少 `.js` 扩展名，因此不宣称支持
+NodeNext 的完整依赖声明检查，也不再通过跳过声明检查进行发布验证。
+PlaneGCS 漏发 `dist/planegcs_dist/planegcs.d.ts`，仓库补丁补齐其模块声明及测试使用的
+原生资源观测接口；Core 对外声明直接引用上游已发布的源码声明，使消费者无需安装该补丁。
+普通白盒测试通过 [源码加载器](../../test/source-loader.mjs) 使用同一份源码模块图，
+不要求发布内部 JS 入口。安装产物验证不加载该 hook。
+
+语言加载器分别缓存文件存在性与源码内容：TypeScript 的 `fileExists` 使用批量元数据查询，
+只有实际选择的声明或 JS 模块才读取内容。恢复已打包的运行时不应因类型解析而重新读入
+其 JS bundle；相关回归要求恢复阶段的实际 JS 内容读取数为零。
+
+## 版本发布
+
+版本 tag 标记本次发布对应的提交，npm 发包是版本发布中交付公开包的步骤。
+App 与网站由 [Build workflow](../../.github/workflows/build.yml) 在主分支更新后按部署配置发布；
+npm 包由下面的 tag workflow 发布，分别核验对应的 CI 结果。
+
+### 准备版本
+
+1. 根据实际改动确定版本号和本批需要发布的公开包。同批包使用同一个版本号，
+   无需发布的包保持原版本，不批量改动所有 workspace 的版本。
+2. 更新这些包的 `package.json.version`，同步受影响的内部依赖版本与根目录 lockfile。
+   如果消费者需要依赖本批新增能力，也要更新它的依赖声明并将其纳入本批发布。
+   更新受影响的包说明与使用文档。
+3. 在任务 worktree 中运行 `npm test`，再用
+   `CODE3D_RELEASE_TAG=v0.0.1-alpha.2 npm run test:packages` 验证目标版本。
+   将示例 tag 换成本次版本；该检查同时覆盖所有公开包，以及仅安装本批 tarball、
+   其余依赖从 npm 获取的真实消费场景。可用下文的 `--dry-run` 检查 registry 状态。
+4. 按[交付流程](../skills/worktree-development/references/delivery-subagent.md)完成已授权的
+   提交、合并与推送，在已验证的发布提交上创建并推送 `v<版本号>` tag。
+   CI 以 tag 对应的提交执行构建与发布。
+
+### CI 发包
+
+[Publish packages](../../.github/workflows/publish.yml) 由仓库版本 tag 触发，例如
+`v0.0.1-alpha.2`；也可重跑对应的 Actions run，或使用
+`gh workflow run publish.yml --ref v0.0.1-alpha.2` 手动在已存在的 tag 上运行。
+Workflow 拒绝 branch ref，checkout 使用事件记录的 commit；不接受另填 tag 后跨 ref
+checkout，避免实际源码与 npm provenance 记录的 GitHub ref/SHA 不一致。
+CI 只选择 `package.json.version` 与 tag 完全一致的公开包，
+按本批包的 dependencies/peerDependencies 顺序执行；没有匹配包时失败，不自动 bump。
+
+每个 npm 包配置 GitHub Actions trusted publisher：用户 `vilicvane`，仓库 `code3d`，
+文件名 `publish.yml`，Environment 留空，允许 `npm stage publish`。
+Workflow 使用 GitHub hosted runner、Node.js 24 与 npm 11.19.1，给予 OIDC
+`id-token: write` 权限，不设置 npm token。包内 repository 元数据对应当前仓库。
+配置规则见 [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/)。
+
+CI 先完成构建、单元测试和真实安装验证，并额外仅安装 tag 选中的 tarball，
+从 npm 获取未参与发布的依赖，检查新包没有误用工作区中未发布的依赖实现。
+随后上传同一份已校验完整性的 tarball，
+不会在上传阶段重新打包。`npm stage publish` 仅暂存，维护者还需要在 npm 上批准才公开；
+批准属于 npm 的交互流程，OIDC 不提供批准权限。已公开版本会跳过；已暂存但尚未批准的
+同版本不能重复上传，需先批准或拒绝对应暂存记录再重跑。默认 dist-tag 为 `latest`，
+包的 `publishConfig.tag` 可覆盖。新包必须先在 npm 完成首次创建并配置 trusted publisher；
+CI 会在上传本批任何包之前检查这一前提。
+详见 [npm stage](https://docs.npmjs.com/cli/v11/commands/npm-stage/)。
+
+本地可在 `npm run test:packages` 后用
+`CODE3D_RELEASE_TAG=v0.0.1-alpha.2 node scripts/publish-packages.mjs --dry-run`
+查看选择及 registry 状态；不带 `--stage` 不会上传。CI workflow 的代码验证与真正
+OIDC 暂存成功是不同验收项，后者需合并 workflow、配置 publisher 并推送版本 tag 后验证。
+
+### 完成发布
+
+CI 成功暂存后，在 npm 批准本批包，再核对所选包的公开版本、目标 dist-tag 和安装结果。
+交付回报记录版本 tag、提交、包列表与验证结果；仍在等待 npm 批准时标明“已暂存，待批准”。
+同批部分成功时逐包记录状态，重试沿用同一个版本 tag；需要修改源码时使用新的版本与 tag。
+App/网站的部署结果按其 workflow 单独记录。
+
 ## 测试与格式
 
 产品界面统一使用英文，包括 Code3D 自己产生的诊断；内部开发文档可使用中文。
@@ -72,6 +171,7 @@ systemd-run --user --wait --pipe --working-directory="$PWD" \
 浏览器测试连接已经运行的开发服务器和主机 Chrome：
 
 ```bash
+npm run test:packages
 CODE3D_TEST_URL=http://localhost:3133 npm run test:browser --workspace @code3d/app
 ```
 

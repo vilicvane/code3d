@@ -1,6 +1,6 @@
 {
   "name": "@code3d/core",
-  "version": "0.0.1-alpha.0",
+  "version": "0.0.1-alpha.2",
   "publishConfig": {
     "access": "public"
   },
@@ -8,10 +8,11 @@
   "author": "vilicvane",
   "type": "module",
   "scripts": {
-    "prepack": "node ../../scripts/package-license.mjs",
-    "test": "node ../../node_modules/typescript/bin/tsc --build src/library/tsconfig.json src/node/tsconfig.json src/tooling/tsconfig.json && npm run test:types && npm run test:run",
-    "test:run": "node --test \"test/*.test.{mjs,ts}\"",
-    "test:types": "node ../../node_modules/typescript/bin/tsc --noEmit -p test/tsconfig.json"
+    "prepack": "npm run build",
+    "test": "npm run build && npm run test:types && npm run test:run",
+    "test:run": "node --import ../../test/source-loader.mjs --test --test-concurrency=1 \"test/*.test.{mjs,ts}\"",
+    "test:types": "node ../../node_modules/typescript/bin/tsc --noEmit -p test/tsconfig.json",
+    "build": "node ../../scripts/build-packages.mjs @code3d/core"
   },
   "exports": {
     ".": {
@@ -43,13 +44,22 @@
   ],
   "dependencies": {
     "@code3d/opencascade": "0.0.1-alpha.0",
-    "@ctrl/tinycolor": "^4.2.0",
     "@salusoft89/planegcs": "1.2.0",
+    "@types/emscripten": "1.41.5",
     "@types/three": "^0.185.4",
-    "flo-boolean": "5.0.8",
     "harfbuzzjs": "1.6.1",
+    "manifold-3d": "3.0.1",
     "replicad": "^1.0.1",
     "replicad-opencascadejs": "1.0.0",
     "three": "^0.185.1"
+  },
+  "devDependencies": {
+    "@ctrl/tinycolor": "^4.2.0",
+    "flo-boolean": "5.0.8"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vilicvane/code3d.git",
+    "directory": "packages/core"
   }
 }

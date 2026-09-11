@@ -62,12 +62,7 @@ before(async () => {
   );
   const readFile = (name: string) => files.get(name) ?? ts.sys.readFile(name);
   const host: ts.LanguageServiceHost = {
-    getCompilationSettings: () => ({
-      strict: true,
-      target: ts.ScriptTarget.ESNext,
-      module: ts.ModuleKind.NodeNext,
-      moduleResolution: ts.ModuleResolutionKind.NodeNext,
-    }),
+    getCompilationSettings: () => language.compilerOptions,
     getScriptFileNames: () => [...files.keys()],
     getScriptVersion: () => String(version),
     getScriptSnapshot: name => {

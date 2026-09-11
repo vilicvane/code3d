@@ -6,7 +6,7 @@ import {
   type SerializedImage,
   type Texture,
   type TypedArray,
-} from './three.js';
+} from 'three';
 import {parseModelColor} from './model-color.js';
 
 /** A color selects the default material for each geometry kind. */
@@ -52,14 +52,13 @@ export function captureModelMaterial(
     }
   }
   if ('isShaderMaterial' in input) {
-    const shader = input as import('./three.js').ShaderMaterial;
+    const shader = input as import('three').ShaderMaterial;
     if (
       shader.uniformsGroups.length ||
       shader.index0AttributeName !== undefined ||
       JSON.stringify(shader.defaultAttributeValues) !==
         JSON.stringify(
-          (restored as import('./three.js').ShaderMaterial)
-            .defaultAttributeValues,
+          (restored as import('three').ShaderMaterial).defaultAttributeValues,
         )
     ) {
       throw new Error(

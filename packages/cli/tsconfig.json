@@ -6,7 +6,9 @@
     "outDir": "bld",
     "tsBuildInfoFile": ".cache/tsconfig.tsbuildinfo",
     "types": ["node"],
-    "lib": ["ESNext", "DOM"]
+    "lib": ["ESNext", "DOM"],
+    "emitDeclarationOnly": true,
+    "declarationMap": true
   },
   "include": ["src/**/*.ts"],
   "references": [

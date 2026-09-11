@@ -15,12 +15,6 @@ export function sketchSourceDiagnostics(
   sketches: ReadonlyMap<string, CompiledSketch>,
   sites: SketchSourceSites,
 ): ModelDiagnostic[] {
-  const sources = new Map(
-    [...sites.values()].map(({diagnostics}) => {
-      const ref = diagnostics.sourceRef;
-      return [`${ref.file}:${ref.start}:${ref.end}`, diagnostics] as const;
-    }),
-  );
   const groups = new Map<string, CompiledSketch[]>();
   for (const sketch of sketches.values()) {
     const ref = sketch.definitionRef ?? sketch.callRef;
@@ -34,9 +28,12 @@ export function sketchSourceDiagnostics(
   for (const group of groups.values()) {
     const owner = group[0];
     const sourceRef = (owner.definitionRef ?? owner.callRef)!;
-    const parsed = sources.get(
-      `${sourceRef.file}:${sourceRef.start}:${sourceRef.end}`,
-    )!;
+    // Source facts belong to the call, including wrappers whose hidden options
+    // prevent the runtime from exposing an editable argument definition.
+    const callRef = owner.callRef!;
+    const parsed = sites.get(
+      `${callRef.file}:${callRef.start}:${callRef.end}`,
+    )!.diagnostics;
     const source = parsed.source;
     const editable = new Map(parsed.editable);
     const differences = group.flatMap(sketch => {
@@ -102,7 +99,8 @@ export function sketchSourceDiagnostics(
           change.axes.some(axis => !editable.get(change.id)?.[axis]),
         ),
       );
-    const canFix = !shared && !expressionDriven && !parsed.reason;
+    const canFix =
+      !!owner.definitionRef && !shared && !expressionDriven && !parsed.reason;
     diagnostics.push({
       kind: 'evaluation',
       severity: 'warning',

@@ -141,8 +141,10 @@ const modelDiagnosticOwner = 'code3d-model';
 const languageCompilerOptions = {
   target: typeScriptLanguage.ScriptTarget.ESNext,
   lib: ['lib.esnext.d.ts'],
-  module: 199 as typeScriptLanguage.ModuleKind,
-  moduleResolution: 99 as typeScriptLanguage.ModuleResolutionKind,
+  module: typeScriptLanguage.ModuleKind.ESNext,
+  // Monaco's enum predates Bundler; the project worker uses TypeScript 6.
+  moduleResolution: 100 as typeScriptLanguage.ModuleResolutionKind,
+  customConditions: ['browser'],
   allowNonTsExtensions: true,
   allowImportingTsExtensions: true,
   strict: true,

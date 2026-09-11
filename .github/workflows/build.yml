@@ -35,11 +35,11 @@ jobs:
       - name: Test worktree coordination
         run: python3 -B -m unittest discover -s .agents/skills/worktree-development/tests
 
-      - name: Build packages
-        run: npm run build:packages
-
       - name: Check test types and run workspace tests
         run: npm test
+
+      - name: Verify installed npm tarballs
+        run: npm run test:packages
 
       - name: Build app and render-only entry
         run: npm run build --workspace @code3d/app

@@ -235,8 +235,7 @@ for (const pause of ['kernel-loop', 'await'] as const) {
         const read = packageFiles.readFile;
         packageFiles.readFile = async path => {
           const bytes = await read(path);
-          if (!bytes || !path.endsWith('/library/kernel-cache.js'))
-            return bytes;
+          if (!bytes || !path.endsWith('/tooling/index.js')) return bytes;
           return new TextEncoder().encode(
             new TextDecoder().decode(bytes) +
               '\nglobalThis.__cacheProbe = kernelOperationCacheStats;',

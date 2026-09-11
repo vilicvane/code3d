@@ -1,4 +1,6 @@
-import type {GcsSystem, ModuleStatic} from '@salusoft89/planegcs';
+import type {GcsSystem} from '@salusoft89/planegcs/dist/planegcs_dist/gcs_system.js';
+// Upstream ships this declaration alongside sources, but omits it from dist.
+import type {ModuleStatic} from '@salusoft89/planegcs/planegcs_dist/planegcs.js';
 import type {SketchArcDirection, SketchPosition} from './sketch.js';
 import {sketchArcGeometry} from './sketch-curves.js';
 import {pointLineDistance} from './sketch-incidence.js';

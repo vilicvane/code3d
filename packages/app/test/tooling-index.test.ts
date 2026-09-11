@@ -487,10 +487,11 @@ function emitPrimitiveDeclaration(source: string) {
   );
   const options = {
     target: ts.ScriptTarget.ES2022,
-    module: ts.ModuleKind.NodeNext,
-    moduleResolution: ts.ModuleResolutionKind.NodeNext,
+    module: ts.ModuleKind.ESNext,
+    moduleResolution: ts.ModuleResolutionKind.Bundler,
+    lib: ['lib.esnext.d.ts', 'lib.dom.d.ts'],
     strict: true,
-    skipLibCheck: true,
+    skipLibCheck: false,
     declaration: true,
     emitDeclarationOnly: true,
     types: [],

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {before, after, test} from 'node:test';
 import {createAppTestServer} from './vite-test-server.ts';
-import {createTestProjectCompiler} from './project-test-files.ts';
+import {createTestModelPipeline} from './project-test-files.ts';
 
 let server, SketchRectangleDrawing, SketchEditResolver, analyzeSketchSource;
 before(async () => {
@@ -295,7 +295,7 @@ function edit(args, change) {
 }
 
 test('generated rectangles preserve right angles, dimensions and source replay when dragging every corner', async () => {
-  const compiler = await createTestProjectCompiler(server);
+  const compiler = await createTestModelPipeline(server);
   const compile = async args => {
     const result = await compiler.compile(
       {
@@ -379,7 +379,7 @@ test('generated rectangles preserve right angles, dimensions and source replay w
 });
 
 test('a generated center stays referenceable by a derived sketch after source dimension updates', async () => {
-  const compiler = await createTestProjectCompiler(server);
+  const compiler = await createTestModelPipeline(server);
   const drawing = new SketchRectangleDrawing('center');
   place(drawing, [4, 6], () => true);
   drawing.dimensions.set('width', '40');

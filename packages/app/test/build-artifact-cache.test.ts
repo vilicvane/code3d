@@ -179,8 +179,10 @@ test('restored dependency output is validated with metadata and avoids reading t
   const files: ProjectFileReader = {
     stat: packageTestFiles.stat,
     async readFile(path) {
-      reads.push(path);
-      return packageTestFiles.readFile(path);
+      const bytes = await packageTestFiles.readFile(path);
+      // TypeScript also probes missing .js paths while resolving declarations.
+      if (bytes) reads.push(path);
+      return bytes;
     },
   };
   const first = new ProjectCompiler(files, files, esbuild);
@@ -197,6 +199,10 @@ test('restored dependency output is validated with metadata and avoids reading t
       },
     );
     const coldReads = reads.filter(path => /\.[cm]?js$/.test(path)).length;
+    assert.ok(
+      reads.some(path => path.endsWith('/core/bld/tooling/index.js')),
+      'the cold build reads the public Core runtime',
+    );
     reads.length = 0;
     second.restoreDependencies(structuredClone(artifact.dependencies));
     const rebuilt = await second.compile(
@@ -220,13 +226,10 @@ test('restored dependency output is validated with metadata and avoids reading t
     );
     assert.equal(rebuilt.id, artifact.id);
     const restoredReads = reads.filter(path => /\.[cm]?js$/.test(path)).length;
-    assert.ok(
-      coldReads > 100,
-      'the cold build reaches the actual runtime graph',
-    );
-    assert.ok(
-      restoredReads < coldReads / 10,
-      `dependency restore read ${restoredReads} JS files after ${coldReads} cold reads`,
+    assert.equal(
+      restoredReads,
+      0,
+      `dependency restore read ${restoredReads} JS files after ${coldReads} cold reads: ${JSON.stringify(reads.filter(path => /\.[cm]?js$/.test(path)))}`,
     );
   } finally {
     await first.dispose();

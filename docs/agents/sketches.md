@@ -75,6 +75,8 @@ are ordered as local entities, local constraints, then region summaries:
 - `authoredParameters`, when present, are evaluated source inputs, which may
   differ from the solved geometry. Preserve expressions and constraints when
   editing; do not blindly replace the source with solved coordinates.
+  A library wrapper that supplies hidden constraint options remains inspectable,
+  but has no editable definition or automatic source Fix action.
 - Constraint items contain their evaluated `value` tuple and zero-based `index`,
   with a `redundant` flag. Constraint and region indices are snapshot-local,
   not persistent IDs. Entity IDs belong to their layer; two layers can use the

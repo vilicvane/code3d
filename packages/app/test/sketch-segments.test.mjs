@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
 import {createAppTestServer} from './vite-test-server.ts';
-import {createTestProjectCompiler} from './project-test-files.ts';
+import {createTestModelPipeline} from './project-test-files.ts';
 
 let server,
   sketchSegments,
@@ -117,7 +117,7 @@ test('trimming both lines distributes pair relations across every survivor; dele
 });
 
 test('trimmed crossing geometry and direction constraints survive fresh compiler replay', async () => {
-  const compiler = await createTestProjectCompiler(server);
+  const compiler = await createTestModelPipeline(server);
   const compile = async (args, angle) => {
     const result = await compiler.compile(
       {
@@ -301,7 +301,7 @@ test('upstream circular boundaries stay read-only during a local line trim', () 
 });
 
 test('circle-delimited line trim preserves boundary expressions and constraints through fresh compilation', async () => {
-  const compiler = await createTestProjectCompiler(server);
+  const compiler = await createTestModelPipeline(server);
   const compile = async args => {
     const module = await compiler.compile(
       {

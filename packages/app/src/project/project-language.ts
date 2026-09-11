@@ -1,6 +1,10 @@
 import ts from '@typescript/typescript6';
 import es5Library from '@typescript/old/lib/lib.es5.d.ts?raw';
-import {decodeProjectFile, type ProjectFileReader} from './file-reader';
+import {
+  decodeProjectFile,
+  statProjectFiles,
+  type ProjectFileReader,
+} from './file-reader';
 import {findPackageScope} from './package-manifest';
 import {
   normalizeProjectPath,
@@ -12,8 +16,9 @@ import {
 
 export const projectCompilerOptions: ts.CompilerOptions = {
   target: ts.ScriptTarget.ES2022,
-  module: ts.ModuleKind.NodeNext,
-  moduleResolution: ts.ModuleResolutionKind.NodeNext,
+  module: ts.ModuleKind.ESNext,
+  moduleResolution: ts.ModuleResolutionKind.Bundler,
+  customConditions: ['browser'],
   allowImportingTsExtensions: true,
   rewriteRelativeImportExtensions: true,
   erasableSyntaxOnly: true,
@@ -42,6 +47,7 @@ async function readAll(reads: readonly Promise<unknown>[]): Promise<void> {
 /** Retain TypeScript's parsed dependency closure between model revisions. */
 export class ProjectLanguageLoader {
   private readonly sources = new Map<string, string | undefined>();
+  private readonly filePresence = new Map<string, boolean>();
   private readonly realPaths = new Map<string, string>();
   private readonly sourceFiles = new Map<string, ts.SourceFile>();
   private localPaths = new Set<string>();
@@ -59,6 +65,7 @@ export class ProjectLanguageLoader {
 
   reset(): void {
     this.sources.clear();
+    this.filePresence.clear();
     this.realPaths.clear();
     this.sourceFiles.clear();
     this.localPaths.clear();
@@ -80,8 +87,13 @@ export class ProjectLanguageLoader {
     }
     for (const path of paths) {
       // Current editor contents replace these directly in load().
-      if (this.localPaths.has(path) || !this.sources.has(path)) continue;
+      if (
+        this.localPaths.has(path) ||
+        (!this.sources.has(path) && !this.filePresence.has(path))
+      )
+        continue;
       this.sources.delete(path);
+      this.filePresence.delete(path);
       this.sourceFiles.delete(path);
       if (path.endsWith('.json')) this.sourceFiles.clear();
       // Previously failed resolutions must also notice newly created files.
@@ -153,6 +165,7 @@ export class ProjectLanguageLoader {
     for (const path of this.localPaths) {
       if (!localPaths.has(path)) {
         sources.delete(path);
+        this.filePresence.delete(path);
         sourceFiles.delete(path);
         this.program = undefined;
       }
@@ -166,13 +179,21 @@ export class ProjectLanguageLoader {
     sources.set(toolingPath, 'import type {} from "@code3d/core/tooling";');
     sources.set('/lib.es5.d.ts', es5Library);
     const pending = new Set<string>();
+    const pendingPresence = new Set<string>();
     const read = (path: string): string | undefined => {
       path = normalizeProjectPath(path);
       if (!sources.has(path)) pending.add(path);
       return sources.get(path);
     };
     const host: ts.CompilerHost = {
-      fileExists: path => read(path) !== undefined,
+      fileExists: path => {
+        path = normalizeProjectPath(path);
+        if (sources.has(path)) return sources.get(path) !== undefined;
+        const present = this.filePresence.get(path);
+        if (present !== undefined) return present;
+        pendingPresence.add(path);
+        return false;
+      },
       realpath: path => realPaths.get(path) ?? path,
       readFile: read,
       directoryExists: () => true,
@@ -201,14 +222,22 @@ export class ProjectLanguageLoader {
     let options = this.options ?? projectCompilerOptions;
     let program: ts.Program;
     for (;;) {
-      if (pending.size) {
+      if (pending.size || pendingPresence.size) {
         prepare();
         const requests = [...pending];
+        const presenceRequests = [...pendingPresence].filter(
+          path => !pending.has(path),
+        );
         pending.clear();
+        pendingPresence.clear();
         // Discovery may have resolved a prior miss; do not reuse its resolution.
         this.program = undefined;
-        await readAll(
-          requests.map(async path => {
+        await readAll([
+          statProjectFiles(reader, presenceRequests).then(infos => {
+            for (const [index, path] of presenceRequests.entries())
+              this.filePresence.set(path, infos[index]?.kind === 'file');
+          }),
+          ...requests.map(async path => {
             const [bytes, info] = await Promise.all([
               reader.readFile(path),
               reader.stat(path),
@@ -221,8 +250,9 @@ export class ProjectLanguageLoader {
               path,
               bytes === undefined ? undefined : decodeProjectFile(bytes),
             );
+            this.filePresence.set(path, bytes !== undefined);
           }),
-        );
+        ]);
       }
       const configSource = sources.get(configPath);
       if (configSource && !this.options) {
@@ -243,8 +273,10 @@ export class ProjectLanguageLoader {
         options = {
           ...projectCompilerOptions,
           ...parsed.options,
-          module: ts.ModuleKind.NodeNext,
-          moduleResolution: ts.ModuleResolutionKind.NodeNext,
+          // Model execution always uses esbuild's browser ESM bundle.
+          module: projectCompilerOptions.module,
+          moduleResolution: projectCompilerOptions.moduleResolution,
+          customConditions: projectCompilerOptions.customConditions,
           noEmit: true,
         };
       }
@@ -254,7 +286,7 @@ export class ProjectLanguageLoader {
         host,
         oldProgram: this.program,
       });
-      if (!pending.size) break;
+      if (!pending.size && !pendingPresence.size) break;
     }
     this.options = options;
     this.program = program;
