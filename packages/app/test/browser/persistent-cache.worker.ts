@@ -2,6 +2,7 @@
 import type {ModelSnapshotObject} from '@code3d/core/tooling';
 import * as esbuild from 'esbuild-wasm';
 import esbuildWasmUrl from 'esbuild-wasm/esbuild.wasm?url';
+import type {ArtifactStoreInitialization} from '../../src/model/artifact-store-protocol';
 import {ArtifactStoreConnection} from '../../src/model/artifact-store';
 import {browserPackageFiles} from '../../src/project/browser-packages';
 import {TestModelPipeline} from '../model-pipeline';
@@ -31,9 +32,16 @@ export type CacheResult = {
 };
 const scope = self as DedicatedWorkerGlobalScope;
 const ready = esbuild.initialize({wasmURL: esbuildWasmUrl, worker: false});
+const storage = new ArtifactStoreConnection();
 let compiler: TestModelPipeline | undefined;
 let assets: NonNullable<CacheRequest['assets']> = {};
-scope.onmessage = async ({data}: MessageEvent<CacheRequest>) => {
+scope.onmessage = async ({
+  data,
+}: MessageEvent<CacheRequest | ArtifactStoreInitialization>) => {
+  if ('kind' in data) {
+    storage.connect(data.endpoint);
+    return;
+  }
   await ready;
   if (data.assets) assets = data.assets;
   if (data.disabled)
@@ -94,7 +102,7 @@ scope.onmessage = async ({data}: MessageEvent<CacheRequest>) => {
               }
             : undefined,
       },
-      data.disabled ? undefined : new ArtifactStoreConnection(),
+      data.disabled ? undefined : storage,
     );
   }
   const start = performance.now();
@@ -168,6 +176,7 @@ scope.onmessage = async ({data}: MessageEvent<CacheRequest>) => {
         byte => byte.toString(16).padStart(2, '0'),
       ).join('');
     };
+    storage.drain();
     scope.postMessage({
       milliseconds,
       stats: compiler.kernelCacheStats,
@@ -178,6 +187,7 @@ scope.onmessage = async ({data}: MessageEvent<CacheRequest>) => {
       diagnostic: module.diagnostic,
     } satisfies CacheResult);
   } catch (error) {
+    storage.drain();
     scope.postMessage({
       milliseconds: performance.now() - start,
       stats: compiler.kernelCacheStats,

@@ -141,6 +141,10 @@ export class ArtifactJournal implements KernelArtifactStore {
     this.flushPeriodically();
   }
 
+  has(id: string): boolean {
+    return this.entries.has(id);
+  }
+
   touch(id: string): boolean {
     const entry = this.entries.get(id);
     if (!entry) return false;

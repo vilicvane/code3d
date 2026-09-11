@@ -69,7 +69,7 @@ export type PublishBuild = (
   key: string,
   value: LatestBuild,
   required: readonly string[],
-) => boolean;
+) => void;
 
 const encode = (value: unknown) =>
   zlibSync(strToU8(JSON.stringify(value)), {level: 3});

@@ -1,57 +1,58 @@
 import type {KernelArtifactStore} from '@code3d/core/tooling';
 import {
-  artifactMailboxBytes,
+  artifactAccounting,
   artifactMailboxHeaderBytes,
+  artifactOperationBytes,
   artifactReply,
   artifactRequestTimeout,
   unpackArtifactValues,
   type ArtifactOperation,
+  type ArtifactStoreEndpoint,
   type ArtifactStoreRequest,
 } from './artifact-store-protocol';
-import ArtifactWorker from './artifact-store.worker?worker';
-import type {PersistentArtifactStats} from './persistent-artifacts';
+import type {ArtifactStoreServer} from './artifact-store-server';
 
-/** Synchronous cache API over a dedicated I/O worker's short OPFS transactions. */
+/** Synchronous reads and background mutations over a project-owned I/O connection. */
 export class ArtifactStoreConnection {
-  private readonly worker: Worker;
-  private readonly port: MessagePort;
-  private readonly mailbox = new SharedArrayBuffer(
-    artifactMailboxHeaderBytes + artifactMailboxBytes,
-  );
-  private readonly state = new Int32Array(this.mailbox, 0, 4);
-  private readonly buffer = new Uint8Array(
-    this.mailbox,
-    artifactMailboxHeaderBytes,
-  );
+  private endpoint?: ArtifactStoreEndpoint;
+  private state?: Int32Array;
+  private buffer?: Uint8Array;
+  private accounting?: BigInt64Array;
   private failed = false;
+  private sequence = 0;
+  private transferMilliseconds = 0;
+  private readMilliseconds = 0;
   private readonly readAccess = new Map<string, Set<string>>();
-  readonly ready: Promise<void>;
+  private resolveReady!: () => void;
+  readonly ready = new Promise<void>(resolve => {
+    this.resolveReady = resolve;
+  });
 
-  constructor() {
-    this.worker = new ArtifactWorker();
-    const {port1, port2} = new MessageChannel();
-    this.port = port1;
-    // A nested Worker's postMessage delivery can depend on its blocked creator.
-    // Connect a MessagePort before using Atomics.wait for synchronous replies.
-    this.worker.postMessage({port: port2}, [port2]);
-    this.ready = new Promise(resolve => {
-      this.worker.onmessage = () => resolve();
-      this.worker.addEventListener(
-        'error',
-        () => {
-          this.failed = true;
-          resolve();
-        },
-        {once: true},
-      );
-    });
-    this.worker.onerror = () => {
+  connect(endpoint?: ArtifactStoreEndpoint): void {
+    if (!endpoint) {
       this.failed = true;
-    };
+      this.resolveReady();
+      return;
+    }
+    this.endpoint = endpoint;
+    this.state = new Int32Array(endpoint.mailbox, 0, 4);
+    this.buffer = new Uint8Array(endpoint.mailbox, artifactMailboxHeaderBytes);
+    this.accounting = new BigInt64Array(endpoint.accounting);
+    endpoint.port.onmessage = () => this.resolveReady();
+  }
+
+  get pendingBytes(): number {
+    return this.accounting
+      ? Number(Atomics.load(this.accounting, artifactAccounting.bytes))
+      : 0;
   }
 
   scope(namespace: string): KernelArtifactStore {
+    const connection = this;
     return {
+      get pendingWriteBytes() {
+        return connection.pendingBytes;
+      },
       get: id => {
         const result = this.request(namespace, {kind: 'get', id});
         if (result instanceof Uint8Array) {
@@ -72,7 +73,9 @@ export class ArtifactStoreConnection {
         return values;
       },
       set: (id, bytes) => {
-        this.request(namespace, {kind: 'set', id, bytes});
+        // Encoders and resource caches may retain this view. Transfer an owned copy,
+        // so their live bytes are neither detached nor cloned a second time in transit.
+        this.enqueue(namespace, {kind: 'set', id, bytes});
       },
       touch: id => this.request(namespace, {kind: 'touch', id}) === true,
       touchMany: ids => {
@@ -81,12 +84,8 @@ export class ArtifactStoreConnection {
           ? Array.from(result, Boolean)
           : ids.map(() => false);
       },
-      delete: id => {
-        this.request(namespace, {kind: 'delete', id});
-      },
-      flush: () => {
-        this.request(namespace, {kind: 'flush'});
-      },
+      delete: id => this.enqueue(namespace, {kind: 'delete', id}),
+      flush: () => this.enqueue(namespace, {kind: 'flush'}),
     };
   }
 
@@ -95,16 +94,14 @@ export class ArtifactStoreConnection {
     id: string,
     value: {stamp: number; artifact: string},
     required: readonly string[],
-  ): boolean {
-    return (
-      this.request(namespace, {
-        kind: 'publish',
-        id,
-        stamp: value.stamp,
-        bytes: new TextEncoder().encode(JSON.stringify(value)),
-        required,
-      }) === true
-    );
+  ): void {
+    this.enqueue(namespace, {
+      kind: 'publish',
+      id,
+      stamp: value.stamp,
+      bytes: new TextEncoder().encode(JSON.stringify(value)),
+      required,
+    });
   }
 
   clear(namespace: string): void {
@@ -112,11 +109,35 @@ export class ArtifactStoreConnection {
       throw new Error('Could not clear the persistent build cache.');
   }
 
-  get stats(): PersistentArtifactStats | undefined {
+  /** Explicit durability barrier; ordinary model completion only schedules a flush. */
+  drain(): void {
+    this.flushReadAccess();
+    this.request('', {kind: 'drain'});
+  }
+
+  get stats():
+    | (ArtifactStoreServer['stats'] & {
+        transferMilliseconds: number;
+        readMilliseconds: number;
+      })
+    | undefined {
     const bytes = this.request('', {kind: 'stats'});
     return bytes instanceof Uint8Array
-      ? (JSON.parse(new TextDecoder().decode(bytes)) ?? undefined)
+      ? {
+          ...JSON.parse(new TextDecoder().decode(bytes)),
+          transferMilliseconds: this.transferMilliseconds,
+          readMilliseconds: this.readMilliseconds,
+        }
       : undefined;
+  }
+
+  dispose(): void {
+    this.flushReadAccess();
+    this.enqueue('', {kind: 'flush'});
+    this.failed = true;
+    this.resolveReady();
+    if (this.accounting)
+      Atomics.store(this.accounting, artifactAccounting.closed, 1n);
   }
 
   private recordRead(namespace: string, id: string): void {
@@ -126,68 +147,120 @@ export class ArtifactStoreConnection {
     entries.add(id);
   }
 
-  /** Disk reads, like memory hits, update LRU together at the next write/flush. */
   private flushReadAccess(): void {
     const pending = [...this.readAccess];
     this.readAccess.clear();
     for (const [namespace, entries] of pending)
-      this.request(namespace, {kind: 'touch-many', ids: [...entries]});
+      this.enqueue(namespace, {kind: 'touch-many', ids: [...entries]});
+  }
+
+  private enqueue(namespace: string, operation: ArtifactOperation): void {
+    if (
+      this.failed ||
+      !this.endpoint ||
+      Atomics.load(this.accounting!, artifactAccounting.closed)
+    )
+      return;
+    this.flushReadAccess();
+    const started = performance.now();
+    const transfer: Transferable[] = [];
+    if ('bytes' in operation) {
+      const bytes = Uint8Array.from(operation.bytes);
+      operation = {...operation, bytes};
+      transfer.push(bytes.buffer);
+    }
+    const byteLength = BigInt(artifactOperationBytes(operation));
+    Atomics.add(this.accounting!, artifactAccounting.bytes, byteLength);
+    Atomics.add(this.accounting!, artifactAccounting.operations, 1n);
+    try {
+      const sequence = ++this.sequence;
+      this.endpoint.port.postMessage(
+        {
+          namespace,
+          operation,
+          reply: false,
+          sequence,
+        } satisfies ArtifactStoreRequest,
+        transfer,
+      );
+      // A terminated producer guarantees only calls that finished posting.
+      // Counting before postMessage cannot serve as a shutdown fence.
+      Atomics.store(
+        this.accounting!,
+        artifactAccounting.posted,
+        BigInt(sequence),
+      );
+    } catch {
+      Atomics.sub(this.accounting!, artifactAccounting.bytes, byteLength);
+      Atomics.sub(this.accounting!, artifactAccounting.operations, 1n);
+      this.failed = true;
+    } finally {
+      this.transferMilliseconds += performance.now() - started;
+    }
   }
 
   private request(
     namespace: string,
     operation: ArtifactOperation,
   ): Uint8Array | boolean | undefined {
-    if (this.failed) return;
-    if (operation.kind !== 'get' && operation.kind !== 'get-many')
-      this.flushReadAccess();
-    this.state.fill(0);
-    const message: ArtifactStoreRequest = {
+    const started = performance.now();
+    try {
+      return this.read(namespace, operation);
+    } finally {
+      this.readMilliseconds += performance.now() - started;
+    }
+  }
+
+  private read(
+    namespace: string,
+    operation: ArtifactOperation,
+  ): Uint8Array | boolean | undefined {
+    if (
+      this.failed ||
+      !this.endpoint ||
+      Atomics.load(this.accounting!, artifactAccounting.closed)
+    )
+      return;
+    const state = this.state!;
+    state.fill(0);
+    this.endpoint.port.postMessage({
       namespace,
       operation,
-      mailbox: this.mailbox,
-    };
-    this.port.postMessage(message);
+      reply: true,
+    } satisfies ArtifactStoreRequest);
     let bytes: Uint8Array | undefined;
     let offset = 0;
     for (;;) {
       if (
         Atomics.wait(
-          this.state,
+          state,
           0,
           artifactReply.pending,
           artifactRequestTimeout,
         ) === 'timed-out'
       ) {
         this.failed = true;
-        this.worker.terminate();
         return;
       }
-      const phase = Atomics.load(this.state, 0);
+      const phase = Atomics.load(state, 0);
       if (phase === artifactReply.failed) return;
       if (phase === artifactReply.done)
         return (
           bytes ??
-          (Atomics.load(this.state, 3)
+          (Atomics.load(state, 3)
             ? operation.kind === 'get'
               ? new Uint8Array()
               : true
             : undefined)
         );
       if (phase === artifactReply.chunk) {
-        bytes ??= new Uint8Array(Atomics.load(this.state, 2));
-        const length = Atomics.load(this.state, 1);
-        bytes.set(this.buffer.subarray(0, length), offset);
+        bytes ??= new Uint8Array(Atomics.load(state, 2));
+        const length = Atomics.load(state, 1);
+        bytes.set(this.buffer!.subarray(0, length), offset);
         offset += length;
-        Atomics.store(this.state, 0, artifactReply.pending);
-        Atomics.notify(this.state, 0);
+        Atomics.store(state, 0, artifactReply.pending);
+        Atomics.notify(state, 0);
       }
     }
-  }
-
-  dispose(): void {
-    this.failed = true;
-    this.port.close();
-    this.worker.terminate();
   }
 }

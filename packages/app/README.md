@@ -44,6 +44,10 @@ explorer to pick up manual edits inside an unchanged installed package.
 Right-click empty space in the explorer and choose **Clear build cache** to
 discard this workspace's in-memory and saved builds and rebuild the active file.
 Geometry, downloaded resources, and other workspaces' build caches are retained.
+Cache writes run in the background and continue after a model is cancelled or
+its execution Worker is replaced. Closing a project drains queued writes;
+reloading or closing the whole page can lose cache entries that have not reached
+storage yet. This does not change how project source files are saved.
 
 ## Source map
 

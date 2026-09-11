@@ -3,6 +3,7 @@ import type {
   TopologyInspection,
   TopologyInspectionOptions,
 } from '@code3d/core/tooling';
+import type {ArtifactStoreInitialization} from './artifact-store-protocol';
 import type {ProjectFileInfo} from '../project/file-reader';
 import type {ModelProject} from '../project/project';
 import type {ProjectLanguage} from '../project/project-language';
@@ -116,11 +117,14 @@ type WorkerResponse =
       diagnostic: ModelDiagnostic;
     }>;
 
-export type ExecutorRequest = Extract<
-  WorkerRequest,
-  {kind: 'execute' | 'export' | 'topology' | 'sketch'}
->;
-export type CompilerRequest = Exclude<WorkerRequest, ExecutorRequest>;
+export type ExecutorRequest =
+  | ArtifactStoreInitialization
+  | Extract<
+      WorkerRequest,
+      {kind: 'execute' | 'export' | 'topology' | 'sketch'}
+    >;
+export type CompilerRequest =
+  ArtifactStoreInitialization | Exclude<WorkerRequest, ExecutorRequest>;
 export type ExecutorResponse = Extract<
   WorkerResponse,
   {kind: 'result' | 'export' | 'topology' | 'sketch' | 'progress' | 'cancelled'}

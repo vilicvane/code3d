@@ -141,9 +141,14 @@ export class ProjectExecutor {
     return this.evaluator.compiledBytes;
   }
   get kernelCacheStats() {
+    const persistence = this.storage?.stats;
+    const memory = this.runtime?.tooling.kernelOperationCacheStats();
     return {
-      memory: this.runtime?.tooling.kernelOperationCacheStats(),
-      disk: this.storage?.stats,
+      memory: memory
+        ? {...memory, pendingPersistenceBytes: this.storage?.pendingBytes ?? 0}
+        : undefined,
+      disk: persistence?.disk,
+      persistence,
       snapshots: this.snapshotPool?.stats,
       resources: this.resourceStats,
     };

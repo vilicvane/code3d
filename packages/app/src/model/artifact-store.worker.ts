@@ -2,84 +2,117 @@
 /// <reference lib="es2024.sharedmemory" />
 
 import {
+  artifactAccounting,
   artifactMailboxHeaderBytes,
+  artifactOperationBytes,
   artifactReply,
   artifactRequestTimeout,
-  packArtifactValues,
+  type ArtifactStoreEndpoint,
   type ArtifactStoreRequest,
 } from './artifact-store-protocol';
-import {withPersistentArtifacts} from './persistent-artifacts';
+import {ArtifactStoreServer} from './artifact-store-server';
 
 const scope = self as DedicatedWorkerGlobalScope;
-let queue = Promise.resolve();
-scope.onmessage = ({data}: MessageEvent<{port: MessagePort}>) => {
-  data.port.onmessage = ({data}: MessageEvent<ArtifactStoreRequest>) => {
-    queue = queue.then(() => respond(data)).catch(() => {});
+const server = new ArtifactStoreServer();
+type Client = ArtifactStoreEndpoint & {received: number};
+const clients = new Set<Client>();
+let disposing = false;
+let finishing = false;
+let closing: ReturnType<typeof setTimeout> | undefined;
+
+function closeIdleClients(): void {
+  if (closing !== undefined) clearTimeout(closing);
+  closing = undefined;
+  for (const client of clients) {
+    const accounting = new BigInt64Array(client.accounting);
+    if (
+      Atomics.load(accounting, artifactAccounting.closed) &&
+      client.received >=
+        Number(Atomics.load(accounting, artifactAccounting.posted))
+    ) {
+      client.port.close();
+      clients.delete(client);
+    }
+  }
+  if (disposing && !clients.size && !finishing) {
+    finishing = true;
+    void server.drain().then(() => {
+      scope.postMessage({kind: 'disposed'});
+      scope.close();
+    });
+  } else if (
+    [...clients].some(client =>
+      Atomics.load(
+        new BigInt64Array(client.accounting),
+        artifactAccounting.closed,
+      ),
+    )
+  ) {
+    // Messages already posted by a terminated Worker can still be in transit.
+    // The last fully posted sequence fences closing, even if termination
+    // interrupted an increment or postMessage for an unfinished cache call.
+    closing = setTimeout(closeIdleClients, 25);
+  }
+}
+
+scope.onmessage = ({
+  data,
+}: MessageEvent<
+  | {kind: 'connect'; endpoint: ArtifactStoreEndpoint}
+  | {kind: 'disconnect' | 'dispose'}
+>) => {
+  if (data.kind !== 'connect') {
+    if (data.kind === 'dispose') disposing = true;
+    closeIdleClients();
+    return;
+  }
+  const client: Client = {...data.endpoint, received: 0};
+  const accounting = new BigInt64Array(client.accounting);
+  clients.add(client);
+  client.port.onmessage = ({data}: MessageEvent<ArtifactStoreRequest>) => {
+    if (data.reply) {
+      // Responses must not serialize the global queue: a dead reader or a large
+      // streamed result cannot prevent another Worker using its pending values.
+      void respond(client, data);
+    } else {
+      client.received = data.sequence;
+      const bytes = BigInt(artifactOperationBytes(data.operation));
+      server.enqueue(data.namespace, data.operation, () => {
+        Atomics.sub(accounting, artifactAccounting.bytes, bytes);
+        Atomics.sub(accounting, artifactAccounting.operations, 1n);
+        closeIdleClients();
+      });
+      closeIdleClients();
+    }
   };
-  scope.postMessage({kind: 'ready'});
+  client.port.postMessage({kind: 'ready'});
 };
 
-async function respond(request: ArtifactStoreRequest): Promise<void> {
-  const state = new Int32Array(request.mailbox, 0, 4);
-  const buffer = new Uint8Array(request.mailbox, artifactMailboxHeaderBytes);
+async function respond(
+  client: ArtifactStoreEndpoint,
+  request: ArtifactStoreRequest,
+): Promise<void> {
+  const state = new Int32Array(client.mailbox, 0, 4);
+  const accounting = new BigInt64Array(client.accounting);
+  const closed = () => !!Atomics.load(accounting, artifactAccounting.closed);
+  const buffer = new Uint8Array(client.mailbox, artifactMailboxHeaderBytes);
   try {
-    let stats;
-    // Ownership ends before sending the result. No model work runs under this lock.
-    const result = await withPersistentArtifacts(
-      request.namespace,
-      async store => {
-        if (!store) return;
-        const operation = request.operation;
-        switch (operation.kind) {
-          case 'get-many':
-            return packArtifactValues(store.getMany(operation.ids));
-          case 'get':
-            return store.get(operation.id);
-          case 'set':
-            store.set(operation.id, operation.bytes);
-            return true;
-          case 'touch':
-            return store.touch(operation.id);
-          case 'touch-many':
-            return Uint8Array.from(store.touchMany(operation.ids), present =>
-              present ? 1 : 0,
-            );
-          case 'delete':
-            store.delete(operation.id);
-            return true;
-          case 'clear':
-            store.clear();
-            return true;
-          case 'flush':
-            store.flush();
-            return true;
-          case 'stats':
-            return;
-          case 'publish': {
-            const previous = store.get(operation.id);
-            if (
-              previous &&
-              JSON.parse(new TextDecoder().decode(previous)).stamp >
-                operation.stamp
-            )
-              return false;
-            if (!operation.required.every(id => store.touch(id))) return false;
-            store.set(operation.id, operation.bytes);
-            return true;
-          }
-        }
-      },
-      value => {
-        stats = value;
-      },
-      {touchReads: false},
-    );
-    const bytes =
-      request.operation.kind === 'stats'
-        ? new TextEncoder().encode(JSON.stringify(stats ?? null))
-        : result instanceof Uint8Array
-          ? result
-          : undefined;
+    if (request.operation.kind === 'clear') {
+      // A restarted compiler may request a clear before the dead compiler's
+      // last port messages arrive. Drain those accepted writes first.
+      while (
+        [...clients].some(client => {
+          const accounting = new BigInt64Array(client.accounting);
+          return Atomics.load(accounting, artifactAccounting.closed);
+        })
+      ) {
+        await server.drain();
+        await new Promise<void>(resolve => setTimeout(resolve, 0));
+      }
+    }
+    const result = await server.request(request.namespace, request.operation);
+    if (closed()) return;
+    const bytes = result instanceof Uint8Array ? result : undefined;
     Atomics.store(state, 2, bytes?.byteLength ?? 0);
     Atomics.store(state, 3, bytes ? 1 : result ? 1 : 0);
     if (bytes) {
@@ -88,6 +121,7 @@ async function respond(request: ArtifactStoreRequest): Promise<void> {
         offset < bytes.byteLength;
         offset += buffer.byteLength
       ) {
+        if (closed()) return;
         const chunk = bytes.subarray(offset, offset + buffer.byteLength);
         buffer.set(chunk);
         Atomics.store(state, 1, chunk.byteLength);
@@ -102,8 +136,10 @@ async function respond(request: ArtifactStoreRequest): Promise<void> {
         if ((await wait.value) === 'timed-out') return;
       }
     }
+    if (closed()) return;
     Atomics.store(state, 0, artifactReply.done);
   } catch {
+    if (closed()) return;
     Atomics.store(state, 0, artifactReply.failed);
   }
   Atomics.notify(state, 0);

@@ -642,3 +642,43 @@ test('batch restoration reads only missing values and preserves misses, ownershi
     finish();
   }
 });
+
+test('pending encoded writes count toward memory pressure without limiting the current version', () => {
+  const records = new Map<string, Uint8Array>();
+  let pendingWriteBytes = 0;
+  cache.setKernelArtifactStore({
+    get pendingWriteBytes() {
+      return pendingWriteBytes;
+    },
+    get: id => records.get(id),
+    getMany: ids => ids.map(id => records.get(id)),
+    set: (id, bytes) => {
+      records.set(id, bytes);
+    },
+    touch: id => records.has(id),
+    touchMany: ids => ids.map(id => records.has(id)),
+    delete: id => {
+      records.delete(id);
+    },
+    flush() {},
+  });
+  evaluate(() => primitive(0));
+  evaluate(() => primitive(1));
+  const end = cache.beginKernelOperationEvaluation();
+  try {
+    pendingWriteBytes = 2 * 1024 ** 3;
+    primitive(2);
+    assert.equal(
+      cache.kernelOperationCacheStats().pendingPersistenceBytes,
+      pendingWriteBytes,
+    );
+    assert.equal(cache.kernelOperationCacheStats().historicalEntries, 0);
+    assert.equal(primitive(1).value.instance, 'use');
+    assert.equal(primitive(2).value.instance, 'use');
+  } finally {
+    end();
+  }
+  assert.equal(cache.kernelOperationCacheStats().entries, 2);
+  pendingWriteBytes = 0;
+  assert.equal(cache.kernelOperationCacheStats().pendingPersistenceBytes, 0);
+});

@@ -10,11 +10,8 @@ import {diagnosticFromError} from './diagnostic';
 import {ProjectExecutor} from './project-executor';
 const scope = self as DedicatedWorkerGlobalScope;
 const send = (message: ExecutorResponse) => scope.postMessage(message);
-const executor = new ProjectExecutor(
-  undefined,
-  undefined,
-  new ArtifactStoreConnection(),
-);
+const storage = new ArtifactStoreConnection();
+const executor = new ProjectExecutor(undefined, undefined, storage);
 const artifactChannel = new ArtifactChannel();
 let compileId: number | undefined;
 
@@ -47,7 +44,9 @@ async function execute(
 }
 
 scope.onmessage = ({data}: MessageEvent<ExecutorRequest>) => {
-  if (data.kind === 'sketch') {
+  if (data.kind === 'artifact-store') {
+    storage.connect(data.endpoint);
+  } else if (data.kind === 'sketch') {
     try {
       send({
         kind: 'sketch',

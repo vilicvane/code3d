@@ -169,12 +169,15 @@ async function compile(request: CompileRequest): Promise<void> {
       diagnostic: diagnosticFromError(error, 'project'),
     });
   } finally {
+    storage.scope('resources').flush();
     if (activeRequest === request.id) activeRequest = undefined;
   }
 }
 
 workerScope.onmessage = ({data}: MessageEvent<CompilerRequest>) => {
-  if (data.kind === 'file-result') {
+  if (data.kind === 'artifact-store') {
+    storage.connect(data.endpoint);
+  } else if (data.kind === 'file-result') {
     const pending = pendingFiles.get(data.id);
     pendingFiles.delete(data.id);
     if (data.error) pending?.reject(new Error(data.error));
