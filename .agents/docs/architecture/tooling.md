@@ -113,6 +113,17 @@ TypeScript 必填性、不读取函数初始化器，也不注入运行时默认
 判断是否接受新快照，使上游截面等仍可通过 gizmo 修正。当前目标自身失败或没有可用
 结果时保留旧预览，ModelPreviewState 撤销其可编辑版本；不能继续使用旧参数写回。
 原点拖动固定手势开始的 snapshot，旋转使用新旧完整旋转的差。
+组合输入上下文中选中带关系的成员（含子组合体）时，默认显示平移箭头，按住 Alt 切换旋转环，松开恢复；仅两种工具同时可用时切换。
+手势开始后固定模式，平移中 Alt 继续取消吸附，窗口失焦清除按键并取消手势。
+工具模式由 observable 按键、绑定与手势状态派生，原生控件显示与拾取共用该模式。
+默认工具分别定位关系链中最近的 offset 与 rotate，优先复用其调用而不是只检查链尾。
+缺少 rotate 时才在链尾添加绕 self 当前原点和局部轴的旋转；已有 rotate 使用完整
+求解结果中的旋转坐标架和现有参数编辑路径，保留 pivot/around、上游表达式与调用顺序。共享指针所有者按实际 binding
+创建控件，支持同轴不同模式，同时保留耦合约束的预览能力限制。
+默认平移和旋转统一由 model-spatial-tool 的 relationBindings 解析关系与调用，viewport 只消费绑定。
+关系工具按保留的 constraint 身份及关系源码范围关联当前可见实例；同一源码多次求值的实例共享编辑，不要求派生后的 nodeId 等于
+最初 relate 的 owner；material 等派生值继续使用当前实例的求解坐标架和原调用参数。
+选中成员的 pivot 标记复用 model-origin 装饰与 constraint.rotation.origin；拖动时由既有 spatial-preview 接管，取消或结束后恢复，避免重复标记。
 坐标细节见[坐标技能](../../skills/code3d-coordinate-semantics/SKILL.md)。
 
 位置拖动按手势开始时的网格小格长度量化沿操作轴的实际位移，再按 sensitivity

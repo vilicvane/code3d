@@ -32,7 +32,6 @@ import {
   type TopologyId,
   type ModelOperationInputRole,
   type ModelSnapshotObject,
-  type ParameterUsage,
   type RenderMesh,
   type SourceRef,
   type TopologyKind,
@@ -52,7 +51,6 @@ import {
 } from './rendering/model-renderer';
 import {
   TransformGizmo,
-  type TransformAxis,
   type TransformGizmoBinding,
   type TransformGizmoEvent,
 } from './tools/transform-gizmo';
@@ -60,7 +58,6 @@ import type {
   SourceDecorationProvider,
   ViewportDecoration,
 } from './viewport-decoration';
-import {editableParameterUsages} from './model/parameter-provenance';
 import {parameterSourceDecoration} from './model/parameter-decorations';
 import {sourceParameterAt} from './model/tool-arguments';
 import type {ToolParameterSchema} from './model/tool-schema';
@@ -68,10 +65,7 @@ import {
   dimensionEdges,
   representativeDimensionEdge,
 } from './rendering/parameter-dimension';
-import {
-  canPreviewConstraintTransform,
-  spatialBindings,
-} from './tools/model-spatial-tool';
+import {spatialBindings, relationBindings} from './tools/model-spatial-tool';
 import type {SpatialObjectPreview} from './tools/spatial-edit';
 import {ViewportCoordinateReference} from './ui/viewport-coordinate-reference';
 import {pickScreenTopology} from './rendering/topology-picking';
@@ -1699,7 +1693,16 @@ export class ModelViewport {
         : null;
     this.transformGizmo.attach(
       occurrence.object,
-      positionBindings(occurrence, this.renderedOccurrences(), constraintId),
+      this.module
+        ? relationBindings(
+            this.module,
+            occurrence,
+            this.renderedOccurrences(),
+            constraintId,
+            this.committedSpatialPreviews,
+            this.spatialParameterValues,
+          )
+        : [],
     );
   }
 
@@ -2329,136 +2332,11 @@ export class ModelViewport {
   }
 }
 
-export function positionBindings(
-  occurrence: Occurrence,
-  occurrences: readonly Occurrence[],
-  constraintId: string | null,
-): TransformGizmoBinding[] {
-  const constraint =
-    constraintId === null
-      ? occurrence.node.constraints.at(-1)
-      : occurrence.node.constraints.find(
-          candidate => candidate.id === constraintId,
-        );
-  if (!constraint || !canPreviewConstraintTransform(occurrence.node)) {
-    return [];
-  }
-  const receiver = constraint.sourceRefs.at(-1);
-  const parameters = editableParameterUsages(
-    constraint.parameters.filter(
-      ({operation, operationRef}) =>
-        operation === 'offset' &&
-        receiver &&
-        sameSource(operationRef, receiver),
-    ),
-  );
-  const modelParameters = occurrences.flatMap(({node}) => node.parameters);
-  const safeTargets = positionOnlyTargets(modelParameters);
-  const byTarget = new Map<
-    string,
-    {
-      target: ParameterUsage['target'];
-      sensitivities: Map<TransformAxis, number>;
-    }
-  >();
-  for (const parameter of parameters) {
-    if (!safeTargets.has(parameter.target.id)) {
-      continue;
-    }
-    const axis = positionAxis(parameter.argument);
-    if (!axis || !Number.isFinite(parameter.sensitivity)) {
-      continue;
-    }
-    const aggregate = byTarget.get(parameter.target.id) ?? {
-      target: parameter.target,
-      sensitivities: new Map<TransformAxis, number>(),
-    };
-    aggregate.sensitivities.set(
-      axis,
-      (aggregate.sensitivities.get(axis) ?? 0) + parameter.sensitivity,
-    );
-    byTarget.set(parameter.target.id, aggregate);
-  }
-
-  const candidates = new Map<TransformAxis, TransformGizmoBinding[]>();
-  for (const {target, sensitivities} of byTarget.values()) {
-    const effective = [...sensitivities].filter(
-      ([, sensitivity]) => Math.abs(sensitivity) > 1e-9,
-    );
-    if (effective.length !== 1) {
-      continue;
-    }
-    const [axis, sensitivity] = effective[0];
-    const binding: TransformGizmoBinding = {
-      kind: 'parameter',
-      mode: 'translate',
-      anchor: 'bounds',
-      axis,
-      target,
-      label: target.label,
-      value: target.value,
-      sensitivity: sensitivity * constraint.offsetDirection,
-      parameterKind: target.kind,
-      frame: constraint.offsetFrame,
-      // Earlier offset calls already contribute to the solved displacement.
-      // Missing arguments belong to this call and each default to zero.
-      completeArguments: receiver
-        ? {sourceRef: receiver, values: [0, 0, 0]}
-        : undefined,
-    };
-    const axisCandidates = candidates.get(axis) ?? [];
-    axisCandidates.push(binding);
-    candidates.set(axis, axisCandidates);
-  }
-
-  return (['x', 'y', 'z'] as const).flatMap(axis => {
-    const axisCandidates = candidates.get(axis) ?? [];
-    if (axisCandidates.length === 1) {
-      return axisCandidates;
-    }
-    if (!receiver) {
-      return [];
-    }
-    const occurrenceKeys = occurrences
-      .filter(({node}) =>
-        node.constraints.some(candidate =>
-          candidate.sourceRefs.some(sourceRef =>
-            sameSource(sourceRef, receiver),
-          ),
-        ),
-      )
-      .map(({key}) => key);
-    return [
-      {
-        kind: 'expression',
-        mode: 'translate',
-        anchor: 'bounds',
-        axis,
-        label: `Δ${axis.toUpperCase()}`,
-        value: 0,
-        sensitivity: constraint.offsetDirection,
-        parameterKind: 'length',
-        frame: constraint.offsetFrame,
-        receiver: {sourceRef: receiver},
-        occurrenceKeys,
-      },
-    ];
-  });
-}
-
 function containsSource(container: SourceRef, candidate: SourceRef): boolean {
   return (
     container.file === candidate.file &&
     container.start <= candidate.start &&
     candidate.end <= container.end
-  );
-}
-
-function sameSource(left: SourceRef, right: SourceRef): boolean {
-  return (
-    left.file === right.file &&
-    left.start === right.start &&
-    left.end === right.end
   );
 }
 
@@ -2510,44 +2388,6 @@ function sourceOperationRole(
     ? [evaluation.constraintOwnerNodeId]
     : evaluation.nodeIds;
   return sourceNodeIds.includes(nodeId) ? input.role : undefined;
-}
-
-function positionOnlyTargets(
-  parameters: readonly ParameterUsage[],
-): Set<string> {
-  const usages = new Map<string, ParameterUsage[]>();
-  for (const parameter of parameters) {
-    const targetUsages = usages.get(parameter.target.id) ?? [];
-    targetUsages.push(parameter);
-    usages.set(parameter.target.id, targetUsages);
-  }
-
-  const safe = new Set<string>();
-  for (const [targetId, targetUsages] of usages) {
-    const axes = new Set(
-      targetUsages.map(usage =>
-        usage.operation === 'offset' ? positionAxis(usage.argument) : undefined,
-      ),
-    );
-    if (
-      axes.size === 1 &&
-      !axes.has(undefined) &&
-      targetUsages.every(
-        ({sensitivity}) =>
-          Number.isFinite(sensitivity) && Math.abs(sensitivity) > 1e-9,
-      )
-    ) {
-      safe.add(targetId);
-    }
-  }
-  return safe;
-}
-
-function positionAxis(argument: string): TransformAxis | undefined {
-  if (argument === 'x') return 'x';
-  if (argument === 'y') return 'y';
-  if (argument === 'z') return 'z';
-  return undefined;
 }
 
 function axisIndex(argument: string): 0 | 1 | 2 | undefined {

@@ -44,7 +44,11 @@ export type SpatialSourceChange =
       value: number;
       mode: 'offset' | 'replace';
     }>
-  | Readonly<{kind: 'origin-offset'; sourceRef: SourceRef; delta: Vec3}>;
+  | Readonly<{
+      kind: 'origin-offset' | 'rotation-call';
+      sourceRef: SourceRef;
+      delta: Vec3;
+    }>;
 
 export type SpatialObjectPreview = Readonly<{
   key: string;
@@ -108,7 +112,11 @@ export class SpatialTransformResolver implements ToolIntentResolver {
               )
             : change.kind === 'call-argument'
               ? setCallArgumentsSource(expectedText, change.values)
-              : offsetCallSource(expectedText, 'originOffset', change.delta);
+              : change.kind === 'rotation-call'
+                ? change.delta.every(value => value === 0)
+                  ? expectedText
+                  : `${expectedText}.rotate(${change.delta.map(formatSourceNumber).join(', ')})`
+                : offsetCallSource(expectedText, 'originOffset', change.delta);
     return {
       status: 'ready',
       plan: {
