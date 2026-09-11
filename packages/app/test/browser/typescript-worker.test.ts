@@ -3,7 +3,7 @@ import {test} from 'node:test';
 import {chromium} from 'playwright-core';
 
 test(
-  'public model types support plain nested groups in the Monaco language service',
+  'public model types and extensionless imports work in the Monaco language service',
   {timeout: 60_000},
   async () => {
     assert.ok(process.env.CODE3D_TEST_URL);

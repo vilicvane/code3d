@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import {before, after, test} from 'node:test';
 import {createAppTestServer} from './vite-test-server.ts';
-import {createTestProjectCompiler} from './project-test-files.ts';
+import {createTestModelPipeline} from './project-test-files.ts';
 
 let server, compiler, ModelViewport, analyzeSketchSource, SketchEditResolver;
 before(async () => {
   server = await createAppTestServer();
-  compiler = await createTestProjectCompiler(server);
+  compiler = await createTestModelPipeline(server);
   ({ModelViewport} = await server.ssrLoadModule('/src/viewport.ts'));
   ({analyzeSketchSource, SketchEditResolver} = await server.ssrLoadModule(
     '/src/tools/sketch-source.ts',
@@ -367,7 +367,7 @@ test('AST coordinate locks preserve expressions through drag, source transaction
             original.entries.get(id).data.elements[axis].getText(),
           );
     assert.doesNotMatch(edited, /fixed|offset/);
-    const cold = await createTestProjectCompiler(server);
+    const cold = await createTestModelPipeline(server);
     try {
       const replaySource =
         source.slice(0, sourceRef.start) + edited + source.slice(sourceRef.end);
@@ -475,6 +475,20 @@ const value = wrapped([['point', 1, [0,0]]]);`);
   const value = [...module.sketches.values()][0];
   assert.equal(value.definitionRef, undefined);
   assert.equal(value.constraints.length, 1);
+});
+
+test('a wrapper with hidden constraints can report solved differences without an unsafe Fix action', async () => {
+  const module = await compile(`
+const wrapped = Function('sketch', 'return entries => sketch(entries, {constraints: [["fixed", 1], ["length", 3, 8]]})')(sketch);
+const value = wrapped([['point', 1, [0,0]], ['point', 2, [5,0]], ['line', 3, [1,2]]]);`);
+  const value = [...module.sketches.values()][0];
+  assert.equal(value.definitionRef, undefined);
+  const warning = module.warnings.find(warning =>
+    /source data differs/.test(warning.summary),
+  );
+  assert.ok(warning);
+  assert.equal(warning.actions, undefined);
+  assert.deepEqual(warning.sourceRef, value.callRef);
 });
 
 test('sketch faces, mapped extrusion and cut retain source targets and editable upstream definitions', async () => {

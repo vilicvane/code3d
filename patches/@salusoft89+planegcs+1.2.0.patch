@@ -1,0 +1,17 @@
+diff --git a/node_modules/@salusoft89/planegcs/dist/planegcs_dist/planegcs.d.ts b/node_modules/@salusoft89/planegcs/dist/planegcs_dist/planegcs.d.ts
+new file mode 100644
+index 0000000..cfa845f
+--- /dev/null
++++ b/node_modules/@salusoft89/planegcs/dist/planegcs_dist/planegcs.d.ts
+@@ -0,0 +1,11 @@
++import { GcsSystemConstructor, DoubleVectorConstructor, IntVectorConstructor } from "./gcs_system.js";
++
++export interface ModuleStatic {
++    GcsSystem: GcsSystemConstructor;
++    IntVector: IntVectorConstructor;
++    DoubleVector: DoubleVectorConstructor;
++    HEAPU8: Uint8Array;
++    count_emval_handles(): number;
++}
++
++export default function Module(config?: {locateFile: () => string}): Promise<ModuleStatic>;

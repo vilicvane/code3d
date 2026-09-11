@@ -1,3 +1,4 @@
+/// <reference types="emscripten" preserve="true" />
 import {cachedArtifact} from './cached.js';
 import type * as HarfBuzz from 'harfbuzzjs';
 import {

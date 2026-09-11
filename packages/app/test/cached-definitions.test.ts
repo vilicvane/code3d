@@ -198,6 +198,18 @@ const fn = cached(build, {encoder: encode, decoder: decode});`;
   );
 });
 
+test('the prebundled Screws package retains its primitive cache definition', async () => {
+  const source = new TextDecoder().decode(
+    await packageTestFiles.readFile('/packages/screws/bld/library/index.js'),
+  );
+  const definitions = await fingerprints(source);
+  assert.equal(definitions.length, 1);
+  assert.deepEqual(
+    await fingerprints('// shifted bundle\n' + source),
+    definitions,
+  );
+});
+
 test('compiled cached/primitive definitions reuse across edits and restore from persistent artifacts', async () => {
   const compiler = await createTestModelPipeline(server);
   const base = `import {cached} from '@code3d/core';

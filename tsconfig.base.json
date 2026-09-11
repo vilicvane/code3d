@@ -1,9 +1,9 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "lib": ["ESNext"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ESNext", "DOM"],
     "types": [],
     "stripInternal": true,
     "sourceMap": true,
@@ -13,7 +13,7 @@
     "noFallthroughCasesInSwitch": true,
     "useDefineForClassFields": true,
     "verbatimModuleSyntax": true,
-    "skipLibCheck": true,
+    "skipLibCheck": false,
     "newLine": "LF"
   }
 }

@@ -18,6 +18,10 @@ The App's built-in package distribution includes the dependency's own LICENSE,
 source files, README, JS loader and separate WASM asset through the ordinary
 package file manifest. Installed projects resolve the same files from their
 own dependencies; Node uses the dependency's unmodified module initializer.
+The workspace supplies the missing `dist/planegcs_dist/planegcs.d.ts` through
+`patches/@salusoft89+planegcs+1.2.0.patch`, including the heap/handle observation
+types used by tests. This affects declarations only. Core's published types use
+the upstream source declaration path, so consumers do not need the patch.
 The linked source revision contains the upstream native build scripts and
 instructions. This change consumes the published artifact, not a locally
 rebuilt binary. The archive SHA-1 is
@@ -41,9 +45,18 @@ the unconditionally used `Map.getOrInsert` in version 6, which is unavailable in
 our Node runtime. Its transitive `squares-rng` 2.0.4 has a workspace patch in
 `patches/squares-rng+2.0.4.patch`: its original window/Node test misclassifies Web
 Workers, so base64 decoding now uses the shared `globalThis.atob` API. The RNG
-algorithm and embedded WASM are unchanged. The built-in package file distribution
-includes this patched module; independent package installations need the same fix
-until upstream supports Worker environments.
+algorithm and embedded WASM are unchanged. Core prebundles this patched computation
+dependency, so npm installations and the App's built-in package files contain the
+same Worker-compatible code without requiring consumers to apply a patch.
+
+The ESM bundles inline `flo-boolean`, its reached mathematical dependencies and
+`@ctrl/tinycolor`. Their notices and full license text are collected in
+`bld/THIRD_PARTY_NOTICES.txt`, including ordinary source copyright comments that
+esbuild would otherwise remove. Explicit legal comments are also retained by
+esbuild. Where an upstream npm archive supplies only an MIT
+identifier and author, the notices include those metadata with the standard MIT
+permission text. HarfBuzz, Replicad, Three.js and native/WASM runtimes remain
+separate dependencies rather than being duplicated between public Core entries.
 
 The dependencies' distributed licenses accompany the built-in dependency closure.
 Text contours use Replicad/OpenCascade curves. Code3D groups nested glyph contours

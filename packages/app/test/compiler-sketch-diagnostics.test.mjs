@@ -1,17 +1,18 @@
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
 import {createAppTestServer} from './vite-test-server.ts';
-import {createTestProjectCompiler} from './project-test-files.ts';
+import {createTestModelPipeline} from './project-test-files.ts';
 
 let server,
   compiler,
   SketchEditResolver,
+  analyzeSketchSource,
   viewportDiagnostic,
   sketchSourceDiagnostics;
 before(async () => {
   server = await createAppTestServer();
-  compiler = await createTestProjectCompiler(server);
-  ({SketchEditResolver} = await server.ssrLoadModule(
+  compiler = await createTestModelPipeline(server);
+  ({SketchEditResolver, analyzeSketchSource} = await server.ssrLoadModule(
     '/src/tools/sketch-source.ts',
   ));
   ({viewportDiagnostic} = await server.ssrLoadModule(
@@ -177,6 +178,7 @@ test('shared geometric tolerance ignores roundoff at different feature scales bu
       references: {},
       constraints: [],
       definitionRef: {file: '/model.ts', start: 0, end: source.length},
+      callRef: {file: '/model.ts', start: 0, end: source.length},
       data: [
         {id: 1, parameters: [0, 0]},
         {id: 2, parameters: [scale, 0]},
@@ -203,9 +205,22 @@ test('shared geometric tolerance ignores roundoff at different feature scales bu
       ],
     };
     const sketches = new Map([['local', sketch]]);
-    const files = new Map([['/model.ts', source]]);
-    assert.deepEqual(sketchSourceDiagnostics(sketches, files), []);
+    const parsed = analyzeSketchSource(source);
+    const sites = new Map([
+      [
+        `/model.ts:0:${source.length}`,
+        {
+          diagnostics: {
+            sourceRef: sketch.definitionRef,
+            source,
+            editable: [...parsed.editable],
+            reason: parsed.reason,
+          },
+        },
+      ],
+    ]);
+    assert.deepEqual(sketchSourceDiagnostics(sketches, sites), []);
     sketch.entities[1].position = [scale * 1.01, 0];
-    assert.equal(sketchSourceDiagnostics(sketches, files).length, 1);
+    assert.equal(sketchSourceDiagnostics(sketches, sites).length, 1);
   }
 });

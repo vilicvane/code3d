@@ -5,7 +5,8 @@
     "rootDir": ".",
     "outDir": "../../bld/tooling",
     "tsBuildInfoFile": "../../.cache/tooling.tsbuildinfo",
-    "declarationMap": true
+    "declarationMap": true,
+    "emitDeclarationOnly": true
   },
   "references": [
     {

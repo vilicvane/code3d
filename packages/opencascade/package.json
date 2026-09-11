@@ -25,9 +25,15 @@
     "build": "node scripts/build.mjs",
     "test": "npm run test:types && npm run test:run",
     "test:run": "node --test \"test/*.test.ts\"",
-    "test:types": "node ../../node_modules/typescript/bin/tsc --noEmit -p test/tsconfig.json"
+    "test:types": "node ../../node_modules/typescript/bin/tsc --noEmit -p test/tsconfig.json",
+    "prepack": "node ../../scripts/build-packages.mjs @code3d/opencascade"
   },
   "dependencies": {
     "replicad-opencascadejs": "1.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vilicvane/code3d.git",
+    "directory": "packages/opencascade"
   }
 }

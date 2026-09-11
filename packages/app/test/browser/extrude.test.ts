@@ -73,6 +73,18 @@ export const body = ${call};`;
       await distance.fill('0');
       await page.keyboard.press('Enter');
       await page.getByText('Model error', {exact: true}).waitFor();
+      // An error retains the last successful geometry and closes its stale tool.
+      assert.equal(await distance.isVisible(), false);
+      await page.evaluate(() => window.extrusionApp.codeEditor.editor.focus());
+      await page.keyboard.press('Control+z');
+      await page.getByText('Ready', {exact: true}).waitFor();
+      await waitExtrusion(page, 3);
+      await page.evaluate(() => {
+        const editor = window.extrusionApp.codeEditor.editor;
+        editor.setPosition(
+          editor.getModel()!.getPositionAt(editor.getValue().lastIndexOf('3')),
+        );
+      });
       await distance.fill('-5');
       await page.keyboard.press('Enter');
       await waitExtrusion(page, -5);

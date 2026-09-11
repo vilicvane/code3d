@@ -81,7 +81,7 @@ import {
   type Vec3,
 } from './spatial.js';
 import {textGlyphs, textRegionFace, type TextOptions} from './text.js';
-import type {Material} from './three.js';
+import type {Material} from 'three';
 import {formatTopologyId, type TopologyId} from './topology-id.js';
 import {
   inspectShapeTopology,
@@ -1463,6 +1463,7 @@ type RelationObjectInit = Readonly<{
 /** A local reference frame and its relations, independent of finite geometry. */
 export abstract class RelationObject {
   readonly nodeId: string;
+  /** @internal */
   abstract readonly name: string;
   protected constraints: StoredConstraint[];
 
@@ -1491,10 +1492,13 @@ export abstract class RelationObject {
     );
   }
 
+  /** @internal */
   abstract relatedObjects(): readonly RelationObject[];
+  /** @internal */
   abstract toSnapshot(
     meshCache?: Map<AnyShape, RenderMesh>,
   ): ModelSnapshotObject;
+  /** @internal */
   abstract attachOperationTrace(
     siteId: string,
     execution: number,

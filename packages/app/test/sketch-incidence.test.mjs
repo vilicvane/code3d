@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
 import {createAppTestServer} from './vite-test-server.ts';
-import {createTestProjectCompiler} from './project-test-files.ts';
+import {createTestModelPipeline} from './project-test-files.ts';
 import {trimmedArcSketchArguments} from './sketch-fixtures.ts';
 
 let server, compiler, analyzeSketchSource, SketchEditResolver;
 before(async () => {
   server = await createAppTestServer();
-  compiler = await createTestProjectCompiler(server);
+  compiler = await createTestModelPipeline(server);
   ({analyzeSketchSource, SketchEditResolver} = await server.ssrLoadModule(
     '/src/tools/sketch-source.ts',
   ));
@@ -101,7 +101,7 @@ test('fixed-neighbor center dragging keeps exact coordinates through staged prev
     }
     assert.deepEqual(position(preview.snapshot, 4), [20, 5]);
     const source = apply(local, args, preview);
-    const fresh = await createTestProjectCompiler(server);
+    const fresh = await createTestModelPipeline(server);
     try {
       const [replay] = await compile('const s=sketch(' + source + ');', fresh);
       assert.deepEqual(replay.entities, preview.snapshot.entities);
@@ -142,7 +142,7 @@ test('staged connected-center dragging preserves shape through continuous previe
     const preview = drag([local], args, 10, [0, y]);
     args = apply(local, args, preview);
     assert.doesNotMatch(args, /'fixed'|'radius'|'sweep'/);
-    const fresh = await createTestProjectCompiler(server);
+    const fresh = await createTestModelPipeline(server);
     try {
       [local] = await compile(source(), fresh);
       assert.deepEqual(local.entities, preview.snapshot.entities);
@@ -170,7 +170,7 @@ test('returning a trimmed arc endpoint keeps the opposite horizontal coordinate 
     assert.deepEqual(position(preview.snapshot, 15), [x, 10]);
     args = apply(local, args, preview);
     assert.ok(args.includes(`['point', 13, [-${x}, 10]]`));
-    const fresh = await createTestProjectCompiler(server);
+    const fresh = await createTestModelPipeline(server);
     try {
       [local] = await compile('const s = sketch(' + args + ');', fresh);
       assert.deepEqual(local.entities, preview.snapshot.entities);
@@ -192,7 +192,7 @@ test('unconstrained point-on-line motion writes actual data and replays exactly 
   const source = apply(local, entries, preview);
   assert.doesNotMatch(source, /constraints/);
   assert.match(source, /\['line', 3, \[1, 2\]\]/);
-  const fresh = await createTestProjectCompiler(server);
+  const fresh = await createTestModelPipeline(server);
   try {
     const [replay] = await compile('const s = sketch(' + source + ');', fresh);
     assert.deepEqual(replay.entities, preview.snapshot.entities);
@@ -281,7 +281,7 @@ test('circle and arc followers replay exactly through fresh compilers after cent
       const preview = drag([local], args, id, target);
       const source = apply(local, args, preview);
       assert.doesNotMatch(source, /constraints/);
-      const fresh = await createTestProjectCompiler(server);
+      const fresh = await createTestModelPipeline(server);
       try {
         const [replay] = await compile(
           'const s = sketch(' + source + ');',

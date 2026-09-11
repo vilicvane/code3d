@@ -8,7 +8,7 @@
     "postinstall": "patch-package --error-on-fail",
     "3": "npm install && npm dedupe && npm install",
     "clean": "rimraf dist --glob packages/*/{.cache,bld,dist}",
-    "build:packages": "node node_modules/typescript/bin/tsc --build",
+    "build:packages": "node scripts/build-packages.mjs",
     "build:solver": "npm run build --workspace @code3d/solver",
     "build": "npm run lint-prettier && npm run clean && npm run build:packages && npm run build --workspace @code3d/app && npm run build --workspace @code3d/web",
     "render:web-images": "npm run render-images --workspace @code3d/web",
@@ -23,7 +23,9 @@
     "web": "npm run --workspace @code3d/web",
     "build:opencascade": "npm run build --workspace @code3d/opencascade",
     "test:types": "npm run test:types --workspaces --if-present",
-    "test": "npm run build:packages && npm run test:types && npm run test:run --workspaces --if-present"
+    "test": "npm run build:packages && npm run test:types && npm run test:release && npm run test:run --workspaces --if-present",
+    "test:packages": "node scripts/test-packages.mjs",
+    "test:release": "node --test test/package-publishing.test.mjs"
   },
   "workspaces": [
     "packages/agent",
@@ -42,7 +44,8 @@
     "prettier": "^3.9.6",
     "rimraf": "^6.1.2",
     "typescript": "^7.0.2",
-    "wrangler": "^4.129.0"
+    "wrangler": "^4.129.0",
+    "esbuild": "0.28.2"
   },
   "overrides": {
     "dompurify": "3.4.14"

@@ -6,7 +6,8 @@
     "rootDir": ".",
     "outDir": "../../bld/node",
     "tsBuildInfoFile": "../../.cache/node.tsbuildinfo",
-    "declarationMap": true
+    "declarationMap": true,
+    "emitDeclarationOnly": true
   },
   "references": [
     {

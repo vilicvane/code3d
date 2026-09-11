@@ -234,6 +234,22 @@ the implementation and tests below.
   and [Node entry](src/node/index.ts).
 - [Executable App examples](../app/examples/) and [runtime tests](test/).
 
+Public JavaScript entries are prebundled ESM with shared chunks. Node, browser,
+tooling and interop entries share the same kernel and cache instances. TypeScript
+declarations, declaration maps and their sources remain available for editor
+navigation. The build and npm `prepack` use the same package build script; see the
+[development guide](../../.agents/docs/development.md#公开包产物) for installed
+tarball verification and CI publishing.
+
+For a standalone TypeScript project, include `ESNext` and `DOM` in `compilerOptions.lib`.
+Use `module: "ESNext"` and `moduleResolution: "Bundler"` when esbuild or another
+bundler handles execution. Code3D's App uses this resolution mode, supports
+extensionless relative imports and selects browser package exports.
+The public packages are built and verified with `skipLibCheck: false`. NodeNext
+currently needs `skipLibCheck` because the `manifold-3d@3.0.1` declarations omit
+relative `.js` extensions. Core includes the declaration dependencies needed by
+its HarfBuzz and Replicad integrations.
+
 From the repository root:
 
 ```sh

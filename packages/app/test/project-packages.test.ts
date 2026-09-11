@@ -71,6 +71,80 @@ function memoryFiles(
 }
 
 const emptyProject = {files: []};
+
+for (const configured of [false, true]) {
+  test(`language and execution resolve extensionless models and browser exports${configured ? ' with a NodeNext project config' : ''}`, async () => {
+    const source = `
+      import {value} from './helper';
+      import {platform} from 'conditional';
+      const checked: 'browser' = platform;
+      export const result = checked + value;
+    `;
+    const files = memoryFiles({
+      '/package.json': {},
+      '/model.ts': source,
+      '/helper.ts': 'export const value: number = 7;',
+      '/node_modules/@code3d/core/package.json': {
+        exports: {'./tooling': './tooling.d.ts'},
+      },
+      '/node_modules/@code3d/core/tooling.d.ts': 'export {};',
+      '/node_modules/conditional/package.json': {
+        type: 'module',
+        exports: {
+          node: './node.js',
+          browser: './browser.js',
+          default: './default.js',
+        },
+      },
+      ...Object.fromEntries(
+        ['node', 'browser', 'default'].flatMap(platform => [
+          [
+            `/node_modules/conditional/${platform}.js`,
+            `export const platform = '${platform}';`,
+          ],
+          [
+            `/node_modules/conditional/${platform}.d.ts`,
+            `export declare const platform: '${platform}';`,
+          ],
+        ]),
+      ),
+      ...(configured
+        ? {
+            '/tsconfig.json': {
+              compilerOptions: {
+                module: 'NodeNext',
+                moduleResolution: 'NodeNext',
+                customConditions: ['node'],
+              },
+            },
+          }
+        : {}),
+    });
+    const loader = new ProjectLanguageLoader(files);
+    await loader.load({files: [{path: '/model.ts', source}]});
+    const program = loader.typeScriptProgram;
+    assert.deepEqual(
+      program
+        .getSemanticDiagnostics(program.getSourceFile('/model.ts'))
+        .map(d => ts.flattenDiagnosticMessageText(d.messageText, '\n')),
+      [],
+    );
+    assert.ok(program.getSourceFile('/helper.ts'));
+    assert.ok(program.getSourceFile('/node_modules/conditional/browser.d.ts'));
+    assert.equal(
+      program.getSourceFile('/node_modules/conditional/node.d.ts'),
+      undefined,
+    );
+    const builder = new ProjectBuilder(files, esbuild);
+    try {
+      const bundle = await builder.build('export * from "/model.ts";');
+      assert.equal((await importTestModule(bundle.source)).result, 'browser7');
+    } finally {
+      await builder.dispose();
+    }
+  });
+}
+
 const unavailableBuiltins = {
   async readFile() {
     assert.fail('Project mode must not read built-in packages');

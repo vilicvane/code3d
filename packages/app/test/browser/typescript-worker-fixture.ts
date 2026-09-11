@@ -4,8 +4,13 @@ import * as language from 'monaco-editor/languages/features/typescript/register'
 import publicModels from '../../../core/test/public-models.ts?raw';
 
 export async function inspectPublicModels() {
+  const helper = monaco.editor.createModel(
+    'export const value = 7;',
+    'typescript',
+    monaco.Uri.file('/workspace/bundler-probe.ts'),
+  );
   const model = monaco.editor.createModel(
-    publicModels,
+    `import {value} from './bundler-probe';\nconst checked: 7 = value;\n${publicModels}`,
     'typescript',
     monaco.Uri.file('/workspace/public-models.ts'),
   );
@@ -18,6 +23,7 @@ export async function inspectPublicModels() {
     ];
   } finally {
     model.dispose();
+    helper.dispose();
   }
 }
 

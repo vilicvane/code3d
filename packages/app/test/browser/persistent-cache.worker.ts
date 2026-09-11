@@ -58,11 +58,7 @@ scope.onmessage = async ({data}: MessageEvent<CacheRequest>) => {
         stat: browserPackageFiles.stat,
         async readFile(path) {
           const bytes = await browserPackageFiles.readFile(path);
-          if (
-            !bytes ||
-            !data.revision ||
-            !path.endsWith('/library/kernel-cache.js')
-          )
+          if (!bytes || !data.revision || !path.endsWith('/tooling/index.js'))
             return bytes;
           return new TextEncoder().encode(
             new TextDecoder().decode(bytes) +

@@ -80,11 +80,11 @@ for (const [name, statement, span, message, extra] of [
     },
   ],
   [
-    'missing extension',
+    'missing relative module',
     'import "./dimensions";',
     '"./dimensions"',
     /resolve/,
-    {'/src/dimensions.ts': 'export const width=2;'},
+    {},
   ],
   [
     'dynamic missing package',
