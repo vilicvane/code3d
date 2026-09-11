@@ -161,3 +161,28 @@ subagent 从完整继承的会话中核对用户原始指令和已有授权；�
 ## 收尾
 
 交付或任务切换的简报须保留当前活跃工作区的未完成事项与归属，不把本批提交完成当作全部工作完成。全部关联工作按要求成功集成进主 worktree 后，可以停止开发服务器并运行 `server-stopped`；确认进程退出后，关闭不再使用的前台 pane，再运行 `finish` 把开发 agent 标记为完成。立即用于其他前台任务的 pane 继续复用。只有确认分支已集成、worktree clean 且没有进程使用它后，才执行 `git worktree remove <path>`；删除分支也必须属于用户明确要求。协调记录保留已完成队列项，作为本地会话与集成历史。
+
+### 定期清理工作区目录
+
+本机按用户授权启用 `code3d-worktree-cleanup.timer`，每天北京时间 05:00 启动一次独立的 Codex 会话，检查至少 **24 小时**无活动的工作区。systemd 只负责调度；由 Codex 逐个复核特殊情况并决定是否删除，有疑点就保留。WSL 未运行期间不执行，恢复用户服务后补做错过的检查。
+
+执行范围、用户授权、逐项检查、删除前加锁复核与报告要求统一放在[定时清理任务提示](references/scheduled-cleanup.md)。保留主 worktree、分支、提交、stash、协调历史和会话；不停止进程或关闭 pane，不把该维护任务变成产品开发或 Git 交付。按用户约定，活跃 worktree 都由 Herdr 中的 Codex 使用；结合其会话与协调记录判断当前归属，idle 会话仍算存活。未完成任务、未合并提交、本地配置或仍被会话使用的目录继续保留。
+
+[候选扫描器](scripts/inspect_worktrees.py)只读，默认闲置阈值为一天，没有删除选项。它提供候选和跳过原因，不能代替 Codex 的逐项判断；旧脚本的直接删除路径已移除。独立扫描命令：
+
+```bash
+python3 "$PRIMARY/.agents/skills/worktree-development/scripts/inspect_worktrees.py" \
+  --repo "$PRIMARY" --days 1
+```
+
+[会话启动器](scripts/run_scheduled_cleanup.py)调用本机 `codex exec`，沿用用户的模型配置，清除继承的 Herdr/父线程身份，并保存每次会话报告和事件日志。启动器每 5 秒提供只读 Herdr pane 快照，供隔离会话关联 owner；不扫描任意宿主进程。默认启动只读验收；正式定时任务显式传入 `--execute`，仍由 Codex 决定具体操作。不能交互审批或检查失败时保留目录并记录，不能绕过权限强行清理。
+
+已验证的启动器、扫描器和任务提示安装在 `~/.local/lib/code3d-worktree-cleanup/`，不依赖开发 worktree。每次运行的 Markdown 报告及 JSONL 事件保存到 `~/.local/state/code3d-worktree-cleanup/`；同时保留正常 Codex 会话历史。源码或任务提示更新后须重新安装副本，并复验只读 Codex 会话和定时器。
+
+```bash
+systemctl --user list-timers code3d-worktree-cleanup.timer
+journalctl --user -u code3d-worktree-cleanup.service
+systemctl --user disable --now code3d-worktree-cleanup.timer
+```
+
+修改后运行 `python3 -B -m unittest discover -s .agents/skills/worktree-development/tests`；测试使用临时仓库和模拟 Codex，覆盖候选保护、24 小时阈值、只读模式、独立会话身份和防止重复启动。实际 Codex 验收须只读，不因测试定时器而批量删除真实目录。

@@ -31,6 +31,10 @@ Browser storage 以当前页面的项目连接为单位；目录权限失效需�
 通过重新加载和依赖版本检查反映。文件清单、当前文档、未保存 overlay 与运行时
 各自拥有状态，不把切换文件视作重新创建整个项目。
 
+项目元数据使用唯一现行结构，原型期间格式标记固定为 `version: 1`，与托管目录的
+内容 revision 分开。初始化按当前结构读取并写回清单，保留托管目录的修订记录及
+跳过决定；不以版本标记决定是否重新初始化，也不维护旧格式转换链。
+
 入口与验证：[directory-access](../../../packages/app/src/project/directory-access.ts)、
 [file-operations](../../../packages/app/src/project/file-operations.ts)、
 [project-session](../../../packages/app/src/agent/project-session.ts)、

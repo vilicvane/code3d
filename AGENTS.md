@@ -3,6 +3,14 @@
 所有会保留的开发遵循[持续重构原则](.agents/skills/code3d-prototyping/SKILL.md)，
 工作区与交付遵循[隔离开发流程](.agents/skills/worktree-development/SKILL.md)。
 
+## 原型期格式版本
+
+Code3D 产品自定义配置、协议与持久化格式可以保留 `version`，但原型期间不得因格式或
+功能变更递增数字。直接修改唯一现行结构及全部读写方；即使不写迁移代码、只是
+提高版本并拒绝旧值，也违反这条约定。本条不适用于仓库内部开发工作流工具。
+版本含义及修改时的核对范围见
+[格式版本约定](.agents/skills/code3d-prototyping/SKILL.md#格式版本)。
+
 ## 默认响应式迁移
 
 每次功能新增、修改或修复，都主动读取并应用
