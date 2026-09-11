@@ -71,6 +71,8 @@ PlaneGCS 漏发 `dist/planegcs_dist/planegcs.d.ts`，仓库补丁补齐其模块
 版本 tag 标记本次发布对应的提交，npm 发包是版本发布中交付公开包的步骤。
 App 与网站由 [Build workflow](../../.github/workflows/build.yml) 在主分支更新后按部署配置发布；
 npm 包由下面的 tag workflow 发布，分别核验对应的 CI 结果。
+Build 保留分支 push、pull request 与手工触发，版本 tag 只触发 Publish 的完整验证，
+避免同一提交重复执行网站构建。
 
 ### 准备版本
 
@@ -86,6 +88,18 @@ npm 包由下面的 tag workflow 发布，分别核验对应的 CI 结果。
 4. 按[交付流程](../skills/worktree-development/references/delivery-subagent.md)完成已授权的
    提交、合并与推送，在已验证的发布提交上创建并推送 `v<版本号>` tag。
    CI 以 tag 对应的提交执行构建与发布。
+
+逐项检查公开包 `dependencies` 与 `peerDependencies` 中的内部包引用，按实际使用的
+API 确定兼容范围和最低支持版本。同批包的版本号相同，不代表所有内部依赖都必须改成
+这个版本：依赖未改动、未参与本批发布的包时，继续引用它已公开的原版本。
+例如 alpha.2 的 CLI 依赖 Agent alpha.2，Materials/Screws 的 Core peer 为
+`^0.0.1-alpha.2`，而 Core 继续依赖未变化的 OpenCascade alpha.0。
+公开包中内部 `devDependencies` 的 `*` 用于本地 workspace 开发，不替代消费者所需的
+dependencies/peerDependencies 声明；私有 App 的 workspace 引用也不属于公开包版本同步。
+
+同步后核对根 lockfile 的 workspace 元数据与各 `package.json` 一致。最终以 CI 实际
+上传的 tarball 内 `package.json` 为发布依据，逐包核对版本、内部依赖与 peer 范围，
+并核对 tarball 完整性及 npm 暂存记录；不能仅凭工作区清单或 registry 中的上一版判断。
 
 ### CI 发包
 
