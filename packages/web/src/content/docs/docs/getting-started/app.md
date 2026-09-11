@@ -267,6 +267,11 @@ touch, a diagnostic explains that there is no common solid volume; the input
 models stay available for adjustment.
 This also works for inline inputs such as `intersect([sphere(8), box(12, 12, 12)])`:
 editing a primitive's dimensions keeps the surrounding intersection visible.
+For `extrude([a, b], distance)`, selecting an input face highlights its extrusion
+in cyan while keeping the other results as translucent context. Selecting the
+input array highlights all results. The shared distance field updates every
+extrusion, and selecting the distance in code displays a length marker on each
+result. If extrusion fails, the input faces remain visible and editable.
 If the current target itself fails or the file cannot be evaluated, its previous
 preview remains visible and its stale tools pause until a new result is available.
 

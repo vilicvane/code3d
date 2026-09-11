@@ -477,6 +477,135 @@ export default loft([start, via, end]).material('#d8ff3e');`;
 );
 
 test(
+  'batch extrusion input focus, shared distance edits and failure recovery use the whole call',
+  {timeout: 120_000},
+  async t => {
+    const {page, errors} = await openApp(t);
+    const source = `import {circle, rectangle, extrude as grow} from '@code3d/core';
+const a = circle(10);
+const b = rectangle(12, 12).relate(s => s.on(a.up).offset(30, 0, 0).rotate(0, 0, 30));
+export default grow([a, b], 20);`;
+    await page.evaluate(source => {
+      const editor = window.coordinateApp.codeEditor.editor;
+      editor.getModel()!.setValue(source);
+      editor.setPosition(
+        editor.getModel()!.getPositionAt(source.lastIndexOf('a, b')),
+      );
+    }, source);
+    await page.waitForFunction(
+      () =>
+        window.coordinateApp.viewport['decorationLayers'].get(
+          'source-context:extrude-result',
+        )?.length === 2,
+    );
+    const inspect = () =>
+      page.evaluate(() => {
+        const {viewport, codeEditor} = window.coordinateApp;
+        const layers =
+          viewport['decorationLayers'].get('source-context:extrude-result') ??
+          [];
+        return {
+          source: codeEditor.editor.getValue(),
+          count:
+            viewport['occurrences'].size + viewport['contextOccurrences'].size,
+          results: layers.map(({object}) => {
+            let decoration:
+              | Extract<
+                  import('../../src/viewport-decoration.ts').ViewportDecoration,
+                  {kind: 'mesh'}
+                >
+              | undefined;
+            object.traverse(child => {
+              if (child.userData.decoration?.kind === 'mesh')
+                decoration = child.userData.decoration;
+            });
+            return {
+              nodeId: decoration!.nodeId,
+              opacity: decoration!.appearance?.opacity,
+            };
+          }),
+          focus: viewport.sourceEvaluation()?.evaluation.nodeIds,
+          lengths: [...viewport['module']!.operations.values()]
+            .filter(op => op.kind === 'extrude')
+            .map(op => Math.hypot(...op.dimensions!.distance.vector)),
+        };
+      });
+    const initial = await inspect();
+    if (process.env.CODE3D_BATCH_EXTRUDE_SCREENSHOT) {
+      await page.evaluate(() => window.coordinateApp.viewport.fit());
+      await cameraIdle(page);
+      await page.screenshot({
+        path: `${process.env.CODE3D_BATCH_EXTRUDE_SCREENSHOT}.input.png`,
+      });
+    }
+    assert.equal(initial.count, 2);
+    assert.equal(initial.results.length, 2);
+    assert.equal(
+      initial.results.filter(result => result.opacity === 0.94).length,
+      1,
+    );
+    assert.ok(
+      initial.results.find(result => result.opacity === 0.94)?.nodeId ===
+        initial.focus![0],
+    );
+    const distance = page.locator('[data-parameter=distance]');
+    await distance.fill('30');
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() =>
+      [...window.coordinateApp.viewport['module']!.operations.values()]
+        .filter(op => op.kind === 'extrude')
+        .every(
+          op =>
+            Math.abs(Math.hypot(...op.dimensions!.distance.vector) - 30) < 1e-6,
+        ),
+    );
+    assert.deepEqual((await inspect()).lengths, [30, 30]);
+    assert.match((await inspect()).source, /grow\(\[a, b\], 30\)/);
+    await page.evaluate(() => {
+      const editor = window.coordinateApp.codeEditor.editor;
+      editor.setPosition(
+        editor.getModel()!.getPositionAt(editor.getValue().lastIndexOf('b]')),
+      );
+    });
+    const second = await inspect();
+    assert.notDeepEqual(second.focus, initial.focus);
+    assert.ok(
+      second.results.find(result => result.opacity === 0.94)?.nodeId ===
+        second.focus![0],
+    );
+    await distance.fill('0');
+    await page.keyboard.press('Enter');
+    await page.locator('#viewport-status[data-state=error]').waitFor();
+    assert.equal((await inspect()).count, 2);
+    assert.equal((await inspect()).results.length, 0);
+    await distance.fill('12');
+    await page.keyboard.press('Enter');
+    await page.getByText('Ready', {exact: true}).waitFor();
+    assert.deepEqual((await inspect()).lengths, [12, 12]);
+    await page.evaluate(() => {
+      const {viewport, codeEditor} = window.coordinateApp;
+      const editor = codeEditor.editor;
+      editor.setPosition(
+        editor.getModel()!.getPositionAt(editor.getValue().lastIndexOf('12')),
+      );
+      viewport.fit();
+    });
+    await page.waitForFunction(
+      () =>
+        window.coordinateApp.viewport['decorationLayers'].get(
+          'source-context:parameter-geometry',
+        )?.length === 2,
+    );
+    await cameraIdle(page);
+    if (process.env.CODE3D_BATCH_EXTRUDE_SCREENSHOT)
+      await page.screenshot({
+        path: process.env.CODE3D_BATCH_EXTRUDE_SCREENSHOT,
+      });
+    assert.deepEqual(errors, []);
+  },
+);
+
+test(
   'the Boolean operations example previews intersection inside inline primitive arguments',
   {timeout: 120_000},
   async t => {

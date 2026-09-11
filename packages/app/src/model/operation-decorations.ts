@@ -6,6 +6,7 @@ import type {
 import type {SourceDecorationProvider} from '../viewport-decoration';
 import {identityRigidTransform} from '@code3d/core/tooling';
 import {sourceContextAppearance} from '../rendering/source-appearance';
+import {sameOperationCall} from './operation-context';
 
 type BooleanInputContext = Readonly<{
   operation: Readonly<{
@@ -160,6 +161,42 @@ export const loftResultSourceDecoration = {
         appearance: sourceContextAppearance,
       },
     ];
+  },
+} satisfies SourceDecorationProvider;
+
+export const extrudeResultSourceDecoration = {
+  id: 'extrude-result',
+  previewBehavior: 'hide',
+  decorations({module, evaluation}) {
+    const input = evaluation.operationInput;
+    const selected = input && module.operations.get(input.operationId);
+    if (
+      selected?.kind !== 'extrude' ||
+      !input ||
+      input.nodeIds.some(id => !evaluation.nodeIds.includes(id))
+    )
+      return [];
+    return [...module.operations.values()]
+      .filter(operation => sameOperationCall(operation, selected))
+      .flatMap(operation => {
+        const receiver = operation.inputs.find(
+          input => input.role === 'receiver',
+        );
+        const result = module.objects.get(operation.outputNodeId);
+        if (!receiver || !result?.mesh) return [];
+        return [
+          {
+            kind: 'mesh' as const,
+            id: `${operation.id}:result`,
+            nodeId: receiver.nodeId,
+            mesh: result.mesh,
+            transform: {...identityRigidTransform, scale: [1, 1, 1] as const},
+            appearance: input.nodeIds.includes(receiver.nodeId)
+              ? booleanAppearances.union
+              : sourceContextAppearance,
+          },
+        ];
+      });
   },
 } satisfies SourceDecorationProvider;
 

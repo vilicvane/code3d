@@ -1,4 +1,24 @@
-import type {ModelOperationInputRole} from '@code3d/core/tooling';
+import type {
+  ModelOperationInputRole,
+  ModelOperationSnapshot,
+} from '@code3d/core/tooling';
+
+export function sameOperationCall(
+  left: ModelOperationSnapshot | undefined,
+  right: ModelOperationSnapshot | undefined,
+): boolean {
+  return (
+    left === right ||
+    !!(
+      left &&
+      right &&
+      (left.id === right.id ||
+        (left.siteId !== undefined &&
+          left.siteId === right.siteId &&
+          left.execution === right.execution))
+    )
+  );
+}
 
 export function isCompositionInputRole(
   role: ModelOperationInputRole | undefined,

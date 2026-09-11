@@ -8,12 +8,14 @@ import {
   booleanOperationSourceDecoration,
   edgeModificationSourceDecoration,
   loftResultSourceDecoration,
+  extrudeResultSourceDecoration,
 } from './operation-decorations';
 
 export const sourceDecorationProviders = [
   booleanOperationSourceDecoration,
   edgeModificationSourceDecoration,
   loftResultSourceDecoration,
+  extrudeResultSourceDecoration,
   elementSourceDecoration,
   relationSourceDecoration,
   originSourceDecoration,
