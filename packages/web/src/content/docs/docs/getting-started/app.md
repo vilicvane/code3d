@@ -261,6 +261,12 @@ Selecting a section inside a `loft` call shows all sections in their composition
 positions, with the current section emphasized. A successful loft also shows its
 completed shape as translucent context. If the loft fails, the sections remain
 visible and editable so you can adjust its inputs.
+Selecting an input inside `intersect()` shows the input collection and highlights
+the volume shared by all inputs in cyan. If the inputs do not overlap or only
+touch, a diagnostic explains that there is no common solid volume; the input
+models stay available for adjustment.
+This also works for inline inputs such as `intersect([sphere(8), box(12, 12, 12)])`:
+editing a primitive's dimensions keeps the surrounding intersection visible.
 If the current target itself fails or the file cannot be evaluated, its previous
 preview remains visible and its stale tools pause until a new result is available.
 

@@ -200,6 +200,34 @@ for (const operation of [
   });
 }
 
+test('intersect explains disjoint and touching inputs while retaining reusable models', () => {
+  const first = box(10, 10, 10);
+  const touching = box(10, 10, 10).originOffset(-10, 0, 0);
+  const distant = box(10, 10, 10).originOffset(-30, 0, 0);
+  const overlapping = box(10, 10, 10).originOffset(-4, 0, 0);
+  try {
+    for (const inputs of [
+      [first, distant],
+      [first, touching],
+      [first, overlapping, distant],
+    ])
+      assert.throws(
+        () => intersect(inputs),
+        /inputs have no common solid volume/,
+      );
+    const result = intersect([first, overlapping]);
+    try {
+      assertMeshIds(result);
+    } finally {
+      disposeModelObjects([result]);
+    }
+    for (const input of [first, touching, distant, overlapping])
+      assertMeshIds(input);
+  } finally {
+    disposeModelObjects([first, touching, distant, overlapping]);
+  }
+});
+
 test('n-ary Boolean input paths exclude internal steps and cached prefixes remain reusable', () => {
   const first = box(4, 4, 4);
   const second = box(3, 3, 3).relate(p =>

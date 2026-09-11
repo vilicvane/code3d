@@ -477,6 +477,122 @@ export default loft([start, via, end]).material('#d8ff3e');`;
 );
 
 test(
+  'the Boolean operations example previews intersection inside inline primitive arguments',
+  {timeout: 120_000},
+  async t => {
+    const {page, errors} = await openApp(t);
+    await page.evaluate(() => {
+      location.hash = '/file/examples/boolean-operations.ts';
+    });
+    await page.waitForFunction(() =>
+      window.coordinateApp.codeEditor.editor
+        .getValue()
+        .includes('const lens = intersect([sphere(8), box(12, 12, 12)])'),
+    );
+    await page.getByText('Ready', {exact: true}).waitFor();
+    for (const call of ['sphere(8)', 'box(12, 12, 12)']) {
+      await page.evaluate(call => {
+        const editor = window.coordinateApp.codeEditor.editor;
+        const offset = editor.getValue().indexOf(call) + call.indexOf('(') + 1;
+        editor.setPosition(editor.getModel()!.getPositionAt(offset));
+        editor.revealPositionInCenter(editor.getPosition()!);
+        editor.focus();
+      }, call);
+      await page.waitForFunction(
+        () =>
+          window.coordinateApp.viewport['decorationLayers'].get(
+            'source-context:boolean-operation-regions',
+          )?.length === 1,
+      );
+      const state = await page.evaluate(() => {
+        const viewport = window.coordinateApp.viewport;
+        const scope = viewport.sourceEvaluation()!;
+        viewport.fit();
+        return {
+          tool: scope.target.tool?.signature.name,
+          operation: viewport['module']!.operations.get(
+            scope.evaluation.operationInput!.operationId,
+          )!.kind,
+          count:
+            viewport['occurrences'].size + viewport['contextOccurrences'].size,
+        };
+      });
+      assert.equal(state.tool, call.slice(0, call.indexOf('(')));
+      assert.equal(state.operation, 'intersect');
+      assert.equal(state.count, 2);
+      await cameraIdle(page);
+      if (process.env.CODE3D_INLINE_INTERSECT_SCREENSHOT)
+        await page.screenshot({
+          path: `${process.env.CODE3D_INLINE_INTERSECT_SCREENSHOT}-${state.tool}.png`,
+        });
+    }
+    assert.deepEqual(errors, []);
+  },
+);
+
+test(
+  'intersect arguments retain three inputs and recover their common result after an empty intersection',
+  {timeout: 120_000},
+  async t => {
+    const {page, errors} = await openApp(t);
+    for (const offset of [8, 50, 4]) {
+      const source = `import {box, intersect as common} from '@code3d/core';
+const a = box(20, 20, 20);
+const b = box(20, 20, 20).relate(s => s.on(a.up).offset(${offset}, -10, 0));
+const c = box(14, 14, 14).originOffset(-4, 0, 0);
+export default common([a, b, c]);`;
+      await page.evaluate(source => {
+        const editor = window.coordinateApp.codeEditor.editor;
+        editor.getModel()!.setValue(source);
+        editor.setPosition(
+          editor.getModel()!.getPositionAt(source.lastIndexOf('b, c') + 1),
+        );
+      }, source);
+      await page.waitForFunction(offset => {
+        const viewport = window.coordinateApp.viewport;
+        return (
+          viewport.getSelected()?.node.constraints[0]?.offset[0] === offset &&
+          Boolean(viewport['module']?.diagnostic) === (offset === 50)
+        );
+      }, offset);
+      const result = await page.evaluate(() => {
+        const viewport = window.coordinateApp.viewport;
+        viewport.fit();
+        const owner = 'source-context:boolean-operation-regions';
+        const count = viewport['decorationLayers'].get(owner)?.length ?? 0;
+        viewport.hideSourceDecorationsDuringPreview();
+        const hidden = !viewport['decorationLayers'].has(owner);
+        viewport.restoreSourceDecorations();
+        return {
+          count,
+          hidden,
+          restored: viewport['decorationLayers'].get(owner)?.length ?? 0,
+          inputs:
+            viewport['occurrences'].size + viewport['contextOccurrences'].size,
+          bindings: viewport['transformGizmo']['axes'].filter(
+            axis => axis.binding,
+          ).length,
+          diagnostic: viewport['module']?.diagnostic?.summary,
+        };
+      });
+      assert.equal(result.inputs, 3);
+      assert.equal(result.bindings, 3);
+      assert.equal(result.count, offset === 50 ? 0 : 1);
+      assert.equal(result.restored, result.count);
+      assert.equal(result.hidden, true);
+      if (offset === 50)
+        assert.match(result.diagnostic!, /no common solid volume/);
+      await cameraIdle(page);
+      if (process.env.CODE3D_INTERSECT_SCREENSHOT)
+        await page.screenshot({
+          path: `${process.env.CODE3D_INTERSECT_SCREENSHOT}-${offset}.png`,
+        });
+    }
+    assert.deepEqual(errors, []);
+  },
+);
+
+test(
   'a failed compilation retains geometry but prevents dragging stale spatial bindings',
   {timeout: 90_000},
   async t => {

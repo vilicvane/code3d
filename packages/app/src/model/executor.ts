@@ -1278,35 +1278,55 @@ export function createModelExecutor(
 
     const operationInputTargets = [...inputTargets.values()];
 
-    function compositionConsumers(nodeIds: readonly string[]) {
-      return operationInputTargets.flatMap(target =>
-        target.evaluations.flatMap(input => {
-          if (!input.role || !isCompositionInputRole(input.role)) return [];
-          const consumedNodeIds = input.objects
-            .map(modelObjectNodeId)
-            .filter(nodeId =>
-              nodeIds.some(sourceNodeId =>
-                sourceLineageContains(
-                  operationsByOutputNodeId,
-                  nodeId,
-                  sourceNodeId,
+    function compositionConsumers(
+      nodeIds: readonly string[],
+      inlineSource?: SourceRef,
+    ) {
+      return operationInputTargets
+        .filter(
+          target =>
+            !inlineSource ||
+            (target.sourceRef.file === inlineSource.file &&
+              target.sourceRef.start <= inlineSource.start &&
+              target.sourceRef.end >= inlineSource.end),
+        )
+        .flatMap(target =>
+          target.evaluations.flatMap(input => {
+            if (
+              !(input.role && isCompositionInputRole(input.role)) &&
+              !(inlineSource && input.collection)
+            )
+              return [];
+            const consumedNodeIds = input.objects
+              .map(modelObjectNodeId)
+              .filter(nodeId =>
+                nodeIds.some(sourceNodeId =>
+                  inlineSource
+                    ? nodeId === sourceNodeId
+                    : sourceLineageContains(
+                        operationsByOutputNodeId,
+                        nodeId,
+                        sourceNodeId,
+                      ),
                 ),
-              ),
-            );
-          return consumedNodeIds.length > 0
-            ? [
-                {
-                  runtime: input.runtime,
-                  operationInput: {
-                    operationId: input.operationId!,
-                    role: input.role,
-                    nodeIds: consumedNodeIds,
+              );
+            return consumedNodeIds.length > 0
+              ? [
+                  {
+                    runtime: input.runtime,
+                    collectionNodeIds: input.collection?.map(modelObjectNodeId),
+                    operationInput: input.role
+                      ? {
+                          operationId: input.operationId!,
+                          role: input.role,
+                          nodeIds: consumedNodeIds,
+                        }
+                      : undefined,
                   },
-                },
-              ]
-            : [];
-        }),
-      );
+                ]
+              : [];
+          }),
+        );
     }
 
     function compositionContextTargets(
@@ -1340,13 +1360,16 @@ export function createModelExecutor(
         if (evaluation.constraintId || !evaluation.operationId)
           return [evaluation];
         const operation = operations.get(evaluation.operationId)!;
-        if (
-          !operation.spatial &&
-          operation.kind !== 'scaled' &&
-          operation.kind !== 'relate'
-        )
-          return [evaluation];
-        const consumers = compositionConsumers(evaluation.nodeIds);
+        const spatial =
+          operation.spatial ||
+          operation.kind === 'scaled' ||
+          operation.kind === 'relate';
+        // Inline constructors keep their numeric tools while inheriting the
+        // surrounding call's composition. Separate definitions stay standalone.
+        const consumers = compositionConsumers(
+          evaluation.nodeIds,
+          spatial ? undefined : target.sourceRef,
+        );
         if (operation.kind === 'relate') {
           const owner = objects.get(operation.outputNodeId)!;
           const source = operation.inputs.find(
@@ -1382,6 +1405,10 @@ export function createModelExecutor(
               toolExecutionOrder:
                 evaluation.toolExecutionOrder ?? evaluation.runtime.order,
               operationInput: consumer.operationInput,
+              nodeIds: consumer.collectionNodeIds ?? evaluation.nodeIds,
+              isCollection: consumer.collectionNodeIds
+                ? true
+                : evaluation.isCollection,
               focusNodeIds: evaluation.focusNodeIds ?? evaluation.nodeIds,
             }))
           : [evaluation];

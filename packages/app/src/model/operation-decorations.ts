@@ -9,7 +9,7 @@ import {sourceContextAppearance} from '../rendering/source-appearance';
 
 type BooleanInputContext = Readonly<{
   operation: Readonly<{
-    kind: 'cut' | 'union';
+    kind: 'cut' | 'union' | 'intersect';
     role: 'receiver' | 'tool' | 'operand' | 'collection';
   }>;
 }>;
@@ -89,6 +89,23 @@ const decorations: SourceDecorationProvider['decorations'] = ({
     )
   )
     return [];
+
+  if (operationKind === 'intersect') {
+    const result = module.objects.get(operation.outputNodeId);
+    const receiver = operation.inputs.find(input => input.role === 'receiver');
+    if (!result?.mesh || !receiver) return [];
+    // Show the common result of every operand, not pairwise overlaps.
+    return [
+      {
+        kind: 'mesh',
+        id: `${operation.id}:result`,
+        nodeId: receiver.nodeId,
+        mesh: result.mesh,
+        transform: {...identityRigidTransform, scale: [1, 1, 1]},
+        appearance: booleanAppearances.union,
+      },
+    ];
+  }
 
   return operation.regions
     .filter(
@@ -201,7 +218,9 @@ function booleanInputContext(
     : undefined;
   const operationKind = runtimeOperation?.kind ?? target.operation?.kind;
   const inputRole = evaluation.operationInput?.role ?? target.operation?.role;
-  return (operationKind === 'cut' || operationKind === 'union') &&
+  return (operationKind === 'cut' ||
+    operationKind === 'union' ||
+    operationKind === 'intersect') &&
     (inputRole === 'receiver' ||
       inputRole === 'tool' ||
       inputRole === 'operand' ||

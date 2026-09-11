@@ -1236,6 +1236,66 @@ test('derives composition roles for imported aliases, namespace calls, and neste
   }
 });
 
+test('inline Boolean constructors preserve numeric tools and composition context', async () => {
+  const source = await readFile(
+    new URL('../examples/boolean-operations.ts', import.meta.url),
+    'utf8',
+  );
+  const module = await compileProject(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  assert.equal(module.diagnostic, undefined);
+  for (const call of ['sphere(8)', 'box(12, 12, 12)']) {
+    const target = defined(
+      ModelViewport.prototype['sourceTargetAt'].call(
+        {module},
+        '/model.ts',
+        source.indexOf(call) + call.indexOf('(') + 1,
+      ),
+    );
+    assert.ok(target.tool, call);
+    const evaluation = target.evaluations[0];
+    assert.equal(
+      defined(
+        module.operations.get(defined(evaluation.operationInput).operationId),
+      ).kind,
+      'intersect',
+    );
+    assert.equal(sourceTargetPlacement(evaluation), 'composition');
+    assert.equal(evaluation.nodeIds.length, 1);
+    assert.ok(target.contextTargetIds.length >= 2);
+  }
+});
+
+test('inline constructors retain failed consumer inputs without changing separate definitions', async () => {
+  const source = `import {sphere, box, intersect} from '@code3d/core';
+const separate = sphere(5);
+export default intersect([sphere(1), box(2, 2, 2).originOffset(-20, 0, 0)]);`;
+  const module = await compileProject(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  assert.ok(module.diagnostic);
+  const at = (call: string) =>
+    defined(
+      ModelViewport.prototype['sourceTargetAt'].call(
+        {module},
+        '/model.ts',
+        source.indexOf(call) + call.indexOf('(') + 1,
+      ),
+    );
+  const inline = at('sphere(1)');
+  assert.ok(inline.tool);
+  assert.equal(inline.evaluations[0].nodeIds.length, 2);
+  assert.equal(defined(inline.evaluations[0].focusNodeIds).length, 1);
+  assert.equal(sourceTargetPlacement(inline.evaluations[0]), 'composition');
+  assert.equal(
+    sourceTargetPlacement(at('sphere(5)').evaluations[0]),
+    'standalone',
+  );
+});
+
 test('failed loft calls retain their complete input collection and focused section across aliases and containers', async () => {
   for (const [call, focus, focusCount] of [
     ['loft([start, via, end])', 'via', 1],
