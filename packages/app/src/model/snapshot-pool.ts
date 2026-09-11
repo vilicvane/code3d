@@ -9,7 +9,6 @@ import type {
 export type SnapshotPoolOptions = {
   concurrency?: number;
   createWorker?: () => Worker;
-  taskTimeoutMs?: number;
   cancellationGraceMs?: number;
 };
 export type SnapshotPoolStats = {
@@ -286,11 +285,6 @@ export class SnapshotWorkerPool {
       reject: rejectReady,
     };
     this.slots[position] = slot;
-    const timeout = setTimeout(
-      () => slot.reject(new Error('Snapshot worker initialization timed out.')),
-      this.options.taskTimeoutMs ?? 120_000,
-    );
-    ready.finally(() => clearTimeout(timeout)).catch(() => {});
     worker.onmessage = ({data}: MessageEvent<SnapshotWorkerResponse>) => {
       slot.nativeBytes = data.nativeBytes;
       if (data.kind === 'ready') {
@@ -339,12 +333,7 @@ export class SnapshotWorkerPool {
           batch.sourceRef ? locateModelError(error, batch.sourceRef) : error,
         );
       };
-      const timeout = setTimeout(
-        () => fail(new Error('Snapshot worker task timed out.')),
-        this.options.taskTimeoutMs ?? 120_000,
-      );
       const cleanup = () => {
-        clearTimeout(timeout);
         slot.receive = undefined;
         slot.inputBytes = 0;
       };

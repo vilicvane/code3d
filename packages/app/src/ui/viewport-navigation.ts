@@ -144,7 +144,7 @@ export class ViewportNavigation extends ArcballControls {
     });
   }
 
-  resetView(frame: Quaternion, framing?: CameraFraming): void {
+  resetView(framing?: CameraFraming): void {
     const pose = this.capturePose();
     const viewHeight = framing
       ? framing.distance / perspectiveDistance(1)
@@ -155,10 +155,7 @@ export class ViewportNavigation extends ArcballControls {
       distance: perspectiveDistance(viewHeight),
       projection: 'perspective',
       projectionMix: 1,
-      orientation: viewOrientation(
-        this.defaultDirection.clone().applyQuaternion(frame),
-        this.defaultUp.clone().applyQuaternion(frame),
-      ),
+      orientation: viewOrientation(this.defaultDirection, this.defaultUp),
     });
   }
 

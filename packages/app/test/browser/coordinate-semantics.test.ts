@@ -136,8 +136,8 @@ test(
           frame: {
             step: grid.step,
             plane: grid.plane,
-            origin: grid['origin'].toArray(),
-            quaternion: grid['frame'].toArray(),
+            axisOffset: grid.material.uniforms.axisOffset.value.toArray(),
+            forward: grid.material.uniforms.forward.value.toArray(),
           },
           locked: grid['locked'],
           active: active && {
@@ -252,8 +252,8 @@ export const assembly = group([base, part]);`;
             .getWorldPosition(selected.position.clone())
             .toArray(),
           grid: {
-            origin: grid['origin'].toArray(),
-            frame: grid['frame'].toArray(),
+            axisOffset: grid.material.uniforms.axisOffset.value.toArray(),
+            forward: grid.material.uniforms.forward.value.toArray(),
             step: grid.step,
           },
           locked: grid['locked'],
@@ -474,7 +474,6 @@ test(
       await waitVertexSelection(page, 3);
       const before = await vertexState(page);
       assertVertexAlignment(before);
-      assert.deepEqual(before.gridOrigin, [0, 0, 0]);
       assert.ok(
         before.vertices
           .find(v => v.id === 3)!
@@ -903,11 +902,9 @@ async function vertexState(page: Page) {
     selection.guide.updateWorldMatrix(true, true);
     camera.updateWorldMatrix(true, false);
     const output = occurrence.node.mesh!;
-    const grid = viewport['rendering'].grid;
     return {
       source: codeEditor.editor.getValue(),
       origin: occurrence.node.origin,
-      gridOrigin: grid['origin'].toArray(),
       vertices: selection.mesh.vertexIds.map((id, i) => {
         const candidate = selection.guide.position
           .clone()

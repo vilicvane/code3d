@@ -75,9 +75,7 @@ export class NpmRegistry {
   }
 
   private async json(url: string, name: string) {
-    const response = await this.request(url, {
-      signal: AbortSignal.timeout(30_000),
-    }).catch(error => {
+    const response = await this.request(url).catch(error => {
       throw new Error(
         `Unable to fetch npm package ${name}. Check the package name and network connection. ${error instanceof Error ? error.message : String(error)}`,
         {cause: error},
@@ -103,9 +101,7 @@ export class NpmRegistry {
       if (await matchesIntegrity(bytes, pkg.integrity)) return bytes;
       await cache!.delete(key);
     }
-    const response = await this.request(pkg.tarball, {
-      signal: AbortSignal.timeout(120_000),
-    });
+    const response = await this.request(pkg.tarball);
     if (!response.ok)
       throw new Error(
         `Unable to download ${pkg.name}@${pkg.version}: HTTP ${response.status}`,

@@ -426,9 +426,9 @@ export class ModelViewport {
             if (this.controls.enabled)
               this.controls.setViewDirection(direction, up);
           },
-          onReset: frame => {
+          onReset: () => {
             if (!this.controls.enabled) return;
-            this.controls.resetView(frame, this.cameraFraming(this.root));
+            this.controls.resetView(this.cameraFraming(this.root));
             this.hasFramedView = true;
           },
         },
@@ -1558,8 +1558,6 @@ export class ModelViewport {
       this.onTopologySelection({kind: 'cancel'});
     }
     this.transformGizmo.detach();
-    this.coordinateReference?.setTarget(undefined);
-    this.rendering.grid.target = undefined;
     this.clearImpactHighlights();
     this.clearAllDecorations();
     this.disposeRoot();
@@ -1586,8 +1584,6 @@ export class ModelViewport {
       return;
     }
     this.selectedKey = key;
-    this.coordinateReference?.setTarget(occurrence.object);
-    this.rendering.grid.target = occurrence.object;
     this.rebuildSelectionHighlight();
     this.rebuildImpactHighlights();
     this.updateDecorationVisibilities();

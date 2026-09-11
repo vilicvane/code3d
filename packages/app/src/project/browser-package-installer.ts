@@ -152,9 +152,7 @@ export class BrowserPackageInstaller {
                 await mapProjectIO(
                   Object.entries(local.files),
                   async ([path, asset]) => {
-                    const response = await fetch(asset.url, {
-                      signal: AbortSignal.timeout(30_000),
-                    });
+                    const response = await fetch(asset.url);
                     if (!response.ok)
                       throw new Error(
                         `Unable to load workspace file: ${pkg.name}/${path}`,

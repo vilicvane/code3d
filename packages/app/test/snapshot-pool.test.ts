@@ -5,6 +5,7 @@ import type {
 } from '@code3d/core/tooling';
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
+import {setImmediate as nextTurn} from 'node:timers/promises';
 import type {
   SnapshotWorkerRequest,
   SnapshotWorkerResponse,
@@ -27,6 +28,8 @@ type Simulation = {
   started: string[];
   fault?: 'crash-once' | 'stall-once' | 'always';
   completed?: () => void;
+  initializeDelay?: number;
+  queryDelay?: number;
 };
 class ComputeWorker {
   onmessage: ((event: MessageEvent<SnapshotWorkerResponse>) => void) | null =
@@ -50,7 +53,10 @@ class ComputeWorker {
   postMessage(original: SnapshotWorkerRequest, transfers: Transferable[] = []) {
     const message = structuredClone(original, {transfer: transfers});
     if (message.kind === 'initialize') {
-      setTimeout(() => this.send({kind: 'ready', nativeBytes: 128}), 0);
+      setTimeout(
+        () => this.send({kind: 'ready', nativeBytes: 128}),
+        this.state.initializeDelay ?? 0,
+      );
       return;
     }
     this.running = true;
@@ -108,9 +114,9 @@ class ComputeWorker {
         nativeBytes: 1024,
       });
       this.state.completed?.();
-      setTimeout(next, 5);
+      setTimeout(next, this.state.queryDelay ?? 5);
     };
-    setTimeout(next, 5);
+    setTimeout(next, this.state.queryDelay ?? 5);
   }
   private finish() {
     if (this.running) {
@@ -155,7 +161,6 @@ function fixture(fault?: Simulation['fault'], maximumBytes = 2 * 1024 ** 3) {
     },
     {
       concurrency: 2,
-      taskTimeoutMs: 1000,
       cancellationGraceMs: 30,
       createWorker: () => {
         const worker = new ComputeWorker(state);
@@ -221,19 +226,53 @@ test('dispatches costly geometry first, streams independent results and shares o
   assert.equal(f.external(), 0);
 });
 
-for (const fault of ['crash-once', 'stall-once'] as const) {
-  test(`${fault} replaces its owner and retries only unfinished queries`, async () => {
-    const f = fixture(fault);
-    try {
-      await f.pool.compute(f.batches, () => {});
-      assert.equal(f.pool.stats.retries, 1);
-      assert.equal(f.values.size, 32);
-      assert.equal(f.state.created, 3);
-    } finally {
-      f.pool.dispose();
+test('a worker crash replaces its owner and retries only unfinished queries', async () => {
+  const f = fixture('crash-once');
+  try {
+    await f.pool.compute(f.batches, () => {});
+    assert.equal(f.pool.stats.retries, 1);
+    assert.equal(f.values.size, 32);
+    assert.equal(f.state.created, 3);
+  } finally {
+    f.pool.dispose();
+  }
+});
+
+test('worker startup and queries can exceed two minutes without restarting or losing results', async t => {
+  t.mock.timers.enable({apis: ['setTimeout']});
+  const f = fixture();
+  f.state.initializeDelay = 125_000;
+  f.state.queryDelay = 125_000;
+  let settled = false;
+  const pending = f.pool
+    .compute(f.batches, () => {})
+    .finally(() => {
+      settled = true;
+    });
+  try {
+    await nextTurn();
+    t.mock.timers.tick(121_000);
+    await nextTurn();
+    assert.equal(settled, false);
+    assert.equal(f.state.created, 2);
+    assert.equal(f.pool.stats.retries, 0);
+    t.mock.timers.tick(4000);
+    await nextTurn();
+    assert.equal(f.state.active, 2);
+    for (let i = 0; i < 20 && !settled; i++) {
+      t.mock.timers.tick(125_000);
+      await nextTurn();
     }
-  });
-}
+    assert.equal(settled, true);
+    await pending;
+    assert.equal(f.values.size, 32);
+    assert.equal(f.state.created, 2);
+    assert.equal(f.pool.stats.retries, 0);
+  } finally {
+    f.pool.dispose();
+    await pending.catch(() => {});
+  }
+});
 
 test('cancellation keeps completed work, settles all owners, and the next run finishes the suffix', async () => {
   const f = fixture();

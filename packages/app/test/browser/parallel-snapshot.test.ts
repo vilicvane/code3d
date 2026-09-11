@@ -138,7 +138,7 @@ test(
 );
 
 test(
-  'a terminated compute worker preserves completed results and retries its unfinished batch',
+  'a crashed compute worker preserves completed results and retries its unfinished batch',
   {timeout: 90_000},
   async t => {
     const page = await fixture(t);
@@ -150,7 +150,7 @@ test(
     valid(reference);
     const result = await compile(
       page,
-      {source, concurrency: 2, disabled: true, terminateChild: true},
+      {source, concurrency: 2, disabled: true, crashChild: true},
       true,
     );
     valid(result);

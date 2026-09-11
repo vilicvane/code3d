@@ -33,6 +33,11 @@ declare const window: Window & {
     };
   }[];
   cancelledCompile: Promise<string>;
+  delayedOperation: {
+    settled: boolean;
+    release?: () => void;
+    result: Promise<string>;
+  };
 };
 
 let browser: Browser;
@@ -123,6 +128,213 @@ const runtimePhases = [
   'initializing-runtime',
   'evaluating-model',
 ];
+
+test('project preparation can exceed two minutes and still compile normally', async t => {
+  const page = await fixture(t);
+  await page.clock.install();
+  await page.evaluate(async () => {
+    client.dispose();
+    const {ModelCompilerClient} = await import('/src/model/compiler-client.ts');
+    let release!: () => void;
+    const preparation = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    window.client = new ModelCompilerClient(
+      {async readFile() {}, async stat() {}},
+      undefined,
+      () => preparation,
+    );
+    window.delayedOperation = {
+      settled: false,
+      release,
+      result: compile().then(
+        module => {
+          window.delayedOperation.settled = true;
+          return module.diagnostic?.summary ?? 'compiled';
+        },
+        error => {
+          window.delayedOperation.settled = true;
+          return error.message;
+        },
+      ),
+    };
+  });
+  await page.clock.fastForward(300_000);
+  assert.deepEqual(
+    await page.evaluate(() => ({
+      pending: client.isCompiling(),
+      settled: window.delayedOperation.settled,
+    })),
+    {pending: true, settled: false},
+  );
+  assert.equal(
+    await page.evaluate(async () => {
+      window.delayedOperation.release!();
+      try {
+        return await window.delayedOperation.result;
+      } finally {
+        client.dispose();
+      }
+    }),
+    'compiled',
+  );
+});
+
+for (const operation of ['export', 'sketch', 'clear-build-cache'] as const) {
+  test(`${operation} waits for its result beyond the former deadline`, async t => {
+    const page = await fixture(t);
+    await page.clock.install();
+    await page.evaluate(async operation => {
+      if (operation === 'clear-build-cache') {
+        client.dispose();
+        const {ModelCompilerClient} =
+          await import('/src/model/compiler-client.ts');
+        window.client = new ModelCompilerClient(
+          {async readFile() {}, async stat() {}},
+          undefined,
+          undefined,
+          'deadline-fixture',
+        );
+      }
+      const module = await compile(
+        undefined,
+        operation === 'sketch'
+          ? "import {sketch} from '@code3d/core'; const value = sketch([['point', 1, [0, 0]]]);"
+          : undefined,
+      );
+      const delayReply = (worker: Worker) => {
+        const receive = worker.onmessage!;
+        worker.onmessage = event => {
+          if (
+            event.data.kind ===
+            (operation === 'clear-build-cache'
+              ? 'build-cache-cleared'
+              : operation)
+          ) {
+            window.delayedOperation.release = () => receive.call(worker, event);
+          } else receive.call(worker, event);
+        };
+      };
+      if (operation === 'clear-build-cache') {
+        const create = client['createCompiler'].bind(client);
+        client['createCompiler'] = () => {
+          const worker = create();
+          delayReply(worker);
+          return worker;
+        };
+      } else delayReply(client['executor']);
+      let pending: Promise<string>;
+      if (operation === 'clear-build-cache') {
+        pending = client.clearBuildCache().then(() => 'cleared');
+      } else if (operation === 'export') {
+        const node = module.fallback!;
+        pending = client
+          .export(
+            module,
+            [
+              {
+                nodeId: node.nodeId,
+                kind: 'solid',
+                name: node.name,
+                transform: node.transform,
+              },
+            ],
+            {
+              format: 'step',
+              scale: 1,
+              upAxis: 'y',
+              tolerance: 0.1,
+              angularTolerance: 0.1,
+              binary: false,
+            },
+          )
+          .then(blob => blob.text());
+      } else {
+        const sketch = [...module.sketches.values()][0];
+        pending = client
+          .previewSketchDrag([sketch], {
+            id: 1,
+            position: [60, 20],
+            editable: new Map([[1, [true, true]]]),
+            data: sketch.data,
+          })
+          .then(preview => JSON.stringify(preview.data));
+      }
+      window.delayedOperation = {
+        settled: false,
+        result: pending.then(
+          value => {
+            window.delayedOperation.settled = true;
+            return value;
+          },
+          error => {
+            window.delayedOperation.settled = true;
+            return error.message;
+          },
+        ),
+      };
+    }, operation);
+    await page.waitForFunction(() => !!window.delayedOperation.release);
+    const workers = await page.evaluate(() => [
+      window.compilerWorkers,
+      window.executorWorkers,
+    ]);
+    await page.clock.fastForward(300_000);
+    assert.equal(
+      await page.evaluate(() => window.delayedOperation.settled),
+      false,
+    );
+    assert.deepEqual(
+      await page.evaluate(() => [
+        window.compilerWorkers,
+        window.executorWorkers,
+      ]),
+      workers,
+    );
+    const result = await page.evaluate(async () => {
+      window.delayedOperation.release!();
+      return window.delayedOperation.result;
+    });
+    if (operation === 'export') assert.match(result, /ISO-10303-21/);
+    else if (operation === 'sketch')
+      assert.deepEqual(JSON.parse(result), [{id: 1, parameters: [60, 20]}]);
+    else assert.equal(result, 'cleared');
+
+    if (operation === 'sketch') {
+      const cancelled = await page.evaluate(async () => {
+        const module = await compile(
+          undefined,
+          "import {sketch} from '@code3d/core'; const value = sketch([['point', 1, [0, 0]]]);",
+        );
+        const sketch = [...module.sketches.values()][0];
+        const workers = window.executorWorkers;
+        const pending = client
+          .previewSketchDrag([sketch], {
+            id: 1,
+            position: [10, 5],
+            editable: new Map([[1, [true, true]]]),
+            data: sketch.data,
+          })
+          .then(
+            () => 'unexpected success',
+            error => error.message,
+          );
+        client.cancel();
+        const error = await pending;
+        const rebuilt = await compile();
+        return {
+          error,
+          restarted: window.executorWorkers > workers,
+          diagnostic: rebuilt.diagnostic,
+        };
+      });
+      assert.match(cancelled.error, /superseded/);
+      assert.equal(cancelled.restarted, true);
+      assert.equal(cancelled.diagnostic, undefined);
+    }
+    await page.evaluate(() => client.dispose());
+  });
+}
 
 test(
   'reports loading before WASM reads and reuses the initialized runtime on edits',

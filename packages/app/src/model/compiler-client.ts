@@ -31,7 +31,6 @@ import type {SketchDrag, SketchDragPreview} from './sketch-drag';
 type PendingRequest = {
   id: number;
   reject(error: Error): void;
-  timeout?: number;
 } & (
   | {
       kind: 'compile';
@@ -77,7 +76,6 @@ export class ModelCompilerClient {
   private cacheReset?: {
     promise: Promise<void>;
     finish(error?: Error): void;
-    timeout: number;
   };
   private publication?: {
     rootPath: string;
@@ -140,7 +138,6 @@ export class ModelCompilerClient {
           resolve,
           reject,
           onProgress,
-          timeout: this.deadline(id, 120_000),
         };
         const entry = JSON.stringify([rootPath, designContext]);
         if (persist && this.projectIdentity && entry !== this.lastEntry) {
@@ -205,17 +202,6 @@ export class ModelCompilerClient {
     this.cacheReset = {
       promise,
       finish,
-      timeout: window.setTimeout(
-        () =>
-          runInAction(() => {
-            this.finishCacheReset(
-              new Error('Clearing the build cache timed out.'),
-            );
-            this.cancel();
-            this.restartCompiler();
-          }),
-        30_000,
-      ),
     };
     this.compiler.postMessage({
       kind: 'clear-build-cache',
@@ -228,7 +214,6 @@ export class ModelCompilerClient {
     const pending = this.cacheReset;
     if (!pending) return;
     this.cacheReset = undefined;
-    window.clearTimeout(pending.timeout);
     pending.finish(error);
   }
   canExport(module: ModelModule): boolean {
@@ -254,7 +239,6 @@ export class ModelCompilerClient {
         id,
         resolve,
         reject,
-        timeout: this.deadline(id, 30_000),
       };
       this.sendExecution({kind: 'export', id, compileId, instances, options});
     });
@@ -275,7 +259,6 @@ export class ModelCompilerClient {
     }
     this.cancelExecution();
     if (!pending) return false;
-    window.clearTimeout(pending.timeout);
     this.exportable = undefined;
     pending.reject(
       new Error(
@@ -286,8 +269,9 @@ export class ModelCompilerClient {
             : 'Model operation cancelled because the project changed.',
       ),
     );
-    if (pending.kind !== 'compile' && pending.kind !== 'sketch')
-      this.restartExecutor();
+    // Export, topology inspection and sketch solving are synchronous native
+    // operations. Explicit cancellation releases their Worker immediately.
+    if (pending.kind !== 'compile') this.restartExecutor();
     return true;
   }
 
@@ -317,7 +301,6 @@ export class ModelCompilerClient {
         id,
         resolve,
         reject,
-        timeout: this.deadline(id, 15_000),
       };
       this.sendExecution({kind: 'sketch', id, layers, drag});
     });
@@ -356,28 +339,6 @@ export class ModelCompilerClient {
     });
   }
 
-  private deadline(id: number, milliseconds: number): number {
-    return window.setTimeout(
-      () =>
-        runInAction(() => {
-          const pending = this.pending;
-          if (pending?.id !== id) return;
-          this.pending = null;
-          if (pending.kind === 'compile') this.restartCompiler();
-          this.restartExecutor();
-          pending.reject(
-            new Error(
-              pending.kind === 'export'
-                ? 'Export exceeded 30 seconds and was terminated. Run the model again before retrying.'
-                : pending.kind === 'sketch'
-                  ? 'Sketch solving exceeded 15 seconds and was terminated.'
-                  : 'Project preparation exceeded 120 seconds and was terminated.',
-            ),
-          );
-        }),
-      milliseconds,
-    );
-  }
   private sendExecution(message: ExecutorRequest): void {
     this.executor.postMessage(message);
   }
@@ -425,14 +386,10 @@ export class ModelCompilerClient {
         });
     }
   }
-  private progress(id: number, phase: CompilationPhase, cached = false): void {
+  private progress(id: number, phase: CompilationPhase): void {
     const pending = this.pending;
     if (pending?.kind !== 'compile' || pending.id !== id) return;
     this.phase = phase;
-    if (phase === 'evaluating-model' && !cached) {
-      window.clearTimeout(pending.timeout);
-      pending.timeout = undefined;
-    }
     pending.onProgress?.(phase);
   }
   private createCompiler(): Worker {
@@ -552,8 +509,7 @@ export class ModelCompilerClient {
             ? this.runningExecution
             : undefined;
         if (data.kind === 'progress') {
-          if (running)
-            this.progress(running.compileId, data.phase, running.cached);
+          if (running) this.progress(running.compileId, data.phase);
           return;
         }
         if (running && (data.kind === 'result' || data.kind === 'cancelled')) {
@@ -593,7 +549,6 @@ export class ModelCompilerClient {
         const pending = this.pending;
         if (!pending || data.kind === 'cancelled' || pending.id !== data.id)
           return;
-        window.clearTimeout(pending.timeout);
         this.pending = null;
         if (!data.ok) pending.reject(new ModelDiagnosticError(data.diagnostic));
         else if (pending.kind === 'export' && data.kind === 'export')
@@ -622,7 +577,6 @@ export class ModelCompilerClient {
   private acceptExecution(module: ModelModule, executionId: number): void {
     const pending = this.pending;
     if (pending?.kind !== 'compile') return;
-    window.clearTimeout(pending.timeout);
     this.pending = null;
     this.exportable = {module, compileId: executionId};
     if (!module.diagnostic && this.compiledArtifact)
@@ -643,7 +597,6 @@ export class ModelCompilerClient {
   private fail(id: number, error: Error): void {
     const pending = this.pending;
     if (pending?.id !== id) return;
-    window.clearTimeout(pending.timeout);
     this.pending = null;
     pending.reject(error);
   }
