@@ -272,5 +272,8 @@ tab 后允许无活动文档，保留文档内容、撤销和视图状态以便�
 Monaco marker，无法归属源码的项目/Worker 错误才使用全局入口；安装失败由包
 状态处理。viewport 诊断卡片仅接受显式 `viewport: 'sketch-source-sync'` 的草图同步提示，
 不再因模型关联或阶段预览失败而展示普通异常。顶部状态独立按求值归属判断错误，
-不依赖卡片白名单；交互提交错误仍使用单独的工具反馈条。成功求解的草图 warning 及修复 actions 使用同一诊断与事务接口，
+不依赖卡片白名单；交互提交错误仍使用单独的工具反馈条。
+ModelPreviewState 的 statusDiagnostic 从当前 presentation 派生，顶部 Model error
+使用它显示原生 tooltip，并在有 sourceRef 时支持点击/Enter/Space，复用 revealSource 跨文件定位。
+忙碌或恢复 Ready 时同步移除详情和跳转资格，不保存另一份待跳转错误。成功求解的草图 warning 及修复 actions 使用同一诊断与事务接口，
 具体作用域和安全写回见[草图](sketch.md#诊断与源码同步)。
