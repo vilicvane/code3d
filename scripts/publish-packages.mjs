@@ -8,17 +8,56 @@ import {
   runNpm,
 } from './package-artifacts.mjs';
 
+const dependencyFields = [
+  'dependencies',
+  'peerDependencies',
+  'optionalDependencies',
+];
+
+/** Published edges retain the current dependency as their minimum supported version. */
+export function validatePackageDependencies(packages) {
+  const publicByName = new Map(
+    packages.filter(pkg => !pkg.private).map(pkg => [pkg.name, pkg]),
+  );
+  for (const pkg of publicByName.values())
+    for (const field of dependencyFields)
+      for (const [name, range] of Object.entries(pkg[field] ?? {})) {
+        const dependency = publicByName.get(name);
+        if (!dependency) continue;
+        if (
+          ![
+            dependency.version,
+            '^' + dependency.version,
+            '~' + dependency.version,
+          ].includes(range)
+        )
+          throw new Error(
+            `${pkg.name} ${field}.${name} must use ${dependency.version} as its minimum version (exact, ^ or ~); found ${range}.`,
+          );
+      }
+}
+
 export function releasePackages(packages, tag) {
   const version = /^v(\d+\.\d+\.\d+(?:-[\da-zA-Z.-]+)?)$/.exec(tag)?.[1];
   if (!version)
     throw new Error(
       'Release tag must be v<package version>, for example v0.0.1-alpha.2.',
     );
-  const selected = packages.filter(pkg => pkg.version === version);
+  const publicList = packages.filter(pkg => !pkg.private);
+  const selected = publicList.filter(pkg => pkg.version === version);
   if (!selected.length)
     throw new Error(
       `No public package has version ${version}. Update package.json before tagging.`,
     );
+  validatePackageDependencies(publicList);
+  const selectedNames = new Set(selected.map(pkg => pkg.name));
+  for (const pkg of publicList)
+    for (const field of dependencyFields)
+      for (const name of Object.keys(pkg[field] ?? {}))
+        if (selectedNames.has(name) && !selectedNames.has(pkg.name))
+          throw new Error(
+            `${pkg.name} must join release ${version}: ${field} references released package ${name}.`,
+          );
   const ordered = new Map();
   const visiting = new Set();
   function visit(pkg) {
@@ -26,7 +65,11 @@ export function releasePackages(packages, tag) {
     if (visiting.has(pkg.name))
       throw new Error(`Release dependency cycle involving ${pkg.name}`);
     visiting.add(pkg.name);
-    const dependencies = {...pkg.dependencies, ...pkg.peerDependencies};
+    const dependencies = {
+      ...pkg.dependencies,
+      ...pkg.peerDependencies,
+      ...pkg.optionalDependencies,
+    };
     for (const dependency of selected)
       if (Object.hasOwn(dependencies, dependency.name)) visit(dependency);
     visiting.delete(pkg.name);
@@ -39,12 +82,12 @@ export function releasePackages(packages, tag) {
 async function main() {
   const tag = process.env.CODE3D_RELEASE_TAG;
   const args = process.argv.slice(2);
-  const stage = args.includes('--stage');
+  const publish = args.includes('--publish');
   if (
     args.length > 1 ||
-    args.some(arg => !['--plan', '--stage', '--dry-run'].includes(arg))
+    args.some(arg => !['--plan', '--publish', '--dry-run'].includes(arg))
   )
-    throw new Error('Use --plan, --dry-run or --stage.');
+    throw new Error('Use --plan, --dry-run or --publish.');
   const packages = releasePackages(await publicPackages(), tag);
   if (args.includes('--plan')) {
     for (const pkg of packages) console.log(`${pkg.name}@${pkg.version}`);
@@ -96,12 +139,11 @@ async function main() {
     const label = `${pkg.name}@${pkg.version}`;
     let status;
     if (published) status = 'Already published; skipped';
-    else if (!stage) status = 'Would stage';
+    else if (!publish) status = 'Would publish';
     else {
-      // Stage does not support workspaces. Publish the exact tested tarball.
+      // Publish the exact tested tarball without running workspace lifecycle hooks.
       process.stdout.write(
         runNpm([
-          'stage',
           'publish',
           filename,
           '--access=public',
@@ -110,7 +152,7 @@ async function main() {
           '--registry=https://registry.npmjs.org',
         ]),
       );
-      status = 'Staged; awaiting approval on npm';
+      status = 'Published';
     }
     console.log(`${label}: ${status}`);
     if (process.env.GITHUB_STEP_SUMMARY)

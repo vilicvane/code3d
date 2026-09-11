@@ -17,12 +17,19 @@ import {
   root,
   run,
 } from './package-artifacts.mjs';
-import {releasePackages} from './publish-packages.mjs';
+import {
+  releasePackages,
+  validatePackageDependencies,
+} from './publish-packages.mjs';
 
+const workspaceManifests = new Map(
+  (await publicPackages()).map(pkg => [pkg.name, pkg]),
+);
 const artifacts = await packPackages();
 const consumer = await mkdtemp(path.join(tmpdir(), 'code3d-packages-'));
 try {
   const typeImports = [];
+  const installedManifests = [];
   await writeFile(
     path.join(consumer, 'package.json'),
     JSON.stringify({private: true, type: 'module'}),
@@ -46,6 +53,18 @@ try {
       await readFile(path.join(directory, 'package.json'), 'utf8'),
     );
     assert.equal(manifest.version, pkg.version);
+    installedManifests.push(manifest);
+    for (const field of [
+      'dependencies',
+      'peerDependencies',
+      'optionalDependencies',
+      'peerDependenciesMeta',
+    ])
+      assert.deepEqual(
+        manifest[field],
+        workspaceManifests.get(pkg.name)[field],
+        `${pkg.name} tarball ${field} matches its release manifest`,
+      );
     for (const [entry, target] of Object.entries(manifest.exports ?? {})) {
       if (typeof target !== 'object' || !target.types) continue;
       const specifier = pkg.name + (entry === '.' ? '' : entry.slice(1));
@@ -74,6 +93,7 @@ try {
         );
     }
   }
+  validatePackageDependencies(installedManifests);
   for (const name of ['flo-boolean', '@ctrl/tinycolor', 'commander'])
     await assert.rejects(stat(path.join(consumer, 'node_modules', name)), {
       code: 'ENOENT',
@@ -144,7 +164,7 @@ try {
   );
   if (process.env.CODE3D_RELEASE_TAG) {
     const selected = releasePackages(
-      await publicPackages(),
+      installedManifests,
       process.env.CODE3D_RELEASE_TAG,
     ).map(pkg => artifacts.find(artifact => artifact.name === pkg.name));
     const releaseConsumer = await mkdtemp(
