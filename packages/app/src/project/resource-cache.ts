@@ -57,7 +57,7 @@ export class ResourceCache {
         mode: 'cors',
         credentials: 'omit',
         cache: 'no-cache',
-        signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
+        signal,
       });
       if (!response.ok) {
         await response.body?.cancel();

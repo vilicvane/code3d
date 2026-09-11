@@ -100,10 +100,10 @@ for (const installed of [false, true] as const) {
             conflict = error.message;
           }
           const restored = await compile(source);
-          const sketchModule =
-            await compile(`import {sketch} from '@code3d/core';
+          const sketchSource = `import {sketch} from '@code3d/core';
             const value = sketch([['point', 1, [0,0]], ['point', 2, [38,2]], ['line', 3, [1,2]]],
-              {constraints: [['horizontal', 3], ['length', 3, 40]]});`);
+              {constraints: [['horizontal', 3], ['length', 3, 40]]});`;
+          const sketchModule = await compile(sketchSource);
           const sketch = [...sketchModule.sketches.values()][0];
           const gesture: import('../../src/model/sketch-drag.ts').SketchDrag = {
             id: 2,
@@ -121,8 +121,13 @@ for (const installed of [false, true] as const) {
           );
           client.cancel();
           const cancelled = await pending;
-          const next = await client.previewSketchDrag([sketch], {
+          // Cancellation invalidates the executor's snapshot; a new compile
+          // establishes the runtime used for the next gesture.
+          const rebuilt = await compile(sketchSource);
+          const nextSketch = [...rebuilt.sketches.values()][0];
+          const next = await client.previewSketchDrag([nextSketch], {
             ...gesture,
+            data: nextSketch.data,
             position: [70, 30],
           });
           return {

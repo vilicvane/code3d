@@ -272,7 +272,7 @@ test(
 );
 
 test(
-  'coordinate indicator selects six local views, flips the facing axis and resets the view without editing the model',
+  'coordinate indicator selects six scene views, flips the facing axis and resets the view without editing the model',
   {timeout: 120_000},
   async t => {
     const {page, errors} = await openNavigationPage(t);
@@ -280,14 +280,14 @@ test(
       "import {box} from '@code3d/core'; export default box(24, 6, 14).material('#8ed5d1');";
     await setSource(page, source);
     const initial = await cameraState(page);
-    // An occurrence's local frame can differ from world axes inside an assembly.
+    // A member's placement must not rotate the scene's navigation frame.
     const frame = await page.evaluate(() => {
       const viewport = window.navigationApp.viewport;
       const occurrence = viewport.getSelected()!;
       occurrence.object.rotation.set(0.3, 0.5, 0.2);
       occurrence.object.updateWorldMatrix(true, true);
       const quaternion = viewport['camera'].quaternion.clone();
-      occurrence.object.getWorldQuaternion(quaternion);
+      quaternion.identity();
       viewport['controls'].focus.set(3, 4, 5);
       viewport['controls'].syncCamera();
       return quaternion.toArray();
@@ -1030,7 +1030,7 @@ function near(actual: number, expected: number) {
 }
 
 test(
-  'adaptive work-plane grids follow all six local axis views, scale, pan and render mode',
+  'adaptive work-plane grids follow all six scene axis views, scale, pan and render mode',
   {timeout: 120_000},
   async t => {
     const {page, errors} = await openNavigationPage(t);
@@ -1047,8 +1047,7 @@ test(
           step: grid.step,
         };
       });
-    // The same selected occurrence drives both the indicator and grid, including
-    // instance placement and live transform previews.
+    // Member placement and live transforms must not move the scene grid or axes.
     await page.evaluate(() => {
       const viewport = window.navigationApp.viewport;
       const target = viewport['occurrences'].get(
@@ -1135,6 +1134,138 @@ test(
     assert.deepEqual(errors, []);
   },
 );
+
+test('composition grids and navigation axes stay fixed through member selection and live placement previews', async t => {
+  const {page, errors} = await openNavigationPage(t);
+  const source = `import {box, group} from '@code3d/core';
+const base = box(24, 6, 14);
+const tilted = box(10, 4, 8).relate(self =>
+  self.on(base.up).offset(0, 10, 0).rotate(20, 30, 45));
+const members = [base, tilted];
+const inner = group(members).rotate(0, 25, 0);
+export const outer = group([inner, box(6, 12, 4)], 'Grid assembly');
+`;
+  await page.evaluate(source => {
+    window.navigationApp.codeEditor.editor.setValue(source);
+  }, source);
+  await page.waitForFunction(
+    () =>
+      window.navigationApp.viewport['module']?.fallback?.name ===
+      'Grid assembly',
+  );
+
+  for (const token of ['members =', 'inner =', 'outer =', 'tilted =']) {
+    const result = await page.evaluate(
+      ({source, token}) => {
+        const {viewport: v, codeEditor} = window.navigationApp;
+        v.selectBySourceOffset(
+          codeEditor.currentFile()!,
+          source.indexOf(token) + 1,
+        );
+        const controls = v['controls'];
+        controls.restorePose(
+          controls.defaultPose(v['cameraFraming'](v['root'])!),
+        );
+        v.setRenderMode('modeling');
+        const camera = v['camera'];
+        const rendering = v['rendering'];
+        const grid = rendering.grid;
+        const sample = () => {
+          v['coordinateReference']!.update();
+          rendering.updateCameraRange(
+            controls.focus,
+            camera.position.distanceTo(controls.focus),
+          );
+          rendering.renderFrame();
+          const u = grid.material.uniforms;
+          return {
+            plane: grid.plane,
+            forward: u.forward.value.toArray(),
+            right: u.right.value.toArray(),
+            up: u.up.value.toArray(),
+            focusPoint: u.focusPoint.value.toArray(),
+            axisOffset: u.axisOffset.value.toArray(),
+            indicator: [
+              ...document.querySelectorAll('.viewport-coordinate-marker'),
+            ].map(marker => [
+              marker.getAttribute('cx'),
+              marker.getAttribute('cy'),
+            ]),
+          };
+        };
+        const initial = sample();
+        const members = [...v['occurrences'].values()];
+        const placed = members.filter(
+          ({object}) =>
+            object.position.length() > 0.01 ||
+            Math.abs(object.quaternion.w) < 0.99,
+        ).length;
+        const samples = members.flatMap(({key}) => {
+          v['selectKey'](key, false);
+          const selected = sample();
+          v.setOccurrenceTranslationPreview([key], [9, -3, 7]);
+          const moved = sample();
+          v.clearOccurrenceTranslationPreview([key]);
+          return [selected, moved, sample()];
+        });
+        return {initial, samples, placed, count: members.length};
+      },
+      {source, token},
+    );
+    assert.equal(result.initial.plane, 'XZ');
+    if (token !== 'tilted =') {
+      assert.ok(result.count >= 2);
+      assert.ok(
+        result.placed > 0,
+        'Exercise real nonidentity member placements',
+      );
+    } else {
+      assert.equal(
+        result.count,
+        1,
+        'Standalone inspection uses model-local coordinates',
+      );
+    }
+    for (const sample of result.samples) {
+      assert.deepEqual(sample, result.initial, token);
+    }
+  }
+  // Check the tilted member while still showing the whole collection.
+  await page.evaluate(source => {
+    const {viewport, codeEditor} = window.navigationApp;
+    viewport.selectBySourceOffset(
+      codeEditor.currentFile()!,
+      source.indexOf('members =') + 1,
+    );
+    viewport['selectKey']('source/1', false);
+    viewport['controls'].restorePose(
+      viewport['controls'].defaultPose(
+        viewport['cameraFraming'](viewport['root'])!,
+      ),
+    );
+  }, source);
+  if (process.env.CODE3D_GRID_SCREENSHOT)
+    await page.screenshot({path: process.env.CODE3D_GRID_SCREENSHOT});
+  for (const [axis, plane] of [
+    ['x', 'YZ'],
+    ['y', 'XZ'],
+    ['z', 'XY'],
+  ] as const) {
+    await page
+      .locator(
+        `.viewport-coordinate-axis[data-axis="${axis}"][data-direction="positive"]`,
+      )
+      .dispatchEvent('click', {detail: 1});
+    await assertLocalView(page, axis, 1, [0, 0, 0, 1]);
+    assert.equal(
+      await page.evaluate(
+        () => window.navigationApp.viewport['rendering'].grid.plane,
+      ),
+      plane,
+    );
+  }
+  assert.deepEqual(errors, []);
+});
 
 test('the shared grid legend follows sketch zoom and restores the 3D display on exit', async t => {
   const {page, errors} = await openNavigationPage(t);

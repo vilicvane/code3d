@@ -17,19 +17,17 @@ const planeRotations: Record<GridPlane, THREE.Quaternion> = {
   ),
 };
 
-/** One unbounded work plane. Rays start at the focus plane to keep dolly zooms
+/** One unbounded work plane in the displayed scene's coordinate system.
+ * Rays start at the focus plane to keep dolly zooms
  * and very small models numerically stable, rather than unprojecting a far plane. */
 export class AdaptiveGrid extends THREE.Mesh<
   THREE.PlaneGeometry,
   THREE.ShaderMaterial
 > {
   readonly focus = new THREE.Vector3();
-  target?: THREE.Object3D;
   plane: GridPlane = 'XZ';
   step = 1;
   private locked = false;
-  private readonly origin = new THREE.Vector3();
-  private readonly frame = new THREE.Quaternion();
   private readonly inverseFrame = new THREE.Quaternion();
   private readonly direction = new THREE.Vector3();
 
@@ -140,18 +138,7 @@ export class AdaptiveGrid extends THREE.Mesh<
   ): void {
     camera.updateMatrixWorld();
     if (!this.locked) {
-      if (this.target) {
-        this.target.updateWorldMatrix(true, false);
-        this.target.getWorldPosition(this.origin);
-        this.target.getWorldQuaternion(this.frame);
-      } else {
-        this.origin.set(0, 0, 0);
-        this.frame.identity();
-      }
-      this.inverseFrame.copy(this.frame).invert();
-      camera
-        .getWorldDirection(this.direction)
-        .applyQuaternion(this.inverseFrame);
+      camera.getWorldDirection(this.direction);
       this.plane =
         camera instanceof THREE.OrthographicCamera
           ? Math.abs(this.direction.x) > Math.abs(this.direction.y) &&
@@ -162,11 +149,9 @@ export class AdaptiveGrid extends THREE.Mesh<
               : 'XZ'
           : 'XZ';
     }
-    // Map grid XY into the chosen plane in the reference frame (no instance scale).
-    this.inverseFrame
-      .copy(this.frame)
-      .multiply(planeRotations[this.plane])
-      .invert();
+    // The scene already expresses a standalone model or a composition in its
+    // own coordinates. Member placement never changes this work plane.
+    this.inverseFrame.copy(planeRotations[this.plane]).invert();
     const distance = camera.position.distanceTo(focus);
     const span = cameraViewHeight(camera, distance);
     if (!this.locked) this.step = gridStep(height / span);
@@ -180,7 +165,6 @@ export class AdaptiveGrid extends THREE.Mesh<
     );
     uniforms.focusPoint.value
       .copy(focus)
-      .sub(this.origin)
       .applyQuaternion(this.inverseFrame)
       .divideScalar(span);
     // Reduce the periodic coordinates on the CPU before uploading floats. Large

@@ -109,8 +109,8 @@ preview while the editor continues to report missing required arguments.
   to zoom. Scrolling over the viewport zooms around the mouse position.
   Zoom has no fixed distance limits.
 - Click an axis endpoint in the upper-right coordinate indicator to view from
-  +X, −X, +Y, −Y, +Z, or −Z. It uses the selected object's local frame, or the
-  world frame when nothing is selected, and enters orthographic projection while
+  +X, −X, +Y, −Y, +Z, or −Z. It uses the displayed scene's coordinate frame and
+  enters orthographic projection while
   keeping the scale at the center of the view. Rotating the camera restores
   perspective; panning, zooming and using modeling tools keep the orthographic
   view. Click
@@ -223,12 +223,24 @@ Your own functions can offer the same dimension inputs. See
 
 ## Understand feedback
 
-Compilation progress appears near the viewport. Source changes from tools
-appear in a temporary code excerpt, making the resulting edit visible.
+Compilation progress appears near the viewport. Project preparation, dependency
+and resource downloads, model snapshots, exports, sketch solving, and build-cache
+clearing have no fixed operation deadline. Slow work can finish; changing the
+source or cancelling still supersedes the old model operation. Network and
+worker failures are reported normally.
+
+Source changes from tools appear in a temporary code excerpt, making the
+resulting edit visible.
 
 The grid legend at the bottom left shows the length of one small grid cell in
 the current 3D or sketch view. It updates as you zoom; source updates and
 diagnostics stack above it. Sketch wheel zoom has no fixed minimum or maximum.
+
+The 3D grid and coordinate indicator use the displayed model or group's local
+coordinates, or the common composition coordinates when previewing a collection
+or relation. Highlighting or moving a member keeps this frame fixed; the member's
+modeling handles still use their own reference frame. Perspective shows the XZ
+grid; axis-aligned orthographic views show the corresponding XY, XZ, or YZ plane.
 
 Each sketch remembers its own pan and zoom while the project is open. Switching
 between visible sketches smoothly restores their views; scrolling, panning or

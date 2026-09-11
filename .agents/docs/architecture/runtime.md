@@ -290,7 +290,7 @@ Worker 复用同步 `KernelArtifactStore`。内存命中的访问记录先在本
 
 单 Worker 与并行查询使用同一二进制几何输入，避免序列化差异改变三角化或拓扑
 编号。取消保留已完成结果；失败只重试未完成查询，并释放未完成的等待记录。
-预算和超时常量以实现为准。验证见 [kernel-cache-memory](../../../packages/core/test/kernel-cache-memory.test.ts)、
+初始化与快照计算没有固定时限；实际失败才重试，取消后不响应的 Worker 在回收宽限期后终止。预算常量以实现为准。验证见 [kernel-cache-memory](../../../packages/core/test/kernel-cache-memory.test.ts)、
 [persistent-cache](../../../packages/app/test/browser/persistent-cache.test.ts)、
 [snapshot-pool](../../../packages/app/test/snapshot-pool.test.ts)。
 
@@ -311,12 +311,20 @@ Worker 复用同步 `KernelArtifactStore`。内存命中的访问记录先在本
 
 ## 取消与请求隔离
 
+项目准备、包与资源下载、快照初始化和查询、导出、草图求解及清理构建缓存不设固定
+执行时限。请求等待完成、真实错误、被新版本取代或显式取消；进度阶段不再启停
+执行倒计时。HTTP 资源仍传递请求所属的取消 signal，后台或慢网络不会单凭耗时
+被 App 中断。独立 agent 传输、正则解析与缓存通信故障检测各自拥有原有生命周期，
+不作为模型操作的运行时限。
+
 [compiler-client](../../../packages/app/src/model/compiler-client.ts)立即拒绝已取消
 请求，只保留最新排队版本，并等待旧请求收尾后派发。同步 JS/WASM 通过共享取消
 标志在完整操作边界观察取消；已完成产物先保留，取消结果不发布快照。
 编译取消调用 esbuild context 的 cancel，保留 context 后处理最新版本。持续编辑
 不延长执行请求的强制终止期限；无法合作退出时只重建执行 Worker，编译侧的文件、
 语言及 esbuild context 保留。编译故障独立重建编译 Worker。
+导出、拓扑检查和草图求解是同步原生操作；显式取消这些请求立即回收执行 Worker，
+重新编译恢复可操作快照，不让已取消的求解阻塞下一版本。
 项目关闭释放整个运行时；Worker 实例与请求 ID 共同限制消息及文件响应归属。
 
 共享取消标志要求安全上下文和跨源隔离。开发、预览和生产 App 资源配置相应

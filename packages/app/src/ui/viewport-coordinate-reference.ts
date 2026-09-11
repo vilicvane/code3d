@@ -15,7 +15,7 @@ type AxisEndView = Readonly<{
 
 type CoordinateActions = Readonly<{
   onSelect(direction: THREE.Vector3, up: THREE.Vector3): void;
-  onReset(frame: THREE.Quaternion): void;
+  onReset(): void;
 }>;
 
 const svgNamespace = 'http://www.w3.org/2000/svg';
@@ -27,12 +27,9 @@ export class ViewportCoordinateReference {
   private readonly root = document.createElement('div');
   private readonly axisEnds: readonly AxisEndView[];
   private readonly cameraQuaternion = new THREE.Quaternion();
-  private readonly frameQuaternion = new THREE.Quaternion();
   private readonly projectedCameraQuaternion = new THREE.Quaternion();
-  private readonly projectedFrameQuaternion = new THREE.Quaternion();
   private readonly viewDirection = new THREE.Vector3();
   private hasProjection = false;
-  private target?: THREE.Object3D;
 
   constructor(
     container: HTMLElement,
@@ -41,6 +38,9 @@ export class ViewportCoordinateReference {
   ) {
     this.root.className = 'viewport-coordinate-reference';
     this.root.setAttribute('role', 'group');
+    this.root.setAttribute('aria-label', 'Scene X, Y, Z coordinate axes');
+    this.root.title =
+      'Scene coordinate frame · Click an axis to align · Double-click to reset';
     this.root.tabIndex = 0;
     this.root.addEventListener('dblclick', event => {
       event.preventDefault();
@@ -156,43 +156,27 @@ export class ViewportCoordinateReference {
 
     this.root.append(svg);
     container.append(this.root);
-    this.updateLabel();
   }
 
   setVisible(visible: boolean): void {
     this.root.hidden = !visible;
   }
 
-  setTarget(target?: THREE.Object3D): void {
-    this.target = target;
-    this.hasProjection = false;
-    this.updateLabel();
-  }
-
   update(): void {
-    if (this.target) {
-      this.target.updateWorldMatrix(true, false);
-      this.target.getWorldQuaternion(this.frameQuaternion);
-    } else {
-      this.frameQuaternion.identity();
-    }
     this.camera.getWorldQuaternion(this.cameraQuaternion).invert();
     if (
       this.hasProjection &&
-      this.projectedCameraQuaternion.equals(this.cameraQuaternion) &&
-      this.projectedFrameQuaternion.equals(this.frameQuaternion)
+      this.projectedCameraQuaternion.equals(this.cameraQuaternion)
     ) {
       return;
     }
     this.hasProjection = true;
     this.projectedCameraQuaternion.copy(this.cameraQuaternion);
-    this.projectedFrameQuaternion.copy(this.frameQuaternion);
 
     const depthSortedEnds = this.axisEnds
       .map(axisEnd => {
         this.viewDirection
           .copy(axisEnd.direction)
-          .applyQuaternion(this.frameQuaternion)
           .applyQuaternion(this.cameraQuaternion);
         const x = center + this.viewDirection.x * axisLength;
         const y = center - this.viewDirection.y * axisLength;
@@ -242,7 +226,6 @@ export class ViewportCoordinateReference {
     const direction = axisEnd.direction.clone();
     const facingCamera = direction
       .clone()
-      .applyQuaternion(this.frameQuaternion)
       .applyQuaternion(this.cameraQuaternion).z;
     if (facingCamera > 1 - 1e-6) direction.negate();
     // Top and bottom views need a screen-up direction perpendicular to Y.
@@ -250,31 +233,13 @@ export class ViewportCoordinateReference {
       axisEnd.name === 'y'
         ? new THREE.Vector3(0, 0, -direction.y)
         : new THREE.Vector3(0, 1, 0);
-    this.actions.onSelect(
-      direction.applyQuaternion(this.frameQuaternion),
-      up.applyQuaternion(this.frameQuaternion),
-    );
+    this.actions.onSelect(direction, up);
     this.update();
   }
 
   private resetView(): void {
     this.update();
-    this.actions.onReset(this.frameQuaternion.clone());
+    this.actions.onReset();
     this.update();
-  }
-
-  private updateLabel(): void {
-    if (!this.target) {
-      this.root.setAttribute('aria-label', 'World X, Y, Z coordinate axes');
-      this.root.title =
-        'World coordinate frame · Click an axis to align · Double-click to reset';
-      return;
-    }
-    const targetName = this.target.name || 'selected model';
-    this.root.setAttribute(
-      'aria-label',
-      `Local X, Y, Z coordinate axes for ${targetName}`,
-    );
-    this.root.title = `Local coordinate frame · ${targetName} · Click an axis to align · Double-click to reset`;
   }
 }

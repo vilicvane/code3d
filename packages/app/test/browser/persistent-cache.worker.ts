@@ -10,7 +10,7 @@ export type CacheRequest = {
   source: string;
   assets?: Record<string, {bytes: Uint8Array; version: string}>;
   concurrency?: number;
-  terminateChild?: boolean;
+  crashChild?: boolean;
   trackSnapshots?: boolean;
   revision?: number;
   disabled?: boolean;
@@ -43,7 +43,7 @@ scope.onmessage = async ({data}: MessageEvent<CacheRequest>) => {
       },
     });
   if (!compiler) {
-    let terminatedChild = false;
+    let crashedChild = false;
     compiler = new TestModelPipeline(
       {
         async readFile(path) {
@@ -70,9 +70,8 @@ scope.onmessage = async ({data}: MessageEvent<CacheRequest>) => {
       undefined,
       {
         concurrency: data.concurrency,
-        taskTimeoutMs: data.terminateChild ? 5000 : undefined,
         createWorker:
-          data.terminateChild || data.trackSnapshots
+          data.crashChild || data.trackSnapshots
             ? () => {
                 const worker = new Worker(
                   new URL(
@@ -85,9 +84,13 @@ scope.onmessage = async ({data}: MessageEvent<CacheRequest>) => {
                   if (response.kind !== 'result') return;
                   if (data.trackSnapshots)
                     scope.postMessage({phase: 'snapshot-query'});
-                  if (data.terminateChild && !terminatedChild) {
-                    terminatedChild = true;
-                    worker.terminate();
+                  if (data.crashChild && !crashedChild) {
+                    crashedChild = true;
+                    worker.dispatchEvent(
+                      new ErrorEvent('error', {
+                        message: 'Simulated snapshot worker crash',
+                      }),
+                    );
                   }
                 });
                 return worker;
