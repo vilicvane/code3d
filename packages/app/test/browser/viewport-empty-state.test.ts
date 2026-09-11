@@ -828,3 +828,94 @@ test('the animation preserves selection timing and visits the hint vocabulary af
     0,
   );
 });
+
+test('Model error shows details and navigates to the source across files with mouse and keyboard', async t => {
+  const page = await open(t);
+  await page.evaluate(() => {
+    const {codeEditor} = window.emptyViewportApp;
+    codeEditor.createFile(
+      '/fault.ts',
+      "import {box} from '@code3d/core';\nexport const part = box(0);",
+    );
+    codeEditor.switchFile('/model.ts');
+    codeEditor.editor
+      .getModel()!
+      .setValue("import {part} from './fault';\nexport default part;");
+  });
+  const status = page.locator('#viewport-status');
+  for (const key of ['click', 'Enter', 'Space']) {
+    if (key !== 'click') {
+      await page.evaluate(() =>
+        window.emptyViewportApp.codeEditor.switchFile('/model.ts'),
+      );
+    }
+    await page.waitForFunction(
+      () =>
+        window.emptyViewportApp.previewState.statusDiagnostic?.sourceRef
+          ?.file === '/fault.ts',
+    );
+    assert.equal(await status.getAttribute('role'), 'button');
+    const message = await page.evaluate(
+      () => window.emptyViewportApp.previewState.statusDiagnostic!.summary,
+    );
+    assert.ok((await status.getAttribute('title'))?.includes(message));
+    if (key === 'click') await status.click();
+    else {
+      await status.focus();
+      await status.press(key);
+    }
+    await page.waitForFunction(
+      () => window.emptyViewportApp.codeEditor.currentFile() === '/fault.ts',
+    );
+    const selection = await page.evaluate(() => {
+      const {editor} = window.emptyViewportApp.codeEditor;
+      return {
+        focused: editor.hasTextFocus(),
+        text: editor.getModel()!.getValueInRange(editor.getSelection()!),
+      };
+    });
+    assert.equal(selection.focused, true);
+    assert.match(selection.text, /box\(0\)/);
+  }
+  await page.evaluate(() => {
+    const {editor} = window.emptyViewportApp.codeEditor;
+    editor
+      .getModel()!
+      .setValue(
+        "import {box} from '@code3d/core';\nexport const part = box(10);",
+      );
+  });
+  await page.getByText('Ready', {exact: true}).waitFor();
+  assert.equal(await status.getAttribute('title'), null);
+  assert.equal(await status.getAttribute('role'), 'status');
+  assert.equal(await status.getAttribute('tabindex'), null);
+});
+
+test('Model error without a source shows details but has no navigation target', async t => {
+  const page = await open(t);
+  await page.evaluate(() => {
+    const {previewState} = window.emptyViewportApp;
+    previewState.fail({
+      kind: 'project',
+      summary: 'Preparation failed',
+      details: 'Package unavailable',
+    });
+    previewState.showStatus('error', 'Model error');
+  });
+  const status = page.locator('#viewport-status');
+  assert.equal(
+    await status.getAttribute('title'),
+    'Preparation failed\n\nPackage unavailable',
+  );
+  assert.equal(await status.getAttribute('role'), 'status');
+  assert.equal(await status.getAttribute('tabindex'), null);
+  await status.click();
+  assert.equal(
+    await page.evaluate(() => window.emptyViewportApp.codeEditor.currentFile()),
+    '/model.ts',
+  );
+  await page.evaluate(() =>
+    window.emptyViewportApp.previewState.showStatus('busy', 'Updating model'),
+  );
+  assert.equal(await status.getAttribute('title'), null);
+});

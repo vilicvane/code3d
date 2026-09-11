@@ -2496,8 +2496,18 @@ kbd {
 }
 
 .viewport-status[data-state='error'] {
+  pointer-events: auto;
   color: #d99b8f;
   border-color: #654138;
+}
+
+.viewport-status[role='button'] {
+  cursor: pointer;
+}
+
+.viewport-status[role='button']:focus-visible {
+  outline: 1px solid currentColor;
+  outline-offset: 2px;
 }
 
 .viewport-status-indicator {

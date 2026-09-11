@@ -51,6 +51,7 @@ export class ModelPreviewState {
       retainingView: computed,
       pendingFile: computed,
       presentation: computed,
+      statusDiagnostic: computed,
       busy: computed,
       empty: computed,
       showHint: computed,
@@ -76,6 +77,10 @@ export class ModelPreviewState {
 
   get presentation() {
     return this.activity;
+  }
+
+  get statusDiagnostic(): ModelDiagnostic | undefined {
+    return this.activity.state === 'error' ? this.diagnostic : undefined;
   }
 
   get busy(): boolean {

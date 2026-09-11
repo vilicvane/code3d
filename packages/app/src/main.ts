@@ -880,14 +880,24 @@ const stopViewportModes = reaction(
 const stopPreviewPresentation = reaction(
   () => ({
     status: previewState.presentation,
+    diagnostic: previewState.statusDiagnostic,
     empty: previewState.empty,
     hint: previewState.showHint,
     retaining: previewState.retainingView,
   }),
-  ({status, empty, hint, retaining}) => {
+  ({status, diagnostic, empty, hint, retaining}) => {
     viewportStatus.dataset.state = status.state;
     viewportStatusLabel.textContent = status.label;
     viewportStatus.setAttribute('aria-busy', String(status.state === 'busy'));
+    if (diagnostic)
+      viewportStatus.title = [diagnostic.summary, diagnostic.details]
+        .filter(Boolean)
+        .join('\n\n');
+    else viewportStatus.removeAttribute('title');
+    const navigable = !!diagnostic?.sourceRef;
+    viewportStatus.setAttribute('role', navigable ? 'button' : 'status');
+    if (navigable) viewportStatus.tabIndex = 0;
+    else viewportStatus.removeAttribute('tabindex');
     viewportHost.dataset.empty = String(empty);
     viewportEmptyState.setVisible(hint);
     for (const element of viewportHost.querySelectorAll<HTMLElement>(
@@ -897,6 +907,21 @@ const stopPreviewPresentation = reaction(
   },
   {fireImmediately: true},
 );
+
+function revealStatusDiagnostic(): void {
+  const sourceRef = previewState.statusDiagnostic?.sourceRef;
+  if (sourceRef) codeEditor.revealSource(sourceRef, true, 'start');
+}
+viewportStatus.addEventListener('click', revealStatusDiagnostic);
+viewportStatus.addEventListener('keydown', event => {
+  if (
+    (event.key === 'Enter' || event.key === ' ') &&
+    previewState.statusDiagnostic?.sourceRef
+  ) {
+    event.preventDefault();
+    revealStatusDiagnostic();
+  }
+});
 
 codeEditor.onChange(change => {
   const toolChange = change.kind === 'content' && change.origin === 'tool';

@@ -293,7 +293,10 @@ file compiles. Its controls pause until the new result replaces it. An empty
 result or a compilation failure clears the previous file’s preview.
 
 Modeling failures appear in the top status and, where source information
-is available, as an editor diagnostic at the responsible call. The viewport
+is available, as an editor diagnostic at the responsible call. Hover **Model error**
+to read the details; click it to open and highlight the responsible source when
+its location is available. Keyboard focus followed by Enter or Space works too.
+The viewport
 diagnostic card is reserved for sketch source data that differs from its
 constraint solution, with a **Fix** action when safe synchronization is available. If the object or sketch
 you are editing evaluated successfully, its preview and tools stay current even
