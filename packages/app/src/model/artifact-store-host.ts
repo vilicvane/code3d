@@ -3,7 +3,7 @@ import {
   artifactAccountingBytes,
   artifactMailboxBytes,
   artifactMailboxHeaderBytes,
-  artifactReply,
+  artifactReadControl,
   type ArtifactStoreEndpoint,
   type ArtifactStoreInitialization,
 } from './artifact-store-protocol';
@@ -13,6 +13,7 @@ import ArtifactWorker from './artifact-store.worker?worker';
 export class ArtifactStoreHost {
   private readonly worker = new ArtifactWorker();
   private readonly clients = new Map<Worker, ArtifactStoreEndpoint>();
+  private nextClient = 0;
   private failed = false;
   private disposing = false;
   private resolveClosed!: () => void;
@@ -49,6 +50,8 @@ export class ArtifactStoreHost {
     }
     const {port1, port2} = new MessageChannel();
     const endpoint: ArtifactStoreEndpoint = {
+      id: ++this.nextClient,
+      control: new SharedArrayBuffer(8),
       port: port2,
       mailbox: new SharedArrayBuffer(
         artifactMailboxHeaderBytes + artifactMailboxBytes,
@@ -66,18 +69,29 @@ export class ArtifactStoreHost {
     );
   }
 
+  cancelReads(worker: Worker): void {
+    const endpoint = this.clients.get(worker);
+    if (!endpoint) return;
+    const control = new Int32Array(endpoint.control);
+    Atomics.add(control, artifactReadControl.generation, 1);
+    Atomics.add(control, artifactReadControl.wake, 1);
+    Atomics.notify(control, artifactReadControl.wake);
+    this.worker.postMessage({kind: 'cancel-reads', id: endpoint.id});
+  }
+
   disconnect(worker: Worker): void {
     const endpoint = this.clients.get(worker);
     if (!endpoint) return;
+    this.cancelReads(worker);
     this.clients.delete(worker);
     Atomics.store(
       new BigInt64Array(endpoint.accounting),
       artifactAccounting.closed,
       1n,
     );
-    const state = new Int32Array(endpoint.mailbox, 0, 4);
-    Atomics.store(state, 0, artifactReply.failed);
-    Atomics.notify(state, 0);
+    const control = new Int32Array(endpoint.control);
+    Atomics.add(control, artifactReadControl.wake, 1);
+    Atomics.notify(control, artifactReadControl.wake);
     this.worker.postMessage({kind: 'disconnect'});
   }
 

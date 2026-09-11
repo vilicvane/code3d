@@ -766,3 +766,122 @@ test(
     assert.equal(result.workers, 2);
   },
 );
+
+for (const stage of ['compiler', 'executor', 'restore'] as const) {
+  test(
+    `cancels a ${stage} cache read promptly and reuses workers for the latest entry`,
+    {timeout: 60_000},
+    async t => {
+      const page = await fixture(t);
+      const result = await page.evaluate(async stage => {
+        let releasePreparation: (() => void) | undefined;
+        let preparing = true;
+        if (stage === 'executor') await compile();
+        if (stage !== 'executor') {
+          client.dispose();
+          const {ModelCompilerClient} =
+            await import('/src/model/compiler-client.ts');
+          window.client = new ModelCompilerClient(
+            {async readFile() {}, async stat() {}},
+            undefined,
+            // Keep normal compilation out of the restore cancellation probe.
+            stage === 'restore'
+              ? () =>
+                  preparing
+                    ? new Promise<void>(resolve => {
+                        releasePreparation = resolve;
+                      })
+                    : Promise.resolve()
+              : undefined,
+            'cancel-restore-fixture',
+          );
+        }
+        const counts = [window.compilerWorkers, window.executorWorkers];
+        const until = async (
+          check: () => boolean | Promise<boolean>,
+          timeout = 2000,
+        ) => {
+          const deadline = performance.now() + timeout;
+          while (!(await check())) {
+            if (performance.now() > deadline)
+              throw new Error('Cancellation did not complete promptly');
+            await new Promise(resolve => setTimeout(resolve, 5));
+          }
+        };
+        let release!: () => void;
+        let acquired!: () => void;
+        const ready = new Promise<void>(resolve => {
+          acquired = resolve;
+        });
+        const held = navigator.locks.request(
+          'code3d-kernel-artifacts',
+          async () => {
+            acquired();
+            await new Promise<void>(resolve => {
+              release = resolve;
+            });
+          },
+        );
+        await ready;
+        try {
+          const cancelled = compile(
+            undefined,
+            'import {box} from "@code3d/core"; export default box(913, 2, 3);',
+          ).then(
+            () => 'unexpected success',
+            error => error.message,
+          );
+          await until(
+            async () => !!(await navigator.locks.query()).pending?.length,
+            15000,
+          );
+          const start = performance.now();
+          client.cancel();
+          // Public rejection alone is insufficient: wait for the real Worker
+          // cancellation reply, or removal of the isolated restore lock request.
+          await until(async () =>
+            stage === 'restore'
+              ? !(await navigator.locks.query()).pending?.length
+              : window.workerEvents.some(event => event.kind === 'cancelled'),
+          );
+          const milliseconds = performance.now() - start;
+          preparing = false;
+          releasePreparation?.();
+          const skipped = compile(
+            undefined,
+            'throw new Error("Obsolete entry executed");',
+          ).then(
+            () => 'unexpected success',
+            error => error.message,
+          );
+          const latest = compile(
+            undefined,
+            'import {box} from "@code3d/core"; export default box(917, 2, 3);',
+          );
+          release();
+          await held;
+          const model = await latest;
+          return {
+            milliseconds,
+            cancelled: await cancelled,
+            skipped: await skipped,
+            diagnostic: model.diagnostic,
+            exportable: client.canExport(model),
+            counts,
+            after: [window.compilerWorkers, window.executorWorkers],
+          };
+        } finally {
+          release();
+          client.dispose();
+        }
+      }, stage);
+      assert.match(result.cancelled, /Compilation superseded/);
+      assert.match(result.skipped, /Compilation superseded/);
+      assert.ok(result.milliseconds < 1000, JSON.stringify(result));
+      assert.equal(result.diagnostic, undefined);
+      assert.equal(result.exportable, true);
+      assert.deepEqual(result.after, result.counts);
+      t.diagnostic(JSON.stringify({stage, ...result}));
+    },
+  );
+}

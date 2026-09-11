@@ -229,3 +229,142 @@ test(
     assert.equal(result.interrupted.value, 'interrupted');
   },
 );
+
+test(
+  'cancelled reads release their lock requests and reuse the connection without losing writes',
+  {timeout: 30_000},
+  async t => {
+    const context = await browser.newContext();
+    t.after(() => context.close());
+    const page = await context.newPage();
+    const url = new URL(
+      '/__artifact-cancel-test__',
+      process.env.CODE3D_TEST_URL,
+    ).href;
+    await context.route(url, route =>
+      route.fulfill({
+        contentType: 'text/html',
+        headers: appIsolationHeaders,
+        body: '<main>Cancel reads</main>',
+      }),
+    );
+    await page.goto(url);
+    const result = await page.evaluate(async () => {
+      const {ArtifactStoreHost} =
+        await import('/src/model/artifact-store-host.ts');
+      const {default: Client} =
+        await import('/test/browser/artifact-store-client.worker.ts?worker');
+      const storage = new ArtifactStoreHost();
+      const worker = new Client();
+      storage.connect(worker);
+      const namespace = 'cancel-test:' + crypto.randomUUID();
+      const command = (
+        operation: unknown,
+        cancellation?: Int32Array<SharedArrayBuffer>,
+      ) =>
+        new Promise<any>((resolve, reject) => {
+          worker.onmessage = ({data}) => resolve(data);
+          worker.onerror = event => reject(new Error(event.message));
+          worker.postMessage({
+            kind: 'command',
+            namespace,
+            operation,
+            cancellation,
+          });
+        });
+      const pendingLocks = async () =>
+        (await navigator.locks.query()).pending?.filter(
+          lock => lock.name === 'code3d-kernel-artifacts',
+        ).length ?? 0;
+      const until = async (check: () => Promise<boolean>) => {
+        const deadline = performance.now() + 2000;
+        while (!(await check())) {
+          if (performance.now() > deadline)
+            throw new Error('Lock state did not settle');
+          await new Promise(resolve => setTimeout(resolve, 5));
+        }
+      };
+      let release!: () => void;
+      let acquired!: () => void;
+      const ready = new Promise<void>(resolve => {
+        acquired = resolve;
+      });
+      try {
+        // A multi-chunk disk result verifies that an old response cannot overwrite
+        // the new request's mailbox after cancellation.
+        await command({
+          kind: 'set',
+          id: 'disk',
+          bytes: new Uint8Array(3 * 1024 ** 2).fill(73),
+        });
+        await command({kind: 'drain'});
+        const held = navigator.locks.request(
+          'code3d-kernel-artifacts',
+          async () => {
+            acquired();
+            await new Promise<void>(resolve => {
+              release = resolve;
+            });
+          },
+        );
+        await ready;
+        const token = new Int32Array(new SharedArrayBuffer(4));
+        Atomics.store(token, 0, 1);
+        storage.cancelReads(worker);
+        const beforeRead = await command({kind: 'get', id: 'disk'}, token);
+        if (!beforeRead.error || (await pendingLocks()) !== 0)
+          throw new Error('A cancelled build started a new disk read');
+        const cancelled = [beforeRead];
+        for (let i = 0; i < 3; i++) {
+          const reading = command({kind: 'get', id: 'disk'});
+          await until(async () => (await pendingLocks()) === 1);
+          const start = performance.now();
+          storage.cancelReads(worker);
+          cancelled.push({
+            ...(await reading),
+            cancellationMilliseconds: performance.now() - start,
+          });
+          await until(async () => (await pendingLocks()) === 0);
+        }
+        await command({kind: 'set', id: 'queued', bytes: new Uint8Array([91])});
+        await until(async () => (await pendingLocks()) === 1);
+        const reading = command({kind: 'get', id: 'disk'});
+        await until(async () => (await pendingLocks()) === 2);
+        storage.cancelReads(worker);
+        cancelled.push(await reading);
+        await until(async () => (await pendingLocks()) === 1);
+        const overlay = await command({kind: 'get', id: 'queued'});
+        const stats = await command({kind: 'stats'});
+        // Administrative draining is independent of model cancellation.
+        const draining = command({kind: 'drain'});
+        storage.cancelReads(worker);
+        release();
+        await held;
+        await draining;
+        const restored = await command({kind: 'get', id: 'disk'});
+        const persisted = await command({kind: 'get', id: 'queued'});
+        return {cancelled, overlay, stats, restored, persisted};
+      } finally {
+        release?.();
+        worker.terminate();
+        storage.disconnect(worker);
+        storage.dispose();
+      }
+    });
+    for (const cancelled of result.cancelled) {
+      assert.match(cancelled.error, /Compilation superseded/);
+      if (cancelled.cancellationMilliseconds !== undefined)
+        assert.ok(
+          cancelled.cancellationMilliseconds < 1000,
+          JSON.stringify(cancelled),
+        );
+    }
+    assert.equal(result.overlay.value.first, 91);
+    assert.equal(result.stats.value.pendingBytes, 1);
+    assert.equal(result.stats.value.errors, 0);
+    assert.equal(result.restored.value.length, 3 * 1024 ** 2);
+    assert.equal(result.restored.value.first, 73);
+    assert.equal(result.persisted.value.first, 91);
+    t.diagnostic(JSON.stringify(result));
+  },
+);

@@ -8,6 +8,9 @@ export default class PersistentCacheWorker extends CacheWorker {
     super();
     storage.connect(this);
   }
+  cancelReads(): void {
+    storage.cancelReads(this);
+  }
   override terminate(): void {
     super.terminate();
     storage.disconnect(this);

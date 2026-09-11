@@ -15,7 +15,7 @@ export type CacheRequest = {
   trackSnapshots?: boolean;
   revision?: number;
   disabled?: boolean;
-  cancellation?: Int32Array;
+  cancellation?: Int32Array<SharedArrayBuffer>;
   inspect?: boolean;
   summary?: boolean;
 };
@@ -108,6 +108,7 @@ scope.onmessage = async ({
       data.disabled ? undefined : storage,
     );
   }
+  storage.readCancellation = data.cancellation;
   const start = performance.now();
   const phases: {phase: string; milliseconds: number}[] = [];
   try {

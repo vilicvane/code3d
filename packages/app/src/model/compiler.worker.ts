@@ -106,6 +106,7 @@ async function compile(request: CompileRequest): Promise<void> {
   try {
     await clearing;
     await storage.ready;
+    storage.readCancellation = request.cancellation;
     checkCancelled();
     if (!engineReady) {
       send({kind: 'progress', id: request.id, phase: 'loading-compiler'});
@@ -169,6 +170,7 @@ async function compile(request: CompileRequest): Promise<void> {
       diagnostic: diagnosticFromError(error, 'project'),
     });
   } finally {
+    storage.readCancellation = undefined;
     storage.scope('resources').flush();
     if (activeRequest === request.id) activeRequest = undefined;
   }
@@ -183,6 +185,8 @@ workerScope.onmessage = ({data}: MessageEvent<CompilerRequest>) => {
     if (data.error) pending?.reject(new Error(data.error));
     else pending?.resolve(data.value);
   } else if (data.kind === 'restore') {
+    const checkCancelled = () =>
+      checkCompilationCancellation(data.cancellation);
     void (async () => {
       await clearing;
       await storage.ready;
@@ -191,8 +195,14 @@ workerScope.onmessage = ({data}: MessageEvent<CompilerRequest>) => {
         data.rootPath,
         data.designContext,
       );
+      checkCancelled();
       const cache = cacheFor(data.projectIdentity);
-      const artifact = cache.restore(key, 'successful') ?? cache.restore(key);
+      const artifact = storage.withReadCancellation(data.cancellation, () => {
+        const successful = cache.restore(key, 'successful');
+        checkCancelled();
+        return successful ?? cache.restore(key);
+      });
+      checkCancelled();
       if (artifact) {
         const dependencies = compiler.restoreDependencies(
           artifact.dependencies,
@@ -210,6 +220,7 @@ workerScope.onmessage = ({data}: MessageEvent<CompilerRequest>) => {
               };
         if (restored !== artifact)
           restored = {...restored, id: await projectArtifactIdentity(restored)};
+        checkCancelled();
         send({
           kind: 'cached',
           id: data.id,

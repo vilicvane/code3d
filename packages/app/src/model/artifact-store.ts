@@ -5,21 +5,45 @@ import {
   artifactOperationBytes,
   artifactReply,
   artifactRequestTimeout,
+  artifactReadControl,
+  artifactMailboxBytes,
   unpackArtifactValues,
   type ArtifactOperation,
   type ArtifactStoreEndpoint,
   type ArtifactStoreRequest,
 } from './artifact-store-protocol';
+import {
+  checkCompilationCancellation,
+  type CompilationCancellation,
+} from './compilation-cancellation';
 import type {ArtifactStoreServer} from './artifact-store-server';
 
 /** Synchronous reads and background mutations over a project-owned I/O connection. */
 export class ArtifactStoreConnection {
+  // Compiler/executor requests are serialized. Synchronous preview restoration
+  // temporarily overrides this token without changing the active compile.
+  readCancellation?: CompilationCancellation;
+
+  withReadCancellation<T>(
+    cancellation: CompilationCancellation,
+    action: () => T,
+  ): T {
+    const previous = this.readCancellation;
+    this.readCancellation = cancellation;
+    try {
+      return action();
+    } finally {
+      this.readCancellation = previous;
+    }
+  }
+
   private endpoint?: ArtifactStoreEndpoint;
-  private state?: Int32Array;
+  private state?: Int32Array<SharedArrayBuffer>;
   private buffer?: Uint8Array;
   private accounting?: BigInt64Array;
   private failed = false;
   private sequence = 0;
+  private nextRead = 0;
   private transferMilliseconds = 0;
   private readMilliseconds = 0;
   private readonly readAccess = new Map<string, Set<string>>();
@@ -222,27 +246,53 @@ export class ArtifactStoreConnection {
     )
       return;
     const state = this.state!;
+    const buffer = this.buffer!;
+    const control = new Int32Array(this.endpoint.control);
+    const generation = ['get', 'get-many', 'touch', 'touch-many'].includes(
+      operation.kind,
+    )
+      ? Atomics.load(control, artifactReadControl.generation)
+      : undefined;
+    const cancellation =
+      generation === undefined ? undefined : this.readCancellation;
+    if (cancellation) checkCompilationCancellation(cancellation);
     state.fill(0);
     this.endpoint.port.postMessage({
       namespace,
       operation,
       reply: true,
+      id: ++this.nextRead,
+      generation,
+      mailbox: state.buffer,
     } satisfies ArtifactStoreRequest);
     let bytes: Uint8Array | undefined;
     let offset = 0;
+    let deadline = performance.now() + artifactRequestTimeout;
     for (;;) {
+      const wake = Atomics.load(control, artifactReadControl.wake);
+      if (Atomics.load(this.accounting!, artifactAccounting.closed)) return;
       if (
-        Atomics.wait(
-          state,
-          0,
-          artifactReply.pending,
-          artifactRequestTimeout,
-        ) === 'timed-out'
+        generation !== undefined &&
+        (generation !== Atomics.load(control, artifactReadControl.generation) ||
+          (cancellation && Atomics.load(cancellation, 0)))
       ) {
-        this.failed = true;
-        return;
+        const mailbox = new SharedArrayBuffer(
+          artifactMailboxHeaderBytes + artifactMailboxBytes,
+        );
+        this.state = new Int32Array(mailbox, 0, 4);
+        this.buffer = new Uint8Array(mailbox, artifactMailboxHeaderBytes);
+        throw new Error('Compilation superseded.');
       }
       const phase = Atomics.load(state, 0);
+      if (phase === artifactReply.pending) {
+        const remaining = deadline - performance.now();
+        if (remaining <= 0) {
+          this.failed = true;
+          return;
+        }
+        Atomics.wait(control, artifactReadControl.wake, wake, remaining);
+        continue;
+      }
       if (phase === artifactReply.failed) return;
       if (phase === artifactReply.done)
         return (
@@ -256,7 +306,8 @@ export class ArtifactStoreConnection {
       if (phase === artifactReply.chunk) {
         bytes ??= new Uint8Array(Atomics.load(state, 2));
         const length = Atomics.load(state, 1);
-        bytes.set(this.buffer!.subarray(0, length), offset);
+        bytes.set(buffer.subarray(0, length), offset);
+        deadline = performance.now() + artifactRequestTimeout;
         offset += length;
         Atomics.store(state, 0, artifactReply.pending);
         Atomics.notify(state, 0);

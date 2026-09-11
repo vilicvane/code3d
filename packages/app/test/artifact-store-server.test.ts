@@ -198,3 +198,43 @@ test('transaction-open failures release the whole accepted queue without retryin
   assert.equal(server.stats.pendingOperations, 0);
   assert.equal(server.stats.errors, 3);
 });
+
+test('cancelling a publication read leaves its accepted writes draining', async () => {
+  const f = fixture();
+  const release = f.block();
+  let completed = 0;
+  set(f.server, 'content', bytes(7), () => completed++);
+  f.server.enqueue(
+    'model',
+    {
+      kind: 'publish',
+      id: 'latest',
+      stamp: 1,
+      required: ['content'],
+      bytes: new TextEncoder().encode(
+        JSON.stringify({stamp: 1, id: 'content'}),
+      ),
+    },
+    () => completed++,
+  );
+  const controller = new AbortController();
+  const reading = f.server.request(
+    'model',
+    {kind: 'get', id: 'latest'},
+    controller.signal,
+  );
+  const rejected = assert.rejects(reading, {name: 'AbortError'});
+  controller.abort();
+  try {
+    await rejected;
+    assert.equal(completed, 0);
+    assert.ok(f.server.stats.pendingBytes > 0);
+    assert.equal(f.server.stats.errors, 0);
+  } finally {
+    release();
+    await f.server.drain();
+  }
+  assert.equal(completed, 2);
+  assert.ok(await f.server.request('model', {kind: 'get', id: 'latest'}));
+  assert.equal(f.server.stats.pendingBytes, 0);
+});

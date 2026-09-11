@@ -15,9 +15,14 @@ export type ArtifactStoreRequest = Readonly<{
   namespace: string;
   operation: ArtifactOperation;
 }> &
-  ({reply: true} | {reply: false; sequence: number});
+  (
+    | {reply: true; id: number; generation?: number; mailbox: SharedArrayBuffer}
+    | {reply: false; sequence: number}
+  );
 
 export type ArtifactStoreEndpoint = Readonly<{
+  id: number;
+  control: SharedArrayBuffer;
   port: MessagePort;
   mailbox: SharedArrayBuffer;
   accounting: SharedArrayBuffer;
@@ -41,7 +46,11 @@ export function artifactOperationBytes(operation: ArtifactOperation): number {
   return 'bytes' in operation ? operation.bytes.byteLength : 0;
 }
 
-// Each client has one bounded mailbox. Large records stream through it.
+// Stable cancellation/wakeup state survives retiring a cancelled read mailbox.
+export const artifactReadControl = {generation: 0, wake: 1} as const;
+
+// Each client reuses a bounded mailbox, replacing it only when a read is cancelled.
+// Large records stream through it; late replies retain their retired mailbox.
 export const artifactMailboxBytes = 1024 * 1024;
 export const artifactMailboxHeaderBytes = 16;
 export const artifactRequestTimeout = 30_000;
