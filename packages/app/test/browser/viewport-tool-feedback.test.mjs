@@ -30,7 +30,7 @@ async function open(t) {
       response,
       body:
         (await response.text()) +
-        '\nwindow.feedbackApp = {codeEditor, viewport, sketchEditor, toolEngine, toolFeedback, handlePositionTool};',
+        '\nwindow.feedbackApp = {codeEditor, viewport, sketchEditor, toolEngine, toolFeedback, handlePositionTool, previewState};',
     });
   });
   await page.goto(process.env.CODE3D_TEST_URL, {timeout: 30000});
@@ -48,6 +48,11 @@ async function source(page, value, selected) {
       );
     },
     {value, selected},
+  );
+  await page.waitForFunction(
+    () =>
+      window.feedbackApp.previewState.sourceVersion ===
+      window.feedbackApp.codeEditor.sourceVersion(),
   );
   await page.getByText('Ready', {exact: true}).waitFor();
 }
@@ -250,3 +255,62 @@ export function profile(radius:number) {
     );
   },
 );
+
+for (const mode of ['3D', 'sketch']) {
+  test(
+    `Arguments visibility follows annotated function evaluations in ${mode}`,
+    {timeout: 60000},
+    async t => {
+      const page = await open(t);
+      const expression =
+        mode === '3D'
+          ? 'box(size, 4, 5)'
+          : "sketch([['point',1,[0,0]],['circle',2,[1,size]]])";
+      const plain =
+        mode === '3D'
+          ? 'box(2, 3, 4)'
+          : "sketch([['point',1,[0,0]],['circle',2,[1,2]]])";
+      const annotation = '/** @code3d.arguments [4] */';
+      const code = `import {box, sketch} from '@code3d/core';
+${annotation}
+export function design(size = 6) { return ${expression}; }
+const plain = ${plain};
+plain;
+export default design();`;
+      await source(page, code, expression);
+      const panel = page.locator('#design-arguments-panel');
+      await panel.waitFor({state: 'visible'});
+      assert.equal(
+        await page.locator('#design-arguments-count').innerText(),
+        '1',
+      );
+      await page.keyboard.press('Alt+1');
+      await page.locator('.design-argument-option').waitFor();
+      await page.evaluate(() => {
+        const editor = window.feedbackApp.codeEditor.editor;
+        editor.setPosition(
+          editor
+            .getModel()
+            .getPositionAt(editor.getValue().lastIndexOf('plain;') + 1),
+        );
+      });
+      await panel.waitFor({state: 'hidden'});
+      const state = await panel.getAttribute('data-panel-state');
+      await page.keyboard.press('Alt+1');
+      assert.equal(await panel.getAttribute('data-panel-state'), state);
+      assert.equal(await panel.isVisible(), false);
+      await source(page, code.replace(annotation, ''), expression);
+      await page.waitForFunction(mode => {
+        const app = window.feedbackApp;
+        return mode === 'sketch'
+          ? app.sketchEditor.hasTarget
+          : !!app.viewport.getSelected();
+      }, mode);
+      assert.equal(await panel.isVisible(), false);
+      assert.equal(
+        await page.locator('#design-arguments-options').innerText(),
+        '',
+      );
+    },
+  );
+}

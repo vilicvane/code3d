@@ -203,7 +203,8 @@ appear in **Modeling** mode and disappear in **Render** mode.
 
 Sketch and 3D views share the **Arguments** selector in the lower-right corner.
 Use **Alt+1** to open it and switch the evaluated argument set of a function
-with `@code3d.arguments`.
+with `@code3d.arguments`. The selector is hidden when the current context
+has no candidate argument sets.
 
 Unavailable tools are hidden or disabled without a separate status banner.
 If a drag still fails when you release it, the preview is restored and a

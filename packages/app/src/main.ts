@@ -284,7 +284,7 @@ app.innerHTML = `
             </div>
           </div>
           <div class="viewport-dock-panels">
-            <aside class="dock-panel design-arguments-panel" id="design-arguments-panel" aria-label="Design arguments">
+            <aside class="dock-panel design-arguments-panel" id="design-arguments-panel" aria-label="Design arguments" hidden>
               <button class="dock-panel-handle" id="design-arguments-handle" type="button">
                 <span>ARGUMENTS</span>
                 <span class="dock-panel-handle-meta">
@@ -324,6 +324,7 @@ const viewportEmptyState = new ViewportEmptyState(
 );
 const previewState = new ModelPreviewState();
 const errorBar = requiredElement('error-bar');
+const designArgumentsPanel = requiredElement('design-arguments-panel');
 const designArgumentsCount = requiredElement('design-arguments-count');
 const designArgumentsFunction = requiredElement('design-arguments-function');
 const designArgumentsOptions = requiredElement('design-arguments-options');
@@ -1953,17 +1954,12 @@ function renderDesignArguments(module: ModelModule | null): void {
     module?.designArguments.filter(
       context => context.functionId === functionId,
     ) ?? [];
+  designArgumentsPanel.hidden = contexts.length === 0;
   designArgumentsCount.textContent = String(contexts.length);
   designArgumentsFunction.textContent =
     contexts[0]?.functionName ?? 'No function context';
   designArgumentsOptions.replaceChildren();
-  if (contexts.length === 0) {
-    const empty = document.createElement('p');
-    empty.className = 'design-arguments-empty';
-    empty.textContent = 'Select a function with @code3d.arguments.';
-    designArgumentsOptions.append(empty);
-    return;
-  }
+  if (contexts.length === 0) return;
 
   const activeContextId =
     viewport.sourceEvaluation()?.evaluation.contextId ??

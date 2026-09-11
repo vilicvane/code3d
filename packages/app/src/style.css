@@ -2527,6 +2527,10 @@ kbd {
   backdrop-filter: blur(12px);
 }
 
+.dock-panel[hidden] {
+  display: none;
+}
+
 .dock-panel[data-panel-state='peek'] {
   z-index: 5;
 }
@@ -2661,13 +2665,6 @@ kbd {
   gap: 2px;
   padding-top: 4px;
   border-top: 1px solid #292c26;
-}
-
-.design-arguments-empty {
-  margin: 8px 2px 2px;
-  color: #696e64;
-  font-size: 9px;
-  line-height: 1.45;
 }
 
 .elements {

@@ -65,6 +65,8 @@ ToolEditPlan、ToolSession 和 host 边界。参数、表达式、实参、拓�
 工具错误由 ViewportToolFeedback 单独拥有 observable 状态和 DOM 订阅，保留最近一次失败，
 可关闭、同类操作成功后清除，切换文件时清除；不再写入编辑器 errorBar 或 sketch output。
 拖动预览错误属于手势，释放时确认失败才报告；恢复或取消不弹错。工具不可用只影响可操作性。
+sketch 和 3D 的 Arguments 在当前候选参数组列表非空时显示，沿用既有函数上下文和标注解析，
+不单独维护第二套显示资格判断；隐藏 dock 不响应快捷键。
 sketch 复用 Arguments dock、Alt+1 和设计上下文选择；切换已编译求值也更新 sketch 与面板，
 面板层级高于 sketch 画布，3D Render 状态不隐藏 sketch Arguments。
 
