@@ -382,3 +382,30 @@ test('an idle worker crash is released before the next revision is dispatched', 
     f.pool.dispose();
   }
 });
+
+test('changing concurrency supports more than four workers and retires surplus runtimes', async () => {
+  const f = fixture();
+  const batches = Array.from({length: 8}, (_, index) => ({
+    ...f.batches[index % 4],
+    id: `new-${index}`,
+    queries: f.batches[0].queries.map((query, n) => ({
+      ...query,
+      key: {id: `new-${index}:${n}`, signature: `new-${index}:${n}`},
+    })),
+  }));
+  try {
+    f.pool.setConcurrency(8);
+    await f.pool.compute(batches, () => {});
+    assert.equal(f.state.maximumActive, 8);
+    assert.equal(f.pool.stats.workers, 8);
+    const memory = f.external();
+    f.pool.setConcurrency(2);
+    assert.ok(f.external() < memory);
+    f.state.maximumActive = 0;
+    await f.pool.compute(f.batches, () => {});
+    assert.equal(f.state.maximumActive, 2);
+    assert.equal(f.state.created, 8);
+  } finally {
+    f.pool.dispose();
+  }
+});

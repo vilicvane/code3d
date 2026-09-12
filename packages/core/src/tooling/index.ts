@@ -9,6 +9,7 @@ export {installOpenCascade} from '../library/open-cascade.js';
 export {
   clearKernelOperationCache,
   kernelOperationCacheStats,
+  setKernelCacheBudget,
   setKernelArtifactStore,
   setKernelExternalBytes,
 } from '../library/kernel-cache.js';

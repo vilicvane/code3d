@@ -69,7 +69,12 @@ scope.onmessage = ({
   | {kind: 'connect'; endpoint: ArtifactStoreEndpoint}
   | {kind: 'disconnect' | 'dispose'}
   | {kind: 'cancel-reads'; id: number}
+  | {kind: 'configure'; maximumBytes: number}
 >) => {
+  if (data.kind === 'configure') {
+    server.maximumBytes = data.maximumBytes;
+    return;
+  }
   if (data.kind === 'cancel-reads') {
     const client = [...clients].find(client => client.id === data.id);
     if (client) {

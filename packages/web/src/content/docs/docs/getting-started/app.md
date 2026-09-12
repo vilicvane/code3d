@@ -20,6 +20,35 @@ default 2 GiB memory budget. It removes the least recently used historical
 results when over budget and keeps the current model's complete working set.
 This budget does not cap the total memory used by the browser tab.
 
+## Performance settings
+
+Open **Settings** in the top bar to adjust performance preferences for all
+projects in this browser. Choose **Preview**, **Rendering**, or
+**Cache** in the sidebar; on narrow screens, the categories appear across the top.
+Switching categories keeps your unsaved edits. Enter values directly and choose
+**Save** to apply all categories; **Cancel** discards edits. **Reset defaults**
+asks for confirmation before filling every category with its initial values.
+The defaults take effect after saving.
+Use arrow keys, Home, or End while focusing the category navigation to switch
+panels. If a field is invalid, saving opens its category and focuses that field.
+
+| Setting                       | Default                           | Effect                                                                         |
+| ----------------------------- | --------------------------------- | ------------------------------------------------------------------------------ |
+| Edit delay (ms)               | 400                               | Wait after typing before updating the model.                                   |
+| Completion preview delay (ms) | 200                               | Wait before previewing a focused completion candidate.                         |
+| Resolution limit (×)          | Unlimited                         | Cap the viewport pixel ratio; leave empty for full display resolution.         |
+| Geometry workers              | Hardware-based, up to 4 initially | Maximum parallel geometry queries; enter any positive whole number.            |
+| Memory cache (GiB)            | 2                                 | Soft computation-cache budget; active models can exceed it.                    |
+| Disk cache (GiB)              | 2                                 | Shared build, geometry and resource cache budget, including maintenance space. |
+
+Cache budgets accept positive decimal values and have no App-imposed maximum.
+More geometry workers can speed up independent queries while using more memory.
+The resolution setting applies immediately to the viewport; image exports keep
+their chosen dimensions. Delays apply to subsequent previews, computation
+settings to the next model execution, and disk budgets to subsequent cache
+transactions. Saving preferences also updates other open tabs on the same site.
+The App does not estimate free disk space to choose or clamp your budget.
+
 ## Arrange your workspace
 
 Use **Hide file explorer** beside the open-file tabs to give the editor more

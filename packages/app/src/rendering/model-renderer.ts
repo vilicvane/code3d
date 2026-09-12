@@ -1,5 +1,6 @@
 import {AdaptiveGrid} from './adaptive-grid';
-import {action, computed, makeObservable, observableRef} from 'mobx';
+import {action, computed, makeObservable, observableRef, reaction} from 'mobx';
+import {appSettings, type AppSettings} from '../app-settings';
 import * as THREE from 'three';
 import {createModelMaterial, disposeModelMaterial} from './model-material';
 import {orientImageCamera, type ImageView} from './image-camera';
@@ -67,8 +68,12 @@ export class ModelRenderer {
   readonly renderer: THREE.WebGLRenderer;
   readonly grid: AdaptiveGrid;
   private readonly renderSize = new THREE.Vector2();
+  private readonly stopSettings: () => void;
 
-  constructor(private readonly container: HTMLElement) {
+  constructor(
+    private readonly container: HTMLElement,
+    private readonly settings: AppSettings = appSettings,
+  ) {
     makeObservable<this, 'renderMode'>(this, {
       renderMode: observableRef,
       mode: computed,
@@ -79,7 +84,7 @@ export class ModelRenderer {
       alpha: false,
       powerPreference: 'high-performance',
     });
-    configureRenderer(this.renderer, Math.min(window.devicePixelRatio, 2));
+    configureRenderer(this.renderer, this.pixelRatio());
     this.renderer.domElement.className = 'viewport-canvas';
     this.container.append(this.renderer.domElement);
 
@@ -102,7 +107,12 @@ export class ModelRenderer {
     this.scene.add(this.grid);
 
     this.camera.position.set(105, 82, 120);
-    this.resize();
+    this.stopSettings = reaction(
+      () => settings.value.pixelRatioLimit,
+      () => this.resize(),
+      {fireImmediately: true},
+    );
+    window.addEventListener('pagehide', this.dispose, {once: true});
   }
 
   get mode(): ModelRenderMode {
@@ -113,7 +123,21 @@ export class ModelRenderer {
     this.renderMode = mode;
   }
 
+  dispose = (): void => {
+    this.stopSettings();
+    window.removeEventListener('pagehide', this.dispose);
+    this.renderer.dispose();
+  };
+
+  private pixelRatio(): number {
+    return Math.min(
+      window.devicePixelRatio,
+      this.settings.value.pixelRatioLimit ?? Infinity,
+    );
+  }
+
   resize(): void {
+    this.renderer.setPixelRatio(this.pixelRatio());
     const width = this.container.clientWidth;
     const height = this.container.clientHeight;
     if (width === 0 || height === 0) return;
