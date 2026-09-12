@@ -1,7 +1,7 @@
 import * as monaco from 'monaco-editor/editor';
 import {AgentError} from '@code3d/agent';
 import {diffChars} from 'diff';
-import {action, autorun, makeObservable, observableRef} from 'mobx';
+import {action, autorun, computed, makeObservable, observableRef} from 'mobx';
 import {randomAgentColor} from './agent/colors';
 import {projectTypeScriptWorker} from './monaco/typescript-worker-client';
 import type {CursorTypeInfo} from './monaco/type-info';
@@ -458,6 +458,7 @@ export class CodeEditor {
 
   readonly editor: monaco.editor.IStandaloneCodeEditor;
   private readonly documents = new Map<string, ProjectDocument>();
+  private languageErrorCounts: ReadonlyMap<string, number> = new Map();
   private readonly designArgumentModels = new Map<
     string,
     monaco.editor.ITextModel
@@ -548,15 +549,25 @@ export class CodeEditor {
       quickSuggestions: {other: true, comments: true, strings: false},
       tabSize: 2,
     });
-    makeObservable<this, 'parameterCursorValue' | 'refreshParameterCursor'>(
+    makeObservable<
       this,
-      {
-        parameterCursorValue: observableRef,
-        refreshParameterCursor: action,
-      },
-    );
+      | 'parameterCursorValue'
+      | 'refreshParameterCursor'
+      | 'languageErrorCounts'
+      | 'refreshLanguageErrors'
+    >(this, {
+      parameterCursorValue: observableRef,
+      refreshParameterCursor: action,
+      languageErrorCounts: observableRef,
+      refreshLanguageErrors: action,
+      errorCounts: computed,
+    });
     this.editor.onDidChangeModelContent(() => this.refreshParameterCursor());
+    const markers = monaco.editor.onDidChangeMarkers(() =>
+      this.refreshLanguageErrors(),
+    );
     this.editor.onDidDispose(() => {
+      markers.dispose();
       for (const document of this.documents.values())
         document.stopDiagnostics();
     });
@@ -677,6 +688,48 @@ export class CodeEditor {
         .map(({path, model}) => ({path, source: model.getValue()}))
         .sort((left, right) => left.path.localeCompare(right.path)),
     };
+  }
+
+  /** Include runtime errors in unopened dependencies without counting their markers twice. */
+  get errorCounts(): ReadonlyMap<string, number> {
+    const counts = new Map(this.languageErrorCounts);
+    const seen = new Set<string>();
+    for (const diagnostic of this.modelDiagnostics()) {
+      const ref = diagnostic.sourceRef;
+      if (!ref || diagnostic.severity === 'warning') continue;
+      const key = JSON.stringify([
+        ref.file,
+        ref.start,
+        ref.end,
+        diagnostic.summary,
+        diagnostic.details,
+      ]);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      counts.set(ref.file, (counts.get(ref.file) ?? 0) + 1);
+    }
+    return counts;
+  }
+
+  private refreshLanguageErrors(): void {
+    const counts = new Map<string, number>();
+    for (const document of this.documents.values()) {
+      const count = monaco.editor
+        .getModelMarkers({resource: document.model.uri})
+        .filter(
+          marker =>
+            marker.owner !== modelDiagnosticOwner &&
+            marker.severity === monaco.MarkerSeverity.Error,
+        ).length;
+      if (count) counts.set(document.path, count);
+    }
+    if (
+      counts.size !== this.languageErrorCounts.size ||
+      [...counts].some(
+        ([path, count]) => this.languageErrorCounts.get(path) !== count,
+      )
+    )
+      this.languageErrorCounts = counts;
   }
 
   /** Source snapshots reached by compilation, including unopened dependencies. */
@@ -1650,6 +1703,7 @@ export class CodeEditor {
     document.model.dispose();
     this.annotationDecorations.delete(path);
     this.documents.delete(path);
+    this.refreshLanguageErrors();
     for (const [id, cursor] of this.agentCursors) {
       if (cursor.ref?.file === path) {
         cursor.ref = undefined;

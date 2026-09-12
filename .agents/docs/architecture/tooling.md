@@ -272,7 +272,16 @@ tab 后允许无活动文档，保留文档内容、撤销和视图状态以便�
 切换到依赖文件不会清空原入口的错误；同一入口重新执行后替换其结果，源码修改、
 文件操作和项目重载时清空过期诊断。CodeEditor 的每个文档通过 autorun 消费该派生
 列表，按位置与消息去重；按需打开的子模块立即得到已有标记，移除文档时释放订阅。
+CodeEditor 从 Monaco 的非运行时 error markers 与入口诊断派生 errorCounts，避免重复计数，
+包含尚未打开的运行时错误文件。tab 持有可销毁的 autorun，只更新颜色、数量和辅助说明；
+ProjectTree 响应式重绘装饰并更新 shadow stylesheet，父目录汇总后代错误，保留 agent 与剪切标记。
 验证见[运行时诊断](../../../packages/app/test/browser/runtime-diagnostics.test.ts)。
+
+新建条目借助 Pierre 的临时行与内联重命名输入框，磁盘操作仍由项目会话执行。
+ProjectTree 接管创建输入的确认、取消和校验，因为 Pierre 的 rename 只接受同目录 basename，
+且名称不变时不触发回调。Enter 或失焦确认、Esc 或空白取消；文件选区排除最后一个扩展名，
+支持 `/` 路径及自动创建父目录。暂存行不进入项目文件快照，取消或页面销毁时移除；
+常规重命名仍使用 Pierre 原生路径。验证见[文件浏览器](../../../packages/app/test/browser/project-explorer.test.ts)。
 
 诊断从最内层求值边界附上原 SourceRef，外层不覆盖已有精确位置。源码诊断进入
 Monaco marker，无法归属源码的项目/Worker 错误才使用全局入口；安装失败由包

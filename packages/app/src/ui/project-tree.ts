@@ -8,6 +8,13 @@ import {
 } from '@pierre/trees';
 import type {AgentLocation} from '../editor';
 import {
+  action,
+  autorun,
+  makeObservable,
+  observableRef,
+  runInAction,
+} from 'mobx';
+import {
   PackageInstallationError,
   type PackageInstallationProgress,
 } from '../project/browser-package-manager';
@@ -38,6 +45,7 @@ type ProjectTreeOptions = Readonly<{
   onUpdateDependencies?(directory: string): Promise<void>;
   onClearBuildCache?(): Promise<void>;
   onBusy(busy: boolean): void;
+  errorCounts?(): ReadonlyMap<string, number>;
 }>;
 
 /** Pierre owns tree interactions; the project session owns filesystem mutations. */
@@ -69,11 +77,21 @@ export class ProjectTree {
   private readonly status = document.createElement('div');
   private removeMenu?: () => void;
   private closeMenu?: ContextMenuOpenContext['close'];
+  private creation?: {
+    entry: ProjectEntry;
+    finish(name: string | undefined): void;
+  };
 
   constructor(
     private readonly container: HTMLElement,
     private readonly options: ProjectTreeOptions,
   ) {
+    makeObservable<this, 'agentLocations' | 'clipboard' | 'copy'>(this, {
+      agentLocations: observableRef,
+      clipboard: observableRef,
+      setAgentLocations: action,
+      copy: action,
+    });
     container.tabIndex = -1;
     this.status.className = 'project-status';
     this.status.hidden = true;
@@ -93,6 +111,7 @@ export class ProjectTree {
       onSelectionChange: paths => {
         if (
           this.synchronizing ||
+          this.creation ||
           this.busy ||
           this.dragging ||
           paths.length !== 1
@@ -220,7 +239,11 @@ export class ProjectTree {
         [data-item-rename-input]::selection { color: #edf0e7; background: #465635; }
         [data-item-section="decoration"] { font-size: 12px; }
         /* Center the visible dot, which sits below the font's line-box center. */
-        [data-item-section="decoration"] > span { transform: translateY(-1px); }
+        [data-item-section="decoration"] > span {
+          display: inline-flex;
+          gap: 5px;
+          transform: translateY(-1px);
+        }
         [data-item-section="icon"] > svg {
           width: var(--trees-icon-width);
           height: var(--trees-icon-width);
@@ -228,8 +251,99 @@ export class ProjectTree {
       `,
     });
     this.tree.render({fileTreeContainer: container});
+    const errorStyles = document.createElement('style');
+    container.shadowRoot!.append(errorStyles);
+    const stopDecorations = autorun(() => {
+      // Pierre invokes decorations during its own render; read their inputs here.
+      this.agentLocations;
+      this.clipboard;
+      const paths = new Set<string>();
+      for (const path of this.options.errorCounts?.().keys() ?? []) {
+        paths.add(path.slice(1));
+        for (
+          let parent = projectDirectory(path);
+          parent !== '/';
+          parent = projectDirectory(parent)
+        )
+          paths.add(parent.slice(1) + '/');
+      }
+      errorStyles.textContent = [...paths]
+        .map(
+          path =>
+            `[data-item-path="${CSS.escape(path)}"] [data-item-section="content"] { color: var(--diagnostic-error); }`,
+        )
+        .join('\n');
+      this.tree.render({fileTreeContainer: container});
+    });
+    const listeners = new AbortController();
+    const root = container.shadowRoot!;
+    const draftInput = (event: Event) => {
+      const input = event.target;
+      return this.creation &&
+        input instanceof HTMLInputElement &&
+        input.hasAttribute('data-item-rename-input')
+        ? input
+        : undefined;
+    };
+    root.addEventListener(
+      'focusin',
+      event => {
+        const input = draftInput(event);
+        if (!input) return;
+        const kind = this.creation!.entry.kind;
+        queueMicrotask(() => {
+          if (!this.creation || !input.isConnected) return;
+          input.setAttribute(
+            'aria-label',
+            kind === 'file' ? 'New file name' : 'New folder name',
+          );
+          const dot = kind === 'file' ? input.value.lastIndexOf('.') : -1;
+          input.setSelectionRange(0, dot > 0 ? dot : input.value.length);
+        });
+      },
+      {signal: listeners.signal},
+    );
+    root.addEventListener(
+      'keydown',
+      event => {
+        const input = draftInput(event);
+        if (!input || !(event instanceof KeyboardEvent) || event.isComposing)
+          return;
+        if (event.key === 'Escape' || event.key === 'Enter') {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          if (event.key === 'Escape') this.finishCreation();
+          else this.commitCreation(input);
+        }
+      },
+      {capture: true, signal: listeners.signal},
+    );
+    // Creation has path semantics; Pierre's rename commit only accepts a basename.
+    root.addEventListener(
+      'blur',
+      event => {
+        const input = draftInput(event);
+        if (!input) return;
+        event.stopImmediatePropagation();
+        this.commitCreation(input);
+      },
+      {capture: true, signal: listeners.signal},
+    );
+    root.addEventListener(
+      'input',
+      event => {
+        const input = draftInput(event);
+        if (input) {
+          input.setCustomValidity('');
+          input.removeAttribute('aria-invalid');
+          this.status.hidden = true;
+        }
+      },
+      {signal: listeners.signal},
+    );
     this.tree.subscribe(() => {
-      if (this.synchronizing || this.expandedCheckQueued) return;
+      if (this.synchronizing || this.creation || this.expandedCheckQueued)
+        return;
       this.expandedCheckQueued = true;
       queueMicrotask(() => {
         this.expandedCheckQueued = false;
@@ -279,6 +393,10 @@ export class ProjectTree {
     });
     window.addEventListener('pagehide', event => {
       if (!event.persisted) {
+        listeners.abort();
+        this.finishCreation();
+        stopDecorations();
+        errorStyles.remove();
         this.closeMenu?.({restoreFocus: false});
         this.tree.cleanUp();
       }
@@ -372,7 +490,10 @@ export class ProjectTree {
   }
 
   private renderEntries(): void {
-    const entries = [...this.entries.values()];
+    const entries = [
+      ...this.entries.values(),
+      ...(this.creation ? [this.creation.entry] : []),
+    ];
     const expanded = entries
       .filter(entry => {
         const item = this.tree.getItem(treePath(entry));
@@ -470,7 +591,6 @@ export class ProjectTree {
 
   setAgentLocations(locations: readonly AgentLocation[]): void {
     this.agentLocations = locations;
-    this.tree.render({fileTreeContainer: this.container});
   }
 
   async focusDirectory(path: string, cancelled: () => boolean): Promise<void> {
@@ -550,7 +670,7 @@ export class ProjectTree {
   }
 
   async create(kind: ProjectEntry['kind'], directory?: string): Promise<void> {
-    if (this.busy) return;
+    if (this.busy || this.creation) return;
     if (directory === undefined) {
       directory = this.targetDirectory();
       // Header actions remain useful while inspecting generated/package files.
@@ -567,6 +687,7 @@ export class ProjectTree {
       this.showError(error);
       return;
     }
+    if (this.busy || this.creation) return;
     const name = await this.askName(kind, directory);
     if (name === undefined) return;
     const path = normalizeProjectPath(`${directory}/${name}`);
@@ -700,7 +821,6 @@ export class ProjectTree {
   private copy(kind: 'copy' | 'move', paths = this.selectedPaths()): void {
     if (!paths.length || paths.some(isProtectedProjectPath)) return;
     this.clipboard = {kind, paths};
-    this.tree.render({fileTreeContainer: this.container});
   }
 
   private async paste(directory = this.targetDirectory()): Promise<void> {
@@ -733,8 +853,10 @@ export class ProjectTree {
       .filter(({from, to}) => from !== to);
     if (!entries.length) return;
     if (await this.perform({kind: clipboard.kind, entries})) {
-      if (clipboard.kind === 'move') this.clipboard = undefined;
-      this.tree.render({fileTreeContainer: this.container});
+      if (clipboard.kind === 'move')
+        runInAction(() => {
+          this.clipboard = undefined;
+        });
     }
   }
 
@@ -1018,8 +1140,25 @@ export class ProjectTree {
     const cut =
       this.clipboard?.kind === 'move' &&
       this.clipboard.paths.some(parent => projectPathIsWithin(path, parent));
-    if (!locations.length && !cut) return null;
+    const errors = this.options.errorCounts?.();
+    const errorCount =
+      item.kind === 'directory'
+        ? [...(errors ?? [])].reduce(
+            (count, [file, value]) =>
+              count + (projectPathIsWithin(file, path) ? value : 0),
+            0,
+          )
+        : (errors?.get(path) ?? 0);
+    if (!locations.length && !cut && !errorCount) return null;
     const parts = [
+      ...(errorCount
+        ? [
+            {
+              text: item.kind === 'directory' ? '●' : String(errorCount),
+              color: 'var(--diagnostic-error)',
+            },
+          ]
+        : []),
       ...(cut ? [{text: '✂', color: 'var(--muted)'}] : []),
       ...locations.slice(0, 3).map(location => ({
         text: '●',
@@ -1031,6 +1170,9 @@ export class ProjectTree {
       text: parts.map(part => part.text).join(''),
       parts,
       title: [
+        errorCount
+          ? `${errorCount} ${errorCount === 1 ? 'error' : 'errors'}${item.kind === 'directory' ? ' in this folder' : ''}`
+          : '',
         cut ? 'Cut — ready to move' : '',
         ...locations.map(location => `${location.name}: ${location.file}`),
       ]
@@ -1043,31 +1185,75 @@ export class ProjectTree {
     kind: ProjectEntry['kind'],
     directory: string,
   ): Promise<string | undefined> {
-    return dialogs.prompt({
-      title: kind === 'file' ? 'New file' : 'New folder',
-      message: `In ${directory}`,
-      trim: true,
-      label: 'Name',
-      value: kind === 'file' ? 'untitled.ts' : 'new-folder',
-      submit: 'Create',
-      placeholder: kind === 'file' ? 'src/model.ts' : 'src/components',
-      validate: value => {
-        if (
-          /[\\\0]/.test(value) ||
-          value
-            .split('/')
-            .some(part => !part.trim() || part === '.' || part === '..')
-        )
-          throw new Error(
-            'Enter a relative path with names separated by /, without . or .. segments.',
-          );
-        const path = normalizeProjectPath(`${directory}/${value}`);
-        if (isProtectedProjectPath(path))
-          throw new Error(`Protected project path: ${path}`);
-        if (this.entries.has(path))
-          throw new Error('An entry with this name already exists.');
-      },
+    return new Promise(resolve => {
+      const stem = kind === 'file' ? 'untitled' : 'new-folder';
+      const extension = kind === 'file' ? '.ts' : '';
+      let name = stem + extension;
+      let suffix = 2;
+      while (this.entries.has(normalizeProjectPath(`${directory}/${name}`)))
+        name = `${stem}-${suffix++}${extension}`;
+      const entry = {path: normalizeProjectPath(`${directory}/${name}`), kind};
+      this.creation = {entry, finish: resolve};
+      this.status.hidden = true;
+      this.tree.closeSearch();
+      this.tree.add(treePath(entry));
+      if (!this.tree.startRenaming(treePath(entry), {removeIfCanceled: true})) {
+        this.finishCreation();
+        return;
+      }
+      this.tree.scrollToPath(treePath(entry), {focus: false});
     });
+  }
+
+  private finishCreation(name?: string): void {
+    const creation = this.creation;
+    if (!creation) return;
+    this.creation = undefined;
+    this.synchronizing = true;
+    try {
+      this.tree.remove(treePath(creation.entry));
+    } finally {
+      this.synchronizing = false;
+    }
+    creation.finish(name);
+  }
+
+  private commitCreation(input: HTMLInputElement): void {
+    const creation = this.creation;
+    if (!creation) return;
+    const value = input.value.trim();
+    if (!value) {
+      this.finishCreation();
+      return;
+    }
+    try {
+      if (
+        /[\\\0]/.test(value) ||
+        value
+          .split('/')
+          .some(part => !part.trim() || part === '.' || part === '..')
+      )
+        throw new Error(
+          'Enter a relative path with names separated by /, without . or .. segments.',
+        );
+      const path = normalizeProjectPath(
+        `${projectDirectory(creation.entry.path)}/${value}`,
+      );
+      if (isProtectedProjectPath(path))
+        throw new Error(`Protected project path: ${path}`);
+      if (this.entries.has(path))
+        throw new Error('An entry with this name already exists.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      input.setCustomValidity(message);
+      input.setAttribute('aria-invalid', 'true');
+      this.showError(error);
+      queueMicrotask(() => {
+        if (input.isConnected) input.focus();
+      });
+      return;
+    }
+    this.finishCreation(value);
   }
 }
 

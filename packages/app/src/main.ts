@@ -20,7 +20,7 @@ import {
   RefreshCw,
   X,
 } from 'lucide';
-import {reaction} from 'mobx';
+import {autorun, reaction} from 'mobx';
 import brandMark from '../../../assets/brand/mark.svg?raw';
 import {AgentConnections} from './agent/connections';
 import {AgentObserver} from './agent/observer';
@@ -357,6 +357,7 @@ const projectExplorerToggle = requiredElement<HTMLButtonElement>(
   'project-explorer-toggle',
 );
 const editorTabs = requiredElement('editor-tabs');
+let stopTabDiagnostics: (() => void)[] = [];
 const projectLocation = requiredElement<HTMLButtonElement>('project-location');
 const projectStorageMenu = requiredElement('project-storage-menu');
 const openFolderButton =
@@ -510,6 +511,7 @@ const agentProject = new AgentProjectSession(
   error => showProjectIssue(error),
 );
 const projectDirectory = new ProjectTree(projectTree, {
+  errorCounts: () => codeEditor.errorCounts,
   async entries(directory) {
     const entries = new Map(
       (await listProjectEntries(projectFileSystem, directory)).map(entry => [
@@ -590,6 +592,7 @@ window.addEventListener(
     modelExportDialog.dispose();
     stopAgentRevision();
     stopSaveStatus();
+    stopTabDiagnostics.forEach(stop => stop());
     stopAgentFollow();
     stopAgentUpdates();
     agentConnections.dispose();
@@ -1477,6 +1480,8 @@ function setProjectExplorerExpanded(expanded: boolean): void {
 }
 
 function renderProjectNavigation(): void {
+  stopTabDiagnostics.forEach(stop => stop());
+  stopTabDiagnostics = [];
   const active = codeEditor.currentFile();
   requiredElement('editor-empty-state').hidden = active !== undefined;
   projectDirectory.setActiveFile(active);
@@ -1484,6 +1489,7 @@ function renderProjectNavigation(): void {
     ...codeEditor.openedFiles().map(path => {
       const tab = document.createElement('span');
       tab.className = 'editor-tab';
+      tab.dataset.path = path;
       tab.classList.toggle('active', path === active);
       const open = document.createElement('button');
       open.type = 'button';
@@ -1491,7 +1497,22 @@ function renderProjectNavigation(): void {
       label.className = 'editor-tab-label';
       label.textContent = path.slice(path.lastIndexOf('/') + 1);
       open.append(createIcon(File, 'project-entry-icon file-icon'), label);
-      open.title = path;
+      const errors = document.createElement('span');
+      errors.className = 'editor-tab-errors';
+      open.append(errors);
+      stopTabDiagnostics.push(
+        autorun(() => {
+          const count = codeEditor.errorCounts.get(path) ?? 0;
+          tab.classList.toggle('has-errors', count > 0);
+          errors.hidden = count === 0;
+          errors.textContent = String(count);
+          const detail = count
+            ? ` · ${count} ${count === 1 ? 'error' : 'errors'}`
+            : '';
+          open.title = path + detail;
+          open.setAttribute('aria-label', path + detail);
+        }),
+      );
       open.addEventListener('click', () => codeEditor.switchFile(path, true));
       const close = document.createElement('button');
       close.type = 'button';
