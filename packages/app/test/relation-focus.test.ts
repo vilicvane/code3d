@@ -48,9 +48,7 @@ function at(module: ModelModule, source: string, token: string) {
     ),
   );
   const evaluation = target.evaluations[0];
-  const constraint = defined(
-    context.evaluatedConstraint(module.objects, evaluation),
-  );
+  const constraint = context.evaluatedConstraint(module.objects, evaluation)!;
   return {module, target, evaluation, constraint};
 }
 
@@ -65,11 +63,11 @@ for (const method of ['on', 'align'] as const) {
           ? 'self'
           : 'self.axis';
       const argument = `${reverse ? 'self' : 'base'}.${method === 'on' ? 'up.flip()' : 'axis.reverse()'}`;
-      const source = `import {box, group} from '@code3d/core';
+      const source = `import {box, group, offset, aroundLine} from '@code3d/core';
         const base = box(20,10,30); const axis = box(2,2,2);
-        const part = box(8,6,4).relate(self => ${receiver}.${method}(
+        const part = box(8,6,4).relate(self => [${receiver}.${method}(
           /* target-start */ ${argument} /* target-end */
-        ).offset(1,2,3).aroundLine(axis.axis).rotate(20)); export default group([base,part]);`;
+        ), offset(1,2,3), aroundLine(axis.axis).rotate(20)]); export default group([base,part]);`;
       const module = await compile(source);
       for (const token of [
         `${method}(`,
@@ -81,17 +79,22 @@ for (const method of ['on', 'align'] as const) {
         '20)',
       ]) {
         const scope = at(module, source, token);
-        assert.equal(scope.evaluation.constraintFocus, 'self', token);
         assert.deepEqual(
           scope.evaluation.focusNodeIds,
           [scope.evaluation.relationOwnerNodeId],
           token,
         );
-        assert.equal(
-          context.focusedConstraintSide(scope.evaluation, scope.constraint),
-          reverse ? 'target' : 'source',
-          token,
-        );
+        if (scope.evaluation.transformationId) {
+          assert.equal(scope.constraint, undefined, token);
+          assert.equal(scope.evaluation.constraintFocus, undefined, token);
+        } else {
+          assert.equal(scope.evaluation.constraintFocus, 'self', token);
+          assert.equal(
+            context.focusedConstraintSide(scope.evaluation, scope.constraint),
+            reverse ? 'target' : 'source',
+            token,
+          );
+        }
       }
       for (const token of [
         '/* target-start */',
@@ -118,7 +121,7 @@ for (const method of ['on', 'align'] as const) {
 }
 
 test('on applies one opacity factor to complete source and target groups without named duplicates', async () => {
-  const source = `import {box,group} from '@code3d/core'; const base=group([box(20,10,30)]); const part=group([box(8,6,4)]).relate(self=>self.on( base.up ).offset(2,0,0)); export default group([base,part]);`;
+  const source = `import {offset, box,group} from '@code3d/core'; const base=group([box(20,10,30)]); const part=group([box(8,6,4)]).relate(self=>[self.on( base.up ), offset(2,0,0)]); export default group([base,part]);`;
   const module = await compile(source);
   for (const token of ['on(', 'base.up']) {
     const scope = at(module, source, token);
@@ -213,7 +216,7 @@ test('two relation elements on the same node keep distinct focus and decoration 
 });
 
 test('member previews retain their reference receiver when a chain focuses self', async () => {
-  const source = `import {box} from '@code3d/core'; const base=box(20,10,30); const axis=box(2,4,6); const part=box(8,6,4).relate(self=>self.on(base.up).aroundLine(axis.axis).rotate(20));`;
+  const source = `import {aroundLine, rotate, box} from '@code3d/core'; const base=box(20,10,30); const axis=box(2,4,6); const part=box(8,6,4).relate(self=>[self.on(base.up), aroundLine(axis.axis).rotate(20)]);`;
   const module = await compile(source);
   const targetAtReference = defined(
     module.sourceTargets.find(
@@ -271,7 +274,7 @@ test('member previews retain their reference receiver when a chain focuses self'
 });
 
 test('joint placement highlights only the focused relation, while self and transforms keep no unrelated markers', async () => {
-  const source = `import {box,group,offset,pivot} from '@code3d/core'; const base=box(20,10,30); const part=box(8,6,4).relate(self=>[self.axis.align(base.axis),self.on(base.up).offset(1,0,0),offset(3,0,0),pivot([1,0,0]).rotate(0,0,20)]); export default group([base,part]);`;
+  const source = `import {box,group,offset,pivot} from '@code3d/core'; const base=box(20,10,30); const part=box(8,6,4).relate(self=>[self.axis.align(base.axis),self.on(base.up), offset(1,0,0),offset(3,0,0),pivot([1,0,0]).rotate(0,0,20)]); export default group([base,part]);`;
   const module = await compile(source);
   for (const token of ['align(', 'on(', 'base.axis', 'base.up']) {
     const scope = at(module, source, token);

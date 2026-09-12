@@ -57,9 +57,9 @@ test(
           relationSourceDecoration,
         ],
       });
-      const source = `import {box, group, rectangle, line, point} from '@code3d/core';
+      const source = `import {offset, box, group, rectangle, line, point} from '@code3d/core';
 const base = box(30, 4, 20).material('#48a');
-const part = box(10, 12, 8).material('#f008').relate(self => self.on(/* target */ base.up).offset(0, 2, 0));
+const part = box(10, 12, 8).material('#f008').relate(self => [self.on(/* target */ base.up), offset(0, 2, 0)]);
 const result = group([base, part, rectangle(8, 9), line([0, 0, 0], [30, 20, 0]).material('#0f08'), point([8, 18, 5]).material('#f80')]);
 export default result;`;
       const module = await client.compile(

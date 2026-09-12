@@ -50,6 +50,55 @@ function targetSpatialTool(target: SourceTarget): SpatialTool | undefined {
   return undefined;
 }
 
+/** Keep a relation step's source focus; otherwise use the innermost relate self. */
+export function contextualToolScope(
+  module: ModelModule,
+  scope: Readonly<{target: SourceTarget; evaluation: SourceTargetEvaluation}>,
+) {
+  const enclosing = scope.target.relationSelfTargetId
+    ? scope.target
+    : !scope.evaluation.relationOwnerNodeId
+      ? module.sourceTargets
+          .filter(
+            candidate =>
+              candidate.relationSelfTargetId &&
+              candidate.sourceRef.file === scope.target.sourceRef.file &&
+              candidate.sourceRef.start <= scope.target.sourceRef.start &&
+              candidate.sourceRef.end >= scope.target.sourceRef.end,
+          )
+          .sort(
+            (a, b) =>
+              a.sourceRef.end -
+              a.sourceRef.start -
+              (b.sourceRef.end - b.sourceRef.start),
+          )[0]
+      : undefined;
+  if (!enclosing) return scope;
+  const target = module.sourceTargets.find(
+    target => target.id === enclosing.relationSelfTargetId,
+  );
+  // Loop iterations share a source range and evaluation context. The first
+  // enclosing call to finish owns this expression's execution.
+  const order = (evaluation: SourceTargetEvaluation) =>
+    evaluation.toolExecutionOrder ?? evaluation.runtime.order;
+  const owner = enclosing.evaluations
+    .filter(
+      evaluation =>
+        evaluation.contextId === scope.evaluation.contextId &&
+        (scope.evaluation.relationOwnerNodeId
+          ? evaluation.relationOwnerNodeId ===
+            scope.evaluation.relationOwnerNodeId
+          : order(evaluation) >= order(scope.evaluation)),
+    )
+    .sort((a, b) => order(a) - order(b))[0]?.relationOwnerNodeId;
+  const evaluation = target?.evaluations.find(
+    evaluation =>
+      evaluation.contextId === scope.evaluation.contextId &&
+      evaluation.relationOwnerNodeId === owner,
+  );
+  return target && evaluation ? {target, evaluation} : scope;
+}
+
 /** Resolve a toolbar command once; all consumers then use its selected source target. */
 export function contextualToolActivation(
   module: ModelModule,
@@ -57,7 +106,7 @@ export function contextualToolActivation(
   tool: SpatialTool | undefined,
   binding?: TransformGizmoBinding,
 ): SourceRef | undefined {
-  const {target, evaluation} = scope;
+  const {target, evaluation} = contextualToolScope(module, scope);
   if (!tool) return;
   const sources = (target: SourceTarget) =>
     authoredToolSources(module, target).at(-1);
@@ -71,9 +120,7 @@ export function contextualToolActivation(
       ? 'sourceRef' in binding.spatial.source
         ? binding.spatial.source.sourceRef
         : undefined
-      : binding?.kind === 'expression'
-        ? binding.receiver.sourceRef
-        : binding?.completeArguments?.sourceRef;
+      : binding?.completeArguments?.sourceRef;
   }
   const stage = owner.relationStages?.find(stage =>
     evaluation.transformationId

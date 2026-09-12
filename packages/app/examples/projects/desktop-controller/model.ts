@@ -1,4 +1,5 @@
 import {
+  offset,
   box,
   cylinder,
   group,
@@ -22,7 +23,8 @@ const knob = makeKnob(12, 10, 12).relate(part => [
   part.down.on(panel.top),
 ]);
 const key = keycap(6).relate(part => [
-  part.axis.align(panel.axis).offset(22, 0, 0),
+  part.axis.align(panel.axis),
+  offset(22, 0, 0),
   part.down.on(panel.top),
 ]);
 

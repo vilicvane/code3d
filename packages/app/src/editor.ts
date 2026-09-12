@@ -98,7 +98,6 @@ type SourceNavigation = EditorCursor & Readonly<{sourceRef?: SourceRef}>;
 
 type EditorSourceContext = Readonly<{
   tool: readonly SourceRef[];
-  activation?: SourceRef;
   /** An insertion gap has no identifier, including when it touches the next call. */
   caretOnly?: boolean;
 }>;
@@ -1391,8 +1390,7 @@ export class CodeEditor {
   }
 
   /** Activate the expression end or insertion gap through normal source navigation. */
-  activateSourceTool(): boolean {
-    const ref = this.sourceContext?.()?.activation;
+  activateSourceTool(ref: SourceRef | undefined): boolean {
     const current = ref && this.resolveSourceRef(ref);
     if (!current || current.file !== this.activePath) return false;
     const model = this.editor.getModel()!;

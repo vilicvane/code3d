@@ -91,10 +91,10 @@ surface's normal sense. These change direction metadata while preserving the
 reference axes. Point membership ignores direction; a curve lying on a surface
 does not gain an arbitrary heading in that surface.
 
-Both on and align offsets translate self in the target reference axes from the
-original solution at that point in the chain. Zero adds no position condition.
-Source and target can be written in either order; `relate` still owns the movable
-self and the offset direction.
+Constraints do not have offset or rotation methods. To adjust their solved pose,
+add an independent `offset(x, y, z)` array entry. Its direction uses the fixed
+composition axes, regardless of which side of `on` or `align` names self.
+Zero leaves the preceding solution unchanged.
 
 <ModelExample id="expose" />
 
@@ -112,15 +112,17 @@ Arrowheads keep the same screen size as you zoom. Unsupported geometry,
 geometric incompatibility, and numerical nonconvergence have separate errors.
 
 To adjust a multi-constraint result visually, select self. The App edits or adds
-an independent transformation after the joint constraint segment. Numeric edits
-inside a constraint chain still solve that segment together with its siblings.
+an independent transformation after the joint constraint segment.
 
 ## Choose a rotation pivot or axis
 
 ```ts
-const placed = part.relate(self =>
-  self.on(base.up).pivot([50, 0, 0]).rotate(0, 0, 45),
-);
+import {pivot} from '@code3d/core';
+
+const placed = part.relate(self => [
+  self.on(base.up),
+  pivot([50, 0, 0]).rotate(0, 0, 45),
+]);
 ```
 
 The pivot is expressed in self's local coordinates. Use `pivotVertex(id)` to
@@ -138,9 +140,9 @@ displacement uses the selected axis frame. Moving along the axis itself has no
 effect on the rotation. These are reference modifiers, followed by one `rotate`;
 completed transformations remain separate array entries.
 
-Each chain's rotation follows its contact placement, so the contact does not
-cancel the authored rotation. Other relations constrain the resulting pose.
-All explicit orientations on one self must agree.
+Rotations follow the preceding joint constraint solution. Later transformations
+compose in order; a later constraint starts a new segment from that pose.
+Groups move their assembled children as one rigid part.
 
 ### Bend a loft with explicit rotations
 
@@ -217,15 +219,12 @@ Even before you write a consuming
 positions. Selecting the related model's standalone binding shows it in its local
 frame. Operations preserve the observable meaning of existing model values.
 
-Within a relation chain, the cursor previews the result through the selected
-call: `on`/`align` show the base relation, and each `offset` or `rotate` shows its
-own result. `pivot`, `pivotVertex`, `pivotPoint`, `aroundEdge`, and `aroundLine` show the preceding pose with
-the selected rotation reference. Later calls do not move this preview or its
-handles. Sibling constraints in the same continuous segment remain jointly solved;
-previous segments provide the incoming pose, and later segments are excluded from
-this preview. Only the selected chain is replaced by its selected prefix. If that
-prefix conflicts with a sibling constraint, the App reports the preview error and
-keeps the valid final model available.
+In a `relate` array, `on` and `align` show the joint solution of their continuous
+constraint segment. Each independent `offset` or `rotate` shows its own result.
+The pivot and axis selectors show the preceding pose with the selected reference.
+Later steps do not move this preview or its handles. Previous segments provide
+the incoming pose; later segments are excluded. An invalid segment reports a
+preview error while keeping the valid final model available.
 
 <p>
   <a href={sitePath('examples/relate/')}>
@@ -249,11 +248,11 @@ inherited constraints still affect the solved position, but their references do
 not become second-level highlights unless the current call also uses them.
 Entering an individual constraint returns to its existing step-by-step preview.
 
-On `self.on(...)` or `self.align(...)`, and through the following `offset`,
+On `self.on(...)` or `self.align(...)`, and in independent `offset`,
 `pivot`, `pivotVertex`, `pivotPoint`, `aroundEdge`, `aroundLine`, and `rotate` calls, self is selected. Inside
 the parentheses of `on(...)` or `align(...)`, the target reference is selected.
-In the reverse spelling `base.on(self.up).offset(...)`, both the target
-argument and the offset therefore focus self. Selecting an explicit reference
+In the reverse spelling `base.on(self.up)`, the target
+argument focuses self. Selecting an explicit reference
 such as the receiver `base` focuses that reference. Switching sides changes
 emphasis without changing marker size or color.
 
@@ -289,7 +288,7 @@ shared, other affected objects preview the change as well.
 
 Without a safe upstream parameter, dragging preserves the offset expression
 and adjusts it by an increment. For example, an X movement of `2` changes
-`.offset((i - 2) * 8, 0, 0)` to `.offset((i - 2) * 8 + 2, 0, 0)`.
+`offset((i - 2) * 8, 0, 0)` to `offset((i - 2) * 8 + 2, 0, 0)`.
 Another movement of `3` combines that increment into `+ 5`. Returning by `5`
 removes it. The tool does not change the inner `8` or keep nesting offset calls.
 

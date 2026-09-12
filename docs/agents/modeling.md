@@ -42,11 +42,14 @@ before promising a feature.
 ## Place a constrained part
 
 Use `relate` for composition placement and `originOffset` to change local
-geometry coordinates. Consecutive constraints solve jointly. Independent Core
+geometry coordinates. Constraints only describe `on`/`align`; they have no
+chained offset, rotation or pivot/axis selectors. Consecutive constraints solve jointly. Independent Core
 `offset`/`rotate` values move that result; later constraints start a new segment
 from the preceding pose. Offset uses fixed composition axes, while rotation
 defaults to the current part origin. `pivot([x,y,z])` chooses self coordinates; `pivotVertex(id)` and `aroundEdge(id)` choose self topology; `pivotPoint(pointRef)` and `aroundLine(lineRef)` accept references. Each selector ends with `rotate`: XYZ angles for a point, one angle for an axis. External references follow their owning model’s solved position; point references retain self’s rotation axes.
-In the App, a selector and its final rotation share one tool and parameter panel. Picking a reference on an unfinished selector appends its missing zero-angle rotation; existing rotations and reference offsets are preserved. The edit undoes as one step. Only the focused align/on relation shows its axes/faces; self and transformation tools keep their own reference markers.
+In the App, selecting `relate()` or its callback self exposes spatial tools without
+activating one by default. Adding a transformation to a single returned constraint
+converts the return value to an array. A selector and its final rotation share one tool and parameter panel. Picking a reference on an unfinished selector appends its missing zero-angle rotation; existing rotations and reference offsets are preserved. The edit undoes as one step. Only the focused align/on relation shows its axes/faces; self and transformation tools keep their own reference markers.
 Pick its reference directly from the visible point/axis candidates; hold Alt to
 move the reference with its translation gizmo. Moving coordinate
 `pivot([...])` updates its coordinates directly; moving a topology or point/line reference

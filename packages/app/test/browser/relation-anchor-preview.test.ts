@@ -50,10 +50,10 @@ test(
           ['self.vertex(2)', 'base.up'],
           ['self.up', 'base.down'],
         ] as const) {
-          const source = `import {box, group} from '@code3d/core';
+          const source = `import {offset, box, group} from '@code3d/core';
           const base = box(10, 10, 10);
           const part = box(20, 20, 20).relate(self => ${sourceAnchor}.on(${targetAnchor}));
-          const peer = box(3, 3, 3).relate(self => self.down.on(base.up).offset(20, 0, 0));
+          const peer = box(3, 3, 3).relate(self => [self.down.on(base.up), offset(20, 0, 0)]);
           export default group([base, part, peer]);`;
           const module = await client.compile(
             {files: [{path: '/main.ts', source}]},

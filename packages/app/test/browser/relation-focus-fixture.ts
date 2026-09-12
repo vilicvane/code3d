@@ -108,8 +108,8 @@ export async function measureRelationFocus() {
       const constraints =
         label === 'two constraints'
           ? `[${relation},self.on(other.front)]`
-          : `${relation}.offset(2,0,0)`;
-      const source = `import {box,group,line,point} from '@code3d/core'; const base=${geometry}; const other=${geometry}; const part=${geometry}.relate(self=>${constraints}); export default group([base,part,other]);`;
+          : `[${relation}, offset(2,0,0)]`;
+      const source = `import {offset,box,group,line,point} from '@code3d/core'; const base=${geometry}; const other=${geometry}; const part=${geometry}.relate(self=>${constraints}); export default group([base,part,other]);`;
       const module = await client.compile(
         {files: [{path: '/main.ts', source}]},
         '/main.ts',

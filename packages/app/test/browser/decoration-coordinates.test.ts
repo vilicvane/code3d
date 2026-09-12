@@ -109,9 +109,9 @@ test(
     const page = await openViewport(t);
     const results = await page.evaluate(async () => {
       const {viewport, compiler} = window.decorationTest;
-      const source = `import {circle, loft, point, rectangle} from '@code3d/core';
-const start = circle(12).relate(s => s.on(point([17, 8, -13]).up).rotate(0, 0, 25));
-const end = rectangle(18, 18).relate(s => s.on(start.up).offset(0, 30, 0));
+      const source = `import {rotate, offset, circle, loft, point, rectangle} from '@code3d/core';
+const start = circle(12).relate(s => [s.on(point([17, 8, -13]).up), rotate(0, 0, 25)]);
+const end = rectangle(18, 18).relate(s => [s.on(start.up), offset(0, 30, 0)]);
 export default loft([start, end]);`;
       const module = await compiler.compile(
         {files: [{path: '/main.ts', source}]},
@@ -151,11 +151,11 @@ export default loft([start, end]);`;
             .applyMatrix4(mesh!.matrixWorld)
             .distanceTo(point.applyMatrix4(receiver.object.matrixWorld));
         });
-        viewport.hideSourceDecorationsDuringPreview();
+        viewport.setParameterPreview('test-preview', 1);
         const hidden = !viewport['decorationLayers'].has(
           'source-context:loft-result',
         );
-        viewport.restoreSourceDecorations();
+        viewport.clearParameterPreview('test-preview');
         results.push({
           word,
           distances,
@@ -191,8 +191,6 @@ test(
     const result = await page.evaluate(async () => {
       const {viewport, compiler} = window.decorationTest;
       const {spatialIntent} = await import('/src/tools/model-spatial-tool.ts');
-      const {originDecoration} =
-        await import('/src/model/origin-decorations.ts');
       const source =
         "import {box} from '@code3d/core'; export default box(20, 10, 30).originOffset(2, 3, 4);";
       const module = await compiler.compile(
@@ -215,36 +213,18 @@ test(
         return spatialIntent(binding, binding.value + delta);
       };
       const first = intent(5);
-      viewport.hideSourceDecorationsDuringPreview();
       viewport.setSpatialPreview(first.preview.objects);
-      viewport.setDecorations(
-        'spatial-preview',
-        first.preview.objects.map(object =>
-          originDecoration(object.nodeId, object.spatial.origin),
-        ),
-      );
-      const dragging = marker('spatial-preview');
+      const dragging = marker('source-context:model-origin');
       viewport.commitSpatialPreview(
         first.preview.objects,
         first.preview.parameter,
       );
       viewport.clearSpatialPreview(first.preview.objects);
-      viewport.clearDecorations('spatial-preview');
-      viewport.restoreSourceDecorations();
       const committed = marker('source-context:model-origin');
       const second = intent(3);
-      viewport.hideSourceDecorationsDuringPreview();
       viewport.setSpatialPreview(second.preview.objects);
-      viewport.setDecorations(
-        'spatial-preview',
-        second.preview.objects.map(object =>
-          originDecoration(object.nodeId, object.spatial.origin),
-        ),
-      );
-      const draggingAgain = marker('spatial-preview');
+      const draggingAgain = marker('source-context:model-origin');
       viewport.clearSpatialPreview(second.preview.objects);
-      viewport.clearDecorations('spatial-preview');
-      viewport.restoreSourceDecorations();
       return {
         dragging,
         committed,
@@ -314,12 +294,25 @@ export default group([assembly, moved]);`;
             );
           });
         const before = check();
-        viewport.setOccurrenceTranslationPreview(
-          [occurrences[1].key],
-          [7, 8, 9],
-        );
+        const preview = {
+          key: occurrences[1].key,
+          nodeId: occurrences[1].node.nodeId,
+          transform: {
+            position: [7, 8, 9] as const,
+            quaternion: [0, 0, 0, 1] as const,
+          },
+          spatial: {
+            origin: [0, 0, 0] as const,
+            vector: [0, 0, 0] as const,
+            frame: {
+              position: [0, 0, 0] as const,
+              quaternion: [0, 0, 0, 1] as const,
+            },
+          },
+        };
+        viewport.setSpatialPreview([preview]);
         const during = check();
-        viewport.clearOccurrenceTranslationPreview([occurrences[1].key]);
+        viewport.clearSpatialPreview([preview]);
         results.push({
           kind,
           occurrences: occurrences.length,
@@ -351,7 +344,7 @@ test(
       for (const reversed of [false, true]) {
         const source = `import {box} from '@code3d/core';
 const base = box(60, 2, 40);
-export default box(20, 10, 30).originVertex(3).rotate(10, 25, 15).relate(self => ${reversed ? 'base.on(self.up)' : 'self.on(base.up)'}.rotate(0, 45, 0).pivotVertex(6).rotate(0, 0, 90).offset(20, 0, 0));`;
+export default box(20, 10, 30).originVertex(3).rotate(10, 25, 15).relate(self => [${reversed ? 'base.on(self.up)' : 'self.on(base.up)'}, rotate(0, 45, 0), pivotVertex(6).rotate(0, 0, 90), offset(20, 0, 0)]);`;
         const module = await compiler.compile(
           {files: [{path: '/main.ts', source}]},
           '/main.ts',

@@ -1,17 +1,15 @@
+import type {Transformation} from '@code3d/core';
 import {defined} from '../../../test/assert.ts';
 import {
   modelObject,
   createModelSnapshotter,
   disposeModelObjects,
 } from './model-test.ts';
-import type {
-  ModelOperationInstrumentation,
-  Constraint,
-} from '@code3d/core/tooling';
+import type {ModelOperationInstrumentation} from '@code3d/core/tooling';
 
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {box} from '../bld/node/index.js';
+import {offset, box} from '../bld/node/index.js';
 import {
   beginModelEvaluation,
   instrumentRelation,
@@ -85,35 +83,37 @@ test('clears cached constraint provenance without losing the stored relation or 
   const base = box(10, 12, 14);
   const target = box(20, 24, 28);
   const trace = instrumentation(10);
-  let constraint: Constraint | undefined;
+  let constraint: Transformation | undefined;
   const related = base.relate(copy => {
-    constraint = copy.on(target.down).offset(2, 3, 4);
+    constraint = offset(2, 3, 4);
     instrumentRelation(constraint, trace.sourceRef, trace.parameters);
-    return constraint;
+    return [copy.on(target.down), constraint];
   });
   try {
     const first = createModelSnapshotter()(related);
-    assert.deepEqual(first.constraints[0].sourceRefs, [trace.sourceRef]);
+    assert.deepEqual(first.transformations![0].sourceRefs, [trace.sourceRef]);
     assert.deepEqual(first.parameters, trace.parameters);
-    assert.deepEqual(first.constraints[0].offsets.at(-1)!.sourceRefs, [
+    assert.deepEqual(first.transformations![0].offsets.at(-1)!.sourceRefs, [
       trace.sourceRef,
     ]);
 
     finishEvaluation();
     finishEvaluation = beginModelEvaluation();
     const second = createModelSnapshotter()(related);
-    assert.deepEqual(second.constraints[0].sourceRefs, []);
-    assert.deepEqual(second.constraints[0].parameters, []);
-    assert.deepEqual(second.constraints[0].offsets.at(-1)!.sourceRefs, []);
+    assert.deepEqual(second.transformations![0].sourceRefs, []);
+    assert.deepEqual(second.transformations![0].parameters, []);
+    assert.deepEqual(second.transformations![0].offsets.at(-1)!.sourceRefs, []);
     assert.deepEqual(second.parameters, []);
     assert.deepEqual(second.compositionTransform, first.compositionTransform);
-    assert.deepEqual(second.constraints[0].offsets.at(-1)!.value, [2, 3, 4]);
+    assert.deepEqual(
+      second.transformations![0].offsets.at(-1)!.value,
+      [2, 3, 4],
+    );
     assert.deepEqual(second.mesh, first.mesh);
-    // A cached Constraint also copies only the current evaluation's metadata.
-    const shifted = defined(constraint).offset(1, 0, 0);
-    const preview = defined(relationPreview(shifted));
-    assert.deepEqual(preview.object.constraints[0].sourceRefs, []);
-    assert.deepEqual(preview.object.constraints[0].parameters, []);
+    // A cached Transformation also exposes only the current evaluation's metadata.
+    const preview = defined(relationPreview(defined(constraint)));
+    assert.deepEqual(preview.object.transformations![0].sourceRefs, []);
+    assert.deepEqual(preview.object.transformations![0].parameters, []);
   } finally {
     finishEvaluation();
     disposeModelObjects([base, target, related]);

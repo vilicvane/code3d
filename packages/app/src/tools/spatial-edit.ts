@@ -63,7 +63,7 @@ export type SpatialSourceChange =
       mode: 'offset' | 'replace';
     }>
   | Readonly<{
-      kind: 'origin-offset' | 'rotation-call';
+      kind: 'origin-offset';
       sourceRef: SourceRef;
       delta: Vec3;
     }>
@@ -71,8 +71,7 @@ export type SpatialSourceChange =
       kind: 'reference-offset';
       sourceRef: SourceRef;
       method: 'pivot' | 'pivotOffset' | 'axisOffset';
-      explicit: boolean;
-      append?: 'chain' | TransformationInsertion['container'];
+      append?: TransformationInsertion['container'];
       values: Vec3;
       delta: Vec3;
       constructor?: TransformationInsertion;
@@ -141,7 +140,6 @@ export class SpatialTransformResolver implements ToolIntentResolver {
               change.method,
               change.values,
               change.delta,
-              change.explicit,
               change.constructor?.name,
               change.append,
             )
@@ -179,15 +177,11 @@ export class SpatialTransformResolver implements ToolIntentResolver {
                             `${change.name}(${change.delta.map(formatSourceNumber).join(', ')})`,
                             change.container,
                           )
-                      : change.kind === 'rotation-call'
-                        ? change.delta.every(value => value === 0)
-                          ? expectedText
-                          : `${expectedText}.rotate(${change.delta.map(formatSourceNumber).join(', ')})`
-                        : offsetCallSource(
-                            expectedText,
-                            'originOffset',
-                            change.delta,
-                          );
+                      : offsetCallSource(
+                          expectedText,
+                          'originOffset',
+                          change.delta,
+                        );
     const importEdits = [];
     const addition =
       change.kind === 'rotation-reference' && referenceEdit?.usesConstructor

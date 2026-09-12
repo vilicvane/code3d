@@ -7,7 +7,6 @@ import {
   origin,
   rotateVector,
   rotation,
-  transformsAreEquivalent,
   type Quaternion,
   type RigidTransform,
   type Vec3,
@@ -58,10 +57,6 @@ export function externalRotationFrame(
 }
 
 export type BodyAction = BodyRotation | Readonly<{offset: Vec3}>;
-export const hasRotation = (relation: {
-  actions: readonly BodyAction[];
-}): boolean => relation.actions.some(action => !('offset' in action));
-
 export type BodyRelation = Readonly<{
   id: string;
   source: Readonly<{
@@ -70,7 +65,6 @@ export type BodyRelation = Readonly<{
     bounds: (orientation: Quaternion) => Bounds;
   }>;
   target: Readonly<{body: number; transform: RigidTransform; facing: 1 | -1}>;
-  actions: readonly BodyAction[];
 }>;
 
 export type Body = Readonly<{
@@ -124,41 +118,7 @@ export function solveBodies(
         'Cyclic external rotation axes cannot determine an authored orientation.',
       );
     visiting.add(index);
-    const candidates = bodies[index].relations
-      .filter(hasRotation)
-      .map(relation => {
-        let pose = bodies[index].initial ?? identityRigidTransform;
-        for (const action of relation.actions) {
-          if ('offset' in action) continue;
-          pose =
-            'local' in action
-              ? composeTransforms(pose, action.local)
-              : 'point' in action
-                ? composeTransforms(pose, rotation(action.rotation))
-                : composeTransforms(
-                    axisRotation(
-                      composeTransforms(seed(action.body), action.axis),
-                      action.angle,
-                    ),
-                    pose,
-                  );
-        }
-        return pose;
-      });
-    let pose = candidates[0] ?? bodies[index].initial ?? identityRigidTransform;
-    if (
-      candidates.some(
-        candidate =>
-          !transformsAreEquivalent(
-            rotation(candidate.quaternion),
-            rotation(pose.quaternion),
-          ),
-      )
-    ) {
-      throw new Error(
-        `Conflicting explicit rotations for ${bodies[index].name}.`,
-      );
-    }
+    let pose = bodies[index].initial ?? identityRigidTransform;
     for (const action of bodies[index].transformations ?? []) {
       if ('offset' in action) continue;
       pose =
@@ -196,36 +156,9 @@ export function solveBodies(
         ),
       },
     };
-    const authored =
-      bodies[index].relations.find(hasRotation) ??
-      bodies[index].relations.find(relation => relation.actions.length);
-    const actions = authored?.actions ?? [];
-    const transformations = bodies[index].transformations ?? [];
-    for (const [actionIndex, action] of [
-      ...actions,
-      ...transformations,
-    ].entries()) {
+    for (const action of bodies[index].transformations ?? []) {
       if ('offset' in action) {
-        if (actionIndex >= actions.length) {
-          pose = {...pose, position: shiftPoint(pose.position, action.offset)};
-          continue;
-        }
-        const relation = authored!;
-        const target =
-          relation.target.body === index
-            ? pose
-            : {quaternion: seed(relation.target.body).quaternion};
-        const frame = composeTransforms(
-          rotation(target.quaternion),
-          relation.target.transform,
-        );
-        pose = {
-          ...pose,
-          position: shiftPoint(
-            pose.position,
-            rotateVector(action.offset, frame.quaternion),
-          ),
-        };
+        pose = {...pose, position: shiftPoint(pose.position, action.offset)};
       } else if ('local' in action) {
         pose = {
           position: shiftPoint(
@@ -267,20 +200,13 @@ export function solveBodies(
   const preferences = new Map<string, Equation>();
   bodies.forEach((body, owner) =>
     body.relations.forEach(relation => {
-      // A chain describes contact followed by its explicit rotations. Invert only
-      // this chain; every other relation still sees and constrains the final pose.
+      // Every contact constrains the joint result before independent transforms.
       const baseline = undoActions(
-        undoActions(poses[owner], body.transformations ?? [], poses, owner),
-        relation.actions,
+        poses[owner],
+        body.transformations ?? [],
         poses,
-        owner,
-        relation.target,
       );
-      // Untouched siblings constrain the final pose, but cannot dilute an
-      // authored displacement along an otherwise free direction.
-      const preferred =
-        relation.actions.length || !body.relations.some(r => r.actions.length);
-      for (let axis = 0; preferred && axis < 3; axis++) {
+      for (let axis = 0; axis < 3; axis++) {
         const preference = {
           id: relation.id,
           coefficients: baseline.position.columns.map(column => column[axis]),
@@ -374,25 +300,12 @@ function undoActions(
   pose: AffinePose,
   actions: readonly BodyAction[],
   poses: readonly AffinePose[],
-  owner: number,
-  target?: BodyRelation['target'],
 ): AffinePose {
   for (const action of [...actions].reverse()) {
     if ('offset' in action) {
-      const frame = target
-        ? composeTransforms(
-            rotation(
-              (target.body === owner ? pose : poses[target.body]).quaternion,
-            ),
-            target.transform,
-          )
-        : identityRigidTransform;
       pose = {
         ...pose,
-        position: shiftPoint(
-          pose.position,
-          negateVector(rotateVector(action.offset, frame.quaternion)),
-        ),
+        position: shiftPoint(pose.position, negateVector(action.offset)),
       };
     } else if ('local' in action) {
       const inverse = invertTransform(action.local);

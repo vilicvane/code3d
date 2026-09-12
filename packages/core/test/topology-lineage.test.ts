@@ -9,6 +9,7 @@ import type {Model} from '@code3d/core';
 import assert from 'node:assert/strict';
 import {afterEach, test} from 'node:test';
 import {
+  offset,
   bezier,
   box,
   circle,
@@ -178,9 +179,10 @@ for (const operation of [
 ]) {
   test(`${operation.name || 'cut'} preserves boundary contributions from both inputs`, () => {
     const left = box(10, 10, 10);
-    const right = box(8, 8, 8).relate(p =>
-      p.center.align(left.center).offset(6, 3, 2),
-    );
+    const right = box(8, 8, 8).relate(p => [
+      p.center.align(left.center),
+      offset(6, 3, 2),
+    ]);
     const result = operation([left, right]);
     try {
       const topology = modelGeometry(result).value.topology;
@@ -230,12 +232,14 @@ test('intersect explains disjoint and touching inputs while retaining reusable m
 
 test('n-ary Boolean input paths exclude internal steps and cached prefixes remain reusable', () => {
   const first = box(4, 4, 4);
-  const second = box(3, 3, 3).relate(p =>
-    p.center.align(first.center).offset(10, 0, 0),
-  );
-  const third = box(2, 2, 2).relate(p =>
-    p.center.align(first.center).offset(20, 0, 0),
-  );
+  const second = box(3, 3, 3).relate(p => [
+    p.center.align(first.center),
+    offset(10, 0, 0),
+  ]);
+  const third = box(2, 2, 2).relate(p => [
+    p.center.align(first.center),
+    offset(20, 0, 0),
+  ]);
   const pair = union([first, second]);
   const before = kernelOperationCacheStats();
   const result = union([first, second, third]);

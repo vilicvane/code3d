@@ -1,11 +1,8 @@
 import {topologyIdExpression} from './topology-expression';
 import {
-  rotateVector,
   type EdgeId,
   type ParameterTarget,
-  type Quaternion,
   type SourceRef,
-  type Vec3,
 } from '@code3d/core/tooling';
 import type {ViewportDecoration} from '../viewport-decoration';
 import type {ToolArgumentEditTarget} from '../model/tool-schema';
@@ -19,7 +16,6 @@ import {
   completeCallArgumentsSource,
   type CallArgumentDefaults,
   formatSourceNumber,
-  offsetCallSource,
   callIdentifierOffset,
 } from './source-expression';
 import {SketchEditResolver, type SketchEditIntent} from './sketch-source';
@@ -98,15 +94,6 @@ type ToolAction =
           }
         | {kind: 'all'; argument: EdgeArgumentTarget}
       >;
-    }>
-  | Readonly<{
-      kind: 'relation.offset';
-      offsetArguments?: Vec3;
-      receiver: SourceAnchor;
-      occurrenceKeys: readonly string[];
-      delta: Vec3;
-      frameQuaternion: Quaternion;
-      direction: 1 | -1;
     }>;
 
 export type SourceTextEdit = Readonly<{
@@ -136,11 +123,6 @@ export type ToolPreview =
   | Readonly<{
       kind: 'source-edits';
       edits: readonly SourceTextEdit[];
-    }>
-  | Readonly<{
-      kind: 'occurrence-translation';
-      occurrenceKeys: readonly string[];
-      delta: Vec3;
     }>
   | Readonly<{
       kind: 'viewport-decorations';
@@ -212,7 +194,6 @@ export class ToolEngine {
     this.register(new RemoveArgumentResolver());
     this.register(new SetArgumentResolver());
     this.register(new SetEdgeOperationResolver());
-    this.register(new OffsetRelationResolver());
     this.register(new SpatialTransformResolver());
     this.register(new SketchEditResolver());
   }
@@ -637,61 +618,6 @@ class SetEdgeOperationResolver implements ToolIntentResolver {
         intent,
         edits,
         preview: {kind: 'source-edits', edits},
-      },
-    };
-  }
-}
-
-class OffsetRelationResolver implements ToolIntentResolver {
-  readonly kind = 'relation.offset' as const;
-
-  resolve(intent: ToolIntent, context: ResolveContext): ToolResolution {
-    if (intent.kind !== this.kind) {
-      return {
-        status: 'unsupported',
-        reason: 'The relation-offset resolver received the wrong edit intent.',
-      };
-    }
-    if (
-      intent.occurrenceKeys.length === 0 ||
-      intent.delta.some(value => !Number.isFinite(value))
-    ) {
-      return {
-        status: 'unsupported',
-        reason: 'A relation offset requires an object and finite values.',
-      };
-    }
-    const resolution = expressionPlan(
-      intent,
-      intent.receiver,
-      receiver =>
-        offsetCallSource(
-          receiver,
-          'offset',
-          intent.delta,
-          intent.offsetArguments,
-        ),
-      'Adjust relation offset',
-      context,
-      'offset',
-    );
-    if (resolution.status !== 'ready') {
-      return resolution;
-    }
-    return {
-      status: 'ready',
-      plan: {
-        ...resolution.plan,
-        preview: {
-          kind: 'occurrence-translation',
-          occurrenceKeys: intent.occurrenceKeys,
-          delta: rotateVector(
-            intent.delta.map(
-              value => value * intent.direction,
-            ) as unknown as Vec3,
-            intent.frameQuaternion,
-          ),
-        },
       },
     };
   }

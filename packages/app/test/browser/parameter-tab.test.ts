@@ -10,7 +10,7 @@ declare const window: Window & {
   };
 };
 
-const source = `import {box, point} from '@code3d/core';
+const source = `import {box, point, pivotVertex} from '@code3d/core';
 const size = 12;
 const body = box(size, size + 4, 30);
 const reference = point([1, 2, 3]);
@@ -401,7 +401,7 @@ test(
       ['chamfer(1, [1])', 'edgeIds'],
       ['shell(1, [1])', 'removedSurfaceIds'],
       [
-        'relate(self => self.on(point([0,0,0]).up).pivotVertex(1).rotate(0,0,20))',
+        'relate(self => [self.on(point([0,0,0]).up), pivotVertex(1).rotate(0,0,20)])',
         'id',
       ],
       ['edge()', 'id'],
@@ -409,7 +409,7 @@ test(
     for (const [call, parameter] of calls) {
       await page.evaluate(call => {
         const editor = window.parameterTabApp.codeEditor.editor;
-        const source = `import {box, point} from '@code3d/core';\nconst body = box(20, 20, 20);\nbody.${call};`;
+        const source = `import {box, point, pivotVertex} from '@code3d/core';\nconst body = box(20, 20, 20);\nbody.${call};`;
         editor.getModel()!.setValue(source);
         const offset = call.includes('pivotVertex')
           ? source.indexOf('pivotVertex(1)') + 'pivotVertex('.length

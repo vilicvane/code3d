@@ -210,8 +210,7 @@ Inside `relate(part => ...)`, the parameter declaration and uses of `part`
 show the related model alongside the other participants. Named elements and
 topology references share that context. Selecting the bare parameter shows its
 completed placement segment so its tools can edit the nearest following offset or rotation.
-Each explicit call in the relation chain shows
-its own stage, before later offsets or rotations in that chain. The other
+Each independent transformation shows its own stage, before later steps in the array. The other
 constraints in the same continuous segment remain active and are solved together in each preview. Independent transformations separate successive segments. The current pair's markers
 distinguish the selected side from its counterpart and the dimmed surrounding
 objects. See
@@ -314,7 +313,7 @@ and the other tool inserts its operation immediately after it.
 A point marker shows that rotation’s pivot when the member is selected and
 remains visible while dragging.
 If none exists, it adds a rotation about that member's origin and local axes.
-Translation likewise reuses the nearest following `.offset(...)`, so alternating between
+Translation likewise reuses the nearest following `offset(...)`, so alternating between
 the tools does not keep appending calls. These tools remain available when
 `.material(...)` follows `relate(...)`. Press `Escape` to cancel or use Undo after committing.
 While dragging a translation arrow, rotation ring, sketch point, or circular
@@ -330,8 +329,8 @@ editable from the committed pose while the model updates. New calls or arguments
 wait for the replacement model before their handles become available.
 Cancelling a drag or releasing it without a change leaves the handles available.
 
-Edits inside coupled constraint chains that cannot be previewed accurately keep their existing
-editing restrictions.
+Constraints expose only `on` and `align`. All relative transformations are independent
+array entries, including transforms after a group of jointly solved constraints.
 
 When a parameter has a unique editable source, the panel follows TypeScript
 definitions to update it. Otherwise, an evaluated expression appears as

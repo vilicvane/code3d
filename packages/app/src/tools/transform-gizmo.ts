@@ -20,7 +20,6 @@ import type {
 } from '@code3d/core/tooling';
 import {spatialAxisColors} from '../spatial-axis-colors';
 import {snapNumericValue} from './parameter-policy';
-import type {SourceAnchor} from './tool-system';
 import type {ModelSpatialBinding} from './model-spatial-tool';
 import type {CallArgumentDefaults} from './source-expression';
 import {worldUnitsPerPixel} from '../rendering/screen-space';
@@ -52,12 +51,6 @@ type TransformBindingBase = Readonly<{
 export type TransformGizmoBinding = TransformBindingBase &
   (
     | Readonly<{kind: 'parameter'; target: ParameterTarget}>
-    | Readonly<{
-        kind: 'expression';
-        offsetArguments?: Vec3;
-        receiver: SourceAnchor;
-        occurrenceKeys: readonly string[];
-      }>
     | Readonly<{
         kind: 'spatial';
         spatial: ModelSpatialBinding;

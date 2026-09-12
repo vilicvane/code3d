@@ -42,9 +42,9 @@ test(
         onTopologySelection() {},
         sourceDecorationProviders: [elementSourceDecoration],
       });
-      const source = `import {box, group, point} from '@code3d/core';
+      const source = `import {offset, box, group, point} from '@code3d/core';
 const part = box(10, 20, 30);
-const shifted = group([part]).expose({body: part}).relate(self => self.body.center.on(point([40, 50, 60]).up).offset(0, 0, 0));
+const shifted = group([part]).expose({body: part}).relate(self => [self.body.center.on(point([40, 50, 60]).up), offset(0, 0, 0)]);
 const assembly = group([shifted]).expose({mount: shifted.body.surface(1), body: shifted.body});
 const outline = assembly.mount.edges();
 const ends = assembly.mount.edge(1).vertices();

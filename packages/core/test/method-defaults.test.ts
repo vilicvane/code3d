@@ -1,3 +1,4 @@
+import {offset, rotate, pivot, pivotVertex, aroundLine} from '@code3d/core';
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {
@@ -5,7 +6,7 @@ import {
   extrude,
   group,
   rectangle,
-  type Constraint,
+  type Transformation,
   type Model,
 } from '@code3d/core';
 import type {ModelSnapshotObject} from '@code3d/core/tooling';
@@ -177,7 +178,7 @@ for (const operation of [
   'pivotVertex',
   'aroundLine',
 ] as const) {
-  test(`constraint ${operation} defaults preserve solved placement`, t => {
+  test(`transformation ${operation} defaults preserve solved placement`, t => {
     const base = box(20, 30, 40);
     const source = box(4, 6, 8).originOffset(1, 2, 3);
     const models: Model[] = [base, source];
@@ -186,21 +187,24 @@ for (const operation of [
       const model = source.relate(self => {
         const constraint = self.on(base.up);
         if (operation === 'pivot') {
-          const chain = Reflect.apply(constraint.pivot, constraint, args);
-          return chain.rotate(0, 0, 25);
+          const chain = Reflect.apply(pivot, undefined, args);
+          return [constraint, chain.rotate(0, 0, 25)];
         }
         const receiver =
           operation === 'pivotVertex'
-            ? constraint.pivotVertex(1)
+            ? pivotVertex(1)
             : operation === 'aroundLine'
-              ? constraint.aroundLine(base.axis)
-              : constraint;
+              ? aroundLine(base.axis)
+              : {offset, rotate};
         const method = operation === 'offset' ? 'offset' : 'rotate';
-        return Reflect.apply(
-          Reflect.get(receiver, method),
-          receiver,
-          args,
-        ) as Constraint;
+        return [
+          constraint,
+          Reflect.apply(
+            Reflect.get(receiver, method),
+            receiver,
+            args,
+          ) as Transformation,
+        ];
       });
       models.push(model);
       return model;

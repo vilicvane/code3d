@@ -66,10 +66,6 @@ import {
   namedElementDecorations,
 } from './model/element-decorations';
 import {
-  originDecoration,
-  originSourceDecoration,
-} from './model/origin-decorations';
-import {
   ModelPreviewState,
   type ModelPreviewRequest,
 } from './model/preview-state';
@@ -917,7 +913,7 @@ const toolEngine = new ToolEngine({
     codeEditor.applySourceEdits(baseVersion, edits, options),
   applyPreview: preview => applyToolPreview(preview),
   commitPreview: preview => commitToolPreview(preview),
-  clearPreview: (preview, reason) => clearToolPreview(preview, reason),
+  clearPreview: preview => clearToolPreview(preview),
 });
 const sketchEditor = new SketchEditorController(viewportHost, {
   reportResult: (operation, error) =>
@@ -936,8 +932,22 @@ const spatialToolbar = new SpatialToolbar(
   viewport.positionTools,
   {
     visible: () => !sketchEditor.hasTarget && viewport.renderMode !== 'render',
+    availableTools: () => viewport.availablePositionTools,
     cancel: cancelRotationReferenceSelection,
-    activateSource: () => codeEditor.activateSourceTool(),
+    activateSource: tool => {
+      const scope = viewport.sourceContext;
+      const module = previewState.module;
+      if (!scope || !module) return;
+      const tools = viewport.positionTools;
+      codeEditor.activateSourceTool(
+        contextualToolActivation(
+          module,
+          scope,
+          tool,
+          tools.toolBinding ?? tools.rotationBinding,
+        ),
+      );
+    },
   },
 );
 viewportToolStack.prepend(spatialToolbar.root);
@@ -950,12 +960,6 @@ codeEditor.observeSourceContext(() => {
   return {
     tool,
     caretOnly: !!scope.target.relationArray,
-    activation: contextualToolActivation(
-      module,
-      scope,
-      tools.tool,
-      tools.toolBinding ?? tools.rotationBinding,
-    ),
   };
 });
 const stopContextualTool = reaction(
@@ -3037,17 +3041,14 @@ function selectRotationReferenceExpression(expression: string): void {
       )
         ? 'axis'
         : 'point',
-      explicit: draft ? true : (reference?.explicit ?? false),
       factory,
       append: draft
         ? undefined
         : source?.kind === 'transformation-insert'
           ? source.container
-          : source?.kind === 'rotation-call'
-            ? 'chain'
-            : changesRotationKind
-              ? (factory?.container ?? 'chain')
-              : undefined,
+          : changesRotationKind
+            ? factory?.container
+            : undefined,
     },
     preview: {kind: 'model-spatial', objects: []},
   };
@@ -3375,7 +3376,9 @@ function interruptCompileForTool(): boolean {
   window.clearTimeout(compileTimer);
   compileTimer = undefined;
   compiler.cancel();
-  restoreModelStatus();
+  // The displayed geometry still predates the queued source edit. A new
+  // gesture only suspends compilation; cancelling it must resume that update.
+  previewState.queueUpdate(true);
   return true;
 }
 
@@ -3442,29 +3445,10 @@ function positionIntent(
   value: number,
 ): ToolIntent {
   if (binding.kind === 'spatial') return spatialIntent(binding, value);
-  if (binding.kind === 'parameter') {
-    return {
-      ...parameterIntent(binding.target, value),
-      completeArguments: binding.completeArguments,
-    };
-  }
-  const delta: [number, number, number] = [0, 0, 0];
-  delta[positionAxisIndex(binding.axis)] = value;
   return {
-    kind: 'relation.offset',
-    offsetArguments: binding.offsetArguments,
-    receiver: binding.receiver,
-    occurrenceKeys: binding.occurrenceKeys,
-    delta,
-    frameQuaternion: binding.frame.quaternion,
-    direction: binding.sensitivity as 1 | -1,
+    ...parameterIntent(binding.target, value),
+    completeArguments: binding.completeArguments,
   };
-}
-
-function positionAxisIndex(axis: TransformGizmoBinding['axis']): 0 | 1 | 2 {
-  if (axis === 'x') return 0;
-  if (axis === 'y') return 1;
-  return 2;
 }
 
 function canEditPositionBinding(binding: TransformGizmoBinding): boolean {
@@ -3475,9 +3459,7 @@ function canEditPositionBinding(binding: TransformGizmoBinding): boolean {
   const reference =
     source.kind === 'parameter' || source.kind === 'omitted-argument'
       ? source.target.sourceRef
-      : source.kind === 'expression'
-        ? source.receiver.sourceRef
-        : source.sourceRef;
+      : source.sourceRef;
   return codeEditor.resolveSourceRef(reference) !== undefined;
 }
 
@@ -3491,47 +3473,17 @@ function positionBindingId(binding: TransformGizmoBinding): string {
         : source.sourceRef;
     return `spatial:${sourceRef.file}:${sourceRef.start}:${sourceRef.end}`;
   }
-  if (binding.kind === 'parameter') {
-    return binding.target.id;
-  }
-  const {start, end} = binding.receiver.sourceRef;
-  return `expression:${binding.receiver.sourceRef.file}:${start}:${end}`;
+  return binding.target.id;
 }
 
 function applyToolPreview(preview: ToolPreview): void {
   if (preview.kind === 'model-spatial') {
-    viewport.hideSourceDecorationsDuringPreview();
     viewport.setSpatialPreview(preview.objects);
-    viewport.setDecorations(
-      'spatial-preview',
-      [
-        ...new Map(
-          preview.objects.map(object => [object.nodeId, object]),
-        ).values(),
-      ].map(object =>
-        preview.continuation?.binding.spatial.operation === 'offset'
-          ? originDecoration(object.nodeId, [0, 0, 0], 'geometry')
-          : originDecoration(object.nodeId, object.spatial.origin),
-      ),
-    );
   } else if (preview.kind === 'parameter') {
     viewport.setParameterPreview(preview.targetId, preview.value);
-    viewport.hideSourceDecorationsDuringPreview();
-  } else if (preview.kind === 'occurrence-translation') {
-    viewport.setOccurrenceTranslationPreview(
-      preview.occurrenceKeys,
-      preview.delta,
-    );
-    viewport.hideSourceDecorationsDuringPreview();
   } else if (preview.kind === 'viewport-decorations') {
     viewport.setDecorations(preview.owner, preview.decorations);
   }
-  if (
-    (preview.kind === 'parameter' ||
-      preview.kind === 'occurrence-translation') &&
-    viewport.positionTools.tool === 'translate'
-  )
-    viewport.setSourceDecorationVisible(originSourceDecoration.id, true);
 }
 
 function commitToolPreview(preview: ToolPreview): void {
@@ -3544,27 +3496,16 @@ function commitToolPreview(preview: ToolPreview): void {
     );
   } else if (preview.kind === 'parameter') {
     viewport.commitParameterPreview(preview.targetId, preview.value);
-  } else if (preview.kind === 'occurrence-translation') {
-    viewport.commitOccurrenceTranslationPreview(preview.occurrenceKeys);
   }
 }
 
-function clearToolPreview(
-  preview: ToolPreview,
-  reason: 'replace' | 'end',
-): void {
+function clearToolPreview(preview: ToolPreview): void {
   if (preview.kind === 'model-spatial') {
     viewport.clearSpatialPreview(preview.objects);
-    viewport.clearDecorations('spatial-preview');
   } else if (preview.kind === 'parameter') {
     viewport.clearParameterPreview(preview.targetId);
-  } else if (preview.kind === 'occurrence-translation') {
-    viewport.clearOccurrenceTranslationPreview(preview.occurrenceKeys);
   } else if (preview.kind === 'viewport-decorations') {
     viewport.clearDecorations(preview.owner);
-  }
-  if (reason === 'end') {
-    viewport.restoreSourceDecorations();
   }
 }
 

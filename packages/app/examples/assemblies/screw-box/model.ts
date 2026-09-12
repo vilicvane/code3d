@@ -1,4 +1,4 @@
-import {group} from '@code3d/core';
+import {offset, group} from '@code3d/core';
 import {plastic, steel} from '@code3d/materials';
 import {ISO4762} from '@code3d/screws';
 import {makeBox} from './box.ts';
@@ -16,7 +16,8 @@ export function screwBox(gap = 14) {
     .material(plastic('#353535'))
     .relate(part => [
       part.axis.align(body.axis),
-      part.mountingFace.on(body.lidSeat).offset(0, gap, 0),
+      part.mountingFace.on(body.lidSeat),
+      offset(0, gap, 0),
     ]);
   const screw = ISO4762.screw('M4', 12).material(
     steel({color: '#d0d0d0', roughness: 0.28}),

@@ -113,6 +113,12 @@ tools share this navigation behavior, including newly inserted calls.
 Choosing a spatial tool keeps a matching current call or checks the immediately
 following transformation. A matching call activates immediately and places the
 caret at the expression end, such as `offset()|` or `aroundEdge(1).rotate(25)|`.
+The toolbar is available throughout `relate(...)`, including `self.axis`, target
+references, and callback whitespace, without activating a tool by default.
+Expression panels and reference highlights keep their focus until you choose a
+spatial tool, which acts on that relation's `self`. Nested `relate` calls use the
+innermost `self`. A callback returning one constraint also supports these tools;
+its first added transformation converts the return value to an array.
 The start of `self` in a relation also provides this lookup. It does not skip
 a different transformation to find a matching call farther ahead. If the call needs
 to be added, the caret moves to its insertion gap and the viewport shows the
@@ -120,6 +126,12 @@ state immediately before that position. Neither action changes the source until 
 Tool edits place the caret after the affected call name, before `(`: picking a
 vertex focuses `pivotVertex`, while changing rotation angles focuses `rotate`.
 Moving the caret into an argument list yourself still highlights its parameter.
+
+The origin is marked by a lime cross with a center dot. A rotation pivot uses
+an orange ring with a center dot; an axis reference remains orange. These markers
+follow your edit while the model updates, including consecutive drags. Choosing
+point rotation shows its pivot before a rotation call is written. Holding Alt
+switches to moving that pivot and keeps the same marker.
 
 Controls follow a unique chain of TypeScript definitions to an editable
 numeric source value, including supported variables, object properties, and

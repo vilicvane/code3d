@@ -187,10 +187,10 @@ pivot 坐标；默认中心第一次移动生成 pivot([...])，引用中心才�
 独立变换的插入位置、可用构造器和导入修改在编译阶段基于已解析 AST 计算，
 通过调用位置元数据传给执行线程，包含没有数值工具面板的 on/align 调用；
 执行线程只读取元数据，不能引入 TypeScript 解析器。
-默认平移和旋转统一由 model-spatial-tool 的 relationBindings 解析关系与调用，viewport 只消费绑定。
-关系工具按保留的 constraint 身份及关系源码范围关联当前可见实例；同一源码多次求值的实例共享编辑，不要求派生后的 nodeId 等于
+平移和旋转统一由 model-spatial-tool 的 transformationBindings 解析独立变换与插入位置，viewport 只消费绑定。
+变换工具按保留的 transformation 身份及源码范围关联当前可见实例；同一源码多次求值的实例共享编辑，不要求派生后的 nodeId 等于
 最初 relate 的 owner；material 等派生值继续使用当前实例的求解坐标架和原调用参数。
-选中成员的 pivot 标记复用 model-origin 装饰与 对应 constraint.rotations 阶段的 spatial.origin；拖动时由既有 spatial-preview 接管，取消或结束后恢复，避免重复标记。
+空间参考标记由 viewport 的单个响应式装饰投影拥有，读取当前源码上下文、工具及每个 occurrence 的空间预览；拖动预览与已提交但等待重算的结果共用 model-origin provider，不另建预览标记层，也不手动恢复旧点。取消时退回最近已提交的预览，新模型替换时清除旧预览。原点随平移几何移动，修改原点及旋转参考使用对应操作坐标架；循环实例分别投影，不能按 node ID 合并。连续编辑重基 gizmo 绑定时保留当前工具类型。后续手势暂停编译时保留交互更新状态，取消后继续完成先前已提交的更新，不能提前恢复 Ready。origin 是黄绿色十字加中心点，pivot 是橙色圆环加中心点，圆环始终朝向屏幕。尚未写入旋转调用的插入位置也按已激活工具生成参考：绕点使用当前 self 的默认 pivot，不能回退为 origin 或借用前一旋转中心；Alt 只切换手柄。绕轴在选轴前不生成参考标记。
 坐标细节见[坐标技能](../../skills/code3d-coordinate-semantics/SKILL.md)。
 
 位置拖动按手势开始时的网格小格长度量化沿操作轴的实际位移，再按 sensitivity
@@ -204,7 +204,7 @@ pivot 坐标；默认中心第一次移动生成 pivot([...])，引用中心才�
 
 拓扑 selector 的单选/多选来自参数类型。空调用复用省略实参的写入目标，展示
 接收模型的候选，选中后补写 ID；不为必填拓扑参数指定任意默认 ID，也不放宽签名。
-`pivotVertex` 在创建关系链前校验 ID 形状，使缺参错误保留在可追踪的调用阶段，
+`pivotVertex` 在创建旋转选择器前校验 ID 形状，使缺参错误保留在可追踪的调用阶段，
 不延迟到快照求解时破坏可编辑输入。fillet/chamfer 的显式过滤数组非空，
 取消最后一个选择删除过滤实参并恢复全部边语义；全部边模式不伪装为显式全选。
 无效的旧输入 ID 不进入可选集合。同一轮交互合并撤销；离开源码调用结束面板，
@@ -407,14 +407,22 @@ consume no space. Both containers share their width, padding, border, translucen
 backdrop blur and shadow, and each readout row uses
 `field: old + delta = new` with a signed operator and the unit after the result. No synthetic source tool or second preview value store is needed.
 
-## 约束链 gizmo 的源码目标
+## relate 变换工具的源码目标
 
-`offset`/`rotate` 保留调用顺序和每个调用的 sourceRef。选择 self 时展示完整链，
+整个 `relate(...)` 源码范围都提供空间工具入口，包括 self.axis、约束目标侧、回调块体
+及内部表达式；嵌套调用归最内层 relate 的 self。工具栏可用性从所属 relate 派生，
+不依赖当前关注几何的 gizmo 绑定，不默认选中工具。具体表达式继续决定参数面板、
+轴面高亮和预览；点击工具才以显式工具类型执行一次源码导航，激活 self 的变换。
+编译结果关联实际 self 源码目标，回调内部表达式沿所属调用及执行实例解析；约束、
+变换与数组空白保留各自阶段和插入语义。首次新增变换时把单个返回值转换为数组，
+不恢复约束链式写法。源码标记仅消费当前焦点，不负责派生或触发工具激活。
+
+`offset`/`rotate` 保留调用顺序和每个调用的 sourceRef。选择 self 时展示完整摆放段，
 工具栏先保留匹配的当前调用，否则比较紧随其后的第一项 transformation：匹配就
 激活该项，不匹配或没有则紧接当前位置插入。self 从共同求解的约束组之后开始；
 不能跳过不同类型的 transformation 或跨过后续约束段。
 阶段快照由 Core 保留继承及同回调的其他关系，联合求解后提供；当前关系的高亮
-不把求解限制为单条约束。耦合关系的阶段与完整结果遵循相同的 gizmo 预览能力限制。
+不把求解限制为单条约束。独立变换使用联合求解后的阶段坐标架进行 gizmo 预览。
 
 每次位移、旋转均提供自身的阶段坐标架。工具激活后显示当前调用或实际插入位置之前的
 阶段，不包含后续操作；参数预览按各次 offset 的 frame 分别计算，不将整链位移累加后
@@ -424,7 +432,7 @@ backdrop blur and shadow, and each readout row uses
 
 ### 独立 Transformation 与分段工具
 
-Core 快照的 relationStages 提供分段边界，transformations 保留动作的 sourceRef 和结果架。contextualToolActivation 是已有调用与插入位置的唯一选择入口；它读取当前完整模块，不能拿截断的阶段预览查找后项。编辑器命令提交源码目标后，源码标记、面板、参考选择和 gizmo 都消费该目标。binding 构建不做候选调用搜索。单值 return 可转数组，完成后的独立变换不允许接链。显式约束链仍保留联合求解能力限制。
+Core 快照的 relationStages 提供分段边界，transformations 保留动作的 sourceRef 和结果架。contextualToolActivation 是已有调用与插入位置的唯一选择入口；它读取当前完整模块，不能拿截断的阶段预览查找后项。编辑器命令提交源码目标后，源码标记、面板、参考选择和 gizmo 都消费该目标。binding 构建不做候选调用搜索。单值 return 可转数组，完成后的独立变换不允许接链。Constraint 只携带 on/align、参与引用和源码追踪，不携带变换动作或 offset/rotation 快照；工具统一使用 Transformation 快照、spatial bindings 和 model.spatial 事务。
 
 relate 直接返回数组内的空白是 self 的插入上下文，保留实际 callback 的执行实例。编译器记录前置数组项及对应插入锚点；执行器按 callback 实例还原该前缀，Core 从该回调开始前的继承关系构造预览，不混入已完成回调的后续操作。在空白中激活工具同样只比较紧随其后的第一项；匹配则定位已有项，否则保持该插入位置；空数组也提供入口。末尾光标在 ] 前，中间在后续项前，且不高亮邻接的调用名称。
 

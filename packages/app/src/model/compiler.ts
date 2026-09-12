@@ -174,6 +174,8 @@ export type SourceTarget = Readonly<{
   }>;
   /** Blank range in a directly returned relate array; its value is the callback self. */
   relationArray?: SourceRef;
+  /** Callback self used by the enclosing relate result's spatial tools. */
+  relationSelfTargetId?: string;
   /** Completed rotation owning this selector's interaction. */
   rotationToolId?: string;
   /** Selector targets shown together with this rotation's numeric parameters. */

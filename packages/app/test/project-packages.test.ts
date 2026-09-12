@@ -274,7 +274,7 @@ test('isolates the built-in dependency closure and gives source, screws and reus
       {
         path: '/model.ts',
         source: [
-          'import {core} from "@code3d/core";',
+          'import {offset, rotate, pivot, pivotVertex, pivotPoint, aroundLine, aroundEdge, core} from "@code3d/core";',
           'import {screwCore} from "@code3d/screws";',
           'import {materialCore} from "@code3d/materials";',
           'import {reusableCore} from "reusable";',
@@ -422,7 +422,7 @@ export {MeshPhysicalMaterial as MaterialClass};`,
     );
     let language: ProjectLanguage | undefined;
     try {
-      const source = `import {box} from '@code3d/core';
+      const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, aroundLine, aroundEdge, box} from '@code3d/core';
 import * as THREE from '@code3d/core/three';
 import {lacquer, MaterialClass} from 'material-library';
 ${mode === 'builtin' ? 'import {owner} from "three"; if (owner !== "project") throw new Error("User Three.js was shadowed");' : ''}
@@ -497,13 +497,13 @@ test('runs a zero-install screw model, retains its runtime on edits, and switche
       {
         path: '/model.ts',
         source: [
-          'import {box, group} from "@code3d/core";',
+          'import {offset, rotate, pivot, pivotVertex, pivotPoint, aroundLine, aroundEdge, box, group} from "@code3d/core";',
           'import {ISO4762} from "@code3d/screws";',
           'import {paint} from "@code3d/materials";',
           'import {MeshPhysicalMaterial, type Material} from "@code3d/core/three";',
           'const material: Material = paint({color: "#ff8800", clearcoat: 1});',
           `const plate = box(40, 10, 30).fillet(${radius}).material(material);`,
-          'const screw = ISO4762.screw("M6", 18).relate(part => part.center.on(plate.up).offset(30, 0, 0));',
+          'const screw = ISO4762.screw("M6", 18).relate(part => [part.center.on(plate.up), offset(30, 0, 0)]);',
           'export default group([plate, screw]);',
         ].join('\n'),
       },
@@ -675,7 +675,7 @@ test('local folders resolve latest workspace imports and their closure without a
     await resolver.resolve('@code3d/remote', '/model.ts'),
     '/node_modules/@code3d/remote/index.js',
   );
-  const source = `import {value} from '@code3d/core'; import {value as transitive} from 'wrapper'; export {value, transitive};`;
+  const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, aroundLine, aroundEdge, value} from '@code3d/core'; import {value as transitive} from 'wrapper'; export {value, transitive};`;
   const bundle = await new ProjectBuilder(reader, esbuild).build(source);
   const result = await importTestModule(bundle.source);
   assert.equal(result.value, 'development');
@@ -684,14 +684,14 @@ test('local folders resolve latest workspace imports and their closure without a
     files: [
       {
         path: '/model.ts',
-        source: `import {value} from '@code3d/core'; import {value as alias} from '@aliases/local'; const literal: 'development' = alias; const direct: 'development' = value;`,
+        source: `import {offset, rotate, pivot, pivotVertex, pivotPoint, aroundLine, aroundEdge, value} from '@code3d/core'; import {value as alias} from '@aliases/local'; const literal: 'development' = alias; const direct: 'development' = value;`,
       },
     ],
   });
   const sources = new Map(language.files.map(file => [file.path, file.source]));
   sources.set(
     '/model.ts',
-    `import {value} from '@code3d/core'; import {value as alias} from '@aliases/local'; const literal: 'development' = alias; const direct: 'development' = value;`,
+    `import {offset, rotate, pivot, pivotVertex, pivotPoint, aroundLine, aroundEdge, value} from '@code3d/core'; import {value as alias} from '@aliases/local'; const literal: 'development' = alias; const direct: 'development' = value;`,
   );
   const program = ts.createProgram({
     rootNames: ['/model.ts'],

@@ -49,12 +49,12 @@ angles use degrees. Read [local coordinates](../web/src/content/docs/docs/concep
 and [relations](../web/src/content/docs/docs/guides/relations.mdx) before mixing
 origin changes, alignment, and rotation.
 
-Constraint `offset` and `rotate` calls execute in source order. Each transforms
-self from the preceding solution; zero values add no centering or orientation
-condition. Use point or axis alignment when a part must be centered. The App's
-gizmos edit or insert the corresponding call at its actual position in the chain.
+Constraints express `on` and `align` only. Put relative `offset` and `rotate`
+transformations in the `relate` array after the constraints. Zero values add no
+centering or orientation condition; use point or axis alignment to center a part.
+The App's gizmos edit or insert independent array entries.
 
-`relate` also accepts independent `offset` and `rotate` transformations. Choose a
+Choose a
 center with `pivot([x,y,z])`, self topology with `pivotVertex(id)`/`aroundEdge(id)`,
 or references with `pivotPoint(pointRef)`/`aroundLine(lineRef)`; finish each selector
 with `rotate`. Point rotations retain self XYZ axes, including external centers. Consecutive constraints solve jointly; transformations
@@ -93,7 +93,7 @@ Dimension-based primitives and numeric modeling methods retain required TypeScri
 signatures while providing runtime defaults for omitted or `undefined` values.
 Rotations and displacements default to zero, scaling to one, extrusion distance
 to ten, and fillet radius, chamfer distance and shell thickness to one. Relation
-rotation chains use the same angle defaults; `pivot()` defaults to local zero.
+rotation selectors use the same angle defaults; `pivot()` defaults to local zero.
 Explicit invalid values retain their normal errors. These defaults work in
 ordinary JavaScript execution as well as App previews.
 
@@ -170,7 +170,7 @@ const draft = sketch().relate(s => s.plane.align(host.surface(2)));
 ```
 
 The target may be a named plane or a planar `host.surface(id)`. The sketch plane
-normal is local `+Y`; alignment uses the same directed-plane, target-frame offset
+normal is local `+Y`; alignment uses the same directed-plane alignment, composition-axis offset
 and rotation semantics as model relations. It does not implicitly center the
 sketch on a trimmed surface. An unbounded sketch plane cannot use `on()` to place
 finite geometry against a bound; use `align()`. Topology-only pivots such as

@@ -139,16 +139,16 @@ execution and do not depend on the App.
 | `rectangle`      | `10, 10`                             |
 | `regularPolygon` | `5, 6, 0`                            |
 
-| Method or utility parameter                            | Runtime defaults |
-| ------------------------------------------------------ | ---------------- |
-| Model/group `rotate` and relation/pivot-chain `rotate` | `0, 0, 0`        |
-| Model/group `originOffset` and relation `offset`       | `0, 0, 0`        |
-| Relation `pivot`                                       | `[0, 0, 0]`      |
-| Selector `pivotOffset` and `axisOffset`                | `0, 0, 0`        |
-| `aroundLine(axis).rotate`                              | `0`              |
-| Geometric model `scaled`                               | `1`              |
-| Face `extrude` and the `extrude` utility's distance    | `10`             |
-| Solid `fillet`, `chamfer` and `shell`                  | `1`              |
+| Method or utility parameter                         | Runtime defaults |
+| --------------------------------------------------- | ---------------- |
+| Model/group `rotate` and independent/pivot `rotate` | `0, 0, 0`        |
+| Model/group `originOffset` and relation `offset`    | `0, 0, 0`        |
+| Relation `pivot`                                    | `[0, 0, 0]`      |
+| Selector `pivotOffset` and `axisOffset`             | `0, 0, 0`        |
+| `aroundLine(axis).rotate`                           | `0`              |
+| Geometric model `scaled`                            | `1`              |
+| Face `extrude` and the `extrude` utility's distance | `10`             |
+| Solid `fillet`, `chamfer` and `shell`               | `1`              |
 
 For example, `box(20, 30, 40).rotate()` previews the unchanged body, and
 `.rotate(30)` previews a 30-degree X rotation. Their missing-angle diagnostics
@@ -447,21 +447,22 @@ spheres. Select a solid's center, axis, vertex, edge, or surface first.
 Curve–curve alignment is directed; `lineReference.reverse()` selects the opposite
 direction. Surface–surface alignment matches normal sense; `faceReference.flip()`
 selects the opposite facing. Neither changes the reference axes or geometry.
-Point membership ignores direction. `align(...).offset(x,y,z)` translates self
-in the target axes at that point in the chain; zero preserves the relation's
-free modes. Offsets and rotations execute in call order. Use point references for additional positioning.
+Point membership ignores direction. Constraints expose no transformation methods.
+Place independent transformations after the constraints in the `relate` array:
 
-- `constraint.rotate(x, y, z)`: rotate around self's origin.
-- `constraint.pivot([x, y, z]).rotate(x, y, z)`: a pivot in self's local frame.
-- `constraint.pivotVertex(id).rotate(x, y, z)`: a vertex belonging to self.
-- `constraint.pivotPoint(pointRef).rotate(x, y, z)`: a local or external point.
-- `constraint.aroundEdge(id).rotate(angle)`: a straight edge belonging to self.
-- `constraint.aroundLine(lineRef).rotate(angle)`: a positioned local or external axis.
+- `offset(x, y, z)`: move self along fixed composition axes.
+- `rotate(x, y, z)`: rotate around self's origin and local XYZ axes.
+- `pivot([x, y, z]).rotate(x, y, z)`: a pivot in self's local frame.
+- `pivotVertex(id).rotate(x, y, z)`: a vertex belonging to self.
+- `pivotPoint(pointRef).rotate(x, y, z)`: a local or external point.
+- `aroundEdge(id).rotate(angle)`: a straight edge belonging to self.
+- `aroundLine(lineRef).rotate(angle)`: a positioned local or external axis.
 
 Angles are degrees; XYZ rotations apply X, then Y, then Z. Pivot/axis selections
-are intermediate values and must be completed with rotate. Rotation follows
-its chain's contact placement; other contacts constrain the final pose. Groups
-move their assembled children as rigid bodies. Standalone geometry is unchanged.
+must be completed with `rotate`. Consecutive constraints solve jointly, followed
+by transformations in array order. A later constraint starts a new segment from
+the preceding pose. Groups move their assembled children as rigid bodies.
+Standalone geometry is unchanged.
 
 ## Topology
 

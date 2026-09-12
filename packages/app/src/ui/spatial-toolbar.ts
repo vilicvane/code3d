@@ -52,16 +52,16 @@ export class SpatialToolbar {
     private readonly tools: TransformGizmo,
     private readonly options: {
       visible(): boolean;
+      availableTools(): readonly SpatialTool[];
       cancel(): void;
-      activateSource(): void;
+      activateSource(tool: SpatialTool): void;
     },
   ) {
     this.root.className = 'spatial-toolbar';
     const group = this.toolbar.group('Transform');
     const choose = action((tool: SpatialTool) => {
       this.options.cancel();
-      this.tools.selectTool(tool);
-      this.options.activateSource();
+      this.options.activateSource(tool);
       // Navigation changes the source context; retain the explicit tool choice.
       this.tools.selectTool(tool);
     });
@@ -90,12 +90,13 @@ export class SpatialToolbar {
     makeObservable(this, {selection: observableRef, setSelection: action});
     this.stop = autorun(() => {
       const tool = tools.tool;
-      this.root.hidden = !options.visible() || !tools.availableTools.length;
+      const available = options.availableTools();
+      this.root.hidden = !options.visible() || !available.length;
       if (this.root.hidden) this.toolbar.close();
       if (tool && tool !== 'translate') this.toolbar.selectVariant(names[tool]);
       this.toolbar.update(name => ({
         pressed: !!tool && name === names[tool],
-        disabled: !tools.availableTools.some(tool => names[tool] === name),
+        disabled: !available.some(tool => names[tool] === name),
       }));
     });
   }

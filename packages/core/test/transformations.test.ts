@@ -418,12 +418,14 @@ test('constraint pivotPoint preserves an external center through joint solving a
     ),
   ).position;
   const byRef = original.relate(self => [
-    self.on(base.up).pivotPoint(point).pivotOffset(2, 3, 4).rotate(17, 23, 31),
+    self.on(base.up),
+    pivotPoint(point).pivotOffset(2, 3, 4).rotate(17, 23, 31),
     offset(3, 2, 1),
     rotate(5, 10, 15),
   ]);
   const byCoordinates = original.relate(self => [
-    self.on(base.up).pivot(local).pivotOffset(2, 3, 4).rotate(17, 23, 31),
+    self.on(base.up),
+    pivot(local).pivotOffset(2, 3, 4).rotate(17, 23, 31),
     offset(3, 2, 1),
     rotate(5, 10, 15),
   ]);

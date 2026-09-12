@@ -440,7 +440,7 @@ export function sourceExpressionError(source: string): string | undefined {
 /** Adjust only the outer offset call, preserving author expressions and trivia. */
 export function offsetCallSource(
   source: string,
-  method: 'offset' | 'originOffset',
+  method: 'originOffset',
   delta: Vec3,
   currentArguments?: Vec3,
 ): string {
@@ -647,22 +647,18 @@ export function referenceOffsetSource(
   method: 'pivot' | 'pivotOffset' | 'axisOffset',
   values: Vec3,
   delta: Vec3,
-  explicit: boolean,
   pivotConstructor?: string,
-  append?: 'chain' | TransformationInsertion['container'],
+  append?: TransformationInsertion['container'],
 ): Readonly<{text: string; usesConstructor: boolean}> {
   if (delta.every(value => value === 0))
     return {text: source, usesConstructor: false};
   if (append) {
-    if (append !== 'chain' && !pivotConstructor)
+    if (!pivotConstructor)
       throw new Error('The pivot constructor is not available in this scope.');
-    const call = `${append === 'chain' ? 'pivot' : pivotConstructor}([${method === 'pivot' ? values.map(formatSourceNumber).join(', ') : '0, 0, 0'}])${method === 'pivot' ? '' : `.${method}(${values.map(formatSourceNumber).join(', ')})`}.rotate(0, 0, 0)`;
+    const call = `${pivotConstructor}([${method === 'pivot' ? values.map(formatSourceNumber).join(', ') : '0, 0, 0'}])${method === 'pivot' ? '' : `.${method}(${values.map(formatSourceNumber).join(', ')})`}.rotate(0, 0, 0)`;
     return {
-      text:
-        append === 'chain'
-          ? `${source}.${call}`
-          : insertTransformationSource(source, call, append),
-      usesConstructor: append !== 'chain',
+      text: insertTransformationSource(source, call, append),
+      usesConstructor: true,
     };
   }
   const {expression, prefixLength} = parseExpression(source);
@@ -688,16 +684,6 @@ export function referenceOffsetSource(
   }
   const selector = unwrapArgument(callee.expression);
   if (method === 'pivot') {
-    if (!explicit) {
-      const at = callee.expression.end - prefixLength;
-      return {
-        text:
-          source.slice(0, at) +
-          `.pivot([${values.map(formatSourceNumber).join(', ')}])` +
-          source.slice(at),
-        usesConstructor: false,
-      };
-    }
     if (!ts.isCallExpression(selector))
       throw new Error('Expected a pivot selector.');
     const argument =
@@ -760,7 +746,7 @@ export function referenceOffsetSource(
   return {
     text:
       source.slice(0, at) +
-      `${explicit ? '' : '.pivot([0, 0, 0])'}.${method}(${values.map(formatSourceNumber).join(', ')})` +
+      `.${method}(${values.map(formatSourceNumber).join(', ')})` +
       source.slice(at),
     usesConstructor: false,
   };
@@ -804,8 +790,7 @@ export type RotationReferenceEdit = Readonly<{
   expression: string;
   factory?: TransformationInsertion;
   previous: 'point' | 'axis';
-  explicit: boolean;
-  append?: 'chain' | TransformationInsertion['container'];
+  append?: TransformationInsertion['container'];
 }>;
 
 /** Replace only the rotation reference; keep same-family angles and offset expressions. */
@@ -818,11 +803,6 @@ export function rotationReferenceSource(
   const selector = `${edit.selector}(${edit.expression})`;
   if (edit.append) {
     const call = `${edit.factory?.name ?? edit.selector}(${edit.expression}).rotate(${angles})`;
-    if (edit.append === 'chain')
-      return {
-        text: `${source}.${selector}.rotate(${angles})`,
-        usesConstructor: false,
-      };
     if (!edit.factory)
       throw new Error(
         'The rotation constructor is not available in this scope.',
@@ -881,29 +861,8 @@ export function rotationReferenceSource(
     );
     selected = unwrapArgument(selected.expression.expression);
   }
-  if (!edit.explicit)
-    return {
-      text:
-        source.slice(0, callee.expression.end - prefixLength) +
-        `.${selector}.rotate(${args})`,
-      usesConstructor: false,
-    };
   if (!ts.isCallExpression(selected))
     throw new Error('Expected a rotation reference selector.');
-  const selectedCallee = selected.expression;
-  // A selector is either a Constraint method or a free (possibly aliased/namespace) constructor.
-  const chain =
-    ts.isPropertyAccessExpression(selectedCallee) &&
-    ts.isCallExpression(unwrapArgument(selectedCallee.expression));
-  if (chain)
-    return {
-      text:
-        source.slice(0, selectedCallee.name.getStart() - prefixLength) +
-        selector +
-        displacement +
-        `.rotate(${args})`,
-      usesConstructor: false,
-    };
   if (!edit.factory)
     throw new Error('The rotation constructor is not available in this scope.');
   return {

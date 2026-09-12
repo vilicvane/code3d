@@ -1,4 +1,5 @@
 import {
+  offset,
   cylinder,
   cut,
   frustum,
@@ -214,7 +215,7 @@ export function hexSocket(
   if (depth >= height)
     throw new Error('Hex socket depth must be smaller than the head height.');
   const tool = regularPrism(width / Math.sqrt(3), depth + 0.2, 6, 30).relate(
-    part => part.down.on(head.up).offset(0, -depth, 0),
+    part => [part.down.on(head.up), offset(0, -depth, 0)],
   );
   return cut(head, [tool]);
 }

@@ -164,9 +164,9 @@ async function switchFile(page: Page, file: string): Promise<void> {
   }, file);
 }
 
-const assembly = `import {box, group} from '@code3d/core';
+const assembly = `import {offset, box, group} from '@code3d/core';
 const a = box(10, 8, 6).originOffset(-30, 0, 0);
-const b = box(8, 6, 4).relate(self => self.on(a.up).offset(0, 5, 0));
+const b = box(8, 6, 4).relate(self => [self.on(a.up), offset(0, 5, 0)]);
 const members = [a, b];
 export const assembled = group(members);
 `;

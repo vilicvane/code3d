@@ -22,7 +22,7 @@ after(async () => browser?.close());
 
 const sourceFor = (
   expression: string,
-) => `import {loft, point, rectangle} from '@code3d/core';
+) => `import {offset, rotate, pivot, pivotVertex, pivotPoint, aroundLine, aroundEdge, loft, point, rectangle} from '@code3d/core';
 const base = rectangle(28, 20);
 const top = rectangle(18, 12).relate(p => p.on(point([0, 32, 0]).up));
 const body = loft([base, top]);
@@ -266,7 +266,7 @@ for (const method of [
     async t => {
       const expression =
         method === 'pivotVertex'
-          ? 'body.relate(self => self.on(point([0,0,0]).up).pivotVertex().rotate(0,0,20))'
+          ? 'body.relate(self => [self.on(point([0,0,0]).up), pivotVertex().rotate(0,0,20)])'
           : `body.${method}()`;
       const {page, errors} = await openApp(t, expression, `${method}()`);
       assert.equal(

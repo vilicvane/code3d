@@ -444,11 +444,11 @@ test('uses installed just-range ESM and types with builtin core across cached mo
               path: '/just-range.ts',
               source: [
                 'import range from "just-range";',
-                'import {box, group} from "@code3d/core";',
+                'import {offset, box, group} from "@code3d/core";',
                 'const base = box(44, 2, 10);',
                 `const bars = range(${count}).map(i =>`,
                 '  box(4, 4 + i * 3, 4).relate(part =>',
-                '    part.down.on(base.up).offset((i - 2) * 8, 0, 0),',
+                '    [part.down.on(base.up), offset((i - 2) * 8, 0, 0)],',
                 '  ),',
                 ');',
                 'export default group([base, ...bars]);',

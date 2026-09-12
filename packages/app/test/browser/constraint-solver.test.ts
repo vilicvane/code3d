@@ -48,7 +48,7 @@ for (const installed of [false, true] as const) {
                 },
               },
         );
-        const source = `import {box, group} from '@code3d/core';
+        const source = `import {offset, rotate, box, group} from '@code3d/core';
         const first = box(10, 10, 10);
         const second = box(20, 20, 20).relate(self => [
           self.edge(3).on(first.left),
@@ -83,13 +83,13 @@ for (const installed of [false, true] as const) {
           const shifted = await compile(
             source.replace(
               'self.up.on(first.down)',
-              'self.up.on(first.down).offset(5, 0, 7)',
+              'self.up.on(first.down), offset(5, 0, 7)',
             ),
           );
           const zero = await compile(
             source.replace(
               'self.up.on(first.down)',
-              'self.up.on(first.down).offset(0, 0, 0).rotate(0, 0, 0)',
+              'self.up.on(first.down), offset(0, 0, 0), rotate(0, 0, 0)',
             ),
           );
           let conflict;
@@ -141,8 +141,9 @@ for (const installed of [false, true] as const) {
             first: root(first)?.children[1].transform.position,
             shiftedDiagnostic: shifted.diagnostic,
             shifted: root(shifted)?.children[1].transform.position,
-            offset:
-              root(shifted)?.children[1].constraints[1].offsets.at(-1)!.value,
+            offset: root(shifted)
+              ?.children[1].transformations!.at(-1)!
+              .offsets.at(-1)!.value,
             constraintSource:
               root(shifted)?.children[1].constraints[1].sourceRefs.at(-1)?.file,
             conflict,
@@ -169,11 +170,11 @@ for (const installed of [false, true] as const) {
         undefined,
         JSON.stringify(result.shiftedDiagnostic),
       );
-      // Group inherits the first member frame. The other contact constrains X,
-      // but leaves the authored Z displacement intact.
+      // Group inherits the first member frame. Both contacts solve first; the
+      // independent offset then shifts their solution along composition axes.
       for (const [actual, expected] of [
         [result.first, [5, -15, 0]],
-        [result.shifted, [5, -15, -7]],
+        [result.shifted, [10, -15, 7]],
         [result.restored, [5, -15, 0]],
         [result.zero, [5, -15, 0]],
       ] as const) {

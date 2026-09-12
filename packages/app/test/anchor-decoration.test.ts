@@ -129,3 +129,60 @@ test('curve direction heads stay exactly at the supplied endpoint', () => {
     [3, 4, 5],
   );
 });
+
+test('pivot rings face the camera and keep their screen radius under transformed parents', () => {
+  const anchor = new AnchorDecorationObject({
+    ...base,
+    elementKind: 'point',
+    spatialReference: 'pivot',
+    layer: 'foreground',
+    appearance: {color: '#ffad4d', opacity: 1},
+  });
+  const parent = new THREE.Group();
+  parent.rotation.set(0.3, 0.7, 1.1);
+  parent.add(anchor);
+  for (const perspective of [true, false]) {
+    const camera = perspective
+      ? new THREE.PerspectiveCamera(60, 1, 0.1, 10000)
+      : new THREE.OrthographicCamera(-50, 50, 50, -50, 0.1, 10000);
+    for (const [distance, height, scale] of [
+      [30, 240, 0.01],
+      [1000, 960, 100],
+    ]) {
+      parent.scale.set(scale, scale * 2, scale * 0.3);
+      for (const direction of [
+        [1, 0, 0],
+        [0, 1, 0],
+        [1, 2, 3],
+      ]) {
+        camera.position
+          .fromArray(direction)
+          .normalize()
+          .multiplyScalar(distance);
+        camera.lookAt(0, 0, 0);
+        camera.updateProjectionMatrix();
+        anchor.update(camera, height);
+        parent.updateMatrixWorld(true);
+        const ring = anchor.children[0].children[0]
+          .children[1] as import('three/addons/lines/LineSegments2.js').LineSegments2;
+        const points = ring.geometry.getAttribute('instanceStart');
+        const center = anchor
+          .getWorldPosition(new THREE.Vector3())
+          .project(camera);
+        for (let i = 0; i < points.count; i++) {
+          const screen = new THREE.Vector3()
+            .fromBufferAttribute(points, i)
+            .applyMatrix4(ring.matrixWorld)
+            .project(camera);
+          near(
+            (Math.hypot(screen.x - center.x, screen.y - center.y) * height) / 2,
+            8,
+          );
+        }
+        assert.equal(ring.material.color.getHexString(), 'ffad4d');
+        assert.equal(ring.material.toneMapped, false);
+        assert.equal(ring.parent!.renderOrder, 1);
+      }
+    }
+  }
+});

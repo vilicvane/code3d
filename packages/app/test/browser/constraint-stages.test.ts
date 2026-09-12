@@ -85,11 +85,9 @@ test(
         };
       };
       try {
-        const source = `import {box, group} from '@code3d/core';
+        const source = `import {offset, pivot, aroundLine, rotate, box, group} from '@code3d/core';
         const base = box(20, 10, 30);
-        const part = box(8, 6, 4).relate(self => self.on(base.up)
-          .offset(10, 0, 0).pivot([5, 0, 0]).rotate(0, 0, 90)
-          .aroundLine(base.axis).rotate(30).offset(7, 0, 0));
+        const part = box(8, 6, 4).relate(self => [self.on(base.up), offset(10, 0, 0), pivot([5, 0, 0]).rotate(0, 0, 90), aroundLine(base.axis).rotate(30), offset(7, 0, 0)]);
         export default group([base, part]);`;
         const module = await compile(source);
         // Compare in the base's frame, independently of the composition reference member.
@@ -117,29 +115,36 @@ test(
         const plain = ['rotate(0,0,45)', 'rotate(0,0,90)'].map(text =>
           inspect(plainSource, text),
         );
-        const aliasSource = `import {box,group} from '@code3d/core';
+        const aliasSource = `import {box,group,offset,rotate} from '@code3d/core';
         const base = box(20,10,30);
         const part = box(8,6,4).relate(self => {
-          const contact = self.on(base.up).offset(10,0,0);
-          return contact.rotate(0,0,90).rotate(0,45,0);
+          const contact = self.on(base.up);
+          const moved = offset(10,0,0);
+          const turned = rotate(0,0,90);
+          return [contact, moved, turned, rotate(0,45,0)];
         });
         export default group([base,part]);`;
         await compile(aliasSource);
         const aliases = [
           'contact =',
-          'contact.rotate',
+          'moved =',
           'rotate(0,0,90)',
           'rotate(0,45,0)',
         ].map(text => inspect(aliasSource, text));
-        const invalidSource = `import {box,group} from '@code3d/core';
+        const invalidSource = `import {offset, box,group} from '@code3d/core';
         const base=box(20,10,20);
         const higher=box(20,10,20).relate(s=>s.on(base.up));
         const original=box(2,2,2).relate(s=>s.on(base.up));
-        const part=original.relate(s=>s.on(higher.up).offset(0,-10,0));
+        const part=original.relate(s=>[s.on(higher.up), offset(0,-10,0)]);
         export default group([base,higher,part]);`;
-        await compile(invalidSource);
-        const invalid = inspect(invalidSource, 'on(higher.up)');
-        const recovered = inspect(invalidSource, 'offset(0,-10,0)');
+        const retained = viewport['module'];
+        let invalid = '';
+        try {
+          await compile(invalidSource);
+        } catch (error) {
+          invalid = String(error);
+        }
+        const retainedValidModel = viewport['module'] === retained;
         return {
           stages,
           finalPose,
@@ -147,7 +152,7 @@ test(
           plain,
           aliases,
           invalid,
-          recovered,
+          retainedValidModel,
         };
       } finally {
         client.dispose();
@@ -163,19 +168,19 @@ test(
       near(stage.matrix!.slice(12, 15), stage.node!.pose.position);
       assert.ok(stage.context.length > 0);
     }
-    assert.deepEqual(stages[1].node!.pose, stages[2].node!.pose);
-    assert.deepEqual(stages[3].node!.pose, stages[4].node!.pose);
+    assert.deepEqual(stages[2].node!.pose, stages[3].node!.pose);
+    assert.deepEqual(stages[4].node!.pose, stages[5].node!.pose);
     assert.notDeepEqual(
       stages[0].node!.pose.position,
       stages[1].node!.pose.position,
     );
     assert.notDeepEqual(
+      stages[1].node!.pose.quaternion,
       stages[2].node!.pose.quaternion,
-      stages[3].node!.pose.quaternion,
     );
     assert.notDeepEqual(
+      stages[3].node!.pose.quaternion,
       stages[4].node!.pose.quaternion,
-      stages[5].node!.pose.quaternion,
     );
     const finalPose = composeTransforms(
       invertTransform(result.finalPose.base),
@@ -188,11 +193,11 @@ test(
     assert.equal(stages[3].bindings.length, 3);
     assert.equal(stages[5].bindings.length, 1);
     assert.equal(stages[5].bindings[0].value, 30);
-    assert.equal(stages[4].bindings.length, 0);
+    assert.equal(stages[4].bindings.length, 1);
     assert.notEqual(result.plain[0].node!.nodeId, result.plain[1].node!.nodeId);
-    assert.deepEqual(
-      result.aliases[0].node!.pose,
-      result.aliases[1].node!.pose,
+    assert.notDeepEqual(
+      result.aliases[0].node!.pose.position,
+      result.aliases[1].node!.pose.position,
     );
     near(result.aliases[0].node!.pose.quaternion, [0, 0, 0, 1]);
     assert.notDeepEqual(
@@ -203,12 +208,7 @@ test(
       result.aliases[2].node!.pose,
       result.aliases[3].node!.pose,
     );
-    assert.match(
-      result.invalid.diagnostic!.details!,
-      /Conflicting bound positions/,
-    );
-    assert.equal(result.invalid.node, undefined);
-    assert.equal(result.recovered.diagnostic, undefined);
-    assert.ok(result.recovered.node);
+    assert.match(result.invalid, /Conflicting bound positions/);
+    assert.equal(result.retainedValidModel, true);
   },
 );

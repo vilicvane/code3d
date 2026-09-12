@@ -43,8 +43,8 @@ lets you inspect a `map(...)` result without its related parts collapsing onto
 the same local origin. A collection is not a new group model or an implicit
 group-level position tool.
 
-Inside a relation chain, inspection stops at the selected call. For example,
-`self.on(base.up).offset(6, 0, 0).rotate(0, 0, 25)` shows contact at `on`, the
+Inside a relate array, inspection stops at the selected transformation. For example,
+`[self.on(base.up), offset(6, 0, 0), rotate(0, 0, 25)]` shows contact at `on`, the
 translated pose at `offset`, and the rotated pose at `rotate`. Later calls do
 not move an earlier preview. The highlighted references indicate which side
 you are inspecting while the other related objects remain as context. See

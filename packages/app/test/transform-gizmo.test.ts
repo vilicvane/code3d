@@ -49,9 +49,14 @@ for (const end of ['commit', 'cancel'] as const) {
     gizmo.attach(
       object,
       (['x', 'y', 'z'] as const).map((axis, i) => ({
-        kind: 'expression',
-        receiver: {sourceRef: {file: '/model.ts', start: 0, end: 4}},
-        occurrenceKeys: ['part'],
+        kind: 'parameter',
+        target: {
+          id: axis,
+          label: axis,
+          kind: 'length',
+          value: 5,
+          sourceRef: {file: '/model.ts', start: 0, end: 4},
+        },
         mode: 'translate',
         axis,
         label: axis,
@@ -296,9 +301,14 @@ function pointerFixture(t: TestContext) {
   gizmo.attach(
     object,
     (['x', 'y', 'z'] as const).map(axis => ({
-      kind: 'expression',
-      receiver: {sourceRef: {file: '/model.ts', start: 0, end: 4}},
-      occurrenceKeys: ['part'],
+      kind: 'parameter',
+      target: {
+        id: axis,
+        label: axis,
+        kind: 'length',
+        value: 0,
+        sourceRef: {file: '/model.ts', start: 0, end: 4},
+      },
       mode: 'translate',
       axis,
       label: axis,

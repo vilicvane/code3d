@@ -2514,6 +2514,30 @@ export function createModelExecutor(
     }
     return completedTargets.map(target => ({
       ...target,
+      relationSelfTargetId: target.evaluations.flatMap(evaluation => {
+        const operation = operations.get(evaluation.operationId ?? '');
+        if (
+          operation?.kind !== 'relate' ||
+          operation.outputNodeId !== evaluation.relationOwnerNodeId ||
+          !operation.sourceRef
+        )
+          return [];
+        const ref = operation.sourceRef;
+        const self = completedTargets.find(
+          candidate =>
+            candidate.kind === 'value' &&
+            (parameterScopes.has(candidate.id) || candidate.relationArray) &&
+            candidate.sourceRef.file === ref.file &&
+            candidate.sourceRef.start >= ref.start &&
+            candidate.sourceRef.end <= ref.end &&
+            candidate.evaluations.some(
+              value =>
+                value.contextId === evaluation.contextId &&
+                value.relationOwnerNodeId === operation.outputNodeId,
+            ),
+        );
+        return self ? [self.id] : [];
+      })[0],
       argumentListRef: toolCallSites.get(target.tool?.callId ?? '')
         ?.argumentListRef,
       rotationSelection:

@@ -182,7 +182,7 @@ export const renderSamples = [
     id: 'relate',
     title: 'Relate parts',
     description:
-      'Place a part on a base, offset its contact and rotate around a pivot.',
+      'Place a part on a base, offset the result and rotate around a pivot.',
     category: 'Constraints',
     file: 'constraints/relate.ts',
     focus: {
@@ -265,7 +265,7 @@ export const sourceContextSets: Readonly<
       description:
         'At on, the part touches the base. Its complete source box is highlighted; the later offset and rotation have not happened yet.',
       focus: {
-        context: '.on(base.up) // Touch the base.',
+        context: '.on(base.up), // Touch the base.',
         token: 'on',
       },
     },
@@ -276,7 +276,7 @@ export const sourceContextSets: Readonly<
       description:
         'Inside on, base.up becomes the bright reference while the part remains visible.',
       focus: {
-        context: '.on(base.up) // Touch the base.',
+        context: '.on(base.up), // Touch the base.',
         token: 'base.up',
       },
     },
@@ -285,9 +285,9 @@ export const sourceContextSets: Readonly<
       image: 'relate-offset',
       label: 'Offset',
       description:
-        'At offset, the part moves in the target frame. Focus returns to self, while the later rotation remains outside this preview.',
+        'At offset, the part moves along the composition axes. Focus returns to self, while the later rotation remains outside this preview.',
       focus: {
-        context: '.offset(6, 0, 0)',
+        context: 'offset(6, 0, 0)',
         token: 'offset',
       },
     },
@@ -296,7 +296,7 @@ export const sourceContextSets: Readonly<
       image: 'relate',
       label: 'Rotation',
       description:
-        'At rotate, the part turns about its chosen pivot. The box, contact reference, and controls share this stage’s pose.',
+        'At rotate, the part turns about its chosen pivot. The model, pivot, and controls share this stage’s pose.',
       focus: {
         context: '.rotate(0, 0, 25)',
         token: 'rotate',

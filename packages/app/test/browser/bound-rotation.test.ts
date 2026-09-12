@@ -262,7 +262,7 @@ test(
           ...elementSourceDecoration.decorations(boundScope),
           ...relationSourceDecoration.decorations(boundScope),
         ];
-        const source2 = `import {box, group} from '@code3d/core'; const base = box(20, 10, 30); const part = box(8, 6, 4).relate(self => base.on(self.up).pivotVertex(3).rotate(0, 0, 45)); export default group([base, part]);`;
+        const source2 = `import {pivotVertex, rotate, box, group} from '@code3d/core'; const base = box(20, 10, 30); const part = box(8, 6, 4).relate(self => [base.on(self.up), pivotVertex(3).rotate(0, 0, 45)]); export default group([base, part]);`;
         const module2 = await compile(source2);
         const vertex = inspect(module2, source2, 'pivotVertex(3)');
         const selection = vertex.evaluation.selection;
@@ -273,7 +273,7 @@ test(
           false,
           selection!.ids,
         );
-        const source3 = `import {box, group} from '@code3d/core'; const base = box(20, 10, 30); const part = box(8, 6, 4).relate(self => self.on(base.up).aroundLine(base.axis).rotate(35)); export default group([base, part]);`;
+        const source3 = `import {aroundLine, rotate, box, group} from '@code3d/core'; const base = box(20, 10, 30); const part = box(8, 6, 4).relate(self => [self.on(base.up), aroundLine(base.axis).rotate(35)]); export default group([base, part]);`;
         const module3 = await compile(source3);
         inspect(module3, source3, 'aroundLine(base.axis)');
         inspect(module3, source3, 'rotate(35)');

@@ -1137,10 +1137,10 @@ test(
 
 test('composition grids and navigation axes stay fixed through member selection and live placement previews', async t => {
   const {page, errors} = await openNavigationPage(t);
-  const source = `import {box, group} from '@code3d/core';
+  const source = `import {offset, rotate, box, group} from '@code3d/core';
 const base = box(24, 6, 14);
 const tilted = box(10, 4, 8).relate(self =>
-  self.on(base.up).offset(0, 10, 0).rotate(20, 30, 45));
+  [self.on(base.up), offset(0, 10, 0), rotate(20, 30, 45)]);
 const members = [base, tilted];
 const inner = group(members).rotate(0, 25, 0);
 export const outer = group([inner, box(6, 12, 4)], 'Grid assembly');
@@ -1203,9 +1203,25 @@ export const outer = group([inner, box(6, 12, 4)], 'Grid assembly');
         const samples = members.flatMap(({key}) => {
           v['selectKey'](key, false);
           const selected = sample();
-          v.setOccurrenceTranslationPreview([key], [9, -3, 7]);
+          const preview = {
+            key,
+            nodeId: members.find(m => m.key === key)!.node.nodeId,
+            spatial: {
+              origin: [0, 0, 0] as const,
+              vector: [0, 0, 0] as const,
+              frame: {
+                position: [0, 0, 0] as const,
+                quaternion: [0, 0, 0, 1] as const,
+              },
+            },
+            transform: {
+              position: [9, -3, 7] as const,
+              quaternion: [0, 0, 0, 1] as const,
+            },
+          };
+          v.setSpatialPreview([preview]);
           const moved = sample();
-          v.clearOccurrenceTranslationPreview([key]);
+          v.clearSpatialPreview([preview]);
           return [selected, moved, sample()];
         });
         return {initial, samples, placed, count: members.length};

@@ -35,9 +35,9 @@ test(
     });
     await page.goto(appUrl!);
     await page.getByText('Ready', {exact: true}).waitFor({timeout: 30000});
-    const source = `import {arc, box, group, line} from '@code3d/core';
+    const source = `import {offset, arc, box, group, line} from '@code3d/core';
 const base=arc([20,0,0],[0,20,0],[-20,0,0]);
-const part=arc([0,20,0],[-20,0,0],[0,-20,0]).relate(self=>self.align(base).offset(0,0,8));
+const part=arc([0,20,0],[-20,0,0],[0,-20,0]).relate(self=>[self.align(base), offset(0,0,8)]);
 const axis=box(1,1,1);
 const rail=line([30,0,0],[30,20,0]).relate(self=>self.align(axis.axis.reverse()));
 export default group([base,part,rail]);`;

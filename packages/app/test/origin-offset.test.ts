@@ -5,19 +5,15 @@ import {after, before, test} from 'node:test';
 import {createAppTestServer} from './vite-test-server.ts';
 
 let server: Awaited<ReturnType<typeof createAppTestServer>>;
-let offsetRelationSource: (
-  source: string,
-  delta: Vec3,
-  current?: Vec3,
-) => string;
+let offsetOriginSource: (source: string, delta: Vec3, current?: Vec3) => string;
 let ToolEngine: (typeof import('../src/tools/tool-system.ts'))['ToolEngine'];
 before(async () => {
   server = await createAppTestServer();
   const {offsetCallSource} = await server.ssrLoadModule<
     typeof import('../src/tools/source-expression.ts')
   >('/src/tools/source-expression.ts');
-  offsetRelationSource = (source, delta, current) =>
-    offsetCallSource(source, 'offset', delta, current);
+  offsetOriginSource = (source, delta, current) =>
+    offsetCallSource(source, 'originOffset', delta, current);
   ({ToolEngine} = await server.ssrLoadModule<
     typeof import('../src/tools/tool-system.ts')
   >('/src/tools/tool-system.ts'));
@@ -27,49 +23,46 @@ after(async () => {
 });
 
 test('repeated drags combine signed increments without nesting offsets', () => {
-  let source = 'part.down.on(base.up).offset((i - 2) * 8, 0, 0)';
+  let source = 'part.originOffset((i - 2) * 8, 0, 0)';
   for (const [delta, expression] of [
     [2, '(i - 2) * 8 + 2'],
     [3, '(i - 2) * 8 + 5'],
     [-8, '(i - 2) * 8 - 3'],
     [3, '(i - 2) * 8'],
   ] as const) {
-    source = offsetRelationSource(source, [delta, 0, 0]);
-    assert.equal(source, `part.down.on(base.up).offset(${expression}, 0, 0)`);
+    source = offsetOriginSource(source, [delta, 0, 0]);
+    assert.equal(source, `part.originOffset(${expression}, 0, 0)`);
   }
 });
 
 test('an absent or spread offset gets one reusable literal call', () => {
-  for (const source of [
-    'part.down.on(base.up)',
-    'relation.offset(...values)',
-  ] as const) {
-    const first = offsetRelationSource(source, [2, -3, 0]);
-    assert.equal(first, `${source}.offset(2, -3, 0)`);
+  for (const source of ['part', 'part.originOffset(...values)'] as const) {
+    const first = offsetOriginSource(source, [2, -3, 0]);
+    assert.equal(first, `${source}.originOffset(2, -3, 0)`);
     assert.equal(
-      offsetRelationSource(first, [-1, 2, 4]),
-      `${source}.offset(1, -1, 4)`,
+      offsetOriginSource(first, [-1, 2, 4]),
+      `${source}.originOffset(1, -1, 4)`,
     );
   }
 });
 
 test('only the outer call is edited, preserving parentheses, axes and comments', () => {
   const source =
-    '(relation.offset(x, 0, 0).offset(/* x */ ((i - 2) * 8),\n  y, /* z */ -2,))';
+    '(part.originOffset(x, 0, 0).originOffset(/* x */ ((i - 2) * 8),\n  y, /* z */ -2,))';
   assert.equal(
-    offsetRelationSource(source, [3, 0, -1]),
-    '(relation.offset(x, 0, 0).offset(/* x */ ((i - 2) * 8 + 3),\n  y, /* z */ -3,))',
+    offsetOriginSource(source, [3, 0, -1]),
+    '(part.originOffset(x, 0, 0).originOffset(/* x */ ((i - 2) * 8 + 3),\n  y, /* z */ -3,))',
   );
   assert.equal(
-    offsetRelationSource(
-      'relation.offset(x /* a */ + /* b */ 2, 0, 0)',
+    offsetOriginSource(
+      'part.originOffset(x /* a */ + /* b */ 2, 0, 0)',
       [-2, 0, 0],
     ),
-    'relation.offset(x /* a */  /* b */, 0, 0)',
+    'part.originOffset(x /* a */  /* b */, 0, 0)',
   );
   assert.equal(
-    offsetRelationSource('relation.offset(- /* sign */ 2, 0, 0)', [3, 0, 0]),
-    'relation.offset(- /* sign */ 2 + 3, 0, 0)',
+    offsetOriginSource('part.originOffset(- /* sign */ 2, 0, 0)', [3, 0, 0]),
+    'part.originOffset(- /* sign */ 2 + 3, 0, 0)',
   );
 });
 
@@ -84,16 +77,16 @@ test('expression increments preserve operator precedence and evaluation count', 
     'i ** 2',
     'i - -2',
   ] as const) {
-    const original = `relation.offset(${expression}, 0, 0)`;
-    const adjusted = offsetRelationSource(original, [3, 0, 0]);
+    const original = `part.originOffset(${expression}, 0, 0)`;
+    const adjusted = offsetOriginSource(original, [3, 0, 0]);
     let calls = 0;
     const evaluate = (source: string) =>
       Function(
-        'relation',
+        'part',
         'i',
         'next',
         `return ${source};`,
-      )({offset: (x: number) => x}, 2, () => {
+      )({originOffset: (x: number) => x}, 2, () => {
         calls++;
         return 4;
       });
@@ -101,40 +94,40 @@ test('expression increments preserve operator precedence and evaluation count', 
     assert.equal(calls, expression === 'next()' ? 2 : 0);
   }
   assert.equal(
-    offsetRelationSource('relation.offset(value as number, 0, 0)', [2, 0, 0]),
-    'relation.offset((value as number) + 2, 0, 0)',
+    offsetOriginSource('part.originOffset(value as number, 0, 0)', [2, 0, 0]),
+    'part.originOffset((value as number) + 2, 0, 0)',
   );
 });
 
 test('zero gestures preserve source and numeric changes remain compact', () => {
-  assert.equal(offsetRelationSource('relation', [0, 0, 0]), 'relation');
+  assert.equal(offsetOriginSource('part', [0, 0, 0]), 'part');
   assert.equal(
-    offsetRelationSource('relation.offset(0x10, 1_000, -.2)', [-2, 2, 0.3]),
-    'relation.offset(14, 1002, 0.1)',
+    offsetOriginSource('part.originOffset(0x10, 1_000, -.2)', [-2, 2, 0.3]),
+    'part.originOffset(14, 1002, 0.1)',
   );
 });
 
 test('cancelling an increment preserves line-comment boundaries', () => {
-  const source = 'relation.offset(x + // keep this comment\n  2, 0, 0)';
-  const adjusted = offsetRelationSource(source, [-2, 0, 0]);
+  const source = 'part.originOffset(x + // keep this comment\n  2, 0, 0)';
+  const adjusted = offsetOriginSource(source, [-2, 0, 0]);
   assert.ok(adjusted.includes('// keep this comment\n'));
   assert.equal(
     Function(
-      'relation',
+      'part',
       'x',
       `return ${adjusted};`,
-    )({offset: (x: number) => x}, 4),
+    )({originOffset: (x: number) => x}, 4),
     4,
   );
 });
 
 test('tool transactions read relocated anchors and accumulate before recompilation', () => {
-  const original = 'relation.offset((i - 2) * 8, 0, 0)';
+  const original = 'part.originOffset((i - 2) * 8, 0, 0)';
   const anchor = {file: '/model.ts', start: 0, end: original.length};
   let source = '// inserted above after compile\n' + original;
   let currentRef = {
     ...anchor,
-    start: source.indexOf('relation'),
+    start: source.indexOf('part'),
     end: source.length,
   };
   let version = 1;
@@ -167,12 +160,26 @@ test('tool transactions read relocated anchors and accumulate before recompilati
   for (const increment of [2, 3, -1] as const) {
     const session = engine.begin('position');
     const intent: ToolIntent = {
-      kind: 'relation.offset',
-      receiver: {sourceRef: anchor},
-      occurrenceKeys: ['source/0', 'context/0'],
-      delta: [increment, 0, 0],
-      frameQuaternion: [0, 0, 0, 1],
-      direction: 1,
+      kind: 'model.spatial',
+      operation: 'originOffset',
+      change: {
+        kind: 'origin-offset',
+        sourceRef: anchor,
+        delta: [increment, 0, 0],
+      },
+      preview: {
+        kind: 'model-spatial',
+        objects: ['source/0', 'context/0'].map(key => ({
+          key,
+          nodeId: 'part',
+          transform: {position: [-increment, 0, 0], quaternion: [0, 0, 0, 1]},
+          spatial: {
+            origin: [0, 0, 0],
+            vector: [0, 0, 0],
+            frame: {position: [0, 0, 0], quaternion: [0, 0, 0, 1]},
+          },
+        })),
+      },
     };
     const before = source;
     assert.ok(session.preview(intent).status === 'ready');
@@ -181,26 +188,26 @@ test('tool transactions read relocated anchors and accumulate before recompilati
   }
   assert.equal(
     source,
-    '// inserted above after compile\nrelation.offset((i - 2) * 8 + 4, 0, 0)',
+    '// inserted above after compile\npart.originOffset((i - 2) * 8 + 4, 0, 0)',
   );
   assert.deepEqual(
     previews.map(preview => {
-      assert.ok(preview.kind === 'occurrence-translation');
-      return preview.delta;
+      assert.ok(preview.kind === 'model-spatial');
+      return preview.objects[0].transform.position;
     }),
     [
-      [2, 0, 0],
-      [2, 0, 0],
-      [3, 0, 0],
-      [3, 0, 0],
-      [-1, 0, 0],
-      [-1, 0, 0],
+      [-2, 0, 0],
+      [-2, 0, 0],
+      [-3, 0, 0],
+      [-3, 0, 0],
+      [1, 0, 0],
+      [1, 0, 0],
     ],
   );
   assert.ok(
     previews.every(preview => {
-      assert.ok(preview.kind === 'occurrence-translation');
-      return preview.occurrenceKeys.length === 2;
+      assert.ok(preview.kind === 'model-spatial');
+      return preview.objects.length === 2;
     }),
   );
 });
@@ -216,23 +223,21 @@ test('a lost receiver anchor conflicts without reading stale source', () => {
     clearPreview: () => assert.fail('must resolve the anchor first'),
   });
   const result = engine.resolve('position', {
-    kind: 'relation.offset',
-    receiver: {sourceRef: {file: '/model.ts', start: 1, end: 20}},
-    occurrenceKeys: ['source/0'],
-    delta: [1, 0, 0],
-    frameQuaternion: [0, 0, 0, 1],
-    direction: 1,
+    kind: 'model.spatial',
+    operation: 'originOffset',
+    change: {
+      kind: 'origin-offset',
+      sourceRef: {file: '/model.ts', start: 1, end: 20},
+      delta: [1, 0, 0],
+    },
+    preview: {kind: 'model-spatial', objects: []},
   });
   assert.ok(result.status === 'conflict');
 });
 
 test('editing an existing spread offset materializes that call instead of adding another stage', () => {
   assert.equal(
-    offsetRelationSource(
-      'self.on(base.up).offset(...values)',
-      [2, -3, 0],
-      [1, 2, 3],
-    ),
-    'self.on(base.up).offset(3, -1, 3)',
+    offsetOriginSource('part.originOffset(...values)', [2, -3, 0], [1, 2, 3]),
+    'part.originOffset(3, -1, 3)',
   );
 });

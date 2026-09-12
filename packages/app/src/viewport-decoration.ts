@@ -70,6 +70,8 @@ type ViewportAnchorDecorationBase = ViewportDecorationBase &
     /** Existing curve geometry supplies the shaft; this frame is its endpoint. */
     headOnly?: boolean;
     layer?: 'reference' | 'foreground';
+    /** Semantic tool reference, projected from the current occurrence preview. */
+    spatialReference?: 'origin' | 'pivot' | 'axis';
     appearance: ViewportDecorationAppearance;
   }>;
 
