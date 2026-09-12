@@ -793,9 +793,10 @@ export function createModelExecutor(
   }
 
   function precedingRelations(
-    site: ToolCallSite | undefined,
+    site: Pick<ToolCallSite, 'relationPredecessors'> | undefined,
     self: RelationObject | undefined,
     order: number,
+    contextId?: string,
   ): RelationExpression[] {
     if (!self) return [];
     const traces = [
@@ -815,9 +816,16 @@ export function createModelExecutor(
             expression: value.expression,
             self: value.self,
             order: value.runtime.order,
+            contextId: value.contextId,
           })),
         )
-        .filter(value => value.self === self && value.order < order)
+        .filter(
+          value =>
+            value.self === self &&
+            (contextId === undefined
+              ? value.order < order
+              : value.contextId === contextId),
+        )
         .sort((a, b) => b.order - a.order)[0];
       return previous ? [previous.expression] : [];
     });
@@ -2083,8 +2091,8 @@ export function createModelExecutor(
                   )
                 )
                   return entry;
-                // Selecting self shows its complete chain. Default gizmos can
-                // then edit the nearest following action in that actual result.
+                // Selecting self shows its complete chain. Tool activation then
+                // navigates to a call or insertion prefix in this same context.
                 const latest = constraintTargets
                   .flatMap(constraint =>
                     constraint.evaluations.map(candidate => ({
@@ -2247,12 +2255,15 @@ export function createModelExecutor(
     ]
       .map(withConstraintContext)
       .map(withOperationContext);
-    // Array whitespace is an authored self scope, with the same per-execution relation stages as an explicit self reference.
+    // Array gaps own their insertion prefix, not the final stage of a nearby call.
     for (const site of relationArraySites) {
       const self = valueTargets.find(
         target => target.id === `source:value:${site.parameterId}`,
       );
       if (!self) continue;
+      const trace = [...sourceValueTraces.values()].find(
+        trace => trace.id === site.parameterId,
+      )!;
       const relations = [...constraintTargets, ...transformationTargets]
         .filter(
           target =>
@@ -2262,6 +2273,8 @@ export function createModelExecutor(
         )
         .sort((a, b) => a.sourceRef.end - b.sourceRef.end);
       for (const [index, gap] of site.gaps.entries()) {
+        const preceding = site.elements.slice(0, index);
+        const predecessor = preceding.at(-1);
         const nearest =
           relations
             .filter(target => target.sourceRef.end <= gap.start)
@@ -2273,18 +2286,54 @@ export function createModelExecutor(
           id,
           sourceRef: gap,
           relationArray: site.sourceRef,
-          transformationInsertion: site.insertion,
+          transformationInsertion: predecessor
+            ? Object.fromEntries(
+                Object.entries(site.insertion).map(([name, insertion]) => [
+                  name,
+                  {
+                    ...insertion,
+                    sourceRef: predecessor,
+                    container: 'array' as const,
+                  },
+                ]),
+              )
+            : site.insertion,
         });
         targets.push({
           ...target,
           evaluations: target.evaluations.map(evaluation => ({
             ...evaluation,
-            relationOwnerNodeId:
-              evaluation.relationOwnerNodeId ?? evaluation.nodeIds[0],
-            relationContext: evaluation.relationContext ?? {
-              constraintIds: [],
-              referenceNodeIds: [],
-            },
+            constraintId: undefined,
+            transformationId: undefined,
+            relationSpatial: undefined,
+            ...relationPreviewContext(
+              gap,
+              trace.evaluations.find(
+                value =>
+                  value.contextId === evaluation.contextId &&
+                  value.objects.some(
+                    object =>
+                      modelObjectNodeId(object) ===
+                      (evaluation.relationOwnerNodeId ?? evaluation.nodeIds[0]),
+                  ),
+              )!.objects[0],
+              self =>
+                relationSelectionPreview(
+                  self,
+                  precedingRelations(
+                    {relationPredecessors: preceding},
+                    self,
+                    Infinity,
+                    evaluation.contextId,
+                  ),
+                  precedingRelations(
+                    {relationPredecessors: site.elements},
+                    self,
+                    Infinity,
+                    evaluation.contextId,
+                  )[0],
+                ),
+            ),
           })),
         });
       }
@@ -2294,16 +2343,26 @@ export function createModelExecutor(
       execution: SourceExecutionTrace,
     ): Partial<SourceTargetEvaluation> {
       if (!site.rotationSelection || !execution.relationSelf) return {};
-      const self = modelObjectNodeId(execution.relationSelf);
+      return relationPreviewContext(
+        site.sourceRef,
+        execution.relationSelf,
+        self => {
+          const preceding = precedingRelations(site, self, execution.order);
+          return isRelationExpression(execution.receiver)
+            ? relationPreview(execution.receiver, preceding)
+            : relationSelectionPreview(self, preceding);
+        },
+      );
+    }
+
+    function relationPreviewContext(
+      sourceRef: SourceRef,
+      receiver: RelationObject,
+      evaluate: (self: RelationObject) => RelationPreview | undefined,
+    ): Partial<SourceTargetEvaluation> {
+      const self = modelObjectNodeId(receiver);
       try {
-        const preceding = precedingRelations(
-          site,
-          execution.relationSelf,
-          execution.order,
-        );
-        const preview = isRelationExpression(execution.receiver)
-          ? relationPreview(execution.receiver, preceding)
-          : relationSelectionPreview(execution.relationSelf, preceding);
+        const preview = evaluate(receiver);
         if (!preview)
           return {
             nodeIds: [self],
@@ -2323,6 +2382,7 @@ export function createModelExecutor(
           focusNodeIds: [self],
           relationOwnerNodeId: self,
           relationPreview: preview.object,
+          relationPreviewDiagnostic: undefined,
           relationContext: {
             constraintIds: preview.object.constraints.map(value => value.id),
             referenceNodeIds,
@@ -2335,7 +2395,7 @@ export function createModelExecutor(
           relationOwnerNodeId: self,
           relationPreviewDiagnostic: {
             ...diagnosticFromError(error),
-            sourceRef: site.sourceRef,
+            sourceRef,
           },
         };
       }

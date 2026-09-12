@@ -327,6 +327,7 @@ type RelationArraySite = Readonly<{
   parameterId: string;
   sourceRef: SourceRef;
   gaps: readonly SourceRef[];
+  elements: readonly SourceRef[];
   insertion: NonNullable<SourceTarget['transformationInsertion']>;
 }>;
 
@@ -1099,6 +1100,13 @@ export function createModelCompiler() {
             array.end,
           ),
           gaps,
+          elements: array.elements.map(element =>
+            sourceRef(
+              sourceFile.fileName,
+              element.getStart(sourceFile),
+              element.end,
+            ),
+          ),
           insertion: insertions(array)!,
         });
       }

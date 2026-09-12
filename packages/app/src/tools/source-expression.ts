@@ -14,6 +14,43 @@ export type TransformationConstructor =
 
 export type NumericArgumentValue = number | readonly NumericArgumentValue[];
 
+/** Resolve a semantic call focus to identifier|(), never an arbitrary argument. */
+export function callIdentifierOffset(
+  source: string,
+  at: number | string,
+): number | undefined {
+  const parsed = ts.createSourceFile(
+    'tool.ts',
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  let selected: ts.CallExpression | undefined;
+  const visit = (node: ts.Node) => {
+    if (ts.isCallExpression(node)) {
+      const matches =
+        typeof at === 'number'
+          ? node.getStart(parsed) <= at && at < node.end
+          : node.expression.getText(parsed) === at ||
+            (ts.isPropertyAccessExpression(node.expression) &&
+              node.expression.name.text === at);
+      if (
+        matches &&
+        (!selected ||
+          (typeof at === 'number'
+            ? node.end - node.getStart(parsed) <
+              selected.end - selected.getStart(parsed)
+            : node.expression.end > selected.expression.end))
+      )
+        selected = node;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(parsed);
+  return selected?.expression.end;
+}
+
 export type TransformationInsertion = Readonly<{
   sourceRef: SourceRef;
   container: 'array' | 'array-start' | 'return';

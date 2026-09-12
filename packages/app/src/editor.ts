@@ -52,6 +52,7 @@ import {
 } from './project/project';
 import type {SourceTextEdit, ToolCommitOptions} from './tools/tool-system';
 import {rebaseSourceRef} from './tools/source-ref';
+import {callIdentifierOffset} from './tools/source-expression';
 import {sourceEditDiff, type SourceEditDiff} from './source-edit-diff';
 
 type MonacoEnvironment = typeof self & {
@@ -92,6 +93,23 @@ export type CompletionFocus = Readonly<{
 }>;
 
 export type EditorCursor = Readonly<{file: string; offset: number}>;
+
+type SourceNavigation = EditorCursor & Readonly<{sourceRef?: SourceRef}>;
+
+type EditorSourceContext = Readonly<{
+  tool: readonly SourceRef[];
+  activation?: SourceRef;
+  /** An insertion gap has no identifier, including when it touches the next call. */
+  caretOnly?: boolean;
+}>;
+
+type EditorCursorState = Readonly<{
+  cursor?: EditorCursor;
+  model: monaco.editor.ITextModel | null;
+  version?: number;
+  focused: boolean;
+  parameter: boolean;
+}>;
 
 type ProjectDocument = {
   path: string;
@@ -470,7 +488,9 @@ export class CodeEditor {
   private readonly changeListeners = new Set<
     (change: ProjectEditorChange) => void
   >();
-  private readonly cursorListeners = new Set<(source: EditorCursor) => void>();
+  private readonly cursorListeners = new Set<
+    (source: SourceNavigation) => void
+  >();
   private readonly agentLocationListeners = new Set<
     (locations: readonly AgentLocation[]) => void
   >();
@@ -493,7 +513,8 @@ export class CodeEditor {
   private pointerActivatingEditor = false;
   private revision = 1;
   private focusToolParameter?: () => boolean;
-  private parameterCursorValue?: EditorCursor;
+  private sourceContext?: () => EditorSourceContext | undefined;
+  private cursorState?: EditorCursorState;
   private operationReadOnly = false;
   private suppressCursorEventDepth = 0;
   private queuedChanges?: ProjectEditorChange[];
@@ -551,18 +572,19 @@ export class CodeEditor {
     });
     makeObservable<
       this,
-      | 'parameterCursorValue'
-      | 'refreshParameterCursor'
+      | 'cursorState'
+      | 'refreshCursorState'
       | 'languageErrorCounts'
       | 'refreshLanguageErrors'
     >(this, {
-      parameterCursorValue: observableRef,
-      refreshParameterCursor: action,
+      cursorState: observableRef,
+      parameterCursor: computed,
+      refreshCursorState: action,
       languageErrorCounts: observableRef,
       refreshLanguageErrors: action,
       errorCounts: computed,
     });
-    this.editor.onDidChangeModelContent(() => this.refreshParameterCursor());
+    this.editor.onDidChangeModelContent(() => this.refreshCursorState());
     const markers = monaco.editor.onDidChangeMarkers(() =>
       this.refreshLanguageErrors(),
     );
@@ -571,7 +593,42 @@ export class CodeEditor {
       for (const document of this.documents.values())
         document.stopDiagnostics();
     });
-    this.editor.onDidBlurEditorText(() => this.refreshParameterCursor());
+    this.editor.onDidBlurEditorText(() => this.refreshCursorState());
+    // Monaco's public content event omits the history selection. Consume the
+    // native transaction result instead of maintaining a parallel undo history.
+    const observeHistory = () => {
+      const model = this.editor.getModel() as
+        | (monaco.editor.ITextModel & {
+            _eventEmitter: {
+              event: monaco.IEvent<{
+                rawContentChangedEvent: {
+                  isUndoing: boolean;
+                  isRedoing: boolean;
+                  resultingSelection: monaco.Selection[] | null;
+                };
+              }>;
+            };
+          })
+        | null;
+      return model?._eventEmitter.event(({rawContentChangedEvent: change}) => {
+        if (
+          this.editor.getModel() !== model ||
+          this.editor.hasTextFocus() ||
+          !(change.isUndoing || change.isRedoing) ||
+          !change.resultingSelection?.length
+        )
+          return;
+        this.withSuppressedCursorEvents(() =>
+          this.editor.setSelections(change.resultingSelection!),
+        );
+      });
+    };
+    let history = observeHistory();
+    this.editor.onDidChangeModel(() => {
+      history?.dispose();
+      history = observeHistory();
+    });
+    this.editor.onDidDispose(() => history?.dispose());
     this.sourceDecoration = this.editor.createDecorationsCollection();
     this.editor.addCommand(
       monaco.KeyCode.Tab,
@@ -582,14 +639,14 @@ export class CodeEditor {
       `editorId == '${this.editor.getId()}' && editorTextFocus && !editorReadonly && !editorHasSelection && !editorHasMultipleSelections && !suggestWidgetVisible && !inSnippetMode && !inlineSuggestionVisible && !editorTabMovesFocus`,
     );
     this.editor.onDidChangeModel(() => {
-      this.refreshParameterCursor();
+      this.refreshCursorState();
       this.editor.updateOptions({readOnly: this.readOnly});
       for (const cursor of this.agentCursors.values()) {
         this.editor.layoutContentWidget(cursor.widget);
       }
     });
     this.editor.onDidChangeConfiguration(event => {
-      this.refreshParameterCursor();
+      this.refreshCursorState();
       if (
         event.hasChanged(monaco.editor.EditorOption.lineHeight) ||
         event.hasChanged(monaco.editor.EditorOption.cursorWidth) ||
@@ -601,7 +658,7 @@ export class CodeEditor {
       }
     });
     this.editor.onDidChangeCursorSelection(({selection, reason}) => {
-      this.refreshParameterCursor();
+      this.refreshCursorState();
       this.cursorSelectionVersion += 1;
       // History and marker recovery move Monaco's cursor without the user
       // leaving the source target currently being edited by a viewport tool.
@@ -644,7 +701,7 @@ export class CodeEditor {
       {capture: true},
     );
     this.editor.onDidFocusEditorText(() => {
-      this.refreshParameterCursor();
+      this.refreshCursorState();
       if (!this.pointerActivatingEditor) this.emitEditorActivation();
     });
     monaco.editor.registerEditorOpener({
@@ -1214,18 +1271,128 @@ export class CodeEditor {
 
   /** Native editor selection/focus projected for parameter UI consumers. */
   get parameterCursor(): EditorCursor | undefined {
-    return this.parameterCursorValue;
+    return this.cursorState?.parameter ? this.cursorState.cursor : undefined;
   }
 
-  private refreshParameterCursor(): void {
+  private refreshCursorState(): void {
     const selections = this.editor.getSelections();
-    this.parameterCursorValue =
-      this.editor.hasTextFocus() &&
-      !this.editor.getOption(monaco.editor.EditorOption.readOnly) &&
-      selections?.length === 1 &&
-      selections[0].isEmpty()
-        ? this.cursorSource()
-        : undefined;
+    const focused = this.editor.hasTextFocus();
+    const model = this.editor.getModel();
+    this.cursorState = {
+      cursor: this.cursorSource(),
+      model,
+      version: model?.getVersionId(),
+      focused,
+      parameter:
+        focused &&
+        !this.editor.getOption(monaco.editor.EditorOption.readOnly) &&
+        selections?.length === 1 &&
+        selections[0].isEmpty(),
+    };
+  }
+
+  /** Activate the expression end or insertion gap through normal source navigation. */
+  activateSourceTool(): boolean {
+    const ref = this.sourceContext?.()?.activation;
+    const current = ref && this.resolveSourceRef(ref);
+    if (!current || current.file !== this.activePath) return false;
+    const model = this.editor.getModel()!;
+    const position = model.getPositionAt(current.end);
+    this.sourceDecoration.clear();
+    this.withSuppressedCursorEvents(() => this.editor.setPosition(position));
+    this.emitCursorPosition(position, ref);
+    this.revealSourceRange(sourceRange(model, current));
+    return true;
+  }
+
+  /** Observe source context without turning state refreshes into navigation. */
+  observeSourceContext(context: () => EditorSourceContext | undefined): void {
+    this.sourceContext = context;
+    const decorations = this.editor.createDecorationsCollection();
+    let revealed: string | undefined;
+    const stop = autorun(() => {
+      const current = context();
+      const state = this.cursorState;
+      const model = state?.model;
+      const cursor = state?.cursor;
+      const marks: monaco.editor.IModelDeltaDecoration[] = [];
+      let reveal: monaco.Range | undefined;
+      if (current && model && cursor) {
+        if (!state.focused) {
+          const position = model.getPositionAt(cursor.offset);
+          const word = model.getWordAtPosition(position);
+          if (word && !current.caretOnly)
+            marks.push({
+              range: new monaco.Range(
+                position.lineNumber,
+                word.startColumn,
+                position.lineNumber,
+                word.endColumn,
+              ),
+              options: {inlineClassName: 'code3d-context-word'},
+            });
+          marks.push({
+            range: monaco.Range.fromPositions(position),
+            options: {
+              beforeContentClassName: 'code3d-context-caret',
+              showIfCollapsed: true,
+            },
+          });
+        }
+        const refs = current.tool.map(ref => this.resolveSourceRef(ref));
+        if (refs.length && refs.every(ref => ref?.file === cursor.file)) {
+          const range = sourceRange(model, {
+            file: cursor.file,
+            start: Math.min(...refs.map(ref => ref!.start)),
+            end: Math.max(...refs.map(ref => ref!.end)),
+          });
+          marks.push({
+            range,
+            options: {
+              className: 'code3d-active-tool-source',
+              inlineClassName: 'code3d-active-tool-source-inline',
+              overviewRuler: {
+                color: '#d8ff3e88',
+                position: monaco.editor.OverviewRulerLane.Right,
+              },
+            },
+          });
+          reveal = range;
+        }
+      }
+      decorations.set(marks);
+      const key = reveal && cursor && `${cursor.file}:${reveal.toString()}`;
+      if (reveal && key !== revealed) this.revealSourceRange(reveal);
+      revealed = key;
+    });
+    this.editor.onDidDispose(stop);
+  }
+
+  /** Shared passive reveal: include horizontal overflow without changing focus. */
+  private revealSourceRange(range: monaco.Range): void {
+    this.editor.revealRangeInCenterIfOutsideViewport(
+      range,
+      monaco.editor.ScrollType.Immediate,
+    );
+    // Long chains may not fit. Prefer the active call identifier when it belongs
+    // to this tool; otherwise show the end of the newly selected operation.
+    const cursor = this.editor.getPosition();
+    const width =
+      range.startLineNumber === range.endLineNumber
+        ? this.editor.getOffsetForColumn(range.endLineNumber, range.endColumn) -
+          this.editor.getOffsetForColumn(
+            range.startLineNumber,
+            range.startColumn,
+          )
+        : Infinity;
+    if (width > this.editor.getLayoutInfo().contentWidth - 40) {
+      this.editor.revealPosition(
+        cursor && range.containsPosition(cursor)
+          ? cursor
+          : range.getEndPosition(),
+        monaco.editor.ScrollType.Immediate,
+      );
+    }
   }
 
   setParameterFocusHandler(handler: () => boolean): void {
@@ -1305,26 +1472,59 @@ export class CodeEditor {
       this.withContentChangeOrigin('tool', () => {
         for (const [path, fileEdits] of grouped) {
           const model = this.requireDocument(path).model;
-          const focused = fileEdits.find(
-            edit => edit.focusOffset !== undefined,
-          );
-          const focusOffset =
-            focused &&
+          const focused =
+            fileEdits.find(edit => edit.focusOffset !== undefined) ??
+            [...fileEdits].sort(
+              (a, b) => b.sourceRef.start - a.sourceRef.start,
+            )[0];
+          const nextSource = [...fileEdits]
+            .sort((a, b) => b.sourceRef.start - a.sourceRef.start)
+            .reduce(
+              (source, edit) =>
+                source.slice(0, edit.sourceRef.start) +
+                edit.text +
+                source.slice(edit.sourceRef.end),
+              model.getValue(),
+            );
+          const changedOffset =
             focused.sourceRef.start +
-              focused.focusOffset! +
-              fileEdits
-                .filter(
-                  edit =>
-                    edit !== focused &&
-                    edit.sourceRef.end <= focused.sourceRef.start,
-                )
-                .reduce(
-                  (delta, edit) =>
-                    delta +
-                    edit.text.length -
-                    (edit.sourceRef.end - edit.sourceRef.start),
-                  0,
-                );
+            fileEdits
+              .filter(
+                edit =>
+                  edit !== focused &&
+                  edit.sourceRef.end <= focused.sourceRef.start,
+              )
+              .reduce(
+                (delta, edit) =>
+                  delta +
+                  edit.text.length -
+                  (edit.sourceRef.end - edit.sourceRef.start),
+                0,
+              );
+          const focusOffset =
+            focused.focusOffset !== undefined
+              ? changedOffset + focused.focusOffset
+              : (callIdentifierOffset(
+                  nextSource,
+                  changedOffset + Math.max(0, focused.text.length - 1),
+                ) ??
+                (() => {
+                  const reference = this.sourceContext?.()?.tool.at(-1);
+                  const current = reference && this.resolveSourceRef(reference);
+                  if (!current || current.file !== path) return undefined;
+                  const rebased = rebaseSourceRef(
+                    current,
+                    fileEdits.map(edit => ({
+                      rangeOffset: edit.sourceRef.start,
+                      rangeLength: edit.sourceRef.end - edit.sourceRef.start,
+                      text: edit.text,
+                    })),
+                    false,
+                  );
+                  return (
+                    rebased && callIdentifierOffset(nextSource, rebased.end - 1)
+                  );
+                })());
           this.pushSourceEdits(
             path,
             [...fileEdits]
@@ -1412,9 +1612,7 @@ export class CodeEditor {
     return () => this.agentLocationListeners.delete(listener);
   }
 
-  onCursorOffset(
-    listener: (source: Readonly<{file: string; offset: number}>) => void,
-  ): () => void {
+  onCursorOffset(listener: (source: SourceNavigation) => void): () => void {
     this.cursorListeners.add(listener);
     return () => this.cursorListeners.delete(listener);
   }
@@ -1892,9 +2090,15 @@ export class CodeEditor {
     return true;
   }
 
-  private emitCursorPosition(position: monaco.IPosition): void {
+  private emitCursorPosition(
+    position: monaco.IPosition,
+    sourceRef?: SourceRef,
+  ): void {
     const cursor = this.cursorAt(position);
-    if (cursor) this.cursorListeners.forEach(listener => listener(cursor));
+    if (cursor)
+      this.cursorListeners.forEach(listener =>
+        listener({...cursor, sourceRef}),
+      );
   }
 
   private async formatFile(
@@ -1939,10 +2143,8 @@ export class CodeEditor {
             path,
             formattingEdits(model, source, result.formatted),
             options.undoGroup,
+            cursorOffset !== undefined ? result.cursorOffset : undefined,
           );
-          if (cursorOffset !== undefined && this.editor.getModel() === model) {
-            this.editor.setPosition(model.getPositionAt(result.cursorOffset));
-          }
         }),
       );
       return true;
@@ -1994,12 +2196,18 @@ export class CodeEditor {
       active ? this.editor.getSelections() : [],
       [...edits],
       () => {
-        if (!active || focusOffset === undefined) return null;
+        if (!active) return null;
+        // Even edits without an explicit focus target need an after-selection
+        // for Redo. Monaco has already rebased this cursor with the source.
+        if (focusOffset === undefined) return this.editor.getSelections();
         const {lineNumber, column} = model.getPositionAt(focusOffset);
         return [new monaco.Selection(lineNumber, column, lineNumber, column)];
       },
     );
-    if (active && selection) this.editor.setSelections(selection);
+    if (active && selection) {
+      this.editor.setSelections(selection);
+      this.revealSourceRange(selection[0]);
+    }
     model.pushStackElement();
     if (undoGroup) {
       this.sourceEditUndoGroups.set(path, undoGroup);

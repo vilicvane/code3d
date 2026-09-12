@@ -53,14 +53,18 @@ export class SpatialToolbar {
     private readonly options: {
       visible(): boolean;
       cancel(): void;
+      activateSource(): void;
     },
   ) {
     this.root.className = 'spatial-toolbar';
     const group = this.toolbar.group('Transform');
-    const choose = (tool: SpatialTool) => {
+    const choose = action((tool: SpatialTool) => {
       this.options.cancel();
       this.tools.selectTool(tool);
-    };
+      this.options.activateSource();
+      // Navigation changes the source context; retain the explicit tool choice.
+      this.tools.selectTool(tool);
+    });
     this.toolbar.add(group, {
       name: names.translate,
       title: 'Translate',
@@ -86,7 +90,7 @@ export class SpatialToolbar {
     makeObservable(this, {selection: observableRef, setSelection: action});
     this.stop = autorun(() => {
       const tool = tools.tool;
-      this.root.hidden = !options.visible() || !tool;
+      this.root.hidden = !options.visible() || !tools.availableTools.length;
       if (this.root.hidden) this.toolbar.close();
       if (tool && tool !== 'translate') this.toolbar.selectVariant(names[tool]);
       this.toolbar.update(name => ({

@@ -51,6 +51,7 @@ import {
 } from './rendering/model-renderer';
 import {
   TransformGizmo,
+  bindingTool,
   type TransformGizmoBinding,
   type TransformGizmoEvent,
 } from './tools/transform-gizmo';
@@ -574,6 +575,7 @@ export class ModelViewport {
     this.pendingSpatialTool = undefined;
     const retainGeometry =
       retainOnError && !!this.module && !!module?.diagnostic;
+    const previousSource = this.sourceContext?.target.sourceRef;
     this.module = module;
     this.sourceParameter = undefined;
     this.scenes = module ? new ViewportScenes(module) : undefined;
@@ -586,6 +588,7 @@ export class ModelViewport {
         source.offset,
         selectedKey,
         source.contextId,
+        previousSource?.end === source.offset ? previousSource : undefined,
       )
     )
       return true;
@@ -618,12 +621,14 @@ export class ModelViewport {
     offset: number,
     preferredOccurrenceKey?: string,
     preferredContextId?: string,
+    preferredSource?: SourceRef,
   ): boolean {
     const scope = this.sourceEvaluationAt(
       this.module,
       file,
       offset,
       preferredContextId,
+      preferredSource,
     );
     const match = scope?.target;
     const previousParameter = this.sourceParameter;
@@ -713,8 +718,9 @@ export class ModelViewport {
     file: string,
     offset: number,
     preferredContextId?: string,
+    preferredSource?: SourceRef,
   ): ModelViewport['sourceContext'] {
-    const target = this.sourceTargetAt(file, offset, module);
+    const target = this.sourceTargetAt(file, offset, module, preferredSource);
     if (!target) return;
     const matchingContextIndex = preferredContextId
       ? target.evaluations.findIndex(
@@ -1597,24 +1603,51 @@ export class ModelViewport {
     file: string,
     offset: number,
     module: ModelModule | null = this.module,
+    preferredSource?: SourceRef,
   ): SourceTarget | undefined {
-    const selected = module?.sourceTargets
-      .filter(
-        ({sourceRef}) =>
-          sourceRef.file === file &&
-          sourceRef.start <= offset &&
-          offset <= sourceRef.end,
-      )
-      .sort((left, right) => {
-        const leftIsTool = left.tool !== undefined;
-        const rightIsTool = right.tool !== undefined;
-        if (leftIsTool !== rightIsTool) return leftIsTool ? -1 : 1;
-        return (
-          sourceSpan(left.sourceRef) - sourceSpan(right.sourceRef) ||
-          sourceTargetPriority(left) - sourceTargetPriority(right) ||
-          latestRuntimeOrder(right) - latestRuntimeOrder(left)
-        );
-      })[0];
+    const candidates = (module?.sourceTargets ?? []).filter(
+      ({sourceRef}) =>
+        sourceRef.file === file &&
+        sourceRef.start <= offset &&
+        offset <= sourceRef.end,
+    );
+    // A call end and a zero-width insertion gap can share one caret. Navigation
+    // carries its registered source identity; recompilation retains that choice
+    // through the existing selected source context.
+    const preferred = preferredSource
+      ? candidates.filter(
+          ({sourceRef}) =>
+            sourceRef.file === preferredSource.file &&
+            sourceRef.start === preferredSource.start &&
+            sourceRef.end === preferredSource.end,
+        )
+      : [];
+    const atExpressionStart = candidates.some(
+      target => !target.relationArray && target.sourceRef.start === offset,
+    );
+    const selected = (
+      preferred.length
+        ? preferred
+        : candidates.filter(
+            target => !atExpressionStart || !target.relationArray,
+          )
+    ).sort((left, right) => {
+      const isInsertion = (target: SourceTarget) =>
+        !!target.relationArray &&
+        offset > target.sourceRef.start &&
+        offset < target.sourceRef.end;
+      const leftInsertion = isInsertion(left);
+      const rightInsertion = isInsertion(right);
+      if (leftInsertion !== rightInsertion) return leftInsertion ? -1 : 1;
+      const leftIsTool = left.tool !== undefined;
+      const rightIsTool = right.tool !== undefined;
+      if (leftIsTool !== rightIsTool) return leftIsTool ? -1 : 1;
+      return (
+        sourceSpan(left.sourceRef) - sourceSpan(right.sourceRef) ||
+        sourceTargetPriority(left) - sourceTargetPriority(right) ||
+        latestRuntimeOrder(right) - latestRuntimeOrder(left)
+      );
+    })[0];
     return selected?.rotationToolId
       ? (module?.sourceTargets.find(
           target => target.id === selected.rotationToolId,
@@ -1812,15 +1845,37 @@ export class ModelViewport {
     }
     const occurrence = this.getSelected();
     const scope = this.sourceContext;
+    const attach = (bindings: readonly TransformGizmoBinding[]) => {
+      const name = scope?.target.tool?.signature.name;
+      const explicit =
+        name &&
+        [
+          'offset',
+          'rotate',
+          'originOffset',
+          'originPoint',
+          'originVertex',
+          'originCenter',
+          'pivot',
+          'pivotVertex',
+          'pivotPoint',
+          'pivotOffset',
+          'aroundEdge',
+          'aroundLine',
+          'axisOffset',
+        ].includes(name);
+      this.transformGizmo.attach(
+        occurrence!.object,
+        bindings,
+        explicit && bindings[0] ? bindingTool(bindings[0]) : undefined,
+      );
+    };
     if (this.pendingSpatialTool) {
       if (
         occurrence?.key === this.pendingSpatialTool.key &&
         scope?.target.id === this.pendingSpatialTool.targetId
       )
-        this.transformGizmo.attach(
-          occurrence.object,
-          this.pendingSpatialTool.bindings,
-        );
+        attach(this.pendingSpatialTool.bindings);
       else this.transformGizmo.detach();
       return;
     }
@@ -1856,10 +1911,7 @@ export class ModelViewport {
           this.spatialParameterValues,
           scope,
         );
-        this.transformGizmo.attach(occurrence.object, [
-          ...bindings,
-          ...rotationReferenceBindings(bindings),
-        ]);
+        attach([...bindings, ...rotationReferenceBindings(bindings)]);
         return;
       }
       const bindings = spatialBindings(
@@ -1871,10 +1923,7 @@ export class ModelViewport {
         this.spatialParameterValues,
       );
       if (bindings.length > 0) {
-        this.transformGizmo.attach(occurrence.object, [
-          ...bindings,
-          ...rotationReferenceBindings(bindings),
-        ]);
+        attach([...bindings, ...rotationReferenceBindings(bindings)]);
         return;
       }
       if (scope.evaluation.relationSpatial) {
@@ -1905,10 +1954,7 @@ export class ModelViewport {
           this.spatialParameterValues,
         )
       : [];
-    this.transformGizmo.attach(occurrence.object, [
-      ...bindings,
-      ...rotationReferenceBindings(bindings),
-    ]);
+    attach([...bindings, ...rotationReferenceBindings(bindings)]);
   }
 
   private applyPreviewTransforms(): void {

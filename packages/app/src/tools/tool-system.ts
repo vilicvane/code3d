@@ -20,6 +20,7 @@ import {
   type CallArgumentDefaults,
   formatSourceNumber,
   offsetCallSource,
+  callIdentifierOffset,
 } from './source-expression';
 import {SketchEditResolver, type SketchEditIntent} from './sketch-source';
 
@@ -109,7 +110,7 @@ type ToolAction =
     }>;
 
 export type SourceTextEdit = Readonly<{
-  /** Cursor offset in replacement text; committed and undone with the source edit. */
+  /** Semantic call identifier offset in replacement text; shares the source undo transaction. */
   focusOffset?: number;
   sourceRef: SourceRef;
   expectedText: string;
@@ -672,6 +673,7 @@ class OffsetRelationResolver implements ToolIntentResolver {
         ),
       'Adjust relation offset',
       context,
+      'offset',
     );
     if (resolution.status !== 'ready') {
       return resolution;
@@ -701,6 +703,7 @@ function expressionPlan(
   replacement: string | ((source: string) => string),
   summary: string,
   context: ResolveContext,
+  focusMethod?: string,
 ): ToolResolution {
   const sourceRef = context.resolveSourceRef(anchor.sourceRef);
   if (!sourceRef) {
@@ -710,14 +713,16 @@ function expressionPlan(
     };
   }
   const currentText = context.readSource(sourceRef);
+  const text =
+    typeof replacement === 'string' ? replacement : replacement(currentText);
   const edits: readonly SourceTextEdit[] = [
     {
       sourceRef,
       expectedText: currentText,
-      text:
-        typeof replacement === 'string'
-          ? replacement
-          : replacement(currentText),
+      text,
+      ...(focusMethod
+        ? {focusOffset: callIdentifierOffset(text, focusMethod)}
+        : {}),
     },
   ];
   return {

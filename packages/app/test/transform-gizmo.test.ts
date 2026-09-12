@@ -66,6 +66,7 @@ for (const end of ['commit', 'cancel'] as const) {
         },
       })),
     );
+    gizmo.selectTool('translate');
     const active = gizmo['axes'][0];
     const direction = new THREE.Vector3(1, 0, 0).applyQuaternion(
       orientations[0],
@@ -307,6 +308,9 @@ function pointerFixture(t: TestContext) {
       frame: {position: [0, 0, 0], quaternion: [0, 0, 0, 1], scale: [1, 1, 1]},
     })),
   );
+  assert.equal(gizmo.tool, undefined, 'Bindings alone do not select a tool');
+  assert.ok(gizmo['axes'].every(axis => !axis.controls.getHelper().visible));
+  gizmo.selectTool('translate');
   scene.updateMatrixWorld(true);
   return {gizmo, camera, element, send, events, captured, grid};
 }

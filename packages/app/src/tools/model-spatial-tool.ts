@@ -31,7 +31,12 @@ import {
 } from './source-expression';
 import type {SpatialObjectPreview} from './spatial-edit';
 import type {ToolIntent} from './tool-system';
-import type {TransformAxis, TransformGizmoBinding} from './transform-gizmo';
+import {
+  bindingTool,
+  type SpatialTool,
+  type TransformAxis,
+  type TransformGizmoBinding,
+} from './transform-gizmo';
 
 type SpatialToolOccurrence = Readonly<{
   key: string;
@@ -354,30 +359,26 @@ export function relationBindings(
     scope && (currentName === 'offset' || currentName === 'rotate')
       ? {...scope.target, sourceRef: sourceRef}
       : undefined;
-  const offset = current
-    ? currentName === 'offset'
-      ? current
-      : undefined
-    : relationToolTarget(module, constraint, 'offset');
-  const rotation = current
-    ? currentName === 'rotate'
-      ? current
-      : undefined
-    : relationToolTarget(module, constraint, 'rotate');
+  // Bindings edit the current source context. Toolbar activation resolves any
+  // following call before rendering; bindings never search for another operation.
+  const offset = currentName === 'offset' ? current : undefined;
+  const rotations = currentName === 'rotate' && current ? [current] : [];
   const positions = positionBindings(
     occurrence,
     occurrences,
     constraint.id,
     offset,
   );
-  const rotations = rotation
-    ? existingRelationRotationBindings(
-        module,
-        rotation,
-        occurrence,
-        members,
-        committed,
-        parameterValues,
+  const rotationBindings = rotations.length
+    ? rotations.flatMap(rotation =>
+        existingRelationRotationBindings(
+          module,
+          rotation,
+          occurrence,
+          members,
+          committed,
+          parameterValues,
+        ),
       )
     : relationRotationBindings(
         occurrence,
@@ -386,18 +387,29 @@ export function relationBindings(
         scope?.target.transformationInsertion,
       );
   return currentName === 'rotate'
-    ? [...rotations, ...positions]
-    : [...positions, ...rotations];
+    ? [...rotationBindings, ...positions]
+    : [...positions, ...rotationBindings];
 }
 
 /** Derive reference movement from the same authored rotation and instance frames. */
 export function rotationReferenceBindings(
   bindings: readonly TransformGizmoBinding[],
 ): TransformGizmoBinding[] {
-  const rotation = bindings.find(
-    binding => binding.kind === 'spatial' && binding.mode === 'rotate',
-  );
-  if (!rotation || rotation.kind !== 'spatial') return [];
+  const rotations = new Map<
+    SpatialTool,
+    Extract<TransformGizmoBinding, {kind: 'spatial'}>
+  >();
+  for (const binding of bindings) {
+    if (binding.kind !== 'spatial' || binding.mode !== 'rotate') continue;
+    const tool = bindingTool(binding);
+    if (!rotations.has(tool)) rotations.set(tool, binding);
+  }
+  return [...rotations.values()].flatMap(rotationReferenceFor);
+}
+
+function rotationReferenceFor(
+  rotation: Extract<TransformGizmoBinding, {kind: 'spatial'}>,
+): TransformGizmoBinding[] {
   const first = rotation.spatial.objects.find(
     object => object.nodeId === rotation.spatial.ownerNodeId,
   );
@@ -485,18 +497,25 @@ function transformationBindings(
           offsetFrame: identityRigidTransform,
         }
       : undefined;
-  const storedStage = occurrence.node.relationStages?.find(stage =>
-    evaluation?.transformationId
-      ? stage.transformationIds.includes(evaluation.transformationId)
-      : evaluation?.constraintId
-        ? stage.constraintIds.includes(evaluation.constraintId)
-        : true,
-  );
+  const insertionScope = !!scope?.target.relationArray;
+  const storedStage = insertionScope
+    ? occurrence.node.relationStages?.at(-1)
+    : occurrence.node.relationStages?.find(stage =>
+        evaluation?.transformationId
+          ? stage.transformationIds.includes(evaluation.transformationId)
+          : evaluation?.constraintId
+            ? stage.constraintIds.includes(evaluation.constraintId)
+            : true,
+      );
   const stage = storedStage ?? emptyArrayStage;
   if (!stage) return undefined;
   const selected = scope?.target.kind === 'transformation';
   const self =
-    !scope || scope.target.kind === 'value' || !!evaluation?.relationContext;
+    !scope ||
+    scope.target.kind === 'value' ||
+    (scope.target.kind === 'constraint' &&
+      ['on', 'align'].includes(scope.target.tool?.signature.name ?? '')) ||
+    !!evaluation?.relationContext;
   if (
     !selected &&
     (!self ||
@@ -530,19 +549,21 @@ function transformationBindings(
         target.transformationInsertion,
     );
   const memberStage = (candidate: SpatialToolOccurrence) =>
-    candidate.node.relationStages?.find(
-      group =>
-        group.constraintIds.some(id =>
-          candidate.node.constraints
-            .find(value => value.id === id)
-            ?.sourceRefs.some(ref => finalRef && sameSource(ref, finalRef)),
-        ) ||
-        group.transformationIds.some(id =>
-          candidate.node.transformations
-            ?.find(value => value.id === id)
-            ?.sourceRefs.some(ref => finalRef && sameSource(ref, finalRef)),
-        ),
-    );
+    insertionScope
+      ? candidate.node.relationStages?.at(-1)
+      : candidate.node.relationStages?.find(
+          group =>
+            group.constraintIds.some(id =>
+              candidate.node.constraints
+                .find(value => value.id === id)
+                ?.sourceRefs.some(ref => finalRef && sameSource(ref, finalRef)),
+            ) ||
+            group.transformationIds.some(id =>
+              candidate.node.transformations
+                ?.find(value => value.id === id)
+                ?.sourceRefs.some(ref => finalRef && sameSource(ref, finalRef)),
+            ),
+        );
   const members = occurrences.filter(
     candidate =>
       memberStage(candidate) ||
@@ -551,176 +572,152 @@ function transformationBindings(
           e => e.relationOwnerNodeId === candidate.node.nodeId,
         )),
   );
-  const tools = (['offset', 'rotate'] as const).flatMap<TransformGizmoBinding>(
-    operation => {
-      const authored = current
-        ? current.tool?.signature.name === operation
-          ? current
-          : undefined
-        : transformations
-            .flatMap(value =>
-              (operation === 'offset'
-                ? value.offsets
-                : value.rotations
-              ).flatMap(action => action.sourceRefs),
-            )
-            .map(ref =>
-              module.sourceTargets.find(
-                target =>
-                  target.kind === 'transformation' &&
-                  target.tool?.signature.name === operation &&
-                  target.sourceRef.file === ref.file &&
-                  target.sourceRef.end === ref.end,
-              ),
-            )
-            .find(Boolean);
-      if (authored) {
-        const evaluations = members.flatMap(candidate => {
-          const source = authored.evaluations.find(value =>
-            candidate.node.transformations?.some(
-              transformation => transformation.id === value.transformationId,
-            ),
-          );
-          const transformation = candidate.node.transformations?.find(
-            value => value.id === source?.transformationId,
-          );
-          const ref = transformation?.sourceRefs.find(
-            ref =>
-              ref.end === authored.sourceRef.end &&
-              ref.file === authored.sourceRef.file,
-          );
-          const action =
-            operation === 'rotate'
-              ? transformation?.rotations.find(value =>
-                  value.sourceRefs.some(value => ref && sameSource(value, ref)),
-                )
-              : transformation?.offsets.find(value =>
-                  value.sourceRefs.some(value => ref && sameSource(value, ref)),
-                );
-          if (!source || !action) return [];
-          const spatial: ModelSpatialOperation =
-            'spatial' in action
-              ? action.spatial
-              : {
-                  origin: [0, 0, 0],
-                  vector: action.value,
-                  frame: {
-                    position: [0, 0, 0],
-                    quaternion: composeTransforms(
-                      invertTransform(candidate.node.compositionTransform),
-                      action.frame,
-                    ).quaternion,
-                  },
-                };
-          return [
-            {
-              ...source,
-              relationOwnerNodeId: candidate.node.nodeId,
-              relationSpatial: {
-                nodeId: candidate.node.nodeId,
-                kind: operation,
-                spatial,
-              },
-            },
-          ];
-        });
-        const own = evaluations.find(
-          value => value.relationOwnerNodeId === occurrence.node.nodeId,
-        );
-        return own
-          ? spatialBindings(
-              module,
-              {target: {...authored, evaluations}, evaluation: own},
-              occurrence,
-              members,
-              committed,
-              parameterValues,
-            )
-          : [];
-      }
-      const insertion = (current ?? endTarget ?? scope?.target)
-        ?.transformationInsertion?.[operation];
-      const source: SpatialBindingSource | undefined = insertion
-        ? {kind: 'transformation-insert', ...insertion}
+  const tools = (
+    ['translate', 'rotate-point', 'rotate-axis'] as const
+  ).flatMap<TransformGizmoBinding>(tool => {
+    const operation = tool === 'translate' ? 'offset' : 'rotate';
+    const axisOnly = tool === 'rotate-axis';
+    const authored =
+      current &&
+      current.tool?.signature.name === operation &&
+      (operation === 'offset' ||
+        !!evaluation?.relationSpatial?.spatial.axisOnly === axisOnly)
+        ? current
         : undefined;
-      if (!source) return [];
-      const objects = members.map(candidate => ({
-        key: candidate.key,
-        nodeId: candidate.node.nodeId,
-        sensitivity: 1,
-        spatial: {
-          origin: [0, 0, 0] as Vec3,
-          vector: [0, 0, 0] as Vec3,
-          reference:
-            operation === 'rotate' ? defaultRotationReference() : undefined,
-          frame:
-            operation === 'rotate'
-              ? identityRigidTransform
-              : {
-                  position: [0, 0, 0] as Vec3,
+    if (authored) {
+      const evaluations = members.flatMap<SourceTargetEvaluation>(candidate => {
+        const source = authored.evaluations.find(value =>
+          candidate.node.transformations?.some(
+            transformation => transformation.id === value.transformationId,
+          ),
+        );
+        const transformation = candidate.node.transformations?.find(
+          value => value.id === source?.transformationId,
+        );
+        const ref = transformation?.sourceRefs.find(
+          ref =>
+            ref.end === authored.sourceRef.end &&
+            ref.file === authored.sourceRef.file,
+        );
+        const action =
+          operation === 'rotate'
+            ? transformation?.rotations.find(value =>
+                value.sourceRefs.some(value => ref && sameSource(value, ref)),
+              )
+            : transformation?.offsets.find(value =>
+                value.sourceRefs.some(value => ref && sameSource(value, ref)),
+              );
+        if (!source || !action) return [];
+        const spatial: ModelSpatialOperation =
+          'spatial' in action
+            ? action.spatial
+            : {
+                origin: [0, 0, 0],
+                vector: action.value,
+                frame: {
+                  position: [0, 0, 0],
                   quaternion: composeTransforms(
                     invertTransform(candidate.node.compositionTransform),
-                    (memberStage(candidate) ?? emptyArrayStage)!.offsetFrame,
+                    action.frame,
                   ).quaternion,
                 },
-        },
-      }));
-      const own = objects.find(
-        value => value.nodeId === occurrence.node.nodeId,
+              };
+        return [
+          {
+            ...source,
+            relationOwnerNodeId: candidate.node.nodeId,
+            relationSpatial: {
+              nodeId: candidate.node.nodeId,
+              kind: operation,
+              spatial,
+            },
+          },
+        ];
+      });
+      const own = evaluations.find(
+        value => value.relationOwnerNodeId === occurrence.node.nodeId,
       );
-      if (!own) return [];
-      return (['x', 'y', 'z'] as const).map(axis => ({
-        kind: 'spatial' as const,
-        placement:
-          occurrence.placement === 'composition'
-            ? occurrence.node.compositionTransform
-            : occurrence.node.transform,
-        mode:
-          operation === 'rotate' ? ('rotate' as const) : ('translate' as const),
-        axis,
-        anchor: 'frame' as const,
-        label: `${operation === 'rotate' ? 'Rotate' : 'Move'} ${axis.toUpperCase()}`,
-        value: 0,
-        sensitivity: 1,
-        parameterKind:
-          operation === 'rotate' ? ('angle' as const) : ('length' as const),
-        frame: {...own.spatial.frame, scale: [1, 1, 1] as Vec3},
-        spatial: {
-          operation,
-          source,
-          objects,
-          ownerNodeId: occurrence.node.nodeId,
-          constructors: (current ?? endTarget ?? scope?.target)
-            ?.transformationInsertion,
-        },
-      }));
-    },
-  );
+      return own
+        ? spatialBindings(
+            module,
+            {target: {...authored, evaluations}, evaluation: own},
+            occurrence,
+            members,
+            committed,
+            parameterValues,
+          )
+        : [];
+    }
+    // No axis exists until a reference is chosen. If another rotation variant
+    // is authored, its binding supplies the insertion anchor for the new kind.
+    if (
+      operation === 'rotate' &&
+      (axisOnly ||
+        (!insertionScope && current?.tool?.signature.name === 'rotate'))
+    )
+      return [];
+    const insertionTarget = insertionScope
+      ? scope!.target
+      : (current ?? endTarget ?? scope?.target);
+    const insertion = insertionTarget?.transformationInsertion?.[operation];
+    const source: SpatialBindingSource | undefined = insertion
+      ? {kind: 'transformation-insert', ...insertion}
+      : undefined;
+    if (!source) return [];
+    const objects = members.map(candidate => ({
+      key: candidate.key,
+      nodeId: candidate.node.nodeId,
+      sensitivity: 1,
+      spatial: {
+        origin: [0, 0, 0] as Vec3,
+        vector: [0, 0, 0] as Vec3,
+        reference:
+          operation === 'rotate' ? defaultRotationReference() : undefined,
+        frame:
+          operation === 'rotate'
+            ? identityRigidTransform
+            : {
+                position: [0, 0, 0] as Vec3,
+                quaternion: composeTransforms(
+                  invertTransform(candidate.node.compositionTransform),
+                  (memberStage(candidate) ?? emptyArrayStage)!.offsetFrame,
+                ).quaternion,
+              },
+      },
+    }));
+    const own = objects.find(value => value.nodeId === occurrence.node.nodeId);
+    if (!own) return [];
+    return (['x', 'y', 'z'] as const).map(axis => ({
+      kind: 'spatial' as const,
+      placement:
+        occurrence.placement === 'composition'
+          ? occurrence.node.compositionTransform
+          : occurrence.node.transform,
+      mode:
+        operation === 'rotate' ? ('rotate' as const) : ('translate' as const),
+      axis,
+      anchor: 'frame' as const,
+      label: `${operation === 'rotate' ? 'Rotate' : 'Move'} ${axis.toUpperCase()}`,
+      value: 0,
+      sensitivity: 1,
+      parameterKind:
+        operation === 'rotate' ? ('angle' as const) : ('length' as const),
+      frame: {...own.spatial.frame, scale: [1, 1, 1] as Vec3},
+      spatial: {
+        operation,
+        source,
+        objects,
+        ownerNodeId: occurrence.node.nodeId,
+        constructors: insertionTarget?.transformationInsertion,
+      },
+    }));
+  });
   return current?.tool?.signature.name === 'rotate'
     ? [
         ...tools.filter(value => value.mode === 'rotate'),
         ...tools.filter(value => value.mode !== 'rotate'),
       ]
     : tools;
-}
-
-export function relationToolTarget(
-  module: ModelModule,
-  constraint: ConstraintSnapshot,
-  name: 'offset' | 'rotate',
-): SourceTarget | undefined {
-  for (const sourceRef of constraint.sourceRefs) {
-    const target = module.sourceTargets.find(
-      target =>
-        target.kind === 'constraint' &&
-        target.tool?.signature.name === name &&
-        target.sourceRef.file === sourceRef.file &&
-        target.sourceRef.end === sourceRef.end &&
-        target.sourceRef.start >= sourceRef.start,
-    );
-    if (target) return {...target, sourceRef};
-  }
-  return undefined;
 }
 
 /** Edit an existing rotation using its frame in the complete relation result. */

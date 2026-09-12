@@ -2050,10 +2050,11 @@ export abstract class RelationObject {
     constraint: StoredPlacement | undefined,
     selection: ConstraintSpatialSelection | undefined,
     preceding: readonly RelationExpression[] = [],
+    original?: RelationObject,
   ): RelationPreview {
     // Keep inherited and sibling relations in the solve. Only the selected chain
     // is replaced by its selected prefix; geometry and node identity stay shared.
-    let placements = [...this.placements];
+    let placements = [...(original ?? this).placements];
     const index = placements.findIndex(value => value.id === constraint?.id);
     if (index < 0) {
       placements.push(
@@ -4939,12 +4940,18 @@ export function currentRelationSelf(): RelationObject | undefined {
   return activeRelate?.self;
 }
 
-/** Preview only completed array entries before an unfinished reference selector. */
+/** Preview an insertion/selector prefix, retaining only placements inherited by its callback. */
 export function relationSelectionPreview(
   self: RelationObject,
   preceding: readonly RelationExpression[],
+  context?: RelationExpression,
 ): RelationPreview {
-  return self[previewRelation](undefined, undefined, preceding);
+  return self[previewRelation](
+    undefined,
+    undefined,
+    preceding,
+    (preceding[0] ?? context)?.chainArguments()[2]?.original,
+  );
 }
 
 export function instrumentRelation(

@@ -108,7 +108,7 @@ export class TransformGizmo {
     context: string | undefined;
     tool: SpatialTool;
   }>;
-  private selectionTool?: SpatialTool;
+  private sourceTool?: SpatialTool;
   private bindings: readonly TransformGizmoBinding[] = [];
   private readonly disposeMode: () => void;
   private readonly disposeContext: () => void;
@@ -151,8 +151,15 @@ export class TransformGizmo {
 
   get availableTools(): readonly SpatialTool[] {
     const tools = new Set(this.bindings.map(bindingTool));
-    if (this.selectionTool) tools.add(this.selectionTool);
-    if (this.reference) {
+    if (this.sourceTool) tools.add(this.sourceTool);
+    if (
+      this.bindings.some(
+        binding =>
+          binding.kind === 'spatial' &&
+          binding.mode === 'rotate' &&
+          binding.spatial.objects.some(object => object.spatial.reference),
+      )
+    ) {
       tools.add('rotate-point');
       tools.add('rotate-axis');
     }
@@ -164,9 +171,15 @@ export class TransformGizmo {
       this.selectedTool &&
       this.availableTools.includes(this.selectedTool.tool)
       ? this.selectedTool.tool
-      : this.bindings[0]
-        ? bindingTool(this.bindings[0])
-        : this.selectionTool;
+      : this.sourceTool;
+  }
+
+  /** The authored operation represented by the active tool, excluding Alt handles. */
+  get toolBinding(): TransformGizmoBinding | undefined {
+    return this.bindings.find(
+      binding =>
+        bindingTool(binding) === this.tool && !referenceBinding(binding),
+    );
   }
 
   selectTool(tool: SpatialTool): void {
@@ -176,9 +189,14 @@ export class TransformGizmo {
 
   get rotationBinding():
     Extract<TransformGizmoBinding, {kind: 'spatial'}> | undefined {
-    return this.bindings.find(
+    const rotations = this.bindings.filter(
       (binding): binding is Extract<TransformGizmoBinding, {kind: 'spatial'}> =>
         binding.kind === 'spatial' && binding.mode === 'rotate',
+    );
+    // A missing variant uses the existing rotation only as its insertion anchor.
+    return (
+      rotations.find(binding => bindingTool(binding) === this.tool) ??
+      rotations[0]
     );
   }
 
@@ -194,7 +212,7 @@ export class TransformGizmo {
     return !this.active &&
       tool &&
       tool !== 'translate' &&
-      (this.reference || this.selectionTool)
+      (this.reference || this.sourceTool)
       ? tool
       : undefined;
   }
@@ -250,7 +268,7 @@ export class TransformGizmo {
     makeObservable<
       this,
       | 'selectedTool'
-      | 'selectionTool'
+      | 'sourceTool'
       | 'displayedBindings'
       | 'altHeld'
       | 'bindings'
@@ -262,9 +280,10 @@ export class TransformGizmo {
       | 'applyDrag'
     >(this, {
       selectedTool: observableRef,
-      selectionTool: observableRef,
+      sourceTool: observableRef,
       availableTools: computed,
       tool: computed,
+      toolBinding: computed,
       reference: computed,
       referencePicking: computed,
       rotationBinding: computed,
@@ -365,11 +384,11 @@ export class TransformGizmo {
   attach(
     object: THREE.Object3D,
     bindings: readonly TransformGizmoBinding[],
-    selectionTool?: SpatialTool,
+    sourceTool?: SpatialTool,
   ): void {
     this.detach();
     this.attachedObject = object;
-    this.selectionTool = selectionTool;
+    this.sourceTool = sourceTool;
     while (this.axes.length > bindings.length) {
       const control = this.axes.pop()!;
       control.controls.getHelper().removeFromParent();
@@ -414,7 +433,7 @@ export class TransformGizmo {
     }
     this.attachedObject = undefined;
     this.bindings = [];
-    this.selectionTool = undefined;
+    this.sourceTool = undefined;
   }
 
   dispose(): void {
@@ -655,7 +674,11 @@ export class TransformGizmo {
   private onModeKey = (event: KeyboardEvent): void => {
     if (event.key !== 'Alt') return;
     this.setAltHeld(event.type === 'keydown');
-    if (this.tool !== 'translate' && (this.reference || this.selectionTool))
+    if (
+      this.tool &&
+      this.tool !== 'translate' &&
+      (this.reference || this.sourceTool)
+    )
       event.preventDefault();
   };
 
@@ -748,7 +771,7 @@ function referenceBinding(binding: TransformGizmoBinding): boolean {
   );
 }
 
-function bindingTool(binding: TransformGizmoBinding): SpatialTool {
+export function bindingTool(binding: TransformGizmoBinding): SpatialTool {
   if (binding.kind === 'spatial') {
     if (
       binding.spatial.operation === 'axisOffset' ||

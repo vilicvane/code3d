@@ -2,6 +2,8 @@ import {
   contextualToolContext,
   contextualToolCallId,
   contextualParameterAt,
+  contextualToolSource,
+  contextualToolActivation,
 } from './tools/contextual-tool-context';
 import {SpatialToolbar} from './ui/spatial-toolbar';
 import {relationSelfExpression} from './tools/source-expression';
@@ -918,9 +920,27 @@ const spatialToolbar = new SpatialToolbar(
   {
     visible: () => !sketchEditor.hasTarget && viewport.renderMode !== 'render',
     cancel: cancelRotationReferenceSelection,
+    activateSource: () => codeEditor.activateSourceTool(),
   },
 );
 viewportToolStack.prepend(spatialToolbar.root);
+codeEditor.observeSourceContext(() => {
+  const scope = viewport.sourceContext;
+  const module = previewState.module;
+  if (!scope || !module || sketchEditor.hasTarget) return;
+  const tools = viewport.positionTools;
+  const tool = contextualToolSource(module, scope.target, tools.tool);
+  return {
+    tool,
+    caretOnly: !!scope.target.relationArray,
+    activation: contextualToolActivation(
+      module,
+      scope,
+      tools.tool,
+      tools.toolBinding ?? tools.rotationBinding,
+    ),
+  };
+});
 const stopContextualTool = reaction(
   () => ({
     context: viewport.sourceContext,
@@ -1074,7 +1094,7 @@ codeEditor.onChange(change => {
   );
 });
 
-codeEditor.onCursorOffset(({file, offset}) => {
+codeEditor.onCursorOffset(({file, offset, sourceRef}) => {
   pendingAgentFollow = undefined;
   if (previewState.pendingFile) return;
   const matched = viewport.selectBySourceOffset(
@@ -1082,6 +1102,7 @@ codeEditor.onCursorOffset(({file, offset}) => {
     offset,
     undefined,
     preferredEvaluationContextId,
+    sourceRef,
   );
   if (!matched && previewState.module) {
     const designContext = designContextAt(previewState.module, file, offset);

@@ -293,20 +293,42 @@ and adjusts it by an increment. For example, an X movement of `2` changes
 Another movement of `3` combines that increment into `+ 5`. Returning by `5`
 removes it. The tool does not change the inner `8` or keep nesting offset calls.
 
-Selecting self shows the complete placement segment. Its position and rotation tools edit
-the nearest following `offset` and `rotate` respectively; if that operation is
-absent, they append one at the end of that segment. In a multi-constraint array,
+Selecting self shows the complete placement segment. Choosing a tool keeps a
+matching current call, or checks the immediately following transformation. If
+that transformation matches, it activates the existing call; otherwise it inserts
+before that transformation. It never skips a different transformation to find
+a matching one farther ahead. With no following transformation, it appends. In a multi-constraint array,
 they target independent transformations after the jointly solved constraints.
 The search stops at the next constraint segment. App inserts the corresponding
 Core import when needed. It preserves existing aliases and avoids local name
 collisions.
 
+The toolbar starts with no active tool when selecting a model, self, or a blank
+array position. Choose a tool explicitly, or place the caret in an existing
+offset or rotation call to activate its tool. When focus moves into the viewport,
+the editor keeps a static caret and word marker at the current source position.
+The active tool's existing call is underlined; if the tool needs to insert a call,
+the underline appears on that new code after the edit. Marked code scrolls into
+view, including horizontally, without taking focus from the viewport or an input.
+Parameter and topology tools use the same source markers and navigation.
+Clicking a tool with an existing call moves the caret to the complete expression
+end, such as `offset()|` or `aroundEdge(1).rotate(25)|`, and shows that step immediately. If a new call is needed, the viewport shows the state just
+before the actual insertion position. The chosen tool stays active, and clicking
+alone does not change the source. New array calls put the caret in the insertion
+gap: before the closing bracket at the end, or before the next item in the middle.
+From an array gap, the same rule checks only the immediately following item;
+a mismatch keeps the insertion position.
+
+The start of a self expression, such as `|self.axis.align(...)`, also counts as
+self context. Plain rotate and pivot selectors match point rotation; around selectors match
+axis rotation. Choosing one does not activate a call of the other type.
+
 When an `offset` or `rotate` is selected, the matching tool edits that call.
-Choose another tool from the toolbar to insert its operation immediately after the selected call,
-before later operations. For independent transformations this inserts a new array
+Choosing another tool checks the next transformation first. A match activates it;
+a mismatch inserts immediately after the selected call, before later operations. For independent transformations this inserts a new array
 item; a single return value becomes an array. It never chains one completed
 transformation into another. Handles and previews use the frame of that exact
-edit, including the effect of later operations. A spread argument is replaced
+edit, excluding later operations. A spread argument is replaced
 with the current three values when editing that call.
 
 A safe shared parameter can update multiple instances of the same call. If it

@@ -9,6 +9,10 @@ declare const window: Window & {
     codeEditor: import('../../src/editor.ts').CodeEditor;
     compiler: import('../../src/model/compiler-client.ts').ModelCompilerClient;
     runModel(): Promise<void>;
+    selectCompiledEvaluationContext(
+      contextId: string,
+      design: boolean,
+    ): boolean;
     resumeCompilation?: (fail?: boolean) => void;
     finishStatusObservation?: () => {
       hidden: boolean;
@@ -197,6 +201,17 @@ group([base, part]);`;
       await page.getByText('Ready', {exact: true}).waitFor();
       const committed = (await state(page)).source;
       assert.match(committed, expected);
+      const identifier = method === 'pivot' ? 'pivot' : method;
+      assert.equal(
+        await page.evaluate(identifier => {
+          const editor = window.coordinateApp.codeEditor.editor;
+          const offset = editor.getModel()!.getOffsetAt(editor.getPosition()!);
+          return editor
+            .getValue()
+            .slice(offset - identifier.length, offset + 1);
+        }, identifier),
+        `${identifier}(`,
+      );
       if (label === 'partial upstream offset') {
         assert.doesNotMatch(committed, /const amount = 2;/);
         assert.match(committed, /const amount = -?[\d.]+;/);
@@ -1969,6 +1984,71 @@ function assertVertexAlignment(value: Awaited<ReturnType<typeof vertexState>>) {
   }
 }
 
+async function sourceMarks(page: Page) {
+  return page.evaluate(() => {
+    const editor = window.coordinateApp.codeEditor.editor;
+    const model = editor.getModel()!;
+    const marks = model.getAllDecorations();
+    return {
+      tool: marks
+        .filter(
+          mark =>
+            mark.options.inlineClassName === 'code3d-active-tool-source-inline',
+        )
+        .map(mark => model.getValueInRange(mark.range)),
+      word: marks
+        .filter(mark => mark.options.inlineClassName === 'code3d-context-word')
+        .map(mark => model.getValueInRange(mark.range)),
+      caret: marks
+        .filter(
+          mark =>
+            mark.options.beforeContentClassName === 'code3d-context-caret',
+        )
+        .map(mark => model.getOffsetAt(mark.range.getStartPosition())),
+      selection: editor.getSelection(),
+      focused: editor.hasTextFocus(),
+    };
+  });
+}
+
+async function focusSource(page: Page, text: string, delta = 1) {
+  await page.evaluate(
+    ({text, delta}) => {
+      const editor = window.coordinateApp.codeEditor.editor;
+      const offset = editor.getValue().indexOf(text);
+      if (offset < 0) throw new Error(`Missing ${text}`);
+      editor.setPosition(editor.getModel()!.getPositionAt(offset + delta));
+      editor.focus();
+    },
+    {text, delta},
+  );
+}
+
+async function assertMarkedSourceVisible(page: Page) {
+  await page.waitForFunction(() => {
+    const editor = window.coordinateApp.codeEditor.editor;
+    const model = editor.getModel()!;
+    const mark = model
+      .getAllDecorations()
+      .find(
+        mark =>
+          mark.options.inlineClassName === 'code3d-active-tool-source-inline',
+      );
+    if (!mark) return false;
+    const position = editor.getScrolledVisiblePosition(
+      mark.range.getEndPosition(),
+    );
+    const layout = editor.getLayoutInfo();
+    return (
+      !!position &&
+      position.left >= layout.contentLeft &&
+      position.left < layout.width - layout.verticalScrollbarWidth &&
+      position.top >= 0 &&
+      position.top + position.height <= layout.height
+    );
+  });
+}
+
 async function setSource(page: Page, source: string, method: string) {
   await page.evaluate(() => window.coordinateApp.codeEditor.editor.focus());
   await page.keyboard.press('Control+a');
@@ -2215,7 +2295,7 @@ async function openApp(t: TestContext) {
       response,
       body:
         (await response.text()) +
-        '\nwindow.coordinateApp = {viewport, codeEditor, compiler, previewState, runModel};\n',
+        '\nwindow.coordinateApp = {viewport, codeEditor, compiler, previewState, runModel, selectCompiledEvaluationContext};\n',
     });
   });
   await page.goto(process.env.CODE3D_TEST_URL!, {
@@ -2258,25 +2338,13 @@ for (const [selection, mode] of [
               .getPositionAt(editor.getValue().indexOf('self.on') + 1),
           );
         });
-        await page.waitForFunction(() => {
-          const bindings = window.coordinateApp.viewport['transformGizmo'][
-            'axes'
-          ].flatMap(axis => (axis.binding ? [axis.binding] : []));
-          return (
-            bindings.some(
-              binding =>
-                binding.mode === 'translate' &&
-                binding.axis === 'x' &&
-                binding.value === 3,
-            ) &&
-            bindings.some(
-              binding =>
-                binding.mode === 'rotate' &&
-                binding.axis === 'x' &&
-                binding.value === 10,
-            )
-          );
-        });
+        await page.getByRole('toolbar', {name: 'Position tools'}).waitFor();
+        assert.equal(
+          await page
+            .locator('.spatial-toolbar button[aria-pressed="true"]')
+            .count(),
+          0,
+        );
       }
       await cameraIdle(page);
       const matrix = () =>
@@ -2285,13 +2353,13 @@ for (const [selection, mode] of [
           object.updateWorldMatrix(true, false);
           return object.matrixWorld.toArray();
         });
-      const before = await matrix();
       await page
         .getByRole('button', {
           name: mode === 'rotate' ? 'Rotate about point' : 'Translate',
           exact: true,
         })
         .click();
+      const before = await matrix();
       const handle =
         mode === 'rotate' ? await rotationHandle(page, 0) : await xHandle(page);
       await page.mouse.move(handle.x, handle.y);
@@ -2321,20 +2389,22 @@ for (const [selection, mode] of [
         `preview ${preview} != committed ${committed}`,
       );
       const changed = (await state(page)).source;
-      if (selection === 'self') {
-        assert.equal((changed.match(/\.offset\(/g) ?? []).length, 2);
-        assert.equal((changed.match(/\.rotate\(/g) ?? []).length, 2);
-        assert.ok(changed.includes('.offset(5,0,2).rotate(20,10,5)'));
-      } else if (selection === 'offset')
+      assert.equal((changed.match(/\.offset\(/g) ?? []).length, 2);
+      assert.equal(
+        (changed.match(/\.rotate\(/g) ?? []).length,
+        selection === 'self' && mode === 'rotate' ? 3 : 2,
+      );
+      if (selection === 'self' && mode === 'rotate')
         assert.match(
           changed,
-          /\.offset\(3,2,1\)\.rotate\([^)]*\)\.rotate\(10,20,30\)/,
+          /\.on\(base\.up\)\.rotate\([^)]+\)\.offset\(3,2,1\)\.rotate\(10,20,30\)/,
         );
-      else
+      else if (selection === 'rotate')
         assert.match(
           changed,
-          /\.rotate\(10,20,30\)\.offset\([^)]*\)\.offset\(5,0,2\)/,
+          /\.offset\(3,2,1\)\.rotate\(10,20,30\)\.offset\([^)]+\)\.rotate\(20,10,5\)/,
         );
+      else assert.ok(changed.includes('.offset(5,0,2).rotate(20,10,5)'));
       await page.evaluate(() => window.coordinateApp.codeEditor.editor.focus());
       await page.keyboard.press('Control+z');
       await page.waitForFunction(
@@ -2389,9 +2459,8 @@ group([...holes,...parts]);`;
       }, selected);
       await page.waitForFunction(
         () =>
-          window.coordinateApp.viewport['transformGizmo']['axes'].filter(
-            axis => !!axis.binding,
-          ).length >= 6,
+          window.coordinateApp.viewport.positionTools.currentBindings.length >=
+          6,
       );
       await cameraIdle(page);
       const matrices = () =>
@@ -2403,22 +2472,23 @@ group([...holes,...parts]);`;
               return value.object.matrixWorld.toArray();
             }),
         );
-      const before = await matrices();
+      const selectedBefore = await matrices();
       if (selected === 'offset') {
-        for (const matrix of before)
+        for (const matrix of selectedBefore)
           assert.deepEqual(
             matrix.slice(0, 12),
             [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0],
             'Every loop instance shows the selected offset before the later rotation',
           );
       }
-      assert.equal(before.length, 4);
+      assert.equal(selectedBefore.length, 4);
       await page
         .getByRole('button', {
           name: mode === 'rotate' ? 'Rotate about point' : 'Translate',
           exact: true,
         })
         .click();
+      const before = await matrices();
       const handle =
         mode === 'rotate' ? await rotationHandle(page, 0) : await xHandle(page);
       const drag = async () => {
@@ -2459,9 +2529,9 @@ group([...holes,...parts]);`;
       assert.match(
         changed,
         selected === 'offset'
-          ? /offset\(2,3,4\), rotate\(/
+          ? /offset\(2,3,4\),\s*rotate\(/
           : selected === 'rotate'
-            ? /rotate\(10,20,30\), offset\(/
+            ? /rotate\(10,20,30\),\s*offset\(/
             : mode === 'rotate'
               ? /part\.on\(hole\.up\), rotate\(/
               : /part\.on\(hole\.up\), offset\(/,
@@ -3128,6 +3198,22 @@ for (const [selector, axis, suffix] of [
         );
         await page.getByText('Ready', {exact: true}).waitFor();
         assert.equal(
+          await page.evaluate(() => {
+            const editor = window.coordinateApp.codeEditor.editor;
+            const offset = editor
+              .getModel()!
+              .getOffsetAt(editor.getPosition()!);
+            return (
+              editor.getValue()[offset] === '(' &&
+              /(?:pivotVertex|aroundEdge)$/.test(
+                editor.getValue().slice(0, offset),
+              )
+            );
+          }),
+          true,
+          'Reference picking focuses its selector, not rotate or the last argument',
+        );
+        assert.equal(
           (await state(page)).source.match(/\.rotate\(/g)?.length,
           2,
         );
@@ -3543,7 +3629,7 @@ test(
 );
 
 test(
-  'toolbar highlight follows source tools while preserving a choice within one rotation chain',
+  'toolbar highlight follows source calls and retains an insertion choice while recompiling',
   {timeout: 90_000},
   async t => {
     const {page, errors} = await openApp(t);
@@ -3586,13 +3672,14 @@ part;`;
     await focus('rotate(0,0,30)');
     await expectTool('Rotate about point');
     await chooseAxis();
-    await focus('pivot([1');
     await expectTool('Rotate about axis');
     await page.evaluate(() => window.coordinateApp.runModel());
     await expectTool('Rotate about axis');
     await page.keyboard.down('Alt');
     await expectTool('Rotate about axis');
     await page.keyboard.up('Alt');
+    await focus('pivot([1');
+    await expectTool('Rotate about point');
     await focus('offset(2');
     await expectTool('Translate');
     await focus('aroundEdge(1)');
@@ -3683,6 +3770,648 @@ test(
     );
     await page.keyboard.press('Escape');
     await page.mouse.up();
+    assert.deepEqual(errors, []);
+  },
+);
+
+test(
+  'toolbar activates the authored step and keeps source location visible',
+  {timeout: 90_000},
+  async t => {
+    const {page, errors} = await openApp(t);
+    const source = `import * as core from '@code3d/core';
+const amount = 2;
+const base = core.box(40,10,30);
+const part = core.box(24,16,14).relate(self => [
+  self.on(base.up),
+  core.offset(amount,0,0),
+  core.pivot([1,2,3]).rotate(0,0,30),
+]);
+core.group([base, part]);`;
+    await setSource(page, source, 'offset');
+    assert.deepEqual((await sourceMarks(page)).tool, ['offset(amount,0,0)']);
+    const originalSource = (await state(page)).source;
+    await focusSource(page, 'self.on');
+    await page.getByRole('toolbar', {name: 'Position tools'}).waitFor();
+    assert.equal(
+      await page
+        .locator('.spatial-toolbar button[aria-pressed="true"]')
+        .count(),
+      0,
+    );
+    assert.deepEqual((await sourceMarks(page)).tool, []);
+    const before = await sourceMarks(page);
+    const pose = () =>
+      page.evaluate(() => {
+        const object = window.coordinateApp.viewport.getSelected()!.object;
+        object.updateWorldMatrix(true, false);
+        return object.matrixWorld.toArray();
+      });
+    const finalPose = await pose();
+    await page.getByRole('button', {name: 'Translate', exact: true}).click();
+    const translated = await sourceMarks(page);
+    assert.equal(translated.focused, false);
+    assert.notDeepEqual(translated.selection, before.selection);
+    assert.deepEqual(translated.word, []);
+    assert.deepEqual(translated.caret, [
+      originalSource.indexOf('offset(') + 'offset(amount,0,0)'.length,
+    ]);
+    assert.deepEqual(translated.tool, ['offset(amount,0,0)']);
+    const offsetPose = await pose();
+    assert.notDeepEqual(offsetPose, finalPose);
+    assert.equal((await state(page)).source, originalSource);
+    const handle = await xHandle(page);
+    await page.mouse.move(handle.x, handle.y);
+    await page.mouse.down();
+    assert.equal((await state(page)).active, true);
+    assert.deepEqual(
+      await pose(),
+      offsetPose,
+      'Pointer down keeps the activated step',
+    );
+    await page.keyboard.press('Escape');
+    await page.mouse.up();
+    await focusSource(page, 'offset(amount,0,0)', 'offset(amount,0,0)'.length);
+    await page
+      .getByRole('button', {name: 'Rotate about point', exact: true})
+      .click();
+    assert.deepEqual((await sourceMarks(page)).tool, [
+      'pivot([1,2,3]).rotate(0,0,30)',
+    ]);
+    await page.evaluate(() => window.coordinateApp.runModel());
+    assert.deepEqual((await sourceMarks(page)).tool, [
+      'pivot([1,2,3]).rotate(0,0,30)',
+    ]);
+    assert.deepEqual((await sourceMarks(page)).word, []);
+    assert.deepEqual(await pose(), finalPose);
+    await assertMarkedSourceVisible(page);
+    await page.screenshot({path: '/tmp/code3d-viewport-source-marks.png'});
+    await focusSource(page, ']);', -1);
+    assert.equal(
+      await page
+        .locator('.spatial-toolbar button[aria-pressed="true"]')
+        .count(),
+      0,
+    );
+    assert.deepEqual((await sourceMarks(page)).tool, []);
+    await page.getByRole('button', {name: 'Translate', exact: true}).click();
+    assert.equal(
+      (await sourceMarks(page)).caret.length,
+      1,
+      'Array gaps retain a static caret',
+    );
+    await focusSource(page, 'import *');
+    assert.deepEqual((await sourceMarks(page)).tool, []);
+    assert.deepEqual((await sourceMarks(page)).word, []);
+    await focusSource(page, 'box(40');
+    assert.deepEqual(
+      (await sourceMarks(page)).tool,
+      ['box(40,10,30)'],
+      'Parameter tools use the same source markers',
+    );
+    await page.evaluate(() =>
+      window.coordinateApp.codeEditor.createFile(
+        '/other.ts',
+        'const other = 1;',
+      ),
+    );
+    assert.deepEqual((await sourceMarks(page)).tool, []);
+    assert.deepEqual((await sourceMarks(page)).word, []);
+    assert.deepEqual(errors, []);
+  },
+);
+
+test(
+  'inserted spatial calls gain a source marker and undo restores the unselected context',
+  {timeout: 90_000},
+  async t => {
+    const {page, errors} = await openApp(t);
+    const source = `import * as core from '@code3d/core';
+const base = core.box(40,10,30);
+const part = core.box(24,16,14).relate(self => [self.on(base.up)]);
+core.group([base, part]);`;
+    await setSource(page, source, 'box');
+    await focusSource(page, 'self.on');
+    await page.getByRole('button', {name: 'Translate', exact: true}).click();
+    const before = await sourceMarks(page);
+    assert.deepEqual(
+      before.tool,
+      [],
+      'A missing offset must not underline its insertion anchor',
+    );
+    const handle = await xHandle(page);
+    await page.mouse.move(handle.x, handle.y);
+    await page.mouse.down();
+    await page.mouse.move(
+      handle.x + handle.dx * 40,
+      handle.y + handle.dy * 40,
+      {steps: 5},
+    );
+    await page.mouse.up();
+    await page.waitForFunction(() =>
+      window.coordinateApp.codeEditor.editor.getValue().includes('offset('),
+    );
+    await page.getByText('Ready', {exact: true}).waitFor();
+    const after = await sourceMarks(page);
+    assert.equal(after.tool.length, 1);
+    assert.match(after.tool[0], /^offset\(/);
+    assert.deepEqual(after.word, ['offset']);
+    assert.equal(after.focused, false);
+    await assertMarkedSourceVisible(page);
+    await page.evaluate(() =>
+      window.coordinateApp.codeEditor.editor.setScrollLeft(0),
+    );
+    await page.evaluate(() => window.coordinateApp.runModel());
+    assert.equal(
+      await page.evaluate(() =>
+        window.coordinateApp.codeEditor.editor.getScrollLeft(),
+      ),
+      0,
+      'Recompiling unchanged source must not reset manual scrolling',
+    );
+    await page.evaluate(() =>
+      window.coordinateApp.codeEditor.runHistoryAction('undo'),
+    );
+    await page.waitForFunction(
+      () =>
+        !window.coordinateApp.codeEditor.editor.getValue().includes('offset('),
+    );
+    await page.getByText('Ready', {exact: true}).waitFor();
+    assert.deepEqual((await sourceMarks(page)).tool, []);
+    assert.deepEqual((await sourceMarks(page)).selection, before.selection);
+    assert.equal(
+      await page
+        .locator('.spatial-toolbar button[aria-pressed="true"]')
+        .count(),
+      0,
+    );
+    await page.evaluate(() =>
+      window.coordinateApp.codeEditor.runHistoryAction('redo'),
+    );
+    await page.waitForFunction(() =>
+      window.coordinateApp.codeEditor.editor.getValue().includes('offset('),
+    );
+    await page.getByText('Ready', {exact: true}).waitFor();
+    await page.waitForFunction(
+      () =>
+        window.coordinateApp.previewState.sourceVersion ===
+        window.coordinateApp.codeEditor.sourceVersion(),
+    );
+    assert.deepEqual((await sourceMarks(page)).tool, after.tool);
+    assert.deepEqual((await sourceMarks(page)).selection, after.selection);
+    assert.equal((await sourceMarks(page)).focused, false);
+    await assertMarkedSourceVisible(page);
+    assert.deepEqual(errors, []);
+  },
+);
+
+test(
+  'new rotation tools activate the real insertion predecessor in the selected loop instance',
+  {timeout: 90_000},
+  async t => {
+    const {page, errors} = await openApp(t);
+    const source = `import * as core from '@code3d/core';
+const base = core.box(40,10,30);
+const parts = [0, 35].map(x => core.box(24,16,14).relate(self => [
+  self.on(base.up),
+  core.rotate(0,0,30),
+  core.offset(20+x,0,0),
+]));
+core.group([base, ...parts]);`;
+    await setSource(page, source, 'offset');
+    await focusSource(page, 'self.on');
+    const contextId = await page.evaluate(() => {
+      const app = window.coordinateApp;
+      const scope = app.viewport.sourceContext!;
+      const contextId = scope.target.evaluations[1].contextId;
+      if (!app.selectCompiledEvaluationContext(contextId, false))
+        throw new Error('Cannot select second loop instance');
+      return contextId;
+    });
+    const poses = () =>
+      page.evaluate(() => {
+        const viewport = window.coordinateApp.viewport;
+        return viewport['renderedOccurrences']().map(occurrence => {
+          occurrence.object.updateWorldMatrix(true, false);
+          return [
+            occurrence.node.nodeId,
+            occurrence.object.matrixWorld.toArray(),
+          ];
+        });
+      });
+    const finalPoses = await poses();
+    await focusSource(page, 'rotate(0,0,30)');
+    const beforeInsertion = await poses();
+    assert.notDeepEqual(beforeInsertion, finalPoses);
+    await focusSource(page, 'rotate(0,0,30)', 'rotate(0,0,30)'.length);
+    const original = (await state(page)).source;
+    const revision = await page.evaluate(() =>
+      window.coordinateApp.codeEditor.sourceVersion(),
+    );
+    await page
+      .getByRole('button', {name: 'Rotation tools', exact: true})
+      .click();
+    await page
+      .getByRole('menuitemradio', {name: 'Rotate about axis', exact: true})
+      .click();
+    assert.deepEqual(
+      await poses(),
+      beforeInsertion,
+      'All instances show the insertion prefix, excluding the later offset',
+    );
+    assert.deepEqual(
+      await page.evaluate(() => {
+        const {viewport, codeEditor} = window.coordinateApp;
+        return {
+          contextId: viewport.sourceContext?.evaluation.contextId,
+          tool: viewport.positionTools.tool,
+          method: viewport.sourceContext?.target.tool?.signature.name,
+          revision: codeEditor.sourceVersion(),
+        };
+      }),
+      {contextId, tool: 'rotate-axis', method: undefined, revision},
+    );
+    const marks = await sourceMarks(page);
+    assert.equal(marks.focused, false);
+    assert.deepEqual(marks.word, []);
+    assert.deepEqual(marks.caret, [original.indexOf('core.offset(20+x')]);
+    assert.deepEqual(
+      marks.tool,
+      [],
+      'The predecessor is not an authored axis rotation',
+    );
+    assert.equal((await state(page)).source, original);
+    await selectAxisEdge(page);
+    await page.waitForFunction(() => {
+      const {previewState, codeEditor} = window.coordinateApp;
+      return (
+        codeEditor.editor.getValue().includes('core.aroundEdge(') &&
+        previewState.sourceVersion === codeEditor.sourceVersion()
+      );
+    });
+    const changed = (await state(page)).source;
+    assert.match(
+      changed,
+      /core\.rotate\(0,0,30\),\s*core\.aroundEdge\([^)]+\)\.rotate\(0\),\s*core\.offset\(20\+x,0,0\)/,
+    );
+    assert.deepEqual((await sourceMarks(page)).word, ['aroundEdge']);
+    assert.equal(
+      await page.evaluate(
+        () => window.coordinateApp.viewport.sourceContext?.evaluation.contextId,
+      ),
+      contextId,
+    );
+    assert.deepEqual(errors, []);
+  },
+);
+
+for (const style of ['array', 'chain'] as const) {
+  for (const axisFirst of [false, true]) {
+    test(
+      `toolbar activates adjacent rotation families (${style}, axis first ${axisFirst})`,
+      {timeout: 90_000},
+      async t => {
+        const {page, errors} = await openApp(t);
+        const point = 'pivotVertex(1).rotate(10,20,30)';
+        const axis = 'aroundEdge(1).rotate(25)';
+        const rotations = axisFirst ? [axis, point] : [point, axis];
+        const expression =
+          style === 'array'
+            ? `[self.on(base.up), ${rotations.map(value => `core.${value}`).join(', ')}, core.offset(8,0,0)]`
+            : `self.on(base.up).${rotations.join('.')}.offset(8,0,0)`;
+        const source = `import * as core from '@code3d/core';
+const base=core.box(40,10,30);
+const parts=[0,1].map(i=>core.box(24+i,16,14).relate(self=>${expression}));
+core.group([base,...parts]);`;
+        await setSource(page, source, 'box');
+        await focusSource(page, 'self.on');
+        const contextId = await page.evaluate(() => {
+          const app = window.coordinateApp;
+          const id =
+            app.viewport.sourceContext!.target.evaluations[1].contextId;
+          if (!app.selectCompiledEvaluationContext(id, false))
+            throw new Error('Missing loop context');
+          return id;
+        });
+        for (const tool of ['rotate-point', 'rotate-axis'] as const) {
+          const requested = tool === 'rotate-point' ? point : axis;
+          if (rotations[0] === requested) await focusSource(page, 'self.on');
+          else {
+            const preceding = rotations[0];
+            await focusSource(page, preceding, preceding.length);
+          }
+          const name =
+            tool === 'rotate-point'
+              ? 'Rotate about point'
+              : 'Rotate about axis';
+          const button = page.getByRole('button', {name, exact: true});
+          if (await button.count()) await button.click();
+          else {
+            await page
+              .getByRole('button', {name: 'Rotation tools', exact: true})
+              .click();
+            await page.getByRole('menuitemradio', {name, exact: true}).click();
+          }
+          const picked = await page.evaluate(() => {
+            const {viewport, codeEditor} = window.coordinateApp;
+            const scope = viewport.sourceContext!;
+            const binding = viewport.positionTools.rotationBinding!;
+            return {
+              contextId: scope.evaluation.contextId,
+              tool: viewport.positionTools.tool,
+              axisOnly: !!scope.evaluation.relationSpatial?.spatial.axisOnly,
+              bindingAxisOnly: !!binding.spatial.objects[0].spatial.axisOnly,
+              picker: viewport['topologySelection']?.kind,
+              cursor: codeEditor.editor
+                .getModel()!
+                .getOffsetAt(codeEditor.editor.getPosition()!),
+              source: codeEditor.editor.getValue(),
+            };
+          });
+          assert.equal(picked.contextId, contextId);
+          assert.equal(picked.tool, tool);
+          assert.equal(
+            picked.axisOnly,
+            tool === 'rotate-axis',
+            JSON.stringify(picked),
+          );
+          assert.equal(
+            picked.bindingAxisOnly,
+            tool === 'rotate-axis',
+            JSON.stringify(picked),
+          );
+          assert.equal(
+            picked.picker,
+            tool === 'rotate-axis' ? 'edge' : 'vertex',
+          );
+          const call =
+            tool === 'rotate-axis' ? 'rotate(25)' : 'rotate(10,20,30)';
+          assert.equal(
+            picked.cursor,
+            picked.source.indexOf(call) + call.length,
+          );
+          assert.ok(
+            (await sourceMarks(page)).tool[0].includes(
+              tool === 'rotate-axis' ? 'aroundEdge(1)' : 'pivotVertex(1)',
+            ),
+          );
+          assert.deepEqual((await sourceMarks(page)).word, []);
+        }
+        assert.deepEqual(errors, []);
+      },
+    );
+  }
+}
+
+test(
+  'new tools put the caret in the array insertion gap with or without a trailing comma',
+  {timeout: 90_000},
+  async t => {
+    const {page, errors} = await openApp(t);
+    for (const array of [
+      '[]',
+      '[core.offset(3,0,0)]',
+      '[core.offset(3,0,0),]',
+      '[core.offset(3,0,0),\n]',
+    ]) {
+      const source = `import * as core from '@code3d/core';\nconst part=core.box(24,16,14).relate(self=>${array});\npart;`;
+      await setSource(page, source, 'box');
+      await focusSource(
+        page,
+        array === '[]' ? '[]' : 'offset(3',
+        array === '[]' ? 1 : 2,
+      );
+      const original = (await state(page)).source;
+      await page
+        .getByRole('button', {name: 'Rotate about point', exact: true})
+        .click();
+      const marks = await sourceMarks(page);
+      assert.equal(marks.focused, false);
+      assert.deepEqual(marks.word, [], JSON.stringify({array, marks}));
+      assert.deepEqual(marks.tool, []);
+      assert.deepEqual(marks.caret, [original.indexOf(']')]);
+      assert.equal((await state(page)).source, original);
+      assert.deepEqual(
+        await page.evaluate(() => {
+          const {viewport} = window.coordinateApp;
+          return {
+            gap: !!viewport.sourceContext?.target.relationArray,
+            tool: viewport.positionTools.tool,
+            position:
+              viewport.getSelected()!.node.compositionTransform.position,
+          };
+        }),
+        {
+          gap: true,
+          tool: 'rotate-point',
+          position: array === '[]' ? [0, 0, 0] : [3, 0, 0],
+        },
+      );
+      await page.evaluate(() => window.coordinateApp.runModel());
+      assert.equal(
+        await page.evaluate(
+          () =>
+            !!window.coordinateApp.viewport.sourceContext?.target.relationArray,
+        ),
+        true,
+        'Recompilation retains insertion intent at the shared expression boundary',
+      );
+      const handle = await rotationHandle(page, 0);
+      await page.mouse.move(handle.x, handle.y);
+      await page.mouse.down();
+      assert.equal((await state(page)).active, true);
+      await page.keyboard.press('Escape');
+      await page.mouse.up();
+    }
+    assert.deepEqual(errors, []);
+  },
+);
+
+test(
+  'expression boundaries activate self or the complete authored tool',
+  {timeout: 90_000},
+  async t => {
+    const {page, errors} = await openApp(t);
+    const source = `import * as core from '@code3d/core';
+const base=core.box(40,10,30);
+const part=core.box(24,16,14).relate(self=>[
+  self.axis.align(base.axis),
+  core.offset(3,0,0),
+  core.aroundEdge(1).rotate(25)]);
+core.group([base,part]);`;
+    await setSource(page, source, 'box');
+    const original = (await state(page)).source;
+    for (const tool of ['translate', 'rotate-axis'] as const) {
+      await focusSource(page, 'self.axis.align', 0);
+      await page.getByRole('toolbar', {name: 'Position tools'}).waitFor();
+      assert.equal(
+        await page.evaluate(
+          () =>
+            !!window.coordinateApp.viewport.sourceContext?.target.relationArray,
+        ),
+        false,
+      );
+      if (tool === 'translate')
+        await page
+          .getByRole('button', {name: 'Translate', exact: true})
+          .click();
+      else {
+        await focusSource(page, 'offset(3,0,0)', 'offset(3,0,0)'.length);
+        await page
+          .getByRole('button', {name: 'Rotation tools', exact: true})
+          .click();
+        await page
+          .getByRole('menuitemradio', {name: 'Rotate about axis', exact: true})
+          .click();
+      }
+      const call =
+        tool === 'translate' ? 'offset(3,0,0)' : 'aroundEdge(1).rotate(25)';
+      for (const recompile of [false, true]) {
+        if (recompile)
+          await page.evaluate(() => window.coordinateApp.runModel());
+        const marks = await sourceMarks(page);
+        assert.deepEqual(marks.caret, [original.indexOf(call) + call.length]);
+        assert.ok(marks.tool.includes(call));
+        assert.deepEqual(marks.word, []);
+        const context = await page.evaluate(() => {
+          const {viewport} = window.coordinateApp;
+          return {
+            gap: !!viewport.sourceContext?.target.relationArray,
+            method: viewport.sourceContext?.target.tool?.signature.name,
+            tool: viewport.positionTools.tool,
+            axes: viewport.positionTools['axes'].length,
+            panel: document.querySelector('.contextual-tool-panel')
+              ?.textContent,
+          };
+        });
+        assert.equal(context.gap, false);
+        assert.equal(
+          context.method,
+          tool === 'translate' ? 'offset' : 'rotate',
+        );
+        assert.equal(context.tool, tool);
+        assert.ok(context.axes > 0, JSON.stringify(context));
+      }
+    }
+    assert.equal((await state(page)).source, original);
+    assert.deepEqual(errors, []);
+  },
+);
+
+test(
+  'toolbar activates the adjacent axis rotation from an offset expression end',
+  {timeout: 90_000},
+  async t => {
+    const {page, errors} = await openApp(t);
+    const source = `import {box, group, offset, aroundEdge} from '@code3d/core';
+const base=box(32,14,24);
+const cover = box(32, 3, 24)
+  .material('#d8ff3e')
+  .relate(self => [
+    self.axis.align(base.axis),
+    self.on(base.up),
+    offset(0, 0, 10.5),
+    aroundEdge(10).rotate(61),
+    offset(0, 0, -11),
+  ]);
+group([base,cover]);`;
+    await page.evaluate(source => {
+      const app = window.coordinateApp;
+      app.codeEditor.editor.getModel()!.setValue(source);
+      return app.runModel();
+    }, source);
+    await page.evaluate(() => window.coordinateApp.viewport.fit());
+    await focusSource(page, 'offset(0, 0, 10.5)', 'offset(0, 0, 10.5)'.length);
+    await page
+      .getByRole('button', {name: 'Rotation tools', exact: true})
+      .click();
+    await page
+      .getByRole('menuitemradio', {name: 'Rotate about axis', exact: true})
+      .click();
+    const original = (await state(page)).source;
+    const call = 'aroundEdge(10).rotate(61)';
+    for (const recompile of [false, true]) {
+      if (recompile) await page.evaluate(() => window.coordinateApp.runModel());
+      const marks = await sourceMarks(page);
+      assert.deepEqual(marks.caret, [original.indexOf(call) + call.length]);
+      assert.deepEqual(marks.tool, [call]);
+      assert.equal(
+        await page.evaluate(
+          () =>
+            window.coordinateApp.viewport.positionTools.rotationBinding?.value,
+        ),
+        61,
+      );
+    }
+    const axis = await page.evaluate(
+      () => window.coordinateApp.viewport.positionTools.rotationBinding!.axis,
+    );
+    const handle = await rotationHandle(page, ['x', 'y', 'z'].indexOf(axis));
+    await page.mouse.move(handle.x, handle.y);
+    await page.mouse.down();
+    assert.equal((await state(page)).active, true);
+    await page.keyboard.press('Escape');
+    await page.mouse.up();
+    assert.equal((await state(page)).source, original);
+    assert.deepEqual(errors, []);
+  },
+);
+
+test(
+  'toolbar does not skip a mismatched transformation and inserts before it',
+  {timeout: 90_000},
+  async t => {
+    const {page, errors} = await openApp(t);
+    const source = `import * as core from '@code3d/core';
+const base=core.box(32,14,24);
+const cover=core.box(32,3,24).relate(self=>[
+ self.axis.align(base.axis),self.on(base.up),
+ core.offset(0,0,10.5),
+ core.pivotVertex(1).rotate(0,0,20),
+ core.aroundEdge(10).rotate(61),
+ core.offset(0,0,-11),
+]); core.group([base,cover]);`;
+    await setSource(page, source, 'offset');
+    await focusSource(page, 'offset(0,0,10.5)', 'offset(0,0,10.5)'.length);
+    await page
+      .getByRole('button', {name: 'Rotation tools', exact: true})
+      .click();
+    await page
+      .getByRole('menuitemradio', {name: 'Rotate about axis', exact: true})
+      .click();
+    const original = (await state(page)).source;
+    assert.deepEqual((await sourceMarks(page)).tool, []);
+    assert.deepEqual((await sourceMarks(page)).caret, [
+      original.indexOf('core.pivotVertex(1)'),
+    ]);
+    assert.equal(
+      await page.evaluate(
+        () =>
+          !!window.coordinateApp.viewport.sourceContext?.target.relationArray,
+      ),
+      true,
+    );
+    await selectAxisEdge(page);
+    await page.waitForFunction(() => {
+      const {codeEditor, previewState} = window.coordinateApp;
+      return (
+        (codeEditor.editor.getValue().match(/aroundEdge\(/g)?.length ?? 0) ===
+          2 && previewState.sourceVersion === codeEditor.sourceVersion()
+      );
+    });
+    const changed = (await state(page)).source;
+    assert.match(
+      changed,
+      /offset\(0,0,10\.5\),\s*core\.aroundEdge\([^)]+\)\.rotate\(0\),\s*core\.pivotVertex\(1\)\.rotate\(0,0,20\),\s*core\.aroundEdge\(10\)\.rotate\(61\)/,
+    );
+    await page.evaluate(() =>
+      window.coordinateApp.codeEditor.runHistoryAction('undo'),
+    );
+    await page.waitForFunction(() => {
+      const {codeEditor, previewState} = window.coordinateApp;
+      return previewState.sourceVersion === codeEditor.sourceVersion();
+    });
+    assert.equal((await state(page)).source, original);
     assert.deepEqual(errors, []);
   },
 );

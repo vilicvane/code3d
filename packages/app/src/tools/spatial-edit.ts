@@ -2,6 +2,7 @@ import {insertTransformationSource} from './source-expression';
 import type {TransformGizmoBinding} from './transform-gizmo';
 import {
   offsetExpression,
+  callIdentifierOffset,
   offsetCallSource,
   formatSourceNumber,
   argumentInsertionSource,
@@ -244,12 +245,21 @@ export class SpatialTransformResolver implements ToolIntentResolver {
                   sourceRef,
                   expectedText,
                   text,
-                  focusOffset:
-                    change.kind === 'rotation-reference' ||
-                    change.kind === 'transformation-insert' ||
-                    (change.kind === 'reference-offset' && change.append)
-                      ? text.lastIndexOf(')')
-                      : undefined,
+                  focusOffset: callIdentifierOffset(
+                    text,
+                    change.kind === 'rotation-reference'
+                      ? referenceEdit?.usesConstructor && change.factory
+                        ? change.factory.name
+                        : change.selector
+                      : change.kind === 'transformation-insert'
+                        ? change.name
+                        : change.kind === 'reference-offset'
+                          ? referenceEdit?.usesConstructor &&
+                            change.method === 'pivot'
+                            ? (change.constructor?.name ?? change.method)
+                            : change.method
+                          : intent.operation,
+                  ),
                 },
               ],
         preview: intent.preview,

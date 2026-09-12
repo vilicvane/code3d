@@ -865,6 +865,25 @@ kbd {
   border-bottom: 1px solid #d8ff3e88;
 }
 
+.monaco-editor .code3d-context-word {
+  background: #d8ff3e1a;
+  outline: 1px solid #d8ff3e44;
+  border-radius: 2px;
+}
+
+.monaco-editor .code3d-context-caret {
+  border-left: 2px solid #d8ff3ecc;
+  margin-left: -1px;
+}
+
+.code3d-active-tool-source {
+  background: #d8ff3e0d;
+}
+
+.monaco-editor .code3d-active-tool-source-inline {
+  border-bottom: 1px solid #d8ff3e99;
+}
+
 /* Monaco themes the rename container; native inputs need explicit inheritance. */
 .monaco-editor .rename-box .rename-input {
   color: inherit;
