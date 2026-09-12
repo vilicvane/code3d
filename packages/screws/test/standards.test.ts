@@ -59,7 +59,8 @@ test('clearance and counterbore references describe the exact cutting geometry',
 });
 
 test('all ordinary counterbore standards accept custom recess diameter and depth', () => {
-  const {ISO10642, ISO4029, ISO7379, ...standards} = screws;
+  const {ISO10642, ISO4029, ISO7379, GB70_3, GB80, GB5281, ...standards} =
+    screws;
   for (const standard of Object.values(standards)) {
     const clearanceHole: (
       size: 'M6',

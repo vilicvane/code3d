@@ -1,6 +1,6 @@
 # `@code3d/screws`
 
-Standard screw models with helical threads, named mounting references, and
+ISO and GB/T screw models with helical threads, named mounting references, and
 Boolean clearance-hole tools. All dimensions are in millimetres.
 
 Install `@code3d/core` and `@code3d/screws` together. The App supplies both when
@@ -21,7 +21,7 @@ and types. Prefer these subpaths to load only the selected standards and their
 shared code. The root also exports the same modules as namespaces. Multipart
 standard numbers use hyphens in subpaths and underscores in namespace names.
 
-## Standards and sizes
+## ISO standards and sizes
 
 | Namespace   | Import subpath             | Form                               | Presets                      |
 | ----------- | -------------------------- | ---------------------------------- | ---------------------------- |
@@ -38,6 +38,68 @@ standard numbers use hyphens in subpaths and underscores in namespace names.
 
 Metric presets are M3, M4, M5, M6, M8, M10, and M12 where listed. All use coarse
 pitch. ISO 7379's shoulder sizes correspond to M5, M6, M8, M10, and M12 threads.
+
+## GB/T standards
+
+GB/T entries use `gb` followed by the standard number. A decimal part becomes
+a hyphen in the subpath and an underscore in the root namespace:
+
+```ts
+import * as GB70_1 from '@code3d/screws/gb70-1';
+import * as GB70_3 from '@code3d/screws/gb70-3';
+import * as GB5783 from '@code3d/screws/gb5783';
+
+const socketCap = GB70_1.screw('M6', 18);
+const countersunk = GB70_3.screw('M6', 20);
+const hexBolt = GB5783.screw('M6', 30);
+```
+
+The editions below are current as checked on 2026-09-12. Each standard links
+to its national standards record. These entries share nominal model dimensions
+and constructors with the corresponding ISO module **within the listed preset
+range**, including its types, length convention, drive options and mounting
+references. They do not assert that the complete GB/T and ISO product standards
+are identical: the adoption is modified (MOD), except GB/T 5281 (EQV).
+
+| Namespace | Subpath suffix | GB/T edition                                                                                      | ISO model   | Presets                      |
+| --------- | -------------- | ------------------------------------------------------------------------------------------------- | ----------- | ---------------------------- |
+| `GB70_1`  | `gb70-1`       | [70.1-2008](https://std.samr.gov.cn/gb/search/gbDetailed?id=71F772D7F825D3A7E05397BE0A0AB82A)     | `ISO4762`   | M3–M12                       |
+| `GB70_2`  | `gb70-2`       | [70.2-2025](https://openstd.samr.gov.cn/bzgk/std/newGbInfo?hcno=6F19BF92846B48BF27058E2B5299935E) | `ISO7380_1` | M3–M12                       |
+| `GB70_3`  | `gb70-3`       | [70.3-2023](https://std.samr.gov.cn/gb/search/gbDetailed?id=FC816D05003162EBE05397BE0A0AD5FA)     | `ISO10642`  | M3–M12                       |
+| `GB70_4`  | `gb70-4`       | [70.4-2025](https://std.samr.gov.cn/gb/search/gbDetailed?id=42BA7D06A4DCE936E06397BE0A0ACDC9)     | `ISO7380_2` | M3–M12                       |
+| `GB5782`  | `gb5782`       | [5782-2025](https://std.samr.gov.cn/gb/search/gbDetailed?id=jAnZliYiA5M%3D&mode=p)                | `ISO4014`   | M3–M12                       |
+| `GB5783`  | `gb5783`       | [5783-2025](https://std.samr.gov.cn/gb/search/gbDetailed?id=42BA7D06A331E936E06397BE0A0ACDC9)     | `ISO4017`   | M3–M12                       |
+| `GB818`   | `gb818`        | [818-2016](https://std.samr.gov.cn/gb/search/gbDetailed?id=71F772D813A1D3A7E05397BE0A0AB82A)      | `ISO7045`   | M3–M10                       |
+| `GB2672`  | `gb2672`       | [2672-2017](https://std.samr.gov.cn/gb/search/gbDetailed?id=71F772D818CAD3A7E05397BE0A0AB82A)     | `ISO14583`  | M3–M10                       |
+| `GB80`    | `gb80`         | [80-2007](https://std.samr.gov.cn/gb/search/gbDetailed?id=71F772D7890DD3A7E05397BE0A0AB82A)       | `ISO4029`   | M3–M12                       |
+| `GB5281`  | `gb5281`       | [5281-1985](https://std.samr.gov.cn/gb/search/gbDetailed?id=71F772D7AF1AD3A7E05397BE0A0AB82A)     | `ISO7379`   | Shoulder Ø6.5, 8, 10, 13, 16 |
+
+The 2025 editions of GB/T 70.2, 70.4, 5782 and 5783 took effect on
+2026-02-01. Presets remain the selected coarse sizes above; additions outside
+that set, such as M7 hexagon bolts and the M16 button-screw thread-length rule,
+are not included. Material, strength, coating, marking and tolerance
+requirements are outside the model scope. In particular, GB/T 5782/5783 use
+the modern M10/M12 hexagon widths of 16/18 mm, not older 17/19 mm variants.
+
+GB/T 70.1 holes include a counterbore by default; GB/T 70.3 holes include a
+90° countersink. Other headed GB/T entries accept an optional `counterbore`;
+GB/T 5281 takes a numeric shoulder diameter, and GB/T 80 has no clearance-hole
+constructor. The hole tools retain the ISO modules' fit and recess allowances
+described below; **they do not implement the GB/T 152 countersink/counterbore
+tables**. Use custom dimensions when a drawing specifies a particular hole.
+
+```ts
+import * as GB5281 from '@code3d/screws/gb5281';
+
+const hole = GB5281.clearanceHole(8, {
+  depth: 12,
+  diameter: 8.5,
+  counterbore: {diameter: 15, depth: 7},
+});
+const shoulder = GB5281.screw(8, 20).relate(part =>
+  part.headBottom.on(hole.counterboreBottom),
+);
+```
 
 ## Length and mounting
 
@@ -179,7 +241,8 @@ thread features.
 
 ## Source and verification
 
-[All ten standard families in one App example](../app/examples/iso-screws.ts),
+[ISO gallery](../app/examples/iso-screws.ts),
+[GB/T gallery](../app/examples/gb-screws.ts),
 [public modules](src/library/index.ts), [geometry tests](test/standards.test.ts),
 [modeling reference](../web/src/content/docs/docs/reference/screws.mdx), and
 [agent modeling workflow](../../docs/agents/modeling.md).

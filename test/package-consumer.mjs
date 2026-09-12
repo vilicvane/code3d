@@ -13,6 +13,8 @@ import * as ISO4762 from '@code3d/screws/iso4762';
 import * as ISO10642 from '@code3d/screws/iso10642';
 import * as ISO14583 from '@code3d/screws/iso14583';
 import * as ISO7379 from '@code3d/screws/iso7379';
+import * as GB70_3 from '@code3d/screws/gb70-3';
+import * as GB5281 from '@code3d/screws/gb5281';
 import * as agent from '@code3d/agent';
 import initSolver from '@code3d/solver';
 import initOpenCascade from '@code3d/opencascade';
@@ -95,6 +97,10 @@ try {
     ISO10642.screw('M3', 10),
     ISO14583.screw('M3', 8),
     ISO7379.screw(6.5, 10),
+    GB70_3.screw('M3', 10),
+    GB70_3.clearanceHole('M3', {depth: 8, countersink: {diameter: 8}}),
+    GB5281.screw(6.5, 10),
+    GB5281.clearanceHole(6.5, {depth: 8, counterbore: true}),
   );
   const snapshot = tooling.createModelSnapshotter();
   for (const shape of shapes) {

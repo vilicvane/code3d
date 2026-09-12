@@ -1,6 +1,6 @@
 ---
 title: Metric fasteners
-description: Model ISO screws, select a standard, and place matching clearance tools.
+description: Model ISO and GB/T screws, select a standard, and place matching clearance tools.
 ---
 
 import ModelExample from '../../../../components/ModelExample.astro';
@@ -44,10 +44,58 @@ all types, dimension sources and modeling details.
 
 <p>
   <a href={appUrl('iso-screws.ts')} target="_blank" rel="noopener">
-    {'Open all ten standard families in the App '}
+    {'Open all ten ISO standard families in the App '}
     <ArrowIcon />
   </a>
   {' to compare their heads, drives and thread lengths.'}
+</p>
+
+## GB/T standards
+
+GB/T standards have individual entries too. Replace the decimal point in a
+multipart number with a hyphen for the import, or an underscore for the root
+namespace:
+
+```ts
+import * as GB70_1 from '@code3d/screws/gb70-1';
+import * as GB70_3 from '@code3d/screws/gb70-3';
+import * as GB5783 from '@code3d/screws/gb5783';
+
+const socketCap = GB70_1.screw('M6', 18);
+const countersunk = GB70_3.screw('M6', 20);
+const hexBolt = GB5783.screw('M6', 30);
+```
+
+| Namespace | GB/T edition | Corresponding ISO model |
+| --------- | ------------ | ----------------------- |
+| `GB70_1`  | 70.1-2008    | `ISO4762`               |
+| `GB70_2`  | 70.2-2025    | `ISO7380_1`             |
+| `GB70_3`  | 70.3-2023    | `ISO10642`              |
+| `GB70_4`  | 70.4-2025    | `ISO7380_2`             |
+| `GB5782`  | 5782-2025    | `ISO4014`               |
+| `GB5783`  | 5783-2025    | `ISO4017`               |
+| `GB818`   | 818-2016     | `ISO7045`               |
+| `GB2672`  | 2672-2017    | `ISO14583`              |
+| `GB80`    | 80-2007      | `ISO4029`               |
+| `GB5281`  | 5281-1985    | `ISO7379`               |
+
+These entries share the corresponding ISO module's nominal geometry, supported
+sizes, length convention, types and mounting references. Edition sources and
+modeling limits are listed in the [package reference](/docs/packages/screws.md#gbt-standards).
+This covers selected model dimensions, not complete product-standard equivalence.
+
+`GB70_1.clearanceHole` includes a counterbore by default, and
+`GB70_3.clearanceHole` includes a 90° countersink. The other headed entries
+accept optional counterbores. `GB5281` takes numeric shoulder sizes and also
+supports `counterbore: {diameter, depth}`; `GB80` is headless and has no hole
+constructor. Hole defaults are modeling allowances shared with the ISO modules;
+they do not implement GB/T 152 hole tables.
+
+<p>
+  <a href={appUrl('gb-screws.ts')} target="_blank" rel="noopener">
+    {'Open all ten GB/T standard families in the App '}
+    <ArrowIcon />
+  </a>
 </p>
 
 ## Screw and clearance tool
