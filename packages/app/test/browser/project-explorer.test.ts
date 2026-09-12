@@ -144,9 +144,12 @@ async function create(
   name: string,
 ): Promise<void> {
   await page.getByRole('button', {name: `New ${kind}`, exact: true}).click();
-  const dialog = page.getByRole('dialog', {name: `New ${kind}`, exact: true});
-  await dialog.getByRole('textbox', {name: 'Name'}).fill(name);
-  await dialog.getByRole('button', {name: 'Create', exact: true}).click();
+  const input = page.getByRole('textbox', {
+    name: `New ${kind} name`,
+    exact: true,
+  });
+  await input.fill(name);
+  await input.press('Enter');
   await row(page, name).waitFor();
 }
 async function menu(page: Page, name: string, command: string): Promise<void> {
@@ -188,6 +191,77 @@ async function mockLocalDirectories(page: Page): Promise<void> {
 }
 
 test(
+  'inline creation selects the stem, accepts unchanged names, and cancels without files',
+  {timeout: 90_000},
+  async t => {
+    const page = await open(t);
+    const start = async (kind: 'file' | 'directory') => {
+      // Rows appear during refresh, before the create command releases its UI lock.
+      await page.waitForFunction(
+        () =>
+          !document.querySelector<HTMLButtonElement>('#new-file-button')!
+            .disabled,
+      );
+      await page.evaluate(kind => {
+        void window.explorerApp.projectDirectory.create(kind, '/');
+      }, kind);
+      return page.getByRole('textbox', {
+        name: kind === 'file' ? 'New file name' : 'New folder name',
+        exact: true,
+      });
+    };
+    let input = await start('file');
+    await input.waitFor();
+    assert.deepEqual(
+      await input.evaluate((input: HTMLInputElement) => [
+        input.value,
+        input.selectionStart,
+        input.selectionEnd,
+      ]),
+      ['untitled.ts', 0, 8],
+    );
+    await input.press('Escape');
+    assert.equal(
+      await page.evaluate(() =>
+        window.explorerApp.projectFileSystem.stat('/untitled.ts'),
+      ),
+      undefined,
+    );
+    assert.equal(
+      await page.locator('[data-item-path="untitled.ts"]').count(),
+      0,
+    );
+    input = await start('file');
+    await input.press('Enter');
+    await active(page, '/untitled.ts');
+    assert.ok(
+      await page.evaluate(() =>
+        window.explorerApp.projectFileSystem.stat('/untitled.ts'),
+      ),
+    );
+    input = await start('file');
+    await input.waitFor();
+    assert.equal(await input.inputValue(), 'untitled-2.ts');
+    await input.press('Escape');
+    input = await start('directory');
+    await input.waitFor();
+    assert.deepEqual(
+      await input.evaluate((input: HTMLInputElement) => [
+        input.selectionStart,
+        input.selectionEnd,
+      ]),
+      [0, 10],
+    );
+    await input.press('Enter');
+    await row(page, 'new-folder').waitFor();
+    input = await start('file');
+    await input.fill('blur-created.ts');
+    await page.locator('[data-file-tree-search-input]').click();
+    await active(page, '/blur-created.ts');
+  },
+);
+
+test(
   'header creation escapes read-only directories and creates nested paths',
   {timeout: 90_000},
   async t => {
@@ -200,12 +274,20 @@ test(
     });
     await row(page, 'node_modules').click();
     await page.getByRole('button', {name: 'New file', exact: true}).click();
-    let dialog = page.getByRole('dialog', {name: 'New file', exact: true});
-    assert.equal(await dialog.locator('header p').innerText(), 'In /');
-    await dialog
-      .getByRole('textbox', {name: 'Name'})
-      .fill('lib/utils/新文件.ts');
-    await dialog.getByRole('button', {name: 'Create', exact: true}).click();
+    const fileName = page.getByRole('textbox', {
+      name: 'New file name',
+      exact: true,
+    });
+    assert.deepEqual(
+      await fileName.evaluate((input: HTMLInputElement) => [
+        input.selectionStart,
+        input.selectionEnd,
+        input.value,
+      ]),
+      [0, 8, 'untitled.ts'],
+    );
+    await fileName.fill('lib/utils/新文件.ts');
+    await fileName.press('Enter');
     await active(page, '/lib/utils/新文件.ts');
     await row(page, '新文件.ts').waitFor();
 
@@ -214,10 +296,12 @@ test(
       .locator('[role="treeitem"][data-item-path="src/.code3d/"]')
       .click();
     await page.getByRole('button', {name: 'New folder', exact: true}).click();
-    dialog = page.getByRole('dialog', {name: 'New folder', exact: true});
-    assert.equal(await dialog.locator('header p').innerText(), 'In /src');
-    await dialog.getByRole('textbox', {name: 'Name'}).fill('nested/empty');
-    await dialog.getByRole('button', {name: 'Create', exact: true}).click();
+    const folderName = page.getByRole('textbox', {
+      name: 'New folder name',
+      exact: true,
+    });
+    await folderName.fill('nested/empty');
+    await folderName.press('Enter');
     await page
       .locator('[role="treeitem"][data-item-path="src/nested/empty/"]')
       .waitFor();
@@ -290,8 +374,10 @@ test(
         'create-local',
     );
     await page.getByRole('button', {name: 'New file', exact: true}).click();
-    const dialog = page.getByRole('dialog', {name: 'New file', exact: true});
-    const name = dialog.getByRole('textbox', {name: 'Name'});
+    const name = page.getByRole('textbox', {
+      name: 'New file name',
+      exact: true,
+    });
     for (const invalid of [
       '../escape.ts',
       '/absolute.ts',
@@ -301,8 +387,8 @@ test(
       'node_modules/entry.ts',
     ]) {
       await name.fill(invalid);
-      await dialog.getByRole('button', {name: 'Create', exact: true}).click();
-      assert.ok(await dialog.isVisible(), invalid);
+      await name.press('Enter');
+      assert.ok(await name.isVisible(), invalid);
       assert.equal(
         await name.evaluate((input: HTMLInputElement) => input.validity.valid),
         false,
@@ -310,7 +396,7 @@ test(
       );
     }
     await name.fill('src/utils/model.ts');
-    await dialog.getByRole('button', {name: 'Create', exact: true}).click();
+    await name.press('Enter');
     await active(page, '/src/utils/model.ts');
     await page.evaluate(async () => {
       const {agentProject, projectFileSystem: fs} = window.explorerApp;
@@ -325,7 +411,7 @@ test(
       void window.explorerApp.projectDirectory.create('file', '/');
     });
     await name.fill('unopened/keep.ts');
-    await dialog.getByRole('button', {name: 'Create', exact: true}).click();
+    await name.press('Enter');
     await page
       .getByText('Destination already exists: /unopened/keep.ts', {exact: true})
       .waitFor();
@@ -337,7 +423,7 @@ test(
       void window.explorerApp.projectDirectory.create('file', '/');
     });
     await name.fill('unopened/keep.ts/child.ts');
-    await dialog.getByRole('button', {name: 'Create', exact: true}).click();
+    await name.press('Enter');
     await page
       .locator('.project-status:not(.package-status)')
       .filter({visible: true})
@@ -1048,9 +1134,12 @@ test(
       true,
     );
     await page.getByRole('menuitem', {name: 'New file', exact: true}).click();
-    const dialog = page.getByRole('dialog', {name: 'New file', exact: true});
-    await dialog.getByRole('textbox', {name: 'Name'}).fill('root-note.txt');
-    await dialog.getByRole('button', {name: 'Create', exact: true}).click();
+    const name = page.getByRole('textbox', {
+      name: 'New file name',
+      exact: true,
+    });
+    await name.fill('root-note.txt');
+    await name.press('Enter');
     await active(page, '/root-note.txt');
     assert.equal(
       await page.evaluate(

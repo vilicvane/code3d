@@ -5,7 +5,11 @@ import type {ModelPreviewState} from '../../src/model/preview-state.ts';
 import type {CodeEditor} from '../../src/editor.ts';
 
 declare const window: Window & {
-  diagnosticFixture: {codeEditor: CodeEditor; previewState: ModelPreviewState};
+  diagnosticFixture: {
+    codeEditor: CodeEditor;
+    previewState: ModelPreviewState;
+    projectDirectory: import('../../src/ui/project-tree.ts').ProjectTree;
+  };
   diagnosticMarkers(): Array<{message: string; startLineNumber: number}>;
 };
 
@@ -36,10 +40,11 @@ test(
     const files = [
       {
         path: '/model.ts',
-        source: "import {parse} from './helper.ts';\nparse('invalid json');",
+        source:
+          "import {parse} from './checks/helper.ts';\nparse('invalid json');",
       },
       {
-        path: '/helper.ts',
+        path: '/checks/helper.ts',
         source:
           'export function parse(text: string) {\n  return JSON.parse(text);\n}',
       },
@@ -71,7 +76,7 @@ test(
         response,
         body:
           (await response.text()) +
-          '\nwindow.diagnosticFixture = {codeEditor,previewState};',
+          '\nwindow.diagnosticFixture = {codeEditor,previewState,projectDirectory};',
       });
     });
     await page.goto(
@@ -84,12 +89,41 @@ test(
       await page.evaluate(
         () => window.diagnosticFixture.previewState.diagnostic?.sourceRef?.file,
       ),
-      '/helper.ts',
+      '/checks/helper.ts',
     );
+    await page.waitForFunction(
+      () =>
+        window.diagnosticFixture.codeEditor.errorCounts.get(
+          '/checks/helper.ts',
+        ) === 1,
+    );
+    const folder = page
+      .locator('[data-item-path="checks/"] [data-item-section="content"]')
+      .first();
+    await folder.waitFor();
+    assert.equal(
+      await folder.evaluate(element => getComputedStyle(element).color),
+      'rgb(227, 144, 134)',
+    );
+    await page.evaluate(() =>
+      window.diagnosticFixture.projectDirectory.setAgentLocations([
+        {
+          id: 'test-agent',
+          name: 'Test agent',
+          file: '/checks/helper.ts',
+          color: 4,
+        },
+      ]),
+    );
+    await page
+      .locator('[data-item-path="checks/"] [title*="Test agent"]')
+      .first()
+      .waitFor();
     await page.locator('#viewport-status').click();
     await page.waitForFunction(
       () =>
-        window.diagnosticFixture.codeEditor.currentFile() === '/helper.ts' &&
+        window.diagnosticFixture.codeEditor.currentFile() ===
+          '/checks/helper.ts' &&
         !window.diagnosticFixture.previewState.busy &&
         window.diagnosticFixture.previewState.sourceVersion !== undefined,
     );
@@ -99,6 +133,28 @@ test(
       ),
       undefined,
       'The helper alone succeeds, but the importing entry still has a runtime error',
+    );
+    const tab = page.locator('.editor-tab[data-path="/checks/helper.ts"]');
+    await tab.locator('.editor-tab-errors').waitFor();
+    assert.equal(await tab.locator('.editor-tab-errors').innerText(), '1');
+    assert.equal(
+      await tab
+        .locator('.editor-tab-label')
+        .evaluate(element => getComputedStyle(element).color),
+      'rgb(227, 144, 134)',
+    );
+    const decoratedFile = page.locator(
+      '[data-item-path="checks/helper.ts"] [data-item-section="decoration"]',
+    );
+    assert.match(
+      (await decoratedFile.locator('[title]').first().getAttribute('title')) ??
+        '',
+      /1 error/,
+    );
+    assert.match(
+      (await decoratedFile.locator('[title]').first().getAttribute('title')) ??
+        '',
+      /Test agent/,
     );
     const markers = await page.evaluate(() => window.diagnosticMarkers());
     assert.equal(markers.length, 1);
@@ -110,6 +166,33 @@ test(
         .setValue('export function parse(text: string) {\n  return text;\n}'),
     );
     await page.waitForFunction(() => window.diagnosticMarkers().length === 0);
+    await page.waitForFunction(
+      () => window.diagnosticFixture.codeEditor.errorCounts.size === 0,
+    );
+    assert.equal(await tab.locator('.editor-tab-errors').isVisible(), false);
+    await page.evaluate(() =>
+      window.diagnosticFixture.codeEditor.editor
+        .getModel()!
+        .setValue('export const count: number = "wrong";'),
+    );
+    await page.waitForFunction(
+      () =>
+        (window.diagnosticFixture.codeEditor.errorCounts.get(
+          '/checks/helper.ts',
+        ) ?? 0) > 0,
+    );
+    await tab.locator('.editor-tab-errors').waitFor();
+    await page.evaluate(() =>
+      window.diagnosticFixture.codeEditor.editor
+        .getModel()!
+        .setValue('export function parse(text: string) { return text; }'),
+    );
+    await page.waitForFunction(
+      () =>
+        !window.diagnosticFixture.codeEditor.errorCounts.has(
+          '/checks/helper.ts',
+        ),
+    );
     await page.evaluate(() =>
       window.diagnosticFixture.codeEditor.openFile('/model.ts'),
     );

@@ -21,8 +21,17 @@ data removes the browser workspace. Keep copies of work you care about.
 
 ## Prompts and confirmations
 
-File creation, package installation, deletion, and example resets use dialogs
-inside the App. Input errors appear below the field so you can correct the name
+Create files and folders directly in the project tree using the toolbar or
+context menu. The new file name is selected without its extension. Press
+**Enter** to create it, or **Escape** to cancel without writing anything. A name
+such as `src/utils/model.ts` creates missing parent folders too. Invalid names
+remain editable, with an explanation below the tree.
+
+Files with errors have red names and error counts in the tree and open tabs;
+parent folders show a red dot for errors below them. These include TypeScript
+and runtime errors with a known source file. Agent activity dots remain separate.
+
+Package installation, deletion, and example resets use dialogs inside the App. Input errors appear below the field so you can correct the name
 without losing your text. Choose **Cancel**, press **Escape**, or click outside
 the dialog to dismiss it. Deletion and example replacement require explicit
 confirmation; **Cancel** receives the initial focus.
