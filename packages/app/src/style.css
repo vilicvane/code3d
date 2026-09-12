@@ -1728,15 +1728,24 @@ kbd {
   display: none;
 }
 
-.contextual-tool-panel {
+.viewport-tool-stack {
   position: absolute;
   top: calc(var(--viewport-inset) + 50px);
   left: var(--viewport-inset);
-  z-index: 5;
-  display: grid;
-  gap: 12px;
-  width: 248px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
   max-width: calc(100% - 2 * var(--viewport-inset));
+  pointer-events: none;
+}
+
+.contextual-tool-panel,
+.tool-drag-preview {
+  display: grid;
+  width: 248px;
+  max-width: 100%;
   padding: 12px;
   color: #dfe5ca;
   border: 1px solid #66752c;
@@ -1744,6 +1753,11 @@ kbd {
   background: #15180ff2;
   box-shadow: 0 12px 34px #0008;
   backdrop-filter: blur(12px);
+}
+
+.contextual-tool-panel {
+  pointer-events: auto;
+  gap: 12px;
 }
 
 .contextual-tool-panel[hidden] {
@@ -3047,7 +3061,7 @@ kbd {
     width: 190px;
   }
 
-  .contextual-tool-panel {
+  .viewport-tool-stack {
     right: 14px;
     width: auto;
     max-width: none;
@@ -3673,4 +3687,24 @@ kbd {
 .viewport-tool-error > button svg {
   width: 14px;
   height: 14px;
+}
+
+.tool-drag-preview {
+  gap: 5px;
+  font:
+    11px/16px 'IBM Plex Mono',
+    monospace;
+  font-variant-numeric: tabular-nums;
+}
+.tool-drag-preview[hidden] {
+  display: none;
+}
+.tool-drag-label {
+  color: #a0a68f;
+}
+.tool-drag-value {
+  overflow-wrap: anywhere;
+}
+.tool-drag-delta {
+  color: var(--acid);
 }

@@ -1106,6 +1106,10 @@ export class ModelViewport {
     }
   }
 
+  get dragPreview() {
+    return this.transformGizmo.dragPreview;
+  }
+
   cancelPositionTool(): boolean {
     return this.transformGizmo.cancel();
   }

@@ -1,3 +1,4 @@
+import type {ToolDragPreview} from '../ui/tool-drag-preview';
 import {action, autorun, computed, makeObservable, observableRef} from 'mobx';
 import * as THREE from 'three';
 import {
@@ -97,6 +98,34 @@ export class TransformGizmo {
   private bindings: readonly TransformGizmoBinding[] = [];
   private readonly disposeMode: () => void;
 
+  get dragPreview(): ToolDragPreview | undefined {
+    if (!this.active) return undefined;
+    const {binding, value} = this.active;
+    return {
+      label:
+        binding.mode === 'rotate'
+          ? 'Rotate'
+          : binding.kind === 'spatial'
+            ? binding.spatial.operation === 'pivot'
+              ? 'Pivot'
+              : 'Origin'
+            : 'Offset',
+      values: [
+        {
+          label: binding.label,
+          value,
+          start: binding.value,
+          unit:
+            binding.parameterKind === 'angle'
+              ? '°'
+              : binding.parameterKind === 'length'
+                ? 'unit'
+                : '',
+        },
+      ],
+    };
+  }
+
   private get displayedMode(): TransformGizmoBinding['mode'] | undefined {
     if (this.active) return this.active.binding.mode;
     const modes = new Set(this.bindings.map(binding => binding.mode));
@@ -124,6 +153,7 @@ export class TransformGizmo {
       | 'setAltHeld'
       | 'beginDrag'
       | 'finishDrag'
+      | 'applyDrag'
     >(this, {
       altHeld: observableRef,
       bindings: observableRef,
@@ -132,6 +162,8 @@ export class TransformGizmo {
       setAltHeld: action,
       beginDrag: action,
       finishDrag: action,
+      applyDrag: action,
+      dragPreview: computed,
       attach: action,
       detach: action,
       cancel: action,
@@ -380,6 +412,7 @@ export class TransformGizmo {
           ? this.translationGrid.lock()
           : undefined,
     };
+    makeObservable(this.active, {value: observableRef});
     this.setHovered(control);
     this.setNavigationEnabled(false);
     this.onEvent({kind: 'begin', binding: control.binding});

@@ -61,7 +61,13 @@ group([base, part]);`;
       await setSource(page, source, method);
       await cameraIdle(page);
       const before = await state(page);
-      assert.equal(before.bindings.length, 3);
+      assert.equal(
+        before.bindings.filter(
+          binding =>
+            binding.mode === (method === 'rotate' ? 'rotate' : 'translate'),
+        ).length,
+        3,
+      );
       assert.equal(before.source, source);
       const handle =
         method === 'rotate'
@@ -78,10 +84,91 @@ group([base, part]);`;
         const preview = await state(page);
         assert.equal(preview.active, true);
         assert.equal(preview.source, source);
+        const readout = page.locator('.tool-drag-preview');
+        assert.equal(await readout.isVisible(), true);
+        const values = await page.evaluate(
+          () => window.coordinateApp.viewport.dragPreview,
+        );
+        assert.ok(values && values.values[0].value !== values.values[0].start);
+        assert.equal(
+          values.values[0].label,
+          method === 'rotate'
+            ? 'Rotate X'
+            : method === 'originOffset'
+              ? 'Origin ΔX'
+              : method === 'pivot'
+                ? 'Pivot X'
+                : 'ΔX',
+        );
+        assert.ok(
+          (await readout.innerText()).includes(`${values.values[0].label}:`),
+        );
+        assert.equal(
+          await readout.locator('.tool-drag-delta').innerText(),
+          `${values.values[0].value - values.values[0].start < 0 ? '−' : '+'} ${Number(Math.abs(values.values[0].value - values.values[0].start).toPrecision(6))}`,
+        );
+        const panel = page.locator('.contextual-tool-panel');
+        if (await panel.isVisible()) {
+          const bounds = (await panel.boundingBox())!;
+          assert.equal((await readout.boundingBox())!.width, bounds.width);
+          const narrowWidths = await page.evaluate(() => {
+            const stack = document
+              .querySelector('.viewport-tool-stack')!
+              .cloneNode(true) as HTMLElement;
+            stack.style.width = '180px';
+            stack.style.visibility = 'hidden';
+            document.querySelector('.viewport-host')!.append(stack);
+            const widths = ['.contextual-tool-panel', '.tool-drag-preview'].map(
+              selector =>
+                stack.querySelector(selector)!.getBoundingClientRect().width,
+            );
+            stack.remove();
+            return widths;
+          });
+          assert.deepEqual(narrowWidths, [180, 180]);
+          assert.deepEqual(
+            await page.evaluate(() => {
+              const styles = [
+                '.contextual-tool-panel',
+                '.tool-drag-preview',
+              ].map(selector => {
+                const style = getComputedStyle(
+                  document.querySelector(selector)!,
+                );
+                return [
+                  'backgroundColor',
+                  'backdropFilter',
+                  'boxShadow',
+                  'border',
+                  'borderRadius',
+                  'padding',
+                ].map(key => style[key as keyof CSSStyleDeclaration]);
+              });
+              return styles[0];
+            }),
+            await readout.evaluate(element => {
+              const style = getComputedStyle(element);
+              return [
+                'backgroundColor',
+                'backdropFilter',
+                'boxShadow',
+                'border',
+                'borderRadius',
+                'padding',
+              ].map(key => style[key as keyof CSSStyleDeclaration]);
+            }),
+          );
+          assert.equal(
+            (await readout.boundingBox())!.y,
+            bounds.y + bounds.height + 10,
+          );
+        }
+        await page.screenshot({path: `/tmp/code3d-drag-${method}.png`});
       };
       await drag();
       await page.keyboard.press('Escape');
       await page.mouse.up();
+      assert.equal(await page.locator('.tool-drag-preview').isVisible(), false);
       assert.equal((await state(page)).source, source);
       assert.equal((await state(page)).active, false);
       await drag();
@@ -108,7 +195,7 @@ group([base, part]);`;
         source,
       );
       await page.getByText('Ready', {exact: true}).waitFor();
-      assert.equal((await state(page)).bindings.length, 3);
+      assert.equal((await state(page)).bindings.length, before.bindings.length);
       assert.deepEqual(errors, []);
     },
   );
@@ -1257,6 +1344,23 @@ for (const grouped of [false, true])
         );
       };
       await drag();
+      const readout = page.locator('.tool-drag-preview');
+      assert.equal(await readout.isVisible(), true);
+      assert.equal(
+        await page.locator('.contextual-tool-panel').isVisible(),
+        false,
+      );
+      assert.equal(
+        (await readout.boundingBox())!.y,
+        (await page.locator('.viewport-tool-stack').boundingBox())!.y,
+      );
+      assert.equal(
+        await page.evaluate(
+          () => window.coordinateApp.viewport.dragPreview?.values[0].start,
+        ),
+        0,
+      );
+
       await page.keyboard.press('Escape');
       await page.mouse.up();
       assert.deepEqual(await visibleModes(), [

@@ -235,6 +235,15 @@ If none exists, it adds a rotation about that member's origin and local axes.
 Translation likewise reuses the latest `.offset(...)`, so alternating between
 the tools does not keep appending calls. These tools remain available when
 `.material(...)` follows `relate(...)`. Press `Escape` to cancel or use Undo after committing.
+While dragging a translation arrow, rotation ring, sketch point, or circular
+radius, a compact readout below the tool panel shows the current value and its
+signed change since the drag began as `field: old + delta = new` (with a minus sign
+when decreasing). Field names match the parameter panel labels, including JSDoc
+`@code3d.param` labels. The readout has the same width as the tool panel. It also appears when there is no parameter
+panel or the drag will add a new offset or rotation call. Values follow snapping
+and the tool's coordinates; sketch values reflect the solved geometry. Releasing
+or cancelling the drag hides the readout.
+
 Coupled constraints that cannot be previewed accurately keep their existing
 editing restrictions.
 

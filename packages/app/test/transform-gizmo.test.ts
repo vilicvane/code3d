@@ -98,6 +98,8 @@ for (const end of ['commit', 'cancel'] as const) {
         const preview = defined(events.at(-1));
         assert.ok(preview.kind === 'preview');
         assert.equal(preview.value, value);
+        assert.equal(gizmo.dragPreview?.values[0].value, value);
+        assert.equal(gizmo.dragPreview?.values[0].start, 5);
       }
       if (end === 'cancel') {
         assert.equal(gizmo.cancel(), true);
@@ -110,6 +112,7 @@ for (const end of ['commit', 'cancel'] as const) {
         assert.equal(commit.value, 4.5);
       }
       assert.equal(defined(events.at(-1)).kind, end);
+      assert.equal(gizmo.dragPreview, undefined);
       assert.deepEqual(navigation, [false, true]);
       assert.ok(gizmo['axes'].every(axis => axis.controls.axis === null));
     } finally {
