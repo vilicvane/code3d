@@ -1,1 +1,10 @@
 export * as ISO4762 from './iso-4762.js';
+export * as ISO10642 from './iso-10642.js';
+export * as ISO7380_1 from './iso-7380-1.js';
+export * as ISO4017 from './iso-4017.js';
+export * as ISO4014 from './iso-4014.js';
+export * as ISO7380_2 from './iso-7380-2.js';
+export * as ISO4029 from './iso-4029.js';
+export * as ISO7045 from './iso-7045.js';
+export * as ISO14583 from './iso-14583.js';
+export * as ISO7379 from './iso-7379.js';

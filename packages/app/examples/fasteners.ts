@@ -1,5 +1,5 @@
 import {box, cut, group} from '@code3d/core';
-import {ISO4762} from '@code3d/screws';
+import * as ISO4762 from '@code3d/screws/iso4762';
 
 const accent = '#d8ff3e';
 const dark = '#222621';

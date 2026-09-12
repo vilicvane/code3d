@@ -135,6 +135,10 @@ try {
     path.join(root, 'packages/core/test/public-api.ts'),
     path.join(consumer, 'public-api.ts'),
   );
+  await copyFile(
+    path.join(root, 'packages/screws/test/public-api.ts'),
+    path.join(consumer, 'screws-public-api.ts'),
+  );
   await writeFile(
     path.join(consumer, 'public-entries.ts'),
     typeImports.join('\n'),
@@ -152,7 +156,7 @@ try {
         noEmit: true,
         types: [],
       },
-      files: ['public-api.ts', 'public-entries.ts'],
+      files: ['public-api.ts', 'screws-public-api.ts', 'public-entries.ts'],
     }),
   );
   process.stdout.write(
