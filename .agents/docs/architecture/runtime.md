@@ -135,6 +135,10 @@ Core，冲突明确报错，不能隐式安装第二份公共 Core。
 
 ## 语言准备与源码构建
 
+CompilerClient 的当前语言快照是响应式状态，编译请求与语言消息共用请求 ID：
+开始新的准备时快照未就绪，只接受仍属当前请求的结果。编辑器诊断的就绪边界与
+过期结果处理见[编辑器状态与诊断](tooling.md#编辑器状态与诊断)。
+
 [Project language](../../../packages/app/src/project/project-language.ts)按导入闭包读取
 真实声明、源码映射及源文件，不生成另一套作者 API 声明。语言准备不初始化内核。
 编辑器的默认基础库是 ECMAScript，不能把宿主项目的 Node/DOM 类型自动注入作者

@@ -496,10 +496,13 @@ const preparePackages = async (_project: ModelProject, file: string) => {
 };
 const compiler = new ModelCompilerClient(
   packageFiles,
-  language => codeEditor.setProjectLanguage(language),
   preparePackages,
   directoryWorkspaceId ? `directory:${directoryWorkspaceId}` : 'browser',
 );
+const stopLanguage = autorun(() =>
+  codeEditor.setProjectLanguage(compiler.language),
+);
+codeEditor.editor.onDidDispose(stopLanguage);
 const retrySaveButton = requiredElement<HTMLButtonElement>('retry-save-button');
 const agentObserver = new AgentObserver(
   packageFiles,

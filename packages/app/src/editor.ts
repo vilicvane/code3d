@@ -387,21 +387,26 @@ export class CodeEditor {
     // Remove stale fallback sources and TypeScript extra libraries, including
     // paths that were only opened by Peek. The next compile supplies new types.
     if (this.projectLanguage)
-      this.setProjectLanguage({
-        ...this.projectLanguage,
-        files: this.projectLanguage.files.filter(file => !affected(file.path)),
-        navigationFiles: this.projectLanguage.navigationFiles.filter(
-          file => !affected(file.path),
-        ),
-        rootPaths: this.projectLanguage.rootPaths.filter(
-          path => !affected(path),
-        ),
-        realPaths: Object.fromEntries(
-          Object.entries(this.projectLanguage.realPaths ?? {}).filter(
-            ([from, to]) => !affected(from) && !affected(to),
+      this.setProjectLanguage(
+        {
+          ...this.projectLanguage,
+          files: this.projectLanguage.files.filter(
+            file => !affected(file.path),
           ),
-        ),
-      });
+          navigationFiles: this.projectLanguage.navigationFiles.filter(
+            file => !affected(file.path),
+          ),
+          rootPaths: this.projectLanguage.rootPaths.filter(
+            path => !affected(path),
+          ),
+          realPaths: Object.fromEntries(
+            Object.entries(this.projectLanguage.realPaths ?? {}).filter(
+              ([from, to]) => !affected(from) && !affected(to),
+            ),
+          ),
+        },
+        false,
+      );
     for (const path of this.navigationFiles.keys())
       if (affected(path)) this.navigationFiles.delete(path);
     for (const {document, bytes} of updates) {
@@ -422,7 +427,11 @@ export class CodeEditor {
     }
   }
 
-  setProjectLanguage(language: ProjectLanguage): void {
+  setProjectLanguage(
+    language: ProjectLanguage | undefined,
+    ready = language !== undefined,
+  ): void {
+    language ??= this.projectLanguage!;
     const navigationChanged =
       JSON.stringify(
         this.projectLanguage?.navigationFiles.map(file => file.path),
@@ -443,6 +452,10 @@ export class CodeEditor {
       filePath: monaco.Uri.file('/workspace' + file.path).toString(),
       content: file.source,
     }));
+    extraLibs.push({
+      filePath: 'file:///workspace/.__code3d-language-ready.json',
+      content: JSON.stringify(ready),
+    });
     extraLibs.push({
       filePath: 'file:///workspace/.__code3d-roots.json',
       content: JSON.stringify(
@@ -558,7 +571,7 @@ export class CodeEditor {
     for (const file of project.files) {
       this.addDocument(file.path, file.source);
     }
-    this.setProjectLanguage({
+    this.projectLanguage = {
       files: [],
       navigationFiles: [],
       compilerOptions: {},
@@ -568,7 +581,8 @@ export class CodeEditor {
           file => isSourceFile(file.path) && !isReadonlyProjectFile(file.path),
         )
         .map(file => file.path),
-    });
+    };
+    this.setProjectLanguage(undefined);
     const active = this.activePath
       ? this.requireDocument(this.activePath)
       : undefined;

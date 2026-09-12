@@ -31,6 +31,11 @@ Files with errors have red names and error counts in the tree and open tabs;
 parent folders show a red dot for errors below them. These include TypeScript
 and runtime errors with a known source file. Agent activity dots remain separate.
 
+While dependencies are loading, syntax errors remain visible; dependency-based
+type checks appear once the language environment is ready. Temporary missing-module
+errors from incomplete loading are not shown. Package loading failures still
+appear in the package or model status.
+
 Package installation, deletion, and example resets use dialogs inside the App. Input errors appear below the field so you can correct the name
 without losing your text. Choose **Cancel**, press **Escape**, or click outside
 the dialog to dismiss it. Deletion and example replacement require explicit

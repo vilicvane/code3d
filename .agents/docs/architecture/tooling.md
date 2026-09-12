@@ -232,6 +232,18 @@ Program。CodeEditor 排除仅导航文件的编译/执行输入，只读状态�
 [语言服务边界](../../../packages/app/test/browser/completion-language.test.ts)和
 [真实包导航](../../../packages/app/test/browser/package-install.test.ts)。
 
+语言依赖加载期间只发布语法诊断。CompilerClient 以 observable 快照表示当前编译的
+语言环境：开始编译、刷新或重建编译 Worker 时失效，只有当前请求的语言消息可以
+重新发布；装配层 autorun 将其同步到 CodeEditor，编辑器销毁时释放。编辑器保留
+上一份文件快照供补全与导航使用，就绪标记经 extra libs 同步给语言 Worker，
+不通过切换 Monaco 诊断配置重启 Worker。包内容失效后的不完整快照同样标记未就绪。
+语义、建议和编译选项诊断等待就绪，真实加载失败仍由原有包/模型错误通道展示。
+
+Monaco 诊断适配器的补丁在每个异步边界核对文档版本、extra libs 快照和文档订阅
+身份。依赖更新事件尚未派发时，快照身份也会立即失效；内容修改、语言配置更新及
+销毁前发出的旧请求不能回写标记。验证见
+[语言就绪与迟到诊断](../../../packages/app/test/browser/language-readiness.test.ts)。
+
 语法着色由 Monaco 的 tokenizer 和可见行调度负责，与 TypeScript Worker 诊断、
 未使用变量淡化和括号配色分别运行。Monaco 0.56 的初次渲染没有登记可见行，
 空闲任务延迟时新文件会一直使用空 token；Sticky Scroll 又可能读取视口外的

@@ -64,15 +64,10 @@ async function createEditor(t: TestContext) {
       project,
       '/model.ts',
     );
-    let language:
-      | import('../../src/project/project-language.ts').ProjectLanguage
-      | undefined;
-    const compiler = new ModelCompilerClient(browserPackageFiles, next => {
-      language = next;
-      editor.setProjectLanguage(next);
-    });
+    const compiler = new ModelCompilerClient(browserPackageFiles);
     try {
       await compiler.compile(project, '/model.ts');
+      editor.setProjectLanguage(compiler.language!);
     } finally {
       compiler.dispose();
     }
@@ -80,7 +75,7 @@ async function createEditor(t: TestContext) {
     window.harness = {
       editor,
       model,
-      language: language!,
+      language: compiler.language!,
       worker: () => projectTypeScriptWorker('typescript', model!.uri),
       complete: worker =>
         worker.getProjectCompletions(
@@ -107,10 +102,16 @@ test(
           error: error instanceof Error ? error.message : String(error),
         }),
       );
+      h.editor.setProjectLanguage(undefined);
+      const preparing = await h.worker();
+      const pendingDuringPreparation = h.complete(preparing);
       h.editor.setProjectLanguage(structuredClone(h.language));
       const current = await h.worker();
       return {
-        sameWorker: current === worker,
+        sameWorker: current === worker && preparing === worker,
+        preparedEntries: (await pendingDuringPreparation)?.entries.map(
+          entry => entry.name,
+        ),
         entries: current === worker ? await pending : [],
       };
     });
@@ -121,6 +122,7 @@ test(
     );
     assert.ok(Array.isArray(result.entries), JSON.stringify(result.entries));
     assert.ok(result.entries.includes('on'));
+    assert.ok(result.preparedEntries?.includes('on'));
   },
 );
 

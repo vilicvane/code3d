@@ -40,7 +40,7 @@ test(
         stat: async () => undefined,
       };
       const create = (identity: string) =>
-        new ModelCompilerClient(files, undefined, undefined, identity);
+        new ModelCompilerClient(files, undefined, identity);
       const source =
         'import {box} from "@code3d/core"; export default box(3, 4, 5);';
       const project = {
@@ -89,7 +89,6 @@ test(
         const client = new ModelCompilerClient(
           {readFile: async () => undefined, stat: async () => undefined},
           undefined,
-          undefined,
           identity,
         );
         try {
@@ -134,7 +133,6 @@ test(
         await import('/src/model/compiler-client.ts');
       const client = new ModelCompilerClient(
         {readFile: async () => undefined, stat: async () => undefined},
-        undefined,
         undefined,
         'clear-running',
       );
@@ -207,7 +205,6 @@ test(
       const client = new ModelCompilerClient(
         files,
         undefined,
-        undefined,
         'build-artifacts-test',
       );
       try {
@@ -277,7 +274,6 @@ self.postMessage = (data, ...rest) => {
       ]) {
         const client = new ModelCompilerClient(
           files,
-          undefined,
           undefined,
           'build-artifacts-test',
         );
@@ -374,7 +370,6 @@ test(
       let client = new ModelCompilerClient(
         files,
         undefined,
-        undefined,
         'directory-fixture',
       );
       const snapshots: string[] = [];
@@ -405,12 +400,7 @@ test(
         await write('node_modules/width/index.js', 'export default 9;');
         await compile();
         client.dispose();
-        client = new ModelCompilerClient(
-          files,
-          undefined,
-          undefined,
-          'directory-fixture',
-        );
+        client = new ModelCompilerClient(files, undefined, 'directory-fixture');
         await compile();
         return snapshots;
       } finally {
@@ -455,7 +445,6 @@ test(
         await import('/src/model/compiler-client.ts');
       const client = new ModelCompilerClient(
         {readFile: async () => undefined, stat: async () => undefined},
-        undefined,
         undefined,
         'switch-entries',
       );
@@ -563,7 +552,6 @@ test(
       let client = new ModelCompilerClient(
         files,
         undefined,
-        undefined,
         'dependency-scopes',
       );
       const results: {path: string; phases: string[]; diagnostic?: unknown}[] =
@@ -574,7 +562,6 @@ test(
             client.dispose();
             client = new ModelCompilerClient(
               files,
-              undefined,
               undefined,
               'dependency-scopes',
             );
