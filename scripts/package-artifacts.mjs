@@ -3,6 +3,7 @@ import {createHash} from 'node:crypto';
 import {mkdir, readFile, rm} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {isDeepStrictEqual} from 'node:util';
 
 export const root = fileURLToPath(new URL('..', import.meta.url));
 export const artifactsDirectory = path.join(root, 'dist/packages');
@@ -48,6 +49,48 @@ export function runNpm(args, cwd = root) {
 
 export const integrity = bytes =>
   'sha512-' + createHash('sha512').update(bytes).digest('base64');
+
+/** Read the verified archive bytes; consumers and publication share one identity. */
+export async function verifiedArtifacts(
+  packages,
+  directory = artifactsDirectory,
+) {
+  const artifacts = JSON.parse(
+    await readFile(path.join(directory, 'manifest.json'), 'utf8'),
+  );
+  return Promise.all(
+    packages.map(async pkg => {
+      const artifact = artifacts.find(
+        item => item.name === pkg.name && item.version === pkg.version,
+      );
+      if (!artifact)
+        throw new Error(
+          `Missing verified artifact for ${pkg.name}@${pkg.version}`,
+        );
+      const filename = path.join(directory, artifact.filename);
+      if (integrity(await readFile(filename)) !== artifact.integrity)
+        throw new Error(`Verified artifact was modified: ${pkg.name}`);
+      const manifest = JSON.parse(
+        run('tar', ['-xOf', filename, 'package/package.json']),
+      );
+      if (manifest.name !== pkg.name || manifest.version !== pkg.version)
+        throw new Error(`Verified artifact identity mismatch: ${pkg.name}`);
+      for (const field of [
+        'dependencies',
+        'peerDependencies',
+        'optionalDependencies',
+        'peerDependenciesMeta',
+      ]) {
+        if (!isDeepStrictEqual(manifest[field], pkg[field]))
+          throw new Error(
+            `Verified artifact ${field} differs from release plan: ${pkg.name}`,
+          );
+      }
+      const tarball = `https://registry.npmjs.org/${pkg.name}/-/${pkg.name.split('/').at(-1)}-${pkg.version}.tgz`;
+      return {...artifact, filename, manifest, tarball};
+    }),
+  );
+}
 
 /** Pack the already-built output once; verification and publishing share these bytes. */
 export async function packPackages() {

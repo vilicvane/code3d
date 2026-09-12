@@ -4,9 +4,11 @@ import {cp, mkdtemp, readFile, readdir, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {releaseArtifacts} from '../../../scripts/publish-packages.mjs';
 
 const app = fileURLToPath(new URL('..', import.meta.url));
 const examples = join(app, 'examples');
+const artifacts = await releaseArtifacts();
 const manifests = (await readdir(examples, {recursive: true})).filter(
   path => path.endsWith('/package.json') && !path.includes('node_modules/'),
 );
@@ -45,11 +47,18 @@ for (const manifestPath of manifests) {
       undefined,
       'Checked-in example locks must use public npm artifacts',
     );
-    // Pin the clean Node consumer to the same direct versions as the browser lock.
-    // Its normal npm installation must work without repository hoisting/aliases.
+    // Node and browser consume the same locked bytes. Before publication only
+    // the selected release archives replace registry downloads, without hoisting.
     for (const name of Object.keys(manifest.dependencies)) {
-      manifest.dependencies[name] =
-        lock.packages[lock.resolutions.primary[name].installUrl].version;
+      const locked = lock.packages[lock.resolutions.primary[name].installUrl];
+      const artifact = artifacts.find(artifact => artifact.name === name);
+      if (artifact) {
+        assert.equal(locked.version, artifact.version, name);
+        assert.equal(locked.integrity, artifact.integrity, name);
+      }
+      manifest.dependencies[name] = artifact
+        ? 'file:' + artifact.filename
+        : locked.version;
     }
     await writeFile(join(directory, 'package.json'), JSON.stringify(manifest));
     await run(
@@ -85,7 +94,11 @@ for (const manifestPath of manifests) {
     `,
     );
     await run(process.execPath, ['verify.mjs'], directory);
-    console.log('Verified clean npm example:', manifestPath);
+    console.log(
+      'Verified clean npm example:',
+      manifestPath,
+      artifacts.length ? '(release archives)' : '(public registry)',
+    );
   } finally {
     await rm(directory, {recursive: true, force: true});
   }

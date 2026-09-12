@@ -1,9 +1,8 @@
-import {readFile, appendFile} from 'node:fs/promises';
+import {appendFile} from 'node:fs/promises';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {
-  artifactsDirectory,
-  integrity,
+  verifiedArtifacts,
   publicPackages,
   runNpm,
 } from './package-artifacts.mjs';
@@ -79,6 +78,15 @@ export function releasePackages(packages, tag) {
   return [...ordered.values()];
 }
 
+/** An explicit release tag selects archives, never workspace aliases or old npm versions. */
+export async function releaseArtifacts() {
+  return process.env.CODE3D_RELEASE_TAG
+    ? verifiedArtifacts(
+        releasePackages(await publicPackages(), process.env.CODE3D_RELEASE_TAG),
+      )
+    : [];
+}
+
 async function main() {
   const tag = process.env.CODE3D_RELEASE_TAG;
   const args = process.argv.slice(2);
@@ -93,22 +101,12 @@ async function main() {
     for (const pkg of packages) console.log(`${pkg.name}@${pkg.version}`);
     return;
   }
-  const artifacts = JSON.parse(
-    await readFile(path.join(artifactsDirectory, 'manifest.json'), 'utf8'),
-  );
+  const artifacts = await verifiedArtifacts(packages);
   const prepared = [];
   // Validate the whole batch before performing any registry mutation.
-  for (const pkg of packages) {
-    const artifact = artifacts.find(
-      item => item.name === pkg.name && item.version === pkg.version,
-    );
-    if (!artifact)
-      throw new Error(
-        `Missing verified artifact for ${pkg.name}@${pkg.version}`,
-      );
-    const filename = path.join(artifactsDirectory, artifact.filename);
-    if (integrity(await readFile(filename)) !== artifact.integrity)
-      throw new Error(`Verified artifact was modified: ${pkg.name}`);
+  for (const artifact of artifacts) {
+    const pkg = packages.find(pkg => pkg.name === artifact.name);
+    const {filename} = artifact;
     const response = await fetch(
       `https://registry.npmjs.org/${encodeURIComponent(pkg.name)}/${encodeURIComponent(pkg.version)}`,
       {signal: AbortSignal.timeout(30_000)},
@@ -117,8 +115,16 @@ async function main() {
       throw new Error(
         `Registry lookup failed for ${pkg.name}: HTTP ${response.status}`,
       );
+    if (response.ok) {
+      const published = await response.json();
+      if (published.dist?.integrity !== artifact.integrity)
+        throw new Error(
+          `Published artifact differs from the verified archive: ${pkg.name}@${pkg.version}`,
+        );
+    } else {
+      await response.body?.cancel();
+    }
     prepared.push({pkg, filename, published: response.ok});
-    await response.body?.cancel();
     if (response.status === 404) {
       const packageResponse = await fetch(
         `https://registry.npmjs.org/${encodeURIComponent(pkg.name)}`,
@@ -127,7 +133,7 @@ async function main() {
       await packageResponse.body?.cancel();
       if (packageResponse.status === 404)
         throw new Error(
-          `${pkg.name} does not exist on npm. Create the initial package and configure its trusted publisher before staged publishing.`,
+          `${pkg.name} does not exist on npm. Create the initial package and configure its trusted publisher before trusted publishing.`,
         );
       if (!packageResponse.ok)
         throw new Error(

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
+import {readFile} from 'node:fs/promises';
 import {
   chromium,
   type Page,
@@ -23,6 +24,13 @@ declare const window: Window & {
   };
 };
 let browser: Browser;
+const artifacts: {
+  name: string;
+  version: string;
+  tarball: string;
+  filename: string;
+  integrity: string;
+}[] = JSON.parse(process.env.CODE3D_EXAMPLE_ARTIFACTS ?? '[]');
 before(async () => {
   assert.ok(process.env.CODE3D_TEST_URL, 'Set CODE3D_TEST_URL');
   browser = process.env.CODE3D_PLAYWRIGHT_WS
@@ -431,9 +439,21 @@ test(
 );
 
 async function useRegistryPackages(context: BrowserContext) {
+  // A release run supplies the exact archives that passed package validation.
+  // URLs and locked integrity stay identical to their eventual public artifacts.
+  for (const artifact of artifacts) {
+    await context.route(artifact.tarball, async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/octet-stream',
+        headers: {'access-control-allow-origin': '*'},
+        body: await readFile(artifact.filename),
+      });
+    });
+  }
   // Exercise production resolution while retaining the dev server's inspection
   // hooks. Built-in files stay available; only local npm replacement metadata
-  // is removed, so declared packages must come from the public registry.
+  // is removed, so declared packages follow the production registry installation path.
   await context.route('**/*virtual*code3d-browser-packages*', async route => {
     const response = await route.fetch();
     const source = await response.text();
@@ -572,15 +592,30 @@ async function verifyOperationRecovery(page: Page, file: string) {
     token => {
       const editor = window.exampleApp.codeEditor.editor;
       editor.setPosition(
-        editor.getModel()!.getPositionAt(editor.getValue().indexOf(token)),
+        editor
+          .getModel()!
+          .getPositionAt(editor.getValue().indexOf(token) + token.length),
       );
       editor.focus();
     },
     file.endsWith('intersect.ts') ? 'intersect([' : 'loft([',
   );
-  assert.equal(
-    await page.evaluate(() => !!window.exampleApp.viewport.sourceContext),
-    true,
+  // Select the actual argument: a failed operation has no result to inspect.
+  assert.deepEqual(
+    await page.evaluate(() => {
+      const {codeEditor, viewport} = window.exampleApp;
+      const source = viewport.sourceContext?.target.sourceRef;
+      return {
+        input:
+          source &&
+          codeEditor.editor.getValue().slice(source.start, source.end),
+        renderable: viewport.hasRenderableGeometry(),
+      };
+    }),
+    {
+      input: file.endsWith('intersect.ts') ? 'blank' : 'start',
+      renderable: true,
+    },
     'Inputs remain inspectable after the operation fails',
   );
   await page.keyboard.press('Control+z');

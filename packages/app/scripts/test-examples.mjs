@@ -2,9 +2,11 @@ import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {chromium} from 'playwright-core';
 import {createServer} from 'vite';
+import {releaseArtifacts} from '../../../scripts/publish-packages.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 let server, browser;
+const artifacts = await releaseArtifacts();
 try {
   let url = process.env.CODE3D_TEST_URL;
   let endpoint;
@@ -29,6 +31,15 @@ try {
         env: {
           ...process.env,
           CODE3D_TEST_URL: url,
+          CODE3D_EXAMPLE_ARTIFACTS: JSON.stringify(
+            artifacts.map(({name, version, tarball, filename, integrity}) => ({
+              name,
+              version,
+              tarball,
+              filename,
+              integrity,
+            })),
+          ),
           ...(endpoint ? {CODE3D_PLAYWRIGHT_WS: endpoint} : {}),
         },
       },
