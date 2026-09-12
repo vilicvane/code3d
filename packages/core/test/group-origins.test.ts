@@ -311,7 +311,7 @@ test('group rotation carries solved members, references and bounds around the se
 test('nested repeated assemblies rotate rigidly in fixed XYZ order without re-solving member relations', () => {
   const base = box(10, 4, 6);
   const cap = box(2, 2, 2).relate(self =>
-    self.on(base.up).around(base.axis).rotate(35),
+    self.on(base.up).aroundLine(base.axis).rotate(35),
   );
   const part = group([base, cap]).expose({base, cap});
   const left = part.relate(self =>

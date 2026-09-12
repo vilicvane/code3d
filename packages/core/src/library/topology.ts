@@ -172,6 +172,7 @@ type StableEdgeGroup = Readonly<{
   start: number;
   count: number;
   edgeId: EdgeId;
+  linear: boolean;
 }>;
 
 type StableSurfaceGroup = Readonly<{
@@ -305,7 +306,17 @@ export function stableEdgeGroups(
       topology,
       groups.map(group => group.edgeId),
     );
-    return groups.map((group, index) => ({...group, edgeId: ids[index]}));
+    const linear = new Map(
+      edges.map(edge => [
+        edge.hashCode,
+        (edge as ReplicadEdge).geomType === 'LINE',
+      ]),
+    );
+    return groups.map((group, index) => ({
+      ...group,
+      edgeId: ids[index],
+      linear: linear.get(group.edgeId) ?? false,
+    }));
   } finally {
     deleteShapes(edges);
   }

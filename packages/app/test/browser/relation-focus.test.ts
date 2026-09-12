@@ -73,7 +73,10 @@ test(
         sample.primary === 'source' ? sample.source : sample.target,
         message,
       );
-      for (const side of ['source', 'target']) {
+      const spatialOrSelf =
+        sample.token === 'offset(' || sample.token.startsWith('self.on(');
+      if (spatialOrSelf) assert.deepEqual(sample.drawn, [], message);
+      for (const side of spatialOrSelf ? [] : ['source', 'target']) {
         const drawn = sample.drawn.filter(part => part.side === side);
         assert.ok(drawn.length > 0, message);
         for (const part of drawn)
@@ -138,7 +141,7 @@ test(
 );
 
 test(
-  'completed relate calls render all current references at secondary emphasis',
+  'completed relate calls retain participants without unselected relation markers',
   {timeout: 120_000},
   async t => {
     assert.ok(process.env.CODE3D_TEST_URL);
@@ -176,7 +179,7 @@ test(
       assert.equal(sample.selected, sample.expectedSelected, message);
       assert.deepEqual(
         new Set(sample.markers.map(marker => marker.nodeId)),
-        new Set(sample.participantIds),
+        new Set(whole ? [] : sample.participantIds),
         message,
       );
       for (const marker of sample.markers) {

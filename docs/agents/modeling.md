@@ -39,6 +39,30 @@ task benefits from several forms of evidence.
 Check the [current limitations](../../packages/web/src/content/docs/docs/reference/limitations.md)
 before promising a feature.
 
+## Place a constrained part
+
+Use `relate` for composition placement and `originOffset` to change local
+geometry coordinates. Consecutive constraints solve jointly. Independent Core
+`offset`/`rotate` values move that result; later constraints start a new segment
+from the preceding pose. Offset uses fixed composition axes, while rotation
+defaults to the current part origin. `pivot([x,y,z])` chooses self coordinates; `pivotVertex(id)` and `aroundEdge(id)` choose self topology; `pivotPoint(pointRef)` and `aroundLine(lineRef)` accept references. Each selector ends with `rotate`: XYZ angles for a point, one angle for an axis. External references follow their owning model’s solved position; point references retain self’s rotation axes.
+In the App, a selector and its final rotation share one tool and parameter panel. Picking a reference on an unfinished selector appends its missing zero-angle rotation; existing rotations and reference offsets are preserved. The edit undoes as one step. Only the focused align/on relation shows its axes/faces; self and transformation tools keep their own reference markers.
+Pick its reference directly from the visible point/axis candidates; hold Alt to
+move the reference with its translation gizmo. Moving coordinate
+`pivot([...])` updates its coordinates directly; moving a topology or point/line reference
+retains the reference and adds or updates its matching offset. Changing between
+point and axis rotation adds a new operation instead of replacing the existing
+rotation. These tools act on the current `relate` self; external axes are references.
+
+Before rotating, point selectors accept one `pivotOffset(dx, dy, dz)` in self local
+axes; axis selectors accept one `axisOffset(dx, dy, dz)` in the selected axis frame.
+These retain the reference and move the rotation center or axis, not the part.
+Completed transformations have no chaining methods; combine steps as array items,
+for example `[offset(0, 8, 0), rotate(0, 25, 0)]`. Read the
+[placement rules](../../packages/web/src/content/docs/docs/guides/relations.mdx#transform-a-joint-result)
+before mixing these operations. Shared source, including a loop callback, changes
+all of its runtime instances.
+
 ## Reuse expensive computations
 
 Use `cached()` for deterministic synchronous data and `definePrimitive()` for

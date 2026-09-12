@@ -32,11 +32,11 @@ test('a conflicting intermediate constraint stage does not invalidate its comple
   const stage = module.sourceTargets.find(
     target =>
       target.kind === 'constraint' &&
-      target.evaluations[0].constraintPreviewDiagnostic,
+      target.evaluations[0].relationPreviewDiagnostic,
   );
   assert.ok(stage);
   assert.match(
-    defined(defined(stage.evaluations[0].constraintPreviewDiagnostic).details),
+    defined(defined(stage.evaluations[0].relationPreviewDiagnostic).details),
     /Conflicting bound positions/,
   );
   const final = module.sourceTargets.find(
@@ -47,10 +47,10 @@ test('a conflicting intermediate constraint stage does not invalidate its comple
         .includes('offset(0, -10, 0)'),
   );
   assert.equal(
-    defined(final).evaluations[0].constraintPreviewDiagnostic,
+    defined(final).evaluations[0].relationPreviewDiagnostic,
     undefined,
   );
-  assert.ok(defined(final).evaluations[0].constraintPreview);
+  assert.ok(defined(final).evaluations[0].relationPreview);
   assert.equal(defined(module.fallback).children.length, 3);
 });
 
@@ -723,7 +723,7 @@ for (const compose of [true, false] as const) {
         const evaluation = defined(target).evaluations[0];
         assert.deepEqual(evaluation.nodeIds, relation.nodeIds);
         assert.deepEqual(evaluation.focusNodeIds, [
-          relation.constraintOwnerNodeId,
+          relation.relationOwnerNodeId,
         ]);
         assert.equal(evaluation.constraintId, relation.constraintId);
         assert.equal(sourceTargetPlacement(evaluation), 'composition');
@@ -738,9 +738,7 @@ for (const compose of [true, false] as const) {
           ).contextTargetIds,
         );
       }
-      const focused = module.objects.get(
-        defined(relation.constraintOwnerNodeId),
-      );
+      const focused = module.objects.get(defined(relation.relationOwnerNodeId));
       assert.ok(
         defined(focused).compositionTransform.position.some(
           value => Math.abs(value) > 49,
@@ -810,7 +808,7 @@ for (const [kind, sourceAnchor, targetAnchor] of [
         1,
       );
       assert.equal(
-        new Set(defined(target).evaluations.map(e => e.constraintOwnerNodeId))
+        new Set(defined(target).evaluations.map(e => e.relationOwnerNodeId))
           .size,
         2,
       );
@@ -828,9 +826,9 @@ for (const [kind, sourceAnchor, targetAnchor] of [
         assert.deepEqual(evaluation.operationInput, constraint.operationInput);
         assert.deepEqual(evaluation.runtime, constraint.runtime);
         const owner: string | undefined = isSource
-          ? constraint.constraintOwnerNodeId
+          ? constraint.relationOwnerNodeId
           : constraint.nodeIds.find(
-              nodeId => nodeId !== constraint.constraintOwnerNodeId,
+              nodeId => nodeId !== constraint.relationOwnerNodeId,
             );
         assert.deepEqual(evaluation.focusNodeIds, [owner]);
         assert.equal(sourceTargetPlacement(evaluation), 'composition');
@@ -893,8 +891,8 @@ test('anchor context is limited to the enclosing relation in a constraint array'
     defined(at('base.down')).evaluations[0].constraintId,
   );
   for (const evaluation of [edge, face]) {
-    const preview = defined(evaluation.constraintPreview);
-    assert.equal(evaluation.constraintPreviewDiagnostic, undefined);
+    const preview = defined(evaluation.relationPreview);
+    assert.equal(evaluation.relationPreviewDiagnostic, undefined);
     assert.equal(preview.constraints.length, 2);
     assert.deepEqual(
       preview.compositionTransform,
@@ -948,8 +946,8 @@ ${composed ? "const derived = part.material('#ff4d81'); export default group([de
         const evaluation = target.evaluations[0];
         assert.equal(evaluation.operationId, part.operation.id);
         assert.equal(evaluation.constraintId, undefined);
-        assert.equal(evaluation.constraintPreview, undefined);
-        assert.equal(evaluation.constraintOwnerNodeId, id('part'));
+        assert.equal(evaluation.relationPreview, undefined);
+        assert.equal(evaluation.relationOwnerNodeId, id('part'));
         assert.deepEqual(evaluation.focusNodeIds, [id('part')]);
         assert.deepEqual(
           new Set(evaluation.nodeIds),
@@ -2489,5 +2487,164 @@ test('empty topology calls retain an editable selection target', async () => {
     assert.equal(argument?.presence, 'omitted', method);
     assert.equal(argument?.target?.kind, 'omitted', method);
     assert.ok(target.evaluations[0]?.selection, method);
+  }
+});
+
+for (const selector of [
+  'pivotVertex()',
+  'pivotVertex(3)',
+  'pivotVertex().rotate(0,0,0)',
+  'core.pivotVertex()',
+])
+  test(`an unfinished independent ${selector} retains self and the completed placement prefix`, async () => {
+    const prefix =
+      'self.axis.align(base.axis), self.on(base.up), pivotVertex(8).rotate(0,0,49)';
+    const source = (suffix: string) =>
+      `import * as core from '@code3d/core'; import {box,pivotVertex} from '@code3d/core'; const base=box(32,14,24); export default box(32,3,24).relate(self=>[${prefix}${suffix}]);`;
+    const complete = await compileProject(
+      {files: [{path: '/model.ts', source: source('')}]},
+      '/model.ts',
+    );
+    assert.equal(complete.diagnostic, undefined);
+    const text = source(`, ${selector}`);
+    const module = await compileProject(
+      {files: [{path: '/model.ts', source: text}]},
+      '/model.ts',
+    );
+    assert.ok(module.diagnostic);
+    const target = module.sourceTargets.find(
+      target =>
+        target.kind === 'topology-selection' &&
+        target.sourceRef.start === text.lastIndexOf('pivotVertex('),
+    );
+    assert.ok(
+      target,
+      JSON.stringify(
+        module.sourceTargets.map(target => ({
+          kind: target.kind,
+          ref: target.sourceRef,
+          tool: target.tool?.signature.name,
+        })),
+      ),
+    );
+    const evaluation = target.evaluations[0];
+    assert.ok(evaluation.selection);
+    assert.equal(
+      evaluation.selection.inputNodeId,
+      evaluation.relationOwnerNodeId,
+    );
+    assert.equal(
+      module.objects.get(evaluation.selection.inputNodeId)?.mesh?.vertexIds
+        .length,
+      8,
+    );
+    assert.deepEqual(
+      evaluation.selection.ids,
+      selector === 'pivotVertex(3)' ? [3] : [],
+    );
+    const actual = defined(evaluation.relationPreview).compositionTransform;
+    const expected = defined(complete.fallback).compositionTransform;
+    actual.position.forEach((value, i) =>
+      assert.ok(
+        Math.abs(value - expected.position[i]) < 1e-6,
+        JSON.stringify({actual, expected}),
+      ),
+    );
+    actual.quaternion.forEach((value, i) =>
+      assert.ok(
+        Math.abs(value - expected.quaternion[i]) < 1e-6,
+        JSON.stringify({actual, expected}),
+      ),
+    );
+  });
+
+for (const selector of [
+  'aroundEdge()',
+  'aroundEdge().axisOffset(2,0,0)',
+  'pivotPoint()',
+  'pivotPoint().pivotOffset(2,0,0)',
+  'aroundLine()',
+  'core.aroundLine().axisOffset(2,0,0)',
+  'aroundLine().rotate(23)',
+  'aroundLine(self.axis)',
+  'pivot()',
+  'pivot([1,2,3]).pivotOffset(2,0,0)',
+  'pivotVertex().pivotOffset(2,0,0)',
+]) {
+  test(`rotation selection ${selector} retains its entire draft and self`, async () => {
+    const text = `import * as core from '@code3d/core'; import {box,aroundLine,aroundEdge,pivotPoint,pivot,pivotVertex} from '@code3d/core'; const base=box(32,14,24); export default box(32,3,24).relate(self=>[self.on(base.up), ${selector}]);`;
+    const module = await compileProject(
+      {files: [{path: '/model.ts', source: text}]},
+      '/model.ts',
+    );
+    assert.ok(module.diagnostic);
+    const target = module.sourceTargets.find(
+      target =>
+        target.rotationSelection &&
+        text.slice(
+          target.rotationSelection.sourceRef.start,
+          target.rotationSelection.sourceRef.end,
+        ) === selector,
+    );
+    assert.ok(
+      target,
+      JSON.stringify(
+        module.sourceTargets.map(target => ({
+          kind: target.kind,
+          ref: target.sourceRef,
+          tool: target.tool?.signature.name,
+          selection: target.rotationSelection,
+        })),
+      ),
+    );
+    const evaluation = target.evaluations[0];
+    assert.ok(evaluation.relationOwnerNodeId);
+    assert.ok(evaluation.relationPreview);
+    assert.equal(evaluation.relationPreview.constraints.length, 1);
+    assert.equal(
+      module.objects.get(evaluation.relationOwnerNodeId)?.mesh?.vertexIds
+        .length,
+      8,
+    );
+  });
+}
+
+test('namespace-qualified point and edge selectors join their completed rotation tool', async () => {
+  const source = `import * as core from '@code3d/core';
+const part = core.box(24,16,14).relate(self => [
+  core.offset(2,0,0),
+  core.pivot([1,2,3]).rotate(0,0,30),
+  core.aroundEdge(1).rotate(20),
+]);
+export default part;`;
+  const module = await compileProject(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  assert.equal(module.diagnostic, undefined);
+  for (const name of ['pivot', 'aroundEdge']) {
+    const selectors = module.sourceTargets.filter(
+      target =>
+        target.tool?.signature.name === name &&
+        target.evaluations.some(
+          evaluation => evaluation.relationSpatial?.kind === name,
+        ),
+    );
+    assert.ok(selectors.length, name);
+    for (const selector of selectors) {
+      assert.equal(selector.rotationSelection, undefined, name);
+      const rotation = module.sourceTargets.find(
+        target => target.id === selector.rotationToolId,
+      );
+      assert.equal(rotation?.tool?.signature.name, 'rotate', name);
+      assert.ok(
+        rotation?.rotationSelectorIds?.some(
+          id =>
+            module.sourceTargets.find(target => target.id === id)?.tool
+              ?.callId === selector.tool?.callId,
+        ),
+        name,
+      );
+    }
   }
 });

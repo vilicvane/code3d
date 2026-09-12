@@ -9,7 +9,7 @@ import {
   SketchFrame,
   disposeModelObjects,
   isModelObject,
-  type Constraint,
+  type Relation,
   type FaceAnchor,
   type FaceModel,
 } from './runtime.js';
@@ -90,7 +90,7 @@ export interface Sketch {
   /** The unbounded local XZ plane (+Y normal), independent of closed regions. */
   readonly plane: FaceAnchor;
   /** Relates this immutable sketch's frame without changing its two-dimensional data. */
-  relate(build: (self: Sketch) => Constraint | readonly Constraint[]): Sketch;
+  relate(build: (self: Sketch) => Relation | readonly Relation[]): Sketch;
   /** References a point defined in this layer. */
   point(id: number): SketchPoint;
   /** Adds a local layer while retaining the upstream sketch as read-only input. */
@@ -375,7 +375,7 @@ class SketchValue implements Sketch {
     return this.frame.plane;
   }
 
-  relate(build: (self: Sketch) => Constraint | readonly Constraint[]): Sketch {
+  relate(build: (self: Sketch) => Relation | readonly Relation[]): Sketch {
     let related!: SketchValue;
     this.frame.relate(frame => {
       related = new SketchValue({source: this, frame});

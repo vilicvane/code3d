@@ -286,7 +286,7 @@ test('published method defaults retain required numeric parameters across model 
     ['body.on(target.up).pivot()', [0, 0, 0]],
     ['body.on(target.up).pivot([1, 2, 3]).rotate()', [0, 0, 0]],
     ['body.on(target.up).pivotVertex(1).rotate()', [0, 0, 0]],
-    ['body.on(target.up).around(target.axis).rotate()', [0]],
+    ['body.on(target.up).aroundLine(target.axis).rotate()', [0]],
   ] as const;
   const source = [
     'import {box, group, rectangle, extrude} from "@code3d/core";',

@@ -36,6 +36,377 @@ const near = (actual: readonly number[], expected: readonly number[]) =>
     assert.ok(Math.abs(x - expected[i]) < 1e-6, `${actual} != ${expected}`),
   );
 
+async function placementTools(source: string, needle: string, name?: string) {
+  const module = await compiler.compile(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  assert.equal(module.diagnostic, undefined);
+  const at = source.indexOf(needle);
+  const target = module.sourceTargets.find(target =>
+    name
+      ? target.kind === 'transformation' &&
+        target.tool?.signature.name === name &&
+        target.sourceRef.start <= at &&
+        target.sourceRef.end >= at + needle.length
+      : target.kind === 'value' && target.sourceRef.start === at,
+  );
+  assert.ok(
+    target,
+    JSON.stringify(
+      module.sourceTargets
+        .filter(
+          target => target.sourceRef.start <= at && target.sourceRef.end >= at,
+        )
+        .map(target => ({
+          kind: target.kind,
+          source: source.slice(target.sourceRef.start, target.sourceRef.end),
+          evaluations: target.evaluations.map(value => ({
+            owner: value.relationOwnerNodeId,
+            constraint: value.constraintId,
+          })),
+        })),
+    ),
+  );
+  const evaluations = [
+    ...new Map(
+      target.evaluations.map(value => [value.relationOwnerNodeId, value]),
+    ).values(),
+  ];
+  const occurrences = evaluations.map((evaluation, index) => ({
+    key: `part/${index}`,
+    placement: 'composition' as const,
+    node: {
+      ...defined(module.objects.get(defined(evaluation.relationOwnerNodeId))),
+      ...evaluation.relationPreview,
+    },
+  }));
+  const {relationBindings} = await server.ssrLoadModule<
+    typeof import('../src/tools/model-spatial-tool.ts')
+  >('/src/tools/model-spatial-tool.ts');
+  const bindings = relationBindings(
+    module,
+    occurrences[0],
+    occurrences,
+    evaluations[0].constraintId ?? null,
+    new Map(),
+    new Map(),
+    {target, evaluation: evaluations[0]},
+  );
+  return {module, target, occurrences, bindings};
+}
+
+for (const mode of ['translate', 'rotate'] as const) {
+  test(`a shared multi-constraint self inserts independent ${mode} for every loop instance`, async () => {
+    const source = `import {box, group} from '@code3d/core';
+const holes = [[-10,-10], [10,-10], [-10,10], [10,10]].map(([x,z]) => box(8, 4, 8).originOffset(-x,0,-z));
+const parts = holes.map(hole => box(2,2,2).relate(part => [part.axis.align(hole.axis), part.on(hole.up)]));
+export default group([...holes, ...parts]);`;
+    const built = await placementTools(source, 'part.axis');
+    assert.equal(built.occurrences.length, 4);
+    assert.equal(built.bindings.length, 6);
+    const binding = defined(
+      built.bindings.find(
+        value =>
+          value.kind === 'spatial' &&
+          value.mode === mode &&
+          value.axis === (mode === 'rotate' ? 'z' : 'x'),
+      ),
+    );
+    assert.ok(binding.kind === 'spatial');
+    const intent = spatialIntent(binding, mode === 'rotate' ? 30 : 5);
+    assert.equal(intent.preview.objects.length, 4);
+    const host = hostFor(source);
+    const engine = new ToolEngine(host.host);
+    const gesture = engine.begin('placement');
+    assert.equal(gesture.preview(intent).status, 'ready');
+    gesture.cancel();
+    assert.equal(host.source(), source);
+    assert.equal(engine.begin('placement').commit(intent).status, 'committed');
+    assert.match(
+      host.source(),
+      mode === 'rotate'
+        ? /part\.on\(hole\.up\), rotate\(0, 0, 30\)/
+        : /part\.on\(hole\.up\), offset\(5, 0, 0\)/,
+    );
+    const next = await placementTools(host.source(), 'part.axis');
+    const {composeTransforms} = await import('../../core/bld/tooling/index.js');
+    built.occurrences.forEach((occurrence, i) => {
+      const predicted = composeTransforms(
+        occurrence.node.compositionTransform,
+        intent.preview.objects[i].transform,
+      );
+      near(
+        predicted.position,
+        next.occurrences[i].node.compositionTransform.position,
+      );
+      near(
+        predicted.quaternion,
+        next.occurrences[i].node.compositionTransform.quaternion,
+      );
+    });
+  });
+}
+
+test('self edits the nearest independent call without crossing the next constraint segment', async () => {
+  const source = `import {box, group, offset, rotate} from '@code3d/core';
+const base = box(20,4,20);
+const result = box(2,2,2).relate(part => [part.axis.align(base.axis), part.on(base.up), offset(2,0,0), rotate(0,0,20), offset(7,0,0), part.on(base.up), offset(100,0,0)]);
+export default group([base,result]);`;
+  const built = await placementTools(source, 'part.axis');
+  const binding = defined(
+    built.bindings.find(
+      value =>
+        value.kind === 'spatial' &&
+        value.mode === 'translate' &&
+        value.axis === 'x',
+    ),
+  );
+  assert.ok(binding.kind === 'spatial');
+  const host = hostFor(source);
+  const intent = spatialIntent(binding, 5);
+  assert.equal(
+    new ToolEngine(host.host).begin('nearest').commit(intent).status,
+    'committed',
+  );
+  assert.match(
+    host.source(),
+    /offset\(5,0,0\), rotate\(0,0,20\), offset\(7,0,0\)/,
+  );
+  assert.match(host.source(), /offset\(100,0,0\)/);
+  const next = await placementTools(host.source(), 'part.axis');
+  const {composeTransforms} = await import('../../core/bld/tooling/index.js');
+  near(
+    composeTransforms(
+      built.occurrences[0].node.compositionTransform,
+      intent.preview.objects[0].transform,
+    ).position,
+    next.occurrences[0].node.compositionTransform.position,
+  );
+});
+
+for (const [chain, selected, mode, expected] of [
+  [
+    'offset(2,3,4), rotate(10,20,30)',
+    'offset(2,3,4)',
+    'translate',
+    'offset(7,3,4), rotate(10,20,30)',
+  ],
+  [
+    'offset(2,3,4), rotate(10,20,30)',
+    'offset(2,3,4)',
+    'rotate',
+    'offset(2,3,4), rotate(5, 0, 0), rotate(10,20,30)',
+  ],
+  [
+    'rotate(10,20,30), offset(2,3,4)',
+    'rotate(10,20,30)',
+    'translate',
+    'rotate(10,20,30), offset(5, 0, 0), offset(2,3,4)',
+  ],
+  [
+    'pivot([2,3,4]).rotate(10,20,30), offset(2,3,4)',
+    'rotate(10,20,30)',
+    'rotate',
+    'pivot([2,3,4]).rotate(15,20,30), offset(2,3,4)',
+  ],
+  [
+    'aroundLine(base.axis).rotate(30), offset(2,3,4)',
+    'rotate(30)',
+    'rotate',
+    'aroundLine(base.axis).rotate(35), offset(2,3,4)',
+  ],
+] as const) {
+  test(`independent selection ${selected} / ${mode} preserves its chain stage`, async () => {
+    const source = `import {box, group, offset, rotate, pivot, aroundLine} from '@code3d/core';
+const base = box(20,4,20);
+const result = box(2,2,2).relate(part => [part.axis.align(base.axis), part.on(base.up), ${chain}]);
+export default group([base,result]);`;
+    const name = selected.startsWith('offset') ? 'offset' : 'rotate';
+    const built = await placementTools(source, selected, name);
+    const binding = defined(
+      built.bindings.find(
+        value => value.kind === 'spatial' && value.mode === mode,
+      ),
+    );
+    assert.ok(binding.kind === 'spatial');
+    const host = hostFor(source);
+    const intent = spatialIntent(binding, binding.value + 5);
+    assert.equal(
+      new ToolEngine(host.host).begin('selected').commit(intent).status,
+      'committed',
+    );
+    assert.ok(host.source().includes(expected), host.source());
+    const next = await placementTools(host.source(), 'part.axis');
+    // A selected operation previews its own prefix; compare with that same prefix
+    // after the edit, rather than the later authored operations.
+    const editedName = mode === 'translate' ? 'offset' : 'rotate';
+    const editedCall = defined(
+      expected.match(new RegExp(editedName + '\\([^)]*\\)')),
+    )[0];
+    const edited = await placementTools(host.source(), editedCall, editedName);
+    const {composeTransforms} = await import('../../core/bld/tooling/index.js');
+    assert.equal(next.module.diagnostic, undefined);
+    const predicted = composeTransforms(
+      built.occurrences[0].node.compositionTransform,
+      intent.preview.objects[0].transform,
+    );
+    near(
+      predicted.position,
+      edited.occurrences[0].node.compositionTransform.position,
+    );
+    near(
+      predicted.quaternion,
+      edited.occurrences[0].node.compositionTransform.quaternion,
+    );
+  });
+}
+
+for (const relation of [
+  'offset(2,3,4)',
+  '[part.axis.align(base.axis),part.on(base.up),offset(2,3,4)]',
+]) {
+  test(`independent tools follow material-derived members: ${relation}`, async () => {
+    const source = `import {box, offset} from '@code3d/core'; const base=box(20,4,20); export default box(2,2,2).relate(part=>${relation}).material('#d8ff3e');`;
+    const module = await compiler.compile(
+      {files: [{path: '/model.ts', source}]},
+      '/model.ts',
+    );
+    assert.equal(module.diagnostic, undefined);
+    const occurrence = {
+      key: 'part/0',
+      placement: 'composition' as const,
+      node: defined(module.fallback),
+    };
+    const {relationBindings} = await server.ssrLoadModule<
+      typeof import('../src/tools/model-spatial-tool.ts')
+    >('/src/tools/model-spatial-tool.ts');
+    const bindings = relationBindings(
+      module,
+      occurrence,
+      [occurrence],
+      null,
+      new Map(),
+      new Map(),
+    );
+    assert.equal(bindings.length, 6);
+    for (const mode of ['translate', 'rotate']) {
+      const binding = defined(
+        bindings.find(value => value.kind === 'spatial' && value.mode === mode),
+      );
+      assert.ok(binding.kind === 'spatial');
+      const host = hostFor(source);
+      const intent = spatialIntent(binding, binding.value + 5);
+      assert.equal(
+        new ToolEngine(host.host).begin('derived').commit(intent).status,
+        'committed',
+      );
+      const next = await compiler.compile(
+        {files: [{path: '/model.ts', source: host.source()}]},
+        '/model.ts',
+      );
+      assert.equal(next.diagnostic, undefined);
+      const {composeTransforms} =
+        await import('../../core/bld/tooling/index.js');
+      const predicted = composeTransforms(
+        occurrence.node.compositionTransform,
+        intent.preview.objects[0].transform,
+      );
+      near(
+        predicted.position,
+        defined(next.fallback).compositionTransform.position,
+      );
+      near(
+        predicted.quaternion,
+        defined(next.fallback).compositionTransform.quaternion,
+      );
+      if (mode === 'rotate' && relation === 'offset(2,3,4)')
+        assert.match(
+          host.source(),
+          /part=>\[offset\(2,3,4\), rotate\(5, 0, 0\)\]/,
+        );
+    }
+  });
+}
+
+test('independent pivotVertex selects the relate self topology', async () => {
+  const source = `import {box, pivotVertex} from '@code3d/core'; export default box(8,6,4).relate(() => pivotVertex(3).rotate(10,20,30));`;
+  const module = await compiler.compile(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  assert.equal(module.diagnostic, undefined);
+  const selection = defined(
+    module.sourceTargets.find(
+      target =>
+        target.kind === 'topology-selection' &&
+        target.tool?.signature.name === 'pivotVertex',
+    ),
+  );
+  assert.deepEqual(defined(selection.evaluations[0].selection).ids, [3]);
+  assert.equal(
+    defined(selection.evaluations[0].selection).inputNodeId,
+    defined(module.fallback).nodeId,
+  );
+});
+
+test('independent insertion retains import comments and avoids shadowed aliases', async () => {
+  const {transformationInsertion, transformationImportSource} =
+    await server.ssrLoadModule<
+      typeof import('../src/tools/source-expression.ts')
+    >('/src/tools/source-expression.ts');
+  for (const [imports, callback, name] of [
+    ["import {box, offset as move} from '@code3d/core';", '(part)', 'move'],
+    ["import * as c3 from '@code3d/core';", '(part)', 'c3.offset'],
+    ["import {box, offset} from '@code3d/core';", '({offset})', 'code3dOffset'],
+    [
+      "import {box // keep this comment\n} from '@code3d/core';",
+      '(part)',
+      'offset',
+    ],
+    [
+      "import {box, // keep this comma\n} from '@code3d/core';",
+      '(part)',
+      'offset',
+    ],
+  ]) {
+    const expression = 'part.on(base.up)';
+    const source = `${imports}\nconst apply = ${callback} => ${expression};`;
+    const ref = {
+      file: '/model.ts',
+      start: source.indexOf(expression),
+      end: source.indexOf(expression) + expression.length,
+    };
+    const insertion = defined(
+      transformationInsertion('/model.ts', source, ref, 'offset'),
+    );
+    assert.equal(insertion.name, name);
+    assert.equal(insertion.container, 'return');
+    if (insertion.importAddition) {
+      const add = insertion.importAddition;
+      const updated = transformationImportSource(
+        source.slice(add.sourceRef.start, add.sourceRef.end),
+        add.specifier,
+        add.statement,
+      );
+      const ts = (await import('@typescript/typescript6')).default;
+      const parsed = ts.createSourceFile(
+        'imports.ts',
+        `import ${updated} from '@code3d/core';`,
+        ts.ScriptTarget.Latest,
+        true,
+      );
+      assert.equal(
+        (parsed as unknown as {parseDiagnostics: unknown[]}).parseDiagnostics
+          .length,
+        0,
+        updated,
+      );
+      if (imports.includes('// keep')) assert.ok(updated.includes('// keep'));
+    }
+  }
+});
+
 test('a group axis includes its child geometry without model-unit padding', async () => {
   const source = `import {box,group,line} from '@code3d/core'; export default group([line([0,10,0],[0,20,0]), line([0,-4,0],[0,-3,0])]).expose({guide: box(1,1,1).axis});`;
   const module = await compiler.compile(
@@ -508,16 +879,14 @@ async function relationTool(source: string, name: string) {
     target =>
       target.kind === 'constraint' &&
       (target.tool?.signature.name === name ||
-        target.evaluations[0].constraintSpatial?.kind === name) &&
-      target.evaluations[0].constraintSpatial,
+        target.evaluations[0].relationSpatial?.kind === name) &&
+      target.evaluations[0].relationSpatial,
   );
   assert.ok(target, `No relation tool for ${name}`);
   const evaluation = target.evaluations[0];
   const node = {
-    ...defined(
-      module.objects.get(defined(evaluation.constraintSpatial).nodeId),
-    ),
-    ...evaluation.constraintPreview,
+    ...defined(module.objects.get(defined(evaluation.relationSpatial).nodeId)),
+    ...evaluation.relationPreview,
   };
   const occurrence = {
     key: 'source/self',
@@ -581,15 +950,20 @@ for (const [chain, name, expected, axis = 'z'] of [
   ],
   ['rotate()', 'rotate', 'rotate(7, 0, 0)', 'x'],
   ['rotate()', 'rotate', 'rotate(0, 0, 7)'],
-  ['around(base.axis).rotate()', 'rotate', 'around(base.axis).rotate(7)'],
+  [
+    'aroundLine(base.axis).rotate()',
+    'rotate',
+    'aroundLine(base.axis).rotate(7)',
+  ],
 ] as const) {
   test(`relation ${chain} provides ${axis} tools from its rendered pose`, async () => {
     const source = `import {box} from '@code3d/core'; const coords = [2, 3, 4] as const; const base = box(20, 10, 30); box(8, 6, 4).relate(self => self.on(base.up).${chain});`;
     const {node, bindings} = await relationTool(source, name);
-    assert.equal(bindings.length, chain.startsWith('around') ? 1 : 3);
+    assert.equal(bindings.length, chain.startsWith('aroundLine') ? 1 : 3);
     const binding = defined(
       bindings.find(
-        binding => binding.axis === (chain.startsWith('around') ? 'y' : axis),
+        binding =>
+          binding.axis === (chain.startsWith('aroundLine') ? 'y' : axis),
       ),
     );
     const intent = spatialIntent(binding, 7);
@@ -620,7 +994,7 @@ for (const reverse of [false, true] as const) {
     const source = `import {box} from '@code3d/core'; const angle = 25; const base = box(20, 10, 30); const part = box(8, 6, 4).relate(self => ${reverse ? 'base.on(self.up)' : 'self.on(base.up)'}.pivot([1, 2, 3]).rotate(angle, 35, 10));`;
     const {node, bindings, evaluation} = await relationTool(source, 'rotate');
     assert.equal(bindings.length, 3);
-    assert.equal(evaluation.constraintOwnerNodeId, defined(node).nodeId);
+    assert.equal(evaluation.relationOwnerNodeId, defined(node).nodeId);
     const binding = bindings[0];
     assert.ok(binding.spatial.source.kind === 'parameter');
     const intent = spatialIntent(binding, 55);
@@ -705,13 +1079,13 @@ for (const [geometry, id] of [
 }
 
 test('around exposes a positioned axis and a single angle ring', async () => {
-  const source = `import {box, point} from '@code3d/core'; const base = box(20, 10, 30); const axis = box(2, 2, 2).relate(self => self.center.on(point([10, 20, 30]).up).offset(0, 0, 0)); const part = box(8, 6, 4).relate(self => self.on(base.up).around(axis.axis).rotate(25).pivot([2, 3, 4]).rotate(10, 20, 30).offset(7, 0, 0));`;
+  const source = `import {box, point} from '@code3d/core'; const base = box(20, 10, 30); const axis = box(2, 2, 2).relate(self => self.center.on(point([10, 20, 30]).up).offset(0, 0, 0)); const part = box(8, 6, 4).relate(self => self.on(base.up).aroundLine(axis.axis).rotate(25).pivot([2, 3, 4]).rotate(10, 20, 30).offset(7, 0, 0));`;
   const {node, bindings} = await relationTool(source, 'rotate');
   assert.equal(bindings.length, 1);
   assert.equal(bindings[0].axis, 'y');
   const intent = spatialIntent(bindings[0], 55);
   const host = hostFor(source);
-  new ToolEngine(host.host).begin('around').commit(intent);
+  new ToolEngine(host.host).begin('aroundLine').commit(intent);
   assert.match(host.source(), /\.rotate\(55\)/);
   const {node: next} = await relationTool(host.source(), 'rotate');
   const {composeTransforms} = await import('../../core/bld/tooling/index.js');
@@ -726,7 +1100,7 @@ test('around exposes a positioned axis and a single angle ring', async () => {
     target,
     evaluation,
     bindings: axisBindings,
-  } = await relationTool(source, 'around');
+  } = await relationTool(source, 'aroundLine');
   assert.equal(axisBindings.length, 0);
   const {originSourceDecoration} = await server.ssrLoadModule<
     typeof import('../src/model/origin-decorations.ts')
@@ -741,7 +1115,7 @@ test('around exposes a positioned axis and a single angle ring', async () => {
 
 for (const reverse of [false, true] as const) {
   test(`align rotation edits self and preserves preview consistency with ${reverse ? 'reversed' : 'forward'} source`, async () => {
-    const source = `import {box, point} from '@code3d/core'; const base = point([20, 10, 30]); const part = box(8, 6, 4).relate(self => ${reverse ? 'base.align(self.center)' : 'self.center.align(base)'}.offset(2, 3, 4).pivot([1, 2, 3]).rotate(25, 35, 10).around(box(1, 1, 1).axis).rotate(45).offset(7, 0, 0));`;
+    const source = `import {box, point} from '@code3d/core'; const base = point([20, 10, 30]); const part = box(8, 6, 4).relate(self => ${reverse ? 'base.align(self.center)' : 'self.center.align(base)'}.offset(2, 3, 4).pivot([1, 2, 3]).rotate(25, 35, 10).aroundLine(box(1, 1, 1).axis).rotate(45).offset(7, 0, 0));`;
     const {node, bindings} = await relationTool(source, 'rotate');
     const intent = spatialIntent(bindings[0], 55),
       host = hostFor(source);
@@ -762,7 +1136,7 @@ for (const reverse of [false, true] as const) {
 }
 
 test('a reversed around axis previews the authored signed angle', async () => {
-  const source = `import {box, point} from '@code3d/core'; const base=point([20,10,30]); const axis=box(1,1,1).axis.reverse(); const part=box(8,6,4).relate(self=>self.center.align(base).around(axis).rotate(25));`;
+  const source = `import {box, point} from '@code3d/core'; const base=point([20,10,30]); const axis=box(1,1,1).axis.reverse(); const part=box(8,6,4).relate(self=>self.center.align(base).aroundLine(axis).rotate(25));`;
   const {node, bindings} = await relationTool(source, 'rotate');
   assert.equal(bindings.length, 1);
   const intent = spatialIntent(bindings[0], 55),
@@ -839,7 +1213,7 @@ test('a bound selection renders each computed plane once across named and relati
 
 for (const [call, kind] of [
   ['pivot([5, 0, 0])', 'point'],
-  ['around(axis.axis)', 'line'],
+  ['aroundLine(axis.axis)', 'line'],
 ] as const) {
   test(`an unfinished ${call} retains a source reference and visible marker`, async () => {
     const source = `import {box} from '@code3d/core'; const base = box(20, 10, 30); const axis = box(2, 2, 2); const part = box(8, 6, 4).relate(self => self.on(base.up).${call});`;
@@ -851,7 +1225,7 @@ for (const [call, kind] of [
     const target = module.sourceTargets.find(
       target =>
         target.kind === 'constraint' &&
-        target.evaluations[0].constraintSpatial?.kind === call.split('(')[0],
+        target.evaluations[0].relationSpatial?.kind === call.split('(')[0],
     );
     assert.ok(target);
     const evaluation = target.evaluations[0];
@@ -864,7 +1238,7 @@ for (const [call, kind] of [
       evaluation,
     });
     assert.equal(anchorDecoration(markers[0]).elementKind, kind);
-    assert.equal(markers[0].nodeId, evaluation.constraintOwnerNodeId);
+    assert.equal(markers[0].nodeId, evaluation.relationOwnerNodeId);
   });
 }
 
@@ -1103,10 +1477,10 @@ test('composition rotation edits reuse the authored call across offsets and pres
     'self.on(base.up).rotate(10,20,30).offset(3,4,5)',
     'base.on(self.up).offset(3,4,5).rotate(10,20,30)',
     'self.on(base.up).pivot([5,0,0]).rotate(10,20,30).offset(3,4,5)',
-    'self.on(base.up).around(base.axis).rotate(20).offset(3,4,5)',
-    'self.on(base.up).rotate(10,20,30).offset(3,4,5).around(base.axis).rotate(25).offset(6,7,8)',
+    'self.on(base.up).aroundLine(base.axis).rotate(20).offset(3,4,5)',
+    'self.on(base.up).rotate(10,20,30).offset(3,4,5).aroundLine(base.axis).rotate(25).offset(6,7,8)',
     'base.on(self.up).rotate(10,20,30).offset(3,4,5).rotate(25,15,5)',
-    'self.on(base.up).around(base.axis).rotate(20).offset(3,4,5).pivot([5,0,0]).rotate(25,15,5)',
+    'self.on(base.up).aroundLine(base.axis).rotate(20).offset(3,4,5).pivot([5,0,0]).rotate(25,15,5)',
   ]) {
     const source = `import {box} from '@code3d/core'; const base=box(20,10,20); export default box(8,6,4).relate(self=>${chain}).material('#d8ff3e');`;
     const module = await compiler.compile(
@@ -1143,8 +1517,8 @@ test('composition rotation edits reuse the authored call across offsets and pres
       new Map(),
     );
     const axisOnly =
-      chain.indexOf('around') >= 0 &&
-      chain.indexOf('around') < chain.indexOf('rotate');
+      chain.indexOf('aroundLine') >= 0 &&
+      chain.indexOf('aroundLine') < chain.indexOf('rotate');
     assert.equal(bindings.length, axisOnly ? 1 : 3);
     const intent = spatialIntent(bindings[0], 40);
     const host = hostFor(source);
@@ -1263,7 +1637,7 @@ test('self gizmos edit the nearest following offset and rotation', async () => {
       target.sourceRef.start === source.indexOf('self.on'),
   );
   assert.ok(self);
-  const preview = defined(self.evaluations[0].constraintPreview);
+  const preview = defined(self.evaluations[0].relationPreview);
   const {originSourceDecoration} = await server.ssrLoadModule<
     typeof import('../src/model/origin-decorations.ts')
   >('/src/model/origin-decorations.ts');
@@ -1313,7 +1687,7 @@ for (const operation of ['offset', 'rotate'] as const)
       const evaluation = target.evaluations[0];
       const node = {
         ...defined(module.fallback),
-        ...defined(evaluation.constraintPreview),
+        ...defined(evaluation.relationPreview),
       };
       const occurrence = {key: 'part', node, placement: 'composition' as const};
       const bindings = relationBindings(
@@ -1385,7 +1759,7 @@ for (const operation of ['offset', 'rotate'] as const)
         ),
       );
       const actual = defined(
-        appended.evaluations[0].constraintPreview,
+        appended.evaluations[0].relationPreview,
       ).compositionTransform;
       if (intent.kind === 'model.spatial') {
         const matrix = (t: {
@@ -1419,3 +1793,244 @@ for (const operation of ['offset', 'rotate'] as const)
       }
     });
   }
+
+for (const selector of [
+  'pivotVertex(1)',
+  'pivot([2,3,4])',
+  'pivotPoint(base.center)',
+  'aroundEdge(1)',
+  'aroundLine(base.axis)',
+  'aroundLine(base.axis.reverse())',
+] as const) {
+  test(`reference displacement ${selector} retains its reference and matches every instance's solved pose`, async () => {
+    const source = `import {box, group, pivot, pivotVertex, pivotPoint, aroundEdge, aroundLine} from '@code3d/core';
+const base=box(40,8,30).rotate(10,20,30);
+const parts=[1,2].map(i=>box(10+i,8,6).relate(self=>[self.on(base.up),${selector}.rotate(${selector.startsWith('around') ? '35' : '10,20,30'})])); group([base,...parts]);`;
+    const built = await placementTools(source, 'self.on');
+    const {rotationReferenceBindings} = await server.ssrLoadModule<
+      typeof import('../src/tools/model-spatial-tool.ts')
+    >('/src/tools/model-spatial-tool.ts');
+    const references = rotationReferenceBindings(built.bindings);
+    const binding = defined(references.find(binding => binding.axis === 'x'));
+    assert.ok(binding.kind === 'spatial');
+    assert.equal(
+      binding.spatial.source.kind === 'reference-offset' &&
+        binding.spatial.source.explicit,
+      true,
+      JSON.stringify(binding.spatial),
+    );
+    const intent = spatialIntent(binding, binding.value + 5);
+    const host = hostFor(source);
+    const result = new ToolEngine(host.host).begin('reference').commit(intent);
+    assert.equal(result.status, 'committed');
+    assert.ok(
+      host
+        .source()
+        .includes(
+          selector.startsWith('pivot(')
+            ? 'pivot([7, 3, 4])'
+            : `${selector}.${selector.startsWith('around') ? 'axisOffset' : 'pivotOffset'}(5, 0, 0)`,
+        ),
+      host.source(),
+    );
+    const next = await placementTools(host.source(), 'self.on');
+    const {composeTransforms} = await import('../../core/bld/tooling/index.js');
+    built.occurrences.forEach((occurrence, i) => {
+      const predicted = composeTransforms(
+        occurrence.node.compositionTransform,
+        intent.preview.objects[i].transform,
+      );
+      near(
+        predicted.position,
+        next.occurrences[i].node.compositionTransform.position,
+      );
+      near(
+        predicted.quaternion,
+        next.occurrences[i].node.compositionTransform.quaternion,
+      );
+    });
+  });
+}
+
+test('reference source edits support aliases, namespaces, repeated movement and selector replacement', async () => {
+  const {referenceOffsetSource, rotationReferenceSource} =
+    await server.ssrLoadModule<
+      typeof import('../src/tools/source-expression.ts')
+    >('/src/tools/source-expression.ts');
+  const factory = {
+    name: 'center',
+    sourceRef: {file: '/model.ts', start: 0, end: 1},
+    container: 'array' as const,
+  };
+  assert.deepEqual(
+    referenceOffsetSource(
+      'core.rotate(10,20,30)',
+      'pivotOffset',
+      [5, 0, 0],
+      [5, 0, 0],
+      false,
+      'core.pivot',
+    ),
+    {
+      text: 'core.pivot([0, 0, 0]).pivotOffset(5, 0, 0).rotate(10,20,30)',
+      usesConstructor: true,
+    },
+  );
+  assert.equal(
+    referenceOffsetSource(
+      'center([x,2,3]).rotate(10,20,30)',
+      'pivotOffset',
+      [5, 0, 0],
+      [5, 0, 0],
+      true,
+    ).text,
+    'center([x,2,3]).pivotOffset(5, 0, 0).rotate(10,20,30)',
+  );
+  assert.equal(
+    referenceOffsetSource(
+      'center([x,2,3]).pivotOffset(n + 5, 0, 0).rotate(10,20,30)',
+      'pivotOffset',
+      [9, 0, 0],
+      [4, 0, 0],
+      true,
+    ).text,
+    'center([x,2,3]).pivotOffset(n + 9, 0, 0).rotate(10,20,30)',
+  );
+  assert.equal(
+    rotationReferenceSource(
+      'center([x,2,3]).pivotOffset(n,0,0).rotate(10,20,30)',
+      {
+        selector: 'pivotVertex',
+        expression: '4',
+        factory: {...factory, name: 'vertexPivot'},
+        previous: 'point',
+        explicit: true,
+      },
+    ).text,
+    'vertexPivot(4).pivotOffset(n,0,0).rotate(10,20,30)',
+  );
+  for (const [selector, method] of [
+    ['pivotVertex(4)', 'pivotOffset'],
+    ['aroundLine(base.axis)', 'axisOffset'],
+  ] as const) {
+    assert.equal(
+      referenceOffsetSource(
+        `${selector}.${method}(...coords).rotate(10)`,
+        method,
+        [6, 2, 3],
+        [5, 0, 0],
+        true,
+      ).text,
+      `${selector}.${method}(6, 2, 3).rotate(10)`,
+    );
+  }
+  assert.equal(
+    rotationReferenceSource('self.on(base.up).rotate(10,20,30)', {
+      selector: 'aroundLine',
+      expression: 'self.edge(2)',
+      previous: 'point',
+      explicit: false,
+      append: 'chain',
+    }).text,
+    'self.on(base.up).rotate(10,20,30).aroundLine(self.edge(2)).rotate(0)',
+  );
+});
+
+test('draft rotation reference edits complete once and preserve authored offsets, angles and constructor names', async () => {
+  const {rotationReferenceSource} = await server.ssrLoadModule<
+    typeof import('../src/tools/source-expression.ts')
+  >('/src/tools/source-expression.ts');
+  for (const [source, selector, name, expression, expected] of [
+    ['pV()', 'pivotVertex', 'pV', '4', 'pV(4).rotate(0, 0, 0)'],
+    [
+      'core.pivotVertex().pivotOffset(n,0,0)',
+      'pivotVertex',
+      'core.pivotVertex',
+      '4',
+      'core.pivotVertex(4).pivotOffset(n,0,0).rotate(0, 0, 0)',
+    ],
+    [
+      'pivotVertex().rotate(x,2,3)',
+      'pivotVertex',
+      'pivotVertex',
+      '4',
+      'pivotVertex(4).rotate(x,2,3)',
+    ],
+    [
+      'pivot([1,2,3]).pivotOffset(n,0,0)',
+      'pivotVertex',
+      'pivotVertex',
+      '4',
+      'pivotVertex(4).pivotOffset(n,0,0).rotate(0, 0, 0)',
+    ],
+    [
+      'core.aroundLine().axisOffset(n,0,0)',
+      'aroundLine',
+      'core.aroundLine',
+      'self.edge(2)',
+      'core.aroundLine(self.edge(2)).axisOffset(n,0,0).rotate(0)',
+    ],
+    [
+      'aroundLine().axisOffset(n,0,0).rotate(angle)',
+      'aroundLine',
+      'aroundLine',
+      'self.edge(2)',
+      'aroundLine(self.edge(2)).axisOffset(n,0,0).rotate(angle)',
+    ],
+    [
+      'self.on(base.up).aroundLine()',
+      'aroundLine',
+      '',
+      'self.edge(2)',
+      'self.on(base.up).aroundLine(self.edge(2)).rotate(0)',
+    ],
+  ] as const) {
+    assert.equal(
+      rotationReferenceSource(source, {
+        draft: true,
+        selector,
+        expression,
+        previous: selector === 'aroundLine' ? 'axis' : 'point',
+        explicit: true,
+        factory: name
+          ? {
+              name,
+              sourceRef: {file: '/model.ts', start: 0, end: 1},
+              container: 'array',
+            }
+          : undefined,
+      }).text,
+      expected,
+    );
+  }
+});
+
+test('draft angle edits complete one rotation and retain other angles during pending recompilation', async () => {
+  const {completeRotationSource} = await server.ssrLoadModule<
+    typeof import('../src/tools/source-expression.ts')
+  >('/src/tools/source-expression.ts');
+  let source = 'core.pivotVertex().pivotOffset(2, 3, 4)';
+  source = completeRotationSource(source, false, 1, 25);
+  assert.equal(
+    source,
+    'core.pivotVertex().pivotOffset(2, 3, 4).rotate(0, 25, 0)',
+  );
+  source = completeRotationSource(source, false, 0, 10);
+  assert.equal(
+    source,
+    'core.pivotVertex().pivotOffset(2, 3, 4).rotate(10, 25, 0)',
+  );
+  assert.equal(
+    completeRotationSource('aroundLine(base.axis)', true, 0, 35),
+    'aroundLine(base.axis).rotate(35)',
+  );
+  assert.equal(
+    completeRotationSource(
+      'pivot([1,2,3]).rotate( /* x */ 15, amount, 20)',
+      false,
+      0,
+      25,
+    ),
+    'pivot([1,2,3]).rotate( /* x */ 25, amount, 20)',
+  );
+});

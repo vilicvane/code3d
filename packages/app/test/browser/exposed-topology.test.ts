@@ -66,7 +66,7 @@ export default assembly;`;
             '/main.ts',
             source.indexOf(expression) + expression.length - 1,
           );
-          const {evaluation, target} = viewport.sourceEvaluation()!;
+          const {evaluation, target} = viewport.sourceContext!;
           const selection = evaluation.selection;
           if (!selection || selection.kind === 'edges')
             throw new Error(`No selection for ${expression} (${target.kind})`);
@@ -122,7 +122,7 @@ export default assembly;`;
           '/main.ts',
           source.indexOf('const outline') + 'const out'.length,
         );
-        const outlineEvaluation = viewport.sourceEvaluation()!.evaluation;
+        const outlineEvaluation = viewport.sourceContext!.evaluation;
         const owner = [...viewport['occurrences'].values()].find(
           occurrence =>
             occurrence.node.nodeId ===
@@ -137,7 +137,7 @@ export default assembly;`;
             'assembly.mount.center'.length -
             1,
         );
-        const center = viewport.sourceEvaluation()!.evaluation.element;
+        const center = viewport.sourceContext!.evaluation.element;
         const markers =
           viewport['decorationLayers'].get('source-context:named-element')
             ?.length ?? 0;

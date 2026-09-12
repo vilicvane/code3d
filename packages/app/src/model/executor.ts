@@ -4,8 +4,8 @@ import {
   isTopologyId,
   sameTopologyId,
   TopologyIdSet,
-  type ConstraintExpression,
-  type ConstraintPreview,
+  type RelationExpression,
+  type RelationPreview,
   type EdgeId,
   type ElementKind,
   type ElementSnapshot,
@@ -111,7 +111,21 @@ type SourceConstraintTrace = {
       source: RelationObject;
       target: RelationObject;
       self?: RelationObject;
-      expression: ConstraintExpression;
+      expression: RelationExpression;
+      contextId: string;
+      runtime: RuntimeReach;
+    }>
+  >;
+};
+
+type SourceTransformationTrace = {
+  id: string;
+  sourceRef: SourceRef;
+  evaluations: Array<
+    Readonly<{
+      transformationId: string;
+      self: RelationObject;
+      expression: RelationExpression;
       contextId: string;
       runtime: RuntimeReach;
     }>
@@ -152,6 +166,7 @@ type SourceExecutionTrace = {
   parameters: readonly ParameterUsage[];
   arguments: Map<number, unknown>;
   receiver?: unknown;
+  relationSelf?: RelationObject;
   inputs: SourceInputTrace[];
   failure?: ModelDiagnostic;
 };
@@ -162,12 +177,14 @@ export function createModelExecutor(
 ) {
   const {
     beginModelEvaluation,
-    constraintTraceReference,
-    constraintPreview,
+    relationTraceReference,
+    relationPreview,
+    currentRelationSelf,
+    relationSelectionPreview,
     createModelSnapshotter,
-    instrumentConstraint,
+    instrumentRelation,
     instrumentModelOperation,
-    isConstraintExpression,
+    isRelationExpression,
     isModelObject,
     isSketch,
     sketchFrame,
@@ -190,10 +207,15 @@ export function createModelExecutor(
   const sketches = new SketchTraceRegistry(runtime);
   const sourceValueTraces = new Map<string, SourceValueTrace>();
   const sourceConstraintTraces = new Map<string, SourceConstraintTrace>();
+  const sourceTransformationTraces = new Map<
+    string,
+    SourceTransformationTrace
+  >();
   const sourceElementTraces = new Map<string, SourceElementTrace>();
   let edgeSelectionSites: CompiledModelSource['edgeSelectionSites'] = new Map();
   let toolCallSites: CompiledModelSource['toolCallSites'] = new Map();
   let relationCallSites: CompiledModelSource['relationCallSites'] = new Map();
+  let relationArraySites: CompiledModelSource['relationArraySites'] = [];
   const sourceExecutionTraces = new Map<string, SourceExecutionTrace>();
   const catalogTraces = new Map<string, CatalogTrace>();
   const parameterFrames: ParameterUsage[][] = [];
@@ -232,7 +254,10 @@ export function createModelExecutor(
         parameters,
         arguments: new Map(),
         inputs: [],
+        relationSelf: currentRelationSelf(),
       };
+      if (executionTrace.relationSelf)
+        tracedObjects.add(executionTrace.relationSelf);
       sourceExecutionTraces.set(
         traceExecutionKey(id, execution),
         executionTrace,
@@ -266,8 +291,8 @@ export function createModelExecutor(
         executionTrace.arguments.get(1),
         executionTrace.receiver,
       );
-      if (isConstraintExpression(result)) {
-        instrumentConstraint(result, location, parameters);
+      if (isRelationExpression(result)) {
+        instrumentRelation(result, location, parameters);
         recordSourceConstraint(id, location, result, context.id, runtime);
       } else if (
         isModelObject(result) ||
@@ -365,7 +390,7 @@ export function createModelExecutor(
       }
       const runtime = completedRuntimeReach();
       sketches.bind(result, location);
-      if (isConstraintExpression(result)) {
+      if (isRelationExpression(result)) {
         recordSourceConstraint(id, location, result, context.id, runtime);
       } else {
         recordSourceValue(id, 'value', location, result, context.id, runtime);
@@ -474,7 +499,7 @@ export function createModelExecutor(
         );
         return value;
       }
-      if (isConstraintExpression(value)) {
+      if (isRelationExpression(value)) {
         recordSourceConstraint(
           id,
           sourceRef(file, start, end),
@@ -532,8 +557,8 @@ export function createModelExecutor(
         const reference = modelTopologyReference(value);
         const model = isModelObject(value)
           ? value
-          : isConstraintExpression(value)
-            ? constraintTraceReference(value).self
+          : isRelationExpression(value)
+            ? relationTraceReference(value).self
             : reference?.model;
         if (model) tracedObjects.add(model);
       }
@@ -667,7 +692,7 @@ export function createModelExecutor(
     runtime: RuntimeReach,
     scopeRef?: SourceRef,
   ): void {
-    if (isConstraintExpression(value)) {
+    if (isRelationExpression(value)) {
       recordSourceConstraint(id, sourceRef, value, contextId, runtime);
       return;
     }
@@ -726,11 +751,30 @@ export function createModelExecutor(
   function recordSourceConstraint(
     id: string,
     location: SourceRef,
-    constraint: ConstraintExpression,
+    constraint: RelationExpression,
     contextId: string,
     runtime: RuntimeReach,
   ): void {
-    const reference = constraintTraceReference(constraint);
+    const reference = relationTraceReference(constraint);
+    if (reference.kind === 'transformation') {
+      if (!reference.self) return;
+      const key = `${id}:${location.file}:${location.start}:${location.end}`;
+      const trace = sourceTransformationTraces.get(key) ?? {
+        id,
+        sourceRef: location,
+        evaluations: [],
+      };
+      trace.evaluations.push({
+        transformationId: reference.transformationId,
+        self: reference.self,
+        expression: constraint,
+        contextId,
+        runtime,
+      });
+      sourceTransformationTraces.set(key, trace);
+      tracedObjects.add(reference.self);
+      return;
+    }
     const key = `${id}:${location.file}:${location.start}:${location.end}`;
     const trace = sourceConstraintTraces.get(key) ?? {
       id,
@@ -746,6 +790,37 @@ export function createModelExecutor(
     sourceConstraintTraces.set(key, trace);
     tracedObjects.add(reference.source);
     tracedObjects.add(reference.target);
+  }
+
+  function precedingRelations(
+    site: ToolCallSite | undefined,
+    self: RelationObject | undefined,
+    order: number,
+  ): RelationExpression[] {
+    if (!self) return [];
+    const traces = [
+      ...sourceConstraintTraces.values(),
+      ...sourceTransformationTraces.values(),
+    ];
+    return (site?.relationPredecessors ?? []).flatMap(reference => {
+      const previous = traces
+        .filter(
+          trace =>
+            trace.sourceRef.file === reference.file &&
+            trace.sourceRef.start >= reference.start &&
+            trace.sourceRef.end === reference.end,
+        )
+        .flatMap(trace =>
+          trace.evaluations.map(value => ({
+            expression: value.expression,
+            self: value.self,
+            order: value.runtime.order,
+          })),
+        )
+        .filter(value => value.self === self && value.order < order)
+        .sort((a, b) => b.order - a.order)[0];
+      return previous ? [previous.expression] : [];
+    });
   }
 
   function recordCatalogValue(
@@ -795,8 +870,8 @@ export function createModelExecutor(
     if (isModelObject(value)) {
       return [value];
     }
-    if (isConstraintExpression(value)) {
-      const self = constraintTraceReference(value).self;
+    if (isRelationExpression(value)) {
+      const self = relationTraceReference(value).self;
       return self ? [self] : [];
     }
     const topology = modelTopologyReference(value);
@@ -876,10 +951,12 @@ export function createModelExecutor(
     tracedObjects.clear();
     sourceValueTraces.clear();
     sourceConstraintTraces.clear();
+    sourceTransformationTraces.clear();
     sourceElementTraces.clear();
     edgeSelectionSites = artifact.edgeSelectionSites;
     toolCallSites = artifact.toolCallSites;
     relationCallSites = artifact.relationCallSites;
+    relationArraySites = artifact.relationArraySites;
     sourceExecutionTraces.clear();
     catalogTraces.clear();
     parameterFrames.length = 0;
@@ -1043,10 +1120,15 @@ export function createModelExecutor(
               ],
             };
           }),
-        sourceTargets: buildSourceTargets(operations, objectSnapshots, [
-          ...designArguments,
-          ...(activeDesignContext ? [activeDesignContext] : []),
-        ]),
+        sourceTargets: buildSourceTargets(
+          operations,
+          objectSnapshots,
+          [
+            ...designArguments,
+            ...(activeDesignContext ? [activeDesignContext] : []),
+          ],
+          files,
+        ),
         evaluationContexts: [...evaluationContexts.values()],
         designArguments: designArguments.map(
           ({
@@ -1066,10 +1148,12 @@ export function createModelExecutor(
       sourceValueTraces.clear();
       sketches.clear();
       sourceConstraintTraces.clear();
+      sourceTransformationTraces.clear();
       sourceElementTraces.clear();
       edgeSelectionSites = new Map();
       toolCallSites = new Map();
       relationCallSites = new Map();
+      relationArraySites = [];
       sourceExecutionTraces.clear();
       catalogTraces.clear();
       parameterFrames.length = 0;
@@ -1151,6 +1235,7 @@ export function createModelExecutor(
       DesignArgumentContext,
       'functionId' | 'functionRef'
     >[],
+    files: ReadonlyMap<string, string>,
   ): SourceTarget[] {
     const operationsByCall = new Map<string, ModelOperationSnapshot[]>();
     for (const operation of operations.values()) {
@@ -1430,7 +1515,7 @@ export function createModelExecutor(
             ...evaluation,
             focusNodeIds: evaluation.nodeIds,
             nodeIds: [...evaluation.nodeIds, ...referenceNodeIds],
-            constraintOwnerNodeId: owner.nodeId,
+            relationOwnerNodeId: owner.nodeId,
             relationContext: {
               constraintIds: owner.constraints
                 .filter(constraint => !inheritedIds.has(constraint.id))
@@ -1562,12 +1647,29 @@ export function createModelExecutor(
         const evaluations = [...sourceExecutionTraces.values()].flatMap(
           execution => {
             if (execution.siteId !== site.siteId) return [];
-            const receiver = execution.receiver;
+            const returned = [...sourceTransformationTraces.values()]
+              .filter(trace => trace.id === execution.siteId)
+              .flatMap(trace => trace.evaluations)
+              .find(
+                value =>
+                  value.contextId === execution.contextId &&
+                  value.runtime.order === execution.order,
+              )?.expression;
+            const receiver = [
+              execution.receiver,
+              returned,
+              execution.relationSelf,
+            ].find(
+              value =>
+                isModelObject(value) ||
+                isRelationExpression(value) ||
+                modelTopologyReference(value),
+            );
             const reference = modelTopologyReference(receiver);
             const owner = isModelObject(receiver)
               ? receiver
-              : isConstraintExpression(receiver)
-                ? constraintTraceReference(receiver).self
+              : isRelationExpression(receiver)
+                ? relationTraceReference(receiver).self
                 : reference?.model;
             if (!owner) return [];
             const availableIds = modelTopologyIds(receiver, parameter.kind);
@@ -1587,10 +1689,55 @@ export function createModelExecutor(
               ?.evaluations.find(
                 evaluation => evaluation.runtime.order === execution.order,
               )?.topologyReferences;
+            let preview: RelationPreview | undefined;
+            let previewDiagnostic: ModelDiagnostic | undefined;
+            if (execution.outcome === 'failed' && execution.relationSelf) {
+              const preceding = precedingRelations(
+                site,
+                execution.relationSelf,
+                execution.order,
+              );
+              try {
+                preview = isRelationExpression(execution.receiver)
+                  ? relationPreview(execution.receiver, preceding)
+                  : relationSelectionPreview(execution.relationSelf, preceding);
+              } catch (error) {
+                previewDiagnostic = {
+                  ...diagnosticFromError(error),
+                  sourceRef: site.sourceRef,
+                };
+              }
+            }
+            const referenceNodeIds = preview
+              ? [
+                  ...new Set(
+                    preview.object.constraints.flatMap(constraint => [
+                      constraint.source.nodeId,
+                      constraint.target.nodeId,
+                    ]),
+                  ),
+                ].filter(id => id !== modelObjectNodeId(owner))
+              : [];
             return [
               {
                 runtime: sourceExecutionRuntime(execution),
-                nodeIds: [operation?.outputNodeId ?? modelObjectNodeId(owner)],
+                nodeIds: [
+                  operation?.outputNodeId ?? modelObjectNodeId(owner),
+                  ...referenceNodeIds,
+                ],
+                relationOwnerNodeId: preview
+                  ? modelObjectNodeId(owner)
+                  : undefined,
+                relationPreview: preview?.object,
+                relationPreviewDiagnostic: previewDiagnostic,
+                relationContext: preview
+                  ? {
+                      constraintIds: preview.object.constraints.map(
+                        value => value.id,
+                      ),
+                      referenceNodeIds,
+                    }
+                  : undefined,
                 operationId: operation?.id,
                 focusNodeIds: operation
                   ? undefined
@@ -1658,10 +1805,17 @@ export function createModelExecutor(
               evaluation.contextId,
               evaluation.runtime,
             );
-            let preview: ConstraintPreview | undefined;
+            let preview: RelationPreview | undefined;
             let previewDiagnostic: ModelDiagnostic | undefined;
             try {
-              preview = constraintPreview(evaluation.expression);
+              preview = relationPreview(
+                evaluation.expression,
+                precedingRelations(
+                  toolSite,
+                  evaluation.self,
+                  evaluation.runtime.order,
+                ),
+              );
             } catch (error) {
               const diagnostic = diagnosticFromError(error);
               previewDiagnostic = {
@@ -1688,12 +1842,12 @@ export function createModelExecutor(
                   ],
                   constraintId: evaluation.constraintId,
                   constraintFocus: 'self',
-                  constraintOwnerNodeId: modelObjectNodeId(
+                  relationOwnerNodeId: modelObjectNodeId(
                     evaluation.self ?? evaluation.source,
                   ),
-                  constraintSpatial: preview?.spatial,
-                  constraintPreview: preview?.object,
-                  constraintPreviewDiagnostic: previewDiagnostic,
+                  relationSpatial: preview?.spatial,
+                  relationPreview: preview?.object,
+                  relationPreviewDiagnostic: previewDiagnostic,
                   contextId: evaluation.contextId,
                 }))
               : [
@@ -1710,12 +1864,12 @@ export function createModelExecutor(
                     ],
                     constraintId: evaluation.constraintId,
                     constraintFocus: 'self',
-                    constraintOwnerNodeId: modelObjectNodeId(
+                    relationOwnerNodeId: modelObjectNodeId(
                       evaluation.self ?? evaluation.source,
                     ),
-                    constraintSpatial: preview?.spatial,
-                    constraintPreview: preview?.object,
-                    constraintPreviewDiagnostic: previewDiagnostic,
+                    relationSpatial: preview?.spatial,
+                    relationPreview: preview?.object,
+                    relationPreviewDiagnostic: previewDiagnostic,
                     contextId: evaluation.contextId,
                   },
                 ];
@@ -1724,6 +1878,10 @@ export function createModelExecutor(
         const target: SourceTarget = {
           id: `source:constraint:${trace.id}`,
           kind: 'constraint',
+          callRef: trace.sourceRef,
+          transformationInsertion:
+            toolSite?.transformationInsertion ??
+            relationSite?.transformationInsertion,
           sourceRef: toolSite?.sourceRef ?? trace.sourceRef,
           receiverRef: relationSite?.receiverRef,
           functionId: designFunctionAt(trace.sourceRef, designArguments),
@@ -1752,6 +1910,80 @@ export function createModelExecutor(
         ];
       },
     );
+
+    const transformationTargets: SourceTarget[] = [
+      ...sourceTransformationTraces.values(),
+    ].map(trace => {
+      const toolSite = toolCallSites.get(trace.id);
+      const evaluations = trace.evaluations.flatMap<SourceTargetEvaluation>(
+        value => {
+          const execution = sourceExecutionFor(
+            trace.id,
+            value.contextId,
+            value.runtime,
+          );
+          let preview: RelationPreview | undefined;
+          let diagnostic: ModelDiagnostic | undefined;
+          try {
+            preview = relationPreview(
+              value.expression,
+              precedingRelations(toolSite, value.self, value.runtime.order),
+            );
+          } catch (error) {
+            diagnostic = {
+              ...diagnosticFromError(error),
+              sourceRef: trace.sourceRef,
+            };
+          }
+          const self = modelObjectNodeId(value.self);
+          const constraints = preview?.object.constraints ?? [];
+          const referenceNodeIds = [
+            ...new Set(
+              constraints.flatMap(value => [
+                value.source.nodeId,
+                value.target.nodeId,
+              ]),
+            ),
+          ].filter(id => id !== self);
+          const evaluation: SourceTargetEvaluation = {
+            runtime: value.runtime,
+            toolExecutionOrder: value.runtime.order,
+            contextId: value.contextId,
+            parameters: execution?.parameters,
+            nodeIds: [self, ...referenceNodeIds],
+            focusNodeIds: [self],
+            relationOwnerNodeId: self,
+            transformationId: value.transformationId,
+            relationPreview: preview?.object,
+            relationSpatial: preview?.spatial,
+            relationPreviewDiagnostic: diagnostic,
+            relationContext: {
+              constraintIds: constraints.map(value => value.id),
+              referenceNodeIds,
+            },
+          };
+          const consumers = compositionConsumers([self]);
+          return consumers.length
+            ? consumers.map(consumer => ({
+                ...evaluation,
+                runtime: consumer.runtime,
+                operationInput: consumer.operationInput,
+              }))
+            : [evaluation];
+        },
+      );
+      return {
+        id: `source:transformation:${trace.id}`,
+        kind: 'transformation',
+        callRef: trace.sourceRef,
+        transformationInsertion: toolSite?.transformationInsertion,
+        sourceRef: toolSite?.sourceRef ?? trace.sourceRef,
+        functionId: designFunctionAt(trace.sourceRef, designArguments),
+        evaluations,
+        tool: sourceTool(toolSite),
+        contextTargetIds: compositionContextTargets(evaluations),
+      };
+    });
 
     const elementTargets = [...sourceElementTraces.values()].map(
       trace =>
@@ -1784,9 +2016,13 @@ export function createModelExecutor(
     );
 
     function withConstraintContext(target: SourceTarget): SourceTarget {
-      if (target.kind === 'constraint') return target;
+      if (target.kind === 'constraint' || target.kind === 'transformation')
+        return target;
       const scopeRef = parameterScopes.get(target.id);
-      const containing = constraintTargets.filter(
+      const containing = [
+        ...constraintTargets,
+        ...transformationTargets,
+      ].filter(
         constraint =>
           constraint.sourceRef.file === target.sourceRef.file &&
           (scopeRef
@@ -1843,7 +2079,7 @@ export function createModelExecutor(
                 if (
                   target.kind !== 'value' ||
                   !focusNodeIds.includes(
-                    entry.candidate.constraintOwnerNodeId ?? '',
+                    entry.candidate.relationOwnerNodeId ?? '',
                   )
                 )
                   return entry;
@@ -1860,8 +2096,8 @@ export function createModelExecutor(
                     ({candidate}) =>
                       candidate.contextId === entry.candidate.contextId &&
                       candidate.constraintId === entry.candidate.constraintId &&
-                      candidate.constraintOwnerNodeId ===
-                        entry.candidate.constraintOwnerNodeId,
+                      candidate.relationOwnerNodeId ===
+                        entry.candidate.relationOwnerNodeId,
                   )
                   .reduce(
                     (latest, next) =>
@@ -1873,11 +2109,38 @@ export function createModelExecutor(
                         : latest,
                     entry,
                   );
+                const owner = objects.get(
+                  latest.candidate.relationOwnerNodeId ?? '',
+                );
+                const stage = owner?.relationStages?.find(
+                  stage =>
+                    stage.constraintIds.includes(
+                      latest.candidate.constraintId ?? '',
+                    ) ||
+                    stage.transformationIds.includes(
+                      latest.candidate.transformationId ?? '',
+                    ),
+                );
+                const preview =
+                  owner && stage
+                    ? {
+                        nodeId: owner.nodeId,
+                        compositionTransform: stage.compositionTransform,
+                        constraints: owner.constraints.filter(value =>
+                          stage.constraintIds.includes(value.id),
+                        ),
+                        transformations: owner.transformations?.filter(value =>
+                          stage.transformationIds.includes(value.id),
+                        ),
+                        relationStages: [stage],
+                      }
+                    : latest.candidate.relationPreview;
                 return {
                   ...latest,
                   candidate: {
                     ...latest.candidate,
                     constraintFocus: entry.candidate.constraintFocus,
+                    relationPreview: preview,
                   },
                 };
               })
@@ -1904,17 +2167,19 @@ export function createModelExecutor(
                   nodeIds: candidate.nodeIds,
                   operationInput: candidate.operationInput,
                   constraintId: candidate.constraintId,
-                  constraintOwnerNodeId: candidate.constraintOwnerNodeId,
+                  transformationId: candidate.transformationId,
+                  relationContext: candidate.relationContext,
+                  relationOwnerNodeId: candidate.relationOwnerNodeId,
                   constraintFocus,
-                  constraintSpatial: candidate.constraintSpatial,
-                  constraintPreview: candidate.constraintPreview,
-                  constraintPreviewDiagnostic:
-                    candidate.constraintPreviewDiagnostic,
+                  relationSpatial: candidate.relationSpatial,
+                  relationPreview: candidate.relationPreview,
+                  relationPreviewDiagnostic:
+                    candidate.relationPreviewDiagnostic,
                 } satisfies SourceTargetEvaluation;
                 const relation = evaluatedConstraint(objects, context);
                 return {
                   ...context,
-                  // An auxiliary reference (e.g. around(axis)) remains available
+                  // An auxiliary reference (e.g. aroundLine(axis)) remains available
                   // while the relation's self stays the primary model.
                   nodeIds: [
                     ...new Set([...candidate.nodeIds, ...evaluation.nodeIds]),
@@ -1935,6 +2200,7 @@ export function createModelExecutor(
     const targets: SourceTarget[] = [
       ...elementTargets,
       ...constraintTargets,
+      ...transformationTargets,
       ...operationSelectionTargets,
       ...topologySelectionTargets,
       ...valueTargets,
@@ -1981,6 +2247,99 @@ export function createModelExecutor(
     ]
       .map(withConstraintContext)
       .map(withOperationContext);
+    // Array whitespace is an authored self scope, with the same per-execution relation stages as an explicit self reference.
+    for (const site of relationArraySites) {
+      const self = valueTargets.find(
+        target => target.id === `source:value:${site.parameterId}`,
+      );
+      if (!self) continue;
+      const relations = [...constraintTargets, ...transformationTargets]
+        .filter(
+          target =>
+            target.sourceRef.file === site.sourceRef.file &&
+            target.sourceRef.start >= site.sourceRef.start &&
+            target.sourceRef.end <= site.sourceRef.end,
+        )
+        .sort((a, b) => a.sourceRef.end - b.sourceRef.end);
+      for (const [index, gap] of site.gaps.entries()) {
+        const nearest =
+          relations
+            .filter(target => target.sourceRef.end <= gap.start)
+            .at(-1) ?? relations[0];
+        const id = `${self.id}:array:${site.sourceRef.start}:${index}`;
+        parameterScopes.set(id, nearest?.sourceRef ?? site.sourceRef);
+        const target = withConstraintContext({
+          ...self,
+          id,
+          sourceRef: gap,
+          relationArray: site.sourceRef,
+          transformationInsertion: site.insertion,
+        });
+        targets.push({
+          ...target,
+          evaluations: target.evaluations.map(evaluation => ({
+            ...evaluation,
+            relationOwnerNodeId:
+              evaluation.relationOwnerNodeId ?? evaluation.nodeIds[0],
+            relationContext: evaluation.relationContext ?? {
+              constraintIds: [],
+              referenceNodeIds: [],
+            },
+          })),
+        });
+      }
+    }
+    function rotationSelectionContext(
+      site: ToolCallSite,
+      execution: SourceExecutionTrace,
+    ): Partial<SourceTargetEvaluation> {
+      if (!site.rotationSelection || !execution.relationSelf) return {};
+      const self = modelObjectNodeId(execution.relationSelf);
+      try {
+        const preceding = precedingRelations(
+          site,
+          execution.relationSelf,
+          execution.order,
+        );
+        const preview = isRelationExpression(execution.receiver)
+          ? relationPreview(execution.receiver, preceding)
+          : relationSelectionPreview(execution.relationSelf, preceding);
+        if (!preview)
+          return {
+            nodeIds: [self],
+            focusNodeIds: [self],
+            relationOwnerNodeId: self,
+          };
+        const referenceNodeIds = [
+          ...new Set(
+            preview.object.constraints.flatMap(value => [
+              value.source.nodeId,
+              value.target.nodeId,
+            ]),
+          ),
+        ].filter(id => id !== self);
+        return {
+          nodeIds: [self, ...referenceNodeIds],
+          focusNodeIds: [self],
+          relationOwnerNodeId: self,
+          relationPreview: preview.object,
+          relationContext: {
+            constraintIds: preview.object.constraints.map(value => value.id),
+            referenceNodeIds,
+          },
+        };
+      } catch (error) {
+        return {
+          nodeIds: [self],
+          focusNodeIds: [self],
+          relationOwnerNodeId: self,
+          relationPreviewDiagnostic: {
+            ...diagnosticFromError(error),
+            sourceRef: site.sourceRef,
+          },
+        };
+      }
+    }
     const fallbackToolTargets: SourceTarget[] = [
       ...toolCallSites.values(),
     ].flatMap(site => {
@@ -1993,6 +2352,7 @@ export function createModelExecutor(
         .map(execution => ({
           runtime: sourceExecutionRuntime(execution),
           nodeIds: toolExecutionNodeIds(execution, objects),
+          ...rotationSelectionContext(site, execution),
           parameters: execution.parameters,
           contextId: execution.contextId,
         }));
@@ -2010,29 +2370,103 @@ export function createModelExecutor(
           ]
         : [];
     });
-    return [...fallbackToolTargets.map(withConstraintContext), ...targets].map(
-      target => ({
-        ...target,
-        evaluations: target.evaluations
-          .map(evaluation => {
-            const execution = target.tool
-              ? sourceExecutionFor(target.tool.callId, evaluation.contextId, {
-                  ...evaluation.runtime,
-                  order:
-                    evaluation.toolExecutionOrder ?? evaluation.runtime.order,
-                })
-              : undefined;
-            const toolArguments = execution
-              ? numericToolArguments(
-                  execution.arguments,
-                  target.tool!.signature,
-                )
-              : undefined;
-            return toolArguments ? {...evaluation, toolArguments} : evaluation;
-          })
-          .sort((left, right) => right.runtime.order - left.runtime.order),
-      }),
-    );
+    const completedTargets = [
+      ...fallbackToolTargets.map(withConstraintContext),
+      ...targets,
+    ].map(target => ({
+      ...target,
+      evaluations: target.evaluations
+        .map(evaluation => {
+          const execution = target.tool
+            ? sourceExecutionFor(target.tool.callId, evaluation.contextId, {
+                ...evaluation.runtime,
+                order:
+                  evaluation.toolExecutionOrder ?? evaluation.runtime.order,
+              })
+            : undefined;
+          const toolArguments = execution
+            ? numericToolArguments(execution.arguments, target.tool!.signature)
+            : undefined;
+          return toolArguments ? {...evaluation, toolArguments} : evaluation;
+        })
+        .sort((left, right) => right.runtime.order - left.runtime.order),
+    }));
+    const rotations = new Map<string, string>();
+    const selectors = new Map<string, string[]>();
+    for (const target of completedTargets) {
+      if (
+        target.tool?.signature.name !== 'rotate' ||
+        !target.evaluations.some(e => e.relationSpatial?.kind === 'rotate')
+      )
+        continue;
+      const refs =
+        toolCallSites.get(target.tool.callId)?.rotationReceivers ?? [];
+      const ids: string[] = [];
+      for (const ref of refs) {
+        const candidates = completedTargets.filter(candidate => {
+          // Tool spans start at the selector, excluding a namespace/receiver.
+          const selector =
+            toolCallSites.get(candidate.tool?.callId ?? '')?.sourceRef ??
+            candidate.sourceRef;
+          return (
+            selector.file === ref.file &&
+            selector.start === ref.selectorStart &&
+            selector.end === ref.end &&
+            candidate.evaluations.some(e =>
+              [
+                'pivot',
+                'pivotVertex',
+                'pivotPoint',
+                'aroundEdge',
+                'pivotOffset',
+                'aroundLine',
+                'axisOffset',
+              ].includes(e.relationSpatial?.kind ?? ''),
+            )
+          );
+        });
+        if (!candidates.length) break;
+        // Reference values inside a selector share the rotation tool too; a nested
+        // call with its own numeric tool still remains independently editable.
+        for (const nested of completedTargets) {
+          if (
+            !nested.tool &&
+            nested.sourceRef.file === ref.file &&
+            nested.sourceRef.start >= ref.selectorStart &&
+            nested.sourceRef.end <= ref.end
+          )
+            rotations.set(nested.id, target.id);
+        }
+        for (const candidate of candidates) {
+          rotations.set(candidate.id, target.id);
+          if (
+            candidate.tool &&
+            !ids.some(
+              id =>
+                completedTargets.find(t => t.id === id)?.tool?.callId ===
+                candidate.tool!.callId,
+            )
+          )
+            ids.unshift(candidate.id);
+        }
+      }
+      if (refs.length) selectors.set(target.id, ids);
+    }
+    return completedTargets.map(target => ({
+      ...target,
+      argumentListRef: toolCallSites.get(target.tool?.callId ?? '')
+        ?.argumentListRef,
+      rotationSelection:
+        !rotations.has(target.id) &&
+        !target.evaluations.some(
+          value => value.relationSpatial?.kind === 'rotate',
+        ) &&
+        target.evaluations.some(value => value.relationOwnerNodeId)
+          ? toolCallSites.get(target.tool?.callId ?? '')?.rotationSelection
+          : undefined,
+      rotationToolId: rotations.get(target.id),
+      rotationSelectorIds: selectors.get(target.id),
+    }));
   }
 
   function numericToolArguments(

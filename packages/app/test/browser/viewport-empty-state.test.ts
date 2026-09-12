@@ -465,7 +465,7 @@ test('constraint method defaults are available on offset, pivot and rotation cha
     ['pivot().rotate(0, 0, 25)', 'pivot()', {x: 0, y: 0, z: 0}],
     ['pivot([1, 2, 3]).rotate()', 'rotate()', {x: 0, y: 0, z: 0}],
     ['pivotVertex(1).rotate()', 'rotate()', {x: 0, y: 0, z: 0}],
-    ['around(base.axis).rotate()', 'rotate()', {angle: 0}],
+    ['aroundLine(base.axis).rotate()', 'rotate()', {angle: 0}],
   ] as const) {
     const source = `import {box, group} from '@code3d/core';\nconst base = box(20, 30, 40);\nconst part = box(4, 6, 8).relate(self => self.on(base.up).${chain});\ngroup([base, part]);`;
     await setSource(page, source, selection);
@@ -920,7 +920,7 @@ test('Model error without a source shows details but has no navigation target', 
   assert.equal(await status.getAttribute('title'), null);
 });
 
-test('pending edits hide status and delayed preview phases cannot outlive their run', async t => {
+test('pending edits keep mode height stable and delayed preview phases cannot outlive their run', async t => {
   const page = await open(
     t,
     "import {box} from '@code3d/core'; export default box(10, 10, 10);",
@@ -930,6 +930,11 @@ test('pending edits hide status and delayed preview phases cannot outlive their 
     if (message.text().includes('[MobX]')) warnings.push(message.text());
   });
   const status = page.locator('#viewport-status');
+  const mode = page.locator('.viewport-mode');
+  const initialMode = await mode.boundingBox();
+  const assertModeHeight = async () =>
+    assert.equal((await mode.boundingBox())?.height, initialMode?.height);
+  assert.equal(initialMode?.height, (await status.boundingBox())?.height);
   await page.evaluate(() => {
     const {codeEditor} = window.emptyViewportApp;
     codeEditor.editor.focus();
@@ -939,6 +944,7 @@ test('pending edits hide status and delayed preview phases cannot outlive their 
   });
   await page.keyboard.type(' ');
   assert.equal(await status.isVisible(), false);
+  await assertModeHeight();
   assert.equal(
     await page.evaluate(() => window.emptyViewportApp.previewState.busy),
     true,
@@ -961,14 +967,17 @@ test('pending edits hide status and delayed preview phases cannot outlive their 
     }, value);
   await phase('reading-files');
   assert.match(await status.innerText(), /Reading files/);
+  await assertModeHeight();
   assert.match((await status.getAttribute('title'))!, /source files/);
   await phase('preparing-preview');
   assert.equal(await status.isVisible(), false);
+  await assertModeHeight();
   await page.waitForTimeout(100);
   assert.equal(await status.isVisible(), false);
   await page.waitForTimeout(125);
   assert.equal(await status.isVisible(), true);
   assert.match(await status.innerText(), /Preparing preview/);
+  await assertModeHeight();
   await page.screenshot({path: '/tmp/code3d-preparing-preview.png'});
   await phase('reading-files');
   await phase('preparing-preview');

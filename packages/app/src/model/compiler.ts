@@ -1,6 +1,8 @@
+import {createTransformationInsertions} from '../tools/source-expression';
+import type {TransformationInsertion} from '../tools/source-expression';
 import {
-  type ConstraintPreview,
-  type ConstraintSpatialReference,
+  type RelationPreview,
+  type RelationSpatialReference,
   type EdgeId,
   type ElementKind,
   type ElementSnapshot,
@@ -97,7 +99,8 @@ export type SourceTargetEvaluation = Readonly<{
     nodeIds: readonly string[];
   }>;
   constraintId?: string;
-  constraintOwnerNodeId?: string;
+  transformationId?: string;
+  relationOwnerNodeId?: string;
   /** Completed relate call: only constraints and references added by this call. */
   relationContext?: Readonly<{
     constraintIds: readonly string[];
@@ -105,9 +108,9 @@ export type SourceTargetEvaluation = Readonly<{
   }>;
   /** Chain operations focus self; relation receiver/argument scopes identify a side. */
   constraintFocus?: 'self' | 'source' | 'target';
-  constraintSpatial?: ConstraintSpatialReference;
-  constraintPreview?: ConstraintPreview['object'];
-  constraintPreviewDiagnostic?: ModelDiagnostic;
+  relationSpatial?: RelationSpatialReference;
+  relationPreview?: RelationPreview['object'];
+  relationPreviewDiagnostic?: ModelDiagnostic;
   contextId: string;
   element?: AnchorValueReference;
   selection?:
@@ -144,6 +147,7 @@ export type SourceTarget = Readonly<{
   kind:
     | 'value'
     | 'constraint'
+    | 'transformation'
     | 'element'
     | 'tool'
     | 'topology-selection'
@@ -152,9 +156,39 @@ export type SourceTarget = Readonly<{
     | 'operation-selection';
   sourceRef: SourceRef;
   receiverRef?: SourceRef;
+  /** Interior of this call parameter list; excludes the method/selector name. */
+  argumentListRef?: SourceRef;
+  /** Complete authored call, including a fluent receiver. */
+  callRef?: SourceRef;
+  /** Authored reference chain, available even before its arguments/rotation complete. */
+  rotationSelection?: Readonly<{
+    sourceRef: SourceRef;
+    selector:
+      'pivot' | 'pivotVertex' | 'pivotPoint' | 'aroundEdge' | 'aroundLine';
+    constructors?: SourceTarget['transformationInsertion'];
+    reference: string;
+    calls: readonly Pick<
+      ToolCallSite,
+      'siteId' | 'sourceRef' | 'argumentListRef' | 'signature' | 'arguments'
+    >[];
+  }>;
+  /** Blank range in a directly returned relate array; its value is the callback self. */
+  relationArray?: SourceRef;
+  /** Completed rotation owning this selector's interaction. */
+  rotationToolId?: string;
+  /** Selector targets shown together with this rotation's numeric parameters. */
+  rotationSelectorIds?: readonly string[];
   functionId?: string;
   evaluations: readonly SourceTargetEvaluation[];
   contextTargetIds: readonly string[];
+  transformationInsertion?: Readonly<
+    Partial<
+      Record<
+        import('../tools/source-expression').TransformationConstructor,
+        TransformationInsertion
+      >
+    >
+  >;
   tool?: Readonly<{
     callId: string;
     signature: ToolSignatureSchema;
@@ -272,10 +306,28 @@ export type EdgeSelectionSite = Readonly<{
 }>;
 
 export type ToolCallSite = Readonly<{
+  argumentListRef: SourceRef;
+  relationPredecessors?: readonly SourceRef[];
+  rotationReceivers?: readonly (SourceRef & {selectorStart: number})[];
+  rotationSelection?: SourceTarget['rotationSelection'];
+  transformationInsertion?: SourceTarget['transformationInsertion'];
   siteId: string;
   sourceRef: SourceRef;
   signature: ToolSignatureSchema;
   arguments: readonly ToolArgumentSource[];
+}>;
+
+type RelationCallSite = Readonly<{
+  receiverRef: SourceRef;
+  targetRef: SourceRef;
+  transformationInsertion?: SourceTarget['transformationInsertion'];
+}>;
+
+type RelationArraySite = Readonly<{
+  parameterId: string;
+  sourceRef: SourceRef;
+  gaps: readonly SourceRef[];
+  insertion: NonNullable<SourceTarget['transformationInsertion']>;
 }>;
 
 export type CompiledModelSource = Readonly<{
@@ -286,20 +338,16 @@ export type CompiledModelSource = Readonly<{
   activeDesignContext?: ActiveDesignContext;
   edgeSelectionSites: ReadonlyMap<string, EdgeSelectionSite>;
   toolCallSites: ReadonlyMap<string, ToolCallSite>;
-  relationCallSites: ReadonlyMap<
-    string,
-    Readonly<{receiverRef: SourceRef; targetRef: SourceRef}>
-  >;
+  relationCallSites: ReadonlyMap<string, RelationCallSite>;
+  relationArraySites: readonly RelationArraySite[];
   sketches: SketchSourceSites;
 }>;
 
 export function createModelCompiler() {
   const edgeSelectionSites = new Map<string, EdgeSelectionSite>();
   const toolCallSites = new Map<string, ToolCallSite>();
-  const relationCallSites = new Map<
-    string,
-    Readonly<{receiverRef: SourceRef; targetRef: SourceRef}>
-  >();
+  const relationCallSites = new Map<string, RelationCallSite>();
+  const relationArraySites: RelationArraySite[] = [];
   async function compileProject(
     project: ModelProject,
     rootModulePath: string,
@@ -313,6 +361,7 @@ export function createModelCompiler() {
     edgeSelectionSites.clear();
     toolCallSites.clear();
     relationCallSites.clear();
+    relationArraySites.length = 0;
     checkCancelled();
     const files = new Map(
       project.files.map(file => [normalizeProjectPath(file.path), file.source]),
@@ -394,6 +443,7 @@ export function createModelCompiler() {
       edgeSelectionSites: new Map(edgeSelectionSites),
       toolCallSites: new Map(toolCallSites),
       relationCallSites: new Map(relationCallSites),
+      relationArraySites: [...relationArraySites],
       sketches: sketchSourceSites(tooling.program, files),
     };
   }
@@ -682,6 +732,78 @@ export function createModelCompiler() {
       const {factory} = context;
 
       return sourceFile => {
+        const insertions = createTransformationInsertions(sourceFile);
+        const rotationSelection = (
+          node: ts.CallExpression,
+        ): SourceTarget['rotationSelection'] => {
+          const nameOf = (call: ts.CallExpression) =>
+            toolCalls?.get(toolCallKey(call.getStart(sourceFile), call.end))
+              ?.name;
+          let first = node;
+          while (
+            ['rotate', 'pivotOffset', 'axisOffset'].includes(
+              nameOf(first) ?? '',
+            ) &&
+            ts.isPropertyAccessExpression(first.expression)
+          ) {
+            const receiver = unwrapArgument(first.expression.expression);
+            if (!ts.isCallExpression(receiver)) return undefined;
+            first = receiver;
+          }
+          const selector = nameOf(first);
+          if (
+            selector !== 'pivot' &&
+            selector !== 'pivotVertex' &&
+            selector !== 'pivotPoint' &&
+            selector !== 'aroundEdge' &&
+            selector !== 'aroundLine'
+          )
+            return undefined;
+          const calls = [first];
+          let last: ts.Expression = first;
+          while (true) {
+            const parent = last.parent;
+            if (
+              ts.isParenthesizedExpression(parent) ||
+              ts.isAsExpression(parent) ||
+              ts.isSatisfiesExpression(parent)
+            ) {
+              last = parent;
+            } else if (
+              ts.isPropertyAccessExpression(parent) &&
+              ts.isCallExpression(parent.parent) &&
+              ['pivotOffset', 'axisOffset', 'rotate'].includes(
+                nameOf(parent.parent) ?? '',
+              )
+            ) {
+              last = parent.parent;
+              calls.push(parent.parent);
+              if (nameOf(parent.parent) === 'rotate') break;
+            } else break;
+          }
+          return {
+            selector,
+            sourceRef: sourceRef(
+              sourceFile.fileName,
+              last.getStart(sourceFile),
+              last.end,
+            ),
+            constructors: insertions(last),
+            reference: first.arguments
+              .map(argument => argument.getText(sourceFile))
+              .join(', '),
+            calls: calls.map(call =>
+              toolCallSite(
+                call,
+                stableSourceId('expression', call, sourceFile),
+                toolCalls!.get(
+                  toolCallKey(call.getStart(sourceFile), call.end),
+                )!,
+                sourceFile,
+              ),
+            ),
+          };
+        };
         const visit: ts.Visitor = node => {
           if (
             !ts.isSourceFile(node) &&
@@ -823,16 +945,48 @@ export function createModelCompiler() {
             !continuesOptionalChain(node)
           ) {
             const siteId = stableSourceId('expression', node, sourceFile);
+            const transformationInsertion = insertions(node);
             const relationSite = relationCallSite(node, sourceFile);
-            if (relationSite) relationCallSites.set(siteId, relationSite);
+            if (relationSite)
+              relationCallSites.set(siteId, {
+                ...relationSite,
+                transformationInsertion,
+              });
             const toolSignature = toolCalls?.get(
               toolCallKey(node.getStart(sourceFile), node.getEnd()),
             );
             if (toolSignature) {
-              toolCallSites.set(
-                siteId,
-                toolCallSite(node, siteId, toolSignature, sourceFile),
-              );
+              const rotationReceivers: (SourceRef & {selectorStart: number})[] =
+                [];
+              let receiver: ts.Expression = node.expression;
+              while (
+                toolSignature.name === 'rotate' &&
+                ts.isPropertyAccessExpression(receiver)
+              ) {
+                const call = unwrapArgument(receiver.expression);
+                if (!ts.isCallExpression(call)) break;
+                rotationReceivers.push({
+                  ...sourceRef(
+                    sourceFile.fileName,
+                    call.getStart(sourceFile),
+                    call.end,
+                  ),
+                  selectorStart: callSourceStart(call, sourceFile),
+                });
+                receiver = call.expression;
+              }
+              toolCallSites.set(siteId, {
+                ...toolCallSite(node, siteId, toolSignature, sourceFile),
+                rotationSelection: rotationSelection(node),
+                relationPredecessors: relationArrayPredecessors(
+                  node,
+                  sourceFile,
+                ),
+                transformationInsertion,
+                rotationReceivers: rotationReceivers.length
+                  ? rotationReceivers
+                  : undefined,
+              });
             }
             const edgeSelection = edgeSelectionSite(node, siteId, sourceFile);
             if (edgeSelection) {
@@ -902,6 +1056,53 @@ export function createModelCompiler() {
     factory: ts.NodeFactory,
   ): ts.Statement[] {
     const statements: ts.Statement[] = [];
+    const callback = body.parent;
+    const call = callback.parent;
+    const self = parameters[0]?.name;
+    if (
+      self &&
+      ts.isIdentifier(self) &&
+      ts.isCallExpression(call) &&
+      ts.isPropertyAccessExpression(call.expression) &&
+      call.expression.name.text === 'relate' &&
+      call.arguments[0] === callback
+    ) {
+      const arrays: ts.ArrayLiteralExpression[] = [];
+      const returned = (expression: ts.Expression) => {
+        const value = unwrapArgument(expression);
+        if (ts.isArrayLiteralExpression(value)) arrays.push(value);
+      };
+      const visitReturn = (node: ts.Node) => {
+        if (ts.isFunctionLike(node)) return;
+        if (ts.isReturnStatement(node) && node.expression)
+          returned(node.expression);
+        else ts.forEachChild(node, visitReturn);
+      };
+      if (ts.isBlock(body)) visitReturn(body);
+      else returned(body);
+      const insertions = createTransformationInsertions(sourceFile);
+      for (const array of arrays) {
+        let start = array.getStart(sourceFile) + 1;
+        const gaps: SourceRef[] = [];
+        for (const element of array.elements) {
+          gaps.push(
+            sourceRef(sourceFile.fileName, start, element.getStart(sourceFile)),
+          );
+          start = element.end;
+        }
+        gaps.push(sourceRef(sourceFile.fileName, start, array.end - 1));
+        relationArraySites.push({
+          parameterId: stableSourceId('parameter', self, sourceFile),
+          sourceRef: sourceRef(
+            sourceFile.fileName,
+            array.getStart(sourceFile),
+            array.end,
+          ),
+          gaps,
+          insertion: insertions(array)!,
+        });
+      }
+    }
     const capture = (name: ts.BindingName): void => {
       if (!ts.isIdentifier(name)) {
         name.elements.forEach(element => {
@@ -1900,6 +2101,11 @@ export function createModelCompiler() {
     const sourceStart = callSourceStart(node, sourceFile);
     return {
       siteId,
+      argumentListRef: sourceRef(
+        sourceFile.fileName,
+        node.arguments.pos,
+        node.end - 1,
+      ),
       sourceRef: sourceRef(sourceFile.fileName, sourceStart, node.getEnd()),
       signature,
       arguments: signature.parameters.map(parameter => {
@@ -2141,4 +2347,28 @@ export function createModelCompiler() {
   }
 
   return {compileProject};
+}
+
+function relationArrayPredecessors(
+  node: ts.CallExpression,
+  sourceFile: ts.SourceFile,
+): readonly SourceRef[] | undefined {
+  let item: ts.Node = node;
+  while (
+    (ts.isPropertyAccessExpression(item.parent) &&
+      item.parent.expression === item) ||
+    (ts.isCallExpression(item.parent) && item.parent.expression === item) ||
+    ts.isParenthesizedExpression(item.parent) ||
+    ts.isAsExpression(item.parent) ||
+    ts.isSatisfiesExpression(item.parent)
+  )
+    item = item.parent;
+  const parent = item.parent;
+  return ts.isArrayLiteralExpression(parent)
+    ? parent.elements
+        .slice(0, parent.elements.indexOf(item as ts.Expression))
+        .map(value =>
+          sourceRef(sourceFile.fileName, value.getStart(sourceFile), value.end),
+        )
+    : undefined;
 }

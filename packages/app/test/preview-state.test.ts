@@ -206,3 +206,39 @@ test('pending input stays busy without a visible label; compilation derives curr
   stop();
   assert.ok(labels.includes('Preparing preview'));
 });
+
+test('tool update feedback stays visible through queuing, phase gaps and replacement', () => {
+  const phase = observable.box<CompilationPhase | undefined>(undefined);
+  const state = new ModelPreviewState(() => phase.get());
+  state.showStatus('ready', 'Ready');
+  const presentations: (typeof state.presentation)[] = [];
+  const stop = reaction(
+    () => state.presentation,
+    value => presentations.push(value),
+  );
+  state.queueUpdate(true);
+  assert.equal(state.presentation.label, 'Updating model');
+  state.beginCompilation();
+  runInAction(() => phase.set('reading-files'));
+  runInAction(() => phase.set('preparing-preview'));
+  assert.equal(state.presentation.label, 'Preparing preview');
+  runInAction(() => phase.set(undefined));
+  assert.equal(state.presentation.label, 'Updating model');
+  // A second gesture supersedes the first while its preview is still visible.
+  state.queueUpdate(true);
+  state.beginCompilation();
+  runInAction(() => phase.set('preparing-preview'));
+  state.showStatus('ready', 'Ready');
+  stop();
+  assert.ok(presentations.every(value => value.label && value.delay === 0));
+  assert.equal(state.presentation.label, 'Ready');
+
+  state.queueUpdate();
+  assert.equal(state.presentation.label, undefined);
+  state.beginCompilation();
+  assert.equal(state.presentation.delay, 200);
+  state.queueUpdate(true);
+  state.showStatus('error', 'Model error');
+  state.beginCompilation();
+  assert.equal(state.presentation.delay, 200);
+});

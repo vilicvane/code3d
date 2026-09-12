@@ -14,7 +14,8 @@ import {test} from 'node:test';
 import {box} from '../bld/node/index.js';
 import {
   beginModelEvaluation,
-  instrumentConstraint,
+  instrumentRelation,
+  relationPreview,
   instrumentModelOperation,
 } from '../bld/tooling/index.js';
 
@@ -87,27 +88,32 @@ test('clears cached constraint provenance without losing the stored relation or 
   let constraint: Constraint | undefined;
   const related = base.relate(copy => {
     constraint = copy.on(target.down).offset(2, 3, 4);
-    instrumentConstraint(constraint, trace.sourceRef, trace.parameters);
+    instrumentRelation(constraint, trace.sourceRef, trace.parameters);
     return constraint;
   });
   try {
     const first = createModelSnapshotter()(related);
     assert.deepEqual(first.constraints[0].sourceRefs, [trace.sourceRef]);
     assert.deepEqual(first.parameters, trace.parameters);
+    assert.deepEqual(first.constraints[0].offsets.at(-1)!.sourceRefs, [
+      trace.sourceRef,
+    ]);
 
     finishEvaluation();
     finishEvaluation = beginModelEvaluation();
     const second = createModelSnapshotter()(related);
     assert.deepEqual(second.constraints[0].sourceRefs, []);
     assert.deepEqual(second.constraints[0].parameters, []);
+    assert.deepEqual(second.constraints[0].offsets.at(-1)!.sourceRefs, []);
     assert.deepEqual(second.parameters, []);
     assert.deepEqual(second.compositionTransform, first.compositionTransform);
     assert.deepEqual(second.constraints[0].offsets.at(-1)!.value, [2, 3, 4]);
     assert.deepEqual(second.mesh, first.mesh);
     // A cached Constraint also copies only the current evaluation's metadata.
     const shifted = defined(constraint).offset(1, 0, 0);
-    assert.deepEqual(Reflect.get(shifted, 'sourceRefs'), []);
-    assert.deepEqual(Reflect.get(shifted, 'parameters'), []);
+    const preview = defined(relationPreview(shifted));
+    assert.deepEqual(preview.object.constraints[0].sourceRefs, []);
+    assert.deepEqual(preview.object.constraints[0].parameters, []);
   } finally {
     finishEvaluation();
     disposeModelObjects([base, target, related]);

@@ -1,7 +1,7 @@
 import {type IconNode} from 'lucide';
 import {createIcon} from './icons';
 
-export type SketchToolAction = Readonly<{
+export type ToolbarAction = Readonly<{
   name: string;
   title: string;
   icon: IconNode;
@@ -9,20 +9,22 @@ export type SketchToolAction = Readonly<{
 }>;
 
 /** Icon-only primary tools with remembered variants and keyboard-accessible menus. */
-export class SketchToolbar {
+export class Toolbar {
   readonly root = document.createElement('header');
   private readonly actions: {
     button: HTMLButtonElement;
-    action: SketchToolAction;
+    action: ToolbarAction;
   }[] = [];
   private readonly menus: {
     root: HTMLElement;
     trigger: HTMLButtonElement;
-    variants: readonly SketchToolAction[];
+    variants: readonly ToolbarAction[];
+    items: HTMLButtonElement[];
+    select(name: string): void;
   }[] = [];
 
-  constructor(label = 'Sketch tools') {
-    this.root.className = 'sketch-toolbar';
+  constructor(label: string) {
+    this.root.className = 'tool-toolbar';
     this.root.setAttribute('role', 'toolbar');
     this.root.setAttribute('aria-label', label);
     this.root.addEventListener('focusin', event => {
@@ -56,14 +58,14 @@ export class SketchToolbar {
 
   group(label: string): HTMLElement {
     const group = document.createElement('div');
-    group.className = 'sketch-tool-group';
+    group.className = 'tool-group';
     group.setAttribute('role', 'group');
     group.setAttribute('aria-label', label);
     this.root.append(group);
     return group;
   }
 
-  add(group: HTMLElement, action: SketchToolAction): HTMLButtonElement {
+  add(group: HTMLElement, action: ToolbarAction): HTMLButtonElement {
     const button = document.createElement('button');
     button.type = 'button';
     button.tabIndex = this.actions.length ? -1 : 0;
@@ -78,16 +80,16 @@ export class SketchToolbar {
   variants(
     group: HTMLElement,
     name: string,
-    variants: readonly SketchToolAction[],
+    variants: readonly ToolbarAction[],
   ): void {
     const wrapper = document.createElement('div');
-    wrapper.className = 'sketch-tool-variants';
+    wrapper.className = 'tool-variants';
     group.append(wrapper);
     const primary = this.add(wrapper, variants[0]);
     const entry = this.actions.at(-1)!;
     const trigger = document.createElement('button');
     trigger.type = 'button';
-    trigger.className = 'sketch-tool-caret';
+    trigger.className = 'tool-caret';
     trigger.tabIndex = -1;
     trigger.title = name;
     trigger.setAttribute('aria-label', name);
@@ -95,11 +97,10 @@ export class SketchToolbar {
     trigger.setAttribute('aria-expanded', 'false');
     trigger.append(createIcon([['path', {d: 'm8 10 4 4 4-4'}]]));
     const menu = document.createElement('div');
-    menu.className = 'sketch-tool-menu';
+    menu.className = 'tool-menu';
     menu.popover = 'auto';
     menu.setAttribute('role', 'menu');
     menu.setAttribute('aria-label', name);
-    this.menus.push({root: menu, trigger, variants});
     const items = variants.map(action => {
       const item = document.createElement('button');
       item.type = 'button';
@@ -112,6 +113,7 @@ export class SketchToolbar {
       );
       item.title = action.title;
       item.addEventListener('click', () => {
+        if (item.disabled) return;
         entry.action = action;
         this.label(primary, action);
         menu.hidePopover();
@@ -119,6 +121,19 @@ export class SketchToolbar {
       });
       menu.append(item);
       return item;
+    });
+    this.menus.push({
+      root: menu,
+      trigger,
+      variants,
+      items,
+      select: name => {
+        const action = variants.find(action => action.name === name);
+        if (action) {
+          entry.action = action;
+          this.label(primary, action);
+        }
+      },
     });
     const open = () => {
       if (trigger.disabled) return;
@@ -130,7 +145,10 @@ export class SketchToolbar {
       items.forEach((item, i) =>
         item.setAttribute('aria-checked', String(variants[i] === entry.action)),
       );
-      items[variants.indexOf(entry.action)].focus();
+      (items[variants.indexOf(entry.action)].disabled
+        ? items.find(item => !item.disabled)
+        : items[variants.indexOf(entry.action)]
+      )?.focus();
     };
     trigger.addEventListener('click', () =>
       menu.matches(':popover-open') ? menu.hidePopover() : open(),
@@ -152,20 +170,21 @@ export class SketchToolbar {
         trigger.focus();
         return;
       }
-      const index = items.indexOf(event.target as HTMLButtonElement);
+      const enabled = items.filter(item => !item.disabled);
+      const index = enabled.indexOf(event.target as HTMLButtonElement);
       const next =
         event.key === 'Home'
           ? 0
           : event.key === 'End'
-            ? items.length - 1
+            ? enabled.length - 1
             : event.key === 'ArrowDown'
-              ? (index + 1) % items.length
+              ? (index + 1) % enabled.length
               : event.key === 'ArrowUp'
-                ? (index + items.length - 1) % items.length
+                ? (index + enabled.length - 1) % enabled.length
                 : undefined;
       if (next !== undefined) {
         event.preventDefault();
-        items[next].focus();
+        enabled[next]?.focus();
       }
     });
     wrapper.append(trigger, menu);
@@ -185,6 +204,9 @@ export class SketchToolbar {
       if (title !== undefined) button.title = title;
     }
     for (const menu of this.menus) {
+      menu.items.forEach((item, i) => {
+        item.disabled = state(menu.variants[i].name).disabled;
+      });
       menu.trigger.disabled = menu.variants.every(
         action => state(action.name).disabled,
       );
@@ -202,6 +224,10 @@ export class SketchToolbar {
     }
   }
 
+  selectVariant(name: string): void {
+    for (const menu of this.menus) menu.select(name);
+  }
+
   close(): void {
     for (const menu of this.menus) menu.root.hidePopover();
   }
@@ -212,7 +238,7 @@ export class SketchToolbar {
     ];
   }
 
-  private label(button: HTMLButtonElement, action: SketchToolAction): void {
+  private label(button: HTMLButtonElement, action: ToolbarAction): void {
     button.setAttribute('aria-label', action.name);
     button.title = action.title;
     button.replaceChildren(createIcon(action.icon));

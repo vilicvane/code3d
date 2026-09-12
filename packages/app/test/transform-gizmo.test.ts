@@ -311,17 +311,18 @@ function pointerFixture(t: TestContext) {
   return {gizmo, camera, element, send, events, captured, grid};
 }
 
-test('Alt bypasses spatial snapping immediately without changing numeric steps', t => {
+test('Alt leaves spatial snapping and numeric steps unchanged', t => {
   const {gizmo, element, send, grid, events} = pointerFixture(t);
   grid.step = 2;
-  for (const control of gizmo['axes']) {
-    control.binding = {
-      ...control.binding!,
+  gizmo.attach(
+    gizmo['attachedObject']!,
+    gizmo.currentBindings.map(binding => ({
+      ...binding,
       value: 0.35,
       sensitivity: -2,
       step: 0.1,
-    };
-  }
+    })),
+  );
   const alt = (type: 'keydown' | 'keyup') => {
     const event = Object.assign(new Event(type, {cancelable: true}), {
       key: 'Alt',
@@ -343,14 +344,13 @@ test('Alt bypasses spatial snapping immediately without changing numeric steps',
   assert.ok(distance > 0);
   assert.ok(Math.abs(distance / 2 - Math.round(distance / 2)) < 1e-10);
   const snapped = active.value;
-  assert.equal(alt('keydown'), true);
-  assert.notEqual(active.value, snapped);
-  assert.ok(Math.abs((active.value - 0.35) * -2 - active.delta) < 1e-10);
-  assert.equal(alt('keyup'), true);
+  assert.equal(alt('keydown'), false);
+  assert.equal(active.value, snapped);
+  assert.equal(alt('keyup'), false);
   assert.equal(
     active.value,
     snapped,
-    'Releasing Alt restores the same snap without mouse motion',
+    'Pressing and releasing Alt keeps the same snap without mouse motion',
   );
   assert.ok(gizmo['axes'].every(control => control.binding!.step === 0.1));
   send('pointerup');
@@ -359,18 +359,25 @@ test('Alt bypasses spatial snapping immediately without changing numeric steps',
   assert.equal(alt('keydown'), false);
 });
 
-test('starting a drag with Alt bypasses snapping and cancellation releases the grid', t => {
+test('starting a drag with Alt still snaps and cancellation releases the grid', t => {
   const {gizmo, send, grid} = pointerFixture(t);
   grid.step = 10;
   send('pointerdown', {altKey: true});
   send('pointermove', {clientX: 459, altKey: true});
   const active = gizmo['active']!;
-  assert.ok(active.control.proxy.position.distanceTo(active.position) > 0);
-  assert.ok(Math.abs(active.value - active.delta) < 1e-10);
+  assert.ok(Math.abs(active.delta) > 0);
+  assert.ok(Math.abs(active.delta) < 5);
+  assert.equal(
+    active.value,
+    0,
+    'A sub-half-grid drag stays snapped even with Alt',
+  );
+  const snapped = active.value;
   send('pointercancel');
   assert.equal(grid.locked, false);
   send('pointerdown');
   send('pointermove', {clientX: 459});
+  assert.equal(gizmo['active']!.value, snapped);
   assert.ok(
     Math.abs(
       gizmo['active']!.value / 10 - Math.round(gizmo['active']!.value / 10),

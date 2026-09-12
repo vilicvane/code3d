@@ -575,7 +575,7 @@ async function verifyOperationRecovery(page: Page, file: string) {
     file.endsWith('intersect.ts') ? 'intersect([' : 'loft([',
   );
   assert.equal(
-    await page.evaluate(() => !!window.exampleApp.viewport.sourceEvaluation()),
+    await page.evaluate(() => !!window.exampleApp.viewport.sourceContext),
     true,
     'Inputs remain inspectable after the operation fails',
   );

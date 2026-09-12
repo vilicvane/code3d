@@ -358,14 +358,14 @@ test('successive rotations compose and a second contact constrains the final pos
 test('around resolves local and positioned external axes', () => {
   const origin = point();
   const selfAxis = box(2, 2, 2).relate(self =>
-    self.on(origin.up).around(self.axis).rotate(90),
+    self.on(origin.up).aroundLine(self.axis).rotate(90),
   );
   near(rotateVector([1, 0, 0], pose(selfAxis).quaternion), [0, 0, -1]);
   const axis = box(2, 2, 2).relate(self =>
     self.center.align(point([10, 20, 30])),
   );
   const rotated = point().relate(self =>
-    self.on(origin.up).around(axis.axis).rotate(90),
+    self.on(origin.up).aroundLine(axis.axis).rotate(90),
   );
   near(position(rotated), [-20, 0, 40]);
   near(rotateVector([1, 0, 0], pose(rotated).quaternion), [0, 0, -1]);
@@ -391,7 +391,7 @@ test('runtime errors distinguish missing bound targets and curved rotation axes'
     // @ts-expect-error Missing and scalar targets must fail at runtime.
     assert.throws(() => part.on(target), /directional bound/);
   assert.throws(
-    () => part.on(part.up).around(circle(3).edge(1)),
+    () => part.on(part.up).aroundLine(circle(3).edge(1)),
     /straight axis/,
   );
 });
@@ -436,17 +436,17 @@ for (const kind of ['on', 'align'] as const) {
     const relation = (self: typeof original) =>
       kind === 'on' ? self.on(target.up) : self.align(target);
     const before = original.relate(self =>
-      relation(self).offset(10, 0, 0).around(axis.axis).rotate(90),
+      relation(self).offset(10, 0, 0).aroundLine(axis.axis).rotate(90),
     );
     const after = original.relate(self =>
-      relation(self).around(axis.axis).rotate(90).offset(10, 0, 0),
+      relation(self).aroundLine(axis.axis).rotate(90).offset(10, 0, 0),
     );
     near(position(before), [0, 0, -10]);
     near(position(after), [10, 0, 0]);
     const interleaved = original.relate(self =>
       relation(self)
         .offset(10, 0, 0)
-        .around(axis.axis)
+        .aroundLine(axis.axis)
         .rotate(90)
         .offset(2, 3, 4),
     );
@@ -462,7 +462,7 @@ test('around uses the final external axis position after mixed constraints solve
       self.center.on(point([0, 20, 0]).up),
     ]);
   const rotated = point().relate(self =>
-    self.on(point().up).around(axis.axis).rotate(90),
+    self.on(point().up).aroundLine(axis.axis).rotate(90),
   );
   near(position(axis), [0, 20, 0]);
   near(position(rotated), [0, 20, 20]);

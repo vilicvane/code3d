@@ -11,7 +11,7 @@ import {
 } from '@code3d/core';
 import {replicad} from '@code3d/core/replicad';
 import {
-  constraintPreview,
+  relationPreview,
   isModelObject,
   modelElementReference,
   sketchDefinition,
@@ -110,7 +110,7 @@ test('constraint stage previews operate on empty sketches and leave final data i
   const placed = sketch().relate(
     s => (relation = s.plane.align(host).offset(2, 0, 0)),
   );
-  const preview = defined(constraintPreview(relation));
+  const preview = defined(relationPreview(relation));
   assert.equal(preview.object.nodeId, sketchFrame(placed).nodeId);
   near(preview.object.compositionTransform.position, pose(placed).position);
   assert.equal(preview.object.constraints.length, 1);

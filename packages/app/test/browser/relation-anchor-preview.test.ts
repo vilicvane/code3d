@@ -66,7 +66,7 @@ test(
               '/main.ts',
               source.indexOf(anchor) + anchor.length - 1,
             );
-            const {target, evaluation} = viewport.sourceEvaluation()!;
+            const {target, evaluation} = viewport.sourceContext!;
             const selected = viewport.getSelected();
             const rendered = [
               ...viewport['occurrences'].values(),
@@ -153,7 +153,7 @@ test(
               ],
             ] as const) {
               viewport.selectBySourceOffset('/main.ts', start + offset);
-              const {target, evaluation} = viewport.sourceEvaluation()!;
+              const {target, evaluation} = viewport.sourceContext!;
               const rendered = [
                 ...viewport['occurrences'].values(),
                 ...viewport['contextOccurrences'].values(),
@@ -168,7 +168,7 @@ test(
                   viewport.getSelected()!.node.nodeId ===
                   (site === 'anchor'
                     ? evaluation.element!.nodeId
-                    : evaluation.constraintOwnerNodeId),
+                    : evaluation.relationOwnerNodeId),
                 correctPlacements: rendered.every(
                   ({node, object, placement}) =>
                     placement === 'composition' &&

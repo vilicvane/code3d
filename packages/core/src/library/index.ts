@@ -16,6 +16,13 @@ export type {
 } from './sketch.js';
 
 export {
+  offset,
+  rotate,
+  pivot,
+  pivotVertex,
+  pivotPoint,
+  aroundEdge,
+  aroundLine,
   arc,
   bezier,
   box,
@@ -45,8 +52,12 @@ export type {
   Anchor,
   Bound,
   DirectionalBounds,
-  ConstraintPivotChain,
-  ConstraintAroundChain,
+  PivotChain,
+  PivotRotation,
+  AxisRotation,
+  AroundChain,
+  Transformation,
+  Relation,
   CanonicalElements,
   Constraint,
   CurveElements,

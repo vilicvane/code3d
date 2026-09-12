@@ -109,6 +109,8 @@ type ToolAction =
     }>;
 
 export type SourceTextEdit = Readonly<{
+  /** Cursor offset in replacement text; committed and undone with the source edit. */
+  focusOffset?: number;
   sourceRef: SourceRef;
   expectedText: string;
   text: string;

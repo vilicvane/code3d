@@ -19,7 +19,13 @@ export type ContextualToolParameterState = {
   schema: ToolValueParameterSchema;
   binding?:
     | Readonly<{kind: 'parameter'; usage: ParameterUsage}>
-    | Readonly<{kind: 'argument'; target: ToolArgumentEditTarget}>;
+    | Readonly<{kind: 'argument'; target: ToolArgumentEditTarget}>
+    | Readonly<{
+        kind: 'rotation';
+        target: {sourceRef: SourceRef};
+        axisOnly: boolean;
+        index: number;
+      }>;
   value?: number;
   placeholderValue?: number;
 };
@@ -82,6 +88,31 @@ export function contextualToolParameters(
   );
 }
 
+/** Missing rotate fields use the same parameter state and source transaction as authored fields. */
+export function draftRotationParameters(
+  sourceRef: SourceRef,
+  axisOnly: boolean,
+): Map<string, ContextualToolParameterState> {
+  return new Map(
+    (axisOnly ? ['angle'] : ['x', 'y', 'z']).map((name, index) => [
+      name,
+      {
+        schema: {
+          index,
+          name,
+          optional: false,
+          kind: 'angle',
+          default: 0,
+          label: axisOnly ? 'Rotate' : `Rotate ${name.toUpperCase()}`,
+          actions: [],
+        },
+        binding: {kind: 'rotation', target: {sourceRef}, axisOnly, index},
+        placeholderValue: 0,
+      },
+    ]),
+  );
+}
+
 export function contextualParameterIntent(
   parameter: ContextualToolParameterState,
 ): ToolIntent | undefined {
@@ -89,6 +120,19 @@ export function contextualParameterIntent(
     return undefined;
   const value = parameter.value!;
   const binding = parameter.binding;
+  if (binding.kind === 'rotation')
+    return {
+      kind: 'model.spatial',
+      operation: 'rotate',
+      change: {
+        kind: 'rotation-complete',
+        sourceRef: binding.target.sourceRef,
+        axisOnly: binding.axisOnly,
+        index: binding.index,
+        value,
+      },
+      preview: {kind: 'model-spatial', objects: []},
+    };
   if (binding.kind === 'parameter') {
     const {usage} = binding;
     const sourceValue =
@@ -117,6 +161,9 @@ export function contextualParameterView(
         ? formatDisplayNumber(parameter.placeholderValue)
         : undefined,
     step: contextualParameterStep(parameter),
+    gridStep:
+      parameter.schema.kind === 'length' &&
+      /(^|\.)d?[xyz]$/.test(parameter.schema.name),
     min: parameter.schema.constraints?.min,
     max: parameter.schema.constraints?.max,
     invalid:

@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {box, line, type Constraint, type SolidModel} from '@code3d/core';
 import {
-  constraintPreview,
-  type ConstraintExpression,
+  relationPreview,
+  type RelationExpression,
   type Transform,
 } from '@code3d/core/tooling';
 
@@ -19,9 +19,9 @@ const samePose = (a: Transform, b: Transform) => {
   near(a.quaternion, b.quaternion);
 };
 
-function previewOf(expression: ConstraintExpression | undefined) {
+function previewOf(expression: RelationExpression | undefined) {
   assert.ok(expression);
-  const preview = constraintPreview(expression);
+  const preview = relationPreview(expression);
   assert.ok(preview);
   return preview;
 }
@@ -34,15 +34,15 @@ test('constraint prefixes keep their own offset, pivot and rotation after the ca
     const offset = on.offset(10, 2, 3);
     const pivot = offset.pivot([5, 0, 0]);
     const rotate = pivot.rotate(25, 35, 10);
-    const around = rotate.around(base.axis.reverse());
-    const axisRotate = around.rotate(45);
+    const aroundLine = rotate.aroundLine(base.axis.reverse());
+    const axisRotate = aroundLine.rotate(45);
     const finalOffset = axisRotate.offset(7, 0, 0);
     return [
       on,
       offset,
       pivot,
       rotate,
-      around,
+      aroundLine,
       axisRotate,
       finalOffset,
     ] as const;
@@ -143,7 +143,7 @@ test('reverse-written align and its earlier rotations retain self as their previ
   let early: Constraint | undefined;
   const placed = original.relate(self => {
     early = base.align(self).rotate(10, 20, 30);
-    return early.around(box(10, 10, 10).axis).rotate(40);
+    return early.aroundLine(box(10, 10, 10).axis).rotate(40);
   });
   const preview = previewOf(early);
   const expected = original.relate(self => base.align(self).rotate(10, 20, 30));

@@ -362,7 +362,7 @@ export default box(20, 10, 30).originVertex(3).rotate(10, 25, 15).relate(self =>
           '/main.ts',
           source.indexOf('pivotVertex') + 2,
         );
-        const selection = viewport.sourceEvaluation()!.evaluation.selection!;
+        const selection = viewport.sourceContext!.evaluation.selection!;
         if (selection.kind === 'edges')
           throw new Error('Expected vertex selection');
         const occurrence = viewport.getSelected()!;

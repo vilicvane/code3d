@@ -4,6 +4,7 @@ import type {
   SourceTargetEvaluation,
 } from './model/compiler';
 import type {ToolParameterSchema} from './model/tool-schema';
+import type {SpatialTool} from './tools/transform-gizmo';
 import type {
   EdgeId,
   ElementKind,
@@ -132,6 +133,7 @@ export type SourceDecorationContext = Readonly<{
   target: SourceTarget;
   evaluation: SourceTargetEvaluation;
   parameter?: ToolParameterSchema;
+  spatialTool?: SpatialTool;
 }>;
 
 export type SourceDecorationProvider = Readonly<{

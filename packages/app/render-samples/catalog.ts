@@ -331,6 +331,7 @@ export const exampleEntries = [
   {
     file: 'constraints/combined-constraints.ts',
   },
+  {file: 'constraints/transformations.ts'},
   {
     file: 'operations/group.ts',
   },

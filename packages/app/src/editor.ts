@@ -1305,6 +1305,26 @@ export class CodeEditor {
       this.withContentChangeOrigin('tool', () => {
         for (const [path, fileEdits] of grouped) {
           const model = this.requireDocument(path).model;
+          const focused = fileEdits.find(
+            edit => edit.focusOffset !== undefined,
+          );
+          const focusOffset =
+            focused &&
+            focused.sourceRef.start +
+              focused.focusOffset! +
+              fileEdits
+                .filter(
+                  edit =>
+                    edit !== focused &&
+                    edit.sourceRef.end <= focused.sourceRef.start,
+                )
+                .reduce(
+                  (delta, edit) =>
+                    delta +
+                    edit.text.length -
+                    (edit.sourceRef.end - edit.sourceRef.start),
+                  0,
+                );
           this.pushSourceEdits(
             path,
             [...fileEdits]
@@ -1317,6 +1337,7 @@ export class CodeEditor {
                 forceMoveMarkers: true,
               })),
             options.undoGroup,
+            focusOffset,
           );
         }
       }),
@@ -1954,6 +1975,7 @@ export class CodeEditor {
     path: string,
     edits: readonly monaco.editor.IIdentifiedSingleEditOperation[],
     undoGroup?: string,
+    focusOffset?: number,
   ): void {
     if (isReadonlyProjectFile(path))
       throw new Error('This project file is read-only.');
@@ -1967,7 +1989,17 @@ export class CodeEditor {
     } else {
       model.pushStackElement();
     }
-    model.pushEditOperations([], [...edits], () => null);
+    const active = model === this.editor.getModel();
+    const selection = model.pushEditOperations(
+      active ? this.editor.getSelections() : [],
+      [...edits],
+      () => {
+        if (!active || focusOffset === undefined) return null;
+        const {lineNumber, column} = model.getPositionAt(focusOffset);
+        return [new monaco.Selection(lineNumber, column, lineNumber, column)];
+      },
+    );
+    if (active && selection) this.editor.setSelections(selection);
     model.pushStackElement();
     if (undoGroup) {
       this.sourceEditUndoGroups.set(path, undoGroup);

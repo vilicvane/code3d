@@ -2,18 +2,20 @@ import {identityRigidTransform, type Vec3} from '@code3d/core/tooling';
 import {namedElementDecorations} from './element-decorations';
 import type {
   SourceDecorationProvider,
+  ViewportAnchorDecoration,
   ViewportDecoration,
 } from '../viewport-decoration';
 
 export function originDecoration(
   nodeId: string,
   position: Vec3,
+  frame: ViewportAnchorDecoration['frame'] = 'operation',
 ): ViewportDecoration {
   return {
     kind: 'anchor',
     id: `${nodeId}:origin`,
     nodeId,
-    frame: 'operation',
+    frame,
     elementKind: 'point',
     layer: 'foreground',
     transform: {...identityRigidTransform, position, scale: [1, 1, 1]},
@@ -24,23 +26,34 @@ export function originDecoration(
 export const originSourceDecoration: SourceDecorationProvider = {
   id: 'model-origin',
   previewBehavior: 'hide',
-  decorations({module, target, evaluation}) {
+  decorations({module, target, evaluation, spatialTool}) {
     const owner =
-      evaluation.constraintPreview ??
-      module.objects.get(evaluation.constraintOwnerNodeId ?? '');
+      evaluation.relationPreview ??
+      module.objects.get(evaluation.relationOwnerNodeId ?? '');
+    if (spatialTool === 'translate') {
+      const nodeIds = owner
+        ? [owner.nodeId]
+        : (evaluation.focusNodeIds ?? evaluation.nodeIds);
+      return nodeIds.flatMap(nodeId => {
+        const node = module.objects.get(nodeId);
+        return node ? [originDecoration(nodeId, node.origin, 'geometry')] : [];
+      });
+    }
     const nearest =
       target.kind === 'value' && owner
-        ? owner.constraints.find(
+        ? (owner.transformations?.flatMap(value => value.rotations)[0]
+            ?.spatial ??
+          owner.constraints.find(
             constraint => constraint.id === evaluation.constraintId,
-          )?.rotations[0]?.spatial
+          )?.rotations[0]?.spatial)
         : undefined;
     const relation =
       nearest && owner
         ? {kind: 'rotate' as const, spatial: nearest, nodeId: owner.nodeId}
-        : evaluation.constraintSpatial;
+        : evaluation.relationSpatial;
     if (relation) {
       const {spatial, nodeId, kind} = relation;
-      if (kind !== 'around' && !spatial.axisOnly)
+      if (kind !== 'aroundLine' && !spatial.axisOnly)
         return [originDecoration(nodeId, spatial.origin)];
       const node = module.objects.get(nodeId);
       return node
@@ -51,6 +64,8 @@ export const originSourceDecoration: SourceDecorationProvider = {
           })
         : [];
     }
+    if (target.kind === 'value' && owner && owner.constraints.length > 1)
+      return [originDecoration(owner.nodeId, [0, 0, 0])];
     return (evaluation.focusNodeIds ?? evaluation.nodeIds).flatMap(nodeId => {
       const node = module.objects.get(nodeId);
       if (node?.operation.spatial)

@@ -303,6 +303,26 @@ export type ModelParameterDimension = Readonly<{
   vector: Vec3;
 }>;
 
+export type RotationReferenceSnapshot = Readonly<{
+  offset: Vec3;
+  offsetExplicit: boolean;
+  explicit: boolean;
+  /** Rotation in the displacement frame, including reversed axes. */
+  rotation: Vec3;
+  /** Reference displacement axes, in the result model's local coordinates. */
+  frame: RigidTransform;
+}> &
+  (
+    | Readonly<{kind: 'pivot'; point: Vec3}>
+    | Readonly<{kind: 'pivotVertex'; id: VertexId}>
+    | Readonly<{kind: 'aroundEdge'; id: EdgeId}>
+    | Readonly<{
+        kind: 'pivotPoint' | 'aroundLine';
+        nodeId: string;
+        name: string;
+      }>
+  );
+
 /** Local geometry coordinates; vector is the authored coordinates, offset, or angles. */
 export type ModelSpatialOperation = Readonly<{
   origin: Vec3;
@@ -311,20 +331,34 @@ export type ModelSpatialOperation = Readonly<{
   frame?: RigidTransform;
   rotation?: Vec3;
   axisOnly?: boolean;
+  reference?: RotationReferenceSnapshot;
 }>;
 
-export type ConstraintSpatialReference = Readonly<{
+export type RelationSpatialReference = Readonly<{
   nodeId: string;
-  kind: 'pivot' | 'pivotVertex' | 'around' | 'rotate';
+  kind:
+    | 'pivot'
+    | 'pivotVertex'
+    | 'pivotPoint'
+    | 'aroundEdge'
+    | 'pivotOffset'
+    | 'aroundLine'
+    | 'axisOffset'
+    | 'rotate'
+    | 'offset';
   spatial: ModelSpatialOperation;
 }>;
 
-export type ConstraintPreview = Readonly<{
+export type RelationPreview = Readonly<{
   object: Pick<
     ModelSnapshotObject,
-    'nodeId' | 'compositionTransform' | 'constraints'
+    | 'nodeId'
+    | 'compositionTransform'
+    | 'constraints'
+    | 'transformations'
+    | 'relationStages'
   >;
-  spatial?: ConstraintSpatialReference;
+  spatial?: RelationSpatialReference;
 }>;
 
 export type RenderMesh = Readonly<{
@@ -347,6 +381,8 @@ export type RenderMesh = Readonly<{
     start: number;
     count: number;
     edgeId: EdgeId;
+    /** True for native straight edges, suitable as rotation references. */
+    linear?: boolean;
   }>[];
 }>;
 
@@ -361,6 +397,8 @@ export type ModelSnapshotObject = Readonly<{
   /** Placement in this snapshot tree; a root value uses model-local coordinates. */
   transform: Transform;
   constraints: readonly ConstraintSnapshot[];
+  transformations?: readonly TransformationSnapshot[];
+  relationStages?: readonly RelationStageSnapshot[];
   elements: readonly ElementSnapshot[];
   origin: Vec3;
   sourceRefs: readonly SourceRef[];
@@ -414,11 +452,20 @@ export type ModelTopologyReference = Readonly<{
   TopologySelection;
 
 export type ConstraintTraceReference = Readonly<{
+  kind: 'constraint';
   constraintId: string;
   source: RelationObject;
   target: RelationObject;
   self?: RelationObject;
 }>;
+
+export type RelationTraceReference =
+  | ConstraintTraceReference
+  | Readonly<{
+      kind: 'transformation';
+      transformationId: string;
+      self?: RelationObject;
+    }>;
 
 export type ModelOperationInstrumentation = Readonly<{
   siteId: string;
@@ -436,6 +483,34 @@ export type ModelObjectRuntimeInfo = Readonly<{
   sourceRefs: readonly SourceRef[];
 }>;
 
+type RelationDefinition =
+  | Readonly<{
+      kind: 'on' | 'align';
+      source: AnchorReference;
+      target: AnchorReference;
+    }>
+  | Readonly<{kind: 'transformation'}>;
+type StoredTransformation = Readonly<{
+  id: string;
+  kind: 'transformation';
+  actions: readonly ConstraintAction[];
+}>;
+export type RelationStageSnapshot = Readonly<{
+  constraintIds: readonly string[];
+  transformationIds: readonly string[];
+  compositionTransform: Transform;
+  offsetFrame: Transform;
+}>;
+export type TransformationSnapshot = Readonly<{
+  id: string;
+  sourceRefs: readonly SourceRef[];
+  parameters: readonly ParameterUsage[];
+  offsets: ConstraintSnapshot['offsets'];
+  rotations: ConstraintSnapshot['rotations'];
+  offsetFrame: Transform;
+}>;
+type StoredPlacement = StoredConstraint | StoredTransformation;
+
 type StoredConstraint = Readonly<{
   id: string;
   kind: 'on' | 'align';
@@ -446,18 +521,48 @@ type StoredConstraint = Readonly<{
 
 // An omitted model refers to relate's self, including after immutable copies.
 type RelationReference = StoredAnchor & Readonly<{model?: RelationObject}>;
-type PivotSelection =
+type PivotSelection = (
   | Readonly<{kind: 'pivot'; point: Vec3}>
   | Readonly<{kind: 'pivotVertex'; id: VertexId}>
-  | Readonly<{kind: 'around'; axis: RelationReference}>;
+  | Readonly<{kind: 'pivotPoint'; point: RelationReference}>
+  | Readonly<{kind: 'aroundEdge'; id: EdgeId}>
+  | Readonly<{kind: 'aroundLine'; axis: RelationReference}>
+) &
+  Readonly<{offset?: Vec3; implicit?: true}>;
+type AxisSelection = Extract<
+  PivotSelection,
+  {kind: 'aroundLine' | 'aroundEdge'}
+>;
+type PointSelection = Exclude<PivotSelection, AxisSelection>;
+function isAxisSelection(pivot: PivotSelection): pivot is AxisSelection {
+  return pivot.kind === 'aroundLine' || pivot.kind === 'aroundEdge';
+}
+function selectionReference(
+  pivot: PivotSelection,
+): RelationReference | undefined {
+  return pivot.kind === 'aroundLine'
+    ? pivot.axis
+    : pivot.kind === 'pivotPoint'
+      ? pivot.point
+      : undefined;
+}
+function mapSelectionReference(
+  pivot: PivotSelection,
+  map: (reference: RelationReference) => RelationReference,
+): PivotSelection {
+  return pivot.kind === 'aroundLine'
+    ? {...pivot, axis: map(pivot.axis)}
+    : pivot.kind === 'pivotPoint'
+      ? {...pivot, point: map(pivot.point)}
+      : pivot;
+}
 type ConstraintRotation = Readonly<{
   pivot: PivotSelection;
   angles: Vec3 | number;
 }>;
-type ConstraintAction = (ConstraintRotation | Readonly<{offset: Vec3}>) &
-  Readonly<{sourceRefs?: readonly SourceRef[]}>;
+type ConstraintAction = ConstraintRotation | Readonly<{offset: Vec3}>;
 type ConstraintSpatialSelection = Readonly<{
-  kind: ConstraintSpatialReference['kind'];
+  kind: RelationSpatialReference['kind'];
   pivot: PivotSelection;
 }>;
 type RelateContext = Readonly<{self: RelationObject; original: RelationObject}>;
@@ -541,7 +646,7 @@ type ModelObjectInit<Kind extends ModelKind = ModelKind> = Readonly<{
   material?: ModelMaterialSnapshot;
   children?: readonly ModelObject[];
   assembly?: SolveContext;
-  constraints?: readonly StoredConstraint[];
+  placements?: readonly StoredPlacement[];
   elements?: StoredElements;
   sourceRefs?: readonly SourceRef[];
   parameters?: readonly ParameterUsage[];
@@ -572,6 +677,7 @@ type SolidGeometry = KernelArtifact<
 
 type SolveContext = {
   poses: ReadonlyMap<RelationObject, RigidTransform>;
+  frame: RigidTransform;
 };
 
 function transformSolveContext(
@@ -579,6 +685,7 @@ function transformSolveContext(
   transform: RigidTransform,
 ): SolveContext {
   return {
+    frame: composeTransforms(transform, context.frame),
     poses: new Map(
       [...context.poses].map(([model, pose]) => [
         model,
@@ -752,7 +859,7 @@ export interface ModelCapabilities<
   relate(
     build: (
       self: ModelForKind<Elements, Kind>,
-    ) => Constraint | readonly Constraint[],
+    ) => Relation | readonly Relation[],
   ): ModelForKind<Elements, Kind>;
   expose<const Sources extends ElementSources>(
     sources: Sources,
@@ -1139,7 +1246,7 @@ export function modelTopologyIds(
       : undefined;
   const source = isModelObject(value)
     ? value
-    : value instanceof ConstraintExpression
+    : value instanceof RelationExpression
       ? value.self()
       : topology?.source;
   const geometry = isModelObject(source)
@@ -1154,23 +1261,15 @@ export function modelTopologyIds(
   );
 }
 
-/** Traceable relation values, including unfinished pivot and axis selections. */
-export abstract class ConstraintExpression {
-  private get sourceRefs(): SourceRef[] {
-    return valueTrace(this).sourceRefs;
-  }
-  private get parameters(): ParameterUsage[] {
-    return valueTrace(this).parameters;
-  }
-  protected spatialOperation?: ConstraintSpatialSelection;
+/** Traceable placement values, including unfinished pivot and axis selections. */
+export abstract class RelationExpression {
   protected constructor(
-    protected readonly kind: StoredConstraint['kind'],
-    protected readonly source: AnchorReference,
-    protected readonly target: AnchorReference,
+    protected readonly definition: RelationDefinition,
     protected readonly actions: readonly ConstraintAction[],
     protected readonly context: RelateContext | undefined,
-    protected readonly constraintId: string,
-    previous?: ConstraintExpression,
+    protected readonly relationId: string,
+    previous?: RelationExpression,
+    protected readonly spatialOperation?: ConstraintSpatialSelection,
   ) {
     valueTraces.set(this, {
       sourceRefs: [...(previous ? valueTrace(previous).sourceRefs : [])],
@@ -1179,7 +1278,7 @@ export abstract class ConstraintExpression {
   }
   /** @internal */
   attachSource(sourceRef: SourceRef): void {
-    const refs = this.sourceRefs;
+    const refs = valueTrace(this).sourceRefs;
     if (
       !refs.some(
         ref =>
@@ -1192,100 +1291,215 @@ export abstract class ConstraintExpression {
   }
   /** @internal */
   attachParameters(parameters: readonly ParameterUsage[]): void {
-    appendUniqueParameters(this.parameters, parameters);
+    appendUniqueParameters(valueTrace(this).parameters, parameters);
   }
   /** @internal */
   self(): RelationObject | undefined {
     return this.context?.self;
   }
   /** @internal */
-  traceReference(): ConstraintTraceReference {
+  traceReference(): RelationTraceReference {
+    if (this.definition.kind === 'transformation')
+      return {
+        kind: 'transformation',
+        transformationId: this.relationId,
+        self: this.context?.self,
+      };
     const rebind = (model: RelationObject) =>
       model === this.context?.original ? this.context.self : model;
     return {
-      constraintId: this.constraintId,
-      source: rebind(this.source.model),
-      target: rebind(this.target.model),
+      kind: 'constraint',
+      constraintId: this.relationId,
+      source: rebind(this.definition.source.model),
+      target: rebind(this.definition.target.model),
       self: this.context?.self,
     };
   }
   /** @internal */
-  storeFor(model: RelationObject, original: RelationObject): StoredConstraint {
+  storeFor(model: RelationObject, original: RelationObject): StoredPlacement {
     const isSelf = (candidate: RelationObject | undefined) =>
       candidate === model || candidate === original;
-    if (!isSelf(this.source.model) && !isSelf(this.target.model))
-      throw new Error(
-        'The constraint returned by relate() must involve self or the original receiver.',
-      );
     const bind = (reference: RelationReference): RelationReference => ({
       ...reference,
       model: isSelf(reference.model) ? undefined : reference.model,
     });
-    const stored: StoredConstraint = {
-      id: this.constraintId,
-      kind: this.kind,
-      source: bind(this.source),
-      target: bind(this.target),
-      actions: this.actions.map(action => ({
-        ...action,
-        sourceRefs: [...valueTrace(action).sourceRefs],
-        ...('pivot' in action
-          ? {
-              pivot:
-                action.pivot.kind === 'around'
-                  ? {...action.pivot, axis: bind(action.pivot.axis)}
-                  : action.pivot,
-            }
-          : {}),
-      })),
+    const definition = this.definition;
+    if (
+      definition.kind !== 'transformation' &&
+      !isSelf(definition.source.model) &&
+      !isSelf(definition.target.model)
+    )
+      throw new Error(
+        'The constraint returned by relate() must involve self or the original receiver.',
+      );
+    const stored: StoredPlacement = {
+      ...(definition.kind === 'transformation'
+        ? definition
+        : {
+            kind: definition.kind,
+            source: bind(definition.source),
+            target: bind(definition.target),
+          }),
+      id: this.relationId,
+      actions: this.actions.map(action => {
+        const storedAction = {
+          ...action,
+          ...('pivot' in action
+            ? {
+                pivot: mapSelectionReference(action.pivot, bind),
+              }
+            : {}),
+        };
+        valueTraces.set(storedAction, {
+          sourceRefs: [...valueTrace(action).sourceRefs],
+          parameters: [...valueTrace(action).parameters],
+        });
+        return storedAction;
+      }),
     };
     valueTraces.set(stored, {
-      sourceRefs: [...this.sourceRefs],
-      parameters: [...this.parameters],
+      sourceRefs: [...valueTrace(this).sourceRefs],
+      parameters: [...valueTrace(this).parameters],
     });
     return stored;
   }
   /** @internal */
-  preview(): ConstraintPreview | undefined {
+  preview(
+    preceding: readonly RelationExpression[] = [],
+  ): RelationPreview | undefined {
     if (!this.context) return undefined;
     const pivot = this.spatialOperation?.pivot;
-    const selection =
-      pivot?.kind === 'around'
-        ? {
-            ...this.spatialOperation!,
-            pivot: {
-              ...pivot,
-              axis: {
-                ...pivot.axis,
-                model:
-                  pivot.axis.model === this.context.self ||
-                  pivot.axis.model === this.context.original
-                    ? undefined
-                    : pivot.axis.model,
-              },
-            },
-          }
-        : this.spatialOperation;
-    return this.context.self[relationPreview](
+    const selection = pivot
+      ? {
+          ...this.spatialOperation!,
+          pivot: mapSelectionReference(pivot, reference => ({
+            ...reference,
+            model:
+              reference.model === this.context!.self ||
+              reference.model === this.context!.original
+                ? undefined
+                : reference.model,
+          })),
+        }
+      : this.spatialOperation;
+    return this.context.self[previewRelation](
       this.storeFor(this.context.self, this.context.original),
       selection,
+      preceding,
     );
+  }
+  /** @internal */
+  chainArguments(): [
+    RelationDefinition,
+    readonly ConstraintAction[],
+    RelateContext | undefined,
+    string,
+    RelationExpression,
+  ] {
+    return [this.definition, this.actions, this.context, this.relationId, this];
   }
 }
 
-export class Constraint extends ConstraintExpression {
+export class Constraint extends RelationExpression {
+  declare protected readonly definition: Exclude<
+    RelationDefinition,
+    {kind: 'transformation'}
+  >;
+  /**
+   * Translate in call order along target reference axes. Zero is identity.
+   * @code3d.param x {kind: 'length', default: 0, label: 'ΔX'}
+   * @code3d.param y {kind: 'length', default: 0, label: 'ΔY'}
+   * @code3d.param z {kind: 'length', default: 0, label: 'ΔZ'}
+   */
+  offset(x: number, y: number, z: number): Constraint;
+  offset(x = 0, y = 0, z = 0): Constraint {
+    assertFiniteVector('offset', [x, y, z]);
+    const action: ConstraintAction = {offset: [x, y, z]};
+    const result = this.completed([...this.actions, action], this);
+    valueTraces.set(action, valueTrace(result));
+    return result;
+  }
+
+  /**
+   * Select this rotation's pivot in self's local coordinates.
+   * @code3d.param x {kind: 'length', default: 0, label: 'Pivot X'}
+   * @code3d.param y {kind: 'length', default: 0, label: 'Pivot Y'}
+   * @code3d.param z {kind: 'length', default: 0, label: 'Pivot Z'}
+   */
+  pivot([x, y, z]: Vec3): PivotChain<Constraint>;
+  pivot([x = 0, y = 0, z = 0]: Vec3 = [0, 0, 0]): PivotChain<Constraint> {
+    assertFiniteVector('pivot', [x, y, z]);
+    return new PivotChain<Constraint>(this, {kind: 'pivot', point: [x, y, z]});
+  }
+  /** @code3d.param id {kind: 'vertex', label: 'Pivot vertex'} */
+  pivotVertex(id: VertexId): PivotChain<Constraint> {
+    assertTopologyId('vertex', id);
+    return new PivotChain<Constraint>(this, {kind: 'pivotVertex', id});
+  }
+  /** Select a point reference as the center; rotation axes remain self local. @code3d.tool */
+  pivotPoint(point: PointAnchor): PivotChain<Constraint> {
+    return new PivotChain(this, {
+      kind: 'pivotPoint',
+      point: rotationPointReference(point),
+    });
+  }
+  /** @code3d.param id {kind: 'edge', label: 'Rotation edge'} */
+  aroundEdge(id: EdgeId): AroundChain<Constraint> {
+    assertTopologyId('edge', id);
+    return new AroundChain(this, {kind: 'aroundEdge', id});
+  }
+  /**
+   * Select a positioned axis in the composition.
+   * @code3d.tool
+   */
+  aroundLine(axis: LineAnchor): AroundChain<Constraint> {
+    const reference = rotationAxisReference(axis);
+    return new AroundChain<Constraint>(this, {
+      kind: 'aroundLine',
+      axis: reference,
+    });
+  }
+  /**
+   * Rotate about self's origin and local X, Y, then Z axes, in degrees.
+   * @code3d.param x {kind: 'angle', default: 0, label: 'Rotate X'}
+   * @code3d.param y {kind: 'angle', default: 0, label: 'Rotate Y'}
+   * @code3d.param z {kind: 'angle', default: 0, label: 'Rotate Z'}
+   */
+  rotate(x: number, y: number, z: number): Constraint;
+  rotate(x = 0, y = 0, z = 0): Constraint {
+    return this.withRotation(
+      {kind: 'pivot', point: origin, implicit: true},
+      [x, y, z],
+      this,
+    );
+  }
+  /** @internal */
+  withRotation(
+    pivot: PivotSelection,
+    angles: Vec3 | number,
+    previous: RelationExpression,
+  ): Constraint {
+    assertFiniteVector(
+      'rotate',
+      typeof angles === 'number' ? [angles, 0, 0] : angles,
+    );
+    const action: ConstraintAction = {pivot, angles};
+    const result = this.completed([...this.actions, action], previous, {
+      kind: 'rotate',
+      pivot,
+    });
+    valueTraces.set(action, valueTrace(result));
+    return result;
+  }
   private constructor(
-    kind: StoredConstraint['kind'],
-    source: AnchorReference,
-    target: AnchorReference,
+    definition: Exclude<RelationDefinition, {kind: 'transformation'}>,
     actions: readonly ConstraintAction[] = [],
     context = activeRelate,
-    constraintId = `constraint-${nextConstraintId++}`,
-    previous?: ConstraintExpression,
-    spatialOperation?: ConstraintSpatialSelection,
+    id = `constraint-${nextConstraintId++}`,
+    previous?: RelationExpression,
+    selection?: ConstraintSpatialSelection,
   ) {
-    super(kind, source, target, actions, context, constraintId, previous);
-    this.spatialOperation = spatialOperation;
+    super(definition, actions, context, id, previous, selection);
   }
   /** @internal */
   static create(
@@ -1299,175 +1513,287 @@ export class Constraint extends ConstraintExpression {
       throw new Error(
         'align() requires points, curves, or surfaces; select geometry on a solid or group.',
       );
-    return new Constraint(kind, source, target);
+    return new Constraint({kind, source, target});
   }
-  /**
-   * Translate self from the relation's solution in the target reference axes,
-   * in call order. Retain the relation's free modes; zero is identity.
-   * @code3d.param x {kind: 'length', default: 0, label: 'ΔX'}
-   * @code3d.param y {kind: 'length', default: 0, label: 'ΔY'}
-   * @code3d.param z {kind: 'length', default: 0, label: 'ΔZ'}
-   */
-  offset(x: number, y: number, z: number): Constraint;
-  offset(x = 0, y = 0, z = 0): Constraint {
-    assertFiniteVector('offset', [x, y, z]);
-    const action: ConstraintAction = {offset: [x, y, z]};
-    const result = new Constraint(
-      this.kind,
-      this.source,
-      this.target,
-      [...this.actions, action],
+  private completed(
+    actions: readonly ConstraintAction[],
+    previous: RelationExpression,
+    selection?: ConstraintSpatialSelection,
+  ): Constraint {
+    return new Constraint(
+      this.definition,
+      actions,
       this.context,
-      this.constraintId,
-      this,
+      this.relationId,
+      previous,
+      selection,
     );
-    valueTraces.set(action, valueTrace(result));
-    return result;
   }
+}
 
-  /**
-   * Select this rotation's pivot in self's local coordinates.
-   * @code3d.param x {kind: 'length', default: 0, label: 'Pivot X'}
-   * @code3d.param y {kind: 'length', default: 0, label: 'Pivot Y'}
-   * @code3d.param z {kind: 'length', default: 0, label: 'Pivot Z'}
-   */
-  pivot([x, y, z]: Vec3): ConstraintPivotChain;
-  pivot([x = 0, y = 0, z = 0]: Vec3 = [0, 0, 0]): ConstraintPivotChain {
-    assertFiniteVector('pivot', [x, y, z]);
-    return new ConstraintPivotChain(this, {kind: 'pivot', point: [x, y, z]});
-  }
-  /** @code3d.param id {kind: 'vertex', label: 'Pivot vertex'} */
-  pivotVertex(id: VertexId): ConstraintPivotChain {
-    assertTopologyId('vertex', id);
-    return new ConstraintPivotChain(this, {kind: 'pivotVertex', id});
-  }
-  /** Select a positioned axis in the composition. */
-  around(axis: LineAnchor): ConstraintAroundChain {
-    const reference = anchorReference(axis);
-    if (reference.kind !== 'line')
-      throw new Error('around() requires an axis or straight edge.');
-    const geometry =
-      reference.topology?.source[modelGeometry]()?.value ??
-      (reference.whole && isModelObject(reference.model)
-        ? reference.model[modelGeometry]()?.value
-        : undefined);
-    if (geometry) {
-      const straight = reference.topology
-        ? withTopologyShape(
-            geometry.shape,
-            geometry.topology,
-            reference.topology.selection,
-            shape => (shape as ReplicadEdge).geomType === 'LINE',
-          )
-        : (geometry.shape as ReplicadEdge).geomType === 'LINE';
-      if (!straight)
-        throw new Error(
-          'around() requires a straight axis; curved edges do not define one rotation axis.',
-        );
-    }
-    return new ConstraintAroundChain(this, {kind: 'around', axis: reference});
-  }
-  /**
-   * Rotate about self's origin and local X, Y, then Z axes, in degrees.
-   * @code3d.param x {kind: 'angle', default: 0, label: 'Rotate X'}
-   * @code3d.param y {kind: 'angle', default: 0, label: 'Rotate Y'}
-   * @code3d.param z {kind: 'angle', default: 0, label: 'Rotate Z'}
-   */
-  rotate(x: number, y: number, z: number): Constraint;
-  rotate(x = 0, y = 0, z = 0): Constraint {
-    return this.withRotation({kind: 'pivot', point: origin}, [x, y, z], this);
-  }
+/** One completed relative placement step. Array order composes transformations. */
+export class Transformation extends RelationExpression {
+  declare protected readonly definition: Readonly<{kind: 'transformation'}>;
   /** @internal */
+  constructor(action: ConstraintAction, previous?: RelationExpression) {
+    const args = previous?.chainArguments();
+    super(
+      {kind: 'transformation'},
+      [action],
+      args ? args[2] : activeRelate,
+      args?.[3] ?? `transformation-${nextConstraintId++}`,
+      previous,
+      'pivot' in action ? {kind: 'rotate', pivot: action.pivot} : undefined,
+    );
+    valueTraces.set(action, valueTrace(this));
+  }
+}
+
+/** Carries the reference selection until its independent rotation is complete. */
+class TransformationRotation extends RelationExpression {
+  constructor() {
+    super(
+      {kind: 'transformation'},
+      [],
+      activeRelate,
+      `transformation-${nextConstraintId++}`,
+    );
+  }
   withRotation(
     pivot: PivotSelection,
     angles: Vec3 | number,
-    previous: ConstraintExpression,
-  ): Constraint {
+    previous: RelationExpression,
+  ): Transformation {
     assertFiniteVector(
       'rotate',
       typeof angles === 'number' ? [angles, 0, 0] : angles,
     );
-    const action: ConstraintAction = {pivot, angles};
-    const result = new Constraint(
-      this.kind,
-      this.source,
-      this.target,
-      [...this.actions, action],
-      this.context,
-      this.constraintId,
-      previous,
-      {kind: 'rotate', pivot},
-    );
-    valueTraces.set(action, valueTrace(result));
-    return result;
-  }
-
-  /** @internal */
-  chainArguments(): [
-    StoredConstraint['kind'],
-    AnchorReference,
-    AnchorReference,
-    readonly ConstraintAction[],
-    RelateContext | undefined,
-    string,
-    ConstraintExpression,
-  ] {
-    return [
-      this.kind,
-      this.source,
-      this.target,
-      this.actions,
-      this.context,
-      this.constraintId,
-      this,
-    ];
+    return new Transformation({pivot, angles}, previous);
   }
 }
 
-export class ConstraintPivotChain extends ConstraintExpression {
+type RotationBuilder<Completed extends Relation> = RelationExpression & {
+  withRotation(
+    pivot: PivotSelection,
+    angles: Vec3 | number,
+    previous: RelationExpression,
+  ): Completed;
+};
+
+function rotationPointReference(point: PointAnchor): AnchorReference {
+  const reference = anchorReference(point);
+  if (reference.kind !== 'point')
+    throw new Error('pivotPoint() requires a point reference.');
+  return reference;
+}
+
+function rotationAxisReference(axis: LineAnchor): AnchorReference {
+  const reference = anchorReference(axis);
+  if (reference.kind !== 'line')
+    throw new Error('aroundLine() requires an axis or straight edge.');
+  const geometry =
+    reference.topology?.source[modelGeometry]()?.value ??
+    (reference.whole && isModelObject(reference.model)
+      ? reference.model[modelGeometry]()?.value
+      : undefined);
+  if (geometry) {
+    const straight = reference.topology
+      ? withTopologyShape(
+          geometry.shape,
+          geometry.topology,
+          reference.topology.selection,
+          shape => (shape as ReplicadEdge).geomType === 'LINE',
+        )
+      : (geometry.shape as ReplicadEdge).geomType === 'LINE';
+    if (!straight)
+      throw new Error(
+        'aroundLine() requires a straight axis; curved edges do not define one rotation axis.',
+      );
+  }
+  return reference;
+}
+
+export type Relation = Constraint | Transformation;
+
+export class PivotRotation<
+  Completed extends Relation,
+> extends RelationExpression {
   /** @internal */
   constructor(
-    private readonly constraint: Constraint,
-    private readonly selection: Exclude<PivotSelection, {kind: 'around'}>,
+    protected readonly chain: RotationBuilder<Completed>,
+    protected readonly selection: PointSelection,
+    previous?: RelationExpression,
   ) {
-    super(...constraint.chainArguments());
-    this.spatialOperation = {kind: selection.kind, pivot: selection};
+    super(...(previous ?? chain).chainArguments(), {
+      kind: selection.offset ? 'pivotOffset' : selection.kind,
+      pivot: selection,
+    });
   }
   /**
    * @code3d.param x {kind: 'angle', default: 0, label: 'Rotate X'}
    * @code3d.param y {kind: 'angle', default: 0, label: 'Rotate Y'}
    * @code3d.param z {kind: 'angle', default: 0, label: 'Rotate Z'}
    */
-  rotate(x: number, y: number, z: number): Constraint;
-  rotate(x = 0, y = 0, z = 0): Constraint {
-    return this.constraint.withRotation(this.selection, [x, y, z], this);
+  rotate(x: number, y: number, z: number): Completed;
+  rotate(x = 0, y = 0, z = 0): Completed {
+    return this.chain.withRotation(this.selection, [x, y, z], this);
   }
 }
-export class ConstraintAroundChain extends ConstraintExpression {
+
+export class PivotChain<
+  Completed extends Relation,
+> extends PivotRotation<Completed> {
+  /**
+   * Offset the selected pivot along self's local axes, retaining its reference.
+   * @code3d.param x {kind: 'length', default: 0, label: 'Pivot ΔX'}
+   * @code3d.param y {kind: 'length', default: 0, label: 'Pivot ΔY'}
+   * @code3d.param z {kind: 'length', default: 0, label: 'Pivot ΔZ'}
+   */
+  pivotOffset(x: number, y: number, z: number): PivotRotation<Completed>;
+  pivotOffset(x = 0, y = 0, z = 0): PivotRotation<Completed> {
+    assertFiniteVector('pivotOffset', [x, y, z]);
+    return new PivotRotation(
+      this.chain,
+      {...this.selection, offset: [x, y, z]},
+      this,
+    );
+  }
+}
+
+export class AxisRotation<
+  Completed extends Relation,
+> extends RelationExpression {
   /** @internal */
   constructor(
-    private readonly constraint: Constraint,
-    private readonly selection: Extract<PivotSelection, {kind: 'around'}>,
+    protected readonly chain: RotationBuilder<Completed>,
+    protected readonly selection: AxisSelection,
+    previous?: RelationExpression,
   ) {
-    super(...constraint.chainArguments());
-    this.spatialOperation = {kind: selection.kind, pivot: selection};
+    super(...(previous ?? chain).chainArguments(), {
+      kind: selection.offset ? 'axisOffset' : selection.kind,
+      pivot: selection,
+    });
   }
   /** @code3d.param angle {kind: 'angle', default: 0, label: 'Rotate'} */
-  rotate(angle: number): Constraint;
-  rotate(angle = 0): Constraint {
-    return this.constraint.withRotation(this.selection, angle, this);
+  rotate(angle: number): Completed;
+  rotate(angle = 0): Completed {
+    return this.chain.withRotation(this.selection, angle, this);
   }
+}
+
+export class AroundChain<
+  Completed extends Relation,
+> extends AxisRotation<Completed> {
+  /**
+   * Offset the selected axis in its reference frame, retaining its direction.
+   * @code3d.param x {kind: 'length', default: 0, label: 'Axis ΔX'}
+   * @code3d.param y {kind: 'length', default: 0, label: 'Axis ΔY'}
+   * @code3d.param z {kind: 'length', default: 0, label: 'Axis ΔZ'}
+   */
+  axisOffset(x: number, y: number, z: number): AxisRotation<Completed>;
+  axisOffset(x = 0, y = 0, z = 0): AxisRotation<Completed> {
+    assertFiniteVector('axisOffset', [x, y, z]);
+    return new AxisRotation(
+      this.chain,
+      {...this.selection, offset: [x, y, z]},
+      this,
+    );
+  }
+}
+
+function selectedAxis(
+  axis: RelationReference,
+  offset: Vec3 | undefined,
+): RigidTransform {
+  return composeTransforms(axis.transform, translation(offset ?? origin));
+}
+
+/**
+ * Move the joint result along the fixed axes of its composition.
+ * @code3d.param x {kind: 'length', default: 0, label: 'ΔX'}
+ * @code3d.param y {kind: 'length', default: 0, label: 'ΔY'}
+ * @code3d.param z {kind: 'length', default: 0, label: 'ΔZ'}
+ */
+export function offset(x: number, y: number, z: number): Transformation;
+export function offset(x = 0, y = 0, z = 0): Transformation {
+  assertFiniteVector('offset', [x, y, z]);
+  return new Transformation({offset: [x, y, z]});
+}
+/**
+ * Rotate about self's current origin and local X, Y, then Z axes.
+ * @code3d.param x {kind: 'angle', default: 0, label: 'Rotate X'}
+ * @code3d.param y {kind: 'angle', default: 0, label: 'Rotate Y'}
+ * @code3d.param z {kind: 'angle', default: 0, label: 'Rotate Z'}
+ */
+export function rotate(x: number, y: number, z: number): Transformation;
+export function rotate(x = 0, y = 0, z = 0): Transformation {
+  assertFiniteVector('rotate', [x, y, z]);
+  return new Transformation({
+    pivot: {kind: 'pivot', point: origin, implicit: true},
+    angles: [x, y, z],
+  });
+}
+/**
+ * Select a pivot in self's local coordinates for the next rotation.
+ * @code3d.param x {kind: 'length', default: 0, label: 'Pivot X'}
+ * @code3d.param y {kind: 'length', default: 0, label: 'Pivot Y'}
+ * @code3d.param z {kind: 'length', default: 0, label: 'Pivot Z'}
+ */
+export function pivot([x, y, z]: Vec3): PivotChain<Transformation>;
+export function pivot([
+  x = 0,
+  y = 0,
+  z = 0,
+]: Vec3 = origin): PivotChain<Transformation> {
+  assertFiniteVector('pivot', [x, y, z]);
+  return new PivotChain(new TransformationRotation(), {
+    kind: 'pivot',
+    point: [x, y, z],
+  });
+}
+/** @code3d.param id {kind: 'vertex', label: 'Pivot vertex'} */
+export function pivotVertex(id: VertexId): PivotChain<Transformation> {
+  assertTopologyId('vertex', id);
+  return new PivotChain(new TransformationRotation(), {
+    kind: 'pivotVertex',
+    id,
+  });
+}
+/** Select a point reference as the center; rotation axes remain self local. @code3d.tool */
+export function pivotPoint(point: PointAnchor): PivotChain<Transformation> {
+  return new PivotChain(new TransformationRotation(), {
+    kind: 'pivotPoint',
+    point: rotationPointReference(point),
+  });
+}
+/** @code3d.param id {kind: 'edge', label: 'Rotation edge'} */
+export function aroundEdge(id: EdgeId): AroundChain<Transformation> {
+  assertTopologyId('edge', id);
+  return new AroundChain(new TransformationRotation(), {
+    kind: 'aroundEdge',
+    id,
+  });
+}
+/**
+ * Select a positioned axis in the composition for the next rotation.
+ * @code3d.tool
+ */
+export function aroundLine(axis: LineAnchor): AroundChain<Transformation> {
+  return new AroundChain(new TransformationRotation(), {
+    kind: 'aroundLine',
+    axis: rotationAxisReference(axis),
+  });
 }
 
 const modelGeometry = Symbol('modelGeometry');
 const referenceBounds = Symbol('referenceBounds');
 const referenceBoundsParts = Symbol('referenceBoundsParts');
 const modelSnapshotQueries = Symbol('modelSnapshotQueries');
-const relationPreview = Symbol('relationPreview');
+const previewRelation = Symbol('previewRelation');
 
 type RelationObjectInit = Readonly<{
   nodeId?: string;
-  constraints?: readonly StoredConstraint[];
+  placements?: readonly StoredPlacement[];
   sourceRefs?: readonly SourceRef[];
   parameters?: readonly ParameterUsage[];
 }>;
@@ -1477,11 +1803,17 @@ export abstract class RelationObject {
   readonly nodeId: string;
   /** @internal */
   abstract readonly name: string;
-  protected constraints: StoredConstraint[];
+  protected placements: StoredPlacement[];
+
+  protected get constraints(): StoredConstraint[] {
+    return this.placements.filter(
+      (value): value is StoredConstraint => value.kind !== 'transformation',
+    );
+  }
 
   protected constructor(init: RelationObjectInit = {}) {
     this.nodeId = init.nodeId ?? `node-${nextNodeId++}`;
-    this.constraints = [...(init.constraints ?? [])];
+    this.placements = [...(init.placements ?? [])];
     valueTraces.set(this, {
       sourceRefs: [...(init.sourceRefs ?? [])],
       parameters: [...(init.parameters ?? [])],
@@ -1497,6 +1829,24 @@ export abstract class RelationObject {
   }
 
   protected abstract copyRelations(init: RelationObjectInit): RelationObject;
+
+  protected edgeReference(_id: EdgeId): RelationReference {
+    throw new Error(
+      'aroundEdge() requires model topology. Use aroundLine(lineRef) for a line reference.',
+    );
+  }
+  private rotationAxis(pivot: AxisSelection): RelationReference {
+    return pivot.kind === 'aroundLine'
+      ? pivot.axis
+      : this.edgeReference(pivot.id);
+  }
+  private rotationPoint(pivot: PointSelection): Vec3 {
+    return pivot.kind === 'pivot'
+      ? pivot.point
+      : pivot.kind === 'pivotVertex'
+        ? this.vertexPosition(pivot.id)
+        : pivot.point.transform.position;
+  }
 
   protected vertexPosition(_id: VertexId): Vec3 {
     throw new Error(
@@ -1522,27 +1872,30 @@ export abstract class RelationObject {
   /** Store relations only after the complete callback has returned. */
   protected addRelations(
     original: RelationObject,
-    build: () => Constraint | readonly Constraint[],
+    build: () => Relation | readonly Relation[],
   ): readonly RelationObject[] {
     const previous = activeRelate;
     activeRelate = {self: this, original};
-    let built: Constraint | readonly Constraint[];
+    let built: Relation | readonly Relation[];
     try {
       built = build();
     } finally {
       activeRelate = previous;
     }
-    const constraints: readonly Constraint[] = Array.isArray(built)
+    const relations: readonly Relation[] = Array.isArray(built)
       ? built
-      : [built as Constraint];
-    const stored = constraints.map(constraint => {
-      if (!(constraint instanceof Constraint))
+      : [built as Relation];
+    const stored = relations.map(constraint => {
+      if (
+        !(constraint instanceof Constraint) &&
+        !(constraint instanceof Transformation)
+      )
         throw new Error(
-          'relate() requires a completed Constraint; finish pivot/around with rotate().',
+          'relate() requires a completed Constraint or Transformation; finish the pivot or axis selector with rotate().',
         );
       return constraint.storeFor(this, original);
     });
-    this.constraints.push(...stored);
+    this.placements.push(...stored);
     return uniqueModels(stored.flatMap(constraintReferences));
   }
 
@@ -1652,28 +2005,36 @@ export abstract class RelationObject {
   }
 
   private bodyActions(
-    constraint: StoredConstraint,
+    constraint: StoredPlacement,
     indices: Map<RelationObject, number>,
   ): BodyAction[] {
     return constraint.actions.map(action => {
       if ('offset' in action) return {offset: action.offset};
       const {pivot, angles} = action;
-      if (pivot.kind === 'around') {
-        return pivot.axis.model
+      if (isAxisSelection(pivot)) {
+        const axis = this.rotationAxis(pivot);
+        return axis.model
           ? {
-              body: indices.get(pivot.axis.model)!,
-              axis: pivot.axis.transform,
-              angle: (angles as number) * (pivot.axis.direction ?? 1),
+              body: indices.get(axis.model)!,
+              axis: selectedAxis(axis, pivot.offset),
+              angle: (angles as number) * (axis.direction ?? 1),
             }
           : {
               local: axisRotation(
-                pivot.axis.transform,
-                (angles as number) * (pivot.axis.direction ?? 1),
+                selectedAxis(axis, pivot.offset),
+                (angles as number) * (axis.direction ?? 1),
               ),
             };
       }
+      if (pivot.kind === 'pivotPoint' && pivot.point.model)
+        return {
+          body: indices.get(pivot.point.model)!,
+          point: pivot.point.transform.position,
+          rotation: rotationAround(origin, angles as Vec3).quaternion,
+          displacement: pivot.offset ?? origin,
+        };
       const frame = translation(
-        pivot.kind === 'pivot' ? pivot.point : this.vertexPosition(pivot.id),
+        addVectors(this.rotationPoint(pivot), pivot.offset ?? origin),
       );
       return {
         local: composeTransforms(
@@ -1685,24 +2046,41 @@ export abstract class RelationObject {
   }
 
   /** @internal */
-  [relationPreview](
-    constraint: StoredConstraint,
+  [previewRelation](
+    constraint: StoredPlacement | undefined,
     selection: ConstraintSpatialSelection | undefined,
-  ): ConstraintPreview {
+    preceding: readonly RelationExpression[] = [],
+  ): RelationPreview {
     // Keep inherited and sibling relations in the solve. Only the selected chain
     // is replaced by its selected prefix; geometry and node identity stay shared.
-    const constraints = [...this.constraints];
-    const index = constraints.findIndex(value => value.id === constraint.id);
-    if (index < 0) constraints.push(constraint);
-    else constraints[index] = constraint;
+    let placements = [...this.placements];
+    const index = placements.findIndex(value => value.id === constraint?.id);
+    if (index < 0) {
+      placements.push(
+        ...preceding.map(value =>
+          value.storeFor(this, value.chainArguments()[2]!.original),
+        ),
+      );
+      if (constraint) placements.push(constraint);
+    } else if (constraint) {
+      placements[index] = constraint;
+      let end = index + 1;
+      if (constraint.kind !== 'transformation')
+        while (
+          end < placements.length &&
+          placements[end].kind !== 'transformation'
+        )
+          end++;
+      placements = placements.slice(0, end);
+    }
     const owner = this.copyRelations({
       nodeId: this.nodeId,
-      constraints,
+      placements,
     });
     const context = RelationObject.createSolveContext([
       owner,
-      ...(selection?.pivot.kind === 'around' && selection.pivot.axis.model
-        ? [selection.pivot.axis.model]
+      ...(selection && selectionReference(selection.pivot)?.model
+        ? [selectionReference(selection.pivot)!.model!]
         : []),
     ]);
     return {
@@ -1712,24 +2090,29 @@ export abstract class RelationObject {
         constraints: owner.constraints.map(value =>
           owner.constraintSnapshot(value, context),
         ),
+        transformations: owner.transformationSnapshots(context),
+        relationStages: owner.relationStageSnapshots(context),
       },
-      spatial: selection
-        ? owner.constraintSpatial(constraint, selection, context)
-        : undefined,
+      spatial:
+        selection && constraint
+          ? owner.relationSpatial(constraint, selection, context)
+          : constraint?.kind === 'transformation' &&
+              constraint.actions.at(-1) &&
+              'offset' in constraint.actions.at(-1)!
+            ? owner.transformationOffsetSpatial(constraint, context)
+            : undefined,
     };
   }
 
-  private constraintSpatial(
-    constraint: StoredConstraint,
+  private relationSpatial(
+    constraint: StoredPlacement,
     selection: ConstraintSpatialSelection,
     context: SolveContext,
     actionIndex?: number,
-  ): ConstraintSpatialReference {
+  ): RelationSpatialReference {
+    context = this.placementStageContext(constraint, context);
     const models = [...context.poses.keys()];
-    const actions = this.bodyActions(
-      constraint,
-      new Map(models.map((model, i) => [model, i])),
-    );
+    const actions = this.placementActions(constraint, context);
     const stage =
       actionIndex ??
       (selection.kind === 'rotate'
@@ -1740,30 +2123,58 @@ export abstract class RelationObject {
             .findIndex(action => 'angles' in action)
         : actions.length);
     const finalPose = this.solvePose(context);
+    const following = this.followingActions(constraint, context);
     const before = beforeRelation(
-      finalPose,
+      beforeRelation(
+        finalPose,
+        {actions: following},
+        models.map(model => model.solvePose(context)),
+        models.indexOf(this),
+      ),
       {
         actions: actions.slice(stage),
-        target: {
-          body: models.indexOf(constraint.target.model ?? this),
-          transform: constraint.target.transform,
-        },
+        target:
+          constraint.kind === 'transformation'
+            ? undefined
+            : {
+                body: models.indexOf(constraint.target.model ?? this),
+                transform: constraint.target.transform,
+              },
       },
       models.map(model => model.solvePose(context)),
       models.indexOf(this),
     );
     const pivot = selection.pivot;
+    const axis = isAxisSelection(pivot) ? this.rotationAxis(pivot) : undefined;
     let frame: RigidTransform;
-    if (pivot.kind === 'around') {
+    if (axis) {
       frame = composeTransforms(
-        pivot.axis.model ? pivot.axis.model.solvePose(context) : before,
-        (pivot.axis.direction ?? 1) === 1
-          ? pivot.axis.transform
-          : composeTransforms(pivot.axis.transform, rotation([1, 0, 0, 0])),
+        axis.model ? axis.model.solvePose(context) : before,
+        (axis.direction ?? 1) === 1
+          ? selectedAxis(axis, pivot.offset)
+          : composeTransforms(
+              selectedAxis(axis, pivot.offset),
+              rotation([1, 0, 0, 0]),
+            ),
       );
+    } else if (pivot.kind === 'pivotPoint' && pivot.point.model) {
+      const center = composeTransforms(
+        pivot.point.model.solvePose(context),
+        pivot.point.transform,
+      ).position;
+      frame = {
+        position: addVectors(
+          center,
+          rotateVector(pivot.offset ?? origin, before.quaternion),
+        ),
+        quaternion: before.quaternion,
+      };
     } else {
       const local = translation(
-        pivot.kind === 'pivot' ? pivot.point : this.vertexPosition(pivot.id),
+        addVectors(
+          this.rotationPoint(pivot as PointSelection),
+          pivot.offset ?? origin,
+        ),
       );
       frame = composeTransforms(before, local);
     }
@@ -1773,31 +2184,52 @@ export abstract class RelationObject {
       typeof angles === 'number' ? [0, angles, 0] : angles;
     // Later world-space actions move the earlier rotation's effective frame.
     // Later self-local actions already follow that rotation.
-    for (const action of actions.slice(stage + 1)) {
+    const poses = models.map(model => model.solvePose(context));
+    const ownerIndex = models.indexOf(this);
+    const actionTarget =
+      constraint.kind === 'transformation'
+        ? undefined
+        : {
+            body: models.indexOf(constraint.target.model ?? this),
+            transform: constraint.target.transform,
+          };
+    let actionPose = afterRelation(
+      before,
+      {actions: actions.slice(stage, stage + 1), target: actionTarget},
+      poses,
+      ownerIndex,
+    );
+    const remainder = [...actions.slice(stage + 1), ...following];
+    for (const [index, action] of remainder.entries()) {
+      const next = afterRelation(
+        actionPose,
+        {
+          actions: [action],
+          target: index < actions.length - stage - 1 ? actionTarget : undefined,
+        },
+        poses,
+        ownerIndex,
+      );
       if ('body' in action)
         frame = composeTransforms(
-          axisRotation(
-            composeTransforms(
-              models[action.body].solvePose(context),
-              action.axis,
-            ),
-            action.angle,
-          ),
+          composeTransforms(next, invertTransform(actionPose)),
           frame,
         );
-      else if ('offset' in action && constraint.target.model) {
-        const targetFrame = composeTransforms(
-          constraint.target.model.solvePose(context),
-          constraint.target.transform,
-        );
+      else if (
+        'offset' in action &&
+        (constraint.kind === 'transformation' ||
+          following.includes(action) ||
+          constraint.target.model)
+      ) {
         frame = {
           ...frame,
           position: addVectors(
             frame.position,
-            rotateVector(action.offset, targetFrame.quaternion),
+            addVectors(next.position, negateVector(actionPose.position)),
           ),
         };
       }
+      actionPose = next;
     }
     const localFrame = relativeTransform(frame, finalPose);
     return {
@@ -1808,30 +2240,297 @@ export abstract class RelationObject {
         vector:
           selection.kind === 'rotate'
             ? rotationVector
-            : pivot.kind === 'pivot'
-              ? pivot.point
-              : origin,
+            : selection.kind === 'pivotOffset' ||
+                selection.kind === 'axisOffset'
+              ? (pivot.offset ?? origin)
+              : pivot.kind === 'pivot'
+                ? pivot.point
+                : origin,
         frame: localFrame,
         rotation: rotationVector,
-        axisOnly: pivot.kind === 'around',
+        axisOnly: isAxisSelection(pivot),
+        reference: {
+          ...(pivot.kind === 'aroundEdge' || pivot.kind === 'pivotVertex'
+            ? {kind: pivot.kind, id: pivot.id}
+            : pivot.kind === 'aroundLine' || pivot.kind === 'pivotPoint'
+              ? {
+                  kind: pivot.kind,
+                  nodeId:
+                    selectionReference(pivot)!.model?.nodeId ?? this.nodeId,
+                  name: selectionReference(pivot)!.name,
+                }
+              : {kind: pivot.kind, point: pivot.point}),
+          offset: pivot.offset ?? origin,
+          offsetExplicit: pivot.offset !== undefined,
+          explicit: !pivot.implicit,
+          rotation:
+            axis && (axis.direction ?? 1) !== 1
+              ? [0, -rotationVector[1], 0]
+              : rotationVector,
+          frame:
+            axis && (axis.direction ?? 1) !== 1
+              ? composeTransforms(localFrame, rotation([1, 0, 0, 0]))
+              : localFrame,
+        },
       },
     };
   }
 
-  static createSolveContext(roots: readonly RelationObject[]): SolveContext {
+  private placementActions(
+    value: StoredPlacement,
+    context: SolveContext,
+  ): BodyAction[] {
+    const indices = new Map(
+      [...context.poses.keys()].map((model, i) => [model, i]),
+    );
+    return this.bodyActions(value, indices).map(action =>
+      value.kind === 'transformation' && 'offset' in action
+        ? {offset: rotateVector(action.offset, context.frame.quaternion)}
+        : action,
+    );
+  }
+
+  /** Pose at the end of this segment; later constraints have their own input pose. */
+  private placementStageContext(
+    placement: StoredPlacement,
+    context: SolveContext,
+  ): SolveContext {
+    const index = this.placements.indexOf(placement);
+    let end = index + 1;
+    if (placement.kind !== 'transformation')
+      while (
+        end < this.placements.length &&
+        this.placements[end].kind !== 'transformation'
+      )
+        end++;
+    while (
+      end < this.placements.length &&
+      this.placements[end].kind === 'transformation'
+    )
+      end++;
+    if (end >= this.placements.length) return context;
+    return transformSolveContext(
+      RelationObject.createSolveContext(
+        [this],
+        new Map([[this, this.placements.slice(0, end)]]),
+      ),
+      context.frame,
+    );
+  }
+
+  private followingActions(
+    placement: StoredPlacement,
+    context: SolveContext,
+  ): BodyAction[] {
+    let start = this.placements.indexOf(placement) + 1;
+    if (placement.kind !== 'transformation')
+      while (
+        start < this.placements.length &&
+        this.placements[start].kind !== 'transformation'
+      )
+        start++;
+    const values: StoredPlacement[] = [];
+    while (
+      start < this.placements.length &&
+      this.placements[start].kind === 'transformation'
+    )
+      values.push(this.placements[start++]);
+    return values.flatMap(value => this.placementActions(value, context));
+  }
+
+  protected relationStageSnapshots(
+    context: SolveContext,
+  ): readonly RelationStageSnapshot[] | undefined {
+    if (!this.placements.length) return undefined;
+    const stages: RelationStageSnapshot[] = [];
+    let start = 0;
+    while (start < this.placements.length) {
+      let end = start;
+      while (
+        end < this.placements.length &&
+        this.placements[end].kind !== 'transformation'
+      )
+        end++;
+      while (
+        end < this.placements.length &&
+        this.placements[end].kind === 'transformation'
+      )
+        end++;
+      const values = this.placements.slice(start, end);
+      const stage = this.placementStageContext(values[0], context);
+      stages.push({
+        constraintIds: values
+          .filter(value => value.kind !== 'transformation')
+          .map(value => value.id),
+        transformationIds: values
+          .filter(value => value.kind === 'transformation')
+          .map(value => value.id),
+        compositionTransform: toTransform(this.solvePose(stage)),
+        offsetFrame: toTransform(stage.frame),
+      });
+      start = end;
+    }
+    return stages;
+  }
+
+  protected transformationSnapshots(
+    context: SolveContext,
+  ): readonly TransformationSnapshot[] | undefined {
+    const values = this.placements.filter(
+      (value): value is StoredTransformation => value.kind === 'transformation',
+    );
+    if (!values.length) return undefined;
+    return values.map(value =>
+      this.transformationSnapshot(
+        value,
+        this.placementStageContext(value, context),
+      ),
+    );
+  }
+
+  private followingReferenceFrame(
+    frame: RigidTransform,
+    actions: readonly BodyAction[],
+    context: SolveContext,
+    target?: {body: number; transform: RigidTransform},
+  ): RigidTransform {
+    const models = [...context.poses.keys()];
+    const poses = models.map(model => model.solvePose(context));
+    const owner = models.indexOf(this);
+    let pose = beforeRelation(
+      this.solvePose(context),
+      {actions, target},
+      poses,
+      owner,
+    );
+    for (const action of actions) {
+      const next = afterRelation(
+        pose,
+        {actions: [action], target},
+        poses,
+        owner,
+      );
+      if ('body' in action)
+        frame = composeTransforms(
+          composeTransforms(next, invertTransform(pose)),
+          frame,
+        );
+      pose = next;
+    }
+    return frame;
+  }
+
+  private transformationSnapshot(
+    value: StoredTransformation,
+    context: SolveContext,
+  ): TransformationSnapshot {
+    const models = [...context.poses.keys()];
+    const actions = this.placementActions(value, context);
+    const following = this.followingActions(value, context);
+    const offsets = value.actions.flatMap((action, index) => {
+      if (!('offset' in action)) return [];
+      const frame = this.followingReferenceFrame(
+        context.frame,
+        [...actions.slice(index + 1), ...following],
+        context,
+      );
+      return [
+        {
+          value: action.offset,
+          frame: toTransform(frame),
+          sourceRefs: valueTrace(action).sourceRefs,
+        },
+      ];
+    });
+    const rotations = value.actions.flatMap((action, index) =>
+      'pivot' in action
+        ? [
+            {
+              spatial: this.relationSpatial(
+                value,
+                {kind: 'rotate', pivot: action.pivot},
+                context,
+                index,
+              ).spatial,
+              sourceRefs: valueTrace(action).sourceRefs,
+            },
+          ]
+        : [],
+    );
+    return {
+      id: value.id,
+      offsets,
+      rotations,
+      offsetFrame: toTransform(context.frame),
+      sourceRefs: [...valueTrace(value).sourceRefs],
+      parameters: [...valueTrace(value).parameters],
+    };
+  }
+
+  private transformationOffsetSpatial(
+    value: StoredTransformation,
+    context: SolveContext,
+  ): RelationSpatialReference {
+    const offset = this.transformationSnapshot(value, context).offsets.at(-1)!;
+    const local = relativeTransform(
+      {...offset.frame, position: this.solvePose(context).position},
+      this.solvePose(context),
+    );
+    return {
+      nodeId: this.nodeId,
+      kind: 'offset',
+      spatial: {origin, vector: offset.value, frame: local},
+    };
+  }
+
+  static createSolveContext(
+    roots: readonly RelationObject[],
+    overrides = new Map<RelationObject, readonly StoredPlacement[]>(),
+  ): SolveContext {
     const models: RelationObject[] = [];
     const indices = new Map<RelationObject, number>();
     const collect = (model: RelationObject): void => {
       if (indices.has(model)) return;
       indices.set(model, models.length);
       models.push(model);
-      model.constraints.flatMap(constraintReferences).forEach(collect);
+      (overrides.get(model) ?? model.placements)
+        .flatMap(constraintReferences)
+        .forEach(collect);
     };
     roots.forEach(collect);
+    const programs = models.map(model => {
+      const placements = overrides.get(model) ?? model.placements;
+      let last = placements.length - 1;
+      while (last >= 0 && placements[last].kind === 'transformation') last--;
+      let start = last;
+      while (start > 0 && placements[start - 1].kind !== 'transformation')
+        start--;
+      const initial =
+        start > 0
+          ? RelationObject.createSolveContext(
+              [model],
+              new Map(overrides).set(model, placements.slice(0, start)),
+            ).poses.get(model)!
+          : identityRigidTransform;
+      return {
+        initial,
+        constraints: placements
+          .slice(Math.max(0, start), last + 1)
+          .filter(
+            (value): value is StoredConstraint =>
+              value.kind !== 'transformation',
+          ),
+        transformations: placements
+          .slice(last + 1)
+          .flatMap(value => model.bodyActions(value, indices)),
+      };
+    });
     const poses = solveBodies(
-      models.map((model): Body => ({
+      models.map((model, index): Body => ({
+        initial: programs[index].initial,
+        transformations: programs[index].transformations,
         name: model.name,
-        relations: model.constraints.map(constraint =>
+        relations: programs[index].constraints.map(constraint =>
           constraint.kind === 'align'
             ? {
                 kind: 'align',
@@ -1860,7 +2559,12 @@ export abstract class RelationObject {
                             action.local,
                             identityRigidTransform,
                           )
-                        : action.angle !== 0,
+                        : 'point' in action
+                          ? !transformsAreEquivalent(
+                              rotation(action.rotation),
+                              identityRigidTransform,
+                            )
+                          : action.angle !== 0,
                   ),
               }
             : {
@@ -1890,7 +2594,12 @@ export abstract class RelationObject {
                             action.local,
                             identityRigidTransform,
                           )
-                        : action.angle !== 0,
+                        : 'point' in action
+                          ? !transformsAreEquivalent(
+                              rotation(action.rotation),
+                              identityRigidTransform,
+                            )
+                          : action.angle !== 0,
                   ),
               },
         ),
@@ -1898,6 +2607,7 @@ export abstract class RelationObject {
     );
     return {
       poses: new Map(models.map((model, index) => [model, poses[index]])),
+      frame: identityRigidTransform,
     };
   }
 
@@ -1909,13 +2619,13 @@ export abstract class RelationObject {
       'pivot' in action
         ? [
             {
-              spatial: this.constraintSpatial(
+              spatial: this.relationSpatial(
                 constraint,
                 {kind: 'rotate', pivot: action.pivot},
                 context,
                 index,
               ).spatial,
-              sourceRefs: action.sourceRefs ?? [],
+              sourceRefs: valueTrace(action).sourceRefs,
             },
           ]
         : [],
@@ -1957,19 +2667,16 @@ export abstract class RelationObject {
           target === this ? stagePose : target.solvePose(context),
           constraint.target.transform,
         );
-        for (const later of actions.slice(index + 1))
-          if ('body' in later)
-            frame = composeTransforms(
-              axisRotation(
-                composeTransforms(poses[later.body], later.axis),
-                later.angle,
-              ),
-              frame,
-            );
+        frame = this.followingReferenceFrame(
+          frame,
+          actions.slice(index + 1),
+          context,
+          targetEndpoint,
+        );
         offsets.push({
           value: action.offset,
           frame: toTransform(frame),
-          sourceRefs: constraint.actions[index].sourceRefs ?? [],
+          sourceRefs: valueTrace(constraint.actions[index]).sourceRefs,
         });
       }
       stagePose = afterRelation(
@@ -2073,7 +2780,7 @@ export class SketchFrame extends RelationObject {
 
   constructor(source?: SketchFrame, init: RelationObjectInit = {}) {
     super({
-      constraints: source?.constraints,
+      placements: source?.placements,
       sourceRefs: source?.sourceRefs,
       parameters: source?.parameters,
       ...init,
@@ -2092,7 +2799,7 @@ export class SketchFrame extends RelationObject {
   relatedObjects(): readonly RelationObject[] {
     return [
       ...(this.source ? [this.source] : []),
-      ...this.constraints.flatMap(constraintReferences),
+      ...this.placements.flatMap(constraintReferences),
     ];
   }
 
@@ -2148,7 +2855,7 @@ export class SketchFrame extends RelationObject {
   }
 
   relate(
-    build: (frame: SketchFrame) => Constraint | readonly Constraint[],
+    build: (frame: SketchFrame) => Relation | readonly Relation[],
   ): SketchFrame {
     const related = new SketchFrame(this);
     related.addRelations(this, () => build(related));
@@ -2156,10 +2863,10 @@ export class SketchFrame extends RelationObject {
   }
 
   face(region: SketchRegion): FaceModel {
-    return sketchFaceModel(region, this.constraints, this);
+    return sketchFaceModel(region, this.placements, this);
   }
 
-  snapshot(): ConstraintPreview['object'] {
+  snapshot(): RelationPreview['object'] {
     const context = RelationObject.createSolveContext([this]);
     return {
       nodeId: this.nodeId,
@@ -2167,6 +2874,8 @@ export class SketchFrame extends RelationObject {
       constraints: this.constraints.map(constraint =>
         this.constraintSnapshot(constraint, context),
       ),
+      transformations: this.transformationSnapshots(context),
+      relationStages: this.relationStageSnapshots(context),
     };
   }
 
@@ -2330,7 +3039,7 @@ export class ModelObject<
   relate(
     build: (
       self: RuntimeModel<Elements, Kind>,
-    ) => Constraint | readonly Constraint[],
+    ) => Relation | readonly Relation[],
   ): RuntimeModel<Elements, Kind> {
     const operation = storedOperation('relate', [
       {model: this, role: 'source', index: 0},
@@ -2594,7 +3303,7 @@ export class ModelObject<
           transformElement(element, transform),
         ]),
       ),
-      constraints: this.mapConstraintGeometry(
+      placements: this.mapConstraintGeometry(
         element => transformElement(element, transform),
         point => composeTransforms(transform, translation(point)).position,
       ),
@@ -2632,27 +3341,48 @@ export class ModelObject<
   private mapConstraintGeometry(
     mapElement: (element: StoredElement) => StoredElement,
     mapPoint: (point: Vec3) => Vec3,
-  ): StoredConstraint[] {
+  ): StoredPlacement[] {
     const mapReference = (reference: RelationReference): RelationReference =>
       reference.model ? reference : {...reference, ...mapElement(reference)};
-    return this.constraints.map(constraint => {
-      const mapped: StoredConstraint = {
+    const zero = mapPoint(origin);
+    const mapVector = (vector: Vec3): Vec3 =>
+      mapPoint(vector).map(
+        (value, index) => value - zero[index],
+      ) as unknown as Vec3;
+    const scale = Math.hypot(...mapVector([1, 0, 0]));
+    return this.placements.map(constraint => {
+      const mapped: StoredPlacement = {
         ...constraint,
-        source: mapReference(constraint.source),
-        target: mapReference(constraint.target),
-        actions: constraint.actions.map(action =>
-          'offset' in action
-            ? action
-            : {
-                ...action,
-                pivot:
-                  action.pivot.kind === 'around'
-                    ? {...action.pivot, axis: mapReference(action.pivot.axis)}
-                    : action.pivot.kind === 'pivot'
-                      ? {...action.pivot, point: mapPoint(action.pivot.point)}
-                      : action.pivot,
-              },
-        ),
+        ...(constraint.kind === 'transformation'
+          ? {}
+          : {
+              source: mapReference(constraint.source),
+              target: mapReference(constraint.target),
+            }),
+        actions: constraint.actions.map(action => {
+          if ('offset' in action) return action;
+          const mappedAction = {
+            ...action,
+            pivot:
+              action.pivot.kind === 'pivot'
+                ? {...action.pivot, point: mapPoint(action.pivot.point)}
+                : mapSelectionReference(action.pivot, mapReference),
+          };
+          if (action.pivot.offset) {
+            mappedAction.pivot = {
+              ...mappedAction.pivot,
+              offset: isAxisSelection(action.pivot)
+                ? selectionReference(action.pivot)?.model
+                  ? action.pivot.offset
+                  : (action.pivot.offset.map(
+                      value => value * scale,
+                    ) as unknown as Vec3)
+                : mapVector(action.pivot.offset),
+            };
+          }
+          valueTraces.set(mappedAction, valueTrace(action));
+          return mappedAction;
+        }),
       };
       valueTraces.set(mapped, valueTrace(constraint));
       return mapped;
@@ -2685,7 +3415,7 @@ export class ModelObject<
       {
         geometryAnchor: scaleElement(this.geometryAnchor, factor),
         elements: scaleElements(this.elements, factor),
-        constraints: this.mapConstraintGeometry(
+        placements: this.mapConstraintGeometry(
           element => scaleElement(element, factor),
           point => scaleFrame(translation(point), factor).position,
         ),
@@ -2724,7 +3454,7 @@ export class ModelObject<
       name: 'Extrude',
       geometry,
       material: this.materialSnapshot,
-      constraints: this.constraints,
+      placements: this.placements,
       sourceRefs: this.sourceRefs,
       parameters: this.allParameters(),
       meshTolerance: this.meshTolerance,
@@ -2914,7 +3644,7 @@ export class ModelObject<
     return [
       ...this.children,
       ...this.operation.inputs.map(input => input.model),
-      ...this.constraints.flatMap(constraintReferences),
+      ...this.placements.flatMap(constraintReferences),
     ];
   }
 
@@ -2939,7 +3669,7 @@ export class ModelObject<
     );
     const parameters = uniqueParameters([
       ...this.parameters,
-      ...this.constraints.flatMap(
+      ...this.placements.flatMap(
         constraint => valueTrace(constraint).parameters,
       ),
     ]);
@@ -2951,6 +3681,8 @@ export class ModelObject<
       compositionTransform: toTransform(pose),
       transform: toTransform(inComposition ? pose : identityRigidTransform),
       constraints,
+      transformations: this.transformationSnapshots(solveContext),
+      relationStages: this.relationStageSnapshots(solveContext),
       origin,
       elements: snapshotElements({
         ...this.elements,
@@ -3062,7 +3794,7 @@ export class ModelObject<
       name: 'Loft',
       geometry,
       material: this.materialSnapshot,
-      constraints: this.constraints,
+      placements: this.placements,
       sourceRefs: inputs.flatMap(input => input.sourceRefs),
       parameters: uniqueParameters(
         inputs.flatMap(input => input.allParameters()),
@@ -3097,7 +3829,7 @@ export class ModelObject<
         geometry: evaluation.geometry,
         name: this.name,
         material: this.materialSnapshot,
-        constraints: this.constraints,
+        placements: this.placements,
         sourceRefs: [this, ...others].flatMap(model => model.sourceRefs),
         parameters: uniqueParameters(
           [this, ...others].flatMap(model => model.allParameters()),
@@ -3222,7 +3954,7 @@ export class ModelObject<
   private allParameters(): ParameterUsage[] {
     return uniqueParameters([
       ...this.parameters,
-      ...this.constraints.flatMap(
+      ...this.placements.flatMap(
         constraint => valueTrace(constraint).parameters,
       ),
     ]);
@@ -3384,6 +4116,10 @@ export class ModelObject<
     );
   }
 
+  protected override edgeReference(id: EdgeId): RelationReference {
+    return {...rotationAxisReference(this.edge(id)), model: undefined};
+  }
+
   protected override vertexPosition(id: VertexId): Vec3 {
     return anchorReference(this.vertex(id)).transform.position;
   }
@@ -3487,7 +4223,7 @@ export class ModelObject<
       material: this.materialSnapshot,
       children: this.children,
       assembly: this.assembly,
-      constraints: this.constraints,
+      placements: this.placements,
       elements: this.elements,
       sourceRefs: this.sourceRefs,
       parameters: this.parameters,
@@ -4185,20 +4921,34 @@ export function isConstraint(value: unknown): value is Constraint {
   return value instanceof Constraint;
 }
 
-export function isConstraintExpression(
+export function isRelationExpression(
   value: unknown,
-): value is ConstraintExpression {
-  return value instanceof ConstraintExpression;
+): value is RelationExpression {
+  return value instanceof RelationExpression;
 }
 
-export function constraintPreview(
-  value: ConstraintExpression,
-): ConstraintPreview | undefined {
-  return value.preview();
+export function relationPreview(
+  value: RelationExpression,
+  preceding: readonly RelationExpression[] = [],
+): RelationPreview | undefined {
+  return value.preview(preceding);
 }
 
-export function instrumentConstraint(
-  constraint: ConstraintExpression,
+/** The current authoring receiver remains available when a free selector throws. */
+export function currentRelationSelf(): RelationObject | undefined {
+  return activeRelate?.self;
+}
+
+/** Preview only completed array entries before an unfinished reference selector. */
+export function relationSelectionPreview(
+  self: RelationObject,
+  preceding: readonly RelationExpression[],
+): RelationPreview {
+  return self[previewRelation](undefined, undefined, preceding);
+}
+
+export function instrumentRelation(
+  constraint: RelationExpression,
   sourceRef: SourceRef,
   parameters: readonly ParameterUsage[],
 ): void {
@@ -4221,9 +4971,9 @@ export function instrumentModelOperation(
   );
 }
 
-export function constraintTraceReference(
-  constraint: ConstraintExpression,
-): ConstraintTraceReference {
+export function relationTraceReference(
+  constraint: RelationExpression,
+): RelationTraceReference {
   return constraint.traceReference();
 }
 
@@ -4510,6 +5260,13 @@ export function retainModelGeometry(
 }
 
 export const authoringApi = Object.freeze({
+  offset,
+  rotate,
+  pivot,
+  pivotVertex,
+  pivotPoint,
+  aroundEdge,
+  aroundLine,
   cached,
   font,
   googleFont,
@@ -4814,7 +5571,7 @@ type PlanarSketch = Readonly<{
 /** Internal bridge from the kernel-independent sketch definition to model geometry. */
 function sketchFaceModel(
   region: SketchRegion,
-  constraints: readonly StoredConstraint[],
+  placements: readonly StoredPlacement[],
   source: SketchFrame,
 ): FaceModel {
   const curves = [region.outer, ...region.holes].map(loop =>
@@ -4836,7 +5593,7 @@ function sketchFaceModel(
   return ModelObject.create<PlanarElements, 'face'>({
     kind: 'face',
     name: 'Sketch face',
-    constraints,
+    placements,
     geometry,
     geometryAnchor: plane,
     elements: {plane},
@@ -5009,14 +5766,13 @@ function solidElements(bounds: LocalBounds): StoredElements {
   return {axis: {kind: 'line', transform: translation(boundsCenter(bounds))}};
 }
 
-function constraintReferences(constraint: StoredConstraint): RelationObject[] {
+function constraintReferences(constraint: StoredPlacement): RelationObject[] {
   return [
-    constraint.source.model,
-    constraint.target.model,
+    ...(constraint.kind === 'transformation'
+      ? []
+      : [constraint.source.model, constraint.target.model]),
     ...constraint.actions.map(action =>
-      'pivot' in action && action.pivot.kind === 'around'
-        ? action.pivot.axis.model
-        : undefined,
+      'pivot' in action ? selectionReference(action.pivot)?.model : undefined,
     ),
   ].filter((model): model is RelationObject => !!model);
 }

@@ -231,7 +231,7 @@ test(
             '/main.ts',
             source.indexOf(text) + (text.includes('(') ? 2 : text.length - 1),
           );
-          const {target, evaluation} = viewport.sourceEvaluation()!;
+          const {target, evaluation} = viewport.sourceContext!;
           const selected = viewport.getSelected();
           const bindings = viewport['transformGizmo']['axes'].flatMap(axis =>
             axis.binding && axis.controls.getHelper().visible
@@ -241,11 +241,11 @@ test(
           scopes.push({
             text,
             kind: target.kind,
-            owner: evaluation.constraintOwnerNodeId,
+            owner: evaluation.relationOwnerNodeId,
             selected: selected?.node.nodeId,
             modes: bindings.map(binding => binding.mode),
             axes: bindings.map(binding => binding.axis),
-            spatialKind: evaluation.constraintSpatial?.kind,
+            spatialKind: evaluation.relationSpatial?.kind,
           });
           return {target, evaluation, selected, bindings};
         };
@@ -273,9 +273,9 @@ test(
           false,
           selection!.ids,
         );
-        const source3 = `import {box, group} from '@code3d/core'; const base = box(20, 10, 30); const part = box(8, 6, 4).relate(self => self.on(base.up).around(base.axis).rotate(35)); export default group([base, part]);`;
+        const source3 = `import {box, group} from '@code3d/core'; const base = box(20, 10, 30); const part = box(8, 6, 4).relate(self => self.on(base.up).aroundLine(base.axis).rotate(35)); export default group([base, part]);`;
         const module3 = await compile(source3);
-        inspect(module3, source3, 'around(base.axis)');
+        inspect(module3, source3, 'aroundLine(base.axis)');
         inspect(module3, source3, 'rotate(35)');
         return {
           scopes,
@@ -292,7 +292,7 @@ test(
         client.dispose();
       }
     });
-    const [pivot, rotate, , vertex, around, axisRotate] = result.scopes;
+    const [pivot, rotate, , vertex, aroundLine, axisRotate] = result.scopes;
     assert.equal(pivot.spatialKind, 'pivot');
     assert.deepEqual(pivot.modes, ['translate', 'translate', 'translate']);
     assert.equal(pivot.selected, pivot.owner);
@@ -300,8 +300,8 @@ test(
     assert.equal(rotate.selected, rotate.owner);
     assert.equal(vertex.selected, vertex.owner);
     assert.ok(result.vertexIds.includes(3));
-    assert.equal(around.spatialKind, 'around');
-    assert.deepEqual(around.axes, []);
+    assert.equal(aroundLine.spatialKind, 'aroundLine');
+    assert.deepEqual(aroundLine.axes, []);
     assert.deepEqual(axisRotate.modes, ['rotate']);
     assert.deepEqual(axisRotate.axes, ['y']);
     assert.equal(new Set(result.boundaryIds).size, result.boundaryIds.length);

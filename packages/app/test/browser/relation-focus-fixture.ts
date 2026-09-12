@@ -131,14 +131,14 @@ export async function measureRelationFocus() {
       ];
       for (const token of tokens) {
         viewport.selectBySourceOffset('/main.ts', source.indexOf(token) + 1);
-        const scope = viewport.sourceEvaluation()!;
+        const scope = viewport.sourceContext!;
         const constraint = evaluatedConstraint(
           module.objects,
           scope.evaluation,
         )!;
         const primary = focusedConstraintSide(scope.evaluation, constraint);
         viewport['root'].updateMatrixWorld(true);
-        const ownerId = scope.evaluation.constraintOwnerNodeId!;
+        const ownerId = scope.evaluation.relationOwnerNodeId!;
         const ownerPositions = viewport['root'].children
           .filter(
             root =>
@@ -353,7 +353,7 @@ export default group([part,base,front,old,other]);`;
           '/main.ts',
           source.lastIndexOf(token) + (token === 'self.on(base' ? 6 : 1),
         );
-        const scope = viewport.sourceEvaluation()!;
+        const scope = viewport.sourceContext!;
         const whole = !!scope.evaluation.relationContext;
         const selected = reverse && !whole ? id('base') : id('part');
         const secondary = new Set(

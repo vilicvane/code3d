@@ -81,6 +81,41 @@ export const plate = rectangle(30, 20).extrude(3).fillet(0.5);
 export const pin = extrude(circle(2), -10);
 ```
 
+## Independent placement transformations
+
+`relate` callbacks return a `Constraint`, a `Transformation`, or a readonly array of both.
+Independent constructors are `offset(x, y, z)`, `rotate(x, y, z)`,
+`pivot([x, y, z]).rotate(x, y, z)`, `pivotVertex(id).rotate(x, y, z)`,
+`pivotPoint(pointRef).rotate(x, y, z)`, `aroundEdge(id).rotate(angle)`, and
+`aroundLine(lineRef).rotate(angle)`. Values can be built in helper functions and reused.
+
+| Selector               | Reference                               |
+| ---------------------- | --------------------------------------- |
+| `pivot([x, y, z])`     | Coordinates in self                     |
+| `pivotVertex(id)`      | A vertex of self                        |
+| `pivotPoint(pointRef)` | A local or external point reference     |
+| `aroundEdge(id)`       | A straight edge of self                 |
+| `aroundLine(lineRef)`  | A local or external line/axis reference |
+
+Point references change the rotation center while retaining self's XYZ axes.
+External references use their owning model's solved placement in the composition.
+Curved edges do not define a rotation axis.
+
+Each independent transformation is one completed operation, with no further
+chaining methods. Use an array to combine steps: `[offset(0, 8, 0), rotate(0, 25, 0)]`.
+These five reference selectors return an unfinished selection with a
+`rotate` method; its result is again a completed transformation.
+Point selectors additionally accept one `pivotOffset(dx, dy, dz)`; axis selectors
+accept one `axisOffset(dx, dy, dz)`. The resulting selector only exposes `rotate`.
+Point offsets use self local axes. Axis offsets use the selected axis reference
+frame, retaining its direction. Both retain the original point/axis reference.
+
+Consecutive constraints form a joint solve segment. Transformations act after
+its result; a subsequent constraint starts another segment and inherits the
+previous pose in its free directions. Independent offset uses fixed composition
+axes; rotation defaults to the current self origin and local XYZ axes. See
+[the complete placement rules](../../guides/relations/#transform-a-joint-result).
+
 ## Runtime defaults while editing
 
 The dimension-based primitives and numeric methods below keep their required TypeScript parameters,
@@ -109,7 +144,8 @@ execution and do not depend on the App.
 | Model/group `rotate` and relation/pivot-chain `rotate` | `0, 0, 0`        |
 | Model/group `originOffset` and relation `offset`       | `0, 0, 0`        |
 | Relation `pivot`                                       | `[0, 0, 0]`      |
-| `around(axis).rotate`                                  | `0`              |
+| Selector `pivotOffset` and `axisOffset`                | `0, 0, 0`        |
+| `aroundLine(axis).rotate`                              | `0`              |
 | Geometric model `scaled`                               | `1`              |
 | Face `extrude` and the `extrude` utility's distance    | `10`             |
 | Solid `fillet`, `chamfer` and `shell`                  | `1`              |
@@ -418,7 +454,9 @@ free modes. Offsets and rotations execute in call order. Use point references fo
 - `constraint.rotate(x, y, z)`: rotate around self's origin.
 - `constraint.pivot([x, y, z]).rotate(x, y, z)`: a pivot in self's local frame.
 - `constraint.pivotVertex(id).rotate(x, y, z)`: a vertex belonging to self.
-- `constraint.around(axis).rotate(angle)`: a positioned local or external axis.
+- `constraint.pivotPoint(pointRef).rotate(x, y, z)`: a local or external point.
+- `constraint.aroundEdge(id).rotate(angle)`: a straight edge belonging to self.
+- `constraint.aroundLine(lineRef).rotate(angle)`: a positioned local or external axis.
 
 Angles are degrees; XYZ rotations apply X, then Y, then Z. Pivot/axis selections
 are intermediate values and must be completed with rotate. Rotation follows

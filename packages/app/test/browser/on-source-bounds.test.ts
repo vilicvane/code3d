@@ -81,8 +81,8 @@ test(
             throw new Error(JSON.stringify(module.diagnostic));
           viewport.renderModule(module);
           viewport.selectBySourceOffset('/main.ts', source.indexOf('.on(') + 2);
-          const evaluation = viewport.sourceEvaluation()!.evaluation;
-          const constraint = evaluation.constraintPreview!.constraints.find(
+          const evaluation = viewport.sourceContext!.evaluation;
+          const constraint = evaluation.relationPreview!.constraints.find(
             c => c.id === evaluation.constraintId,
           )!;
           const drawn: Array<

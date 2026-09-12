@@ -54,6 +54,23 @@ self from the preceding solution; zero values add no centering or orientation
 condition. Use point or axis alignment when a part must be centered. The App's
 gizmos edit or insert the corresponding call at its actual position in the chain.
 
+`relate` also accepts independent `offset` and `rotate` transformations. Choose a
+center with `pivot([x,y,z])`, self topology with `pivotVertex(id)`/`aroundEdge(id)`,
+or references with `pivotPoint(pointRef)`/`aroundLine(lineRef)`; finish each selector
+with `rotate`. Point rotations retain self XYZ axes, including external centers. Consecutive constraints solve jointly; transformations
+then act on that result in order. A later constraint starts a new segment using
+the preceding pose. Independent offsets use fixed composition axes, and rotations
+default to self's current origin. Each completed transformation is one array item,
+for example `[offset(0, 8, 0), rotate(0, 25, 0)]`. Only pivot/axis selections
+chain into `rotate`; completed transformations cannot chain into another operation.
+Keep a selected reference while moving it with
+`pivotVertex(id).pivotOffset(dx, dy, dz).rotate(x, y, z)` or
+`aroundLine(axis).axisOffset(dx, dy, dz).rotate(angle)`. Point offsets use self local
+axes; axis offsets use the selected axis frame and preserve its direction.
+Each selector accepts one matching offset, followed by `rotate`.
+See the [transformation example](../app/examples/constraints/transformations.ts)
+and [placement guide](../web/src/content/docs/docs/guides/relations.mdx#transform-a-joint-result).
+
 Build readable models from named intermediate values and public operations. A
 profile followed by extrusion, or solids combined with Boolean operations,
 keeps the construction understandable and editable by both people and agents.

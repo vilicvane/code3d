@@ -61,13 +61,13 @@ test(
       };
       const inspect = (source: string, text: string) => {
         viewport.selectBySourceOffset('/main.ts', source.indexOf(text) + 2);
-        const scope = viewport.sourceEvaluation()!;
+        const scope = viewport.sourceContext!;
         const selected = viewport.getSelected();
         selected?.object.updateWorldMatrix(true, false);
         return {
           text,
-          preview: scope!.evaluation.constraintPreview,
-          spatial: scope!.evaluation.constraintSpatial,
+          preview: scope!.evaluation.relationPreview,
+          spatial: scope!.evaluation.relationSpatial,
           node: selected && {
             nodeId: selected.node.nodeId,
             pose: selected.node.compositionTransform,
@@ -81,7 +81,7 @@ test(
               ? [{mode: axis.binding.mode, value: axis.binding.value}]
               : [],
           ),
-          diagnostic: scope.evaluation.constraintPreviewDiagnostic,
+          diagnostic: scope.evaluation.relationPreviewDiagnostic,
         };
       };
       try {
@@ -89,7 +89,7 @@ test(
         const base = box(20, 10, 30);
         const part = box(8, 6, 4).relate(self => self.on(base.up)
           .offset(10, 0, 0).pivot([5, 0, 0]).rotate(0, 0, 90)
-          .around(base.axis).rotate(30).offset(7, 0, 0));
+          .aroundLine(base.axis).rotate(30).offset(7, 0, 0));
         export default group([base, part]);`;
         const module = await compile(source);
         // Compare in the base's frame, independently of the composition reference member.
@@ -103,7 +103,7 @@ test(
           'offset(10',
           'pivot([5',
           'rotate(0',
-          'around(base.axis)',
+          'aroundLine(base.axis)',
           'rotate(30)',
           'offset(7',
         ].map(text => inspect(source, text));

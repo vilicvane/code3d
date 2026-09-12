@@ -5,7 +5,7 @@ import {
   type DrawingDimension,
 } from '../tools/drawing-dimensions';
 import {DrawingInputs} from './drawing-inputs';
-import {SketchToolbar} from './sketch-toolbar';
+import {Toolbar} from './toolbar';
 import {sketchConstraintIcons} from './sketch-icons';
 import type {SketchPointAddress} from '@code3d/core/tooling';
 import {
@@ -16,7 +16,7 @@ import {
 /** Selection actions reuse drawing numeric entry and the same atomic source transaction. */
 export class SketchConstraintTools {
   readonly root = document.createElement('div');
-  private toolbar = new SketchToolbar('Selection constraints');
+  private toolbar = new Toolbar('Selection constraints');
   private readonly inputs = new DrawingInputs(
     () => {},
     () => this.apply(),
@@ -88,7 +88,7 @@ export class SketchConstraintTools {
     ) {
       this.cancel();
       this.identity = identity;
-      const toolbar = new SketchToolbar('Selection constraints');
+      const toolbar = new Toolbar('Selection constraints');
       const group = toolbar.group('Constrain');
       for (const action of actions)
         toolbar.add(group, {

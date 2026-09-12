@@ -52,7 +52,7 @@ import {
   type SketchPoint as Point,
 } from '../tools/sketch-snap';
 import {DrawingInputs} from './drawing-inputs';
-import {SketchToolbar, type SketchToolAction} from './sketch-toolbar';
+import {Toolbar, type ToolbarAction} from './toolbar';
 import {
   CenterArc,
   CenterCircle,
@@ -143,7 +143,7 @@ export class SketchEditor {
   );
   private readonly shapes = new Map<string, SVGElement>();
   private readonly usedShapes = new Set<string>();
-  private readonly toolbar = new SketchToolbar();
+  private readonly toolbar = new Toolbar('Sketch tools');
   private readonly constraintTools = new SketchConstraintTools(
     change => {
       const committed = this.commit(change);
@@ -357,6 +357,7 @@ export class SketchEditor {
       this.overlay,
       this.selectionBox,
     );
+    this.toolbar.root.classList.add('sketch-toolbar');
     this.root.append(this.toolbar.root, this.constraintTools.root, stage);
     container.append(this.root);
     this.resize = new ResizeObserver(() => this.draw());
@@ -640,7 +641,7 @@ export class SketchEditor {
       'Arc · Center, start and end · R reverses direction',
     ];
     const actions = drawingTools.map(
-      ([name, icon, create], i): SketchToolAction => ({
+      ([name, icon, create], i): ToolbarAction => ({
         name,
         icon,
         title: titles[i],

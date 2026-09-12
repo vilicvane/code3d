@@ -68,7 +68,7 @@ async function setSource(page: Page, value = source, token = 'size,') {
   await page.waitForFunction(
     () =>
       !window.parameterTabApp.contextualToolPanel.root.hidden &&
-      window.parameterTabApp.viewport.sourceEvaluation()?.target.tool?.signature
+      window.parameterTabApp.viewport.sourceContext?.target.tool?.signature
         .name === 'box',
   );
   await page.getByText('Ready', {exact: true}).waitFor();
@@ -420,7 +420,7 @@ test(
       await page.waitForFunction(
         ({call, parameter}) => {
           const {viewport} = window.parameterTabApp;
-          const scope = viewport.sourceEvaluation();
+          const scope = viewport.sourceContext;
           return (
             scope?.target.tool?.signature.name ===
               (call.includes('pivotVertex')

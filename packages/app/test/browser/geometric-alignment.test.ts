@@ -58,8 +58,7 @@ export default group([base,part,rail]);`;
     await page.locator('[data-parameter=z]').waitFor();
     await page.waitForFunction(
       () =>
-        window.alignmentTest.viewport.sourceEvaluation()?.evaluation
-          .constraintId,
+        window.alignmentTest.viewport.sourceContext?.evaluation.constraintId,
     );
     const inspect = () =>
       page.evaluate(async () => {
@@ -131,8 +130,8 @@ export default group([base,part,rail]);`;
     await select('self.align(axis');
     await page.waitForFunction(() => {
       const vp = window.alignmentTest.viewport,
-        scope = vp.sourceEvaluation();
-      const owner = scope?.evaluation.constraintOwnerNodeId;
+        scope = vp.sourceContext;
+      const owner = scope?.evaluation.relationOwnerNodeId;
       return vp['module']?.objects
         .get(owner!)
         ?.constraints.some(c => c.targetElement.name === 'axis');

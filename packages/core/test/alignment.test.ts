@@ -229,10 +229,10 @@ test('rotation, pivot and reversed around axes remain authored after alignment',
   near(direction(rotated, rotated.edge(1)), [-1, 0, 0]);
   const axis = box(1, 1, 1).axis;
   const a = point([10, 0, 0]).relate(s =>
-    s.align(target).around(axis).rotate(90),
+    s.align(target).aroundLine(axis).rotate(90),
   );
   const b = point([10, 0, 0]).relate(s =>
-    s.align(target).around(axis.reverse()).rotate(-90),
+    s.align(target).aroundLine(axis.reverse()).rotate(-90),
   );
   near(position(a), position(b));
   near(pose(a).quaternion, pose(b).quaternion);
