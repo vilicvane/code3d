@@ -86,16 +86,16 @@ export const pin = extrude(circle(2), -10);
 `relate` callbacks return a `Constraint`, a `Transformation`, or a readonly array of both.
 Independent constructors are `offset(x, y, z)`, `rotate(x, y, z)`,
 `pivot([x, y, z]).rotate(x, y, z)`, `pivotVertex(id).rotate(x, y, z)`,
-`pivotPoint(pointRef).rotate(x, y, z)`, `aroundEdge(id).rotate(angle)`, and
-`aroundLine(lineRef).rotate(angle)`. Values can be built in helper functions and reused.
+`pivotPoint(pointRef).rotate(x, y, z)`, `axisEdge(id).rotate(angle)`, and
+`axisLine(lineRef).rotate(angle)`. Values can be built in helper functions and reused.
 
 | Selector               | Reference                               |
 | ---------------------- | --------------------------------------- |
 | `pivot([x, y, z])`     | Coordinates in self                     |
 | `pivotVertex(id)`      | A vertex of self                        |
 | `pivotPoint(pointRef)` | A local or external point reference     |
-| `aroundEdge(id)`       | A straight edge of self                 |
-| `aroundLine(lineRef)`  | A local or external line/axis reference |
+| `axisEdge(id)`         | A straight edge of self                 |
+| `axisLine(lineRef)`    | A local or external line/axis reference |
 
 Point references change the rotation center while retaining self's XYZ axes.
 External references use their owning model's solved placement in the composition.
@@ -145,7 +145,7 @@ execution and do not depend on the App.
 | Model/group `originOffset` and relation `offset`    | `0, 0, 0`        |
 | Relation `pivot`                                    | `[0, 0, 0]`      |
 | Selector `pivotOffset` and `axisOffset`             | `0, 0, 0`        |
-| `aroundLine(axis).rotate`                           | `0`              |
+| `axisLine(axis).rotate`                             | `0`              |
 | Geometric model `scaled`                            | `1`              |
 | Face `extrude` and the `extrude` utility's distance | `10`             |
 | Solid `fillet`, `chamfer` and `shell`               | `1`              |
@@ -455,8 +455,8 @@ Place independent transformations after the constraints in the `relate` array:
 - `pivot([x, y, z]).rotate(x, y, z)`: a pivot in self's local frame.
 - `pivotVertex(id).rotate(x, y, z)`: a vertex belonging to self.
 - `pivotPoint(pointRef).rotate(x, y, z)`: a local or external point.
-- `aroundEdge(id).rotate(angle)`: a straight edge belonging to self.
-- `aroundLine(lineRef).rotate(angle)`: a positioned local or external axis.
+- `axisEdge(id).rotate(angle)`: a straight edge belonging to self.
+- `axisLine(lineRef).rotate(angle)`: a positioned local or external axis.
 
 Angles are degrees; XYZ rotations apply X, then Y, then Z. Pivot/axis selections
 must be completed with `rotate`. Consecutive constraints solve jointly, followed

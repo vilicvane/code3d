@@ -7,7 +7,7 @@ import test from 'node:test';
 import {
   offset,
   rotate,
-  aroundLine,
+  axisLine,
   arc,
   bezier,
   box,
@@ -220,7 +220,7 @@ test('elliptic cylinder sections and spherical latitude circles constrain the wh
   }
 });
 
-test('rotation, pivot and reversed around axes remain authored after alignment', () => {
+test('rotation, pivot and reversed rotation axes remain authored after alignment', () => {
   const target = point([10, 0, 0]);
   const rotated = line([0, 0, 0], [0, 10, 0]).relate(s => [
     s.start.align(target),
@@ -231,11 +231,11 @@ test('rotation, pivot and reversed around axes remain authored after alignment',
   const axis = box(1, 1, 1).axis;
   const a = point([10, 0, 0]).relate(s => [
     s.align(target),
-    aroundLine(axis).rotate(90),
+    axisLine(axis).rotate(90),
   ]);
   const b = point([10, 0, 0]).relate(s => [
     s.align(target),
-    aroundLine(axis.reverse()).rotate(-90),
+    axisLine(axis.reverse()).rotate(-90),
   ]);
   near(position(a), position(b));
   near(pose(a).quaternion, pose(b).quaternion);

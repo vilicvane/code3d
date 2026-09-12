@@ -290,8 +290,8 @@ A pivot or axis selector shows the full rotation panel immediately, including it
 
 A pivot or axis selector and its final `rotate(...)` form one tool: moving the
 cursor between them retains the same rotation controls and a panel containing
-both reference and angle parameters. An unfinished `pivotVertex()`, `aroundEdge()`, `pivotPoint()`, or `aroundLine()`
-still offers references on self. Picking a self vertex/straight edge writes `pivotVertex(id)`/`aroundEdge(id)`, completes a missing `rotate` with zero
+both reference and angle parameters. An unfinished `pivotVertex()`, `axisEdge()`, `pivotPoint()`, or `axisLine()`
+still offers references on self. Picking a self vertex/straight edge writes `pivotVertex(id)`/`axisEdge(id)`, completes a missing `rotate` with zero
 angles and activates its gizmo. Existing angles and `pivotOffset`/`axisOffset` are
 preserved; selection and completion undo together. Coordinate `pivot` selectors
 use the same point picker, including before their final rotation is written.
@@ -304,7 +304,7 @@ keeps the operation it started with even if Alt is released before the pointer.
 Gizmo handles take priority over nearby candidates; snapping stays enabled.
 
 Moving a coordinate `pivot([x, y, z])` changes those coordinates directly.
-Moving a referenced center (`pivotVertex`/`pivotPoint`) or axis (`aroundEdge`/`aroundLine`) adds `pivotOffset` or
+Moving a referenced center (`pivotVertex`/`pivotPoint`) or axis (`axisEdge`/`axisLine`) adds `pivotOffset` or
 `axisOffset`, retaining the reference; an existing offset is edited in place.
 Dragging a ring
 edits the nearest following `.rotate(...)` when self is selected, preserving its

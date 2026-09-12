@@ -128,13 +128,13 @@ const placed = part.relate(self => [
 The pivot is expressed in self's local coordinates. Use `pivotVertex(id)` to
 choose one of self's vertices, or omit the pivot and call `rotate(x, y, z)`
 to rotate around self's origin. Angles are degrees, applied X, then Y, then Z.
-`aroundLine(base.axis).rotate(angle)` instead uses a positioned line axis; external
+`axisLine(base.axis).rotate(angle)` instead uses a positioned line axis; external
 axes follow their own composition placement. Each selection applies only to
 the next rotation.
 
 To move a reference without losing it, use
 `pivotVertex(id).pivotOffset(dx, dy, dz).rotate(x, y, z)` or
-`aroundLine(base.axis).axisOffset(dx, dy, dz).rotate(angle)`. `pivot([...])` also
+`axisLine(base.axis).axisOffset(dx, dy, dz).rotate(angle)`. `pivot([...])` also
 accepts `pivotOffset`. The point displacement uses self's local axes; the axis
 displacement uses the selected axis frame. Moving along the axis itself has no
 effect on the rotation. These are reference modifiers, followed by one `rotate`;
@@ -155,7 +155,7 @@ through them. Editing `pivot` or `rotate` changes the same source used here.
 
 ## Transform a joint result
 
-Import `offset`, `rotate`, `pivot`, `pivotVertex`, `pivotPoint`, `aroundEdge`, or `aroundLine` from Core to build
+Import `offset`, `rotate`, `pivot`, `pivotVertex`, `pivotPoint`, `axisEdge`, or `axisLine` from Core to build
 an independent `Transformation` inside `relate`. It acts on the joint solution
 and can move the part away from its contacts:
 
@@ -175,7 +175,7 @@ and can move the part away from its contacts:
 Independent `offset(x, y, z)` uses the composition's fixed axes. Rotating the
 part does not rotate those offset directions. Independent `rotate(x, y, z)`
 uses self's current origin and local axes; `pivot([x, y, z])` changes that center,
-`pivotVertex(id)` chooses a self vertex; `pivotPoint(pointRef)` selects a local or external point while keeping self XYZ axes. `aroundEdge(id).rotate(angle)` chooses a straight self edge, and `aroundLine(lineRef).rotate(angle)` uses
+`pivotVertex(id)` chooses a self vertex; `pivotPoint(pointRef)` selects a local or external point while keeping self XYZ axes. `axisEdge(id).rotate(angle)` chooses a straight self edge, and `axisLine(lineRef).rotate(angle)` uses
 the referenced axis in its solved placement. Pivot selections apply to the next
 rotation. Completed transformations cannot be chained: write `[offset(...), rotate(...)]`,
 not `offset(...).rotate(...)`. Only pivot and axis selections expose `rotate` to
@@ -249,7 +249,7 @@ not become second-level highlights unless the current call also uses them.
 Entering an individual constraint returns to its existing step-by-step preview.
 
 On `self.on(...)` or `self.align(...)`, and in independent `offset`,
-`pivot`, `pivotVertex`, `pivotPoint`, `aroundEdge`, `aroundLine`, and `rotate` calls, self is selected. Inside
+`pivot`, `pivotVertex`, `pivotPoint`, `axisEdge`, `axisLine`, and `rotate` calls, self is selected. Inside
 the parentheses of `on(...)` or `align(...)`, the target reference is selected.
 In the reverse spelling `base.on(self.up)`, the target
 argument focuses self. Selecting an explicit reference
@@ -311,7 +311,7 @@ the underline appears on that new code after the edit. Marked code scrolls into
 view, including horizontally, without taking focus from the viewport or an input.
 Parameter and topology tools use the same source markers and navigation.
 Clicking a tool with an existing call moves the caret to the complete expression
-end, such as `offset()|` or `aroundEdge(1).rotate(25)|`, and shows that step immediately. If a new call is needed, the viewport shows the state just
+end, such as `offset()|` or `axisEdge(1).rotate(25)|`, and shows that step immediately. If a new call is needed, the viewport shows the state just
 before the actual insertion position. The chosen tool stays active, and clicking
 alone does not change the source. New array calls put the caret in the insertion
 gap: before the closing bracket at the end, or before the next item in the middle.
@@ -319,7 +319,7 @@ From an array gap, the same rule checks only the immediately following item;
 a mismatch keeps the insertion position.
 
 The start of a self expression, such as `|self.axis.align(...)`, also counts as
-self context. Plain rotate and pivot selectors match point rotation; around selectors match
+self context. Plain rotate and pivot selectors match point rotation; axis selectors match
 axis rotation. Choosing one does not activate a call of the other type.
 
 When an `offset` or `rotate` is selected, the matching tool edits that call.

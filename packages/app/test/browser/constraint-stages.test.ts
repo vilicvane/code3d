@@ -85,9 +85,9 @@ test(
         };
       };
       try {
-        const source = `import {offset, pivot, aroundLine, rotate, box, group} from '@code3d/core';
+        const source = `import {offset, pivot, axisLine, rotate, box, group} from '@code3d/core';
         const base = box(20, 10, 30);
-        const part = box(8, 6, 4).relate(self => [self.on(base.up), offset(10, 0, 0), pivot([5, 0, 0]).rotate(0, 0, 90), aroundLine(base.axis).rotate(30), offset(7, 0, 0)]);
+        const part = box(8, 6, 4).relate(self => [self.on(base.up), offset(10, 0, 0), pivot([5, 0, 0]).rotate(0, 0, 90), axisLine(base.axis).rotate(30), offset(7, 0, 0)]);
         export default group([base, part]);`;
         const module = await compile(source);
         // Compare in the base's frame, independently of the composition reference member.
@@ -101,7 +101,7 @@ test(
           'offset(10',
           'pivot([5',
           'rotate(0',
-          'aroundLine(base.axis)',
+          'axisLine(base.axis)',
           'rotate(30)',
           'offset(7',
         ].map(text => inspect(source, text));

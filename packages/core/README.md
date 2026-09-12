@@ -55,8 +55,8 @@ centering or orientation condition; use point or axis alignment to center a part
 The App's gizmos edit or insert independent array entries.
 
 Choose a
-center with `pivot([x,y,z])`, self topology with `pivotVertex(id)`/`aroundEdge(id)`,
-or references with `pivotPoint(pointRef)`/`aroundLine(lineRef)`; finish each selector
+center with `pivot([x,y,z])`, self topology with `pivotVertex(id)`/`axisEdge(id)`,
+or references with `pivotPoint(pointRef)`/`axisLine(lineRef)`; finish each selector
 with `rotate`. Point rotations retain self XYZ axes, including external centers. Consecutive constraints solve jointly; transformations
 then act on that result in order. A later constraint starts a new segment using
 the preceding pose. Independent offsets use fixed composition axes, and rotations
@@ -65,7 +65,7 @@ for example `[offset(0, 8, 0), rotate(0, 25, 0)]`. Only pivot/axis selections
 chain into `rotate`; completed transformations cannot chain into another operation.
 Keep a selected reference while moving it with
 `pivotVertex(id).pivotOffset(dx, dy, dz).rotate(x, y, z)` or
-`aroundLine(axis).axisOffset(dx, dy, dz).rotate(angle)`. Point offsets use self local
+`axisLine(axis).axisOffset(dx, dy, dz).rotate(angle)`. Point offsets use self local
 axes; axis offsets use the selected axis frame and preserve its direction.
 Each selector accepts one matching offset, followed by `rotate`.
 See the [transformation example](../app/examples/constraints/transformations.ts)

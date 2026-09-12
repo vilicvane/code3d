@@ -1,4 +1,4 @@
-import {offset, rotate, pivot, pivotVertex, aroundLine} from '@code3d/core';
+import {offset, rotate, pivot, pivotVertex, axisLine} from '@code3d/core';
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {
@@ -176,7 +176,7 @@ for (const operation of [
   'rotate',
   'pivot',
   'pivotVertex',
-  'aroundLine',
+  'axisLine',
 ] as const) {
   test(`transformation ${operation} defaults preserve solved placement`, t => {
     const base = box(20, 30, 40);
@@ -193,8 +193,8 @@ for (const operation of [
         const receiver =
           operation === 'pivotVertex'
             ? pivotVertex(1)
-            : operation === 'aroundLine'
-              ? aroundLine(base.axis)
+            : operation === 'axisLine'
+              ? axisLine(base.axis)
               : {offset, rotate};
         const method = operation === 'offset' ? 'offset' : 'rotate';
         return [
@@ -212,7 +212,7 @@ for (const operation of [
     const defaults =
       operation === 'pivot'
         ? [[0, 0, 0]]
-        : operation === 'aroundLine'
+        : operation === 'axisLine'
           ? [0]
           : [0, 0, 0];
     for (const args of [[], [undefined]])
@@ -222,7 +222,7 @@ for (const operation of [
         snapshot(place([[2, undefined, 4]])),
         snapshot(place([[2, 0, 4]])),
       );
-    } else if (operation !== 'aroundLine') {
+    } else if (operation !== 'axisLine') {
       equivalent(
         snapshot(place([3, undefined, 5])),
         snapshot(place([3, 0, 5])),

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  aroundLine,
-  aroundEdge,
+  axisLine,
+  axisEdge,
   pivotPoint,
   box,
   group,
@@ -69,12 +69,12 @@ test('pivot and external axis chains preserve authored call order', () => {
   const axis = line([0, 0, 10]);
   const part = box(2, 2, 2);
   near(
-    snapshot(part.relate(() => [offset(10, 0, 0), aroundLine(axis).rotate(90)]))
+    snapshot(part.relate(() => [offset(10, 0, 0), axisLine(axis).rotate(90)]))
       .compositionTransform.position,
     [0, 10, 0],
   );
   near(
-    snapshot(part.relate(() => [aroundLine(axis).rotate(90), offset(10, 0, 0)]))
+    snapshot(part.relate(() => [axisLine(axis).rotate(90), offset(10, 0, 0)]))
       .compositionTransform.position,
     [10, 0, 0],
   );
@@ -199,7 +199,7 @@ test('external axes use their own final independent placement in mixed systems',
     self.axis.align(base.axis),
     self.on(base.up),
     offset(10, -3, 0),
-    aroundLine(axis).rotate(90),
+    axisLine(axis).rotate(90),
   ]);
   near(snapshot(part).compositionTransform.position, [7, 11, 0]);
 });
@@ -211,14 +211,14 @@ test('completed independent transformations have no chaining operations', () => 
     rotate(10, 20, 30),
     pivot([1, 2, 3]).rotate(10, 20, 30),
     pivotVertex(1).rotate(10, 20, 30),
-    aroundLine(axis).rotate(30),
+    axisLine(axis).rotate(30),
   ]) {
     for (const operation of [
       'offset',
       'rotate',
       'pivot',
       'pivotVertex',
-      'aroundLine',
+      'axisLine',
     ])
       assert.equal(operation in value, false);
   }
@@ -272,9 +272,9 @@ test('axisOffset moves an axis in its reference frame and retains its direction'
   ]);
   const part = box(2, 3, 4);
   const actual = snapshot(
-    part.relate(() => aroundLine(axis).axisOffset(2, 3, 4).rotate(65)),
+    part.relate(() => axisLine(axis).axisOffset(2, 3, 4).rotate(65)),
   );
-  const expected = snapshot(part.relate(() => aroundLine(shifted).rotate(65)));
+  const expected = snapshot(part.relate(() => axisLine(shifted).rotate(65)));
   near(
     actual.compositionTransform.position,
     expected.compositionTransform.position,
@@ -284,12 +284,12 @@ test('axisOffset moves an axis in its reference frame and retains its direction'
     expected.compositionTransform.quaternion,
   );
   const along = snapshot(
-    part.relate(() => aroundLine(axis).axisOffset(0, 100, 0).rotate(65)),
+    part.relate(() => axisLine(axis).axisOffset(0, 100, 0).rotate(65)),
   );
   near(
     along.compositionTransform.position,
-    snapshot(part.relate(() => aroundLine(axis).rotate(65)))
-      .compositionTransform.position,
+    snapshot(part.relate(() => axisLine(axis).rotate(65))).compositionTransform
+      .position,
   );
 });
 
@@ -298,7 +298,7 @@ test('reference offsets stay incomplete until rotation and keep model value sema
   const shifted = center.pivotOffset(1, 2, 3);
   assert.equal('pivotOffset' in shifted, false);
   assert.equal('offset' in shifted, false);
-  const axis = aroundLine(line([0, 1, 0]));
+  const axis = axisLine(line([0, 1, 0]));
   assert.equal('axisOffset' in axis.axisOffset(1, 2, 3), false);
   assert.equal('axisOffset' in axis.axisOffset(1, 2, 3).rotate(30), false);
   assert.throws(() => box(2, 2, 2).relate(() => shifted as never), /completed/);
@@ -310,15 +310,15 @@ test('reference offsets stay incomplete until rotation and keep model value sema
   assert.deepEqual(snapshot(original).compositionTransform, before);
 });
 
-test('aroundEdge is equivalent to a self edge reference after placement, offsets and origin edits', () => {
+test('axisEdge is equivalent to a self edge reference after placement, offsets and origin edits', () => {
   const original = box(8, 6, 4)
     .originOffset(2, -1, 3)
     .relate(() => [offset(4, 8, -2), rotate(20, 10, 30)]);
   const byId = original.relate(() =>
-    aroundEdge(1).axisOffset(2, 3, 4).rotate(37),
+    axisEdge(1).axisOffset(2, 3, 4).rotate(37),
   );
   const byRef = original.relate(self =>
-    aroundLine(self.edge(1)).axisOffset(2, 3, 4).rotate(37),
+    axisLine(self.edge(1)).axisOffset(2, 3, 4).rotate(37),
   );
   near(
     snapshot(byId).compositionTransform.position,
@@ -331,7 +331,7 @@ test('aroundEdge is equivalent to a self edge reference after placement, offsets
   assert.equal(
     snapshot(byId).transformations!.at(-1)!.rotations[0].spatial.reference!
       .kind,
-    'aroundEdge',
+    'axisEdge',
   );
 });
 

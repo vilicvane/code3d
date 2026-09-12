@@ -65,7 +65,7 @@ for (const [label, expression, method, expected] of [
     {timeout: 90_000},
     async t => {
       const {page, errors} = await openApp(t);
-      const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, aroundLine, aroundEdge, box, group} from '@code3d/core';
+      const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, group} from '@code3d/core';
 const coords = [1, 2, 3] as const;
 const amount = 2;
 const base = box(40, 10, 30);
@@ -240,7 +240,7 @@ test(
   async t => {
     const {page, errors} = await openApp(t);
     const source =
-      "import {offset, rotate, pivot, pivotVertex, pivotPoint, aroundLine, aroundEdge, box} from '@code3d/core';\nconst shift = 0.3;\nexport const part = box(24, 6, 14).rotate(17, 23, 11).originOffset(shift * -2, 0, 0);";
+      "import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from '@code3d/core';\nconst shift = 0.3;\nexport const part = box(24, 6, 14).rotate(17, 23, 11).originOffset(shift * -2, 0, 0);";
     await setSource(page, source, 'originOffset');
     const input = page.locator('input[data-parameter="dx"]');
     await input.waitFor();
@@ -350,7 +350,7 @@ test(
   async t => {
     const {page, errors} = await openApp(t);
     const source =
-      "import {offset, rotate, pivot, pivotVertex, pivotPoint, aroundLine, aroundEdge, box} from '@code3d/core';\nexport const part = box(24, 6, 14).originOffset();";
+      "import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from '@code3d/core';\nexport const part = box(24, 6, 14).originOffset();";
     await setSource(page, source, 'originOffset');
     await cameraIdle(page);
     const handles = () =>
@@ -531,7 +531,7 @@ test(
   {timeout: 120_000},
   async t => {
     const {page, errors} = await openApp(t);
-    const source = `import {rotate, pivot, pivotVertex, pivotPoint, aroundLine, aroundEdge, offset, box, group} from '@code3d/core';
+    const source = `import {rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, offset, box, group} from '@code3d/core';
 const base = box(24, 6, 14);
 const part = box(6, 8, 4).rotate(0, 27, 0).relate(s => [s.on(base.up), offset(1.3, 0, 0)]);
 export const assembly = group([base, part]);`;
@@ -602,7 +602,7 @@ test(
     page.on('console', message => {
       if (/\[mobx\]/i.test(message.text())) errors.push(message.text());
     });
-    const source = `import {rotate, pivotVertex, pivotPoint, aroundLine, aroundEdge, pivot, offset, circle, group, loft, rectangle, regularPolygon} from '@code3d/core';
+    const source = `import {rotate, pivotVertex, pivotPoint, axisLine, axisEdge, pivot, offset, circle, group, loft, rectangle, regularPolygon} from '@code3d/core';
 const start = circle(20);
 const via = regularPolygon(20, 8).relate(self => [self.on(start.up), pivot([50, 0, 0]).rotate(0, 0, 45), offset(0, 0, 0)]);
 const end = rectangle(40, 40).relate(self => [self.on(start.up), pivot([50, 0, 0]).rotate(0, 0, 90)]);
@@ -718,7 +718,7 @@ test(
   async t => {
     const {page, errors} = await openApp(t);
     for (const offset of [0, -18, -8]) {
-      const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, aroundLine, aroundEdge, circle, loft, rectangle, regularPolygon} from '@code3d/core';
+      const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, circle, loft, rectangle, regularPolygon} from '@code3d/core';
 const start = circle(20);
 const via = regularPolygon(20, 8).relate(self => [self.on(start.up), pivot([50, 0, 0]).rotate(0, 0, 45), offset(${offset}, 0, 0)]);
 const end = rectangle(40, 40).relate(self => [self.on(start.up), pivot([50, 0, 0]).rotate(0, 0, 90)]);
@@ -780,7 +780,7 @@ test(
   {timeout: 120_000},
   async t => {
     const {page, errors} = await openApp(t);
-    const source = `import {pivot, pivotVertex, pivotPoint, aroundLine, aroundEdge, offset, rotate, circle, rectangle, extrude as grow} from '@code3d/core';
+    const source = `import {pivot, pivotVertex, pivotPoint, axisLine, axisEdge, offset, rotate, circle, rectangle, extrude as grow} from '@code3d/core';
 const a = circle(10);
 const b = rectangle(12, 12).relate(s => [s.on(a.up), offset(30, 0, 0), rotate(0, 0, 30)]);
 export default grow([a, b], 20);`;
@@ -911,7 +911,7 @@ test(
     const {page, errors} = await openApp(t);
     await page.evaluate(() => {
       const editor = window.coordinateApp.codeEditor.editor;
-      const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, aroundLine, aroundEdge, box, intersect, sphere} from '@code3d/core';
+      const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, intersect, sphere} from '@code3d/core';
 export default intersect([sphere(8), box(12, 12, 12)]);`;
       editor.getModel()!.setValue(source);
       editor.setPosition(
@@ -972,7 +972,7 @@ test(
   async t => {
     const {page, errors} = await openApp(t);
     for (const offset of [8, 50, 4]) {
-      const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, aroundLine, aroundEdge, box, intersect as common} from '@code3d/core';
+      const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, intersect as common} from '@code3d/core';
 const a = box(20, 20, 20);
 const b = box(20, 20, 20).relate(s => [s.on(a.up), offset(${offset}, -10, 0)]);
 const c = box(14, 14, 14).originOffset(-4, 0, 0);
@@ -1035,7 +1035,7 @@ test(
   async t => {
     const {page, errors} = await openApp(t);
     const source =
-      "import {offset, rotate, pivot, pivotVertex, pivotPoint, aroundLine, aroundEdge, box} from '@code3d/core';\nexport const part = box(24, 6, 14).originOffset(2, 3, 4);";
+      "import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from '@code3d/core';\nexport const part = box(24, 6, 14).originOffset(2, 3, 4);";
     await setSource(page, source, 'originOffset');
     const before = await state(page);
     const handle = await xHandle(page);
@@ -1088,7 +1088,7 @@ test(
   async t => {
     const {page, errors} = await openApp(t);
     const source =
-      "import {offset, rotate, pivot, pivotVertex, pivotPoint, aroundLine, aroundEdge, box} from '@code3d/core';\nexport const part = box(24, 6, 14).originOffset(2, 3, 4);";
+      "import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from '@code3d/core';\nexport const part = box(24, 6, 14).originOffset(2, 3, 4);";
     await setSource(page, source, 'originOffset');
     const before = await state(page);
     if (process.env.CODE3D_ORIGIN_LAYER_SCREENSHOT)
@@ -1180,7 +1180,7 @@ test(
     );
 
     const pivotSource =
-      "import {offset, rotate, pivotVertex, pivotPoint, aroundLine, aroundEdge, pivot, box, point} from '@code3d/core';\nexport const part = box(24, 6, 14).relate(self => [self.center.align(point()), pivot([5, 0, 0]).rotate(0, 90, 0)]);";
+      "import {offset, rotate, pivotVertex, pivotPoint, axisLine, axisEdge, pivot, box, point} from '@code3d/core';\nexport const part = box(24, 6, 14).relate(self => [self.center.align(point()), pivot([5, 0, 0]).rotate(0, 90, 0)]);";
     await setSource(page, pivotSource, 'pivot');
     await assertOriginForeground(page);
     assert.equal((await state(page)).bindings.length, 3);
@@ -1208,7 +1208,7 @@ test(
       '',
       '.originOffset(4, -2, 6).rotate(15, 35, 10).scaled(2)',
     ]) {
-      const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, aroundLine, aroundEdge, box} from '@code3d/core';\nexport const part = box(24, 6, 14).material('#8ed5d1')${prefix}.originVertex(3);`;
+      const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from '@code3d/core';\nexport const part = box(24, 6, 14).material('#8ed5d1')${prefix}.originVertex(3);`;
       await setSource(page, source, 'originVertex');
       await waitVertexSelection(page, 3);
       const before = await vertexState(page);
@@ -1302,7 +1302,7 @@ test(
   {timeout: 120_000},
   async t => {
     const {page, errors} = await openApp(t);
-    const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, aroundLine, aroundEdge, box, group} from '@code3d/core';
+    const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, group} from '@code3d/core';
 const base = box(24, 6, 14).material('#8ed5d1');
 const cap = box(8, 4, 8).material('#d9b478').relate(self => self.on(base.up));
 export const assembly = group([base, cap]).originPoint(cap.center);`;
@@ -1399,7 +1399,7 @@ for (const projection of ['perspective', 'orthographic'] as const)
     {timeout: 120_000},
     async t => {
       const {page, errors} = await openApp(t);
-      const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, aroundLine, aroundEdge, box, group} from '@code3d/core';
+      const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, group} from '@code3d/core';
 const base = box(24, 6, 14).material('#8ed5d1');
 const cap = box(8, 4, 8).material('#d9b478').relate(self => self.on(base.up));
 export const assembly = group([base, cap]).originPoint(cap.center).rotate(0, 0, 0);`;
@@ -1521,7 +1521,7 @@ for (const grouped of [false, true])
     {timeout: 90_000},
     async t => {
       const {page, errors} = await openApp(t);
-      const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, aroundLine, aroundEdge, box, group} from '@code3d/core'; const base=box(30,8,25); const part=${grouped ? 'group([box(12,10,8)])' : 'box(12,10,8)'}.relate(self=>self.on(base.up)); export default group([base,part]);`;
+      const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, group} from '@code3d/core'; const base=box(30,8,25); const part=${grouped ? 'group([box(12,10,8)])' : 'box(12,10,8)'}.relate(self=>self.on(base.up)); export default group([base,part]);`;
       await page.evaluate(source => {
         const {codeEditor} = window.coordinateApp;
         const e = codeEditor.editor;
@@ -1687,7 +1687,7 @@ test(
   {timeout: 90_000},
   async t => {
     const {page, errors} = await openApp(t);
-    const source = `import {rotate, pivotVertex, pivotPoint, aroundLine, aroundEdge, offset, pivot, box, cut, cylinder, group, intersect, sphere, union} from '@code3d/core';
+    const source = `import {rotate, pivotVertex, pivotPoint, axisLine, axisEdge, offset, pivot, box, cut, cylinder, group, intersect, sphere, union} from '@code3d/core';
 const accent = '#d8ff3e';
 const neutral = '#30352f';
 const stockHeight = 8;
@@ -2075,9 +2075,9 @@ async function setSource(page: Page, source: string, method: string) {
   await page.keyboard.insertText(source);
   await page.evaluate(method => {
     const editor = window.coordinateApp.codeEditor.editor;
-    editor.setPosition(
-      editor.getModel()!.getPositionAt(editor.getValue().indexOf(method) + 2),
-    );
+    const offset = editor.getValue().indexOf(`${method}(`);
+    if (offset < 0) throw new Error(`Missing source call: ${method}`);
+    editor.setPosition(editor.getModel()!.getPositionAt(offset + 2));
   }, method);
   await page.waitForFunction(method => {
     const target = window.coordinateApp.viewport.sourceContext?.target;
@@ -2087,7 +2087,7 @@ async function setSource(page: Page, source: string, method: string) {
         'pivotVertex',
         'pivotOffset',
         'axisOffset',
-        'aroundLine',
+        'axisLine',
       ].includes(method) && target?.rotationSelectorIds
         ? 'rotate'
         : method;
@@ -2371,7 +2371,7 @@ for (const [selection, mode] of [
     {timeout: 90_000},
     async t => {
       const {page, errors} = await openApp(t);
-      const source = `import {pivot, pivotVertex, pivotPoint, aroundLine, aroundEdge, offset, rotate, box,group} from '@code3d/core'; const base=box(40,10,30); const part=box(24,16,14).relate(self=>[self.on(base.up), offset(3,2,1), rotate(10,20,30), offset(5,0,2), rotate(20,10,5)]); group([base,part]);`;
+      const source = `import {pivot, pivotVertex, pivotPoint, axisLine, axisEdge, offset, rotate, box,group} from '@code3d/core'; const base=box(40,10,30); const part=box(24,16,14).relate(self=>[self.on(base.up), offset(3,2,1), rotate(10,20,30), offset(5,0,2), rotate(20,10,5)]); group([base,part]);`;
       await setSource(
         page,
         source,
@@ -2614,7 +2614,7 @@ test(
   {timeout: 90_000},
   async t => {
     const {page, errors} = await openApp(t);
-    const source = `import {offset, rotate, pivot, pivotPoint, aroundLine, aroundEdge, box, group, pivotVertex} from '@code3d/core';
+    const source = `import {offset, rotate, pivot, pivotPoint, axisLine, axisEdge, box, group, pivotVertex} from '@code3d/core';
 const base=box(40,8,30); const part=box(24,16,14).relate(self=>[self.on(base.up),pivotVertex(1).rotate(10,20,30)]); group([base,part]);`;
     await setSource(page, source, 'rotate');
     await page.getByRole('toolbar', {name: 'Position tools'}).waitFor();
@@ -2702,7 +2702,7 @@ const base=box(40,8,30); const part=box(24,16,14).relate(self=>[self.on(base.up)
       id =>
         window.coordinateApp.codeEditor.editor
           .getValue()
-          .includes(`aroundEdge(${JSON.stringify(id)}).rotate(0)`),
+          .includes(`axisEdge(${JSON.stringify(id)}).rotate(0)`),
       edge,
     );
     const withAxis = (await state(page)).source;
@@ -2732,7 +2732,7 @@ const base=box(40,8,30); const part=box(24,16,14).relate(self=>[self.on(base.up)
         target && codeEditor.readSource(target.callRef ?? target.sourceRef)
       );
     });
-    assert.match(focusedRotation ?? '', /aroundEdge\(.+?\)\.rotate\(0\)/);
+    assert.match(focusedRotation ?? '', /axisEdge\(.+?\)\.rotate\(0\)/);
     await page.screenshot({path: '/tmp/code3d-spatial-toolbar.png'});
     assert.deepEqual(errors, []);
   },
@@ -2838,7 +2838,7 @@ for (const [name, expression, method, reference, rotationAxis] of [
   ],
   [
     'axis offset',
-    'core.box(24,16,14).relate(self=>[self.on(base.up),core.aroundLine(base.axis).axisOffset(0.35,3,4).rotate(35)])',
+    'core.box(24,16,14).relate(self=>[self.on(base.up),core.axisLine(base.axis).axisOffset(0.35,3,4).rotate(35)])',
     'axisOffset',
     true,
     undefined,
@@ -2852,7 +2852,7 @@ for (const [name, expression, method, reference, rotationAxis] of [
   ],
   [
     'axis rotation',
-    'core.box(24,16,14).relate(self=>[self.on(base.up),core.aroundLine(base.axis).rotate(7)])',
+    'core.box(24,16,14).relate(self=>[self.on(base.up),core.axisLine(base.axis).rotate(7)])',
     'rotate',
     false,
     1,
@@ -3039,7 +3039,7 @@ for (const mode of ['offset', 'rotate', 'pivot', 'axisOffset'] as const)
         mode === 'pivot'
           ? 'core.pivot([2,3,4]).rotate(10,20,30)'
           : mode === 'axisOffset'
-            ? 'core.aroundLine(base.axis).axisOffset(2,3,4).rotate(35)'
+            ? 'core.axisLine(base.axis).axisOffset(2,3,4).rotate(35)'
             : `core.${mode}(0,0,0)`;
       const source = `import * as core from '@code3d/core'; const base=core.box(40,8,30); const part=core.box(24,16,14).relate(self=>[self.on(base.up),${expression}]); core.group([base,part]);`;
       await setSource(page, source, mode);
@@ -3190,11 +3190,11 @@ for (const mode of ['offset', 'rotate', 'pivot', 'axisOffset'] as const)
   );
 
 test(
-  'axis rotation Alt moves its reference and retains the angle through a tool switch',
+  'axis rotation Alt moves its reference and retains the angle when replacing the axis',
   {timeout: 90_000},
   async t => {
     const {page, errors} = await openApp(t);
-    const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, aroundEdge, box,group,aroundLine} from '@code3d/core'; const base=box(40,8,30); const part=box(24,16,14).relate(self=>[self.on(base.up),aroundLine(base.axis).rotate(35)]); group([base,part]);`;
+    const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisEdge, box,group,axisLine} from '@code3d/core'; const base=box(40,8,30); const part=box(24,16,14).relate(self=>[self.on(base.up),axisLine(base.axis).rotate(35)]); group([base,part]);`;
     await setSource(page, source, 'rotate');
     const rotationId = await page.evaluate(
       () => window.coordinateApp.viewport.sourceContext?.target.id,
@@ -3204,7 +3204,7 @@ test(
       editor.setPosition(
         editor
           .getModel()!
-          .getPositionAt(editor.getValue().indexOf('aroundLine(base') + 2),
+          .getPositionAt(editor.getValue().indexOf('axisLine(base') + 2),
       );
     });
     assert.equal(
@@ -3220,8 +3220,8 @@ test(
         editor
           .getModel()!
           .getPositionAt(
-            editor.getValue().indexOf('aroundLine(base.axis)') +
-              'aroundLine(base.'.length,
+            editor.getValue().indexOf('axisLine(base.axis)') +
+              'axisLine(base.'.length,
           ),
       );
     });
@@ -3236,6 +3236,16 @@ test(
       .waitFor();
     await page.getByRole('button', {name: 'Translate', exact: true}).click();
     await assertTranslationOrigin(page);
+    // Translate focuses an insertion after this rotation. Revisit the authored
+    // rotation to edit its reference instead of creating a new rotation there.
+    await page.evaluate(() => {
+      const editor = window.coordinateApp.codeEditor.editor;
+      editor.setPosition(
+        editor
+          .getModel()!
+          .getPositionAt(editor.getValue().indexOf('axisLine(base') + 2),
+      );
+    });
     await page
       .getByRole('button', {name: 'Rotate about axis', exact: true})
       .click();
@@ -3278,7 +3288,7 @@ test(
     await page.getByText('Ready', {exact: true}).waitFor();
     assert.match(
       (await state(page)).source,
-      /aroundLine\(base.axis\)\.axisOffset\([^)]*\)\.rotate\(35\)/,
+      /axisLine\(base.axis\)\.axisOffset\([^)]*\)\.rotate\(35\)/,
     );
     await page.evaluate(() => {
       const editor = window.coordinateApp.codeEditor.editor;
@@ -3305,13 +3315,13 @@ test(
       id =>
         window.coordinateApp.codeEditor.editor
           .getValue()
-          .includes(`aroundEdge(${JSON.stringify(id)})`),
+          .includes(`axisEdge(${JSON.stringify(id)})`),
       edge,
     );
     await page.getByText('Ready', {exact: true}).waitFor();
     assert.match(
       (await state(page)).source,
-      /aroundEdge\([^)]*\)\.axisOffset\([^)]*\)\.rotate\(35\)/,
+      /axisEdge\([^)]*\)\.axisOffset\([^)]*\)\.rotate\(35\)/,
     );
     assert.deepEqual(errors, []);
   },
@@ -3323,7 +3333,7 @@ for (const grouped of [false, true])
     {timeout: 90_000},
     async t => {
       const {page, errors} = await openApp(t);
-      const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, aroundLine, aroundEdge, box,group} from '@code3d/core'; const base=box(40,8,30).rotate(10,0,0); const part=${grouped ? 'group([box(24,16,14)])' : 'box(24,16,14)'}.relate(self=>self.on(base.up)); group([base,part]);`;
+      const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box,group} from '@code3d/core'; const base=box(40,8,30).rotate(10,0,0); const part=${grouped ? 'group([box(24,16,14)])' : 'box(24,16,14)'}.relate(self=>self.on(base.up)); group([base,part]);`;
       await setSource(page, source, 'rotate');
       await page.evaluate(() => {
         const editor = window.coordinateApp.codeEditor.editor;
@@ -3490,13 +3500,13 @@ for (const [selector, axis, suffix] of [
     false,
     '.pivotOffset(2,0,0).rotate(0, 0, 0)',
   ],
-  ['aroundLine()', true, '.rotate(0)'],
-  ['aroundEdge()', true, '.rotate(0)'],
+  ['axisLine()', true, '.rotate(0)'],
+  ['axisEdge()', true, '.rotate(0)'],
   ['pivotPoint()', false, '.rotate(0, 0, 0)'],
-  ['aroundLine(self.edge())', true, '.rotate(0)'],
-  ['core.aroundLine().axisOffset(2,0,0)', true, '.axisOffset(2,0,0).rotate(0)'],
+  ['axisLine(self.edge())', true, '.rotate(0)'],
+  ['core.axisLine().axisOffset(2,0,0)', true, '.axisOffset(2,0,0).rotate(0)'],
   [
-    'aroundLine().axisOffset(2,0,0).rotate(23)',
+    'axisLine().axisOffset(2,0,0).rotate(23)',
     true,
     '.axisOffset(2,0,0).rotate(23)',
   ],
@@ -3507,7 +3517,7 @@ for (const [selector, axis, suffix] of [
     async t => {
       const {page, errors} = await openApp(t);
       try {
-        const source = `import * as core from '@code3d/core'; import {offset, rotate, box,group,pivot,pivotVertex,pivotPoint,aroundEdge,aroundLine} from '@code3d/core'; const base=box(32,14,24); const cover=box(32,3,24).relate(self=>[self.axis.align(base.axis),self.on(base.up),pivotVertex(8).rotate(0,0,49),${selector}]); group([base,cover]);`;
+        const source = `import * as core from '@code3d/core'; import {offset, rotate, box,group,pivot,pivotVertex,pivotPoint,axisEdge,axisLine} from '@code3d/core'; const base=box(32,14,24); const cover=box(32,3,24).relate(self=>[self.axis.align(base.axis),self.on(base.up),pivotVertex(8).rotate(0,0,49),${selector}]); group([base,cover]);`;
         await page.evaluate(
           ({source, selector}) => {
             const editor = window.coordinateApp.codeEditor.editor;
@@ -3565,7 +3575,7 @@ for (const [selector, axis, suffix] of [
           reference = JSON.stringify(candidate.id);
           await page.mouse.click(candidate.x, candidate.y);
         }
-        const selected = `${selector.startsWith('core.') ? 'core.' : ''}${axis ? 'aroundEdge' : 'pivotVertex'}(${reference})${suffix}`;
+        const selected = `${selector.startsWith('core.') ? 'core.' : ''}${axis ? 'axisEdge' : 'pivotVertex'}(${reference})${suffix}`;
         await page.waitForFunction(
           selected =>
             window.coordinateApp.codeEditor.editor
@@ -3582,7 +3592,7 @@ for (const [selector, axis, suffix] of [
               .getOffsetAt(editor.getPosition()!);
             return (
               editor.getValue()[offset] === '(' &&
-              /(?:pivotVertex|aroundEdge)$/.test(
+              /(?:pivotVertex|axisEdge)$/.test(
                 editor.getValue().slice(0, offset),
               )
             );
@@ -3637,8 +3647,8 @@ for (const [selector, axis, suffix] of [
           await page.locator('.contextual-tool-panel output').textContent(),
           `${axis ? 'E' : 'V'}${reference}`,
         );
-        if (selector === 'aroundLine()' || selector === 'aroundEdge()')
-          await page.screenshot({path: '/tmp/code3d-around-completed.png'});
+        if (selector === 'axisLine()' || selector === 'axisEdge()')
+          await page.screenshot({path: '/tmp/code3d-axis-completed.png'});
         if (selector === 'pivotVertex()')
           await page.screenshot({path: '/tmp/code3d-pivot-completed.png'});
         await page.evaluate(() =>
@@ -3669,15 +3679,15 @@ for (const [selector, axis, valid] of [
   ['pivot([1,2,3])', false, true],
   ['pivotVertex()', false, false],
   ['pivotPoint(base.center)', false, true],
-  ['aroundEdge()', true, false],
-  ['aroundLine(base.axis)', true, true],
+  ['axisEdge()', true, false],
+  ['axisLine(base.axis)', true, true],
 ] as const)
   test(
     `draft ${selector} panel edits rotation before picking and undoes once`,
     {timeout: 90_000},
     async t => {
       const {page, errors} = await openApp(t);
-      const source = `import {offset, rotate, box,group,pivot,pivotVertex,pivotPoint,aroundEdge,aroundLine} from '@code3d/core'; const base=box(32,14,24); const cover=box(32,3,24).relate(self=>[self.on(base.up),${selector}]); group([base,cover]);`;
+      const source = `import {offset, rotate, box,group,pivot,pivotVertex,pivotPoint,axisEdge,axisLine} from '@code3d/core'; const base=box(32,14,24); const cover=box(32,3,24).relate(self=>[self.on(base.up),${selector}]); group([base,cover]);`;
       await page.evaluate(
         ({source, selector}) => {
           const editor = window.coordinateApp.codeEditor.editor;
@@ -3738,7 +3748,7 @@ test(
   {timeout: 90_000},
   async t => {
     const {page, errors} = await openApp(t);
-    const source = `import {offset, rotate, pivot, pivotPoint, aroundLine, aroundEdge, box,pivotVertex} from '@code3d/core'; box(20,8,12).relate(self=>[pivotVertex()]);
+    const source = `import {offset, rotate, pivot, pivotPoint, axisLine, axisEdge, box,pivotVertex} from '@code3d/core'; box(20,8,12).relate(self=>[pivotVertex()]);
 // outside the model`;
     await page.evaluate(source => {
       const app = window.coordinateApp;
@@ -3786,13 +3796,13 @@ test(
   },
 );
 
-for (const selector of ['pivotVertex', 'aroundEdge'] as const) {
+for (const selector of ['pivotVertex', 'axisEdge'] as const) {
   test(
     `${selector} source arguments highlight the unified rotation panel reference`,
     {timeout: 90_000},
     async t => {
       const {page, errors} = await openApp(t);
-      const source = `import {box,${selector}} from '@code3d/core'; box(20,8,12).relate(self=>[${selector}(1).rotate(${selector === 'aroundEdge' ? '20' : '0,0,20'})]);`;
+      const source = `import {box,${selector}} from '@code3d/core'; box(20,8,12).relate(self=>[${selector}(1).rotate(${selector === 'axisEdge' ? '20' : '0,0,20'})]);`;
       await page.evaluate(source => {
         const editor = window.coordinateApp.codeEditor.editor;
         editor.getModel()!.setValue(source);
@@ -3825,7 +3835,7 @@ for (const selector of ['pivotVertex', 'aroundEdge'] as const) {
         );
         assert.equal(
           await reference.innerText(),
-          selector === 'aroundEdge' ? 'E1' : 'V1',
+          selector === 'axisEdge' ? 'E1' : 'V1',
         );
         await page.evaluate(() => {
           const editor = window.coordinateApp.codeEditor.editor;
@@ -3873,7 +3883,7 @@ for (const contents of [
     {timeout: 90_000},
     async t => {
       const {page, errors} = await openApp(t);
-      const source = `import {rotate, pivot, pivotVertex, pivotPoint, aroundLine, aroundEdge, box,group,offset} from '@code3d/core'; const base=box(32,14,24); const cover=box(32,3,24).relate(self=>[${contents}]); group([base,cover]);`;
+      const source = `import {rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box,group,offset} from '@code3d/core'; const base=box(32,14,24); const cover=box(32,3,24).relate(self=>[${contents}]); group([base,cover]);`;
       await page.evaluate(source => {
         const editor = window.coordinateApp.codeEditor.editor;
         editor.getModel()!.setValue(source);
@@ -3912,10 +3922,7 @@ for (const contents of [
         await page.locator('.contextual-tool-panel').isVisible(),
         true,
       );
-      assert.match(
-        (await state(page)).source,
-        /aroundEdge\(.+?\)\.rotate\(0\)/,
-      );
+      assert.match((await state(page)).source, /axisEdge\(.+?\)\.rotate\(0\)/);
       await page.evaluate(() =>
         window.coordinateApp.codeEditor.runHistoryAction('undo'),
       );
@@ -3933,7 +3940,7 @@ test(
   {timeout: 90_000},
   async t => {
     const {page, errors} = await openApp(t);
-    const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, aroundLine, aroundEdge, box} from '@code3d/core'; const shift=2; box(20,10,12).originOffset(shift*2,0,0);`;
+    const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from '@code3d/core'; const shift=2; box(20,10,12).originOffset(shift*2,0,0);`;
     await setSource(page, source, 'originOffset');
     await cameraIdle(page);
     const fields = page.locator('.contextual-tool-panel input');
@@ -4014,7 +4021,7 @@ test(
 const part = core.box(24,16,14).relate(self => [
   core.offset(2,0,0),
   core.pivot([1,2,3]).rotate(0,0,30),
-  core.aroundEdge(1).rotate(20),
+  core.axisEdge(1).rotate(20),
 ]);
 part;`;
     await setSource(page, source, 'offset');
@@ -4059,7 +4066,7 @@ part;`;
     await expectTool('Rotate about point');
     await focus('offset(2');
     await expectTool('Translate');
-    await focus('aroundEdge(1)');
+    await focus('axisEdge(1)');
     await expectTool('Rotate about axis');
     assert.equal(
       await page.evaluate(
@@ -4422,16 +4429,16 @@ core.group([base, ...parts]);`;
     await page.waitForFunction(() => {
       const {previewState, codeEditor} = window.coordinateApp;
       return (
-        codeEditor.editor.getValue().includes('core.aroundEdge(') &&
+        codeEditor.editor.getValue().includes('core.axisEdge(') &&
         previewState.sourceVersion === codeEditor.sourceVersion()
       );
     });
     const changed = (await state(page)).source;
     assert.match(
       changed,
-      /core\.rotate\(0,0,30\),\s*core\.aroundEdge\([^)]+\)\.rotate\(0\),\s*core\.offset\(20\+x,0,0\)/,
+      /core\.rotate\(0,0,30\),\s*core\.axisEdge\([^)]+\)\.rotate\(0\),\s*core\.offset\(20\+x,0,0\)/,
     );
-    assert.deepEqual((await sourceMarks(page)).word, ['aroundEdge']);
+    assert.deepEqual((await sourceMarks(page)).word, ['axisEdge']);
     assert.equal(
       await page.evaluate(
         () => window.coordinateApp.viewport.sourceContext?.evaluation.contextId,
@@ -4450,7 +4457,7 @@ core.group([base, ...parts]);`;
       async t => {
         const {page, errors} = await openApp(t);
         const point = 'pivotVertex(1).rotate(10,20,30)';
-        const axis = 'aroundEdge(1).rotate(25)';
+        const axis = 'axisEdge(1).rotate(25)';
         const rotations = axisFirst ? [axis, point] : [point, axis];
         const expression = `[self.on(base.up), ${rotations.map(value => `core.${value}`).join(', ')}, core.offset(8,0,0)]`;
         const source = `import * as core from '@code3d/core';
@@ -4526,7 +4533,7 @@ core.group([base,...parts]);`;
           );
           assert.ok(
             (await sourceMarks(page)).tool[0].includes(
-              tool === 'rotate-axis' ? 'aroundEdge(1)' : 'pivotVertex(1)',
+              tool === 'rotate-axis' ? 'axisEdge(1)' : 'pivotVertex(1)',
             ),
           );
           assert.deepEqual((await sourceMarks(page)).word, []);
@@ -4611,7 +4618,7 @@ const base=core.box(40,10,30);
 const part=core.box(24,16,14).relate(self=>[
   self.axis.align(base.axis),
   core.offset(3,0,0),
-  core.aroundEdge(1).rotate(25)]);
+  core.axisEdge(1).rotate(25)]);
 core.group([base,part]);`;
     await setSource(page, source, 'box');
     const original = (await state(page)).source;
@@ -4639,7 +4646,7 @@ core.group([base,part]);`;
           .click();
       }
       const call =
-        tool === 'translate' ? 'offset(3,0,0)' : 'aroundEdge(1).rotate(25)';
+        tool === 'translate' ? 'offset(3,0,0)' : 'axisEdge(1).rotate(25)';
       for (const recompile of [false, true]) {
         if (recompile)
           await page.evaluate(() => window.coordinateApp.runModel());
@@ -4677,7 +4684,7 @@ test(
   {timeout: 90_000},
   async t => {
     const {page, errors} = await openApp(t);
-    const source = `import {rotate, pivot, pivotVertex, pivotPoint, aroundLine, box, group, offset, aroundEdge} from '@code3d/core';
+    const source = `import {rotate, pivot, pivotVertex, pivotPoint, axisLine, box, group, offset, axisEdge} from '@code3d/core';
 const base=box(32,14,24);
 const cover = box(32, 3, 24)
   .material('#d8ff3e')
@@ -4685,7 +4692,7 @@ const cover = box(32, 3, 24)
     self.axis.align(base.axis),
     self.on(base.up),
     offset(0, 0, 10.5),
-    aroundEdge(10).rotate(61),
+    axisEdge(10).rotate(61),
     offset(0, 0, -11),
   ]);
 group([base,cover]);`;
@@ -4703,7 +4710,7 @@ group([base,cover]);`;
       .getByRole('menuitemradio', {name: 'Rotate about axis', exact: true})
       .click();
     const original = (await state(page)).source;
-    const call = 'aroundEdge(10).rotate(61)';
+    const call = 'axisEdge(10).rotate(61)';
     for (const recompile of [false, true]) {
       if (recompile) await page.evaluate(() => window.coordinateApp.runModel());
       const marks = await sourceMarks(page);
@@ -4742,7 +4749,7 @@ const cover=core.box(32,3,24).relate(self=>[
  self.axis.align(base.axis),self.on(base.up),
  core.offset(0,0,10.5),
  core.pivotVertex(1).rotate(0,0,20),
- core.aroundEdge(10).rotate(61),
+ core.axisEdge(10).rotate(61),
  core.offset(0,0,-11),
 ]); core.group([base,cover]);`;
     await setSource(page, source, 'offset');
@@ -4769,14 +4776,14 @@ const cover=core.box(32,3,24).relate(self=>[
     await page.waitForFunction(() => {
       const {codeEditor, previewState} = window.coordinateApp;
       return (
-        (codeEditor.editor.getValue().match(/aroundEdge\(/g)?.length ?? 0) ===
+        (codeEditor.editor.getValue().match(/axisEdge\(/g)?.length ?? 0) ===
           2 && previewState.sourceVersion === codeEditor.sourceVersion()
       );
     });
     const changed = (await state(page)).source;
     assert.match(
       changed,
-      /offset\(0,0,10\.5\),\s*core\.aroundEdge\([^)]+\)\.rotate\(0\),\s*core\.pivotVertex\(1\)\.rotate\(0,0,20\),\s*core\.aroundEdge\(10\)\.rotate\(61\)/,
+      /offset\(0,0,10\.5\),\s*core\.axisEdge\([^)]+\)\.rotate\(0\),\s*core\.pivotVertex\(1\)\.rotate\(0,0,20\),\s*core\.axisEdge\(10\)\.rotate\(61\)/,
     );
     await page.evaluate(() =>
       window.coordinateApp.codeEditor.runHistoryAction('undo'),
@@ -4795,7 +4802,7 @@ for (const [expression, tool, parameter] of [
   ['rotate(0, 0, 20)', 'rotate', 'z'],
   ['pivot().rotate(0, 0, 20)', 'rotate', 'pivot.x'],
   ['pivotVertex()', 'pivotVertex', 'x'],
-  ['aroundEdge()', 'aroundEdge', 'angle'],
+  ['axisEdge()', 'axisEdge', 'angle'],
 ] as const) {
   test(
     `single relate return keeps the ${expression} panel and edits its own call`,
@@ -4838,7 +4845,7 @@ export default part;`;
       );
       assert.match(edited, /12/);
       assert.doesNotMatch(edited, /self\s*=>\s*\[/);
-      if (expression === 'pivotVertex()' || expression === 'aroundEdge()')
+      if (expression === 'pivotVertex()' || expression === 'axisEdge()')
         assert.match(edited, /\.rotate\(/);
       await page.evaluate(() =>
         window.coordinateApp.codeEditor.runHistoryAction('undo'),

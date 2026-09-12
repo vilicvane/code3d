@@ -5,7 +5,7 @@ import {
   line,
   offset,
   pivot,
-  aroundLine,
+  axisLine,
   rotate,
   type Constraint,
   type Transformation,
@@ -43,7 +43,7 @@ test('independent steps and unfinished references retain their prefixes after th
     const shift = offset(10, 2, 3);
     const center = pivot([5, 0, 0]);
     const turn = center.rotate(25, 35, 10);
-    const axis = aroundLine(base.axis.reverse());
+    const axis = axisLine(base.axis.reverse());
     const orbit = axis.rotate(45);
     const finalShift = offset(7, 0, 0);
     return {
@@ -136,11 +136,7 @@ test('reverse-written align retains self as the owner of later independent rotat
   let early: Transformation | undefined;
   const placed = original.relate(self => {
     early = rotate(10, 20, 30);
-    return [
-      base.align(self),
-      early,
-      aroundLine(box(10, 10, 10).axis).rotate(40),
-    ];
+    return [base.align(self), early, axisLine(box(10, 10, 10).axis).rotate(40)];
   });
   const preview = previewOf(early);
   samePose(
@@ -165,8 +161,8 @@ test('constraints expose no chained transformations or rotation selectors', () =
       'pivot',
       'pivotVertex',
       'pivotPoint',
-      'aroundEdge',
-      'aroundLine',
+      'axisEdge',
+      'axisLine',
       'pivotOffset',
       'axisOffset',
     ])

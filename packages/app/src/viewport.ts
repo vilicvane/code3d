@@ -1877,8 +1877,8 @@ export class ModelViewport {
           'pivotVertex',
           'pivotPoint',
           'pivotOffset',
-          'aroundEdge',
-          'aroundLine',
+          'axisEdge',
+          'axisLine',
           'axisOffset',
         ].includes(name);
       this.transformGizmo.attach(
@@ -1901,7 +1901,7 @@ export class ModelViewport {
         this.transformGizmo.attach(
           occurrence.object,
           [],
-          ['aroundLine', 'aroundEdge'].includes(
+          ['axisLine', 'axisEdge'].includes(
             scope.target.rotationSelection.selector,
           )
             ? 'rotate-axis'

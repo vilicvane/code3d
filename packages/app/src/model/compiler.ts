@@ -163,8 +163,7 @@ export type SourceTarget = Readonly<{
   /** Authored reference chain, available even before its arguments/rotation complete. */
   rotationSelection?: Readonly<{
     sourceRef: SourceRef;
-    selector:
-      'pivot' | 'pivotVertex' | 'pivotPoint' | 'aroundEdge' | 'aroundLine';
+    selector: 'pivot' | 'pivotVertex' | 'pivotPoint' | 'axisEdge' | 'axisLine';
     constructors?: SourceTarget['transformationInsertion'];
     reference: string;
     calls: readonly Pick<
@@ -758,8 +757,8 @@ export function createModelCompiler() {
             selector !== 'pivot' &&
             selector !== 'pivotVertex' &&
             selector !== 'pivotPoint' &&
-            selector !== 'aroundEdge' &&
-            selector !== 'aroundLine'
+            selector !== 'axisEdge' &&
+            selector !== 'axisLine'
           )
             return undefined;
           const calls = [first];

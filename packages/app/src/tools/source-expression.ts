@@ -9,8 +9,8 @@ export type TransformationConstructor =
   | 'pivot'
   | 'pivotVertex'
   | 'pivotPoint'
-  | 'aroundEdge'
-  | 'aroundLine';
+  | 'axisEdge'
+  | 'axisLine';
 
 export type NumericArgumentValue = number | readonly NumericArgumentValue[];
 
@@ -152,8 +152,8 @@ export function createTransformationInsertions(
           'pivot',
           'pivotVertex',
           'pivotPoint',
-          'aroundEdge',
-          'aroundLine',
+          'axisEdge',
+          'axisLine',
         ] as const
       ).map(operation => [
         operation,
@@ -786,7 +786,7 @@ export function relationSelfExpression(
 export type RotationReferenceEdit = Readonly<{
   /** A reference chain may not yet end in rotate. Complete it in the same edit. */
   draft?: boolean;
-  selector: 'pivotVertex' | 'pivotPoint' | 'aroundEdge' | 'aroundLine';
+  selector: 'pivotVertex' | 'pivotPoint' | 'axisEdge' | 'axisLine';
   expression: string;
   factory?: TransformationInsertion;
   previous: 'point' | 'axis';
@@ -798,7 +798,7 @@ export function rotationReferenceSource(
   source: string,
   edit: RotationReferenceEdit,
 ): Readonly<{text: string; usesConstructor: boolean}> {
-  const axis = edit.selector === 'aroundLine' || edit.selector === 'aroundEdge';
+  const axis = edit.selector === 'axisLine' || edit.selector === 'axisEdge';
   const angles = axis ? '0' : '0, 0, 0';
   const selector = `${edit.selector}(${edit.expression})`;
   if (edit.append) {

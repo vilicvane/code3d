@@ -33,10 +33,10 @@ TypeScript 隐藏声明不等于 JavaScript 对象上的字段不可读；这是
 组合只在需要具体几何、查询或显示时解释相关模型的关系闭包；单独检查一个模型
 仍使用它自己的局部几何。复用同一个模型值与创建两个 `relate` 值具有不同身份。
 
-`relate` 确定接受摆放的 self，约束与独立 Transformation 按顺序保存在新模型值的 placements 中。Constraint 只表示 on/align 条件，不提供变换或旋转选择器；独立 Transformation 只表示一次 offset 或 rotate，不提供完成后的链式方法。pivot/pivotVertex/pivotPoint 可接一次 pivotOffset，aroundEdge/aroundLine 可接一次 axisOffset；偏移后的未完成选择只提供 rotate，完成后同样返回单步 Transformation；两者共用源码 trace。
+`relate` 确定接受摆放的 self，约束与独立 Transformation 按顺序保存在新模型值的 placements 中。Constraint 只表示 on/align 条件，不提供变换或旋转选择器；独立 Transformation 只表示一次 offset 或 rotate，不提供完成后的链式方法。pivot/pivotVertex/pivotPoint 可接一次 pivotOffset，axisEdge/axisLine 可接一次 axisOffset；偏移后的未完成选择只提供 rotate，完成后同样返回单步 Transformation；两者共用源码 trace。
 连续约束形成联合求解段；独立变换作用于该段结果，随后约束仅继承前段姿态与自由度，不继承其硬条件。求解器先联合求解条件，再执行独立 transformations；只有 Transformation 存储动作与参考，不保留约束内变换路径。引用其他零件时使用其最终姿态。连续 relate 调用接续原排列。快照的 relationStages 保存段边界、结果位姿和固定组合架；原点重表达和嵌套组合一起变换该架。
 独立 Transformation 不改变独立查看的局部几何。
-旋转选择按输入区分坐标 pivot、self 拓扑 pivotVertex/aroundEdge 和直接引用 pivotPoint/aroundLine。拓扑 ID 延后由 self 解析；外部点线保留所属模型，参与关系闭包并使用已求解姿态。点引用只改变中心，旋转及 pivotOffset 仍沿 self 操作前局部轴；求解器正向执行与逆向恢复共用同一旋转参考计算，避免在摆放确定前烘焙外部点。
+旋转选择按输入区分坐标 pivot、self 拓扑 pivotVertex/axisEdge 和直接引用 pivotPoint/axisLine。拓扑 ID 延后由 self 解析；外部点线保留所属模型，参与关系闭包并使用已求解姿态。点引用只改变中心，旋转及 pivotOffset 仍沿 self 操作前局部轴；求解器正向执行与逆向恢复共用同一旋转参考计算，避免在摆放确定前烘焙外部点。
 
 原点由构造器确定；派生操作继承主输入坐标系，不按结果包围盒自动居中。
 group/union/intersect 使用首个成员或操作数的完整局部坐标系，cut 使用 stock，

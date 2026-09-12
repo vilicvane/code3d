@@ -63,17 +63,17 @@ for (const method of ['on', 'align'] as const) {
           ? 'self'
           : 'self.axis';
       const argument = `${reverse ? 'self' : 'base'}.${method === 'on' ? 'up.flip()' : 'axis.reverse()'}`;
-      const source = `import {box, group, offset, aroundLine} from '@code3d/core';
+      const source = `import {box, group, offset, axisLine} from '@code3d/core';
         const base = box(20,10,30); const axis = box(2,2,2);
         const part = box(8,6,4).relate(self => [${receiver}.${method}(
           /* target-start */ ${argument} /* target-end */
-        ), offset(1,2,3), aroundLine(axis.axis).rotate(20)]); export default group([base,part]);`;
+        ), offset(1,2,3), axisLine(axis.axis).rotate(20)]); export default group([base,part]);`;
       const module = await compile(source);
       for (const token of [
         `${method}(`,
         'offset(',
         '1,2,3',
-        'aroundLine(',
+        'axisLine(',
         'axis.axis',
         'rotate(',
         '20)',
@@ -216,7 +216,7 @@ test('two relation elements on the same node keep distinct focus and decoration 
 });
 
 test('member previews retain their reference receiver when a chain focuses self', async () => {
-  const source = `import {aroundLine, rotate, box} from '@code3d/core'; const base=box(20,10,30); const axis=box(2,4,6); const part=box(8,6,4).relate(self=>[self.on(base.up), aroundLine(axis.axis).rotate(20)]);`;
+  const source = `import {axisLine, rotate, box} from '@code3d/core'; const base=box(20,10,30); const axis=box(2,4,6); const part=box(8,6,4).relate(self=>[self.on(base.up), axisLine(axis.axis).rotate(20)]);`;
   const module = await compile(source);
   const targetAtReference = defined(
     module.sourceTargets.find(

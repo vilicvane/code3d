@@ -22,7 +22,7 @@ after(async () => browser?.close());
 
 const sourceFor = (
   expression: string,
-) => `import {offset, rotate, pivot, pivotVertex, pivotPoint, aroundLine, aroundEdge, loft, point, rectangle} from '@code3d/core';
+) => `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, loft, point, rectangle} from '@code3d/core';
 const base = rectangle(28, 20);
 const top = rectangle(18, 12).relate(p => p.on(point([0, 32, 0]).up));
 const body = loft([base, top]);

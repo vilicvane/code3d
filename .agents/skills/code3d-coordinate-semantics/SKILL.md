@@ -13,9 +13,9 @@ description: 'code3d 的局部坐标、原点与相对位置约定。设计、�
 
 处理坐标时先明确它属于哪个模型值、实例或参考元素。模型局部轴、线/面锚点的参考坐标架、组合位姿和视口世界坐标各有归属；同样的 XYZ 数字不代表同一个方向或位置。`expose()` 将引用带入外层模型的局部空间，重复实例通过具体 occurrence 解析。
 
-relate 中连续的约束共同求解位姿；初段未约束自由度采用求解器默认结果，后段继承前段姿态。Constraint 仅表达 on/align，不提供 offset、rotate 或 pivot/around 选择器。相对变换只能通过独立 Transformation 数组项表达，作用于前面同段的联合解，允许离开此前接触位置。变换严格按数组顺序执行；随后出现约束时进入新段，不把此前约束跨段收集回去。连续 relate 调用接续同一排列。零位移和零角度不增加位置或朝向条件。 混合求解收尾时，保留前段未约束的平移需让与之对齐的其他零件共同参与平移自由度；不能冻结从属零件后单独回正被引用的零件。
+relate 中连续的约束共同求解位姿；初段未约束自由度采用求解器默认结果，后段继承前段姿态。Constraint 仅表达 on/align，不提供 offset、rotate 或 pivot/axis 选择器。相对变换只能通过独立 Transformation 数组项表达，作用于前面同段的联合解，允许离开此前接触位置。变换严格按数组顺序执行；随后出现约束时进入新段，不把此前约束跨段收集回去。连续 relate 调用接续同一排列。零位移和零角度不增加位置或朝向条件。 混合求解收尾时，保留前段未约束的平移需让与之对齐的其他零件共同参与平移自由度；不能冻结从属零件后单独回正被引用的零件。
 
-独立 `offset` 沿该组合求解参考架的固定轴移动，不跟随 self 的朝向，也不是视口世界轴。独立 `rotate` 默认绕 self 当前原点和局部 XYZ 轴；pivot/pivotVertex/pivotPoint 改中心；pivotPoint 接受点引用并保留 self XYZ 旋转轴。aroundEdge 使用 self 直边 ID，aroundLine 使用线引用的已求解摆放。group 构造、嵌套与原点操作统一重表达该参考架及位姿。固定轴平移与当前自原点旋转可能交换，不能据此重排操作。模型本身不提供 offset；构造函数只生成由 relate 消费的描述值。完成的独立 offset/rotate 不再提供任何链式变换方法；pivot/pivotVertex/pivotPoint 的未完成选择可接一次 pivotOffset，aroundEdge/aroundLine 可接一次 axisOffset，之后只能用 rotate 完成。多个独立操作写为数组项，不能从 offset 进入 rotate 或反向接链。
+独立 `offset` 沿该组合求解参考架的固定轴移动，不跟随 self 的朝向，也不是视口世界轴。独立 `rotate` 默认绕 self 当前原点和局部 XYZ 轴；pivot/pivotVertex/pivotPoint 改中心；pivotPoint 接受点引用并保留 self XYZ 旋转轴。axisEdge 使用 self 直边 ID，axisLine 使用线引用的已求解摆放。group 构造、嵌套与原点操作统一重表达该参考架及位姿。固定轴平移与当前自原点旋转可能交换，不能据此重排操作。模型本身不提供 offset；构造函数只生成由 relate 消费的描述值。完成的独立 offset/rotate 不再提供任何链式变换方法；pivot/pivotVertex/pivotPoint 的未完成选择可接一次 pivotOffset，axisEdge/axisLine 可接一次 axisOffset，之后只能用 rotate 完成。多个独立操作写为数组项，不能从 offset 进入 rotate 或反向接链。
 
 ## 原点
 
@@ -73,4 +73,4 @@ point([x, y, z]) ≡ point().originOffset(-x, -y, -z)
 
 GUI 移动坐标 `pivot([...])` 时直接改坐标；只有引用中心 `pivotVertex` 才附加 `pivotOffset`。已有参考偏移继续修改同一调用，不重复追加；默认原点旋转首次改中心使用 `pivot([...])`。
 
-`pivotVertex(id)`/`aroundEdge(id)` 延后按 relate 的 self 解析拓扑；`pivotPoint(pointRef)`/`aroundLine(lineRef)` 保留引用及其所属模型。外部点按组合中已求解位置确定中心，点偏移与旋转仍沿 self 的操作前局部轴；不能在构造时把外部点烘焙成尚未摆放的 self 坐标。aroundLine 只接受直线/轴，不接受曲边。
+`pivotVertex(id)`/`axisEdge(id)` 延后按 relate 的 self 解析拓扑；`pivotPoint(pointRef)`/`axisLine(lineRef)` 保留引用及其所属模型。外部点按组合中已求解位置确定中心，点偏移与旋转仍沿 self 的操作前局部轴；不能在构造时把外部点烘焙成尚未摆放的 self 坐标。axisLine 只接受直线/轴，不接受曲边。

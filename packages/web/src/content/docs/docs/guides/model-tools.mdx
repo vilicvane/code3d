@@ -112,7 +112,7 @@ position when focus moves into the viewport. Parameter, topology, and spatial
 tools share this navigation behavior, including newly inserted calls.
 Choosing a spatial tool keeps a matching current call or checks the immediately
 following transformation. A matching call activates immediately and places the
-caret at the expression end, such as `offset()|` or `aroundEdge(1).rotate(25)|`.
+caret at the expression end, such as `offset()|` or `axisEdge(1).rotate(25)|`.
 The toolbar is available throughout `relate(...)`, including `self.axis`, target
 references, and callback whitespace, without activating a tool by default.
 Expression panels and reference highlights keep their focus until you choose a
@@ -213,4 +213,4 @@ builder signature; panel defaults come from `@code3d.param`. Use ordinary calls 
 See [custom primitives](../custom-primitives/) for the complete twisted-knob
 example, including parameter tools, placement, and colors.
 
-`@code3d.tool` marks a callable as a tool even when it has no numeric or topology-ID parameters. It does not make an arbitrary reference editable by itself; Core uses it for `aroundLine`, whose axis is handled by the App’s rotation reference picker. Use `@code3d.param` for ordinary editable model parameters.
+`@code3d.tool` marks a callable as a tool even when it has no numeric or topology-ID parameters. It does not make an arbitrary reference editable by itself; Core uses it for `axisLine`, whose axis is handled by the App’s rotation reference picker. Use `@code3d.param` for ordinary editable model parameters.

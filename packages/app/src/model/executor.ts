@@ -2187,7 +2187,7 @@ export function createModelExecutor(
                 const relation = evaluatedConstraint(objects, context);
                 return {
                   ...context,
-                  // An auxiliary reference (e.g. aroundLine(axis)) remains available
+                  // An auxiliary reference (e.g. axisLine(axis)) remains available
                   // while the relation's self stays the primary model.
                   nodeIds: [
                     ...new Set([...candidate.nodeIds, ...evaluation.nodeIds]),
@@ -2477,9 +2477,9 @@ export function createModelExecutor(
                 'pivot',
                 'pivotVertex',
                 'pivotPoint',
-                'aroundEdge',
+                'axisEdge',
                 'pivotOffset',
-                'aroundLine',
+                'axisLine',
                 'axisOffset',
               ].includes(e.relationSpatial?.kind ?? ''),
             )

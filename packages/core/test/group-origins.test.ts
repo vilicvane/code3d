@@ -3,7 +3,7 @@ import {test} from 'node:test';
 import type {Anchor, Model} from '@code3d/core';
 import {
   rotate,
-  aroundLine,
+  axisLine,
   box,
   group,
   line,
@@ -323,7 +323,7 @@ test('nested repeated assemblies rotate rigidly in fixed XYZ order without re-so
   const base = box(10, 4, 6);
   const cap = box(2, 2, 2).relate(self => [
     self.on(base.up),
-    aroundLine(base.axis).rotate(35),
+    axisLine(base.axis).rotate(35),
   ]);
   const part = group([base, cap]).expose({base, cap});
   const left = part.relate(self => [

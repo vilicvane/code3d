@@ -286,10 +286,10 @@ test('published method defaults retain required numeric parameters across model 
     ['pivot()', [0, 0, 0]],
     ['pivot([1, 2, 3]).rotate()', [0, 0, 0]],
     ['pivotVertex(1).rotate()', [0, 0, 0]],
-    ['aroundLine(target.axis).rotate()', [0]],
+    ['axisLine(target.axis).rotate()', [0]],
   ] as const;
   const source = [
-    'import {box, group, rectangle, extrude, offset, rotate, pivot, pivotVertex, aroundLine} from "@code3d/core";',
+    'import {box, group, rectangle, extrude, offset, rotate, pivot, pivotVertex, axisLine} from "@code3d/core";',
     'const body = box(20, 30, 40), target = box(40, 20, 30);',
     'const assembly = group([body]), face = rectangle(20, 30);',
     ...cases.map(([call]) => `${call};`),

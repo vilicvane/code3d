@@ -361,9 +361,9 @@ async function expectDefaults(
   defaults: Readonly<Record<string, number>>,
 ) {
   const names = Object.keys(defaults);
-  await page.locator(`[data-parameter=${names[0]}]`).waitFor();
+  await page.locator(`[data-parameter="${names[0]}"]`).waitFor();
   for (const [index, name] of names.entries()) {
-    const input = page.locator(`[data-parameter=${name}]`);
+    const input = page.locator(`[data-parameter="${name}"]`);
     assert.equal(await input.inputValue(), '', name);
     assert.equal(
       await input.getAttribute('placeholder'),
@@ -457,20 +457,26 @@ test('model method defaults appear for groups and geometry operations without re
   }
 });
 
-test('constraint method defaults are available on offset, pivot and rotation chains', async t => {
+test('relate transformation defaults are available on offset, pivot and axis rotation', async t => {
   const page = await open(t);
   for (const [chain, selection, defaults] of [
     ['offset()', 'offset()', {x: 0, y: 0, z: 0}],
     ['rotate()', 'rotate()', {x: 0, y: 0, z: 0}],
-    ['pivot().rotate(0, 0, 25)', 'pivot()', {x: 0, y: 0, z: 0}],
+    [
+      'pivot().rotate(0, 0, 25)',
+      'pivot()',
+      {'pivot.x': 0, 'pivot.y': 0, 'pivot.z': 0},
+    ],
     ['pivot([1, 2, 3]).rotate()', 'rotate()', {x: 0, y: 0, z: 0}],
     ['pivotVertex(1).rotate()', 'rotate()', {x: 0, y: 0, z: 0}],
-    ['aroundLine(base.axis).rotate()', 'rotate()', {angle: 0}],
+    ['axisLine(base.axis).rotate()', 'rotate()', {angle: 0}],
   ] as const) {
-    const source = `import {box, group} from '@code3d/core';\nconst base = box(20, 30, 40);\nconst part = box(4, 6, 8).relate(self => self.on(base.up).${chain});\ngroup([base, part]);`;
+    const source = `import * as core from '@code3d/core';\nconst base = core.box(20, 30, 40);\nconst part = core.box(4, 6, 8).relate(self => [self.on(base.up), core.${chain}]);\ncore.group([base, part]);`;
     await setSource(page, source, selection);
     await expectDefaults(page, defaults);
-    const input = page.locator(`[data-parameter=${Object.keys(defaults)[0]}]`);
+    const input = page.locator(
+      `[data-parameter="${Object.keys(defaults)[0]}"]`,
+    );
     await input.focus();
     await input.press('Enter');
     assert.equal(
@@ -484,16 +490,18 @@ test('constraint method defaults are available on offset, pivot and rotation cha
       await input.press('Tab');
       await page.waitForFunction(
         () =>
-          (document.activeElement as HTMLElement)?.dataset.parameter === 'y',
+          (document.activeElement as HTMLElement)?.dataset.parameter ===
+          'pivot.y',
       );
-      const y = page.locator('[data-parameter=y]');
+      const y = page.locator('[data-parameter="pivot.y"]');
       await y.fill('0');
       await y.press('Tab');
       await page.waitForFunction(
         () =>
-          (document.activeElement as HTMLElement)?.dataset.parameter === 'z',
+          (document.activeElement as HTMLElement)?.dataset.parameter ===
+          'pivot.z',
       );
-      const z = page.locator('[data-parameter=z]');
+      const z = page.locator('[data-parameter="pivot.z"]');
       await z.fill('5');
       await z.press('Enter');
       await page.waitForFunction(() =>
@@ -509,7 +517,7 @@ test('constraint method defaults are available on offset, pivot and rotation cha
       );
       await page.waitForFunction(
         () =>
-          document.querySelector<HTMLInputElement>('[data-parameter=x]')
+          document.querySelector<HTMLInputElement>('[data-parameter="pivot.x"]')
             ?.disabled === false,
       );
       await expectDefaults(page, defaults);

@@ -2639,7 +2639,7 @@ function renderContextualToolPanel(forceParameterValues = false): void {
       tool.rotationSelection && tool.rotationSelection.selector !== 'pivot'
         ? {
             name: tool.focus.reference?.name ?? 'rotation-reference',
-            label: ['aroundEdge', 'aroundLine'].includes(
+            label: ['axisEdge', 'axisLine'].includes(
               tool.rotationSelection.selector,
             )
               ? 'AXIS'
@@ -2674,7 +2674,7 @@ function renderContextualToolPanel(forceParameterValues = false): void {
                 viewport.positionTools.reference.kind !== 'pivot'
               ? {
                   name: tool.focus.reference?.name ?? 'rotation-reference',
-                  label: ['aroundLine', 'aroundEdge'].includes(
+                  label: ['axisLine', 'axisEdge'].includes(
                     viewport.positionTools.reference.kind,
                   )
                     ? 'AXIS'
@@ -2683,7 +2683,7 @@ function renderContextualToolPanel(forceParameterValues = false): void {
                     'name' in viewport.positionTools.reference
                       ? viewport.positionTools.reference.name
                       : formatTopologyId(
-                          viewport.positionTools.reference.kind === 'aroundEdge'
+                          viewport.positionTools.reference.kind === 'axisEdge'
                             ? 'edge'
                             : 'vertex',
                           viewport.positionTools.reference.id,
@@ -2699,12 +2699,12 @@ function draftRotationReferenceLabel(
   draft: NonNullable<SourceTarget['rotationSelection']>,
 ): string {
   if (!draft.reference) return 'None';
-  if (draft.selector === 'pivotVertex' || draft.selector === 'aroundEdge') {
+  if (draft.selector === 'pivotVertex' || draft.selector === 'axisEdge') {
     try {
       const id: unknown = JSON.parse(draft.reference);
       if (isTopologyId(id))
         return formatTopologyId(
-          draft.selector === 'aroundEdge' ? 'edge' : 'vertex',
+          draft.selector === 'axisEdge' ? 'edge' : 'vertex',
           id,
         );
     } catch {
@@ -3015,13 +3015,13 @@ function selectRotationReferenceExpression(expression: string): void {
   const reference = binding?.spatial.objects.find(
     object => object.nodeId === binding.spatial.ownerNodeId,
   )?.spatial.reference;
-  const selector = tool === 'rotate-axis' ? 'aroundEdge' : 'pivotVertex';
+  const selector = tool === 'rotate-axis' ? 'axisEdge' : 'pivotVertex';
   const factory = (draft?.constructors ?? binding?.spatial.constructors)?.[
     selector
   ];
   const changesRotationKind =
     (tool === 'rotate-axis') !==
-    (reference?.kind === 'aroundLine' || reference?.kind === 'aroundEdge');
+    (reference?.kind === 'axisLine' || reference?.kind === 'axisEdge');
   const sourceRef =
     draft?.sourceRef ??
     binding?.spatial.operationRef ??
@@ -3036,7 +3036,7 @@ function selectRotationReferenceExpression(expression: string): void {
       selector,
       expression,
       draft: !!draft,
-      previous: ['aroundLine', 'aroundEdge'].includes(
+      previous: ['axisLine', 'axisEdge'].includes(
         draft?.selector ?? reference?.kind ?? '',
       )
         ? 'axis'

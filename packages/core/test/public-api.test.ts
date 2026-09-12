@@ -11,8 +11,8 @@ import * as browserReplicadInterop from '../bld/library/replicad.js';
 
 const authoringValues = [
   'arc',
-  'aroundEdge',
-  'aroundLine',
+  'axisEdge',
+  'axisLine',
   'offset',
   'rotate',
   'pivot',

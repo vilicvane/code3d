@@ -331,7 +331,7 @@ function rotationReferenceFor(
   const reference = first?.spatial.reference;
   if (!reference) return [];
   const operation =
-    reference.kind === 'aroundLine' || reference.kind === 'aroundEdge'
+    reference.kind === 'axisLine' || reference.kind === 'axisEdge'
       ? 'axisOffset'
       : reference.kind === 'pivot' && !reference.offsetExplicit
         ? 'pivot'
@@ -361,7 +361,7 @@ function rotationReferenceFor(
     ...rotation,
     axis,
     mode: 'translate',
-    label: `${reference.kind === 'aroundLine' || reference.kind === 'aroundEdge' ? 'Axis' : 'Pivot'} ${operation === 'pivot' ? '' : 'Δ'}${axis.toUpperCase()}`,
+    label: `${reference.kind === 'axisLine' || reference.kind === 'axisEdge' ? 'Axis' : 'Pivot'} ${operation === 'pivot' ? '' : 'Δ'}${axis.toUpperCase()}`,
     value:
       operation === 'pivot' && reference.kind === 'pivot'
         ? reference.point[index]

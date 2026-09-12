@@ -29,7 +29,7 @@ export function contextualToolSource(
 function targetSpatialTool(target: SourceTarget): SpatialTool | undefined {
   const selector = target.rotationSelection?.selector;
   if (selector)
-    return ['aroundEdge', 'aroundLine'].includes(selector)
+    return ['axisEdge', 'axisLine'].includes(selector)
       ? 'rotate-axis'
       : 'rotate-point';
   const name = target.tool?.signature.name;
@@ -336,7 +336,7 @@ export function contextualToolContext(
   if (draft && !draft.calls.some(call => call.signature.name === 'rotate')) {
     for (const [name, parameter] of draftRotationParameters(
       draft.sourceRef,
-      ['aroundEdge', 'aroundLine'].includes(draft.selector),
+      ['axisEdge', 'axisLine'].includes(draft.selector),
     )) {
       parameters.set(name, parameter);
       mergedSchemas.push(parameter.schema);
@@ -348,14 +348,14 @@ export function contextualToolContext(
     parameters: mergedSchemas,
   };
   const selector = components.find(component =>
-    ['pivotVertex', 'aroundEdge', 'pivotPoint', 'aroundLine'].includes(
+    ['pivotVertex', 'axisEdge', 'pivotPoint', 'axisLine'].includes(
       component.target.tool!.signature.name,
     ),
   );
   const reference = selector && {
     name:
       selector.prefix +
-      (['pivotVertex', 'aroundEdge'].includes(
+      (['pivotVertex', 'axisEdge'].includes(
         selector.target.tool!.signature.name,
       )
         ? 'id'

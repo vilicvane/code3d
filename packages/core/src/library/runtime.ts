@@ -303,9 +303,9 @@ export type RotationReferenceSnapshot = Readonly<{
   (
     | Readonly<{kind: 'pivot'; point: Vec3}>
     | Readonly<{kind: 'pivotVertex'; id: VertexId}>
-    | Readonly<{kind: 'aroundEdge'; id: EdgeId}>
+    | Readonly<{kind: 'axisEdge'; id: EdgeId}>
     | Readonly<{
-        kind: 'pivotPoint' | 'aroundLine';
+        kind: 'pivotPoint' | 'axisLine';
         nodeId: string;
         name: string;
       }>
@@ -328,9 +328,9 @@ export type RelationSpatialReference = Readonly<{
     | 'pivot'
     | 'pivotVertex'
     | 'pivotPoint'
-    | 'aroundEdge'
+    | 'axisEdge'
     | 'pivotOffset'
-    | 'aroundLine'
+    | 'axisLine'
     | 'axisOffset'
     | 'rotate'
     | 'offset';
@@ -522,22 +522,19 @@ type PivotSelection = (
   | Readonly<{kind: 'pivot'; point: Vec3}>
   | Readonly<{kind: 'pivotVertex'; id: VertexId}>
   | Readonly<{kind: 'pivotPoint'; point: RelationReference}>
-  | Readonly<{kind: 'aroundEdge'; id: EdgeId}>
-  | Readonly<{kind: 'aroundLine'; axis: RelationReference}>
+  | Readonly<{kind: 'axisEdge'; id: EdgeId}>
+  | Readonly<{kind: 'axisLine'; axis: RelationReference}>
 ) &
   Readonly<{offset?: Vec3; implicit?: true}>;
-type AxisSelection = Extract<
-  PivotSelection,
-  {kind: 'aroundLine' | 'aroundEdge'}
->;
+type AxisSelection = Extract<PivotSelection, {kind: 'axisLine' | 'axisEdge'}>;
 type PointSelection = Exclude<PivotSelection, AxisSelection>;
 function isAxisSelection(pivot: PivotSelection): pivot is AxisSelection {
-  return pivot.kind === 'aroundLine' || pivot.kind === 'aroundEdge';
+  return pivot.kind === 'axisLine' || pivot.kind === 'axisEdge';
 }
 function selectionReference(
   pivot: PivotSelection,
 ): RelationReference | undefined {
-  return pivot.kind === 'aroundLine'
+  return pivot.kind === 'axisLine'
     ? pivot.axis
     : pivot.kind === 'pivotPoint'
       ? pivot.point
@@ -547,7 +544,7 @@ function mapSelectionReference(
   pivot: PivotSelection,
   map: (reference: RelationReference) => RelationReference,
 ): PivotSelection {
-  return pivot.kind === 'aroundLine'
+  return pivot.kind === 'axisLine'
     ? {...pivot, axis: map(pivot.axis)}
     : pivot.kind === 'pivotPoint'
       ? {...pivot, point: map(pivot.point)}
@@ -1476,7 +1473,7 @@ function rotationPointReference(point: PointAnchor): AnchorReference {
 function rotationAxisReference(axis: LineAnchor): AnchorReference {
   const reference = anchorReference(axis);
   if (reference.kind !== 'line')
-    throw new Error('aroundLine() requires an axis or straight edge.');
+    throw new Error('axisLine() requires an axis or straight edge.');
   const geometry =
     reference.topology?.source[modelGeometry]()?.value ??
     (reference.whole && isModelObject(reference.model)
@@ -1493,7 +1490,7 @@ function rotationAxisReference(axis: LineAnchor): AnchorReference {
       : (geometry.shape as ReplicadEdge).geomType === 'LINE';
     if (!straight)
       throw new Error(
-        'aroundLine() requires a straight axis; curved edges do not define one rotation axis.',
+        'axisLine() requires a straight axis; curved edges do not define one rotation axis.',
       );
   }
   return reference;
@@ -1561,7 +1558,7 @@ export class AxisRotation extends RelationExpression {
   }
 }
 
-export class AroundChain extends AxisRotation {
+export class AxisChain extends AxisRotation {
   /**
    * Offset the selected axis in its reference frame, retaining its direction.
    * @code3d.param x {kind: 'length', default: 0, label: 'Axis ΔX'}
@@ -1641,10 +1638,10 @@ export function pivotPoint(point: PointAnchor): PivotChain {
   });
 }
 /** @code3d.param id {kind: 'edge', label: 'Rotation edge'} */
-export function aroundEdge(id: EdgeId): AroundChain {
+export function axisEdge(id: EdgeId): AxisChain {
   assertTopologyId('edge', id);
-  return new AroundChain(new TransformationRotation(), {
-    kind: 'aroundEdge',
+  return new AxisChain(new TransformationRotation(), {
+    kind: 'axisEdge',
     id,
   });
 }
@@ -1652,9 +1649,9 @@ export function aroundEdge(id: EdgeId): AroundChain {
  * Select a positioned axis in the composition for the next rotation.
  * @code3d.tool
  */
-export function aroundLine(axis: LineAnchor): AroundChain {
-  return new AroundChain(new TransformationRotation(), {
-    kind: 'aroundLine',
+export function axisLine(axis: LineAnchor): AxisChain {
+  return new AxisChain(new TransformationRotation(), {
+    kind: 'axisLine',
     axis: rotationAxisReference(axis),
   });
 }
@@ -1706,11 +1703,11 @@ export abstract class RelationObject {
 
   protected edgeReference(_id: EdgeId): RelationReference {
     throw new Error(
-      'aroundEdge() requires model topology. Use aroundLine(lineRef) for a line reference.',
+      'axisEdge() requires model topology. Use axisLine(lineRef) for a line reference.',
     );
   }
   private rotationAxis(pivot: AxisSelection): RelationReference {
-    return pivot.kind === 'aroundLine'
+    return pivot.kind === 'axisLine'
       ? pivot.axis
       : this.edgeReference(pivot.id);
   }
@@ -2100,9 +2097,9 @@ export abstract class RelationObject {
         rotation: rotationVector,
         axisOnly: isAxisSelection(pivot),
         reference: {
-          ...(pivot.kind === 'aroundEdge' || pivot.kind === 'pivotVertex'
+          ...(pivot.kind === 'axisEdge' || pivot.kind === 'pivotVertex'
             ? {kind: pivot.kind, id: pivot.id}
-            : pivot.kind === 'aroundLine' || pivot.kind === 'pivotPoint'
+            : pivot.kind === 'axisLine' || pivot.kind === 'pivotPoint'
               ? {
                   kind: pivot.kind,
                   nodeId:
@@ -5013,8 +5010,8 @@ export const authoringApi = Object.freeze({
   pivot,
   pivotVertex,
   pivotPoint,
-  aroundEdge,
-  aroundLine,
+  axisEdge,
+  axisLine,
   cached,
   font,
   googleFont,

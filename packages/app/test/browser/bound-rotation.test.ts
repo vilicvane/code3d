@@ -265,17 +265,16 @@ test(
         const source2 = `import {pivotVertex, rotate, box, group} from '@code3d/core'; const base = box(20, 10, 30); const part = box(8, 6, 4).relate(self => [base.on(self.up), pivotVertex(3).rotate(0, 0, 45)]); export default group([base, part]);`;
         const module2 = await compile(source2);
         const vertex = inspect(module2, source2, 'pivotVertex(3)');
-        const selection = vertex.evaluation.selection;
         const vertexIds = viewport.beginTopologySelection(
           vertex.selected!.key,
-          selection!.inputNodeId,
+          vertex.selected!.node.nodeId,
           'vertex',
           false,
-          selection!.ids,
+          [3],
         );
-        const source3 = `import {aroundLine, rotate, box, group} from '@code3d/core'; const base = box(20, 10, 30); const part = box(8, 6, 4).relate(self => [self.on(base.up), aroundLine(base.axis).rotate(35)]); export default group([base, part]);`;
+        const source3 = `import {axisLine, rotate, box, group} from '@code3d/core'; const base = box(20, 10, 30); const part = box(8, 6, 4).relate(self => [self.on(base.up), axisLine(base.axis).rotate(35)]); export default group([base, part]);`;
         const module3 = await compile(source3);
-        inspect(module3, source3, 'aroundLine(base.axis)');
+        inspect(module3, source3, 'axisLine(base.axis)');
         inspect(module3, source3, 'rotate(35)');
         return {
           scopes,
@@ -292,16 +291,16 @@ test(
         client.dispose();
       }
     });
-    const [pivot, rotate, , vertex, aroundLine, axisRotate] = result.scopes;
-    assert.equal(pivot.spatialKind, 'pivot');
-    assert.deepEqual(pivot.modes, ['translate', 'translate', 'translate']);
+    const [pivot, rotate, , vertex, axisLine, axisRotate] = result.scopes;
+    assert.equal(pivot.spatialKind, 'rotate');
+    assert.deepEqual(pivot.modes, ['rotate', 'rotate', 'rotate']);
     assert.equal(pivot.selected, pivot.owner);
     assert.deepEqual(rotate.modes, ['rotate', 'rotate', 'rotate']);
     assert.equal(rotate.selected, rotate.owner);
     assert.equal(vertex.selected, vertex.owner);
     assert.ok(result.vertexIds.includes(3));
-    assert.equal(aroundLine.spatialKind, 'aroundLine');
-    assert.deepEqual(aroundLine.axes, []);
+    assert.equal(axisLine.spatialKind, 'rotate');
+    assert.deepEqual(axisLine.axes, ['y']);
     assert.deepEqual(axisRotate.modes, ['rotate']);
     assert.deepEqual(axisRotate.axes, ['y']);
     assert.equal(new Set(result.boundaryIds).size, result.boundaryIds.length);
