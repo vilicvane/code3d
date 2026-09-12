@@ -145,7 +145,9 @@ import {ElementsPanel} from './ui/elements-panel';
 import {createIcon} from './ui/icons';
 import {ImageExportDialog} from './ui/image-export';
 import {ModelExportDialog} from './ui/model-export';
-import {ProjectTree, askInstallPackage} from './ui/project-tree';
+import {ProjectTree} from './ui/project-tree';
+import {dialogs} from './ui/dialog';
+import {parsePackageSpecifier} from './project/package-manifest';
 import {SourceEditPopover} from './ui/source-edit-popover';
 import {ViewportContextMenu} from './ui/viewport-context-menu';
 import {ViewportEmptyState} from './ui/viewport-empty-state';
@@ -184,9 +186,12 @@ await projectFileSystem.syncDirectory(
         const entries = await projectFileSystem.list('/');
         return (
           entries.every(entry => entry.name === '.code3d') &&
-          window.confirm(
-            'This folder is empty. Create bundled examples in /examples?',
-          )
+          (await dialogs.confirm({
+            title: 'Create examples',
+            message:
+              'This folder is empty. Create bundled examples in /examples?',
+            submit: 'Create examples',
+          }))
         );
       }
     : undefined,
@@ -576,6 +581,9 @@ const stopSaveStatus = reaction(
 window.addEventListener(
   'pagehide',
   () => {
+    dialogs.dispose();
+    imageExportDialog.dispose();
+    modelExportDialog.dispose();
     stopAgentRevision();
     stopSaveStatus();
     stopAgentFollow();
@@ -609,7 +617,17 @@ async function installProjectPackage(selectedDirectory: string): Promise<void> {
     projectFileSystem,
     selectedDirectory,
   );
-  const specifier = await askInstallPackage(directory);
+  const specifier = await dialogs.prompt({
+    title: 'Install package',
+    message: `In ${directory}`,
+    label: 'Package',
+    placeholder: 'just-range or @scope/package@version',
+    submit: 'Install',
+    trim: true,
+    validate: value => {
+      parsePackageSpecifier(value);
+    },
+  });
   if (!specifier) return;
   const path = normalizeProjectPath(directory + '/package.json');
   await packageManager!.install(directory, async () => {
@@ -1361,11 +1379,14 @@ async function resetExamples(): Promise<void> {
   try {
     const existing = await projectFileSystem.stat(bundledExamples.directory);
     if (
-      !window.confirm(
-        existing
-          ? 'Reset bundled examples? Files under /examples will be replaced. Other project files will not change.'
+      !(await dialogs.confirm({
+        title: existing ? 'Reset examples' : 'Create examples',
+        message: existing
+          ? 'Files under /examples will be replaced. Other project files will not change.'
           : 'Create bundled examples in /examples?',
-      )
+        submit: existing ? 'Reset examples' : 'Create examples',
+        danger: !!existing,
+      }))
     )
       return;
     await agentProject.flush();

@@ -1,11 +1,25 @@
+import {
+  action,
+  autorun,
+  makeObservable,
+  observableRef,
+  runInAction,
+} from 'mobx';
+import {AppDialog} from './dialog';
+
 export class ExportDialog {
-  private readonly dialog = document.createElement('dialog');
+  private readonly dialog: AppDialog;
   private readonly form = document.createElement('form');
   private readonly fields = document.createElement('fieldset');
   private readonly submit = document.createElement('button');
   private readonly cancel = document.createElement('button');
   private readonly status = document.createElement('div');
   readonly description = document.createElement('p');
+  private busy = false;
+  private error = '';
+  private label = 'Export';
+  private disposed = false;
+  private readonly stopRendering: () => void;
 
   constructor(
     host: HTMLElement,
@@ -16,62 +30,82 @@ export class ExportDialog {
       export(): Promise<{blob: Blob; fileName: string}>;
     },
   ) {
-    this.dialog.className = 'app-dialog viewport-export-dialog';
+    makeObservable<this, 'busy' | 'error' | 'label' | 'export'>(this, {
+      busy: observableRef,
+      error: observableRef,
+      label: observableRef,
+      open: action,
+      setSubmitLabel: action,
+      export: action,
+    });
+    this.dialog = new AppDialog(
+      {
+        title: options.title,
+        className: 'viewport-export-dialog',
+        canDismiss: () => !this.busy,
+      },
+      host,
+    );
     this.form.className = 'app-dialog-content';
-    this.dialog.setAttribute('aria-label', options.title);
     const heading = document.createElement('header');
     const title = document.createElement('h2');
     title.textContent = options.title;
     this.description.textContent = options.description;
     heading.append(title, this.description);
     this.status.className = 'viewport-export-status';
-    this.status.hidden = true;
     this.status.setAttribute('role', 'status');
     this.submit.type = 'submit';
     this.submit.className = 'dialog-button button-primary';
-    this.submit.textContent = 'Export';
     this.cancel.type = 'button';
     this.cancel.className = 'dialog-button';
     this.cancel.textContent = 'Cancel';
     const actions = document.createElement('footer');
     actions.append(this.cancel, this.submit);
     this.form.append(heading, this.fields, this.status, actions);
-    this.dialog.append(this.form);
-    host.append(this.dialog);
-    this.cancel.addEventListener('click', () => this.dialog.close());
+    this.dialog.element.append(this.form);
+    this.cancel.addEventListener('click', () => this.dialog.dismiss());
     this.form.addEventListener('submit', event => {
       event.preventDefault();
       void this.export();
     });
-    this.dialog.addEventListener('cancel', event => {
-      if (this.submit.disabled) event.preventDefault();
+    this.stopRendering = autorun(() => {
+      this.submit.disabled =
+        this.cancel.disabled =
+        this.fields.disabled =
+          this.busy;
+      this.form.setAttribute('aria-busy', String(this.busy));
+      this.submit.textContent = this.busy ? this.options.busyLabel : this.label;
+      this.status.textContent = this.error;
+      this.status.hidden = !this.error;
     });
-    this.dialog.addEventListener('keydown', event => event.stopPropagation());
   }
 
   append(...fields: HTMLElement[]): void {
     this.fields.append(...fields);
   }
   setSubmitLabel(label: string): void {
-    this.submit.textContent = label;
+    this.label = label;
   }
 
   open(focus: HTMLElement): void {
-    this.status.hidden = true;
-    this.dialog.showModal();
-    focus.focus();
-    if (focus instanceof HTMLInputElement) focus.select();
+    if (this.disposed || this.busy) return;
+    this.error = '';
+    this.dialog.open(focus);
+  }
+
+  dispose(): void {
+    this.disposed = true;
+    this.stopRendering();
+    this.dialog.dispose();
   }
 
   private async export(): Promise<void> {
-    if (this.submit.disabled || !this.form.reportValidity()) return;
-    const label = this.submit.textContent;
-    this.submit.disabled = this.cancel.disabled = this.fields.disabled = true;
-    this.form.setAttribute('aria-busy', 'true');
-    this.submit.textContent = this.options.busyLabel;
-    this.status.hidden = true;
+    if (this.disposed || this.busy || !this.form.reportValidity()) return;
+    this.busy = true;
+    this.error = '';
     try {
       const {blob, fileName} = await this.options.export();
+      if (this.disposed) return;
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -82,16 +116,15 @@ export class ExportDialog {
       setTimeout(() => URL.revokeObjectURL(url));
       this.dialog.close();
     } catch (error) {
-      this.status.textContent =
-        error instanceof Error ? error.message : String(error);
-      this.status.hidden = false;
+      if (!this.disposed)
+        runInAction(() => {
+          this.error = error instanceof Error ? error.message : String(error);
+        });
     } finally {
-      this.submit.disabled =
-        this.cancel.disabled =
-        this.fields.disabled =
-          false;
-      this.form.removeAttribute('aria-busy');
-      this.submit.textContent = label;
+      if (!this.disposed)
+        runInAction(() => {
+          this.busy = false;
+        });
     }
   }
 }

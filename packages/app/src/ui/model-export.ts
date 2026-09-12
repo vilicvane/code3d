@@ -80,6 +80,10 @@ export class ModelExportDialog {
     });
   }
 
+  dispose(): void {
+    this.dialog.dispose();
+  }
+
   open(): void {
     this.session = this.createSession();
     this.fileName.value = this.session.fileName;

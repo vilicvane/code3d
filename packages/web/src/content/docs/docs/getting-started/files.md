@@ -19,6 +19,16 @@ model.
 Browser data belongs to that browser profile and site origin. Clearing site
 data removes the browser workspace. Keep copies of work you care about.
 
+## Prompts and confirmations
+
+File creation, package installation, deletion, and example resets use dialogs
+inside the App. Input errors appear below the field so you can correct the name
+without losing your text. Choose **Cancel**, press **Escape**, or click outside
+the dialog to dismiss it. Deletion and example replacement require explicit
+confirmation; **Cancel** receives the initial focus.
+
+Folder selection and access permissions use your browser's system dialogs.
+
 ## Install packages in browser storage
 
 Right-click a folder or `package.json` in the file explorer and choose
