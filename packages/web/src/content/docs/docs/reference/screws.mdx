@@ -1,28 +1,111 @@
 ---
 title: Metric fasteners
-description: Use ISO 4762 socket cap screws and matching hole geometry.
+description: Model ISO and GB/T screws, select a standard, and place matching clearance tools.
 ---
 
 import ModelExample from '../../../../components/ModelExample.astro';
+import ArrowIcon from '../../../../components/ArrowIcon.astro';
+import {appUrl} from '../../../../lib/site';
 
-Import the fastener namespace from `@code3d/screws`:
+Import each standard directly to load the selected standards and their shared
+code:
 
 ```ts
-import {ISO4762} from '@code3d/screws';
+import * as ISO10642 from '@code3d/screws/iso10642';
+import * as ISO4762 from '@code3d/screws/iso4762';
+import * as ISO7380_1 from '@code3d/screws/iso7380-1';
 ```
+
+The root `@code3d/screws` entry also exports these modules as namespaces.
+
+## Select a standard
+
+| Namespace   | Form                       | Length input   |
+| ----------- | -------------------------- | -------------- |
+| `ISO4762`   | Socket cap                 | Below head     |
+| `ISO10642`  | Countersunk socket         | Including head |
+| `ISO7380_1` | Button socket              | Below head     |
+| `ISO4017`   | Fully threaded hexagon     | Below head     |
+| `ISO4014`   | Partially threaded hexagon | Below head     |
+| `ISO7380_2` | Button socket with collar  | Below head     |
+| `ISO4029`   | Cup-point set screw        | Overall        |
+| `ISO7045`   | H/Z cross-recessed pan     | Below head     |
+| `ISO14583`  | Hexalobular pan            | Below head     |
+| `ISO7379`   | Socket shoulder            | Shoulder only  |
+
+The module subpath is the lowercase standard number, for example
+`@code3d/screws/iso4017`. Multipart numbers retain their hyphen:
+`@code3d/screws/iso7380-1` exports the same module as `ISO7380_1`.
+
+Metric presets are M3, M4, M5, M6, M8, M10 and M12. ISO 7045 and ISO 14583 stop
+at M10. ISO 7379 uses shoulder diameters 6.5, 8, 10, 13 and 16 instead of thread
+size strings. See the [Screws package reference](/docs/packages/screws.md) for
+all types, dimension sources and modeling details.
+
+<p>
+  <a href={appUrl('iso-screws.ts')} target="_blank" rel="noopener">
+    {'Open all ten ISO standard families in the App '}
+    <ArrowIcon />
+  </a>
+  {' to compare their heads, drives and thread lengths.'}
+</p>
+
+## GB/T standards
+
+GB/T standards have individual entries too. Replace the decimal point in a
+multipart number with a hyphen for the import, or an underscore for the root
+namespace:
+
+```ts
+import * as GB70_1 from '@code3d/screws/gb70-1';
+import * as GB70_3 from '@code3d/screws/gb70-3';
+import * as GB5783 from '@code3d/screws/gb5783';
+
+const socketCap = GB70_1.screw('M6', 18);
+const countersunk = GB70_3.screw('M6', 20);
+const hexBolt = GB5783.screw('M6', 30);
+```
+
+| Namespace | GB/T edition | Corresponding ISO model |
+| --------- | ------------ | ----------------------- |
+| `GB70_1`  | 70.1-2008    | `ISO4762`               |
+| `GB70_2`  | 70.2-2025    | `ISO7380_1`             |
+| `GB70_3`  | 70.3-2023    | `ISO10642`              |
+| `GB70_4`  | 70.4-2025    | `ISO7380_2`             |
+| `GB5782`  | 5782-2025    | `ISO4014`               |
+| `GB5783`  | 5783-2025    | `ISO4017`               |
+| `GB818`   | 818-2016     | `ISO7045`               |
+| `GB2672`  | 2672-2017    | `ISO14583`              |
+| `GB80`    | 80-2007      | `ISO4029`               |
+| `GB5281`  | 5281-1985    | `ISO7379`               |
+
+These entries share the corresponding ISO module's nominal geometry, supported
+sizes, length convention, types and mounting references. Edition sources and
+modeling limits are listed in the [package reference](/docs/packages/screws.md#gbt-standards).
+This covers selected model dimensions, not complete product-standard equivalence.
+
+`GB70_1.clearanceHole` includes a counterbore by default, and
+`GB70_3.clearanceHole` includes a 90° countersink. The other headed entries
+accept optional counterbores. `GB5281` takes numeric shoulder sizes and also
+supports `counterbore: {diameter, depth}`; `GB80` is headless and has no hole
+constructor. Hole defaults are modeling allowances shared with the ISO modules;
+they do not implement GB/T 152 hole tables.
+
+<p>
+  <a href={appUrl('gb-screws.ts')} target="_blank" rel="noopener">
+    {'Open all ten GB/T standard families in the App '}
+    <ArrowIcon />
+  </a>
+</p>
 
 ## Screw and clearance tool
 
-`ISO4762.screw(size, length)` creates a socket cap screw.
-`ISO4762.clearanceHole(size, length)` creates the matching clearance and
-counterbore tool. Current examples cover metric sizes M3 through M12.
-
-The hole is a model used as a tool for `cut(stock, [hole])`. It is also a
-useful placement reference: its named elements describe the fastening geometry.
+`ISO4762.screw('M6', 18)` creates a socket cap screw.
+`ISO4762.clearanceHole('M6', 10)` creates its clearance and counterbore tool.
+The hole is a model used with `cut(stock, [hole])` and provides named mounting
+references.
 
 <ModelExample id="screw-box" />
-
-## Place through named elements
 
 The lid exposes four seats from the holes' `counterboreBottom` references.
 Each screw's `headBottom` meets one seat, and the lid's `mountingFace` meets
@@ -30,19 +113,85 @@ the box's `lidSeat`. Set `gap` to 0 to close the box or lift the lid and screws
 together to inspect the holes. The box models blind tapping pilots; internal
 thread geometry is omitted.
 
-Use completion to inspect the full typed interface and supported size values.
+ISO 4762 includes a counterbore by default; ISO 10642 includes a countersink.
+Use `counterbore: false` or `countersink: false` respectively for a plain hole.
+Other ordinary headed standards default to plain holes and accept
+`counterbore: true` to recess the head. The options accept a total `depth`,
+ISO 273 `fit` (`close`, `normal`, `loose`), or custom `diameter`.
 
-## Specification queries
+Use `counterbore: {diameter, depth}` for custom recess dimensions, or
+`counterbore: {axialClearance}` to calculate recess depth from the head height.
+An explicit counterbore `depth` overrides `axialClearance`.
+For ISO 10642, `countersink: {diameter}` controls the opening; the passage
+diameter and fixed 90° angle determine the countersink depth.
 
-`ISO4762.resolveSpecification(input)` returns the specification for a size
-such as `'M6'`, or returns a supplied `ISO4762.Specification` unchanged.
-
-`ISO4762.threadLength(spec, length)` returns the nominal thread length in
-millimeters for the given specification and screw length below the head.
-The screw builder limits this value to the available shank length after
-allowing for the under-head transition.
+Counterbored holes expose `counterboreTop`/`counterboreBottom`; countersunk
+holes expose `countersinkTop`/`countersinkBottom`. All holes expose
+`shaftTop`, `shaftBottom`, and `shaftAxis`.
 
 ```ts
-const spec = ISO4762.resolveSpecification('M6');
-const nominalThreadLength = ISO4762.threadLength(spec, 30); // 24 mm
+const hole = ISO10642.clearanceHole('M6', 10);
+const screw = ISO10642.screw('M6', 20).relate(part =>
+  part.headTop.on(hole.countersinkTop),
+);
 ```
+
+`depth` includes the head recess. Default recess clearances are modeling
+allowances; they are described in the package reference.
+
+## Shoulder and set screws
+
+```ts
+import * as ISO7379 from '@code3d/screws/iso7379';
+import * as ISO4029 from '@code3d/screws/iso4029';
+
+const shoulder = ISO7379.screw(8, 20); // Ø8 shoulder, M6 thread
+const setScrew = ISO4029.screw('M6', 12);
+```
+
+The shoulder's fixed threaded projection is additional to its input length.
+Use `shoulderTop`/`shoulderBottom` and `threadTop`/`threadBottom` to position
+these distinct segments. `ISO7379.clearanceHole(8, 10)` makes a shoulder passage
+with 0.2 mm diametral clearance; `{depth, diameter}` overrides that allowance.
+Add `counterbore: true` for a head recess using preset allowances, or supply
+its diameter and depth:
+
+```ts
+const hole = ISO7379.clearanceHole(8, {
+  depth: 12,
+  diameter: 8.5,
+  counterbore: {diameter: 15, depth: 7},
+});
+const seatedShoulder = shoulder.relate(part =>
+  part.headBottom.on(hole.counterboreBottom),
+);
+```
+
+The total `depth` includes the counterbore. Its defaults are head diameter +
+1 mm and head height + 0.5 mm; `axialClearance` changes that extra depth.
+ISO 7379 uses a shoulder passage diameter instead of an ISO 273 `fit`.
+
+Set screws expose `driveTop`, `pointBottom`, and `threadAxis`. They have no
+clearance-hole constructor because their mating feature is threaded.
+
+## Specifications and drives
+
+`resolveSpecification(input)` returns a preset, or the supplied custom
+`Specification` unchanged. `specifications` exposes the preset table.
+
+For ordinary headed screws, `threadLength(spec, length)` returns the nominal
+thread length; the builder limits it to the available shank after its under-head
+transition. For example, ISO 4014 M6 has an 18 mm nominal thread at 30 mm bolt
+length, while ISO 4017 threads the full available shank.
+
+```ts
+import * as ISO7045 from '@code3d/screws/iso7045';
+
+const zDrive = ISO7045.screw('M4', 16, {recess: 'Z'}); // default: H
+```
+
+Models include coarse helical threads and standard-specific driving forms.
+Driving profiles, thread ends, transitions and reliefs are nominal modeling
+representations. They are intended for assembly layout and visualization;
+manufacturing tolerances, inspection gauges and strength grades are outside
+their scope.

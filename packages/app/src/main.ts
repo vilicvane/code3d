@@ -32,6 +32,8 @@ import {
   X,
 } from 'lucide';
 import {autorun, reaction, runInAction} from 'mobx';
+import {appSettings} from './app-settings';
+import {AppSettingsDialog} from './ui/app-settings';
 import brandMark from '../../../assets/brand/mark.svg?raw';
 import {AgentConnections} from './agent/connections';
 import {AgentObserver} from './agent/observer';
@@ -54,7 +56,11 @@ import type {
   SourceTarget,
 } from './model/compiler';
 import {ModelCompilerClient} from './model/compiler-client';
-import {ModelDiagnosticError, type ModelDiagnostic} from './model/diagnostic';
+import {
+  ModelDiagnosticError,
+  describeDiagnosticCounts,
+  type ModelDiagnostic,
+} from './model/diagnostic';
 import {
   elementSourceDecoration,
   namedElementDecorations,
@@ -242,6 +248,7 @@ app.innerHTML = `
       </a>
       <div class="topbar-actions">
         <button class="quiet-button" id="retry-save-button" type="button" hidden>Retry saving</button>
+        <button class="quiet-button" id="settings-button" type="button">Settings</button>
         <div class="agent-nav">
           <button class="quiet-button button-primary agent-connect-button" id="agents-button" type="button">Connect Agent</button>
         </div>
@@ -513,10 +520,13 @@ const preparePackages = async (_project: ModelProject, file: string) => {
 };
 const compiler = new ModelCompilerClient(
   packageFiles,
-  language => codeEditor.setProjectLanguage(language),
   preparePackages,
   directoryWorkspaceId ? `directory:${directoryWorkspaceId}` : 'browser',
 );
+const stopLanguage = autorun(() =>
+  codeEditor.setProjectLanguage(compiler.language),
+);
+codeEditor.editor.onDidDispose(stopLanguage);
 const retrySaveButton = requiredElement<HTMLButtonElement>('retry-save-button');
 const agentObserver: AgentObserver = new AgentObserver(
   packageFiles,
@@ -531,7 +541,7 @@ const agentProject: AgentProjectSession = new AgentProjectSession(
   error => showProjectIssue(error),
 );
 const projectDirectory = new ProjectTree(projectTree, {
-  errorCounts: () => codeEditor.errorCounts,
+  diagnosticCounts: () => codeEditor.diagnosticCounts,
   async entries(directory) {
     const entries = new Map(
       (await listProjectEntries(projectFileSystem, directory)).map(entry => [
@@ -593,6 +603,11 @@ const agentPanel = new AgentPanel(
   agentProject,
   requiredElement<HTMLButtonElement>('agents-button'),
 );
+const settingsDialog = new AppSettingsDialog(appSettings);
+requiredElement<HTMLButtonElement>('settings-button').addEventListener(
+  'click',
+  () => settingsDialog.open(),
+);
 const stopAgentRevision = reaction(
   () => agentProject.currentRevision,
   () => agentObserver.invalidate(),
@@ -607,6 +622,8 @@ const stopSaveStatus = reaction(
 window.addEventListener(
   'pagehide',
   () => {
+    settingsDialog.dispose();
+    appSettings.dispose();
     dialogs.dispose();
     imageExportDialog.dispose();
     modelExportDialog.dispose();
@@ -1089,7 +1106,7 @@ codeEditor.onChange(change => {
   if (!toolChange) sourceEditPopover.dismiss();
   if (change.kind !== 'content') renderProjectNavigation();
   requestModelUpdate(
-    toolChange || historyChange ? 0 : 420,
+    toolChange || historyChange ? 0 : appSettings.value.editDelayMs,
     toolChange || historyChange,
   );
 });
@@ -1602,18 +1619,21 @@ function renderProjectNavigation(): void {
       label.className = 'editor-tab-label';
       label.textContent = path.slice(path.lastIndexOf('/') + 1);
       open.append(createIcon(File, 'project-entry-icon file-icon'), label);
-      const errors = document.createElement('span');
-      errors.className = 'editor-tab-errors';
-      open.append(errors);
+      const diagnostics = document.createElement('span');
+      diagnostics.className = 'editor-tab-diagnostics';
+      open.append(diagnostics);
       stopTabDiagnostics.push(
         autorun(() => {
-          const count = codeEditor.errorCounts.get(path) ?? 0;
-          tab.classList.toggle('has-errors', count > 0);
-          errors.hidden = count === 0;
-          errors.textContent = String(count);
-          const detail = count
-            ? ` · ${count} ${count === 1 ? 'error' : 'errors'}`
-            : '';
+          const counts = codeEditor.diagnosticCounts.get(path);
+          const count = counts ? counts.errors + counts.warnings : 0;
+          tab.dataset.diagnosticSeverity = counts?.errors
+            ? 'error'
+            : counts?.warnings
+              ? 'warning'
+              : '';
+          diagnostics.hidden = count === 0;
+          diagnostics.textContent = String(count);
+          const detail = counts ? ` · ${describeDiagnosticCounts(counts)}` : '';
           open.title = path + detail;
           open.setAttribute('aria-label', path + detail);
         }),
@@ -1992,7 +2012,7 @@ function handleCompletionFocus(focus: CompletionFocus | undefined): void {
   completionPreviewTimer = window.setTimeout(() => {
     completionPreviewTimer = undefined;
     void runCompletionPreview(focus, revision);
-  }, 160);
+  }, appSettings.value.completionDelayMs);
 }
 
 async function runCompletionPreview(

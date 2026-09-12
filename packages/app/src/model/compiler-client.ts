@@ -4,6 +4,7 @@ import type {
   TopologyInspectionOptions,
 } from '@code3d/core/tooling';
 import {action, makeObservable, observableRef, runInAction} from 'mobx';
+import {appSettings} from '../app-settings';
 import {browserPackageFiles} from '../project/browser-packages';
 import {statProjectFiles, type ProjectFileReader} from '../project/file-reader';
 import type {ModelProject} from '../project/project';
@@ -45,7 +46,7 @@ type PendingRequest = {
 
 type ExecuteRequest = Omit<
   Extract<ExecutorRequest, {kind: 'execute'}>,
-  'artifact' | 'dependency'
+  'artifact' | 'dependency' | 'settings'
 > & {artifact: ProjectBuildArtifact};
 type Execution = {
   request: ExecuteRequest;
@@ -72,6 +73,8 @@ export class ModelCompilerClient {
   private runningExecution?: Execution;
   private exportable?: {module: ModelModule; compileId: number};
   phase: CompilationPhase | undefined;
+  /** Undefined until the current compilation has prepared its dependency graph. */
+  language: ProjectLanguage | undefined;
   restored: Readonly<{rootPath: string; module: ModelModule}> | undefined;
   private lastEntry?: string;
   private compiledArtifact?: string;
@@ -94,7 +97,6 @@ export class ModelCompilerClient {
 
   constructor(
     private readonly files: ProjectFileReader,
-    private readonly onLanguage?: (language: ProjectLanguage) => void,
     private readonly prepareProject?: (
       project: ModelProject,
       rootPath: string,
@@ -106,6 +108,7 @@ export class ModelCompilerClient {
       exportable: observableRef,
       phase: observableRef,
       restored: observableRef,
+      language: observableRef,
       cancel: action,
       dispose: action,
       refreshProject: action,
@@ -130,6 +133,7 @@ export class ModelCompilerClient {
     return new Promise((resolve, reject) =>
       runInAction(() => {
         const id = this.nextId++;
+        this.language = undefined;
         this.exportable = undefined;
         this.phase = undefined;
         this.restored = undefined;
@@ -190,6 +194,7 @@ export class ModelCompilerClient {
 
   refreshProject(): void {
     this.cancel();
+    this.language = undefined;
     this.compiler.postMessage({kind: 'refresh-project'});
   }
 
@@ -375,6 +380,7 @@ export class ModelCompilerClient {
     const request = this.runningExecution.request;
     this.sendExecution({
       ...request,
+      settings: appSettings.execution,
       ...this.executionArtifacts.encode(request.artifact),
     });
   }
@@ -432,7 +438,7 @@ export class ModelCompilerClient {
           return;
         }
         if (data.kind === 'language') {
-          if (data.id === this.pending?.id) this.onLanguage?.(data.language);
+          if (data.id === this.pending?.id) this.language = data.language;
           return;
         }
         if (data.kind === 'cached') {
@@ -618,6 +624,7 @@ export class ModelCompilerClient {
     pending.reject(error);
   }
   private restartCompiler(): void {
+    this.language = undefined;
     this.finishCacheReset(new Error('The compiler worker was restarted.'));
     this.runningCompile = undefined;
     this.compiler.terminate();

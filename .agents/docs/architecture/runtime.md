@@ -135,6 +135,10 @@ Core，冲突明确报错，不能隐式安装第二份公共 Core。
 
 ## 语言准备与源码构建
 
+CompilerClient 的当前语言快照是响应式状态，编译请求与语言消息共用请求 ID：
+开始新的准备时快照未就绪，只接受仍属当前请求的结果。编辑器诊断的就绪边界与
+过期结果处理见[编辑器状态与诊断](tooling.md#编辑器状态与诊断)。
+
 [Project language](../../../packages/app/src/project/project-language.ts)按导入闭包读取
 真实声明、源码映射及源文件，不生成另一套作者 API 声明。语言准备不初始化内核。
 编辑器的默认基础库是 ECMAScript，不能把宿主项目的 Node/DOM 类型自动注入作者
@@ -263,6 +267,26 @@ URL 不等于卸载模块。不能承诺无限多不同源码版本下 JavaScrip
 [cached-module-exports](../../../packages/app/test/cached-module-exports.test.ts)和
 [module-evaluator](../../../packages/app/test/module-evaluator.test.ts)。
 
+## App 性能设置
+
+[AppSettings](../../../packages/app/src/app-settings.ts)拥有当前浏览器的性能偏好，
+通过 MobX 发布已提交值并持久化到 localStorage，storage 事件同步其他标签页。
+[设置对话框](../../../packages/app/src/ui/app-settings.ts)复用 AppDialog，输入草稿在
+保存后提交；分类侧栏由组件自己的 MobX 活跃分类状态控制，切换仅显隐原面板，
+保留各类输入节点和草稿。导航支持键盘与窄屏顶部布局，保存统一验证所有分类，
+错误定位回所属面板。每个字段仅在对应已提交值变化时回填，不因其他设置变化覆盖草稿。
+恢复默认值通过统一 `dialogs.confirm` 确认后回填所有分类草稿，仍需保存才提交。
+设置不属于项目清单，不改变模型语义，也没有产品格式版本迁移路径。
+
+编辑及补全调度在下一次请求读取延迟；渲染器订阅像素倍率上限并立即调整画布。
+ModelCompilerClient 发出执行请求时携带普通计算配置快照，ProjectExecutor 在执行
+边界更新 Core 历史缓存软预算与几何查询并行度；缩小并行度释放多余 Worker。
+页面预览和 Agent 观察使用同一偏好，取消/重启后的 Worker 仍收到当前值。
+ArtifactStoreHost 订阅磁盘预算并传给 I/O Worker，各次事务按当前预算打开日志；
+缩小预算时按现有日志整理规则淘汰缓存。新增订阅由所属页面/服务生命周期销毁。
+当前数值默认值与合法输入边界由设置源码维护，用户说明见
+[性能设置](../../../packages/web/src/content/docs/docs/getting-started/app.md#performance-settings)。
+
 ## 计算缓存、持久化与并行快照
 
 [CachedDefinitionCompiler](../../../packages/app/src/project/cached-definitions.ts)
@@ -293,7 +317,7 @@ bounds 的 ModelGeometryValue 分别使用 `kernel-shape:` 和 `model-geometry:`
 
 [persistent-artifacts](../../../packages/app/src/model/persistent-artifacts.ts)与
 [artifact-journal](../../../packages/app/src/model/artifact-journal.ts)把可持久化计算结果
-保存到 OPFS。构建产物、几何与 HTTP 资源共享 min(1 GiB, origin 配额的 10%) 磁盘预算，含整理空间。命名空间来自实际运行时代码和 WASM 的内容身份，不使用临时 Blob URL。
+保存到 OPFS。构建产物、几何与 HTTP 资源共享 App 设置指定的磁盘预算（默认 2 GiB，不按浏览器配额或剩余空间截断），含整理空间。命名空间来自实际运行时代码和 WASM 的内容身份，不使用临时 Blob URL。
 日志带签名及校验，整理副本在完整写入后发布；损坏、配额不足或存储不可用时继续
 内存模式。索引按需读取记录，不预载全部历史几何。
 

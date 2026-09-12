@@ -143,7 +143,6 @@ test('project preparation can exceed two minutes and still compile normally', as
     });
     window.client = new ModelCompilerClient(
       {async readFile() {}, async stat() {}},
-      undefined,
       () => preparation,
     );
     window.delayedOperation = {
@@ -194,7 +193,6 @@ for (const operation of ['export', 'sketch', 'clear-build-cache'] as const) {
           await import('/src/model/compiler-client.ts');
         window.client = new ModelCompilerClient(
           {async readFile() {}, async stat() {}},
-          undefined,
           undefined,
           'deadline-fixture',
         );
@@ -812,7 +810,6 @@ for (const stage of ['compiler', 'executor', 'restore'] as const) {
             await import('/src/model/compiler-client.ts');
           window.client = new ModelCompilerClient(
             {async readFile() {}, async stat() {}},
-            undefined,
             // Keep normal compilation out of the restore cancellation probe.
             stage === 'restore'
               ? () =>

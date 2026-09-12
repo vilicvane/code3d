@@ -3,6 +3,7 @@ import type {
   TopologyInspection,
   TopologyInspectionOptions,
 } from '@code3d/core/tooling';
+import type {ExecutionSettings} from '../app-settings';
 import type {ArtifactStoreInitialization} from './artifact-store-protocol';
 import type {ProjectFileInfo} from '../project/file-reader';
 import type {ModelProject} from '../project/project';
@@ -62,6 +63,7 @@ type WorkerRequest =
   | Readonly<
       {
         kind: 'execute';
+        settings: ExecutionSettings;
         id: number;
         cancellation: CompilationCancellation;
       } & ArtifactMessage

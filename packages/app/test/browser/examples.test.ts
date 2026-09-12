@@ -204,11 +204,15 @@ async function editAndUndo(page: Page, file: string, preferSketch = false) {
     regularPrism: ['radius', 'y', 'sides', 'rotation'],
     spacer: ['height', 'radius', 'sides'],
     screwBox: ['gap'],
+    screw: ['input', 'length'],
     extrude: ['face', 'distance'],
   };
   const calls = [
     ...original.matchAll(
-      /(box|cylinder|sphere|circle|rectangle|regularPolygon|regularPrism|spacer|screwBox|extrude)\(([^()\n]+)\)/g,
+      new RegExp(
+        `(${Object.keys(parameterNames).join('|')})\\(([^()\\n]+)\\)`,
+        'g',
+      ),
     ),
   ];
   let edit: {offset: number; parameter: string; value: number} | undefined;

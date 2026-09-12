@@ -307,6 +307,8 @@ export const sourceContextSets: Readonly<
 
 // Every runnable source, including reusable project parts, is checked by the example tests.
 export const exampleEntries = [
+  {file: 'iso-screws.ts'},
+  {file: 'gb-screws.ts'},
   {
     file: 'projects/desktop-controller/enclosure.ts',
   },

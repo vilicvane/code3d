@@ -238,3 +238,23 @@ test('cancelling a publication read leaves its accepted writes draining', async 
   assert.ok(await f.server.request('model', {kind: 'get', id: 'latest'}));
   assert.equal(f.server.stats.pendingBytes, 0);
 });
+
+test('configured disk budgets reach reads, writes and clear transactions', async () => {
+  const budgets: (number | undefined)[] = [];
+  const server = new ArtifactStoreServer(async (action, stats, options) => {
+    budgets.push(options?.maximumBytes);
+    stats(undefined);
+    return action(() => undefined);
+  });
+  server.maximumBytes = 64 * 1024 ** 3;
+  await server.request('geometry', {kind: 'get', id: 'missing'});
+  server.enqueue(
+    'geometry',
+    {kind: 'set', id: 'shape', bytes: bytes(1)},
+    () => {},
+  );
+  await server.drain();
+  server.maximumBytes = 512 * 1024 ** 2;
+  await server.request('geometry', {kind: 'clear'});
+  assert.deepEqual(budgets, [64 * 1024 ** 3, 64 * 1024 ** 3, 512 * 1024 ** 2]);
+});

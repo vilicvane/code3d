@@ -288,3 +288,18 @@ test('batched journal replies preserve order, missing entries and empty or multi
   const restored = new ArtifactJournal(disk, 16 * 1024 ** 2);
   assert.deepEqual(restored.getMany(['large', 'missing']), [large, undefined]);
 });
+
+test('lowering a reopened journal budget reclaims history and keeps its newest records', () => {
+  const disk = files();
+  let journal = new ArtifactJournal(disk, 32768);
+  for (let i = 0; i < 10; i++) journal.set(String(i), value(i, 1000));
+  journal.flush();
+  journal = new ArtifactJournal(disk, 4096, journal.index());
+  assert.ok(journal.stats().diskBytes <= 4096);
+  assert.equal(journal.get('0'), undefined);
+  assert.deepEqual(journal.get('9'), value(9, 1000));
+  journal = new ArtifactJournal(disk, 128 * 1024 ** 3, journal.index());
+  journal.set('large', value(42, 5000));
+  journal.flush();
+  assert.deepEqual(journal.get('large'), value(42, 5000));
+});

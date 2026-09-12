@@ -41,7 +41,7 @@ type Slot = {
 export class SnapshotWorkerPool {
   private readonly slots: Slot[] = [];
   private readonly costs = new Map<string, number>();
-  private readonly concurrency: number;
+  private concurrency: number;
   private disposed = false;
   private queuedBytes = 0;
   private localInputBytes = 0;
@@ -63,6 +63,14 @@ export class SnapshotWorkerPool {
       (typeof Worker === 'undefined'
         ? 1
         : Math.min(4, Math.max(1, (navigator.hardwareConcurrency ?? 2) - 1)));
+  }
+
+  /** Called between executions; retire surplus native runtimes when lowering the limit. */
+  setConcurrency(concurrency: number): void {
+    this.concurrency = concurrency;
+    for (let index = this.slots.length - 1; index >= concurrency; index--)
+      this.dropSlot(index, new Error('Geometry concurrency changed.'));
+    this.slots.length = Math.min(this.slots.length, concurrency);
   }
 
   get stats(): SnapshotPoolStats {

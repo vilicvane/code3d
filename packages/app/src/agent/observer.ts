@@ -65,9 +65,9 @@ export class AgentObserver {
   constructor(
     files: ProjectFileReader,
     private readonly revision: () => number,
-    prepareProject?: ConstructorParameters<typeof ModelCompilerClient>[2],
+    prepareProject?: ConstructorParameters<typeof ModelCompilerClient>[1],
   ) {
-    this.compiler = new ModelCompilerClient(files, undefined, prepareProject);
+    this.compiler = new ModelCompilerClient(files, prepareProject);
   }
 
   observe(request: AgentObservation): Promise<AgentResponse> {

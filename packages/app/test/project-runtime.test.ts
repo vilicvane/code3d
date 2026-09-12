@@ -36,19 +36,30 @@ test('runs installed package artifacts in their own kernel and retains screw cac
     packageTestFiles,
     builder,
     assets,
-    'void import("@code3d/screws");',
+    'void import("@code3d/screws"); void import("@code3d/screws/iso10642"); void import("@code3d/screws/gb70-3");',
   );
   const runtime = await ProjectRuntime.create(
     artifact,
     await createTestEvaluator(server),
   );
   const evaluator = await createTestEvaluator(server);
-  const source =
-    'import {ISO4762} from "@code3d/screws"; export const screw = ISO4762.screw("M6", 18);';
+  const source = [
+    'import {ISO10642 as aggregate, GB70_3 as gbAggregate} from "@code3d/screws";',
+    'import * as ISO10642 from "@code3d/screws/iso10642";',
+    'import * as GB70_3 from "@code3d/screws/gb70-3";',
+    'export const same = aggregate.screw === ISO10642.screw && gbAggregate.screw === GB70_3.screw;',
+    'export const screw = GB70_3.screw("M6", 18);',
+  ].join('\n');
   try {
-    const path = await builder.resolve('@code3d/screws');
-    assert.ok(path);
-    await runtime.importModule(path);
+    for (const specifier of [
+      '@code3d/screws',
+      '@code3d/screws/iso10642',
+      '@code3d/screws/gb70-3',
+    ]) {
+      const path = await builder.resolve(specifier);
+      assert.ok(path);
+      await runtime.importModule(path);
+    }
     const bundle = await builder.build(source, {
       runtimeFiles: artifact.formats,
     });
@@ -59,6 +70,7 @@ test('runs installed package artifacts in their own kernel and retains screw cac
       bundle.source,
       contexts,
     );
+    assert.equal(first.same, true);
     assert.ok(runtime.tooling.isModelObject(first.screw));
     const identity = modelGeometry(first.screw).id;
     const mesh = runtime.tooling.createModelSnapshotter()(first.screw).mesh;

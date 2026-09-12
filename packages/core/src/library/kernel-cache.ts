@@ -71,6 +71,12 @@ export function createComputationCache({
   const pendingPersistence = new Map<string, () => Uint8Array>();
   let externalBytes = 0;
 
+  /** Adjust historical retention without invalidating the current model. */
+  function setKernelCacheBudget(bytes: number): void {
+    maximumBytes = bytes;
+    evictHistoricalEntries();
+  }
+
   /** The host accounts for in-flight inputs and all auxiliary native heaps. */
   function setKernelExternalBytes(bytes: number): void {
     externalBytes = bytes;
@@ -368,6 +374,7 @@ export function createComputationCache({
     beginKernelOperationEvaluation,
     clearKernelOperationCache,
     kernelOperationCacheStats,
+    setKernelCacheBudget,
     setKernelArtifactStore,
     findKernelOperation,
     findKernelOperations,
@@ -388,6 +395,7 @@ export const {
   beginKernelOperationEvaluation,
   clearKernelOperationCache,
   kernelOperationCacheStats,
+  setKernelCacheBudget,
   setKernelArtifactStore,
   findKernelOperation,
   findKernelOperations,

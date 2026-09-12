@@ -1,1 +1,21 @@
 export * as ISO4762 from './iso-4762.js';
+export * as ISO10642 from './iso-10642.js';
+export * as ISO7380_1 from './iso-7380-1.js';
+export * as ISO4017 from './iso-4017.js';
+export * as ISO4014 from './iso-4014.js';
+export * as ISO7380_2 from './iso-7380-2.js';
+export * as ISO4029 from './iso-4029.js';
+export * as ISO7045 from './iso-7045.js';
+export * as ISO14583 from './iso-14583.js';
+export * as ISO7379 from './iso-7379.js';
+
+export * as GB70_1 from './gb-70-1.js';
+export * as GB70_2 from './gb-70-2.js';
+export * as GB70_3 from './gb-70-3.js';
+export * as GB70_4 from './gb-70-4.js';
+export * as GB5782 from './gb-5782.js';
+export * as GB5783 from './gb-5783.js';
+export * as GB818 from './gb-818.js';
+export * as GB2672 from './gb-2672.js';
+export * as GB80 from './gb-80.js';
+export * as GB5281 from './gb-5281.js';

@@ -27,9 +27,24 @@ context menu. The new file name is selected without its extension. Press
 such as `src/utils/model.ts` creates missing parent folders too. Invalid names
 remain editable, with an explanation below the tree.
 
-Files with errors have red names and error counts in the tree and open tabs;
-parent folders show a red dot for errors below them. These include TypeScript
-and runtime errors with a known source file. Agent activity dots remain separate.
+Files with errors have red names in the tree and open tabs; files with only
+warnings use yellow. The badge shows the total number of errors and warnings,
+with separate counts in its tooltip. Parent folders show a red or yellow dot
+for diagnostics below them, with errors taking priority. These include editor
+and runtime diagnostics with a known source file; hints and information do not
+add to the badge.
+
+Agent activity dots remain separate, to the right of diagnostics and cut markers.
+They keep each agent's color; up to three dots are shown, followed by `+N` for
+additional agents. The tooltip lists every agent. Folders collect activity from
+their descendants whether collapsed or expanded. Expanded folders and their
+files both keep their activity dots.
+Clearing diagnostics leaves agent activity visible.
+
+While dependencies are loading, syntax errors remain visible; dependency-based
+type checks appear once the language environment is ready. Temporary missing-module
+errors from incomplete loading are not shown. Package loading failures still
+appear in the package or model status.
 
 Package installation, deletion, and example resets use dialogs inside the App. Input errors appear below the field so you can correct the name
 without losing your text. Choose **Cancel**, press **Escape**, or click outside
@@ -171,6 +186,13 @@ Packages that publish declaration maps and their original TypeScript sources
 can take you directly to those sources. Installed files and generated locks
 open read-only; they are not executable model files. JSON files remain editable
 project files and do not run as models.
+
+Opening a package's original source for reference does not add it to your
+project's type checking or error counts. Hover and further definition navigation
+remain available. Imported declarations still provide types; the App skips
+checking declaration-file internals by default. If your code directly imports
+an implementation source file, that file becomes a dependency and is checked
+normally. Actual errors remain visible even in read-only files.
 
 ## Local folder
 

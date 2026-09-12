@@ -163,6 +163,16 @@ export default group([base, top], 'Assembly');`;
     const snapshot = module.objects.get(defined(module.exports.get('default')));
     const instances = collectExportInstances(scene(defined(snapshot)));
     assert.equal(instances.length, 2);
+    // The group inherits the base frame; the top sits on its y = 10 face.
+    const positions = [
+      [0, 0, 0],
+      [0, 12, 0],
+    ];
+    instances.forEach((instance, i) =>
+      instance.transform.position.forEach((value, axis) =>
+        assert.ok(Math.abs(value - positions[i][axis]) < 1e-6),
+      ),
+    );
     const blob = compiler.export(instances, defaults);
     const text = await blob.text();
     assert.match(text, /ISO-10303-21/);

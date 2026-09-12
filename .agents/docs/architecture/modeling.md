@@ -117,7 +117,8 @@ handle 不足以证明原生几何已释放。
 Render 与 PNG 使用作者材质。
 
 CAD 导出使用当前选定运行时中对应 revision 的完成快照，保留前景模型组合位姿，
-排除弱化上下文和辅助标记。导出不借用主机的另一份内核，也不销毁仍需继续导出的
+排除弱化上下文和辅助标记。组合导出沿用快照的首成员局部坐标系，不重新居中；
+导出回归同时核对成员位姿和导出后重新导入的包围盒。导出不借用主机的另一份内核，也不销毁仍需继续导出的
 当前快照。实现见 [material](../../../packages/core/src/library/material.ts)、
 [model-export](../../../packages/app/src/model/model-export.ts)；验证见
 [材质测试](../../../packages/core/test/material.test.ts)和

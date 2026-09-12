@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {glob, readFile} from 'node:fs/promises';
 import {after, before, test} from 'node:test';
 import {defined} from '../../../test/assert.ts';
 import type {ProjectFileReader} from '../src/project/file-reader.ts';
@@ -21,12 +22,13 @@ after(async () => server?.close());
 async function fingerprints(
   source: string,
   additional: Record<string, string> = {},
+  path = '/model.ts',
 ) {
   const files: Record<string, string> = {
-    '/model.ts': source,
     '/core.js': 'export const cached = () => {};',
     '/replicad.js': 'export const definePrimitive = () => {};',
     ...additional,
+    [path]: source,
   };
   const reader: ProjectFileReader = {
     async readFile(path) {
@@ -45,7 +47,7 @@ async function fingerprints(
       return new URL(specifier, 'file://' + importer).pathname;
     },
   );
-  return [...(await compiler.definitions('/model.ts', source)).values()];
+  return [...(await compiler.definitions(path, source)).values()];
 }
 
 test('fingerprints exclude export/position/unused edits and include transitive local helpers', async () => {
@@ -198,16 +200,21 @@ const fn = cached(build, {encoder: encode, decoder: decode});`;
   );
 });
 
-test('the prebundled Screws package retains its primitive cache definition', async () => {
-  const source = new TextDecoder().decode(
-    await packageTestFiles.readFile('/packages/screws/bld/library/index.js'),
-  );
-  const definitions = await fingerprints(source);
-  assert.equal(definitions.length, 1);
-  assert.deepEqual(
-    await fingerprints('// shifted bundle\n' + source),
-    definitions,
-  );
+test('the prebundled Screws package retains its thread, cup and hexalobular primitive cache definitions', async () => {
+  const directory = new URL('../../screws/bld/', import.meta.url);
+  const files: Record<string, string> = {};
+  for await (const file of glob('**/*.js', {cwd: directory}))
+    files['/' + file] = await readFile(new URL(file, directory), 'utf8');
+  const definitions: string[] = [];
+  for (const [path, source] of Object.entries(files)) {
+    const original = await fingerprints(source, files, path);
+    definitions.push(...original);
+    assert.deepEqual(
+      await fingerprints('// shifted bundle\n' + source, files, path),
+      original,
+    );
+  }
+  assert.equal(new Set(definitions).size, 3);
 });
 
 test('compiled cached/primitive definitions reuse across edits and restore from persistent artifacts', async () => {

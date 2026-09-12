@@ -51,6 +51,10 @@ its execution Worker is replaced. Closing a project drains queued writes;
 reloading or closing the whole page can lose cache entries that have not reached
 storage yet. This does not change how project source files are saved.
 
+Performance preferences are available from **Settings** in the top bar.
+They are saved for this browser and shared across projects and tabs; see the
+[settings guide](../web/src/content/docs/docs/getting-started/app.md#performance-settings).
+
 ## Source map
 
 Read [project and runtime](../../.agents/docs/architecture/runtime.md),
@@ -58,18 +62,19 @@ Read [project and runtime](../../.agents/docs/architecture/runtime.md),
 [sketch architecture](../../.agents/docs/architecture/sketch.md) for the relevant
 contracts before following the implementation links below.
 
-| Responsibility                                        | Start here                                                          |
-| ----------------------------------------------------- | ------------------------------------------------------------------- |
-| Application composition                               | [main.ts](src/main.ts)                                              |
-| Editor and source selection                           | [editor.ts](src/editor.ts), [source edits](src/source-edit-diff.ts) |
-| Project files and package installation                | [Project services](src/project/)                                    |
-| Compilation, execution and observations               | [Model runtime](src/model/)                                         |
-| 3D rendering and viewport interaction                 | [viewport.ts](src/viewport.ts), [rendering](src/rendering/)         |
-| Sketch and source editing tools                       | [Tools](src/tools/)                                                 |
-| Agent grants, requests, cursors, following and images | [Agent integration](src/agent/)                                     |
-| App prompts and modal lifecycle                       | [Dialog API](src/ui/dialog.ts)                                      |
-| UI components                                         | [UI](src/ui/)                                                       |
-| Executable models and website samples                 | [Examples](examples/), [sample catalog](render-samples/catalog.ts)  |
+| Responsibility                                        | Start here                                                              |
+| ----------------------------------------------------- | ----------------------------------------------------------------------- |
+| Application composition                               | [main.ts](src/main.ts)                                                  |
+| Editor and source selection                           | [editor.ts](src/editor.ts), [source edits](src/source-edit-diff.ts)     |
+| Project files and package installation                | [Project services](src/project/)                                        |
+| Compilation, execution and observations               | [Model runtime](src/model/)                                             |
+| 3D rendering and viewport interaction                 | [viewport.ts](src/viewport.ts), [rendering](src/rendering/)             |
+| Sketch and source editing tools                       | [Tools](src/tools/)                                                     |
+| Agent grants, requests, cursors, following and images | [Agent integration](src/agent/)                                         |
+| App prompts and modal lifecycle                       | [Dialog API](src/ui/dialog.ts)                                          |
+| App performance preferences                           | [State](src/app-settings.ts), [settings dialog](src/ui/app-settings.ts) |
+| UI components                                         | [UI](src/ui/)                                                           |
+| Executable models and website samples                 | [Examples](examples/), [sample catalog](render-samples/catalog.ts)      |
 
 Public model authoring belongs to [Core](../core/README.md). Shared connection,
 encryption, and request receipts belong to [Agent](../agent/README.md); the local

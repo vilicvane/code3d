@@ -31,10 +31,13 @@ export const projectCompilerOptions: ts.CompilerOptions = {
 
 export type ProjectLanguage = Readonly<{
   files: readonly ProjectSourceFile[];
+  navigationFiles: readonly ProjectSourceFile[];
+  /** Compiler-injected imports, kept out of user files and navigation snapshots. */
+  toolingFile?: ProjectSourceFile;
   compilerOptions: ts.CompilerOptions;
   packageSpecifiers: readonly string[];
   realPaths?: Readonly<Record<string, string>>;
-  rootPaths?: readonly string[];
+  rootPaths: readonly string[];
 }>;
 
 async function readAll(reads: readonly Promise<unknown>[]): Promise<void> {
@@ -362,15 +365,23 @@ export class ProjectLanguageLoader {
       }),
     );
     return {
-      rootPaths: localFiles.map(file => normalizeProjectPath(file.path)),
+      rootPaths: [...localPaths],
+      toolingFile: {path: toolingPath, source: sources.get(toolingPath)!},
       realPaths: Object.fromEntries(realPaths),
+      navigationFiles: [...navigationFiles].flatMap(path => {
+        const source = sources.get(path);
+        return source !== undefined &&
+          !reachable.has(path) &&
+          !reachable.has(realPaths.get(path) ?? '')
+          ? [{path, source}]
+          : [];
+      }),
       files: [...sources].flatMap(([path, source]) =>
         source !== undefined &&
         path !== '/lib.es5.d.ts' &&
         path !== toolingPath &&
         (reachable.has(path) ||
           reachable.has(realPaths.get(path) ?? '') ||
-          navigationFiles.has(path) ||
           path.endsWith('.json')) &&
         !projectPaths.has(path)
           ? [{path, source}]

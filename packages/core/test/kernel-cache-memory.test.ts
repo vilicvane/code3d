@@ -56,3 +56,39 @@ test('a native memory budget releases historical geometry while returned shapes 
     cache.clearKernelOperationCache();
   }
 });
+
+test('changing the budget evicts history while keeping the active evaluation usable', () => {
+  const cache = createComputationCache({
+    maximumBytes: 4096,
+    nativeAllocatedBytes: () => 0,
+  });
+  const released: number[] = [];
+  const lifecycle = {
+    estimateBytes: () => 256,
+    retain: (value: number) => value,
+    instantiate: (value: number) => value,
+    release: (value: number) => {
+      released.push(value);
+    },
+  };
+  const evaluate = (value: number) =>
+    cache.evaluateCachedArtifact(
+      kernelOperationKey('budget-test', [value], []),
+      lifecycle,
+      () => value,
+      false,
+    ).value;
+  let finish = cache.beginKernelOperationEvaluation();
+  evaluate(1);
+  finish();
+  finish = cache.beginKernelOperationEvaluation();
+  evaluate(2);
+  finish();
+  cache.setKernelCacheBudget(1);
+  assert.deepEqual(released, [1]);
+  assert.equal(cache.kernelOperationCacheStats().entries, 1);
+  assert.equal(evaluate(2), 2);
+  cache.setKernelCacheBudget(128 * 1024 ** 3);
+  assert.equal(cache.kernelOperationCacheStats().maximumBytes, 128 * 1024 ** 3);
+  cache.clearKernelOperationCache();
+});
