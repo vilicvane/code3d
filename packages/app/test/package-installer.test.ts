@@ -304,7 +304,11 @@ test('subprojects install exact versions, all package files, types, sources, ass
       [],
       '/a/model.ts',
     );
-    assert.ok(language.files.some(file => file.path.endsWith('/src/index.ts')));
+    assert.ok(
+      language.navigationFiles.some(file =>
+        file.path.endsWith('/src/index.ts'),
+      ),
+    );
     assert.ok(
       language.files.some(
         file =>

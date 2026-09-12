@@ -85,9 +85,18 @@ Build 保留分支 push、pull request 与手工触发，版本 tag 只触发 Pu
    `CODE3D_RELEASE_TAG=v0.0.1-alpha.2 npm run test:packages` 验证目标版本。
    将示例 tag 换成本次版本；该检查同时覆盖所有公开包，以及仅安装本批 tarball、
    其余依赖从 npm 获取的真实消费场景。可用下文的 `--dry-run` 检查 registry 状态。
+   接着用同一个 `CODE3D_RELEASE_TAG` 运行
+   `npm run update:examples:locks --workspace @code3d/app`，由真实 tarball 清单与
+   公共 npm 元数据生成示例锁；锁中只记录正式 registry URL 和 tarball 完整性，
+   不记录 workspace 或本地文件。提交锁后不得再修改将上传的包内容。
+   同一 tag 下的 `test:examples:packages` 与 `test:examples:browser` 使用已验证
+   tarball 代替本批尚未上传的包，其他依赖仍来自 npm；浏览器沿正常安装、校验、
+   解压和解析路径运行全部示例。清单与 tarball 不符时失败，不退回旧版包。
 4. 按[交付流程](../skills/worktree-development/references/delivery-subagent.md)完成已授权的
    提交、合并与推送，在已验证的发布提交上创建并推送 `v<版本号>` tag。
-   CI 以 tag 对应的提交执行构建与发布。
+   CI 以 tag 对应的提交执行构建与发布。示例锁引用本批新包时，先推送该 tag，
+   等待 npm 上传与公开示例复验通过，再推送同一主分支提交触发网站部署，避免
+   Build 在新包尚未公开时安装失败。
 
 公开包发布按 `dependencies`、`peerDependencies` 与 `optionalDependencies` 的反向依赖闭包联动。
 Core 发布新版本时，依赖它的 Materials、Screws 同步更新版本和 Core 最低版本并纳入本批；
@@ -124,7 +133,7 @@ Workflow 使用 GitHub hosted runner、Node.js 24 与 npm 11.19.1，给予 OIDC
 CI 先完成构建、单元测试和真实安装验证，并额外仅安装 tag 选中的 tarball，
 从 npm 获取未参与发布的依赖，检查新包没有误用工作区中未发布的依赖实现。
 随后直接发布同一份已校验完整性的 tarball，不在上传阶段重新打包或执行 lifecycle scripts。
-已公开版本跳过；默认 dist-tag 为 `latest`，包的 `publishConfig.tag` 可覆盖。
+已公开版本仅在完整性与本批已验证产物一致时跳过；默认 dist-tag 为 `latest`，包的 `publishConfig.tag` 可覆盖。
 新包必须先在 npm 完成首次创建并配置 trusted publisher；CI 会在上传本批任何包前检查这一前提。
 Trusted Publisher 必须允许 direct publishing；只允许 staged publishing 的配置不能运行本流程。
 使用 `npm trust list <package> --json` 读取已有 claims，保留仓库、workflow、environment，
@@ -140,7 +149,9 @@ Trusted Publisher 必须允许 direct publishing；只允许 staged publishing �
 ### 完成发布
 
 核对本批包的公开版本、目标 dist-tag、实际 tarball 的依赖/peer 最低版本和安装结果，
-不能只根据 workflow 成功判断 registry 已可用。交付回报记录版本 tag、提交、包列表及验证结果。
+不能只根据 workflow 成功判断 registry 已可用。发包后不设置 `CODE3D_RELEASE_TAG`，
+再次运行干净 npm 示例与浏览器示例验证，使安装从公开 registry 获取同一锁定版本；
+Publish workflow 自动执行这两道公开消费门槛。交付回报记录版本 tag、提交、包列表及验证结果。
 部分成功时逐包记录状态，重试沿用同一个版本 tag；需要修改源码时使用新的版本与 tag。
 App/网站的部署结果按其 workflow 单独记录。
 

@@ -1,5 +1,13 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
+import {mkdtemp, mkdir, writeFile, readFile, rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+import {
+  integrity,
+  run,
+  verifiedArtifacts,
+} from '../scripts/package-artifacts.mjs';
 import {releasePackages} from '../scripts/publish-packages.mjs';
 
 test('a shared release tag selects only matching versions in dependency order', () => {
@@ -144,5 +152,66 @@ test('duplicate peer and optional declarations are both validated', () => {
         'v1.1.0',
       ),
     /peerDependencies.core.*minimum version/,
+  );
+});
+
+test('example consumers and publication require the exact verified archive identity', async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'code3d-artifact-test-'));
+  t.after(() => rm(directory, {recursive: true, force: true}));
+  const manifest = {
+    name: '@code3d/example',
+    version: '1.2.3',
+    dependencies: {external: '1.0.0'},
+  };
+  await mkdir(path.join(directory, 'package'));
+  await writeFile(
+    path.join(directory, 'package/package.json'),
+    JSON.stringify(manifest),
+  );
+  run('tar', ['-czf', 'example.tgz', 'package'], directory);
+  const filename = path.join(directory, 'example.tgz');
+  const artifact = {
+    ...manifest,
+    filename: 'example.tgz',
+    integrity: integrity(await readFile(filename)),
+  };
+  await writeFile(
+    path.join(directory, 'manifest.json'),
+    JSON.stringify([artifact]),
+  );
+  const [verified] = await verifiedArtifacts([manifest], directory);
+  assert.deepEqual(verified.manifest, manifest);
+  assert.equal(
+    verified.tarball,
+    'https://registry.npmjs.org/@code3d/example/-/example-1.2.3.tgz',
+  );
+  assert.equal(verified.filename, filename);
+  await assert.rejects(
+    verifiedArtifacts(
+      [{...manifest, dependencies: {external: '2.0.0'}}],
+      directory,
+    ),
+    /differs from release plan/,
+  );
+  await assert.rejects(
+    verifiedArtifacts([{...manifest, version: '1.2.4'}], directory),
+    /Missing verified artifact/,
+  );
+  await writeFile(
+    path.join(directory, 'manifest.json'),
+    JSON.stringify([{...artifact, version: '1.2.4'}]),
+  );
+  await assert.rejects(
+    verifiedArtifacts([{...manifest, version: '1.2.4'}], directory),
+    /identity mismatch/,
+  );
+  await writeFile(
+    path.join(directory, 'manifest.json'),
+    JSON.stringify([artifact]),
+  );
+  await writeFile(filename, 'modified');
+  await assert.rejects(
+    verifiedArtifacts([manifest], directory),
+    /artifact was modified/,
   );
 });

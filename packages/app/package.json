@@ -16,7 +16,8 @@
     "test:run": "node --import ../../test/source-loader.mjs --test --test-concurrency=1 \"test/*.test.{mjs,ts}\"",
     "test:types": "node ../../node_modules/typescript/bin/tsc --noEmit -p test/tsconfig.json",
     "test:examples:browser": "node scripts/test-examples.mjs",
-    "test:examples:packages": "node scripts/test-example-packages.mjs"
+    "test:examples:packages": "node scripts/test-example-packages.mjs",
+    "update:examples:locks": "node scripts/update-example-locks.mjs"
   },
   "dependencies": {
     "@code3d/agent": "*",

@@ -53,7 +53,7 @@ jobs:
           npm test
           npm run test:packages
 
-      - name: Verify clean npm examples
+      - name: Verify clean npm examples against release archives
         run: npm run test:examples:packages --workspace @code3d/app
 
       - name: Install example test browser
@@ -71,3 +71,10 @@ jobs:
 
       - name: Publish matching package versions on npm
         run: node scripts/publish-packages.mjs --publish
+
+      - name: Verify published examples from npm
+        env:
+          CODE3D_RELEASE_TAG: ''
+        run: |
+          npm run test:examples:packages --workspace @code3d/app
+          npm run test:examples:browser --workspace @code3d/app
