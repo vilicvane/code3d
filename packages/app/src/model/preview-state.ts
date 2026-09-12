@@ -21,6 +21,8 @@ export class ModelPreviewState {
   private awaitingFile = false;
   private retaining = false;
   private changingSource = false;
+  private diagnosticsByEntry: ReadonlyMap<string, readonly ModelDiagnostic[]> =
+    new Map();
   private activity: Readonly<{
     state: 'busy' | 'ready' | 'error';
     label?: string;
@@ -44,6 +46,7 @@ export class ModelPreviewState {
       | 'retaining'
       | 'changingSource'
       | 'activity'
+      | 'diagnosticsByEntry'
     >(this, {
       snapshot: observableRef,
       resultCurrent: observableRef,
@@ -51,6 +54,9 @@ export class ModelPreviewState {
       retaining: observableRef,
       changingSource: observableRef,
       activity: observableRef,
+      diagnosticsByEntry: observableRef,
+      editorDiagnostics: computed,
+      clearEditorDiagnostics: action,
       file: observableRef,
       status: observableRef,
       diagnostic: observableRef,
@@ -107,6 +113,26 @@ export class ModelPreviewState {
     return this.activity.state === 'error' ? this.diagnostic : undefined;
   }
 
+  get editorDiagnostics(): readonly ModelDiagnostic[] {
+    return [...this.diagnosticsByEntry.values()].flat();
+  }
+
+  clearEditorDiagnostics(): void {
+    this.diagnosticsByEntry = new Map();
+  }
+
+  private recordEditorDiagnostics(): void {
+    if (!this.file) return;
+    const diagnostics = new Map(this.diagnosticsByEntry);
+    const entry = [
+      ...(this.diagnostic ? [this.diagnostic] : []),
+      ...this.warnings,
+    ];
+    if (entry.length) diagnostics.set(this.file, entry);
+    else diagnostics.delete(this.file);
+    this.diagnosticsByEntry = diagnostics;
+  }
+
   get busy(): boolean {
     return this.activity.state === 'busy';
   }
@@ -139,6 +165,7 @@ export class ModelPreviewState {
 
   activate(file: string | undefined, reload = false): boolean {
     if (file === this.file && !reload) return false;
+    if (reload) this.clearEditorDiagnostics();
     this.retaining =
       !!file && !reload && (this.hasPreviewedTarget || this.retaining);
     this.invalidate();
@@ -177,6 +204,7 @@ export class ModelPreviewState {
     this.status = module.diagnostic ? 'error' : 'ready';
     this.diagnostic = module.diagnostic;
     this.warnings = module.warnings;
+    this.recordEditorDiagnostics();
   }
 
   /** Cached geometry is displayable while its source snapshot is being checked. */
@@ -202,6 +230,7 @@ export class ModelPreviewState {
     this.status = 'error';
     this.diagnostic = diagnostic;
     this.warnings = [];
+    this.recordEditorDiagnostics();
   }
 
   observeTarget(present: boolean): void {

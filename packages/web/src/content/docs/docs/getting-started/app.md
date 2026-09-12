@@ -311,7 +311,10 @@ file compiles. Its controls pause until the new result replaces it. An empty
 result or a compilation failure clears the previous file’s preview.
 
 Modeling failures appear in the top status and, where source information
-is available, as an editor diagnostic at the responsible call. Hover **Model error**
+is available, as an editor diagnostic at the responsible call. Errors from an
+entry remain visible when you navigate into a helper file, even if that helper
+runs successfully on its own. Editing the project clears outdated diagnostics;
+rerunning an entry replaces its previous results. Hover **Model error**
 to read the details; click it to open and highlight the responsible source when
 its location is available. Keyboard focus followed by Enter or Space works too.
 The viewport

@@ -268,6 +268,12 @@ tab 后允许无活动文档，保留文档内容、撤销和视图状态以便�
 验证见 [相机导航](../../../packages/app/test/browser/camera-navigation.test.ts)与
 [相机计算](../../../packages/app/test/view-camera.test.ts)。
 
+编辑器诊断由 ModelPreviewState 按执行入口保存最近结果，与当前预览的状态提示分开。
+切换到依赖文件不会清空原入口的错误；同一入口重新执行后替换其结果，源码修改、
+文件操作和项目重载时清空过期诊断。CodeEditor 的每个文档通过 autorun 消费该派生
+列表，按位置与消息去重；按需打开的子模块立即得到已有标记，移除文档时释放订阅。
+验证见[运行时诊断](../../../packages/app/test/browser/runtime-diagnostics.test.ts)。
+
 诊断从最内层求值边界附上原 SourceRef，外层不覆盖已有精确位置。源码诊断进入
 Monaco marker，无法归属源码的项目/Worker 错误才使用全局入口；安装失败由包
 状态处理。viewport 诊断卡片仅接受显式 `viewport: 'sketch-source-sync'` 的草图同步提示，
