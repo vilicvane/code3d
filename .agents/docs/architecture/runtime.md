@@ -147,7 +147,18 @@ Node 执行源码时，仍须满足 Node 自身的导入规则。
 工具参数、字体与草图源码分析共用语言加载器拥有的 Program，不重新解析整套声明。
 新增导入扩展闭包，移除导入时撤下仅由它触达的语言库，再次导入可复用已读内容。
 
-`Preparing project` 对应实际的初次或依赖准备，不是每次编辑必经的可见步骤。
+阶段按实际工作发布：`reading-files` 覆盖入口源码与配置读取，语言加载器发现缺失
+声明或重建导入闭包时发布 `resolving-imports`，缓存命中可跳过后者。包管理准备和
+依赖 bundle 使用 `loading-runtime`（显示 Loading dependencies）；代码编译显示
+Compiling code，内核初始化显示 Starting modeling engine，作者代码执行显示
+Building model。执行器在收集对象图、网格/拓扑查询和快照组装之前发布
+`preparing-preview`，前端持续到渲染结果接收后再恢复 Ready/Model error。
+
+`ModelPreviewState` 从编译客户端的 observable phase 派生文字与 tooltip，普通
+编译与补全预览使用相同路径，不保留每次调用的 phase-to-label reaction。等待
+输入期间内部仍 busy，但无可见状态条；Preparing preview 由状态 DOM 消费者延迟
+200ms 显示，状态离开、取消和视图销毁都清除定时器。延迟不影响编译或 agent 就绪
+判断，不显示虚构百分比，也不延长已完成阶段。
 
 模型编译在项目与内置包的原始文件 reader 上统一应用仓库已有的
 `squares-rng@2.0.4` Worker 补丁，再进入文件缓存和包解析。因此 npm 下载、

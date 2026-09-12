@@ -83,7 +83,7 @@ export class ProjectExecutor {
         runtime.modules,
         runtime.importModule,
         runtime.resources.url,
-        () => onProgress?.('evaluating-model'),
+        onProgress,
         objects => {
           checkCancelled();
           this.geometry = runtime.tooling.retainModelGeometry(objects);

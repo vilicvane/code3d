@@ -33,7 +33,6 @@ import {
   type CompletionFocus,
   type ProjectEditorChange,
 } from './editor';
-import {compilationPhaseLabels} from './model/compilation-progress';
 import type {
   DesignArgumentContext,
   DesignContext,
@@ -328,7 +327,7 @@ const viewportHost = requiredElement('viewport-host');
 const viewportEmptyState = new ViewportEmptyState(
   requiredElement('viewport-empty-state'),
 );
-const previewState = new ModelPreviewState();
+const previewState = new ModelPreviewState(() => compiler.phase);
 const errorBar = requiredElement('error-bar');
 const designArgumentsPanel = requiredElement('design-arguments-panel');
 const designArgumentsCount = requiredElement('design-arguments-count');
@@ -584,6 +583,8 @@ window.addEventListener(
     agentConnections.dispose();
     stopViewportModes();
     stopPreviewPresentation();
+    stopViewportStatus();
+    clearTimeout(statusRevealTimer);
     viewportGridScale.dispose();
     toolFeedback.dispose();
     sketchEditor.dispose();
@@ -888,27 +889,43 @@ const stopViewportModes = reaction(
   },
   {fireImmediately: true},
 );
-const stopPreviewPresentation = reaction(
+let statusRevealTimer: ReturnType<typeof setTimeout> | undefined;
+const stopViewportStatus = reaction(
   () => ({
     status: previewState.presentation,
     diagnostic: previewState.statusDiagnostic,
-    empty: previewState.empty,
-    hint: previewState.showHint,
-    retaining: previewState.retainingView,
   }),
-  ({status, diagnostic, empty, hint, retaining}) => {
+  ({status, diagnostic}) => {
+    clearTimeout(statusRevealTimer);
+    statusRevealTimer = undefined;
+    viewportStatus.hidden = !status.label || status.delay > 0;
     viewportStatus.dataset.state = status.state;
-    viewportStatusLabel.textContent = status.label;
+    viewportStatusLabel.textContent = status.label ?? '';
     viewportStatus.setAttribute('aria-busy', String(status.state === 'busy'));
-    if (diagnostic)
-      viewportStatus.title = [diagnostic.summary, diagnostic.details]
-        .filter(Boolean)
-        .join('\n\n');
+    const description = diagnostic
+      ? [diagnostic.summary, diagnostic.details].filter(Boolean).join('\n\n')
+      : status.description;
+    if (description) viewportStatus.title = description;
     else viewportStatus.removeAttribute('title');
     const navigable = !!diagnostic?.sourceRef;
     viewportStatus.setAttribute('role', navigable ? 'button' : 'status');
     if (navigable) viewportStatus.tabIndex = 0;
     else viewportStatus.removeAttribute('tabindex');
+    if (status.label && status.delay > 0)
+      statusRevealTimer = setTimeout(() => {
+        statusRevealTimer = undefined;
+        viewportStatus.hidden = false;
+      }, status.delay);
+  },
+  {fireImmediately: true},
+);
+const stopPreviewPresentation = reaction(
+  () => ({
+    empty: previewState.empty,
+    hint: previewState.showHint,
+    retaining: previewState.retainingView,
+  }),
+  ({empty, hint, retaining}) => {
     viewportHost.dataset.empty = String(empty);
     viewportEmptyState.setVisible(hint);
     for (const element of viewportHost.querySelectorAll<HTMLElement>(
@@ -1539,19 +1556,12 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
   const designContextId =
     designContext && 'id' in designContext ? designContext.id : undefined;
   compilingDesignContextId = designContextId;
-  previewState.showStatus('busy', 'Updating model');
+  previewState.showStatus('busy');
   if (designContextId) {
     renderCurrentPanels();
   }
   errorBar.hidden = true;
 
-  const stopProgress = reaction(
-    () => compiler.phase,
-    phase => {
-      if (phase && previewState.isCurrent(request, codeEditor.sourceVersion()))
-        previewState.showStatus('busy', compilationPhaseLabels[phase]);
-    },
-  );
   const stopRestore = reaction(
     () => compiler.restored,
     restored => {
@@ -1571,11 +1581,13 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
 
   try {
     const selectedKey = viewport.getSelected()?.key ?? 'root';
-    const nextModule = await compiler.compile(
+    const compilation = compiler.compile(
       codeEditor.project(),
       file,
       designContext,
     );
+    previewState.beginCompilation();
+    const nextModule = await compilation;
     if (!previewState.isCurrent(request, codeEditor.sourceVersion())) return;
     const cursor = codeEditor.cursorSource();
     const focusedScope =
@@ -1688,7 +1700,6 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
     }
     restoreModelStatus();
   } finally {
-    stopProgress();
     stopRestore();
   }
 }
@@ -1843,7 +1854,7 @@ function handleCompletionFocus(focus: CompletionFocus | undefined): void {
   compiler.cancel();
   window.clearTimeout(compileTimer);
   compileTimer = undefined;
-  previewState.showStatus('busy', `Rendering preview · ${focus.memberName}`);
+  previewState.showStatus('busy');
   const revision = previewState.revision;
   completionPreviewTimer = window.setTimeout(() => {
     completionPreviewTimer = undefined;
@@ -1863,29 +1874,17 @@ async function runCompletionPreview(
   ) {
     return;
   }
-  const stopProgress = reaction(
-    () => compiler.phase,
-    phase => {
-      if (
-        phase &&
-        revision === previewState.revision &&
-        activeCompletionFocus === focus &&
-        preview.sourceVersion === codeEditor.sourceVersion()
-      )
-        previewState.showStatus(
-          'busy',
-          `${compilationPhaseLabels[phase]} · ${focus.memberName}`,
-        );
-    },
-  );
+
   try {
-    const module = await compiler.compile(
+    const compilation = compiler.compile(
       preview.project,
       preview.cursor.file,
       activeDesignContext(preview.cursor),
       undefined,
       false,
     );
+    previewState.beginCompilation(focus.memberName);
+    const module = await compilation;
     if (
       revision !== previewState.revision ||
       activeCompletionFocus !== focus ||
@@ -1912,15 +1911,13 @@ async function runCompletionPreview(
     if (revision === previewState.revision && activeCompletionFocus === focus) {
       restoreModelStatus();
     }
-  } finally {
-    stopProgress();
   }
 }
 
 function resumeModelAfterCompletion(): void {
   previewState.invalidate();
   compiler.cancel();
-  previewState.showStatus('busy', 'Updating model');
+  previewState.showStatus('busy');
   scheduleModelRun(180);
 }
 
@@ -1939,7 +1936,7 @@ function requestModelUpdate(delay: number): void {
   completionPreviewTimer = undefined;
   viewport.restoreTransientPreview();
   renderElementsPanel(viewport.getSelected());
-  previewState.showStatus('busy', 'Updating model');
+  previewState.showStatus('busy');
   previewState.invalidate();
   compiler.cancel();
   refreshViewportFeedback();
