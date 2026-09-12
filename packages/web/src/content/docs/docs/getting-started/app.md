@@ -206,6 +206,14 @@ Use **Alt+1** to open it and switch the evaluated argument set of a function
 with `@code3d.arguments`. The selector is hidden when the current context
 has no candidate argument sets.
 
+The viewport status names the work currently running: **Reading files**,
+**Resolving imports**, **Loading dependencies**, **Compiling code**, and
+**Building model**. Initial startup can also show **Loading compiler** or
+**Starting modeling engine**. Hover a stage for an explanation. Cached work can
+skip stages. While waiting for you to pause typing, no stage is shown.
+**Preparing preview** covers display meshes and topology after model execution;
+it appears only when that stage lasts longer than 200ms.
+
 Unavailable tools are hidden or disabled without a separate status banner.
 If a drag still fails when you release it, the preview is restored and a
 dismissible error appears above the scale legend. Cancelling with **Escape**

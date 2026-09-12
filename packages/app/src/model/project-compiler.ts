@@ -95,6 +95,7 @@ export class ProjectCompiler {
     ) => Promise<DependencyArtifact | undefined>,
   ): Promise<ProjectBuildArtifact> {
     checkCancelled();
+    onProgress?.('reading-files');
     const refresh = this.dependenciesRefreshRequested;
     const select = (
       path: string,
@@ -209,7 +210,7 @@ export class ProjectCompiler {
       languageProject,
       reader.packageSpecifiers,
       rootPath,
-      () => onProgress?.('preparing-project'),
+      () => onProgress?.('resolving-imports'),
     );
     checkCancelled();
     onLanguage?.(language);

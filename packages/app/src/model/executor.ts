@@ -1,3 +1,4 @@
+import type {CompilationProgress} from './compilation-progress';
 import type * as CoreTooling from '@code3d/core/tooling';
 import {
   isTopologyId,
@@ -866,7 +867,7 @@ export function createModelExecutor(
     runtimeModules: ReadonlyMap<string, ModuleExports>,
     importModule: (path: string) => Promise<ModuleExports>,
     assetUrl: (path: string) => string,
-    onEvaluate?: () => void,
+    onProgress?: CompilationProgress,
     captureGeometry?: (objects: readonly RelationObject[]) => void,
     checkCancelled: () => void = () => {},
     prepareSnapshots?: (objects: readonly RelationObject[]) => Promise<void>,
@@ -895,7 +896,7 @@ export function createModelExecutor(
       let modules = new Map<string, Record<string, unknown>>();
       let diagnostic: ModelDiagnostic | undefined;
       try {
-        onEvaluate?.();
+        onProgress?.('evaluating-model');
         checkCancelled();
         finishEvaluation = beginModelEvaluation(checkCancelled);
         const result = await evaluator.evaluate(artifact.source, {
@@ -943,6 +944,7 @@ export function createModelExecutor(
         diagnostic = relateDiagnostic(diagnostic, fallbackObject);
       }
 
+      onProgress?.('preparing-preview');
       const graphObjects = collectObjectGraph([
         ...tracedObjects,
         ...sketches.frames(),

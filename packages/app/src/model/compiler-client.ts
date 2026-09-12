@@ -142,6 +142,10 @@ export class ModelCompilerClient {
           reject,
           onProgress,
         };
+        if (this.prepareProject) {
+          this.progress(id, 'loading-runtime');
+          if (revision !== this.preparationRevision) return;
+        }
         const entry = JSON.stringify([rootPath, designContext]);
         if (persist && this.projectIdentity && entry !== this.lastEntry) {
           this.compiler.postMessage({

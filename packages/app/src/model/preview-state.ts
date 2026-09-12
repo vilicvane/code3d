@@ -1,3 +1,8 @@
+import {
+  compilationPhaseLabels,
+  compilationPhaseDescriptions,
+  type CompilationPhase,
+} from './compilation-progress.ts';
 import {action, computed, makeObservable, observableRef} from 'mobx';
 import type {ModelModule} from './compiler';
 import type {ModelDiagnostic} from './diagnostic';
@@ -18,14 +23,19 @@ export class ModelPreviewState {
   private changingSource = false;
   private activity: Readonly<{
     state: 'busy' | 'ready' | 'error';
-    label: string;
+    label?: string;
+    compilation?: {member?: string};
   }> = {state: 'busy', label: 'Loading editor'};
   file: string | undefined;
   status: 'ready' | 'error' = 'ready';
   diagnostic: ModelDiagnostic | undefined;
   warnings: readonly ModelDiagnostic[] = [];
   hasPreviewedTarget = false;
-  constructor() {
+  private readonly compilationPhase: () => CompilationPhase | undefined;
+  constructor(
+    compilationPhase: () => CompilationPhase | undefined = () => undefined,
+  ) {
+    this.compilationPhase = compilationPhase;
     makeObservable<
       this,
       | 'snapshot'
@@ -64,6 +74,7 @@ export class ModelPreviewState {
       observeTarget: action,
       editSource: action,
       showStatus: action,
+      beginCompilation: action,
     });
   }
 
@@ -76,7 +87,20 @@ export class ModelPreviewState {
   }
 
   get presentation() {
-    return this.activity;
+    const compilation = this.activity.compilation;
+    const phase = compilation ? this.compilationPhase() : undefined;
+    return {
+      state: this.activity.state,
+      label: phase
+        ? `${compilationPhaseLabels[phase]}${compilation?.member ? ` · ${compilation.member}` : ''}`
+        : this.activity.label,
+      description: phase ? compilationPhaseDescriptions[phase] : undefined,
+      delay: phase === 'preparing-preview' ? 200 : 0,
+    };
+  }
+
+  beginCompilation(member?: string): void {
+    this.activity = {state: 'busy', compilation: {member}};
   }
 
   get statusDiagnostic(): ModelDiagnostic | undefined {
@@ -95,7 +119,7 @@ export class ModelPreviewState {
     return this.empty && !this.busy;
   }
 
-  showStatus(state: 'busy' | 'ready' | 'error', label: string): void {
+  showStatus(state: 'busy' | 'ready' | 'error', label?: string): void {
     this.activity = {state, label};
   }
 

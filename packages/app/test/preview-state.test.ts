@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {reaction} from 'mobx';
+import {reaction, observable, runInAction} from 'mobx';
+import type {CompilationPhase} from '../src/model/compilation-progress.ts';
 import type {ModelModule} from '../src/model/compiler.ts';
 import {ModelPreviewState} from '../src/model/preview-state.ts';
 
@@ -143,4 +144,35 @@ test('an evaluated tool failure remains editable and source transactions suspend
     /Edit failed/,
   );
   assert.equal(state.sourceVersion, 1);
+});
+
+test('pending input stays busy without a visible label; compilation derives current phases', () => {
+  const phase = observable.box<CompilationPhase | undefined>(undefined);
+  const state = new ModelPreviewState(() => phase.get());
+  state.showStatus('busy');
+  assert.equal(state.busy, true);
+  assert.equal(state.presentation.label, undefined);
+  assert.equal(state.showHint, false);
+  const labels: (string | undefined)[] = [];
+  const stop = reaction(
+    () => state.presentation.label,
+    label => labels.push(label),
+  );
+  state.beginCompilation();
+  runInAction(() => phase.set('reading-files'));
+  assert.equal(state.presentation.label, 'Reading files');
+  runInAction(() => phase.set('preparing-preview'));
+  assert.equal(state.presentation.label, 'Preparing preview');
+  assert.equal(state.presentation.delay, 200);
+  state.showStatus('ready', 'Ready');
+  runInAction(() => phase.set('resolving-imports'));
+  assert.equal(state.presentation.label, 'Ready');
+  assert.equal(state.presentation.delay, 0);
+  state.beginCompilation('center');
+  assert.equal(state.presentation.label, 'Resolving imports · center');
+  state.showStatus('busy');
+  runInAction(() => phase.set('preparing-preview'));
+  assert.equal(state.presentation.label, undefined);
+  stop();
+  assert.ok(labels.includes('Preparing preview'));
 });

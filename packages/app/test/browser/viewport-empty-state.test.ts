@@ -36,7 +36,7 @@ async function open(
   const page = await context.newPage();
   page.setDefaultTimeout(15_000);
   const errors: string[] = [];
-  page.on('pageerror', error => errors.push(error.message));
+  page.on('pageerror', error => errors.push(error.stack ?? error.message));
   t.after(() => assert.deepEqual(errors, []));
   await page.route('**/src/project/default-project.ts*', route =>
     route.fulfill({
@@ -915,7 +915,75 @@ test('Model error without a source shows details but has no navigation target', 
     '/model.ts',
   );
   await page.evaluate(() =>
-    window.emptyViewportApp.previewState.showStatus('busy', 'Updating model'),
+    window.emptyViewportApp.previewState.showStatus('busy'),
   );
   assert.equal(await status.getAttribute('title'), null);
+});
+
+test('pending edits hide status and delayed preview phases cannot outlive their run', async t => {
+  const page = await open(
+    t,
+    "import {box} from '@code3d/core'; export default box(10, 10, 10);",
+  );
+  const warnings: string[] = [];
+  page.on('console', message => {
+    if (message.text().includes('[MobX]')) warnings.push(message.text());
+  });
+  const status = page.locator('#viewport-status');
+  await page.evaluate(() => {
+    const {codeEditor} = window.emptyViewportApp;
+    codeEditor.editor.focus();
+    codeEditor.editor.setPosition(
+      codeEditor.editor.getModel()!.getPositionAt(0),
+    );
+  });
+  await page.keyboard.type(' ');
+  assert.equal(await status.isVisible(), false);
+  assert.equal(
+    await page.evaluate(() => window.emptyViewportApp.previewState.busy),
+    true,
+  );
+  await page.waitForTimeout(100);
+  assert.equal(await status.isVisible(), false);
+  // Cancel the scheduled edit before driving real observable phase transitions.
+  await page.evaluate(() => window.emptyViewportApp.runModel());
+  await status.waitFor({state: 'visible'});
+  const phase = async (
+    value: import('../../src/model/compilation-progress.ts').CompilationPhase,
+  ) =>
+    page.evaluate(async value => {
+      const mobxUrl = '/node_modules/.vite/deps/mobx.js';
+      const {runInAction}: typeof import('mobx') = await import(mobxUrl);
+      runInAction(() => {
+        window.emptyViewportApp.compiler.phase = value;
+        window.emptyViewportApp.previewState.beginCompilation();
+      });
+    }, value);
+  await phase('reading-files');
+  assert.match(await status.innerText(), /Reading files/);
+  assert.match((await status.getAttribute('title'))!, /source files/);
+  await phase('preparing-preview');
+  assert.equal(await status.isVisible(), false);
+  await page.waitForTimeout(100);
+  assert.equal(await status.isVisible(), false);
+  await page.waitForTimeout(125);
+  assert.equal(await status.isVisible(), true);
+  assert.match(await status.innerText(), /Preparing preview/);
+  await page.screenshot({path: '/tmp/code3d-preparing-preview.png'});
+  await phase('reading-files');
+  await phase('preparing-preview');
+  await page.waitForTimeout(100);
+  await page.evaluate(() =>
+    window.emptyViewportApp.previewState.showStatus('ready', 'Ready'),
+  );
+  await page.waitForTimeout(300);
+  assert.match(await status.innerText(), /Ready/);
+  assert.equal(await status.getAttribute('title'), null);
+  await phase('preparing-preview');
+  await page.evaluate(() =>
+    window.emptyViewportApp.previewState.showStatus('busy'),
+  );
+  await page.waitForTimeout(300);
+  assert.equal(await status.isVisible(), false);
+  assert.deepEqual(warnings, []);
 });

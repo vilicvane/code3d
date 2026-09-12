@@ -122,11 +122,13 @@ async function fixture(t: TestContext) {
 }
 
 const runtimePhases = [
-  'preparing-project',
+  'reading-files',
+  'resolving-imports',
   'loading-runtime',
   'compiling-model',
   'initializing-runtime',
   'evaluating-model',
+  'preparing-preview',
 ];
 
 test('project preparation can exceed two minutes and still compile normally', async t => {
@@ -163,9 +165,10 @@ test('project preparation can exceed two minutes and still compile normally', as
   assert.deepEqual(
     await page.evaluate(() => ({
       pending: client.isCompiling(),
+      phase: client.phase,
       settled: window.delayedOperation.settled,
     })),
-    {pending: true, settled: false},
+    {pending: true, phase: 'loading-runtime', settled: false},
   );
   assert.equal(
     await page.evaluate(async () => {
@@ -372,7 +375,12 @@ test(
       }
     });
     assert.deepEqual(result.cold, ['loading-compiler', ...runtimePhases]);
-    assert.deepEqual(result.warm, ['compiling-model', 'evaluating-model']);
+    assert.deepEqual(result.warm, [
+      'reading-files',
+      'compiling-model',
+      'evaluating-model',
+      'preparing-preview',
+    ]);
     assert.equal(result.readsAfterFirst, 3);
     assert.equal(new Set(result.wasmReads.map(read => read.path)).size, 3);
     assert.equal(result.wasmReads.length, result.readsAfterFirst);
@@ -420,11 +428,18 @@ test(
       }
     });
     assert.deepEqual(result.added, [
-      'preparing-project',
+      'reading-files',
+      'resolving-imports',
       'compiling-model',
       'evaluating-model',
+      'preparing-preview',
     ]);
-    assert.deepEqual(result.edited, ['compiling-model', 'evaluating-model']);
+    assert.deepEqual(result.edited, [
+      'reading-files',
+      'compiling-model',
+      'evaluating-model',
+      'preparing-preview',
+    ]);
     assert.ok(
       result.newReads.some(
         path => path.includes('/@code3d/screws/') && path.endsWith('.d.ts'),
@@ -509,7 +524,12 @@ for (const pause of ['kernel-loop', 'await'] as const) {
       assert.equal(result.diagnostic, undefined);
       assert.equal(result.exportable, true);
       assert.equal(result.workers, 1);
-      assert.deepEqual(result.phases, ['compiling-model', 'evaluating-model']);
+      assert.deepEqual(result.phases, [
+        'reading-files',
+        'compiling-model',
+        'evaluating-model',
+        'preparing-preview',
+      ]);
       assert.equal(
         result.events.filter(event => event.kind === 'cancelled').length,
         1,
@@ -564,14 +584,17 @@ test(
     assert.match(result.error!, /superseded/);
     assert.deepEqual(result.cancelled, [
       'loading-compiler',
-      'preparing-project',
+      'reading-files',
+      'resolving-imports',
       'loading-runtime',
     ]);
     assert.deepEqual(result.next, [
+      'reading-files',
       'loading-runtime',
       'compiling-model',
       'initializing-runtime',
       'evaluating-model',
+      'preparing-preview',
     ]);
     assert.equal(result.workers, 1);
     assert.equal(result.diagnostic, undefined);
@@ -621,10 +644,14 @@ test(
     assert.match(result.error!, /Simulated WASM download failure/);
     assert.deepEqual(result.failed, [
       'loading-compiler',
-      'preparing-project',
+      'reading-files',
+      'resolving-imports',
       'loading-runtime',
     ]);
-    assert.deepEqual(result.retried, runtimePhases.slice(1));
+    assert.deepEqual(result.retried, [
+      'reading-files',
+      ...runtimePhases.slice(2),
+    ]);
     assert.equal(result.diagnostic, undefined);
   },
 );
@@ -713,10 +740,12 @@ test(
     assert.equal(result.stillRunning, true);
     assert.match(result.error, /Compilation superseded/);
     assert.deepEqual(result.recovered, [
-      'preparing-project',
+      'reading-files',
+      'resolving-imports',
       'compiling-model',
       'initializing-runtime',
       'evaluating-model',
+      'preparing-preview',
     ]);
     assert.equal(result.compilerWorkers, 1);
     assert.equal(result.executorWorkers, 2);

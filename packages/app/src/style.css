@@ -2482,6 +2482,10 @@ kbd {
   display: none;
 }
 
+.viewport-status[hidden] {
+  display: none;
+}
+
 .viewport-status {
   display: flex;
   align-items: center;
@@ -2498,6 +2502,10 @@ kbd {
   font-family: 'IBM Plex Mono', monospace;
   font-size: 10px;
   letter-spacing: 0.02em;
+}
+
+.viewport-status[title] {
+  pointer-events: auto;
 }
 
 .viewport-status[data-state='busy'] {
