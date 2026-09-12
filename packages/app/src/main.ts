@@ -82,6 +82,7 @@ import {
   rememberProjectDirectory,
   requestProjectDirectoryPermission,
   storedProjectDirectory,
+  observeProjectDirectory,
   supportsProjectDirectories,
 } from './project/directory-access';
 import {
@@ -538,7 +539,7 @@ codeEditor.onAgentLocations(locations =>
 );
 agentProject.onEntriesChange(reason => {
   void projectDirectory.refresh();
-  if (reason === 'operation') requestModelUpdate(0);
+  if (reason !== 'save') requestModelUpdate(0);
 });
 const agentConnections = new AgentConnections(
   codeEditor,
@@ -1081,10 +1082,114 @@ newFolderButton.addEventListener(
   'click',
   () => void projectDirectory.create('directory'),
 );
+let externalRefresh: Promise<void> | undefined;
+let externalRefreshStopped = false;
+let externalRefreshAll = false;
+let externalRefreshForce = false;
+const externalChangedPaths = new Set<string>();
+let externalRefreshTimer: number | undefined;
+let stopDirectoryObservation: (() => void) | undefined;
+let externalPolling = false;
+function refreshExternalProjectFiles(
+  paths?: readonly string[],
+  force = false,
+): Promise<void> {
+  if (externalRefreshStopped) return Promise.resolve();
+  externalRefreshForce ||= force;
+  if (paths) for (const path of paths) externalChangedPaths.add(path);
+  else externalRefreshAll = true;
+  return (externalRefresh ??= (async () => {
+    while (
+      !externalRefreshStopped &&
+      (externalRefreshAll || externalChangedPaths.size)
+    ) {
+      const changed = externalRefreshAll
+        ? undefined
+        : [...externalChangedPaths];
+      const forceRead = externalRefreshForce;
+      externalRefreshForce = false;
+      externalRefreshAll = false;
+      externalChangedPaths.clear();
+      await agentProject.refreshExternalFiles(
+        codeEditor.workspaceProject(),
+        () => externalRefreshStopped,
+        changed,
+        forceRead,
+      );
+    }
+  })().finally(() => {
+    externalRefresh = undefined;
+  }));
+}
+function checkExternalProjectFiles(): void {
+  if (!directoryConnected || document.hidden || externalRefreshStopped) return;
+  void refreshExternalProjectFiles().catch(showProjectIssue);
+}
+function startExternalPolling(): void {
+  if (externalRefreshStopped || externalPolling) return;
+  externalPolling = true;
+  const poll = async () => {
+    if (externalRefreshStopped) return;
+    const start = performance.now();
+    try {
+      if (!document.hidden) await refreshExternalProjectFiles();
+    } catch (error) {
+      showProjectIssue(error);
+    } finally {
+      if (!externalRefreshStopped)
+        externalRefreshTimer = window.setTimeout(
+          poll,
+          Math.max(5000, (performance.now() - start) * 50),
+        );
+    }
+  };
+  void poll();
+}
+if (directoryConnected) {
+  void observeProjectDirectory(
+    storedDirectoryHandle,
+    paths => {
+      if (document.hidden) {
+        // Preserve invalidation even when an editor retained the timestamp and size.
+        externalRefreshAll = true;
+        externalRefreshForce = true;
+        return;
+      }
+      void refreshExternalProjectFiles(paths, paths === undefined).catch(
+        showProjectIssue,
+      );
+    },
+    startExternalPolling,
+  ).then(stop => {
+    if (externalRefreshStopped) {
+      stop?.();
+      return;
+    }
+    stopDirectoryObservation = stop;
+    if (!stop) startExternalPolling();
+  });
+}
+window.addEventListener('focus', checkExternalProjectFiles);
+document.addEventListener('visibilitychange', checkExternalProjectFiles);
+window.addEventListener(
+  'pagehide',
+  () => {
+    externalRefreshStopped = true;
+    window.clearTimeout(externalRefreshTimer);
+    stopDirectoryObservation?.();
+    externalChangedPaths.clear();
+    window.removeEventListener('focus', checkExternalProjectFiles);
+    document.removeEventListener('visibilitychange', checkExternalProjectFiles);
+  },
+  {once: true},
+);
 refreshFilesButton.addEventListener('click', () => {
-  compiler.refreshDependencies();
-  void projectDirectory.refresh();
-  void runModel();
+  void (async () => {
+    await refreshExternalProjectFiles(undefined, true);
+    compiler.refreshProject();
+    await projectDirectory.refresh();
+    await runModel();
+  })().catch(showProjectIssue);
 });
 openFolderButton.addEventListener('click', () => {
   void openProjectDirectory();

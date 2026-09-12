@@ -232,8 +232,8 @@ workerScope.onmessage = ({data}: MessageEvent<CompilerRequest>) => {
     void compile(data);
   } else if (data.kind === 'cancel-compile' && activeRequest === data.id) {
     void compiler.cancel();
-  } else if (data.kind === 'refresh-dependencies') {
-    compiler.refreshDependencies();
+  } else if (data.kind === 'refresh-project') {
+    compiler.refreshProject();
   } else if (data.kind === 'clear-build-cache') {
     // The client starts this command in a fresh compiler Worker. Any new source
     // or restore request waits until the old project's disk records are gone.

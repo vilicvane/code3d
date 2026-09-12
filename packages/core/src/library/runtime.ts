@@ -3314,17 +3314,17 @@ export class ModelObject<
     return this.copy(init, this.operation);
   }
 
-  /** Fix the assembly frame once, using only its direct member origins. */
+  /** Fix the assembly frame once in the first member's solved local coordinates. */
   private static createAssembly(
     children: readonly ModelObject[],
   ): SolveContext {
     const context = ModelObject.createSolveContext(children);
-    const center = children.length
-      ? boundsCenter(
-          pointBounds(children.map(child => child.solvePose(context).position)),
+    return children.length
+      ? transformSolveContext(
+          context,
+          invertTransform(children[0].solvePose(context)),
         )
-      : origin;
-    return transformSolveContext(context, translation(negateVector(center)));
+      : context;
   }
 
   private requireGeometry(): ModelGeometry {
@@ -3999,6 +3999,7 @@ function normalizeReplicadSolid(shape: Shape3D): Shape3D {
   return solid;
 }
 
+/** Compose members in the first member's local frame; empty groups use the default frame. */
 export function group(children: readonly Model[], name = 'Group'): GroupModel {
   const runtimeChildren = children.map(child =>
     requireModelObject(child, 'Every group child must be a model.'),
@@ -4534,7 +4535,11 @@ const kernelShape = cachedArtifact(
     _inputs: readonly KernelArtifact<unknown>[],
     compute: () => AnyShape,
   ) => compute(),
-  {key: kernelOperationKey, lifecycle: shapeLifecycle},
+  {
+    key: (operation, arguments_, inputs) =>
+      kernelOperationKey(`kernel-shape:${operation}`, arguments_, inputs),
+    lifecycle: shapeLifecycle,
+  },
 );
 
 function evaluateKernelShape<Shape extends AnyShape>(
@@ -4568,7 +4573,11 @@ const evaluateModelGeometry = cachedArtifact(
       referenceBasis: result.referenceBasis,
     };
   },
-  {key: kernelOperationKey, lifecycle: modelGeometryLifecycle},
+  {
+    key: (operation, arguments_, inputs) =>
+      kernelOperationKey(`model-geometry:${operation}`, arguments_, inputs),
+    lifecycle: modelGeometryLifecycle,
+  },
 );
 
 function createModelGeometryValue(

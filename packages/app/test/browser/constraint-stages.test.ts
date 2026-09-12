@@ -92,7 +92,7 @@ test(
           .around(base.axis).rotate(30).offset(7, 0, 0));
         export default group([base, part]);`;
         const module = await compile(source);
-        // group() recenters its origin; compare in the original base's frame.
+        // Compare in the base's frame, independently of the composition reference member.
         const [base, part] = module.fallback!.children;
         const finalPose = {
           base: base.compositionTransform,

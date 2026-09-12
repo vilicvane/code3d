@@ -171,9 +171,18 @@ requests run in parallel. The App restores the file in the URL, or opens a root
 select a file from the explorer. Unopened directories are listed when expanded,
 and filename search discovers additional directory names on demand.
 
-Edits in the App write directly to that directory. If you change a file in
-another editor, choose **Reload folder** to read the changes. Automatic
-external-file watching is not currently available.
+Edits in the App write directly to that directory. When available, browser file
+change events synchronize opened files and source dependencies. Otherwise, the
+App checks modification times and sizes while the page is visible. Checks run
+at least 5 seconds apart, waiting 50 times the scan duration when that is longer,
+and immediately when you return to the page. Changed source files update the
+editor and rebuild the model; deleted files close their tabs. Unsaved edits are
+kept. **Refresh files and dependencies** forces those source files to be reread
+even if their timestamps and sizes are unchanged. It also discards cached file
+reads and rebuilds from the current entry, rereading the source, configuration,
+dependencies, and local resources required by that entry, as when reopening
+the page. It refreshes the directory listing too. Unused files load when needed; refresh does not read
+the entire directory into memory. **Reload folder** reloads the workspace.
 
 Each connected directory gets its own workspace URL. Click the storage location
 in the explorer header to access **Reload folder**, **Reconnect folder** when the

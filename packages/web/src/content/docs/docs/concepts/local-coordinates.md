@@ -28,6 +28,40 @@ Curve control points use the returned model's local coordinates too. A common
 offset in their coordinates is retained; the curve does not automatically move
 its start or center to zero.
 
+## Default origin rules
+
+Constructors define a local coordinate frame. Derived operations inherit their
+main input's frame; they do not automatically recenter the resulting geometry.
+Only an explicit origin operation chooses a different local zero.
+
+| Constructor or operation                          | Origin and coordinate frame                                                                                                                |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `box`, `sphere`, `circle`, `ellipse`, `rectangle` | Geometry is constructed around local zero.                                                                                                 |
+| `cylinder`, `tube`, `frustum`, `regularPrism`     | The central axis passes through zero; height is centered on Y. This is not a center-of-mass rule.                                          |
+| `regularPolygon`                                  | The polygon's construction-circle center, which need not equal its bounding-box center.                                                    |
+| `coil`                                            | The helix axis passes through zero; the centerline's axial span is centered on Y.                                                          |
+| `point`, `line`, `arc`, `bezier`, `spline`        | Retain the supplied coordinates relative to zero; neither endpoints nor curve centers are automatically moved to zero.                     |
+| Faces made from a sketch                          | Retain the sketch's local frame.                                                                                                           |
+| `text`                                            | All returned faces share the text layout's baseline origin, including its glyph advances and offsets. Individual letters are not centered. |
+| `definePrimitive`                                 | Retain the frame used by the returned geometry; no automatic recentering.                                                                  |
+| `extrude`                                         | Inherit the input face's frame, without centering the extrusion.                                                                           |
+| `union`, `intersect`                              | Inherit the first operand's frame.                                                                                                         |
+| `cut`                                             | Inherit the stock's frame.                                                                                                                 |
+| `loft`                                            | Inherit the first section's frame.                                                                                                         |
+| `group`                                           | Inherit the first member's frame after solving placement; an empty group uses the default frame.                                           |
+| `rotate`, `scaled`, `fillet`, `chamfer`, `shell`  | Retain the input model's frame, even when its geometric bounds change.                                                                     |
+| `relate`, `material`, `expose`                    | Retain the model's local frame; relations describe its placement within a composition.                                                     |
+
+For example, `point([10, 0, 0])` has geometry at X = 10 and an origin at zero.
+Similarly, `rectangle(10, 10).extrude(20)` keeps its origin on the starting
+plane, while `box(10, 20, 10)` is centered on its origin.
+
+Explicit choices are `originOffset(dx, dy, dz)` for a displacement,
+`originPoint(pointRef)` for a referenced point, `originVertex(id)` for an own
+topology vertex, and `originCenter()` for the existing center anchor. The last
+two require geometry and are not available on groups. A carried center anchor
+is not necessarily the center of the current axis-aligned bounding box.
+
 ## Changing the origin changes point coordinates
 
 `originOffset(dx, dy, dz)` chooses a new origin at that displacement in the
@@ -87,7 +121,7 @@ New model values also have a coordinate frame:
 
 - A boolean result uses the main operand's local coordinates.
 - A loft uses its first section's local coordinates.
-- A group retains the placement of the parts in the resulting composition.
+- A group uses its first member's local coordinates, retaining relative placement.
 - `expose()` brings a reference into the outer model's local space. For a
   repeated part, use the reference from its specific instance.
 
@@ -97,11 +131,14 @@ scale and up axis are applied afterward. See [exporting models](../../guides/exp
 
 ## Group origins
 
-A group first solves the placement of its direct members, then chooses the
-bounding-box center of their origins as its local zero. The axes stay aligned
-with the assembly reference axes. This uses member origins, not geometry bounds
-or an average of points. Nested groups contribute just their own origin; an
-empty group starts at zero.
+A group first solves the placement of its direct members, then expresses all
+members in the **first member's local coordinate frame**, including its origin
+and axes. This is the same reference rule used by `union`, `intersect`, and
+`loft`; `cut` uses the stock's frame. Reordering members can change the group's
+frame, while preserving their relative placement. A nested group is one member,
+with its own existing frame. An empty group uses the default origin and axes.
+A relation's rotation affects that solved member frame; rotating the member's
+geometry directly with `.rotate()` does not redefine its local axes.
 
 ```ts
 import {box, group} from '@code3d/core';
@@ -118,8 +155,10 @@ the assembled coordinates; `originOffset()` can then shift it further. Both
 operations re-express the whole group, preserving member spacing and internal
 relations. The default is chosen once and does not overwrite explicit edits.
 
-Changing a member's origin before constructing a new group may change its
-default, even if constraints keep the member's physical geometry in place.
+Changing the first member's origin before constructing a new group changes the
+reference frame, even if constraints keep its physical geometry in place.
+Changing a later member's origin does not select a different reference member;
+its placement still follows the assembly constraints.
 Within an existing model, origin edits also update its own stored relation
 references, so a constraint on a selected geometric point still follows that
 same point.

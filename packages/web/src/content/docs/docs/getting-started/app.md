@@ -87,9 +87,10 @@ updates its open tabs and agent locations, but does not rewrite import paths.
 If an operation fails, the explorer shows the error and reloads the actual
 directory state. A batch may have completed some entries before a storage
 failure. Unsaved text must be saved successfully before moving or deleting
-entries. Use **Refresh files** to reread directory names after external changes;
-open documents keep their current text. Unsaved new files remain visible in the
-tree. **Reload folder** also reloads file contents after saving pending edits.
+entries. Local folders automatically check opened files and source dependencies
+for external changes while the page is visible and when you return to it.
+**Refresh files** also rereads file contents and directory names. Unsaved text
+is preserved. **Reload folder** reloads the workspace after saving pending edits.
 
 Deleting every file leaves an empty project. You can create a new file there;
 refreshing does not restore files you deleted. Closing every tab also leaves

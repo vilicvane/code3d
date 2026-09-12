@@ -6,6 +6,7 @@ import {
   composeTransforms,
   modelElementReference,
   rotateVector,
+  relativeTransform,
 } from '../bld/tooling/index.js';
 import {defined} from '../../../test/assert.ts';
 import {createModelSnapshotter} from './model-test.ts';
@@ -72,31 +73,62 @@ test('direct assembly retains the common origin even with unequal geometry bound
     near(child.transform.position, [0, 0, 0]);
 });
 
-test('default group origin is the bounds center of solved direct origins, not their mean', () => {
+test('group inherits its first member frame independently of geometry bounds and later origins', () => {
   const a = point([100, 0, 0]);
   const b = point().relate(self => self.align(point([2, 4, -8])));
   const c = point().relate(self => self.align(point([20, -6, 2])));
   const assembly = group([a, b, c]).expose({a, b, c});
   const children = snapshot(assembly).children;
-  near(children[0].transform.position, [-10, 1, 3]);
-  near(children[1].transform.position, [-8, 5, -5]);
-  near(children[2].transform.position, [10, -5, 5]);
-  near(position(assembly.a), [90, 1, 3]);
-  near(position(assembly.b), [-8, 5, -5]);
-  near(position(assembly.c), [10, -5, 5]);
-  near(children[1].transform.quaternion, [0, 0, 0, 1]);
+  near(children[0].transform.position, [0, 0, 0]);
+  near(children[1].transform.position, [2, 4, -8]);
+  near(children[2].transform.position, [20, -6, 2]);
+  near(position(assembly.a), [100, 0, 0]);
+  near(position(assembly.b), [2, 4, -8]);
+  near(position(assembly.c), [20, -6, 2]);
 });
 
-test('changing a member origin changes a newly constructed group default', () => {
+test('only the chosen reference member defines the new group frame after an origin edit', () => {
   const target = point([20, 0, 0]);
   const original = box(2, 2, 2).relate(self => self.center.align(target));
   const changed = original.originOffset(5, 0, 0);
   const before = snapshot(group([target, original]));
   const after = snapshot(group([target, changed]));
-  near(before.children[0].transform.position, [-10, 0, 0]);
-  near(after.children[0].transform.position, [-12.5, 0, 0]);
-  near(before.children[1].transform.position, [10, 0, 0]);
-  near(after.children[1].transform.position, [12.5, 0, 0]);
+  near(before.children[0].transform.position, [0, 0, 0]);
+  near(after.children[0].transform.position, [0, 0, 0]);
+  near(before.children[1].transform.position, [20, 0, 0]);
+  near(after.children[1].transform.position, [25, 0, 0]);
+  near(
+    snapshot(group([original, target])).children[1].transform.position,
+    [-20, 0, 0],
+  );
+  near(
+    snapshot(group([changed, target])).children[1].transform.position,
+    [-25, 0, 0],
+  );
+});
+
+test('first-member orientation and translation define the full frame and ordering preserves relative poses', () => {
+  const first = box(8, 6, 4).relate(self =>
+    self.center.align(point([20, 4, 6])).rotate(10, 20, 30),
+  );
+  const second = box(2, 4, 6).relate(self =>
+    self.center.align(point([-5, 8, 12])).rotate(-15, 25, 5),
+  );
+  const firstPose = snapshot(first).compositionTransform;
+  const secondPose = snapshot(second).compositionTransform;
+  for (const [members, expected] of [
+    [[first, second], relativeTransform(secondPose, firstPose)],
+    [[second, first], relativeTransform(firstPose, secondPose)],
+  ] as const) {
+    const assembly = snapshot(group(members));
+    near(assembly.children[0].transform.position, [0, 0, 0]);
+    near(assembly.children[0].transform.quaternion, [0, 0, 0, 1]);
+    near(assembly.children[1].transform.position, expected.position);
+    near(assembly.children[1].transform.quaternion, expected.quaternion);
+  }
+  const single = group([first]).expose({first});
+  near(position(single.first.vertex(3)), position(first.vertex(3)));
+  near(snapshot(first).compositionTransform.position, firstPose.position);
 });
 
 test('group rebasing preserves solved internal relations, anchors, bounds and earlier values', () => {
@@ -106,14 +138,14 @@ test('group rebasing preserves solved internal relations, anchors, bounds and ea
   const moved = assembly.originOffset(3, 5, 7);
   const before = snapshot(assembly),
     after = snapshot(moved);
-  near(before.children[0].transform.position, [0, -3, 0]);
-  near(before.children[1].transform.position, [0, 3, 0]);
-  near(after.children[0].transform.position, [-3, -8, -7]);
-  near(after.children[1].transform.position, [-3, -2, -7]);
+  near(before.children[0].transform.position, [0, 0, 0]);
+  near(before.children[1].transform.position, [0, 6, 0]);
+  near(after.children[0].transform.position, [-3, -5, -7]);
+  near(after.children[1].transform.position, [-3, 1, -7]);
   near(position(moved.base.up), position(moved.cap.down));
-  near(position(moved.up), [-3, -1, -7]);
-  near(position(moved.down), [-3, -13, -7]);
-  near(position(assembly.up), [0, 4, 0]);
+  near(position(moved.up), [-3, 2, -7]);
+  near(position(moved.down), [-3, -10, -7]);
+  near(position(assembly.up), [0, 7, 0]);
   const exposedLater = moved.expose({capAgain: cap});
   near(position(exposedLater.capAgain.center), position(moved.cap.center));
   const restored = moved.originOffset(-3, -5, -7).material('#abcdef');
@@ -165,11 +197,11 @@ test('nested groups contribute their own origin once and rebase as a rigid assem
   const inner = group([point(), body]).expose({body}).originOffset(4, 0, 0);
   const outer = group([inner, point()]).expose({inner});
   near(snapshot(outer).children[0].transform.position, [0, 0, 0]);
-  near(position(outer.inner.body.center), [11, 0, 0]);
+  near(position(outer.inner.body.center), [26, 0, 0]);
   const moved = outer.originPoint(body.center);
   near(position(moved.inner.body.center), [0, 0, 0]);
-  near(snapshot(moved).children[0].transform.position, [-11, 0, 0]);
-  near(snapshot(moved).children[0].children[1].transform.position, [11, 0, 0]);
+  near(snapshot(moved).children[0].transform.position, [-26, 0, 0]);
+  near(snapshot(moved).children[0].children[1].transform.position, [26, 0, 0]);
 });
 
 test('ambiguous repeated members require a concrete occurrence reference', () => {
@@ -188,7 +220,7 @@ test('ambiguous repeated members require a concrete occurrence reference', () =>
   const selected = assembly.originPoint(right.body.center);
   near(position(selected.rightPart.body.center), [0, 0, 0]);
   near(position(selected.leftPart.body.center), [-40, 0, 0]);
-  near(position(assembly.leftPart.body.center), [-20, 0, 0]);
+  near(position(assembly.leftPart.body.center), [0, 0, 0]);
 });
 
 test('group origin edits carry its existing self relation references without moving its constrained geometry', () => {
@@ -266,7 +298,7 @@ test('group rotation carries solved members, references and bounds around the se
   const placed = box(2, 2, 2).relate(self => self.on(rotated.right));
   near(
     snapshot(group([rotated, placed])).children[1].transform.position,
-    [6, 0, 0],
+    [12, 0, 0],
   );
   near(
     position(rotated.rotate(0, 0, -90).base.center),

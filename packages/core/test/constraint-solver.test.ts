@@ -258,8 +258,8 @@ test('group bounds include solved child placements and stay rigid in a parent co
   const target = point([20, 30, 40]);
   const moved = inner.relate(self => self.on(target.up).offset(0, 0, 0));
   const outer = snapshot(group([target, moved]));
-  near(outer.children[1].transform.position, [10, 19, 20]);
-  near(outer.children[1].children[1].transform.position, [0, 3, 0]);
+  near(outer.children[1].transform.position, [20, 35, 40]);
+  near(outer.children[1].children[1].transform.position, [0, 6, 0]);
   const exposed = moved.expose({mount: cap.up});
   near(
     position(box(2, 2, 2).relate(self => self.on(exposed.mount))),

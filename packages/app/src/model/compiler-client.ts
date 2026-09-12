@@ -108,7 +108,7 @@ export class ModelCompilerClient {
       restored: observableRef,
       cancel: action,
       dispose: action,
-      refreshDependencies: action,
+      refreshProject: action,
       clearBuildCache: action,
       export: action,
       previewSketchDrag: action,
@@ -184,9 +184,9 @@ export class ModelCompilerClient {
     return this.pending?.kind === 'compile';
   }
 
-  refreshDependencies(): void {
+  refreshProject(): void {
     this.cancel();
-    this.compiler.postMessage({kind: 'refresh-dependencies'});
+    this.compiler.postMessage({kind: 'refresh-project'});
   }
 
   clearBuildCache(): Promise<void> {

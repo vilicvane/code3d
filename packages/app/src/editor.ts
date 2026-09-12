@@ -673,6 +673,18 @@ export class CodeEditor {
     };
   }
 
+  /** Source snapshots reached by compilation, including unopened dependencies. */
+  workspaceProject(): ModelProject {
+    const files = new Map(this.navigationFiles);
+    for (const {path, model} of this.documents.values())
+      files.set(path, model.getValue());
+    return {
+      files: [...files]
+        .filter(([path]) => !isReadonlyProjectFile(path))
+        .map(([path, source]) => ({path, source})),
+    };
+  }
+
   currentFile(): string | undefined {
     return this.activePath;
   }
