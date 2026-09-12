@@ -2814,6 +2814,221 @@ for (const [name, body] of [
     },
   );
 
+for (const [name, expression, method, reference, rotationAxis] of [
+  [
+    'offset',
+    'core.box(24,16,14).relate(self=>[self.on(base.up),core.offset(0.35,0,0)])',
+    'offset',
+    false,
+    undefined,
+  ],
+  [
+    'origin',
+    'core.box(24,16,14).originOffset(0.35,0,0)',
+    'originOffset',
+    false,
+    undefined,
+  ],
+  [
+    'pivot',
+    'core.box(24,16,14).relate(self=>[self.on(base.up),core.pivot([0.35,3,4]).rotate(10,20,30)])',
+    'pivot',
+    true,
+    undefined,
+  ],
+  [
+    'axis offset',
+    'core.box(24,16,14).relate(self=>[self.on(base.up),core.aroundLine(base.axis).axisOffset(0.35,3,4).rotate(35)])',
+    'axisOffset',
+    true,
+    undefined,
+  ],
+  [
+    'point rotation',
+    'core.box(24,16,14).relate(self=>[self.on(base.up),core.pivot([2,3,4]).rotate(7,20,30)])',
+    'rotate',
+    false,
+    0,
+  ],
+  [
+    'axis rotation',
+    'core.box(24,16,14).relate(self=>[self.on(base.up),core.aroundLine(base.axis).rotate(7)])',
+    'rotate',
+    false,
+    1,
+  ],
+] as const)
+  test(
+    `Shift gizmo ${name} snaps, switches mid-drag, commits and cancels`,
+    {timeout: 90_000},
+    async t => {
+      const {page, errors} = await openApp(t);
+      const source = `import * as core from '@code3d/core'; const base=core.box(40,8,30); const part=${expression}; core.group([base,part]);`;
+      await setSource(page, source, method);
+      await cameraIdle(page);
+      if (reference) await page.keyboard.down('Alt');
+      const matrix = () =>
+        page.evaluate(() => {
+          const object = window.coordinateApp.viewport.getSelected()!.object;
+          object.updateWorldMatrix(true, false);
+          return object.matrixWorld.toArray();
+        });
+      const dragState = () =>
+        page.evaluate(() => {
+          const viewport = window.coordinateApp.viewport;
+          const active = viewport['transformGizmo']['active']!;
+          return {
+            delta: active.delta,
+            start: active.binding.value,
+            value: active.value,
+            sensitivity: active.binding.sensitivity,
+            grid: active.gridStep,
+            label: active.binding.label,
+            mode: active.binding.mode,
+            preview: viewport.dragPreview!.values[0].value,
+          };
+        });
+      const grid = await page.evaluate(
+        () => window.coordinateApp.viewport.gridStep,
+      );
+      assert.ok(grid);
+      assert.match(
+        (await page.locator('.viewport-grid-scale').getAttribute('title')) ??
+          '',
+        /5 cells per major interval/,
+      );
+      const handle =
+        rotationAxis === undefined
+          ? await xHandle(page)
+          : await rotationHandle(page, rotationAxis);
+      const before = await matrix();
+      await page.mouse.move(handle.x, handle.y);
+      await page.mouse.down();
+      await page.mouse.move(
+        handle.x + handle.dx * 70,
+        handle.y + handle.dy * 70,
+        {steps: 6},
+      );
+      const fine = await dragState();
+      assert.ok(Math.abs(fine.delta) > 0);
+      assert.equal(fine.preview, fine.value);
+      const coarseStep = rotationAxis === undefined ? grid * 5 : 15;
+      let coarse = fine;
+      for (let i = 0; i < 2; i++) {
+        await page.keyboard.down('Shift');
+        coarse = await dragState();
+        assert.equal(
+          coarse.delta,
+          fine.delta,
+          'Changing snap does not alter raw drag distance',
+        );
+        const expected =
+          fine.start +
+          (Math.round(fine.delta / coarseStep) * coarseStep) / fine.sensitivity;
+        assert.ok(
+          Math.abs(coarse.value - expected) < 1e-8,
+          JSON.stringify({fine, coarse, coarseStep, expected}),
+        );
+        assert.equal(coarse.preview, coarse.value);
+        if (rotationAxis === undefined) assert.equal(coarse.grid, grid);
+        await page.keyboard.up('Shift');
+        assert.equal((await dragState()).value, fine.value);
+      }
+      await page.keyboard.down('Shift');
+      assert.notEqual(
+        coarse.value,
+        coarse.start,
+        'Fixture must cross a major increment',
+      );
+      // Playwright's keyboard tracks one Shift flag for both physical keys.
+      // CDP lets the key-up event retain Shift while the other key stays down.
+      const keyboard = await page.context().newCDPSession(page);
+      const shift = (type: 'rawKeyDown' | 'keyUp', right: boolean) =>
+        keyboard.send('Input.dispatchKeyEvent', {
+          type,
+          key: 'Shift',
+          code: right ? 'ShiftRight' : 'ShiftLeft',
+          windowsVirtualKeyCode: 16,
+          location: right ? 2 : 1,
+          modifiers: 8,
+        });
+      await shift('rawKeyDown', true);
+      await shift('keyUp', false);
+      assert.equal(
+        (await dragState()).value,
+        coarse.value,
+        'The other Shift key still holds coarse snapping',
+      );
+      await shift('rawKeyDown', false);
+      await shift('keyUp', true);
+      await keyboard.detach();
+      const preview = await matrix();
+      assert.equal((await state(page)).source, source);
+      await page.mouse.up();
+      await page.waitForFunction(
+        source => window.coordinateApp.codeEditor.editor.getValue() !== source,
+        source,
+      );
+      await page.getByText('Ready', {exact: true}).waitFor();
+      await page.keyboard.up('Shift');
+      const committedValue = await page.evaluate(
+        ({label, mode}) =>
+          window.coordinateApp.viewport['transformGizmo'].currentBindings.find(
+            binding => binding.label === label && binding.mode === mode,
+          )?.value,
+        coarse,
+      );
+      assert.equal(
+        committedValue,
+        coarse.value,
+        'Source writeback retains the snapped value',
+      );
+      const committed = await matrix();
+      assert.ok(
+        committed.every((value, i) => Math.abs(value - preview[i]) < 1e-6),
+        'Committed geometry matches the drag preview',
+      );
+      if (reference) await page.keyboard.up('Alt');
+      await page.keyboard.press('Control+z');
+      await page.waitForFunction(
+        source => window.coordinateApp.codeEditor.editor.getValue() === source,
+        source,
+      );
+      await page.getByText('Ready', {exact: true}).waitFor();
+      if (reference) await page.keyboard.down('Alt');
+      await page.keyboard.down('Shift');
+      const retry =
+        rotationAxis === undefined
+          ? await xHandle(page)
+          : await rotationHandle(page, rotationAxis);
+      await page.mouse.move(retry.x, retry.y);
+      await page.mouse.down();
+      await page.mouse.move(retry.x + retry.dx * 70, retry.y + retry.dy * 70, {
+        steps: 4,
+      });
+      const restarted = await dragState();
+      assert.ok(
+        Math.abs(
+          ((restarted.value - restarted.start) * restarted.sensitivity) /
+            coarseStep -
+            Math.round(restarted.delta / coarseStep),
+        ) < 1e-8,
+      );
+      await page.keyboard.press('Escape');
+      await page.mouse.up();
+      await page.keyboard.up('Shift');
+      if (reference) await page.keyboard.up('Alt');
+      assert.equal((await state(page)).source, source);
+      assert.equal((await state(page)).active, false);
+      assert.ok(
+        (await matrix()).every(
+          (value, i) => Math.abs(value - before[i]) < 1e-6,
+        ),
+      );
+      assert.deepEqual(errors, []);
+    },
+  );
+
 for (const mode of ['offset', 'rotate', 'pivot', 'axisOffset'] as const)
   test(
     `authored ${mode} supports consecutive gizmo edits before model replacement`,

@@ -1,5 +1,5 @@
 import type {ToolDragPreview} from './tool-drag-preview';
-import {gridStep} from '../grid-scale';
+import {gridStep, majorGridCells} from '../grid-scale';
 import {
   action,
   computed,
@@ -1173,7 +1173,7 @@ export class SketchEditor {
       this.line(
         [x, 0],
         [x, height],
-        i % 5 === 0 ? 'grid major' : 'grid',
+        i % majorGridCells === 0 ? 'grid major' : 'grid',
         `grid:x:${i}`,
         this.grid,
       );
@@ -1187,7 +1187,7 @@ export class SketchEditor {
       this.line(
         [0, y],
         [width, y],
-        i % 5 === 0 ? 'grid major' : 'grid',
+        i % majorGridCells === 0 ? 'grid major' : 'grid',
         `grid:y:${i}`,
         this.grid,
       );

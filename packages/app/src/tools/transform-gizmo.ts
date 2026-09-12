@@ -19,12 +19,14 @@ import type {
   Vec3,
 } from '@code3d/core/tooling';
 import {spatialAxisColors} from '../spatial-axis-colors';
+import {majorGridCells} from '../grid-scale';
 import {snapNumericValue} from './parameter-policy';
 import type {ModelSpatialBinding} from './model-spatial-tool';
 import type {CallArgumentDefaults} from './source-expression';
 import {worldUnitsPerPixel} from '../rendering/screen-space';
 
 const handleLengthPixels = 100;
+const coarseRotationStep = 15;
 
 export type TransformAxis = 'x' | 'y' | 'z';
 export type SpatialTool = 'translate' | 'rotate-point' | 'rotate-axis';
@@ -97,6 +99,7 @@ export class TransformGizmo {
   private pointerId?: number;
   private cancelling = false;
   private altHeld = false;
+  private shiftHeld = false;
   private selectedTool?: Readonly<{
     context: string | undefined;
     tool: SpatialTool;
@@ -264,10 +267,12 @@ export class TransformGizmo {
       | 'sourceTool'
       | 'displayedBindings'
       | 'altHeld'
+      | 'shiftHeld'
       | 'bindings'
       | 'active'
       | 'displayedMode'
       | 'setAltHeld'
+      | 'setShiftHeld'
       | 'beginDrag'
       | 'finishDrag'
       | 'applyDrag'
@@ -283,10 +288,12 @@ export class TransformGizmo {
       selectTool: action,
       displayedBindings: computed,
       altHeld: observableRef,
+      shiftHeld: observableRef,
       bindings: observableRef,
       active: observableRef,
       displayedMode: computed,
       setAltHeld: action,
+      setShiftHeld: action,
       beginDrag: action,
       finishDrag: action,
       applyDrag: action,
@@ -363,10 +370,14 @@ export class TransformGizmo {
     );
     domElement.ownerDocument.addEventListener(
       'keydown',
-      this.onModeKey,
+      this.onModifierKey,
       options,
     );
-    domElement.ownerDocument.addEventListener('keyup', this.onModeKey, options);
+    domElement.ownerDocument.addEventListener(
+      'keyup',
+      this.onModifierKey,
+      options,
+    );
     domElement.ownerDocument.defaultView?.addEventListener(
       'blur',
       this.onBlur,
@@ -580,15 +591,21 @@ export class TransformGizmo {
       binding.axis === 'y' ? 1 : 0,
       binding.axis === 'z' ? 1 : 0,
     );
-    // Quantize spatial distance before reversing the source parameter mapping.
+    // Quantize physical distance/angle before reversing the parameter mapping.
     // Keep the gesture's starting value, so off-grid inputs do not jump on grab.
+    const step =
+      active.gridStep !== undefined
+        ? active.gridStep * (this.shiftHeld ? majorGridCells : 1)
+        : this.shiftHeld
+          ? coarseRotationStep
+          : undefined;
     const delta =
-      active.gridStep === undefined
+      step === undefined
         ? active.delta
-        : Math.round(active.delta / active.gridStep) * active.gridStep;
+        : Math.round(active.delta / step) * step;
     const candidate = binding.value + delta / binding.sensitivity;
     const value =
-      binding.mode === 'rotate'
+      step === undefined
         ? snapNumericValue(
             {
               value: binding.value,
@@ -659,12 +676,23 @@ export class TransformGizmo {
     this.altHeld = value;
   }
 
+  private setShiftHeld(value: boolean): boolean {
+    if (this.shiftHeld === value) return false;
+    this.shiftHeld = value;
+    return true;
+  }
+
   private onBlur = (): void => {
-    this.setAltHeld(false);
     this.cancel();
+    this.setAltHeld(false);
+    this.setShiftHeld(false);
   };
 
-  private onModeKey = (event: KeyboardEvent): void => {
+  private onModifierKey = (event: KeyboardEvent): void => {
+    if (event.key === 'Shift') {
+      if (this.setShiftHeld(event.shiftKey) && this.active) this.applyDrag();
+      return;
+    }
     if (event.key !== 'Alt') return;
     this.setAltHeld(event.type === 'keydown');
     if (
@@ -723,6 +751,7 @@ export class TransformGizmo {
   private onPointerDown = (event: PointerEvent): void => {
     if (this.active || event.button !== 0) return;
     this.setAltHeld(event.altKey);
+    this.setShiftHeld(event.shiftKey);
     const control = this.pickAxis(event);
     this.setHovered(control);
     if (!control) return;
@@ -733,9 +762,10 @@ export class TransformGizmo {
   };
 
   private onPointerMove = (event: PointerEvent): void => {
+    if (this.active && event.pointerId !== this.pointerId) return;
     this.setAltHeld(event.altKey);
+    this.setShiftHeld(event.shiftKey);
     if (this.active) {
-      if (event.pointerId !== this.pointerId) return;
       this.prepareRay(event);
       this.active.control.controls.pointerMove(null);
     } else if (event.pointerType === 'mouse' || event.pointerType === 'pen') {
@@ -745,6 +775,8 @@ export class TransformGizmo {
 
   private onPointerUp = (event: PointerEvent): void => {
     if (event.pointerId !== this.pointerId || event.button !== 0) return;
+    this.setAltHeld(event.altKey);
+    if (this.setShiftHeld(event.shiftKey) && this.active) this.applyDrag();
     this.active?.control.controls.pointerUp(null);
   };
 

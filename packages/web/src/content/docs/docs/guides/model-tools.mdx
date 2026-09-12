@@ -133,6 +133,12 @@ follow your edit while the model updates, including consecutive drags. Choosing
 point rotation shows its pivot before a rotation call is written. Holding Alt
 switches to moving that pivot and keeps the same marker.
 
+Hold **Shift** while dragging to use larger snap increments: one major grid
+interval (five small cells) for movement, or **15°** from the drag's starting
+angle for rotation. You can press or release Shift during the drag. **Alt + Shift**
+moves a rotation pivot or axis by major grid intervals. Movement uses the grid
+spacing at the start of the drag; typed values remain exact.
+
 Controls follow a unique chain of TypeScript definitions to an editable
 numeric source value, including supported variables, object properties, and
 destructuring. The appearance of the input tells you how an edit will work:

@@ -256,7 +256,9 @@ function pointerFixture(t: TestContext) {
   const element = Object.assign(new EventTarget(), {
     style: {touchAction: 'pan-y'},
     clientHeight: 600,
-    ownerDocument: new EventTarget(),
+    ownerDocument: Object.assign(new EventTarget(), {
+      defaultView: new EventTarget(),
+    }),
     getBoundingClientRect: () => ({left: 0, top: 0, width: 800, height: 600}),
     setPointerCapture: (id: number) => captured.add(id),
     hasPointerCapture: (id: number) => captured.has(id),
@@ -274,6 +276,7 @@ function pointerFixture(t: TestContext) {
         clientX: 400,
         clientY: 300,
         altKey: false,
+        shiftKey: false,
         ...overrides,
       }),
     );
@@ -324,6 +327,160 @@ function pointerFixture(t: TestContext) {
   scene.updateMatrixWorld(true);
   return {gizmo, camera, element, send, events, captured, grid};
 }
+
+function modifier(element: HTMLElement, key: string, held: boolean) {
+  const event = Object.assign(
+    new Event(held ? 'keydown' : 'keyup', {cancelable: true}),
+    {key, shiftKey: key === 'Shift' && held},
+  );
+  element.ownerDocument.dispatchEvent(event);
+  return event.defaultPrevented;
+}
+
+for (const sign of [1, -1]) {
+  test(`Shift translation resnaps the original delta on the frozen major grid (sign ${sign})`, t => {
+    const {gizmo, element, grid, events} = pointerFixture(t);
+    grid.step = 0.5;
+    gizmo.attach(
+      gizmo['attachedObject']!,
+      gizmo.currentBindings.map(binding => ({
+        ...binding,
+        value: 0.35,
+        sensitivity: -2,
+        step: 0.1,
+      })),
+    );
+    const control = gizmo['axes'][0];
+    control.controls.dispatchEvent({type: 'mouseDown', mode: 'translate'});
+    const active = gizmo['active']!;
+    grid.step = 100;
+    control.proxy.position.x = active.position.x + sign * 3.2;
+    control.controls.dispatchEvent({type: 'objectChange'});
+    const fine = active.value;
+    assert.equal(fine, Number((0.35 - (sign * 3) / 2).toPrecision(12)));
+    for (let i = 0; i < 3; i++) {
+      assert.equal(modifier(element, 'Shift', true), false);
+      assert.equal(
+        active.value,
+        Number((0.35 - (sign * 2.5) / 2).toPrecision(12)),
+      );
+      assert.equal(control.proxy.position.x - active.position.x, sign * 2.5);
+      const count = events.length;
+      modifier(element, 'Shift', true);
+      assert.equal(
+        events.length,
+        count,
+        'Key repeats do not emit more previews',
+      );
+      element.ownerDocument.dispatchEvent(
+        Object.assign(new Event('keyup'), {key: 'Shift', shiftKey: true}),
+      );
+      assert.equal(
+        events.length,
+        count,
+        'Releasing one of two held Shift keys keeps coarse snapping',
+      );
+      modifier(element, 'Shift', false);
+      assert.equal(active.value, fine, 'No accumulated rounding between modes');
+    }
+    modifier(element, 'Shift', true);
+    control.controls.dispatchEvent({type: 'mouseUp', mode: 'translate'});
+    assert.equal(grid.locked, false);
+    const commit = defined(events.at(-1));
+    assert.ok(commit.kind === 'commit');
+    assert.equal(commit.value, active.value);
+    assert.ok(gizmo.currentBindings.every(binding => binding.step === 0.1));
+  });
+
+  test(`Shift rotation quantizes physical 15-degree increments from the starting angle (sign ${sign})`, t => {
+    const {gizmo, grid, element, events} = pointerFixture(t);
+    const control = gizmo['axes'][0];
+    control.binding = {
+      ...control.binding!,
+      mode: 'rotate',
+      value: 7,
+      sensitivity: -2,
+      parameterKind: 'angle',
+      step: 5,
+    };
+    control.controls.setMode('rotate');
+    modifier(element, 'Shift', true);
+    control.controls.dispatchEvent({type: 'mouseDown', mode: 'rotate'});
+    control.controls.dispatchEvent({type: 'objectChange'});
+    assert.equal(
+      gizmo['active']!.value,
+      7,
+      'Off-step angle does not jump on grab',
+    );
+    control.angle = (sign * 38 * Math.PI) / 180;
+    control.controls.dispatchEvent({type: 'objectChange'});
+    const active = gizmo['active']!;
+    assert.equal(active.value, 7 - (sign * 45) / 2);
+    assert.ok(
+      Math.abs(
+        (control.proxy.quaternion.angleTo(active.quaternion) * 180) / Math.PI -
+          45,
+      ) < 1e-7,
+    );
+    modifier(element, 'Shift', false);
+    assert.equal(active.value, Math.round((7 - (sign * 38) / 2) / 5) * 5);
+    modifier(element, 'Shift', true);
+    assert.equal(active.value, 7 - (sign * 45) / 2);
+    assert.equal(grid.locked, false);
+    control.controls.dispatchEvent({type: 'mouseUp', mode: 'rotate'});
+    const commit = defined(events.at(-1));
+    assert.ok(commit.kind === 'commit');
+    assert.equal(commit.value, active.value);
+  });
+}
+
+test('pointer modifiers select coarse snapping and ignore non-owning pointers', t => {
+  const {gizmo, send, grid, events} = pointerFixture(t);
+  grid.step = 0.5;
+  send('pointerdown', {shiftKey: true, altKey: true});
+  send('pointermove', {clientX: 459, shiftKey: true, altKey: true});
+  const active = gizmo['active']!;
+  assert.ok(Math.abs(active.delta) > 0);
+  assert.equal(active.value, Math.round(active.delta / 2.5) * 2.5);
+  const coarse = active.value;
+  const count = events.length;
+  send('pointermove', {pointerId: 2, clientX: 600});
+  assert.equal(active.value, coarse);
+  assert.equal(gizmo['shiftHeld'], true);
+  assert.equal(events.length, count);
+  send('pointermove', {clientX: 459});
+  assert.equal(active.value, Math.round(active.delta / 0.5) * 0.5);
+  send('pointerup', {shiftKey: true});
+  const commit = defined(events.at(-1));
+  assert.ok(commit.kind === 'commit');
+  assert.equal(
+    commit.value,
+    coarse,
+    'Pointer release uses its current modifier',
+  );
+  assert.equal(grid.locked, false);
+});
+
+test('blur cancels coarse dragging before clearing modifiers and releases capture', t => {
+  const {gizmo, element, send, grid, events, captured} = pointerFixture(t);
+  grid.step = 0.5;
+  send('pointerdown', {shiftKey: true});
+  send('pointermove', {clientX: 459, shiftKey: true});
+  const count = events.length;
+  element.ownerDocument.defaultView!.dispatchEvent(new Event('blur'));
+  assert.deepEqual(
+    events.slice(count).map(event => event.kind),
+    ['cancel'],
+  );
+  assert.equal(gizmo['active'], undefined);
+  assert.equal(gizmo['shiftHeld'], false);
+  assert.equal(grid.locked, false);
+  assert.equal(captured.size, 0);
+  send('pointerdown');
+  send('pointermove', {clientX: 459});
+  const active = gizmo['active']!;
+  assert.equal(active.value, Math.round(active.delta / 0.5) * 0.5);
+});
 
 test('Alt leaves spatial snapping and numeric steps unchanged', t => {
   const {gizmo, element, send, grid, events} = pointerFixture(t);
