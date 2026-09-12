@@ -58,6 +58,46 @@
     "./iso7379": {
       "types": "./bld/library/iso-7379.d.ts",
       "default": "./bld/library/iso-7379.js"
+    },
+    "./gb70-1": {
+      "types": "./bld/library/gb-70-1.d.ts",
+      "default": "./bld/library/gb-70-1.js"
+    },
+    "./gb70-2": {
+      "types": "./bld/library/gb-70-2.d.ts",
+      "default": "./bld/library/gb-70-2.js"
+    },
+    "./gb70-3": {
+      "types": "./bld/library/gb-70-3.d.ts",
+      "default": "./bld/library/gb-70-3.js"
+    },
+    "./gb70-4": {
+      "types": "./bld/library/gb-70-4.d.ts",
+      "default": "./bld/library/gb-70-4.js"
+    },
+    "./gb5782": {
+      "types": "./bld/library/gb-5782.d.ts",
+      "default": "./bld/library/gb-5782.js"
+    },
+    "./gb5783": {
+      "types": "./bld/library/gb-5783.d.ts",
+      "default": "./bld/library/gb-5783.js"
+    },
+    "./gb818": {
+      "types": "./bld/library/gb-818.d.ts",
+      "default": "./bld/library/gb-818.js"
+    },
+    "./gb2672": {
+      "types": "./bld/library/gb-2672.d.ts",
+      "default": "./bld/library/gb-2672.js"
+    },
+    "./gb80": {
+      "types": "./bld/library/gb-80.d.ts",
+      "default": "./bld/library/gb-80.js"
+    },
+    "./gb5281": {
+      "types": "./bld/library/gb-5281.d.ts",
+      "default": "./bld/library/gb-5281.js"
     }
   },
   "files": [

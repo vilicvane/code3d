@@ -27,7 +27,16 @@ export const y = (anchor: Anchor) =>
 export const volume = (model: Model) =>
   replicad.measureVolume(modelGeometry(model).value.shape.asShape3D());
 
-const {ISO4029, ISO7379, ...headedStandards} = screws;
+const headedStandards = {
+  ISO4762: screws.ISO4762,
+  ISO10642: screws.ISO10642,
+  ISO7380_1: screws.ISO7380_1,
+  ISO4014: screws.ISO4014,
+  ISO4017: screws.ISO4017,
+  ISO7380_2: screws.ISO7380_2,
+  ISO7045: screws.ISO7045,
+  ISO14583: screws.ISO14583,
+};
 export function headedStandardTests(
   names: readonly (keyof typeof headedStandards)[],
 ): void {

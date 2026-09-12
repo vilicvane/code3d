@@ -118,3 +118,50 @@ function shoulderHole(options: Direct7379.ClearanceHoleOptions) {
 void shoulderHole;
 // @ts-expect-error Shoulder clearance is selected by diameter, not an ISO 273 fit.
 Direct7379.clearanceHole(8, {depth: 12, fit: 'normal'});
+
+import * as GB70_1 from '@code3d/screws/gb70-1';
+import * as GB70_2 from '@code3d/screws/gb70-2';
+import * as GB70_3 from '@code3d/screws/gb70-3';
+import * as GB70_4 from '@code3d/screws/gb70-4';
+import * as GB5782 from '@code3d/screws/gb5782';
+import * as GB5783 from '@code3d/screws/gb5783';
+import * as GB818 from '@code3d/screws/gb818';
+import * as GB2672 from '@code3d/screws/gb2672';
+import * as GB80 from '@code3d/screws/gb80';
+import * as GB5281 from '@code3d/screws/gb5281';
+import {GB70_1 as RootGB70_1, GB5281 as RootGB5281} from '@code3d/screws';
+
+const gbSpec: GB70_1.Specification = GB70_1.resolveSpecification('M6');
+const gbInput: RootGB70_1.ScrewInput = gbSpec;
+const gbCap: RootGB70_1.Screw = GB70_1.screw(gbInput, 20);
+gbCap.headBottom.on(GB70_1.clearanceHole('M6', 12).counterboreBottom);
+// @ts-expect-error Disabling the counterbore removes its mounting references.
+GB70_1.clearanceHole('M6', {depth: 12, counterbore: false}).counterboreTop;
+GB70_2.screw('M6', 20).headBottom;
+GB70_2.clearanceHole('M6', {depth: 12, counterbore: true}).counterboreBottom;
+GB70_3.screw('M6', 20).headTop.on(
+  GB70_3.clearanceHole('M6', {depth: 12, countersink: {diameter: 15}})
+    .countersinkTop,
+);
+// @ts-expect-error GB/T 70.3 uses a countersink, not a cylindrical counterbore.
+GB70_3.clearanceHole('M6', {depth: 12, counterbore: true});
+GB70_4.screw('M6', 20).headBottom;
+GB5782.threadLength(GB5782.resolveSpecification('M6'), 30);
+GB5783.screw('M6', 30).shankBottom;
+GB818.screw('M6', 20, {recess: 'Z'}).headBottom;
+// @ts-expect-error GB/T 818 provides H/Z cross recesses.
+GB818.screw('M6', 20, {recess: 'T'});
+GB2672.screw('M6', 20).headBottom;
+GB80.screw('M6', 12).pointBottom;
+// @ts-expect-error GB/T 80 is headless and has no clearance-hole constructor.
+GB80.clearanceHole('M6', 12);
+const gbShoulder: RootGB5281.Screw = GB5281.screw(8, 20);
+gbShoulder.headBottom.on(
+  GB5281.clearanceHole(8, {
+    depth: 12,
+    diameter: 8.5,
+    counterbore: {diameter: 15, depth: 7},
+  }).counterboreBottom,
+);
+// @ts-expect-error GB/T 5281 takes a shoulder diameter, not a thread size.
+GB5281.screw('M6', 20);
