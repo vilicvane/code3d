@@ -3,34 +3,15 @@ import {ArtifactJournal} from './artifact-journal';
 
 const storageName = 'code3d-kernel-artifacts';
 let retainedIndex: ReturnType<ArtifactJournal['index']> | undefined;
-let storageFiles:
-  | {
-      handles: readonly FileSystemFileHandle[];
-      maximumBytes: number;
-      checkedAt: number;
-    }
-  | undefined;
+let storageFiles: readonly FileSystemFileHandle[] | undefined;
 
 async function journalFiles() {
-  if (storageFiles && performance.now() - storageFiles.checkedAt < 60_000)
-    return storageFiles;
+  if (storageFiles) return storageFiles;
   const root = await navigator.storage.getDirectory();
   const directory = await root.getDirectoryHandle(storageName, {create: true});
-  const [handles, estimate] = await Promise.all([
-    Promise.all(
-      ['a', 'b'].map(name => directory.getFileHandle(name, {create: true})),
-    ),
-    navigator.storage.estimate(),
-  ]);
-  // File handles are capabilities, not exclusive sync access handles. Keeping
-  // them does not hold the journal lock between individual transactions.
-  return (storageFiles = {
-    handles,
-    maximumBytes: Math.floor(
-      Math.min(1024 ** 3, (estimate.quota ?? 10 * 1024 ** 3) / 10),
-    ),
-    checkedAt: performance.now(),
-  });
+  return (storageFiles = await Promise.all(
+    ['a', 'b'].map(name => directory.getFileHandle(name, {create: true})),
+  ));
 }
 
 /** Content, including resolved Core/Replicad/codec input files and actual WASM bytes. */
@@ -81,7 +62,8 @@ export async function withPersistentArtifacts<Result>(
   {
     touchReads = true,
     signal,
-  }: {touchReads?: boolean; signal?: AbortSignal} = {},
+    maximumBytes = 2 * 1024 ** 3,
+  }: {touchReads?: boolean; signal?: AbortSignal; maximumBytes?: number} = {},
 ): Promise<Result> {
   if (
     typeof navigator === 'undefined' ||
@@ -100,7 +82,7 @@ export async function withPersistentArtifacts<Result>(
       let journal: ArtifactJournal;
       let errors = 0;
       try {
-        const {handles: files, maximumBytes} = await journalFiles();
+        const files = await journalFiles();
         for (const file of files) {
           handles.push(await file.createSyncAccessHandle());
         }

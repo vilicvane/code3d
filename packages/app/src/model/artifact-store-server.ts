@@ -18,6 +18,7 @@ type Result = Uint8Array | boolean | undefined;
 
 /** One I/O owner retains accepted writes independently of compilation lifetimes. */
 export class ArtifactStoreServer {
+  maximumBytes = 2 * 1024 ** 3;
   private readonly queue = new Set<Mutation>();
   private readonly pending = new Map<string, Map<string, Mutation>>();
   private writing?: Promise<void>;
@@ -84,7 +85,7 @@ export class ArtifactStoreServer {
         stats => {
           this.disk = stats;
         },
-        {touchReads: false, signal},
+        {touchReads: false, signal, maximumBytes: this.maximumBytes},
       );
     }
     if (
@@ -123,7 +124,7 @@ export class ArtifactStoreServer {
           stats => {
             this.disk = stats;
           },
-          {touchReads: false, signal},
+          {touchReads: false, signal, maximumBytes: this.maximumBytes},
         );
     if (touching) {
       const present = values.map(Boolean);
@@ -190,7 +191,7 @@ export class ArtifactStoreServer {
           this.disk = stats;
           this.errors += stats?.errors ?? 0;
         },
-        {touchReads: false},
+        {touchReads: false, maximumBytes: this.maximumBytes},
       );
     } catch {
       this.errors++;

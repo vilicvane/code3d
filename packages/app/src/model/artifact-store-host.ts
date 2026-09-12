@@ -1,3 +1,5 @@
+import {reaction} from 'mobx';
+import {appSettings, gibibyte} from '../app-settings';
 import {
   artifactAccounting,
   artifactAccountingBytes,
@@ -12,6 +14,7 @@ import ArtifactWorker from './artifact-store.worker?worker';
 /** Project-owned I/O survives replacement of compiler/executor Workers. */
 export class ArtifactStoreHost {
   private readonly worker = new ArtifactWorker();
+  private readonly stopSettings: () => void;
   private readonly clients = new Map<Worker, ArtifactStoreEndpoint>();
   private nextClient = 0;
   private failed = false;
@@ -21,7 +24,18 @@ export class ArtifactStoreHost {
     this.resolveClosed = resolve;
   });
 
+  private readonly closePage = () => {
+    void this.dispose();
+  };
+
   constructor() {
+    window.addEventListener('pagehide', this.closePage, {once: true});
+    this.stopSettings = reaction(
+      () => appSettings.value.diskCacheGiB * gibibyte,
+      maximumBytes =>
+        this.worker.postMessage({kind: 'configure', maximumBytes}),
+      {fireImmediately: true},
+    );
     this.worker.onmessage = ({data}) => {
       if (data.kind === 'disposed') {
         this.worker.terminate();
@@ -30,6 +44,8 @@ export class ArtifactStoreHost {
     };
     this.worker.onerror = () => {
       this.failed = true;
+      this.stopSettings();
+      window.removeEventListener('pagehide', this.closePage);
       for (const worker of this.clients.keys()) {
         worker.postMessage({
           kind: 'artifact-store',
@@ -98,6 +114,8 @@ export class ArtifactStoreHost {
   dispose(): Promise<void> {
     if (this.disposing || this.failed) return this.closed;
     this.disposing = true;
+    window.removeEventListener('pagehide', this.closePage);
+    this.stopSettings();
     for (const worker of this.clients.keys()) this.disconnect(worker);
     // The I/O worker closes itself only after accepted writes have drained.
     this.worker.postMessage({kind: 'dispose'});

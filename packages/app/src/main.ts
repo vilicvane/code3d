@@ -21,6 +21,8 @@ import {
   X,
 } from 'lucide';
 import {autorun, reaction} from 'mobx';
+import {appSettings} from './app-settings';
+import {AppSettingsDialog} from './ui/app-settings';
 import brandMark from '../../../assets/brand/mark.svg?raw';
 import {AgentConnections} from './agent/connections';
 import {AgentObserver} from './agent/observer';
@@ -222,6 +224,7 @@ app.innerHTML = `
       </a>
       <div class="topbar-actions">
         <button class="quiet-button" id="retry-save-button" type="button" hidden>Retry saving</button>
+        <button class="quiet-button" id="settings-button" type="button">Settings</button>
         <div class="agent-nav">
           <button class="quiet-button button-primary agent-connect-button" id="agents-button" type="button">Connect Agent</button>
         </div>
@@ -573,6 +576,11 @@ const agentPanel = new AgentPanel(
   agentProject,
   requiredElement<HTMLButtonElement>('agents-button'),
 );
+const settingsDialog = new AppSettingsDialog(appSettings);
+requiredElement<HTMLButtonElement>('settings-button').addEventListener(
+  'click',
+  () => settingsDialog.open(),
+);
 const stopAgentRevision = reaction(
   () => agentProject.currentRevision,
   () => agentObserver.invalidate(),
@@ -587,6 +595,8 @@ const stopSaveStatus = reaction(
 window.addEventListener(
   'pagehide',
   () => {
+    settingsDialog.dispose();
+    appSettings.dispose();
     dialogs.dispose();
     imageExportDialog.dispose();
     modelExportDialog.dispose();
@@ -990,7 +1000,9 @@ codeEditor.onChange(change => {
   agentProject.recordEditorChange(change);
   if (!toolChange) sourceEditPopover.dismiss();
   if (change.kind !== 'content') renderProjectNavigation();
-  requestModelUpdate(toolChange || historyChange ? 0 : 420);
+  requestModelUpdate(
+    toolChange || historyChange ? 0 : appSettings.value.editDelayMs,
+  );
 });
 
 codeEditor.onCursorOffset(({file, offset}) => {
@@ -1901,7 +1913,7 @@ function handleCompletionFocus(focus: CompletionFocus | undefined): void {
   completionPreviewTimer = window.setTimeout(() => {
     completionPreviewTimer = undefined;
     void runCompletionPreview(focus, revision);
-  }, 160);
+  }, appSettings.value.completionDelayMs);
 }
 
 async function runCompletionPreview(

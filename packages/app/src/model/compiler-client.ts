@@ -4,6 +4,7 @@ import type {
   TopologyInspectionOptions,
 } from '@code3d/core/tooling';
 import {action, makeObservable, observableRef, runInAction} from 'mobx';
+import {appSettings} from '../app-settings';
 import {browserPackageFiles} from '../project/browser-packages';
 import {statProjectFiles, type ProjectFileReader} from '../project/file-reader';
 import type {ModelProject} from '../project/project';
@@ -45,7 +46,7 @@ type PendingRequest = {
 
 type ExecuteRequest = Omit<
   Extract<ExecutorRequest, {kind: 'execute'}>,
-  'artifact' | 'dependency'
+  'artifact' | 'dependency' | 'settings'
 > & {artifact: ProjectBuildArtifact};
 type Execution = {
   request: ExecuteRequest;
@@ -375,6 +376,7 @@ export class ModelCompilerClient {
     const request = this.runningExecution.request;
     this.sendExecution({
       ...request,
+      settings: appSettings.execution,
       ...this.executionArtifacts.encode(request.artifact),
     });
   }

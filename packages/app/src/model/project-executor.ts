@@ -4,6 +4,7 @@ import type {
   TopologyInspection,
   TopologyInspectionOptions,
 } from '@code3d/core/tooling';
+import type {ExecutionSettings} from '../app-settings';
 import type {ArtifactStoreConnection} from './artifact-store';
 import type {CompilationProgress} from './compilation-progress';
 import type {ModelModule} from './compiler';
@@ -42,6 +43,7 @@ export class ProjectExecutor {
     artifact: ProjectBuildArtifact,
     onProgress?: CompilationProgress,
     checkCancelled: () => void = () => {},
+    settings?: ExecutionSettings,
   ): Promise<ModelModule> {
     await this.storage?.ready;
     checkCancelled();
@@ -68,6 +70,10 @@ export class ProjectExecutor {
       );
     }
     const runtime = this.runtime!;
+    if (settings) {
+      runtime.tooling.setKernelCacheBudget(settings.memoryCacheBytes);
+      this.snapshotPool!.setConcurrency(settings.snapshotConcurrency);
+    }
     runtime.resources.install(artifact.resources);
     this.resourceStats = artifact.resourceStats;
     runtime.tooling.setKernelArtifactStore(

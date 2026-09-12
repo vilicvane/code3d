@@ -27,6 +27,7 @@ async function execute(
       artifactChannel.decode(request),
       phase => send({kind: 'progress', id: request.id, phase}),
       checkCancelled,
+      request.settings,
     );
     checkCancelled();
     compileId = request.id;
