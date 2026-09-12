@@ -210,7 +210,7 @@ test(
         spatialKind: string | undefined;
       }[] = [];
       try {
-        const source = (await import('/examples/bound-rotation.ts?raw'))
+        const source = (await import('/examples/operations/loft.ts?raw'))
           .default;
         const compile = async (source: string) => {
           const module = await client.compile(
@@ -234,7 +234,9 @@ test(
           const {target, evaluation} = viewport.sourceEvaluation()!;
           const selected = viewport.getSelected();
           const bindings = viewport['transformGizmo']['axes'].flatMap(axis =>
-            axis.binding ? [axis.binding] : [],
+            axis.binding && axis.controls.getHelper().visible
+              ? [axis.binding]
+              : [],
           );
           scopes.push({
             text,

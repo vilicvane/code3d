@@ -20,6 +20,9 @@ const defaultSurfaceOpacity = 0.68;
 const boundaryColor = '#080a07';
 const boundaryOpacity = 0.72;
 
+// CPU-backed, neutral studio map: each renderer builds its own GPU reflection cache.
+const studioEnvironment = createStudioEnvironment();
+
 export type ModelRenderMode = 'modeling' | 'render';
 
 type ModelMaterial = THREE.Material;
@@ -85,16 +88,17 @@ export class ModelRenderer {
 
     this.scene.background = new THREE.Color('#171815');
     this.scene.fog = new THREE.Fog('#171815', 180, 430);
+    this.scene.environment = studioEnvironment;
     this.scene.add(
-      new THREE.HemisphereLight('#f6f4df', '#333b40', 1.8),
-      new THREE.AmbientLight('#eef0e8', 2.4),
+      new THREE.HemisphereLight('#ffffff', '#737373', 1.2),
+      new THREE.AmbientLight('#ffffff', 0.8),
     );
 
-    const key = new THREE.DirectionalLight('#fff8df', 3.2);
+    const key = new THREE.DirectionalLight('#ffffff', 2.4);
     key.position.set(70, 110, 80);
     this.scene.add(key);
 
-    const rim = new THREE.DirectionalLight('#90a0ff', 1.6);
+    const rim = new THREE.DirectionalLight('#ffffff', 1.6);
     rim.position.set(-80, 55, -65);
     this.scene.add(rim);
 
@@ -411,4 +415,44 @@ export function applyTransform(
   object.position.set(...transform.position);
   object.quaternion.set(...transform.quaternion);
   object.scale.set(...transform.scale);
+}
+
+/** Broad white softboxes over a gray ambient field keep metals readable from all sides. */
+function createStudioEnvironment(): THREE.DataTexture {
+  const width = 256;
+  const height = 128;
+  const data = new Float32Array(width * height * 4);
+  const softboxes = [
+    new THREE.Vector3(1, 1, 1).normalize(),
+    new THREE.Vector3(-1, 0.6, -1).normalize(),
+    new THREE.Vector3(-1, 0.3, 1).normalize(),
+  ];
+  const direction = new THREE.Vector3();
+  for (let y = 0; y < height; y++) {
+    const latitude = ((y + 0.5) / height - 0.5) * Math.PI;
+    for (let x = 0; x < width; x++) {
+      const longitude = ((x + 0.5) / width - 0.5) * Math.PI * 2;
+      direction.set(
+        Math.cos(latitude) * Math.cos(longitude),
+        Math.sin(latitude),
+        Math.cos(latitude) * Math.sin(longitude),
+      );
+      let light = 0.45 + 0.25 * Math.max(direction.y, 0);
+      for (const softbox of softboxes)
+        light += 2.5 * Math.exp((direction.dot(softbox) - 1) * 12);
+      const index = (y * width + x) * 4;
+      data[index] = data[index + 1] = data[index + 2] = light;
+      data[index + 3] = 1;
+    }
+  }
+  const texture = new THREE.DataTexture(
+    data,
+    width,
+    height,
+    THREE.RGBAFormat,
+    THREE.FloatType,
+  );
+  texture.mapping = THREE.EquirectangularReflectionMapping;
+  texture.needsUpdate = true;
+  return texture;
 }

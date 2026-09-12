@@ -2,7 +2,9 @@ import {
   axisRotation,
   solveBodies as solveBoundBodies,
   type BodyRelation as BoundRelation,
-  type BodyRotation,
+  type BodyAction,
+  hasRotation,
+  solveTranslations,
 } from './bound-solver.js';
 import {
   alignmentResidual,
@@ -24,16 +26,14 @@ import {
   composeTransforms,
   identityRigidTransform,
   invertTransform,
-  origin,
   rotateVector,
   rotation,
-  translation,
   type Quaternion,
   type RigidTransform,
   type Vec3,
 } from './spatial.js';
 
-export {axisRotation, type BodyRotation};
+export {axisRotation, type BodyAction};
 type AlignEndpoint = Readonly<{
   body: number;
   geometry: AlignmentGeometry;
@@ -44,76 +44,81 @@ type AlignRelation = Readonly<{
   id: string;
   source: AlignEndpoint;
   target: AlignEndpoint;
-  offset: Vec3 | undefined;
-  rotations: readonly BodyRotation[];
+  actions: readonly BodyAction[];
 }>;
 type Relation = (BoundRelation & {kind: 'on'}) | AlignRelation;
 export type Body = Readonly<{name: string; relations: readonly Relation[]}>;
 
-/** Authored actions apply after satisfying the relation, about self or an external axis. */
+/** Undo exactly the authored prefix, in reverse call order. */
 export function beforeRelation(
   pose: RigidTransform,
-  relation: Pick<Relation, 'kind' | 'rotations' | 'offset' | 'target'>,
+  relation: {
+    actions: readonly BodyAction[];
+    target: {body: number; transform: RigidTransform};
+  },
   poses: readonly RigidTransform[],
   owner: number,
 ): RigidTransform {
-  for (const action of [...relation.rotations].reverse())
-    pose =
-      'local' in action
-        ? composeTransforms(pose, invertTransform(action.local))
-        : composeTransforms(
-            axisRotation(
-              composeTransforms(poses[action.body], action.axis),
-              -action.angle,
-            ),
-            pose,
-          );
-  if (relation.kind === 'align' && relation.offset) {
-    const target =
-      relation.target.body === owner ? pose : poses[relation.target.body];
-    const frame = composeTransforms(target, relation.target.transform);
-    pose = {
-      ...pose,
-      position: subtract(
-        pose.position,
-        rotateVector(relation.offset, frame.quaternion),
-      ),
-    };
+  for (const action of [...relation.actions].reverse()) {
+    if ('offset' in action) {
+      const target =
+        relation.target.body === owner ? pose : poses[relation.target.body];
+      const frame = composeTransforms(target, relation.target.transform);
+      pose = {
+        ...pose,
+        position: subtract(
+          pose.position,
+          rotateVector(action.offset, frame.quaternion),
+        ),
+      };
+    } else
+      pose =
+        'local' in action
+          ? composeTransforms(pose, invertTransform(action.local))
+          : composeTransforms(
+              axisRotation(
+                composeTransforms(poses[action.body], action.axis),
+                -action.angle,
+              ),
+              pose,
+            );
   }
   return pose;
 }
 
-function afterRelation(
+export function afterRelation(
   pose: RigidTransform,
-  relation: Relation,
+  relation: {
+    actions: readonly BodyAction[];
+    target: {body: number; transform: RigidTransform};
+  },
   poses: readonly RigidTransform[],
   owner: number,
 ): RigidTransform {
-  if (relation.kind === 'align' && relation.offset) {
-    const target =
-      relation.target.body === owner ? pose : poses[relation.target.body];
-    pose = {
-      ...pose,
-      position: addVectors(
-        pose.position,
-        rotateVector(
-          relation.offset,
-          composeTransforms(target, relation.target.transform).quaternion,
+  for (const action of relation.actions) {
+    if ('offset' in action) {
+      const target =
+        relation.target.body === owner ? pose : poses[relation.target.body];
+      const frame = composeTransforms(target, relation.target.transform);
+      pose = {
+        ...pose,
+        position: addVectors(
+          pose.position,
+          rotateVector(action.offset, frame.quaternion),
         ),
-      ),
-    };
+      };
+    } else
+      pose =
+        'local' in action
+          ? composeTransforms(pose, action.local)
+          : composeTransforms(
+              axisRotation(
+                composeTransforms(poses[action.body], action.axis),
+                action.angle,
+              ),
+              pose,
+            );
   }
-  for (const action of relation.rotations)
-    pose =
-      'local' in action
-        ? composeTransforms(pose, action.local)
-        : composeTransforms(
-            axisRotation(
-              composeTransforms(poses[action.body], action.axis),
-              action.angle,
-            ),
-            pose,
-          );
   return pose;
 }
 
@@ -290,14 +295,10 @@ export function solveBodies(
   let poses = bodies.map(() => identityRigidTransform);
   for (const owner of active) {
     const authored =
+      unique.find(entry => entry.owner === owner && hasRotation(entry.relation))
+        ?.relation ??
       unique.find(
-        entry => entry.owner === owner && entry.relation.rotations.length,
-      )?.relation ??
-      unique.find(
-        entry =>
-          entry.owner === owner &&
-          entry.relation.kind === 'align' &&
-          entry.relation.offset,
+        entry => entry.owner === owner && entry.relation.actions.length,
       )?.relation;
     if (authored)
       poses[owner] = afterRelation(
@@ -340,9 +341,19 @@ export function solveBodies(
         : [],
     ),
   );
-  const variables = active.flatMap(body =>
-    Array.from({length: 6}, (_, axis) => ({body, axis})),
+  const fullVariables = active.flatMap(body =>
+    // Bound-only bodies without authored rotations have exactly identity
+    // orientation. Do not numerically perturb those fixed axes: native bound
+    // queries can introduce noise that prevents convergence at the identity.
+    Array.from(
+      {
+        length:
+          flexible[body] || bodies[body].relations.some(hasRotation) ? 6 : 3,
+      },
+      (_, axis) => ({body, axis}),
+    ),
   );
+  let variables = fullVariables.filter(variable => variable.axis < 3);
   const residual = (candidate: readonly RigidTransform[]): number[] => [
     ...unique.flatMap(({owner, relation: r}) => {
       const baseline = beforeRelation(candidate[owner], r, candidate, owner);
@@ -369,19 +380,16 @@ export function solveBodies(
         source.position,
         rotateVector(center, frame.quaternion),
       );
-      const b = composeTransforms(
-        frame,
-        translation(r.offset ?? origin),
-      ).position;
+      const b = frame.position;
       const delta = rotateVector(
         subtract(a, b),
         invertTransform(frame).quaternion,
       );
-      return r.offset ? [...delta] : [delta[1]];
+      return [delta[1]];
     }),
     ...active.flatMap(owner => {
       if (flexible[owner]) return [];
-      const rotations = bodies[owner].relations.filter(r => r.rotations.length);
+      const rotations = bodies[owner].relations.filter(hasRotation);
       return rotations.length
         ? rotations.flatMap(r =>
             beforeRelation(
@@ -420,12 +428,84 @@ export function solveBodies(
       };
     });
   };
+  // Once geometric constraints settle, choose bound-only free translations in
+  // their pre-action frames. External axes may have moved since initialization.
+  const settleBoundTranslations = (): readonly RigidTransform[] => {
+    const free = active
+      .filter(owner => !flexible[owner])
+      .flatMap(body => [0, 1, 2].map(axis => ({body, axis})));
+    if (!free.length) return poses;
+    const shift = (steps: readonly number[]) => {
+      const result = poses.map(pose => ({
+        ...pose,
+        position: [...pose.position] as [number, number, number],
+      }));
+      free.forEach(({body, axis}, i) => {
+        result[body].position[axis] += steps[i];
+      });
+      return result;
+    };
+    const preferences = (candidate: readonly RigidTransform[]) =>
+      unique
+        .filter(
+          ({owner, relation}) =>
+            !flexible[owner] &&
+            (relation.actions.length ||
+              !bodies[owner].relations.some(r => r.actions.length)),
+        )
+        .flatMap(
+          ({owner, relation}) =>
+            beforeRelation(candidate[owner], relation, candidate, owner)
+              .position,
+        );
+    const h = 1e-5;
+    const initial = residual(poses),
+      preference = preferences(poses);
+    const columns = free.map((_, i) => {
+      const plus = shift(free.map((_, j) => (i === j ? h : 0)));
+      const minus = shift(free.map((_, j) => (i === j ? -h : 0)));
+      const a = residual(plus),
+        b = residual(minus),
+        p = preferences(plus),
+        q = preferences(minus);
+      return {
+        constraints: a.map((v, j) => (v - b[j]) / (2 * h)),
+        preferences: p.map((v, j) => (v - q[j]) / (2 * h)),
+      };
+    });
+    const step = solveTranslations(
+      initial.map((value, i) => ({
+        id: 'bound translation',
+        value: -value,
+        coefficients: columns.map(column => column.constraints[i]),
+      })),
+      preference.map((value, i) => ({
+        id: 'pre-action position',
+        value: -value,
+        coefficients: columns.map(column => column.preferences[i]),
+      })),
+      free.length,
+    );
+    const candidate = shift(step);
+    // A nonlinear geometric locus need not admit its linearized free step.
+    // Preserve the valid geometric solution when that direction is not free.
+    return residual(candidate).every(value => Math.abs(value) < 1e-8)
+      ? candidate
+      : poses;
+  };
   let values = residual(poses),
     damping = 1e-5;
   const norm = (values: readonly number[]) =>
     values.reduce((sum, x) => sum + x * x, 0);
-  for (let iteration = 0; iteration < 160; iteration++) {
-    if (values.every(v => Math.abs(v) < 1e-8)) return poses;
+  for (let iteration = 0; iteration < 168; iteration++) {
+    // First settle translation along the seeded orientations. This prevents
+    // unconstrained rotations from tilting a contact chain merely to move it.
+    // Relations that genuinely require rotation then use the full rigid solve.
+    if (iteration === 8) {
+      variables = fullVariables;
+      damping = 1e-5;
+    }
+    if (values.every(v => Math.abs(v) < 1e-8)) return settleBoundTranslations();
     const h = 1e-6;
     const columns = variables.map((_, i) => {
       const shifted = residual(
@@ -434,7 +514,15 @@ export function solveBodies(
           variables.map((_, j) => (i === j ? h : 0)),
         ),
       );
-      return values.map((v, j) => (shifted[j] - v) / h);
+      const opposite = residual(
+        perturb(
+          poses,
+          variables.map((_, j) => (i === j ? -h : 0)),
+        ),
+      );
+      // A directional bound has a cusp at an axis-aligned pose. A forward
+      // difference invents a rotation gradient there; use both sides.
+      return values.map((_, j) => (shifted[j] - opposite[j]) / (2 * h));
     });
     const multiply = (a: readonly number[], b: readonly number[]) =>
       a.reduce((sum, x, i) => sum + x * b[i], 0);

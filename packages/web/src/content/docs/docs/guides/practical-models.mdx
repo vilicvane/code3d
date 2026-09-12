@@ -1,0 +1,125 @@
+---
+title: Learn with practical models
+description: Edit sketches and solids, reuse components, install packages, and assemble a complete project.
+---
+
+import ArrowIcon from '../../../../components/ArrowIcon.astro';
+import ModelExample from '../../../../components/ModelExample.astro';
+import {appUrl} from '../../../../lib/site';
+
+Basic shapes, operations and constraints have their own directories. Text,
+expose, materials and topology paths are standalone files. Sketches, npm
+dependencies, assemblies and complete projects retain their own directories.
+Interaction belongs in each model, not in a separate set of UI demos. Start with the [desktop stand](../../getting-started/first-model/)
+without installing packages or connecting an agent.
+
+## Cut a slot on a part
+
+<ModelExample id="mounting-plate" />
+
+Select `slot` to edit its local points, lines and arcs. Select `sketch(...)` inside
+`roundedSlot` and compare the 4 mm and 6 mm radius Arguments presets; switching
+this inspection context does not rewrite the model call. The relation in code puts
+that sketch on the rotated stock's top plane. The surrounding solid is read-only
+context; it is not a snapping or external-constraint source. Select `mountingPlate`
+to inspect the cut, or return to the sketch and move an endpoint. Undo restores
+the same source geometry. Selecting a face does not automatically create a sketch.
+
+The companion `sketches/constraints.ts` shows one rectangular plate with a hole.
+Horizontal and vertical constraints preserve its shape while its height and hole
+position remain editable.
+
+## Turn lettering into geometry
+
+<ModelExample id="text" />
+
+Select `lettering`, `raised`, or `engraved`. `googleFont('Play')` downloads the
+font on first use; this example needs network access. A comment shows the local
+font alternative without adding a font file to the examples directory.
+`B8i` demonstrates counters and the separate dot. `text` returns faces, and
+`extrude` processes them using one depth. Inspect the faces or result solids,
+change the depth, then Undo. Text outlines are not editable sketch entities.
+
+## Reuse a model and a package
+
+`annotations.ts` demonstrates how defaults, limits and Arguments presets give
+an ordinary spacer function an editing interface. `primitives/custom-primitives.ts`
+shows when a Replicad-backed `definePrimitive` is useful instead. See
+[reusable models](../reusable-models/) and [custom primitives](../custom-primitives/).
+
+<p>
+  <a target="_blank" rel="noopener" href={appUrl('npm/model.ts')}>
+    {'Open the npm package example '}
+    <ArrowIcon />
+  </a>
+</p>
+
+Start with this small npm example. `just-range` supplies the actual array of posts. Its
+folder's `package.json` and `code3d-lock.json` declare and lock Core and the
+dependency. In Browser storage, opening the model installs that scope; F12 can
+inspect the installed package files. **Update dependencies** on `package.json`
+resolves its ranges again. Normal dimension edits do not reinstall packages.
+
+<p>
+  <a
+    target="_blank"
+    rel="noopener"
+    href={appUrl('assemblies/screw-box/model.ts')}
+  >
+    {'Open the screw box '}
+    <ArrowIcon />
+  </a>
+</p>
+
+This model combines Screws and Materials in a thin dark-gray plastic box with
+round screw posts touching the walls, blind tapping pilots,
+an 8 mm flat-mating lid and four silver M4 screws. The 4.5 mm counterbores
+leave 3.5 mm below each screw head. The box and lid have separate source files.
+Change `gap` from 14 to 0 to close the lid; the screws follow its named seats.
+The pilot bores omit internal thread geometry. Follow the [Screws README](../../packages/screws.md) and
+[Materials README](../../packages/materials.md) for further sizes and options. In a local folder, run `npm install` in the corresponding
+example directory and choose **Reload folder**; the App does not run npm for you.
+Node-only packages, install scripts and npm workspaces are not browser features.
+
+## Inspect operation inputs
+
+<ModelExample id="intersect" />
+
+Select `intersect` to inspect the sphere and blank together. Move the
+sphere clear of the blank to get an empty intersection, then Undo to restore
+valid geometry. Failed operations keep available inputs inspectable; ordinary
+errors are shown in status and source diagnostics, not as a general viewport Fix.
+
+<p>
+  <a target="_blank" rel="noopener" href={appUrl('operations/loft.ts')}>
+    {'Open the curved duct '}
+    <ArrowIcon />
+  </a>
+</p>
+
+This model positions three sections with contacts and pivot rotations before lofting. Inspect `start`, `via`, `end` and the completed loft. See [relations](../relations/) for their coordinate frames.
+
+## Explore a complete project
+
+<ModelExample id="desktop-controller" />
+
+Open `enclosure.ts` and `panel.ts` alongside the assembly. Their functions return
+models with exposed mounting references. The assembly seats the panel against the
+enclosure and aligns the knob with the shaft opening using those names.
+The controller keeps its enclosure and panel in separate modules and its knob
+and keycap in small helpers below the assembly. It adds a connector opening,
+board placeholder, posts and screws, using the built-in modeling packages. The two independent npm examples
+above demonstrate actual installation instead.
+
+Switch to Render to inspect materials. Select the final group before
+[exporting STEP, STL or 3MF](../exporting/); selecting an individual component
+exports that context. This is a modeling study, not an electronics or
+manufacturing-validated design.
+
+## Let an agent continue the same model
+
+Use the mounting plate for the first [agent handoff](../agents/). Connect an
+agent and copy its prompt, then ask it to widen the plate while preserving the
+slot. Follow the agent to see its current source and render. Continue with a
+parameter edit yourself and Undo it; the agent must read the current file version
+before its next write. Render history records observations, not past code versions.

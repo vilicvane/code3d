@@ -102,7 +102,7 @@ test('clears cached constraint provenance without losing the stored relation or 
     assert.deepEqual(second.constraints[0].parameters, []);
     assert.deepEqual(second.parameters, []);
     assert.deepEqual(second.compositionTransform, first.compositionTransform);
-    assert.deepEqual(second.constraints[0].offset, [2, 3, 4]);
+    assert.deepEqual(second.constraints[0].offsets.at(-1)!.value, [2, 3, 4]);
     assert.deepEqual(second.mesh, first.mesh);
     // A cached Constraint also copies only the current evaluation's metadata.
     const shifted = defined(constraint).offset(1, 0, 0);

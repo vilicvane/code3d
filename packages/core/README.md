@@ -49,6 +49,11 @@ angles use degrees. Read [local coordinates](../web/src/content/docs/docs/concep
 and [relations](../web/src/content/docs/docs/guides/relations.mdx) before mixing
 origin changes, alignment, and rotation.
 
+Constraint `offset` and `rotate` calls execute in source order. Each transforms
+self from the preceding solution; zero values add no centering or orientation
+condition. Use point or axis alignment when a part must be centered. The App's
+gizmos edit or insert the corresponding call at its actual position in the chain.
+
 Build readable models from named intermediate values and public operations. A
 profile followed by extrusion, or solids combined with Boolean operations,
 keeps the construction understandable and editable by both people and agents.
@@ -168,7 +173,7 @@ of that geometry are not separate authoring definitions. Context outlines are
 visual references only, not snapping targets or imported geometry constraints.
 The select-surface-and-create UI is tracked separately within
 [#114](https://github.com/vilicvane/code3d/issues/114).
-Try [sketch-on-surface.ts](../app/examples/sketch-on-surface.ts).
+Try [mounting-plate.ts](../app/examples/sketches/mounting-plate.ts).
 
 ## Cached computations and custom primitives
 

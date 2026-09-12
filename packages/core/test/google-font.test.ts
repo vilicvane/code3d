@@ -83,7 +83,7 @@ test('font-face parsing retains all subsets, Unicode ranges and CSS precedence',
 
 test('a font composed of subsets lays out mixed characters on one baseline', () => {
   const latin = readFileSync(
-    new URL('../../app/examples/fonts/DejaVuSans.ttf', import.meta.url),
+    new URL('./fonts/DejaVuSans.ttf', import.meta.url),
   );
   const chinese = readFileSync(
     new URL('./fonts/NotoSansCJK-subset.otf', import.meta.url),

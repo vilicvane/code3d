@@ -76,14 +76,11 @@ export type ModelSpatialBinding = Readonly<{
   objects: readonly SpatialBindingObject[];
 }>;
 
-/** Coupled geometric equations require solving; a rigid preview cannot predict them. */
+/** Coupled relations require solving; a rigid preview cannot predict them. */
 export function canPreviewConstraintTransform(
   node: ModelSnapshotObject,
 ): boolean {
-  return (
-    node.constraints.length <= 1 ||
-    node.constraints.every(constraint => constraint.kind === 'on')
-  );
+  return node.constraints.length <= 1;
 }
 
 export function spatialBindings(
@@ -282,6 +279,7 @@ export function relationBindings(
   constraintId: string | null,
   committed: ReadonlyMap<string, SpatialObjectPreview>,
   parameterValues: ReadonlyMap<string, number>,
+  scope?: Readonly<{target: SourceTarget; evaluation: SourceTargetEvaluation}>,
 ): TransformGizmoBinding[] {
   const constraint =
     constraintId === null
@@ -297,30 +295,49 @@ export function relationBindings(
   )
     return [];
   const members = relationOccurrences(occurrences, constraint);
-  const offset = relationToolTarget(module, constraint, 'offset');
-  const rotation = relationToolTarget(module, constraint, 'rotate');
-  return [
-    ...positionBindings(occurrence, occurrences, constraint.id, offset),
-    ...(rotation
-      ? existingRelationRotationBindings(
-          module,
-          rotation,
-          occurrence,
-          members,
-          committed,
-          parameterValues,
-        )
-      : relationRotationBindings(occurrence, members, sourceRef)),
-  ];
+  const currentName = scope?.target.tool?.signature.name;
+  const current =
+    scope && (currentName === 'offset' || currentName === 'rotate')
+      ? {...scope.target, sourceRef: sourceRef}
+      : undefined;
+  const offset = current
+    ? currentName === 'offset'
+      ? current
+      : undefined
+    : relationToolTarget(module, constraint, 'offset');
+  const rotation = current
+    ? currentName === 'rotate'
+      ? current
+      : undefined
+    : relationToolTarget(module, constraint, 'rotate');
+  const positions = positionBindings(
+    occurrence,
+    occurrences,
+    constraint.id,
+    offset,
+  );
+  const rotations = rotation
+    ? existingRelationRotationBindings(
+        module,
+        rotation,
+        occurrence,
+        members,
+        committed,
+        parameterValues,
+      )
+    : relationRotationBindings(occurrence, members, sourceRef);
+  return currentName === 'rotate'
+    ? [...rotations, ...positions]
+    : [...positions, ...rotations];
 }
 
-/** Resolve the last matching authored call within this exact relation chain. */
+/** Resolve the nearest following authored call within this exact relation chain. */
 export function relationToolTarget(
   module: ModelModule,
   constraint: ConstraintSnapshot,
   name: 'offset' | 'rotate',
 ): SourceTarget | undefined {
-  for (const sourceRef of [...constraint.sourceRefs].reverse()) {
+  for (const sourceRef of constraint.sourceRefs) {
     const target = module.sourceTargets.find(
       target =>
         target.kind === 'constraint' &&
@@ -354,7 +371,10 @@ export function existingRelationRotationBindings(
       candidate.node.constraints.find(
         constraint => constraint.id === evaluation.constraintId,
       );
-    return evaluation && constraint?.rotation
+    const rotation = constraint?.rotations.find(rotation =>
+      rotation.sourceRefs.some(ref => sameSource(ref, target.sourceRef)),
+    );
+    return evaluation && rotation
       ? [
           {
             ...evaluation,
@@ -362,7 +382,7 @@ export function existingRelationRotationBindings(
             constraintSpatial: {
               kind: 'rotate' as const,
               nodeId: candidate.node.nodeId,
-              spatial: constraint.rotation,
+              spatial: rotation.spatial,
             },
           },
         ]
@@ -644,6 +664,11 @@ export function positionBindings(
     return [];
   }
   const receiver = offsetTarget?.sourceRef ?? constraint.sourceRefs.at(-1);
+  const offsetStage = constraint.offsets.find(
+    offset =>
+      receiver && offset.sourceRefs.some(ref => sameSource(ref, receiver)),
+  );
+  const offsetFrame = offsetStage?.frame ?? constraint.offsetFrame;
   const axisLabel = (axis: TransformAxis) =>
     offsetTarget?.tool?.signature.parameters.find(
       parameter => parameter.name === axis,
@@ -701,9 +726,9 @@ export function positionBindings(
       target,
       label: axisLabel(axis),
       value: target.value,
-      sensitivity: sensitivity * constraint.offsetDirection,
+      sensitivity,
       parameterKind: target.kind,
-      frame: constraint.offsetFrame,
+      frame: offsetFrame,
       // Earlier offset calls already contribute to the solved displacement.
       // Missing arguments belong to this call and each default to zero.
       completeArguments: receiver
@@ -729,14 +754,15 @@ export function positionBindings(
     return [
       {
         kind: 'expression',
+        offsetArguments: offsetStage?.value,
         mode: 'translate',
         anchor: 'bounds',
         axis,
         label: axisLabel(axis),
         value: 0,
-        sensitivity: constraint.offsetDirection,
+        sensitivity: 1,
         parameterKind: 'length',
-        frame: constraint.offsetFrame,
+        frame: offsetFrame,
         receiver: {sourceRef: receiver},
         occurrenceKeys,
       },
@@ -764,6 +790,9 @@ function positionOnlyTargets(
     if (
       axes.size === 1 &&
       !axes.has(undefined) &&
+      targetUsages.every(usage =>
+        sameSource(usage.operationRef, targetUsages[0].operationRef),
+      ) &&
       targetUsages.every(
         ({sensitivity}) =>
           Number.isFinite(sensitivity) && Math.abs(sensitivity) > 1e-9,

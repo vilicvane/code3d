@@ -116,9 +116,10 @@ execution and do not depend on the App.
 
 For example, `box(20, 30, 40).rotate()` previews the unchanged body, and
 `.rotate(30)` previews a 30-degree X rotation. Their missing-angle diagnostics
-remain until all three arguments are supplied. Relation `offset()` behaves like
-explicit `offset(0, 0, 0)`, including the existing tangential placement rules;
-`pivot()` selects self's local origin. Geometry IDs, reference axes and input
+remain until all three arguments are supplied. Relation `offset()` translates
+self from the relation's solution in the target reference axes. Like explicit
+`offset(0, 0, 0)`, omitting its arguments preserves that solution and adds no
+tangential constraints. `pivot()` selects self's local origin. Geometry IDs, reference axes and input
 models still need explicit values.
 
 Explicit arguments remain subject to their normal validation: `box(0)`, for
@@ -205,7 +206,7 @@ Rotating the face rotates its extrusion direction too.
 `loft` takes one face per section and preserves a single corresponding hole, with
 or without a spine. Different hole counts or multiple unpaired holes report an
 error rather than silently filling holes. Persistent region IDs and general
-multi-hole correspondence are not available yet. Try `examples/sketch-modeling.ts`
+multi-hole correspondence are not available yet. Try `examples/sketches/regions.ts`
 in the App for a plate, multiple cutting tools and a hollow loft.
 
 ### Sketch placement and model context
@@ -234,8 +235,8 @@ reference plane.
 Select `opening` in the App to edit with read-only model outlines in the sketch's
 local plane, or `profile` for the original local view. Both write the same geometry
 array. The outlines do not become snapping targets or external geometry constraints.
-See `examples/sketch-on-surface.ts`; the surface-selection creation entry is still
-being implemented under [#114](https://github.com/vilicvane/code3d/issues/114).
+See `examples/sketches/mounting-plate.ts` for a slotted plate. Create the relation
+in code; selecting a face does not automatically generate a related sketch.
 
 ## Composition and boolean operations
 
@@ -391,8 +392,9 @@ Tangential position and orientation are preserved. Targets must be directional
 bounds. Infinite reference lines and planes cannot supply a finite source extent.
 
 Return an array from `relate()` to combine positional conditions. Inconsistent
-positions report a conflict. `offset(x, y, z)` pins matching bound centers in
-the target frame, including explicit zero. `bound.flip()` reverses contact
+positions report a conflict. `offset(x, y, z)` translates self from the original
+solution in the target reference frame. Explicit zero changes nothing; use
+point or axis alignment for centering. `bound.flip()` reverses contact
 facing without changing geometry or reference axes.
 
 `relate` owns self's placement, allowing `self.on(base.up)`,
@@ -410,8 +412,8 @@ Curve–curve alignment is directed; `lineReference.reverse()` selects the oppos
 direction. Surface–surface alignment matches normal sense; `faceReference.flip()`
 selects the opposite facing. Neither changes the reference axes or geometry.
 Point membership ignores direction. `align(...).offset(x,y,z)` translates self
-in the target axes after alignment, before explicit rotations; zero preserves
-the relation's free modes. Use point references for additional positioning.
+in the target axes at that point in the chain; zero preserves the relation's
+free modes. Offsets and rotations execute in call order. Use point references for additional positioning.
 
 - `constraint.rotate(x, y, z)`: rotate around self's origin.
 - `constraint.pivot([x, y, z]).rotate(x, y, z)`: a pivot in self's local frame.

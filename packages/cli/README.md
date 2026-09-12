@@ -72,7 +72,7 @@ See the [agent Markdown entry](../../docs/agents.md) for the required workflow a
 complete topic directory. Detailed pages cover [connection](../../docs/agents/connection.md),
 [files and npm dependencies](../../docs/agents/files.md), [cursor and arguments](../../docs/agents/cursor.md),
 [rendering and topology](../../docs/agents/observation.md), and [recovery](../../docs/agents/recovery.md).
-The [website introduction](../web/src/content/docs/docs/guides/agents.md) explains
+The [website introduction](../web/src/content/docs/docs/guides/agents.mdx) explains
 collaboration features for App users.
 
 ## Development

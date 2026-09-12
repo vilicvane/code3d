@@ -476,6 +476,7 @@
     align-items: center;
   }
   .demo-source pre {
+    max-height: 32rem;
     margin: 0;
     padding: 35px 28px;
     font: 12px/2 var(--c3-mono);

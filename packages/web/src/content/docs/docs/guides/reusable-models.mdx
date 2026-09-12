@@ -8,7 +8,16 @@ import ModelExample from '../../../../components/ModelExample.astro';
 A reusable model is an ordinary function. Pass dimensions in, return a model
 value, and use `expose()` to name the elements that other parts should attach to.
 
-<ModelExample id="locating-pin" />
+<ModelExample id="annotations" />
+
+The spacer in `annotations.ts` demonstrates parameter defaults, limits and
+Arguments presets. Select its call to edit dimensions or inspect another preset.
+An ordinary function remains usable without annotations; the comments supply
+its editing interface.
+
+For a component with named attachment geometry:
+
+<ModelExample id="expose" />
 
 ## Name the interface
 
@@ -31,12 +40,15 @@ Exposing a geometric model gives callers a topology reference to it:
 ```ts
 import {box, group} from '@code3d/core';
 
-const plate = box(32, 4, 24);
-const assembly = group([plate]).expose({
-  body: plate,
-  mountingFace: plate.surface(1),
-});
+function makeMountingPlate() {
+  const plate = box(32, 4, 24);
+  return group([plate]).expose({
+    body: plate,
+    mountingFace: plate.surface(4),
+  });
+}
 
+const assembly = makeMountingPlate();
 const boundary = assembly.mountingFace.edges();
 const center = assembly.mountingFace.center;
 ```

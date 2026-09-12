@@ -53,6 +53,8 @@ export async function measureRelationFocus() {
       color: string;
     }>;
     selectionBox?: number;
+    ownerPositions: number[][];
+    expectedOwnerPosition: readonly number[];
     topologyHighlights: number;
     exported: boolean;
   }> = [];
@@ -118,7 +120,12 @@ export async function measureRelationFocus() {
         '/* target */',
         label === 'two constraints' ? 'on( /* target */' : 'offset(',
         ...(label === 'two constraints'
-          ? ['other.front', 'on(other.front']
+          ? [
+              'self.on( /* target */',
+              'other.front',
+              'on(other.front',
+              'self.on(other.front)',
+            ]
           : []),
         '/* target */',
       ];
@@ -130,6 +137,18 @@ export async function measureRelationFocus() {
           scope.evaluation,
         )!;
         const primary = focusedConstraintSide(scope.evaluation, constraint);
+        viewport['root'].updateMatrixWorld(true);
+        const ownerId = scope.evaluation.constraintOwnerNodeId!;
+        const ownerPositions = viewport['root'].children
+          .filter(
+            root =>
+              (root.userData.sourceNodeId ??
+                viewport['occurrences'].get(root.userData.selectionKey)?.node
+                  .nodeId) === ownerId,
+          )
+          .map(root => root.getWorldPosition(new THREE.Vector3()).toArray());
+        const expectedOwnerPosition =
+          module.objects.get(ownerId)!.compositionTransform.position;
         const drawn: (typeof samples)[number]['drawn'] = [];
         const bodies: (typeof samples)[number]['bodies'] = [];
         let topologyHighlights = 0;
@@ -243,6 +262,8 @@ export async function measureRelationFocus() {
             drawn: [...drawn],
             bodies: [...bodies],
             selectionBox,
+            ownerPositions,
+            expectedOwnerPosition,
             topologyHighlights,
             exported,
           });

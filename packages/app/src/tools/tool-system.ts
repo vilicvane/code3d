@@ -100,6 +100,7 @@ type ToolAction =
     }>
   | Readonly<{
       kind: 'relation.offset';
+      offsetArguments?: Vec3;
       receiver: SourceAnchor;
       occurrenceKeys: readonly string[];
       delta: Vec3;
@@ -660,7 +661,13 @@ class OffsetRelationResolver implements ToolIntentResolver {
     const resolution = expressionPlan(
       intent,
       intent.receiver,
-      receiver => offsetCallSource(receiver, 'offset', intent.delta),
+      receiver =>
+        offsetCallSource(
+          receiver,
+          'offset',
+          intent.delta,
+          intent.offsetArguments,
+        ),
       'Adjust relation offset',
       context,
     );

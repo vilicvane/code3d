@@ -1658,6 +1658,26 @@ export class ModelViewport {
     const occurrence = this.getSelected();
     const scope = this.renderedSourceScope();
     if (occurrence && scope && this.module) {
+      const relation = scope.evaluation;
+      const selection = relation.constraintSpatial?.kind;
+      if (
+        relation.constraintId &&
+        relation.constraintOwnerNodeId === occurrence.node.nodeId &&
+        (!selection || selection === 'rotate') &&
+        !relation.operationId
+      ) {
+        const bindings = relationBindings(
+          this.module,
+          occurrence,
+          this.renderedOccurrences(),
+          relation.constraintId,
+          this.committedSpatialPreviews,
+          this.spatialParameterValues,
+          scope,
+        );
+        this.transformGizmo.attach(occurrence.object, bindings);
+        return;
+      }
       const bindings = spatialBindings(
         this.module,
         scope,
@@ -1769,25 +1789,33 @@ export class ModelViewport {
       occurrenceOffset?.[2] ?? 0,
     ];
     for (const constraint of occurrence.node.constraints) {
-      const localOffset: [number, number, number] = [0, 0, 0];
       for (const parameter of constraint.parameters) {
         const previewValue = this.parameterPreviews.get(parameter.target.id);
-        if (previewValue === undefined || parameter.operation !== 'offset') {
+        if (previewValue === undefined || parameter.operation !== 'offset')
           continue;
-        }
         const axis = axisIndex(parameter.argument);
-        if (axis !== undefined) {
-          localOffset[axis] +=
-            (previewValue - parameter.target.value) * parameter.sensitivity;
-        }
+        if (axis === undefined) continue;
+        const stage = constraint.offsets.find(stage =>
+          stage.sourceRefs.some(
+            ref =>
+              ref.file === parameter.operationRef.file &&
+              ref.start === parameter.operationRef.start &&
+              ref.end === parameter.operationRef.end,
+          ),
+        );
+        if (!stage) continue;
+        const localOffset = new THREE.Vector3();
+        localOffset.setComponent(
+          axis,
+          (previewValue - parameter.target.value) * parameter.sensitivity,
+        );
+        localOffset.applyQuaternion(
+          new THREE.Quaternion(...stage.frame.quaternion),
+        );
+        offset[0] += localOffset.x;
+        offset[1] += localOffset.y;
+        offset[2] += localOffset.z;
       }
-      const frame = new THREE.Quaternion(...constraint.offsetFrame.quaternion);
-      const worldOffset = new THREE.Vector3(...localOffset).applyQuaternion(
-        frame,
-      );
-      offset[0] += worldOffset.x * constraint.offsetDirection;
-      offset[1] += worldOffset.y * constraint.offsetDirection;
-      offset[2] += worldOffset.z * constraint.offsetDirection;
     }
     return offset;
   }

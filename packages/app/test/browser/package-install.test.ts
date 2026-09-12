@@ -77,7 +77,7 @@ test(
         return;
       errors.push(error.message);
     });
-    const route = '#/file/examples/patterns/post-array/model.ts';
+    const route = '#/file/examples/npm/model.ts';
     // Do not inject a project or files: the public link must work for a new user.
     await page.goto(process.env.CODE3D_TEST_URL + route);
     await page.getByText('Ready', {exact: true}).waitFor({timeout: 90_000});
@@ -86,7 +86,7 @@ test(
       const {openBrowserProjectFileSystem} =
         await import('/src/project/filesystem.ts');
       const files = await openBrowserProjectFileSystem();
-      const root = '/examples/patterns/post-array';
+      const root = '/examples/npm';
       return {
         source: new TextDecoder().decode(
           await files.readFile(root + '/model.ts'),
@@ -155,9 +155,7 @@ test(
       'reloading the manifest preserves the same source text',
     );
     await page.evaluate(() =>
-      window.packageApp.codeEditor.openFile(
-        '/examples/patterns/post-array/model.ts',
-      ),
+      window.packageApp.codeEditor.openFile('/examples/npm/model.ts'),
     );
     await page.getByText('Ready', {exact: true}).waitFor({timeout: 90_000});
 
@@ -208,7 +206,7 @@ test(
     // The package's implementation is also a directly addressable, read-only document.
     await page.goto(
       process.env.CODE3D_TEST_URL +
-        '#/file/examples/patterns/post-array/node_modules/just-range/index.mjs',
+        '#/file/examples/npm/node_modules/just-range/index.mjs',
     );
     await page.waitForFunction(() =>
       window.packageApp?.codeEditor

@@ -77,7 +77,7 @@ test(
             o => o.node.nodeId,
           ),
           bindings: viewport['transformGizmo']['axes'].flatMap(axis =>
-            axis.binding
+            axis.binding && axis.controls.getHelper().visible
               ? [{mode: axis.binding.mode, value: axis.binding.value}]
               : [],
           ),

@@ -152,10 +152,23 @@ export function offsetCallSource(
   source: string,
   method: 'offset' | 'originOffset',
   delta: Vec3,
+  currentArguments?: Vec3,
 ): string {
   if (delta.every(value => value === 0)) return source;
   const {expression, prefixLength} = parseExpression(source);
   const receiver = unparenthesize(expression);
+  if (
+    currentArguments &&
+    ts.isCallExpression(receiver) &&
+    ts.isPropertyAccessExpression(receiver.expression) &&
+    receiver.expression.name.text === method &&
+    receiver.arguments.some(argument => ts.isSpreadElement(argument))
+  ) {
+    return setCallArgumentsSource(
+      source,
+      currentArguments.map((value, axis) => value + delta[axis]),
+    );
+  }
   // A spread has no stable per-axis argument span. Append one editable offset;
   // later gestures will edit that outer call, never append another one.
   if (

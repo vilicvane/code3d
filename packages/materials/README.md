@@ -78,7 +78,7 @@ Use the complete example linked below to explore all ten presets.
 
 - [Preset factories and public types](src/library/index.ts).
 - [Material behavior tests](test/materials.test.ts) and [type examples](test/public-api.types.ts).
-- [All ten presets in a complete model](../app/examples/material-presets.ts).
+- [A screw box using plastic and steel](../app/examples/assemblies/screw-box/model.ts).
 - [Core material integration](../core/README.md#materials-and-entry-points) and
   [agent render options](../../docs/agents/observation.md).
 

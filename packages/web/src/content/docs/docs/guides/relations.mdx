@@ -7,7 +7,7 @@ import ModelExample from '../../../../components/ModelExample.astro';
 import SourceCode from '../../../../components/SourceCode.astro';
 import ArrowIcon from '../../../../components/ArrowIcon.astro';
 import {appUrl, sitePath} from '../../../../lib/site';
-import source from '../../../../../../app/examples/combined-constraints.ts?raw';
+import source from '../../../../../../app/examples/constraints/combined-constraints.ts?raw';
 
 A relation describes how one part sits against another. It is attached to a
 model value and resolved when the parts are composed. The part keeps its own
@@ -15,7 +15,7 @@ model value and resolved when the parts are composed. The part keeps its own
 those geometry coordinates, while a relation's `offset()` participates in
 placement. Multiple relations are solved together with their offsets.
 
-<ModelExample id="relation-preview" />
+<ModelExample id="relate" />
 
 ## Touch a directional bound
 
@@ -29,8 +29,12 @@ geometry contributes its extent. A tilted shape still has a support boundary
 in the target direction; `on` never rotates it. Without an offset, its position
 along the boundary plane stays unchanged.
 
-An explicit `offset(x, y, z)` fixes the matching bound centers in the **target
-reference frame**, including when all values are zero. Repeated offsets add.
+An explicit `offset(x, y, z)` translates self from the original solution in the
+**target reference frame**. Zero leaves the result unchanged; it never adds
+centering constraints. Use explicit point or axis alignment to center parts.
+Consecutive offsets in the same frame add. Offsets and rotations execute in
+call order: a translation before an external-axis rotation moves with that
+rotation; the same translation after it does not.
 `base.up.flip()` reverses the side of contact while keeping that frame and the
 geometry unchanged. Arbitrary models or topology elements are not valid targets.
 
@@ -38,10 +42,14 @@ geometry unchanged. Arbitrary models or topology elements are not valid targets.
 
 Return an array from `relate()` to solve several relations together:
 
-<SourceCode source={source} file="combined-constraints.ts" />
+<SourceCode source={source} file="constraints/combined-constraints.ts" />
 
 <p>
-  <a href={appUrl('combined-constraints.ts')} target="_blank" rel="noopener">
+  <a
+    href={appUrl('constraints/combined-constraints.ts')}
+    target="_blank"
+    rel="noopener"
+  >
     {'Open this example in the App '}
     <ArrowIcon />
   </a>
@@ -81,12 +89,16 @@ surface's normal sense. These change direction metadata while preserving the
 reference axes. Point membership ignores direction; a curve lying on a surface
 does not gain an arbitrary heading in that surface.
 
-An align offset translates self in the target reference axes after alignment
-and before explicit rotations. Zero adds no extra position condition. It does
-not pin centers as an on offset does. Source and target can be written in either
-order; `relate` still owns the movable self.
+Both on and align offsets translate self in the target reference axes from the
+original solution at that point in the chain. Zero adds no position condition.
+Source and target can be written in either order; `relate` still owns the movable
+self and the offset direction.
 
-<ModelExample id="geometric-alignment" />
+<ModelExample id="expose" />
+
+The pin function exposes its mounting face, tip face and centerline. The cap
+aligns its axis to the pin and touches its tip. These two relations express the
+actual fit; changing the pin's height does not require recomputing the cap position.
 
 Relation curves keep their actual shape and serve as the arrow shaft. Only
 the arrowhead is added at the directed endpoint (or seam for a closed curve),
@@ -97,9 +109,9 @@ both ends.
 Arrowheads keep the same screen size as you zoom. Unsupported geometry,
 geometric incompatibility, and numerical nonconvergence have separate errors.
 
-For several relations involving align on one model, edit the numeric parameters
-or source so the joint system is solved for each change. Spatial drags are
-available for a single align relation; a coupled system may respond differently
+For several relations on one model, edit the numeric parameters or source so
+the joint system is solved for each change. Spatial drags are available for a
+single relation; a coupled system may respond differently
 from a rigid move, so it uses parameter editing instead.
 
 ## Choose a rotation pivot or axis
@@ -123,7 +135,7 @@ All explicit orientations on one self must agree.
 
 ### Bend a loft with explicit rotations
 
-<ModelExample id="bound-rotation" />
+<ModelExample id="loft" />
 
 The octagonal and rectangular sections first touch the circle's `up` bound,
 then turn 45° and 90° around a pivot 50 units along self's X axis.
@@ -146,7 +158,9 @@ composition peers visible while highlighting the selected anchor.
 
 The callback parameter in `relate(part => ...)` is the new related model
 value. Place the cursor on its declaration or a use of `part` inside the
-callback to inspect the same relationship. Even before you write a consuming
+callback to inspect its completed chain. Its tools edit the nearest following
+offset or rotation, with the preview including later operations in that chain.
+Even before you write a consuming
 `group` or `loft`, the relation context shows the participants in their solved
 positions. Selecting the related model's standalone binding shows it in its local
 frame. Operations preserve the observable meaning of existing model values.
@@ -155,13 +169,13 @@ Within a relation chain, the cursor previews the result through the selected
 call: `on`/`align` show the base relation, and each `offset` or `rotate` shows its
 own result. `pivot`, `pivotVertex`, and `around` show the preceding pose with
 the selected rotation reference. Later calls do not move this preview or its
-handles. Earlier `relate` calls remain in effect; sibling constraints in the
-current callback are combined when inspecting the completed `relate` result.
-If an intermediate stage conflicts with inherited constraints, the App reports
+handles. Earlier `relate` calls and the other constraints returned by the current
+callback remain in effect and are solved together. Only the selected chain is
+replaced by its selected stage. If that stage conflicts with another constraint, the App reports
 that stage's preview error and keeps the valid final model available.
 
 <p>
-  <a href={sitePath('examples/relation-preview/')}>
+  <a href={sitePath('examples/relate/')}>
     Step through contact, target, offset, and rotation in the relation preview →
   </a>
 </p>
@@ -226,9 +240,19 @@ and adjusts it by an increment. For example, an X movement of `2` changes
 Another movement of `3` combines that increment into `+ 5`. Returning by `5`
 removes it. The tool does not change the inner `8` or keep nesting offset calls.
 
-Only the outermost offset is edited. When no offset is present, or its arguments
-cannot be edited axis by axis, the tool appends one offset and reuses it on later
-drags. A shared expression changes all of its runtime occurrences; it is not
+Selecting self shows the complete chain. Its position and rotation tools edit
+the nearest following `offset` and `rotate` respectively; if that operation is
+absent, they append one at the end of the chain.
+
+When an `offset` or `rotate` is selected, the matching tool edits that call.
+Hold `Alt` to use the other tool. It inserts its operation immediately after the selected call,
+before any remaining chain. Handles and previews use the frame of that exact
+edit, including the effect of later operations. A spread argument is replaced
+with the current three values when editing that call.
+
+A safe shared parameter can update multiple instances of the same call. If it
+also controls a different operation, dragging adjusts the selected expression
+instead. A shared expression changes all of its runtime occurrences; it is not
 an override for only the clicked part.
 
 Release to commit the preview, or press `Esc` while dragging to cancel without

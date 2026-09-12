@@ -3,7 +3,7 @@
 It retains space, B, 8, i, 中, 文, 字, 测 and 试, including original cubic outlines.
 Generated using fontTools 4.64.0 `Subsetter`, preserving all name records.
 The adjacent SIL Open Font License applies. Latin quadratic/TTF tests use the
-unmodified DejaVu Sans font shipped in `packages/app/examples/fonts`.
+unmodified DejaVu Sans font kept here as `DejaVuSans.ttf` (see `LICENSE-DejaVu.txt`).
 
 `Roboto-variable-subset.ttf` is the Google Fonts Latin WOFF2 subset returned for
 `https://fonts.googleapis.com/css2?family=Roboto:wght@450` to Chrome 153 on

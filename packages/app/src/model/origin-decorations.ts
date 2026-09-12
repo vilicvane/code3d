@@ -24,8 +24,20 @@ export function originDecoration(
 export const originSourceDecoration: SourceDecorationProvider = {
   id: 'model-origin',
   previewBehavior: 'hide',
-  decorations({module, evaluation}) {
-    const relation = evaluation.constraintSpatial;
+  decorations({module, target, evaluation}) {
+    const owner =
+      evaluation.constraintPreview ??
+      module.objects.get(evaluation.constraintOwnerNodeId ?? '');
+    const nearest =
+      target.kind === 'value' && owner
+        ? owner.constraints.find(
+            constraint => constraint.id === evaluation.constraintId,
+          )?.rotations[0]?.spatial
+        : undefined;
+    const relation =
+      nearest && owner
+        ? {kind: 'rotate' as const, spatial: nearest, nodeId: owner.nodeId}
+        : evaluation.constraintSpatial;
     if (relation) {
       const {spatial, nodeId, kind} = relation;
       if (kind !== 'around' && !spatial.axisOnly)
@@ -43,7 +55,7 @@ export const originSourceDecoration: SourceDecorationProvider = {
       const node = module.objects.get(nodeId);
       if (node?.operation.spatial)
         return [originDecoration(nodeId, node.origin)];
-      const rotation = node?.constraints.at(-1)?.rotation;
+      const rotation = node?.constraints.at(-1)?.rotations[0]?.spatial;
       return rotation ? [originDecoration(nodeId, rotation.origin)] : [];
     });
   },

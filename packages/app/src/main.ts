@@ -1,4 +1,5 @@
 import {ToolDragPreviewView} from './ui/tool-drag-preview';
+import {movedExamplePaths} from '../render-samples/catalog';
 import {resolveRenderView} from '@code3d/agent';
 import {
   compareTopologyIds,
@@ -203,7 +204,14 @@ const localPackageFiles = directoryWorkspaceId
       developmentWorkspaces,
     )
   : projectFileSystem;
-const requestedFile = filePathFromRoute(window.location.hash);
+let requestedFile = filePathFromRoute(window.location.hash);
+if (
+  requestedFile &&
+  movedExamplePaths[requestedFile] &&
+  !(await localPackageFiles.stat(requestedFile))
+) {
+  requestedFile = movedExamplePaths[requestedFile];
+}
 let initialFileError: unknown;
 const initialProject: ModelProject = await loadInitialProject();
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -1538,6 +1546,15 @@ async function activateProjectFile(
 ): Promise<void> {
   const version = ++fileOpenVersion;
   if (cancelled()) return;
+  if (
+    path &&
+    movedExamplePaths[path] &&
+    !codeEditor.fileState(path) &&
+    !(await localPackageFiles.stat(path))
+  ) {
+    if (version !== fileOpenVersion || cancelled()) return;
+    path = movedExamplePaths[path];
+  }
   if (path && !codeEditor.fileState(path)) {
     let source: string;
     try {
@@ -3130,6 +3147,7 @@ function positionIntent(
   delta[positionAxisIndex(binding.axis)] = value;
   return {
     kind: 'relation.offset',
+    offsetArguments: binding.offsetArguments,
     receiver: binding.receiver,
     occurrenceKeys: binding.occurrenceKeys,
     delta,

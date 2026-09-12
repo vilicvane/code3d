@@ -13,7 +13,7 @@ function option(name, fallback) {
   return index < 0 ? fallback : process.argv[index + 1];
 }
 
-const model = option('model', 'first-model');
+const model = option('model', 'desktop-stand');
 const output = path.resolve(
   packageDirectory,
   option('output', `rendered/${model}.png`),
@@ -44,7 +44,7 @@ const browser = cdpEndpoint
   ? await chromium.connectOverCDP(cdpEndpoint)
   : await chromium.launch({headless: true});
 const ownsBrowser = !cdpEndpoint;
-const context = browser.contexts()[0] ?? (await browser.newContext());
+const context = await browser.newContext();
 const page = await context.newPage();
 await page.setViewportSize({width, height});
 
@@ -57,7 +57,7 @@ try {
     .locator('html[data-render-state="ready"], html[data-render-state="error"]')
     .waitFor({
       state: 'attached',
-      timeout: 60_000,
+      timeout: 120_000,
     });
   if (
     (await page.locator('html').getAttribute('data-render-state')) === 'error'
@@ -70,7 +70,7 @@ try {
   await writeFile(output, Buffer.from(encoded, 'base64'));
   console.log(path.relative(process.cwd(), output));
 } finally {
-  await page.close();
+  await context.close();
   if (ownsBrowser) await browser.close();
   await server.close();
 }

@@ -1,0 +1,8 @@
+{
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@code3d/core": "latest",
+    "just-range": "4.2.0"
+  }
+}

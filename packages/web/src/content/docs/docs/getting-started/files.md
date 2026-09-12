@@ -104,12 +104,12 @@ project** appears when opening a project for the first time, loading new
 dependencies, or refreshing changed packages, configuration or external files.
 Changing a dimension or expression does not repeat that preparation.
 
-Try `/examples/patterns/post-array/model.ts` in the App's file explorer. This
+Try `/examples/npm/model.ts` in the App's file explorer. This
 bundled example has its own `package.json` and uses `just-range` from npm to
 place a row of posts. Select the `postArray()` call to edit the count, spacing
 and height in the parameter panel. The example is included in every browser
 workspace; it does not depend on files from another browser profile.
-In a local project, run `npm install` inside `examples/patterns/post-array`,
+In a local project, run `npm install` inside `examples/npm`,
 then choose **Reload folder** before running this example.
 
 ```json

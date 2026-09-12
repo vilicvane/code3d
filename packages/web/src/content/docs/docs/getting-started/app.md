@@ -179,8 +179,11 @@ evaluated before it failed.
 
 Inside `relate(part => ...)`, the parameter declaration and uses of `part`
 show the related model alongside the other participants. Named elements and
-topology references share that context. Each call in the relation chain shows
-its own stage, before later offsets or rotations. The current pair's markers
+topology references share that context. Selecting the bare parameter shows its
+completed chain so its tools can edit the nearest following offset or rotation.
+Each explicit call in the relation chain shows
+its own stage, before later offsets or rotations in that chain. The other
+constraints remain active and are solved together in every preview. The current pair's markers
 distinguish the selected side from its counterpart and the dimmed surrounding
 objects. See
 [inspecting relation scope](../../guides/relations/#inspect-the-right-scope).
@@ -233,10 +236,14 @@ and arrows, while `rotate` offers angle inputs and rotation rings. Try the
 [origin and rotation guide](../../guides/origins-and-rotation/).
 In a composition preview, selecting a member or subgroup positioned with
 `relate()` shows translation arrows by default. Hold `Alt` to show rotation rings
-when both tools are available, and release it to restore translation. The tool
+when both tools are available, and release it to restore translation. On an
+explicit `rotate` call the defaults reverse: rings are shown first and `Alt`
+switches to translation. The tool
 stays fixed during a drag; `Alt` during a translation drag still temporarily
 disables grid snapping. Dragging a ring
-edits the latest `.rotate(...)` in its relation, preserving its pivot or axis.
+edits the nearest following `.rotate(...)` when self is selected, preserving its
+pivot or axis. On a selected offset/rotate, the matching tool edits that call
+and the other tool inserts its operation immediately after it.
 A point marker shows that rotation’s pivot when the member is selected and
 remains visible while dragging.
 If none exists, it adds a rotation about that member's origin and local axes.

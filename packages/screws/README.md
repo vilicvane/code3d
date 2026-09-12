@@ -56,7 +56,7 @@ npm install @code3d/core @code3d/screws
 
 - [Public exports](src/library/index.ts), [ISO 4762 definitions and builders](src/library/iso-4762.ts),
   and [thread geometry](src/library/thread.ts).
-- [Complete mounting example](../app/examples/website/fastener.ts) and [behavior tests](test/iso-4762.test.ts).
+- [Complete mounting example](../app/examples/assemblies/screw-box/model.ts) and [behavior tests](test/iso-4762.test.ts).
 - [Core relations and topology](../core/README.md), [modeling reference](../web/src/content/docs/docs/reference/screws.mdx),
   and [agent modeling workflow](../../docs/agents/modeling.md).
 

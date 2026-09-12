@@ -173,8 +173,8 @@ export default group([base, top], 'Assembly');`;
       assert.deepEqual(
         bounds.bounds.map(point => point.map(value => Math.round(value))),
         [
-          [-5, -16, -15],
-          [5, 8, 15],
+          [-5, -10, -15],
+          [5, 14, 15],
         ],
       );
       bounds.delete();

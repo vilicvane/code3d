@@ -16,7 +16,7 @@ test(
   async t => {
     assert.ok(process.env.CODE3D_TEST_URL);
     const source = await readFile(
-      new URL('../../examples/material-presets.ts', import.meta.url),
+      new URL('../fixtures/material-presets.ts', import.meta.url),
       'utf8',
     );
     const browser = await chromium.connectOverCDP(

@@ -56,7 +56,9 @@ import {
   axisRotation,
   solveBodies,
   type Body,
-  type BodyRotation,
+  beforeRelation,
+  afterRelation,
+  type BodyAction,
 } from './relation-solver.js';
 import {estimateRetainedBytes} from './retained-memory.js';
 import {shellWithTopology} from './shell.js';
@@ -76,6 +78,7 @@ import {
   rotation,
   rotationAround,
   translation,
+  transformsAreEquivalent,
   type Quaternion,
   type RigidTransform,
   type Vec3,
@@ -180,11 +183,18 @@ export type ConstraintSnapshot = Readonly<{
   target: ConstraintAnchorSnapshot;
   sourceElement: ElementSnapshot;
   targetElement: ElementSnapshot;
-  offsetDirection: 1 | -1;
-  offset: Vec3;
+  /** Target axes for appending an offset at the end of this chain. */
   offsetFrame: Transform;
-  /** Latest authored rotation, expressed in the fully solved self frame. */
-  rotation?: ModelSpatialOperation;
+  offsets: readonly Readonly<{
+    value: Vec3;
+    frame: Transform;
+    sourceRefs: readonly SourceRef[];
+  }>[];
+  /** Each authored rotation, expressed in the fully solved self frame. */
+  rotations: readonly Readonly<{
+    spatial: ModelSpatialOperation;
+    sourceRefs: readonly SourceRef[];
+  }>[];
   sourceRefs: readonly SourceRef[];
   parameters: readonly ParameterUsage[];
 }> &
@@ -431,8 +441,7 @@ type StoredConstraint = Readonly<{
   kind: 'on' | 'align';
   source: RelationReference;
   target: RelationReference;
-  rotations: readonly ConstraintRotation[];
-  offset: Vec3 | undefined;
+  actions: readonly ConstraintAction[];
 }>;
 
 // An omitted model refers to relate's self, including after immutable copies.
@@ -445,6 +454,8 @@ type ConstraintRotation = Readonly<{
   pivot: PivotSelection;
   angles: Vec3 | number;
 }>;
+type ConstraintAction = (ConstraintRotation | Readonly<{offset: Vec3}>) &
+  Readonly<{sourceRefs?: readonly SourceRef[]}>;
 type ConstraintSpatialSelection = Readonly<{
   kind: ConstraintSpatialReference['kind'];
   pivot: PivotSelection;
@@ -1156,8 +1167,7 @@ export abstract class ConstraintExpression {
     protected readonly kind: StoredConstraint['kind'],
     protected readonly source: AnchorReference,
     protected readonly target: AnchorReference,
-    protected readonly displacement: Vec3 | undefined,
-    protected readonly rotations: readonly ConstraintRotation[],
+    protected readonly actions: readonly ConstraintAction[],
     protected readonly context: RelateContext | undefined,
     protected readonly constraintId: string,
     previous?: ConstraintExpression,
@@ -1216,13 +1226,17 @@ export abstract class ConstraintExpression {
       kind: this.kind,
       source: bind(this.source),
       target: bind(this.target),
-      offset: this.displacement,
-      rotations: this.rotations.map(action => ({
+      actions: this.actions.map(action => ({
         ...action,
-        pivot:
-          action.pivot.kind === 'around'
-            ? {...action.pivot, axis: bind(action.pivot.axis)}
-            : action.pivot,
+        sourceRefs: [...valueTrace(action).sourceRefs],
+        ...('pivot' in action
+          ? {
+              pivot:
+                action.pivot.kind === 'around'
+                  ? {...action.pivot, axis: bind(action.pivot.axis)}
+                  : action.pivot,
+            }
+          : {}),
       })),
     };
     valueTraces.set(stored, {
@@ -1252,8 +1266,7 @@ export abstract class ConstraintExpression {
             },
           }
         : this.spatialOperation;
-    return this.context.original[relationPreview](
-      this.context.self.nodeId,
+    return this.context.self[relationPreview](
       this.storeFor(this.context.self, this.context.original),
       selection,
     );
@@ -1265,23 +1278,13 @@ export class Constraint extends ConstraintExpression {
     kind: StoredConstraint['kind'],
     source: AnchorReference,
     target: AnchorReference,
-    displacement: Vec3 | undefined = undefined,
-    rotations: readonly ConstraintRotation[] = [],
+    actions: readonly ConstraintAction[] = [],
     context = activeRelate,
     constraintId = `constraint-${nextConstraintId++}`,
     previous?: ConstraintExpression,
     spatialOperation?: ConstraintSpatialSelection,
   ) {
-    super(
-      kind,
-      source,
-      target,
-      displacement,
-      rotations,
-      context,
-      constraintId,
-      previous,
-    );
+    super(kind, source, target, actions, context, constraintId, previous);
     this.spatialOperation = spatialOperation;
   }
   /** @internal */
@@ -1299,9 +1302,8 @@ export class Constraint extends ConstraintExpression {
     return new Constraint(kind, source, target);
   }
   /**
-   * In the target reference axes, on() pins matching bound centers; align()
-   * translates self after alignment, retaining the relation's free modes.
-   * Explicit zero pins tangential coordinates for on() only.
+   * Translate self from the relation's solution in the target reference axes,
+   * in call order. Retain the relation's free modes; zero is identity.
    * @code3d.param x {kind: 'length', default: 0, label: 'ΔX'}
    * @code3d.param y {kind: 'length', default: 0, label: 'ΔY'}
    * @code3d.param z {kind: 'length', default: 0, label: 'ΔZ'}
@@ -1309,17 +1311,20 @@ export class Constraint extends ConstraintExpression {
   offset(x: number, y: number, z: number): Constraint;
   offset(x = 0, y = 0, z = 0): Constraint {
     assertFiniteVector('offset', [x, y, z]);
-    return new Constraint(
+    const action: ConstraintAction = {offset: [x, y, z]};
+    const result = new Constraint(
       this.kind,
       this.source,
       this.target,
-      addVectors(this.displacement ?? origin, [x, y, z]),
-      this.rotations,
+      [...this.actions, action],
       this.context,
       this.constraintId,
       this,
     );
+    valueTraces.set(action, valueTrace(result));
+    return result;
   }
+
   /**
    * Select this rotation's pivot in self's local coordinates.
    * @code3d.param x {kind: 'length', default: 0, label: 'Pivot X'}
@@ -1382,25 +1387,27 @@ export class Constraint extends ConstraintExpression {
       'rotate',
       typeof angles === 'number' ? [angles, 0, 0] : angles,
     );
-    return new Constraint(
+    const action: ConstraintAction = {pivot, angles};
+    const result = new Constraint(
       this.kind,
       this.source,
       this.target,
-      this.displacement,
-      [...this.rotations, {pivot, angles}],
+      [...this.actions, action],
       this.context,
       this.constraintId,
       previous,
       {kind: 'rotate', pivot},
     );
+    valueTraces.set(action, valueTrace(result));
+    return result;
   }
+
   /** @internal */
   chainArguments(): [
     StoredConstraint['kind'],
     AnchorReference,
     AnchorReference,
-    Vec3 | undefined,
-    readonly ConstraintRotation[],
+    readonly ConstraintAction[],
     RelateContext | undefined,
     string,
     ConstraintExpression,
@@ -1409,8 +1416,7 @@ export class Constraint extends ConstraintExpression {
       this.kind,
       this.source,
       this.target,
-      this.displacement,
-      this.rotations,
+      this.actions,
       this.context,
       this.constraintId,
       this,
@@ -1645,11 +1651,13 @@ export abstract class RelationObject {
     };
   }
 
-  private bodyRotations(
+  private bodyActions(
     constraint: StoredConstraint,
     indices: Map<RelationObject, number>,
-  ): BodyRotation[] {
-    return constraint.rotations.map(({pivot, angles}) => {
+  ): BodyAction[] {
+    return constraint.actions.map(action => {
+      if ('offset' in action) return {offset: action.offset};
+      const {pivot, angles} = action;
       if (pivot.kind === 'around') {
         return pivot.axis.model
           ? {
@@ -1678,15 +1686,18 @@ export abstract class RelationObject {
 
   /** @internal */
   [relationPreview](
-    nodeId: string,
     constraint: StoredConstraint,
     selection: ConstraintSpatialSelection | undefined,
   ): ConstraintPreview {
-    // This expression starts from the relate receiver, before sibling constraints
-    // are returned and committed to self. Geometry and node identity stay shared.
+    // Keep inherited and sibling relations in the solve. Only the selected chain
+    // is replaced by its selected prefix; geometry and node identity stay shared.
+    const constraints = [...this.constraints];
+    const index = constraints.findIndex(value => value.id === constraint.id);
+    if (index < 0) constraints.push(constraint);
+    else constraints[index] = constraint;
     const owner = this.copyRelations({
-      nodeId,
-      constraints: [...this.constraints, constraint],
+      nodeId: this.nodeId,
+      constraints,
     });
     const context = RelationObject.createSolveContext([
       owner,
@@ -1696,7 +1707,7 @@ export abstract class RelationObject {
     ]);
     return {
       object: {
-        nodeId,
+        nodeId: this.nodeId,
         compositionTransform: toTransform(owner.solvePose(context)),
         constraints: owner.constraints.map(value =>
           owner.constraintSnapshot(value, context),
@@ -1712,31 +1723,35 @@ export abstract class RelationObject {
     constraint: StoredConstraint,
     selection: ConstraintSpatialSelection,
     context: SolveContext,
+    actionIndex?: number,
   ): ConstraintSpatialReference {
     const models = [...context.poses.keys()];
-    const actions = this.bodyRotations(
+    const actions = this.bodyActions(
       constraint,
       new Map(models.map((model, i) => [model, i])),
     );
-    const stage = actions.length - (selection.kind === 'rotate' ? 1 : 0);
+    const stage =
+      actionIndex ??
+      (selection.kind === 'rotate'
+        ? constraint.actions.length -
+          1 -
+          [...constraint.actions]
+            .reverse()
+            .findIndex(action => 'angles' in action)
+        : actions.length);
     const finalPose = this.solvePose(context);
-    let before = finalPose;
-    for (let i = actions.length - 1; i >= stage; i--) {
-      const action = actions[i];
-      before =
-        'local' in action
-          ? composeTransforms(before, invertTransform(action.local))
-          : composeTransforms(
-              axisRotation(
-                composeTransforms(
-                  models[action.body].solvePose(context),
-                  action.axis,
-                ),
-                -action.angle,
-              ),
-              before,
-            );
-    }
+    const before = beforeRelation(
+      finalPose,
+      {
+        actions: actions.slice(stage),
+        target: {
+          body: models.indexOf(constraint.target.model ?? this),
+          transform: constraint.target.transform,
+        },
+      },
+      models.map(model => model.solvePose(context)),
+      models.indexOf(this),
+    );
     const pivot = selection.pivot;
     let frame: RigidTransform;
     if (pivot.kind === 'around') {
@@ -1752,9 +1767,38 @@ export abstract class RelationObject {
       );
       frame = composeTransforms(before, local);
     }
-    const angles = constraint.rotations[stage]?.angles ?? origin;
+    const selected = constraint.actions[stage];
+    const angles = selected && 'angles' in selected ? selected.angles : origin;
     const rotationVector: Vec3 =
       typeof angles === 'number' ? [0, angles, 0] : angles;
+    // Later world-space actions move the earlier rotation's effective frame.
+    // Later self-local actions already follow that rotation.
+    for (const action of actions.slice(stage + 1)) {
+      if ('body' in action)
+        frame = composeTransforms(
+          axisRotation(
+            composeTransforms(
+              models[action.body].solvePose(context),
+              action.axis,
+            ),
+            action.angle,
+          ),
+          frame,
+        );
+      else if ('offset' in action && constraint.target.model) {
+        const targetFrame = composeTransforms(
+          constraint.target.model.solvePose(context),
+          constraint.target.transform,
+        );
+        frame = {
+          ...frame,
+          position: addVectors(
+            frame.position,
+            rotateVector(action.offset, targetFrame.quaternion),
+          ),
+        };
+      }
+    }
     const localFrame = relativeTransform(frame, finalPose);
     return {
       nodeId: this.nodeId,
@@ -1806,8 +1850,18 @@ export abstract class RelationObject {
                   ).alignmentGeometry(constraint.target),
                   transform: constraint.target.transform,
                 },
-                offset: constraint.offset,
-                rotations: model.bodyRotations(constraint, indices),
+                actions: model
+                  .bodyActions(constraint, indices)
+                  .filter(action =>
+                    'offset' in action
+                      ? action.offset.some(n => n !== 0)
+                      : 'local' in action
+                        ? !transformsAreEquivalent(
+                            action.local,
+                            identityRigidTransform,
+                          )
+                        : action.angle !== 0,
+                  ),
               }
             : {
                 kind: 'on',
@@ -1826,8 +1880,18 @@ export abstract class RelationObject {
                   transform: constraint.target.transform,
                   facing: constraint.target.bound!.facing,
                 },
-                offset: constraint.offset,
-                rotations: model.bodyRotations(constraint, indices),
+                actions: model
+                  .bodyActions(constraint, indices)
+                  .filter(action =>
+                    'offset' in action
+                      ? action.offset.some(n => n !== 0)
+                      : 'local' in action
+                        ? !transformsAreEquivalent(
+                            action.local,
+                            identityRigidTransform,
+                          )
+                        : action.angle !== 0,
+                  ),
               },
         ),
       })),
@@ -1841,56 +1905,81 @@ export abstract class RelationObject {
     constraint: StoredConstraint,
     context: SolveContext,
   ): ConstraintSnapshot {
-    const lastRotation = constraint.rotations.at(-1);
-    const rotationSpatial = lastRotation
-      ? this.constraintSpatial(
-          constraint,
-          {kind: 'rotate', pivot: lastRotation.pivot},
-          context,
-        ).spatial
-      : undefined;
+    const rotations = constraint.actions.flatMap((action, index) =>
+      'pivot' in action
+        ? [
+            {
+              spatial: this.constraintSpatial(
+                constraint,
+                {kind: 'rotate', pivot: action.pivot},
+                context,
+                index,
+              ).spatial,
+              sourceRefs: action.sourceRefs ?? [],
+            },
+          ]
+        : [],
+    );
     const source = constraint.source.model ?? this;
     const target = constraint.target.model ?? this;
     const models = [...context.poses.keys()];
-    const actions = this.bodyRotations(
+    const actions = this.bodyActions(
       constraint,
       new Map(models.map((model, i) => [model, i])),
     );
-    let before = this.solvePose(context);
-    for (const action of [...actions].reverse()) {
-      before =
-        'local' in action
-          ? composeTransforms(before, invertTransform(action.local))
-          : composeTransforms(
-              axisRotation(
-                composeTransforms(
-                  models[action.body].solvePose(context),
-                  action.axis,
-                ),
-                -action.angle,
-              ),
-              before,
-            );
-    }
+    const poses = models.map(model => model.solvePose(context));
+    const owner = models.indexOf(this);
+    const targetEndpoint = {
+      body: models.indexOf(target),
+      transform: constraint.target.transform,
+    };
+    const before = beforeRelation(
+      this.solvePose(context),
+      {actions, target: targetEndpoint},
+      poses,
+      owner,
+    );
     const sourcePose = source === this ? before : source.solvePose(context);
     const targetPose = target === this ? before : target.solvePose(context);
-    let offsetFrame = composeTransforms(
+    const contactFrame = composeTransforms(
       targetPose,
       constraint.target.transform,
     );
-    if (constraint.kind === 'align') {
-      for (const action of actions)
-        if ('body' in action)
-          offsetFrame = composeTransforms(
-            axisRotation(
-              composeTransforms(
-                models[action.body].solvePose(context),
-                action.axis,
+    const offsetFrame = composeTransforms(
+      target.solvePose(context),
+      constraint.target.transform,
+    );
+    const offsets: ConstraintSnapshot['offsets'][number][] = [];
+    let stagePose = before;
+    actions.forEach((action, index) => {
+      if ('offset' in action) {
+        let frame = composeTransforms(
+          target === this ? stagePose : target.solvePose(context),
+          constraint.target.transform,
+        );
+        for (const later of actions.slice(index + 1))
+          if ('body' in later)
+            frame = composeTransforms(
+              axisRotation(
+                composeTransforms(poses[later.body], later.axis),
+                later.angle,
               ),
-              action.angle,
-            ),
-            offsetFrame,
-          );
+              frame,
+            );
+        offsets.push({
+          value: action.offset,
+          frame: toTransform(frame),
+          sourceRefs: constraint.actions[index].sourceRefs ?? [],
+        });
+      }
+      stagePose = afterRelation(
+        stagePose,
+        {actions: [action], target: targetEndpoint},
+        poses,
+        owner,
+      );
+    });
+    if (constraint.kind === 'align') {
       return {
         id: constraint.id,
         kind: 'align',
@@ -1898,16 +1987,15 @@ export abstract class RelationObject {
         target: anchorSnapshot(target, constraint.target),
         sourceElement: source.relationElement(constraint.source),
         targetElement: target.relationElement(constraint.target),
-        offsetDirection: 1,
-        offset: constraint.offset ?? origin,
+        offsets,
         offsetFrame: toTransform(offsetFrame),
-        rotation: rotationSpatial,
+        rotations,
         sourceRefs: [...valueTrace(constraint).sourceRefs],
         parameters: [...valueTrace(constraint).parameters],
       };
     }
     const orientation = composeTransforms(
-      invertTransform(rotation(offsetFrame.quaternion)),
+      invertTransform(rotation(contactFrame.quaternion)),
       rotation(sourcePose.quaternion),
     ).quaternion;
     const bounds = source[referenceBounds](
@@ -1923,9 +2011,9 @@ export abstract class RelationObject {
       {
         position: addVectors(
           sourcePose.position,
-          rotateVector(center, offsetFrame.quaternion),
+          rotateVector(center, contactFrame.quaternion),
         ),
-        quaternion: offsetFrame.quaternion,
+        quaternion: contactFrame.quaternion,
       },
       sourcePose,
     );
@@ -1934,19 +2022,6 @@ export abstract class RelationObject {
       bounds[1][1] - bounds[0][1],
       bounds[1][2] - bounds[0][2],
     ];
-    for (const action of actions) {
-      if ('body' in action)
-        offsetFrame = composeTransforms(
-          axisRotation(
-            composeTransforms(
-              models[action.body].solvePose(context),
-              action.axis,
-            ),
-            action.angle,
-          ),
-          offsetFrame,
-        );
-    }
     return {
       id: constraint.id,
       kind: constraint.kind,
@@ -1980,10 +2055,9 @@ export abstract class RelationObject {
         transform: toTransform(constraint.target.transform),
         bound: constraint.target.bound,
       },
-      offsetDirection: source === this ? 1 : -1,
-      offset: constraint.offset ?? origin,
+      offsets,
       offsetFrame: toTransform(offsetFrame),
-      rotation: rotationSpatial,
+      rotations,
       sourceRefs: [...valueTrace(constraint).sourceRefs],
       parameters: [...valueTrace(constraint).parameters],
     };
@@ -2566,15 +2640,19 @@ export class ModelObject<
         ...constraint,
         source: mapReference(constraint.source),
         target: mapReference(constraint.target),
-        rotations: constraint.rotations.map(action => ({
-          ...action,
-          pivot:
-            action.pivot.kind === 'around'
-              ? {...action.pivot, axis: mapReference(action.pivot.axis)}
-              : action.pivot.kind === 'pivot'
-                ? {...action.pivot, point: mapPoint(action.pivot.point)}
-                : action.pivot,
-        })),
+        actions: constraint.actions.map(action =>
+          'offset' in action
+            ? action
+            : {
+                ...action,
+                pivot:
+                  action.pivot.kind === 'around'
+                    ? {...action.pivot, axis: mapReference(action.pivot.axis)}
+                    : action.pivot.kind === 'pivot'
+                      ? {...action.pivot, point: mapPoint(action.pivot.point)}
+                      : action.pivot,
+              },
+        ),
       };
       valueTraces.set(mapped, valueTrace(constraint));
       return mapped;
@@ -4935,8 +5013,10 @@ function constraintReferences(constraint: StoredConstraint): RelationObject[] {
   return [
     constraint.source.model,
     constraint.target.model,
-    ...constraint.rotations.map(action =>
-      action.pivot.kind === 'around' ? action.pivot.axis.model : undefined,
+    ...constraint.actions.map(action =>
+      'pivot' in action && action.pivot.kind === 'around'
+        ? action.pivot.axis.model
+        : undefined,
     ),
   ].filter((model): model is RelationObject => !!model);
 }

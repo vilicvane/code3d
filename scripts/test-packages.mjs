@@ -116,7 +116,7 @@ try {
     assert.ok(notices.includes(name));
   assert.ok(notices.includes('Copyright 2013 Bartek Szopka'));
   await copyFile(
-    path.join(root, 'packages/app/examples/fonts/DejaVuSans.ttf'),
+    path.join(root, 'packages/core/test/fonts/DejaVuSans.ttf'),
     path.join(consumer, 'font.ttf'),
   );
   await copyFile(

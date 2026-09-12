@@ -1,7 +1,0 @@
-{
-  "private": true,
-  "type": "module",
-  "dependencies": {
-    "just-range": "4.2.0"
-  }
-}

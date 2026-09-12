@@ -1839,6 +1839,48 @@ export function createModelExecutor(
                   (candidate.toolExecutionOrder ?? candidate.runtime.order) ===
                   enclosingOrder,
               )
+              .map(entry => {
+                if (
+                  target.kind !== 'value' ||
+                  !focusNodeIds.includes(
+                    entry.candidate.constraintOwnerNodeId ?? '',
+                  )
+                )
+                  return entry;
+                // Selecting self shows its complete chain. Default gizmos can
+                // then edit the nearest following action in that actual result.
+                const latest = constraintTargets
+                  .flatMap(constraint =>
+                    constraint.evaluations.map(candidate => ({
+                      constraint,
+                      candidate,
+                    })),
+                  )
+                  .filter(
+                    ({candidate}) =>
+                      candidate.contextId === entry.candidate.contextId &&
+                      candidate.constraintId === entry.candidate.constraintId &&
+                      candidate.constraintOwnerNodeId ===
+                        entry.candidate.constraintOwnerNodeId,
+                  )
+                  .reduce(
+                    (latest, next) =>
+                      (next.candidate.toolExecutionOrder ??
+                        next.candidate.runtime.order) >
+                      (latest.candidate.toolExecutionOrder ??
+                        latest.candidate.runtime.order)
+                        ? next
+                        : latest,
+                    entry,
+                  );
+                return {
+                  ...latest,
+                  candidate: {
+                    ...latest.candidate,
+                    constraintFocus: entry.candidate.constraintFocus,
+                  },
+                };
+              })
               .map(({constraint, candidate}) => {
                 constraint.contextTargetIds.forEach(id =>
                   contextTargetIds.add(id),

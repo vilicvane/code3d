@@ -163,6 +163,16 @@ npm run lint-prettier
 `npm test` 构建包、检查测试类型并运行各 workspace 的单元测试；完整发布构建使用
 `npm run build`。根据实际改动选择相关验证，已有检查通过后不重复运行无变化的产品。
 
+示例由 `packages/app/render-samples/catalog.ts` 统一登记，按建模主题组织，App、官网与
+文档复用同一源码。`packages/app/test/examples.test.ts` 检查入口覆盖、源码焦点、公开
+参数组、真实几何与用途断言；新增或迁移例子同时维护对应测试。
+
+`npm run test:examples:packages --workspace @code3d/app` 在仓库之外的干净临时目录
+安装锁定的公开包并检查类型与建模，避免开发 workspace 掩盖缺依赖。
+`CODE3D_TEST_URL=http://127.0.0.1:<预留端口>/ npm run test:examples:browser --workspace @code3d/app`
+使用 host Chrome，逐例打开、参数写回、几何更新及 Undo，并验证操作失败恢复、完整
+工程导出和实际 agent 接续。CI 自行启动受控服务及浏览器，构建与发包前均运行这些门槛。
+
 新增运行时测试使用 `*.test.ts`、`node:test` 和 `node:assert/strict`。
 Node.js 24 直接执行可擦除的 TypeScript；测试间导入使用显式 `.ts` 扩展。
 `public-api.ts` 等纯类型 fixture 只检查类型，不作为运行时测试执行。

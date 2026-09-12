@@ -79,29 +79,63 @@ test('constraint prefixes keep their own offset, pivot and rotation after the ca
     assert.equal(preview.object.nodeId, final.nodeId);
     assert.equal(preview.object.constraints[0].source.nodeId, final.nodeId);
   });
-  near(previewOf(chains[1]).object.constraints[0].offset, [10, 2, 3]);
-  near(previewOf(chains.at(-1)).object.constraints[0].offset, [17, 2, 3]);
+  near(
+    previewOf(chains[1]).object.constraints[0].offsets.at(-1)!.value,
+    [10, 2, 3],
+  );
+  near(
+    previewOf(chains.at(-1)).object.constraints[0].offsets.at(-1)!.value,
+    [7, 0, 0],
+  );
   samePose(snapshot(placed).compositionTransform, final.compositionTransform);
 });
 
-test('align previews inherit earlier relate calls while excluding sibling return expressions', () => {
+test('align prefixes jointly solve inherited and sibling relations', () => {
   const base = box(20, 10, 20);
+  const guide = line([10, 6, 0], [10, 6, 30]);
   const original = box(2, 2, 2).relate(s => s.on(base.up));
   let early: Constraint | undefined;
   const placed = original.relate(self => {
-    early = self.axis.align(base.axis);
-    return [early.rotate(0, 25, 0), self.on(base.right)];
+    early = self.center.align(guide);
+    return [early.rotate(0, 25, 0), self.on(base.front)];
   });
   const preview = previewOf(early);
-  assert.equal(preview.object.constraints.length, 2);
+  assert.equal(preview.object.constraints.length, 3);
+  const expected = original.relate(self => [
+    self.center.align(guide),
+    self.on(base.front),
+  ]);
   samePose(
     preview.object.compositionTransform,
-    snapshot(original.relate(s => s.axis.align(base.axis)))
-      .compositionTransform,
+    snapshot(expected).compositionTransform,
   );
-  // This preview does not need the full return array to have a solution.
   assert.ok(placed);
 });
+
+for (const reverse of [false, true]) {
+  test(`bound previews keep both contacts and only truncate the selected chain (reverse=${reverse})`, () => {
+    const base = box(10, 10, 10);
+    let first: Constraint | undefined,
+      shifted: Constraint | undefined,
+      second: Constraint | undefined;
+    const model = box(20, 20, 20).relate(self => {
+      first = reverse ? base.on(self.left) : self.on(base.right);
+      shifted = first.offset(0, 0, 6);
+      second = reverse ? base.on(self.up) : self.on(base.down);
+      return [shifted, second];
+    });
+    const final = snapshot(model);
+    for (const expression of [shifted, second]) {
+      const preview = previewOf(expression);
+      assert.equal(preview.object.constraints.length, 2);
+      samePose(preview.object.compositionTransform, final.compositionTransform);
+    }
+    const beforeOffset = previewOf(first);
+    assert.equal(beforeOffset.object.constraints.length, 2);
+    near(beforeOffset.object.compositionTransform.position, [15, -15, 0]);
+    assert.equal(beforeOffset.object.constraints[0].offsets.length, 0);
+  });
+}
 
 test('reverse-written align and its earlier rotations retain self as their preview owner', () => {
   const base = line([10, 0, 0], [10, 30, 0]);

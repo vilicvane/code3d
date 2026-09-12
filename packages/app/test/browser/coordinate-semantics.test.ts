@@ -409,10 +409,11 @@ export default loft([start, via, end]).material('#d8ff3e');`;
           position: selected.object
             .getWorldPosition(selected.object.position.clone())
             .toArray(),
-          offset: selected.node.constraints[0].offset,
+          offset: selected.node.constraints[0].offsets.at(-1)!.value,
           active: !!viewport['transformGizmo']['active'],
         };
       });
+    // Keep these positions on the 5 mm grid at this camera scale.
     const before = await inspect();
     const drag = async (value: number) => {
       const handle = await xHandle(page);
@@ -453,18 +454,19 @@ export default loft([start, via, end]).material('#d8ff3e');`;
     const waitOffset = (value: number) =>
       page.waitForFunction(
         value =>
-          window.coordinateApp.viewport.getSelected()?.node.constraints[0]
-            ?.offset[0] === value,
+          window.coordinateApp.viewport
+            .getSelected()
+            ?.node.constraints[0]?.offsets.at(-1)!.value[0] === value,
         value,
       );
 
-    const invalid = await drag(-18);
+    const invalid = await drag(-20);
     assert.equal(invalid.source, before.source);
     await page.mouse.up();
     await page.locator('#viewport-status[data-state=error]').waitFor();
-    await waitOffset(-18);
+    await waitOffset(-20);
     near((await inspect()).position, invalid.position);
-    assert.match((await inspect()).source, /offset\(-18, 0, 0\)/);
+    assert.match((await inspect()).source, /offset\(-20, 0, 0\)/);
     assert.match(
       await page.evaluate(
         () => window.coordinateApp.viewport['module']!.diagnostic!.summary,
@@ -472,24 +474,24 @@ export default loft([start, via, end]).material('#d8ff3e');`;
       /Could not construct a solid loft/,
     );
     const broken = await inspect();
-    await drag(-8);
+    await drag(-10);
     await page.keyboard.press('Escape');
     await page.mouse.up();
     assert.deepEqual(await inspect(), broken);
 
-    const valid = await drag(-8);
+    const valid = await drag(-10);
     await page.mouse.up();
-    await waitOffset(-8);
+    await waitOffset(-10);
     await page.getByText('Ready', {exact: true}).waitFor();
     near((await inspect()).position, valid.position);
-    assert.match((await inspect()).source, /offset\(-8, 0, 0\)/);
+    assert.match((await inspect()).source, /offset\(-10, 0, 0\)/);
     await page.evaluate(() => window.coordinateApp.codeEditor.editor.focus());
     await page.keyboard.press('Control+z');
-    await waitOffset(-18);
+    await waitOffset(-20);
     await page.locator('#viewport-status[data-state=error]').waitFor();
     near((await inspect()).position, invalid.position);
     await page.keyboard.press('Control+Shift+z');
-    await waitOffset(-8);
+    await waitOffset(-10);
     await page.getByText('Ready', {exact: true}).waitFor();
     near((await inspect()).position, valid.position);
     if (process.env.CODE3D_LOFT_RECOVERY_SCREENSHOT)
@@ -521,7 +523,8 @@ export default loft([start, via, end]).material('#d8ff3e');`;
       await page.waitForFunction(offset => {
         const viewport = window.coordinateApp.viewport;
         return (
-          viewport.getSelected()?.node.constraints[0]?.offset[0] === offset &&
+          viewport.getSelected()?.node.constraints[0]?.offsets.at(-1)!
+            .value[0] === offset &&
           Boolean(viewport['module']?.diagnostic) === (offset === -18)
         );
       }, offset);
@@ -550,7 +553,7 @@ export default loft([start, via, end]).material('#d8ff3e');`;
       assert.equal(displayed.count, 3);
       assert.equal(displayed.result, offset === -18 ? 0 : 1);
       assert.equal(displayed.relative, true);
-      assert.equal(displayed.bindings, 3);
+      assert.equal(displayed.bindings, 6);
       for (const position of displayed.positions)
         near(position.actual, position.expected);
       await cameraIdle(page);
@@ -693,18 +696,26 @@ export default grow([a, b], 20);`;
 );
 
 test(
-  'the Boolean operations example previews intersection inside inline primitive arguments',
+  'intersection previews include both inputs inside inline primitive arguments',
   {timeout: 120_000},
   async t => {
     const {page, errors} = await openApp(t);
     await page.evaluate(() => {
-      location.hash = '/file/examples/boolean-operations.ts';
+      const editor = window.coordinateApp.codeEditor.editor;
+      const source = `import {box, intersect, sphere} from '@code3d/core';
+export default intersect([sphere(8), box(12, 12, 12)]);`;
+      editor.getModel()!.setValue(source);
+      editor.setPosition(
+        editor.getModel()!.getPositionAt(source.lastIndexOf('intersect') + 2),
+      );
     });
-    await page.waitForFunction(() =>
-      window.coordinateApp.codeEditor.editor
-        .getValue()
-        .includes('const lens = intersect([sphere(8), box(12, 12, 12)])'),
-    );
+    await page.waitForFunction(() => {
+      const target = window.coordinateApp.viewport.sourceEvaluation()?.target;
+      return (
+        (target?.tool?.signature.name ?? target?.operation?.kind) ===
+        'intersect'
+      );
+    });
     await page.getByText('Ready', {exact: true}).waitFor();
     for (const call of ['sphere(8)', 'box(12, 12, 12)']) {
       await page.evaluate(call => {
@@ -767,7 +778,8 @@ export default common([a, b, c]);`;
       await page.waitForFunction(offset => {
         const viewport = window.coordinateApp.viewport;
         return (
-          viewport.getSelected()?.node.constraints[0]?.offset[0] === offset &&
+          viewport.getSelected()?.node.constraints[0]?.offsets.at(-1)!
+            .value[0] === offset &&
           Boolean(viewport['module']?.diagnostic) === (offset === 50)
         );
       }, offset);
@@ -792,7 +804,7 @@ export default common([a, b, c]);`;
         };
       });
       assert.equal(result.inputs, 3);
-      assert.equal(result.bindings, 3);
+      assert.equal(result.bindings, 6);
       assert.equal(result.count, offset === 50 ? 0 : 1);
       assert.equal(result.restored, result.count);
       assert.equal(result.hidden, true);
@@ -1531,7 +1543,7 @@ export const booleanOperationsExample = group([joined, lens], 'Boolean operation
     });
     await page.waitForFunction(() =>
       window.coordinateApp.viewport['transformGizmo']['axes']
-        .filter(c => c.binding)
+        .filter(c => c.controls.getHelper().visible)
         .every(c => c.binding?.mode === 'rotate'),
     );
     await cameraIdle(page);
@@ -1804,7 +1816,10 @@ async function xHandle(page: Page) {
   return page.evaluate(() => {
     const viewport = window.coordinateApp.viewport;
     const gizmo = viewport['transformGizmo'];
-    const control = gizmo['axes'][0];
+    const control = gizmo['axes'].find(
+      control =>
+        control.binding?.mode === 'translate' && control.binding.axis === 'x',
+    )!;
     const camera = viewport['camera'];
     const rect = viewport['renderer'].domElement.getBoundingClientRect();
     control.controls.getHelper().updateMatrixWorld(true);
@@ -1878,4 +1893,117 @@ async function openApp(t: TestContext) {
   });
   await page.getByText('Ready', {exact: true}).waitFor({timeout: 60_000});
   return {page, errors};
+}
+
+for (const [selection, mode] of [
+  ['self', 'translate'],
+  ['self', 'rotate'],
+  ['offset', 'rotate'],
+  ['rotate', 'translate'],
+] as const) {
+  test(
+    `ordered constraint gizmo ${selection} / ${mode} matches commit and Undo`,
+    {timeout: 90_000},
+    async t => {
+      const {page, errors} = await openApp(t);
+      const source = `import {box,group} from '@code3d/core'; const base=box(40,10,30); const part=box(24,16,14).relate(self=>self.on(base.up).offset(3,2,1).rotate(10,20,30).offset(5,0,2).rotate(20,10,5)); group([base,part]);`;
+      await setSource(
+        page,
+        source,
+        selection === 'self' ? 'offset' : selection,
+      );
+      if (selection === 'self') {
+        await page.evaluate(() => {
+          const editor = window.coordinateApp.codeEditor.editor;
+          editor.setPosition(
+            editor
+              .getModel()!
+              .getPositionAt(editor.getValue().indexOf('self.on') + 1),
+          );
+        });
+        await page.waitForFunction(() => {
+          const bindings = window.coordinateApp.viewport['transformGizmo'][
+            'axes'
+          ].flatMap(axis => (axis.binding ? [axis.binding] : []));
+          return (
+            bindings.some(
+              binding =>
+                binding.mode === 'translate' &&
+                binding.axis === 'x' &&
+                binding.value === 3,
+            ) &&
+            bindings.some(
+              binding =>
+                binding.mode === 'rotate' &&
+                binding.axis === 'x' &&
+                binding.value === 10,
+            )
+          );
+        });
+      }
+      await cameraIdle(page);
+      const matrix = () =>
+        page.evaluate(() => {
+          const object = window.coordinateApp.viewport.getSelected()!.object;
+          object.updateWorldMatrix(true, false);
+          return object.matrixWorld.toArray();
+        });
+      const before = await matrix();
+      const alternate =
+        (selection === 'rotate' ? 'rotate' : 'translate') !== mode;
+      if (alternate) await page.keyboard.down('Alt');
+      const handle =
+        mode === 'rotate' ? await rotationHandle(page, 0) : await xHandle(page);
+      await page.mouse.move(handle.x, handle.y);
+      await page.mouse.down();
+      await page.mouse.move(
+        handle.x + handle.dx * 40,
+        handle.y + handle.dy * 40,
+        {steps: 5},
+      );
+      const preview = await matrix();
+      assert.ok(
+        preview.some((value, index) => Math.abs(value - before[index]) > 1e-4),
+      );
+      assert.equal((await state(page)).source, source);
+      await page.mouse.up();
+      if (alternate) await page.keyboard.up('Alt');
+      await page.waitForFunction(
+        source => window.coordinateApp.codeEditor.editor.getValue() !== source,
+        source,
+      );
+      await page.getByText('Ready', {exact: true}).waitFor();
+      await cameraIdle(page);
+      const committed = await matrix();
+      assert.ok(
+        committed.every(
+          (value, index) => Math.abs(value - preview[index]) < 1e-5,
+        ),
+        `preview ${preview} != committed ${committed}`,
+      );
+      const changed = (await state(page)).source;
+      if (selection === 'self') {
+        assert.equal((changed.match(/\.offset\(/g) ?? []).length, 2);
+        assert.equal((changed.match(/\.rotate\(/g) ?? []).length, 2);
+        assert.ok(changed.includes('.offset(5,0,2).rotate(20,10,5)'));
+      } else if (selection === 'offset')
+        assert.match(
+          changed,
+          /\.offset\(3,2,1\)\.rotate\([^)]*\)\.rotate\(10,20,30\)/,
+        );
+      else
+        assert.match(
+          changed,
+          /\.rotate\(10,20,30\)\.offset\([^)]*\)\.offset\(5,0,2\)/,
+        );
+      await page.evaluate(() => window.coordinateApp.codeEditor.editor.focus());
+      await page.keyboard.press('Control+z');
+      await page.waitForFunction(
+        source => window.coordinateApp.codeEditor.editor.getValue() === source,
+        source,
+      );
+      await page.getByText('Ready', {exact: true}).waitFor();
+      assert.deepEqual(errors, []);
+    },
+  );
 }

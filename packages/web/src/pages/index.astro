@@ -23,7 +23,7 @@ import {sitePath, appUrl} from '../lib/site';
       <div class="hero-actions">
         <a
           class="button"
-          href={appUrl('website/first-model.ts')}
+          href={appUrl('projects/phone-stand.ts')}
           target="_blank"
           rel="noopener">Start building <ArrowIcon /></a
         ><a
@@ -33,7 +33,7 @@ import {sitePath, appUrl} from '../lib/site';
         >
       </div>
     </div>
-    <SourceDemo />
+    <SourceDemo id="desktop-stand" />
     <div class="hero-footnote">
       <span>ONE MODEL. ONE SOURCE OF TRUTH.</span><p>
         Click a source context above. See exactly the object it produces.
@@ -91,7 +91,16 @@ import {sitePath, appUrl} from '../lib/site';
         >Explore the examples →</a
       >
     </div>
-    <ExampleCards />
+    <ExampleCards
+      ids={[
+        'mounting-plate',
+        'text',
+        'annotations',
+        'screw-box',
+        'loft',
+        'desktop-controller',
+      ]}
+    />
   </section>
   <section class="foundations shell">
     <div>
@@ -145,7 +154,7 @@ import {sitePath, appUrl} from '../lib/site';
     <div class="hero-actions">
       <a
         class="button"
-        href={appUrl('website/first-model.ts')}
+        href={appUrl('projects/phone-stand.ts')}
         target="_blank"
         rel="noopener">Open Code3D <ArrowIcon /></a
       ><a class="text-link" href={sitePath('docs/')}>Read the docs →</a>

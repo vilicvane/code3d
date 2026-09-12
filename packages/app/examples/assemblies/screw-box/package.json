@@ -1,0 +1,9 @@
+{
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@code3d/core": "latest",
+    "@code3d/screws": "0.0.1-alpha.4",
+    "@code3d/materials": "0.0.1-alpha.4"
+  }
+}

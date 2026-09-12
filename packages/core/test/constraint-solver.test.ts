@@ -175,7 +175,7 @@ test('selected points, edges and surfaces use only their own finite extent', () 
   near(position(sloped), [0, 8, 0]);
 });
 
-test('offset pins bound centers in the unchanged target frame, including explicit zero', () => {
+test('offset translates the existing solution without pinning bound centers', () => {
   const base = box(10, 10, 10);
   const shifted = box(20, 20, 20).relate(self =>
     self.on(base.down).offset(5, 0, 7),
@@ -184,7 +184,7 @@ test('offset pins bound centers in the unchanged target frame, including explici
   const centered = point([20, 0, 30]).relate(self =>
     self.on(base.up).offset(0, 0, 0),
   );
-  near(position(centered), [-20, 5, -30]);
+  near(position(centered), [0, 5, 0]);
   const flip = box(20, 20, 20).relate(self =>
     self.on(base.up.flip()).offset(5, 0, 7),
   );
@@ -216,7 +216,7 @@ test('redundancy is accepted and positional conflicts never rotate the model', (
     self.on(base.up).offset(0, 0, 0),
     self.on(base.right),
   ]);
-  assert.throws(() => snapshot(pinnedConflict), /Conflicting bound positions/);
+  near(position(pinnedConflict), [5, 5, 0]);
   near(position(point().relate(self => self.on(self.up))), [0, 0, 0]);
   assert.throws(
     () => snapshot(box(2, 2, 2).relate(self => self.on(self.up))),
@@ -258,7 +258,7 @@ test('group bounds include solved child placements and stay rigid in a parent co
   const target = point([20, 30, 40]);
   const moved = inner.relate(self => self.on(target.up).offset(0, 0, 0));
   const outer = snapshot(group([target, moved]));
-  near(outer.children[1].transform.position, [20, 35, 40]);
+  near(outer.children[1].transform.position, [0, 35, 0]);
   near(outer.children[1].children[1].transform.position, [0, 6, 0]);
   const exposed = moved.expose({mount: cap.up});
   near(
@@ -362,7 +362,7 @@ test('around resolves local and positioned external axes', () => {
   );
   near(rotateVector([1, 0, 0], pose(selfAxis).quaternion), [0, 0, -1]);
   const axis = box(2, 2, 2).relate(self =>
-    self.center.on(point([10, 20, 30]).up).offset(0, 0, 0),
+    self.center.align(point([10, 20, 30])),
   );
   const rotated = point().relate(self =>
     self.on(origin.up).around(axis.axis).rotate(90),
@@ -395,3 +395,93 @@ test('runtime errors distinguish missing bound targets and curved rotation axes'
     /straight axis/,
   );
 });
+
+for (const reverse of [false, true]) {
+  test(`offset translates self's solved pose, including reversed endpoints (${reverse})`, () => {
+    const base = box(10, 20, 30).originOffset(-40, -15, 7);
+    const part = box(2, 4, 6).originOffset(13, -8, 17);
+    const relation = (self: typeof part) =>
+      reverse ? base.on(self.up) : self.on(base.up);
+    const solved = pose(part.relate(relation));
+    const shifted = pose(part.relate(self => relation(self).offset(3, 5, 7)));
+    near(
+      shifted.position,
+      solved.position.map((n, i) => n + [3, 5, 7][i]),
+    );
+    near(shifted.quaternion, solved.quaternion);
+    near(
+      position(part.relate(self => relation(self).offset(0, 0, 0))),
+      solved.position,
+    );
+  });
+}
+
+test('zero rotation on a sibling contact adds no orientation constraint', () => {
+  const base = point();
+  const part = circle(2);
+  const make = (zero: boolean) =>
+    part.relate(self => [
+      self.on(base.up).pivot([5, 0, 0]).rotate(0, 0, 90),
+      zero ? self.on(base.right).rotate(0, 0, 0) : self.on(base.right),
+    ]);
+  near(position(make(true)), position(make(false)));
+  near(pose(make(true)).quaternion, pose(make(false)).quaternion);
+});
+
+for (const kind of ['on', 'align'] as const) {
+  test(`${kind} applies offsets and external rotations in call order`, () => {
+    const target = point();
+    const axis = box(1, 1, 1);
+    const original = point();
+    const relation = (self: typeof original) =>
+      kind === 'on' ? self.on(target.up) : self.align(target);
+    const before = original.relate(self =>
+      relation(self).offset(10, 0, 0).around(axis.axis).rotate(90),
+    );
+    const after = original.relate(self =>
+      relation(self).around(axis.axis).rotate(90).offset(10, 0, 0),
+    );
+    near(position(before), [0, 0, -10]);
+    near(position(after), [10, 0, 0]);
+    const interleaved = original.relate(self =>
+      relation(self)
+        .offset(10, 0, 0)
+        .around(axis.axis)
+        .rotate(90)
+        .offset(2, 3, 4),
+    );
+    near(position(interleaved), [2, 3, -6]);
+  });
+}
+
+test('around uses the final external axis position after mixed constraints solve', () => {
+  const axis = box(2, 2, 2)
+    .rotate(0, 0, 90)
+    .relate(self => [
+      self.center.align(line([0, 0, 0], [0, 100, 0])),
+      self.center.on(point([0, 20, 0]).up),
+    ]);
+  const rotated = point().relate(self =>
+    self.on(point().up).around(axis.axis).rotate(90),
+  );
+  near(position(axis), [0, 20, 0]);
+  near(position(rotated), [0, 20, 20]);
+});
+
+for (const mixed of [false, true]) {
+  test(`untransformed sibling contacts do not dilute offsets (mixed=${mixed})`, () => {
+    const base = box(10, 10, 10);
+    const axis = box(2, 2, 2).relate(self => self.center.align(base.center));
+    for (const reverse of [false, true]) {
+      const placed = box(20, 20, 20).relate(self => {
+        const constraints = [
+          self.edge(3).on(base.left).offset(0, 0, 0).rotate(0, 0, 0),
+          self.up.on(base.down).offset(5, 0, 7),
+        ];
+        return reverse ? constraints.reverse() : constraints;
+      });
+      const model = group([base, placed, ...(mixed ? [axis] : [])]);
+      near(snapshot(model).children[1].transform.position, [5, -15, -7]);
+    }
+  });
+}

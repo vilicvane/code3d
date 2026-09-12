@@ -80,7 +80,7 @@ test('uses face, edge, and vertex topology as relation anchors', () => {
     );
     const relatedSnapshot = snapshotModel(vertexRelated);
     assert.deepEqual(relatedSnapshot.transform.position, [0, 0, 0]);
-    assertVectorNear(relatedSnapshot.compositionTransform.position, [2, 3, 4]);
+    assertVectorNear(relatedSnapshot.compositionTransform.position, [0, 3, 0]);
   } finally {
     disposeModelObjects([
       face,
@@ -96,7 +96,7 @@ test('uses face, edge, and vertex topology as relation anchors', () => {
 test('resolves relation placement only inside a composition', () => {
   const snapshotModel = createModelSnapshotter();
   const target = point([2, 3, 4]);
-  const related = point().relate(self => self.on(target.up).offset(0, 0, 0));
+  const related = point().relate(self => self.align(target));
   const assembly = group([target, related]);
 
   try {
@@ -123,15 +123,13 @@ test('lofts nonparallel planar profiles along a curved spine', () => {
     [4, 28, 14],
   ]);
   const start = circle(4).relate(profile =>
-    profile
-      .on(point().up)
-      .offset(0, 0, 0)
+    profile.center
+      .align(point())
       .rotate(0, 0, (-Math.atan2(12, 7) * 180) / Math.PI),
   );
   const end = rectangle(7, 4).relate(profile =>
-    profile
-      .on(point([4, 28, 14]).up)
-      .offset(0, 0, 0)
+    profile.center
+      .align(point([4, 28, 14]))
       .rotate(
         (Math.atan2(5, Math.hypot(6, 8)) * 180) / Math.PI,
         0,
@@ -194,7 +192,10 @@ test('reports an unsuccessful loft without losing its editable sections', () => 
     );
     const snapshot = snapshotModel(sections);
     assert.equal(snapshot.children.length, 3);
-    assert.deepEqual(snapshot.children[1].constraints[0].offset, [-18, 0, 0]);
+    assert.deepEqual(
+      snapshot.children[1].constraints[0].offsets.at(-1)!.value,
+      [-18, 0, 0],
+    );
     assert.ok(defined(snapshot.children[1].mesh).triangles.length > 0);
   } finally {
     disposeModelObjects([start, via, end, sections]);

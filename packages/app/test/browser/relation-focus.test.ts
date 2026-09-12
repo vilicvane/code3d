@@ -34,6 +34,16 @@ test(
     assert.ok(samples.some(sample => sample.exported));
     for (const sample of samples) {
       const message = `${sample.label} at ${sample.token}, export=${sample.exported}`;
+      if (sample.label === 'two constraints') {
+        assert.equal(sample.ownerPositions.length, 1, message);
+        for (const position of sample.ownerPositions)
+          position.forEach((value, axis) =>
+            assert.ok(
+              Math.abs(value - sample.expectedOwnerPosition[axis]) < 1e-6,
+              `${message}: ${position} != ${sample.expectedOwnerPosition}`,
+            ),
+          );
+      }
       const [base, self, other] = sample.participants;
       assert.equal(
         sample.source,

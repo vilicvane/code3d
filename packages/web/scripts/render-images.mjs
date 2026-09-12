@@ -21,7 +21,7 @@ function render(id, name, context) {
       '1080',
       ...(context ? ['--context', context] : []),
     ],
-    {cwd: appDirectory, stdio: 'inherit', timeout: 120_000},
+    {cwd: appDirectory, stdio: 'inherit', timeout: 180_000},
   );
 }
 

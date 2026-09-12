@@ -6,16 +6,16 @@ description: Use JSDoc to give ordinary TypeScript functions parameter panels an
 import SourceCode from '../../../../components/SourceCode.astro';
 import ArrowIcon from '../../../../components/ArrowIcon.astro';
 import {appUrl} from '../../../../lib/site';
-import source from '../../../../../../app/examples/design-arguments.ts?raw';
+import source from '../../../../../../app/examples/annotations.ts?raw';
 
 A model function can have visual controls without becoming a different kind of
 function. Add JSDoc annotations to describe its parameters; the App reads them
 alongside its TypeScript signature.
 
-<SourceCode source={source} file="design-arguments.ts" />
+<SourceCode source={source} file="annotations.ts" />
 
 <p>
-  <a href={appUrl('design-arguments.ts')} target="_blank" rel="noopener">
+  <a href={appUrl('annotations.ts')} target="_blank" rel="noopener">
     {'Open this example in the App '}
     <ArrowIcon />
   </a>
@@ -41,7 +41,7 @@ For example:
 /** @code3d.param radius {kind: 'length', label: 'Radius', constraints: {min: 1}} */
 ```
 
-Place the cursor in `makeKnob(10, 5, 6)` to open its parameter panel. Change an
+Place the cursor in `spacer(12, 5, 6)` to open its parameter panel. Change an
 input and the App writes to the corresponding source value. Normal source
 Undo and Redo still apply.
 
@@ -53,13 +53,13 @@ annotate the overload signatures that should offer tools.
 ## Describe an omitted argument's default
 
 ```ts
-/** @code3d.param twist {kind: 'angle', default: 60} */
-function makeKnob(twist = 60) {
-  // Build the model using twist.
+/** @code3d.param height {kind: 'length', default: 12} */
+function spacer(height = 12) {
+  // Build the model using height.
 }
 ```
 
-For `makeKnob()`, the panel shows `60` as a numeric placeholder. The annotation
+For `spacer()`, the panel shows `12` as a numeric placeholder. The annotation
 describes this display value; the function implementation decides what an
 omitted argument actually does. Keep the two consistent. The App reads the
 same annotation from source and published `.d.ts` declarations, without
@@ -154,7 +154,7 @@ argument that can be appended is editable, even when later parameters have
 default placeholders. Editing never fills intermediate positions with
 `undefined`.
 
-At and after a spread argument such as `makeKnob(...args)`, the panel cannot
+At and after a spread argument such as `spacer(...args)`, the panel cannot
 map individual parameter positions to source arguments. Those controls remain
 disabled without default placeholders.
 

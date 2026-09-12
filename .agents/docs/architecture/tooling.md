@@ -121,7 +121,7 @@ TypeScript 必填性、不读取函数初始化器，也不注入运行时默认
 可写工具参数与可渲染输入时，也接受该快照供工具修正，保留真实失败诊断。
 没有可用结果或修正入口时保留旧预览，ModelPreviewState 撤销其可编辑版本；不能继续使用旧参数写回。
 原点拖动固定手势开始的 snapshot，旋转使用新旧完整旋转的差。
-组合输入上下文中选中带关系的成员（含子组合体）时，默认显示平移箭头，按住 Alt 切换旋转环，松开恢复；仅两种工具同时可用时切换。
+组合输入上下文中选中带关系的成员（含子组合体）时，默认显示平移箭头；显式选择 rotate 时默认旋转环。两种工具都可用时 Alt 临时切换到另一工具，松开恢复。
 手势开始后固定模式，平移中 Alt 继续取消吸附，窗口失焦清除按键并取消手势。
 工具模式由 observable 按键、绑定与手势状态派生，原生控件显示与拾取共用该模式。
 默认工具分别定位关系链中最近的 offset 与 rotate，优先复用其调用而不是只检查链尾。
@@ -131,7 +131,7 @@ TypeScript 必填性、不读取函数初始化器，也不注入运行时默认
 默认平移和旋转统一由 model-spatial-tool 的 relationBindings 解析关系与调用，viewport 只消费绑定。
 关系工具按保留的 constraint 身份及关系源码范围关联当前可见实例；同一源码多次求值的实例共享编辑，不要求派生后的 nodeId 等于
 最初 relate 的 owner；material 等派生值继续使用当前实例的求解坐标架和原调用参数。
-选中成员的 pivot 标记复用 model-origin 装饰与 constraint.rotation.origin；拖动时由既有 spatial-preview 接管，取消或结束后恢复，避免重复标记。
+选中成员的 pivot 标记复用 model-origin 装饰与 对应 constraint.rotations 阶段的 spatial.origin；拖动时由既有 spatial-preview 接管，取消或结束后恢复，避免重复标记。
 坐标细节见[坐标技能](../../skills/code3d-coordinate-semantics/SKILL.md)。
 
 位置拖动按手势开始时的网格小格长度量化沿操作轴的实际位移，再按 sensitivity
@@ -304,3 +304,17 @@ after release. The contextual panel and readout share a flex stack; hidden panel
 consume no space. Both containers share their width, padding, border, translucent background,
 backdrop blur and shadow, and each readout row uses
 `field: old + delta = new` with a signed operator and the unit after the result. No synthetic source tool or second preview value store is needed.
+
+## 约束链 gizmo 的源码目标
+
+`offset`/`rotate` 保留调用顺序和每个调用的 sourceRef。选择 self 时展示完整链，
+平移与旋转工具分别修改后面最近的同类调用，没有则在链尾添加。选择某个 offset
+或 rotate 时，同工具修改当前调用，另一工具紧接当前调用插入，保留后续链。
+阶段快照由 Core 保留继承及同回调的其他关系，联合求解后提供；当前关系的高亮
+不把求解限制为单条约束。耦合关系的阶段与完整结果遵循相同的 gizmo 预览能力限制。
+
+每次位移、旋转均提供自身的阶段坐标架。修改早期操作时，其有效 gizmo frame
+包含后续外部变换；参数预览按各次 offset 的 frame 分别计算，不将整链位移累加后
+套用一个 frame。旋转中心同样随其后的外部平移/旋转变换。预览、源码写回、正常
+求值和 Undo 必须一致；共享参数涉及不同调用时改当前表达式，不能借修改参数
+同时改变另一操作。内部实现不维护另一份独立的模型摆放状态。

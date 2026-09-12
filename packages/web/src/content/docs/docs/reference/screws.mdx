@@ -20,14 +20,15 @@ counterbore tool. Current examples cover metric sizes M3 through M12.
 The hole is a model used as a tool for `cut(stock, [hole])`. It is also a
 useful placement reference: its named elements describe the fastening geometry.
 
-<ModelExample id="fastener" />
+<ModelExample id="screw-box" />
 
 ## Place through named elements
 
-The hole's `shaftBottom` positions it against the plate.
-The screw's `headBottom` relates to the hole's `counterboreBottom`.
-The offset in this example lifts the screw away from its seated position to
-make the connection visible.
+The lid exposes four seats from the holes' `counterboreBottom` references.
+Each screw's `headBottom` meets one seat, and the lid's `mountingFace` meets
+the box's `lidSeat`. Set `gap` to 0 to close the box or lift the lid and screws
+together to inspect the holes. The box models blind tapping pilots; internal
+thread geometry is omitted.
 
 Use completion to inspect the full typed interface and supported size values.
 

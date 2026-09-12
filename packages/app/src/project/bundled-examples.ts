@@ -1,4 +1,3 @@
-import textFontUrl from '../../examples/fonts/DejaVuSans.ttf?inline';
 import type {ProjectDirectoryTemplate, ProjectSourceFile} from './project';
 
 const sources = import.meta.glob<string>(
@@ -21,11 +20,7 @@ const files = Object.entries(sources)
 
 export const bundledExamples = {
   directory: '/examples',
-  revision: sourceRevision([
-    ...files,
-    {path: '/examples/fonts/DejaVuSans.ttf', source: textFontUrl},
-  ]),
-  assets: [{path: '/examples/fonts/DejaVuSans.ttf', url: textFontUrl}],
+  revision: sourceRevision(files),
   files,
 } satisfies ProjectDirectoryTemplate;
 

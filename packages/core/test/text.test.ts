@@ -25,10 +25,7 @@ import {
   modelGeometry,
 } from './model-test.ts';
 
-const latinUrl = new URL(
-  '../../app/examples/fonts/DejaVuSans.ttf',
-  import.meta.url,
-);
+const latinUrl = new URL('./fonts/DejaVuSans.ttf', import.meta.url);
 const chineseUrl = new URL('./fonts/NotoSansCJK-subset.otf', import.meta.url);
 const models: Model[] = [];
 const keep = <T extends Model>(model: T): T => {

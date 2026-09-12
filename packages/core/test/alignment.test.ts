@@ -332,3 +332,25 @@ test('point-to-ellipse placement follows the nearest locus point, ignoring trim 
   const tangent = [(-20 * p[2]) / 10, 0, (10 * p[0]) / 20];
   assert.ok(Math.abs(move[0] * tangent[0] + move[2] * tangent[2]) < 1e-4);
 });
+
+test('point alignment to a bound-placed part keeps its fixed orientation exact in standalone previews', () => {
+  const base = box(70, 5, 52).fillet(2).originOffset(0, 2.5, 0);
+  const mast = box(12, 32, 12)
+    .fillet(1)
+    .relate(part => [
+      part.axis.align(base.axis).offset(0, 0, -12),
+      part.down.on(base.up),
+    ]);
+  const axle = cylinder(3, 20)
+    .rotate(0, 0, 90)
+    .relate(part => part.center.align(mast.center));
+  near(position(axle), [0, 16, -12]);
+  near(pose(mast).quaternion, [0, 0, 0, 1]);
+  const knob = box(5, 16, 16).relate(part =>
+    part.center.align(axle.center).offset(0, 12.5, 0),
+  );
+  near(position(knob), [-12.5, 16, -12]);
+  const assembly = group([base, mast, axle]);
+  assert.equal(snapshot(assembly).children.length, 3);
+  near(position(axle), [0, 16, -12]);
+});

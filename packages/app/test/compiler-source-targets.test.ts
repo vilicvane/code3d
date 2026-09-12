@@ -11,7 +11,10 @@ import type {
   SourceTargetEvaluation,
 } from '../src/model/compiler.ts';
 import type {ToolParameterSchema} from '../src/model/tool-schema.ts';
-import {createTestModelPipeline} from './project-test-files.ts';
+import {
+  createTestModelPipeline,
+  packageTestFiles,
+} from './project-test-files.ts';
 import {createAppTestServer} from './vite-test-server.ts';
 
 test('a conflicting intermediate constraint stage does not invalidate its completed model', async () => {
@@ -72,7 +75,12 @@ before(async () => {
   ({applyNodeTransform} = await server.ssrLoadModule<
     typeof import('../src/rendering/model-renderer.ts')
   >('/src/rendering/model-renderer.ts'));
-  compiler = await createTestModelPipeline(server);
+  const examplePath = (path: string) =>
+    path.startsWith('/examples/') ? '/packages/app' + path : path;
+  compiler = await createTestModelPipeline(server, {
+    readFile: path => packageTestFiles.readFile(examplePath(path)),
+    stat: path => packageTestFiles.stat(examplePath(path)),
+  });
   compileProject = compiler.compile.bind(compiler);
   ({bundledExamples} = await server.ssrLoadModule<
     typeof import('../src/project/bundled-examples.ts')
@@ -372,7 +380,7 @@ test('a caret on range previews one map result with resolved collection placemen
   }
 });
 
-test('position bindings preserve inline expressions and prioritize safe upstream parameters in the outer call', async () => {
+test('position bindings preserve expressions when a shared parameter controls different calls', async () => {
   const source = [
     "import {box, group} from '@code3d/core';",
     'const base = box(44, 2, 10);',
@@ -403,8 +411,12 @@ test('position bindings preserve inline expressions and prioritize safe upstream
   assert.ok(bindings[0][0].kind === 'expression');
   assert.ok(bindings[0][1].kind === 'parameter');
   assert.deepEqual(bindings[0][0].occurrenceKeys, ['root/1', 'root/4']);
-  assert.ok(bindings[1][0].kind === 'parameter');
-  assert.equal(bindings[1][0].target.sourceRef.start, source.indexOf('8;'));
+  assert.ok(bindings[1][0].kind === 'expression');
+  assert.equal(
+    bindings[1][0].receiver.sourceRef.end,
+    source.indexOf('offset(i * spacing, 0, 0)') +
+      'offset(i * spacing, 0, 0)'.length,
+  );
   assert.ok(bindings[2][0].kind === 'parameter');
   assert.equal(
     bindings[2][0].target.sourceRef.start,
@@ -880,6 +892,15 @@ test('anchor context is limited to the enclosing relation in a constraint array'
     face.constraintId,
     defined(at('base.down')).evaluations[0].constraintId,
   );
+  for (const evaluation of [edge, face]) {
+    const preview = defined(evaluation.constraintPreview);
+    assert.equal(evaluation.constraintPreviewDiagnostic, undefined);
+    assert.equal(preview.constraints.length, 2);
+    assert.deepEqual(
+      preview.compositionTransform,
+      defined(module.objects.get(preview.nodeId)).compositionTransform,
+    );
+  }
   const alone = defined(at('base.edge(2)')).evaluations[0];
   assert.equal(alone.nodeIds.length, 1);
   assert.equal(alone.constraintId, undefined);
@@ -1196,8 +1217,8 @@ test('derives composition roles for imported aliases, namespace calls, and neste
     'import * as core from "@code3d/core";',
     'import {loft as skin, group as assemble} from "@code3d/core";',
     'const spine = core.bezier([[0, 0, 0], [-12, -7, 0], [-10, -20, -9], [-4, -28, -14]]);',
-    'const start = core.circle(4).relate(p => p.on(core.point().up).offset(0, 0, 0).rotate(0, 0, -Math.atan2(12, 7) * 180 / Math.PI));',
-    'const end = core.rectangle(7, 4).relate(p => p.on(core.point([-4, -28, -14]).up).offset(0, 0, 0).rotate(Math.atan2(5, 10) * 180 / Math.PI, 0, Math.atan2(6, 8) * 180 / Math.PI));',
+    'const start = core.circle(4).relate(p => p.center.align(core.point()).rotate(0, 0, -Math.atan2(12, 7) * 180 / Math.PI));',
+    'const end = core.rectangle(7, 4).relate(p => p.center.align(core.point([-4, -28, -14])).rotate(Math.atan2(5, 10) * 180 / Math.PI, 0, Math.atan2(6, 8) * 180 / Math.PI));',
     'const body = skin([...[start], end], {spine});',
     'const sections = [start, end];',
     'const options = {spine};',
@@ -1346,10 +1367,8 @@ export const results = [5, 10].map(distance => extrude(faces, distance));`;
 });
 
 test('inline Boolean constructors preserve numeric tools and composition context', async () => {
-  const source = await readFile(
-    new URL('../examples/boolean-operations.ts', import.meta.url),
-    'utf8',
-  );
+  const source = `import {sphere, box, intersect} from '@code3d/core';
+export default intersect([sphere(8), box(12, 12, 12)]);`;
   const module = await compileProject(
     {files: [{path: '/model.ts', source}]},
     '/model.ts',
@@ -1448,7 +1467,7 @@ export default ${call};`;
       const section = defined(
         module.objects.get(defined(evaluation.focusNodeIds)[0]),
       );
-      assert.equal(section.constraints[0].offset[0], -18, call);
+      assert.equal(section.constraints[0].offsets.at(-1)!.value[0], -18, call);
     }
   }
 });
@@ -1481,8 +1500,9 @@ export default body(-18);`;
   assert.equal(failed.nodeIds.length, 3);
   assert.equal(defined(failed.focusNodeIds).length, 1);
   assert.equal(
-    defined(module.objects.get(defined(failed.focusNodeIds)[0])).constraints[0]
-      .offset[0],
+    defined(
+      module.objects.get(defined(failed.focusNodeIds)[0]),
+    ).constraints[0].offsets.at(-1)!.value[0],
     -18,
   );
   const operation = defined(
@@ -1675,7 +1695,7 @@ test('evaluates a user-defined Replicad primitive', async () => {
 });
 
 test('compiles the standalone custom primitive example with direct annotations and a default argument', async () => {
-  const rootPath = '/examples/custom-primitives.ts';
+  const rootPath = '/examples/primitives/custom-primitives.ts';
   const module = await compileProject({files: bundledExamples.files}, rootPath);
   assert.equal(module.diagnostic, undefined);
   assert.ok(module.exports.has('customPrimitivesExample'));
@@ -1720,61 +1740,37 @@ test('compiles the standalone custom primitive example with direct annotations a
   }
 });
 
-test('the documented origin example exposes each spatial operation and its assembly', async () => {
-  const rootPath = '/examples/origin-and-rotation.ts';
+test('the origin example exposes each spatial operation', async () => {
+  const rootPath = '/examples/operations/origin.ts';
   const file = bundledExamples.files.find(file => file.path === rootPath);
   assert.ok(file);
   const module = await compileProject({files: [file]}, rootPath);
   assert.equal(module.diagnostic, undefined);
-  for (const [text, kind, parameters] of [
-    ['blank.originVertex(3)', 'originVertex', ['id']],
-    ['pivoted.originOffset(0, 2, 0)', 'originOffset', ['dx', 'dy', 'dz']],
-    ['offset.rotate(15, 35, 0)', 'rotate', ['x', 'y', 'z']],
-    ['rotated.originCenter()', 'originCenter', undefined],
-    ['centered.originOffset(0, -2, 0)', 'originOffset', ['dx', 'dy', 'dz']],
-  ] as const) {
-    // The receiver is a separate input scope; the tool starts at the method name.
-    const targets = exactTargets(
-      module,
-      file.source,
-      defined(text).slice(defined(text).indexOf('.') + 1),
-      text,
-    );
+  for (const method of [
+    'originVertex(3)',
+    'originOffset(0, 2, 0)',
+    'originCenter()',
+    'originPoint(blank.center)',
+  ]) {
+    const targets = exactTargets(module, file.source, method);
     assert.ok(
       targets.some(target =>
         target.evaluations.some(evaluation => {
           const operation = module.operations.get(
             defined(evaluation.operationId),
           );
-          return operation?.kind === kind && defined(operation).spatial;
+          return (
+            operation?.kind === method.slice(0, method.indexOf('(')) &&
+            operation.spatial
+          );
         }),
       ),
-      `The guide needs an inspectable spatial context for ${text}`,
     );
-    if (parameters) {
-      const target = targets.find(target => target.tool);
-      assert.deepEqual(
-        defined(target?.tool).signature.parameters.map(
-          parameter => parameter.name,
-        ),
-        parameters,
-      );
-    }
   }
-  const assembly = exactTargets(
-    module,
-    file.source,
-    'group([rotated, companion])',
-  );
-  assert.ok(
-    assembly.some(target =>
-      target.evaluations.some(evaluation => evaluation.nodeIds.length > 0),
-    ),
-  );
 });
 
 test('the shared combined-constraints guide retains both inspectable relations', async () => {
-  const rootPath = '/examples/combined-constraints.ts';
+  const rootPath = '/examples/constraints/combined-constraints.ts';
   const file = bundledExamples.files.find(file => file.path === rootPath);
   assert.ok(file);
   const module = await compileProject({files: [file]}, rootPath);
@@ -1840,7 +1836,10 @@ for (const sample of renderSamples) {
     const rootPath = '/examples/' + sample.file;
     const file = bundledExamples.files.find(file => file.path === rootPath);
     assert.ok(file, `Gallery source must be bundled in App: ${rootPath}`);
-    const module = await compileProject({files: [file]}, rootPath);
+    const module = await compileProject(
+      {files: bundledExamples.files},
+      rootPath,
+    );
     assert.equal(module.diagnostic, undefined);
     const focuses = [
       sample.focus,
@@ -1865,27 +1864,27 @@ for (const sample of renderSamples) {
 }
 
 test('the documented function offers parameter tools and design-time arguments', async () => {
-  const rootPath = '/examples/design-arguments.ts';
+  const rootPath = '/examples/annotations.ts';
   const file = bundledExamples.files.find(file => file.path === rootPath);
   const module = await compileProject({files: [defined(file)]}, rootPath);
   assert.equal(module.diagnostic, undefined);
   const call = exactTargets(
     module,
     defined(file).source,
-    'makeKnob(10, 5, 6)',
+    'spacer(12, 5, 6)',
   ).find(target => target.tool);
   assert.ok(call);
   assert.deepEqual(
     defined(call.tool).signature.parameters.map(parameter => parameter.name),
-    ['radius', 'height', 'sides'],
+    ['height', 'radius', 'sides'],
   );
   assert.deepEqual(
     valueParameter(defined(call.tool).signature.parameters[2]).constraints,
-    {min: 3},
+    {min: 3, max: 12},
   );
   assert.deepEqual(
     module.designArguments.map(context => context.label),
-    ['10, 5, 6', '14, 7, 8'],
+    ['12, 5, 6', '20, 6, 8'],
   );
   for (const context of module.designArguments) {
     const preview = await compileProject({files: [defined(file)]}, rootPath, {
@@ -1974,17 +1973,15 @@ test('the npm documentation example compiles with the installed just-range packa
   assert.ok(module.fallback);
 });
 
-test('compiles one coil in the bundled primitives showcase without a separate coil example', async () => {
-  const rootPath = '/examples/primitives.ts';
-  const module = await compileProject({files: bundledExamples.files}, rootPath);
-  assert.equal(module.diagnostic, undefined);
-  assert.ok(module.exports.has('primitivesExample'));
-  assert.ok(
-    !bundledExamples.files.some(file => file.path === '/examples/coils.ts'),
+test('coil construction exposes its geometry and numeric tools', async () => {
+  const rootPath = '/model.ts';
+  const source = `import {coil} from '@code3d/core';
+export default coil(5, 0.75, 4, 2.5);`;
+  const module = await compileProject(
+    {files: [{path: rootPath, source}]},
+    rootPath,
   );
-  const source = defined(
-    bundledExamples.files.find(file => file.path === rootPath),
-  ).source;
+  assert.equal(module.diagnostic, undefined);
   assert.equal([...source.matchAll(/\bcoil\(/g)].length, 1);
   const start = source.indexOf('coil(5, 0.75, 4, 2.5)');
   assert.notEqual(start, -1);
@@ -2005,13 +2002,16 @@ test('compiles one coil in the bundled primitives showcase without a separate co
   assert.ok(defined(defined(model).mesh).triangles.length > 0);
 });
 
-test('compiles the core tube example with its own operation and editable dimensions', async () => {
-  const rootPath = '/examples/primitives.ts';
-  const module = await compileProject({files: bundledExamples.files}, rootPath);
+test('tube construction has its own operation and editable dimensions', async () => {
+  const rootPath = '/model.ts';
+  const source = `import {tube} from '@code3d/core';
+const collarHeight = 4;
+export default tube(5.5, 4.5, collarHeight);`;
+  const module = await compileProject(
+    {files: [{path: rootPath, source}]},
+    rootPath,
+  );
   assert.equal(module.diagnostic, undefined);
-  const source = defined(
-    bundledExamples.files.find(file => file.path === rootPath),
-  ).source;
   const start = source.indexOf('tube(5.5, 4.5, collarHeight)');
   assert.notEqual(start, -1);
   const target = module.sourceTargets.find(

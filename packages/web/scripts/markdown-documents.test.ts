@@ -83,7 +83,10 @@ test('MDX guides expose complete executable examples without UI components', asy
   assert.ok(document);
   const guide = await renderMarkdown(document, documents);
   const source = await readFile(
-    path.join(repository, 'packages/app/examples/combined-constraints.ts'),
+    path.join(
+      repository,
+      'packages/app/examples/constraints/combined-constraints.ts',
+    ),
     'utf8',
   );
   assert.ok(guide.startsWith('# Positioning with relations\n'));
@@ -93,7 +96,7 @@ test('MDX guides expose complete executable examples without UI components', asy
   assert.ok(!guide.includes('import ArrowIcon'));
   assert.ok(
     markdownReferences(guide).includes(
-      '../../app/#/file/examples/combined-constraints.ts',
+      '../../app/#/file/examples/constraints/combined-constraints.ts',
     ),
   );
   assert.ok(markdownHeadings(guide).has('combine-conditions'));

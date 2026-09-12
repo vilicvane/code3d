@@ -86,12 +86,18 @@ for (const installed of [false, true] as const) {
               'self.up.on(first.down).offset(5, 0, 7)',
             ),
           );
+          const zero = await compile(
+            source.replace(
+              'self.up.on(first.down)',
+              'self.up.on(first.down).offset(0, 0, 0).rotate(0, 0, 0)',
+            ),
+          );
           let conflict;
           try {
             const conflicting = await compile(
               source.replace(
                 'self.up.on(first.down)',
-                'self.up.on(first.down).offset(0, 0, 0)',
+                'self.up.on(first.down), self.down.on(first.up)',
               ),
             );
             conflict = conflicting.diagnostic?.summary;
@@ -135,10 +141,13 @@ for (const installed of [false, true] as const) {
             first: root(first)?.children[1].transform.position,
             shiftedDiagnostic: shifted.diagnostic,
             shifted: root(shifted)?.children[1].transform.position,
-            offset: root(shifted)?.children[1].constraints[1].offset,
+            offset:
+              root(shifted)?.children[1].constraints[1].offsets.at(-1)!.value,
             constraintSource:
               root(shifted)?.children[1].constraints[1].sourceRefs.at(-1)?.file,
             conflict,
+            zeroDiagnostic: zero.diagnostic,
+            zero: root(zero)?.children[1].transform.position,
             restored: root(restored)?.children[1].transform.position,
             sketchDiagnostic: sketchModule.diagnostic,
             originalSketch: sketch,
@@ -160,12 +169,13 @@ for (const installed of [false, true] as const) {
         undefined,
         JSON.stringify(result.shiftedDiagnostic),
       );
-      // The group origin is the midpoint of its two member origins, so the
-      // second child's group-local position is half their relative displacement.
+      // Group inherits the first member frame. The other contact constrains X,
+      // but leaves the authored Z displacement intact.
       for (const [actual, expected] of [
-        [result.first, [2.5, -7.5, 0]],
-        [result.shifted, [2.5, -7.5, -3.5]],
-        [result.restored, [2.5, -7.5, 0]],
+        [result.first, [5, -15, 0]],
+        [result.shifted, [5, -15, -7]],
+        [result.restored, [5, -15, 0]],
+        [result.zero, [5, -15, 0]],
       ] as const) {
         actual!.forEach((value, index) =>
           assert.ok(
@@ -174,6 +184,7 @@ for (const installed of [false, true] as const) {
           ),
         );
       }
+      assert.equal(result.zeroDiagnostic, undefined);
       assert.deepEqual(result.offset, [5, 0, 7]);
       assert.equal(result.constraintSource, '/main.ts');
       assert.match(result.conflict!, /Conflicting bound positions/);

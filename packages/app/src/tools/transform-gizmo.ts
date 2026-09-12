@@ -9,6 +9,7 @@ import type {
   ParameterKind,
   ParameterTarget,
   Transform,
+  Vec3,
 } from '@code3d/core/tooling';
 import {spatialAxisColors} from '../spatial-axis-colors';
 import {snapNumericValue} from './parameter-policy';
@@ -45,6 +46,7 @@ export type TransformGizmoBinding = TransformBindingBase &
     | Readonly<{kind: 'parameter'; target: ParameterTarget}>
     | Readonly<{
         kind: 'expression';
+        offsetArguments?: Vec3;
         receiver: SourceAnchor;
         occurrenceKeys: readonly string[];
       }>
@@ -128,12 +130,13 @@ export class TransformGizmo {
 
   private get displayedMode(): TransformGizmoBinding['mode'] | undefined {
     if (this.active) return this.active.binding.mode;
+    const preferred = this.bindings[0]?.mode;
     const modes = new Set(this.bindings.map(binding => binding.mode));
-    return modes.size > 1
-      ? this.altHeld
-        ? 'rotate'
-        : 'translate'
-      : this.bindings[0]?.mode;
+    return modes.size > 1 && this.altHeld
+      ? preferred === 'rotate'
+        ? 'translate'
+        : 'rotate'
+      : preferred;
   }
 
   constructor(

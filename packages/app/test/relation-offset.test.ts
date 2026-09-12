@@ -5,15 +5,19 @@ import {after, before, test} from 'node:test';
 import {createAppTestServer} from './vite-test-server.ts';
 
 let server: Awaited<ReturnType<typeof createAppTestServer>>;
-let offsetRelationSource: (source: string, delta: Vec3) => string;
+let offsetRelationSource: (
+  source: string,
+  delta: Vec3,
+  current?: Vec3,
+) => string;
 let ToolEngine: (typeof import('../src/tools/tool-system.ts'))['ToolEngine'];
 before(async () => {
   server = await createAppTestServer();
   const {offsetCallSource} = await server.ssrLoadModule<
     typeof import('../src/tools/source-expression.ts')
   >('/src/tools/source-expression.ts');
-  offsetRelationSource = (source, delta) =>
-    offsetCallSource(source, 'offset', delta);
+  offsetRelationSource = (source, delta, current) =>
+    offsetCallSource(source, 'offset', delta, current);
   ({ToolEngine} = await server.ssrLoadModule<
     typeof import('../src/tools/tool-system.ts')
   >('/src/tools/tool-system.ts'));
@@ -220,4 +224,15 @@ test('a lost receiver anchor conflicts without reading stale source', () => {
     direction: 1,
   });
   assert.ok(result.status === 'conflict');
+});
+
+test('editing an existing spread offset materializes that call instead of adding another stage', () => {
+  assert.equal(
+    offsetRelationSource(
+      'self.on(base.up).offset(...values)',
+      [2, -3, 0],
+      [1, 2, 3],
+    ),
+    'self.on(base.up).offset(3, -1, 3)',
+  );
 });
